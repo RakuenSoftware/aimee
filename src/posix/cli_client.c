@@ -34,6 +34,22 @@
 #include <sys/inotify.h>
 #endif
 
+/* macOS / BSD lack the Linux-only SOCK_CLOEXEC socket() flag. Fall back to 0 and
+ * set close-on-exec explicitly via cli_fd_cloexec() after each socket(). On
+ * Linux (where SOCK_CLOEXEC already applied it atomically) the post-hoc set is a
+ * harmless no-op. */
+#ifndef SOCK_CLOEXEC
+#define SOCK_CLOEXEC 0
+#endif
+static void cli_fd_cloexec(int fd)
+{
+   if (fd < 0)
+      return;
+   int flags = fcntl(fd, F_GETFD);
+   if (flags >= 0)
+      (void)fcntl(fd, F_SETFD, flags | FD_CLOEXEC);
+}
+
 #define SERVER_READY_TIMEOUT_MS          30000
 #define STALE_SERVER_SHUTDOWN_TIMEOUT_MS 30000
 #else
@@ -147,6 +163,7 @@ int cli_connect_timeout(cli_conn_t *conn, const char *socket_path, int timeout_m
       cli_record_connect_errno(socket_path, errno);
       return -1;
    }
+   cli_fd_cloexec(fd);
 
    /* Set non-blocking for connect timeout */
    int flags = fcntl(fd, F_GETFL, 0);
@@ -336,6 +353,7 @@ static int cli_http_connect(const char *endpoint, char *host_out, size_t host_n,
       int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
       if (fd < 0)
          return -1;
+      cli_fd_cloexec(fd);
       struct sockaddr_un addr;
       memset(&addr, 0, sizeof(addr));
       addr.sun_family = AF_UNIX;
@@ -401,6 +419,7 @@ static int cli_http_connect(const char *endpoint, char *host_out, size_t host_n,
       int fd = socket(ai->ai_family, ai->ai_socktype | SOCK_CLOEXEC, ai->ai_protocol);
       if (fd < 0)
          continue;
+      cli_fd_cloexec(fd);
       int rc;
       int flags = fcntl(fd, F_GETFL, 0);
       if (flags >= 0)
@@ -1015,6 +1034,7 @@ static int socket_is_live(const char *path)
    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
    if (fd < 0)
       return -1;
+   cli_fd_cloexec(fd);
    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
 
    struct sockaddr_un addr;
