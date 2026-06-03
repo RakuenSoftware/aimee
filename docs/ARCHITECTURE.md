@@ -65,7 +65,7 @@ graph TB
     CLI -->|/v1 HTTP<br/>UDS or TCP| SRV
     WC -->|/v1 HTTP<br/>UDS or TCP| SRV
     GW -.->|/v1 HTTP| SRV
-    SRV -->|typed KB RPC<br/>socket / HTTP :8741| KB
+    SRV -->|typed KB /v1<br/>HTTP :8741| KB
     SRV --> DB1
     KB --> DB2
     SRV -->|delegate HTTPS| Providers
@@ -416,15 +416,16 @@ redirected to the worktree path. Abandoned worktrees are garbage-collected by
 
 | Topology | Shape | Notes |
 |----------|-------|-------|
-| **Single developer (default)** | All processes on one host; service units keep server/KB running; DB1 in `~/.config/aimee`, DB2 in local Postgres. | Zero config beyond `install.sh` on supported service managers. |
-| **Managed services** | `aimee-kb` + local `aimee-server` as systemd user units (Linux) or launchd agents (macOS), with memory/task limits. KB starts first; server depends on it. | `systemd/user/*.service`, `service/com.aimee.*.plist`. |
-| **Shared KB** | Multiple local `aimee-server` instances point at one `aimee-kb`/Postgres deployment. DB1 remains per-user/per-machine; DB2 carries only project, workspace, global, or otherwise shareable knowledge for that KB. | Use KB URL/token config and scope promotion rules deliberately. |
-| **Containerized KB** | `aimee-kb` in a container with Postgres/pgvector, an embedder sidecar, and an optional local LLM, wired by `compose.yaml`. KB binds `0.0.0.0:8741` and uses Python sidecars for embeddings/synthesis/curation. | `Dockerfile`, `Dockerfile.embedder`, `deploy/container/aimee.yaml`. |
-| **Proxy / multi-host** | `Dockerfile.proxy` + `docker-compose.proxy.yml` for fronting a local or shared KB service. | See [`MANUAL.md`](../MANUAL.md) operations chapter. |
+| **Containerized server + KB (recommended)** | `aimee-server` + `aimee-kb` run as containers (combined in one image, or split into two) with Postgres/pgvector and an embedder sidecar; the server fronts `/v1` on `:8740` and reaches the kb over HTTP on `:8741`. Developers install only the cross-platform thin client and point it at the server. | `compose.combined.yaml` (one container) / `compose.server.yaml` (split); `Dockerfile.combined`, `Dockerfile.server`, `Dockerfile`, `Dockerfile.embedder`. |
+| **Single developer, source build** | All processes on one host from `install.sh`; service units keep server/KB running; DB1 in `~/.config/aimee`, DB2 in local Postgres. | Service-managed via `systemd/user/*.service` (Linux) or `service/com.aimee.*.plist` (macOS). KB starts first; server depends on it. |
+| **Shared KB** | Multiple `aimee-server` instances (containerized or local) point at one `aimee-kb`/Postgres deployment over HTTP. DB1 remains per-user/per-machine; DB2 carries only project, workspace, global, or otherwise shareable knowledge. | Set `AIMEE_KB_API_URL` (+ optional bearer); promote scopes deliberately. |
+| **KB-only container** | `aimee-kb` + Postgres/pgvector + embedder (+ optional local LLM) via `compose.yaml`; KB binds `0.0.0.0:8741` and uses Python sidecars for embeddings/synthesis/curation. | The building block behind a shared/scaled KB; `Dockerfile`, `Dockerfile.embedder`, `deploy/container/aimee.yaml`. |
+| **Standalone server** | `aimee-server` only (SQLite DB1, no kb), via `compose.server-standalone.yaml`. | DB1-backed `/v1` endpoints with no shared knowledge until a kb is wired in. |
 
-In every topology the contracts are identical: thin clients speak the socket
-protocol to the server; the server speaks typed KB RPC to `aimee-kb`; the
-storage boundary holds.
+In every topology the contracts are identical: thin clients speak the `/v1`
+protocol to the server (local `aimee-http.sock` or a remote `host:port`); the
+server speaks the typed KB `/v1` HTTP API to `aimee-kb` (`AIMEE_KB_API_URL`; the
+legacy Unix-socket KB transport was retired in #2747); the storage boundary holds.
 
 ---
 
