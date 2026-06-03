@@ -6125,6 +6125,11 @@ static char *cli_rpc_http_request(const char *verb, const char *path, const char
  * selection any more (the legacy NDJSON transport was removed). One-shot
  * commands go over the local aimee-http.sock, or a configured remote /v1
  * endpoint (cli_rpc_client_endpoint) — see cli_rpc_forward below. */
+#endif /* !_WIN32 — the aimee-http.sock helpers above are POSIX-only */
+
+/* The remote-endpoint resolvers below are portable (env + aimee.yaml, no UDS)
+ * and MUST compile on Windows too: cli_rpc_forward calls them unconditionally
+ * and the Windows thin client always takes the remote /v1 path. */
 
 /* cli_rpc_aimee_yaml_value: scan <aimee_home>/aimee.yaml for the first
  * (non-comment) line containing <key> and return its malloc'd, unquoted value,
@@ -6202,7 +6207,6 @@ char *cli_rpc_client_bearer(void)
       return strdup(env);
    return cli_rpc_aimee_yaml_value("bearer_token:");
 }
-#endif /* !_WIN32 */
 
 /* cli_rpc_has_remote_endpoint: true when the thin client is configured to reach
  * a remote aimee-server over /v1 (client_transport != socket AND an endpoint is
