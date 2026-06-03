@@ -108,7 +108,7 @@ The shipped artifacts are four binaries: `aimee`, `aimee-webchat`, `aimee-server
 flowchart TD
     CLI[aimee\nCLI + MCP stdio] -->|JSON RPC| SRV[aimee-server\nDB1 + compute pool]
     WEB[aimee-webchat\nbrowser-facing client] -->|JSON RPC| SRV
-    SRV -->|typed KB RPC| KB[aimee-kb\nDB2 + pgvector]
+    SRV -->|typed KB /v1 HTTP| KB[aimee-kb\nDB2 + pgvector]
     SRV --> DB1[src/db1/*]
     KB --> DB2[src/db2/*]
 ```

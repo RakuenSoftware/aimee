@@ -102,6 +102,9 @@ This section covers how the aimee MCP server is registered with supported client
 `install.sh` and `configure-hooks.sh` automatically detect installed clients and register
 `aimee mcp-serve` for each one found. Running the installer is idempotent: if a client is
 already configured, the registration is refreshed and reported as such rather than duplicated.
+In the recommended Docker deployment (services in containers, thin client per machine),
+each developer runs `configure-hooks.sh` directly to register hooks + MCP locally; the
+hooks call the thin client, which reaches the configured `aimee-server`.
 
 | Client | Detection method | Hook config path | MCP config path | Registration status |
 |---|---|---|---|---|

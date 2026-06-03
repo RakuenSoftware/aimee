@@ -492,7 +492,7 @@ graph TD
     Server --> Data
     Server --> Agent
     Server --> Cmd
-    Server -.->|typed KB RPC| KB
+    Server -.->|typed KB /v1 HTTP| KB
     Core --> Data
     Data --> Agent
     Agent --> Cmd
@@ -811,9 +811,10 @@ reference for the separate KB API (`api/openapi-v1.yaml`). See the
 ## The KB split
 
 `aimee-server` owns no DB2 SQL. It reaches DB2 through the **KB client**
-(`src/server/kb_client*.c`), typed RPC wrappers (memory, index, docs, agent,
-dashboard, roadmap, notes, curiosity, status) that talk to `aimee-kb` over a Unix
-socket or HTTP (`AIMEE_KB_API_URL`, port 8741). DB1 remains local to the server;
+(`src/server/kb_client*.c`), typed wrappers (memory, index, docs, agent,
+dashboard, roadmap, notes, curiosity, status) that call `aimee-kb` over its
+HTTP `/v1` API (`AIMEE_KB_API_URL`, port 8741). The legacy Unix-socket transport
+was retired in #2747 — HTTP is now the only KB transport. DB1 remains local to the server;
 DB2 can be a local single-user KB or a shared KB, and server-side reflection or
 promotion flows send only scoped knowledge artifacts across that boundary.
 `aimee-kb` (`src/kb/`) owns the DB2 schema, the memory inference pipeline, the
@@ -821,8 +822,9 @@ vector collections, the code index, document ingest, and the curator. It exposes
 43 HTTP /v1 endpoints
 (`/v1/code/*`, `/v1/docs/*`, `/v1/search`, `/v1/ingest/*`, `/v1/entities/*`,
 `/v1/reflections/*`, `/v1/maintenance/*`, `/v1/releases/*`), see
-`api/openapi-v1.yaml`. The server auto-starts the KB on demand unless
-`AIMEE_KB_NO_AUTOSTART` is set.
+`api/openapi-v1.yaml`. The server no longer auto-starts the KB: `AIMEE_KB_API_URL`
+must point at an already-running `aimee-kb` (started by its service unit, container,
+or `aimee-kb --http-port`). `AIMEE_KB_NO_AUTOSTART` is now a deprecated no-op.
 
 ## Scaling model
 
