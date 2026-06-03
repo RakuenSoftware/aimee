@@ -1,0 +1,32 @@
+# Branch policy gate for `main`.
+#
+# `main`'s branch protection lists `allow-only-testing-source` as a REQUIRED
+# status check, but nothing produced it — so every PR into `main` sat blocked on
+# a check that never reported. This workflow produces that check: a PR may merge
+# into `main` only when its source (head) branch is `testing`.
+#
+# The required-check context is the job's check-run name, so the job name must
+# stay EXACTLY `allow-only-testing-source` to satisfy branch protection.
+name: Branch policy
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  allow-only-testing-source:
+    name: allow-only-testing-source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the PR source branch to be `testing`
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          if [ "$HEAD_REF" != "testing" ]; then
+            echo "::error::PRs into 'main' may only originate from the 'testing' branch (source was '$HEAD_REF')."
+            exit 1
+          fi
+          echo "PR source branch is 'testing' — allowed to target main."
