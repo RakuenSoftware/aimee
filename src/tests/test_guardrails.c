@@ -180,6 +180,7 @@ int main(void)
    test_read_tracking_state_roundtrip();
    test_verify_gate_blocks_bash_git_push();
    test_verify_gate_blocks_bash_gh_pr_create();
+   test_verify_gate_pr_create_uses_head_commit_not_worktree();
    test_verify_gate_not_enforced_without_enforce_flag();
    test_verify_gate_worktree_uses_own_last_verify();
    test_verify_gate_uses_tool_workdir();

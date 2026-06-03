@@ -1267,6 +1267,76 @@ static void test_verify_gate_blocks_bash_gh_pr_create(void)
    vy_clear_home();
 }
 
+static void test_verify_gate_pr_create_uses_head_commit_not_worktree(void)
+{
+   /* Regression (#gh-pr-create verify gate): `gh pr create --head <branch>` must
+    * verify the COMMITTED tip of the head branch, not the live working tree of
+    * the checkout that holds it. A PR ships the committed branch, so a verified
+    * head commit must pass the gate even when the working tree is dirty (or, in
+    * the real failure, belongs to a stale/foreign worktree). Prior to the fix the
+    * gate hashed the working tree and blocked. */
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-vg-prhead-XXXXXX");
+   assert(mkdtemp(tmpdir) != NULL);
+
+   char cmd[1024];
+   snprintf(cmd, sizeof(cmd),
+            "cd '%s' && git init -q && git config user.email t@t && "
+            "git config user.name t && echo x > f && git add f && "
+            "git commit -q -m init && git checkout -q -b testing",
+            tmpdir);
+   assert(system(cmd) == 0);
+
+   vy_set_global_yaml(
+       tmpdir, "verify:\n  enforce: true\n  steps:\n    - name: build\n      run: echo ok\n");
+
+   /* Record the COMMITTED head tree as verified (clean tree == HEAD tree). */
+   char *head_tree = verify_compute_file_hash(tmpdir);
+   assert(head_tree != NULL);
+   char lv[512];
+   snprintf(lv, sizeof(lv), "%s/.aimee/.last-verify", tmpdir);
+   {
+      char mk[600];
+      snprintf(mk, sizeof(mk), "mkdir -p '%s/.aimee'", tmpdir);
+      assert(system(mk) == 0);
+   }
+   FILE *f = fopen(lv, "w");
+   assert(f != NULL);
+   fprintf(f, "%ld\n%s\nfailed=0/total=1\n", (long)time(NULL), head_tree);
+   fclose(f);
+   free(head_tree);
+
+   /* Dirty the working tree so its hash no longer matches the verified commit. */
+   snprintf(cmd, sizeof(cmd), "cd '%s' && echo dirty >> f", tmpdir);
+   assert(system(cmd) == 0);
+
+   char saved_cwd[4096];
+   assert(getcwd(saved_cwd, sizeof(saved_cwd)) != NULL);
+   assert(chdir(tmpdir) == 0);
+
+   guardrails_open_test_sqlite();
+   session_state_t state;
+   memset(&state, 0, sizeof(state));
+   strcpy(state.session_mode, MODE_IMPLEMENT);
+   strcpy(state.guardrail_mode, MODE_APPROVE);
+
+   char msg[512] = {0};
+   int rc = pre_tool_check(
+       "Bash", "{\"command\":\"gh pr create --title 'test' --body '' --base main --head testing\"}",
+       &state, MODE_APPROVE, tmpdir, msg, sizeof(msg));
+   /* The committed head (branch `testing`) is verified, so the verify gate must
+    * NOT block even though the working tree is dirty. */
+   assert(strstr(msg, "pr create blocked") == NULL);
+   (void)rc;
+
+   guardrails_close_test_sqlite();
+
+   assert(chdir(saved_cwd) == 0);
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
+   system(cmd);
+   vy_clear_home();
+}
+
 static void test_verify_gate_not_enforced_without_enforce_flag(void)
 {
    /* With enforce: false, git push must NOT be blocked by the verify gate. */

@@ -702,6 +702,59 @@ static int bash_git_push_target_dir(const char *cmd, const char *fallback_cwd, c
    return rc == 0;
 }
 
+/* Resolve the commit a push / PR-create verify gate should check: the *committed*
+ * tip of the ref being pushed or proposed — NOT the live working tree. A PR ships
+ * the branch as it exists on the remote (so prefer origin/<head>); a push ships
+ * the local ref. Passing this commit to verify_check makes the gate verify the
+ * tree that will actually leave the machine, which is correct even when the head
+ * branch is checked out in a *different* (stale or foreign) worktree. Returns 1
+ * and fills out with a commit SHA, or 0 when no ref resolves — the caller then
+ * falls back to the working-tree hash (prior behavior). */
+static int bash_gate_expected_commit(const char *cmd, const char *pdir, int is_pr_create, char *out,
+                                     size_t out_len)
+{
+   char ref[256];
+   const char *candidates[2];
+   int ncand = 0;
+   char origin_ref[300];
+
+   if (is_pr_create)
+   {
+      if (!bash_gh_pr_create_head_ref(cmd, ref, sizeof(ref)))
+         return 0;
+      snprintf(origin_ref, sizeof(origin_ref), "origin/%s", ref);
+      candidates[ncand++] = origin_ref; /* what gh actually proposes */
+      candidates[ncand++] = ref;        /* fallback: local branch tip */
+   }
+   else
+   {
+      if (!bash_git_push_local_ref(cmd, ref, sizeof(ref)))
+         return 0;
+      candidates[ncand++] = ref;
+   }
+
+   for (int i = 0; i < ncand; i++)
+   {
+      char rc_cmd[MAX_PATH_LEN + 384];
+      snprintf(rc_cmd, sizeof(rc_cmd),
+               "git -C '%s' rev-parse --verify --quiet '%s^{commit}' 2>/dev/null", pdir,
+               candidates[i]);
+      int rc;
+      char *res = run_cmd(rc_cmd, &rc);
+      if (rc == 0 && res && res[0])
+      {
+         char *nl = strchr(res, '\n');
+         if (nl)
+            *nl = '\0';
+         snprintf(out, out_len, "%s", res);
+         free(res);
+         return 1;
+      }
+      free(res);
+   }
+   return 0;
+}
+
 /* Return 1 when dir is inside a git worktree checkout (not the primary repo
  * checkout). We compare --git-dir to --git-common-dir: they differ in a
  * linked worktree and match in the main checkout. */
@@ -1256,8 +1309,17 @@ int pre_tool_check(const char *tool_name, const char *input_json, session_state_
       const char *vr = (wrc == 0 && wt && wt[0]) ? wt : NULL;
       verify_config_t vcfg;
       char vm[256];
+      /* Verify the committed tip being pushed/proposed, not the working tree of
+       * whatever checkout happens to hold the head branch (which may be a stale
+       * or foreign worktree). Falls back to NULL (working-tree hash) if no ref
+       * resolves. */
+      char expected[64];
+      const char *exp = bash_gate_expected_commit(cmd->valuestring, pdir, is_pr_create, expected,
+                                                  sizeof(expected))
+                            ? expected
+                            : NULL;
       if (verify_load_config(vr, &vcfg) == 0 && vcfg.enforce &&
-          !verify_check(vr, NULL, vm, sizeof(vm)))
+          !verify_check(vr, exp, vm, sizeof(vm)))
       {
          snprintf(msg_buf, msg_len, "BLOCKED: %s blocked — %s. Run 'aimee git verify' first.",
                   is_push ? "push" : "pr create", vm);
