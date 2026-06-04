@@ -48,9 +48,13 @@ it as a lookup reference afterward.
 
 ## 1. What aimee is
 
-aimee gives your AI coding tool a memory. It is a local-first layer that sits
-between you and tools like Claude Code, Gemini CLI, Codex CLI, Mistral Vibe, and
-GitHub Copilot, and adds three things they lack:
+aimee gives your AI coding tool a memory, and lets you run that tool on any
+model you like. It is a local-first layer that sits between you and tools like
+Claude Code, Codex, OpenCode, Gemini CLI, Mistral Vibe, and GitHub Copilot. One
+UI, any model, and a memory that travels with you between every model and
+provider, so switching never starts from zero and is never locked to a vendor
+(see [§25, Integrations](#25-integrations) for pointing a tool's front end at
+aimee). On top of that it adds three things your tools lack:
 
 - **Persistent memory** that compounds across sessions and across tools, so your
   AI starts every session already knowing your infrastructure, conventions,
@@ -1184,8 +1188,9 @@ HTTP API generated from [`api/openapi-v1.yaml`](api/openapi-v1.yaml).
 | Tool | Integration | Setup |
 |------|-------------|-------|
 | Claude Code | Hooks + MCP, or any primary model via the Anthropic ingress | `./install.sh` / `aimee claude-proxy enable` |
+| Codex CLI | Hooks + MCP + local plugin, or any primary model via the Responses ingress | `./install.sh` / `~/.codex/config.toml` |
+| OpenCode | TUI front end (`opencode attach`), any primary model via the OpenAI-compatible ingress | `./install.sh` |
 | Gemini CLI | Hooks | `./install.sh` |
-| Codex CLI | Hooks + MCP + local plugin | `./install.sh` |
 | Mistral Vibe | Provider-CLI primary + subscription-plan delegates (incl. `mistral-plan`) | `aimee agent setup mistral-plan` |
 | GitHub Copilot | MCP server | `./install.sh` |
 | VS Code | MCP tools in Copilot Chat agent mode, or aimee as an OpenAI-compatible model via the `/v1` API | [docs/VSCODE.md](docs/VSCODE.md) |
@@ -1228,6 +1233,46 @@ ANTHROPIC_BASE_URL=http://127.0.0.1:8910 ANTHROPIC_AUTH_TOKEN=<bearer> claude
 
 (The server must be reachable over HTTP — loopback TCP with a bearer, or a
 remote `AIMEE_SERVER_URL`.)
+
+### Codex on any primary model (Responses ingress)
+
+aimee-server also exposes the OpenAI Responses API at `POST /v1/responses` (with
+SSE streaming), the sibling of the Claude Code ingress above. To the open-source
+Codex CLI/TUI, aimee then behaves exactly like any other model: point Codex's
+model provider at aimee and it is indistinguishable from `gpt-5.x`. Codex drives
+its normal agent loop, aimee runs the turn on a registered primary-agent model
+selected by the request `model` field, and aimee participates in Codex's tool
+loop (it emits `function_call` items, Codex executes them in the user's
+workspace, and returns `function_call_output`). `GET /v1/models` lists the
+registered primary-agent models so Codex can list and switch models from its UI.
+
+Add a provider to `~/.codex/config.toml` and select it:
+
+```toml
+[model_providers.aimee]
+name = "aimee"
+base_url = "http://<aimee-host>:<port>/v1"
+wire_api = "responses"
+env_key = "AIMEE_API_KEY"          # aimee loopback bearer
+requires_openai_auth = false
+
+model_provider = "aimee"
+model = "aimee"                     # or any slug from GET /v1/models
+```
+
+Like the Anthropic ingress, this is a stateless wire-format proxy: Codex keeps
+owning its prompt, history, and tool execution; aimee translates the wire format
+and swaps the model. Switch models with `aimee primary <agent>`.
+
+### Any OpenAI-compatible front end (OpenCode, VS Code, custom clients)
+
+Tools that speak the OpenAI Chat Completions wire format point at
+`POST /v1/chat/completions` (SSE streaming supported) and run on aimee's primary
+agent the same way. This covers OpenCode (also launchable as a TUI through
+`opencode attach`), VS Code configured with aimee as an OpenAI-compatible model
+(see [docs/VSCODE.md](docs/VSCODE.md)), and any custom client. Whatever front end
+you choose, the memory, guardrails, and delegation are identical because they
+live in the shared server and KB, not in the tool.
 
 ---
 
