@@ -538,3 +538,16 @@ Focused references:
 | [Compatibility](docs/COMPATIBILITY.md) | Supported OS, shell, and provider matrix |
 | [VS Code Integration](docs/VSCODE.md) | Wire aimee into VS Code via MCP tools or as an OpenAI-compatible model |
 | [Feature Status](docs/STATUS.md) | Implementation status of all features |
+
+## License
+
+aimee is Copyright (C) 2026 The aimee authors and is licensed under the
+**GNU Affero General Public License v3.0** (AGPL-3.0). See [LICENSE](LICENSE)
+for the full text and [NOTICE](NOTICE) for the copyright notice.
+
+If the AGPL does not suit your needs, a different license can be discussed on
+request. For commercial or alternative licensing terms, contact the aimee
+authors at <jbailes@gmail.com>.
+
+Bundled third-party components (cJSON and the generated SDKs under `api/sdks/`)
+are licensed separately; see [NOTICE](NOTICE) for details.

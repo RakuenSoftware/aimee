@@ -1,0 +1,43 @@
+aimee
+Copyright (C) 2026 The aimee authors
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+The full license text is in the LICENSE file at the root of this
+repository.
+
+----------------------------------------------------------------------
+
+ALTERNATIVE LICENSING
+
+aimee is licensed under the GNU AGPL-3.0 (above). If the AGPL does not
+suit your needs, a different license can be discussed on request.
+For commercial or alternative licensing terms, contact:
+
+    The aimee authors <jbailes@gmail.com>
+
+----------------------------------------------------------------------
+
+THIRD-PARTY COMPONENTS
+
+This project bundles third-party code that is licensed separately from
+aimee and is not covered by the AGPL-3.0 grant above:
+
+  - src/vendor/cJSON.c, src/vendor/headers/cJSON.h and the copies under
+    api/sdks/c/external/ are cJSON, Copyright (c) 2009-2017 Dave Gamble
+    and cJSON contributors, licensed under the MIT License.
+
+  - The generated SDKs under api/sdks/ (python, typescript, rust, c) are
+    produced by OpenAPI Generator and carry their own upstream license
+    headers.
