@@ -11,6 +11,13 @@ find_package(Python3 COMPONENTS Interpreter REQUIRED)
 # gmtime_r, strtok_r, strcasecmp, strncasecmp, etc.)
 add_compile_definitions(_GNU_SOURCE)
 
+# Version string embedded into binaries (aimee version / --version). Mirrors the
+# Makefile's GIT_VERSION injection. Release/packaging passes -DAIMEE_VERSION_STR=vX.Y.Z;
+# when unset the headers fall back to the AIMEE_VERSION default in aimee_version.h.
+if(DEFINED AIMEE_VERSION_STR AND NOT AIMEE_VERSION_STR STREQUAL "")
+    add_compile_definitions(AIMEE_VERSION="${AIMEE_VERSION_STR}")
+endif()
+
 option(WITH_PAM "Enable PAM authentication support" ON)
 option(WITH_LIBSECRET "Enable libsecret integration" ON)
 option(WITH_UI "Enable embedded dashboard UI" OFF)

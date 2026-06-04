@@ -1,0 +1,86 @@
+# Auto-release on every push to main.
+#
+# On each push to `main` (which, under the testing->main promote flow, is a
+# promote merge) this computes the next semver PATCH from the highest existing
+# `v*` tag, creates and pushes that tag, then cuts a full release by calling the
+# reusable build workflows:
+#   - release-thin-client.yml  -> aimee CLI binaries (Linux/macOS/Windows) on the GitHub Release
+#   - publish-images.yml       -> aimee-server / aimee-kb / aimee-server-kb multi-arch images, tagged :<version> + :latest
+#
+# Reusable workflows are invoked directly (workflow_call), so this works with the
+# default GITHUB_TOKEN -- no PAT needed (a tag pushed by GITHUB_TOKEN would not,
+# by design, re-trigger the tag-on:push workflows, hence the direct call).
+name: Auto release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+
+permissions:
+  contents: write
+  packages: write
+
+# Serialize so two quick pushes can't race to compute the same next version.
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Compute next patch version
+        id: bump
+        run: |
+          latest=$(git tag --list 'v*' --sort=-v:refname | head -n1)
+          if [ -z "$latest" ]; then
+            next="0.0.1"
+          else
+            v="${latest#v}"
+            IFS='.' read -r major minor patch <<< "$v"
+            # Guard against malformed tags; default missing components to 0.
+            major=${major:-0}; minor=${minor:-0}; patch=${patch:-0}
+            patch=$((patch + 1))
+            next="${major}.${minor}.${patch}"
+          fi
+          if git rev-parse -q --verify "refs/tags/v${next}" >/dev/null; then
+            echo "::error::tag v${next} already exists; aborting to avoid clobbering a release"
+            exit 1
+          fi
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "Next version: v${next} (from ${latest:-<none>})"
+
+      - name: Create and push tag
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          tag="v${{ steps.bump.outputs.version }}"
+          git tag -a "$tag" -m "aimee $tag"
+          git push origin "$tag"
+
+  thin-clients:
+    needs: version
+    uses: ./.github/workflows/release-thin-client.yml
+    permissions:
+      contents: write
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  images:
+    needs: version
+    uses: ./.github/workflows/publish-images.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      version: ${{ needs.version.outputs.version }}

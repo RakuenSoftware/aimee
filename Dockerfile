@@ -15,7 +15,8 @@ RUN apt-get update \
 
 WORKDIR /src
 COPY . .
-RUN make -C src ../aimee-kb
+ARG AIMEE_VERSION=""
+RUN make -C src ../aimee-kb ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
 FROM debian:bookworm-slim
 
