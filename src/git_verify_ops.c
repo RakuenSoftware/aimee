@@ -2,11 +2,76 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <unistd.h>
 
 #include "headers/git_verify_internal.h"
+#include "headers/config.h"
+#include "headers/guardrails.h"
 #include "headers/dstr.h"
 #include "headers/util.h"
 #include "headers/mcp_git.h"
+
+/* --- Verify scope + master-switch gate --- */
+
+int verify_enabled_global(void)
+{
+   config_t cfg;
+   return (config_load(&cfg) == 0) ? cfg.verify_enabled : 0;
+}
+
+/* See git_verify.h for the contract. Compares the canonical main-repo root of
+ * the target against the session's registered worktree git_roots; cross-project
+ * repos are out of scope unless config opts in. config_load /
+ * session_state_load are both cheap relative to a push/PR. */
+int verify_project_in_scope(const char *target_repo_root)
+{
+   config_t cfg;
+   if (config_load(&cfg) == 0 && cfg.verify_cross_project)
+      return 1;
+
+   session_state_t state;
+   session_state_load(&state, session_id());
+   if (state.worktree_count == 0)
+      return 1; /* no session home anchor — preserve single-repo behavior */
+
+   char target_main[MAX_PATH_LEN];
+   if (resolve_main_repo_root(target_repo_root, target_main, sizeof(target_main)) != 0)
+      return 1; /* cannot resolve target — fail open rather than wrongly skip */
+
+   for (int i = 0; i < state.worktree_count; i++)
+   {
+      char home_main[MAX_PATH_LEN];
+      if (resolve_main_repo_root(state.worktrees[i].git_root, home_main, sizeof(home_main)) == 0 &&
+          strcmp(home_main, target_main) == 0)
+         return 1;
+   }
+   return 0;
+}
+
+int verify_gate_blocks(const char *target_root, const char *expected_commit, char *msg,
+                       size_t msg_len)
+{
+   /* Out-of-scope (cross-project, default) repos are never gated. */
+   if (!verify_project_in_scope(target_root))
+      return 0;
+
+   /* Auto-generate-and-gate an unconfigured repo only when the global verify
+    * master switch is on. With verify disabled (default), an existing explicit
+    * project.yaml with enforce:true still re-enables the gate, but a repo with
+    * no config is neither created nor gated. */
+   if (!verify_enabled_global())
+   {
+      char ypath[MAX_PATH_LEN];
+      if (project_yaml_path(target_root, ypath, sizeof(ypath)) != 0 || access(ypath, F_OK) != 0)
+         return 0;
+   }
+
+   verify_config_t vcfg;
+   if (verify_load_config(target_root, &vcfg) != 0 || !vcfg.enforce)
+      return 0;
+
+   return !verify_check(target_root, expected_commit, msg, msg_len);
+}
 
 /* --- Semantic Conflict Resolver --- */
 

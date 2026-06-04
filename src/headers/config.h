@@ -609,6 +609,21 @@ typedef struct config
     * relying solely on aimee guardrails for safety */
    int autonomous;
 
+   /* Verify master switch. When 0 (default), aimee does not automatically gate
+    * pushes/PR-creates or auto-generate an enforcing project.yaml: a repo is
+    * only gated if it already has an explicit project.yaml with enforce:true
+    * (which re-enables the gate per-project). Explicit `aimee git verify` runs
+    * still execute steps on demand regardless. Set to 1 to restore automatic
+    * gating + enforce:true auto-generated config for the current project. */
+   int verify_enabled;
+
+   /* Verify scope. When 0 (default), `aimee git verify` and the push/PR verify
+    * gate apply only to the session's current project (the repo the session is
+    * rooted in). Cross-project repositories are neither auto-configured (no
+    * project.yaml is generated) nor gated, and verify will not run against them.
+    * Set to 1 to allow verify to run and enforce across other repositories. */
+   int verify_cross_project;
+
    /* Cross-verification: delegates verify tool fixes, tool verifies delegate fixes */
    int cross_verify;
    char verify_cmd[512];

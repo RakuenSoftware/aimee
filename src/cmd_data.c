@@ -386,6 +386,8 @@ static const config_field_t config_fields[] = {
     {"memory_query_expansion_k", offsetof(config_t, memory_query_expansion_k), sizeof(int), 0,
      CFG_INT},
     {"autonomous", offsetof(config_t, autonomous), sizeof(int), 1, CFG_BOOL},
+    {"verify_enabled", offsetof(config_t, verify_enabled), sizeof(int), 1, CFG_BOOL},
+    {"verify_cross_project", offsetof(config_t, verify_cross_project), sizeof(int), 1, CFG_BOOL},
     {"cross_verify", offsetof(config_t, cross_verify), sizeof(int), 1, CFG_BOOL},
     {"ecomode", offsetof(config_t, ecomode), sizeof(int), 1, CFG_BOOL},
     {"max_iterations", offsetof(config_t, max_iterations), sizeof(int), 0, CFG_INT},

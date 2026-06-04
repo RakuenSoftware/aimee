@@ -31,6 +31,14 @@ void verify_run_waves(verify_config_t *cfg, verify_thread_ctx_t *contexts);
 void verify_run_step(verify_thread_ctx_t *ctx);
 void verify_config_prefer_verify_local(const char *project_root, verify_config_t *cfg);
 
+/* Resolve dir to the canonical main-repo root (worktrees collapse to the shared
+ * repo). Defined in git_verify.c; used by the scope gate in git_verify_ops.c. */
+int resolve_main_repo_root(const char *dir, char *out, size_t out_len);
+
+/* Read the global verify master switch (config verify_enabled). Defined in
+ * git_verify_ops.c; used by generate_project_yaml in git_verify.c. */
+int verify_enabled_global(void);
+
 /* git_verify_ops.c — action handlers dispatched by handle_git_verify */
 char *verify_resolve_conflicts(const char *project_root);
 char *verify_check_env(verify_config_t *cfg);

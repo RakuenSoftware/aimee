@@ -1307,7 +1307,6 @@ int pre_tool_check(const char *tool_name, const char *input_json, session_state_
             *nl = '\0';
       }
       const char *vr = (wrc == 0 && wt && wt[0]) ? wt : NULL;
-      verify_config_t vcfg;
       char vm[256];
       /* Verify the committed tip being pushed/proposed, not the working tree of
        * whatever checkout happens to hold the head branch (which may be a stale
@@ -1318,8 +1317,10 @@ int pre_tool_check(const char *tool_name, const char *input_json, session_state_
                                                   sizeof(expected))
                             ? expected
                             : NULL;
-      if (verify_load_config(vr, &vcfg) == 0 && vcfg.enforce &&
-          !verify_check(vr, exp, vm, sizeof(vm)))
+      /* verify_gate_blocks honors scope (current project only unless
+       * cross-project verify is enabled) and the global verify master switch,
+       * and does not auto-configure an out-of-scope/unconfigured repo. */
+      if (verify_gate_blocks(vr, exp, vm, sizeof(vm)))
       {
          snprintf(msg_buf, msg_len, "BLOCKED: %s blocked — %s. Run 'aimee git verify' first.",
                   is_push ? "push" : "pr create", vm);
