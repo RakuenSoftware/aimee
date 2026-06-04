@@ -58,34 +58,79 @@ func (s *server) socketCallForRequest(r *http.Request, req map[string]any) (map[
 	return s.rpcV1Call(ctx, req)
 }
 
-// rpcV1Call dispatches a unary RPC over aimee-server's /v1 HTTP transport
-// (POST /v1/rpc over the UDS), the cutover from the legacy NDJSON socket. The
-// bridge echoes the dispatch response byte-for-byte (the server's NDJSON↔/v1
-// parity gate proves this), so the decoded result is identical to the old
-// socket path; the UDS is filesystem-trusted, so no bearer is needed. If the
-// /v1 HTTP listener is unreachable (transport error), it falls back to the
-// NDJSON socket so webchat keeps working on socket-only servers — WP3.4 drops
-// the fallback once /v1 is always-on.
+// methodRoute is the first-class /v1 route backing a dispatch method.
+type methodRoute struct {
+	verb string
+	path string
+}
+
+// methodRoutes maps each dispatch method webchat calls to its first-class /v1
+// route. The server retired the generic POST /v1/rpc bridge once every method
+// gained a real route (src/server/server_http_routes.inc); these mirror that
+// table. GET routes take no body; POST routes carry their args in the body. The
+// server's rh_dispatch_op returns the dispatch envelope ({status,data,...})
+// byte-for-byte, so every caller's response parsing is unchanged.
+var methodRoutes = map[string]methodRoute{
+	// Dashboard read views (GET, no args).
+	"dashboard.all":            {http.MethodGet, "/v1/dashboard/all"},
+	"dashboard.delegations":    {http.MethodGet, "/v1/dashboard/delegations"},
+	"dashboard.metrics":        {http.MethodGet, "/v1/dashboard/metrics"},
+	"dashboard.logs":           {http.MethodGet, "/v1/dashboard/logs"},
+	"dashboard.plans":          {http.MethodGet, "/v1/dashboard/plans"},
+	"dashboard.traces":         {http.MethodGet, "/v1/dashboard/traces"},
+	"dashboard.plugins":        {http.MethodGet, "/v1/dashboard/plugins"},
+	"dashboard.memory_stats":   {http.MethodGet, "/v1/dashboard/memory_stats"},
+	"dashboard.onboard":        {http.MethodGet, "/v1/dashboard/onboard"},
+	"agent.list":               {http.MethodGet, "/v1/agent/list"},
+	"collab_rules.list":        {http.MethodGet, "/v1/collab_rules"},
+	"collab_rules.list_active": {http.MethodGet, "/v1/collab_rules/active"},
+	// Mutations + arg-bearing calls (POST, body carries the args; the server
+	// overrides the body's method from the matched route).
+	"collab_rules.approve":    {http.MethodPost, "/v1/collab_rules/approve"},
+	"collab_rules.reject":     {http.MethodPost, "/v1/collab_rules/reject"},
+	"collab_rules.retire":     {http.MethodPost, "/v1/collab_rules/retire"},
+	"lsp.diagnostics_summary": {http.MethodPost, "/v1/lsp/diagnostics_summary"},
+	"index.list":              {http.MethodPost, "/v1/index/list"},
+	"mcp.call":                {http.MethodPost, "/v1/mcp/call"},
+}
+
+// rpcV1Call dispatches a unary RPC over aimee-server's first-class /v1 HTTP
+// routes (resolved from the request's method via methodRoutes) over the UDS.
+// rh_dispatch_op returns the dispatch envelope byte-for-byte, so the decoded
+// result is identical to the legacy NDJSON socket; the UDS is filesystem-trusted,
+// so no bearer is needed. An unmapped method or a genuine transport error falls
+// back to the NDJSON socket, so webchat still works against an older socket-only
+// server.
 func (s *server) rpcV1Call(ctx context.Context, req map[string]any) (map[string]json.RawMessage, error) {
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
+	method, _ := req["method"].(string)
+	route, ok := methodRoutes[method]
+	if !ok {
+		return socketCallContext(ctx, s.cfg.socketPath, req)
 	}
-	st, data, err := s.v1Request(ctx, http.MethodPost, "/v1/rpc", body)
+
+	var body []byte
+	if route.verb != http.MethodGet {
+		var err error
+		if body, err = json.Marshal(req); err != nil {
+			return nil, err
+		}
+	}
+
+	st, data, err := s.v1Request(ctx, route.verb, route.path, body)
 	if err != nil {
 		return socketCallContext(ctx, s.cfg.socketPath, req)
 	}
 	var msg map[string]json.RawMessage
 	if len(data) > 0 {
 		if uerr := json.Unmarshal(data, &msg); uerr != nil {
-			return nil, fmt.Errorf("decode /v1/rpc response: %w", uerr)
+			return nil, fmt.Errorf("decode %s response: %w", route.path, uerr)
 		}
 	}
 	if st != http.StatusOK {
 		if rerr := rpcError(msg); rerr != nil {
 			return nil, rerr
 		}
-		return nil, fmt.Errorf("/v1/rpc status %d", st)
+		return nil, fmt.Errorf("%s status %d", route.path, st)
 	}
 	if rerr := rpcError(msg); rerr != nil {
 		return nil, rerr

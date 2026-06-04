@@ -153,14 +153,14 @@ func TestHandleOpenAIModelsReturnsOpenAICompatibleList(t *testing.T) {
 }
 
 // TestRPCV1CallDispatchesOverV1 proves the unary RPC path (socketCallForRequest
-// → rpcV1Call) now goes over POST /v1/rpc, injecting the method into the body
-// and decoding the bridge's byte-identical dispatch response.
+// → rpcV1Call) resolves a GET-backed method to its first-class /v1 route (no
+// body) and decodes the dispatch envelope returned byte-for-byte by the server's
+// rh_dispatch_op.
 func TestRPCV1CallDispatchesOverV1(t *testing.T) {
-	var gotMethod, gotPath, gotBody string
+	var gotMethod, gotPath string
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/rpc", func(w http.ResponseWriter, r *http.Request) {
-		b, _ := io.ReadAll(r.Body)
-		gotMethod, gotPath, gotBody = r.Method, r.URL.Path, string(b)
+	mux.HandleFunc("/v1/agent/list", func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"status":"ok","agents":[{"name":"aimee"}]}`)
 	})
@@ -171,14 +171,44 @@ func TestRPCV1CallDispatchesOverV1(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rpcV1Call: %v", err)
 	}
-	if gotMethod != http.MethodPost || gotPath != "/v1/rpc" {
-		t.Fatalf("dispatched %s %s, want POST /v1/rpc", gotMethod, gotPath)
-	}
-	if !strings.Contains(gotBody, `"agent.list"`) {
-		t.Fatalf("request body missing method: %q", gotBody)
+	if gotMethod != http.MethodGet || gotPath != "/v1/agent/list" {
+		t.Fatalf("dispatched %s %s, want GET /v1/agent/list", gotMethod, gotPath)
 	}
 	if _, ok := resp["agents"]; !ok {
 		t.Fatalf("decoded response missing agents: %v", resp)
+	}
+}
+
+// TestRPCV1CallForwardsBodyForPOSTRoute proves a POST-backed method reaches its
+// first-class route and forwards the request body (args) — e.g. mcp.call carries
+// its tool/arguments.
+func TestRPCV1CallForwardsBodyForPOSTRoute(t *testing.T) {
+	var gotMethod, gotPath, gotBody string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/mcp/call", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotMethod, gotPath, gotBody = r.Method, r.URL.Path, string(b)
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"status":"ok","structuredContent":{"sessions":[]}}`)
+	})
+	cfg := startFakeV1(t, mux)
+	s := &server{cfg: cfg}
+
+	resp, err := s.rpcV1Call(context.Background(), map[string]any{
+		"method": "mcp.call", "tool": "session_list",
+		"arguments": map[string]any{"limit": 100},
+	})
+	if err != nil {
+		t.Fatalf("rpcV1Call: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/v1/mcp/call" {
+		t.Fatalf("dispatched %s %s, want POST /v1/mcp/call", gotMethod, gotPath)
+	}
+	if !strings.Contains(gotBody, `"session_list"`) {
+		t.Fatalf("request body missing tool args: %q", gotBody)
+	}
+	if _, ok := resp["structuredContent"]; !ok {
+		t.Fatalf("decoded response missing structuredContent: %v", resp)
 	}
 }
 
@@ -186,7 +216,7 @@ func TestRPCV1CallDispatchesOverV1(t *testing.T) {
 // into an error (matching the legacy socket path's rpcError behaviour).
 func TestRPCV1CallSurfacesServerError(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/rpc", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/v1/agent/list", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"status":"error","message":"nope"}`)
 	})

@@ -1,0 +1,8 @@
+# PAM stack for the aimee-webchat browser login (service name "aimee-webchat").
+#
+# Self-contained (does not @include common-*) so it works on a minimal image
+# with only libpam-modules installed. pam_unix checks /etc/shadow, which is why
+# aimee-webchat runs as root inside the container; the login user is created from
+# AIMEE_WEBCHAT_USER / AIMEE_WEBCHAT_PASSWORD by the entrypoint.
+auth     required pam_unix.so
+account  required pam_unix.so
