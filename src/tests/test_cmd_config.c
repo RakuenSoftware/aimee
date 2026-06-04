@@ -6,7 +6,9 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "aimee.h"
+#include "cJSON.h"
 #include "commands.h"
+#include "config_fields.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
 
@@ -118,10 +120,56 @@ static void test_dispositions_text_and_json(void)
    platform_test_rmrf(tmpdir);
 }
 
+/* The config.show/get/set server handlers and the `aimee config` command both
+ * resolve fields through this shared table; exercise the pure helpers here. */
+static void test_config_fields_helpers(void)
+{
+   assert(config_field_lookup("provider") != NULL);
+   assert(config_field_lookup("autonomous") != NULL);
+   assert(config_field_lookup("no_such_key") == NULL);
+
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+
+   /* string */
+   const config_field_t *provider = config_field_lookup("provider");
+   assert(config_field_set_value(&cfg, provider, "claude") == 0);
+   cJSON *v = config_field_value_json(&cfg, provider);
+   assert(cJSON_IsString(v) && strcmp(v->valuestring, "claude") == 0);
+   cJSON_Delete(v);
+
+   /* bool: accepts true/1/false/0, rejects anything else */
+   const config_field_t *auton = config_field_lookup("autonomous");
+   assert(config_field_set_value(&cfg, auton, "true") == 0);
+   v = config_field_value_json(&cfg, auton);
+   assert(cJSON_IsBool(v) && cJSON_IsTrue(v));
+   cJSON_Delete(v);
+   assert(config_field_set_value(&cfg, auton, "0") == 0);
+   v = config_field_value_json(&cfg, auton);
+   assert(cJSON_IsBool(v) && !cJSON_IsTrue(v));
+   cJSON_Delete(v);
+   assert(config_field_set_value(&cfg, auton, "maybe") == -1);
+
+   /* int */
+   const config_field_t *iters = config_field_lookup("max_iterations");
+   assert(iters && config_field_set_value(&cfg, iters, "42") == 0);
+   v = config_field_value_json(&cfg, iters);
+   assert(cJSON_IsNumber(v) && v->valueint == 42);
+   cJSON_Delete(v);
+
+   /* float — including a threshold field that used to be mistyped CFG_STRING */
+   const config_field_t *thr = config_field_lookup("guardrails_semantic_warn_threshold");
+   assert(thr && config_field_set_value(&cfg, thr, "0.25") == 0);
+   v = config_field_value_json(&cfg, thr);
+   assert(cJSON_IsNumber(v) && v->valuedouble > 0.24 && v->valuedouble < 0.26);
+   cJSON_Delete(v);
+}
+
 int main(void)
 {
    printf("cmd_config: ");
    test_dispositions_text_and_json();
+   test_config_fields_helpers();
    printf("OK\n");
    return 0;
 }

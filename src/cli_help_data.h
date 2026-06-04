@@ -194,4 +194,27 @@
      "  show <name>      Show profile details\n"
      "  delete <name>    Delete a profile (--force for non-interactive use)\n"
      "  current          Print the active profile name\n"},
+    {"config", "View and update configuration", CLIENT_TIER_CORE, 1,
+     "  show             Show all config values\n"
+     "  get <key>        Get one config value\n"
+     "  set <key> <val>  Set one config value\n"},
+    {"kb", "Project knowledge base", CLIENT_TIER_CORE, 1,
+     "  search <query>   Search the knowledge base\n"
+     "  build            Build the knowledge base for a project\n"
+     "  update           Update the knowledge base\n"
+     "  ingest           Ingest documents (status: ingest status)\n"
+     "  status           Show knowledge-base status\n"
+     "  docs push        Push docs into the knowledge base\n"},
+    {"graph", "Code-graph projection and explain", CLIENT_TIER_ADVANCED, 0,
+     "  sync-code        Project the code graph\n"
+     "  explain          Explain a code-graph relationship\n"},
+    {"curator", "Knowledge curator queries", CLIENT_TIER_ADVANCED, 0,
+     "  implements <topic>   What implements a topic\n"
+     "  synthesize <topic>   Synthesize knowledge on a topic\n"
+     "  contradictions       List contradictions\n"},
+    {"trajectory", "Replayable session trajectories", CLIENT_TIER_ADVANCED, 0,
+     "  export           Export a session trajectory\n"
+     "  batch            Export trajectories in batch\n"},
+    {"episode", "Delegation episodes", CLIENT_TIER_ADVANCED, 0,
+     "  list             List recent delegation episodes\n"},
     {NULL, NULL, 0, 0, NULL},

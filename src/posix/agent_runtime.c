@@ -709,10 +709,24 @@ native_provider_http:
       /* Log request trace */
       agent_trace_log(0, turn, "request", body, NULL, NULL, NULL, NULL);
 
-      /* POST with automatic retry on transient errors */
+      /* POST with automatic retry on transient errors. The per-call timeout is
+       * capped by the remaining loop budget so a single model call can't blow
+       * the total -- but once too little budget remains for a viable call,
+       * issuing one anyway just yields a short-timeout read failure (HTTP -1)
+       * that the provider-health tracker misreads as "provider unreachable" and
+       * aborts the whole delegate (the provider is fine, we starved the call).
+       * agent_loop_per_call_timeout_ms returns -1 in that case so we stop the
+       * loop cleanly with a partial result instead. */
       char *response_body = NULL;
-      int remaining = total_timeout_ms - elapsed_ms;
-      int per_call = (agent->timeout_ms < remaining) ? agent->timeout_ms : remaining;
+      int per_call =
+          agent_loop_per_call_timeout_ms(agent->timeout_ms, total_timeout_ms, elapsed_ms);
+      if (per_call < 0)
+      {
+         snprintf(out->error, sizeof(out->error), "tool loop budget exhausted (%dms of %dms used)",
+                  elapsed_ms, total_timeout_ms);
+         free(body);
+         break;
+      }
 
       config_t retry_cfg;
       config_load(&retry_cfg);

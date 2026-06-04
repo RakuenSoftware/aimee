@@ -1795,6 +1795,28 @@ static void test_agent_route_health_filter(void)
    assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
 }
 
+/* Regression: the multi-turn tool loop must not issue a model call with a
+ * starved (sub-viable) timeout when its budget is nearly exhausted -- that
+ * yields an HTTP -1 read failure that gets misreported as "provider
+ * unreachable" and marks the provider degraded. agent_loop_per_call_timeout_ms
+ * returns -1 instead so the loop stops cleanly. */
+static void test_agent_loop_per_call_timeout(void)
+{
+   /* Early in the loop: full per-call timeout. */
+   assert(agent_loop_per_call_timeout_ms(180000, 720000, 0) == 180000);
+   /* Mid loop: capped to the remaining budget, still >= the viable floor. */
+   assert(agent_loop_per_call_timeout_ms(180000, 720000, 660000) == 60000);
+   /* Budget nearly gone (only 2.2s left -- the real-world failure): stop, do
+    * NOT issue a doomed 2262ms call. */
+   assert(agent_loop_per_call_timeout_ms(180000, 720000, 717738) == -1);
+   /* Exactly at the floor is still viable; one below it stops. */
+   assert(agent_loop_per_call_timeout_ms(180000, 720000, 660000) == 60000);
+   assert(agent_loop_per_call_timeout_ms(180000, 720000, 660001) == -1);
+   /* Small configured timeout: the floor never exceeds agent_timeout_ms. */
+   assert(agent_loop_per_call_timeout_ms(10000, 40000, 0) == 10000);
+   assert(agent_loop_per_call_timeout_ms(10000, 40000, 35000) == -1);
+}
+
 int main(void)
 {
    char tmp_home[512];
@@ -1809,6 +1831,7 @@ int main(void)
    test_agent_has_role();
    test_agent_find();
    test_agent_route();
+   test_agent_loop_per_call_timeout();
    test_agent_route_health_filter();
    test_agent_route_with_caps_honors_tools_enabled();
    test_current_code_only_role_tool_policy();
