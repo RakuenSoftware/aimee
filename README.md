@@ -1,8 +1,10 @@
 # aimee
 
-**Your company's collective memory, that learns.** aimee distills what your whole organization knows, across engineering, product, sales, support, and operations, into one self-learning knowledge base, draws conclusions across every domain, and routes work to the cheapest capable model to keep costs down. Zero cloud dependencies, sub-10ms.
+**One UI. Any model. Memory that travels with you.** aimee is a single front end for every AI coding tool and model you use: drive it from Claude Code, Codex, OpenCode, or the built-in browser webchat, and run any turn on any model from any provider, Claude, GPT, Gemini, Mistral, MiniMax, or a local model. Your accumulated memory, preferences, and hard-won context move with you between every model and provider, so switching never starts from zero and is never locked to a vendor. Zero cloud dependencies, sub-10ms.
 
-It **starts as persistent memory for your AI coding tool**, one install, and every session starts knowing what the last one learned, adding memory, safety guardrails, and cost-saving delegation to Claude Code, Gemini CLI, Codex CLI, Mistral Vibe, and GitHub Copilot. The *same substrate* scales up to a company-wide knowledge base. See **[How aimee learns](docs/KNOWLEDGE.md)**.
+**It is also your company's collective memory, that learns.** aimee distills what your whole organization knows, across engineering, product, sales, support, and operations, into one self-learning knowledge base, draws conclusions across every domain, and routes work to the cheapest capable model to keep costs down.
+
+It **starts as persistent memory for your AI coding tool**, one install, and every session starts knowing what the last one learned, adding memory, safety guardrails, and cost-saving delegation to Claude Code, Gemini CLI, Codex CLI, OpenCode, Mistral Vibe, and GitHub Copilot. Point your existing tool's front end at aimee and every turn runs on whatever primary model you choose: **you can use Claude Code with any model or provider now.** The *same substrate* scales up to a company-wide knowledge base. See **[How aimee learns](docs/KNOWLEDGE.md)**.
 
 Four shipped artifacts: `aimee`, `aimee-webchat`, `aimee-server`, and `aimee-kb`. Client and webchat talk only to the local `aimee-server`; local runtime information stays in server-owned DB1, while knowledge lives behind `aimee-kb` in DB2, which can be a local or shared Postgres service. Zero cloud dependencies. The core services are C; the browser webchat is the standalone Go service in `webchat/`. Starts in under 10ms.
 
@@ -19,7 +21,7 @@ aimee sits between you and your AI tool, intercepting actions through hooks and 
 ```mermaid
 graph TB
     User["You"]
-    PA["Primary Agent<br/>Claude Code / Gemini CLI / Codex CLI / Vibe"]
+    PA["Primary Agent<br/>Claude Code / Codex / OpenCode / Gemini CLI / Vibe"]
     Hooks["aimee hooks<br/>SessionStart &bull; PreToolUse &bull; PostToolUse"]
     Memory[("Memory<br/>4-tier, scoped search")]
     Guard["Guardrails<br/>Sensitive file blocking<br/>Anti-pattern detection<br/>Planning mode"]
@@ -70,16 +72,56 @@ Each session gets its own git worktree, state file, and branch. Run two sessions
 
 ### Works with what you already use
 
-| Tool | Integration | Setup |
-|------|------------|-------|
-| Claude Code | Full hook support + MCP | `./install.sh` |
-| Gemini CLI | Full hook support | `./install.sh` |
-| Codex CLI | Full hook support + MCP + local plugin | `./install.sh` |
-| Mistral Vibe | Provider-CLI primary and subscription-plan delegates, including `mistral-plan` | `aimee agent setup mistral-plan` |
-| GitHub Copilot | MCP server | `./install.sh` |
-| VS Code | MCP tools in Copilot Chat, or aimee as an OpenAI-compatible model | [VS Code guide](docs/VSCODE.md) |
+| Tool | Integration | Run on any model | Setup |
+|------|------------|------------------|-------|
+| Claude Code | Full hook support + MCP | Yes, via the Anthropic ingress (`/v1/messages`) | `./install.sh` / `aimee claude-proxy enable` |
+| Codex CLI | Full hook support + MCP + local plugin | Yes, via the OpenAI Responses ingress (`/v1/responses`) | `./install.sh` |
+| OpenCode | TUI front end (`opencode attach`) | Yes, via the OpenAI-compatible ingress | `./install.sh` |
+| Gemini CLI | Full hook support | Provider CLI | `./install.sh` |
+| Mistral Vibe | Provider-CLI primary and subscription-plan delegates, including `mistral-plan` | Provider CLI | `aimee agent setup mistral-plan` |
+| GitHub Copilot | MCP server | Via the OpenAI-compatible model | `./install.sh` |
+| VS Code | MCP tools in Copilot Chat, or aimee as an OpenAI-compatible model | Yes, via `/v1/chat/completions` | [VS Code guide](docs/VSCODE.md) |
 
 Switch tools any time. aimee keeps all your memory and context.
+
+### Use your front end on any model
+
+aimee-server speaks the same wire formats your tools already use, so you can point
+a tool's front end at aimee and run every turn on aimee's configured **primary
+agent** (any provider's model) instead of the tool's built-in vendor. It is a
+stateless wire-format proxy: the tool keeps owning its prompt, history, and tools
+(tool execution stays client-side); aimee translates the wire format and swaps the
+model. Switch models any time with `aimee primary <agent>`, and `GET /v1/models`
+lists what is selectable.
+
+**Claude Code on any model** (Anthropic Messages ingress, `POST /v1/messages`):
+
+```bash
+aimee claude-proxy enable http://127.0.0.1:8910 <server-bearer>
+# one-off, without touching ~/.claude/settings.json:
+ANTHROPIC_BASE_URL=http://127.0.0.1:8910 ANTHROPIC_AUTH_TOKEN=<bearer> claude
+```
+
+**Codex on any model** (OpenAI Responses ingress, `POST /v1/responses`). Add a
+provider to `~/.codex/config.toml` and select it:
+
+```toml
+[model_providers.aimee]
+name = "aimee"
+base_url = "http://<aimee-host>:<port>/v1"
+wire_api = "responses"
+env_key = "AIMEE_API_KEY"          # aimee loopback bearer
+requires_openai_auth = false
+
+model_provider = "aimee"
+model = "aimee"                     # or any slug from GET /v1/models
+```
+
+**OpenCode and any OpenAI-compatible client** point at `POST /v1/chat/completions`
+(SSE streaming supported); see the [Manual](MANUAL.md#25-integrations) and
+[VS Code guide](docs/VSCODE.md) for the OpenAI-endpoint setup. Whatever front end
+you choose, the memory, guardrails, and delegation are the same, because they live
+in the shared server and KB, not in the tool.
 
 ## Performance
 
