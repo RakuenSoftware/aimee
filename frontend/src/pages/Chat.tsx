@@ -206,6 +206,63 @@ function saveTabs(tabs: TabData[]): void {
   try { localStorage.setItem(TABS_KEY, JSON.stringify(tabs)); } catch { /* ignore */ }
 }
 
+/* Server-side session persistence (per logged-in user). The conversation lives
+ * on aimee-server keyed by aimeeSid; webchat stores which sessions belong to the
+ * user so tabs survive a browser/laptop crash or a move to another device.
+ * localStorage remains a fast local cache (and holds per-tab message history);
+ * the server is authoritative for *which* tabs exist. */
+
+interface ServerSession {
+  id: string;
+  title?: string;
+  cwd?: string;
+  created_at?: string;
+  last_active?: string;
+}
+
+async function fetchServerSessions(): Promise<ServerSession[]> {
+  try {
+    const r = await fetch('/api/chat/sessions');
+    if (!r.ok) return [];
+    const data = await r.json();
+    return Array.isArray(data) ? (data as ServerSession[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+// mergeServerSessions restores server-persisted sessions the local cache is
+// missing (e.g. after a crash cleared localStorage, or on a fresh device),
+// appending them as message-empty tabs keyed by the stored aimeeSid. Local tabs
+// are never dropped — except a single pristine, unused default tab, which the
+// restored sessions replace so the user does not see a stray empty "Chat".
+function mergeServerSessions(local: TabData[], server: ServerSession[]): TabData[] {
+  const known = new Set(local.map(t => t.aimeeSid).filter(Boolean));
+  const restored: TabData[] = [];
+  for (const s of server) {
+    if (s.id && !known.has(s.id)) {
+      restored.push(normalizeTab({ title: s.title ?? '', messages: [], sid: '', aimeeSid: s.id }, 0));
+      known.add(s.id);
+    }
+  }
+  if (restored.length === 0) return local;
+  const pristineDefault =
+    local.length === 1 && local[0].messages.length === 0 && !local[0].sid;
+  return pristineDefault ? restored : [...local, ...restored];
+}
+
+// forgetServerSession removes a closed tab's session from the server so it does
+// not reappear on the next restore. Best-effort.
+function forgetServerSession(aimeeSid: string): void {
+  if (!aimeeSid) return;
+  try {
+    fetch(`/api/chat/session?sid=${encodeURIComponent(aimeeSid)}`, {
+      method: 'DELETE',
+      headers: { 'X-CSRF-Token': window._csrf || '' },
+    }).catch(() => {});
+  } catch { /* ignore */ }
+}
+
 function rulesBannerDismissedKey(root: string): string {
   return root ? `${RULES_BANNER_DISMISSED_KEY}:${root}` : RULES_BANNER_DISMISSED_KEY;
 }
@@ -1521,6 +1578,19 @@ export default function Chat() {
     saveTabs(tabs);
   }, [tabs]);
 
+  /* Restore server-persisted sessions on load (per-user, survives a crash or a
+   * move to another device). Runs once; merges in any sessions the local cache
+   * is missing. */
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const server = await fetchServerSessions();
+      if (cancelled || server.length === 0) return;
+      setTabs(prev => mergeServerSessions(prev, server));
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   useEffect(() => {
     if (activeIdx >= tabs.length) {
       setActiveIdx(Math.max(0, tabs.length - 1));
@@ -1989,6 +2059,9 @@ export default function Chat() {
   function closeTab(i: number) {
     if (tabs.length <= 1) return;
     detachTabPresence(tabs[i]);
+    // Forget the server-side session so the closed tab does not reappear on the
+    // next restore (best-effort).
+    forgetServerSession(tabs[i]?.aimeeSid ?? '');
     if (i === activeIdx) abortActiveSends();
     setTabs(prev => {
       const next = [...prev];

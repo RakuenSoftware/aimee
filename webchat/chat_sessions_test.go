@@ -112,14 +112,14 @@ func TestTouchChatSessionScopedByUser(t *testing.T) {
 	}
 }
 
-func TestHandleChatThreadsReturnsUserSessions(t *testing.T) {
+func TestHandleChatSessionsListReturnsUserSessions(t *testing.T) {
 	s := newSessionTestServer(t)
 	_ = s.touchChatSession("alice", "sess-1", "/a", "hello there")
 	_ = s.touchChatSession("bob", "sess-2", "/b", "bob only")
 
 	rr := httptest.NewRecorder()
-	req := asUser(httptest.NewRequest(http.MethodGet, "/api/chat/threads", nil), "alice")
-	s.handleChatThreads(rr, req)
+	req := asUser(httptest.NewRequest(http.MethodGet, "/api/chat/sessions", nil), "alice")
+	s.handleChatSessionsList(rr, req)
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d", rr.Code)
@@ -133,13 +133,13 @@ func TestHandleChatThreadsReturnsUserSessions(t *testing.T) {
 	}
 }
 
-func TestHandleChatThreadsEmptyIsArray(t *testing.T) {
+func TestHandleChatSessionsListEmptyIsArray(t *testing.T) {
 	s := newSessionTestServer(t)
 	rr := httptest.NewRecorder()
-	req := asUser(httptest.NewRequest(http.MethodGet, "/api/chat/threads", nil), "nobody")
-	s.handleChatThreads(rr, req)
+	req := asUser(httptest.NewRequest(http.MethodGet, "/api/chat/sessions", nil), "nobody")
+	s.handleChatSessionsList(rr, req)
 	if got := strings.TrimSpace(rr.Body.String()); got != "[]" {
-		t.Fatalf("empty threads = %q, want []", got)
+		t.Fatalf("empty sessions = %q, want []", got)
 	}
 }
 

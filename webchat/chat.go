@@ -311,6 +311,15 @@ func (s *server) handleChatClear(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"status":"ok"}`)
 }
 
+// handleChatThreads is a stub for GET /api/chat/threads (in-tab conversation
+// branching — a separate, not-yet-implemented feature). It returns the empty
+// shape the SPA's ThreadBar expects. The per-user persisted tab list lives at
+// GET /api/chat/sessions (handleChatSessionsList), not here.
+func (s *server) handleChatThreads(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"threads":[],"active_id":0}`)
+}
+
 // handleChatBranch is a stub for POST /api/chat/branch.
 func (s *server) handleChatBranch(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")

@@ -22,9 +22,11 @@ SPA changes described under "Frontend integration" live in that separate repo.
 
 ## Endpoints
 
-### `GET /api/chat/threads`
+### `GET /api/chat/sessions`
 
-Returns the user's sessions, most-recently-active first (bare JSON array):
+Returns the user's sessions, most-recently-active first (bare JSON array).
+(Distinct from `/api/chat/threads`, which is the unrelated, not-yet-implemented
+in-tab conversation-branch surface.)
 
 ```json
 [
@@ -95,7 +97,7 @@ rename, or pre-registering a tab before its first turn.
 
 ## Frontend integration (smoothgui repo)
 
-1. **On app load**, call `GET /api/chat/threads`. Render each entry as a
+1. **On app load**, call `GET /api/chat/sessions`. Render each entry as a
    restorable tab/thread in the sidebar. Clicking one re-opens that
    conversation by reusing its `id` as the `aimee_session_id` on subsequent
    `POST /api/chat/send` calls (aimee-server replays history for that id).
@@ -108,5 +110,16 @@ rename, or pre-registering a tab before its first turn.
    its own id so each persists independently.
 4. **Rename**: `POST /api/chat/session` with `{id, title}`.
 5. **Close/forget a tab**: `DELETE /api/chat/session?sid=<id>`.
-6. The thread endpoints (`/branch`, `/switch-thread`, `/rewind`) remain stubs;
-   full thread-tree management is out of scope for per-user tab restore.
+6. The thread endpoints (`/api/chat/threads`, `/branch`, `/switch-thread`,
+   `/rewind`) remain stubs; in-tab conversation-branch management is a separate
+   feature, out of scope for per-user tab restore.
+
+## Frontend status (aimee/frontend)
+
+The aimee web SPA (`frontend/src/pages/Chat.tsx`) integrates this as of the
+session-frontend change: on mount it fetches `GET /api/chat/sessions` and merges
+any server-side sessions the local `localStorage` cache is missing (restoring
+tabs after a crash or on a fresh device), and `closeTab` issues
+`DELETE /api/chat/session?sid=` so a closed tab does not reappear. `localStorage`
+is retained as a fast local cache (it also holds per-tab message history); the
+server is authoritative for *which* tabs exist.
