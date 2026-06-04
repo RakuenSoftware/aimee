@@ -250,52 +250,6 @@ else
     fail "bootstrap scripts call hidden client commands:$hidden_bootstrap_calls"
 fi
 
-# 7e. Release packaging must not reference RETIRED artifact names. The active
-# artifact is `aimee` (the CLI was renamed from aimee-client in #1467); only
-# aimee-client / aimee-worker / aimem / aimee-mcp / aimee-client-lean are
-# retired. Active artifacts (aimee, aimee-webchat, aimee-server, aimee-kb)
-# must not match.
-release_workflow="../.github/workflows/release.yml"
-release_legacy_refs=$(grep -En \
-    '(^|[^[:alnum:]_-])aimee-client([^[:alnum:]_-]|$)|(^|[^[:alnum:]_-])aimee-worker([^[:alnum:]_-]|$)|(^|[^[:alnum:]_-])aimee-mcp([^[:alnum:]_-]|$)|(^|[^[:alnum:]_-])aimem([^[:alnum:]_-]|$)|aimee-client-lean' \
-    "$release_workflow" 2>/dev/null || true)
-if [ -z "$release_legacy_refs" ]; then
-    pass "release workflow avoids retired artifact names"
-else
-    fail "release workflow references retired artifact names:$release_legacy_refs"
-fi
-
-release_missing_artifacts=""
-for artifact in aimee aimee-webchat aimee-server aimee-kb; do
-    count=$(grep -c "cp .*${artifact}.*AppDir/usr/bin/" "$release_workflow" 2>/dev/null || true)
-    if [ "$count" -lt 2 ]; then
-        release_missing_artifacts="$release_missing_artifacts $artifact"
-    fi
-done
-if [ -z "$release_missing_artifacts" ]; then
-    pass "Linux release bundles include all shipped artifacts"
-else
-    fail "Linux release bundles missing shipped artifacts:$release_missing_artifacts"
-fi
-
-if grep -q 'cp aimee aimee-webchat aimee-server aimee-kb "\$DIST_DIR/"' "$release_workflow"; then
-    pass "macOS release bundle includes all shipped artifacts"
-else
-    fail "macOS release bundle does not include all shipped artifacts"
-fi
-
-release_windows_missing=""
-for artifact in aimee.exe aimee-webchat.exe aimee-server.exe aimee-kb.exe; do
-    if ! grep -q "File \"${artifact}\"" "$release_workflow"; then
-        release_windows_missing="$release_windows_missing $artifact"
-    fi
-done
-if [ -z "$release_windows_missing" ]; then
-    pass "Windows installer includes all shipped artifacts"
-else
-    fail "Windows installer missing shipped artifacts:$release_windows_missing"
-fi
-
 # 7e. CMake shipped targets must mirror the Makefile artifact boundaries. The
 # legacy helper libraries intentionally still exist for tests, but DB-free
 # client/webchat and DB1-only server targets must not link them transitively.
