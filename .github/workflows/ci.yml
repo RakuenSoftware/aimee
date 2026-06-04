@@ -204,6 +204,16 @@ jobs:
           # The new remote transport must parse on Windows (Winsock path).
           .\build\aimee.exe --server http://127.0.0.1:9 version
 
+      - name: Thin-client smoke (selfcheck, Winsock transport)
+        shell: bash
+        run: |
+          # Beyond `version`: drive a real subcommand with the HTTP transport env
+          # set, so the Windows client exercises its Winsock connect path (a
+          # connection error is the expected selfcheck outcome; a usage/parse
+          # error is not). Mirrors the macOS/Linux thin-client smoke.
+          AIMEE_BIN='./build/aimee.exe' FORCE_MODE=selfcheck \
+            bash scripts/aimee-thin-client-smoke.sh
+
   windows-build:
     runs-on: windows-latest
     steps:
@@ -234,6 +244,16 @@ jobs:
           .\build\aimee.exe version
           # The new remote transport must parse on Windows (Winsock path).
           .\build\aimee.exe --server http://127.0.0.1:9 version
+
+      - name: Thin-client smoke (selfcheck, Winsock transport)
+        shell: bash
+        run: |
+          # Beyond `version`: drive a real subcommand with the HTTP transport env
+          # set, so the Windows client exercises its Winsock connect path (a
+          # connection error is the expected selfcheck outcome; a usage/parse
+          # error is not). Mirrors the macOS/Linux thin-client smoke.
+          AIMEE_BIN='./build/aimee.exe' FORCE_MODE=selfcheck \
+            bash scripts/aimee-thin-client-smoke.sh
 
   macos-build:
     runs-on: macos-latest
