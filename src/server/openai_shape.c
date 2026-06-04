@@ -263,6 +263,224 @@ int openai_parse_responses_request(const char *body, char *model, size_t model_n
    return 0;
 }
 
+/* ── Codex Responses request → OpenAI chat (full-parity ingress) ──────────────
+ *
+ * Codex drives aimee like any other model: it POSTs a Responses-API request with
+ * `instructions`, a structured `input` history (message / function_call /
+ * function_call_output items), and OpenAI `function` tools. This converts that
+ * into the OpenAI chat-completions shape so the request can run on the primary
+ * agent's provider and the model's tool calls can be relayed back to Codex. */
+
+/* Join all text parts of a Responses `content` array into one heap string.
+ * Handles both {type:input_text|output_text|text, text:…} parts and a bare
+ * string content. Returns "" (heap) when empty. NULL on OOM. */
+static char *responses_join_content_text(const cJSON *content)
+{
+   size_t cap = 64, len = 0;
+   char *out = malloc(cap);
+   if (!out)
+      return NULL;
+   out[0] = '\0';
+   if (cJSON_IsString(content))
+   {
+      free(out);
+      return strdup(content->valuestring ? content->valuestring : "");
+   }
+   if (cJSON_IsArray(content))
+   {
+      const cJSON *part;
+      cJSON_ArrayForEach(part, content)
+      {
+         const char *t = NULL;
+         if (cJSON_IsString(part))
+            t = part->valuestring;
+         else
+         {
+            const cJSON *tx = cJSON_GetObjectItemCaseSensitive(part, "text");
+            if (cJSON_IsString(tx))
+               t = tx->valuestring;
+         }
+         if (!t || !t[0])
+            continue;
+         size_t need = strlen(t) + 1;
+         while (len + need > cap)
+         {
+            size_t ncap = cap * 2;
+            char *tmp = realloc(out, ncap);
+            if (!tmp)
+            {
+               free(out);
+               return NULL;
+            }
+            out = tmp;
+            cap = ncap;
+         }
+         len += (size_t)snprintf(out + len, cap - len, "%s", t);
+      }
+   }
+   return out;
+}
+
+/* Stringify a function_call_output `output` field (Codex sends a string, but be
+ * tolerant of an object/array). Returns heap string; NULL on OOM. */
+static char *responses_output_to_string(const cJSON *output)
+{
+   if (!output)
+      return strdup("");
+   if (cJSON_IsString(output))
+      return strdup(output->valuestring ? output->valuestring : "");
+   char *s = cJSON_PrintUnformatted(output);
+   return s ? s : strdup("");
+}
+
+int openai_parse_responses_to_chat(const char *body, char *model, size_t model_n,
+                                   char **instructions_out, struct cJSON **messages_out,
+                                   struct cJSON **tools_out, int *stream_out)
+{
+   if (messages_out)
+      *messages_out = NULL;
+   if (tools_out)
+      *tools_out = NULL;
+   if (instructions_out)
+      *instructions_out = NULL;
+   if (stream_out)
+      *stream_out = 0;
+   if (!body || !messages_out)
+      return -1;
+
+   cJSON *root = cJSON_Parse(body);
+   if (!root)
+      return -1;
+
+   if (model && model_n)
+      parse_model(root, model, model_n);
+   if (stream_out)
+      *stream_out = parse_stream(root);
+
+   if (instructions_out)
+   {
+      const cJSON *ins = cJSON_GetObjectItemCaseSensitive(root, "instructions");
+      if (cJSON_IsString(ins) && ins->valuestring && ins->valuestring[0])
+         *instructions_out = strdup(ins->valuestring);
+   }
+
+   cJSON *messages = cJSON_CreateArray();
+   if (!messages)
+   {
+      cJSON_Delete(root);
+      free(instructions_out ? *instructions_out : NULL);
+      if (instructions_out)
+         *instructions_out = NULL;
+      return -1;
+   }
+
+   const cJSON *input = cJSON_GetObjectItemCaseSensitive(root, "input");
+   const cJSON *item;
+   cJSON_ArrayForEach(item, input)
+   {
+      if (cJSON_IsString(item))
+      {
+         cJSON *m = cJSON_CreateObject();
+         cJSON_AddStringToObject(m, "role", "user");
+         cJSON_AddStringToObject(m, "content", item->valuestring ? item->valuestring : "");
+         cJSON_AddItemToArray(messages, m);
+         continue;
+      }
+      const cJSON *typ = cJSON_GetObjectItemCaseSensitive(item, "type");
+      const char *type = cJSON_IsString(typ) ? typ->valuestring : "message";
+
+      if (strcmp(type, "function_call") == 0)
+      {
+         const cJSON *name = cJSON_GetObjectItemCaseSensitive(item, "name");
+         const cJSON *args = cJSON_GetObjectItemCaseSensitive(item, "arguments");
+         const cJSON *cid = cJSON_GetObjectItemCaseSensitive(item, "call_id");
+         cJSON *m = cJSON_CreateObject();
+         cJSON_AddStringToObject(m, "role", "assistant");
+         cJSON_AddNullToObject(m, "content");
+         cJSON *tcs = cJSON_AddArrayToObject(m, "tool_calls");
+         cJSON *tc = cJSON_CreateObject();
+         cJSON_AddStringToObject(tc, "id", cJSON_IsString(cid) ? cid->valuestring : "");
+         cJSON_AddStringToObject(tc, "type", "function");
+         cJSON *fn = cJSON_AddObjectToObject(tc, "function");
+         cJSON_AddStringToObject(fn, "name", cJSON_IsString(name) ? name->valuestring : "");
+         cJSON_AddStringToObject(fn, "arguments", cJSON_IsString(args) ? args->valuestring : "{}");
+         cJSON_AddItemToArray(tcs, tc);
+         cJSON_AddItemToArray(messages, m);
+         continue;
+      }
+      if (strcmp(type, "function_call_output") == 0)
+      {
+         const cJSON *cid = cJSON_GetObjectItemCaseSensitive(item, "call_id");
+         const cJSON *out = cJSON_GetObjectItemCaseSensitive(item, "output");
+         char *text = responses_output_to_string(out);
+         cJSON *m = cJSON_CreateObject();
+         cJSON_AddStringToObject(m, "role", "tool");
+         cJSON_AddStringToObject(m, "tool_call_id", cJSON_IsString(cid) ? cid->valuestring : "");
+         cJSON_AddStringToObject(m, "content", text ? text : "");
+         free(text);
+         cJSON_AddItemToArray(messages, m);
+         continue;
+      }
+      if (strcmp(type, "message") == 0)
+      {
+         const cJSON *roleItem = cJSON_GetObjectItemCaseSensitive(item, "role");
+         const char *role = cJSON_IsString(roleItem) ? roleItem->valuestring : "user";
+         /* OpenAI chat has no "developer" role; fold it into system. */
+         if (strcmp(role, "developer") == 0)
+            role = "system";
+         const cJSON *content = cJSON_GetObjectItemCaseSensitive(item, "content");
+         char *text = responses_join_content_text(content);
+         cJSON *m = cJSON_CreateObject();
+         cJSON_AddStringToObject(m, "role", role);
+         cJSON_AddStringToObject(m, "content", text ? text : "");
+         free(text);
+         cJSON_AddItemToArray(messages, m);
+         continue;
+      }
+      /* reasoning / item_reference / unknown item types: skip. */
+   }
+
+   /* Tools: keep only OpenAI `function` tools, reshaped into chat form
+    * {type:function, function:{name,description,parameters}}. Codex's
+    * namespace/web_search/image_generation tool *types* are dropped. */
+   cJSON *tools = NULL;
+   const cJSON *in_tools = cJSON_GetObjectItemCaseSensitive(root, "tools");
+   if (cJSON_IsArray(in_tools))
+   {
+      const cJSON *t;
+      cJSON_ArrayForEach(t, in_tools)
+      {
+         const cJSON *tt = cJSON_GetObjectItemCaseSensitive(t, "type");
+         if (!cJSON_IsString(tt) || strcmp(tt->valuestring, "function") != 0)
+            continue;
+         const cJSON *name = cJSON_GetObjectItemCaseSensitive(t, "name");
+         if (!cJSON_IsString(name))
+            continue;
+         if (!tools)
+            tools = cJSON_CreateArray();
+         cJSON *ct = cJSON_CreateObject();
+         cJSON_AddStringToObject(ct, "type", "function");
+         cJSON *fn = cJSON_AddObjectToObject(ct, "function");
+         cJSON_AddStringToObject(fn, "name", name->valuestring);
+         const cJSON *desc = cJSON_GetObjectItemCaseSensitive(t, "description");
+         if (cJSON_IsString(desc))
+            cJSON_AddStringToObject(fn, "description", desc->valuestring);
+         const cJSON *params = cJSON_GetObjectItemCaseSensitive(t, "parameters");
+         if (params)
+            cJSON_AddItemToObject(fn, "parameters", cJSON_Duplicate(params, 1));
+         cJSON_AddItemToArray(tools, ct);
+      }
+   }
+
+   cJSON_Delete(root);
+   *messages_out = messages;
+   if (tools_out)
+      *tools_out = tools;
+   else
+      cJSON_Delete(tools);
+   return 0;
+}
+
 /* ── optional sampling-field readers ─────────────────────────────────────── */
 
 double openai_request_double(const char *body, const char *field, double dflt, double hi)
@@ -886,6 +1104,187 @@ int openai_format_responses_completed(const char *id, const char *model, const c
       return -1;
    }
    cJSON_AddItemToObject(root, "response", obj);
+   return emit_json(root, resp, cap);
+}
+
+/* ── Responses API output items (Codex parity) ──────────────────────────────
+ *
+ * Codex's Responses-API parser requires an *active output item* to exist before
+ * any text/arguments delta — a bare created→delta→completed stream is rejected
+ * ("OutputTextDelta without active item") and the text is dropped. These helpers
+ * build the message / function_call output items and the output_item.added/.done
+ * and function_call_arguments.delta/.done events that wrap a turn. */
+
+cJSON *openai_responses_message_item(const char *item_id, const char *text, const char *status)
+{
+   cJSON *item = cJSON_CreateObject();
+   if (!item)
+      return NULL;
+   cJSON_AddStringToObject(item, "id", item_id ? item_id : "");
+   cJSON_AddStringToObject(item, "type", "message");
+   cJSON_AddStringToObject(item, "status", status ? status : "completed");
+   cJSON_AddStringToObject(item, "role", "assistant");
+   cJSON *content = cJSON_AddArrayToObject(item, "content");
+   if (content && text && text[0])
+   {
+      cJSON *part = cJSON_CreateObject();
+      if (part)
+      {
+         cJSON_AddStringToObject(part, "type", "output_text");
+         cJSON_AddStringToObject(part, "text", text);
+         cJSON_AddItemToObject(part, "annotations", cJSON_CreateArray());
+         cJSON_AddItemToArray(content, part);
+      }
+   }
+   return item;
+}
+
+cJSON *openai_responses_function_call_item(const char *item_id, const char *call_id,
+                                           const char *name, const char *arguments,
+                                           const char *status)
+{
+   cJSON *item = cJSON_CreateObject();
+   if (!item)
+      return NULL;
+   cJSON_AddStringToObject(item, "id", item_id ? item_id : "");
+   cJSON_AddStringToObject(item, "type", "function_call");
+   cJSON_AddStringToObject(item, "status", status ? status : "completed");
+   cJSON_AddStringToObject(item, "name", name ? name : "");
+   cJSON_AddStringToObject(item, "call_id", call_id ? call_id : "");
+   cJSON_AddStringToObject(item, "arguments", arguments ? arguments : "");
+   return item;
+}
+
+/* Wrap a (consumed) item object in a response.output_item.added/.done event. */
+static int emit_output_item_event(const char *type, int output_index, cJSON *item, char *resp,
+                                  int cap)
+{
+   if (!item)
+      return -1;
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+   {
+      cJSON_Delete(item);
+      return -1;
+   }
+   cJSON_AddStringToObject(root, "type", type);
+   cJSON_AddNumberToObject(root, "output_index", (double)output_index);
+   cJSON_AddItemToObject(root, "item", item);
+   return emit_json(root, resp, cap);
+}
+
+int openai_format_responses_msg_item_added(const char *item_id, int output_index, char *resp,
+                                           int cap)
+{
+   if (!resp || cap <= 0)
+      return -1;
+   return emit_output_item_event("response.output_item.added", output_index,
+                                 openai_responses_message_item(item_id, "", "in_progress"), resp,
+                                 cap);
+}
+
+int openai_format_responses_msg_item_done(const char *item_id, const char *text, int output_index,
+                                          char *resp, int cap)
+{
+   if (!resp || cap <= 0)
+      return -1;
+   return emit_output_item_event("response.output_item.done", output_index,
+                                 openai_responses_message_item(item_id, text, "completed"), resp,
+                                 cap);
+}
+
+int openai_format_responses_fc_item_added(const char *item_id, const char *call_id,
+                                          const char *name, int output_index, char *resp, int cap)
+{
+   if (!resp || cap <= 0)
+      return -1;
+   return emit_output_item_event(
+       "response.output_item.added", output_index,
+       openai_responses_function_call_item(item_id, call_id, name, "", "in_progress"), resp, cap);
+}
+
+int openai_format_responses_fc_item_done(const char *item_id, const char *call_id, const char *name,
+                                         const char *arguments, int output_index, char *resp,
+                                         int cap)
+{
+   if (!resp || cap <= 0)
+      return -1;
+   return emit_output_item_event(
+       "response.output_item.done", output_index,
+       openai_responses_function_call_item(item_id, call_id, name, arguments, "completed"), resp,
+       cap);
+}
+
+int openai_format_responses_fc_args_delta(const char *item_id, int output_index, const char *delta,
+                                          char *resp, int cap)
+{
+   if (!resp || cap <= 0)
+      return -1;
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+      return -1;
+   cJSON_AddStringToObject(root, "type", "response.function_call_arguments.delta");
+   cJSON_AddStringToObject(root, "item_id", item_id ? item_id : "");
+   cJSON_AddNumberToObject(root, "output_index", (double)output_index);
+   cJSON_AddStringToObject(root, "delta", delta ? delta : "");
+   return emit_json(root, resp, cap);
+}
+
+int openai_format_responses_fc_args_done(const char *item_id, int output_index,
+                                         const char *arguments, char *resp, int cap)
+{
+   if (!resp || cap <= 0)
+      return -1;
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+      return -1;
+   cJSON_AddStringToObject(root, "type", "response.function_call_arguments.done");
+   cJSON_AddStringToObject(root, "item_id", item_id ? item_id : "");
+   cJSON_AddNumberToObject(root, "output_index", (double)output_index);
+   cJSON_AddStringToObject(root, "arguments", arguments ? arguments : "");
+   return emit_json(root, resp, cap);
+}
+
+/* response.completed carrying a caller-built output array (consumed). Used for
+ * function_call turns where `output` holds function_call items rather than a
+ * message. */
+int openai_format_responses_completed_items(const char *id, const char *model, long created,
+                                            cJSON *output_arr, int prompt_tokens,
+                                            int completion_tokens, char *resp, int cap)
+{
+   if (!resp || cap <= 0)
+   {
+      cJSON_Delete(output_arr);
+      return -1;
+   }
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+   {
+      cJSON_Delete(output_arr);
+      return -1;
+   }
+   cJSON_AddStringToObject(root, "type", "response.completed");
+   cJSON *r = cJSON_CreateObject();
+   if (!r)
+   {
+      cJSON_Delete(output_arr);
+      cJSON_Delete(root);
+      return -1;
+   }
+   cJSON_AddItemToObject(root, "response", r);
+   cJSON_AddStringToObject(r, "id", id ? id : "");
+   cJSON_AddStringToObject(r, "object", "response");
+   cJSON_AddNumberToObject(r, "created_at", (double)created);
+   cJSON_AddStringToObject(r, "model", model ? model : "");
+   cJSON_AddStringToObject(r, "status", "completed");
+   cJSON_AddItemToObject(r, "output", output_arr ? output_arr : cJSON_CreateArray());
+   cJSON *usage = cJSON_AddObjectToObject(r, "usage");
+   if (usage)
+   {
+      cJSON_AddNumberToObject(usage, "input_tokens", (double)prompt_tokens);
+      cJSON_AddNumberToObject(usage, "output_tokens", (double)completion_tokens);
+      cJSON_AddNumberToObject(usage, "total_tokens", (double)(prompt_tokens + completion_tokens));
+   }
    return emit_json(root, resp, cap);
 }
 

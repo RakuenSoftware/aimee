@@ -1,6 +1,7 @@
 /* test_openai_shape.c: unit tests for the OpenAI-compatible JSON shaping
  * helpers (pure — no sockets, no network, no agent execution). */
 #include "openai_shape.h"
+#include "cJSON.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -336,6 +337,124 @@ int main(void)
       assert(strstr(resp, "\"type\":\"output_text\""));
       assert(strstr(resp, "\"text\":\"the answer\""));
       assert(strstr(resp, "\"total_tokens\":10"));
+   }
+
+   /* --- Codex parity: message output-item events --- */
+   {
+      int len = openai_format_responses_msg_item_added("resp_9-msg", 0, resp, sizeof(resp));
+      assert(len > 0);
+      assert(strstr(resp, "\"type\":\"response.output_item.added\""));
+      assert(strstr(resp, "\"type\":\"message\""));
+      assert(strstr(resp, "\"status\":\"in_progress\""));
+      assert(strstr(resp, "\"role\":\"assistant\""));
+
+      len =
+          openai_format_responses_msg_item_done("resp_9-msg", "hello world", 0, resp, sizeof(resp));
+      assert(len > 0);
+      assert(strstr(resp, "\"type\":\"response.output_item.done\""));
+      assert(strstr(resp, "\"status\":\"completed\""));
+      assert(strstr(resp, "\"type\":\"output_text\""));
+      assert(strstr(resp, "\"text\":\"hello world\""));
+   }
+
+   /* --- Codex parity: function_call output-item + argument events --- */
+   {
+      int len = openai_format_responses_fc_item_added("resp_9-fc-0", "call_42", "exec_command", 0,
+                                                      resp, sizeof(resp));
+      assert(len > 0);
+      assert(strstr(resp, "\"type\":\"response.output_item.added\""));
+      assert(strstr(resp, "\"type\":\"function_call\""));
+      assert(strstr(resp, "\"call_id\":\"call_42\""));
+      assert(strstr(resp, "\"name\":\"exec_command\""));
+
+      len = openai_format_responses_fc_args_delta("resp_9-fc-0", 0, "{\"cmd\":\"ls\"}", resp,
+                                                  sizeof(resp));
+      assert(len > 0);
+      assert(strstr(resp, "\"type\":\"response.function_call_arguments.delta\""));
+      assert(strstr(resp, "\"item_id\":\"resp_9-fc-0\""));
+
+      len = openai_format_responses_fc_args_done("resp_9-fc-0", 0, "{\"cmd\":\"ls\"}", resp,
+                                                 sizeof(resp));
+      assert(len > 0);
+      assert(strstr(resp, "\"type\":\"response.function_call_arguments.done\""));
+
+      len = openai_format_responses_fc_item_done("resp_9-fc-0", "call_42", "exec_command",
+                                                 "{\"cmd\":\"ls\"}", 0, resp, sizeof(resp));
+      assert(len > 0);
+      assert(strstr(resp, "\"type\":\"response.output_item.done\""));
+      assert(strstr(resp, "\"type\":\"function_call\""));
+      assert(strstr(resp, "\"arguments\":\"{\\\"cmd\\\":\\\"ls\\\"}\""));
+   }
+
+   /* --- Codex parity: completed with a function_call output item --- */
+   {
+      struct cJSON *out = cJSON_CreateArray();
+      cJSON_AddItemToArray((cJSON *)out, openai_responses_function_call_item(
+                                             "resp_9-fc-0", "call_42", "exec_command",
+                                             "{\"cmd\":\"ls\"}", "completed"));
+      int len = openai_format_responses_completed_items("resp_9", "aimee", 1700000000, out, 5, 2,
+                                                        resp, sizeof(resp));
+      assert(len > 0);
+      assert(strstr(resp, "\"type\":\"response.completed\""));
+      assert(strstr(resp, "\"type\":\"function_call\""));
+      assert(strstr(resp, "\"call_id\":\"call_42\""));
+      assert(strstr(resp, "\"total_tokens\":7"));
+   }
+
+   /* --- Codex parity: Responses request -> OpenAI chat conversion --- */
+   {
+      const char *body =
+          "{\"model\":\"aimee\",\"instructions\":\"be helpful\",\"stream\":true,\"input\":["
+          "{\"type\":\"message\",\"role\":\"developer\",\"content\":[{\"type\":\"input_text\","
+          "\"text\":\"dev note\"}]},"
+          "{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":"
+          "\"do it\"}]},"
+          "{\"type\":\"function_call\",\"name\":\"exec_command\",\"arguments\":\"{\\\"cmd\\\":"
+          "\\\"ls\\\"}\",\"call_id\":\"call_1\"},"
+          "{\"type\":\"function_call_output\",\"call_id\":\"call_1\",\"output\":\"file.txt\"}"
+          "],\"tools\":[{\"type\":\"function\",\"name\":\"exec_command\",\"description\":\"run\","
+          "\"parameters\":{\"type\":\"object\"}},{\"type\":\"web_search\"}]}";
+      char model[64] = "";
+      char *instructions = NULL;
+      struct cJSON *messages = NULL;
+      struct cJSON *tools = NULL;
+      int stream = -1;
+      int rc = openai_parse_responses_to_chat(body, model, sizeof(model), &instructions, &messages,
+                                              &tools, &stream);
+      assert(rc == 0);
+      assert(strcmp(model, "aimee") == 0);
+      assert(stream == 1);
+      assert(instructions && strcmp(instructions, "be helpful") == 0);
+
+      assert(cJSON_GetArraySize((cJSON *)messages) == 4);
+      /* developer -> system */
+      cJSON *m0 = cJSON_GetArrayItem((cJSON *)messages, 0);
+      assert(strcmp(cJSON_GetObjectItem(m0, "role")->valuestring, "system") == 0);
+      assert(strcmp(cJSON_GetObjectItem(m0, "content")->valuestring, "dev note") == 0);
+      /* function_call -> assistant tool_calls */
+      cJSON *m2 = cJSON_GetArrayItem((cJSON *)messages, 2);
+      assert(strcmp(cJSON_GetObjectItem(m2, "role")->valuestring, "assistant") == 0);
+      cJSON *tcs = cJSON_GetObjectItem(m2, "tool_calls");
+      assert(tcs && cJSON_GetArraySize(tcs) == 1);
+      cJSON *tc = cJSON_GetArrayItem(tcs, 0);
+      assert(strcmp(cJSON_GetObjectItem(tc, "id")->valuestring, "call_1") == 0);
+      assert(strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(tc, "function"), "name")->valuestring,
+                    "exec_command") == 0);
+      /* function_call_output -> role:tool */
+      cJSON *m3 = cJSON_GetArrayItem((cJSON *)messages, 3);
+      assert(strcmp(cJSON_GetObjectItem(m3, "role")->valuestring, "tool") == 0);
+      assert(strcmp(cJSON_GetObjectItem(m3, "tool_call_id")->valuestring, "call_1") == 0);
+      assert(strcmp(cJSON_GetObjectItem(m3, "content")->valuestring, "file.txt") == 0);
+      /* tools: only the `function` tool kept, reshaped to chat form; web_search dropped */
+      assert(tools && cJSON_GetArraySize((cJSON *)tools) == 1);
+      cJSON *t0 = cJSON_GetArrayItem((cJSON *)tools, 0);
+      assert(strcmp(cJSON_GetObjectItem(t0, "type")->valuestring, "function") == 0);
+      assert(strcmp(cJSON_GetObjectItem(cJSON_GetObjectItem(t0, "function"), "name")->valuestring,
+                    "exec_command") == 0);
+
+      free(instructions);
+      cJSON_Delete((cJSON *)messages);
+      cJSON_Delete((cJSON *)tools);
    }
 
    printf("ok\n");

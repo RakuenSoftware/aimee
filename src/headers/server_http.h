@@ -171,6 +171,15 @@ extern "C"
    typedef int (*server_http_models_fn)(char ids[][SERVER_HTTP_MODEL_ID_MAX], int max);
    void server_http_set_models_provider(server_http_models_fn fn);
 
+   /* Raw GET /v1/models provider: writes the entire JSON response body into
+    * resp[cap] and returns its length (or <0 to fall back to the id-list shape
+    * above). Lets a provider emit a richer schema than the OpenAI list — e.g.
+    * the Codex CLI's `{models:[…]}` model-discovery shape — without pulling the
+    * agent/config dependency into this unit. Registered by openai_chat_register;
+    * when set it takes precedence over the id-list provider. */
+   typedef int (*server_http_models_raw_fn)(char *resp, int cap);
+   void server_http_set_models_raw_provider(server_http_models_raw_fn fn);
+
    /* Register the inference-backed chat/completions handlers (defined in
     * server/openai_chat.c). Called once during server startup. */
    void openai_chat_register(void);
