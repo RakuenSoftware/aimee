@@ -1007,6 +1007,91 @@ static void ensure_claude_code_commands(const char *home)
                    0644);
 }
 
+/* Normalize an aimee server URL into an Anthropic base URL: Claude Code appends
+ * "/v1/messages", so we want the origin without a trailing "/" or "/v1".
+ * Writes into out (caller-sized). */
+static void normalize_anthropic_base(const char *server_url, char *out, size_t out_len)
+{
+   size_t n;
+   snprintf(out, out_len, "%s", server_url ? server_url : "");
+   n = strlen(out);
+   while (n > 0 && out[n - 1] == '/')
+      out[--n] = '\0';
+   if (n >= 3 && strcmp(out + n - 3, "/v1") == 0)
+      out[n - 3] = '\0';
+}
+
+/* Enable or disable routing Claude Code through aimee's Anthropic Messages
+ * ingress by writing (enable) or removing (disable) ANTHROPIC_BASE_URL and
+ * ANTHROPIC_AUTH_TOKEN under the "env" key of ~/.claude/settings.json.
+ *
+ * Enabling reroutes ALL of the operator's Claude Code traffic — including any
+ * live session — off Anthropic to aimee's primary model, so it is only ever
+ * invoked explicitly via `aimee claude-proxy enable`. server_url is the
+ * aimee-server origin (required on enable); token is the server bearer (may be
+ * NULL/empty → a local placeholder is written, since Claude Code always sends
+ * an auth value). Returns 0 on success, -1 on error. */
+int claude_code_proxy_configure(const char *server_url, const char *token, int enable)
+{
+   const char *home = getenv("HOME");
+   char settings_path[MAX_PATH_LEN];
+   cJSON *root, *env;
+   char *json;
+   int rc = -1;
+
+   if (!home || !home[0])
+      return -1;
+   if (enable && (!server_url || !server_url[0]))
+      return -1;
+
+   snprintf(settings_path, sizeof(settings_path), "%s/.claude/settings.json", home);
+   root = read_json_file(settings_path);
+   if (!cJSON_IsObject(root))
+   {
+      if (root)
+         cJSON_Delete(root);
+      if (!enable)
+         return 0; /* disabling a never-enabled proxy is a no-op success */
+      root = cJSON_CreateObject();
+      if (!root)
+         return -1;
+   }
+
+   env = cJSON_GetObjectItemCaseSensitive(root, "env");
+   if (!cJSON_IsObject(env))
+   {
+      if (env)
+         cJSON_DeleteItemFromObjectCaseSensitive(root, "env");
+      if (!enable)
+      {
+         cJSON_Delete(root); /* nothing to remove */
+         return 0;
+      }
+      env = cJSON_AddObjectToObject(root, "env");
+   }
+
+   cJSON_DeleteItemFromObjectCaseSensitive(env, "ANTHROPIC_BASE_URL");
+   cJSON_DeleteItemFromObjectCaseSensitive(env, "ANTHROPIC_AUTH_TOKEN");
+   if (enable)
+   {
+      char base[MAX_PATH_LEN];
+      normalize_anthropic_base(server_url, base, sizeof(base));
+      cJSON_AddStringToObject(env, "ANTHROPIC_BASE_URL", base);
+      cJSON_AddStringToObject(env, "ANTHROPIC_AUTH_TOKEN",
+                              (token && token[0]) ? token : "aimee-local");
+   }
+
+   json = cJSON_Print(root);
+   if (json)
+   {
+      write_text_file(settings_path, json, 0600);
+      free(json);
+      rc = 0;
+   }
+   cJSON_Delete(root);
+   return rc;
+}
+
 /* Ensure the "env" key in settings.json has required environment variables.
  * Currently sets CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR=0 so that cd
  * commands persist across Bash calls, enabling worktree workflows. */

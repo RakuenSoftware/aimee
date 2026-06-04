@@ -1,0 +1,92 @@
+/* anthropic_ingress.h: inbound Anthropic Messages API translation.
+ *
+ * aimee-server exposes POST /v1/messages so Claude Code (and any Anthropic
+ * Messages API client) can drive aimee's configured primary model. The proxy
+ * is a stateless wire-format translator: it does NOT route through aimee's
+ * agent loop, memory, or toolset. The client owns its system prompt, message
+ * history, and tools, and tool execution stays client-side; aimee only swaps
+ * the model transport and re-encodes the wire format.
+ *
+ * This module holds the pure (cJSON-only) translation between the Anthropic
+ * Messages wire format and the OpenAI chat/completions format aimee's
+ * provider drivers speak. The anthropic provider driver is a near-passthrough
+ * (the inbound body is already Anthropic-shaped); the OpenAI-family drivers
+ * (minimax, mistral, mimo, openai, ...) need the conversions below. */
+#ifndef DEC_ANTHROPIC_INGRESS_H
+#define DEC_ANTHROPIC_INGRESS_H 1
+
+#include "aimee.h"          /* size macros consumed transitively by agent_types.h */
+#include "agent_protocol.h" /* parsed_response_t */
+
+struct cJSON;
+
+/* Flatten an Anthropic request's "system" field — which may be a plain string
+ * or an array of {type:"text", text:...} blocks — into a single newly
+ * malloc'd string (text blocks joined with "\n\n"). Returns NULL when no
+ * system prompt is present or it is empty. Caller frees. */
+char *anthropic_system_to_text(const struct cJSON *req);
+
+/* Convert an Anthropic "messages" array into an OpenAI chat/completions
+ * "messages" array (new cJSON array, caller owns via cJSON_Delete). Content
+ * blocks map as:
+ *   text         -> assistant/user text
+ *   image        -> OpenAI image_url part (base64 data URL)
+ *   tool_use     -> assistant message tool_calls[] entry (arguments stringified)
+ *   tool_result  -> a {role:"tool", tool_call_id, content} message
+ * When system_text is non-NULL/non-empty it is prepended as a system message.
+ * Returns NULL on malformed input (messages not an array). */
+struct cJSON *anthropic_messages_to_openai(const struct cJSON *messages, const char *system_text);
+
+/* Convert an Anthropic "tools" array ([{name,description,input_schema}]) into
+ * an OpenAI tools array ([{type:"function",function:{name,description,
+ * parameters}}]). Returns a new array (caller owns), or NULL when there are no
+ * usable tools. */
+struct cJSON *anthropic_tools_to_openai(const struct cJSON *anthropic_tools);
+
+/* Build a non-streaming Anthropic Messages API response object from a parsed
+ * provider reply. resp_id is the "msg_..." id; model echoes the request's
+ * model string. Produces:
+ *   {id,type:"message",role:"assistant",model,
+ *    content:[{type:"text",...}|{type:"tool_use",...}],
+ *    stop_reason,stop_sequence:null,usage:{input_tokens,output_tokens}}
+ * stop_reason is "tool_use" when the reply contains tool calls, else
+ * "end_turn". Caller owns the returned object. */
+struct cJSON *anthropic_response_from_parsed(const char *resp_id, const char *model,
+                                             const parsed_response_t *parsed);
+
+/* --- Streaming translation (OpenAI chat chunks -> Anthropic Messages SSE) ---
+ *
+ * Claude Code always streams /v1/messages. The translator consumes the
+ * provider's OpenAI-style `chat.completion.chunk` `data:` payloads and emits
+ * the Anthropic SSE event sequence:
+ *   message_start
+ *   (content_block_start, content_block_delta*, content_block_stop)*  // text + tool_use
+ *   message_delta   (stop_reason + output usage)
+ *   message_stop
+ * The emit callback matches server_http.c's sse_event_emit: it receives the
+ * event name and the JSON data payload; the caller owns framing/transport. The
+ * translator is pure (no I/O) so it is unit-testable with synthetic chunks. */
+typedef void (*anthropic_sse_emit_fn)(void *ctx, const char *event, const char *data_json);
+
+typedef struct anthropic_stream_xlate anthropic_stream_xlate_t;
+
+/* Begin a stream: allocates state and emits message_start immediately (so the
+ * client sees a first event without waiting for the model). input_tokens is the
+ * prompt-token estimate for message_start.usage; pass 0 if unknown. Returns
+ * NULL on allocation failure. */
+anthropic_stream_xlate_t *anthropic_stream_begin(const char *msg_id, const char *model,
+                                                 int input_tokens, anthropic_sse_emit_fn emit,
+                                                 void *ctx);
+
+/* Feed one provider SSE `data:` payload (the text after "data: "). Accepts the
+ * OpenAI chat.completion.chunk shape; "[DONE]", NULL, or unparseable lines are
+ * ignored (terminal closure happens in anthropic_stream_finish). */
+void anthropic_stream_feed_openai(anthropic_stream_xlate_t *st, const char *data_json);
+
+/* Close any open content block and emit message_delta + message_stop. */
+void anthropic_stream_finish(anthropic_stream_xlate_t *st);
+
+/* Free translator state (does not emit). */
+void anthropic_stream_free(anthropic_stream_xlate_t *st);
+
+#endif /* DEC_ANTHROPIC_INGRESS_H */

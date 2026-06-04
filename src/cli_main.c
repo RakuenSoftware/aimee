@@ -1614,6 +1614,59 @@ static char *acp_dispatch_prompt(const char *content, const char *session_id)
                           (void *)session_id);
 }
 
+/* `aimee claude-proxy enable|disable [server_url] [token]` — opt-in routing of
+ * Claude Code through aimee's Anthropic Messages ingress (POST /v1/messages).
+ * Off by default; enabling rewrites ~/.claude/settings.json env to reroute ALL
+ * Claude Code traffic (including live sessions) to aimee's primary model.
+ * URL/token come from positional args, else AIMEE_SERVER_URL /
+ * AIMEE_SERVER_TOKEN. Runs locally — no server round-trip. */
+static int cli_claude_proxy(int argc, char **argv)
+{
+   const char *action = (argc >= 1) ? argv[0] : "";
+   int enable;
+
+   if (strcmp(action, "enable") == 0)
+      enable = 1;
+   else if (strcmp(action, "disable") == 0)
+      enable = 0;
+   else
+   {
+      fprintf(stderr, "Usage: aimee claude-proxy enable|disable [server_url] [token]\n");
+      return 2;
+   }
+
+   if (!enable)
+   {
+      if (claude_code_proxy_configure(NULL, NULL, 0) != 0)
+      {
+         fprintf(stderr, "claude-proxy: failed to update ~/.claude/settings.json\n");
+         return 1;
+      }
+      fprintf(stderr, "claude-proxy: disabled — Claude Code restored to its default endpoint.\n");
+      return 0;
+   }
+
+   const char *url = (argc >= 2) ? argv[1] : getenv("AIMEE_SERVER_URL");
+   const char *token = (argc >= 3) ? argv[2] : getenv("AIMEE_SERVER_TOKEN");
+   if (!url || !url[0])
+   {
+      fprintf(stderr, "claude-proxy: no server URL — pass one or set AIMEE_SERVER_URL\n"
+                      "  e.g. aimee claude-proxy enable http://127.0.0.1:8910 <bearer>\n");
+      return 2;
+   }
+   if (claude_code_proxy_configure(url, token, 1) != 0)
+   {
+      fprintf(stderr, "claude-proxy: failed to update ~/.claude/settings.json\n");
+      return 1;
+   }
+   fprintf(stderr,
+           "claude-proxy: enabled — Claude Code now routes through aimee (%s) to your primary "
+           "agent.\n  This reroutes ALL Claude Code sessions, including running ones. "
+           "Run 'aimee claude-proxy disable' to revert.\n",
+           url);
+   return 0;
+}
+
 int main(int argc, char **argv)
 {
    /* Ignore SIGPIPE so write() to a dead aimee-server socket returns EPIPE
@@ -1746,6 +1799,8 @@ int main(int argc, char **argv)
       return cli_clean(sub_argc, sub_argv);
    if (strcmp(cmd, "profile") == 0)
       return cmd_profile_run(sub_argc, sub_argv);
+   if (strcmp(cmd, "claude-proxy") == 0)
+      return cli_claude_proxy(sub_argc, sub_argv);
 #ifndef _WIN32
    /* manuscript mode talks to the server over the Unix-domain /v1 socket
     * (http_uds_client, AF_UNIX), which the Windows client does not build. */
