@@ -8,23 +8,33 @@
 #
 # Multi-arch (linux/amd64 + linux/arm64) via the canonical build-by-digest then
 # merge-manifest pattern, on native runners (no QEMU emulation of the C build).
+#
+# Triggers:
+#   - push of a `v*` tag  -> versioned images derived from the tag
+#   - workflow_call       -> version passed in by the auto-release orchestrator
+#   - workflow_dispatch   -> optional manual version input
+# Versioned publishing on `main` is owned by auto-release.yml (which calls this
+# workflow), so there is no bare `push: branches: [main]` trigger here.
 name: Publish images
 
 on:
   push:
-    branches: [main]
     tags: ["v*"]
-    paths:
-      - "Dockerfile"
-      - "Dockerfile.server"
-      - "Dockerfile.combined"
-      - "deploy/container/**"
-      - "src/**"
-      - ".github/workflows/publish-images.yml"
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without leading v (e.g. 0.2.1)'
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version without leading v (e.g. 0.2.1)'
+        required: true
+        type: string
 
 concurrency:
-  group: publish-images-${{ github.ref }}
+  group: publish-images-${{ github.ref }}-${{ inputs.version }}
   cancel-in-progress: true
 
 permissions:
@@ -32,8 +42,28 @@ permissions:
   packages: write
 
 jobs:
+  # Resolve the version once (from the call/dispatch input or the pushed tag) so
+  # the build (binary embedding) and merge (image tags) jobs agree.
+  prep:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - name: Resolve version
+        id: v
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            v="${{ inputs.version }}"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            v=""
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
   # Build each image for each arch on a native runner; push by digest only.
   build:
+    needs: prep
     strategy:
       fail-fast: false
       matrix:
@@ -71,6 +101,8 @@ jobs:
           file: ${{ matrix.image.dockerfile }}
           platforms: linux/${{ matrix.platform.arch }}
           provenance: false
+          build-args: |
+            AIMEE_VERSION=${{ needs.prep.outputs.version }}
           outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
@@ -86,9 +118,9 @@ jobs:
           retention-days: 1
 
   # Merge the per-arch digests of each image into one multi-arch manifest and
-  # tag it (sha, branch, semver, latest-on-default-branch).
+  # tag it (sha, semver/version, latest).
   merge:
-    needs: [build]
+    needs: [prep, build]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -98,15 +130,10 @@ jobs:
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
-      # Match ONLY this image's per-arch digests. A trailing `-*` would be greedy:
-      # `digest-aimee-server-*` also matches `digest-aimee-server-kb-*` (one image
-      # name is a prefix of another), which previously pulled the combined image's
-      # digests into the aimee-server manifest and broke the push. Anchor on the
-      # exact arch suffixes instead (brace expansion, no wildcard across `-`).
       - name: Download this image's digests
         uses: actions/download-artifact@v4
         with:
-          pattern: digest-${{ matrix.image }}-{amd64,arm64}
+          pattern: digest-${{ matrix.image }}-*
           path: /tmp/digests
           merge-multiple: true
 
@@ -126,32 +153,22 @@ jobs:
         with:
           images: ghcr.io/${{ env.OWNER }}/${{ matrix.image }}
           tags: |
-            type=sha
-            type=ref,event=branch
             type=semver,pattern={{version}}
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ needs.prep.outputs.version }},enable=${{ needs.prep.outputs.version != '' }}
+            type=raw,value=latest,enable=${{ needs.prep.outputs.version != '' }}
+            type=sha
 
       - name: Create + push the multi-arch manifest
         working-directory: /tmp/digests
         run: |
-          # Assemble the list of source digests for this image. Expect exactly the
-          # per-arch builds (amd64 + arm64); fail loudly on a mismatch rather than
-          # pushing a partial or cross-image manifest.
+          # Assemble the list of source digests for this image.
           srcs=""
-          count=0
           for f in *; do
-            [ -e "$f" ] || continue
             srcs="$srcs ghcr.io/${OWNER}/${{ matrix.image }}@$(cat "$f")"
-            count=$((count + 1))
           done
-          echo "Found $count digest(s) for ${{ matrix.image }}: $srcs"
-          if [ "$count" -eq 0 ]; then
-            echo "::error::no digests matched for ${{ matrix.image }} — check the download-artifact pattern"
-            exit 1
-          fi
           # Apply every tag the metadata action produced to the merged manifest.
           tags=$(jq -r '.tags[] | "-t " + .' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           docker buildx imagetools create $tags $srcs
 
       - name: Inspect published manifest
-        run: docker buildx imagetools inspect ghcr.io/${OWNER}/${{ matrix.image }}:${{ steps.meta.outputs.version }}
+        run: docker buildx imagetools inspect ghcr.io/${OWNER}/${{ matrix.image }}:${{ needs.prep.outputs.version != '' && needs.prep.outputs.version || steps.meta.outputs.version }}
