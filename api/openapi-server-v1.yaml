@@ -2275,6 +2275,74 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /messages:
+    post:
+      summary: Create a message (Anthropic Messages API ingress)
+      description: >
+        Anthropic Messages API surface so Claude Code (and any Anthropic
+        Messages API client pointed here via ANTHROPIC_BASE_URL) can drive
+        aimee's configured primary model. A stateless wire-format proxy: the
+        request's system/messages/tools are translated to the primary
+        provider's format and the reply is translated back to Anthropic shape
+        — aimee's agent loop, memory, and toolset are NOT involved. With
+        `stream: true` the response is the Anthropic typed-event SSE sequence
+        (message_start … message_stop). Requires CAP_CHAT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages]
+              properties:
+                model: { type: string, description: Ignored; aimee routes to its primary agent. }
+                max_tokens: { type: integer }
+                system: {}
+                messages: { type: array, items: { type: object } }
+                tools: { type: array, items: { type: object } }
+                temperature: { type: number }
+                stream: { type: boolean }
+      responses:
+        "200":
+          description: >
+            An Anthropic message object (stream:false), or the typed-event
+            SSE sequence (stream:true).
+          content:
+            application/json:
+              schema: { type: object }
+            text/event-stream:
+              schema: { type: string }
+        "400":
+          description: Invalid request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "502":
+          description: Primary provider call failed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /messages/count_tokens:
+    post:
+      summary: Count input tokens for an Anthropic Messages request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                system: {}
+                messages: { type: array, items: { type: object } }
+      responses:
+        "200":
+          description: Estimated input token count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  input_tokens: { type: integer }
   /persona:
     get:
       summary: Current active persona

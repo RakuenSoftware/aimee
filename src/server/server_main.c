@@ -205,7 +205,8 @@ static int run_server(const char *socket_path, log_level_t log_level)
    /* Wire the inference-backed OpenAI completion handlers before the listener
     * accepts requests (agent_http_init above must run first). */
    openai_chat_register();
-   server_native_register(); /* native /v1 REST providers (e.g. GET /v1/rules) */
+   anthropic_http_register(); /* Anthropic Messages API ingress (Claude Code) */
+   server_native_register();  /* native /v1 REST providers (e.g. GET /v1/rules) */
 
    /* Inbound /v1 HTTP API (UDS always; optional localhost TCP + bearer when
     * aimee.api.{http_port,bearer_token} are configured). Best-effort: a bind

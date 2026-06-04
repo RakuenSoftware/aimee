@@ -665,6 +665,9 @@ static server_http_completion_fn g_responses_handler = NULL;
 static server_http_stream_fn g_chat_stream_handler = NULL;
 static server_http_stream_fn g_completion_stream_handler = NULL;
 static server_http_responses_stream_fn g_responses_stream_handler = NULL;
+static server_http_completion_fn g_messages_handler = NULL;
+static server_http_responses_stream_fn g_messages_stream_handler = NULL;
+static server_http_completion_fn g_count_tokens_handler = NULL;
 
 void server_http_set_chat_handler(server_http_completion_fn fn)
 {
@@ -699,6 +702,21 @@ void server_http_set_embeddings_handler(server_http_completion_fn fn)
 void server_http_set_responses_handler(server_http_completion_fn fn)
 {
    g_responses_handler = fn;
+}
+
+void server_http_set_messages_handler(server_http_completion_fn fn)
+{
+   g_messages_handler = fn;
+}
+
+void server_http_set_messages_stream_handler(server_http_responses_stream_fn fn)
+{
+   g_messages_stream_handler = fn;
+}
+
+void server_http_set_count_tokens_handler(server_http_completion_fn fn)
+{
+   g_count_tokens_handler = fn;
 }
 
 /* Native-resource providers/handlers (registered by server_native_register). */
@@ -1120,6 +1138,16 @@ static void handle_responses_stream(int fd, const char *body, const char *reques
 {
    write_sse_headers(fd, request_id);
    g_responses_stream_handler(body ? body : "", sse_event_emit, &fd);
+}
+
+/* SSE for POST /v1/messages (Anthropic Messages API, stream:true). Emits the
+ * Anthropic typed-event sequence (message_start … message_stop) via the same
+ * `event:`/`data:` framer as Responses; unlike the OpenAI SSE path there is no
+ * terminal `data: [DONE]` (the stream ends with message_stop). */
+static void handle_messages_stream(int fd, const char *body, const char *request_id)
+{
+   write_sse_headers(fd, request_id);
+   g_messages_stream_handler(body ? body : "", sse_event_emit, &fd);
 }
 
 /* GET /v1/runs/{id}/events: subscribe to the live run record. Flush already
@@ -1563,6 +1591,13 @@ static void handle_conn(int fd, int is_tcp)
       if (strcmp(path, "/v1/responses") == 0 && g_responses_stream_handler)
       {
          handle_responses_stream(fd, body, request_id);
+         LOG_INFO("server.http", "%s %s -> 200 (stream) req_id=%s", method, path, request_id);
+         free(body);
+         return;
+      }
+      if (strcmp(path, "/v1/messages") == 0 && g_messages_stream_handler)
+      {
+         handle_messages_stream(fd, body, request_id);
          LOG_INFO("server.http", "%s %s -> 200 (stream) req_id=%s", method, path, request_id);
          free(body);
          return;

@@ -161,6 +161,16 @@ extern "C"
    void server_http_set_embeddings_handler(server_http_completion_fn fn);
    void server_http_set_responses_handler(server_http_completion_fn fn);
 
+   /* Anthropic Messages API ingress (POST /v1/messages) so Claude Code can drive
+    * aimee's primary model. The buffered handler returns the JSON message
+    * object; the stream handler emits the Anthropic typed-event sequence
+    * (message_start … message_stop) via server_http_sse_event_emit, with no
+    * terminal `[DONE]`. count_tokens backs POST /v1/messages/count_tokens.
+    * Registered by anthropic_http_register; absent in unit tests. */
+   void server_http_set_messages_handler(server_http_completion_fn fn);
+   void server_http_set_messages_stream_handler(server_http_responses_stream_fn fn);
+   void server_http_set_count_tokens_handler(server_http_completion_fn fn);
+
    /* Models-provider seam for GET /v1/models. The route always advertises the
     * local `aimee` model; a registered provider appends the configured agent
     * names (the (provider,model) bindings a client can target). It must COPY
@@ -174,6 +184,10 @@ extern "C"
    /* Register the inference-backed chat/completions handlers (defined in
     * server/openai_chat.c). Called once during server startup. */
    void openai_chat_register(void);
+
+   /* Register the Anthropic Messages API ingress handlers (defined in
+    * server/anthropic_http.c). Called once during server startup. */
+   void anthropic_http_register(void);
 
    /* --- Native /v1 REST resource seam ---
     * Some native resources are backed by subsystems (kb_client, memory, …)
