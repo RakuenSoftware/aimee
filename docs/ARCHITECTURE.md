@@ -81,8 +81,8 @@ graph TB
 | `aimee-gateway` | C11 | optional ambient-presence delivery (Telegram/ntfy/webhook, STT/TTS) | minimal | optional |
 
 The two **thin clients** (`aimee`, `aimee-webchat`) never touch a database.
-They reach `aimee-server` over its `/v1` HTTP surface — the local `aimee-http.sock`
-Unix socket by default, or a remote `host:port` — and forward typed requests.
+They reach `aimee-server` over its `/v1` HTTP surface (the local `aimee-http.sock`
+Unix socket by default, or a remote `host:port`) and forward typed requests.
 This is what keeps the CLI startup under 10 ms and why hook checks add ~1 ms to a
 tool call: the expensive state already lives in a warm, long-running server.
 
@@ -255,7 +255,7 @@ Key properties:
   body is a sequence of newline-delimited aimee events terminated by a final
   status object. (The legacy newline-delimited JSON-RPC socket was removed.)
 - **Authentication.** The local UDS is filesystem-permission gated and fully
-  trusted — it reaches the entire dispatch surface, with no token. The optional
+  trusted: it reaches the entire dispatch surface, with no token. The optional
   TCP listener requires a configured bearer token and is capability-scoped.
   Authorization is expressed as **16 capability flags** (chat, delegate,
   tool-execute, tool-bash, tool-write, memory-read/write, rules-read/admin,
@@ -386,7 +386,7 @@ sequenceDiagram
     participant Pool as Compute pool
     participant Prov as Provider
     PA->>SRV: delegate <role> <prompt>
-    SRV->>SRV: route — cheapest enabled agent for role
+    SRV->>SRV: route to cheapest enabled agent for role
     SRV->>Pool: enqueue (acquire compute budget)
     Pool->>Prov: HTTPS (OpenAI / ChatGPT / Anthropic format)
     Prov-->>Pool: completion (retry/fallback on failure)

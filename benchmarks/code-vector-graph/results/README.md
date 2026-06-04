@@ -26,15 +26,15 @@ baseline p50 156.9 / p95 221.3; full_fusion p50 236.7 / p95 298.5 →
 
 ## AC status from this pass
 
-- **AC#1 (fusion-off latency baseline):** measured — see
+- **AC#1 (fusion-off latency baseline):** measured; see
   `docs/proposals/benchmarks/effectiveness-weighted-code-vector-graph-baseline.json`.
-  (`utility_score_distribution` in that file is still pending — needs a direct
+  (`utility_score_distribution` in that file is still pending; it needs a direct
   DB2 query, no RPC surface yet.)
-- **AC#4 (p95 overhead ≤ 25%):** **FAILS** — full_fusion is ~35% over baseline
+- **AC#4 (p95 overhead ≤ 25%):** **FAILS**; full_fusion is ~35% over baseline
   p95.
 - **AC#5 (per-arm matrix):** latency captured here for all 9 arms.
 
-## Caveats — do NOT read recall from these files
+## Caveats: do NOT read recall from these files
 
 - **`recall_*`, `mrr`, `ndcg_*` are 0** because the corpus is unlabelled
   (`expected_ids: []` for all 108 queries). These artifacts are **latency-only**

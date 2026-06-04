@@ -1,23 +1,23 @@
 # Benchmarks
 
-## Unified suite — provisioning & rollout validation
+## Unified suite: provisioning & rollout validation
 
 The unified benchmark suite (memory / coding / reasoning) ships its harness,
 target adapters, pinned judge, and per-dataset loaders in-repo. Provisioning the
 real datasets, judge model, and sandboxes, and running each track end-to-end, is
-the **rollout-validation** half — see **[benchmarks/PROVISIONING.md](../benchmarks/PROVISIONING.md)**.
+the **rollout-validation** half; see **[benchmarks/PROVISIONING.md](../benchmarks/PROVISIONING.md)**.
 
 Key entry points:
 
-- `benchmarks/provisioning.toml` — documented, hash-pinnable provisioning path
+- `benchmarks/provisioning.toml`: documented, hash-pinnable provisioning path
   for every catalog dataset.
-- `benchmarks/check_provisioning.py` — coverage + hash-integrity gate
+- `benchmarks/check_provisioning.py`: coverage + hash-integrity gate
   (`--require-coverage`, `--verify-hashes`); wired into the `bench-smoke.yml` CI.
-- `scripts/provision-benchmarks.sh` — manifest-driven fetcher (auto-fetches what
+- `scripts/provision-benchmarks.sh`: manifest-driven fetcher (auto-fetches what
   it can, prints manual steps and the SHA-256 to pin).
-- `benchmarks/compare_targets.py` — publishes a cross-target comparison report
+- `benchmarks/compare_targets.py`: publishes a cross-target comparison report
   under `benchmarks/results/`.
-- `benchmarks/suite/run-validation.sh` — one-command operator runbook
+- `benchmarks/suite/run-validation.sh`: one-command operator runbook
   (preflight → tracks → determinism → comparison → smoke budget).
 
 ## Memory Harness v2

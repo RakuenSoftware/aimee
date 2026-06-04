@@ -1,7 +1,7 @@
 # aimee-kb
 
 This directory is the ownership boundary and implementation home for the
-`aimee-kb` service — the knowledge tier that owns **DB2** (Postgres + pgvector)
+`aimee-kb` service, the knowledge tier that owns **DB2** (Postgres + pgvector)
 and everything derived from it. For the system-level picture see
 [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md); for the code-level module map
 see the [Technical Reference](../README.md).
@@ -11,7 +11,7 @@ see the [Technical Reference](../README.md).
 `aimee-kb` is a single C11 process that owns the DB2 schema and all knowledge
 operations: the memory inference pipeline (dedup, contradiction detection,
 temporal versioning, promotion/decay), the vector collections, the code index,
-document ingest, and the curator. `aimee-server` holds **no** DB2 SQL — it reaches
+document ingest, and the curator. `aimee-server` holds **no** DB2 SQL; it reaches
 all of this through the typed KB client over a Unix socket or HTTP. KB service
 entry, dispatcher, background workers, mining, curator, ingest, and the HTTP
 surface live here (`kb_main.c`, `kb_service*.c`, `kb_ingest_workers.c`,
@@ -29,14 +29,14 @@ Where `aimee-server` is strictly 1:1 with a user, **`aimee-kb` is the shared tie
 that scales out to serve many users at once.** Three properties make this work:
 
 1. **All durable state lives in DB2 (Postgres).** A KB process keeps only
-   transient state — connection pools, in-flight request buffers, worker loops.
+   transient state: connection pools, in-flight request buffers, worker loops.
    The knowledge itself (memories, rules, code index, tasks, embeddings) is in
    Postgres. A KB instance is therefore an effectively **stateless request server
    over a shared database**.
 2. **It is reachable over the network.** Besides the local Unix socket, KB serves
    its full contract over HTTP on `:8741` (`AIMEE_KB_API_URL`, optional bearer
-   token). Many independent `aimee-server` instances — i.e. many users on many
-   machines — can point at one KB endpoint.
+   token). Many independent `aimee-server` instances (i.e. many users on many
+   machines) can point at one KB endpoint.
 3. **Concurrent instances are safe with no external coordinator.** The background
    pipeline (ingest, curator, embedding, index-update) claims work straight off
    DB2 queues using `FOR UPDATE SKIP LOCKED`
@@ -45,7 +45,7 @@ that scales out to serve many users at once.** Three properties make this work:
 
 Consequently you scale the KB the way you scale any stateless web tier: **run N
 `aimee-kb` replicas behind a load balancer**, all pointed at one Postgres. Read
-and query traffic (search, recall, index lookups — the hot path the servers hit)
+and query traffic (search, recall, index lookups, the hot path the servers hit)
 fans out across replicas freely; the background workers on each replica drain the
 shared DB2 queues cooperatively.
 
@@ -54,8 +54,8 @@ shared DB2 queues cooperatively.
 There is no bespoke datastore. DB2 is one ordinary Postgres database
 (`aimee_shared` by default) with two extensions: `pg_trgm` (lexical) and `vector`
 (pgvector, for dense embeddings). You scale it with the standard Postgres
-playbook — vertical sizing, connection pooling (e.g. PgBouncer), and read
-replicas for query fan-out — and `db2_pool_size` (1–32, default 8) bounds each KB
+playbook (vertical sizing, connection pooling such as PgBouncer, and read
+replicas for query fan-out), and `db2_pool_size` (1-32, default 8) bounds each KB
 instance's connection pool.
 
 Vector search rides inside the same Postgres, so it scales with it:
@@ -63,7 +63,7 @@ Vector search rides inside the same Postgres, so it scales with it:
 - **pgvector HNSW is the default** for memory vectors (always) and for all
   small-to-medium corpora. No extra extension required.
 - **pgvectorscale (StreamingDiskANN) is the opt-in scale-up** for large corpora.
-  It is *additive* — built on top of pgvector, same `vector` column type and same
+  It is *additive*: built on top of pgvector, same `vector` column type and same
   distance operators, adding only the `USING diskann` index access method, which
   is disk-backed with bounded build memory. Selected per corpus table by
   `db2.vector.corpus_index` (`auto` | `hnsw` | `diskann`); `auto` flips to diskann
@@ -89,7 +89,7 @@ Vector search rides inside the same Postgres, so it scales with it:
 
 ## Boundary rules
 
-Server code must not include KB internals directly — it speaks only the KB client
+Server code must not include KB internals directly; it speaks only the KB client
 contract. KB code must not link SQLite or reach DB1. The build gates
 (`make check-linking`, `make kb-target-isolation-check`,
 `make kb-container-packaging-check`, `scripts/check_tier_deps.sh`) enforce both

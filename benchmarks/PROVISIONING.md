@@ -2,8 +2,8 @@
 
 This is the operational companion to the (implemented) unified benchmark suite.
 The harness, target adapters, pinned-judge plumbing, and per-dataset loaders all
-ship in-repo and are unit-tested. What lives **outside** the repo — the real
-datasets, the judge model, and the SWE-bench / TerminalBench sandboxes — is
+ship in-repo and are unit-tested. What lives **outside** the repo (the real
+datasets, the judge model, and the SWE-bench / TerminalBench sandboxes) is
 provisioned per host using this runbook.
 
 See the parent (implemented) proposal
@@ -67,7 +67,7 @@ any `grader = "llm"` dataset route through the configured judge:
   execute-role agent (`~/.config/aimee/agents.json`).
 - `profile = "open70b"` uses a pinned open-weights GGUF; record its digest in
   `[judge].hash`.
-- `profile = "small"` is CI-smoke only — results are **not** canonical.
+- `profile = "small"` is CI-smoke only; results are **not** canonical.
 
 `majority = 3` → three judge votes per question; `check_determinism.py` asserts
 the verdicts are stable across reruns at temperature 0.
@@ -77,22 +77,22 @@ the verdicts are stable across reruns at temperature 0.
 The `frontier` profile routes both answering and judging through
 `aimee delegate execute`, i.e. the configured execute-role **delegate**
 (MiniMax / MiMo / Mistral). No GPU or pinned local weights are required to score
-the LLM-judge track — the delegate *is* the judge. The harness queues each turn
+the LLM-judge track; the delegate *is* the judge. The harness queues each turn
 as a background delegate job and polls `jobs status` (foreground delegate is
 unsupported over the default `/v1` transport), so a running `aimee-server` with
 the execute agent configured is the only prerequisite.
 
 Knobs (all optional):
 
-- `AIMEE_BENCH_PERSONA` — delegate persona (default `engineer`; required by the server).
-- `AIMEE_BENCH_JUDGE_MAX_TOKENS` — judge token budget (default `64`). Raise to
+- `AIMEE_BENCH_PERSONA`: delegate persona (default `engineer`; required by the server).
+- `AIMEE_BENCH_JUDGE_MAX_TOKENS`: judge token budget (default `64`). Raise to
   ~2048 for *reasoning* delegates, which spend tokens on hidden reasoning before
   emitting the JSON verdict and otherwise return "no content".
-- `AIMEE_BENCH_DELEGATE_TIMEOUT` / `AIMEE_BENCH_DELEGATE_POLL` — per-job timeout
+- `AIMEE_BENCH_DELEGATE_TIMEOUT` / `AIMEE_BENCH_DELEGATE_POLL`: per-job timeout
   and poll interval (seconds).
 
 The adapter LLM targets (`model_only`, `small_agent`, `rag_chromadb`) score the
-LLM-judge track with **no** memory store/search — so no vector DB is needed:
+LLM-judge track with **no** memory store/search, so no vector DB is needed:
 
 ```bash
 benchmarks/suite/run-llm.sh --target model_only --bench longmemeval_s
@@ -137,11 +137,11 @@ with no Docker, a GPU box, or CI.
 - Memory benches skip where the dataset isn't provisioned.
 - The `aimee` target writes to a vector DB, so it is **skipped unless**
   `AIMEE_BENCH_ALLOW_AIMEE=1` (point `AIMEE_BENCH_SOURCE_HOME` at a scratch home
-  on an isolated DB first) — this keeps benchmark runs out of operational memory.
+  on an isolated DB first); this keeps benchmark runs out of operational memory.
 - Default non-aimee baseline is `bm25` (dependency-free); `rag_chromadb` needs
   the `chromadb` package.
 - `--max-samples` / `--max-questions` bound the work (LoCoMo carries ~100+
-  questions per conversation — cap them for a quick run).
+  questions per conversation, so cap them for a quick run).
 
 ## 6. Reference numbers & determinism
 
@@ -156,5 +156,5 @@ with no Docker, a GPU box, or CI.
 
 The GPU host (pve) carries the corpora and the GPU for real-model runs; the
 SWE-bench Docker harness runs on the Docker host. These are shared-infra,
-operator-driven runs — they are not executed from CI. CI runs only the
+operator-driven runs; they are not executed from CI. CI runs only the
 deterministic gates (provisioning coverage) and the fake-agent smoke slice.

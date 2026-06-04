@@ -1,4 +1,4 @@
-# aimee-kb Public API — Stability Contract
+# aimee-kb Public API: Stability Contract
 
 The **aimee-kb `/v1` HTTP API** is the sole, public, versioned interface to the
 aimee knowledge base. aimee-server is its primary client; third parties consume
@@ -11,7 +11,7 @@ the same endpoints with no access to aimee source.
 - **Human reference:** [`docs/gen/api-v1.md`](gen/api-v1.md), generated from the
   spec (`make docs-gen`).
 - **Client SDKs:** generated under [`api/sdks/`](../api/sdks/) for eight
-  languages — see [SDKs](#sdks).
+  languages; see [SDKs](#sdks).
 
 This document is the **stability contract**. It applies from the first tagged
 release; pre-release `/v1` may still iterate freely.
@@ -56,7 +56,7 @@ frames are unmasked text JSON.
 | Endpoint | Stream |
 |----------|--------|
 | `GET /v1/jobs/{id}/stream` | live job-status frames until the job is terminal (done/failed), then a close frame |
-| `GET /v1/events` | a `{"type":"subscribed"}` greeting, then `{"type":"invalidation","kind":...,"scope_kind":...,"scope_id":...,"ts":...}` events whenever cached retrieval state changes — a **release** is promoted/rolled back, or a **doc** is ingested |
+| `GET /v1/events` | a `{"type":"subscribed"}` greeting, then `{"type":"invalidation","kind":...,"scope_kind":...,"scope_id":...,"ts":...}` events whenever cached retrieval state changes (a **release** is promoted/rolled back, or a **doc** is ingested) |
 
 The invalidation stream lets aimee-server drop cached search/entity/index
 results on signal rather than waiting for TTL expiry (the cache itself is a
@@ -115,7 +115,7 @@ The pure decision logic lives in `src/kb/kb_scope.c` and is unit-tested in
   `{"error": "<message>"}`. The status code is the stable signal; the `message`
   text may change. The per-request correlation id is returned in the
   `X-Request-ID` response header (see below), not the body.
-- **Pagination:** opaque cursors only — responses carry `next_cursor`; pass it
+- **Pagination:** opaque cursors only; responses carry `next_cursor`, pass it
   back as `?cursor=<value>`. There are **no** numeric offsets.
 - **Observability:** every response echoes `X-Request-ID` (client-supplied or
   server-generated as `<pid>-<counter>`), and the service logs it at INFO with
@@ -157,18 +157,18 @@ spec is a **byte-for-byte no-op**, so a stale SDK is caught in review.
 
 Two gates keep SDKs honest (both wired into `make lint`):
 
-- `scripts/check-sdk-parity.py` — every `operationId` in the spec is covered by
+- `scripts/check-sdk-parity.py`: every `operationId` in the spec is covered by
   every committed SDK (`make sdk-parity-check`).
-- `scripts/check-api-conformance.py` — every spec path is routed by the
+- `scripts/check-api-conformance.py`: every spec path is routed by the
   aimee-kb server (`make api-conformance-check`).
 
 Running each SDK against a live aimee-kb is automated by `scripts/sdk-smoke.sh`
 (`make v1-sdk-smoke`): it builds a minimal consumer per language that calls the
-service through the generated client and reports PASS/SKIP/FAIL — skipping
+service through the generated client and reports PASS/SKIP/FAIL, skipping
 languages whose toolchain/deps aren't present and self-skipping when no kb is
 reachable. Run it on any host with the toolchains installed (the per-language
 list is in the script header) and point it at a deployed kb with `KB_BASE_URL` /
-`KB_BEARER_TOKEN` — no CI service required.
+`KB_BEARER_TOKEN`; no CI service required.
 
 Validated live on a Debian-12 host with all toolchains: **go, typescript,
 python, java, c, cpp, csharp PASS**; rust requires a newer cargo than Debian 12
@@ -181,8 +181,8 @@ unauthenticated kb. See also [Integration testing](#integration-testing).
 ## Integration testing
 
 A language-agnostic smoke test that uses only `curl` + `jq` exercises the
-core client journey — ingest → search → fetch artifact → subscribe to the
-invalidation/job stream — against a running service:
+core client journey (ingest → search → fetch artifact → subscribe to the
+invalidation/job stream) against a running service:
 
 ```sh
 KB_BASE_URL=http://127.0.0.1:8090/v1 \
@@ -208,7 +208,7 @@ transport differs.
 
 Switching aimee-server from local to remote kb is a **config change, not a code
 change**: set `kb_client_url` to the remote kb's `https://` **origin**
-(`scheme://host:port`, without a `/v1` suffix — the client appends the versioned
+(`scheme://host:port`, without a `/v1` suffix; the client appends the versioned
 path) and `kb_client_bearer_token` to a token the remote kb accepts.
 aimee-server exports these into
 `AIMEE_KB_API_URL` / `AIMEE_KB_API_BEARER_TOKEN`, which the kb_client transport
@@ -219,9 +219,9 @@ and [`config/aimee-kb.yaml.example`](../config/aimee-kb.yaml.example).
 
 ## References
 
-- [`api/openapi-v1.yaml`](../api/openapi-v1.yaml) — the contract.
-- [`docs/gen/api-v1.md`](gen/api-v1.md) — generated reference.
+- [`api/openapi-v1.yaml`](../api/openapi-v1.yaml): the contract.
+- [`docs/gen/api-v1.md`](gen/api-v1.md): generated reference.
 - [`docs/proposa../done/aimee-kb-service-and-public-api.md`](proposa../done/aimee-kb-service-and-public-api.md)
-  — the owning proposal.
+  is the owning proposal.
 - [`docs/proposals/done/memory-public-contract.md`](proposals/done/memory-public-contract.md)
-  — the caller-facing contract reused across CLI / MCP / `/v1`.
+  is the caller-facing contract reused across CLI / MCP / `/v1`.

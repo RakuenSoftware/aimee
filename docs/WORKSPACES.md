@@ -47,7 +47,7 @@ The repositories to clone. Each entry needs a `url`; `path` is an optional clone
 
 ### `dependencies`
 
-Install commands, grouped by language for readability. The grouping key (`python`, `node`, `rust`, ...) is for your eyes only — aimee reads the package-manager keys underneath it and builds one command per manager:
+Install commands, grouped by language for readability. The grouping key (`python`, `node`, `rust`, ...) is for your eyes only; aimee reads the package-manager keys underneath it and builds one command per manager:
 
 | Key | Command |
 |-----|---------|
@@ -62,14 +62,14 @@ Install commands, grouped by language for readability. The grouping key (`python
 
 ### `secrets`
 
-Credentials the workspace needs but that aimee will not create for you — API tokens, deploy keys, and the like. Each entry has a `name` and an optional `description`. `aimee setup` prints them as a checklist so you know what to put in place before the build will work. It does not store or fetch them.
+Credentials the workspace needs but that aimee will not create for you: API tokens, deploy keys, and the like. Each entry has a `name` and an optional `description`. `aimee setup` prints them as a checklist so you know what to put in place before the build will work. It does not store or fetch them.
 
 ### `quickstart`
 
 Two booleans, both on by default:
 
-- `index` — index the discovered projects into the code index.
-- `generate_rules` — detect the project's stacks and write a starter `.aimee-rules`.
+- `index`: index the discovered projects into the code index.
+- `generate_rules`: detect the project's stacks and write a starter `.aimee-rules`.
 
 ## Commands
 

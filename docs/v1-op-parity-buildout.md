@@ -1,4 +1,4 @@
-# `/v1` op-parity buildout — route→method map and wave plan
+# `/v1` op-parity buildout: route→method map and wave plan
 
 > Working tracker for **P1 / WP1.x / WP1.fin** of the
 > [aimee `/v1` hub-migration plan](proposals/accepted/aimee-v1-hub-migration-plan.md).
@@ -7,7 +7,7 @@
 > already makes every method *reachable*; this buildout gives each one a
 > dedicated, self-documenting, OpenAPI-listed route.
 
-## Mechanism (already landed — WP0.2, #2531)
+## Mechanism (already landed: WP0.2, #2531)
 
 The `/v1` surface is a declarative table in
 `src/server/server_http_routes.inc`. Adding a first-class route is:
@@ -25,7 +25,7 @@ The `/v1` surface is a declarative table in
 ### When a row is **not** enough
 
 - **Positional `args`-array methods** (e.g. `workspace.*`) need a small bespoke
-  adapter — see `ws_dispatch_args` in the registry. Most CLI methods marshal a
+  adapter; see `ws_dispatch_args` in the registry. Most CLI methods marshal a
   JSON **object** (named fields / `marshal_no_args`), so they take the trivial
   `rh_dispatch_op` row.
 - **Streaming or foreground-blocking methods** must **not** use
@@ -41,7 +41,7 @@ The `/v1` surface is a declarative table in
   so any read that needs params is **POST** with a JSON body.
 - **POST** for all mutations and all param-bearing calls.
 - One route per RPC method. Existing dashboard read-views (`GET /v1/agents`,
-  `GET /v1/models`, `GET /v1/kb/status` — backed by `route_json_provider`) are a
+  `GET /v1/models`, `GET /v1/kb/status`, backed by `route_json_provider`) are a
   *different* curated surface and coexist with the per-method routes below.
 
 ## Deliberate exclusions (NOT given a first-class route)
@@ -58,14 +58,14 @@ The `/v1` surface is a declarative table in
 > duration. Sub-second and bounded-network methods (e.g. `agent.probe`,
 > `provider.test`) are fine. **Long-running / LLM methods** (`kb.build`,
 > `kb.ingest`, `kb.update`, `graph.sync_code`, `index.scan`, `memory.benchmark`,
-> `curator.synthesize`, `rules.generate`, `eval.run`) are *not* inline-dispatched
-> — they are routed **async** via `rh_dispatch_op_async`: the POST returns a
+> `curator.synthesize`, `rules.generate`, `eval.run`) are *not* inline-dispatched;
+> they are routed **async** via `rh_dispatch_op_async`: the POST returns a
 > queued run handle and a detached worker drives the loopback RPC to completion;
 > poll status/result at `GET /v1/runs/{id}`. So they keep the listener free
 > while still being first-class `/v1` routes.
 
 `server.health`/`server.info` and `model.list` overlap the existing
-`/v1/health`, `/v1/version`, `/v1/models` read-views — the owning wave maps them
+`/v1/health`, `/v1/version`, `/v1/models` read-views; the owning wave maps them
 to the existing route (no duplicate) and notes it.
 
 ## Family → wave map
@@ -87,12 +87,12 @@ same files collide.
 | **5** | `kb.*`, `curator.*`, `graph.*`, `memory.benchmark`, `index.scan`, `trajectory.batch` | ~12 |
 | **6** | `work.*`, `wm.*`, `skill.*`, `session.*`, `toolset.resolve`, `rules.generate`, `blast_radius.preview`, `mcp.*`, `workspace.context`, `worktree.gc`, `aux.test`, `eval.*`, `trigger.*`, `init.run`, `launch.run` | ~40 |
 
-(Method shapes — object vs positional-args vs streaming — are confirmed by the
+(Method shapes, object vs positional-args vs streaming, are confirmed by the
 owning delegate against the preloaded handler; the default is the trivial
 `rh_dispatch_op` row.)
 
-## WP1.fin — coverage gate
+## WP1.fin: coverage gate
 
 After the waves, add a conformance gate that walks `server_dispatch_table[]` and
-asserts every method has a `/v1` route **or** is on the exclusion list above —
+asserts every method has a `/v1` route **or** is on the exclusion list above,
 so parity can never silently regress. Wire into `make lint`.

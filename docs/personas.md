@@ -98,7 +98,7 @@ toolset); aimee delegates are the only sub-agent mechanism.
 
 ## Assigning a persona to a delegate (required)
 
-Every delegate runs **as a persona** — it is **required**, not optional. The
+Every delegate runs **as a persona**; it is **required**, not optional. The
 persona sets the delegate's identity and principles; for a non-engineer
 built-in or a custom persona, its identity prose (the "You are …" body) is
 layered onto the role template, so e.g. a `review` delegate run as `security`
@@ -114,7 +114,7 @@ engineer framing.
 The persona name resolves from the built-ins or a user-level persona file (the
 same set as the rest of the persona surface). The delegate's *role* still
 governs tool access and write capability; the *persona* governs its identity and
-principles — they compose.
+principles, and they compose.
 
 ## V1 HTTP API
 

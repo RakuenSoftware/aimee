@@ -41,7 +41,7 @@ graph TB
 
 ### Memory that compounds, and a knowledge base that learns
 
-A 4-tier memory system tracks project context, infrastructure details, preferences, and past outcomes. Facts are deduplicated, contradictions are detected, and stale information decays automatically. Your AI starts every session already knowing what matters -- no re-discovery, no repeated questions.
+A 4-tier memory system tracks project context, infrastructure details, preferences, and past outcomes. Facts are deduplicated, contradictions are detected, and stale information decays automatically. Your AI starts every session already knowing what matters: no re-discovery, no repeated questions.
 
 That's the on-ramp. aimee doesn't just *store*, a curator pipeline **extracts, synthesizes, judges, and promotes** knowledge into a typed graph, and reflects on idle time to improve it. Point a team at a **shared `aimee-kb`** and it distills *everyone's* knowledge to *everyone*, across all domains, not just code. The longer you use it, the more it learns you. See **[How aimee learns](docs/KNOWLEDGE.md)**.
 
@@ -124,18 +124,18 @@ graph TB
 
 - **`aimee-server` is 1:1 with a user.** It owns local, same-user state (DB1 /
   SQLite) and authenticates by peer UID, so each developer runs exactly one server
-  on their own machine. It is single-tenant and local by design — you never shard
+  on their own machine. It is single-tenant and local by design; you never shard
   or replicate it.
 - **`aimee-kb` is the shared, horizontally-scalable tier.** All of its durable
   state lives in Postgres; a KB process is otherwise a stateless request server
   plus background workers. One KB deployment serves *many* `aimee-server`
-  instances — i.e. many users — and you scale it by running **multiple `aimee-kb`
+  instances (i.e. many users) and you scale it by running **multiple `aimee-kb`
   replicas behind a load balancer** on HTTP `:8741`. Even the ingest/curator
   workers coordinate purely through Postgres (`FOR UPDATE SKIP LOCKED`), so adding
   replicas needs no external coordinator.
 - **The database is just standard Postgres.** No bespoke datastore: knowledge rows
   and their vector embeddings live in one Postgres database (`aimee_shared`) with
-  the `pg_trgm` and `vector` (pgvector) extensions. Scale it like any Postgres —
+  the `pg_trgm` and `vector` (pgvector) extensions. Scale it like any Postgres:
   bigger instance, connection pooling, read replicas. For large vector corpora,
   add **`pgvectorscale`** (StreamingDiskANN): it sits on top of pgvector with
   identical data and queries, so switching is a reindex, not a migration. Small and
@@ -150,7 +150,7 @@ aimee is a few services plus a thin client. **`aimee-server`** (per-user runtime
 local DB1) and **`aimee-kb`** (the shared knowledge base, Postgres DB2 + vectors)
 are long-running services; the **`aimee` CLI is a thin client** that holds no
 database and talks to a server over `/v1`. The intended deployment is to run the
-**services in Docker** — one combined container, or two split containers — and
+**services in Docker** (one combined container, or two split containers) and
 install only the **thin client** on each developer machine, pointed at the server.
 
 > Prefer everything on one box from source (no Docker)? See
@@ -177,9 +177,9 @@ curl -H 'Authorization: Bearer aimee-local-dev' http://localhost:8740/v1/kb/stat
 ```
 
 **Combined vs. split.** The combined container (`compose.combined.yaml`) is the
-recommended default — one aimee container to run and update. Split the two
+recommended default: one aimee container to run and update. Split the two
 binaries into separate containers (`compose.server.yaml`) when you want to scale,
-update, or place `aimee-server` and `aimee-kb` independently — that matches the
+update, or place `aimee-server` and `aimee-kb` independently; that matches the
 horizontal-scaling model (many servers → one shared kb). Both publish the same
 ports and bearer. See [Run in Docker](#run-in-docker) for every topology, health
 probes, and the end-to-end smoke tests.
@@ -192,9 +192,9 @@ probes, and the end-to-end smoke tests.
 
 Each developer installs only the `aimee` CLI and points it at the server. Prebuilt
 thin-client binaries for **Linux, macOS, and Windows** are attached to every GitHub
-release — download one, put it on your `PATH`, and skip the build. To build it
+release; download one, put it on your `PATH`, and skip the build. To build it
 yourself, configure with `-DAIMEE_THIN_CLIENT=ON` (a C compiler is the only
-dependency — no Go, libpq, or zstd); see
+dependency, no Go, libpq, or zstd); see
 [Build just the thin client](#build-just-the-thin-client).
 
 Point the client at the server per-invocation, via the environment, or persist it:
@@ -217,16 +217,16 @@ aimee remote clear    # revert to a local Unix socket
 Precedence is `--server` flag > `AIMEE_SERVER_URL` env > persisted `remote.conf`.
 
 `https://` URLs are supported on Linux/macOS builds (OpenSSL), with certificate
-verification on by default — set `AIMEE_TLS_INSECURE=1` for self-signed/dev
+verification on by default; set `AIMEE_TLS_INSECURE=1` for self-signed/dev
 servers. The Windows thin client is built without TLS and refuses `https://`;
 terminate TLS at a reverse proxy and use its `http://` address there.
 
 **What a remote thin client can and can't do.** The remote transport drives the
-**data/RPC plane** — `memory`, `kb`, `rules`, `index`, `sessions`, `notes`, and
+**data/RPC plane**: `memory`, `kb`, `rules`, `index`, `sessions`, `notes`, and
 so on. Interactive **`aimee chat` / `aimee launch` need a *co-located* server**:
 they run the agent and its tools on the client host and chdir into a local
 worktree, so they refuse a remote endpoint rather than misbehave. **Writes are off
-by default over the network** (leaked-bearer protection) — a remote bearer is
+by default over the network** (leaked-bearer protection): a remote bearer is
 read/query only until the server opts in via `aimee.api.remote_writes`; see
 [Drive a remote server with the CLI](#drive-a-remote-server-with-the-cli).
 
@@ -240,8 +240,8 @@ full source install (below) does this for you as its last step.
 
 ### Single-box source install (no Docker)
 
-To build and run everything on one host without containers — the classic
-single-developer setup — install from source:
+To build and run everything on one host without containers (the classic
+single-developer setup), install from source:
 
 ```bash
 git clone https://github.com/RakuenSoftware/aimee.git
@@ -262,7 +262,7 @@ Source-build prerequisites:
 | libcurl | `apt install libcurl4-openssl-dev` | `brew install curl` |
 | PAM (webchat) | `apt install libpam0g-dev` | built-in |
 
-**Local or remote knowledge base.** `install.sh` asks whether to run `aimee-kb` **locally** (the default — backed by the local Postgres) or point at an existing **remote** `aimee-kb` over HTTP. Choosing remote persists `kb_client_url` (and an optional bearer token) to `aimee.yaml`, skips the local sidecar and Postgres, and `aimee-server` reaches the remote kb on every launch path. For a remote-only host, also skip the database bootstrap: `AIMEE_KB_MODE=remote ./install-deps.sh`.
+**Local or remote knowledge base.** `install.sh` asks whether to run `aimee-kb` **locally** (the default, backed by the local Postgres) or point at an existing **remote** `aimee-kb` over HTTP. Choosing remote persists `kb_client_url` (and an optional bearer token) to `aimee.yaml`, skips the local sidecar and Postgres, and `aimee-server` reaches the remote kb on every launch path. For a remote-only host, also skip the database bootstrap: `AIMEE_KB_MODE=remote ./install-deps.sh`.
 
 ### Verify
 
@@ -282,7 +282,7 @@ as the cross-platform fallback.
 For packaging hosts that should ship only the `aimee` CLI (no `aimee-server`,
 `aimee-kb`, gateway, or webchat), configure with `-DAIMEE_THIN_CLIENT=ON`.
 That option restricts the build to the `aimee` target, so the box needs only
-a C compiler — no Go, libpq, or zstd. Combine with `-DAIMEE_LEAN=ON` to add
+a C compiler (no Go, libpq, or zstd). Combine with `-DAIMEE_LEAN=ON` to add
 the size-optimized strip. Add OpenSSL on Linux/macOS to keep `https://`
 support (the default for the thin client); skip it on Windows and terminate
 TLS at a reverse proxy.
@@ -295,7 +295,7 @@ cmake -B build -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON \
 cmake --build build --target aimee
 ```
 
-**macOS (Homebrew OpenSSL is keg-only — point CMake at it):**
+**macOS (Homebrew OpenSSL is keg-only; point CMake at it):**
 
 ```bash
 cmake -B build -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON \
@@ -304,7 +304,7 @@ cmake -B build -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON \
 cmake --build build --target aimee
 ```
 
-**Windows (MinGW, no TLS — use a TLS-terminating proxy for `https://`):**
+**Windows (MinGW, no TLS; use a TLS-terminating proxy for `https://`):**
 
 ```bash
 cmake -B build -G "MinGW Makefiles" \
@@ -349,9 +349,9 @@ boot.
 
 | File | Brings up | Use when |
 |------|-----------|----------|
-| `compose.combined.yaml` | **`aimee-server+kb`** (one container) + Postgres + embedder | **Recommended default** — both binaries co-located; server `/v1` on `:8740`, kb `:8741` |
-| `compose.server.yaml` | `aimee-server` + `aimee-kb` + Postgres + embedder | Split stack — scale/update/place server and kb independently; server `:8740`, kb `:8741` |
-| `compose.yaml` | `aimee-kb` + Postgres (pgvector) + embedder | The knowledge service (DB2 + vectors) on its own — building block for a shared/scaled kb |
+| `compose.combined.yaml` | **`aimee-server+kb`** (one container) + Postgres + embedder | **Recommended default**: both binaries co-located; server `/v1` on `:8740`, kb `:8741` |
+| `compose.server.yaml` | `aimee-server` + `aimee-kb` + Postgres + embedder | Split stack: scale/update/place server and kb independently; server `:8740`, kb `:8741` |
+| `compose.yaml` | `aimee-kb` + Postgres (pgvector) + embedder | The knowledge service (DB2 + vectors) on its own: building block for a shared/scaled kb |
 | `compose.server-standalone.yaml` | `aimee-server` only (SQLite DB1, no kb) | DB1-backed `/v1` endpoints with no shared knowledge |
 
 ### Combined server + kb (recommended)
@@ -379,7 +379,7 @@ curl 'http://localhost:8741/v1/health?status=1'   # in-container kb: DB + pgvect
 docker compose -f compose.server.yaml up --build -d
 ```
 
-`aimee-server` and `aimee-kb` run as separate containers — the same topology as
+`aimee-server` and `aimee-kb` run as separate containers, the same topology as
 the [horizontal-scaling model](#how-aimee-scales) (many servers → one shared kb).
 The server fronts `/v1` on `:8740` (bearer `aimee-local-dev`) and reaches the kb
 over HTTP (`AIMEE_KB_API_URL=http://aimee-kb:8741`); the kb owns Postgres + the
@@ -403,7 +403,7 @@ docker compose -f compose.yaml up --build -d
 ```
 
 Brings up just `aimee-kb` + Postgres + embedder, serving the `/v1` HTTP API on
-`:8741` — the building block behind a shared or horizontally-scaled kb that many
+`:8741`: the building block behind a shared or horizontally-scaled kb that many
 servers point at:
 
 ```bash
@@ -413,13 +413,13 @@ curl http://localhost:8741/v1/capabilities
 ```
 
 The LLM-backed synthesis/curator passes are wired but disabled until you point an
-OpenAI-compatible endpoint at them — bring up a local llama.cpp server with
+OpenAI-compatible endpoint at them: bring up a local llama.cpp server with
 `docker compose -f compose.yaml --profile llm up` (the same `--profile llm` flag
 works with the combined and split stacks).
 
 ### Managing the containers
 
-The compose stacks are ordinary Docker Compose projects — the binaries run as
+The compose stacks are ordinary Docker Compose projects: the binaries run as
 **long-lived container processes** (PID 1 inside each container), supervised by
 Docker's restart policy, not by systemd/launchd. Day-to-day lifecycle:
 
@@ -440,7 +440,7 @@ thing that erases data:
 
 | Volume | Holds |
 |--------|-------|
-| `*-postgres` | DB2 (`aimee_shared`) — all shared knowledge + vectors |
+| `*-postgres` | DB2 (`aimee_shared`): all shared knowledge + vectors |
 | `*-home` (`/var/lib/aimee`) | server/kb runtime state (DB1 SQLite, config) |
 | `*-workspaces` (`/var/lib/aimee-workspaces`) | mirror-tier bare mirrors + reconstructed worktrees |
 | `*-embedder-models` / `*-llm-models` | cached model weights |
@@ -454,8 +454,8 @@ mounting your own `aimee.yaml` at `/var/lib/aimee/aimee.yaml` (see
 ### Verify a stack end to end
 
 Each stack ships a smoke test that brings it up, waits for health, exercises the
-live surface (DB + vector readiness, search, embeddings, and — for the server
-stacks — the server→kb path), then tears down. `e2e-matrix.sh` runs several at
+live surface (DB + vector readiness, search, embeddings, and, for the server
+stacks, the server→kb path), then tears down. `e2e-matrix.sh` runs several at
 once and prints one pass/fail table (run it on a Docker host, e.g. inside CT 101):
 
 ```bash
@@ -475,7 +475,7 @@ cross-platform thin-client smoke) is documented in
 The [`--server` / `AIMEE_SERVER_URL`](#2-install-the-thin-client) path above is the
 simplest way to reach a remote server. The same connection is also expressible at
 the transport layer (the form `aimee workspace serve` and persisted `aimee.yaml`
-config use) — point it at a container's published `:8740` by selecting the HTTP
+config use): point it at a container's published `:8740` by selecting the HTTP
 transport and a remote endpoint:
 
 ```bash
@@ -493,8 +493,8 @@ variables override them. The TCP host may be a DNS name or an IPv4/IPv6 literal
 
 This drives the **data/RPC plane** (`memory`, `kb`, `rules`, `index`,
 `sessions`, `notes`, …). Interactive **`aimee chat` / `aimee launch` need a
-co-located server** — they run the agent and its tools on the client host and
-chdir into a local worktree — so they refuse a remote `tcp:` endpoint with a
+co-located server**: they run the agent and its tools on the client host and
+chdir into a local worktree, so they refuse a remote `tcp:` endpoint with a
 clear message rather than misbehaving.
 
 **Remote writes are off by default** (leaked-bearer protection): over the TCP
@@ -503,9 +503,9 @@ server opts in per `aimee.api.remote_writes`:
 
 | `aimee.api.remote_writes` | Over the TCP listener |
 |---------------------------|-----------------------|
-| `off` (default) | **reads only** — any route needing a non-read capability is local-UDS-only (the detached-workspace plane — `workspace serve`/`add`/`remove` — is the deliberate exception, still bearer-gated) |
+| `off` (default) | **reads only**: any route needing a non-read capability is local-UDS-only (the detached-workspace plane, `workspace serve`/`add`/`remove`, is the deliberate exception, still bearer-gated) |
 | `data` | + data-plane writes (`memory store`, `work …`, `rules delete`, `skill …`) |
-| `full` | + exec/control (`delegate`, `cron`, `agent`, `provider`, `api`, …) and the `/v1/rpc` delegate/tool bridge (`CAPS_ALL`). **Trusted networks only** — a leaked bearer then permits remote code execution. |
+| `full` | + exec/control (`delegate`, `cron`, `agent`, `provider`, `api`, …) and the `/v1/rpc` delegate/tool bridge (`CAPS_ALL`). **Trusted networks only**: a leaked bearer then permits remote code execution. |
 
 The capability gate is fail-closed: a route is reachable over TCP only if its
 required capability is satisfied *and* the tier permits its class. A scoped
