@@ -1,4 +1,4 @@
-# aimee -- Technical Reference
+# aimee: Technical Reference
 
 Architecture, internals, and build instructions. For usage and getting started,
 see the [root README](../README.md) and the full [Manual](../MANUAL.md). For the
@@ -11,7 +11,7 @@ aimee's core services are written in C11 for performance and minimal footprint. 
 
 ## Architecture overview
 
-aimee supports two agent roles. The **primary agent** is the AI coding surface the user interacts with (Claude Code, Gemini CLI, direct Codex, direct Mistral, Codex CLI legacy mode, Mistral Vibe, GitHub Copilot). aimee integrates through hooks, provider-CLI adapters, or direct primary-session adapters -- intercepting tool calls, injecting memory and rules, enforcing guardrails, and managing session isolation. **Delegate agents** are sub-agents configured in `agents.json` that handle offloaded work via `aimee delegate <role> <prompt>`.
+aimee supports two agent roles. The **primary agent** is the AI coding surface the user interacts with (Claude Code, Gemini CLI, direct Codex, direct Mistral, Codex CLI legacy mode, Mistral Vibe, GitHub Copilot). aimee integrates through hooks, provider-CLI adapters, or direct primary-session adapters, intercepting tool calls, injecting memory and rules, enforcing guardrails, and managing session isolation. **Delegate agents** are sub-agents configured in `agents.json` that handle offloaded work via `aimee delegate <role> <prompt>`.
 
 ```mermaid
 graph TB
@@ -186,10 +186,10 @@ The largest source files are tracked for decomposition in waves (split the bigge
 
 ```mermaid
 graph TD
-    L0[L0 -- Session Memory<br/>Scratch, in-progress state<br/>Lifetime: session only]
-    L1[L1 -- Recent Memory<br/>Decisions, context, checkpoints<br/>Lifetime: 30 days]
-    L2[L2 -- Long-term Memory<br/>Stable facts, preferences, patterns<br/>Lifetime: persistent]
-    L3[L3 -- Episodic Memory<br/>Past attempts, outcomes, failures<br/>Lifetime: persistent with decay]
+    L0[L0: Session Memory<br/>Scratch, in-progress state<br/>Lifetime: session only]
+    L1[L1: Recent Memory<br/>Decisions, context, checkpoints<br/>Lifetime: 30 days]
+    L2[L2: Long-term Memory<br/>Stable facts, preferences, patterns<br/>Lifetime: persistent]
+    L3[L3: Episodic Memory<br/>Past attempts, outcomes, failures<br/>Lifetime: persistent with decay]
 
     L0 -->|accordion fold<br/>at session end| L1
     L1 -->|3 reuses or<br/>confidence >= 0.9| L2
@@ -709,8 +709,8 @@ worker; any handler that may block runs on the compute pool.
 - The HTTP listener (`src/server/server_http.c`) owns the accept loop over the
   `/v1` UDS (`~/.config/aimee/aimee-http.sock`) and the optional localhost TCP
   port, handing each accepted connection to its own detached worker thread.
-- `server_run()` (`src/server/server.c`) no longer runs an accept loop — the
-  legacy NDJSON RPC socket was removed — and simply parks until shutdown. The
+- `server_run()` (`src/server/server.c`) no longer runs an accept loop (the
+  legacy NDJSON RPC socket was removed) and simply parks until shutdown. The
   `server_conn_t` buffered read/write helpers (`conn_flush()` etc.) survive
   because the in-process `/v1` dispatch bridge reuses them with a stack-allocated
   connection.
@@ -814,7 +814,7 @@ reference for the separate KB API (`api/openapi-v1.yaml`). See the
 (`src/server/kb_client*.c`), typed wrappers (memory, index, docs, agent,
 dashboard, roadmap, notes, curiosity, status) that call `aimee-kb` over its
 HTTP `/v1` API (`AIMEE_KB_API_URL`, port 8741). The legacy Unix-socket transport
-was retired in #2747 — HTTP is now the only KB transport. DB1 remains local to the server;
+was retired in #2747; HTTP is now the only KB transport. DB1 remains local to the server;
 DB2 can be a local single-user KB or a shared KB, and server-side reflection or
 promotion flows send only scoped knowledge artifacts across that boundary.
 `aimee-kb` (`src/kb/`) owns the DB2 schema, the memory inference pipeline, the
@@ -833,7 +833,7 @@ knowledge service scale independently and in different ways.
 
 **`aimee-server` is 1:1 with a user.** It owns DB1 (local SQLite, same-user
 runtime state) and authenticates by `SO_PEERCRED` peer UID, so it is single-tenant
-and local by construction — one per OS login, never sharded or load-balanced. Its
+and local by construction: one per OS login, never sharded or load-balanced. Its
 only scaling axis is *vertical*: the compute pool and concurrency knobs
 (`compute_threads` / `worker_threads` / `background_threads` / `session_threads`,
 `concurrency.per_model`) raise a single user's in-flight delegate and tool-call
@@ -846,13 +846,13 @@ database. Many `aimee-server` instances (many users) reach one KB over HTTP `:87
 (`AIMEE_KB_API_URL`). Critically, the background pipeline claims work straight off
 DB2 with `FOR UPDATE SKIP LOCKED` (`db2_kb_ingest_queue_claim_next` in
 `src/kb/kb_ingest_workers.c`; the curator drain in `kb_curator_extract_code.c`), so
-concurrent KB replicas never double-claim a row — Postgres is the only
+concurrent KB replicas never double-claim a row; Postgres is the only
 coordinator. The scale-out recipe is therefore: **run N `aimee-kb` replicas behind
 a load balancer over one Postgres.**
 
 **DB2 is standard Postgres.** It is one `aimee_shared` database with `pg_trgm` +
-`vector` (pgvector) — scaled with the normal Postgres playbook (instance sizing,
-pooling, read replicas; `db2_pool_size` bounds each instance's pool, 1–32). Vector
+`vector` (pgvector), scaled with the normal Postgres playbook (instance sizing,
+pooling, read replicas; `db2_pool_size` bounds each instance's pool, 1-32). Vector
 search scales inside it: pgvector HNSW by default (and always for memory vectors),
 with **pgvectorscale (StreamingDiskANN)** as an additive, opt-in scale-up for large
 corpus tables. The index type is chosen per corpus table by

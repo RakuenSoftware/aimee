@@ -7,9 +7,9 @@ current version and prints it once after an upgrade.
 
 ## v0.2.0
 
-- **Docker-first deployment**: run `aimee-server` + `aimee-kb` as containers — one
+- **Docker-first deployment**: run `aimee-server` + `aimee-kb` as containers, either one
   combined image (`compose.combined.yaml`, recommended) or split
-  (`compose.server.yaml`) — and install only the thin client on each developer
+  (`compose.server.yaml`), and install only the thin client on each developer
   machine. See the README "Run in Docker" and Manual §27.1.
 - **Cross-platform thin client**: the `aimee` CLI now drives a remote server over
   HTTP from Linux, macOS, and Windows. Point it with `--server` /

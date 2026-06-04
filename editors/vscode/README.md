@@ -1,8 +1,8 @@
-# aimee — VS Code extension
+# aimee: VS Code extension
 
 Chat with **aimee** inside VS Code. Prompts are routed through `aimee-server`'s
 OpenAI-compatible `/v1` API, so they go through aimee's delegate fabric with
-memory and guardrails applied — no new server protocol, just the surface that
+memory and guardrails applied, with no new server protocol, just the surface that
 already ships (see [docs/VSCODE.md](../../docs/VSCODE.md) and
 [the proposal](../../docs/proposals/pending/vscode-integration.md)).
 
@@ -39,8 +39,8 @@ already ships (see [docs/VSCODE.md](../../docs/VSCODE.md) and
    editor can read and chat but not perform admin mutations.
 
 2. In VS Code settings, set:
-   - `aimee.apiBase` — default `http://127.0.0.1:8910/v1`
-   - `aimee.bearerToken` — your `bearer_token`
+   - `aimee.apiBase`: default `http://127.0.0.1:8910/v1`
+   - `aimee.bearerToken`: your `bearer_token`
 
 3. Open **Copilot Chat** and type `@aimee <your prompt>`.
 

@@ -1,7 +1,7 @@
 # aimee-server
 
 This directory is the ownership boundary and implementation home for
-`aimee-server` — the persistent local hub that every thin client talks to.
+`aimee-server`, the persistent local hub that every thin client talks to.
 For the system-level picture see [`docs/ARCHITECTURE.md`](../../docs/ARCHITECTURE.md);
 for the code-level module map and RPC catalog see the
 [Technical Reference](../README.md).
@@ -13,8 +13,8 @@ bounded compute pool, routes delegates, serves the lifecycle hooks, and exposes
 the public HTTP `/v1` surface (its only client transport). The thin clients
 (`aimee`, `aimee-webchat`) hold no database; they reach this process over `/v1`
 (local `aimee-http.sock` or remote TCP) and forward typed requests. The expensive
-state — open DB handles, a
-warm KB connection, the worker pool — lives here, in a warm long-running process,
+state (open DB handles, a
+warm KB connection, the worker pool) lives here, in a warm long-running process,
 which is what keeps CLI startup under 10 ms and a pre-tool hook check around 1 ms.
 
 It links `-lsqlite3` (plus `-lssl`/`-lcrypto`/`-lpam`) and is built with
@@ -28,7 +28,7 @@ knowledge operations go through the typed **KB client** (`kb_client*.c`) to
 **`aimee-server` is strictly 1:1 with a user.** This is a design invariant, not a
 deployment choice:
 
-- It owns **local, same-user runtime state** in DB1 — sessions, working memory,
+- It owns **local, same-user runtime state** in DB1: sessions, working memory,
   conversation windows, checkpoints, durable delegate jobs, secrets. That state is
   private to one OS user on one host.
 - It authenticates callers by **`SO_PEERCRED`** (the connecting process's UID).
@@ -48,7 +48,7 @@ deployment. The server is the per-user front; the KB is the many-user back. See
 
 | Concern | Where | Notes |
 |---------|-------|-------|
-| Event loop | `server.c` (`server_run`) | Single epoll thread: read, parse, dispatch — **never blocks**. Per-connection buffered I/O; `EPOLLOUT` added only while a write is pending. |
+| Event loop | `server.c` (`server_run`) | Single epoll thread: read, parse, dispatch, and **never blocks**. Per-connection buffered I/O; `EPOLLOUT` added only while a write is pending. |
 | Entry / signals | `server_main.c` | Startup handshake, SIGTERM/SIGINT graceful drain, unclean-exit forensics to DB1. |
 | Auth | `server_auth.c` | Capability lookup + a 16-bit capability mask declared per method (unknown methods default to deny). The local `/v1` UDS is filesystem-trusted (full surface); the optional TCP listener is bearer-gated (`server_http_authorize`, constant-time compare via `server_ct_equal`). |
 | Sessions | `server_session.c` | Session create/list/get/close, per-session worktrees and state. |
@@ -67,7 +67,7 @@ deployment. The server is the per-user front; the KB is the many-user back. See
   concurrent heavyweight inference so a burst of delegates cannot exhaust the host.
 
 These knobs scale a single user's server *vertically* (more in-flight delegates,
-more parallel tool calls). They do **not** make the server multi-user — that
+more parallel tool calls). They do **not** make the server multi-user; that
 remains the KB tier's job.
 
 ## Boundary rules

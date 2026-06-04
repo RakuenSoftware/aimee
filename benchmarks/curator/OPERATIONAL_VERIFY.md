@@ -10,7 +10,7 @@ The two LLM passes use the **deterministic stub sidecars** in
 Point `judge_command` / `synthesize_command` at a real model to validate
 against one instead.
 
-This is a runbook, not a CI gate — it needs a real pgvector DB2, which CI does
+This is a runbook, not a CI gate; it needs a real pgvector DB2, which CI does
 not provide. Run it on a scratch DB2 (e.g. the CT 101 scratch-Postgres recipe);
 it never touches a production aimee server.
 
@@ -22,11 +22,11 @@ it never touches a production aimee server.
 
 ## 1. Configure (`aimee.yaml`)
 
-Use **block style** — aimee's YAML parser is indentation-based and does not
+Use **block style**; aimee's YAML parser is indentation-based and does not
 parse flow maps (`{ enabled: true }`), so a flow-style gate reads as *off*:
 
 ```yaml
-embedding_command: builtin          # MiniLM builtin embedder — no GPU needed
+embedding_command: builtin          # MiniLM builtin embedder, no GPU needed
 kb:
   curator:
     resolve_entities:
@@ -61,7 +61,7 @@ VALUES ('proj-a', '/tmp/proj-a', 'ws-1', '');
 
 -- AC1: two entity mentions of the same real-world thing at different scopes.
 -- resolve_entities embeds both; the second must dedup (>=0.85 merge, or the
--- 0.70-0.85 judge band via judge_stub) onto the first — NOT a second vector.
+-- 0.70-0.85 judge band via judge_stub) onto the first, NOT a second vector.
 INSERT INTO artifacts (id, kind, state, scope_kind, scope_id, payload_json)
 VALUES
  ('ent-acme-ws',  'entity', 'proposed', 'workspace', 'ws-1',
