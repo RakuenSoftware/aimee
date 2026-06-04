@@ -147,11 +147,12 @@ func (s *server) listChatSessions(username string) ([]chatSession, error) {
 	return out, rows.Err()
 }
 
-// handleChatThreads (GET /api/chat/threads) returns the authenticated user's
-// persisted sessions so the SPA can restore every open tab after a reload or a
-// crash. Shape is a bare JSON array (matching the prior stub) of session
-// objects, newest activity first.
-func (s *server) handleChatThreads(w http.ResponseWriter, r *http.Request) {
+// handleChatSessionsList (GET /api/chat/sessions) returns the authenticated
+// user's persisted sessions so the SPA can restore every open tab after a
+// reload or a crash. Shape is a bare JSON array of session objects, newest
+// activity first. (Distinct from /api/chat/threads, which is the in-tab
+// conversation-branch surface.)
+func (s *server) handleChatSessionsList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	sessions, err := s.listChatSessions(currentUser(r))
 	if err != nil {

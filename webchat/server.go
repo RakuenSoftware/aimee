@@ -136,6 +136,9 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/chat/prompt-tier", s.requireAuth(s.handleChatPromptTier))
 	mux.HandleFunc("/api/chat/clear", s.requireAuth(s.handleChatClear))
 	mux.HandleFunc("/api/chat/threads", s.requireAuth(s.handleChatThreads))
+	// Per-user persisted session/tab list (restore after a crash). Distinct from
+	// /api/chat/threads (in-tab branches).
+	mux.HandleFunc("/api/chat/sessions", s.requireAuth(s.handleChatSessionsList))
 	mux.HandleFunc("/api/chat/branch", s.requireAuth(s.handleChatBranch))
 	mux.HandleFunc("/api/chat/switch-thread", s.requireAuth(s.handleChatSwitchThread))
 	mux.HandleFunc("/api/chat/rewind", s.requireAuth(s.handleChatRewind))
