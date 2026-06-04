@@ -7,6 +7,11 @@
  */
 {"init", "Run server initialization", CLIENT_TIER_CORE, 1, NULL},
     {"manuscript", "Novel-mode manuscript tools", CLIENT_TIER_CORE, 0, NULL},
+    {"claude-proxy", "Route Claude Code through aimee's primary model", CLIENT_TIER_ADVANCED, 0,
+     "  enable [url] [token]  Point Claude Code at aimee's /v1/messages ingress\n"
+     "                        (url/token default to AIMEE_SERVER_URL/AIMEE_SERVER_TOKEN);\n"
+     "                        reroutes ALL Claude Code sessions to your primary agent\n"
+     "  disable               Restore Claude Code to its default endpoint\n"},
     {"remote", "Point the thin client at a remote aimee-server", CLIENT_TIER_ADVANCED, 0,
      "  set <url> [token]  Persist a remote server target\n"
      "  status             Show the resolved transport and a health probe\n"

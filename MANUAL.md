@@ -1183,7 +1183,7 @@ HTTP API generated from [`api/openapi-v1.yaml`](api/openapi-v1.yaml).
 
 | Tool | Integration | Setup |
 |------|-------------|-------|
-| Claude Code | Hooks + MCP | `./install.sh` |
+| Claude Code | Hooks + MCP, or any primary model via the Anthropic ingress | `./install.sh` / `aimee claude-proxy enable` |
 | Gemini CLI | Hooks | `./install.sh` |
 | Codex CLI | Hooks + MCP + local plugin | `./install.sh` |
 | Mistral Vibe | Provider-CLI primary + subscription-plan delegates (incl. `mistral-plan`) | `aimee agent setup mistral-plan` |
@@ -1197,6 +1197,37 @@ setups. Switching tools preserves all memory and
 context because everything lives in the shared server/KB, not in the tool. Direct
 Codex and Mistral primary sessions use server-side structured conversation state;
 explicit legacy routes (e.g. `codex-cli`) still use the provider CLI.
+
+### Claude Code on any primary model (Anthropic ingress)
+
+aimee-server exposes the Anthropic Messages API at `POST /v1/messages` (with
+streaming and `/v1/messages/count_tokens`). Point Claude Code at it and every
+turn runs on aimee's configured **primary agent** — minimax, mistral, mimo,
+gemini, openai, or anthropic — instead of Anthropic's models. It is a stateless
+wire-format proxy: Claude Code keeps owning its own system prompt, history, and
+tools (tool execution stays client-side); aimee only translates the wire format
+and swaps the model. Switch models with `aimee primary <agent>`.
+
+Enable it (writes `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` into
+`~/.claude/settings.json`):
+
+```sh
+aimee claude-proxy enable http://127.0.0.1:8910 <server-bearer>
+# or, with AIMEE_SERVER_URL / AIMEE_SERVER_TOKEN already set:
+aimee claude-proxy enable
+aimee claude-proxy disable   # restore Claude Code to Anthropic
+```
+
+This is **off by default** and reroutes **all** Claude Code sessions (including
+running ones), so it is only ever changed by this explicit command. For a
+one-off session without touching settings, set the env vars inline instead:
+
+```sh
+ANTHROPIC_BASE_URL=http://127.0.0.1:8910 ANTHROPIC_AUTH_TOKEN=<bearer> claude
+```
+
+(The server must be reachable over HTTP — loopback TCP with a bearer, or a
+remote `AIMEE_SERVER_URL`.)
 
 ---
 

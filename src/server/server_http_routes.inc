@@ -160,6 +160,16 @@ static int rh_responses(const route_req_t *rq, char *resp, int cap)
 {
    return route_completion(g_responses_handler, rq->body, resp, cap);
 }
+/* POST /v1/messages buffered (stream:false). The stream:true case is intercepted
+ * in handle_conn before the buffered router (see g_messages_stream_handler). */
+static int rh_messages(const route_req_t *rq, char *resp, int cap)
+{
+   return route_completion(g_messages_handler, rq->body, resp, cap);
+}
+static int rh_count_tokens(const route_req_t *rq, char *resp, int cap)
+{
+   return route_completion(g_count_tokens_handler, rq->body, resp, cap);
+}
 
 static int rh_runs_get(const route_req_t *rq, char *resp, int cap)
 {
@@ -918,6 +928,11 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/completions", NULL, RM_EXACT, "chat.send_stream", 0, rh_completions},
     {"POST", "/v1/responses", NULL, RM_EXACT, "chat.send_stream", 0, rh_responses},
     {"POST", "/v1/embeddings", NULL, RM_EXACT, NULL, CAP_CHAT, rh_embeddings},
+    /* Anthropic Messages API ingress (Claude Code). Buffered row handles
+     * stream:false; the stream:true case is dispatched by handle_conn (this row
+     * still drives the capability gate + conformance scan for it). */
+    {"POST", "/v1/messages", NULL, RM_EXACT, "chat.send_stream", 0, rh_messages},
+    {"POST", "/v1/messages/count_tokens", NULL, RM_EXACT, NULL, CAP_CHAT, rh_count_tokens},
     /* Streaming chat over HTTP: dispatched by handle_conn; row exists for the
      * capability gate + conformance scan. */
     {"POST", "/v1/chat/stream", NULL, RM_EXACT, "chat.send_stream", 0, NULL},
