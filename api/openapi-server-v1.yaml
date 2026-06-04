@@ -927,6 +927,41 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /config:
+    get:
+      summary: Show all configuration values
+      responses:
+        "200":
+          description: Configuration envelope with a config object of key/value pairs
+          content:
+            application/json:
+              schema: { type: object }
+  /config/get:
+    post:
+      summary: Get one configuration value
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Single config key/value
+          content:
+            application/json:
+              schema: { type: object }
+  /config/set:
+    post:
+      summary: Set one configuration value
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object }
+      responses:
+        "200":
+          description: Updated config key/value
+          content:
+            application/json:
+              schema: { type: object }
   /cron:
     get:
       summary: List cron jobs

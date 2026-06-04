@@ -767,6 +767,9 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/wm/list", NULL, RM_EXACT, "wm.list", 0, rh_dispatch_op},
     {"POST", "/v1/attempts/list", NULL, RM_EXACT, "attempt.list", 0, rh_dispatch_op},
     {"GET", "/v1/aux/config", NULL, RM_EXACT, "aux.config_show", 0, rh_dispatch_op},
+    {"GET", "/v1/config", NULL, RM_EXACT, "config.show", 0, rh_dispatch_op},
+    {"POST", "/v1/config/get", NULL, RM_EXACT, "config.get", 0, rh_dispatch_op},
+    {"POST", "/v1/config/set", NULL, RM_EXACT, "config.set", 0, rh_dispatch_op},
 
     /* cron.* family (op-parity P1 wave 1) — single-response, object-body
      * methods, so each is a plain dispatch-op row. */
