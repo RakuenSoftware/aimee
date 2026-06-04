@@ -7,18 +7,23 @@
 /* Forward declaration for cJSON (used by plan API). */
 struct cJSON;
 
-#define MAX_AGENTS                 16
-#define MAX_AGENT_ROLES            16
-#define MAX_AGENT_NAME             64
-#define MAX_ENDPOINT_LEN           512
-#define MAX_MODEL_LEN              128
-#define MAX_API_KEY_LEN            4096
-#define MAX_AUTH_CMD_LEN           512
-#define MAX_AGENT_CREDENTIALS      8
-#define MAX_CRED_NAME_LEN          32
-#define MAX_CRED_ENV_VAR_LEN       64
-#define MAX_FALLBACK               8
-#define AGENT_DEFAULT_TIMEOUT_MS   180000
+#define MAX_AGENTS               16
+#define MAX_AGENT_ROLES          16
+#define MAX_AGENT_NAME           64
+#define MAX_ENDPOINT_LEN         512
+#define MAX_MODEL_LEN            128
+#define MAX_API_KEY_LEN          4096
+#define MAX_AUTH_CMD_LEN         512
+#define MAX_AGENT_CREDENTIALS    8
+#define MAX_CRED_NAME_LEN        32
+#define MAX_CRED_ENV_VAR_LEN     64
+#define MAX_FALLBACK             8
+#define AGENT_DEFAULT_TIMEOUT_MS 180000
+/* Floor for the per-call HTTP timeout inside the multi-turn tool loop. Once the
+ * remaining loop budget drops below this, the loop stops cleanly instead of
+ * issuing a doomed short-timeout call that the provider-health tracker would
+ * misread as "provider unreachable" (see posix/agent_runtime.c). */
+#define AGENT_LOOP_MIN_CALL_MS     60000
 #define AGENT_DEFAULT_MAX_TOKENS   4096
 #define MAX_EXEC_ROLES             8
 #define MAX_EXEC_PROMPT_LEN        4096
@@ -42,6 +47,25 @@ struct cJSON;
 #define AGENT_MAX_CHECKPOINTS      32
 #define AGENT_MAX_EVAL_TASKS       64
 #define AGENT_MAX_COORD_AGENTS     4
+
+/* Per-call HTTP timeout for one turn of the multi-turn tool loop.
+ *   agent_timeout_ms  configured per-call timeout (also the per-call cap)
+ *   total_timeout_ms  whole-loop budget (typically agent_timeout_ms * N)
+ *   elapsed_ms        wall-clock already spent in the loop
+ * Returns the timeout to use, or -1 when the remaining budget is too small for a
+ * viable call (the caller should stop the loop cleanly rather than issue a
+ * doomed short-timeout call that the provider-health tracker misreads as
+ * "provider unreachable"). Pure function — unit-tested in test_agent.c. */
+static inline int agent_loop_per_call_timeout_ms(int agent_timeout_ms, int total_timeout_ms,
+                                                 int elapsed_ms)
+{
+   int remaining = total_timeout_ms - elapsed_ms;
+   int min_call =
+       agent_timeout_ms < AGENT_LOOP_MIN_CALL_MS ? agent_timeout_ms : AGENT_LOOP_MIN_CALL_MS;
+   if (remaining < min_call)
+      return -1;
+   return agent_timeout_ms < remaining ? agent_timeout_ms : remaining;
+}
 
 typedef struct
 {
