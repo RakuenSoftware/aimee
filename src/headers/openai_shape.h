@@ -4,6 +4,8 @@
 
 #include <stddef.h>
 
+struct cJSON;
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -38,6 +40,18 @@ extern "C"
                                       char **prompt_out, char *prev_id, size_t prev_id_n,
                                       int *stream_out);
 
+   /* Convert a Codex/OpenAI Responses request into the OpenAI chat shape for the
+    * full-parity ingress: copies `model` (default "aimee"), strdup's
+    * `instructions` into *instructions_out (NULL if absent; caller frees),
+    * builds *messages_out as a chat messages array (message / function_call ->
+    * assistant tool_calls / function_call_output -> role:tool), and *tools_out as
+    * chat function tools (NULL if none; only `function`-type tools kept). Sets
+    * *stream_out. Returns 0 on success, -1 on invalid JSON. On success the caller
+    * owns and cJSON_Delete()s *messages_out and *tools_out. */
+   int openai_parse_responses_to_chat(const char *body, char *model, size_t model_n,
+                                      char **instructions_out, struct cJSON **messages_out,
+                                      struct cJSON **tools_out, int *stream_out);
+
    /* Build an OpenAI Responses object into resp[cap]:
     * {"id":…,"object":"response","created_at":…,"model":…,"status":"completed",
     *  "output":[{"id":…,"type":"message","status":"completed","role":"assistant",
@@ -67,6 +81,34 @@ extern "C"
    int openai_format_responses_completed(const char *id, const char *model, const char *output_text,
                                          long created, int prompt_tokens, int completion_tokens,
                                          char *resp, int cap);
+
+   /* Responses-API output items + item/argument streaming events (Codex parity).
+    * Codex requires output_item.added before any text/arguments delta, and
+    * output_item.done + completed carrying the items. The *_item builders return
+    * a new cJSON object (caller owns / adds to an output array). The format_*
+    * helpers emit the matching SSE data payloads (bytes written or -1). */
+   struct cJSON *openai_responses_message_item(const char *item_id, const char *text,
+                                               const char *status);
+   struct cJSON *openai_responses_function_call_item(const char *item_id, const char *call_id,
+                                                     const char *name, const char *arguments,
+                                                     const char *status);
+   int openai_format_responses_msg_item_added(const char *item_id, int output_index, char *resp,
+                                              int cap);
+   int openai_format_responses_msg_item_done(const char *item_id, const char *text,
+                                             int output_index, char *resp, int cap);
+   int openai_format_responses_fc_item_added(const char *item_id, const char *call_id,
+                                             const char *name, int output_index, char *resp,
+                                             int cap);
+   int openai_format_responses_fc_item_done(const char *item_id, const char *call_id,
+                                            const char *name, const char *arguments,
+                                            int output_index, char *resp, int cap);
+   int openai_format_responses_fc_args_delta(const char *item_id, int output_index,
+                                             const char *delta, char *resp, int cap);
+   int openai_format_responses_fc_args_done(const char *item_id, int output_index,
+                                            const char *arguments, char *resp, int cap);
+   int openai_format_responses_completed_items(const char *id, const char *model, long created,
+                                               struct cJSON *output_arr, int prompt_tokens,
+                                               int completion_tokens, char *resp, int cap);
 
    /* Read an optional numeric sampling field from an OpenAI request body.
     * Returns the value when it is a finite number within [0, hi]; otherwise

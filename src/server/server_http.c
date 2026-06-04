@@ -37,6 +37,11 @@
 
 #define SHTTP_READ_MAX 8192
 #define SHTTP_RESP_MAX (256 * 1024)
+/* Max request body. The OpenAI/Codex Responses surface sends large bodies — a
+ * Codex turn carries ~20KB instructions + ~18 tool schemas + the full
+ * conversation/tool-call history (175KB+ and growing), so the cap must be well
+ * above the legacy 64KB or large requests are truncated and misparsed. */
+#define SHTTP_MAX_BODY (4 * 1024 * 1024)
 #define SHTTP_BACKLOG  16
 
 /* ── per-session persona store ──────────────────────────────────────────── */
@@ -629,16 +634,31 @@ static int route_capabilities(char *resp, int cap)
  * can target via the `model` field). The provider seam keeps the agent/config
  * dependency out of this unit and its test. */
 static server_http_models_fn g_models_fn = NULL;
+static server_http_models_raw_fn g_models_raw_fn = NULL;
 
 void server_http_set_models_provider(server_http_models_fn fn)
 {
    g_models_fn = fn;
 }
 
+void server_http_set_models_raw_provider(server_http_models_raw_fn fn)
+{
+   g_models_raw_fn = fn;
+}
+
 #define SHTTP_MODELS_MAX 64
 
 static int route_models(char *resp, int cap)
 {
+   /* A raw provider (e.g. the Codex `{models:[…]}` schema) takes precedence; it
+    * writes the whole body. <0 means "not handled" → fall through to the list. */
+   if (g_models_raw_fn)
+   {
+      int rlen = g_models_raw_fn(resp, cap);
+      if (rlen >= 0)
+         return 200;
+   }
+
    char extra[SHTTP_MODELS_MAX][SERVER_HTTP_MODEL_ID_MAX];
    int n_extra = g_models_fn ? g_models_fn(extra, SHTTP_MODELS_MAX - 1) : 0;
    if (n_extra < 0)
@@ -1490,8 +1510,8 @@ static void handle_conn(int fd, int is_tcp)
       body_len = atoi(cl + 18);
       if (body_len < 0)
          body_len = 0;
-      if (body_len > 65536)
-         body_len = 65536;
+      if (body_len > SHTTP_MAX_BODY)
+         body_len = SHTTP_MAX_BODY;
       body = malloc((size_t)body_len + 1);
       if (body)
       {
