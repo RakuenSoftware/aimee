@@ -47,6 +47,10 @@ func run(cfg *config) error {
 		return fmt.Errorf("channel migrations: %w", err)
 	}
 
+	if err := applyChatSessionMigrations(db); err != nil {
+		return fmt.Errorf("chat session migrations: %w", err)
+	}
+
 	sessions := auth.NewSessionStore(db, 24*time.Hour)
 	rl := auth.NewRateLimiter(db, 10, 15*time.Minute)
 	users := auth.NewUserManager("aimee")
