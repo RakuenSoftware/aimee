@@ -71,6 +71,7 @@ jobs:
           - { name: aimee-server,    dockerfile: Dockerfile.server }
           - { name: aimee-kb,        dockerfile: Dockerfile }
           - { name: aimee-server-kb, dockerfile: Dockerfile.combined }
+          - { name: aimee-embedder,  dockerfile: Dockerfile.embedder }
         platform:
           - { arch: amd64, runner: ubuntu-latest }
           - { arch: arm64, runner: ubuntu-24.04-arm }
@@ -125,7 +126,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [aimee-server, aimee-kb, aimee-server-kb]
+        image: [aimee-server, aimee-kb, aimee-server-kb, aimee-embedder]
     steps:
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
