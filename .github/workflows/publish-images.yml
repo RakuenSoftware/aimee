@@ -103,6 +103,14 @@ jobs:
           provenance: false
           build-args: |
             AIMEE_VERSION=${{ needs.prep.outputs.version }}
+          # webchat's SPA pulls @rakuensoftware/smoothgui from GitHub Packages,
+          # whose npm registry requires an authenticated token (even for public
+          # reads). Prefer a repo/org NPM_TOKEN secret (a PAT with read:packages);
+          # fall back to the built-in GITHUB_TOKEN, which suffices for public
+          # packages. The aimee-kb image ignores it. Passed via BuildKit so the
+          # token never lands in an image layer.
+          secrets: |
+            npm_token=${{ secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
           outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest

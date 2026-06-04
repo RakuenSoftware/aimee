@@ -32,6 +32,39 @@ COPY . .
 ARG AIMEE_VERSION=""
 RUN make -C src ../aimee-server ../aimee-kb ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
+# --- webchat frontend: build the React SPA into a single index.html ---
+# vite-plugin-singlefile inlines all JS/CSS, so the runtime image ships one file.
+FROM node:20-bookworm AS frontend-build
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+# @rakuensoftware/smoothgui is hosted on GitHub Packages, whose npm registry
+# requires an authenticated token even for public reads. The token arrives as a
+# BuildKit secret and is written to a throwaway .npmrc that lives only for this
+# RUN, so it never lands in an image layer:
+#   docker build --secret id=npm_token,env=NPM_TOKEN ...
+#   compose: build.secrets;  CI: npm_token=${{ secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
+RUN --mount=type=secret,id=npm_token \
+    { echo '@rakuensoftware:registry=https://npm.pkg.github.com'; \
+      echo "//npm.pkg.github.com/:_authToken=$(cat /run/secrets/npm_token)"; } > .npmrc \
+    && npm ci \
+    && rm -f .npmrc
+COPY frontend/ ./
+RUN npm run build
+
+# --- webchat service: the standalone Go browser server (cgo: PAM + sqlite) ---
+FROM golang:1.25-bookworm AS webchat-build
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        libpam0g-dev \
+        pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src/webchat
+COPY webchat/go.mod webchat/go.sum ./
+RUN go mod download
+COPY webchat/ ./
+RUN CGO_ENABLED=1 go build -o /out/aimee-webchat .
+
 FROM debian:bookworm-slim
 
 # Union of both runtime closures: libsqlite3 (server DB1), libpq (kb DB2),
@@ -41,6 +74,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        libpam-modules \
+        libpam0g \
         libpq5 \
         libsqlite3-0 \
         libssl3 \
@@ -82,13 +117,22 @@ COPY scripts/embed-remote.py scripts/llm-chat.py scripts/learning-synthesize.py 
 # not collide under the shared AIMEE_HOME.
 COPY --chown=aimee:aimee deploy/container/aimee-server.yaml /var/lib/aimee/aimee.yaml
 COPY --chown=aimee:aimee deploy/container/aimee.yaml /var/lib/aimee/.config/aimee/aimee.yaml
-# Process supervisor: starts kb, waits for kb health, then execs the server.
-COPY --chown=aimee:aimee deploy/container/combined-entrypoint.sh /usr/local/bin/aimee-combined-entrypoint
+# Co-located webchat browser UI: the Go service, the single-file React SPA, the
+# PAM stack for browser login, and the bootstrap/launch helpers. webchat shares
+# AIMEE_HOME so its Unix-socket transports line up with the server.
+COPY --from=webchat-build /out/aimee-webchat /usr/local/bin/aimee-webchat
+COPY --from=frontend-build /frontend/dist/index.html /usr/local/share/aimee-webchat/index.html
+COPY deploy/container/pam-aimee-webchat /etc/pam.d/aimee-webchat
+COPY deploy/container/webchat-lib.sh /usr/local/bin/webchat-lib.sh
+# Process supervisor: starts kb, waits for kb health, starts the server + webchat.
+COPY deploy/container/combined-entrypoint.sh /usr/local/bin/aimee-combined-entrypoint
 RUN chmod +x /usr/local/bin/aimee-combined-entrypoint
 
-USER aimee
+# Runs as root: the entrypoint bootstraps the webchat PAM user and runs webchat
+# (pam_unix needs /etc/shadow), then drops aimee-kb + aimee-server to "aimee".
 WORKDIR /var/lib/aimee
-EXPOSE 8740 8741
+# 8740 = server /v1; 8741 = kb /v1; 8443 = aimee-webchat browser UI (HTTPS).
+EXPOSE 8740 8741 8443
 
 # NOTE: the server's worker threads need a 64 MB stack. A Dockerfile cannot set
 # a runtime ulimit, so callers MUST raise it (the 8 MB container default
