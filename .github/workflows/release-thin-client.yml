@@ -48,13 +48,13 @@ jobs:
           - os: ubuntu-24.04-arm
             kind: linux
             asset: aimee-linux-arm64
-          # macOS: CMake lean thin client. arm64 (macos-latest) + Intel (macos-13).
+          # macOS: one universal (arm64 + x86_64) binary, built on macos-latest.
+          # Avoids the scarce/deprecating Intel runner; the thin client links only
+          # Threads (WITH_TLS=OFF, as on Windows), so a fat build needs no
+          # arch-specific brew libraries.
           - os: macos-latest
             kind: macos
-            asset: aimee-macos-arm64
-          - os: macos-13
-            kind: macos
-            asset: aimee-macos-x86_64
+            asset: aimee-macos-universal
           # Windows: CMake thin client via MinGW (x86_64).
           - os: windows-latest
             kind: windows
@@ -101,14 +101,15 @@ jobs:
         run: cp aimee "${{ matrix.asset }}"
 
       # --- macOS: CMake thin-client target, lean profile ---
-      - name: macOS deps
-        if: matrix.kind == 'macos'
-        run: brew install sqlite3 openssl@3 || true
-      - name: Build (macOS, CMake)
+      - name: Build (macOS, CMake -- universal arm64+x86_64)
         if: matrix.kind == 'macos'
         run: |
-          cmake -B build -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" -DAIMEE_VERSION_STR="${{ steps.ver.outputs.version != '' && format('v{0}', steps.ver.outputs.version) || '' }}"
+          cmake -B build -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=OFF -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DAIMEE_VERSION_STR="${{ steps.ver.outputs.version != '' && format('v{0}', steps.ver.outputs.version) || '' }}"
           cmake --build build --parallel 3 --target aimee
+          # Fail the build unless the artifact is a true fat binary.
+          echo "archs: $(lipo -archs build/aimee)"
+          lipo -archs build/aimee | grep -q arm64
+          lipo -archs build/aimee | grep -q x86_64
       - name: Stage artifact (macOS)
         if: matrix.kind == 'macos'
         run: cp build/aimee "${{ matrix.asset }}"
