@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -64,6 +65,11 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	doneSent := false
+	// effectiveSID tracks the aimee conversation id for this turn: the one the
+	// SPA supplied, or the one aimee-server mints (delivered as a "session"
+	// event) for a brand-new tab. It is persisted against the logged-in user
+	// after the turn so the tab can be restored later.
+	effectiveSID := req.AimeeSessionID
 	// Stream the chat over aimee-server's /v1 HTTP transport (native
 	// POST /v1/chat/stream); the legacy NDJSON socket helper (chatStream)
 	// remains available as a fallback.
@@ -79,6 +85,9 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 			case "turn_end":
 				sseWrite(w, "turn_end", map[string]any{})
 			case "session":
+				if evt.ID != "" {
+					effectiveSID = evt.ID
+				}
 				sseWrite(w, "session", map[string]string{"id": evt.ID})
 			case "usage":
 				sseWrite(w, "usage", map[string]any{
@@ -103,6 +112,14 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 
 	if r.Context().Err() != nil {
 		return
+	}
+	// Record this tab's session against the logged-in user so it survives a
+	// browser/laptop crash and can be restored from /api/chat/threads. The
+	// conversation itself already lives on aimee-server; this only persists the
+	// ownership + lightweight metadata. Best-effort: a failure here must not
+	// break the chat response that already streamed.
+	if uerr := s.touchChatSession(currentUser(r), effectiveSID, cwd, req.Message); uerr != nil {
+		log.Printf("aimee-webchat: persist session %q: %v", effectiveSID, uerr)
 	}
 	if err != nil {
 		sseWrite(w, "error", map[string]string{"message": err.Error()})
@@ -156,23 +173,6 @@ func (s *server) handleChatProjects(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"current_root": currentRoot,
 		"projects":     projects,
-	})
-}
-
-// handleChatSession returns session state for the current browser session.
-func (s *server) handleChatSession(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
-		return
-	}
-
-	sid := r.URL.Query().Get("sid")
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"session_id":  sid,
-		"csrf":        "",
-		"prompt_tier": "standard",
 	})
 }
 
@@ -311,10 +311,13 @@ func (s *server) handleChatClear(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"status":"ok"}`)
 }
 
-// handleChatThreads returns empty threads for a session.
+// handleChatThreads is a stub for GET /api/chat/threads (in-tab conversation
+// branching — a separate, not-yet-implemented feature). It returns the empty
+// shape the SPA's ThreadBar expects. The per-user persisted tab list lives at
+// GET /api/chat/sessions (handleChatSessionsList), not here.
 func (s *server) handleChatThreads(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `[]`)
+	fmt.Fprintf(w, `{"threads":[],"active_id":0}`)
 }
 
 // handleChatBranch is a stub for POST /api/chat/branch.
@@ -339,9 +342,10 @@ func (s *server) handleChatRewind(w http.ResponseWriter, r *http.Request) {
 // for page paths it redirects to /login.
 func (s *server) requireAuth(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		var username string
 		cookie, err := r.Cookie("session")
 		if err == nil {
-			_, err = s.sessions.ValidateSession(cookie.Value)
+			username, err = s.sessions.ValidateSession(cookie.Value)
 		}
 		if err != nil {
 			if isAPIPath(r.URL.Path) {
@@ -353,7 +357,9 @@ func (s *server) requireAuth(h http.HandlerFunc) http.HandlerFunc {
 			http.Redirect(w, r, "/login", http.StatusFound)
 			return
 		}
-		h(w, r)
+		// Carry the validated username so handlers can scope persistence
+		// (chat sessions) to the logged-in user.
+		h(w, withUser(r, username))
 	}
 }
 
