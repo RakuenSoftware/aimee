@@ -9,7 +9,9 @@
 #   docker compose -f compose.combined.yaml up --build
 #
 # Server /v1 on :8740 (bearer "aimee-local-dev"); the in-container kb /v1 is also
-# published on :8741 for direct inspection.
+# published on :8741 for direct inspection. The aimee-webchat browser UI is on
+# https://localhost:8443 (self-signed; log in as AIMEE_WEBCHAT_USER /
+# AIMEE_WEBCHAT_PASSWORD, default aimee / aimee-local-dev).
 #   curl -H "Authorization: Bearer aimee-local-dev" http://localhost:8740/v1/health
 #   curl http://localhost:8741/v1/health?status=1
 services:
@@ -44,6 +46,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.combined
+      # webchat's SPA build needs a GitHub Packages token (see Dockerfile.combined).
+      # Sourced from the host $NPM_TOKEN; export it before `docker compose build`.
+      secrets:
+        - npm_token
     image: aimee-server-kb
     # The server's worker threads need a 64 MB stack (the 8 MB container default
     # overflows during startup — matches systemd's LimitSTACK=67108864).
@@ -57,9 +63,15 @@ services:
       AIMEE_SERVER_HTTP_BIND: "1"
       AIMEE_KB_HTTP_BIND: "1"
       AIMEE_KB_API_URL: http://127.0.0.1:8741
+      # Browser webchat (HTTPS on :8443). The entrypoint provisions this single
+      # login account via PAM; change it (and use a real password) for anything
+      # beyond local dev. Leave both unset to serve webchat with no account.
+      AIMEE_WEBCHAT_USER: aimee
+      AIMEE_WEBCHAT_PASSWORD: aimee-local-dev
     ports:
       - "8740:8740"
       - "8741:8741"
+      - "8443:8443"
     depends_on:
       postgres:
         condition: service_healthy
@@ -101,3 +113,9 @@ volumes:
   aimee-combined-postgres:
   aimee-embedder-models:
   aimee-llm-models:
+
+# Build-time secret for the webchat SPA's GitHub Packages dependency. Empty when
+# $NPM_TOKEN is unset (fine for public packages reachable with no token).
+secrets:
+  npm_token:
+    environment: NPM_TOKEN
