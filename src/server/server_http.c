@@ -1501,13 +1501,17 @@ static void handle_conn(int fd, int is_tcp)
       }
    }
 
-   /* Body via Content-Length (read remainder after the header block). */
+   /* Body via Content-Length (read remainder after the header block). Header
+    * names are case-insensitive (RFC 7230 §3.2): clients such as the Codex CLI
+    * (reqwest/hyper) send a lowercase `content-length`, so match it via the
+    * case-insensitive header lookup rather than a literal strstr — otherwise the
+    * body is never read and large POSTs misparse as empty. */
    char *body = NULL;
    int body_len = 0;
-   const char *cl = strstr(buf, "\r\nContent-Length: ");
-   if (cl)
+   char clbuf[32] = "";
+   if (http_header(buf, "Content-Length", clbuf, sizeof(clbuf)))
    {
-      body_len = atoi(cl + 18);
+      body_len = atoi(clbuf);
       if (body_len < 0)
          body_len = 0;
       if (body_len > SHTTP_MAX_BODY)
