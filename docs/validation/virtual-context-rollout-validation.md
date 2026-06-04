@@ -1,4 +1,4 @@
-# Virtual-Context Assembly — Rollout Validation Report
+# Virtual-Context Assembly: Rollout Validation Report
 
 Closes the operational acceptance criteria of
 [virtual-context-assembly-rollout-validation.md](../proposals/done/virtual-context-assembly-rollout-validation.md).
@@ -11,19 +11,19 @@ and the benchmark gate; this validates them for real and flips the default on.
 
 | Acceptance criterion | Status | Evidence |
 |---|---|---|
-| Gate passes on a real (non-synthetic) tool-heavy transcript | ✅ | §1 — `fixture_real_session.json` |
-| Manual inspection: compacted signal, not raw duplicate traffic; expand recovers raw | ✅ | §2 — `make virtual-context-inspect` |
+| Gate passes on a real (non-synthetic) tool-heavy transcript | ✅ | §1, `fixture_real_session.json` |
+| Manual inspection: compacted signal, not raw duplicate traffic; expand recovers raw | ✅ | §2, `make virtual-context-inspect` |
 | Operational metrics collected, no late-turn regression beyond 0.01 | ✅ | §1 (accuracy) + §3 (metrics surface) |
 | Default flipped to on with documented rollback | ✅ | §4 |
 | Dashboard + rebuild-backlog / expansion-failure alert thresholds | ✅ | §5 |
 
-## §1 — Real-session benchmark validation (AC#1)
+## §1: Real-session benchmark validation (AC#1)
 
 `run_eval.py` now takes a repeatable `--fixture` flag and the
 `virtual-context-eval-check` make target runs **two** fixtures: the original
 synthetic one and a new non-synthetic `fixture_real_session.json` captured from
 a real aimee coding session (each chain is a real Read/Bash/Edit chain over real
-repository files; every oracle answer is a symbol that exists in this repo —
+repository files; every oracle answer is a symbol that exists in this repo:
 `run_eval.py`, `virtual_context_enabled`, `build_stub`, `db1_conv_list_chains`).
 
 ```
@@ -53,12 +53,12 @@ budget, budget-truncated raw history drops the old long-context answers
 1.00`), with **no overall regression** (compacted ≥ baseline by +0.50, well
 inside the 0.01 tolerance). AC#3's "no regression beyond 0.01" holds.
 
-## §2 — Manual inspection (AC#2)
+## §2: Manual inspection (AC#2)
 
 `make virtual-context-inspect` builds and runs `inspect_real_session.c`, which
 drives the **real** public path with the flag on
 (`conv_ctx_record_event` → `conv_ctx_flush_pending` → `conv_ctx_assemble`, plus
-`db1_conv_search_chains` / `db1_conv_chain_events` — the same functions the
+`db1_conv_search_chains` / `db1_conv_chain_events`, the same functions the
 `session_context_search` / `_expand` / `_status` MCP tools wrap) over a
 realistic 7-event tool-heavy sequence. No LLM or network required, so it is a
 reproducible inspection artifact rather than a one-off screenshot.
@@ -93,7 +93,7 @@ This confirms the three things the parent Test Plan asked a human to check:
 3. **Expand recovers raw on demand.** `session_context_expand` (via
    `db1_conv_chain_events`) returns the raw events behind a stub.
 
-## §3 — Operational metrics (AC#3)
+## §3: Operational metrics (AC#3)
 
 `tool_session_context_status` now returns a `metrics` object derived from the
 session's chains, giving the dashboard real data:
@@ -114,11 +114,11 @@ Exposed keys: `session_context_segments_total`,
 `session_context_bytes_saved`, `compression_ratio` (plus the existing
 `event_count` / `chain_count` / `pending_events` fields).
 
-## §4 — Default flip + rollback (AC#4)
+## §4: Default flip + rollback (AC#4)
 
 `config.c` now initializes `virtual_context_enabled = 1` (was `0`); the header
 documents the new default. The full unit suite (`make unit-tests`, ~200
-binaries) passes with the flag on by default — the only test that assumed the
+binaries) passes with the flag on by default; the only test that assumed the
 compiled-off default (`test_assemble_disabled`) was updated to disable the flag
 explicitly via config.
 
@@ -127,14 +127,14 @@ explicitly via config.
 the feature reverts with no schema loss. Blast radius is prompt-assembly quality
 for long sessions; failure degrades to larger prompts, not data loss.
 
-## §5 — Dashboard + alerts (AC#5)
+## §5: Dashboard + alerts (AC#5)
 
 - [`docs/observability/virtual-context-dashboard.json`](../observability/virtual-context-dashboard.json)
-  — 7-panel Grafana dashboard over the metrics above (segments, stubbed,
+  is a 7-panel Grafana dashboard over the metrics above (segments, stubbed,
   compression ratio, pending events, bytes saved, assembly latency p50/p95, and
   stub-expansion ok/error rate).
 - [`docs/observability/virtual-context-alerts.md`](../observability/virtual-context-alerts.md)
-  — the **RebuildBacklog** alert (pending events accumulate while no segments
+  defines the **RebuildBacklog** alert (pending events accumulate while no segments
   emit → auto-flush stalled) and the **ExpandFailure** alert (>5% expand error
   rate → raw recovery broken), each with PromQL, for-duration, severity, and
   rationale, plus the rollback note.

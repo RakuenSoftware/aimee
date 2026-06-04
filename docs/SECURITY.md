@@ -119,7 +119,7 @@ The primary attack surfaces are:
 
 7. aimee-server `/v1` HTTP listener (optional, off by default)
    - A loopback-only TCP endpoint (`http://127.0.0.1:<port>/v1`) turned on with `aimee api enable`; it exposes the OpenAI-compatible surface to local editors
-   - Bearer-authenticated, per-bearer rate-limited, and gated by token scope — a scoped token is denied with `403` when it requests an action outside its grant
+   - Bearer-authenticated, per-bearer rate-limited, and gated by token scope; a scoped token is denied with `403` when it requests an action outside its grant
    - Main concern: bearer theft by a same-host process, overbroad token scope, or exposing the port past loopback through a misconfigured proxy
 
 8. aimee-kb (DB2) transport
