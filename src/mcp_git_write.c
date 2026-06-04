@@ -218,19 +218,16 @@ cJSON *handle_git_push(cJSON *args)
       return mcp_text("error: branch has a merged PR. Do not push to merged branches. "
                       "Create a new branch for new work.");
 
-   /* Verify gate: only enforced when enforce: true in project.yaml */
+   /* Verify gate. verify_gate_blocks honors scope (current project only unless
+    * cross-project verify is enabled) and the global verify master switch, and
+    * never auto-generates config for an out-of-scope/unconfigured repo. */
    {
-      const char *verify_root = run_cmd_get_cwd();
-      verify_config_t vcfg;
-      if (verify_load_config(verify_root, &vcfg) == 0 && vcfg.enforce)
+      char verify_msg[256];
+      if (verify_gate_blocks(run_cmd_get_cwd(), NULL, verify_msg, sizeof(verify_msg)))
       {
-         char verify_msg[256];
-         if (!verify_check(verify_root, NULL, verify_msg, sizeof(verify_msg)))
-         {
-            char buf[512];
-            snprintf(buf, sizeof(buf), "error: push blocked: %s", verify_msg);
-            return mcp_text(buf);
-         }
+         char buf[512];
+         snprintf(buf, sizeof(buf), "error: push blocked: %s", verify_msg);
+         return mcp_text(buf);
       }
    }
 
