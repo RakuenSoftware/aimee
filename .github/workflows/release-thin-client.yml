@@ -150,9 +150,14 @@ jobs:
     # was supplied via call/dispatch (the orchestrator created the tag first).
     if: ${{ inputs.version != '' || startsWith(github.ref, 'refs/tags/') }}
     steps:
-      - name: Download all artifacts
+      # Scope to the thin-client binaries only. When invoked via auto-release
+      # (workflow_call), the publish-images workflow shares this run and uploads
+      # digest-* artifacts too; an unscoped download would pull those into dist/
+      # (and onto the Release) and widen the flaky-download surface.
+      - name: Download thin-client artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: aimee-*
           path: dist
           merge-multiple: true
       - name: Publish release
