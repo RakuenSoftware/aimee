@@ -691,6 +691,14 @@ int config_load(config_t *cfg)
    if (cJSON_IsBool(item))
       cfg->autonomous = cJSON_IsTrue(item);
 
+   item = cJSON_GetObjectItemCaseSensitive(root, "verify_enabled");
+   if (cJSON_IsBool(item))
+      cfg->verify_enabled = cJSON_IsTrue(item);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "verify_cross_project");
+   if (cJSON_IsBool(item))
+      cfg->verify_cross_project = cJSON_IsTrue(item);
+
    item = cJSON_GetObjectItemCaseSensitive(root, "embedding_command");
    if (cJSON_IsString(item) && item->valuestring[0])
       snprintf(cfg->embedding_command, sizeof(cfg->embedding_command), "%s", item->valuestring);

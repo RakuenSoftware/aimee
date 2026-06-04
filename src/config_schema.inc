@@ -31,6 +31,8 @@
 {"memory", SCHEMA_OBJECT, 0},
 {"workspaces", SCHEMA_ARRAY, 0},
 {"autonomous", SCHEMA_BOOL, 0},
+{"verify_enabled", SCHEMA_BOOL, 0},
+{"verify_cross_project", SCHEMA_BOOL, 0},
 {"cross_verify", SCHEMA_OBJECT, 0},
 {"retry", SCHEMA_OBJECT, 0},
 {"max_iterations", SCHEMA_INT, 0},

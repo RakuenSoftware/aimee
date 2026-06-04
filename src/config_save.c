@@ -634,6 +634,12 @@ int config_save(const config_t *cfg)
          cJSON_AddItemToArray(ws, cJSON_CreateString(cfg->workspaces[i]));
    }
 
+   /* Verify gating: only persist when enabled (default-off is the absence). */
+   if (cfg->verify_enabled)
+      cJSON_AddBoolToObject(root, "verify_enabled", 1);
+   if (cfg->verify_cross_project)
+      cJSON_AddBoolToObject(root, "verify_cross_project", 1);
+
    /* Cross-verification */
    if (cfg->cross_verify || cfg->verify_cmd[0] || cfg->verify_role[0])
    {

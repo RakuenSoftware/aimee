@@ -45,6 +45,18 @@ typedef struct
  * verify section found. project_root may be NULL (uses cwd). */
 int verify_load_config(const char *project_root, verify_config_t *cfg);
 
+/* Verify scope gate. Returns 1 if target_repo_root is in scope for
+ * verification — either cross-project verify is enabled in config, or the
+ * target resolves to the same canonical main repo as one of the session's
+ * registered worktrees (i.e. it is the session's current project). Returns 0
+ * for a cross-project repository when cross-project verify is disabled (the
+ * default). A session with no registered worktree mapping is treated as in
+ * scope so plain single-repo CLI use is unaffected. project_root may be NULL.
+ *
+ * When this returns 0, callers must skip verify entirely: do not load or
+ * auto-generate project.yaml, do not run steps, and do not gate the push/PR. */
+int verify_project_in_scope(const char *target_repo_root);
+
 /* Check whether the last verification is still valid.
  * Valid means: tree hash of HEAD matches a stored entry AND within TTL (3600s).
  * expected_commit: if non-NULL, this commit SHA is resolved to its tree hash
@@ -55,6 +67,15 @@ int verify_load_config(const char *project_root, verify_config_t *cfg);
  * returns 1 (no gate). Returns 1 if valid, 0 if verification required. */
 int verify_check(const char *project_root, const char *expected_commit, char *msg_buf,
                  size_t msg_len);
+
+/* Unified push/PR verify gate. Returns 1 if the operation should be BLOCKED
+ * (msg filled with the reason), 0 if allowed. Encapsulates scope
+ * (verify_project_in_scope), the global verify_enabled master switch, config
+ * resolution (no auto-generation for an unconfigured repo while verify is
+ * disabled), the per-project enforce flag, and the freshness check. msg may be
+ * NULL. target_root may be NULL; expected_commit may be NULL. */
+int verify_gate_blocks(const char *target_root, const char *expected_commit, char *msg,
+                       size_t msg_len);
 
 /* Compute the tree hash (HEAD^{tree}) for the given directory.
  * Using the tree hash rather than the commit hash means squash-merges and
