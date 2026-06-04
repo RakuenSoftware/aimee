@@ -253,6 +253,10 @@ static const struct
     {"aux", "config", "aux.config_show", NULL, NULL, 0},
     {"aux", "test", "aux.test", NULL, NULL, 300000},
     {"aux", "", "aux.config_show", NULL, NULL, 0},
+    {"config", "show", "config.show", NULL, NULL, 0},
+    {"config", "get", "config.get", NULL, NULL, 0},
+    {"config", "set", "config.set", NULL, NULL, 0},
+    {"config", "", "config.show", NULL, NULL, 0},
     {"episode", "list", "episode.list", NULL, "episodes", 0},
     {"trigger", "list", "trigger.list", NULL, "triggers", 0},
     {"trigger", "status", "trigger.status", NULL, NULL, 0},
@@ -887,6 +891,30 @@ static cJSON *marshal_wm_list(int argc, char **argv)
    const char *v;
    if ((v = rpc_get(&opts, "category")))
       cJSON_AddStringToObject(req, "category", v);
+   return req;
+}
+
+static cJSON *marshal_config_get(int argc, char **argv)
+{
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
+
+   cJSON *req = marshal_no_args("config.get");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "key", opts.positional[0]);
+   return req;
+}
+
+static cJSON *marshal_config_set(int argc, char **argv)
+{
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
+
+   cJSON *req = marshal_no_args("config.set");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "key", opts.positional[0]);
+   if (opts.pos_count > 1)
+      cJSON_AddStringToObject(req, "value", opts.positional[1]);
    return req;
 }
 
@@ -2886,6 +2914,12 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_job_id_request(method, argc, argv);
    if (strcmp(method, "aux.config_show") == 0)
       return marshal_no_args(method);
+   if (strcmp(method, "config.show") == 0)
+      return marshal_no_args(method);
+   if (strcmp(method, "config.get") == 0)
+      return marshal_config_get(argc, argv);
+   if (strcmp(method, "config.set") == 0)
+      return marshal_config_set(argc, argv);
    if (strcmp(method, "aux.test") == 0)
       return marshal_aux_test(argc, argv);
    if (strcmp(method, "delegate.log") == 0)
@@ -5054,6 +5088,47 @@ static void pt_print_wm_set(const char *method, cJSON *resp)
    if (cJSON_IsString(k) && cJSON_IsString(v))
       printf("set %s = %s\n", k->valuestring, v->valuestring);
 }
+static void pt_print_config_value(cJSON *v)
+{
+   if (cJSON_IsString(v))
+      printf("%s\n", v->valuestring[0] ? v->valuestring : "(unset)");
+   else if (cJSON_IsBool(v))
+      printf("%s\n", cJSON_IsTrue(v) ? "true" : "false");
+   else if (cJSON_IsNumber(v))
+   {
+      double d = v->valuedouble;
+      if (d == (double)(long)d)
+         printf("%ld\n", (long)d);
+      else
+         printf("%g\n", d);
+   }
+   else
+      printf("(unset)\n");
+}
+static void pt_print_config_get(const char *method, cJSON *resp)
+{
+   (void)method;
+   pt_print_config_value(cJSON_GetObjectItemCaseSensitive(resp, "value"));
+}
+static void pt_print_config_set(const char *method, cJSON *resp)
+{
+   (void)method;
+   cJSON *k = cJSON_GetObjectItemCaseSensitive(resp, "key");
+   cJSON *v = cJSON_GetObjectItemCaseSensitive(resp, "value");
+   printf("set %s = ", cJSON_IsString(k) ? k->valuestring : "?");
+   pt_print_config_value(v);
+}
+static void pt_print_config_show(const char *method, cJSON *resp)
+{
+   (void)method;
+   cJSON *cfg = cJSON_GetObjectItemCaseSensitive(resp, "config");
+   char *s = cJSON_Print(cfg ? cfg : resp);
+   if (s)
+   {
+      printf("%s\n", s);
+      free(s);
+   }
+}
 static void pt_print_wm_list(const char *method, cJSON *resp)
 {
    cJSON *entries = cJSON_GetObjectItemCaseSensitive(resp, "entries");
@@ -5916,6 +5991,9 @@ static const struct
     {"job.status", pt_print_job_status},
     {"job.cancel", pt_print_job_cancel},
     {"aux.config_show", pt_print_aux_config_show},
+    {"config.show", pt_print_config_show},
+    {"config.get", pt_print_config_get},
+    {"config.set", pt_print_config_set},
     {"aux.test", pt_print_aux_test},
     {"delegate.log", pt_print_delegate_log},
     {"episode.list", pt_print_delegate_log},
