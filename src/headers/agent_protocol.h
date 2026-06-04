@@ -43,9 +43,9 @@ struct cJSON *agent_build_request_anthropic(const agent_t *agent, struct cJSON *
 /* Build a Gemini generateContent request.
  * cache_name: "cachedContents/..." from gemini_prompt_cache_create(), or "" for uncached. */
 struct cJSON *agent_build_request_gemini(const agent_t *agent, struct cJSON *messages,
-                                          struct cJSON *tools, const char *system_prompt,
-                                          int max_tokens, double temperature,
-                                          const char *cache_name);
+                                         struct cJSON *tools, const char *system_prompt,
+                                         int max_tokens, double temperature,
+                                         const char *cache_name);
 
 /* --- Response parsers --- */
 

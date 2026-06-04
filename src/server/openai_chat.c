@@ -23,6 +23,10 @@
 #include "config.h"                 /* config_t, config_load */
 #include "agent_config.h"
 #include "agent_exec.h"
+#include "agent_protocol.h"  /* parsed_response_t, message_history_repair */
+#include "delegate_driver.h" /* single provider step for the Codex proxy */
+#include "http_retry.h"
+#include "cJSON.h"
 #include "agent_tools.h" /* agent_tools_set_tool_event_cb — /v1/runs tool events */
 #include "agent_types.h"
 #include "memory.h" /* memory_embed_text */
@@ -152,6 +156,131 @@ static int models_provider(char ids[][SERVER_HTTP_MODEL_ID_MAX], int max)
       k++;
    }
    return k;
+}
+
+/* Append one Codex model-discovery entry (the proprietary schema Codex's model
+ * manager expects). slug is what Codex echoes in the request `model` field to
+ * select this primary-agent model. The full field set mirrors Codex's own
+ * models cache so its deserializer accepts the entry. */
+static void codex_add_model(cJSON *models, const char *slug, const char *description,
+                            int context_window)
+{
+   cJSON *m = cJSON_CreateObject();
+   if (!m)
+      return;
+   cJSON_AddStringToObject(m, "slug", slug);
+   cJSON_AddStringToObject(m, "display_name", slug);
+   cJSON_AddStringToObject(m, "description",
+                           description && description[0] ? description : "Aimee primary agent.");
+   cJSON_AddStringToObject(m, "default_reasoning_level", "medium");
+   cJSON *levels = cJSON_AddArrayToObject(m, "supported_reasoning_levels");
+   static const char *const effs[] = {"low", "medium", "high"};
+   for (int i = 0; levels && i < 3; i++)
+   {
+      cJSON *lv = cJSON_CreateObject();
+      cJSON_AddStringToObject(lv, "effort", effs[i]);
+      cJSON_AddStringToObject(lv, "description", effs[i]);
+      cJSON_AddItemToArray(levels, lv);
+   }
+   cJSON_AddStringToObject(m, "shell_type", "shell_command");
+   cJSON_AddStringToObject(m, "visibility", "list");
+   cJSON_AddBoolToObject(m, "supported_in_api", 1);
+   cJSON_AddNumberToObject(m, "priority", 1);
+   cJSON_AddItemToObject(m, "additional_speed_tiers", cJSON_CreateArray());
+   cJSON_AddItemToObject(m, "service_tiers", cJSON_CreateArray());
+   cJSON *nux = cJSON_AddObjectToObject(m, "availability_nux");
+   if (nux)
+      cJSON_AddStringToObject(nux, "message", "");
+   cJSON_AddNullToObject(m, "upgrade");
+   cJSON_AddStringToObject(m, "base_instructions", "");
+   cJSON *mm = cJSON_AddObjectToObject(m, "model_messages");
+   if (mm)
+   {
+      cJSON_AddStringToObject(mm, "instructions_template", "");
+      cJSON_AddObjectToObject(mm, "instructions_variables");
+   }
+   cJSON_AddBoolToObject(m, "supports_reasoning_summaries", 0);
+   cJSON_AddStringToObject(m, "default_reasoning_summary", "none");
+   cJSON_AddBoolToObject(m, "support_verbosity", 0);
+   cJSON_AddStringToObject(m, "default_verbosity", "low");
+   cJSON_AddStringToObject(m, "apply_patch_tool_type", "freeform");
+   cJSON_AddStringToObject(m, "web_search_tool_type", "text_and_image");
+   cJSON *trunc = cJSON_AddObjectToObject(m, "truncation_policy");
+   if (trunc)
+   {
+      cJSON_AddStringToObject(trunc, "mode", "tokens");
+      cJSON_AddNumberToObject(trunc, "limit", 10000);
+   }
+   cJSON_AddBoolToObject(m, "supports_parallel_tool_calls", 1);
+   cJSON_AddBoolToObject(m, "supports_image_detail_original", 0);
+   cJSON_AddNumberToObject(m, "context_window", context_window);
+   cJSON_AddNumberToObject(m, "max_context_window", context_window);
+   cJSON_AddNumberToObject(m, "effective_context_window_percent", 95);
+   cJSON_AddItemToObject(m, "experimental_supported_tools", cJSON_CreateArray());
+   cJSON *mods = cJSON_AddArrayToObject(m, "input_modalities");
+   if (mods)
+      cJSON_AddItemToArray(mods, cJSON_CreateString("text"));
+   cJSON_AddBoolToObject(m, "supports_search_tool", 0);
+   cJSON_AddItemToArray(models, m);
+}
+
+/* GET /v1/models (raw): emit the Codex `{models:[…]}` discovery schema from the
+ * registered primary-agent models, alongside the OpenAI `{object,data}` list for
+ * other clients. One `models` entry per agent (plus the default "aimee"); the
+ * slug is the id Codex puts in the request `model` field to switch models. */
+#define CODEX_DEFAULT_CONTEXT_WINDOW 272000
+static int codex_models_raw(char *resp, int cap)
+{
+   agent_config_t acfg;
+   if (agent_load_config(&acfg) != 0)
+      return -1;
+
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+      return -1;
+   cJSON_AddStringToObject(root, "object", "list");
+   cJSON *data = cJSON_AddArrayToObject(root, "data");
+   cJSON *models = cJSON_AddArrayToObject(root, "models");
+   if (!data || !models)
+   {
+      cJSON_Delete(root);
+      return -1;
+   }
+
+   /* Always advertise the default "aimee" model, then each named agent. */
+   int seen_aimee = 0;
+   codex_add_model(models, "aimee", "Aimee primary agent.", CODEX_DEFAULT_CONTEXT_WINDOW);
+   cJSON *de = cJSON_CreateObject();
+   cJSON_AddStringToObject(de, "id", "aimee");
+   cJSON_AddStringToObject(de, "object", "model");
+   cJSON_AddStringToObject(de, "owned_by", "aimee");
+   cJSON_AddItemToArray(data, de);
+
+   for (int i = 0; i < acfg.agent_count; i++)
+   {
+      const char *nm = acfg.agents[i].name;
+      if (!nm || !nm[0] || strcmp(nm, "aimee") == 0)
+      {
+         if (nm && strcmp(nm, "aimee") == 0)
+            seen_aimee = 1;
+         continue;
+      }
+      codex_add_model(models, nm, acfg.agents[i].model, CODEX_DEFAULT_CONTEXT_WINDOW);
+      cJSON *e = cJSON_CreateObject();
+      cJSON_AddStringToObject(e, "id", nm);
+      cJSON_AddStringToObject(e, "object", "model");
+      cJSON_AddStringToObject(e, "owned_by", "aimee");
+      cJSON_AddItemToArray(data, e);
+   }
+   (void)seen_aimee;
+
+   char *s = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!s)
+      return -1;
+   int len = snprintf(resp, (size_t)cap, "%s", s);
+   free(s);
+   return (len < 0 || len >= cap) ? -1 : len;
 }
 
 /* POST /v1/embeddings: embed each input via the configured embedder
@@ -520,23 +649,94 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
    return 0;
 }
 
-/* SSE streaming for POST /v1/responses (stream:true). The Responses API uses
- * typed events: a `response.created`, then `response.output_text.delta` events
- * carrying the text (chunked), then a terminal `response.completed` with the
- * full response object. Honours previous_response_id continuation and persists
- * the turn just like the unary handler. Compute-then-chunk first cut. */
+/* Single provider step for the Codex proxy: build the request for `agent`'s
+ * provider from a caller-supplied messages array and passthrough `tools`, POST
+ * it, and parse the reply into *out. Unlike agent_run_with_tools this does NOT
+ * execute tool calls — out->calls[] surfaces them so the handler can relay them
+ * to Codex. Returns 0 on success, -1 on transport/parse failure. *out is zeroed
+ * here; the caller frees it with agent_free_parsed_response(). */
+static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *tools,
+                                  const char *system_prompt, int max_tokens, double temperature,
+                                  parsed_response_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   if (!agent || !messages)
+      return -1;
+
+   delegate_drivers_init();
+   const delegate_driver_t *driver = delegate_driver_get(agent->provider);
+   if (!driver || !driver->build_request || !driver->parse_response)
+      return -1;
+
+   char url[MAX_ENDPOINT_LEN + 64];
+   if (delegate_build_url(driver, agent, url, sizeof(url)) != 0)
+      return -1;
+
+   char auth_header[MAX_API_KEY_LEN + 32];
+   if (agent_resolve_auth(agent, auth_header, sizeof(auth_header)) != 0)
+      return -1;
+   char extra_headers[512];
+   agent_build_extra_headers(agent, extra_headers, sizeof(extra_headers));
+
+   int tok = (max_tokens > 0) ? max_tokens : agent->max_tokens;
+   cJSON *req = driver->build_request(agent, messages, tools, system_prompt, tok, temperature);
+   if (!req)
+      return -1;
+   char *body = cJSON_PrintUnformatted(req);
+   cJSON_Delete(req);
+   if (!body)
+      return -1;
+
+   char *response_body = NULL;
+   config_t retry_cfg;
+   config_load(&retry_cfg);
+   int ra =
+       retry_cfg.retry_max_attempts > 0 ? retry_cfg.retry_max_attempts : HTTP_RETRY_MAX_ATTEMPTS;
+   int rb = retry_cfg.retry_base_ms > 0 ? retry_cfg.retry_base_ms : HTTP_RETRY_BASE_MS;
+   int rm = retry_cfg.retry_max_ms > 0 ? retry_cfg.retry_max_ms : HTTP_RETRY_MAX_MS;
+   int http_status =
+       http_retry_post_context(url, auth_header, body, &response_body, agent->timeout_ms,
+                               extra_headers, ra, rb, rm, agent->provider, agent->model, NULL);
+   free(body);
+
+   if (http_status != 200 || !response_body)
+   {
+      free(response_body);
+      return -1;
+   }
+
+   cJSON *root = cJSON_Parse(response_body);
+   driver->parse_response(root, response_body, out);
+   if (root)
+      cJSON_Delete(root);
+   free(response_body);
+   return 0;
+}
+
+/* SSE streaming for POST /v1/responses — full Codex parity. Converts the Codex
+ * Responses request into the OpenAI chat shape (instructions -> system, the
+ * message / function_call / function_call_output history -> chat messages,
+ * `function` tools passed through), runs ONE provider step on the selected
+ * primary agent (NO internal tool loop), and relays the result as Responses-API
+ * events: either a message item (text) or function_call items that Codex
+ * executes locally and feeds back as function_call_output next turn. The Codex
+ * parser requires output_item.added before any delta, so every turn is framed
+ * created -> item.added -> delta(s) -> item.done -> completed. Compute-then-chunk. */
 static int responses_stream_handler(const char *body, server_http_sse_event_emit emit, void *ctx)
 {
    char model[64] = "";
-   char prev_id[128] = "";
-   char *prompt = NULL;
+   char *instructions = NULL;
+   cJSON *messages = NULL;
+   cJSON *tools = NULL;
    int stream = 0;
    long created = (long)time(NULL);
    char id[64];
    responses_mint_id(created, id, sizeof(id));
    char frame[2048];
 
-   if (openai_parse_responses_request(body, model, sizeof(model), &prompt, prev_id, sizeof(prev_id),
+   if (openai_parse_responses_to_chat(body, model, sizeof(model), &instructions, &messages, &tools,
                                       &stream) != 0)
    {
       if (openai_format_responses_created(id, model, created, frame, sizeof(frame)) > 0)
@@ -544,9 +744,12 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
       if (openai_format_responses_completed(id, model, "invalid responses request", created, 0, 0,
                                             frame, sizeof(frame)) > 0)
          emit(ctx, "response.completed", frame);
-      free(prompt);
+      free(instructions);
+      cJSON_Delete(messages);
+      cJSON_Delete(tools);
       return 0;
    }
+   (void)stream; /* this handler is the streaming path; flag is informational */
 
    agent_config_t acfg;
    agent_t *ag = stream_pick_agent(&acfg, model);
@@ -557,70 +760,127 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
       if (openai_format_responses_completed(id, model, "no agent configured", created, 0, 0, frame,
                                             sizeof(frame)) > 0)
          emit(ctx, "response.completed", frame);
-      free(prompt);
+      free(instructions);
+      cJSON_Delete(messages);
+      cJSON_Delete(tools);
       return 0;
    }
 
    double temperature = openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0);
    int max_tokens = openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768);
 
-   /* Continuation: prepend a prior turn's transcript when chaining. */
-   char *full = prompt;
-   char *combined = NULL;
-   char prev[OPENAI_RESP_TRANSCRIPT_MAX];
-   if (prev_id[0] && openai_responses_store_get(prev_id, prev, sizeof(prev)) && prev[0])
-   {
-      size_t need = strlen(prev) + 1 + strlen(prompt) + 1;
-      combined = malloc(need);
-      if (combined)
-      {
-         snprintf(combined, need, "%s\n%s", prev, prompt);
-         full = combined;
-      }
-   }
+   /* Heal orphaned tool calls/results — each Codex turn is stateless full-history. */
+   message_history_repair(messages);
 
-   agent_result_t result;
-   memset(&result, 0, sizeof(result));
-   int erc = agent_execute(ag, NULL, full, max_tokens, temperature, &result);
+   parsed_response_t parsed;
+   int erc =
+       agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature, &parsed);
 
    if (openai_format_responses_created(id, model, created, frame, sizeof(frame)) > 0)
       emit(ctx, "response.created", frame);
 
-   char item_id[72];
-   snprintf(item_id, sizeof(item_id), "%s-msg", id);
-   const char *txt = (erc == 0 && result.response)
-                         ? result.response
-                         : (result.error[0] ? result.error : "response failed");
-
-   size_t n = strlen(txt);
-   for (size_t off = 0; off < n; off += OPENAI_STREAM_CHUNK)
+   if (erc == 0 && parsed.is_tool_call && parsed.call_count > 0)
    {
-      char seg[OPENAI_STREAM_CHUNK + 1];
-      size_t take = (n - off < OPENAI_STREAM_CHUNK) ? (n - off) : OPENAI_STREAM_CHUNK;
-      memcpy(seg, txt + off, take);
-      seg[take] = '\0';
-      char dframe[OPENAI_STREAM_CHUNK * 6 + 256];
-      if (openai_format_responses_delta(item_id, seg, dframe, sizeof(dframe)) > 0)
-         emit(ctx, "response.output_text.delta", dframe);
+      /* Tool calls: relay each as a function_call item for Codex to execute. */
+      cJSON *output = cJSON_CreateArray();
+      for (int i = 0; i < parsed.call_count; i++)
+      {
+         const char *name = parsed.calls[i].name;
+         const char *cid = parsed.calls[i].id;
+         const char *args = parsed.calls[i].arguments ? parsed.calls[i].arguments : "{}";
+         char fc_id[80];
+         snprintf(fc_id, sizeof(fc_id), "%s-fc-%d", id, i);
+
+         char added[256];
+         if (openai_format_responses_fc_item_added(fc_id, cid, name, i, added, sizeof(added)) > 0)
+            emit(ctx, "response.output_item.added", added);
+
+         size_t acap = strlen(args) * 6 + 256;
+         char *af = malloc(acap);
+         if (af)
+         {
+            if (openai_format_responses_fc_args_delta(fc_id, i, args, af, (int)acap) > 0)
+               emit(ctx, "response.function_call_arguments.delta", af);
+            if (openai_format_responses_fc_args_done(fc_id, i, args, af, (int)acap) > 0)
+               emit(ctx, "response.function_call_arguments.done", af);
+            free(af);
+         }
+
+         size_t dcap = strlen(args) * 6 + strlen(name) + strlen(cid) + 512;
+         char *df = malloc(dcap);
+         if (df)
+         {
+            if (openai_format_responses_fc_item_done(fc_id, cid, name, args, i, df, (int)dcap) > 0)
+               emit(ctx, "response.output_item.done", df);
+            free(df);
+         }
+         if (output)
+            cJSON_AddItemToArray(
+                output, openai_responses_function_call_item(fc_id, cid, name, args, "completed"));
+      }
+
+      size_t ccap = 4096;
+      for (int i = 0; i < parsed.call_count; i++)
+         ccap += (parsed.calls[i].arguments ? strlen(parsed.calls[i].arguments) : 0) * 6 + 256;
+      char *cf = malloc(ccap);
+      if (cf)
+      {
+         if (openai_format_responses_completed_items(id, model, created, output,
+                                                     parsed.prompt_tokens, parsed.completion_tokens,
+                                                     cf, (int)ccap) > 0)
+            emit(ctx, "response.completed", cf);
+         free(cf);
+      }
+      else
+         cJSON_Delete(output);
+   }
+   else
+   {
+      /* Text turn: a single assistant message item carrying the content. */
+      const char *txt =
+          (erc == 0 && parsed.content) ? parsed.content : "the model returned no content";
+      char item_id[72];
+      snprintf(item_id, sizeof(item_id), "%s-msg", id);
+
+      if (openai_format_responses_msg_item_added(item_id, 0, frame, sizeof(frame)) > 0)
+         emit(ctx, "response.output_item.added", frame);
+
+      size_t n = strlen(txt);
+      for (size_t off = 0; off < n; off += OPENAI_STREAM_CHUNK)
+      {
+         char seg[OPENAI_STREAM_CHUNK + 1];
+         size_t take = (n - off < OPENAI_STREAM_CHUNK) ? (n - off) : OPENAI_STREAM_CHUNK;
+         memcpy(seg, txt + off, take);
+         seg[take] = '\0';
+         char dframe[OPENAI_STREAM_CHUNK * 6 + 256];
+         if (openai_format_responses_delta(item_id, seg, dframe, sizeof(dframe)) > 0)
+            emit(ctx, "response.output_text.delta", dframe);
+      }
+
+      size_t icap = n * 6 + 512;
+      char *itf = malloc(icap);
+      if (itf)
+      {
+         if (openai_format_responses_msg_item_done(item_id, txt, 0, itf, (int)icap) > 0)
+            emit(ctx, "response.output_item.done", itf);
+         free(itf);
+      }
+
+      size_t ccap = n * 6 + 1024;
+      char *cf = malloc(ccap);
+      if (cf)
+      {
+         if (openai_format_responses_completed(id, model, txt, created, parsed.prompt_tokens,
+                                               parsed.completion_tokens, cf, (int)ccap) > 0)
+            emit(ctx, "response.completed", cf);
+         free(cf);
+      }
    }
 
-   if (erc == 0 && result.response)
-      responses_store_turn(id, full, result.response);
-
-   /* Terminal completed event carries the full output text — size for it. */
-   size_t cn = n + 512;
-   char *cframe = malloc(cn);
-   if (cframe)
-   {
-      if (openai_format_responses_completed(id, model, txt, created, result.prompt_tokens,
-                                            result.completion_tokens, cframe, (int)cn) > 0)
-         emit(ctx, "response.completed", cframe);
-      free(cframe);
-   }
-
-   free(result.response);
-   free(prompt);
-   free(combined);
+   agent_free_parsed_response(&parsed);
+   free(instructions);
+   cJSON_Delete(messages);
+   cJSON_Delete(tools);
    return 0;
 }
 
@@ -878,4 +1138,5 @@ void openai_chat_register(void)
    server_http_set_embeddings_handler(embeddings_handler);
    server_http_set_responses_handler(responses_handler);
    server_http_set_models_provider(models_provider);
+   server_http_set_models_raw_provider(codex_models_raw);
 }
