@@ -746,7 +746,13 @@ $(WEBCHAT): $(WEBCHAT_GO_SRCS)
 
 # Server (daemon). DB2-bound work routes through kb_client to aimee-kb;
 # keep this target free of DB2_OBJS and libpq.
-$(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS)
+#
+# aimee_client.o resolves the dependency-free remote-target accessors
+# (aimee_client_remote_active / _token) that cli_rpc_client_endpoint now calls to
+# synthesize a tcp: endpoint from a --server / AIMEE_SERVER_URL / remote.conf
+# target. --gc-sections drops the rest of aimee_client (the actual TCP/TLS
+# transport), so no extra net/tls/uds objects are needed here.
+$(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS) $(OBJDIR)/aimee_client.o
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_SERVER)
 
@@ -764,7 +770,9 @@ $(KB): $(KB_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(KB_DA
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_KB)
 
-$(GATEWAY): $(GATEWAY_OBJS)
+# aimee_client.o for the same reason as $(SERVER): cli_rpc_client_endpoint calls
+# the dependency-free remote-target accessors; --gc-sections drops the transport.
+$(GATEWAY): $(GATEWAY_OBJS) $(OBJDIR)/aimee_client.o
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_GATEWAY)
 

@@ -409,8 +409,12 @@ $(TESTPREFIX)/unit-test-context-discover: $(OBJDIR)/tests/test_context_discover.
 $(TESTPREFIX)/unit-test-cli-mcp-serve: $(OBJDIR)/tests/test_cli_mcp_serve.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
+# aimee_client.o resolves the remote-target accessors cli_rpc_client_endpoint now
+# calls (it synthesizes a tcp: endpoint from a --server/AIMEE_SERVER_URL target).
+# --gc-sections drops the rest of the transport, which this marshalling test
+# never calls.
 $(TESTPREFIX)/unit-test-cli-rpc-delegate: $(OBJDIR)/tests/test_cli_rpc_delegate.o \
-                                  $(OBJDIR)/cJSON.o $(OBJDIR)/posix/util.o
+                                  $(OBJDIR)/cJSON.o $(OBJDIR)/posix/util.o $(OBJDIR)/aimee_client.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-cli-server-compat: $(OBJDIR)/tests/test_cli_server_compat.o \

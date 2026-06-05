@@ -53,6 +53,13 @@ extern "C"
     * diagnostics; desc_sz is its buffer size. */
    int aimee_client_remote_active(char *desc_out, unsigned long desc_sz);
 
+   /* Returns 1 if a remote target is in effect and copies its bearer token (the
+    * second remote.conf line / --server-token / AIMEE_SERVER_TOKEN) into *tok_out
+    * (empty string when the target has no token), else 0. Dependency-free (no
+    * networking) so callers that only need the resolved token don't pull the
+    * transport closure. tok_sz is the buffer size. */
+   int aimee_client_remote_token(char *tok_out, unsigned long tok_sz);
+
    /* Send an HTTP request to aimee-server's /v1 API over the resolved transport.
     * method: "GET"/"POST"; path: e.g. "/v1/personas"; body: JSON or NULL.
     * Returns the response body (heap; caller frees) and sets *status_out to the

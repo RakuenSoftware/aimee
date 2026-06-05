@@ -11,10 +11,39 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <direct.h>
+#define AIMEE_MKDIR(p) _mkdir(p)
+#else
+#include <sys/stat.h>
+#define AIMEE_MKDIR(p) mkdir((p), 0700)
+#endif
 
 static void remote_conf_path(char *out, size_t out_sz)
 {
    snprintf(out, out_sz, "%s/remote.conf", aimee_home());
+}
+
+/* Create |dir| and any missing parents (best effort, ignores existing/errors).
+ * A thin-client-only host (the README's recommended deployment) has nothing
+ * else that creates <aimee_home> (~/.config/aimee), so `aimee remote set` must
+ * make it before writing remote.conf or the first call fails with ENOENT. */
+static void ensure_dir_p(const char *dir)
+{
+   if (!dir || !dir[0])
+      return;
+   char tmp[512];
+   snprintf(tmp, sizeof(tmp), "%s", dir);
+   for (char *p = tmp + 1; *p; p++)
+   {
+      if (*p == '/')
+      {
+         *p = '\0';
+         AIMEE_MKDIR(tmp);
+         *p = '/';
+      }
+   }
+   AIMEE_MKDIR(tmp);
 }
 
 /* Read the persisted URL (line 1) and token (line 2, optional) into the given
@@ -57,6 +86,7 @@ static int remote_set(const char *url, const char *token, int json_output)
    }
    char path[512];
    remote_conf_path(path, sizeof(path));
+   ensure_dir_p(aimee_home());
    FILE *f = fopen(path, "w");
    if (!f)
    {

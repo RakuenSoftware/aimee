@@ -57,6 +57,35 @@ static void test_clear(void)
    PASS("clear removes persisted config");
 }
 
+static void test_set_creates_missing_home(void)
+{
+   reset_state();
+   /* The README's recommended deployment installs ONLY the thin client, so
+    * nothing creates <aimee_home> (~/.config/aimee) before the user runs
+    * `aimee remote set`. Point AIMEE_HOME at a not-yet-existing nested path and
+    * confirm set creates it instead of failing with ENOENT (regression). */
+   const char *saved = getenv("AIMEE_HOME");
+   char nested[320];
+   snprintf(nested, sizeof(nested), "%s/missing/aimee_home", saved ? saved : "/tmp");
+   setenv("AIMEE_HOME", nested, 1);
+
+   char *argv[] = {(char *)"set", (char *)"http://made-host:8740", (char *)"tok"};
+   assert(cli_remote_cmd(3, argv, 1) == 0);
+   cli_remote_load_persisted();
+   char desc[128] = {0};
+   assert(aimee_client_remote_active(desc, sizeof(desc)) == 1);
+   assert(strcmp(desc, "made-host:8740") == 0);
+   PASS("remote set creates a missing aimee_home dir");
+
+   /* Best-effort cleanup + restore home for any later tests. */
+   char path[400];
+   snprintf(path, sizeof(path), "%s/remote.conf", nested);
+   unlink(path);
+   rmdir(nested);
+   if (saved)
+      setenv("AIMEE_HOME", saved, 1);
+}
+
 int main(void)
 {
    /* Isolate AIMEE_HOME so we never touch the real config. */
@@ -68,6 +97,7 @@ int main(void)
    test_set_then_load();
    test_env_wins_over_file();
    test_clear();
+   test_set_creates_missing_home();
    printf("ALL PASS\n");
 
    /* Best-effort cleanup. */

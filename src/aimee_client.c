@@ -323,6 +323,16 @@ int aimee_client_remote_active(char *desc_out, unsigned long desc_sz)
    return 1;
 }
 
+int aimee_client_remote_token(char *tok_out, unsigned long tok_sz)
+{
+   char url[512], tok[256];
+   if (!resolve_remote(url, sizeof(url), tok, sizeof(tok)))
+      return 0;
+   if (tok_out && tok_sz)
+      snprintf(tok_out, tok_sz, "%s", tok);
+   return 1;
+}
+
 char *aimee_client_request(const char *method, const char *path, const char *body, int *status_out)
 {
    if (status_out)
