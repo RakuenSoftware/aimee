@@ -33,6 +33,7 @@
 #include "hud.h"
 #include "platform_event.h"
 #include "platform_ipc.h"
+#include "platform_path.h"
 #include "platform_process.h"
 #include "util.h"
 #include "workspace.h"
@@ -1441,6 +1442,22 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
       perror("aimee-server: evloop create");
       errno = saved_errno;
       return -1;
+   }
+   /* Ensure the config dir (parent of the socket, pid file, and DB1 file)
+    * exists before we write the pid file or open DB1. On a fresh AIMEE_HOME
+    * (e.g. a deploy not seeded by install.sh) nothing else has created it yet,
+    * so without this both server_pid_write and db1_init silently fail and DB1
+    * stays unavailable for the whole process lifetime. */
+   {
+      char cfg_dir[sizeof(ctx->socket_path)];
+      snprintf(cfg_dir, sizeof(cfg_dir), "%s", socket_path);
+      char *slash = strrchr(cfg_dir, '/');
+      if (slash)
+      {
+         *slash = '\0';
+         if (cfg_dir[0])
+            platform_mkdir_p(cfg_dir, 0700);
+      }
    }
    /* Record our pid so future server_init calls can detect us deterministically
     * (and `aimee server start/restart` can probe liveness). */
