@@ -182,7 +182,7 @@ fi
 # --- Install binaries ---
 
 mkdir -p "$INSTALL_DIR"
-rm -f "$INSTALL_DIR/aimee" "$INSTALL_DIR/aimee" "$INSTALL_DIR/aimee-server" \
+rm -f "$INSTALL_DIR/aimee" "$INSTALL_DIR/aimee-server" \
       "$INSTALL_DIR/aimee-webchat" "$INSTALL_DIR/aimee-kb"
 cp "$LOCAL_BIN" "$INSTALL_DIR/aimee"
 cp "$LOCAL_SERVER" "$INSTALL_DIR/aimee-server"
@@ -190,8 +190,6 @@ cp "$LOCAL_WEBCHAT" "$INSTALL_DIR/aimee-webchat"
 cp "$LOCAL_KB" "$INSTALL_DIR/aimee-kb"
 chmod +x "$INSTALL_DIR/aimee" "$INSTALL_DIR/aimee-server" \
          "$INSTALL_DIR/aimee-webchat" "$INSTALL_DIR/aimee-kb"
-cp "$INSTALL_DIR/aimee" "$INSTALL_DIR/aimee"
-chmod +x "$INSTALL_DIR/aimee"
 
 # Remove retired binaries. aimee-worker was folded into aimee-server's
 # in-process compute pool; it is not a shipped artifact.
@@ -202,7 +200,7 @@ for legacy in "$INSTALL_DIR/aimee-mcp" "$INSTALL_DIR/aimem" "$INSTALL_DIR/aimee-
     fi
 done
 
-info "Installed: $INSTALL_DIR/aimee, $INSTALL_DIR/aimee-server, $INSTALL_DIR/aimee-webchat, $INSTALL_DIR/aimee-kb (with $INSTALL_DIR/aimee -> aimee)"
+info "Installed: $INSTALL_DIR/aimee, $INSTALL_DIR/aimee-server, $INSTALL_DIR/aimee-webchat, $INSTALL_DIR/aimee-kb"
 
 # --- Install bundled skills ---
 

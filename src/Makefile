@@ -928,7 +928,7 @@ schema_data.h: $(SCHEMA_FILES) gen_schema.py
 kb/http/openapi_data.h: ../api/openapi-v1.yaml gen_openapi.py
 	python3 gen_openapi.py $@
 
-$(OBJDIR)/kb/kb_http.o $(OBJDIR)/kb/http/kb_http.o: kb/http/openapi_data.h
+$(OBJDIR)/kb/kb_http.o $(OBJDIR)/kb/http/kb_http.o $(OBJDIR)/kb/http/kb_http_conn.o: kb/http/openapi_data.h
 
 server/openapi_server_data.h: ../api/openapi-server-v1.yaml gen_openapi_server.py
 	python3 gen_openapi_server.py $@
