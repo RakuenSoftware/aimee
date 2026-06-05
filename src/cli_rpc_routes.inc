@@ -6271,7 +6271,26 @@ char *cli_rpc_client_endpoint(void)
    const char *env = getenv("AIMEE_API_ENDPOINT");
    if (env && env[0])
       return strdup(env);
-   return cli_rpc_aimee_yaml_value("client_endpoint:");
+   char *yaml = cli_rpc_aimee_yaml_value("client_endpoint:");
+   if (yaml)
+      return yaml;
+   /* Fall back to a --server / AIMEE_SERVER_URL / remote.conf target (aimee_client)
+    * by synthesizing the "tcp:host:port" endpoint cli_http_request expects. This
+    * is what makes the README's headline remote flow drive the WHOLE data/RPC
+    * plane (status, memory, kb, …), not just the lower-level AIMEE_API_ENDPOINT
+    * form. http reaches the published container port directly; an https:// target
+    * needs a TLS-terminating proxy, the same as the AIMEE_API_ENDPOINT tcp:
+    * transport. Keeping the bridge here (vs. cli_v1_send) means the shared
+    * dispatcher references no networking symbols, so the server/gateway/tests that
+    * link it pull only the dependency-free aimee_client resolver. */
+   char hostport[300];
+   if (aimee_client_remote_active(hostport, sizeof(hostport)))
+   {
+      char ep[320];
+      snprintf(ep, sizeof(ep), "tcp:%s", hostport);
+      return strdup(ep);
+   }
+   return NULL;
 }
 
 /* cli_rpc_client_bearer: bearer token sent with the remote HTTP transport.
@@ -6283,7 +6302,15 @@ char *cli_rpc_client_bearer(void)
    const char *env = getenv("AIMEE_API_BEARER");
    if (env && env[0])
       return strdup(env);
-   return cli_rpc_aimee_yaml_value("bearer_token:");
+   char *yaml = cli_rpc_aimee_yaml_value("bearer_token:");
+   if (yaml)
+      return yaml;
+   /* Token for a synthesized aimee_client endpoint: --server-token /
+    * AIMEE_SERVER_TOKEN / remote.conf line 2. */
+   char tok[300];
+   if (aimee_client_remote_token(tok, sizeof(tok)) && tok[0])
+      return strdup(tok);
+   return NULL;
 }
 
 /* cli_rpc_has_remote_endpoint: true when the thin client is configured to reach
@@ -6295,6 +6322,9 @@ char *cli_rpc_client_bearer(void)
 int cli_rpc_has_remote_endpoint(void)
 {
 #if !defined(_WIN32) && !defined(_WIN64)
+   /* cli_rpc_client_endpoint() also synthesizes a tcp: endpoint from a --server /
+    * AIMEE_SERVER_URL / remote.conf target (aimee_client), so this transparently
+    * reports those too and the dispatcher skips the dead local-socket preflight. */
    char *ep = cli_rpc_client_endpoint();
    if (ep)
    {
@@ -6319,6 +6349,9 @@ int cli_rpc_has_remote_endpoint(void)
 int cli_rpc_remote_endpoint_is_tcp(void)
 {
 #if !defined(_WIN32) && !defined(_WIN64)
+   /* A synthesized aimee_client target (--server / AIMEE_SERVER_URL / remote.conf)
+    * is always "tcp:host:port" (a network host, never a local unix: path), so
+    * chat/launch refuse it here just like an explicit tcp: endpoint. */
    char *ep = cli_rpc_client_endpoint();
    int is_tcp = ep && strncmp(ep, "tcp:", 4) == 0;
    free(ep);
@@ -6687,6 +6720,7 @@ int cli_rpc_forward(const char *socket_path, const cli_rpc_route_t *route, int j
     * always remote (resolved from --server / AIMEE_SERVER_URL inside cli_v1_send). */
    char *remote = cli_rpc_client_endpoint();
    char *bearer = remote ? cli_rpc_client_bearer() : NULL;
+   int http_status = 0; /* last HTTP status from the REST send (0 for the async path) */
 
    if (http_body && async_path)
    {
@@ -6710,7 +6744,7 @@ int cli_rpc_forward(const char *socket_path, const cli_rpc_route_t *route, int j
             cJSON_Delete(resp);
             resp = NULL;
          }
-         int http_status = 0;
+         http_status = 0;
          resp = cli_v1_send(remote, bearer, rest_verb, rest_path, body, timeout, &http_status);
          if (resp)
          {
@@ -6762,6 +6796,28 @@ int cli_rpc_forward(const char *socket_path, const cli_rpc_route_t *route, int j
       cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
       if (cJSON_IsString(msg) && msg->valuestring[0])
          fprintf(stderr, "aimee: %s\n", msg->valuestring);
+      cJSON_Delete(resp);
+      return 1;
+   }
+
+   /* REST error envelope: {"error":{"message":..,"type":..}}. The server emits
+    * this on any non-2xx — e.g. 403 permission_error when a write is attempted
+    * over a read-only remote listener (aimee.api.remote_writes=off). It is NOT a
+    * {"status":"error"} body, so without this the success pretty-printers below
+    * would misreport a denied write as success (e.g. print "stored memory"). */
+   if (cJSON_IsObject(err))
+   {
+      cJSON *emsg = cJSON_GetObjectItemCaseSensitive(err, "message");
+      fprintf(stderr, "aimee: %s\n",
+              (cJSON_IsString(emsg) && emsg->valuestring[0]) ? emsg->valuestring
+                                                             : "request failed");
+      cJSON_Delete(resp);
+      return 1;
+   }
+   /* Any other non-2xx with an unrecognized body: never render it as success. */
+   if (http_status >= 400)
+   {
+      fprintf(stderr, "aimee: server returned HTTP %d for '%s'\n", http_status, route->method);
       cJSON_Delete(resp);
       return 1;
    }

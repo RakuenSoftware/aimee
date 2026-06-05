@@ -201,7 +201,17 @@ static int bootstrap_db2_try_url(config_t *cfg, const char *url, int save_config
    {
       snprintf(cfg->db2_url, sizeof(cfg->db2_url), "%s", url);
       if (config_save(cfg) != 0)
-         return -1;
+      {
+         /* DB2 is already proven healthy (db2_init + health probe above). The
+          * config persist is only a fast-path cache for later starts — the URL
+          * is re-resolved from AIMEE_DB2_URL / db2_url every boot regardless — so
+          * a failed save (e.g. a read-only aimee.yaml, as the remote-writes
+          * compose override bind-mounts it :ro) must NOT abort an otherwise
+          * healthy kb. Record that the save was skipped and continue. */
+         fprintf(stderr, "aimee-kb: warning: could not persist db2_url to config "
+                         "(continuing; DB2 is reachable via the resolved URL)\n");
+         save_config = 0;
+      }
    }
 
    cJSON_AddStringToObject(resp, "status", "ok");
