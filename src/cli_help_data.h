@@ -142,19 +142,10 @@
      "  models <name>    Fetch provider model catalog (--json)\n"
      "  test <name>      Probe provider credentials and connectivity\n"
      "  quota [name]     Show process-local credential pool quota state\n"},
-    {"model", "Model capability metadata", CLIENT_TIER_ADVANCED, 0,
-     "  show <provider:model>      Show context, cost, and capability flags\n"
-     "  list [--capability NAME]   List configured models matching a capability\n"},
     {"version", "Print version", CLIENT_TIER_CORE, 0, NULL},
     {"help", "Show help for a command", CLIENT_TIER_CORE, 1, NULL},
 
     {"status", "System health overview", CLIENT_TIER_ADVANCED, 0, NULL},
-    {"jobs", "Agent job management", CLIENT_TIER_ADVANCED, 0,
-     "  list             List recent background delegate jobs\n"
-     "  status <job_id>  Show one background delegate job\n"
-     "  show <job_id>    Alias for status\n"
-     "  logs <job_id>    Print the recorded delegate result/log body\n"
-     "  cancel <job_id>  Cancel one background delegate job\n"},
     {"hud", "Real-time session status and HUD", CLIENT_TIER_ADVANCED, 0, NULL},
     {"identity", "Charter and working-profile inspection", CLIENT_TIER_ADVANCED, 0,
      "  show             Show charter, local operator, and working profile\n"

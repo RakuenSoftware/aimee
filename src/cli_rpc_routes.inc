@@ -4240,6 +4240,16 @@ static void print_memory_stats(cJSON *resp)
 
 static void print_index_scan(cJSON *resp)
 {
+   /* An error response (e.g. KB unavailable) carries no projects/files counts;
+    * surface the message instead of formatting absent numbers, which would
+    * otherwise print INT_MIN via (int)cJSON_GetNumberValue(NULL) == (int)NaN. */
+   if (strcmp(json_str(resp, "status"), "error") == 0)
+   {
+      const char *msg = json_str(resp, "message");
+      printf("==> Scan failed: %s\n", msg[0] ? msg : "knowledge service unavailable");
+      return;
+   }
+
    cJSON *skipped = cJSON_GetObjectItemCaseSensitive(resp, "skipped");
    if (cJSON_IsTrue(skipped))
    {
@@ -4254,9 +4264,9 @@ static void print_index_scan(cJSON *resp)
       return;
    }
 
-   int projects = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(resp, "projects"));
-   int files = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(resp, "files"));
-   int inspected = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(resp, "inspected"));
+   int projects = json_int(resp, "projects", 0);
+   int files = json_int(resp, "files", 0);
+   int inspected = json_int(resp, "inspected", 0);
    int unchanged = inspected - files;
    if (inspected > 0 && unchanged > 0)
       printf("==> Scan complete: %d project(s), %d file(s) re-indexed (%d unchanged)\n", projects,
