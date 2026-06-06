@@ -238,7 +238,9 @@ Go 1.25+ is required only to build `aimee-webchat`. Then `install.sh`, in order:
 1. **Check prerequisites** (FTS5 + the dev headers); if any are missing it stops
    and points you back at `install-deps.sh` rather than escalating privileges.
 2. **Build** (only if sources changed): `cd src && make all server`, producing
-   `aimee`, `aimee-server`, `aimee-kb`, and `aimee-webchat` at the repo root.
+   `aimee`, `aimee-server`, and `aimee-kb` at the repo root, plus `aimee-webchat`
+   when a Go toolchain is on `PATH` (otherwise `make` notes it was skipped and the
+   C services still build — webchat is optional for a source install).
 3. **Stop any running server/KB** gracefully to avoid "text file busy".
 4. **Install binaries** to `~/.local/bin/` and remove retired binaries.
 5. **Install bundled skills** to `~/.local/share/aimee/skills/` (idempotent).

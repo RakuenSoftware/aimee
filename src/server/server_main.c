@@ -148,8 +148,24 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * env-based kb_client transport (kb_client_v1_base_url / auth_header)
     * reaches the remote kb on every launch path — systemd AND the fork-and-exec
     * fallback. Pre-set env wins, so AIMEE_KB_API_URL still overrides config. */
-   if (cfg.kb_client_url[0] && !(getenv("AIMEE_KB_API_URL") && getenv("AIMEE_KB_API_URL")[0]))
-      platform_setenv("AIMEE_KB_API_URL", cfg.kb_client_url);
+   if (!(getenv("AIMEE_KB_API_URL") && getenv("AIMEE_KB_API_URL")[0]))
+   {
+      if (cfg.kb_client_url[0])
+         platform_setenv("AIMEE_KB_API_URL", cfg.kb_client_url);
+      else
+      {
+         /* Co-located default: with no remote kb_client_url and no explicit
+          * AIMEE_KB_API_URL, point at the local aimee-kb sidecar. The systemd
+          * unit, the launchd plist, and the fork-and-exec fallback all serve it
+          * on 127.0.0.1:8741 (kb_api_http_port if the operator overrode it).
+          * Without this a source install's server has no kb URL at all and every
+          * DB2-backed feature (memory/kb/rules) silently reports "unavailable". */
+         char local_kb[64];
+         int kb_port = cfg.kb_api_http_port > 0 ? cfg.kb_api_http_port : 8741;
+         snprintf(local_kb, sizeof(local_kb), "http://127.0.0.1:%d", kb_port);
+         platform_setenv("AIMEE_KB_API_URL", local_kb);
+      }
+   }
    if (cfg.kb_client_bearer_token[0] &&
        !(getenv("AIMEE_KB_API_BEARER_TOKEN") && getenv("AIMEE_KB_API_BEARER_TOKEN")[0]))
       platform_setenv("AIMEE_KB_API_BEARER_TOKEN", cfg.kb_client_bearer_token);

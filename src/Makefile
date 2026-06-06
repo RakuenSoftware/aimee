@@ -17,6 +17,18 @@ WEBCHAT = ../aimee-webchat$(EXEEXT)
 GATEWAY = ../aimee-gateway$(EXEEXT)
 RETIRED_ROOT_BINARIES = ../aimee-client$(EXEEXT) ../aimee-worker$(EXEEXT)
 
+# aimee-webchat is the only Go artifact and needs the Go toolchain (go.mod pins a
+# newer Go than some distros package, e.g. Debian 13 ships 1.24). The C services
+# (aimee / aimee-server / aimee-kb) need no Go, so `make all` builds webchat only
+# when `go` is on PATH and otherwise skips it with a note — a source install on a
+# box without Go still gets a working core instead of a hard `go: not found`.
+HAVE_GO := $(shell command -v go >/dev/null 2>&1 && echo 1)
+ifeq ($(HAVE_GO),1)
+ALL_WEBCHAT = $(WEBCHAT)
+else
+ALL_WEBCHAT =
+endif
+
 define AIMEE_RUNTIME_MUTATION_GUARD
 	@if [ -n "$$AIMEE_TUI_SESSION" ]; then \
 		echo "aimee: refusing to mutate runtime target '$@' from inside the TUI" >&2; \
@@ -424,7 +436,12 @@ DEPS = $(ALL_OBJS:.o=.d)
 
 .PHONY: all clean install forge-cred-integration forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check gen-sdks sdk-parity-check v1-ws-test format unit-tests verify-local integration-tests v1-third-party-test v1-sdk-smoke v1-ws-test init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries
 
-all: retire-obsolete-binaries $(BINARY) $(WEBCHAT) $(SERVER) $(KB) $(GATEWAY)
+all: retire-obsolete-binaries $(BINARY) $(ALL_WEBCHAT) $(SERVER) $(KB) $(GATEWAY)
+ifneq ($(HAVE_GO),1)
+	@echo "aimee: NOTE - 'go' not found on PATH; skipped aimee-webchat (browser UI)."
+	@echo "aimee:        Install Go (>=1.25, see webchat/go.mod) and re-run to build it,"
+	@echo "aimee:        or run the browser UI from the Docker image instead."
+endif
 
 retire-obsolete-binaries:
 	$(AIMEE_RUNTIME_MUTATION_GUARD)

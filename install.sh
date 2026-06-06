@@ -121,7 +121,11 @@ fi
 # --- Build (skip if binary is newer than all source) ---
 
 needs_build() {
-    local bins=("$LOCAL_BIN" "$LOCAL_SERVER" "$LOCAL_WEBCHAT" "$LOCAL_KB")
+    # aimee-webchat (Go) is only required/buildable when a Go toolchain is
+    # present; without Go the C core still builds and installs (see make all's
+    # ALL_WEBCHAT gate), so don't let a missing webchat force a rebuild loop.
+    local bins=("$LOCAL_BIN" "$LOCAL_SERVER" "$LOCAL_KB")
+    command -v go >/dev/null 2>&1 && bins+=("$LOCAL_WEBCHAT")
     local bin
 
     for bin in "${bins[@]}"; do
@@ -186,10 +190,13 @@ rm -f "$INSTALL_DIR/aimee" "$INSTALL_DIR/aimee-server" \
       "$INSTALL_DIR/aimee-webchat" "$INSTALL_DIR/aimee-kb"
 cp "$LOCAL_BIN" "$INSTALL_DIR/aimee"
 cp "$LOCAL_SERVER" "$INSTALL_DIR/aimee-server"
-cp "$LOCAL_WEBCHAT" "$INSTALL_DIR/aimee-webchat"
 cp "$LOCAL_KB" "$INSTALL_DIR/aimee-kb"
-chmod +x "$INSTALL_DIR/aimee" "$INSTALL_DIR/aimee-server" \
-         "$INSTALL_DIR/aimee-webchat" "$INSTALL_DIR/aimee-kb"
+chmod +x "$INSTALL_DIR/aimee" "$INSTALL_DIR/aimee-server" "$INSTALL_DIR/aimee-kb"
+# webchat is optional (built only when Go is available); install it if present.
+if [ -f "$LOCAL_WEBCHAT" ]; then
+    cp "$LOCAL_WEBCHAT" "$INSTALL_DIR/aimee-webchat"
+    chmod +x "$INSTALL_DIR/aimee-webchat"
+fi
 
 # Remove retired binaries. aimee-worker was folded into aimee-server's
 # in-process compute pool; it is not a shipped artifact.
@@ -200,7 +207,11 @@ for legacy in "$INSTALL_DIR/aimee-mcp" "$INSTALL_DIR/aimem" "$INSTALL_DIR/aimee-
     fi
 done
 
-info "Installed: $INSTALL_DIR/aimee, $INSTALL_DIR/aimee-server, $INSTALL_DIR/aimee-webchat, $INSTALL_DIR/aimee-kb"
+if [ -f "$INSTALL_DIR/aimee-webchat" ]; then
+    info "Installed: $INSTALL_DIR/aimee, $INSTALL_DIR/aimee-server, $INSTALL_DIR/aimee-webchat, $INSTALL_DIR/aimee-kb"
+else
+    info "Installed: $INSTALL_DIR/aimee, $INSTALL_DIR/aimee-server, $INSTALL_DIR/aimee-kb (aimee-webchat skipped: no Go toolchain)"
+fi
 
 # --- Install bundled skills ---
 

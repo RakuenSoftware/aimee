@@ -292,17 +292,30 @@ cd aimee
 ./install.sh        # build + install + configure (no sudo)
 ```
 
-`install-deps.sh` installs the system packages aimee builds against and bootstraps the `aimee_shared` PostgreSQL database, the only steps that need root. `install.sh` then builds from source, installs the four binaries to `~/.local/bin/`, installs service units where supported (systemd user units on Linux, launchd agents on macOS), enables `aimee-kb` then `aimee-server`, and configures hooks + MCP for every detected AI coding tool. If a dependency is missing, `install.sh` stops and points you back at `install-deps.sh`. Windows users run `install.ps1` (CMake build + WinSW services) and `configure-hooks.ps1`.
+`install-deps.sh` installs the system packages aimee builds against and bootstraps the `aimee_shared` PostgreSQL database, the only steps that need root. `install.sh` then builds from source, installs the binaries to `~/.local/bin/`, installs service units where supported (systemd user units on Linux, launchd agents on macOS), enables `aimee-kb` then `aimee-server`, and configures hooks + MCP for every detected AI coding tool. If a dependency is missing, `install.sh` stops and points you back at `install-deps.sh`. Windows users run `install.ps1` (CMake build + WinSW services) and `configure-hooks.ps1`.
+
+`install-deps.sh` installs the full set below; you only need this table if you are
+installing dependencies by hand. The C services (`aimee`, `aimee-server`,
+`aimee-kb`) need no Go. The browser UI (`aimee-webchat`) is the only Go artifact
+and is **optional**: `install.sh` builds it when a suitable Go toolchain is on
+`PATH` (see `webchat/go.mod` for the required version, newer than some distros
+package) and otherwise skips it with a note — install Go and re-run, or run the
+webchat from the Docker image.
 
 Source-build prerequisites:
 
 | Package | Debian/Ubuntu | macOS |
 |---------|---------------|-------|
 | C compiler | `apt install build-essential` | Xcode CLT |
+| pkg-config | `apt install pkg-config` | `brew install pkg-config` |
 | SQLite3 (FTS5) | `apt install libsqlite3-dev sqlite3` | System SQLite |
 | libpq | `apt install libpq-dev` | `brew install libpq` |
+| libzstd | `apt install libzstd-dev` | `brew install zstd` |
 | libcurl | `apt install libcurl4-openssl-dev` | `brew install curl` |
 | PAM (webchat) | `apt install libpam0g-dev` | built-in |
+| PostgreSQL + pgvector | `apt install postgresql postgresql-NN-pgvector` | `brew install postgresql pgvector` |
+| ripgrep, universal-ctags | `apt install ripgrep universal-ctags` | `brew install ripgrep universal-ctags` |
+| Go (optional, `aimee-webchat` only) | see `webchat/go.mod` | `brew install go` |
 
 **Local or remote knowledge base.** `install.sh` asks whether to run `aimee-kb` **locally** (the default, backed by the local Postgres) or point at an existing **remote** `aimee-kb` over HTTP. Choosing remote persists `kb_client_url` (and an optional bearer token) to `aimee.yaml`, skips the local sidecar and Postgres, and `aimee-server` reaches the remote kb on every launch path. For a remote-only host, also skip the database bootstrap: `AIMEE_KB_MODE=remote ./install-deps.sh`.
 
