@@ -1378,12 +1378,42 @@ static int server_pid_alive(const char *socket_path)
    fclose(f);
    if (n != 1 || pid_val <= 1)
       return 0;
+   /* The stale pid file may record OUR OWN pid: container process start order is
+    * deterministic, so after a restart a fresh aimee-server is frequently
+    * assigned the exact pid the previous instance wrote (the pid file lives on
+    * the persisted AIMEE_HOME volume). Detecting ourselves as "another server"
+    * would wedge every restart, so treat our own pid as not-a-conflict. */
+   if (pid_val == (long)getpid())
+      return 0;
    /* kill(pid, 0) returns 0 if the pid is alive (and we have permission
     * to signal), -1 with EPERM if alive but owned by another uid (still
     * counts as "alive" for our purposes), -1 with ESRCH if dead. */
-   if (kill((pid_t)pid_val, 0) == 0)
-      return 1;
-   return errno == EPERM;
+   if (kill((pid_t)pid_val, 0) != 0 && errno != EPERM)
+      return 0; /* ESRCH (or other): the pid is gone — stale pid file */
+#ifdef __linux__
+   /* The pid may be alive but a DIFFERENT process after a restart/reboot (PID
+    * reuse) — common when the pid file lives on a persisted volume, e.g. the
+    * Docker AIMEE_HOME volume: a fresh container reuses low PIDs, so the old
+    * server's pid now belongs to some unrelated process and the bare kill(0)
+    * above would wrongly report "already running" and block startup. Confirm the
+    * pid is actually an aimee-server before treating it as a live instance; a
+    * stale pid file then never wedges a restart. */
+   char comm_path[64];
+   snprintf(comm_path, sizeof(comm_path), "/proc/%ld/comm", pid_val);
+   FILE *cf = fopen(comm_path, "r");
+   if (!cf)
+      return 0; /* process vanished between checks — stale */
+   char comm[64] = {0};
+   char *got = fgets(comm, sizeof(comm), cf);
+   fclose(cf);
+   if (!got)
+      return 0;
+   comm[strcspn(comm, "\r\n")] = '\0';
+   /* The kernel truncates comm to 15 chars; "aimee-server" (12) fits. */
+   return strcmp(comm, "aimee-server") == 0;
+#else
+   return 1; /* alive; non-Linux keeps the kill-based liveness check */
+#endif
 }
 
 static void server_pid_write(const char *socket_path)
