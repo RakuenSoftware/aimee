@@ -19,10 +19,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.server
-      # webchat's SPA build needs a GitHub Packages token (see Dockerfile.server).
-      # Sourced from the host $NPM_TOKEN; export it before `docker compose build`.
-      secrets:
-        - npm_token
+      # Default build needs NO credentials (server ships without the browser UI).
+      # Opt into the optional aimee-webchat with a GitHub Packages token:
+      #   NPM_TOKEN=<github PAT> docker compose -f compose.server-standalone.yaml \
+      #     build --build-arg WITH_WEBCHAT=1 --secret id=npm_token,env=NPM_TOKEN
     image: aimee-server
     # The server's worker threads need a 64 MB stack (the 8 MB container default
     # overflows during startup — matches systemd's LimitSTACK=67108864).
@@ -47,9 +47,3 @@ services:
 volumes:
   aimee-server-home:
   aimee-server-workspaces:
-
-# Build-time secret for the webchat SPA's GitHub Packages dependency. Empty when
-# $NPM_TOKEN is unset (fine for public packages reachable with no token).
-secrets:
-  npm_token:
-    environment: NPM_TOKEN
