@@ -52,7 +52,11 @@ COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
 COPY scripts/embed-remote.py scripts/llm-chat.py scripts/learning-synthesize.py \
      scripts/curator-extract.py /opt/aimee/scripts/
 # Baked default config: selects the sidecar commands (endpoints come from env).
-COPY --chown=aimee:aimee deploy/container/aimee.yaml /var/lib/aimee/.config/aimee/aimee.yaml
+# Kept OUTSIDE $AIMEE_HOME so a bind mount over /var/lib/aimee can't shadow it;
+# the entrypoint seeds it into $AIMEE_HOME/.config/aimee on first start.
+COPY deploy/container/aimee.yaml /opt/aimee/defaults/aimee.yaml
+COPY deploy/container/aimee-kb-entrypoint.sh /usr/local/bin/aimee-kb-entrypoint.sh
+RUN chmod +x /usr/local/bin/aimee-kb-entrypoint.sh
 
 USER aimee
 WORKDIR /var/lib/aimee
@@ -61,7 +65,10 @@ EXPOSE 8741
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8741/v1/health >/dev/null || exit 1
 
-ENTRYPOINT ["aimee-kb"]
+# The entrypoint raises the worker-thread stack rlimit and seeds the baked
+# config into $AIMEE_HOME when a bind mount has shadowed the image copy, then
+# execs aimee-kb. See deploy/container/aimee-kb-entrypoint.sh.
+ENTRYPOINT ["/usr/local/bin/aimee-kb-entrypoint.sh"]
 # aimee-kb serves the /v1 HTTP API only; --http-port is required (it exits without
 # one). The legacy --socket transport was retired (#2747).
 CMD ["--http-port=8741"]
