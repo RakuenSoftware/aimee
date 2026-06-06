@@ -116,6 +116,15 @@ check "POST /v1/search"           '"hits"'     -X POST -H 'content-type: applica
                                                -d '{"query":"docker smoke test","max_results":3}' \
                                                "${KB_URL}/v1/search"
 
+# memory.find_facts with graph-code fusion ON is the deepest-stack worker path
+# (the server's `aimee memory search` drives it). It SIGSEGVs the kb (exit 139)
+# unless the container has a 64 MB stack ulimit — a regression the /v1/search
+# check above does NOT catch. curl -fsS fails here if the kb crashed, so this
+# guards the ulimit fix. An empty "facts" array on a fresh DB is a pass.
+check "POST memory.find_facts (fusion)" '"facts"' -X POST -H 'content-type: application/json' \
+                                               -d '{"query":"docker smoke test","limit":3,"graph_code_fusion_state":"on"}' \
+                                               "${KB_URL}/v1/actions/memory.find_facts"
+
 bold "==> Embedder round-trip (in-network, via the kb container)"
 if "${DC[@]}" ps --format '{{.Service}}' 2>/dev/null | grep -qx embedder; then
   if emb="$("${DC[@]}" exec -T aimee-kb sh -c \

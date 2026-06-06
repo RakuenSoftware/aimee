@@ -45,6 +45,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # The kb's drain/ingest/watch/query worker threads need a 64 MB stack; the
+    # 8 MB container default overflows and SIGSEGVs (exit 139) on real memory/kb
+    # queries. Matches systemd's LimitSTACK=67108864 and the cli fork-exec ulimit.
+    ulimits:
+      stack: 67108864
     environment:
       AIMEE_HOME: /var/lib/aimee
       AIMEE_DB2_URL: postgresql://aimee:aimee@postgres:5432/aimee_shared
