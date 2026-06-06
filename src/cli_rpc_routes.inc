@@ -6773,8 +6773,14 @@ int cli_rpc_forward(const char *socket_path, const cli_rpc_route_t *route, int j
    else if (http_body)
    {
       /* No first-class route — unreachable given the coverage gates; surface it
-       * rather than silently dropping the command. */
+       * rather than silently dropping the command. This is a routing gap, not an
+       * unreachable server, so return early instead of falling through to the
+       * misleading "is the server running?" hint below. */
       fprintf(stderr, "aimee: '%s' has no /v1 route\n", route->method);
+      free(http_body);
+      free(bearer);
+      free(remote);
+      return -1;
    }
 
    free(http_body);
@@ -6824,10 +6830,19 @@ int cli_rpc_forward(const char *socket_path, const cli_rpc_route_t *route, int j
       cJSON_Delete(resp);
       return 1;
    }
-   /* Any other non-2xx with an unrecognized body: never render it as success. */
+   /* Any other non-2xx: never render it as success. Prefer a string error
+    * envelope {"error":"<msg>"} — the shape server_http.c's err_json() emits
+    * (28+ routes: 502/503 backend-unavailable, "no such persona/agent", "attach
+    * refused", ...) — over the generic HTTP line, which drops the real reason.
+    * Gated on http_status so a 2xx success that legitimately carries a top-level
+    * "error" string (e.g. cron.run returns {status:ok,...,error:"<job stderr>"})
+    * is NOT misreported as a failure. */
    if (http_status >= 400)
    {
-      fprintf(stderr, "aimee: server returned HTTP %d for '%s'\n", http_status, route->method);
+      if (cJSON_IsString(err) && err->valuestring[0])
+         fprintf(stderr, "aimee: %s\n", err->valuestring);
+      else
+         fprintf(stderr, "aimee: server returned HTTP %d for '%s'\n", http_status, route->method);
       cJSON_Delete(resp);
       return 1;
    }
