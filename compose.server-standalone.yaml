@@ -16,6 +16,7 @@
 #     -v aimee-workspaces:/var/lib/aimee-workspaces aimee-server
 services:
   aimee-server:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile.server
