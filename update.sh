@@ -499,4 +499,8 @@ fi
 
 bash "$SCRIPT_DIR/configure-hooks.sh"
 
-info "Updated: $AIMEE_BIN, $AIMEE_SERVER_BIN, $AIMEE_WEBCHAT_BIN, $AIMEE_KB_BIN"
+if [ -f "$AIMEE_WEBCHAT_BIN" ]; then
+    info "Updated: $AIMEE_BIN, $AIMEE_SERVER_BIN, $AIMEE_WEBCHAT_BIN, $AIMEE_KB_BIN"
+else
+    info "Updated: $AIMEE_BIN, $AIMEE_SERVER_BIN, $AIMEE_KB_BIN (aimee-webchat skipped: no Go toolchain)"
+fi
