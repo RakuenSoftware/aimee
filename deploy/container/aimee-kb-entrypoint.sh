@@ -19,6 +19,11 @@
 #    falls back to a non-functional builtin embedder (embed_ok=false). Keep the
 #    canonical default outside $AIMEE_HOME (at /opt/aimee/defaults) and seed it
 #    in if the config is missing, so embeddings work under any volume type.
+#
+#    The config path is aimee_home()/aimee.yaml; with AIMEE_HOME set,
+#    aimee_home() == $AIMEE_HOME verbatim (see src/aimee_home.c), so the file
+#    the kb reads is $AIMEE_HOME/aimee.yaml -- NOT $AIMEE_HOME/.config/aimee/
+#    (that path only applies when AIMEE_HOME is unset and $HOME/.config is used).
 set -e
 
 # 1. Stack rlimit (64 MB == 65536 KiB == 67108864 bytes). Best-effort: some
@@ -26,13 +31,13 @@ set -e
 #    profile is still required.
 ulimit -s 65536 2>/dev/null || true
 
-# 2. Seed the baked default config if the (possibly bind-mounted) config dir
-#    lacks it. Never clobber an operator-provided config.
+# 2. Seed the baked default config if it is missing (fresh / bind-mounted
+#    volume). Never clobber an operator-provided config.
 : "${AIMEE_HOME:=/var/lib/aimee}"
-cfg="$AIMEE_HOME/.config/aimee/aimee.yaml"
+cfg="$AIMEE_HOME/aimee.yaml"
 default="/opt/aimee/defaults/aimee.yaml"
 if [ ! -f "$cfg" ] && [ -f "$default" ]; then
-    mkdir -p "$AIMEE_HOME/.config/aimee"
+    mkdir -p "$AIMEE_HOME"
     cp "$default" "$cfg"
 fi
 
