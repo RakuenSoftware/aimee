@@ -1,5 +1,6 @@
 services:
   postgres:
+    restart: unless-stopped
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: aimee_shared
@@ -14,6 +15,7 @@ services:
       retries: 5
 
   embedder:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile.embedder
@@ -27,6 +29,7 @@ services:
       start_period: 30s
 
   aimee-kb:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile
@@ -68,6 +71,7 @@ services:
   # The model is fetched from HuggingFace on first start (-hf) and cached in the
   # volume; override LLAMA_ARG_HF_REPO to choose a different GGUF.
   llm:
+    restart: unless-stopped
     image: ghcr.io/ggml-org/llama.cpp:server
     profiles: ["llm"]
     environment:
