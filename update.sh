@@ -169,7 +169,11 @@ NEW_HEAD=$(git rev-parse HEAD)
 # --- Check if rebuild is needed ---
 
 needs_build() {
-    local bins=("$LOCAL_BIN" "$LOCAL_SERVER" "$LOCAL_WEBCHAT" "$LOCAL_KB")
+    # aimee-webchat (Go) is optional: only required/buildable when a Go toolchain
+    # is present (see `make all`'s ALL_WEBCHAT gate). Without Go the C core still
+    # builds, so a missing webchat must not force a perpetual rebuild.
+    local bins=("$LOCAL_BIN" "$LOCAL_SERVER" "$LOCAL_KB")
+    command -v go >/dev/null 2>&1 && bins+=("$LOCAL_WEBCHAT")
     local bin
 
     if $FORCE; then
@@ -208,7 +212,10 @@ needs_install() {
         return 0
     fi
 
-    for bin in "$AIMEE_BIN" "$AIMEE_SERVER_BIN" "$AIMEE_WEBCHAT_BIN" "$AIMEE_KB_BIN"; do
+    local bins=("$AIMEE_BIN" "$AIMEE_SERVER_BIN" "$AIMEE_KB_BIN")
+    # webchat only counts toward "needs install" when a local build exists.
+    [ -f "$LOCAL_WEBCHAT" ] && bins+=("$AIMEE_WEBCHAT_BIN")
+    for bin in "${bins[@]}"; do
         [ -f "$bin" ] || return 0
     done
 
@@ -343,9 +350,13 @@ if $REFRESH_BINARIES; then
     rm -f "$AIMEE_BIN" "$AIMEE_SERVER_BIN" "$AIMEE_WEBCHAT_BIN" "$AIMEE_KB_BIN"
     cp "$LOCAL_BIN" "$AIMEE_BIN"
     cp "$LOCAL_SERVER" "$AIMEE_SERVER_BIN"
-    cp "$LOCAL_WEBCHAT" "$AIMEE_WEBCHAT_BIN"
     cp "$LOCAL_KB" "$AIMEE_KB_BIN"
-    chmod +x "$AIMEE_BIN" "$AIMEE_SERVER_BIN" "$AIMEE_WEBCHAT_BIN" "$AIMEE_KB_BIN"
+    chmod +x "$AIMEE_BIN" "$AIMEE_SERVER_BIN" "$AIMEE_KB_BIN"
+    # webchat is optional (built only when Go is available); install if present.
+    if [ -f "$LOCAL_WEBCHAT" ]; then
+        cp "$LOCAL_WEBCHAT" "$AIMEE_WEBCHAT_BIN"
+        chmod +x "$AIMEE_WEBCHAT_BIN"
+    fi
 fi
 
 # --- Refresh systemd user units (Linux only) ---
@@ -479,7 +490,11 @@ fi
 if ! $KB_REMOTE && ! $KB_SYSTEMD_RESTARTED && [ -x "$AIMEE_KB_BIN" ] && \
    ! pgrep -x aimee-kb >/dev/null 2>&1; then
     info "Starting aimee-kb..."
-    "$AIMEE_KB_BIN" >/dev/null 2>&1 &
+    # Match the systemd unit / launchd plist: aimee-kb serves /v1 only and EXITS
+    # without a port (kb_api_http_port defaults to 0), so pass --http-port=8741.
+    # Also give worker threads a 64 MB stack like the unit's LimitSTACK, or the
+    # drain/ingest/watch threads can overflow the default 8 MB and SIGSEGV.
+    ( ulimit -s 65536 2>/dev/null || true; exec "$AIMEE_KB_BIN" --http-port=8741 >/dev/null 2>&1 ) &
 fi
 
 bash "$SCRIPT_DIR/configure-hooks.sh"
