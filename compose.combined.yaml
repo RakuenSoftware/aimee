@@ -9,9 +9,11 @@
 #   docker compose -f compose.combined.yaml up --build
 #
 # Server /v1 on :8740 (bearer "aimee-local-dev"); the in-container kb /v1 is also
-# published on :8741 for direct inspection. The aimee-webchat browser UI is on
-# https://localhost:8443 (self-signed; log in as AIMEE_WEBCHAT_USER /
-# AIMEE_WEBCHAT_PASSWORD, default aimee / aimee-local-dev).
+# published on :8741 for direct inspection. The default build needs no credentials
+# and ships server+kb only. The optional aimee-webchat browser UI (https://localhost:8443,
+# self-signed; log in as AIMEE_WEBCHAT_USER / AIMEE_WEBCHAT_PASSWORD, default
+# aimee / aimee-local-dev) is included only when built with --build-arg WITH_WEBCHAT=1
+# (needs a GitHub Packages token) or when running a published image.
 #   curl -H "Authorization: Bearer aimee-local-dev" http://localhost:8740/v1/health
 #   curl http://localhost:8741/v1/health?status=1
 services:
@@ -46,10 +48,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.combined
-      # webchat's SPA build needs a GitHub Packages token (see Dockerfile.combined).
-      # Sourced from the host $NPM_TOKEN; export it before `docker compose build`.
-      secrets:
-        - npm_token
+      # Default build needs NO credentials and ships the server+kb services only.
+      # The optional browser UI (aimee-webchat) pulls a GitHub Packages npm package
+      # that needs a token; opt in by building with the token + arg:
+      #   NPM_TOKEN=<github PAT> docker compose -f compose.combined.yaml build \
+      #     --build-arg WITH_WEBCHAT=1 --secret id=npm_token,env=NPM_TOKEN
+      # (or `docker pull` the published image, which already includes webchat).
     image: aimee-server-kb
     # The server's worker threads need a 64 MB stack (the 8 MB container default
     # overflows during startup — matches systemd's LimitSTACK=67108864).
@@ -113,9 +117,3 @@ volumes:
   aimee-combined-postgres:
   aimee-embedder-models:
   aimee-llm-models:
-
-# Build-time secret for the webchat SPA's GitHub Packages dependency. Empty when
-# $NPM_TOKEN is unset (fine for public packages reachable with no token).
-secrets:
-  npm_token:
-    environment: NPM_TOKEN

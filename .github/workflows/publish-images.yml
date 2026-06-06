@@ -102,8 +102,12 @@ jobs:
           file: ${{ matrix.image.dockerfile }}
           platforms: linux/${{ matrix.platform.arch }}
           provenance: false
+          # Published images bundle the optional browser UI (WITH_WEBCHAT=1); the
+          # default `docker compose up --build` an end user runs leaves it off so it
+          # needs no credentials. The aimee-kb image ignores WITH_WEBCHAT.
           build-args: |
             AIMEE_VERSION=${{ needs.prep.outputs.version }}
+            WITH_WEBCHAT=1
           # webchat's SPA pulls @rakuensoftware/smoothgui from GitHub Packages,
           # whose npm registry requires an authenticated token (even for public
           # reads). Prefer a repo/org NPM_TOKEN secret (a PAT with read:packages);

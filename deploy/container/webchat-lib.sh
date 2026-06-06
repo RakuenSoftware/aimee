@@ -53,6 +53,12 @@ webchat_bootstrap_user() {
 # Launch aimee-webchat in the background (as root, for PAM). Self-signed TLS on
 # :8443 is auto-generated under AIMEE_HOME and persists on the data volume.
 webchat_start() {
+    # webchat is optional: images built with WITH_WEBCHAT=0 ship no aimee-webchat
+    # binary. Skip the browser UI rather than fail — the server is the contract.
+    if ! command -v aimee-webchat >/dev/null 2>&1; then
+        webchat_log "aimee-webchat not present (image built without WITH_WEBCHAT); skipping browser UI"
+        return 0
+    fi
     webchat_bootstrap_user
     webchat_log "starting aimee-webchat on :$WEBCHAT_PORT (https), socket=$WEBCHAT_HOME/aimee-server.sock"
     HOME=/root aimee-webchat \
