@@ -246,12 +246,38 @@ int shutdown_forensics_write_record(const shutdown_ctx_t *ctx)
    if (n <= 0 || (size_t)n >= sizeof(body))
       return -1;
 
-   int fd = open(path, O_CREAT | O_TRUNC | O_WRONLY | O_CLOEXEC, 0600);
+   /* Write to a per-pid temp file then rename() over the target so the update is
+    * atomic: a concurrent reader (shutdown_forensics_list_recent) sees either the
+    * old or the new complete record, never a truncated one. This matters because
+    * the async diagnostic child rewrites the same record the parent just wrote
+    * (to add the process tree); a reader racing an O_TRUNC rewrite could
+    * otherwise observe an empty file and miss the record. */
+   char tmppath[4160];
+   int tn = snprintf(tmppath, sizeof(tmppath), "%s.tmp.%ld", path, (long)getpid());
+   if (tn <= 0 || (size_t)tn >= sizeof(tmppath))
+      return -1;
+   int fd = open(tmppath, O_CREAT | O_TRUNC | O_WRONLY | O_CLOEXEC, 0600);
    if (fd < 0)
       return -1;
    ssize_t wrote = write(fd, body, (size_t)n);
    close(fd);
-   return wrote == n ? 0 : -1;
+   if (wrote != n)
+   {
+      unlink(tmppath);
+      return -1;
+   }
+#ifdef _WIN32
+   /* Windows rename() will not replace an existing file; the atomic-replace race
+    * it guards against is POSIX-only (the async diagnostic uses /proc), so a
+    * non-atomic remove-then-rename is acceptable here. */
+   unlink(path);
+#endif
+   if (rename(tmppath, path) != 0)
+   {
+      unlink(tmppath);
+      return -1;
+   }
+   return 0;
 }
 
 #ifndef _WIN32
