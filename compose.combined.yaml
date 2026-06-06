@@ -18,6 +18,7 @@
 #   curl http://localhost:8741/v1/health?status=1
 services:
   postgres:
+    restart: unless-stopped
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: aimee_shared
@@ -32,6 +33,7 @@ services:
       retries: 5
 
   embedder:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile.embedder
@@ -45,6 +47,7 @@ services:
       start_period: 30s
 
   aimee-server-kb:
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile.combined
@@ -95,6 +98,7 @@ services:
   # Optional local LLM for the kb synthesis / curator passes. Enable with
   #   docker compose -f compose.combined.yaml --profile llm up
   llm:
+    restart: unless-stopped
     image: ghcr.io/ggml-org/llama.cpp:server
     profiles: ["llm"]
     environment:
