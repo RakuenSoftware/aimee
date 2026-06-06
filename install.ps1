@@ -1,6 +1,19 @@
 #Requires -Version 5.1
+# $Portable is accepted for backwards compatibility (it previously skipped
+# Windows service registration); the Windows install is now thin-client only and
+# registers no services, so the switch is a no-op.
 param([switch]$Portable)
 $ErrorActionPreference = "Stop"
+
+# aimee Windows installer — THIN CLIENT ONLY.
+#
+# On Windows aimee runs as the thin client: a single `aimee.exe` that talks to a
+# remote aimee-server over the /v1 HTTP API. The server (aimee-server) and the
+# knowledge base (aimee-kb) run in Docker or on a Linux/macOS host, not on
+# Windows. This script builds that client with CMake's thin-client profile and
+# installs it to %LOCALAPPDATA%\aimee\bin; it does not build or run any services.
+# (Prefer no build at all? Download the prebuilt aimee-windows-x86_64.exe from a
+# GitHub release and put it on your PATH instead.)
 
 try {
     Write-Host "> Checking prerequisites..." -ForegroundColor Green
@@ -26,11 +39,28 @@ try {
     $installRoot = Join-Path $env:LOCALAPPDATA "aimee"
     $binDir = Join-Path $installRoot "bin"
 
-    Write-Host "> Building aimee with CMake..." -ForegroundColor Green
+    Write-Host "> Building the aimee thin client with CMake..." -ForegroundColor Green
     Push-Location $repoRoot
     try {
-        & cmake -B $buildDir -S $repoRoot
-        & cmake --build $buildDir --config Release
+        # Thin-client profile: only aimee.exe (no server/kb/gateway/webchat, so no
+        # libpq / Go / PAM). TLS is off on Windows — terminate TLS at a reverse
+        # proxy and point the client at its http:// address. Matches the CI and
+        # release Windows builds.
+        $cfgArgs = @(
+            "-B", $buildDir,
+            "-DAIMEE_THIN_CLIENT=ON",
+            "-DAIMEE_LEAN=ON",
+            "-DWITH_PAM=OFF",
+            "-DWITH_LIBSECRET=OFF",
+            "-DWITH_UI=OFF",
+            "-DWITH_TLS=OFF"
+        )
+        # MinGW gcc needs an explicit Makefiles generator; MSVC uses its default.
+        if ($gcc -and -not $cl) {
+            $cfgArgs += @("-G", "MinGW Makefiles")
+        }
+        & cmake @cfgArgs
+        & cmake --build $buildDir --config Release --target aimee
     }
     finally {
         Pop-Location
@@ -41,97 +71,14 @@ try {
         (Join-Path $releaseDir "aimee.exe"),
         (Join-Path $buildDir "aimee.exe")
     ) | Where-Object { Test-Path $_ } | Select-Object -First 1
-    $serverCandidate = @(
-        (Join-Path $releaseDir "aimee-server.exe"),
-        (Join-Path $buildDir "aimee-server.exe")
-    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
     if (-not $cliCandidate) {
         throw "Built binary not found: aimee.exe"
     }
-    if (-not $serverCandidate) {
-        throw "Built binary not found: aimee-server.exe"
-    }
 
-    Write-Host "> Installing binaries to $binDir..." -ForegroundColor Green
+    Write-Host "> Installing aimee.exe to $binDir..." -ForegroundColor Green
     New-Item -ItemType Directory -Force -Path $binDir | Out-Null
     Copy-Item $cliCandidate (Join-Path $binDir "aimee.exe") -Force
-    Copy-Item $serverCandidate (Join-Path $binDir "aimee-server.exe") -Force
-
-    $skillsSrc = Join-Path $repoRoot "skills"
-    if (Test-Path $skillsSrc) {
-        $skillsDst = Join-Path $installRoot "skills"
-        New-Item -ItemType Directory -Force -Path $skillsDst | Out-Null
-        Get-ChildItem -Path $skillsSrc -Directory | ForEach-Object {
-            $dst = Join-Path $skillsDst $_.Name
-            if (-not (Test-Path $dst)) {
-                Copy-Item $_.FullName $dst -Recurse
-                Write-Host "  Installed bundled skill: $($_.Name)" -ForegroundColor Green
-            }
-        }
-    }
-
-    # Windows Service installation via WinSW (best-effort; skip with -Portable)
-    $servicesRegistered = $false
-    if (-not $Portable) {
-        Write-Host "> Registering Windows services (WinSW)..." -ForegroundColor Green
-
-        $winswUrl = "https://github.com/winsw/winsw/releases/download/v3.0.0-alpha.11/WinSW-x64.exe"
-        $serviceDefs = @(
-            @{ id = "aimee-kb";  xml = "aimee-kb.xml" },
-            @{ id = "aimee-server"; xml = "aimee-server.xml" }
-        )
-
-        foreach ($svc in $serviceDefs) {
-            $svcId = $svc.id
-            $xmlSrc = Join-Path $repoRoot "service\$($svc.xml)"
-            $xmlDst = Join-Path $binDir "$svcId-service.xml"
-            $exeDst = Join-Path $binDir "$svcId-service.exe"
-            $winsw  = $exeDst
-
-            # Copy WinSW XML config
-            Copy-Item $xmlSrc $xmlDst -Force
-
-            # Download WinSW.exe if absent
-            if (-not (Test-Path $exeDst)) {
-                try {
-                    Invoke-WebRequest -Uri $winswUrl -OutFile $exeDst -UseBasicParsing
-                }
-                catch {
-                    Write-Warning "Failed to download WinSW for $svcId ($winswUrl). Skipping service registration. Re-run with -Portable for portable install."
-                    continue
-                }
-            }
-
-            # Install the service (refresh if already installed)
-            try {
-                & $winsw install
-            }
-            catch {
-                try {
-                    & $winsw refresh
-                }
-                catch {
-                    Write-Warning "Failed to install/refresh service $svcId: $($_.Exception.Message)"
-                    continue
-                }
-            }
-
-            # Start the service
-            try {
-                & $winsw start
-            }
-            catch {
-                Write-Warning "Failed to start service $svcId: $($_.Exception.Message)"
-            }
-
-            $servicesRegistered = $true
-        }
-
-        if ($servicesRegistered) {
-            Write-Host "  Services registered successfully." -ForegroundColor Green
-        }
-    }
 
     Write-Host "> Updating user PATH..." -ForegroundColor Green
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -165,23 +112,15 @@ try {
         Write-Host "  User PATH already includes $binDir." -ForegroundColor Yellow
     }
 
-    Write-Host "> Initializing aimee..." -ForegroundColor Green
-    & (Join-Path $binDir "aimee.exe") init
-
     Write-Host ""
-    Write-Host "Install complete." -ForegroundColor Green
+    Write-Host "Thin client installed." -ForegroundColor Green
     Write-Host "Next steps:" -ForegroundColor Green
-    Write-Host "  1. Open a new PowerShell or Command Prompt so PATH changes take effect everywhere."
-    Write-Host "  2. Run .\configure-hooks.ps1 to configure Claude, Codex, Gemini, or Copilot hooks on Windows."
-    if ($Portable) {
-        Write-Host "  3. For Windows service setup, see service\aimee-server.xml (WinSW) or use the schtasks example in that file."
-    }
-    elseif ($servicesRegistered) {
-        Write-Host "  3. aimee-server and aimee-kb are registered as Windows services (WinSW). Inspect with: Get-Service aimee-server,aimee-kb"
-    }
-    else {
-        Write-Host "  3. For Windows service setup, see service\aimee-server.xml (WinSW) or use the schtasks example in that file."
-    }
+    Write-Host "  1. Open a new PowerShell or Command Prompt so PATH changes take effect."
+    Write-Host "  2. Point aimee at your aimee-server (running in Docker or on Linux/macOS):"
+    Write-Host "       aimee remote set http://YOUR_SERVER:8740 YOUR_BEARER_TOKEN"
+    Write-Host "       aimee remote status"
+    Write-Host "     (or set AIMEE_SERVER_URL / AIMEE_SERVER_TOKEN, or pass --server per command)."
+    Write-Host "  3. Run .\configure-hooks.ps1 to configure Claude, Codex, Gemini, or Copilot hooks."
 }
 catch {
     Write-Host "Install failed: $($_.Exception.Message)" -ForegroundColor Red

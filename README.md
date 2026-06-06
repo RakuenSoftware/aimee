@@ -292,7 +292,7 @@ cd aimee
 ./install.sh        # build + install + configure (no sudo)
 ```
 
-`install-deps.sh` installs the system packages aimee builds against and bootstraps the `aimee_shared` PostgreSQL database, the only steps that need root. `install.sh` then builds from source, installs the binaries to `~/.local/bin/`, installs service units where supported (systemd user units on Linux, launchd agents on macOS), enables `aimee-kb` then `aimee-server`, and configures hooks + MCP for every detected AI coding tool. If a dependency is missing, `install.sh` stops and points you back at `install-deps.sh`. Windows users run `install.ps1` (CMake build + WinSW services) and `configure-hooks.ps1`.
+`install-deps.sh` installs the system packages aimee builds against and bootstraps the `aimee_shared` PostgreSQL database, the only steps that need root. `install.sh` then builds from source, installs the binaries to `~/.local/bin/`, installs service units where supported (systemd user units on Linux, launchd agents on macOS), enables `aimee-kb` then `aimee-server`, and configures hooks + MCP for every detected AI coding tool. If a dependency is missing, `install.sh` stops and points you back at `install-deps.sh`. On **Windows**, aimee runs as the thin client only (the server + kb run in Docker or on Linux/macOS): run `install.ps1` (builds + installs just `aimee.exe`), point it at your server with `aimee remote set http://host:8740 <token>`, and run `configure-hooks.ps1`.
 
 `install-deps.sh` installs the full set below; you only need this table if you are
 installing dependencies by hand. The C services (`aimee`, `aimee-server`,
