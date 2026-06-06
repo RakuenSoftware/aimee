@@ -402,6 +402,13 @@ Postgres (DB2) and a CPU embedder sidecar (`all-MiniLM-L6-v2`, `Dockerfile.embed
 the kb auto-applies its DB2 schema (tables + `pg_trgm`/`vector` extensions) on first
 boot.
 
+> **`docker compose ... up --build` needs no credentials.** The default build ships
+> the **server + kb** services only. The optional browser UI (`aimee-webchat`) pulls
+> a private-by-default npm package from GitHub Packages, so it is **off by default**;
+> the entrypoint simply skips it. To include it, either `docker pull` the published
+> image (it already bundles webchat) or build with a GitHub token:
+> `NPM_TOKEN=<PAT with read:packages> docker compose -f compose.combined.yaml build --build-arg WITH_WEBCHAT=1 --secret id=npm_token,env=NPM_TOKEN`.
+
 | File | Brings up | Use when |
 |------|-----------|----------|
 | `compose.combined.yaml` | **`aimee-server+kb`** (one container) + Postgres + embedder | **Recommended default**: both binaries co-located; server `/v1` on `:8740`, kb `:8741` |
