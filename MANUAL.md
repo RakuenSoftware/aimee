@@ -260,8 +260,10 @@ Go 1.25+ is required only to build `aimee-webchat`. Then `install.sh`, in order:
 
 `install-deps.sh` also bootstraps Postgres (starts the service, creates
 `aimee_shared`, enables `pg_trgm` + `vector`); `aimee-kb`'s startup auto-bootstrap
-retries the same steps on first launch. Windows users run `install.ps1` (CMake +
-WinSW services) and `configure-hooks.ps1`. Update with `./update.sh` (§4).
+retries the same steps on first launch. On Windows, aimee runs as the thin client
+only (server + kb live in Docker or on a Linux/macOS host): `install.ps1` builds
+and installs just `aimee.exe`; point it at a server with `aimee remote set` (or
+`AIMEE_SERVER_URL`), then run `configure-hooks.ps1`. Update with `./update.sh` (§4).
 
 **Manual build targets:**
 
