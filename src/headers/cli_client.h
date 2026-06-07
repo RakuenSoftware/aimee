@@ -158,6 +158,14 @@ int cmd_workspace_serve(const char *workspace_id);
 int cli_workspace_serve_loop(const char *workspace_id, const char *sock, const char *endpoint,
                              const char *bearer, volatile sig_atomic_t *stop);
 
+/* Reverse-channel for interactive/bridge commands (mcp-serve, chat) against a
+ * remote aimee-server: register the client's cwd as a `detached` workspace and
+ * serve it on a background thread so the server's file/exec tools route back to
+ * this client. start() returns 1 if a channel was started (remote configured),
+ * 0 otherwise (incl. co-located). stop() tears it down. One channel per process. */
+int cli_workspace_reverse_channel_start(void);
+void cli_workspace_reverse_channel_stop(void);
+
 /* Return the path to an already-running compatible server, or NULL if none
  * is available. Unlike cli_ensure_server(), this does not auto-start. */
 const char *cli_existing_server(void);

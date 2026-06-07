@@ -17,9 +17,16 @@
 #include "workspace_provider_detached.h"
 #include "cJSON.h"
 
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+#ifndef CLI_TUI_PATH_MAX
+#define CLI_TUI_PATH_MAX 4096
+#endif
 
 typedef struct
 {
@@ -212,4 +219,93 @@ int cmd_workspace_serve(const char *workspace_id)
    free(endpoint);
    free(bearer);
    return rc;
+}
+
+/* --- Reverse-channel helper for interactive/bridge commands ---
+ *
+ * When mcp-serve / chat target a remote aimee-server, the agent runs on the
+ * server but its file/exec tools must act on THIS client's tree. These helpers
+ * register the client's cwd as a `detached` workspace and serve it on a
+ * background thread, so the server (which binds that workspace per turn by cwd)
+ * marshals tool ops back here over runner.poll/respond. No-op for a co-located
+ * server. One channel per process. */
+static volatile sig_atomic_t g_rc_stop = 0;
+static pthread_t g_rc_thread;
+static int g_rc_active = 0;
+struct rc_args
+{
+   char *id;
+   char *endpoint;
+   char *bearer;
+};
+static void *rc_thread_main(void *arg)
+{
+   struct rc_args *a = arg;
+   cli_workspace_serve_loop(a->id, NULL, a->endpoint, a->bearer, &g_rc_stop);
+   free(a->id);
+   free(a->endpoint);
+   free(a->bearer);
+   free(a);
+   return NULL;
+}
+
+int cli_workspace_reverse_channel_start(void)
+{
+   if (g_rc_active || !cli_rpc_has_remote_endpoint())
+      return 0;
+   char cwd[CLI_TUI_PATH_MAX];
+   if (!getcwd(cwd, sizeof(cwd)) || !cwd[0])
+      return 0;
+   char *endpoint = cli_rpc_client_endpoint();
+   if (!endpoint)
+      return 0;
+   char *bearer = cli_rpc_client_bearer();
+
+   /* Register the detached workspace (idempotent). Best-effort. */
+   cJSON *reg = cJSON_CreateObject();
+   cJSON_AddStringToObject(reg, "root", cwd);
+   cJSON_AddStringToObject(reg, "provider", "detached");
+   char *body = cJSON_PrintUnformatted(reg);
+   cJSON_Delete(reg);
+   if (body)
+   {
+      int status = 0;
+      cJSON *resp = cli_http_request(endpoint, "POST", "/v1/workspaces", body, bearer, 15000,
+                                     &status);
+      cJSON_Delete(resp);
+      free(body);
+   }
+
+   struct rc_args *a = calloc(1, sizeof(*a));
+   if (!a)
+   {
+      free(endpoint);
+      free(bearer);
+      return 0;
+   }
+   a->id = strdup(cwd);
+   a->endpoint = endpoint; /* ownership passes to the thread */
+   a->bearer = bearer;
+   g_rc_stop = 0;
+   if (pthread_create(&g_rc_thread, NULL, rc_thread_main, a) == 0)
+   {
+      g_rc_active = 1;
+      return 1;
+   }
+   free(a->id);
+   free(a->endpoint);
+   free(a->bearer);
+   free(a);
+   return 0;
+}
+
+void cli_workspace_reverse_channel_stop(void)
+{
+   if (!g_rc_active)
+      return;
+   g_rc_stop = 1;
+   /* The poll may be mid-flight (~30s); the process is exiting, so detach
+    * rather than block on join. */
+   pthread_detach(g_rc_thread);
+   g_rc_active = 0;
 }
