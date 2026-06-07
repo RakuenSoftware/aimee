@@ -175,6 +175,8 @@ static const struct
     {"workspace", "mirror-sync", "workspace.mirror-sync", NULL, NULL, 60000},
     {"graph", "sync-code", "graph.sync_code", NULL, NULL, 300000},
     {"graph", "explain", "graph.explain", NULL, NULL, 60000},
+    {"notes", "search", "notes.search", NULL, "notes", 0},
+    {"notes", NULL, "notes.list", NULL, "notes", 0},
     {"session", "list", "session.list", NULL, "sessions", 0},
     {"session", "show", "session.get", NULL, NULL, 0},
     {"session", "get", "session.get", NULL, NULL, 0},
@@ -688,6 +690,21 @@ static cJSON *marshal_session_id_request(const char *method, int argc, char **ar
    const char *sid = opts.pos_count > 0 ? opts.positional[0] : rpc_get(&opts, "session");
    if (sid && sid[0])
       cJSON_AddStringToObject(req, "session_id", sid);
+   return req;
+}
+
+/* `aimee notes search <query>` -> POST /v1/notes/search {query}.
+ * (`aimee notes` -> notes.list is a GET and uses marshal_no_args.) */
+static cJSON *marshal_notes_search(int argc, char **argv)
+{
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
+
+   cJSON *req = marshal_no_args("notes.search");
+   const char *q = opts.pos_count > 0 ? opts.positional[0] : rpc_get(&opts, "query");
+   if (q)
+      cJSON_AddStringToObject(req, "query", q);
+   cJSON_AddNumberToObject(req, "limit", rpc_get_int(&opts, "limit", 20));
    return req;
 }
 
@@ -2851,6 +2868,10 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_workspace_mirror_sync(argc, argv);
    if (strcmp(method, "workspace.list") == 0)
       return marshal_no_args(method);
+   if (strcmp(method, "notes.list") == 0)
+      return marshal_no_args(method);
+   if (strcmp(method, "notes.search") == 0)
+      return marshal_notes_search(argc, argv);
    if (strcmp(method, "session.list") == 0)
       return marshal_session_list(argc, argv);
    if (strcmp(method, "session.get") == 0)
@@ -6438,6 +6459,8 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
        {"kb.status", "GET", "/v1/kb/status"},
        {"memory.recall", "POST", "/v1/memory/recall"},
        {"rules.list", "GET", "/v1/rules"},
+       {"notes.list", "GET", "/v1/notes"},
+       {"notes.search", "POST", "/v1/notes/search"},
    };
    for (size_t i = 0; i < sizeof(bespoke) / sizeof(bespoke[0]); i++)
    {
