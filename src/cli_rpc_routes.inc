@@ -6419,7 +6419,11 @@ int cli_rpc_remote_endpoint_is_tcp(void)
    free(ep);
    return is_tcp;
 #else
-   return 0;
+   /* The Windows thin client's only remote target comes from aimee_client
+    * (AIMEE_SERVER_URL / --server), which is always a tcp:host:port network
+    * endpoint — never a local unix: socket. Report it so chat/launch start the
+    * reverse-channel and route the turn over /v1 (matching has_remote_endpoint). */
+   return aimee_client_has_remote();
 #endif
 }
 
