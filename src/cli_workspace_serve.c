@@ -14,15 +14,24 @@
  * (workspace-resource-plane §3), so a client can serve its working tree to a
  * server on another host (e.g. a container). */
 #include "cli_client.h"
+#include "platform_process.h"
 #include "workspace_provider_detached.h"
 #include "cJSON.h"
 
-#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+/* Threading for the background reverse-channel: pthreads co-located, the CRT's
+ * _beginthreadex on Windows (always present in MinGW, no winpthreads needed). */
+#ifdef _WIN32
+#include <process.h>
+#include <windows.h>
+#else
+#include <pthread.h>
+#endif
 
 #ifndef CLI_TUI_PATH_MAX
 #define CLI_TUI_PATH_MAX 4096
@@ -204,8 +213,8 @@ int cmd_workspace_serve(const char *workspace_id)
       }
    }
 
-   signal(SIGINT, serve_on_signal);
-   signal(SIGTERM, serve_on_signal);
+   platform_signal_int(serve_on_signal);
+   platform_signal_term(serve_on_signal);
 
    fprintf(stderr, "aimee: serving detached workspace '%s' (%s) (Ctrl-C to stop)\n", workspace_id,
            endpoint ? endpoint : "local socket");
@@ -230,7 +239,11 @@ int cmd_workspace_serve(const char *workspace_id)
  * marshals tool ops back here over runner.poll/respond. No-op for a co-located
  * server. One channel per process. */
 static volatile sig_atomic_t g_rc_stop = 0;
+#ifdef _WIN32
+static HANDLE g_rc_thread = NULL;
+#else
 static pthread_t g_rc_thread;
+#endif
 static int g_rc_active = 0;
 struct rc_args
 {
@@ -238,16 +251,28 @@ struct rc_args
    char *endpoint;
    char *bearer;
 };
-static void *rc_thread_main(void *arg)
+/* Shared body for both thread ABIs: drive the serve loop, then free the args. */
+static void rc_serve_run(struct rc_args *a)
 {
-   struct rc_args *a = arg;
    cli_workspace_serve_loop(a->id, NULL, a->endpoint, a->bearer, &g_rc_stop);
    free(a->id);
    free(a->endpoint);
    free(a->bearer);
    free(a);
+}
+#ifdef _WIN32
+static unsigned __stdcall rc_thread_main(void *arg)
+{
+   rc_serve_run((struct rc_args *)arg);
+   return 0;
+}
+#else
+static void *rc_thread_main(void *arg)
+{
+   rc_serve_run((struct rc_args *)arg);
    return NULL;
 }
+#endif
 
 int cli_workspace_reverse_channel_start(void)
 {
@@ -287,11 +312,20 @@ int cli_workspace_reverse_channel_start(void)
    a->endpoint = endpoint; /* ownership passes to the thread */
    a->bearer = bearer;
    g_rc_stop = 0;
+#ifdef _WIN32
+   g_rc_thread = (HANDLE)_beginthreadex(NULL, 0, rc_thread_main, a, 0, NULL);
+   if (g_rc_thread)
+   {
+      g_rc_active = 1;
+      return 1;
+   }
+#else
    if (pthread_create(&g_rc_thread, NULL, rc_thread_main, a) == 0)
    {
       g_rc_active = 1;
       return 1;
    }
+#endif
    free(a->id);
    free(a->endpoint);
    free(a->bearer);
@@ -306,6 +340,14 @@ void cli_workspace_reverse_channel_stop(void)
    g_rc_stop = 1;
    /* The poll may be mid-flight (~30s); the process is exiting, so detach
     * rather than block on join. */
+#ifdef _WIN32
+   if (g_rc_thread)
+   {
+      CloseHandle(g_rc_thread);
+      g_rc_thread = NULL;
+   }
+#else
    pthread_detach(g_rc_thread);
+#endif
    g_rc_active = 0;
 }

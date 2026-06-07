@@ -750,13 +750,10 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/server/delegate_plan.c
     ${AIMEE_SRC_DIR}/acp_server.c
 )
-# `workspace serve` hosts the detached-workspace runner — a co-located POSIX
-# feature. On Windows the thin client is a remote /v1 consumer that does not host
-# it, and windows/cli_client.c already provides a cmd_workspace_serve stub; drop
-# the POSIX implementation here so the two do not collide at link time.
-if(WIN32)
-    list(REMOVE_ITEM CLI_SRCS ${AIMEE_SRC_DIR}/cli_workspace_serve.c)
-endif()
+# `workspace serve` + the reverse-channel host the detached-workspace runner so
+# the client serves its working tree to a remote aimee-server. It now builds on
+# Windows too (cli_workspace_serve.c is native-threaded via _beginthreadex), so
+# it is compiled on every platform — no per-OS exclusion.
 
 set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
