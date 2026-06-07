@@ -15,6 +15,20 @@ static inline void util_free_tokens(char **tokens, int count)
       free(tokens[i]);
 }
 
+/* True when `p` is an absolute path in either POSIX (/...) or Windows
+ * (C:\... / C:/...) form. The detached reverse-channel carries the CLIENT's cwd,
+ * which may be a Windows drive-letter path even though the server is POSIX, so
+ * cwd-binding/guard checks that must accept it use this rather than `p[0]=='/'`. */
+static inline int aimee_path_is_absolute(const char *p)
+{
+   if (!p || !p[0])
+      return 0;
+   if (p[0] == '/')
+      return 1;
+   return (((p[0] >= 'A' && p[0] <= 'Z') || (p[0] >= 'a' && p[0] <= 'z')) && p[1] == ':' &&
+           (p[2] == '\\' || p[2] == '/'));
+}
+
 /* 1 if `token` is a shell control/redirection operator (| || & && ; > >> < 2> 2>> >&). */
 static inline int util_token_is_shell_operator(const char *token)
 {

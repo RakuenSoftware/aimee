@@ -189,7 +189,7 @@ static void tool_execute_worker(void *arg)
     * A `mirror` workspace remaps into the server-side reconstructed worktree. */
    const char *eff_cwd = workspace_turn_active_cwd();
    const char *use_cwd = eff_cwd ? eff_cwd : cwd;
-   if (use_cwd[0] && use_cwd[0] == '/' && !strstr(use_cwd, "/../") && !strstr(use_cwd, "/.."))
+   if (aimee_path_is_absolute(use_cwd) && !strstr(use_cwd, "/../") && !strstr(use_cwd, "/.."))
       run_cmd_set_cwd(use_cwd);
 
    /* Guardrail pre-check */
