@@ -886,7 +886,15 @@ static int session_cwd_is_worktree(const char *cwd)
  * client's (it serves its own tree). */
 static int cwd_is_detached_workspace(const char *cwd)
 {
-   if (!cwd || cwd[0] != '/')
+   if (!cwd || !cwd[0])
+      return 0;
+   /* The cwd of a detached turn is the CLIENT's path — POSIX (/...) or Windows
+    * (C:\... / C:/...). A Windows thin client serving its tree has a drive-letter
+    * cwd, so accept that form too (the exemption is what lets its remote agent
+    * write to the served working tree). */
+   int win_abs = (((cwd[0] >= 'A' && cwd[0] <= 'Z') || (cwd[0] >= 'a' && cwd[0] <= 'z')) &&
+                  cwd[1] == ':' && (cwd[2] == '\\' || cwd[2] == '/'));
+   if (cwd[0] != '/' && !win_abs)
       return 0;
    config_t cfg;
    config_load(&cfg);
@@ -896,7 +904,8 @@ static int cwd_is_detached_workspace(const char *cwd)
       size_t len = ws ? strlen(ws) : 0;
       if (len == 0 || cfg.workspace_providers[i][0] == '\0')
          continue;
-      int inside = strncmp(cwd, ws, len) == 0 && (cwd[len] == '/' || cwd[len] == '\0');
+      int inside =
+          strncmp(cwd, ws, len) == 0 && (cwd[len] == '/' || cwd[len] == '\\' || cwd[len] == '\0');
       if (inside && strcmp(cfg.workspace_providers[i], "detached") == 0)
          return 1;
    }
