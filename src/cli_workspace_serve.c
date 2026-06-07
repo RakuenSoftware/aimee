@@ -136,6 +136,36 @@ static int serve_post(void *vctx, cJSON *response)
    return ok ? 0 : -1;
 }
 
+/* The serve loop, factored out so callers other than `aimee workspace serve`
+ * (e.g. mcp-serve's background reverse-channel thread) can drive it with their
+ * own stop flag instead of the process-wide SIGINT/SIGTERM handler. Either
+ * `sock` (local) or `endpoint` (remote) selects the transport. Returns 0 on a
+ * clean stop, 1 if it bailed after too many consecutive transport errors. */
+int cli_workspace_serve_loop(const char *workspace_id, const char *sock, const char *endpoint,
+                             const char *bearer, volatile sig_atomic_t *stop)
+{
+   serve_ctx_t ctx = {sock, workspace_id, endpoint, bearer};
+   int rc = 0;
+   int consecutive_errors = 0;
+   while (!*stop)
+   {
+      int r = ws_runner_serve_once(serve_fetch, serve_post, &ctx);
+      if (r < 0)
+      {
+         if (++consecutive_errors >= 5)
+         {
+            rc = 1;
+            break;
+         }
+      }
+      else
+      {
+         consecutive_errors = 0;
+      }
+   }
+   return rc;
+}
+
 int cmd_workspace_serve(const char *workspace_id)
 {
    if (!workspace_id || !workspace_id[0])
@@ -170,31 +200,12 @@ int cmd_workspace_serve(const char *workspace_id)
    signal(SIGINT, serve_on_signal);
    signal(SIGTERM, serve_on_signal);
 
-   serve_ctx_t ctx = {sock, workspace_id, endpoint, bearer};
    fprintf(stderr, "aimee: serving detached workspace '%s' (%s) (Ctrl-C to stop)\n", workspace_id,
            endpoint ? endpoint : "local socket");
 
-   int rc = 0;
-   int consecutive_errors = 0;
-   while (!g_serve_stop)
-   {
-      int r = ws_runner_serve_once(serve_fetch, serve_post, &ctx);
-      if (r < 0)
-      {
-         /* Transport error (server down mid-serve, etc.). Bail after a few in a
-          * row so a wedged server doesn't spin forever. */
-         if (++consecutive_errors >= 5)
-         {
-            fprintf(stderr, "aimee: too many runner errors; stopping\n");
-            rc = 1;
-            break;
-         }
-      }
-      else
-      {
-         consecutive_errors = 0;
-      }
-   }
+   int rc = cli_workspace_serve_loop(workspace_id, sock, endpoint, bearer, &g_serve_stop);
+   if (rc)
+      fprintf(stderr, "aimee: too many runner errors; stopping\n");
 
    if (!rc)
       fprintf(stderr, "\naimee: stopped serving '%s'\n", workspace_id);

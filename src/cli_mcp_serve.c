@@ -11,6 +11,7 @@
 #include "platform_path.h"
 #include "cJSON.h"
 #include <ctype.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -965,12 +966,105 @@ static int read_mcp_message(FILE *in, char **out)
 
 /* --- Entry point --- */
 
+/* --- Phase 2b: workspace reverse-channel for a remote aimee-server ---
+ *
+ * When mcp-serve targets a remote server, register the client's cwd as a
+ * `detached` workspace and serve it on a background thread. The server binds
+ * that workspace per mcp.call (by cwd) and marshals file/exec tools back here
+ * over runner.poll/respond, so tools run on the client's tree while the agent +
+ * memory/kb stay on the server. No-op for a co-located server. */
+static volatile sig_atomic_t g_ws_serve_stop = 0;
+static pthread_t g_ws_serve_thread;
+static int g_ws_serve_active = 0;
+
+struct ws_serve_args
+{
+   char *id;
+   char *endpoint;
+   char *bearer;
+};
+
+static void *ws_serve_thread_main(void *arg)
+{
+   struct ws_serve_args *a = arg;
+   cli_workspace_serve_loop(a->id, NULL, a->endpoint, a->bearer, &g_ws_serve_stop);
+   free(a->id);
+   free(a->endpoint);
+   free(a->bearer);
+   free(a);
+   return NULL;
+}
+
+static void mcp_workspace_reverse_channel_start(void)
+{
+   if (!cli_rpc_has_remote_endpoint())
+      return;
+   char cwd[MAX_PATH_LEN];
+   if (!getcwd(cwd, sizeof(cwd)) || !cwd[0])
+      return;
+   char *endpoint = cli_rpc_client_endpoint();
+   if (!endpoint)
+      return;
+   char *bearer = cli_rpc_client_bearer();
+
+   /* Register the detached workspace (idempotent: re-registering the same root
+    * is harmless). Best-effort — if it fails, file tools simply won't route. */
+   cJSON *reg = cJSON_CreateObject();
+   cJSON_AddStringToObject(reg, "root", cwd);
+   cJSON_AddStringToObject(reg, "provider", "detached");
+   char *body = cJSON_PrintUnformatted(reg);
+   cJSON_Delete(reg);
+   if (body)
+   {
+      int status = 0;
+      cJSON *resp = cli_http_request(endpoint, "POST", "/v1/workspaces", body, bearer, 15000,
+                                     &status);
+      cJSON_Delete(resp);
+      free(body);
+   }
+
+   struct ws_serve_args *a = calloc(1, sizeof(*a));
+   if (!a)
+   {
+      free(endpoint);
+      free(bearer);
+      return;
+   }
+   a->id = strdup(cwd);
+   a->endpoint = endpoint; /* ownership passes to the thread */
+   a->bearer = bearer;
+   if (pthread_create(&g_ws_serve_thread, NULL, ws_serve_thread_main, a) == 0)
+      g_ws_serve_active = 1;
+   else
+   {
+      free(a->id);
+      free(a->endpoint);
+      free(a->bearer);
+      free(a);
+   }
+}
+
+static void mcp_workspace_reverse_channel_stop(void)
+{
+   if (!g_ws_serve_active)
+      return;
+   g_ws_serve_stop = 1;
+   /* The poll may be mid-flight (~30s); the process is exiting, so detach rather
+    * than block on join. */
+   pthread_detach(g_ws_serve_thread);
+   g_ws_serve_active = 0;
+}
+
 int cli_mcp_serve(void)
 {
    /* Unbuffered stdout for MCP protocol. SIGPIPE is ignored process-wide
     * by cli_main so write() to a dead server socket surfaces EPIPE rather
     * than killing the bridge. */
    setvbuf(stdout, NULL, _IONBF, 0);
+
+   /* If pointed at a remote aimee-server, serve this client's working tree to it
+    * over the reverse-channel so file/exec tools route back here (Phase 2b). */
+   mcp_workspace_reverse_channel_start();
 
    char *message = NULL;
    int rc;
@@ -993,6 +1087,7 @@ int cli_mcp_serve(void)
    free(message);
    if (rc < 0)
       mcp_error(NULL, -32700, "Parse error");
+   mcp_workspace_reverse_channel_stop();
    cli_close(&g_conn);
    return 0;
 }
