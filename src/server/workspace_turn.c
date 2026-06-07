@@ -37,7 +37,9 @@ static int cwd_in_workspace(const char *cwd, const char *ws)
    size_t len = strlen(ws);
    if (len == 0)
       return 0;
-   return strncmp(cwd, ws, len) == 0 && (cwd[len] == '/' || cwd[len] == '\0');
+   /* '\\' is also a boundary so a Windows client's subdir (C:\ws\sub) matches its
+    * registered root (C:\ws); the exact-match case (cwd[len]=='\0') covers both. */
+   return strncmp(cwd, ws, len) == 0 && (cwd[len] == '/' || cwd[len] == '\\' || cwd[len] == '\0');
 }
 
 /* Production git runner for the mirror lifecycle: prepend "git" and fork/exec

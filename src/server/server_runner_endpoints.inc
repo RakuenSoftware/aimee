@@ -109,7 +109,14 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char abs[MAX_PATH_LEN];
    if (is_detached || is_mirror)
    {
-      if (argv[0][0] != '/')
+      /* The root is the CLIENT's absolute path, never resolved on this server, so
+       * accept either POSIX (/...) or Windows (C:\... / C:/...) form — a Windows
+       * thin client serving its working tree registers a drive-letter path. */
+      const char *r = argv[0];
+      int posix_abs = (r[0] == '/');
+      int win_abs = (((r[0] >= 'A' && r[0] <= 'Z') || (r[0] >= 'a' && r[0] <= 'z')) &&
+                     r[1] == ':' && (r[2] == '\\' || r[2] == '/'));
+      if (!posix_abs && !win_abs)
          return server_send_error(conn, "workspace: detached/mirror root must be an absolute path",
                                   NULL);
       snprintf(abs, sizeof(abs), "%s", argv[0]);
