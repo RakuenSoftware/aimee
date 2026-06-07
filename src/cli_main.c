@@ -1051,8 +1051,8 @@ static int handle_session_start_remote(void)
    cJSON_Delete(body);
 
    int status = 0;
-   cJSON *resp = cli_http_request(endpoint, "POST", "/v1/memory/recall", body_s, bearer, 30000,
-                                  &status);
+   cJSON *resp =
+       cli_http_request(endpoint, "POST", "/v1/memory/recall", body_s, bearer, 30000, &status);
    free(endpoint);
    free(bearer);
    free(body_s);
@@ -1270,9 +1270,9 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
       char *bearer = cli_rpc_client_bearer();
       char *body = cJSON_PrintUnformatted(req);
       int status = 0;
-      resp = (endpoint && body)
-                 ? cli_http_request(endpoint, "POST", "/v1/launch/run", body, bearer, 30000, &status)
-                 : NULL;
+      resp = (endpoint && body) ? cli_http_request(endpoint, "POST", "/v1/launch/run", body, bearer,
+                                                   30000, &status)
+                                : NULL;
       free(endpoint);
       free(bearer);
       free(body);
