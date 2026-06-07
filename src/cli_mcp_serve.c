@@ -141,6 +141,36 @@ static int ensure_connection(void)
 
 static cJSON *server_request(cJSON *req, int timeout_ms)
 {
+   /* Remote aimee-server: POST mcp.call to its first-class /v1 route. The local
+    * cli_v1_rpc_local path only speaks the co-located UDS, so a thin client
+    * configured with a remote endpoint must route here. Memory/kb/search tools
+    * resolve on the server (which proxies DB2 to aimee-kb). File/exec tools whose
+    * cwd is a registered detached workspace marshal back to this client over the
+    * workspace reverse-channel (Phase 2b); on a non-served cwd they fail safe
+    * server-side (the path does not exist there). */
+   if (cli_rpc_has_remote_endpoint())
+   {
+      char *endpoint = cli_rpc_client_endpoint();
+      char *bearer = cli_rpc_client_bearer();
+      const char *verb = NULL;
+      const char *path = cli_v1_route_for_method("mcp.call", &verb);
+      cJSON *resp = NULL;
+      if (endpoint && path)
+      {
+         char *body = cJSON_PrintUnformatted(req);
+         if (body)
+         {
+            int status = 0;
+            resp = cli_http_request(endpoint, verb ? verb : "POST", path, body, bearer,
+                                    timeout_ms, &status);
+            free(body);
+         }
+      }
+      free(endpoint);
+      free(bearer);
+      return resp;
+   }
+
    useconds_t delay = RECONNECT_DELAY_INIT_US;
    for (int retry = 0; retry < RECONNECT_RETRIES; retry++)
    {
