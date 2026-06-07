@@ -61,6 +61,7 @@ static const struct
     {"dashboard.plans", "GET", "/v1/dashboard/plans"},
     {"dashboard.plugins", "GET", "/v1/dashboard/plugins"},
     {"dashboard.traces", "GET", "/v1/dashboard/traces"},
+    {"delegate", "POST", "/v1/delegate/run"},
     {"delegate.backend_exec", "POST", "/v1/delegate/backend_exec"},
     {"delegate.backend_list", "GET", "/v1/delegate/backend_list"},
     {"delegate.launch", "POST", "/v1/delegate/launch"},

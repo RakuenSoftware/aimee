@@ -789,6 +789,10 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/delegate/backend_list", NULL, RM_EXACT, "delegate.backend_list", 0,
      rh_dispatch_op},
     {"POST", "/v1/delegate/status", NULL, RM_EXACT, "delegate.status", 0, rh_dispatch_op},
+    /* Background-only over /v1: the thin client forces `background` (returns a
+     * job_id to poll via the /v1/jobs routes); a foreground delegate streams and
+     * would tie up a listener thread, so remote callers use background mode. */
+    {"POST", "/v1/delegate/run", NULL, RM_EXACT, "delegate", 0, rh_dispatch_op},
     {"POST", "/v1/delegate/reply", NULL, RM_EXACT, "delegate.reply", 0, rh_dispatch_op},
     {"POST", "/v1/delegate/launch", NULL, RM_EXACT, "delegate.launch", 0, rh_dispatch_op},
     {"POST", "/v1/delegate/backend_exec", NULL, RM_EXACT, "delegate.backend_exec", 0,

@@ -119,18 +119,37 @@ static void chat_stream_on_open(int fd, void *ud)
       control->set_stream_fd(fd, control->userdata);
 }
 
-/* Resolve the co-located /v1 HTTP endpoint for chat ("unix:<home>/aimee-http.sock").
- * Interactive chat runs the agent + tools on this host, so it always targets the
- * local server's HTTP UDS (a remote TCP endpoint is refused upstream in
- * cli_main). Returns 0 on success. */
+/* Resolve the /v1 HTTP endpoint for chat. A configured remote aimee-server is
+ * used when set (the agent runs there; this client serves its working tree over
+ * the reverse-channel set up by cli_main); otherwise the co-located server's
+ * HTTP UDS ("unix:<home>/aimee-http.sock"). Returns 0 on success. */
 static int chat_v1_endpoint(char *out, size_t out_len)
 {
+   if (!out || out_len == 0)
+      return -1;
+   if (cli_rpc_has_remote_endpoint())
+   {
+      char *ep = cli_rpc_client_endpoint();
+      if (ep)
+      {
+         int n = snprintf(out, out_len, "%s", ep);
+         free(ep);
+         return (n > 0 && (size_t)n < out_len) ? 0 : -1;
+      }
+   }
    const char *home = aimee_home();
-   if (!home || !home[0] || !out || out_len == 0)
+   if (!home || !home[0])
       return -1;
    if (snprintf(out, out_len, "unix:%s/aimee-http.sock", home) >= (int)out_len)
       return -1;
    return 0;
+}
+
+/* Bearer for the chat /v1 endpoint: the configured token for a remote endpoint,
+ * NULL for the local UDS (no auth needed). Caller frees. */
+static char *chat_v1_bearer(void)
+{
+   return cli_rpc_has_remote_endpoint() ? cli_rpc_client_bearer() : NULL;
 }
 
 /* Build "/v1/sessions/<pct-encoded session_id><suffix>" into out. Returns 0 on
@@ -154,9 +173,11 @@ static cJSON *chat_v1_post(const char *path, cJSON *body_obj)
    if (chat_v1_endpoint(endpoint, sizeof(endpoint)) != 0)
       return NULL;
    char *body = body_obj ? cJSON_PrintUnformatted(body_obj) : NULL;
+   char *bearer = chat_v1_bearer();
    int status = 0;
    cJSON *resp =
-       cli_http_request(endpoint, "POST", path, body, NULL, CLIENT_DEFAULT_TIMEOUT_MS, &status);
+       cli_http_request(endpoint, "POST", path, body, bearer, CLIENT_DEFAULT_TIMEOUT_MS, &status);
+   free(bearer);
    free(body);
    if (resp && !(status >= 200 && status < 300))
    {
@@ -324,7 +345,7 @@ builtin_chat_send_ex(const char *sock, const char *provider_session_id,
    if (control)
       control->aborted = 0;
 
-   (void)sock; /* chat always targets the co-located /v1 HTTP endpoint */
+   (void)sock; /* chat targets the /v1 HTTP endpoint (local UDS or remote) */
    if (control && control->should_abort && control->should_abort(control->userdata))
    {
       control->aborted = 1;
@@ -384,11 +405,13 @@ builtin_chat_send_ex(const char *sock, const char *provider_session_id,
    int http_status = 0;
    /* on_open surfaces the live stream fd to control->set_stream_fd (and -1 on
     * close) so the TUI's abort path can interrupt the turn exactly as before. */
+   char *bearer = chat_v1_bearer();
    cJSON *resp = body ? cli_http_request_stream_ndjson(endpoint, "POST", "/v1/chat/stream", body,
-                                                       NULL, BUILTIN_CHAT_STREAM_IDLE_TIMEOUT_MS,
+                                                       bearer, BUILTIN_CHAT_STREAM_IDLE_TIMEOUT_MS,
                                                        &http_status, chat_stream_event_cb, &st,
                                                        chat_stream_on_open, control)
                       : NULL;
+   free(bearer);
    free(body);
    chat_stream_finish(&st);
    md_stream_free(st.md);
