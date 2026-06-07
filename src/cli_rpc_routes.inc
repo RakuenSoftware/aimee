@@ -1729,7 +1729,10 @@ static cJSON *marshal_delegate(int argc, char **argv)
    const char *env_parent = getenv("AIMEE_PARENT_DELEGATION_ID");
    if (env_parent && env_parent[0] && (v = getenv("AIMEE_DELEGATE_DEPTH")) && v[0] && atoi(v) > 0)
       cJSON_AddNumberToObject(req, "delegation_depth", atoi(v));
-   if (rpc_get(&opts, "background"))
+   /* Foreground delegate streams over a long-lived connection and has no /v1
+    * route; against a remote aimee-server force background so the call uses the
+    * /v1/delegate/run route (returns a job_id to poll via `aimee jobs`). */
+   if (rpc_get(&opts, "background") || cli_rpc_has_remote_endpoint())
       cJSON_AddTrueToObject(req, "background");
    if (rpc_get(&opts, "tools"))
       cJSON_AddTrueToObject(req, "tools");
