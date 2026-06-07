@@ -270,8 +270,8 @@ int cli_workspace_reverse_channel_start(void)
    if (body)
    {
       int status = 0;
-      cJSON *resp = cli_http_request(endpoint, "POST", "/v1/workspaces", body, bearer, 15000,
-                                     &status);
+      cJSON *resp =
+          cli_http_request(endpoint, "POST", "/v1/workspaces", body, bearer, 15000, &status);
       cJSON_Delete(resp);
       free(body);
    }

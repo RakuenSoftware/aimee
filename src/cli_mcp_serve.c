@@ -51,7 +51,9 @@ int cli_workspace_reverse_channel_start(void)
 {
    return 0;
 }
-void cli_workspace_reverse_channel_stop(void) {}
+void cli_workspace_reverse_channel_stop(void)
+{
+}
 #endif
 
 static int g_output_ndjson = 1;
@@ -174,8 +176,8 @@ static cJSON *server_request(cJSON *req, int timeout_ms)
          if (body)
          {
             int status = 0;
-            resp = cli_http_request(endpoint, verb ? verb : "POST", path, body, bearer,
-                                    timeout_ms, &status);
+            resp = cli_http_request(endpoint, verb ? verb : "POST", path, body, bearer, timeout_ms,
+                                    &status);
             free(body);
          }
       }

@@ -3,8 +3,8 @@
  * Unported commands fail in cli_main before reaching the server.
  * =================================================================== */
 
-#include "util.h"          /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
-#include "aimee_client.h"  /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
+#include "util.h"         /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
+#include "aimee_client.h" /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
 #if !defined(_WIN32) && !defined(_WIN64)
 #include "aimee_home.h"
 #include <dirent.h>
@@ -6763,9 +6763,9 @@ int cli_rpc_forward(const char *socket_path, const cli_rpc_route_t *route, int j
     * field, which marshalling may set to a server_method twin (e.g. `git verify`
     * dispatches as mcp.call) — not the CLI route name. */
    cJSON *bm = cJSON_GetObjectItemCaseSensitive(req, "method");
-   const char *disp_method =
-       (cJSON_IsString(bm) && bm->valuestring && bm->valuestring[0]) ? bm->valuestring
-                                                                     : route->method;
+   const char *disp_method = (cJSON_IsString(bm) && bm->valuestring && bm->valuestring[0])
+                                 ? bm->valuestring
+                                 : route->method;
    const char *rest_verb = NULL;
    const char *rest_path = NULL;
    const char *async_verb = NULL;
