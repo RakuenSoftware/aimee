@@ -41,6 +41,21 @@
  * output. Default is NDJSON, so spec-compliant clients work even if we have
  * to emit an error before reading anything. */
 
+#if defined(_WIN32) || defined(_WIN64)
+/* The workspace reverse-channel lives in cli_workspace_serve.c, which the Windows
+ * thin client excludes (POSIX-only: pthreads + the runner serve loop). mcp-serve
+ * and chat still reference these, so provide no-op stubs here on Windows — remote
+ * file/exec tools simply don't route back to a Windows client. POSIX builds use
+ * the real definitions in cli_workspace_serve.c (this block compiles out). */
+int cli_workspace_reverse_channel_start(void)
+{
+   return 0;
+}
+void cli_workspace_reverse_channel_stop(void)
+{
+}
+#endif
+
 static int g_output_ndjson = 1;
 
 static void mcp_send(cJSON *msg)
@@ -161,8 +176,8 @@ static cJSON *server_request(cJSON *req, int timeout_ms)
          if (body)
          {
             int status = 0;
-            resp = cli_http_request(endpoint, verb ? verb : "POST", path, body, bearer,
-                                    timeout_ms, &status);
+            resp = cli_http_request(endpoint, verb ? verb : "POST", path, body, bearer, timeout_ms,
+                                    &status);
             free(body);
          }
       }

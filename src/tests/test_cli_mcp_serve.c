@@ -40,6 +40,52 @@ const char *cli_ensure_server_for_method(const char *method)
    return cli_ensure_server();
 }
 
+/* Reverse-channel helpers live in cli_workspace_serve.c, which this unit test
+ * does not link; stub them so cli_mcp_serve.o resolves. */
+int cli_workspace_reverse_channel_start(void)
+{
+   return 0;
+}
+void cli_workspace_reverse_channel_stop(void)
+{
+}
+
+/* Remote-endpoint accessors used by server_request's remote-routing branch.
+ * This test drives the local-socket path (cli_ensure_server returns a socket),
+ * so cli_rpc_has_remote_endpoint() returns 0 and the rest are never called;
+ * stub them so cli_mcp_serve.o links standalone. */
+int cli_rpc_has_remote_endpoint(void)
+{
+   return 0;
+}
+char *cli_rpc_client_endpoint(void)
+{
+   return NULL;
+}
+char *cli_rpc_client_bearer(void)
+{
+   return NULL;
+}
+const char *cli_v1_route_for_method(const char *method, const char **verb_out)
+{
+   (void)method;
+   (void)verb_out;
+   return NULL;
+}
+cJSON *cli_http_request(const char *endpoint, const char *method, const char *path,
+                        const char *body_json, const char *bearer, int timeout_ms, int *http_status)
+{
+   (void)endpoint;
+   (void)method;
+   (void)path;
+   (void)body_json;
+   (void)bearer;
+   (void)timeout_ms;
+   if (http_status)
+      *http_status = 0;
+   return NULL;
+}
+
 int cli_connect(cli_conn_t *conn, const char *socket_path)
 {
    (void)socket_path;
