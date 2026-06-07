@@ -1009,6 +1009,11 @@ const char *path_in_thread_cwd(const char *path, char *buf, size_t buf_len)
 {
    if (!path || !path[0] || path[0] == '/')
       return path;
+   /* A Windows-absolute client path (C:\... or C:/...) is already rooted — don't
+    * prefix the detached turn's cwd onto it. */
+   if (((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+       path[1] == ':' && (path[2] == '\\' || path[2] == '/'))
+      return path;
    const char *cwd = run_cmd_get_cwd();
    if (!cwd || !cwd[0] || !buf || buf_len == 0)
       return path;

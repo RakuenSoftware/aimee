@@ -577,7 +577,7 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
     * client-supplied cwd. Otherwise run in the (validated) client cwd. */
    const char *eff_cwd = workspace_turn_active_cwd();
    const char *use_cwd = eff_cwd ? eff_cwd : cwd;
-   if (use_cwd && use_cwd[0] == '/' && !strstr(use_cwd, "/.."))
+   if (aimee_path_is_absolute(use_cwd) && !strstr(use_cwd, "/.."))
       run_cmd_set_cwd(use_cwd);
    if (aimee_sid && aimee_sid[0])
       session_id_set_override(aimee_sid);

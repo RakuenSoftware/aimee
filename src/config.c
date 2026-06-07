@@ -784,8 +784,14 @@ int config_load(config_t *cfg)
          }
          if (path_str && path_str[0])
          {
+            /* A Windows-absolute path (C:\... / C:/...) is already rooted — a
+             * detached workspace registered by a Windows thin client — so store
+             * it verbatim rather than resolving it against the server's CWD. */
+            int win_abs = (((path_str[0] >= 'A' && path_str[0] <= 'Z') ||
+                            (path_str[0] >= 'a' && path_str[0] <= 'z')) &&
+                           path_str[1] == ':' && (path_str[2] == '\\' || path_str[2] == '/'));
             /* Resolve relative workspace paths against CWD. */
-            if (path_str[0] != '/')
+            if (path_str[0] != '/' && !win_abs)
             {
                const char *base = NULL;
                char cwd_buf[MAX_PATH_LEN];
