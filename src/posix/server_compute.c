@@ -661,6 +661,30 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    if (chat_model_passthrough_allowed(model_override))
       snprintf(ag->model, sizeof(ag->model), "%s", model_override);
 
+   /* If this turn's workspace is registered `detached`, route its file/exec
+    * tools over the reverse channel to the serving client (no-op for shared).
+    * primary_session_adapter_turn runs the agent loop inline on this thread, so
+    * the thread-local provider binding applies to its tool calls — the same
+    * seam chat_stream_worker_agent uses. Without this, a direct primary agent
+    * (minimax/mistral/...) ran bash/file tools on the server's own fs. */
+   int detached_bound = workspace_turn_bind_active(cwd);
+   int trusted_local = (cctx->conn_caps == (uint32_t)CAPS_ALL);
+   /* AC #6 — a remote peer must act within a registered `detached` workspace;
+    * never open its raw client-supplied path on the server's filesystem. */
+   if (workspace_turn_reject_foreign_cwd(detached_bound, trusted_local, cwd))
+   {
+      workspace_turn_unbind_active();
+      free(system_prompt);
+      compute_error(cctx, "workspace: a remote session must act within a registered `detached` "
+                          "workspace; raw server-side path not accepted");
+      compute_ctx_free(cctx);
+      return;
+   }
+   /* A `mirror` workspace remaps the turn into a server-side reconstructed
+    * worktree; otherwise act in the (validated) client cwd. */
+   const char *eff_cwd = workspace_turn_active_cwd();
+   const char *use_cwd = eff_cwd ? eff_cwd : cwd;
+
    stream_event(cctx, "turn_start", NULL, NULL);
 
    primary_session_request_t preq;
@@ -669,7 +693,7 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    preq.network = &acfg.network;
    preq.provider_session_id = provider_sid;
    preq.aimee_session_id = aimee_sid;
-   preq.cwd = cwd;
+   preq.cwd = use_cwd;
    preq.system_prompt = system_prompt ? system_prompt : "";
    preq.user_prompt = message;
    preq.max_tokens = AGENT_DEFAULT_MAX_TOKENS;
@@ -679,6 +703,7 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
    agent_result_t result;
    memset(&result, 0, sizeof(result));
    int rc = primary_session_adapter_turn(&preq, &result, session_id, sizeof(session_id));
+   workspace_turn_unbind_active();
    free(system_prompt);
 
    if (rc != 0)
