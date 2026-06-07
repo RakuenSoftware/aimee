@@ -319,14 +319,32 @@ char *tool_edit_file(const char *path, const char *old_string, const char *new_s
 static char *td_bash(cJSON *args, const char *name, const char *dispatch_cwd,
                      const char *dispatch_sid, int timeout_ms)
 {
-   char *result = NULL;
    cJSON *cmd = cJSON_GetObjectItem(args, "command");
-   if (cmd && cJSON_IsString(cmd))
-      result = tool_bash(cmd->valuestring, timeout_ms);
-   else
-      result = safe_strdup("error: missing 'command' parameter");
+   if (!cmd || !cJSON_IsString(cmd))
+      return safe_strdup("error: missing 'command' parameter");
 
-   return result;
+   /* Detached workspace (turn bound to a serving client): marshal the shell
+    * command — with the thread-local cwd — over the reverse-channel so it runs
+    * on the CLIENT's working tree, not the server's filesystem. tool_bash's
+    * local fork/exec + read-only fast-paths only apply co-located, and would
+    * otherwise fail (the client's cwd does not exist on the server). The shared
+    * provider keeps using tool_bash below. */
+   const workspace_provider_t *ws = workspace_provider_active();
+   if (ws && ws->kind == WS_PROVIDER_DETACHED && ws->exec_shell)
+   {
+      int exit_code = -1;
+      char *out = ws->exec_shell(ws, cmd->valuestring, &exit_code);
+      cJSON *r = cJSON_CreateObject();
+      cJSON_AddStringToObject(r, "stdout", out ? out : "");
+      cJSON_AddStringToObject(r, "stderr", "");
+      cJSON_AddNumberToObject(r, "exit_code", exit_code);
+      free(out);
+      char *result = cJSON_PrintUnformatted(r);
+      cJSON_Delete(r);
+      return result ? result : safe_strdup("{}");
+   }
+
+   return tool_bash(cmd->valuestring, timeout_ms);
 }
 
 static char *td_execute_script(cJSON *args, const char *name, const char *dispatch_cwd,
