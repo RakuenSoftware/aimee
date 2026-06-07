@@ -121,7 +121,10 @@ ENV LLM_ENDPOINT=http://llm:8080/v1
 # a dedicated volume, matching Dockerfile.server.
 ENV AIMEE_WORKSPACES_DIR=/var/lib/aimee-workspaces
 
-RUN useradd --system --home-dir /var/lib/aimee --create-home --shell /usr/sbin/nologin aimee \
+# aimee runs as uid 1000 so it can own its data on storage backends that
+# present a uniform owner (e.g. SmoothNAS smoothfs tiers force uid 1000). The
+# entrypoint stays root (for webchat PAM) and drops kb/server to this user.
+RUN useradd --uid 1000 --user-group --home-dir /var/lib/aimee --create-home --shell /usr/sbin/nologin aimee \
     && mkdir -p /var/lib/aimee-workspaces /var/lib/aimee/.config/aimee \
     && chown -R aimee:aimee /var/lib/aimee-workspaces /var/lib/aimee/.config
 VOLUME /var/lib/aimee-workspaces
@@ -132,11 +135,12 @@ COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
 # kb sidecar clients (LLM/embedder access code the kb invokes via popen).
 COPY scripts/embed-remote.py scripts/llm-chat.py scripts/learning-synthesize.py \
      scripts/curator-extract.py /opt/aimee/scripts/
-# Baked configs: the server config (port + bearer for the /v1 listener) and the
-# kb config (sidecar command selection). They live at distinct paths so they do
-# not collide under the shared AIMEE_HOME.
-COPY --chown=aimee:aimee deploy/container/aimee-server.yaml /var/lib/aimee/aimee.yaml
-COPY --chown=aimee:aimee deploy/container/aimee.yaml /var/lib/aimee/.config/aimee/aimee.yaml
+# Baked default config kept OUTSIDE $AIMEE_HOME so a bind-mounted (empty) volume
+# can't shadow it; the entrypoint seeds it into $AIMEE_HOME/aimee.yaml on first
+# start. server + kb share AIMEE_HOME and both read $AIMEE_HOME/aimee.yaml, so
+# this single merged file carries the server's /v1 settings AND the kb's sidecar
+# command selection (incl. embedding_command).
+COPY deploy/container/aimee-combined.yaml /opt/aimee/defaults/aimee.yaml
 # Co-located webchat browser UI: the Go service, the single-file React SPA, the
 # PAM stack for browser login, and the bootstrap/launch helpers. webchat shares
 # AIMEE_HOME so its Unix-socket transports line up with the server.
@@ -163,11 +167,12 @@ WORKDIR /var/lib/aimee
 # 8740 = server /v1; 8741 = kb /v1; 8443 = aimee-webchat browser UI (HTTPS).
 EXPOSE 8740 8741 8443
 
-# NOTE: the server's worker threads need a 64 MB stack. A Dockerfile cannot set
-# a runtime ulimit, so callers MUST raise it (the 8 MB container default
-# overflows during server startup and the process segfaults):
-#   docker run --ulimit stack=67108864 ...
-#   # or in compose:   ulimits: { stack: 67108864 }
+# NOTE: the server's/kb's worker threads need a 64 MB stack (the 8 MB container
+# default overflows during startup and the process segfaults). The entrypoint
+# raises the soft stack rlimit to 64 MB before launching them, so no runtime
+# --ulimit is required on hosts whose hard limit allows it (the usual case;
+# hard stack defaults to unlimited). A runtime ulimit still works if you'd
+# rather set it explicitly:  docker run --ulimit stack=67108864 ...
 
 # Health probe targets the SERVER /v1 listener (the container's public contract).
 # Every TCP /v1 request is authenticated, so an unauthenticated probe returns

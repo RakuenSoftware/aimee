@@ -16,9 +16,30 @@
 # (compose supplies AIMEE_DB2_URL / AIMEE_EMBEDDER_URL).
 set -eu
 
+AIMEE_HOME="${AIMEE_HOME:-/var/lib/aimee}"
 KB_HTTP_PORT="${AIMEE_KB_HTTP_PORT:-8741}"
 SERVER_SOCK="${AIMEE_SERVER_SOCK:-/var/lib/aimee/aimee-server.sock}"
 KB_WAIT_SECONDS="${KB_WAIT_SECONDS:-120}"
+
+# Worker threads (server + kb drain/ingest/watch/query) need a 64 MB stack; the
+# 8 MB container default overflows and SIGSEGVs on real queries. Raise the soft
+# limit here (inherited by the runuser children); hard limit is unlimited on
+# typical hosts. Best-effort — a runtime --ulimit still works if disallowed.
+ulimit -s 65536 2>/dev/null || true
+
+# Seed the baked default config into AIMEE_HOME if absent. The server and kb
+# share AIMEE_HOME and both read $AIMEE_HOME/aimee.yaml; a bind-mounted (empty)
+# volume would otherwise leave them with no config (no /v1 bearer; embeddings
+# falling back to the broken builtin). Never clobber an operator's config. Done
+# as root before dropping to "aimee", then chown so aimee can read/rewrite it.
+if [ ! -f "$AIMEE_HOME/aimee.yaml" ] && [ -f /opt/aimee/defaults/aimee.yaml ]; then
+    mkdir -p "$AIMEE_HOME"
+    cp /opt/aimee/defaults/aimee.yaml "$AIMEE_HOME/aimee.yaml"
+fi
+# Ensure aimee (uid 1000) owns its home + workspaces so it can write on an empty
+# bind mount. On smoothfs tiers ownership is forced to 1000 regardless; harmless.
+chown aimee:aimee "$AIMEE_HOME" "${AIMEE_WORKSPACES_DIR:-/var/lib/aimee-workspaces}" 2>/dev/null || true
+[ -f "$AIMEE_HOME/aimee.yaml" ] && chown aimee:aimee "$AIMEE_HOME/aimee.yaml" 2>/dev/null || true
 
 kb_pid=""
 server_pid=""
