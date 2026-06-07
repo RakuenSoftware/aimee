@@ -294,7 +294,16 @@ static int kb_bootstrap_db2_resolve(config_t *cfg, cJSON *resp)
    cJSON *steps = cJSON_AddArrayToObject(resp, "steps");
    const char *env_url = getenv("AIMEE_DB2_URL");
 
-   if (!cfg->db2_url[0] && env_url && env_url[0])
+   /* AIMEE_DB2_URL, when set, is the source of truth and overrides any db2_url
+    * cached in aimee.yaml from a previous boot. In a container deploy the
+    * runtime injects the current Postgres address every start; a service it
+    * depends on can be recreated onto a NEW bridge IP, so a db2_url persisted on
+    * an earlier boot goes stale. Preferring the cached value (as before) made
+    * the kb connect to the old/wrong address forever — even though the correct
+    * URL was right there in the environment. The successful bootstrap below
+    * re-persists this URL, refreshing the cache. The cached value is used only
+    * as a fallback when AIMEE_DB2_URL is unset (manual / non-container setups). */
+   if (env_url && env_url[0])
       snprintf(cfg->db2_url, sizeof(cfg->db2_url), "%s", env_url);
 
    if (cfg->db2_url[0])
