@@ -212,9 +212,13 @@ static void test_v1_route_map(void)
           strcmp(id_field, "session_id") == 0);
    assert(cli_v1_pathid_route_for_method("memory.search", &verb, &suffix, &id_field) == NULL);
 
+   /* delegate runs over POST /v1/delegate/run (forced background remotely). */
+   assert(strcmp(cli_v1_route_for_method("delegate", &verb), "/v1/delegate/run") == 0 &&
+          strcmp(verb, "POST") == 0);
+
    /* Unknown / unmapped methods return NULL with verb defaulted to POST. */
    verb = NULL;
-   assert(cli_v1_route_for_method("delegate", &verb) == NULL);
+   assert(cli_v1_route_for_method("not.a.real.method", &verb) == NULL);
    assert(verb && strcmp(verb, "POST") == 0);
    assert(cli_v1_route_for_method(NULL, NULL) == NULL);
    assert(cli_v1_route_for_method("", NULL) == NULL);
