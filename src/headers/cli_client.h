@@ -2,6 +2,7 @@
 #define DEC_CLI_CLIENT_H 1
 
 #include <stddef.h>
+#include <signal.h>
 
 #define CLIENT_DEFAULT_TIMEOUT_MS 5000
 #define CLIENT_CONNECT_TIMEOUT_MS 1000
@@ -150,6 +151,12 @@ const char *cli_ensure_server_for_method(const char *method);
  * loop (poll -> execute locally -> respond) until interrupted. Returns 0 on a
  * clean stop, non-zero on a usage / connection error. */
 int cmd_workspace_serve(const char *workspace_id);
+
+/* The serve loop without signal handling, for callers that drive it on a
+ * background thread with their own stop flag (e.g. mcp-serve's reverse-channel).
+ * Either `sock` (local) or `endpoint`+`bearer` (remote) selects the transport. */
+int cli_workspace_serve_loop(const char *workspace_id, const char *sock, const char *endpoint,
+                             const char *bearer, volatile sig_atomic_t *stop);
 
 /* Return the path to an already-running compatible server, or NULL if none
  * is available. Unlike cli_ensure_server(), this does not auto-start. */
