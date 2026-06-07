@@ -10,8 +10,26 @@
 # POSIX sh (the image has no bash). Endpoints/DB come from the environment.
 set -eu
 
+AIMEE_HOME="${AIMEE_HOME:-/var/lib/aimee}"
 SERVER_SOCK="${AIMEE_SERVER_SOCK:-/var/lib/aimee/aimee-server.sock}"
 server_pid=""
+
+# The server's worker threads need a 64 MB stack; the 8 MB container default
+# overflows and SIGSEGVs on real queries. Raise the soft limit here (inherited
+# by the runuser child); hard limit is unlimited on typical hosts. Best-effort.
+ulimit -s 65536 2>/dev/null || true
+
+# Seed the baked default config into AIMEE_HOME if absent. The server reads its
+# /v1 listener settings (port + bearer) from $AIMEE_HOME/aimee.yaml; a
+# bind-mounted (empty) volume would otherwise leave the listener unconfigured.
+# Never clobber an operator's config. Done as root, then owned by aimee so it
+# can read/rewrite it. On smoothfs tiers ownership is forced to 1000 regardless.
+if [ ! -f "$AIMEE_HOME/aimee.yaml" ] && [ -f /opt/aimee/defaults/aimee.yaml ]; then
+    mkdir -p "$AIMEE_HOME"
+    cp /opt/aimee/defaults/aimee.yaml "$AIMEE_HOME/aimee.yaml"
+fi
+chown aimee:aimee "$AIMEE_HOME" "${AIMEE_WORKSPACES_DIR:-/var/lib/aimee-workspaces}" 2>/dev/null || true
+[ -f "$AIMEE_HOME/aimee.yaml" ] && chown aimee:aimee "$AIMEE_HOME/aimee.yaml" 2>/dev/null || true
 
 . /usr/local/bin/webchat-lib.sh
 
