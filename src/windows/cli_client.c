@@ -729,6 +729,13 @@ cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, 
       *http_status = 0;
    if (!endpoint || !method || !path)
       return NULL;
+   /* The caller passes the chat idle-timeout sentinel (-1 = "block until the
+    * server streams / closes"). cli_win_http_connect maps any non-positive value
+    * to the tiny 5s default SO_RCVTIMEO, which truncates a chat turn the moment
+    * the provider takes >5s to respond — the stream is read in one synchronous
+    * pass, so a long recv window is required. Use a generous bound instead. */
+   if (timeout_ms <= 0)
+      timeout_ms = 600000; /* 10 min — covers provider latency + tool round-trips */
    size_t len = 0;
    char *resp = cli_win_http_exec(endpoint, method, path, body_json, bearer, timeout_ms, &len);
    if (!resp)
