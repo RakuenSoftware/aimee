@@ -780,15 +780,10 @@ cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, 
 
 /* cli_v1_rpc_local now lives in the shared cli_rpc_routes.inc — it resolves the
  * method's first-class /v1 route (no more POST /v1/rpc bridge). On Windows
- * cli_v1_send routes it through aimee_client_request to the configured remote. */
-
-int cmd_workspace_serve(const char *workspace_id)
-{
-   /* The detached-workspace runner serve loop is a co-located (POSIX) feature;
-    * the Windows thin client is a remote /v1 consumer and does not host it. */
-   (void)workspace_id;
-   fprintf(stderr, "aimee: 'workspace serve' is not supported on the Windows client\n");
-   return 1;
-}
+ * cli_v1_send routes it through aimee_client_request to the configured remote.
+ *
+ * cmd_workspace_serve + the reverse-channel helpers now build on Windows too
+ * (cli_workspace_serve.c, native-threaded via _beginthreadex), so the Windows
+ * thin client serves its working tree to a remote aimee-server just like POSIX. */
 
 #include "../cli_rpc_routes.inc"
