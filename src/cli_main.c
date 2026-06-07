@@ -1236,22 +1236,24 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
     * chdirs into a server-resolved worktree on the local filesystem, so it needs
     * a co-located aimee-server over the local socket. A remote /v1 endpoint
     * serves only the data/RPC plane (memory, kb, rules, index, sessions, …). */
-   if (cli_rpc_remote_endpoint_is_tcp())
+   /* A remote aimee-server runs the agent + tools on the server; serve THIS
+    * client's working tree over the reverse-channel so those tools act here (the
+    * client never absorbs the engine or a DB). A co-located server uses the local
+    * socket as before. */
+   int remote = cli_rpc_remote_endpoint_is_tcp();
+   const char *sock = NULL;
+   if (remote)
    {
-      fprintf(stderr,
-              "aimee: interactive chat/launch needs a co-located aimee-server (the agent and its "
-              "tools run on this host) and cannot use the remote /v1 endpoint set in "
-              "AIMEE_API_ENDPOINT / aimee.api.client_endpoint. That endpoint serves the data/RPC "
-              "commands (memory, kb, rules, index, sessions, notes, ...). Unset it, or set "
-              "aimee.api.client_transport=socket, to use the local server.\n");
-      return 1;
+      cli_workspace_reverse_channel_start();
    }
-
-   const char *sock = cli_ensure_server_for_method("launch.run");
-   if (!sock)
+   else
    {
-      fprintf(stderr, "aimee: cannot launch session; server unavailable\n");
-      return 1;
+      sock = cli_ensure_server_for_method("launch.run");
+      if (!sock)
+      {
+         fprintf(stderr, "aimee: cannot launch session; server unavailable\n");
+         return 1;
+      }
    }
 
    cJSON *req = cJSON_CreateObject();
@@ -1261,7 +1263,24 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
    if (getcwd(cwd, sizeof(cwd)))
       cJSON_AddStringToObject(req, "cwd", cwd);
 
-   cJSON *resp = cli_v1_rpc_local(req, 30000);
+   cJSON *resp;
+   if (remote)
+   {
+      char *endpoint = cli_rpc_client_endpoint();
+      char *bearer = cli_rpc_client_bearer();
+      char *body = cJSON_PrintUnformatted(req);
+      int status = 0;
+      resp = (endpoint && body)
+                 ? cli_http_request(endpoint, "POST", "/v1/launch/run", body, bearer, 30000, &status)
+                 : NULL;
+      free(endpoint);
+      free(bearer);
+      free(body);
+   }
+   else
+   {
+      resp = cli_v1_rpc_local(req, 30000);
+   }
    cJSON_Delete(req);
 
    if (!resp)
@@ -1331,7 +1350,10 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
       }
    }
 
-   if (worktree_cwd && worktree_cwd[0])
+   /* Co-located only: chdir into the server-resolved worktree (it lives on this
+    * host). For a remote server the worktree is the client's own cwd (a detached
+    * workspace served over the reverse-channel), so there is nothing to chdir. */
+   if (!remote && worktree_cwd && worktree_cwd[0])
    {
       if (chdir(worktree_cwd) != 0)
          fprintf(stderr, "aimee: warning: could not chdir to worktree: %s\n", worktree_cwd);
@@ -1339,11 +1361,15 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
          fprintf(stderr, "aimee: session cwd: %s\n", worktree_cwd);
    }
 
-   /* Make sure hooks/MCP children inherit the active socket. */
-   platform_setenv("AIMEE_SOCK", sock);
+   /* Make sure hooks/MCP children inherit the active socket (co-located only;
+    * a remote session reaches the server over the configured /v1 endpoint). */
+   if (!remote && sock)
+      platform_setenv("AIMEE_SOCK", sock);
 
    int rc = builtin_chat_loop(sock, provider, model, sid, autonomous, debug, default_launch,
                               chat_argc, chat_argv);
+   if (remote)
+      cli_workspace_reverse_channel_stop();
    cJSON_Delete(resp);
    return rc;
 }
