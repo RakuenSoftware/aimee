@@ -150,6 +150,7 @@ static const struct
 } rpc_routes[] = {
     {"init", "", "init.run", NULL, NULL, 0},
     {"memory", "search", "memory.search", NULL, NULL, 60000},
+    {"memory", "recall", "memory.recall", NULL, NULL, 60000},
     {"memory", "store", "memory.store", NULL, NULL, 60000},
     {"memory", "list", "memory.list", NULL, "memories", 60000},
     {"memory", "get", "memory.get", NULL, NULL, 60000},
@@ -462,6 +463,31 @@ static cJSON *marshal_memory_search(int argc, char **argv)
       cJSON_AddItemToArray(kw, cJSON_CreateString(opts.positional[i]));
    cJSON_AddItemToObject(req, "keywords", kw);
    cJSON_AddNumberToObject(req, "limit", rpc_get_int(&opts, "limit", 10));
+   return req;
+}
+
+/* `aimee memory recall [task] [--task T] [--query Q] [--session-start]
+ * [--limit-tokens N]` -> POST /v1/memory/recall. task_hint is required by the
+ * endpoint; fall back to a generic hint so the command always succeeds. */
+static cJSON *marshal_memory_recall(int argc, char **argv)
+{
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
+
+   cJSON *req = marshal_no_args("memory.recall");
+
+   const char *task = rpc_get(&opts, "task");
+   if (!task && opts.pos_count > 0)
+      task = opts.positional[0];
+   cJSON_AddStringToObject(req, "task_hint", task && task[0] ? task : "session start");
+   if (rpc_has_flag(&opts, "session-start"))
+      cJSON_AddBoolToObject(req, "session_start", 1);
+   const char *q = rpc_get(&opts, "query");
+   if (q)
+      cJSON_AddStringToObject(req, "query", q);
+   int lt = rpc_get_int(&opts, "limit-tokens", 0);
+   if (lt > 0)
+      cJSON_AddNumberToObject(req, "limit_tokens", lt);
    return req;
 }
 
@@ -2781,6 +2807,8 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_no_args(method);
    if (strcmp(method, "memory.search") == 0)
       return marshal_memory_search(argc, argv);
+   if (strcmp(method, "memory.recall") == 0)
+      return marshal_memory_recall(argc, argv);
    if (strcmp(method, "memory.store") == 0)
       return marshal_memory_store(argc, argv);
    if (strcmp(method, "memory.list") == 0)
