@@ -694,6 +694,26 @@ int64_t auto_snapshot_record(const char *path)
 
 char *tool_bash(const char *command, int timeout_ms)
 {
+   /* Detached workspace (turn bound to a serving client): marshal the shell
+    * command — with the thread-local cwd — over the reverse-channel so it runs
+    * on the CLIENT's tree, not the server's fs. This is the agent-loop seam (the
+    * file tools already route via workspace_provider_active(); only bash forked
+    * locally). The local fork/exec + sandbox path below applies co-located. */
+   const workspace_provider_t *ws = workspace_provider_active();
+   if (ws && ws->kind == WS_PROVIDER_DETACHED && ws->exec_shell)
+   {
+      int exit_code = -1;
+      char *out = ws->exec_shell(ws, command, &exit_code);
+      cJSON *r = cJSON_CreateObject();
+      cJSON_AddStringToObject(r, "stdout", out ? out : "");
+      cJSON_AddStringToObject(r, "stderr", "");
+      cJSON_AddNumberToObject(r, "exit_code", exit_code);
+      free(out);
+      char *res = cJSON_PrintUnformatted(r);
+      cJSON_Delete(r);
+      return res ? res : safe_strdup("{}");
+   }
+
    int stdout_pipe[2], stderr_pipe[2];
    if (pipe(stdout_pipe) != 0 || pipe(stderr_pipe) != 0)
       return safe_strdup("{\"stdout\":\"\",\"stderr\":\"pipe failed\",\"exit_code\":-1}");
