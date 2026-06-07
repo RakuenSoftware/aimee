@@ -108,7 +108,10 @@ ENV AIMEE_SERVER_HTTP_BIND=1
 # and have a different backup lifecycle than DB1, hence a separate mount.
 ENV AIMEE_WORKSPACES_DIR=/var/lib/aimee-workspaces
 
-RUN useradd --system --home-dir /var/lib/aimee --create-home --shell /usr/sbin/nologin aimee \
+# aimee runs as uid 1000 so it can own its data on storage backends that present
+# a uniform owner (e.g. SmoothNAS smoothfs tiers force uid 1000). The entrypoint
+# stays root (for webchat PAM) and drops the server to this user.
+RUN useradd --uid 1000 --user-group --home-dir /var/lib/aimee --create-home --shell /usr/sbin/nologin aimee \
     && mkdir -p /var/lib/aimee-workspaces \
     && chown aimee:aimee /var/lib/aimee-workspaces
 # Durable mirror-tier state (AIMEE_WORKSPACES_DIR). Declaring it a VOLUME means an
@@ -135,8 +138,10 @@ COPY deploy/container/webchat-lib.sh /usr/local/bin/webchat-lib.sh
 COPY deploy/container/server-entrypoint.sh /usr/local/bin/aimee-server-entrypoint
 RUN chmod +x /usr/local/bin/aimee-server-entrypoint
 
-# Baked default config: enables the inbound /v1 HTTP listener (port + bearer).
-COPY --chown=aimee:aimee deploy/container/aimee-server.yaml /var/lib/aimee/aimee.yaml
+# Baked default config (enables the inbound /v1 HTTP listener: port + bearer).
+# Kept OUTSIDE $AIMEE_HOME so a bind-mounted (empty) volume can't shadow it; the
+# entrypoint seeds it into $AIMEE_HOME/aimee.yaml on first start.
+COPY deploy/container/aimee-server.yaml /opt/aimee/defaults/aimee.yaml
 
 # Runs as root: the entrypoint bootstraps the webchat PAM user and runs webchat
 # (pam_unix needs /etc/shadow), then drops aimee-server to the "aimee" user.
@@ -144,12 +149,12 @@ WORKDIR /var/lib/aimee
 # 8740 = server /v1 HTTP API; 8443 = aimee-webchat browser UI (HTTPS).
 EXPOSE 8740 8443
 
-# NOTE: the server's worker threads need a 64 MB stack. A Dockerfile cannot set
-# a runtime ulimit, so callers MUST raise it (the 8 MB container default
-# overflows during startup and the process segfaults):
-#   docker run --ulimit stack=67108864 ...
-#   # or in compose:   ulimits: { stack: 67108864 }
-# This mirrors the systemd unit's LimitSTACK=67108864.
+# NOTE: the server's worker threads need a 64 MB stack (the 8 MB container
+# default overflows during startup and the process segfaults). The entrypoint
+# raises the soft stack rlimit to 64 MB before launching the server, so no
+# runtime --ulimit is required on hosts whose hard limit allows it (the usual
+# case; hard stack defaults to unlimited). A runtime ulimit still works:
+#   docker run --ulimit stack=67108864 ...   (mirrors systemd LimitSTACK)
 
 # Health probe: every TCP /v1 request (including /v1/health) is authenticated,
 # so an unauthenticated probe gets 401 — which still proves the listener is up
