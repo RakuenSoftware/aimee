@@ -733,6 +733,7 @@ endif()
 
 set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_main.c
+    ${AIMEE_SRC_DIR}/cli_session_start.c
     ${AIMEE_SRC_DIR}/cli_tui.c
     ${AIMEE_SRC_DIR}/cli_client.c
     ${AIMEE_SRC_DIR}/cli_launch.c

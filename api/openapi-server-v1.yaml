@@ -1093,6 +1093,11 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /delegate/run:
+    post:
+      summary: Run a delegate task (forced background when invoked remotely; returns job_id to poll)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Delegate run accepted, content: { application/json: { schema: { type: object } } } } }
   /delegate/log:
     get:
       summary: Tail the delegate log

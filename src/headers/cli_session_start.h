@@ -1,0 +1,18 @@
+#ifndef DEC_CLI_SESSION_START_H
+#define DEC_CLI_SESSION_START_H 1
+
+#include "cJSON.h"
+#include <stddef.h>
+
+/* Defined in cli_main.c; shared with cli_session_start.c (also used by the
+ * pre/post-tool hook handlers that remain in cli_main.c). */
+char *read_stdin(void);
+int client_hook_payload_session_id(const cJSON *hook_json, char *out, size_t out_len);
+
+/* `aimee session-start` SessionStart-hook entry (cli_session_start.c). Reads the
+ * host hook JSON from stdin and either forwards hooks.session_start to a
+ * co-located server or, against a remote /v1 endpoint, emits proactive recall
+ * directly. Returns the process exit code. */
+int handle_session_start(int json_output);
+
+#endif /* DEC_CLI_SESSION_START_H */

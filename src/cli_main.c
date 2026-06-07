@@ -3,6 +3,7 @@
 #include "aimee_client.h"
 #include "cli_remote.h"
 #include "cli_client.h"
+#include "cli_session_start.h"
 #include "cli_mcp_serve.h"
 #include "acp_server.h"
 #include "cli_profile.h"
@@ -34,7 +35,7 @@ static int client_hook_session_id_safe(const char *sid)
    return 1;
 }
 
-static int client_hook_payload_session_id(const cJSON *hook_json, char *out, size_t out_len)
+int client_hook_payload_session_id(const cJSON *hook_json, char *out, size_t out_len)
 {
    if (!out || out_len == 0)
       return 0;
@@ -494,7 +495,7 @@ static int arg_list_contains(int argc, char **argv, const char *flag)
 }
 
 /* Read all of stdin into a buffer. Returns malloc'd string, caller frees. */
-static char *read_stdin(void)
+char *read_stdin(void)
 {
    size_t cap = 65536;
    char *buf = malloc(cap);
@@ -972,255 +973,6 @@ static int handle_hooks(int argc, char **argv, int json_output)
  * soft failure (exit 0) so claude is never aborted by the hook. */
 /* Minimal growing string buffer for assembling the session-start context
  * without depending on open_memstream's feature-test macros. */
-struct ss_sbuf
-{
-   char *p;
-   size_t cap, len;
-};
-static void ss_add(struct ss_sbuf *b, const char *s)
-{
-   if (!s || !s[0])
-      return;
-   size_t n = strlen(s);
-   if (b->len + n + 1 > b->cap)
-   {
-      size_t nc = b->cap ? b->cap : 1024;
-      while (nc < b->len + n + 1)
-         nc *= 2;
-      char *np = realloc(b->p, nc);
-      if (!np)
-         return;
-      b->p = np;
-      b->cap = nc;
-   }
-   memcpy(b->p + b->len, s, n);
-   b->len += n;
-   b->p[b->len] = '\0';
-}
-
-/* Render one recall section ([{title,description}|{text}]) as markdown. */
-static void ss_render_section(struct ss_sbuf *b, const char *title, cJSON *arr)
-{
-   if (!cJSON_IsArray(arr) || cJSON_GetArraySize(arr) == 0)
-      return;
-   ss_add(b, "## ");
-   ss_add(b, title);
-   ss_add(b, "\n");
-   cJSON *it = NULL;
-   cJSON_ArrayForEach(it, arr)
-   {
-      const char *t = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "title"));
-      const char *d = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "description"));
-      if (!t)
-         t = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(it, "text"));
-      if (!t && !d)
-         continue;
-      ss_add(b, "- ");
-      if (t)
-         ss_add(b, t);
-      if (d && d[0])
-      {
-         ss_add(b, ": ");
-         ss_add(b, d);
-      }
-      ss_add(b, "\n");
-   }
-   ss_add(b, "\n");
-}
-
-/* Thin-client SessionStart fallback. When there is no co-located aimee-server
- * but a remote /v1 endpoint is configured, the thin client serves session-start
- * itself: it fetches proactive recall (read-only data-plane: POST
- * /v1/memory/recall, served by any aimee — local or the shared NAS kb) and emits
- * it as the hook's additionalContext. The execution-plane parts of the
- * server-side hook (git pull --ff-only, session_state writes) need a co-located
- * server and are intentionally skipped here; proactive recall is the injectable
- * value. Always soft-fails (exit 0) so the host session is never blocked. */
-static int handle_session_start_remote(void)
-{
-   char *endpoint = cli_rpc_client_endpoint();
-   if (!endpoint)
-      return 0;
-   char *bearer = cli_rpc_client_bearer();
-
-   cJSON *body = cJSON_CreateObject();
-   /* task_hint is required by /v1/memory/recall; session_start widens recall. */
-   cJSON_AddStringToObject(body, "task_hint", "session start");
-   cJSON_AddBoolToObject(body, "session_start", 1);
-   char *body_s = cJSON_PrintUnformatted(body);
-   cJSON_Delete(body);
-
-   int status = 0;
-   cJSON *resp =
-       cli_http_request(endpoint, "POST", "/v1/memory/recall", body_s, bearer, 30000, &status);
-   free(endpoint);
-   free(bearer);
-   free(body_s);
-   if (!resp || status != 200)
-   {
-      cJSON_Delete(resp);
-      return 0;
-   }
-
-   cJSON *recall = cJSON_GetObjectItemCaseSensitive(resp, "recall");
-   struct ss_sbuf b = {0};
-   ss_render_section(&b, "Always-On Rules", cJSON_GetObjectItem(recall, "always_on_rules"));
-   ss_render_section(&b, "Identity", cJSON_GetObjectItem(recall, "identity"));
-   ss_render_section(&b, "Preferences", cJSON_GetObjectItem(recall, "preferences"));
-   ss_render_section(&b, "Active Context", cJSON_GetObjectItem(recall, "active_context"));
-   ss_render_section(&b, "Open Commitments", cJSON_GetObjectItem(recall, "open_commitments"));
-   ss_render_section(&b, "Reminders", cJSON_GetObjectItem(recall, "reminders"));
-   ss_render_section(&b, "Directives", cJSON_GetObjectItem(recall, "directives"));
-
-   if (b.p && b.p[0])
-   {
-      cJSON *out = cJSON_CreateObject();
-      cJSON *hook_out = cJSON_AddObjectToObject(out, "hookSpecificOutput");
-      cJSON_AddStringToObject(hook_out, "hookEventName", "SessionStart");
-      struct ss_sbuf ctx = {0};
-      ss_add(&ctx, "# Proactive Recall (session-start)\n\n");
-      ss_add(&ctx, b.p);
-      cJSON_AddStringToObject(hook_out, "additionalContext", ctx.p ? ctx.p : b.p);
-      char *s = cJSON_PrintUnformatted(out);
-      if (s)
-      {
-         fputs(s, stdout);
-         fputc('\n', stdout);
-         free(s);
-      }
-      free(ctx.p);
-      cJSON_Delete(out);
-   }
-   free(b.p);
-   cJSON_Delete(resp);
-   return 0;
-}
-
-static int handle_session_start(int json_output)
-{
-   char *stdin_data = read_stdin();
-   const char *hook_input = stdin_data ? stdin_data : "";
-
-   /* Pin the aimee session_id to the host-provided value so DB1 session_state
-    * rows line up with hooks.pre / hooks.post. Falls back to known session
-    * env vars when the host omits it (e.g. test harnesses piping empty stdin). */
-   char hook_sid[64] = "";
-   const char *sid = NULL;
-   cJSON *hook_json = stdin_data ? cJSON_Parse(stdin_data) : NULL;
-   if (client_hook_payload_session_id(hook_json, hook_sid, sizeof(hook_sid)))
-      sid = hook_sid;
-
-   /* Detect server-invoked context: AIMEE_SESSION_ID is set by chat_stream_worker
-    * in the environment of the claude subprocess it forks. */
-   int nonblocking = (getenv("AIMEE_SESSION_ID") != NULL);
-
-   const char *sock = cli_ensure_server_for_method("hooks.session_start");
-   if (!sock)
-   {
-      /* No co-located server. If a remote /v1 endpoint is configured, the thin
-       * client serves session-start itself via the read-only recall route — no
-       * local aimee-server needed (see handle_session_start_remote). */
-      if (cli_rpc_has_remote_endpoint())
-      {
-         int rc = handle_session_start_remote();
-         cJSON_Delete(hook_json);
-         free(stdin_data);
-         return rc;
-      }
-      if (!nonblocking)
-         fprintf(stderr, "aimee: cannot run session-start; server unavailable\n");
-      cJSON_Delete(hook_json);
-      free(stdin_data);
-      return nonblocking ? 0 : 1;
-   }
-
-   /* Inject the client's CWD into hook_input so the server-side worktree
-    * isolation check targets the client's repo, not the server's CWD. */
-   char client_cwd[4096];
-   char *augmented_hook = NULL;
-   if (hook_json && getcwd(client_cwd, sizeof(client_cwd)))
-   {
-      if (!cJSON_GetObjectItemCaseSensitive(hook_json, "client_cwd"))
-         cJSON_AddStringToObject(hook_json, "client_cwd", client_cwd);
-      augmented_hook = cJSON_PrintUnformatted(hook_json);
-      if (augmented_hook)
-         hook_input = augmented_hook;
-   }
-
-   cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "method", "hooks.session_start");
-   cJSON_AddStringToObject(req, "hook_input", hook_input);
-   if (sid && sid[0])
-      cJSON_AddStringToObject(req, "session_id", sid);
-   if (nonblocking)
-      cJSON_AddBoolToObject(req, "nonblocking", 1);
-
-   /* Use a shorter timeout in the nonblocking path: the server will respond
-    * immediately once the background thread is launched (typically <50 ms).
-    * If it doesn't, soft-fail after 10 s rather than blocking claude for 60 s. */
-   int timeout_ms = nonblocking ? 10000 : 60000;
-   cJSON *resp = cli_v1_rpc_local(req, timeout_ms);
-   cJSON_Delete(req);
-   cJSON_Delete(hook_json);
-   free(augmented_hook);
-   free(stdin_data);
-
-   int exit_code = nonblocking ? 0 : 1;
-   if (resp)
-   {
-      cJSON *ec = cJSON_GetObjectItemCaseSensitive(resp, "exit_code");
-      if (cJSON_IsNumber(ec))
-         exit_code = (int)ec->valuedouble;
-
-      cJSON *jout = cJSON_GetObjectItemCaseSensitive(resp, "output");
-      if (cJSON_IsString(jout) && jout->valuestring[0])
-      {
-         cJSON *out = cJSON_CreateObject();
-         cJSON *hook_out = out ? cJSON_AddObjectToObject(out, "hookSpecificOutput") : NULL;
-         if (hook_out)
-         {
-            cJSON_AddStringToObject(hook_out, "hookEventName", "SessionStart");
-            cJSON_AddStringToObject(hook_out, "additionalContext", jout->valuestring);
-            char *s = cJSON_PrintUnformatted(out);
-            if (s)
-            {
-               fputs(s, stdout);
-               fputc('\n', stdout);
-               free(s);
-            }
-         }
-         else
-            fputs(jout->valuestring, stdout);
-         cJSON_Delete(out);
-      }
-
-      cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
-      if (cJSON_IsString(msg) && msg->valuestring[0])
-         fprintf(stderr, "aimee: %s\n", msg->valuestring);
-
-      if (json_output)
-      {
-         cJSON *out = cJSON_CreateObject();
-         cJSON_AddNumberToObject(out, "exit_code", exit_code);
-         if (cJSON_IsString(jout) && jout->valuestring[0])
-            cJSON_AddStringToObject(out, "output", jout->valuestring);
-         char *s = cJSON_PrintUnformatted(out);
-         if (s)
-         {
-            puts(s);
-            free(s);
-         }
-         cJSON_Delete(out);
-      }
-
-      cJSON_Delete(resp);
-   }
-   else if (!nonblocking)
-   {
-      fprintf(stderr, "aimee: session-start RPC failed\n");
-   }
-   return exit_code;
-}
 
 /* No-arg `aimee` launch path.
  *
