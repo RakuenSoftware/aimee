@@ -1,0 +1,36 @@
+# Default aimee-combined (server + kb) container configuration.
+#
+# In the combined image the server and the kb share AIMEE_HOME, and both read
+# their config from $AIMEE_HOME/aimee.yaml (config_default_dir() == aimee_home()
+# == $AIMEE_HOME). So a single merged file must carry BOTH the server's /v1
+# listener settings AND the kb's sidecar-command selection — otherwise whichever
+# one isn't in aimee.yaml is silently lost (the kb's embedding_command landing in
+# a never-read .config/aimee/aimee.yaml is how embeddings ended up disabled).
+#
+# Endpoints come from the environment (AIMEE_EMBEDDER_URL / LLM_ENDPOINT). The
+# entrypoint seeds this file into $AIMEE_HOME on first start, so it survives a
+# bind-mounted (empty) volume — see deploy/container/combined-entrypoint.sh.
+
+# --- server: inbound /v1 HTTP API (binds only with port + bearer set) ---
+aimee:
+  api:
+    http_port: 8740
+    bearer_token: "aimee-local-dev"
+    rate_limit_per_min: 0
+    # Mutating /v1 routes are local-UDS-only by default; over the published TCP
+    # port a bearer is read/query/chat only. Opt into remote writes here:
+    #   remote_writes: data   # data writes (memory/work/rules/skill), cap-gated
+    #   remote_writes: full   # + delegate/tool over /v1/rpc — trusted nets only
+    remote_writes: "off"
+
+# --- kb: real semantic embeddings via the persistent embedder service ---
+embedding_command: "python3 /opt/aimee/scripts/embed-remote.py"
+
+learning:
+  synthesize:
+    enabled: false
+    command: "python3 /opt/aimee/scripts/learning-synthesize.py"
+
+kb:
+  curator:
+    extract_command: "python3 /opt/aimee/scripts/curator-extract.py"
