@@ -252,8 +252,7 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
       }
    }
 
-   if (req->cwd && req->cwd[0] && req->cwd[0] == '/' && !strstr(req->cwd, "/../") &&
-       !strstr(req->cwd, "/.."))
+   if (aimee_path_is_absolute(req->cwd) && !strstr(req->cwd, "/../") && !strstr(req->cwd, "/.."))
       run_cmd_set_cwd(req->cwd);
    if (effective_aimee_session_id[0])
       session_id_set_override(effective_aimee_session_id);
