@@ -33,6 +33,7 @@ static const struct
     {"aux.config_show", "GET", "/v1/aux/config"},
     {"aux.test", "POST", "/v1/aux/test"},
     {"blast_radius.preview", "POST", "/v1/blast_radius/preview"},
+    {"code.audit", "POST", "/v1/code/audit"},
     {"collab_rules.approve", "POST", "/v1/collab_rules/approve"},
     {"collab_rules.list", "GET", "/v1/collab_rules"},
     {"collab_rules.list_active", "GET", "/v1/collab_rules/active"},
