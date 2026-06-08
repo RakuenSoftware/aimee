@@ -894,6 +894,22 @@ int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* optimize.export: surface the kb bandit/optimization export (decision-point
+ * registry + per-point arm baselines + closed-decision log) over a first-class
+ * /v1 route so the thin client's `aimee optimize` can reach it. */
+int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+
+   char *json = kb_client_bandit_export_json();
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!resp)
+      return server_send_error(conn, "bandit optimization export failed", NULL);
+   return send_and_free(conn, resp);
+}
+
 /* --- Rules handlers --- */
 
 int handle_rules_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

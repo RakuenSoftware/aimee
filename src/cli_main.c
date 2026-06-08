@@ -1720,6 +1720,10 @@ int main(int argc, char **argv)
       return cmd_profile_run(sub_argc, sub_argv);
    if (strcmp(cmd, "claude-proxy") == 0)
       return cli_claude_proxy(sub_argc, sub_argv);
+   /* optimize: dispatches optimize.export to its first-class /v1 route, then
+    * renders points/baseline/replay client-side. */
+   if (strcmp(cmd, "optimize") == 0)
+      return cmd_optimize_run(sub_argc, sub_argv, json_output);
 #ifndef _WIN32
    /* manuscript mode talks to the server over the Unix-domain /v1 socket
     * (http_uds_client, AF_UNIX), which the Windows client does not build. */

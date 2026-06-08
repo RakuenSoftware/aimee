@@ -1352,6 +1352,10 @@ paths:
     get:
       summary: Insights overview
       responses: { "200": { description: Insights, content: { application/json: { schema: { type: object } } } } }
+  /optimize/export:
+    get:
+      summary: Bandit optimization export (decision-point registry, arm baselines, decision log)
+      responses: { "200": { description: Optimization export, content: { application/json: { schema: { type: object } } } } }
   /identity/show:
     get:
       summary: Show current identity

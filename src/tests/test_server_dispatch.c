@@ -532,6 +532,10 @@ int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "kb.status");
 }
+int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "optimize.export");
+}
 int handle_workers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "workers");
