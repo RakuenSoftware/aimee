@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "aimee.h"
+#include "config_database.h"
 #include "server.h" /* SERVER_REMOTE_WRITES_* */
 #include "aimee_home.h"
 #include "platform_path.h"
@@ -1678,6 +1679,46 @@ int main(void)
       }
       else
          platform_unsetenv("AIMEE_MODE");
+   }
+
+   /* --- AIMEE_DB2_URL env overrides a cached config-file db2_url ---
+    * Regression for the kb IP-drift outage: when Postgres is recreated on a new
+    * bridge IP the runtime injects the current address via AIMEE_DB2_URL, which
+    * must win over the stale value persisted in aimee.yaml. */
+   {
+      char *old = getenv("AIMEE_DB2_URL");
+      char *saved = old ? strdup(old) : NULL;
+
+      config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      snprintf(cfg.db2_url, sizeof(cfg.db2_url),
+               "postgresql://aimee:aimee@10.0.0.9:5432/aimee_shared");
+
+      /* env set -> overrides the cached file value, returns 1 (applied) */
+      platform_setenv("AIMEE_DB2_URL", "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared");
+      assert(config_apply_db2_url_env_override(&cfg) == 1);
+      assert(strcmp(cfg.db2_url, "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared") == 0);
+
+      /* env unset -> leaves the existing value untouched, returns 0 */
+      platform_unsetenv("AIMEE_DB2_URL");
+      assert(config_apply_db2_url_env_override(&cfg) == 0);
+      assert(strcmp(cfg.db2_url, "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared") == 0);
+
+      /* empty env -> treated as unset, returns 0 */
+      platform_setenv("AIMEE_DB2_URL", "");
+      assert(config_apply_db2_url_env_override(&cfg) == 0);
+      assert(strcmp(cfg.db2_url, "postgresql://aimee:aimee@10.0.0.16:5432/aimee_shared") == 0);
+
+      /* NULL cfg -> no crash, returns 0 */
+      assert(config_apply_db2_url_env_override(NULL) == 0);
+
+      if (saved)
+      {
+         platform_setenv("AIMEE_DB2_URL", saved);
+         free(saved);
+      }
+      else
+         platform_unsetenv("AIMEE_DB2_URL");
    }
 
    printf("all tests passed\n");

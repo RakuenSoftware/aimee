@@ -182,6 +182,26 @@ void provider_health_update(const char *provider_name, int http_status);
 const provider_health_t *provider_health_get(const char *provider_name);
 
 /* HTTP */
+
+/* Upper bound on the TCP-connect phase, independent of the overall request
+ * timeout. A reachable host completes the TCP handshake in milliseconds, so a
+ * connect that takes seconds means the host is unreachable — e.g. a down
+ * dependency behind a gateway that silently drops SYNs (no RST). Without this
+ * cap an unreachable host blocks for the FULL request timeout (e.g. the 60s kb
+ * action timeout), so reads like /v1/memory/recall and /v1/memory/stats hang
+ * instead of fast-failing the way /v1/kb/status (5s) does. The longer request
+ * timeout still governs the response read for hosts that are up but slow. */
+#define AGENT_HTTP_CONNECT_TIMEOUT_MS 5000
+
+/* Effective connect-phase poll timeout for a request whose overall budget is
+ * request_timeout_ms: min(budget-or-30s-default, AGENT_HTTP_CONNECT_TIMEOUT_MS).
+ * Inline so the HTTP client and its tests share one definition. */
+static inline int agent_http_effective_connect_timeout_ms(int request_timeout_ms)
+{
+   int connect_ms = request_timeout_ms > 0 ? request_timeout_ms : 30000;
+   return connect_ms > AGENT_HTTP_CONNECT_TIMEOUT_MS ? AGENT_HTTP_CONNECT_TIMEOUT_MS : connect_ms;
+}
+
 int agent_http_get(const char *url, const char *extra_headers, char **response_buf, int timeout_ms);
 int agent_http_put(const char *url, const char *auth_header, const char *body, char **response_buf,
                    int timeout_ms, const char *extra_headers);

@@ -1,6 +1,7 @@
 #include "aimee.h"
 #include "agent_exec.h"
 #include "config.h"
+#include "config_database.h"
 #include "db2/code_index.h"
 #include "kb_auth_oidc.h"
 #include "kb_enroll.h"
@@ -292,7 +293,6 @@ static int bootstrap_db2_with_local_tools(cJSON *steps)
 static int kb_bootstrap_db2_resolve(config_t *cfg, cJSON *resp)
 {
    cJSON *steps = cJSON_AddArrayToObject(resp, "steps");
-   const char *env_url = getenv("AIMEE_DB2_URL");
 
    /* AIMEE_DB2_URL, when set, is the source of truth and overrides any db2_url
     * cached in aimee.yaml from a previous boot. In a container deploy the
@@ -303,8 +303,7 @@ static int kb_bootstrap_db2_resolve(config_t *cfg, cJSON *resp)
     * URL was right there in the environment. The successful bootstrap below
     * re-persists this URL, refreshing the cache. The cached value is used only
     * as a fallback when AIMEE_DB2_URL is unset (manual / non-container setups). */
-   if (env_url && env_url[0])
-      snprintf(cfg->db2_url, sizeof(cfg->db2_url), "%s", env_url);
+   config_apply_db2_url_env_override(cfg);
 
    if (cfg->db2_url[0])
    {
@@ -535,6 +534,17 @@ int main(int argc, char **argv)
 
    config_t kb_cfg;
    config_load(&kb_cfg);
+
+   /* AIMEE_DB2_URL, when set, is the source of truth and overrides any db2_url
+    * cached in aimee.yaml from a previous boot — applied here unconditionally,
+    * BEFORE the bootstrap gate below. In a container deploy the runtime injects
+    * the current Postgres address on every start; if Postgres is recreated on a
+    * new bridge IP, the persisted db2_url goes stale. kb_bootstrap_db2_resolve()
+    * already prefers the env URL, but it only runs when db2_url is empty (the
+    * gate below), so a populated-but-stale cached URL would skip the override
+    * entirely and db2_init() below would dial the dead address and exit. Apply
+    * the override here so the kb self-heals across Postgres IP drift. */
+   config_apply_db2_url_env_override(&kb_cfg);
 
    /* Auto-bootstrap on startup so kb keeps working for users who upgrade past
     * the "DB2 required" cutover (#1151) without their config being touched.

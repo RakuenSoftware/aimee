@@ -190,11 +190,14 @@ static void client_delegate_plan_usage(void)
 
 static void client_delegate_usage(void)
 {
-   fprintf(stderr, "Usage: aimee delegate <role> [\"prompt\"] [options]\n"
+   fprintf(stderr, "Usage: aimee delegate <role> [\"prompt\"] --persona NAME [options]\n"
                    "\n"
-                   "Delegate a bounded task to a sub-agent.\n"
+                   "Delegate a bounded task to a sub-agent. A persona is required.\n"
                    "\n"
                    "Options:\n"
+                   "  --persona NAME     REQUIRED. Run the delegate as a persona (e.g. engineer,\n"
+                   "                     qa, security, reviewer, architect, or a custom persona):\n"
+                   "                     sets its identity + principles\n"
                    "  --json             Output result as JSON\n"
                    "  --background       Run asynchronously (returns job ID)\n"
                    "  --durable          Persist result to disk\n"

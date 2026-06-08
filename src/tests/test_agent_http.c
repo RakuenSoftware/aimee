@@ -1240,9 +1240,28 @@ static void test_minimax_driver_has_own_caps(void)
    printf("minimax_driver_has_own_caps OK\n");
 }
 
+/* Regression for the kb-down hang: the TCP-connect phase must be capped below
+ * the overall request budget so an unreachable kb fast-fails instead of blocking
+ * for the full 60s action timeout. */
+static void test_connect_timeout_caps_below_request_budget(void)
+{
+   /* A short budget is used verbatim for connect. */
+   assert(agent_http_effective_connect_timeout_ms(1000) == 1000);
+   assert(agent_http_effective_connect_timeout_ms(AGENT_HTTP_CONNECT_TIMEOUT_MS) ==
+          AGENT_HTTP_CONNECT_TIMEOUT_MS);
+   /* A long budget (e.g. the 60s kb action timeout) is capped. */
+   assert(agent_http_effective_connect_timeout_ms(60000) == AGENT_HTTP_CONNECT_TIMEOUT_MS);
+   /* Non-positive budget -> capped default, never unbounded. */
+   assert(agent_http_effective_connect_timeout_ms(0) == AGENT_HTTP_CONNECT_TIMEOUT_MS);
+   assert(agent_http_effective_connect_timeout_ms(-1) == AGENT_HTTP_CONNECT_TIMEOUT_MS);
+   printf("connect_timeout_caps_below_request_budget OK\n");
+}
+
 int main(void)
 {
    printf("test_agent_http: ");
+
+   test_connect_timeout_caps_below_request_budget();
 
    test_cache_attach_adds_field();
    test_cache_attach_noop_on_empty_name();
