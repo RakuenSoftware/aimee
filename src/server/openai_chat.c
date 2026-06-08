@@ -100,7 +100,11 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
 
    agent_result_t result;
    memset(&result, 0, sizeof(result));
-   int erc = agent_execute(ag, NULL, prompt, max_tokens, temperature, &result);
+   /* P1 pre-injection: prepend the <aimee-context> envelope as the system
+    * prompt (config ingress_preinject_enabled; no-op when off/empty). */
+   char *pi_env = ingress_preinject_build(prompt, 0);
+   int erc = agent_execute(ag, pi_env, prompt, max_tokens, temperature, &result);
+   free(pi_env);
    free(prompt);
 
    if (erc != 0 || !result.response)
@@ -460,7 +464,11 @@ static int responses_handler(const char *body, char *resp, int cap)
 
    agent_result_t result;
    memset(&result, 0, sizeof(result));
-   int erc = agent_execute(ag, NULL, full, max_tokens, temperature, &result);
+   /* P1 pre-injection: prepend the <aimee-context> envelope as the system
+    * prompt (config ingress_preinject_enabled; no-op when off/empty). */
+   char *pi_env = ingress_preinject_build(full, 0);
+   int erc = agent_execute(ag, pi_env, full, max_tokens, temperature, &result);
+   free(pi_env);
 
    if (erc != 0 || !result.response)
    {
@@ -563,7 +571,11 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
 
    agent_result_t result;
    memset(&result, 0, sizeof(result));
-   int erc = agent_execute(ag, NULL, prompt, max_tokens, temperature, &result);
+   /* P1 pre-injection: prepend the <aimee-context> envelope as the system
+    * prompt (config ingress_preinject_enabled; no-op when off/empty). */
+   char *pi_env = ingress_preinject_build(prompt, 0);
+   int erc = agent_execute(ag, pi_env, prompt, max_tokens, temperature, &result);
+   free(pi_env);
    free(prompt);
 
    emit_chunk(emit, ctx, id, model, created, 1, NULL, 0); /* role frame */
@@ -624,7 +636,11 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
 
    agent_result_t result;
    memset(&result, 0, sizeof(result));
-   int erc = agent_execute(ag, NULL, prompt, max_tokens, temperature, &result);
+   /* P1 pre-injection: prepend the <aimee-context> envelope as the system
+    * prompt (config ingress_preinject_enabled; no-op when off/empty). */
+   char *pi_env = ingress_preinject_build(prompt, 0);
+   int erc = agent_execute(ag, pi_env, prompt, max_tokens, temperature, &result);
+   free(pi_env);
    free(prompt);
 
    if (erc != 0 || !result.response)
