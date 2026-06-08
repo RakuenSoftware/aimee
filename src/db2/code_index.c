@@ -150,7 +150,7 @@ int db2_code_index_term_find(const char *identifier, term_hit_t *out, int max)
    /* Hidden path rows are never valid index evidence. Filter both project
     * roots and project-relative file paths so stale rows created before the
     * scanner guard landed cannot surface through read APIs. */
-   static const char *sql = "SELECT p.name, f.path, t.line, t.kind"
+   static const char *sql = "SELECT p.name, f.path, t.line, t.kind, t.line_end"
                             " FROM terms t"
                             " JOIN files f ON f.id = t.file_id"
                             " JOIN projects p ON p.id = f.project_id"
@@ -158,11 +158,11 @@ int db2_code_index_term_find(const char *identifier, term_hit_t *out, int max)
                             "   AND f.path NOT LIKE '.%'"
                             "   AND f.path NOT LIKE '%/.%'"
                             "   AND p.root NOT LIKE '%/.%'"
-                            " GROUP BY p.name, f.path, t.line, t.kind"
+                            " GROUP BY p.name, f.path, t.line, t.kind, t.line_end"
                             " ORDER BY CASE WHEN t.kind = 'definition' THEN 0 ELSE 1 END,"
                             " p.name, f.path"
                             " LIMIT ?2";
-   static const char *sql_like = "SELECT p.name, f.path, t.line, t.kind"
+   static const char *sql_like = "SELECT p.name, f.path, t.line, t.kind, t.line_end"
                                  " FROM terms t"
                                  " JOIN files f ON f.id = t.file_id"
                                  " JOIN projects p ON p.id = f.project_id"
@@ -170,7 +170,7 @@ int db2_code_index_term_find(const char *identifier, term_hit_t *out, int max)
                                  "   AND f.path NOT LIKE '.%'"
                                  "   AND f.path NOT LIKE '%/.%'"
                                  "   AND p.root NOT LIKE '%/.%'"
-                                 " GROUP BY p.name, f.path, t.line, t.kind"
+                                 " GROUP BY p.name, f.path, t.line, t.kind, t.line_end"
                                  " ORDER BY CASE WHEN t.kind = 'definition' THEN 0 ELSE 1 END,"
                                  " p.name, f.path"
                                  " LIMIT ?2";
@@ -191,6 +191,7 @@ int db2_code_index_term_find(const char *identifier, term_hit_t *out, int max)
       snprintf(out[count].project, sizeof(out[count].project), "%s", p ? p : "");
       snprintf(out[count].file_path, sizeof(out[count].file_path), "%s", f ? f : "");
       out[count].line = line;
+      out[count].line_end = aimee_pg_column_int(st, 4);
       snprintf(out[count].kind, sizeof(out[count].kind), "%s", k ? k : "");
       count++;
    }
@@ -218,6 +219,7 @@ int db2_code_index_term_find(const char *identifier, term_hit_t *out, int max)
          snprintf(out[count].project, sizeof(out[count].project), "%s", p ? p : "");
          snprintf(out[count].file_path, sizeof(out[count].file_path), "%s", f ? f : "");
          out[count].line = line;
+         out[count].line_end = aimee_pg_column_int(st2, 4);
          snprintf(out[count].kind, sizeof(out[count].kind), "%s", k ? k : "");
          count++;
       }
@@ -304,7 +306,7 @@ int db2_code_index_file_definitions(const char *project, const char *file_path, 
    if (file_id < 0)
       return 0;
 
-   static const char *sql = "SELECT name, kind, line FROM terms"
+   static const char *sql = "SELECT name, kind, line, line_end FROM terms"
                             " WHERE file_id = ?1 AND kind = 'definition'"
                             " ORDER BY line";
    char err[CIDX_ERRBUF] = "";
@@ -322,6 +324,7 @@ int db2_code_index_file_definitions(const char *project, const char *file_path, 
       snprintf(out[count].name, sizeof(out[count].name), "%s", n ? n : "");
       snprintf(out[count].kind, sizeof(out[count].kind), "%s", k ? k : "");
       out[count].line = line;
+      out[count].line_end = aimee_pg_column_int(st, 3);
       count++;
    }
    aimee_pg_finalize(st);
@@ -665,8 +668,8 @@ int db2_code_index_file_replace(int64_t file_id, const code_index_file_data_t *d
 
    if (rc == 0 && data->definition_count > 0 && data->definitions)
    {
-      static const char *ins = "INSERT INTO terms (file_id, name, kind, line)"
-                               " VALUES (?1, ?2, ?3, ?4)";
+      static const char *ins = "INSERT INTO terms (file_id, name, kind, line, line_end)"
+                               " VALUES (?1, ?2, ?3, ?4, ?5)";
       for (int i = 0; i < data->definition_count; i++)
       {
          aimee_pg_stmt_t *st = aimee_pg_prepare(conn, ins, err, sizeof(err));
@@ -679,6 +682,7 @@ int db2_code_index_file_replace(int64_t file_id, const code_index_file_data_t *d
          aimee_pg_bind_text(st, "?2", data->definitions[i].name);
          aimee_pg_bind_text(st, "?3", data->definitions[i].kind);
          aimee_pg_bind_int(st, "?4", data->definitions[i].line);
+         aimee_pg_bind_int(st, "?5", data->definitions[i].line_end);
          if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_DONE)
             rc = -1;
          aimee_pg_finalize(st);
