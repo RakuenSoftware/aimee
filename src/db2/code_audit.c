@@ -109,6 +109,51 @@ static void add_clones(cJSON *resp, const char *project, int limit)
    aimee_pg_finalize(st);
 }
 
+/* Near-duplicate clones: for each code-unit embedding, find its nearest OTHER
+ * embedding via the HNSW index and report pairs within a tight cosine distance
+ * that are NOT identical (those are exact-hash clones in `clones`). Cosine
+ * distance via pgvector `<=>` (0 = identical); kept in (0.0001, 0.06] so sim is
+ * ~0.94..0.9999. `a.point_id < b.bpid` reports each pair once. pgvector-only;
+ * runs on the live kb's Postgres (not exercised by the sqlite test shim). */
+static void add_near_clones(cJSON *resp, const char *project, int limit)
+{
+   void *conn = db2_conn();
+   cJSON *arr = cJSON_AddArrayToObject(resp, "near_clones");
+   if (!conn || !arr)
+      return;
+   static const char *sql =
+       "SELECT a.symbol, a.file_path, b.bsym, b.bfile, (1.0 - (a.embedding <=> b.bemb)) AS sim "
+       "FROM code_embeddings a JOIN LATERAL ("
+       "  SELECT c.point_id AS bpid, c.symbol AS bsym, c.file_path AS bfile, c.embedding AS bemb "
+       "  FROM code_embeddings c "
+       "  WHERE c.point_id <> a.point_id AND c.record_type = 'code_unit' "
+       "    AND (?1 = '' OR c.project = ?1) "
+       "  ORDER BY c.embedding <=> a.embedding LIMIT 1) b ON true "
+       "WHERE a.record_type = 'code_unit' AND (?2 = '' OR a.project = ?2) "
+       "  AND a.point_id < b.bpid AND (a.embedding <=> b.bemb) BETWEEN 0.0001 AND 0.06 "
+       "ORDER BY sim DESC LIMIT ?3";
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return;
+   aimee_pg_bind_text(st, "?1", project ? project : "");
+   aimee_pg_bind_text(st, "?2", project ? project : "");
+   aimee_pg_bind_int(st, "?3", limit);
+   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *as = aimee_pg_column_text(st, 0);
+      const char *af = aimee_pg_column_text(st, 1);
+      const char *bs = aimee_pg_column_text(st, 2);
+      const char *bf = aimee_pg_column_text(st, 3);
+      double sim = aimee_pg_column_double(st, 4);
+      char line[1100];
+      snprintf(line, sizeof(line), "%.3f  %s (%s)  ~  %s (%s)", sim, as ? as : "", af ? af : "",
+               bs ? bs : "", bf ? bf : "");
+      cJSON_AddItemToArray(arr, cJSON_CreateString(line));
+   }
+   aimee_pg_finalize(st);
+}
+
 cJSON *db2_kb_service_code_audit_json(const char *project, int limit)
 {
    if (limit <= 0 || limit > 200)
@@ -182,6 +227,7 @@ cJSON *db2_kb_service_code_audit_json(const char *project, int limit)
    free(deps);
 
    add_clones(resp, project, limit);
+   add_near_clones(resp, project, limit);
 
    for (int i = 0; i < ne; i++)
    {

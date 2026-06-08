@@ -324,6 +324,16 @@ static int audit_graph_remote(const char *project, int json_output)
             printf("    - %s\n", it->valuestring);
       }
       printf("  clone groups:  %d\n", cJSON_GetArraySize(cl));
+      cJSON *nc = cJSON_GetObjectItemCaseSensitive(resp, "near_clones");
+      printf("  near clones:   %d\n", cJSON_GetArraySize(nc));
+      shown = 0;
+      cJSON_ArrayForEach(it, nc)
+      {
+         if (shown++ >= 10)
+            break;
+         if (cJSON_IsString(it))
+            printf("    - %s\n", it->valuestring);
+      }
    }
    cJSON_Delete(resp);
    return 0;
