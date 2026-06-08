@@ -276,6 +276,15 @@ int kb_bandit_reward(const config_t *cfg, const char *decision_point, const char
    return db2_bandit_arm_stats_update(decision_point, arm_id, reward, new_alpha, new_beta);
 }
 
+double kb_bandit_recall_sufficiency_reward(int n_results, int limit)
+{
+   if (n_results <= 0)
+      return 0.0;
+   if (limit > 0 && n_results >= limit)
+      return 0.5; /* truncated at the cap: a larger limit might have helped */
+   return 1.0;    /* sufficient recall without truncation */
+}
+
 /* ---- replay evidence ---- */
 
 int kb_bandit_record_replay_evidence(const char *decision_point, const char *result_json,

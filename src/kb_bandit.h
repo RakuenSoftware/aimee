@@ -43,6 +43,16 @@ extern "C"
    int kb_bandit_reward(const config_t *cfg, const char *decision_point, const char *decision_id,
                         const char *arm_id, double reward);
 
+   /* Reward (v1) for the kb_memory_retrieval_limit decision: did the chosen
+    * limit return a sufficient, non-truncated recall set?
+    *   n_results == 0           -> 0.0  (empty recall is bad at any limit)
+    *   n_results >= limit       -> 0.5  (hit the cap; a larger limit might help)
+    *   0 < n_results < limit    -> 1.0  (limit was sufficient, no truncation)
+    * Inspectable proxy; not trivially biased toward the larger arm (an arm that
+    * returns everything relevant without truncation scores 1.0 regardless of
+    * limit).  Pure function so it can be unit-tested in isolation. */
+   double kb_bandit_recall_sufficiency_reward(int n_results, int limit);
+
    /* Record offline-replay attribution as a benchmark_trace artifact.
     *
     * Used by `aimee kb bandit-replay`: the Python replay tool emits a JSON
