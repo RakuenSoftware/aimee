@@ -150,6 +150,28 @@ static void test_bandit_explore_stats(void)
    printf("  bandit_explore_stats: ok\n");
 }
 
+/* ---- recall-sufficiency reward (pure) ---- */
+static void test_bandit_recall_reward(void)
+{
+   /* Empty recall is bad at any limit. */
+   assert(kb_bandit_recall_sufficiency_reward(0, 10) == 0.0);
+   assert(kb_bandit_recall_sufficiency_reward(0, 20) == 0.0);
+
+   /* Sufficient, non-truncated recall scores 1.0 — and is not biased toward the
+    * larger arm: 8 results satisfy both the 10 and 20 arms. */
+   assert(kb_bandit_recall_sufficiency_reward(8, 10) == 1.0);
+   assert(kb_bandit_recall_sufficiency_reward(8, 20) == 1.0);
+
+   /* Hitting the cap is a truncation signal (a larger limit might help). */
+   assert(kb_bandit_recall_sufficiency_reward(10, 10) == 0.5);
+   assert(kb_bandit_recall_sufficiency_reward(20, 20) == 0.5);
+
+   /* 10 results: truncated for the 10-arm, sufficient for the 20-arm. */
+   assert(kb_bandit_recall_sufficiency_reward(10, 20) == 1.0);
+
+   printf("  bandit_recall_reward: ok\n");
+}
+
 /* ---- 7. decision_points_list / arms_list ---- */
 static void test_bandit_enumeration(void)
 {
@@ -229,6 +251,7 @@ int main(void)
    test_bandit_reward_closed();
    test_config_bandit_defaults();
    test_bandit_explore_stats();
+   test_bandit_recall_reward();
    test_bandit_enumeration();
    test_bandit_replay_evidence();
 

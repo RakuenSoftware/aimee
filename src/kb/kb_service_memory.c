@@ -29,7 +29,12 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
       return kb_send_error(fd, "memory.find_facts requires query");
    int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 20;
 
-   /* Shadow bandit for memory retrieval limit (no explicit limit from caller). */
+   /* Shadow bandit for memory retrieval limit (no explicit limit from caller).
+    * Sample an arm now; carry the decision id + chosen arm so the reward can be
+    * attributed from the recall result below — otherwise the loop never closes
+    * and the arm posteriors never learn from live traffic. */
+   char ml_decision_id[KB_BANDIT_MAX_DECISION] = {0};
+   char ml_arm_id[KB_BANDIT_MAX_ARM_ID] = {0};
    if (!cJSON_IsNumber(limit_j))
    {
       config_t cfg;
@@ -37,13 +42,13 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
       if (cfg.bandit_live_decision_enabled)
       {
          static const char ml_arms[2][KB_BANDIT_MAX_ARM_ID] = {"10", "20"};
-         char ml_decision_id[KB_BANDIT_MAX_DECISION] = {0};
          int ml_arm =
              kb_bandit_sample(&cfg, "kb_memory_retrieval_limit", NULL, ml_arms, 2, ml_decision_id);
          if (ml_arm >= 0 && ml_arm < 2)
          {
             aimee_log(LOG_DEBUG, "kb.bandit", "kb_memory_retrieval_limit arm=%s", ml_arms[ml_arm]);
             limit = (ml_arm == 0) ? 10 : 20;
+            snprintf(ml_arm_id, sizeof(ml_arm_id), "%s", ml_arms[ml_arm]);
          }
       }
    }
@@ -56,6 +61,16 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
    memory_fusion_state_set(cJSON_IsString(fusion_j) ? fusion_j->valuestring : NULL);
    cJSON *resp = db2_kb_service_memory_find_facts_json(query_j->valuestring, limit);
    memory_fusion_state_clear();
+
+   /* Close the bandit loop: attribute an immediate recall-sufficiency reward to
+    * the sampled decision so the arm posteriors update from live traffic. */
+   if (ml_decision_id[0] && ml_arm_id[0])
+   {
+      cJSON *facts = resp ? cJSON_GetObjectItemCaseSensitive(resp, "facts") : NULL;
+      int n_results = cJSON_IsArray(facts) ? cJSON_GetArraySize(facts) : 0;
+      double reward = kb_bandit_recall_sufficiency_reward(n_results, limit);
+      kb_bandit_reward(NULL, "kb_memory_retrieval_limit", ml_decision_id, ml_arm_id, reward);
+   }
    return kb_reply_or_error(fd, resp, "failed to search memory facts");
 }
 
