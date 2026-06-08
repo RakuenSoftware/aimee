@@ -264,11 +264,12 @@ Safety / reliability (P1-P2):
 
 Capability / coordination / research (P3):
 
-- [Mixture-of-Agents Ensemble Delegate Mode](proposals/done/mixture-of-agents-ensemble-delegate.md):
+- Mixture-of-Agents Ensemble Delegate Mode:
   opt-in quality-up ensemble (diverse references → aggregator synthesis)
   over the delegate fabric. **Synthesize / Rank-Fuse. Done.** _Note: the shipped
   fan-out does not actually route to distinct references (all tasks run the default
-  agent); the routing fix is folded into the Agent Roundtable proposal below._
+  agent). The original done-proposal file is not present in this tree; the routing
+  fix is folded into the Agent Roundtable proposal below._
 - [Agent Roundtable — Round-Robin Collaborative Drafting and Review](proposals/pending/agent-roundtable-collaborative-drafting.md):
   first fixes a shipped bug — the ensemble's reference models are unrouted (every
   "participant" is the same default agent) — then generalizes it into a bounded
