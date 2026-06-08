@@ -19,6 +19,15 @@ char *kb_client_memory_context_block(const char *query, const char *block_type, 
    (void)limit;
    return NULL;
 }
+int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
+                                int max)
+{
+   (void)query;
+   (void)project;
+   (void)out;
+   (void)max;
+   return 0;
+}
 int config_load(config_t *cfg)
 {
    if (cfg)
@@ -113,11 +122,36 @@ static void test_apply(void)
    printf("apply OK\n");
 }
 
+static void test_format_code_block(void)
+{
+   assert(ingress_preinject_format_code_block(NULL, 3) == NULL);
+   code_search_hit_t hits[2];
+   memset(hits, 0, sizeof(hits));
+   assert(ingress_preinject_format_code_block(hits, 0) == NULL);
+
+   snprintf(hits[0].file_path, sizeof(hits[0].file_path), "src/server/openai_chat.c");
+   snprintf(hits[0].snippet, sizeof(hits[0].snippet), "  static int   responses_stream_handler(\n\tconst char *body)");
+   snprintf(hits[1].file_path, sizeof(hits[1].file_path), "src/server/ingress_preinject.c");
+   hits[1].snippet[0] = '\0'; /* no snippet -> just the file line */
+
+   char *b = ingress_preinject_format_code_block(hits, 2);
+   assert(b != NULL);
+   assert(strstr(b, "recommended (code):") == b);
+   assert(strstr(b, "  - src/server/openai_chat.c") != NULL);
+   assert(strstr(b, "  - src/server/ingress_preinject.c") != NULL);
+   /* snippet whitespace collapsed to a single line, no tabs/newlines */
+   assert(strstr(b, "> static int responses_stream_handler( const char *body)") != NULL);
+   assert(strchr(b, '\t') == NULL);
+   free(b);
+   printf("format_code_block OK\n");
+}
+
 int main(void)
 {
    printf("ingress_preinject: ");
    test_confidence_tiers();
    test_format_envelope();
+   test_format_code_block();
    test_query_from_messages();
    test_apply();
    printf("all tests passed\n");

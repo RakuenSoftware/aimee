@@ -19,10 +19,18 @@
 #define DEC_INGRESS_PREINJECT_H 1
 
 #include "cJSON.h"
+#include "index.h" /* code_search_hit_t */
 
 /* Map a recall relevance score in [0,1] to a confidence tier string
  * ("high" | "medium" | "low"). Pure; thresholds documented in the .c. */
 const char *ingress_preinject_confidence(double top_score);
+
+/* Format code-search hits into a `recommended (code):` block — one
+ * `  - <file>` line per hit, each followed by a trimmed single-line snippet.
+ * This is the primary pre-injection signal: the agent sees which files matter
+ * for the turn before it explores. Returns a malloc'd string the caller frees,
+ * or NULL when there are no hits. Pure (no kb). */
+char *ingress_preinject_format_code_block(const code_search_hit_t *hits, int n);
 
 /* Format the <aimee-context …> envelope from an already-packed context block
  * and a confidence tier. Returns a malloc'd string the caller frees, or NULL
