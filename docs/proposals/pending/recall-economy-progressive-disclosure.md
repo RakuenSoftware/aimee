@@ -73,13 +73,18 @@ The expensive, hard parts are done. Confirmed in the tree:
 - **A preview store already exists.** `memory_summaries`
   (`src/db2/schema.sql:66`, `scope='headline'`, indexed at line 133) is exactly
   a per-record preview table. It is simply **not used by the envelope assembler.**
-- **Follow-up retrieval already exists, but not yet id-addressable.** The
-  envelope already advertises `explore-with: ... get_context_block`, and
-  `get_context_block` resolves a query to a full rendered context block
-  (`server_mcp.c` → `kb_client_memory_context_block`). It does **not** currently
-  accept `memory_id` or a `memory:123` handle, so Phase 2 must add that contract
-  (or expose an MCP `memory_get` equivalent) before previews can be true
-  pull-handles.
+- **Follow-up retrieval already exists, but not yet id-addressable *at the MCP
+  tool layer*.** The envelope already advertises
+  `explore-with: ... get_context_block`, and `get_context_block` resolves a
+  *query* to a full rendered context block (`server_mcp.c:491` →
+  `kb_client_memory_context_block`). It does **not** accept `memory_id` or a
+  `memory:123` handle. Crucially, though, the **by-id read chain below it already
+  exists end-to-end**: the `memory.get` RPC (`kb_service.c:984` →
+  `kb_handle_memory_get`), the backend `db2_kb_service_memory_get_json(id)` (full
+  row by id), and the client wrapper `kb_client_memory_get(id, &out)`
+  (`kb_client_memory.c:1093`). So the only missing piece for true pull-handles is
+  a thin **MCP tool wrapper** (e.g. `memory_get`) over that existing chain — not a
+  new RPC, backend, or client contract.
 - **A budget pattern already exists.** Session virtual-context assembly is
   byte-bounded by `virtual_context_assembly_budget` (default 4096,
   `src/config_fields.c:139`, enforced in `conversation_context.c`). The ingress
@@ -115,9 +120,10 @@ The high-value slice should be concrete before any default-on discussion:
 - Memory previews should be structured internally even if rendered as text:
   `id`, `handle`, `key`, `kind`, `tier`, `headline`, `score` when available,
   `updated_at`, `truncated`.
-- A preview handle must be openable. Either extend `get_context_block` with
-  `memory_id` / `handle`, or expose a sibling MCP tool backed by
-  `memory.get`. Do not emit ids that the agent cannot resolve.
+- A preview handle must be openable. Prefer a sibling `memory_get` MCP tool over
+  the existing `kb_client_memory_get` → `memory.get` chain (§0); optionally also
+  extend `get_context_block` with `memory_id` / `handle`. Do not emit ids that
+  the agent cannot resolve.
 - Missing headline summaries fall back to a first-N-character preview, never the
   full body, and are marked `headline_missing=true` so the curator can backfill.
 - Prompt-injection and sensitivity handling are part of the contract: preview
@@ -165,11 +171,15 @@ rendered full context block straight into the envelope.
   **key/title + the `headline`-scope row from `memory_summaries` + stable id +
   openable handle**, instead of full `content`. The summaries table already
   holds the headline; this is a read path, not a new write path.
-- Extend the pull path so the handle actually opens the selected record. Today
-  `get_context_block` accepts `query`, `block_type`, and `limit`; it does not
-  accept `memory_id`. Phase 2 should either add `memory_id`/`handle` to that MCP
-  tool and RPC, or add a sibling `memory_get`/`get_memory` MCP tool that returns
-  the full body for `memory:123`.
+- Make the handle openable. Today `get_context_block` accepts `query`,
+  `block_type`, and `limit`; it does not accept `memory_id`. **Preferred path:**
+  add a sibling `memory_get` MCP tool that wraps the *already-existing*
+  `kb_client_memory_get(id, &out)` → `memory.get` RPC chain (§0) and returns the
+  full body for `memory:123`. This is the cheaper, lower-risk option — a tool
+  registration in `server_mcp_call_table.inc` plus a small handler — because the
+  RPC, backend, and client layers already exist. Optionally also extend
+  `get_context_block` with `memory_id`, but the sibling tool is sufficient and
+  keeps the query-shaped and id-shaped reads cleanly separated.
 - Where no headline summary exists yet for a record, fall back to a
   budget-trimmed first-N-chars preview (never the full body), and let the
   curator backfill the summary out of band.
