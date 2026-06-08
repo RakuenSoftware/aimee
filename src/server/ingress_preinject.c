@@ -13,7 +13,7 @@
 
 /* The standing exploration policy carried in every envelope. Kept short — it is
  * advice the model weighs, not a contract we can enforce over the wire. */
-#define INGRESS_EXPLORE_WITH \
+#define INGRESS_EXPLORE_WITH                                                                       \
    "find_symbol, lsp_references, ast_grep_search, search_graph, get_context_block"
 
 const char *ingress_preinject_confidence(double top_score)

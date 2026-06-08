@@ -70,9 +70,9 @@ static void test_query_from_messages(void)
    cJSON_Delete(m);
 
    /* Array-of-parts content. */
-   cJSON *m2 = cJSON_Parse(
-       "[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"hello \"},"
-       "{\"type\":\"input_text\",\"text\":\"world\"}]}]");
+   cJSON *m2 =
+       cJSON_Parse("[{\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"hello \"},"
+                   "{\"type\":\"input_text\",\"text\":\"world\"}]}]");
    char *q2 = ingress_preinject_query_from_messages(m2);
    assert(q2 && strcmp(q2, "hello world") == 0);
    free(q2);

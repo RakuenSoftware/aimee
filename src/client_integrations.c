@@ -984,8 +984,7 @@ static void ensure_claude_code_hooks(const char *settings_path)
          continue;
       for (int j = 0; j < cJSON_GetArraySize(hook_arr); j++)
       {
-         cJSON *cmd =
-             cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(hook_arr, j), "command");
+         cJSON *cmd = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(hook_arr, j), "command");
          if (cJSON_IsString(cmd) && strstr(cmd->valuestring, "user-prompt-submit"))
             found_ups = 1;
       }
