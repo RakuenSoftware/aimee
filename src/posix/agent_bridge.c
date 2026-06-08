@@ -167,9 +167,12 @@ static int connect_with_timeout(const char *host, int port, int timeout_ms)
 
    if (rc < 0)
    {
-      /* Wait for connect */
+      /* Wait for connect — capped well below the overall request timeout so an
+       * unreachable host (e.g. a down kb behind a SYN-dropping gateway) fails
+       * fast instead of blocking for the full request budget. See
+       * agent_http_effective_connect_timeout_ms() in agent_exec.h. */
       struct pollfd pfd = {fd, POLLOUT, 0};
-      int pr = poll(&pfd, 1, timeout_ms > 0 ? timeout_ms : 30000);
+      int pr = poll(&pfd, 1, agent_http_effective_connect_timeout_ms(timeout_ms));
       if (pr <= 0)
       {
          close(fd);

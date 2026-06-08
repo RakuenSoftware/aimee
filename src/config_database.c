@@ -1,6 +1,7 @@
 #include "aimee.h"
 #include "config_database.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Applies DB2 connection defaults, then overlays values from the parsed config
@@ -43,4 +44,17 @@ void config_parse_database(config_t *cfg, cJSON *root)
                  "%d\n",
                  n);
    }
+}
+
+int config_apply_db2_url_env_override(config_t *cfg)
+{
+   if (!cfg)
+      return 0;
+   const char *env_url = getenv("AIMEE_DB2_URL");
+   if (env_url && env_url[0])
+   {
+      snprintf(cfg->db2_url, sizeof(cfg->db2_url), "%s", env_url);
+      return 1;
+   }
+   return 0;
 }
