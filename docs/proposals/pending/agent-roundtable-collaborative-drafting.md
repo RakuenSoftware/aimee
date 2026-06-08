@@ -10,19 +10,26 @@
   single-shot path, replace the fixed result buffer with a bounded heap artifact,
   and fix the per-call `srand` reseed),
   `src/headers/delegate_ensemble.h` (new `delegate_roundtable_*` surface, heap
-  result), `src/headers/agent_types.h` + `src/server/agent_runtime.c` (thread a
+  result), `src/headers/agent_types.h` + `src/server/agent_runtime.c` (and the
+  cross-platform mirror sources `src/posix/agent_runtime.c`,
+  `src/posix/cmd_agent_delegate.c`, `src/windows/cmd_agent_delegate.c`, which must
+  stay in lockstep under the thin-client split) — thread a
   per-task participant selector through `agent_task_t` → `parallel_worker` and a
   shared named-agent execution helper so both parallel fan-out and sequential
-  turns route to distinct configured agents, plus threading `temperature` through
-  `agent_run`/`parallel_worker` so the currently-dead `agent_task_t.temperature`
-  becomes a live per-task control — see §0.1),
+  turns route to distinct configured agents; clone the selected `agent_t` before
+  mutation to close a pre-existing parallel-fan-out race (§0.1 step 4); and add an
+  internal `agent_run_ex(…, double temperature, …)` seam that `agent_run` wraps
+  with the current `0.3` default (so the ~28 existing `agent_run` call sites are
+  unchanged) and that `parallel_worker` calls with `task->temperature`, making the
+  currently-dead `agent_task_t.temperature` a live per-task control — see §0.1),
   the entry-point wiring that does not exist today (§0.2):
-  first-class `/v1` endpoints only (`src/server/server_http_routes.inc`,
-  `api/openapi-server-v1.yaml`, native V1 route handlers, and thin-client V1
-  call sites for `aimee delegate aggregate` / `roundtable`); no
-  `src/cli_rpc_routes.inc` rows, no `src/server/server.c` dispatch-table
-  methods, no `v1-method-coverage-check` exclusion, and no `POST /v1/rpc`
-  fallback; optionally `src/server/server_mcp_delegate.c` (MCP tools) backed by
+  first-class `/v1/delegate/*` endpoints (`src/server/server_http_routes.inc`,
+  `api/openapi-server-v1.yaml`, route handlers, and thin-client V1 call sites for
+  `aimee delegate aggregate` / `roundtable`), backed either by the existing
+  `delegate.*` dispatch pattern (+ one documented `v1-method-coverage-check`
+  exclusion) or by a native `op == NULL` handler — a deliberate P0 choice, not a
+  fixed invariant (§0.2 decision box); never the retired `POST /v1/rpc` fallback;
+  optionally `src/server/server_mcp_delegate.c` (MCP tools) backed by
   the same server-side implementation;
   `src/cmd_agent_delegate.c` is the lint-only body template for the new
   `roundtable` subcommand beside the existing (also lint-only) `aggregate` block,
@@ -198,9 +205,20 @@ the parallel path (see fix step 7), which repairs `agent_vote` at the same time.
    available only for the aggregator/judge paths unless a later proposal adds an
    explicit per-participant fallback list.
 4. Clone the selected `agent_t` into local call state before applying runtime
-   config, `ablation`, or `write_enforce`. Current `agent_run` mutates fields on
-   the selected `agent_t`; doing that against shared `agent_config_t` entries from
-   parallel fan-out would create races between participants.
+   config, `ablation`, or `write_enforce`. This closes a **pre-existing data
+   race**, not just a forward one: `agent_run` mutates fields on the selected
+   `agent_t` in place (`agent_runtime.c:165-167` and `:203-205` —
+   `agent_apply_runtime_config(ag); ag->ablation = …; ag->write_enforce = …`), and
+   those `agent_t` structs are owned by the shared `agent_config_t`. Under
+   `agent_run_parallel` every worker thread shares one `cfg`, so **today** — where
+   all fan-out tasks route to the *same* default agent (the `role = NULL` bug
+   above) — N threads already write the same `agent_t` fields concurrently;
+   `agent_vote` (`agent_coord.c`) has the identical race. It is practically benign
+   only because the colliding writes happen to store the same values, but it is
+   undefined behavior and a TSan finding. Clone **unconditionally** in the
+   named-agent helper / `parallel_worker` (not only when `task->agent` is set), so
+   the race is closed for the existing same-agent fan-out too, and add a
+   concurrency test that runs N parallel tasks against one agent under TSan.
 5. `delegate_ensemble_run` sets `tasks[i].agent = cfg->ensemble_reference_models[i]`
    so the N references become N real participants.
 6. **Un-stubbed test.** `test_delegate_ensemble.c` currently stubs
@@ -210,10 +228,14 @@ the parallel path (see fix step 7), which repairs `agent_vote` at the same time.
    stubbing it away, plus negative cases for missing, disabled, unhealthy,
    duplicate, and role-incompatible participants.
 7. **Plumb temperature through the parallel path (repairs `agent_vote` too).**
-   Give `agent_run` a temperature parameter (or a per-task override read from
-   `task->temperature`) and have `parallel_worker` pass `task->temperature`
-   instead of dropping it; default to the current `0.3` when the field is `0`/unset
-   so existing single-agent callers are unchanged. This turns the already-present
+   `agent_run` takes no `task` argument and has ~28 call sites across 17 files, so
+   do **not** widen its signature directly. Add an internal
+   `agent_run_ex(cfg, role, system_prompt, user_prompt, max_tokens, temperature,
+   out)` that carries the hard-coded `0.3` onto a real parameter
+   (`agent_runtime.c:171/173/227/229/333`), and keep `agent_run` as a thin wrapper
+   that passes `0.3` — so every existing caller is byte-unchanged. Have
+   `parallel_worker` call `agent_run_ex` with `task->temperature`, defaulting to
+   `0.3` when the field is `0`/unset. This turns the already-present
    but dead `agent_task_t.temperature` into a real per-task sampling control,
    which (a) gives the ensemble a cheap orthogonal diversity axis even before
    distinct agents are configured and (b) makes `agent_coord.c:501`'s existing
@@ -279,56 +301,73 @@ this: `test_delegate_ensemble.c` calls `delegate_ensemble_run` directly with a
 stubbed `agent_run_parallel`, exercising a code path no shipped binary reaches.
 
 **The missing wiring (P0 must add this before its value lands).** Add a
-first-class `/v1` surface, not a new RPC method family. The repo has completed
-op-parity with `v1-method-coverage-check` reporting zero exclusions, and
-`server_http_routes.inc` explicitly says `POST /v1/rpc` was retired. Therefore
-P0 must not add `delegate.aggregate` / `delegate.roundtable` to
-`server_dispatch_table[]`, must not add rows to `cli_rpc_routes.inc`, and must
-not add a method-coverage exclusion. The public entry point is V1 only:
+first-class `/v1/delegate/*` surface. There are two valid ways to back it (see
+the decision box): mirror the existing dispatch-method family, or use a native
+`op == NULL` handler. The repo's standing op-parity direction
+(`v1-method-coverage-check` at zero exclusions, `POST /v1/rpc` retired) pulls
+toward the native option; the rest of the delegate family being
+dispatch-method-backed, *and the async run contract itself being dispatch-based*,
+pulls toward the method option. The public entry point either way is V1-first
+(never the retired `/v1/rpc`):
 
-> **Decision — V1-only, not the `delegate.*` RPC family (settled, with rationale).**
-> An earlier draft of this proposal recommended mirroring the existing typed
-> `delegate.*` RPC family (`delegate.launch` / `delegate.status` / `delegate.log`
-> at `cli_rpc_routes.inc:235-243`). That is the *more locally consistent* option —
-> the rest of the delegate family already lives on the dispatch table, and the
-> bare `{"delegate", NULL, …, 900000}` catch-all already tolerates long calls. It
-> is recorded here as the rejected alternative so the choice is not re-litigated.
-> **V1-only wins on policy:** the repo's standing direction is op-parity with *no
-> new RPC methods or `/v1/rpc` fallbacks* (`v1-method-coverage-check` reports zero
-> exclusions; `POST /v1/rpc` is retired). Adding two new NDJSON dispatch methods
-> would reverse that direction for one command family and require a coverage
-> exclusion or method-table churn. The cost of V1-only is the extra async
-> `/v1/runs/{id}` plumbing (below); the benefit is no new RPC surface, OpenAPI
-> coverage for free, and one native server-side implementation reachable from V1,
-> MCP, and the thin client alike. This is a hard implementation invariant, not a
-> preference: P0 is rejected if it adds `delegate.aggregate` /
-> `delegate.roundtable` methods, `cli_rpc_routes.inc` rows,
-> `server_dispatch_table[]` entries, a `/v1/rpc` fallback, or a coverage
-> exclusion.
+> **Decision — two viable entry-point shapes; choose at P0 with eyes open.**
+> There are two honest ways to give the ensemble a reachable entry point, and the
+> earlier "V1-only is a settled hard invariant" framing overstated the case. Both
+> are recorded so P0 chooses deliberately rather than by reflex.
+>
+> **Option A — mirror the existing `delegate.*` dispatch family (lower risk).**
+> Every other `/v1/delegate/*` route is already dispatch-method-backed via an `op`
+> twin (`server_http_routes.inc:788-798`: `delegate.run` / `.launch` / `.status` /
+> `.log` / `.reply`), and the async run contract `rh_dispatch_op_async` *is itself
+> built on* injecting an NDJSON method and calling `loopback_rpc`. So adding
+> `delegate.aggregate` (+ `delegate.roundtable`) as dispatch methods with an async
+> `/v1/delegate/aggregate` route reuses the exact, proven pattern of the rest of
+> the family with the least new code. Its cost is one documented
+> `v1-method-coverage-check` exclusion (or method-table entry) — a small,
+> well-trodden policy concession.
+>
+> **Option B — native `op == NULL` V1 handlers (keeps zero coverage exclusions).**
+> Honours the op-parity direction (no new dispatch methods, no `/v1/rpc`), at the
+> cost of building a **new** native async-run seam: `rh_dispatch_op_async` is not
+> reusable as-is (it injects a method + `loopback_rpc`), so P0 must add a native
+> enqueue/finalize helper that drives `/v1/runs/{id}` without `server_dispatch`.
+> That new seam is the single most code-heavy and least-tested piece of P0.
+>
+> **Recommendation:** prefer **Option A** unless the zero-exclusions policy is
+> treated as inviolable. The point of P0 is to make a dead feature work with
+> minimal risk; spending the bulk of P0's novel, untested code on a bespoke async
+> mechanism purely to avoid one documented exclusion inverts that risk trade. If
+> the project owner rules that `v1-method-coverage-check` must stay at zero
+> exclusions, take Option B and budget P0 accordingly. Either way the public entry
+> point is a first-class `/v1/delegate/aggregate` route with OpenAPI coverage and
+> explicit `CAP_DELEGATE`; the only open question is whether it is backed by a
+> dispatch-method `op` twin (A) or a native handler (B).
 
 - **V1 routes.**
   - Add `POST /v1/delegate/aggregate` and, once the loop exists,
-    `POST /v1/delegate/roundtable` to `server_http_routes.inc` with native route
-    handlers, plus matching paths in `api/openapi-server-v1.yaml`.
-  - Do **not** set an `op` twin on these rows. They are not NDJSON dispatch
-    methods; they call the server-side ensemble/roundtable implementation
-    directly.
-  - Because `op == NULL` rows do **not** inherit `server_capability_for_method`,
-    the route rows must set `caps = CAP_DELEGATE` explicitly. A `caps = 0`
-    initializer would make expensive LLM fan-out public, and is a release blocker.
-    Add route-cap tests that assert both endpoints require `CAP_DELEGATE` and that
-    TCP access remains denied unless the bearer/tier is allowed for delegate
-    execution (`remote_writes=full` for privileged remote execution, same as the
-    existing delegate routes).
-  - Because aggregate/roundtable are LLM-heavy and roundtable can run many calls,
-    return a queued run handle and finalize status/result through the existing
-    `/v1/runs/{id}` store, mirroring the `rh_dispatch_op_async` contract without
-    routing through `server_dispatch`. The buffered listener must not run the
-    ensemble inline. `rh_dispatch_op_async` itself is not reusable as-is because
-    it injects an NDJSON method and calls `loopback_rpc`; P0 must add a native
-    enqueue/finalize helper (or refactor the run helper to accept a native worker
-    callback) that creates the run, moves it through queued → in_progress →
-    completed/failed/cancelled, and stores the final aggregate/roundtable JSON.
+    `POST /v1/delegate/roundtable` to `server_http_routes.inc`, plus matching
+    paths in `api/openapi-server-v1.yaml`.
+  - **Option A (dispatch-backed):** give each row an `op` twin
+    (`delegate.aggregate` / `delegate.roundtable`) and route through
+    `rh_dispatch_op_async`, exactly like `delegate.launch`. Caps are then inherited
+    from `server_capability_for_method`. Record the one
+    `v1-method-coverage-check` exclusion (or method-table entry) this adds.
+  - **Option B (native handler):** leave `op == NULL` and call the server-side
+    implementation directly. Because `op == NULL` rows do **not** inherit
+    `server_capability_for_method` (`server_http_routes.inc:1073`), the row must set
+    `caps = CAP_DELEGATE` explicitly — a `caps = 0` initializer would make expensive
+    LLM fan-out public and is a release blocker. Because `rh_dispatch_op_async` is
+    not reusable as-is (it injects a method + calls `loopback_rpc`), P0 must add a
+    native enqueue/finalize helper that drives `/v1/runs/{id}` without
+    `server_dispatch`.
+  - **Both options:** add route-cap tests asserting both endpoints require
+    `CAP_DELEGATE` and that TCP access stays denied unless the bearer/tier is
+    allowed for delegate execution (`remote_writes=full`, as the existing delegate
+    routes). aggregate/roundtable are LLM-heavy and roundtable runs many calls, so
+    they must return a queued run handle and finalize status/result through the
+    existing `/v1/runs/{id}` store; the buffered listener must **never** run the
+    ensemble inline. The run moves queued → in_progress →
+    completed/failed/cancelled and stores the final aggregate/roundtable JSON.
 - **Server implementation.**
   - Add a server-linked implementation TU such as
     `src/server/delegate_ensemble_v1.c` (registered in `SERVER_SRCS`), or place
@@ -369,19 +408,21 @@ not add a method-coverage exclusion. The public entry point is V1 only:
     `cli_rpc_lookup("delegate", ...)`, sends `"aggregate"` as `role`, or touches
     `cli_rpc_routes.inc`.
 - **MCP tool (parallel, optional in P0).** Expose `aggregate` / `roundtable`
-  MCP tools in `server_mcp_delegate.c`, but have them call the same native worker
-  helper used by the V1 handlers rather than inventing or dispatching a separate
-  RPC method.
+  MCP tools in `server_mcp_delegate.c`, but have them call the same server-side
+  helper the V1 route uses (the dispatch `op` under Option A, or the native worker
+  under Option B), not a third implementation.
 - **Build + de-dup.** Register any new TU in `src/Makefile` (`SERVER_SRCS`) and,
   if applicable, the cmake profile; retire the lint-only `aggregate` block in
   `cmd_agent_delegate.c` (or keep it strictly as a platform CLI helper that
   builds the V1 request) so there is one live implementation, not two divergent
   ones.
-  Add a negative route-surface check for P0: no new `delegate.aggregate` or
-  `delegate.roundtable` string may appear in `src/server/server.c`,
-  `src/cli_rpc_routes.inc`, or any `/v1/rpc` fallback; the only accepted public
-  paths are the first-class `/v1/delegate/*` routes plus optional MCP tools backed
-  by the same native helper.
+  Under **Option B**, add a negative route-surface check for P0: no new
+  `delegate.aggregate` / `delegate.roundtable` string may appear in
+  `src/server/server.c`, `src/cli_rpc_routes.inc`, or any `/v1/rpc` fallback. Under
+  **Option A**, that check is dropped; the new dispatch methods plus their one
+  documented coverage exclusion are the accepted surface instead. Either way the
+  public path is the first-class `/v1/delegate/*` routes plus optional MCP tools
+  backed by the same server-side helper, never `/v1/rpc`.
 
 Until this wiring exists, the §0.1 routing fix repairs a path with no callers.
 P0 therefore **wires the entry point and fixes the routing in the same phase**
@@ -399,11 +440,12 @@ the standalone P0 changeset is:
 
 | Defect (all verified in-tree) | Fix | Files |
 |---|---|---|
-| Engine unreachable — no shipped binary calls `delegate_ensemble_run` (§0.2) | Native `POST /v1/delegate/aggregate` + `CAP_DELEGATE` route row + native async run worker + thin-client `aggregate` subcommand, async via `/v1/runs/{id}` and never via RPC dispatch | `server_http_routes.inc`, `api/openapi-server-v1.yaml`, new `server/delegate_ensemble_v1.c`, `cli_main.c`, `Makefile` |
+| Engine unreachable — no shipped binary calls `delegate_ensemble_run` (§0.2) | `POST /v1/delegate/aggregate` (+ explicit `CAP_DELEGATE`) finalizing via `/v1/runs/{id}` + thin-client `aggregate` subcommand; dispatch-backed (Option A) or native handler (Option B) per the §0.2 decision; never `/v1/rpc` | `server_http_routes.inc`, `api/openapi-server-v1.yaml`, `server/*`, `cli_main.c`, `Makefile` |
 | All N references route to the one default agent (`role = NULL`, §0.1) | Add `const char *agent;` to `agent_task_t`; named-agent execution helper resolving like `aux_router.c:51-58`; clone `agent_t` before mutation; set `tasks[i].agent = ensemble_reference_models[i]` | `agent_types.h`, `agent_runtime.c`, `delegate_ensemble.c` |
-| `agent_task_t.temperature` is dead on the parallel path → zero diversity, also breaks `agent_vote` (§0.1 step 7) | Thread `temperature` through `agent_run`/`parallel_worker` | `agent_exec.h`, `agent_runtime.c` |
+| `agent_task_t.temperature` is dead on the parallel path → zero diversity, also breaks `agent_vote` (§0.1 step 7) | Add internal `agent_run_ex(…, temperature, …)`; `agent_run` wraps it with `0.3`; `parallel_worker` passes `task->temperature` | `agent_exec.h`, `agent_runtime.c` (+ `posix/agent_runtime.c`) |
+| Pre-existing data race: `agent_run` mutates shared `cfg`-owned `agent_t` (`:165-167`, `:203-205`) under `agent_run_parallel`; today all tasks hit one default agent so N threads write one struct (also `agent_vote`) (§0.1 step 4) | Clone `agent_t` into local call state **unconditionally** before mutation; add a TSan concurrency test | `agent_runtime.c` |
 | `srand(time(NULL))` per call clobbers global RNG, collides within a second (§4) | Seed once at process start or thread `rand_r` state through `shuffle_indices` | `delegate_ensemble.c` |
-| Silent truncation: fixed `response[8192]` / `synthesis_buf[16384]` (§3) | Heap-grown result for the new path; keep the fixed buffers only on the frozen legacy path until parity is proven | `delegate_ensemble.h`, `delegate_ensemble.c` |
+| Truncation: result copies silently `snprintf` into fixed `response[8192]` (`:181/200/233`), while a too-large synthesis prompt instead hard-fails the **whole run** (`build_synthesis_prompt` → `-1`, `:218`) — both wrong for a growing multi-round draft (§3) | Heap-grown result + budget-bounded prompt on the new path; keep fixed buffers only on the frozen legacy path until parity is proven | `delegate_ensemble.h`, `delegate_ensemble.c` |
 | Bug shipped unseen because the test stubs `agent_run_parallel` (§0.1 step 6) | Un-stubbed routing test + an end-to-end reachability test (CLI/V1 → engine → run result) | `tests/test_delegate_ensemble.c`, `tests/Rules.mk` |
 
 Everything from §1 onward (multi-round loop, draft/review modes, sequential
@@ -465,7 +507,7 @@ least:
     {
       "severity": "blocking|suggestion|nit",
       "category": "correctness|security|performance|maintainability|style",
-      "stable_key": "short deterministic issue key",
+      "stable_key": "optional model-supplied key — display only; the engine computes its own identity key (§1)",
       "location": "file:line or artifact section",
       "summary": "one-sentence issue"
     }
@@ -473,10 +515,17 @@ least:
 }
 ```
 
-The engine treats `severity == "blocking"` plus `stable_key` as the deterministic
-stop predicate. The aggregator may still semantically deduplicate and improve the
-final prose, but the engine does not depend on semantic matching to decide
-whether a new blocking issue appeared.
+The engine treats `severity == "blocking"` as the stop-relevant class, but it does
+**not** trust the reviewer-supplied `stable_key` for issue identity — an LLM will
+not emit a key that is stable across rounds or consistent across reviewers, so
+trusting it risks both premature saturation (a key coincidentally reused) and
+never-saturating (the same issue re-keyed every round, so the loop always runs to
+`max_rounds`). Instead the engine **computes** the identity key itself by
+normalizing and hashing `category` + `location` (falling back to a shingled hash of
+`summary` when `location` is absent); the model's `stable_key`, when present, is
+recorded for display only. The aggregator may still semantically deduplicate the
+final prose, but the saturation decision rests on an engine-computed,
+model-independent key.
 
 Both modes are the *same loop* — they differ only in the per-turn instruction
 (revise vs. critique) and the convergence predicate (draft stabilized vs. no new
@@ -509,29 +558,47 @@ per round.
 Borrowed from `agent_loop_t` (`agent_exec.h:122`), not reinvented:
 
 - **Hard cap:** `roundtable_max_rounds` (default 3). Always terminates.
-- **Draft mode — stability:** after the aggregator produces `Dₙ`, ask the
-  `reason` role to score how much `Dₙ` differs from `Dₙ₋₁` on 0–100 (0 = no
-  meaningful change). Stop when change `<` `roundtable_converge_threshold`
-  (default 10). Cheap: one short judging call per round, same pattern as
-  `agent_loop_parse_completion` (`agent_exec.h:144`).
-- **Review mode — saturation:** stop when a round returns no feedback item with
-  `severity == "blocking"` whose `stable_key` was not already raised in a prior
-  round. Semantic dedup stays in the aggregator for final presentation, but the
-  engine's stop predicate is deterministic and unit-testable.
-- **Cost ceiling (shared, hard) — preflight, not only post-hoc.** The existing
+- **Wall-clock deadline:** `roundtable_deadline_ms` (default 600000 = 10 min, `0`
+  = off). Sequential-turns mode is R×N serial LLM calls plus R×(aggregator+scorer)
+  and can run many minutes; `agent_loop_t` already bounds its loop on time, and the
+  roundtable should too. Checked at each round boundary and before each expensive
+  stage (alongside the `/v1/runs/{id}/stop` cancellation check); on expiry the loop
+  stops and returns the best artifact so far with `deadline_hit` set, never a
+  partial mid-stage write.
+- **Draft mode — stability:** convergence of *text* is mechanically measurable, so
+  the primary signal is **deterministic** — compute a normalized change ratio
+  between `Dₙ` and `Dₙ₋₁` (token-set Jaccard or normalized edit distance) and stop
+  when it is below `roundtable_converge_threshold` (default 10, as a 0–100
+  percentage). This avoids paying an LLM call — and its own noise — to judge
+  something a diff measures exactly. The `reason`-role 0–100 judge is kept only as
+  an **optional tiebreak** for the ambiguous band (a large reword that barely
+  changes meaning), not as the gate. This differs deliberately from
+  `agent_loop_parse_completion` (`agent_exec.h:144`), which judges *task completion*
+  (genuinely an LLM call); text convergence does not need a model in the common
+  path.
+- **Review mode — saturation:** stop when a round returns no `severity ==
+  "blocking"` item whose **engine-computed** identity key (normalized
+  `category`+`location` hash, §1 — *not* the model's `stable_key`) was not already
+  raised in a prior round. Semantic dedup stays in the aggregator for final
+  presentation; the engine's stop predicate is deterministic, model-independent,
+  and unit-testable.
+- **Cost ceiling (shared, hard) — post-hoc hard stop, preflight once cost is real.** The existing
   `ensemble_max_cost_usd` cap is a *running* total across all rounds. Today's
   single-shot path only checks cost *after* the fan-out has already spent it
   (`delegate_ensemble.c:169-173`), so the cap reports but never prevents. Over R
   rounds that compounds: post-hoc-only enforcement can overshoot by a full round ×
-  N participants before the loop notices. This proposal therefore enforces **at
-  the round boundary**: before dispatching round *n*, estimate that round's worst
-  case from `(participants × effective_per_task_max_tokens) + aggregator + judge`
-  at `ENSEMBLE_COST_PER_TOKEN`, and **do not start the round** if `accumulated +
-  estimate` would cross the cap. `effective_per_task_max_tokens` is resolved from
-  the task value when set, otherwise from the selected participant/provider
-  default; a literal `0` cannot be treated as a zero-cost turn. The post-call
-  accounting still runs to true up the real spend. Either way, cap handling
-  returns the **best artifact so far** (§4, keep-best) with `cost_capped = 1`.
+  N participants before the loop notices. This proposal therefore checks **at the
+  round boundary**: before dispatching round *n*, estimate that round's cost from
+  `(participants × effective_per_task_max_tokens) + aggregator + scorer` and, once a
+  realistic per-provider cost exists (see the sub-bullet), **do not start the
+  round** if `accumulated + estimate` would cross the cap. Until that cost lands,
+  the preflight estimate only **warns** and the **post-hoc** accounting below is the
+  authoritative hard stop — so the cap is never a no-op even in warn mode, it just
+  cannot overshoot by more than one round. `effective_per_task_max_tokens` is
+  resolved from the task value when set, otherwise from the selected
+  participant/provider default; a literal `0` cannot be treated as a zero-cost turn.
+  Either way, cap handling returns the **best artifact so far** (§4, keep-best) with
+  `cost_capped = 1`.
   - **The cost model must improve, or preflight over-blocks (review finding).**
     `ENSEMBLE_COST_PER_TOKEN` is a single flat `$15/MTok` constant
     (`delegate_ensemble.c:19`) that bears no relation to the actual delegates
@@ -548,10 +615,12 @@ Borrowed from `agent_loop_t` (`agent_exec.h:122`), not reinvented:
     a real per-provider cost exists, the preflight gate should default to *warn*,
     not *block*, so it cannot strand a valid run.
 - **Size ceiling — bounded heap artifact, summarize-forward, no silent truncation.**
-  Today the result is a fixed `char response[8192]` (`delegate_ensemble.h:12`) and
-  synthesis a `char synthesis_buf[16384]` (`:215`), both silently
-  `snprintf`-truncated (`:181/200/233`) — the exact failure mode a growing
-  multi-round draft hits. The roundtable does not inherit this: `roundtable_result_t`
+  Today the result is a fixed `char response[8192]` (`delegate_ensemble.h:12`),
+  silently `snprintf`-truncated at the three copy sites (`:181/200/233`), while a
+  too-large synthesis prompt takes the opposite-but-also-wrong path:
+  `build_synthesis_prompt` returns `-1` and the **entire run fails** (`:218`) rather
+  than degrading. Both are exactly the failure mode a growing multi-round draft
+  hits. The roundtable does not inherit either: `roundtable_result_t`
   holds a **heap `char *artifact`** (grown to fit, freed by the caller, §4), and
   per-round prompts are assembled under an explicit byte budget derived from the
   participant context window. When `task + artifact + peer notes` would exceed the
@@ -572,7 +641,8 @@ typedef struct {
    roundtable_mode_t mode;
    roundtable_turns_t turns;
    int max_rounds;          /* default 3 */
-   int converge_threshold;  /* 0-100 draft-delta stop, default 10 */
+   int converge_threshold;  /* 0-100 normalized change-ratio stop, default 10 */
+   int deadline_ms;         /* wall-clock cap, default 600000; 0 = off (§3) */
    int apply_review;        /* mode B: final draft turn applies the review */
 } roundtable_opts_t;
 
@@ -583,6 +653,7 @@ typedef struct {
    int degraded;            /* a round fell back to best-candidate, or summarized */
    int truncated;           /* a peer note was summarized forward to fit budget */
    int cost_capped;         /* running cost cap hit (preflight or post-hoc) */
+   int deadline_hit;        /* wall-clock deadline expired (§3) */
    int best_round;          /* which round produced the returned artifact */
    double cost_usd;         /* accumulated across all rounds + aggregators */
 } roundtable_result_t;
@@ -601,9 +672,10 @@ today, then call `run_aggregator` to fold the round into the next artifact. Afte
 each round, run the convergence check (§3) and break early.
 
 **Keep-best-so-far is the default, not an option.** A pathological round can make
-the draft *worse*, and the convergence judge only detects *low change*, not
-regression. So each round's aggregated artifact is scored (the same `reason`-role
-delta judge, scored against the task rather than the prior draft), the engine
+the draft *worse*, and the deterministic change ratio (§3) detects only *low
+change*, not *regression*. So each round's aggregated artifact is scored for
+**quality against the task** by one `reason`-role call (this is a genuine judgement,
+unlike the mechanical convergence metric, so it stays an LLM call), the engine
 retains the **highest-scored** artifact across rounds, and `out->artifact` /
 `out->best_round` return that — never blindly the last round. This reuses the
 existing `best_candidate` idea (`delegate_ensemble.c:197`) one level up.
@@ -637,7 +709,7 @@ permit changing the implementation.
 
 ## §5 CLI
 
-A new subcommand built on the §0.2 native V1 wiring (CLI JSON body builder +
+A new subcommand built on the §0.2 V1 wiring (CLI JSON body builder +
 `POST /v1/delegate/roundtable` + `/v1/runs/{id}` polling), using the
 `cmd_agent_delegate.c:504` block only as a body template — **not** as the live
 path, since that file is lint-only:
@@ -667,7 +739,8 @@ Add a top-level `roundtable` config object beside the existing top-level
 | key | default | meaning |
 |-----|---------|---------|
 | `roundtable.max_rounds` | 3 | hard round cap |
-| `roundtable.converge_threshold` | 10 | draft-delta stop (0–100) |
+| `roundtable.converge_threshold` | 10 | normalized change-ratio stop (0–100) |
+| `roundtable.deadline_ms` | 600000 | wall-clock cap (0 = off) |
 | `roundtable.turns` | `parallel` | default turn discipline |
 
 Participants (`ensemble.reference_models`), aggregator
@@ -679,6 +752,7 @@ roundtable defaults are serialized as a **top-level** `roundtable` object:
 roundtable:
   max_rounds: 3
   converge_threshold: 10
+  deadline_ms: 600000
   turns: parallel
 ```
 
@@ -691,17 +765,19 @@ roundtable:
 land as follows, and because they are flat scalars (unlike the
 `reference_models` array) they *can* additionally be CLI-settable:
 
-- `config.h` — three new fields on `config_t` (`roundtable_max_rounds`,
-  `roundtable_converge_threshold`, `roundtable_turns[16]`).
-- `config.c` — defaults (3, 10, `"parallel"`), beside the ensemble defaults at
-  `config.c:507-509`.
+- `config.h` — four new fields on `config_t` (`roundtable_max_rounds`,
+  `roundtable_converge_threshold`, `roundtable_deadline_ms`,
+  `roundtable_turns[16]`).
+- `config.c` — defaults (3, 10, 600000, `"parallel"`), beside the ensemble defaults
+  at `config.c:507-509`.
 - `config_sections.c` — add a sibling inline parser for the top-level
   `roundtable` object, near the existing ensemble parser.
 - `config_save.c` — extend the inverse saver for round-trip of the top-level
   `roundtable` object.
-- `config_fields.c` — register **only** the three flat scalars so `aimee config
-  get/set roundtable.max_rounds` works. (The array-valued `ensemble.*` keys stay
-  inline-only, as today.)
+- `config_fields.c` — register **only** the flat scalars (`max_rounds`,
+  `converge_threshold`, `deadline_ms`, and the short `turns` string) so `aimee
+  config get/set roundtable.max_rounds` works. (The array-valued `ensemble.*` keys
+  stay inline-only, as today.)
 
 This is a deliberate, stated decision rather than an inherited convention: scalars
 are CLI-settable; the array participant list is not.
@@ -711,16 +787,15 @@ are CLI-settable; the array participant list is not.
 1. **P0 — wire the entry point (§0.2) + fix the routing bug (§0.1) + the `srand`
    reseed.** These ship together because the routing fix is invisible without a
    reachable caller.
-   - *Wiring (§0.2):* add native `/v1/delegate/aggregate` (and the
+   - *Wiring (§0.2):* add `POST /v1/delegate/aggregate` (and the
      `/v1/delegate/roundtable` placeholder shape if useful) with OpenAPI coverage,
-     explicit `CAP_DELEGATE` route caps, a native server-linked V1 worker that
-     enqueues/finalizes `/v1/runs/{id}` without `server_dispatch` /
-     `loopback_rpc`, and a bespoke CLI builder that posts `{prompt,...}` to V1 and
-     polls `/v1/runs/{id}`. Do not add `delegate.aggregate` /
-     `delegate.roundtable` dispatch-table methods, do not add `cli_rpc_routes.inc`
-     rows, do not add `/v1/rpc` fallback, and do not add a method-coverage
-     exclusion. Retire the lint-only `aggregate` block or keep it only as V1
-     request-building helper code.
+     explicit `CAP_DELEGATE`, async finalize through `/v1/runs/{id}`, and a CLI
+     builder that posts `{prompt,...}` and polls the run. Pick the backing per the
+     §0.2 decision box: **Option A** reuses the `delegate.*` dispatch pattern (+ one
+     documented coverage exclusion); **Option B** adds a native `op == NULL` handler
+     and the new enqueue/finalize seam. The buffered listener must never run the
+     ensemble inline either way; `/v1/rpc` is not used. Retire the lint-only
+     `aggregate` block or keep it only as request-building helper code.
    - *Routing (§0.1):* thread an optional `agent` selector through
      `agent_task_t` and a shared named-agent execution helper, resolving named
      agents the way `aux_router.c:51-58` already does; point each ensemble
@@ -732,14 +807,18 @@ are CLI-settable; the array participant list is not.
      engine → run result) that fails on today's tree — this is the test whose
      absence let both the unreachability and the §0.1 bug ship. Add route-cap
      tests (`CAP_DELEGATE`, TCP privilege denial), a non-blocking listener test, a
-     cancellation test, and negative surface tests proving no
-     `delegate.aggregate` / `delegate.roundtable` RPC methods, `cli_rpc_routes.inc`
-     rows, or `/v1/rpc` fallback were added. Plus **un-stubbed routing tests**:
-     three configured references → three distinct `agent_name` results,
+     cancellation test, and surface tests matching the chosen option (Option B:
+     prove no `delegate.aggregate` / `delegate.roundtable` dispatch methods,
+     `cli_rpc_routes.inc` rows, or `/v1/rpc` fallback were added; Option A: assert
+     the new methods carry their one documented coverage exclusion and nothing
+     else regresses). Plus **un-stubbed routing tests**: three configured
+     references → three distinct `agent_name` results,
      missing/disabled/unhealthy participants, duplicate names, role
-     incompatibility, and proof that parallel named-agent calls do not race on
-     shared `agent_t` mutation. The existing stubbed ensemble tests also re-run
-     green.
+     incompatibility, a temperature test (two tasks with different
+     `task->temperature` reach the request builder with different values), and a
+     TSan concurrency test proving the unconditional `agent_t` clone closes the
+     same-agent parallel-fan-out race (§0.1 step 4) as well as the new
+     named-agent path. The existing stubbed ensemble tests also re-run green.
 
    This phase ships independently and **makes the marked-Done MoA feature
    actually work for the first time** (it does not today, §0.2); everything below
@@ -755,19 +834,24 @@ are CLI-settable; the array participant list is not.
    prompt-budget summarize-forward (assert `truncated` set, not silent),
    keep-best-selects-not-last, and aggregate golden parity for the existing public
    path.
-3. **P2 — convergence + sequential turns.** Add the `reason`-role delta judge
-   (dedicated judge prompt emitting the `{"completion":N}` shape that
-   `agent_loop_parse_completion` already parses, `agent_exec.h:144` — the stock
-   `reason` template alone does not emit that shape) and `--turns sequential`
-   (per-round shuffle via the fixed RNG). Tests for early-stop on a stable draft,
-   keep-best on a regressing draft, and order-shuffling.
+3. **P2 — convergence + sequential turns.** Add the **deterministic** draft change
+   ratio (token-set Jaccard / normalized edit distance, §3) as the primary stop
+   signal, the optional `reason`-role tiebreak judge for the ambiguous band (a
+   dedicated prompt emitting the `{"completion":N}` shape that
+   `agent_loop_parse_completion` parses, `agent_exec.h:144` — the stock `reason`
+   template alone does not emit that shape), the `reason`-role keep-best quality
+   scorer (§4), the `roundtable_deadline_ms` wall-clock cap (§3), and `--turns
+   sequential` (per-round shuffle via the fixed RNG). Tests: early-stop on a stable
+   draft (no LLM call needed), keep-best on a regressing draft, deadline expiry
+   returns best-so-far with `deadline_hit`, and order-shuffling.
 4. **P3 — review mode.** `--mode review`, structured-feedback JSON prompt,
-   `stable_key`-based blocking-issue saturation stop, aggregator dedup, optional
-   `--apply` final draft turn. Malformed reviewer JSON counts as a failed
-   participant after one optional repair prompt; the engine computes a normalized
-   fallback key from `severity/category/location/summary` when `stable_key` is
-   missing, but it never lets malformed JSON silently satisfy convergence. Tests
-   for saturation stop, dedup, malformed JSON, and normalized fallback keys.
+   blocking-issue saturation stop keyed on the **engine-computed** identity key
+   (normalized `category`+`location` hash, §1 — never the model's `stable_key`),
+   aggregator dedup, optional `--apply` final draft turn. Malformed reviewer JSON
+   counts as a failed participant after one optional repair prompt and never
+   silently satisfies convergence. Tests for saturation stop, dedup, malformed
+   JSON, key stability across two rounds that re-describe the same issue in
+   different words, and the `summary`-shingle fallback when `location` is absent.
 5. **P4 — CLI + config + docs.** `aimee delegate roundtable`, the `roundtable.*`
    config keys (inline parse/save + scalar registration in `config_fields.c`, §6),
    `MANUAL.md` section. Live-validate against the configured delegates (minimax /
@@ -777,16 +861,19 @@ are CLI-settable; the array participant list is not.
 ## §8 Risks / non-goals
 
 - **Cost.** Per *draft* round the call count is **N participants + 1 aggregator +
-  1 convergence judge + 1 keep-best scorer = N + 3** LLM calls, not just N — so a
-  round is meaningfully more than "N participants × turn cost," and the preflight
-  estimate (§3) must include the aggregator/judge/scorer overhead, not only the
-  participant fan-out. Over R rounds total cost is roughly R × (N + 3) turns.
-  Bounded by the **preflight** running cost cap (§3, refuses to start a round that
-  would cross the cap — not just post-hoc reporting), a low default `max_rounds =
-  3`, and early convergence stops. Where the judge and keep-best scorer can be
-  merged into one call (both score the round's artifact), do so to drop the
-  per-round overhead from +3 to +2. The CLI prints accumulated `cost_usd` like
-  `aggregate` does.
+  1 keep-best quality scorer = N + 2** LLM calls — the convergence check is now
+  **deterministic** (§3) so it is not a call in the common path (an optional
+  tiebreak judge adds at most one more, only in the ambiguous band). A round is
+  still meaningfully more than "N participants × turn cost," and the cost estimate
+  (§3) must include the aggregator + scorer overhead, not only the participant
+  fan-out. Over R rounds total cost is roughly R × (N + 2) turns. Bounded by the
+  running cost cap — the **post-hoc** check is the authoritative hard stop (it can
+  overshoot by at most one round × (N+2)); the **preflight** gate tightens that to
+  "refuse to start a round that would cross the cap" only once a realistic
+  per-provider cost replaces the flat constant (§3), warning rather than blocking
+  until then — plus a low default `max_rounds = 3`, the `roundtable_deadline_ms`
+  wall-clock cap, and early convergence stops. The CLI prints accumulated
+  `cost_usd` like `aggregate` does.
 - **Routing ambiguity — resolved, not assumed away.** The shipped ensemble does
   not route fan-out tasks to the configured reference names at all (the §0.1 bug).
   P0 fixes this with a per-task `agent` selector, a named-agent execution helper,
@@ -802,15 +889,15 @@ are CLI-settable; the array participant list is not.
   *regression*. The engine therefore scores each round and returns the
   **highest-scored** artifact (`best_round`), not the last (§4). This is default
   behavior, not an opt-in.
-- **No new RPC methods or fallback routes.** §0.2 deliberately avoids adding
-  `delegate.aggregate` / `delegate.roundtable` to the NDJSON dispatch table and
-  avoids `POST /v1/rpc`. The entry point is first-class V1 only, with OpenAPI
-  coverage, explicit `CAP_DELEGATE` route caps, and no
-  `v1-method-coverage-check` exclusion. It adds no new transport/protocol, no
-  long-lived service, no persistence, and no new provider integration.
-  Long-running aggregate/roundtable calls use the existing `/v1/runs/{id}`
-  status/result contract through a native worker rather than blocking the V1
-  listener or routing through RPC dispatch.
+- **Entry point is first-class V1; no `/v1/rpc` fallback.** The public surface is
+  `POST /v1/delegate/*` with OpenAPI coverage and explicit `CAP_DELEGATE`, never
+  the retired `POST /v1/rpc` bridge. Whether the route is backed by a `delegate.*`
+  dispatch `op` (Option A, + one documented coverage exclusion) or a native
+  `op == NULL` handler (Option B, zero exclusions) is the §0.2 decision, with
+  Option A recommended as the lower-risk reuse of the existing delegate family. No
+  new transport/protocol, no long-lived service, no persistence, no new provider
+  integration. Long-running aggregate/roundtable calls finalize through the
+  existing `/v1/runs/{id}` contract and never block the buffered listener.
 - **Not the self-correcting `agent_loop`.** That loop is *one* agent improving
   its own output; the roundtable is *many* agents collaborating. They share stop-
   condition machinery but are deliberately separate engines.
@@ -826,6 +913,8 @@ one engine, one config section, one CLI family, makes the (newly reachable)
 `aggregate` a provable special case after parity tests, and confines the new
 surface to the §0.2 entry-point wiring, the §0.1 routing fix, a loop,
 budget-bounded prompt assembly, and a convergence check. As a bonus,
-generalizing here forces the fix of three latent defects the shipped engine has
+generalizing here forces the fix of five latent defects the shipped engine has
 been quietly carrying — its complete unreachability (§0.2), the unrouted
-references (§0.1), and the per-call `srand` reseed (§4).
+references (§0.1), the dead per-task `temperature` on the parallel path (§0.1
+step 7, which also silently breaks `agent_vote`), the shared-`agent_t` data race
+under parallel fan-out (§0.1 step 4), and the per-call `srand` reseed (§4).
