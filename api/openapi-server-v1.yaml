@@ -589,6 +589,32 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /code/audit:
+    post:
+      summary: Graph-derived code-health audit (proxied to aimee-kb)
+      description: >-
+        Dead exports, import cycles, and content-hash clones derived from the
+        code graph (entity_edges) and code_embeddings.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                project: { type: string }
+                limit: { type: integer }
+      responses:
+        "200":
+          description: Audit bundle ({dead_exports, cycles, clones})
+          content:
+            application/json:
+              schema: { type: object }
+        "502":
+          description: Knowledge service (aimee-kb) unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /notes:
     get:
       summary: List notes (proxied to aimee-kb)
