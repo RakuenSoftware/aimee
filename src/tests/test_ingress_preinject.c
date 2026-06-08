@@ -130,7 +130,8 @@ static void test_format_code_block(void)
    assert(ingress_preinject_format_code_block(hits, 0) == NULL);
 
    snprintf(hits[0].file_path, sizeof(hits[0].file_path), "src/server/openai_chat.c");
-   snprintf(hits[0].snippet, sizeof(hits[0].snippet), "  static int   responses_stream_handler(\n\tconst char *body)");
+   snprintf(hits[0].snippet, sizeof(hits[0].snippet),
+            "  static int   responses_stream_handler(\n\tconst char *body)");
    snprintf(hits[1].file_path, sizeof(hits[1].file_path), "src/server/ingress_preinject.c");
    hits[1].snippet[0] = '\0'; /* no snippet -> just the file line */
 
