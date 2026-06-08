@@ -206,12 +206,13 @@ audit, `src/kb/kb_lab.c`). Do **not** reuse `lab`. Proposed verb: `aimee optimiz
 ```
 aimee optimize points
 aimee optimize baseline   --point kb_memory_retrieval_limit
-aimee optimize variants   --point kb_memory_retrieval_limit --register <artifact>
 aimee optimize replay     --point kb_memory_retrieval_limit   # off-policy, IPW
-aimee optimize run        --point kb_memory_retrieval_limit --suite code-graph-fusion
-aimee optimize compare    --baseline <id> --candidate <id>
-aimee optimize promote    --candidate <id> --guarded          # gated
 ```
+
+Future phases may add `variants`, `run`, `compare`, and `promote`, but they are
+not part of the shipped P1 surface. Until those phases land, the optimize command
+is an inspection/export surface for registered points, arm baselines, and replay
+logs.
 
 ### What this deliberately does **not** do
 
@@ -251,9 +252,11 @@ This is assembly of existing parts, but the assembly includes real API work at t
 - **P1** — close the reward loop for `kb_memory_retrieval_limit`; decision-point
   registry + reward config; fix the phantom export; `aimee optimize
   points|baseline|replay`. (Off-policy only; no new live traffic.)
-- **P2** — offline `aimee optimize run --suite code-graph-fusion`; `compare`.
-- **P3** — online exploration for `kb_memory_retrieval_limit`; `promote --guarded`
-  with rollback metadata.
+- **P2** — offline benchmark support; add `aimee optimize run --suite
+  code-graph-fusion` and `compare` when the benchmark adapter is implemented.
+- **P3** — online exploration for `kb_memory_retrieval_limit`; add
+  `promote --guarded` with rollback metadata when the promotion gate is
+  implemented.
 - **P4** — convert `kb_fusion_mode` from a static knob to a sampled decision; add
   `delegate_routing`; then fan out to `briefing_style`, `guardrail_strictness`
   (the last two are the optimisation surface exposed by the companion proposal,

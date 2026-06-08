@@ -1,4 +1,4 @@
-# Proposal: finish the first-class /v1 migration (retire the RPC vestiges, close the dispatch gaps)
+# Proposal: finish the first-class /v1 migration (retire the RPC vestiges, keep typed routes)
 
 - **State:** draft — pending review
 - **Author:** JBailes
@@ -7,11 +7,11 @@
   DB tier, no intelligence pass).
 - **Scope:** `src/cli_rpc_routes.inc` (rename the legacy `cli_v1_rpc_local`
   helper; resolver comments), `src/server/server_http*.c` + `src/headers/*.h`
-  (stale `/v1/rpc` doc/comment purge; CAPS trust-model wording), the kb
-  intelligence routes (`src/kb/http/kb_http.c` + `src/server` dispatch +
-  `cli_rpc_routes.inc`) that are not yet on the dispatch surface, the coverage
-  gates (`scripts/check-cli-v1-routes.py`, `check-v1-method-coverage.py`,
-  `check-kb-v1-coverage.py`), docs. No new long-lived service.
+  (stale `/v1/rpc` doc/comment purge; CAPS trust-model wording), and the
+  coverage gates (`scripts/check-cli-v1-routes.py`,
+  `check-v1-method-coverage.py`, `check-kb-v1-coverage.py`) so typed /v1 remains
+  the only route contract. No new long-lived service and no new dispatch/RPC
+  surface.
 
 ## Summary
 
@@ -19,7 +19,7 @@ The move from the synchronous `POST /v1/rpc` bridge to first-class /v1 routes is
 **functionally complete but not finished**. The CLI forward path is already
 strict-/v1 (`cli_rpc_forward` resolves every dispatch method to a generated
 route, enforced by the coverage gates; the standalone bridge endpoint is gone).
-What remains is **debt and gaps**, not transport work:
+What remains is **debt and policy clarity**, not transport work:
 
 - **(A) Vestiges.** The helper that *used* to be the bridge is still named
   `cli_v1_rpc_local` and several comments/headers still say "POST /v1/rpc" even
@@ -27,18 +27,16 @@ What remains is **debt and gaps**, not transport work:
   (`CAPS_ALL` "opens the /v1/rpc bridge") describes a thing that no longer
   exists. This misleads readers (it misled a contributor into thinking a new
   command needed "an RPC route").
-- **(B) Dispatch gaps.** A whole family of kb capabilities — the
-  `/v1/intelligence/*` routes (`calibration/readiness`, `demotion/check`,
-  `bandit/export`, `bandit/replay-record`) — exists only as **kb HTTP endpoints
-  with dead `cmd_*` handlers**. They were never added to the CLI dispatch
-  registry (`cli_rpc_routes.inc`), so they are unreachable from the thin client.
-  Their `cmd_kb` handlers (e.g. `kb_cmd_bandit`) are compiled but **not linked
-  into the thin client** (which is DB-/`kb_client`-free by design), so
-  `aimee kb bandit --export` returns "no typed server RPC route".
+- **(B) Route ownership drift.** Some kb intelligence capabilities are
+  intentionally kb-direct typed endpoints (`/v1/intelligence/*`) rather than
+  aimee-server dispatch methods. That split must stay explicit so future work
+  does not add `cli_rpc_routes.inc` rows or server dispatch arms merely to make a
+  command reachable. Thin-client surfaces should call the appropriate typed /v1
+  route directly.
 
 Finishing the migration means: delete the vestiges so "strict /v1" is the
-*stated* contract, and route the orphaned capabilities so nothing has to reach
-for a `cmd_*` handler or a non-/v1 path.
+*stated* contract, and document route ownership so nothing reaches for a `cmd_*`
+handler, a new dispatch method, or a non-/v1 path.
 
 ## Motivation
 
@@ -52,9 +50,8 @@ remove real foot-guns:
   `provider_catalog.c:342,358`, `server_http.c:315`, `config.h:894`,
   `cli_client.h:41`.)
 - A new thin-client command for an existing kb endpoint (e.g. `aimee optimize`
-  over `/v1/intelligence/bandit/export`) appears to need bespoke plumbing,
-  because the intelligence family was never given dispatch routes — when the fix
-  is the same `cli_rpc_routes.inc` registry entry every other command uses.
+  over `/v1/intelligence/bandit/export`) should use the typed kb V1 route
+  directly rather than creating an aimee-server dispatch proxy.
 
 ## Current state (verified)
 
@@ -66,8 +63,8 @@ remove real foot-guns:
   cli_workspace_serve, cmd_trigger, cli_mcp_serve, gateway_ctx, provider_catalog).
 - The `POST /v1/rpc` endpoint is retired (`server_http_routes.inc:262`,
   `server_http.c:895`).
-- **Orphaned dispatch gaps:** `kb_http.c:773–806` serves four `/v1/intelligence/*`
-  routes with no entry in `cli_rpc_routes.inc` and only dead `cmd_kb` handlers.
+- **Typed kb-direct routes:** `kb_http.c:773–806` serves `/v1/intelligence/*`
+  routes directly. These are not dispatch gaps; they are kb-owned V1 endpoints.
 
 ## Design
 
@@ -84,40 +81,38 @@ remove real foot-guns:
    bridge"; restate it in terms of per-method caps on the /v1 surface
    (`server_http.c:315`, `headers/server.h:89`, `config.h:894`).
 
-### Part B — close the dispatch gaps (the intelligence family)
+### Part B — make kb-direct ownership explicit
 
-For each orphaned `/v1/intelligence/*` capability, add the standard dispatch
-wiring so the thin client reaches it like any other command:
+For each `/v1/intelligence/*` capability, keep the V1 route typed and explicit:
 
-1. A registry row in `cli_rpc_routes.inc` (`{cmd, sub, method, …}`), its client
-   marshaller, and the server-side dispatch arm that calls the kb client.
-2. Regenerate `cli_v1_routes_gen.inc` via `scripts/gen-cli-v1-routes.py`; clear
-   any entry from the coverage gates' EXCLUDED set.
-3. Remove the now-redundant dead `cmd_*` handler (or reduce it to the thin
-   presenter the dispatch response feeds).
+1. Document whether the endpoint is kb-direct only or mirrored through
+   aimee-server for a specific reason.
+2. Add a gate that fails if kb-direct endpoints are accidentally surfaced through
+   `cli_rpc_routes.inc`, server dispatch arms, or `/v1/rpc` fallback text.
+3. Keep thin-client presenters small and route them to the typed V1 endpoint they
+   actually need.
 
-This unblocks the **`aimee optimize`** verb (companion proposal
-`optimization-surface.md`) and, with it, `kb calibrate` / `kb demote` over the
-thin client — all of which are currently unreachable for the same reason.
+This keeps **`aimee optimize`** and `aimee kb ...` surfaces on typed V1 APIs
+without adding RPC/dispatch methods.
 
 ### What this deliberately does **not** do
 
 - No change to the /v1 transport, the coverage-gate mechanism, or the async
   run-and-poll model — those are done and correct.
-- No reintroduction of a generic dispatch endpoint; every method stays a typed
-  route.
+- No new dispatch methods for kb intelligence endpoints; every operation stays a
+  typed V1 route.
 
 ## Phasing
 
 - **P1** — Part A rename + comment/doc purge + trust-model wording. Pure cleanup;
   gated by the existing coverage checks (must stay green).
-- **P2** — Part B for the bandit surface (`bandit/export`, `bandit/replay-record`)
-  — the slice that unblocks `aimee optimize`.
-- **P3** — Part B for `calibration/readiness` + `demotion/check`; retire the dead
-  `cmd_kb` intelligence handlers.
+- **P2** — Part B for the bandit surface (`bandit/export`, `bandit/replay-record`):
+  document kb-direct ownership and keep `aimee optimize` on typed V1 calls.
+- **P3** — Part B for `calibration/readiness` + `demotion/check`: document
+  kb-direct ownership and keep `aimee kb` presenters aligned with those routes.
 - **P4** — audit sweep: assert (via a gate) that every kb `/v1` route is either
-  in the dispatch registry or explicitly annotated kb-direct, so no future
-  capability can be added off-surface.
+  intentionally kb-direct or intentionally mirrored, and that neither case adds
+  `/v1/rpc` fallback or surprise dispatch surface.
 
 ## Risks
 

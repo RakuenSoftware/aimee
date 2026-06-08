@@ -24,11 +24,11 @@
   currently-dead `agent_task_t.temperature` a live per-task control — see §0.1),
   the entry-point wiring that does not exist today (§0.2):
   first-class `/v1/delegate/*` endpoints (`src/server/server_http_routes.inc`,
-  `api/openapi-server-v1.yaml`, route handlers, and thin-client V1 call sites for
-  `aimee delegate aggregate` / `roundtable`), backed either by the existing
-  `delegate.*` dispatch pattern (+ one documented `v1-method-coverage-check`
-  exclusion) or by a native `op == NULL` handler — a deliberate P0 choice, not a
-  fixed invariant (§0.2 decision box); never the retired `POST /v1/rpc` fallback;
+  `api/openapi-server-v1.yaml`, native route handlers, and thin-client V1 call
+  sites for `aimee delegate aggregate` / `roundtable`), backed by native
+  `op == NULL` handlers with explicit `CAP_DELEGATE` and async `/v1/runs/{id}`
+  finalization; never new `delegate.*` dispatch methods and never the retired
+  `POST /v1/rpc` fallback;
   optionally `src/server/server_mcp_delegate.c` (MCP tools) backed by
   the same server-side implementation;
   `src/cmd_agent_delegate.c` is the lint-only body template for the new
@@ -301,70 +301,38 @@ this: `test_delegate_ensemble.c` calls `delegate_ensemble_run` directly with a
 stubbed `agent_run_parallel`, exercising a code path no shipped binary reaches.
 
 **The missing wiring (P0 must add this before its value lands).** Add a
-first-class `/v1/delegate/*` surface. There are two valid ways to back it (see
-the decision box): mirror the existing dispatch-method family, or use a native
-`op == NULL` handler. The repo's standing op-parity direction
-(`v1-method-coverage-check` at zero exclusions, `POST /v1/rpc` retired) pulls
-toward the native option; the rest of the delegate family being
-dispatch-method-backed, *and the async run contract itself being dispatch-based*,
-pulls toward the method option. The public entry point either way is V1-first
-(never the retired `/v1/rpc`):
+first-class `/v1/delegate/*` surface backed by **native V1 handlers only**. The
+repo has retired `POST /v1/rpc`, keeps `v1-method-coverage-check` at zero
+exclusions, and this feature must not add new `delegate.*` dispatch methods as a
+shortcut. That means P0 must budget the native async seam explicitly:
+`rh_dispatch_op_async` is not reusable as-is because it injects a method and
+calls `loopback_rpc`, so aggregate/roundtable need a native enqueue/finalize
+helper that drives `/v1/runs/{id}` without `server_dispatch`.
 
-> **Decision — two viable entry-point shapes; choose at P0 with eyes open.**
-> There are two honest ways to give the ensemble a reachable entry point, and the
-> earlier "V1-only is a settled hard invariant" framing overstated the case. Both
-> are recorded so P0 chooses deliberately rather than by reflex.
->
-> **Option A — mirror the existing `delegate.*` dispatch family (lower risk).**
-> Every other `/v1/delegate/*` route is already dispatch-method-backed via an `op`
-> twin (`server_http_routes.inc:788-798`: `delegate.run` / `.launch` / `.status` /
-> `.log` / `.reply`), and the async run contract `rh_dispatch_op_async` *is itself
-> built on* injecting an NDJSON method and calling `loopback_rpc`. So adding
-> `delegate.aggregate` (+ `delegate.roundtable`) as dispatch methods with an async
-> `/v1/delegate/aggregate` route reuses the exact, proven pattern of the rest of
-> the family with the least new code. Its cost is one documented
-> `v1-method-coverage-check` exclusion (or method-table entry) — a small,
-> well-trodden policy concession.
->
-> **Option B — native `op == NULL` V1 handlers (keeps zero coverage exclusions).**
-> Honours the op-parity direction (no new dispatch methods, no `/v1/rpc`), at the
-> cost of building a **new** native async-run seam: `rh_dispatch_op_async` is not
-> reusable as-is (it injects a method + `loopback_rpc`), so P0 must add a native
-> enqueue/finalize helper that drives `/v1/runs/{id}` without `server_dispatch`.
-> That new seam is the single most code-heavy and least-tested piece of P0.
->
-> **Recommendation:** prefer **Option A** unless the zero-exclusions policy is
-> treated as inviolable. The point of P0 is to make a dead feature work with
-> minimal risk; spending the bulk of P0's novel, untested code on a bespoke async
-> mechanism purely to avoid one documented exclusion inverts that risk trade. If
-> the project owner rules that `v1-method-coverage-check` must stay at zero
-> exclusions, take Option B and budget P0 accordingly. Either way the public entry
-> point is a first-class `/v1/delegate/aggregate` route with OpenAPI coverage and
-> explicit `CAP_DELEGATE`; the only open question is whether it is backed by a
-> dispatch-method `op` twin (A) or a native handler (B).
+> **V1-only invariant.** The public entry point is first-class
+> `/v1/delegate/aggregate` and `/v1/delegate/roundtable` with OpenAPI coverage,
+> explicit `CAP_DELEGATE`, native `op == NULL` handlers, and async completion via
+> `/v1/runs/{id}`. Do **not** add `delegate.aggregate` / `delegate.roundtable`
+> dispatch methods, `cli_rpc_routes.inc` rows, server dispatch arms, coverage
+> exclusions, or any `/v1/rpc` fallback.
 
 - **V1 routes.**
   - Add `POST /v1/delegate/aggregate` and, once the loop exists,
     `POST /v1/delegate/roundtable` to `server_http_routes.inc`, plus matching
     paths in `api/openapi-server-v1.yaml`.
-  - **Option A (dispatch-backed):** give each row an `op` twin
-    (`delegate.aggregate` / `delegate.roundtable`) and route through
-    `rh_dispatch_op_async`, exactly like `delegate.launch`. Caps are then inherited
-    from `server_capability_for_method`. Record the one
-    `v1-method-coverage-check` exclusion (or method-table entry) this adds.
-  - **Option B (native handler):** leave `op == NULL` and call the server-side
-    implementation directly. Because `op == NULL` rows do **not** inherit
+  - Leave each row's `op == NULL` and call the server-side implementation
+    directly. Because `op == NULL` rows do **not** inherit
     `server_capability_for_method` (`server_http_routes.inc:1073`), the row must set
     `caps = CAP_DELEGATE` explicitly — a `caps = 0` initializer would make expensive
     LLM fan-out public and is a release blocker. Because `rh_dispatch_op_async` is
     not reusable as-is (it injects a method + calls `loopback_rpc`), P0 must add a
     native enqueue/finalize helper that drives `/v1/runs/{id}` without
     `server_dispatch`.
-  - **Both options:** add route-cap tests asserting both endpoints require
-    `CAP_DELEGATE` and that TCP access stays denied unless the bearer/tier is
-    allowed for delegate execution (`remote_writes=full`, as the existing delegate
-    routes). aggregate/roundtable are LLM-heavy and roundtable runs many calls, so
-    they must return a queued run handle and finalize status/result through the
+  - Add route-cap tests asserting both endpoints require `CAP_DELEGATE` and that
+    TCP access stays denied unless the bearer/tier is allowed for delegate
+    execution (`remote_writes=full`, as the existing delegate routes).
+    aggregate/roundtable are LLM-heavy and roundtable runs many calls, so they
+    must return a queued run handle and finalize status/result through the
     existing `/v1/runs/{id}` store; the buffered listener must **never** run the
     ensemble inline. The run moves queued → in_progress →
     completed/failed/cancelled and stores the final aggregate/roundtable JSON.
@@ -409,20 +377,18 @@ pulls toward the method option. The public entry point either way is V1-first
     `cli_rpc_routes.inc`.
 - **MCP tool (parallel, optional in P0).** Expose `aggregate` / `roundtable`
   MCP tools in `server_mcp_delegate.c`, but have them call the same server-side
-  helper the V1 route uses (the dispatch `op` under Option A, or the native worker
-  under Option B), not a third implementation.
+  helper the native V1 route uses, not a third implementation.
 - **Build + de-dup.** Register any new TU in `src/Makefile` (`SERVER_SRCS`) and,
   if applicable, the cmake profile; retire the lint-only `aggregate` block in
   `cmd_agent_delegate.c` (or keep it strictly as a platform CLI helper that
   builds the V1 request) so there is one live implementation, not two divergent
   ones.
-  Under **Option B**, add a negative route-surface check for P0: no new
-  `delegate.aggregate` / `delegate.roundtable` string may appear in
-  `src/server/server.c`, `src/cli_rpc_routes.inc`, or any `/v1/rpc` fallback. Under
-  **Option A**, that check is dropped; the new dispatch methods plus their one
-  documented coverage exclusion are the accepted surface instead. Either way the
-  public path is the first-class `/v1/delegate/*` routes plus optional MCP tools
-  backed by the same server-side helper, never `/v1/rpc`.
+  Add a negative route-surface check for P0: no new `delegate.aggregate` /
+  `delegate.roundtable` string may appear in `src/server/server.c`,
+  `src/cli_rpc_routes.inc`, server dispatch methods, coverage exclusions, or any
+  `/v1/rpc` fallback. The public path is the first-class `/v1/delegate/*` routes
+  plus optional MCP tools backed by the same server-side helper, never dispatch
+  methods and never `/v1/rpc`.
 
 Until this wiring exists, the §0.1 routing fix repairs a path with no callers.
 P0 therefore **wires the entry point and fixes the routing in the same phase**
@@ -440,7 +406,7 @@ the standalone P0 changeset is:
 
 | Defect (all verified in-tree) | Fix | Files |
 |---|---|---|
-| Engine unreachable — no shipped binary calls `delegate_ensemble_run` (§0.2) | `POST /v1/delegate/aggregate` (+ explicit `CAP_DELEGATE`) finalizing via `/v1/runs/{id}` + thin-client `aggregate` subcommand; dispatch-backed (Option A) or native handler (Option B) per the §0.2 decision; never `/v1/rpc` | `server_http_routes.inc`, `api/openapi-server-v1.yaml`, `server/*`, `cli_main.c`, `Makefile` |
+| Engine unreachable — no shipped binary calls `delegate_ensemble_run` (§0.2) | `POST /v1/delegate/aggregate` native `op == NULL` handler (+ explicit `CAP_DELEGATE`) finalizing via `/v1/runs/{id}` + thin-client `aggregate` subcommand; never dispatch methods and never `/v1/rpc` | `server_http_routes.inc`, `api/openapi-server-v1.yaml`, `server/*`, `cli_main.c`, `Makefile` |
 | All N references route to the one default agent (`role = NULL`, §0.1) | Add `const char *agent;` to `agent_task_t`; named-agent execution helper resolving like `aux_router.c:51-58`; clone `agent_t` before mutation; set `tasks[i].agent = ensemble_reference_models[i]` | `agent_types.h`, `agent_runtime.c`, `delegate_ensemble.c` |
 | `agent_task_t.temperature` is dead on the parallel path → zero diversity, also breaks `agent_vote` (§0.1 step 7) | Add internal `agent_run_ex(…, temperature, …)`; `agent_run` wraps it with `0.3`; `parallel_worker` passes `task->temperature` | `agent_exec.h`, `agent_runtime.c` (+ `posix/agent_runtime.c`) |
 | Pre-existing data race: `agent_run` mutates shared `cfg`-owned `agent_t` (`:165-167`, `:203-205`) under `agent_run_parallel`; today all tasks hit one default agent so N threads write one struct (also `agent_vote`) (§0.1 step 4) | Clone `agent_t` into local call state **unconditionally** before mutation; add a TSan concurrency test | `agent_runtime.c` |
@@ -790,11 +756,11 @@ are CLI-settable; the array participant list is not.
    - *Wiring (§0.2):* add `POST /v1/delegate/aggregate` (and the
      `/v1/delegate/roundtable` placeholder shape if useful) with OpenAPI coverage,
      explicit `CAP_DELEGATE`, async finalize through `/v1/runs/{id}`, and a CLI
-     builder that posts `{prompt,...}` and polls the run. Pick the backing per the
-     §0.2 decision box: **Option A** reuses the `delegate.*` dispatch pattern (+ one
-     documented coverage exclusion); **Option B** adds a native `op == NULL` handler
-     and the new enqueue/finalize seam. The buffered listener must never run the
-     ensemble inline either way; `/v1/rpc` is not used. Retire the lint-only
+     builder that posts `{prompt,...}` and polls the run. Use native
+     `op == NULL` handlers plus the new enqueue/finalize seam; do not add
+     `delegate.*` dispatch methods, coverage exclusions, `cli_rpc_routes.inc`
+     mappings, or any `/v1/rpc` fallback. The buffered listener must never run the
+     ensemble inline. Retire the lint-only
      `aggregate` block or keep it only as request-building helper code.
    - *Routing (§0.1):* thread an optional `agent` selector through
      `agent_task_t` and a shared named-agent execution helper, resolving named
@@ -807,11 +773,10 @@ are CLI-settable; the array participant list is not.
      engine → run result) that fails on today's tree — this is the test whose
      absence let both the unreachability and the §0.1 bug ship. Add route-cap
      tests (`CAP_DELEGATE`, TCP privilege denial), a non-blocking listener test, a
-     cancellation test, and surface tests matching the chosen option (Option B:
-     prove no `delegate.aggregate` / `delegate.roundtable` dispatch methods,
-     `cli_rpc_routes.inc` rows, or `/v1/rpc` fallback were added; Option A: assert
-     the new methods carry their one documented coverage exclusion and nothing
-     else regresses). Plus **un-stubbed routing tests**: three configured
+     cancellation test, and negative surface tests proving no
+     `delegate.aggregate` / `delegate.roundtable` dispatch methods,
+     `cli_rpc_routes.inc` rows, coverage exclusions, or `/v1/rpc` fallback were
+     added. Plus **un-stubbed routing tests**: three configured
      references → three distinct `agent_name` results,
      missing/disabled/unhealthy participants, duplicate names, role
      incompatibility, a temperature test (two tasks with different
@@ -889,14 +854,12 @@ are CLI-settable; the array participant list is not.
   *regression*. The engine therefore scores each round and returns the
   **highest-scored** artifact (`best_round`), not the last (§4). This is default
   behavior, not an opt-in.
-- **Entry point is first-class V1; no `/v1/rpc` fallback.** The public surface is
-  `POST /v1/delegate/*` with OpenAPI coverage and explicit `CAP_DELEGATE`, never
-  the retired `POST /v1/rpc` bridge. Whether the route is backed by a `delegate.*`
-  dispatch `op` (Option A, + one documented coverage exclusion) or a native
-  `op == NULL` handler (Option B, zero exclusions) is the §0.2 decision, with
-  Option A recommended as the lower-risk reuse of the existing delegate family. No
-  new transport/protocol, no long-lived service, no persistence, no new provider
-  integration. Long-running aggregate/roundtable calls finalize through the
+- **Entry point is first-class V1; no dispatch/RPC fallback.** The public surface
+  is `POST /v1/delegate/*` with OpenAPI coverage, explicit `CAP_DELEGATE`, native
+  `op == NULL` route handlers, and no new `delegate.*` dispatch methods or retired
+  `POST /v1/rpc` bridge. No new transport/protocol, no long-lived service, no
+  persistence, no new provider integration. Long-running aggregate/roundtable
+  calls finalize through the
   existing `/v1/runs/{id}` contract and never block the buffered listener.
 - **Not the self-correcting `agent_loop`.** That loop is *one* agent improving
   its own output; the roundtable is *many* agents collaborating. They share stop-
