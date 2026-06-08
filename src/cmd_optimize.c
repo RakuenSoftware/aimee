@@ -211,12 +211,103 @@ static int optimize_cmd_replay(int argc, char **argv, int json_output)
    return 0;
 }
 
+/* Read an entire file into a malloc'd NUL-terminated buffer (caller frees). */
+static char *optimize_slurp(const char *path)
+{
+   FILE *fp = fopen(path, "rb");
+   if (!fp)
+      return NULL;
+   fseek(fp, 0, SEEK_END);
+   long n = ftell(fp);
+   fseek(fp, 0, SEEK_SET);
+   if (n < 0)
+   {
+      fclose(fp);
+      return NULL;
+   }
+   char *buf = malloc((size_t)n + 1);
+   if (!buf)
+   {
+      fclose(fp);
+      return NULL;
+   }
+   size_t got = fread(buf, 1, (size_t)n, fp);
+   fclose(fp);
+   buf[got] = '\0';
+   return buf;
+}
+
+/* aimee optimize replay-record --point <p> --file <f>: record an off-policy
+ * replay result (output of tools/bandit_replay.py) as a benchmark_trace. */
+static int optimize_cmd_replay_record(int argc, char **argv, int json_output)
+{
+   const char *point = optimize_arg_point(argc, argv);
+   const char *file = NULL;
+   for (int i = 0; i < argc; i++)
+      if (strcmp(argv[i], "--file") == 0 && i + 1 < argc)
+         file = argv[i + 1];
+   if (!point || !file)
+   {
+      fprintf(stderr, "usage: aimee optimize replay-record --point <decision_point> --file <result.json>\n");
+      return 2;
+   }
+   char *raw = optimize_slurp(file);
+   if (!raw)
+   {
+      fprintf(stderr, "optimize: cannot read %s\n", file);
+      return 1;
+   }
+   cJSON *result = cJSON_Parse(raw);
+   free(raw);
+   if (!cJSON_IsObject(result))
+   {
+      cJSON_Delete(result);
+      fprintf(stderr, "optimize: %s must contain a JSON object (replay-tool output)\n", file);
+      return 1;
+   }
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "method", "optimize.replay_record");
+   cJSON_AddStringToObject(req, "decision_point", point);
+   cJSON_AddItemToObject(req, "result", result);
+   cJSON *resp = cli_v1_dispatch_local(req, 30000);
+   cJSON_Delete(req);
+   if (!resp)
+   {
+      fprintf(stderr, "optimize: no response from aimee-server\n");
+      return 1;
+   }
+
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
+   if (json_output)
+   {
+      optimize_print_json(resp);
+   }
+   else if (ok)
+   {
+      cJSON *aid = cJSON_GetObjectItemCaseSensitive(resp, "artifact_id");
+      printf("recorded benchmark_trace %s for decision_point=%s\n",
+             cJSON_IsString(aid) ? aid->valuestring : "?", point);
+   }
+   else
+   {
+      cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      fprintf(stderr, "optimize replay-record: %s\n",
+              cJSON_IsString(msg) ? msg->valuestring : "unknown error");
+   }
+   cJSON_Delete(resp);
+   return ok ? 0 : 1;
+}
+
 static void optimize_usage(void)
 {
-   fprintf(stderr, "Usage: aimee optimize <subcommand> [options]\n\nSubcommands:\n"
-                   "  points                       List registered decision points\n"
-                   "  baseline --point <name>      Show current arm posteriors for a point\n"
-                   "  replay --point <name>        Emit a point's closed-decision log for replay\n");
+   fprintf(stderr,
+           "Usage: aimee optimize <subcommand> [options]\n\nSubcommands:\n"
+           "  points                              List registered decision points\n"
+           "  baseline --point <name>             Show current arm posteriors for a point\n"
+           "  replay --point <name>               Emit a point's closed-decision log for replay\n"
+           "  replay-record --point <name> --file <f>  Record a replay result (benchmark_trace)\n");
 }
 
 int cmd_optimize_run(int argc, char **argv, int json_output)
@@ -233,6 +324,8 @@ int cmd_optimize_run(int argc, char **argv, int json_output)
       return optimize_cmd_baseline(argc - 1, argv + 1, json_output);
    if (strcmp(sub, "replay") == 0)
       return optimize_cmd_replay(argc - 1, argv + 1, json_output);
+   if (strcmp(sub, "replay-record") == 0)
+      return optimize_cmd_replay_record(argc - 1, argv + 1, json_output);
    if (strcmp(sub, "--help") == 0 || strcmp(sub, "-h") == 0 || strcmp(sub, "help") == 0)
    {
       optimize_usage();
