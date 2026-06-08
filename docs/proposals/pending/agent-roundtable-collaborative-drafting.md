@@ -13,16 +13,17 @@
   result), `src/headers/agent_types.h` + `src/server/agent_runtime.c` (thread a
   per-task participant selector through `agent_task_t` → `parallel_worker` and a
   shared named-agent execution helper so both parallel fan-out and sequential
-  turns route to distinct configured agents — see §0.1),
+  turns route to distinct configured agents, plus threading `temperature` through
+  `agent_run`/`parallel_worker` so the currently-dead `agent_task_t.temperature`
+  becomes a live per-task control — see §0.1),
   the entry-point wiring that does not exist today (§0.2):
-  `src/cli_main.c` + `src/cli_rpc_routes.inc` (recognize the subcommands, add
-  routes + `marshal_delegate_aggregate`/`marshal_delegate_roundtable`),
-  `src/server/server.c` (dispatch-table entries) and a new server-linked TU
-  `src/server/delegate_ensemble_rpc.c` for `handle_delegate_aggregate` /
-  `handle_delegate_roundtable` (registered in `src/Makefile` `SERVER_SRCS`),
-  optionally `src/server/server_mcp_delegate.c` (MCP tools) and the `/v1`
-  surface (`server_http_routes.inc`, `api/openapi-server-v1.yaml`,
-  `cli_v1_routes_gen.inc`) or a documented method-coverage exclusion;
+  first-class `/v1` endpoints only (`src/server/server_http_routes.inc`,
+  `api/openapi-server-v1.yaml`, native V1 route handlers, and thin-client V1
+  call sites for `aimee delegate aggregate` / `roundtable`); no
+  `src/cli_rpc_routes.inc` rows, no `src/server/server.c` dispatch-table
+  methods, no `v1-method-coverage-check` exclusion, and no `POST /v1/rpc`
+  fallback; optionally `src/server/server_mcp_delegate.c` (MCP tools) backed by
+  the same server-side implementation;
   `src/cmd_agent_delegate.c` is the lint-only body template for the new
   `roundtable` subcommand beside the existing (also lint-only) `aggregate` block,
   config plumbing
@@ -35,8 +36,8 @@
   guarded execution path, the per-task provider/model resolution
   precedent in `src/server/aux_router.c` (reused as the routing seam), unit tests
   (`src/tests/test_delegate_ensemble.c` sibling, plus an un-stubbed routing test),
-  docs (`MANUAL.md`). No new long-lived service, no new RPC transport, no new
-  provider integration.
+  docs (`MANUAL.md`). No new long-lived service, no new RPC route or transport,
+  no new provider integration.
 
 ## Goal
 
@@ -159,9 +160,22 @@ routing — there is no per-task agent/model/provider field. With `role == NULL`
 for all N tasks. `ensemble_reference_models` is consumed only as display labels in
 `build_synthesis_prompt` (`:216-217`). **Net effect: today's "ensemble of diverse
 reference models" is one agent answering the same prompt N times** — the only
-variation is sampling noise. (The sibling fan-out in `agent_coord.c:497-501` has
-the same `role`-only limitation but at least perturbs `temperature` per task; the
-ensemble does not even do that.)
+variation is sampling noise.
+
+**There is not even temperature diversity (a second, deeper defect).** A natural
+assumption is that the fan-out at least varies sampling temperature per task. It
+does not, and cannot today: `agent_run` (`agent_exec.h:27`,
+`agent_runtime.c:131`) has **no temperature parameter** at all, and
+`parallel_worker` (`agent_runtime.c:386-391`) calls it without passing
+`task->temperature`. The call path hard-codes `0.3` (`agent_runtime.c:171/173`).
+So `agent_task_t.temperature` is a **dead field on the parallel execution path** —
+every parallel task runs the same agent at the same fixed temperature. This also
+means the sibling vote fan-out in `agent_coord.c:497-501`, which sets
+`tasks[i].temperature = 0.3 + 0.1*i` ("slight variation"), is a **no-op**:
+`agent_vote()` has the identical illusion-of-diversity bug. Net: today's ensemble
+has **zero** diversity — not by role, not by temperature — so the synthesis pass
+reconciles N near-duplicate answers. P0 therefore also plumbs temperature through
+the parallel path (see fix step 7), which repairs `agent_vote` at the same time.
 
 **The fix (committed in P0, not deferred):**
 
@@ -195,12 +209,31 @@ ensemble does not even do that.)
    configured references → three distinct `agent_name` results) instead of
    stubbing it away, plus negative cases for missing, disabled, unhealthy,
    duplicate, and role-incompatible participants.
+7. **Plumb temperature through the parallel path (repairs `agent_vote` too).**
+   Give `agent_run` a temperature parameter (or a per-task override read from
+   `task->temperature`) and have `parallel_worker` pass `task->temperature`
+   instead of dropping it; default to the current `0.3` when the field is `0`/unset
+   so existing single-agent callers are unchanged. This turns the already-present
+   but dead `agent_task_t.temperature` into a real per-task sampling control,
+   which (a) gives the ensemble a cheap orthogonal diversity axis even before
+   distinct agents are configured and (b) makes `agent_coord.c:501`'s existing
+   `0.3 + 0.1*i` perturbation actually take effect, fixing `agent_vote()`'s
+   matching illusion-of-diversity bug. A unit test asserts two tasks with
+   different `temperature` reach the request builder with different values.
 
-The existing aggregate engine path stays byte-identical because
-`tasks[i].agent = NULL` (the new default) reproduces the current route. The
-roundtable then builds on real multi-agent fan-out instead of an illusion of one.
-(Note "byte-identical *engine* behavior," not "still works for users" — per §0.2
-the aggregate command has no reachable caller today regardless of this fix.)
+**Routing fix changes the aggregate output — by design.** Note carefully: once
+fix step 5 sets `tasks[i].agent = ensemble_reference_models[i]`, the aggregate
+path **no longer produces the same text** it does today — it now fans out to N
+distinct agents instead of one agent N times. That is the whole point. So the
+"parity" guarantee for the existing public path is **engine-mechanics parity**
+(`success` / `degraded` / `cost_capped` / `cost_usd` accounting, buffer/size
+limits, aggregation max-tokens, the default-route path when `task->agent ==
+NULL`), **not** response-text parity. The default-route path *is* byte-identical
+when `tasks[i].agent == NULL`; the configured-reference path is intentionally
+different and better. (See §4 — the golden-parity tests verify mechanics, not
+text.) "Byte-identical *engine* behavior" never meant "still works for users":
+per §0.2 the aggregate command has no reachable caller today regardless of this
+fix.
 
 ## §0.2 Worse than mis-routed: the feature is unreachable (wire it first)
 
@@ -245,56 +278,127 @@ This is why the §0.1 routing test never caught the §0.1 bug *and* never caught
 this: `test_delegate_ensemble.c` calls `delegate_ensemble_run` directly with a
 stubbed `agent_run_parallel`, exercising a code path no shipped binary reaches.
 
-**The missing wiring (P0 must add this before its value lands).** Mirror the
-existing typed `delegate.*` RPC family rather than overloading the bare
-`delegate` method:
+**The missing wiring (P0 must add this before its value lands).** Add a
+first-class `/v1` surface, not a new RPC method family. The repo has completed
+op-parity with `v1-method-coverage-check` reporting zero exclusions, and
+`server_http_routes.inc` explicitly says `POST /v1/rpc` was retired. Therefore
+P0 must not add `delegate.aggregate` / `delegate.roundtable` to
+`server_dispatch_table[]`, must not add rows to `cli_rpc_routes.inc`, and must
+not add a method-coverage exclusion. The public entry point is V1 only:
 
+> **Decision — V1-only, not the `delegate.*` RPC family (settled, with rationale).**
+> An earlier draft of this proposal recommended mirroring the existing typed
+> `delegate.*` RPC family (`delegate.launch` / `delegate.status` / `delegate.log`
+> at `cli_rpc_routes.inc:235-243`). That is the *more locally consistent* option —
+> the rest of the delegate family already lives on the dispatch table, and the
+> bare `{"delegate", NULL, …, 900000}` catch-all already tolerates long calls. It
+> is recorded here as the rejected alternative so the choice is not re-litigated.
+> **V1-only wins on policy:** the repo's standing direction is op-parity with *no
+> new RPC methods or `/v1/rpc` fallbacks* (`v1-method-coverage-check` reports zero
+> exclusions; `POST /v1/rpc` is retired). Adding two new NDJSON dispatch methods
+> would reverse that direction for one command family and require a coverage
+> exclusion or method-table churn. The cost of V1-only is the extra async
+> `/v1/runs/{id}` plumbing (below); the benefit is no new RPC surface, OpenAPI
+> coverage for free, and one server-side implementation reachable from V1, MCP,
+> and the thin client alike. If a reviewer prefers the RPC-family route, that is a
+> one-section swap, but it must be decided *before* P0 lands — not left split
+> between the committed text and the working tree, as this proposal was during
+> review.
+
+- **V1 routes.**
+  - Add `POST /v1/delegate/aggregate` and, once the loop exists,
+    `POST /v1/delegate/roundtable` to `server_http_routes.inc` with native route
+    handlers, plus matching paths in `api/openapi-server-v1.yaml`.
+  - Do **not** set an `op` twin on these rows. They are not NDJSON dispatch
+    methods; they call the server-side ensemble/roundtable implementation
+    directly.
+  - Because aggregate/roundtable are LLM-heavy and roundtable can run many calls,
+    return a queued run handle and finalize status/result through the existing
+    `/v1/runs/{id}` store, mirroring the `rh_dispatch_op_async` contract without
+    routing through `server_dispatch`. The buffered listener must not run the
+    ensemble inline.
+- **Server implementation.**
+  - Add a server-linked implementation TU such as
+    `src/server/delegate_ensemble_v1.c` (registered in `SERVER_SRCS`), or place
+    the handlers beside the other native V1 handlers if that fits the local
+    organization better.
+  - The handler body is the `cmd_agent_delegate.c:504-535` block rewritten as
+    native V1 work: read `prompt`/opts from the JSON body, load config +
+    `agent_config_t` server-side, gate on `ensemble_enabled` (and
+    `roundtable_enabled` if added), call `delegate_ensemble_run` /
+    `delegate_roundtable_run`, and store/return `artifact` or `response` plus
+    `degraded` / `cost_capped` / `cost_usd` / `rounds_run` / `converged` in the
+    run result.
+  - Apply the same `persona`/prompt-length guards intentionally (the ensemble
+    prompt is the *task*, so the `<20` guard is appropriate; just make the error
+    name the ensemble, not a generic delegate).
 - **Thin client.**
   - Add `aggregate` (and later `roundtable`) to `delegate_arg_is_subcommand`
     (`cli_main.c:485`) so usage/help and subcommand detection work.
-  - Add route entries in `cli_rpc_routes.inc` beside the other `delegate.*`
-    rows (≈ `:235-243`):
-    `{"delegate", "aggregate",  "delegate.aggregate",  marshal_delegate_aggregate,  NULL, <timeout>}`
-    and `{"delegate", "roundtable", "delegate.roundtable", marshal_delegate_roundtable, NULL, <timeout>}`.
-  - Add `marshal_delegate_aggregate` / `marshal_delegate_roundtable` that put
-    **positional[0] → `prompt`** (not `role`, the bug above) and fold the flags
-    (`--mode`, `--turns`, `--rounds`, `--apply`) into the request — modeled on
-    `marshal_delegate` (`:1665`) minus the role-positional mapping.
-- **Server.**
-  - Register handlers in the dispatch table beside `{"delegate", handle_delegate}`
-    (`src/server/server.c:1131`):
-    `{"delegate.aggregate", handle_delegate_aggregate}` and
-    `{"delegate.roundtable", handle_delegate_roundtable}`.
-  - Implement those handlers **in a server-linked TU** (a new
-    `src/server/delegate_ensemble_rpc.c` added to `SERVER_SRCS`, or inside
-    `server_compute.c`). The body is the `cmd_agent_delegate.c:504-535` block
-    rewritten as an RPC handler: read `prompt`/opts from the request, load
-    config + `agent_config_t` server-side, gate on `ensemble_enabled`
-    (and `roundtable_enabled`), call `delegate_ensemble_run` /
-    `delegate_roundtable_run` (both already server-linked), and return the
-    response plus `degraded` / `cost_capped` / `cost_usd` / `rounds_run` /
-    `converged` as the RPC result.
-  - Apply the same `persona`/prompt-length guards intentionally (the ensemble
-    prompt is the *task*, so the `<20` guard is appropriate; just make the
-    error name the ensemble, not a generic delegate).
+  - Add a small CLI-side V1 request builder for these subcommands that puts
+    **positional[0] -> `prompt`** (not `role`, the bug above) and folds flags
+    (`--mode`, `--turns`, `--rounds`, `--apply`) into the JSON body.
+  - POST to `/v1/delegate/aggregate` or `/v1/delegate/roundtable`, then poll
+    `/v1/runs/{id}` until terminal and print the stored result. This is a native
+    V1 call path, not a `cli_rpc_routes.inc` method mapping.
 - **MCP tool (parallel, optional in P0).** Expose `aggregate` / `roundtable`
-  MCP tools in `server_mcp_delegate.c` mirroring `handle_mcp_delegate_call`, so
-  IDE/agent callers can invoke the ensemble too.
-- **`/v1` coverage.** The repo gates every RPC method on having a first-class
-  `/v1` route or a documented exclusion (`v1-method-coverage-check`,
-  `src/Makefile`). `delegate.aggregate` / `delegate.roundtable` are long-running
-  and may stream, so either add `/v1` routes (`server_http_routes.inc`,
-  `api/openapi-server-v1.yaml`, `cli_v1_routes_gen.inc`) or register a
-  documented exclusion exactly as the foreground `delegate` method does.
+  MCP tools in `server_mcp_delegate.c`, but have them call the same native
+  server-side implementation as the V1 handlers rather than inventing a separate
+  RPC method.
 - **Build + de-dup.** Register any new TU in `src/Makefile` (`SERVER_SRCS`) and,
   if applicable, the cmake profile; retire the lint-only `aggregate` block in
-  `cmd_agent_delegate.c` (or keep it strictly as the platform CLI shim) so there
-  is one live copy, not two divergent ones.
+  `cmd_agent_delegate.c` (or keep it strictly as a platform CLI helper that
+  builds the V1 request) so there is one live implementation, not two divergent
+  ones.
 
 Until this wiring exists, the §0.1 routing fix repairs a path with no callers.
 P0 therefore **wires the entry point and fixes the routing in the same phase**
-(§7), with an end-to-end reachability test (CLI/RPC → engine → output) that
+(§7), with an end-to-end reachability test (CLI/V1 → engine → run result) that
 would have caught both this gap and the §0.1 bug.
+
+## §0.3 Standalone fix: P0 ships on its own, ahead of the roundtable
+
+P0 is **not** scaffolding for the roundtable — it is a self-contained repair of a
+shipped, marked-Done feature that does not work, and it should be reviewable and
+mergeable **without committing to any of §1–§9**. The roundtable (P1+) builds on
+it, but P0 stands alone and delivers value the day it lands: `aimee delegate
+aggregate` runs a real Mixture-of-Agents ensemble for the first time. Concretely,
+the standalone P0 changeset is:
+
+| Defect (all verified in-tree) | Fix | Files |
+|---|---|---|
+| Engine unreachable — no shipped binary calls `delegate_ensemble_run` (§0.2) | Native `POST /v1/delegate/aggregate` + server impl + thin-client `aggregate` subcommand, async via `/v1/runs/{id}` | `server_http_routes.inc`, `api/openapi-server-v1.yaml`, new `server/delegate_ensemble_v1.c`, `cli_main.c`, `Makefile` |
+| All N references route to the one default agent (`role = NULL`, §0.1) | Add `const char *agent;` to `agent_task_t`; named-agent execution helper resolving like `aux_router.c:51-58`; clone `agent_t` before mutation; set `tasks[i].agent = ensemble_reference_models[i]` | `agent_types.h`, `agent_runtime.c`, `delegate_ensemble.c` |
+| `agent_task_t.temperature` is dead on the parallel path → zero diversity, also breaks `agent_vote` (§0.1 step 7) | Thread `temperature` through `agent_run`/`parallel_worker` | `agent_exec.h`, `agent_runtime.c` |
+| `srand(time(NULL))` per call clobbers global RNG, collides within a second (§4) | Seed once at process start or thread `rand_r` state through `shuffle_indices` | `delegate_ensemble.c` |
+| Silent truncation: fixed `response[8192]` / `synthesis_buf[16384]` (§3) | Heap-grown result for the new path; keep the fixed buffers only on the frozen legacy path until parity is proven | `delegate_ensemble.h`, `delegate_ensemble.c` |
+| Bug shipped unseen because the test stubs `agent_run_parallel` (§0.1 step 6) | Un-stubbed routing test + an end-to-end reachability test (CLI/V1 → engine → run result) | `tests/test_delegate_ensemble.c`, `tests/Rules.mk` |
+
+Everything from §1 onward (multi-round loop, draft/review modes, sequential
+turns, convergence judging, keep-best, config keys) is **strictly additive on top
+of a working P0** and can be staged or dropped without reopening the P0 fix. A
+reviewer who only wants the bug fixed can approve P0 and stop there.
+
+## §0.4 Process gap: how a never-implemented feature was marked "Done"
+
+Worth fixing alongside the code, because it is the reason this shipped: the MoA
+entry in `docs/PROPOSALS.md` was marked **Done** while no binary ever called the
+engine, and nothing flagged it. Two cheap guardrails would have caught it:
+
+- **A reachability/coverage smell test.** A feature whose only non-test caller is
+  a lint-only `cmd_*.c` (the legacy, unlinked CLI layer — see the project note
+  that `cmd_*` files are lint-only under the thin-client split) is, by
+  definition, unreachable. A CI check that flags exported "feature" entry points
+  with no caller in any shipped-binary object set would have caught this before
+  the "Done" label.
+- **A proposal-index link check.** `PROPOSALS.md`'s MoA entry linked
+  `proposals/done/mixture-of-agents-ensemble-delegate.md`, a file that does not
+  exist (and 45 of its 47 links resolve to nothing — `done/` proposals are
+  delisted as files by convention). That convention makes a genuinely-missing or
+  mistyped link invisible. A check that (a) every `pending/` and `accepted/` link
+  resolves and (b) every `done/` entry that *claims* a file actually has one would
+  keep the index honest. This is out of scope for the code fix but is logged here
+  as the root-cause control.
 
 ## §1 What a roundtable is
 
@@ -396,6 +500,21 @@ Borrowed from `agent_loop_t` (`agent_exec.h:122`), not reinvented:
   default; a literal `0` cannot be treated as a zero-cost turn. The post-call
   accounting still runs to true up the real spend. Either way, cap handling
   returns the **best artifact so far** (§4, keep-best) with `cost_capped = 1`.
+  - **The cost model must improve, or preflight over-blocks (review finding).**
+    `ENSEMBLE_COST_PER_TOKEN` is a single flat `$15/MTok` constant
+    (`delegate_ensemble.c:19`) that bears no relation to the actual delegates
+    (minimax / mimo-2.5 / mistral). Worse, a *worst-case* preflight that multiplies
+    by `effective_per_task_max_tokens` is pathological on these providers: their
+    advertised `max_tokens` run to 131k–524k, so `participants × max_tokens ×
+    flat-rate` will exceed any sane `ensemble_max_cost_usd` and **refuse to start
+    rounds that would actually be cheap** (real completions are a small fraction of
+    `max_tokens`). P0/P1 must therefore (a) source per-provider/per-token cost from
+    the model-capability registry rather than one global constant, and (b) base the
+    preflight estimate on a realistic expected completion size (e.g. a configurable
+    `roundtable_preflight_tokens` budget or an EWMA of observed completion tokens),
+    treating the raw `max_tokens` ceiling as an upper bound for logging only. Until
+    a real per-provider cost exists, the preflight gate should default to *warn*,
+    not *block*, so it cannot strand a valid run.
 - **Size ceiling — bounded heap artifact, summarize-forward, no silent truncation.**
   Today the result is a fixed `char response[8192]` (`delegate_ensemble.h:12`) and
   synthesis a `char synthesis_buf[16384]` (`:215`), both silently
@@ -468,10 +587,15 @@ the fix; golden parity holds because the shuffle distribution is unchanged.
 
 Keep `delegate_ensemble_run` behavior frozen in the first implementation. Extract
 shared helpers where useful, but do not replace the public aggregate path until
-golden parity tests prove the same response text, `success`, `degraded`,
+golden parity tests prove the **engine mechanics** — `success`, `degraded`,
 `cost_capped`, response-size limit, aggregation max tokens, and `cost_usd`
-semantics for the existing one-shot cases. Once that is proven, `aggregate` can
-be documented as the one-round roundtable special case.
+semantics — for the existing one-shot cases. **Parity is on mechanics, not
+response text:** the P0 routing fix (§0.1 step 5) deliberately changes the
+aggregate output from "one default agent N times" to "N distinct configured
+agents," so asserting identical synthesis text would contradict the fix. Text
+parity is asserted only for the unchanged default-route path (`task->agent ==
+NULL`). Once mechanics parity is proven, `aggregate` can be documented as the
+one-round roundtable special case.
 
 `build_synthesis_prompt` may be refactored into a parameterized prompt builder so
 the "you are a synthesis aggregator" framing (draft merge) and a new "you are
@@ -481,8 +605,8 @@ permit changing the implementation.
 
 ## §5 CLI
 
-A new subcommand built on the §0.2 wiring (thin-client route +
-`marshal_delegate_roundtable` + server `handle_delegate_roundtable`), using the
+A new subcommand built on the §0.2 native V1 wiring (CLI JSON body builder +
+`POST /v1/delegate/roundtable` + `/v1/runs/{id}` polling), using the
 `cmd_agent_delegate.c:504` block only as a body template — **not** as the live
 path, since that file is lint-only:
 
@@ -497,7 +621,7 @@ aimee delegate roundtable "<task or path to artifact>" \
   there is one "multi-agent is on" switch).
 - Prints the final artifact; on `--mode review` prints the consolidated review;
   emits the same degrade/cost warnings the engine produces, plus `rounds_run` /
-  `converged`, marshalled from the RPC result.
+  `converged`, read from the V1 run result.
 - `aimee delegate aggregate` becomes a **genuinely working** one-shot alias for
   the first time once §0.2 lands (it does not work today), and stays the
   documented `rounds==1` special case.
@@ -555,17 +679,22 @@ are CLI-settable; the array participant list is not.
 1. **P0 — wire the entry point (§0.2) + fix the routing bug (§0.1) + the `srand`
    reseed.** These ship together because the routing fix is invisible without a
    reachable caller.
-   - *Wiring (§0.2):* add the `delegate.aggregate` (and `delegate.roundtable`
-     placeholder) thin-client route + marshal (`prompt` as positional, not
-     `role`), the server dispatch-table entries, and a server-linked
-     `handle_delegate_aggregate` that calls `delegate_ensemble_run`; add the
-     `/v1` route or documented exclusion; retire the lint-only `aggregate` block.
+   - *Wiring (§0.2):* add native `/v1/delegate/aggregate` (and the
+     `/v1/delegate/roundtable` placeholder shape if useful) with OpenAPI coverage,
+     a server-linked V1 worker that calls `delegate_ensemble_run`, and a CLI
+     builder that posts `{prompt,...}` to V1 and polls `/v1/runs/{id}`. Do not add
+     `delegate.aggregate` / `delegate.roundtable` dispatch-table methods, do not
+     add `cli_rpc_routes.inc` rows, and do not add a method-coverage exclusion.
+     Retire the lint-only `aggregate` block or keep it only as V1 request-building
+     helper code.
    - *Routing (§0.1):* thread an optional `agent` selector through
      `agent_task_t` and a shared named-agent execution helper, resolving named
      agents the way `aux_router.c:51-58` already does; point each ensemble
-     fan-out task at `ensemble_reference_models[i]`. Move `srand` out of the
-     per-call path.
-   - *Tests:* an **end-to-end reachability test** (CLI/RPC → engine → output)
+     fan-out task at `ensemble_reference_models[i]`. Thread `temperature` through
+     `agent_run`/`parallel_worker` so the dead `agent_task_t.temperature` field
+     becomes live (also repairs `agent_vote`, §0.1 step 7). Move `srand` out of
+     the per-call path.
+   - *Tests:* an **end-to-end reachability test** (CLI/V1 → engine → run result)
      that fails on today's tree — this is the test whose absence let both the
      unreachability and the §0.1 bug ship. Plus **un-stubbed routing tests**:
      three configured references → three distinct `agent_name` results,
@@ -609,11 +738,17 @@ are CLI-settable; the array participant list is not.
 
 ## §8 Risks / non-goals
 
-- **Cost.** R rounds × N participants × turn cost is roughly R× a single MoA
-  call. Bounded by the **preflight** running cost cap (§3, refuses to start a round
-  that would cross the cap — not just post-hoc reporting), a low default
-  `max_rounds = 3`, and early convergence stops. The CLI prints accumulated
-  `cost_usd` like `aggregate` does.
+- **Cost.** Per *draft* round the call count is **N participants + 1 aggregator +
+  1 convergence judge + 1 keep-best scorer = N + 3** LLM calls, not just N — so a
+  round is meaningfully more than "N participants × turn cost," and the preflight
+  estimate (§3) must include the aggregator/judge/scorer overhead, not only the
+  participant fan-out. Over R rounds total cost is roughly R × (N + 3) turns.
+  Bounded by the **preflight** running cost cap (§3, refuses to start a round that
+  would cross the cap — not just post-hoc reporting), a low default `max_rounds =
+  3`, and early convergence stops. Where the judge and keep-best scorer can be
+  merged into one call (both score the round's artifact), do so to drop the
+  per-round overhead from +3 to +2. The CLI prints accumulated `cost_usd` like
+  `aggregate` does.
 - **Routing ambiguity — resolved, not assumed away.** The shipped ensemble does
   not route fan-out tasks to the configured reference names at all (the §0.1 bug).
   P0 fixes this with a per-task `agent` selector, a named-agent execution helper,
@@ -629,14 +764,13 @@ are CLI-settable; the array participant list is not.
   *regression*. The engine therefore scores each round and returns the
   **highest-scored** artifact (`best_round`), not the last (§4). This is default
   behavior, not an opt-in.
-- **New typed RPC methods, but not a new transport or service.** §0.2 adds two
-  typed methods (`delegate.aggregate`, `delegate.roundtable`) to the existing
-  RPC dispatch and `/v1` surface — the same kind of seam the rest of the
-  `delegate.*` family already uses. It adds no new transport/protocol, no
-  long-lived service, no persistence, and no new background job type. A
-  roundtable is a single foreground `delegate`-family invocation. (The earlier
-  claim that this "adds no RPC" was wrong: the feature has *no* reachable RPC
-  today, which is exactly the gap §0.2 closes.)
+- **No new RPC methods or fallback routes.** §0.2 deliberately avoids adding
+  `delegate.aggregate` / `delegate.roundtable` to the NDJSON dispatch table and
+  avoids `POST /v1/rpc`. The entry point is first-class V1 only, with OpenAPI
+  coverage and no `v1-method-coverage-check` exclusion. It adds no new
+  transport/protocol, no long-lived service, no persistence, and no new
+  provider integration. Long-running aggregate/roundtable calls use the existing
+  `/v1/runs/{id}` status/result contract rather than blocking the V1 listener.
 - **Not the self-correcting `agent_loop`.** That loop is *one* agent improving
   its own output; the roundtable is *many* agents collaborating. They share stop-
   condition machinery but are deliberately separate engines.
