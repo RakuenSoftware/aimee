@@ -352,7 +352,7 @@ int handle_session_start(int json_output)
     * immediately once the background thread is launched (typically <50 ms).
     * If it doesn't, soft-fail after 10 s rather than blocking claude for 60 s. */
    int timeout_ms = nonblocking ? 10000 : 60000;
-   cJSON *resp = cli_v1_rpc_local(req, timeout_ms);
+   cJSON *resp = cli_v1_dispatch_local(req, timeout_ms);
    cJSON_Delete(req);
    cJSON_Delete(hook_json);
    free(augmented_hook);

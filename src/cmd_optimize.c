@@ -3,7 +3,7 @@
  *
  * Thin-client command (special-cased in cli_main.c like `persona`/`manuscript`).
  * Every subcommand dispatches the `optimize.export` method to its first-class
- * /v1 route (GET /v1/optimize/export) via cli_v1_rpc_local; aimee-server proxies
+ * /v1 route (GET /v1/optimize/export) via cli_v1_dispatch_local; aimee-server proxies
  * to the kb intelligence export, which carries the declared `registry`, the
  * per-point `arm_stats` baseline, and the closed-decision log for replay.
  * See docs/proposals/pending/optimization-surface.md (P1). */
@@ -21,7 +21,7 @@ static cJSON *optimize_fetch(void)
    if (!req)
       return NULL;
    cJSON_AddStringToObject(req, "method", "optimize.export");
-   cJSON *resp = cli_v1_rpc_local(req, 30000);
+   cJSON *resp = cli_v1_dispatch_local(req, 30000);
    cJSON_Delete(req);
    if (!resp)
    {

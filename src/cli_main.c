@@ -542,7 +542,7 @@ static int handle_agent_setup_cmd(int argc, char **argv, int json_output)
    cJSON *req1 = cJSON_CreateObject();
    cJSON_AddStringToObject(req1, "method", "agent.setup");
    cJSON_AddStringToObject(req1, "provider", provider);
-   cJSON *resp1 = cli_v1_rpc_local(req1, 15000);
+   cJSON *resp1 = cli_v1_dispatch_local(req1, 15000);
    cJSON_Delete(req1);
 
    if (!resp1)
@@ -629,7 +629,7 @@ static int handle_agent_setup_cmd(int argc, char **argv, int json_output)
    cJSON_AddNumberToObject(req2, "expires_in", expires_s);
 
    int poll_timeout_ms = (expires_s + 60) * 1000;
-   cJSON *resp2 = cli_v1_rpc_local(req2, poll_timeout_ms);
+   cJSON *resp2 = cli_v1_dispatch_local(req2, poll_timeout_ms);
    cJSON_Delete(req2);
 
    if (!resp2)
@@ -848,7 +848,7 @@ static int handle_hooks(int argc, char **argv, int json_output)
    if (sid && sid[0])
       cJSON_AddStringToObject(req, "session_id", sid);
 
-   cJSON *resp = cli_v1_rpc_local(req, 5000);
+   cJSON *resp = cli_v1_dispatch_local(req, 5000);
    cJSON_Delete(req);
    free(stdin_data);
 
@@ -1036,7 +1036,7 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
    }
    else
    {
-      resp = cli_v1_rpc_local(req, 30000);
+      resp = cli_v1_dispatch_local(req, 30000);
    }
    cJSON_Delete(req);
 

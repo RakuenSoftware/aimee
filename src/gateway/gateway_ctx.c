@@ -1,7 +1,7 @@
 /* gateway_ctx.c: gateway runtime context and message handling.
  *
  * Connects inbound platform messages to the co-located aimee-server over its
- * /v1 HTTP surface (POST /v1/chat/stream for turns, POST /v1/rpc for launch.run
+ * /v1 HTTP surface (POST /v1/chat/stream for turns, first-class /v1 routes for launch.run
  * and other unary methods), then delivers streamed responses back through the
  * platform delivery router.
  */
@@ -154,7 +154,7 @@ static int rpc_launch_run(char *sid_out, size_t sid_cap)
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "launch.run");
    cJSON_AddStringToObject(req, "cwd", "/");
-   cJSON *resp = cli_v1_rpc_local(req, 15000);
+   cJSON *resp = cli_v1_dispatch_local(req, 15000);
    cJSON_Delete(req);
    if (!resp)
    {
@@ -295,7 +295,7 @@ static int gw_resolve_workspace(const char *name, char *out, size_t out_cap)
 {
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "workspace.list");
-   cJSON *resp = cli_v1_rpc_local(req, 10000);
+   cJSON *resp = cli_v1_dispatch_local(req, 10000);
    cJSON_Delete(req);
 
    int found = -1;
@@ -361,7 +361,7 @@ static void handle_pr_command(gateway_ctx_t *ctx, const session_source_t *src, c
    cJSON *a = cJSON_AddObjectToObject(req, "arguments");
    cJSON_AddStringToObject(a, "action", "create");
    cJSON_AddStringToObject(a, "title", title);
-   cJSON *resp = cli_v1_rpc_local(req, 300000); /* gh pr create + verify gate */
+   cJSON *resp = cli_v1_dispatch_local(req, 300000); /* gh pr create + verify gate */
    cJSON_Delete(req);
 
    const char *reply = "PR command sent (no response from server).";
@@ -478,7 +478,7 @@ static int handle_slash_command(gateway_ctx_t *ctx, const session_source_t *src,
          cJSON *req = cJSON_CreateObject();
          cJSON_AddStringToObject(req, "method", "chat.graceful_cancel");
          cJSON_AddStringToObject(req, "aimee_session_id", sid_copy);
-         cJSON_Delete(cli_v1_rpc_local(req, 5000));
+         cJSON_Delete(cli_v1_dispatch_local(req, 5000));
          cJSON_Delete(req);
       }
       reply_origin(ctx, src, "Cancelled.");

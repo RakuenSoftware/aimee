@@ -130,8 +130,8 @@ static const char *client_session_id(void)
 }
 
 /* Ensure a co-located aimee-server is reachable over the /v1 HTTP UDS. The thin
- * client is connectionless per call now (each server_request is a one-shot POST
- * /v1/rpc), so this is a pure availability probe — no persistent socket. */
+ * client is connectionless per call now (each server_request is a one-shot /v1
+ * dispatch), so this is a pure availability probe — no persistent socket. */
 static int ensure_connection(void)
 {
    if (!g_sock_path)
@@ -142,7 +142,7 @@ static int ensure_connection(void)
 static cJSON *server_request(cJSON *req, int timeout_ms)
 {
    /* Remote aimee-server: POST mcp.call to its first-class /v1 route. The local
-    * cli_v1_rpc_local path only speaks the co-located UDS, so a thin client
+    * cli_v1_dispatch_local path only speaks the co-located UDS, so a thin client
     * configured with a remote endpoint must route here. Memory/kb/search tools
     * resolve on the server (which proxies DB2 to aimee-kb). File/exec tools whose
     * cwd is a registered detached workspace marshal back to this client over the
@@ -191,9 +191,9 @@ static cJSON *server_request(cJSON *req, int timeout_ms)
          continue;
       }
 
-      /* Each call is a one-shot POST /v1/rpc to the co-located server (mcp.call
+      /* Each call is a one-shot /v1 dispatch to the co-located server (mcp.call
        * is reached over the local UDS, which permits the full dispatch surface). */
-      cJSON *resp = cli_v1_rpc_local(req, timeout_ms);
+      cJSON *resp = cli_v1_dispatch_local(req, timeout_ms);
       if (resp)
          return resp;
 

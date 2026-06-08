@@ -313,7 +313,7 @@ uint32_t server_http_conn_caps(int is_tcp, const char *bearer, int remote_writes
    if (bearer && strncmp(bearer, "scope:", 6) == 0)
       return CAPS_READ_ONLY & ~(uint32_t)CAP_CHAT; /* scoped: query-only, no compute */
    /* Unscoped TCP bearer. "full" makes it fully trusted (CAPS_ALL), which also
-    * opens the /v1/rpc delegate/tool bridge (gated on == CAPS_ALL); "off"/"data"
+    * permits the delegate/tool methods over /v1 (gated on == CAPS_ALL); "off"/"data"
     * keep CAPS_AUTHENTICATED (write caps present, but mutating routes are gated
     * separately in server_http_route_allowed). */
    if (remote_writes >= SERVER_REMOTE_WRITES_FULL)

@@ -52,12 +52,12 @@ static void serve_on_signal(int sig)
    g_serve_stop = 1;
 }
 
-/* One short-lived RPC call to the co-located server over POST /v1/rpc (local
- * aimee-http.sock). Returns the response (caller frees) or NULL. */
+/* One short-lived dispatch to the co-located server over its first-class /v1
+ * route (local aimee-http.sock). Returns the response (caller frees) or NULL. */
 static cJSON *serve_rpc(const char *sock, cJSON *req, int timeout_ms)
 {
    (void)sock; /* co-located runner reaches the server over the /v1 HTTP UDS */
-   return cli_v1_rpc_local(req, timeout_ms);
+   return cli_v1_dispatch_local(req, timeout_ms);
 }
 
 /* fetch: get the next op to execute (caller frees) or NULL when none is pending

@@ -891,7 +891,7 @@ typedef struct config
    /* server_api_remote_writes: how far a TCP bearer may mutate (the UDS path is
     * always full). 0 = off (default; mutating routes local-UDS-only), 1 = data
     * (data-mutating /v1 routes allowed over TCP, capability-gated), 2 = full
-    * (CAPS_ALL: data writes + delegate/tool over /v1/rpc). Parsed from
+    * (CAPS_ALL: data writes + delegate/tool over /v1). Parsed from
     * aimee.api.remote_writes ("off"|"data"|"full"); see SERVER_REMOTE_WRITES_*. */
    int server_api_remote_writes;
 

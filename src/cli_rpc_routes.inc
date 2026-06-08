@@ -6678,14 +6678,14 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
    }
 }
 
-/* cli_v1_rpc_local: dispatch a pre-marshalled {method, ...params} request to its
+/* cli_v1_dispatch_local: dispatch a pre-marshalled {method, ...params} request to its
  * first-class /v1 route over the co-located transport — the local aimee-http.sock
  * on POSIX, or the configured remote on Windows (no UDS). Replaces the old POST
  * /v1/rpc bridge: the interactive co-located callers (chat, launch, mcp serve,
  * hooks, triggers, gateway, workspace serve) now reach the same dispatch surface
  * via dedicated routes (async methods are polled to completion). Returns the
  * parsed response (caller frees) or NULL. */
-cJSON *cli_v1_rpc_local(cJSON *req, int timeout_ms)
+cJSON *cli_v1_dispatch_local(cJSON *req, int timeout_ms)
 {
    if (!req)
       return NULL;
