@@ -1144,17 +1144,20 @@ static void test_intelligence_bandit_export(void)
    int s = kb_http_route_ex("GET", "/v1/intelligence/bandit/export", NULL, NULL, NULL, NULL, 0, buf,
                             sizeof(buf));
    assert(s == 200);
-   /* Export is data-driven: it reports the point that is actually sampled, and a
-    * `points` breakdown — not the hard-coded phantom kb_fusion_mode. */
+   /* Export is data-driven: the `points` breakdown reports only the point that is
+    * actually sampled (no fabricated phantom — the arm_stats mock aborts on any
+    * other decision point). */
    assert(strstr(buf, "\"points\":[") != NULL);
    assert(strstr(buf, "\"decision_point\":\"kb_memory_retrieval_limit\"") != NULL);
-   assert(strstr(buf, "kb_fusion_mode") == NULL);
    assert(strstr(buf, "\"arm_id\":\"10\"") != NULL);
    assert(strstr(buf, "\"n_decisions\":3") != NULL);
    /* The registry section lists declared decision points (source of truth),
-    * including arms and the reward function — present even with no decisions. */
+    * including arms and the reward function — present even with no decisions.
+    * kb_fusion_mode is now a registered point, so it appears here (not as a
+    * phantom with fabricated arm stats). */
    assert(strstr(buf, "\"registry\":[") != NULL);
    assert(strstr(buf, "\"reward_fn\":\"recall_sufficiency_v1\"") != NULL);
+   assert(strstr(buf, "\"decision_point\":\"kb_fusion_mode\"") != NULL);
 }
 
 static void test_not_found(void)
