@@ -860,6 +860,58 @@ static void ensure_claude_code_mcp(const char *settings_path)
    cJSON_Delete(root);
 }
 
+/* Ensure `hooks.<event>` contains a no-matcher entry running
+ * `AIMEE_HOOK_CLIENT=claude <aimee> <subcommand>`. Idempotent (keyed on the
+ * subcommand substring); sets *dirty when it adds the array or the entry. Used
+ * for the context-pre-injection hooks (UserPromptSubmit, PreCompact) which fire
+ * on every event and carry no matcher. */
+static void ensure_aimee_event_hook(cJSON *hooks, const char *event, const char *subcommand,
+                                    int *dirty)
+{
+   cJSON *arr = cJSON_GetObjectItemCaseSensitive(hooks, event);
+   if (!cJSON_IsArray(arr))
+   {
+      if (arr)
+         cJSON_DeleteItemFromObjectCaseSensitive(hooks, event);
+      arr = cJSON_AddArrayToObject(hooks, event);
+      *dirty = 1;
+   }
+   for (int i = 0; i < cJSON_GetArraySize(arr); i++)
+   {
+      cJSON *hook_arr = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(arr, i), "hooks");
+      if (!cJSON_IsArray(hook_arr))
+         continue;
+      for (int j = 0; j < cJSON_GetArraySize(hook_arr); j++)
+      {
+         cJSON *cmd = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(hook_arr, j), "command");
+         if (cJSON_IsString(cmd) && strstr(cmd->valuestring, subcommand))
+            return; /* already installed */
+      }
+   }
+   const char *aimee_bin = resolved_aimee_bin_path();
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "AIMEE_HOOK_CLIENT=claude %s %s", aimee_bin ? aimee_bin : "aimee",
+            subcommand);
+   cJSON *entry = cJSON_CreateObject();
+   cJSON *hook_arr = cJSON_CreateArray();
+   cJSON *hook = cJSON_CreateObject();
+   if (entry && hook_arr && hook)
+   {
+      cJSON_AddStringToObject(hook, "type", "command");
+      cJSON_AddStringToObject(hook, "command", cmd);
+      cJSON_AddItemToArray(hook_arr, hook);
+      cJSON_AddItemToObject(entry, "hooks", hook_arr);
+      cJSON_AddItemToArray(arr, entry);
+      *dirty = 1;
+   }
+   else
+   {
+      cJSON_Delete(entry);
+      cJSON_Delete(hook_arr);
+      cJSON_Delete(hook);
+   }
+}
+
 /* Ensure PostToolUse hooks include EnterWorktree|ExitWorktree so that
  * aimee's CWD tracking file gets updated when the session enters/exits
  * a worktree. Without this, MCP git tools won't follow worktree changes. */
@@ -963,57 +1015,11 @@ static void ensure_claude_code_hooks(const char *settings_path)
       }
    }
 
-   /* P1 context pre-injection: a UserPromptSubmit hook that injects a per-turn
-    * <aimee-context> envelope (recall seeded by the prompt + an explore-with
-    * pointer at aimee's tools) so Claude Code reasons over already-loaded
-    * context instead of re-exploring. The hook fires on every prompt (no
-    * matcher) and soft-fails, so it never blocks a turn. */
-   cJSON *ups = cJSON_GetObjectItemCaseSensitive(hooks, "UserPromptSubmit");
-   if (!cJSON_IsArray(ups))
-   {
-      if (ups)
-         cJSON_DeleteItemFromObjectCaseSensitive(hooks, "UserPromptSubmit");
-      ups = cJSON_AddArrayToObject(hooks, "UserPromptSubmit");
-      dirty = 1;
-   }
-   int found_ups = 0;
-   for (int i = 0; i < cJSON_GetArraySize(ups); i++)
-   {
-      cJSON *hook_arr = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(ups, i), "hooks");
-      if (!cJSON_IsArray(hook_arr))
-         continue;
-      for (int j = 0; j < cJSON_GetArraySize(hook_arr); j++)
-      {
-         cJSON *cmd = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(hook_arr, j), "command");
-         if (cJSON_IsString(cmd) && strstr(cmd->valuestring, "user-prompt-submit"))
-            found_ups = 1;
-      }
-   }
-   if (!found_ups)
-   {
-      const char *aimee_bin = resolved_aimee_bin_path();
-      char ups_cmd[512];
-      snprintf(ups_cmd, sizeof(ups_cmd), "AIMEE_HOOK_CLIENT=claude %s user-prompt-submit",
-               aimee_bin ? aimee_bin : "aimee");
-      cJSON *entry = cJSON_CreateObject();
-      cJSON *hook_arr = cJSON_CreateArray();
-      cJSON *hook = cJSON_CreateObject();
-      if (entry && hook_arr && hook)
-      {
-         cJSON_AddStringToObject(hook, "type", "command");
-         cJSON_AddStringToObject(hook, "command", ups_cmd);
-         cJSON_AddItemToArray(hook_arr, hook);
-         cJSON_AddItemToObject(entry, "hooks", hook_arr);
-         cJSON_AddItemToArray(ups, entry);
-         dirty = 1;
-      }
-      else
-      {
-         cJSON_Delete(entry);
-         cJSON_Delete(hook_arr);
-         cJSON_Delete(hook);
-      }
-   }
+   /* Context pre-injection hooks: the P1 per-turn UserPromptSubmit envelope and
+    * the P3 PreCompact re-prime. Both fire with no matcher and soft-fail, so
+    * they never block a turn. */
+   ensure_aimee_event_hook(hooks, "UserPromptSubmit", "user-prompt-submit", &dirty);
+   ensure_aimee_event_hook(hooks, "PreCompact", "pre-compact", &dirty);
 
    if (dirty)
    {

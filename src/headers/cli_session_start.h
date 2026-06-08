@@ -21,4 +21,9 @@ int handle_session_start(int json_output);
  * hook's additionalContext. Always soft-fails (returns 0). */
 int handle_user_prompt_submit(void);
 
+/* `aimee pre-compact` PreCompact-hook entry (cli_session_start.c). Re-emits the
+ * durable recall as additionalContext just before Claude Code compacts, so the
+ * post-compaction context isn't lost. Always soft-fails (returns 0). */
+int handle_pre_compact(void);
+
 #endif /* DEC_CLI_SESSION_START_H */
