@@ -208,10 +208,10 @@ cJSON *handle_git_issue(cJSON *args)
    return stub_git_content("git_issue");
 }
 
-/* cli_mcp_serve now forwards over the co-located /v1/rpc bridge instead of the
- * legacy NDJSON socket, so the mock backend is cli_v1_rpc_local (same
+/* cli_mcp_serve now forwards over the co-located /v1 dispatch instead of the
+ * legacy NDJSON socket, so the mock backend is cli_v1_dispatch_local (same
  * {method,...} request → canned dispatch response). */
-cJSON *cli_v1_rpc_local(cJSON *request, int timeout_ms)
+cJSON *cli_v1_dispatch_local(cJSON *request, int timeout_ms)
 {
    (void)timeout_ms;
 

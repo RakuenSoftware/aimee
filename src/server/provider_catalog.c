@@ -339,7 +339,7 @@ static int server_slot_acquire(const char *agent_name, int max_parallel)
    cJSON_AddStringToObject(req, "method", "provider.slot_acquire");
    cJSON_AddStringToObject(req, "agent_name", agent_name);
    cJSON_AddNumberToObject(req, "max_parallel", max_parallel);
-   cJSON *resp = cli_v1_rpc_local(req, 2000); /* co-located /v1/rpc bridge */
+   cJSON *resp = cli_v1_dispatch_local(req, 2000); /* co-located /v1 dispatch */
    cJSON_Delete(req);
    if (!resp)
       return -1;
@@ -355,7 +355,7 @@ static int server_slot_release_try(const char *agent_name)
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "provider.slot_release");
    cJSON_AddStringToObject(req, "agent_name", agent_name);
-   cJSON *resp = cli_v1_rpc_local(req, 2000); /* co-located /v1/rpc bridge */
+   cJSON *resp = cli_v1_dispatch_local(req, 2000); /* co-located /v1 dispatch */
    cJSON_Delete(req);
    cJSON_Delete(resp);
    return 0;

@@ -56,7 +56,7 @@ static const char *trigger_socket(void)
 }
 
 /* No-op kept for call-site symmetry: the thin client is connectionless per call
- * now (each trigger_rpc is a one-shot POST /v1/rpc). Server availability is
+ * now (each trigger_rpc is a one-shot /v1 dispatch). Server availability is
  * already ensured by trigger_socket() → cli_ensure_server_for_method. */
 static int trigger_connect(cli_conn_t *conn, const char *sock)
 {
@@ -65,12 +65,12 @@ static int trigger_connect(cli_conn_t *conn, const char *sock)
    return 0;
 }
 
-/* Send *req over POST /v1/rpc (local aimee-http.sock), delete req.  Returns NULL
+/* Send *req over the first-class /v1 dispatch (local aimee-http.sock), delete req.  Returns NULL
  * on transport error (error already printed). */
 static cJSON *trigger_rpc(cli_conn_t *conn, cJSON *req)
 {
    (void)conn;
-   cJSON *resp = cli_v1_rpc_local(req, CLIENT_DEFAULT_TIMEOUT_MS);
+   cJSON *resp = cli_v1_dispatch_local(req, CLIENT_DEFAULT_TIMEOUT_MS);
    cJSON_Delete(req);
    if (!resp)
       fprintf(stderr, "aimee: no response from server\n");

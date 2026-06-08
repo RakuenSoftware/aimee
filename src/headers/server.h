@@ -86,8 +86,8 @@ typedef struct cJSON cJSON;
  *   OFF  — mutating /v1 routes are local-UDS-only (default; leaked-bearer safe).
  *   DATA — data-mutating routes (memory.store, work.*, rules.delete, skill.*, …)
  *          allowed over TCP, gated by the per-route capability matrix.
- *   FULL — TCP bearer is fully trusted (CAPS_ALL): data writes AND the /v1/rpc
- *          delegate/tool/bash bridge. Trusted networks only. */
+ *   FULL — TCP bearer is fully trusted (CAPS_ALL): data writes AND the
+ *          delegate/tool/bash methods over /v1. Trusted networks only. */
 #define SERVER_REMOTE_WRITES_OFF  0
 #define SERVER_REMOTE_WRITES_DATA 1
 #define SERVER_REMOTE_WRITES_FULL 2
