@@ -204,7 +204,9 @@
      "  points                          List registered decision points\n"
      "  baseline --point <name>         Show current arm posteriors for a point\n"
      "  replay --point <name>           Emit a point's closed-decision log for replay\n"
-     "  replay-record --point <n> --file <f>  Record a replay result (benchmark_trace)\n"},
+     "  replay-record --point <n> --file <f>  Record a replay result (benchmark_trace)\n"
+     "  run [--suite <s>] [--arm <a>]   Run the offline benchmark suite (ranks baseline vs on)\n"
+     "  compare --baseline <a> --candidate <b>  Per-metric delta between two arms\n"},
     {"code", "Code-health audit", CLIENT_TIER_ADVANCED, 0,
      "  audit [dir] [--json]   File-health audit (untested files, TODO/FIXME\n"
      "                         markers, debt score) over the working tree\n"

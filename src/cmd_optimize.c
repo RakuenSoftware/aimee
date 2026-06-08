@@ -2,11 +2,11 @@
  * optimization loop (decision-point registry + off-policy inspection).
  *
  * Thin-client command (special-cased in cli_main.c like `persona`/`manuscript`).
- * Every subcommand dispatches the `optimize.export` method to its first-class
- * /v1 route (GET /v1/optimize/export) via cli_v1_dispatch_local; aimee-server proxies
- * to the kb intelligence export, which carries the declared `registry`, the
- * per-point `arm_stats` baseline, and the closed-decision log for replay.
- * See docs/proposals/pending/optimization-surface.md (P1). */
+ * points/baseline/replay dispatch `optimize.export` (GET /v1/optimize/export);
+ * replay-record dispatches `optimize.replay_record`; run/compare dispatch the
+ * `memory.benchmark` suite (the offline-suite adapter). All via
+ * cli_v1_dispatch_local to first-class /v1 routes — no kb_client in the thin
+ * client. See docs/proposals/pending/optimization-surface.md (P1/P2). */
 #include "cJSON.h"
 #include "cli_client.h"
 #include <stdio.h>
@@ -300,6 +300,192 @@ static int optimize_cmd_replay_record(int argc, char **argv, int json_output)
    return ok ? 0 : 1;
 }
 
+/* ── offline benchmark suite (optimize run / compare) ─────────────────────── */
+
+/* Read a numeric metric from a benchmark response's `metrics` object. */
+static double opt_metric(cJSON *resp, const char *key)
+{
+   cJSON *m = resp ? cJSON_GetObjectItemCaseSensitive(resp, "metrics") : NULL;
+   cJSON *v = m ? cJSON_GetObjectItemCaseSensitive(m, key) : NULL;
+   return cJSON_IsNumber(v) ? v->valuedouble : 0.0;
+}
+
+/* Read a latency percentile from the `latency` object. */
+static double opt_latency(cJSON *resp, const char *key)
+{
+   cJSON *l = resp ? cJSON_GetObjectItemCaseSensitive(resp, "latency") : NULL;
+   cJSON *v = l ? cJSON_GetObjectItemCaseSensitive(l, key) : NULL;
+   return cJSON_IsNumber(v) ? v->valuedouble : 0.0;
+}
+
+/* Run one benchmark arm via the memory.benchmark dispatch method (async, polled
+ * to completion). Returns the parsed response (caller frees) or NULL after
+ * printing an error. The benchmark is long-running, hence the generous timeout. */
+static cJSON *optimize_run_arm(const char *suite, const char *arm, const char *corpus,
+                               const char *matrix)
+{
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "method", "memory.benchmark");
+   if (suite)
+      cJSON_AddStringToObject(req, "suite", suite);
+   if (arm)
+      cJSON_AddStringToObject(req, "arm", arm);
+   if (corpus)
+      cJSON_AddStringToObject(req, "corpus", corpus);
+   if (matrix)
+      cJSON_AddStringToObject(req, "matrix", matrix);
+   cJSON *resp = cli_v1_dispatch_local(req, 600000);
+   cJSON_Delete(req);
+   if (!resp)
+   {
+      fprintf(stderr, "optimize: no response from aimee-server (is it running?)\n");
+      return NULL;
+   }
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   if (!cJSON_IsString(status) || strcmp(status->valuestring, "ok") != 0)
+   {
+      cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      fprintf(stderr, "optimize: benchmark failed: %s\n",
+              cJSON_IsString(msg) ? msg->valuestring : "unknown error");
+      cJSON_Delete(resp);
+      return NULL;
+   }
+   return resp;
+}
+
+static void optimize_print_arm_metrics(const char *label, cJSON *resp)
+{
+   printf("  %-10s ndcg@10=%.4f mrr=%.4f recall@10=%.4f  p50=%.1fms p95=%.1fms\n", label,
+          opt_metric(resp, "ndcg_10"), opt_metric(resp, "mrr"), opt_metric(resp, "recall_10"),
+          opt_latency(resp, "p50_ms"), opt_latency(resp, "p95_ms"));
+}
+
+/* aimee optimize run --suite <s> [--arm A] [--corpus C] [--matrix M]:
+ * run the offline benchmark for one arm, or (no --arm) run baseline vs on and
+ * rank by ndcg@10. */
+static int optimize_cmd_run(int argc, char **argv, int json_output)
+{
+   const char *suite = "code-graph-fusion";
+   const char *arm = NULL, *corpus = NULL, *matrix = NULL;
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--suite") == 0 && i + 1 < argc)
+         suite = argv[++i];
+      else if (strcmp(argv[i], "--arm") == 0 && i + 1 < argc)
+         arm = argv[++i];
+      else if (strcmp(argv[i], "--corpus") == 0 && i + 1 < argc)
+         corpus = argv[++i];
+      else if (strcmp(argv[i], "--matrix") == 0 && i + 1 < argc)
+         matrix = argv[++i];
+   }
+
+   /* Single explicit arm. */
+   if (arm)
+   {
+      cJSON *resp = optimize_run_arm(suite, arm, corpus, matrix);
+      if (!resp)
+         return 1;
+      if (json_output)
+         optimize_print_json(resp);
+      else
+      {
+         printf("Suite %s, arm %s:\n", suite, arm);
+         optimize_print_arm_metrics(arm, resp);
+      }
+      cJSON_Delete(resp);
+      return 0;
+   }
+
+   /* No arm: run baseline vs on and rank. */
+   cJSON *base = optimize_run_arm(suite, "baseline", corpus, matrix);
+   if (!base)
+      return 1;
+   cJSON *on = optimize_run_arm(suite, "on", corpus, matrix);
+   if (!on)
+   {
+      cJSON_Delete(base);
+      return 1;
+   }
+   if (json_output)
+   {
+      cJSON *out = cJSON_CreateObject();
+      cJSON_AddItemToObject(out, "baseline", cJSON_Duplicate(base, 1));
+      cJSON_AddItemToObject(out, "on", cJSON_Duplicate(on, 1));
+      optimize_print_json(out);
+      cJSON_Delete(out);
+   }
+   else
+   {
+      double b = opt_metric(base, "ndcg_10"), o = opt_metric(on, "ndcg_10");
+      printf("Suite %s (ranking by ndcg@10):\n", suite);
+      optimize_print_arm_metrics("baseline", base);
+      optimize_print_arm_metrics("on", on);
+      printf("  winner: %s (ndcg@10 %+.4f)\n", o >= b ? "on" : "baseline", o - b);
+   }
+   cJSON_Delete(base);
+   cJSON_Delete(on);
+   return 0;
+}
+
+/* aimee optimize compare --baseline A --candidate B [--suite S]:
+ * run two arms and show the per-metric delta (candidate - baseline). */
+static int optimize_cmd_compare(int argc, char **argv, int json_output)
+{
+   const char *suite = "code-graph-fusion";
+   const char *base_arm = NULL, *cand_arm = NULL, *corpus = NULL, *matrix = NULL;
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--suite") == 0 && i + 1 < argc)
+         suite = argv[++i];
+      else if (strcmp(argv[i], "--baseline") == 0 && i + 1 < argc)
+         base_arm = argv[++i];
+      else if (strcmp(argv[i], "--candidate") == 0 && i + 1 < argc)
+         cand_arm = argv[++i];
+      else if (strcmp(argv[i], "--corpus") == 0 && i + 1 < argc)
+         corpus = argv[++i];
+      else if (strcmp(argv[i], "--matrix") == 0 && i + 1 < argc)
+         matrix = argv[++i];
+   }
+   if (!base_arm || !cand_arm)
+   {
+      fprintf(stderr, "usage: aimee optimize compare --baseline <arm> --candidate <arm> "
+                      "[--suite <s>]\n");
+      return 2;
+   }
+
+   cJSON *base = optimize_run_arm(suite, base_arm, corpus, matrix);
+   if (!base)
+      return 1;
+   cJSON *cand = optimize_run_arm(suite, cand_arm, corpus, matrix);
+   if (!cand)
+   {
+      cJSON_Delete(base);
+      return 1;
+   }
+
+   if (json_output)
+   {
+      cJSON *out = cJSON_CreateObject();
+      cJSON_AddItemToObject(out, "baseline", cJSON_Duplicate(base, 1));
+      cJSON_AddItemToObject(out, "candidate", cJSON_Duplicate(cand, 1));
+      optimize_print_json(out);
+      cJSON_Delete(out);
+   }
+   else
+   {
+      static const char *keys[] = {"ndcg_10", "mrr", "recall_10", "ndcg_5", "recall_5", NULL};
+      printf("Suite %s: %s (baseline) vs %s (candidate)\n", suite, base_arm, cand_arm);
+      for (int i = 0; keys[i]; i++)
+      {
+         double b = opt_metric(base, keys[i]), c = opt_metric(cand, keys[i]);
+         printf("  %-10s %.4f -> %.4f  (%+.4f)\n", keys[i], b, c, c - b);
+      }
+   }
+   cJSON_Delete(base);
+   cJSON_Delete(cand);
+   return 0;
+}
+
 static void optimize_usage(void)
 {
    fprintf(stderr,
@@ -307,7 +493,9 @@ static void optimize_usage(void)
            "  points                              List registered decision points\n"
            "  baseline --point <name>             Show current arm posteriors for a point\n"
            "  replay --point <name>               Emit a point's closed-decision log for replay\n"
-           "  replay-record --point <name> --file <f>  Record a replay result (benchmark_trace)\n");
+           "  replay-record --point <name> --file <f>  Record a replay result (benchmark_trace)\n"
+           "  run [--suite <s>] [--arm <a>]       Run the offline benchmark suite (ranks baseline vs on)\n"
+           "  compare --baseline <a> --candidate <b> [--suite <s>]  Per-metric delta between two arms\n");
 }
 
 int cmd_optimize_run(int argc, char **argv, int json_output)
@@ -326,6 +514,10 @@ int cmd_optimize_run(int argc, char **argv, int json_output)
       return optimize_cmd_replay(argc - 1, argv + 1, json_output);
    if (strcmp(sub, "replay-record") == 0)
       return optimize_cmd_replay_record(argc - 1, argv + 1, json_output);
+   if (strcmp(sub, "run") == 0)
+      return optimize_cmd_run(argc - 1, argv + 1, json_output);
+   if (strcmp(sub, "compare") == 0)
+      return optimize_cmd_compare(argc - 1, argv + 1, json_output);
    if (strcmp(sub, "--help") == 0 || strcmp(sub, "-h") == 0 || strcmp(sub, "help") == 0)
    {
       optimize_usage();
