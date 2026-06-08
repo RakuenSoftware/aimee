@@ -273,6 +273,12 @@ typedef struct config
    int memory_context_budget_enabled; /* 0=top-K assembly (default), 1=token-budget assembly */
    int memory_context_budget_tokens;  /* budget in tokens; 0=use default (2048) */
    int memory_routing_enabled;        /* 1=adaptive route selection (default), 0=hybrid route mix */
+
+   /* Context pre-injection for the model ingresses (Codex/OpenAI). When on, the
+    * ingress prepends a fusion-recall <aimee-context> envelope to the request
+    * system prompt so the external agent stops re-exploring the repo. Default
+    * off; a per-request `x-aimee-preinject: 0` header also disables it. */
+   int ingress_preinject_enabled;
    int memory_pagerank_enabled;
    int memory_pagerank_iterations;
    double memory_pagerank_weight;

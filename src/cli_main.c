@@ -1800,6 +1800,11 @@ int main(int argc, char **argv)
    if (strcmp(cmd, "session-start") == 0)
       return handle_session_start(json_output);
 
+   /* UserPromptSubmit hook (P1 per-turn context pre-injection for Claude Code;
+    * settings.json wires it as `aimee user-prompt-submit`). */
+   if (strcmp(cmd, "user-prompt-submit") == 0)
+      return handle_user_prompt_submit();
+
    /* agent token: read access_token from local auth file; no server needed.
     * This command is called by agent_resolve_auth via safe_exec_capture so it
     * must exit 0 and print only the raw token on stdout. */
