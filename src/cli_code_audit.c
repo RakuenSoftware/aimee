@@ -1,5 +1,6 @@
 /* cli_code_audit.c: see cli_code_audit.h. */
 #include "cli_code_audit.h"
+#include "cli_client.h" /* cli_http_request, cli_rpc_client_* */
 #include "cJSON.h"
 #include <ctype.h>
 #include <dirent.h>
@@ -257,22 +258,103 @@ static int stem_in_tests(const audit_acc_t *a, const char *stem)
    return 0;
 }
 
+/* Graph-derived checks: query the server's /v1/code/audit (dead exports, import
+ * cycles, clones — computed kb-side over entity_edges + code_embeddings) and
+ * print them. Advisory; returns 0. */
+static int audit_graph_remote(const char *project, int json_output)
+{
+   char *endpoint = cli_rpc_client_endpoint();
+   if (!endpoint)
+   {
+      fprintf(stderr, "code audit --graph: no aimee server configured (set `aimee remote`).\n");
+      return 0;
+   }
+   char *bearer = cli_rpc_client_bearer();
+   cJSON *body = cJSON_CreateObject();
+   if (project && project[0])
+      cJSON_AddStringToObject(body, "project", project);
+   char *body_s = cJSON_PrintUnformatted(body);
+   cJSON_Delete(body);
+
+   int status = 0;
+   cJSON *resp =
+       cli_http_request(endpoint, "POST", "/v1/code/audit", body_s, bearer, 60000, &status);
+   free(endpoint);
+   free(bearer);
+   free(body_s);
+   if (!resp || status != 200)
+   {
+      fprintf(stderr, "code audit --graph: server query failed (status %d)\n", status);
+      cJSON_Delete(resp);
+      return 0;
+   }
+
+   if (json_output)
+   {
+      char *s = cJSON_PrintUnformatted(resp);
+      if (s)
+      {
+         puts(s);
+         free(s);
+      }
+   }
+   else
+   {
+      cJSON *de = cJSON_GetObjectItemCaseSensitive(resp, "dead_exports");
+      cJSON *cy = cJSON_GetObjectItemCaseSensitive(resp, "cycles");
+      cJSON *cl = cJSON_GetObjectItemCaseSensitive(resp, "clones");
+      printf("aimee code audit — graph-derived checks (via aimee-kb)\n");
+      printf("  dead exports:  %d\n", cJSON_GetArraySize(de));
+      int shown = 0;
+      cJSON *it = NULL;
+      cJSON_ArrayForEach(it, de)
+      {
+         if (shown++ >= 10)
+            break;
+         if (cJSON_IsString(it))
+            printf("    - %s\n", it->valuestring);
+      }
+      printf("  import cycles: %d\n", cJSON_GetArraySize(cy));
+      shown = 0;
+      cJSON_ArrayForEach(it, cy)
+      {
+         if (shown++ >= 10)
+            break;
+         if (cJSON_IsString(it))
+            printf("    - %s\n", it->valuestring);
+      }
+      printf("  clone groups:  %d\n", cJSON_GetArraySize(cl));
+   }
+   cJSON_Delete(resp);
+   return 0;
+}
+
 int handle_code_audit(int argc, char **argv, int json_output)
 {
    const char *dir = ".";
-   int dir_set = 0;
+   const char *project = "";
+   int dir_set = 0, graph = 0;
    for (int i = 0; i < argc; i++)
    {
       if (!argv[i])
          continue;
       if (strcmp(argv[i], "--json") == 0)
          json_output = 1;
+      else if (strcmp(argv[i], "--graph") == 0)
+         graph = 1;
+      else if (strcmp(argv[i], "--project") == 0 && i + 1 < argc)
+         project = argv[++i];
       else if (argv[i][0] != '-' && !dir_set)
       {
          dir = argv[i];
          dir_set = 1;
       }
    }
+
+   /* --graph switches to the kb-side graph-derived checks (a different surface
+    * from the local file scan). */
+   if (graph)
+      return audit_graph_remote(project, json_output);
 
    audit_acc_t a;
    memset(&a, 0, sizeof(a));

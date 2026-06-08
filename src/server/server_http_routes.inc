@@ -869,6 +869,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/curator/implements", NULL, RM_EXACT, "curator.implements", 0, rh_dispatch_op},
     {"POST", "/v1/curator/invalidated", NULL, RM_EXACT, "curator.invalidated", 0, rh_dispatch_op},
     {"POST", "/v1/graph/explain", NULL, RM_EXACT, "graph.explain", 0, rh_dispatch_op},
+    {"POST", "/v1/code/audit", NULL, RM_EXACT, "code.audit", 0, rh_dispatch_op},
     {"POST", "/v1/trajectory/batch", NULL, RM_EXACT, "trajectory.batch", 0, rh_dispatch_op},
 
     /* work.* / wm.* / skill.* / session.* / toolset.* / mcp.* / trigger.* and

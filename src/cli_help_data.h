@@ -202,7 +202,9 @@
      "  explain          Explain a code-graph relationship\n"},
     {"code", "Code-health audit", CLIENT_TIER_ADVANCED, 0,
      "  audit [dir] [--json]   File-health audit (untested files, TODO/FIXME\n"
-     "                         markers, debt score) over the working tree\n"},
+     "                         markers, debt score) over the working tree\n"
+     "  audit --graph [--project P] [--json]   Graph-derived checks via aimee-kb\n"
+     "                         (dead exports, import cycles, clones)\n"},
     {"curator", "Knowledge curator queries", CLIENT_TIER_ADVANCED, 0,
      "  implements <topic>   What implements a topic\n"
      "  synthesize <topic>   Synthesize knowledge on a topic\n"

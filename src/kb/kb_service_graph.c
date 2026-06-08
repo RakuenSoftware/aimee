@@ -10,6 +10,7 @@
 #include "db2/code_projection.h"
 #include "db2/entity_edges.h"
 #include "db2/entity_nodes.h"
+#include "db2/kb_service_backend.h" /* db2_kb_service_code_audit_json */
 
 #include <stdlib.h>
 #include <string.h>
@@ -105,6 +106,26 @@ int kb_handle_graph_explain(int fd, cJSON *req)
       cJSON_AddItemToArray(arr, e);
    }
    cJSON_AddNumberToObject(resp, "edge_count", n);
+   int rc = kb_send_response(fd, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+/* code.audit: graph-derived code-health checks (dead exports, import cycles,
+ * clones). Request {[project], [limit]}; response is the assembled bundle. */
+int kb_handle_code_audit(int fd, cJSON *req)
+{
+   cJSON *proj_j = cJSON_GetObjectItemCaseSensitive(req, "project");
+   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
+   const char *project = cJSON_IsString(proj_j) ? proj_j->valuestring : "";
+   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 50;
+
+   if (!db2_is_initialized())
+      return kb_send_error(fd, "failed to open knowledge service store");
+
+   cJSON *resp = db2_kb_service_code_audit_json(project, limit);
+   if (!resp)
+      return kb_send_error(fd, "failed to build code audit");
    int rc = kb_send_response(fd, resp);
    cJSON_Delete(resp);
    return rc;
