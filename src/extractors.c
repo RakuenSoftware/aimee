@@ -772,10 +772,92 @@ int extract_routes(const char *ext, const char *content, char **out, int max)
    return ctx.count;
 }
 
+int code_def_end_line(const char *content, int start_line, const char *ext)
+{
+   if (!content || start_line < 1)
+      return start_line < 1 ? 1 : start_line;
+   lang_t lang = detect_lang(ext);
+
+   /* Walk to the start of line `start_line` (1-based). */
+   const char *p = content;
+   int line = 1;
+   while (line < start_line && *p)
+   {
+      if (*p == '\n')
+         line++;
+      p++;
+   }
+   if (!*p)
+      return start_line;
+
+   if (lang == LANG_PY)
+   {
+      /* Body = the run of following lines indented deeper than the def line;
+       * blank lines don't end it and trailing blanks aren't included. */
+      int def_indent = 0;
+      const char *q = p;
+      while (*q == ' ' || *q == '\t')
+      {
+         def_indent++;
+         q++;
+      }
+      int end = start_line, cur = start_line;
+      const char *r = p;
+      while (*r && *r != '\n')
+         r++;
+      while (*r == '\n')
+      {
+         r++;
+         cur++;
+         if (!*r)
+            break;
+         const char *s = r;
+         int indent = 0;
+         while (*s == ' ' || *s == '\t')
+         {
+            indent++;
+            s++;
+         }
+         int blank = (*s == '\n' || *s == '\r' || *s == '\0');
+         if (!blank && indent <= def_indent)
+            break;
+         if (!blank)
+            end = cur;
+         while (*r && *r != '\n')
+            r++;
+      }
+      return end;
+   }
+
+   /* C-family (and most brace languages): match the symbol's first `{` to its
+    * closing `}`. No `{` (a declaration / one-liner) -> the start line. Braces
+    * inside strings/comments can skew this; acceptable for an advisory span. */
+   int depth = 0, seen_open = 0, cur = start_line, scanned = 0;
+   for (const char *r = p; *r && scanned < 2000000; r++, scanned++)
+   {
+      char c = *r;
+      if (c == '\n')
+         cur++;
+      else if (c == '{')
+      {
+         depth++;
+         seen_open = 1;
+      }
+      else if (c == '}')
+      {
+         depth--;
+         if (seen_open && depth <= 0)
+            return cur;
+      }
+   }
+   return start_line;
+}
+
 int extract_definitions(const char *ext, const char *content, definition_t *out, int max)
 {
    lang_t lang = detect_lang(ext);
    def_ctx_t ctx = {out, 0, max, lang == LANG_TS};
+   int count = 0;
 
    switch (lang)
    {
@@ -802,7 +884,8 @@ int extract_definitions(const char *ext, const char *content, definition_t *out,
    {
       c_def_ctx_t cctx = {out, 0, max, 0};
       for_each_line(content, c_def_line, &cctx);
-      return cctx.count;
+      count = cctx.count;
+      break;
    }
    case LANG_LUA:
       for_each_line(content, lua_def_line, &ctx);
@@ -829,7 +912,13 @@ int extract_definitions(const char *ext, const char *content, definition_t *out,
       break;
    }
 
-   return ctx.count;
+   if (lang != LANG_C)
+      count = ctx.count;
+   /* Fill each definition's body end line from the source span. */
+   for (int i = 0; i < count; i++)
+      if (out[i].line >= 1)
+         out[i].line_end = code_def_end_line(content, out[i].line, ext);
+   return count;
 }
 
 int extract_calls(const char *ext, const char *content, call_ref_t *out, int max)

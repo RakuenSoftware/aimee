@@ -163,6 +163,8 @@ static int kb_index_find_parse(cJSON *resp, term_hit_t *out, int max)
          if (cJSON_IsString(f))
             snprintf(out[count].file_path, sizeof(out[count].file_path), "%s", f->valuestring);
          out[count].line = cJSON_IsNumber(l) ? (int)l->valuedouble : 0;
+         cJSON *le = cJSON_GetObjectItemCaseSensitive(h, "line_end");
+         out[count].line_end = cJSON_IsNumber(le) ? (int)le->valuedouble : 0;
          if (cJSON_IsString(k))
             snprintf(out[count].kind, sizeof(out[count].kind), "%s", k->valuestring);
          count++;
@@ -583,6 +585,8 @@ int kb_client_index_structure(const char *project, const char *file_path, defini
          if (cJSON_IsString(kind))
             snprintf(out[count].kind, sizeof(out[count].kind), "%s", kind->valuestring);
          out[count].line = cJSON_IsNumber(line) ? (int)line->valuedouble : 0;
+         cJSON *line_end = cJSON_GetObjectItemCaseSensitive(d, "line_end");
+         out[count].line_end = cJSON_IsNumber(line_end) ? (int)line_end->valuedouble : 0;
          count++;
       }
    }

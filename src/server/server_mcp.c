@@ -792,8 +792,17 @@ static cJSON *tool_find_symbol(cJSON *args)
       pos = mcp_appendf(buf, pos, (int)sizeof(buf), "Found %d match(es) for '%s':\n\n", count,
                         jid->valuestring);
       for (int i = 0; i < count && pos < (int)sizeof(buf) - 256; i++)
-         pos = mcp_appendf(buf, pos, (int)sizeof(buf), "- %s:%d [%s] in project '%s'\n",
-                           hits[i].file_path, hits[i].line, hits[i].kind, hits[i].project);
+      {
+         /* Show the body span (line-line_end) when known, so a `file::symbol`
+          * read can fetch exactly that range; fall back to the start line. */
+         if (hits[i].line_end > hits[i].line)
+            pos = mcp_appendf(buf, pos, (int)sizeof(buf), "- %s:%d-%d [%s] in project '%s'\n",
+                              hits[i].file_path, hits[i].line, hits[i].line_end, hits[i].kind,
+                              hits[i].project);
+         else
+            pos = mcp_appendf(buf, pos, (int)sizeof(buf), "- %s:%d [%s] in project '%s'\n",
+                              hits[i].file_path, hits[i].line, hits[i].kind, hits[i].project);
+      }
    }
    return text_content(buf);
 }
