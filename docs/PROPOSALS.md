@@ -266,11 +266,14 @@ Capability / coordination / research (P3):
 
 - [Mixture-of-Agents Ensemble Delegate Mode](proposals/done/mixture-of-agents-ensemble-delegate.md):
   opt-in quality-up ensemble (diverse references → aggregator synthesis)
-  over the delegate fabric. **Synthesize / Rank-Fuse. Done.**
+  over the delegate fabric. **Synthesize / Rank-Fuse. Done.** _Note: the shipped
+  fan-out does not actually route to distinct references (all tasks run the default
+  agent); the routing fix is folded into the Agent Roundtable proposal below._
 - [Agent Roundtable — Round-Robin Collaborative Drafting and Review](proposals/pending/agent-roundtable-collaborative-drafting.md):
-  bounded multi-round generalization of the ensemble delegate: executable
-  participant routing, draft/review modes, deterministic convergence, and
-  running cost limits over the existing delegate fabric. **Draft / Review / Reason. New.**
+  first fixes a shipped bug — the ensemble's reference models are unrouted (every
+  "participant" is the same default agent) — then generalizes it into a bounded
+  multi-round roundtable: real participant routing, draft/review modes,
+  deterministic convergence, keep-best, preflight cost limits. **Draft / Review / Reason. New.**
 - [Composable Named Toolsets](proposals/done/composable-named-toolsets.md):
   one composable toolset object shared by roles, delegates, gateway
   channels, and the scripted-RPC allow-list. **Done.**

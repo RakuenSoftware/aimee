@@ -5,19 +5,26 @@
 - **Date:** 2026-06-08
 - **Charter roles:** Draft (initial + revision turns), Review (per-round
   critique + final synthesis/aggregation), Reason (convergence judging).
-- **Scope:** `src/server/delegate_ensemble.c` (the engine being generalized — add
-  explicit participant routing plus a multi-round loop alongside the existing
-  single-shot path),
-  `src/headers/delegate_ensemble.h` (new `delegate_roundtable_*` surface),
+- **Scope:** `src/server/delegate_ensemble.c` (the engine being generalized —
+  fix the participant-routing bug, add a multi-round loop alongside the existing
+  single-shot path, replace the fixed result buffer with a bounded heap artifact,
+  and fix the per-call `srand` reseed),
+  `src/headers/delegate_ensemble.h` (new `delegate_roundtable_*` surface, heap
+  result), `src/headers/agent_types.h` + `src/server/agent_runtime.c` (thread a
+  per-task participant selector through `agent_task_t` → `parallel_worker` →
+  `agent_run` so fan-out tasks route to distinct configured agents — see §0.1),
   `src/cmd_agent_delegate.c` (new `aimee delegate roundtable` subcommand beside
   the existing `aggregate`), config plumbing
-  (`src/headers/config.h`, `src/config.c`, `src/config_fields.c`,
-  `src/config_sections.c` — a `roundtable.*` section reusing the `ensemble.*`
-  knobs), `src/config_save.c`, the existing parallel/sequential agent primitives
-  in `src/headers/agent_exec.h` (`agent_run_parallel`,
-  `agent_run_with_tools_write_enforce`), unit tests
-  (`src/tests/test_delegate_ensemble.c` sibling), docs (`MANUAL.md`). No new
-  long-lived service, no new RPC transport, no new provider integration.
+  (`src/headers/config.h`, `src/config.c`, `src/config_sections.c` for the inline
+  `ensemble.*`/`roundtable.*` parse, `src/config_save.c` for round-trip, and
+  `src/config_fields.c` only for the new flat scalar `roundtable.*` keys so they
+  are `aimee config get/set`-able — see §6), the existing parallel/sequential
+  agent primitives in `src/headers/agent_exec.h` (`agent_run_parallel`,
+  `agent_run_with_tools_write_enforce`), the per-task provider/model resolution
+  precedent in `src/server/aux_router.c` (reused as the routing seam), unit tests
+  (`src/tests/test_delegate_ensemble.c` sibling, plus an un-stubbed routing test),
+  docs (`MANUAL.md`). No new long-lived service, no new RPC transport, no new
+  provider integration.
 
 ## Goal
 
@@ -28,10 +35,12 @@ through iteration instead of being assembled in a single shot.
 
 Aimee already has the *single-shot* version of this: **Mixture-of-Agents**
 (`aimee delegate aggregate "<prompt>"` → `delegate_ensemble_run`,
-`src/server/delegate_ensemble.c`). MoA fans the same prompt to N diverse
-reference models **in parallel**, then runs **one** synthesis pass that
-reconciles their answers into a final response. It is the right primitive, but it
-is intentionally flat:
+`src/server/delegate_ensemble.c`). MoA fans a prompt to N tasks **in parallel**,
+then runs **one** synthesis pass that reconciles their answers into a final
+response. It is the right primitive, but it is both intentionally flat **and
+currently broken in a way that defeats its headline value** (§0.1): the "N
+diverse reference models" are not actually distinct models. Beyond that bug, the
+shape is flat:
 
 - **One round only.** Candidates never see each other. There is no turn-taking,
   no "agent B builds on agent A," and no chance to revise after reading a peer.
@@ -46,9 +55,10 @@ is intentionally flat:
 This proposal **generalizes the ensemble engine into a roundtable**: the same
 fan-out / cost-accounting / degrade-to-best machinery, wrapped in a bounded loop
 where each round's shared artifact feeds the next round's prompts. It reuses the
-existing orchestration shape, but it also closes one current implementation gap:
-configured `ensemble.reference_models` must become real routed participants, not
-only labels in the synthesis prompt.
+existing orchestration shape, and as step one it **fixes a shipped bug** (§0.1):
+configured `ensemble.reference_models` are today only labels in the synthesis
+prompt — every "participant" is the same default agent — and must become real
+routed participants before any of this is meaningful.
 
 ## §0 What already exists (so we don't rebuild it)
 
@@ -69,12 +79,12 @@ config plumbing, a CLI entry point — are done. Confirmed in the tree:
   `ensemble_reference_count`, `ensemble_aggregator`, `ensemble_min_successful`,
   `ensemble_max_cost_usd` (`src/headers/config.h:1201-1206`), parsed by
   `config_parse_ensemble_section` (`src/config_sections.c:1068`). The roundtable
-  reuses the configured participant list and aggregator, but P0/P1 must make the
-  reference list executable: today `delegate_ensemble_run` sets each fan-out task's
-  `role = NULL` and only uses `ensemble_reference_models` as display names in the
-  synthesis prompt. Roundtable implementation must route each configured
-  participant by explicit agent/model name or by a new `agent_task_t` participant
-  field before claiming true multi-agent collaboration.
+  reuses the configured participant list and aggregator. The configured reference
+  list is **not** executable today (the `role = NULL` bug in §0.1); P0 fixes that
+  by threading a per-task `agent` selector and routing each reference to a distinct
+  agent. **Note:** these fields are parsed by a dedicated inline parser, **not**
+  registered in `config_fields.c` (see `config_save.c:29`), so the "five-file
+  pattern" does not apply to them — §6 specifies exactly where the new keys land.
 - **The CLI seam exists.** `aimee delegate aggregate "<prompt>"`
   (`src/cmd_agent_delegate.c:504-535`) already loads config, checks
   `ensemble_enabled`, loads `agent_config_t`, calls the engine, and prints the
@@ -98,9 +108,60 @@ config plumbing, a CLI entry point — are done. Confirmed in the tree:
   (`role_templates.c:21`) for critique — the latter is already the ensemble's
   default aggregator role (`delegate_ensemble.c:113`).
 
-So the net new code is: **participant routing, a bounded loop around the existing
-fan-out, bounded prompt/artifact handling, a shared-artifact prompt builder, and
+So the net new code is: **the routing fix (§0.1), a bounded loop around the
+existing fan-out, a bounded heap artifact, a shared-artifact prompt builder, and
 a convergence check.**
+
+## §0.1 First: the shipped ensemble does not use distinct models (bug, fixed here)
+
+This is not a forward-looking gap — it is a correctness defect in the **already
+merged, marked-Done** MoA feature, and this proposal fixes it as step one rather
+than building on top of it.
+
+`delegate_ensemble_run` builds every fan-out task identically with `role = NULL`
+(`delegate_ensemble.c:156-162`):
+
+```c
+for (int i = 0; i < ref_count; i++) {
+   tasks[i].role = NULL;          /* identical for every task */
+   tasks[i].user_prompt = prompt;
+}
+agent_run_parallel(acfg, tasks, ref_count, results);   /* :167 */
+```
+
+`agent_task_t` (`agent_types.h:233-240`) carries **only** `role` to influence
+routing — there is no per-task agent/model/provider field. With `role == NULL`,
+`agent_run` (`agent_runtime.c:142`) skips the entire fallback loop
+(`agent_has_role(ag, NULL)` never matches, `:154`) and falls through to
+`agent_route(cfg, NULL)` (`:198`) — the **single default agent**, deterministically,
+for all N tasks. `ensemble_reference_models` is consumed only as display labels in
+`build_synthesis_prompt` (`:216-217`). **Net effect: today's "ensemble of diverse
+reference models" is one agent answering the same prompt N times** — the only
+variation is sampling noise. (The sibling fan-out in `agent_coord.c:497-501` has
+the same `role`-only limitation but at least perturbs `temperature` per task; the
+ensemble does not even do that.)
+
+**The fix (committed in P0, not deferred):**
+
+1. Add an optional `const char *agent;` selector to `agent_task_t`
+   (`agent_types.h`). When set, it names the configured agent/model that task must
+   run on; when `NULL`, behavior is byte-identical to today (default route).
+2. Honor it in `parallel_worker` (`agent_runtime.c:386-391`) and in `agent_run`:
+   when `task->agent` is set, resolve it the way `aux_router.c:51-58` already
+   resolves a per-task `provider`/`model` (that file is the existing precedent for
+   "this unit of work runs on a specific named provider/model"), bypassing the
+   role fallback chain and routing directly to the named agent.
+3. `delegate_ensemble_run` sets `tasks[i].agent = cfg->ensemble_reference_models[i]`
+   so the N references become N real participants.
+4. **Un-stubbed test.** `test_delegate_ensemble.c` currently stubs
+   `agent_run_parallel` wholesale, which is exactly why this bug shipped unseen.
+   P0 adds a routing test that exercises the real selector resolution (three
+   configured references → three distinct `agent_name` results) instead of stubbing
+   it away.
+
+The existing aggregate path keeps working because `tasks[i].agent = NULL` (the
+new default) reproduces the current route. The roundtable then builds on real
+multi-agent fan-out instead of an illusion of one.
 
 ## §1 What a roundtable is
 
@@ -186,20 +247,29 @@ Borrowed from `agent_loop_t` (`agent_exec.h:122`), not reinvented:
   `severity == "blocking"` whose `stable_key` was not already raised in a prior
   round. Semantic dedup stays in the aggregator for final presentation, but the
   engine's stop predicate is deterministic and unit-testable.
-- **Cost ceiling (shared, hard):** the existing `ensemble_max_cost_usd` cap is
-  now a *running* total across all rounds. The first implementation can enforce
-  this post-call, matching today's `delegate_ensemble_run`: estimate fan-out cost
-  after a round returns, add aggregator/judge costs after those calls return, and
-  stop before starting another round once the accumulated estimate has crossed the
-  cap. If a later phase wants true preflight enforcement, it must reserve budget
-  from prompt size and max-token limits before dispatch. In either case, cap
-  handling returns the **best artifact so far** with `cost_capped = 1`.
-- **Size ceiling:** prompts and artifacts are bounded. Current synthesis uses a
-  16KB prompt buffer and `delegate_ensemble_result_t.response` is 8KB; roundtable
-  prompts can grow by `task + artifact + peer notes + revisions`. P1 must define a
-  truncation or summary policy before dispatch, preferably reusing existing
-  delegate token-budget/context-shedding helpers, and must return a controlled
-  degrade result rather than failing on ordinary long peer outputs.
+- **Cost ceiling (shared, hard) — preflight, not only post-hoc.** The existing
+  `ensemble_max_cost_usd` cap is a *running* total across all rounds. Today's
+  single-shot path only checks cost *after* the fan-out has already spent it
+  (`delegate_ensemble.c:169-173`), so the cap reports but never prevents. Over R
+  rounds that compounds: post-hoc-only enforcement can overshoot by a full round ×
+  N participants before the loop notices. This proposal therefore enforces **at
+  the round boundary**: before dispatching round *n*, estimate that round's worst
+  case from `(participants × per-task max_tokens) + aggregator + judge` at
+  `ENSEMBLE_COST_PER_TOKEN`, and **do not start the round** if `accumulated +
+  estimate` would cross the cap. The post-call accounting still runs to true up the
+  real spend. Either way, cap handling returns the **best artifact so far** (§4,
+  keep-best) with `cost_capped = 1`.
+- **Size ceiling — bounded heap artifact, summarize-forward, no silent truncation.**
+  Today the result is a fixed `char response[8192]` (`delegate_ensemble.h:12`) and
+  synthesis a `char synthesis_buf[16384]` (`:215`), both silently
+  `snprintf`-truncated (`:181/200/233`) — the exact failure mode a growing
+  multi-round draft hits. The roundtable does not inherit this: `roundtable_result_t`
+  holds a **heap `char *artifact`** (grown to fit, freed by the caller, §4), and
+  per-round prompts are assembled under an explicit byte budget derived from the
+  participant context window. When `task + artifact + peer notes` would exceed the
+  budget, `build_round_prompt` **summarizes the oldest peer notes forward via one
+  aggregator pass** rather than truncating mid-token, and sets `degraded = 1` with a
+  `truncated` flag in the result so the condition is observable, never silent.
 
 ## §4 Engine shape (generalize, don't fork)
 
@@ -219,11 +289,13 @@ typedef struct {
 } roundtable_opts_t;
 
 typedef struct {
-   char artifact[16384];    /* final draft (A) or consolidated review (B) */
+   char *artifact;          /* heap, grown to fit; caller frees. best round (§3) */
    int rounds_run;
    int converged;           /* 1 = stopped on convergence, 0 = hit cap */
-   int degraded;            /* a round fell back to best-candidate */
-   int cost_capped;         /* running cost cap hit */
+   int degraded;            /* a round fell back to best-candidate, or summarized */
+   int truncated;           /* a peer note was summarized forward to fit budget */
+   int cost_capped;         /* running cost cap hit (preflight or post-hoc) */
+   int best_round;          /* which round produced the returned artifact */
    double cost_usd;         /* accumulated across all rounds + aggregators */
 } roundtable_result_t;
 
@@ -233,12 +305,29 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg,
 ```
 
 `delegate_roundtable_run` is a loop whose body is *the existing ensemble round*:
-build per-participant tasks (each task is routed to a configured participant, and
-each task's `user_prompt` is composed of the task + current artifact + peer notes
-via a bounded `build_round_prompt`), fan out (parallel or sequential per §2),
-apply cost/min-success/degrade with the same semantics as today, then call
-`run_aggregator` to fold the round into the next artifact. After each round, run
-the convergence check (§3) and break early.
+build per-participant tasks (each task routed to a distinct configured participant
+via the §0.1 `agent` selector, each `user_prompt` composed of task + current
+artifact + peer notes via a budget-bounded `build_round_prompt`), fan out (parallel
+or sequential per §2), apply cost/min-success/degrade with the same semantics as
+today, then call `run_aggregator` to fold the round into the next artifact. After
+each round, run the convergence check (§3) and break early.
+
+**Keep-best-so-far is the default, not an option.** A pathological round can make
+the draft *worse*, and the convergence judge only detects *low change*, not
+regression. So each round's aggregated artifact is scored (the same `reason`-role
+delta judge, scored against the task rather than the prior draft), the engine
+retains the **highest-scored** artifact across rounds, and `out->artifact` /
+`out->best_round` return that — never blindly the last round. This reuses the
+existing `best_candidate` idea (`delegate_ensemble.c:197`) one level up.
+
+**Fix the `srand` reseed while here.** `delegate_ensemble.c:212` calls
+`srand((unsigned)time(NULL))` on *every* invocation; two calls in the same second
+produce the same shuffle and it clobbers process-global RNG state. The roundtable
+shuffles **per round** (§2), so this latent bug would silently disable the
+position-bias control (identical orders every round within a second). The fix:
+seed once at process start (or use a local `rand_r` state threaded through
+`shuffle_indices`), and remove the per-call `srand`. The aggregate path inherits
+the fix; golden parity holds because the shuffle distribution is unchanged.
 
 Keep `delegate_ensemble_run` behavior frozen in the first implementation. Extract
 shared helpers where useful, but do not replace the public aggregate path until
@@ -284,55 +373,87 @@ Extend the parsed `ensemble.*` / new `roundtable.*` section
 
 Participants (`ensemble.reference_models`), aggregator
 (`ensemble.aggregator`), `min_successful`, and `max_cost_usd` are reused as the
-configuration source, with the participant-routing fix from §0. New fields land
-in `config.h`, `config.c` (defaults),
-`config_fields.c` (registration), `config_sections.c` (parse), and
-`config_save.c` (round-trip) — the same five-file pattern every config field in
-this tree follows.
+configuration source, with the participant-routing fix from §0.1.
+
+**Placement (corrected).** The `ensemble.*` fields are *not* registered in
+`config_fields.c`; they use a dedicated inline parser/saver pair
+(`config_parse_ensemble_section` at `config_sections.c:1068`, inverse in
+`config_save.c:62-81` — see the `config_save.c:29` comment naming the
+"dogfood/ensemble/integrity/identity" inline parsers). So the often-quoted
+"five-file pattern" does **not** describe these keys. The new `roundtable.*` keys
+land as follows, and because they are flat scalars (unlike the
+`reference_models` array) they *can* additionally be CLI-settable:
+
+- `config.h` — three new fields on `config_t` (`roundtable_max_rounds`,
+  `roundtable_converge_threshold`, `roundtable_turns[16]`).
+- `config.c` — defaults (3, 10, `"parallel"`), beside the ensemble defaults at
+  `config.c:507-509`.
+- `config_sections.c` — extend the existing inline ensemble section parser to read
+  the `roundtable.*` keys (one parser, one section).
+- `config_save.c` — extend the inverse saver for round-trip.
+- `config_fields.c` — register **only** the three flat scalars so `aimee config
+  get/set roundtable.max_rounds` works. (The array-valued `ensemble.*` keys stay
+  inline-only, as today.)
+
+This is a deliberate, stated decision rather than an inherited convention: scalars
+are CLI-settable; the array participant list is not.
 
 ## §7 Phasing
 
-1. **P0 — executable participant routing.** Make `ensemble.reference_models`
-   select the actual participant for each fan-out task instead of acting only as
-   candidate labels. This can be a per-task agent/model field, an explicit
-   temporary `default_agent` override per task, or another narrow routing helper.
-   Tests must prove three configured references invoke three distinct configured
-   participants when available.
+1. **P0 — fix the routing bug (§0.1) + the `srand` reseed.** Thread an optional
+   `agent` selector through `agent_task_t` → `parallel_worker` → `agent_run`,
+   resolving named agents the way `aux_router.c:51-58` already does; point each
+   ensemble fan-out task at `ensemble_reference_models[i]`. Move `srand` out of
+   the per-call path. **Un-stubbed routing test** (three configured references →
+   three distinct `agent_name` results), plus the existing stubbed ensemble tests
+   re-run green. This phase ships independently and repairs the marked-Done MoA
+   feature on its own; everything below builds on real fan-out.
 2. **P1 — engine generalization (`mode draft`, `turns parallel`).** Add
-   `delegate_roundtable_run` looping the existing round; add bounded
-   `build_round_prompt`; keep `delegate_ensemble_run` frozen while extracting
-   shared helpers. Running cost cap + degrade-to-best at loop level. Unit tests
-   sibling to `test_delegate_ensemble.c` (stubbed `agent_run_parallel`):
-   convergence stop, post-round cap stop, degrade path, prompt/artifact
-   truncation, and aggregate golden parity for the existing public path.
-3. **P2 — convergence + sequential turns.** Add the `reason`-role draft-delta
-   judge and `--turns sequential` (per-round shuffle). Tests for early-stop on a
-   stable draft and order-shuffling.
+   `delegate_roundtable_run` looping the existing round; add budget-bounded
+   `build_round_prompt` (summarize-forward, no silent truncation, §3); heap
+   `char *artifact` with keep-best-so-far (§4); **preflight + post-hoc** running
+   cost cap at loop level (§3). Keep `delegate_ensemble_run` frozen while
+   extracting shared helpers. Unit tests sibling to `test_delegate_ensemble.c`:
+   convergence stop, preflight cap stop, post-hoc cap stop, degrade path,
+   prompt-budget summarize-forward (assert `truncated` set, not silent),
+   keep-best-selects-not-last, and aggregate golden parity for the existing public
+   path.
+3. **P2 — convergence + sequential turns.** Add the `reason`-role delta judge
+   (dedicated judge prompt emitting the `{"completion":N}` shape that
+   `agent_loop_parse_completion` already parses, `agent_exec.h:144` — the stock
+   `reason` template alone does not emit that shape) and `--turns sequential`
+   (per-round shuffle via the fixed RNG). Tests for early-stop on a stable draft,
+   keep-best on a regressing draft, and order-shuffling.
 4. **P3 — review mode.** `--mode review`, structured-feedback JSON prompt,
    `stable_key`-based blocking-issue saturation stop, aggregator dedup, optional
-   `--apply` final draft turn.
+   `--apply` final draft turn. Tests for saturation stop and dedup.
 5. **P4 — CLI + config + docs.** `aimee delegate roundtable`, the `roundtable.*`
-   config keys, `MANUAL.md` section. Live-validate against the configured
-   delegates (minimax / mimo-2.5 / mistral) drafting and then reviewing a small
-   real proposal end-to-end.
+   config keys (inline parse/save + scalar registration in `config_fields.c`, §6),
+   `MANUAL.md` section. Live-validate against the configured delegates (minimax /
+   mimo-2.5 / mistral) — now genuinely distinct after P0 — drafting and then
+   reviewing a small real proposal end-to-end.
 
 ## §8 Risks / non-goals
 
 - **Cost.** R rounds × N participants × turn cost is roughly R× a single MoA
-  call. Mitigated by the running cost cap (§3), a low default `max_rounds = 3`,
-  and explicit post-round stop semantics. The CLI prints accumulated `cost_usd`
-  like `aggregate` does.
-- **Routing ambiguity.** The current ensemble implementation labels candidates
-  with `ensemble.reference_models` but does not route fan-out tasks to those
-  names. P0 exists so the roundtable cannot accidentally run repeated calls to
-  the default routed agent while presenting them as distinct peers.
-- **Prompt growth.** Multi-round prompts can exceed the current fixed buffers
-  quickly. P1 must bound prompt and artifact sizes before dispatch and test the
-  truncation/degrade behavior.
-- **Non-convergence / drift.** A pathological round could make the draft worse;
-  the convergence judge stops on *low* change but cannot detect *regression*. P2
-  can optionally keep the highest-scored intermediate artifact (the same
-  `best_candidate` idea, scored by the aggregator) rather than the last one.
+  call. Bounded by the **preflight** running cost cap (§3, refuses to start a round
+  that would cross the cap — not just post-hoc reporting), a low default
+  `max_rounds = 3`, and early convergence stops. The CLI prints accumulated
+  `cost_usd` like `aggregate` does.
+- **Routing ambiguity — resolved, not assumed away.** The shipped ensemble does
+  not route fan-out tasks to the configured reference names at all (the §0.1 bug).
+  P0 fixes this with a per-task `agent` selector and proves it with an un-stubbed
+  test, so the roundtable runs genuinely distinct peers rather than repeated calls
+  to one default agent presented as a panel.
+- **Prompt growth — handled by design.** Per-round prompts are assembled under an
+  explicit byte budget; over-budget peer notes are summarized forward (one
+  aggregator pass) and flagged `truncated`, never silently `snprintf`-cut. The
+  artifact is heap-grown rather than a fixed buffer (§3, §4).
+- **Non-convergence / drift — kept-best by default.** A pathological round can make
+  the draft worse, and the convergence judge detects only *low change*, not
+  *regression*. The engine therefore scores each round and returns the
+  **highest-scored** artifact (`best_round`), not the last (§4). This is default
+  behavior, not an opt-in.
 - **Not a new transport or service.** This is strictly an orchestration loop over
   existing agent execution; it adds no RPC, no persistence, no background job
   type. A roundtable is a single foreground `delegate` invocation, like
@@ -349,5 +470,8 @@ fail, and position-bias control** — and it is already CLI- and config-wired. A
 greenfield "debate" engine would re-derive all of that. Generalizing
 `delegate_ensemble.c` into a loop keeps one engine, one config section, one CLI
 family, makes the existing `aggregate` a provable special case after parity
-tests, and confines the new surface to participant routing, a loop, bounded prompt
-assembly, and a convergence check.
+tests, and confines the new surface to the §0.1 routing fix, a loop, budget-bounded
+prompt assembly, and a convergence check. As a bonus, generalizing here forces the
+fix of two latent defects in the shipped engine — the unrouted references (§0.1)
+and the per-call `srand` reseed (§4) — that the single-shot path has been quietly
+carrying.
