@@ -53,6 +53,40 @@ char *ingress_preinject_format_envelope(const char *context_block, const char *c
    return out;
 }
 
+char *ingress_preinject_format_code_block(const code_search_hit_t *hits, int n)
+{
+   if (!hits || n <= 0)
+      return NULL;
+   dstr_t d;
+   dstr_init(&d);
+   dstr_append_str(&d, "recommended (code):\n");
+   for (int i = 0; i < n; i++)
+   {
+      dstr_appendf(&d, "  - %s\n", hits[i].file_path);
+      /* One trimmed, single-line snippet so the agent sees why the file matched
+       * without paying for the whole match. Collapse whitespace runs. */
+      const char *s = hits[i].snippet;
+      if (s && s[0])
+      {
+         char line[160];
+         int j = 0;
+         for (const char *p = s; *p && j < (int)sizeof(line) - 1; p++)
+         {
+            char c = (*p == '\n' || *p == '\r' || *p == '\t') ? ' ' : *p;
+            if (c == ' ' && (j == 0 || line[j - 1] == ' '))
+               continue; /* skip leading / collapsed spaces */
+            line[j++] = c;
+         }
+         while (j > 0 && line[j - 1] == ' ')
+            j--;
+         line[j] = '\0';
+         if (line[0])
+            dstr_appendf(&d, "    > %s\n", line);
+      }
+   }
+   return dstr_steal(&d);
+}
+
 /* Pull the text out of a message `content` that is either a JSON string or an
  * array of {type, text} parts (the Responses content shape). Appends into d. */
 static void append_content_text(dstr_t *d, const cJSON *content)
@@ -115,23 +149,56 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    if (!cfg.ingress_preinject_enabled)
       return NULL;
 
-   char *block = kb_client_memory_context_block(query, "general", 5);
-   if (!block)
+   dstr_t block;
+   dstr_init(&block);
+   double score = 0.0;
+
+   /* Primary signal: code search over the turn query. The code index is the
+    * richest source, so recommended code files lead the envelope; the agent
+    * sees which files matter before it explores. Confidence scales with how
+    * many relevant files came back (no [0,1] rank is exposed by the search
+    * path, so map the hit count into the tiering primitive). */
+   code_search_hit_t hits[6];
+   int n = kb_client_index_code_search(query, NULL, hits, (int)(sizeof(hits) / sizeof(hits[0])));
+   if (n > 0)
+   {
+      char *code = ingress_preinject_format_code_block(hits, n);
+      if (code)
+      {
+         dstr_append_str(&block, code);
+         free(code);
+      }
+      double cs = (double)n / 6.0;
+      if (cs > score)
+         score = cs;
+   }
+
+   /* Secondary signal: durable memory context (the how/why), when present.
+    * Empty in deployments with no charter, so guarded. */
+   char *mem = kb_client_memory_context_block(query, "general", 5);
+   if (mem && mem[0])
+   {
+      int lines = 0;
+      for (const char *p = mem; *p; p++)
+         if (*p == '\n')
+            lines++;
+      if (block.len)
+         dstr_append_str(&block, "\n");
+      dstr_append_str(&block, mem);
+      double ms = lines >= 6 ? 0.7 : (lines >= 2 ? 0.4 : 0.1);
+      if (ms > score)
+         score = ms;
+   }
+   free(mem);
+
+   char *blk = dstr_steal(&block);
+   if (!blk || !blk[0])
+   {
+      free(blk);
       return NULL;
-
-   /* No score is exposed by the context-block path yet, so derive a coarse
-    * confidence from how much context came back: a multi-entry block is a
-    * stronger signal than a sparse one. This is the provisional source for the
-    * (unit-tested) ingress_preinject_confidence() tiering until the recall path
-    * surfaces graph_score. */
-   int lines = 0;
-   for (const char *p = block; *p; p++)
-      if (*p == '\n')
-         lines++;
-   double score = lines >= 6 ? 0.7 : (lines >= 2 ? 0.4 : 0.1);
-
-   char *env = ingress_preinject_format_envelope(block, ingress_preinject_confidence(score));
-   free(block);
+   }
+   char *env = ingress_preinject_format_envelope(blk, ingress_preinject_confidence(score));
+   free(blk);
    return env;
 }
 
