@@ -144,53 +144,103 @@ cJSON *kb_intel_demote_check_response(void)
 #define KB_INTEL_BANDIT_EXPORT_LIMIT 500
 #define KB_INTEL_BANDIT_EXPORT_BUFSZ (256 * 1024)
 
+/* Build one {decision_point, decisions, arm_stats} object for a decision point
+ * that is actually present in the bandit decision log.  Arms are discovered from
+ * the log (so they appear even before any reward has been observed). */
+static cJSON *intel_bandit_point_obj(const char *decision_point)
+{
+   cJSON *pt = cJSON_CreateObject();
+   if (!pt)
+      return NULL;
+   cJSON_AddStringToObject(pt, "decision_point", decision_point);
+
+   /* Closed decisions for offline replay. */
+   char *buf = malloc(KB_INTEL_BANDIT_EXPORT_BUFSZ);
+   cJSON *decisions = NULL;
+   if (buf)
+   {
+      buf[0] = '\0';
+      db2_bandit_decisions_export(decision_point, KB_INTEL_BANDIT_EXPORT_LIMIT, buf,
+                                  KB_INTEL_BANDIT_EXPORT_BUFSZ);
+      decisions = cJSON_ParseWithLength(buf, strlen(buf));
+      free(buf);
+   }
+   cJSON_AddItemToObject(pt, "decisions", decisions ? decisions : cJSON_CreateArray());
+
+   /* Per-arm stats, over the arms observed in the log for this point. */
+   cJSON *arm_stats_arr = cJSON_CreateArray();
+   char arms_buf[8192];
+   arms_buf[0] = '\0';
+   db2_bandit_arms_list(decision_point, arms_buf, sizeof(arms_buf));
+   cJSON *arms = cJSON_ParseWithLength(arms_buf, strlen(arms_buf));
+   if (cJSON_IsArray(arms))
+   {
+      cJSON *arm;
+      cJSON_ArrayForEach(arm, arms)
+      {
+         if (!cJSON_IsString(arm) || !arm->valuestring[0])
+            continue;
+         db2_bandit_arm_stats_t stats;
+         memset(&stats, 0, sizeof(stats));
+         db2_bandit_arm_stats_read(decision_point, arm->valuestring, &stats);
+
+         cJSON *entry = cJSON_CreateObject();
+         cJSON_AddStringToObject(entry, "arm_id", arm->valuestring);
+         cJSON_AddNumberToObject(entry, "n_decisions", (double)stats.n_decisions);
+         cJSON_AddNumberToObject(entry, "n_rewards", (double)stats.n_rewards);
+         cJSON_AddNumberToObject(entry, "sum_reward", stats.sum_reward);
+         cJSON_AddNumberToObject(entry, "posterior_alpha", stats.posterior_alpha);
+         cJSON_AddNumberToObject(entry, "posterior_beta", stats.posterior_beta);
+         cJSON_AddItemToArray(arm_stats_arr, entry);
+      }
+   }
+   cJSON_Delete(arms);
+   cJSON_AddItemToObject(pt, "arm_stats", arm_stats_arr);
+   return pt;
+}
+
+/* Export bandit state for every decision point that has logged decisions.
+ *
+ * Data-driven: the set of points and their arms is read from the decision log
+ * (db2_bandit_decision_points_list / db2_bandit_arms_list), not hard-coded, so
+ * introspection reflects what is actually sampled at runtime.  The top-level
+ * `decision_point` mirrors the primary (most-recent) point for backward
+ * compatibility; `points` carries the full per-point breakdown. */
 cJSON *kb_intel_bandit_export_response(void)
 {
-   const char *decision_point = "kb_fusion_mode";
-   static const char *arms[] = {"rrf", "static_alpha", "dynamic_alpha"};
-   int n_arms = 3;
-
-   char *buf = malloc(KB_INTEL_BANDIT_EXPORT_BUFSZ);
-   if (!buf)
-      return NULL;
-
-   buf[0] = '\0';
-   db2_bandit_decisions_export(decision_point, KB_INTEL_BANDIT_EXPORT_LIMIT, buf,
-                               KB_INTEL_BANDIT_EXPORT_BUFSZ);
-
-   cJSON *decisions = cJSON_ParseWithLength(buf, strlen(buf));
-   free(buf);
-   if (!decisions)
-      decisions = cJSON_CreateArray();
-
-   cJSON *arm_stats_arr = cJSON_CreateArray();
-   for (int i = 0; i < n_arms; i++)
-   {
-      db2_bandit_arm_stats_t stats;
-      memset(&stats, 0, sizeof(stats));
-      db2_bandit_arm_stats_read(decision_point, arms[i], &stats);
-
-      cJSON *entry = cJSON_CreateObject();
-      cJSON_AddStringToObject(entry, "arm_id", arms[i]);
-      cJSON_AddNumberToObject(entry, "n_decisions", (double)stats.n_decisions);
-      cJSON_AddNumberToObject(entry, "n_rewards", (double)stats.n_rewards);
-      cJSON_AddNumberToObject(entry, "sum_reward", stats.sum_reward);
-      cJSON_AddNumberToObject(entry, "posterior_alpha", stats.posterior_alpha);
-      cJSON_AddNumberToObject(entry, "posterior_beta", stats.posterior_beta);
-      cJSON_AddItemToArray(arm_stats_arr, entry);
-   }
+   char points_buf[8192];
+   points_buf[0] = '\0';
+   db2_bandit_decision_points_list(points_buf, sizeof(points_buf));
+   cJSON *names = cJSON_ParseWithLength(points_buf, strlen(points_buf));
 
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
    {
-      cJSON_Delete(decisions);
-      cJSON_Delete(arm_stats_arr);
+      cJSON_Delete(names);
       return NULL;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "decision_point", decision_point);
-   cJSON_AddItemToObject(resp, "decisions", decisions);
-   cJSON_AddItemToObject(resp, "arm_stats", arm_stats_arr);
+
+   cJSON *points = cJSON_CreateArray();
+   const char *primary = "";
+   if (cJSON_IsArray(names))
+   {
+      cJSON *name;
+      cJSON_ArrayForEach(name, names)
+      {
+         if (!cJSON_IsString(name) || !name->valuestring[0])
+            continue;
+         if (!primary[0])
+            primary = name->valuestring;
+         cJSON *pt = intel_bandit_point_obj(name->valuestring);
+         if (pt)
+            cJSON_AddItemToArray(points, pt);
+      }
+   }
+   /* Back-compat: a single primary point at the top level (string is copied). */
+   cJSON_AddStringToObject(resp, "decision_point", primary);
+   cJSON_AddItemToObject(resp, "points", points);
+   cJSON_Delete(names);
    return resp;
 }
 

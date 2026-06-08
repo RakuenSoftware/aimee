@@ -982,33 +982,47 @@ static void kb_cmd_bandit(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   cJSON *dp = cJSON_GetObjectItemCaseSensitive(resp, "decision_point");
-   cJSON *decisions = cJSON_GetObjectItemCaseSensitive(resp, "decisions");
-   cJSON *arm_stats = cJSON_GetObjectItemCaseSensitive(resp, "arm_stats");
-
-   printf("Bandit export: %s\n", cJSON_IsString(dp) ? dp->valuestring : "kb_fusion_mode");
-   printf("  decisions: %d closed\n", cJSON_IsArray(decisions) ? cJSON_GetArraySize(decisions) : 0);
-
-   if (cJSON_IsArray(arm_stats) && cJSON_GetArraySize(arm_stats) > 0)
+   cJSON *points = cJSON_GetObjectItemCaseSensitive(resp, "points");
+   if (!cJSON_IsArray(points) || cJSON_GetArraySize(points) == 0)
    {
-      printf("\n  Arm stats:\n");
-      cJSON *entry;
-      cJSON_ArrayForEach(entry, arm_stats)
+      printf("Bandit export: no decision points with logged decisions\n");
+      cJSON_Delete(resp);
+      return;
+   }
+
+   cJSON *pt;
+   cJSON_ArrayForEach(pt, points)
+   {
+      cJSON *dp = cJSON_GetObjectItemCaseSensitive(pt, "decision_point");
+      cJSON *decisions = cJSON_GetObjectItemCaseSensitive(pt, "decisions");
+      cJSON *arm_stats = cJSON_GetObjectItemCaseSensitive(pt, "arm_stats");
+
+      printf("Bandit export: %s\n", cJSON_IsString(dp) ? dp->valuestring : "?");
+      printf("  decisions: %d closed\n",
+             cJSON_IsArray(decisions) ? cJSON_GetArraySize(decisions) : 0);
+
+      if (cJSON_IsArray(arm_stats) && cJSON_GetArraySize(arm_stats) > 0)
       {
-         cJSON *arm = cJSON_GetObjectItemCaseSensitive(entry, "arm_id");
-         cJSON *nd = cJSON_GetObjectItemCaseSensitive(entry, "n_decisions");
-         cJSON *nr = cJSON_GetObjectItemCaseSensitive(entry, "n_rewards");
-         cJSON *sr = cJSON_GetObjectItemCaseSensitive(entry, "sum_reward");
-         cJSON *alpha = cJSON_GetObjectItemCaseSensitive(entry, "posterior_alpha");
-         cJSON *beta = cJSON_GetObjectItemCaseSensitive(entry, "posterior_beta");
-         printf("    %-16s decisions=%lld rewards=%lld sum=%.2f alpha=%.2f beta=%.2f\n",
-                cJSON_IsString(arm) ? arm->valuestring : "?",
-                cJSON_IsNumber(nd) ? (long long)nd->valuedouble : 0LL,
-                cJSON_IsNumber(nr) ? (long long)nr->valuedouble : 0LL,
-                cJSON_IsNumber(sr) ? sr->valuedouble : 0.0,
-                cJSON_IsNumber(alpha) ? alpha->valuedouble : 0.0,
-                cJSON_IsNumber(beta) ? beta->valuedouble : 0.0);
+         printf("  Arm stats:\n");
+         cJSON *entry;
+         cJSON_ArrayForEach(entry, arm_stats)
+         {
+            cJSON *arm = cJSON_GetObjectItemCaseSensitive(entry, "arm_id");
+            cJSON *nd = cJSON_GetObjectItemCaseSensitive(entry, "n_decisions");
+            cJSON *nr = cJSON_GetObjectItemCaseSensitive(entry, "n_rewards");
+            cJSON *sr = cJSON_GetObjectItemCaseSensitive(entry, "sum_reward");
+            cJSON *alpha = cJSON_GetObjectItemCaseSensitive(entry, "posterior_alpha");
+            cJSON *beta = cJSON_GetObjectItemCaseSensitive(entry, "posterior_beta");
+            printf("    %-24s decisions=%lld rewards=%lld sum=%.2f alpha=%.2f beta=%.2f\n",
+                   cJSON_IsString(arm) ? arm->valuestring : "?",
+                   cJSON_IsNumber(nd) ? (long long)nd->valuedouble : 0LL,
+                   cJSON_IsNumber(nr) ? (long long)nr->valuedouble : 0LL,
+                   cJSON_IsNumber(sr) ? sr->valuedouble : 0.0,
+                   cJSON_IsNumber(alpha) ? alpha->valuedouble : 0.0,
+                   cJSON_IsNumber(beta) ? beta->valuedouble : 0.0);
+         }
       }
+      printf("\n");
    }
    cJSON_Delete(resp);
 }

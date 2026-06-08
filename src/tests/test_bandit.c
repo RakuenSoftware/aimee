@@ -150,6 +150,39 @@ static void test_bandit_explore_stats(void)
    printf("  bandit_explore_stats: ok\n");
 }
 
+/* ---- 7. decision_points_list / arms_list ---- */
+static void test_bandit_enumeration(void)
+{
+   open_db();
+
+   /* Two points, the first with two arms; a sibling point must not leak in. */
+   assert(db2_bandit_decision_insert("enum-a-1", "kb_memory_retrieval_limit", "10", "", 0.5, 0) == 0);
+   assert(db2_bandit_decision_insert("enum-a-2", "kb_memory_retrieval_limit", "20", "", 0.5, 0) == 0);
+   assert(db2_bandit_decision_insert("enum-a-3", "kb_memory_retrieval_limit", "10", "", 0.5, 0) == 0);
+   assert(db2_bandit_decision_insert("enum-b-1", "other_dp", "x", "", 0.5, 0) == 0);
+
+   char buf[2048];
+
+   /* Points list: both points present, none invented. */
+   assert(db2_bandit_decision_points_list(buf, sizeof(buf)) == 0);
+   assert(strstr(buf, "\"kb_memory_retrieval_limit\"") != NULL);
+   assert(strstr(buf, "\"other_dp\"") != NULL);
+   assert(strstr(buf, "kb_fusion_mode") == NULL);
+
+   /* Arms list: distinct arms for the point, scoped (no sibling-point arm). */
+   assert(db2_bandit_arms_list("kb_memory_retrieval_limit", buf, sizeof(buf)) == 0);
+   assert(strstr(buf, "\"10\"") != NULL);
+   assert(strstr(buf, "\"20\"") != NULL);
+   assert(strstr(buf, "\"x\"") == NULL);
+
+   /* Unknown point: empty array, not an error. */
+   assert(db2_bandit_arms_list("no_such_point", buf, sizeof(buf)) == 0);
+   assert(strcmp(buf, "[]") == 0);
+
+   close_db();
+   printf("  bandit_enumeration: ok\n");
+}
+
 /* ---- 6. bandit_replay_evidence ---- */
 static void test_bandit_replay_evidence(void)
 {
@@ -196,6 +229,7 @@ int main(void)
    test_bandit_reward_closed();
    test_config_bandit_defaults();
    test_bandit_explore_stats();
+   test_bandit_enumeration();
    test_bandit_replay_evidence();
 
    printf("All bandit tests passed.\n");
