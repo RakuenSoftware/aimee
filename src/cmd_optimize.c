@@ -531,7 +531,33 @@ static double beta_lower_95(double a, double b)
    return lo < 0.0 ? 0.0 : (lo > 1.0 ? 1.0 : lo);
 }
 
-/* aimee optimize promote --point <p> --candidate <arm> [--guarded] [--suite <s>]:
+/* Persist `arm` as the production default for `point` (dispatches optimize.promote).
+ * On success returns 0 and fills rollback_out with the prior default. */
+static int optimize_apply_promotion(const char *point, const char *arm, char *rollback_out,
+                                    size_t rb_len)
+{
+   if (rollback_out && rb_len)
+      rollback_out[0] = '\0';
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return -1;
+   cJSON_AddStringToObject(req, "method", "optimize.promote");
+   cJSON_AddStringToObject(req, "decision_point", point);
+   cJSON_AddStringToObject(req, "arm", arm);
+   cJSON *resp = cli_v1_dispatch_local(req, 15000);
+   cJSON_Delete(req);
+   if (!resp)
+      return -1;
+   const char *status = cJSON_GetStringValue(cJSON_GetObjectItem(resp, "status"));
+   const char *rb = cJSON_GetStringValue(cJSON_GetObjectItem(resp, "rollback_arm"));
+   int rc = (status && strcmp(status, "ok") == 0) ? 0 : -1;
+   if (rc == 0 && rb && rollback_out && rb_len)
+      snprintf(rollback_out, rb_len, "%s", rb);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+/* aimee optimize promote --point <p> --candidate <arm> [--guarded] [--suite <s>] [--apply]:
  * evaluate whether the candidate arm clears the promotion gate against the
  * current best (incumbent) arm, and report the verdict + rollback metadata. The
  * gate: the candidate's 95% posterior credible lower bound >= the incumbent's
@@ -542,7 +568,7 @@ static int optimize_cmd_promote(int argc, char **argv, int json_output)
 {
    const char *point = optimize_arg_point(argc, argv);
    const char *cand = NULL, *suite = NULL;
-   int guarded = 0;
+   int guarded = 0, apply = 0;
    for (int i = 0; i < argc; i++)
    {
       if (strcmp(argv[i], "--candidate") == 0 && i + 1 < argc)
@@ -551,11 +577,13 @@ static int optimize_cmd_promote(int argc, char **argv, int json_output)
          suite = argv[++i];
       else if (strcmp(argv[i], "--guarded") == 0)
          guarded = 1;
+      else if (strcmp(argv[i], "--apply") == 0)
+         apply = 1;
    }
    if (!point || !cand)
    {
       fprintf(stderr, "usage: aimee optimize promote --point <decision_point> --candidate <arm> "
-                      "[--guarded] [--suite <s>]\n");
+                      "[--guarded] [--suite <s>] [--apply]\n");
       return 2;
    }
 
@@ -621,6 +649,14 @@ static int optimize_cmd_promote(int argc, char **argv, int json_output)
 
    int gate_pass = posterior_ok && bench_ok;
 
+   /* Apply: persist `cand` as the production default, unless --guarded blocks it
+    * on a failed gate. Without --apply this is an evaluation only. */
+   int blocked = apply && guarded && !gate_pass;
+   int applied = 0;
+   char applied_rb[64] = "";
+   if (apply && !blocked)
+      applied = (optimize_apply_promotion(point, cand, applied_rb, sizeof(applied_rb)) == 0);
+
    if (json_output)
    {
       cJSON *out = cJSON_CreateObject();
@@ -638,13 +674,14 @@ static int optimize_cmd_promote(int argc, char **argv, int json_output)
       }
       cJSON_AddBoolToObject(out, "gate_pass", gate_pass);
       cJSON *rb = cJSON_CreateObject();
-      cJSON_AddStringToObject(rb, "rollback_arm", incumbent);
+      cJSON_AddStringToObject(rb, "rollback_arm", applied ? applied_rb : incumbent);
       cJSON_AddItemToObject(out, "rollback", rb);
-      cJSON_AddStringToObject(out, "applied", "no (evaluation only)");
+      cJSON_AddStringToObject(out, "applied",
+                             applied ? "yes" : (blocked ? "blocked" : (apply ? "failed" : "no")));
       optimize_print_json(out);
       cJSON_Delete(out);
       cJSON_Delete(resp);
-      return (guarded && !gate_pass) ? 1 : 0;
+      return (blocked || (apply && !applied)) ? 1 : 0;
    }
 
    printf("Promotion gate for %s: candidate=%s vs incumbent=%s\n", point, cand, incumbent);
@@ -653,15 +690,18 @@ static int optimize_cmd_promote(int argc, char **argv, int json_output)
    if (bench_checked)
       printf("  benchmark: ndcg@10 delta=%+.4f -> %s\n", bench_delta, bench_ok ? "PASS" : "FAIL");
    printf("  gate: %s\n", gate_pass ? "PASS" : "FAIL");
-   printf("  rollback arm (incumbent): %s\n", incumbent);
-   if (guarded && !gate_pass)
-      printf("  --guarded: promotion BLOCKED (gate failed)\n");
-   else if (gate_pass)
-      printf("  decision: %s clears the gate (apply to the production default to promote)\n", cand);
-   printf("  note: evaluation only — no production default changed.\n");
+   if (blocked)
+      printf("  --apply BLOCKED under --guarded (gate failed); production default unchanged.\n");
+   else if (applied)
+      printf("  applied: %s is now the production default for %s (rollback arm: %s)\n", cand, point,
+             applied_rb[0] ? applied_rb : "(none)");
+   else if (apply)
+      printf("  apply FAILED — could not persist the promotion; default unchanged.\n");
+   else
+      printf("  evaluation only (rollback would be %s) — pass --apply to promote.\n", incumbent);
 
    cJSON_Delete(resp);
-   return (guarded && !gate_pass) ? 1 : 0;
+   return (blocked || (apply && !applied)) ? 1 : 0;
 }
 
 static void optimize_usage(void)
@@ -674,7 +714,7 @@ static void optimize_usage(void)
            "  replay-record --point <name> --file <f>  Record a replay result (benchmark_trace)\n"
            "  run [--suite <s>] [--arm <a>]       Run the offline benchmark suite (ranks baseline vs on)\n"
            "  compare --baseline <a> --candidate <b> [--suite <s>]  Per-metric delta between two arms\n"
-           "  promote --point <p> --candidate <a> [--guarded] [--suite <s>]  Evaluate the promotion gate\n");
+           "  promote --point <p> --candidate <a> [--guarded] [--suite <s>] [--apply]  Gate (and optionally apply) a promotion\n");
 }
 
 int cmd_optimize_run(int argc, char **argv, int json_output)

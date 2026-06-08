@@ -820,6 +820,22 @@ int kb_bandit_reward(const config_t *cfg, const char *decision_point, const char
    return 0;
 }
 
+int db2_bandit_promotion_get(const char *decision_point, char *arm_out, size_t arm_out_len)
+{
+   (void)decision_point;
+   if (arm_out && arm_out_len)
+      arm_out[0] = '\0';
+   return -1; /* no promotion in tests */
+}
+int db2_bandit_promotion_set(const char *decision_point, const char *arm_id,
+                             const char *rollback_arm)
+{
+   (void)decision_point;
+   (void)arm_id;
+   (void)rollback_arm;
+   return 0;
+}
+
 int db2_bandit_decision_points_list(char *buf, size_t len)
 {
    /* The data-driven export asks the log which points exist; return the one

@@ -26,4 +26,9 @@ cJSON *kb_intel_bandit_close_response(const char *body_json, int body_len);
 int kb_intel_bandit_sample_http(const char *body, int body_len, char *out_buf, int out_cap);
 int kb_intel_bandit_close_http(const char *body, int body_len, char *out_buf, int out_cap);
 
+/* bandit.promote: persist the production-default arm for a decision point
+ * (body {decision_point, arm}); returns {status, rollback_arm}. */
+cJSON *kb_intel_bandit_promote_response(const char *body_json, int body_len);
+int kb_intel_bandit_promote_http(const char *body, int body_len, char *out_buf, int out_cap);
+
 #endif /* DEC_KB_INTEL_PAYLOAD_H */

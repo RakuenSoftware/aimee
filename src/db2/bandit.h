@@ -75,6 +75,13 @@ extern "C"
     * reward has been observed.  Returns 0 on success, -1 on error. */
    int db2_bandit_arms_list(const char *decision_point, char *buf, size_t len);
 
+   /* Promoted (production-default) arm per decision point. get writes the arm into
+    * arm_out and returns 0, or -1 when no promotion exists. set upserts the
+    * promotion (recording rollback_arm, the prior default). Returns 0 on success. */
+   int db2_bandit_promotion_get(const char *decision_point, char *arm_out, size_t arm_out_len);
+   int db2_bandit_promotion_set(const char *decision_point, const char *arm_id,
+                                const char *rollback_arm);
+
 #ifdef __cplusplus
 }
 #endif

@@ -494,3 +494,47 @@ int kb_intel_bandit_close_http(const char *body, int body_len, char *out_buf, in
       return 500;
    return intel_bandit_emit_http(kb_intel_bandit_close_response(body, body_len), out_buf, out_cap);
 }
+
+/* bandit.promote: persist {decision_point, arm} as the production-default arm
+ * (consumers honour it when live sampling is off), recording the prior default
+ * as rollback. Returns {status, rollback_arm}. */
+cJSON *kb_intel_bandit_promote_response(const char *body_json, int body_len)
+{
+   if (!body_json || body_len <= 0)
+      return intel_bandit_replay_err("missing body");
+   cJSON *body = cJSON_ParseWithLength(body_json, (size_t)body_len);
+   if (!body || !cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return intel_bandit_replay_err("body must be a JSON object");
+   }
+   const char *dp = cJSON_GetStringValue(cJSON_GetObjectItem(body, "decision_point"));
+   const char *arm = cJSON_GetStringValue(cJSON_GetObjectItem(body, "arm"));
+   if (!dp || !dp[0] || !arm || !arm[0])
+   {
+      cJSON_Delete(body);
+      return intel_bandit_replay_err("decision_point and arm are required");
+   }
+
+   char rollback[KB_BANDIT_MAX_ARM_ID] = "";
+   db2_bandit_promotion_get(dp, rollback, sizeof(rollback)); /* prior default, if any */
+   int rc = db2_bandit_promotion_set(dp, arm, rollback);
+   cJSON_Delete(body);
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   cJSON_AddStringToObject(resp, "status", rc == 0 ? "ok" : "error");
+   if (rc == 0)
+      cJSON_AddStringToObject(resp, "rollback_arm", rollback);
+   else
+      cJSON_AddStringToObject(resp, "message", "failed to persist promotion");
+   return resp;
+}
+
+int kb_intel_bandit_promote_http(const char *body, int body_len, char *out_buf, int out_cap)
+{
+   if (!out_buf || out_cap <= 0)
+      return 500;
+   return intel_bandit_emit_http(kb_intel_bandit_promote_response(body, body_len), out_buf, out_cap);
+}

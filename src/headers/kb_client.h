@@ -844,6 +844,9 @@ int kb_client_bandit_sample(const char *decision_point, const char *const *arms,
                             size_t decision_id_out_len);
 int kb_client_bandit_close(const char *decision_point, const char *decision_id, const char *arm_id,
                            double reward);
+/* Persist the production-default arm for a decision point; raw kb JSON
+ * ({status, rollback_arm}), caller frees. */
+char *kb_client_bandit_promote_json(const char *decision_point, const char *arm);
 
 /* artifacts.list_proposed: list proposed artifacts by surface (NULL = all).
  * Returns heap-allocated JSON string; caller frees. */

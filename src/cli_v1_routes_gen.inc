@@ -115,6 +115,7 @@ static const struct
     {"model.refresh", "POST", "/v1/model/refresh"},
     {"model.show", "GET", "/v1/model/show"},
     {"optimize.export", "GET", "/v1/optimize/export"},
+    {"optimize.promote", "POST", "/v1/optimize/promote"},
     {"optimize.replay_record", "POST", "/v1/optimize/replay-record"},
     {"provider.get", "POST", "/v1/provider/get"},
     {"provider.list", "GET", "/v1/provider/list"},
