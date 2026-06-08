@@ -860,13 +860,14 @@ static void ensure_claude_code_mcp(const char *settings_path)
    cJSON_Delete(root);
 }
 
-/* Ensure `hooks.<event>` contains a no-matcher entry running
- * `AIMEE_HOOK_CLIENT=claude <aimee> <subcommand>`. Idempotent (keyed on the
+/* Ensure `hooks.<event>` contains an entry running
+ * `AIMEE_HOOK_CLIENT=claude <aimee> <subcommand>`, optionally scoped to
+ * `matcher` (NULL = fire on every event of this type). Idempotent (keyed on the
  * subcommand substring); sets *dirty when it adds the array or the entry. Used
- * for the context-pre-injection hooks (UserPromptSubmit, PreCompact) which fire
- * on every event and carry no matcher. */
+ * for the context-pre-injection hooks (UserPromptSubmit, PreCompact — no
+ * matcher) and the attention guard (PreToolUse — matcher-scoped). */
 static void ensure_aimee_event_hook(cJSON *hooks, const char *event, const char *subcommand,
-                                    int *dirty)
+                                    const char *matcher, int *dirty)
 {
    cJSON *arr = cJSON_GetObjectItemCaseSensitive(hooks, event);
    if (!cJSON_IsArray(arr))
@@ -897,6 +898,8 @@ static void ensure_aimee_event_hook(cJSON *hooks, const char *event, const char 
    cJSON *hook = cJSON_CreateObject();
    if (entry && hook_arr && hook)
    {
+      if (matcher && matcher[0])
+         cJSON_AddStringToObject(entry, "matcher", matcher);
       cJSON_AddStringToObject(hook, "type", "command");
       cJSON_AddStringToObject(hook, "command", cmd);
       cJSON_AddItemToArray(hook_arr, hook);
@@ -1018,8 +1021,13 @@ static void ensure_claude_code_hooks(const char *settings_path)
    /* Context pre-injection hooks: the P1 per-turn UserPromptSubmit envelope and
     * the P3 PreCompact re-prime. Both fire with no matcher and soft-fail, so
     * they never block a turn. */
-   ensure_aimee_event_hook(hooks, "UserPromptSubmit", "user-prompt-submit", &dirty);
-   ensure_aimee_event_hook(hooks, "PreCompact", "pre-compact", &dirty);
+   ensure_aimee_event_hook(hooks, "UserPromptSubmit", "user-prompt-submit", NULL, &dirty);
+   ensure_aimee_event_hook(hooks, "PreCompact", "pre-compact", NULL, &dirty);
+   /* P3 attention guard: PreToolUse hook scoped to read/edit/destructive tools;
+    * accrues per-file attention and blocks hard-destructive ops on files the
+    * session has actively touched. */
+   ensure_aimee_event_hook(hooks, "PreToolUse", "attention-guard",
+                           "Read|Edit|Write|MultiEdit|NotebookEdit|Bash", &dirty);
 
    if (dirty)
    {

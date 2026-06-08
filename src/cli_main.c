@@ -4,6 +4,7 @@
 #include "cli_remote.h"
 #include "cli_client.h"
 #include "cli_session_start.h"
+#include "cli_attention_guard.h"
 #include "cli_mcp_serve.h"
 #include "acp_server.h"
 #include "cli_profile.h"
@@ -1808,6 +1809,10 @@ int main(int argc, char **argv)
    /* PreCompact hook (P3 re-prime; settings.json wires it as `aimee pre-compact`). */
    if (strcmp(cmd, "pre-compact") == 0)
       return handle_pre_compact();
+
+   /* PreToolUse attention guard (P3; settings.json wires it as `aimee attention-guard`). */
+   if (strcmp(cmd, "attention-guard") == 0)
+      return handle_attention_guard();
 
    /* agent token: read access_token from local auth file; no server needed.
     * This command is called by agent_resolve_auth via safe_exec_capture so it
