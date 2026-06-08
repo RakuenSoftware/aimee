@@ -9,6 +9,7 @@
  * client. See docs/proposals/pending/optimization-surface.md (P1/P2). */
 #include "cJSON.h"
 #include "cli_client.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -486,6 +487,183 @@ static int optimize_cmd_compare(int argc, char **argv, int json_output)
    return 0;
 }
 
+/* ── guarded promotion (optimize promote) ─────────────────────────────────── */
+
+/* Find an arm_stats entry for `arm` within a point object. */
+static cJSON *optimize_arm_stats(cJSON *pt, const char *arm)
+{
+   cJSON *arr = pt ? cJSON_GetObjectItemCaseSensitive(pt, "arm_stats") : NULL;
+   if (!cJSON_IsArray(arr) || !arm)
+      return NULL;
+   cJSON *e;
+   cJSON_ArrayForEach(e, arr)
+   {
+      cJSON *id = cJSON_GetObjectItemCaseSensitive(e, "arm_id");
+      if (cJSON_IsString(id) && strcmp(id->valuestring, arm) == 0)
+         return e;
+   }
+   return NULL;
+}
+
+static double arm_alpha(cJSON *e)
+{
+   cJSON *v = e ? cJSON_GetObjectItemCaseSensitive(e, "posterior_alpha") : NULL;
+   return cJSON_IsNumber(v) ? v->valuedouble : 1.0;
+}
+static double arm_beta(cJSON *e)
+{
+   cJSON *v = e ? cJSON_GetObjectItemCaseSensitive(e, "posterior_beta") : NULL;
+   return cJSON_IsNumber(v) ? v->valuedouble : 1.0;
+}
+static double beta_mean(double a, double b)
+{
+   return (a + b > 0.0) ? a / (a + b) : 0.0;
+}
+/* ~95% Beta credible lower bound (normal approximation), clamped to [0,1]. */
+static double beta_lower_95(double a, double b)
+{
+   double n = a + b;
+   if (n <= 0.0)
+      return 0.0;
+   double mean = a / n;
+   double var = (a * b) / (n * n * (n + 1.0));
+   double lo = mean - 1.96 * sqrt(var);
+   return lo < 0.0 ? 0.0 : (lo > 1.0 ? 1.0 : lo);
+}
+
+/* aimee optimize promote --point <p> --candidate <arm> [--guarded] [--suite <s>]:
+ * evaluate whether the candidate arm clears the promotion gate against the
+ * current best (incumbent) arm, and report the verdict + rollback metadata. The
+ * gate: the candidate's 95% posterior credible lower bound >= the incumbent's
+ * posterior mean, AND (when --suite is given) no benchmark regression on ndcg@10.
+ * This reports the gated decision; applying it to the production default is a
+ * separate, deliberately-deferred step (no production change here). */
+static int optimize_cmd_promote(int argc, char **argv, int json_output)
+{
+   const char *point = optimize_arg_point(argc, argv);
+   const char *cand = NULL, *suite = NULL;
+   int guarded = 0;
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--candidate") == 0 && i + 1 < argc)
+         cand = argv[++i];
+      else if (strcmp(argv[i], "--suite") == 0 && i + 1 < argc)
+         suite = argv[++i];
+      else if (strcmp(argv[i], "--guarded") == 0)
+         guarded = 1;
+   }
+   if (!point || !cand)
+   {
+      fprintf(stderr, "usage: aimee optimize promote --point <decision_point> --candidate <arm> "
+                      "[--guarded] [--suite <s>]\n");
+      return 2;
+   }
+
+   cJSON *resp = optimize_fetch();
+   if (!resp)
+      return 1;
+   cJSON *pt = optimize_find_point(resp, point);
+   cJSON *arr = pt ? cJSON_GetObjectItemCaseSensitive(pt, "arm_stats") : NULL;
+   if (!cJSON_IsArray(arr) || cJSON_GetArraySize(arr) == 0)
+   {
+      fprintf(stderr, "optimize: %s has no arm stats yet (need closed decisions to promote)\n",
+              point);
+      cJSON_Delete(resp);
+      return 1;
+   }
+
+   /* Incumbent = arm with the highest posterior mean (excluding the candidate). */
+   cJSON *cand_e = optimize_arm_stats(pt, cand);
+   if (!cand_e)
+   {
+      fprintf(stderr, "optimize: candidate arm '%s' has no stats for %s\n", cand, point);
+      cJSON_Delete(resp);
+      return 1;
+   }
+   const char *incumbent = NULL;
+   double best_mean = -1.0;
+   cJSON *e;
+   cJSON_ArrayForEach(e, arr)
+   {
+      cJSON *id = cJSON_GetObjectItemCaseSensitive(e, "arm_id");
+      if (!cJSON_IsString(id) || strcmp(id->valuestring, cand) == 0)
+         continue;
+      double m = beta_mean(arm_alpha(e), arm_beta(e));
+      if (m > best_mean)
+      {
+         best_mean = m;
+         incumbent = id->valuestring;
+      }
+   }
+   if (!incumbent)
+      incumbent = cand; /* only one arm; nothing to beat */
+
+   double c_lo = beta_lower_95(arm_alpha(cand_e), arm_beta(cand_e));
+   double c_mean = beta_mean(arm_alpha(cand_e), arm_beta(cand_e));
+   int posterior_ok = (c_lo >= best_mean);
+
+   /* Optional benchmark non-regression gate. */
+   int bench_checked = 0, bench_ok = 1;
+   double bench_delta = 0.0;
+   if (suite)
+   {
+      cJSON *cb = optimize_run_arm(suite, cand, NULL, NULL);
+      cJSON *ib = optimize_run_arm(suite, incumbent, NULL, NULL);
+      if (cb && ib)
+      {
+         bench_checked = 1;
+         bench_delta = opt_metric(cb, "ndcg_10") - opt_metric(ib, "ndcg_10");
+         bench_ok = (bench_delta >= 0.0);
+      }
+      cJSON_Delete(cb);
+      cJSON_Delete(ib);
+   }
+
+   int gate_pass = posterior_ok && bench_ok;
+
+   if (json_output)
+   {
+      cJSON *out = cJSON_CreateObject();
+      cJSON_AddStringToObject(out, "decision_point", point);
+      cJSON_AddStringToObject(out, "candidate", cand);
+      cJSON_AddStringToObject(out, "incumbent", incumbent);
+      cJSON_AddBoolToObject(out, "guarded", guarded);
+      cJSON_AddBoolToObject(out, "posterior_ok", posterior_ok);
+      cJSON_AddNumberToObject(out, "candidate_lower_95", c_lo);
+      cJSON_AddNumberToObject(out, "incumbent_mean", best_mean);
+      if (bench_checked)
+      {
+         cJSON_AddBoolToObject(out, "benchmark_ok", bench_ok);
+         cJSON_AddNumberToObject(out, "ndcg10_delta", bench_delta);
+      }
+      cJSON_AddBoolToObject(out, "gate_pass", gate_pass);
+      cJSON *rb = cJSON_CreateObject();
+      cJSON_AddStringToObject(rb, "rollback_arm", incumbent);
+      cJSON_AddItemToObject(out, "rollback", rb);
+      cJSON_AddStringToObject(out, "applied", "no (evaluation only)");
+      optimize_print_json(out);
+      cJSON_Delete(out);
+      cJSON_Delete(resp);
+      return (guarded && !gate_pass) ? 1 : 0;
+   }
+
+   printf("Promotion gate for %s: candidate=%s vs incumbent=%s\n", point, cand, incumbent);
+   printf("  posterior: candidate lower95=%.3f (mean %.3f) vs incumbent mean=%.3f -> %s\n", c_lo,
+          c_mean, best_mean, posterior_ok ? "PASS" : "FAIL");
+   if (bench_checked)
+      printf("  benchmark: ndcg@10 delta=%+.4f -> %s\n", bench_delta, bench_ok ? "PASS" : "FAIL");
+   printf("  gate: %s\n", gate_pass ? "PASS" : "FAIL");
+   printf("  rollback arm (incumbent): %s\n", incumbent);
+   if (guarded && !gate_pass)
+      printf("  --guarded: promotion BLOCKED (gate failed)\n");
+   else if (gate_pass)
+      printf("  decision: %s clears the gate (apply to the production default to promote)\n", cand);
+   printf("  note: evaluation only — no production default changed.\n");
+
+   cJSON_Delete(resp);
+   return (guarded && !gate_pass) ? 1 : 0;
+}
+
 static void optimize_usage(void)
 {
    fprintf(stderr,
@@ -495,7 +673,8 @@ static void optimize_usage(void)
            "  replay --point <name>               Emit a point's closed-decision log for replay\n"
            "  replay-record --point <name> --file <f>  Record a replay result (benchmark_trace)\n"
            "  run [--suite <s>] [--arm <a>]       Run the offline benchmark suite (ranks baseline vs on)\n"
-           "  compare --baseline <a> --candidate <b> [--suite <s>]  Per-metric delta between two arms\n");
+           "  compare --baseline <a> --candidate <b> [--suite <s>]  Per-metric delta between two arms\n"
+           "  promote --point <p> --candidate <a> [--guarded] [--suite <s>]  Evaluate the promotion gate\n");
 }
 
 int cmd_optimize_run(int argc, char **argv, int json_output)
@@ -518,6 +697,8 @@ int cmd_optimize_run(int argc, char **argv, int json_output)
       return optimize_cmd_run(argc - 1, argv + 1, json_output);
    if (strcmp(sub, "compare") == 0)
       return optimize_cmd_compare(argc - 1, argv + 1, json_output);
+   if (strcmp(sub, "promote") == 0)
+      return optimize_cmd_promote(argc - 1, argv + 1, json_output);
    if (strcmp(sub, "--help") == 0 || strcmp(sub, "-h") == 0 || strcmp(sub, "help") == 0)
    {
       optimize_usage();
