@@ -21,6 +21,8 @@
 #include "delegate_economics.h"
 #include "delegate_run_phases.h"
 #include "db1/delegate_learning.h"
+#include "kb_client.h"
+#include "kb_bandit.h"
 #include "db1/interaction_events.h"
 #include "delegate_role.h"
 #include "guardrails.h"
@@ -734,6 +736,10 @@ void delegate_worker(void *arg)
    const char *acp_args = cJSON_IsString(jacp_args) ? jacp_args->valuestring : NULL;
    const char *provider_override = cJSON_IsString(jprovider) ? jprovider->valuestring : NULL;
    const char *model_override = cJSON_IsString(jmodel) ? jmodel->valuestring : NULL;
+   /* delegate_routing bandit: sampled at the route step below (gated, best-effort)
+    * and rewarded with the run outcome at exit. Empty unless a decision was made. */
+   char dr_decision_id[KB_BANDIT_MAX_DECISION] = {0};
+   char dr_arm_id[KB_BANDIT_MAX_ARM_ID] = {0};
    cJSON *jpersona = cJSON_GetObjectItemCaseSensitive(req, "persona");
    const char *persona_override = cJSON_IsString(jpersona) ? jpersona->valuestring : NULL;
    /* A persona is REQUIRED on every delegate request — it sets the delegate's
@@ -818,6 +824,31 @@ void delegate_worker(void *arg)
          required_caps |= inferred_caps;
          if (inferred_min_context > min_context)
             min_context = inferred_min_context;
+      }
+      /* delegate_routing bandit: when the caller gave no explicit route override,
+       * sample a cost-tier preference (cheapest vs premium) from the kb DB2 bandit
+       * and translate it into tier_override. Gated by bandit_live_decision_enabled
+       * (default off); best-effort, so a kb hiccup falls back to default routing. */
+      if (!acp_command && tier_override < 0 && !(via_name && via_name[0]) &&
+          !(provider_override && provider_override[0]) && !(model_override && model_override[0]))
+      {
+         config_t dr_cfg;
+         config_load(&dr_cfg);
+         if (dr_cfg.bandit_live_decision_enabled)
+         {
+            static const char *const dr_arms[2] = {"cheapest", "premium"};
+            if (kb_client_bandit_sample("delegate_routing", dr_arms, 2, dr_arm_id, sizeof(dr_arm_id),
+                                        dr_decision_id, sizeof(dr_decision_id)) == 0)
+            {
+               if (strcmp(dr_arm_id, "premium") == 0)
+               {
+                  int max_tier = delegate_max_cost_tier(&acfg, role);
+                  if (max_tier >= 0)
+                     tier_override = max_tier;
+               }
+               /* "cheapest" leaves tier_override = -1 (default cheapest routing). */
+            }
+         }
       }
       if (delegate_apply_route_overrides(&acfg, role, via_name, tier_override, provider_override,
                                          model_override, route_err, sizeof(route_err)) != 0 ||
@@ -1463,6 +1494,11 @@ void delegate_worker(void *arg)
 
    /* Classify and record a learning from this delegate exit. */
    delegate_record_exit_learning(sid, role, &result, rc, max_turns, &acfg, target_agent);
+
+   /* Close the delegate_routing bandit decision (if one was sampled) with the run
+    * outcome: success (rc == 0) -> 1.0, otherwise 0.0. Best-effort. */
+   if (dr_decision_id[0] && dr_arm_id[0])
+      kb_client_bandit_close("delegate_routing", dr_decision_id, dr_arm_id, rc == 0 ? 1.0 : 0.0);
 
    /* Reconcile delegate sibling-worktree edits via PR or supervisor review. */
    if (delegate_worktree_path[0] && delegate_git_root[0] && !delegate_allows_writes &&
