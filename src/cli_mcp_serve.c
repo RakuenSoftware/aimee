@@ -152,8 +152,15 @@ static cJSON *server_request(cJSON *req, int timeout_ms)
    {
       char *endpoint = cli_rpc_client_endpoint();
       char *bearer = cli_rpc_client_bearer();
+      /* Route by the request's ACTUAL method, not a hardcoded "mcp.call": e.g.
+       * mcp.tools_list -> GET /v1/mcp/tools_list, mcp.call -> POST /v1/mcp/call.
+       * Hardcoding mcp.call sent tools/list to /v1/mcp/call (which needs a `tool`
+       * arg) and failed with "Failed to list tools". */
+      cJSON *jmethod = cJSON_GetObjectItemCaseSensitive(req, "method");
+      const char *method =
+          (cJSON_IsString(jmethod) && jmethod->valuestring[0]) ? jmethod->valuestring : "mcp.call";
       const char *verb = NULL;
-      const char *path = cli_v1_route_for_method("mcp.call", &verb);
+      const char *path = cli_v1_route_for_method(method, &verb);
       cJSON *resp = NULL;
       if (endpoint && path)
       {
