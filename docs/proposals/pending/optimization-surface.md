@@ -106,6 +106,29 @@ subsystem is more skeletal in production than its API suggests:
   `code.audit` surface. If this proposal lands after it, treat code-audit/report
   enrichment as another measurable evaluation surface or explicitly defer it.
 
+### Standalone fix-it: the phantom bandit export
+
+The third constraint above is a real current-code wart worth fixing on its own,
+**independent of whether the larger optimization surface is built**:
+
+> `kb_intel_bandit_export_response()` (`src/kb/kb_intel_payload.c`) advertises arm
+> stats for `kb_fusion_mode` with fixed `rrf` / `static_alpha` / `dynamic_alpha`
+> arms — but `kb_fusion_mode` is never passed to `kb_bandit_sample`, so it has
+> **no live decisions**. Meanwhile the decision point that *is* sampled
+> (`kb_memory_retrieval_limit`, in `src/kb/kb_service_memory.c`) is **not**
+> exported. The introspection endpoint — and `aimee kb`'s "Bandit export" line
+> (`cmd_kb.c`) — therefore reports a decision point that does not exist at runtime
+> and hides the one that does.
+
+**Minimal fix (no new infrastructure):** make the export reflect reality — emit
+the decision point(s) actually present in the bandit decision log (the distinct
+`decision_point` values, via `db2_bandit_*`), instead of a hard-coded
+`kb_fusion_mode` literal. This is a small, self-contained correctness change that
+can ship as its own PR, and it doubles as **Step 0** for the registry work in §1:
+once the export is data-driven, adding decision points is purely additive. It
+should carry a unit test asserting the export lists only points that have logged
+decisions.
+
 ## Design
 
 ### 0. Close the reward loop (prerequisite)
