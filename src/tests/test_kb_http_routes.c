@@ -790,11 +790,26 @@ int db2_demotion_profile_read(const char *memory_class, const char *scope_kind,
    return 0;
 }
 
+int db2_bandit_decision_points_list(char *buf, size_t len)
+{
+   /* The data-driven export asks the log which points exist; return the one
+    * that is actually sampled in production (not the legacy kb_fusion_mode). */
+   snprintf(buf, len, "[\"kb_memory_retrieval_limit\"]");
+   return 0;
+}
+
+int db2_bandit_arms_list(const char *decision_point, char *buf, size_t len)
+{
+   assert(strcmp(decision_point, "kb_memory_retrieval_limit") == 0);
+   snprintf(buf, len, "[\"10\"]");
+   return 0;
+}
+
 int db2_bandit_decisions_export(const char *decision_point, int limit, char *buf, size_t len)
 {
-   assert(strcmp(decision_point, "kb_fusion_mode") == 0);
+   assert(strcmp(decision_point, "kb_memory_retrieval_limit") == 0);
    assert(limit == 500);
-   snprintf(buf, len, "[{\"id\":\"decision-1\",\"arm_id\":\"rrf\"}]");
+   snprintf(buf, len, "[{\"id\":\"decision-1\",\"arm_id\":\"10\"}]");
    return 0;
 }
 
@@ -811,10 +826,10 @@ int kb_bandit_record_replay_evidence(const char *decision_point, const char *res
 int db2_bandit_arm_stats_read(const char *decision_point, const char *arm_id,
                               db2_bandit_arm_stats_t *out)
 {
-   assert(strcmp(decision_point, "kb_fusion_mode") == 0);
+   assert(strcmp(decision_point, "kb_memory_retrieval_limit") == 0);
    assert(out != NULL);
    memset(out, 0, sizeof(*out));
-   if (strcmp(arm_id, "rrf") == 0)
+   if (strcmp(arm_id, "10") == 0)
    {
       out->n_decisions = 3;
       out->n_rewards = 2;
@@ -1125,8 +1140,12 @@ static void test_intelligence_bandit_export(void)
    int s = kb_http_route_ex("GET", "/v1/intelligence/bandit/export", NULL, NULL, NULL, NULL, 0, buf,
                             sizeof(buf));
    assert(s == 200);
-   assert(strstr(buf, "\"decision_point\":\"kb_fusion_mode\"") != NULL);
-   assert(strstr(buf, "\"arm_id\":\"rrf\"") != NULL);
+   /* Export is data-driven: it reports the point that is actually sampled, and a
+    * `points` breakdown — not the hard-coded phantom kb_fusion_mode. */
+   assert(strstr(buf, "\"points\":[") != NULL);
+   assert(strstr(buf, "\"decision_point\":\"kb_memory_retrieval_limit\"") != NULL);
+   assert(strstr(buf, "kb_fusion_mode") == NULL);
+   assert(strstr(buf, "\"arm_id\":\"10\"") != NULL);
    assert(strstr(buf, "\"n_decisions\":3") != NULL);
 }
 
