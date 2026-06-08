@@ -14,6 +14,7 @@
 #include <string.h>
 #include "db2_test_shim.h"
 #include "../kb_bandit.h"
+#include "../kb_bandit_registry.h"
 #include "../db2/bandit.h"
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
@@ -150,6 +151,31 @@ static void test_bandit_explore_stats(void)
    printf("  bandit_explore_stats: ok\n");
 }
 
+/* ---- decision-point registry ---- */
+static void test_bandit_registry(void)
+{
+   /* At least the live retrieval-limit point is registered. */
+   assert(kb_bandit_registry_count() >= 1);
+
+   const kb_bandit_decision_point_t *dp = kb_bandit_registry_get("kb_memory_retrieval_limit");
+   assert(dp != NULL);
+   assert(strcmp(dp->id, "kb_memory_retrieval_limit") == 0);
+   assert(strcmp(dp->status, "live") == 0);
+   assert(strcmp(dp->reward_fn, "recall_sufficiency_v1") == 0);
+   assert(dp->n_arms == 2);
+   assert(strcmp(dp->arms[0], "10") == 0);
+   assert(strcmp(dp->arms[1], "20") == 0);
+
+   /* Unknown id -> NULL; index access is bounds-checked. */
+   assert(kb_bandit_registry_get("nope") == NULL);
+   assert(kb_bandit_registry_get(NULL) == NULL);
+   assert(kb_bandit_registry_at(-1) == NULL);
+   assert(kb_bandit_registry_at(kb_bandit_registry_count()) == NULL);
+   assert(kb_bandit_registry_at(0) != NULL);
+
+   printf("  bandit_registry: ok\n");
+}
+
 /* ---- recall-sufficiency reward (pure) ---- */
 static void test_bandit_recall_reward(void)
 {
@@ -251,6 +277,7 @@ int main(void)
    test_bandit_reward_closed();
    test_config_bandit_defaults();
    test_bandit_explore_stats();
+   test_bandit_registry();
    test_bandit_recall_reward();
    test_bandit_enumeration();
    test_bandit_replay_evidence();

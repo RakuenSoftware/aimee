@@ -8,6 +8,7 @@
 #include "db2/demotion.h"
 #include "db2/memory_query.h"
 #include "kb_bandit.h"
+#include "kb_bandit_registry.h"
 #include "kb_intel_payload.h"
 #include "memory.h"
 
@@ -199,13 +200,41 @@ static cJSON *intel_bandit_point_obj(const char *decision_point)
    return pt;
 }
 
+/* Declared decision points from the registry (source of truth) — present even
+ * when a point has no logged decisions yet.  Lets `aimee optimize` show what is
+ * tunable, with each point's arm set and reward function. */
+static cJSON *intel_bandit_registry_array(void)
+{
+   cJSON *arr = cJSON_CreateArray();
+   if (!arr)
+      return NULL;
+   for (int i = 0; i < kb_bandit_registry_count(); i++)
+   {
+      const kb_bandit_decision_point_t *dp = kb_bandit_registry_at(i);
+      if (!dp)
+         continue;
+      cJSON *e = cJSON_CreateObject();
+      cJSON_AddStringToObject(e, "decision_point", dp->id);
+      cJSON_AddStringToObject(e, "description", dp->description);
+      cJSON_AddStringToObject(e, "reward_fn", dp->reward_fn);
+      cJSON_AddStringToObject(e, "status", dp->status);
+      cJSON *arms = cJSON_CreateArray();
+      for (int a = 0; a < dp->n_arms; a++)
+         cJSON_AddItemToArray(arms, cJSON_CreateString(dp->arms[a]));
+      cJSON_AddItemToObject(e, "arms", arms);
+      cJSON_AddItemToArray(arr, e);
+   }
+   return arr;
+}
+
 /* Export bandit state for every decision point that has logged decisions.
  *
  * Data-driven: the set of points and their arms is read from the decision log
  * (db2_bandit_decision_points_list / db2_bandit_arms_list), not hard-coded, so
  * introspection reflects what is actually sampled at runtime.  The top-level
  * `decision_point` mirrors the primary (most-recent) point for backward
- * compatibility; `points` carries the full per-point breakdown. */
+ * compatibility; `points` carries the full per-point breakdown; `registry`
+ * lists every declared decision point (even those not yet sampled). */
 cJSON *kb_intel_bandit_export_response(void)
 {
    char points_buf[8192];
@@ -240,6 +269,7 @@ cJSON *kb_intel_bandit_export_response(void)
    /* Back-compat: a single primary point at the top level (string is copied). */
    cJSON_AddStringToObject(resp, "decision_point", primary);
    cJSON_AddItemToObject(resp, "points", points);
+   cJSON_AddItemToObject(resp, "registry", intel_bandit_registry_array());
    cJSON_Delete(names);
    return resp;
 }

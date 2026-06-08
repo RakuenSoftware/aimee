@@ -1136,7 +1136,7 @@ static void test_intelligence_demotion_check(void)
 
 static void test_intelligence_bandit_export(void)
 {
-   char buf[2048];
+   char buf[4096];
    int s = kb_http_route_ex("GET", "/v1/intelligence/bandit/export", NULL, NULL, NULL, NULL, 0, buf,
                             sizeof(buf));
    assert(s == 200);
@@ -1147,6 +1147,10 @@ static void test_intelligence_bandit_export(void)
    assert(strstr(buf, "kb_fusion_mode") == NULL);
    assert(strstr(buf, "\"arm_id\":\"10\"") != NULL);
    assert(strstr(buf, "\"n_decisions\":3") != NULL);
+   /* The registry section lists declared decision points (source of truth),
+    * including arms and the reward function — present even with no decisions. */
+   assert(strstr(buf, "\"registry\":[") != NULL);
+   assert(strstr(buf, "\"reward_fn\":\"recall_sufficiency_v1\"") != NULL);
 }
 
 static void test_not_found(void)
