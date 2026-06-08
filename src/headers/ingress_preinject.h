@@ -55,4 +55,12 @@ char *ingress_preinject_build(const char *query, int request_disabled);
  * not free its arguments. Pure. */
 char *ingress_preinject_apply(const char *instructions, const char *envelope);
 
+/* Per-request override (thread-local): the HTTP layer sets this from the
+ * `x-aimee-preinject: 0` request header before dispatching the turn, so a
+ * single request can disable pre-injection without touching the server config
+ * (used by the A/B bench). ingress_preinject_build() consults it in addition to
+ * its `request_disabled` argument and the config flag. Set per request; it does
+ * not auto-reset, so the HTTP layer sets it (to 0 or 1) on every request. */
+void ingress_preinject_set_request_disabled(int disabled);
+
 #endif /* DEC_INGRESS_PREINJECT_H */

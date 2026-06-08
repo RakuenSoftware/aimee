@@ -16,6 +16,7 @@
 #include "log.h"
 #include "aimee_version.h"
 #include "openai_shape.h"
+#include "ingress_preinject.h"
 #include "openapi_server_data.h" /* AIMEE_OPENAPI_SERVER_YAML_STR (generated from api/openapi-server-v1.yaml) */
 #include "openai_runs_store.h"
 #include "presence.h"
@@ -1434,6 +1435,13 @@ static void handle_conn(int fd, int is_tcp)
       char skey[256] = "";
       int has_auth = http_header(buf, "Authorization", auth, sizeof(auth));
       int has_skey = http_header(buf, "X-Aimee-Session-Key", skey, sizeof(skey));
+      /* Per-request pre-injection override: `x-aimee-preinject: 0` disables the
+       * <aimee-context> envelope for this turn (set every request so it never
+       * leaks across requests on a reused worker thread). */
+      char preinject[16] = "";
+      ingress_preinject_set_request_disabled(
+          http_header(buf, "X-Aimee-Preinject", preinject, sizeof(preinject)) &&
+          strcmp(preinject, "0") == 0);
       int az = server_http_authorize(is_tcp, g_bearer, has_auth ? auth : NULL, has_skey);
       if (az != 0)
       {

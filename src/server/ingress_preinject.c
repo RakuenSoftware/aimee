@@ -16,6 +16,16 @@
 #define INGRESS_EXPLORE_WITH                                                                       \
    "find_symbol, lsp_references, ast_grep_search, search_graph, get_context_block"
 
+/* Per-request disable, set by the HTTP layer from the `x-aimee-preinject: 0`
+ * header. Thread-local: the ingress runs the turn synchronously on the request
+ * thread, so this is read by ingress_preinject_build() during the same request. */
+static __thread int g_request_disabled = 0;
+
+void ingress_preinject_set_request_disabled(int disabled)
+{
+   g_request_disabled = disabled ? 1 : 0;
+}
+
 const char *ingress_preinject_confidence(double top_score)
 {
    /* Thresholds chosen so a clear top hit is "high", a plausible-but-thin match
@@ -139,7 +149,7 @@ char *ingress_preinject_query_from_messages(const cJSON *messages)
 
 char *ingress_preinject_build(const char *query, int request_disabled)
 {
-   if (request_disabled)
+   if (request_disabled || g_request_disabled)
       return NULL;
    if (!query || !query[0])
       return NULL;
