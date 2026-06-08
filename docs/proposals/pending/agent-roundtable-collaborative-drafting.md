@@ -14,8 +14,18 @@
   per-task participant selector through `agent_task_t` → `parallel_worker` and a
   shared named-agent execution helper so both parallel fan-out and sequential
   turns route to distinct configured agents — see §0.1),
-  `src/cmd_agent_delegate.c` (new `aimee delegate roundtable` subcommand beside
-  the existing `aggregate`), config plumbing
+  the entry-point wiring that does not exist today (§0.2):
+  `src/cli_main.c` + `src/cli_rpc_routes.inc` (recognize the subcommands, add
+  routes + `marshal_delegate_aggregate`/`marshal_delegate_roundtable`),
+  `src/server/server.c` (dispatch-table entries) and a new server-linked TU
+  `src/server/delegate_ensemble_rpc.c` for `handle_delegate_aggregate` /
+  `handle_delegate_roundtable` (registered in `src/Makefile` `SERVER_SRCS`),
+  optionally `src/server/server_mcp_delegate.c` (MCP tools) and the `/v1`
+  surface (`server_http_routes.inc`, `api/openapi-server-v1.yaml`,
+  `cli_v1_routes_gen.inc`) or a documented method-coverage exclusion;
+  `src/cmd_agent_delegate.c` is the lint-only body template for the new
+  `roundtable` subcommand beside the existing (also lint-only) `aggregate` block,
+  config plumbing
   (`src/headers/config.h`, `src/config.c`, `src/config_sections.c` for the inline
   `ensemble.*` plus a top-level `roundtable.*` parse, `src/config_save.c` for
   round-trip, and `src/config_fields.c` only for the new flat scalar
@@ -57,15 +67,20 @@ shape is flat:
 This proposal **generalizes the ensemble engine into a roundtable**: the same
 fan-out / cost-accounting / degrade-to-best machinery, wrapped in a bounded loop
 where each round's shared artifact feeds the next round's prompts. It reuses the
-existing orchestration shape, and as step one it **fixes a shipped bug** (§0.1):
-configured `ensemble.reference_models` are today only labels in the synthesis
-prompt — every "participant" is the same default agent — and must become real
-routed participants before any of this is meaningful.
+existing orchestration shape, but before any of that is meaningful it must repair
+the shipped engine on two levels: **(§0.2) wire an entry point** — the
+marked-Done MoA feature has no caller in any shipped binary, so `aimee delegate
+aggregate` does not run the ensemble at all — and **(§0.1) fix the participant
+routing** — even once reachable, configured `ensemble.reference_models` are only
+labels in the synthesis prompt, so every "participant" is the same default agent.
+Both are step one (P0).
 
 ## §0 What already exists (so we don't rebuild it)
 
 The hard parts — parallel execution, cost accounting, graceful degradation,
-config plumbing, a CLI entry point — are done. Confirmed in the tree:
+config plumbing — are done. The one part that is **not** done, despite the
+feature being marked Done, is the entry point: nothing in any shipped binary
+calls `delegate_ensemble_run` (see §0.2). What is confirmed in the tree:
 
 - **The MoA engine.** `delegate_ensemble_run`
   (`src/server/delegate_ensemble.c:138`) already does: build N tasks → run them
@@ -87,11 +102,15 @@ config plumbing, a CLI entry point — are done. Confirmed in the tree:
   agent. **Note:** these fields are parsed by a dedicated inline parser, **not**
   registered in `config_fields.c` (see `config_save.c:29`), so the "five-file
   pattern" does not apply to them — §6 specifies exactly where the new keys land.
-- **The CLI seam exists.** `aimee delegate aggregate "<prompt>"`
-  (`src/cmd_agent_delegate.c:504-535`) already loads config, checks
-  `ensemble_enabled`, loads `agent_config_t`, calls the engine, and prints the
-  result with degrade/cost warnings. A `roundtable` subcommand is a near-clone of
-  this block pointing at the new entry point.
+- **A CLI seam exists — but only as lint-only code, not a live path.**
+  `aimee delegate aggregate "<prompt>"` (`src/cmd_agent_delegate.c:504-535`)
+  loads config, checks `ensemble_enabled`, loads `agent_config_t`, calls the
+  engine, and prints the result with degrade/cost warnings. This is the right
+  *shape* for a `roundtable` near-clone — **but `cmd_agent_delegate.c` is not
+  linked into any shipped binary** (it sits in `CMD_SRCS` → `CMD_OBJS`, which
+  appears only in `ALL_OBJS`, the lint/unit-test object set; `src/Makefile:433`).
+  So this seam is a *template*, not a working entry point. See §0.2 for the full
+  trace and the wiring that P0 must add before any of this is reachable.
 - **Both execution shapes are available with one routing helper added.**
   `agent_run_parallel` (`agent_exec.h:41`) already covers "all participants act
   this round simultaneously." `agent_run_with_tools_write_enforce`
@@ -111,9 +130,9 @@ config plumbing, a CLI entry point — are done. Confirmed in the tree:
   (`role_templates.c:21`) for critique — the latter is already the ensemble's
   default aggregator role (`delegate_ensemble.c:113`).
 
-So the net new code is: **the routing fix (§0.1), a bounded loop around the
-existing fan-out, a bounded heap artifact, a shared-artifact prompt builder, and
-a convergence check.**
+So the net new code is: **the entry-point wiring (§0.2), the routing fix (§0.1),
+a bounded loop around the existing fan-out, a bounded heap artifact, a
+shared-artifact prompt builder, and a convergence check.**
 
 ## §0.1 First: the shipped ensemble does not use distinct models (bug, fixed here)
 
@@ -177,9 +196,105 @@ ensemble does not even do that.)
    stubbing it away, plus negative cases for missing, disabled, unhealthy,
    duplicate, and role-incompatible participants.
 
-The existing aggregate path keeps working because `tasks[i].agent = NULL` (the
-new default) reproduces the current route. The roundtable then builds on real
-multi-agent fan-out instead of an illusion of one.
+The existing aggregate engine path stays byte-identical because
+`tasks[i].agent = NULL` (the new default) reproduces the current route. The
+roundtable then builds on real multi-agent fan-out instead of an illusion of one.
+(Note "byte-identical *engine* behavior," not "still works for users" — per §0.2
+the aggregate command has no reachable caller today regardless of this fix.)
+
+## §0.2 Worse than mis-routed: the feature is unreachable (wire it first)
+
+§0.1 is a correctness bug *inside* the engine. This is a layer below it: even
+with §0.1 fixed, **no shipped binary ever calls `delegate_ensemble_run`**, so
+`aimee delegate aggregate` cannot run the ensemble at all. The engine
+(`src/server/delegate_ensemble.c`) *is* compiled into `aimee-server`
+(`SERVER_SRCS`, `src/Makefile:376`), but it sits there as a defined-but-uncalled
+symbol. Its only caller, `cmd_agent_delegate.c`, is lint-only (§0). A
+tree-wide search confirms `delegate_ensemble` is referenced by exactly four
+files: the engine, its header, its unit test, and the lint-only
+`cmd_agent_delegate.c`.
+
+**What `aimee delegate aggregate "<prompt>"` actually does today.** Traced end
+to end:
+
+1. The thin client does not recognize `aggregate` as a delegate subcommand —
+   `delegate_arg_is_subcommand` (`src/cli_main.c:485-490`) lists only
+   `plan / launch / status / log / history / --list-roles`. So the call falls
+   through to the generic RPC dispatch.
+2. `cli_rpc_lookup("delegate", …)` matches the catch-all delegate route
+   `{"delegate", NULL, "delegate", …}` (`src/cli_rpc_routes.inc:243`).
+3. `marshal_delegate` (`src/cli_rpc_routes.inc:1665`) maps **positional[0] →
+   `role`** and **positional[1] → `prompt`**. So `"aggregate"` is sent as the
+   *role* and the prompt becomes the request prompt:
+   `{method:"delegate", role:"aggregate", prompt:"<prompt>"}`.
+4. Server `handle_delegate` (`src/server/server_compute.c:1583`) canonicalizes
+   the role — `delegate_role_canonicalize("aggregate")` returns `"aggregate"`
+   unchanged (no alias, `src/server/delegate_role.c:40`). It then enforces a
+   minimum prompt length: `if (strlen(prompt) < 20)` → **error "prompt too
+   short."** For a longer prompt it runs **one ordinary delegate**; role
+   `"aggregate"` matches no agent's role set, so `agent_route` falls back to the
+   **single default agent** (`src/server/agent_runtime.c:198`).
+
+Net user-visible behavior: a short prompt errors out; a normal-length prompt
+silently runs a **single default-agent delegate** with a meaningless role label.
+Either way there is no fan-out, no diverse references, no synthesis, no cost cap,
+no degrade-to-best — none of the ensemble semantics — and **nothing tells the
+operator the ensemble did not run.** The "Done" MoA feature is dead on arrival.
+
+This is why the §0.1 routing test never caught the §0.1 bug *and* never caught
+this: `test_delegate_ensemble.c` calls `delegate_ensemble_run` directly with a
+stubbed `agent_run_parallel`, exercising a code path no shipped binary reaches.
+
+**The missing wiring (P0 must add this before its value lands).** Mirror the
+existing typed `delegate.*` RPC family rather than overloading the bare
+`delegate` method:
+
+- **Thin client.**
+  - Add `aggregate` (and later `roundtable`) to `delegate_arg_is_subcommand`
+    (`cli_main.c:485`) so usage/help and subcommand detection work.
+  - Add route entries in `cli_rpc_routes.inc` beside the other `delegate.*`
+    rows (≈ `:235-243`):
+    `{"delegate", "aggregate",  "delegate.aggregate",  marshal_delegate_aggregate,  NULL, <timeout>}`
+    and `{"delegate", "roundtable", "delegate.roundtable", marshal_delegate_roundtable, NULL, <timeout>}`.
+  - Add `marshal_delegate_aggregate` / `marshal_delegate_roundtable` that put
+    **positional[0] → `prompt`** (not `role`, the bug above) and fold the flags
+    (`--mode`, `--turns`, `--rounds`, `--apply`) into the request — modeled on
+    `marshal_delegate` (`:1665`) minus the role-positional mapping.
+- **Server.**
+  - Register handlers in the dispatch table beside `{"delegate", handle_delegate}`
+    (`src/server/server.c:1131`):
+    `{"delegate.aggregate", handle_delegate_aggregate}` and
+    `{"delegate.roundtable", handle_delegate_roundtable}`.
+  - Implement those handlers **in a server-linked TU** (a new
+    `src/server/delegate_ensemble_rpc.c` added to `SERVER_SRCS`, or inside
+    `server_compute.c`). The body is the `cmd_agent_delegate.c:504-535` block
+    rewritten as an RPC handler: read `prompt`/opts from the request, load
+    config + `agent_config_t` server-side, gate on `ensemble_enabled`
+    (and `roundtable_enabled`), call `delegate_ensemble_run` /
+    `delegate_roundtable_run` (both already server-linked), and return the
+    response plus `degraded` / `cost_capped` / `cost_usd` / `rounds_run` /
+    `converged` as the RPC result.
+  - Apply the same `persona`/prompt-length guards intentionally (the ensemble
+    prompt is the *task*, so the `<20` guard is appropriate; just make the
+    error name the ensemble, not a generic delegate).
+- **MCP tool (parallel, optional in P0).** Expose `aggregate` / `roundtable`
+  MCP tools in `server_mcp_delegate.c` mirroring `handle_mcp_delegate_call`, so
+  IDE/agent callers can invoke the ensemble too.
+- **`/v1` coverage.** The repo gates every RPC method on having a first-class
+  `/v1` route or a documented exclusion (`v1-method-coverage-check`,
+  `src/Makefile`). `delegate.aggregate` / `delegate.roundtable` are long-running
+  and may stream, so either add `/v1` routes (`server_http_routes.inc`,
+  `api/openapi-server-v1.yaml`, `cli_v1_routes_gen.inc`) or register a
+  documented exclusion exactly as the foreground `delegate` method does.
+- **Build + de-dup.** Register any new TU in `src/Makefile` (`SERVER_SRCS`) and,
+  if applicable, the cmake profile; retire the lint-only `aggregate` block in
+  `cmd_agent_delegate.c` (or keep it strictly as the platform CLI shim) so there
+  is one live copy, not two divergent ones.
+
+Until this wiring exists, the §0.1 routing fix repairs a path with no callers.
+P0 therefore **wires the entry point and fixes the routing in the same phase**
+(§7), with an end-to-end reachability test (CLI/RPC → engine → output) that
+would have caught both this gap and the §0.1 bug.
 
 ## §1 What a roundtable is
 
@@ -366,7 +481,10 @@ permit changing the implementation.
 
 ## §5 CLI
 
-A new subcommand mirroring the `aggregate` block (`cmd_agent_delegate.c:504`):
+A new subcommand built on the §0.2 wiring (thin-client route +
+`marshal_delegate_roundtable` + server `handle_delegate_roundtable`), using the
+`cmd_agent_delegate.c:504` block only as a body template — **not** as the live
+path, since that file is lint-only:
 
 ```
 aimee delegate roundtable "<task or path to artifact>" \
@@ -378,9 +496,11 @@ aimee delegate roundtable "<task or path to artifact>" \
   `roundtable_enabled`; recommend gating on the existing `ensemble_enabled` so
   there is one "multi-agent is on" switch).
 - Prints the final artifact; on `--mode review` prints the consolidated review;
-  emits the same degrade/cost warnings the `aggregate` path already prints
-  (`cmd_agent_delegate.c:530-532`), plus `rounds_run` / `converged`.
-- `aimee delegate aggregate` stays as the documented one-shot alias.
+  emits the same degrade/cost warnings the engine produces, plus `rounds_run` /
+  `converged`, marshalled from the RPC result.
+- `aimee delegate aggregate` becomes a **genuinely working** one-shot alias for
+  the first time once §0.2 lands (it does not work today), and stays the
+  documented `rounds==1` special case.
 
 ## §6 Config (reuse ensemble participants)
 
@@ -432,17 +552,31 @@ are CLI-settable; the array participant list is not.
 
 ## §7 Phasing
 
-1. **P0 — fix the routing bug (§0.1) + the `srand` reseed.** Thread an optional
-   `agent` selector through `agent_task_t` and a shared named-agent execution
-   helper, resolving named agents the way `aux_router.c:51-58` already does; point
-   each ensemble fan-out task at `ensemble_reference_models[i]`. Move `srand` out
-   of the per-call path. **Un-stubbed routing tests** cover three configured
-   references → three distinct `agent_name` results, missing/disabled/unhealthy
-   participants, duplicate names, role incompatibility, and proof that parallel
-   named-agent calls do not race on shared `agent_t` mutation. The existing
-   stubbed ensemble tests also re-run green. This phase ships independently and
-   repairs the marked-Done MoA feature on its own; everything below builds on real
-   fan-out.
+1. **P0 — wire the entry point (§0.2) + fix the routing bug (§0.1) + the `srand`
+   reseed.** These ship together because the routing fix is invisible without a
+   reachable caller.
+   - *Wiring (§0.2):* add the `delegate.aggregate` (and `delegate.roundtable`
+     placeholder) thin-client route + marshal (`prompt` as positional, not
+     `role`), the server dispatch-table entries, and a server-linked
+     `handle_delegate_aggregate` that calls `delegate_ensemble_run`; add the
+     `/v1` route or documented exclusion; retire the lint-only `aggregate` block.
+   - *Routing (§0.1):* thread an optional `agent` selector through
+     `agent_task_t` and a shared named-agent execution helper, resolving named
+     agents the way `aux_router.c:51-58` already does; point each ensemble
+     fan-out task at `ensemble_reference_models[i]`. Move `srand` out of the
+     per-call path.
+   - *Tests:* an **end-to-end reachability test** (CLI/RPC → engine → output)
+     that fails on today's tree — this is the test whose absence let both the
+     unreachability and the §0.1 bug ship. Plus **un-stubbed routing tests**:
+     three configured references → three distinct `agent_name` results,
+     missing/disabled/unhealthy participants, duplicate names, role
+     incompatibility, and proof that parallel named-agent calls do not race on
+     shared `agent_t` mutation. The existing stubbed ensemble tests also re-run
+     green.
+
+   This phase ships independently and **makes the marked-Done MoA feature
+   actually work for the first time** (it does not today, §0.2); everything below
+   builds on a reachable, real fan-out.
 2. **P1 — engine generalization (`mode draft`, `turns parallel`).** Add
    `delegate_roundtable_run` looping the existing round; add budget-bounded
    `build_round_prompt` (summarize-forward, no silent truncation, §3); heap
@@ -495,10 +629,14 @@ are CLI-settable; the array participant list is not.
   *regression*. The engine therefore scores each round and returns the
   **highest-scored** artifact (`best_round`), not the last (§4). This is default
   behavior, not an opt-in.
-- **Not a new transport or service.** This is strictly an orchestration loop over
-  existing agent execution; it adds no RPC, no persistence, no background job
-  type. A roundtable is a single foreground `delegate` invocation, like
-  `aggregate` today.
+- **New typed RPC methods, but not a new transport or service.** §0.2 adds two
+  typed methods (`delegate.aggregate`, `delegate.roundtable`) to the existing
+  RPC dispatch and `/v1` surface — the same kind of seam the rest of the
+  `delegate.*` family already uses. It adds no new transport/protocol, no
+  long-lived service, no persistence, and no new background job type. A
+  roundtable is a single foreground `delegate`-family invocation. (The earlier
+  claim that this "adds no RPC" was wrong: the feature has *no* reachable RPC
+  today, which is exactly the gap §0.2 closes.)
 - **Not the self-correcting `agent_loop`.** That loop is *one* agent improving
   its own output; the roundtable is *many* agents collaborating. They share stop-
   condition machinery but are deliberately separate engines.
@@ -507,12 +645,13 @@ are CLI-settable; the array participant list is not.
 
 The ensemble already encodes the three things that are easy to get wrong in
 multi-agent orchestration — **bounded cost, graceful degradation when providers
-fail, and position-bias control** — and it is already CLI- and config-wired. A
-greenfield "debate" engine would re-derive all of that. Generalizing
-`delegate_ensemble.c` into a loop keeps one engine, one config section, one CLI
-family, makes the existing `aggregate` a provable special case after parity
-tests, and confines the new surface to the §0.1 routing fix, a loop, budget-bounded
-prompt assembly, and a convergence check. As a bonus, generalizing here forces the
-fix of two latent defects in the shipped engine — the unrouted references (§0.1)
-and the per-call `srand` reseed (§4) — that the single-shot path has been quietly
-carrying.
+fail, and position-bias control** — and it is already config-wired (the
+*runtime* path is not yet wired; §0.2). A greenfield "debate" engine would
+re-derive the hard parts. Generalizing `delegate_ensemble.c` into a loop keeps
+one engine, one config section, one CLI family, makes the (newly reachable)
+`aggregate` a provable special case after parity tests, and confines the new
+surface to the §0.2 entry-point wiring, the §0.1 routing fix, a loop,
+budget-bounded prompt assembly, and a convergence check. As a bonus,
+generalizing here forces the fix of three latent defects the shipped engine has
+been quietly carrying — its complete unreachability (§0.2), the unrouted
+references (§0.1), and the per-call `srand` reseed (§4).
