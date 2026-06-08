@@ -171,12 +171,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install MinGW-w64
-        run: choco install mingw
-
-      - name: Add MinGW to PATH
-        shell: powershell
-        run: echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Set up MinGW-w64
+        shell: pwsh
+        run: |
+          # Reliable MinGW setup. Two failure modes this avoids:
+          #  (1) bare `choco install mingw` flakes ~50% on the Chocolatey CDN;
+          #  (2) the choco package's gcc path changes between versions (v15.2.0
+          #      moved it), so a hardcoded `...\mingw64\bin` breaks.
+          # Prefer the MSYS2 mingw64 toolchain pre-installed on the runner image
+          # (no network); otherwise choco-install with retries and *discover* the
+          # gcc.exe location instead of hardcoding it.
+          function Find-MingwBin {
+            if (Test-Path "C:\msys64\mingw64\bin\gcc.exe") { return "C:\msys64\mingw64\bin" }
+            $g = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\mingw","C:\ProgramData\mingw64" `
+                   -Recurse -Filter gcc.exe -ErrorAction SilentlyContinue |
+                 Where-Object { $_.FullName -match 'mingw64' } | Select-Object -First 1
+            if ($g) { return (Split-Path $g.FullName) }
+            return $null
+          }
+          $bin = Find-MingwBin
+          if (-not $bin) {
+            for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
+              choco install mingw -y --no-progress
+              if ($LASTEXITCODE -ne 0) { Start-Sleep 15 }
+              $bin = Find-MingwBin
+            }
+          }
+          if (-not $bin) { Write-Error "MinGW gcc.exe not found after install"; exit 1 }
+          Write-Host "Using MinGW at $bin"
+          & "$bin\gcc.exe" --version
+          echo "$bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Download SQLite amalgamation
         shell: powershell
