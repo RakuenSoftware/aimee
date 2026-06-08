@@ -1028,6 +1028,7 @@ static const struct
     {"memory.explain_match", kb_handle_memory_explain_match},
     {"graph.sync_code", kb_handle_graph_sync_code},
     {"graph.explain", kb_handle_graph_explain},
+    {"code.audit", kb_handle_code_audit},
     {"memory.link_create", kb_handle_memory_link_create},
     {"memory.link_query", kb_handle_memory_link_query},
     {"memory.link_delete", kb_handle_memory_link_delete},

@@ -16,4 +16,10 @@ int kb_handle_graph_sync_code(int fd, cJSON *req);
  *            structural_weight,utility_score,edge_origin}], node:{...}}. */
 int kb_handle_graph_explain(int fd, cJSON *req);
 
+/* code.audit: graph-derived code-health checks over entity_edges +
+ * code_embeddings.  Request: {[project], [limit]}.
+ * Response: {status, dead_exports:[key], cycles:["a -> b -> a"],
+ *            clones:[["sym  path", …]]}. */
+int kb_handle_code_audit(int fd, cJSON *req);
+
 #endif /* DEC_KB_SERVICE_GRAPH_H */
