@@ -1,8 +1,36 @@
 # Proposal: aimee optimization surface — assemble the measure→optimize→promote loop
 
-- **State:** draft — pending review
+- **State:** **largely shipped** (#117, #125–#128) — this file now tracks the
+  residual tail, not unbuilt work; see *Status* below.
 - **Author:** JBailes
-- **Date:** 2026-06-08
+- **Date:** 2026-06-08 (status refreshed 2026-06-08 after the surface landed)
+
+## Status (verified against `testing` @ #128)
+
+Most of what this proposal described has since merged. Re-reading it as a
+forward-looking plan is now misleading; the corrections below keep it honest, and
+the original design is retained for provenance.
+
+- **Reward loop is closed** (was the headline gap). `kb_bandit_reward()` →
+  `db2_bandit_decision_close()` is now called in production, not just tests —
+  `src/kb/kb_service_memory.c:98` (retrieval-limit) and `src/kb/kb.c:1760`
+  (fusion-mode). The "the loop is open / reward never observed" framing below is
+  **superseded**.
+- **The phantom export is fixed.** `kb_intel_payload.c` now builds the bandit
+  export data-driven from the decision registry / decision log
+  (`intel_bandit_point_obj`, `kb_bandit_registry_at`, `db2_bandit_*`), not a
+  hard-coded `kb_fusion_mode` literal. The "*Standalone fix-it: the phantom bandit
+  export*" section below is **done**.
+- **The CLI surface shipped.** `aimee optimize points|baseline|replay|run|compare|promote`
+  all exist (`src/cmd_optimize.c`); P2 (`run`/`compare`, #125), P3 (`promote`, #126)
+  are merged.
+- **Decision points beyond the first shipped.** `kb_fusion_mode` is now a sampled
+  decision (#127) and `delegate_routing` was added (#128) — the P4 conversions the
+  plan described.
+- **Residual (genuinely still open):** the `briefing_style` and
+  `guardrail_strictness` decision points (the remaining P4 fan-out), and any
+  online-exploration enablement still gated `default-off`. That tail is all that
+  remains live in `pending/`.
 - **Charter role(s):** learning / self-improvement (no new store, no new DB
   tier — reuses the existing bandit decision-log tables in DB2, the memory
   benchmark RPC, and the learning/calibration config surface).

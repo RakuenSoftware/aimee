@@ -219,6 +219,18 @@ the parallel path (see fix step 7), which repairs `agent_vote` at the same time.
    named-agent helper / `parallel_worker` (not only when `task->agent` is set), so
    the race is closed for the existing same-agent fan-out too, and add a
    concurrency test that runs N parallel tasks against one agent under TSan.
+   `agent_t` is a large struct (an inline per-agent credential pool,
+   network/tunnel config, role arrays), so the clone is not free — though bounded
+   by the small fan-out width (`ENSEMBLE_MAX_REFS = 8`) and dwarfed by the LLM call
+   it precedes. The real subtlety is **semantic, not cost**: a struct copy
+   duplicates the inline `credentials[]` lease pool and any per-agent cooldown /
+   provider-health state, so writes the worker makes to the clone (e.g. a 429
+   cooldown) do **not** propagate back to the shared `agent_t`. The clone must
+   therefore copy the fields the call mutates (`ablation`, `write_enforce`, runtime
+   config) while leaving rate-limit/health accounting on the shared, process-wide
+   structures it already uses (`provider_catalog_*`), so the fix closes the race
+   without making each task blind to siblings' rate-limit signals. Call this out
+   explicitly in the P0 design and cover it in the TSan/concurrency test.
 5. `delegate_ensemble_run` sets `tasks[i].agent = cfg->ensemble_reference_models[i]`
    so the N references become N real participants.
 6. **Un-stubbed test.** `test_delegate_ensemble.c` currently stubs
@@ -401,8 +413,16 @@ P0 is **not** scaffolding for the roundtable — it is a self-contained repair o
 shipped, marked-Done feature that does not work, and it should be reviewable and
 mergeable **without committing to any of §1–§9**. The roundtable (P1+) builds on
 it, but P0 stands alone and delivers value the day it lands: `aimee delegate
-aggregate` runs a real Mixture-of-Agents ensemble for the first time. Concretely,
-the standalone P0 changeset is:
+aggregate` runs a real Mixture-of-Agents ensemble for the first time.
+
+**"Self-contained" is not "small."** P0's largest and riskiest piece is the
+**entry-point wiring**, not the engine-local fixes. The routing/temperature/`srand`
+repairs are confined edits; but making the feature reachable requires a native
+`op == NULL` `/v1/delegate/aggregate` handler with an enqueue/finalize seam that
+drives `/v1/runs/{id}` *without* `server_dispatch` — `rh_dispatch_op_async` is not
+reusable as-is (§0.2). That seam is new server infrastructure, and review effort
+should be budgeted there, not on the one-line `tasks[i].agent` assignment.
+Concretely, the standalone P0 changeset is:
 
 | Defect (all verified in-tree) | Fix | Files |
 |---|---|---|
@@ -423,22 +443,38 @@ reviewer who only wants the bug fixed can approve P0 and stop there.
 
 Worth fixing alongside the code, because it is the reason this shipped: the MoA
 entry in `docs/PROPOSALS.md` was marked **Done** while no binary ever called the
-engine, and nothing flagged it. Two cheap guardrails would have caught it:
+engine, and nothing flagged it. Two controls were proposed here; building them
+turned one into a shipped gate and showed the other is harder than it looks.
 
-- **A reachability/coverage smell test.** A feature whose only non-test caller is
-  a lint-only `cmd_*.c` (the legacy, unlinked CLI layer — see the project note
-  that `cmd_*` files are lint-only under the thin-client split) is, by
-  definition, unreachable. A CI check that flags exported "feature" entry points
-  with no caller in any shipped-binary object set would have caught this before
-  the "Done" label.
-- **A proposal-index link check.** `PROPOSALS.md`'s MoA entry linked
+- **A proposal-index link check — built and shipped.**
+  `PROPOSALS.md`'s MoA entry linked
   `proposals/done/mixture-of-agents-ensemble-delegate.md`, a file that does not
-  exist (and 45 of its 47 links resolve to nothing — `done/` proposals are
-  delisted as files by convention). That convention makes a genuinely-missing or
-  mistyped link invisible. A check that (a) every `pending/` and `accepted/` link
-  resolves and (b) every `done/` entry that *claims* a file actually has one would
-  keep the index honest. This is out of scope for the code fix but is logged here
-  as the root-cause control.
+  exist. It was not alone: a sweep found **63 dead `proposals/*.md` links** in the
+  index — most are `accepted/`/`done/`/`rejected/` proposals that were delisted as
+  files (by convention only `pending/` keeps a live file) but kept their markdown
+  link syntax, so a genuinely-missing or mistyped link was invisible among them.
+  `scripts/check-proposal-links.py` (wired into `make lint`) now enforces that
+  every `proposals/*.md` link in the index and in pending proposals resolves; a
+  delisted proposal must be plain text, not a dead link. The 63 stale links were
+  delisted in the same change, so the gate is green and stays honest going forward.
+- **A reachability "smell test" — attempted, and *not* the cheap gate it looks
+  like.** The intuition is sound: a feature whose only non-test caller is a
+  lint-only `cmd_*.c` (the legacy, unlinked CLI layer) is unreachable, as MoA was.
+  But a naive static gate — "flag every header-declared function defined in a
+  linked file whose only caller is the lint-only `cmd_*` layer" — was prototyped
+  against the tree and flagged **~300 symbols**, almost all false positives.
+  The reason is structural: under the thin-client split the lint-only `cmd_*`
+  mirror layer still *references* hundreds of live backend functions
+  (`db1_*`, `kb_client_*`, `memory_*`, …), and whether each has a live alternate
+  path is a per-command routing question (thin client → `/v1` route → server/kb
+  handler) that no symbol-graph heuristic resolves — many live handlers are
+  reached only as function pointers in dispatch tables, not by `name(` call
+  syntax. So a blocking "no shipped caller" gate would be false-confidence noise.
+  The tractable control is **not** a generic static gate but a **per-feature
+  end-to-end reachability test** (CLI/V1 → engine → result) — exactly the test P0
+  adds (§0.2, §7), and the one whose absence let both the unreachability and the
+  §0.1 bug ship. The lesson for the index: prefer a real reachability test at the
+  feature boundary over a tree-wide caller scan that the mirror layer defeats.
 
 ## §1 What a roundtable is
 
@@ -515,6 +551,14 @@ because they trade latency for cross-pollination:
   avoid a fixed speaking order biasing the result, the participant order is
   **shuffled each round** with the existing `shuffle_indices`
   (`delegate_ensemble.c:21`).
+  - **Latency caveat (real on the configured delegates).** Sequential mode is
+    R×N serial LLM calls. The actual delegates (minimax / mimo-2.5 / mistral) have
+    multi-second-to-minute time-to-first-token under load — mistral has been seen
+    at ~88s TTFB — so with `N=3`, `R=3` a sequential run can approach the default
+    `roundtable_deadline_ms = 600000` (10 min) on its own. Sequential should be
+    documented as the high-latency, maximum-cross-pollination option, with the
+    deadline (and best-so-far return, §3) as the backstop; `parallel` stays the
+    default precisely because it collapses each round to one batch.
 
 Both share the cost cap, `min_successful` floor, and degrade-to-best fallback
 per round.

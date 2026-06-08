@@ -1,8 +1,27 @@
 # Proposal: finish the first-class /v1 migration (retire the RPC vestiges, keep typed routes)
 
-- **State:** draft — pending review
+- **State:** **mostly shipped** — only the Part A.2 comment/doc purge remains;
+  see *Status* below.
 - **Author:** JBailes
-- **Date:** 2026-06-08
+- **Date:** 2026-06-08 (status refreshed after #122/#128-era work)
+
+## Status (verified against `testing` @ #128)
+
+Two of this proposal's three deliverables have since merged; only the cosmetic
+comment purge is left.
+
+- **Part A.1 (rename) is done.** `cli_v1_rpc_local` was renamed to
+  `cli_v1_dispatch_local` in #122 (the v1-vestige-cleanup that is the parent of
+  this work). The "Current state" section below still describes the *old* name as
+  pending — that is stale; treat the rename as complete.
+- **Part B (kb-direct ownership gate) is done.** `scripts/check-kb-intelligence-surfaced.py`
+  now enforces that every `/v1/intelligence/*` route is either surfaced through an
+  aimee-server client path or explicitly marked `kb-direct`, wired into `make lint`
+  as `kb-intelligence-surfaced-check`. That is the gate Part B asked for.
+- **Residual (still open): Part A.2 only** — a handful of stale `POST /v1/rpc`
+  comments/strings remain (e.g. `src/headers/cli_client.h`, `src/server/server_http.c`)
+  and the `CAPS_ALL` "opens the /v1/rpc bridge" wording. Pure comment/doc cleanup,
+  no behaviour change.
 - **Charter role(s):** none (transport/architecture cleanup — no new store, no new
   DB tier, no intelligence pass).
 - **Scope:** `src/cli_rpc_routes.inc` (rename the legacy `cli_v1_rpc_local`
