@@ -17,6 +17,24 @@ static const kb_bandit_decision_point_t REGISTRY[] = {
         .reward_fn = "recall_sufficiency_v1",
         .status = "live",
     },
+    {
+        .id = "kb_fusion_mode",
+        .description = "KB-search hybrid fusion strategy: how lexical and dense "
+                       "results are combined when no explicit mode is requested.",
+        .arms = {"rrf", "static_alpha", "dynamic_alpha"},
+        .n_arms = 3,
+        .reward_fn = "recall_sufficiency_v1",
+        .status = "live",
+    },
+    {
+        .id = "delegate_routing",
+        .description = "Delegate cost-tier preference when a sub-task is launched "
+                       "with no explicit --via/--tier/--provider override.",
+        .arms = {"cheapest", "premium"},
+        .n_arms = 2,
+        .reward_fn = "delegate_success_v1",
+        .status = "live",
+    },
 };
 
 int kb_bandit_registry_count(void)

@@ -836,6 +836,18 @@ char *kb_client_bandit_export_json(void);
  * `result_json` must be a JSON object string (the replay-tool result). */
 char *kb_client_bandit_replay_record_json(const char *decision_point, const char *result_json);
 
+/* Server-side decision points reach the kb DB2 bandit through these. sample
+ * selects+logs an arm (returns 0 + fills arm_out/decision_id_out, or -1 when
+ * disabled/transport-failed); close records the reward [0,1] (best-effort). */
+int kb_client_bandit_sample(const char *decision_point, const char *const *arms, int n_arms,
+                            char *arm_out, size_t arm_out_len, char *decision_id_out,
+                            size_t decision_id_out_len);
+int kb_client_bandit_close(const char *decision_point, const char *decision_id, const char *arm_id,
+                           double reward);
+/* Persist the production-default arm for a decision point; raw kb JSON
+ * ({status, rollback_arm}), caller frees. */
+char *kb_client_bandit_promote_json(const char *decision_point, const char *arm);
+
 /* artifacts.list_proposed: list proposed artifacts by surface (NULL = all).
  * Returns heap-allocated JSON string; caller frees. */
 char *kb_client_artifacts_list_proposed_json(const char *target_surface, int limit);

@@ -216,6 +216,8 @@ static const struct
     {"kb", "ingest", "kb.ingest", NULL, NULL, 30000},
     {"kb", "ingest status", "kb.ingest.status", NULL, NULL, 0},
     {"kb", "status", "kb.status", NULL, NULL, 0},
+    {"kb", "calibrate", "calibration.readiness", NULL, NULL, 0},
+    {"kb", "demote", "demotion.check", NULL, NULL, 0},
     {"workers", "", "workers", NULL, NULL, 0},
     {"insights", NULL, "insights.overview", NULL, NULL, 0},
     {"worktree", "gc", "worktree.gc", NULL, NULL, 60000},
@@ -3027,6 +3029,10 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
    if (strcmp(method, "eval.results") == 0)
       return marshal_eval_results(argc, argv);
    if (strcmp(method, "identity.show") == 0)
+      return marshal_no_args(method);
+   if (strcmp(method, "calibration.readiness") == 0)
+      return marshal_no_args(method);
+   if (strcmp(method, "demotion.check") == 0)
       return marshal_no_args(method);
    if (strcmp(method, "identity.snapshot") == 0)
       return marshal_identity_snapshot(argc, argv);

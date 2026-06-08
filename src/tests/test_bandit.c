@@ -166,6 +166,20 @@ static void test_bandit_registry(void)
    assert(strcmp(dp->arms[0], "10") == 0);
    assert(strcmp(dp->arms[1], "20") == 0);
 
+   /* kb_fusion_mode is also registered (KB-search fusion strategy). */
+   const kb_bandit_decision_point_t *fm = kb_bandit_registry_get("kb_fusion_mode");
+   assert(fm != NULL);
+   assert(fm->n_arms == 3);
+   assert(strcmp(fm->arms[0], "rrf") == 0);
+   assert(strcmp(fm->status, "live") == 0);
+
+   /* delegate_routing (server-side decision point reached via the kb bandit). */
+   const kb_bandit_decision_point_t *dr = kb_bandit_registry_get("delegate_routing");
+   assert(dr != NULL);
+   assert(dr->n_arms == 2);
+   assert(strcmp(dr->arms[0], "cheapest") == 0);
+   assert(strcmp(dr->arms[1], "premium") == 0);
+
    /* Unknown id -> NULL; index access is bounds-checked. */
    assert(kb_bandit_registry_get("nope") == NULL);
    assert(kb_bandit_registry_get(NULL) == NULL);

@@ -10,6 +10,7 @@
 #include "cJSON.h"
 #include "kb_http.h"
 #include "kb_service.h"
+#include "kb_bandit.h"
 #include "kb_service_backend.h"
 #include "kb_enroll.h"
 #include "kb_paths.h"
@@ -794,6 +795,47 @@ int db2_demotion_profile_read(const char *memory_class, const char *scope_kind,
    return 0;
 }
 
+/* kb_intel_payload's bandit.sample/close builders call these; this test does not
+ * link kb_bandit.o. Stub sample as "disabled" and reward as a no-op success. */
+int kb_bandit_sample(const config_t *cfg, const char *decision_point, const char *context_json,
+                     const char (*arm_ids)[KB_BANDIT_MAX_ARM_ID], int n_arms, char *decision_id_out)
+{
+   (void)cfg;
+   (void)decision_point;
+   (void)context_json;
+   (void)arm_ids;
+   (void)n_arms;
+   if (decision_id_out)
+      decision_id_out[0] = '\0';
+   return -1;
+}
+int kb_bandit_reward(const config_t *cfg, const char *decision_point, const char *decision_id,
+                     const char *arm_id, double reward)
+{
+   (void)cfg;
+   (void)decision_point;
+   (void)decision_id;
+   (void)arm_id;
+   (void)reward;
+   return 0;
+}
+
+int db2_bandit_promotion_get(const char *decision_point, char *arm_out, size_t arm_out_len)
+{
+   (void)decision_point;
+   if (arm_out && arm_out_len)
+      arm_out[0] = '\0';
+   return -1; /* no promotion in tests */
+}
+int db2_bandit_promotion_set(const char *decision_point, const char *arm_id,
+                             const char *rollback_arm)
+{
+   (void)decision_point;
+   (void)arm_id;
+   (void)rollback_arm;
+   return 0;
+}
+
 int db2_bandit_decision_points_list(char *buf, size_t len)
 {
    /* The data-driven export asks the log which points exist; return the one
@@ -1144,17 +1186,20 @@ static void test_intelligence_bandit_export(void)
    int s = kb_http_route_ex("GET", "/v1/intelligence/bandit/export", NULL, NULL, NULL, NULL, 0, buf,
                             sizeof(buf));
    assert(s == 200);
-   /* Export is data-driven: it reports the point that is actually sampled, and a
-    * `points` breakdown — not the hard-coded phantom kb_fusion_mode. */
+   /* Export is data-driven: the `points` breakdown reports only the point that is
+    * actually sampled (no fabricated phantom — the arm_stats mock aborts on any
+    * other decision point). */
    assert(strstr(buf, "\"points\":[") != NULL);
    assert(strstr(buf, "\"decision_point\":\"kb_memory_retrieval_limit\"") != NULL);
-   assert(strstr(buf, "kb_fusion_mode") == NULL);
    assert(strstr(buf, "\"arm_id\":\"10\"") != NULL);
    assert(strstr(buf, "\"n_decisions\":3") != NULL);
    /* The registry section lists declared decision points (source of truth),
-    * including arms and the reward function — present even with no decisions. */
+    * including arms and the reward function — present even with no decisions.
+    * kb_fusion_mode is now a registered point, so it appears here (not as a
+    * phantom with fabricated arm stats). */
    assert(strstr(buf, "\"registry\":[") != NULL);
    assert(strstr(buf, "\"reward_fn\":\"recall_sufficiency_v1\"") != NULL);
+   assert(strstr(buf, "\"decision_point\":\"kb_fusion_mode\"") != NULL);
 }
 
 static void test_not_found(void)

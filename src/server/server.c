@@ -1049,6 +1049,10 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"kb.ingest.status", handle_kb_ingest_status},
     {"kb.status", handle_kb_status},
     {"optimize.export", handle_optimize_export},
+    {"optimize.promote", handle_optimize_promote},
+    {"optimize.replay_record", handle_optimize_replay_record},
+    {"calibration.readiness", handle_calibration_readiness},
+    {"demotion.check", handle_demotion_check},
     {"workers", handle_workers},
     /* Rules */
     {"rules.list", handle_rules_list},

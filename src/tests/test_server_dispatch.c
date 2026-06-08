@@ -536,6 +536,22 @@ int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "optimize.export");
 }
+int handle_optimize_promote(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "optimize.promote");
+}
+int handle_optimize_replay_record(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "optimize.replay_record");
+}
+int handle_calibration_readiness(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "calibration.readiness");
+}
+int handle_demotion_check(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "demotion.check");
+}
 int handle_workers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "workers");

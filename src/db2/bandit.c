@@ -305,6 +305,72 @@ int db2_bandit_arms_list(const char *decision_point, char *buf, size_t len)
    return 0;
 }
 
+int db2_bandit_promotion_get(const char *decision_point, char *arm_out, size_t arm_out_len)
+{
+   if (arm_out && arm_out_len)
+      arm_out[0] = '\0';
+   if (!decision_point || !arm_out || arm_out_len == 0)
+      return -1;
+
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "SELECT arm_id FROM bandit_promotions"
+                                          " WHERE decision_point = ?1",
+                                          err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", decision_point);
+   int found = -1;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *arm = aimee_pg_column_text(st, 0);
+      if (arm && arm[0])
+      {
+         snprintf(arm_out, arm_out_len, "%s", arm);
+         found = 0;
+      }
+   }
+   aimee_pg_finalize(st);
+   return found;
+}
+
+int db2_bandit_promotion_set(const char *decision_point, const char *arm_id,
+                             const char *rollback_arm)
+{
+   if (!decision_point || !arm_id || !arm_id[0])
+      return -1;
+
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char ts[32];
+   now_utc(ts, sizeof(ts));
+
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "INSERT INTO bandit_promotions (decision_point, arm_id, rollback_arm,"
+                        "   promoted_at)"
+                        "  VALUES (?1, ?2, ?3, ?4)"
+                        "  ON CONFLICT (decision_point) DO UPDATE"
+                        "    SET arm_id = ?2, rollback_arm = ?3, promoted_at = ?4",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", decision_point);
+   aimee_pg_bind_text(st, "?2", arm_id);
+   aimee_pg_bind_text(st, "?3", rollback_arm ? rollback_arm : "");
+   aimee_pg_bind_text(st, "?4", ts);
+   aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return 0;
+}
+
 int db2_bandit_decisions_export(const char *decision_point, int limit, char *buf, size_t len)
 {
    if (!decision_point || !buf || len == 0)
