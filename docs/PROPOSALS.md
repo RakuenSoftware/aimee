@@ -3,7 +3,7 @@
 This index reflects the current proposal tree under
 [`docs/proposals/`](proposals/). The pending section is organized by
 the layers of the
-[Architecture Charter](proposals/done/architecture-charter.md),
+Architecture Charter,
 which is the single umbrella contract every intelligence-surface
 proposal inherits from, whether neural, symbolic, statistical,
 planning, or deterministic. Ordering within a layer does not imply a strict global
@@ -51,7 +51,7 @@ umbrella document plus two platform-wide contracts.
 ### Evidence pipeline: aimee-kb + curator + learning + ingest
 
 These proposals together implement the charter's one data pipeline.
-The [Document Corpus Intelligence Pipeline](proposals/done/document-corpus-intelligence-pipeline.md)
+The Document Corpus Intelligence Pipeline
 umbrella maps the document side's stages and tables onto this cluster
 and routes the genuine gaps to four new siblings. Platform and curator
 split the doc + code side; cross-source-learning owns the session /
@@ -59,7 +59,7 @@ feedback / workflow side; ingest-lab is the Normalize stage feeding the
 curator; approximate-sketches sits between normalization and dense
 recall.
 
-- [Document Corpus Intelligence Pipeline](proposals/done/document-corpus-intelligence-pipeline.md):
+- Document Corpus Intelligence Pipeline:
   umbrella for the document side; maps the 13-stage / 15-table corpus
   design onto the charter spine + shipped work; sets the CPU-first
   curator profile and the size-adaptive vector-index strategy.
@@ -69,73 +69,73 @@ recall.
   auth; corpus staging and release gating; reflection HTTP surface.
   Phase 1 shipped, `/v1/health`, `/v1/version`, `/v1/capabilities`; bearer-token
   auth; `kb.api.http_port` config; OpenAPI v1 spec. Phases 2+ require dogfood.
-- [aimee-kb Service Split and Headless Containerization](proposals/pending/aimee-kb-service-split-and-containerization.md):
+- aimee-kb Service Split and Headless Containerization:
   `src/kb/` / `src/server/` source split; Docker packaging; `/v1/`-only
   access (retiring the legacy `kb.*` RPC); headless completeness so a
   remote container is fully consumable from another host. **New.**
-- [Distributed-Mode Auth: Zero-Config Enrollment and Pluggable Verifier](proposals/pending/distributed-mode-auth.md):
+- Distributed-Mode Auth: Zero-Config Enrollment and Pluggable Verifier:
   the remote aimee-server ↔ aimee-kb trust boundary the service proposal
   deferred ("distributed-mode auth"); one-string container enrollment
   (CA-pinned TLS + one-time token), automated mTLS with auto-rotation,
   and a pluggable `Verifier` (kb-token default, BYO OIDC/JWT).
   Container-per-owner by default; single-container multi-tenant is
   opt-in. **New.**
-- [Deep Curator: Doc and Code Extraction](proposals/accepted/deep-curator-doc-and-code-extraction.md):
+- Deep Curator: Doc and Code Extraction:
   Extract / Synthesize / Judge on docs and code; entity graph;
   doc↔code bridge via `implements`; contradictions; synthesis;
   semantic code indexing and search. Runs inside the aimee-kb service.
   **Accepted. Phase 0 shipped, `scripts/embed-minilm.py` MiniLM-L6-v2 sidecar.**
-- [Cross-Source Learning Pipeline: Candidate Generation, Promotion Rollout, and Review](proposals/pending/cross-source-learning-pipeline.md):
+- Cross-Source Learning Pipeline: Candidate Generation, Promotion Rollout, and Review:
   Continuation of the now-done Cross-Source Learning Substrate. Carries the
   model-assisted / infra-bound remainder, candidate generation, pgvector
   neighbourhood retrieval, synthesis, the rest of the promotion surfaces,
   cross-surface review, and version-bump replay. **New.**
-- [Ingest Lab and Strategy-Aware Chunking](proposals/accepted/ingest-lab-and-strategy-aware-chunking.md):
+- Ingest Lab and Strategy-Aware Chunking:
   Normalize stage; document-kind-aware chunking; operator-facing
   debug surface; quality / staging recommendations for the curator's
   release gate. **Accepted. Phase 0 shipped, `aimee kb lab` command with chunk preview,
   quality signals, and stage recommendations.**
-- [Approximate Sketches for Ingest Pre-Filtering](proposals/done/approximate-sketches-for-ingest-prefiltering.md):
+- Approximate Sketches for Ingest Pre-Filtering:
   Bloom / MinHash-LSH / Count-Min / HyperLogLog layer between
   Normalize and dense recall; cheap dedupe, near-dup clustering,
   distinct-source counts; feeds `sketch.*` features into the feature
   view. **Done.** Shipped, all four algorithms + DB2 persistence,
   Bloom exact skip, MinHash-LSH near-dup skip and supersession proposals,
   Count-Min / HLL `sketch.*` features, and fixture-backed sketch tests.
-- [Corpus Staged Processing Pipeline](proposals/done/corpus-staged-processing-pipeline.md):
+- Corpus Staged Processing Pipeline:
   per-document resumable stage machine (`corpus_processing_jobs`) that
   conducts the existing per-kind job queues. Fills the design's central
   gap. **Done.** Shipped, DB2 job/event/version tables, doc-ingest
   seeding, deterministic drain handlers, and `aimee kb pipeline`.
-- [Corpus Structural Analysis](proposals/done/corpus-structural-analysis.md):
+- Corpus Structural Analysis:
   stages 1 / 2 / 5, doc-type classification, `document_sections`,
   `document_references` + staleness. **Done.** Shipped, deterministic
   doc classification, Markdown section trees, document references, and
   reference staleness helpers.
-- [Corpus Terminology and Gap Detection](proposals/pending/corpus-terminology-and-gap-detection.md):
+- Corpus Terminology and Gap Detection:
   stages 6 / 12, `term_mapping` and `gap` artifact kinds; corpus gaps
   feed the memory-side curiosity surface. **New.**
-- [Corpus Vector Index Strategy](proposals/pending/pgvectorscale-corpus-vector-indexes.md):
+- Corpus Vector Index Strategy:
   pgvector HNSW by default, pgvectorscale diskann as an opt-in scale-up;
   memory vectors stay HNSW. **New.**
 
 ### Retrieval (Recall / Rerank / Rank-Fuse)
 
-- [Dynamic Alpha Fusion for KB Hybrid Retrieval](proposals/done/dynamic-alpha-kb-fusion.md):
+- Dynamic Alpha Fusion for KB Hybrid Retrieval:
   score-aware lexical / dense blending shipped as an opt-in fusion mode on
   `POST /v1/search`; benchmark gate did not justify a default flip, so `rrf`
   remains default. **Done, bench-only / no rollout.**
 
 ### Synthesis tie-break (Synthesize / Calibrate)
 
-- [MDL-Guided Synthesis Selection](proposals/done/mdl-guided-synthesis-selection.md):
+- MDL-Guided Synthesis Selection:
   minimum-description-length tie-break over N-attempt-agreed
   synthesis candidates; emits `mdl.*` features; prompt-bump drift
   guardrail.
 
 ### Reasoning (Reason / Constrain-Verify / Case Recall)
 
-- [Graph Reasoning, Case-Based Recall, and Contradiction Logic](proposals/done/graph-reasoning-case-based-recall-and-contradiction-logic.md):
+- Graph Reasoning, Case-Based Recall, and Contradiction Logic:
   Datalog-over-DB2 rule engine; case library as promotion target;
   deterministic temporal / provenance contradiction checks; shared
   symbolic substrate consumed by curator, learning, and guardrails.
@@ -143,10 +143,10 @@ recall.
 
 ### Ranking, Calibration, Detection (Rank-Fuse / Calibrate / Detect-Cluster)
 
-- [Statistical Decision Systems for Ranking and Detection](proposals/accepted/statistical-decision-systems-for-ranking-calibration-and-experiments.md):
+- Statistical Decision Systems for Ranking and Detection:
   shared feature view; learning-to-rank substrate; clustering /
   anomaly / drift detection; emits `drift_signal` evidence.
-- [Bayesian Calibration of Promotion Thresholds](proposals/done/bayesian-promotion-threshold-calibration.md):
+- Bayesian Calibration of Promotion Thresholds:
   per-`(target_surface, kind, scope)` Beta-binomial posteriors with
   conformal abstention floor; replaces static `threshold.*` config
   values with fitted `calibration_profile` artifacts.
@@ -154,7 +154,7 @@ recall.
   sidecar fitting, per-surface tau config, dynamic surface discovery,
   working-profile gate consumption, prompt/model version keyed refits,
   fixture-backed calibration tests, and benchmark requests.
-- [Outcome-Driven Demotion and Poison Resilience](proposals/done/outcome-driven-demotion-and-poison-resilience.md):
+- Outcome-Driven Demotion and Poison Resilience:
   per-row retrieval-outcome attribution via `retrieval_event_id`;
   demotion driven by observed downstream outcomes rather than declared
   trust metadata; poison-slice benchmark with a release-blocking
@@ -162,7 +162,7 @@ recall.
 
 ### Recall evaluation
 
-- [Unified Benchmark Suite: Target Adapters, Pinned Judge, Memory + Coding + Reasoning](proposals/accepted/unified-benchmark-suite-memory-coding-reasoning.md):
+- Unified Benchmark Suite: Target Adapters, Pinned Judge, Memory + Coding + Reasoning:
   language-neutral target-adapter contract; pinned open-weights
   judge; catalog across memory (LoCoMo, LongMemEval-S/M/L, MSC, DMR,
   BEAM, MRCR, RULER, L-Eval), coding (HumanEval, MBPP+, BigCodeBench,
@@ -180,40 +180,40 @@ recall.
 Two sibling proposals: one owns the compacted session context, the other
 owns the transport-time decision to preserve prompt-cache prefixes.
 
-- [Virtual Context Assembly and Recoverable Tool-Chain Paging](proposals/accepted/virtual-context-assembly-and-tool-chain-paging.md):
+- Virtual Context Assembly and Recoverable Tool-Chain Paging:
   session-local prompt working-set management; tool-chain stubs;
   budget-aware assembly in `aimee-server`. Phase 1+2 shipped; Phase 3-4 require dogfood.
-- [Prompt-Cache-Aware Deferred Payload Rewrite](proposals/done/prompt-cache-aware-deferred-payload-rewrite.md):
+- Prompt-Cache-Aware Deferred Payload Rewrite:
   cache-preserving outbound payload policy; decouples compaction
   epoch from provider-facing payload rewrites. Done.
 
 ### Safety (Classify-Score)
 
-- [Neural-Assisted Guardrails and Semantic Risk Scoring](proposals/accepted/neural-assisted-guardrails.md):
+- Neural-Assisted Guardrails and Semantic Risk Scoring:
   multi-head semantic risk scoring in `pre_tool_check`; advisor to
   deterministic policy; exemplar clustering via the charter promotion
   pipeline. Phase 0/1 shipped, sidecar mechanism, shadow dry_run mode, DB1 `guardrail_events` table, score-band policy mapping, `aimee guardrails review` CLI, and `scripts/guardrails-semantic.py` reference sidecar. Phases 2+ require dogfood.
 
 ### Planning & Execution (Plan-Search / Constrain-Verify)
 
-- [Deliberate Planning, MCTS Search, and SMT Constraint Execution](proposals/accepted/deliberate-planning-search-and-constraint-execution.md):
+- Deliberate Planning, MCTS Search, and SMT Constraint Execution:
   `plan_candidate` / `plan_template` artifacts; MCTS-seeded bounded
   plan search; SMT-sidecar hard-constraint validation; case-based
   plan repair; opt-in gate per task shape.
 
 ### Deterministic verify gate (Constrain-Verify)
 
-- [Incremental Verify: Change-Scoped Step Selection and Command Scoping](proposals/done/incremental-verify-step-selection-and-scoping.md):
+- Incremental Verify: Change-Scoped Step Selection and Command Scoping:
   skip verify steps whose declared `paths:` saw no change since the last
   passing tree in `.aimee/.last-verify`, plus opt-in per-step command
   scoping to the changed-file set; conservative invalidation
   (`always_run_globs`, undeclared / new steps) so a tree is never reported
   passing that a full run would fail. Extends the shipped
-  [session-safety](proposals/done/session-safety.md) verify gate. **Done.**
+  session-safety verify gate. **Done.**
 
 ### Experimentation & Policy (Evaluate-Optimize)
 
-- [Contextual Bandits and Counterfactual Replay](proposals/done/contextual-bandits-and-counterfactual-replay.md):
+- Contextual Bandits and Counterfactual Replay:
   Thompson sampling over sidecar / ranker / prompt variants;
   synthetic-control + IPW attribution over `audit_outcome` evidence;
   `policy_arm` artifacts flipped through the charter promotion
@@ -225,40 +225,40 @@ Two proposals that exist purely to close acceptance items from
 shipped code on a real calendar. Same pattern: shipped plumbing +
 unshipped operational artifacts + explicit close-by deadline.
 
-- [Working-Profile Operational Validation Cycle](proposals/pending/working-profile-operational-validation.md):
+- Working-Profile Operational Validation Cycle:
   first end-to-end test of the charter's promotion +
   retroactive-review loop; proving ground before the pattern
   generalizes.
-- [Dogfood Autolabel Operational Cycle](proposals/done/dogfood-autolabel-operational-cycle.md):
+- Dogfood Autolabel Operational Cycle:
   operational loop for the dogfood classifier; first monthly review
   artefact and cross-session reminder demo.
 
 ### Imported from the hermes-agent intake
 
 Eleven candidates drafted from the
-[hermes-agent concept intake](proposals/hermes-agent-concept-intake.md)
+hermes-agent concept intake
 (survey of `nousresearch/hermes-agent`). Each cites its charter role(s)
 and the shipped aimee work it builds on. Listed by the intake's priority.
 
 Safety / reliability (P1-P2):
 
-- [MCP Supply-Chain Malware Gate](proposals/done/mcp-supply-chain-malware-gate.md):
+- MCP Supply-Chain Malware Gate:
   OSV `MAL-*` check before launching `npx`/`uvx`-backed MCP servers;
   fail-open; DB1 cache; allowlist. **Enforce. Done.**
-- [API Error Taxonomy and Failover Classifier](proposals/done/api-error-taxonomy-and-failover-classifier.md):
+- API Error Taxonomy and Failover Classifier:
   typed `failover_reason_t` + recovery routing (retry / rotate / fallback /
   compress / abort), replacing scattered status matching in `http_retry.c`.
   **Classify-Score → Enforce. Done.**
-- [Multi-Credential Pool and Rate-Limit Failover](proposals/done/multi-credential-pool-and-rate-limit-failover.md):
+- Multi-Credential Pool and Rate-Limit Failover:
   per-provider key pool, `x-ratelimit-*` capture, rotation on the
   classifier's rate-limit/billing reason. **Enforce / Calibrate. Done.**
-- [Model Capability Registry and Capability-Aware Routing](proposals/done/model-capability-registry-and-capability-aware-routing.md):
+- Model Capability Registry and Capability-Aware Routing:
   offline-first `models.dev` metadata behind the catalog; capability-gated
   delegate routing. **Rank-Fuse / Calibrate. Done.**
-- [Session Search Agent Tool](proposals/done/session-search-agent-tool.md):
+- Session Search Agent Tool:
   zero-LLM agent-callable FTS over DB1 sessions (discovery / scroll /
   browse + bookends). **Recall.**
-- [Shutdown and Crash Forensics](proposals/done/shutdown-crash-forensics.md):
+- Shutdown and Crash Forensics:
   non-blocking signal-time context capture (signal, sender, in-flight
   state) across daemons; surfaced by `aimee doctor`.
 
@@ -280,26 +280,26 @@ Capability / coordination / research (P3):
   "participant" is the same default agent) — then generalizes it into a bounded
   multi-round roundtable: real participant routing, draft/review modes,
   deterministic convergence, keep-best, preflight cost limits. **Draft / Review / Reason. New.**
-- [Composable Named Toolsets](proposals/done/composable-named-toolsets.md):
+- Composable Named Toolsets:
   one composable toolset object shared by roles, delegates, gateway
   channels, and the scripted-RPC allow-list. **Done.**
-- [Computer-Use as a Guarded Capability](proposals/done/computer-use-as-guarded-capability.md):
+- Computer-Use as a Guarded Capability:
   browser/GUI control via an OSV-gated, sandboxed external MCP server with
   per-action risk bands + approval-required enforcement.
   **Classify-Score / Enforce. Done.**
-- [Kanban Board over the Work Queue](proposals/done/kanban-work-queue-board.md):
+- Kanban Board over the Work Queue:
   shipped board view over the existing `cmd_work.c` queue.
-- [Kanban Lanes and Claim Hardening](proposals/done/kanban-lanes-and-claim-hardening.md):
+- Kanban Lanes and Claim Hardening:
   lane claim model + concurrency hardening over the existing queue.
-- [Trajectory Capture and Compression](proposals/done/trajectory-capture-and-compression.md):
+- Trajectory Capture and Compression:
   redacted, compressed, replayable trajectories from the DB1 event log for
   offline eval/training. **Evaluate-Optimize. Done.**
 
 ### Skills methodology and capability surface
 
 aimee shipped a complete skill *engine*
-([`skill-context-injection`](proposals/done/skill-context-injection.md),
-[`agent-self-improvement-skill-lifecycle`](proposals/done/agent-self-improvement-skill-lifecycle.md))
+(`skill-context-injection`,
+`agent-self-improvement-skill-lifecycle`)
 but ships no skill *content* and has no proactive dispatcher for the
 primary agent. Four sibling proposals adapt the methodology layer of
 [`obra/superpowers`](https://github.com/obra/superpowers) (MIT) onto
@@ -308,29 +308,29 @@ surface. Methodology skills *teach*; the deterministic gates
 (`tdd-enforcement`, `structured-code-review`) still *enforce*, the
 two are defense in depth.
 
-- [Bundled Methodology Skill Library](proposals/done/bundled-methodology-skill-library.md):
+- Bundled Methodology Skill Library:
   curated default skills (TDD, systematic-debugging,
   verification-before-completion, condition-based-waiting, …) seeded at
   install; bundled discovery tier; directory `SKILL.md` format. Loads
   the empty engine.
-- [Proactive Skill Dispatch](proposals/done/proactive-skill-dispatch.md):
+- Proactive Skill Dispatch:
   SessionStart skill-index injection + dispatch directive + opt-in
   deterministic PreToolUse advisory; prompt-cache-safe. Charter roles
   Classify-Score / Gate-Promote. The "reach for the right skill"
   mechanism the engine lacks.
-- [Skill Authoring Discipline and Compliance Eval](proposals/done/skill-authoring-discipline-and-compliance-eval.md):
+- Skill Authoring Discipline and Compliance Eval:
   `writing-skills` meta-skill + before/after compliance eval gating
   `skill_change` promotion; `aimee skill lint`. Closes the quality hole
   in the lifecycle proposal. Charter roles Evaluate-Optimize /
   Gate-Promote.
-- [Capability Skills: Expose aimee's Native Subsystems](proposals/done/capability-skills-expose-native-subsystems.md):
+- Capability Skills: Expose aimee's Native Subsystems:
   thin trigger-activated skills routing to `find_symbol`,
   `search_memory`, `search_docs`, `delegate` so agents reach for
   aimee's tooling over grep/re-asking. Charter role Classify-Score.
 
 ## Accepted
 
-- [Unified Benchmark Suite: Target Adapters, Pinned Judge, Memory + Coding + Reasoning](proposals/accepted/unified-benchmark-suite-memory-coding-reasoning.md):
+- Unified Benchmark Suite: Target Adapters, Pinned Judge, Memory + Coding + Reasoning:
   PR1 shipped, `benchmarks/catalog.toml`, `benchmarks/targets/aimee/adapter.py` (wraps AimeeHarness
   behind the stdio JSON protocol), provenance fields in `result_schema.py`, judge-profile / dataset-hash
   refusal check in `verify_scores.py`, and `benchmarks/suite/` dispatch scripts.
@@ -339,12 +339,12 @@ two are defense in depth.
   Phase 1 shipped, `/v1/health`, `/v1/version`, `/v1/capabilities` HTTP endpoints;
   bearer-token auth middleware; `kb.api.http_port` / `kb_api_bearer_token` config; `--http-port=N`
   CLI arg; OpenAPI 3.1 spec at `api/openapi-v1.yaml`. Phases 2+ require dogfood.
-- [Virtual Context Assembly and Recoverable Tool-Chain Paging](proposals/accepted/virtual-context-assembly-and-tool-chain-paging.md):
+- Virtual Context Assembly and Recoverable Tool-Chain Paging:
   Phase 1+2 shipped, DB1 schema, tool-chain events, deterministic stubs, three MCP inspection tools, `conv_ctx_assemble` budget-aware assembly injected into delegate context. Phases 3-4 require dogfood and benchmark validation.
-- [Prompt-Cache-Aware Deferred Payload Rewrite](proposals/done/prompt-cache-aware-deferred-payload-rewrite.md):
+- Prompt-Cache-Aware Deferred Payload Rewrite:
   Done, metadata/observability, opt-in deferral, proxy/delegate transport
   coverage, and adaptive context refresh gating shipped.
-- [Neural-Assisted Guardrails and Semantic Risk Scoring](proposals/accepted/neural-assisted-guardrails.md):
+- Neural-Assisted Guardrails and Semantic Risk Scoring:
   Phase 0/1 shipped, sidecar mechanism, shadow dry_run mode, DB1 `guardrail_events` table, score-band policy mapping, `aimee guardrails review` CLI, and `scripts/guardrails-semantic.py` reference sidecar. Phases 2+ require dogfood.
 ## Done
 
@@ -429,16 +429,16 @@ For the full chronological list, see the directory listing or
 
 ## Rejected
 
-- [Adoption and Onboarding](proposals/rejected/adoption-onboarding.md)
-- [DRY Refactoring](proposals/rejected/dry-refactoring.md)
-- [Idempotent Tool Caching](proposals/rejected/idempotent-tool-caching.md)
-- [Operations Runbook](proposals/rejected/operations-runbook.md)
-- [Project-Scoped Memory](proposals/rejected/project-scoped-memory.md)
-- [Relocate Session State Out of the Repository](proposals/rejected/relocate-session-state-out-of-repo.md)
-- [Split CLI / Hooks / Chat](proposals/rejected/split-cli-hooks-chat.md)
-- [Split cmd / Agent](proposals/rejected/split-cmd-agent.md)
-- [Split DB and Memory](proposals/rejected/split-db-and-memory.md)
-- [Split Webchat](proposals/rejected/split-webchat.md)
+- Adoption and Onboarding
+- DRY Refactoring
+- Idempotent Tool Caching
+- Operations Runbook
+- Project-Scoped Memory
+- Relocate Session State Out of the Repository
+- Split CLI / Hooks / Chat
+- Split cmd / Agent
+- Split DB and Memory
+- Split Webchat
 
 ## Notes
 
@@ -447,12 +447,12 @@ For the full chronological list, see the directory listing or
 - `docs/proposals/done/`, `accepted/`, `pending/`, `deferred/`,
   `rejected/`, and `reviews/` remain the authoritative state folders.
   Proposals that have shipped move to `done/`.
-- The [Architecture Charter](proposals/done/architecture-charter.md)
+- The Architecture Charter
   is the single review gate for any new intelligence-surface proposal,
   whether neural, symbolic, statistical, planning, or deterministic. A
   new proposal in that scope that does not name its charter role(s) and
   cite the charter is not ready for review.
-- The [Memory Public Contract](proposals/done/memory-public-contract.md)
+- The Memory Public Contract
   is the review gate for any new caller-facing memory surface, whether
   a CLI flag, MCP tool shape, or HTTP endpoint. New surfaces align with
   the contract or explicitly justify a deviation.
