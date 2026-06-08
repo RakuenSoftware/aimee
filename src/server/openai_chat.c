@@ -17,6 +17,7 @@
  * single-owner surface this first cut targets. */
 #include "server_http.h"
 #include "openai_shape.h"
+#include "ingress_preinject.h"
 #include "openai_responses_store.h" /* previous_response_id continuation store */
 #include "openai_runs_store.h"      /* GET /v1/runs/{id} record store */
 #include "aimee.h"                  /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
@@ -771,6 +772,26 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
 
    /* Heal orphaned tool calls/results — each Codex turn is stateless full-history. */
    message_history_repair(messages);
+
+   /* P1 context pre-injection (config: ingress_preinject_enabled, default off):
+    * prepend a fusion-recall <aimee-context> envelope to the system prompt so the
+    * external agent reasons over already-loaded context instead of re-exploring
+    * the repo. No-op when disabled or when recall yields nothing. */
+   {
+      char *pi_query = ingress_preinject_query_from_messages(messages);
+      char *pi_env = ingress_preinject_build(pi_query, 0);
+      if (pi_env)
+      {
+         char *merged = ingress_preinject_apply(instructions, pi_env);
+         if (merged)
+         {
+            free(instructions);
+            instructions = merged;
+         }
+      }
+      free(pi_query);
+      free(pi_env);
+   }
 
    parsed_response_t parsed;
    int erc =

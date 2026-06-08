@@ -685,6 +685,8 @@ static void ensure_codex_plugin_files(const char *home)
             "    \"termsOfServiceURL\": \"https://github.com/RakuenSoftware/aimee\",\n"
             "    \"defaultPrompt\": [\n"
             "      \"Search aimee memory before answering repo-specific questions\",\n"
+            "      \"Explore the codebase through aimee's tools (find_symbol, "
+            "ast_grep_search, search_graph) instead of raw grep/read\",\n"
             "      \"Preview the blast radius before editing multiple files\",\n"
             "      \"%s\",\n"
             "      \"Delegate bounded work through aimee delegate, not provider sub-agents\"\n"
@@ -729,6 +731,8 @@ static void ensure_codex_plugin_files(const char *home)
             "    \"termsOfServiceURL\": \"https://github.com/RakuenSoftware/aimee\",\n"
             "    \"defaultPrompt\": [\n"
             "      \"Search aimee memory before answering repo-specific questions\",\n"
+            "      \"Explore the codebase through aimee's tools (find_symbol, "
+            "ast_grep_search, search_graph) instead of raw grep/read\",\n"
             "      \"Preview the blast radius before editing multiple files\",\n"
             "      \"%s\",\n"
             "      \"Delegate bounded work through aimee delegate, not provider sub-agents\"\n"
@@ -949,6 +953,59 @@ static void ensure_claude_code_hooks(const char *settings_path)
          cJSON_AddItemToArray(hook_arr, hook);
          cJSON_AddItemToObject(entry, "hooks", hook_arr);
          cJSON_AddItemToArray(post, entry);
+         dirty = 1;
+      }
+      else
+      {
+         cJSON_Delete(entry);
+         cJSON_Delete(hook_arr);
+         cJSON_Delete(hook);
+      }
+   }
+
+   /* P1 context pre-injection: a UserPromptSubmit hook that injects a per-turn
+    * <aimee-context> envelope (recall seeded by the prompt + an explore-with
+    * pointer at aimee's tools) so Claude Code reasons over already-loaded
+    * context instead of re-exploring. The hook fires on every prompt (no
+    * matcher) and soft-fails, so it never blocks a turn. */
+   cJSON *ups = cJSON_GetObjectItemCaseSensitive(hooks, "UserPromptSubmit");
+   if (!cJSON_IsArray(ups))
+   {
+      if (ups)
+         cJSON_DeleteItemFromObjectCaseSensitive(hooks, "UserPromptSubmit");
+      ups = cJSON_AddArrayToObject(hooks, "UserPromptSubmit");
+      dirty = 1;
+   }
+   int found_ups = 0;
+   for (int i = 0; i < cJSON_GetArraySize(ups); i++)
+   {
+      cJSON *hook_arr = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(ups, i), "hooks");
+      if (!cJSON_IsArray(hook_arr))
+         continue;
+      for (int j = 0; j < cJSON_GetArraySize(hook_arr); j++)
+      {
+         cJSON *cmd =
+             cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(hook_arr, j), "command");
+         if (cJSON_IsString(cmd) && strstr(cmd->valuestring, "user-prompt-submit"))
+            found_ups = 1;
+      }
+   }
+   if (!found_ups)
+   {
+      const char *aimee_bin = resolved_aimee_bin_path();
+      char ups_cmd[512];
+      snprintf(ups_cmd, sizeof(ups_cmd), "AIMEE_HOOK_CLIENT=claude %s user-prompt-submit",
+               aimee_bin ? aimee_bin : "aimee");
+      cJSON *entry = cJSON_CreateObject();
+      cJSON *hook_arr = cJSON_CreateArray();
+      cJSON *hook = cJSON_CreateObject();
+      if (entry && hook_arr && hook)
+      {
+         cJSON_AddStringToObject(hook, "type", "command");
+         cJSON_AddStringToObject(hook, "command", ups_cmd);
+         cJSON_AddItemToArray(hook_arr, hook);
+         cJSON_AddItemToObject(entry, "hooks", hook_arr);
+         cJSON_AddItemToArray(ups, entry);
          dirty = 1;
       }
       else
