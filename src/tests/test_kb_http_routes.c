@@ -325,6 +325,7 @@ typedef struct
    char project[128];
    char file_path[MAX_PATH_LEN];
    int line;
+   int line_end;
    char kind[32];
 } test_term_hit_t;
 
@@ -338,6 +339,7 @@ int canonical_index_find(const char *identifier, void *out, int max)
    snprintf(hits[0].project, sizeof(hits[0].project), "proj-alpha");
    snprintf(hits[0].file_path, sizeof(hits[0].file_path), "src/main.c");
    hits[0].line = 12;
+   hits[0].line_end = 20;
    snprintf(hits[0].kind, sizeof(hits[0].kind), "function");
    return 1;
 }
@@ -372,6 +374,7 @@ typedef struct
    char name[128];
    char kind[32];
    int line;
+   int line_end;
 } test_definition_t;
 
 int canonical_index_structure(const char *project, const char *file_path, void *out, int max)
@@ -386,6 +389,7 @@ int canonical_index_structure(const char *project, const char *file_path, void *
    snprintf(defs[0].name, sizeof(defs[0].name), "main");
    snprintf(defs[0].kind, sizeof(defs[0].kind), "function");
    defs[0].line = 12;
+   defs[0].line_end = 20;
    return 1;
 }
 
