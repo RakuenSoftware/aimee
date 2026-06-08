@@ -5,6 +5,7 @@
 #include "cli_client.h"
 #include "cli_session_start.h"
 #include "cli_attention_guard.h"
+#include "cli_code_audit.h"
 #include "cli_mcp_serve.h"
 #include "acp_server.h"
 #include "cli_profile.h"
@@ -1796,6 +1797,15 @@ int main(int argc, char **argv)
    /* Hooks: use dedicated server methods */
    if (strcmp(cmd, "hooks") == 0)
       return handle_hooks(sub_argc, sub_argv, json_output);
+
+   /* Code audit (P4): `aimee code audit [dir] [--json]` — local file-health scan. */
+   if (strcmp(cmd, "code") == 0)
+   {
+      if (sub_argc >= 1 && strcmp(sub_argv[0], "audit") == 0)
+         return handle_code_audit(sub_argc - 1, sub_argv + 1, json_output);
+      fprintf(stderr, "usage: aimee code audit [dir] [--json]\n");
+      return 2;
+   }
 
    /* SessionStart hook (settings.json wires it as `aimee session-start`). */
    if (strcmp(cmd, "session-start") == 0)
