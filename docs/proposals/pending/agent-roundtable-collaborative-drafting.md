@@ -299,11 +299,12 @@ not add a method-coverage exclusion. The public entry point is V1 only:
 > would reverse that direction for one command family and require a coverage
 > exclusion or method-table churn. The cost of V1-only is the extra async
 > `/v1/runs/{id}` plumbing (below); the benefit is no new RPC surface, OpenAPI
-> coverage for free, and one server-side implementation reachable from V1, MCP,
-> and the thin client alike. If a reviewer prefers the RPC-family route, that is a
-> one-section swap, but it must be decided *before* P0 lands — not left split
-> between the committed text and the working tree, as this proposal was during
-> review.
+> coverage for free, and one native server-side implementation reachable from V1,
+> MCP, and the thin client alike. This is a hard implementation invariant, not a
+> preference: P0 is rejected if it adds `delegate.aggregate` /
+> `delegate.roundtable` methods, `cli_rpc_routes.inc` rows,
+> `server_dispatch_table[]` entries, a `/v1/rpc` fallback, or a coverage
+> exclusion.
 
 - **V1 routes.**
   - Add `POST /v1/delegate/aggregate` and, once the loop exists,
@@ -312,11 +313,22 @@ not add a method-coverage exclusion. The public entry point is V1 only:
   - Do **not** set an `op` twin on these rows. They are not NDJSON dispatch
     methods; they call the server-side ensemble/roundtable implementation
     directly.
+  - Because `op == NULL` rows do **not** inherit `server_capability_for_method`,
+    the route rows must set `caps = CAP_DELEGATE` explicitly. A `caps = 0`
+    initializer would make expensive LLM fan-out public, and is a release blocker.
+    Add route-cap tests that assert both endpoints require `CAP_DELEGATE` and that
+    TCP access remains denied unless the bearer/tier is allowed for delegate
+    execution (`remote_writes=full` for privileged remote execution, same as the
+    existing delegate routes).
   - Because aggregate/roundtable are LLM-heavy and roundtable can run many calls,
     return a queued run handle and finalize status/result through the existing
     `/v1/runs/{id}` store, mirroring the `rh_dispatch_op_async` contract without
     routing through `server_dispatch`. The buffered listener must not run the
-    ensemble inline.
+    ensemble inline. `rh_dispatch_op_async` itself is not reusable as-is because
+    it injects an NDJSON method and calls `loopback_rpc`; P0 must add a native
+    enqueue/finalize helper (or refactor the run helper to accept a native worker
+    callback) that creates the run, moves it through queued → in_progress →
+    completed/failed/cancelled, and stores the final aggregate/roundtable JSON.
 - **Server implementation.**
   - Add a server-linked implementation TU such as
     `src/server/delegate_ensemble_v1.c` (registered in `SERVER_SRCS`), or place
@@ -325,13 +337,22 @@ not add a method-coverage exclusion. The public entry point is V1 only:
   - The handler body is the `cmd_agent_delegate.c:504-535` block rewritten as
     native V1 work: read `prompt`/opts from the JSON body, load config +
     `agent_config_t` server-side, gate on `ensemble_enabled` (and
-    `roundtable_enabled` if added), call `delegate_ensemble_run` /
-    `delegate_roundtable_run`, and store/return `artifact` or `response` plus
-    `degraded` / `cost_capped` / `cost_usd` / `rounds_run` / `converged` in the
-    run result.
+    `roundtable_enabled` if added), call the native aggregate/roundtable engine,
+    and store/return `artifact` or `response` plus `degraded` / `cost_capped` /
+    `cost_usd` / `rounds_run` / `converged` in the run result. If P0 fixes
+    truncation for the new V1 path, it must expose a heap-result aggregate helper
+    now; simply calling today's `delegate_ensemble_run` preserves the fixed
+    `response[8192]` truncation and does not satisfy the P0 truncation row in
+    §0.3. If heap output is deferred to P1, move that defect out of P0 rather than
+    claiming it is fixed.
   - Apply the same `persona`/prompt-length guards intentionally (the ensemble
     prompt is the *task*, so the `<20` guard is appropriate; just make the error
     name the ensemble, not a generic delegate).
+  - The worker must check `/v1/runs/{id}/stop` cancellation via
+    `openai_runs_store_cancel_requested()` before starting each expensive stage
+    (preflight, participant fan-out/sequential turn, aggregation, judge/scorer)
+    and finalize as cancelled when requested. Tests should prove the V1 listener
+    returns the queued run immediately and is not blocked by the ensemble worker.
 - **Thin client.**
   - Add `aggregate` (and later `roundtable`) to `delegate_arg_is_subcommand`
     (`cli_main.c:485`) so usage/help and subcommand detection work.
@@ -341,15 +362,26 @@ not add a method-coverage exclusion. The public entry point is V1 only:
   - POST to `/v1/delegate/aggregate` or `/v1/delegate/roundtable`, then poll
     `/v1/runs/{id}` until terminal and print the stored result. This is a native
     V1 call path, not a `cli_rpc_routes.inc` method mapping.
+  - This bespoke client path will **not** be generated by
+    `scripts/gen-cli-v1-routes.py`, because native handlers with `op == NULL` are
+    intentionally excluded from the generated method map. Add a CLI test that
+    fails if `aimee delegate aggregate "<prompt>"` falls through to
+    `cli_rpc_lookup("delegate", ...)`, sends `"aggregate"` as `role`, or touches
+    `cli_rpc_routes.inc`.
 - **MCP tool (parallel, optional in P0).** Expose `aggregate` / `roundtable`
-  MCP tools in `server_mcp_delegate.c`, but have them call the same native
-  server-side implementation as the V1 handlers rather than inventing a separate
+  MCP tools in `server_mcp_delegate.c`, but have them call the same native worker
+  helper used by the V1 handlers rather than inventing or dispatching a separate
   RPC method.
 - **Build + de-dup.** Register any new TU in `src/Makefile` (`SERVER_SRCS`) and,
   if applicable, the cmake profile; retire the lint-only `aggregate` block in
   `cmd_agent_delegate.c` (or keep it strictly as a platform CLI helper that
   builds the V1 request) so there is one live implementation, not two divergent
   ones.
+  Add a negative route-surface check for P0: no new `delegate.aggregate` or
+  `delegate.roundtable` string may appear in `src/server/server.c`,
+  `src/cli_rpc_routes.inc`, or any `/v1/rpc` fallback; the only accepted public
+  paths are the first-class `/v1/delegate/*` routes plus optional MCP tools backed
+  by the same native helper.
 
 Until this wiring exists, the §0.1 routing fix repairs a path with no callers.
 P0 therefore **wires the entry point and fixes the routing in the same phase**
@@ -367,7 +399,7 @@ the standalone P0 changeset is:
 
 | Defect (all verified in-tree) | Fix | Files |
 |---|---|---|
-| Engine unreachable — no shipped binary calls `delegate_ensemble_run` (§0.2) | Native `POST /v1/delegate/aggregate` + server impl + thin-client `aggregate` subcommand, async via `/v1/runs/{id}` | `server_http_routes.inc`, `api/openapi-server-v1.yaml`, new `server/delegate_ensemble_v1.c`, `cli_main.c`, `Makefile` |
+| Engine unreachable — no shipped binary calls `delegate_ensemble_run` (§0.2) | Native `POST /v1/delegate/aggregate` + `CAP_DELEGATE` route row + native async run worker + thin-client `aggregate` subcommand, async via `/v1/runs/{id}` and never via RPC dispatch | `server_http_routes.inc`, `api/openapi-server-v1.yaml`, new `server/delegate_ensemble_v1.c`, `cli_main.c`, `Makefile` |
 | All N references route to the one default agent (`role = NULL`, §0.1) | Add `const char *agent;` to `agent_task_t`; named-agent execution helper resolving like `aux_router.c:51-58`; clone `agent_t` before mutation; set `tasks[i].agent = ensemble_reference_models[i]` | `agent_types.h`, `agent_runtime.c`, `delegate_ensemble.c` |
 | `agent_task_t.temperature` is dead on the parallel path → zero diversity, also breaks `agent_vote` (§0.1 step 7) | Thread `temperature` through `agent_run`/`parallel_worker` | `agent_exec.h`, `agent_runtime.c` |
 | `srand(time(NULL))` per call clobbers global RNG, collides within a second (§4) | Seed once at process start or thread `rand_r` state through `shuffle_indices` | `delegate_ensemble.c` |
@@ -681,12 +713,14 @@ are CLI-settable; the array participant list is not.
    reachable caller.
    - *Wiring (§0.2):* add native `/v1/delegate/aggregate` (and the
      `/v1/delegate/roundtable` placeholder shape if useful) with OpenAPI coverage,
-     a server-linked V1 worker that calls `delegate_ensemble_run`, and a CLI
-     builder that posts `{prompt,...}` to V1 and polls `/v1/runs/{id}`. Do not add
-     `delegate.aggregate` / `delegate.roundtable` dispatch-table methods, do not
-     add `cli_rpc_routes.inc` rows, and do not add a method-coverage exclusion.
-     Retire the lint-only `aggregate` block or keep it only as V1 request-building
-     helper code.
+     explicit `CAP_DELEGATE` route caps, a native server-linked V1 worker that
+     enqueues/finalizes `/v1/runs/{id}` without `server_dispatch` /
+     `loopback_rpc`, and a bespoke CLI builder that posts `{prompt,...}` to V1 and
+     polls `/v1/runs/{id}`. Do not add `delegate.aggregate` /
+     `delegate.roundtable` dispatch-table methods, do not add `cli_rpc_routes.inc`
+     rows, do not add `/v1/rpc` fallback, and do not add a method-coverage
+     exclusion. Retire the lint-only `aggregate` block or keep it only as V1
+     request-building helper code.
    - *Routing (§0.1):* thread an optional `agent` selector through
      `agent_task_t` and a shared named-agent execution helper, resolving named
      agents the way `aux_router.c:51-58` already does; point each ensemble
@@ -694,9 +728,13 @@ are CLI-settable; the array participant list is not.
      `agent_run`/`parallel_worker` so the dead `agent_task_t.temperature` field
      becomes live (also repairs `agent_vote`, §0.1 step 7). Move `srand` out of
      the per-call path.
-   - *Tests:* an **end-to-end reachability test** (CLI/V1 → engine → run result)
-     that fails on today's tree — this is the test whose absence let both the
-     unreachability and the §0.1 bug ship. Plus **un-stubbed routing tests**:
+   - *Tests:* an **end-to-end reachability test** (CLI/V1 → native worker →
+     engine → run result) that fails on today's tree — this is the test whose
+     absence let both the unreachability and the §0.1 bug ship. Add route-cap
+     tests (`CAP_DELEGATE`, TCP privilege denial), a non-blocking listener test, a
+     cancellation test, and negative surface tests proving no
+     `delegate.aggregate` / `delegate.roundtable` RPC methods, `cli_rpc_routes.inc`
+     rows, or `/v1/rpc` fallback were added. Plus **un-stubbed routing tests**:
      three configured references → three distinct `agent_name` results,
      missing/disabled/unhealthy participants, duplicate names, role
      incompatibility, and proof that parallel named-agent calls do not race on
@@ -767,10 +805,12 @@ are CLI-settable; the array participant list is not.
 - **No new RPC methods or fallback routes.** §0.2 deliberately avoids adding
   `delegate.aggregate` / `delegate.roundtable` to the NDJSON dispatch table and
   avoids `POST /v1/rpc`. The entry point is first-class V1 only, with OpenAPI
-  coverage and no `v1-method-coverage-check` exclusion. It adds no new
-  transport/protocol, no long-lived service, no persistence, and no new
-  provider integration. Long-running aggregate/roundtable calls use the existing
-  `/v1/runs/{id}` status/result contract rather than blocking the V1 listener.
+  coverage, explicit `CAP_DELEGATE` route caps, and no
+  `v1-method-coverage-check` exclusion. It adds no new transport/protocol, no
+  long-lived service, no persistence, and no new provider integration.
+  Long-running aggregate/roundtable calls use the existing `/v1/runs/{id}`
+  status/result contract through a native worker rather than blocking the V1
+  listener or routing through RPC dispatch.
 - **Not the self-correcting `agent_loop`.** That loop is *one* agent improving
   its own output; the roundtable is *many* agents collaborating. They share stop-
   condition machinery but are deliberately separate engines.
