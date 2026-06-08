@@ -178,9 +178,12 @@ static void test_bandit_enumeration(void)
    open_db();
 
    /* Two points, the first with two arms; a sibling point must not leak in. */
-   assert(db2_bandit_decision_insert("enum-a-1", "kb_memory_retrieval_limit", "10", "", 0.5, 0) == 0);
-   assert(db2_bandit_decision_insert("enum-a-2", "kb_memory_retrieval_limit", "20", "", 0.5, 0) == 0);
-   assert(db2_bandit_decision_insert("enum-a-3", "kb_memory_retrieval_limit", "10", "", 0.5, 0) == 0);
+   assert(db2_bandit_decision_insert("enum-a-1", "kb_memory_retrieval_limit", "10", "", 0.5, 0) ==
+          0);
+   assert(db2_bandit_decision_insert("enum-a-2", "kb_memory_retrieval_limit", "20", "", 0.5, 0) ==
+          0);
+   assert(db2_bandit_decision_insert("enum-a-3", "kb_memory_retrieval_limit", "10", "", 0.5, 0) ==
+          0);
    assert(db2_bandit_decision_insert("enum-b-1", "other_dp", "x", "", 0.5, 0) == 0);
 
    char buf[2048];
