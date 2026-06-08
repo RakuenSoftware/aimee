@@ -850,6 +850,7 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/dashboard/plugins", NULL, RM_EXACT, "dashboard.plugins", 0, rh_dispatch_op},
     {"GET", "/v1/dashboard/traces", NULL, RM_EXACT, "dashboard.traces", 0, rh_dispatch_op},
     {"GET", "/v1/insights/overview", NULL, RM_EXACT, "insights.overview", 0, rh_dispatch_op},
+    {"GET", "/v1/optimize/export", NULL, RM_EXACT, "optimize.export", 0, rh_dispatch_op},
     {"GET", "/v1/identity/show", NULL, RM_EXACT, "identity.show", 0, rh_dispatch_op},
     {"POST", "/v1/identity/diff", NULL, RM_EXACT, "identity.diff", 0, rh_dispatch_op},
     {"POST", "/v1/identity/snapshot", NULL, RM_EXACT, "identity.snapshot", 0, rh_dispatch_op},

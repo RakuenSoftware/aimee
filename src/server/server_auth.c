@@ -117,6 +117,7 @@ const method_policy_t method_registry[] = {
     /* Knowledge base: search/status read; build/ingest/update rebuild the store. */
     {"kb.search", CAP_INDEX_READ, "knowledge search"},
     {"kb.status", CAP_DASHBOARD_READ, "knowledge base status"},
+    {"optimize.export", CAP_DASHBOARD_READ, "bandit optimization export"},
     {"kb.build", CAP_INDEX_ADMIN, "build knowledge base"},
     {"kb.ingest", CAP_INDEX_ADMIN, "ingest corpus"},
     {"kb.update", CAP_INDEX_ADMIN, "update knowledge base"},

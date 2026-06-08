@@ -244,6 +244,9 @@ int parse_launch_meta(const char *output, launch_meta_t *meta);
  * tree). Defined in cmd_profile.c / cmd_manuscript.c. */
 int cmd_profile_run(int argc, char **argv);
 int cmd_manuscript_run(int argc, char **argv, int json_output);
+/* `aimee optimize` — bandit optimization loop (points/baseline/replay).
+ * Dispatches optimize.export to GET /v1/optimize/export. Defined in cmd_optimize.c. */
+int cmd_optimize_run(int argc, char **argv, int json_output);
 
 /* `aimee persona <list|show|edit|add|rm>` — manage personas over the server's
  * /v1 HTTP API. Defined in cli_persona.c. */

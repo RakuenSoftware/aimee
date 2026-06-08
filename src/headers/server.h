@@ -281,6 +281,7 @@ int handle_kb_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_docs_push(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_ingest_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_workers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_rules_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_rules_generate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

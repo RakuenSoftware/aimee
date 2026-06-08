@@ -200,6 +200,10 @@
     {"graph", "Code-graph projection and explain", CLIENT_TIER_ADVANCED, 0,
      "  sync-code        Project the code graph\n"
      "  explain          Explain a code-graph relationship\n"},
+    {"optimize", "Bandit optimization loop", CLIENT_TIER_ADVANCED, 0,
+     "  points                     List registered decision points\n"
+     "  baseline --point <name>    Show current arm posteriors for a point\n"
+     "  replay --point <name>      Emit a point's closed-decision log for replay\n"},
     {"code", "Code-health audit", CLIENT_TIER_ADVANCED, 0,
      "  audit [dir] [--json]   File-health audit (untested files, TODO/FIXME\n"
      "                         markers, debt score) over the working tree\n"
