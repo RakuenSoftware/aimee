@@ -58,7 +58,13 @@ def log(msg: str) -> None:
 
 
 def run(cmd: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True, capture_output=True)
+    env = dict(os.environ)
+    # The aimee codex model provider authenticates with the loopback bearer; the
+    # provider block sets env_key = "AIMEE_API_KEY". Fall back to the remote
+    # bearer if AIMEE_API_KEY is unset.
+    env.setdefault("AIMEE_API_KEY", os.environ.get("AIMEE_BEARER", "aimee-local-dev"))
+    return subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True,
+                          capture_output=True, env=env)
 
 
 def aimee_set_flag(value: int) -> bool:
@@ -85,7 +91,9 @@ def aimee_get_flag() -> int | None:
 
 def codex_tokens(prompt: str, project: Path, model: str) -> tuple[int, str] | None:
     """Run one prompt through codex; return (total_tokens, final_text) or None."""
-    cmd = ["codex", "exec", "--json", "--skip-git-repo-check", "-C", str(project)]
+    provider = os.environ.get("AIMEE_BENCH_PROVIDER", "aimee")
+    cmd = ["codex", "exec", "--json", "--skip-git-repo-check", "-C", str(project),
+           "-c", f"model_provider={provider}"]
     if model:
         cmd += ["-m", model]
     cmd.append(prompt)
