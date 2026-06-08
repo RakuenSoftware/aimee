@@ -451,6 +451,16 @@ CREATE TABLE IF NOT EXISTS bandit_arm_stats (
     PRIMARY KEY (decision_point, arm_id)
 );
 
+-- Promoted (production-default) arm per decision point: the arm an operator has
+-- locked in via `aimee optimize promote --apply`. Consumers use it as the default
+-- when live bandit sampling is off; rollback_arm records the prior default.
+CREATE TABLE IF NOT EXISTS bandit_promotions (
+    decision_point  TEXT NOT NULL PRIMARY KEY,
+    arm_id          TEXT NOT NULL,
+    rollback_arm    TEXT NOT NULL DEFAULT '',
+    promoted_at     TEXT NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
+);
+
 -- KB temporal confidence decay: access tracking + maintenance audit
 ALTER TABLE artifacts ADD COLUMN IF NOT EXISTS last_accessed_at TIMESTAMPTZ DEFAULT NULL;
 ALTER TABLE artifacts ADD COLUMN IF NOT EXISTS last_decay_at TEXT DEFAULT NULL;

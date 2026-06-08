@@ -15,6 +15,7 @@
 #include "kb_detect.h"
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
+#include "db2/bandit.h"
 #endif
 #include "headers/sketch.h"
 #include "kb.h"
@@ -1551,6 +1552,7 @@ static char *kb_search_gather(const char *project, const char *query, const char
    const char *fusion_mode;
    char fm_decision_id[KB_BANDIT_MAX_DECISION] = {0};
    char fm_arm_id[KB_BANDIT_MAX_ARM_ID] = {0};
+   char fm_promo[KB_BANDIT_MAX_ARM_ID] = "";
    const kb_bandit_decision_point_t *fm_dp = NULL;
    if (fusion_mode_override && fusion_mode_override[0])
       fusion_mode = fusion_mode_override;
@@ -1574,6 +1576,9 @@ static char *kb_search_gather(const char *project, const char *query, const char
       }
       if (fm_arm_id[0])
          fusion_mode = fm_arm_id; /* function-scope buffer; valid throughout */
+      else if (db2_bandit_promotion_get("kb_fusion_mode", fm_promo, sizeof(fm_promo)) == 0 &&
+               fm_promo[0])
+         fusion_mode = fm_promo; /* promoted default (operator locked it in) */
       else if (fusion_cfg_ok && fusion_cfg.kb_fusion_mode[0])
          fusion_mode = fusion_cfg.kb_fusion_mode;
       else

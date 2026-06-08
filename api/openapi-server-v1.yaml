@@ -1356,6 +1356,11 @@ paths:
     get:
       summary: Bandit optimization export (decision-point registry, arm baselines, decision log)
       responses: { "200": { description: Optimization export, content: { application/json: { schema: { type: object } } } } }
+  /optimize/promote:
+    post:
+      summary: Persist the production-default arm for a decision point
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Promotion result, content: { application/json: { schema: { type: object } } } } }
   /optimize/replay-record:
     post:
       summary: Record off-policy bandit replay attribution as a benchmark_trace artifact

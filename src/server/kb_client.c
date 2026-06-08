@@ -1361,6 +1361,24 @@ int kb_client_bandit_sample(const char *decision_point, const char *const *arms,
    return rc;
 }
 
+/* Persist the production-default arm for a decision point. Returns the raw kb
+ * response JSON (caller frees), which carries {status, rollback_arm}. */
+char *kb_client_bandit_promote_json(const char *decision_point, const char *arm)
+{
+   if (!decision_point || !decision_point[0] || !arm || !arm[0])
+      return strdup("{\"status\":\"error\",\"message\":\"decision_point and arm required\"}");
+   cJSON *body = cJSON_CreateObject();
+   if (!body)
+      return strdup("{\"status\":\"error\",\"message\":\"out of memory\"}");
+   cJSON_AddStringToObject(body, "decision_point", decision_point);
+   cJSON_AddStringToObject(body, "arm", arm);
+   int http_status = -1;
+   char *resp = kb_client_v1_post_json("/v1/intelligence/bandit/promote", body,
+                                       CLIENT_DEFAULT_TIMEOUT_MS, &http_status);
+   cJSON_Delete(body);
+   return resp ? resp : strdup("{\"status\":\"error\",\"message\":\"no response\"}");
+}
+
 /* Close a sampled decision with its observed reward [0,1]. Best-effort: a failed
  * close just means a missed learning sample, never a caller error. Returns 0. */
 int kb_client_bandit_close(const char *decision_point, const char *decision_id, const char *arm_id,

@@ -1035,6 +1035,19 @@ paths:
                 type: object
         "401":
           description: Unauthorized
+  /intelligence/bandit/promote:
+    post:
+      operationId: postIntelligenceBanditPromote
+      summary: Persist the production-default arm for a decision point
+      responses:
+        "200":
+          description: Promotion result (rollback_arm)
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Unauthorized
 
   /actions/{action}:
     post:

@@ -910,6 +910,25 @@ int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* optimize.promote: persist the production-default arm for a decision point via
+ * the kb DB2 bandit. Request: { decision_point, arm }. */
+int handle_optimize_promote(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+
+   const char *dp = jo_str(req, "decision_point", NULL);
+   const char *arm = jo_str(req, "arm", NULL);
+   if (!dp || !dp[0] || !arm || !arm[0])
+      return server_send_error(conn, "decision_point and arm are required", NULL);
+
+   char *json = kb_client_bandit_promote_json(dp, arm);
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!resp)
+      return server_send_error(conn, "bandit promotion failed", NULL);
+   return send_and_free(conn, resp);
+}
+
 /* calibration.readiness: surface the kb calibration-readiness report over a
  * first-class /v1 route (was kb-only; reachable now via `aimee kb calibrate`). */
 int handle_calibration_readiness(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

@@ -9,6 +9,7 @@
 #include "json_fluent.h" /* jo_ok */
 #include "config.h"
 #include "db2/kb_service_backend.h"
+#include "db2/bandit.h"
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
 #include "kb_service_memory.h"
@@ -28,7 +29,23 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
    cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
    if (!cJSON_IsString(query_j))
       return kb_send_error(fd, "memory.find_facts requires query");
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 20;
+   int limit;
+   if (cJSON_IsNumber(limit_j))
+      limit = (int)limit_j->valuedouble;
+   else
+   {
+      /* Default = the promoted arm (if an operator locked one in via
+       * `aimee optimize promote --apply`), else 20. A live bandit sample below
+       * overrides this when exploration is enabled. */
+      limit = 20;
+      char promo[KB_BANDIT_MAX_ARM_ID] = "";
+      if (db2_bandit_promotion_get("kb_memory_retrieval_limit", promo, sizeof(promo)) == 0)
+      {
+         int p = atoi(promo);
+         if (p > 0)
+            limit = p;
+      }
+   }
 
    /* Shadow bandit for memory retrieval limit (no explicit limit from caller).
     * Sample an arm now; carry the decision id + chosen arm so the reward can be
