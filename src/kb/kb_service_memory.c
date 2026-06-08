@@ -10,6 +10,7 @@
 #include "config.h"
 #include "db2/kb_service_backend.h"
 #include "kb_bandit.h"
+#include "kb_bandit_registry.h"
 #include "kb_service_memory.h"
 #include "log.h"
 #include "memory_graph_fusion.h"
@@ -35,19 +36,27 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
     * and the arm posteriors never learn from live traffic. */
    char ml_decision_id[KB_BANDIT_MAX_DECISION] = {0};
    char ml_arm_id[KB_BANDIT_MAX_ARM_ID] = {0};
-   if (!cJSON_IsNumber(limit_j))
+   const kb_bandit_decision_point_t *ml_dp = kb_bandit_registry_get("kb_memory_retrieval_limit");
+   if (!cJSON_IsNumber(limit_j) && ml_dp && ml_dp->n_arms > 0)
    {
       config_t cfg;
       config_load(&cfg);
       if (cfg.bandit_live_decision_enabled)
       {
-         static const char ml_arms[2][KB_BANDIT_MAX_ARM_ID] = {"10", "20"};
+         /* Arms come from the registry (source of truth); each arm id is the
+          * literal retrieval limit. */
+         char ml_arms[KB_BANDIT_MAX_ARMS][KB_BANDIT_MAX_ARM_ID];
+         for (int i = 0; i < ml_dp->n_arms; i++)
+            snprintf(ml_arms[i], KB_BANDIT_MAX_ARM_ID, "%s", ml_dp->arms[i]);
+
          int ml_arm =
-             kb_bandit_sample(&cfg, "kb_memory_retrieval_limit", NULL, ml_arms, 2, ml_decision_id);
-         if (ml_arm >= 0 && ml_arm < 2)
+             kb_bandit_sample(&cfg, ml_dp->id, NULL, ml_arms, ml_dp->n_arms, ml_decision_id);
+         if (ml_arm >= 0 && ml_arm < ml_dp->n_arms)
          {
-            aimee_log(LOG_DEBUG, "kb.bandit", "kb_memory_retrieval_limit arm=%s", ml_arms[ml_arm]);
-            limit = (ml_arm == 0) ? 10 : 20;
+            aimee_log(LOG_DEBUG, "kb.bandit", "%s arm=%s", ml_dp->id, ml_arms[ml_arm]);
+            int arm_limit = atoi(ml_arms[ml_arm]);
+            if (arm_limit > 0)
+               limit = arm_limit;
             snprintf(ml_arm_id, sizeof(ml_arm_id), "%s", ml_arms[ml_arm]);
          }
       }
@@ -64,12 +73,12 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
 
    /* Close the bandit loop: attribute an immediate recall-sufficiency reward to
     * the sampled decision so the arm posteriors update from live traffic. */
-   if (ml_decision_id[0] && ml_arm_id[0])
+   if (ml_dp && ml_decision_id[0] && ml_arm_id[0])
    {
       cJSON *facts = resp ? cJSON_GetObjectItemCaseSensitive(resp, "facts") : NULL;
       int n_results = cJSON_IsArray(facts) ? cJSON_GetArraySize(facts) : 0;
       double reward = kb_bandit_recall_sufficiency_reward(n_results, limit);
-      kb_bandit_reward(NULL, "kb_memory_retrieval_limit", ml_decision_id, ml_arm_id, reward);
+      kb_bandit_reward(NULL, ml_dp->id, ml_decision_id, ml_arm_id, reward);
    }
    return kb_reply_or_error(fd, resp, "failed to search memory facts");
 }

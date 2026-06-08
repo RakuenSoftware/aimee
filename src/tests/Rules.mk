@@ -2169,6 +2169,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o \
                      $(OBJDIR)/shared/kb_paths.o \
                      $(OBJDIR)/aimee_home.o \
                      $(OBJDIR)/kb/kb_intel_payload.o \
+                     $(OBJDIR)/kb/kb_bandit_registry.o \
                      $(OBJDIR)/kb/http/kb_http_code.o \
                      $(OBJDIR)/kb/http/kb_http_jobs.o \
                      $(OBJDIR)/cJSON.o \
@@ -2357,6 +2358,7 @@ $(TESTPREFIX)/unit-test-reasoning: $(OBJDIR)/tests/test_reasoning.o \
 
 $(TESTPREFIX)/unit-test-bandit: $(OBJDIR)/tests/test_bandit.o \
                      $(OBJDIR)/kb/kb_bandit.o \
+                     $(OBJDIR)/kb/kb_bandit_registry.o \
                      $(OBJDIR)/db2/bandit.o \
                      $(OBJDIR)/db2/artifacts.o \
                      $(OBJDIR)/db2/feature_rows.o \
