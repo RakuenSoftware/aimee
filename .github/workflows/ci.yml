@@ -171,12 +171,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install MinGW-w64
-        run: choco install mingw
-
-      - name: Add MinGW to PATH
-        shell: powershell
-        run: echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Set up MinGW-w64
+        shell: pwsh
+        run: |
+          # Prefer the MSYS2 mingw-w64 toolchain pre-installed on the runner image
+          # (no network) and fall back to a *retried* choco install only if it is
+          # absent. `choco install mingw` on its own flakes intermittently on the
+          # Chocolatey CDN, which used to fail the Windows jobs ~50% of the time.
+          $mingw = "C:\msys64\mingw64\bin"
+          if (-not (Test-Path "$mingw\gcc.exe")) {
+            $ok = $false
+            for ($i = 0; $i -lt 3 -and -not $ok; $i++) {
+              choco install mingw -y --no-progress
+              if ($LASTEXITCODE -eq 0) { $ok = $true } else { Start-Sleep 15 }
+            }
+            if (-not $ok) { Write-Error "MinGW install failed after 3 attempts"; exit 1 }
+            $mingw = "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin"
+          }
+          Write-Host "Using MinGW at $mingw"
+          & "$mingw\gcc.exe" --version
+          echo "$mingw" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
       - name: Download SQLite amalgamation
         shell: powershell

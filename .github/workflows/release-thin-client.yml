@@ -115,13 +115,27 @@ jobs:
         run: cp build/aimee "${{ matrix.asset }}"
 
       # --- Windows: CMake thin-client target via MinGW, lean profile ---
-      - name: Install MinGW-w64 (Windows)
+      - name: Set up MinGW-w64 (Windows)
         if: matrix.kind == 'windows'
-        run: choco install mingw
-      - name: Add MinGW to PATH (Windows)
-        if: matrix.kind == 'windows'
-        shell: powershell
-        run: echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        shell: pwsh
+        run: |
+          # Prefer the MSYS2 mingw-w64 toolchain pre-installed on the runner image
+          # (no network) and fall back to a *retried* choco install only if absent.
+          # Bare `choco install mingw` flakes on the Chocolatey CDN and used to
+          # fail the Windows release build intermittently.
+          $mingw = "C:\msys64\mingw64\bin"
+          if (-not (Test-Path "$mingw\gcc.exe")) {
+            $ok = $false
+            for ($i = 0; $i -lt 3 -and -not $ok; $i++) {
+              choco install mingw -y --no-progress
+              if ($LASTEXITCODE -eq 0) { $ok = $true } else { Start-Sleep 15 }
+            }
+            if (-not $ok) { Write-Error "MinGW install failed after 3 attempts"; exit 1 }
+            $mingw = "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin"
+          }
+          Write-Host "Using MinGW at $mingw"
+          & "$mingw\gcc.exe" --version
+          echo "$mingw" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
       - name: Download SQLite amalgamation (Windows)
         if: matrix.kind == 'windows'
         shell: powershell
