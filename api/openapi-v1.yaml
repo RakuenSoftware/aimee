@@ -1009,6 +1009,32 @@ paths:
                 type: object
         "401":
           description: Unauthorized
+  /intelligence/bandit/sample:
+    post:
+      operationId: postIntelligenceBanditSample
+      summary: Sample an arm for a decision point (server-side decision points)
+      responses:
+        "200":
+          description: Selected arm + decision id (or status disabled)
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Unauthorized
+  /intelligence/bandit/close:
+    post:
+      operationId: postIntelligenceBanditClose
+      summary: Close a sampled decision with its observed reward
+      responses:
+        "200":
+          description: Close result
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Unauthorized
 
   /actions/{action}:
     post:

@@ -197,6 +197,8 @@ char *delegate_build_tier_context(const char *via_name, int tier_override, const
  * paths. Provider routing picks the cheapest enabled agent for the requested
  * provider and role, preferring the configured default agent on equal tier. */
 agent_t *delegate_route_by_provider(agent_config_t *cfg, const char *role, const char *provider);
+/* Highest cost_tier among enabled, role-capable agents (or -1 if none). */
+int delegate_max_cost_tier(agent_config_t *cfg, const char *role);
 /* Synthesize an ephemeral ACP delegate agent from an inline `--acp <command>`
  * (+ optional `--acp-args <args>`), append it to cfg, and return its generated
  * name via name_out. The agent uses the provider-cli backend with the "acp"

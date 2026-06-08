@@ -804,6 +804,14 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       return strcmp(method, "POST") == 0
                  ? kb_intel_bandit_replay_record_http(body, body_len, out_buf, out_cap)
                  : json_body_error(out_buf, out_cap, 405, "method not allowed");
+   if (strcmp(path, "/v1/intelligence/bandit/sample") == 0)
+      return strcmp(method, "POST") == 0
+                 ? kb_intel_bandit_sample_http(body, body_len, out_buf, out_cap)
+                 : json_body_error(out_buf, out_cap, 405, "method not allowed");
+   if (strcmp(path, "/v1/intelligence/bandit/close") == 0)
+      return strcmp(method, "POST") == 0
+                 ? kb_intel_bandit_close_http(body, body_len, out_buf, out_cap)
+                 : json_body_error(out_buf, out_cap, 405, "method not allowed");
    if (strncmp(path, "/v1/actions/", 12) == 0)
    {
       if (strcmp(method, "POST") != 0)

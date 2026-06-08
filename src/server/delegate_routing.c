@@ -150,6 +150,27 @@ agent_t *delegate_route_by_provider(agent_config_t *cfg, const char *role, const
    return best;
 }
 
+/* Highest cost_tier among enabled, routing-available agents that can serve the
+ * role (or -1 if none). Used by the delegate_routing bandit to translate a
+ * "premium" arm into a concrete tier_override, deployment-independently. */
+int delegate_max_cost_tier(agent_config_t *cfg, const char *role)
+{
+   int max_tier = -1;
+   if (!cfg)
+      return -1;
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      agent_t *ag = &cfg->agents[i];
+      if (!ag->enabled || !agent_is_available_for_routing(ag))
+         continue;
+      if (role && !agent_has_role(ag, role) && !agent_is_exec_role(ag, role))
+         continue;
+      if (ag->cost_tier > max_tier)
+         max_tier = ag->cost_tier;
+   }
+   return max_tier;
+}
+
 static void route_err(char *errbuf, size_t errbuf_sz, const char *fmt, const char *a, const char *b)
 {
    if (errbuf && errbuf_sz > 0)

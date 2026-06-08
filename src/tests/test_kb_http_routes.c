@@ -10,6 +10,7 @@
 #include "cJSON.h"
 #include "kb_http.h"
 #include "kb_service.h"
+#include "kb_bandit.h"
 #include "kb_service_backend.h"
 #include "kb_enroll.h"
 #include "kb_paths.h"
@@ -791,6 +792,31 @@ int db2_demotion_profile_read(const char *memory_class, const char *scope_kind,
    assert(strcmp(scope_kind, "global") == 0);
    assert(strcmp(scope_id, "") == 0);
    snprintf(buf, len, "{\"score_percentiles\":{\"p10\":0.5}}");
+   return 0;
+}
+
+/* kb_intel_payload's bandit.sample/close builders call these; this test does not
+ * link kb_bandit.o. Stub sample as "disabled" and reward as a no-op success. */
+int kb_bandit_sample(const config_t *cfg, const char *decision_point, const char *context_json,
+                     const char (*arm_ids)[KB_BANDIT_MAX_ARM_ID], int n_arms, char *decision_id_out)
+{
+   (void)cfg;
+   (void)decision_point;
+   (void)context_json;
+   (void)arm_ids;
+   (void)n_arms;
+   if (decision_id_out)
+      decision_id_out[0] = '\0';
+   return -1;
+}
+int kb_bandit_reward(const config_t *cfg, const char *decision_point, const char *decision_id,
+                     const char *arm_id, double reward)
+{
+   (void)cfg;
+   (void)decision_point;
+   (void)decision_id;
+   (void)arm_id;
+   (void)reward;
    return 0;
 }
 

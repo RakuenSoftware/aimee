@@ -1308,3 +1308,79 @@ char *kb_client_bandit_replay_record_json(const char *decision_point, const char
    cJSON_Delete(body);
    return resp ? resp : strdup("{\"status\":\"error\",\"message\":\"no response\"}");
 }
+
+/* Sample an arm for a server-side decision point via the kb DB2 bandit. On
+ * success (status "ok"), fills arm_out + decision_id_out and returns 0. Returns
+ * -1 when sampling is disabled (no optimize command), on transport failure, or
+ * on a malformed response — the caller falls back to its default behaviour. */
+int kb_client_bandit_sample(const char *decision_point, const char *const *arms, int n_arms,
+                            char *arm_out, size_t arm_out_len, char *decision_id_out,
+                            size_t decision_id_out_len)
+{
+   if (arm_out && arm_out_len)
+      arm_out[0] = '\0';
+   if (decision_id_out && decision_id_out_len)
+      decision_id_out[0] = '\0';
+   if (!decision_point || !decision_point[0] || !arms || n_arms < 1)
+      return -1;
+
+   cJSON *body = cJSON_CreateObject();
+   if (!body)
+      return -1;
+   cJSON_AddStringToObject(body, "decision_point", decision_point);
+   cJSON *aj = cJSON_CreateArray();
+   for (int i = 0; i < n_arms; i++)
+      if (arms[i] && arms[i][0])
+         cJSON_AddItemToArray(aj, cJSON_CreateString(arms[i]));
+   cJSON_AddItemToObject(body, "arms", aj);
+
+   int http_status = -1;
+   char *resp = kb_client_v1_post_json("/v1/intelligence/bandit/sample", body,
+                                       CLIENT_DEFAULT_TIMEOUT_MS, &http_status);
+   cJSON_Delete(body);
+   if (!resp)
+      return -1;
+   cJSON *r = cJSON_Parse(resp);
+   free(resp);
+   int rc = -1;
+   if (r)
+   {
+      const char *status = cJSON_GetStringValue(cJSON_GetObjectItem(r, "status"));
+      const char *arm = cJSON_GetStringValue(cJSON_GetObjectItem(r, "arm"));
+      const char *did = cJSON_GetStringValue(cJSON_GetObjectItem(r, "decision_id"));
+      if (status && strcmp(status, "ok") == 0 && arm && did)
+      {
+         if (arm_out && arm_out_len)
+            snprintf(arm_out, arm_out_len, "%s", arm);
+         if (decision_id_out && decision_id_out_len)
+            snprintf(decision_id_out, decision_id_out_len, "%s", did);
+         rc = 0;
+      }
+   }
+   cJSON_Delete(r);
+   return rc;
+}
+
+/* Close a sampled decision with its observed reward [0,1]. Best-effort: a failed
+ * close just means a missed learning sample, never a caller error. Returns 0. */
+int kb_client_bandit_close(const char *decision_point, const char *decision_id, const char *arm_id,
+                           double reward)
+{
+   if (!decision_point || !decision_point[0] || !decision_id || !decision_id[0] || !arm_id ||
+       !arm_id[0])
+      return -1;
+   cJSON *body = cJSON_CreateObject();
+   if (!body)
+      return -1;
+   cJSON_AddStringToObject(body, "decision_point", decision_point);
+   cJSON_AddStringToObject(body, "decision_id", decision_id);
+   cJSON_AddStringToObject(body, "arm_id", arm_id);
+   cJSON_AddNumberToObject(body, "reward", reward);
+
+   int http_status = -1;
+   char *resp = kb_client_v1_post_json("/v1/intelligence/bandit/close", body,
+                                       CLIENT_DEFAULT_TIMEOUT_MS, &http_status);
+   cJSON_Delete(body);
+   free(resp); /* best-effort */
+   return 0;
+}

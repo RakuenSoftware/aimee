@@ -357,3 +357,140 @@ int kb_intel_bandit_replay_record_http(const char *body, int body_len, char *out
    free(json);
    return 200;
 }
+
+/* Serialize a response object into out_buf; returns the HTTP status. */
+static int intel_bandit_emit_http(cJSON *resp, char *out_buf, int out_cap)
+{
+   char *json = resp ? cJSON_PrintUnformatted(resp) : NULL;
+   cJSON_Delete(resp);
+   if (!json)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"status\":\"error\",\"message\":\"out of memory\"}");
+      return 500;
+   }
+   size_t n = strlen(json);
+   if (n >= (size_t)out_cap)
+   {
+      free(json);
+      snprintf(out_buf, (size_t)out_cap, "{\"status\":\"error\",\"message\":\"response too large\"}");
+      return 500;
+   }
+   memcpy(out_buf, json, n + 1);
+   free(json);
+   return 200;
+}
+
+/* bandit.sample: select an arm for a decision point (Thompson via the optimize
+ * sidecar), log the decision, and return {arm, decision_id}. Server-side
+ * decision points (e.g. delegate_routing) reach the DB2 bandit through this. */
+cJSON *kb_intel_bandit_sample_response(const char *body_json, int body_len)
+{
+   if (!body_json || body_len <= 0)
+      return intel_bandit_replay_err("missing body");
+   cJSON *body = cJSON_ParseWithLength(body_json, (size_t)body_len);
+   if (!body || !cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return intel_bandit_replay_err("body must be a JSON object");
+   }
+   const char *dp = cJSON_GetStringValue(cJSON_GetObjectItem(body, "decision_point"));
+   cJSON *arms = cJSON_GetObjectItem(body, "arms");
+   if (!dp || !dp[0])
+   {
+      cJSON_Delete(body);
+      return intel_bandit_replay_err("decision_point is required");
+   }
+   if (!cJSON_IsArray(arms) || cJSON_GetArraySize(arms) < 1)
+   {
+      cJSON_Delete(body);
+      return intel_bandit_replay_err("arms (non-empty array) is required");
+   }
+   int total = cJSON_GetArraySize(arms);
+   char arm_ids[KB_BANDIT_MAX_ARMS][KB_BANDIT_MAX_ARM_ID];
+   int na = 0;
+   for (int i = 0; i < total && na < KB_BANDIT_MAX_ARMS; i++)
+   {
+      cJSON *a = cJSON_GetArrayItem(arms, i);
+      if (cJSON_IsString(a) && a->valuestring[0])
+         snprintf(arm_ids[na++], KB_BANDIT_MAX_ARM_ID, "%s", a->valuestring);
+   }
+   cJSON *ctx = cJSON_GetObjectItem(body, "context");
+   char *ctx_str = (ctx && cJSON_IsObject(ctx)) ? cJSON_PrintUnformatted(ctx) : NULL;
+
+   config_t cfg;
+   config_load(&cfg);
+   char decision_id[KB_BANDIT_MAX_DECISION] = {0};
+   int idx = (na >= 1) ? kb_bandit_sample(&cfg, dp, ctx_str, arm_ids, na, decision_id) : -1;
+   free(ctx_str);
+   cJSON_Delete(body);
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   if (idx < 0 || idx >= na)
+   {
+      /* Sampling disabled (no optimize command) or failed — caller falls back to
+       * its default routing; no decision is logged. */
+      cJSON_AddStringToObject(resp, "status", "disabled");
+      return resp;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "arm", arm_ids[idx]);
+   cJSON_AddStringToObject(resp, "decision_id", decision_id);
+   return resp;
+}
+
+/* bandit.close: close a logged decision with its observed reward [0,1] and update
+ * the arm posterior. */
+cJSON *kb_intel_bandit_close_response(const char *body_json, int body_len)
+{
+   if (!body_json || body_len <= 0)
+      return intel_bandit_replay_err("missing body");
+   cJSON *body = cJSON_ParseWithLength(body_json, (size_t)body_len);
+   if (!body || !cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return intel_bandit_replay_err("body must be a JSON object");
+   }
+   const char *dp = cJSON_GetStringValue(cJSON_GetObjectItem(body, "decision_point"));
+   const char *did = cJSON_GetStringValue(cJSON_GetObjectItem(body, "decision_id"));
+   const char *arm = cJSON_GetStringValue(cJSON_GetObjectItem(body, "arm_id"));
+   cJSON *rj = cJSON_GetObjectItem(body, "reward");
+   if (!dp || !dp[0] || !did || !did[0] || !arm || !arm[0])
+   {
+      cJSON_Delete(body);
+      return intel_bandit_replay_err("decision_point, decision_id and arm_id are required");
+   }
+   double reward = cJSON_IsNumber(rj) ? rj->valuedouble : 0.0;
+   if (reward < 0.0)
+      reward = 0.0;
+   if (reward > 1.0)
+      reward = 1.0;
+
+   config_t cfg;
+   config_load(&cfg);
+   int rc = kb_bandit_reward(&cfg, dp, did, arm, reward);
+   cJSON_Delete(body);
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   cJSON_AddStringToObject(resp, "status", rc == 0 ? "ok" : "error");
+   if (rc != 0)
+      cJSON_AddStringToObject(resp, "message", "failed to close decision");
+   return resp;
+}
+
+int kb_intel_bandit_sample_http(const char *body, int body_len, char *out_buf, int out_cap)
+{
+   if (!out_buf || out_cap <= 0)
+      return 500;
+   return intel_bandit_emit_http(kb_intel_bandit_sample_response(body, body_len), out_buf, out_cap);
+}
+
+int kb_intel_bandit_close_http(const char *body, int body_len, char *out_buf, int out_cap)
+{
+   if (!out_buf || out_cap <= 0)
+      return 500;
+   return intel_bandit_emit_http(kb_intel_bandit_close_response(body, body_len), out_buf, out_cap);
+}

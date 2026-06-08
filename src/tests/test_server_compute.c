@@ -387,6 +387,32 @@ const char *server_http_delegate_block(const char *session_id, const char *role,
 
 #include "test_server_compute_workspace_stubs.inc"
 
+/* delegate_routing reaches the kb DB2 bandit over kb_client, which this unit test
+ * does not link. Stub it as "sampling disabled" so delegate_worker falls back to
+ * default routing (and never closes a decision). */
+int kb_client_bandit_sample(const char *decision_point, const char *const *arms, int n_arms,
+                            char *arm_out, size_t arm_out_len, char *decision_id_out,
+                            size_t decision_id_out_len)
+{
+   (void)decision_point;
+   (void)arms;
+   (void)n_arms;
+   if (arm_out && arm_out_len)
+      arm_out[0] = '\0';
+   if (decision_id_out && decision_id_out_len)
+      decision_id_out[0] = '\0';
+   return -1;
+}
+int kb_client_bandit_close(const char *decision_point, const char *decision_id, const char *arm_id,
+                           double reward)
+{
+   (void)decision_point;
+   (void)decision_id;
+   (void)arm_id;
+   (void)reward;
+   return 0;
+}
+
 void concurrency_mgr_init(concurrency_mgr_t *mgr, int default_limit,
                           const concurrency_entry_t *per_model, int per_model_count,
                           const concurrency_entry_t *per_provider, int per_provider_count)
