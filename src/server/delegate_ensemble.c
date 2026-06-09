@@ -1447,11 +1447,13 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
 
    out->artifact = best_artifact ? best_artifact : xstrdup0(artifact);
    out->artifact_round = out->best_round > 0 ? out->best_round : out->rounds_run;
-   if (out->artifact)
+   if (out->artifact && local.mode == ROUNDTABLE_REVIEW)
    {
-      /* The question pass is an extra reason-role LLM call. Skip it when the run
-       * was cancelled (respect the stop) or already hit the cost cap (do not
-       * spend past the budget); still report the questions as gaps so the
+      /* Questions are a review-mode concept (directed PR review), so a draft run
+       * never triggers the pass even if a brief carried questions. The question
+       * pass is an extra reason-role LLM call: skip it when the run was cancelled
+       * (respect the stop) or already hit the cost cap (do not spend past the
+       * budget), but still report the questions as gaps so the
        * answered_questions/coverage_gaps contract stays populated. */
       if (out->cancelled || out->cost_capped)
          mark_question_gaps(&local, out);

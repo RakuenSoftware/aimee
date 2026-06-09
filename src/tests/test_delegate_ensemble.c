@@ -631,6 +631,35 @@ static void test_roundtable_partial_question_answers_report_gaps(void)
    printf("  test_roundtable_partial_question_answers_report_gaps: ok\n");
 }
 
+static void test_roundtable_draft_brief_questions_not_answered(void)
+{
+   reset_modes();
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   /* Questions are a review-mode concept. A draft run that happens to carry a
+    * brief with questions must not trigger the reason-role question pass or
+    * return answered_questions/items (it would otherwise pay for a review-only
+    * feature and emit an inconsistent draft contract). */
+   const char *questions[] = {"does auth hold?"};
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   opts.converge_threshold = 0;
+   opts.brief = "focus:\n- auth checks\n";
+   opts.questions = questions;
+   opts.question_count = 1;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft a short proposal", &opts, &result);
+   assert(rc == 0);
+   assert(result.answered_question_count == 0);
+   assert(result.coverage_gap_count == 0);
+   assert(result.item_count == 0);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_draft_brief_questions_not_answered: ok\n");
+}
+
 static void test_roundtable_review_summary_fallback_key_converges(void)
 {
    reset_modes();
@@ -783,6 +812,7 @@ int main(void)
    test_roundtable_review_brief_and_items_return();
    test_roundtable_cost_capped_skips_question_pass();
    test_roundtable_partial_question_answers_report_gaps();
+   test_roundtable_draft_brief_questions_not_answered();
    test_roundtable_review_summary_fallback_key_converges();
    test_roundtable_review_clean_round_converges();
    test_roundtable_malformed_review_json_counts_failed();
