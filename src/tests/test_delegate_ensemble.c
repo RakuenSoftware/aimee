@@ -5,13 +5,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* --- stubs for agent exec functions --- */
 
 static int g_parallel_mode = 0; /* 0=all-succeed, 1=only-first-succeeds */
+static int g_aggregator_mode = 0;
+static int g_reason_mode = 0;
+static int g_repair_mode = 0;
 static int g_parallel_calls = 0;
 static int g_named_calls = 0;
 static int g_aggregator_calls = 0;
+static int g_cancel_after_checks = -1;
 
 /* Capture the per-task participant selector the engine sets, so a test can
  * assert the §0.1 routing fix: each fan-out task must be pointed at its own
@@ -39,11 +44,30 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
       out[0].completion_tokens = 50;
       return 1;
    }
+   if (g_parallel_mode == 4)
+   {
+      struct timespec ts = {0, 3000000};
+      nanosleep(&ts, NULL);
+   }
    for (int i = 0; i < count; i++)
    {
       char buf[128];
-      snprintf(buf, sizeof(buf), "mock response from %s", tasks[i].agent ? tasks[i].agent : "default");
-      out[i].response = strdup(buf);
+      if (g_parallel_mode == 2 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
+         out[i].response = strdup("{\"issues\":[{\"severity\":\"blocking\",\"category\":\"api\","
+                                  "\"location\":\"src/a.c:10\",\"summary\":\"same bug\","
+                                  "\"recommendation\":\"fix it\"}],\"overall\":\"block\"}");
+      else if (g_parallel_mode == 3 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
+         out[i].response = strdup(i == 0 ? "not json" : "{\"issues\":[],\"overall\":\"ok\"}");
+      else if (g_parallel_mode == 5 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
+         out[i].response =
+             strdup("{\"items\":[{\"severity\":\"blocking\",\"category\":\"security\","
+                    "\"summary\":\"missing authorization check before write\"}],\"overall\":\"block\"}");
+      else
+      {
+         snprintf(buf, sizeof(buf), "mock response from %s",
+                  tasks[i].agent ? tasks[i].agent : "default");
+         out[i].response = strdup(buf);
+      }
       out[i].prompt_tokens = 50;
       out[i].completion_tokens = 50;
       out[i].success = 1;
@@ -63,9 +87,23 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    (void)temperature;
    g_named_calls++;
    memset(out, 0, sizeof(*out));
-   char buf[128];
-   snprintf(buf, sizeof(buf), "named response from %s", name ? name : "missing");
-   out->response = strdup(buf);
+   if (role && strcmp(role, "review") == 0 &&
+       strstr(user_prompt ? user_prompt : "", "Repair this malformed roundtable review"))
+   {
+      out->response =
+          strdup(g_repair_mode == 1 ? "{\"items\":[{\"severity\":\"blocking\","
+                                      "\"category\":\"correctness\",\"location\":\"src/fixed.c:9\","
+                                      "\"summary\":\"fixed malformed review\"}]}"
+                                    : "still not json");
+   }
+   else if (role && strcmp(role, "review") == 0)
+      out->response = strdup("{\"items\":[],\"overall\":\"ok\"}");
+   else
+   {
+      char buf[128];
+      snprintf(buf, sizeof(buf), "named response from %s", name ? name : "missing");
+      out->response = strdup(buf);
+   }
    out->prompt_tokens = 40;
    out->completion_tokens = 20;
    out->success = 1;
@@ -84,18 +122,48 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
    (void)user_prompt;
    memset(out, 0, sizeof(*out));
    if (role && strcmp(role, "reason") == 0)
-      out->response = strdup("80");
+   {
+      if (strstr(user_prompt ? user_prompt : "", "{\"completion\":N}"))
+         out->response = strdup("{\"completion\":95}");
+      else if (g_reason_mode == 1)
+         out->response = strdup(strstr(user_prompt ? user_prompt : "", "synthesized answer 1") ? "95"
+                                                                                                  : "10");
+      else
+         out->response = strdup("80");
+   }
    else
    {
       char buf[128];
       g_aggregator_calls++;
-      snprintf(buf, sizeof(buf), "synthesized answer %d", g_aggregator_calls);
-      out->response = strdup(buf);
+      if (g_aggregator_mode == 1)
+         out->response = strdup(g_aggregator_calls == 1 ? "synthesized answer 1"
+                                                        : "inferior final artifact");
+      else if (g_aggregator_mode == 2)
+      {
+         size_t n = 26000;
+         out->response = malloc(n);
+         memset(out->response, 'a', n - 2);
+         out->response[n - 2] = '\n';
+         out->response[n - 1] = '\0';
+      }
+      else
+      {
+         snprintf(buf, sizeof(buf), "synthesized answer %d", g_aggregator_calls);
+         out->response = strdup(buf);
+      }
    }
    out->prompt_tokens = 200;
    out->completion_tokens = 100;
    out->success = 1;
    return 0;
+}
+
+static int test_cancel_requested(void *ctx)
+{
+   (void)ctx;
+   if (g_cancel_after_checks < 0)
+      return 0;
+   return g_cancel_after_checks-- <= 0;
 }
 
 /* --- test helpers --- */
@@ -123,13 +191,23 @@ static agent_config_t make_acfg(void)
    return acfg;
 }
 
+static void reset_modes(void)
+{
+   g_parallel_mode = 0;
+   g_aggregator_mode = 0;
+   g_reason_mode = 0;
+   g_repair_mode = 0;
+   g_parallel_calls = 0;
+   g_named_calls = 0;
+   g_aggregator_calls = 0;
+   g_cancel_after_checks = -1;
+}
+
 /* --- tests --- */
 
 static void test_ensemble_basic(void)
 {
-   g_parallel_mode = 0;
-   g_parallel_calls = 0;
-   g_aggregator_calls = 0;
+   reset_modes();
    config_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    delegate_ensemble_result_t result;
@@ -216,9 +294,7 @@ static void test_ensemble_routes_to_distinct_agents(void)
 
 static void test_roundtable_parallel_basic(void)
 {
-   g_parallel_mode = 0;
-   g_parallel_calls = 0;
-   g_aggregator_calls = 0;
+   reset_modes();
    config_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
@@ -243,9 +319,7 @@ static void test_roundtable_parallel_basic(void)
 
 static void test_roundtable_sequential_uses_named_agents(void)
 {
-   g_parallel_mode = 0;
-   g_named_calls = 0;
-   g_aggregator_calls = 0;
+   reset_modes();
    config_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
@@ -267,8 +341,8 @@ static void test_roundtable_sequential_uses_named_agents(void)
 
 static void test_roundtable_degrades_on_min_success(void)
 {
+   reset_modes();
    g_parallel_mode = 1;
-   g_parallel_calls = 0;
    config_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    roundtable_opts_t opts;
@@ -288,6 +362,196 @@ static void test_roundtable_degrades_on_min_success(void)
    printf("  test_roundtable_degrades_on_min_success: ok\n");
 }
 
+static void test_roundtable_preflight_cap_stops_before_round(void)
+{
+   reset_modes();
+   config_t cfg = make_cfg(1, 2, 0.0001);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 3;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft a capped proposal", &opts, &result);
+   assert(rc == 0);
+   assert(result.cost_capped == 1);
+   assert(g_parallel_calls == 0);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_preflight_cap_stops_before_round: ok\n");
+}
+
+static void test_roundtable_keep_best_not_last(void)
+{
+   reset_modes();
+   g_aggregator_mode = 1;
+   g_reason_mode = 1;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 2;
+   opts.converge_threshold = 0;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft then regress", &opts, &result);
+   assert(rc == 0);
+   assert(strcmp(result.artifact, "synthesized answer 1") == 0);
+   assert(result.best_round == 1);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_keep_best_not_last: ok\n");
+}
+
+static void test_roundtable_summarize_forward_sets_truncated(void)
+{
+   reset_modes();
+   g_aggregator_mode = 2;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 2;
+   opts.converge_threshold = 0;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft a very large artifact", &opts, &result);
+   assert(rc == 0);
+   assert(result.truncated == 1);
+   assert(result.degraded == 1);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_summarize_forward_sets_truncated: ok\n");
+}
+
+static void test_roundtable_review_saturation_converges(void)
+{
+   reset_modes();
+   g_parallel_mode = 2;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 3;
+   opts.converge_threshold = 0;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review with repeated blocking issue", &opts, &result);
+   assert(rc == 0);
+   assert(result.converged == 1);
+   assert(result.rounds_run == 2);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_review_saturation_converges: ok\n");
+}
+
+static void test_roundtable_review_summary_fallback_key_converges(void)
+{
+   reset_modes();
+   g_parallel_mode = 5;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 3;
+   opts.converge_threshold = 0;
+   roundtable_result_t result;
+   int rc =
+       delegate_roundtable_run(&acfg, &cfg, "review with no-location blockers", &opts, &result);
+   assert(rc == 0);
+   assert(result.converged == 1);
+   assert(result.rounds_run == 2);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_review_summary_fallback_key_converges: ok\n");
+}
+
+static void test_roundtable_malformed_review_json_counts_failed(void)
+{
+   reset_modes();
+   g_parallel_mode = 3;
+   g_repair_mode = 2;
+   config_t cfg = make_cfg(1, 3, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review malformed json handling", &opts, &result);
+   assert(rc == 0);
+   assert(result.degraded == 1);
+   assert(g_named_calls == 1);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_malformed_review_json_counts_failed: ok\n");
+}
+
+static void test_roundtable_malformed_review_json_repair_counts_successful(void)
+{
+   reset_modes();
+   g_parallel_mode = 3;
+   g_repair_mode = 1;
+   config_t cfg = make_cfg(1, 3, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review malformed json repair", &opts, &result);
+   assert(rc == 0);
+   assert(result.degraded == 0);
+   assert(g_named_calls == 1);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_malformed_review_json_repair_counts_successful: ok\n");
+}
+
+static void test_roundtable_cancellation_stops(void)
+{
+   reset_modes();
+   g_cancel_after_checks = 0;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 3;
+   opts.cancel_requested = test_cancel_requested;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft but cancel before work", &opts, &result);
+   assert(rc == 0);
+   assert(result.cancelled == 1);
+   assert(g_parallel_calls == 0);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_cancellation_stops: ok\n");
+}
+
+static void test_roundtable_deadline_returns_best_so_far(void)
+{
+   reset_modes();
+   g_parallel_mode = 4;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 3;
+   opts.deadline_ms = 1;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft until deadline", &opts, &result);
+   assert(rc == 0);
+   assert(result.deadline_hit == 1);
+   assert(result.rounds_run == 1);
+   assert(result.artifact != NULL && result.artifact[0]);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_deadline_returns_best_so_far: ok\n");
+}
+
 int main(void)
 {
    printf("delegate_ensemble tests\n");
@@ -300,6 +564,15 @@ int main(void)
    test_roundtable_parallel_basic();
    test_roundtable_sequential_uses_named_agents();
    test_roundtable_degrades_on_min_success();
+   test_roundtable_preflight_cap_stops_before_round();
+   test_roundtable_keep_best_not_last();
+   test_roundtable_summarize_forward_sets_truncated();
+   test_roundtable_review_saturation_converges();
+   test_roundtable_review_summary_fallback_key_converges();
+   test_roundtable_malformed_review_json_counts_failed();
+   test_roundtable_malformed_review_json_repair_counts_successful();
+   test_roundtable_cancellation_stops();
+   test_roundtable_deadline_returns_best_so_far();
    printf("all tests passed\n");
    return 0;
 }

@@ -356,6 +356,7 @@ static void *op_run_worker(void *arg)
    /* A dispatch returning a JSON object with "error" (or a non-2xx rc) is a
     * failed run; anything else is the completed result payload. */
    int ok = (rc >= 200 && rc < 300);
+   openai_run_status_t terminal_status = OPENAI_RUN_COMPLETED;
    if (ok)
    {
       cJSON *parsed = cJSON_Parse(buf);
@@ -363,13 +364,17 @@ static void *op_run_worker(void *arg)
       {
          if (cJSON_GetObjectItemCaseSensitive(parsed, "error"))
             ok = 0;
+         cJSON *cancelled = cJSON_GetObjectItemCaseSensitive(parsed, "cancelled");
+         if (cJSON_IsTrue(cancelled))
+            terminal_status = OPENAI_RUN_CANCELLED;
          cJSON_Delete(parsed);
       }
    }
    long now = (long)time(NULL);
-   char *snap = op_run_snapshot(j->run_id, j->op, ok ? "completed" : "failed", now, buf);
-   openai_runs_store_finalize(j->run_id, ok ? OPENAI_RUN_COMPLETED : OPENAI_RUN_FAILED,
-                              snap ? snap : buf);
+   const char *status_str =
+       terminal_status == OPENAI_RUN_CANCELLED ? "cancelled" : (ok ? "completed" : "failed");
+   char *snap = op_run_snapshot(j->run_id, j->op, status_str, now, buf);
+   openai_runs_store_finalize(j->run_id, ok ? terminal_status : OPENAI_RUN_FAILED, snap ? snap : buf);
    free(snap);
    free(buf);
    free(j->line);
@@ -389,15 +394,18 @@ static int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
    }
    cJSON_DeleteItemFromObjectCaseSensitive(req, "method");
    cJSON_AddStringToObject(req, "method", rq->op);
-   char *line = cJSON_PrintUnformatted(req);
-   cJSON_Delete(req);
-   if (!line)
-      return err_json(resp, cap, 500, "out of memory");
 
    long created = (long)time(NULL);
    static unsigned long g_op_run_seq = 0; /* listener thread only; single-writer */
    char id[64];
    snprintf(id, sizeof(id), "oprun_%ld_%lu", created, ++g_op_run_seq);
+
+   cJSON_DeleteItemFromObjectCaseSensitive(req, "__run_id");
+   cJSON_AddStringToObject(req, "__run_id", id);
+   char *line = cJSON_PrintUnformatted(req);
+   cJSON_Delete(req);
+   if (!line)
+      return err_json(resp, cap, 500, "out of memory");
 
    char *queued = op_run_snapshot(id, rq->op, "queued", created, NULL);
    if (!queued || !openai_runs_store_create(id, queued))

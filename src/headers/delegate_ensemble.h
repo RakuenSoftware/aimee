@@ -41,6 +41,8 @@ typedef struct
    int converge_threshold;
    int deadline_ms;
    int apply_review;
+   int (*cancel_requested)(void *ctx);
+   void *cancel_ctx;
 } roundtable_opts_t;
 
 typedef struct
@@ -52,6 +54,7 @@ typedef struct
    int truncated;
    int cost_capped;
    int deadline_hit;
+   int cancelled;
    int best_round;
    double cost_usd;
 } roundtable_result_t;

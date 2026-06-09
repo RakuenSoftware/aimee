@@ -30,6 +30,7 @@
 #include "liveness.h"
 #include "log.h"
 #include "model_registry.h"
+#include "openai_runs_store.h"
 #include "platform_process.h"
 #include "prompts.h"
 #include "persona.h"
@@ -1603,6 +1604,12 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
    return cctx;
 }
 
+static int roundtable_run_cancel_requested(void *ctx)
+{
+   const char *run_id = (const char *)ctx;
+   return run_id && run_id[0] && openai_runs_store_cancel_requested(run_id);
+}
+
 int handle_tool_execute(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    compute_ctx_t *cctx = create_compute_ctx(ctx, conn, req);
@@ -1760,6 +1767,12 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    opts.max_rounds = cfg.roundtable_max_rounds > 0 ? cfg.roundtable_max_rounds : 3;
    opts.converge_threshold = cfg.roundtable_converge_threshold;
    opts.deadline_ms = cfg.roundtable_deadline_ms;
+   cJSON *jrun = cJSON_GetObjectItemCaseSensitive(req, "__run_id");
+   if (cJSON_IsString(jrun) && jrun->valuestring && jrun->valuestring[0])
+   {
+      opts.cancel_requested = roundtable_run_cancel_requested;
+      opts.cancel_ctx = jrun->valuestring;
+   }
 
    cJSON *jmode = cJSON_GetObjectItemCaseSensitive(req, "mode");
    if (cJSON_IsString(jmode) && strcmp(jmode->valuestring, "review") == 0)
@@ -1793,6 +1806,7 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    cJSON_AddBoolToObject(resp, "truncated", result.truncated ? 1 : 0);
    cJSON_AddBoolToObject(resp, "cost_capped", result.cost_capped ? 1 : 0);
    cJSON_AddBoolToObject(resp, "deadline_hit", result.deadline_hit ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "cancelled", result.cancelled ? 1 : 0);
    cJSON_AddNumberToObject(resp, "best_round", result.best_round);
    cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
    delegate_roundtable_result_free(&result);

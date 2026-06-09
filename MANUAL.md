@@ -651,7 +651,7 @@ Offload work to a sub-agent (via the server compute pool).
 - `delegate plan <proposal.md> [--json] [--output PATH] [--launch] [--parallel N]`, generate work packets from a proposal.
 - `delegate launch <plan.json> [--json] [--parallel N]` (`delegate.launch`), queue reviewed packets.
 - `delegate aggregate "<task>"` (`delegate.aggregate`), run one Mixture-of-Agents fan-out and synthesis over `ensemble.reference_models`.
-- `delegate roundtable "<task>" [--mode draft|review] [--turns parallel|sequential] [--rounds N] [--apply]` (`delegate.roundtable`), run a bounded multi-round collaborative draft or review. The async run result includes `artifact`, `rounds_run`, `converged`, `degraded`, `truncated`, `cost_capped`, `deadline_hit`, `best_round`, and `cost_usd`.
+- `delegate roundtable "<task>" [--mode draft|review] [--turns parallel|sequential] [--rounds N] [--apply]` (`delegate.roundtable`), run a bounded multi-round collaborative draft or review. The async run result includes `artifact`, `rounds_run`, `converged`, `degraded`, `truncated`, `cost_capped`, `deadline_hit`, `cancelled`, `best_round`, and `cost_usd`.
 - `delegate status <job_id> [job_id...] [--full|--result-limit N]` (`delegate.status`).
 - `delegate log` / `delegate history` (`delegate.log`) · `delegate --list-roles` (`agent.list`).
 
