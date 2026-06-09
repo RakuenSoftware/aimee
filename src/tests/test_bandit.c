@@ -180,6 +180,20 @@ static void test_bandit_registry(void)
    assert(strcmp(dr->arms[0], "cheapest") == 0);
    assert(strcmp(dr->arms[1], "premium") == 0);
 
+   const kb_bandit_decision_point_t *bs = kb_bandit_registry_get("briefing_style");
+   assert(bs != NULL);
+   assert(bs->n_arms == 2);
+   assert(strcmp(bs->arms[0], "compact") == 0);
+   assert(strcmp(bs->arms[1], "evidence_heavy") == 0);
+   assert(strcmp(bs->status, "static") == 0);
+
+   const kb_bandit_decision_point_t *gs = kb_bandit_registry_get("guardrail_strictness");
+   assert(gs != NULL);
+   assert(gs->n_arms == 2);
+   assert(strcmp(gs->arms[0], "balanced") == 0);
+   assert(strcmp(gs->arms[1], "strict") == 0);
+   assert(strcmp(gs->status, "static") == 0);
+
    /* Unknown id -> NULL; index access is bounds-checked. */
    assert(kb_bandit_registry_get("nope") == NULL);
    assert(kb_bandit_registry_get(NULL) == NULL);
