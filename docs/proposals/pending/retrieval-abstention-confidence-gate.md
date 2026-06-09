@@ -8,14 +8,16 @@
   Gate-Promote (curated-content exemption), Extract (curated/provenance signal
   the exemption keys on).
 - **Scope:** `src/memory_core_search.inc` (`memory_ask_query_scoped`,
-  `memory_answer_confidence`, the existing `no_answer` triggers), `src/memory_context.c`
+  `memory_answer_confidence`, the existing `no_answer` triggers, answer-evidence
+  tracing), `src/memory_context.c`
   (`memory_retrieval_confidence` coverage/separation), `src/memory_assemble.c`
   (failure-detection wiring + LOW-marker injection), `src/headers/memory.h`
-  (`memory_answer_result_t`), config plumbing (`src/headers/config.h`,
+  (`memory_answer_result_t`, evidence-trace structs), config plumbing (`src/headers/config.h`,
   `src/config.c`, `src/config_fields.c`, `src/config_sections.c`),
-  `src/server/server_mcp.c` (no-answer rendering), `src/server/kb_client_memory.c`
+  `src/cmd_memory_embed.c`, `src/server/server_mcp.c` (no-answer rendering),
+  `src/server/kb_client_memory.c`
   + `src/db2/kb_service_backend_memory.c` + `src/kb/kb_service_memory.c`
-  (the `memory.ask` response contract), the `kb_calibrate` loop
+  (the `memory.ask` response contract + evidence trace), the `kb_calibrate` loop
   (`src/kb_calibrate.h`) for per-triple thresholds, unit + integration tests, an
   abstain/false-omission bench. No new service, no new model.
 
@@ -34,13 +36,16 @@ instruction, which is exactly the failure mode this proposal removes. (The
 `memory.ask` answer path is **extractive** and pays no generation cost — §R2.1;
 the gate's basis is correctness, and **§A** revises *where* the decision lives.)
 
-The change is small because the substrate is already built. The abstention
-*slot*, *schema*, and *rendering* exist end-to-end; only the **decision** is
-missing. This proposal wires a deterministic answerability decision into recall
-(gating on the **grounding** signal — §A.2), adds the chunk-filter / answer-gate
-split the literature calls for, exempts curated content, and lets the calibration
-loop tune it from outcomes instead of a hand-picked constant. **§A revises the
-single-path framing in the sections below per the §R / §R2 review findings.**
+The change is small because the substrate is already built, but the contract must
+grow in two targeted places. The abstention *slot* exists end-to-end; the missing
+parts are the **decision**, an explicit **no-answer rendering contract** for every
+caller path, and an **evidence trace** that records what was withheld when the
+answer is refused. This proposal wires a deterministic answerability decision
+into recall (gating on the **grounding** signal — §A.2), adds the chunk-filter /
+answer-gate split the literature calls for, exempts curated content, and lets the
+calibration loop tune it from outcomes instead of a hand-picked constant. **§A
+revises the single-path framing in the sections below per the §R / §R2 review
+findings.**
 
 ## §0 What already exists (so we don't rebuild it)
 
@@ -146,13 +151,20 @@ seam and feeds it the right signal.**
 Introduce a single, path-agnostic predicate — working name `memory_answerable()` —
 computed once from the **final candidate set + query terms + thresholds**, that
 returns a decision (`answerable | abstain | exempt`) plus the scores behind it. It
-is a **pure function** (no I/O, no counters). Both consumers call it and own their
-terminal action:
+is a **pure function** (no I/O, no counters). It also returns a compact
+**evidence trace**: candidate ids, ranked count, anchor id, anchor/cluster
+coverage, top-K grounding score, decision reason, and whether the refusal was
+structural or gate-driven. Rendered citations may be empty on abstain; the trace
+must not be empty when retrieval found weak evidence. Both consumers call it and
+own their terminal action:
 
 - **Answer path** (`memory_ask_query_scoped`): on `abstain` → set `no_answer = 1`,
-  clear `answer`, zero citations; the **caller** increments
-  `memory.answer.abstained`. Reuses the existing end-to-end contract; the
-  justification is **correctness**, not cost (§R2.1).
+  clear `answer`, zero rendered citations, retain the evidence trace for
+  telemetry/bench/calibration, and render an explicit "No confident answer" on
+  every non-JSON/text helper path; the **caller** increments
+  `memory.answer.abstained`. Reuses the existing structured contract and closes
+  the string-helper/UI gaps (§R4.1); the justification is **correctness**, not
+  cost (§R2.1).
 - **Context path** (`memory_assemble`): on `abstain` → **deterministically
   withhold** the weak evidence (and/or emit one machine-unambiguous "no reliable
   memory for X" sentinel) **instead of** injecting the soft `## Retrieval
@@ -219,8 +231,8 @@ answer rendering is a separate, later capability.
 
 | Phase | Change | Note |
 |------|--------|------|
-| **P0** (new, foundational) | Extract the **pure** `memory_answerable()` evaluator; make per-candidate scores survive to the answer path; lift coverage/separation onto the answer path; compute it from the **deterministic** hybrid signal (§A.2/§A.3); evaluate the **answer anchor/cluster**, not just the top-K list (§R3.2); keep enough candidate evidence for logging/bench labels (§R4.2). | The real load-bearing refactor §R said Phase 2 hides. Nothing user-visible. |
-| **P1** | Answer-path **refuse** via the evaluator (grounding-first), reusing `no_answer`; caller-counted; update string-only helper callers so abstention is not silently rendered as an empty answer (§R4.1). | Was "Phase 1"; now depends on P0. Correctness basis, not cost. |
+| **P0** (new, foundational) | Extract the **pure** `memory_answerable()` evaluator; make per-candidate scores survive to the answer path; lift coverage/separation onto the answer path; compute it from the **deterministic** hybrid signal (§A.2/§A.3); evaluate the **answer anchor/cluster**, not just the top-K list (§R3.2); return a first-class evidence trace for logging/bench labels (§R4.2). | The real load-bearing refactor §R said Phase 2 hides. Nothing user-visible, except trace fields in structured/debug output. |
+| **P1** | Answer-path **refuse** via the evaluator (grounding-first), reusing `no_answer`; caller-counted; update string-only helpers, CLI text, frontend/webchat, and MCP/JSON structured output so abstention is never silently rendered as an empty answer (§R4.1). | Was "Phase 1"; now depends on P0. Correctness basis, not cost. |
 | **P2** | Context-path **withhold** — replace the prompt-delegated LOW marker with the deterministic decision (§A.1). | Promoted from non-goal; the slice that actually saves generation and removes the anti-pattern. |
 | **P3** | Curated exemption keyed on the **anchor** record's tier (L4/L5) — not "any cited record" (§R.13, §R2.7). | |
 | **P4** | Per-triple calibration — **gated on first building the ask-outcome feedback signal**, which does not exist today (§R.5.14). Net-new infra, not a free hook. | |
@@ -247,13 +259,20 @@ now follows the revised architecture in §A):**
   (§A.3). The outcome counter is written by the **caller**, not the evaluator
   (§A.4). Note `memory.ask` is extractive — there is no generation cost to gate
   "before" (§R2.1); the basis is correctness.
-- On abstain, the result is the **existing** shape: `no_answer = 1`, `answer`
-  empty, `confidence` set to the (low) computed value, citations empty. No new
-  field, no new render path - `server_mcp.c:386` already says the right thing.
-- String-only helper paths (`memory_answer_query*`) and any UI/CLI text path that
-  does not inspect `memory_answer_result_t.no_answer` must render an explicit
-  abstention instead of treating empty `answer` as a legitimate empty result
-  (§R.1.4, §R4.1).
+- On abstain, the result has a **clear no-answer contract**: `no_answer = 1`,
+  `answer` empty in structured JSON/RPC, `confidence` set to the computed low
+  value, rendered citations empty, and an explicit "No confident answer for …"
+  string on helper/text/UI surfaces that cannot carry the structured bool. No
+  caller may treat an empty `answer` as a successful blank answer (§R.1.4,
+  §R4.1).
+- Add first-class **answer evidence tracing** beside the answer result. The trace
+  is not a rendered citation list; it records the candidate ids considered,
+  ranked count, anchor id, anchor/cluster coverage, top-K grounding score,
+  decision (`answerable|abstain|exempt`), reason
+  (`structural_empty|structural_no_extract|citation_required|grounding_low|...`),
+  and threshold values. It is serialized for JSON/RPC debug/bench paths and used
+  by dogfood/ask-outcome logging so gated abstentions retain the withheld evidence
+  (§R4.2).
 - Abstention is **counted**: increment a `memory.answer.abstained` runtime
   counter (mirroring the existing `memory.citation.*` counters at
   `memory_core_search.inc:4831+`) so the calibration loop and bench can see the
@@ -289,9 +308,10 @@ now follows the revised architecture in §A):**
   and the answer is **not** curated-exempt (Phase 3): set `out->no_answer = 1`,
   clear `out->answer`, leave `out->confidence` as the computed low value, zero
   citations, increment `memory.answer.abstained`, and return `0`.
-- This reuses the existing `no_answer` contract entirely. `server_mcp.c:386`
-  already renders it as "No confident answer for …"; the CLI / webchat already
-  understand `no_answer`. Nothing downstream changes.
+- This reuses the existing structured `no_answer` contract where it already
+  exists. `server_mcp.c:386` already renders it as "No confident answer for …",
+  but CLI text, frontend/webchat, and string-helper callers need explicit
+  no-answer handling so abstention is never a blank answer (§R.1.4, §R4.1).
 
 Isolated to the ask path plus two config fields. The context/proactive-recall
 path is untouched in Phase 1.
@@ -387,17 +407,26 @@ discriminating signal arrives with the grounding wiring now promoted to P0/§A.2
 ## Testing & validation
 
 - **Unit:** gate fires when `confidence < gate` and answer is non-curated
-  (`no_answer == 1`, empty answer, citations zeroed, counter incremented); gate
-  does **not** fire at/above threshold; gate **never** fires for curated/exempt
-  anchors; chunk floor drops weak hits before scoring; coverage/separation `min`
-  floor abstains on the fluent-but-off-topic case; the existing structural
-  `no_answer` cases (`:4796` / `:4809` / `:4879`) still behave identically;
-  default-off means behavior is byte-identical to today.
+  (`no_answer == 1`, empty structured answer, rendered citations zeroed, counter
+  incremented, evidence trace populated with candidate ids / anchor / reason);
+  gate does **not** fire at/above threshold; gate **never** fires for
+  curated/exempt anchors; chunk floor drops weak hits before scoring;
+  coverage/separation `min` floor abstains on the fluent-but-off-topic case; the
+  existing structural `no_answer` cases (`:4796` / `:4809` / `:4879`) still behave
+  identically but carry a structural reason; default-off means behavior is
+  byte-identical to today except for inert trace fields on structured/debug paths.
 - **Integration:** `memory.ask` round-trip through
   `kb_client_memory_ask` → RPC → `server_mcp` rendering returns "No confident
   answer for …" on a deliberately weak query, and a normal answer with citations
-  on a well-supported one; a curated record answers even when its similarity is
-  low.
+  on a well-supported one; `aimee memory ask` text output,
+  `memory_answer_query*`, frontend/webchat, and JSON/RPC all expose the same
+  no-answer state without silently printing a blank answer; a curated record
+  answers even when its similarity is low.
+- **Telemetry:** dogfood / ask-outcome logs for gated abstentions include the
+  evidence trace even though rendered citations are empty; zero-retrieval
+  structural abstentions are distinguishable from retrieved-but-rejected
+  abstentions; the trace is bounded and redacts or hashes text consistently with
+  existing dogfood privacy settings.
 - **Abstain/false-omission bench (the acceptance bar):** on a fixed query set
   with hand-labeled answerability, measure **(a)** hallucination rate on
   unanswerable queries (should drop toward zero as the gate engages) against
