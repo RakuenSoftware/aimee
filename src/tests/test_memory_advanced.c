@@ -10,6 +10,7 @@
 #include "db2.h"
 #include "db2_test_shim.h"
 #include "memory_ontology.h"
+#include "../db2/bandit.h"
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
 
@@ -916,6 +917,12 @@ int main(void)
 
       struct cJSON *bundle = memory_briefing(0 /* default limit */);
       assert(bundle != NULL);
+      const char *style =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive((cJSON *)bundle, "briefing_style"));
+      assert(style && strcmp(style, "compact") == 0);
+      int limit = (int)cJSON_GetNumberValue(
+          cJSON_GetObjectItemCaseSensitive((cJSON *)bundle, "limit_tokens"));
+      assert(limit == 1024);
 
       struct cJSON *key_facts = cJSON_GetObjectItemCaseSensitive((cJSON *)bundle, "key_facts");
       struct cJSON *recent = cJSON_GetObjectItemCaseSensitive((cJSON *)bundle, "recent_activity");
@@ -998,6 +1005,17 @@ int main(void)
       assert(cJSON_GetArraySize((cJSON *)small_entities) == 0);
       assert(cJSON_GetArraySize((cJSON *)small_recent) == 0);
       cJSON_Delete((cJSON *)small);
+
+      assert(db2_bandit_promotion_set("briefing_style", "evidence_heavy", "compact") == 0);
+      struct cJSON *heavy = memory_briefing(0);
+      assert(heavy);
+      const char *heavy_style =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive((cJSON *)heavy, "briefing_style"));
+      int heavy_limit = (int)cJSON_GetNumberValue(
+          cJSON_GetObjectItemCaseSensitive((cJSON *)heavy, "limit_tokens"));
+      assert(heavy_style && strcmp(heavy_style, "evidence_heavy") == 0);
+      assert(heavy_limit == 3000);
+      cJSON_Delete((cJSON *)heavy);
    }
 
    /* --- memory_aggregate: entity-route coverage + truncated flag --- */

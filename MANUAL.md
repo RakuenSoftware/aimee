@@ -762,6 +762,10 @@ See [§20](#20-triggers-cron-and-automation).
   return an `async-only` response that points to the CLI/delegate benchmark path.
 - `optimize compare --baseline <arm> --candidate <arm>`: compare benchmark arm
   metrics.
+- Registered decision points include `briefing_style` (`compact`,
+  `evidence_heavy`) and `guardrail_strictness` (`balanced`, `strict`). These
+  residual UX/safety points are promotion/replay driven; online exploration
+  remains default-off unless `intelligence.bandit.live_decision_enabled` is set.
 
 ### 7.19 Review surfaces
 

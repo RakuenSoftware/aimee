@@ -35,6 +35,23 @@ static const kb_bandit_decision_point_t REGISTRY[] = {
         .reward_fn = "delegate_success_v1",
         .status = "live",
     },
+    {
+        .id = "briefing_style",
+        .description = "Session briefing density: compact start-of-session context "
+                       "versus an evidence-heavy bundle.",
+        .arms = {"compact", "evidence_heavy"},
+        .n_arms = 2,
+        .reward_fn = "briefing_quality_replay_v1",
+        .status = "static",
+    },
+    {
+        .id = "guardrail_strictness",
+        .description = "Semantic guardrail threshold profile for write-intent tools.",
+        .arms = {"balanced", "strict"},
+        .n_arms = 2,
+        .reward_fn = "guardrail_outcome_replay_v1",
+        .status = "static",
+    },
 };
 
 int kb_bandit_registry_count(void)

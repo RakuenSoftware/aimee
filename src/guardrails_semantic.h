@@ -10,6 +10,7 @@
 #define DEC_GUARDRAILS_SEMANTIC_H 1
 
 #include "cJSON.h"
+#include "headers/config.h"
 #include <stddef.h>
 
 /* Byte caps for bounded sidecar inputs (per proposal). */
@@ -62,6 +63,10 @@ int gsem_assess(const gsem_input_t *in, const char *command, gsem_output_t *out)
  * Returns "allow", "warn", "prompt", or "block".
  * Returns "allow" when parse_ok=0 (degrade to deterministic). */
 const char *gsem_policy(const gsem_output_t *out, double warn_t, double prompt_t, double block_t);
+
+/* Apply the promoted guardrail_strictness arm to semantic thresholds.
+ * The default/balanced arm leaves config unchanged. */
+void gsem_apply_strictness_arm(config_t *cfg);
 
 /* Format the user-visible Phase 2 advisory warning for warn/prompt bands.
  * Returns 1 when |action| was formatted, 0 when no advisory applies. */

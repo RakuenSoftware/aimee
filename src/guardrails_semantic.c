@@ -11,6 +11,9 @@
  * guardrail result is unaffected. One warning is logged on failure. */
 #include "guardrails_semantic.h"
 #include "db1/guardrail_events.h"
+#if !defined(AIMEE_DB2_DISABLED)
+#include "db2/bandit.h"
+#endif
 #include "headers/log.h"
 #include "platform_process.h"
 #include <cJSON.h>
@@ -239,6 +242,24 @@ const char *gsem_policy(const gsem_output_t *out, double warn_t, double prompt_t
    if (out->overall >= warn_t)
       return "warn";
    return "allow";
+}
+
+void gsem_apply_strictness_arm(config_t *cfg)
+{
+#if defined(AIMEE_DB2_DISABLED)
+   (void)cfg;
+#else
+   char arm[64] = "";
+   if (!cfg || db2_bandit_promotion_get("guardrail_strictness", arm, sizeof(arm)) != 0 ||
+       strcmp(arm, "strict") != 0)
+      return;
+   if (cfg->guardrails_semantic_warn_threshold > 0.30)
+      cfg->guardrails_semantic_warn_threshold = 0.30;
+   if (cfg->guardrails_semantic_prompt_threshold > 0.55)
+      cfg->guardrails_semantic_prompt_threshold = 0.55;
+   if (cfg->guardrails_semantic_block_threshold > 0.80)
+      cfg->guardrails_semantic_block_threshold = 0.80;
+#endif
 }
 
 int gsem_format_advisory_message(char *buf, size_t buf_len, const char *action,
