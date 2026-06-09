@@ -956,6 +956,7 @@ $(OBJDIR)/server/server_http.o: server/openapi_server_data.h
 # The output is committed; regenerating on an unchanged spec is a no-op.
 docs-gen:
 	@python3 ../scripts/gen-api-docs.py
+	@python3 ../scripts/gen-reference-docs.py
 
 # CI gate: fail if docs/gen is stale relative to the committed spec.
 docs-gen-check: docs-gen
