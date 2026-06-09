@@ -1673,6 +1673,23 @@ paths:
               properties:
                 prompt: { type: string }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /delegate/roundtable:
+    post:
+      summary: Multi-round agent roundtable over ensemble.reference_models (async; poll GET /runs/{id})
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt: { type: string }
+                mode: { type: string, enum: [draft, review] }
+                turns: { type: string, enum: [parallel, sequential] }
+                rounds: { type: integer }
+                apply: { type: boolean }
+      responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
   /memory/search:
     post:
       summary: Keyword-search memories

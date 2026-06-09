@@ -97,6 +97,8 @@ adapters behind provider-CLI-compatible config.
 - `aimee delegate <role> <prompt>`: delegate a task through `aimee-server`.
 - `aimee delegate plan <proposal.md> [--output PATH] [--launch]`: generate reviewed work packets.
 - `aimee delegate launch <plan.json> [--parallel N]`: queue a packet plan into a coordinated job.
+- `aimee delegate aggregate "<task>"`: run one Mixture-of-Agents fan-out and synthesis over `ensemble.reference_models`.
+- `aimee delegate roundtable "<task>" [--mode draft|review] [--turns parallel|sequential] [--rounds N] [--apply]`: run a bounded multi-round collaborative draft or review.
 - `aimee delegate status <job_id> [job_id...]`: inspect background delegate status.
 - `aimee delegate log` / `aimee delegate history`: show delegation episodes.
 - `aimee delegate --list-roles`: list configured delegate roles.

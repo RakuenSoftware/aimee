@@ -1205,6 +1205,13 @@ typedef struct config
    int ensemble_min_successful;
    double ensemble_max_cost_usd;
 
+   /* Agent roundtable (roundtable.*). Participants and aggregator are reused
+    * from ensemble.*; these fields control the multi-round loop. */
+   int roundtable_max_rounds;
+   int roundtable_converge_threshold;
+   int roundtable_deadline_ms;
+   char roundtable_turns[16];
+
    /* Context engine selection (context.engine).
     * Empty string means use the default "compactor" engine. */
    char context_engine[64];

@@ -104,7 +104,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `virtual_context_assembly_budget` | int |
 | `virtual_context_enabled` | bool |
 
-## Config-file sections (37)
+## Config-file sections (38)
 
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`.
 
@@ -138,6 +138,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`otel`** — `endpoint`, `service_name`
 - **`retry`** — `base_ms`, `max_attempts`, `max_ms`
 - **`rewind`** — `auto_snapshot`
+- **`roundtable`** — `converge_threshold`, `deadline_ms`, `max_rounds`, `turns`
 - **`sandbox`** — `allow_paths`, `mode`, `network`
 - **`script`** — `allowed_tools`
 - **`search`** — `backend`, `max_results`, `searxng_url`, `tavily_api_key`

@@ -666,9 +666,10 @@ int main(void)
       /* Privileged exec/control routes (delegate/cron/agent/provider/worktree/...)
        * are local-only over TCP unless remote_writes==full; data-plane writes need
        * only remote_writes>=data. Fail-closed at the default. */
-      const char *exec_paths[] = {
-          "/v1/delegate/launch", "/v1/delegate/backend_exec", "/v1/cron/add",   "/v1/agent/add",
-          "/v1/worktree/gc",     "/v1/model/refresh",         "/v1/api/disable"};
+      const char *exec_paths[] = {"/v1/delegate/launch",     "/v1/delegate/backend_exec",
+                                  "/v1/delegate/roundtable", "/v1/cron/add",
+                                  "/v1/agent/add",           "/v1/worktree/gc",
+                                  "/v1/model/refresh",       "/v1/api/disable"};
       for (size_t i = 0; i < sizeof(exec_paths) / sizeof(exec_paths[0]); i++)
       {
          assert(server_http_route_allowed(1, "plain", "POST", exec_paths[i],
@@ -680,6 +681,9 @@ int main(void)
          assert(server_http_route_allowed(0, NULL, "POST", exec_paths[i],
                                           SERVER_REMOTE_WRITES_OFF) == 1); /* UDS always */
       }
+      assert(server_http_route_caps("POST", "/v1/delegate/roundtable") == CAP_DELEGATE);
+      assert(server_http_route_allowed(1, "scope:project:alpha:s3cr3t", "POST",
+                                       "/v1/delegate/roundtable", SERVER_REMOTE_WRITES_FULL) == 0);
       /* The detached-workspace plane is exempt: reachable over TCP at remote_writes=off
        * (still cap-gated -> a scoped query-only bearer is still denied). */
       assert(server_http_route_allowed(1, "plain", "POST", "/v1/runner/poll", 0) == 1);
@@ -885,6 +889,13 @@ int main(void)
       /* A real route with no handler seam wired in this test returns 503, not 404
        * — proving the row matched and dispatched. */
       assert(server_http_route("GET", "/v1/rules", NULL, 0, rb, sizeof(rb)) == 503);
+      openai_runs_store_reset();
+      const char *roundtable_body = "{\"prompt\":\"draft\"}";
+      assert(server_http_route("POST", "/v1/delegate/roundtable", roundtable_body,
+                               (int)strlen(roundtable_body), rb, sizeof(rb)) == 200);
+      assert(strstr(rb, "\"object\":\"op.run\""));
+      assert(strstr(rb, "\"method\":\"delegate.roundtable\""));
+      assert(strstr(rb, "\"status\":\"queued\""));
       /* The /v1/rpc bridge was retired: the path is now unrouted (404). */
       assert(server_http_route("POST", "/v1/rpc", "{}", 2, rb, sizeof(rb)) == 404);
       /* A deeper run path (two segments, no /stop|/events) does not match. */
