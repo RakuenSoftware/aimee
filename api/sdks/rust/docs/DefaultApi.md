@@ -38,6 +38,9 @@ Method | HTTP request | Description
 [**post_drain**](DefaultApi.md#post_drain) | **POST** /drain | Drain the asynchronous knowledge ingest queue
 [**post_entity_search**](DefaultApi.md#post_entity_search) | **POST** /entities/search | Find entities by name or context
 [**post_ingest**](DefaultApi.md#post_ingest) | **POST** /ingest | Enqueue background project ingest
+[**post_intelligence_bandit_close**](DefaultApi.md#post_intelligence_bandit_close) | **POST** /intelligence/bandit/close | Close a sampled decision with its observed reward
+[**post_intelligence_bandit_promote**](DefaultApi.md#post_intelligence_bandit_promote) | **POST** /intelligence/bandit/promote | Persist the production-default arm for a decision point
+[**post_intelligence_bandit_sample**](DefaultApi.md#post_intelligence_bandit_sample) | **POST** /intelligence/bandit/sample | Sample an arm for a decision point (server-side decision points)
 [**post_maintenance_clear**](DefaultApi.md#post_maintenance_clear) | **POST** /maintenance/clear | Clear indexed knowledge for a project
 [**post_maintenance_reconcile**](DefaultApi.md#post_maintenance_reconcile) | **POST** /maintenance/reconcile | Reconcile orphaned vector records
 [**post_maintenance_repair**](DefaultApi.md#post_maintenance_repair) | **POST** /maintenance/repair | Repair a project knowledge index
@@ -982,6 +985,81 @@ Name | Type | Description  | Required | Notes
 ### HTTP request headers
 
 - **Content-Type**: application/json
+- **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+
+## post_intelligence_bandit_close
+
+> serde_json::Value post_intelligence_bandit_close()
+Close a sampled decision with its observed reward
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+[**serde_json::Value**](serde_json::Value.md)
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+
+## post_intelligence_bandit_promote
+
+> serde_json::Value post_intelligence_bandit_promote()
+Persist the production-default arm for a decision point
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+[**serde_json::Value**](serde_json::Value.md)
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+
+## post_intelligence_bandit_sample
+
+> serde_json::Value post_intelligence_bandit_sample()
+Sample an arm for a decision point (server-side decision points)
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+[**serde_json::Value**](serde_json::Value.md)
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
 - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

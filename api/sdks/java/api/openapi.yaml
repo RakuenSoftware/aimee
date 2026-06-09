@@ -125,6 +125,51 @@ paths:
       summary: Export fusion bandit decision data
       x-accepts:
       - application/json
+  /intelligence/bandit/sample:
+    post:
+      operationId: postIntelligenceBanditSample
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+          description: Selected arm + decision id (or status disabled)
+        "401":
+          description: Unauthorized
+      summary: Sample an arm for a decision point (server-side decision points)
+      x-accepts:
+      - application/json
+  /intelligence/bandit/close:
+    post:
+      operationId: postIntelligenceBanditClose
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+          description: Close result
+        "401":
+          description: Unauthorized
+      summary: Close a sampled decision with its observed reward
+      x-accepts:
+      - application/json
+  /intelligence/bandit/promote:
+    post:
+      operationId: postIntelligenceBanditPromote
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+          description: Promotion result (rollback_arm)
+        "401":
+          description: Unauthorized
+      summary: Persist the production-default arm for a decision point
+      x-accepts:
+      - application/json
   /actions/{action}:
     post:
       operationId: postAction

@@ -27,6 +27,21 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
 int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
               const char *user_prompt, int max_tokens, agent_result_t *out);
 
+/* Like agent_run, but with an explicit sampling temperature. agent_run is the
+ * thin wrapper that passes the historical 0.3 default, so its ~28 call sites are
+ * byte-unchanged; the parallel fan-out path uses this to honour a per-task
+ * temperature (agent_task_t.temperature), which agent_run dropped. */
+int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
+                 const char *user_prompt, int max_tokens, double temperature, agent_result_t *out);
+
+/* Run one task on a specifically named configured agent (clones the agent_t
+ * before mutation; a missing/disabled agent is a failed participant, no silent
+ * fallback). Defined in agent_runtime.c beside the static helpers it uses,
+ * called from agent_parallel.c's fan-out. */
+int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
+                    const char *system_prompt, const char *user_prompt, int max_tokens,
+                    double temperature, agent_result_t *out);
+
 /* Like agent_run but forces tool execution regardless of agent config */
 int agent_run_with_tools(agent_config_t *cfg, const char *role, const char *system_prompt,
                          const char *user_prompt, int max_tokens, agent_result_t *out);

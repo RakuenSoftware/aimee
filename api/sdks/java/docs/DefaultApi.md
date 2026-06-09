@@ -72,6 +72,12 @@ All URIs are relative to *http://127.0.0.1:8090/v1*
 | [**postEntitySearchWithHttpInfo**](DefaultApi.md#postEntitySearchWithHttpInfo) | **POST** /entities/search | Find entities by name or context |
 | [**postIngest**](DefaultApi.md#postIngest) | **POST** /ingest | Enqueue background project ingest |
 | [**postIngestWithHttpInfo**](DefaultApi.md#postIngestWithHttpInfo) | **POST** /ingest | Enqueue background project ingest |
+| [**postIntelligenceBanditClose**](DefaultApi.md#postIntelligenceBanditClose) | **POST** /intelligence/bandit/close | Close a sampled decision with its observed reward |
+| [**postIntelligenceBanditCloseWithHttpInfo**](DefaultApi.md#postIntelligenceBanditCloseWithHttpInfo) | **POST** /intelligence/bandit/close | Close a sampled decision with its observed reward |
+| [**postIntelligenceBanditPromote**](DefaultApi.md#postIntelligenceBanditPromote) | **POST** /intelligence/bandit/promote | Persist the production-default arm for a decision point |
+| [**postIntelligenceBanditPromoteWithHttpInfo**](DefaultApi.md#postIntelligenceBanditPromoteWithHttpInfo) | **POST** /intelligence/bandit/promote | Persist the production-default arm for a decision point |
+| [**postIntelligenceBanditSample**](DefaultApi.md#postIntelligenceBanditSample) | **POST** /intelligence/bandit/sample | Sample an arm for a decision point (server-side decision points) |
+| [**postIntelligenceBanditSampleWithHttpInfo**](DefaultApi.md#postIntelligenceBanditSampleWithHttpInfo) | **POST** /intelligence/bandit/sample | Sample an arm for a decision point (server-side decision points) |
 | [**postMaintenanceClear**](DefaultApi.md#postMaintenanceClear) | **POST** /maintenance/clear | Clear indexed knowledge for a project |
 | [**postMaintenanceClearWithHttpInfo**](DefaultApi.md#postMaintenanceClearWithHttpInfo) | **POST** /maintenance/clear | Clear indexed knowledge for a project |
 | [**postMaintenanceReconcile**](DefaultApi.md#postMaintenanceReconcile) | **POST** /maintenance/reconcile | Reconcile orphaned vector records |
@@ -4955,6 +4961,408 @@ ApiResponse<[**IngestResponse**](IngestResponse.md)>
 | **401** | Unauthorized |  -  |
 | **405** | Method not allowed |  -  |
 | **503** | Knowledge store unavailable |  -  |
+
+
+## postIntelligenceBanditClose
+
+> Object postIntelligenceBanditClose()
+
+Close a sampled decision with its observed reward
+
+### Example
+
+```java
+// Import classes:
+import org.openapitools.client.ApiClient;
+import org.openapitools.client.ApiException;
+import org.openapitools.client.Configuration;
+import org.openapitools.client.auth.*;
+import org.openapitools.client.models.*;
+import org.openapitools.client.api.DefaultApi;
+
+public class Example {
+    public static void main(String[] args) {
+        ApiClient defaultClient = Configuration.getDefaultApiClient();
+        defaultClient.setBasePath("http://127.0.0.1:8090/v1");
+        
+        // Configure HTTP bearer authorization: bearerAuth
+        HttpBearerAuth bearerAuth = (HttpBearerAuth) defaultClient.getAuthentication("bearerAuth");
+        bearerAuth.setBearerToken("BEARER TOKEN");
+
+        DefaultApi apiInstance = new DefaultApi(defaultClient);
+        try {
+            Object result = apiInstance.postIntelligenceBanditClose();
+            System.out.println(result);
+        } catch (ApiException e) {
+            System.err.println("Exception when calling DefaultApi#postIntelligenceBanditClose");
+            System.err.println("Status code: " + e.getCode());
+            System.err.println("Reason: " + e.getResponseBody());
+            System.err.println("Response headers: " + e.getResponseHeaders());
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+**Object**
+
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: application/json
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Close result |  -  |
+| **401** | Unauthorized |  -  |
+
+## postIntelligenceBanditCloseWithHttpInfo
+
+> ApiResponse<Object> postIntelligenceBanditCloseWithHttpInfo()
+
+Close a sampled decision with its observed reward
+
+### Example
+
+```java
+// Import classes:
+import org.openapitools.client.ApiClient;
+import org.openapitools.client.ApiException;
+import org.openapitools.client.ApiResponse;
+import org.openapitools.client.Configuration;
+import org.openapitools.client.auth.*;
+import org.openapitools.client.models.*;
+import org.openapitools.client.api.DefaultApi;
+
+public class Example {
+    public static void main(String[] args) {
+        ApiClient defaultClient = Configuration.getDefaultApiClient();
+        defaultClient.setBasePath("http://127.0.0.1:8090/v1");
+        
+        // Configure HTTP bearer authorization: bearerAuth
+        HttpBearerAuth bearerAuth = (HttpBearerAuth) defaultClient.getAuthentication("bearerAuth");
+        bearerAuth.setBearerToken("BEARER TOKEN");
+
+        DefaultApi apiInstance = new DefaultApi(defaultClient);
+        try {
+            ApiResponse<Object> response = apiInstance.postIntelligenceBanditCloseWithHttpInfo();
+            System.out.println("Status code: " + response.getStatusCode());
+            System.out.println("Response headers: " + response.getHeaders());
+            System.out.println("Response body: " + response.getData());
+        } catch (ApiException e) {
+            System.err.println("Exception when calling DefaultApi#postIntelligenceBanditClose");
+            System.err.println("Status code: " + e.getCode());
+            System.err.println("Response headers: " + e.getResponseHeaders());
+            System.err.println("Reason: " + e.getResponseBody());
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+ApiResponse<**Object**>
+
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: application/json
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Close result |  -  |
+| **401** | Unauthorized |  -  |
+
+
+## postIntelligenceBanditPromote
+
+> Object postIntelligenceBanditPromote()
+
+Persist the production-default arm for a decision point
+
+### Example
+
+```java
+// Import classes:
+import org.openapitools.client.ApiClient;
+import org.openapitools.client.ApiException;
+import org.openapitools.client.Configuration;
+import org.openapitools.client.auth.*;
+import org.openapitools.client.models.*;
+import org.openapitools.client.api.DefaultApi;
+
+public class Example {
+    public static void main(String[] args) {
+        ApiClient defaultClient = Configuration.getDefaultApiClient();
+        defaultClient.setBasePath("http://127.0.0.1:8090/v1");
+        
+        // Configure HTTP bearer authorization: bearerAuth
+        HttpBearerAuth bearerAuth = (HttpBearerAuth) defaultClient.getAuthentication("bearerAuth");
+        bearerAuth.setBearerToken("BEARER TOKEN");
+
+        DefaultApi apiInstance = new DefaultApi(defaultClient);
+        try {
+            Object result = apiInstance.postIntelligenceBanditPromote();
+            System.out.println(result);
+        } catch (ApiException e) {
+            System.err.println("Exception when calling DefaultApi#postIntelligenceBanditPromote");
+            System.err.println("Status code: " + e.getCode());
+            System.err.println("Reason: " + e.getResponseBody());
+            System.err.println("Response headers: " + e.getResponseHeaders());
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+**Object**
+
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: application/json
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Promotion result (rollback_arm) |  -  |
+| **401** | Unauthorized |  -  |
+
+## postIntelligenceBanditPromoteWithHttpInfo
+
+> ApiResponse<Object> postIntelligenceBanditPromoteWithHttpInfo()
+
+Persist the production-default arm for a decision point
+
+### Example
+
+```java
+// Import classes:
+import org.openapitools.client.ApiClient;
+import org.openapitools.client.ApiException;
+import org.openapitools.client.ApiResponse;
+import org.openapitools.client.Configuration;
+import org.openapitools.client.auth.*;
+import org.openapitools.client.models.*;
+import org.openapitools.client.api.DefaultApi;
+
+public class Example {
+    public static void main(String[] args) {
+        ApiClient defaultClient = Configuration.getDefaultApiClient();
+        defaultClient.setBasePath("http://127.0.0.1:8090/v1");
+        
+        // Configure HTTP bearer authorization: bearerAuth
+        HttpBearerAuth bearerAuth = (HttpBearerAuth) defaultClient.getAuthentication("bearerAuth");
+        bearerAuth.setBearerToken("BEARER TOKEN");
+
+        DefaultApi apiInstance = new DefaultApi(defaultClient);
+        try {
+            ApiResponse<Object> response = apiInstance.postIntelligenceBanditPromoteWithHttpInfo();
+            System.out.println("Status code: " + response.getStatusCode());
+            System.out.println("Response headers: " + response.getHeaders());
+            System.out.println("Response body: " + response.getData());
+        } catch (ApiException e) {
+            System.err.println("Exception when calling DefaultApi#postIntelligenceBanditPromote");
+            System.err.println("Status code: " + e.getCode());
+            System.err.println("Response headers: " + e.getResponseHeaders());
+            System.err.println("Reason: " + e.getResponseBody());
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+ApiResponse<**Object**>
+
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: application/json
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Promotion result (rollback_arm) |  -  |
+| **401** | Unauthorized |  -  |
+
+
+## postIntelligenceBanditSample
+
+> Object postIntelligenceBanditSample()
+
+Sample an arm for a decision point (server-side decision points)
+
+### Example
+
+```java
+// Import classes:
+import org.openapitools.client.ApiClient;
+import org.openapitools.client.ApiException;
+import org.openapitools.client.Configuration;
+import org.openapitools.client.auth.*;
+import org.openapitools.client.models.*;
+import org.openapitools.client.api.DefaultApi;
+
+public class Example {
+    public static void main(String[] args) {
+        ApiClient defaultClient = Configuration.getDefaultApiClient();
+        defaultClient.setBasePath("http://127.0.0.1:8090/v1");
+        
+        // Configure HTTP bearer authorization: bearerAuth
+        HttpBearerAuth bearerAuth = (HttpBearerAuth) defaultClient.getAuthentication("bearerAuth");
+        bearerAuth.setBearerToken("BEARER TOKEN");
+
+        DefaultApi apiInstance = new DefaultApi(defaultClient);
+        try {
+            Object result = apiInstance.postIntelligenceBanditSample();
+            System.out.println(result);
+        } catch (ApiException e) {
+            System.err.println("Exception when calling DefaultApi#postIntelligenceBanditSample");
+            System.err.println("Status code: " + e.getCode());
+            System.err.println("Reason: " + e.getResponseBody());
+            System.err.println("Response headers: " + e.getResponseHeaders());
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+**Object**
+
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: application/json
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Selected arm + decision id (or status disabled) |  -  |
+| **401** | Unauthorized |  -  |
+
+## postIntelligenceBanditSampleWithHttpInfo
+
+> ApiResponse<Object> postIntelligenceBanditSampleWithHttpInfo()
+
+Sample an arm for a decision point (server-side decision points)
+
+### Example
+
+```java
+// Import classes:
+import org.openapitools.client.ApiClient;
+import org.openapitools.client.ApiException;
+import org.openapitools.client.ApiResponse;
+import org.openapitools.client.Configuration;
+import org.openapitools.client.auth.*;
+import org.openapitools.client.models.*;
+import org.openapitools.client.api.DefaultApi;
+
+public class Example {
+    public static void main(String[] args) {
+        ApiClient defaultClient = Configuration.getDefaultApiClient();
+        defaultClient.setBasePath("http://127.0.0.1:8090/v1");
+        
+        // Configure HTTP bearer authorization: bearerAuth
+        HttpBearerAuth bearerAuth = (HttpBearerAuth) defaultClient.getAuthentication("bearerAuth");
+        bearerAuth.setBearerToken("BEARER TOKEN");
+
+        DefaultApi apiInstance = new DefaultApi(defaultClient);
+        try {
+            ApiResponse<Object> response = apiInstance.postIntelligenceBanditSampleWithHttpInfo();
+            System.out.println("Status code: " + response.getStatusCode());
+            System.out.println("Response headers: " + response.getHeaders());
+            System.out.println("Response body: " + response.getData());
+        } catch (ApiException e) {
+            System.err.println("Exception when calling DefaultApi#postIntelligenceBanditSample");
+            System.err.println("Status code: " + e.getCode());
+            System.err.println("Response headers: " + e.getResponseHeaders());
+            System.err.println("Reason: " + e.getResponseBody());
+            e.printStackTrace();
+        }
+    }
+}
+```
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+ApiResponse<**Object**>
+
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: application/json
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Selected arm + decision id (or status disabled) |  -  |
+| **401** | Unauthorized |  -  |
 
 
 ## postMaintenanceClear

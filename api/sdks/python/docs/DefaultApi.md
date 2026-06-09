@@ -38,6 +38,9 @@ Method | HTTP request | Description
 [**post_drain**](DefaultApi.md#post_drain) | **POST** /drain | Drain the asynchronous knowledge ingest queue
 [**post_entity_search**](DefaultApi.md#post_entity_search) | **POST** /entities/search | Find entities by name or context
 [**post_ingest**](DefaultApi.md#post_ingest) | **POST** /ingest | Enqueue background project ingest
+[**post_intelligence_bandit_close**](DefaultApi.md#post_intelligence_bandit_close) | **POST** /intelligence/bandit/close | Close a sampled decision with its observed reward
+[**post_intelligence_bandit_promote**](DefaultApi.md#post_intelligence_bandit_promote) | **POST** /intelligence/bandit/promote | Persist the production-default arm for a decision point
+[**post_intelligence_bandit_sample**](DefaultApi.md#post_intelligence_bandit_sample) | **POST** /intelligence/bandit/sample | Sample an arm for a decision point (server-side decision points)
 [**post_maintenance_clear**](DefaultApi.md#post_maintenance_clear) | **POST** /maintenance/clear | Clear indexed knowledge for a project
 [**post_maintenance_reconcile**](DefaultApi.md#post_maintenance_reconcile) | **POST** /maintenance/reconcile | Reconcile orphaned vector records
 [**post_maintenance_repair**](DefaultApi.md#post_maintenance_repair) | **POST** /maintenance/repair | Repair a project knowledge index
@@ -2676,6 +2679,222 @@ Name | Type | Description  | Notes
 **401** | Unauthorized |  -  |
 **405** | Method not allowed |  -  |
 **503** | Knowledge store unavailable |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **post_intelligence_bandit_close**
+> object post_intelligence_bandit_close()
+
+Close a sampled decision with its observed reward
+
+### Example
+
+* Bearer Authentication (bearerAuth):
+
+```python
+import aimee_kb
+from aimee_kb.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://127.0.0.1:8090/v1
+# See configuration.py for a list of all supported configuration parameters.
+configuration = aimee_kb.Configuration(
+    host = "http://127.0.0.1:8090/v1"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: bearerAuth
+configuration = aimee_kb.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with aimee_kb.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = aimee_kb.DefaultApi(api_client)
+
+    try:
+        # Close a sampled decision with its observed reward
+        api_response = api_instance.post_intelligence_bandit_close()
+        print("The response of DefaultApi->post_intelligence_bandit_close:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling DefaultApi->post_intelligence_bandit_close: %s\n" % e)
+```
+
+
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+**object**
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Close result |  -  |
+**401** | Unauthorized |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **post_intelligence_bandit_promote**
+> object post_intelligence_bandit_promote()
+
+Persist the production-default arm for a decision point
+
+### Example
+
+* Bearer Authentication (bearerAuth):
+
+```python
+import aimee_kb
+from aimee_kb.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://127.0.0.1:8090/v1
+# See configuration.py for a list of all supported configuration parameters.
+configuration = aimee_kb.Configuration(
+    host = "http://127.0.0.1:8090/v1"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: bearerAuth
+configuration = aimee_kb.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with aimee_kb.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = aimee_kb.DefaultApi(api_client)
+
+    try:
+        # Persist the production-default arm for a decision point
+        api_response = api_instance.post_intelligence_bandit_promote()
+        print("The response of DefaultApi->post_intelligence_bandit_promote:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling DefaultApi->post_intelligence_bandit_promote: %s\n" % e)
+```
+
+
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+**object**
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Promotion result (rollback_arm) |  -  |
+**401** | Unauthorized |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **post_intelligence_bandit_sample**
+> object post_intelligence_bandit_sample()
+
+Sample an arm for a decision point (server-side decision points)
+
+### Example
+
+* Bearer Authentication (bearerAuth):
+
+```python
+import aimee_kb
+from aimee_kb.rest import ApiException
+from pprint import pprint
+
+# Defining the host is optional and defaults to http://127.0.0.1:8090/v1
+# See configuration.py for a list of all supported configuration parameters.
+configuration = aimee_kb.Configuration(
+    host = "http://127.0.0.1:8090/v1"
+)
+
+# The client must configure the authentication and authorization parameters
+# in accordance with the API server security policy.
+# Examples for each auth method are provided below, use the example that
+# satisfies your auth use case.
+
+# Configure Bearer authorization: bearerAuth
+configuration = aimee_kb.Configuration(
+    access_token = os.environ["BEARER_TOKEN"]
+)
+
+# Enter a context with an instance of the API client
+with aimee_kb.ApiClient(configuration) as api_client:
+    # Create an instance of the API class
+    api_instance = aimee_kb.DefaultApi(api_client)
+
+    try:
+        # Sample an arm for a decision point (server-side decision points)
+        api_response = api_instance.post_intelligence_bandit_sample()
+        print("The response of DefaultApi->post_intelligence_bandit_sample:\n")
+        pprint(api_response)
+    except Exception as e:
+        print("Exception when calling DefaultApi->post_intelligence_bandit_sample: %s\n" % e)
+```
+
+
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+**object**
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+### HTTP response details
+
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+**200** | Selected arm + decision id (or status disabled) |  -  |
+**401** | Unauthorized |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 

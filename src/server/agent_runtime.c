@@ -128,8 +128,8 @@ static void record_outcome(const char *agent_name, const char *role, const agent
                                         outcome->reason, outcome->turns_used, outcome->tools_called,
                                         outcome->tokens_used, outcome->tool_error_pattern);
 }
-int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
-              const char *user_prompt, int max_tokens, agent_result_t *out)
+int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
+                 const char *user_prompt, int max_tokens, double temperature, agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
 
@@ -168,9 +168,9 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
          int rc;
          if (use_tools)
             rc = agent_execute_with_tools_for_role(ag, &cfg->network, role, system_prompt,
-                                                   user_prompt, max_tokens, 0.3, out);
+                                                   user_prompt, max_tokens, temperature, out);
          else
-            rc = agent_execute(ag, system_prompt, user_prompt, max_tokens, 0.3, out);
+            rc = agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
 
          if (rc == 0)
          {
@@ -224,9 +224,9 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
       int rc;
       if (use_tools)
          rc = agent_execute_with_tools_for_role(ag, &cfg->network, role, system_prompt,
-                                                effective_prompt, max_tokens, 0.3, out);
+                                                effective_prompt, max_tokens, temperature, out);
       else
-         rc = agent_execute(ag, system_prompt, effective_prompt, max_tokens, 0.3, out);
+         rc = agent_execute(ag, system_prompt, effective_prompt, max_tokens, temperature, out);
 
       free(enhanced);
 
@@ -261,6 +261,63 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
    if (!out->error[0])
       snprintf(out->error, sizeof(out->error), "no agent available for role '%s'", role);
    return -1;
+}
+
+/* Thin wrapper preserving the historical 0.3 sampling temperature, so existing
+ * agent_run call sites are byte-unchanged while agent_run_ex carries a real
+ * temperature parameter for the parallel fan-out path. */
+int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
+              const char *user_prompt, int max_tokens, agent_result_t *out)
+{
+   return agent_run_ex(cfg, role, system_prompt, user_prompt, max_tokens, 0.3, out);
+}
+
+/* Run one fan-out task on a specifically named configured agent (resolved like
+ * aux_router.c), not by role. The selected agent_t is CLONED before any runtime
+ * mutation so concurrent parallel workers never write the shared cfg-owned
+ * struct (closes the data race that the same-agent fan-out otherwise has). A
+ * missing or disabled named agent is a failed participant — it does NOT silently
+ * fall back to another agent, because that would collapse a diverse panel back
+ * into duplicate participants. Defined here (next to the static execution
+ * helpers it needs) but called from agent_parallel.c, so it is not static. */
+int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
+                    const char *system_prompt, const char *user_prompt, int max_tokens,
+                    double temperature, agent_result_t *out)
+{
+   memset(out, 0, sizeof(*out));
+
+   agent_t *src = agent_find(cfg, name);
+   if (!src || !src->enabled)
+   {
+      snprintf(out->agent_name, MAX_AGENT_NAME, "%s", name ? name : "");
+      snprintf(out->error, sizeof(out->error), "named participant '%s' not found or disabled",
+               name ? name : "(null)");
+      return -1;
+   }
+
+   /* Clone before mutating: each worker owns its agent_t copy, so runtime-config
+    * / ablation / write_enforce writes never race on the shared struct. Rate-limit
+    * and provider-health accounting stay on the process-wide provider_catalog_*
+    * tables (keyed by agent name), so siblings still see each other's signals. */
+   agent_t local = *src;
+   agent_apply_runtime_config(&local);
+   local.ablation = cfg->ablation;
+   local.write_enforce = 0; /* ensemble references answer a prompt; no write tools */
+
+   int rc = agent_execute(&local, system_prompt, user_prompt, max_tokens, temperature, out);
+   if (rc == 0)
+      provider_catalog_record_success(local.name);
+   else
+   {
+      const char *err_class = agent_error_is_retryable(out->error) ? "retryable" : "error";
+      provider_catalog_record_failure(local.name, err_class);
+   }
+   {
+      agent_outcome_t oc;
+      classify_outcome(out, local.max_turns, &oc);
+      record_outcome(out->agent_name, role ? role : "ensemble", &oc);
+   }
+   return rc;
 }
 
 static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
@@ -376,106 +433,9 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
                                         enforce_writes, out);
 }
 
-typedef struct
-{
-   agent_config_t *cfg;
-   agent_task_t *task;
-   agent_result_t *result;
-} parallel_ctx_t;
-
-static void *parallel_worker(void *arg)
-{
-   parallel_ctx_t *ctx = (parallel_ctx_t *)arg;
-   agent_run(ctx->cfg, ctx->task->role, ctx->task->system_prompt, ctx->task->user_prompt,
-             ctx->task->max_tokens, ctx->result);
-   return NULL;
-}
-
-/* Cap concurrent parallel_worker threads by the shared compute budget. An
- * explicit AIMEE_PARALLEL_MAX can still tighten the ceiling further. */
-static int parallel_worker_ceiling(void)
-{
-   const char *env = getenv("AIMEE_PARALLEL_MAX");
-   if (env && env[0])
-   {
-      int v = atoi(env);
-      if (v >= 1)
-         return v;
-   }
-   return aimee_resolve_compute_threads(0);
-}
-
-int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
-                       agent_result_t *out)
-{
-   if (task_count <= 0)
-      return 0;
-   if (task_count == 1)
-   {
-      int rc = agent_run(cfg, tasks[0].role, tasks[0].system_prompt, tasks[0].user_prompt,
-                         tasks[0].max_tokens, &out[0]);
-      return rc == 0 ? 1 : 0;
-   }
-
-   parallel_ctx_t *ctxs = calloc((size_t)task_count, sizeof(parallel_ctx_t));
-   if (!ctxs)
-      return 0;
-
-   pthread_t *threads = calloc((size_t)task_count, sizeof(pthread_t));
-   if (!threads)
-   {
-      free(ctxs);
-      return 0;
-   }
-   int *thread_ok = calloc((size_t)task_count, sizeof(int));
-   if (!thread_ok)
-   {
-      free(threads);
-      free(ctxs);
-      return 0;
-   }
-
-   for (int i = 0; i < task_count; i++)
-   {
-      memset(&out[i], 0, sizeof(out[i]));
-      ctxs[i].cfg = cfg;
-      ctxs[i].task = &tasks[i];
-      ctxs[i].result = &out[i];
-   }
-
-   int ceiling = parallel_worker_ceiling();
-   int wave_start = 0;
-   while (wave_start < task_count)
-   {
-      int wave_end = wave_start + ceiling;
-      if (wave_end > task_count)
-         wave_end = task_count;
-
-      for (int i = wave_start; i < wave_end; i++)
-      {
-         if (pthread_create(&threads[i], NULL, parallel_worker, &ctxs[i]) == 0)
-            thread_ok[i] = 1;
-      }
-      for (int i = wave_start; i < wave_end; i++)
-      {
-         if (thread_ok[i])
-            pthread_join(threads[i], NULL);
-      }
-      wave_start = wave_end;
-   }
-
-   free(thread_ok);
-   free(threads);
-   free(ctxs);
-
-   int success_count = 0;
-   for (int i = 0; i < task_count; i++)
-   {
-      if (out[i].success)
-         success_count++;
-   }
-   return success_count;
-}
+/* The parallel fan-out machinery (parallel_worker, agent_run_parallel) lives in
+ * agent_parallel.c — extracted to keep this file under the 2000-line cap. It
+ * calls the now-non-static agent_run_named / agent_run_ex above. */
 
 void agent_store_feedback(const agent_result_t *result, const char *role,
                           const char *prompt_summary)

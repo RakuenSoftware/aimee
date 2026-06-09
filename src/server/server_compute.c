@@ -25,6 +25,7 @@
 #include "kb_bandit.h"
 #include "db1/interaction_events.h"
 #include "delegate_role.h"
+#include "delegate_ensemble.h"
 #include "guardrails.h"
 #include "liveness.h"
 #include "log.h"
@@ -837,8 +838,9 @@ void delegate_worker(void *arg)
          if (dr_cfg.bandit_live_decision_enabled)
          {
             static const char *const dr_arms[2] = {"cheapest", "premium"};
-            if (kb_client_bandit_sample("delegate_routing", dr_arms, 2, dr_arm_id, sizeof(dr_arm_id),
-                                        dr_decision_id, sizeof(dr_decision_id)) == 0)
+            if (kb_client_bandit_sample("delegate_routing", dr_arms, 2, dr_arm_id,
+                                        sizeof(dr_arm_id), dr_decision_id,
+                                        sizeof(dr_decision_id)) == 0)
             {
                if (strcmp(dr_arm_id, "premium") == 0)
                {
@@ -1680,6 +1682,54 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
 
    return 0; /* Response will be sent by worker thread */
+}
+
+/* Mixture-of-Agents ensemble aggregate. Reached over the first-class
+ * POST /v1/delegate/aggregate route (method "delegate.aggregate"), dispatched
+ * async via rh_dispatch_op_async — so this runs on a detached op-run worker
+ * thread, never the buffered listener, and the LLM fan-out may block here. The
+ * run result is finalized into /v1/runs/{id}. Before this entry point existed,
+ * delegate_ensemble_run had no caller in any shipped binary. */
+int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
+   const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
+   if (!prompt || !prompt[0])
+      return server_send_error(conn, "missing prompt", NULL);
+   /* The ensemble prompt is the task; the same minimum-length guard as an
+    * ordinary delegate applies, but it must name the ensemble. */
+   if (strlen(prompt) < 20)
+   {
+      char errmsg[80];
+      snprintf(errmsg, sizeof(errmsg), "ensemble prompt too short (%zu chars, min 20)",
+               strlen(prompt));
+      return server_send_error(conn, errmsg, NULL);
+   }
+
+   config_t cfg;
+   config_load(&cfg);
+   if (!cfg.ensemble_enabled)
+      return server_send_error(
+          conn, "Mixture-of-Agents ensemble disabled (set ensemble.enabled=true)", NULL);
+
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof(acfg));
+   if (agent_load_config(&acfg) != 0)
+      return server_send_error(conn, "could not load agents.json", NULL);
+
+   delegate_ensemble_result_t result;
+   int rc = delegate_ensemble_run(&acfg, &cfg, prompt, &result);
+   if (rc != 0)
+      return server_send_error(
+          conn, "ensemble run failed (check ensemble.enabled / ensemble.reference_models)", NULL);
+
+   cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "response", result.response);
+   cJSON_AddBoolToObject(resp, "degraded", result.degraded ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "cost_capped", result.cost_capped ? 1 : 0);
+   cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
+   return server_send_ok(conn, resp);
 }
 
 int handle_delegate_reply(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

@@ -38,6 +38,9 @@ Method | HTTP request | Description
 [**PostDrain**](DefaultAPI.md#PostDrain) | **Post** /drain | Drain the asynchronous knowledge ingest queue
 [**PostEntitySearch**](DefaultAPI.md#PostEntitySearch) | **Post** /entities/search | Find entities by name or context
 [**PostIngest**](DefaultAPI.md#PostIngest) | **Post** /ingest | Enqueue background project ingest
+[**PostIntelligenceBanditClose**](DefaultAPI.md#PostIntelligenceBanditClose) | **Post** /intelligence/bandit/close | Close a sampled decision with its observed reward
+[**PostIntelligenceBanditPromote**](DefaultAPI.md#PostIntelligenceBanditPromote) | **Post** /intelligence/bandit/promote | Persist the production-default arm for a decision point
+[**PostIntelligenceBanditSample**](DefaultAPI.md#PostIntelligenceBanditSample) | **Post** /intelligence/bandit/sample | Sample an arm for a decision point (server-side decision points)
 [**PostMaintenanceClear**](DefaultAPI.md#PostMaintenanceClear) | **Post** /maintenance/clear | Clear indexed knowledge for a project
 [**PostMaintenanceReconcile**](DefaultAPI.md#PostMaintenanceReconcile) | **Post** /maintenance/reconcile | Reconcile orphaned vector records
 [**PostMaintenanceRepair**](DefaultAPI.md#PostMaintenanceRepair) | **Post** /maintenance/repair | Repair a project knowledge index
@@ -2218,6 +2221,183 @@ Name | Type | Description  | Notes
 ### HTTP request headers
 
 - **Content-Type**: application/json
+- **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints)
+[[Back to Model list]](../README.md#documentation-for-models)
+[[Back to README]](../README.md)
+
+
+## PostIntelligenceBanditClose
+
+> map[string]interface{} PostIntelligenceBanditClose(ctx).Execute()
+
+Close a sampled decision with its observed reward
+
+### Example
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	openapiclient "github.com/GIT_USER_ID/GIT_REPO_ID/aimeekb"
+)
+
+func main() {
+
+	configuration := openapiclient.NewConfiguration()
+	apiClient := openapiclient.NewAPIClient(configuration)
+	resp, r, err := apiClient.DefaultAPI.PostIntelligenceBanditClose(context.Background()).Execute()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error when calling `DefaultAPI.PostIntelligenceBanditClose``: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
+	}
+	// response from `PostIntelligenceBanditClose`: map[string]interface{}
+	fmt.Fprintf(os.Stdout, "Response from `DefaultAPI.PostIntelligenceBanditClose`: %v\n", resp)
+}
+```
+
+### Path Parameters
+
+This endpoint does not need any parameter.
+
+### Other Parameters
+
+Other parameters are passed through a pointer to a apiPostIntelligenceBanditCloseRequest struct via the builder pattern
+
+
+### Return type
+
+**map[string]interface{}**
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints)
+[[Back to Model list]](../README.md#documentation-for-models)
+[[Back to README]](../README.md)
+
+
+## PostIntelligenceBanditPromote
+
+> map[string]interface{} PostIntelligenceBanditPromote(ctx).Execute()
+
+Persist the production-default arm for a decision point
+
+### Example
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	openapiclient "github.com/GIT_USER_ID/GIT_REPO_ID/aimeekb"
+)
+
+func main() {
+
+	configuration := openapiclient.NewConfiguration()
+	apiClient := openapiclient.NewAPIClient(configuration)
+	resp, r, err := apiClient.DefaultAPI.PostIntelligenceBanditPromote(context.Background()).Execute()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error when calling `DefaultAPI.PostIntelligenceBanditPromote``: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
+	}
+	// response from `PostIntelligenceBanditPromote`: map[string]interface{}
+	fmt.Fprintf(os.Stdout, "Response from `DefaultAPI.PostIntelligenceBanditPromote`: %v\n", resp)
+}
+```
+
+### Path Parameters
+
+This endpoint does not need any parameter.
+
+### Other Parameters
+
+Other parameters are passed through a pointer to a apiPostIntelligenceBanditPromoteRequest struct via the builder pattern
+
+
+### Return type
+
+**map[string]interface{}**
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints)
+[[Back to Model list]](../README.md#documentation-for-models)
+[[Back to README]](../README.md)
+
+
+## PostIntelligenceBanditSample
+
+> map[string]interface{} PostIntelligenceBanditSample(ctx).Execute()
+
+Sample an arm for a decision point (server-side decision points)
+
+### Example
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"os"
+	openapiclient "github.com/GIT_USER_ID/GIT_REPO_ID/aimeekb"
+)
+
+func main() {
+
+	configuration := openapiclient.NewConfiguration()
+	apiClient := openapiclient.NewAPIClient(configuration)
+	resp, r, err := apiClient.DefaultAPI.PostIntelligenceBanditSample(context.Background()).Execute()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error when calling `DefaultAPI.PostIntelligenceBanditSample``: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Full HTTP response: %v\n", r)
+	}
+	// response from `PostIntelligenceBanditSample`: map[string]interface{}
+	fmt.Fprintf(os.Stdout, "Response from `DefaultAPI.PostIntelligenceBanditSample`: %v\n", resp)
+}
+```
+
+### Path Parameters
+
+This endpoint does not need any parameter.
+
+### Other Parameters
+
+Other parameters are passed through a pointer to a apiPostIntelligenceBanditSampleRequest struct via the builder pattern
+
+
+### Return type
+
+**map[string]interface{}**
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
 - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints)

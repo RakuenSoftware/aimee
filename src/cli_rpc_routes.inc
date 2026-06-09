@@ -239,6 +239,12 @@ static const struct
     {"delegate", "--list-roles", "agent.list", NULL, "agents", 0},
     {"delegate", "log", "delegate.log", NULL, "episodes", 0},
     {"delegate", "history", "delegate.log", NULL, "episodes", 0},
+    /* MoA ensemble aggregate: positional[0] is the PROMPT (not a role). Async —
+     * forwards to POST /v1/delegate/aggregate and polls GET /v1/runs/{id}. This
+     * specific route is what makes `aimee delegate aggregate "<prompt>"` reach the
+     * ensemble; without it the prompt fell through to the catch-all delegate
+     * route, which maps positional[0] -> role and never ran the engine. */
+    {"delegate", "aggregate", "delegate.aggregate", NULL, NULL, 600000},
     /* Codex/openai delegate agents have agent->timeout_ms == 900000 server-side.
      * The CLI must outlast that, otherwise we report "no response" while the
      * server is still genuinely working. */
@@ -1664,6 +1670,19 @@ static const char *marshal_delegate_toolset_arg(int argc, char **argv)
    return NULL;
 }
 
+/* MoA ensemble aggregate. positional[0] is the prompt (the catch-all delegate
+ * marshaller mapped positional[0] -> role, which is the §0.2 routing bug). */
+static cJSON *marshal_delegate_aggregate(int argc, char **argv)
+{
+   static const char *bool_flags[] = {"json", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+   cJSON *req = marshal_no_args("delegate.aggregate");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "prompt", opts.positional[0]);
+   return req;
+}
+
 static cJSON *marshal_delegate(int argc, char **argv)
 {
    static const char *bool_flags[] = {"json",         "background", "durable", "coordination",
@@ -2951,6 +2970,8 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_work_request(method, argc, argv);
    if (strcmp(method, "delegate") == 0)
       return marshal_delegate(argc, argv);
+   if (strcmp(method, "delegate.aggregate") == 0)
+      return marshal_delegate_aggregate(argc, argv);
    if (strcmp(method, "delegate.launch") == 0)
       return marshal_delegate_launch(argc, argv);
    if (strcmp(method, "delegate.status") == 0)

@@ -484,9 +484,10 @@ static int arg_list_contains_help_flag(int argc, char **argv)
 
 static int delegate_arg_is_subcommand(const char *arg)
 {
-   return arg && (strcmp(arg, "plan") == 0 || strcmp(arg, "launch") == 0 ||
-                  strcmp(arg, "status") == 0 || strcmp(arg, "log") == 0 ||
-                  strcmp(arg, "history") == 0 || strcmp(arg, "--list-roles") == 0);
+   return arg &&
+          (strcmp(arg, "plan") == 0 || strcmp(arg, "launch") == 0 || strcmp(arg, "status") == 0 ||
+           strcmp(arg, "log") == 0 || strcmp(arg, "history") == 0 ||
+           strcmp(arg, "aggregate") == 0 || strcmp(arg, "--list-roles") == 0);
 }
 
 static int arg_list_contains(int argc, char **argv, const char *flag)

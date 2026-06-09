@@ -663,6 +663,54 @@ public class DefaultApiTest {
     }
     
     /**
+     * Close a sampled decision with its observed reward
+     *
+     * 
+     *
+     * @throws ApiException
+     *          if the Api call fails
+     */
+    @Test
+    public void postIntelligenceBanditCloseTest() throws ApiException {
+        Object response = 
+        api.postIntelligenceBanditClose();
+        
+        // TODO: test validations
+    }
+    
+    /**
+     * Persist the production-default arm for a decision point
+     *
+     * 
+     *
+     * @throws ApiException
+     *          if the Api call fails
+     */
+    @Test
+    public void postIntelligenceBanditPromoteTest() throws ApiException {
+        Object response = 
+        api.postIntelligenceBanditPromote();
+        
+        // TODO: test validations
+    }
+    
+    /**
+     * Sample an arm for a decision point (server-side decision points)
+     *
+     * 
+     *
+     * @throws ApiException
+     *          if the Api call fails
+     */
+    @Test
+    public void postIntelligenceBanditSampleTest() throws ApiException {
+        Object response = 
+        api.postIntelligenceBanditSample();
+        
+        // TODO: test validations
+    }
+    
+    /**
      * Clear indexed knowledge for a project
      *
      * 
