@@ -26,9 +26,8 @@ int agent_http_post(const char *url, const char *auth_header, const char *body, 
                                        response_buf, timeout_ms, extra_headers);
 }
 
-int agent_http_post_content_type(const char *url, const char *auth_header,
-                                 const char *content_type, const char *body,
-                                 char **response_buf, int timeout_ms,
+int agent_http_post_content_type(const char *url, const char *auth_header, const char *content_type,
+                                 const char *body, char **response_buf, int timeout_ms,
                                  const char *extra_headers)
 {
    (void)extra_headers; /* Phase 2: add WinHTTP extra headers support */
@@ -77,7 +76,8 @@ int agent_http_post_content_type(const char *url, const char *auth_header,
    }
 
    /* Add headers */
-   const char *ct = content_type && content_type[0] ? content_type : "Content-Type: application/json";
+   const char *ct =
+       content_type && content_type[0] ? content_type : "Content-Type: application/json";
    wchar_t wct[512];
    MultiByteToWideChar(CP_UTF8, 0, ct, -1, wct, 512);
    WinHttpAddRequestHeaders(req, wct, -1, WINHTTP_ADDREQ_FLAG_ADD);

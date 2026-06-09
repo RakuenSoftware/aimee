@@ -35,8 +35,8 @@ cJSON *mcp_client_registry_build_namespaced_tools(int timeout_ms);
 
 /* Lookup a single namespaced remote tool schema. On success, |*out_tool|
  * receives a duplicated MCP-style tool object with a namespaced "name". */
-int mcp_client_registry_get_tool_schema(const char *qualified_name, int timeout_ms, cJSON **out_tool,
-                                        char *err_buf, size_t err_buf_len);
+int mcp_client_registry_get_tool_schema(const char *qualified_name, int timeout_ms,
+                                        cJSON **out_tool, char *err_buf, size_t err_buf_len);
 
 /* Dispatch a namespaced remote tool call to the matching live MCP client. */
 int mcp_client_registry_call_tool(const char *qualified_name, const cJSON *args, int timeout_ms,

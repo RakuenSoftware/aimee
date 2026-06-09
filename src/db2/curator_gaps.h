@@ -13,7 +13,7 @@ extern "C"
 {
 #endif
 
-int db2_corpus_detect_gaps(int64_t doc_id);
+   int db2_corpus_detect_gaps(int64_t doc_id);
 
 #ifdef __cplusplus
 }

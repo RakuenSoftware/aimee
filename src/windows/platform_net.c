@@ -8,7 +8,12 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
-#define NETDBG(...) do { if (getenv("AIMEE_NET_DEBUG")) fprintf(stderr, "[net] " __VA_ARGS__); } while (0)
+#define NETDBG(...)                                                                                \
+   do                                                                                              \
+   {                                                                                               \
+      if (getenv("AIMEE_NET_DEBUG"))                                                               \
+         fprintf(stderr, "[net] " __VA_ARGS__);                                                    \
+   } while (0)
 
 /* Winsock requires one-time initialization before any socket call. Bring it up
  * lazily on first connect; the single startup is intentionally never paired

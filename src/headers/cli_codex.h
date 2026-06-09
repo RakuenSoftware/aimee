@@ -39,10 +39,10 @@ extern "C"
       const char *cwd;           /* optional: child process working directory */
       const char *system_prompt; /* optional: developerInstructions on new threads */
       const char *user_prompt;
-      const char *model; /* optional: turn-level model override */
+      const char *model;            /* optional: turn-level model override */
       const char *reasoning_effort; /* optional: low/medium/high/xhigh */
-      int timeout_ms; /* idle timeout; <0 disables while caller stays attached */
-      int autonomous; /* auto-approve Codex client approval requests */
+      int timeout_ms;               /* idle timeout; <0 disables while caller stays attached */
+      int autonomous;               /* auto-approve Codex client approval requests */
    } cli_codex_chat_request_t;
 
    typedef struct
@@ -59,7 +59,7 @@ extern "C"
    {
       const char *thread_id; /* required: Codex thread to compact */
       const char *cwd;       /* optional: child process working directory */
-      int timeout_ms; /* idle timeout; <0 disables while caller stays attached */
+      int timeout_ms;        /* idle timeout; <0 disables while caller stays attached */
       int autonomous;
    } cli_codex_compact_request_t;
 

@@ -5,7 +5,8 @@
 #include <stdint.h>
 
 /* Failure modes a delegate can exit with */
-typedef enum {
+typedef enum
+{
    DL_MODE_SUCCESS,           /* delegate completed successfully */
    DL_MODE_STALL_NO_WRITES,   /* write_enforce fired, 0 writes */
    DL_MODE_STALL_SLOW_WRITES, /* write_enforce fired but eventually wrote */
@@ -16,20 +17,22 @@ typedef enum {
 } dl_failure_mode_t;
 
 /* Metrics captured at delegate exit for classification */
-typedef struct {
+typedef struct
+{
    const char *session_id;
    const char *role;
    int turns;
    int tool_calls;
-   int success;         /* 1 if rc==0, 0 otherwise */
-   int had_writes;      /* 1 if any files were written */
+   int success;             /* 1 if rc==0, 0 otherwise */
+   int had_writes;          /* 1 if any files were written */
    int write_enforce_fired; /* 1 if write_enforce triggered */
-   int max_turns_limit; /* the max_turns cap that was set */
-   const char *error;   /* error string if failure */
+   int max_turns_limit;     /* the max_turns cap that was set */
+   const char *error;       /* error string if failure */
 } dl_exit_metrics_t;
 
 /* Classified result from classify_delegate_exit */
-typedef struct {
+typedef struct
+{
    dl_failure_mode_t failure_mode;
    double confidence;
    char lesson[512];    /* human-readable lesson */

@@ -104,8 +104,8 @@ int lsp_manager_references(const char *workspace, const char *file, int line, in
  * Returns the number of files modified, or -1 on error (check errbuf).
  */
 int lsp_manager_rename(const char *workspace, const char *file, int line, int col,
-                       const char *new_name, char *out, size_t out_size,
-                       char *errbuf, size_t errbuf_size);
+                       const char *new_name, char *out, size_t out_size, char *errbuf,
+                       size_t errbuf_size);
 
 /*
  * lsp_manager_diag_summary() — aggregate diagnostic counts and active server

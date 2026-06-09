@@ -11,11 +11,12 @@ struct cJSON;
 #define DRIVER_URL_MAX 1024
 
 /* Capability flags */
-#define DRIVER_CAP_TOOL_CALLS   (1 << 0) /* native JSON tool calling */
-#define DRIVER_CAP_STREAMING    (1 << 1) /* streaming responses */
-#define DRIVER_CAP_VISION       (1 << 2) /* image inputs */
-#define DRIVER_CAP_SYSTEM_MSG   (1 << 3) /* system message in request body (vs. messages array) */
-#define DRIVER_CAP_PROMPT_CACHE (1 << 4) /* provider-side prompt caching (e.g. Gemini cachedContent) */
+#define DRIVER_CAP_TOOL_CALLS (1 << 0) /* native JSON tool calling */
+#define DRIVER_CAP_STREAMING  (1 << 1) /* streaming responses */
+#define DRIVER_CAP_VISION     (1 << 2) /* image inputs */
+#define DRIVER_CAP_SYSTEM_MSG (1 << 3) /* system message in request body (vs. messages array) */
+#define DRIVER_CAP_PROMPT_CACHE                                                                    \
+   (1 << 4) /* provider-side prompt caching (e.g. Gemini cachedContent) */
 
 /* Context window sizes (in tokens) for capability metadata */
 #define DRIVER_CTX_SMALL  4096

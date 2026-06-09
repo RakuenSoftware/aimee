@@ -8,7 +8,9 @@
 #define KB_GLOB_MAX 512
 
 /* Default include/exclude patterns */
-#define KB_DEFAULT_INCLUDE "**/*.md,**/*.txt,**/*.rst,**/*.c,**/*.h,**/*.cpp,**/*.hpp,**/*.py,**/*.go,**/*.rs,**/*.js,**/*.ts,**/*.tsx,**/*.jsx,**/*.sh,**/*.yaml,**/*.yml,**/*.toml"
+#define KB_DEFAULT_INCLUDE                                                                         \
+   "**/*.md,**/*.txt,**/*.rst,**/*.c,**/*.h,**/*.cpp,**/*.hpp,**/*.py,**/*.go,**/*.rs,**/*.js,**/" \
+   "*.ts,**/*.tsx,**/*.jsx,**/*.sh,**/*.yaml,**/*.yml,**/*.toml"
 #define KB_DEFAULT_EXCLUDE "node_modules/**,vendor/**,.git/**,build/**,dist/**"
 
 /* Chunking defaults */
