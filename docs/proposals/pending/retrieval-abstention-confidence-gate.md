@@ -235,7 +235,7 @@ answer rendering is a separate, later capability.
 | **P1** | Answer-path **refuse** via the evaluator (grounding-first), reusing `no_answer`; caller-counted; update string-only helpers, CLI text, frontend/webchat, and MCP/JSON structured output so abstention is never silently rendered as an empty answer (§R4.1). | Was "Phase 1"; now depends on P0. Correctness basis, not cost. |
 | **P2** | Context-path **withhold** — replace the prompt-delegated LOW marker with the deterministic decision (§A.1). | Promoted from non-goal; the slice that actually saves generation and removes the anti-pattern. |
 | **P3** | Curated exemption keyed on the **anchor** record's tier (L4/L5) — not "any cited record" (§R.13, §R2.7). | |
-| **P4** | Per-triple calibration — **gated on first building the ask-outcome feedback signal**, which does not exist today (§R.5.14). Net-new infra, not a free hook. | |
+| **P4** | Per-triple calibration — **gated on first building the ask-outcome feedback signal**, which does not exist today (§R.5.14); store ask outcomes separately from promotion audit events (§B.6). Net-new infra, not a free hook. | |
 | **Bench** | Build the abstain/false-omission harness (labeled answerable/unanswerable corpus, ask-path runner, false-omission metric, per-query confidence export, gate A/B) **before** any default-on (§R2.5). | Precedes the default-on decision. |
 
 Config (`memory_abstain_enabled` / `memory_abstain_gate` / chunk floor) must be
@@ -282,6 +282,118 @@ now follows the revised architecture in §A):**
   tree.
 - Curated/exempt records **bypass the gate**: a hand-authored answer is trusted
   evidence by construction and must not be refused for failing a similarity bar.
+
+## §B Pinned contracts before implementation
+
+These contracts are part of the proposal, not optional implementation notes.
+
+### §B.1 Evidence trace schema
+
+Add a bounded trace object beside `memory_answer_result_t` (working name
+`memory_answer_evidence_t`) and serialize it on JSON/RPC/debug/bench surfaces as
+`evidence_trace`. It is a diagnostic/learning artifact, **not** a rendered
+citation list.
+
+Required fields:
+
+| Field | Type | Meaning |
+|------|------|---------|
+| `decision` | enum string | `answerable`, `abstain`, or `exempt` |
+| `reason` | enum string | `ok`, `structural_empty`, `structural_no_extract`, `citation_required`, `grounding_low`, `chunk_floor`, `curated_exempt`, `db_unavailable` |
+| `candidate_ids` | array<int64>, max 16 | ranked candidate ids considered by the evaluator |
+| `ranked_count` | int | number of ranked retrieval candidates before context-neighbour expansion |
+| `anchor_id` | int64 or 0 | answer anchor memory id, if one exists |
+| `anchor_rank` | int or -1 | deterministic pre-CE rank of the anchor |
+| `topk_grounding` | double | coverage/separation grounding score used as the corpus-level floor |
+| `anchor_coverage` | double | query-term coverage over the anchor |
+| `cluster_coverage` | double | query-term coverage over answer-cluster members |
+| `threshold` | double | effective answerability threshold |
+| `chunk_floor` | double | effective candidate floor, or 0 when disabled |
+| `structural` | bool | true for no retrieval / no extract / DB unavailable |
+| `exempt` | bool | true when the answer bypassed the gate |
+
+Hard caps: keep at most 16 candidate ids and no raw content snippets in the trace.
+If more candidates were considered, set `trace_truncated = true` in JSON. The C
+struct should be fixed-size and stack-friendly; no hot-path heap allocation just
+to record evidence.
+
+### §B.2 Trace privacy
+
+Trace payloads store ids, ranks, numeric scores, enum reasons, and threshold
+values. They **must not** store raw query text, memory keys, memory content, or
+answer text. Dogfood may continue to hash the query through its existing
+`query_hash` path, and raw query/content may appear only when the existing
+dogfood raw-logging opt-in is enabled. This keeps the abstention bench useful
+without widening default data capture.
+
+### §B.3 No-answer rendering contract
+
+Structured surfaces keep `answer: ""` and `no_answer: true`. Human-readable or
+string-only surfaces render exactly:
+
+```text
+No confident answer for "<query>"
+```
+
+If the caller cannot safely include the query, render:
+
+```text
+No confident answer.
+```
+
+Affected paths include MCP text content, `aimee memory ask` text output,
+`memory_answer_query*`, DB2-disabled stubs, frontend/webchat, and any future UI
+that does not inspect the structured bool. Tests should assert that no
+no-answer path returns or prints only an empty line.
+
+### §B.4 Context withhold sentinel
+
+When the context path withholds weak memory evidence, it emits one
+machine-unambiguous sentinel instead of the soft LOW prose:
+
+```text
+## Memory Answerability
+No reliable memory evidence for this query.
+```
+
+The sentinel must not include weak candidate text. It should preserve the
+retrieval-failure learning side effect from today (`memory_directive_record_retrieval_failure`)
+or an explicitly equivalent `memory.answerability.withheld` signal consumed by
+the directive subsystem. This keeps the LLM from seeing weak evidence while the
+system still learns that recall could not support the query.
+
+### §B.5 MCP scope contract
+
+`memory_ask` over MCP must support per-scope calibration. Add optional
+`scope_type` and `scope_value` arguments to the MCP tool schema and forward them
+to `kb_client_memory_ask`. If omitted, the MCP call is explicitly calibrated as
+`scope_kind = "global"`, `scope_id = ""`; future workspace/session-derived scope
+can change that default only as a separate compatibility change.
+
+### §B.6 Ask-outcome calibration data
+
+Do **not** reuse promotion `audit_events` as if they were answer correctness
+labels. Add a distinct ask-outcome feedback artifact/table shape with at least:
+`query_hash`, `target_surface`, `kind`, `scope_kind`, `scope_id`, `decision`,
+`reason`, `confidence`, `threshold`, `anchor_id`, `candidate_ids`, `user_verdict`
+(`correct|wrong|false_omission|correct_abstain|unknown`), and timestamps. Phase 4
+can fit abstain thresholds only after this feedback exists and has enough labeled
+rows per tuple.
+
+### §B.7 Default-on acceptance bar
+
+The gate remains default-off until a labeled bench clears explicit thresholds:
+
+- wrong-answer rate on unanswerable queries drops by at least 50% relative to
+  baseline, or to <= 5% absolute, whichever is easier to satisfy;
+- false-omission rate on answerable queries rises by no more than 2 percentage
+  points absolute;
+- curated-exempt bypasses account for no more than 10% of answered bench cases
+  unless separately justified;
+- the bench exports per-query evidence traces so failures can be audited.
+
+If the corpus is too small for stable percentages, keep the gate default-off and
+collect more labeled ask outcomes.
 
 ## The gaps and the proposed changes
 
@@ -408,7 +520,7 @@ discriminating signal arrives with the grounding wiring now promoted to P0/§A.2
 
 - **Unit:** gate fires when `confidence < gate` and answer is non-curated
   (`no_answer == 1`, empty structured answer, rendered citations zeroed, counter
-  incremented, evidence trace populated with candidate ids / anchor / reason);
+  incremented, evidence trace populated with the §B.1 fields);
   gate does **not** fire at/above threshold; gate **never** fires for
   curated/exempt anchors; chunk floor drops weak hits before scoring;
   coverage/separation `min` floor abstains on the fluent-but-off-topic case; the
@@ -421,21 +533,21 @@ discriminating signal arrives with the grounding wiring now promoted to P0/§A.2
   on a well-supported one; `aimee memory ask` text output,
   `memory_answer_query*`, frontend/webchat, and JSON/RPC all expose the same
   no-answer state without silently printing a blank answer; a curated record
-  answers even when its similarity is low.
+  answers even when its similarity is low. String-only no-answer rendering matches
+  §B.3 exactly.
 - **Telemetry:** dogfood / ask-outcome logs for gated abstentions include the
   evidence trace even though rendered citations are empty; zero-retrieval
   structural abstentions are distinguishable from retrieved-but-rejected
   abstentions; the trace is bounded and redacts or hashes text consistently with
-  existing dogfood privacy settings.
+  §B.1 / §B.2.
 - **Abstain/false-omission bench (the acceptance bar):** on a fixed query set
   with hand-labeled answerability, measure **(a)** hallucination rate on
   unanswerable queries (should drop toward zero as the gate engages) against
   **(b)** false-omission rate on answerable queries (must not rise materially).
   Plot the confidence distributions for correct vs incorrect answers and pick the
-  default gate where the curves separate - exactly the blog's tuning method, run
-  through the existing benchmark suite. The bar for flipping
-  `memory_abstain_enabled` default-on is *materially lower wrong-answer rate at
-  no material increase in false omissions*. Deploy/bench runs are user-gated.
+  default gate where the curves separate - exactly the blog's tuning method. The
+  default-on decision must satisfy the numeric §B.7 acceptance bar. Deploy/bench
+  runs are user-gated.
 
 ## Non-goals / risks
 
