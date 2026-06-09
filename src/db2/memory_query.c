@@ -1487,10 +1487,10 @@ int db2_memory_get(int64_t memory_id, memory_t *out)
    if (!conn)
       return -1;
 
-   static const char *sql =
-       "SELECT id, tier, kind, key, content, confidence, use_count,"
-       "       last_used_at, created_at, updated_at, source_session, salience, provenance_category"
-       "  FROM memories WHERE id = ?1";
+   static const char *sql = "SELECT id, tier, kind, key, content, confidence, use_count,"
+                            "       last_used_at, created_at, updated_at, source_session, salience,"
+                            "       provenance_category, use_cases"
+                            "  FROM memories WHERE id = ?1";
    char err[MQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)

@@ -692,6 +692,9 @@ int kb_client_memory_get(int64_t id, memory_t *out);
 int kb_client_memory_insert(const char *tier, const char *kind, const char *key,
                             const char *content, double confidence, const char *session_id,
                             memory_t *out);
+int kb_client_memory_insert_ex(const char *tier, const char *kind, const char *key,
+                               const char *content, const char *use_cases, double confidence,
+                               const char *session_id, memory_t *out);
 
 /* Look up a memory id by (key, kind) via aimee-kb.  Returns 0 if no
  * row matches or kb is unreachable; the row id otherwise.  Mirrors

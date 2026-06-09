@@ -9,6 +9,7 @@ typedef struct
    char key[512];
    char headline[512];
    char content[2048];
+   char use_cases[1024];
    double confidence;
    int use_count;
    char last_used_at[32];
@@ -31,6 +32,7 @@ typedef struct
    char kind[16];
    char key[512];
    char content[2048];
+   char use_cases[1024];
 } memory_ranker_input_t;
 
 typedef struct
@@ -347,6 +349,9 @@ int memory_approve_l4_promotion(int64_t memory_id, const char *approver, const c
 /* --- Tiered Memory --- */
 int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
                   double confidence, const char *session_id, memory_t *out);
+int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
+                     const char *use_cases, double confidence, const char *session_id,
+                     memory_t *out);
 int memory_get(int64_t id, memory_t *out);
 int memory_touch(int64_t id);
 int memory_update_content(int64_t id, const char *content);

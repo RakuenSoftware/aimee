@@ -41,6 +41,7 @@ static cJSON *kbs_memory_row_to_json(const memory_t *m)
       headline = summaries[0].summary;
    cJSON_AddStringToObject(obj, "headline", headline);
    cJSON_AddStringToObject(obj, "content", m->content);
+   cJSON_AddStringToObject(obj, "use_cases", m->use_cases);
    cJSON_AddNumberToObject(obj, "confidence", m->confidence);
    cJSON_AddNumberToObject(obj, "use_count", m->use_count);
    cJSON_AddStringToObject(obj, "last_used_at", m->last_used_at);
@@ -1159,13 +1160,22 @@ cJSON *db2_kb_service_memory_insert_json(const char *tier, const char *kind, con
                                          const char *content, double confidence,
                                          const char *session_id)
 {
+   return db2_kb_service_memory_insert_ex_json(tier, kind, key, content, "", confidence,
+                                               session_id);
+}
+
+cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, const char *key,
+                                            const char *content, const char *use_cases,
+                                            double confidence, const char *session_id)
+{
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
 
    memory_t out;
-   int rc = memory_insert(tier ? tier : "", kind ? kind : "", key ? key : "",
-                          content ? content : "", confidence, session_id ? session_id : "", &out);
+   int rc =
+       memory_insert_ex(tier ? tier : "", kind ? kind : "", key ? key : "", content ? content : "",
+                        use_cases ? use_cases : "", confidence, session_id ? session_id : "", &out);
    if (rc != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
