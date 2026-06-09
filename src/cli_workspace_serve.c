@@ -245,12 +245,44 @@ static HANDLE g_rc_thread = NULL;
 static pthread_t g_rc_thread;
 #endif
 static int g_rc_active = 0;
+static int g_rc_unregister_on_stop = 0;
+static char g_rc_workspace_id[CLI_TUI_PATH_MAX];
+static char g_rc_endpoint[CLI_TUI_PATH_MAX + 32];
+static char *g_rc_bearer = NULL;
 struct rc_args
 {
    char *id;
    char *endpoint;
    char *bearer;
 };
+
+static void rc_unregister_workspace_at(const char *endpoint, const char *bearer,
+                                       const char *workspace_id)
+{
+   if (!workspace_id || !workspace_id[0] || !endpoint || !endpoint[0])
+      return;
+
+   char enc[CLI_TUI_PATH_MAX * 3];
+   char path[sizeof(enc) + 32];
+   if (cli_v1_pct_encode(workspace_id, enc, sizeof(enc)) == 0 &&
+       snprintf(path, sizeof(path), "/v1/workspaces/%s", enc) < (int)sizeof(path))
+   {
+      int status = 0;
+      cJSON *resp = cli_http_request(endpoint, "DELETE", path, NULL, bearer, 15000, &status);
+      cJSON_Delete(resp);
+   }
+}
+
+static void rc_unregister_workspace(void)
+{
+   if (g_rc_unregister_on_stop)
+      rc_unregister_workspace_at(g_rc_endpoint, g_rc_bearer, g_rc_workspace_id);
+   g_rc_unregister_on_stop = 0;
+   g_rc_workspace_id[0] = '\0';
+   g_rc_endpoint[0] = '\0';
+   free(g_rc_bearer);
+   g_rc_bearer = NULL;
+}
 /* Shared body for both thread ABIs: drive the serve loop, then free the args. */
 static void rc_serve_run(struct rc_args *a)
 {
@@ -285,32 +317,85 @@ int cli_workspace_reverse_channel_start(void)
    if (!endpoint)
       return 0;
    char *bearer = cli_rpc_client_bearer();
+   int should_unregister = 0;
 
-   /* Register the detached workspace (idempotent). Best-effort. */
+   /* Register the detached workspace. Treat "already registered" as an
+    * idempotent attach, but only tear down registrations created by this bridge. */
    cJSON *reg = cJSON_CreateObject();
    cJSON_AddStringToObject(reg, "root", cwd);
    cJSON_AddStringToObject(reg, "provider", "detached");
    char *body = cJSON_PrintUnformatted(reg);
    cJSON_Delete(reg);
-   if (body)
-   {
-      int status = 0;
-      cJSON *resp =
-          cli_http_request(endpoint, "POST", "/v1/workspaces", body, bearer, 15000, &status);
-      cJSON_Delete(resp);
-      free(body);
-   }
-
-   struct rc_args *a = calloc(1, sizeof(*a));
-   if (!a)
+   if (!body)
    {
       free(endpoint);
       free(bearer);
       return 0;
    }
+   else
+   {
+      int status = 0;
+      cJSON *resp =
+          cli_http_request(endpoint, "POST", "/v1/workspaces", body, bearer, 15000, &status);
+      free(body);
+      if (status < 200 || status >= 300)
+      {
+         cJSON *msg = resp ? cJSON_GetObjectItemCaseSensitive(resp, "message") : NULL;
+         int already = cJSON_IsString(msg) && strstr(msg->valuestring, "already registered");
+         if (!already)
+         {
+            cJSON_Delete(resp);
+            free(endpoint);
+            free(bearer);
+            return 0;
+         }
+      }
+      else
+      {
+         should_unregister = 1;
+      }
+      cJSON_Delete(resp);
+   }
+
+   struct rc_args *a = calloc(1, sizeof(*a));
+   if (!a)
+   {
+      if (should_unregister)
+         rc_unregister_workspace_at(endpoint, bearer, cwd);
+      free(endpoint);
+      free(bearer);
+      return 0;
+   }
    a->id = strdup(cwd);
+   if (!a->id)
+   {
+      if (should_unregister)
+         rc_unregister_workspace_at(endpoint, bearer, cwd);
+      free(a);
+      free(endpoint);
+      free(bearer);
+      return 0;
+   }
    a->endpoint = endpoint; /* ownership passes to the thread */
    a->bearer = bearer;
+   snprintf(g_rc_workspace_id, sizeof(g_rc_workspace_id), "%s", cwd);
+   snprintf(g_rc_endpoint, sizeof(g_rc_endpoint), "%s", endpoint);
+   g_rc_unregister_on_stop = should_unregister;
+   free(g_rc_bearer);
+   g_rc_bearer = bearer ? strdup(bearer) : NULL;
+   if (bearer && !g_rc_bearer)
+   {
+      if (should_unregister)
+         rc_unregister_workspace_at(endpoint, bearer, cwd);
+      free(a->id);
+      free(a);
+      free(endpoint);
+      free(bearer);
+      g_rc_workspace_id[0] = '\0';
+      g_rc_endpoint[0] = '\0';
+      g_rc_unregister_on_stop = 0;
+      return 0;
+   }
    g_rc_stop = 0;
 #ifdef _WIN32
    g_rc_thread = (HANDLE)_beginthreadex(NULL, 0, rc_thread_main, a, 0, NULL);
@@ -330,6 +415,7 @@ int cli_workspace_reverse_channel_start(void)
    free(a->endpoint);
    free(a->bearer);
    free(a);
+   rc_unregister_workspace();
    return 0;
 }
 
@@ -350,4 +436,5 @@ void cli_workspace_reverse_channel_stop(void)
    pthread_detach(g_rc_thread);
 #endif
    g_rc_active = 0;
+   rc_unregister_workspace();
 }

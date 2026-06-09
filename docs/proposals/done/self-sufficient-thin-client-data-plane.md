@@ -2,7 +2,7 @@
 
 - **State:** done
 - **Status refreshed:** 2026-06-09
-- **Split from:** `docs/proposals/pending/self-sufficient-thin-client.md`
+- **Split from:** `docs/proposals/done/self-sufficient-thin-client.md`
 
 ## Shipped
 

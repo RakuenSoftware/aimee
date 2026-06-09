@@ -378,7 +378,17 @@ verbose mode, network info, recent delegations, capabilities) by querying DB1
 and DB2-via-KB, and prints it to the tool's stdout. It also creates per-session
 worktrees and state. See "Context assembly" in [`src/README.md`](../src/README.md).
 
-### 9.3 A delegate task
+### 9.3 Remote thin-client execution
+
+When `aimee mcp-serve`, chat, or launch targets a remote `aimee-server`, the
+client registers its current directory as a detached workspace, starts a
+background `workspace serve` reverse channel, and routes file/exec operations
+back to the client over `/v1/runner/poll` and `/v1/runner/respond`. The client
+removes the detached workspace when the bridge exits or remote launch fails.
+Delegate routes are exposed over `/v1/delegate/*`, but TCP access requires an
+unscoped bearer and `aimee.api.remote_writes: full`.
+
+### 9.4 A delegate task
 
 ```mermaid
 sequenceDiagram

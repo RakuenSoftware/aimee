@@ -698,6 +698,8 @@ int main(void)
       assert(server_http_route_allowed(1, "plain", "DELETE", "/v1/workspaces/%2Ftmp", 0) == 1);
       assert(server_http_route_allowed(1, sb, "POST", "/v1/runner/poll", 0) ==
              0); /* scoped denied */
+      assert(server_http_route_allowed(1, sb, "POST", "/v1/workspaces", 0) == 0);
+      assert(server_http_route_allowed(1, sb, "DELETE", "/v1/workspaces/%2Ftmp", 0) == 0);
    }
 
    /* --- declarative route registry: capability rows --- */
