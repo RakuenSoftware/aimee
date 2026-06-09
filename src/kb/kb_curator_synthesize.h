@@ -18,6 +18,7 @@
  * Returns 1 if a synthesis was written, 0 if nothing was eligible (or no DB /
  * sidecar disabled), so the drain can rate-limit. */
 #include <stddef.h>
+#include <stdint.h>
 
 /* Test seam: pick the highest-centrality un-synthesised topic — the committed
  * entity with the most inbound `mentions` and no `synthesis` linked `about` it.
@@ -25,6 +26,11 @@
  * frees), else 0. */
 int kb_curator_synth_pick_topic(void *conn, char *id, size_t id_len, char **payload_out,
                                 char *scope_kind, size_t sk_len, char *scope_id, size_t si_len);
+
+int kb_curator_restore_fragment_record(int64_t fragment_doc_id, const char *base_artifact_id,
+                                       const char *restored_text, double confidence,
+                                       const char *prompt_version, char *artifact_id_out,
+                                       size_t artifact_id_len);
 
 int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts);
 

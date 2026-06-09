@@ -26,6 +26,71 @@
 #define CURATOR_SYNTH_OUTBUF    16384
 #define CURATOR_SYNTH_DEFAULT_K 8
 
+int kb_curator_restore_fragment_record(int64_t fragment_doc_id, const char *base_artifact_id,
+                                       const char *restored_text, double confidence,
+                                       const char *prompt_version, char *artifact_id_out,
+                                       size_t artifact_id_len)
+{
+   if (fragment_doc_id <= 0 || !restored_text || !restored_text[0])
+      return -1;
+
+   char fragment_id[32];
+   snprintf(fragment_id, sizeof(fragment_id), "%lld", (long long)fragment_doc_id);
+
+   cJSON *payload = cJSON_CreateObject();
+   if (!payload)
+      return -1;
+   cJSON_AddStringToObject(payload, "text", restored_text);
+   cJSON_AddStringToObject(payload, "evidence_mode", "synthesised");
+   cJSON_AddStringToObject(payload, "restoration_prompt_version",
+                           prompt_version && prompt_version[0] ? prompt_version : "restore-v1");
+   cJSON_AddStringToObject(payload, "fragment_doc_id", fragment_id);
+   if (base_artifact_id && base_artifact_id[0])
+      cJSON_AddStringToObject(payload, "base_artifact_id", base_artifact_id);
+   cJSON_AddBoolToObject(payload, "unknown_sentinel_present",
+                         strstr(restored_text, "[unknown]") != NULL);
+   cJSON_AddStringToObject(payload, "guardrail",
+                           "preserve source nouns, numbers, and relationships; mark gaps "
+                           "[unknown]; never invent");
+   char *payload_json = cJSON_PrintUnformatted(payload);
+   cJSON_Delete(payload);
+
+   char restore_id[64];
+   db2_artifact_gen_id(restore_id, sizeof(restore_id));
+   int rc = db2_artifact_write(restore_id, "restoration", "committed", "doc", fragment_id,
+                               "curator", confidence, payload_json ? payload_json : "{}");
+   free(payload_json);
+   if (rc != 0)
+      return -1;
+
+   if (db2_artifact_cite(restore_id, "doc", fragment_id) != 0)
+      return -1;
+   if (base_artifact_id && base_artifact_id[0])
+   {
+      if (db2_artifact_cite(restore_id, "artifact", base_artifact_id) != 0)
+         return -1;
+      if (db2_artifact_link(restore_id, base_artifact_id, "restored_from") != 0)
+         return -1;
+      if (db2_artifact_link(base_artifact_id, restore_id, "restores") != 0)
+         return -1;
+   }
+
+   char audit_id[64];
+   db2_artifact_gen_id(audit_id, sizeof(audit_id));
+   char before_json[128];
+   char after_json[256];
+   snprintf(before_json, sizeof(before_json), "{\"fragment_doc_id\":\"%s\"}", fragment_id);
+   snprintf(after_json, sizeof(after_json),
+            "{\"artifact_id\":\"%s\",\"evidence_mode\":\"synthesised\"}", restore_id);
+   if (db2_audit_event_write(audit_id, restore_id, "corpus.restore", fragment_id, "curator", "doc",
+                             fragment_id, confidence, 0, before_json, after_json) != 0)
+      return -1;
+
+   if (artifact_id_out && artifact_id_len > 0)
+      snprintf(artifact_id_out, artifact_id_len, "%s", restore_id);
+   return 0;
+}
+
 /* Pick the highest-centrality un-synthesized topic entity. Writes id/payload/
  * scope into the caller buffers. Returns 1 if one was found, else 0. */
 int kb_curator_synth_pick_topic(void *conn, char *id, size_t id_len, char **payload_out,

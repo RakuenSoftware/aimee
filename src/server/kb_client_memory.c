@@ -1401,6 +1401,7 @@ int kb_client_memory_ask(const char *query, const char *scope_type, const char *
    }
    cJSON *answer_j = cJSON_GetObjectItemCaseSensitive(resp, "answer");
    cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(resp, "confidence");
+   cJSON *mode_j = cJSON_GetObjectItemCaseSensitive(resp, "evidence_mode");
    cJSON *no_j = cJSON_GetObjectItemCaseSensitive(resp, "no_answer");
    cJSON *low_j = cJSON_GetObjectItemCaseSensitive(resp, "low_confidence");
    cJSON *retr_j = cJSON_GetObjectItemCaseSensitive(resp, "retrieval_count");
@@ -1410,6 +1411,8 @@ int kb_client_memory_ask(const char *query, const char *scope_type, const char *
       snprintf(out->answer, sizeof(out->answer), "%s", answer_j->valuestring);
    if (cJSON_IsNumber(conf_j))
       out->confidence = conf_j->valuedouble;
+   if (cJSON_IsString(mode_j))
+      snprintf(out->evidence_mode, sizeof(out->evidence_mode), "%s", mode_j->valuestring);
    if (cJSON_IsBool(no_j))
       out->no_answer = cJSON_IsTrue(no_j) ? 1 : 0;
    if (cJSON_IsBool(low_j))

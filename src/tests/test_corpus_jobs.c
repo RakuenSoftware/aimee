@@ -142,12 +142,37 @@ static void test_failure_and_running_recovery(void)
    printf("  failure_and_running_recovery: ok\n");
 }
 
+static void test_restoration_candidate_queue(void)
+{
+   open_db();
+
+   int64_t doc_id = db2_kb_doc_write("restore-hash", "docs/damaged.md", "global", "passthrough", "",
+                                     "damaged fragment", NULL);
+   assert(doc_id > 0);
+
+   assert(db2_corpus_job_mark_restoration_candidate(doc_id, "restore-hash",
+                                                    "[\"FLAT_TEXT\",\"UNDERSIZED_CHUNKS\"]") == 0);
+
+   db2_corpus_job_t job;
+   assert(db2_corpus_job_get(doc_id, &job) == 0);
+   assert(strcmp(job.stage, "restore") == 0);
+   assert(strcmp(job.stage_status, "pending") == 0);
+   assert(strcmp(job.content_hash, "restore-hash") == 0);
+   assert(query_int("SELECT COUNT(*) FROM corpus_stage_events"
+                    " WHERE to_stage = 'restore' AND outcome = 'restoration_candidate'"
+                    " AND detail LIKE '%UNDERSIZED_CHUNKS%'") == 1);
+
+   close_db();
+   printf("  restoration_candidate_queue: ok\n");
+}
+
 int main(void)
 {
    printf("corpus_jobs:\n");
    test_doc_write_seeds_job_and_version();
    test_drain_advances_to_complete_with_events();
    test_failure_and_running_recovery();
+   test_restoration_candidate_queue();
    printf("corpus_jobs: all tests passed\n");
    return 0;
 }

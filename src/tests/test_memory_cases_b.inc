@@ -39,6 +39,7 @@ static void test_memory_ask_query_returns_structured_result(void)
    assert(result.no_answer == 0);
    assert(result.answer[0] != '\0');
    assert(result.confidence > 0.6);
+   assert(strcmp(result.evidence_mode, "verbatim") == 0);
    assert(result.citation_count >= 1);
    assert(result.citation_ids[0] == m.id);
 
@@ -253,8 +254,8 @@ static void test_memory_find_facts_falls_back_when_vector_index_unavailable(void
 
    memory_t m;
    assert(memory_insert(TIER_L2, KIND_FACT, "agent role model",
-                        "There is one primary agent and delegated work uses delegates.", 0.95,
-                        "s1", &m) == 0);
+                        "There is one primary agent and delegated work uses delegates.", 0.95, "s1",
+                        &m) == 0);
 
    memory_t results[8];
    int count = memory_find_facts("agent delegates", 5, results, 8);

@@ -1883,6 +1883,7 @@ cJSON *db2_kb_service_memory_ask_json(const char *query, const char *scope_type,
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "answer", result.answer);
    cJSON_AddNumberToObject(resp, "confidence", result.confidence);
+   cJSON_AddStringToObject(resp, "evidence_mode", result.evidence_mode);
    cJSON_AddBoolToObject(resp, "no_answer", result.no_answer);
    cJSON_AddBoolToObject(resp, "low_confidence", result.low_confidence);
    cJSON_AddNumberToObject(resp, "retrieval_count", result.retrieval_count);

@@ -279,12 +279,13 @@ Capability / coordination / research (P3):
   `POST /v1/delegate/aggregate` entry point and per-task agent routing (plus the
   temperature/`srand`/clone fixes). The original done-proposal file is absent from
   this tree; the analysis lives in the Agent Roundtable proposal below._
-- [Agent Roundtable — Round-Robin Collaborative Drafting and Review](proposals/pending/agent-roundtable-collaborative-drafting.md):
+- [Agent Roundtable — Round-Robin Collaborative Drafting and Review](proposals/done/agent-roundtable-collaborative-drafting.md):
   first makes the shipped-but-dead ensemble actually work — wires an entry point
   (no shipped binary calls it today) and fixes the unrouted-references bug (every
   "participant" is the same default agent) — then generalizes it into a bounded
   multi-round roundtable: real participant routing, draft/review modes,
-  deterministic convergence, keep-best, preflight cost limits. **Draft / Review / Reason. New.**
+  deterministic convergence, keep-best, preflight cost limits.
+  **Draft / Review / Reason. Done.**
 - [Agent-Directed PR Review](proposals/done/agent-directed-pr-review.md):
   lets an agent call in the roundtable's review mode against a code change and
   direct it with a brief (focus areas, fixes made, invariants, questions), with
