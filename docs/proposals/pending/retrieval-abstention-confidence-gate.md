@@ -22,22 +22,25 @@
 ## Goal
 
 Make recall **refuse to answer when the retrieved evidence does not support a
-confident answer**, deterministically, on the answer path, before any generation
-cost is paid. Today Aimee retrieves well and *reports* a confidence number, but
+confident answer**, as a deterministic retrieval decision rather than a prompt
+instruction. Today Aimee retrieves well and *reports* a confidence number, but
 it only abstains on **structural** failure (nothing retrieved, no extractable
 answer, no citations). When retrieval succeeds but the hits are weak, the answer
-path still synthesizes and merely attaches a low-confidence note; the context
-path injects a soft "## Retrieval Confidence: LOW" marker and asks the answering
-LLM to abstain *for itself*. That delegates the most important decision - "is
-there an answer here at all?" - to a prompt instruction, which is exactly the
-failure mode this proposal removes.
+path still returns the weak **extracted** snippet and merely attaches a
+low-confidence note; the context path injects a soft "## Retrieval Confidence:
+LOW" marker and asks the answering LLM to abstain *for itself*. That delegates
+the most important decision - "is there an answer here at all?" - to a prompt
+instruction, which is exactly the failure mode this proposal removes. (The
+`memory.ask` answer path is **extractive** and pays no generation cost — §R2.1;
+the gate's basis is correctness, and **§A** revises *where* the decision lives.)
 
 The change is small because the substrate is already built. The abstention
-*slot*, *schema*, and *rendering* exist end-to-end; only the **trigger** is
-missing. This proposal wires the already-computed confidence into a deterministic
-gate, splits one threshold into the two the literature calls for (a chunk filter
-and an answer gate), exempts curated content, and lets the existing calibration
-loop tune the gate from outcomes instead of a hand-picked constant.
+*slot*, *schema*, and *rendering* exist end-to-end; only the **decision** is
+missing. This proposal wires a deterministic answerability decision into recall
+(gating on the **grounding** signal — §A.2), adds the chunk-filter / answer-gate
+split the literature calls for, exempts curated content, and lets the calibration
+loop tune it from outcomes instead of a hand-picked constant. **§A revises the
+single-path framing in the sections below per the §R / §R2 review findings.**
 
 ## §0 What already exists (so we don't rebuild it)
 
@@ -107,22 +110,142 @@ agrees with this in one place and contradicts it in another:
   refusing. That is the prompt-delegated abstention the blog argues against.
 
 This proposal keeps the blend exactly as-is (we still compute the full ranked
-result - no gating of *retrieval compute*) and only changes the **terminal
-action on the answer path** from "synthesize + warn" to "abstain" when calibrated
-confidence is below the gate. The soft LOW marker stays as the *context-path*
-behavior for proactive recall, where there is no single answer to refuse; the
-hard gate is added on the *answer path* (`memory.ask`), where there is.
+result - no gating of *retrieval compute*) and changes only the **terminal
+action** from "return + warn" to a deterministic abstain decision. **Revised
+stance (see §A):** that decision belongs on a single shared seam consumed by
+*both* paths — the answer path *refuses* (`no_answer`) and the context path
+*withholds* weak evidence instead of injecting the soft LOW marker — because the
+context path is where generation cost and the prompt-delegated anti-pattern
+actually live (§R2.2). The original "gate the answer path, keep the LOW marker on
+the context path" split is **superseded by §A**.
+
+## §A Revised architecture (incorporating the §R / §R2 findings)
+
+The review passes (§R, §R2) showed the original single-path framing above is
+structurally wrong on two points and should be corrected **before**
+implementation:
+
+1. The `memory.ask` answer path is **extractive** — it pays **no generation
+   cost**, and the answer is composed (`memory_pick_answer_from_cluster`) *before*
+   confidence is computed — so "a deterministic gate before generation cost"
+   cannot apply there (§R2.1). The generation cost lives on the **context path**
+   (assembled context → main agent LLM), which is exactly the path the original
+   design leaves on the prompt-delegated LOW marker (§R2.2).
+2. `memory_answer_confidence` is dominated by rank position and citation presence,
+   not grounding strength, so it is a weak discriminator for the
+   "retrieved-but-weak" case the proposal targets (§R.2.6); the grounding signal
+   (coverage/separation + citation verification) lives in a different function on
+   a different path (§R.3.9).
+
+The corrected architecture keeps the proposal's spirit — reuse the `no_answer`
+contract, no new retrieval, no new service — but **moves the decision to a shared
+seam and feeds it the right signal.**
+
+### §A.1 One answerability evaluator, two terminal actions
+
+Introduce a single, path-agnostic predicate — working name `memory_answerable()` —
+computed once from the **final candidate set + query terms + thresholds**, that
+returns a decision (`answerable | abstain | exempt`) plus the scores behind it. It
+is a **pure function** (no I/O, no counters). Both consumers call it and own their
+terminal action:
+
+- **Answer path** (`memory_ask_query_scoped`): on `abstain` → set `no_answer = 1`,
+  clear `answer`, zero citations; the **caller** increments
+  `memory.answer.abstained`. Reuses the existing end-to-end contract; the
+  justification is **correctness**, not cost (§R2.1).
+- **Context path** (`memory_assemble`): on `abstain` → **deterministically
+  withhold** the weak evidence (and/or emit one machine-unambiguous "no reliable
+  memory for X" sentinel) **instead of** injecting the soft `## Retrieval
+  Confidence: LOW` prose and asking the model to self-abstain. This is where the
+  blog's separation-of-concerns actually bites and where generation cost is saved
+  (§R2.2). The *decision* to withhold is made deterministically; what reaches the
+  LLM is either trustworthy context or an explicit, non-negotiable
+  "insufficient memory" signal — never weak content plus a soft plea. **This
+  supersedes the original "keep the LOW marker" non-goal.**
+
+This removes the duplication the tree carries today (coverage/separation on one
+path, answer-confidence on the other, neither gating) and makes "I don't know"
+**one decision with two renderings.**
+
+### §A.2 Grounding-signal-first (which number the gate reads)
+
+The evaluator's primary input is the **grounding** signal —
+`memory_retrieval_confidence`'s coverage/separation — plus **citation
+verification**, *not* `memory_answer_confidence` (cluster shape).
+`memory_answer_confidence` may serve only as a secondary tiebreak. Concretely
+this is the wiring §R.3 flagged as understated, now on the **critical path**, not
+"optional Phase 2":
+
+- lift `memory_retrieval_confidence` so it runs on the answer path too (it is
+  context-path-only today, §R.3.9);
+- make the per-candidate **retrieval score survive** to the evaluator (it is
+  discarded today — `out[i] = candidates[i]` drops the ranking score, §R.3.8), and
+  build the significant-query-terms array the answer path does not compute today.
+
+This score-survival + term plumbing is the real foundational work and is promoted
+to **P0** (§A.6).
+
+### §A.3 Determinism boundary (make the gate reproducible)
+
+A threshold decision near a boundary must be reproducible, but the cross-encoder
+rerank is an external subprocess with silent fallback (§R2.4), so the *reranked
+order* is not stable. Resolve this explicitly: compute the evaluator's grounding
+signal from the **deterministic** hybrid/coverage signals, **not** the
+subprocess-reranked order, so the abstain/answer decision is reproducible
+run-to-run and host-to-host even when the cross-encoder is absent or times out.
+The reranker still orders what is *shown*; it does not decide *whether to answer*.
+Document this contract.
+
+### §A.4 Side-effect boundary
+
+The evaluator is **pure**; the **caller** records the outcome counter. This
+resolves the §R2.4 contradiction ("side-effect-free" vs. a mandated counter): the
+abstain decision is side-effect-free; observability is a deliberate, separate
+write owned by each path.
+
+### §A.5 Completeness is explicitly out of scope
+
+The evaluator answers "is there *a* supported answer," not "is the answer
+*complete*." The single-scalar extractor + intent enum cannot represent
+list/count/aggregate answers (§R2.3), and confidence gating cannot detect that
+failure (those queries score *high*). Two consequences: (a) the proposal must not
+be sold as covering completeness; (b) the evaluator must **not abstain** on a
+high-grounding multi-record query merely because the extractor returned one value
+— a completeness limitation must not masquerade as low confidence.
+Cardinality-aware extraction is a separate, later capability.
+
+### §A.6 Corrected phase plan (authoritative; supersedes "Phasing & ordering")
+
+| Phase | Change | Note |
+|------|--------|------|
+| **P0** (new, foundational) | Extract the **pure** `memory_answerable()` evaluator; make per-candidate scores survive to the answer path; lift coverage/separation onto the answer path; compute it from the **deterministic** hybrid signal (§A.2/§A.3). | The real load-bearing refactor §R said Phase 2 hides. Nothing user-visible. |
+| **P1** | Answer-path **refuse** via the evaluator (grounding-first), reusing `no_answer`; caller-counted. | Was "Phase 1"; now depends on P0. Correctness basis, not cost. |
+| **P2** | Context-path **withhold** — replace the prompt-delegated LOW marker with the deterministic decision (§A.1). | Promoted from non-goal; the slice that actually saves generation and removes the anti-pattern. |
+| **P3** | Curated exemption keyed on the **anchor** record's tier (L4/L5) — not "any cited record" (§R.13, §R2.7). | |
+| **P4** | Per-triple calibration — **gated on first building the ask-outcome feedback signal**, which does not exist today (§R.5.14). Net-new infra, not a free hook. | |
+| **Bench** | Build the abstain/false-omission harness (labeled answerable/unanswerable corpus, ask-path runner, false-omission metric, per-query confidence export, gate A/B) **before** any default-on (§R2.5). | Precedes the default-on decision. |
+
+Config (`memory_abstain_enabled` / `memory_abstain_gate` / chunk floor) must be
+**CLI-settable** — added to `config_fields.c`, which the failure-detection
+precedent skips (§R.1.2) — with **effective (use-site) defaults**, since the
+stored default is `memset`-zero (§R.1.3).
 
 ## Implementation contract
 
-The gate must be concrete before any default-on discussion:
+The decision must be concrete before any default-on discussion **(this contract
+now follows the revised architecture in §A):**
 
-- The gated confidence is **`memory_answer_confidence`'s existing 0..1 output**,
-  optionally floored by `memory_retrieval_confidence.score` (coverage/separation)
-  when failure detection is enabled. We do not invent a third confidence number.
-- The gate is **deterministic and side-effect-free**: given the same candidates
-  and thresholds it always produces the same abstain/answer decision, and it runs
-  **before** any answer composition cost beyond what retrieval already paid.
+- The gated signal is the **grounding** score (`memory_retrieval_confidence`
+  coverage/separation + citation verification), **not** `memory_answer_confidence`,
+  which is position/citation-driven and a weak discriminator (§A.2, §R.2.6).
+  `memory_answer_confidence` may serve only as a secondary tiebreak; we do not
+  invent a third confidence number.
+- The evaluator is a **pure function** of (final candidates, query terms,
+  thresholds) and computes the grounding signal from the **deterministic** hybrid
+  signal, not the cross-encoder-reranked order, so the decision is reproducible
+  (§A.3). The outcome counter is written by the **caller**, not the evaluator
+  (§A.4). Note `memory.ask` is extractive — there is no generation cost to gate
+  "before" (§R2.1); the basis is correctness.
 - On abstain, the result is the **existing** shape: `no_answer = 1`, `answer`
   empty, `confidence` set to the (low) computed value, citations empty. No new
   field, no new render path - `server_mcp.c:386` already says the right thing.
@@ -137,6 +260,14 @@ The gate must be concrete before any default-on discussion:
   evidence by construction and must not be refused for failing a similarity bar.
 
 ## The gaps and the proposed changes
+
+> **Read against §A.** The per-change detail below is still useful, but the
+> *architecture and ordering* are revised by §A: the gate is a shared pure
+> evaluator (§A.1) keyed on the **grounding** signal (§A.2), the score-survival /
+> grounding-on-the-answer-path wiring is foundational **P0** (§A.6), and the
+> context-path change is a deterministic **withhold**, not the LOW marker (§A.1).
+> Where the text below says "gate `memory_answer_confidence`" or "Phase 1 is
+> shippable alone," prefer §A.
 
 ### Phase 1 - The answer-path gate (smallest, highest leverage)
 
@@ -228,6 +359,15 @@ avoid.
 
 ## Phasing & ordering
 
+> **Superseded by §A.6.** The original ordering below underestimated the
+> foundational work (it folded the score-survival + grounding-on-the-answer-path
+> refactor into "Phase 2" and treated the calibration loop as a free hook). The
+> **authoritative** plan is the §A.6 table: P0 (extract the pure evaluator + make
+> scores survive + grounding-on-the-answer-path), P1 (answer-path refuse), P2
+> (context-path withhold), P3 (anchor-keyed exemption), P4 (calibration, gated on
+> a net-new feedback signal), then the bench before default-on. The table below is
+> retained only to show the original framing.
+
 | Phase | Change | Blast radius | Risk |
 |------|--------|-------------|------|
 | 1 | Answer-path abstain gate | `memory_core_search.inc` + 2 config fields | low |
@@ -235,10 +375,9 @@ avoid.
 | 3 | Curated-content exemption | gate predicate + (maybe) provenance signal | low |
 | 4 | Per-triple calibrated thresholds | `kb_calibrate` output + ask-path read | medium |
 
-Phase 1 is the high-value slice and is shippable alone: it turns the
-already-computed-but-ignored confidence into an actual refusal, reusing the
-end-to-end `no_answer` contract. 2 sharpens it, 3 removes the obvious false
-refusal, and 4 makes the threshold learn instead of being guessed.
+(Original framing — now corrected by §A: Phase 1 alone is largely cosmetic
+because the gated number is position/citation-driven, not grounding; the
+discriminating signal arrives with the grounding wiring now promoted to P0/§A.2.)
 
 ## Testing & validation
 
@@ -269,9 +408,17 @@ refusal, and 4 makes the threshold learn instead of being guessed.
 - **Not** changing the blend to a retrieval gate - recall compute is unchanged;
   we gate the *answer*, not what we *compute* (§0, and consistent with the
   recall-economy proposal's "blend, don't gate" stance).
-- **Not** removing the soft LOW marker - it stays as the proactive-recall /
-  context-path behavior, where there is no single answer to refuse. The hard gate
-  is added on the answer path only.
+- ~~**Not** removing the soft LOW marker~~ **— superseded by §A.1.** On the
+  context path the soft LOW marker is *replaced* by a deterministic
+  withhold / insufficient-memory decision: keeping a prompt-delegated marker on
+  the generation-bearing path is the very anti-pattern this proposal exists to
+  remove (§R2.2). The decision is shared across both paths — the answer path
+  refuses, the context path withholds.
+- **Not** addressing answer **completeness** — list/count/"all of X" queries
+  return a single extracted scalar at high confidence and are invisible to the
+  gate (§A.5, §R2.3); that needs cardinality-aware extraction, a separate later
+  capability. The evaluator must not let that limitation masquerade as low
+  confidence.
 - **Over-abstention** is the primary risk: too high a gate refuses answerable
   queries. Mitigated by default-off rollout, the false-omission arm of the bench,
   the curated exemption, and per-triple calibration so a chatty scope is not held
