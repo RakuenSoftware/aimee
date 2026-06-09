@@ -64,6 +64,9 @@ const method_policy_t method_registry[] = {
     {"attempt.*", CAP_SESSION_READ, "attempt log operation"},
     /* Dashboard (prefix) */
     {"dashboard.*", CAP_DASHBOARD_READ, "dashboard operation"},
+    {"plugin.list", CAP_DASHBOARD_READ, "plugin list"},
+    {"plugin.enable", CAP_TOOL_EXECUTE, "enable plugin"},
+    {"plugin.disable", CAP_TOOL_EXECUTE, "disable plugin"},
     {"lsp.*", CAP_DASHBOARD_READ, "lsp status"},
     /* Workspace. Reads (context/get/list) are index:read; register/remove
      * mutate the instance-scoped registry and a detached client performs them

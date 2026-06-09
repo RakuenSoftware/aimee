@@ -1348,6 +1348,20 @@ paths:
     get:
       summary: Traces dashboard
       responses: { "200": { description: Traces, content: { application/json: { schema: { type: object } } } } }
+  /plugins:
+    get:
+      summary: List installed plugins
+      responses: { "200": { description: Plugins, content: { application/json: { schema: { type: object } } } } }
+  /plugins/enable:
+    post:
+      summary: Enable an installed plugin
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Plugin, content: { application/json: { schema: { type: object } } } } }
+  /plugins/disable:
+    post:
+      summary: Disable an installed plugin
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Plugin, content: { application/json: { schema: { type: object } } } } }
   /insights/overview:
     get:
       summary: Insights overview

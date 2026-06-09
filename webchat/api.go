@@ -81,6 +81,9 @@ var methodRoutes = map[string]methodRoute{
 	"dashboard.plugins":        {http.MethodGet, "/v1/dashboard/plugins"},
 	"dashboard.memory_stats":   {http.MethodGet, "/v1/dashboard/memory_stats"},
 	"dashboard.onboard":        {http.MethodGet, "/v1/dashboard/onboard"},
+	"plugin.list":              {http.MethodGet, "/v1/plugins"},
+	"plugin.enable":            {http.MethodPost, "/v1/plugins/enable"},
+	"plugin.disable":           {http.MethodPost, "/v1/plugins/disable"},
 	"agent.list":               {http.MethodGet, "/v1/agent/list"},
 	"collab_rules.list":        {http.MethodGet, "/v1/collab_rules"},
 	"collab_rules.list_active": {http.MethodGet, "/v1/collab_rules/active"},
@@ -272,6 +275,79 @@ func (s *server) dataObjectHandler(method string) http.HandlerFunc {
 		} else {
 			fmt.Fprintf(w, "{}")
 		}
+	}
+}
+
+type pluginInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	Enabled bool   `json:"enabled"`
+	Source  string `json:"source_path,omitempty"`
+}
+
+func (s *server) handlePluginsList(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.socketCallForRequest(r, map[string]any{"method": "plugin.list"})
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil || resp == nil {
+		fmt.Fprintf(w, "[]")
+		return
+	}
+	if data, ok := resp["data"]; ok {
+		w.Write(data)
+	} else {
+		fmt.Fprintf(w, "[]")
+	}
+}
+
+func (s *server) handlePluginToggle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	name := r.PathValue("name")
+	if name == "" {
+		writeJSONError(w, http.StatusBadRequest, "plugin name required")
+		return
+	}
+
+	resp, err := s.socketCallForRequest(r, map[string]any{"method": "plugin.list"})
+	if err != nil || resp == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "failed to load plugins")
+		return
+	}
+	var plugins []pluginInfo
+	if data, ok := resp["data"]; ok {
+		_ = json.Unmarshal(data, &plugins)
+	}
+	found := false
+	enabled := false
+	for _, plugin := range plugins {
+		if plugin.Name == name {
+			found = true
+			enabled = plugin.Enabled
+			break
+		}
+	}
+	if !found {
+		writeJSONError(w, http.StatusNotFound, "plugin not found")
+		return
+	}
+
+	method := "plugin.enable"
+	if enabled {
+		method = "plugin.disable"
+	}
+	resp, err = s.socketCallForRequest(r, map[string]any{"method": method, "name": name})
+	if err != nil || resp == nil {
+		writeJSONError(w, http.StatusInternalServerError, "failed to toggle plugin")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if data, ok := resp["data"]; ok {
+		w.Write(data)
+	} else {
+		_ = json.NewEncoder(w).Encode(map[string]any{"name": name, "enabled": !enabled})
 	}
 }
 
