@@ -515,27 +515,37 @@ int main(void)
    /* --- server_http_authorize: UDS vs TCP + bearer + session-key rule --- */
    {
       /* UDS is always authorized regardless of token, when no session key. */
-      assert(server_http_authorize(0, "", NULL, 0) == 0);
-      assert(server_http_authorize(0, "secret", NULL, 0) == 0);
-      assert(server_http_authorize(0, "secret", "Bearer wrong", 0) == 0);
+      assert(server_http_authorize(0, "", NULL, NULL, 0) == 0);
+      assert(server_http_authorize(0, "secret", NULL, NULL, 0) == 0);
+      assert(server_http_authorize(0, "secret", "Bearer wrong", NULL, 0) == 0);
 
       /* TCP with no bearer configured => 503 (TCP shouldn't be serving). */
-      assert(server_http_authorize(1, "", "Bearer x", 0) == 503);
-      assert(server_http_authorize(1, NULL, NULL, 0) == 503);
+      assert(server_http_authorize(1, "", "Bearer x", NULL, 0) == 503);
+      assert(server_http_authorize(1, NULL, NULL, NULL, 0) == 503);
 
-      /* TCP with a bearer configured: exact match passes, else 401. */
-      assert(server_http_authorize(1, "secret", "Bearer secret", 0) == 0);
-      assert(server_http_authorize(1, "secret", "Bearer nope", 0) == 401);
-      assert(server_http_authorize(1, "secret", NULL, 0) == 401);
-      assert(server_http_authorize(1, "secret", "secret", 0) == 401);  /* missing "Bearer " */
-      assert(server_http_authorize(1, "secret", "Bearer ", 0) == 401); /* empty token */
+      /* TCP with a bearer configured: Authorization or x-api-key exact match passes. */
+      assert(server_http_authorize(1, "secret", "Bearer secret", NULL, 0) == 0);
+      assert(server_http_authorize(1, "secret", NULL, "secret", 0) == 0);
+      assert(server_http_authorize(1, "secret", "Bearer nope", "secret", 0) == 0);
+      assert(server_http_authorize(1, "secret", NULL, "nope", 0) == 401);
+      assert(server_http_authorize(1, "secret", NULL, NULL, 0) == 401);
+      assert(server_http_authorize(1, "secret", "secret", NULL, 0) == 401);
+      assert(server_http_authorize(1, "secret", "Bearer ", NULL, 0) == 401);
 
       /* Session-scoping key without a bearer configured => 503 on any transport. */
-      assert(server_http_authorize(0, "", NULL, 1) == 503);
-      assert(server_http_authorize(0, NULL, NULL, 1) == 503);
-      assert(server_http_authorize(1, "", NULL, 1) == 503);
+      assert(server_http_authorize(0, "", NULL, NULL, 1) == 503);
+      assert(server_http_authorize(0, NULL, NULL, NULL, 1) == 503);
+      assert(server_http_authorize(1, "", NULL, NULL, 1) == 503);
       /* With a bearer configured, the session key alone doesn't block UDS. */
-      assert(server_http_authorize(0, "secret", NULL, 1) == 0);
+      assert(server_http_authorize(0, "secret", NULL, NULL, 1) == 0);
+   }
+
+   /* --- typed SSE framing: embedded newlines become repeated data: lines --- */
+   {
+      char frame[256];
+      int n = server_http_sse_event_format("delta", "{\"a\":1}\n{\"b\":2}", frame, sizeof(frame));
+      assert(n == (int)strlen("event: delta\ndata: {\"a\":1}\ndata: {\"b\":2}\n\n"));
+      assert(strcmp(frame, "event: delta\ndata: {\"a\":1}\ndata: {\"b\":2}\n\n") == 0);
    }
 
    /* --- per-route capability matrix (pure helpers) --- */

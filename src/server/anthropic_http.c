@@ -91,26 +91,80 @@ static int write_error(char *resp, int cap, int status, const char *type, const 
    return status;
 }
 
-/* Translate an Anthropic request into the provider's OpenAI-shaped messages +
- * tools. *out_system is a malloc'd flattened system prompt (caller frees). */
-static void translate_request(const cJSON *req, cJSON **out_messages, cJSON **out_tools,
-                              char **out_system)
+static int driver_is_anthropic(const delegate_driver_t *driver)
+{
+   return driver && driver->name && strcmp(driver->name, "anthropic") == 0;
+}
+
+static int driver_consumes_system_prompt(const delegate_driver_t *driver)
+{
+   return driver && driver->name &&
+          (strcmp(driver->name, "chatgpt") == 0 || strcmp(driver->name, "gemini") == 0);
+}
+
+/* Translate an Anthropic request into the selected provider's message/tool
+ * shape. Anthropic itself receives the original Messages wire shape; the
+ * OpenAI-family providers receive the inverse delegate-driver conversion.
+ * *out_system is a malloc'd flattened system prompt (caller frees). */
+static void translate_request(const cJSON *req, const delegate_driver_t *driver,
+                              cJSON **out_messages, cJSON **out_tools, char **out_system)
 {
    *out_system = anthropic_system_to_text(req);
+   if (driver_is_anthropic(driver))
+   {
+      const cJSON *messages = cJSON_GetObjectItemCaseSensitive(req, "messages");
+      const cJSON *tools = cJSON_GetObjectItemCaseSensitive(req, "tools");
+      *out_messages = cJSON_IsArray(messages) ? cJSON_Duplicate(messages, 1) : NULL;
+      *out_tools = cJSON_IsArray(tools) ? cJSON_Duplicate(tools, 1) : NULL;
+      return;
+   }
    *out_messages =
-       anthropic_messages_to_openai(cJSON_GetObjectItemCaseSensitive(req, "messages"), *out_system);
+       anthropic_messages_to_openai(cJSON_GetObjectItemCaseSensitive(req, "messages"),
+                                    driver_consumes_system_prompt(driver) ? NULL : *out_system);
    *out_tools = anthropic_tools_to_openai(cJSON_GetObjectItemCaseSensitive(req, "tools"));
 }
 
-/* Build the provider request body (OpenAI chat shape). `stream` toggles the
- * streaming flag. Returns a malloc'd JSON string (caller frees), or NULL. */
-static char *build_provider_body(const agent_t *ag, cJSON *messages, cJSON *tools, int max_tokens,
-                                 double temperature, int stream)
+/* Build the provider request body via the selected delegate driver. `stream`
+ * toggles the provider stream flag. Returns a malloc'd JSON string (caller
+ * frees), or NULL. */
+static char *build_provider_body(const delegate_driver_t *driver, const agent_t *ag,
+                                 cJSON *messages, cJSON *tools, const char *system_text,
+                                 int max_tokens, double temperature, int stream)
 {
-   cJSON *req = agent_build_request_openai((agent_t *)ag, messages, tools, max_tokens, temperature);
+   cJSON *req = NULL;
    char *body;
+
+   if (driver && driver->build_request)
+      req = driver->build_request(ag, messages, tools, system_text, max_tokens, temperature);
+   else
+      req = agent_build_request_openai((agent_t *)ag, messages, tools, max_tokens, temperature);
    if (!req)
       return NULL;
+   if (stream)
+      cJSON_AddBoolToObject(req, "stream", 1);
+   body = cJSON_PrintUnformatted(req);
+   cJSON_Delete(req);
+   return body;
+}
+
+/* Anthropic-native ingress is a near-passthrough: Claude Code already speaks
+ * Anthropic Messages, so preserve request fields such as system cache_control,
+ * tool_choice, thinking, stop_sequences, top_p, and top_k. The configured
+ * primary model still wins over the inbound model name. */
+static char *build_anthropic_provider_body(const cJSON *in, const agent_t *ag, int stream)
+{
+   cJSON *req;
+   cJSON *model;
+   char *body;
+
+   req = cJSON_Duplicate((cJSON *)in, 1);
+   if (!req)
+      return NULL;
+   cJSON_DeleteItemFromObjectCaseSensitive(req, "model");
+   model = cJSON_CreateString(ag && ag->model[0] ? ag->model : "claude");
+   if (model)
+      cJSON_AddItemToObject(req, "model", model);
+   cJSON_DeleteItemFromObjectCaseSensitive(req, "stream");
    if (stream)
       cJSON_AddBoolToObject(req, "stream", 1);
    body = cJSON_PrintUnformatted(req);
@@ -147,10 +201,9 @@ static int messages_buffered(const char *body, char *resp, int cap)
       return write_error(resp, cap, 503, "api_error", "no primary agent configured");
    }
 
-   translate_request(req, &messages, &tools, &system_text);
-
    delegate_drivers_init();
    driver = delegate_driver_get(ag->provider);
+   translate_request(req, driver, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
    {
@@ -159,8 +212,12 @@ static int messages_buffered(const char *body, char *resp, int cap)
    }
    agent_build_extra_headers(ag, extra, sizeof(extra));
 
-   prov_body = build_provider_body(ag, messages, tools, jo_int(req, "max_tokens", 4096),
-                                   jo_num(req, "temperature", 1.0), 0);
+   if (driver_is_anthropic(driver))
+      prov_body = build_anthropic_provider_body(req, ag, 0);
+   else
+      prov_body =
+          build_provider_body(driver, ag, messages, tools, system_text,
+                              jo_int(req, "max_tokens", 4096), jo_num(req, "temperature", 1.0), 0);
    http_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &response, ag->timeout_ms,
                                  extra[0] ? extra : NULL);
    if (http_status != 200 || !response)
@@ -173,7 +230,12 @@ static int messages_buffered(const char *body, char *resp, int cap)
    provider_resp = cJSON_Parse(response);
    memset(&parsed, 0, sizeof(parsed));
    if (provider_resp)
-      agent_parse_response_openai(provider_resp, &parsed);
+   {
+      if (driver && driver->parse_response)
+         driver->parse_response(provider_resp, response, &parsed);
+      else
+         agent_parse_response_openai(provider_resp, &parsed);
+   }
 
    mint_msg_id(msg_id, sizeof(msg_id));
    out = anthropic_response_from_parsed(msg_id, model, &parsed);
@@ -204,6 +266,18 @@ typedef struct
    anthropic_stream_xlate_t *xl;
 } prov_stream_ctx_t;
 
+typedef struct
+{
+   sse_parser_t parser;
+   server_http_sse_event_emit emit;
+   void *emit_ctx;
+   char event[64];
+   char *data;
+   size_t data_len;
+   size_t data_cap;
+   int emitted;
+} anthropic_relay_ctx_t;
+
 static int prov_line_cb(const char *line, size_t len, void *ud)
 {
    prov_stream_ctx_t *c = (prov_stream_ctx_t *)ud;
@@ -221,6 +295,94 @@ static int prov_chunk_cb(const char *data, size_t len, void *ud)
 {
    prov_stream_ctx_t *c = (prov_stream_ctx_t *)ud;
    return sse_parser_feed(&c->parser, data, len, prov_line_cb, c);
+}
+
+static int relay_append_data(anthropic_relay_ctx_t *c, const char *data)
+{
+   size_t add = data ? strlen(data) : 0;
+   size_t sep = c->data_len ? 1 : 0;
+   size_t need = c->data_len + sep + add + 1;
+   char *tmp;
+
+   if (need > c->data_cap)
+   {
+      size_t cap = c->data_cap ? c->data_cap : 4096;
+      while (cap < need)
+         cap *= 2;
+      tmp = realloc(c->data, cap);
+      if (!tmp)
+         return -1;
+      c->data = tmp;
+      c->data_cap = cap;
+   }
+   if (sep)
+      c->data[c->data_len++] = '\n';
+   if (add)
+   {
+      memcpy(c->data + c->data_len, data, add);
+      c->data_len += add;
+   }
+   c->data[c->data_len] = '\0';
+   return 0;
+}
+
+static void relay_flush(anthropic_relay_ctx_t *c)
+{
+   const char *event = c->event[0] ? c->event : "message";
+
+   if (c->data_len > 0 && strcmp(c->data, "[DONE]") != 0)
+   {
+      c->emit(c->emit_ctx, event, c->data);
+      c->emitted++;
+   }
+   c->event[0] = '\0';
+   c->data_len = 0;
+   if (c->data)
+      c->data[0] = '\0';
+}
+
+static void relay_emit_transport_error(anthropic_relay_ctx_t *c, int status)
+{
+   char data[192];
+
+   snprintf(data, sizeof(data),
+            "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
+            "\"message\":\"primary provider stream failed with status %d\"}}",
+            status);
+   c->emit(c->emit_ctx, "error", data);
+   c->emitted++;
+}
+
+static int anthropic_relay_line_cb(const char *line, size_t len, void *ud)
+{
+   anthropic_relay_ctx_t *c = (anthropic_relay_ctx_t *)ud;
+   if (len == 0)
+   {
+      relay_flush(c);
+      return 0;
+   }
+   if (strncmp(line, "event:", 6) == 0)
+   {
+      const char *p = line + 6;
+      while (*p == ' ')
+         p++;
+      snprintf(c->event, sizeof(c->event), "%s", p);
+      return 0;
+   }
+   if (strncmp(line, "data:", 5) == 0)
+   {
+      const char *p = line + 5;
+      while (*p == ' ')
+         p++;
+      return relay_append_data(c, p);
+   }
+   return 0;
+}
+
+static int anthropic_relay_chunk_cb(const char *data, size_t len, void *ud)
+{
+   anthropic_relay_ctx_t *c = (anthropic_relay_ctx_t *)ud;
+   return sse_parser_feed(&c->parser, data, len, anthropic_relay_line_cb, c);
 }
 
 static int messages_stream(const char *body, server_http_sse_event_emit emit, void *ctx)
@@ -256,26 +418,44 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       return 0;
    }
 
-   translate_request(req, &messages, &tools, &system_text);
-   input_est = messages ? session_compact_estimate_tokens(messages) : 0;
-   xl = anthropic_stream_begin(msg_id, model, input_est, emit, ctx);
-
    delegate_drivers_init();
    driver = delegate_driver_get(ag->provider);
-   if (!xl || delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
+   translate_request(req, driver, &messages, &tools, &system_text);
+   if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
-   {
-      if (xl)
-      {
-         anthropic_stream_finish(xl);
-         anthropic_stream_free(xl);
-      }
       goto cleanup;
-   }
    agent_build_extra_headers(ag, extra, sizeof(extra));
 
-   prov_body = build_provider_body(ag, messages, tools, jo_int(req, "max_tokens", 4096),
-                                   jo_num(req, "temperature", 1.0), 1);
+   if (driver_is_anthropic(driver))
+      prov_body = build_anthropic_provider_body(req, ag, 1);
+   else
+      prov_body =
+          build_provider_body(driver, ag, messages, tools, system_text,
+                              jo_int(req, "max_tokens", 4096), jo_num(req, "temperature", 1.0), 1);
+
+   if (driver_is_anthropic(driver))
+   {
+      anthropic_relay_ctx_t relay;
+      int stream_status;
+      memset(&relay, 0, sizeof(relay));
+      sse_parser_init(&relay.parser);
+      relay.emit = emit;
+      relay.emit_ctx = ctx;
+      stream_status =
+          agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", anthropic_relay_chunk_cb,
+                                 &relay, ag->timeout_ms, extra[0] ? extra : NULL);
+      relay_flush(&relay);
+      if (stream_status != 200)
+         relay_emit_transport_error(&relay, stream_status);
+      sse_parser_free(&relay.parser);
+      free(relay.data);
+      goto cleanup;
+   }
+
+   input_est = messages ? session_compact_estimate_tokens(messages) : 0;
+   xl = anthropic_stream_begin(msg_id, model, input_est, emit, ctx);
+   if (!xl)
+      goto cleanup;
 
    sse_parser_init(&pc.parser);
    pc.xl = xl;

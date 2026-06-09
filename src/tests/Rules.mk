@@ -152,6 +152,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-delegate-role \
                $(TESTPREFIX)/unit-test-sse-parser \
                $(TESTPREFIX)/unit-test-anthropic-ingress \
+               $(TESTPREFIX)/unit-test-anthropic-http \
                $(TESTPREFIX)/unit-test-hud \
                $(TESTPREFIX)/unit-test-coord-jobs \
                $(TESTPREFIX)/unit-test-plan-waves \
@@ -1207,6 +1208,9 @@ $(TESTPREFIX)/unit-test-sse-parser: $(OBJDIR)/tests/test_sse_parser.o $(OBJDIR)/
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-anthropic-ingress: $(OBJDIR)/tests/test_anthropic_ingress.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/tests/test_anthropic_http.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(OBJDIR)/tests/%.o: tests/%.c
