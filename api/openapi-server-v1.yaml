@@ -593,8 +593,10 @@ paths:
     post:
       summary: Graph-derived code-health audit (proxied to aimee-kb)
       description: >-
-        Dead exports, import cycles, and body-hash clones derived from the
-        code graph (entity_edges) and code_embeddings.
+        Dead exports, import cycles, exact body-hash clone groups, near-clone
+        pairs, and clone threshold metadata derived from the indexed code graph
+        (entity_edges) and code_embeddings. Requires aimee-kb with code graph
+        rows for the requested project.
       requestBody:
         required: false
         content:
@@ -606,7 +608,7 @@ paths:
                 limit: { type: integer }
       responses:
         "200":
-          description: Audit bundle ({dead_exports, cycles, clones})
+          description: Audit bundle ({dead_exports, cycles, clones, near_clones})
           content:
             application/json:
               schema: { type: object }

@@ -210,10 +210,12 @@
      "  promote --point <p> --candidate <a> [--guarded] [--apply]  Gate/apply a promotion "
      "(credible interval)\n"},
     {"code", "Code-health audit", CLIENT_TIER_ADVANCED, 0,
-     "  audit [dir] [--json]   File-health audit (untested files, TODO/FIXME\n"
-     "                         markers, debt score) over the working tree\n"
+     "  audit [dir] [--json] [--fix]   File-health audit (untested files,\n"
+     "                         TODO/FIXME markers, debt score) over the tree;\n"
+     "                         --fix is non-mutating and reports no safe fixes yet\n"
      "  audit --graph [--project P] [--json]   Graph-derived checks via aimee-kb\n"
-     "                         (dead exports, import cycles, clones)\n"},
+     "                         (dead exports, import cycles, exact/near clones);\n"
+     "                         requires a configured server, kb, and code index\n"},
     {"curator", "Knowledge curator queries", CLIENT_TIER_ADVANCED, 0,
      "  implements <topic>   What implements a topic\n"
      "  synthesize <topic>   Synthesize knowledge on a topic\n"

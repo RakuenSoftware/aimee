@@ -77,6 +77,8 @@ progress, not part of the installed CLI contract.
 - `aimee index blast-radius <file>`: show files affected by changing a file.
 - `aimee index structure <file>`: show file structure.
 - `aimee index callers <symbol>`: find callers of a symbol.
+- `aimee code audit [dir] [--json] [--fix]`: run local file-health checks. `--fix` is intentionally non-mutating for now and reports that no safe automatic fixes are available.
+- `aimee code audit --graph [--project P] [--json]`: request graph-derived dead-export, import-cycle, exact-clone, and near-clone findings from `aimee-server`/`aimee-kb`. Thin clients need a configured remote and an indexed project.
 
 ### Chat
 

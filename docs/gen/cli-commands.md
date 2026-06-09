@@ -239,10 +239,12 @@ Code-health audit.
 Subcommands:
 
 ```
-  audit [dir] [--json]   File-health audit (untested files, TODO/FIXME
-                         markers, debt score) over the working tree
+  audit [dir] [--json] [--fix]   File-health audit (untested files,
+                         TODO/FIXME markers, debt score) over the tree;
+                         --fix is non-mutating and reports no safe fixes yet
   audit --graph [--project P] [--json]   Graph-derived checks via aimee-kb
-                         (dead exports, import cycles, clones)
+                         (dead exports, import cycles, exact/near clones);
+                         requires a configured server, kb, and code index
 ```
 
 ### `aimee cron`
