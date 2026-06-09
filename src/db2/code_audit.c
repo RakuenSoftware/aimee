@@ -1,9 +1,10 @@
 /* db2/code_audit.c: fetch + assemble the graph-derived code-health audit.
  *
- * Fetches `exports`/`imports` edges from entity_edges and code-unit content
- * hashes from code_embeddings, runs the pure algorithms in code_audit_graph.c
- * (dead-export set-diff, import-cycle DFS) and groups clones by content_hash,
- * and returns a JSON {dead_exports[], cycles[], clones[]} bundle.
+ * Fetches `exports`/`imports`/`references` edges from entity_edges and
+ * code-unit body hashes from code_embeddings, runs the pure algorithms in
+ * code_audit_graph.c (dead-export set-diff, import-cycle DFS) and groups
+ * clones by body_hash, and returns a JSON {dead_exports[], cycles[], clones[]}
+ * bundle.
  *
  * SQL is kept to simple SELECTs; all aggregation/graph logic is in C so it is
  * unit-testable without a DB (see tests/test_code_audit_graph.c).
@@ -11,26 +12,63 @@
 #include "aimee.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
+#include "entity_nodes.h"
 #include "code_audit_graph.h"
 #include "cJSON.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define CA_FETCH_MAX 4000
-#define CA_DEP_MAX   8000
+#define CA_FETCH_MAX       4000
+#define CA_DEP_MAX         8000
+#define CA_CLONE_MIN_LINES 5
 
-static int fetch_edges(const char *relation, char **src, char **tgt, int max)
+int db2_code_audit_edge_target_like(const char *relation, const char *project, char *out,
+                                    size_t cap)
+{
+   if (!relation || !project || !out || cap == 0)
+      return -1;
+   out[0] = '\0';
+   if (!project[0])
+      return 0;
+
+   const char *prefix = NULL;
+   if (strcmp(relation, "exports") == 0)
+      prefix = "export";
+   else if (strcmp(relation, "imports") == 0)
+      prefix = "import";
+   else if (strcmp(relation, "references") == 0)
+      prefix = "reference";
+   else
+      return -1;
+
+   char enc_project[256];
+   if (db2_entity_node_encode_component(project, enc_project, sizeof(enc_project)) < 0)
+      return -1;
+   int n = snprintf(out, cap, "%s:%s:%%", prefix, enc_project);
+   return (n >= 0 && (size_t)n < cap) ? 0 : -1;
+}
+
+static int fetch_edges(const char *relation, const char *project, char **src, char **tgt, int max)
 {
    void *conn = db2_conn();
    if (!conn)
       return 0;
-   static const char *sql = "SELECT source, target FROM entity_edges WHERE relation = ?1 LIMIT ?2";
+   static const char *sql = "SELECT source, target FROM entity_edges"
+                            " WHERE relation = ?1 AND (?2 = '' OR target LIKE ?3)"
+                            " LIMIT ?4";
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_text(st, "?1", relation);
-   aimee_pg_bind_int(st, "?2", max);
+   aimee_pg_bind_text(st, "?2", project ? project : "");
+   char project_like[512];
+   if (db2_code_audit_edge_target_like(relation, project ? project : "", project_like,
+                                       sizeof(project_like)) != 0)
+      project_like[0] = '\0';
+   aimee_pg_bind_text(st, "?3", project_like);
+   aimee_pg_bind_int(st, "?4", max);
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
@@ -56,17 +94,32 @@ static const char *key_tail(const char *key, const char *prefix)
    return strncmp(key, prefix, pl) == 0 ? key + pl : key;
 }
 
-/* Group clones: code_embeddings rows ordered by content_hash; consecutive runs
- * of the same non-empty hash with >= 2 members are clone groups. */
+static int clone_payload_line_count(const char *payload)
+{
+   if (!payload || !payload[0])
+      return 0;
+   cJSON *root = cJSON_Parse(payload);
+   if (!root)
+      return 0;
+   cJSON *line_count = cJSON_GetObjectItemCaseSensitive(root, "line_count");
+   int n = cJSON_IsNumber(line_count) ? line_count->valueint : 0;
+   cJSON_Delete(root);
+   return n;
+}
+
+/* Group clones: code_embeddings rows ordered by body_hash; consecutive runs of
+ * the same non-empty normalized body hash with >= 2 eligible members are clone
+ * groups. New file-backed rows carry payload_json.line_count and must meet a
+ * small span floor; legacy rows without span metadata remain eligible. */
 static void add_clones(cJSON *resp, const char *project, int limit)
 {
    void *conn = db2_conn();
    cJSON *arr = cJSON_AddArrayToObject(resp, "clones");
    if (!conn || !arr)
       return;
-   static const char *sql = "SELECT content_hash, symbol, file_path FROM code_embeddings"
-                            " WHERE content_hash <> '' AND (?1 = '' OR project = ?1)"
-                            " ORDER BY content_hash LIMIT 20000";
+   static const char *sql = "SELECT body_hash, symbol, file_path, payload_json FROM code_embeddings"
+                            " WHERE body_hash <> '' AND (?1 = '' OR project = ?1)"
+                            " ORDER BY body_hash LIMIT 20000";
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -81,6 +134,7 @@ static void add_clones(cJSON *resp, const char *project, int limit)
       const char *h = aimee_pg_column_text(st, 0);
       const char *sym = aimee_pg_column_text(st, 1);
       const char *fp = aimee_pg_column_text(st, 2);
+      const char *payload = aimee_pg_column_text(st, 3);
       if (!h)
          continue;
       if (strcmp(h, cur_hash) != 0)
@@ -97,6 +151,9 @@ static void add_clones(cJSON *resp, const char *project, int limit)
          group_n = 0;
          snprintf(cur_hash, sizeof(cur_hash), "%s", h);
       }
+      int line_count = clone_payload_line_count(payload);
+      if (line_count > 0 && line_count < CA_CLONE_MIN_LINES)
+         continue;
       char member[1024];
       snprintf(member, sizeof(member), "%s  %s", sym ? sym : "", fp ? fp : "");
       cJSON_AddItemToArray(group, cJSON_CreateString(member));
@@ -163,31 +220,53 @@ cJSON *db2_kb_service_code_audit_json(const char *project, int limit)
    if (!resp)
       return NULL;
    cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "clone_granularity", "code_embedding_row");
+   cJSON_AddStringToObject(resp, "clone_scope_note",
+                           "body_hash groups indexed code-unit rows; current code embeddings are "
+                           "file-backed until symbol-level code-unit rows are indexed");
+   cJSON_AddNumberToObject(resp, "clone_min_lines", CA_CLONE_MIN_LINES);
 
    char **exp_src = calloc(CA_FETCH_MAX, sizeof(char *));
    char **exp_tgt = calloc(CA_FETCH_MAX, sizeof(char *));
    char **imp_src = calloc(CA_FETCH_MAX, sizeof(char *));
    char **imp_tgt = calloc(CA_FETCH_MAX, sizeof(char *));
-   if (!exp_src || !exp_tgt || !imp_src || !imp_tgt)
+   char **ref_src = calloc(CA_FETCH_MAX, sizeof(char *));
+   char **ref_tgt = calloc(CA_FETCH_MAX, sizeof(char *));
+   if (!exp_src || !exp_tgt || !imp_src || !imp_tgt || !ref_src || !ref_tgt)
    {
       free(exp_src);
       free(exp_tgt);
       free(imp_src);
       free(imp_tgt);
+      free(ref_src);
+      free(ref_tgt);
       return resp;
    }
-   int ne = fetch_edges("exports", exp_src, exp_tgt, CA_FETCH_MAX);
-   int ni = fetch_edges("imports", imp_src, imp_tgt, CA_FETCH_MAX);
+   int ne = fetch_edges("exports", project, exp_src, exp_tgt, CA_FETCH_MAX);
+   int ni = fetch_edges("imports", project, imp_src, imp_tgt, CA_FETCH_MAX);
+   int nr = fetch_edges("references", project, ref_src, ref_tgt, CA_FETCH_MAX);
+   cJSON_AddStringToObject(resp, "dead_export_consumers", "imports,references");
 
-   /* Dead exports: export target keys with no matching import target key. */
+   /* Dead exports: export target keys with no matching import/reference target
+    * key. The current code projection emits imports; future references edges are
+    * consumed here when indexed. */
    const char **dead = calloc((size_t)(ne > 0 ? ne : 1), sizeof(char *));
    cJSON *darr = cJSON_AddArrayToObject(resp, "dead_exports");
    if (dead && darr)
    {
-      int nd = code_audit_dead_exports((const char *const *)exp_tgt, ne,
-                                       (const char *const *)imp_tgt, ni, dead, limit);
+      const char **consumed = calloc((size_t)(ni + nr > 0 ? ni + nr : 1), sizeof(char *));
+      if (consumed)
+      {
+         for (int i = 0; i < ni; i++)
+            consumed[i] = imp_tgt[i];
+         for (int i = 0; i < nr; i++)
+            consumed[ni + i] = ref_tgt[i];
+      }
+      int nd =
+          code_audit_dead_exports((const char *const *)exp_tgt, ne, consumed, ni + nr, dead, limit);
       for (int i = 0; i < nd; i++)
          cJSON_AddItemToArray(darr, cJSON_CreateString(dead[i]));
+      free(consumed);
    }
    free(dead);
 
@@ -239,9 +318,16 @@ cJSON *db2_kb_service_code_audit_json(const char *project, int limit)
       free(imp_src[i]);
       free(imp_tgt[i]);
    }
+   for (int i = 0; i < nr; i++)
+   {
+      free(ref_src[i]);
+      free(ref_tgt[i]);
+   }
    free(exp_src);
    free(exp_tgt);
    free(imp_src);
    free(imp_tgt);
+   free(ref_src);
+   free(ref_tgt);
    return resp;
 }

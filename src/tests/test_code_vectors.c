@@ -1,8 +1,11 @@
 /* test_code_vectors.c: unit tests for Phase 5 code vector recall. */
 
 #include <assert.h>
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "aimee.h"
 #include "db.h"
@@ -15,6 +18,21 @@
 #include "../db2/entity_nodes.h"
 
 static char g_db_path[512];
+
+static void write_text_file(const char *path, const char *text)
+{
+   FILE *f = fopen(path, "wb");
+   assert(f != NULL);
+   assert(fputs(text, f) >= 0);
+   assert(fclose(f) == 0);
+}
+
+static void make_tmp_dir(char *path, size_t cap, const char *suffix)
+{
+   snprintf(path, cap, "%s/aimee-code-vectors-%ld-%s", platform_tmpdir(), (long)getpid(), suffix);
+   if (mkdir(path, 0700) != 0 && errno != EEXIST)
+      assert(0);
+}
 
 static void setup(void)
 {
@@ -111,7 +129,7 @@ static void test_fallback_text_null(void)
 /* Test: pgvec_code_exists_by_hash graceful with no DB. */
 static void test_code_exists_no_db(void)
 {
-   int r = pgvec_kb_service_code_exists_by_hash("proj", "file:proj:foo.c", "abc123");
+   int r = pgvec_kb_service_code_exists_by_hash("proj", "file:proj:foo.c", "abc123", "body123");
    assert(r == 0 || r == 1);
 }
 
@@ -157,6 +175,41 @@ static void test_ensure_code_collection(void)
    teardown();
 }
 
+static void test_normalized_body_hash_comments(void)
+{
+   char dir[512];
+   make_tmp_dir(dir, sizeof(dir), "hash");
+
+   char p1[1024], p2[1024], p3[1024], p4[1024], p5[1024];
+   snprintf(p1, sizeof(p1), "%s/a.yaml", dir);
+   snprintf(p2, sizeof(p2), "%s/b.yaml", dir);
+   snprintf(p3, sizeof(p3), "%s/a.c", dir);
+   snprintf(p4, sizeof(p4), "%s/b.c", dir);
+   snprintf(p5, sizeof(p5), "%s/empty.c", dir);
+   write_text_file(p1, "url: https://example.com/a\n");
+   write_text_file(p2, "url: https://example.com/b\n");
+   write_text_file(p3, "int x = 1; // comment one\n");
+   write_text_file(p4, "int x = 1; /* comment two */\n");
+   write_text_file(p5, "   \n\t\n");
+
+   char h1[32], h2[32], h3[32], h4[32], h5[32];
+   kb_code_embed_normalized_file_body_hash(dir, "a.yaml", h1);
+   kb_code_embed_normalized_file_body_hash(dir, "b.yaml", h2);
+   kb_code_embed_normalized_file_body_hash(dir, "a.c", h3);
+   kb_code_embed_normalized_file_body_hash(dir, "b.c", h4);
+   kb_code_embed_normalized_file_body_hash(dir, "empty.c", h5);
+   assert(h1[0] && h2[0] && strcmp(h1, h2) != 0);
+   assert(h3[0] && h4[0] && strcmp(h3, h4) == 0);
+   assert(h5[0] == '\0');
+
+   unlink(p1);
+   unlink(p2);
+   unlink(p3);
+   unlink(p4);
+   unlink(p5);
+   rmdir(dir);
+}
+
 int main(void)
 {
    printf("test_refresh_no_db... ");
@@ -194,6 +247,9 @@ int main(void)
    printf("ok\n");
    printf("test_ensure_code_collection... ");
    test_ensure_code_collection();
+   printf("ok\n");
+   printf("test_normalized_body_hash_comments... ");
+   test_normalized_body_hash_comments();
    printf("ok\n");
    printf("code_vectors: all tests passed\n");
    return 0;

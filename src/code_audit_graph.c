@@ -20,7 +20,11 @@ int code_audit_dead_exports(const char *const *exports, int n_exports, const cha
          const char *ik = imports[j];
          if (!ik)
             continue;
-         const char *itail = strncmp(ik, "import:", 7) == 0 ? ik + 7 : ik;
+         const char *itail = ik;
+         if (strncmp(ik, "import:", 7) == 0)
+            itail = ik + 7;
+         else if (strncmp(ik, "reference:", 10) == 0)
+            itail = ik + 10;
          if (strcmp(etail, itail) == 0)
          {
             consumed = 1;

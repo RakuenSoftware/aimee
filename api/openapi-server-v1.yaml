@@ -593,7 +593,7 @@ paths:
     post:
       summary: Graph-derived code-health audit (proxied to aimee-kb)
       description: >-
-        Dead exports, import cycles, and content-hash clones derived from the
+        Dead exports, import cycles, and body-hash clones derived from the
         code graph (entity_edges) and code_embeddings.
       requestBody:
         required: false
