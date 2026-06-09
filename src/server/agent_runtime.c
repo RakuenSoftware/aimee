@@ -281,8 +281,8 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
  * into duplicate participants. Defined here (next to the static execution
  * helpers it needs) but called from agent_parallel.c, so it is not static. */
 int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
-                           const char *system_prompt, const char *user_prompt, int max_tokens,
-                           double temperature, agent_result_t *out)
+                    const char *system_prompt, const char *user_prompt, int max_tokens,
+                    double temperature, agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
 

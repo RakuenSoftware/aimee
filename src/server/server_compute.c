@@ -838,8 +838,9 @@ void delegate_worker(void *arg)
          if (dr_cfg.bandit_live_decision_enabled)
          {
             static const char *const dr_arms[2] = {"cheapest", "premium"};
-            if (kb_client_bandit_sample("delegate_routing", dr_arms, 2, dr_arm_id, sizeof(dr_arm_id),
-                                        dr_decision_id, sizeof(dr_decision_id)) == 0)
+            if (kb_client_bandit_sample("delegate_routing", dr_arms, 2, dr_arm_id,
+                                        sizeof(dr_arm_id), dr_decision_id,
+                                        sizeof(dr_decision_id)) == 0)
             {
                if (strcmp(dr_arm_id, "premium") == 0)
                {
