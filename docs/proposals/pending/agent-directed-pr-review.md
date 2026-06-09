@@ -563,6 +563,94 @@ the new agent surface. None of them touch the roundtable's core or its P0 fixes.
    the consolidator must then emit a small side JSON the engine reads without
    feeding it back into `peer_notes`.)
 
+## §13 Second-pass verification findings (implementation gaps)
+
+A second review pass re-validated every symbol and line cited above against
+`testing@d3eb402d` (all cited files are byte-identical to that commit) and
+confirmed them. It also surfaced six concrete implementation gaps the sections
+above do not yet cover. Each is small but load-bearing; fold them into the
+phase they belong to.
+
+1. **`build_round_prompt`'s malloc must grow by the brief length (P1a).** §4
+   correctly notes the prompt buffer is sized dynamically, but the size
+   expression is `needed = strlen(task) + strlen(artifact) + strlen(peer_notes)
+   + 1200` (`delegate_ensemble.c:411-412`), and that `1200` is fixed slack for
+   the *template literal + round number only*. Threading the brief as a new
+   middle `%s` without adding `strlen(brief)` to `needed` makes the final
+   `snprintf` (`:415-420`) silently truncate — and because the brief sits
+   *before* the closing `ROUND %d INSTRUCTION:\n%s` block, the part that gets
+   cut is the structured-output contract (`mode_task`), which breaks JSON
+   parsing for that reviewer and forces a `repair_review_json` call (or a
+   degrade). P1a must add the (capped) brief length into `needed`, not only
+   enforce the 4 KB cap. Add a test: a near-4 KB brief still emits a complete,
+   parseable prompt with the trailing instruction intact.
+
+2. **Registering the MCP tool breaks the tools-list golden — regenerate it
+   (P1c).** `ensemble_review` is added via `build_tool` in
+   `mcp_build_tools_list()`, which is pinned by an auto-generated surface net:
+   `src/tests/test_mcp_tools_golden.inc` (`MCP_TOOLS_GOLDEN_COUNT 86`, one
+   sorted `name {props} req:...` line per tool), asserted by
+   `test_mcp_client_registry`. P1c will fail CI on the count and the new line
+   until the golden is regenerated (`DUMP_TOOLS=1
+   ./unit-test-mcp-client-registry 2>&1`, per the file header). §10's test
+   list should name this regeneration as a required step, since it is a
+   guaranteed red build otherwise.
+
+3. **The shared async-submit helper inherits a single-writer run-id counter
+   (P1c).** `rh_dispatch_op_async` mints run ids with a non-atomic
+   `static unsigned long g_op_run_seq` (`server_http_routes.inc:400`) annotated
+   "listener thread only; single-writer." §3's extracted
+   `(op_method, request_json, caps)` helper is now reachable from a second
+   call site (the MCP dispatch path). The helper must preserve that
+   single-threaded-submit invariant, or make the counter atomic, otherwise two
+   concurrent submits can mint a colliding id (and `openai_runs_store_create`
+   would key two runs to one id). Confirm the MCP arm enqueues on the same
+   listener thread, or switch the counter to an atomic/locked allocator as part
+   of the extraction.
+
+4. **The bridge must rename the `diff` argument to `prompt` (P1c).** The tool
+   schema names the input `diff`, but the re-dispatched `delegate.roundtable`
+   handler reads `prompt` and validates *that* field for the 20-char minimum
+   (`handle_delegate_roundtable`, `server_compute.c:1745-1753`). §3/§6 say "diff
+   maps to the engine's task," but the concrete step is: the async-submit bridge
+   must copy `args.diff` into a `prompt` field on the request body it builds
+   before submitting `delegate.roundtable`. If it forwards `diff` verbatim, the
+   handler sees an empty `prompt` and rejects with "missing prompt" rather than
+   the intended short-input message. State the rename explicitly.
+
+5. **Returned-item dedup by identity key can drop distinct actionable findings
+   (P1b).** §5 dedups the returned items "by identity key across participants,"
+   reusing `normalized_identity_key` — which keys on `category` + `location`
+   only (`summary` backs the location component *only when location is empty*,
+   `delegate_ensemble.c:586-587`). That is correct for the blocking-saturation
+   set (the question there is "did a *new class* of blocking issue appear"), but
+   for the agent-facing actionable array it means two genuinely different issues
+   at the same `location` with the same `category` collapse to one returned
+   item and the other is silently dropped. The returned array should dedup on a
+   key that also includes `summary` (or carry both `severity`+`summary` so
+   distinct findings survive), kept separate from the saturation key. Add a test
+   with two same-location/same-category but different-summary items asserting
+   both survive in the returned array while the saturation set still counts one
+   key.
+
+6. **The pre-existing `delegate` MCP capability hole deserves a tracked
+   side-fix, not just avoidance.** §3 proves `handle_mcp_delegate_call` reaches
+   `handle_delegate` by a direct C call (`server_mcp_delegate.c:65`) inside the
+   `mcp.call`/`CAP_TOOL_EXECUTE` gate, so the `delegate -> CAP_DELEGATE` registry
+   entry (`server_auth.c:82`) is never consulted — a `CAP_TOOL_EXECUTE`-only
+   principal can drive a delegate today. `ensemble_review` correctly avoids
+   reproducing this by routing through the re-dispatched method gate, but the
+   existing hole stays open. Since this pass has pinpointed it exactly, fold a
+   defense-in-depth explicit `CAP_DELEGATE` check into `handle_mcp_delegate_call`
+   (with a negative test) as a small tracked side-fix, rather than leaving a
+   known privilege gap next to the new, correctly-gated sibling.
+
+   Related lifetime note for §12 Q3: if the items array / `answeredQuestions`
+   move to heap (the "raise the cap" option), `delegate_roundtable_result_free`
+   (`delegate_ensemble.h:64`) must free them too, or each run leaks. The default
+   fixed-stack bound avoids this; only the heap variant needs the free path
+   extended.
+
 ## Recommendation
 
 Ship P1a + P1b + P1c: thread an optional `brief` into review mode with an open
