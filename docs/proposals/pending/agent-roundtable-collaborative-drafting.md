@@ -271,6 +271,27 @@ fix.
 
 ## §0.2 Worse than mis-routed: the feature is unreachable (wire it first)
 
+> **As-built correction (P0 shipped in #131).** P0 has now landed as its own PR.
+> The diagnosis below (no shipped caller; the §0.2 trace) is exactly right and was
+> confirmed against `testing`. **The prescription was not.** This section
+> mandated a *native `op == NULL`* handler and "no `delegate.*` dispatch method,"
+> on the premise that `rh_dispatch_op_async` "is not reusable as-is." Reading the
+> code, that premise is false: `rh_dispatch_op_async` (`server_http_routes.inc`)
+> is precisely the reusable async seam — it injects the method, drives
+> `loopback_rpc`, finalizes the run store — and it is the codebase-wide convention
+> for *every* LLM-heavy op (`kb.build`, `eval.run`, `memory.benchmark`,
+> `rules.generate`, `curator.synthesize`). So #131 wired the entry point the
+> sanctioned way: dispatch method **`delegate.aggregate`** → `handle_delegate_aggregate`,
+> exposed as first-class **`POST /v1/delegate/aggregate`** via `rh_dispatch_op_async`,
+> with explicit `CAP_DELEGATE`. That satisfies the invariant's *actual* intent —
+> the method owns a first-class typed `/v1` route, `v1-method-coverage-check`
+> reports **0 excluded**, and there is no `/v1/rpc` fallback — without building a
+> parallel native run seam that would duplicate `rh_dispatch_op_async` for no
+> benefit. **Treat the "native `op == NULL` only" requirement below (and in the
+> Scope line, §0.3 table, §5, §7, §8) as superseded by the dispatch-backed async
+> path; the roundtable route should follow the same pattern.** The rest of §0.2
+> (the trace, the missing-test argument, the reachability test P0 adds) stands.
+
 §0.1 is a correctness bug *inside* the engine. This is a layer below it: even
 with §0.1 fixed, **no shipped binary ever calls `delegate_ensemble_run`**, so
 `aimee delegate aggregate` cannot run the ensemble at all. The engine
