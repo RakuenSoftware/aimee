@@ -864,3 +864,94 @@ phase plan.
    catches accidental tests that validate only the synchronous handler path while
    the MCP tool's poll path still drops or wraps the structured fields
    incorrectly.
+
+## §16 Fifth-pass findings (run lifecycle, parse-retention, free-path, parity)
+
+A further independent pass re-verified the async run store, the review parse, and
+the result free-path against `testing@d3eb402d` and surfaced five net-new gaps the
+earlier passes did not cover. They concentrate on the *lifecycle* of the run the
+agent polls and on the seams where structured retention can silently return wrong
+or leaked data.
+
+1. **The op-run store can silently evict a non-terminal or unpolled review run —
+   this is a hole in §3's polling contract (P1c).** The async run store the bridge
+   reuses is a single global fixed table: `OPENAI_RUNS_STORE_MAX 256`,
+   `static run_record_t g_entries[256]` (`openai_runs_store.c:15,32`). When the
+   table is full, `openai_runs_store_create` (`:94-135`) evicts the **oldest
+   (smallest `seq`) in-use slot unconditionally — it does not skip runs that are
+   still `queued`/`in_progress`** (`:111-120`, "Full: reuse the oldest in-use
+   slot"). That store is shared by *every* async surface — `POST /v1/runs`, every
+   `rh_dispatch_op_async` op-run, and the parallel run path in `openai_chat.c` — so
+   a review run carrying up to a 10-minute `roundtable_deadline_ms` can be evicted
+   by 256 later runs from any source before the agent polls it. After eviction the
+   failure is silent and three-fold: `GET /v1/runs/{id}` returns not-found,
+   `roundtable_run_cancel_requested -> openai_runs_store_cancel_requested`
+   (`server_compute.c:1609-1610`) returns 0 so `/v1/runs/{id}/stop` becomes a
+   no-op, and the worker's terminal `openai_runs_store_finalize` no-ops on the
+   missing id (`op_run_worker:377`) — the structured result is discarded with no
+   error surfaced to the caller. §3 must state this eviction window and pick a
+   mitigation: skip non-terminal entries when choosing an eviction victim (fall
+   back to oldest *terminal*), and/or document a "poll promptly" requirement, and/or
+   raise the bound for delegate op-runs. Add a test that fills the store past 256
+   while a non-terminal run is outstanding and asserts the contract (survives, or
+   the loss is documented and surfaced rather than silent).
+
+2. **The all-severity retention parse must reuse `parse_review_issue_keys`'s
+   array-key fallback and read the *repaired* JSON, not the raw response (P1b).**
+   Two concrete seams make a naive second parse wrong. (a) `parse_review_issue_keys`
+   resolves the items array from any of three keys in order — `issues`, then
+   `items`, then `blocking_issues` (`delegate_ensemble.c:615-620`) — so a retention
+   walk that hard-codes `"items"` returns an empty array for any reviewer that
+   emitted `issues`/`blocking_issues`, even though that reviewer's findings *did*
+   count toward saturation. (b) On malformed JSON the engine **replaces**
+   `results[i].response` with the `repair_review_json` output before the successful
+   re-parse (`:983-984`); a retention walk that captured from the original response
+   would capture malformed text for exactly the participants that needed repair.
+   The retention must therefore share the *exact* array-resolution of
+   `parse_review_issue_keys` (cleanest: capture inside it, or a sibling sharing the
+   JSON walk) and run against the post-repair text. Add a test with one reviewer
+   that uses the `issues` key and one whose first emission is malformed-then-repaired,
+   asserting both contribute returned items.
+
+3. **`delegate_roundtable_result_free` today frees only `artifact` — every heaped
+   addition is a guaranteed leak until it is added here (P1b).** The current body is
+   exactly `free(r->artifact); r->artifact = NULL;` (`delegate_ensemble.c`,
+   `delegate_ensemble.h:64`). §14.B.4 flags `answeredQuestions`/`coverageGaps`;
+   make the obligation concrete and complete: the items array (if it moves off the
+   fixed stack per §12 Q3), `answeredQuestions`, `coverageGaps`, and any heaped
+   per-item strings (`recommendation`/`location`/`summary`/`sources`) must all be
+   freed here. Note the handler calls this free only on the success path
+   (`server_compute.c:1812`); P1a/P1b must also call it on any **new** early-return
+   error path they introduce after `delegate_roundtable_run` populates `result`
+   (today every post-run path falls through to the single free, but adding
+   brief-truncation or serialization-size error returns can leak). Add a
+   leak/double-free test that runs review mode with a populated brief + questions
+   all the way through the free.
+
+4. **Empty-brief byte-parity requires the brief's *label/header* to live inside the
+   conditional `%s`, not just the brief body (P1a).** §4.3 promises a NULL brief is
+   byte-identical, but parity holds only if the *entire* brief block — any
+   `AUTHOR BRIEF:`-style header, the load-bearing open-mandate sentence (§2), and
+   the brief body — expands from one middle `%s` that is `""` when there is no
+   brief. If the format string carries a fixed header literal *around* the `%s`,
+   then a present-but-empty normalized brief (e.g. `{}` or `{focus:[],questions:[]}`
+   from an empty-object argument) emits the bare header and breaks both the golden
+   parity test (§10) and the byte-identical guarantee. State the rule explicitly:
+   normalization must collapse an empty / whitespace-only brief back to the
+   NULL/empty-`%s` path, and the golden parity test must cover `brief == NULL`,
+   `brief == "{}"`, and an empty-object argument — not only the NULL case.
+
+5. **Minor — surface the per-participant `overall` summary, not only the items.**
+   The reviewer JSON contract includes a top-level `"overall":"..."` field
+   (`build_round_prompt:402`) that the engine discards along with everything but the
+   identity keys. Like `recommendation` (§15.4), it is cheap signal an agent can act
+   on without re-reading the consolidated prose `artifact`; consider folding a
+   bounded panel/`overall` summary into the structured result. Optional; folds into
+   the §15.4/§15.5 "carry more than severity/location/summary" decision and the
+   §14.B.5 response-size budget.
+
+All citations in §13/§14/§15 were re-confirmed byte-accurate against
+`testing@d3eb402d` in this pass (including the run-store eviction at
+`openai_runs_store.c:111-120`, the three-key array fallback at
+`delegate_ensemble.c:615-620`, the repair-then-replace at `:983-984`, and the
+`free(r->artifact)`-only result free).
