@@ -72,11 +72,25 @@ static void test_find_cycles(void)
    printf("find_cycles OK\n");
 }
 
+static void test_cycle_limit(void)
+{
+   char *out[4];
+   audit_edge_t cycles[] = {
+       {"a", "b"}, {"b", "a"}, {"c", "d"}, {"d", "c"}, {"e", "f"}, {"f", "e"},
+   };
+   int n = code_audit_find_cycles(cycles, 6, out, 2);
+   assert(n == 2);
+   for (int i = 0; i < n; i++)
+      free(out[i]);
+   printf("cycle_limit OK\n");
+}
+
 int main(void)
 {
    printf("code_audit_graph: ");
    test_dead_exports();
    test_find_cycles();
+   test_cycle_limit();
    printf("all tests passed\n");
    return 0;
 }

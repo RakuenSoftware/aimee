@@ -2,7 +2,7 @@
 
 - **State:** done
 - **Status refreshed:** 2026-06-09
-- **Split from:** `docs/proposals/pending/code-health-audit.md`
+- **Split lineage:** residual follow-up folded into this done record.
 
 ## Shipped
 
@@ -13,6 +13,14 @@ The core proposal is implemented.
 - `code.audit` is exposed as a kb-side graph query and assembled as JSON.
 - `aimee code audit` has a graph-backed mode that reads the server-side `dead_exports`, `cycles`, `clones`, and `near_clones` payload.
 - The CLI still has local file-health checks, but graph-derived checks now use the kb-side audit surface.
+
+## Residual Follow-up
+
+The residual follow-up is complete.
+
+- `aimee code audit --fix` remains a non-mutating flag until safe, reviewable mechanical fixes exist. The CLI reports that no safe automatic fixes are available rather than editing files.
+- Acceptance coverage now exercises an indexed-project-shaped KB payload: graph dead exports, bounded import cycles, exact clone grouping, clone minimum-line thresholds, legacy clone metadata handling, clone result limits, and empty pgvector near-clone results from the test shim.
+- User-facing docs now describe `aimee code audit --graph`, the `aimee-server`/`aimee-kb` and code-index prerequisites for thin clients, and the graph payload fields.
 
 ## Verification Notes
 
