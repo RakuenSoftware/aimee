@@ -896,6 +896,14 @@ int main(void)
       assert(strstr(rb, "\"object\":\"op.run\""));
       assert(strstr(rb, "\"method\":\"delegate.roundtable\""));
       assert(strstr(rb, "\"status\":\"queued\""));
+      for (int i = 0; i < 100 && strcmp(g_disp_method, "delegate.roundtable") != 0; i++)
+         usleep(1000);
+      g_disp_method[0] = '\0';
+      g_disp_body[0] = '\0';
+      openai_runs_store_reset();
+      assert(server_http_submit_op_run("delegate.roundtable", "{\"prompt\":\"draft\"}",
+                                       CAP_TOOL_EXECUTE, rb, sizeof(rb)) == 403);
+      assert(strstr(rb, "insufficient capabilities"));
       /* The /v1/rpc bridge was retired: the path is now unrouted (404). */
       assert(server_http_route("POST", "/v1/rpc", "{}", 2, rb, sizeof(rb)) == 404);
       /* A deeper run path (two segments, no /stop|/events) does not match. */

@@ -1228,8 +1228,8 @@ static size_t method_size_limit(const char *method)
       const char *prefix;
       size_t max;
    } limits[] = {
-       {"memory.", LIMIT_MEMORY}, {"tool.", LIMIT_TOOL}, {"delegate", LIMIT_DELEGATE},
-       {"chat.", LIMIT_CHAT},     {NULL, LIMIT_DEFAULT},
+       {"memory.", LIMIT_MEMORY},    {"tool.", LIMIT_TOOL}, {"delegate", LIMIT_DELEGATE},
+       {"mcp.call", LIMIT_DELEGATE}, {"chat.", LIMIT_CHAT}, {NULL, LIMIT_DEFAULT},
    };
 
    for (int i = 0; limits[i].prefix; i++)

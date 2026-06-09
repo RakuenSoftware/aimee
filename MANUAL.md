@@ -651,7 +651,7 @@ Offload work to a sub-agent (via the server compute pool).
 - `delegate plan <proposal.md> [--json] [--output PATH] [--launch] [--parallel N]`, generate work packets from a proposal.
 - `delegate launch <plan.json> [--json] [--parallel N]` (`delegate.launch`), queue reviewed packets.
 - `delegate aggregate "<task>"` (`delegate.aggregate`), run one Mixture-of-Agents fan-out and synthesis over `ensemble.reference_models`.
-- `delegate roundtable "<task>" [--mode draft|review] [--turns parallel|sequential] [--rounds N] [--apply]` (`delegate.roundtable`), run a bounded multi-round collaborative draft or review. The async run result includes `artifact`, `rounds_run`, `converged`, `degraded`, `truncated`, `cost_capped`, `deadline_hit`, `cancelled`, `best_round`, and `cost_usd`.
+- `delegate roundtable "<task>" [--mode draft|review] [--turns parallel|sequential] [--rounds N] [--brief TEXT] [--brief-json JSON] [--apply]` (`delegate.roundtable`), run a bounded multi-round collaborative draft or review. Directed review briefs may include focus/fixes/invariants/questions. The async run result includes `artifact`, `rounds_run`, `converged`, `degraded`, `truncated`, `cost_capped`, `deadline_hit`, `cancelled`, `best_round`, `items_round`, `artifact_round`, `cost_usd`, `items`, `answered_questions`, and `coverage_gaps`.
 - `delegate status <job_id> [job_id...] [--full|--result-limit N]` (`delegate.status`).
 - `delegate log` / `delegate history` (`delegate.log`) · `delegate --list-roles` (`agent.list`).
 
@@ -956,7 +956,7 @@ aimee delegate code --tools "Add tests for the auth module"
 aimee delegate summarize --files notes.md "Summarize to 5 bullets"
 aimee delegate execute --tools --background "Migrate config to YAML"
 aimee delegate roundtable "Draft a migration proposal" --rounds 3
-aimee delegate roundtable "Review this design" --mode review --turns sequential
+aimee delegate roundtable "Review this design" --mode review --turns sequential --brief "Check authorization and cancellation paths"
 ```
 
 **Roles:** `code`, `review`, `explain`, `refactor`, `draft`, `execute`,

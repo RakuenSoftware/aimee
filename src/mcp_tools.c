@@ -607,6 +607,25 @@ cJSON *mcp_build_tools_list(void)
                                         "background=true.\"}},\"required\":[\"job_id\"]}")));
    }
 
+   /* ensemble_review */
+   {
+      cJSON_AddItemToArray(
+          tools,
+          build_tool("ensemble_review",
+                     "Run the multi-agent roundtable in review mode against caller-provided diff "
+                     "text. Returns a queued run id; poll /v1/runs/{id}.",
+                     cJSON_Parse(
+                         "{\"type\":\"object\",\"properties\":{"
+                         "\"diff\":{\"type\":\"string\",\"description\":\"Unified diff or code "
+                         "under review, minimum 20 characters.\"},"
+                         "\"brief\":{\"type\":\"object\",\"description\":\"Optional directed "
+                         "review brief with focus/fixes/invariants/questions string arrays.\"},"
+                         "\"rounds\":{\"type\":\"integer\",\"description\":\"Max review rounds.\"},"
+                         "\"turns\":{\"type\":\"string\",\"enum\":[\"parallel\",\"sequential\"],"
+                         "\"description\":\"Round execution mode.\"}},"
+                         "\"required\":[\"diff\"]}")));
+   }
+
    /* preview_blast_radius */
    {
       cJSON *s = cJSON_CreateObject();

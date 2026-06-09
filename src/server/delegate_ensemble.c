@@ -391,7 +391,7 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
 }
 
 static char *build_round_prompt(const char *task, const char *artifact, const char *peer_notes,
-                                roundtable_mode_t mode, int round)
+                                roundtable_mode_t mode, int round, const char *brief)
 {
    const char *role_hint = mode == ROUNDTABLE_REVIEW ? "review and critique" : "draft and revise";
    const char *mode_task =
@@ -407,18 +407,35 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
       artifact = "";
    if (!peer_notes)
       peer_notes = "";
+   const char *brief_block = "";
+   char *owned_brief_block = NULL;
+   if (mode == ROUNDTABLE_REVIEW && brief && brief[0])
+   {
+      owned_brief_block = xasprintf3(
+          "CALLER BRIEF:\n", brief,
+          "\nPrioritize this brief and answer its questions, but report any blocking issue you "
+          "find even if it is outside the brief.\n\n");
+      if (!owned_brief_block)
+         return NULL;
+      brief_block = owned_brief_block;
+   }
 
-   size_t needed = strlen(task ? task : "") + strlen(artifact) + strlen(peer_notes) + 1200;
+   size_t needed = strlen(task ? task : "") + strlen(artifact) + strlen(peer_notes) +
+                   strlen(brief_block) + 1200;
    char *prompt = malloc(needed);
    if (!prompt)
+   {
+      free(owned_brief_block);
       return NULL;
+   }
    snprintf(prompt, needed,
             "You are one participant in an agent roundtable. Your role is to %s.\n\n"
-            "TASK:\n%s\n\nCURRENT SHARED ARTIFACT:\n%s\n\nPEER NOTES FROM PREVIOUS TURN:\n%s\n\n"
+            "TASK:\n%s\n\nCURRENT SHARED ARTIFACT:\n%s\n\nPEER NOTES FROM PREVIOUS TURN:\n%s\n\n%s"
             "ROUND %d INSTRUCTION:\n%s\n",
             role_hint, task ? task : "", artifact[0] ? artifact : "(none yet)",
-            peer_notes[0] ? peer_notes : "(none yet)", round, mode_task);
+            peer_notes[0] ? peer_notes : "(none yet)", brief_block, round, mode_task);
 
+   free(owned_brief_block);
    return prompt;
 }
 
@@ -645,6 +662,252 @@ static int parse_review_issue_keys(const char *text, char keys[][128], int *coun
    return 0;
 }
 
+static int review_items_same(const roundtable_review_item_t *a, const char *identity,
+                             const char *summary)
+{
+   return a && identity && summary && strcmp(a->identity_key, identity) == 0 &&
+          strcmp(a->summary, summary) == 0;
+}
+
+static void review_item_add_source(roundtable_review_item_t *item, const char *source)
+{
+   if (!item)
+      return;
+   item->count++;
+   if (!source || !source[0])
+      return;
+   if (strstr(item->sources, source))
+      return;
+   size_t used = strlen(item->sources);
+   if (used > 0 && used + 2 < sizeof(item->sources))
+   {
+      item->sources[used++] = ',';
+      item->sources[used++] = ' ';
+      item->sources[used] = '\0';
+   }
+   if (used + 1 < sizeof(item->sources))
+      snprintf(item->sources + used, sizeof(item->sources) - used, "%s", source);
+}
+
+static cJSON *review_items_array(cJSON *root)
+{
+   cJSON *issues = cJSON_GetObjectItemCaseSensitive(root, "issues");
+   if (!cJSON_IsArray(issues))
+      issues = cJSON_GetObjectItemCaseSensitive(root, "items");
+   if (!cJSON_IsArray(issues))
+      issues = cJSON_GetObjectItemCaseSensitive(root, "blocking_issues");
+   return cJSON_IsArray(issues) ? issues : NULL;
+}
+
+static void capture_review_items_from_text(const char *text, const char *source,
+                                           roundtable_result_t *out)
+{
+   if (!text || !out)
+      return;
+   cJSON *root = cJSON_Parse(text);
+   if (!root)
+      return;
+   cJSON *issues = review_items_array(root);
+   if (!issues)
+   {
+      cJSON_Delete(root);
+      return;
+   }
+   cJSON *it;
+   cJSON_ArrayForEach(it, issues)
+   {
+      cJSON *severity = cJSON_GetObjectItemCaseSensitive(it, "severity");
+      cJSON *category = cJSON_GetObjectItemCaseSensitive(it, "category");
+      cJSON *location = cJSON_GetObjectItemCaseSensitive(it, "location");
+      cJSON *summary = cJSON_GetObjectItemCaseSensitive(it, "summary");
+      cJSON *recommendation = cJSON_GetObjectItemCaseSensitive(it, "recommendation");
+      const char *sev =
+          cJSON_IsString(severity) && severity->valuestring[0] ? severity->valuestring : "blocking";
+      const char *cat = cJSON_IsString(category) ? category->valuestring : "";
+      const char *loc = cJSON_IsString(location) ? location->valuestring : "";
+      const char *sum = cJSON_IsString(summary) ? summary->valuestring : "";
+      const char *rec = cJSON_IsString(recommendation) ? recommendation->valuestring : "";
+      char identity[128];
+      normalized_identity_key(cat, loc, sum, identity, sizeof(identity));
+      if (!identity[0] || !sum[0])
+         continue;
+      int idx = -1;
+      for (int i = 0; i < out->item_count; i++)
+      {
+         if (review_items_same(&out->items[i], identity, sum))
+         {
+            idx = i;
+            break;
+         }
+      }
+      if (idx < 0)
+      {
+         if (out->item_count >= ROUNDTABLE_MAX_REVIEW_ITEMS)
+         {
+            out->truncated = 1;
+            continue;
+         }
+         idx = out->item_count++;
+         memset(&out->items[idx], 0, sizeof(out->items[idx]));
+         snprintf(out->items[idx].severity, sizeof(out->items[idx].severity), "%s", sev);
+         snprintf(out->items[idx].category, sizeof(out->items[idx].category), "%s", cat);
+         snprintf(out->items[idx].location, sizeof(out->items[idx].location), "%s", loc);
+         snprintf(out->items[idx].summary, sizeof(out->items[idx].summary), "%s", sum);
+         snprintf(out->items[idx].recommendation, sizeof(out->items[idx].recommendation), "%s",
+                  rec);
+         snprintf(out->items[idx].identity_key, sizeof(out->items[idx].identity_key), "%s",
+                  identity);
+      }
+      review_item_add_source(&out->items[idx], source);
+   }
+   cJSON_Delete(root);
+}
+
+static void capture_round_review_items(const agent_result_t *results, int ref_count,
+                                       roundtable_result_t *out, int round)
+{
+   if (!results || !out)
+      return;
+   out->item_count = 0;
+   out->items_round = round;
+   memset(out->items, 0, sizeof(out->items));
+   for (int i = 0; i < ref_count; i++)
+      capture_review_items_from_text(results[i].response, results[i].agent_name, out);
+}
+
+static void mark_question_gaps(const roundtable_opts_t *opts, roundtable_result_t *out)
+{
+   if (!opts || !out)
+      return;
+   int n = opts->question_count;
+   if (n > ROUNDTABLE_MAX_QUESTIONS)
+      n = ROUNDTABLE_MAX_QUESTIONS;
+   for (int i = 0; i < n; i++)
+   {
+      const char *q = opts->questions && opts->questions[i] ? opts->questions[i] : "";
+      snprintf(out->answered_questions[i].question, sizeof(out->answered_questions[i].question),
+               "%s", q);
+      snprintf(out->answered_questions[i].answer, sizeof(out->answered_questions[i].answer), "%s",
+               "");
+      snprintf(out->answered_questions[i].evidence, sizeof(out->answered_questions[i].evidence),
+               "%s", "");
+      out->answered_questions[i].answered = 0;
+      snprintf(out->coverage_gaps[i], sizeof(out->coverage_gaps[i]), "%s", q);
+   }
+   out->answered_question_count = n;
+   out->coverage_gap_count = n;
+}
+
+static void parse_question_answers(const char *text, const roundtable_opts_t *opts,
+                                   roundtable_result_t *out)
+{
+   cJSON *root = cJSON_Parse(text);
+   if (!root)
+   {
+      mark_question_gaps(opts, out);
+      return;
+   }
+   cJSON *answers = cJSON_GetObjectItemCaseSensitive(root, "answered_questions");
+   if (!cJSON_IsArray(answers))
+      answers = cJSON_GetObjectItemCaseSensitive(root, "answeredQuestions");
+   int qi = 0;
+   cJSON *it;
+   cJSON_ArrayForEach(it, answers)
+   {
+      if (qi >= ROUNDTABLE_MAX_QUESTIONS)
+         break;
+      cJSON *q = cJSON_GetObjectItemCaseSensitive(it, "question");
+      cJSON *a = cJSON_GetObjectItemCaseSensitive(it, "answer");
+      cJSON *e = cJSON_GetObjectItemCaseSensitive(it, "evidence");
+      cJSON *answered = cJSON_GetObjectItemCaseSensitive(it, "answered");
+      snprintf(out->answered_questions[qi].question, sizeof(out->answered_questions[qi].question),
+               "%s", cJSON_IsString(q) ? q->valuestring : "");
+      snprintf(out->answered_questions[qi].answer, sizeof(out->answered_questions[qi].answer), "%s",
+               cJSON_IsString(a) ? a->valuestring : "");
+      snprintf(out->answered_questions[qi].evidence, sizeof(out->answered_questions[qi].evidence),
+               "%s", cJSON_IsString(e) ? e->valuestring : "");
+      out->answered_questions[qi].answered = cJSON_IsBool(answered)
+                                                 ? cJSON_IsTrue(answered)
+                                                 : (cJSON_IsString(a) && a->valuestring[0]);
+      qi++;
+   }
+   out->answered_question_count = qi;
+   cJSON *gaps = cJSON_GetObjectItemCaseSensitive(root, "coverage_gaps");
+   if (!cJSON_IsArray(gaps))
+      gaps = cJSON_GetObjectItemCaseSensitive(root, "coverageGaps");
+   int gi = 0;
+   cJSON_ArrayForEach(it, gaps)
+   {
+      if (gi >= ROUNDTABLE_MAX_QUESTIONS)
+         break;
+      if (cJSON_IsString(it))
+         snprintf(out->coverage_gaps[gi++], sizeof(out->coverage_gaps[0]), "%s", it->valuestring);
+      else
+      {
+         cJSON *q = cJSON_GetObjectItemCaseSensitive(it, "question");
+         if (cJSON_IsString(q))
+            snprintf(out->coverage_gaps[gi++], sizeof(out->coverage_gaps[0]), "%s", q->valuestring);
+      }
+   }
+   out->coverage_gap_count = gi;
+   cJSON_Delete(root);
+   if (out->answered_question_count == 0 && opts && opts->question_count > 0)
+      mark_question_gaps(opts, out);
+}
+
+static void answer_roundtable_questions(agent_config_t *acfg, const char *task,
+                                        const roundtable_opts_t *opts, roundtable_result_t *out)
+{
+   if (!acfg || !opts || !out || !out->artifact || opts->question_count <= 0)
+      return;
+   int qn = opts->question_count;
+   if (qn > ROUNDTABLE_MAX_QUESTIONS)
+      qn = ROUNDTABLE_MAX_QUESTIONS;
+   cJSON *qs = cJSON_CreateArray();
+   if (!qs)
+   {
+      mark_question_gaps(opts, out);
+      return;
+   }
+   for (int i = 0; i < qn; i++)
+      cJSON_AddItemToArray(qs, cJSON_CreateString(opts->questions[i] ? opts->questions[i] : ""));
+   char *qjson = cJSON_PrintUnformatted(qs);
+   cJSON_Delete(qs);
+   if (!qjson)
+   {
+      mark_question_gaps(opts, out);
+      return;
+   }
+   const char *prefix =
+       "Answer the caller's roundtable review questions from the consolidated review. Return only "
+       "JSON shaped {\"answered_questions\":[{\"question\":\"...\",\"answer\":\"...\","
+       "\"evidence\":\"...\",\"answered\":true}],\"coverage_gaps\":[\"...\"]}.\n\nTASK:\n";
+   size_t n =
+       strlen(prefix) + strlen(task ? task : "") + strlen(out->artifact) + strlen(qjson) + 80;
+   char *prompt = (char *)malloc(n);
+   if (!prompt)
+   {
+      free(qjson);
+      mark_question_gaps(opts, out);
+      return;
+   }
+   snprintf(prompt, n, "%s%s\n\nQUESTIONS:\n%s\n\nCONSOLIDATED REVIEW:\n%s\n", prefix,
+            task ? task : "", qjson, out->artifact);
+   free(qjson);
+   agent_result_t res;
+   memset(&res, 0, sizeof(res));
+   if (agent_run_with_tools_write_enforce(acfg, "reason", NULL, prompt, 1024, 0, &res) == 0 &&
+       res.response && res.response[0])
+   {
+      parse_question_answers(res.response, opts, out);
+      out->cost_usd += result_token_cost(acfg, &res, "reason");
+   }
+   else
+      mark_question_gaps(opts, out);
+   free(res.response);
+   free(prompt);
+}
+
 static int repair_review_json(agent_config_t *acfg, const config_t *cfg, int participant,
                               const char *bad_text, char **fixed, double *cost_usd)
 {
@@ -689,7 +952,7 @@ static int review_saturated(char prev[][128], int prev_count, char cur[][128], i
 
 static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const char *task,
                               const char *artifact, const char *peer_notes, roundtable_mode_t mode,
-                              int round, agent_result_t *results)
+                              int round, const char *brief, agent_result_t *results)
 {
    int ref_count = cfg->ensemble_reference_count;
    agent_task_t tasks[ENSEMBLE_MAX_REFS];
@@ -698,7 +961,7 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
    memset(prompts, 0, sizeof(prompts));
    for (int i = 0; i < ref_count; i++)
    {
-      prompts[i] = build_round_prompt(task, artifact, peer_notes, mode, round);
+      prompts[i] = build_round_prompt(task, artifact, peer_notes, mode, round, brief);
       if (!prompts[i])
          goto fail;
       tasks[i].role = mode == ROUNDTABLE_REVIEW ? "review" : "draft";
@@ -719,7 +982,7 @@ fail:
 
 static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const char *task,
                                 const char *artifact, char **peer_notes, roundtable_mode_t mode,
-                                int round, agent_result_t *results)
+                                int round, const char *brief, agent_result_t *results)
 {
    int ref_count = cfg->ensemble_reference_count;
    int order[ENSEMBLE_MAX_REFS];
@@ -730,7 +993,7 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
    for (int oi = 0; oi < ref_count; oi++)
    {
       int i = order[oi];
-      char *prompt = build_round_prompt(task, artifact, *peer_notes, mode, round);
+      char *prompt = build_round_prompt(task, artifact, *peer_notes, mode, round, brief);
       if (!prompt)
          return -1;
       memset(&results[i], 0, sizeof(results[i]));
@@ -895,6 +1158,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       local.max_rounds = 3;
    if (local.converge_threshold < 0)
       local.converge_threshold = 10;
+   if (local.brief_truncated)
+      out->truncated = 1;
 
    long start_ms = monotonic_ms();
    char *artifact = xstrdup0("");
@@ -941,9 +1206,9 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       memset(results, 0, sizeof(results));
       int rc = local.turns == ROUNDTABLE_SEQUENTIAL
                    ? run_round_sequential(acfg, cfg, task, artifact, &peer_notes, local.mode, round,
-                                          results)
+                                          local.brief, results)
                    : run_round_parallel(acfg, cfg, task, artifact, peer_notes, local.mode, round,
-                                        results);
+                                        local.brief, results);
       if (rc != 0)
       {
          for (int i = 0; i < ref_count; i++)
@@ -1005,6 +1270,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                free(results[i].response);
             break;
          }
+         capture_round_review_items(results, ref_count, out, round);
       }
 
       double round_cost = estimate_cost(acfg, results, cfg->ensemble_reference_models, ref_count);
@@ -1186,6 +1452,9 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
    }
 
    out->artifact = best_artifact ? best_artifact : xstrdup0(artifact);
+   out->artifact_round = out->best_round > 0 ? out->best_round : out->rounds_run;
+   if (out->artifact)
+      answer_roundtable_questions(acfg, task, &local, out);
    free(artifact);
    free(peer_notes);
    return out->artifact ? 0 : -1;

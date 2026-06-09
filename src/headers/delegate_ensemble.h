@@ -5,7 +5,9 @@
 #include "agent_config.h"
 #include "config.h"
 
-#define ENSEMBLE_MAX_REFS 8
+#define ENSEMBLE_MAX_REFS           8
+#define ROUNDTABLE_MAX_REVIEW_ITEMS 128
+#define ROUNDTABLE_MAX_QUESTIONS    16
 
 typedef struct
 {
@@ -41,9 +43,33 @@ typedef struct
    int converge_threshold;
    int deadline_ms;
    int apply_review;
+   const char *brief;
+   int brief_truncated;
+   const char **questions;
+   int question_count;
    int (*cancel_requested)(void *ctx);
    void *cancel_ctx;
 } roundtable_opts_t;
+
+typedef struct
+{
+   char severity[16];
+   char category[32];
+   char location[128];
+   char summary[256];
+   char recommendation[256];
+   char identity_key[128];
+   char sources[256];
+   int count;
+} roundtable_review_item_t;
+
+typedef struct
+{
+   char question[512];
+   char answer[1024];
+   char evidence[512];
+   int answered;
+} roundtable_answered_question_t;
 
 typedef struct
 {
@@ -57,6 +83,14 @@ typedef struct
    int cancelled;
    int best_round;
    double cost_usd;
+   roundtable_review_item_t items[ROUNDTABLE_MAX_REVIEW_ITEMS];
+   int item_count;
+   int items_round;
+   int artifact_round;
+   roundtable_answered_question_t answered_questions[ROUNDTABLE_MAX_QUESTIONS];
+   int answered_question_count;
+   char coverage_gaps[ROUNDTABLE_MAX_QUESTIONS][512];
+   int coverage_gap_count;
 } roundtable_result_t;
 
 int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const char *task,

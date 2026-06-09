@@ -119,6 +119,14 @@ extern "C"
    int server_http_route(const char *method, const char *path, const char *body, int body_len,
                          char *resp, int resp_cap);
 
+   /* Submit an existing dispatch method through the HTTP async op-run machinery
+    * without going through a /v1 route. `body_json` is the method body before
+    * method/__run_id injection. `conn_caps` are the caller capabilities to use
+    * when the worker re-dispatches the method. The helper preflights the target
+    * method capability before creating a run. */
+   int server_http_submit_op_run(const char *op_method, const char *body_json, uint32_t conn_caps,
+                                 char *resp, int resp_cap);
+
    /* --- OpenAI-compatible completion seam ---
     * The /v1/chat/completions and /v1/completions routes run real inference,
     * which pulls the agent/provider dependency closure. To keep that out of
