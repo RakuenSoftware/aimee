@@ -310,6 +310,7 @@ typedef struct
    char op[64];
    char *line;         /* dispatch body with method injected; owned by worker */
    uint32_t conn_caps; /* caps captured at enqueue time */
+   long created;
 } op_run_job_t;
 
 /* Build the run snapshot object stored for GET /v1/runs/{id}. `result` is an
@@ -335,21 +336,29 @@ static char *op_run_snapshot(const char *run_id, const char *op, const char *sta
    return s;
 }
 
-static void *op_run_worker(void *arg)
+static void op_run_worker_run(void *arg)
 {
    op_run_job_t *j = (op_run_job_t *)arg;
+   compute_pool_set_job(POOL_JOB_DELEGATE, "op=%s run=%s", j->op, j->run_id);
    openai_runs_store_set_status(j->run_id, OPENAI_RUN_IN_PROGRESS);
+   char *started = op_run_snapshot(j->run_id, j->op, "in_progress", j->created, NULL);
+   if (started)
+   {
+      openai_runs_store_update_json(j->run_id, started);
+      free(started);
+   }
 
    char *buf = (char *)malloc(SHTTP_RESP_MAX);
    if (!buf)
    {
-      char *snap = op_run_snapshot(j->run_id, j->op, "failed", (long)time(NULL),
+      char *snap = op_run_snapshot(j->run_id, j->op, "failed", j->created,
                                    "{\"error\":\"out of memory\"}");
       openai_runs_store_finalize(j->run_id, OPENAI_RUN_FAILED, snap ? snap : "{}");
       free(snap);
       free(j->line);
       free(j);
-      return NULL;
+      compute_pool_clear_job();
+      return;
    }
 
    int rc = loopback_rpc(j->line, (int)strlen(j->line), buf, SHTTP_RESP_MAX, j->conn_caps);
@@ -370,16 +379,21 @@ static void *op_run_worker(void *arg)
          cJSON_Delete(parsed);
       }
    }
-   long now = (long)time(NULL);
    const char *status_str =
        terminal_status == OPENAI_RUN_CANCELLED ? "cancelled" : (ok ? "completed" : "failed");
-   char *snap = op_run_snapshot(j->run_id, j->op, status_str, now, buf);
+   char *snap = op_run_snapshot(j->run_id, j->op, status_str, j->created, buf);
    openai_runs_store_finalize(j->run_id, ok ? terminal_status : OPENAI_RUN_FAILED,
                               snap ? snap : buf);
    free(snap);
    free(buf);
    free(j->line);
    free(j);
+   compute_pool_clear_job();
+}
+
+static void *op_run_worker_thread(void *arg)
+{
+   op_run_worker_run(arg);
    return NULL;
 }
 
@@ -432,17 +446,39 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
    snprintf(j->op, sizeof(j->op), "%s", op_method);
    j->line = line; /* ownership moves to the worker */
    j->conn_caps = conn_caps;
+   j->created = created;
 
-   pthread_t th;
-   if (pthread_create(&th, NULL, op_run_worker, j) != 0)
+   server_ctx_t *ctx = server_active_ctx();
+   if (ctx)
    {
-      openai_runs_store_finalize(id, OPENAI_RUN_FAILED, queued);
-      free(j->line);
-      free(j);
-      free(queued);
-      return err_json(resp, cap, 500, "could not start run");
+      if (compute_pool_submit(&ctx->pool, op_run_worker_run, j) != 0)
+      {
+         char *failed =
+             op_run_snapshot(id, op_method, "failed", created, "{\"error\":\"compute queue full\"}");
+         openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
+         free(failed);
+         free(j->line);
+         free(j);
+         free(queued);
+         return err_json(resp, cap, 503, "compute queue full");
+      }
    }
-   pthread_detach(th);
+   else
+   {
+      pthread_t th;
+      if (pthread_create(&th, NULL, op_run_worker_thread, j) != 0)
+      {
+         char *failed =
+             op_run_snapshot(id, op_method, "failed", created, "{\"error\":\"could not start run\"}");
+         openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
+         free(failed);
+         free(j->line);
+         free(j);
+         free(queued);
+         return err_json(resp, cap, 500, "could not start run");
+      }
+      pthread_detach(th);
+   }
 
    int n = snprintf(resp, (size_t)cap, "%s", queued);
    free(queued);

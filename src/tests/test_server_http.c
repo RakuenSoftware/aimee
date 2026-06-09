@@ -45,7 +45,8 @@ static int stub_models_provider(char ids[][SERVER_HTTP_MODEL_ID_MAX], int max)
  * NDJSON method a first-class /v1 route actually dispatched, and that the body
  * survived the bridge. */
 static _Thread_local char g_disp_method[96];
-static _Thread_local char g_disp_body[512];
+static _Thread_local char g_disp_body[24576];
+static char g_agg_body[24576];
 
 int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, size_t msg_len)
 {
@@ -53,6 +54,8 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
    /* Capture the dispatched method + body (msg is the NUL-terminated line the
     * loopback bridge built). */
    snprintf(g_disp_body, sizeof(g_disp_body), "%.*s", (int)msg_len, msg ? msg : "");
+   if (strstr(g_disp_body, "\"method\":\"delegate.aggregate\""))
+      snprintf(g_agg_body, sizeof(g_agg_body), "%s", g_disp_body);
    g_disp_method[0] = '\0';
    const char *p = strstr(g_disp_body, "\"method\":\"");
    if (p)
@@ -898,6 +901,37 @@ int main(void)
       assert(strstr(rb, "\"status\":\"queued\""));
       for (int i = 0; i < 100 && strcmp(g_disp_method, "delegate.roundtable") != 0; i++)
          usleep(1000);
+      char *large_body = malloc(9200);
+      assert(large_body);
+      strcpy(large_body, "{\"prompt\":\"");
+      size_t prefix_len = strlen(large_body);
+      memset(large_body + prefix_len, 'x', 9000);
+      strcpy(large_body + prefix_len + 9000, "\"}");
+      assert(server_http_route("POST", "/v1/delegate/aggregate", large_body,
+                               (int)strlen(large_body), rb, sizeof(rb)) == 200);
+      assert(strstr(rb, "\"object\":\"op.run\""));
+      assert(strstr(rb, "\"method\":\"delegate.aggregate\""));
+      char run_id[96] = "";
+      char *idp = strstr(rb, "\"id\":\"");
+      assert(idp);
+      idp += strlen("\"id\":\"");
+      char *ide = strchr(idp, '"');
+      assert(ide && (size_t)(ide - idp) < sizeof(run_id));
+      snprintf(run_id, sizeof(run_id), "%.*s", (int)(ide - idp), idp);
+      openai_run_status_t st = OPENAI_RUN_QUEUED;
+      for (int i = 0; i < 100; i++)
+      {
+         assert(openai_runs_store_status(run_id, &st));
+         if (openai_run_status_terminal(st))
+            break;
+         usleep(10000);
+      }
+      assert(st == OPENAI_RUN_COMPLETED);
+      assert(openai_runs_store_get(run_id, rb, sizeof(rb)));
+      assert(strstr(rb, "\"status\":\"completed\""));
+      assert(strstr(g_agg_body, "\"method\":\"delegate.aggregate\""));
+      assert(strstr(g_agg_body, "\"prompt\":\"xxx"));
+      free(large_body);
       g_disp_method[0] = '\0';
       g_disp_body[0] = '\0';
       openai_runs_store_reset();
