@@ -47,9 +47,8 @@ DEDICATED = {
     "runner.respond",      # POST /v1/runner/respond
 }
 
-# Deliberate exclusions — NOT given a first-class /v1 route (reachable via the
-# generic POST /v1/rpc passthrough if ever needed). Keep in sync with the
-# exclusions table in docs/v1-op-parity-buildout.md.
+# Deliberate exclusions — NOT given a first-class /v1 route. Keep in sync with
+# the exclusions table in docs/v1-op-parity-buildout.md.
 # (none) — every dispatch method now has a first-class /v1 route. The harness
 # hooks (hooks.pre/post/session_start) and the tool-execution bridge
 # (tool.execute) became first-class routes (POST /v1/hooks/*, /v1/tools/execute)

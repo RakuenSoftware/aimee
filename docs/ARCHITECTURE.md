@@ -250,10 +250,11 @@ Key properties:
   serializes heavyweight inference to bound resource use.
 - **Transport.** Clients reach the server over its `/v1` HTTP surface: the
   always-on `~/.config/aimee/aimee-http.sock` Unix socket, plus an optional
-  localhost TCP listener. Dispatch methods without a dedicated REST route are
-  reached via `POST /v1/rpc`; streaming chat uses `POST /v1/chat/stream`, whose
-  body is a sequence of newline-delimited aimee events terminated by a final
-  status object. (The legacy newline-delimited JSON-RPC socket was removed.)
+  localhost TCP listener. Dispatch methods use first-class `/v1` routes; the
+  generic `POST /v1/rpc` endpoint is retired. Streaming chat uses
+  `POST /v1/chat/stream`, whose body is a sequence of newline-delimited aimee
+  events terminated by a final status object. (The legacy newline-delimited
+  JSON-RPC socket was removed.)
 - **Authentication.** The local UDS is filesystem-permission gated and fully
   trusted: it reaches the entire dispatch surface, with no token. The optional
   TCP listener requires a configured bearer token and is capability-scoped.

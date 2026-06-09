@@ -2,7 +2,7 @@
 
 - **State:** done
 - **Status refreshed:** 2026-06-09
-- **Split from:** `docs/proposals/pending/v1-dispatch-migration-finish.md`
+- **Split from:** `docs/proposals/done/v1-dispatch-migration-finish.md`
 
 ## Shipped
 

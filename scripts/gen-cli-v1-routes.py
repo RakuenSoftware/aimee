@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the thin client's method -> first-class /v1 route map from the server
 registry, so the client calls dedicated REST endpoints instead of tunnelling
-through POST /v1/rpc.
+through the retired generic dispatch endpoint.
 
 Single source of truth: src/server/server_http_routes.inc. We emit one row per
 *synchronous* rh_dispatch_op route (RM_EXACT) — those dispatch the NDJSON method

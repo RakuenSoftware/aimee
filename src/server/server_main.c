@@ -53,8 +53,8 @@ static int presence_deliver_via_notify(const delivery_target_t *target, const ch
    return notify_deliver_target(&nt, "delegate_done", text);
 }
 
-/* The process-wide server context, for in-process callers such as the /v1/rpc
- * HTTP bridge that dispatch through server_dispatch(). */
+/* The process-wide server context, for first-class /v1 route handlers that
+ * dispatch through server_dispatch() in-process. */
 server_ctx_t *server_active_ctx(void)
 {
    return &g_ctx;

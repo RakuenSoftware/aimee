@@ -3,9 +3,9 @@
 > Working tracker for **P1 / WP1.x / WP1.fin** of the
 > [aimee `/v1` hub-migration plan](proposals/accepted/aimee-v1-hub-migration-plan.md).
 > Goal: **every NDJSON RPC method gets a first-class `/v1` HTTP route** (or a
-> documented, deliberate exclusion). The generic `POST /v1/rpc` passthrough
-> already makes every method *reachable*; this buildout gives each one a
-> dedicated, self-documenting, OpenAPI-listed route.
+> documented, deliberate exclusion). The generic `POST /v1/rpc` passthrough is
+> retired; this buildout gave each method a dedicated, self-documenting,
+> OpenAPI-listed route.
 
 ## Mechanism (already landed: WP0.2, #2531)
 
@@ -48,10 +48,10 @@ The `/v1` surface is a declarative table in
 
 | Method(s) | Why |
 |---|---|
-| `hooks.pre`, `hooks.post`, `hooks.session_start` | Internal harness lifecycle hooks, not a public REST surface. Reachable via `/v1/rpc` if ever needed. |
+| `hooks.pre`, `hooks.post`, `hooks.session_start` | Internal harness lifecycle hooks; now first-class privileged routes at `/v1/hooks/*`, gated by `CAP_TOOL_EXECUTE`. |
 | `runner.poll`, `runner.respond` | Already first-class (`/v1/runner/*`, workspace detached reverse channel). |
 | `primary.get/set/clear` | Already first-class via `/v1/sessions/{id}/primary`. |
-| `tool.execute` | Internal tool-execution bridge (workspace plane); `CAP_TOOL_EXECUTE`, not a public verb. |
+| `tool.execute` | Internal tool-execution path at `/v1/tools/execute` (workspace plane); gated by `CAP_TOOL_EXECUTE`, not a public verb. |
 
 > **Inline-dispatch latency budget.** Dispatch-op routes run inline on the
 > listener thread, so any routed method blocks other `/v1` callers for its
