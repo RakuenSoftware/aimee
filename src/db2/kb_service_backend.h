@@ -278,6 +278,9 @@ extern "C"
    cJSON *db2_kb_service_memory_insert_json(const char *tier, const char *kind, const char *key,
                                             const char *content, double confidence,
                                             const char *session_id);
+   cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, const char *key,
+                                               const char *content, const char *use_cases,
+                                               double confidence, const char *session_id);
    cJSON *db2_kb_service_memory_briefing_json(int limit_tokens);
    cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *block_type,
                                                    int limit);

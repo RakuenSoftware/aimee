@@ -274,6 +274,50 @@ int db2_retrieval_shortcut_observe(const char *normalized_query, const int64_t *
    return rc == AIMEE_PG_DONE ? 0 : -1;
 }
 
+int db2_retrieval_shortcut_lookup(const char *normalized_query, int64_t *ids, int max,
+                                  int *promoted_out, int64_t *hit_count_out)
+{
+   if (promoted_out)
+      *promoted_out = 0;
+   if (hit_count_out)
+      *hit_count_out = 0;
+   if (!normalized_query || !normalized_query[0] || !ids || max <= 0)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+
+   static const char *sql = "SELECT target_ids, promoted, hit_count FROM retrieval_shortcuts WHERE "
+                            "normalized_query = ?1";
+   char err[MQB_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_text(st, "?1", normalized_query);
+   int n = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *targets = aimee_pg_column_text(st, 0);
+      if (promoted_out)
+         *promoted_out = aimee_pg_column_int(st, 1);
+      if (hit_count_out)
+         *hit_count_out = aimee_pg_column_int64(st, 2);
+      const char *p = targets ? targets : "";
+      while (*p && n < max)
+      {
+         char *end = NULL;
+         long long id = strtoll(p, &end, 10);
+         if (end == p)
+            break;
+         if (id > 0)
+            ids[n++] = (int64_t)id;
+         p = (*end == ',') ? end + 1 : end;
+      }
+   }
+   aimee_pg_finalize(st);
+   return n;
+}
+
 int db2_memory_event_frames_list(int64_t memory_id, db2_memory_event_frame_row_t *out, int max)
 {
    if (memory_id <= 0 || !out || max <= 0)

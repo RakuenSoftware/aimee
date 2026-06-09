@@ -275,6 +275,13 @@ int kb_client_memory_insert(const char *tier, const char *kind, const char *key,
                             const char *content, double confidence, const char *session_id,
                             memory_t *out)
 {
+   return kb_client_memory_insert_ex(tier, kind, key, content, "", confidence, session_id, out);
+}
+
+int kb_client_memory_insert_ex(const char *tier, const char *kind, const char *key,
+                               const char *content, const char *use_cases, double confidence,
+                               const char *session_id, memory_t *out)
+{
    if (!key || !content)
       return -1;
 
@@ -285,6 +292,8 @@ int kb_client_memory_insert(const char *tier, const char *kind, const char *key,
       cJSON_AddStringToObject(req, "kind", kind);
    cJSON_AddStringToObject(req, "key", key);
    cJSON_AddStringToObject(req, "content", content);
+   if (use_cases && use_cases[0])
+      cJSON_AddStringToObject(req, "use_cases", use_cases);
    cJSON_AddNumberToObject(req, "confidence", confidence);
    if (session_id && session_id[0])
       cJSON_AddStringToObject(req, "session_id", session_id);

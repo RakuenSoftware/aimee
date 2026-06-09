@@ -129,8 +129,9 @@ static int memory_semantic_value_equivalent(const char *a, const char *b)
    return trigram_similarity(norm_a, norm_b) >= 0.92;
 }
 
-int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
-                  double confidence, const char *session_id, memory_t *out)
+int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
+                     const char *use_cases, double confidence, const char *session_id,
+                     memory_t *out)
 {
    if (!tier || !kind || !key)
       return -1;
@@ -266,9 +267,9 @@ int memory_insert(const char *tier, const char *kind, const char *key, const cha
          if (old_surprise > new_surprise)
             new_surprise = old_surprise;
 
-         if (db2_memory_merge_update(existing_id, merged_content ? merged_content : content,
-                                     new_conf, new_use, new_obs, new_evidence,
-                                     memory_content_salience(content), new_surprise, ts) != 0)
+         if (db2_memory_merge_update_ex(existing_id, merged_content ? merged_content : content,
+                                        use_cases, new_conf, new_use, new_obs, new_evidence,
+                                        memory_content_salience(content), new_surprise, ts) != 0)
             return -1;
 
          memory_refresh_derived_metadata(
@@ -341,8 +342,9 @@ int memory_insert(const char *tier, const char *kind, const char *key, const cha
          if (dup_surprise > new_surprise)
             new_surprise = dup_surprise;
 
-         if (db2_memory_merge_update(dup_id, content, new_conf, new_use, new_obs, new_evidence,
-                                     memory_content_salience(content), new_surprise, ts) != 0)
+         if (db2_memory_merge_update_ex(dup_id, content, use_cases, new_conf, new_use, new_obs,
+                                        new_evidence, memory_content_salience(content),
+                                        new_surprise, ts) != 0)
             return -1;
 
          memory_refresh_derived_metadata(dup_id, norm_key, content ? content : "");
@@ -366,8 +368,8 @@ int memory_insert(const char *tier, const char *kind, const char *key, const cha
 
    /* Truly new: INSERT */
    {
-      int64_t new_id = db2_memory_row_insert(
-          tier, kind, norm_key, content, confidence, session_id, ts, sensitivity,
+      int64_t new_id = db2_memory_row_insert_ex(
+          tier, kind, norm_key, content, use_cases, confidence, session_id, ts, sensitivity,
           memory_base_evidence_strength(norm_key, content, confidence),
           memory_content_salience(content), memory_content_surprise(session_id, content));
       if (new_id < 0)
@@ -397,6 +399,12 @@ int memory_insert(const char *tier, const char *kind, const char *key, const cha
          memory_maybe_run_maintenance();
       return 0;
    }
+}
+
+int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
+                  double confidence, const char *session_id, memory_t *out)
+{
+   return memory_insert_ex(tier, kind, key, content, "", confidence, session_id, out);
 }
 
 int memory_get(int64_t id, memory_t *out)

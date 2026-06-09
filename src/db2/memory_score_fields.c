@@ -474,36 +474,46 @@ int db2_memory_lookup_merge_fields(const char *key, int64_t *id_out, char *conte
    return hit;
 }
 
-int db2_memory_merge_update(int64_t memory_id, const char *content, double confidence,
-                            int use_count, int observation_count, double evidence_strength,
-                            double salience, double surprise, const char *ts)
+int db2_memory_merge_update_ex(int64_t memory_id, const char *content, const char *use_cases,
+                               double confidence, int use_count, int observation_count,
+                               double evidence_strength, double salience, double surprise,
+                               const char *ts)
 {
    if (memory_id <= 0 || !content || !ts)
       return -1;
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   static const char *sql = "UPDATE memories SET content = ?1, confidence = ?2,"
-                            " use_count = ?3, observation_count = ?4, evidence_strength = ?5,"
-                            " salience = ?6, surprise = ?7, last_used_at = ?8, updated_at = ?9"
-                            " WHERE id = ?10";
+   static const char *sql = "UPDATE memories SET content = ?1, use_cases = ?2, confidence = ?3,"
+                            " use_count = ?4, observation_count = ?5, evidence_strength = ?6,"
+                            " salience = ?7, surprise = ?8, last_used_at = ?9, updated_at = ?10"
+                            " WHERE id = ?11";
    char err[MSF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", content);
-   aimee_pg_bind_double(st, "?2", confidence);
-   aimee_pg_bind_int(st, "?3", use_count);
-   aimee_pg_bind_int(st, "?4", observation_count);
-   aimee_pg_bind_double(st, "?5", evidence_strength);
-   aimee_pg_bind_double(st, "?6", salience);
-   aimee_pg_bind_double(st, "?7", surprise);
-   aimee_pg_bind_text(st, "?8", ts);
+   aimee_pg_bind_text(st, "?2", use_cases ? use_cases : "");
+   aimee_pg_bind_double(st, "?3", confidence);
+   aimee_pg_bind_int(st, "?4", use_count);
+   aimee_pg_bind_int(st, "?5", observation_count);
+   aimee_pg_bind_double(st, "?6", evidence_strength);
+   aimee_pg_bind_double(st, "?7", salience);
+   aimee_pg_bind_double(st, "?8", surprise);
    aimee_pg_bind_text(st, "?9", ts);
-   aimee_pg_bind_int64(st, "?10", memory_id);
+   aimee_pg_bind_text(st, "?10", ts);
+   aimee_pg_bind_int64(st, "?11", memory_id);
    int rc = aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
+}
+
+int db2_memory_merge_update(int64_t memory_id, const char *content, double confidence,
+                            int use_count, int observation_count, double evidence_strength,
+                            double salience, double surprise, const char *ts)
+{
+   return db2_memory_merge_update_ex(memory_id, content, "", confidence, use_count,
+                                     observation_count, evidence_strength, salience, surprise, ts);
 }
 
 int db2_memory_active_kind_dedupe_candidates(const char *kind, db2_memory_dedupe_candidate_t *out,
@@ -542,10 +552,10 @@ int db2_memory_active_kind_dedupe_candidates(const char *kind, db2_memory_dedupe
    return n;
 }
 
-int64_t db2_memory_row_insert(const char *tier, const char *kind, const char *key,
-                              const char *content, double confidence, const char *session_id,
-                              const char *ts, const char *sensitivity, double evidence_strength,
-                              double salience, double surprise)
+int64_t db2_memory_row_insert_ex(const char *tier, const char *kind, const char *key,
+                                 const char *content, const char *use_cases, double confidence,
+                                 const char *session_id, const char *ts, const char *sensitivity,
+                                 double evidence_strength, double salience, double surprise)
 {
    if (!tier || !kind || !key || !ts)
       return -1;
@@ -554,10 +564,10 @@ int64_t db2_memory_row_insert(const char *tier, const char *kind, const char *ke
       return -1;
    /* Postgres replaces sqlite's last_insert_rowid() with INSERT ... RETURNING id. */
    static const char *sql =
-       "INSERT INTO memories (tier, kind, key, content, confidence,"
+       "INSERT INTO memories (tier, kind, key, content, use_cases, confidence,"
        " use_count, last_used_at, source_session, created_at,"
        " updated_at, sensitivity, evidence_strength, salience, surprise, observation_count)"
-       " VALUES (?1, ?2, ?3, ?4, ?5, 1, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 1)"
+       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1)"
        " RETURNING id";
    char err[MSF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -567,20 +577,30 @@ int64_t db2_memory_row_insert(const char *tier, const char *kind, const char *ke
    aimee_pg_bind_text(st, "?2", kind);
    aimee_pg_bind_text(st, "?3", key);
    aimee_pg_bind_text(st, "?4", content ? content : "");
-   aimee_pg_bind_double(st, "?5", confidence);
-   aimee_pg_bind_text(st, "?6", ts);
-   aimee_pg_bind_text(st, "?7", session_id ? session_id : "");
-   aimee_pg_bind_text(st, "?8", ts);
+   aimee_pg_bind_text(st, "?5", use_cases ? use_cases : "");
+   aimee_pg_bind_double(st, "?6", confidence);
+   aimee_pg_bind_text(st, "?7", ts);
+   aimee_pg_bind_text(st, "?8", session_id ? session_id : "");
    aimee_pg_bind_text(st, "?9", ts);
-   aimee_pg_bind_text(st, "?10", sensitivity ? sensitivity : "");
-   aimee_pg_bind_double(st, "?11", evidence_strength);
-   aimee_pg_bind_double(st, "?12", salience);
-   aimee_pg_bind_double(st, "?13", surprise);
+   aimee_pg_bind_text(st, "?10", ts);
+   aimee_pg_bind_text(st, "?11", sensitivity ? sensitivity : "");
+   aimee_pg_bind_double(st, "?12", evidence_strength);
+   aimee_pg_bind_double(st, "?13", salience);
+   aimee_pg_bind_double(st, "?14", surprise);
    int64_t new_id = -1;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       new_id = aimee_pg_column_int64(st, 0);
    aimee_pg_finalize(st);
    return new_id;
+}
+
+int64_t db2_memory_row_insert(const char *tier, const char *kind, const char *key,
+                              const char *content, double confidence, const char *session_id,
+                              const char *ts, const char *sensitivity, double evidence_strength,
+                              double salience, double surprise)
+{
+   return db2_memory_row_insert_ex(tier, kind, key, content, "", confidence, session_id, ts,
+                                   sensitivity, evidence_strength, salience, surprise);
 }
 
 int db2_memory_count_versions(const char *key_prefix)

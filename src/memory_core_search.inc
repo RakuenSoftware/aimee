@@ -1935,6 +1935,7 @@ static memory_ranker_input_t memory_ranker_input_from(const memory_t *m)
    snprintf(r.kind, sizeof(r.kind), "%s", m->kind);
    snprintf(r.key, sizeof(r.key), "%s", m->key);
    snprintf(r.content, sizeof(r.content), "%s", m->content);
+   snprintf(r.use_cases, sizeof(r.use_cases), "%s", m->use_cases);
    return r;
 }
 
@@ -1951,6 +1952,7 @@ static void memory_compute_score_parts(const char *raw_query, const char *norm_q
    char qtokens[32][64];
    char norm_key[sizeof(m->key)];
    char norm_content[sizeof(m->content)];
+   char norm_use_cases[sizeof(m->use_cases)];
    int nq = memory_split_tokens(norm_query, qtokens, 32);
    if (nq <= 0)
       return;
@@ -1959,13 +1961,15 @@ static void memory_compute_score_parts(const char *raw_query, const char *norm_q
    memory_query_intent_t intent = memory_query_intent(raw_query, norm_query);
    normalize_key(m->key, norm_key, sizeof(norm_key));
    normalize_key(m->content, norm_content, sizeof(norm_content));
+   normalize_key(m->use_cases, norm_use_cases, sizeof(norm_use_cases));
 
    int matched = 0;
    for (int i = 0; i < nq; i++)
    {
       int in_key = memory_token_in_norm(norm_key, qtokens[i]);
       int in_content = memory_token_in_norm(norm_content, qtokens[i]);
-      if (in_key || in_content)
+      int in_use_cases = memory_token_in_norm(norm_use_cases, qtokens[i]);
+      if (in_key || in_content || in_use_cases)
       {
          double v = in_key ? w.lexical_key : w.lexical_content;
          size_t len = strlen(qtokens[i]);
@@ -4441,6 +4445,22 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    if (!query || !query[0] || !out || max <= 0)
       return 0;
 
+   char norm_query[512];
+   normalize_key(query, norm_query, sizeof(norm_query));
+   if (!norm_query[0])
+      snprintf(norm_query, sizeof(norm_query), "%s", query);
+
+   int64_t shortcut_ids[8];
+   int shortcut_promoted = 0;
+   int shortcut_n =
+       db2_retrieval_shortcut_lookup(norm_query, shortcut_ids, 8, &shortcut_promoted, NULL);
+   memory_t shortcut_matches[8];
+   int shortcut_match_n = 0;
+   if (shortcut_n > 0)
+      for (int i = 0; i < shortcut_n && shortcut_match_n < 8; i++)
+         if (db2_memory_get(shortcut_ids[i], &shortcut_matches[shortcut_match_n]) == 0)
+            shortcut_match_n++;
+
    memory_t matches[64];
    int count = memory_find_facts_scoped(query, scope_type, scope_value, limit > 0 ? limit : 10,
                                         matches, 64);
@@ -4458,11 +4478,6 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    if (memory_collect_semantic_matches(query, embed_cmd, 32, matches, count, 64, semantic_ids,
                                        semantic_scores, &semantic_hit_count, 128) < 0)
       return -1;
-
-   char norm_query[512];
-   normalize_key(query, norm_query, sizeof(norm_query));
-   if (!norm_query[0])
-      snprintf(norm_query, sizeof(norm_query), "%s", query);
 
    memory_pagerank_config_t pagerank_cfg;
    memory_pagerank_score_t pagerank_scores[64];
@@ -4485,6 +4500,20 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
       for (int i = 0; i < shortcut_n; i++)
          shortcut_ids[i] = out[i].memory.id;
       (void)db2_retrieval_shortcut_observe(norm_query, shortcut_ids, shortcut_n);
+   }
+   if (shortcut_promoted && shortcut_match_n > 0)
+   {
+      int promoted_count = shortcut_match_n < max ? shortcut_match_n : max;
+      for (int i = 0; i < promoted_count; i++)
+      {
+         out[i].memory = shortcut_matches[i];
+         memory_ranker_input_t ri = memory_ranker_input_from(&shortcut_matches[i]);
+         memory_compute_score_parts(query, norm_query, &ri, semantic_ids, semantic_scores,
+                                    semantic_hit_count, pagerank_scores, pagerank_count,
+                                    &out[i].parts);
+         out[i].parts.confidence = shortcut_matches[i].confidence;
+      }
+      return promoted_count;
    }
    return count;
 }

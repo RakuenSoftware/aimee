@@ -189,10 +189,18 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
 int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
                   double confidence, const char *session_id, memory_t *out)
 {
+   return memory_insert_ex(tier, kind, key, content, "", confidence, session_id, out);
+}
+
+int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
+                     const char *use_cases, double confidence, const char *session_id,
+                     memory_t *out)
+{
    (void)tier;
    (void)kind;
    (void)key;
    (void)content;
+   (void)use_cases;
    (void)confidence;
    (void)session_id;
    if (out)

@@ -33,6 +33,7 @@ void kbc_memory_row_from_json(cJSON *f, memory_t *m)
    cJSON *key_j = cJSON_GetObjectItemCaseSensitive(f, "key");
    cJSON *headline_j = cJSON_GetObjectItemCaseSensitive(f, "headline");
    cJSON *content_j = cJSON_GetObjectItemCaseSensitive(f, "content");
+   cJSON *use_cases_j = cJSON_GetObjectItemCaseSensitive(f, "use_cases");
    cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(f, "confidence");
    cJSON *uses_j = cJSON_GetObjectItemCaseSensitive(f, "use_count");
    cJSON *last_j = cJSON_GetObjectItemCaseSensitive(f, "last_used_at");
@@ -51,6 +52,8 @@ void kbc_memory_row_from_json(cJSON *f, memory_t *m)
       snprintf(m->headline, sizeof(m->headline), "%s", headline_j->valuestring);
    if (cJSON_IsString(content_j))
       snprintf(m->content, sizeof(m->content), "%s", content_j->valuestring);
+   if (cJSON_IsString(use_cases_j))
+      snprintf(m->use_cases, sizeof(m->use_cases), "%s", use_cases_j->valuestring);
    if (cJSON_IsNumber(conf_j))
       m->confidence = conf_j->valuedouble;
    if (cJSON_IsNumber(uses_j))
