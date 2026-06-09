@@ -14,6 +14,7 @@
 #include <string.h>
 #include "db2_test_shim.h"
 #include "../kb_bandit.h"
+#include "../kb_bandit_registry.h"
 #include "../db2/bandit.h"
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
@@ -150,6 +151,103 @@ static void test_bandit_explore_stats(void)
    printf("  bandit_explore_stats: ok\n");
 }
 
+/* ---- decision-point registry ---- */
+static void test_bandit_registry(void)
+{
+   /* At least the live retrieval-limit point is registered. */
+   assert(kb_bandit_registry_count() >= 1);
+
+   const kb_bandit_decision_point_t *dp = kb_bandit_registry_get("kb_memory_retrieval_limit");
+   assert(dp != NULL);
+   assert(strcmp(dp->id, "kb_memory_retrieval_limit") == 0);
+   assert(strcmp(dp->status, "live") == 0);
+   assert(strcmp(dp->reward_fn, "recall_sufficiency_v1") == 0);
+   assert(dp->n_arms == 2);
+   assert(strcmp(dp->arms[0], "10") == 0);
+   assert(strcmp(dp->arms[1], "20") == 0);
+
+   /* kb_fusion_mode is also registered (KB-search fusion strategy). */
+   const kb_bandit_decision_point_t *fm = kb_bandit_registry_get("kb_fusion_mode");
+   assert(fm != NULL);
+   assert(fm->n_arms == 3);
+   assert(strcmp(fm->arms[0], "rrf") == 0);
+   assert(strcmp(fm->status, "live") == 0);
+
+   /* delegate_routing (server-side decision point reached via the kb bandit). */
+   const kb_bandit_decision_point_t *dr = kb_bandit_registry_get("delegate_routing");
+   assert(dr != NULL);
+   assert(dr->n_arms == 2);
+   assert(strcmp(dr->arms[0], "cheapest") == 0);
+   assert(strcmp(dr->arms[1], "premium") == 0);
+
+   /* Unknown id -> NULL; index access is bounds-checked. */
+   assert(kb_bandit_registry_get("nope") == NULL);
+   assert(kb_bandit_registry_get(NULL) == NULL);
+   assert(kb_bandit_registry_at(-1) == NULL);
+   assert(kb_bandit_registry_at(kb_bandit_registry_count()) == NULL);
+   assert(kb_bandit_registry_at(0) != NULL);
+
+   printf("  bandit_registry: ok\n");
+}
+
+/* ---- recall-sufficiency reward (pure) ---- */
+static void test_bandit_recall_reward(void)
+{
+   /* Empty recall is bad at any limit. */
+   assert(kb_bandit_recall_sufficiency_reward(0, 10) == 0.0);
+   assert(kb_bandit_recall_sufficiency_reward(0, 20) == 0.0);
+
+   /* Sufficient, non-truncated recall scores 1.0 — and is not biased toward the
+    * larger arm: 8 results satisfy both the 10 and 20 arms. */
+   assert(kb_bandit_recall_sufficiency_reward(8, 10) == 1.0);
+   assert(kb_bandit_recall_sufficiency_reward(8, 20) == 1.0);
+
+   /* Hitting the cap is a truncation signal (a larger limit might help). */
+   assert(kb_bandit_recall_sufficiency_reward(10, 10) == 0.5);
+   assert(kb_bandit_recall_sufficiency_reward(20, 20) == 0.5);
+
+   /* 10 results: truncated for the 10-arm, sufficient for the 20-arm. */
+   assert(kb_bandit_recall_sufficiency_reward(10, 20) == 1.0);
+
+   printf("  bandit_recall_reward: ok\n");
+}
+
+/* ---- 7. decision_points_list / arms_list ---- */
+static void test_bandit_enumeration(void)
+{
+   open_db();
+
+   /* Two points, the first with two arms; a sibling point must not leak in. */
+   assert(db2_bandit_decision_insert("enum-a-1", "kb_memory_retrieval_limit", "10", "", 0.5, 0) ==
+          0);
+   assert(db2_bandit_decision_insert("enum-a-2", "kb_memory_retrieval_limit", "20", "", 0.5, 0) ==
+          0);
+   assert(db2_bandit_decision_insert("enum-a-3", "kb_memory_retrieval_limit", "10", "", 0.5, 0) ==
+          0);
+   assert(db2_bandit_decision_insert("enum-b-1", "other_dp", "x", "", 0.5, 0) == 0);
+
+   char buf[2048];
+
+   /* Points list: both points present, none invented. */
+   assert(db2_bandit_decision_points_list(buf, sizeof(buf)) == 0);
+   assert(strstr(buf, "\"kb_memory_retrieval_limit\"") != NULL);
+   assert(strstr(buf, "\"other_dp\"") != NULL);
+   assert(strstr(buf, "kb_fusion_mode") == NULL);
+
+   /* Arms list: distinct arms for the point, scoped (no sibling-point arm). */
+   assert(db2_bandit_arms_list("kb_memory_retrieval_limit", buf, sizeof(buf)) == 0);
+   assert(strstr(buf, "\"10\"") != NULL);
+   assert(strstr(buf, "\"20\"") != NULL);
+   assert(strstr(buf, "\"x\"") == NULL);
+
+   /* Unknown point: empty array, not an error. */
+   assert(db2_bandit_arms_list("no_such_point", buf, sizeof(buf)) == 0);
+   assert(strcmp(buf, "[]") == 0);
+
+   close_db();
+   printf("  bandit_enumeration: ok\n");
+}
+
 /* ---- 6. bandit_replay_evidence ---- */
 static void test_bandit_replay_evidence(void)
 {
@@ -196,6 +294,9 @@ int main(void)
    test_bandit_reward_closed();
    test_config_bandit_defaults();
    test_bandit_explore_stats();
+   test_bandit_registry();
+   test_bandit_recall_reward();
+   test_bandit_enumeration();
    test_bandit_replay_evidence();
 
    printf("All bandit tests passed.\n");

@@ -4,10 +4,10 @@
 #include <pthread.h>
 #include <stdint.h>
 
-#define COMPUTE_QUEUE_SIZE         128
-#define COMPUTE_QUEUE_HIGH_PCT     80
-#define COMPUTE_QUEUE_LOW_PCT      50
-#define POOL_SLOT_DESCRIPTOR_MAX   128
+#define COMPUTE_QUEUE_SIZE       128
+#define COMPUTE_QUEUE_HIGH_PCT   80
+#define COMPUTE_QUEUE_LOW_PCT    50
+#define POOL_SLOT_DESCRIPTOR_MAX 128
 
 typedef struct
 {
@@ -102,8 +102,8 @@ const char *pool_job_kind_name(pool_job_kind_t kind);
  * pool is reported. Concurrent registrations of the same `pool` overwrite
  * the previous entry in place.
  */
-#define COMPUTE_POOL_REGISTRY_MAX  8
-#define COMPUTE_POOL_NAME_MAX      32
+#define COMPUTE_POOL_REGISTRY_MAX 8
+#define COMPUTE_POOL_NAME_MAX     32
 
 void compute_pool_register_secondary(compute_pool_t *pool, const char *name);
 void compute_pool_unregister_secondary(compute_pool_t *pool);

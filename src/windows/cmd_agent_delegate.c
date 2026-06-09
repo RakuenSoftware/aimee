@@ -31,8 +31,7 @@ void platform_delegate_run_background(
       if (parent_worktree_head && parent_worktree_head[0])
          cJSON_AddStringToObject(obj, "parent_worktree_head", parent_worktree_head);
       if (parent_worktree_fingerprint && parent_worktree_fingerprint[0])
-         cJSON_AddStringToObject(obj, "parent_worktree_fingerprint",
-                                 parent_worktree_fingerprint);
+         cJSON_AddStringToObject(obj, "parent_worktree_fingerprint", parent_worktree_fingerprint);
       char *json = cJSON_Print(obj);
       if (json)
       {

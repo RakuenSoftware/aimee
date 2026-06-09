@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 43
+Total endpoints: 46
 
 ## Endpoints
 
@@ -356,6 +356,15 @@ Responses:
 - `405` — Method not allowed
 - `503` — Ingest status unavailable
 
+### `POST /v1/intelligence/bandit/close`
+
+Close a sampled decision with its observed reward
+
+Responses:
+
+- `200` — Close result
+- `401` — Unauthorized
+
 ### `GET /v1/intelligence/bandit/export`
 
 Export fusion bandit decision data
@@ -363,6 +372,24 @@ Export fusion bandit decision data
 Responses:
 
 - `200` — Bandit decisions and arm stats
+- `401` — Unauthorized
+
+### `POST /v1/intelligence/bandit/promote`
+
+Persist the production-default arm for a decision point
+
+Responses:
+
+- `200` — Promotion result (rollback_arm)
+- `401` — Unauthorized
+
+### `POST /v1/intelligence/bandit/sample`
+
+Sample an arm for a decision point (server-side decision points)
+
+Responses:
+
+- `200` — Selected arm + decision id (or status disabled)
 - `401` — Unauthorized
 
 ### `GET /v1/intelligence/calibration/readiness`

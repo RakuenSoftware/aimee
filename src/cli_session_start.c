@@ -135,6 +135,160 @@ static int handle_session_start_remote(void)
    return 0;
 }
 
+/* Thin-client UserPromptSubmit hook (P1 context pre-injection for Claude Code).
+ * Fires once per user turn. Fetches recall seeded by the user's prompt
+ * (read-only POST /v1/memory/recall, task_hint = the prompt) and emits the
+ * turn-relevant slices — wrapped as an <aimee-context> envelope with an
+ * explore-with pointer at aimee's own retrieval tools — as the hook's
+ * additionalContext, so Claude Code reasons over already-loaded context instead
+ * of re-exploring the repo and, when it needs more, explores THROUGH aimee.
+ *
+ * Deliberately the Claude-Code delivery path for pre-injection: the Anthropic
+ * /v1/messages proxy is kept a pure stateless wire-format proxy (mutating it
+ * would corrupt the context Claude Code builds), so the envelope rides in via
+ * the hook rather than the wire. Renders only the per-turn sections (session-
+ * level identity/preferences/rules already land at SessionStart). Always
+ * soft-fails (exit 0) so a prompt is never blocked. */
+int handle_user_prompt_submit(void)
+{
+   char *stdin_data = read_stdin();
+   cJSON *hook_json = stdin_data ? cJSON_Parse(stdin_data) : NULL;
+   const char *prompt =
+       hook_json ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hook_json, "prompt"))
+                 : NULL;
+
+   char *endpoint = cli_rpc_client_endpoint();
+   if (!prompt || !prompt[0] || !endpoint)
+   {
+      free(endpoint);
+      cJSON_Delete(hook_json);
+      free(stdin_data);
+      return 0;
+   }
+   char *bearer = cli_rpc_client_bearer();
+
+   cJSON *body = cJSON_CreateObject();
+   cJSON_AddStringToObject(body, "task_hint", prompt);
+   cJSON_AddBoolToObject(body, "session_start", 0);
+   char *body_s = cJSON_PrintUnformatted(body);
+   cJSON_Delete(body);
+
+   int status = 0;
+   cJSON *resp =
+       cli_http_request(endpoint, "POST", "/v1/memory/recall", body_s, bearer, 15000, &status);
+   free(endpoint);
+   free(bearer);
+   free(body_s);
+   cJSON_Delete(hook_json);
+   free(stdin_data);
+   if (!resp || status != 200)
+   {
+      cJSON_Delete(resp);
+      return 0;
+   }
+
+   cJSON *recall = cJSON_GetObjectItemCaseSensitive(resp, "recall");
+   struct ss_sbuf b = {0};
+   ss_render_section(&b, "Active Context", cJSON_GetObjectItem(recall, "active_context"));
+   ss_render_section(&b, "Open Commitments", cJSON_GetObjectItem(recall, "open_commitments"));
+   ss_render_section(&b, "Reminders", cJSON_GetObjectItem(recall, "reminders"));
+   ss_render_section(&b, "Directives", cJSON_GetObjectItem(recall, "directives"));
+
+   if (b.p && b.p[0])
+   {
+      struct ss_sbuf ctx = {0};
+      ss_add(&ctx, "<aimee-context>\n");
+      ss_add(&ctx, b.p);
+      ss_add(&ctx, "explore-with: find_symbol, lsp_references, ast_grep_search, search_graph, "
+                   "get_context_block\n");
+      ss_add(&ctx, "</aimee-context>");
+
+      cJSON *out = cJSON_CreateObject();
+      cJSON *hook_out = cJSON_AddObjectToObject(out, "hookSpecificOutput");
+      cJSON_AddStringToObject(hook_out, "hookEventName", "UserPromptSubmit");
+      cJSON_AddStringToObject(hook_out, "additionalContext", ctx.p ? ctx.p : b.p);
+      char *s = cJSON_PrintUnformatted(out);
+      if (s)
+      {
+         fputs(s, stdout);
+         fputc('\n', stdout);
+         free(s);
+      }
+      free(ctx.p);
+      cJSON_Delete(out);
+   }
+   free(b.p);
+   cJSON_Delete(resp);
+   return 0;
+}
+
+/* Thin-client PreCompact hook (P3 re-prime). Claude Code fires PreCompact just
+ * before it compacts the conversation, which drops the session-start context.
+ * Re-emit the durable recall (same broad read-only POST /v1/memory/recall as
+ * session-start) as additionalContext so the post-compaction context still
+ * carries identity/preferences/rules/active-context. Soft-fails (exit 0). */
+int handle_pre_compact(void)
+{
+   char *stdin_data = read_stdin();
+   free(stdin_data); /* PreCompact payload is informational; recall is broad. */
+
+   char *endpoint = cli_rpc_client_endpoint();
+   if (!endpoint)
+      return 0;
+   char *bearer = cli_rpc_client_bearer();
+
+   cJSON *body = cJSON_CreateObject();
+   cJSON_AddStringToObject(body, "task_hint", "compaction re-prime");
+   cJSON_AddBoolToObject(body, "session_start", 1);
+   char *body_s = cJSON_PrintUnformatted(body);
+   cJSON_Delete(body);
+
+   int status = 0;
+   cJSON *resp =
+       cli_http_request(endpoint, "POST", "/v1/memory/recall", body_s, bearer, 30000, &status);
+   free(endpoint);
+   free(bearer);
+   free(body_s);
+   if (!resp || status != 200)
+   {
+      cJSON_Delete(resp);
+      return 0;
+   }
+
+   cJSON *recall = cJSON_GetObjectItemCaseSensitive(resp, "recall");
+   struct ss_sbuf b = {0};
+   ss_render_section(&b, "Always-On Rules", cJSON_GetObjectItem(recall, "always_on_rules"));
+   ss_render_section(&b, "Identity", cJSON_GetObjectItem(recall, "identity"));
+   ss_render_section(&b, "Preferences", cJSON_GetObjectItem(recall, "preferences"));
+   ss_render_section(&b, "Active Context", cJSON_GetObjectItem(recall, "active_context"));
+   ss_render_section(&b, "Open Commitments", cJSON_GetObjectItem(recall, "open_commitments"));
+   ss_render_section(&b, "Reminders", cJSON_GetObjectItem(recall, "reminders"));
+   ss_render_section(&b, "Directives", cJSON_GetObjectItem(recall, "directives"));
+
+   if (b.p && b.p[0])
+   {
+      cJSON *out = cJSON_CreateObject();
+      cJSON *hook_out = cJSON_AddObjectToObject(out, "hookSpecificOutput");
+      cJSON_AddStringToObject(hook_out, "hookEventName", "PreCompact");
+      struct ss_sbuf ctx = {0};
+      ss_add(&ctx, "# Proactive Recall (re-primed after compaction)\n\n");
+      ss_add(&ctx, b.p);
+      cJSON_AddStringToObject(hook_out, "additionalContext", ctx.p ? ctx.p : b.p);
+      char *s = cJSON_PrintUnformatted(out);
+      if (s)
+      {
+         fputs(s, stdout);
+         fputc('\n', stdout);
+         free(s);
+      }
+      free(ctx.p);
+      cJSON_Delete(out);
+   }
+   free(b.p);
+   cJSON_Delete(resp);
+   return 0;
+}
+
 int handle_session_start(int json_output)
 {
    char *stdin_data = read_stdin();
@@ -198,7 +352,7 @@ int handle_session_start(int json_output)
     * immediately once the background thread is launched (typically <50 ms).
     * If it doesn't, soft-fail after 10 s rather than blocking claude for 60 s. */
    int timeout_ms = nonblocking ? 10000 : 60000;
-   cJSON *resp = cli_v1_rpc_local(req, timeout_ms);
+   cJSON *resp = cli_v1_dispatch_local(req, timeout_ms);
    cJSON_Delete(req);
    cJSON_Delete(hook_json);
    free(augmented_hook);

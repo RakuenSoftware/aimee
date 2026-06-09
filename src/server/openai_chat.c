@@ -17,6 +17,7 @@
  * single-owner surface this first cut targets. */
 #include "server_http.h"
 #include "openai_shape.h"
+#include "ingress_preinject.h"
 #include "openai_responses_store.h" /* previous_response_id continuation store */
 #include "openai_runs_store.h"      /* GET /v1/runs/{id} record store */
 #include "aimee.h"                  /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
@@ -99,7 +100,11 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
 
    agent_result_t result;
    memset(&result, 0, sizeof(result));
-   int erc = agent_execute(ag, NULL, prompt, max_tokens, temperature, &result);
+   /* P1 pre-injection: prepend the <aimee-context> envelope as the system
+    * prompt (config ingress_preinject_enabled; no-op when off/empty). */
+   char *pi_env = ingress_preinject_build(prompt, 0);
+   int erc = agent_execute(ag, pi_env, prompt, max_tokens, temperature, &result);
+   free(pi_env);
    free(prompt);
 
    if (erc != 0 || !result.response)
@@ -459,7 +464,11 @@ static int responses_handler(const char *body, char *resp, int cap)
 
    agent_result_t result;
    memset(&result, 0, sizeof(result));
-   int erc = agent_execute(ag, NULL, full, max_tokens, temperature, &result);
+   /* P1 pre-injection: prepend the <aimee-context> envelope as the system
+    * prompt (config ingress_preinject_enabled; no-op when off/empty). */
+   char *pi_env = ingress_preinject_build(full, 0);
+   int erc = agent_execute(ag, pi_env, full, max_tokens, temperature, &result);
+   free(pi_env);
 
    if (erc != 0 || !result.response)
    {
@@ -562,7 +571,11 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
 
    agent_result_t result;
    memset(&result, 0, sizeof(result));
-   int erc = agent_execute(ag, NULL, prompt, max_tokens, temperature, &result);
+   /* P1 pre-injection: prepend the <aimee-context> envelope as the system
+    * prompt (config ingress_preinject_enabled; no-op when off/empty). */
+   char *pi_env = ingress_preinject_build(prompt, 0);
+   int erc = agent_execute(ag, pi_env, prompt, max_tokens, temperature, &result);
+   free(pi_env);
    free(prompt);
 
    emit_chunk(emit, ctx, id, model, created, 1, NULL, 0); /* role frame */
@@ -623,7 +636,11 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
 
    agent_result_t result;
    memset(&result, 0, sizeof(result));
-   int erc = agent_execute(ag, NULL, prompt, max_tokens, temperature, &result);
+   /* P1 pre-injection: prepend the <aimee-context> envelope as the system
+    * prompt (config ingress_preinject_enabled; no-op when off/empty). */
+   char *pi_env = ingress_preinject_build(prompt, 0);
+   int erc = agent_execute(ag, pi_env, prompt, max_tokens, temperature, &result);
+   free(pi_env);
    free(prompt);
 
    if (erc != 0 || !result.response)
@@ -771,6 +788,26 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
 
    /* Heal orphaned tool calls/results — each Codex turn is stateless full-history. */
    message_history_repair(messages);
+
+   /* P1 context pre-injection (config: ingress_preinject_enabled, default off):
+    * prepend a fusion-recall <aimee-context> envelope to the system prompt so the
+    * external agent reasons over already-loaded context instead of re-exploring
+    * the repo. No-op when disabled or when recall yields nothing. */
+   {
+      char *pi_query = ingress_preinject_query_from_messages(messages);
+      char *pi_env = ingress_preinject_build(pi_query, 0);
+      if (pi_env)
+      {
+         char *merged = ingress_preinject_apply(instructions, pi_env);
+         if (merged)
+         {
+            free(instructions);
+            instructions = merged;
+         }
+      }
+      free(pi_query);
+      free(pi_env);
+   }
 
    parsed_response_t parsed;
    int erc =

@@ -12,7 +12,7 @@ extern "C"
 {
 #endif
 
-int db2_corpus_normalize_terms(int64_t doc_id);
+   int db2_corpus_normalize_terms(int64_t doc_id);
 
 #ifdef __cplusplus
 }

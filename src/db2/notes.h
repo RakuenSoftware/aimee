@@ -37,8 +37,8 @@ extern "C"
 
    /* Create or append to a note. If a note with the same slug exists, appends
     * content to it. Returns 0 on success, -1 on error. */
-   int db2_note_create(const char *title, const char *content, const char *tags,
-                       const char *author, note_t *out);
+   int db2_note_create(const char *title, const char *content, const char *tags, const char *author,
+                       note_t *out);
 
    /* List notes, optionally filtered by tag. Returns count written to out. */
    int db2_note_list(const char *tag, int limit, note_t *out, int max);

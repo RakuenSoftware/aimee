@@ -1,7 +1,6 @@
 #ifndef DEC_AGENT_TASKS_H
 #define DEC_AGENT_TASKS_H 1
 
-
 #include "agent_types.h"
 
 typedef struct

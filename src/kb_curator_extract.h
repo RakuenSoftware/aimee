@@ -4,8 +4,8 @@
 typedef struct
 {
    char extract_command[512];
-   int  max_tokens;
-   int  max_attempts;
+   int max_tokens;
+   int max_attempts;
 } kb_curator_extract_opts_t;
 
 /* Claim and process one pending extract_doc job.

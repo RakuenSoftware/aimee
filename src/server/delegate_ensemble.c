@@ -22,9 +22,16 @@ static void shuffle_indices(int *indices, int count)
 {
    if (!indices || count <= 1)
       return;
+   /* Seed a thread-local rand_r state from the monotonic clock rather than
+    * srand(time(NULL)): the per-call srand clobbered process-global RNG and
+    * produced identical shuffles for two calls in the same second (which would
+    * silently disable position-bias control when shuffling per round). */
+   struct timespec ts;
+   clock_gettime(CLOCK_MONOTONIC, &ts);
+   unsigned int seed = (unsigned int)ts.tv_nsec ^ (unsigned int)ts.tv_sec;
    for (int i = count - 1; i > 0; i--)
    {
-      int j = rand() % (i + 1);
+      int j = (int)(rand_r(&seed) % (unsigned int)(i + 1));
       int tmp = indices[i];
       indices[i] = indices[j];
       indices[j] = tmp;
@@ -155,7 +162,11 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
    memset(tasks, 0, sizeof(tasks));
    for (int i = 0; i < ref_count; i++)
    {
+      /* Route each fan-out task to its distinct configured reference agent
+       * (resolved by name in parallel_worker), not the single default agent.
+       * This is what makes the ensemble an ensemble of *diverse* models. */
       tasks[i].role = NULL;
+      tasks[i].agent = cfg->ensemble_reference_models[i];
       tasks[i].system_prompt = NULL;
       tasks[i].user_prompt = prompt;
       tasks[i].max_tokens = 0;
@@ -209,7 +220,6 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
    int order[ENSEMBLE_MAX_REFS];
    for (int i = 0; i < ref_count; i++)
       order[i] = i;
-   srand((unsigned)time(NULL));
    shuffle_indices(order, ref_count);
 
    char synthesis_buf[16384];

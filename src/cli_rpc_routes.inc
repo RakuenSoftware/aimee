@@ -216,6 +216,8 @@ static const struct
     {"kb", "ingest", "kb.ingest", NULL, NULL, 30000},
     {"kb", "ingest status", "kb.ingest.status", NULL, NULL, 0},
     {"kb", "status", "kb.status", NULL, NULL, 0},
+    {"kb", "calibrate", "calibration.readiness", NULL, NULL, 0},
+    {"kb", "demote", "demotion.check", NULL, NULL, 0},
     {"workers", "", "workers", NULL, NULL, 0},
     {"insights", NULL, "insights.overview", NULL, NULL, 0},
     {"worktree", "gc", "worktree.gc", NULL, NULL, 60000},
@@ -237,6 +239,12 @@ static const struct
     {"delegate", "--list-roles", "agent.list", NULL, "agents", 0},
     {"delegate", "log", "delegate.log", NULL, "episodes", 0},
     {"delegate", "history", "delegate.log", NULL, "episodes", 0},
+    /* MoA ensemble aggregate: positional[0] is the PROMPT (not a role). Async —
+     * forwards to POST /v1/delegate/aggregate and polls GET /v1/runs/{id}. This
+     * specific route is what makes `aimee delegate aggregate "<prompt>"` reach the
+     * ensemble; without it the prompt fell through to the catch-all delegate
+     * route, which maps positional[0] -> role and never ran the engine. */
+    {"delegate", "aggregate", "delegate.aggregate", NULL, NULL, 600000},
     /* Codex/openai delegate agents have agent->timeout_ms == 900000 server-side.
      * The CLI must outlast that, otherwise we report "no response" while the
      * server is still genuinely working. */
@@ -1662,6 +1670,19 @@ static const char *marshal_delegate_toolset_arg(int argc, char **argv)
    return NULL;
 }
 
+/* MoA ensemble aggregate. positional[0] is the prompt (the catch-all delegate
+ * marshaller mapped positional[0] -> role, which is the §0.2 routing bug). */
+static cJSON *marshal_delegate_aggregate(int argc, char **argv)
+{
+   static const char *bool_flags[] = {"json", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+   cJSON *req = marshal_no_args("delegate.aggregate");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "prompt", opts.positional[0]);
+   return req;
+}
+
 static cJSON *marshal_delegate(int argc, char **argv)
 {
    static const char *bool_flags[] = {"json",         "background", "durable", "coordination",
@@ -2949,6 +2970,8 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_work_request(method, argc, argv);
    if (strcmp(method, "delegate") == 0)
       return marshal_delegate(argc, argv);
+   if (strcmp(method, "delegate.aggregate") == 0)
+      return marshal_delegate_aggregate(argc, argv);
    if (strcmp(method, "delegate.launch") == 0)
       return marshal_delegate_launch(argc, argv);
    if (strcmp(method, "delegate.status") == 0)
@@ -3027,6 +3050,10 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
    if (strcmp(method, "eval.results") == 0)
       return marshal_eval_results(argc, argv);
    if (strcmp(method, "identity.show") == 0)
+      return marshal_no_args(method);
+   if (strcmp(method, "calibration.readiness") == 0)
+      return marshal_no_args(method);
+   if (strcmp(method, "demotion.check") == 0)
       return marshal_no_args(method);
    if (strcmp(method, "identity.snapshot") == 0)
       return marshal_identity_snapshot(argc, argv);
@@ -6678,14 +6705,14 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
    }
 }
 
-/* cli_v1_rpc_local: dispatch a pre-marshalled {method, ...params} request to its
+/* cli_v1_dispatch_local: dispatch a pre-marshalled {method, ...params} request to its
  * first-class /v1 route over the co-located transport — the local aimee-http.sock
  * on POSIX, or the configured remote on Windows (no UDS). Replaces the old POST
  * /v1/rpc bridge: the interactive co-located callers (chat, launch, mcp serve,
  * hooks, triggers, gateway, workspace serve) now reach the same dispatch surface
  * via dedicated routes (async methods are polled to completion). Returns the
  * parsed response (caller frees) or NULL. */
-cJSON *cli_v1_rpc_local(cJSON *req, int timeout_ms)
+cJSON *cli_v1_dispatch_local(cJSON *req, int timeout_ms)
 {
    if (!req)
       return NULL;

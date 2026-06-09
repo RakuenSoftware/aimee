@@ -62,6 +62,26 @@ extern "C"
    int db2_bandit_explore_stats(const char *decision_point, int window_seconds,
                                 long long *n_explore_out, long long *n_total_out);
 
+   /* List the distinct decision points that actually have logged decisions, as a
+    * JSON array of strings ordered most-recent-first.  Writes "[]" when empty.
+    * Used by the bandit export so introspection reflects the points that are
+    * really sampled, rather than a hard-coded literal.
+    * Returns 0 on success, -1 on error. */
+   int db2_bandit_decision_points_list(char *buf, size_t len);
+
+   /* List the distinct arm ids observed for a decision point in the decision log,
+    * as a JSON array of strings ordered by arm id.  Writes "[]" when empty.
+    * Discovered from the log (not arm-stats), so arms are visible even before any
+    * reward has been observed.  Returns 0 on success, -1 on error. */
+   int db2_bandit_arms_list(const char *decision_point, char *buf, size_t len);
+
+   /* Promoted (production-default) arm per decision point. get writes the arm into
+    * arm_out and returns 0, or -1 when no promotion exists. set upserts the
+    * promotion (recording rollback_arm, the prior default). Returns 0 on success. */
+   int db2_bandit_promotion_get(const char *decision_point, char *arm_out, size_t arm_out_len);
+   int db2_bandit_promotion_set(const char *decision_point, const char *arm_id,
+                                const char *rollback_arm);
+
 #ifdef __cplusplus
 }
 #endif

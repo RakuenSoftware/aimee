@@ -97,10 +97,11 @@
      "                   refactor, draft, execute, summarize, format, search,\n"
      "                   diagnose, validate. Aliases: implement/build -> code,\n"
      "                   test/check -> validate, inspect -> diagnose,\n"
-     "                   research -> execute. --tools enables tool use for roles\n"
-     "                   that do not already enable tools by default.\n"
-     "                   See `aimee delegate <role> --help` for the full flag set\n"
-     "                   (--context-file, --via, etc.).\n"
+     "                   research -> execute. REQUIRES --persona NAME (e.g.\n"
+     "                   engineer, qa, security, reviewer, architect). --tools\n"
+     "                   enables tool use for roles that do not enable it by\n"
+     "                   default. See `aimee delegate <role> --help` for the full\n"
+     "                   flag set (--persona, --context-file, --via, etc.).\n"
      "  plan             Generate read-only work packets from a proposal\n"
      "  launch <plan>    Queue a reviewed packet plan into a coord job\n"
      "  status <job_id> [job_id...]  Check background delegate status\n"
@@ -199,6 +200,20 @@
     {"graph", "Code-graph projection and explain", CLIENT_TIER_ADVANCED, 0,
      "  sync-code        Project the code graph\n"
      "  explain          Explain a code-graph relationship\n"},
+    {"optimize", "Bandit optimization loop", CLIENT_TIER_ADVANCED, 0,
+     "  points                          List registered decision points\n"
+     "  baseline --point <name>         Show current arm posteriors for a point\n"
+     "  replay --point <name>           Emit a point's closed-decision log for replay\n"
+     "  replay-record --point <n> --file <f>  Record a replay result (benchmark_trace)\n"
+     "  run [--suite <s>] [--arm <a>]   Run the offline benchmark suite (ranks baseline vs on)\n"
+     "  compare --baseline <a> --candidate <b>  Per-metric delta between two arms\n"
+     "  promote --point <p> --candidate <a> [--guarded] [--apply]  Gate/apply a promotion "
+     "(credible interval)\n"},
+    {"code", "Code-health audit", CLIENT_TIER_ADVANCED, 0,
+     "  audit [dir] [--json]   File-health audit (untested files, TODO/FIXME\n"
+     "                         markers, debt score) over the working tree\n"
+     "  audit --graph [--project P] [--json]   Graph-derived checks via aimee-kb\n"
+     "                         (dead exports, import cycles, clones)\n"},
     {"curator", "Knowledge curator queries", CLIENT_TIER_ADVANCED, 0,
      "  implements <topic>   What implements a topic\n"
      "  synthesize <topic>   Synthesize knowledge on a topic\n"

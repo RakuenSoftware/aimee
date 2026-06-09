@@ -1,5 +1,16 @@
 # Command Reference
 
+> **Complete, always-current references** (generated from the source-of-truth
+> tables — see [`gen/cli-commands.md`](gen/cli-commands.md) and
+> [`gen/configuration.md`](gen/configuration.md)):
+> - **[Full CLI command list](gen/cli-commands.md)** — every command + subcommands,
+>   from `src/cli_help_data.h`.
+> - **[Configuration reference](gen/configuration.md)** — every config key (the
+>   `aimee config get/set` allowlist + the config-file JSON sections).
+>
+> This page is a hand-written walkthrough of the common commands; the generated
+> pages above are the authoritative, exhaustive lists.
+
 `aimee` is a thin CLI. It either handles a small local-only operation
 or forwards a typed request to `aimee-server`. Commands that are not listed
 here are not part of the client contract until they have a typed server route.

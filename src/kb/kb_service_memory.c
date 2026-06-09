@@ -9,7 +9,9 @@
 #include "json_fluent.h" /* jo_ok */
 #include "config.h"
 #include "db2/kb_service_backend.h"
+#include "db2/bandit.h"
 #include "kb_bandit.h"
+#include "kb_bandit_registry.h"
 #include "kb_service_memory.h"
 #include "log.h"
 #include "memory_graph_fusion.h"
@@ -27,23 +29,52 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
    cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
    if (!cJSON_IsString(query_j))
       return kb_send_error(fd, "memory.find_facts requires query");
-   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 20;
+   int limit;
+   if (cJSON_IsNumber(limit_j))
+      limit = (int)limit_j->valuedouble;
+   else
+   {
+      /* Default = the promoted arm (if an operator locked one in via
+       * `aimee optimize promote --apply`), else 20. A live bandit sample below
+       * overrides this when exploration is enabled. */
+      limit = 20;
+      char promo[KB_BANDIT_MAX_ARM_ID] = "";
+      if (db2_bandit_promotion_get("kb_memory_retrieval_limit", promo, sizeof(promo)) == 0)
+      {
+         int p = atoi(promo);
+         if (p > 0)
+            limit = p;
+      }
+   }
 
-   /* Shadow bandit for memory retrieval limit (no explicit limit from caller). */
-   if (!cJSON_IsNumber(limit_j))
+   /* Shadow bandit for memory retrieval limit (no explicit limit from caller).
+    * Sample an arm now; carry the decision id + chosen arm so the reward can be
+    * attributed from the recall result below — otherwise the loop never closes
+    * and the arm posteriors never learn from live traffic. */
+   char ml_decision_id[KB_BANDIT_MAX_DECISION] = {0};
+   char ml_arm_id[KB_BANDIT_MAX_ARM_ID] = {0};
+   const kb_bandit_decision_point_t *ml_dp = kb_bandit_registry_get("kb_memory_retrieval_limit");
+   if (!cJSON_IsNumber(limit_j) && ml_dp && ml_dp->n_arms > 0)
    {
       config_t cfg;
       config_load(&cfg);
       if (cfg.bandit_live_decision_enabled)
       {
-         static const char ml_arms[2][KB_BANDIT_MAX_ARM_ID] = {"10", "20"};
-         char ml_decision_id[KB_BANDIT_MAX_DECISION] = {0};
+         /* Arms come from the registry (source of truth); each arm id is the
+          * literal retrieval limit. */
+         char ml_arms[KB_BANDIT_MAX_ARMS][KB_BANDIT_MAX_ARM_ID];
+         for (int i = 0; i < ml_dp->n_arms; i++)
+            snprintf(ml_arms[i], KB_BANDIT_MAX_ARM_ID, "%s", ml_dp->arms[i]);
+
          int ml_arm =
-             kb_bandit_sample(&cfg, "kb_memory_retrieval_limit", NULL, ml_arms, 2, ml_decision_id);
-         if (ml_arm >= 0 && ml_arm < 2)
+             kb_bandit_sample(&cfg, ml_dp->id, NULL, ml_arms, ml_dp->n_arms, ml_decision_id);
+         if (ml_arm >= 0 && ml_arm < ml_dp->n_arms)
          {
-            aimee_log(LOG_DEBUG, "kb.bandit", "kb_memory_retrieval_limit arm=%s", ml_arms[ml_arm]);
-            limit = (ml_arm == 0) ? 10 : 20;
+            aimee_log(LOG_DEBUG, "kb.bandit", "%s arm=%s", ml_dp->id, ml_arms[ml_arm]);
+            int arm_limit = atoi(ml_arms[ml_arm]);
+            if (arm_limit > 0)
+               limit = arm_limit;
+            snprintf(ml_arm_id, sizeof(ml_arm_id), "%s", ml_arms[ml_arm]);
          }
       }
    }
@@ -56,6 +87,16 @@ int kb_handle_memory_find_facts(int fd, cJSON *req)
    memory_fusion_state_set(cJSON_IsString(fusion_j) ? fusion_j->valuestring : NULL);
    cJSON *resp = db2_kb_service_memory_find_facts_json(query_j->valuestring, limit);
    memory_fusion_state_clear();
+
+   /* Close the bandit loop: attribute an immediate recall-sufficiency reward to
+    * the sampled decision so the arm posteriors update from live traffic. */
+   if (ml_dp && ml_decision_id[0] && ml_arm_id[0])
+   {
+      cJSON *facts = resp ? cJSON_GetObjectItemCaseSensitive(resp, "facts") : NULL;
+      int n_results = cJSON_IsArray(facts) ? cJSON_GetArraySize(facts) : 0;
+      double reward = kb_bandit_recall_sufficiency_reward(n_results, limit);
+      kb_bandit_reward(NULL, ml_dp->id, ml_decision_id, ml_arm_id, reward);
+   }
    return kb_reply_or_error(fd, resp, "failed to search memory facts");
 }
 

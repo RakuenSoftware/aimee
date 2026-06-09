@@ -8,6 +8,7 @@
 #include "db2/demotion.h"
 #include "db2/memory_query.h"
 #include "kb_bandit.h"
+#include "kb_bandit_registry.h"
 #include "kb_intel_payload.h"
 #include "memory.h"
 
@@ -144,53 +145,132 @@ cJSON *kb_intel_demote_check_response(void)
 #define KB_INTEL_BANDIT_EXPORT_LIMIT 500
 #define KB_INTEL_BANDIT_EXPORT_BUFSZ (256 * 1024)
 
+/* Build one {decision_point, decisions, arm_stats} object for a decision point
+ * that is actually present in the bandit decision log.  Arms are discovered from
+ * the log (so they appear even before any reward has been observed). */
+static cJSON *intel_bandit_point_obj(const char *decision_point)
+{
+   cJSON *pt = cJSON_CreateObject();
+   if (!pt)
+      return NULL;
+   cJSON_AddStringToObject(pt, "decision_point", decision_point);
+
+   /* Closed decisions for offline replay. */
+   char *buf = malloc(KB_INTEL_BANDIT_EXPORT_BUFSZ);
+   cJSON *decisions = NULL;
+   if (buf)
+   {
+      buf[0] = '\0';
+      db2_bandit_decisions_export(decision_point, KB_INTEL_BANDIT_EXPORT_LIMIT, buf,
+                                  KB_INTEL_BANDIT_EXPORT_BUFSZ);
+      decisions = cJSON_ParseWithLength(buf, strlen(buf));
+      free(buf);
+   }
+   cJSON_AddItemToObject(pt, "decisions", decisions ? decisions : cJSON_CreateArray());
+
+   /* Per-arm stats, over the arms observed in the log for this point. */
+   cJSON *arm_stats_arr = cJSON_CreateArray();
+   char arms_buf[8192];
+   arms_buf[0] = '\0';
+   db2_bandit_arms_list(decision_point, arms_buf, sizeof(arms_buf));
+   cJSON *arms = cJSON_ParseWithLength(arms_buf, strlen(arms_buf));
+   if (cJSON_IsArray(arms))
+   {
+      cJSON *arm;
+      cJSON_ArrayForEach(arm, arms)
+      {
+         if (!cJSON_IsString(arm) || !arm->valuestring[0])
+            continue;
+         db2_bandit_arm_stats_t stats;
+         memset(&stats, 0, sizeof(stats));
+         db2_bandit_arm_stats_read(decision_point, arm->valuestring, &stats);
+
+         cJSON *entry = cJSON_CreateObject();
+         cJSON_AddStringToObject(entry, "arm_id", arm->valuestring);
+         cJSON_AddNumberToObject(entry, "n_decisions", (double)stats.n_decisions);
+         cJSON_AddNumberToObject(entry, "n_rewards", (double)stats.n_rewards);
+         cJSON_AddNumberToObject(entry, "sum_reward", stats.sum_reward);
+         cJSON_AddNumberToObject(entry, "posterior_alpha", stats.posterior_alpha);
+         cJSON_AddNumberToObject(entry, "posterior_beta", stats.posterior_beta);
+         cJSON_AddItemToArray(arm_stats_arr, entry);
+      }
+   }
+   cJSON_Delete(arms);
+   cJSON_AddItemToObject(pt, "arm_stats", arm_stats_arr);
+   return pt;
+}
+
+/* Declared decision points from the registry (source of truth) — present even
+ * when a point has no logged decisions yet.  Lets `aimee optimize` show what is
+ * tunable, with each point's arm set and reward function. */
+static cJSON *intel_bandit_registry_array(void)
+{
+   cJSON *arr = cJSON_CreateArray();
+   if (!arr)
+      return NULL;
+   for (int i = 0; i < kb_bandit_registry_count(); i++)
+   {
+      const kb_bandit_decision_point_t *dp = kb_bandit_registry_at(i);
+      if (!dp)
+         continue;
+      cJSON *e = cJSON_CreateObject();
+      cJSON_AddStringToObject(e, "decision_point", dp->id);
+      cJSON_AddStringToObject(e, "description", dp->description);
+      cJSON_AddStringToObject(e, "reward_fn", dp->reward_fn);
+      cJSON_AddStringToObject(e, "status", dp->status);
+      cJSON *arms = cJSON_CreateArray();
+      for (int a = 0; a < dp->n_arms; a++)
+         cJSON_AddItemToArray(arms, cJSON_CreateString(dp->arms[a]));
+      cJSON_AddItemToObject(e, "arms", arms);
+      cJSON_AddItemToArray(arr, e);
+   }
+   return arr;
+}
+
+/* Export bandit state for every decision point that has logged decisions.
+ *
+ * Data-driven: the set of points and their arms is read from the decision log
+ * (db2_bandit_decision_points_list / db2_bandit_arms_list), not hard-coded, so
+ * introspection reflects what is actually sampled at runtime.  The top-level
+ * `decision_point` mirrors the primary (most-recent) point for backward
+ * compatibility; `points` carries the full per-point breakdown; `registry`
+ * lists every declared decision point (even those not yet sampled). */
 cJSON *kb_intel_bandit_export_response(void)
 {
-   const char *decision_point = "kb_fusion_mode";
-   static const char *arms[] = {"rrf", "static_alpha", "dynamic_alpha"};
-   int n_arms = 3;
-
-   char *buf = malloc(KB_INTEL_BANDIT_EXPORT_BUFSZ);
-   if (!buf)
-      return NULL;
-
-   buf[0] = '\0';
-   db2_bandit_decisions_export(decision_point, KB_INTEL_BANDIT_EXPORT_LIMIT, buf,
-                               KB_INTEL_BANDIT_EXPORT_BUFSZ);
-
-   cJSON *decisions = cJSON_ParseWithLength(buf, strlen(buf));
-   free(buf);
-   if (!decisions)
-      decisions = cJSON_CreateArray();
-
-   cJSON *arm_stats_arr = cJSON_CreateArray();
-   for (int i = 0; i < n_arms; i++)
-   {
-      db2_bandit_arm_stats_t stats;
-      memset(&stats, 0, sizeof(stats));
-      db2_bandit_arm_stats_read(decision_point, arms[i], &stats);
-
-      cJSON *entry = cJSON_CreateObject();
-      cJSON_AddStringToObject(entry, "arm_id", arms[i]);
-      cJSON_AddNumberToObject(entry, "n_decisions", (double)stats.n_decisions);
-      cJSON_AddNumberToObject(entry, "n_rewards", (double)stats.n_rewards);
-      cJSON_AddNumberToObject(entry, "sum_reward", stats.sum_reward);
-      cJSON_AddNumberToObject(entry, "posterior_alpha", stats.posterior_alpha);
-      cJSON_AddNumberToObject(entry, "posterior_beta", stats.posterior_beta);
-      cJSON_AddItemToArray(arm_stats_arr, entry);
-   }
+   char points_buf[8192];
+   points_buf[0] = '\0';
+   db2_bandit_decision_points_list(points_buf, sizeof(points_buf));
+   cJSON *names = cJSON_ParseWithLength(points_buf, strlen(points_buf));
 
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
    {
-      cJSON_Delete(decisions);
-      cJSON_Delete(arm_stats_arr);
+      cJSON_Delete(names);
       return NULL;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "decision_point", decision_point);
-   cJSON_AddItemToObject(resp, "decisions", decisions);
-   cJSON_AddItemToObject(resp, "arm_stats", arm_stats_arr);
+
+   cJSON *points = cJSON_CreateArray();
+   const char *primary = "";
+   if (cJSON_IsArray(names))
+   {
+      cJSON *name;
+      cJSON_ArrayForEach(name, names)
+      {
+         if (!cJSON_IsString(name) || !name->valuestring[0])
+            continue;
+         if (!primary[0])
+            primary = name->valuestring;
+         cJSON *pt = intel_bandit_point_obj(name->valuestring);
+         if (pt)
+            cJSON_AddItemToArray(points, pt);
+      }
+   }
+   /* Back-compat: a single primary point at the top level (string is copied). */
+   cJSON_AddStringToObject(resp, "decision_point", primary);
+   cJSON_AddItemToObject(resp, "points", points);
+   cJSON_AddItemToObject(resp, "registry", intel_bandit_registry_array());
+   cJSON_Delete(names);
    return resp;
 }
 
@@ -276,4 +356,187 @@ int kb_intel_bandit_replay_record_http(const char *body, int body_len, char *out
    memcpy(out_buf, json, n + 1);
    free(json);
    return 200;
+}
+
+/* Serialize a response object into out_buf; returns the HTTP status. */
+static int intel_bandit_emit_http(cJSON *resp, char *out_buf, int out_cap)
+{
+   char *json = resp ? cJSON_PrintUnformatted(resp) : NULL;
+   cJSON_Delete(resp);
+   if (!json)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"status\":\"error\",\"message\":\"out of memory\"}");
+      return 500;
+   }
+   size_t n = strlen(json);
+   if (n >= (size_t)out_cap)
+   {
+      free(json);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"status\":\"error\",\"message\":\"response too large\"}");
+      return 500;
+   }
+   memcpy(out_buf, json, n + 1);
+   free(json);
+   return 200;
+}
+
+/* bandit.sample: select an arm for a decision point (Thompson via the optimize
+ * sidecar), log the decision, and return {arm, decision_id}. Server-side
+ * decision points (e.g. delegate_routing) reach the DB2 bandit through this. */
+cJSON *kb_intel_bandit_sample_response(const char *body_json, int body_len)
+{
+   if (!body_json || body_len <= 0)
+      return intel_bandit_replay_err("missing body");
+   cJSON *body = cJSON_ParseWithLength(body_json, (size_t)body_len);
+   if (!body || !cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return intel_bandit_replay_err("body must be a JSON object");
+   }
+   const char *dp = cJSON_GetStringValue(cJSON_GetObjectItem(body, "decision_point"));
+   cJSON *arms = cJSON_GetObjectItem(body, "arms");
+   if (!dp || !dp[0])
+   {
+      cJSON_Delete(body);
+      return intel_bandit_replay_err("decision_point is required");
+   }
+   if (!cJSON_IsArray(arms) || cJSON_GetArraySize(arms) < 1)
+   {
+      cJSON_Delete(body);
+      return intel_bandit_replay_err("arms (non-empty array) is required");
+   }
+   int total = cJSON_GetArraySize(arms);
+   char arm_ids[KB_BANDIT_MAX_ARMS][KB_BANDIT_MAX_ARM_ID];
+   int na = 0;
+   for (int i = 0; i < total && na < KB_BANDIT_MAX_ARMS; i++)
+   {
+      cJSON *a = cJSON_GetArrayItem(arms, i);
+      if (cJSON_IsString(a) && a->valuestring[0])
+         snprintf(arm_ids[na++], KB_BANDIT_MAX_ARM_ID, "%s", a->valuestring);
+   }
+   cJSON *ctx = cJSON_GetObjectItem(body, "context");
+   char *ctx_str = (ctx && cJSON_IsObject(ctx)) ? cJSON_PrintUnformatted(ctx) : NULL;
+
+   config_t cfg;
+   config_load(&cfg);
+   char decision_id[KB_BANDIT_MAX_DECISION] = {0};
+   int idx = (na >= 1) ? kb_bandit_sample(&cfg, dp, ctx_str, arm_ids, na, decision_id) : -1;
+   free(ctx_str);
+   cJSON_Delete(body);
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   if (idx < 0 || idx >= na)
+   {
+      /* Sampling disabled (no optimize command) or failed — caller falls back to
+       * its default routing; no decision is logged. */
+      cJSON_AddStringToObject(resp, "status", "disabled");
+      return resp;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "arm", arm_ids[idx]);
+   cJSON_AddStringToObject(resp, "decision_id", decision_id);
+   return resp;
+}
+
+/* bandit.close: close a logged decision with its observed reward [0,1] and update
+ * the arm posterior. */
+cJSON *kb_intel_bandit_close_response(const char *body_json, int body_len)
+{
+   if (!body_json || body_len <= 0)
+      return intel_bandit_replay_err("missing body");
+   cJSON *body = cJSON_ParseWithLength(body_json, (size_t)body_len);
+   if (!body || !cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return intel_bandit_replay_err("body must be a JSON object");
+   }
+   const char *dp = cJSON_GetStringValue(cJSON_GetObjectItem(body, "decision_point"));
+   const char *did = cJSON_GetStringValue(cJSON_GetObjectItem(body, "decision_id"));
+   const char *arm = cJSON_GetStringValue(cJSON_GetObjectItem(body, "arm_id"));
+   cJSON *rj = cJSON_GetObjectItem(body, "reward");
+   if (!dp || !dp[0] || !did || !did[0] || !arm || !arm[0])
+   {
+      cJSON_Delete(body);
+      return intel_bandit_replay_err("decision_point, decision_id and arm_id are required");
+   }
+   double reward = cJSON_IsNumber(rj) ? rj->valuedouble : 0.0;
+   if (reward < 0.0)
+      reward = 0.0;
+   if (reward > 1.0)
+      reward = 1.0;
+
+   config_t cfg;
+   config_load(&cfg);
+   int rc = kb_bandit_reward(&cfg, dp, did, arm, reward);
+   cJSON_Delete(body);
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   cJSON_AddStringToObject(resp, "status", rc == 0 ? "ok" : "error");
+   if (rc != 0)
+      cJSON_AddStringToObject(resp, "message", "failed to close decision");
+   return resp;
+}
+
+int kb_intel_bandit_sample_http(const char *body, int body_len, char *out_buf, int out_cap)
+{
+   if (!out_buf || out_cap <= 0)
+      return 500;
+   return intel_bandit_emit_http(kb_intel_bandit_sample_response(body, body_len), out_buf, out_cap);
+}
+
+int kb_intel_bandit_close_http(const char *body, int body_len, char *out_buf, int out_cap)
+{
+   if (!out_buf || out_cap <= 0)
+      return 500;
+   return intel_bandit_emit_http(kb_intel_bandit_close_response(body, body_len), out_buf, out_cap);
+}
+
+/* bandit.promote: persist {decision_point, arm} as the production-default arm
+ * (consumers honour it when live sampling is off), recording the prior default
+ * as rollback. Returns {status, rollback_arm}. */
+cJSON *kb_intel_bandit_promote_response(const char *body_json, int body_len)
+{
+   if (!body_json || body_len <= 0)
+      return intel_bandit_replay_err("missing body");
+   cJSON *body = cJSON_ParseWithLength(body_json, (size_t)body_len);
+   if (!body || !cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return intel_bandit_replay_err("body must be a JSON object");
+   }
+   const char *dp = cJSON_GetStringValue(cJSON_GetObjectItem(body, "decision_point"));
+   const char *arm = cJSON_GetStringValue(cJSON_GetObjectItem(body, "arm"));
+   if (!dp || !dp[0] || !arm || !arm[0])
+   {
+      cJSON_Delete(body);
+      return intel_bandit_replay_err("decision_point and arm are required");
+   }
+
+   char rollback[KB_BANDIT_MAX_ARM_ID] = "";
+   db2_bandit_promotion_get(dp, rollback, sizeof(rollback)); /* prior default, if any */
+   int rc = db2_bandit_promotion_set(dp, arm, rollback);
+   cJSON_Delete(body);
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   cJSON_AddStringToObject(resp, "status", rc == 0 ? "ok" : "error");
+   if (rc == 0)
+      cJSON_AddStringToObject(resp, "rollback_arm", rollback);
+   else
+      cJSON_AddStringToObject(resp, "message", "failed to persist promotion");
+   return resp;
+}
+
+int kb_intel_bandit_promote_http(const char *body, int body_len, char *out_buf, int out_cap)
+{
+   if (!out_buf || out_cap <= 0)
+      return 500;
+   return intel_bandit_emit_http(kb_intel_bandit_promote_response(body, body_len), out_buf,
+                                 out_cap);
 }

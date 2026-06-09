@@ -63,6 +63,9 @@ Class | Method | HTTP request | Description
 *DefaultApi* | [**post_drain**](docs/DefaultApi.md#post_drain) | **POST** /drain | Drain the asynchronous knowledge ingest queue
 *DefaultApi* | [**post_entity_search**](docs/DefaultApi.md#post_entity_search) | **POST** /entities/search | Find entities by name or context
 *DefaultApi* | [**post_ingest**](docs/DefaultApi.md#post_ingest) | **POST** /ingest | Enqueue background project ingest
+*DefaultApi* | [**post_intelligence_bandit_close**](docs/DefaultApi.md#post_intelligence_bandit_close) | **POST** /intelligence/bandit/close | Close a sampled decision with its observed reward
+*DefaultApi* | [**post_intelligence_bandit_promote**](docs/DefaultApi.md#post_intelligence_bandit_promote) | **POST** /intelligence/bandit/promote | Persist the production-default arm for a decision point
+*DefaultApi* | [**post_intelligence_bandit_sample**](docs/DefaultApi.md#post_intelligence_bandit_sample) | **POST** /intelligence/bandit/sample | Sample an arm for a decision point (server-side decision points)
 *DefaultApi* | [**post_maintenance_clear**](docs/DefaultApi.md#post_maintenance_clear) | **POST** /maintenance/clear | Clear indexed knowledge for a project
 *DefaultApi* | [**post_maintenance_reconcile**](docs/DefaultApi.md#post_maintenance_reconcile) | **POST** /maintenance/reconcile | Reconcile orphaned vector records
 *DefaultApi* | [**post_maintenance_repair**](docs/DefaultApi.md#post_maintenance_repair) | **POST** /maintenance/repair | Repair a project knowledge index

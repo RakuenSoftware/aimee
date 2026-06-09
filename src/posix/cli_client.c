@@ -1,5 +1,5 @@
 /* cli_client.c: shared client library. aimee-server is reached over its /v1 HTTP
- * surface (cli_http_request / cli_v1_rpc_local); the cli_connect/cli_request
+ * surface (cli_http_request / cli_v1_dispatch_local); the cli_connect/cli_request
  * NDJSON primitives remain only for the aimee-kb sidecar socket. */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -95,7 +95,7 @@ static const char *cli_http_sock_path(void)
  * UDS within timeout_ms. The local UDS is filesystem-trusted (no token); a 2xx
  * response means the server is up and serving /v1. This is the liveness probe
  * that replaced the NDJSON `server.info` handshake — health-only by design (the
- * /v1 surface + /v1/rpc bridge make per-method/version gating unnecessary, and
+ * first-class /v1 surface makes per-method/version gating unnecessary, and
  * strict version matching historically caused dev-vs-installed restart loops). */
 static int cli_http_health_ok(int timeout_ms)
 {
@@ -1013,7 +1013,7 @@ int cli_server_available(const char *socket_path)
    return cli_http_health_ok(CLIENT_CONNECT_TIMEOUT_MS);
 }
 
-/* cli_v1_rpc_local now lives in the shared cli_rpc_routes.inc — it resolves the
+/* cli_v1_dispatch_local now lives in the shared cli_rpc_routes.inc — it resolves the
  * method's first-class /v1 route (no more POST /v1/rpc bridge). */
 
 void cli_close(cli_conn_t *conn)

@@ -685,6 +685,8 @@ static void ensure_codex_plugin_files(const char *home)
             "    \"termsOfServiceURL\": \"https://github.com/RakuenSoftware/aimee\",\n"
             "    \"defaultPrompt\": [\n"
             "      \"Search aimee memory before answering repo-specific questions\",\n"
+            "      \"Explore the codebase through aimee's tools (find_symbol, "
+            "ast_grep_search, search_graph) instead of raw grep/read\",\n"
             "      \"Preview the blast radius before editing multiple files\",\n"
             "      \"%s\",\n"
             "      \"Delegate bounded work through aimee delegate, not provider sub-agents\"\n"
@@ -729,6 +731,8 @@ static void ensure_codex_plugin_files(const char *home)
             "    \"termsOfServiceURL\": \"https://github.com/RakuenSoftware/aimee\",\n"
             "    \"defaultPrompt\": [\n"
             "      \"Search aimee memory before answering repo-specific questions\",\n"
+            "      \"Explore the codebase through aimee's tools (find_symbol, "
+            "ast_grep_search, search_graph) instead of raw grep/read\",\n"
             "      \"Preview the blast radius before editing multiple files\",\n"
             "      \"%s\",\n"
             "      \"Delegate bounded work through aimee delegate, not provider sub-agents\"\n"
@@ -856,6 +860,61 @@ static void ensure_claude_code_mcp(const char *settings_path)
    cJSON_Delete(root);
 }
 
+/* Ensure `hooks.<event>` contains an entry running
+ * `AIMEE_HOOK_CLIENT=claude <aimee> <subcommand>`, optionally scoped to
+ * `matcher` (NULL = fire on every event of this type). Idempotent (keyed on the
+ * subcommand substring); sets *dirty when it adds the array or the entry. Used
+ * for the context-pre-injection hooks (UserPromptSubmit, PreCompact — no
+ * matcher) and the attention guard (PreToolUse — matcher-scoped). */
+static void ensure_aimee_event_hook(cJSON *hooks, const char *event, const char *subcommand,
+                                    const char *matcher, int *dirty)
+{
+   cJSON *arr = cJSON_GetObjectItemCaseSensitive(hooks, event);
+   if (!cJSON_IsArray(arr))
+   {
+      if (arr)
+         cJSON_DeleteItemFromObjectCaseSensitive(hooks, event);
+      arr = cJSON_AddArrayToObject(hooks, event);
+      *dirty = 1;
+   }
+   for (int i = 0; i < cJSON_GetArraySize(arr); i++)
+   {
+      cJSON *hook_arr = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(arr, i), "hooks");
+      if (!cJSON_IsArray(hook_arr))
+         continue;
+      for (int j = 0; j < cJSON_GetArraySize(hook_arr); j++)
+      {
+         cJSON *cmd = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(hook_arr, j), "command");
+         if (cJSON_IsString(cmd) && strstr(cmd->valuestring, subcommand))
+            return; /* already installed */
+      }
+   }
+   const char *aimee_bin = resolved_aimee_bin_path();
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "AIMEE_HOOK_CLIENT=claude %s %s", aimee_bin ? aimee_bin : "aimee",
+            subcommand);
+   cJSON *entry = cJSON_CreateObject();
+   cJSON *hook_arr = cJSON_CreateArray();
+   cJSON *hook = cJSON_CreateObject();
+   if (entry && hook_arr && hook)
+   {
+      if (matcher && matcher[0])
+         cJSON_AddStringToObject(entry, "matcher", matcher);
+      cJSON_AddStringToObject(hook, "type", "command");
+      cJSON_AddStringToObject(hook, "command", cmd);
+      cJSON_AddItemToArray(hook_arr, hook);
+      cJSON_AddItemToObject(entry, "hooks", hook_arr);
+      cJSON_AddItemToArray(arr, entry);
+      *dirty = 1;
+   }
+   else
+   {
+      cJSON_Delete(entry);
+      cJSON_Delete(hook_arr);
+      cJSON_Delete(hook);
+   }
+}
+
 /* Ensure PostToolUse hooks include EnterWorktree|ExitWorktree so that
  * aimee's CWD tracking file gets updated when the session enters/exits
  * a worktree. Without this, MCP git tools won't follow worktree changes. */
@@ -958,6 +1017,17 @@ static void ensure_claude_code_hooks(const char *settings_path)
          cJSON_Delete(hook);
       }
    }
+
+   /* Context pre-injection hooks: the P1 per-turn UserPromptSubmit envelope and
+    * the P3 PreCompact re-prime. Both fire with no matcher and soft-fail, so
+    * they never block a turn. */
+   ensure_aimee_event_hook(hooks, "UserPromptSubmit", "user-prompt-submit", NULL, &dirty);
+   ensure_aimee_event_hook(hooks, "PreCompact", "pre-compact", NULL, &dirty);
+   /* P3 attention guard: PreToolUse hook scoped to read/edit/destructive tools;
+    * accrues per-file attention and blocks hard-destructive ops on files the
+    * session has actively touched. */
+   ensure_aimee_event_hook(hooks, "PreToolUse", "attention-guard",
+                           "Read|Edit|Write|MultiEdit|NotebookEdit|Bash", &dirty);
 
    if (dirty)
    {

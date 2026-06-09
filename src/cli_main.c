@@ -4,6 +4,8 @@
 #include "cli_remote.h"
 #include "cli_client.h"
 #include "cli_session_start.h"
+#include "cli_attention_guard.h"
+#include "cli_code_audit.h"
 #include "cli_mcp_serve.h"
 #include "acp_server.h"
 #include "cli_profile.h"
@@ -190,11 +192,14 @@ static void client_delegate_plan_usage(void)
 
 static void client_delegate_usage(void)
 {
-   fprintf(stderr, "Usage: aimee delegate <role> [\"prompt\"] [options]\n"
+   fprintf(stderr, "Usage: aimee delegate <role> [\"prompt\"] --persona NAME [options]\n"
                    "\n"
-                   "Delegate a bounded task to a sub-agent.\n"
+                   "Delegate a bounded task to a sub-agent. A persona is required.\n"
                    "\n"
                    "Options:\n"
+                   "  --persona NAME     REQUIRED. Run the delegate as a persona (e.g. engineer,\n"
+                   "                     qa, security, reviewer, architect, or a custom persona):\n"
+                   "                     sets its identity + principles\n"
                    "  --json             Output result as JSON\n"
                    "  --background       Run asynchronously (returns job ID)\n"
                    "  --durable          Persist result to disk\n"
@@ -479,9 +484,10 @@ static int arg_list_contains_help_flag(int argc, char **argv)
 
 static int delegate_arg_is_subcommand(const char *arg)
 {
-   return arg && (strcmp(arg, "plan") == 0 || strcmp(arg, "launch") == 0 ||
-                  strcmp(arg, "status") == 0 || strcmp(arg, "log") == 0 ||
-                  strcmp(arg, "history") == 0 || strcmp(arg, "--list-roles") == 0);
+   return arg &&
+          (strcmp(arg, "plan") == 0 || strcmp(arg, "launch") == 0 || strcmp(arg, "status") == 0 ||
+           strcmp(arg, "log") == 0 || strcmp(arg, "history") == 0 ||
+           strcmp(arg, "aggregate") == 0 || strcmp(arg, "--list-roles") == 0);
 }
 
 static int arg_list_contains(int argc, char **argv, const char *flag)
@@ -537,7 +543,7 @@ static int handle_agent_setup_cmd(int argc, char **argv, int json_output)
    cJSON *req1 = cJSON_CreateObject();
    cJSON_AddStringToObject(req1, "method", "agent.setup");
    cJSON_AddStringToObject(req1, "provider", provider);
-   cJSON *resp1 = cli_v1_rpc_local(req1, 15000);
+   cJSON *resp1 = cli_v1_dispatch_local(req1, 15000);
    cJSON_Delete(req1);
 
    if (!resp1)
@@ -624,7 +630,7 @@ static int handle_agent_setup_cmd(int argc, char **argv, int json_output)
    cJSON_AddNumberToObject(req2, "expires_in", expires_s);
 
    int poll_timeout_ms = (expires_s + 60) * 1000;
-   cJSON *resp2 = cli_v1_rpc_local(req2, poll_timeout_ms);
+   cJSON *resp2 = cli_v1_dispatch_local(req2, poll_timeout_ms);
    cJSON_Delete(req2);
 
    if (!resp2)
@@ -843,7 +849,7 @@ static int handle_hooks(int argc, char **argv, int json_output)
    if (sid && sid[0])
       cJSON_AddStringToObject(req, "session_id", sid);
 
-   cJSON *resp = cli_v1_rpc_local(req, 5000);
+   cJSON *resp = cli_v1_dispatch_local(req, 5000);
    cJSON_Delete(req);
    free(stdin_data);
 
@@ -1031,7 +1037,7 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
    }
    else
    {
-      resp = cli_v1_rpc_local(req, 30000);
+      resp = cli_v1_dispatch_local(req, 30000);
    }
    cJSON_Delete(req);
 
@@ -1715,6 +1721,10 @@ int main(int argc, char **argv)
       return cmd_profile_run(sub_argc, sub_argv);
    if (strcmp(cmd, "claude-proxy") == 0)
       return cli_claude_proxy(sub_argc, sub_argv);
+   /* optimize: dispatches optimize.export to its first-class /v1 route, then
+    * renders points/baseline/replay client-side. */
+   if (strcmp(cmd, "optimize") == 0)
+      return cmd_optimize_run(sub_argc, sub_argv, json_output);
 #ifndef _WIN32
    /* manuscript mode talks to the server over the Unix-domain /v1 socket
     * (http_uds_client, AF_UNIX), which the Windows client does not build. */
@@ -1793,9 +1803,31 @@ int main(int argc, char **argv)
    if (strcmp(cmd, "hooks") == 0)
       return handle_hooks(sub_argc, sub_argv, json_output);
 
+   /* Code audit (P4): `aimee code audit [dir] [--json]` — local file-health scan. */
+   if (strcmp(cmd, "code") == 0)
+   {
+      if (sub_argc >= 1 && strcmp(sub_argv[0], "audit") == 0)
+         return handle_code_audit(sub_argc - 1, sub_argv + 1, json_output);
+      fprintf(stderr, "usage: aimee code audit [dir] [--json]\n");
+      return 2;
+   }
+
    /* SessionStart hook (settings.json wires it as `aimee session-start`). */
    if (strcmp(cmd, "session-start") == 0)
       return handle_session_start(json_output);
+
+   /* UserPromptSubmit hook (P1 per-turn context pre-injection for Claude Code;
+    * settings.json wires it as `aimee user-prompt-submit`). */
+   if (strcmp(cmd, "user-prompt-submit") == 0)
+      return handle_user_prompt_submit();
+
+   /* PreCompact hook (P3 re-prime; settings.json wires it as `aimee pre-compact`). */
+   if (strcmp(cmd, "pre-compact") == 0)
+      return handle_pre_compact();
+
+   /* PreToolUse attention guard (P3; settings.json wires it as `aimee attention-guard`). */
+   if (strcmp(cmd, "attention-guard") == 0)
+      return handle_attention_guard();
 
    /* agent token: read access_token from local auth file; no server needed.
     * This command is called by agent_resolve_auth via safe_exec_capture so it

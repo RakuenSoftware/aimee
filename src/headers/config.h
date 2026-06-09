@@ -273,6 +273,12 @@ typedef struct config
    int memory_context_budget_enabled; /* 0=top-K assembly (default), 1=token-budget assembly */
    int memory_context_budget_tokens;  /* budget in tokens; 0=use default (2048) */
    int memory_routing_enabled;        /* 1=adaptive route selection (default), 0=hybrid route mix */
+
+   /* Context pre-injection for the model ingresses (Codex/OpenAI). When on, the
+    * ingress prepends a fusion-recall <aimee-context> envelope to the request
+    * system prompt so the external agent stops re-exploring the repo. Default
+    * off; a per-request `x-aimee-preinject: 0` header also disables it. */
+   int ingress_preinject_enabled;
    int memory_pagerank_enabled;
    int memory_pagerank_iterations;
    double memory_pagerank_weight;
@@ -885,7 +891,7 @@ typedef struct config
    /* server_api_remote_writes: how far a TCP bearer may mutate (the UDS path is
     * always full). 0 = off (default; mutating routes local-UDS-only), 1 = data
     * (data-mutating /v1 routes allowed over TCP, capability-gated), 2 = full
-    * (CAPS_ALL: data writes + delegate/tool over /v1/rpc). Parsed from
+    * (CAPS_ALL: data writes + delegate/tool over /v1). Parsed from
     * aimee.api.remote_writes ("off"|"data"|"full"); see SERVER_REMOTE_WRITES_*. */
    int server_api_remote_writes;
 

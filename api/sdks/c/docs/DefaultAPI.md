@@ -38,6 +38,9 @@ Method | HTTP request | Description
 [**DefaultAPI_postDrain**](DefaultAPI.md#DefaultAPI_postDrain) | **POST** /drain | Drain the asynchronous knowledge ingest queue
 [**DefaultAPI_postEntitySearch**](DefaultAPI.md#DefaultAPI_postEntitySearch) | **POST** /entities/search | Find entities by name or context
 [**DefaultAPI_postIngest**](DefaultAPI.md#DefaultAPI_postIngest) | **POST** /ingest | Enqueue background project ingest
+[**DefaultAPI_postIntelligenceBanditClose**](DefaultAPI.md#DefaultAPI_postIntelligenceBanditClose) | **POST** /intelligence/bandit/close | Close a sampled decision with its observed reward
+[**DefaultAPI_postIntelligenceBanditPromote**](DefaultAPI.md#DefaultAPI_postIntelligenceBanditPromote) | **POST** /intelligence/bandit/promote | Persist the production-default arm for a decision point
+[**DefaultAPI_postIntelligenceBanditSample**](DefaultAPI.md#DefaultAPI_postIntelligenceBanditSample) | **POST** /intelligence/bandit/sample | Sample an arm for a decision point (server-side decision points)
 [**DefaultAPI_postMaintenanceClear**](DefaultAPI.md#DefaultAPI_postMaintenanceClear) | **POST** /maintenance/clear | Clear indexed knowledge for a project
 [**DefaultAPI_postMaintenanceReconcile**](DefaultAPI.md#DefaultAPI_postMaintenanceReconcile) | **POST** /maintenance/reconcile | Reconcile orphaned vector records
 [**DefaultAPI_postMaintenanceRepair**](DefaultAPI.md#DefaultAPI_postMaintenanceRepair) | **POST** /maintenance/repair | Repair a project knowledge index
@@ -1036,6 +1039,90 @@ Name | Type | Description  | Notes
 ### HTTP request headers
 
  - **Content-Type**: application/json
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **DefaultAPI_postIntelligenceBanditClose**
+```c
+// Close a sampled decision with its observed reward
+//
+object_t* DefaultAPI_postIntelligenceBanditClose(apiClient_t *apiClient);
+```
+
+### Parameters
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+**apiClient** | **apiClient_t \*** | context containing the client configuration |
+
+### Return type
+
+[object_t](object.md) *
+
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **DefaultAPI_postIntelligenceBanditPromote**
+```c
+// Persist the production-default arm for a decision point
+//
+object_t* DefaultAPI_postIntelligenceBanditPromote(apiClient_t *apiClient);
+```
+
+### Parameters
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+**apiClient** | **apiClient_t \*** | context containing the client configuration |
+
+### Return type
+
+[object_t](object.md) *
+
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+# **DefaultAPI_postIntelligenceBanditSample**
+```c
+// Sample an arm for a decision point (server-side decision points)
+//
+object_t* DefaultAPI_postIntelligenceBanditSample(apiClient_t *apiClient);
+```
+
+### Parameters
+Name | Type | Description  | Notes
+------------- | ------------- | ------------- | -------------
+**apiClient** | **apiClient_t \*** | context containing the client configuration |
+
+### Return type
+
+[object_t](object.md) *
+
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
  - **Accept**: application/json
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)

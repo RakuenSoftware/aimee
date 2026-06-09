@@ -15,4 +15,15 @@ int client_hook_payload_session_id(const cJSON *hook_json, char *out, size_t out
  * directly. Returns the process exit code. */
 int handle_session_start(int json_output);
 
+/* `aimee user-prompt-submit` UserPromptSubmit-hook entry (cli_session_start.c).
+ * Reads the host hook JSON (with `prompt`) from stdin and, against a remote /v1
+ * endpoint, emits a per-turn <aimee-context> pre-injection envelope as the
+ * hook's additionalContext. Always soft-fails (returns 0). */
+int handle_user_prompt_submit(void);
+
+/* `aimee pre-compact` PreCompact-hook entry (cli_session_start.c). Re-emits the
+ * durable recall as additionalContext just before Claude Code compacts, so the
+ * post-compaction context isn't lost. Always soft-fails (returns 0). */
+int handle_pre_compact(void);
+
 #endif /* DEC_CLI_SESSION_START_H */

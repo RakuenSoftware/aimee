@@ -29,7 +29,8 @@ typedef struct
 {
    char project[128];
    char file_path[MAX_PATH_LEN];
-   int line;
+   int line;     /* 1-based definition (start) line */
+   int line_end; /* 1-based last line of the symbol body (>= line; 0 if unknown) */
    char kind[32];
 } term_hit_t;
 
@@ -37,7 +38,8 @@ typedef struct
 {
    char name[128];
    char kind[32];
-   int line;
+   int line;     /* 1-based definition (start) line */
+   int line_end; /* 1-based last line of the symbol body (>= line; 0 if unknown) */
 } definition_t;
 
 typedef struct
@@ -85,8 +87,17 @@ int extract_exports(const char *ext, const char *content, char **out, int max);
 /* Extract route definitions. Returns count. Caller frees each string. */
 int extract_routes(const char *ext, const char *content, char **out, int max);
 
-/* Extract definitions with line numbers. Returns count. */
+/* Extract definitions with line numbers. Returns count. Each definition's
+ * line_end is filled with the last line of its body (brace-match for C-family,
+ * indentation for Python; falls back to the start line when undetermined). */
 int extract_definitions(const char *ext, const char *content, definition_t *out, int max);
+
+/* Last line (1-based) of the definition that starts at `start_line` (1-based)
+ * in `content`, by language family: brace-depth for C-like languages,
+ * indentation for Python. Returns start_line when the span can't be
+ * determined. Pure (no I/O); the code index stores only the start line, so the
+ * span is computed here at index time. */
+int code_def_end_line(const char *content, int start_line, const char *ext);
 
 /* Extract function calls with caller context and line numbers. Returns count. */
 int extract_calls(const char *ext, const char *content, call_ref_t *out, int max);

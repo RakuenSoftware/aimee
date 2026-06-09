@@ -267,6 +267,24 @@ ingest_response_t*
 DefaultAPI_postIngest(apiClient_t *apiClient, ingest_request_t *ingest_request);
 
 
+// Close a sampled decision with its observed reward
+//
+object_t*
+DefaultAPI_postIntelligenceBanditClose(apiClient_t *apiClient);
+
+
+// Persist the production-default arm for a decision point
+//
+object_t*
+DefaultAPI_postIntelligenceBanditPromote(apiClient_t *apiClient);
+
+
+// Sample an arm for a decision point (server-side decision points)
+//
+object_t*
+DefaultAPI_postIntelligenceBanditSample(apiClient_t *apiClient);
+
+
 // Clear indexed knowledge for a project
 //
 maintenance_clear_response_t*

@@ -283,8 +283,40 @@ static void test_lua_definitions(void)
    assert(dc.count == 4);
 }
 
+/* --- code_def_end_line: body-span recovery for find_symbol --- */
+static void test_def_end_line(void)
+{
+   /* C: brace-matched span, ignoring an inner block. */
+   const char *c = "int a;\n"       /* 1 */
+                   "int f(int x)\n" /* 2  <- def start */
+                   "{\n"            /* 3 */
+                   "   if (x) {\n"  /* 4 */
+                   "      x++;\n"   /* 5 */
+                   "   }\n"         /* 6 */
+                   "   return x;\n" /* 7 */
+                   "}\n"            /* 8  <- end */
+                   "int g;\n";      /* 9 */
+   assert(code_def_end_line(c, 2, ".c") == 8);
+   /* A prototype / one-liner (no brace) collapses to its own line. */
+   assert(code_def_end_line("int proto(void);\n", 1, ".c") == 1);
+
+   /* Python: indented body, trailing blank line excluded. */
+   const char *py = "def f(x):\n"     /* 1  <- def */
+                    "    y = x + 1\n" /* 2 */
+                    "    return y\n"  /* 3  <- end */
+                    "\n"              /* 4  blank */
+                    "z = 1\n";        /* 5  dedent */
+   assert(code_def_end_line(py, 1, ".py") == 3);
+
+   /* Out-of-range / empty inputs are safe. */
+   assert(code_def_end_line("", 1, ".c") == 1);
+   assert(code_def_end_line(c, 0, ".c") == 1);
+   printf("def_end_line OK\n");
+}
+
 int main(void)
 {
+   test_def_end_line();
    test_c_imports();
    test_c_exports();
    test_c_definitions();

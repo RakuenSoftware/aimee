@@ -785,7 +785,7 @@ cJSON *cli_http_request_stream_ndjson(const char *endpoint, const char *method, 
    return final;
 }
 
-/* cli_v1_rpc_local now lives in the shared cli_rpc_routes.inc — it resolves the
+/* cli_v1_dispatch_local now lives in the shared cli_rpc_routes.inc — it resolves the
  * method's first-class /v1 route (no more POST /v1/rpc bridge). On Windows
  * cli_v1_send routes it through aimee_client_request to the configured remote.
  *

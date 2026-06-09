@@ -13,6 +13,9 @@
 #include "kb_features.h"
 #include "kb_ranker.h"
 #include "kb_detect.h"
+#include "kb_bandit.h"
+#include "kb_bandit_registry.h"
+#include "db2/bandit.h"
 #endif
 #include "headers/sketch.h"
 #include "kb.h"
@@ -1540,16 +1543,47 @@ static char *kb_search_gather(const char *project, const char *query, const char
    char proj[256];
    kb_resolve_project(project, NULL, proj, sizeof(proj));
 
-   /* Determine fusion mode: explicit override > config > default. */
+   /* Determine fusion mode: explicit override > bandit sample > config > default.
+    * When no override is given and live bandit decisions are enabled, sample the
+    * fusion strategy from the kb_fusion_mode decision point; the choice is
+    * rewarded from this search's recall sufficiency at the success exit below. */
    config_t fusion_cfg;
    int fusion_cfg_ok = (config_load(&fusion_cfg) == 0);
    const char *fusion_mode;
+   char fm_decision_id[KB_BANDIT_MAX_DECISION] = {0};
+   char fm_arm_id[KB_BANDIT_MAX_ARM_ID] = {0};
+   char fm_promo[KB_BANDIT_MAX_ARM_ID] = "";
+   const kb_bandit_decision_point_t *fm_dp = NULL;
    if (fusion_mode_override && fusion_mode_override[0])
       fusion_mode = fusion_mode_override;
-   else if (fusion_cfg_ok && fusion_cfg.kb_fusion_mode[0])
-      fusion_mode = fusion_cfg.kb_fusion_mode;
    else
-      fusion_mode = "rrf";
+   {
+      if (fusion_cfg_ok && fusion_cfg.bandit_live_decision_enabled)
+      {
+         fm_dp = kb_bandit_registry_get("kb_fusion_mode");
+         if (fm_dp && fm_dp->n_arms > 0)
+         {
+            char fm_arms[KB_BANDIT_MAX_ARMS][KB_BANDIT_MAX_ARM_ID];
+            for (int i = 0; i < fm_dp->n_arms; i++)
+               snprintf(fm_arms[i], KB_BANDIT_MAX_ARM_ID, "%s", fm_dp->arms[i]);
+            int a = kb_bandit_sample(&fusion_cfg, fm_dp->id, NULL, fm_arms, fm_dp->n_arms,
+                                     fm_decision_id);
+            if (a >= 0 && a < fm_dp->n_arms)
+               snprintf(fm_arm_id, sizeof(fm_arm_id), "%s", fm_arms[a]);
+            else
+               fm_dp = NULL; /* sample disabled/failed: fall back, no reward */
+         }
+      }
+      if (fm_arm_id[0])
+         fusion_mode = fm_arm_id; /* function-scope buffer; valid throughout */
+      else if (db2_bandit_promotion_get("kb_fusion_mode", fm_promo, sizeof(fm_promo)) == 0 &&
+               fm_promo[0])
+         fusion_mode = fm_promo; /* promoted default (operator locked it in) */
+      else if (fusion_cfg_ok && fusion_cfg.kb_fusion_mode[0])
+         fusion_mode = fusion_cfg.kb_fusion_mode;
+      else
+         fusion_mode = "rrf";
+   }
 
    kb_result_t *lex_res = malloc(MAX_LEXICAL_RESULTS * sizeof(kb_result_t));
    kb_result_t *vec_res = malloc(MAX_VEC_RESULTS * sizeof(kb_result_t));
@@ -1716,6 +1750,15 @@ static char *kb_search_gather(const char *project, const char *query, const char
 #endif
 
    *n_out = n_results;
+
+   /* Close the kb_fusion_mode bandit loop with this search's recall sufficiency
+    * (same proxy as kb_memory_retrieval_limit), so the arm posteriors learn from
+    * live traffic. Only runs when an arm was sampled above. */
+   if (fm_dp && fm_decision_id[0] && fm_arm_id[0])
+   {
+      double reward = kb_bandit_recall_sufficiency_reward(n_results, max_results);
+      kb_bandit_reward(NULL, fm_dp->id, fm_decision_id, fm_arm_id, reward);
+   }
    return NULL;
 }
 

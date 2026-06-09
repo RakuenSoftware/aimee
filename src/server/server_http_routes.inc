@@ -850,6 +850,11 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/dashboard/plugins", NULL, RM_EXACT, "dashboard.plugins", 0, rh_dispatch_op},
     {"GET", "/v1/dashboard/traces", NULL, RM_EXACT, "dashboard.traces", 0, rh_dispatch_op},
     {"GET", "/v1/insights/overview", NULL, RM_EXACT, "insights.overview", 0, rh_dispatch_op},
+    {"GET", "/v1/optimize/export", NULL, RM_EXACT, "optimize.export", 0, rh_dispatch_op},
+    {"POST", "/v1/optimize/promote", NULL, RM_EXACT, "optimize.promote", 0, rh_dispatch_op},
+    {"POST", "/v1/optimize/replay-record", NULL, RM_EXACT, "optimize.replay_record", 0, rh_dispatch_op},
+    {"GET", "/v1/calibration/readiness", NULL, RM_EXACT, "calibration.readiness", 0, rh_dispatch_op},
+    {"GET", "/v1/demotion/check", NULL, RM_EXACT, "demotion.check", 0, rh_dispatch_op},
     {"GET", "/v1/identity/show", NULL, RM_EXACT, "identity.show", 0, rh_dispatch_op},
     {"POST", "/v1/identity/diff", NULL, RM_EXACT, "identity.diff", 0, rh_dispatch_op},
     {"POST", "/v1/identity/snapshot", NULL, RM_EXACT, "identity.snapshot", 0, rh_dispatch_op},
@@ -869,6 +874,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/curator/implements", NULL, RM_EXACT, "curator.implements", 0, rh_dispatch_op},
     {"POST", "/v1/curator/invalidated", NULL, RM_EXACT, "curator.invalidated", 0, rh_dispatch_op},
     {"POST", "/v1/graph/explain", NULL, RM_EXACT, "graph.explain", 0, rh_dispatch_op},
+    {"POST", "/v1/code/audit", NULL, RM_EXACT, "code.audit", 0, rh_dispatch_op},
     {"POST", "/v1/trajectory/batch", NULL, RM_EXACT, "trajectory.batch", 0, rh_dispatch_op},
 
     /* work.* / wm.* / skill.* / session.* / toolset.* / mcp.* / trigger.* and
@@ -929,6 +935,8 @@ static const http_route_t g_v1_routes[] = {
      rh_dispatch_op_async},
     {"POST", "/v1/rules/generate", NULL, RM_EXACT, "rules.generate", 0, rh_dispatch_op_async},
     {"POST", "/v1/eval/run", NULL, RM_EXACT, "eval.run", 0, rh_dispatch_op_async},
+    {"POST", "/v1/delegate/aggregate", NULL, RM_EXACT, "delegate.aggregate", 0,
+     rh_dispatch_op_async},
 
     /* Compute / inference — consume model budget; map to the chat twin's cap. */
     {"POST", "/v1/chat/completions", NULL, RM_EXACT, "chat.send_stream", 0, rh_chat},

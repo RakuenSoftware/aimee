@@ -13,7 +13,6 @@ typedef struct
 } delegate_launch_result_t;
 
 int delegate_launch_coord_job(cJSON *plan, int max_concurrent, const char *cwd,
-                              delegate_launch_result_t *out,
-                              char *errbuf, size_t errbuf_len);
+                              delegate_launch_result_t *out, char *errbuf, size_t errbuf_len);
 
 #endif /* DEC_DELEGATE_LAUNCH_H */

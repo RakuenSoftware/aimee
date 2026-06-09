@@ -13,7 +13,7 @@
  * the registry is the rendezvous between "the server wants a file op done" and
  * "the client is here to do it". Bounded (64 live detached workspaces). */
 
-#define WS_RUNNER_REGISTRY_MAX  64
+#define WS_RUNNER_REGISTRY_MAX   64
 #define WS_RUNNER_REGISTRY_IDLEN 128
 
 /* Return the queue for `id`, creating (and initializing) it on first use.

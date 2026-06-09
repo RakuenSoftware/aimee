@@ -178,6 +178,7 @@ int handle_get_code_find(const char *query_string, char *out_buf, int out_cap)
       cJSON_AddStringToObject(hit, "project", hits[i].project);
       cJSON_AddStringToObject(hit, "file_path", hits[i].file_path);
       cJSON_AddNumberToObject(hit, "line", hits[i].line);
+      cJSON_AddNumberToObject(hit, "line_end", hits[i].line_end);
       cJSON_AddStringToObject(hit, "kind", hits[i].kind);
       cJSON_AddItemToArray(arr, hit);
    }
@@ -300,6 +301,7 @@ int handle_get_code_structure(const char *query_string, char *out_buf, int out_c
       cJSON_AddStringToObject(d, "name", defs[i].name);
       cJSON_AddStringToObject(d, "kind", defs[i].kind);
       cJSON_AddNumberToObject(d, "line", defs[i].line);
+      cJSON_AddNumberToObject(d, "line_end", defs[i].line_end);
       cJSON_AddItemToArray(arr, d);
    }
    char *json = cJSON_PrintUnformatted(resp);

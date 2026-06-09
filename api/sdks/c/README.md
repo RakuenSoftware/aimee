@@ -99,6 +99,9 @@ Category | Method | HTTP request | Description
 *DefaultAPI* | [**DefaultAPI_postDrain**](docs/DefaultAPI.md#DefaultAPI_postDrain) | **POST** /drain | Drain the asynchronous knowledge ingest queue
 *DefaultAPI* | [**DefaultAPI_postEntitySearch**](docs/DefaultAPI.md#DefaultAPI_postEntitySearch) | **POST** /entities/search | Find entities by name or context
 *DefaultAPI* | [**DefaultAPI_postIngest**](docs/DefaultAPI.md#DefaultAPI_postIngest) | **POST** /ingest | Enqueue background project ingest
+*DefaultAPI* | [**DefaultAPI_postIntelligenceBanditClose**](docs/DefaultAPI.md#DefaultAPI_postIntelligenceBanditClose) | **POST** /intelligence/bandit/close | Close a sampled decision with its observed reward
+*DefaultAPI* | [**DefaultAPI_postIntelligenceBanditPromote**](docs/DefaultAPI.md#DefaultAPI_postIntelligenceBanditPromote) | **POST** /intelligence/bandit/promote | Persist the production-default arm for a decision point
+*DefaultAPI* | [**DefaultAPI_postIntelligenceBanditSample**](docs/DefaultAPI.md#DefaultAPI_postIntelligenceBanditSample) | **POST** /intelligence/bandit/sample | Sample an arm for a decision point (server-side decision points)
 *DefaultAPI* | [**DefaultAPI_postMaintenanceClear**](docs/DefaultAPI.md#DefaultAPI_postMaintenanceClear) | **POST** /maintenance/clear | Clear indexed knowledge for a project
 *DefaultAPI* | [**DefaultAPI_postMaintenanceReconcile**](docs/DefaultAPI.md#DefaultAPI_postMaintenanceReconcile) | **POST** /maintenance/reconcile | Reconcile orphaned vector records
 *DefaultAPI* | [**DefaultAPI_postMaintenanceRepair**](docs/DefaultAPI.md#DefaultAPI_postMaintenanceRepair) | **POST** /maintenance/repair | Repair a project knowledge index

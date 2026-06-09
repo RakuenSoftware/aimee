@@ -31,16 +31,15 @@ typedef struct
 } conv_tool_chain_t;
 
 /* Record a tool call event. Returns the new event id (>0) or -1 on error. */
-int64_t db1_conv_record_event(const char *session_id, const char *tool_name,
-                              const char *tool_input, const char *tool_result, int result_bytes);
+int64_t db1_conv_record_event(const char *session_id, const char *tool_name, const char *tool_input,
+                              const char *tool_result, int result_bytes);
 
 /* Assign chain_id to a range of events. Returns 0 on success. */
 int db1_conv_set_chain_id(int64_t event_id_first, int64_t event_id_last, int64_t chain_id);
 
 /* Insert a new chain. Returns the new chain id (>0) or -1 on error. */
-int64_t db1_conv_insert_chain(const char *session_id, int64_t event_id_first,
-                              int64_t event_id_last, const char *tools, const char *stub,
-                              int raw_bytes, int stub_bytes);
+int64_t db1_conv_insert_chain(const char *session_id, int64_t event_id_first, int64_t event_id_last,
+                              const char *tools, const char *stub, int raw_bytes, int stub_bytes);
 
 /* Load events not yet assigned to a chain for a session.
  * Returns count; populates out[] up to max entries. */

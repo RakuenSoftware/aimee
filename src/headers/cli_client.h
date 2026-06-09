@@ -38,14 +38,15 @@ typedef int (*cli_stream_cb)(cJSON *event, void *userdata);
  * co-located server is reached over aimee-http.sock). */
 int cli_server_available(const char *socket_path);
 
-/* Run a unary {method,...} dispatch over the co-located server's POST /v1/rpc
- * bridge (local aimee-http.sock) and return the parsed dispatch response (caller
- * cJSON_Delete()s it), or NULL on transport failure. The local UDS is
- * filesystem-trusted, so /v1/rpc permits any method (server_dispatch still
+/* Run a unary {method,...} dispatch by resolving the method to its first-class
+ * /v1 route and sending it to the co-located server (local aimee-http.sock on
+ * POSIX; the configured remote on Windows). Returns the parsed dispatch response
+ * (caller cJSON_Delete()s it), or NULL on transport failure or when the method
+ * has no /v1 route. The local UDS is filesystem-trusted (server_dispatch still
  * enforces per-method caps); dispatch-level errors come back as a
- * {status:"error",...} body. Replaces the legacy NDJSON connect/authenticate/
- * request sequence for one-shot client commands. POSIX only. */
-cJSON *cli_v1_rpc_local(cJSON *req, int timeout_ms);
+ * {status:"error",...} body. Replaces both the legacy NDJSON
+ * connect/authenticate/request sequence and the retired POST /v1/rpc bridge. */
+cJSON *cli_v1_dispatch_local(cJSON *req, int timeout_ms);
 
 /* ── /v1 HTTP transport (aimee.api.client_transport) ───────────────────────
  * First-party clients can reach aimee-server over its /v1 HTTP surface
@@ -67,8 +68,8 @@ cli_transport_t cli_transport_parse(const char *s);
  * dispatch-backed (rh_dispatch_op), so an HTTP call returns byte-identical
  * results to the NDJSON socket. Returns the request path and sets *verb_out
  * ("GET"/"POST"); returns NULL (with *verb_out defaulted to "POST") when the
- * method has no parity-safe REST route, so the caller falls back to /v1/rpc or
- * the socket. Only POST routes and no-argument GET reads are mapped. */
+ * method has no parity-safe REST route. Only POST routes and no-argument GET
+ * reads are mapped. */
 const char *cli_v1_route_for_method(const char *method, const char **verb_out);
 
 /* {id}-bearing /v1 routes (PREFIX{id}SUFFIX, e.g. /v1/workspaces/{path},
@@ -244,6 +245,9 @@ int parse_launch_meta(const char *output, launch_meta_t *meta);
  * tree). Defined in cmd_profile.c / cmd_manuscript.c. */
 int cmd_profile_run(int argc, char **argv);
 int cmd_manuscript_run(int argc, char **argv, int json_output);
+/* `aimee optimize` — bandit optimization loop (points/baseline/replay).
+ * Dispatches optimize.export to GET /v1/optimize/export. Defined in cmd_optimize.c. */
+int cmd_optimize_run(int argc, char **argv, int json_output);
 
 /* `aimee persona <list|show|edit|add|rm>` — manage personas over the server's
  * /v1 HTTP API. Defined in cli_persona.c. */

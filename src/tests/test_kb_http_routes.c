@@ -10,6 +10,7 @@
 #include "cJSON.h"
 #include "kb_http.h"
 #include "kb_service.h"
+#include "kb_bandit.h"
 #include "kb_service_backend.h"
 #include "kb_enroll.h"
 #include "kb_paths.h"
@@ -325,6 +326,7 @@ typedef struct
    char project[128];
    char file_path[MAX_PATH_LEN];
    int line;
+   int line_end;
    char kind[32];
 } test_term_hit_t;
 
@@ -338,6 +340,7 @@ int canonical_index_find(const char *identifier, void *out, int max)
    snprintf(hits[0].project, sizeof(hits[0].project), "proj-alpha");
    snprintf(hits[0].file_path, sizeof(hits[0].file_path), "src/main.c");
    hits[0].line = 12;
+   hits[0].line_end = 20;
    snprintf(hits[0].kind, sizeof(hits[0].kind), "function");
    return 1;
 }
@@ -372,6 +375,7 @@ typedef struct
    char name[128];
    char kind[32];
    int line;
+   int line_end;
 } test_definition_t;
 
 int canonical_index_structure(const char *project, const char *file_path, void *out, int max)
@@ -386,6 +390,7 @@ int canonical_index_structure(const char *project, const char *file_path, void *
    snprintf(defs[0].name, sizeof(defs[0].name), "main");
    snprintf(defs[0].kind, sizeof(defs[0].kind), "function");
    defs[0].line = 12;
+   defs[0].line_end = 20;
    return 1;
 }
 
@@ -790,11 +795,67 @@ int db2_demotion_profile_read(const char *memory_class, const char *scope_kind,
    return 0;
 }
 
+/* kb_intel_payload's bandit.sample/close builders call these; this test does not
+ * link kb_bandit.o. Stub sample as "disabled" and reward as a no-op success. */
+int kb_bandit_sample(const config_t *cfg, const char *decision_point, const char *context_json,
+                     const char (*arm_ids)[KB_BANDIT_MAX_ARM_ID], int n_arms, char *decision_id_out)
+{
+   (void)cfg;
+   (void)decision_point;
+   (void)context_json;
+   (void)arm_ids;
+   (void)n_arms;
+   if (decision_id_out)
+      decision_id_out[0] = '\0';
+   return -1;
+}
+int kb_bandit_reward(const config_t *cfg, const char *decision_point, const char *decision_id,
+                     const char *arm_id, double reward)
+{
+   (void)cfg;
+   (void)decision_point;
+   (void)decision_id;
+   (void)arm_id;
+   (void)reward;
+   return 0;
+}
+
+int db2_bandit_promotion_get(const char *decision_point, char *arm_out, size_t arm_out_len)
+{
+   (void)decision_point;
+   if (arm_out && arm_out_len)
+      arm_out[0] = '\0';
+   return -1; /* no promotion in tests */
+}
+int db2_bandit_promotion_set(const char *decision_point, const char *arm_id,
+                             const char *rollback_arm)
+{
+   (void)decision_point;
+   (void)arm_id;
+   (void)rollback_arm;
+   return 0;
+}
+
+int db2_bandit_decision_points_list(char *buf, size_t len)
+{
+   /* The data-driven export asks the log which points exist; return the one
+    * that is actually sampled in production (not the legacy kb_fusion_mode). */
+   snprintf(buf, len, "[\"kb_memory_retrieval_limit\"]");
+   return 0;
+}
+
+int db2_bandit_arms_list(const char *decision_point, char *buf, size_t len)
+{
+   assert(strcmp(decision_point, "kb_memory_retrieval_limit") == 0);
+   snprintf(buf, len, "[\"10\"]");
+   return 0;
+}
+
 int db2_bandit_decisions_export(const char *decision_point, int limit, char *buf, size_t len)
 {
-   assert(strcmp(decision_point, "kb_fusion_mode") == 0);
+   assert(strcmp(decision_point, "kb_memory_retrieval_limit") == 0);
    assert(limit == 500);
-   snprintf(buf, len, "[{\"id\":\"decision-1\",\"arm_id\":\"rrf\"}]");
+   snprintf(buf, len, "[{\"id\":\"decision-1\",\"arm_id\":\"10\"}]");
    return 0;
 }
 
@@ -811,10 +872,10 @@ int kb_bandit_record_replay_evidence(const char *decision_point, const char *res
 int db2_bandit_arm_stats_read(const char *decision_point, const char *arm_id,
                               db2_bandit_arm_stats_t *out)
 {
-   assert(strcmp(decision_point, "kb_fusion_mode") == 0);
+   assert(strcmp(decision_point, "kb_memory_retrieval_limit") == 0);
    assert(out != NULL);
    memset(out, 0, sizeof(*out));
-   if (strcmp(arm_id, "rrf") == 0)
+   if (strcmp(arm_id, "10") == 0)
    {
       out->n_decisions = 3;
       out->n_rewards = 2;
@@ -1121,13 +1182,24 @@ static void test_intelligence_demotion_check(void)
 
 static void test_intelligence_bandit_export(void)
 {
-   char buf[2048];
+   char buf[4096];
    int s = kb_http_route_ex("GET", "/v1/intelligence/bandit/export", NULL, NULL, NULL, NULL, 0, buf,
                             sizeof(buf));
    assert(s == 200);
-   assert(strstr(buf, "\"decision_point\":\"kb_fusion_mode\"") != NULL);
-   assert(strstr(buf, "\"arm_id\":\"rrf\"") != NULL);
+   /* Export is data-driven: the `points` breakdown reports only the point that is
+    * actually sampled (no fabricated phantom — the arm_stats mock aborts on any
+    * other decision point). */
+   assert(strstr(buf, "\"points\":[") != NULL);
+   assert(strstr(buf, "\"decision_point\":\"kb_memory_retrieval_limit\"") != NULL);
+   assert(strstr(buf, "\"arm_id\":\"10\"") != NULL);
    assert(strstr(buf, "\"n_decisions\":3") != NULL);
+   /* The registry section lists declared decision points (source of truth),
+    * including arms and the reward function — present even with no decisions.
+    * kb_fusion_mode is now a registered point, so it appears here (not as a
+    * phantom with fabricated arm stats). */
+   assert(strstr(buf, "\"registry\":[") != NULL);
+   assert(strstr(buf, "\"reward_fn\":\"recall_sufficiency_v1\"") != NULL);
+   assert(strstr(buf, "\"decision_point\":\"kb_fusion_mode\"") != NULL);
 }
 
 static void test_not_found(void)

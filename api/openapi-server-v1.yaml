@@ -589,6 +589,32 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /code/audit:
+    post:
+      summary: Graph-derived code-health audit (proxied to aimee-kb)
+      description: >-
+        Dead exports, import cycles, and content-hash clones derived from the
+        code graph (entity_edges) and code_embeddings.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                project: { type: string }
+                limit: { type: integer }
+      responses:
+        "200":
+          description: Audit bundle ({dead_exports, cycles, clones})
+          content:
+            application/json:
+              schema: { type: object }
+        "502":
+          description: Knowledge service (aimee-kb) unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /notes:
     get:
       summary: List notes (proxied to aimee-kb)
@@ -1326,6 +1352,28 @@ paths:
     get:
       summary: Insights overview
       responses: { "200": { description: Insights, content: { application/json: { schema: { type: object } } } } }
+  /optimize/export:
+    get:
+      summary: Bandit optimization export (decision-point registry, arm baselines, decision log)
+      responses: { "200": { description: Optimization export, content: { application/json: { schema: { type: object } } } } }
+  /optimize/promote:
+    post:
+      summary: Persist the production-default arm for a decision point
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Promotion result, content: { application/json: { schema: { type: object } } } } }
+  /optimize/replay-record:
+    post:
+      summary: Record off-policy bandit replay attribution as a benchmark_trace artifact
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Replay record result, content: { application/json: { schema: { type: object } } } } }
+  /calibration/readiness:
+    get:
+      summary: Calibration readiness report
+      responses: { "200": { description: Calibration readiness, content: { application/json: { schema: { type: object } } } } }
+  /demotion/check:
+    get:
+      summary: Demotion dry-run report
+      responses: { "200": { description: Demotion check, content: { application/json: { schema: { type: object } } } } }
   /identity/show:
     get:
       summary: Show current identity
@@ -1611,6 +1659,19 @@ paths:
     post:
       summary: Run an evaluation (async; poll GET /runs/{id})
       requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /delegate/aggregate:
+    post:
+      summary: Mixture-of-Agents ensemble aggregate over ensemble.reference_models (async; poll GET /runs/{id})
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt: { type: string }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
   /memory/search:
     post:

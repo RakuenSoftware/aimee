@@ -1,0 +1,11 @@
+# Prompt suite for ingress_token_bench.py — repo-comprehension questions that
+# normally make an agent explore the tree. Keep answers brief; do not edit code.
+# One prompt per line; lines starting with # are ignored.
+Which source file implements the Codex /v1/responses streaming handler, and what function name? Answer in one line.
+Where is the kb's DB2 connection URL resolved at startup, and which env var overrides the config file? One short paragraph.
+Name the function that builds the <aimee-context> pre-injection envelope and the file it lives in. One line.
+How does the thin client decide between local-socket and remote-TCP transport? Summarize in two sentences.
+Which config field gates context pre-injection for the model ingresses, and what is its default? One line.
+What caps the TCP connect phase of the HTTP client, and why? Two sentences.
+List the three services bundled in the aimee-kb plugin. One line.
+Where are MCP tool definitions assembled for the tools/list response? Name the function. One line.

@@ -2194,6 +2194,141 @@ export class DefaultApi extends runtime.BaseAPI {
     }
 
     /**
+     * Creates request options for postIntelligenceBanditClose without sending the request
+     */
+    async postIntelligenceBanditCloseRequestOpts(): Promise<runtime.RequestOpts> {
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("bearerAuth", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/intelligence/bandit/close`;
+
+        return {
+            path: urlPath,
+            method: 'POST',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     * Close a sampled decision with its observed reward
+     */
+    async postIntelligenceBanditCloseRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<object>> {
+        const requestOptions = await this.postIntelligenceBanditCloseRequestOpts();
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse<any>(response);
+    }
+
+    /**
+     * Close a sampled decision with its observed reward
+     */
+    async postIntelligenceBanditClose(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<object> {
+        const response = await this.postIntelligenceBanditCloseRaw(initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for postIntelligenceBanditPromote without sending the request
+     */
+    async postIntelligenceBanditPromoteRequestOpts(): Promise<runtime.RequestOpts> {
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("bearerAuth", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/intelligence/bandit/promote`;
+
+        return {
+            path: urlPath,
+            method: 'POST',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     * Persist the production-default arm for a decision point
+     */
+    async postIntelligenceBanditPromoteRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<object>> {
+        const requestOptions = await this.postIntelligenceBanditPromoteRequestOpts();
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse<any>(response);
+    }
+
+    /**
+     * Persist the production-default arm for a decision point
+     */
+    async postIntelligenceBanditPromote(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<object> {
+        const response = await this.postIntelligenceBanditPromoteRaw(initOverrides);
+        return await response.value();
+    }
+
+    /**
+     * Creates request options for postIntelligenceBanditSample without sending the request
+     */
+    async postIntelligenceBanditSampleRequestOpts(): Promise<runtime.RequestOpts> {
+        const queryParameters: any = {};
+
+        const headerParameters: runtime.HTTPHeaders = {};
+
+        if (this.configuration && this.configuration.accessToken) {
+            const token = this.configuration.accessToken;
+            const tokenString = await token("bearerAuth", []);
+
+            if (tokenString) {
+                headerParameters["Authorization"] = `Bearer ${tokenString}`;
+            }
+        }
+
+        let urlPath = `/intelligence/bandit/sample`;
+
+        return {
+            path: urlPath,
+            method: 'POST',
+            headers: headerParameters,
+            query: queryParameters,
+        };
+    }
+
+    /**
+     * Sample an arm for a decision point (server-side decision points)
+     */
+    async postIntelligenceBanditSampleRaw(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<runtime.ApiResponse<object>> {
+        const requestOptions = await this.postIntelligenceBanditSampleRequestOpts();
+        const response = await this.request(requestOptions, initOverrides);
+
+        return new runtime.JSONApiResponse<any>(response);
+    }
+
+    /**
+     * Sample an arm for a decision point (server-side decision points)
+     */
+    async postIntelligenceBanditSample(initOverrides?: RequestInit | runtime.InitOverrideFunction): Promise<object> {
+        const response = await this.postIntelligenceBanditSampleRaw(initOverrides);
+        return await response.value();
+    }
+
+    /**
      * Creates request options for postMaintenanceClear without sending the request
      */
     async postMaintenanceClearRequestOpts(requestParameters: PostMaintenanceClearRequest): Promise<runtime.RequestOpts> {

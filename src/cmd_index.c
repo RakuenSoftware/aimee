@@ -329,6 +329,7 @@ static void idx_find(app_ctx_t *ctx, int argc, char **argv)
          cJSON_AddStringToObject(h, "project", hits[i].project);
          cJSON_AddStringToObject(h, "file_path", hits[i].file_path);
          cJSON_AddNumberToObject(h, "line", hits[i].line);
+         cJSON_AddNumberToObject(h, "line_end", hits[i].line_end);
          cJSON_AddStringToObject(h, "kind", hits[i].kind);
          if (idx_source_authority_enabled() || idx_source_authority_root())
          {
@@ -424,6 +425,7 @@ static void idx_structure(app_ctx_t *ctx, int argc, char **argv)
          cJSON_AddStringToObject(d, "name", defs[i].name);
          cJSON_AddStringToObject(d, "kind", defs[i].kind);
          cJSON_AddNumberToObject(d, "line", defs[i].line);
+         cJSON_AddNumberToObject(d, "line_end", defs[i].line_end);
          cJSON_AddItemToArray(arr, d);
       }
       emit_json_ctx(arr, ctx->json_fields, ctx->response_profile);

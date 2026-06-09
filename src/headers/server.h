@@ -86,8 +86,8 @@ typedef struct cJSON cJSON;
  *   OFF  — mutating /v1 routes are local-UDS-only (default; leaked-bearer safe).
  *   DATA — data-mutating routes (memory.store, work.*, rules.delete, skill.*, …)
  *          allowed over TCP, gated by the per-route capability matrix.
- *   FULL — TCP bearer is fully trusted (CAPS_ALL): data writes AND the /v1/rpc
- *          delegate/tool/bash bridge. Trusted networks only. */
+ *   FULL — TCP bearer is fully trusted (CAPS_ALL): data writes AND the
+ *          delegate/tool/bash methods over /v1. Trusted networks only. */
 #define SERVER_REMOTE_WRITES_OFF  0
 #define SERVER_REMOTE_WRITES_DATA 1
 #define SERVER_REMOTE_WRITES_FULL 2
@@ -281,6 +281,11 @@ int handle_kb_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_docs_push(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_ingest_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_optimize_promote(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_calibration_readiness(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_demotion_check(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_optimize_replay_record(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_workers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_rules_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_rules_generate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -341,6 +346,7 @@ int handle_identity_diff(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Compute handlers (server_compute.c) */
 int handle_tool_execute(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_launch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_jobs_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

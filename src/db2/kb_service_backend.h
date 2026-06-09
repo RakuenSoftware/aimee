@@ -110,6 +110,8 @@ extern "C"
    int db2_kb_service_directive_suppress(int64_t id);
    int db2_kb_service_directive_sweep_expired(void);
    cJSON *db2_kb_service_directive_list_json(const char *state, const char *cause, int max_rows);
+   /* Graph-derived code-health audit: dead exports, import cycles, clones. */
+   cJSON *db2_kb_service_code_audit_json(const char *project, int limit);
    cJSON *db2_kb_service_curiosity_list_json(const char *state, int max_rows);
    cJSON *db2_kb_service_curiosity_create_json(const char *gap_type, const char *target_entity,
                                                const char *target_topic, const char *evidence,

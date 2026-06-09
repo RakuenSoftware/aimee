@@ -80,6 +80,7 @@ const method_policy_t method_registry[] = {
     /* Compute */
     {"tool.execute", CAP_TOOL_EXECUTE, "execute tool"},
     {"delegate", CAP_DELEGATE, "delegate task"},
+    {"delegate.aggregate", CAP_DELEGATE, "Mixture-of-Agents ensemble aggregate"},
     {"delegate.status", CAP_DELEGATE, "delegate status"},
     {"jobs.list", CAP_DELEGATE, "list delegate jobs"},
     {"jobs.status", CAP_DELEGATE, "delegate job status"},
@@ -117,6 +118,11 @@ const method_policy_t method_registry[] = {
     /* Knowledge base: search/status read; build/ingest/update rebuild the store. */
     {"kb.search", CAP_INDEX_READ, "knowledge search"},
     {"kb.status", CAP_DASHBOARD_READ, "knowledge base status"},
+    {"optimize.export", CAP_DASHBOARD_READ, "bandit optimization export"},
+    {"optimize.promote", CAP_INDEX_ADMIN, "promote a bandit arm to default"},
+    {"optimize.replay_record", CAP_INDEX_ADMIN, "record bandit replay attribution"},
+    {"calibration.readiness", CAP_DASHBOARD_READ, "calibration readiness report"},
+    {"demotion.check", CAP_DASHBOARD_READ, "demotion dry-run report"},
     {"kb.build", CAP_INDEX_ADMIN, "build knowledge base"},
     {"kb.ingest", CAP_INDEX_ADMIN, "ingest corpus"},
     {"kb.update", CAP_INDEX_ADMIN, "update knowledge base"},

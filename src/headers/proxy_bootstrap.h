@@ -6,8 +6,8 @@
 #ifndef DEC_PROXY_BOOTSTRAP_H
 #define DEC_PROXY_BOOTSTRAP_H 1
 
-#define PROXY_HOST_LEN       256
-#define PROXY_AUTH_LEN       256
+#define PROXY_HOST_LEN      256
+#define PROXY_AUTH_LEN      256
 #define PROXY_NO_PROXY_LEN  4096
 #define PROXY_CA_BUNDLE_LEN 1024
 
@@ -22,10 +22,10 @@ typedef struct
 /* Full proxy context derived from the environment */
 typedef struct
 {
-   proxy_config_t https_proxy;             /* resolved HTTPS proxy */
-   int has_proxy;                          /* 1 if a proxy was found */
-   char no_proxy[PROXY_NO_PROXY_LEN];      /* merged NO_PROXY list */
-   char ca_bundle[PROXY_CA_BUNDLE_LEN];    /* CA bundle path, or empty */
+   proxy_config_t https_proxy;          /* resolved HTTPS proxy */
+   int has_proxy;                       /* 1 if a proxy was found */
+   char no_proxy[PROXY_NO_PROXY_LEN];   /* merged NO_PROXY list */
+   char ca_bundle[PROXY_CA_BUNDLE_LEN]; /* CA bundle path, or empty */
 } proxy_bootstrap_t;
 
 /* Parse a proxy URL string into a proxy_config_t.

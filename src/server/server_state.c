@@ -894,6 +894,98 @@ int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* optimize.export: surface the kb bandit/optimization export (decision-point
+ * registry + per-point arm baselines + closed-decision log) over a first-class
+ * /v1 route so the thin client's `aimee optimize` can reach it. */
+int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+
+   char *json = kb_client_bandit_export_json();
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!resp)
+      return server_send_error(conn, "bandit optimization export failed", NULL);
+   return send_and_free(conn, resp);
+}
+
+/* optimize.promote: persist the production-default arm for a decision point via
+ * the kb DB2 bandit. Request: { decision_point, arm }. */
+int handle_optimize_promote(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+
+   const char *dp = jo_str(req, "decision_point", NULL);
+   const char *arm = jo_str(req, "arm", NULL);
+   if (!dp || !dp[0] || !arm || !arm[0])
+      return server_send_error(conn, "decision_point and arm are required", NULL);
+
+   char *json = kb_client_bandit_promote_json(dp, arm);
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!resp)
+      return server_send_error(conn, "bandit promotion failed", NULL);
+   return send_and_free(conn, resp);
+}
+
+/* calibration.readiness: surface the kb calibration-readiness report over a
+ * first-class /v1 route (was kb-only; reachable now via `aimee kb calibrate`). */
+int handle_calibration_readiness(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+
+   char *json = kb_client_calibrate_readiness_json();
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!resp)
+      return server_send_error(conn, "calibration readiness check failed", NULL);
+   return send_and_free(conn, resp);
+}
+
+/* demotion.check: surface the kb demotion dry-run report over a first-class /v1
+ * route (was kb-only; reachable now via `aimee kb demote`). */
+int handle_demotion_check(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+
+   char *json = kb_client_demote_check_json();
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!resp)
+      return server_send_error(conn, "demotion check failed", NULL);
+   return send_and_free(conn, resp);
+}
+
+/* optimize.replay_record: record off-policy replay attribution (output of
+ * tools/bandit_replay.py) as a benchmark_trace artifact. Body: {decision_point,
+ * result}. Reachable via `aimee optimize replay-record --point X --file F`. */
+int handle_optimize_replay_record(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+
+   const char *dp = jo_str(req, "decision_point", NULL);
+   if (!dp || !dp[0])
+      return server_send_error(conn, "decision_point is required", NULL);
+
+   cJSON *result = cJSON_GetObjectItemCaseSensitive(req, "result");
+   if (!cJSON_IsObject(result))
+      return server_send_error(conn, "result (object) is required", NULL);
+   char *result_json = cJSON_PrintUnformatted(result);
+   if (!result_json)
+      return server_send_error(conn, "failed to serialize result", NULL);
+
+   char *json = kb_client_bandit_replay_record_json(dp, result_json);
+   free(result_json);
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!resp)
+      return server_send_error(conn, "replay-record failed", NULL);
+   return send_and_free(conn, resp);
+}
+
 /* --- Rules handlers --- */
 
 int handle_rules_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

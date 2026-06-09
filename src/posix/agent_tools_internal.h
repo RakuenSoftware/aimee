@@ -19,17 +19,15 @@ static inline int agent_tools_cmd_refers_to_readonly_root(const char *cmd, const
    size_t rw_len = rw ? strlen(rw) : 0;
    for (const char *p = cmd; (p = strstr(p, ro)); p++)
    {
-      int before_ok = (p == cmd) || p[-1] == '\'' || p[-1] == '"' || p[-1] == '=' ||
-                      p[-1] == ':' || p[-1] == ',' || p[-1] == '(' || p[-1] == '[' ||
-                      p[-1] == '{' || p[-1] == '<' || p[-1] == ' ' || p[-1] == '\t' ||
-                      p[-1] == '\n';
+      int before_ok = (p == cmd) || p[-1] == '\'' || p[-1] == '"' || p[-1] == '=' || p[-1] == ':' ||
+                      p[-1] == ',' || p[-1] == '(' || p[-1] == '[' || p[-1] == '{' ||
+                      p[-1] == '<' || p[-1] == ' ' || p[-1] == '\t' || p[-1] == '\n';
       int after_ok = p[ro_len] == '/' || p[ro_len] == '\'' || p[ro_len] == '"' ||
-                     p[ro_len] == ':' || p[ro_len] == ',' || p[ro_len] == ')' ||
-                     p[ro_len] == ']' || p[ro_len] == '}' || p[ro_len] == '>' ||
-                     p[ro_len] == ' ' || p[ro_len] == '\t' || p[ro_len] == '\n' ||
-                     p[ro_len] == '\0';
-      int under_rw = rw_len && strncmp(p, rw, rw_len) == 0 &&
-                     (p[rw_len] == '/' || p[rw_len] == '\0');
+                     p[ro_len] == ':' || p[ro_len] == ',' || p[ro_len] == ')' || p[ro_len] == ']' ||
+                     p[ro_len] == '}' || p[ro_len] == '>' || p[ro_len] == ' ' ||
+                     p[ro_len] == '\t' || p[ro_len] == '\n' || p[ro_len] == '\0';
+      int under_rw =
+          rw_len && strncmp(p, rw, rw_len) == 0 && (p[rw_len] == '/' || p[rw_len] == '\0');
       if (before_ok && after_ok && !under_rw)
          return 1;
    }

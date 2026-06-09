@@ -578,6 +578,7 @@ set(DATA_SRCS
 
 set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/agent_runtime.c
+    ${AIMEE_SRC_DIR}/server/agent_parallel.c
     ${AIMEE_SRC_DIR}/server/agent_runtime_liveness.c
     ${AIMEE_SRC_DIR}/server/agent_fallback.c
     ${AIMEE_SRC_DIR}/server/agent_context_budget.c
@@ -734,6 +735,8 @@ endif()
 set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_main.c
     ${AIMEE_SRC_DIR}/cli_session_start.c
+    ${AIMEE_SRC_DIR}/cli_attention_guard.c
+    ${AIMEE_SRC_DIR}/cli_code_audit.c
     ${AIMEE_SRC_DIR}/cli_tui.c
     ${AIMEE_SRC_DIR}/cli_client.c
     ${AIMEE_SRC_DIR}/cli_launch.c
@@ -742,6 +745,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/client_integrations.c
     ${AIMEE_SRC_DIR}/cmd_profile.c
     ${AIMEE_SRC_DIR}/cmd_manuscript.c
+    ${AIMEE_SRC_DIR}/cmd_optimize.c
     ${AIMEE_SRC_DIR}/manuscript.c
     ${AIMEE_SRC_DIR}/cli_persona.c
     ${AIMEE_SRC_DIR}/cli_roles.c
@@ -1125,6 +1129,13 @@ add_executable(aimee
 target_include_directories(aimee PRIVATE ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/vendor/headers ${AIMEE_SRC_DIR}/db1 ${AIMEE_SRC_DIR}/db2)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee PRIVATE Threads::Threads)
+if(NOT WIN32)
+    # cmd_optimize.c (bandit math) and cli_attention_guard.c use sqrt/pow/log;
+    # libm is implicit in libSystem on Apple but a separate link on Linux. The
+    # make build links -lm unconditionally (L_CLIENT); mirror that here. Windows
+    # math lives in the CRT, so no separate lib.
+    target_link_libraries(aimee PRIVATE m)
+endif()
 if(WIN32)
     target_compile_definitions(aimee PRIVATE AIMEE_WINDOWS _WIN32_WINNT=0x0A00)
     target_link_libraries(aimee PRIVATE ws2_32)

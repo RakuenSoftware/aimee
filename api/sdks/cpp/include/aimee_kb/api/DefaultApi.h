@@ -436,6 +436,30 @@ public:
         boost::optional<std::shared_ptr<IngestRequest>> ingestRequest
     ) const;
     /// <summary>
+    /// Close a sampled decision with its observed reward
+    /// </summary>
+    /// <remarks>
+    /// 
+    /// </remarks>
+    pplx::task<std::shared_ptr<Object>> postIntelligenceBanditClose(
+    ) const;
+    /// <summary>
+    /// Persist the production-default arm for a decision point
+    /// </summary>
+    /// <remarks>
+    /// 
+    /// </remarks>
+    pplx::task<std::shared_ptr<Object>> postIntelligenceBanditPromote(
+    ) const;
+    /// <summary>
+    /// Sample an arm for a decision point (server-side decision points)
+    /// </summary>
+    /// <remarks>
+    /// 
+    /// </remarks>
+    pplx::task<std::shared_ptr<Object>> postIntelligenceBanditSample(
+    ) const;
+    /// <summary>
     /// Clear indexed knowledge for a project
     /// </summary>
     /// <remarks>
