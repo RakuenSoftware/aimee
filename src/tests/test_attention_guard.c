@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include "cli_attention_guard.h"
-#include "config.h"
 
 /* Stubs for handle_attention_guard's deps (it is not called here). */
 char *read_stdin(void)
@@ -23,12 +22,6 @@ int platform_mkdir_p(const char *path, int mode)
 {
    (void)path;
    (void)mode;
-   return 0;
-}
-int config_load(config_t *cfg)
-{
-   memset(cfg, 0, sizeof(*cfg));
-   cfg->ingress_max_raw_scans = 0;
    return 0;
 }
 
