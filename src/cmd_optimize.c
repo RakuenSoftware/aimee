@@ -249,7 +249,9 @@ static int optimize_cmd_replay_record(int argc, char **argv, int json_output)
          file = argv[i + 1];
    if (!point || !file)
    {
-      fprintf(stderr, "usage: aimee optimize replay-record --point <decision_point> --file <result.json>\n");
+      fprintf(
+          stderr,
+          "usage: aimee optimize replay-record --point <decision_point> --file <result.json>\n");
       return 2;
    }
    char *raw = optimize_slurp(file);
@@ -677,7 +679,7 @@ static int optimize_cmd_promote(int argc, char **argv, int json_output)
       cJSON_AddStringToObject(rb, "rollback_arm", applied ? applied_rb : incumbent);
       cJSON_AddItemToObject(out, "rollback", rb);
       cJSON_AddStringToObject(out, "applied",
-                             applied ? "yes" : (blocked ? "blocked" : (apply ? "failed" : "no")));
+                              applied ? "yes" : (blocked ? "blocked" : (apply ? "failed" : "no")));
       optimize_print_json(out);
       cJSON_Delete(out);
       cJSON_Delete(resp);
@@ -706,15 +708,18 @@ static int optimize_cmd_promote(int argc, char **argv, int json_output)
 
 static void optimize_usage(void)
 {
-   fprintf(stderr,
-           "Usage: aimee optimize <subcommand> [options]\n\nSubcommands:\n"
-           "  points                              List registered decision points\n"
-           "  baseline --point <name>             Show current arm posteriors for a point\n"
-           "  replay --point <name>               Emit a point's closed-decision log for replay\n"
-           "  replay-record --point <name> --file <f>  Record a replay result (benchmark_trace)\n"
-           "  run [--suite <s>] [--arm <a>]       Run the offline benchmark suite (ranks baseline vs on)\n"
-           "  compare --baseline <a> --candidate <b> [--suite <s>]  Per-metric delta between two arms\n"
-           "  promote --point <p> --candidate <a> [--guarded] [--suite <s>] [--apply]  Gate (and optionally apply) a promotion\n");
+   fprintf(
+       stderr,
+       "Usage: aimee optimize <subcommand> [options]\n\nSubcommands:\n"
+       "  points                              List registered decision points\n"
+       "  baseline --point <name>             Show current arm posteriors for a point\n"
+       "  replay --point <name>               Emit a point's closed-decision log for replay\n"
+       "  replay-record --point <name> --file <f>  Record a replay result (benchmark_trace)\n"
+       "  run [--suite <s>] [--arm <a>]       Run the offline benchmark suite (ranks baseline vs "
+       "on)\n"
+       "  compare --baseline <a> --candidate <b> [--suite <s>]  Per-metric delta between two arms\n"
+       "  promote --point <p> --candidate <a> [--guarded] [--suite <s>] [--apply]  Gate (and "
+       "optionally apply) a promotion\n");
 }
 
 int cmd_optimize_run(int argc, char **argv, int json_output)
