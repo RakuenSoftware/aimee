@@ -39,7 +39,10 @@ _STUB = textwrap.dedent(
         sys.stdout.write(json.dumps(obj))
 
     if "delegate" in argv and "execute" in argv:
-        prompt = argv[argv.index("execute") + 1]
+        # The harness passes the prompt over stdin with --prompt-stdin (benchmark
+        # prompts exceed the argv size limit); mirror the real client contract
+        # instead of reading the positional slot, which is now the flag itself.
+        prompt = sys.stdin.read() if "--prompt-stdin" in argv else argv[argv.index("execute") + 1]
         with open(pfile, "w") as fh:
             fh.write(prompt)
         emit({"job_id": 1, "job_status": "pending"})
