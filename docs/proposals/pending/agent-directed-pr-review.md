@@ -651,6 +651,137 @@ phase they belong to.
    fixed-stack bound avoids this; only the heap variant needs the free path
    extended.
 
+## §14 Third-pass and independent verification findings
+
+A further pass re-read the design against `testing@d3eb402d` and verified every
+symbol below in the tree. It splits into (A) third-pass bridge/contract gaps that
+had been raised in PR discussion but were not yet folded into this document, and
+(B) net-new findings from an independent verification that the earlier passes did
+not surface. §13 above is the *second* pass; this section is the third pass plus
+the independent check.
+
+### §14.A Bridge and contract gaps (fold into P1c unless noted)
+
+1. **The MCP bridge must force `mode: "review"`.** `handle_delegate_roundtable`
+   defaults to `ROUNDTABLE_DRAFT` (`server_compute.c:1764`) and only switches to
+   review when the submitted body carries `mode: "review"` (`:1777-1779`). The
+   `ensemble_review` schema has no `mode` argument, so the async-submit bridge must
+   **synthesize `mode: "review"`** into the re-dispatched `delegate.roundtable`
+   body. Otherwise the tool launches the *draft* loop against a diff and never
+   parses or returns review items. Keep `apply` absent/false on this path
+   (`apply_review` defaults to 0 via the handler `memset`, `:1786-1788`) unless an
+   auto-apply feature is deliberately added.
+
+2. **The queued run shape is `id`, not `run_id`.** `op_run_snapshot` emits
+   `{id, object:"op.run", method, status, created, result?}`
+   (`server_http_routes.inc:323-327`), while §3 advertises `{run_id,
+   status:"running"}`. Either the MCP arm translates `id` into a `run_id` field for
+   tool callers, or the contract adopts the existing `id` field. Pin a test that the
+   returned identifier is exactly the one accepted by `GET /v1/runs/{id}`.
+
+3. **The initial run status is `queued`, not `running`.** The snapshot is created
+   with status `queued` (`server_http_routes.inc:411`); `op_run_worker` then sets
+   the store to `in_progress` (`:341`) and finalizes as `completed|failed|cancelled`
+   (`:374-378`). The store never emits `running`. If the tool promises
+   `status:"running"`, translate it intentionally or adopt the store's
+   `queued|in_progress|completed|failed|cancelled` vocabulary so callers do not
+   special-case a value that is never produced.
+
+4. **Polling and cancellation need capabilities beyond `CAP_DELEGATE`.** The
+   follow-up lifecycle routes are gated separately: `GET /v1/runs/{id}` and
+   `/v1/runs/{id}/events` require `CAP_SESSION_READ`, and `POST /v1/runs/{id}/stop`
+   requires `CAP_CHAT` (`server_http_routes.inc:972-974`). A principal holding
+   `CAP_TOOL_EXECUTE|CAP_DELEGATE` but neither of those can *start* a review yet
+   cannot *read or stop* it. Resolve by documenting the additional required caps,
+   re-gating the op-run lifecycle routes, or adding MCP-native status/cancel
+   siblings that enforce the intended delegate capability.
+
+5. **Brief truncation needs a threaded flag, not just a reserved bit.** §4 sets
+   `roundtable_result_t.truncated` on a >4 KB brief, but if normalization/truncation
+   happens in `handle_delegate_roundtable` *before* the engine runs, the engine has
+   no way to know the brief was truncated unless that fact is threaded in
+   (`opts.brief_truncated`, a normalized-brief struct, or a post-run response
+   patch). Otherwise brief truncation is silent while `result.truncated` stays
+   reserved for the summarize-forward overflow path. Add a direct handler/HTTP test,
+   not only a prompt-builder unit test.
+
+6. **Tests should pin the synthesized delegate body, not just end behavior.**
+   Several of the above are single-field bridge mistakes (`diff`->`prompt`, add
+   `mode:"review"`, preserve `brief`, copy the caller's caps, omit `apply`). Add a
+   narrow unit seam around the MCP->`delegate.roundtable` request construction so
+   these fields are asserted *before* the async worker runs; the end-to-end async
+   test can then focus on run lifecycle and cancellation.
+
+### §14.B Net-new findings (independent verification)
+
+1. **The MCP result is unwrapped, and the async helper writes to a `resp` buffer,
+   not to `conn`.** The existing `delegate` MCP tool reaches `handle_delegate`,
+   which writes its response straight to the connection via `server_send_ok`
+   (`server_mcp_delegate.c:65`). But `rh_dispatch_op_async` writes the queued
+   snapshot into the **route-layer `resp` char buffer** — its signature is
+   `(const route_req_t *rq, char *resp, int cap)` (`server_http_routes.inc:386`),
+   with no `server_conn_t`. So the extracted helper must **return** the run id /
+   snapshot as a value, and the `server_mcp.c` arm must itself `server_send_ok`
+   that `{run_id|id, status}` onto `conn`. State explicitly that the MCP arm owns
+   the connection write; the shared helper must not assume a route-layer `resp`
+   buffer or a particular response envelope.
+
+2. **`g_rpc_conn_caps` *is* correctly populated on the synchronous `mcp.call`
+   path — frame the explicit-threading guidance as robustness, not a live bug.**
+   §3 bullet 3 says the thread-local "is not guaranteed to hold the caller's caps."
+   In fact `g_rpc_conn_caps` is set per request on the listener thread
+   (`server_http.c:1655`), and `/v1/mcp/call` dispatches **synchronously on that
+   same thread** via `rh_dispatch_op`, so by the time `handle_mcp_call` runs the
+   thread-local already equals the MCP caller's caps. Threading
+   `conn->capabilities` explicitly is still the right design — it is correct under
+   any future nested or worker-thread re-dispatch of `mcp.call`, where the
+   thread-local could diverge — but the rationale is **defense-in-depth /
+   correctness-under-nesting**, not a bug on the common path. The negative
+   `CAP_DELEGATE` test still proves the gate either way.
+
+3. **`turns: "parallel"` is inert against a sequential config default.**
+   `handle_delegate_roundtable` only forces `ROUNDTABLE_SEQUENTIAL` when the body
+   `turns == "sequential"` (`server_compute.c:1780-1782`); it never forces
+   `ROUNDTABLE_PARALLEL`. So if `roundtable_turns` config is `"sequential"`, a tool
+   caller passing `turns:"parallel"` still runs sequentially. The schema advertises
+   an enum value the handler does not honor symmetrically. Either make the handler
+   honor `"parallel"` explicitly, or document `turns` as "request *sequential*;
+   otherwise inherit the config default" so the schema does not over-promise.
+
+4. **`answeredQuestions`/`coverageGaps` need a free path independent of the
+   items-array bound decision.** §13.6's lifetime note ties extending
+   `delegate_roundtable_result_free` (`delegate_ensemble.h:64`) to the heap "raise
+   the cap" variant of the items array (§12 Q3). But `answeredQuestions`
+   (`{question, answer, evidence}`) is inherently variable-length text and cannot
+   live in a fixed `char[N]` stack the way the 64×128 identity keys do; it will be
+   heap-allocated even in the **default** P1b shape. So the result-free path must
+   free `answeredQuestions`/`coverageGaps` regardless of whether the items array
+   stays fixed-stack. Add this to P1b's free path and its leak test, not only to the
+   Q3 heap variant.
+
+5. **The enlarged result must fit `SHTTP_RESP_MAX` (256 KB) or it silently
+   degrades to an opaque string.** The async worker captures the re-dispatched
+   handler response into a `SHTTP_RESP_MAX` buffer (256 KB,
+   `server_http.c:40`) via `loopback_rpc` (`server_http_routes.inc:343,355`). If the
+   response — now carrying the consolidated artifact **plus** up to 64 items **plus**
+   `answeredQuestions` — exceeds that, the buffer truncates, `cJSON_Parse` fails in
+   `op_run_worker` (`:362`) so the `cancelled`-status check is skipped, and
+   `op_run_snapshot`'s own parse fails and stores the result as a JSON **string**
+   rather than an object (`:330-331`). A polling agent then receives `result` as
+   opaque text. In practice a consolidated review (~16 KB) plus 64 short items
+   (~20 KB) is well under 256 KB, so this is a robustness note, not a likely
+   failure: bound the serialized items/`answeredQuestions`, keep `recommendation`
+   and `evidence` strings short, and add an assertion that the serialized result
+   stays well under `SHTTP_RESP_MAX`.
+
+6. **Open question — the brief `type: ["string","object"]` union may trip strict
+   MCP clients.** Some MCP / JSON-Schema tool-call validators reject a union type on
+   a single property. Since §2 already normalizes both forms server-side, consider
+   either documenting two shapes or advertising `object` and accepting a bare string
+   at parse time (normalized to `{focus:[s]}`) without exposing a union type in the
+   schema, to maximize client compatibility. Not a blocker; folds into the §12 Q1
+   naming/shape decision.
+
 ## Recommendation
 
 Ship P1a + P1b + P1c: thread an optional `brief` into review mode with an open
