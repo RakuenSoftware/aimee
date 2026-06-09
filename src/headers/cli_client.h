@@ -44,8 +44,8 @@ int cli_server_available(const char *socket_path);
  * (caller cJSON_Delete()s it), or NULL on transport failure or when the method
  * has no /v1 route. The local UDS is filesystem-trusted (server_dispatch still
  * enforces per-method caps); dispatch-level errors come back as a
- * {status:"error",...} body. Replaces both the legacy NDJSON
- * connect/authenticate/request sequence and the retired POST /v1/rpc bridge. */
+ * {status:"error",...} body. Replaces the legacy NDJSON
+ * connect/authenticate/request sequence with first-class /v1 dispatch routes. */
 cJSON *cli_v1_dispatch_local(cJSON *req, int timeout_ms);
 
 /* ── /v1 HTTP transport (aimee.api.client_transport) ───────────────────────

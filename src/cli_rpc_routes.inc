@@ -6500,13 +6500,13 @@ int cli_rpc_remote_endpoint_is_tcp(void)
 #include "cli_v1_routes_gen.inc"
 
 /* First-class /v1 REST route resolvers — SHARED across POSIX and Windows so both
- * thin clients route a method to its dedicated dispatch-backed endpoint instead
- * of tunnelling through POST /v1/rpc. Pure string-map lookups (no platform deps).
- * The HTTP response is byte-identical to the NDJSON socket, and data-write routes
- * are reachable under aimee.api.remote_writes=data (vs /v1/rpc's CAPS_ALL). Both
- * GET and POST routes carry the request body — the server reads it via
- * Content-Length regardless of verb — so param-bearing GET reads (skill.list,
- * work.list, …) keep their filters. */
+ * thin clients route a method to its dedicated dispatch-backed endpoint. Pure
+ * string-map lookups (no platform deps).
+ * The HTTP response is byte-identical to the NDJSON socket. Data-write routes
+ * are denied on TCP unless aimee.api.remote_writes is data/full; privileged
+ * exec/control routes require full. Both GET and POST routes carry the request
+ * body — the server reads it via Content-Length regardless of verb — so
+ * param-bearing GET reads (skill.list, work.list, …) keep their filters. */
 const char *cli_v1_route_for_method(const char *method, const char **verb_out)
 {
    if (verb_out)
@@ -6702,8 +6702,8 @@ static cJSON *cli_v1_send(const char *remote, const char *bearer, const char *ve
 
 /* cli_v1_run_and_poll: POST an async (rh_dispatch_op_async) route, then poll
  * GET /v1/runs/{id} until the run is terminal and return its `result` — the raw
- * dispatch payload, identical to what the old synchronous /v1/rpc dispatch
- * returned, so the CLI's response handling is unchanged. Caller frees. */
+ * dispatch payload, matching the synchronous dispatch response shape, so the
+ * CLI's response handling is unchanged. Caller frees. */
 static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const char *verb,
                                   const char *path, const char *body, int timeout_ms)
 {
@@ -6747,11 +6747,11 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
 
 /* cli_v1_dispatch_local: dispatch a pre-marshalled {method, ...params} request to its
  * first-class /v1 route over the co-located transport — the local aimee-http.sock
- * on POSIX, or the configured remote on Windows (no UDS). Replaces the old POST
- * /v1/rpc bridge: the interactive co-located callers (chat, launch, mcp serve,
- * hooks, triggers, gateway, workspace serve) now reach the same dispatch surface
- * via dedicated routes (async methods are polled to completion). Returns the
- * parsed response (caller frees) or NULL. */
+ * on POSIX, or the configured remote on Windows (no UDS). Interactive
+ * co-located callers (chat, launch, mcp serve, hooks, triggers, gateway,
+ * workspace serve) reach the dispatch surface via dedicated routes (async
+ * methods are polled to completion). Returns the parsed response (caller frees)
+ * or NULL. */
 cJSON *cli_v1_dispatch_local(cJSON *req, int timeout_ms)
 {
    if (!req)

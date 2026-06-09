@@ -14,7 +14,7 @@ directory listing:
 
 - [`proposals/accepted/`](proposals/accepted/): locked but not yet
   implemented
-- [`proposals/done/`](proposals/done/): shipped (312 proposals)
+- [`proposals/done/`](proposals/done/): shipped (313 proposals)
 - [`proposals/rejected/`](proposals/rejected/): considered and
   declined
 - [`proposals/deferred/`](proposals/deferred/): parked for later

@@ -37,10 +37,9 @@ static int stub_models_provider(char ids[][SERVER_HTTP_MODEL_ID_MAX], int max)
    return 2;
 }
 
-/* The /v1/rpc bridge in server_http.o references server_dispatch() and
- * server_active_ctx() (server.c / server_main.c, not linked into this test).
- * Stub them for linking; the tests below hit only the allowlist/validation
- * gates, which return before any dispatch. */
+/* Dispatch-backed first-class /v1 routes in server_http.o reference
+ * server_dispatch() and server_active_ctx() (server.c / server_main.c, not
+ * linked into this test). Stub them for linking. */
 /* Last dispatch captured by the stub, so route→method tests can assert which
  * NDJSON method a first-class /v1 route actually dispatched, and that the body
  * survived the bridge. */
@@ -52,7 +51,7 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
 {
    (void)ctx;
    /* Capture the dispatched method + body (msg is the NUL-terminated line the
-    * loopback bridge built). */
+    * loopback dispatch route built). */
    snprintf(g_disp_body, sizeof(g_disp_body), "%.*s", (int)msg_len, msg ? msg : "");
    if (strstr(g_disp_body, "\"method\":\"delegate.aggregate\""))
       snprintf(g_agg_body, sizeof(g_agg_body), "%s", g_disp_body);
@@ -66,7 +65,8 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
          snprintf(g_disp_method, sizeof(g_disp_method), "%.*s", (int)(q - p), p);
    }
    /* Mimic a real method handler: write an NDJSON response to the loopback fd
-    * the bridge handed us, so the /v1/rpc capture path is exercised end to end. */
+    * the first-class /v1 route handed us, so the capture path is exercised end to
+    * end. */
    const char *r = "{\"status\":\"ok\",\"result\":42}\n";
    ssize_t w = write(conn->fd, r, strlen(r));
    (void)w;
@@ -796,7 +796,7 @@ int main(void)
              server_capability_for_method("memory.recall"));
    }
 
-   /* --- local-UDS-only write families (P1) --- */
+   /* --- data-write families default to local-UDS-only (P1) --- */
    {
       const char *sb = "scope:project:alpha:s3cr3t";
       /* Caps still derive from the op for the local path. */
@@ -810,7 +810,7 @@ int main(void)
       assert(server_http_route_allowed(0, NULL, "POST", "/v1/work/claim", 0) == 1);
       assert(server_http_route_allowed(0, NULL, "POST", "/v1/work/complete", 0) == 1);
       assert(server_http_route_allowed(0, NULL, "POST", "/v1/work/fail", 0) == 1);
-      /* ... but never over TCP, regardless of bearer (unscoped or scoped). */
+      /* ... but not over TCP at the default, regardless of bearer (unscoped or scoped). */
       assert(server_http_route_allowed(1, NULL, "POST", "/v1/memory/store", 0) == 0);
       assert(server_http_route_allowed(1, "plain-token", "POST", "/v1/memory/store", 0) == 0);
       assert(server_http_route_allowed(1, sb, "POST", "/v1/memory/store", 0) == 0);
@@ -822,7 +822,8 @@ int main(void)
       assert(server_http_route_allowed(1, NULL, "GET", "/v1/work", 0) == 1);
       assert(server_http_route_allowed(1, NULL, "POST", "/v1/memory/search", 0) == 1);
 
-      /* Later write batches: session + rules/collab-rules + skill mutations, all UDS-only. */
+      /* Later write batches: session + rules/collab-rules + skill mutations, all
+       * UDS-only at the default remote_writes=off. */
       const char *write_paths[] = {"/v1/wm/set",
                                    "/v1/attempts/record",
                                    "/v1/rules/delete",
@@ -845,7 +846,7 @@ int main(void)
       assert(server_http_route_caps("POST", "/v1/rules/delete") == CAP_RULES_ADMIN);
       assert(server_http_route_caps("POST", "/v1/collab_rules/approve") == CAP_RULES_ADMIN);
       assert(server_http_route_caps("POST", "/v1/skills/create") == CAP_TOOL_WRITE);
-      /* Skill reads remain TCP-reachable (only the mutations are local-only). */
+      /* Skill reads remain TCP-reachable (only the mutations are write-gated). */
       assert(server_http_route_allowed(1, NULL, "GET", "/v1/skills", 0) == 1);
    }
 
@@ -1055,7 +1056,7 @@ int main(void)
          assert(st == 200);
          /* dispatched exactly the op twin, server-set from the row */
          assert(strcmp(g_disp_method, cases[i].expect_op) == 0);
-         /* byte-identical to the bridge's echo of the same dispatch */
+         /* byte-identical to the route's echo of the same dispatch */
          assert(strcmp(resp, "{\"status\":\"ok\",\"result\":42}") == 0);
          /* the client body survived (a field from it appears in the dispatch) */
          if (cases[i].body && strchr(cases[i].body, ':'))
