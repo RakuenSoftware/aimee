@@ -75,8 +75,8 @@ void otel_flush(void);
  *   direction  "response"  → end the current turn span and flush
  *   direction  "tool_call" → emit a child span for a single tool execution
  * tool_name / tool_args / tool_result are used for tool_call spans only. */
-void otel_on_trace(const char *direction, const char *tool_name,
-                   const char *tool_args, const char *tool_result, int turn);
+void otel_on_trace(const char *direction, const char *tool_name, const char *tool_args,
+                   const char *tool_result, int turn);
 
 /* Convenience wrappers for delegation spans.
  * Call otel_delegation_start() before running the delegate; capture the

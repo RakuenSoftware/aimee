@@ -32,9 +32,8 @@ extern "C"
     * otherwise only rows outside that slot are eligible. Falls back to the
     * regular kind promotion when slot_modulo <= 0. */
    int db2_memory_promotion_promote_kind_slot(const char *ts, const char *kind,
-                                              int promote_use_count,
-                                              double promote_confidence, int slot_modulo,
-                                              int slot_remainder, int slot_match);
+                                              int promote_use_count, double promote_confidence,
+                                              int slot_modulo, int slot_remainder, int slot_match);
 
    /* L2 -> L1 demotion for a single kind, gated by confidence and idle days
     * (`days_neg_str` is "-N", embedded into `datetime('now', ?||' days')`).

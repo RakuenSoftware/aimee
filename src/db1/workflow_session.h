@@ -46,14 +46,14 @@ extern "C"
    int db1_workflow_role_needs_dissent(const char *role);
 
    int db1_workflow_session_create(const char *project_root, const char *template_name,
-                                   const char *channel, cJSON *assignments, int *out_id,
-                                   char *err, size_t errlen);
+                                   const char *channel, cJSON *assignments, int *out_id, char *err,
+                                   size_t errlen);
    int db1_workflow_session_get(int id, workflow_session_info_t *out, char **prompt_out,
                                 char **context_out, char *err, size_t errlen);
    int db1_workflow_session_pause(int id, const char *reason, char *err, size_t errlen);
    int db1_workflow_session_advance(int id, const char *sender, const char *text,
-                                    workflow_session_info_t *out, char **prompt_out,
-                                    char *err, size_t errlen);
+                                    workflow_session_info_t *out, char **prompt_out, char *err,
+                                    size_t errlen);
    int db1_workflow_session_list(workflow_session_info_t **out, int *out_count, char *err,
                                  size_t errlen);
    int db1_workflow_session_find_current_by_channel(const char *channel, int *out_id, char *err,

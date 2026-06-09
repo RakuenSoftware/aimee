@@ -29,8 +29,7 @@
 /* Base64url-encode (RFC 4648 §5) |inlen| bytes from |in| into |out|.
  * No padding is emitted. |outlen| must be at least 4*ceil(inlen/3) - pad + 1.
  * Returns 0 on success, -1 if |out| is too small or args are invalid. */
-int oauth_pkce_base64url_encode(const unsigned char *in, size_t inlen,
-                                char *out, size_t outlen);
+int oauth_pkce_base64url_encode(const unsigned char *in, size_t inlen, char *out, size_t outlen);
 
 /* Fill |out| with a PKCE code_verifier of exactly |len| characters
  * (43..128). |out| must have room for |len| + 1 bytes (NUL terminator).
@@ -63,7 +62,6 @@ typedef struct
  *
  * Returns the number of bytes written (excluding NUL) on success,
  * or -1 if |out| is too small or required fields are missing. */
-int oauth_pkce_build_auth_url(const oauth_pkce_auth_request_t *req,
-                              char *out, size_t outlen);
+int oauth_pkce_build_auth_url(const oauth_pkce_auth_request_t *req, char *out, size_t outlen);
 
 #endif /* DEC_OAUTH_PKCE_H */

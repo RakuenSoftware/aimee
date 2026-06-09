@@ -9,10 +9,10 @@ extern "C"
 {
 #endif
 
-#define DB1_MCP_OSV_TEXT_LEN     256
-#define DB1_MCP_OSV_VERDICT_LEN  16
-#define DB1_MCP_OSV_ACTION_LEN   32
-#define DB1_MCP_OSV_CHECKED_LEN  32
+#define DB1_MCP_OSV_TEXT_LEN    256
+#define DB1_MCP_OSV_VERDICT_LEN 16
+#define DB1_MCP_OSV_ACTION_LEN  32
+#define DB1_MCP_OSV_CHECKED_LEN 32
 
    typedef struct
    {

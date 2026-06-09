@@ -1,7 +1,6 @@
 #ifndef DEC_AGENT_COORD_H
 #define DEC_AGENT_COORD_H 1
 
-
 #include "agent_types.h"
 #include "agent_tasks.h"
 #include "db1.h"

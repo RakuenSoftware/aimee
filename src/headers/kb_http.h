@@ -28,5 +28,5 @@ int kb_http_route(const char *method, const char *path, const char *auth_header,
  * POST endpoints and path-parameter routes.
  * query_string and body may be NULL. out_buf must be at least out_cap bytes. */
 int kb_http_route_ex(const char *method, const char *path, const char *query_string,
-                     const char *auth_header, const char *bearer_token,
-                     const char *body, int body_len, char *out_buf, int out_cap);
+                     const char *auth_header, const char *bearer_token, const char *body,
+                     int body_len, char *out_buf, int out_cap);

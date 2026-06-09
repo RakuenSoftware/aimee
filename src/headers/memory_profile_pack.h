@@ -23,9 +23,9 @@ extern "C"
       char description[MEMORY_PROFILE_PACK_DESC_LEN];
       /* Optional narrowing — empty means "all allowed". */
       char allowed_tiers[MEMORY_PROFILE_PACK_MAX_TIERS][4];
-      int  allowed_tier_count;
+      int allowed_tier_count;
       char allowed_kinds[MEMORY_PROFILE_PACK_MAX_KINDS][16];
-      int  allowed_kind_count;
+      int allowed_kind_count;
       /* Optional defaults */
       char default_tier[4];
       char default_visibility[16]; /* "default" | "strict" | "expanded" */
@@ -41,8 +41,8 @@ extern "C"
 
    /* Load a named pack from the pack directory into |out|.
     * Returns 0 on success, -1 if not found or invalid. */
-   int memory_profile_pack_load(const char *name, memory_profile_pack_t *out,
-                                char *errbuf, size_t errlen);
+   int memory_profile_pack_load(const char *name, memory_profile_pack_t *out, char *errbuf,
+                                size_t errlen);
 
    /* List available pack names into |names|.  Each slot is a NUL-terminated
     * string up to MEMORY_PROFILE_PACK_NAME_LEN.

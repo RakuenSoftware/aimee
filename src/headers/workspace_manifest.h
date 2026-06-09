@@ -12,9 +12,9 @@
 
 #define WORKSPACE_MANIFEST_FILENAME "aimee.workspace.yaml"
 
-#define MANIFEST_MAX_REPOS     32
-#define MANIFEST_MAX_DEP_CMDS  16
-#define MANIFEST_MAX_SECRETS   16
+#define MANIFEST_MAX_REPOS    32
+#define MANIFEST_MAX_DEP_CMDS 16
+#define MANIFEST_MAX_SECRETS  16
 
 /* A single repository entry declared in the manifest. */
 typedef struct
@@ -38,14 +38,14 @@ typedef struct
 
 typedef struct
 {
-   manifest_repo_t    repos[MANIFEST_MAX_REPOS];
-   int                repo_count;
+   manifest_repo_t repos[MANIFEST_MAX_REPOS];
+   int repo_count;
 
    manifest_dep_cmd_t dep_cmds[MANIFEST_MAX_DEP_CMDS];
-   int                dep_cmd_count;
+   int dep_cmd_count;
 
-   manifest_secret_t  secrets[MANIFEST_MAX_SECRETS];
-   int                secret_count;
+   manifest_secret_t secrets[MANIFEST_MAX_SECRETS];
+   int secret_count;
 
    /* quickstart knobs (both default to 1 when absent) */
    int index;          /* 1 = index discovered projects */

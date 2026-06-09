@@ -93,7 +93,7 @@ extern "C"
 
    /* Update a run row on completion. */
    int db1_cron_job_run_complete(int64_t run_id, int64_t completed_at, const char *status,
-                                  int silent, const char *output, const char *error);
+                                 int silent, const char *output, const char *error);
 
    /* Mark a run as delivered. */
    int db1_cron_job_run_mark_delivered(int64_t run_id);
@@ -103,8 +103,8 @@ extern "C"
 
    /* List recent runs for a job (most recent first). Pass 0 for limit to get
     * all. Returns 0 on success, -1 on error. */
-   int db1_cron_job_run_history(const char *job_id, int limit, db1_cron_job_run_t *out,
-                                 int max_out, int *out_count);
+   int db1_cron_job_run_history(const char *job_id, int limit, db1_cron_job_run_t *out, int max_out,
+                                int *out_count);
 
 #ifdef __cplusplus
 }

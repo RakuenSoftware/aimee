@@ -5,8 +5,8 @@
 
 struct cJSON;
 
-#define REPORT_SUBJECT_TYPE_GIT_REPO "git_repo"
-#define REPORT_SUBJECT_TYPE_GIT_ORG "git_org"
+#define REPORT_SUBJECT_TYPE_GIT_REPO  "git_repo"
+#define REPORT_SUBJECT_TYPE_GIT_ORG   "git_org"
 #define REPORT_SUBJECT_TYPE_AGGREGATE "aggregate"
 
 typedef struct report_subject
