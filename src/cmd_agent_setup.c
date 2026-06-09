@@ -107,6 +107,9 @@ static void setup_ensure_fallback(agent_config_t *cfg, const char *name)
 
 static const char *default_provider_cli_roles[] = {"code",     "review", "explain",
                                                    "refactor", "draft",  "execute"};
+static const char *codex_oauth_roles[] = {"code",     "review",  "explain",   "refactor",
+                                          "draft",    "execute", "summarize", "format",
+                                          "diagnose", "validate"};
 static const char *mistral_plan_roles[] = {"code",     "review",  "explain",   "refactor",
                                            "draft",    "execute", "summarize", "format",
                                            "diagnose", "validate"};
@@ -171,8 +174,10 @@ static void configure_tmux_cli_agent(agent_t *ag, const char *name, const char *
       snprintf(ag->roles[ag->role_count++], 32, "%s", default_provider_cli_roles[i]);
 }
 
-static void configure_direct_adapter_agent(agent_t *ag, const agent_adapter_t *adapter,
-                                           const char *name, int cost_tier, int timeout_ms)
+static void configure_direct_adapter_agent_with_roles(agent_t *ag, const agent_adapter_t *adapter,
+                                                      const char *name, int cost_tier,
+                                                      int timeout_ms, const char *const *roles,
+                                                      int role_count)
 {
    memset(ag, 0, sizeof(*ag));
    snprintf(ag->name, MAX_AGENT_NAME, "%s", name);
@@ -189,11 +194,16 @@ static void configure_direct_adapter_agent(agent_t *ag, const agent_adapter_t *a
    ag->max_parallel = AGENT_DEFAULT_MAX_PARALLEL;
 
    ag->role_count = 0;
-   for (int i = 0;
-        i < (int)(sizeof(default_provider_cli_roles) / sizeof(default_provider_cli_roles[0])) &&
-        ag->role_count < MAX_AGENT_ROLES;
-        i++)
-      snprintf(ag->roles[ag->role_count++], 32, "%s", default_provider_cli_roles[i]);
+   for (int i = 0; i < role_count && ag->role_count < MAX_AGENT_ROLES; i++)
+      snprintf(ag->roles[ag->role_count++], 32, "%s", roles[i]);
+}
+
+static void configure_direct_adapter_agent(agent_t *ag, const agent_adapter_t *adapter,
+                                           const char *name, int cost_tier, int timeout_ms)
+{
+   configure_direct_adapter_agent_with_roles(
+       ag, adapter, name, cost_tier, timeout_ms, default_provider_cli_roles,
+       (int)(sizeof(default_provider_cli_roles) / sizeof(default_provider_cli_roles[0])));
 }
 
 /* --- agent setup: codex-cli (legacy provider CLI) --- */
@@ -584,7 +594,9 @@ static void setup_codex_oauth(app_ctx_t *ctx, agent_config_t *cfg)
    const agent_adapter_t *adapter = agent_adapter_for_name("codex");
    if (!adapter)
       fatal("codex adapter is not registered");
-   configure_direct_adapter_agent(ag, adapter, "codex", 0, 600000);
+   configure_direct_adapter_agent_with_roles(
+       ag, adapter, "codex", 0, 600000, codex_oauth_roles,
+       (int)(sizeof(codex_oauth_roles) / sizeof(codex_oauth_roles[0])));
    if (chatgpt_account_id[0])
       snprintf(ag->extra_headers, sizeof(ag->extra_headers),
                "originator: codex_cli_rs\nChatGPT-Account-ID: %s", chatgpt_account_id);

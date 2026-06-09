@@ -1234,14 +1234,11 @@ int agent_is_exec_role(const agent_t *agent, const char *role)
 
 /* --- Auth resolution --- */
 
-static int agent_read_codex_oauth_token(char *token, size_t token_len)
+static int agent_read_codex_oauth_token_from_path(const char *path, char *token, size_t token_len)
 {
-   if (!token || token_len == 0)
+   if (!path || !path[0] || !token || token_len == 0)
       return -1;
    token[0] = '\0';
-
-   char path[MAX_PATH_LEN];
-   snprintf(path, sizeof(path), "%s/codex-auth.json", config_default_dir());
 
    FILE *f = fopen(path, "rb");
    if (!f)
@@ -1275,11 +1272,39 @@ static int agent_read_codex_oauth_token(char *token, size_t token_len)
       return -1;
 
    cJSON *access = cJSON_GetObjectItem(root, "access_token");
+   if (!access)
+   {
+      cJSON *tokens = cJSON_GetObjectItem(root, "tokens");
+      if (tokens && cJSON_IsObject(tokens))
+         access = cJSON_GetObjectItem(tokens, "access_token");
+   }
    if (access && cJSON_IsString(access) && access->valuestring[0])
       snprintf(token, token_len, "%s", access->valuestring);
    cJSON_Delete(root);
 
    return token[0] ? 0 : -1;
+}
+
+static int agent_read_codex_oauth_token(char *token, size_t token_len)
+{
+   if (!token || token_len == 0)
+      return -1;
+   token[0] = '\0';
+
+   char path[MAX_PATH_LEN];
+   snprintf(path, sizeof(path), "%s/codex-auth.json", config_default_dir());
+   if (agent_read_codex_oauth_token_from_path(path, token, token_len) == 0)
+      return 0;
+
+   const char *home = getenv("HOME");
+   if (home && home[0])
+   {
+      snprintf(path, sizeof(path), "%s/.codex/auth.json", home);
+      if (agent_read_codex_oauth_token_from_path(path, token, token_len) == 0)
+         return 0;
+   }
+
+   return -1;
 }
 
 int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
