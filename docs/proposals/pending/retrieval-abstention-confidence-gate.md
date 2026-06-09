@@ -219,8 +219,8 @@ answer rendering is a separate, later capability.
 
 | Phase | Change | Note |
 |------|--------|------|
-| **P0** (new, foundational) | Extract the **pure** `memory_answerable()` evaluator; make per-candidate scores survive to the answer path; lift coverage/separation onto the answer path; compute it from the **deterministic** hybrid signal (§A.2/§A.3); evaluate the **answer anchor/cluster**, not just the top-K list (§R3.2). | The real load-bearing refactor §R said Phase 2 hides. Nothing user-visible. |
-| **P1** | Answer-path **refuse** via the evaluator (grounding-first), reusing `no_answer`; caller-counted. | Was "Phase 1"; now depends on P0. Correctness basis, not cost. |
+| **P0** (new, foundational) | Extract the **pure** `memory_answerable()` evaluator; make per-candidate scores survive to the answer path; lift coverage/separation onto the answer path; compute it from the **deterministic** hybrid signal (§A.2/§A.3); evaluate the **answer anchor/cluster**, not just the top-K list (§R3.2); keep enough candidate evidence for logging/bench labels (§R4.2). | The real load-bearing refactor §R said Phase 2 hides. Nothing user-visible. |
+| **P1** | Answer-path **refuse** via the evaluator (grounding-first), reusing `no_answer`; caller-counted; update string-only helper callers so abstention is not silently rendered as an empty answer (§R4.1). | Was "Phase 1"; now depends on P0. Correctness basis, not cost. |
 | **P2** | Context-path **withhold** — replace the prompt-delegated LOW marker with the deterministic decision (§A.1). | Promoted from non-goal; the slice that actually saves generation and removes the anti-pattern. |
 | **P3** | Curated exemption keyed on the **anchor** record's tier (L4/L5) — not "any cited record" (§R.13, §R2.7). | |
 | **P4** | Per-triple calibration — **gated on first building the ask-outcome feedback signal**, which does not exist today (§R.5.14). Net-new infra, not a free hook. | |
@@ -250,6 +250,10 @@ now follows the revised architecture in §A):**
 - On abstain, the result is the **existing** shape: `no_answer = 1`, `answer`
   empty, `confidence` set to the (low) computed value, citations empty. No new
   field, no new render path - `server_mcp.c:386` already says the right thing.
+- String-only helper paths (`memory_answer_query*`) and any UI/CLI text path that
+  does not inspect `memory_answer_result_t.no_answer` must render an explicit
+  abstention instead of treating empty `answer` as a legitimate empty result
+  (§R.1.4, §R4.1).
 - Abstention is **counted**: increment a `memory.answer.abstained` runtime
   counter (mirroring the existing `memory.citation.*` counters at
   `memory_core_search.inc:4831+`) so the calibration loop and bench can see the
@@ -926,3 +930,95 @@ recording, changes the threshold/counter key, or introduces a new
 important part is that the LLM no longer receives weak evidence plus a soft plea,
 but the system still learns that the memory corpus lacked reliable evidence for
 the query.
+
+## §R4 Second follow-up review — remaining surface and telemetry traps (`testing@d3eb402d` + PR head)
+
+This pass focused on paths outside the main `memory_ask_query_scoped` body: helper
+APIs, CLI/MCP surfaces, dogfood telemetry, and alternate build modes. The core
+architecture still holds, but these details decide whether abstention is visible,
+measurable, and shippable across all supported binaries.
+
+### §R4.1 `memory_answer_query*` string helpers turn `no_answer` into an empty string
+
+The proposal now correctly says structured surfaces can carry `no_answer`, but
+the tree still has public string helpers:
+
+- `memory_answer_query()` → `memory_answer_query_scoped()`
+  (`memory_core_search.inc:4756-4758`);
+- `memory_answer_query_scoped()` calls `memory_ask_query_scoped()` and then
+  returns either a cited answer string or `safe_strdup(result.answer)`
+  (`memory_core_search.inc:4903-4912`);
+- in the DB2-disabled implementation, the same helpers always return
+  `memory_dup_cstr("")` (`memory_core.c:333-347`).
+
+So after the proposed gate sets `no_answer = 1` and clears `answer`, direct helper
+callers observe an **empty string**, not an explicit "I don't know." Tests still
+exercise these helpers (`tests/test_memory_cases_a.inc`, `tests/test_memory.c`),
+and future callers can bypass the structured contract accidentally.
+
+Phase 1 should either deprecate these helpers for answerable/abstain-sensitive
+flows or make them render the same explicit abstention text as MCP. At minimum,
+add regression tests for both `memory_ask_query*` and `memory_answer_query*` so
+the no-answer contract cannot silently collapse on string-only paths.
+
+### §R4.2 Abstention telemetry must retain the weak candidate ids, not only zero citations
+
+Today dogfood logging for ask records passes `out->citation_ids` and
+`out->citation_count` (`memory_core_search.inc:4765`, `cmd_memory.c:103`). The
+proposed abstain action explicitly clears citations. That means the most valuable
+training cases — "we retrieved weak evidence and refused" — will be logged with
+no retrieved ids, indistinguishable from zero-retrieval/no-evidence abstentions
+unless extra metadata is added.
+
+That undermines two proposal goals:
+
+- the abstain/false-omission bench needs to inspect what evidence was withheld;
+- Phase 4's ask-outcome feedback needs to learn which candidates caused false
+  abstentions or false answers.
+
+The evaluator should return or side-band an evidence trace separate from rendered
+citations: candidate ids, anchor id, ranked count, answerability decision/reason,
+grounding score, and whether the abstention was structural vs gated. Rendered
+citations can remain empty on abstain; telemetry should not be empty.
+
+### §R4.3 DB2-disabled/stub builds need an explicit no-op contract
+
+`memory_core.c` has an `AIMEE_DB2_DISABLED` implementation for DB-free binaries.
+It already defines `memory_ask_query*`, `memory_answer_query*`,
+`memory_tier_priority`, query-shape helpers, and many memory APIs as stubs. Adding
+new config fields and a shared `memory_answerable()` symbol only in the DB2-backed
+path risks either link failures or divergent semantics in client/webchat/test
+binaries that compile with DB2 disabled.
+
+The implementation plan should include the stub contract:
+
+- declare the evaluator/result types in the public header only if both backed and
+  DB2-disabled builds can compile them;
+- provide a DB2-disabled no-op evaluator returning `abstain`/unavailable without
+  touching DB state;
+- keep `memory_answer_query*` string behavior explicit in the disabled path too,
+  instead of another empty-string abstention.
+
+This is small but important because the proposal is framed as "no new service /
+no new schema"; it should also remain no-new-linkage-risk for DB-free clients.
+
+### §R4.4 Per-scope calibration is not reachable from the MCP `memory_ask` surface today
+
+The calibration plan keys thresholds by surface/kind/scope. The ask engine can
+receive `scope_type` / `scope_value`, and the KB backend forwards them when
+present (`db2_kb_service_memory_ask_json`, `kb_client_memory_ask`). The MCP tool
+does not expose or forward scope: `tool_memory_ask` calls
+`kb_client_memory_ask(jq->valuestring, NULL, NULL, limit, &result)`
+(`server_mcp.c:362-366`).
+
+If MCP is one of the main recall surfaces, Phase 4 needs a decision before
+per-scope thresholds are used there:
+
+- add optional `scope_type` / `scope_value` (or workspace/project-derived scope)
+  to the MCP schema and handler;
+- intentionally treat MCP as global-scope for calibration; or
+- derive scope from session/workspace context elsewhere and document that source.
+
+Without this, the "per `(surface, kind, scope)`" gate will be per-scope for CLI/RPC
+callers but effectively global for MCP, which is exactly the surface most likely
+to use recall inside agent turns.
