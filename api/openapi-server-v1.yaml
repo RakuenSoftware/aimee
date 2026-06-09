@@ -593,8 +593,10 @@ paths:
     post:
       summary: Graph-derived code-health audit (proxied to aimee-kb)
       description: >-
-        Dead exports, import cycles, and body-hash clones derived from the
-        code graph (entity_edges) and code_embeddings.
+        Dead exports, import cycles, exact body-hash clone groups, near-clone
+        pairs, and clone threshold metadata derived from the indexed code graph
+        (entity_edges) and code_embeddings. Requires aimee-kb with code graph
+        rows for the requested project.
       requestBody:
         required: false
         content:
@@ -606,7 +608,7 @@ paths:
                 limit: { type: integer }
       responses:
         "200":
-          description: Audit bundle ({dead_exports, cycles, clones})
+          description: Audit bundle ({dead_exports, cycles, clones, near_clones})
           content:
             application/json:
               schema: { type: object }
@@ -1656,9 +1658,16 @@ paths:
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
   /memory/benchmark:
     post:
-      summary: Run a memory retrieval benchmark (async; poll GET /runs/{id})
+      summary: Run a memory retrieval benchmark
+      description: >-
+        Runs synchronous retrieval suites through the server-side
+        memory.benchmark handler. Supported sync suites are code-graph-fusion,
+        memory, corpus, memory-retrieval, and live. Dataset or judge-style
+        suites such as locomo, longmemeval, locomo-qa, and
+        longmemeval-qa return an async-only envelope with the CLI/delegate route
+        to run them.
       requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+      responses: { "200": { description: Benchmark result or async-only envelope, content: { application/json: { schema: { type: object } } } } }
   /curator/synthesize:
     post:
       summary: Run curator synthesis/extraction (async; poll GET /runs/{id})

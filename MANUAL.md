@@ -626,6 +626,8 @@ Symbol-level code knowledge (DB2 code index, via KB).
 - `index structure <file>` (`index.structure`)
 - `index callers <symbol>` (`index.find_callers`)
 - `index blast-radius <file>` (`index.blast_radius`)
+- `code audit [dir] [--json] [--fix]`: local file-health checks. `--fix` is non-mutating until there are safe, reviewable mechanical fixes.
+- `code audit --graph [--project P] [--json]`: graph-derived dead exports, import cycles, exact clones, and near clones via `aimee-server` and `aimee-kb`. Thin clients need a configured remote and a scanned/indexed project.
 
 See [§12](#12-the-code-index).
 
@@ -751,13 +753,23 @@ See [§21](#21-the-knowledge-base).
 
 See [§20](#20-triggers-cron-and-automation).
 
-### 7.18 Review surfaces
+### 7.18 Benchmarks and optimization, `aimee optimize`
+
+- `optimize run --suite <suite> [--arm <arm>]`: run the server-side
+  `memory.benchmark` RPC. Synchronous retrieval suites are `code-graph-fusion`,
+  `memory`, `corpus`, `memory-retrieval`, and `live`. Dataset and judge-style
+  suites such as `locomo`, `longmemeval`, `locomo-qa`, and `longmemeval-qa`
+  return an `async-only` response that points to the CLI/delegate benchmark path.
+- `optimize compare --baseline <arm> --candidate <arm>`: compare benchmark arm
+  metrics.
+
+### 7.19 Review surfaces
 
 Unified `aimee review` is implemented in the legacy command table but is not
 currently routed through the thin CLI. Use routed review/status surfaces that are
 visible in `aimee help --all` for your installed build.
 
-### 7.19 Insights, HUD, status, dogfood, graph, trajectory
+### 7.20 Insights, HUD, status, dogfood, graph, trajectory
 
 - `insights [--days N]`, token-usage totals (default 30 days) (`insights.overview`).
 - `hud`, real-time session telemetry (`hud.status`).
@@ -935,7 +947,17 @@ aimee index find handleLogin        # locate a symbol
 aimee index callers handleLogin     # who calls it
 aimee index structure src/auth.c    # definitions in a file
 aimee index blast-radius src/db.c   # files impacted by changing this one
+aimee code audit --graph --project my-app --json
 ```
+
+`aimee code audit` has two modes. The local mode scans a working tree for file
+health signals such as untested files and TODO/FIXME markers; its `--fix` flag
+does not rewrite files yet and reports that no safe automatic fixes are
+available. The graph mode calls `/v1/code/audit` on `aimee-server`, which proxies
+to `aimee-kb`; it requires the server and KB to be reachable and the project to
+have code graph/index rows. The graph response includes dead exports, import
+cycles, exact body-hash clone groups, near-clone pairs, and clone threshold
+metadata such as `clone_min_lines`.
 
 `find_symbol`, `preview_blast_radius`, and `ast_grep_search` are also exposed as
 MCP tools (see [§22](#22-the-mcp-server)), so a tool that speaks MCP can use the

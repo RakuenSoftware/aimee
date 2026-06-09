@@ -1,6 +1,6 @@
 # Proposal: ingest restoration + bounded-hallucination recall contract
 
-- **State:** draft — pending review
+- **State:** done
 - **Author:** JBailes
 - **Date:** 2026-06-08
 - **Charter role(s):** knowledge-base ingest + recall (kb-side intelligence

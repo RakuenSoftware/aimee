@@ -9,4 +9,4 @@
 - Add the `briefing_style` decision point for compact versus evidence-heavy session briefings.
 - Add the `guardrail_strictness` decision point for strict versus balanced guardrail thresholds.
 - Define and validate any online-exploration enablement that remains default-off today.
-- Keep benchmark-suite generalization tracked separately in `memory-benchmark-suite-generalisation.md`; it is not a blocker for the shipped optimization surface.
+- Benchmark-suite generalization was tracked separately and is now complete in `docs/proposals/done/memory-benchmark-suite-generalisation.md`; it was not a blocker for the shipped optimization surface.
