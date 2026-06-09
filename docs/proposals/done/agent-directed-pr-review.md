@@ -1,6 +1,6 @@
 # Proposal: Agent-directed PR review (call in the ensemble with a brief)
 
-- **State:** draft, pending review
+- **State:** done
 - **Author:** JBailes
 - **Date:** 2026-06-09
 - **Charter roles:** Review (per-round critique and consolidation). Reason runs
