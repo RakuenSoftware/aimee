@@ -4797,6 +4797,30 @@ const char *memory_answer_evidence_reason_str(const memory_answer_evidence_t *tr
    return memory_answer_reason_name(trace ? trace->reason : MEMORY_ANSWER_REASON_DB_UNAVAILABLE);
 }
 
+static int memory_fixed_field_eq(const char *field, size_t field_len, const char *value)
+{
+   if (!field || !value)
+      return 0;
+   size_t value_len = strlen(value);
+   if (value_len >= field_len)
+      return 0;
+   return memcmp(field, value, value_len) == 0 && field[value_len] == '\0';
+}
+
+static const char *memory_answer_mode_for_anchor(const memory_t *matches, int count, int anchor)
+{
+   if (!matches || anchor < 0 || anchor >= count)
+      return "";
+   const memory_t *m = &matches[anchor];
+   if (memory_fixed_field_eq(m->tier, sizeof(m->tier), TIER_L5) ||
+       memory_fixed_field_eq(m->kind, sizeof(m->kind), "synthesis") ||
+       memory_fixed_field_eq(m->kind, sizeof(m->kind), "restoration") ||
+       memory_fixed_field_eq(m->provenance_category, sizeof(m->provenance_category), "synthesis") ||
+       memory_fixed_field_eq(m->provenance_category, sizeof(m->provenance_category), "restoration"))
+      return "synthesised";
+   return "verbatim";
+}
+
 static double memory_text_term_coverage(const char **terms, int term_count, const char *a,
                                         const char *b)
 {
@@ -5114,6 +5138,8 @@ int memory_ask_query_scoped(const char *query, const char *scope_type, const cha
       strip_unverified = atoi(strip_env) != 0;
 
    int anchor = memory_answer_anchor_index(matches, count);
+   snprintf(out->evidence_mode, sizeof(out->evidence_mode), "%s",
+            memory_answer_mode_for_anchor(matches, count, anchor));
    out->citation_count = memory_collect_answer_citation_ids(
        matches, count, anchor, out->citation_ids, MEMORY_ANSWER_MAX_CITATIONS);
 

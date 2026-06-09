@@ -462,6 +462,7 @@ static cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out)
    cJSON_AddStringToObject(structured, "query", jq->valuestring);
    cJSON_AddStringToObject(structured, "answer", result.answer);
    cJSON_AddNumberToObject(structured, "confidence", result.confidence);
+   cJSON_AddStringToObject(structured, "evidence_mode", result.evidence_mode);
    cJSON_AddBoolToObject(structured, "no_answer", result.no_answer);
    cJSON_AddBoolToObject(structured, "low_confidence", result.low_confidence);
    cJSON *trace = cJSON_AddObjectToObject(structured, "evidence_trace");

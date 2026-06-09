@@ -155,6 +155,7 @@ typedef struct
    double confidence;
    int no_answer;
    int low_confidence;
+   char evidence_mode[16];
    int retrieval_count;
    int citation_count;
    int64_t citation_ids[MEMORY_ANSWER_MAX_CITATIONS];

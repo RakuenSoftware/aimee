@@ -47,6 +47,8 @@ extern "C"
                                      const char *content_hash);
    int db2_corpus_job_get(int64_t doc_id, db2_corpus_job_t *out);
    int db2_corpus_job_advance(int64_t doc_id, const char *outcome, const char *detail);
+   int db2_corpus_job_mark_restoration_candidate(int64_t doc_id, const char *content_hash,
+                                                 const char *signals_json);
    int db2_corpus_job_fail(int64_t doc_id, const char *error);
    int db2_corpus_job_recover_running(int stale_seconds);
    int db2_corpus_pipeline_status(db2_corpus_pipeline_stats_t *out);
