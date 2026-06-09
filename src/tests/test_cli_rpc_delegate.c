@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "aimee.h"
@@ -107,6 +108,57 @@ static void test_delegate_persona_marshaled(void)
    assert(cJSON_GetObjectItem(req, "persona") == NULL);
    cJSON_Delete(req);
    printf("  PASS: test_delegate_persona_marshaled\n");
+}
+
+static void test_delegate_roundtable_brief_marshaled(void)
+{
+   char *argv[] = {"review this change thoroughly",
+                   "--mode",
+                   "review",
+                   "--turns",
+                   "parallel",
+                   "--rounds",
+                   "2",
+                   "--brief",
+                   "focus on auth",
+                   "--brief-json",
+                   "{\"questions\":[\"does auth hold?\"]}",
+                   "--apply"};
+   cJSON *req = marshal_delegate_roundtable(12, argv);
+   assert(req != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "delegate.roundtable") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "prompt")->valuestring,
+                 "review this change thoroughly") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "mode")->valuestring, "review") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "turns")->valuestring, "parallel") == 0);
+   assert(cJSON_GetObjectItem(req, "rounds")->valueint == 2);
+   assert(cJSON_IsTrue(cJSON_GetObjectItem(req, "apply")));
+   cJSON *brief = cJSON_GetObjectItem(req, "brief");
+   assert(cJSON_IsObject(brief));
+   cJSON *questions = cJSON_GetObjectItem(brief, "questions");
+   assert(cJSON_IsArray(questions));
+   assert(strcmp(cJSON_GetArrayItem(questions, 0)->valuestring, "does auth hold?") == 0);
+   cJSON_Delete(req);
+   printf("  PASS: test_delegate_roundtable_brief_marshaled\n");
+}
+
+static void test_delegate_roundtable_invalid_brief_json_exits(void)
+{
+   pid_t pid = fork();
+   assert(pid >= 0);
+   if (pid == 0)
+   {
+      char *argv[] = {"review this change thoroughly", "--brief-json", "{\"questions\":["};
+      cJSON *req = marshal_delegate_roundtable(3, argv);
+      cJSON_Delete(req);
+      _exit(0);
+   }
+
+   int status = 0;
+   assert(waitpid(pid, &status, 0) == pid);
+   assert(WIFEXITED(status));
+   assert(WEXITSTATUS(status) == 1);
+   printf("  PASS: test_delegate_roundtable_invalid_brief_json_exits\n");
 }
 
 static cJSON *marshal_delegate_with_stdin(int argc, char **argv, const char *input)
@@ -1202,6 +1254,8 @@ int main(void)
    test_delegate_zero_max_turns_marshaled();
    test_delegate_provider_model_marshaled();
    test_delegate_persona_marshaled();
+   test_delegate_roundtable_brief_marshaled();
+   test_delegate_roundtable_invalid_brief_json_exits();
    test_delegate_prompt_stdin_marshaled();
    test_delegate_status_multiple_ids_marshaled();
    test_delegate_log_rejects_ignored_args();

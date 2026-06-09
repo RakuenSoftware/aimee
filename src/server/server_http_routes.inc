@@ -383,23 +383,28 @@ static void *op_run_worker(void *arg)
    return NULL;
 }
 
-static int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
+static int submit_op_run_internal(const char *op_method, const char *body_json, uint32_t conn_caps,
+                                  int preflight_caps, char *resp, int cap)
 {
-   if (!rq->op || !rq->op[0])
+   if (!op_method || !op_method[0])
       return err_json(resp, cap, 500, "route has no dispatch method");
-   cJSON *req = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : cJSON_CreateObject();
+   uint32_t required = server_capability_for_method(op_method);
+   if (preflight_caps && required && (conn_caps & required) == 0)
+      return err_json(resp, cap, 403, "forbidden: insufficient capabilities");
+   cJSON *req = (body_json && body_json[0]) ? cJSON_Parse(body_json) : cJSON_CreateObject();
    if (!req || !cJSON_IsObject(req))
    {
       cJSON_Delete(req);
       return err_json(resp, cap, 400, "invalid JSON body");
    }
    cJSON_DeleteItemFromObjectCaseSensitive(req, "method");
-   cJSON_AddStringToObject(req, "method", rq->op);
+   cJSON_AddStringToObject(req, "method", op_method);
 
    long created = (long)time(NULL);
-   static unsigned long g_op_run_seq = 0; /* listener thread only; single-writer */
+   static atomic_ulong g_op_run_seq = 0;
    char id[64];
-   snprintf(id, sizeof(id), "oprun_%ld_%lu", created, ++g_op_run_seq);
+   unsigned long seq = atomic_fetch_add_explicit(&g_op_run_seq, 1, memory_order_relaxed) + 1;
+   snprintf(id, sizeof(id), "oprun_%ld_%lu", created, seq);
 
    cJSON_DeleteItemFromObjectCaseSensitive(req, "__run_id");
    cJSON_AddStringToObject(req, "__run_id", id);
@@ -408,7 +413,7 @@ static int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
    if (!line)
       return err_json(resp, cap, 500, "out of memory");
 
-   char *queued = op_run_snapshot(id, rq->op, "queued", created, NULL);
+   char *queued = op_run_snapshot(id, op_method, "queued", created, NULL);
    if (!queued || !openai_runs_store_create(id, queued))
    {
       free(queued);
@@ -424,9 +429,9 @@ static int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
       return err_json(resp, cap, 500, "out of memory");
    }
    snprintf(j->run_id, sizeof(j->run_id), "%s", id);
-   snprintf(j->op, sizeof(j->op), "%s", rq->op);
+   snprintf(j->op, sizeof(j->op), "%s", op_method);
    j->line = line; /* ownership moves to the worker */
-   j->conn_caps = g_rpc_conn_caps;
+   j->conn_caps = conn_caps;
 
    pthread_t th;
    if (pthread_create(&th, NULL, op_run_worker, j) != 0)
@@ -442,6 +447,17 @@ static int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
    int n = snprintf(resp, (size_t)cap, "%s", queued);
    free(queued);
    return (n > 0 && n < cap) ? 200 : 200;
+}
+
+int server_http_submit_op_run(const char *op_method, const char *body_json, uint32_t conn_caps,
+                              char *resp, int cap)
+{
+   return submit_op_run_internal(op_method, body_json, conn_caps, 1, resp, cap);
+}
+
+static int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
+{
+   return submit_op_run_internal(rq->op, rq->body, g_rpc_conn_caps, 0, resp, cap);
 }
 
 /* ── workspace resource plane (workspace-resource-plane §1) ───────────────────

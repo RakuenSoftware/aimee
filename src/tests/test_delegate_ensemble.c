@@ -18,6 +18,7 @@ static int g_parallel_calls = 0;
 static int g_named_calls = 0;
 static int g_aggregator_calls = 0;
 static int g_cancel_after_checks = -1;
+static char g_last_parallel_prompt[8192];
 
 /* Capture the per-task participant selector the engine sets, so a test can
  * assert the §0.1 routing fix: each fan-out task must be pointed at its own
@@ -44,6 +45,8 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
 {
    (void)cfg;
    g_parallel_calls++;
+   snprintf(g_last_parallel_prompt, sizeof(g_last_parallel_prompt), "%s",
+            count > 0 && tasks[0].user_prompt ? tasks[0].user_prompt : "");
    g_captured_count = count < CAP_MAX ? count : CAP_MAX;
    for (int i = 0; i < g_captured_count; i++)
       snprintf(g_captured_agents[i], sizeof(g_captured_agents[i]), "%s",
@@ -79,6 +82,17 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
              "\"summary\":\"missing authorization check before write\"}],\"overall\":\"block\"}");
       else if (g_parallel_mode == 6 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
          out[i].response = strdup("{\"items\":[],\"overall\":\"ok\"}");
+      else if (g_parallel_mode == 7 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
+         out[i].response =
+             strdup(i == 0 ? "{\"items\":[{\"severity\":\"blocking\",\"category\":\"correctness\","
+                             "\"location\":\"src/a.c:10\",\"summary\":\"first bug\","
+                             "\"recommendation\":\"fix first\"},{\"severity\":\"suggestion\","
+                             "\"category\":\"correctness\",\"location\":\"src/a.c:10\","
+                             "\"summary\":\"second bug\",\"recommendation\":\"fix second\"}],"
+                             "\"overall\":\"mixed\"}"
+                           : "{\"items\":[{\"severity\":\"nit\",\"category\":\"style\","
+                             "\"location\":\"src/b.c:2\",\"summary\":\"rename local\","
+                             "\"recommendation\":\"use clearer name\"}],\"overall\":\"nit\"}");
       else
       {
          snprintf(buf, sizeof(buf), "mock response from %s",
@@ -141,7 +155,11 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
    memset(out, 0, sizeof(*out));
    if (role && strcmp(role, "reason") == 0)
    {
-      if (strstr(user_prompt ? user_prompt : "", "{\"completion\":N}"))
+      if (strstr(user_prompt ? user_prompt : "", "Answer the caller's roundtable review questions"))
+         out->response = strdup("{\"answered_questions\":[{\"question\":\"does auth hold?\","
+                                "\"answer\":\"yes\",\"evidence\":\"review mentions auth\","
+                                "\"answered\":true}],\"coverage_gaps\":[]}");
+      else if (strstr(user_prompt ? user_prompt : "", "{\"completion\":N}"))
          out->response = strdup("{\"completion\":95}");
       else if (g_reason_mode == 1)
          out->response =
@@ -234,6 +252,7 @@ static void reset_modes(void)
    g_named_calls = 0;
    g_aggregator_calls = 0;
    g_cancel_after_checks = -1;
+   g_last_parallel_prompt[0] = '\0';
 }
 
 /* --- tests --- */
@@ -520,6 +539,127 @@ static void test_roundtable_review_saturation_converges(void)
    printf("  test_roundtable_review_saturation_converges: ok\n");
 }
 
+static void test_roundtable_review_brief_and_items_return(void)
+{
+   reset_modes();
+   g_parallel_mode = 7;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   const char *questions[] = {"does auth hold?"};
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   opts.brief = "focus:\n- auth checks\n";
+   opts.questions = questions;
+   opts.question_count = 1;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review all severities", &opts, &result);
+   assert(rc == 0);
+   assert(strstr(g_last_parallel_prompt, "CALLER BRIEF:") != NULL);
+   assert(strstr(g_last_parallel_prompt, "report any blocking issue") != NULL);
+   assert(result.item_count == 3);
+   assert(strcmp(result.items[0].severity, "blocking") == 0);
+   assert(strcmp(result.items[1].severity, "suggestion") == 0);
+   assert(strcmp(result.items[2].severity, "nit") == 0);
+   assert(strcmp(result.items[0].identity_key, result.items[1].identity_key) == 0);
+   assert(strcmp(result.items[0].summary, result.items[1].summary) != 0);
+   assert(result.answered_question_count == 1);
+   assert(result.answered_questions[0].answered == 1);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_review_brief_and_items_return: ok\n");
+}
+
+static void test_roundtable_cost_capped_skips_question_pass(void)
+{
+   reset_modes();
+   g_parallel_mode = 7;
+   config_t cfg = make_cfg(1, 2, 0.001); /* tiny cap trips after round 1 */
+   agent_config_t acfg = make_acfg();
+   const char *questions[] = {"does auth hold?"};
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 2;
+   opts.questions = questions;
+   opts.question_count = 1;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review with cost cap", &opts, &result);
+   assert(rc == 0);
+   assert(result.cost_capped == 1);
+   /* The reason-role question pass is skipped on a cost-capped run; the mock would
+    * have answered "does auth hold?" with answered=true, so answered==0 proves it
+    * was skipped while the question is still reported as an unanswered gap. */
+   assert(result.answered_question_count == 1);
+   assert(result.answered_questions[0].answered == 0);
+   assert(strcmp(result.answered_questions[0].question, "does auth hold?") == 0);
+   assert(result.coverage_gap_count == 1);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_cost_capped_skips_question_pass: ok\n");
+}
+
+static void test_roundtable_partial_question_answers_report_gaps(void)
+{
+   reset_modes();
+   g_parallel_mode = 7;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   /* The reason mock answers only "does auth hold?"; the second question is left
+    * unanswered. The engine must still return one entry per asked question and
+    * report the second as a coverage gap (not silently drop it). */
+   const char *questions[] = {"does auth hold?", "is the cache safe?"};
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   opts.questions = questions;
+   opts.question_count = 2;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review two questions", &opts, &result);
+   assert(rc == 0);
+   assert(result.answered_question_count == 2);
+   assert(strcmp(result.answered_questions[0].question, "does auth hold?") == 0);
+   assert(result.answered_questions[0].answered == 1);
+   assert(strcmp(result.answered_questions[1].question, "is the cache safe?") == 0);
+   assert(result.answered_questions[1].answered == 0);
+   assert(result.coverage_gap_count == 1);
+   assert(strcmp(result.coverage_gaps[0], "is the cache safe?") == 0);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_partial_question_answers_report_gaps: ok\n");
+}
+
+static void test_roundtable_draft_brief_questions_not_answered(void)
+{
+   reset_modes();
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   /* Questions are a review-mode concept. A draft run that happens to carry a
+    * brief with questions must not trigger the reason-role question pass or
+    * return answered_questions/items (it would otherwise pay for a review-only
+    * feature and emit an inconsistent draft contract). */
+   const char *questions[] = {"does auth hold?"};
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   opts.converge_threshold = 0;
+   opts.brief = "focus:\n- auth checks\n";
+   opts.questions = questions;
+   opts.question_count = 1;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft a short proposal", &opts, &result);
+   assert(rc == 0);
+   assert(result.answered_question_count == 0);
+   assert(result.coverage_gap_count == 0);
+   assert(result.item_count == 0);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_draft_brief_questions_not_answered: ok\n");
+}
+
 static void test_roundtable_review_summary_fallback_key_converges(void)
 {
    reset_modes();
@@ -602,6 +742,8 @@ static void test_roundtable_malformed_review_json_repair_counts_successful(void)
    assert(rc == 0);
    assert(result.degraded == 0);
    assert(g_named_calls == 1);
+   assert(result.item_count == 1);
+   assert(strcmp(result.items[0].location, "src/fixed.c:9") == 0);
    delegate_roundtable_result_free(&result);
    printf("  test_roundtable_malformed_review_json_repair_counts_successful: ok\n");
 }
@@ -667,6 +809,10 @@ int main(void)
    test_roundtable_post_fanout_cap_keeps_prior_best();
    test_roundtable_summarize_forward_sets_truncated();
    test_roundtable_review_saturation_converges();
+   test_roundtable_review_brief_and_items_return();
+   test_roundtable_cost_capped_skips_question_pass();
+   test_roundtable_partial_question_answers_report_gaps();
+   test_roundtable_draft_brief_questions_not_answered();
    test_roundtable_review_summary_fallback_key_converges();
    test_roundtable_review_clean_round_converges();
    test_roundtable_malformed_review_json_counts_failed();

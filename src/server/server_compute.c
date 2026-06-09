@@ -39,8 +39,10 @@
 #include "role_templates.h"
 #include "workspace.h"
 #include "cJSON.h"
+#include <ctype.h>
 #include <errno.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -1610,6 +1612,8 @@ static int roundtable_run_cancel_requested(void *ctx)
    return run_id && run_id[0] && openai_runs_store_cancel_requested(run_id);
 }
 
+#include "server_compute_roundtable.inc"
+
 int handle_tool_execute(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    compute_ctx_t *cctx = create_compute_ctx(ctx, conn, req);
@@ -1773,6 +1777,15 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
       opts.cancel_requested = roundtable_run_cancel_requested;
       opts.cancel_ctx = jrun->valuestring;
    }
+   normalized_roundtable_brief_t brief;
+   char brief_err[128];
+   brief_err[0] = '\0';
+   if (normalize_roundtable_brief(req, &brief, brief_err, sizeof(brief_err)) != 0)
+      return server_send_error(conn, brief_err[0] ? brief_err : "invalid brief", NULL);
+   opts.brief = brief.rendered;
+   opts.brief_truncated = brief.truncated;
+   opts.questions = brief.question_ptrs;
+   opts.question_count = brief.question_count;
 
    cJSON *jmode = cJSON_GetObjectItemCaseSensitive(req, "mode");
    if (cJSON_IsString(jmode) && strcmp(jmode->valuestring, "review") == 0)
@@ -1780,9 +1793,15 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    cJSON *jturns = cJSON_GetObjectItemCaseSensitive(req, "turns");
    if (cJSON_IsString(jturns) && strcmp(jturns->valuestring, "sequential") == 0)
       opts.turns = ROUNDTABLE_SEQUENTIAL;
+   else if (cJSON_IsString(jturns) && strcmp(jturns->valuestring, "parallel") == 0)
+      opts.turns = ROUNDTABLE_PARALLEL;
    cJSON *jrounds = cJSON_GetObjectItemCaseSensitive(req, "rounds");
    if (cJSON_IsNumber(jrounds) && jrounds->valuedouble > 0)
+   {
       opts.max_rounds = (int)jrounds->valuedouble;
+      if (opts.max_rounds > ROUNDTABLE_MAX_ROUNDS_REQUEST)
+         opts.max_rounds = ROUNDTABLE_MAX_ROUNDS_REQUEST;
+   }
    cJSON *japply = cJSON_GetObjectItemCaseSensitive(req, "apply");
    if (cJSON_IsBool(japply))
       opts.apply_review = cJSON_IsTrue(japply) ? 1 : 0;
@@ -1790,13 +1809,19 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    agent_config_t acfg;
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
+   {
+      free(brief.rendered);
       return server_send_error(conn, "could not load agents.json", NULL);
+   }
 
    roundtable_result_t result;
    int rc = delegate_roundtable_run(&acfg, &cfg, prompt, &opts, &result);
    if (rc != 0)
+   {
+      free(brief.rendered);
       return server_send_error(
           conn, "roundtable run failed (check ensemble.enabled / ensemble.reference_models)", NULL);
+   }
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "artifact", result.artifact ? result.artifact : "");
@@ -1808,8 +1833,12 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    cJSON_AddBoolToObject(resp, "deadline_hit", result.deadline_hit ? 1 : 0);
    cJSON_AddBoolToObject(resp, "cancelled", result.cancelled ? 1 : 0);
    cJSON_AddNumberToObject(resp, "best_round", result.best_round);
+   cJSON_AddNumberToObject(resp, "items_round", result.items_round);
+   cJSON_AddNumberToObject(resp, "artifact_round", result.artifact_round);
    cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
+   add_roundtable_arrays(resp, &result);
    delegate_roundtable_result_free(&result);
+   free(brief.rendered);
    return server_send_ok(conn, resp);
 }
 

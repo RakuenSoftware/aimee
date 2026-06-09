@@ -1190,6 +1190,35 @@ static void test_large_delegate_payload_within_limit(void)
    free(ctx);
 }
 
+static void test_large_mcp_call_payload_within_limit(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   conn->peer_uid = getuid();
+   conn->capabilities = CAPS_AUTHENTICATED;
+
+   size_t size = LIMIT_DEFAULT + 64;
+   char *msg = malloc(size + 1);
+   assert(msg != NULL);
+   snprintf(msg, size + 1,
+            "{\"method\":\"mcp.call\",\"tool\":\"ensemble_review\",\"arguments\":{\"diff\":\"");
+   size_t used = strlen(msg);
+   memset(msg + used, 'a', size - used - 4);
+   msg[size - 4] = '"';
+   msg[size - 3] = '}';
+   msg[size - 2] = '}';
+   msg[size - 1] = '\0';
+
+   cJSON *json = dispatch_json(ctx, conn, msg, strlen(msg));
+   assert(strcmp(cJSON_GetObjectItem(json, "status")->valuestring, "ok") == 0);
+   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "mcp.call") == 0);
+   cJSON_Delete(json);
+   free(msg);
+   free(conn);
+   free(ctx);
+}
+
 static void test_unknown_method(void)
 {
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
@@ -1557,6 +1586,7 @@ int main(void)
    test_missing_method();
    test_oversized_payload();
    test_large_delegate_payload_within_limit();
+   test_large_mcp_call_payload_within_limit();
    test_unknown_method();
    test_removed_storage_named_migration_alias();
    test_authz_denied_shape();

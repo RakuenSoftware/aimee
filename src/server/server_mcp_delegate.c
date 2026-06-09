@@ -29,6 +29,10 @@ static void add_resolved_delegate_cwd(cJSON *dreq, cJSON *args, const char *sid)
 
 int handle_mcp_delegate_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *args, const char *sid)
 {
+   uint32_t required = server_capability_for_method("delegate");
+   if (required && conn && (conn->capabilities & required) == 0)
+      return server_send_error(conn, "forbidden: insufficient capabilities", NULL);
+
    cJSON *dreq = cJSON_CreateObject();
    cJSON_AddStringToObject(dreq, "method", "delegate");
    cJSON *jr = cJSON_GetObjectItemCaseSensitive(args, "role");
