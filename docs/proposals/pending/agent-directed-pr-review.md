@@ -1252,3 +1252,47 @@ All other citations in §13–§17 were re-confirmed byte-accurate against
 `testing@d3eb402d` in this pass (including the run-store eviction at
 `openai_runs_store.c:111-120`, the snapshot `id` shape, the capability rows, the
 `set_status`-doesn't-update-JSON gap, and the `free(r->artifact)`-only result free).
+
+## §19 Eighth-pass findings (authorization timing and payload limits)
+
+This pass re-checked the MCP bridge against the actual HTTP route gate and
+`server_dispatch` payload limiter on `testing@d3eb402d`. It found two additional
+contract gaps in §3/P1c that are easy to miss because the direct V1 route already
+handles them before `rh_dispatch_op_async` runs.
+
+1. **The MCP bridge must preflight `CAP_DELEGATE` before creating the op-run, not
+   rely only on the worker's re-dispatched method gate.** §3 says the async-submit
+   design "closes the gap automatically" because `op_run_worker` re-dispatches
+   `delegate.roundtable` through `server_dispatch`, where the
+   `delegate.roundtable -> CAP_DELEGATE` method gate fires
+   (`server.c:1296`, `server_auth.c:84`). That is true for the worker, but it is
+   **later than the HTTP route gate**: a normal `POST /v1/delegate/roundtable`
+   request is denied before enqueue by `server_http_route_allowed`
+   (`server_http.c:1525-1535`), while an `ensemble_review` call inside
+   `/v1/mcp/call` has already passed only the outer `mcp.call ->
+   CAP_TOOL_EXECUTE` gate. If the extracted helper creates the run first and lets
+   the worker discover the missing `CAP_DELEGATE`, a `CAP_TOOL_EXECUTE`-only caller
+   still receives a queued run id, consumes a store slot/thread, and only sees the
+   authorization failure later by polling the failed run. That is not equivalent to
+   route-level denial and makes §10's "is denied when it calls `ensemble_review`"
+   ambiguous. P1c should add a synchronous preflight in the MCP arm/helper:
+   `server_capability_for_method("delegate.roundtable")` must be satisfied by the
+   captured caller caps before `openai_runs_store_create` or `pthread_create`.
+   Keep the worker-side gate as defense in depth, but test that the initial
+   `mcp.call` response is an authorization error and no run record is created.
+
+2. **`ensemble_review` currently inherits the 256 KB `mcp.call` payload limit,
+   not the 4 MB `delegate.*` limit the direct route gets.** Direct HTTP callers to
+   `delegate.roundtable` are checked by `server_dispatch` under the
+   `delegate` prefix, so they get `LIMIT_DELEGATE` (4 MB,
+   `server.c:1221-1242`). But the MCP tool is invoked as method `mcp.call`, and
+   `method_size_limit` has no `mcp.` override, so the outer request falls through
+   to `LIMIT_DEFAULT` (256 KB) before `handle_mcp_call` can extract `arguments.diff`
+   or repackage it as `prompt`. A realistic unified diff can easily exceed 256 KB
+   while still being well under the direct delegate limit; the proposed MCP surface
+   would reject it with `PAYLOAD_TOO_LARGE ... method 'mcp.call'` rather than the
+   roundtable handler's own validation. P1c must choose an explicit fix: raise the
+   `mcp.call` limit to at least the delegate/tool limit, add a tool-specific
+   pre-parse allowance, or lower/document the MCP diff maximum separately from the
+   V1 route. Add tests for a diff just over 256 KB and one near the accepted upper
+   bound so the MCP and V1 contracts do not drift silently.
