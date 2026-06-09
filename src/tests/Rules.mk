@@ -103,6 +103,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-kb-client-search \
                $(TESTPREFIX)/unit-test-kb-client-memory \
                $(TESTPREFIX)/unit-test-server-compute \
+               $(TESTPREFIX)/unit-test-server-memory-benchmark \
                $(TESTPREFIX)/unit-test-server-jobs-aux \
                $(TESTPREFIX)/unit-test-compute-concurrency \
                $(TESTPREFIX)/unit-test-provider-catalog \
@@ -555,6 +556,12 @@ $(TESTPREFIX)/unit-test-db2-code-audit: $(OBJDIR)/tests/test_db2_code_audit.o \
                      $(OBJDIR)/db2/code_audit.o $(OBJDIR)/db2/entity_nodes.o \
                      $(OBJDIR)/code_audit_graph.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-server-memory-benchmark: \
+                     $(OBJDIR)/tests/test_server_memory_benchmark.o \
+                     $(OBJDIR)/server/server_memory_benchmark.o \
+                     $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-config: $(OBJDIR)/tests/test_config.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

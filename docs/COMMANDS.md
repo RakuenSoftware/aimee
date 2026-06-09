@@ -173,6 +173,7 @@ Useful flags:
 - `aimee graph sync-code`, `graph explain`: run code graph sync/explanation helpers.
 - `aimee trajectory export`, `trajectory batch`: export or batch-generate trajectory data.
 - `aimee aux`, `aux config show`, `aux test`: inspect or test auxiliary-model routing.
+- `aimee optimize run --suite <suite> [--arm <arm>]`: run the `memory.benchmark` RPC for retrieval suites. Synchronous suites are `code-graph-fusion`, `memory`, `corpus`, `memory-retrieval`, and `live`; dataset and judge-style suites return an `async-only` pointer to the CLI/delegate benchmark path.
 - `aimee identity show`, `snapshot`, `diff`: inspect charter/local-operator/working-profile state.
 - `aimee dogfood tag`, `review`, `report`: label and report dogfood review data.
 - `aimee eval run <suite_dir>`, `eval results [suite]`: run or inspect eval suites.

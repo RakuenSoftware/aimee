@@ -751,13 +751,23 @@ See [§21](#21-the-knowledge-base).
 
 See [§20](#20-triggers-cron-and-automation).
 
-### 7.18 Review surfaces
+### 7.18 Benchmarks and optimization, `aimee optimize`
+
+- `optimize run --suite <suite> [--arm <arm>]`: run the server-side
+  `memory.benchmark` RPC. Synchronous retrieval suites are `code-graph-fusion`,
+  `memory`, `corpus`, `memory-retrieval`, and `live`. Dataset and judge-style
+  suites such as `locomo`, `longmemeval`, `locomo-qa`, and `longmemeval-qa`
+  return an `async-only` response that points to the CLI/delegate benchmark path.
+- `optimize compare --baseline <arm> --candidate <arm>`: compare benchmark arm
+  metrics.
+
+### 7.19 Review surfaces
 
 Unified `aimee review` is implemented in the legacy command table but is not
 currently routed through the thin CLI. Use routed review/status surfaces that are
 visible in `aimee help --all` for your installed build.
 
-### 7.19 Insights, HUD, status, dogfood, graph, trajectory
+### 7.20 Insights, HUD, status, dogfood, graph, trajectory
 
 - `insights [--days N]`, token-usage totals (default 30 days) (`insights.overview`).
 - `hud`, real-time session telemetry (`hud.status`).

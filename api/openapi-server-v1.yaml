@@ -1656,9 +1656,16 @@ paths:
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
   /memory/benchmark:
     post:
-      summary: Run a memory retrieval benchmark (async; poll GET /runs/{id})
+      summary: Run a memory retrieval benchmark
+      description: >-
+        Runs synchronous retrieval suites through the server-side
+        memory.benchmark handler. Supported sync suites are code-graph-fusion,
+        memory, corpus, memory-retrieval, and live. Dataset or judge-style
+        suites such as locomo, longmemeval, locomo-qa, and
+        longmemeval-qa return an async-only envelope with the CLI/delegate route
+        to run them.
       requestBody: { content: { application/json: { schema: { type: object } } } }
-      responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+      responses: { "200": { description: Benchmark result or async-only envelope, content: { application/json: { schema: { type: object } } } } }
   /curator/synthesize:
     post:
       summary: Run curator synthesis/extraction (async; poll GET /runs/{id})
