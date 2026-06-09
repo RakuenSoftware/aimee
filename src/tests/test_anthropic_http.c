@@ -57,6 +57,18 @@ const delegate_driver_t *delegate_driver_get(const char *provider)
    return g_driver;
 }
 
+void delegate_get_caps(const delegate_driver_t *driver, const agent_t *agent, driver_caps_t *caps)
+{
+   memset(caps, 0, sizeof(*caps));
+   if (driver && driver->get_caps)
+   {
+      driver->get_caps(agent, caps);
+      return;
+   }
+   caps->capability_flags = DRIVER_CAP_TOOL_CALLS | DRIVER_CAP_STREAMING;
+   caps->context_limit = DRIVER_CTX_LARGE;
+}
+
 int delegate_build_url(const delegate_driver_t *driver, const agent_t *agent, char *url,
                        size_t url_len)
 {
@@ -217,6 +229,13 @@ static cJSON *system_prompt_driver_build(const agent_t *agent, cJSON *messages, 
    return out;
 }
 
+static void system_prompt_driver_caps(const agent_t *agent, driver_caps_t *caps)
+{
+   (void)agent;
+   caps->capability_flags = DRIVER_CAP_STREAMING | DRIVER_CAP_SYSTEM_MSG;
+   caps->context_limit = DRIVER_CTX_HUGE;
+}
+
 static void parsed_text(cJSON *root, const char *body, parsed_response_t *out)
 {
    (void)root;
@@ -252,7 +271,7 @@ static void test_translate_request_anthropic_passthrough(void)
    char *orig_tools_s;
    char *out_tools_s;
 
-   translate_request(req, &anthropic, &messages, &tools, &system_text);
+   translate_request(req, &anthropic, NULL, &messages, &tools, &system_text);
 
    assert(system_text && strcmp(system_text, "SYS") == 0);
    assert(messages && messages != orig_messages);
@@ -471,7 +490,8 @@ static void test_messages_buffered_system_prompt_driver_no_duplicate_system(void
 {
    const delegate_driver_t chatgpt = {.name = "chatgpt",
                                       .build_request = system_prompt_driver_build,
-                                      .parse_response = parsed_text};
+                                      .parse_response = parsed_text,
+                                      .get_caps = system_prompt_driver_caps};
    cJSON *sent;
    const cJSON *input;
    char resp[4096];
@@ -490,6 +510,32 @@ static void test_messages_buffered_system_prompt_driver_no_duplicate_system(void
    cJSON_Delete(sent);
    reset_capture();
    PASS("messages_buffered_system_prompt_driver_no_duplicate_system");
+}
+
+static void test_messages_buffered_system_prompt_capability_no_duplicate_system(void)
+{
+   const delegate_driver_t capable = {.name = "future-responses",
+                                      .build_request = system_prompt_driver_build,
+                                      .parse_response = parsed_text,
+                                      .get_caps = system_prompt_driver_caps};
+   cJSON *sent;
+   const cJSON *input;
+   char resp[4096];
+
+   reset_capture();
+   g_driver = &capable;
+   assert(messages_buffered("{\"model\":\"ignored\",\"system\":\"SYS\","
+                            "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+                            resp, sizeof(resp)) == 200);
+   sent = parse(g_last_body);
+   assert(strcmp(obj(sent, "instructions")->valuestring, "SYS") == 0);
+   input = obj(sent, "input");
+   assert(cJSON_IsArray(input));
+   assert(cJSON_GetArraySize((cJSON *)input) == 1);
+   assert(strcmp(obj(cJSON_GetArrayItem((cJSON *)input, 0), "role")->valuestring, "user") == 0);
+   cJSON_Delete(sent);
+   reset_capture();
+   PASS("messages_buffered_system_prompt_capability_no_duplicate_system");
 }
 
 static void test_messages_stream_openai_family_translates(void)
@@ -532,6 +578,7 @@ int main(void)
    test_messages_stream_anthropic_preserves_request_shape();
    test_messages_buffered_openai_family_translates();
    test_messages_buffered_system_prompt_driver_no_duplicate_system();
+   test_messages_buffered_system_prompt_capability_no_duplicate_system();
    test_messages_stream_openai_family_translates();
    printf("anthropic_http: OK\n");
    return 0;
