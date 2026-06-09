@@ -1,8 +1,36 @@
 # Proposal: aimee optimization surface — assemble the measure→optimize→promote loop
 
-- **State:** draft — pending review
+- **State:** **largely shipped** (#117, #125–#128) — this file now tracks the
+  residual tail, not unbuilt work; see *Status* below.
 - **Author:** JBailes
-- **Date:** 2026-06-08
+- **Date:** 2026-06-08 (status refreshed 2026-06-08 after the surface landed)
+
+## Status (verified against `testing` @ #128)
+
+Most of what this proposal described has since merged. Re-reading it as a
+forward-looking plan is now misleading; the corrections below keep it honest, and
+the original design is retained for provenance.
+
+- **Reward loop is closed** (was the headline gap). `kb_bandit_reward()` →
+  `db2_bandit_decision_close()` is now called in production, not just tests —
+  `src/kb/kb_service_memory.c:98` (retrieval-limit) and `src/kb/kb.c:1760`
+  (fusion-mode). The "the loop is open / reward never observed" framing below is
+  **superseded**.
+- **The phantom export is fixed.** `kb_intel_payload.c` now builds the bandit
+  export data-driven from the decision registry / decision log
+  (`intel_bandit_point_obj`, `kb_bandit_registry_at`, `db2_bandit_*`), not a
+  hard-coded `kb_fusion_mode` literal. The "*Standalone fix-it: the phantom bandit
+  export*" section below is **done**.
+- **The CLI surface shipped.** `aimee optimize points|baseline|replay|run|compare|promote`
+  all exist (`src/cmd_optimize.c`); P2 (`run`/`compare`, #125), P3 (`promote`, #126)
+  are merged.
+- **Decision points beyond the first shipped.** `kb_fusion_mode` is now a sampled
+  decision (#127) and `delegate_routing` was added (#128) — the P4 conversions the
+  plan described.
+- **Residual (genuinely still open):** the `briefing_style` and
+  `guardrail_strictness` decision points (the remaining P4 fan-out), and any
+  online-exploration enablement still gated `default-off`. That tail is all that
+  remains live in `pending/`.
 - **Charter role(s):** learning / self-improvement (no new store, no new DB
   tier — reuses the existing bandit decision-log tables in DB2, the memory
   benchmark RPC, and the learning/calibration config surface).
@@ -206,12 +234,13 @@ audit, `src/kb/kb_lab.c`). Do **not** reuse `lab`. Proposed verb: `aimee optimiz
 ```
 aimee optimize points
 aimee optimize baseline   --point kb_memory_retrieval_limit
-aimee optimize variants   --point kb_memory_retrieval_limit --register <artifact>
 aimee optimize replay     --point kb_memory_retrieval_limit   # off-policy, IPW
-aimee optimize run        --point kb_memory_retrieval_limit --suite code-graph-fusion
-aimee optimize compare    --baseline <id> --candidate <id>
-aimee optimize promote    --candidate <id> --guarded          # gated
 ```
+
+Future phases may add `variants`, `run`, `compare`, and `promote`, but they are
+not part of the shipped P1 surface. Until those phases land, the optimize command
+is an inspection/export surface for registered points, arm baselines, and replay
+logs.
 
 ### What this deliberately does **not** do
 
@@ -251,9 +280,11 @@ This is assembly of existing parts, but the assembly includes real API work at t
 - **P1** — close the reward loop for `kb_memory_retrieval_limit`; decision-point
   registry + reward config; fix the phantom export; `aimee optimize
   points|baseline|replay`. (Off-policy only; no new live traffic.)
-- **P2** — offline `aimee optimize run --suite code-graph-fusion`; `compare`.
-- **P3** — online exploration for `kb_memory_retrieval_limit`; `promote --guarded`
-  with rollback metadata.
+- **P2** — offline benchmark support; add `aimee optimize run --suite
+  code-graph-fusion` and `compare` when the benchmark adapter is implemented.
+- **P3** — online exploration for `kb_memory_retrieval_limit`; add
+  `promote --guarded` with rollback metadata when the promotion gate is
+  implemented.
 - **P4** — convert `kb_fusion_mode` from a static knob to a sampled decision; add
   `delegate_routing`; then fan out to `briefing_style`, `guardrail_strictness`
   (the last two are the optimisation surface exposed by the companion proposal,
