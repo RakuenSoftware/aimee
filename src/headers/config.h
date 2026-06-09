@@ -978,8 +978,10 @@ typedef struct config
     *   for exploration (default 0.05 = 5%).
     * bandit_ipw_weight_cap: cap on IPW importance weights to control variance
     *   (default 10.0).
-    * bandit_live_decision_enabled: 0 = off (default), 1 = wire kb_bandit_sample()
-    *   into KB hybrid retrieval fusion-mode selection.
+    * bandit_live_decision_enabled: 0 = off (default), 1 = allow live
+    *   kb_bandit_sample() calls from decision points with a closed reward loop.
+    *   Static points remain promotion/replay driven until their automatic reward
+    *   is validated.
     * bandit_exploration_window_seconds: rolling window the budget Gate enforces
     *   (default 604800 = 7 days). */
    char bandit_optimize_command[512];

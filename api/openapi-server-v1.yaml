@@ -1371,6 +1371,7 @@ paths:
   /optimize/export:
     get:
       summary: Bandit optimization export (decision-point registry, arm baselines, decision log)
+      description: Includes live and static optimization points such as kb_fusion_mode, delegate_routing, briefing_style, and guardrail_strictness. Static points are promotion/replay driven until an automatic reward loop is validated.
       responses: { "200": { description: Optimization export, content: { application/json: { schema: { type: object } } } } }
   /optimize/promote:
     post:

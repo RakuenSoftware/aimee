@@ -12,6 +12,7 @@
 #include "db1.h"
 #if !defined(AIMEE_DB2_DISABLED)
 #include "db2/anti_patterns.h"
+#include "db2/bandit.h"
 #include "db2/decision_log.h"
 #include "db2/feedback.h"
 #include "db2/memory_briefing.h"
@@ -132,6 +133,29 @@ cJSON *memory_briefing(int limit_tokens)
 }
 
 #else
+
+static const char *memory_briefing_style(void)
+{
+   static __thread char promoted[64];
+   promoted[0] = '\0';
+   if (db2_bandit_promotion_get("briefing_style", promoted, sizeof(promoted)) == 0)
+   {
+      if (strcmp(promoted, "compact") == 0 || strcmp(promoted, "evidence_heavy") == 0)
+         return promoted;
+   }
+   return "compact";
+}
+
+static int memory_briefing_apply_style_limit(const char *style, int limit_tokens)
+{
+   if (limit_tokens <= 0)
+      limit_tokens = MEMORY_BRIEFING_DEFAULT_LIMIT_TOKENS;
+   if (style && strcmp(style, "compact") == 0 && limit_tokens > 1024)
+      limit_tokens = 1024;
+   if (style && strcmp(style, "evidence_heavy") == 0 && limit_tokens < 3000)
+      limit_tokens = 3000;
+   return limit_tokens;
+}
 
 /* --- Anti-Patterns: high-level extraction/escalation. Storage primitives
  * live in db1/anti_patterns.{h,c}. --- */
@@ -693,8 +717,8 @@ static void memory_briefing_truncate_to_budget(cJSON *bundle, cJSON *arr, int li
 
 cJSON *memory_briefing(int limit_tokens)
 {
-   if (limit_tokens <= 0)
-      limit_tokens = MEMORY_BRIEFING_DEFAULT_LIMIT_TOKENS;
+   const char *style = memory_briefing_style();
+   limit_tokens = memory_briefing_apply_style_limit(style, limit_tokens);
    if (limit_tokens < MEMORY_BRIEFING_MIN_LIMIT_TOKENS)
       limit_tokens = MEMORY_BRIEFING_MIN_LIMIT_TOKENS;
    if (limit_tokens > MEMORY_BRIEFING_MAX_LIMIT_TOKENS)
@@ -713,6 +737,7 @@ cJSON *memory_briefing(int limit_tokens)
       return NULL;
    }
 
+   cJSON_AddStringToObject(bundle, "briefing_style", style);
    cJSON_AddNumberToObject(bundle, "limit_tokens", limit_tokens);
    cJSON_AddItemToObject(bundle, "key_facts", key_facts);
    cJSON_AddItemToObject(bundle, "recent_activity", recent_activity);
@@ -720,9 +745,10 @@ cJSON *memory_briefing(int limit_tokens)
 
    /* Over-fetch each section relative to the budget; truncation below trims
     * to fit.  The caps double as DoS guards if the DB is huge. */
-   memory_briefing_fill_key_facts(key_facts, 30);
-   memory_briefing_fill_recent_activity(recent_activity, 5);
-   memory_briefing_fill_active_entities(active_entities, 20);
+   int evidence_heavy = style && strcmp(style, "evidence_heavy") == 0;
+   memory_briefing_fill_key_facts(key_facts, evidence_heavy ? 60 : 30);
+   memory_briefing_fill_recent_activity(recent_activity, evidence_heavy ? 10 : 5);
+   memory_briefing_fill_active_entities(active_entities, evidence_heavy ? 40 : 20);
 
    /* Priority order: trim lowest-priority sections first. */
    memory_briefing_truncate_to_budget(bundle, active_entities, limit_tokens);
