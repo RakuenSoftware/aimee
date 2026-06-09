@@ -521,3 +521,171 @@ corrections and gaps to fold into the phases before this leaves design review.
   formula and `0.35`, `memory_answer_confidence:4675`, the three structural
   `no_answer` triggers, the assemble marker at `:1042`, the end-to-end contract
   lines) re-confirmed accurate against `testing@d3eb402d`.
+
+## §R2 Second review pass — deeper behavioral findings (`testing@d3eb402d`)
+
+A second, more intense pass read `memory_ask_query_scoped` end-to-end and traced
+the actual answer-composition, recovery, generation, determinism, and bench
+machinery. It surfaced findings that change the framing of the value proposition
+itself, plus one correction to §R.11. These are net-new beyond §R.
+
+### §R2.1 The "before any generation cost" framing is wrong — `memory.ask` is fully extractive (and the gate runs *after* composition)
+
+The Goal and the Implementation contract rest on "refuse … before any generation
+cost is paid" and "the gate runs **before** any answer composition cost beyond
+what retrieval already paid." Both are false for this path:
+
+- **There is no generation cost.** `memory_ask_query_scoped`
+  (`memory_core_search.inc:4769`) composes the answer purely **extractively** via
+  `memory_pick_answer_from_cluster` (`:4703`, called at `:4806`), which `snprintf`s
+  a stored record's `summary` or a 180-char `content` snippet into `out->answer`.
+  There is **no** LLM/provider/`agent_run`/generation call anywhere in the ask
+  path (grep is empty). The wrong-answer risk being mitigated is a *weak extracted
+  snippet*, not a hallucinated generation. The proposal's word "synthesizes" (Goal)
+  is inaccurate — it is extractive selection.
+- **The answer is already composed before the gate.** Composition happens at
+  `:4806`; confidence is not computed until `:4868 / :4894 / :4899`. So the gate as
+  proposed sits **after** answer composition, not before it. "Runs before any
+  answer composition cost" cannot be satisfied by the proposed placement (and there
+  is no composition cost worth gating against anyway, since it is a `snprintf`).
+
+**Consequence:** drop the cost framing from the Goal and the Implementation
+contract. The gate's only sound justification is **correctness** — do not surface
+an unsupported extracted snippet as if it were an answer. Rest Phase 1 on that,
+not on cost.
+
+### §R2.2 The cost rationale is not merely absent — it is inverted
+
+Real generation cost lives on the **context / proactive-recall path**:
+`memory_assemble.c` builds the context buffer (with the soft `## Retrieval
+Confidence: LOW` marker appended at `:1042`) that is fed to the **main agent LLM**
+downstream — that turn is where tokens are generated. The proposal's split puts
+the **deterministic hard gate on the extractive (zero-generation) answer path**
+and keeps the **soft prompt-delegated marker on the generation-bearing context
+path** — exactly opposite to "a deterministic gate before generation cost." If
+cost avoidance is a goal at all, the deterministic suppression belongs on the
+context path (suppress feeding weak context into the expensive turn); as written,
+Phase 1 saves no generation. (Note the context path is *also* not harmless to
+keep "as-is": `memory_assemble.c:876` records retrieval failures / can auto-create
+directives — a state mutation, not just a prose marker.)
+
+### §R2.3 Completeness blind spot: list / count / "all of X" queries pass the gate while returning a single wrong scalar
+
+This is the failure the gate is *most* likely to face on real recall, and it is
+invisible to every axis the proposal gates on:
+
+- The intent enum has **no list / enumerate / count / definition** value — only
+  `MEM_QUERY_{GENERAL,TEMPORAL,ENTITY,PROCEDURAL}` (`memory_core.c:702-705`), and
+  the classifier is substring matching.
+- The extractor returns **exactly one** value: `memory_pick_answer_from_event`
+  emits a single field (`event_time`/`actor`/`location`/`object`), and
+  `memory_pick_answer_from_cluster` stops at the **first** non-empty buffer. A
+  legitimately multi-record query ("what are all my projects", "who is on the
+  team", "how many times did X happen") collapses to one record's one field.
+- For such a query over a well-covered corpus, `memory_answer_confidence` is
+  **high** (good cluster score, high `support_norm`, citations present) **and**
+  coverage/separation are high (the terms *are* well covered). So **both** the
+  Phase 1 gate **and** the Phase 2 `min`-floor pass the answer through. The answer
+  is wrong-because-incomplete, which is orthogonal to confidence entirely.
+
+The proposal's claim — "refuse when the retrieved evidence does not support a
+confident answer" — should be scoped to exclude completeness, or explicitly note
+that incompleteness needs a separate signal (e.g. an answer-cardinality/coverage
+check), because confidence gating cannot catch it.
+
+### §R2.4 "Deterministic and side-effect-free" is false on both counts
+
+- **Side-effects.** The answer path already performs SQLite writes:
+  `memory_runtime_state_increment` (`memory_core_helpers.inc:748`) →
+  `db1_runtime_state_add_int` → `INSERT OR REPLACE INTO memory_runtime_state`
+  (`db1/runtime_state.c:21`), fired for the `memory.citation.*` counters at
+  `:4831/4835/4874/4877/4898`. The contract's own mandated `memory.answer.abstained`
+  counter is another such write. So the Implementation contract simultaneously
+  claims "side-effect-free" and **specifies a side effect**. Qualify it to "no
+  side-effects beyond the existing observability counters."
+- **Determinism.** The cross-encoder rerank is an **external subprocess** —
+  `memory_cross_encoder_scores` → `platform_exec_pipe(command, …)`
+  (`memory_core_search.inc:2504`) — which **silently falls back to hybrid order**
+  on missing command / parse error / timeout. The resulting order drives
+  `memory_answer_anchor_index`, which sets both the extracted snippet **and**
+  `rank_norm = 1/(anchor+1)` feeding `memory_answer_confidence`. So a hard `0.40`
+  threshold sitting near a decision boundary can flip abstain/answer
+  **non-reproducibly** across runs/hosts/load. "Given the same candidates and
+  thresholds it always produces the same decision" holds only under *stable
+  candidate order*, which rerank can break. (Default-off stays byte-identical; this
+  caveat is for default-on and, importantly, for the bench's distribution-tuning
+  step, which sits on a shifting input.)
+
+### §R2.5 The acceptance-bar bench is net-new infrastructure, not "the existing benchmark suite"
+
+The "Testing & validation" section says to measure wrong-answer vs false-omission
+rate on a hand-labeled answerability corpus and "run through the existing
+benchmark suite." The existing eval does not support this:
+
+- The eval has an **IR track** (`ir_mrr`/`ir_ndcg_at_k`/`ir_recall_at_k` over
+  `expected_ids` *relevance* labels, `agent_eval.h:58-66`) and a **QA track**
+  (gold-answer accuracy via an LLM judge, `agent_eval_memory_support.c:660-745`).
+- **No corpus carries answerability labels** (answerable vs unanswerable) — the
+  bench's core axis. Every corpus is answerable-by-construction.
+- The QA harness **never calls `memory.ask` / `memory_ask_query_scoped`** (zero
+  hits in `agent_eval*`); it scores an **LLM-synthesized** answer over assembled
+  context — i.e. *not the extractive path the gate modifies*.
+- `hallucination_rate` is literally `1.0 - accuracy` over answerable QA
+  (`agent_eval_memory_support.c:764`); there is **no false-omission / abstention
+  metric**, and "correctly abstained" is not a judgment the current judge renders
+  (it grades candidate-vs-gold).
+- Per-query **numeric confidence is not exported** (the trace only string-matches
+  the `LOW` marker), so "plot the confidence distributions" needs new
+  instrumentation, and there is **no per-run gate-toggle seam** wired into the
+  harness.
+
+So the acceptance bar requires building: a labeled answerable/unanswerable corpus,
+an **ask-path** harness, abstention/false-omission metrics, per-query confidence
+logging, a gate A/B config seam, and an abstention-aware judge. The "Deploy/bench
+runs are user-gated" line is true but moot — there is no memory-answer-abstention
+bench to gate-run yet. Add bench construction as an explicit work item, ahead of
+any default-on decision.
+
+### §R2.6 Correction to §R.11 + recovery/reprompt ordering
+
+§R.11 said the cheaper re-fetch recovery is "context-path only"; that overstated
+it. The answer path **does** have a recovery: a citations **reprompt-on-miss**
+re-fetch (`memory_core_search.inc:4833-4864`, `cfg.memory_citations_reprompt_on_miss`),
+which runs a second (unscoped) `memory_find_facts` and replaces
+`matches`/`count`/`anchor` when required-mode citations are missing. Two
+implications the gate must handle:
+
+- The reprompt **swaps the cluster underneath the gate**, so the gate and the
+  abstain counter must evaluate the **final post-reprompt cluster exactly once**
+  (no double-fire across the original and reprompt clusters).
+- It triggers **only** on citation-miss in `required` mode, not on low confidence,
+  and (default mode is `off`, below) rarely fires — so the *spirit* of §R.11
+  stands: there is no **confidence-driven** broaden-and-retry. A low-confidence
+  query that a wider fetch could rescue still abstains. Offering a confidence-driven
+  broaden step before abstaining remains the cheaper-win opportunity.
+
+### §R2.7 Two more concrete gaps
+
+- **Curated exemption is broader than its own guardrail (sharpens §R.13).** Phase 3
+  exempts when "the anchor **or any cited record**" is curated, and
+  `memory_collect_answer_citation_ids` gathers the whole answer cluster's ids — so
+  **one** curated record anywhere in the cluster exempts the entire answer, even
+  when the extracted snippet (the anchor) came from a **non-curated** record. Tie
+  the exemption to the **anchor record** the snippet was extracted from, not "any
+  cited record," or the escape hatch is wider than the "genuine hand-authored
+  provenance" intent.
+- **Default `citations_mode` is `off` (`config.c:408`), so the proposed gate is the
+  *only* abstention trigger in the default deployment.** With citations off, the
+  common path is `:4866-4869`; the structural citation `no_answer` (`:4879`) needs
+  `required` + `strip`, which the default never enables. So only zero-retrieval and
+  no-extract fire today, and the gate becomes the sole quality gate — keying on a
+  confidence whose `citation_norm` contributes a `0.35` floor even with zero
+  citations. This raises the calibration stakes and argues the default-`off`
+  posture should not be permanent for default-mode deployments.
+- **180-char content truncation is a confidence-invisible quality loss.** The
+  generic content fallback in `memory_pick_answer_from_cluster` hard-truncates to
+  180 chars (`"%.*s", 180`) although `out->answer` is `char[1024]` and
+  `memory_t.content` is `char[2048]`. A truncated/mangled extract scores the same
+  confidence (which never reads the answer text) and passes the gate. Independent
+  of the gate, but it bounds what the gate/bands can ever catch; consider raising
+  the cap or noting the limitation.
