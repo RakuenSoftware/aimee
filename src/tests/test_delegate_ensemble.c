@@ -10,10 +10,22 @@
 
 static int g_parallel_mode = 0; /* 0=all-succeed, 1=only-first-succeeds */
 
+/* Capture the per-task participant selector the engine sets, so a test can
+ * assert the §0.1 routing fix: each fan-out task must be pointed at its own
+ * configured reference agent, not left NULL (which routed all N to the one
+ * default agent). The old stub ignored `tasks` entirely — that blind spot is
+ * exactly why the unrouted-references bug shipped unseen. */
+#define CAP_MAX 8
+static char g_captured_agents[CAP_MAX][128];
+static int g_captured_count = 0;
+
 int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agent_result_t *out)
 {
    (void)cfg;
-   (void)tasks;
+   g_captured_count = count < CAP_MAX ? count : CAP_MAX;
+   for (int i = 0; i < g_captured_count; i++)
+      snprintf(g_captured_agents[i], sizeof(g_captured_agents[i]), "%s",
+               tasks[i].agent ? tasks[i].agent : "(null)");
    for (int i = 0; i < count; i++)
       memset(&out[i], 0, sizeof(out[i]));
    if (g_parallel_mode == 1)
@@ -141,6 +153,30 @@ static void test_ensemble_null_args(void)
    printf("  test_ensemble_null_args: ok\n");
 }
 
+/* §0.1 regression: the engine must route each fan-out task to its OWN configured
+ * reference agent. Before the fix every task->agent was NULL, so all N ran the
+ * single default agent; this asserts three configured references produce three
+ * distinct, correctly-ordered selectors. */
+static void test_ensemble_routes_to_distinct_agents(void)
+{
+   g_parallel_mode = 0;
+   g_captured_count = 0;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   delegate_ensemble_result_t result;
+   int rc = delegate_ensemble_run(&acfg, &cfg, "route check", &result);
+   assert(rc == 0);
+   assert(g_captured_count == 3);
+   assert(strcmp(g_captured_agents[0], "model-a") == 0);
+   assert(strcmp(g_captured_agents[1], "model-b") == 0);
+   assert(strcmp(g_captured_agents[2], "model-c") == 0);
+   /* distinct, and none left NULL (the bug) */
+   assert(strcmp(g_captured_agents[0], "(null)") != 0);
+   assert(strcmp(g_captured_agents[0], g_captured_agents[1]) != 0);
+   assert(strcmp(g_captured_agents[1], g_captured_agents[2]) != 0);
+   printf("  test_ensemble_routes_to_distinct_agents: ok\n");
+}
+
 int main(void)
 {
    printf("delegate_ensemble tests\n");
@@ -149,6 +185,7 @@ int main(void)
    test_ensemble_basic();
    test_ensemble_cost_cap();
    test_ensemble_min_successful_degradation();
+   test_ensemble_routes_to_distinct_agents();
    printf("all tests passed\n");
    return 0;
 }

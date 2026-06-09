@@ -128,8 +128,8 @@ static void record_outcome(const char *agent_name, const char *role, const agent
                                         outcome->reason, outcome->turns_used, outcome->tools_called,
                                         outcome->tokens_used, outcome->tool_error_pattern);
 }
-int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
-              const char *user_prompt, int max_tokens, agent_result_t *out)
+int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
+                 const char *user_prompt, int max_tokens, double temperature, agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
 
@@ -168,9 +168,9 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
          int rc;
          if (use_tools)
             rc = agent_execute_with_tools_for_role(ag, &cfg->network, role, system_prompt,
-                                                   user_prompt, max_tokens, 0.3, out);
+                                                   user_prompt, max_tokens, temperature, out);
          else
-            rc = agent_execute(ag, system_prompt, user_prompt, max_tokens, 0.3, out);
+            rc = agent_execute(ag, system_prompt, user_prompt, max_tokens, temperature, out);
 
          if (rc == 0)
          {
@@ -224,9 +224,9 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
       int rc;
       if (use_tools)
          rc = agent_execute_with_tools_for_role(ag, &cfg->network, role, system_prompt,
-                                                effective_prompt, max_tokens, 0.3, out);
+                                                effective_prompt, max_tokens, temperature, out);
       else
-         rc = agent_execute(ag, system_prompt, effective_prompt, max_tokens, 0.3, out);
+         rc = agent_execute(ag, system_prompt, effective_prompt, max_tokens, temperature, out);
 
       free(enhanced);
 
@@ -261,6 +261,62 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
    if (!out->error[0])
       snprintf(out->error, sizeof(out->error), "no agent available for role '%s'", role);
    return -1;
+}
+
+/* Thin wrapper preserving the historical 0.3 sampling temperature, so existing
+ * agent_run call sites are byte-unchanged while agent_run_ex carries a real
+ * temperature parameter for the parallel fan-out path. */
+int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
+              const char *user_prompt, int max_tokens, agent_result_t *out)
+{
+   return agent_run_ex(cfg, role, system_prompt, user_prompt, max_tokens, 0.3, out);
+}
+
+/* Run one fan-out task on a specifically named configured agent (resolved like
+ * aux_router.c), not by role. The selected agent_t is CLONED before any runtime
+ * mutation so concurrent parallel workers never write the shared cfg-owned
+ * struct (closes the data race that the same-agent fan-out otherwise has). A
+ * missing or disabled named agent is a failed participant — it does NOT silently
+ * fall back to another agent, because that would collapse a diverse panel back
+ * into duplicate participants. */
+static int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
+                           const char *system_prompt, const char *user_prompt, int max_tokens,
+                           double temperature, agent_result_t *out)
+{
+   memset(out, 0, sizeof(*out));
+
+   agent_t *src = agent_find(cfg, name);
+   if (!src || !src->enabled)
+   {
+      snprintf(out->agent_name, MAX_AGENT_NAME, "%s", name ? name : "");
+      snprintf(out->error, sizeof(out->error), "named participant '%s' not found or disabled",
+               name ? name : "(null)");
+      return -1;
+   }
+
+   /* Clone before mutating: each worker owns its agent_t copy, so runtime-config
+    * / ablation / write_enforce writes never race on the shared struct. Rate-limit
+    * and provider-health accounting stay on the process-wide provider_catalog_*
+    * tables (keyed by agent name), so siblings still see each other's signals. */
+   agent_t local = *src;
+   agent_apply_runtime_config(&local);
+   local.ablation = cfg->ablation;
+   local.write_enforce = 0; /* ensemble references answer a prompt; no write tools */
+
+   int rc = agent_execute(&local, system_prompt, user_prompt, max_tokens, temperature, out);
+   if (rc == 0)
+      provider_catalog_record_success(local.name);
+   else
+   {
+      const char *err_class = agent_error_is_retryable(out->error) ? "retryable" : "error";
+      provider_catalog_record_failure(local.name, err_class);
+   }
+   {
+      agent_outcome_t oc;
+      classify_outcome(out, local.max_turns, &oc);
+      record_outcome(out->agent_name, role ? role : "ensemble", &oc);
+   }
+   return rc;
 }
 
 static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
@@ -386,8 +442,14 @@ typedef struct
 static void *parallel_worker(void *arg)
 {
    parallel_ctx_t *ctx = (parallel_ctx_t *)arg;
-   agent_run(ctx->cfg, ctx->task->role, ctx->task->system_prompt, ctx->task->user_prompt,
-             ctx->task->max_tokens, ctx->result);
+   /* Per-task temperature, defaulting to the historical 0.3 when unset (0). */
+   double temp = ctx->task->temperature > 0.0 ? ctx->task->temperature : 0.3;
+   if (ctx->task->agent && ctx->task->agent[0])
+      agent_run_named(ctx->cfg, ctx->task->agent, ctx->task->role, ctx->task->system_prompt,
+                      ctx->task->user_prompt, ctx->task->max_tokens, temp, ctx->result);
+   else
+      agent_run_ex(ctx->cfg, ctx->task->role, ctx->task->system_prompt, ctx->task->user_prompt,
+                   ctx->task->max_tokens, temp, ctx->result);
    return NULL;
 }
 
@@ -412,8 +474,14 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
       return 0;
    if (task_count == 1)
    {
-      int rc = agent_run(cfg, tasks[0].role, tasks[0].system_prompt, tasks[0].user_prompt,
-                         tasks[0].max_tokens, &out[0]);
+      double temp = tasks[0].temperature > 0.0 ? tasks[0].temperature : 0.3;
+      int rc;
+      if (tasks[0].agent && tasks[0].agent[0])
+         rc = agent_run_named(cfg, tasks[0].agent, tasks[0].role, tasks[0].system_prompt,
+                              tasks[0].user_prompt, tasks[0].max_tokens, temp, &out[0]);
+      else
+         rc = agent_run_ex(cfg, tasks[0].role, tasks[0].system_prompt, tasks[0].user_prompt,
+                           tasks[0].max_tokens, temp, &out[0]);
       return rc == 0 ? 1 : 0;
    }
 

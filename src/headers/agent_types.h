@@ -237,6 +237,12 @@ typedef struct
    const char *user_prompt;
    int max_tokens;
    double temperature;
+   /* Optional per-task participant selector. When set, this task runs on the
+    * named configured agent (resolved like aux_router does), bypassing
+    * role-based routing — so a fan-out (e.g. the MoA ensemble) reaches N
+    * distinct agents instead of N copies of the one default agent. When NULL,
+    * routing is unchanged (role-based default route). */
+   const char *agent;
 } agent_task_t;
 
 typedef struct
