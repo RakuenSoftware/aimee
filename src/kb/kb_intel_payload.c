@@ -372,7 +372,8 @@ static int intel_bandit_emit_http(cJSON *resp, char *out_buf, int out_cap)
    if (n >= (size_t)out_cap)
    {
       free(json);
-      snprintf(out_buf, (size_t)out_cap, "{\"status\":\"error\",\"message\":\"response too large\"}");
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"status\":\"error\",\"message\":\"response too large\"}");
       return 500;
    }
    memcpy(out_buf, json, n + 1);
@@ -536,5 +537,6 @@ int kb_intel_bandit_promote_http(const char *body, int body_len, char *out_buf, 
 {
    if (!out_buf || out_cap <= 0)
       return 500;
-   return intel_bandit_emit_http(kb_intel_bandit_promote_response(body, body_len), out_buf, out_cap);
+   return intel_bandit_emit_http(kb_intel_bandit_promote_response(body, body_len), out_buf,
+                                 out_cap);
 }
