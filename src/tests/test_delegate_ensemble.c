@@ -600,6 +600,37 @@ static void test_roundtable_cost_capped_skips_question_pass(void)
    printf("  test_roundtable_cost_capped_skips_question_pass: ok\n");
 }
 
+static void test_roundtable_partial_question_answers_report_gaps(void)
+{
+   reset_modes();
+   g_parallel_mode = 7;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   /* The reason mock answers only "does auth hold?"; the second question is left
+    * unanswered. The engine must still return one entry per asked question and
+    * report the second as a coverage gap (not silently drop it). */
+   const char *questions[] = {"does auth hold?", "is the cache safe?"};
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   opts.questions = questions;
+   opts.question_count = 2;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review two questions", &opts, &result);
+   assert(rc == 0);
+   assert(result.answered_question_count == 2);
+   assert(strcmp(result.answered_questions[0].question, "does auth hold?") == 0);
+   assert(result.answered_questions[0].answered == 1);
+   assert(strcmp(result.answered_questions[1].question, "is the cache safe?") == 0);
+   assert(result.answered_questions[1].answered == 0);
+   assert(result.coverage_gap_count == 1);
+   assert(strcmp(result.coverage_gaps[0], "is the cache safe?") == 0);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_partial_question_answers_report_gaps: ok\n");
+}
+
 static void test_roundtable_review_summary_fallback_key_converges(void)
 {
    reset_modes();
@@ -751,6 +782,7 @@ int main(void)
    test_roundtable_review_saturation_converges();
    test_roundtable_review_brief_and_items_return();
    test_roundtable_cost_capped_skips_question_pass();
+   test_roundtable_partial_question_answers_report_gaps();
    test_roundtable_review_summary_fallback_key_converges();
    test_roundtable_review_clean_round_converges();
    test_roundtable_malformed_review_json_counts_failed();

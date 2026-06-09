@@ -801,58 +801,52 @@ static void mark_question_gaps(const roundtable_opts_t *opts, roundtable_result_
 static void parse_question_answers(const char *text, const roundtable_opts_t *opts,
                                    roundtable_result_t *out)
 {
-   cJSON *root = cJSON_Parse(text);
+   /* Seed one entry per asked question (answered=0), then fill answers in by
+    * matching the model's entries back to the asked questions by text. This
+    * guarantees exactly one result entry per asked question regardless of how
+    * many answers the model returns or in what order, so a partial or reordered
+    * answer set never silently drops a question (§5). */
+   mark_question_gaps(opts, out);
+   int n = out->answered_question_count;
+   cJSON *root = text ? cJSON_Parse(text) : NULL;
    if (!root)
-   {
-      mark_question_gaps(opts, out);
-      return;
-   }
+      return; /* keep the gap-seeded result */
    cJSON *answers = cJSON_GetObjectItemCaseSensitive(root, "answered_questions");
    if (!cJSON_IsArray(answers))
       answers = cJSON_GetObjectItemCaseSensitive(root, "answeredQuestions");
-   int qi = 0;
    cJSON *it;
    cJSON_ArrayForEach(it, answers)
    {
-      if (qi >= ROUNDTABLE_MAX_QUESTIONS)
-         break;
       cJSON *q = cJSON_GetObjectItemCaseSensitive(it, "question");
       cJSON *a = cJSON_GetObjectItemCaseSensitive(it, "answer");
       cJSON *e = cJSON_GetObjectItemCaseSensitive(it, "evidence");
       cJSON *answered = cJSON_GetObjectItemCaseSensitive(it, "answered");
-      snprintf(out->answered_questions[qi].question, sizeof(out->answered_questions[qi].question),
-               "%s", cJSON_IsString(q) ? q->valuestring : "");
-      snprintf(out->answered_questions[qi].answer, sizeof(out->answered_questions[qi].answer), "%s",
-               cJSON_IsString(a) ? a->valuestring : "");
-      snprintf(out->answered_questions[qi].evidence, sizeof(out->answered_questions[qi].evidence),
+      const char *qtext = cJSON_IsString(q) ? q->valuestring : "";
+      int idx = -1;
+      for (int i = 0; i < n; i++)
+         if (strcmp(out->answered_questions[i].question, qtext) == 0)
+         {
+            idx = i;
+            break;
+         }
+      if (idx < 0)
+         continue; /* model answered something that was not asked; ignore it */
+      snprintf(out->answered_questions[idx].answer, sizeof(out->answered_questions[idx].answer),
+               "%s", cJSON_IsString(a) ? a->valuestring : "");
+      snprintf(out->answered_questions[idx].evidence, sizeof(out->answered_questions[idx].evidence),
                "%s", cJSON_IsString(e) ? e->valuestring : "");
-      out->answered_questions[qi].answered = cJSON_IsBool(answered)
-                                                 ? cJSON_IsTrue(answered)
-                                                 : (cJSON_IsString(a) && a->valuestring[0]);
-      qi++;
+      out->answered_questions[idx].answered = cJSON_IsBool(answered)
+                                                  ? cJSON_IsTrue(answered)
+                                                  : (cJSON_IsString(a) && a->valuestring[0]);
    }
-   out->answered_question_count = qi;
-   cJSON *gaps = cJSON_GetObjectItemCaseSensitive(root, "coverage_gaps");
-   if (!cJSON_IsArray(gaps))
-      gaps = cJSON_GetObjectItemCaseSensitive(root, "coverageGaps");
-   int gi = 0;
-   cJSON_ArrayForEach(it, gaps)
-   {
-      if (gi >= ROUNDTABLE_MAX_QUESTIONS)
-         break;
-      if (cJSON_IsString(it))
-         snprintf(out->coverage_gaps[gi++], sizeof(out->coverage_gaps[0]), "%s", it->valuestring);
-      else
-      {
-         cJSON *q = cJSON_GetObjectItemCaseSensitive(it, "question");
-         if (cJSON_IsString(q))
-            snprintf(out->coverage_gaps[gi++], sizeof(out->coverage_gaps[0]), "%s", q->valuestring);
-      }
-   }
-   out->coverage_gap_count = gi;
    cJSON_Delete(root);
-   if (out->answered_question_count == 0 && opts && opts->question_count > 0)
-      mark_question_gaps(opts, out);
+   /* Coverage gaps are exactly the asked questions still unanswered. */
+   int gi = 0;
+   for (int i = 0; i < n; i++)
+      if (!out->answered_questions[i].answered)
+         snprintf(out->coverage_gaps[gi++], sizeof(out->coverage_gaps[0]), "%s",
+                  out->answered_questions[i].question);
+   out->coverage_gap_count = gi;
 }
 
 static void answer_roundtable_questions(agent_config_t *acfg, const char *task,

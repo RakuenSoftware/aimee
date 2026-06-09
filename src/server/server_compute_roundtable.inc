@@ -51,12 +51,17 @@ static int brief_array_append(const char *label, cJSON *arr, char *buf, size_t c
          snprintf(err, err_n, "brief.%s must be an array of strings", label);
          return -1;
       }
-      if (strcmp(label, "questions") == 0 && out->question_count < ROUNDTABLE_MAX_QUESTIONS)
+      if (strcmp(label, "questions") == 0)
       {
-         snprintf(out->questions[out->question_count], sizeof(out->questions[0]), "%s",
-                  it->valuestring ? it->valuestring : "");
-         out->question_ptrs[out->question_count] = out->questions[out->question_count];
-         out->question_count++;
+         if (out->question_count < ROUNDTABLE_MAX_QUESTIONS)
+         {
+            snprintf(out->questions[out->question_count], sizeof(out->questions[0]), "%s",
+                     it->valuestring ? it->valuestring : "");
+            out->question_ptrs[out->question_count] = out->questions[out->question_count];
+            out->question_count++;
+         }
+         else
+            out->truncated = 1; /* more questions asked than the engine can track */
       }
       if (rc == 0)
          rc = brief_append(buf, cap, pos, "- %s\n", it->valuestring ? it->valuestring : "");
