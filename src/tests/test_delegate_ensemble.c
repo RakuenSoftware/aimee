@@ -1,6 +1,7 @@
 /* test_delegate_ensemble.c: unit tests for MoA ensemble fan-out and synthesis. */
 #include "aimee.h"
 #include "delegate_ensemble.h"
+#include "model_registry.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -27,6 +28,18 @@ static int g_cancel_after_checks = -1;
 static char g_captured_agents[CAP_MAX][128];
 static int g_captured_count = 0;
 
+int model_capability_get(const char *provider, const char *model_id, model_capability_t *out)
+{
+   if (!out || !provider || strcmp(provider, "priced") != 0 || !model_id || !model_id[0])
+      return 0;
+   memset(out, 0, sizeof(*out));
+   snprintf(out->provider, sizeof(out->provider), "%s", provider);
+   snprintf(out->model_id, sizeof(out->model_id), "%s", model_id);
+   out->cost_in_per_mtok = 1.0;
+   out->cost_out_per_mtok = 3.0;
+   return 1;
+}
+
 int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agent_result_t *out)
 {
    (void)cfg;
@@ -52,6 +65,8 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
    for (int i = 0; i < count; i++)
    {
       char buf[128];
+      snprintf(out[i].agent_name, sizeof(out[i].agent_name), "%s",
+               tasks[i].agent ? tasks[i].agent : "");
       if (g_parallel_mode == 2 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
          out[i].response = strdup("{\"issues\":[{\"severity\":\"blocking\",\"category\":\"api\","
                                   "\"location\":\"src/a.c:10\",\"summary\":\"same bug\","
@@ -108,6 +123,7 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    }
    out->prompt_tokens = 40;
    out->completion_tokens = 20;
+   snprintf(out->agent_name, sizeof(out->agent_name), "%s", name ? name : "");
    out->success = 1;
    return 0;
 }
@@ -156,6 +172,7 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
    }
    out->prompt_tokens = 200;
    out->completion_tokens = 100;
+   snprintf(out->agent_name, sizeof(out->agent_name), "%s", role ? role : "");
    out->success = 1;
    return 0;
 }
@@ -190,6 +207,20 @@ static agent_config_t make_acfg(void)
    agent_config_t acfg;
    memset(&acfg, 0, sizeof(acfg));
    snprintf(acfg.default_agent, sizeof(acfg.default_agent), "review");
+   return acfg;
+}
+
+static agent_config_t make_priced_acfg(void)
+{
+   agent_config_t acfg = make_acfg();
+   const char *names[] = {"model-a", "model-b", "model-c", "review", "reason", "draft"};
+   acfg.agent_count = (int)(sizeof(names) / sizeof(names[0]));
+   for (int i = 0; i < acfg.agent_count; i++)
+   {
+      snprintf(acfg.agents[i].name, sizeof(acfg.agents[i].name), "%s", names[i]);
+      snprintf(acfg.agents[i].provider, sizeof(acfg.agents[i].provider), "%s", "priced");
+      snprintf(acfg.agents[i].model, sizeof(acfg.agents[i].model), "priced-%s", names[i]);
+   }
    return acfg;
 }
 
@@ -249,6 +280,21 @@ static void test_ensemble_cost_cap(void)
    assert(result.cost_capped == 1);
    assert(!result.degraded);
    printf("  test_ensemble_cost_cap: ok\n");
+}
+
+static void test_ensemble_cost_uses_model_registry_prices(void)
+{
+   reset_modes();
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_priced_acfg();
+   delegate_ensemble_result_t result;
+   int rc = delegate_ensemble_run(&acfg, &cfg, "priced question", &result);
+   assert(rc == 0);
+   /* 3 refs at 50 input + 50 output each, plus aggregator at 200 input + 100 output:
+    * (350 * $1/MTok) + (250 * $3/MTok) = $0.0011. The old flat fallback would be
+    * 600 * $15/MTok = $0.009, so this catches regressions to global pricing. */
+   assert(result.cost_usd > 0.00109 && result.cost_usd < 0.00111);
+   printf("  test_ensemble_cost_uses_model_registry_prices: ok\n");
 }
 
 static void test_ensemble_disabled(void)
@@ -610,6 +656,7 @@ int main(void)
    test_ensemble_null_args();
    test_ensemble_basic();
    test_ensemble_cost_cap();
+   test_ensemble_cost_uses_model_registry_prices();
    test_ensemble_min_successful_degradation();
    test_ensemble_routes_to_distinct_agents();
    test_roundtable_parallel_basic();

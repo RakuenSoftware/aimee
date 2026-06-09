@@ -9,6 +9,7 @@
 #include "delegate_ensemble.h"
 #include "agent_exec.h"
 #include "log.h"
+#include "model_registry.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,7 +17,7 @@
 #include <time.h>
 #include <ctype.h>
 
-/* Rough cost estimate: $15/MTok all-in (covers GPT-4o, Claude Sonnet range). */
+/* Fallback when an ad-hoc model is absent from the capability registry. */
 #define ENSEMBLE_COST_PER_TOKEN 0.000015
 
 static void shuffle_indices(int *indices, int count)
@@ -69,11 +70,58 @@ static int best_candidate(const agent_result_t *results, int count)
    return best;
 }
 
-static double estimate_cost(const agent_result_t *results, int count)
+static const agent_t *find_agent_cost_model(const agent_config_t *acfg, const char *name)
+{
+   if (!acfg || !name || !name[0])
+      return NULL;
+   for (int i = 0; i < acfg->agent_count; i++)
+      if (strcmp(acfg->agents[i].name, name) == 0)
+         return &acfg->agents[i];
+   return NULL;
+}
+
+static double fallback_token_cost(int prompt_tokens, int completion_tokens)
+{
+   return (double)(prompt_tokens + completion_tokens) * ENSEMBLE_COST_PER_TOKEN;
+}
+
+static double model_token_cost(const char *provider, const char *model, int prompt_tokens,
+                               int completion_tokens)
+{
+   model_capability_t cap;
+   if (model && model[0] && model_capability_get(provider, model, &cap) &&
+       (cap.cost_in_per_mtok > 0.0 || cap.cost_out_per_mtok > 0.0))
+   {
+      return (double)prompt_tokens * cap.cost_in_per_mtok / 1000000.0 +
+             (double)completion_tokens * cap.cost_out_per_mtok / 1000000.0;
+   }
+   return fallback_token_cost(prompt_tokens, completion_tokens);
+}
+
+static double agent_token_cost(const agent_config_t *acfg, const char *agent_name,
+                               int prompt_tokens, int completion_tokens)
+{
+   const agent_t *ag = find_agent_cost_model(acfg, agent_name);
+   if (ag)
+      return model_token_cost(ag->provider, ag->model, prompt_tokens, completion_tokens);
+   return fallback_token_cost(prompt_tokens, completion_tokens);
+}
+
+static double result_token_cost(const agent_config_t *acfg, const agent_result_t *result,
+                                const char *fallback_agent)
+{
+   if (!result)
+      return 0.0;
+   const char *agent = result->agent_name[0] ? result->agent_name : fallback_agent;
+   return agent_token_cost(acfg, agent, result->prompt_tokens, result->completion_tokens);
+}
+
+static double estimate_cost(const agent_config_t *acfg, const agent_result_t *results,
+                            const char (*fallback_agents)[128], int count)
 {
    double total = 0.0;
    for (int i = 0; i < count; i++)
-      total += (results[i].prompt_tokens + results[i].completion_tokens) * ENSEMBLE_COST_PER_TOKEN;
+      total += result_token_cost(acfg, &results[i], fallback_agents ? fallback_agents[i] : NULL);
    return total;
 }
 
@@ -257,9 +305,23 @@ static int change_ratio_0_100(const char *prev, const char *next)
    return (tj + ed) / 2;
 }
 
-static double estimated_stage_cost(int calls, int tokens_per_call)
+static double estimated_agent_call_cost(const agent_config_t *acfg, const char *agent_name,
+                                        int tokens_per_call)
 {
-   return (double)(calls * tokens_per_call) * ENSEMBLE_COST_PER_TOKEN;
+   int prompt_tokens = tokens_per_call / 2;
+   int completion_tokens = tokens_per_call - prompt_tokens;
+   return agent_token_cost(acfg, agent_name, prompt_tokens, completion_tokens);
+}
+
+static double estimated_round_cost(const agent_config_t *acfg, const config_t *cfg, int ref_count,
+                                   int tokens_per_call)
+{
+   double total = 0.0;
+   for (int i = 0; i < ref_count; i++)
+      total += estimated_agent_call_cost(acfg, cfg->ensemble_reference_models[i], tokens_per_call);
+   total += estimated_agent_call_cost(acfg, cfg->ensemble_aggregator, tokens_per_call);
+   total += estimated_agent_call_cost(acfg, "reason", tokens_per_call);
+   return total;
 }
 
 static int build_synthesis_prompt(char *buf, size_t cap, const char *original_prompt,
@@ -433,8 +495,7 @@ static int run_quality_scorer(agent_config_t *acfg, const char *task, const char
        score_result.response && score_result.response[0])
    {
       if (cost_usd)
-         *cost_usd += (score_result.prompt_tokens + score_result.completion_tokens) *
-                      ENSEMBLE_COST_PER_TOKEN;
+         *cost_usd += result_token_cost(acfg, &score_result, "reason");
       char *end = NULL;
       long parsed = strtol(score_result.response, &end, 10);
       if (end && end != score_result.response && parsed >= 0 && parsed <= 100)
@@ -465,7 +526,7 @@ static int run_convergence_tiebreak(agent_config_t *acfg, const char *task, cons
        res.response && res.response[0])
    {
       if (cost_usd)
-         *cost_usd += (res.prompt_tokens + res.completion_tokens) * ENSEMBLE_COST_PER_TOKEN;
+         *cost_usd += result_token_cost(acfg, &res, "reason");
       cJSON *j = cJSON_Parse(res.response);
       cJSON *c = j ? cJSON_GetObjectItemCaseSensitive(j, "completion") : NULL;
       if (cJSON_IsNumber(c))
@@ -505,7 +566,7 @@ static int summarize_forward(agent_config_t *acfg, const config_t *cfg, const ch
       return -1;
    }
    if (cost_usd)
-      *cost_usd += (res.prompt_tokens + res.completion_tokens) * ENSEMBLE_COST_PER_TOKEN;
+      *cost_usd += result_token_cost(acfg, &res, cfg->ensemble_aggregator);
    free(*peer_notes);
    *peer_notes = xstrdup0(res.response);
    if (strlen(*artifact) > 20000)
@@ -609,7 +670,7 @@ static int repair_review_json(agent_config_t *acfg, const config_t *cfg, int par
       return -1;
    }
    if (cost_usd)
-      *cost_usd += (res.prompt_tokens + res.completion_tokens) * ENSEMBLE_COST_PER_TOKEN;
+      *cost_usd += result_token_cost(acfg, &res, cfg->ensemble_reference_models[participant]);
    *fixed = res.response;
    return 0;
 }
@@ -727,7 +788,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
 
    agent_run_parallel(acfg, tasks, ref_count, results);
 
-   double cost = estimate_cost(results, ref_count);
+   double cost = estimate_cost(acfg, results, cfg->ensemble_reference_models, ref_count);
    out->cost_usd = cost;
 
    /* Check cost cap before doing more work */
@@ -791,8 +852,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
    if (agg_rc == 0 && agg_result.response && agg_result.response[0])
    {
       snprintf(out->response, sizeof(out->response), "%s", agg_result.response);
-      out->cost_usd +=
-          (agg_result.prompt_tokens + agg_result.completion_tokens) * ENSEMBLE_COST_PER_TOKEN;
+      out->cost_usd += result_token_cost(acfg, &agg_result, cfg->ensemble_aggregator);
       out->success = 1;
    }
    else
@@ -861,7 +921,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       }
       if (cfg->ensemble_max_cost_usd > 0.0)
       {
-         double preflight = estimated_stage_cost(ref_count + 2, 768);
+         double preflight = estimated_round_cost(acfg, cfg, ref_count, 768);
          if (out->cost_usd + preflight > cfg->ensemble_max_cost_usd)
             aimee_log(LOG_WARN, "delegate_roundtable",
                       "round cost estimate $%.4f would exceed cap $%.4f; continuing until "
@@ -947,7 +1007,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          }
       }
 
-      double round_cost = estimate_cost(results, ref_count);
+      double round_cost = estimate_cost(acfg, results, cfg->ensemble_reference_models, ref_count);
       out->cost_usd += round_cost;
       out->rounds_run = round;
       if (cfg->ensemble_max_cost_usd > 0.0 && out->cost_usd > cfg->ensemble_max_cost_usd)
@@ -1019,8 +1079,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          free(agg_result.response);
          continue;
       }
-      out->cost_usd +=
-          (agg_result.prompt_tokens + agg_result.completion_tokens) * ENSEMBLE_COST_PER_TOKEN;
+      out->cost_usd += result_token_cost(acfg, &agg_result, cfg->ensemble_aggregator);
 
       char *prev_artifact_for_judge = xstrdup0(artifact);
       int ratio = change_ratio_0_100(artifact, agg_result.response);
@@ -1119,8 +1178,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          {
             free(best_artifact);
             best_artifact = xstrdup0(apply_result.response);
-            out->cost_usd += (apply_result.prompt_tokens + apply_result.completion_tokens) *
-                             ENSEMBLE_COST_PER_TOKEN;
+            out->cost_usd += result_token_cost(acfg, &apply_result, "draft");
          }
          free(apply_result.response);
          free(full);
