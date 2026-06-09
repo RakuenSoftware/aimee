@@ -89,9 +89,12 @@ The expensive, hard parts are done. Confirmed in the tree:
   byte-bounded by `virtual_context_assembly_budget` (default 4096,
   `src/config_fields.c:139`, enforced in `conversation_context.c`). The ingress
   envelope has **no equivalent**. Separately, `memory_assemble_context()` already
-  has internal caps (`MAX_CONTEXT_TOTAL`, per-section budgets, optional
-  `memory.context_budget` token mode), so the missing layer is an outer
-  ingress-envelope budget, not the first budget anywhere in memory assembly.
+  has internal caps (`MAX_CONTEXT_TOTAL` = 8000 bytes, `MAX_CONTEXT_MEMS` = 16 rows,
+  `src/headers/aimee.h:21-22`, per-section budgets, optional `memory.context_budget`
+  token mode). So what the memory half injects today is a **rendered,
+  already-capped, opaque** block — not raw full bodies — and the missing layer is
+  an outer ingress-envelope budget over the whole envelope, not the first budget
+  anywhere in memory assembly.
 
 So this proposal is **assembly discipline plus a preview/read contract and two
 cheap stores**, not new retrieval.
@@ -103,8 +106,9 @@ layer and skip the expensive one if it answers. **Aimee deliberately blends**
 all layers into one ranked result (`memory_score_parts_t`), which yields better
 recall quality than gating. This proposal does **not** change that. Progressive
 disclosure here is about **what we inject**, not **what we compute** — we still
-run the full blend; we just inject previews of its top results instead of full
-bodies. The token win is in the envelope, not in skipped compute.
+run the full blend; we just inject previews of its top results instead of the
+full rendered context block. The token win is in the envelope, not in skipped
+compute.
 
 ## Implementation contract for Phases 1–2
 
@@ -151,10 +155,12 @@ budget once code snippets, memory, wrapper, and footer are combined.
   available via get_context_block)` line so truncation is visible to the agent
   rather than silent. (No silent caps — same discipline as the rest of the
   codebase.)
-- Do not claim cross-source "highest ranked first" until code and memory return
-  comparable scores. The first implementation can use fixed source bands
-  (wrapper/footer reserve, code reserve, memory-preview reserve), then move to
-  score-normalized packing when structured scores are exposed.
+- Do not claim cross-source "highest ranked first": code hits carry `ts_rank`
+  scores while memory hits carry `memory_score_parts_t` composite scores — these
+  are different scales and are not directly comparable. The first implementation
+  therefore uses fixed source bands (wrapper/footer reserve, code reserve,
+  memory-preview reserve), and only moves to score-normalized cross-source packing
+  once code and memory expose comparable structured scores.
 
 Isolated to the ingress assembler plus config plumbing. No recall behaviour
 changes.
@@ -199,10 +205,11 @@ precondition.
   `retrieval_shortcuts` table keyed by normalized query) mapping a normalized
   query → an ordered set of record ids/handles, with a hit-count and last-used
   timestamp.
-- Start in **shadow mode**: consult shortcuts before the blend, but still run the
-  normal blend and record whether the shortcut would have agreed. Only after the
-  shortcut agrees across a threshold should it become eligible to answer without
-  the full blend.
+- Start in **shadow mode**, following the established off/shadow/on rollout
+  pattern graph-code fusion already uses (`src/memory_graph_fusion.c:347`):
+  consult shortcuts before the blend, but still run the normal blend and record
+  whether the shortcut would have agreed. Only after the shortcut agrees across a
+  threshold should it become eligible to answer without the full blend.
 - A promoted shortcut hit returns mapped previews directly (and still respects
   the Phase 1 budget). A miss, low-confidence hit, stale target, or scope
   mismatch runs the normal blend.
