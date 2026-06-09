@@ -456,6 +456,39 @@ namespace AimeeKb.Test.Api
         }
 
         /// <summary>
+        /// Test PostIntelligenceBanditClose
+        /// </summary>
+        [Fact (Skip = "not implemented")]
+        public async Task PostIntelligenceBanditCloseAsyncTest()
+        {
+            var response = await _instance.PostIntelligenceBanditCloseAsync();
+            var model = response.Ok();
+            Assert.IsType<Object>(model);
+        }
+
+        /// <summary>
+        /// Test PostIntelligenceBanditPromote
+        /// </summary>
+        [Fact (Skip = "not implemented")]
+        public async Task PostIntelligenceBanditPromoteAsyncTest()
+        {
+            var response = await _instance.PostIntelligenceBanditPromoteAsync();
+            var model = response.Ok();
+            Assert.IsType<Object>(model);
+        }
+
+        /// <summary>
+        /// Test PostIntelligenceBanditSample
+        /// </summary>
+        [Fact (Skip = "not implemented")]
+        public async Task PostIntelligenceBanditSampleAsyncTest()
+        {
+            var response = await _instance.PostIntelligenceBanditSampleAsync();
+            var model = response.Ok();
+            Assert.IsType<Object>(model);
+        }
+
+        /// <summary>
         /// Test PostMaintenanceClear
         /// </summary>
         [Fact (Skip = "not implemented")]

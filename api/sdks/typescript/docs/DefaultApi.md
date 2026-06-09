@@ -38,6 +38,9 @@ All URIs are relative to *http://127.0.0.1:8090/v1*
 | [**postDrain**](DefaultApi.md#postdrain) | **POST** /drain | Drain the asynchronous knowledge ingest queue |
 | [**postEntitySearch**](DefaultApi.md#postentitysearch) | **POST** /entities/search | Find entities by name or context |
 | [**postIngest**](DefaultApi.md#postingest) | **POST** /ingest | Enqueue background project ingest |
+| [**postIntelligenceBanditClose**](DefaultApi.md#postintelligencebanditclose) | **POST** /intelligence/bandit/close | Close a sampled decision with its observed reward |
+| [**postIntelligenceBanditPromote**](DefaultApi.md#postintelligencebanditpromote) | **POST** /intelligence/bandit/promote | Persist the production-default arm for a decision point |
+| [**postIntelligenceBanditSample**](DefaultApi.md#postintelligencebanditsample) | **POST** /intelligence/bandit/sample | Sample an arm for a decision point (server-side decision points) |
 | [**postMaintenanceClear**](DefaultApi.md#postmaintenanceclear) | **POST** /maintenance/clear | Clear indexed knowledge for a project |
 | [**postMaintenanceReconcile**](DefaultApi.md#postmaintenancereconcile) | **POST** /maintenance/reconcile | Reconcile orphaned vector records |
 | [**postMaintenanceRepair**](DefaultApi.md#postmaintenancerepair) | **POST** /maintenance/repair | Repair a project knowledge index |
@@ -2416,6 +2419,192 @@ example().catch(console.error);
 | **401** | Unauthorized |  -  |
 | **405** | Method not allowed |  -  |
 | **503** | Knowledge store unavailable |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
+
+
+## postIntelligenceBanditClose
+
+> object postIntelligenceBanditClose()
+
+Close a sampled decision with its observed reward
+
+### Example
+
+```ts
+import {
+  Configuration,
+  DefaultApi,
+} from '@aimee/kb-client';
+import type { PostIntelligenceBanditCloseRequest } from '@aimee/kb-client';
+
+async function example() {
+  console.log("🚀 Testing @aimee/kb-client SDK...");
+  const config = new Configuration({ 
+    // Configure HTTP bearer authorization: bearerAuth
+    accessToken: "YOUR BEARER TOKEN",
+  });
+  const api = new DefaultApi(config);
+
+  try {
+    const data = await api.postIntelligenceBanditClose();
+    console.log(data);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+// Run the test
+example().catch(console.error);
+```
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+**object**
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: `application/json`
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Close result |  -  |
+| **401** | Unauthorized |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
+
+
+## postIntelligenceBanditPromote
+
+> object postIntelligenceBanditPromote()
+
+Persist the production-default arm for a decision point
+
+### Example
+
+```ts
+import {
+  Configuration,
+  DefaultApi,
+} from '@aimee/kb-client';
+import type { PostIntelligenceBanditPromoteRequest } from '@aimee/kb-client';
+
+async function example() {
+  console.log("🚀 Testing @aimee/kb-client SDK...");
+  const config = new Configuration({ 
+    // Configure HTTP bearer authorization: bearerAuth
+    accessToken: "YOUR BEARER TOKEN",
+  });
+  const api = new DefaultApi(config);
+
+  try {
+    const data = await api.postIntelligenceBanditPromote();
+    console.log(data);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+// Run the test
+example().catch(console.error);
+```
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+**object**
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: `application/json`
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Promotion result (rollback_arm) |  -  |
+| **401** | Unauthorized |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
+
+
+## postIntelligenceBanditSample
+
+> object postIntelligenceBanditSample()
+
+Sample an arm for a decision point (server-side decision points)
+
+### Example
+
+```ts
+import {
+  Configuration,
+  DefaultApi,
+} from '@aimee/kb-client';
+import type { PostIntelligenceBanditSampleRequest } from '@aimee/kb-client';
+
+async function example() {
+  console.log("🚀 Testing @aimee/kb-client SDK...");
+  const config = new Configuration({ 
+    // Configure HTTP bearer authorization: bearerAuth
+    accessToken: "YOUR BEARER TOKEN",
+  });
+  const api = new DefaultApi(config);
+
+  try {
+    const data = await api.postIntelligenceBanditSample();
+    console.log(data);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+// Run the test
+example().catch(console.error);
+```
+
+### Parameters
+
+This endpoint does not need any parameter.
+
+### Return type
+
+**object**
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+- **Content-Type**: Not defined
+- **Accept**: `application/json`
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Selected arm + decision id (or status disabled) |  -  |
+| **401** | Unauthorized |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#api-endpoints) [[Back to Model list]](../README.md#models) [[Back to README]](../README.md)
 

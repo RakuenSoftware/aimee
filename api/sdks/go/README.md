@@ -108,6 +108,9 @@ Class | Method | HTTP request | Description
 *DefaultAPI* | [**PostDrain**](docs/DefaultAPI.md#postdrain) | **Post** /drain | Drain the asynchronous knowledge ingest queue
 *DefaultAPI* | [**PostEntitySearch**](docs/DefaultAPI.md#postentitysearch) | **Post** /entities/search | Find entities by name or context
 *DefaultAPI* | [**PostIngest**](docs/DefaultAPI.md#postingest) | **Post** /ingest | Enqueue background project ingest
+*DefaultAPI* | [**PostIntelligenceBanditClose**](docs/DefaultAPI.md#postintelligencebanditclose) | **Post** /intelligence/bandit/close | Close a sampled decision with its observed reward
+*DefaultAPI* | [**PostIntelligenceBanditPromote**](docs/DefaultAPI.md#postintelligencebanditpromote) | **Post** /intelligence/bandit/promote | Persist the production-default arm for a decision point
+*DefaultAPI* | [**PostIntelligenceBanditSample**](docs/DefaultAPI.md#postintelligencebanditsample) | **Post** /intelligence/bandit/sample | Sample an arm for a decision point (server-side decision points)
 *DefaultAPI* | [**PostMaintenanceClear**](docs/DefaultAPI.md#postmaintenanceclear) | **Post** /maintenance/clear | Clear indexed knowledge for a project
 *DefaultAPI* | [**PostMaintenanceReconcile**](docs/DefaultAPI.md#postmaintenancereconcile) | **Post** /maintenance/reconcile | Reconcile orphaned vector records
 *DefaultAPI* | [**PostMaintenanceRepair**](docs/DefaultAPI.md#postmaintenancerepair) | **Post** /maintenance/repair | Repair a project knowledge index

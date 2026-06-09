@@ -38,6 +38,9 @@ All URIs are relative to *http://127.0.0.1:8090/v1*
 | [**PostDrain**](DefaultApi.md#postdrain) | **POST** /drain | Drain the asynchronous knowledge ingest queue |
 | [**PostEntitySearch**](DefaultApi.md#postentitysearch) | **POST** /entities/search | Find entities by name or context |
 | [**PostIngest**](DefaultApi.md#postingest) | **POST** /ingest | Enqueue background project ingest |
+| [**PostIntelligenceBanditClose**](DefaultApi.md#postintelligencebanditclose) | **POST** /intelligence/bandit/close | Close a sampled decision with its observed reward |
+| [**PostIntelligenceBanditPromote**](DefaultApi.md#postintelligencebanditpromote) | **POST** /intelligence/bandit/promote | Persist the production-default arm for a decision point |
+| [**PostIntelligenceBanditSample**](DefaultApi.md#postintelligencebanditsample) | **POST** /intelligence/bandit/sample | Sample an arm for a decision point (server-side decision points) |
 | [**PostMaintenanceClear**](DefaultApi.md#postmaintenanceclear) | **POST** /maintenance/clear | Clear indexed knowledge for a project |
 | [**PostMaintenanceReconcile**](DefaultApi.md#postmaintenancereconcile) | **POST** /maintenance/reconcile | Reconcile orphaned vector records |
 | [**PostMaintenanceRepair**](DefaultApi.md#postmaintenancerepair) | **POST** /maintenance/repair | Repair a project knowledge index |
@@ -1253,6 +1256,99 @@ Enqueue background project ingest
 | **401** | Unauthorized |  -  |
 | **405** | Method not allowed |  -  |
 | **503** | Knowledge store unavailable |  -  |
+
+[[Back to top]](#) [[Back to API list]](../../README.md#documentation-for-api-endpoints) [[Back to Model list]](../../README.md#documentation-for-models) [[Back to README]](../../README.md)
+
+<a id="postintelligencebanditclose"></a>
+# **PostIntelligenceBanditClose**
+> Object PostIntelligenceBanditClose ()
+
+Close a sampled decision with its observed reward
+
+
+### Parameters
+This endpoint does not need any parameter.
+### Return type
+
+**Object**
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Close result |  -  |
+| **401** | Unauthorized |  -  |
+
+[[Back to top]](#) [[Back to API list]](../../README.md#documentation-for-api-endpoints) [[Back to Model list]](../../README.md#documentation-for-models) [[Back to README]](../../README.md)
+
+<a id="postintelligencebanditpromote"></a>
+# **PostIntelligenceBanditPromote**
+> Object PostIntelligenceBanditPromote ()
+
+Persist the production-default arm for a decision point
+
+
+### Parameters
+This endpoint does not need any parameter.
+### Return type
+
+**Object**
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Promotion result (rollback_arm) |  -  |
+| **401** | Unauthorized |  -  |
+
+[[Back to top]](#) [[Back to API list]](../../README.md#documentation-for-api-endpoints) [[Back to Model list]](../../README.md#documentation-for-models) [[Back to README]](../../README.md)
+
+<a id="postintelligencebanditsample"></a>
+# **PostIntelligenceBanditSample**
+> Object PostIntelligenceBanditSample ()
+
+Sample an arm for a decision point (server-side decision points)
+
+
+### Parameters
+This endpoint does not need any parameter.
+### Return type
+
+**Object**
+
+### Authorization
+
+[bearerAuth](../README.md#bearerAuth)
+
+### HTTP request headers
+
+ - **Content-Type**: Not defined
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Selected arm + decision id (or status disabled) |  -  |
+| **401** | Unauthorized |  -  |
 
 [[Back to top]](#) [[Back to API list]](../../README.md#documentation-for-api-endpoints) [[Back to Model list]](../../README.md#documentation-for-models) [[Back to README]](../../README.md)
 

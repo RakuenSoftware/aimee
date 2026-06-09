@@ -80,6 +80,7 @@ const method_policy_t method_registry[] = {
     /* Compute */
     {"tool.execute", CAP_TOOL_EXECUTE, "execute tool"},
     {"delegate", CAP_DELEGATE, "delegate task"},
+    {"delegate.aggregate", CAP_DELEGATE, "Mixture-of-Agents ensemble aggregate"},
     {"delegate.status", CAP_DELEGATE, "delegate status"},
     {"jobs.list", CAP_DELEGATE, "list delegate jobs"},
     {"jobs.status", CAP_DELEGATE, "delegate job status"},

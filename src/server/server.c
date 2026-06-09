@@ -1133,6 +1133,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     /* Compute (thread pool) */
     {"tool.execute", handle_tool_execute},
     {"delegate", handle_delegate},
+    {"delegate.aggregate", handle_delegate_aggregate},
     {"delegate.launch", handle_delegate_launch},
     {"delegate.status", handle_delegate_status},
     {"jobs.list", handle_jobs_list},

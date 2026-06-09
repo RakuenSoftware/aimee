@@ -177,6 +177,12 @@ Class | Method | HTTP request | Description
 *DefaultApi* | [**postEntitySearchWithHttpInfo**](docs/DefaultApi.md#postEntitySearchWithHttpInfo) | **POST** /entities/search | Find entities by name or context
 *DefaultApi* | [**postIngest**](docs/DefaultApi.md#postIngest) | **POST** /ingest | Enqueue background project ingest
 *DefaultApi* | [**postIngestWithHttpInfo**](docs/DefaultApi.md#postIngestWithHttpInfo) | **POST** /ingest | Enqueue background project ingest
+*DefaultApi* | [**postIntelligenceBanditClose**](docs/DefaultApi.md#postIntelligenceBanditClose) | **POST** /intelligence/bandit/close | Close a sampled decision with its observed reward
+*DefaultApi* | [**postIntelligenceBanditCloseWithHttpInfo**](docs/DefaultApi.md#postIntelligenceBanditCloseWithHttpInfo) | **POST** /intelligence/bandit/close | Close a sampled decision with its observed reward
+*DefaultApi* | [**postIntelligenceBanditPromote**](docs/DefaultApi.md#postIntelligenceBanditPromote) | **POST** /intelligence/bandit/promote | Persist the production-default arm for a decision point
+*DefaultApi* | [**postIntelligenceBanditPromoteWithHttpInfo**](docs/DefaultApi.md#postIntelligenceBanditPromoteWithHttpInfo) | **POST** /intelligence/bandit/promote | Persist the production-default arm for a decision point
+*DefaultApi* | [**postIntelligenceBanditSample**](docs/DefaultApi.md#postIntelligenceBanditSample) | **POST** /intelligence/bandit/sample | Sample an arm for a decision point (server-side decision points)
+*DefaultApi* | [**postIntelligenceBanditSampleWithHttpInfo**](docs/DefaultApi.md#postIntelligenceBanditSampleWithHttpInfo) | **POST** /intelligence/bandit/sample | Sample an arm for a decision point (server-side decision points)
 *DefaultApi* | [**postMaintenanceClear**](docs/DefaultApi.md#postMaintenanceClear) | **POST** /maintenance/clear | Clear indexed knowledge for a project
 *DefaultApi* | [**postMaintenanceClearWithHttpInfo**](docs/DefaultApi.md#postMaintenanceClearWithHttpInfo) | **POST** /maintenance/clear | Clear indexed knowledge for a project
 *DefaultApi* | [**postMaintenanceReconcile**](docs/DefaultApi.md#postMaintenanceReconcile) | **POST** /maintenance/reconcile | Reconcile orphaned vector records

@@ -264,6 +264,27 @@ class TestDefaultApi(unittest.TestCase):
         """
         pass
 
+    def test_post_intelligence_bandit_close(self) -> None:
+        """Test case for post_intelligence_bandit_close
+
+        Close a sampled decision with its observed reward
+        """
+        pass
+
+    def test_post_intelligence_bandit_promote(self) -> None:
+        """Test case for post_intelligence_bandit_promote
+
+        Persist the production-default arm for a decision point
+        """
+        pass
+
+    def test_post_intelligence_bandit_sample(self) -> None:
+        """Test case for post_intelligence_bandit_sample
+
+        Sample an arm for a decision point (server-side decision points)
+        """
+        pass
+
     def test_post_maintenance_clear(self) -> None:
         """Test case for post_maintenance_clear
 

@@ -1660,6 +1660,19 @@ paths:
       summary: Run an evaluation (async; poll GET /runs/{id})
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /delegate/aggregate:
+    post:
+      summary: Mixture-of-Agents ensemble aggregate over ensemble.reference_models (async; poll GET /runs/{id})
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt: { type: string }
+      responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
   /memory/search:
     post:
       summary: Keyword-search memories

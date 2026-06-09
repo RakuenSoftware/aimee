@@ -88,6 +88,9 @@ All URIs are relative to *http://127.0.0.1:8090/v1*
 *DefaultApi* | [**postDrain**](docs/DefaultApi.md#postdrain) | **POST** /drain | Drain the asynchronous knowledge ingest queue
 *DefaultApi* | [**postEntitySearch**](docs/DefaultApi.md#postentitysearch) | **POST** /entities/search | Find entities by name or context
 *DefaultApi* | [**postIngest**](docs/DefaultApi.md#postingest) | **POST** /ingest | Enqueue background project ingest
+*DefaultApi* | [**postIntelligenceBanditClose**](docs/DefaultApi.md#postintelligencebanditclose) | **POST** /intelligence/bandit/close | Close a sampled decision with its observed reward
+*DefaultApi* | [**postIntelligenceBanditPromote**](docs/DefaultApi.md#postintelligencebanditpromote) | **POST** /intelligence/bandit/promote | Persist the production-default arm for a decision point
+*DefaultApi* | [**postIntelligenceBanditSample**](docs/DefaultApi.md#postintelligencebanditsample) | **POST** /intelligence/bandit/sample | Sample an arm for a decision point (server-side decision points)
 *DefaultApi* | [**postMaintenanceClear**](docs/DefaultApi.md#postmaintenanceclear) | **POST** /maintenance/clear | Clear indexed knowledge for a project
 *DefaultApi* | [**postMaintenanceReconcile**](docs/DefaultApi.md#postmaintenancereconcile) | **POST** /maintenance/reconcile | Reconcile orphaned vector records
 *DefaultApi* | [**postMaintenanceRepair**](docs/DefaultApi.md#postmaintenancerepair) | **POST** /maintenance/repair | Repair a project knowledge index
