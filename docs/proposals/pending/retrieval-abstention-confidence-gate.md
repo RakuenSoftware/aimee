@@ -192,7 +192,12 @@ this is the wiring §R.3 flagged as understated, now on the **critical path**, n
   context-path-only today, §R.3.9);
 - make the per-candidate **retrieval score survive** to the evaluator (it is
   discarded today — `out[i] = candidates[i]` drops the ranking score, §R.3.8), and
-  build the significant-query-terms array the answer path does not compute today.
+  build the significant-query-terms array the answer path does not compute today;
+- compute grounding as **three** signals, not one: `anchor_coverage` and
+  `cluster_coverage` (anchor/cluster-local, §R3.2) plus `topk_grounding` as a
+  corpus-level floor. How they combine into a single abstain/answer decision is
+  **pinned in §B.8** — `memory_answer_confidence` is only a near-threshold
+  tiebreak, never the gate.
 
 This score-survival + term plumbing is the real foundational work and is promoted
 to **P0** (§A.6).
@@ -206,7 +211,20 @@ signal from the **deterministic** hybrid/coverage signals, **not** the
 subprocess-reranked order, so the abstain/answer decision is reproducible
 run-to-run and host-to-host even when the cross-encoder is absent or times out.
 The reranker still orders what is *shown*; it does not decide *whether to answer*.
-Document this contract.
+
+The determinism boundary also covers **anchor selection** (§R5.2).
+`memory_answer_anchor_index` picks the anchor by a position-based
+`memory_answer_cluster_score` over the post-CE, post-session-window `matches`
+array (`memory_core_search.inc:4555-4604`), so the chosen anchor — and therefore
+the extracted answer snippet, `anchor_coverage`, and `anchor_rank` — would inherit
+the CE non-determinism. The evaluator must select the anchor on the **pre-CE
+deterministic order** (or make the cluster score position-independent), so the
+same corpus yields the same anchor and the same outcome, not just the same
+grounding number. Consequently `anchor_rank` (§B.1) is the **pre-CE hybrid rank
+captured on the candidate at rerank time** — it is not recoverable afterward,
+because the CE reorder and the `out[i] = candidates[i]` score-drop (§R.3.8)
+destroy the ordering it refers to. This is part of the P0 score-survival work
+(§A.2), extended to carry the pre-CE rank, not only the score.
 
 ### §A.4 Side-effect boundary
 
@@ -303,7 +321,7 @@ Required fields:
 | `candidate_ids` | array<int64>, max 16 | ranked candidate ids considered by the evaluator |
 | `ranked_count` | int | number of ranked retrieval candidates before context-neighbour expansion |
 | `anchor_id` | int64 or 0 | answer anchor memory id, if one exists |
-| `anchor_rank` | int or -1 | deterministic pre-CE rank of the anchor |
+| `anchor_rank` | int or -1 | pre-CE hybrid rank of the anchor, **captured on the candidate at rerank time** (not recoverable post-CE; §A.3, §R5.2) |
 | `topk_grounding` | double | coverage/separation grounding score used as the corpus-level floor |
 | `anchor_coverage` | double | query-term coverage over the anchor |
 | `cluster_coverage` | double | query-term coverage over answer-cluster members |
@@ -364,11 +382,31 @@ system still learns that recall could not support the query.
 
 ### §B.5 MCP scope contract
 
-`memory_ask` over MCP must support per-scope calibration. Add optional
-`scope_type` and `scope_value` arguments to the MCP tool schema and forward them
-to `kb_client_memory_ask`. If omitted, the MCP call is explicitly calibrated as
-`scope_kind = "global"`, `scope_id = ""`; future workspace/session-derived scope
-can change that default only as a separate compatibility change.
+`memory_ask` over MCP must support per-scope calibration. **Note (§R5.3):**
+`memory_ask` is currently a *dispatched-but-unadvertised* tool — it is wired only
+through the data-driven call table (`server_mcp_call_table.inc` →
+`mcph_memory_ask` → `tool_memory_ask`) and is **not** registered via `build_tool`
+in `mcp_build_tools_list`, so it has no published schema and does not appear in
+`test_mcp_tools_golden.inc` (unlike `memory_recall`). There is therefore no MCP
+schema to "amend." Resolve it one of two ways, explicitly:
+
+- **(preferred)** register `memory_ask` via `build_tool` with `query`, `limit`,
+  and the new optional `scope_type` / `scope_value` properties, forward them to
+  `kb_client_memory_ask`, and **regenerate `test_mcp_tools_golden.inc`**
+  (`DUMP_TOOLS=1 …`, count + the new sorted line) — this is a required CI step,
+  the MCP-surface analogue of the config-surface regen in §R.6; or
+- accept the params **handler-side only** and document MCP `memory_ask` as
+  **global-scope** (`scope_kind = "global"`, `scope_id = ""`) with the params
+  undiscoverable, deferring per-scope MCP calibration.
+
+Either way, the answer-path gate (§A.1, P1) is reachable over MCP only through this
+unadvertised tool; the *advertised* recall tool is `memory_recall` (the **context
+path**). So the gate agents actually trigger over MCP is the context-path withhold
+(§A.1, P2), which is a further reason P2 carries more agent-facing weight than P1
+until `memory_ask` is advertised. If omitted, the MCP call is explicitly
+calibrated as `scope_kind = "global"`, `scope_id = ""`; future
+workspace/session-derived scope can change that default only as a separate
+compatibility change.
 
 ### §B.6 Ask-outcome calibration data
 
@@ -394,6 +432,49 @@ The gate remains default-off until a labeled bench clears explicit thresholds:
 
 If the corpus is too small for stable percentages, keep the gate default-off and
 collect more labeled ask outcomes.
+
+### §B.8 Answerability decision rule
+
+The evaluator combines the §B.1 signals into **one** deterministic decision
+(§R5.1); the engine, the unit test (§10), and the trace `decision`/`reason` all
+follow exactly this rule, evaluated in order:
+
+```
+1. exempt anchor (high tier / curator provenance, §A.5/§R.4)
+      -> answerable, reason = curated_exempt          (bypasses every check below)
+2. structural failure (no retrieval / no extract / DB unavailable)
+      -> abstain,     reason = structural_empty | structural_no_extract | db_unavailable
+3. citations required and zero verified citations
+      -> abstain,     reason = citation_required
+4. chunk floor: drop candidates below `chunk_floor` before scoring; if the
+   evidence set is empty after the floor
+      -> abstain,     reason = chunk_floor
+5. grounding gate (the retrieved-but-weak case):
+      grounding = min(anchor_coverage, cluster_coverage)   # anchor/cluster-local (§R3.2)
+      floored   = min(grounding, topk_grounding)           # corpus-level floor (§A.2)
+      if floored < threshold
+            -> abstain,    reason = grounding_low
+      else
+            -> answerable, reason = ok
+```
+
+Rules:
+
+- **Grounding-first, never confidence-first.** `memory_answer_confidence` is *not*
+  a gate input; it may only break a near-threshold tie
+  (`|floored - threshold| < epsilon`), and only toward *answerable* (it can rescue
+  a borderline answer, never manufacture an abstention). Document `epsilon`
+  (e.g. `0.02`) or set it to `0` to disable the tiebreak.
+- **Determinism.** All inputs are computed on the pre-CE deterministic order
+  (§A.3); the same corpus + thresholds always yield the same decision.
+- **`min`, not a blend.** Combining the coverage signals is a floor so a single
+  strong axis cannot carry a weak one (the §R2.4 "fluent-but-off-topic" guard).
+- **Default-off parity.** When `memory_abstain_enabled = 0`, step 5 is skipped
+  entirely (steps 1–4 are today's existing structural behavior), so output is
+  byte-identical to today except for inert trace fields (§10).
+
+The exact `min`/tiebreak shape is the recommended default; any change must keep it
+a single rule the trace and §10 assert, not a per-implementer choice.
 
 ## The gaps and the proposed changes
 
@@ -518,15 +599,23 @@ discriminating signal arrives with the grounding wiring now promoted to P0/§A.2
 
 ## Testing & validation
 
-- **Unit:** gate fires when `confidence < gate` and answer is non-curated
-  (`no_answer == 1`, empty structured answer, rendered citations zeroed, counter
-  incremented, evidence trace populated with the §B.1 fields);
-  gate does **not** fire at/above threshold; gate **never** fires for
-  curated/exempt anchors; chunk floor drops weak hits before scoring;
-  coverage/separation `min` floor abstains on the fluent-but-off-topic case; the
+- **Unit:** the gate abstains exactly per the **§B.8 decision rule** — i.e. when
+  `min(min(anchor_coverage, cluster_coverage), topk_grounding) < threshold` for a
+  non-curated answer (assert the *grounding* decision, **not** `confidence < gate`:
+  `memory_answer_confidence` is never the gate, only the bounded near-threshold
+  tiebreak). On abstain: `no_answer == 1`, empty structured answer, rendered
+  citations zeroed, counter incremented, evidence trace populated with the §B.1
+  fields and the matching `decision`/`reason`. The gate does **not** fire
+  at/above threshold; **never** fires for curated/exempt anchors; the chunk floor
+  drops weak hits before scoring (and an emptied evidence set abstains with reason
+  `chunk_floor`); the `min` floor abstains on the fluent-but-off-topic case; the
   existing structural `no_answer` cases (`:4796` / `:4809` / `:4879`) still behave
   identically but carry a structural reason; default-off means behavior is
   byte-identical to today except for inert trace fields on structured/debug paths.
+- **Determinism (§A.3 / §R5.2):** the same corpus + thresholds yield the same
+  anchor and the same abstain/answer decision across runs (anchor chosen on the
+  pre-CE order; `anchor_rank` reflects the captured pre-CE rank), independent of
+  whether the cross-encoder subprocess succeeds.
 - **Integration:** `memory.ask` round-trip through
   `kb_client_memory_ask` → RPC → `server_mcp` rendering returns "No confident
   answer for …" on a deliberately weak query, and a normal answer with citations
@@ -534,7 +623,9 @@ discriminating signal arrives with the grounding wiring now promoted to P0/§A.2
   `memory_answer_query*`, frontend/webchat, and JSON/RPC all expose the same
   no-answer state without silently printing a blank answer; a curated record
   answers even when its similarity is low. String-only no-answer rendering matches
-  §B.3 exactly.
+  §B.3 exactly. The MCP test states explicitly whether it drives the advertised
+  `memory_recall` (context path) or the unadvertised `memory_ask` (answer path),
+  per the §B.5 resolution.
 - **Telemetry:** dogfood / ask-outcome logs for gated abstentions include the
   evidence trace even though rendered citations are empty; zero-retrieval
   structural abstentions are distinguishable from retrieved-but-rejected
@@ -1172,6 +1263,13 @@ line numbers still hold) and went after three things the §A/§B contracts and t
 §R3/§R4 follow-ups pin *around* but never pin *directly*: the actual abstain
 decision function, whether the anchor the gate keys on is even deterministic, and
 whether the MCP "ask" surface §B.5 amends actually exists.
+
+> **Resolved into the body.** These findings are now folded into the authoritative
+> contracts: the decision rule is **§B.8** (§A.2 points to it; §10 asserts it
+> instead of `confidence < gate`); anchor determinism + the pre-CE `anchor_rank`
+> are folded into **§A.3** and the **§B.1** schema; and the unadvertised
+> `memory_ask` resolution is folded into **§B.5**. The subsections below remain as
+> the rationale/evidence trail.
 
 ### §R5.1 The abstain decision rule is still unspecified — and §10 still tests the gate §A.2 replaced
 
