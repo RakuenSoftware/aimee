@@ -1708,11 +1708,13 @@ static cJSON *marshal_delegate_roundtable(int argc, char **argv)
    if (brief_json)
    {
       cJSON *parsed = cJSON_Parse(brief_json);
-      if (parsed)
+      if (!parsed)
       {
-         cJSON_DeleteItemFromObjectCaseSensitive(req, "brief");
-         cJSON_AddItemToObject(req, "brief", parsed);
+         fprintf(stderr, "aimee: delegate roundtable: --brief-json must be valid JSON\n");
+         exit(1);
       }
+      cJSON_DeleteItemFromObjectCaseSensitive(req, "brief");
+      cJSON_AddItemToObject(req, "brief", parsed);
    }
    if (rpc_has_flag(&opts, "apply"))
       cJSON_AddBoolToObject(req, "apply", 1);

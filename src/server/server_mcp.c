@@ -99,6 +99,9 @@ static int handle_mcp_ensemble_review(server_conn_t *conn, cJSON *args)
    cJSON *diff = cJSON_GetObjectItemCaseSensitive(args, "diff");
    if (!cJSON_IsString(diff) || !diff->valuestring || !diff->valuestring[0])
       return server_send_error(conn, "ensemble_review requires 'diff'", NULL);
+   if (strlen(diff->valuestring) < 20)
+      return server_send_error(conn, "ensemble_review requires 'diff' of at least 20 characters",
+                               NULL);
 
    cJSON *body = cJSON_CreateObject();
    if (!body)
