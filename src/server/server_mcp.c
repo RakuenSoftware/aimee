@@ -109,15 +109,45 @@ static int handle_mcp_ensemble_review(server_conn_t *conn, cJSON *args)
    cJSON_AddStringToObject(body, "prompt", diff->valuestring);
    cJSON_AddStringToObject(body, "mode", "review");
    cJSON *brief = cJSON_GetObjectItemCaseSensitive(args, "brief");
-   if (brief && (cJSON_IsObject(brief) || cJSON_IsString(brief)))
-      cJSON_AddItemToObject(body, "brief", cJSON_Duplicate(brief, 1));
+   if (brief)
+   {
+      if (!cJSON_IsObject(brief) && !cJSON_IsString(brief))
+      {
+         cJSON_Delete(body);
+         return server_send_error(conn, "ensemble_review 'brief' must be a string or object", NULL);
+      }
+      cJSON *brief_copy = cJSON_Duplicate(brief, 1);
+      if (!brief_copy)
+      {
+         cJSON_Delete(body);
+         return server_send_error(conn, "out of memory", NULL);
+      }
+      cJSON_AddItemToObject(body, "brief", brief_copy);
+   }
    cJSON *rounds = cJSON_GetObjectItemCaseSensitive(args, "rounds");
-   if (cJSON_IsNumber(rounds))
+   if (rounds)
+   {
+      if (!cJSON_IsNumber(rounds) || rounds->valuedouble < 1 || rounds->valuedouble > 16 ||
+          rounds->valuedouble != (double)rounds->valueint)
+      {
+         cJSON_Delete(body);
+         return server_send_error(conn, "ensemble_review 'rounds' must be an integer from 1 to 16",
+                                  NULL);
+      }
       cJSON_AddNumberToObject(body, "rounds", rounds->valuedouble);
+   }
    cJSON *turns = cJSON_GetObjectItemCaseSensitive(args, "turns");
-   if (cJSON_IsString(turns) && (strcmp(turns->valuestring, "parallel") == 0 ||
-                                 strcmp(turns->valuestring, "sequential") == 0))
+   if (turns)
+   {
+      if (!cJSON_IsString(turns) || (strcmp(turns->valuestring, "parallel") != 0 &&
+                                     strcmp(turns->valuestring, "sequential") != 0))
+      {
+         cJSON_Delete(body);
+         return server_send_error(conn, "ensemble_review 'turns' must be parallel or sequential",
+                                  NULL);
+      }
       cJSON_AddStringToObject(body, "turns", turns->valuestring);
+   }
 
    char *line = cJSON_PrintUnformatted(body);
    cJSON_Delete(body);

@@ -611,21 +611,28 @@ cJSON *mcp_build_tools_list(void)
    {
       cJSON_AddItemToArray(
           tools,
-          build_tool("ensemble_review",
-                     "Run the multi-agent roundtable in review mode against caller-provided diff "
-                     "text. Returns a queued run id; poll /v1/runs/{id}. The result's items "
-                     "describe items_round while artifact is artifact_round (the best round); "
-                     "compare those fields before assuming the findings match the artifact.",
-                     cJSON_Parse(
-                         "{\"type\":\"object\",\"properties\":{"
-                         "\"diff\":{\"type\":\"string\",\"description\":\"Unified diff or code "
-                         "under review, minimum 20 characters.\"},"
-                         "\"brief\":{\"type\":\"object\",\"description\":\"Optional directed "
-                         "review brief with focus/fixes/invariants/questions string arrays.\"},"
-                         "\"rounds\":{\"type\":\"integer\",\"description\":\"Max review rounds.\"},"
-                         "\"turns\":{\"type\":\"string\",\"enum\":[\"parallel\",\"sequential\"],"
-                         "\"description\":\"Round execution mode.\"}},"
-                         "\"required\":[\"diff\"]}")));
+          build_tool(
+              "ensemble_review",
+              "Run the multi-agent roundtable in review mode against caller-provided diff "
+              "text. Returns a queued run id; poll /v1/runs/{id}. The result's items "
+              "describe items_round while artifact is artifact_round (the best round); "
+              "compare those fields before assuming the findings match the artifact.",
+              cJSON_Parse("{\"type\":\"object\",\"properties\":{"
+                          "\"diff\":{\"type\":\"string\",\"description\":\"Unified diff or code "
+                          "under review.\",\"minLength\":20},"
+                          "\"brief\":{\"description\":\"Optional directed review brief as a string "
+                          "or object with focus/fixes/invariants/questions string arrays.\","
+                          "\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\","
+                          "\"properties\":{\"focus\":{\"type\":\"array\",\"items\":{\"type\":"
+                          "\"string\"}},\"fixes\":{\"type\":\"array\",\"items\":{\"type\":"
+                          "\"string\"}},\"invariants\":{\"type\":\"array\",\"items\":{\"type\":"
+                          "\"string\"}},\"questions\":{\"type\":\"array\",\"items\":{\"type\":"
+                          "\"string\"}}}}]},"
+                          "\"rounds\":{\"type\":\"integer\",\"minimum\":1,\"maximum\":16,"
+                          "\"description\":\"Max review rounds.\"},"
+                          "\"turns\":{\"type\":\"string\",\"enum\":[\"parallel\",\"sequential\"],"
+                          "\"description\":\"Round execution mode.\"}},"
+                          "\"required\":[\"diff\"]}")));
    }
 
    /* preview_blast_radius */
