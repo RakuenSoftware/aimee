@@ -655,6 +655,11 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "verify_cross_project", 1);
    if (cfg->ingress_preinject_enabled)
       cJSON_AddBoolToObject(root, "ingress_preinject_enabled", 1);
+   if (cfg->ingress_preinject_assembly_budget != 6144)
+      cJSON_AddNumberToObject(root, "ingress_preinject_assembly_budget",
+                              cfg->ingress_preinject_assembly_budget);
+   if (cfg->ingress_max_raw_scans != 0)
+      cJSON_AddNumberToObject(root, "ingress_max_raw_scans", cfg->ingress_max_raw_scans);
 
    /* Cross-verification */
    if (cfg->cross_verify || cfg->verify_cmd[0] || cfg->verify_role[0])

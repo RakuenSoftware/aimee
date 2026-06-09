@@ -14,7 +14,7 @@ directory listing:
 
 - [`proposals/accepted/`](proposals/accepted/): locked but not yet
   implemented
-- [`proposals/done/`](proposals/done/): shipped (313 proposals)
+- [`proposals/done/`](proposals/done/): shipped (16 proposals)
 - [`proposals/rejected/`](proposals/rejected/): considered and
   declined
 - [`proposals/deferred/`](proposals/deferred/): parked for later
@@ -361,7 +361,7 @@ two are defense in depth.
   Phase 0/1 shipped, sidecar mechanism, shadow dry_run mode, DB1 `guardrail_events` table, score-band policy mapping, `aimee guardrails review` CLI, and `scripts/guardrails-semantic.py` reference sidecar. Phases 2+ require dogfood.
 ## Done
 
-The [`proposals/done/`](proposals/done/) directory holds 311 shipped
+The [`proposals/done/`](proposals/done/) directory holds 16 shipped
 proposals. Recent highlights by theme:
 
 - **Architecture / platform contracts.** Architecture Charter (umbrella

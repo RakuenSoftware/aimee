@@ -6,10 +6,14 @@
  * Bash command, blocks (exit 2) when the command text mentions a path the log
  * scores at/above the high-attention threshold. Substring-matching known
  * high-attention paths against the command avoids fragile shell parsing.
+ * Recursive raw scans are blocked by default and redirected toward Aimee's
+ * indexed exploration tools; ingress_max_raw_scans allows a capped number per
+ * session.
  */
 #include "cli_attention_guard.h"
 #include "cli_session_start.h" /* read_stdin */
 #include "aimee_home.h"
+#include "config.h"
 #include "platform_path.h"
 #include "cJSON.h"
 #include <math.h>
@@ -60,6 +64,48 @@ static int bash_is_hard(const char *cmd)
    return 0;
 }
 
+static int cmd_has_token(const char *cmd, const char *tok)
+{
+   if (!cmd || !tok || !tok[0])
+      return 0;
+   size_t n = strlen(tok);
+   const char *p = cmd;
+   while ((p = strstr(p, tok)) != NULL)
+   {
+      int left = (p == cmd || p[-1] == ' ' || p[-1] == '\t' || p[-1] == '\n');
+      char r = p[n];
+      int right = (r == '\0' || r == ' ' || r == '\t' || r == '\n');
+      if (left && right)
+         return 1;
+      p += n;
+   }
+   return 0;
+}
+
+static int bash_is_raw_recursive_scan(const char *cmd)
+{
+   if (!cmd || !cmd[0])
+      return 0;
+   int names_tool = (cmd_has_token(cmd, "grep") || cmd_has_token(cmd, "rg") ||
+                     cmd_has_token(cmd, "find") || cmd_has_token(cmd, "ls"));
+   if (!names_tool)
+      return 0;
+   return strstr(cmd, "grep -r") || strstr(cmd, "grep -R") || strstr(cmd, "rg --files") ||
+          strstr(cmd, "find .") || strstr(cmd, "ls -R") || strstr(cmd, "cat $(find") ||
+          strstr(cmd, "xargs grep");
+}
+
+int attn_is_raw_scan(const char *tool_name, const char *bash_cmd)
+{
+   if (!tool_name)
+      return 0;
+   if (strcmp(tool_name, "Grep") == 0 || strcmp(tool_name, "Glob") == 0)
+      return 1;
+   if (strcmp(tool_name, "Bash") == 0)
+      return bash_is_raw_recursive_scan(bash_cmd);
+   return 0;
+}
+
 attn_op_t attn_classify(const char *tool_name, const char *bash_cmd)
 {
    if (!tool_name)
@@ -73,10 +119,14 @@ attn_op_t attn_classify(const char *tool_name, const char *bash_cmd)
    {
       if (bash_is_hard(bash_cmd))
          return ATTN_OP_HARD;
+      if (attn_is_raw_scan(tool_name, bash_cmd))
+         return ATTN_OP_RAW_SCAN;
       if (bash_cmd && (strstr(bash_cmd, "rm ") || strstr(bash_cmd, " > ")))
          return ATTN_OP_SOFT;
       return ATTN_OP_READ;
    }
+   if (attn_is_raw_scan(tool_name, bash_cmd))
+      return ATTN_OP_RAW_SCAN;
    return ATTN_OP_READ;
 }
 
@@ -84,6 +134,7 @@ attn_op_t attn_classify(const char *tool_name, const char *bash_cmd)
 
 #define ATTN_MAX_RECORDS    1024
 #define ATTN_PRUNE_AGE_SECS (24 * 3600)
+#define ATTN_RAW_SCAN_PATH  "__aimee_raw_scan__"
 
 static void attn_log_path(const char *session_id, char *out, size_t cap)
 {
@@ -203,8 +254,30 @@ static void attn_record(cJSON *arr, const char *path, int weight, long now_ts)
    cJSON_AddItemToArray(arr, e);
 }
 
+static int attn_raw_scan_count(cJSON *arr, long now_ts)
+{
+   int count = 0;
+   cJSON *e = NULL;
+   cJSON_ArrayForEach(e, arr)
+   {
+      cJSON *p = cJSON_GetObjectItemCaseSensitive(e, "path");
+      cJSON *ts = cJSON_GetObjectItemCaseSensitive(e, "ts");
+      if (!cJSON_IsString(p) || strcmp(p->valuestring, ATTN_RAW_SCAN_PATH) != 0 ||
+          !cJSON_IsNumber(ts))
+         continue;
+      long age = now_ts - (long)ts->valuedouble;
+      if (age >= 0 && age <= ATTN_PRUNE_AGE_SECS)
+         count++;
+   }
+   return count;
+}
+
 int handle_attention_guard(void)
 {
+   const char *bypass = getenv("AIMEE_GUARD");
+   if (bypass && strcmp(bypass, "0") == 0)
+      return 0;
+
    char *stdin_data = read_stdin();
    cJSON *hook = stdin_data ? cJSON_Parse(stdin_data) : NULL;
    if (!hook)
@@ -228,7 +301,27 @@ int handle_attention_guard(void)
 
    int exit_code = 0;
 
-   if (op == ATTN_OP_HARD && bash_cmd && bash_cmd[0])
+   if (op == ATTN_OP_RAW_SCAN)
+   {
+      config_t cfg;
+      config_load(&cfg);
+      int used = attn_raw_scan_count(arr, now_ts);
+      if (cfg.ingress_max_raw_scans <= 0 || used >= cfg.ingress_max_raw_scans)
+      {
+         fprintf(stderr,
+                 "aimee attention-guard: recursive raw scans are disabled or exhausted for this "
+                 "context. "
+                 "Use Aimee's indexed tools instead: find_symbol, ast_grep_search, "
+                 "search_graph, or get_context_block. Set ingress_max_raw_scans above 0 "
+                 "only when raw scanning is intentional.\n");
+         exit_code = 2;
+      }
+      else
+      {
+         attn_record(arr, ATTN_RAW_SCAN_PATH, 1, now_ts);
+      }
+   }
+   else if (op == ATTN_OP_HARD && bash_cmd && bash_cmd[0])
    {
       /* Block if the destructive command mentions a high-attention path. */
       attn_record_t recs[ATTN_MAX_RECORDS];

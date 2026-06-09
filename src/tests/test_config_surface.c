@@ -31,7 +31,8 @@ static const char *FIXTURE_A =
     "db1_path: ZZA_val\nguardrail_mode: ZZA_val\nprovider: ZZA_val\nopenai_endpoint: "
     "ZZA_val\nopenai_model: ZZA_val\nopenai_key_cmd: ZZA_val\nclaude_model: ZZA_val\ncodex_model: "
     "ZZA_val\nautonomous: true\nverify_enabled: true\nverify_cross_project: "
-    "true\nembedding_command: ZZA_val\nembedding_model: "
+    "true\ningress_preinject_enabled: true\ningress_preinject_assembly_budget: 1\n"
+    "ingress_max_raw_scans: 3\nembedding_command: ZZA_val\nembedding_model: "
     "ZZA_val\nembedding_endpoint: ZZA_val\nembedding_dim: 1\nmemory_rerank_mode: "
     "ZZA_val\nmemory_rewrite:\n  enabled: true\n  hyde: true\n  decompose: true\n  max_subqueries: "
     "1\nmemory_negation:\n  enabled: true\nmemory_rerank:\n  enabled: true\n  top_k: 1\n  mix: "
@@ -79,7 +80,8 @@ static const char *FIXTURE_B =
     "db1_path: ZZB_val\nguardrail_mode: ZZB_val\nprovider: ZZB_val\nopenai_endpoint: "
     "ZZB_val\nopenai_model: ZZB_val\nopenai_key_cmd: ZZB_val\nclaude_model: ZZB_val\ncodex_model: "
     "ZZB_val\nautonomous: false\nverify_enabled: false\nverify_cross_project: "
-    "false\nembedding_command: ZZB_val\nembedding_model: "
+    "false\ningress_preinject_enabled: false\ningress_preinject_assembly_budget: 4096\n"
+    "ingress_max_raw_scans: 4096\nembedding_command: ZZB_val\nembedding_model: "
     "ZZB_val\nembedding_endpoint: ZZB_val\nembedding_dim: 4096\nmemory_rerank_mode: "
     "ZZB_val\nmemory_rewrite:\n  enabled: false\n  hyde: false\n  decompose: false\n  "
     "max_subqueries: 4096\nmemory_negation:\n  enabled: false\nmemory_rerank:\n  enabled: false\n  "
@@ -155,6 +157,9 @@ int main(void)
    assert(cfgA.autonomous == 1 && cfgB.autonomous == 0);
    assert(cfgA.verify_enabled == 1 && cfgB.verify_enabled == 0);
    assert(cfgA.verify_cross_project == 1 && cfgB.verify_cross_project == 0);
+   assert(cfgA.ingress_preinject_enabled == 1 && cfgB.ingress_preinject_enabled == 0);
+   assert(cfgA.ingress_preinject_assembly_budget != cfgB.ingress_preinject_assembly_budget);
+   assert(cfgA.ingress_max_raw_scans != cfgB.ingress_max_raw_scans);
    assert(strcmp(cfgA.embedding_command, cfgB.embedding_command) != 0);
    assert(strcmp(cfgA.embedding_model, cfgB.embedding_model) != 0);
    assert(strcmp(cfgA.embedding_endpoint, cfgB.embedding_endpoint) != 0);

@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "cli_attention_guard.h"
+#include "config.h"
 
 /* Stubs for handle_attention_guard's deps (it is not called here). */
 char *read_stdin(void)
@@ -24,6 +25,12 @@ int platform_mkdir_p(const char *path, int mode)
    (void)mode;
    return 0;
 }
+int config_load(config_t *cfg)
+{
+   memset(cfg, 0, sizeof(*cfg));
+   cfg->ingress_max_raw_scans = 0;
+   return 0;
+}
 
 static void test_classify(void)
 {
@@ -37,11 +44,17 @@ static void test_classify(void)
    assert(attn_classify("Bash", "truncate -s0 log") == ATTN_OP_HARD);
    assert(attn_classify("Bash", "shred secret") == ATTN_OP_HARD);
    assert(attn_classify("Bash", ": > file") == ATTN_OP_HARD);
+   assert(attn_classify("Bash", "grep -R symbol .") == ATTN_OP_RAW_SCAN);
+   assert(attn_classify("Bash", "rg --files") == ATTN_OP_RAW_SCAN);
+   assert(attn_classify("Bash", "find . -name '*.c'") == ATTN_OP_RAW_SCAN);
    assert(attn_classify("Bash", "rm stale.txt") == ATTN_OP_SOFT);  /* non-recursive */
    assert(attn_classify("Bash", "echo hi > out") == ATTN_OP_SOFT); /* redirect overwrite */
    assert(attn_classify("Bash", "ls -la") == ATTN_OP_READ);
-   assert(attn_classify("Grep", NULL) == ATTN_OP_READ);
+   assert(attn_classify("Grep", NULL) == ATTN_OP_RAW_SCAN);
+   assert(attn_classify("Glob", NULL) == ATTN_OP_RAW_SCAN);
    assert(attn_classify(NULL, NULL) == ATTN_OP_READ);
+   assert(attn_is_raw_scan("Bash", "grep -r TODO src") == 1);
+   assert(attn_is_raw_scan("Bash", "grep TODO src/file.c") == 0);
    printf("classify OK\n");
 }
 
