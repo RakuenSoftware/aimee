@@ -155,7 +155,22 @@ static int tokenize_unique(const char *s, char tokens[][64], int max)
    return count;
 }
 
-static int normalized_edit_change_0_100(const char *prev, const char *next);
+static int positional_change_0_100(const char *prev, const char *next)
+{
+   const char *ps = prev ? prev : "";
+   const char *ns = next ? next : "";
+   size_t a = strlen(ps);
+   size_t b = strlen(ns);
+   size_t denom = a > b ? a : b;
+   if (denom == 0)
+      return 0;
+   size_t common = a < b ? a : b;
+   size_t diff = a > b ? a - b : b - a;
+   for (size_t i = 0; i < common; i++)
+      if (ps[i] != ns[i])
+         diff++;
+   return (int)((diff * 100) / denom);
+}
 
 static int token_jaccard_change_0_100(const char *prev, const char *next)
 {
@@ -165,7 +180,7 @@ static int token_jaccard_change_0_100(const char *prev, const char *next)
    {
       free(a);
       free(b);
-      return normalized_edit_change_0_100(prev, next);
+      return positional_change_0_100(prev, next);
    }
    int na = tokenize_unique(prev, a, 512);
    int nb = tokenize_unique(next, b, 512);
@@ -202,21 +217,14 @@ static int normalized_edit_change_0_100(const char *prev, const char *next)
    if (denom == 0)
       return 0;
    if (a > 4096 || b > 4096)
-   {
-      size_t common = a < b ? a : b;
-      size_t diff = a > b ? a - b : b - a;
-      for (size_t i = 0; i < common; i++)
-         if (ps[i] != ns[i])
-            diff++;
-      return (int)((diff * 100) / denom);
-   }
+      return positional_change_0_100(prev, next);
    int *prev_row = calloc(b + 1, sizeof(int));
    int *cur_row = calloc(b + 1, sizeof(int));
    if (!prev_row || !cur_row)
    {
       free(prev_row);
       free(cur_row);
-      return token_jaccard_change_0_100(prev, next);
+      return positional_change_0_100(prev, next);
    }
    for (size_t j = 0; j <= b; j++)
       prev_row[j] = (int)j;
@@ -321,9 +329,8 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
 }
 
 static char *build_round_prompt(const char *task, const char *artifact, const char *peer_notes,
-                                roundtable_mode_t mode, int round, int *truncated)
+                                roundtable_mode_t mode, int round)
 {
-   (void)truncated;
    const char *role_hint = mode == ROUNDTABLE_REVIEW ? "review and critique" : "draft and revise";
    const char *mode_task =
        mode == ROUNDTABLE_REVIEW
@@ -621,7 +628,7 @@ static int review_saturated(char prev[][128], int prev_count, char cur[][128], i
 
 static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const char *task,
                               const char *artifact, const char *peer_notes, roundtable_mode_t mode,
-                              int round, agent_result_t *results, int *truncated)
+                              int round, agent_result_t *results)
 {
    int ref_count = cfg->ensemble_reference_count;
    agent_task_t tasks[ENSEMBLE_MAX_REFS];
@@ -630,7 +637,7 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
    memset(prompts, 0, sizeof(prompts));
    for (int i = 0; i < ref_count; i++)
    {
-      prompts[i] = build_round_prompt(task, artifact, peer_notes, mode, round, truncated);
+      prompts[i] = build_round_prompt(task, artifact, peer_notes, mode, round);
       if (!prompts[i])
          goto fail;
       tasks[i].role = mode == ROUNDTABLE_REVIEW ? "review" : "draft";
@@ -651,7 +658,7 @@ fail:
 
 static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const char *task,
                                 const char *artifact, char **peer_notes, roundtable_mode_t mode,
-                                int round, agent_result_t *results, int *truncated)
+                                int round, agent_result_t *results)
 {
    int ref_count = cfg->ensemble_reference_count;
    int order[ENSEMBLE_MAX_REFS];
@@ -662,7 +669,7 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
    for (int oi = 0; oi < ref_count; oi++)
    {
       int i = order[oi];
-      char *prompt = build_round_prompt(task, artifact, *peer_notes, mode, round, truncated);
+      char *prompt = build_round_prompt(task, artifact, *peer_notes, mode, round);
       if (!prompt)
          return -1;
       memset(&results[i], 0, sizeof(results[i]));
@@ -872,22 +879,16 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
 
       agent_result_t results[ENSEMBLE_MAX_REFS];
       memset(results, 0, sizeof(results));
-      int truncated_this_round = 0;
       int rc = local.turns == ROUNDTABLE_SEQUENTIAL
                    ? run_round_sequential(acfg, cfg, task, artifact, &peer_notes, local.mode, round,
-                                          results, &truncated_this_round)
+                                          results)
                    : run_round_parallel(acfg, cfg, task, artifact, peer_notes, local.mode, round,
-                                        results, &truncated_this_round);
+                                        results);
       if (rc != 0)
       {
          for (int i = 0; i < ref_count; i++)
             free(results[i].response);
          goto fail;
-      }
-      if (truncated_this_round)
-      {
-         out->truncated = 1;
-         out->degraded = 1;
       }
       if (local.cancel_requested && local.cancel_requested(local.cancel_ctx))
       {
