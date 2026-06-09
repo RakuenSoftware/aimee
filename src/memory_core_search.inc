@@ -4101,7 +4101,12 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    int semantic_hit_count = 0;
    memory_candidate_source_t source_stats[128];
    int source_stats_count = 0;
-   memory_t candidates[MEMORY_RERANK_BUFFER];
+   memory_t *candidates = (memory_t *)calloc(MEMORY_RERANK_BUFFER, sizeof(*candidates));
+   if (!candidates)
+   {
+      pgvec_memory_vector_scope_hint_clear();
+      return -1;
+   }
 
    /* Primary retrieval pass */
    const char *effective_query = query;
@@ -4123,6 +4128,7 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    if (count < 0)
    {
       pgvec_memory_vector_scope_hint_clear();
+      free(candidates);
       return -1;
    }
 
@@ -4142,6 +4148,7 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
       if (extra_count < 0)
       {
          pgvec_memory_vector_scope_hint_clear();
+         free(candidates);
          return -1;
       }
       count = memory_candidates_merge(candidates, count, extra, extra_count, MEMORY_RERANK_BUFFER);
@@ -4173,6 +4180,7 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
       if (sub_count < 0)
       {
          pgvec_memory_vector_scope_hint_clear();
+         free(candidates);
          return -1;
       }
       count =
@@ -4327,6 +4335,7 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    clock_gettime(CLOCK_MONOTONIC, &ts1);
    memory_record_query_plan_metrics(&plan, memory_query_elapsed_ms(&ts0, &ts1));
    pgvec_memory_vector_scope_hint_clear();
+   free(candidates);
    return reranked;
 }
 
@@ -4474,11 +4483,16 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
          if (db2_memory_get(shortcut_ids[i], &shortcut_matches[shortcut_match_n]) == 0)
             shortcut_match_n++;
 
-   memory_t matches[64];
+   memory_t *matches = (memory_t *)calloc(64, sizeof(*matches));
+   if (!matches)
+      return -1;
    int count = memory_find_facts_scoped(query, scope_type, scope_value, limit > 0 ? limit : 10,
                                         matches, 64);
    if (count < 0)
+   {
+      free(matches);
       return -1;
+   }
    if (count > max)
       count = max;
 
@@ -4490,7 +4504,10 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    int semantic_hit_count = 0;
    if (memory_collect_semantic_matches(query, embed_cmd, 32, matches, count, 64, semantic_ids,
                                        semantic_scores, &semantic_hit_count, 128) < 0)
+   {
+      free(matches);
       return -1;
+   }
 
    memory_pagerank_config_t pagerank_cfg;
    memory_pagerank_score_t pagerank_scores[64];
@@ -4526,8 +4543,10 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
                                     &out[i].parts);
          out[i].parts.confidence = shortcut_matches[i].confidence;
       }
+      free(matches);
       return promoted_count;
    }
+   free(matches);
    return count;
 }
 

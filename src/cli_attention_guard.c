@@ -13,9 +13,11 @@
 #include "cli_attention_guard.h"
 #include "cli_session_start.h" /* read_stdin */
 #include "aimee_home.h"
-#include "config.h"
 #include "platform_path.h"
 #include "cJSON.h"
+#include <ctype.h>
+#include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -272,6 +274,134 @@ static int attn_raw_scan_count(cJSON *arr, long now_ts)
    return count;
 }
 
+static int attn_parse_nonnegative_int(const char *s, int *out)
+{
+   if (!s || !out)
+      return 0;
+
+   while (isspace((unsigned char)*s))
+      s++;
+   if (*s == '+')
+      s++;
+   if (!isdigit((unsigned char)*s))
+      return 0;
+
+   errno = 0;
+   char *end = NULL;
+   long value = strtol(s, &end, 10);
+   if (errno || end == s || value < 0 || value > INT_MAX)
+      return 0;
+   *out = (int)value;
+   return 1;
+}
+
+static int attn_parse_ingress_max_raw_scans(const char *buf, int *out)
+{
+   if (!buf || !out)
+      return 0;
+
+   const char *line = buf;
+   while (*line)
+   {
+      const char *p = line;
+      while (*p == ' ' || *p == '\t')
+         p++;
+
+      if (*p && *p != '#')
+      {
+         char quote = 0;
+         if (*p == '"' || *p == '\'')
+            quote = *p++;
+
+         size_t key_len = strlen("ingress_max_raw_scans");
+         if (strncmp(p, "ingress_max_raw_scans", key_len) == 0)
+         {
+            p += key_len;
+            if (quote)
+            {
+               if (*p != quote)
+                  goto next_line;
+               p++;
+            }
+            while (*p && isspace((unsigned char)*p))
+               p++;
+            if (*p == ':' || *p == '=')
+            {
+               p++;
+               return attn_parse_nonnegative_int(p, out);
+            }
+         }
+      }
+
+   next_line:
+      while (*line && *line != '\n')
+         line++;
+      if (*line == '\n')
+         line++;
+   }
+
+   return 0;
+}
+
+static int attn_read_file(const char *path, char **out)
+{
+   if (!path || !out)
+      return 0;
+   *out = NULL;
+
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return 0;
+   if (fseek(f, 0, SEEK_END) != 0)
+   {
+      fclose(f);
+      return 0;
+   }
+   long sz = ftell(f);
+   if (fseek(f, 0, SEEK_SET) != 0)
+   {
+      fclose(f);
+      return 0;
+   }
+   if (sz <= 0 || sz > (1 << 20))
+   {
+      fclose(f);
+      return 0;
+   }
+
+   char *buf = (char *)malloc((size_t)sz + 1);
+   if (!buf)
+   {
+      fclose(f);
+      return 0;
+   }
+   size_t got = fread(buf, 1, (size_t)sz, f);
+   fclose(f);
+   buf[got] = '\0';
+   *out = buf;
+   return 1;
+}
+
+static int attn_config_ingress_max_raw_scans(void)
+{
+   const char *home = aimee_home();
+   if (!home || !home[0])
+      return 0;
+
+   char path[1024];
+   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
+
+   char *buf = NULL;
+   if (!attn_read_file(path, &buf))
+      return 0;
+
+   int value = 0;
+   if (!attn_parse_ingress_max_raw_scans(buf, &value))
+      value = 0;
+   free(buf);
+   return value;
+}
+
 int handle_attention_guard(void)
 {
    const char *bypass = getenv("AIMEE_GUARD");
@@ -303,10 +433,9 @@ int handle_attention_guard(void)
 
    if (op == ATTN_OP_RAW_SCAN)
    {
-      config_t cfg;
-      config_load(&cfg);
+      int ingress_max_raw_scans = attn_config_ingress_max_raw_scans();
       int used = attn_raw_scan_count(arr, now_ts);
-      if (cfg.ingress_max_raw_scans <= 0 || used >= cfg.ingress_max_raw_scans)
+      if (ingress_max_raw_scans <= 0 || used >= ingress_max_raw_scans)
       {
          fprintf(stderr,
                  "aimee attention-guard: recursive raw scans are disabled or exhausted for this "
@@ -324,7 +453,14 @@ int handle_attention_guard(void)
    else if (op == ATTN_OP_HARD && bash_cmd && bash_cmd[0])
    {
       /* Block if the destructive command mentions a high-attention path. */
-      attn_record_t recs[ATTN_MAX_RECORDS];
+      attn_record_t *recs = (attn_record_t *)calloc(ATTN_MAX_RECORDS, sizeof(*recs));
+      if (!recs)
+      {
+         cJSON_Delete(arr);
+         cJSON_Delete(hook);
+         free(stdin_data);
+         return 0;
+      }
       int n = attn_records_from_json(arr, recs, ATTN_MAX_RECORDS);
       /* Dedup the paths we score so we don't repeat work. */
       for (int i = 0; i < n; i++)
@@ -344,6 +480,7 @@ int handle_attention_guard(void)
             break;
          }
       }
+      free(recs);
    }
    else if (ti)
    {
