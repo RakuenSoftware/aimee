@@ -1163,3 +1163,121 @@ per-scope thresholds are used there:
 Without this, the "per `(surface, kind, scope)`" gate will be per-scope for CLI/RPC
 callers but effectively global for MCP, which is exactly the surface most likely
 to use recall inside agent turns.
+
+## §R5 Third follow-up review — the decision rule, anchor determinism, and the unadvertised ask surface (`testing@4d747ca`)
+
+This pass re-verified the cited memory symbols against the current base
+(`testing@4d747ca`; the cited memory files are byte-identical to `d3eb402d`, so all
+line numbers still hold) and went after three things the §A/§B contracts and the
+§R3/§R4 follow-ups pin *around* but never pin *directly*: the actual abstain
+decision function, whether the anchor the gate keys on is even deterministic, and
+whether the MCP "ask" surface §B.5 amends actually exists.
+
+### §R5.1 The abstain decision rule is still unspecified — and §10 still tests the gate §A.2 replaced
+
+§A.2 made the gate **grounding-first** (drop `memory_answer_confidence` as the
+gate signal), and §R3.2 + §B.1 then split grounding into **three** signals —
+`topk_grounding`, `anchor_coverage`, `cluster_coverage` — alongside `threshold`,
+`chunk_floor`, the curated-exempt short-circuit, and the `memory_answer_confidence`
+tiebreak. But no section states the **boolean decision** that combines them. The
+only "combine" language in the document is §A.2/§R3.9's "a `min`, not a blend"
+(written when grounding was a single number) and the §10 unit bullet, which still
+reads *"gate fires when `confidence < gate`"* (`§10`, line ~521) — i.e. it tests
+the **superseded** `memory_answer_confidence` gate that §A.2 explicitly removed.
+So the document simultaneously says "don't gate on answer confidence" (§A.2) and
+"test that the gate fires on answer confidence" (§10).
+
+Pin one deterministic formula, e.g.:
+
+```
+if exempt:                      decision = exempt        (reason curated_exempt)
+elif structural failure:        decision = abstain       (reason structural_*)
+elif citations required & none: decision = abstain       (reason citation_required)
+else:
+   grounding = min(anchor_coverage, cluster_coverage)    # anchor/cluster-local (§R3.2)
+   floored   = min(grounding, topk_grounding)            # corpus-level floor (§A.2)
+   decision  = abstain if floored < threshold else answerable
+              # memory_answer_confidence only breaks |floored - threshold| < epsilon ties
+```
+
+The exact combiner is a design choice, but it must be **one** rule that the
+trace's `decision`/`reason` (§B.1) map onto deterministically, and §10 must assert
+*that* rule — not `confidence < gate`. Without this, two implementers (or the unit
+test and the engine) can disagree on when the gate fires while both "follow the
+proposal."
+
+### §R5.2 The anchor the gate keys on is selected from the non-deterministic CE order — so §A.3 does not yet make the decision (or the answer) reproducible
+
+§B.1 wants `anchor_rank` = "deterministic pre-CE rank of the anchor," and §R3.2
+wants anchor/cluster-local grounding. Both assume a stable anchor. It is not:
+
+- `memory_answer_anchor_index` (`memory_core_search.inc:4588-4604`) picks the anchor
+  by maximizing `memory_answer_cluster_score`, which is **position-based**
+  (`1.0/(anchor_idx+1)` and `0.35/(i+1)`, `:4555-4586`).
+- It runs over the `matches` array in **post-CE, post-session-window display
+  order** (`out[i] = candidates[i]` then `memory_expand_to_session_window`,
+  `:4299-4313`).
+- The cross-encoder rerank that produces that order is the **non-deterministic
+  subprocess** of §R2.4 (silent fallback to hybrid order on miss/timeout).
+
+So the chosen anchor — and therefore the extracted **answer snippet**,
+`anchor_coverage`, and `anchor_rank` — can change run-to-run for the same corpus.
+§A.3 makes the *grounding floor* deterministic but leaves the *anchor selection*
+(and thus the answer content and the anchor-local signals) on the CE order. Two
+required additions:
+
+1. **Extend §A.3's determinism boundary to anchor selection**: choose the anchor on
+   the deterministic pre-CE order, or make `memory_answer_cluster_score`
+   position-independent, so the same corpus yields the same anchor (and the same
+   abstain/answer outcome), not only the same grounding number.
+2. **`anchor_rank` is not recoverable post-hoc**: neither the per-candidate score
+   nor the pre-CE order survives into the answer path (`out[i] = candidates[i]`
+   drops the score per §R.3.8, and session-window expansion further mutates order).
+   Recording `anchor_rank` as the *pre-CE hybrid rank* therefore requires capturing
+   that rank **on each candidate at rerank time**, which is strictly deeper than
+   §A.2's "make the score survive" — the CE reorder destroys the ordering that rank
+   refers to.
+
+### §R5.3 `memory_ask` is dispatched but **unadvertised**, so §B.5 has no MCP schema to amend and the gated answer surface is undiscoverable
+
+§B.5 says to "add optional `scope_type`/`scope_value` to the MCP tool schema" for
+`memory_ask`, and §R4.4 calls MCP `memory_ask` "the surface most likely to use
+recall inside agent turns." But `memory_ask` is **not in the published tool list**:
+it is dispatched only through the data-driven call table
+(`server_mcp_call_table.inc:39,491` → `mcph_memory_ask` → `tool_memory_ask`) and is
+**not** registered via `build_tool` in `mcp_build_tools_list` — it is absent from
+`test_mcp_tools_golden.inc` (which *does* list `memory_recall`, `memory_alerts`,
+`memory_briefing`, `memory_maintain`, `search_memory`). Consequences:
+
+- **§B.5's premise is off.** There is no advertised `memory_ask` schema to add
+  `scope_type`/`scope_value` to. The fix is one of: (a) register `memory_ask` via
+  `build_tool` to publish the params — which adds a line to the tools golden and is
+  a required regenerate step (cf. §R.6 for the config-surface net); or (b) read the
+  params handler-side only and **explicitly document MCP `memory_ask` as
+  global-scope** with undiscoverable optional params (the §R4.4 "intentional
+  global" option). Pick one; "amend the schema" as written is not implementable
+  against an unadvertised tool.
+- **The answer-path gate is barely reachable by agents over MCP.** The §A.1
+  *answer path* (`memory.ask` → hard refuse) is exposed only through this
+  unadvertised tool, while the *advertised* recall tool is `memory_recall` (the
+  **context path**). So in practice the gate an agent actually triggers over MCP is
+  the **context-path withhold** (§A.1 / P2), not the answer-path refuse — which
+  reinforces §A.2/§R2.2 that the context path is the higher-leverage place for this
+  work, and means P1 (answer-path refuse) has limited agent-facing reach until/unless
+  `memory_ask` is advertised.
+
+### §R5.4 Reconcile §10 with §A/§B once the rule is pinned (minor)
+
+Beyond the stale `confidence < gate` bullet (§R5.1), the §10 unit/integration list
+predates the three-signal grounding model, the evidence-trace assertions, and the
+unadvertised-MCP surface. After §R5.1 pins the decision rule, §10 should: assert the
+**grounding** decision and the trace `decision`/`reason` mapping (not
+`confidence < gate`); add an anchor-determinism regression (same corpus → same
+anchor/decision, §R5.2); and make the MCP integration test explicit about whether
+it drives the advertised `memory_recall` (context) or the unadvertised `memory_ask`
+(answer) path (§R5.3).
+
+All §0/§A/§B citations re-confirmed against `testing@4d747ca` in this pass
+(`memory_answer_anchor_index:4588`, `memory_answer_cluster_score:4555`,
+`out[i] = candidates[i]`/session-window at `:4299-4313`, the call-table
+registration of `memory_ask`, and the golden's omission of it).
