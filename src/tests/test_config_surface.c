@@ -49,7 +49,9 @@ static const char *FIXTURE_A =
     "summarise_enabled: true\n    min_cluster: 1\n    max_confidence: 0.01\n  scenes:\n    "
     "enabled: true\n    min_cluster_size: 1\n    top_m: 1\n    global_escape_ratio: 0.01\n  "
     "episode_summaries:\n    enabled: true\n  derive_facts:\n    enabled: true\n  "
-    "failure_detection:\n    enabled: true\n    threshold: 0.01\n  profile_cards:\n    enabled: "
+    "failure_detection:\n    enabled: true\n    threshold: 0.01\n  abstain:\n    enabled: "
+    "true\n    gate: 0.01\n    chunk_min_confidence: 0.01\n  "
+    "profile_cards:\n    enabled: "
     "true\n    min_observations: 1\n    stale_secs: 1\n  context_budget:\n    enabled: true\n    "
     "tokens: 1\n  routing:\n    enabled: true\n  bm25_weight: 0.01\n  semantic_weight: 0.01\n  "
     "fetch_budget:\n    enabled: true\n    base: 32\n    shape_aware: true\ncross_verify:\n  "
@@ -96,7 +98,9 @@ static const char *FIXTURE_B =
     "false\n    min_cluster: 4096\n    max_confidence: 0.99\n  scenes:\n    enabled: false\n    "
     "min_cluster_size: 4096\n    top_m: 4096\n    global_escape_ratio: 0.99\n  "
     "episode_summaries:\n    enabled: false\n  derive_facts:\n    enabled: false\n  "
-    "failure_detection:\n    enabled: false\n    threshold: 0.99\n  profile_cards:\n    enabled: "
+    "failure_detection:\n    enabled: false\n    threshold: 0.99\n  abstain:\n    enabled: "
+    "false\n    gate: 0.99\n    chunk_min_confidence: 0.99\n  "
+    "profile_cards:\n    enabled: "
     "false\n    min_observations: 4096\n    stale_secs: 4096\n  context_budget:\n    enabled: "
     "false\n    tokens: 4096\n  routing:\n    enabled: false\n  bm25_weight: 0.99\n  "
     "semantic_weight: 0.99\n  fetch_budget:\n    enabled: false\n    base: 512\n    shape_aware: "
@@ -206,6 +210,9 @@ int main(void)
    assert(cfgA.memory_derive_facts_enabled == 1 && cfgB.memory_derive_facts_enabled == 0);
    assert(cfgA.memory_failure_detection_enabled == 1 && cfgB.memory_failure_detection_enabled == 0);
    assert(cfgA.memory_failure_detection_threshold != cfgB.memory_failure_detection_threshold);
+   assert(cfgA.memory_abstain_enabled == 1 && cfgB.memory_abstain_enabled == 0);
+   assert(cfgA.memory_abstain_gate != cfgB.memory_abstain_gate);
+   assert(cfgA.memory_chunk_min_confidence != cfgB.memory_chunk_min_confidence);
    assert(cfgA.memory_profile_cards_enabled == 1 && cfgB.memory_profile_cards_enabled == 0);
    assert(cfgA.memory_profile_cards_min_obs != cfgB.memory_profile_cards_min_obs);
    assert(cfgA.memory_profile_cards_stale_secs != cfgB.memory_profile_cards_stale_secs);

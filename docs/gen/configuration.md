@@ -12,7 +12,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (88)
+## CLI-settable keys (91)
 
 | Key | Type |
 |-----|------|
@@ -61,7 +61,10 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `learning_router_enabled` | bool |
 | `max_iterations` | int |
 | `max_iterations_delegate` | int |
+| `memory_abstain_enabled` | bool |
+| `memory_abstain_gate` | float |
 | `memory_bm25_weight` | float |
+| `memory_chunk_min_confidence` | float |
 | `memory_coref_mode` | string |
 | `memory_coref_window` | int |
 | `memory_fetch_budget_base` | int |
@@ -127,7 +130,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`kb`** — `api`, `background_ingest`, `connection_workers`, `curator`, `evidence`, `maintenance`, `mining`, `search_max_results`, `worker_count`
 - **`learning`** — `embed`, `router`, `synthesize`
 - **`mcp`** — `osv`
-- **`memory`** — `aggregation`, `bm25_weight`, `briefing`, `citations`, `cognify`, `context_budget`, `coref`, `derive_facts`, `directives`, `dispositions`, `episode_summaries`, `failure_detection`, `fetch_budget`, `hard_negative_log`, `improve`, `lifecycle`, `pagerank`, `profile_cards`, `prospective`, `recall`, `rewrite`, `routing`, `salience`, `scenes`, `semantic_weight`
+- **`memory`** — `abstain`, `aggregation`, `bm25_weight`, `briefing`, `citations`, `cognify`, `context_budget`, `coref`, `derive_facts`, `directives`, `dispositions`, `episode_summaries`, `failure_detection`, `fetch_budget`, `hard_negative_log`, `improve`, `lifecycle`, `pagerank`, `profile_cards`, `prospective`, `recall`, `rewrite`, `routing`, `salience`, `scenes`, `semantic_weight`
 - **`memory_maintenance`** — `enabled`, `interval_seconds`, `summarize_enabled`, `trigger_inserts`, `trigger_secs`
 - **`memory_negation`** — `enabled`
 - **`memory_query_expansion`** — `k`, `mode`

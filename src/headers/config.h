@@ -510,6 +510,14 @@ typedef struct config
    int memory_failure_detection_enabled;
    double memory_failure_detection_threshold;
 
+   /* Retrieval answerability gate.
+    * memory_abstain_enabled: 0 = disabled (default), 1 = refuse weak evidence.
+    * memory_abstain_gate: effective default 0.40 at use site when enabled.
+    * memory_chunk_min_confidence: 0 = disabled; otherwise candidate floor [0,1]. */
+   int memory_abstain_enabled;
+   double memory_abstain_gate;
+   double memory_chunk_min_confidence;
+
    /* Weight profile inline overrides: applied on top of the file-based profile.
     * memory_bm25_weight: lexical (BM25-style) score weight (0 = use profile/default).
     * memory_semantic_weight: semantic/embedding score weight (0 = use profile/default). */
