@@ -441,6 +441,28 @@ void mem_answer(app_ctx_t *ctx, int argc, char **argv)
       cJSON_AddNumberToObject(obj, "confidence", result.confidence);
       cJSON_AddBoolToObject(obj, "no_answer", result.no_answer);
       cJSON_AddBoolToObject(obj, "low_confidence", result.low_confidence);
+      cJSON *trace = cJSON_AddObjectToObject(obj, "evidence_trace");
+      if (trace)
+      {
+         cJSON_AddStringToObject(trace, "decision",
+                                 memory_answer_evidence_decision_str(&result.evidence));
+         cJSON_AddStringToObject(trace, "reason",
+                                 memory_answer_evidence_reason_str(&result.evidence));
+         cJSON *ids = cJSON_AddArrayToObject(trace, "candidate_ids");
+         for (int i = 0; ids && i < result.evidence.candidate_id_count; i++)
+            cJSON_AddItemToArray(ids, cJSON_CreateNumber((double)result.evidence.candidate_ids[i]));
+         cJSON_AddNumberToObject(trace, "ranked_count", result.evidence.ranked_count);
+         cJSON_AddNumberToObject(trace, "anchor_id", (double)result.evidence.anchor_id);
+         cJSON_AddNumberToObject(trace, "anchor_rank", result.evidence.anchor_rank);
+         cJSON_AddNumberToObject(trace, "topk_grounding", result.evidence.topk_grounding);
+         cJSON_AddNumberToObject(trace, "anchor_coverage", result.evidence.anchor_coverage);
+         cJSON_AddNumberToObject(trace, "cluster_coverage", result.evidence.cluster_coverage);
+         cJSON_AddNumberToObject(trace, "threshold", result.evidence.threshold);
+         cJSON_AddNumberToObject(trace, "chunk_floor", result.evidence.chunk_floor);
+         cJSON_AddBoolToObject(trace, "structural", result.evidence.structural);
+         cJSON_AddBoolToObject(trace, "exempt", result.evidence.exempt);
+         cJSON_AddBoolToObject(trace, "trace_truncated", result.evidence.trace_truncated);
+      }
       cJSON *citations = cJSON_AddArrayToObject(obj, "citations");
       for (int i = 0; i < result.citation_count; i++)
       {
@@ -462,7 +484,10 @@ void mem_answer(app_ctx_t *ctx, int argc, char **argv)
    }
    else
    {
-      printf("%s\n", result.answer);
+      if (result.no_answer)
+         printf("No confident answer for \"%s\"\n", query_buf);
+      else
+         printf("%s\n", result.answer);
       if (explain)
       {
          cJSON *fc = memory_filter_to_json(&filter);

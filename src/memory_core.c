@@ -6,6 +6,7 @@
 /* memory_core.c: high-level memory orchestration, context assembly, scoring,
  * and DB2 (incl. pgvector) retrieval routing. */
 #include "aimee.h"
+#include "memory_context_internal.h"
 
 #if defined(AIMEE_DB2_DISABLED)
 
@@ -32,6 +33,10 @@ static void memory_answer_unavailable(memory_answer_result_t *out)
       return;
    memset(out, 0, sizeof(*out));
    out->no_answer = 1;
+   out->evidence.decision = MEMORY_ANSWER_DECISION_ABSTAIN;
+   out->evidence.reason = MEMORY_ANSWER_REASON_DB_UNAVAILABLE;
+   out->evidence.structural = 1;
+   out->evidence.anchor_rank = -1;
    snprintf(out->error, sizeof(out->error), "%s", memory_storage_unavailable_msg());
 }
 
@@ -140,6 +145,18 @@ const char *memory_query_shape_name(memory_query_shape_t shape)
    default:
       return "unknown";
    }
+}
+
+const char *memory_answer_evidence_decision_str(const memory_answer_evidence_t *trace)
+{
+   (void)trace;
+   return "abstain";
+}
+
+const char *memory_answer_evidence_reason_str(const memory_answer_evidence_t *trace)
+{
+   (void)trace;
+   return "db_unavailable";
 }
 
 double memory_fetch_budget_factor(memory_query_shape_t shape, int ntokens)

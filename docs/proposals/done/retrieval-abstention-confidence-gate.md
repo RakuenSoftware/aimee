@@ -1,6 +1,7 @@
 # Proposal: Teach recall to say "I don't know" - a calibrated abstention gate
 
-- **State:** draft - pending review
+- **State:** done
+- **Completed:** 2026-06-09
 - **Author:** JBailes
 - **Date:** 2026-06-09
 - **Charter roles:** Recall (gate placement on the answer path), Calibrate /
@@ -20,6 +21,17 @@
   (the `memory.ask` response contract + evidence trace), the `kb_calibrate` loop
   (`src/kb_calibrate.h`) for per-triple thresholds, unit + integration tests, an
   abstain/false-omission bench. No new service, no new model.
+
+## Completion summary
+
+This implementation ships the default-off answerability gate and trace contract:
+`memory.ask` now records bounded evidence traces, refuses weak retrieved evidence
+when `memory.abstain.enabled` is set, emits explicit no-answer text on string
+surfaces, and keeps L4/L5 curated anchors exempt. The context path withholds weak
+memory evidence behind the same rollout switch and emits the pinned
+`## Memory Answerability` sentinel instead of the soft LOW marker. Calibration
+and default-on rollout remain gated on future labeled ask-outcome data and bench
+acceptance, as required by §B.6/§B.7.
 
 ## Goal
 

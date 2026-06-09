@@ -859,6 +859,14 @@ reranking. Conversation-window search combines term match, lexical recall, and a
 helpers exist in the KB memory pipeline, but they are not current thin-client
 commands unless they appear in `aimee help memory`.
 
+`memory.ask` also carries a default-off answerability gate. When
+`memory.abstain.enabled` is set, weak retrieved evidence is refused with
+`no_answer=true`, empty rendered citations, and an `evidence_trace` containing
+candidate ids, grounding scores, thresholds, and the abstention reason. The
+context path uses the same rollout switch to withhold weak memory context and
+emit `## Memory Answerability` instead of passing weak evidence to the model.
+L4/L5 curated anchors bypass the gate.
+
 ### 8.5 Everyday usage
 
 ```bash
