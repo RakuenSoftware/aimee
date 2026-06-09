@@ -25,6 +25,10 @@ typedef struct
 int kb_code_embed_build_fallback_text(const char *project, const char *file_path, int64_t file_id,
                                       char *out, size_t cap);
 
+/* Compute the normalized file body hash used for advisory clone grouping.
+ * Empty/whitespace-only normalized bodies leave out empty. */
+void kb_code_embed_normalized_file_body_hash(const char *root, const char *rel_path, char out[32]);
+
 /* Run code embedding refresh for a project.
  * scope: "changed_files" | "full_project"
  * paths: optional array of specific file paths (NULL = all in scope)

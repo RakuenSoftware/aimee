@@ -8,13 +8,19 @@
 #include "config.h"
 #include "kb_client.h"
 #include "dstr.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <time.h>
 
 /* The standing exploration policy carried in every envelope. Kept short — it is
  * advice the model weighs, not a contract we can enforce over the wire. */
 #define INGRESS_EXPLORE_WITH                                                                       \
    "find_symbol, lsp_references, ast_grep_search, search_graph, get_context_block"
+
+#define INGRESS_AUDIT_CONTEXT_FILE            "audit_context.txt"
+#define INGRESS_AUDIT_CONTEXT_MAX_AGE_SECONDS (6 * 60 * 60)
 
 /* Per-request disable, set by the HTTP layer from the `x-aimee-preinject: 0`
  * header. Thread-local: the ingress runs the turn synchronously on the request
@@ -95,6 +101,43 @@ char *ingress_preinject_format_code_block(const code_search_hit_t *hits, int n)
       }
    }
    return dstr_steal(&d);
+}
+
+static char *ingress_preinject_read_audit_context(void)
+{
+   const char *dir = config_default_dir();
+   if (!dir || !dir[0])
+      return NULL;
+   char path[4096];
+   int n = snprintf(path, sizeof(path), "%s/%s", dir, INGRESS_AUDIT_CONTEXT_FILE);
+   if (n < 0 || (size_t)n >= sizeof(path))
+      return NULL;
+   struct stat st;
+   if (stat(path, &st) != 0 || !S_ISREG(st.st_mode))
+      return NULL;
+   time_t now = time(NULL);
+   if (now == (time_t)-1 || st.st_mtime > now ||
+       now - st.st_mtime > INGRESS_AUDIT_CONTEXT_MAX_AGE_SECONDS)
+      return NULL;
+
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return NULL;
+   char *buf = malloc(2048);
+   if (!buf)
+   {
+      fclose(f);
+      return NULL;
+   }
+   size_t got = fread(buf, 1, 2047, f);
+   fclose(f);
+   buf[got] = '\0';
+   if (got == 0)
+   {
+      free(buf);
+      return NULL;
+   }
+   return buf;
 }
 
 /* Pull the text out of a message `content` that is either a JSON string or an
@@ -200,6 +243,17 @@ char *ingress_preinject_build(const char *query, int request_disabled)
          score = ms;
    }
    free(mem);
+
+   char *audit = ingress_preinject_read_audit_context();
+   if (audit && audit[0])
+   {
+      if (block.len)
+         dstr_append_str(&block, "\n");
+      dstr_append_str(&block, audit);
+      if (score < 0.4)
+         score = 0.4;
+   }
+   free(audit);
 
    char *blk = dstr_steal(&block);
    if (!blk || !blk[0])

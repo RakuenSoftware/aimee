@@ -1320,7 +1320,7 @@ int pgvec_curator_code_unit_search(const char *which_vec, const char *def_kind, 
 
 int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *project,
                       const char *node_key, const char *file_path, const char *symbol,
-                      const char *content_hash, const char *payload_json)
+                      const char *content_hash, const char *body_hash, const char *payload_json)
 {
    if (!vec || dim <= 0)
       return 0;
@@ -1335,11 +1335,11 @@ int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *p
    static const char *sql =
        "INSERT INTO code_embeddings"
        "  (point_id, embedding, project, node_key, file_path, symbol,"
-       "   content_hash, payload_json,"
+       "   content_hash, body_hash, payload_json,"
        "   updated_at)"
        " VALUES"
        "  (:point_id, :embedding::vector, :project, :node_key, :file_path, :symbol,"
-       "   :content_hash, :payload,"
+       "   :content_hash, :body_hash, :payload,"
        "   to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS'))"
        " ON CONFLICT (point_id) DO UPDATE SET"
        "  embedding = EXCLUDED.embedding,"
@@ -1348,6 +1348,7 @@ int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *p
        "  file_path = EXCLUDED.file_path,"
        "  symbol = EXCLUDED.symbol,"
        "  content_hash = EXCLUDED.content_hash,"
+       "  body_hash = EXCLUDED.body_hash,"
        "  payload_json = EXCLUDED.payload_json,"
        "  updated_at = EXCLUDED.updated_at";
 
@@ -1365,6 +1366,7 @@ int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *p
    aimee_pg_bind_text(stmt, "file_path", file_path ? file_path : "");
    aimee_pg_bind_text(stmt, "symbol", symbol ? symbol : "");
    aimee_pg_bind_text(stmt, "content_hash", content_hash ? content_hash : "");
+   aimee_pg_bind_text(stmt, "body_hash", body_hash ? body_hash : "");
    aimee_pg_bind_text(stmt, "payload", payload_json ? payload_json : "");
 
    aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
@@ -1462,16 +1464,17 @@ int pgvec_code_search(const char *project, const float *vec, int dim, int limit,
    return (rc == AIMEE_PG_ERR) ? -1 : n;
 }
 
-int pgvec_code_exists_by_hash(const char *project, const char *node_key, const char *content_hash)
+int pgvec_code_exists_by_hash(const char *project, const char *node_key, const char *content_hash,
+                              const char *body_hash)
 {
    if (!project || !node_key || !content_hash || !*content_hash)
       return 0;
    void *pg = db2_conn();
    if (!pg)
       return 0;
-   static const char *sql =
-       "SELECT 1 FROM code_embeddings"
-       " WHERE project = :proj AND node_key = :nk AND content_hash = :ch LIMIT 1";
+   static const char *sql = "SELECT 1 FROM code_embeddings"
+                            " WHERE project = :proj AND node_key = :nk AND content_hash = :ch"
+                            "   AND (:bh = '' OR body_hash = :bh) LIMIT 1";
    char errbuf[256];
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
    if (!stmt)
@@ -1479,6 +1482,7 @@ int pgvec_code_exists_by_hash(const char *project, const char *node_key, const c
    aimee_pg_bind_text(stmt, "proj", project);
    aimee_pg_bind_text(stmt, "nk", node_key);
    aimee_pg_bind_text(stmt, "ch", content_hash);
+   aimee_pg_bind_text(stmt, "bh", body_hash ? body_hash : "");
    int found = (aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW) ? 1 : 0;
    aimee_pg_finalize(stmt);
    return found;

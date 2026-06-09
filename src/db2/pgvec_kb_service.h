@@ -36,9 +36,10 @@ extern "C"
    int pgvec_kb_service_code_upsert(int64_t point_id, const float *vec, int dim,
                                     const char *project, const char *node_key,
                                     const char *file_path, const char *symbol,
-                                    const char *content_hash, const char *payload_json);
+                                    const char *content_hash, const char *body_hash,
+                                    const char *payload_json);
    int pgvec_kb_service_code_exists_by_hash(const char *project, const char *node_key,
-                                            const char *content_hash);
+                                            const char *content_hash, const char *body_hash);
 
 #ifdef __cplusplus
 }

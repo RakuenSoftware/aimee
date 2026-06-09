@@ -34,6 +34,10 @@ int config_load(config_t *cfg)
       memset(cfg, 0, sizeof(*cfg));
    return 0;
 }
+const char *config_default_dir(void)
+{
+   return "/tmp/aimee-test";
+}
 
 static void test_confidence_tiers(void)
 {

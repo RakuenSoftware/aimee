@@ -44,8 +44,8 @@ static int stub_models_provider(char ids[][SERVER_HTTP_MODEL_ID_MAX], int max)
 /* Last dispatch captured by the stub, so route→method tests can assert which
  * NDJSON method a first-class /v1 route actually dispatched, and that the body
  * survived the bridge. */
-static char g_disp_method[96];
-static char g_disp_body[512];
+static _Thread_local char g_disp_method[96];
+static _Thread_local char g_disp_body[512];
 
 int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, size_t msg_len)
 {

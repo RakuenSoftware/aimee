@@ -1,14 +1,11 @@
 /* cli_code_audit.h: P4 code-health audit (`aimee code audit`).
  *
- * A self-contained client command that walks the working tree and reports
- * file-level health signals — untested code files (stem-matched against test
- * files) and orphaned TODO/FIXME/HACK/XXX markers — with a 0..100 debt score
- * (100 = clean). It runs locally over the repo and needs no kb/server.
- *
- * This is the self-contained slice of docs/proposals/pending/code-health-audit.md;
- * the graph-derived checks there (dead exports, import cycles, body-hash clones)
- * need new kb-side graph queries + a body_hash index column and remain a kb
- * follow-on.
+ * Walks the working tree and reports file-level health signals (untested files,
+ * TODO/FIXME/HACK/XXX markers, DB-in-routes, missing HTTP error handling) with a
+ * 0..100 debt score (100 = clean). Normal audits attempt one kb-side graph
+ * request to /v1/code/audit (dead exports, import cycles, body-hash clones) and
+ * quietly degrade when the server is unavailable. They also write a short,
+ * scope-labelled AUDIT_CONTEXT block for ingress pre-injection.
  *
  * The classification/scoring helpers are pure and unit-tested; the tree walk
  * and reporting live in the .c.
@@ -32,11 +29,19 @@ void audit_stem(const char *path, char *out, size_t cap);
 /* Count orphaned-work markers (TODO/FIXME/HACK/XXX) in `content`. Pure. */
 int audit_count_todos(const char *content);
 
-/* Debt score in [0,100] (100 = clean) from the audit tallies. Pure. */
-int audit_debt_score(int code_files, int untested, int todo_markers);
+/* Count route-layer DB access smells in `content` for paths that look like
+ * routes/controllers/API handlers. Pure. */
+int audit_count_db_in_routes(const char *path, const char *content);
 
-/* `aimee code audit [dir] [--json]` entry. Walks `dir` (default cwd), runs the
- * file-level checks, prints a report (or JSON), and returns 0. */
+/* Count likely HTTP/fetch calls without obvious nearby error handling. Pure,
+ * heuristic, and intentionally conservative. */
+int audit_count_unhandled_http(const char *content);
+
+/* Debt score in [0,100] (100 = clean) from the audit tallies. Pure. */
+int audit_debt_score(int code_files, int untested, int todo_markers, int db_in_routes,
+                     int unhandled_http);
+
+/* `aimee code audit [dir] [--json] [--project NAME] [--graph] [--fix]` entry. */
 int handle_code_audit(int argc, char **argv, int json_output);
 
 #endif /* DEC_CLI_CODE_AUDIT_H */

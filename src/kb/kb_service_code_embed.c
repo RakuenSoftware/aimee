@@ -14,11 +14,154 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #define CE_ERRBUF               256
 #define CE_TEXT_CAP             4096
 #define CE_FALLBACK_MAX_CALLS   5
 #define CE_FALLBACK_MAX_IMPORTS 5
+
+static unsigned long long ce_fnv1a_update(unsigned long long h, unsigned char c)
+{
+   h ^= (unsigned long long)c;
+   h *= 1099511628211ULL;
+   return h;
+}
+
+static int ce_path_uses_hash_comments(const char *rel_path)
+{
+   const char *dot = rel_path ? strrchr(rel_path, '.') : NULL;
+   if (!dot)
+      return 0;
+   return strcmp(dot, ".py") == 0 || strcmp(dot, ".rb") == 0 || strcmp(dot, ".sh") == 0 ||
+          strcmp(dot, ".bash") == 0 || strcmp(dot, ".zsh") == 0 || strcmp(dot, ".yaml") == 0 ||
+          strcmp(dot, ".yml") == 0 || strcmp(dot, ".toml") == 0;
+}
+
+static int ce_path_uses_slash_comments(const char *rel_path)
+{
+   const char *dot = rel_path ? strrchr(rel_path, '.') : NULL;
+   if (!dot)
+      return 0;
+   return strcmp(dot, ".c") == 0 || strcmp(dot, ".h") == 0 || strcmp(dot, ".cc") == 0 ||
+          strcmp(dot, ".cpp") == 0 || strcmp(dot, ".cxx") == 0 || strcmp(dot, ".hpp") == 0 ||
+          strcmp(dot, ".hh") == 0 || strcmp(dot, ".java") == 0 || strcmp(dot, ".js") == 0 ||
+          strcmp(dot, ".jsx") == 0 || strcmp(dot, ".ts") == 0 || strcmp(dot, ".tsx") == 0 ||
+          strcmp(dot, ".go") == 0 || strcmp(dot, ".rs") == 0 || strcmp(dot, ".cs") == 0 ||
+          strcmp(dot, ".kt") == 0 || strcmp(dot, ".swift") == 0;
+}
+
+void kb_code_embed_normalized_file_body_hash(const char *root, const char *rel_path, char out[32])
+{
+   if (!out)
+      return;
+   out[0] = '\0';
+   if (!root || !rel_path)
+      return;
+
+   char path[1024];
+   int n = snprintf(path, sizeof(path), "%s/%s", root, rel_path);
+   if (n < 0 || (size_t)n >= sizeof(path))
+      return;
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return;
+
+   /* Lightweight heuristic normalization, not a language parser: strips common
+    * comments and collapses whitespace, but does not understand string/char
+    * literals. Good enough for advisory clone grouping; symbol-level parsers can
+    * replace it when code-unit rows become parser-backed. */
+   unsigned long long h = 1469598103934665603ULL;
+   int c;
+   int in_ws = 0;
+   int line_prefix_ws = 1;
+   int hash_comments = ce_path_uses_hash_comments(rel_path);
+   int slash_comments = ce_path_uses_slash_comments(rel_path);
+   int emitted = 0;
+   while ((c = fgetc(f)) != EOF)
+   {
+      if (slash_comments && c == '/')
+      {
+         int next = fgetc(f);
+         if (next == '/')
+         {
+            while ((c = fgetc(f)) != EOF && c != '\n')
+               ;
+            in_ws = 1;
+            line_prefix_ws = 1;
+            continue;
+         }
+         if (next == '*')
+         {
+            int prev = 0;
+            while ((c = fgetc(f)) != EOF)
+            {
+               if (prev == '*' && c == '/')
+                  break;
+               prev = c;
+            }
+            in_ws = 1;
+            continue;
+         }
+         if (next != EOF)
+            ungetc(next, f);
+      }
+      if (hash_comments && c == '#' && line_prefix_ws)
+      {
+         while ((c = fgetc(f)) != EOF && c != '\n')
+            ;
+         in_ws = 1;
+         line_prefix_ws = 1;
+         continue;
+      }
+      if (isspace((unsigned char)c))
+      {
+         in_ws = 1;
+         if (c == '\n' || c == '\r')
+            line_prefix_ws = 1;
+         continue;
+      }
+      if (in_ws)
+      {
+         h = ce_fnv1a_update(h, ' ');
+         in_ws = 0;
+      }
+      h = ce_fnv1a_update(h, (unsigned char)c);
+      emitted = 1;
+      line_prefix_ws = 0;
+   }
+   fclose(f);
+   if (emitted)
+      snprintf(out, 32, "%016llx", h);
+}
+
+static int ce_file_line_count(const char *root, const char *rel_path)
+{
+   if (!root || !rel_path)
+      return 0;
+   char path[1024];
+   int n = snprintf(path, sizeof(path), "%s/%s", root, rel_path);
+   if (n < 0 || (size_t)n >= sizeof(path))
+      return 0;
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return 0;
+   int lines = 0;
+   int saw_any = 0;
+   int last = '\n';
+   int c;
+   while ((c = fgetc(f)) != EOF)
+   {
+      saw_any = 1;
+      if (c == '\n')
+         lines++;
+      last = c;
+   }
+   fclose(f);
+   if (saw_any && last != '\n')
+      lines++;
+   return lines;
+}
 
 int kb_code_embed_build_fallback_text(const char *project, const char *file_path, int64_t file_id,
                                       char *out, size_t cap)
@@ -141,14 +284,19 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
    char err[CE_ERRBUF] = "";
 
    /* Get project id. */
-   static const char *proj_sql = "SELECT id FROM projects WHERE name = ?1 LIMIT 1";
+   static const char *proj_sql = "SELECT id, root FROM projects WHERE name = ?1 LIMIT 1";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, proj_sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", project);
    int64_t proj_id = -1;
+   char project_root[512] = "";
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
       proj_id = aimee_pg_column_int64(st, 0);
+      const char *root = aimee_pg_column_text(st, 1);
+      snprintf(project_root, sizeof(project_root), "%s", root ? root : "");
+   }
    aimee_pg_finalize(st);
    if (proj_id < 0)
    {
@@ -238,8 +386,17 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
       if (db2_entity_node_key_file(project, rows[i].path, node_key, sizeof(node_key)) != 0)
          continue;
 
-      /* Skip unchanged: check content_hash. */
-      if (rows[i].hash[0] && pgvec_kb_service_code_exists_by_hash(project, node_key, rows[i].hash))
+      char body_hash[32];
+      kb_code_embed_normalized_file_body_hash(project_root, rows[i].path, body_hash);
+      int line_count = ce_file_line_count(project_root, rows[i].path);
+      if (!body_hash[0] && line_count > 0)
+         snprintf(body_hash, sizeof(body_hash), "%s", rows[i].hash);
+
+      /* Skip unchanged only when both file content and normalized body hash are
+       * current. Upgraded stores with blank legacy body_hash intentionally
+       * re-embed once so clone grouping is backfilled. */
+      if (rows[i].hash[0] &&
+          pgvec_kb_service_code_exists_by_hash(project, node_key, rows[i].hash, body_hash))
       {
          skipped++;
          continue;
@@ -264,8 +421,8 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
       char payload[2048];
       int plen = snprintf(payload, sizeof(payload),
                           "{\"project\":\"%s\",\"node_key\":\"%s\",\"file_path\":\"%s\","
-                          "\"content_hash\":\"%s\"}",
-                          project, node_key, rows[i].path, rows[i].hash);
+                          "\"content_hash\":\"%s\",\"body_hash\":\"%s\",\"line_count\":%d}",
+                          project, node_key, rows[i].path, rows[i].hash, body_hash, line_count);
       if (plen < 0 || (size_t)plen >= sizeof(payload))
       {
          db2_code_index_op_record(point_id, project, node_key, rows[i].path, 0,
@@ -296,7 +453,7 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
       }
 
       int up = pgvec_kb_service_code_upsert(point_id, vec, 384, project, node_key, rows[i].path, "",
-                                            rows[i].hash, payload);
+                                            rows[i].hash, body_hash, payload);
       /* Per-chunk replay bookkeeping so a failed embed is retried by
        * `memory repair --reset-stuck`, not orphaned. */
       db2_code_index_op_record(point_id, project, node_key, rows[i].path, up == 0,

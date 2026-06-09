@@ -21,6 +21,8 @@ static void test_dead_exports(void)
    const char *e2[] = {"export:p:A"};
    const char *i2[] = {"import:p:A"};
    assert(code_audit_dead_exports(e2, 1, i2, 1, out, 8) == 0);
+   const char *r2[] = {"reference:p:A"};
+   assert(code_audit_dead_exports(e2, 1, r2, 1, out, 8) == 0);
 
    /* no imports at all -> all dead, capped at max */
    assert(code_audit_dead_exports(exports, 3, NULL, 0, out, 1) == 1);

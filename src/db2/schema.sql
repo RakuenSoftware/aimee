@@ -909,10 +909,14 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
                 symbol       TEXT NOT NULL DEFAULT '',
                 record_type  TEXT NOT NULL DEFAULT 'code_unit',
                 content_hash TEXT NOT NULL DEFAULT '',
+                body_hash    TEXT NOT NULL DEFAULT '',
                 source_hash  TEXT NOT NULL DEFAULT '',
                 payload_json TEXT NOT NULL DEFAULT '',
                 updated_at   TEXT NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
             )
+        $T$;
+        EXECUTE $T$
+            ALTER TABLE code_embeddings ADD COLUMN IF NOT EXISTS body_hash TEXT NOT NULL DEFAULT ''
         $T$;
         EXECUTE $T$
             CREATE INDEX IF NOT EXISTS idx_code_embeddings_project
@@ -925,6 +929,10 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         EXECUTE $T$
             CREATE UNIQUE INDEX IF NOT EXISTS idx_code_embeddings_hash
                 ON code_embeddings(project, node_key, content_hash)
+        $T$;
+        EXECUTE $T$
+            CREATE INDEX IF NOT EXISTS idx_code_embeddings_body_hash
+                ON code_embeddings(project, body_hash)
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'code_embeddings table skipped (%)', SQLERRM;
