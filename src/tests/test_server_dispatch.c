@@ -833,6 +833,10 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
 {
    return stub_handler(conn, "delegate.aggregate");
 }
+int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "delegate.roundtable");
+}
 int handle_delegate_launch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "delegate.launch");
@@ -1382,6 +1386,12 @@ static void test_routing(void)
                         strlen("{\"method\":\"delegate.status\",\"job_id\":1}"));
    assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "delegate.status") == 0);
    assert(strcmp(g_last_handler, "delegate.status") == 0);
+   cJSON_Delete(json);
+
+   json = dispatch_json(ctx, conn, "{\"method\":\"delegate.roundtable\",\"prompt\":\"draft\"}",
+                        strlen("{\"method\":\"delegate.roundtable\",\"prompt\":\"draft\"}"));
+   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "delegate.roundtable") == 0);
+   assert(strcmp(g_last_handler, "delegate.roundtable") == 0);
    cJSON_Delete(json);
 
    json = dispatch_json(ctx, conn, "{\"method\":\"delegate.launch\"}",

@@ -161,6 +161,14 @@ const config_field_t config_fields[] = {
     {"kb_mining_min_poll_s", offsetof(config_t, kb_mining_min_poll_s), sizeof(int), 0, CFG_INT},
     {"verify_enabled", offsetof(config_t, verify_enabled), sizeof(int), 1, CFG_BOOL},
     {"verify_cross_project", offsetof(config_t, verify_cross_project), sizeof(int), 1, CFG_BOOL},
+    {"roundtable.max_rounds", offsetof(config_t, roundtable_max_rounds), sizeof(int), 0,
+     CFG_INT},
+    {"roundtable.converge_threshold", offsetof(config_t, roundtable_converge_threshold),
+     sizeof(int), 0, CFG_INT},
+    {"roundtable.deadline_ms", offsetof(config_t, roundtable_deadline_ms), sizeof(int), 0,
+     CFG_INT},
+    {"roundtable.turns", offsetof(config_t, roundtable_turns),
+     sizeof(((config_t *)0)->roundtable_turns), 0, CFG_STRING},
     {NULL, 0, 0, 0, CFG_STRING},
 };
 

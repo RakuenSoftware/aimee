@@ -9,6 +9,9 @@
 /* --- stubs for agent exec functions --- */
 
 static int g_parallel_mode = 0; /* 0=all-succeed, 1=only-first-succeeds */
+static int g_parallel_calls = 0;
+static int g_named_calls = 0;
+static int g_aggregator_calls = 0;
 
 /* Capture the per-task participant selector the engine sets, so a test can
  * assert the §0.1 routing fix: each fan-out task must be pointed at its own
@@ -22,6 +25,7 @@ static int g_captured_count = 0;
 int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agent_result_t *out)
 {
    (void)cfg;
+   g_parallel_calls++;
    g_captured_count = count < CAP_MAX ? count : CAP_MAX;
    for (int i = 0; i < g_captured_count; i++)
       snprintf(g_captured_agents[i], sizeof(g_captured_agents[i]), "%s",
@@ -37,12 +41,35 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
    }
    for (int i = 0; i < count; i++)
    {
-      out[i].response = strdup("mock response");
+      char buf[128];
+      snprintf(buf, sizeof(buf), "mock response from %s", tasks[i].agent ? tasks[i].agent : "default");
+      out[i].response = strdup(buf);
       out[i].prompt_tokens = 50;
       out[i].completion_tokens = 50;
       out[i].success = 1;
    }
    return count;
+}
+
+int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
+                    const char *system_prompt, const char *user_prompt, int max_tokens,
+                    double temperature, agent_result_t *out)
+{
+   (void)cfg;
+   (void)role;
+   (void)system_prompt;
+   (void)user_prompt;
+   (void)max_tokens;
+   (void)temperature;
+   g_named_calls++;
+   memset(out, 0, sizeof(*out));
+   char buf[128];
+   snprintf(buf, sizeof(buf), "named response from %s", name ? name : "missing");
+   out->response = strdup(buf);
+   out->prompt_tokens = 40;
+   out->completion_tokens = 20;
+   out->success = 1;
+   return 0;
 }
 
 int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
@@ -56,7 +83,15 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
    (void)max_tokens;
    (void)user_prompt;
    memset(out, 0, sizeof(*out));
-   out->response = strdup("synthesized answer");
+   if (role && strcmp(role, "reason") == 0)
+      out->response = strdup("80");
+   else
+   {
+      char buf[128];
+      g_aggregator_calls++;
+      snprintf(buf, sizeof(buf), "synthesized answer %d", g_aggregator_calls);
+      out->response = strdup(buf);
+   }
    out->prompt_tokens = 200;
    out->completion_tokens = 100;
    out->success = 1;
@@ -93,6 +128,8 @@ static agent_config_t make_acfg(void)
 static void test_ensemble_basic(void)
 {
    g_parallel_mode = 0;
+   g_parallel_calls = 0;
+   g_aggregator_calls = 0;
    config_t cfg = make_cfg(1, 2, 10.0);
    agent_config_t acfg = make_acfg();
    delegate_ensemble_result_t result;
@@ -177,6 +214,80 @@ static void test_ensemble_routes_to_distinct_agents(void)
    printf("  test_ensemble_routes_to_distinct_agents: ok\n");
 }
 
+static void test_roundtable_parallel_basic(void)
+{
+   g_parallel_mode = 0;
+   g_parallel_calls = 0;
+   g_aggregator_calls = 0;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 2;
+   opts.converge_threshold = 0;
+   opts.deadline_ms = 0;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft a short engineering proposal", &opts, &result);
+   assert(rc == 0);
+   assert(result.artifact != NULL);
+   assert(strstr(result.artifact, "synthesized answer") != NULL);
+   assert(result.rounds_run == 2);
+   assert(result.best_round > 0);
+   assert(result.cost_usd > 0.0);
+   assert(g_parallel_calls == 2);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_parallel_basic: ok\n");
+}
+
+static void test_roundtable_sequential_uses_named_agents(void)
+{
+   g_parallel_mode = 0;
+   g_named_calls = 0;
+   g_aggregator_calls = 0;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_SEQUENTIAL;
+   opts.max_rounds = 1;
+   opts.converge_threshold = 10;
+   opts.deadline_ms = 0;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review this proposed design for correctness", &opts, &result);
+   assert(rc == 0);
+   assert(result.artifact != NULL);
+   assert(g_named_calls == 3);
+   assert(result.rounds_run == 1);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_sequential_uses_named_agents: ok\n");
+}
+
+static void test_roundtable_degrades_on_min_success(void)
+{
+   g_parallel_mode = 1;
+   g_parallel_calls = 0;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   opts.deadline_ms = 0;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft with too few successful participants", &opts, &result);
+   assert(rc == 0);
+   assert(result.degraded == 1);
+   assert(result.artifact != NULL);
+   assert(strstr(result.artifact, "only one answer") != NULL);
+   delegate_roundtable_result_free(&result);
+   g_parallel_mode = 0;
+   printf("  test_roundtable_degrades_on_min_success: ok\n");
+}
+
 int main(void)
 {
    printf("delegate_ensemble tests\n");
@@ -186,6 +297,9 @@ int main(void)
    test_ensemble_cost_cap();
    test_ensemble_min_successful_degradation();
    test_ensemble_routes_to_distinct_agents();
+   test_roundtable_parallel_basic();
+   test_roundtable_sequential_uses_named_agents();
+   test_roundtable_degrades_on_min_success();
    printf("all tests passed\n");
    return 0;
 }

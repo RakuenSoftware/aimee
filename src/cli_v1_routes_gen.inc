@@ -186,6 +186,7 @@ static const struct
 } CLI_V1_ASYNC_ROUTES[] = {
     {"curator.synthesize", "POST", "/v1/curator/synthesize"},
     {"delegate.aggregate", "POST", "/v1/delegate/aggregate"},
+    {"delegate.roundtable", "POST", "/v1/delegate/roundtable"},
     {"eval.run", "POST", "/v1/eval/run"},
     {"graph.sync_code", "POST", "/v1/graph/sync_code"},
     {"index.scan", "POST", "/v1/index/scan"},

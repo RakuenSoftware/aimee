@@ -507,6 +507,10 @@ static void config_set_defaults(config_t *cfg)
    cfg->ensemble_enabled = 0;
    cfg->ensemble_min_successful = 2;
    cfg->ensemble_max_cost_usd = 1.0;
+   cfg->roundtable_max_rounds = 3;
+   cfg->roundtable_converge_threshold = 10;
+   cfg->roundtable_deadline_ms = 600000;
+   snprintf(cfg->roundtable_turns, sizeof(cfg->roundtable_turns), "parallel");
    cfg->mcp_osv_enabled = 1;
    cfg->mcp_osv_offline = 0;
    cfg->mcp_osv_enforce = 1;
@@ -970,6 +974,7 @@ int config_load(config_t *cfg)
       config_parse_db2_section(cfg, root);
    }
    config_parse_ensemble_section(cfg, root);
+   config_parse_roundtable_section(cfg, root);
    cJSON_Delete(root);
    /* Update mtime cache */
    {

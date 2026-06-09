@@ -1732,6 +1732,73 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    return server_send_ok(conn, resp);
 }
 
+int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
+   const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
+   if (!prompt || !prompt[0])
+      return server_send_error(conn, "missing prompt", NULL);
+   if (strlen(prompt) < 20)
+   {
+      char errmsg[88];
+      snprintf(errmsg, sizeof(errmsg), "roundtable prompt too short (%zu chars, min 20)",
+               strlen(prompt));
+      return server_send_error(conn, errmsg, NULL);
+   }
+
+   config_t cfg;
+   config_load(&cfg);
+   if (!cfg.ensemble_enabled)
+      return server_send_error(conn, "agent roundtable disabled (set ensemble.enabled=true)", NULL);
+
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = strcmp(cfg.roundtable_turns, "sequential") == 0 ? ROUNDTABLE_SEQUENTIAL
+                                                                 : ROUNDTABLE_PARALLEL;
+   opts.max_rounds = cfg.roundtable_max_rounds > 0 ? cfg.roundtable_max_rounds : 3;
+   opts.converge_threshold = cfg.roundtable_converge_threshold;
+   opts.deadline_ms = cfg.roundtable_deadline_ms;
+
+   cJSON *jmode = cJSON_GetObjectItemCaseSensitive(req, "mode");
+   if (cJSON_IsString(jmode) && strcmp(jmode->valuestring, "review") == 0)
+      opts.mode = ROUNDTABLE_REVIEW;
+   cJSON *jturns = cJSON_GetObjectItemCaseSensitive(req, "turns");
+   if (cJSON_IsString(jturns) && strcmp(jturns->valuestring, "sequential") == 0)
+      opts.turns = ROUNDTABLE_SEQUENTIAL;
+   cJSON *jrounds = cJSON_GetObjectItemCaseSensitive(req, "rounds");
+   if (cJSON_IsNumber(jrounds) && jrounds->valuedouble > 0)
+      opts.max_rounds = (int)jrounds->valuedouble;
+   cJSON *japply = cJSON_GetObjectItemCaseSensitive(req, "apply");
+   if (cJSON_IsBool(japply))
+      opts.apply_review = cJSON_IsTrue(japply) ? 1 : 0;
+
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof(acfg));
+   if (agent_load_config(&acfg) != 0)
+      return server_send_error(conn, "could not load agents.json", NULL);
+
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, prompt, &opts, &result);
+   if (rc != 0)
+      return server_send_error(
+          conn, "roundtable run failed (check ensemble.enabled / ensemble.reference_models)", NULL);
+
+   cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "artifact", result.artifact ? result.artifact : "");
+   cJSON_AddNumberToObject(resp, "rounds_run", result.rounds_run);
+   cJSON_AddBoolToObject(resp, "converged", result.converged ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "degraded", result.degraded ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "truncated", result.truncated ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "cost_capped", result.cost_capped ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "deadline_hit", result.deadline_hit ? 1 : 0);
+   cJSON_AddNumberToObject(resp, "best_round", result.best_round);
+   cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
+   delegate_roundtable_result_free(&result);
+   return server_send_ok(conn, resp);
+}
+
 int handle_delegate_reply(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

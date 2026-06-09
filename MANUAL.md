@@ -420,6 +420,7 @@ corresponding `config_*.c` module.
 | `background_threads` / `compute_threads` / `session_threads` / `worker_threads` | int | Server thread-pool sizing. |
 | `concurrency` | object | Per-model concurrency limits (`concurrency.per_model.<model>: N`). |
 | `ensemble` | object | Ensemble/voting delegate settings. |
+| `roundtable` | object | Agent roundtable loop settings: `max_rounds`, `converge_threshold`, `deadline_ms`, `turns`. |
 
 **Sessions, tools, transport**
 
@@ -649,6 +650,8 @@ Offload work to a sub-agent (via the server compute pool).
   `--context-dir DIR`, `--files F`.
 - `delegate plan <proposal.md> [--json] [--output PATH] [--launch] [--parallel N]`, generate work packets from a proposal.
 - `delegate launch <plan.json> [--json] [--parallel N]` (`delegate.launch`), queue reviewed packets.
+- `delegate aggregate "<task>"` (`delegate.aggregate`), run one Mixture-of-Agents fan-out and synthesis over `ensemble.reference_models`.
+- `delegate roundtable "<task>" [--mode draft|review] [--turns parallel|sequential] [--rounds N] [--apply]` (`delegate.roundtable`), run a bounded multi-round collaborative draft or review. The async run result includes `artifact`, `rounds_run`, `converged`, `degraded`, `truncated`, `cost_capped`, `deadline_hit`, `best_round`, and `cost_usd`.
 - `delegate status <job_id> [job_id...] [--full|--result-limit N]` (`delegate.status`).
 - `delegate log` / `delegate history` (`delegate.log`) · `delegate --list-roles` (`agent.list`).
 
@@ -952,6 +955,8 @@ aimee delegate review "Review this PR for security issues"
 aimee delegate code --tools "Add tests for the auth module"
 aimee delegate summarize --files notes.md "Summarize to 5 bullets"
 aimee delegate execute --tools --background "Migrate config to YAML"
+aimee delegate roundtable "Draft a migration proposal" --rounds 3
+aimee delegate roundtable "Review this design" --mode review --turns sequential
 ```
 
 **Roles:** `code`, `review`, `explain`, `refactor`, `draft`, `execute`,
@@ -970,6 +975,14 @@ subscriptions), `x-api-key` (Anthropic).
 **Cross-verification:** `--verify CMD` runs a build/test after delegation and
 fails (exit 3) if it does not pass; `aimee verify` can send your diff to a
 delegate for review. Full guide: [`docs/DELEGATES.md`](docs/DELEGATES.md).
+
+**Roundtable:** `aimee delegate roundtable` reuses `ensemble.enabled`,
+`ensemble.reference_models`, `ensemble.aggregator`, `ensemble.min_successful`,
+and `ensemble.max_cost_usd`. `roundtable.max_rounds` defaults to `3`,
+`roundtable.converge_threshold` to `10`, `roundtable.deadline_ms` to `600000`,
+and `roundtable.turns` to `parallel`. Draft mode returns a shared artifact;
+review mode returns a consolidated review, and `--apply` asks a final draft turn
+to apply that review.
 
 ---
 

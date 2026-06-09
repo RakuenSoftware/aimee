@@ -58,6 +58,7 @@ void delegate_print_help(void)
            "  aimee delegate plan <proposal.md>  Generate read-only work packets\n"
            "  aimee delegate launch <plan.json>  Queue reviewed packets into a coord job\n"
            "  aimee delegate aggregate \"<task>\"  MoA ensemble: diverse models + synthesis\n"
+           "  aimee delegate roundtable \"<task>\"  Multi-round collaborative drafting/review\n"
            "  aimee delegate status <background_task_id>   Check background delegate status\n"
            "  aimee delegate --list-roles        List available roles\n"
            "\n"

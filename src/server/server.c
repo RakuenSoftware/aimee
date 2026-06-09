@@ -1134,6 +1134,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"tool.execute", handle_tool_execute},
     {"delegate", handle_delegate},
     {"delegate.aggregate", handle_delegate_aggregate},
+    {"delegate.roundtable", handle_delegate_roundtable},
     {"delegate.launch", handle_delegate_launch},
     {"delegate.status", handle_delegate_status},
     {"jobs.list", handle_jobs_list},
