@@ -1133,7 +1133,11 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     /* Compute (thread pool) */
     {"tool.execute", handle_tool_execute},
     {"delegate", handle_delegate},
+    /* Public /v1 delegate aggregate/roundtable routes enqueue through
+     * rh_dispatch_op_async. Direct raw dispatch remains synchronous for
+     * compatibility with the dispatch-method surface. */
     {"delegate.aggregate", handle_delegate_aggregate},
+    {"delegate.roundtable", handle_delegate_roundtable},
     {"delegate.launch", handle_delegate_launch},
     {"delegate.status", handle_delegate_status},
     {"jobs.list", handle_jobs_list},
@@ -1224,8 +1228,8 @@ static size_t method_size_limit(const char *method)
       const char *prefix;
       size_t max;
    } limits[] = {
-       {"memory.", LIMIT_MEMORY}, {"tool.", LIMIT_TOOL}, {"delegate", LIMIT_DELEGATE},
-       {"chat.", LIMIT_CHAT},     {NULL, LIMIT_DEFAULT},
+       {"memory.", LIMIT_MEMORY},    {"tool.", LIMIT_TOOL}, {"delegate", LIMIT_DELEGATE},
+       {"mcp.call", LIMIT_DELEGATE}, {"chat.", LIMIT_CHAT}, {NULL, LIMIT_DEFAULT},
    };
 
    for (int i = 0; limits[i].prefix; i++)

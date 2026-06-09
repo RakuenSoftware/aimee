@@ -1101,6 +1101,27 @@ void config_parse_ensemble_section(config_t *cfg, cJSON *root)
    }
 }
 
+void config_parse_roundtable_section(config_t *cfg, cJSON *root)
+{
+   cJSON *item = NULL;
+   cJSON *roundtable_cfg = cJSON_GetObjectItemCaseSensitive(root, "roundtable");
+   if (!cJSON_IsObject(roundtable_cfg))
+      return;
+
+   item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "max_rounds");
+   if (cJSON_IsNumber(item) && item->valuedouble > 0)
+      cfg->roundtable_max_rounds = (int)item->valuedouble;
+   item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "converge_threshold");
+   if (cJSON_IsNumber(item) && item->valuedouble >= 0 && item->valuedouble <= 100)
+      cfg->roundtable_converge_threshold = (int)item->valuedouble;
+   item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "deadline_ms");
+   if (cJSON_IsNumber(item) && item->valuedouble >= 0)
+      cfg->roundtable_deadline_ms = (int)item->valuedouble;
+   item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "turns");
+   if (cJSON_IsString(item) && item->valuestring && item->valuestring[0])
+      snprintf(cfg->roundtable_turns, sizeof(cfg->roundtable_turns), "%s", item->valuestring);
+}
+
 void config_parse_kb_section2(config_t *cfg, cJSON *root)
 {
    cJSON *item = NULL;

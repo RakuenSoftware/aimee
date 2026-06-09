@@ -157,7 +157,8 @@ static cJSON *chatgpt_build_tools(void)
 static void chatgpt_get_caps(const agent_t *agent, driver_caps_t *caps)
 {
    (void)agent;
-   caps->capability_flags = DRIVER_CAP_TOOL_CALLS | DRIVER_CAP_STREAMING | DRIVER_CAP_VISION;
+   caps->capability_flags =
+       DRIVER_CAP_TOOL_CALLS | DRIVER_CAP_STREAMING | DRIVER_CAP_VISION | DRIVER_CAP_SYSTEM_MSG;
    caps->context_limit = DRIVER_CTX_HUGE;
    caps->max_output_tokens = 0;
 }

@@ -9,7 +9,9 @@
  * Edge-key formats (from db2/code_projection.c):
  *   exports edge target: "export:<proj>:<name>"
  *   imports edge target: "import:<proj>:<name>"
- * An export is consumed iff some import shares the same "<proj>:<name>" tail.
+ *   references edge target: "reference:<proj>:<name>"
+ * An export is consumed iff some import/reference shares the same
+ * "<proj>:<name>" tail.
  */
 #ifndef DEC_CODE_AUDIT_GRAPH_H
 #define DEC_CODE_AUDIT_GRAPH_H 1
@@ -21,9 +23,9 @@ typedef struct
    const char *to;   /* exporting file key */
 } audit_edge_t;
 
-/* Select dead exports: export keys ("export:<X>") with no matching import key
- * ("import:<X>"). Writes borrowed pointers from `exports` into `out`. Returns
- * the count written (<= max). Pure. */
+/* Select dead exports: export keys ("export:<X>") with no matching import or
+ * reference key ("import:<X>" / "reference:<X>"). Writes borrowed pointers from
+ * `exports` into `out`. Returns the count written (<= max). Pure. */
 int code_audit_dead_exports(const char *const *exports, int n_exports, const char *const *imports,
                             int n_imports, const char **out, int max);
 

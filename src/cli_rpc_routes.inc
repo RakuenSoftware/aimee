@@ -245,6 +245,7 @@ static const struct
      * ensemble; without it the prompt fell through to the catch-all delegate
      * route, which maps positional[0] -> role and never ran the engine. */
     {"delegate", "aggregate", "delegate.aggregate", NULL, NULL, 600000},
+    {"delegate", "roundtable", "delegate.roundtable", NULL, NULL, 900000},
     /* Codex/openai delegate agents have agent->timeout_ms == 900000 server-side.
      * The CLI must outlast that, otherwise we report "no response" while the
      * server is still genuinely working. */
@@ -1683,6 +1684,43 @@ static cJSON *marshal_delegate_aggregate(int argc, char **argv)
    return req;
 }
 
+static cJSON *marshal_delegate_roundtable(int argc, char **argv)
+{
+   static const char *bool_flags[] = {"json", "apply", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+   cJSON *req = marshal_no_args("delegate.roundtable");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "prompt", opts.positional[0]);
+   const char *mode = rpc_get(&opts, "mode");
+   if (mode)
+      cJSON_AddStringToObject(req, "mode", mode);
+   const char *turns = rpc_get(&opts, "turns");
+   if (turns)
+      cJSON_AddStringToObject(req, "turns", turns);
+   const char *rounds = rpc_get(&opts, "rounds");
+   if (rounds)
+      cJSON_AddNumberToObject(req, "rounds", atoi(rounds));
+   const char *brief = rpc_get(&opts, "brief");
+   if (brief)
+      cJSON_AddStringToObject(req, "brief", brief);
+   const char *brief_json = rpc_get(&opts, "brief-json");
+   if (brief_json)
+   {
+      cJSON *parsed = cJSON_Parse(brief_json);
+      if (!parsed)
+      {
+         fprintf(stderr, "aimee: delegate roundtable: --brief-json must be valid JSON\n");
+         exit(1);
+      }
+      cJSON_DeleteItemFromObjectCaseSensitive(req, "brief");
+      cJSON_AddItemToObject(req, "brief", parsed);
+   }
+   if (rpc_has_flag(&opts, "apply"))
+      cJSON_AddBoolToObject(req, "apply", 1);
+   return req;
+}
+
 static cJSON *marshal_delegate(int argc, char **argv)
 {
    static const char *bool_flags[] = {"json",         "background", "durable", "coordination",
@@ -2972,6 +3010,8 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_delegate(argc, argv);
    if (strcmp(method, "delegate.aggregate") == 0)
       return marshal_delegate_aggregate(argc, argv);
+   if (strcmp(method, "delegate.roundtable") == 0)
+      return marshal_delegate_roundtable(argc, argv);
    if (strcmp(method, "delegate.launch") == 0)
       return marshal_delegate_launch(argc, argv);
    if (strcmp(method, "delegate.status") == 0)

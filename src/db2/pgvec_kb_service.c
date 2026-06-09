@@ -116,14 +116,15 @@ int pgvec_kb_service_ensure_code_collection(int dim)
 
 int pgvec_kb_service_code_upsert(int64_t point_id, const float *vec, int dim, const char *project,
                                  const char *node_key, const char *file_path, const char *symbol,
-                                 const char *content_hash, const char *payload_json)
+                                 const char *content_hash, const char *body_hash,
+                                 const char *payload_json)
 {
    return pgvec_code_upsert(point_id, vec, dim, project, node_key, file_path, symbol, content_hash,
-                            payload_json);
+                            body_hash, payload_json);
 }
 
 int pgvec_kb_service_code_exists_by_hash(const char *project, const char *node_key,
-                                         const char *content_hash)
+                                         const char *content_hash, const char *body_hash)
 {
-   return pgvec_code_exists_by_hash(project, node_key, content_hash);
+   return pgvec_code_exists_by_hash(project, node_key, content_hash, body_hash);
 }

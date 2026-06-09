@@ -898,6 +898,9 @@ static void sagent_jwt_account_id(const char *jwt, char *buf, size_t buf_len)
 
 static const char *sagent_provider_cli_roles[] = {"code",     "review", "explain",
                                                   "refactor", "draft",  "execute"};
+static const char *sagent_codex_oauth_roles[] = {"code",     "review",  "explain",   "refactor",
+                                                 "draft",    "execute", "summarize", "format",
+                                                 "diagnose", "validate"};
 static const char *sagent_mistral_plan_roles[] = {"code",     "review",  "explain",   "refactor",
                                                   "draft",    "execute", "summarize", "format",
                                                   "diagnose", "validate"};
@@ -965,8 +968,10 @@ static void sagent_configure_tmux_cli_agent(agent_t *ag, const char *name, const
       snprintf(ag->roles[ag->role_count++], 32, "%s", sagent_provider_cli_roles[i]);
 }
 
-static void sagent_configure_direct_adapter_agent(agent_t *ag, const agent_adapter_t *adapter,
-                                                  const char *name, int cost_tier, int timeout_ms)
+static void
+sagent_configure_direct_adapter_agent_with_roles(agent_t *ag, const agent_adapter_t *adapter,
+                                                 const char *name, int cost_tier, int timeout_ms,
+                                                 const char *const *roles, int role_count)
 {
    memset(ag, 0, sizeof(*ag));
    snprintf(ag->name, MAX_AGENT_NAME, "%s", name);
@@ -983,11 +988,8 @@ static void sagent_configure_direct_adapter_agent(agent_t *ag, const agent_adapt
    ag->max_parallel = AGENT_DEFAULT_MAX_PARALLEL;
 
    ag->role_count = 0;
-   for (int i = 0;
-        i < (int)(sizeof(sagent_provider_cli_roles) / sizeof(sagent_provider_cli_roles[0])) &&
-        ag->role_count < MAX_AGENT_ROLES;
-        i++)
-      snprintf(ag->roles[ag->role_count++], 32, "%s", sagent_provider_cli_roles[i]);
+   for (int i = 0; i < role_count && ag->role_count < MAX_AGENT_ROLES; i++)
+      snprintf(ag->roles[ag->role_count++], 32, "%s", roles[i]);
 }
 
 static int sagent_setup_provider_cli(server_conn_t *conn, const char *provider)
@@ -1400,7 +1402,9 @@ int handle_agent_setup_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const agent_adapter_t *adapter = agent_adapter_for_name("codex");
    if (!adapter)
       return server_send_error(conn, "codex adapter is not registered", NULL);
-   sagent_configure_direct_adapter_agent(ag, adapter, "codex", 0, 600000);
+   sagent_configure_direct_adapter_agent_with_roles(
+       ag, adapter, "codex", 0, 600000, sagent_codex_oauth_roles,
+       (int)(sizeof(sagent_codex_oauth_roles) / sizeof(sagent_codex_oauth_roles[0])));
    if (chatgpt_account_id[0])
       snprintf(ag->extra_headers, sizeof(ag->extra_headers),
                "originator: codex_cli_rs\nChatGPT-Account-ID: %s", chatgpt_account_id);

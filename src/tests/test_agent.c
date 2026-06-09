@@ -632,6 +632,24 @@ static void test_codex_oauth_auth_resolution(void)
    char auth[MAX_API_KEY_LEN + 32];
    assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
    assert(strcmp(auth, "Authorization: Bearer codex-test-token") == 0);
+
+   assert(unlink(path) == 0);
+   const char *home = getenv("HOME");
+   assert(home != NULL && home[0]);
+
+   char codex_dir[MAX_PATH_LEN];
+   snprintf(codex_dir, sizeof(codex_dir), "%s/.codex", home);
+   assert(platform_mkdir_p(codex_dir, 0700) == 0 || access(codex_dir, F_OK) == 0);
+
+   char codex_path[MAX_PATH_LEN];
+   snprintf(codex_path, sizeof(codex_path), "%s/auth.json", codex_dir);
+   f = fopen(codex_path, "w");
+   assert(f != NULL);
+   fputs("{\"tokens\":{\"access_token\":\"codex-cli-token\"}}\n", f);
+   fclose(f);
+
+   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(strcmp(auth, "Authorization: Bearer codex-cli-token") == 0);
 }
 
 static void test_responses_parser_keeps_all_output_text_parts(void)

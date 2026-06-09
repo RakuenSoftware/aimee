@@ -484,10 +484,10 @@ static int arg_list_contains_help_flag(int argc, char **argv)
 
 static int delegate_arg_is_subcommand(const char *arg)
 {
-   return arg &&
-          (strcmp(arg, "plan") == 0 || strcmp(arg, "launch") == 0 || strcmp(arg, "status") == 0 ||
-           strcmp(arg, "log") == 0 || strcmp(arg, "history") == 0 ||
-           strcmp(arg, "aggregate") == 0 || strcmp(arg, "--list-roles") == 0);
+   return arg && (strcmp(arg, "plan") == 0 || strcmp(arg, "launch") == 0 ||
+                  strcmp(arg, "status") == 0 || strcmp(arg, "log") == 0 ||
+                  strcmp(arg, "history") == 0 || strcmp(arg, "aggregate") == 0 ||
+                  strcmp(arg, "roundtable") == 0 || strcmp(arg, "--list-roles") == 0);
 }
 
 static int arg_list_contains(int argc, char **argv, const char *flag)
@@ -1803,12 +1803,13 @@ int main(int argc, char **argv)
    if (strcmp(cmd, "hooks") == 0)
       return handle_hooks(sub_argc, sub_argv, json_output);
 
-   /* Code audit (P4): `aimee code audit [dir] [--json]` — local file-health scan. */
+   /* Code audit (P4): local file-health scan plus kb graph checks when available. */
    if (strcmp(cmd, "code") == 0)
    {
       if (sub_argc >= 1 && strcmp(sub_argv[0], "audit") == 0)
          return handle_code_audit(sub_argc - 1, sub_argv + 1, json_output);
-      fprintf(stderr, "usage: aimee code audit [dir] [--json]\n");
+      fprintf(stderr,
+              "usage: aimee code audit [dir] [--json] [--project NAME] [--graph] [--fix]\n");
       return 2;
    }
 

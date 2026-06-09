@@ -372,6 +372,18 @@ binary on `PATH`.
       }
     },
     {
+      "name": "codex",
+      "provider": "chatgpt",
+      "endpoint": "https://chatgpt.com/backend-api/codex",
+      "model": "gpt-5.4",
+      "roles": ["code", "review", "explain", "refactor", "draft", "execute", "summarize", "format", "diagnose", "validate"],
+      "tier": 0,
+      "enabled": true,
+      "auth": {
+        "type": "codex-oauth"
+      }
+    },
+    {
       "name": "claude",
       "provider": "claude",
       "backend": "tmux-cli",

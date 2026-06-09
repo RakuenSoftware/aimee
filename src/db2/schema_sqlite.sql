@@ -296,7 +296,8 @@ CREATE INDEX IF NOT EXISTS idx_ee_source_relation ON entity_edges(source, relati
 CREATE INDEX IF NOT EXISTS idx_ee_target_relation ON entity_edges(target, relation);
 CREATE INDEX IF NOT EXISTS idx_ee_origin_source ON entity_edges(edge_origin, source);
 CREATE INDEX IF NOT EXISTS idx_ee_projection_generation ON entity_edges(projection_generation_id, source, relation);
-CREATE TABLE IF NOT EXISTS code_embeddings (  point_id INTEGER PRIMARY KEY,  embedding TEXT NOT NULL DEFAULT '[]',  project TEXT NOT NULL DEFAULT '',  node_key TEXT NOT NULL DEFAULT '',  file_path TEXT NOT NULL DEFAULT '',  symbol TEXT NOT NULL DEFAULT '',  record_type TEXT NOT NULL DEFAULT 'code_unit',  content_hash TEXT NOT NULL DEFAULT '',  source_hash TEXT NOT NULL DEFAULT '',  payload_json TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS code_embeddings (  point_id INTEGER PRIMARY KEY,  embedding TEXT NOT NULL DEFAULT '[]',  project TEXT NOT NULL DEFAULT '',  node_key TEXT NOT NULL DEFAULT '',  file_path TEXT NOT NULL DEFAULT '',  symbol TEXT NOT NULL DEFAULT '',  record_type TEXT NOT NULL DEFAULT 'code_unit',  content_hash TEXT NOT NULL DEFAULT '',  body_hash TEXT NOT NULL DEFAULT '',  source_hash TEXT NOT NULL DEFAULT '',  payload_json TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE INDEX IF NOT EXISTS idx_code_embeddings_project ON code_embeddings(project);
 CREATE INDEX IF NOT EXISTS idx_code_embeddings_node ON code_embeddings(project, node_key);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_code_embeddings_hash ON code_embeddings(project, node_key, content_hash);
+CREATE INDEX IF NOT EXISTS idx_code_embeddings_body_hash ON code_embeddings(project, body_hash);

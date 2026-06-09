@@ -310,6 +310,7 @@ typedef struct
    char op[64];
    char *line;         /* dispatch body with method injected; owned by worker */
    uint32_t conn_caps; /* caps captured at enqueue time */
+   long created;
 } op_run_job_t;
 
 /* Build the run snapshot object stored for GET /v1/runs/{id}. `result` is an
@@ -335,27 +336,36 @@ static char *op_run_snapshot(const char *run_id, const char *op, const char *sta
    return s;
 }
 
-static void *op_run_worker(void *arg)
+static void op_run_worker_run(void *arg)
 {
    op_run_job_t *j = (op_run_job_t *)arg;
+   compute_pool_set_job(POOL_JOB_DELEGATE, "op=%s run=%s", j->op, j->run_id);
    openai_runs_store_set_status(j->run_id, OPENAI_RUN_IN_PROGRESS);
+   char *started = op_run_snapshot(j->run_id, j->op, "in_progress", j->created, NULL);
+   if (started)
+   {
+      openai_runs_store_update_json(j->run_id, started);
+      free(started);
+   }
 
    char *buf = (char *)malloc(SHTTP_RESP_MAX);
    if (!buf)
    {
-      char *snap = op_run_snapshot(j->run_id, j->op, "failed", (long)time(NULL),
+      char *snap = op_run_snapshot(j->run_id, j->op, "failed", j->created,
                                    "{\"error\":\"out of memory\"}");
       openai_runs_store_finalize(j->run_id, OPENAI_RUN_FAILED, snap ? snap : "{}");
       free(snap);
       free(j->line);
       free(j);
-      return NULL;
+      compute_pool_clear_job();
+      return;
    }
 
    int rc = loopback_rpc(j->line, (int)strlen(j->line), buf, SHTTP_RESP_MAX, j->conn_caps);
    /* A dispatch returning a JSON object with "error" (or a non-2xx rc) is a
     * failed run; anything else is the completed result payload. */
    int ok = (rc >= 200 && rc < 300);
+   openai_run_status_t terminal_status = OPENAI_RUN_COMPLETED;
    if (ok)
    {
       cJSON *parsed = cJSON_Parse(buf);
@@ -363,43 +373,61 @@ static void *op_run_worker(void *arg)
       {
          if (cJSON_GetObjectItemCaseSensitive(parsed, "error"))
             ok = 0;
+         cJSON *cancelled = cJSON_GetObjectItemCaseSensitive(parsed, "cancelled");
+         if (cJSON_IsTrue(cancelled))
+            terminal_status = OPENAI_RUN_CANCELLED;
          cJSON_Delete(parsed);
       }
    }
-   long now = (long)time(NULL);
-   char *snap = op_run_snapshot(j->run_id, j->op, ok ? "completed" : "failed", now, buf);
-   openai_runs_store_finalize(j->run_id, ok ? OPENAI_RUN_COMPLETED : OPENAI_RUN_FAILED,
+   const char *status_str =
+       terminal_status == OPENAI_RUN_CANCELLED ? "cancelled" : (ok ? "completed" : "failed");
+   char *snap = op_run_snapshot(j->run_id, j->op, status_str, j->created, buf);
+   openai_runs_store_finalize(j->run_id, ok ? terminal_status : OPENAI_RUN_FAILED,
                               snap ? snap : buf);
    free(snap);
    free(buf);
    free(j->line);
    free(j);
+   compute_pool_clear_job();
+}
+
+static void *op_run_worker_thread(void *arg)
+{
+   op_run_worker_run(arg);
    return NULL;
 }
 
-static int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
+static int submit_op_run_internal(const char *op_method, const char *body_json, uint32_t conn_caps,
+                                  int preflight_caps, char *resp, int cap)
 {
-   if (!rq->op || !rq->op[0])
+   if (!op_method || !op_method[0])
       return err_json(resp, cap, 500, "route has no dispatch method");
-   cJSON *req = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : cJSON_CreateObject();
+   uint32_t required = server_capability_for_method(op_method);
+   if (preflight_caps && required && (conn_caps & required) == 0)
+      return err_json(resp, cap, 403, "forbidden: insufficient capabilities");
+   cJSON *req = (body_json && body_json[0]) ? cJSON_Parse(body_json) : cJSON_CreateObject();
    if (!req || !cJSON_IsObject(req))
    {
       cJSON_Delete(req);
       return err_json(resp, cap, 400, "invalid JSON body");
    }
    cJSON_DeleteItemFromObjectCaseSensitive(req, "method");
-   cJSON_AddStringToObject(req, "method", rq->op);
+   cJSON_AddStringToObject(req, "method", op_method);
+
+   long created = (long)time(NULL);
+   static atomic_ulong g_op_run_seq = 0;
+   char id[64];
+   unsigned long seq = atomic_fetch_add_explicit(&g_op_run_seq, 1, memory_order_relaxed) + 1;
+   snprintf(id, sizeof(id), "oprun_%ld_%lu", created, seq);
+
+   cJSON_DeleteItemFromObjectCaseSensitive(req, "__run_id");
+   cJSON_AddStringToObject(req, "__run_id", id);
    char *line = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
    if (!line)
       return err_json(resp, cap, 500, "out of memory");
 
-   long created = (long)time(NULL);
-   static unsigned long g_op_run_seq = 0; /* listener thread only; single-writer */
-   char id[64];
-   snprintf(id, sizeof(id), "oprun_%ld_%lu", created, ++g_op_run_seq);
-
-   char *queued = op_run_snapshot(id, rq->op, "queued", created, NULL);
+   char *queued = op_run_snapshot(id, op_method, "queued", created, NULL);
    if (!queued || !openai_runs_store_create(id, queued))
    {
       free(queued);
@@ -415,24 +443,57 @@ static int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
       return err_json(resp, cap, 500, "out of memory");
    }
    snprintf(j->run_id, sizeof(j->run_id), "%s", id);
-   snprintf(j->op, sizeof(j->op), "%s", rq->op);
+   snprintf(j->op, sizeof(j->op), "%s", op_method);
    j->line = line; /* ownership moves to the worker */
-   j->conn_caps = g_rpc_conn_caps;
+   j->conn_caps = conn_caps;
+   j->created = created;
 
-   pthread_t th;
-   if (pthread_create(&th, NULL, op_run_worker, j) != 0)
+   server_ctx_t *ctx = server_active_ctx();
+   if (ctx)
    {
-      openai_runs_store_finalize(id, OPENAI_RUN_FAILED, queued);
-      free(j->line);
-      free(j);
-      free(queued);
-      return err_json(resp, cap, 500, "could not start run");
+      if (compute_pool_submit(&ctx->pool, op_run_worker_run, j) != 0)
+      {
+         char *failed =
+             op_run_snapshot(id, op_method, "failed", created, "{\"error\":\"compute queue full\"}");
+         openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
+         free(failed);
+         free(j->line);
+         free(j);
+         free(queued);
+         return err_json(resp, cap, 503, "compute queue full");
+      }
    }
-   pthread_detach(th);
+   else
+   {
+      pthread_t th;
+      if (pthread_create(&th, NULL, op_run_worker_thread, j) != 0)
+      {
+         char *failed =
+             op_run_snapshot(id, op_method, "failed", created, "{\"error\":\"could not start run\"}");
+         openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
+         free(failed);
+         free(j->line);
+         free(j);
+         free(queued);
+         return err_json(resp, cap, 500, "could not start run");
+      }
+      pthread_detach(th);
+   }
 
    int n = snprintf(resp, (size_t)cap, "%s", queued);
    free(queued);
    return (n > 0 && n < cap) ? 200 : 200;
+}
+
+int server_http_submit_op_run(const char *op_method, const char *body_json, uint32_t conn_caps,
+                              char *resp, int cap)
+{
+   return submit_op_run_internal(op_method, body_json, conn_caps, 1, resp, cap);
+}
+
+static int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
+{
+   return submit_op_run_internal(rq->op, rq->body, g_rpc_conn_caps, 0, resp, cap);
 }
 
 /* ── workspace resource plane (workspace-resource-plane §1) ───────────────────
@@ -852,8 +913,10 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/insights/overview", NULL, RM_EXACT, "insights.overview", 0, rh_dispatch_op},
     {"GET", "/v1/optimize/export", NULL, RM_EXACT, "optimize.export", 0, rh_dispatch_op},
     {"POST", "/v1/optimize/promote", NULL, RM_EXACT, "optimize.promote", 0, rh_dispatch_op},
-    {"POST", "/v1/optimize/replay-record", NULL, RM_EXACT, "optimize.replay_record", 0, rh_dispatch_op},
-    {"GET", "/v1/calibration/readiness", NULL, RM_EXACT, "calibration.readiness", 0, rh_dispatch_op},
+    {"POST", "/v1/optimize/replay-record", NULL, RM_EXACT, "optimize.replay_record", 0,
+     rh_dispatch_op},
+    {"GET", "/v1/calibration/readiness", NULL, RM_EXACT, "calibration.readiness", 0,
+     rh_dispatch_op},
     {"GET", "/v1/demotion/check", NULL, RM_EXACT, "demotion.check", 0, rh_dispatch_op},
     {"GET", "/v1/identity/show", NULL, RM_EXACT, "identity.show", 0, rh_dispatch_op},
     {"POST", "/v1/identity/diff", NULL, RM_EXACT, "identity.diff", 0, rh_dispatch_op},
@@ -936,6 +999,8 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/rules/generate", NULL, RM_EXACT, "rules.generate", 0, rh_dispatch_op_async},
     {"POST", "/v1/eval/run", NULL, RM_EXACT, "eval.run", 0, rh_dispatch_op_async},
     {"POST", "/v1/delegate/aggregate", NULL, RM_EXACT, "delegate.aggregate", 0,
+     rh_dispatch_op_async},
+    {"POST", "/v1/delegate/roundtable", NULL, RM_EXACT, "delegate.roundtable", 0,
      rh_dispatch_op_async},
 
     /* Compute / inference — consume model budget; map to the chat twin's cap. */

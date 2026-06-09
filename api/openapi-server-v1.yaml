@@ -593,7 +593,7 @@ paths:
     post:
       summary: Graph-derived code-health audit (proxied to aimee-kb)
       description: >-
-        Dead exports, import cycles, and content-hash clones derived from the
+        Dead exports, import cycles, and body-hash clones derived from the
         code graph (entity_edges) and code_embeddings.
       requestBody:
         required: false
@@ -1673,6 +1673,37 @@ paths:
               properties:
                 prompt: { type: string }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /delegate/roundtable:
+    post:
+      summary: Multi-round agent roundtable over ensemble.reference_models (async; poll GET /runs/{id})
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt: { type: string }
+                mode: { type: string, enum: [draft, review] }
+                turns: { type: string, enum: [parallel, sequential] }
+                rounds: { type: integer }
+                apply: { type: boolean }
+                brief:
+                  oneOf:
+                    - { type: string }
+                    - type: object
+                      properties:
+                        focus: { type: array, items: { type: string } }
+                        fixes: { type: array, items: { type: string } }
+                        invariants: { type: array, items: { type: string } }
+                        questions: { type: array, items: { type: string } }
+      responses:
+        "200":
+          description: Queued op run; poll GET /runs/{id}. Final result includes artifact, items, answered_questions, and coverage_gaps.
+          content:
+            application/json:
+              schema: { type: object }
   /memory/search:
     post:
       summary: Keyword-search memories

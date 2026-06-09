@@ -42,6 +42,7 @@ void config_parse_auxiliary_section(config_t *cfg, cJSON *root);
 void config_parse_model_meta_section(config_t *cfg, cJSON *root);
 void config_parse_db2_section(config_t *cfg, cJSON *root);
 void config_parse_ensemble_section(config_t *cfg, cJSON *root);
+void config_parse_roundtable_section(config_t *cfg, cJSON *root);
 
 void config_parse_kb_section2(config_t *cfg, cJSON *root);
 

@@ -347,6 +347,7 @@ int handle_identity_diff(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_tool_execute(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_launch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_jobs_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

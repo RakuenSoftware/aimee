@@ -6,6 +6,11 @@
 #include <string.h>
 #include "cli_code_audit.h"
 
+const char *aimee_home(void)
+{
+   return "/tmp/aimee-test";
+}
+
 static void test_is_code_file(void)
 {
    assert(audit_is_code_file("src/foo.c"));
@@ -53,16 +58,35 @@ static void test_count_todos(void)
    printf("count_todos OK\n");
 }
 
+static void test_db_in_routes(void)
+{
+   assert(audit_count_db_in_routes("src/routes/user.c", "SELECT * FROM users") == 1);
+   assert(audit_count_db_in_routes("src/api/user.py", "db2_code_index_project_count()") == 1);
+   assert(audit_count_db_in_routes("api/user.py", "aimee_pg_prepare(conn, sql, err, n)") == 1);
+   assert(audit_count_db_in_routes("src/lib/user.c", "SELECT * FROM users") == 0);
+   assert(audit_count_db_in_routes("src/routes/user.c", NULL) == 0);
+   printf("db_in_routes OK\n");
+}
+
+static void test_unhandled_http(void)
+{
+   assert(audit_count_unhandled_http("const r = fetch('/x');\n") == 1);
+   assert(audit_count_unhandled_http("try { await fetch('/x'); } catch (e) {}\n") == 0);
+   assert(audit_count_unhandled_http("if (cli_http_request(...)) return -1;\n") == 0);
+   assert(audit_count_unhandled_http(NULL) == 0);
+   printf("unhandled_http OK\n");
+}
+
 static void test_debt_score(void)
 {
-   assert(audit_debt_score(0, 0, 0) == 100);   /* no code -> clean */
-   assert(audit_debt_score(100, 0, 0) == 100); /* all tested, no todos */
-   /* all untested -> 60-pt penalty -> 40 */
-   assert(audit_debt_score(100, 100, 0) == 40);
-   /* half untested -> 30-pt penalty -> 70 */
-   assert(audit_debt_score(100, 50, 0) == 70);
+   assert(audit_debt_score(0, 0, 0, 0, 0) == 100);   /* no code -> clean */
+   assert(audit_debt_score(100, 0, 0, 0, 0) == 100); /* all tested, no todos */
+   /* all untested -> 55-pt penalty -> 45 */
+   assert(audit_debt_score(100, 100, 0, 0, 0) == 45);
+   /* half untested -> 28-pt rounded penalty -> 73 */
+   assert(audit_debt_score(100, 50, 0, 0, 0) == 73);
    /* todos drag the score down but stay clamped >= 0 */
-   int s = audit_debt_score(10, 10, 1000);
+   int s = audit_debt_score(10, 10, 1000, 20, 20);
    assert(s >= 0 && s <= 100);
    printf("debt_score OK\n");
 }
@@ -74,6 +98,8 @@ int main(void)
    test_is_test_file();
    test_stem();
    test_count_todos();
+   test_db_in_routes();
+   test_unhandled_http();
    test_debt_score();
    printf("all tests passed\n");
    return 0;

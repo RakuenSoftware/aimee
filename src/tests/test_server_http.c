@@ -44,8 +44,9 @@ static int stub_models_provider(char ids[][SERVER_HTTP_MODEL_ID_MAX], int max)
 /* Last dispatch captured by the stub, so route→method tests can assert which
  * NDJSON method a first-class /v1 route actually dispatched, and that the body
  * survived the bridge. */
-static char g_disp_method[96];
-static char g_disp_body[512];
+static _Thread_local char g_disp_method[96];
+static _Thread_local char g_disp_body[24576];
+static char g_agg_body[24576];
 
 int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, size_t msg_len)
 {
@@ -53,6 +54,8 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
    /* Capture the dispatched method + body (msg is the NUL-terminated line the
     * loopback bridge built). */
    snprintf(g_disp_body, sizeof(g_disp_body), "%.*s", (int)msg_len, msg ? msg : "");
+   if (strstr(g_disp_body, "\"method\":\"delegate.aggregate\""))
+      snprintf(g_agg_body, sizeof(g_agg_body), "%s", g_disp_body);
    g_disp_method[0] = '\0';
    const char *p = strstr(g_disp_body, "\"method\":\"");
    if (p)
@@ -515,27 +518,37 @@ int main(void)
    /* --- server_http_authorize: UDS vs TCP + bearer + session-key rule --- */
    {
       /* UDS is always authorized regardless of token, when no session key. */
-      assert(server_http_authorize(0, "", NULL, 0) == 0);
-      assert(server_http_authorize(0, "secret", NULL, 0) == 0);
-      assert(server_http_authorize(0, "secret", "Bearer wrong", 0) == 0);
+      assert(server_http_authorize(0, "", NULL, NULL, 0) == 0);
+      assert(server_http_authorize(0, "secret", NULL, NULL, 0) == 0);
+      assert(server_http_authorize(0, "secret", "Bearer wrong", NULL, 0) == 0);
 
       /* TCP with no bearer configured => 503 (TCP shouldn't be serving). */
-      assert(server_http_authorize(1, "", "Bearer x", 0) == 503);
-      assert(server_http_authorize(1, NULL, NULL, 0) == 503);
+      assert(server_http_authorize(1, "", "Bearer x", NULL, 0) == 503);
+      assert(server_http_authorize(1, NULL, NULL, NULL, 0) == 503);
 
-      /* TCP with a bearer configured: exact match passes, else 401. */
-      assert(server_http_authorize(1, "secret", "Bearer secret", 0) == 0);
-      assert(server_http_authorize(1, "secret", "Bearer nope", 0) == 401);
-      assert(server_http_authorize(1, "secret", NULL, 0) == 401);
-      assert(server_http_authorize(1, "secret", "secret", 0) == 401);  /* missing "Bearer " */
-      assert(server_http_authorize(1, "secret", "Bearer ", 0) == 401); /* empty token */
+      /* TCP with a bearer configured: Authorization or x-api-key exact match passes. */
+      assert(server_http_authorize(1, "secret", "Bearer secret", NULL, 0) == 0);
+      assert(server_http_authorize(1, "secret", NULL, "secret", 0) == 0);
+      assert(server_http_authorize(1, "secret", "Bearer nope", "secret", 0) == 0);
+      assert(server_http_authorize(1, "secret", NULL, "nope", 0) == 401);
+      assert(server_http_authorize(1, "secret", NULL, NULL, 0) == 401);
+      assert(server_http_authorize(1, "secret", "secret", NULL, 0) == 401);
+      assert(server_http_authorize(1, "secret", "Bearer ", NULL, 0) == 401);
 
       /* Session-scoping key without a bearer configured => 503 on any transport. */
-      assert(server_http_authorize(0, "", NULL, 1) == 503);
-      assert(server_http_authorize(0, NULL, NULL, 1) == 503);
-      assert(server_http_authorize(1, "", NULL, 1) == 503);
+      assert(server_http_authorize(0, "", NULL, NULL, 1) == 503);
+      assert(server_http_authorize(0, NULL, NULL, NULL, 1) == 503);
+      assert(server_http_authorize(1, "", NULL, NULL, 1) == 503);
       /* With a bearer configured, the session key alone doesn't block UDS. */
-      assert(server_http_authorize(0, "secret", NULL, 1) == 0);
+      assert(server_http_authorize(0, "secret", NULL, NULL, 1) == 0);
+   }
+
+   /* --- typed SSE framing: embedded newlines become repeated data: lines --- */
+   {
+      char frame[256];
+      int n = server_http_sse_event_format("delta", "{\"a\":1}\n{\"b\":2}", frame, sizeof(frame));
+      assert(n == (int)strlen("event: delta\ndata: {\"a\":1}\ndata: {\"b\":2}\n\n"));
+      assert(strcmp(frame, "event: delta\ndata: {\"a\":1}\ndata: {\"b\":2}\n\n") == 0);
    }
 
    /* --- per-route capability matrix (pure helpers) --- */
@@ -656,9 +669,10 @@ int main(void)
       /* Privileged exec/control routes (delegate/cron/agent/provider/worktree/...)
        * are local-only over TCP unless remote_writes==full; data-plane writes need
        * only remote_writes>=data. Fail-closed at the default. */
-      const char *exec_paths[] = {
-          "/v1/delegate/launch", "/v1/delegate/backend_exec", "/v1/cron/add",   "/v1/agent/add",
-          "/v1/worktree/gc",     "/v1/model/refresh",         "/v1/api/disable"};
+      const char *exec_paths[] = {"/v1/delegate/launch",     "/v1/delegate/backend_exec",
+                                  "/v1/delegate/roundtable", "/v1/cron/add",
+                                  "/v1/agent/add",           "/v1/worktree/gc",
+                                  "/v1/model/refresh",       "/v1/api/disable"};
       for (size_t i = 0; i < sizeof(exec_paths) / sizeof(exec_paths[0]); i++)
       {
          assert(server_http_route_allowed(1, "plain", "POST", exec_paths[i],
@@ -670,6 +684,9 @@ int main(void)
          assert(server_http_route_allowed(0, NULL, "POST", exec_paths[i],
                                           SERVER_REMOTE_WRITES_OFF) == 1); /* UDS always */
       }
+      assert(server_http_route_caps("POST", "/v1/delegate/roundtable") == CAP_DELEGATE);
+      assert(server_http_route_allowed(1, "scope:project:alpha:s3cr3t", "POST",
+                                       "/v1/delegate/roundtable", SERVER_REMOTE_WRITES_FULL) == 0);
       /* The detached-workspace plane is exempt: reachable over TCP at remote_writes=off
        * (still cap-gated -> a scoped query-only bearer is still denied). */
       assert(server_http_route_allowed(1, "plain", "POST", "/v1/runner/poll", 0) == 1);
@@ -875,6 +892,52 @@ int main(void)
       /* A real route with no handler seam wired in this test returns 503, not 404
        * — proving the row matched and dispatched. */
       assert(server_http_route("GET", "/v1/rules", NULL, 0, rb, sizeof(rb)) == 503);
+      openai_runs_store_reset();
+      const char *roundtable_body = "{\"prompt\":\"draft\"}";
+      assert(server_http_route("POST", "/v1/delegate/roundtable", roundtable_body,
+                               (int)strlen(roundtable_body), rb, sizeof(rb)) == 200);
+      assert(strstr(rb, "\"object\":\"op.run\""));
+      assert(strstr(rb, "\"method\":\"delegate.roundtable\""));
+      assert(strstr(rb, "\"status\":\"queued\""));
+      for (int i = 0; i < 100 && strcmp(g_disp_method, "delegate.roundtable") != 0; i++)
+         usleep(1000);
+      char *large_body = malloc(9200);
+      assert(large_body);
+      strcpy(large_body, "{\"prompt\":\"");
+      size_t prefix_len = strlen(large_body);
+      memset(large_body + prefix_len, 'x', 9000);
+      strcpy(large_body + prefix_len + 9000, "\"}");
+      assert(server_http_route("POST", "/v1/delegate/aggregate", large_body,
+                               (int)strlen(large_body), rb, sizeof(rb)) == 200);
+      assert(strstr(rb, "\"object\":\"op.run\""));
+      assert(strstr(rb, "\"method\":\"delegate.aggregate\""));
+      char run_id[96] = "";
+      char *idp = strstr(rb, "\"id\":\"");
+      assert(idp);
+      idp += strlen("\"id\":\"");
+      char *ide = strchr(idp, '"');
+      assert(ide && (size_t)(ide - idp) < sizeof(run_id));
+      snprintf(run_id, sizeof(run_id), "%.*s", (int)(ide - idp), idp);
+      openai_run_status_t st = OPENAI_RUN_QUEUED;
+      for (int i = 0; i < 100; i++)
+      {
+         assert(openai_runs_store_status(run_id, &st));
+         if (openai_run_status_terminal(st))
+            break;
+         usleep(10000);
+      }
+      assert(st == OPENAI_RUN_COMPLETED);
+      assert(openai_runs_store_get(run_id, rb, sizeof(rb)));
+      assert(strstr(rb, "\"status\":\"completed\""));
+      assert(strstr(g_agg_body, "\"method\":\"delegate.aggregate\""));
+      assert(strstr(g_agg_body, "\"prompt\":\"xxx"));
+      free(large_body);
+      g_disp_method[0] = '\0';
+      g_disp_body[0] = '\0';
+      openai_runs_store_reset();
+      assert(server_http_submit_op_run("delegate.roundtable", "{\"prompt\":\"draft\"}",
+                                       CAP_TOOL_EXECUTE, rb, sizeof(rb)) == 403);
+      assert(strstr(rb, "insufficient capabilities"));
       /* The /v1/rpc bridge was retired: the path is now unrouted (404). */
       assert(server_http_route("POST", "/v1/rpc", "{}", 2, rb, sizeof(rb)) == 404);
       /* A deeper run path (two segments, no /stop|/events) does not match. */

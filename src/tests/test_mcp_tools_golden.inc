@@ -2,7 +2,7 @@
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 86
+#define MCP_TOOLS_GOLDEN_COUNT 87
 #define MCP_TOOLS_GOLDEN \
    "ask_user {choices,question} req:question\n" \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n" \
@@ -21,6 +21,7 @@
    "diagnose_observe {content,diagnosis_id,source} req:content,diagnosis_id\n" \
    "diagnose_start {symptom} req:symptom\n" \
    "diagnose_status {diagnosis_id} req:diagnosis_id\n" \
+   "ensemble_review {brief,diff,rounds,turns} req:diff\n" \
    "find_symbol {identifier} req:identifier\n" \
    "get_background_output {id,tail_lines} req:id\n" \
    "get_context_block {block_type,limit,query} req:query\n" \
