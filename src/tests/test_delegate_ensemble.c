@@ -62,6 +62,8 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
          out[i].response = strdup(
              "{\"items\":[{\"severity\":\"blocking\",\"category\":\"security\","
              "\"summary\":\"missing authorization check before write\"}],\"overall\":\"block\"}");
+      else if (g_parallel_mode == 6 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
+         out[i].response = strdup("{\"items\":[],\"overall\":\"ok\"}");
       else
       {
          snprintf(buf, sizeof(buf), "mock response from %s",
@@ -365,7 +367,7 @@ static void test_roundtable_degrades_on_min_success(void)
    printf("  test_roundtable_degrades_on_min_success: ok\n");
 }
 
-static void test_roundtable_preflight_cap_stops_before_round(void)
+static void test_roundtable_preflight_cap_warns_observed_cap_stops(void)
 {
    reset_modes();
    config_t cfg = make_cfg(1, 2, 0.0001);
@@ -379,9 +381,9 @@ static void test_roundtable_preflight_cap_stops_before_round(void)
    int rc = delegate_roundtable_run(&acfg, &cfg, "draft a capped proposal", &opts, &result);
    assert(rc == 0);
    assert(result.cost_capped == 1);
-   assert(g_parallel_calls == 0);
+   assert(g_parallel_calls == 1);
    delegate_roundtable_result_free(&result);
-   printf("  test_roundtable_preflight_cap_stops_before_round: ok\n");
+   printf("  test_roundtable_preflight_cap_warns_observed_cap_stops: ok\n");
 }
 
 static void test_roundtable_keep_best_not_last(void)
@@ -404,6 +406,29 @@ static void test_roundtable_keep_best_not_last(void)
    assert(result.best_round == 1);
    delegate_roundtable_result_free(&result);
    printf("  test_roundtable_keep_best_not_last: ok\n");
+}
+
+static void test_roundtable_post_fanout_cap_keeps_prior_best(void)
+{
+   reset_modes();
+   g_aggregator_mode = 1;
+   g_reason_mode = 1;
+   config_t cfg = make_cfg(1, 2, 0.015);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 2;
+   opts.converge_threshold = 0;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft then hit cap", &opts, &result);
+   assert(rc == 0);
+   assert(result.cost_capped == 1);
+   assert(strcmp(result.artifact, "synthesized answer 1") == 0);
+   assert(result.best_round == 1);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_post_fanout_cap_keeps_prior_best: ok\n");
 }
 
 static void test_roundtable_summarize_forward_sets_truncated(void)
@@ -469,6 +494,28 @@ static void test_roundtable_review_summary_fallback_key_converges(void)
    assert(result.rounds_run == 2);
    delegate_roundtable_result_free(&result);
    printf("  test_roundtable_review_summary_fallback_key_converges: ok\n");
+}
+
+static void test_roundtable_review_clean_round_converges(void)
+{
+   reset_modes();
+   g_parallel_mode = 6;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 3;
+   opts.converge_threshold = 0;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review clean document", &opts, &result);
+   assert(rc == 0);
+   assert(result.converged == 1);
+   assert(result.rounds_run == 1);
+   assert(g_parallel_calls == 1);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_review_clean_round_converges: ok\n");
 }
 
 static void test_roundtable_malformed_review_json_counts_failed(void)
@@ -568,11 +615,13 @@ int main(void)
    test_roundtable_parallel_basic();
    test_roundtable_sequential_uses_named_agents();
    test_roundtable_degrades_on_min_success();
-   test_roundtable_preflight_cap_stops_before_round();
+   test_roundtable_preflight_cap_warns_observed_cap_stops();
    test_roundtable_keep_best_not_last();
+   test_roundtable_post_fanout_cap_keeps_prior_best();
    test_roundtable_summarize_forward_sets_truncated();
    test_roundtable_review_saturation_converges();
    test_roundtable_review_summary_fallback_key_converges();
+   test_roundtable_review_clean_round_converges();
    test_roundtable_malformed_review_json_counts_failed();
    test_roundtable_malformed_review_json_repair_counts_successful();
    test_roundtable_cancellation_stops();

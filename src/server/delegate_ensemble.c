@@ -155,22 +155,41 @@ static int tokenize_unique(const char *s, char tokens[][64], int max)
    return count;
 }
 
+static int normalized_edit_change_0_100(const char *prev, const char *next);
+
 static int token_jaccard_change_0_100(const char *prev, const char *next)
 {
-   char a[512][64];
-   char b[512][64];
+   char (*a)[64] = calloc(512, sizeof(*a));
+   char (*b)[64] = calloc(512, sizeof(*b));
+   if (!a || !b)
+   {
+      free(a);
+      free(b);
+      return normalized_edit_change_0_100(prev, next);
+   }
    int na = tokenize_unique(prev, a, 512);
    int nb = tokenize_unique(next, b, 512);
    if (na == 0 && nb == 0)
+   {
+      free(a);
+      free(b);
       return 0;
+   }
    int inter = 0;
    for (int i = 0; i < na; i++)
       if (token_seen(b, nb, a[i]))
          inter++;
    int uni = na + nb - inter;
    if (uni <= 0)
+   {
+      free(a);
+      free(b);
       return 0;
-   return 100 - (inter * 100 / uni);
+   }
+   int change = 100 - (inter * 100 / uni);
+   free(a);
+   free(b);
+   return change;
 }
 
 static int normalized_edit_change_0_100(const char *prev, const char *next)
@@ -304,13 +323,14 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
 static char *build_round_prompt(const char *task, const char *artifact, const char *peer_notes,
                                 roundtable_mode_t mode, int round, int *truncated)
 {
-   const size_t budget = 24000;
+   (void)truncated;
    const char *role_hint = mode == ROUNDTABLE_REVIEW ? "review and critique" : "draft and revise";
    const char *mode_task =
        mode == ROUNDTABLE_REVIEW
-           ? "Return only JSON: {\"issues\":[{\"severity\":\"blocking|nonblocking\","
-             "\"category\":\"...\",\"location\":\"file:line or section\","
-             "\"summary\":\"...\",\"recommendation\":\"...\"}],\"overall\":\"...\"}. "
+           ? "Return only JSON: {\"items\":[{\"severity\":\"blocking|suggestion|nit\","
+             "\"category\":\"correctness|security|performance|maintainability|style\","
+             "\"location\":\"file:line or artifact section\",\"summary\":\"one-sentence issue\","
+             "\"recommendation\":\"...\"}],\"overall\":\"...\"}. "
              "Do not invent stable keys; the engine computes identity keys."
            : "Return the next complete draft. Incorporate useful peer input and do not describe "
              "the process.";
@@ -330,11 +350,6 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
             role_hint, task ? task : "", artifact[0] ? artifact : "(none yet)",
             peer_notes[0] ? peer_notes : "(none yet)", round, mode_task);
 
-   if (strlen(prompt) <= budget)
-      return prompt;
-
-   if (truncated)
-      *truncated = 1;
    return prompt;
 }
 
@@ -594,7 +609,9 @@ static int repair_review_json(agent_config_t *acfg, const config_t *cfg, int par
 
 static int review_saturated(char prev[][128], int prev_count, char cur[][128], int cur_count)
 {
-   if (prev_count <= 0 || cur_count <= 0)
+   if (cur_count <= 0)
+      return 1;
+   if (prev_count <= 0)
       return 0;
    for (int i = 0; i < cur_count; i++)
       if (!key_seen128(prev, prev_count, cur[i]))
@@ -839,10 +856,10 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       {
          double preflight = estimated_stage_cost(ref_count + 2, 768);
          if (out->cost_usd + preflight > cfg->ensemble_max_cost_usd)
-         {
-            out->cost_capped = 1;
-            break;
-         }
+            aimee_log(LOG_WARN, "delegate_roundtable",
+                      "round cost estimate $%.4f would exceed cap $%.4f; continuing until "
+                      "observed cost is available",
+                      out->cost_usd + preflight, cfg->ensemble_max_cost_usd);
       }
       if (strlen(artifact) + strlen(peer_notes) + strlen(task) > 22000)
       {
@@ -936,7 +953,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       {
          out->cost_capped = 1;
          int best = best_candidate(results, ref_count);
-         if (best >= 0 && results[best].response)
+         if (best_score < 0 && best >= 0 && results[best].response)
          {
             free(best_artifact);
             best_artifact = xstrdup0(results[best].response);
@@ -1043,13 +1060,15 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       if (cfg->ensemble_max_cost_usd > 0.0 && out->cost_usd > cfg->ensemble_max_cost_usd)
       {
          out->cost_capped = 1;
+         free(prev_artifact_for_judge);
          break;
       }
-      if (local.mode == ROUNDTABLE_REVIEW && round > 1 &&
+      if (local.mode == ROUNDTABLE_REVIEW &&
           review_saturated(prev_review_keys, prev_review_key_count, cur_review_keys,
                            cur_review_key_count))
       {
          out->converged = 1;
+         free(prev_artifact_for_judge);
          break;
       }
       if (local.mode == ROUNDTABLE_REVIEW)
@@ -1058,12 +1077,14 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          for (int i = 0; i < cur_review_key_count; i++)
             snprintf(prev_review_keys[i], sizeof(prev_review_keys[i]), "%s", cur_review_keys[i]);
       }
-      if (round > 1 && ratio <= local.converge_threshold)
+      if (local.mode == ROUNDTABLE_DRAFT && round > 1 && ratio <= local.converge_threshold)
       {
          out->converged = 1;
+         free(prev_artifact_for_judge);
          break;
       }
-      if (round > 1 && abs(ratio - local.converge_threshold) <= 5 &&
+      if (local.mode == ROUNDTABLE_DRAFT && round > 1 &&
+          abs(ratio - local.converge_threshold) <= 5 &&
           !(local.cancel_requested && local.cancel_requested(local.cancel_ctx)) &&
           run_convergence_tiebreak(acfg, task, prev_artifact_for_judge, artifact, &out->cost_usd))
       {

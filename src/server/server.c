@@ -1133,6 +1133,9 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     /* Compute (thread pool) */
     {"tool.execute", handle_tool_execute},
     {"delegate", handle_delegate},
+    /* Public /v1 delegate aggregate/roundtable routes enqueue through
+     * rh_dispatch_op_async. Direct raw dispatch remains synchronous for
+     * compatibility with the dispatch-method surface. */
     {"delegate.aggregate", handle_delegate_aggregate},
     {"delegate.roundtable", handle_delegate_roundtable},
     {"delegate.launch", handle_delegate_launch},
