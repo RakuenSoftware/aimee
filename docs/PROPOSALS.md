@@ -14,7 +14,7 @@ directory listing:
 
 - [`proposals/accepted/`](proposals/accepted/): locked but not yet
   implemented
-- [`proposals/done/`](proposals/done/): shipped (311 proposals)
+- [`proposals/done/`](proposals/done/): shipped (312 proposals)
 - [`proposals/rejected/`](proposals/rejected/): considered and
   declined
 - [`proposals/deferred/`](proposals/deferred/): parked for later
@@ -361,7 +361,7 @@ two are defense in depth.
   Phase 0/1 shipped, sidecar mechanism, shadow dry_run mode, DB1 `guardrail_events` table, score-band policy mapping, `aimee guardrails review` CLI, and `scripts/guardrails-semantic.py` reference sidecar. Phases 2+ require dogfood.
 ## Done
 
-The [`proposals/done/`](proposals/done/) directory holds 310 shipped
+The [`proposals/done/`](proposals/done/) directory holds 311 shipped
 proposals. Recent highlights by theme:
 
 - **Architecture / platform contracts.** Architecture Charter (umbrella
@@ -385,7 +385,10 @@ proposals. Recent highlights by theme:
   resolution), two-lane retrieval with summary and atomic-fact lanes,
   graph PageRank (context pruning + eval + LongMemEval
   lift report), information-theoretic salience, memory surprise
-  scoring.
+  scoring, recall economy progressive disclosure (bounded ingress
+  envelopes, memory previews with `memory:<id>` pull-handles,
+  shadow-mode retrieval shortcuts, and additive use-case intent
+  search).
 - **Knowledge base.** KB vector collection and retrieval (originally
   shipped against Qdrant; folded into pgvector inside DB2 in #1575),
   vector benchmark rollout, vector index sync and cutover, vector
