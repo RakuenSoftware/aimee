@@ -59,6 +59,7 @@ int main(void)
       assert(cfg.skills_capability_autostub == 0);
       assert(cfg.skills_eval_gate_enabled == 0);
       assert(fabs(cfg.skills_eval_threshold - 0.01) < 0.0001);
+      assert(cfg.ingress_max_raw_scans == 0);
       assert(cfg.concurrency_preempt_requeue_max == CONFIG_DEFAULT_CONCURRENCY_PREEMPT_REQUEUE_MAX);
    }
 
@@ -80,6 +81,8 @@ int main(void)
       cfg.server_api_max_event_streams = 512;
       snprintf(cfg.server_api_client_transport, sizeof(cfg.server_api_client_transport), "http");
       cfg.server_api_remote_writes = SERVER_REMOTE_WRITES_FULL;
+      cfg.ingress_preinject_assembly_budget = 8192;
+      cfg.ingress_max_raw_scans = 2;
       /* Per-workspace provider: a detached entry round-trips as {path,provider};
        * a shared/default entry stays a bare path string; a mirror entry also
        * round-trips its vcs.remote + head in the object. */
@@ -255,6 +258,8 @@ int main(void)
       /* regression: remote_writes used to be parsed but never written by config_save,
        * so any save silently reset it to off. */
       assert(cfg2.server_api_remote_writes == SERVER_REMOTE_WRITES_FULL);
+      assert(cfg2.ingress_preinject_assembly_budget == 8192);
+      assert(cfg2.ingress_max_raw_scans == 2);
       assert(cfg2.workspace_count == 3);
       assert(strcmp(cfg2.workspaces[0], "/tmp/ws-shared-rt") == 0);
       assert(cfg2.workspace_providers[0][0] == '\0'); /* shared stays default */

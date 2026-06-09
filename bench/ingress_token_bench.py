@@ -17,9 +17,10 @@ harness flips it between the two runs of each prompt via the aimee CLI:
     aimee config set ingress_preinject_enabled 1   # ON
     aimee config set ingress_preinject_enabled 0   # OFF
 
-and restores the original value at the end. (A future ``x-aimee-preinject``
-request header would avoid mutating shared server state; until then this is the
-runtime toggle.)
+and restores the original value at the end. The server also supports the
+``x-aimee-preinject: 0`` request header for per-request disable, but ``codex
+exec`` does not expose arbitrary provider headers, so the benchmark uses the
+config toggle.
 
 Prerequisites
 -------------

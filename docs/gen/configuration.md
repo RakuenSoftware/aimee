@@ -12,7 +12,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (91)
+## CLI-settable keys (92)
 
 | Key | Type |
 |-----|------|
@@ -42,6 +42,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `guardrails_semantic_prompt_threshold` | float |
 | `guardrails_semantic_warn_threshold` | float |
 | `identity_working_profile_injection_enabled` | bool |
+| `ingress_max_raw_scans` | int |
 | `ingress_preinject_assembly_budget` | int |
 | `ingress_preinject_enabled` | bool |
 | `integrity_dry_run` | bool |
