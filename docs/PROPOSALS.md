@@ -14,7 +14,7 @@ directory listing:
 
 - [`proposals/accepted/`](proposals/accepted/): locked but not yet
   implemented
-- [`proposals/done/`](proposals/done/): shipped (310 proposals)
+- [`proposals/done/`](proposals/done/): shipped (311 proposals)
 - [`proposals/rejected/`](proposals/rejected/): considered and
   declined
 - [`proposals/deferred/`](proposals/deferred/): parked for later
@@ -95,6 +95,10 @@ recall.
   debug surface; quality / staging recommendations for the curator's
   release gate. **Accepted. Phase 0 shipped, `aimee kb lab` command with chunk preview,
   quality signals, and stage recommendations.**
+- Ingest Restoration and Bounded-Hallucination Recall Contract:
+  restoration-candidate queueing outside `kb_lab`, single-pass
+  curator fusion with provenance and `[unknown]`, and per-result
+  verbatim vs synthesised recall evidence mode. **Done.**
 - Approximate Sketches for Ingest Pre-Filtering:
   Bloom / MinHash-LSH / Count-Min / HyperLogLog layer between
   Normalize and dense recall; cheap dedupe, near-dup clustering,
