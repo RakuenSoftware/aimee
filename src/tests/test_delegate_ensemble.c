@@ -571,6 +571,35 @@ static void test_roundtable_review_brief_and_items_return(void)
    printf("  test_roundtable_review_brief_and_items_return: ok\n");
 }
 
+static void test_roundtable_cost_capped_skips_question_pass(void)
+{
+   reset_modes();
+   g_parallel_mode = 7;
+   config_t cfg = make_cfg(1, 2, 0.001); /* tiny cap trips after round 1 */
+   agent_config_t acfg = make_acfg();
+   const char *questions[] = {"does auth hold?"};
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 2;
+   opts.questions = questions;
+   opts.question_count = 1;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review with cost cap", &opts, &result);
+   assert(rc == 0);
+   assert(result.cost_capped == 1);
+   /* The reason-role question pass is skipped on a cost-capped run; the mock would
+    * have answered "does auth hold?" with answered=true, so answered==0 proves it
+    * was skipped while the question is still reported as an unanswered gap. */
+   assert(result.answered_question_count == 1);
+   assert(result.answered_questions[0].answered == 0);
+   assert(strcmp(result.answered_questions[0].question, "does auth hold?") == 0);
+   assert(result.coverage_gap_count == 1);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_cost_capped_skips_question_pass: ok\n");
+}
+
 static void test_roundtable_review_summary_fallback_key_converges(void)
 {
    reset_modes();
@@ -721,6 +750,7 @@ int main(void)
    test_roundtable_summarize_forward_sets_truncated();
    test_roundtable_review_saturation_converges();
    test_roundtable_review_brief_and_items_return();
+   test_roundtable_cost_capped_skips_question_pass();
    test_roundtable_review_summary_fallback_key_converges();
    test_roundtable_review_clean_round_converges();
    test_roundtable_malformed_review_json_counts_failed();

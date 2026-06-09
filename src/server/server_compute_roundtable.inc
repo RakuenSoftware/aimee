@@ -117,12 +117,31 @@ static int normalize_roundtable_brief(cJSON *req, normalized_roundtable_brief_t 
    return 0;
 }
 
+/* Cap the serialized items so the whole result stays under SHTTP_RESP_MAX
+ * (256 KB). The fixed item array alone can serialize to ~190 KB; left unbounded
+ * it would push a large consolidated `artifact` over the async op-run capture
+ * buffer, which loopback_rpc rejects as "response too large" (a failed run with
+ * an opaque error) instead of returning the findings. Bounding items to ~96 KB
+ * leaves ample headroom for the artifact + answered_questions. */
+#define ROUNDTABLE_ITEMS_JSON_BUDGET (96 * 1024)
+
 static void add_roundtable_arrays(cJSON *resp, const roundtable_result_t *result)
 {
    cJSON *items = cJSON_CreateArray();
+   size_t used = 0;
+   int items_truncated = 0;
    for (int i = 0; i < result->item_count; i++)
    {
       const roundtable_review_item_t *it = &result->items[i];
+      size_t est = strlen(it->severity) + strlen(it->category) + strlen(it->location) +
+                   strlen(it->summary) + strlen(it->recommendation) + strlen(it->identity_key) +
+                   strlen(it->sources) + 160; /* JSON keys, quotes, count */
+      if (i > 0 && used + est > ROUNDTABLE_ITEMS_JSON_BUDGET)
+      {
+         items_truncated = 1;
+         break;
+      }
+      used += est;
       cJSON *o = cJSON_CreateObject();
       cJSON_AddStringToObject(o, "severity", it->severity);
       cJSON_AddStringToObject(o, "category", it->category);
@@ -135,6 +154,8 @@ static void add_roundtable_arrays(cJSON *resp, const roundtable_result_t *result
       cJSON_AddItemToArray(items, o);
    }
    cJSON_AddItemToObject(resp, "items", items);
+   if (items_truncated)
+      cJSON_AddBoolToObject(resp, "items_truncated", 1);
 
    cJSON *answers = cJSON_CreateArray();
    for (int i = 0; i < result->answered_question_count; i++)

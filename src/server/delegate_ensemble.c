@@ -1454,7 +1454,16 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
    out->artifact = best_artifact ? best_artifact : xstrdup0(artifact);
    out->artifact_round = out->best_round > 0 ? out->best_round : out->rounds_run;
    if (out->artifact)
-      answer_roundtable_questions(acfg, task, &local, out);
+   {
+      /* The question pass is an extra reason-role LLM call. Skip it when the run
+       * was cancelled (respect the stop) or already hit the cost cap (do not
+       * spend past the budget); still report the questions as gaps so the
+       * answered_questions/coverage_gaps contract stays populated. */
+      if (out->cancelled || out->cost_capped)
+         mark_question_gaps(&local, out);
+      else
+         answer_roundtable_questions(acfg, task, &local, out);
+   }
    free(artifact);
    free(peer_notes);
    return out->artifact ? 0 : -1;

@@ -613,7 +613,9 @@ cJSON *mcp_build_tools_list(void)
           tools,
           build_tool("ensemble_review",
                      "Run the multi-agent roundtable in review mode against caller-provided diff "
-                     "text. Returns a queued run id; poll /v1/runs/{id}.",
+                     "text. Returns a queued run id; poll /v1/runs/{id}. The result's items "
+                     "describe items_round while artifact is artifact_round (the best round); "
+                     "compare those fields before assuming the findings match the artifact.",
                      cJSON_Parse(
                          "{\"type\":\"object\",\"properties\":{"
                          "\"diff\":{\"type\":\"string\",\"description\":\"Unified diff or code "
