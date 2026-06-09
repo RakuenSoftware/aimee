@@ -1,6 +1,6 @@
 # Proposal: Recall economy — progressive disclosure, bounded envelopes, and learned retrieval shortcuts
 
-- **State:** draft — pending review
+- **State:** done
 - **Author:** JBailes
 - **Date:** 2026-06-08
 - **Charter roles:** Recall, Rewrite (envelope assembly / compression),

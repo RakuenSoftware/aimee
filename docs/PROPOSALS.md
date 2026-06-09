@@ -14,7 +14,7 @@ directory listing:
 
 - [`proposals/accepted/`](proposals/accepted/): locked but not yet
   implemented
-- [`proposals/done/`](proposals/done/): shipped (311 proposals)
+- [`proposals/done/`](proposals/done/): shipped (312 proposals)
 - [`proposals/rejected/`](proposals/rejected/): considered and
   declined
 - [`proposals/deferred/`](proposals/deferred/): parked for later
@@ -125,6 +125,10 @@ recall.
 
 ### Retrieval (Recall / Rerank / Rank-Fuse)
 
+- Recall Economy: Progressive Disclosure, Bounded Envelopes, and Learned Retrieval Shortcuts:
+  bounded ingress envelope assembly, memory previews with openable
+  pull-handles, retrieval shortcuts, intent annotation, and per-layer
+  transparency for token/quality attribution. **Done.**
 - Dynamic Alpha Fusion for KB Hybrid Retrieval:
   score-aware lexical / dense blending shipped as an opt-in fusion mode on
   `POST /v1/search`; benchmark gate did not justify a default flip, so `rrf`
