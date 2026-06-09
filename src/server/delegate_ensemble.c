@@ -312,7 +312,8 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
              "\"category\":\"...\",\"location\":\"file:line or section\","
              "\"summary\":\"...\",\"recommendation\":\"...\"}],\"overall\":\"...\"}. "
              "Do not invent stable keys; the engine computes identity keys."
-           : "Return the next complete draft. Incorporate useful peer input and do not describe the process.";
+           : "Return the next complete draft. Incorporate useful peer input and do not describe "
+             "the process.";
    if (!artifact)
       artifact = "";
    if (!peer_notes)
@@ -350,13 +351,13 @@ static char *build_round_synthesis_prompt(const char *task, const char *prior_ar
    if (!buf)
       return NULL;
    size_t pos = 0;
-   const char *frame =
-       mode == ROUNDTABLE_REVIEW
-           ? "You are consolidating peer reviews from an agent roundtable."
-           : "You are consolidating draft revisions from an agent roundtable.";
-   int n = snprintf(buf + pos, cap - pos,
-                    "%s\n\nTASK:\n%s\n\nPRIOR SHARED ARTIFACT:\n%s\n\nPARTICIPANT OUTPUTS:\n\n",
-                    frame, task ? task : "", prior_artifact && prior_artifact[0] ? prior_artifact : "(none)");
+   const char *frame = mode == ROUNDTABLE_REVIEW
+                           ? "You are consolidating peer reviews from an agent roundtable."
+                           : "You are consolidating draft revisions from an agent roundtable.";
+   int n =
+       snprintf(buf + pos, cap - pos,
+                "%s\n\nTASK:\n%s\n\nPRIOR SHARED ARTIFACT:\n%s\n\nPARTICIPANT OUTPUTS:\n\n", frame,
+                task ? task : "", prior_artifact && prior_artifact[0] ? prior_artifact : "(none)");
    if (n < 0 || (size_t)n >= cap - pos)
    {
       free(buf);
@@ -425,10 +426,10 @@ static int run_quality_scorer(agent_config_t *acfg, const char *task, const char
 static int run_convergence_tiebreak(agent_config_t *acfg, const char *task, const char *prev,
                                     const char *next, double *cost_usd)
 {
-   char *prompt = xasprintf3(
-       "Judge whether this roundtable artifact has converged. Reply only as JSON "
-       "{\"completion\":N} where N is 0-100.\n\nTASK:\n",
-       task ? task : "", "\n\nPREVIOUS:\n");
+   char *prompt =
+       xasprintf3("Judge whether this roundtable artifact has converged. Reply only as JSON "
+                  "{\"completion\":N} where N is 0-100.\n\nTASK:\n",
+                  task ? task : "", "\n\nPREVIOUS:\n");
    char *p2 = prompt ? xasprintf3(prompt, prev ? prev : "", "\n\nCURRENT:\n") : NULL;
    free(prompt);
    char *full = p2 ? xasprintf3(p2, next ? next : "", "\n") : NULL;
@@ -550,7 +551,8 @@ static int parse_review_issue_keys(const char *text, char keys[][128], int *coun
       char key[128];
       normalized_identity_key(cJSON_IsString(category) ? category->valuestring : "",
                               cJSON_IsString(location) ? location->valuestring : "",
-                              cJSON_IsString(summary) ? summary->valuestring : "", key, sizeof(key));
+                              cJSON_IsString(summary) ? summary->valuestring : "", key,
+                              sizeof(key));
       if (!key[0] || key_seen128(keys, *count, key))
          continue;
       if (*count < max)
@@ -647,8 +649,9 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
       if (!prompt)
          return -1;
       memset(&results[i], 0, sizeof(results[i]));
-      agent_run_named(acfg, cfg->ensemble_reference_models[i], mode == ROUNDTABLE_REVIEW ? "review" : "draft",
-                      NULL, prompt, 0, 0.3 + (0.05 * i), &results[i]);
+      agent_run_named(acfg, cfg->ensemble_reference_models[i],
+                      mode == ROUNDTABLE_REVIEW ? "review" : "draft", NULL, prompt, 0,
+                      0.3 + (0.05 * i), &results[i]);
       if (results[i].response && results[i].response[0])
       {
          char label[256];
@@ -799,7 +802,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       memset(&local, 0, sizeof(local));
       local.mode = ROUNDTABLE_DRAFT;
       local.turns = strcmp(cfg->roundtable_turns, "sequential") == 0 ? ROUNDTABLE_SEQUENTIAL
-                                                                      : ROUNDTABLE_PARALLEL;
+                                                                     : ROUNDTABLE_PARALLEL;
       local.max_rounds = cfg->roundtable_max_rounds > 0 ? cfg->roundtable_max_rounds : 3;
       local.converge_threshold = cfg->roundtable_converge_threshold;
       local.deadline_ms = cfg->roundtable_deadline_ms;
@@ -976,9 +979,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       for (int i = 0; i < ref_count; i++)
          order[i] = i;
       shuffle_indices(order, ref_count);
-      char *synthesis_prompt =
-          build_round_synthesis_prompt(task, artifact, results, order, cfg->ensemble_reference_models,
-                                       ref_count, local.mode);
+      char *synthesis_prompt = build_round_synthesis_prompt(
+          task, artifact, results, order, cfg->ensemble_reference_models, ref_count, local.mode);
       for (int i = 0; i < ref_count; i++)
          free(results[i].response);
       if (!synthesis_prompt)

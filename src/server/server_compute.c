@@ -1763,7 +1763,7 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    memset(&opts, 0, sizeof(opts));
    opts.mode = ROUNDTABLE_DRAFT;
    opts.turns = strcmp(cfg.roundtable_turns, "sequential") == 0 ? ROUNDTABLE_SEQUENTIAL
-                                                                 : ROUNDTABLE_PARALLEL;
+                                                                : ROUNDTABLE_PARALLEL;
    opts.max_rounds = cfg.roundtable_max_rounds > 0 ? cfg.roundtable_max_rounds : 3;
    opts.converge_threshold = cfg.roundtable_converge_threshold;
    opts.deadline_ms = cfg.roundtable_deadline_ms;

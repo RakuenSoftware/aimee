@@ -374,7 +374,8 @@ static void *op_run_worker(void *arg)
    const char *status_str =
        terminal_status == OPENAI_RUN_CANCELLED ? "cancelled" : (ok ? "completed" : "failed");
    char *snap = op_run_snapshot(j->run_id, j->op, status_str, now, buf);
-   openai_runs_store_finalize(j->run_id, ok ? terminal_status : OPENAI_RUN_FAILED, snap ? snap : buf);
+   openai_runs_store_finalize(j->run_id, ok ? terminal_status : OPENAI_RUN_FAILED,
+                              snap ? snap : buf);
    free(snap);
    free(buf);
    free(j->line);
@@ -860,8 +861,10 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/insights/overview", NULL, RM_EXACT, "insights.overview", 0, rh_dispatch_op},
     {"GET", "/v1/optimize/export", NULL, RM_EXACT, "optimize.export", 0, rh_dispatch_op},
     {"POST", "/v1/optimize/promote", NULL, RM_EXACT, "optimize.promote", 0, rh_dispatch_op},
-    {"POST", "/v1/optimize/replay-record", NULL, RM_EXACT, "optimize.replay_record", 0, rh_dispatch_op},
-    {"GET", "/v1/calibration/readiness", NULL, RM_EXACT, "calibration.readiness", 0, rh_dispatch_op},
+    {"POST", "/v1/optimize/replay-record", NULL, RM_EXACT, "optimize.replay_record", 0,
+     rh_dispatch_op},
+    {"GET", "/v1/calibration/readiness", NULL, RM_EXACT, "calibration.readiness", 0,
+     rh_dispatch_op},
     {"GET", "/v1/demotion/check", NULL, RM_EXACT, "demotion.check", 0, rh_dispatch_op},
     {"GET", "/v1/identity/show", NULL, RM_EXACT, "identity.show", 0, rh_dispatch_op},
     {"POST", "/v1/identity/diff", NULL, RM_EXACT, "identity.diff", 0, rh_dispatch_op},

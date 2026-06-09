@@ -59,9 +59,9 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
       else if (g_parallel_mode == 3 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
          out[i].response = strdup(i == 0 ? "not json" : "{\"issues\":[],\"overall\":\"ok\"}");
       else if (g_parallel_mode == 5 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
-         out[i].response =
-             strdup("{\"items\":[{\"severity\":\"blocking\",\"category\":\"security\","
-                    "\"summary\":\"missing authorization check before write\"}],\"overall\":\"block\"}");
+         out[i].response = strdup(
+             "{\"items\":[{\"severity\":\"blocking\",\"category\":\"security\","
+             "\"summary\":\"missing authorization check before write\"}],\"overall\":\"block\"}");
       else
       {
          snprintf(buf, sizeof(buf), "mock response from %s",
@@ -126,8 +126,8 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
       if (strstr(user_prompt ? user_prompt : "", "{\"completion\":N}"))
          out->response = strdup("{\"completion\":95}");
       else if (g_reason_mode == 1)
-         out->response = strdup(strstr(user_prompt ? user_prompt : "", "synthesized answer 1") ? "95"
-                                                                                                  : "10");
+         out->response =
+             strdup(strstr(user_prompt ? user_prompt : "", "synthesized answer 1") ? "95" : "10");
       else
          out->response = strdup("80");
    }
@@ -136,8 +136,8 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
       char buf[128];
       g_aggregator_calls++;
       if (g_aggregator_mode == 1)
-         out->response = strdup(g_aggregator_calls == 1 ? "synthesized answer 1"
-                                                        : "inferior final artifact");
+         out->response =
+             strdup(g_aggregator_calls == 1 ? "synthesized answer 1" : "inferior final artifact");
       else if (g_aggregator_mode == 2)
       {
          size_t n = 26000;
@@ -305,7 +305,8 @@ static void test_roundtable_parallel_basic(void)
    opts.converge_threshold = 0;
    opts.deadline_ms = 0;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "draft a short engineering proposal", &opts, &result);
+   int rc =
+       delegate_roundtable_run(&acfg, &cfg, "draft a short engineering proposal", &opts, &result);
    assert(rc == 0);
    assert(result.artifact != NULL);
    assert(strstr(result.artifact, "synthesized answer") != NULL);
@@ -330,7 +331,8 @@ static void test_roundtable_sequential_uses_named_agents(void)
    opts.converge_threshold = 10;
    opts.deadline_ms = 0;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "review this proposed design for correctness", &opts, &result);
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review this proposed design for correctness",
+                                    &opts, &result);
    assert(rc == 0);
    assert(result.artifact != NULL);
    assert(g_named_calls == 3);
@@ -352,7 +354,8 @@ static void test_roundtable_degrades_on_min_success(void)
    opts.max_rounds = 1;
    opts.deadline_ms = 0;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "draft with too few successful participants", &opts, &result);
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft with too few successful participants",
+                                    &opts, &result);
    assert(rc == 0);
    assert(result.degraded == 1);
    assert(result.artifact != NULL);
@@ -437,7 +440,8 @@ static void test_roundtable_review_saturation_converges(void)
    opts.max_rounds = 3;
    opts.converge_threshold = 0;
    roundtable_result_t result;
-   int rc = delegate_roundtable_run(&acfg, &cfg, "review with repeated blocking issue", &opts, &result);
+   int rc =
+       delegate_roundtable_run(&acfg, &cfg, "review with repeated blocking issue", &opts, &result);
    assert(rc == 0);
    assert(result.converged == 1);
    assert(result.rounds_run == 2);

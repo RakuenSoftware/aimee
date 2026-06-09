@@ -82,15 +82,13 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
 
    /* roundtable.* */
    if (cfg->roundtable_max_rounds != 3 || cfg->roundtable_converge_threshold != 10 ||
-       cfg->roundtable_deadline_ms != 600000 ||
-       strcmp(cfg->roundtable_turns, "parallel") != 0)
+       cfg->roundtable_deadline_ms != 600000 || strcmp(cfg->roundtable_turns, "parallel") != 0)
    {
       cJSON *rt = cJSON_AddObjectToObject(root, "roundtable");
       if (rt)
       {
          cJSON_AddNumberToObject(rt, "max_rounds", cfg->roundtable_max_rounds);
-         cJSON_AddNumberToObject(rt, "converge_threshold",
-                                 cfg->roundtable_converge_threshold);
+         cJSON_AddNumberToObject(rt, "converge_threshold", cfg->roundtable_converge_threshold);
          cJSON_AddNumberToObject(rt, "deadline_ms", cfg->roundtable_deadline_ms);
          cJSON_AddStringToObject(rt, "turns", cfg->roundtable_turns);
       }
