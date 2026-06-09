@@ -285,3 +285,239 @@ refusal, and 4 makes the threshold learn instead of being guessed.
 - **Threshold staleness:** a hand-picked global gate drifts as the corpus grows;
   Phase 4 hands it to the calibration loop so it tracks outcomes instead of
   ossifying at `0.40`.
+
+## §R Review findings — independent verification pass (`testing@d3eb402d`)
+
+A verification pass re-checked every cited symbol/line/behavior against the tree
+and went one level deeper into each phase. The **core premise holds and is
+load-bearing-true**: `memory_answer_confidence` is computed on every `memory.ask`
+and appears in **zero** conditionals — it is only assigned and serialized, never
+gated (verified across `memory_core_search.inc` and the four downstream files).
+The end-to-end `no_answer` round-trip is real (engine `memory_ask_query_scoped`
+→ serialize `db2/kb_service_backend_memory.c:1863-1869` → kb handler
+`kb/kb_service_memory.c` → client parse `server/kb_client_memory.c:1396-1422` →
+render `server_mcp.c:386`); both confidence functions are deterministic; and the
+`memory.answer.abstained` counter is a clean one-line add via
+`memory_runtime_state_increment` (`memory_core_helpers.inc:748`). So the
+substrate claims in §0 are essentially accurate. The findings below are
+corrections and gaps to fold into the phases before this leaves design review.
+
+### §R.1 Premise corrections (claims that are inaccurate as written)
+
+1. **"Aimee currently runs two decisions through one `0.35` knob" is false — the
+   answer path has *no* threshold today.** `memory_answer_confidence` is assigned
+   at `memory_core_search.inc:4868/4894/4899` and never compared to anything; the
+   only retrieval threshold in the tree is the single **context-path** field
+   `memory_failure_detection_threshold` (`config.h:510`, used only at
+   `memory_assemble.c:807` and `memory_context.c:735`). There is no second answer
+   threshold, and the two `0.35` values the proposal conflates are not "one knob
+   doing double duty" — there is exactly one knob, on the context path only. So
+   Phase 2 is **not "splitting one threshold into two"**; it is *adding two new
+   gates where zero exist on the answer path* (`memory_abstain_gate` +
+   `memory_chunk_min_confidence`). Keep the literature framing, but strike the
+   "currently coupled / one knob" claim — it overstates how much is already wired.
+
+2. **The config-plumbing precedent is 2 files + a use-site default, not 4 — and
+   it is *not* CLI-settable.** `memory_failure_detection_*` is declared in
+   `config.h:509-510` and parsed in `config_sections.c:321-330`, but it is **not**
+   in `config.c` (no stored default; it relies on `memset`→0 plus an inline
+   `> 0 ? cfg : 0.35` fallback) and **not** in `config_fields.c` — so it cannot be
+   set via `aimee config set` and is absent from `config get/show`. The proposal's
+   "same plumbing as the failure-detection knobs" therefore yields **non-settable**
+   abstain knobs, which contradicts the stated off→on rollout discipline (you
+   cannot flip `memory_abstain_enabled` from the CLI). To be rollout-controllable,
+   the new fields must **also** be added to `config_fields.c` (where 44 other
+   `memory_*` fields already live) — a step the cited precedent skips. State this
+   explicitly in Phase 1.
+
+3. **"Default `0.40`" is an effective (use-site) default, not a stored one.**
+   Following the failure-detection pattern, an absent config key zero-inits the
+   field (`config.c` `memset`), so `memory_abstain_gate` would be `0.0` — which the
+   proposal itself defines as *disabled*. The stated `0.40`/`0.25` defaults must be
+   applied at the use site (`x > 0 ? x : 0.40`), or "default-off" holds only via
+   `memory_abstain_enabled`. Pin the stored-vs-effective default in the config
+   step so the table's "default 0.40" is not misread as a stored value.
+
+4. **"The CLI / webchat already understand `no_answer`" is false for the
+   human-facing surfaces.** The MCP and `--json` paths handle it
+   (`server_mcp.c:386`; the JSON emitter carries the bool), but the CLI **text**
+   path prints the answer unconditionally — `printf("%s\n", result.answer);`
+   (`cmd_memory_embed.c:465`) — so on abstain (empty `answer`) `aimee memory ask`
+   prints a **blank line**, not "No confident answer." And the webchat frontend has
+   **zero** references to `no_answer` (`grep` over `frontend/src` is empty).
+   Honoring the proposal's own "no silent abstention" principle therefore requires
+   a one-line `no_answer` branch in `cmd_memory_embed.c` and a frontend change —
+   not "nothing downstream changes." Add both to Phase 1's scope (or drop the
+   "already understands" claim).
+
+### §R.2 Phase 1 (answer-path gate)
+
+5. **There are three confidence-computing return sites, not two — and the contract
+   omits the one that matters most.** The Implementation contract and Phase 1 body
+   say "before the success returns (`:4868` / `:4899`)," but there is a **third**
+   at `memory_core_search.inc:4894`: the citations-`required`, zero-citation,
+   non-strip path, which sets `low_confidence = 1`, computes confidence, and
+   returns. These are mutually-exclusive early returns, so there is no single
+   "before the success returns" point — the gate must cover all three or hoist the
+   confidence computation above the citation-mode branch at `:4866`. The `:4894`
+   path is precisely the *weak / unverified* case the gate most wants to catch;
+   leaving it ungated would be the main miss.
+
+6. **Phase 1 alone under-targets the weak-hit case it exists for.**
+   `memory_answer_confidence` (`:4675`) is
+   `0.45·cluster + 0.20·rank + 0.20·support + 0.15·citation`, and
+   `memory_answer_cluster_score` (`:4555`) is built from rank *position*
+   (`1/(anchor+1) + Σ0.35/(i+1)` + variety bonuses), not match strength. A single
+   moderately-ranked, cited hit computes to ≈ **0.625** (the existing test
+   `test_memory_ask_query_returns_structured_result` asserts `confidence > 0.6` on
+   one clean hit) — comfortably **above** the proposed `0.40` gate. So a
+   weak-but-top-ranked hit (the "retrieved plausible-looking but weak" target of
+   the Goal) sails through Phase 1. The real weak-hit signal is
+   coverage/separation — i.e. **Phase 2** — which means Phase 1 is largely
+   cosmetic on its own. Re-frame "Phase 1 is the high-value slice, shippable
+   alone": it wires the contract, but the discriminating power arrives with Phase
+   2.
+
+7. **`low_confidence` is already set and already injects prose — the gate must
+   reconcile, not "ignore" it.** The `:4886-4891` path prepends a
+   `## Retrieval Confidence: LOW … unverified and may be inaccurate` block into
+   `out->answer` and sets `low_confidence = 1`. That is the *same*
+   prompt/user-delegated anti-pattern the proposal removes, living on the **answer**
+   path (not only the context path the Goal cites). The new gate overlaps this
+   exact case; specify whether the gate supersedes it (clear the LOW-prose answer
+   and abstain) or leaves it, and reconcile the two `no_answer` producers'
+   disagreement on `confidence` (the structural `:4879` sets `confidence = 0.0`;
+   the proposed gate keeps the low computed value), since the renderer and the
+   "confidence bands" bonus must handle both.
+
+### §R.3 Phase 2 (two-tier thresholds) — the blast radius is understated
+
+8. **There is no surviving per-candidate *match* score to floor on.** The
+   ranking score (`memory_score_parts_t`, local to `memory_rerank_matches`) is
+   discarded; the answer path receives bare `memory_t` (`out[i] = candidates[i]`,
+   `:4299`). The only per-candidate number that survives is `memory_t.confidence`
+   — the record's **intrinsic stored** confidence, *not* its match-to-query
+   strength. So a "chunk-confidence floor" on the answer path either (a) filters on
+   intrinsic record confidence — a different filter than the blog's chunk-relevance
+   floor — or (b) requires threading the retrieval score out of ranking into a
+   parallel array / new field. Either way it is materially more than "1 config
+   field + a filter on the candidate list"; the "low/medium" blast radius is
+   optimistic. State which signal the floor uses.
+
+9. **The coverage/separation `min` floor requires running a context-path function
+   on the answer path, with a struct and a token-list it does not have.**
+   `memory_retrieval_confidence` is called *only* from `memory_assemble.c:812/860`;
+   `memory_ask_query_scoped` never calls it. It takes `context_candidate_t` (which
+   carries the `.score` separation needs), not `memory_t`, and it needs the
+   tokenized **significant query terms** the answer path does not build
+   (it uses `normalize_key` + intent). So the "one place the two functions are
+   combined — a `min`, not a new blend" hides a struct bridge, a term tokenizer,
+   and net-new compute on the ask hot path.
+
+10. **coverage is brittle on short queries; separation is discontinuous on small
+    candidate sets.** Significant terms require `strlen ≥ 3` and not a stopword,
+    and the stopword list includes `who/what/when/where/why/which`
+    (`memory_context.c:547-552,684`); a query like "who is X" collapses to one
+    significant term, making `coverage ∈ {0.0, 1.0}` — and coverage carries 0.6 of
+    the blend, so a single literal-substring miss (no morphology/synonyms) trips
+    the floor → false abstention. `separation` is hard-coded to `0.5` for one
+    candidate, uses the *last* of two for the "third-place" gap with two, and only
+    reaches the intended 3rd-place gap at ≥3 (`memory_context.c:719-730`).
+    Low-cardinality answer sets are common, so the floor is noisiest exactly where
+    it bites. Quantify this in the false-omission arm of the bench.
+
+11. **The cheaper recovery is thrown away on the answer path.** The wider re-fetch
+    (`memory_assemble.c:815-864`) — which the proposal calls "the right recovery" —
+    is context-path only. The answer-path gate abstains *without* attempting it, so
+    a weak query that a broader fetch would rescue is refused instead, inflating
+    the proposal's own false-omission metric. At minimum acknowledge that
+    abstain-without-refetch forgoes a known cheaper win; better, offer the same
+    broaden-then-recheck step on the answer path before abstaining.
+
+12. **Scope the chunk floor to the answer path.** Candidate assembly is shared
+    between the context path (`memory_assemble.c`) and the answer path; a floor
+    placed "where candidates are assembled" would silently alter proactive-recall
+    context unless gated strictly to `memory.ask`. Unspecified today.
+
+### §R.4 Phase 3 (curated exemption) — feasible, with a sharpened signal choice
+
+13. **Implementable today with no schema change** — `memory_t` carries `tier[4]`
+    and `provenance_category[32]` (`memory.h:7,18`), and the anchor index is in
+    hand at the gate point (`matches[anchor]`, `:4823`). **Prefer the tier signal**
+    (`memory_tier_priority(tier) >= 4`, i.e. L4/L5 = the hand-authored/directive
+    tiers): `provenance_category` is a coarse 3-value field whose
+    "human-authored" value `user_stated` covers *any* user utterance, which is
+    exactly the "exemption too broad → gate toothless" escape-hatch risk the
+    proposal lists. Also note `memory_answer_confidence`'s `rank_norm`/`support_norm`
+    are degenerate on a single curated hit, so on the exempt path the *predicate*
+    (not the score) does all the work — its precision is correctness-critical, and
+    the separate exempt-bypass counter the proposal already suggests is the right
+    guard.
+
+### §R.5 Phase 4 (calibrated per-triple thresholds) — the blocking gap
+
+14. **The audit-outcome signal Phase 4 trains on does not exist.** `kb_calibrate`
+    reads `audit_events.applied_confidence` + `verdict IN ('accepted','rejected')`
+    (`db2/calibration.c:250-266`), and `audit_events` is written exclusively by the
+    **promotion / curation review** path (`db2/artifacts.c:361`, verdicts like
+    `thumbs_down`/`accepted`/`rejected`). Those are "should this memory have been
+    *promoted*," **not** "was the *answer* correct." The ask path
+    (`memory_ask_query_scoped`) records **zero** outcome/audit events, and the only
+    ask-adjacent feedback (`retrieval_attribution` via
+    `kb_handle_memory_record_retrieval_outcome`) is per-row and feeds **demotion**,
+    not calibration. So Phase 4 is **not** "automated through machinery that already
+    exists": it needs net-new (a) ask-outcome capture keyed by the triple, (b) a
+    delayed correctness-labeling flow ("answer later marked wrong" — no such
+    reviewer path exists for ask answers), and (c) a semantically distinct
+    abstain-quantile fit. The existing
+    `db2_calibration_threshold_from_profile_json` derives a *promotion-accept*
+    threshold (confidence above which a curator accepts) — the **inverse** of what
+    abstain needs (confidence below which an answer is likely wrong). Re-scope Phase
+    4 to include building the feedback loop, and treat it as gated on that, not on
+    the existing calibrator.
+
+15. **The triple is a 4-tuple, and the cited precedent is global-only and
+    batch-time.** Calibration keys on `(target_surface, kind, scope_kind, scope_id)`
+    (`db2/calibration.h:50-56`), not a 3-tuple "scope." `memory_ask_query_scoped`
+    has the scope (→ `scope_kind`/`scope_id`) and can read `kind` from
+    `matches[anchor].kind`, so the key is reconstructable — but the precedent it
+    "mirrors," `memory_promote` (`memory_logic.c:84-117`), reads a **global** profile
+    (`db2_calibration_profile_read("memory", kind, "global", "")`, `:87`) inside a
+    **batch maintenance** job, never a per-query-scope read on a latency path.
+    Phase 4's per-ask profile read is a DB round-trip (up to 3 fallback queries)
+    that the precedent never pays — budget caching, and resolve whether the abstain
+    read piggybacks on the promotion-specific `calibration_enabled` rollout enum
+    (`config.h:906-909`) or needs its own switch (likely the latter, since it must
+    roll out independently of promotion calibration).
+
+### §R.6 Test / CI traps not mentioned in "Testing & validation"
+
+16. **The config-surface CI net must be hand-edited, and its generator is stale.**
+    `test_config_surface.c` (run in the aggregate `unit-tests`) asserts A≠B for the
+    full parsed-field set including `memory_failure_detection_*`. New `memory:`
+    fields need fixture entries (two distinct in-range values) + an assertion or
+    the net silently under-covers — **and re-running `tests/gen_config_surface.py`
+    is wrong**: it scans only `src/config.c`, but the memory section parses live in
+    `config_sections.c`, so regeneration would drop every `memory.*` field. The new
+    fields must be hand-wired into the test (or fix the generator first). Name this
+    as a required step.
+
+17. **Docs regen.** If the fields are added to `config_fields.c` (per §R.1.2),
+    `docs/gen/configuration.md` is regenerated from it via
+    `scripts/gen-reference-docs.py` (`make -C src docs-gen`); no CI enforces it, so
+    it will not break the build, but it is the documented step and should be in the
+    phase plan.
+
+### §R.7 Minor citation corrections (symbols stable; line/scope drift)
+
+- `memory_ask_query_scoped` is at `memory_core_search.inc:4769`; `:4761` is the
+  unscoped wrapper `memory_ask_query`. (Cited as `:4761` in the Scope and Phase 1
+  headings.)
+- The confidence return sites are `:4868 / :4894 / :4899` (three); the
+  Implementation contract lists only `4868 / 4899`. See §R.2.5.
+- `kb_calibrate_run`'s implementation is `src/kb/kb_calibrate.c:111` (the Scope
+  cites only `kb_calibrate.h`).
+- All other §0 citations (`memory_rrf_bonus:2390`, `memory_retrieval_confidence`
+  formula and `0.35`, `memory_answer_confidence:4675`, the three structural
+  `no_answer` triggers, the assemble marker at `:1042`, the end-to-end contract
+  lines) re-confirmed accurate against `testing@d3eb402d`.
