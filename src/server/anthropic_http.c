@@ -96,17 +96,19 @@ static int driver_is_anthropic(const delegate_driver_t *driver)
    return driver && driver->name && strcmp(driver->name, "anthropic") == 0;
 }
 
-static int driver_consumes_system_prompt(const delegate_driver_t *driver)
+static int driver_consumes_system_prompt(const delegate_driver_t *driver, const agent_t *ag)
 {
-   return driver && driver->name &&
-          (strcmp(driver->name, "chatgpt") == 0 || strcmp(driver->name, "gemini") == 0);
+   driver_caps_t caps;
+
+   delegate_get_caps(driver, ag, &caps);
+   return (caps.capability_flags & DRIVER_CAP_SYSTEM_MSG) != 0;
 }
 
 /* Translate an Anthropic request into the selected provider's message/tool
  * shape. Anthropic itself receives the original Messages wire shape; the
  * OpenAI-family providers receive the inverse delegate-driver conversion.
  * *out_system is a malloc'd flattened system prompt (caller frees). */
-static void translate_request(const cJSON *req, const delegate_driver_t *driver,
+static void translate_request(const cJSON *req, const delegate_driver_t *driver, const agent_t *ag,
                               cJSON **out_messages, cJSON **out_tools, char **out_system)
 {
    *out_system = anthropic_system_to_text(req);
@@ -120,7 +122,7 @@ static void translate_request(const cJSON *req, const delegate_driver_t *driver,
    }
    *out_messages =
        anthropic_messages_to_openai(cJSON_GetObjectItemCaseSensitive(req, "messages"),
-                                    driver_consumes_system_prompt(driver) ? NULL : *out_system);
+                                    driver_consumes_system_prompt(driver, ag) ? NULL : *out_system);
    *out_tools = anthropic_tools_to_openai(cJSON_GetObjectItemCaseSensitive(req, "tools"));
 }
 
@@ -203,7 +205,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
 
    delegate_drivers_init();
    driver = delegate_driver_get(ag->provider);
-   translate_request(req, driver, &messages, &tools, &system_text);
+   translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
    {
@@ -420,7 +422,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    delegate_drivers_init();
    driver = delegate_driver_get(ag->provider);
-   translate_request(req, driver, &messages, &tools, &system_text);
+   translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
       goto cleanup;
