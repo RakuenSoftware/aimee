@@ -759,20 +759,21 @@ the independent check.
    stays fixed-stack. Add this to P1b's free path and its leak test, not only to the
    Q3 heap variant.
 
-5. **The enlarged result must fit `SHTTP_RESP_MAX` (256 KB) or it silently
-   degrades to an opaque string.** The async worker captures the re-dispatched
-   handler response into a `SHTTP_RESP_MAX` buffer (256 KB,
-   `server_http.c:40`) via `loopback_rpc` (`server_http_routes.inc:343,355`). If the
-   response — now carrying the consolidated artifact **plus** up to 64 items **plus**
-   `answeredQuestions` — exceeds that, the buffer truncates, `cJSON_Parse` fails in
-   `op_run_worker` (`:362`) so the `cancelled`-status check is skipped, and
-   `op_run_snapshot`'s own parse fails and stores the result as a JSON **string**
-   rather than an object (`:330-331`). A polling agent then receives `result` as
-   opaque text. In practice a consolidated review (~16 KB) plus 64 short items
-   (~20 KB) is well under 256 KB, so this is a robustness note, not a likely
-   failure: bound the serialized items/`answeredQuestions`, keep `recommendation`
-   and `evidence` strings short, and add an assertion that the serialized result
-   stays well under `SHTTP_RESP_MAX`.
+5. **The enlarged result must fit `SHTTP_RESP_MAX` (256 KB), or the async run
+   fails with a generic bridge error.** The async worker captures the
+   re-dispatched handler response into a `SHTTP_RESP_MAX` buffer (256 KB,
+   `server_http.c:40`) via `loopback_rpc` (`server_http_routes.inc:343,355`).
+   `loopback_rpc` validates the captured body before returning; if truncation
+   makes it malformed, it overwrites the buffer with `{"error":"rpc response too
+   large or malformed"}` and returns 502 (`server_http.c:947-951`). So the current
+   failure mode is **not** an opaque string result; it is a failed run whose
+   `result` contains the bridge error object. That is better than silent
+   corruption, but still too opaque for a caller trying to act on review items.
+   In practice a consolidated review (~16 KB) plus 64 short items (~20 KB) is well
+   under 256 KB, so this is a robustness note, not a likely failure: bound the
+   serialized items/`answeredQuestions`, keep `recommendation` and `evidence`
+   strings short, and add an assertion that the serialized result stays well under
+   `SHTTP_RESP_MAX`.
 
 6. **Open question — the brief `type: ["string","object"]` union may trip strict
    MCP clients.** Some MCP / JSON-Schema tool-call validators reject a union type on
@@ -796,3 +797,70 @@ prompt-builder seam, a result array, the async submit bridge, and one tool.
 Validate it against a real change with a concrete invariant and a concrete
 hypothesis to steer at (the Wolf shutdown-race / gst-wayland-display work is a good
 first target: there is an invariant to protect and a race to ask about).
+
+## §15 Fourth-pass findings (merge-result verification)
+
+This pass reviewed the effective merge result against current `origin/testing`
+(`d3eb402d`), not only the PR head, because the PR branch is older than the target
+branch and the roundtable implementation comes from `testing`. The PR merges
+cleanly, but these additional implementation details should be folded into the
+phase plan.
+
+1. **`/v1/runs/{id}` does not expose `in_progress` for op-run jobs today.** §14.A
+   correctly says the queued snapshot starts as `status:"queued"` and the worker
+   calls `openai_runs_store_set_status(..., OPENAI_RUN_IN_PROGRESS)`
+   (`server_http_routes.inc:341`). But `openai_runs_store_set_status` updates only
+   the store's internal enum (`openai_runs_store.c:152-162`); it does **not** call
+   `openai_runs_store_update_json`, and `GET /v1/runs/{id}` returns the stored JSON
+   snapshot verbatim (`server_http.c:827`, `openai_runs_store.c:279-290`). So a
+   polling caller can see `queued` until the run finalizes, even while the internal
+   status is `OPENAI_RUN_IN_PROGRESS`. If `ensemble_review` reuses the op-run store,
+   either update the snapshot when the worker transitions to in-progress or
+   document/pin the observable vocabulary as `queued -> completed|failed|cancelled`
+   for this route. Add a route-level test that polls after `set_status` and proves
+   the JSON status the client actually sees.
+
+2. **The public V1/OpenAPI surface must be updated with the new request and result
+   fields, not only the engine and MCP tool.** P1a adds `brief` to
+   `POST /v1/delegate/roundtable`, and P1b adds structured result arrays. The
+   current OpenAPI row (`api/openapi-server-v1.yaml:1676-1690`) lists only
+   `prompt`, `mode`, `turns`, `rounds`, and `apply`, and the CLI/docs surfaces
+   (`MANUAL.md`, `docs/COMMANDS.md`, generated config/API docs) describe the old
+   result shape. P1a/P1b should explicitly include OpenAPI + generated-doc updates
+   and run the server conformance checks, otherwise remote/thin clients will not
+   learn that `brief`, `items`, `answeredQuestions`, and `coverageGaps` exist.
+
+3. **The CLI `roundtable` marshaller needs a concrete `--brief` contract if P2
+   lands.** The current marshaller accepts `--mode`, `--turns`, `--rounds`, and
+   `--apply` (`src/cli_rpc_routes.inc:1687-1705`), but there is no stdin/file
+   convention for a multi-line structured brief. If the optional CLI helper lands,
+   define the input shape up front: either `--brief <text>`, `--brief-json
+   <json>`, and/or `--brief-file <path>`, with clear precedence and the same 4 KB
+   normalization/cap as HTTP/MCP. This avoids ad hoc shell-quoting behavior for
+   the exact field agents and humans will use most.
+
+4. **Returned review items should preserve `recommendation`, not only
+   severity/category/location/summary.** §5 says the result item carries
+   `severity`, `category`, `location`, `summary`, and the engine identity key, but
+   the reviewer prompt already asks for `recommendation` and the agent-facing goal
+   is actionable feedback. Dropping `recommendation` turns a machine-readable
+   finding back into a diagnosis without the proposed fix. Include bounded
+   `recommendation` text in the returned item, dedup/merge it separately from the
+   blocking saturation key, and keep it under the response-size budget from
+   §14.B.5.
+
+5. **Deduped items should carry contributor/count metadata.** Once P1b dedups
+   participant items for the final round, the caller loses whether one reviewer or
+   the whole panel raised the issue. Add `sources` (participant names or stable
+   indexes) and/or `count` to each returned item. This is cheap to collect at the
+   parse-time capture point, helps agents prioritize fixes, and makes the
+   structured result explainable without reading the consolidated prose.
+
+6. **OpenAPI/result tests should check the actual async envelope.** The handler
+   returns a normal `jo_ok()` body, but the async run stores it under
+   `result` in an `op.run` snapshot. Tests for P1b/P1c should assert both shapes:
+   the direct handler body contains the new item/question arrays, and
+   `GET /v1/runs/{id}` returns them nested under `result` after finalization. This
+   catches accidental tests that validate only the synchronous handler path while
+   the MCP tool's poll path still drops or wraps the structured fields
+   incorrectly.
