@@ -1004,3 +1004,251 @@ into code.
    aliases/tests for the existing snake_case fields. The smallest-compatible path is
    snake_case on `/v1/delegate/roundtable` and `/v1/runs/{id}.result`, plus
    documented MCP-specific names only if the MCP envelope deliberately differs.
+
+## §18 Seventh-pass findings (concurrency, code-placement, retention/parse, input validation)
+
+A seventh independent pass re-verified every prior citation against
+`testing@d3eb402d` and went one level deeper into the *execution model* the async
+bridge runs in, the *placement constraints* the new code lands under, and the
+*input/parse seams* P1a/P1b must actually write. It surfaced two pre-existing live
+bugs the earlier passes hedged or missed, several hard build/placement constraints
+that make the difference between a green and a red CI, and a set of concrete
+engine/handler seams. Each is verified in the tree; line numbers are
+`testing@d3eb402d`.
+
+### §18.A Two pre-existing live bugs (not future hazards) on the path §3 reuses
+
+1. **`g_op_run_seq` is not single-writer — it is a live data race today, before any
+   second caller.** §13.3 hedges this as "preserve the single-writer invariant, or
+   confirm the MCP arm enqueues on the same listener thread." That premise is
+   **false**: there is no single listener thread for dispatch. The counter is
+   `static unsigned long g_op_run_seq = 0; /* listener thread only; single-writer */`
+   incremented non-atomically with `++g_op_run_seq` (`server_http_routes.inc:400-402`),
+   but `rh_dispatch_op_async` runs inside `handle_conn`, and **every accepted
+   connection is offloaded to its own detached worker thread** (`conn_offload` ->
+   `conn_worker` -> `handle_conn`, up to `CONN_LIVE_MAX 64` concurrent,
+   `server_http.c:1721-1766`). The architecture comment is explicit:
+   "independent /v1 requests run concurrently … per-request state is thread-local
+   (`g_rpc_conn_caps`), atomic (request-id seq), or locked" (`server_http.c:1709-1719`).
+   So two concurrent async-op submits (`POST /v1/delegate/roundtable`, `POST /v1/runs`,
+   any `rh_dispatch_op_async`) in the same wall-clock second can mint a colliding
+   `oprun_<sec>_<seq>` id; `openai_runs_store_create` returns 0 on the duplicate and
+   the second request fails with a spurious 500. **Decisive proof the comment is
+   stale:** the author's own parallel run-id counters in `openai_chat.c` are
+   `atomic_ulong` with the comment "connections run concurrently; atomic"
+   (`openai_chat.c:375,1127`). Adding the MCP submit site only widens an existing
+   hole. Reframe §13.3: the extraction must make `g_op_run_seq` a single
+   file-static **atomic** counter (matching `openai_chat.c`), not "preserve a
+   single-writer invariant" that does not exist. This also tightens §14.B.2: the
+   thread-local *does* hold the caller's caps on the synchronous `mcp.call` path, but
+   because `handle_conn` runs on the **per-connection worker thread** (`g_rpc_conn_caps`
+   is `_Thread_local`, set at `server_http.c:1700`), **not** "on the listener
+   thread" — same conclusion, corrected mechanism, and the correctness-under-nesting
+   argument for explicit cap threading stands.
+
+2. **A large run result fails as `200` + truncated/unparseable body at poll time —
+   not as the clean `502` §14.B.5 assumes.** §14.B.5 reasons only about the
+   `loopback_rpc` capture boundary and concludes an oversized result yields a tidy
+   502 bridge-error. It misses the second inflation: `op_run_worker` **wraps** the
+   already-up-to-256 KB captured body inside an `op.run` envelope via `op_run_snapshot`
+   (`server_http_routes.inc:376`, re-parsing `result` at `:328-333`), so the *stored*
+   snapshot is strictly larger than the captured body, and neither `op_run_snapshot`
+   nor `openai_runs_store_finalize` caps it. On poll, `openai_runs_store_get`
+   does `snprintf(out, 256 KB, "%s", snapshot_json)` (`openai_runs_store.c:291`),
+   which **silently truncates to malformed JSON**, and `route_runs_get` returns it as
+   **HTTP 200** with no validation (`server_http.c:827`). So the realistic failure on
+   the exact path the agent polls is "200 with a body that won't parse," which is
+   *worse* than §14.B.5's stated 502. The serialized-result bound §14.B.5 recommends
+   must account for the envelope-wrapping inflation **and** the GET-side `snprintf`
+   cap, not only the loopback capture; add a poll-path test, not only a submit-path
+   one.
+
+### §18.B Build-integrity and code-placement constraints (green-vs-red CI)
+
+3. **P1a/P1b/P1c land in two files already near the 2000-line hard fail.**
+   `test_build_integrity.sh` errors any `*.c` (incl. `tests/*.c`) over
+   `ERROR_LINES=2000` (`:511`), warns over 1500 (`:510`), exempting only
+   `memory_logic.c memory_advanced.c` (`:512`). Today **`mcp_tools.c` is 1905 lines**
+   (95 from the hard limit) and **`server_compute.c` is 1841** (159 from the limit,
+   already in the warn zone). P1c adds an `ensemble_review` registration block to
+   `mcp_tools.c`; P1a/P1b add string-or-object brief normalization, all-severity item
+   serialization, and `answered_questions`/`coverage_gaps` to `handle_delegate_roundtable`
+   in `server_compute.c`. Either file can cross 2000 and turn CI red on a check
+   §13.2 never mentions (it flags only the golden-count regen). Mitigation: land the
+   brief-normalization and result-serialization helpers in a `.inc` (the line check
+   globs `*.c` only, so `.inc` is exempt) or a new TU, and keep the new arms thin.
+
+4. **`ensemble_review` structurally cannot live in the data-driven dispatch table —
+   it must be a ladder arm in `handle_mcp_call`.** Handlers in
+   `server_mcp_call_table.inc` have signature `cJSON *(struct mcp_call *)` and return
+   a `content` cJSON that `handle_mcp_call` wraps via `send_mcp_result`
+   (`server_mcp.c:1463-1467`); they cannot write their own response, and the table's
+   own header comment says tools that send their own response (`delegate*`, workflow)
+   stay in `handle_mcp_call`. Since §14.B.1 requires `ensemble_review` to do an async
+   submit and `server_send_ok` a custom `{id|run_id, status}` envelope onto `conn`,
+   it **must** be a `strcmp` arm beside the delegate arm (`server_mcp.c:1396`) that
+   `return`s after sending — a table row would force the run-id envelope through
+   `text_content` wrapping. The proposal says "add an arm beside delegate" but never
+   states the now-canonical table path is unusable here; an implementer could
+   reasonably try it and hit the content-vs-conn contract wall.
+
+5. **The new ladder arm inherits the `owns_jargs` cleanup contract.** Every
+   early-returning arm in `handle_mcp_call` must `if (owns_jargs) cJSON_Delete(jargs);`
+   before returning (delegate `:1399-1400`, delegate_status `:1407-1408`,
+   delegate_reply `:1425-1426`), because `jargs` is synthesized as an empty object
+   when the request omits `arguments` (`:1381-1387`). An `ensemble_review` arm that
+   returns the run-id response without this leaks `jargs` on the no-arguments path.
+   Pin it in the §10 bridge unit test.
+
+### §18.C Engine retention/parse corrections (P1b)
+
+6. **There are *two* independent 64-key stacks, and the all-severity array fills far
+   faster than the blocking set — so "reuse the 64 bound" (§5/§12 Q3) makes
+   `truncated` near-permanently true.** Saturation uses two `char[64][128]` stacks
+   declared in `delegate_roundtable_run` — `prev_review_keys` (`delegate_ensemble.c:905`)
+   and `cur_review_keys` (`:961`) — passed to `parse_review_issue_keys` with the literal
+   bound `64` (`:970-971,981`). (Correction to §0/§5: the cap is *not* "at `:641`";
+   line 641 is the generic `*count < max` guard inside the parser — the 64 lives at
+   the call sites.) The saturation stack counts **blocking only** (filter at `:632`),
+   while the agent-facing array carries `blocking|suggestion|nit`. Suggestions and
+   nits vastly outnumber blocking items, so an all-severity array sharing the 64
+   bound will hit it — and set `truncated` — on routine, fully-converged reviews
+   whose blocking set is nowhere near 64. Reusing the bound makes `truncated` noise.
+   Decouple the two: size the agent-facing array independently (larger fixed bound or
+   heap per §12 Q3), and reserve `truncated` for genuine overflow.
+
+7. **A valid-JSON reviewer that emits only suggestions/nits is never re-walked, so
+   folding all-severity capture *into* `parse_review_issue_keys` cannot work as
+   written.** §16.2 correctly says to reuse the three-key fallback and read the
+   *repaired* text, but misses a control-flow constraint: `parse_review_issue_keys`
+   filters to blocking-only at `:632` (`continue`) and returns the blocking count;
+   the repair re-parse fires **only on a `-1` parse failure** (`:970-994`). A reviewer
+   whose JSON is valid but carries zero blocking items returns `0` and lands in the
+   empty `else if (cur_review_key_count == before)` branch (`~:996-1000`) — its
+   response is never re-examined. So the all-severity capture cannot be a side effect
+   of the blocking parse; it must be a **separate walk that does not short-circuit on
+   the blocking filter and runs for the zero-blocking reviewers too**, over the
+   post-repair `results[i].response`.
+
+8. **The capture has exactly one safe window: after the repair loop, before the
+   first round-exit free.** Tightening §5's "capture before the per-round free":
+   `results[i].response` is replaced mid-loop by `repair_review_json`
+   (`:983-984`) and set to `NULL` when repair fails (`~:990-991`), so a per-participant
+   inline capture sees pre-repair or freed text. The only point where all responses
+   are in final post-repair state **and** still alive is after the parse/repair loop
+   completes (~`:1001`) and before the cost estimate / cost-cap / degrade frees
+   (`:1010` onward, frees at `:1024/:1052/:1062-1063`). The retained items must be
+   deep-copied in that window, and (per finding 6) committed to the result struct
+   each round so a degrade `continue`/cost-cap `break`/saturation `break` exit still
+   carries the last good round.
+
+9. **The §12 Q5 "fold question-answering into the consolidator" leaning is
+   incompatible with the verbatim `peer_notes` reuse §5 makes load-bearing.**
+   `run_aggregator` returns one `agg_result` whose `.response` becomes **both**
+   `artifact` (`:1087`) and `peer_notes` (`:1095`) verbatim, and `peer_notes` is fed
+   straight into the next reviewer prompt (`:417`). To read a side-JSON answer block
+   out of the consolidator without polluting the next round's peer notes, the engine
+   would have to parse-and-strip `agg_result.response` before assigning it — i.e.
+   modify the prose §5 promises to reuse byte-for-byte. So the two options in §12 Q5
+   are not equivalent: "fold into the consolidator" breaks the §5 invariant; only a
+   **separate `reason`-role pass** (the non-leaning option, +1 call/round) preserves
+   it. Resolve Q5 toward the separate pass, or explicitly relax the verbatim-reuse
+   invariant.
+
+10. **§5 ("final round that ran") and §17.2 ("the round that produced
+    `best_artifact`") name different rounds, and the loser's items are unrecoverable.**
+    `cur_review_keys` is overwritten every round; the engine returns
+    `best_artifact ? best_artifact : artifact` (`:1188`), and `best_artifact` may come
+    from an earlier, higher-scored round (`:1110-1117`). To return items aligned with
+    the artifact the caller actually sees, retention must keep items for **every**
+    round until the run ends (then select the `best_round`'s items), which is a
+    strictly larger obligation than §5's "final round." Pick one contract explicitly
+    and size retention for it; do not leave §5 and §17.2 specifying different rounds.
+
+### §18.D Handler input-validation and lifetime gaps (P1a)
+
+11. **No string-or-object union helper and no string-array parser exist, and the
+    malformed-structured-brief case is unspecified.** `handle_delegate_roundtable`
+    today does only flat scalar `cJSON_GetObjectItemCaseSensitive` reads, and there is
+    no reusable `IsString||IsObject` normalizer or `json_array_to_strings` in
+    `server_compute.c` / `json_fluent.c`. §2 defines the *string-vs-object* split but
+    never says what happens when the object is present with a **wrong-typed field** —
+    `{"focus":"not-an-array"}` or `{"questions":{}}`. Without an explicit rule this
+    either mis-walks a non-array or silently drops the field. P1a must (a) write the
+    union + array-extract helpers, and (b) state the wrong-type policy (reject with a
+    clear error vs. coerce-and-ignore), with a test for each malformed shape.
+
+12. **The normalized brief buffer leaks on the two *pre-existing* handler error
+    returns.** §16.3 covers calling the result-free on *new* error paths, but the
+    brief gets its own heap buffer (normalized object string / struct) allocated
+    **before** `delegate_roundtable_run` at `:1796`, and the two existing
+    `server_send_error` returns between allocation and the result-free —
+    `agent_load_config != 0` (`:1792-1793`) and `rc != 0` (`:1797-1799`) — will leak
+    it unless freed. Add the brief-buffer free to both, plus a leak test.
+
+13. **`rounds` has no server-side upper clamp.** The handler validates only `> 0`
+    (`server_compute.c:1783-1785`) and assigns straight to `opts.max_rounds`; the §3
+    schema advertises a bare integer. An MCP/HTTP caller passing `rounds: 10000` is
+    honored, bounded only post-hoc by cost cap / deadline — a long, expensive run an
+    agent can trigger by accident. Pair the schema with a documented server-side
+    clamp (e.g. to a small max) in P1a.
+
+### §18.E Public surface, CLI, and docs (P1a/P1b/P2)
+
+14. **The thin client renders the whole response object as raw JSON, so P1b dumps an
+    unformatted item blob onto the human CLI.** The roundtable route entry has
+    `extract == NULL` (`cli_rpc_routes.inc:248`), which per `cli_client.h` means
+    "print the response object minus `status`." New structured arrays therefore reach
+    `aimee delegate roundtable --mode review` as a raw, unpretty JSON dump of up to 64
+    items. The upside (no silent drop) is real, but P1b needs a CLI renderer for the
+    new arrays that the proposal never scopes.
+
+15. **`MANUAL.md` hardcodes a *closed* enumeration of result fields, so it becomes
+    affirmatively wrong, not merely stale.** `MANUAL.md:654` states the result
+    "includes `artifact`, `rounds_run`, `converged`, `degraded`, `truncated`,
+    `cost_capped`, `deadline_hit`, `cancelled`, `best_round`, and `cost_usd`" — an
+    exhaustive list. §15.2 names the doc files generically; pin the concrete edit
+    points (`MANUAL.md:654` result list, `MANUAL.md:423` config table, and the
+    `docs/COMMANDS.md` roundtable entry) so the new `items`/`answered_questions`/
+    `coverage_gaps` (and the P2 `--brief` flag) land in the hand-maintained surfaces,
+    not only OpenAPI.
+
+16. **The CLI roundtable timeout equals the server deadline, leaving no client
+    margin.** `cli_rpc_routes.inc:248` sets the roundtable CLI timeout to exactly
+    `600000` ms — identical to the `roundtable_deadline_ms` default — whereas the
+    sibling `delegate` row deliberately uses `900000` with the comment that the CLI
+    "must outlast" the server or it reports a false "no response." A directed-review
+    loop (§5) that pushes near the deadline will trip this. Raise the roundtable CLI
+    timeout above the server deadline as part of P1a/P2.
+
+17. **§15.2's "run the server conformance checks" gives false assurance for new
+    *fields*.** `check-api-conformance-server.py` validates only that every `/v1`
+    *path* is routed and documented (path granularity, regexing `"/v1/..."` literals);
+    adding `brief` to the request or `items` to the response passes it untouched, and
+    `test_server_dispatch.c` *stubs* the roundtable handler so it does not break on
+    shape changes either. There is no field-level schema test for
+    `/v1/delegate/roundtable` today. P1a/P1b should add one (assert the request
+    accepts `brief` and the response/`run.result` carries the new arrays) rather than
+    relying on conformance. The `api-conformance-scanner-literal-trap` only bites P1c
+    if it introduces a new `/v1` literal (e.g. an `ensemble_review_status` route);
+    P1a/P1b add no path.
+
+### §18.F Minor citation corrections (symbols stable; line drift only)
+
+- The 64-item cap is a **caller-side** literal (`delegate_ensemble.c:905/961/970/981`),
+  not "at `:641`" (`:641` is the generic `*count < max` guard inside the parser). See
+  finding 6.
+- `g_rpc_conn_caps` is declared at `server_http.c:908` (§3/§14.B.2 cite 907) and set
+  in `handle_conn` at `:1700` (§14.B.2 cites 1655) — on the per-connection worker
+  thread, not the listener (finding 1).
+- The `loopback_rpc` "rpc response too large or malformed" 502 block is at
+  `server_http.c:956-958` (§14.B.5 cites 947-951).
+- In `op_run_worker` the `loopback_rpc` call is at `server_http_routes.inc:355`; line
+  343 is the `SHTTP_RESP_MAX` buffer `malloc` (§14.B.5 cites "343,355").
+- The three-key array fallback in `parse_review_issue_keys` spans
+  `delegate_ensemble.c:615-619` (§16.2 cites 615-620).
+
+All other citations in §13–§17 were re-confirmed byte-accurate against
+`testing@d3eb402d` in this pass (including the run-store eviction at
+`openai_runs_store.c:111-120`, the snapshot `id` shape, the capability rows, the
+`set_status`-doesn't-update-JSON gap, and the `free(r->artifact)`-only result free).
