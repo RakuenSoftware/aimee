@@ -745,6 +745,18 @@ int handle_dashboard_plugins(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "dashboard.plugins");
 }
+int handle_plugin_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "plugin.list");
+}
+int handle_plugin_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "plugin.enable");
+}
+int handle_plugin_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "plugin.disable");
+}
 int handle_dashboard_onboard(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "dashboard.onboard");
