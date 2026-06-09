@@ -955,3 +955,52 @@ All citations in §13/§14/§15 were re-confirmed byte-accurate against
 `openai_runs_store.c:111-120`, the three-key array fallback at
 `delegate_ensemble.c:615-620`, the repair-then-replace at `:983-984`, and the
 `free(r->artifact)`-only result free).
+
+## §17 Sixth-pass findings (event surface, artifact/item alignment, field naming)
+
+This pass re-checked the MCP dispatch table, the op-run event path, and the
+roundtable return semantics against `testing@d3eb402d`. It found three additional
+implementation details that should be pinned before P1b/P1c turns the proposal
+into code.
+
+1. **`/v1/runs/{id}/events` is authorized for op-runs, but op-runs currently
+   append no events (P1c).** §14.A.4 correctly notes that `/events` has a
+   separate capability gate (`CAP_SESSION_READ`), but the more important behavior
+   gap is that `op_run_worker` only calls `openai_runs_store_set_status` and
+   `openai_runs_store_finalize` (`server_http_routes.inc:341,377`); it never calls
+   `openai_runs_store_append_event`. `openai_runs_store_wait` returns only buffered
+   events and then `TERMINAL` when the status is terminal (`openai_runs_store.c:328-341`),
+   so an `ensemble_review` subscriber on `/v1/runs/{id}/events` will receive no
+   structured completion payload unless the bridge adds explicit queued/progress/
+   completed events or documents that op-runs are **poll-only** through
+   `GET /v1/runs/{id}`. If a dedicated `ensemble_review_status` MCP sibling is
+   chosen, it can avoid promising an inert SSE path. Add a route-level test that an
+   op-run either emits a final event carrying the same result as `GET /v1/runs/{id}`
+   or that `/events` is intentionally not part of the contract.
+
+2. **Returned items can describe a different round than the returned `artifact`
+   unless the result carries round/source metadata (P1b).** §5 says to return the
+   items from the final round that ran, but `delegate_roundtable_run` does not always
+   return the final round's consolidated text. It tracks `best_artifact` using the
+   reason scorer (`delegate_ensemble.c:1110-1117`) and finally returns
+   `best_artifact ? best_artifact : artifact` (`:1188`). On a later lower-scored
+   round, a post-fan-out cost cap, or a degraded exit, the captured "final round"
+   items may refer to a review round whose consolidated prose is **not** the
+   `artifact` the caller sees. That mismatch is manageable, but it must be explicit:
+   either capture the items from the same round that produced `best_artifact`, or
+   return `items_round`, `artifact_round`/`best_round`, and a `partial` flag so an
+   agent knows whether the findings and prose are aligned. Add a regression where
+   round 1 is best, round 2 produces different items, and the API asserts the chosen
+   alignment contract.
+
+3. **New result fields should choose a casing contract per surface.** The existing
+   V1 roundtable response is snake_case (`rounds_run`, `cost_capped`,
+   `deadline_hit`, `cost_usd`; `server_compute.c:1802-1811`), while the proposal
+   names the new arrays `answeredQuestions` and `coverageGaps`. That mixes two JSON
+   styles inside one response object and will leak into OpenAPI/SDK generation
+   (§15.2). Pick one of these explicitly: snake_case for the V1 HTTP/direct
+   handler (`answered_questions`, `coverage_gaps`) with an MCP `structuredContent`
+   translation to camelCase if desired, or camelCase everywhere with compatibility
+   aliases/tests for the existing snake_case fields. The smallest-compatible path is
+   snake_case on `/v1/delegate/roundtable` and `/v1/runs/{id}.result`, plus
+   documented MCP-specific names only if the MCP envelope deliberately differs.
