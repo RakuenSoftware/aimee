@@ -991,6 +991,7 @@ static void *run_job_worker(void *arg)
    }
 
    openai_runs_store_set_status(j->run_id, OPENAI_RUN_IN_PROGRESS);
+   openai_runs_store_update_json(j->run_id, run_status_json(j, "in_progress", buf, RUN_JSON_CAP));
    openai_runs_store_append_event(j->run_id, "response.in_progress",
                                   run_status_json(j, "in_progress", buf, RUN_JSON_CAP));
 

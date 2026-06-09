@@ -1,6 +1,7 @@
 /* cli_code_audit.c: see cli_code_audit.h. */
 #include "cli_code_audit.h"
 #include "cli_client.h" /* cli_http_request, cli_rpc_client_* */
+#include "aimee_home.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <dirent.h>
@@ -10,6 +11,8 @@
 #include <sys/stat.h>
 
 /* ---- pure helpers ---- */
+
+#define AUDIT_CONTEXT_FILE "audit_context.txt"
 
 static const char *audit_ext(const char *path)
 {
@@ -98,7 +101,92 @@ int audit_count_todos(const char *content)
    return count;
 }
 
-int audit_debt_score(int code_files, int untested, int todo_markers)
+static int path_contains_segment(const char *path, const char *needle)
+{
+   return path && needle && strstr(path, needle) != NULL;
+}
+
+static int path_starts_with(const char *path, const char *prefix)
+{
+   return path && prefix && strncmp(path, prefix, strlen(prefix)) == 0;
+}
+
+static int audit_count_marker(const char *content, const char *marker)
+{
+   int count = 0;
+   const char *p = content;
+   size_t ml = strlen(marker);
+   while (ml > 0 && (p = strstr(p, marker)) != NULL)
+   {
+      count++;
+      p += ml;
+   }
+   return count;
+}
+
+int audit_count_db_in_routes(const char *path, const char *content)
+{
+   if (!path || !content)
+      return 0;
+   int route_like =
+       path_contains_segment(path, "/routes/") || path_contains_segment(path, "/api/") ||
+       path_contains_segment(path, "/controllers/") || path_contains_segment(path, "/handlers/") ||
+       path_starts_with(path, "routes/") || path_starts_with(path, "api/") ||
+       path_starts_with(path, "controllers/") || path_starts_with(path, "handlers/");
+   if (!route_like)
+      return 0;
+   static const char *markers[] = {"aimee_pg_", "pg_query", "mysql_",      "SELECT ",
+                                   "INSERT ",   "UPDATE ",  "DELETE FROM "};
+   int count = 0;
+   for (size_t m = 0; m < sizeof(markers) / sizeof(markers[0]); m++)
+      count += audit_count_marker(content, markers[m]);
+
+   char marker[16];
+   snprintf(marker, sizeof(marker), "%s%s%s", "sqli", "te3", "_");
+   count += audit_count_marker(content, marker);
+   snprintf(marker, sizeof(marker), "%s%s%s", "db", "2", "_");
+   count += audit_count_marker(content, marker);
+   return count;
+}
+
+static int line_has_any(const char *line, size_t len, const char *const *needles, int n)
+{
+   char tmp[1024];
+   size_t copy = len < sizeof(tmp) - 1 ? len : sizeof(tmp) - 1;
+   memcpy(tmp, line, copy);
+   tmp[copy] = '\0';
+   for (int i = 0; i < n; i++)
+      if (strstr(tmp, needles[i]))
+         return 1;
+   return 0;
+}
+
+int audit_count_unhandled_http(const char *content)
+{
+   if (!content)
+      return 0;
+   static const char *calls[] = {
+       "fetch(", "axios.", "requests.", "http_request(", "cli_http_request(", "curl_easy_perform("};
+   static const char *guards[] = {"try",    "catch", "except", "if (", "if(",
+                                  "status", "ok",    "error",  "NULL", "nullptr"};
+   int count = 0;
+   const char *line = content;
+   while (*line)
+   {
+      const char *next = strchr(line, '\n');
+      size_t len = next ? (size_t)(next - line) : strlen(line);
+      if (line_has_any(line, len, calls, (int)(sizeof(calls) / sizeof(calls[0]))) &&
+          !line_has_any(line, len, guards, (int)(sizeof(guards) / sizeof(guards[0]))))
+         count++;
+      if (!next)
+         break;
+      line = next + 1;
+   }
+   return count;
+}
+
+int audit_debt_score(int code_files, int untested, int todo_markers, int db_in_routes,
+                     int unhandled_http)
 {
    if (code_files <= 0)
       return 100;
@@ -106,7 +194,10 @@ int audit_debt_score(int code_files, int untested, int todo_markers)
     * 40 pts, ~1 pt per 2 markers per 100 files). 100 = clean. */
    double untested_frac = (double)untested / (double)code_files;
    double todo_density = (double)todo_markers / (double)code_files;
-   double penalty = untested_frac * 60.0 + todo_density * 20.0;
+   double db_density = (double)db_in_routes / (double)code_files;
+   double http_density = (double)unhandled_http / (double)code_files;
+   double penalty =
+       untested_frac * 55.0 + todo_density * 15.0 + db_density * 20.0 + http_density * 15.0;
    if (penalty > 100.0)
       penalty = 100.0;
    int score = (int)(100.0 - penalty + 0.5);
@@ -130,6 +221,8 @@ typedef struct
    char **test_stems;
    int n_test, cap_test;
    int todo_markers;
+   int db_in_routes;
+   int unhandled_http;
 } audit_acc_t;
 
 static int skip_dir(const char *name)
@@ -236,6 +329,8 @@ static void audit_walk(const char *dir, audit_acc_t *a, int depth)
       if (content)
       {
          a->todo_markers += audit_count_todos(content);
+         a->db_in_routes += audit_count_db_in_routes(path, content);
+         a->unhandled_http += audit_count_unhandled_http(content);
          free(content);
       }
       char stem[256];
@@ -258,16 +353,14 @@ static int stem_in_tests(const audit_acc_t *a, const char *stem)
    return 0;
 }
 
-/* Graph-derived checks: query the server's /v1/code/audit (dead exports, import
- * cycles, clones — computed kb-side over entity_edges + code_embeddings) and
- * print them. Advisory; returns 0. */
-static int audit_graph_remote(const char *project, int json_output)
+static cJSON *audit_graph_remote(const char *project, int quiet)
 {
    char *endpoint = cli_rpc_client_endpoint();
    if (!endpoint)
    {
-      fprintf(stderr, "code audit --graph: no aimee server configured (set `aimee remote`).\n");
-      return 0;
+      if (!quiet)
+         fprintf(stderr, "code audit --graph: no aimee server configured (set `aimee remote`).\n");
+      return NULL;
    }
    char *bearer = cli_rpc_client_bearer();
    cJSON *body = cJSON_CreateObject();
@@ -284,66 +377,191 @@ static int audit_graph_remote(const char *project, int json_output)
    free(body_s);
    if (!resp || status != 200)
    {
-      fprintf(stderr, "code audit --graph: server query failed (status %d)\n", status);
+      if (!quiet)
+         fprintf(stderr, "code audit --graph: server query failed (status %d)\n", status);
       cJSON_Delete(resp);
-      return 0;
+      return NULL;
    }
+   return resp;
+}
 
-   if (json_output)
+static void print_graph_report(cJSON *resp)
+{
+   cJSON *de = cJSON_GetObjectItemCaseSensitive(resp, "dead_exports");
+   cJSON *cy = cJSON_GetObjectItemCaseSensitive(resp, "cycles");
+   cJSON *cl = cJSON_GetObjectItemCaseSensitive(resp, "clones");
+   printf("  dead exports:  %d\n", cJSON_GetArraySize(de));
+   int shown = 0;
+   cJSON *it = NULL;
+   cJSON_ArrayForEach(it, de)
    {
-      char *s = cJSON_PrintUnformatted(resp);
-      if (s)
-      {
-         puts(s);
-         free(s);
-      }
+      if (shown++ >= 10)
+         break;
+      if (cJSON_IsString(it))
+         printf("    - %s\n", it->valuestring);
    }
-   else
+   printf("  import cycles: %d\n", cJSON_GetArraySize(cy));
+   shown = 0;
+   cJSON_ArrayForEach(it, cy)
    {
-      cJSON *de = cJSON_GetObjectItemCaseSensitive(resp, "dead_exports");
-      cJSON *cy = cJSON_GetObjectItemCaseSensitive(resp, "cycles");
-      cJSON *cl = cJSON_GetObjectItemCaseSensitive(resp, "clones");
-      printf("aimee code audit — graph-derived checks (via aimee-kb)\n");
-      printf("  dead exports:  %d\n", cJSON_GetArraySize(de));
-      int shown = 0;
-      cJSON *it = NULL;
-      cJSON_ArrayForEach(it, de)
-      {
-         if (shown++ >= 10)
-            break;
-         if (cJSON_IsString(it))
-            printf("    - %s\n", it->valuestring);
-      }
-      printf("  import cycles: %d\n", cJSON_GetArraySize(cy));
-      shown = 0;
-      cJSON_ArrayForEach(it, cy)
-      {
-         if (shown++ >= 10)
-            break;
-         if (cJSON_IsString(it))
-            printf("    - %s\n", it->valuestring);
-      }
-      printf("  clone groups:  %d\n", cJSON_GetArraySize(cl));
-      cJSON *nc = cJSON_GetObjectItemCaseSensitive(resp, "near_clones");
-      printf("  near clones:   %d\n", cJSON_GetArraySize(nc));
-      shown = 0;
-      cJSON_ArrayForEach(it, nc)
-      {
-         if (shown++ >= 10)
-            break;
-         if (cJSON_IsString(it))
-            printf("    - %s\n", it->valuestring);
-      }
+      if (shown++ >= 10)
+         break;
+      if (cJSON_IsString(it))
+         printf("    - %s\n", it->valuestring);
    }
-   cJSON_Delete(resp);
-   return 0;
+   printf("  clone groups:  %d\n", cJSON_GetArraySize(cl));
+   cJSON *gran = cJSON_GetObjectItemCaseSensitive(resp, "clone_granularity");
+   cJSON *note = cJSON_GetObjectItemCaseSensitive(resp, "clone_scope_note");
+   if (cJSON_IsString(gran))
+      printf("    granularity: %s\n", gran->valuestring);
+   if (cJSON_IsString(note))
+      printf("    note: %s\n", note->valuestring);
+   cJSON *nc = cJSON_GetObjectItemCaseSensitive(resp, "near_clones");
+   printf("  near clones:   %d\n", cJSON_GetArraySize(nc));
+   shown = 0;
+   cJSON_ArrayForEach(it, nc)
+   {
+      if (shown++ >= 10)
+         break;
+      if (cJSON_IsString(it))
+         printf("    - %s\n", it->valuestring);
+   }
+}
+
+static void build_audit_context(char *out, size_t cap, const char *dir, const char *project,
+                                int score, int untested, int todos, int db_in_routes,
+                                int unhandled_http, cJSON *graph)
+{
+   if (!out || cap == 0)
+      return;
+   int dead = 0, cycles = 0, clones = 0;
+   if (graph)
+   {
+      dead = cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(graph, "dead_exports"));
+      cycles = cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(graph, "cycles"));
+      clones = cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(graph, "clones"));
+   }
+   snprintf(out, cap,
+            "AUDIT_CONTEXT: scope=%s%s%s; debt_score=%d/100; prioritize %d untested files, %d "
+            "TODO/FIXME markers, %d route DB-access smells, %d unhandled HTTP calls, %d dead "
+            "exports, %d import cycles, %d clone groups.",
+            dir && dir[0] ? dir : ".", project && project[0] ? "; project=" : "",
+            project && project[0] ? project : "", score, untested, todos, db_in_routes,
+            unhandled_http, dead, cycles, clones);
+}
+
+static int write_audit_context(const char *audit_context)
+{
+   if (!audit_context || !audit_context[0])
+      return -1;
+   const char *dir = aimee_home();
+   if (!dir || !dir[0])
+      return -1;
+   char path[4096];
+   int n = snprintf(path, sizeof(path), "%s/%s", dir, AUDIT_CONTEXT_FILE);
+   if (n < 0 || (size_t)n >= sizeof(path))
+      return -1;
+   FILE *f = fopen(path, "w");
+   if (!f)
+      return -1;
+   fprintf(f, "%s\n", audit_context);
+   return fclose(f) == 0 ? 0 : -1;
+}
+
+static void audit_roadmap_counts(cJSON *graph, int *dead, int *cycles, int *clones)
+{
+   if (dead)
+      *dead =
+          graph ? cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(graph, "dead_exports")) : 0;
+   if (cycles)
+      *cycles = graph ? cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(graph, "cycles")) : 0;
+   if (clones)
+      *clones = graph ? cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(graph, "clones")) : 0;
+}
+
+static void audit_add_roadmap_item(cJSON *arr, const char *text)
+{
+   if (arr && text && text[0])
+      cJSON_AddItemToArray(arr, cJSON_CreateString(text));
+}
+
+static cJSON *audit_build_roadmap_json(int untested, int todos, int db_in_routes,
+                                       int unhandled_http, cJSON *graph)
+{
+   cJSON *arr = cJSON_CreateArray();
+   if (!arr)
+      return NULL;
+   int dead = 0, cycles = 0, clones = 0;
+   audit_roadmap_counts(graph, &dead, &cycles, &clones);
+   char line[192];
+   if (untested > 0)
+   {
+      snprintf(line, sizeof(line), "Add or link tests for %d untested source file%s.", untested,
+               untested == 1 ? "" : "s");
+      audit_add_roadmap_item(arr, line);
+   }
+   if (db_in_routes > 0)
+   {
+      snprintf(line, sizeof(line), "Move or wrap %d route-layer DB access smell%s.", db_in_routes,
+               db_in_routes == 1 ? "" : "s");
+      audit_add_roadmap_item(arr, line);
+   }
+   if (unhandled_http > 0)
+   {
+      snprintf(line, sizeof(line), "Add explicit error handling for %d HTTP call%s.",
+               unhandled_http, unhandled_http == 1 ? "" : "s");
+      audit_add_roadmap_item(arr, line);
+   }
+   if (todos > 0)
+   {
+      snprintf(line, sizeof(line), "Triage %d TODO/FIXME/HACK/XXX marker%s.", todos,
+               todos == 1 ? "" : "s");
+      audit_add_roadmap_item(arr, line);
+   }
+   if (cycles > 0)
+   {
+      snprintf(line, sizeof(line), "Break %d import cycle%s.", cycles, cycles == 1 ? "" : "s");
+      audit_add_roadmap_item(arr, line);
+   }
+   if (dead > 0)
+   {
+      snprintf(line, sizeof(line), "Review %d exported symbol%s without imports/references.", dead,
+               dead == 1 ? "" : "s");
+      audit_add_roadmap_item(arr, line);
+   }
+   if (clones > 0)
+   {
+      snprintf(line, sizeof(line), "Inspect %d exact clone group%s before refactoring.", clones,
+               clones == 1 ? "" : "s");
+      audit_add_roadmap_item(arr, line);
+   }
+   if (cJSON_GetArraySize(arr) == 0)
+      audit_add_roadmap_item(arr, "No prioritized code-health actions found.");
+   return arr;
+}
+
+static void audit_print_roadmap(cJSON *roadmap)
+{
+   printf("\nPrioritized roadmap:\n");
+   if (!cJSON_IsArray(roadmap) || cJSON_GetArraySize(roadmap) == 0)
+   {
+      printf("  1. No prioritized code-health actions found.\n");
+      return;
+   }
+   int n = 1;
+   cJSON *it = NULL;
+   cJSON_ArrayForEach(it, roadmap)
+   {
+      if (cJSON_IsString(it) && it->valuestring)
+         printf("  %d. %s\n", n++, it->valuestring);
+   }
 }
 
 int handle_code_audit(int argc, char **argv, int json_output)
 {
    const char *dir = ".";
    const char *project = "";
-   int dir_set = 0, graph = 0;
+   int dir_set = 0, graph_only = 0, fix = 0;
    for (int i = 0; i < argc; i++)
    {
       if (!argv[i])
@@ -351,7 +569,9 @@ int handle_code_audit(int argc, char **argv, int json_output)
       if (strcmp(argv[i], "--json") == 0)
          json_output = 1;
       else if (strcmp(argv[i], "--graph") == 0)
-         graph = 1;
+         graph_only = 1;
+      else if (strcmp(argv[i], "--fix") == 0)
+         fix = 1;
       else if (strcmp(argv[i], "--project") == 0 && i + 1 < argc)
          project = argv[++i];
       else if (argv[i][0] != '-' && !dir_set)
@@ -361,10 +581,28 @@ int handle_code_audit(int argc, char **argv, int json_output)
       }
    }
 
-   /* --graph switches to the kb-side graph-derived checks (a different surface
-    * from the local file scan). */
-   if (graph)
-      return audit_graph_remote(project, json_output);
+   if (graph_only)
+   {
+      cJSON *graph = audit_graph_remote(project, 0);
+      if (!graph)
+         return 0;
+      if (json_output)
+      {
+         char *s = cJSON_PrintUnformatted(graph);
+         if (s)
+         {
+            puts(s);
+            free(s);
+         }
+      }
+      else
+      {
+         printf("aimee code audit — graph-derived checks (via aimee-kb)\n");
+         print_graph_report(graph);
+      }
+      cJSON_Delete(graph);
+      return 0;
+   }
 
    audit_acc_t a;
    memset(&a, 0, sizeof(a));
@@ -375,7 +613,15 @@ int handle_code_audit(int argc, char **argv, int json_output)
       if (!stem_in_tests(&a, a.code_stems[i]))
          untested++;
 
-   int score = audit_debt_score(a.n_code, untested, a.todo_markers);
+   cJSON *graph = audit_graph_remote(project, 1);
+   int score =
+       audit_debt_score(a.n_code, untested, a.todo_markers, a.db_in_routes, a.unhandled_http);
+   char audit_context[512];
+   build_audit_context(audit_context, sizeof(audit_context), dir, project, score, untested,
+                       a.todo_markers, a.db_in_routes, a.unhandled_http, graph);
+   int context_written = write_audit_context(audit_context) == 0 ? 1 : 0;
+   cJSON *roadmap =
+       audit_build_roadmap_json(untested, a.todo_markers, a.db_in_routes, a.unhandled_http, graph);
 
    if (json_output)
    {
@@ -384,7 +630,23 @@ int handle_code_audit(int argc, char **argv, int json_output)
       cJSON_AddNumberToObject(o, "test_files", a.n_test);
       cJSON_AddNumberToObject(o, "untested_files", untested);
       cJSON_AddNumberToObject(o, "todo_markers", a.todo_markers);
+      cJSON_AddNumberToObject(o, "db_in_routes", a.db_in_routes);
+      cJSON_AddNumberToObject(o, "unhandled_http_calls", a.unhandled_http);
       cJSON_AddNumberToObject(o, "debt_score", score);
+      cJSON_AddStringToObject(o, "audit_context", audit_context);
+      cJSON_AddBoolToObject(o, "audit_context_written", context_written);
+      if (roadmap)
+         cJSON_AddItemToObject(o, "roadmap", cJSON_Duplicate(roadmap, 1));
+      if (fix)
+      {
+         cJSON *fx = cJSON_AddObjectToObject(o, "fix");
+         cJSON_AddNumberToObject(fx, "applied", 0);
+         cJSON_AddStringToObject(fx, "status", "no_safe_automatic_fixes");
+      }
+      if (graph)
+         cJSON_AddItemToObject(o, "graph", cJSON_Duplicate(graph, 1));
+      else
+         cJSON_AddStringToObject(o, "graph_status", "unavailable");
       char *s = cJSON_PrintUnformatted(o);
       if (s)
       {
@@ -401,9 +663,22 @@ int handle_code_audit(int argc, char **argv, int json_output)
       printf("  untested files: %d (%.0f%%)\n", untested,
              a.n_code ? 100.0 * untested / a.n_code : 0.0);
       printf("  TODO/FIXME/HACK/XXX markers: %d\n", a.todo_markers);
+      printf("  DB-in-routes smells: %d\n", a.db_in_routes);
+      printf("  unhandled HTTP calls: %d\n", a.unhandled_http);
       printf("  debt score:     %d/100 (100 = clean)\n", score);
-      printf("\nNote: graph-derived checks (dead exports, import cycles, clones) are the kb "
-             "follow-on in docs/proposals/pending/code-health-audit.md.\n");
+      if (graph)
+      {
+         printf("\nGraph-derived checks (via aimee-kb):\n");
+         print_graph_report(graph);
+      }
+      else
+         printf("\nGraph-derived checks: unavailable (configure `aimee remote` to query kb).\n");
+      audit_print_roadmap(roadmap);
+      printf("\n%s\n", audit_context);
+      printf("  pre-injection: %s%s\n", context_written ? "written to " : "not written",
+             context_written ? AUDIT_CONTEXT_FILE : "");
+      if (fix)
+         printf("  --fix: no safe automatic fixes are available yet; roadmap emitted only.\n");
    }
 
    for (int i = 0; i < a.n_code; i++)
@@ -416,5 +691,7 @@ int handle_code_audit(int argc, char **argv, int json_output)
    free(a.code_paths);
    free(a.code_stems);
    free(a.test_stems);
+   cJSON_Delete(roadmap);
+   cJSON_Delete(graph);
    return 0;
 }

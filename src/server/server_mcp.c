@@ -25,6 +25,7 @@
 #include "server_mcp_delegate.h"
 #include "server_mcp_workflows.h"
 #include "server_mcp_gateway.h"
+#include "server_http.h"
 #include "headers/conversation_context.h"
 #include "headers/payload_rewrite.h"
 #include "headers/session_search_tool.h"
@@ -90,6 +91,95 @@ static int send_mcp_result_structured(server_conn_t *conn, cJSON *content, cJSON
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "content", content);
    cJSON_AddItemToObject(resp, "structuredContent", structured);
+   return server_send_ok(conn, resp);
+}
+
+static int handle_mcp_ensemble_review(server_conn_t *conn, cJSON *args)
+{
+   cJSON *diff = cJSON_GetObjectItemCaseSensitive(args, "diff");
+   if (!cJSON_IsString(diff) || !diff->valuestring || !diff->valuestring[0])
+      return server_send_error(conn, "ensemble_review requires 'diff'", NULL);
+   if (strlen(diff->valuestring) < 20)
+      return server_send_error(conn, "ensemble_review requires 'diff' of at least 20 characters",
+                               NULL);
+
+   cJSON *body = cJSON_CreateObject();
+   if (!body)
+      return server_send_error(conn, "out of memory", NULL);
+   cJSON_AddStringToObject(body, "prompt", diff->valuestring);
+   cJSON_AddStringToObject(body, "mode", "review");
+   cJSON *brief = cJSON_GetObjectItemCaseSensitive(args, "brief");
+   if (brief)
+   {
+      if (!cJSON_IsObject(brief) && !cJSON_IsString(brief))
+      {
+         cJSON_Delete(body);
+         return server_send_error(conn, "ensemble_review 'brief' must be a string or object", NULL);
+      }
+      cJSON *brief_copy = cJSON_Duplicate(brief, 1);
+      if (!brief_copy)
+      {
+         cJSON_Delete(body);
+         return server_send_error(conn, "out of memory", NULL);
+      }
+      cJSON_AddItemToObject(body, "brief", brief_copy);
+   }
+   cJSON *rounds = cJSON_GetObjectItemCaseSensitive(args, "rounds");
+   if (rounds)
+   {
+      if (!cJSON_IsNumber(rounds) || rounds->valuedouble < 1 || rounds->valuedouble > 16 ||
+          rounds->valuedouble != (double)rounds->valueint)
+      {
+         cJSON_Delete(body);
+         return server_send_error(conn, "ensemble_review 'rounds' must be an integer from 1 to 16",
+                                  NULL);
+      }
+      cJSON_AddNumberToObject(body, "rounds", rounds->valuedouble);
+   }
+   cJSON *turns = cJSON_GetObjectItemCaseSensitive(args, "turns");
+   if (turns)
+   {
+      if (!cJSON_IsString(turns) || (strcmp(turns->valuestring, "parallel") != 0 &&
+                                     strcmp(turns->valuestring, "sequential") != 0))
+      {
+         cJSON_Delete(body);
+         return server_send_error(conn, "ensemble_review 'turns' must be parallel or sequential",
+                                  NULL);
+      }
+      cJSON_AddStringToObject(body, "turns", turns->valuestring);
+   }
+
+   char *line = cJSON_PrintUnformatted(body);
+   cJSON_Delete(body);
+   if (!line)
+      return server_send_error(conn, "out of memory", NULL);
+
+   char respbuf[8192];
+   int st = server_http_submit_op_run("delegate.roundtable", line, conn->capabilities, respbuf,
+                                      sizeof(respbuf));
+   free(line);
+   if (st < 200 || st >= 300)
+   {
+      cJSON *err = cJSON_Parse(respbuf);
+      cJSON *msg = err ? cJSON_GetObjectItemCaseSensitive(err, "error") : NULL;
+      const char *text = cJSON_IsString(msg) ? msg->valuestring : "could not queue ensemble_review";
+      int rc = server_send_error(conn, text, NULL);
+      cJSON_Delete(err);
+      return rc;
+   }
+
+   cJSON *snap = cJSON_Parse(respbuf);
+   if (!snap)
+      return server_send_error(conn, "could not parse queued run", NULL);
+   cJSON *id = cJSON_GetObjectItemCaseSensitive(snap, "id");
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(snap, "status");
+   cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "run_id", cJSON_IsString(id) ? id->valuestring : "");
+   cJSON_AddStringToObject(resp, "id", cJSON_IsString(id) ? id->valuestring : "");
+   cJSON_AddStringToObject(resp, "object", "op.run");
+   cJSON_AddStringToObject(resp, "method", "delegate.roundtable");
+   cJSON_AddStringToObject(resp, "status", cJSON_IsString(status) ? status->valuestring : "queued");
+   cJSON_Delete(snap);
    return server_send_ok(conn, resp);
 }
 static cJSON *tool_get_help(cJSON *args)
@@ -1404,6 +1494,14 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (strcmp(tool, "delegate_status") == 0)
    {
       int rc = handle_delegate_status(ctx, conn, jargs);
+      if (owns_jargs)
+         cJSON_Delete(jargs);
+      return rc;
+   }
+
+   if (strcmp(tool, "ensemble_review") == 0)
+   {
+      int rc = handle_mcp_ensemble_review(conn, jargs);
       if (owns_jargs)
          cJSON_Delete(jargs);
       return rc;

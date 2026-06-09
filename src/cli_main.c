@@ -1803,12 +1803,13 @@ int main(int argc, char **argv)
    if (strcmp(cmd, "hooks") == 0)
       return handle_hooks(sub_argc, sub_argv, json_output);
 
-   /* Code audit (P4): `aimee code audit [dir] [--json]` — local file-health scan. */
+   /* Code audit (P4): local file-health scan plus kb graph checks when available. */
    if (strcmp(cmd, "code") == 0)
    {
       if (sub_argc >= 1 && strcmp(sub_argv[0], "audit") == 0)
          return handle_code_audit(sub_argc - 1, sub_argv + 1, json_output);
-      fprintf(stderr, "usage: aimee code audit [dir] [--json]\n");
+      fprintf(stderr,
+              "usage: aimee code audit [dir] [--json] [--project NAME] [--graph] [--fix]\n");
       return 2;
    }
 

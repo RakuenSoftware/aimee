@@ -29,6 +29,20 @@ static void copy_sqlite_err(char *errbuf, size_t errlen, const char *src)
  * domain APIs. The SQLite-flavoured DB2 schema lives in
  * src/db2/schema_sqlite.sql and is embedded as AIMEE_DB2_SCHEMA_SQLITE_SQL. */
 
+#ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
+static void db2_run_sqlite_migrations(sqlite3 *db)
+{
+   /* Each statement is independent; duplicate-column / missing-table errors are
+    * ignored so legacy and fresh DBs both continue to the canonical schema. */
+   static const char *migrations[] = {
+       "ALTER TABLE code_embeddings ADD COLUMN body_hash TEXT NOT NULL DEFAULT ''",
+       NULL,
+   };
+   for (int i = 0; migrations[i]; i++)
+      sqlite3_exec(db, migrations[i], NULL, NULL, NULL);
+}
+#endif
+
 int db_apply_schema_postgres(void *pg_conn, char *errbuf, size_t errlen)
 {
    if (!pg_conn)
@@ -50,6 +64,7 @@ int db2_apply_schema_sqlite_shim(sqlite3 *db, char *errbuf, size_t errlen)
       copy_sqlite_err(errbuf, errlen, "sqlite shim unavailable");
       return -1;
    }
+   db2_run_sqlite_migrations(db);
    char *err = NULL;
    int rc = sqlite3_exec(db, AIMEE_DB2_SCHEMA_SQLITE_SQL, NULL, NULL, &err);
    if (rc != SQLITE_OK)

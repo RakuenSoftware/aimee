@@ -148,6 +148,59 @@ static void test_key_tables_exist(void)
    sqlite3_close(db);
 }
 
+static int sqlite_column_exists(sqlite3 *db, const char *table, const char *column)
+{
+   char sql[256];
+   snprintf(sql, sizeof(sql), "PRAGMA table_info(%s)", table);
+   sqlite3_stmt *stmt = NULL;
+   assert(sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) == SQLITE_OK);
+   int found = 0;
+   while (sqlite3_step(stmt) == SQLITE_ROW)
+   {
+      const unsigned char *name = sqlite3_column_text(stmt, 1);
+      if (name && strcmp((const char *)name, column) == 0)
+      {
+         found = 1;
+         break;
+      }
+   }
+   sqlite3_finalize(stmt);
+   return found;
+}
+
+static void test_db2_sqlite_code_embeddings_body_hash_migration(void)
+{
+   sqlite3 *db = NULL;
+   assert(sqlite3_open(":memory:", &db) == SQLITE_OK);
+   db1_apply_pragmas(db, DB_MODE_CLI);
+   assert(sqlite3_exec(db,
+                       "CREATE TABLE code_embeddings ("
+                       " point_id INTEGER PRIMARY KEY,"
+                       " embedding TEXT NOT NULL DEFAULT '[]',"
+                       " project TEXT NOT NULL DEFAULT '',"
+                       " node_key TEXT NOT NULL DEFAULT '',"
+                       " file_path TEXT NOT NULL DEFAULT '',"
+                       " symbol TEXT NOT NULL DEFAULT '',"
+                       " record_type TEXT NOT NULL DEFAULT 'code_unit',"
+                       " content_hash TEXT NOT NULL DEFAULT '',"
+                       " source_hash TEXT NOT NULL DEFAULT '',"
+                       " payload_json TEXT NOT NULL DEFAULT '',"
+                       " updated_at TEXT NOT NULL DEFAULT (datetime('now')))",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   assert(!sqlite_column_exists(db, "code_embeddings", "body_hash"));
+
+   char err[512] = {0};
+   assert(db2_apply_schema_sqlite_shim(db, err, sizeof(err)) == 0);
+   assert(sqlite_column_exists(db, "code_embeddings", "body_hash"));
+   assert(sqlite3_exec(db,
+                       "INSERT INTO code_embeddings"
+                       " (point_id, project, node_key, content_hash, body_hash)"
+                       " VALUES (1, 'p', 'file:p:a.c', 'content', 'body')",
+                       NULL, NULL, NULL) == SQLITE_OK);
+
+   sqlite3_close(db);
+}
+
 static void test_trigger_run_change_counts(void)
 {
    char path[PATH_MAX];
@@ -751,6 +804,7 @@ int main(void)
    test_prepare_cache_different_queries();
    test_migrations_idempotent();
    test_key_tables_exist();
+   test_db2_sqlite_code_embeddings_body_hash_migration();
    test_trigger_run_change_counts();
    test_cron_job_history_round_trip();
    test_model_catalog_cache();
