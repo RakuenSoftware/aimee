@@ -199,6 +199,21 @@ cJSON *mcp_build_tools_list(void)
                             "Assemble a deterministic memory context block for a query.", s));
    }
 
+   /* memory_get */
+   {
+      cJSON *s = cJSON_CreateObject();
+      cJSON_AddStringToObject(s, "type", "object");
+      cJSON *p = cJSON_AddObjectToObject(s, "properties");
+      cJSON *id = cJSON_AddObjectToObject(p, "id");
+      cJSON_AddStringToObject(id, "type", "integer");
+      cJSON_AddStringToObject(id, "description", "Memory row id to fetch");
+      cJSON *h = cJSON_AddObjectToObject(p, "handle");
+      cJSON_AddStringToObject(h, "type", "string");
+      cJSON_AddStringToObject(h, "description", "Handle emitted in previews, e.g. memory:123");
+      cJSON_AddItemToArray(
+          tools, build_tool("memory_get", "Fetch a full memory by id or memory:<id> handle.", s));
+   }
+
    /* list_facts */
    {
       cJSON *s = cJSON_CreateObject();

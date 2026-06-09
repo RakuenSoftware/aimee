@@ -897,6 +897,12 @@ extern "C"
    int db2_memory_summaries_list(int64_t memory_id, int limit, db2_memory_summary_row_t *out,
                                  int max);
 
+   /* Shadow-mode learned retrieval shortcut observation. Records a normalized
+    * query and the ordered top memory ids produced by the normal blend. Stable
+    * repeated mappings are promoted in-store, but callers still run normal
+    * recall; consumers can use the table later to safely short-circuit. */
+   int db2_retrieval_shortcut_observe(const char *normalized_query, const int64_t *ids, int count);
+
    /* INSERT OR UPDATE memory_summaries(memory_id, scope, summary).
     * Empty `scope` defaults to "headline". Best-effort; no return. */
    void db2_memory_summary_upsert(int64_t memory_id, const char *scope, const char *summary);

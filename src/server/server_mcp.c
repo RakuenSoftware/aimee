@@ -2,6 +2,7 @@
 #include "server.h"
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
+#include "dstr.h"
 #include "commands.h"
 #include "db2/curiosity.h"
 #include "memory.h"
@@ -593,6 +594,43 @@ static cJSON *tool_get_context_block(cJSON *args)
       return text_content("No context block available.");
    cJSON *result = text_content(ctx);
    free(ctx);
+   return result;
+}
+
+static cJSON *tool_memory_get(cJSON *args)
+{
+   cJSON *jid = cJSON_GetObjectItemCaseSensitive(args, "id");
+   cJSON *jh = cJSON_GetObjectItemCaseSensitive(args, "handle");
+   int64_t id = 0;
+   if (cJSON_IsNumber(jid))
+      id = (int64_t)jid->valuedouble;
+   else if (cJSON_IsString(jh))
+   {
+      const char *s = jh->valuestring;
+      if (strncmp(s, "memory:", 7) == 0)
+         s += 7;
+      id = (int64_t)strtoll(s, NULL, 10);
+   }
+   if (id <= 0)
+      return text_content("error: missing memory id or memory:<id> handle");
+
+   memory_t m;
+   if (kb_client_memory_get(id, &m) != 0)
+      return text_content("No memory found.");
+
+   dstr_t d;
+   dstr_init(&d);
+   dstr_appendf(&d, "Memory: memory:%lld\nTier: %s\nKind: %s\nKey: %s\nConfidence: %.3f\n",
+                (long long)m.id, m.tier, m.kind, m.key, m.confidence);
+   if (m.headline[0])
+      dstr_appendf(&d, "Headline: %s\n", m.headline);
+   if (m.updated_at[0])
+      dstr_appendf(&d, "Updated: %s\n", m.updated_at);
+   dstr_append_str(&d, "\n");
+   dstr_append_str(&d, m.content);
+   char *rendered = dstr_steal(&d);
+   cJSON *result = text_content(rendered ? rendered : "");
+   free(rendered);
    return result;
 }
 

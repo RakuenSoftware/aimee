@@ -7,6 +7,7 @@ typedef struct
    char tier[4];
    char kind[16];
    char key[512];
+   char headline[512];
    char content[2048];
    double confidence;
    int use_count;

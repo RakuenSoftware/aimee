@@ -42,6 +42,7 @@ static cJSON *mcph_get_episode(struct mcp_call *c) { return tool_get_episode(c->
 static cJSON *mcph_get_entity(struct mcp_call *c) { return tool_get_entity(c->jargs); }
 static cJSON *mcph_get_entity_edges(struct mcp_call *c) { return tool_get_entity_edges(c->jargs); }
 static cJSON *mcph_get_context_block(struct mcp_call *c) { return tool_get_context_block(c->jargs); }
+static cJSON *mcph_memory_get(struct mcp_call *c) { return tool_memory_get(c->jargs); }
 static cJSON *mcph_list_facts(struct mcp_call *c) { (void)c; return tool_list_facts(); }
 static cJSON *mcph_memory_briefing(struct mcp_call *c) { return tool_memory_briefing(c->jargs); }
 static cJSON *mcph_get_identity(struct mcp_call *c) { (void)c; return tool_get_identity(); }
@@ -494,6 +495,7 @@ static const struct
     {"get_entity", mcph_get_entity},
     {"get_entity_edges", mcph_get_entity_edges},
     {"get_context_block", mcph_get_context_block},
+    {"memory_get", mcph_memory_get},
     {"list_facts", mcph_list_facts},
     {"memory_briefing", mcph_memory_briefing},
     {"get_identity", mcph_get_identity},

@@ -4479,6 +4479,13 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
                                  &out[i].parts);
       out[i].parts.confidence = matches[i].confidence;
    }
+   {
+      int64_t shortcut_ids[8];
+      int shortcut_n = count < 8 ? count : 8;
+      for (int i = 0; i < shortcut_n; i++)
+         shortcut_ids[i] = out[i].memory.id;
+      (void)db2_retrieval_shortcut_observe(norm_query, shortcut_ids, shortcut_n);
+   }
    return count;
 }
 

@@ -28,6 +28,18 @@ static cJSON *kbs_memory_row_to_json(const memory_t *m)
    cJSON_AddStringToObject(obj, "tier", m->tier);
    cJSON_AddStringToObject(obj, "kind", m->kind);
    cJSON_AddStringToObject(obj, "key", m->key);
+   db2_memory_summary_row_t summaries[4];
+   int summary_n = db2_memory_summaries_list(m->id, 4, summaries, 4);
+   const char *headline = "";
+   for (int i = 0; i < summary_n; i++)
+      if (strcmp(summaries[i].scope, "headline") == 0 && summaries[i].summary[0])
+      {
+         headline = summaries[i].summary;
+         break;
+      }
+   if (!headline[0] && summary_n > 0)
+      headline = summaries[0].summary;
+   cJSON_AddStringToObject(obj, "headline", headline);
    cJSON_AddStringToObject(obj, "content", m->content);
    cJSON_AddNumberToObject(obj, "confidence", m->confidence);
    cJSON_AddNumberToObject(obj, "use_count", m->use_count);

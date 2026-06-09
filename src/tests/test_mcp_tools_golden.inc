@@ -2,7 +2,7 @@
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 87
+#define MCP_TOOLS_GOLDEN_COUNT 88
 #define MCP_TOOLS_GOLDEN \
    "ask_user {choices,question} req:question\n" \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n" \
@@ -65,6 +65,7 @@
    "lsp_references {col,file,line,workspace} req:col,file,line\n" \
    "memory_alerts {since} req:\n" \
    "memory_briefing {limit_tokens} req:\n" \
+   "memory_get {handle,id} req:\n" \
    "memory_maintain {dry_run,force,modes} req:\n" \
    "memory_recall {limit_tokens,session_start,task_hint} req:\n" \
    "mutate {confidence,content,id,key,kind,reason,tier,verb} req:verb\n" \

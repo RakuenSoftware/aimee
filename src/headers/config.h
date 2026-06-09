@@ -279,6 +279,7 @@ typedef struct config
     * system prompt so the external agent stops re-exploring the repo. Default
     * off; a per-request `x-aimee-preinject: 0` header also disables it. */
    int ingress_preinject_enabled;
+   int ingress_preinject_assembly_budget;
    int memory_pagerank_enabled;
    int memory_pagerank_iterations;
    double memory_pagerank_weight;

@@ -83,16 +83,18 @@ int db2_memory_find_facts_like(const char *query, int limit, memory_t *out, int 
        " last_used_at, created_at, updated_at, source_session, salience, provenance_category"
        " FROM memories"
        " WHERE (LOWER(key) LIKE '%' || LOWER(?1) || '%'"
-       "    OR LOWER(content) LIKE '%' || LOWER(?2) || '%')"
+       "    OR LOWER(content) LIKE '%' || LOWER(?2) || '%'"
+       "    OR LOWER(COALESCE(use_cases, '')) LIKE '%' || LOWER(?3) || '%')"
        " ORDER BY CASE"
-       "            WHEN LOWER(key) = LOWER(?3) THEN 0"
-       "            WHEN LOWER(content) = LOWER(?4) THEN 1"
-       "            WHEN LOWER(key) LIKE LOWER(?5) || '%' THEN 2"
-       "            ELSE 3"
+       "            WHEN LOWER(key) = LOWER(?4) THEN 0"
+       "            WHEN LOWER(content) = LOWER(?5) THEN 1"
+       "            WHEN LOWER(COALESCE(use_cases, '')) = LOWER(?6) THEN 2"
+       "            WHEN LOWER(key) LIKE LOWER(?7) || '%' THEN 3"
+       "            ELSE 4"
        "          END,"
        "          CASE tier WHEN 'L3' THEN 0 WHEN 'L2' THEN 1 WHEN 'L1' THEN 2 ELSE 3 END,"
        "          use_count DESC, confidence DESC"
-       " LIMIT ?6";
+       " LIMIT ?8";
 
    char err[MQ_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -103,7 +105,9 @@ int db2_memory_find_facts_like(const char *query, int limit, memory_t *out, int 
    aimee_pg_bind_text(st, "?3", query);
    aimee_pg_bind_text(st, "?4", query);
    aimee_pg_bind_text(st, "?5", query);
-   aimee_pg_bind_int(st, "?6", limit);
+   aimee_pg_bind_text(st, "?6", query);
+   aimee_pg_bind_text(st, "?7", query);
+   aimee_pg_bind_int(st, "?8", limit);
 
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)

@@ -8,6 +8,7 @@
 #include "ingress_preinject.h"
 #include "cJSON.h"
 #include "config.h"
+#include "kb_client.h"
 
 /* The kb-backed builder (ingress_preinject_build) is out of scope here; these
  * stubs satisfy the linker so the test links only the pure helpers without
@@ -19,19 +20,49 @@ char *kb_client_memory_context_block(const char *query, const char *block_type, 
    (void)limit;
    return NULL;
 }
+int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
+{
+   (void)query;
+   (void)limit;
+   if (!out || max <= 0)
+      return 0;
+   memset(out, 0, sizeof(out[0]) * (size_t)max);
+   out[0].memory.id = 101;
+   snprintf(out[0].memory.tier, sizeof(out[0].memory.tier), "L2");
+   snprintf(out[0].memory.kind, sizeof(out[0].memory.kind), "fact");
+   snprintf(out[0].memory.key, sizeof(out[0].memory.key), "deploy path");
+   snprintf(out[0].memory.headline, sizeof(out[0].memory.headline), "Use the deploy matrix.");
+   out[0].parts.total = 0.88;
+   if (max == 1)
+      return 1;
+   out[1].memory.id = 102;
+   snprintf(out[1].memory.tier, sizeof(out[1].memory.tier), "L2");
+   snprintf(out[1].memory.kind, sizeof(out[1].memory.kind), "policy");
+   snprintf(out[1].memory.key, sizeof(out[1].memory.key), "fallback");
+   snprintf(out[1].memory.content, sizeof(out[1].memory.content), "Fallback preview from content.");
+   out[1].parts.total = 0.44;
+   return 2;
+}
 int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
                                 int max)
 {
    (void)query;
    (void)project;
-   (void)out;
-   (void)max;
-   return 0;
+   if (!out || max <= 0)
+      return 0;
+   memset(out, 0, sizeof(out[0]) * (size_t)max);
+   snprintf(out[0].file_path, sizeof(out[0].file_path), "src/server/ingress_preinject.c");
+   snprintf(out[0].snippet, sizeof(out[0].snippet), "builder emits a bounded context envelope");
+   return 1;
 }
 int config_load(config_t *cfg)
 {
    if (cfg)
+   {
       memset(cfg, 0, sizeof(*cfg));
+      cfg->ingress_preinject_enabled = 1;
+      cfg->ingress_preinject_assembly_budget = 1200;
+   }
    return 0;
 }
 const char *config_default_dir(void)
@@ -151,6 +182,21 @@ static void test_format_code_block(void)
    printf("format_code_block OK\n");
 }
 
+static void test_budgeted_build_uses_memory_previews(void)
+{
+   char *env = ingress_preinject_build("deploy matrix", 0);
+   assert(env != NULL);
+   assert(strlen(env) <= 1200);
+   assert(strstr(env, "recommended (memory previews):") != NULL);
+   assert(strstr(env, "memory:101") != NULL);
+   assert(strstr(env, "Use the deploy matrix.") != NULL);
+   assert(strstr(env, "context-budget:") != NULL);
+   assert(strstr(env, "memory_get") != NULL);
+   assert(strstr(env, "Fallback preview from content.") != NULL);
+   free(env);
+   printf("budgeted_build_uses_memory_previews OK\n");
+}
+
 int main(void)
 {
    printf("ingress_preinject: ");
@@ -159,6 +205,7 @@ int main(void)
    test_format_code_block();
    test_query_from_messages();
    test_apply();
+   test_budgeted_build_uses_memory_previews();
    printf("all tests passed\n");
    return 0;
 }
