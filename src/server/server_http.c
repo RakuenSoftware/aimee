@@ -227,9 +227,10 @@ static int err_json(char *resp, int cap, int status, const char *msg)
 /* ── auth ───────────────────────────────────────────────────────────────── */
 
 int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_header,
-                          int has_session_key)
+                          const char *api_key_header, int has_session_key)
 {
    int have_bearer = bearer_cfg && bearer_cfg[0];
+   int authorized = 0;
 
    /* Session-scoping is refused unless a bearer is configured — prevents an
     * unauthenticated session-scoping pivot, on any transport. */
@@ -242,9 +243,11 @@ int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_h
    /* TCP requires a configured bearer and a matching Authorization header. */
    if (!have_bearer)
       return 503;
-   const char *presented =
-       (auth_header && strncmp(auth_header, "Bearer ", 7) == 0) ? auth_header + 7 : "";
-   if (!presented[0] || !server_ct_equal(presented, bearer_cfg))
+   if (auth_header && strncmp(auth_header, "Bearer ", 7) == 0 && auth_header[7])
+      authorized = server_ct_equal(auth_header + 7, bearer_cfg);
+   if (api_key_header && api_key_header[0])
+      authorized |= server_ct_equal(api_key_header, bearer_cfg);
+   if (!authorized)
       return 401;
    return 0;
 }
@@ -1135,21 +1138,66 @@ static void handle_native_chat_stream(int fd, const char *body, uint32_t conn_ca
    cJSON_Delete(req);
 }
 
+static int append_sse_text(char *buf, size_t n, size_t *pos, const char *s, size_t len)
+{
+   if (buf && *pos < n)
+   {
+      size_t avail = n - *pos;
+      size_t copy = len < avail ? len : avail - 1;
+      if (copy)
+         memcpy(buf + *pos, s, copy);
+      buf[*pos + copy] = '\0';
+   }
+   *pos += len;
+   return (int)*pos;
+}
+
+int server_http_sse_event_format(const char *event, const char *data_json, char *buf, size_t n)
+{
+   size_t pos = 0;
+   const char *p;
+
+   if (buf && n)
+      buf[0] = '\0';
+   if (!data_json)
+      return 0;
+   if (event && event[0])
+   {
+      append_sse_text(buf, n, &pos, "event: ", 7);
+      append_sse_text(buf, n, &pos, event, strlen(event));
+      append_sse_text(buf, n, &pos, "\n", 1);
+   }
+   p = data_json;
+   for (;;)
+   {
+      const char *nl = strchr(p, '\n');
+      append_sse_text(buf, n, &pos, "data: ", 6);
+      append_sse_text(buf, n, &pos, p, nl ? (size_t)(nl - p) : strlen(p));
+      append_sse_text(buf, n, &pos, "\n", 1);
+      if (!nl)
+         break;
+      p = nl + 1;
+   }
+   append_sse_text(buf, n, &pos, "\n", 1);
+   return (int)pos;
+}
+
 /* Typed-event emit for the Responses API: `event: <name>\ndata: <json>\n\n`. */
 static void sse_event_emit(void *ctx, const char *event, const char *data_json)
 {
    int fd = *(int *)ctx;
+   int need;
+   char *frame;
+
    if (!data_json)
       return;
-   if (event && event[0])
-   {
-      write_all_fd(fd, "event: ", 7);
-      write_all_fd(fd, event, (int)strlen(event));
-      write_all_fd(fd, "\n", 1);
-   }
-   write_all_fd(fd, "data: ", 6);
-   write_all_fd(fd, data_json, (int)strlen(data_json));
-   write_all_fd(fd, "\n\n", 2);
+   need = server_http_sse_event_format(event, data_json, NULL, 0);
+   frame = malloc((size_t)need + 1);
+   if (!frame)
+      return;
+   server_http_sse_event_format(event, data_json, frame, (size_t)need + 1);
+   write_all_fd(fd, frame, need);
+   free(frame);
 }
 
 /* Run a streaming /v1/responses request: write event-stream headers, let the
@@ -1432,8 +1480,10 @@ static void handle_conn(int fd, int is_tcp)
     * configured bearer is refused on any transport. */
    {
       char auth[512] = "";
+      char api_key[512] = "";
       char skey[256] = "";
       int has_auth = http_header(buf, "Authorization", auth, sizeof(auth));
+      int has_api_key = http_header(buf, "x-api-key", api_key, sizeof(api_key));
       int has_skey = http_header(buf, "X-Aimee-Session-Key", skey, sizeof(skey));
       /* Per-request pre-injection override: `x-aimee-preinject: 0` disables the
        * <aimee-context> envelope for this turn (set every request so it never
@@ -1442,7 +1492,8 @@ static void handle_conn(int fd, int is_tcp)
       ingress_preinject_set_request_disabled(
           http_header(buf, "X-Aimee-Preinject", preinject, sizeof(preinject)) &&
           strcmp(preinject, "0") == 0);
-      int az = server_http_authorize(is_tcp, g_bearer, has_auth ? auth : NULL, has_skey);
+      int az = server_http_authorize(is_tcp, g_bearer, has_auth ? auth : NULL,
+                                     has_api_key ? api_key : NULL, has_skey);
       if (az != 0)
       {
          const char *msg = az == 401 ? "{\"error\":{\"message\":\"missing or invalid bearer "

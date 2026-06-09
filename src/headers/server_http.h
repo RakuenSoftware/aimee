@@ -34,6 +34,7 @@ extern "C"
     *   bearer_cfg      : the configured bearer token, or NULL/"" if none.
     *   auth_header     : the Authorization header value (e.g. "Bearer xyz"), or
     *                     NULL if absent.
+    *   api_key_header  : the x-api-key header value, or NULL if absent.
     *   has_session_key : an X-Aimee-Session-Key header was present.
     * Returns 0 if authorized, else the HTTP status to reject with: 503 when a
     * session key is presented without a bearer configured, or when TCP is
@@ -41,7 +42,7 @@ extern "C"
     * TCP. UDS requests are always authorized (subject to the session-key rule).
     * The compare is constant-time. */
    int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_header,
-                             int has_session_key);
+                             const char *api_key_header, int has_session_key);
 
    /* Fixed-window per-bearer rate limiter (pure — unit-testable). State is a
     * single 60s window the caller owns. limit_per_min <= 0 disables limiting
@@ -157,6 +158,7 @@ extern "C"
    typedef int (*server_http_responses_stream_fn)(const char *body, server_http_sse_event_emit emit,
                                                   void *ctx);
    void server_http_set_responses_stream_handler(server_http_responses_stream_fn fn);
+   int server_http_sse_event_format(const char *event, const char *data_json, char *buf, size_t n);
    void server_http_set_completion_handler(server_http_completion_fn fn);
    void server_http_set_embeddings_handler(server_http_completion_fn fn);
    void server_http_set_responses_handler(server_http_completion_fn fn);
