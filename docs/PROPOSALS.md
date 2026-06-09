@@ -281,14 +281,14 @@ Capability / coordination / research (P3):
   "participant" is the same default agent) — then generalizes it into a bounded
   multi-round roundtable: real participant routing, draft/review modes,
   deterministic convergence, keep-best, preflight cost limits. **Draft / Review / Reason. New.**
-- [Agent-Directed PR Review](proposals/pending/agent-directed-pr-review.md):
+- [Agent-Directed PR Review](proposals/done/agent-directed-pr-review.md):
   lets an agent call in the roundtable's review mode against a code change and
   direct it with a brief (focus areas, fixes made, invariants, questions), with
   an open mandate so direction reorders priority without suppressing findings.
   Adds an optional `brief` threaded through `build_round_prompt`, returns the
   structured review items (not just prose) plus answered questions, and exposes a
   `CAP_DELEGATE`-gated `ensemble_review` MCP tool. Strictly additive on the
-  roundtable. **Review / Reason. New.**
+  roundtable. **Review / Reason. Done.**
 - Composable Named Toolsets:
   one composable toolset object shared by roles, delegates, gateway
   channels, and the scripted-RPC allow-list. **Done.**
