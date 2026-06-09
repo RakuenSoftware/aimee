@@ -206,19 +206,20 @@ write owned by each path.
 ### §A.5 Completeness is explicitly out of scope
 
 The evaluator answers "is there *a* supported answer," not "is the answer
-*complete*." The single-scalar extractor + intent enum cannot represent
-list/count/aggregate answers (§R2.3), and confidence gating cannot detect that
-failure (those queries score *high*). Two consequences: (a) the proposal must not
-be sold as covering completeness; (b) the evaluator must **not abstain** on a
-high-grounding multi-record query merely because the extractor returned one value
-— a completeness limitation must not masquerade as low confidence.
-Cardinality-aware extraction is a separate, later capability.
+*complete*." Even with the newer query-shape enum and default-off aggregation
+route, `memory.ask` still renders through the same single-scalar extractor
+(§R3.1), and confidence gating cannot detect that failure (those queries score
+*high*). Two consequences: (a) the proposal must not be sold as covering
+completeness; (b) the evaluator must **not abstain** on a high-grounding
+multi-record query merely because the extractor returned one value — a
+completeness limitation must not masquerade as low confidence. Cardinality-aware
+answer rendering is a separate, later capability.
 
 ### §A.6 Corrected phase plan (authoritative; supersedes "Phasing & ordering")
 
 | Phase | Change | Note |
 |------|--------|------|
-| **P0** (new, foundational) | Extract the **pure** `memory_answerable()` evaluator; make per-candidate scores survive to the answer path; lift coverage/separation onto the answer path; compute it from the **deterministic** hybrid signal (§A.2/§A.3). | The real load-bearing refactor §R said Phase 2 hides. Nothing user-visible. |
+| **P0** (new, foundational) | Extract the **pure** `memory_answerable()` evaluator; make per-candidate scores survive to the answer path; lift coverage/separation onto the answer path; compute it from the **deterministic** hybrid signal (§A.2/§A.3); evaluate the **answer anchor/cluster**, not just the top-K list (§R3.2). | The real load-bearing refactor §R said Phase 2 hides. Nothing user-visible. |
 | **P1** | Answer-path **refuse** via the evaluator (grounding-first), reusing `no_answer`; caller-counted. | Was "Phase 1"; now depends on P0. Correctness basis, not cost. |
 | **P2** | Context-path **withhold** — replace the prompt-delegated LOW marker with the deterministic decision (§A.1). | Promoted from non-goal; the slice that actually saves generation and removes the anti-pattern. |
 | **P3** | Curated exemption keyed on the **anchor** record's tier (L4/L5) — not "any cited record" (§R.13, §R2.7). | |
@@ -414,11 +415,11 @@ discriminating signal arrives with the grounding wiring now promoted to P0/§A.2
   the generation-bearing path is the very anti-pattern this proposal exists to
   remove (§R2.2). The decision is shared across both paths — the answer path
   refuses, the context path withholds.
-- **Not** addressing answer **completeness** — list/count/"all of X" queries
-  return a single extracted scalar at high confidence and are invisible to the
-  gate (§A.5, §R2.3); that needs cardinality-aware extraction, a separate later
-  capability. The evaluator must not let that limitation masquerade as low
-  confidence.
+- **Not** addressing answer **completeness** — list/count/"all of X" queries can
+  still return a single extracted scalar at high confidence and are invisible to
+  the gate (§A.5, §R2.3, §R3.1); that needs cardinality-aware answer rendering, a
+  separate later capability. The evaluator must not let that limitation
+  masquerade as low confidence.
 - **Over-abstention** is the primary risk: too high a gate refuses answerable
   queries. Mitigated by default-off rollout, the false-omission arm of the bench,
   the curated exemption, and per-triple calibration so a chatty scope is not held
@@ -836,3 +837,92 @@ implications the gate must handle:
   confidence (which never reads the answer text) and passes the gate. Independent
   of the gate, but it bounds what the gate/bands can ever catch; consider raising
   the cap or noting the limitation.
+
+## §R3 Follow-up review — current-tree deltas and remaining design holes (`testing@d3eb402d` + PR head)
+
+This pass re-read the proposal after §A and checked the current retrieval tree for
+places where the review text had drifted or where the new shared-evaluator plan
+still leaves implementation choices underspecified.
+
+### §R3.1 Completeness is still out of scope, but the code citation changed
+
+§R2.3 correctly identifies the completeness blind spot, but one supporting claim
+is now stale: the tree **does** have query-shape classes for list and quantitative
+queries (`MEM_SHAPE_LIST`, `MEM_SHAPE_QUANTITATIVE` in `src/headers/memory.h`) and
+a default-off aggregation route in `memory_find_facts_scoped`
+(`memory_core_search.inc:3963-3984`). That route detects shapes like "list all X"
+and can return multiple `memory_t` rows before vector readiness.
+
+The conclusion still holds for `memory.ask`: the returned rows still flow into
+`memory_pick_answer_from_cluster`, which picks one anchor/event/summary/content
+fallback and writes one string to `out->answer` (`memory_core_search.inc:4703+`).
+So the proposal should phrase the limitation as "the ask renderer is scalar even
+when aggregation retrieval is enabled," not "there is no list/count shape support."
+Implementation should add regression cases for both modes:
+
+- aggregation disabled: list/count queries must not be treated as fixed by the
+  abstention gate;
+- aggregation enabled: the gate must not turn a scalar-rendering limitation into
+  an abstention decision, and a later cardinality-aware renderer must own the
+  user-visible fix.
+
+### §R3.2 Grounding must be anchor/cluster-specific, not only top-K-specific
+
+§A says the evaluator consumes the "final candidate set + query terms +
+thresholds." That is not precise enough for this answer path. The extracted
+answer is keyed to `memory_answer_anchor_index`, which can choose a non-top-1
+candidate based on cluster shape (`memory_core_search.inc:4588-4601`), while
+`memory_retrieval_confidence` measures coverage across the top-K list and
+separation between list positions 0 and 2 (`memory_context.c:676-736`).
+
+That mismatch can pass the wrong thing: the top candidates can cover the query and
+create a healthy coverage/separation score while the chosen anchor is a weaker
+cluster member whose snippet is not grounded by those top hits. Conversely, a
+strong anchor can be penalized by unrelated top-list separation. P0 should pass
+the chosen `anchor_idx` into `memory_answerable()` and compute at least one
+anchor/cluster-local grounding signal:
+
+- anchor coverage: query-term coverage over `matches[anchor]`;
+- cluster coverage/support: coverage over `memory_cluster_member(...)` rows only;
+- deterministic anchor rank: the pre-CE hybrid rank/score of the anchor, not the
+  mutable post-CE display order.
+
+The top-K grounding score can remain a corpus-level floor, but it should not be
+the only pass/fail signal for an answer extracted from one specific anchor.
+
+### §R3.3 Define the boundary around session-window expansion and non-ranked rows
+
+`memory_find_facts_scoped` reranks candidates, copies the first `reranked` rows to
+`out`, and then may append conversational neighbours via
+`memory_expand_to_session_window` (`memory_core_search.inc:4299-4313`). Those
+neighbours are useful context, but they did not participate in the query ranking
+and have no retrieval score. If the proposed evaluator runs on the "final
+candidate set," it can accidentally treat window-neighbour rows as evidence for
+answerability, inflate `support_norm`, or even shift the anchor chosen by
+`memory_answer_anchor_index`.
+
+Pin the contract before implementation:
+
+- run `memory_answerable()` on the ranked retrieval slice before session-window
+  expansion, or
+- carry a `ranked_count` / `is_context_neighbor` side band so the evaluator and
+  citation support exclude unranked neighbours.
+
+Without that boundary, enabling `memory_window_radius` can change abstain/answer
+decisions for reasons unrelated to evidence quality.
+
+### §R3.4 Context-path withhold must preserve or replace retrieval-failure learning
+
+§A.1 correctly replaces the soft LOW prose on the context path, but the current
+LOW branch is not only presentation. When confidence remains below threshold,
+`memory_assemble.c` calls `memory_directive_record_retrieval_failure`
+(`memory_assemble.c:866-877`), which can create an epistemic directive after
+repeated failures. A deterministic withhold that simply returns no context would
+silently remove that learning/clarification loop.
+
+The context-path phase should say whether withhold keeps the retrieval-failure
+recording, changes the threshold/counter key, or introduces a new
+`memory.answerability.withheld` signal that the directive subsystem consumes. The
+important part is that the LLM no longer receives weak evidence plus a soft plea,
+but the system still learns that the memory corpus lacked reliable evidence for
+the query.
