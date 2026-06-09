@@ -829,6 +829,10 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "delegate");
 }
+int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "delegate.aggregate");
+}
 int handle_delegate_launch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "delegate.launch");

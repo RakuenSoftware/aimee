@@ -34,6 +34,14 @@ int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
 int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
                  const char *user_prompt, int max_tokens, double temperature, agent_result_t *out);
 
+/* Run one task on a specifically named configured agent (clones the agent_t
+ * before mutation; a missing/disabled agent is a failed participant, no silent
+ * fallback). Defined in agent_runtime.c beside the static helpers it uses,
+ * called from agent_parallel.c's fan-out. */
+int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
+                    const char *system_prompt, const char *user_prompt, int max_tokens,
+                    double temperature, agent_result_t *out);
+
 /* Like agent_run but forces tool execution regardless of agent config */
 int agent_run_with_tools(agent_config_t *cfg, const char *role, const char *system_prompt,
                          const char *user_prompt, int max_tokens, agent_result_t *out);
