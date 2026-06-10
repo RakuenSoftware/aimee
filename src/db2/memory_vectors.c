@@ -85,6 +85,11 @@ int pgvec_memory_vector_deep_search(const float *vec, int dim, int limit, int64_
    return pgvec_memory_deep_search(vec, dim, limit, ids, scores, max);
 }
 
+int pgvec_memory_vector_deep_similarity(int64_t id_a, int64_t id_b, double *out)
+{
+   return pgvec_memory_deep_similarity(id_a, id_b, out);
+}
+
 int pgvec_memory_vector_search_record_type(const char *record_type, const float *vec, int dim,
                                            int limit, int64_t *ids, double *scores, int max)
 {

@@ -6,6 +6,7 @@
 #if !defined(AIMEE_DB2_DISABLED)
 #include "db2/memory_conflicts.h"
 #include "db2/memory_query.h"
+#include "db2/memory_vectors.h"
 #endif
 #include "kb.h"
 #include "log.h"
@@ -186,6 +187,26 @@ static int retro_scan_due(void)
 }
 #endif
 
+/* Deep-tier precision guard. When the 4B deep tier is on and BOTH memories have a
+ * deep embedding, a clearly-low deep cosine means the lexical overlap that made
+ * them a candidate pair was coincidental — they aren't about the same thing, so
+ * skip the costly is_contradiction check. Conservative threshold so real
+ * contradictions (which are deep-similar) are never skipped; a no-op when deep is
+ * off or either row lacks a deep embedding (partial coverage degrades gracefully). */
+#define DEEP_CONFLICT_MIN_SIM 0.35
+
+#if !defined(AIMEE_DB2_DISABLED)
+static int deep_pair_clearly_unrelated(int deep_on, int64_t id_a, int64_t id_b)
+{
+   if (!deep_on)
+      return 0;
+   double sim = 0.0;
+   if (pgvec_memory_vector_deep_similarity(id_a, id_b, &sim) == 1 && sim < DEEP_CONFLICT_MIN_SIM)
+      return 1;
+   return 0;
+}
+#endif
+
 int memory_scan_retroactive_conflicts(void)
 {
 #if defined(AIMEE_DB2_DISABLED)
@@ -194,6 +215,11 @@ int memory_scan_retroactive_conflicts(void)
    /* Rate limit: at most once per day */
    if (!retro_scan_due())
       return 0;
+
+   /* Deep-tier precision guard on by config (stored deep embeddings only — no
+    * embedder call). Loaded once; the per-pair check is cheap when off. */
+   config_t deep_cfg;
+   int deep_on = (config_load(&deep_cfg) == 0 && deep_cfg.memory_deep_embedding_enabled);
 
    /* Skip if fewer than RETRO_CONFLICT_MIN_L2 L2 memories */
    if (db2_memory_count_l2() < RETRO_CONFLICT_MIN_L2)
@@ -209,6 +235,8 @@ int memory_scan_retroactive_conflicts(void)
       int n = db2_memory_l2_cross_key_pairs(RETRO_CONFLICT_MAX_PAIRS, pairs, pair_cap);
       for (int i = 0; i < n; i++)
       {
+         if (deep_pair_clearly_unrelated(deep_on, pairs[i].id_a, pairs[i].id_b))
+            continue;
          if (is_contradiction(pairs[i].content_a, pairs[i].content_b))
          {
             memory_record_conflict(pairs[i].id_a, pairs[i].id_b);
@@ -222,6 +250,8 @@ int memory_scan_retroactive_conflicts(void)
       int n = db2_memory_l2_fact_vs_decision_pairs(RETRO_CONFLICT_MAX_PAIRS, pairs, pair_cap);
       for (int i = 0; i < n; i++)
       {
+         if (deep_pair_clearly_unrelated(deep_on, pairs[i].id_a, pairs[i].id_b))
+            continue;
          if (is_contradiction(pairs[i].content_a, pairs[i].content_b))
          {
             memory_record_conflict(pairs[i].id_a, pairs[i].id_b);
