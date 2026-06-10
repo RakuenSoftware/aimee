@@ -288,14 +288,42 @@ int config_save(const config_t *cfg)
       cJSON_AddStringToObject(root, "openai_model", cfg->openai_model);
    if (cfg->openai_key_cmd[0])
       cJSON_AddStringToObject(root, "openai_key_cmd", cfg->openai_key_cmd);
-   if (!cfg->learning_router_enabled || cfg->learning_proposal_ttl_days != 7 ||
-       cfg->learning_max_commits_per_week != 25)
    {
-      cJSON *learning = cJSON_AddObjectToObject(root, "learning");
-      cJSON *router = cJSON_AddObjectToObject(learning, "router");
-      cJSON_AddBoolToObject(router, "enabled", cfg->learning_router_enabled ? 1 : 0);
-      cJSON_AddNumberToObject(router, "ttl_days", cfg->learning_proposal_ttl_days);
-      cJSON_AddNumberToObject(router, "max_commits_per_week", cfg->learning_max_commits_per_week);
+      int router_any = !cfg->learning_router_enabled || cfg->learning_proposal_ttl_days != 7 ||
+                       cfg->learning_max_commits_per_week != 25;
+      /* citation_* default on, the 3 stateful heuristics default off — emit when
+       * any differs so an override (incl. turning the citation detector off)
+       * persists. */
+      int implicit_any =
+          !cfg->learning_implicit_citation_repair ||
+          !cfg->learning_implicit_citation_continuation || cfg->learning_implicit_repeat_question ||
+          cfg->learning_implicit_repeated_correction || cfg->learning_implicit_workflow_repetition;
+      if (router_any || implicit_any)
+      {
+         cJSON *learning = cJSON_AddObjectToObject(root, "learning");
+         if (router_any)
+         {
+            cJSON *router = cJSON_AddObjectToObject(learning, "router");
+            cJSON_AddBoolToObject(router, "enabled", cfg->learning_router_enabled ? 1 : 0);
+            cJSON_AddNumberToObject(router, "ttl_days", cfg->learning_proposal_ttl_days);
+            cJSON_AddNumberToObject(router, "max_commits_per_week",
+                                    cfg->learning_max_commits_per_week);
+         }
+         if (implicit_any)
+         {
+            cJSON *implicit = cJSON_AddObjectToObject(learning, "implicit");
+            cJSON_AddBoolToObject(implicit, "citation_repair",
+                                  cfg->learning_implicit_citation_repair ? 1 : 0);
+            cJSON_AddBoolToObject(implicit, "citation_continuation",
+                                  cfg->learning_implicit_citation_continuation ? 1 : 0);
+            cJSON_AddBoolToObject(implicit, "repeat_question",
+                                  cfg->learning_implicit_repeat_question ? 1 : 0);
+            cJSON_AddBoolToObject(implicit, "repeated_correction",
+                                  cfg->learning_implicit_repeated_correction ? 1 : 0);
+            cJSON_AddBoolToObject(implicit, "workflow_repetition",
+                                  cfg->learning_implicit_workflow_repetition ? 1 : 0);
+         }
+      }
    }
    if (cfg->embedding_command[0])
       cJSON_AddStringToObject(root, "embedding_command", cfg->embedding_command);

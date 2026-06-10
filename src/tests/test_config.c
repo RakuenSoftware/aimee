@@ -115,6 +115,10 @@ int main(void)
       cfg.learning_router_enabled = 0;
       cfg.learning_proposal_ttl_days = 14;
       cfg.learning_max_commits_per_week = 11;
+      /* learning.implicit.* now persist (was parse/save gap): citation_repair off
+       * (default on → prove the off state round-trips), repeat_question on. */
+      cfg.learning_implicit_citation_repair = 0;
+      cfg.learning_implicit_repeat_question = 1;
       cfg.cache_aware_rewrite_enabled = 1;
       cfg.cache_aware_rewrite_min_savings_tokens = 321;
       cfg.cache_aware_rewrite_hard_context_threshold = 0.72;
@@ -303,6 +307,11 @@ int main(void)
       assert(cfg2.memory_citations_strip_unverified == 1);
       assert(cfg2.learning_router_enabled == 0);
       assert(cfg2.learning_proposal_ttl_days == 14);
+      /* implicit overrides persisted; the untouched citation_continuation kept
+       * its default-on. */
+      assert(cfg2.learning_implicit_citation_repair == 0);
+      assert(cfg2.learning_implicit_citation_continuation == 1);
+      assert(cfg2.learning_implicit_repeat_question == 1);
       assert(cfg2.learning_max_commits_per_week == 11);
       assert(cfg2.cache_aware_rewrite_enabled == 1);
       assert(cfg2.cache_aware_rewrite_min_savings_tokens == 321);

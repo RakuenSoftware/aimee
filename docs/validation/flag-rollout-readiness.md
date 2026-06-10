@@ -256,9 +256,11 @@ prior citation moment was logged and the relevant flags are on. Signals feed
 `learning_implicit_citation_{repair,continuation}` flipped default-on (proven +
 now consumed). **Still needs `.254` live validation** that it fires on real
 post-citation turns and not spuriously — flip the flags off if it mis-fires
-(trivially revertible). **NB:** `learning_implicit_*` lack config-file persistence
-(a pre-existing systemic gap across all five) — defaults apply at startup; adding
-a `learning.implicit.*` parse/save block is a separate follow-up.
+(trivially revertible). **Persistence:** `learning_implicit_*` previously had no
+config-file parse/save (config_fields is only the get/set reflection surface), so
+overrides didn't survive a save/restart — **fixed this PR** with a
+`learning.implicit.*` parse + emit-when-non-default save block (round-trip tested),
+so all five toggles now persist and are overridable.
 
 ---
 

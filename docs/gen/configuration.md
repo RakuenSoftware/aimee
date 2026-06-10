@@ -131,7 +131,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`integrity`** — `dry_run`, `enabled`
 - **`intelligence`** — `bandit`, `bandit_optimize_command`, `calibrate`, `constraint_solver_command`, `demotion`, `kb`, `planner`, `planner_search_command`, `ranker_fuse_command`, `ranking`, `reasoning`, `reasoning_datalog_command`, `synthesize`
 - **`kb`** — `api`, `background_ingest`, `connection_workers`, `curator`, `evidence`, `maintenance`, `mining`, `search_max_results`, `worker_count`
-- **`learning`** — `embed`, `router`, `synthesize`
+- **`learning`** — `embed`, `implicit`, `router`, `synthesize`
 - **`mcp`** — `osv`
 - **`memory`** — `abstain`, `aggregation`, `bm25_weight`, `briefing`, `citations`, `cognify`, `context_budget`, `coref`, `derive_facts`, `directives`, `dispositions`, `episode_summaries`, `failure_detection`, `fetch_budget`, `hard_negative_log`, `improve`, `lifecycle`, `pagerank`, `profile_cards`, `prospective`, `recall`, `rewrite`, `routing`, `salience`, `scenes`, `semantic_weight`
 - **`memory_maintenance`** — `enabled`, `interval_seconds`, `summarize_enabled`, `trigger_inserts`, `trigger_secs`
