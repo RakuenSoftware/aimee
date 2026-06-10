@@ -620,7 +620,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS memory_embeddings (
             point_id      BIGINT PRIMARY KEY,
-            embedding     vector(1024),
+            embedding     halfvec(1024),
             record_type   TEXT NOT NULL DEFAULT '',
             primary_scope TEXT NOT NULL DEFAULT '',
             workspace     TEXT NOT NULL DEFAULT '',
@@ -633,7 +633,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS kb_embeddings (
             point_id     BIGINT PRIMARY KEY,
-            embedding    vector(1024),
+            embedding    halfvec(1024),
             project      TEXT NOT NULL DEFAULT '',
             payload_json TEXT NOT NULL DEFAULT ''
         )
@@ -648,7 +648,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_entity_vectors (
             point_id       BIGINT PRIMARY KEY,
-            embedding      vector(1024),
+            embedding      halfvec(1024),
             scope_kind     TEXT NOT NULL DEFAULT '',
             scope_id       TEXT NOT NULL DEFAULT '',
             canonical_name TEXT NOT NULL DEFAULT '',
@@ -668,7 +668,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_narrative_vectors (
             point_id     BIGINT PRIMARY KEY,
-            embedding    vector(1024),
+            embedding    halfvec(1024),
             artifact_id  TEXT NOT NULL DEFAULT '',
             kind         TEXT NOT NULL DEFAULT '',
             doc_id       TEXT NOT NULL DEFAULT '',
@@ -687,8 +687,8 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_claim_vectors (
             point_id      BIGINT PRIMARY KEY,
-            subj_attr_vec vector(1024),
-            value_vec     vector(1024),
+            subj_attr_vec halfvec(1024),
+            value_vec     halfvec(1024),
             artifact_id   TEXT NOT NULL DEFAULT '',
             subject       TEXT NOT NULL DEFAULT '',
             attribute     TEXT NOT NULL DEFAULT '',
@@ -709,9 +709,9 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_code_unit_vectors (
             point_id      BIGINT PRIMARY KEY,
-            intent_vec    vector(1024),
-            signature_vec vector(1024),
-            body_vec      vector(1024),
+            intent_vec    halfvec(1024),
+            signature_vec halfvec(1024),
+            body_vec      halfvec(1024),
             artifact_id   TEXT NOT NULL DEFAULT '',
             file_path     TEXT NOT NULL DEFAULT '',
             def_kind      TEXT NOT NULL DEFAULT '',
@@ -721,16 +721,16 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         )
     $T$;
 
-    -- The embedding columns carry a fixed dimension (vector(1024)) matching the
-    -- default embedder perplexity-ai/pplx-embed-v1-0.6b; a fresh database gets
-    -- that straight from the CREATE TABLE definitions above. We deliberately do
-    -- NOT auto-alter an existing differently-dimensioned column here: a database
-    -- created with the old 384-dim embedder (all-MiniLM-L6-v2) holds vector(1024)
-    -- columns full of incompatible vectors, and silently clearing them on a
-    -- routine schema-apply would wipe the corpus. Instead we surface a clear
-    -- NOTICE; the operator runs deploy/migrations/2026-embed-dim-1024.sql (after a
-    -- backup) to drop the HNSW indexes, clear the columns to vector(1024), and
-    -- re-embed. Vector ops degrade (not crash) until then.
+    -- The embedding columns are halfvec(1024) — fp16, matching the default
+    -- embedder pplx-embed-v1-0.6b's 1024-dim output; a fresh database gets that
+    -- straight from the CREATE TABLE definitions above. We deliberately do NOT
+    -- auto-alter an existing differently-typed column here (a routine schema-apply
+    -- must never reshape the corpus); instead we surface a NOTICE:
+    --   * a column still vector(1024) (pre-halfvec) just needs an in-place cast —
+    --     run deploy/migrations/2026-embed-halfvec.sql (no re-embed);
+    --   * a column with a different DIMENSION (e.g. old vector(384) all-MiniLM)
+    --     additionally needs a re-embed — deploy/migrations/2026-embed-dim-1024.sql.
+    -- Vector ops degrade (not crash) until then.
     DECLARE
         cur_type text;
     BEGIN
@@ -738,8 +738,8 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
           FROM pg_attribute
          WHERE attrelid = 'memory_embeddings'::regclass
            AND attname = 'embedding' AND NOT attisdropped;
-        IF cur_type IS NOT NULL AND cur_type <> 'vector(1024)' THEN
-            RAISE NOTICE 'aimee: embedding columns are "%" but the embedder now produces vector(1024). Vector ops are degraded until you run deploy/migrations/2026-embed-dim-1024.sql (clears old embeddings, re-embed required) — back up DB2 first.', cur_type;
+        IF cur_type IS NOT NULL AND cur_type <> 'halfvec(1024)' THEN
+            RAISE NOTICE 'aimee: embedding columns are "%" but expected halfvec(1024). Run deploy/migrations/2026-embed-halfvec.sql to cast (no re-embed); if the dimension also differs, re-embed too. Vector ops degraded until then — back up DB2 first.', cur_type;
         END IF;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'embedding dimension check skipped (%)', SQLERRM;
@@ -777,7 +777,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     BEGIN
         EXECUTE $T$
             CREATE INDEX IF NOT EXISTS idx_memory_embeddings_hnsw
-                ON memory_embeddings USING hnsw (embedding vector_cosine_ops)
+                ON memory_embeddings USING hnsw (embedding halfvec_cosine_ops)
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'memory_embeddings HNSW index skipped (%)', SQLERRM;
@@ -785,7 +785,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     BEGIN
         EXECUTE $T$
             CREATE INDEX IF NOT EXISTS idx_kb_embeddings_hnsw
-                ON kb_embeddings USING hnsw (embedding vector_cosine_ops)
+                ON kb_embeddings USING hnsw (embedding halfvec_cosine_ops)
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'kb_embeddings HNSW index skipped (%)', SQLERRM;
@@ -793,7 +793,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     BEGIN
         EXECUTE $T$
             CREATE INDEX IF NOT EXISTS idx_curator_entity_vectors_hnsw
-                ON curator_entity_vectors USING hnsw (embedding vector_cosine_ops)
+                ON curator_entity_vectors USING hnsw (embedding halfvec_cosine_ops)
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'curator_entity_vectors HNSW index skipped (%)', SQLERRM;
@@ -801,7 +801,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     BEGIN
         EXECUTE $T$
             CREATE INDEX IF NOT EXISTS idx_curator_narrative_vectors_hnsw
-                ON curator_narrative_vectors USING hnsw (embedding vector_cosine_ops)
+                ON curator_narrative_vectors USING hnsw (embedding halfvec_cosine_ops)
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'curator_narrative_vectors HNSW index skipped (%)', SQLERRM;
@@ -809,7 +809,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     BEGIN
         EXECUTE $T$
             CREATE INDEX IF NOT EXISTS idx_curator_claim_vectors_subj_attr_hnsw
-                ON curator_claim_vectors USING hnsw (subj_attr_vec vector_cosine_ops)
+                ON curator_claim_vectors USING hnsw (subj_attr_vec halfvec_cosine_ops)
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'curator_claim_vectors subj_attr HNSW index skipped (%)', SQLERRM;
@@ -817,7 +817,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     BEGIN
         EXECUTE $T$
             CREATE INDEX IF NOT EXISTS idx_curator_claim_vectors_value_hnsw
-                ON curator_claim_vectors USING hnsw (value_vec vector_cosine_ops)
+                ON curator_claim_vectors USING hnsw (value_vec halfvec_cosine_ops)
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'curator_claim_vectors value HNSW index skipped (%)', SQLERRM;
@@ -825,7 +825,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     BEGIN
         EXECUTE $T$
             CREATE INDEX IF NOT EXISTS idx_curator_code_unit_vectors_intent_hnsw
-                ON curator_code_unit_vectors USING hnsw (intent_vec vector_cosine_ops)
+                ON curator_code_unit_vectors USING hnsw (intent_vec halfvec_cosine_ops)
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'curator_code_unit_vectors intent HNSW index skipped (%)', SQLERRM;
@@ -833,7 +833,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     BEGIN
         EXECUTE $T$
             CREATE INDEX IF NOT EXISTS idx_curator_code_unit_vectors_signature_hnsw
-                ON curator_code_unit_vectors USING hnsw (signature_vec vector_cosine_ops)
+                ON curator_code_unit_vectors USING hnsw (signature_vec halfvec_cosine_ops)
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'curator_code_unit_vectors signature HNSW index skipped (%)', SQLERRM;
@@ -841,7 +841,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     BEGIN
         EXECUTE $T$
             CREATE INDEX IF NOT EXISTS idx_curator_code_unit_vectors_body_hnsw
-                ON curator_code_unit_vectors USING hnsw (body_vec vector_cosine_ops)
+                ON curator_code_unit_vectors USING hnsw (body_vec halfvec_cosine_ops)
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'curator_code_unit_vectors body HNSW index skipped (%)', SQLERRM;
@@ -855,7 +855,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
                 id          BIGSERIAL PRIMARY KEY,
                 artifact_id TEXT      NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
                 collection  TEXT      NOT NULL DEFAULT 'case_exemplars',
-                embedding   vector(1024),
+                embedding   halfvec(1024),
                 created_at  TEXT      NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
             )
         $T$;
@@ -881,7 +881,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
                 id          BIGSERIAL PRIMARY KEY,
                 artifact_id TEXT      NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
                 collection  TEXT      NOT NULL DEFAULT 'evidence',
-                embedding   vector(1024),
+                embedding   halfvec(1024),
                 created_at  TEXT      NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
             )
         $T$;
@@ -939,7 +939,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     BEGIN
         EXECUTE $T$
             CREATE INDEX IF NOT EXISTS idx_code_embeddings_hnsw
-                ON code_embeddings USING hnsw (embedding vector_cosine_ops)
+                ON code_embeddings USING hnsw (embedding halfvec_cosine_ops)
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'code_embeddings HNSW index skipped (%)', SQLERRM;
