@@ -93,7 +93,7 @@ These are **wired** (gate real code) but unmeasurable today.
 
 | Flag | Prod reader | Tests | Build needed |
 |---|---|---|---|
-| `learning_synthesize_enabled` + 6 `learning_implicit_*` | `learning_router.c`, `kb_curator_drain.c` | ~ | **runner over existing `benchmarks/learning/` fixtures** — fixtures ready, see `learning_replay.py` (this PR) |
+| `learning_synthesize_enabled` + 6 `learning_implicit_*` | `learning_router.c`, `kb_curator_drain.c` | ~ | runner landed: `learning_replay.py` + `make learning-citation-eval`. **Citation detectors GRADED PASS** (see Executed validation). Stateful heuristics + substrate promotion still need a live-router replay entry |
 | `memory_scenes_enabled` | `memory_core_helpers.inc` | ✗ | labelled scene-retrieval corpus + runner |
 | `memory_negation_enabled` | `memory_core_helpers.inc` | ✗ | negation/absence corpus + runner |
 | `memory_salience_enabled` | `memory_core_helpers.inc` | ✗ | per-flag arm in retrieval suite |
@@ -183,11 +183,16 @@ production binary on a real corpus, which stays user-gated.
 |---|---|---|---|
 | `demotion_enabled` | `benchmarks/memory/poison_gate.py` | PASS (exit 0): all clean rows retrieved CORRECT; only closed-outcome poison rows (`poison_refresh`, `poison_snapshot`) suppressed — declared-confidence / trusted-source / frequency fields correctly ignored | **decision boundary sound** — safe to run the live shadow→live(2) ladder; the gate does not over-suppress |
 | `guardrails_semantic_enabled` (→advisory) | `tools/guardrails_replay.py` (75 fixtures) | PASS (exit 0): precision **1.0**, recall **1.0**, **0** false-positives on benign; yellow-zone advisory recall **1.0** vs deterministic **0.0** (+1.0); per-label precision 1.0 (secret_leak/task_drift/verification_bypass) | **precision floor cleared** → the enable→advisory flip is supported on fixtures; blocking stage still needs the live FP-on-benign confirmation |
-| `learning_synthesize_enabled` + `learning_implicit_*` | `benchmarks/learning/learning_replay.py` (175 fixtures) | VALIDATION OK: schema + label distribution (114 pos / 61 neg) clean; graded mode blocked on injected predictions | **harness + fixtures ready**; needs the `aimee learning replay` C entry to emit predictions, then graded run |
+| `learning_implicit_citation_repair` / `_continuation` | `make learning-citation-eval` (real `dogfood_classify_next_turn` over 63 citation fixtures) | **GRADED PASS** (exit 0): precision **1.0**, recall **1.0**, FPR **0.0** (44 pos / 19 neg) — clears the pinned 0.90/0.80/0.10 bar | **detector validated on the labelled corpus**; the per-turn classifier is accurate. Remaining for a flip: the full router→substrate promotion loop on a real session corpus |
+| `learning_implicit_repeat_question` / `repeated_correction` / `workflow_repetition` | — | stateful (session/DB) — not replayable by the pure-text tool | needs a live router + session state to grade |
+| `learning_synthesize_enabled` (substrate promotion) | `learning_replay.py` substrate fixtures | VALIDATION OK: schema + distribution clean | needs a substrate-promotion replay entry (live router) to grade |
 
 What this changes: `demotion_enabled` and `guardrails_semantic_enabled`(advisory)
-move from "harness exists, unmeasured" to "boundary validated on fixtures — the
-remaining arm is the live-binary/real-corpus run." They are the two closest flips.
+move to "boundary validated on fixtures — remaining arm is the live-binary/real-
+corpus run", and the two **citation implicit-signal detectors are graded PASS
+against the real classifier** (the metric is now bound to the build via
+`make learning-citation-eval`, not a Python re-implementation). These are the
+closest flips.
 
 ---
 
@@ -195,7 +200,7 @@ remaining arm is the live-binary/real-corpus run." They are the two closest flip
 
 | Step | What | State |
 |---|---|---|
-| 1 | Build missing harness primitives | **in progress**: `learning_replay.py` landed (this PR); suite `--config-variant` knob + per-pass curator eval = backlog |
+| 1 | Build missing harness primitives | **in progress**: `learning_replay.py` + the real-classifier replay (`make learning-citation-eval`) landed (this PR); suite `--config-variant` knob + a live-router substrate replay + per-pass curator eval = backlog |
 | 2 | Pin acceptance criteria per flag | **this doc** (defaults pinned; per-flag numbers fill as corpora land) |
 | 3 | Clear Tier A | **partial**: `demotion_enabled` boundary validated on fixtures (poison_gate PASS); live recall A/B still needs aimee-server + corpora via `! <cmd>` |
 | 4 | Run safety (Tier S) in shadow | **partial**: `guardrails_semantic_enabled` advisory precision/recall = 1.0 on 75 fixtures (guardrails_replay PASS); live FP-on-benign confirmation + dashboards still user-gated |

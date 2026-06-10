@@ -30,9 +30,13 @@ exits 0 without asserting a quality bar.
 Exit status in graded mode: 0 if every pinned threshold clears, 1 otherwise — so this
 can gate a rollout the way poison_gate.py / guardrails_replay.py do.
 
-THE REMAINING WIRE: a small `aimee learning replay --fixtures …` entry that emits the
-predictions jsonl. Until that lands, produce predictions however you exercise the
-detector; the metric + gate defined here are stable regardless.
+DETECTOR-REPLAY ENTRY (citation heuristics): `src/tests/learning_implicit_replay.c`
+(built as `make tests/learning-implicit-replay`) runs the real
+dogfood_classify_next_turn() over the citation_then_* fixtures and emits the
+predictions jsonl. Grade that subset with `--heuristics
+citation_then_repair,citation_then_continuation`. The three stateful heuristics
+(repeat_question, repeated_correction, workflow_repetition) still need a live
+router + session/DB state to replay.
 """
 
 from __future__ import annotations
@@ -149,6 +153,11 @@ def _collect(inputs: list[str]) -> list[Path]:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("fixtures", nargs="+", help="fixture .jsonl files or dirs")
+    ap.add_argument(
+        "--heuristics",
+        help="comma-separated heuristic names; keep only rows whose 'heuristic' is in this set "
+        "(use to grade the subset a partial detector-replay covers, e.g. the citation heuristics)",
+    )
     ap.add_argument("--predictions", help="jsonl of {'predicted': bool[, 'id']} from a live detector replay")
     ap.add_argument("--min-precision", type=float, default=DEFAULT_MIN_PRECISION)
     ap.add_argument("--min-recall", type=float, default=DEFAULT_MIN_RECALL)
@@ -162,6 +171,12 @@ def main(argv: list[str] | None = None) -> int:
         rows = _load_jsonl(path)
         _validate(rows, path)
         fixtures.extend(rows)
+
+    if args.heuristics:
+        keep = {h.strip() for h in args.heuristics.split(",") if h.strip()}
+        fixtures = [r for r in fixtures if r.get("heuristic") in keep]
+        if not fixtures:
+            raise ValueError(f"no fixtures match --heuristics {sorted(keep)}")
 
     report: dict[str, Any] = {
         "fixtures": [str(p) for p in fixture_paths],
