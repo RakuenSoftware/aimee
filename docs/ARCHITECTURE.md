@@ -316,7 +316,10 @@ Responsibilities:
   and decay (the L0-L3 tier machinery).
 - **Vector operations**, pgvector collections, embeddings (built-in or via an
   external `embedding_command` sidecar), reranking, release/repair/reconcile of
-  vector state.
+  vector state. The embedder/reranker/halfvec stack is described in
+  [retrieval-stack.md](retrieval-stack.md); the optional authoritative 4B layer
+  (deep recall + precision guards across memory and the curator) in
+  [deep-embedding-tier.md](deep-embedding-tier.md).
 - **Code index**, symbol extraction across many languages, `find_symbol`,
   callers, structure, blast-radius, full-text code search.
 - **Document ingest + curator**, staged document ingest, curator extraction of
