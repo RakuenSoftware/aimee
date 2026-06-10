@@ -44,13 +44,6 @@ PORT = int(os.environ.get("EMBEDDER_PORT", "8080"))
 # an explicit EMBEDDER_THREADS wins. Set OMP before torch is imported.
 EMBEDDER_THREADS = int(os.environ.get("EMBEDDER_THREADS", "0")) or min(8, os.cpu_count() or 8)
 os.environ.setdefault("OMP_NUM_THREADS", str(EMBEDDER_THREADS))
-# Optional ONNX backend: a Hub-relative onnx file (e.g. onnx/model_q4.onnx) serves
-# via onnxruntime instead of torch/safetensors. pplx-embed-0.6b's q4 export is
-# ~1.6x faster on CPU (117ms vs 189ms @ 8 threads, dim unchanged). The image bakes
-# the q4 files and sets this; clear it to fall back to fp32 torch. Loading by an
-# explicit file_name avoids the on-the-fly export that fails on split external
-# data ("External data path validation failed" with a bare backend="onnx").
-EMBEDDER_ONNX_FILE = os.environ.get("EMBEDDER_ONNX_FILE", "")
 
 _model = None
 _dim = 0
@@ -74,24 +67,10 @@ def load_model():
     torch.set_num_threads(EMBEDDER_THREADS)
     # trust_remote_code: the Qwen3-based embedders (pplx-embed, gte-Qwen2) ship
     # custom modelling code on the Hub.
-    kwargs = {"trust_remote_code": True}
-    if EMBEDDER_ONNX_FILE:
-        kwargs["backend"] = "onnx"
-        kwargs["model_kwargs"] = {"file_name": EMBEDDER_ONNX_FILE}
-    try:
-        _model = SentenceTransformer(MODEL_NAME, **kwargs)
-    except Exception as exc:  # noqa: BLE001 - any ONNX/optimum failure → torch
-        if not EMBEDDER_ONNX_FILE:
-            raise
-        sys.stderr.write(
-            f"embedder-server: ONNX backend ({EMBEDDER_ONNX_FILE}) failed"
-            f" ({type(exc).__name__}: {exc}); falling back to fp32 torch\n"
-        )
-        _model = SentenceTransformer(MODEL_NAME, trust_remote_code=True)
+    _model = SentenceTransformer(MODEL_NAME, trust_remote_code=True)
     _dim = _model.get_sentence_embedding_dimension() or 0
     sys.stderr.write(
-        f"embedder-server: loaded {MODEL_NAME} dim={_dim} threads={EMBEDDER_THREADS}"
-        f" backend={'onnx:' + EMBEDDER_ONNX_FILE if EMBEDDER_ONNX_FILE else 'torch'}\n"
+        f"embedder-server: loaded {MODEL_NAME} dim={_dim} threads={EMBEDDER_THREADS}\n"
     )
     return _model
 
