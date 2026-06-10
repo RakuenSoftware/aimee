@@ -407,6 +407,7 @@ int main(void)
    test_surprise_demotes_repeated_fact_matches();
    test_pagerank_promotes_linked_definition_memory();
    test_memory_embed_records_embedder_version();
+   test_memory_deep_search_gate();
    test_coref_heuristic_indexes_recent_named_entity();
    test_coref_heuristic_skips_ambiguous_prior_turn();
    test_coref_audit_bound_recorded();
