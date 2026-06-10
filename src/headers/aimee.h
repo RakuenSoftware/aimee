@@ -88,11 +88,7 @@
 #define EFFECTIVENESS_MIN_SAMPLES      10
 
 /* Embedding retrieval */
-#define EMBED_MAX_DIM 1536
-/* Deep tier (optional 4B re-embed): its vectors are larger than the live 0.6b's,
- * so the backfill buffers them separately. pplx-embed-v1-4b is 2560-dim (halfvec
- * column embedding_deep); size for that. */
-#define DEEP_EMBED_MAX_DIM         2560
+#define EMBED_MAX_DIM              1536
 #define EMBED_SIMILARITY_THRESHOLD 0.7
 #define EMBED_ALPHA                0.5 /* hybrid blend: alpha*lexical + (1-alpha)*embed */
 #define EMBED_MAX_OUTPUT           (EMBED_MAX_DIM * 16)

@@ -544,35 +544,6 @@ static void test_memory_embed_records_embedder_version(void)
    assert(platform_unsetenv("AIMEE_NO_CACHE") == 0);
 }
 
-static void test_memory_deep_search_gate(void)
-{
-   /* Deep recall is gated by memory_deep_embedding_enabled (default off): with the
-    * tier off, memory_deep_search_facts returns 0 rows and never touches the deep
-    * index/embedder, so --deep is a safe no-op on a lite deployment. */
-   char tmpdir[128];
-   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-deep-gate-XXXXXX", platform_tmpdir());
-   assert(platform_mkdtemp(tmpdir) != NULL);
-   assert(platform_setenv("HOME", tmpdir) == 0);
-   assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
-
-   char cfgdir[256];
-   snprintf(cfgdir, sizeof(cfgdir), "%s/.config/aimee", tmpdir);
-   assert(platform_mkdir_p(cfgdir, 0700) == 0);
-   char cfgpath[320];
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", cfgdir);
-   FILE *fp = fopen(cfgpath, "w");
-   assert(fp != NULL);
-   fprintf(fp, "embedding_command: builtin\n"); /* deep tier left unset => off */
-   fclose(fp);
-
-   setup();
-   memory_t facts[8];
-   assert(memory_deep_search_facts("any query", 8, facts, 8) == 0);
-   teardown();
-   platform_test_rmrf(tmpdir);
-   assert(platform_unsetenv("AIMEE_NO_CACHE") == 0);
-}
-
 static void test_coref_heuristic_indexes_recent_named_entity(void)
 {
    char tmpdir[128];

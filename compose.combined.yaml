@@ -47,12 +47,6 @@ services:
       dockerfile: Dockerfile.embedder
     volumes:
       - aimee-embedder-models:/opt/models
-    environment:
-      # Pair int8 with the deep tier: when you enable memory_deep_embedding, also
-      # set AIMEE_EMBEDDER_QUANTIZE=int8 so the fast 0.6b tier runs int8 (~3.3x
-      # faster) and the background 4b re-embed backstops the quality drift. Leave
-      # unset (fp32, reference quality) for a 0.6b-only deployment.
-      EMBEDDER_QUANTIZE: ${AIMEE_EMBEDDER_QUANTIZE:-fp32}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
       interval: 30s

@@ -14,7 +14,6 @@ config_mcp_transport_t config_mcp_transport_from_string(const char *s);
 void config_parse_memory_rewrite_section(config_t *cfg, cJSON *root);
 void config_parse_memory_negation_section(config_t *cfg, cJSON *root);
 void config_parse_memory_rerank_section(config_t *cfg, cJSON *root);
-void config_parse_memory_deep_embedding_section(config_t *cfg, cJSON *root);
 void config_parse_memory_query_expansion_section(config_t *cfg, cJSON *root);
 void config_parse_memory_recall_lanes_section(config_t *cfg, cJSON *root);
 void config_parse_memory_window_section(config_t *cfg, cJSON *root);

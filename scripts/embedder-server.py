@@ -15,19 +15,13 @@ Also serves a cross-encoder reranker (lazy-loaded) for the aimee memory rerank
 stage, reusing the resident torch stack instead of a second container.
 
 Endpoints:
-  POST /embed       body = raw UTF-8 text              -> JSON float array (model dim)
-  POST /embed_deep  body = raw UTF-8 text              -> JSON float array (deep dim)
-  POST /rerank      body = JSON [[query,candidate],...] -> JSON float score array
-  GET  /health                                          -> {"status":"ok","model":...,"dim":N,...}
-
-/embed_deep serves the optional larger DEEP_MODEL (lazy-loaded on first call) for
-aimee's background "comprehensive" re-embedding pass; it is never loaded unless
-that pass runs, so a lite deployment pays none of its resident cost.
+  POST /embed   body = raw UTF-8 text                 -> JSON float array (model dim)
+  POST /rerank  body = JSON [[query,candidate],...]    -> JSON float score array
+  GET  /health                                         -> {"status":"ok","model":...,"dim":N}
 
 Config (env):
   EMBEDDER_PORT     listen port (default 8080)
   EMBEDDER_MODEL    sentence-transformers model id (default pplx-embed-v1-0.6b)
-  DEEP_MODEL        deep-tier model id for /embed_deep (default pplx-embed-v1-4b)
   RERANKER_MODEL    cross-encoder model id (default ettin-reranker-400m-v1)
   EMBEDDER_THREADS  torch intra-op threads (default min(8, ncpu))
   EMBEDDER_QUANTIZE fp32 (default) | int8 (torch dynamic; ~3.3x faster, drifts —
@@ -54,26 +48,17 @@ PORT = int(os.environ.get("EMBEDDER_PORT", "8080"))
 EMBEDDER_THREADS = int(os.environ.get("EMBEDDER_THREADS", "0")) or min(8, os.cpu_count() or 8)
 os.environ.setdefault("OMP_NUM_THREADS", str(EMBEDDER_THREADS))
 # Optional int8 dynamic quantization. Pure torch (no optimum/onnx), so it composes
-# with the transformers>=5.2 the Ettin reranker needs — unlike the dropped q4 path.
+# with the transformers>=5.2 the Ettin reranker needs — unlike the q4 ONNX path.
 # EMBEDDER_QUANTIZE=int8 runs ~3.3x faster on CPU (58ms vs 190ms/embed @ 8 threads)
 # but the embedding drifts (~0.90 cosine vs fp32): dynamic quant is per-tensor and
 # uncalibrated. INTENDED PAIRING: serve int8 only when the 4b deep tier is enabled
 # (it re-embeds for quality, backstopping the drift); serve fp32 when the 0.6b is
 # the sole tier. The deep-tier deployment sets this to int8; the default is fp32.
 EMBEDDER_QUANTIZE = os.environ.get("EMBEDDER_QUANTIZE", "fp32").strip().lower()
-# Optional deep tier: a larger, higher-quality model served on /embed_deep for the
-# background "comprehensive" re-embedding pass (aimee memory_deep_embedding). It is
-# LAZY — never loaded until the first /embed_deep call — so a default (lite)
-# deployment pays none of its ~16GB resident cost; only a host that opts into the
-# deep tier (config memory_deep_embedding_enabled) ever triggers the load. Latency
-# is not critical here (it runs in the background), so it stays fp32 torch.
-DEEP_MODEL = os.environ.get("DEEP_MODEL", "perplexity-ai/pplx-embed-v1-4b")
 
 _model = None
 _dim = 0
 _reranker = None
-_deep_model = None
-_deep_dim = 0
 
 
 def load_model():
@@ -116,31 +101,8 @@ def load_reranker():
     return _reranker
 
 
-def load_deep_model():
-    global _deep_model, _deep_dim
-    if _deep_model is not None:
-        return _deep_model
-    from sentence_transformers import SentenceTransformer
-
-    import torch
-
-    torch.set_num_threads(EMBEDDER_THREADS)
-    # fp32 torch: the deep model is the background quality tier, not latency-bound,
-    # and not every model ships a quantized export. trust_remote_code for the
-    # Qwen3-based pplx-embed family.
-    _deep_model = SentenceTransformer(DEEP_MODEL, trust_remote_code=True)
-    _deep_dim = _deep_model.get_sentence_embedding_dimension() or 0
-    sys.stderr.write(f"embedder-server: loaded deep {DEEP_MODEL} dim={_deep_dim}\n")
-    return _deep_model
-
-
 def embed(text: str):
     vec = load_model().encode(text, normalize_embeddings=True)
-    return vec.tolist()
-
-
-def embed_deep(text: str):
-    vec = load_deep_model().encode(text, normalize_embeddings=True)
     return vec.tolist()
 
 
@@ -168,25 +130,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.rstrip("/") == "/health":
-            # Report the deep model's id + dim only once it has actually loaded
-            # (deep_dim>0); never force the ~16GB load from a healthcheck.
             self._send(
                 200,
-                {
-                    "status": "ok",
-                    "model": MODEL_NAME,
-                    "dim": _dim,
-                    "quantize": EMBEDDER_QUANTIZE,
-                    "deep_model": DEEP_MODEL,
-                    "deep_dim": _deep_dim,
-                },
+                {"status": "ok", "model": MODEL_NAME, "dim": _dim, "quantize": EMBEDDER_QUANTIZE},
             )
         else:
             self._send(404, {"error": "not found"})
 
     def do_POST(self):
         path = self.path.rstrip("/")
-        if path not in ("/embed", "/embed_deep", "/rerank"):
+        if path not in ("/embed", "/rerank"):
             self._send(404, {"error": "not found"})
             return
         length = int(self.headers.get("content-length", "0") or "0")
@@ -203,7 +156,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": "empty input"})
             return
         try:
-            self._send(200, embed_deep(text) if path == "/embed_deep" else embed(text))
+            self._send(200, embed(text))
         except Exception as exc:  # noqa: BLE001
             self._send(500, {"error": str(exc)})
 
