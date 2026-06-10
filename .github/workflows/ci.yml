@@ -103,7 +103,12 @@ jobs:
     # memories_code_fts trigram index (see src/schema/postgres.sql).
     services:
       postgres:
-        image: postgres:17-alpine
+        # pgvector/pgvector (debian, not alpine) so the embedding tables exercise
+        # the REAL vector path: it ships pgvector >= 0.7 (halfvec — the unified
+        # embedding column type) and the contrib modules incl. pg_trgm (the
+        # memories_code_fts trigram index). postgres:17-alpine shipped neither, so
+        # schema apply degraded; e2e-docker already runs on this image family.
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_USER: aimee
           POSTGRES_PASSWORD: aimee
