@@ -57,6 +57,10 @@ int pgvec_memory_deep_update(int64_t point_id, const float *vec, int dim);
  * (oldest first). Returns the count written to `ids`, or -1 on error. */
 int pgvec_memory_deep_candidates(int64_t *ids, int max);
 
+/* Deep tier: nearest-neighbour search over the halfvec embedding_deep index. */
+int pgvec_memory_deep_search(const float *vec, int dim, int limit, int64_t *ids, double *scores,
+                             int max);
+
 /* Upsert a single kb embedding row.  Extracts project from payload_json. */
 int pgvec_kb_upsert(int64_t point_id, const float *vec, int dim, const char *payload_json);
 

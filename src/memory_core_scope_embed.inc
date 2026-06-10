@@ -455,6 +455,22 @@ int memory_deep_backfill(const char *command, int max_rows)
    return done;
 }
 
+/* Deep recall: embed the query with the deep model and search the embedding_deep
+ * halfvec index for the highest-quality nearest neighbours. Opt-in / occasional —
+ * a deep query embed is slow (~seconds on CPU), so this is never on the default
+ * per-turn recall path. Returns the hit count, or -1 on error. */
+int memory_deep_search(const char *command, const char *query, int limit, int64_t *ids,
+                       double *scores, int max)
+{
+   if (!command || !command[0] || !query || !query[0] || !ids || !scores || max <= 0)
+      return -1;
+   float qvec[DEEP_EMBED_MAX_DIM];
+   int qdim = memory_embed_text(query, command, qvec, DEEP_EMBED_MAX_DIM);
+   if (qdim <= 0)
+      return -1;
+   return pgvec_memory_vector_deep_search(qvec, qdim, limit, ids, scores, max);
+}
+
 /* memory_episode_row and memory_relation_row used to live here; the row
  * mappers moved into db2 with db2_memory_episodes_search and
  * db2_memory_relations_search. */

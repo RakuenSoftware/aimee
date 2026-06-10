@@ -942,6 +942,11 @@ int memory_embed_deep(int64_t memory_id, const char *command);
 /* Deep tier: backfill up to max_rows memories lacking a deep embedding (one
  * throttled batch). Returns the number deep-embedded. */
 int memory_deep_backfill(const char *command, int max_rows);
+/* Deep tier: embed `query` with the deep model and search embedding_deep for the
+ * top `limit` nearest memories. Opt-in (a deep query embed is slow). Returns the
+ * hit count written to ids/scores, or -1 on error. */
+int memory_deep_search(const char *command, const char *query, int limit, int64_t *ids,
+                       double *scores, int max);
 double cosine_similarity(const float *a, const float *b, int dim);
 
 /* --- Effectiveness Tracking --- */

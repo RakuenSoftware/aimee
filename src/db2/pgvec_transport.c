@@ -409,6 +409,54 @@ int pgvec_memory_deep_candidates(int64_t *ids, int max)
    return n;
 }
 
+/* Deep-recall search: nearest neighbours over the halfvec embedding_deep index
+ * (only rows the backfill has populated). The query vector is the deep model's
+ * 2560-dim output. Mirrors the live memory search but on the deep column; cosine
+ * distance via halfvec_cosine_ops. Returns hit count, or -1 on error. */
+int pgvec_memory_deep_search(const float *vec, int dim, int limit, int64_t *ids, double *scores,
+                             int max)
+{
+   if (!vec || dim <= 0 || !ids || !scores || max <= 0)
+      return -1;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+
+   char *vec_text = build_vec_text(vec, dim);
+   if (!vec_text)
+      return -1;
+
+   static const char *sql = "SELECT point_id, 1.0 - (embedding_deep <=> :qvec::halfvec) AS score "
+                            "FROM memory_embeddings "
+                            "WHERE embedding_deep IS NOT NULL "
+                            "ORDER BY embedding_deep <=> :qvec::halfvec "
+                            "LIMIT :lim";
+
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+   {
+      free(vec_text);
+      return 0; /* halfvec/pgvector not available — no deep results */
+   }
+   aimee_pg_bind_text(stmt, "qvec", vec_text);
+   aimee_pg_bind_int(stmt, "lim", limit > 0 ? limit : max);
+
+   int n = 0;
+   aimee_pg_step_t rc;
+   while ((rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf))) == AIMEE_PG_ROW)
+   {
+      if (n >= max)
+         break;
+      ids[n] = aimee_pg_column_int64(stmt, 0);
+      scores[n] = aimee_pg_column_double(stmt, 1);
+      n++;
+   }
+   aimee_pg_finalize(stmt);
+   free(vec_text);
+   return (rc == AIMEE_PG_ERR) ? -1 : n;
+}
+
 /* -------------------------------------------------------------------------
  * KB upsert
  * ---------------------------------------------------------------------- */

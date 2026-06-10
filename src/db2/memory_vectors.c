@@ -77,6 +77,14 @@ int pgvec_memory_vector_deep_candidates(int64_t *ids, int max)
    return pgvec_memory_deep_candidates(ids, max);
 }
 
+int pgvec_memory_vector_deep_search(const float *vec, int dim, int limit, int64_t *ids,
+                                    double *scores, int max)
+{
+   if (!vec || dim <= 0 || !ids || !scores || max <= 0)
+      return -1;
+   return pgvec_memory_deep_search(vec, dim, limit, ids, scores, max);
+}
+
 int pgvec_memory_vector_search_record_type(const char *record_type, const float *vec, int dim,
                                            int limit, int64_t *ids, double *scores, int max)
 {
