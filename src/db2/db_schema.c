@@ -3,6 +3,7 @@
 
 #include "db_schema.h"
 #include "db_postgres.h"
+#include "aimee.h" /* EMBED_MAX_DIM */
 #include "../schema_data.h"
 
 #ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
@@ -11,6 +12,8 @@ typedef struct sqlite3 sqlite3;
 #include <sqlite3.h>
 #endif
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #if !defined(AIMEE_DISABLE_DB2_SQLITE_SHIM) && (defined(__GNUC__) || defined(__clang__))
 #pragma weak sqlite3_errmsg
@@ -43,11 +46,68 @@ static void db2_run_sqlite_migrations(sqlite3 *db)
 }
 #endif
 
-int db_apply_schema_postgres(void *pg_conn, char *errbuf, size_t errlen)
+/* Replace every occurrence of |token| in |src| with |repl|, returning a
+ * heap-allocated copy (caller frees) or NULL on allocation failure. |token|
+ * must be non-empty. */
+static char *schema_subst(const char *src, const char *token, const char *repl)
+{
+   size_t tok_len = strlen(token);
+   size_t repl_len = strlen(repl);
+   if (tok_len == 0)
+      return NULL;
+
+   size_t count = 0;
+   for (const char *p = src; (p = strstr(p, token)) != NULL; p += tok_len)
+      count++;
+
+   /* strlen(src) >= count*tok_len always (matches lie within src), so the
+    * subtraction stays non-negative before adding the replacement bytes. */
+   size_t out_len = strlen(src) - count * tok_len + count * repl_len;
+   char *out = malloc(out_len + 1);
+   if (!out)
+      return NULL;
+
+   char *w = out;
+   for (const char *p = src; *p;)
+   {
+      if (strncmp(p, token, tok_len) == 0)
+      {
+         memcpy(w, repl, repl_len);
+         w += repl_len;
+         p += tok_len;
+      }
+      else
+         *w++ = *p++;
+   }
+   *w = '\0';
+   return out;
+}
+
+int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen)
 {
    if (!pg_conn)
       return -1;
-   return aimee_pg_exec(pg_conn, AIMEE_DB2_SCHEMA_SQL, errbuf, errlen);
+
+   /* The DB2 schema declares its halfvec embedding columns with the
+    * __EMBED_DIM__ placeholder so a deployment can run either embedder
+    * (0.6b=1024 or 4b=2560). Substitute the configured dimension here — the one
+    * place the schema is applied to Postgres. An out-of-range value falls back
+    * to the default 0.6b dimension rather than emitting invalid DDL. */
+   if (embed_dim <= 0 || embed_dim > EMBED_MAX_DIM)
+      embed_dim = 1024;
+   char dimbuf[16];
+   snprintf(dimbuf, sizeof(dimbuf), "%d", embed_dim);
+
+   char *sql = schema_subst(AIMEE_DB2_SCHEMA_SQL, "__EMBED_DIM__", dimbuf);
+   if (!sql)
+   {
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen, "schema dimension substitution failed (out of memory)");
+      return -1;
+   }
+   int rc = aimee_pg_exec(pg_conn, sql, errbuf, errlen);
+   free(sql);
+   return rc;
 }
 
 int db2_apply_schema_sqlite_shim(sqlite3 *db, char *errbuf, size_t errlen)

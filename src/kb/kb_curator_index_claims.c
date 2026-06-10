@@ -26,7 +26,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CURATOR_CLAIM_DIM 384
+/* Buffer cap for the claim subject/value embeddings; actual dimension is set
+ * by the deployment's single embedder (1024 pplx-0.6b / 2560 pplx-4b). */
+#define CURATOR_CLAIM_DIM EMBED_MAX_DIM
 
 static int64_t claim_point_id(const char *artifact_id)
 {
@@ -109,11 +111,11 @@ int kb_curator_index_claims_one(const kb_curator_extract_opts_t *opts)
                               CURATOR_CLAIM_DIM);
    int d2 = memory_embed_text(value_text[0] ? value_text : subj_attr, embed_cmd, val_vec,
                               CURATOR_CLAIM_DIM);
-   if (d1 == CURATOR_CLAIM_DIM && d2 == CURATOR_CLAIM_DIM)
+   if (d1 > 0 && d1 == d2)
    {
       int64_t pid = claim_point_id(id);
-      if (pgvec_curator_claim_upsert(pid, subj_vec, val_vec, CURATOR_CLAIM_DIM, id, subject,
-                                     attribute, value, claim_kind, payload ? payload : "{}") != 0)
+      if (pgvec_curator_claim_upsert(pid, subj_vec, val_vec, d1, id, subject, attribute, value,
+                                     claim_kind, payload ? payload : "{}") != 0)
          aimee_log(LOG_WARN, "kb.curator.claims", "claim vector upsert failed for %s", id);
    }
    else

@@ -51,9 +51,10 @@ void aimee_pg_close(void *pg_conn)
    assert(pg_conn == &g_fake_conn);
 }
 
-int db_apply_schema_postgres(void *pg_conn, char *errbuf, size_t errlen)
+int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen)
 {
    g_schema_calls++;
+   (void)embed_dim;
    assert(pg_conn == &g_fake_conn);
    if (g_fail_schema)
    {

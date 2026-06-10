@@ -25,7 +25,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CURATOR_NARRATIVE_DIM 384
+/* Buffer cap for the narrative embedding; actual dimension is set by the
+ * deployment's single embedder (1024 pplx-0.6b / 2560 pplx-4b). */
+#define CURATOR_NARRATIVE_DIM EMBED_MAX_DIM
 
 /* Deterministic, positive 64-bit point id (FNV-1a) for a narrative artifact. */
 static int64_t narrative_point_id(const char *artifact_id)
@@ -109,7 +111,7 @@ int kb_curator_index_narrative_one(const kb_curator_extract_opts_t *opts)
    const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
    float vec[CURATOR_NARRATIVE_DIM];
    int dim = memory_embed_text(text, embed_cmd, vec, CURATOR_NARRATIVE_DIM);
-   if (dim == CURATOR_NARRATIVE_DIM)
+   if (dim > 0)
    {
       int64_t pid = narrative_point_id(id);
       const char *doc_id = jo_cstr(pj, "doc_id");

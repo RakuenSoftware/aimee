@@ -32,7 +32,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CURATOR_ENTITY_DIM 384
+/* Buffer cap for the entity embedding. The deployment's single embedder
+ * decides the actual dimension (1024 for pplx-0.6b, 2560 for 4b); we size for
+ * the largest and upsert whatever the embedder returns. */
+#define CURATOR_ENTITY_DIM EMBED_MAX_DIM
 
 /* Cosine score (1 - distance) at/above which a mention is treated as the same
  * canonical entity as an existing one (no new vector written). */
@@ -187,7 +190,7 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
    const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
    float vec[CURATOR_ENTITY_DIM];
    int dim = memory_embed_text(embed_text, embed_cmd, vec, CURATOR_ENTITY_DIM);
-   if (dim == CURATOR_ENTITY_DIM)
+   if (dim > 0)
    {
       /* Resolve to an existing canonical entity in this scope, or — per the
        * charter's scope lattice — any BROADER scope (project -> workspace ->
