@@ -31,6 +31,9 @@ services:
 
   embedder:
     restart: unless-stopped
+    # Published image (pushed to ghcr on every merge to main); override
+    # AIMEE_EMBEDDER_IMAGE to pin a version or use a fork/registry.
+    image: ${AIMEE_EMBEDDER_IMAGE:-ghcr.io/rakuensoftware/aimee-embedder:latest}
     build:
       context: .
       dockerfile: Dockerfile.embedder
@@ -45,6 +48,9 @@ services:
 
   aimee-kb:
     restart: unless-stopped
+    # Published image (pushed to ghcr on every merge to main); override
+    # AIMEE_KB_IMAGE to pin a version or use a fork/registry.
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
     build:
       context: .
       dockerfile: Dockerfile
@@ -76,6 +82,9 @@ services:
 
   aimee-server:
     restart: unless-stopped
+    # Published image (pushed to ghcr on every merge to main); override
+    # AIMEE_SERVER_IMAGE to pin a version or use a fork/registry.
+    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:latest}
     build:
       context: .
       dockerfile: Dockerfile.server

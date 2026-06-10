@@ -5,7 +5,10 @@
 # kb-backed shared / vector operations are simply unavailable until a kb is wired
 # in (see compose.server.yaml for the full server + kb stack).
 #
-#   docker compose -f compose.server-standalone.yaml up --build
+# Deploy the published image (pushed to ghcr on every merge to main), or build:
+#   docker compose -f compose.server-standalone.yaml pull && \
+#     docker compose -f compose.server-standalone.yaml up -d
+#   docker compose -f compose.server-standalone.yaml up --build   # build from source
 #
 # The /v1 API requires a bearer token (baked default: "aimee-local-dev"):
 #   curl -H "Authorization: Bearer aimee-local-dev" http://localhost:8740/v1/health
@@ -24,7 +27,10 @@ services:
       # Opt into the optional aimee-webchat with a GitHub Packages token:
       #   NPM_TOKEN=<github PAT> docker compose -f compose.server-standalone.yaml \
       #     build --build-arg WITH_WEBCHAT=1 --secret id=npm_token,env=NPM_TOKEN
-    image: aimee-server
+    # Published image (built + pushed to ghcr on every merge to main): `docker
+    # compose pull` fetches it; `up --build` rebuilds locally and tags it the same.
+    # Override AIMEE_SERVER_IMAGE to pin a version or use a fork/registry.
+    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:latest}
     # The server's worker threads need a 64 MB stack (the 8 MB container default
     # overflows during startup — matches systemd's LimitSTACK=67108864).
     ulimits:

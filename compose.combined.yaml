@@ -6,6 +6,10 @@
 # the embedder remain separate services — the combined image bundles the two
 # aimee binaries, not a database.
 #
+# Deploy the published images (built + pushed to ghcr on every merge to main):
+#   docker compose -f compose.combined.yaml pull
+#   docker compose -f compose.combined.yaml up -d
+# Or build from source instead of pulling:
 #   docker compose -f compose.combined.yaml up --build
 #
 # Server /v1 on :8740 (bearer "aimee-local-dev"); the in-container kb /v1 is also
@@ -34,6 +38,10 @@ services:
 
   embedder:
     restart: unless-stopped
+    # Published image (built + pushed to ghcr on every merge to main). `docker
+    # compose pull` fetches it; `up --build` rebuilds locally and tags it the same.
+    # Override AIMEE_EMBEDDER_IMAGE to pin a version or use a fork/registry.
+    image: ${AIMEE_EMBEDDER_IMAGE:-ghcr.io/rakuensoftware/aimee-embedder:latest}
     build:
       context: .
       dockerfile: Dockerfile.embedder
@@ -57,7 +65,12 @@ services:
       #   NPM_TOKEN=<github PAT> docker compose -f compose.combined.yaml build \
       #     --build-arg WITH_WEBCHAT=1 --secret id=npm_token,env=NPM_TOKEN
       # (or `docker pull` the published image, which already includes webchat).
-    image: aimee-server-kb
+    # Published combined image (built + pushed to ghcr on every merge to main).
+    # `docker compose pull` fetches it so the standard deploy creates containers
+    # from the merge-built image without a local build; `up --build` still
+    # rebuilds locally and tags it the same. Override AIMEE_COMBINED_IMAGE to pin
+    # a version (e.g. ghcr.io/rakuensoftware/aimee-server-kb:v0.2.41) or a fork.
+    image: ${AIMEE_COMBINED_IMAGE:-ghcr.io/rakuensoftware/aimee-server-kb:latest}
     # The server's worker threads need a 64 MB stack (the 8 MB container default
     # overflows during startup — matches systemd's LimitSTACK=67108864).
     ulimits:
