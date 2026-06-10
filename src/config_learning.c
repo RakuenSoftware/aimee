@@ -132,6 +132,32 @@ void config_apply_learning_settings(config_t *cfg, cJSON *root)
          snprintf(cfg->learning_embed_model_version, sizeof(cfg->learning_embed_model_version),
                   "%s", item->valuestring);
    }
+
+   /* learning.implicit.*: per-heuristic implicit-signal detector toggles. These
+    * were CLI-settable (config_fields) but had no file parse/save, so the value
+    * never persisted across a save/restart — only the config.c default applied.
+    * Parse them here so an operator override survives. citation_repair /
+    * citation_continuation default on (the detector is wired + graded PASS); the
+    * three stateful heuristics default off. */
+   cJSON *implicit_cfg = cJSON_GetObjectItemCaseSensitive(learning_cfg, "implicit");
+   if (cJSON_IsObject(implicit_cfg))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(implicit_cfg, "citation_repair");
+      if (cJSON_IsBool(item))
+         cfg->learning_implicit_citation_repair = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(implicit_cfg, "citation_continuation");
+      if (cJSON_IsBool(item))
+         cfg->learning_implicit_citation_continuation = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(implicit_cfg, "repeat_question");
+      if (cJSON_IsBool(item))
+         cfg->learning_implicit_repeat_question = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(implicit_cfg, "repeated_correction");
+      if (cJSON_IsBool(item))
+         cfg->learning_implicit_repeated_correction = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(implicit_cfg, "workflow_repetition");
+      if (cJSON_IsBool(item))
+         cfg->learning_implicit_workflow_repetition = cJSON_IsTrue(item) ? 1 : 0;
+   }
 }
 
 void config_apply_calibration_settings(config_t *cfg, cJSON *root)
@@ -212,7 +238,13 @@ void config_apply_calibration_settings(config_t *cfg, cJSON *root)
 
 void config_apply_demotion_settings(config_t *cfg, cJSON *root)
 {
-   cfg->demotion_enabled = 0;
+   /* Default 1 = shadow: kb_demote_run computes effectiveness scores + fits the
+    * per-class demotion profiles but does NOT demote (live suppression only at
+    * >= 2). Flipped on as the proven-safe rollout stage — the poison-gate
+    * harness shows the score boundary suppresses only closed-outcome poison
+    * rows, never clean ones, and gate criterion #4 requires shadow-before-acting.
+    * Bump to 2 (live) after reviewing real-recall shadow data. */
+   cfg->demotion_enabled = 1;
    cfg->demotion_window = 64;
    cfg->demotion_half_life_days = 30.0;
    cfg->demotion_n_min = 5;
@@ -449,7 +481,9 @@ void config_save_intelligence(const config_t *cfg, cJSON *root)
        cfg->calibration_tau_memory_flag != 0.55 ||
        cfg->calibration_tau_working_profile_auto != 0.80 ||
        cfg->calibration_tau_working_profile_flag != 0.65;
-   int dem_any = cfg->demotion_enabled || cfg->demotion_window != 64 ||
+   /* demotion_enabled defaults to 1 (shadow); emit when it differs from the
+    * default so the off (0) and live (2) states survive a save round-trip. */
+   int dem_any = cfg->demotion_enabled != 1 || cfg->demotion_window != 64 ||
                  cfg->demotion_half_life_days != 30.0 || cfg->demotion_n_min != 5;
    int bandit_any = cfg->bandit_optimize_command[0] || cfg->bandit_exploration_fraction != 0.05 ||
                     cfg->bandit_ipw_weight_cap != 10.0 || cfg->bandit_live_decision_enabled ||

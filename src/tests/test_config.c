@@ -61,6 +61,16 @@ int main(void)
       assert(fabs(cfg.skills_eval_threshold - 0.01) < 0.0001);
       assert(cfg.ingress_max_raw_scans == 0);
       assert(cfg.concurrency_preempt_requeue_max == CONFIG_DEFAULT_CONCURRENCY_PREEMPT_REQUEUE_MAX);
+      /* profile-card refresh ran ungated in maintenance before the enable-gate was
+       * wired; the flag now defaults on so that behavior is preserved. */
+      assert(cfg.memory_profile_cards_enabled == 1);
+      /* dedupe likewise ran ungated in the COMPACT pass; default-on preserves it.
+       * summarise stays opt-in (default off). */
+      assert(cfg.memory_improve_dedupe_enabled == 1);
+      assert(cfg.memory_improve_summarise_enabled == 0);
+      /* directives auto-create ran ungated before the toggle was wired; default-on
+       * preserves it. */
+      assert(cfg.memory_directives_enabled == 1);
    }
 
    /* --- config_save + config_load round-trip --- */
@@ -105,6 +115,10 @@ int main(void)
       cfg.learning_router_enabled = 0;
       cfg.learning_proposal_ttl_days = 14;
       cfg.learning_max_commits_per_week = 11;
+      /* learning.implicit.* now persist (was parse/save gap): citation_repair off
+       * (default on → prove the off state round-trips), repeat_question on. */
+      cfg.learning_implicit_citation_repair = 0;
+      cfg.learning_implicit_repeat_question = 1;
       cfg.cache_aware_rewrite_enabled = 1;
       cfg.cache_aware_rewrite_min_savings_tokens = 321;
       cfg.cache_aware_rewrite_hard_context_threshold = 0.72;
@@ -153,6 +167,19 @@ int main(void)
       snprintf(cfg.kb_curator_synthesize_command, sizeof(cfg.kb_curator_synthesize_command),
                "synth --json");
       cfg.kb_evidence_embed_enabled = 0;
+      /* profile_cards now defaults on; set it off to prove the disabled state
+       * round-trips (regression class: a default-on bool whose save guard only
+       * emitted on a truthy value would silently reset back to on). */
+      cfg.memory_profile_cards_enabled = 0;
+      /* memory.improve.* was parse-only (dropped on save); dedupe defaults on so
+       * set it off, summarise on, to prove the whole block now round-trips. */
+      cfg.memory_improve_dedupe_enabled = 0;
+      cfg.memory_improve_summarise_enabled = 1;
+      cfg.memory_improve_min_cluster = 5;
+      cfg.memory_improve_max_confidence = 0.42;
+      /* directives defaults on; set off to prove the disabled state round-trips
+       * (same default-on save-guard regression class as profile_cards). */
+      cfg.memory_directives_enabled = 0;
       /* kb.maintenance.* — must survive config_save (same drop class as curator). */
       cfg.kb_maintenance_enabled = 1;
       cfg.kb_maintenance_interval_hours = 12;
@@ -170,7 +197,9 @@ int main(void)
       cfg.calibration_buckets = 20;
       cfg.calibration_tau_memory_auto = 0.91;
       snprintf(cfg.calibration_command, sizeof(cfg.calibration_command), "calib --json");
-      cfg.demotion_enabled = 1;
+      /* demotion_enabled now defaults to 1 (shadow); set 2 (live) to prove the
+       * non-default value survives the emit-when-!=1 save guard. */
+      cfg.demotion_enabled = 2;
       cfg.demotion_window = 128;
       cfg.bandit_live_decision_enabled = 1;
       cfg.bandit_exploration_fraction = 0.2;
@@ -278,6 +307,11 @@ int main(void)
       assert(cfg2.memory_citations_strip_unverified == 1);
       assert(cfg2.learning_router_enabled == 0);
       assert(cfg2.learning_proposal_ttl_days == 14);
+      /* implicit overrides persisted; the untouched citation_continuation kept
+       * its default-on. */
+      assert(cfg2.learning_implicit_citation_repair == 0);
+      assert(cfg2.learning_implicit_citation_continuation == 1);
+      assert(cfg2.learning_implicit_repeat_question == 1);
       assert(cfg2.learning_max_commits_per_week == 11);
       assert(cfg2.cache_aware_rewrite_enabled == 1);
       assert(cfg2.cache_aware_rewrite_min_savings_tokens == 321);
@@ -317,6 +351,12 @@ int main(void)
       assert(strcmp(cfg2.kb_curator_judge_command, "judge --json") == 0);
       assert(strcmp(cfg2.kb_curator_synthesize_command, "synth --json") == 0);
       assert(cfg2.kb_evidence_embed_enabled == 0);
+      assert(cfg2.memory_profile_cards_enabled == 0);
+      assert(cfg2.memory_improve_dedupe_enabled == 0);
+      assert(cfg2.memory_improve_summarise_enabled == 1);
+      assert(cfg2.memory_improve_min_cluster == 5);
+      assert(fabs(cfg2.memory_improve_max_confidence - 0.42) < 0.0001);
+      assert(cfg2.memory_directives_enabled == 0);
       /* regression: kb.maintenance.* used to be parsed but never saved -> dropped on save. */
       assert(cfg2.kb_maintenance_enabled == 1);
       assert(cfg2.kb_maintenance_interval_hours == 12);
@@ -331,7 +371,7 @@ int main(void)
       assert(cfg2.calibration_buckets == 20);
       assert(cfg2.calibration_tau_memory_auto > 0.90 && cfg2.calibration_tau_memory_auto < 0.92);
       assert(strcmp(cfg2.calibration_command, "calib --json") == 0);
-      assert(cfg2.demotion_enabled == 1 && cfg2.demotion_window == 128);
+      assert(cfg2.demotion_enabled == 2 && cfg2.demotion_window == 128);
       assert(cfg2.bandit_live_decision_enabled == 1);
       assert(cfg2.bandit_exploration_fraction > 0.19 && cfg2.bandit_exploration_fraction < 0.21);
       assert(strcmp(cfg2.bandit_optimize_command, "bopt --json") == 0);

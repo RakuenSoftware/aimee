@@ -874,11 +874,16 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
          /* Record the failure; after threshold crossings, the
           * directives subsystem auto-creates a retrieval_failure
           * directive so future turns can ask the user to fill the
-          * gap instead of silently flailing. */
-         char norm_hint[256];
-         normalize_key(task_hint, norm_hint, sizeof(norm_hint));
-         if (norm_hint[0])
-            memory_directive_record_retrieval_failure(norm_hint, 0, "");
+          * gap instead of silently flailing. Gated by the directives
+          * toggle (default on); manually-created directives still
+          * surface when it is off. */
+         if (assemble_cfg.memory_directives_enabled)
+         {
+            char norm_hint[256];
+            normalize_key(task_hint, norm_hint, sizeof(norm_hint));
+            if (norm_hint[0])
+               memory_directive_record_retrieval_failure(norm_hint, 0, "");
+         }
       }
    }
 
