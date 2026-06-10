@@ -947,6 +947,9 @@ int memory_deep_backfill(const char *command, int max_rows);
  * hit count written to ids/scores, or -1 on error. */
 int memory_deep_search(const char *command, const char *query, int limit, int64_t *ids,
                        double *scores, int max);
+/* Deep recall returning full memory_t rows; loads config for the gate + command.
+ * Returns the row count, 0 if the deep tier is off, or -1 on error. */
+int memory_deep_search_facts(const char *query, int limit, memory_t *facts, int max);
 double cosine_similarity(const float *a, const float *b, int dim);
 
 /* --- Effectiveness Tracking --- */

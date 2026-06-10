@@ -471,6 +471,39 @@ int memory_deep_search(const char *command, const char *query, int limit, int64_
    return pgvec_memory_vector_deep_search(qvec, qdim, limit, ids, scores, max);
 }
 
+/* Deep recall as full memory rows: self-contained entry for the recall handler.
+ * Loads config to honour the gate + resolve the deep command (mirrors how the
+ * live recall reads embedding_command via config_load), deep-searches, then
+ * fetches each hit as a memory_t. Returns the row count, 0 if the deep tier is
+ * off / no deep embeddings exist, or -1 on error. */
+int memory_deep_search_facts(const char *query, int limit, memory_t *facts, int max)
+{
+   if (!query || !query[0] || !facts || max <= 0)
+      return -1;
+   config_t cfg;
+   if (config_load(&cfg) != 0)
+      return -1;
+   if (!cfg.memory_deep_embedding_enabled || !cfg.memory_deep_embedding_command[0])
+      return 0; /* deep tier off — caller renders an empty result */
+
+   int cap = max < 64 ? max : 64;
+   if (limit <= 0 || limit > cap)
+      limit = cap;
+   int64_t ids[64];
+   double scores[64];
+   int n = memory_deep_search(cfg.memory_deep_embedding_command, query, limit, ids, scores, cap);
+   if (n < 0)
+      return -1;
+
+   int out = 0;
+   for (int i = 0; i < n && out < max; i++)
+   {
+      if (memory_get(ids[i], &facts[out]) == 0)
+         out++;
+   }
+   return out;
+}
+
 /* memory_episode_row and memory_relation_row used to live here; the row
  * mappers moved into db2 with db2_memory_episodes_search and
  * db2_memory_relations_search. */

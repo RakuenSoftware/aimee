@@ -438,6 +438,15 @@ int kb_handle_memory_find_facts_scoped(int fd, cJSON *req)
    const char *scope_type = cJSON_IsString(st) ? st->valuestring : "";
    const char *scope_value = cJSON_IsString(sv) ? sv->valuestring : "";
    int limit = cJSON_IsNumber(l) ? (int)l->valuedouble : 20;
+   /* Opt-in deep recall: when "deep" is set, search the 4B deep index instead of
+    * the live hybrid recall (config memory_deep_embedding_enabled gates it). Same
+    * response shape, so callers parse it unchanged. */
+   cJSON *deep_j = cJSON_GetObjectItemCaseSensitive(req, "deep");
+   if (cJSON_IsTrue(deep_j))
+   {
+      cJSON *dresp = db2_kb_service_memory_deep_facts_json(q->valuestring, limit);
+      return kb_reply_or_error(fd, dresp, "failed deep recall");
+   }
    /* Honour graph_code_fusion_state for the duration of this recall (see
     * kb_handle_memory_find_facts). Thread-local; cleared after. */
    cJSON *fusion_j = cJSON_GetObjectItemCaseSensitive(req, "graph_code_fusion_state");

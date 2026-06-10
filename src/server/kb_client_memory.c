@@ -488,6 +488,23 @@ int kb_client_memory_find_facts_scoped(const char *query, const char *scope_type
                                                 "on");
 }
 
+/* Opt-in deep recall: same memory.find_facts_scoped endpoint with deep=true, so
+ * the kb searches the 4B deep index. No new RPC — just the extra request flag. */
+int kb_client_memory_find_facts_deep(const char *query, int limit, memory_t *out, int max)
+{
+   if (!query || !out || max <= 0)
+      return 0;
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "query", query);
+   if (limit > 0)
+      cJSON_AddNumberToObject(req, "limit", limit);
+   cJSON_AddBoolToObject(req, "deep", 1);
+   char *json = kb_v1_action_request("memory.find_facts_scoped", req);
+   int n = kbc_facts_array_from_envelope(json, out, max);
+   free(json);
+   return n;
+}
+
 int kb_client_memory_search(char **clusters, int cluster_count, int limit, search_result_t *out,
                             int max)
 {

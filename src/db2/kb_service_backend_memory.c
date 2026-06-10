@@ -389,6 +389,47 @@ cJSON *db2_kb_service_memory_find_facts_scoped_json(const char *query, const cha
    return resp;
 }
 
+/* Deep-recall variant of find_facts: pure 4B-deep-index nearest neighbours
+ * (config memory_deep_embedding_enabled). Same response shape as the scoped
+ * search so the existing memory.find_facts callers parse it unchanged; reached
+ * via the "deep" flag on that request. Empty "facts" when the deep tier is off. */
+cJSON *db2_kb_service_memory_deep_facts_json(const char *query, int limit)
+{
+   if (limit < 1)
+      limit = 20;
+   if (limit > 64)
+      limit = 64;
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON *arr = resp ? cJSON_AddArrayToObject(resp, "facts") : NULL;
+   if (!resp || !arr)
+   {
+      cJSON_Delete(resp);
+      return NULL;
+   }
+
+   memory_t facts[64];
+   int n = memory_deep_search_facts(query ? query : "", limit, facts, 64);
+   if (n < 0)
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message", "deep recall unavailable");
+      return resp;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *obj = kbs_memory_row_to_json(&facts[i]);
+      if (!obj)
+      {
+         cJSON_Delete(resp);
+         return NULL;
+      }
+      cJSON_AddItemToArray(arr, obj);
+   }
+   return resp;
+}
+
 cJSON *db2_kb_service_memory_export_jsonl_json(const char *path)
 {
    cJSON *resp = cJSON_CreateObject();
