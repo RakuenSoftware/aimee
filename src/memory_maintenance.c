@@ -28,6 +28,11 @@
 
 #define MAINTENANCE_STATE_KEY "cycle"
 
+/* Deep-tier backfill throttle: memories deep-embedded per maintenance cycle. Kept
+ * modest because each deep embed is a slow large-model call (~seconds on CPU); the
+ * corpus fills in over many cycles ("take our time"). */
+#define MEMORY_DEEP_BACKFILL_BATCH 25
+
 static pthread_mutex_t s_mm_metrics_mu = PTHREAD_MUTEX_INITIALIZER;
 static int64_t s_mm_metric_runs_total = 0;
 static int64_t s_mm_metric_skips_total = 0;
@@ -80,7 +85,8 @@ static void mm_state_save(const memory_maintenance_summary_t *summary)
    int changes = summary->promoted + summary->demoted + summary->expired +
                  summary->lifecycle_archived + summary->reminders_expired +
                  summary->directives_expired + summary->rescored +
-                 summary->profile_cards_refreshed + summary->merged + summary->summarized;
+                 summary->profile_cards_refreshed + summary->merged + summary->summarized +
+                 summary->deep_embedded;
    db1_maintenance_state_t st = {0};
    st.present = 1;
    now_utc(st.last_run_at, sizeof(st.last_run_at));
@@ -144,6 +150,7 @@ cJSON *memory_maintenance_summary_to_json(const memory_maintenance_summary_t *su
    cJSON_AddNumberToObject(j, "profile_cards_refreshed", summary->profile_cards_refreshed);
    cJSON_AddNumberToObject(j, "merged", summary->merged);
    cJSON_AddNumberToObject(j, "summarized", summary->summarized);
+   cJSON_AddNumberToObject(j, "deep_embedded", summary->deep_embedded);
    cJSON_AddNumberToObject(j, "elapsed_ms", summary->elapsed_ms);
    cJSON_AddNumberToObject(j, "memory_count_before", (double)summary->memory_count_before);
    cJSON_AddNumberToObject(j, "memory_count_after", (double)summary->memory_count_after);
@@ -295,6 +302,24 @@ int memory_maintenance_run(const config_t *cfg, unsigned int modes, int force, i
       }
    }
 
+   /* Deep embed: background backfill of the optional 4B deep-tier embeddings
+    * (config memory_deep_embedding_enabled). One throttled batch per cycle so a
+    * large corpus fills in gradually rather than blocking — matching the cycle's
+    * existing slow modes (SUMMARIZE may call an LLM). NB the FIRST batch after the
+    * tier is enabled triggers the embedder's one-time ~150s lazy load of the 4B
+    * model, so that cycle runs long; subsequent cycles are fast (model resident). */
+   if (modes & MEMORY_MAINTENANCE_MODE_DEEP_EMBED)
+   {
+      if (!dry_run && cfg && cfg->memory_deep_embedding_enabled &&
+          cfg->memory_deep_embedding_command[0])
+      {
+         int embedded =
+             memory_deep_backfill(cfg->memory_deep_embedding_command, MEMORY_DEEP_BACKFILL_BATCH);
+         if (embedded > 0)
+            out->deep_embedded = embedded;
+      }
+   }
+
    out->memory_count_after = db2_memory_count();
    clock_gettime(CLOCK_MONOTONIC, &t1);
    out->elapsed_ms = (t1.tv_sec - t0.tv_sec) * 1000.0 + (t1.tv_nsec - t0.tv_nsec) / 1.0e6;
@@ -308,7 +333,7 @@ int memory_maintenance_run(const config_t *cfg, unsigned int modes, int force, i
 
    int changes = out->promoted + out->demoted + out->expired + out->lifecycle_archived +
                  out->reminders_expired + out->directives_expired + out->rescored +
-                 out->profile_cards_refreshed + out->merged + out->summarized;
+                 out->profile_cards_refreshed + out->merged + out->summarized + out->deep_embedded;
    mm_metrics_record(out->elapsed_ms, 0, changes);
 
    if (!dry_run)
@@ -377,6 +402,8 @@ int memory_maintenance_last_summary(memory_maintenance_summary_t *out)
          out->merged = (int)v->valuedouble;
       if ((v = cJSON_GetObjectItem(parsed, "summarized")) && cJSON_IsNumber(v))
          out->summarized = (int)v->valuedouble;
+      if ((v = cJSON_GetObjectItem(parsed, "deep_embedded")) && cJSON_IsNumber(v))
+         out->deep_embedded = (int)v->valuedouble;
       if ((v = cJSON_GetObjectItem(parsed, "memory_count_before")) && cJSON_IsNumber(v))
          out->memory_count_before = (int64_t)v->valuedouble;
       if ((v = cJSON_GetObjectItem(parsed, "memory_count_after")) && cJSON_IsNumber(v))

@@ -49,6 +49,18 @@ int pgvec_memory_upsert(int64_t point_id, const float *vec, int dim, const char 
 /* Delete a single memory embedding row by point_id. */
 int pgvec_memory_delete(int64_t point_id);
 
+/* Deep tier: write a 2560-dim deep embedding to the halfvec column embedding_deep
+ * of an existing memory_embeddings row (leaves the live `embedding` untouched). */
+int pgvec_memory_deep_update(int64_t point_id, const float *vec, int dim);
+
+/* Deep tier: collect up to `max` memory point_ids still missing a deep embedding
+ * (oldest first). Returns the count written to `ids`, or -1 on error. */
+int pgvec_memory_deep_candidates(int64_t *ids, int max);
+
+/* Deep tier: nearest-neighbour search over the halfvec embedding_deep index. */
+int pgvec_memory_deep_search(const float *vec, int dim, int limit, int64_t *ids, double *scores,
+                             int max);
+
 /* Upsert a single kb embedding row.  Extracts project from payload_json. */
 int pgvec_kb_upsert(int64_t point_id, const float *vec, int dim, const char *payload_json);
 

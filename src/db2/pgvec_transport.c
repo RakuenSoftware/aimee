@@ -347,6 +347,116 @@ int pgvec_memory_delete(int64_t point_id)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
+/* Deep embedding tier (config memory_deep_embedding_enabled). The 2560-dim deep
+ * vector is written to the halfvec column embedding_deep on an existing row; the
+ * live `embedding` is untouched. The same '[..]' literal build_vec_text produces
+ * casts to halfvec. */
+int pgvec_memory_deep_update(int64_t point_id, const float *vec, int dim)
+{
+   if (!vec || dim <= 0)
+      return 0;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   char *vec_text = build_vec_text(vec, dim);
+   if (!vec_text)
+      return -1;
+   static const char *sql = "UPDATE memory_embeddings SET embedding_deep = :embedding::halfvec "
+                            "WHERE point_id = :point_id";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+   {
+      free(vec_text);
+      return -1;
+   }
+   aimee_pg_bind_int64(stmt, "point_id", point_id);
+   aimee_pg_bind_text(stmt, "embedding", vec_text);
+   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
+   aimee_pg_finalize(stmt);
+   free(vec_text);
+   return (rc == AIMEE_PG_DONE) ? 0 : -1;
+}
+
+/* Select up to `max` memory point_ids still missing a deep embedding, restricted
+ * to points that map to a live memory (so the backfill can reconstruct their text
+ * via db2_memory_get_key_content). Oldest point_ids first for deterministic,
+ * resumable progress. Returns the count written to `ids`, or -1 on error. */
+int pgvec_memory_deep_candidates(int64_t *ids, int max)
+{
+   if (!ids || max <= 0)
+      return 0;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   if (max > 1000)
+      max = 1000;
+   char sql[320];
+   snprintf(sql, sizeof(sql),
+            "SELECT e.point_id FROM memory_embeddings e "
+            "WHERE e.embedding_deep IS NULL "
+            "AND EXISTS (SELECT 1 FROM memories m WHERE m.id = e.point_id) "
+            "ORDER BY e.point_id LIMIT %d",
+            max);
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+      return -1;
+   int n = 0;
+   while (n < max && aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
+      ids[n++] = aimee_pg_column_int64(stmt, 0);
+   aimee_pg_finalize(stmt);
+   return n;
+}
+
+/* Deep-recall search: nearest neighbours over the halfvec embedding_deep index
+ * (only rows the backfill has populated). The query vector is the deep model's
+ * 2560-dim output. Mirrors the live memory search but on the deep column; cosine
+ * distance via halfvec_cosine_ops. Returns hit count, or -1 on error. */
+int pgvec_memory_deep_search(const float *vec, int dim, int limit, int64_t *ids, double *scores,
+                             int max)
+{
+   if (!vec || dim <= 0 || !ids || !scores || max <= 0)
+      return -1;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+
+   char *vec_text = build_vec_text(vec, dim);
+   if (!vec_text)
+      return -1;
+
+   static const char *sql = "SELECT point_id, 1.0 - (embedding_deep <=> :qvec::halfvec) AS score "
+                            "FROM memory_embeddings "
+                            "WHERE embedding_deep IS NOT NULL "
+                            "ORDER BY embedding_deep <=> :qvec::halfvec "
+                            "LIMIT :lim";
+
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+   {
+      free(vec_text);
+      return 0; /* halfvec/pgvector not available — no deep results */
+   }
+   aimee_pg_bind_text(stmt, "qvec", vec_text);
+   aimee_pg_bind_int(stmt, "lim", limit > 0 ? limit : max);
+
+   int n = 0;
+   aimee_pg_step_t rc;
+   while ((rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf))) == AIMEE_PG_ROW)
+   {
+      if (n >= max)
+         break;
+      ids[n] = aimee_pg_column_int64(stmt, 0);
+      scores[n] = aimee_pg_column_double(stmt, 1);
+      n++;
+   }
+   aimee_pg_finalize(stmt);
+   free(vec_text);
+   return (rc == AIMEE_PG_ERR) ? -1 : n;
+}
+
 /* -------------------------------------------------------------------------
  * KB upsert
  * ---------------------------------------------------------------------- */

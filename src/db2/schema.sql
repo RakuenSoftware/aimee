@@ -745,6 +745,21 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         RAISE NOTICE 'embedding dimension check skipped (%)', SQLERRM;
     END;
 
+    -- Deep embedding tier (opt-in: config memory_deep_embedding_enabled). A
+    -- halfvec(2560) column holding the background 4B "comprehensive" re-embed
+    -- (embedder /embed_deep). Added by an exception-guarded ALTER rather than the
+    -- CREATE TABLE above so a pgvector build without halfvec — or any failure —
+    -- degrades to a NOTICE instead of breaking schema apply for lite deployments
+    -- that never use it. NULL until the backfill pass populates it; 2560 exceeds
+    -- pgvector's 2000-dim vector index cap, so halfvec (HNSW-indexable to 4000).
+    BEGIN
+        EXECUTE $T$
+            ALTER TABLE memory_embeddings ADD COLUMN IF NOT EXISTS embedding_deep halfvec(2560)
+        $T$;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'memory_embeddings.embedding_deep column skipped (%)', SQLERRM;
+    END;
+
     EXECUTE $T$
         CREATE INDEX IF NOT EXISTS idx_memory_embeddings_record_type
             ON memory_embeddings (record_type)
@@ -781,6 +796,16 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'memory_embeddings HNSW index skipped (%)', SQLERRM;
+    END;
+    -- Deep-tier HNSW over the halfvec(2560) column (empty/cheap until the 4B
+    -- backfill populates it). Guarded like the column add above.
+    BEGIN
+        EXECUTE $T$
+            CREATE INDEX IF NOT EXISTS idx_memory_embeddings_deep_hnsw
+                ON memory_embeddings USING hnsw (embedding_deep halfvec_cosine_ops)
+        $T$;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'memory_embeddings deep HNSW index skipped (%)', SQLERRM;
     END;
     BEGIN
         EXECUTE $T$

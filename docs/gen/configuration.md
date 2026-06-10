@@ -12,7 +12,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (94)
+## CLI-settable keys (96)
 
 | Key | Type |
 |-----|------|
@@ -68,6 +68,8 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `memory_chunk_min_confidence` | float |
 | `memory_coref_mode` | string |
 | `memory_coref_window` | int |
+| `memory_deep_embedding_command` | string |
+| `memory_deep_embedding_enabled` | bool |
 | `memory_fetch_budget_base` | int |
 | `memory_fetch_budget_enabled` | bool |
 | `memory_fetch_budget_shape_aware` | bool |
@@ -111,7 +113,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `virtual_context_assembly_budget` | int |
 | `virtual_context_enabled` | bool |
 
-## Config-file sections (38)
+## Config-file sections (39)
 
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`.
 
@@ -134,6 +136,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`learning`** — `embed`, `implicit`, `router`, `synthesize`
 - **`mcp`** — `osv`
 - **`memory`** — `abstain`, `aggregation`, `bm25_weight`, `briefing`, `citations`, `cognify`, `context_budget`, `coref`, `derive_facts`, `directives`, `dispositions`, `episode_summaries`, `failure_detection`, `fetch_budget`, `hard_negative_log`, `improve`, `lifecycle`, `pagerank`, `profile_cards`, `prospective`, `recall`, `rewrite`, `routing`, `salience`, `scenes`, `semantic_weight`
+- **`memory_deep_embedding`** — `command`, `enabled`
 - **`memory_maintenance`** — `enabled`, `interval_seconds`, `summarize_enabled`, `trigger_inserts`, `trigger_secs`
 - **`memory_negation`** — `enabled`
 - **`memory_query_expansion`** — `k`, `mode`

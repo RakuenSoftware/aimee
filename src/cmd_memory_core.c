@@ -173,6 +173,7 @@ void mem_search(app_ctx_t *ctx, int argc, char **argv)
    cmd_memory_apply_rerank_mode(&opts);
    int limit = opt_get_int(&opts, "limit", 10);
    int explain = opt_get_flag(&opts, "explain");
+   int deep = opt_get_flag(&opts, "deep");
    const char *as_of = opt_get(&opts, "as-of");
 
    memory_filter_t filter;
@@ -195,9 +196,10 @@ void mem_search(app_ctx_t *ctx, int argc, char **argv)
       qpos = str_appendf(query_buf, qpos, (int)sizeof(query_buf), "%s", clusters[i]);
    }
 
-   /* Search stored facts */
+   /* Search stored facts; --deep routes to the 4B deep index (opt-in). */
    memory_t facts[64];
-   int fact_count = cmd_memory_find_facts(&opts, query_buf, limit, facts, 64);
+   int fact_count = deep ? kb_client_memory_find_facts_deep(query_buf, limit, facts, 64)
+                         : cmd_memory_find_facts(&opts, query_buf, limit, facts, 64);
    cmd_memory_require_runtime(fact_count, "memory search");
 
    memory_diagnostic_t explain_rows[64];

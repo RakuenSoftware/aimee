@@ -627,6 +627,8 @@ int kb_client_memory_find_facts_scoped(const char *query, const char *scope_type
 int kb_client_memory_find_facts_scoped_ex(const char *query, const char *scope_type,
                                           const char *scope_value, int limit, memory_t *out,
                                           int max, const char *graph_code_fusion_state);
+/* Opt-in deep recall over the 4B deep index (same endpoint + the deep flag). */
+int kb_client_memory_find_facts_deep(const char *query, int limit, memory_t *out, int max);
 
 /* Export memories / decisions to a JSONL file via aimee-kb.  Returns
  * row count or -1.  Mirrors the wholesale-export flow used by
