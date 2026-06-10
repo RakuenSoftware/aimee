@@ -118,6 +118,39 @@ int kb_curator_index_narrative_one(const kb_curator_extract_opts_t *opts)
       if (pgvec_curator_narrative_upsert(pid, vec, dim, id, kind, doc_id, status, priority,
                                          payload ? payload : "{}") != 0)
          aimee_log(LOG_WARN, "kb.curator.narrative", "narrative vector upsert failed for %s", id);
+      else if (cfg.memory_deep_embedding_enabled && cfg.memory_deep_embedding_command[0])
+      {
+/* Deep tier: store a deep embedding, then link deep-confirmed near-duplicate
+ * narratives via an additive "similar_to" edge (never drops content). Conservative
+ * thresholds; gated default-off. */
+#define CURATOR_DEDUP_K        5
+#define CURATOR_DEDUP_LIVE_MIN 0.85
+#define CURATOR_DEDUP_DEEP_MIN 0.85
+         float deep_vec[DEEP_EMBED_MAX_DIM];
+         int dd = memory_embed_text(text, cfg.memory_deep_embedding_command, deep_vec,
+                                    DEEP_EMBED_MAX_DIM);
+         if (dd > 0)
+         {
+            int64_t cand[CURATOR_DEDUP_K];
+            double cscore[CURATOR_DEDUP_K];
+            int nc = pgvec_curator_narrative_search(NULL, NULL, NULL, vec, dim, CURATOR_DEDUP_K,
+                                                    cand, cscore, CURATOR_DEDUP_K);
+            for (int j = 0; j < nc; j++)
+            {
+               if (cand[j] == pid || cscore[j] < CURATOR_DEDUP_LIVE_MIN)
+                  continue;
+               double dsim = 0.0;
+               if (pgvec_curator_narrative_deep_similarity(cand[j], deep_vec, dd, &dsim) != 1 ||
+                   dsim < CURATOR_DEDUP_DEEP_MIN)
+                  continue;
+               char cart[64] = "";
+               if (pgvec_curator_narrative_artifact(cand[j], cart, sizeof(cart)) == 1 && cart[0] &&
+                   strcmp(cart, id) != 0)
+                  db2_artifact_link(id, cart, "similar_to");
+            }
+            pgvec_curator_narrative_deep_update(pid, deep_vec, dd);
+         }
+      }
    }
    else
    {

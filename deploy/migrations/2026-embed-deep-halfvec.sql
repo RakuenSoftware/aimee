@@ -59,4 +59,13 @@ ALTER TABLE curator_claim_vectors ADD COLUMN IF NOT EXISTS subj_attr_deep_vec ha
 CREATE INDEX IF NOT EXISTS idx_curator_claim_vectors_subj_attr_deep_hnsw
     ON curator_claim_vectors USING hnsw (subj_attr_deep_vec halfvec_cosine_ops);
 
+-- Near-duplicate linking: deep embeddings of the narrative text / code-unit body,
+-- used to confirm a similarity link at index time.
+ALTER TABLE curator_narrative_vectors ADD COLUMN IF NOT EXISTS embedding_deep halfvec(2560);
+CREATE INDEX IF NOT EXISTS idx_curator_narrative_vectors_deep_hnsw
+    ON curator_narrative_vectors USING hnsw (embedding_deep halfvec_cosine_ops);
+ALTER TABLE curator_code_unit_vectors ADD COLUMN IF NOT EXISTS body_deep_vec halfvec(2560);
+CREATE INDEX IF NOT EXISTS idx_curator_code_unit_vectors_body_deep_hnsw
+    ON curator_code_unit_vectors USING hnsw (body_deep_vec halfvec_cosine_ops);
+
 COMMIT;

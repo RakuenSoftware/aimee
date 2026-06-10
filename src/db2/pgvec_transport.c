@@ -1117,6 +1117,95 @@ int pgvec_curator_narrative_delete(int64_t point_id)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
+/* Deep tier (curator narratives): store/compare a deep embedding on
+ * embedding_deep + look up artifact_id by point_id, for near-duplicate linking. */
+int pgvec_curator_narrative_deep_update(int64_t point_id, const float *vec, int dim)
+{
+   if (!vec || dim <= 0)
+      return 0;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   char *vec_text = build_vec_text(vec, dim);
+   if (!vec_text)
+      return -1;
+   static const char *sql =
+       "UPDATE curator_narrative_vectors SET embedding_deep = :embedding::halfvec "
+       "WHERE point_id = :point_id";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+   {
+      free(vec_text);
+      return -1;
+   }
+   aimee_pg_bind_int64(stmt, "point_id", point_id);
+   aimee_pg_bind_text(stmt, "embedding", vec_text);
+   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
+   aimee_pg_finalize(stmt);
+   free(vec_text);
+   return (rc == AIMEE_PG_DONE) ? 0 : -1;
+}
+
+int pgvec_curator_narrative_deep_similarity(int64_t point_id, const float *vec, int dim,
+                                            double *out)
+{
+   if (!vec || dim <= 0 || !out)
+      return -1;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   char *vec_text = build_vec_text(vec, dim);
+   if (!vec_text)
+      return -1;
+   static const char *sql = "SELECT 1.0 - (embedding_deep <=> :qvec::halfvec) "
+                            "FROM curator_narrative_vectors "
+                            "WHERE point_id = :point_id AND embedding_deep IS NOT NULL";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+   {
+      free(vec_text);
+      return 0;
+   }
+   aimee_pg_bind_int64(stmt, "point_id", point_id);
+   aimee_pg_bind_text(stmt, "qvec", vec_text);
+   int have = 0;
+   if (aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
+   {
+      *out = aimee_pg_column_double(stmt, 0);
+      have = 1;
+   }
+   aimee_pg_finalize(stmt);
+   free(vec_text);
+   return have;
+}
+
+int pgvec_curator_narrative_artifact(int64_t point_id, char *artifact_out, int alen)
+{
+   if (!artifact_out || alen <= 0)
+      return -1;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   static const char *sql =
+       "SELECT artifact_id FROM curator_narrative_vectors WHERE point_id = :point_id";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+      return -1;
+   aimee_pg_bind_int64(stmt, "point_id", point_id);
+   int have = 0;
+   if (aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
+   {
+      const char *a = aimee_pg_column_text(stmt, 0);
+      snprintf(artifact_out, (size_t)alen, "%s", a ? a : "");
+      have = 1;
+   }
+   aimee_pg_finalize(stmt);
+   return have;
+}
+
 int pgvec_curator_narrative_search(const char *kind, const char *status, const char *priority,
                                    const float *vec, int dim, int limit, int64_t *ids,
                                    double *scores, int max)
@@ -1543,6 +1632,95 @@ int pgvec_curator_code_unit_delete(int64_t point_id)
    aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
    aimee_pg_finalize(stmt);
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
+}
+
+/* Deep tier (curator code units): store/compare a deep embedding of the body on
+ * body_deep_vec + look up artifact_id by point_id, for clone (near-dup) linking. */
+int pgvec_curator_code_unit_deep_update(int64_t point_id, const float *vec, int dim)
+{
+   if (!vec || dim <= 0)
+      return 0;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   char *vec_text = build_vec_text(vec, dim);
+   if (!vec_text)
+      return -1;
+   static const char *sql =
+       "UPDATE curator_code_unit_vectors SET body_deep_vec = :embedding::halfvec "
+       "WHERE point_id = :point_id";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+   {
+      free(vec_text);
+      return -1;
+   }
+   aimee_pg_bind_int64(stmt, "point_id", point_id);
+   aimee_pg_bind_text(stmt, "embedding", vec_text);
+   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
+   aimee_pg_finalize(stmt);
+   free(vec_text);
+   return (rc == AIMEE_PG_DONE) ? 0 : -1;
+}
+
+int pgvec_curator_code_unit_deep_similarity(int64_t point_id, const float *vec, int dim,
+                                            double *out)
+{
+   if (!vec || dim <= 0 || !out)
+      return -1;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   char *vec_text = build_vec_text(vec, dim);
+   if (!vec_text)
+      return -1;
+   static const char *sql = "SELECT 1.0 - (body_deep_vec <=> :qvec::halfvec) "
+                            "FROM curator_code_unit_vectors "
+                            "WHERE point_id = :point_id AND body_deep_vec IS NOT NULL";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+   {
+      free(vec_text);
+      return 0;
+   }
+   aimee_pg_bind_int64(stmt, "point_id", point_id);
+   aimee_pg_bind_text(stmt, "qvec", vec_text);
+   int have = 0;
+   if (aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
+   {
+      *out = aimee_pg_column_double(stmt, 0);
+      have = 1;
+   }
+   aimee_pg_finalize(stmt);
+   free(vec_text);
+   return have;
+}
+
+int pgvec_curator_code_unit_artifact(int64_t point_id, char *artifact_out, int alen)
+{
+   if (!artifact_out || alen <= 0)
+      return -1;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   static const char *sql =
+       "SELECT artifact_id FROM curator_code_unit_vectors WHERE point_id = :point_id";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+      return -1;
+   aimee_pg_bind_int64(stmt, "point_id", point_id);
+   int have = 0;
+   if (aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
+   {
+      const char *a = aimee_pg_column_text(stmt, 0);
+      snprintf(artifact_out, (size_t)alen, "%s", a ? a : "");
+      have = 1;
+   }
+   aimee_pg_finalize(stmt);
+   return have;
 }
 
 int pgvec_curator_code_unit_search(const char *which_vec, const char *def_kind, const float *vec,

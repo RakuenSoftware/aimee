@@ -781,6 +781,23 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         RAISE NOTICE 'curator_claim_vectors.subj_attr_deep_vec column skipped (%)', SQLERRM;
     END;
 
+    -- Deep tier for near-duplicate linking: a halfvec(2560) deep embedding of the
+    -- narrative text / code-unit body, used to confirm a similarity link.
+    BEGIN
+        EXECUTE $T$
+            ALTER TABLE curator_narrative_vectors ADD COLUMN IF NOT EXISTS embedding_deep halfvec(2560)
+        $T$;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'curator_narrative_vectors.embedding_deep column skipped (%)', SQLERRM;
+    END;
+    BEGIN
+        EXECUTE $T$
+            ALTER TABLE curator_code_unit_vectors ADD COLUMN IF NOT EXISTS body_deep_vec halfvec(2560)
+        $T$;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'curator_code_unit_vectors.body_deep_vec column skipped (%)', SQLERRM;
+    END;
+
     EXECUTE $T$
         CREATE INDEX IF NOT EXISTS idx_memory_embeddings_record_type
             ON memory_embeddings (record_type)
@@ -843,6 +860,22 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'curator_claim_vectors deep HNSW index skipped (%)', SQLERRM;
+    END;
+    BEGIN
+        EXECUTE $T$
+            CREATE INDEX IF NOT EXISTS idx_curator_narrative_vectors_deep_hnsw
+                ON curator_narrative_vectors USING hnsw (embedding_deep halfvec_cosine_ops)
+        $T$;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'curator_narrative_vectors deep HNSW index skipped (%)', SQLERRM;
+    END;
+    BEGIN
+        EXECUTE $T$
+            CREATE INDEX IF NOT EXISTS idx_curator_code_unit_vectors_body_deep_hnsw
+                ON curator_code_unit_vectors USING hnsw (body_deep_vec halfvec_cosine_ops)
+        $T$;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'curator_code_unit_vectors deep HNSW index skipped (%)', SQLERRM;
     END;
     BEGIN
         EXECUTE $T$

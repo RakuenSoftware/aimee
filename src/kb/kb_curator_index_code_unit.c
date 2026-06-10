@@ -116,6 +116,39 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
                                          id, file_path, def_kind, signature, body_hash,
                                          payload ? payload : "{}") != 0)
          aimee_log(LOG_WARN, "kb.curator.code_unit", "code_unit vector upsert failed for %s", id);
+      else if (cfg.memory_deep_embedding_enabled && cfg.memory_deep_embedding_command[0])
+      {
+/* Deep tier: store a deep embedding of the body, then link deep-confirmed clones
+ * (near-duplicate bodies) via an additive "similar_to" edge. Conservative
+ * thresholds; gated default-off. */
+#define CURATOR_CLONE_K        5
+#define CURATOR_CLONE_LIVE_MIN 0.85
+#define CURATOR_CLONE_DEEP_MIN 0.85
+         float body_deep[DEEP_EMBED_MAX_DIM];
+         int dd = memory_embed_text(body_text, cfg.memory_deep_embedding_command, body_deep,
+                                    DEEP_EMBED_MAX_DIM);
+         if (dd > 0)
+         {
+            int64_t cand[CURATOR_CLONE_K];
+            double cscore[CURATOR_CLONE_K];
+            int nc = pgvec_curator_code_unit_search("body", NULL, body_vec, CURATOR_CODE_UNIT_DIM,
+                                                    CURATOR_CLONE_K, cand, cscore, CURATOR_CLONE_K);
+            for (int j = 0; j < nc; j++)
+            {
+               if (cand[j] == pid || cscore[j] < CURATOR_CLONE_LIVE_MIN)
+                  continue;
+               double dsim = 0.0;
+               if (pgvec_curator_code_unit_deep_similarity(cand[j], body_deep, dd, &dsim) != 1 ||
+                   dsim < CURATOR_CLONE_DEEP_MIN)
+                  continue;
+               char cart[64] = "";
+               if (pgvec_curator_code_unit_artifact(cand[j], cart, sizeof(cart)) == 1 && cart[0] &&
+                   strcmp(cart, id) != 0)
+                  db2_artifact_link(id, cart, "similar_to");
+            }
+            pgvec_curator_code_unit_deep_update(pid, body_deep, dd);
+         }
+      }
    }
    else
    {

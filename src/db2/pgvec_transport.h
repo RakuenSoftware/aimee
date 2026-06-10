@@ -142,6 +142,13 @@ int pgvec_curator_narrative_upsert(int64_t point_id, const float *vec, int dim,
 /* Delete a single curator_narrative_vectors row by point_id. */
 int pgvec_curator_narrative_delete(int64_t point_id);
 
+/* Deep tier (curator narratives): store/compare embedding_deep + look up
+ * artifact_id by point_id, for deep-confirmed near-duplicate linking. */
+int pgvec_curator_narrative_deep_update(int64_t point_id, const float *vec, int dim);
+int pgvec_curator_narrative_deep_similarity(int64_t point_id, const float *vec, int dim,
+                                            double *out);
+int pgvec_curator_narrative_artifact(int64_t point_id, char *artifact_out, int alen);
+
 /* Search curator_narrative_vectors by cosine distance.  kind/status/priority
  * are optional equality filters; pass NULL or "" to skip any.  Returns the
  * number of results written (<= max), -1 on error. */
@@ -191,6 +198,13 @@ int pgvec_curator_code_unit_upsert(int64_t point_id, const float *intent_vec,
 
 /* Delete a single curator_code_unit_vectors row by point_id. */
 int pgvec_curator_code_unit_delete(int64_t point_id);
+
+/* Deep tier (curator code units): store/compare body_deep_vec + look up
+ * artifact_id by point_id, for deep-confirmed clone (near-dup) linking. */
+int pgvec_curator_code_unit_deep_update(int64_t point_id, const float *vec, int dim);
+int pgvec_curator_code_unit_deep_similarity(int64_t point_id, const float *vec, int dim,
+                                            double *out);
+int pgvec_curator_code_unit_artifact(int64_t point_id, char *artifact_out, int alen);
 
 /* Search curator_code_unit_vectors by cosine distance.  which_vec selects the
  * named vector column to rank on: "intent", "signature" or "body" (any other
