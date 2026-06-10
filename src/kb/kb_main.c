@@ -425,7 +425,7 @@ static int kb_run_fusion_probe(const char *query)
     * block) unless the pgvector memory collection exists, so ensure it. */
    if (pgvec_memory_vector_collection_exists() <= 0)
    {
-      int dim = cfg.embedding_dim > 0 ? cfg.embedding_dim : 384;
+      int dim = cfg.embedding_dim > 0 ? cfg.embedding_dim : 1024;
       (void)pgvec_memory_vector_collection_recreate(dim);
    }
 
@@ -534,6 +534,11 @@ int main(int argc, char **argv)
 
    config_t kb_cfg;
    config_load(&kb_cfg);
+
+   /* aimee-kb owns DB2; tell the DB2 layer the deployment's embedding dimension
+    * (one embedder: 1024 pplx-0.6b / 2560 pplx-4b) before any db2_init() so the
+    * halfvec embedding columns are created at the right size. */
+   db2_set_embedding_dim(kb_cfg.embedding_dim);
 
    /* AIMEE_DB2_URL, when set, is the source of truth and overrides any db2_url
     * cached in aimee.yaml from a previous boot — applied here unconditionally,

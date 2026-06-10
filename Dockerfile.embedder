@@ -1,24 +1,58 @@
-# Persistent embedding service for aimee-kb: holds all-MiniLM-L6-v2 resident and
-# serves /embed over HTTP, so the kb container embeds without reloading the model
-# per call. Kept separate from the kb image so torch/sentence-transformers never
-# bloat the slim kb runtime.
+# Persistent embedding service for aimee-kb: holds the embedding model resident
+# and serves /embed over HTTP, so the kb container embeds without reloading the
+# model per call. Kept separate from the kb image so torch/sentence-transformers
+# never bloat the slim kb runtime.
+#
+# Default model: perplexity-ai/pplx-embed-v1-0.6b (Feb 2026, MIT, Qwen3-based,
+# 1024-dim, retrieval-optimized, prefix-free, INT8-native) — replacing the 2021
+# all-MiniLM-L6-v2 (384-dim). Override at build time with
+#   --build-arg EMBEDDER_MODEL=<hf id>  (must match config embedding_dim + the
+#   schema vector(N) columns — pplx-embed-v1-0.6b is 1024).
 FROM python:3.11-slim AS embedder
 
+ARG EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-0.6b
+# Cross-encoder reranker served from the same process (aimee's memory rerank
+# stage). Small/CPU-friendly by design — it scores top-K (~50) pairs per query.
+ARG RERANKER_MODEL=cross-encoder/ettin-reranker-400m-v1
 ENV PIP_NO_CACHE_DIR=1 \
     HF_HOME=/opt/models \
-    EMBEDDER_MODEL=all-MiniLM-L6-v2 \
+    EMBEDDER_MODEL=${EMBEDDER_MODEL} \
+    RERANKER_MODEL=${RERANKER_MODEL} \
     EMBEDDER_PORT=8080
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-# CPU-only torch keeps the image off the CUDA wheels.
+# CPU-only torch keeps the image off the CUDA wheels. einops + a recent
+# sentence-transformers are needed for the Qwen3-based embedder. transformers>=5.2
+# is required by the Ettin (ModernBERT) cross-encoder reranker — older transformers
+# can't instantiate its tokenizer ("Unrecognized processing class") — so pin the
+# floor explicitly rather than rely on the transitive resolution.
 RUN pip install --index-url https://download.pytorch.org/whl/cpu torch \
-    && pip install sentence-transformers
+    && pip install -U "sentence-transformers>=3.3" "transformers>=5.2" einops
 
-# Pre-download the model at build time so runtime needs no network.
-RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+# Pre-download EMBEDDER_MODEL at build time so runtime needs no network. The model
+# id is read from the env so the build, the runtime, and an override all agree on
+# one source of truth. HuggingFace downloads are flaky during CI image builds
+# (transient network/CDN errors fail the whole release), so retry with backoff;
+# the final attempt is unguarded so an image that genuinely couldn't fetch the
+# model still fails the build rather than shipping without it (a cached model
+# makes the re-verify a fast no-op).
+RUN for i in 1 2 3 4 5; do \
+        python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['EMBEDDER_MODEL'], trust_remote_code=True)" && break; \
+        echo "model download attempt $i failed; retrying in $((i * 10))s"; \
+        sleep $((i * 10)); \
+    done; \
+    python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['EMBEDDER_MODEL'], trust_remote_code=True)"
+
+# Pre-download the cross-encoder reranker too (same retry rationale).
+RUN for i in 1 2 3 4 5; do \
+        python -c "import os; from sentence_transformers import CrossEncoder; CrossEncoder(os.environ['RERANKER_MODEL'], trust_remote_code=True)" && break; \
+        echo "reranker download attempt $i failed; retrying in $((i * 10))s"; \
+        sleep $((i * 10)); \
+    done; \
+    python -c "import os; from sentence_transformers import CrossEncoder; CrossEncoder(os.environ['RERANKER_MODEL'], trust_remote_code=True)"
 
 COPY scripts/embedder-server.py /opt/aimee/scripts/embedder-server.py
 

@@ -329,6 +329,15 @@ static char *translate_sql(const char *sql_in)
          p += 8;
          continue;
       }
+      /* ::halfvec -> drop.  Same as ::vector — the embedding columns are now
+       * halfvec (fp16), but the SQLite stub still stores embeddings as TEXT, so
+       * the bare value is compatible without a cast. Must precede no other rule
+       * (longer literal than ::vector). */
+      if (starts_with(p, "::halfvec"))
+      {
+         p += 9;
+         continue;
+      }
       /* ILIKE -> LIKE.  SQLite's LIKE is case-insensitive for ASCII by
        * default, which matches ILIKE semantics for the terms this
        * codebase searches. */
