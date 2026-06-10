@@ -14,10 +14,16 @@ ARG EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-0.6b
 # Cross-encoder reranker served from the same process (aimee's memory rerank
 # stage). Small/CPU-friendly by design — it scores top-K (~50) pairs per query.
 ARG RERANKER_MODEL=cross-encoder/ettin-reranker-400m-v1
+# Serve the q4 ONNX export by default: ~1.6x faster than fp32 on CPU (117ms vs
+# 189ms/embed @ 8 threads for pplx-embed-0.6b, identical 1024-dim output). Clear
+# EMBEDDER_ONNX_FILE (or override EMBEDDER_MODEL to a model without onnx/) to fall
+# back to fp32 torch — the server also falls back automatically if the file is
+# missing. The matching onnx files are baked below.
 ENV PIP_NO_CACHE_DIR=1 \
     HF_HOME=/opt/models \
     EMBEDDER_MODEL=${EMBEDDER_MODEL} \
     RERANKER_MODEL=${RERANKER_MODEL} \
+    EMBEDDER_ONNX_FILE=onnx/model_q4.onnx \
     EMBEDDER_PORT=8080
 
 RUN apt-get update \
@@ -26,8 +32,10 @@ RUN apt-get update \
 
 # CPU-only torch keeps the image off the CUDA wheels. einops + a recent
 # sentence-transformers/transformers are needed for the Qwen3-based embedder.
+# optimum[onnxruntime] backs the ONNX serving path (EMBEDDER_ONNX_FILE); the q4
+# export runs ~1.6x faster than fp32 torch on CPU.
 RUN pip install --index-url https://download.pytorch.org/whl/cpu torch \
-    && pip install -U "sentence-transformers>=3.3" einops
+    && pip install -U "sentence-transformers>=3.3" einops "optimum[onnxruntime]>=1.23"
 
 # Pre-download EMBEDDER_MODEL at build time so runtime needs no network. The model
 # id is read from the env so the build, the runtime, and an override all agree on
@@ -42,6 +50,19 @@ RUN for i in 1 2 3 4 5; do \
         sleep $((i * 10)); \
     done; \
     python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['EMBEDDER_MODEL'], trust_remote_code=True)"
+
+# Bake the q4 ONNX export (the default serving path) + verify it loads via the
+# onnxruntime backend, so the runtime needs no network and a broken export fails
+# the build rather than silently falling back to slow fp32. allow_patterns scoped
+# to the q4 files keeps the layer small (it skips the ~2.4GB fp32 onnx). Skipped
+# cleanly for an EMBEDDER_MODEL without an onnx/ dir (nothing matches → no-op, and
+# the server falls back to torch at runtime).
+RUN for i in 1 2 3 4 5; do \
+        python -c "import os; from huggingface_hub import snapshot_download; snapshot_download(os.environ['EMBEDDER_MODEL'], allow_patterns=['onnx/model_q4*'])" && break; \
+        echo "onnx download attempt $i failed; retrying in $((i * 10))s"; \
+        sleep $((i * 10)); \
+    done; \
+    python -c "import os; from sentence_transformers import SentenceTransformer; m=SentenceTransformer(os.environ['EMBEDDER_MODEL'], trust_remote_code=True, backend='onnx', model_kwargs={'file_name': os.environ['EMBEDDER_ONNX_FILE']}); print('onnx q4 ok dim=', m.get_sentence_embedding_dimension())"
 
 # Pre-download the cross-encoder reranker too (same retry rationale).
 RUN for i in 1 2 3 4 5; do \
