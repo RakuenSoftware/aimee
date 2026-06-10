@@ -163,14 +163,34 @@ auto-create paths are real features worth finishing).
 
 ---
 
+## Executed validation (local, deterministic) — 2026-06-10
+
+The self-contained harnesses (bundled fixtures, no live server/corpus/GPU) were
+run. These are **oracle validations**: each harness encodes the decision boundary
+and grades it against labelled fixtures, proving gate criteria **#2 (harness
+isolates the flag)** and **#3 (criteria achievable)** — *not* #1 against the
+production binary on a real corpus, which stays user-gated.
+
+| Flag | Harness | Result | Verdict |
+|---|---|---|---|
+| `demotion_enabled` | `benchmarks/memory/poison_gate.py` | PASS (exit 0): all clean rows retrieved CORRECT; only closed-outcome poison rows (`poison_refresh`, `poison_snapshot`) suppressed — declared-confidence / trusted-source / frequency fields correctly ignored | **decision boundary sound** — safe to run the live shadow→live(2) ladder; the gate does not over-suppress |
+| `guardrails_semantic_enabled` (→advisory) | `tools/guardrails_replay.py` (75 fixtures) | PASS (exit 0): precision **1.0**, recall **1.0**, **0** false-positives on benign; yellow-zone advisory recall **1.0** vs deterministic **0.0** (+1.0); per-label precision 1.0 (secret_leak/task_drift/verification_bypass) | **precision floor cleared** → the enable→advisory flip is supported on fixtures; blocking stage still needs the live FP-on-benign confirmation |
+| `learning_synthesize_enabled` + `learning_implicit_*` | `benchmarks/learning/learning_replay.py` (175 fixtures) | VALIDATION OK: schema + label distribution (114 pos / 61 neg) clean; graded mode blocked on injected predictions | **harness + fixtures ready**; needs the `aimee learning replay` C entry to emit predictions, then graded run |
+
+What this changes: `demotion_enabled` and `guardrails_semantic_enabled`(advisory)
+move from "harness exists, unmeasured" to "boundary validated on fixtures — the
+remaining arm is the live-binary/real-corpus run." They are the two closest flips.
+
+---
+
 ## Execution plan (program steps 1–5)
 
 | Step | What | State |
 |---|---|---|
 | 1 | Build missing harness primitives | **in progress**: `learning_replay.py` landed (this PR); suite `--config-variant` knob + per-pass curator eval = backlog |
 | 2 | Pin acceptance criteria per flag | **this doc** (defaults pinned; per-flag numbers fill as corpora land) |
-| 3 | Clear Tier A | **user-gated**: needs live aimee-server + corpora; run via `! <cmd>` (see runbook below) |
-| 4 | Run safety (Tier S) in shadow | **user-gated**: enable advisory + replay; dashboards |
+| 3 | Clear Tier A | **partial**: `demotion_enabled` boundary validated on fixtures (poison_gate PASS); live recall A/B still needs aimee-server + corpora via `! <cmd>` |
+| 4 | Run safety (Tier S) in shadow | **partial**: `guardrails_semantic_enabled` advisory precision/recall = 1.0 on 75 fixtures (guardrails_replay PASS); live FP-on-benign confirmation + dashboards still user-gated |
 | 5 | Stop treating Tier X as default candidates | **done** (documented above) |
 
 ### What can be done autonomously vs needs you
