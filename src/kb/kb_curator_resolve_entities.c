@@ -44,6 +44,16 @@
  * decides. Below this, always create. */
 #define CURATOR_ENTITY_JUDGE_LOW 0.70
 
+/* Deep-tier precision guard (config memory_deep_embedding_enabled): when a confident
+ * live-embedding merge (>= MERGE_THRESHOLD) is also checkable in the 4B deep space
+ * — both the mention and the matched entity have a deep embedding — a clearly-low
+ * deep cosine means the live embedding over-estimated similarity; reject the merge
+ * and create a distinct entity instead. Conservative threshold: true matches are
+ * deep-similar (well above this), so a real merge is never blocked; a no-op when
+ * the deep tier is off or the matched entity has no deep embedding yet. Deep can
+ * only PREVENT a merge, never force one — it cannot collapse distinct entities. */
+#define CURATOR_ENTITY_DEEP_CONFIRM 0.60
+
 void kb_curator_entity_embed_text(const char *name, const char *context, char *out, size_t out_len)
 {
    if (!out || out_len == 0)
@@ -79,7 +89,8 @@ int64_t kb_curator_entity_point_id(const char *artifact_id)
  * A judge error is treated as "not the same" (create), so a flaky sidecar can
  * only over-create, never collapse distinct entities. */
 static int resolve_try_match(const char *scope_kind, const char *scope_id, const float *vec,
-                             int dim, const char *name, const char *context, const config_t *cfg)
+                             int dim, const char *name, const char *context, const config_t *cfg,
+                             const float *deep_vec, int deep_dim)
 {
    int64_t match_ids[1];
    double match_scores[1];
@@ -89,6 +100,19 @@ static int resolve_try_match(const char *scope_kind, const char *scope_id, const
       return 0;
    if (match_scores[0] >= CURATOR_ENTITY_MERGE_THRESHOLD)
    {
+      /* Deep-tier guard: reject a confident live merge only when the 4B deep space
+       * clearly disagrees (both sides deep-embedded; cosine below the floor). */
+      double dsim = 0.0;
+      if (deep_dim > 0 &&
+          pgvec_curator_entity_deep_similarity(match_ids[0], deep_vec, deep_dim, &dsim) == 1 &&
+          dsim < CURATOR_ENTITY_DEEP_CONFIRM)
+      {
+         aimee_log(LOG_INFO, "kb.curator.resolve",
+                   "entity '%s' live-matched in %s:%s (score=%.3f) but deep guard rejects "
+                   "(deep=%.3f); creating distinct entity",
+                   name, scope_kind, scope_id, match_scores[0], dsim);
+         return 0;
+      }
       aimee_log(LOG_INFO, "kb.curator.resolve",
                 "entity '%s' resolves to existing in %s:%s (score=%.3f); skipping duplicate vector",
                 name, scope_kind, scope_id, match_scores[0]);
@@ -187,6 +211,13 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
    const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
    float vec[CURATOR_ENTITY_DIM];
    int dim = memory_embed_text(embed_text, embed_cmd, vec, CURATOR_ENTITY_DIM);
+   /* Deep tier: embed the mention once with the deep model (when enabled) — reused
+    * for the merge-confirmation guard and, if it becomes a new entity, stored. */
+   float deep_vec[DEEP_EMBED_MAX_DIM];
+   int deep_dim = 0;
+   if (cfg.memory_deep_embedding_enabled && cfg.memory_deep_embedding_command[0])
+      deep_dim = memory_embed_text(embed_text, cfg.memory_deep_embedding_command, deep_vec,
+                                   DEEP_EMBED_MAX_DIM);
    if (dim == CURATOR_ENTITY_DIM)
    {
       /* Resolve to an existing canonical entity in this scope, or — per the
@@ -195,7 +226,8 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
        * workspace/global entity resolves onto it instead of creating a
        * near-duplicate. The searches run before the upsert, so they only see
        * previously-committed entities. */
-      int merged = resolve_try_match(scope_kind, scope_id, vec, dim, name, context, &cfg);
+      int merged = resolve_try_match(scope_kind, scope_id, vec, dim, name, context, &cfg, deep_vec,
+                                     deep_dim);
       if (!merged)
       {
          void *conn = db2_conn();
@@ -205,7 +237,7 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
          while (!merged && conn &&
                 kb_curator_broaden_scope(conn, ck, cid, wk, sizeof(wk), wid, sizeof(wid)))
          {
-            merged = resolve_try_match(wk, wid, vec, dim, name, context, &cfg);
+            merged = resolve_try_match(wk, wid, vec, dim, name, context, &cfg, deep_vec, deep_dim);
             snprintf(ck, sizeof(ck), "%s", wk);
             snprintf(cid, sizeof(cid), "%s", wid);
          }
@@ -216,6 +248,8 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
          if (pgvec_curator_entity_upsert(pid, vec, dim, scope_kind, scope_id, name, id,
                                          payload ? payload : "{}") != 0)
             aimee_log(LOG_WARN, "kb.curator.resolve", "entity vector upsert failed for %s", id);
+         else if (deep_dim > 0)
+            pgvec_curator_entity_deep_update(pid, deep_vec, deep_dim); /* deep precision layer */
       }
    }
    else

@@ -119,6 +119,12 @@ int pgvec_curator_entity_lookup(int64_t point_id, char *artifact_id_out, int aid
 /* Delete a single curator_entity_vectors row by point_id. */
 int pgvec_curator_entity_delete(int64_t point_id);
 
+/* Deep tier (curator entities): store / compare a deep embedding on
+ * curator_entity_vectors.embedding_deep. similarity returns 1 (present, *out set),
+ * 0 (none), -1 (error). */
+int pgvec_curator_entity_deep_update(int64_t point_id, const float *vec, int dim);
+int pgvec_curator_entity_deep_similarity(int64_t point_id, const float *vec, int dim, double *out);
+
 /* Search curator_entity_vectors by cosine distance.  scope_kind/scope_id are
  * optional equality filters; pass NULL or "" to skip either.  Returns the
  * number of results written (<= max), -1 on error. */

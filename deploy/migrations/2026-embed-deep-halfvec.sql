@@ -47,4 +47,10 @@ ALTER TABLE memory_embeddings ADD COLUMN IF NOT EXISTS embedding_deep halfvec(25
 CREATE INDEX IF NOT EXISTS idx_memory_embeddings_deep_hnsw
     ON memory_embeddings USING hnsw (embedding_deep halfvec_cosine_ops);
 
+-- Curator entity resolution shares the deep tier: the same precision column on
+-- curator_entity_vectors (written/compared by resolve_entities).
+ALTER TABLE curator_entity_vectors ADD COLUMN IF NOT EXISTS embedding_deep halfvec(2560);
+CREATE INDEX IF NOT EXISTS idx_curator_entity_vectors_deep_hnsw
+    ON curator_entity_vectors USING hnsw (embedding_deep halfvec_cosine_ops);
+
 COMMIT;

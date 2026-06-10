@@ -898,6 +898,72 @@ int pgvec_curator_entity_delete(int64_t point_id)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
+/* Deep tier (curator entities): store a 2560-dim deep embedding on
+ * curator_entity_vectors.embedding_deep — the precision layer for resolve_entities
+ * (the live `embedding` is untouched). Mirrors pgvec_memory_deep_update. */
+int pgvec_curator_entity_deep_update(int64_t point_id, const float *vec, int dim)
+{
+   if (!vec || dim <= 0)
+      return 0;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   char *vec_text = build_vec_text(vec, dim);
+   if (!vec_text)
+      return -1;
+   static const char *sql =
+       "UPDATE curator_entity_vectors SET embedding_deep = :embedding::halfvec "
+       "WHERE point_id = :point_id";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+   {
+      free(vec_text);
+      return -1;
+   }
+   aimee_pg_bind_int64(stmt, "point_id", point_id);
+   aimee_pg_bind_text(stmt, "embedding", vec_text);
+   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
+   aimee_pg_finalize(stmt);
+   free(vec_text);
+   return (rc == AIMEE_PG_DONE) ? 0 : -1;
+}
+
+/* Cosine of a query deep vector against an entity's stored deep embedding.
+ * Returns 1 (stored deep present, *out set), 0 (none — caller no-ops), -1 (error). */
+int pgvec_curator_entity_deep_similarity(int64_t point_id, const float *vec, int dim, double *out)
+{
+   if (!vec || dim <= 0 || !out)
+      return -1;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   char *vec_text = build_vec_text(vec, dim);
+   if (!vec_text)
+      return -1;
+   static const char *sql = "SELECT 1.0 - (embedding_deep <=> :qvec::halfvec) "
+                            "FROM curator_entity_vectors "
+                            "WHERE point_id = :point_id AND embedding_deep IS NOT NULL";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+   {
+      free(vec_text);
+      return 0;
+   }
+   aimee_pg_bind_int64(stmt, "point_id", point_id);
+   aimee_pg_bind_text(stmt, "qvec", vec_text);
+   int have = 0;
+   if (aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
+   {
+      *out = aimee_pg_column_double(stmt, 0);
+      have = 1;
+   }
+   aimee_pg_finalize(stmt);
+   free(vec_text);
+   return have;
+}
+
 int pgvec_curator_entity_search(const char *scope_kind, const char *scope_id, const float *vec,
                                 int dim, int limit, int64_t *ids, double *scores, int max)
 {

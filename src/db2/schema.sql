@@ -760,6 +760,16 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         RAISE NOTICE 'memory_embeddings.embedding_deep column skipped (%)', SQLERRM;
     END;
 
+    -- Deep tier for curator entity resolution: same opt-in halfvec(2560) precision
+    -- column on curator_entity_vectors, written/compared by resolve_entities.
+    BEGIN
+        EXECUTE $T$
+            ALTER TABLE curator_entity_vectors ADD COLUMN IF NOT EXISTS embedding_deep halfvec(2560)
+        $T$;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'curator_entity_vectors.embedding_deep column skipped (%)', SQLERRM;
+    END;
+
     EXECUTE $T$
         CREATE INDEX IF NOT EXISTS idx_memory_embeddings_record_type
             ON memory_embeddings (record_type)
@@ -806,6 +816,14 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'memory_embeddings deep HNSW index skipped (%)', SQLERRM;
+    END;
+    BEGIN
+        EXECUTE $T$
+            CREATE INDEX IF NOT EXISTS idx_curator_entity_vectors_deep_hnsw
+                ON curator_entity_vectors USING hnsw (embedding_deep halfvec_cosine_ops)
+        $T$;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'curator_entity_vectors deep HNSW index skipped (%)', SQLERRM;
     END;
     BEGIN
         EXECUTE $T$

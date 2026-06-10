@@ -68,6 +68,21 @@ int pgvec_curator_entity_upsert(int64_t point_id, const float *vec, int dim, con
    g_upserts++;
    return 0;
 }
+int pgvec_curator_entity_deep_update(int64_t point_id, const float *vec, int dim)
+{
+   (void)point_id;
+   (void)vec;
+   (void)dim;
+   return 0;
+}
+int pgvec_curator_entity_deep_similarity(int64_t point_id, const float *vec, int dim, double *out)
+{
+   (void)point_id;
+   (void)vec;
+   (void)dim;
+   (void)out;
+   return 0; /* no stored deep embedding in the stub => guard is a no-op */
+}
 int pgvec_curator_entity_search(const char *scope_kind, const char *scope_id, const float *vec,
                                 int dim, int limit, int64_t *ids, double *scores, int max)
 {
