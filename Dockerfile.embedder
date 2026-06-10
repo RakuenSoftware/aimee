@@ -13,7 +13,7 @@ FROM python:3.11-slim AS embedder
 ARG EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-0.6b
 # Cross-encoder reranker served from the same process (aimee's memory rerank
 # stage). Small/CPU-friendly by design — it scores top-K (~50) pairs per query.
-ARG RERANKER_MODEL=Alibaba-NLP/gte-reranker-modernbert-base
+ARG RERANKER_MODEL=cross-encoder/ettin-reranker-400m-v1
 ENV PIP_NO_CACHE_DIR=1 \
     HF_HOME=/opt/models \
     EMBEDDER_MODEL=${EMBEDDER_MODEL} \

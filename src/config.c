@@ -421,7 +421,7 @@ static void config_set_defaults(config_t *cfg)
    /* Embedding dimension of the default embedder (pplx-embed-v1-0.6b = 1024).
     * Must match the schema vector(N) columns and the embedder model. */
    cfg->embedding_dim = 1024;
-   /* The cross-encoder rerank stage (gte-reranker-modernbert-base, served by the
+   /* The cross-encoder rerank stage (ettin-reranker-400m-v1, served by the
     * embedder service /rerank, client scripts/rerank-remote.py) is wired and
     * shipped but stays default-off — it is an unvalidated quality/latency
     * tradeoff (per-query top-K cross-encoder pass), so it follows the

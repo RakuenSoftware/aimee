@@ -22,7 +22,7 @@ Endpoints:
 Config (env):
   EMBEDDER_PORT   listen port (default 8080)
   EMBEDDER_MODEL  sentence-transformers model id (default pplx-embed-v1-0.6b)
-  RERANKER_MODEL  cross-encoder model id (default gte-reranker-modernbert-base)
+  RERANKER_MODEL  cross-encoder model id (default ettin-reranker-400m-v1)
 
 Dependencies: pip install "sentence-transformers>=3.3" einops
 """
@@ -36,7 +36,7 @@ MODEL_NAME = os.environ.get("EMBEDDER_MODEL", "perplexity-ai/pplx-embed-v1-0.6b"
 # Cross-encoder reranker, served from the same process (it reuses the resident
 # torch/sentence-transformers stack). Lazy-loaded on first /rerank so the embedder
 # starts and stays healthy even if reranking is never used.
-RERANKER_MODEL = os.environ.get("RERANKER_MODEL", "Alibaba-NLP/gte-reranker-modernbert-base")
+RERANKER_MODEL = os.environ.get("RERANKER_MODEL", "cross-encoder/ettin-reranker-400m-v1")
 PORT = int(os.environ.get("EMBEDDER_PORT", "8080"))
 
 _model = None
