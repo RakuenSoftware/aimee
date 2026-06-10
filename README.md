@@ -493,8 +493,15 @@ docker compose -f compose.combined.yaml restart aimee-server-kb
 docker compose -f compose.combined.yaml down         # stop + remove containers (named volumes persist)
 docker compose -f compose.combined.yaml down -v      # also drop the data volumes (DESTROYS DB2 + state)
 docker compose -f compose.combined.yaml pull && \
-  docker compose -f compose.combined.yaml up -d --build   # update: rebuild images and recreate
+  docker compose -f compose.combined.yaml up -d           # update: pull the latest published image + recreate
+docker compose -f compose.combined.yaml up -d --build     # alternative: rebuild from local source instead of pulling
 ```
+
+The compose services point at the published `ghcr.io/rakuensoftware/aimee-*`
+images (built and pushed on every merge to `main`), so `pull` fetches the latest
+release without a local build. Pin a specific version (or a fork/registry) by
+overriding `AIMEE_COMBINED_IMAGE` / `AIMEE_SERVER_IMAGE` / `AIMEE_KB_IMAGE` /
+`AIMEE_EMBEDDER_IMAGE` (e.g. `AIMEE_COMBINED_IMAGE=ghcr.io/rakuensoftware/aimee-server-kb:v0.2.41`).
 
 Each container runs as a non-root user. Durable state lives in **named volumes**,
 not the container filesystem, so `down`/recreate is safe and `down -v` is the only
