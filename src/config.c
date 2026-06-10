@@ -426,6 +426,11 @@ static void config_set_defaults(config_t *cfg)
    /* Default-on to preserve behavior: dedupe of duplicate-key memories ran ungated
     * in the maintenance COMPACT pass before the enable-gate was wired. */
    cfg->memory_improve_dedupe_enabled = 1;
+   /* Default-on to preserve behavior: the auto-create of a retrieval_failure
+    * directive after a confident-failure ran ungated in memory_assemble before
+    * this toggle was wired. Off stops auto-creation; manually-created directives
+    * still surface. */
+   cfg->memory_directives_enabled = 1;
    cfg->memory_hard_negative_log[0] = '\0';
    cfg->dogfood_enabled = 1;
    cfg->dogfood_log_dir[0] = '\0';

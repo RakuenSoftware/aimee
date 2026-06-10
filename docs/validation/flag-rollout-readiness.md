@@ -133,18 +133,25 @@ alone: `worktree_gc_enabled`.
 
 ## Inert flags — wire or remove (decision required)
 
-These `*_enabled` toggles have **zero production readers**; only config parse/save and
-one config-surface test reference them. The feature behind each is reachable another
-way, so the *toggle* is vestigial — but it is a **misleading control surface**: a user
-can `config set` it, it persists, shows in `config show`, and silently does nothing.
+These `*_enabled` toggles had **zero production readers**; only config parse/save and
+one config-surface test referenced them. The feature behind each is reachable another
+way, so the *toggle* was vestigial — a **misleading control surface**: a user could
+`config set` it, it persists, shows in `config show`, and silently did nothing.
 
-| Flag | Feature reachable via | Disposition |
-|---|---|---|
-| `memory_profile_cards_enabled` | runs in maintenance, gated by `_min_obs`/`_stale_secs` (both read) | **wire** the toggle as the master gate, or **remove** it and document profile-cards as always-on-in-maintenance |
-| `memory_briefing_enabled` (+`_limit_tokens`) | `aimee memory briefing` / MCP `memory_briefing` tool / session-lifecycle | toggle was meant to **auto-inject** briefing at session start — wire that path, or remove the toggle (briefing stays a manual tool) |
-| `memory_directives_enabled` (+`_failure_threshold`,`_max_matches`) | `aimee memory directive(s)` CLI + `session_briefing_directives` | toggle gates **auto-create-on-confident-failure** + **auto-surface-per-turn** — wire those, or remove and keep directives manual |
-| `memory_improve_dedupe_enabled` | `memory_improve_dedupe()` callable | improve loop doesn't consult the toggle — wire it as the gate, or remove |
-| `memory_improve_summarise_enabled` | `memory_improve_summarise()` callable | same |
+Status: **4 of 5 now wired** (this PR). Each was wired into its feature's gate and
+**defaulted ON** — the gated behaviour ran ungated before, so a default-off gate would
+*regress*; default-on preserves the status quo while making the toggle functional.
+`summarise` is the exception (opt-in, default off). The `directives` toggle gates the
+**confident-failure** auto-create specifically (the documented intent); the separate
+contradiction-at-promotion and manual CLI/MCP create paths stay independent by design.
+
+| Flag | Feature reachable via | Disposition | Status |
+|---|---|---|---|
+| `memory_profile_cards_enabled` | runs in maintenance, gated by `_min_obs`/`_stale_secs` (both read) | wire as master gate of the REPLAY-pass refresh | **WIRED, default-on** (PR #168) |
+| `memory_improve_dedupe_enabled` | `memory_improve_dedupe()` in COMPACT pass | wire as the COMPACT gate | **WIRED, default-on** (PR #168) |
+| `memory_improve_summarise_enabled` | `memory_improve_summarise()` callable | OR into the SUMMARIZE gate | **WIRED, default-off** (opt-in, PR #168) |
+| `memory_directives_enabled` (+`_failure_threshold`,`_max_matches`) | `aimee memory directive(s)` CLI + `session_briefing_directives` | gate **auto-create-on-confident-failure** (memory_assemble); surfacing of *existing* directives stays unconditional so manual directives always show | **WIRED, default-on** (PR #168) |
+| `memory_briefing_enabled` (+`_limit_tokens`) | `aimee memory briefing` / MCP `memory_briefing` tool | toggle was meant to **auto-inject** briefing at session start — but **no auto-inject site exists in code** (the briefing is a pull-only tool today). Disposition: this is a *missing feature*, not a mis-gated one. Either build the session-start auto-inject and gate it here, or remove the toggle and document briefing as pull-only. **Left as a scoped follow-up** (a new feature + its own rollout gate, not an inert-toggle cleanup). | **OPEN** (follow-up) |
 
 **Why not just delete them?**
 1. Deleting a flag here is **not** deleting nothing — the feature is live. Removal
@@ -157,9 +164,10 @@ can `config set` it, it persists, shows in `config show`, and silently does noth
    **remove the toggle and document the feature's fixed behaviour** — a product call,
    not a reflex `git rm`.
 
-Recommended: wire `profile_cards`/`improve_*` (trivial — connect the existing gate),
-and take `briefing`/`directives` auto-mode as scoped follow-ups (the auto-inject /
-auto-create paths are real features worth finishing).
+Done: `profile_cards`/`improve_*` (PR #168) and `directives` auto-create wired as
+their gates, default-on. Remaining: `briefing` auto-inject is a *missing feature*
+(no session-start injection site exists) — tracked as a scoped follow-up, since
+building it is a new capability with its own rollout gate, not an inert-toggle fix.
 
 ---
 

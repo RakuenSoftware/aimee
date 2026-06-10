@@ -442,7 +442,7 @@ int config_save(const config_t *cfg)
        cfg->memory_lifecycle_ttl_relative_days > 0 ||
        cfg->memory_lifecycle_ttl_open_ended_days > 0 || cfg->memory_recall_enabled ||
        cfg->memory_recall_limit_tokens_session > 0 || cfg->memory_recall_limit_tokens_turn > 0 ||
-       cfg->memory_directives_enabled || cfg->memory_directives_failure_threshold > 0 ||
+       !cfg->memory_directives_enabled || cfg->memory_directives_failure_threshold > 0 ||
        cfg->memory_directives_max_matches > 0 || cfg->memory_rewrite_enabled ||
        cfg->memory_rewrite_command[0] || !cfg->memory_improve_dedupe_enabled ||
        cfg->memory_improve_summarise_enabled || cfg->memory_improve_min_cluster > 0 ||
@@ -614,7 +614,7 @@ int config_save(const config_t *cfg)
          if (cfg->memory_recall_limit_tokens_turn > 0)
             cJSON_AddNumberToObject(rc, "limit_tokens_turn", cfg->memory_recall_limit_tokens_turn);
       }
-      if (cfg->memory_directives_enabled || cfg->memory_directives_failure_threshold > 0 ||
+      if (!cfg->memory_directives_enabled || cfg->memory_directives_failure_threshold > 0 ||
           cfg->memory_directives_max_matches > 0)
       {
          cJSON *dc = cJSON_AddObjectToObject(memory, "directives");

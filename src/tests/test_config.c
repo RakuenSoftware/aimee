@@ -68,6 +68,9 @@ int main(void)
        * summarise stays opt-in (default off). */
       assert(cfg.memory_improve_dedupe_enabled == 1);
       assert(cfg.memory_improve_summarise_enabled == 0);
+      /* directives auto-create ran ungated before the toggle was wired; default-on
+       * preserves it. */
+      assert(cfg.memory_directives_enabled == 1);
    }
 
    /* --- config_save + config_load round-trip --- */
@@ -170,6 +173,9 @@ int main(void)
       cfg.memory_improve_summarise_enabled = 1;
       cfg.memory_improve_min_cluster = 5;
       cfg.memory_improve_max_confidence = 0.42;
+      /* directives defaults on; set off to prove the disabled state round-trips
+       * (same default-on save-guard regression class as profile_cards). */
+      cfg.memory_directives_enabled = 0;
       /* kb.maintenance.* — must survive config_save (same drop class as curator). */
       cfg.kb_maintenance_enabled = 1;
       cfg.kb_maintenance_interval_hours = 12;
@@ -339,6 +345,7 @@ int main(void)
       assert(cfg2.memory_improve_summarise_enabled == 1);
       assert(cfg2.memory_improve_min_cluster == 5);
       assert(fabs(cfg2.memory_improve_max_confidence - 0.42) < 0.0001);
+      assert(cfg2.memory_directives_enabled == 0);
       /* regression: kb.maintenance.* used to be parsed but never saved -> dropped on save. */
       assert(cfg2.kb_maintenance_enabled == 1);
       assert(cfg2.kb_maintenance_interval_hours == 12);
