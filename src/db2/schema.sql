@@ -620,7 +620,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS memory_embeddings (
             point_id      BIGINT PRIMARY KEY,
-            embedding     vector(384),
+            embedding     vector(1024),
             record_type   TEXT NOT NULL DEFAULT '',
             primary_scope TEXT NOT NULL DEFAULT '',
             workspace     TEXT NOT NULL DEFAULT '',
@@ -633,7 +633,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS kb_embeddings (
             point_id     BIGINT PRIMARY KEY,
-            embedding    vector(384),
+            embedding    vector(1024),
             project      TEXT NOT NULL DEFAULT '',
             payload_json TEXT NOT NULL DEFAULT ''
         )
@@ -648,7 +648,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_entity_vectors (
             point_id       BIGINT PRIMARY KEY,
-            embedding      vector(384),
+            embedding      vector(1024),
             scope_kind     TEXT NOT NULL DEFAULT '',
             scope_id       TEXT NOT NULL DEFAULT '',
             canonical_name TEXT NOT NULL DEFAULT '',
@@ -668,7 +668,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_narrative_vectors (
             point_id     BIGINT PRIMARY KEY,
-            embedding    vector(384),
+            embedding    vector(1024),
             artifact_id  TEXT NOT NULL DEFAULT '',
             kind         TEXT NOT NULL DEFAULT '',
             doc_id       TEXT NOT NULL DEFAULT '',
@@ -687,8 +687,8 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_claim_vectors (
             point_id      BIGINT PRIMARY KEY,
-            subj_attr_vec vector(384),
-            value_vec     vector(384),
+            subj_attr_vec vector(1024),
+            value_vec     vector(1024),
             artifact_id   TEXT NOT NULL DEFAULT '',
             subject       TEXT NOT NULL DEFAULT '',
             attribute     TEXT NOT NULL DEFAULT '',
@@ -709,9 +709,9 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_code_unit_vectors (
             point_id      BIGINT PRIMARY KEY,
-            intent_vec    vector(384),
-            signature_vec vector(384),
-            body_vec      vector(384),
+            intent_vec    vector(1024),
+            signature_vec vector(1024),
+            body_vec      vector(1024),
             artifact_id   TEXT NOT NULL DEFAULT '',
             file_path     TEXT NOT NULL DEFAULT '',
             def_kind      TEXT NOT NULL DEFAULT '',
@@ -721,34 +721,28 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         )
     $T$;
 
-    -- The embedding columns must carry a fixed dimension or the HNSW index
-    -- below cannot be built (pgvector rejects an HNSW index on an
-    -- undimensioned `vector` column), which leaves a fresh database with no
-    -- usable vector index and /v1/health reporting pgvector degraded. All
-    -- embedders in the stack emit 384 dims (MiniLM). This ALTER migrates
-    -- databases created before the columns were dimensioned; it is a no-op
-    -- once the columns are already vector(384).
+    -- The embedding columns carry a fixed dimension (vector(1024)) matching the
+    -- default embedder perplexity-ai/pplx-embed-v1-0.6b; a fresh database gets
+    -- that straight from the CREATE TABLE definitions above. We deliberately do
+    -- NOT auto-alter an existing differently-dimensioned column here: a database
+    -- created with the old 384-dim embedder (all-MiniLM-L6-v2) holds vector(1024)
+    -- columns full of incompatible vectors, and silently clearing them on a
+    -- routine schema-apply would wipe the corpus. Instead we surface a clear
+    -- NOTICE; the operator runs deploy/migrations/2026-embed-dim-1024.sql (after a
+    -- backup) to drop the HNSW indexes, clear the columns to vector(1024), and
+    -- re-embed. Vector ops degrade (not crash) until then.
+    DECLARE
+        cur_type text;
     BEGIN
-        EXECUTE $T$ ALTER TABLE memory_embeddings
-                    ALTER COLUMN embedding TYPE vector(384) USING embedding::vector(384) $T$;
-        EXECUTE $T$ ALTER TABLE kb_embeddings
-                    ALTER COLUMN embedding TYPE vector(384) USING embedding::vector(384) $T$;
-        EXECUTE $T$ ALTER TABLE curator_entity_vectors
-                    ALTER COLUMN embedding TYPE vector(384) USING embedding::vector(384) $T$;
-        EXECUTE $T$ ALTER TABLE curator_narrative_vectors
-                    ALTER COLUMN embedding TYPE vector(384) USING embedding::vector(384) $T$;
-        EXECUTE $T$ ALTER TABLE curator_claim_vectors
-                    ALTER COLUMN subj_attr_vec TYPE vector(384) USING subj_attr_vec::vector(384) $T$;
-        EXECUTE $T$ ALTER TABLE curator_claim_vectors
-                    ALTER COLUMN value_vec TYPE vector(384) USING value_vec::vector(384) $T$;
-        EXECUTE $T$ ALTER TABLE curator_code_unit_vectors
-                    ALTER COLUMN intent_vec TYPE vector(384) USING intent_vec::vector(384) $T$;
-        EXECUTE $T$ ALTER TABLE curator_code_unit_vectors
-                    ALTER COLUMN signature_vec TYPE vector(384) USING signature_vec::vector(384) $T$;
-        EXECUTE $T$ ALTER TABLE curator_code_unit_vectors
-                    ALTER COLUMN body_vec TYPE vector(384) USING body_vec::vector(384) $T$;
+        SELECT format_type(atttypid, atttypmod) INTO cur_type
+          FROM pg_attribute
+         WHERE attrelid = 'memory_embeddings'::regclass
+           AND attname = 'embedding' AND NOT attisdropped;
+        IF cur_type IS NOT NULL AND cur_type <> 'vector(1024)' THEN
+            RAISE NOTICE 'aimee: embedding columns are "%" but the embedder now produces vector(1024). Vector ops are degraded until you run deploy/migrations/2026-embed-dim-1024.sql (clears old embeddings, re-embed required) — back up DB2 first.', cur_type;
+        END IF;
     EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'embedding column dimension migration skipped (%)', SQLERRM;
+        RAISE NOTICE 'embedding dimension check skipped (%)', SQLERRM;
     END;
 
     EXECUTE $T$
@@ -861,7 +855,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
                 id          BIGSERIAL PRIMARY KEY,
                 artifact_id TEXT      NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
                 collection  TEXT      NOT NULL DEFAULT 'case_exemplars',
-                embedding   vector(384),
+                embedding   vector(1024),
                 created_at  TEXT      NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
             )
         $T$;
@@ -887,7 +881,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
                 id          BIGSERIAL PRIMARY KEY,
                 artifact_id TEXT      NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
                 collection  TEXT      NOT NULL DEFAULT 'evidence',
-                embedding   vector(384),
+                embedding   vector(1024),
                 created_at  TEXT      NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
             )
         $T$;
