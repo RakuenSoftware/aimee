@@ -1027,7 +1027,7 @@ static void ensure_claude_code_hooks(const char *settings_path)
     * accrues per-file attention and blocks hard-destructive ops on files the
     * session has actively touched. */
    ensure_aimee_event_hook(hooks, "PreToolUse", "attention-guard",
-                           "Read|Edit|Write|MultiEdit|NotebookEdit|Bash", &dirty);
+                           "Read|Edit|Write|MultiEdit|NotebookEdit|Bash|Grep|Glob", &dirty);
 
    if (dirty)
    {

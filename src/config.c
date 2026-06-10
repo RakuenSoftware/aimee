@@ -419,6 +419,18 @@ static void config_set_defaults(config_t *cfg)
    cfg->memory_fetch_budget_shape_aware = 1;
    cfg->kb_search_max_results = 50;
    cfg->memory_routing_enabled = 1;
+   /* Default-on to preserve behavior: profile-card refresh ran ungated in the
+    * maintenance REPLAY pass before the enable-gate was wired. Maintenance is
+    * itself default-off, so this is a no-op until maintenance is enabled. */
+   cfg->memory_profile_cards_enabled = 1;
+   /* Default-on to preserve behavior: dedupe of duplicate-key memories ran ungated
+    * in the maintenance COMPACT pass before the enable-gate was wired. */
+   cfg->memory_improve_dedupe_enabled = 1;
+   /* Default-on to preserve behavior: the auto-create of a retrieval_failure
+    * directive after a confident-failure ran ungated in memory_assemble before
+    * this toggle was wired. Off stops auto-creation; manually-created directives
+    * still surface. */
+   cfg->memory_directives_enabled = 1;
    cfg->memory_hard_negative_log[0] = '\0';
    cfg->dogfood_enabled = 1;
    cfg->dogfood_log_dir[0] = '\0';
@@ -431,13 +443,23 @@ static void config_set_defaults(config_t *cfg)
    cfg->learning_proposal_ttl_days = 7;
    cfg->learning_max_commits_per_week = 25;
    config_learning_defaults(cfg); /* learning.synthesize.* + learning.embed.* */
-   cfg->learning_implicit_citation_repair = 0;
-   cfg->learning_implicit_citation_continuation = 0;
+   /* Default-on: the citation_then_{repair,continuation} detector is graded PASS
+    * (precision/recall 1.0 on the labelled corpus via make learning-citation-eval)
+    * and is now wired into the primary chat turn (openai_chat.c). It is
+    * self-gating (fires only after a memory-citation moment) and emits operator-
+    * reviewed learning proposals, so the blast radius is bounded. The 3 stateful
+    * implicit heuristics below stay off (their detectors need session/DB state and
+    * are not yet validated). NB: learning_implicit_* lack config-file persistence
+    * (a pre-existing systemic gap) — these defaults apply at startup. */
+   cfg->learning_implicit_citation_repair = 1;
+   cfg->learning_implicit_citation_continuation = 1;
    cfg->learning_implicit_repeat_question = 0;
    cfg->learning_implicit_repeated_correction = 0;
    cfg->learning_implicit_workflow_repetition = 0;
    cfg->integrity_enabled = 0;
    cfg->integrity_dry_run = 1;
+   cfg->ingress_preinject_assembly_budget = 6144;
+   cfg->ingress_max_raw_scans = 0;
    /* Default-on as of the virtual-context rollout: the long-session benchmark
     * gate (make virtual-context-eval-check) passes on synthetic and real
     * tool-heavy session fixtures. Rollback: set session.virtual_context.enabled
@@ -706,6 +728,14 @@ int config_load(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "ingress_preinject_enabled");
    if (cJSON_IsBool(item))
       cfg->ingress_preinject_enabled = cJSON_IsTrue(item);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "ingress_preinject_assembly_budget");
+   if (cJSON_IsNumber(item) && item->valuedouble > 0)
+      cfg->ingress_preinject_assembly_budget = (int)item->valuedouble;
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "ingress_max_raw_scans");
+   if (cJSON_IsNumber(item) && item->valuedouble >= 0)
+      cfg->ingress_max_raw_scans = (int)item->valuedouble;
 
    item = cJSON_GetObjectItemCaseSensitive(root, "embedding_command");
    if (cJSON_IsString(item) && item->valuestring[0])

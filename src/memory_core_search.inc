@@ -1935,6 +1935,7 @@ static memory_ranker_input_t memory_ranker_input_from(const memory_t *m)
    snprintf(r.kind, sizeof(r.kind), "%s", m->kind);
    snprintf(r.key, sizeof(r.key), "%s", m->key);
    snprintf(r.content, sizeof(r.content), "%s", m->content);
+   snprintf(r.use_cases, sizeof(r.use_cases), "%s", m->use_cases);
    return r;
 }
 
@@ -1951,6 +1952,7 @@ static void memory_compute_score_parts(const char *raw_query, const char *norm_q
    char qtokens[32][64];
    char norm_key[sizeof(m->key)];
    char norm_content[sizeof(m->content)];
+   char norm_use_cases[sizeof(m->use_cases)];
    int nq = memory_split_tokens(norm_query, qtokens, 32);
    if (nq <= 0)
       return;
@@ -1959,13 +1961,15 @@ static void memory_compute_score_parts(const char *raw_query, const char *norm_q
    memory_query_intent_t intent = memory_query_intent(raw_query, norm_query);
    normalize_key(m->key, norm_key, sizeof(norm_key));
    normalize_key(m->content, norm_content, sizeof(norm_content));
+   normalize_key(m->use_cases, norm_use_cases, sizeof(norm_use_cases));
 
    int matched = 0;
    for (int i = 0; i < nq; i++)
    {
       int in_key = memory_token_in_norm(norm_key, qtokens[i]);
       int in_content = memory_token_in_norm(norm_content, qtokens[i]);
-      if (in_key || in_content)
+      int in_use_cases = memory_token_in_norm(norm_use_cases, qtokens[i]);
+      if (in_key || in_content || in_use_cases)
       {
          double v = in_key ? w.lexical_key : w.lexical_content;
          size_t len = strlen(qtokens[i]);
@@ -2629,6 +2633,8 @@ static int memory_rerank_matches(const char *raw_query, memory_t *matches, int c
       parts[i].hybrid_total = scores[i];
       parts[i].blended_total = scores[i];
       parts[i].rerank_mix = 0.0;
+      matches[i].retrieval_score = scores[i];
+      matches[i].hybrid_rank = 0;
    }
 
    /* Cross-encoder second pass: score top-K candidates with a local cross-encoder model
@@ -2749,6 +2755,17 @@ static int memory_rerank_matches(const char *raw_query, memory_t *matches, int c
     * for display/trace surfaces — it must not have entered the score above. */
    for (int i = 0; i < count; i++)
       parts[i].confidence = matches[i].confidence;
+
+   for (int i = 0; i < count; i++)
+   {
+      int rank = 1;
+      for (int j = 0; j < count; j++)
+      {
+         if (i != j && matches[j].retrieval_score > matches[i].retrieval_score)
+            rank++;
+      }
+      matches[i].hybrid_rank = rank;
+   }
 
    return count < limit ? count : limit;
 }
@@ -4084,7 +4101,12 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    int semantic_hit_count = 0;
    memory_candidate_source_t source_stats[128];
    int source_stats_count = 0;
-   memory_t candidates[MEMORY_RERANK_BUFFER];
+   memory_t *candidates = (memory_t *)calloc(MEMORY_RERANK_BUFFER, sizeof(*candidates));
+   if (!candidates)
+   {
+      pgvec_memory_vector_scope_hint_clear();
+      return -1;
+   }
 
    /* Primary retrieval pass */
    const char *effective_query = query;
@@ -4106,6 +4128,7 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    if (count < 0)
    {
       pgvec_memory_vector_scope_hint_clear();
+      free(candidates);
       return -1;
    }
 
@@ -4125,6 +4148,7 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
       if (extra_count < 0)
       {
          pgvec_memory_vector_scope_hint_clear();
+         free(candidates);
          return -1;
       }
       count = memory_candidates_merge(candidates, count, extra, extra_count, MEMORY_RERANK_BUFFER);
@@ -4156,6 +4180,7 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
       if (sub_count < 0)
       {
          pgvec_memory_vector_scope_hint_clear();
+         free(candidates);
          return -1;
       }
       count =
@@ -4310,6 +4335,7 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    clock_gettime(CLOCK_MONOTONIC, &ts1);
    memory_record_query_plan_metrics(&plan, memory_query_elapsed_ms(&ts0, &ts1));
    pgvec_memory_vector_scope_hint_clear();
+   free(candidates);
    return reranked;
 }
 
@@ -4441,11 +4467,32 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    if (!query || !query[0] || !out || max <= 0)
       return 0;
 
-   memory_t matches[64];
+   char norm_query[512];
+   normalize_key(query, norm_query, sizeof(norm_query));
+   if (!norm_query[0])
+      snprintf(norm_query, sizeof(norm_query), "%s", query);
+
+   int64_t shortcut_ids[8];
+   int shortcut_promoted = 0;
+   int shortcut_n =
+       db2_retrieval_shortcut_lookup(norm_query, shortcut_ids, 8, &shortcut_promoted, NULL);
+   memory_t shortcut_matches[8];
+   int shortcut_match_n = 0;
+   if (shortcut_n > 0)
+      for (int i = 0; i < shortcut_n && shortcut_match_n < 8; i++)
+         if (db2_memory_get(shortcut_ids[i], &shortcut_matches[shortcut_match_n]) == 0)
+            shortcut_match_n++;
+
+   memory_t *matches = (memory_t *)calloc(64, sizeof(*matches));
+   if (!matches)
+      return -1;
    int count = memory_find_facts_scoped(query, scope_type, scope_value, limit > 0 ? limit : 10,
                                         matches, 64);
    if (count < 0)
+   {
+      free(matches);
       return -1;
+   }
    if (count > max)
       count = max;
 
@@ -4457,12 +4504,10 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
    int semantic_hit_count = 0;
    if (memory_collect_semantic_matches(query, embed_cmd, 32, matches, count, 64, semantic_ids,
                                        semantic_scores, &semantic_hit_count, 128) < 0)
+   {
+      free(matches);
       return -1;
-
-   char norm_query[512];
-   normalize_key(query, norm_query, sizeof(norm_query));
-   if (!norm_query[0])
-      snprintf(norm_query, sizeof(norm_query), "%s", query);
+   }
 
    memory_pagerank_config_t pagerank_cfg;
    memory_pagerank_score_t pagerank_scores[64];
@@ -4479,6 +4524,29 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
                                  &out[i].parts);
       out[i].parts.confidence = matches[i].confidence;
    }
+   {
+      int64_t shortcut_ids[8];
+      int shortcut_n = count < 8 ? count : 8;
+      for (int i = 0; i < shortcut_n; i++)
+         shortcut_ids[i] = out[i].memory.id;
+      (void)db2_retrieval_shortcut_observe(norm_query, shortcut_ids, shortcut_n);
+   }
+   if (shortcut_promoted && shortcut_match_n > 0)
+   {
+      int promoted_count = shortcut_match_n < max ? shortcut_match_n : max;
+      for (int i = 0; i < promoted_count; i++)
+      {
+         out[i].memory = shortcut_matches[i];
+         memory_ranker_input_t ri = memory_ranker_input_from(&shortcut_matches[i]);
+         memory_compute_score_parts(query, norm_query, &ri, semantic_ids, semantic_scores,
+                                    semantic_hit_count, pagerank_scores, pagerank_count,
+                                    &out[i].parts);
+         out[i].parts.confidence = shortcut_matches[i].confidence;
+      }
+      free(matches);
+      return promoted_count;
+   }
+   free(matches);
    return count;
 }
 
@@ -4700,6 +4768,264 @@ static double memory_answer_confidence(const memory_t *matches, int count, int a
    return conf;
 }
 
+static const char *memory_answer_decision_name(memory_answer_decision_t decision)
+{
+   switch (decision)
+   {
+   case MEMORY_ANSWER_DECISION_ANSWERABLE:
+      return "answerable";
+   case MEMORY_ANSWER_DECISION_ABSTAIN:
+      return "abstain";
+   case MEMORY_ANSWER_DECISION_EXEMPT:
+      return "exempt";
+   }
+   return "abstain";
+}
+
+static const char *memory_answer_reason_name(memory_answer_reason_t reason)
+{
+   switch (reason)
+   {
+   case MEMORY_ANSWER_REASON_OK:
+      return "ok";
+   case MEMORY_ANSWER_REASON_STRUCTURAL_EMPTY:
+      return "structural_empty";
+   case MEMORY_ANSWER_REASON_STRUCTURAL_NO_EXTRACT:
+      return "structural_no_extract";
+   case MEMORY_ANSWER_REASON_CITATION_REQUIRED:
+      return "citation_required";
+   case MEMORY_ANSWER_REASON_GROUNDING_LOW:
+      return "grounding_low";
+   case MEMORY_ANSWER_REASON_CHUNK_FLOOR:
+      return "chunk_floor";
+   case MEMORY_ANSWER_REASON_CURATED_EXEMPT:
+      return "curated_exempt";
+   case MEMORY_ANSWER_REASON_DB_UNAVAILABLE:
+      return "db_unavailable";
+   }
+   return "ok";
+}
+
+const char *memory_answer_evidence_decision_str(const memory_answer_evidence_t *trace)
+{
+   return memory_answer_decision_name(trace ? trace->decision : MEMORY_ANSWER_DECISION_ABSTAIN);
+}
+
+const char *memory_answer_evidence_reason_str(const memory_answer_evidence_t *trace)
+{
+   return memory_answer_reason_name(trace ? trace->reason : MEMORY_ANSWER_REASON_DB_UNAVAILABLE);
+}
+
+static int memory_fixed_field_eq(const char *field, size_t field_len, const char *value)
+{
+   if (!field || !value)
+      return 0;
+   size_t value_len = strlen(value);
+   if (value_len >= field_len)
+      return 0;
+   return memcmp(field, value, value_len) == 0 && field[value_len] == '\0';
+}
+
+static const char *memory_answer_mode_for_anchor(const memory_t *matches, int count, int anchor)
+{
+   if (!matches || anchor < 0 || anchor >= count)
+      return "";
+   const memory_t *m = &matches[anchor];
+   if (memory_fixed_field_eq(m->tier, sizeof(m->tier), TIER_L5) ||
+       memory_fixed_field_eq(m->kind, sizeof(m->kind), "synthesis") ||
+       memory_fixed_field_eq(m->kind, sizeof(m->kind), "restoration") ||
+       memory_fixed_field_eq(m->provenance_category, sizeof(m->provenance_category), "synthesis") ||
+       memory_fixed_field_eq(m->provenance_category, sizeof(m->provenance_category), "restoration"))
+      return "synthesised";
+   return "verbatim";
+}
+
+static double memory_text_term_coverage(const char **terms, int term_count, const char *a,
+                                        const char *b)
+{
+   int significant = 0;
+   int covered = 0;
+   for (int t = 0; t < term_count; t++)
+   {
+      const char *term = terms[t];
+      if (!term || strlen(term) < 3 || is_coverage_stopword(term))
+         continue;
+      significant++;
+      char lower_term[128];
+      snprintf(lower_term, sizeof(lower_term), "%s", term);
+      for (char *p = lower_term; *p; p++)
+         *p = (char)tolower((unsigned char)*p);
+      int found = 0;
+      const char *texts[2] = {a ? a : "", b ? b : ""};
+      for (int i = 0; i < 2 && !found; i++)
+      {
+         char lower_text[2048];
+         snprintf(lower_text, sizeof(lower_text), "%s", texts[i]);
+         for (char *p = lower_text; *p; p++)
+            *p = (char)tolower((unsigned char)*p);
+         if (strstr(lower_text, lower_term))
+            found = 1;
+      }
+      if (found)
+         covered++;
+   }
+   return significant > 0 ? (double)covered / (double)significant : 0.0;
+}
+
+static void memory_answer_trace_init(memory_answer_evidence_t *trace, const memory_t *matches,
+                                     int count, int anchor)
+{
+   if (!trace)
+      return;
+   memset(trace, 0, sizeof(*trace));
+   trace->decision = MEMORY_ANSWER_DECISION_ANSWERABLE;
+   trace->reason = MEMORY_ANSWER_REASON_OK;
+   trace->anchor_id = 0;
+   trace->anchor_rank = -1;
+   trace->ranked_count = count > 0 ? count : 0;
+   if (matches && count > 0)
+   {
+      int cap = count < MEMORY_ANSWER_TRACE_MAX_IDS ? count : MEMORY_ANSWER_TRACE_MAX_IDS;
+      for (int i = 0; i < cap; i++)
+         trace->candidate_ids[i] = matches[i].id;
+      trace->candidate_id_count = cap;
+      trace->trace_truncated = count > MEMORY_ANSWER_TRACE_MAX_IDS ? 1 : 0;
+      if (anchor >= 0 && anchor < count)
+      {
+         trace->anchor_id = matches[anchor].id;
+         trace->anchor_rank =
+             matches[anchor].hybrid_rank > 0 ? matches[anchor].hybrid_rank : anchor + 1;
+      }
+   }
+}
+
+static int memory_answer_anchor_exempt(const memory_t *matches, int count, int anchor)
+{
+   if (!matches || anchor < 0 || anchor >= count)
+      return 0;
+   return memory_tier_priority(matches[anchor].tier) >= 4;
+}
+
+static void memory_answer_trace_set(memory_answer_evidence_t *trace,
+                                    memory_answer_decision_t decision,
+                                    memory_answer_reason_t reason, int structural, int exempt)
+{
+   if (!trace)
+      return;
+   trace->decision = decision;
+   trace->reason = reason;
+   trace->structural = structural;
+   trace->exempt = exempt;
+}
+
+static void memory_answerable(const memory_t *matches, int count, int anchor,
+                              const char **query_terms, int term_count, int citation_count,
+                              int citations_required, int structural_failure,
+                              memory_answer_reason_t structural_reason, double threshold,
+                              double chunk_floor, int abstain_enabled, double answer_confidence,
+                              memory_answer_evidence_t *trace)
+{
+   memory_answer_trace_init(trace, matches, count, anchor);
+   if (!trace)
+      return;
+   trace->threshold = threshold;
+   trace->chunk_floor = chunk_floor;
+
+   if (memory_answer_anchor_exempt(matches, count, anchor))
+   {
+      memory_answer_trace_set(trace, MEMORY_ANSWER_DECISION_EXEMPT,
+                              MEMORY_ANSWER_REASON_CURATED_EXEMPT, 0, 1);
+      return;
+   }
+   if (structural_failure)
+   {
+      memory_answer_trace_set(trace, MEMORY_ANSWER_DECISION_ABSTAIN, structural_reason, 1, 0);
+      return;
+   }
+   if (citations_required && citation_count <= 0)
+   {
+      memory_answer_trace_set(trace, MEMORY_ANSWER_DECISION_ABSTAIN,
+                              MEMORY_ANSWER_REASON_CITATION_REQUIRED, 1, 0);
+      return;
+   }
+
+   context_candidate_t cands[16];
+   int cand_count = count < 16 ? count : 16;
+   int kept = 0;
+   for (int i = 0; i < cand_count; i++)
+   {
+      double score = matches[i].retrieval_score;
+      if (chunk_floor > 0.0 && score < chunk_floor)
+         continue;
+      memset(&cands[kept], 0, sizeof(cands[kept]));
+      cands[kept].id = matches[i].id;
+      snprintf(cands[kept].key, sizeof(cands[kept].key), "%s", matches[i].key);
+      snprintf(cands[kept].content, sizeof(cands[kept].content), "%s", matches[i].content);
+      cands[kept].score = score > 0.0 ? score : (double)(cand_count - i);
+      kept++;
+   }
+   if (chunk_floor > 0.0 && kept <= 0)
+   {
+      memory_answer_trace_set(trace, MEMORY_ANSWER_DECISION_ABSTAIN,
+                              MEMORY_ANSWER_REASON_CHUNK_FLOOR, 0, 0);
+      return;
+   }
+
+   retrieval_confidence_t rconf;
+   memory_retrieval_confidence(query_terms, term_count, cands, kept, threshold, &rconf);
+   trace->topk_grounding = rconf.score;
+   if (matches && anchor >= 0 && anchor < count)
+      trace->anchor_coverage = memory_text_term_coverage(
+          query_terms, term_count, matches[anchor].key, matches[anchor].content);
+
+   int cluster_count = 0;
+   int cluster_covered = 0;
+   for (int t = 0; t < term_count; t++)
+   {
+      const char *term = query_terms[t];
+      if (!term || strlen(term) < 3 || is_coverage_stopword(term))
+         continue;
+      cluster_count++;
+      for (int i = 0; i < count; i++)
+      {
+         if (!memory_cluster_member(matches, count, anchor, i))
+            continue;
+         if (memory_text_term_coverage(&term, 1, matches[i].key, matches[i].content) > 0.0)
+         {
+            cluster_covered++;
+            break;
+         }
+      }
+   }
+   trace->cluster_coverage =
+       cluster_count > 0 ? (double)cluster_covered / (double)cluster_count : 0.0;
+
+   if (!abstain_enabled)
+   {
+      memory_answer_trace_set(trace, MEMORY_ANSWER_DECISION_ANSWERABLE, MEMORY_ANSWER_REASON_OK, 0,
+                              0);
+      return;
+   }
+
+   double grounding = trace->anchor_coverage < trace->cluster_coverage ? trace->anchor_coverage
+                                                                       : trace->cluster_coverage;
+   double floored = grounding < trace->topk_grounding ? grounding : trace->topk_grounding;
+   const double epsilon = 0.02;
+   if (floored < threshold)
+   {
+      if (threshold - floored < epsilon && answer_confidence >= threshold)
+      {
+         memory_answer_trace_set(trace, MEMORY_ANSWER_DECISION_ANSWERABLE, MEMORY_ANSWER_REASON_OK,
+                                 0, 0);
+         return;
+      }
+      memory_answer_trace_set(trace, MEMORY_ANSWER_DECISION_ABSTAIN,
+                              MEMORY_ANSWER_REASON_GROUNDING_LOW, 0, 0);
+      return;
+   }
+   memory_answer_trace_set(trace, MEMORY_ANSWER_DECISION_ANSWERABLE, MEMORY_ANSWER_REASON_OK, 0, 0);
+}
+
 static void memory_pick_answer_from_cluster(const memory_t *matches, int count,
                                             memory_query_intent_t intent, char *buf, size_t buf_len)
 {
@@ -4788,12 +5114,18 @@ int memory_ask_query_scoped(const char *query, const char *scope_type, const cha
    {
       snprintf(out->error, sizeof(out->error),
                "error: memory retrieval index unavailable; server-side maintenance is required");
+      memory_answer_trace_init(&out->evidence, NULL, 0, -1);
+      memory_answer_trace_set(&out->evidence, MEMORY_ANSWER_DECISION_ABSTAIN,
+                              MEMORY_ANSWER_REASON_DB_UNAVAILABLE, 1, 0);
       return -1;
    }
    out->retrieval_count = count;
    if (count <= 0)
    {
       out->no_answer = 1;
+      memory_answer_trace_init(&out->evidence, NULL, 0, -1);
+      memory_answer_trace_set(&out->evidence, MEMORY_ANSWER_DECISION_ABSTAIN,
+                              MEMORY_ANSWER_REASON_STRUCTURAL_EMPTY, 1, 0);
       return 0;
    }
 
@@ -4807,6 +5139,10 @@ int memory_ask_query_scoped(const char *query, const char *scope_type, const cha
    if (!out->answer[0])
    {
       out->no_answer = 1;
+      int structural_anchor = memory_answer_anchor_index(matches, count);
+      memory_answer_trace_init(&out->evidence, matches, count, structural_anchor);
+      memory_answer_trace_set(&out->evidence, MEMORY_ANSWER_DECISION_ABSTAIN,
+                              MEMORY_ANSWER_REASON_STRUCTURAL_NO_EXTRACT, 1, 0);
       return 0;
    }
 
@@ -4821,6 +5157,8 @@ int memory_ask_query_scoped(const char *query, const char *scope_type, const cha
       strip_unverified = atoi(strip_env) != 0;
 
    int anchor = memory_answer_anchor_index(matches, count);
+   snprintf(out->evidence_mode, sizeof(out->evidence_mode), "%s",
+            memory_answer_mode_for_anchor(matches, count, anchor));
    out->citation_count = memory_collect_answer_citation_ids(
        matches, count, anchor, out->citation_ids, MEMORY_ANSWER_MAX_CITATIONS);
 
@@ -4839,6 +5177,9 @@ int memory_ask_query_scoped(const char *query, const char *scope_type, const cha
       {
          snprintf(out->error, sizeof(out->error),
                   "error: memory retrieval index unavailable; server-side maintenance is required");
+         memory_answer_trace_init(&out->evidence, matches, count, anchor);
+         memory_answer_trace_set(&out->evidence, MEMORY_ANSWER_DECISION_ABSTAIN,
+                                 MEMORY_ANSWER_REASON_DB_UNAVAILABLE, 1, 0);
          return -1;
       }
       if (reprompt_count > 0)
@@ -4863,13 +5204,9 @@ int memory_ask_query_scoped(const char *query, const char *scope_type, const cha
       }
    }
 
-   if (!citations_mode || !citations_mode[0] || strcmp(citations_mode, "off") == 0)
-   {
-      out->confidence = memory_answer_confidence(matches, count, anchor, out->citation_count, 0, 0);
-      return 0;
-   }
-
-   if (out->citation_count <= 0)
+   int citation_required_abstain = 0;
+   if (out->citation_count <= 0 && citations_mode && citations_mode[0] &&
+       strcmp(citations_mode, "off") != 0)
    {
       memory_runtime_state_increment("memory.citation.missing", 1);
       if (strip_unverified)
@@ -4878,25 +5215,58 @@ int memory_ask_query_scoped(const char *query, const char *scope_type, const cha
          out->answer[0] = '\0';
          out->no_answer = 1;
          out->confidence = 0.0;
+         memory_answerable(matches, count, anchor, NULL, 0, 0, is_required, 1,
+                           MEMORY_ANSWER_REASON_CITATION_REQUIRED, 0.0, 0.0, 0, 0.0,
+                           &out->evidence);
          return 0;
       }
       if (is_required)
       {
-         char low_answer[sizeof(out->answer)];
-         snprintf(low_answer, sizeof(low_answer),
-                  "## Retrieval Confidence: LOW\n"
-                  "No verified citations could be attached to this answer. "
-                  "The information below is unverified and may be inaccurate.\n\n%s",
-                  out->answer);
-         snprintf(out->answer, sizeof(out->answer), "%s", low_answer);
+         citation_required_abstain = 1;
          out->low_confidence = 1;
       }
-      out->confidence = memory_answer_confidence(matches, count, anchor, 0, 0, out->low_confidence);
-      return 0;
    }
 
-   memory_runtime_state_increment("memory.citation.verified", 1);
-   out->confidence = memory_answer_confidence(matches, count, anchor, out->citation_count, 0, 0);
+   if (out->citation_count > 0)
+      memory_runtime_state_increment("memory.citation.verified", 1);
+   out->confidence = memory_answer_confidence(matches, count, anchor, out->citation_count, 0,
+                                              out->low_confidence);
+
+   double threshold = cfg.memory_abstain_gate > 0.0 ? cfg.memory_abstain_gate : 0.40;
+   double chunk_floor =
+       cfg.memory_chunk_min_confidence > 0.0 ? cfg.memory_chunk_min_confidence : 0.0;
+   if (chunk_floor > 1.0)
+      chunk_floor = 1.0;
+   char query_terms_storage[32][64];
+   const char *query_terms[32];
+   int term_count = memory_split_tokens(norm_query, query_terms_storage, 32);
+   for (int i = 0; i < term_count; i++)
+      query_terms[i] = query_terms_storage[i];
+   int abstain_enabled = cfg.memory_abstain_enabled && threshold > 0.0;
+   if (!citations_mode || !citations_mode[0] || strcmp(citations_mode, "off") == 0)
+      citation_required_abstain = 0;
+   double active_chunk_floor = abstain_enabled ? chunk_floor : 0.0;
+   memory_answerable(matches, count, anchor, query_terms, term_count, out->citation_count,
+                     citation_required_abstain, 0, MEMORY_ANSWER_REASON_OK, threshold,
+                     active_chunk_floor, abstain_enabled, out->confidence, &out->evidence);
+   if (out->evidence.decision == MEMORY_ANSWER_DECISION_ABSTAIN)
+   {
+      out->no_answer = 1;
+      out->low_confidence = 1;
+      out->answer[0] = '\0';
+      out->citation_count = 0;
+      memory_runtime_state_increment("memory.answer.abstained", 1);
+   }
+   else if (citation_required_abstain && out->citation_count <= 0)
+   {
+      char low_answer[sizeof(out->answer)];
+      snprintf(low_answer, sizeof(low_answer),
+               "## Retrieval Confidence: LOW\n"
+               "No verified citations could be attached to this answer. "
+               "The information below is unverified and may be inaccurate.\n\n%s",
+               out->answer);
+      snprintf(out->answer, sizeof(out->answer), "%s", low_answer);
+   }
    return 0;
 }
 
@@ -4906,6 +5276,15 @@ char *memory_answer_query_scoped(const char *query, const char *scope_type, cons
    memory_answer_result_t result;
    if (memory_ask_query_scoped(query, scope_type, scope_value, limit, &result) != 0)
       return safe_strdup(result.error[0] ? result.error : "");
+   if (result.no_answer)
+   {
+      char msg[768];
+      if (query && query[0])
+         snprintf(msg, sizeof(msg), "No confident answer for \"%s\"", query);
+      else
+         snprintf(msg, sizeof(msg), "No confident answer.");
+      return safe_strdup(msg);
+   }
    if (result.citation_count > 0)
       return memory_render_cited_answer(result.answer, result.citation_ids, result.citation_count);
    return safe_strdup(result.answer);

@@ -236,6 +236,10 @@ extern "C"
     * observation_count, evidence_strength, salience, surprise,
     * last_used_at, updated_at WHERE id = ?. Best-effort. Returns 0 on
     * success, -1 on SQL error. */
+   int db2_memory_merge_update_ex(int64_t memory_id, const char *content, const char *use_cases,
+                                  double confidence, int use_count, int observation_count,
+                                  double evidence_strength, double salience, double surprise,
+                                  const char *ts);
    int db2_memory_merge_update(int64_t memory_id, const char *content, double confidence,
                                int use_count, int observation_count, double evidence_strength,
                                double salience, double surprise, const char *ts);
@@ -245,6 +249,10 @@ extern "C"
     * confidence/sensitivity/evidence/salience/surprise. `ts` is used for
     * last_used_at, created_at, updated_at. Returns the new rowid on
     * success, -1 on SQL error. */
+   int64_t db2_memory_row_insert_ex(const char *tier, const char *kind, const char *key,
+                                    const char *content, const char *use_cases, double confidence,
+                                    const char *session_id, const char *ts, const char *sensitivity,
+                                    double evidence_strength, double salience, double surprise);
    int64_t db2_memory_row_insert(const char *tier, const char *kind, const char *key,
                                  const char *content, double confidence, const char *session_id,
                                  const char *ts, const char *sensitivity, double evidence_strength,
@@ -677,6 +685,10 @@ extern "C"
 
    /* Single-row SELECT into memory_t. Returns 0 on hit, -1 on miss. */
    int db2_memory_get(int64_t memory_id, memory_t *out);
+
+   int db2_retrieval_shortcut_lookup(const char *normalized_query, int64_t *ids, int max,
+                                     int *promoted_out, int64_t *hit_count_out);
+   int db2_retrieval_shortcut_observe(const char *normalized_query, const int64_t *ids, int count);
 
    /* DELETE FROM memory_provenance WHERE memory_id = ?. Best-effort. */
    void db2_memory_provenance_delete(int64_t memory_id);

@@ -1042,12 +1042,14 @@ int kb_handle_memory_store(int fd, cJSON *req)
    cJSON *kind_j = cJSON_GetObjectItemCaseSensitive(req, "kind");
    cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(req, "confidence");
    cJSON *sid_j = cJSON_GetObjectItemCaseSensitive(req, "session_id");
+   cJSON *use_cases_j = cJSON_GetObjectItemCaseSensitive(req, "use_cases");
    const char *tier = cJSON_IsString(tier_j) ? tier_j->valuestring : TIER_L0;
    const char *kind = cJSON_IsString(kind_j) ? kind_j->valuestring : KIND_FACT;
    double confidence = cJSON_IsNumber(conf_j) ? conf_j->valuedouble : 1.0;
    const char *session_id = cJSON_IsString(sid_j) ? sid_j->valuestring : "";
+   const char *use_cases = cJSON_IsString(use_cases_j) ? use_cases_j->valuestring : "";
 
-   cJSON *resp = db2_kb_service_memory_insert_json(tier, kind, key_j->valuestring,
-                                                   content_j->valuestring, confidence, session_id);
+   cJSON *resp = db2_kb_service_memory_insert_ex_json(
+       tier, kind, key_j->valuestring, content_j->valuestring, use_cases, confidence, session_id);
    return kb_reply_or_error(fd, resp, "failed to store memory");
 }

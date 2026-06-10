@@ -761,10 +761,10 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/memory/get", NULL, RM_EXACT, "memory.get", 0, rh_dispatch_op},
     {"GET", "/v1/memory/read", NULL, RM_EXACT, "memory.read", 0, rh_dispatch_op},
 
-    /* Write families (hub-migration P1), dispatch-backed and LOCAL-UDS-ONLY:
-     * their ops are listed in g_v1_write_ops, so v1_route_is_local_only denies
-     * them on the TCP listener regardless of bearer caps (mirroring the /v1/rpc
-     * bridge's write policy). caps still derived from the op for the UDS path. */
+    /* Write families (hub-migration P1), dispatch-backed data-plane writes:
+     * their ops are listed in g_v1_write_ops, so the TCP listener denies them at
+     * remote_writes=off and allows them only at remote_writes=data/full after
+     * capability checks. caps still derive from the op. */
     {"POST", "/v1/memory/store", NULL, RM_EXACT, "memory.store", 0, rh_dispatch_op},
     {"POST", "/v1/work/add", NULL, RM_EXACT, "work.add", 0, rh_dispatch_op},
     {"POST", "/v1/work/claim", NULL, RM_EXACT, "work.claim", 0, rh_dispatch_op},
@@ -817,7 +817,8 @@ static const http_route_t g_v1_routes[] = {
      * listener (privileged tier) while the local UDS — the co-located AI-tool
      * integration that actually drives them — bypasses as the trusted same-user
      * peer. Giving them first-class routes lets the CLI reach them without the
-     * /v1/rpc bridge (op-parity: removed from check-v1-method-coverage's EXCLUDED). */
+     * retired generic dispatch endpoint (op-parity: removed from
+     * check-v1-method-coverage's EXCLUDED). */
     {"POST", "/v1/hooks/pre", NULL, RM_EXACT, "hooks.pre", 0, rh_dispatch_op},
     {"POST", "/v1/hooks/post", NULL, RM_EXACT, "hooks.post", 0, rh_dispatch_op},
     {"POST", "/v1/hooks/session_start", NULL, RM_EXACT, "hooks.session_start", 0, rh_dispatch_op},
@@ -1147,11 +1148,12 @@ static uint32_t v1_route_caps_lookup(const char *method, const char *path)
    return e->op ? server_capability_for_method(e->op) : e->caps;
 }
 
-/* Mutating NDJSON method twins exposed as /v1 routes that must stay local-UDS-
- * only (see v1_route_is_local_only). Keeping write-ness keyed on the op — rather
- * than a per-row struct field — avoids a missing-initializer churn across every
- * existing read row under -Wextra. Add a write route's op here when you add the
- * row. */
+/* Data-plane mutating NDJSON method twins exposed as /v1 routes. At
+ * remote_writes=off they are local-UDS-only; remote_writes=data/full exposes
+ * them over TCP after capability checks. Keeping write-ness keyed on the op —
+ * rather than a per-row struct field — avoids a missing-initializer churn across
+ * every existing read row under -Wextra. Add a data-write route's op here when
+ * you add the row. */
 static const char *const g_v1_write_ops[] = {"memory.store",
                                              "work.add",
                                              "work.claim",
@@ -1169,8 +1171,9 @@ static const char *const g_v1_write_ops[] = {"memory.store",
                                              "skill.pin",
                                              NULL};
 
-/* Backing implementation for v1_route_is_local_only (declared earlier): a route
- * is local-only iff it dispatches a mutating op in g_v1_write_ops. */
+/* Backing implementation for v1_route_is_local_only (declared earlier):
+ * historical name; returns whether the route dispatches a data-write op in
+ * g_v1_write_ops. */
 static int v1_route_is_local_only(const char *method, const char *path)
 {
    if (!method || !path)

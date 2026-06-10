@@ -1938,6 +1938,7 @@ int pre_tool_check(const char *tool_name, const char *input_json, session_state_
    {
       config_t scfg;
       config_load(&scfg);
+      gsem_apply_strictness_arm(&scfg);
       if (scfg.guardrails_semantic_enabled && scfg.guardrails_semantic_command[0] &&
           is_write_intent(tool_name, root))
       {

@@ -2,6 +2,7 @@
 #include "server.h"
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
+#include "dstr.h"
 #include "commands.h"
 #include "db2/curiosity.h"
 #include "memory.h"
@@ -461,8 +462,30 @@ static cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out)
    cJSON_AddStringToObject(structured, "query", jq->valuestring);
    cJSON_AddStringToObject(structured, "answer", result.answer);
    cJSON_AddNumberToObject(structured, "confidence", result.confidence);
+   cJSON_AddStringToObject(structured, "evidence_mode", result.evidence_mode);
    cJSON_AddBoolToObject(structured, "no_answer", result.no_answer);
    cJSON_AddBoolToObject(structured, "low_confidence", result.low_confidence);
+   cJSON *trace = cJSON_AddObjectToObject(structured, "evidence_trace");
+   if (trace)
+   {
+      cJSON_AddStringToObject(trace, "decision",
+                              memory_answer_evidence_decision_str(&result.evidence));
+      cJSON_AddStringToObject(trace, "reason", memory_answer_evidence_reason_str(&result.evidence));
+      cJSON *ids = cJSON_AddArrayToObject(trace, "candidate_ids");
+      for (int i = 0; ids && i < result.evidence.candidate_id_count; i++)
+         cJSON_AddItemToArray(ids, cJSON_CreateNumber((double)result.evidence.candidate_ids[i]));
+      cJSON_AddNumberToObject(trace, "ranked_count", result.evidence.ranked_count);
+      cJSON_AddNumberToObject(trace, "anchor_id", (double)result.evidence.anchor_id);
+      cJSON_AddNumberToObject(trace, "anchor_rank", result.evidence.anchor_rank);
+      cJSON_AddNumberToObject(trace, "topk_grounding", result.evidence.topk_grounding);
+      cJSON_AddNumberToObject(trace, "anchor_coverage", result.evidence.anchor_coverage);
+      cJSON_AddNumberToObject(trace, "cluster_coverage", result.evidence.cluster_coverage);
+      cJSON_AddNumberToObject(trace, "threshold", result.evidence.threshold);
+      cJSON_AddNumberToObject(trace, "chunk_floor", result.evidence.chunk_floor);
+      cJSON_AddBoolToObject(trace, "structural", result.evidence.structural);
+      cJSON_AddBoolToObject(trace, "exempt", result.evidence.exempt);
+      cJSON_AddBoolToObject(trace, "trace_truncated", result.evidence.trace_truncated);
+   }
    cJSON *citations = cJSON_AddArrayToObject(structured, "citations");
    for (int i = 0; i < result.citation_count; i++)
    {
@@ -593,6 +616,43 @@ static cJSON *tool_get_context_block(cJSON *args)
       return text_content("No context block available.");
    cJSON *result = text_content(ctx);
    free(ctx);
+   return result;
+}
+
+static cJSON *tool_memory_get(cJSON *args)
+{
+   cJSON *jid = cJSON_GetObjectItemCaseSensitive(args, "id");
+   cJSON *jh = cJSON_GetObjectItemCaseSensitive(args, "handle");
+   int64_t id = 0;
+   if (cJSON_IsNumber(jid))
+      id = (int64_t)jid->valuedouble;
+   else if (cJSON_IsString(jh))
+   {
+      const char *s = jh->valuestring;
+      if (strncmp(s, "memory:", 7) == 0)
+         s += 7;
+      id = (int64_t)strtoll(s, NULL, 10);
+   }
+   if (id <= 0)
+      return text_content("error: missing memory id or memory:<id> handle");
+
+   memory_t m;
+   if (kb_client_memory_get(id, &m) != 0)
+      return text_content("No memory found.");
+
+   dstr_t d;
+   dstr_init(&d);
+   dstr_appendf(&d, "Memory: memory:%lld\nTier: %s\nKind: %s\nKey: %s\nConfidence: %.3f\n",
+                (long long)m.id, m.tier, m.kind, m.key, m.confidence);
+   if (m.headline[0])
+      dstr_appendf(&d, "Headline: %s\n", m.headline);
+   if (m.updated_at[0])
+      dstr_appendf(&d, "Updated: %s\n", m.updated_at);
+   dstr_append_str(&d, "\n");
+   dstr_append_str(&d, m.content);
+   char *rendered = dstr_steal(&d);
+   cJSON *result = text_content(rendered ? rendered : "");
+   free(rendered);
    return result;
 }
 

@@ -39,4 +39,9 @@ void db2_fill_memory_12col_pg(aimee_pg_stmt_t *stmt, memory_t *m)
    const char *pcat = aimee_pg_column_text(stmt, 12);
    snprintf(m->provenance_category, sizeof(m->provenance_category), "%s",
             pcat ? pcat : "user_stated");
+   if (aimee_pg_column_count(stmt) > 13)
+   {
+      const char *use_cases = aimee_pg_column_text(stmt, 13);
+      snprintf(m->use_cases, sizeof(m->use_cases), "%s", use_cases ? use_cases : "");
+   }
 }

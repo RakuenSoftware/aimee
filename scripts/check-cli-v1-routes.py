@@ -5,7 +5,7 @@ The thin client's method -> /v1 route map is generated from
 src/server/server_http_routes.inc by scripts/gen-cli-v1-routes.py and committed.
 This check regenerates it into a temp file and diffs, so a registry change that
 isn't reflected in the committed map fails `make lint` instead of silently
-leaving the client tunnelling those methods through /v1/rpc.
+leaving the client without its first-class /v1 route.
 """
 import subprocess
 import sys

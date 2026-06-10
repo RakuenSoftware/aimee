@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include "aimee.h"
 #include "cJSON.h"
 #include "db.h"
@@ -10,6 +11,7 @@
 #include "db2.h"
 #include "db2_test_shim.h"
 #include "memory_ontology.h"
+#include "../db2/bandit.h"
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
 
@@ -17,6 +19,20 @@ static void reset_db(void)
 {
    db2_test_shim_close();
    db2_test_shim_open();
+}
+
+static void write_test_config(const char *yaml)
+{
+   char dir[256], path[320];
+   snprintf(dir, sizeof(dir), "/tmp/aimee-memory-advanced-cfg-%d", (int)getpid());
+   mkdir(dir, 0755);
+   setenv("AIMEE_HOME", dir, 1);
+   setenv("AIMEE_NO_CACHE", "1", 1);
+   snprintf(path, sizeof(path), "%s/aimee.yaml", dir);
+   FILE *f = fopen(path, "w");
+   assert(f);
+   fputs(yaml, f);
+   fclose(f);
 }
 
 int main(void)
@@ -916,6 +932,12 @@ int main(void)
 
       struct cJSON *bundle = memory_briefing(0 /* default limit */);
       assert(bundle != NULL);
+      const char *style =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive((cJSON *)bundle, "briefing_style"));
+      assert(style && strcmp(style, "compact") == 0);
+      int limit = (int)cJSON_GetNumberValue(
+          cJSON_GetObjectItemCaseSensitive((cJSON *)bundle, "limit_tokens"));
+      assert(limit == 1024);
 
       struct cJSON *key_facts = cJSON_GetObjectItemCaseSensitive((cJSON *)bundle, "key_facts");
       struct cJSON *recent = cJSON_GetObjectItemCaseSensitive((cJSON *)bundle, "recent_activity");
@@ -998,6 +1020,17 @@ int main(void)
       assert(cJSON_GetArraySize((cJSON *)small_entities) == 0);
       assert(cJSON_GetArraySize((cJSON *)small_recent) == 0);
       cJSON_Delete((cJSON *)small);
+
+      assert(db2_bandit_promotion_set("briefing_style", "evidence_heavy", "compact") == 0);
+      struct cJSON *heavy = memory_briefing(0);
+      assert(heavy);
+      const char *heavy_style =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive((cJSON *)heavy, "briefing_style"));
+      int heavy_limit = (int)cJSON_GetNumberValue(
+          cJSON_GetObjectItemCaseSensitive((cJSON *)heavy, "limit_tokens"));
+      assert(heavy_style && strcmp(heavy_style, "evidence_heavy") == 0);
+      assert(heavy_limit == 3000);
+      cJSON_Delete((cJSON *)heavy);
    }
 
    /* --- memory_aggregate: entity-route coverage + truncated flag --- */
@@ -1057,6 +1090,45 @@ int main(void)
       int n2 = memory_aggregate(&hint, "What cities has Jon visited?", 2, rows, 16, &truncated2);
       assert(n2 == 2);
       assert(truncated2 == 1);
+   }
+
+   /* --- memory.answerability: default-off trace, gate abstain, curated exemption --- */
+   {
+      reset_db();
+
+      write_test_config("memory:\n  abstain:\n    enabled: false\n    gate: 0.99\n    "
+                        "chunk_min_confidence: 0.0\n");
+      memory_t m;
+      assert(memory_insert(TIER_L2, KIND_FACT, "mars:color", "mars color is red", 0.9, "s1", &m) ==
+             0);
+      memory_answer_result_t result;
+      assert(memory_ask_query("mars color", 5, &result) == 0);
+      assert(result.no_answer == 0);
+      assert(result.evidence.decision == MEMORY_ANSWER_DECISION_ANSWERABLE);
+      assert(result.evidence.ranked_count > 0);
+      assert(result.evidence.candidate_id_count > 0);
+
+      write_test_config("memory:\n  abstain:\n    enabled: true\n    gate: 0.99\n    "
+                        "chunk_min_confidence: 0.0\n");
+      memset(&result, 0, sizeof(result));
+      assert(memory_ask_query("mars color", 5, &result) == 0);
+      assert(result.no_answer == 1);
+      assert(result.answer[0] == '\0');
+      assert(result.citation_count == 0);
+      assert(result.evidence.decision == MEMORY_ANSWER_DECISION_ABSTAIN);
+      assert(result.evidence.reason == MEMORY_ANSWER_REASON_GROUNDING_LOW);
+      char *rendered = memory_answer_query("mars color", 5);
+      assert(rendered && strcmp(rendered, "No confident answer for \"mars color\"") == 0);
+      free(rendered);
+
+      assert(memory_insert(TIER_L4, KIND_FACT, "venus:color", "venus color is yellow", 0.9, "s1",
+                           &m) == 0);
+      memset(&result, 0, sizeof(result));
+      assert(memory_ask_query("venus color", 5, &result) == 0);
+      assert(result.no_answer == 0);
+      assert(result.evidence.decision == MEMORY_ANSWER_DECISION_EXEMPT);
+      assert(result.evidence.reason == MEMORY_ANSWER_REASON_CURATED_EXEMPT);
+      assert(result.evidence.exempt == 1);
    }
 
    /* --- memory_aggregate: keyword fallback when no entity seed --- */

@@ -10,6 +10,7 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
+#include "db2/artifacts.h"
 #include "db2_test_shim.h"
 #include "../kb/kb_curator_synthesize.h"
 
@@ -63,10 +64,50 @@ static void test_pick_seeded(void)
    printf("  synth_pick_topic selects an un-synthesised entity OK\n");
 }
 
+static int count_sql(sqlite3 *db, const char *sql)
+{
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db, sql, -1, &st, NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   int n = sqlite3_column_int(st, 0);
+   sqlite3_finalize(st);
+   return n;
+}
+
+static void test_restore_fragment_record(void)
+{
+   db2_test_shim_open();
+   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   assert(db != NULL);
+   seed(db, "INSERT INTO artifacts (id,kind,state,scope_kind,scope_id,payload) VALUES"
+            " ('base','summary','committed','doc','base-doc','{\"text\":\"base\"}')");
+
+   char out_id[64] = "";
+   assert(kb_curator_restore_fragment_record(42, "base",
+                                             "Restored title: [unknown]. Preserved number 17.",
+                                             0.82, "restore-test-v1", out_id, sizeof(out_id)) == 0);
+   assert(out_id[0] != '\0');
+   assert(count_sql(db, "SELECT COUNT(*) FROM artifacts WHERE id != 'base' AND kind='restoration'"
+                        " AND state='committed' AND payload LIKE '%unknown_sentinel_present%'"
+                        " AND payload LIKE '%synthesised%'") == 1);
+   assert(count_sql(db, "SELECT COUNT(*) FROM artifact_citations WHERE artifact_id != 'base'"
+                        " AND source_kind='doc' AND source_id='42'") == 1);
+   assert(count_sql(db, "SELECT COUNT(*) FROM artifact_links WHERE from_id != 'base'"
+                        " AND to_id='base' AND kind='restored_from'") == 1);
+   assert(count_sql(db, "SELECT COUNT(*) FROM artifact_links WHERE from_id='base'"
+                        " AND kind='restores'") == 1);
+   assert(count_sql(
+              db, "SELECT COUNT(*) FROM audit_events WHERE target_surface='corpus.restore'") == 1);
+
+   db2_test_shim_close();
+   printf("  restore_fragment_record writes provenance OK\n");
+}
+
 int main(void)
 {
    test_gated_empty();
    test_pick_seeded();
+   test_restore_fragment_record();
    printf("curator_synthesize: all tests passed\n");
    return 0;
 }

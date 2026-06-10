@@ -50,7 +50,7 @@ COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
 
 # Sidecar clients (the LLM/embedder access code the kb invokes via popen).
 COPY scripts/embed-remote.py scripts/llm-chat.py scripts/learning-synthesize.py \
-     scripts/curator-extract.py /opt/aimee/scripts/
+     scripts/curator-extract.py scripts/guardrails-semantic.py /opt/aimee/scripts/
 # Baked default config: selects the sidecar commands (endpoints come from env).
 # Kept OUTSIDE $AIMEE_HOME so a bind mount over /var/lib/aimee can't shadow it;
 # the entrypoint seeds it into $AIMEE_HOME/.config/aimee on first start.

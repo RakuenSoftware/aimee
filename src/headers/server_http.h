@@ -79,9 +79,10 @@ extern "C"
    int server_http_route_allowed(int is_tcp, const char *bearer, const char *method,
                                  const char *path, int remote_writes);
 
-   /* server_http_route_is_local_only: 1 iff the (method,path) route mutates
-    * state and is therefore reachable only over the local UDS (never the TCP
-    * listener, regardless of bearer caps). Pure — unit-testable. */
+   /* server_http_route_is_local_only: 1 iff the (method,path) route is a
+    * data-plane write. Historical name retained: at remote_writes=off these
+    * routes are local-UDS-only; remote_writes=data/full can expose them over TCP
+    * after the per-route capability check. Pure — unit-testable. */
    int server_http_route_is_local_only(const char *method, const char *path);
 
    /* Build a human-readable VS Code / OpenAI-compatible model-provider setup

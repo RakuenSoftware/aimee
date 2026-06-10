@@ -288,14 +288,42 @@ int config_save(const config_t *cfg)
       cJSON_AddStringToObject(root, "openai_model", cfg->openai_model);
    if (cfg->openai_key_cmd[0])
       cJSON_AddStringToObject(root, "openai_key_cmd", cfg->openai_key_cmd);
-   if (!cfg->learning_router_enabled || cfg->learning_proposal_ttl_days != 7 ||
-       cfg->learning_max_commits_per_week != 25)
    {
-      cJSON *learning = cJSON_AddObjectToObject(root, "learning");
-      cJSON *router = cJSON_AddObjectToObject(learning, "router");
-      cJSON_AddBoolToObject(router, "enabled", cfg->learning_router_enabled ? 1 : 0);
-      cJSON_AddNumberToObject(router, "ttl_days", cfg->learning_proposal_ttl_days);
-      cJSON_AddNumberToObject(router, "max_commits_per_week", cfg->learning_max_commits_per_week);
+      int router_any = !cfg->learning_router_enabled || cfg->learning_proposal_ttl_days != 7 ||
+                       cfg->learning_max_commits_per_week != 25;
+      /* citation_* default on, the 3 stateful heuristics default off — emit when
+       * any differs so an override (incl. turning the citation detector off)
+       * persists. */
+      int implicit_any =
+          !cfg->learning_implicit_citation_repair ||
+          !cfg->learning_implicit_citation_continuation || cfg->learning_implicit_repeat_question ||
+          cfg->learning_implicit_repeated_correction || cfg->learning_implicit_workflow_repetition;
+      if (router_any || implicit_any)
+      {
+         cJSON *learning = cJSON_AddObjectToObject(root, "learning");
+         if (router_any)
+         {
+            cJSON *router = cJSON_AddObjectToObject(learning, "router");
+            cJSON_AddBoolToObject(router, "enabled", cfg->learning_router_enabled ? 1 : 0);
+            cJSON_AddNumberToObject(router, "ttl_days", cfg->learning_proposal_ttl_days);
+            cJSON_AddNumberToObject(router, "max_commits_per_week",
+                                    cfg->learning_max_commits_per_week);
+         }
+         if (implicit_any)
+         {
+            cJSON *implicit = cJSON_AddObjectToObject(learning, "implicit");
+            cJSON_AddBoolToObject(implicit, "citation_repair",
+                                  cfg->learning_implicit_citation_repair ? 1 : 0);
+            cJSON_AddBoolToObject(implicit, "citation_continuation",
+                                  cfg->learning_implicit_citation_continuation ? 1 : 0);
+            cJSON_AddBoolToObject(implicit, "repeat_question",
+                                  cfg->learning_implicit_repeat_question ? 1 : 0);
+            cJSON_AddBoolToObject(implicit, "repeated_correction",
+                                  cfg->learning_implicit_repeated_correction ? 1 : 0);
+            cJSON_AddBoolToObject(implicit, "workflow_repetition",
+                                  cfg->learning_implicit_workflow_repetition ? 1 : 0);
+         }
+      }
    }
    if (cfg->embedding_command[0])
       cJSON_AddStringToObject(root, "embedding_command", cfg->embedding_command);
@@ -433,7 +461,7 @@ int config_save(const config_t *cfg)
        cfg->memory_pagerank_relations[0] ||
        (cfg->memory_citations_mode[0] && strcmp(cfg->memory_citations_mode, "off") != 0) ||
        cfg->memory_citations_reprompt_on_miss || cfg->memory_citations_strip_unverified ||
-       cfg->memory_profile_cards_enabled || cfg->memory_profile_cards_min_obs > 0 ||
+       !cfg->memory_profile_cards_enabled || cfg->memory_profile_cards_min_obs > 0 ||
        cfg->memory_profile_cards_stale_secs > 0 || cfg->memory_briefing_enabled ||
        cfg->memory_briefing_limit_tokens > 0 || cfg->memory_aggregation_enabled ||
        cfg->memory_aggregation_max_items > 0 || cfg->memory_prospective_enabled ||
@@ -442,9 +470,11 @@ int config_save(const config_t *cfg)
        cfg->memory_lifecycle_ttl_relative_days > 0 ||
        cfg->memory_lifecycle_ttl_open_ended_days > 0 || cfg->memory_recall_enabled ||
        cfg->memory_recall_limit_tokens_session > 0 || cfg->memory_recall_limit_tokens_turn > 0 ||
-       cfg->memory_directives_enabled || cfg->memory_directives_failure_threshold > 0 ||
+       !cfg->memory_directives_enabled || cfg->memory_directives_failure_threshold > 0 ||
        cfg->memory_directives_max_matches > 0 || cfg->memory_rewrite_enabled ||
-       cfg->memory_rewrite_command[0])
+       cfg->memory_rewrite_command[0] || !cfg->memory_improve_dedupe_enabled ||
+       cfg->memory_improve_summarise_enabled || cfg->memory_improve_min_cluster > 0 ||
+       cfg->memory_improve_max_confidence > 0.0)
    {
       cJSON *memory = cJSON_AddObjectToObject(root, "memory");
       if (cfg->disposition_count > 0 || cfg->disposition_global_count > 0 ||
@@ -542,7 +572,7 @@ int config_save(const config_t *cfg)
          cJSON_AddBoolToObject(citations_cfg, "strip_unverified",
                                cfg->memory_citations_strip_unverified ? 1 : 0);
       }
-      if (cfg->memory_profile_cards_enabled || cfg->memory_profile_cards_min_obs > 0 ||
+      if (!cfg->memory_profile_cards_enabled || cfg->memory_profile_cards_min_obs > 0 ||
           cfg->memory_profile_cards_stale_secs > 0)
       {
          cJSON *pc_cfg = cJSON_AddObjectToObject(memory, "profile_cards");
@@ -551,6 +581,19 @@ int config_save(const config_t *cfg)
             cJSON_AddNumberToObject(pc_cfg, "min_observations", cfg->memory_profile_cards_min_obs);
          if (cfg->memory_profile_cards_stale_secs > 0)
             cJSON_AddNumberToObject(pc_cfg, "stale_secs", cfg->memory_profile_cards_stale_secs);
+      }
+      if (!cfg->memory_improve_dedupe_enabled || cfg->memory_improve_summarise_enabled ||
+          cfg->memory_improve_min_cluster > 0 || cfg->memory_improve_max_confidence > 0.0)
+      {
+         cJSON *improve = cJSON_AddObjectToObject(memory, "improve");
+         cJSON_AddBoolToObject(improve, "dedupe_enabled",
+                               cfg->memory_improve_dedupe_enabled ? 1 : 0);
+         cJSON_AddBoolToObject(improve, "summarise_enabled",
+                               cfg->memory_improve_summarise_enabled ? 1 : 0);
+         if (cfg->memory_improve_min_cluster > 0)
+            cJSON_AddNumberToObject(improve, "min_cluster", cfg->memory_improve_min_cluster);
+         if (cfg->memory_improve_max_confidence > 0.0)
+            cJSON_AddNumberToObject(improve, "max_confidence", cfg->memory_improve_max_confidence);
       }
       if (cfg->memory_briefing_enabled || cfg->memory_briefing_limit_tokens > 0)
       {
@@ -600,7 +643,7 @@ int config_save(const config_t *cfg)
          if (cfg->memory_recall_limit_tokens_turn > 0)
             cJSON_AddNumberToObject(rc, "limit_tokens_turn", cfg->memory_recall_limit_tokens_turn);
       }
-      if (cfg->memory_directives_enabled || cfg->memory_directives_failure_threshold > 0 ||
+      if (!cfg->memory_directives_enabled || cfg->memory_directives_failure_threshold > 0 ||
           cfg->memory_directives_max_matches > 0)
       {
          cJSON *dc = cJSON_AddObjectToObject(memory, "directives");
@@ -655,6 +698,11 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "verify_cross_project", 1);
    if (cfg->ingress_preinject_enabled)
       cJSON_AddBoolToObject(root, "ingress_preinject_enabled", 1);
+   if (cfg->ingress_preinject_assembly_budget != 6144)
+      cJSON_AddNumberToObject(root, "ingress_preinject_assembly_budget",
+                              cfg->ingress_preinject_assembly_budget);
+   if (cfg->ingress_max_raw_scans != 0)
+      cJSON_AddNumberToObject(root, "ingress_max_raw_scans", cfg->ingress_max_raw_scans);
 
    /* Cross-verification */
    if (cfg->cross_verify || cfg->verify_cmd[0] || cfg->verify_role[0])

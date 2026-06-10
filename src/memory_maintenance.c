@@ -219,14 +219,17 @@ int memory_maintenance_run(const config_t *cfg, unsigned int modes, int force, i
          int rescored = memory_compute_effectiveness();
          if (rescored > 0)
             out->rescored = rescored;
-         int min_obs =
-             cfg && cfg->memory_profile_cards_min_obs > 0 ? cfg->memory_profile_cards_min_obs : 10;
-         int stale = cfg && cfg->memory_profile_cards_stale_secs > 0
-                         ? cfg->memory_profile_cards_stale_secs
-                         : 86400;
-         int refreshed = memory_profile_card_refresh(min_obs, stale);
-         if (refreshed > 0)
-            out->profile_cards_refreshed = refreshed;
+         if (cfg && cfg->memory_profile_cards_enabled)
+         {
+            int min_obs =
+                cfg->memory_profile_cards_min_obs > 0 ? cfg->memory_profile_cards_min_obs : 10;
+            int stale = cfg->memory_profile_cards_stale_secs > 0
+                            ? cfg->memory_profile_cards_stale_secs
+                            : 86400;
+            int refreshed = memory_profile_card_refresh(min_obs, stale);
+            if (refreshed > 0)
+               out->profile_cards_refreshed = refreshed;
+         }
          /* Curiosity scoring rides on replay — novelty and progress
           * need to stay fresh for routing to pick the right top-N. */
          int curiosity_rescored = db2_curiosity_rescore_all();
@@ -265,15 +268,21 @@ int memory_maintenance_run(const config_t *cfg, unsigned int modes, int force, i
    /* Compact: dedupe near-duplicate keys via the improve module. */
    if (modes & MEMORY_MAINTENANCE_MODE_COMPACT)
    {
-      int merged = memory_improve_dedupe(dry_run);
-      if (merged > 0)
-         out->merged = merged;
+      if (cfg && cfg->memory_improve_dedupe_enabled)
+      {
+         int merged = memory_improve_dedupe(dry_run);
+         if (merged > 0)
+            out->merged = merged;
+      }
    }
 
    /* Summarize: gated behind config flag; may call an LLM. */
    if (modes & MEMORY_MAINTENANCE_MODE_SUMMARIZE)
    {
-      int enabled = cfg && cfg->memory_maintenance_summarize_enabled;
+      /* Either the maintenance-summarize gate or the (formerly inert) improve
+       * summarise toggle enables the LLM-backed cluster summarisation. */
+      int enabled = cfg && (cfg->memory_maintenance_summarize_enabled ||
+                            cfg->memory_improve_summarise_enabled);
       if (enabled)
       {
          int min_cluster =

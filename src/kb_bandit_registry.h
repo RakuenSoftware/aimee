@@ -4,7 +4,7 @@
  * arm sets, and the reward function each uses.  Consumed by the live sampler
  * (kb_service_memory.c) and the intelligence export (kb_intel_payload.c), and
  * surfaced to operators via `aimee optimize`.  See
- * docs/proposals/pending/optimization-surface.md (P1).
+ * docs/proposals/done/optimization-surface.md.
  */
 #ifndef DEC_KB_BANDIT_REGISTRY_H
 #define DEC_KB_BANDIT_REGISTRY_H 1

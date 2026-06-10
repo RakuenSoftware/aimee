@@ -2,7 +2,7 @@
 
 - **State:** done
 - **Status refreshed:** 2026-06-09
-- **Split from:** `docs/proposals/pending/optimization-surface.md`
+- **Residuals completed in:** `docs/proposals/done/optimization-surface-residual.md`
 
 ## Shipped
 

@@ -250,10 +250,11 @@ Key properties:
   serializes heavyweight inference to bound resource use.
 - **Transport.** Clients reach the server over its `/v1` HTTP surface: the
   always-on `~/.config/aimee/aimee-http.sock` Unix socket, plus an optional
-  localhost TCP listener. Dispatch methods without a dedicated REST route are
-  reached via `POST /v1/rpc`; streaming chat uses `POST /v1/chat/stream`, whose
-  body is a sequence of newline-delimited aimee events terminated by a final
-  status object. (The legacy newline-delimited JSON-RPC socket was removed.)
+  localhost TCP listener. Dispatch methods use first-class `/v1` routes; the
+  generic `POST /v1/rpc` endpoint is retired. Streaming chat uses
+  `POST /v1/chat/stream`, whose body is a sequence of newline-delimited aimee
+  events terminated by a final status object. (The legacy newline-delimited
+  JSON-RPC socket was removed.)
 - **Authentication.** The local UDS is filesystem-permission gated and fully
   trusted: it reaches the entire dispatch surface, with no token. The optional
   TCP listener requires a configured bearer token and is capability-scoped.
@@ -377,7 +378,17 @@ verbose mode, network info, recent delegations, capabilities) by querying DB1
 and DB2-via-KB, and prints it to the tool's stdout. It also creates per-session
 worktrees and state. See "Context assembly" in [`src/README.md`](../src/README.md).
 
-### 9.3 A delegate task
+### 9.3 Remote thin-client execution
+
+When `aimee mcp-serve`, chat, or launch targets a remote `aimee-server`, the
+client registers its current directory as a detached workspace, starts a
+background `workspace serve` reverse channel, and routes file/exec operations
+back to the client over `/v1/runner/poll` and `/v1/runner/respond`. The client
+removes the detached workspace when the bridge exits or remote launch fails.
+Delegate routes are exposed over `/v1/delegate/*`, but TCP access requires an
+unscoped bearer and `aimee.api.remote_writes: full`.
+
+### 9.4 A delegate task
 
 ```mermaid
 sequenceDiagram

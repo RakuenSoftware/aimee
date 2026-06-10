@@ -289,9 +289,9 @@ void server_http_request_id(const char *provided, int pid, unsigned long seq, ch
 static uint32_t v1_route_caps_lookup(const char *method, const char *path);
 static int v1_route_dispatch(const char *method, const char *path, const char *body, int body_len,
                              char *resp, int resp_cap);
-/* 1 if the route mutates state and is therefore local-UDS-only (never reachable
- * over the TCP listener regardless of bearer caps), mirroring the /v1/rpc
- * bridge's write policy. */
+/* 1 if the route is a data-plane write. At the default remote_writes=off these
+ * routes are local-UDS-only; remote_writes=data/full can expose them over TCP
+ * after the per-route capability check. */
 static int v1_route_is_local_only(const char *method, const char *path);
 
 /* Capability bitmask a /v1 route requires (route_caps subset of conn_caps gates
@@ -302,8 +302,9 @@ uint32_t server_http_route_caps(const char *method, const char *path)
    return v1_route_caps_lookup(method, path);
 }
 
-/* Public accessor for the local-UDS-only classification (test + introspection).
- * See v1_route_is_local_only in server_http_routes.inc. */
+/* Public accessor for the data-write classification (test + introspection).
+ * Historical name retained for ABI compatibility; see
+ * v1_route_is_local_only in server_http_routes.inc. */
 int server_http_route_is_local_only(const char *method, const char *path)
 {
    return v1_route_is_local_only(method, path);
@@ -345,10 +346,10 @@ int server_http_route_allowed(int is_tcp, const char *bearer, const char *method
                               int remote_writes)
 {
    /* Over the TCP listener, a route that needs any capability beyond the read set
-    * (CAPS_READ_ONLY) is "privileged" and local-UDS-only unless the operator opts
-    * in via aimee.api.remote_writes, so a leaked/shared bearer cannot mutate or
-    * execute remotely at the default. Two tiers: data-plane writes (memory, work,
-    * rules, skill, ... — v1_route_is_local_only / g_v1_write_ops) need
+    * (CAPS_READ_ONLY) is "privileged" and denied unless the operator opts in via
+    * aimee.api.remote_writes, so a leaked/shared bearer cannot mutate or execute
+    * remotely at the default. Two tiers: data-plane writes (memory, work, rules,
+    * skill, ... — v1_route_is_local_only / g_v1_write_ops) need
     * remote_writes>=data; everything else privileged (delegate, cron, agent,
     * provider, api, worktree, session admin, ...) is exec/control and needs
     * remote_writes==full. The detached-workspace plane (runner + workspace
@@ -892,7 +893,7 @@ static int route_completion(server_http_completion_fn fn, const char *body, char
    return fn(body ? body : "", resp, cap);
 }
 
-/* ── Dispatch-bridge connection caps ──────────────────────────────────────
+/* ── Dispatch-backed route connection caps ────────────────────────────────
  * The first-class /v1 routes (rh_dispatch_op / rh_dispatch_op_async) run their
  * NDJSON method twin through server_dispatch() via loopback_rpc, carrying a fake
  * connection with the request's real capabilities so server_dispatch re-checks
@@ -917,7 +918,7 @@ static int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap
 {
    int sp[2];
    if (socketpair(AF_UNIX, SOCK_STREAM, 0, sp) != 0)
-      return err_json(resp, resp_cap, 500, "rpc bridge unavailable");
+      return err_json(resp, resp_cap, 500, "dispatch route unavailable");
    int fl = fcntl(sp[1], F_GETFL, 0);
    if (fl >= 0)
       fcntl(sp[1], F_SETFL, fl | O_NONBLOCK);

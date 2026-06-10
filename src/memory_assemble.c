@@ -802,11 +802,15 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
    /* 4b. Retrieval-failure detection: compute confidence and optionally
     * attempt a fallback before assembling context. */
    int low_confidence_flag = 0; /* 1 = inject LOW marker into context */
-   if (assemble_cfg.memory_failure_detection_enabled)
+   int answerability_withheld = 0;
+   if (assemble_cfg.memory_failure_detection_enabled || assemble_cfg.memory_abstain_enabled)
    {
-      double threshold = assemble_cfg.memory_failure_detection_threshold > 0.0
-                             ? assemble_cfg.memory_failure_detection_threshold
-                             : 0.35;
+      double threshold =
+          assemble_cfg.memory_abstain_enabled
+              ? (assemble_cfg.memory_abstain_gate > 0.0 ? assemble_cfg.memory_abstain_gate : 0.40)
+              : (assemble_cfg.memory_failure_detection_threshold > 0.0
+                     ? assemble_cfg.memory_failure_detection_threshold
+                     : 0.35);
 
       retrieval_confidence_t rconf;
       memory_retrieval_confidence((const char **)query_terms, term_count, candidates, cand_count,
@@ -866,14 +870,20 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
       if (rconf.below_threshold)
       {
          low_confidence_flag = 1;
+         answerability_withheld = assemble_cfg.memory_abstain_enabled ? 1 : 0;
          /* Record the failure; after threshold crossings, the
           * directives subsystem auto-creates a retrieval_failure
           * directive so future turns can ask the user to fill the
-          * gap instead of silently flailing. */
-         char norm_hint[256];
-         normalize_key(task_hint, norm_hint, sizeof(norm_hint));
-         if (norm_hint[0])
-            memory_directive_record_retrieval_failure(norm_hint, 0, "");
+          * gap instead of silently flailing. Gated by the directives
+          * toggle (default on); manually-created directives still
+          * surface when it is off. */
+         if (assemble_cfg.memory_directives_enabled)
+         {
+            char norm_hint[256];
+            normalize_key(task_hint, norm_hint, sizeof(norm_hint));
+            if (norm_hint[0])
+               memory_directive_record_retrieval_failure(norm_hint, 0, "");
+         }
       }
    }
 
@@ -884,6 +894,8 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
    context_candidate_t negative_candidates[MAX_CANDIDATES];
    for (int i = 0; i < cand_count; i++)
       negative_candidates[i] = candidates[i];
+   if (answerability_withheld)
+      cand_count = 0;
 
    /* 5. Classify intent and build retrieval plan for dynamic budgets */
    retrieval_plan_t rplan;
@@ -1039,7 +1051,15 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
    /* Retrieval-failure LOW marker.
     * Appended last so the LLM sees it near the end of context, immediately
     * before it begins composing its answer. */
-   if (low_confidence_flag)
+   if (answerability_withheld)
+   {
+      int written = snprintf(buf + pos, (size_t)(cap - pos),
+                             "\n## Memory Answerability\n"
+                             "No reliable memory evidence for this query.\n");
+      if (written > 0 && written < cap - pos)
+         pos += written;
+   }
+   else if (low_confidence_flag)
    {
       int written = snprintf(buf + pos, (size_t)(cap - pos),
                              "\n## Retrieval Confidence: LOW\n"

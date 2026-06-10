@@ -31,7 +31,9 @@ void kbc_memory_row_from_json(cJSON *f, memory_t *m)
    cJSON *tier_j = cJSON_GetObjectItemCaseSensitive(f, "tier");
    cJSON *kind_j = cJSON_GetObjectItemCaseSensitive(f, "kind");
    cJSON *key_j = cJSON_GetObjectItemCaseSensitive(f, "key");
+   cJSON *headline_j = cJSON_GetObjectItemCaseSensitive(f, "headline");
    cJSON *content_j = cJSON_GetObjectItemCaseSensitive(f, "content");
+   cJSON *use_cases_j = cJSON_GetObjectItemCaseSensitive(f, "use_cases");
    cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(f, "confidence");
    cJSON *uses_j = cJSON_GetObjectItemCaseSensitive(f, "use_count");
    cJSON *last_j = cJSON_GetObjectItemCaseSensitive(f, "last_used_at");
@@ -46,8 +48,12 @@ void kbc_memory_row_from_json(cJSON *f, memory_t *m)
       snprintf(m->kind, sizeof(m->kind), "%s", kind_j->valuestring);
    if (cJSON_IsString(key_j))
       snprintf(m->key, sizeof(m->key), "%s", key_j->valuestring);
+   if (cJSON_IsString(headline_j))
+      snprintf(m->headline, sizeof(m->headline), "%s", headline_j->valuestring);
    if (cJSON_IsString(content_j))
       snprintf(m->content, sizeof(m->content), "%s", content_j->valuestring);
+   if (cJSON_IsString(use_cases_j))
+      snprintf(m->use_cases, sizeof(m->use_cases), "%s", use_cases_j->valuestring);
    if (cJSON_IsNumber(conf_j))
       m->confidence = conf_j->valuedouble;
    if (cJSON_IsNumber(uses_j))
@@ -1395,14 +1401,18 @@ int kb_client_memory_ask(const char *query, const char *scope_type, const char *
    }
    cJSON *answer_j = cJSON_GetObjectItemCaseSensitive(resp, "answer");
    cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(resp, "confidence");
+   cJSON *mode_j = cJSON_GetObjectItemCaseSensitive(resp, "evidence_mode");
    cJSON *no_j = cJSON_GetObjectItemCaseSensitive(resp, "no_answer");
    cJSON *low_j = cJSON_GetObjectItemCaseSensitive(resp, "low_confidence");
    cJSON *retr_j = cJSON_GetObjectItemCaseSensitive(resp, "retrieval_count");
    cJSON *cits = cJSON_GetObjectItemCaseSensitive(resp, "citation_ids");
+   cJSON *trace = cJSON_GetObjectItemCaseSensitive(resp, "evidence_trace");
    if (cJSON_IsString(answer_j))
       snprintf(out->answer, sizeof(out->answer), "%s", answer_j->valuestring);
    if (cJSON_IsNumber(conf_j))
       out->confidence = conf_j->valuedouble;
+   if (cJSON_IsString(mode_j))
+      snprintf(out->evidence_mode, sizeof(out->evidence_mode), "%s", mode_j->valuestring);
    if (cJSON_IsBool(no_j))
       out->no_answer = cJSON_IsTrue(no_j) ? 1 : 0;
    if (cJSON_IsBool(low_j))
@@ -1419,6 +1429,85 @@ int kb_client_memory_ask(const char *query, const char *scope_type, const char *
          if (cJSON_IsNumber(id_j))
             out->citation_ids[out->citation_count++] = (int64_t)id_j->valuedouble;
       }
+   }
+   if (cJSON_IsObject(trace))
+   {
+      cJSON *decision = cJSON_GetObjectItemCaseSensitive(trace, "decision");
+      cJSON *reason = cJSON_GetObjectItemCaseSensitive(trace, "reason");
+      if (cJSON_IsString(decision))
+      {
+         if (strcmp(decision->valuestring, "answerable") == 0)
+            out->evidence.decision = MEMORY_ANSWER_DECISION_ANSWERABLE;
+         else if (strcmp(decision->valuestring, "exempt") == 0)
+            out->evidence.decision = MEMORY_ANSWER_DECISION_EXEMPT;
+         else
+            out->evidence.decision = MEMORY_ANSWER_DECISION_ABSTAIN;
+      }
+      if (cJSON_IsString(reason))
+      {
+         if (strcmp(reason->valuestring, "structural_empty") == 0)
+            out->evidence.reason = MEMORY_ANSWER_REASON_STRUCTURAL_EMPTY;
+         else if (strcmp(reason->valuestring, "structural_no_extract") == 0)
+            out->evidence.reason = MEMORY_ANSWER_REASON_STRUCTURAL_NO_EXTRACT;
+         else if (strcmp(reason->valuestring, "citation_required") == 0)
+            out->evidence.reason = MEMORY_ANSWER_REASON_CITATION_REQUIRED;
+         else if (strcmp(reason->valuestring, "grounding_low") == 0)
+            out->evidence.reason = MEMORY_ANSWER_REASON_GROUNDING_LOW;
+         else if (strcmp(reason->valuestring, "chunk_floor") == 0)
+            out->evidence.reason = MEMORY_ANSWER_REASON_CHUNK_FLOOR;
+         else if (strcmp(reason->valuestring, "curated_exempt") == 0)
+            out->evidence.reason = MEMORY_ANSWER_REASON_CURATED_EXEMPT;
+         else if (strcmp(reason->valuestring, "db_unavailable") == 0)
+            out->evidence.reason = MEMORY_ANSWER_REASON_DB_UNAVAILABLE;
+         else
+            out->evidence.reason = MEMORY_ANSWER_REASON_OK;
+      }
+      cJSON *ids = cJSON_GetObjectItemCaseSensitive(trace, "candidate_ids");
+      if (cJSON_IsArray(ids))
+      {
+         cJSON *id_j;
+         cJSON_ArrayForEach(id_j, ids)
+         {
+            if (out->evidence.candidate_id_count >= MEMORY_ANSWER_TRACE_MAX_IDS)
+               break;
+            if (cJSON_IsNumber(id_j))
+               out->evidence.candidate_ids[out->evidence.candidate_id_count++] =
+                   (int64_t)id_j->valuedouble;
+         }
+      }
+      cJSON *n = cJSON_GetObjectItemCaseSensitive(trace, "ranked_count");
+      if (cJSON_IsNumber(n))
+         out->evidence.ranked_count = (int)n->valuedouble;
+      n = cJSON_GetObjectItemCaseSensitive(trace, "anchor_id");
+      if (cJSON_IsNumber(n))
+         out->evidence.anchor_id = (int64_t)n->valuedouble;
+      n = cJSON_GetObjectItemCaseSensitive(trace, "anchor_rank");
+      if (cJSON_IsNumber(n))
+         out->evidence.anchor_rank = (int)n->valuedouble;
+      n = cJSON_GetObjectItemCaseSensitive(trace, "topk_grounding");
+      if (cJSON_IsNumber(n))
+         out->evidence.topk_grounding = n->valuedouble;
+      n = cJSON_GetObjectItemCaseSensitive(trace, "anchor_coverage");
+      if (cJSON_IsNumber(n))
+         out->evidence.anchor_coverage = n->valuedouble;
+      n = cJSON_GetObjectItemCaseSensitive(trace, "cluster_coverage");
+      if (cJSON_IsNumber(n))
+         out->evidence.cluster_coverage = n->valuedouble;
+      n = cJSON_GetObjectItemCaseSensitive(trace, "threshold");
+      if (cJSON_IsNumber(n))
+         out->evidence.threshold = n->valuedouble;
+      n = cJSON_GetObjectItemCaseSensitive(trace, "chunk_floor");
+      if (cJSON_IsNumber(n))
+         out->evidence.chunk_floor = n->valuedouble;
+      cJSON *b = cJSON_GetObjectItemCaseSensitive(trace, "structural");
+      if (cJSON_IsBool(b))
+         out->evidence.structural = cJSON_IsTrue(b) ? 1 : 0;
+      b = cJSON_GetObjectItemCaseSensitive(trace, "exempt");
+      if (cJSON_IsBool(b))
+         out->evidence.exempt = cJSON_IsTrue(b) ? 1 : 0;
+      b = cJSON_GetObjectItemCaseSensitive(trace, "trace_truncated");
+      if (cJSON_IsBool(b))
+         out->evidence.trace_truncated = cJSON_IsTrue(b) ? 1 : 0;
    }
    cJSON_Delete(resp);
    return 0;

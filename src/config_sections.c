@@ -329,6 +329,20 @@ void config_parse_memory_section(config_t *cfg, cJSON *root)
             cfg->memory_failure_detection_threshold = item->valuedouble;
       }
 
+      cJSON *abstain_cfg = cJSON_GetObjectItemCaseSensitive(memory_cfg, "abstain");
+      if (cJSON_IsObject(abstain_cfg))
+      {
+         item = cJSON_GetObjectItemCaseSensitive(abstain_cfg, "enabled");
+         if (cJSON_IsBool(item))
+            cfg->memory_abstain_enabled = cJSON_IsTrue(item) ? 1 : 0;
+         item = cJSON_GetObjectItemCaseSensitive(abstain_cfg, "gate");
+         if (cJSON_IsNumber(item) && item->valuedouble >= 0.0 && item->valuedouble <= 1.0)
+            cfg->memory_abstain_gate = item->valuedouble;
+         item = cJSON_GetObjectItemCaseSensitive(abstain_cfg, "chunk_min_confidence");
+         if (cJSON_IsNumber(item) && item->valuedouble >= 0.0 && item->valuedouble <= 1.0)
+            cfg->memory_chunk_min_confidence = item->valuedouble;
+      }
+
       cJSON *profile_cards_cfg = cJSON_GetObjectItemCaseSensitive(memory_cfg, "profile_cards");
       if (cJSON_IsObject(profile_cards_cfg))
       {

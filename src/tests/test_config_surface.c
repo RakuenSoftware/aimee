@@ -31,7 +31,8 @@ static const char *FIXTURE_A =
     "db1_path: ZZA_val\nguardrail_mode: ZZA_val\nprovider: ZZA_val\nopenai_endpoint: "
     "ZZA_val\nopenai_model: ZZA_val\nopenai_key_cmd: ZZA_val\nclaude_model: ZZA_val\ncodex_model: "
     "ZZA_val\nautonomous: true\nverify_enabled: true\nverify_cross_project: "
-    "true\nembedding_command: ZZA_val\nembedding_model: "
+    "true\ningress_preinject_enabled: true\ningress_preinject_assembly_budget: 1\n"
+    "ingress_max_raw_scans: 3\nembedding_command: ZZA_val\nembedding_model: "
     "ZZA_val\nembedding_endpoint: ZZA_val\nembedding_dim: 1\nmemory_rerank_mode: "
     "ZZA_val\nmemory_rewrite:\n  enabled: true\n  hyde: true\n  decompose: true\n  max_subqueries: "
     "1\nmemory_negation:\n  enabled: true\nmemory_rerank:\n  enabled: true\n  top_k: 1\n  mix: "
@@ -49,7 +50,9 @@ static const char *FIXTURE_A =
     "summarise_enabled: true\n    min_cluster: 1\n    max_confidence: 0.01\n  scenes:\n    "
     "enabled: true\n    min_cluster_size: 1\n    top_m: 1\n    global_escape_ratio: 0.01\n  "
     "episode_summaries:\n    enabled: true\n  derive_facts:\n    enabled: true\n  "
-    "failure_detection:\n    enabled: true\n    threshold: 0.01\n  profile_cards:\n    enabled: "
+    "failure_detection:\n    enabled: true\n    threshold: 0.01\n  abstain:\n    enabled: "
+    "true\n    gate: 0.01\n    chunk_min_confidence: 0.01\n  "
+    "profile_cards:\n    enabled: "
     "true\n    min_observations: 1\n    stale_secs: 1\n  context_budget:\n    enabled: true\n    "
     "tokens: 1\n  routing:\n    enabled: true\n  bm25_weight: 0.01\n  semantic_weight: 0.01\n  "
     "fetch_budget:\n    enabled: true\n    base: 32\n    shape_aware: true\ncross_verify:\n  "
@@ -77,7 +80,8 @@ static const char *FIXTURE_B =
     "db1_path: ZZB_val\nguardrail_mode: ZZB_val\nprovider: ZZB_val\nopenai_endpoint: "
     "ZZB_val\nopenai_model: ZZB_val\nopenai_key_cmd: ZZB_val\nclaude_model: ZZB_val\ncodex_model: "
     "ZZB_val\nautonomous: false\nverify_enabled: false\nverify_cross_project: "
-    "false\nembedding_command: ZZB_val\nembedding_model: "
+    "false\ningress_preinject_enabled: false\ningress_preinject_assembly_budget: 4096\n"
+    "ingress_max_raw_scans: 4096\nembedding_command: ZZB_val\nembedding_model: "
     "ZZB_val\nembedding_endpoint: ZZB_val\nembedding_dim: 4096\nmemory_rerank_mode: "
     "ZZB_val\nmemory_rewrite:\n  enabled: false\n  hyde: false\n  decompose: false\n  "
     "max_subqueries: 4096\nmemory_negation:\n  enabled: false\nmemory_rerank:\n  enabled: false\n  "
@@ -96,7 +100,9 @@ static const char *FIXTURE_B =
     "false\n    min_cluster: 4096\n    max_confidence: 0.99\n  scenes:\n    enabled: false\n    "
     "min_cluster_size: 4096\n    top_m: 4096\n    global_escape_ratio: 0.99\n  "
     "episode_summaries:\n    enabled: false\n  derive_facts:\n    enabled: false\n  "
-    "failure_detection:\n    enabled: false\n    threshold: 0.99\n  profile_cards:\n    enabled: "
+    "failure_detection:\n    enabled: false\n    threshold: 0.99\n  abstain:\n    enabled: "
+    "false\n    gate: 0.99\n    chunk_min_confidence: 0.99\n  "
+    "profile_cards:\n    enabled: "
     "false\n    min_observations: 4096\n    stale_secs: 4096\n  context_budget:\n    enabled: "
     "false\n    tokens: 4096\n  routing:\n    enabled: false\n  bm25_weight: 0.99\n  "
     "semantic_weight: 0.99\n  fetch_budget:\n    enabled: false\n    base: 512\n    shape_aware: "
@@ -151,6 +157,9 @@ int main(void)
    assert(cfgA.autonomous == 1 && cfgB.autonomous == 0);
    assert(cfgA.verify_enabled == 1 && cfgB.verify_enabled == 0);
    assert(cfgA.verify_cross_project == 1 && cfgB.verify_cross_project == 0);
+   assert(cfgA.ingress_preinject_enabled == 1 && cfgB.ingress_preinject_enabled == 0);
+   assert(cfgA.ingress_preinject_assembly_budget != cfgB.ingress_preinject_assembly_budget);
+   assert(cfgA.ingress_max_raw_scans != cfgB.ingress_max_raw_scans);
    assert(strcmp(cfgA.embedding_command, cfgB.embedding_command) != 0);
    assert(strcmp(cfgA.embedding_model, cfgB.embedding_model) != 0);
    assert(strcmp(cfgA.embedding_endpoint, cfgB.embedding_endpoint) != 0);
@@ -206,6 +215,9 @@ int main(void)
    assert(cfgA.memory_derive_facts_enabled == 1 && cfgB.memory_derive_facts_enabled == 0);
    assert(cfgA.memory_failure_detection_enabled == 1 && cfgB.memory_failure_detection_enabled == 0);
    assert(cfgA.memory_failure_detection_threshold != cfgB.memory_failure_detection_threshold);
+   assert(cfgA.memory_abstain_enabled == 1 && cfgB.memory_abstain_enabled == 0);
+   assert(cfgA.memory_abstain_gate != cfgB.memory_abstain_gate);
+   assert(cfgA.memory_chunk_min_confidence != cfgB.memory_chunk_min_confidence);
    assert(cfgA.memory_profile_cards_enabled == 1 && cfgB.memory_profile_cards_enabled == 0);
    assert(cfgA.memory_profile_cards_min_obs != cfgB.memory_profile_cards_min_obs);
    assert(cfgA.memory_profile_cards_stale_secs != cfgB.memory_profile_cards_stale_secs);

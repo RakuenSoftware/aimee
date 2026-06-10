@@ -7,7 +7,9 @@ typedef struct
    char tier[4];
    char kind[16];
    char key[512];
+   char headline[512];
    char content[2048];
+   char use_cases[1024];
    double confidence;
    int use_count;
    char last_used_at[32];
@@ -16,6 +18,8 @@ typedef struct
    char source_session[128];
    double salience;
    char provenance_category[32];
+   double retrieval_score; /* deterministic hybrid score captured before CE reorder */
+   int hybrid_rank;        /* 1-based deterministic hybrid rank, or 0 when unknown */
 } memory_t;
 
 /* Narrow ranking input: only fields needed to compute retrieval order.
@@ -28,6 +32,7 @@ typedef struct
    char kind[16];
    char key[512];
    char content[2048];
+   char use_cases[1024];
 } memory_ranker_input_t;
 
 typedef struct
@@ -104,6 +109,45 @@ typedef struct
 } memory_diagnostic_t;
 
 #define MEMORY_ANSWER_MAX_CITATIONS 4
+#define MEMORY_ANSWER_TRACE_MAX_IDS 16
+
+typedef enum
+{
+   MEMORY_ANSWER_DECISION_ANSWERABLE = 0,
+   MEMORY_ANSWER_DECISION_ABSTAIN,
+   MEMORY_ANSWER_DECISION_EXEMPT
+} memory_answer_decision_t;
+
+typedef enum
+{
+   MEMORY_ANSWER_REASON_OK = 0,
+   MEMORY_ANSWER_REASON_STRUCTURAL_EMPTY,
+   MEMORY_ANSWER_REASON_STRUCTURAL_NO_EXTRACT,
+   MEMORY_ANSWER_REASON_CITATION_REQUIRED,
+   MEMORY_ANSWER_REASON_GROUNDING_LOW,
+   MEMORY_ANSWER_REASON_CHUNK_FLOOR,
+   MEMORY_ANSWER_REASON_CURATED_EXEMPT,
+   MEMORY_ANSWER_REASON_DB_UNAVAILABLE
+} memory_answer_reason_t;
+
+typedef struct
+{
+   memory_answer_decision_t decision;
+   memory_answer_reason_t reason;
+   int64_t candidate_ids[MEMORY_ANSWER_TRACE_MAX_IDS];
+   int candidate_id_count;
+   int trace_truncated;
+   int ranked_count;
+   int64_t anchor_id;
+   int anchor_rank;
+   double topk_grounding;
+   double anchor_coverage;
+   double cluster_coverage;
+   double threshold;
+   double chunk_floor;
+   int structural;
+   int exempt;
+} memory_answer_evidence_t;
 
 typedef struct
 {
@@ -111,11 +155,16 @@ typedef struct
    double confidence;
    int no_answer;
    int low_confidence;
+   char evidence_mode[16];
    int retrieval_count;
    int citation_count;
    int64_t citation_ids[MEMORY_ANSWER_MAX_CITATIONS];
+   memory_answer_evidence_t evidence;
    char error[256];
 } memory_answer_result_t;
+
+const char *memory_answer_evidence_decision_str(const memory_answer_evidence_t *trace);
+const char *memory_answer_evidence_reason_str(const memory_answer_evidence_t *trace);
 
 typedef enum
 {
@@ -301,6 +350,9 @@ int memory_approve_l4_promotion(int64_t memory_id, const char *approver, const c
 /* --- Tiered Memory --- */
 int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
                   double confidence, const char *session_id, memory_t *out);
+int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
+                     const char *use_cases, double confidence, const char *session_id,
+                     memory_t *out);
 int memory_get(int64_t id, memory_t *out);
 int memory_touch(int64_t id);
 int memory_update_content(int64_t id, const char *content);

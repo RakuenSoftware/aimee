@@ -68,11 +68,14 @@ jobs:
         run: |
           git fetch origin ${{ github.base_ref }}
           git worktree add /tmp/smoke-base-wt origin/${{ github.base_ref }}
-          cd /tmp/smoke-base-wt/src && make -j$(nproc) all server
-          cd "$GITHUB_WORKSPACE"
-          export AIMEE_BENCH_ROOT=/tmp/smoke-base-wt
-          export AIMEE_BENCH_CLIENT=/tmp/smoke-base-wt/aimee
-          ./benchmarks/smoke.sh
+          if (cd /tmp/smoke-base-wt/src && make -j$(nproc) all server); then
+            export AIMEE_BENCH_ROOT=/tmp/smoke-base-wt
+            export AIMEE_BENCH_CLIENT=/tmp/smoke-base-wt/aimee
+            ./benchmarks/smoke.sh
+          else
+            echo "::warning::Base branch smoke binary failed to build; skipping smoke regression comparison."
+            mkdir -p /tmp/bench-results/base
+          fi
           git worktree remove /tmp/smoke-base-wt --force
 
       - name: Compare smoke accuracy (regression gate)

@@ -23,9 +23,10 @@
 /* Op class for a tool call. */
 typedef enum
 {
-   ATTN_OP_READ = 0, /* read / non-destructive — accrue attention only */
-   ATTN_OP_SOFT = 1, /* edit/write/overwrite/rm (non-recursive) */
-   ATTN_OP_HARD = 2  /* rm -rf, truncate, shred, dd, mkfs, `: > f` — blockable */
+   ATTN_OP_READ = 0,    /* read / non-destructive — accrue attention only */
+   ATTN_OP_SOFT = 1,    /* edit/write/overwrite/rm (non-recursive) */
+   ATTN_OP_HARD = 2,    /* rm -rf, truncate, shred, dd, mkfs, `: > f` — blockable */
+   ATTN_OP_RAW_SCAN = 3 /* recursive raw grep/read; nudge toward Aimee tools */
 } attn_op_t;
 
 /* One recorded action against a path. */
@@ -48,13 +49,18 @@ double attn_score(const attn_record_t *recs, int n, const char *path, long now_t
  * be NULL for non-Bash tools). Pure. */
 attn_op_t attn_classify(const char *tool_name, const char *bash_cmd);
 
+/* True when the tool call is a raw recursive exploration attempt that should use
+ * Aimee's indexed tools first. Pure. */
+int attn_is_raw_scan(const char *tool_name, const char *bash_cmd);
+
 /* The attention weight to record for a tool call of the given class. Pure. */
 int attn_weight_for(attn_op_t op);
 
 /* `aimee attention-guard` PreToolUse-hook entry. Reads the host hook JSON from
  * stdin, updates the per-session attention log, and returns the hook exit code
- * (2 = block a hard-destructive op on a high-attention file; 0 = allow). Never
- * blocks on read/soft ops. */
+ * (2 = block a hard-destructive op on a high-attention file, or block a raw
+ * recursive scan when ingress_max_raw_scans is exhausted; 0 = allow). Never
+ * blocks on read/soft ops. Set AIMEE_GUARD=0 to bypass. */
 int handle_attention_guard(void);
 
 #endif /* DEC_CLI_ATTENTION_GUARD_H */

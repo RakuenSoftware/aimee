@@ -14,7 +14,7 @@ directory listing:
 
 - [`proposals/accepted/`](proposals/accepted/): locked but not yet
   implemented
-- [`proposals/done/`](proposals/done/): shipped (311 proposals)
+- [`proposals/done/`](proposals/done/): shipped (16 proposals)
 - [`proposals/rejected/`](proposals/rejected/): considered and
   declined
 - [`proposals/deferred/`](proposals/deferred/): parked for later
@@ -279,12 +279,13 @@ Capability / coordination / research (P3):
   `POST /v1/delegate/aggregate` entry point and per-task agent routing (plus the
   temperature/`srand`/clone fixes). The original done-proposal file is absent from
   this tree; the analysis lives in the Agent Roundtable proposal below._
-- [Agent Roundtable — Round-Robin Collaborative Drafting and Review](proposals/pending/agent-roundtable-collaborative-drafting.md):
+- [Agent Roundtable — Round-Robin Collaborative Drafting and Review](proposals/done/agent-roundtable-collaborative-drafting.md):
   first makes the shipped-but-dead ensemble actually work — wires an entry point
   (no shipped binary calls it today) and fixes the unrouted-references bug (every
   "participant" is the same default agent) — then generalizes it into a bounded
   multi-round roundtable: real participant routing, draft/review modes,
-  deterministic convergence, keep-best, preflight cost limits. **Draft / Review / Reason. New.**
+  deterministic convergence, keep-best, preflight cost limits.
+  **Draft / Review / Reason. Done.**
 - [Agent-Directed PR Review](proposals/done/agent-directed-pr-review.md):
   lets an agent call in the roundtable's review mode against a code change and
   direct it with a brief (focus areas, fixes made, invariants, questions), with
@@ -361,7 +362,7 @@ two are defense in depth.
   Phase 0/1 shipped, sidecar mechanism, shadow dry_run mode, DB1 `guardrail_events` table, score-band policy mapping, `aimee guardrails review` CLI, and `scripts/guardrails-semantic.py` reference sidecar. Phases 2+ require dogfood.
 ## Done
 
-The [`proposals/done/`](proposals/done/) directory holds 310 shipped
+The [`proposals/done/`](proposals/done/) directory holds 16 shipped
 proposals. Recent highlights by theme:
 
 - **Architecture / platform contracts.** Architecture Charter (umbrella
@@ -385,7 +386,10 @@ proposals. Recent highlights by theme:
   resolution), two-lane retrieval with summary and atomic-fact lanes,
   graph PageRank (context pruning + eval + LongMemEval
   lift report), information-theoretic salience, memory surprise
-  scoring.
+  scoring, recall economy progressive disclosure (bounded ingress
+  envelopes, memory previews with `memory:<id>` pull-handles,
+  shadow-mode retrieval shortcuts, and additive use-case intent
+  search).
 - **Knowledge base.** KB vector collection and retrieval (originally
   shipped against Qdrant; folded into pgvector inside DB2 in #1575),
   vector benchmark rollout, vector index sync and cutover, vector

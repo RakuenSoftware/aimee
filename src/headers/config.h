@@ -279,6 +279,8 @@ typedef struct config
     * system prompt so the external agent stops re-exploring the repo. Default
     * off; a per-request `x-aimee-preinject: 0` header also disables it. */
    int ingress_preinject_enabled;
+   int ingress_preinject_assembly_budget;
+   int ingress_max_raw_scans;
    int memory_pagerank_enabled;
    int memory_pagerank_iterations;
    double memory_pagerank_weight;
@@ -508,6 +510,14 @@ typedef struct config
     *   Queries scoring below this value trigger the fallback and LOW marker. */
    int memory_failure_detection_enabled;
    double memory_failure_detection_threshold;
+
+   /* Retrieval answerability gate.
+    * memory_abstain_enabled: 0 = disabled (default), 1 = refuse weak evidence.
+    * memory_abstain_gate: effective default 0.40 at use site when enabled.
+    * memory_chunk_min_confidence: 0 = disabled; otherwise candidate floor [0,1]. */
+   int memory_abstain_enabled;
+   double memory_abstain_gate;
+   double memory_chunk_min_confidence;
 
    /* Weight profile inline overrides: applied on top of the file-based profile.
     * memory_bm25_weight: lexical (BM25-style) score weight (0 = use profile/default).
@@ -978,8 +988,10 @@ typedef struct config
     *   for exploration (default 0.05 = 5%).
     * bandit_ipw_weight_cap: cap on IPW importance weights to control variance
     *   (default 10.0).
-    * bandit_live_decision_enabled: 0 = off (default), 1 = wire kb_bandit_sample()
-    *   into KB hybrid retrieval fusion-mode selection.
+    * bandit_live_decision_enabled: 0 = off (default), 1 = allow live
+    *   kb_bandit_sample() calls from decision points with a closed reward loop.
+    *   Static points remain promotion/replay driven until their automatic reward
+    *   is validated.
     * bandit_exploration_window_seconds: rolling window the budget Gate enforces
     *   (default 604800 = 7 days). */
    char bandit_optimize_command[512];

@@ -569,6 +569,24 @@ $(TESTPREFIX)/unit-test-config: $(OBJDIR)/tests/test_config.o $(TEST_CORE_OBJS)
 $(TESTPREFIX)/unit-test-config-surface: $(OBJDIR)/tests/test_config_surface.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+# Learning detector replay (citation heuristics). Runs the real
+# dogfood_classify_next_turn() over implicit-signal fixtures and emits a
+# predictions jsonl for benchmarks/learning/learning_replay.py — binds the
+# learning-router rollout metric to the real build instead of a Python re-impl.
+$(TESTPREFIX)/learning-implicit-replay: $(OBJDIR)/tests/learning_implicit_replay.o \
+		$(OBJDIR)/dogfood.o $(OBJDIR)/cJSON.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/dstr.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# One-command reproduce of the citation-detector grade (PASS/FAIL via exit code).
+.PHONY: learning-citation-eval
+learning-citation-eval: $(TESTPREFIX)/learning-implicit-replay
+	$(TESTPREFIX)/learning-implicit-replay ../benchmarks/learning/implicit-signal/labelled.jsonl \
+		> $(OBJDIR)/learning_citation_preds.jsonl
+	python3 ../benchmarks/learning/learning_replay.py \
+		../benchmarks/learning/implicit-signal/labelled.jsonl \
+		--heuristics citation_then_repair,citation_then_continuation \
+		--predictions $(OBJDIR)/learning_citation_preds.jsonl
+
 $(TESTPREFIX)/unit-test-feedback: $(OBJDIR)/tests/test_feedback.o $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

@@ -28,7 +28,20 @@ static cJSON *kbs_memory_row_to_json(const memory_t *m)
    cJSON_AddStringToObject(obj, "tier", m->tier);
    cJSON_AddStringToObject(obj, "kind", m->kind);
    cJSON_AddStringToObject(obj, "key", m->key);
+   db2_memory_summary_row_t summaries[4];
+   int summary_n = db2_memory_summaries_list(m->id, 4, summaries, 4);
+   const char *headline = "";
+   for (int i = 0; i < summary_n; i++)
+      if (strcmp(summaries[i].scope, "headline") == 0 && summaries[i].summary[0])
+      {
+         headline = summaries[i].summary;
+         break;
+      }
+   if (!headline[0] && summary_n > 0)
+      headline = summaries[0].summary;
+   cJSON_AddStringToObject(obj, "headline", headline);
    cJSON_AddStringToObject(obj, "content", m->content);
+   cJSON_AddStringToObject(obj, "use_cases", m->use_cases);
    cJSON_AddNumberToObject(obj, "confidence", m->confidence);
    cJSON_AddNumberToObject(obj, "use_count", m->use_count);
    cJSON_AddStringToObject(obj, "last_used_at", m->last_used_at);
@@ -1147,13 +1160,22 @@ cJSON *db2_kb_service_memory_insert_json(const char *tier, const char *kind, con
                                          const char *content, double confidence,
                                          const char *session_id)
 {
+   return db2_kb_service_memory_insert_ex_json(tier, kind, key, content, "", confidence,
+                                               session_id);
+}
+
+cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, const char *key,
+                                            const char *content, const char *use_cases,
+                                            double confidence, const char *session_id)
+{
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
 
    memory_t out;
-   int rc = memory_insert(tier ? tier : "", kind ? kind : "", key ? key : "",
-                          content ? content : "", confidence, session_id ? session_id : "", &out);
+   int rc =
+       memory_insert_ex(tier ? tier : "", kind ? kind : "", key ? key : "", content ? content : "",
+                        use_cases ? use_cases : "", confidence, session_id ? session_id : "", &out);
    if (rc != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
@@ -1861,12 +1883,34 @@ cJSON *db2_kb_service_memory_ask_json(const char *query, const char *scope_type,
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "answer", result.answer);
    cJSON_AddNumberToObject(resp, "confidence", result.confidence);
+   cJSON_AddStringToObject(resp, "evidence_mode", result.evidence_mode);
    cJSON_AddBoolToObject(resp, "no_answer", result.no_answer);
    cJSON_AddBoolToObject(resp, "low_confidence", result.low_confidence);
    cJSON_AddNumberToObject(resp, "retrieval_count", result.retrieval_count);
    cJSON *citations = cJSON_AddArrayToObject(resp, "citation_ids");
    for (int i = 0; i < result.citation_count; i++)
       cJSON_AddItemToArray(citations, cJSON_CreateNumber((double)result.citation_ids[i]));
+   cJSON *trace = cJSON_AddObjectToObject(resp, "evidence_trace");
+   if (trace)
+   {
+      cJSON_AddStringToObject(trace, "decision",
+                              memory_answer_evidence_decision_str(&result.evidence));
+      cJSON_AddStringToObject(trace, "reason", memory_answer_evidence_reason_str(&result.evidence));
+      cJSON *ids = cJSON_AddArrayToObject(trace, "candidate_ids");
+      for (int i = 0; ids && i < result.evidence.candidate_id_count; i++)
+         cJSON_AddItemToArray(ids, cJSON_CreateNumber((double)result.evidence.candidate_ids[i]));
+      cJSON_AddNumberToObject(trace, "ranked_count", result.evidence.ranked_count);
+      cJSON_AddNumberToObject(trace, "anchor_id", (double)result.evidence.anchor_id);
+      cJSON_AddNumberToObject(trace, "anchor_rank", result.evidence.anchor_rank);
+      cJSON_AddNumberToObject(trace, "topk_grounding", result.evidence.topk_grounding);
+      cJSON_AddNumberToObject(trace, "anchor_coverage", result.evidence.anchor_coverage);
+      cJSON_AddNumberToObject(trace, "cluster_coverage", result.evidence.cluster_coverage);
+      cJSON_AddNumberToObject(trace, "threshold", result.evidence.threshold);
+      cJSON_AddNumberToObject(trace, "chunk_floor", result.evidence.chunk_floor);
+      cJSON_AddBoolToObject(trace, "structural", result.evidence.structural);
+      cJSON_AddBoolToObject(trace, "exempt", result.evidence.exempt);
+      cJSON_AddBoolToObject(trace, "trace_truncated", result.evidence.trace_truncated);
+   }
    return resp;
 }
 

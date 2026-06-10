@@ -1044,6 +1044,8 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
    if (!resp)
    {
       fprintf(stderr, "aimee: cannot launch session; server request failed\n");
+      if (remote)
+         cli_workspace_reverse_channel_stop();
       return 1;
    }
 
@@ -1054,6 +1056,8 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
       fprintf(stderr, "aimee: launch failed: %s\n",
               cJSON_IsString(jmsg) ? jmsg->valuestring : "server returned error");
       cJSON_Delete(resp);
+      if (remote)
+         cli_workspace_reverse_channel_stop();
       return 1;
    }
 
@@ -1078,6 +1082,8 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
          free(s);
       }
       cJSON_Delete(resp);
+      if (remote)
+         cli_workspace_reverse_channel_stop();
       return 0;
    }
 

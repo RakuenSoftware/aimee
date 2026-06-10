@@ -21,16 +21,48 @@ MAX_CASES="${AIMEE_BENCH_MAX_CASES:-0}"
 GIT_SHA=$(git -C "${ROOT_DIR}" rev-parse --short HEAD)
 TARGET="aimee"
 BENCH="locomo,longmemeval_s"
+CONFIG_VARIANT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --target) TARGET="${2:-}"; shift 2 ;;
     --bench)  BENCH="${2:-}";  shift 2 ;;
+    # Tier-B rollout A/B knob: set one config flag for the duration of this run,
+    # then restore it. Run twice (KEY=off, KEY=on) to isolate a single flag.
+    --config-variant) CONFIG_VARIANT="${2:-}"; shift 2 ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
 
 mkdir -p "${RESULTS_DIR}"
+
+# --config-variant KEY=VALUE: flip one flag for this run via the aimee CLI,
+# capturing the prior value and restoring it on exit (the flag-rollout-readiness
+# A/B mechanism — see docs/validation/flag-rollout-readiness.md). The bench run
+# itself still needs a live aimee-server + corpora; this only sets the flag.
+if [[ -n "${CONFIG_VARIANT}" ]]; then
+  if [[ "${CONFIG_VARIANT}" != *=* ]]; then
+    echo "--config-variant expects KEY=VALUE (got '${CONFIG_VARIANT}')" >&2
+    exit 1
+  fi
+  AIMEE_BIN="${AIMEE_BIN:-aimee}"
+  CV_KEY="${CONFIG_VARIANT%%=*}"
+  CV_VAL="${CONFIG_VARIANT#*=}"
+  if [[ -z "${CV_KEY}" ]]; then
+    echo "--config-variant KEY must be non-empty" >&2
+    exit 1
+  fi
+  CV_PRIOR="$("${AIMEE_BIN}" config get "${CV_KEY}" 2>/dev/null | tail -1 || true)"
+  echo "[config-variant] ${CV_KEY}: ${CV_PRIOR:-<unset>} -> ${CV_VAL}" >&2
+  "${AIMEE_BIN}" config set "${CV_KEY}" "${CV_VAL}"
+  restore_config_variant() {
+    if [[ -n "${CV_PRIOR}" ]]; then
+      "${AIMEE_BIN}" config set "${CV_KEY}" "${CV_PRIOR}" >/dev/null 2>&1 || true
+    fi
+    echo "[config-variant] restored ${CV_KEY} -> ${CV_PRIOR:-<unset>}" >&2
+  }
+  trap restore_config_variant EXIT
+fi
 
 IFS=',' read -r -a BENCH_LIST <<< "${BENCH}"
 

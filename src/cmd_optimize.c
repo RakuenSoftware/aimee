@@ -6,7 +6,7 @@
  * replay-record dispatches `optimize.replay_record`; run/compare dispatch the
  * `memory.benchmark` suite (the offline-suite adapter). All via
  * cli_v1_dispatch_local to first-class /v1 routes — no kb_client in the thin
- * client. See docs/proposals/pending/optimization-surface.md (P1/P2). */
+ * client. See docs/proposals/done/optimization-surface.md. */
 #include "cJSON.h"
 #include "cli_client.h"
 #include <math.h>

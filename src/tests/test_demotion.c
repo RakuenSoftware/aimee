@@ -188,7 +188,9 @@ static void test_config_defaults(void)
    memset(&cfg, 0, sizeof(cfg));
    config_apply_demotion_settings(&cfg, NULL);
 
-   assert(cfg.demotion_enabled == 0);
+   /* Default flipped to 1 (shadow): scores/profiles are computed but no row is
+    * demoted until 2 (live). See config_apply_demotion_settings rationale. */
+   assert(cfg.demotion_enabled == 1);
    assert(cfg.demotion_window == 64);
    assert(fabs(cfg.demotion_half_life_days - 30.0) < 1e-9);
    assert(cfg.demotion_n_min == 5);

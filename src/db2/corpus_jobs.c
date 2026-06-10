@@ -263,6 +263,50 @@ int db2_corpus_job_advance(int64_t doc_id, const char *outcome, const char *deta
    return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
 }
 
+int db2_corpus_job_mark_restoration_candidate(int64_t doc_id, const char *content_hash,
+                                              const char *signals_json)
+{
+   void *conn = db2_conn();
+   if (!conn || doc_id <= 0)
+      return -1;
+
+   db2_corpus_job_t existing;
+   const char *from_stage = "";
+   if (db2_corpus_job_get(doc_id, &existing) == 0)
+      from_stage = existing.stage;
+
+   char detail[512];
+   snprintf(detail, sizeof(detail), "{\"restoration_candidate\":true,\"signals\":%s}",
+            signals_json && signals_json[0] ? signals_json : "[]");
+   if (corpus_event_insert(doc_id, from_stage, "restore", "restoration_candidate", detail) != 0)
+      return -1;
+
+   char err[CJ_ERRBUF] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "INSERT INTO corpus_processing_jobs"
+                        " (doc_id, content_hash, stage, stage_status, attempts, last_error,"
+                        "  updated_at)"
+                        " VALUES (?1,?2,'restore','pending',0,'',?3)"
+                        " ON CONFLICT (doc_id) DO UPDATE SET"
+                        " content_hash=CASE WHEN ?2 <> '' THEN ?2 ELSE corpus_processing_jobs."
+                        "content_hash END,"
+                        " stage='restore', stage_status='pending', attempts=0, last_error='',"
+                        " updated_at=?3",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
+
+   char ts[32];
+   now_utc(ts, sizeof(ts));
+   aimee_pg_bind_int64(st, "?1", doc_id);
+   aimee_pg_bind_text(st, "?2", content_hash ? content_hash : "");
+   aimee_pg_bind_text(st, "?3", ts);
+   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
+}
+
 int db2_corpus_job_fail(int64_t doc_id, const char *error)
 {
    void *conn = db2_conn();
@@ -373,6 +417,13 @@ int db2_corpus_pipeline_stage_counts(db2_corpus_pipeline_stage_count_t *out, int
 static int corpus_run_stage_handler(int64_t doc_id, const char *next_stage, char *detail,
                                     size_t detail_len)
 {
+   if (strcmp(next_stage, "restore") == 0)
+   {
+      (void)doc_id;
+      snprintf(detail, detail_len, "restoration queued");
+      return 1;
+   }
+
    if (strcmp(next_stage, "classified") == 0)
    {
       int rc = db2_corpus_classify_doc(doc_id, "pipeline");

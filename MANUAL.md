@@ -762,6 +762,10 @@ See [§20](#20-triggers-cron-and-automation).
   return an `async-only` response that points to the CLI/delegate benchmark path.
 - `optimize compare --baseline <arm> --candidate <arm>`: compare benchmark arm
   metrics.
+- Registered decision points include `briefing_style` (`compact`,
+  `evidence_heavy`) and `guardrail_strictness` (`balanced`, `strict`). These
+  residual UX/safety points are promotion/replay driven; online exploration
+  remains default-off unless `intelligence.bandit.live_decision_enabled` is set.
 
 ### 7.19 Review surfaces
 
@@ -854,6 +858,14 @@ reranking. Conversation-window search combines term match, lexical recall, and a
 (raw 1.0 / summary 0.7 / fact 0.4). Internal diagnostic and answer-generation
 helpers exist in the KB memory pipeline, but they are not current thin-client
 commands unless they appear in `aimee help memory`.
+
+`memory.ask` also carries a default-off answerability gate. When
+`memory.abstain.enabled` is set, weak retrieved evidence is refused with
+`no_answer=true`, empty rendered citations, and an `evidence_trace` containing
+candidate ids, grounding scores, thresholds, and the abstention reason. The
+context path uses the same rollout switch to withhold weak memory context and
+emit `## Memory Answerability` instead of passing weak evidence to the model.
+L4/L5 curated anchors bypass the gate.
 
 ### 8.5 Everyday usage
 
