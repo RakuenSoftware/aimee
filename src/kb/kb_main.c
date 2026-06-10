@@ -425,7 +425,7 @@ static int kb_run_fusion_probe(const char *query)
     * block) unless the pgvector memory collection exists, so ensure it. */
    if (pgvec_memory_vector_collection_exists() <= 0)
    {
-      int dim = cfg.embedding_dim > 0 ? cfg.embedding_dim : 384;
+      int dim = cfg.embedding_dim > 0 ? cfg.embedding_dim : 1024;
       (void)pgvec_memory_vector_collection_recreate(dim);
    }
 

@@ -418,6 +418,17 @@ static void config_set_defaults(config_t *cfg)
    cfg->memory_fetch_budget_base = 128;
    cfg->memory_fetch_budget_shape_aware = 1;
    cfg->kb_search_max_results = 50;
+   /* Embedding dimension of the default embedder (pplx-embed-v1-0.6b = 1024).
+    * Must match the schema vector(N) columns and the embedder model. */
+   cfg->embedding_dim = 1024;
+   /* The cross-encoder rerank stage (gte-reranker-modernbert-base, served by the
+    * embedder service /rerank, client scripts/rerank-remote.py) is wired and
+    * shipped but stays default-off — it is an unvalidated quality/latency
+    * tradeoff (per-query top-K cross-encoder pass), so it follows the
+    * rollout-readiness discipline (validate, then flip). Enable it with:
+    *   aimee config set memory_rerank_enabled 1
+    *   aimee config set memory_rerank_command "python3 /opt/aimee/scripts/rerank-remote.py"
+    * It degrades safely to hybrid ordering if the reranker is absent or errors. */
    cfg->memory_routing_enabled = 1;
    /* Default-on to preserve behavior: profile-card refresh ran ungated in the
     * maintenance REPLAY pass before the enable-gate was wired. Maintenance is
