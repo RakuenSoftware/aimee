@@ -349,15 +349,6 @@ int config_save(const config_t *cfg)
       if (cfg->memory_rerank_mix != 0.0)
          cJSON_AddNumberToObject(mr, "mix", cfg->memory_rerank_mix);
    }
-   /* Emit the deep tier whenever it is configured, so an enabled gate survives a
-    * round-trip even with an empty command (the inert-toggle save pattern). */
-   if (cfg->memory_deep_embedding_enabled || cfg->memory_deep_embedding_command[0])
-   {
-      cJSON *md = cJSON_AddObjectToObject(root, "memory_deep_embedding");
-      cJSON_AddBoolToObject(md, "enabled", cfg->memory_deep_embedding_enabled);
-      if (cfg->memory_deep_embedding_command[0])
-         cJSON_AddStringToObject(md, "command", cfg->memory_deep_embedding_command);
-   }
    if (cfg->memory_query_expansion_mode[0] || cfg->memory_query_expansion_k > 0)
    {
       cJSON *qe = cJSON_AddObjectToObject(root, "memory_query_expansion");

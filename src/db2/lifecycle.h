@@ -13,6 +13,14 @@ extern "C"
 
    int db2_is_initialized(void);
    int db2_init(const char *libpq_url);
+
+   /* Set the embedding dimension used to create the DB2 halfvec embedding
+    * columns (one embedder per deployment: 1024 for pplx-0.6b, 2560 for
+    * pplx-4b). Call from startup — with the loaded config's embedding_dim —
+    * BEFORE db2_init() applies the schema, so this layer stays config-free.
+    * Unset/<=0 means the 1024 default. */
+   void db2_set_embedding_dim(int dim);
+   int db2_embedding_dim(void);
    int db2_fork_conn_url(char *out, size_t cap);
    int db2_health_probe(int *schema_ok, int *have_pg_trgm);
    int db2_kb_health_probe(int *kb_tables_ok);

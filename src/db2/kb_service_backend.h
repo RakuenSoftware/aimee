@@ -268,7 +268,6 @@ extern "C"
                                                         const char *project, int limit);
    cJSON *db2_kb_service_memory_find_facts_scoped_json(const char *query, const char *scope_type,
                                                        const char *scope_value, int limit);
-   cJSON *db2_kb_service_memory_deep_facts_json(const char *query, int limit);
    cJSON *db2_kb_service_memory_diagnose_scoped_json(const char *query, const char *scope_type,
                                                      const char *scope_value, int limit);
    cJSON *db2_kb_service_memory_explain_match_json(const char *query, int64_t memory_id);

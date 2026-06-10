@@ -27,7 +27,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CURATOR_CODE_UNIT_DIM 384
+/* Buffer cap for the intent/signature/body embeddings; actual dimension is set
+ * by the deployment's single embedder (1024 pplx-0.6b / 2560 pplx-4b). */
+#define CURATOR_CODE_UNIT_DIM EMBED_MAX_DIM
 
 static int64_t fnv1a(const char *s)
 {
@@ -107,13 +109,13 @@ int kb_curator_index_code_unit_one(const kb_curator_extract_opts_t *opts)
    int d1 = memory_embed_text(intent_text, embed_cmd, intent_vec, CURATOR_CODE_UNIT_DIM);
    int d2 = memory_embed_text(sig_text, embed_cmd, sig_vec, CURATOR_CODE_UNIT_DIM);
    int d3 = memory_embed_text(body_text, embed_cmd, body_vec, CURATOR_CODE_UNIT_DIM);
-   if (d1 == CURATOR_CODE_UNIT_DIM && d2 == CURATOR_CODE_UNIT_DIM && d3 == CURATOR_CODE_UNIT_DIM)
+   if (d1 > 0 && d1 == d2 && d2 == d3)
    {
       int64_t pid = fnv1a(id);
       char body_hash[32];
       snprintf(body_hash, sizeof(body_hash), "%llx", (unsigned long long)fnv1a(body));
-      if (pgvec_curator_code_unit_upsert(pid, intent_vec, sig_vec, body_vec, CURATOR_CODE_UNIT_DIM,
-                                         id, file_path, def_kind, signature, body_hash,
+      if (pgvec_curator_code_unit_upsert(pid, intent_vec, sig_vec, body_vec, d1, id, file_path,
+                                         def_kind, signature, body_hash,
                                          payload ? payload : "{}") != 0)
          aimee_log(LOG_WARN, "kb.curator.code_unit", "code_unit vector upsert failed for %s", id);
    }

@@ -44,6 +44,22 @@ static void db2_maybe_clear_sqlite_cache(sqlite3 *db)
 static void *g_conn = NULL;
 static char g_pg_url[512] = "";
 static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
+/* Embedding dimension for the DB2 halfvec columns (one embedder per deployment:
+ * 1024 for pplx-0.6b, 2560 for pplx-4b). Set from the loaded config by the
+ * server / aimee-kb startup via db2_set_embedding_dim() before db2_init(), so
+ * this layer needs no config dependency. 0 = unset -> db2_embedding_dim()
+ * reports the 1024 default. */
+static int g_embed_dim = 0;
+
+void db2_set_embedding_dim(int dim)
+{
+   g_embed_dim = dim;
+}
+
+int db2_embedding_dim(void)
+{
+   return g_embed_dim > 0 ? g_embed_dim : 1024;
+}
 static pthread_key_t g_thread_conn_key;
 static pthread_once_t g_thread_conn_key_once = PTHREAD_ONCE_INIT;
 /* The thread that ran db2_init() owns g_conn and uses it directly; every other
@@ -229,7 +245,12 @@ int db2_init(const char *libpq_url)
       return -1;
    }
 
-   if (db_apply_schema_postgres(conn, errbuf, sizeof(errbuf)) != 0)
+   /* The deployment runs a single embedder (0.6b=1024 / 4b=2560); the configured
+    * embedding_dim drives the dimension of the DB2 halfvec embedding columns.
+    * The dimension is supplied by db2_set_embedding_dim() at startup (the server
+    * and aimee-kb, which hold the loaded config) so this low-level layer stays
+    * config-free; it defaults to 1024 when unset. */
+   if (db_apply_schema_postgres(conn, db2_embedding_dim(), errbuf, sizeof(errbuf)) != 0)
    {
       /* Surface the postgres error so callers see WHICH statement failed.
        * Silently returning -1 hid bugs like a stale CREATE INDEX referencing

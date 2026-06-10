@@ -620,7 +620,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS memory_embeddings (
             point_id      BIGINT PRIMARY KEY,
-            embedding     halfvec(1024),
+            embedding     halfvec(__EMBED_DIM__),
             record_type   TEXT NOT NULL DEFAULT '',
             primary_scope TEXT NOT NULL DEFAULT '',
             workspace     TEXT NOT NULL DEFAULT '',
@@ -633,7 +633,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS kb_embeddings (
             point_id     BIGINT PRIMARY KEY,
-            embedding    halfvec(1024),
+            embedding    halfvec(__EMBED_DIM__),
             project      TEXT NOT NULL DEFAULT '',
             payload_json TEXT NOT NULL DEFAULT ''
         )
@@ -648,7 +648,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_entity_vectors (
             point_id       BIGINT PRIMARY KEY,
-            embedding      halfvec(1024),
+            embedding      halfvec(__EMBED_DIM__),
             scope_kind     TEXT NOT NULL DEFAULT '',
             scope_id       TEXT NOT NULL DEFAULT '',
             canonical_name TEXT NOT NULL DEFAULT '',
@@ -668,7 +668,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_narrative_vectors (
             point_id     BIGINT PRIMARY KEY,
-            embedding    halfvec(1024),
+            embedding    halfvec(__EMBED_DIM__),
             artifact_id  TEXT NOT NULL DEFAULT '',
             kind         TEXT NOT NULL DEFAULT '',
             doc_id       TEXT NOT NULL DEFAULT '',
@@ -687,8 +687,8 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_claim_vectors (
             point_id      BIGINT PRIMARY KEY,
-            subj_attr_vec halfvec(1024),
-            value_vec     halfvec(1024),
+            subj_attr_vec halfvec(__EMBED_DIM__),
+            value_vec     halfvec(__EMBED_DIM__),
             artifact_id   TEXT NOT NULL DEFAULT '',
             subject       TEXT NOT NULL DEFAULT '',
             attribute     TEXT NOT NULL DEFAULT '',
@@ -709,9 +709,9 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
     EXECUTE $T$
         CREATE TABLE IF NOT EXISTS curator_code_unit_vectors (
             point_id      BIGINT PRIMARY KEY,
-            intent_vec    halfvec(1024),
-            signature_vec halfvec(1024),
-            body_vec      halfvec(1024),
+            intent_vec    halfvec(__EMBED_DIM__),
+            signature_vec halfvec(__EMBED_DIM__),
+            body_vec      halfvec(__EMBED_DIM__),
             artifact_id   TEXT NOT NULL DEFAULT '',
             file_path     TEXT NOT NULL DEFAULT '',
             def_kind      TEXT NOT NULL DEFAULT '',
@@ -721,15 +721,18 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         )
     $T$;
 
-    -- The embedding columns are halfvec(1024) — fp16, matching the default
-    -- embedder pplx-embed-v1-0.6b's 1024-dim output; a fresh database gets that
-    -- straight from the CREATE TABLE definitions above. We deliberately do NOT
-    -- auto-alter an existing differently-typed column here (a routine schema-apply
-    -- must never reshape the corpus); instead we surface a NOTICE:
-    --   * a column still vector(1024) (pre-halfvec) just needs an in-place cast —
+    -- The embedding columns are halfvec(N) — fp16 — where N is the deployment's
+    -- configured embedding_dim (a placeholder token in the column defs above is
+    -- substituted at schema-apply time): 1024 for the default pplx-embed-v1-0.6b,
+    -- 2560 for the pplx-embed-v1-4b. One embedder per deployment, so every column
+    -- shares that one dimension. A fresh database gets it straight from the
+    -- CREATE TABLE definitions above. We deliberately do NOT auto-alter an
+    -- existing differently-typed column here (a routine schema-apply must never
+    -- reshape the corpus); instead we surface a NOTICE:
+    --   * a column still vector(N) (pre-halfvec) just needs an in-place cast —
     --     run deploy/migrations/2026-embed-halfvec.sql (no re-embed);
-    --   * a column with a different DIMENSION (e.g. old vector(384) all-MiniLM)
-    --     additionally needs a re-embed — deploy/migrations/2026-embed-dim-1024.sql.
+    --   * a column with a different DIMENSION (e.g. switching 0.6b<->4b, or old
+    --     vector(384) all-MiniLM) additionally needs a re-embed at the new dim.
     -- Vector ops degrade (not crash) until then.
     DECLARE
         cur_type text;
@@ -738,26 +741,11 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
           FROM pg_attribute
          WHERE attrelid = 'memory_embeddings'::regclass
            AND attname = 'embedding' AND NOT attisdropped;
-        IF cur_type IS NOT NULL AND cur_type <> 'halfvec(1024)' THEN
-            RAISE NOTICE 'aimee: embedding columns are "%" but expected halfvec(1024). Run deploy/migrations/2026-embed-halfvec.sql to cast (no re-embed); if the dimension also differs, re-embed too. Vector ops degraded until then — back up DB2 first.', cur_type;
+        IF cur_type IS NOT NULL AND cur_type <> 'halfvec(__EMBED_DIM__)' THEN
+            RAISE NOTICE 'aimee: embedding columns are "%" but expected halfvec(__EMBED_DIM__). Run deploy/migrations/2026-embed-halfvec.sql to cast (no re-embed); if the dimension also differs, re-embed at the configured embedding_dim. Vector ops degraded until then — back up DB2 first.', cur_type;
         END IF;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'embedding dimension check skipped (%)', SQLERRM;
-    END;
-
-    -- Deep embedding tier (opt-in: config memory_deep_embedding_enabled). A
-    -- halfvec(2560) column holding the background 4B "comprehensive" re-embed
-    -- (embedder /embed_deep). Added by an exception-guarded ALTER rather than the
-    -- CREATE TABLE above so a pgvector build without halfvec — or any failure —
-    -- degrades to a NOTICE instead of breaking schema apply for lite deployments
-    -- that never use it. NULL until the backfill pass populates it; 2560 exceeds
-    -- pgvector's 2000-dim vector index cap, so halfvec (HNSW-indexable to 4000).
-    BEGIN
-        EXECUTE $T$
-            ALTER TABLE memory_embeddings ADD COLUMN IF NOT EXISTS embedding_deep halfvec(2560)
-        $T$;
-    EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'memory_embeddings.embedding_deep column skipped (%)', SQLERRM;
     END;
 
     EXECUTE $T$
@@ -796,16 +784,6 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'memory_embeddings HNSW index skipped (%)', SQLERRM;
-    END;
-    -- Deep-tier HNSW over the halfvec(2560) column (empty/cheap until the 4B
-    -- backfill populates it). Guarded like the column add above.
-    BEGIN
-        EXECUTE $T$
-            CREATE INDEX IF NOT EXISTS idx_memory_embeddings_deep_hnsw
-                ON memory_embeddings USING hnsw (embedding_deep halfvec_cosine_ops)
-        $T$;
-    EXCEPTION WHEN OTHERS THEN
-        RAISE NOTICE 'memory_embeddings deep HNSW index skipped (%)', SQLERRM;
     END;
     BEGIN
         EXECUTE $T$
@@ -880,7 +858,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
                 id          BIGSERIAL PRIMARY KEY,
                 artifact_id TEXT      NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
                 collection  TEXT      NOT NULL DEFAULT 'case_exemplars',
-                embedding   halfvec(1024),
+                embedding   halfvec(__EMBED_DIM__),
                 created_at  TEXT      NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
             )
         $T$;
@@ -906,7 +884,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
                 id          BIGSERIAL PRIMARY KEY,
                 artifact_id TEXT      NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
                 collection  TEXT      NOT NULL DEFAULT 'evidence',
-                embedding   halfvec(1024),
+                embedding   halfvec(__EMBED_DIM__),
                 created_at  TEXT      NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
             )
         $T$;

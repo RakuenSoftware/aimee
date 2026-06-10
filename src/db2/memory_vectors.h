@@ -14,12 +14,6 @@ int pgvec_memory_vector_upsert_memory(int64_t memory_id, const float *vec, int d
 int pgvec_memory_vector_upsert_unit(int64_t unit_id, const float *vec, int dim,
                                     const char *payload_json);
 int pgvec_memory_vector_delete_point(int64_t point_id);
-/* Deep tier: write a deep embedding to embedding_deep / list rows needing one. */
-int pgvec_memory_vector_deep_update(int64_t memory_id, const float *vec, int dim);
-int pgvec_memory_vector_deep_candidates(int64_t *ids, int max);
-int pgvec_memory_vector_deep_search(const float *vec, int dim, int limit, int64_t *ids,
-                                    double *scores, int max);
-int pgvec_memory_vector_deep_similarity(int64_t id_a, int64_t id_b, double *out);
 int pgvec_memory_vector_search_record_type(const char *record_type, const float *vec, int dim,
                                            int limit, int64_t *ids, double *scores, int max);
 int pgvec_memory_vector_search_with_kinds(const float *vec, int dim, const char *const *kinds,

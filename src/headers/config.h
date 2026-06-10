@@ -452,19 +452,6 @@ typedef struct config
    char memory_query_expansion_mode[16];
    int memory_query_expansion_k;
 
-   /* Deep embedding tier (optional background "comprehensive" re-embed pass).
-    * A larger model (embedder DEEP_MODEL, default pplx-embed-v1-4b, 2560-dim,
-    * served on /embed_deep) re-embeds memories in the background into a
-    * halfvec(2560) index, powering offline memory intelligence + an opt-in
-    * deep-recall mode. Default OFF: the lite path is the live 0.6b q4 embedder
-    * alone (~0.5GB); the deep tier adds a ~16GB resident model, so it is opt-in
-    * for hosts with the RAM.
-    * memory_deep_embedding_enabled: master gate (0 = off, lite 0.6b only; default).
-    * memory_deep_embedding_command: /embed_deep client (stdin: text, stdout: JSON
-    *   float array). Empty = disabled even when the gate is on. */
-   int memory_deep_embedding_enabled;
-   char memory_deep_embedding_command[512];
-
    /* Two-lane retrieval: separate per-lane top-K for summary-shaped vs atomic-fact evidence.
     * memory_recall_lanes_enabled: 0 = disabled (default), 1 = split recall into two lanes.
     * memory_recall_lanes_summary_kinds: comma-separated memory kinds for the summary lane

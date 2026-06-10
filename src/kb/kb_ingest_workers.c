@@ -42,7 +42,9 @@
 #include <sys/resource.h>
 #endif
 
-#define KB_EXPECTED_DIM 384
+/* Fallback kb_embeddings dimension when config.embedding_dim is unset; the
+ * default embedder is pplx-embed-v1-0.6b (1024-dim). */
+#define KB_DEFAULT_DIM 1024
 
 /* ------------------------------------------------------------------ */
 /* notify: wake parked workers (called by kb_handle_ingest on enqueue) */
@@ -103,7 +105,10 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
              job->force);
    kb_background_set("ingest", "project=%s phase=build", job->project);
 
-   if (pgvec_kb_service_ensure_kb_collection(KB_EXPECTED_DIM) != 0)
+   /* The kb_embeddings vector column dimension comes from the schema (sized to
+    * the deployment's configured embedding_dim); pgvec_ensure_index infers the
+    * dimension from the data, so the value passed here is advisory only. */
+   if (pgvec_kb_service_ensure_kb_collection(KB_DEFAULT_DIM) != 0)
    {
       aimee_log(LOG_WARN, "kb.ingest.worker", "vector store unavailable for project='%s'",
                 job->project);

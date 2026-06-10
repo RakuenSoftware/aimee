@@ -15,8 +15,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* evidence_vectors.embedding is 384-dim (MiniLM / builtin). */
-#define BUNDLE_EMBED_DIM 384
+/* Buffer cap for query + stored evidence embeddings. The deployment's single
+ * embedder sets the actual dimension (1024 pplx-0.6b / 2560 pplx-4b; 384 for
+ * the legacy builtin); the cosine loop below already skips rows whose parsed
+ * dimension differs from the query, so we just size for the largest. */
+#define BUNDLE_EMBED_DIM EMBED_MAX_DIM
 /* Upper bound on vectors pulled into the in-memory ranker per build. Plenty for
  * the labeled replay corpus; the pgvector-native path handles larger scales. */
 #define BUNDLE_SCAN_MAX 512

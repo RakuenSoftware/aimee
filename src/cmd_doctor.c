@@ -65,7 +65,7 @@ static doctor_db2_session_t check_database(check_result_t *r, config_t *cfg)
    {
       session.ready = 1;
    }
-   else if (db2_init(cfg->db2_url) == 0)
+   else if ((db2_set_embedding_dim(cfg->embedding_dim), db2_init(cfg->db2_url)) == 0)
    {
       session.ready = 1;
       session.owned = 1;

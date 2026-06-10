@@ -133,8 +133,8 @@ COPY --from=build /src/aimee-server /usr/local/bin/aimee-server
 COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
 
 # kb sidecar clients (LLM/embedder access code the kb invokes via popen).
-COPY scripts/embed-remote.py scripts/embed-deep-remote.py scripts/rerank-remote.py \
-     scripts/llm-chat.py scripts/learning-synthesize.py scripts/curator-extract.py \
+COPY scripts/embed-remote.py scripts/rerank-remote.py scripts/llm-chat.py \
+     scripts/learning-synthesize.py scripts/curator-extract.py \
      scripts/guardrails-semantic.py /opt/aimee/scripts/
 # Baked default config kept OUTSIDE $AIMEE_HOME so a bind-mounted (empty) volume
 # can't shadow it; the entrypoint seeds it into $AIMEE_HOME/aimee.yaml on first
