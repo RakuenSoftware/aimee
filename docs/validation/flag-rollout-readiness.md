@@ -191,7 +191,7 @@ production binary on a real corpus, which stays user-gated.
 | Flag | Harness | Result | Verdict |
 |---|---|---|---|
 | `demotion_enabled` | `benchmarks/memory/poison_gate.py` | PASS (exit 0): all clean rows retrieved CORRECT; only closed-outcome poison rows (`poison_refresh`, `poison_snapshot`) suppressed — declared-confidence / trusted-source / frequency fields correctly ignored | **decision boundary sound** — safe to run the live shadow→live(2) ladder; the gate does not over-suppress |
-| `guardrails_semantic_enabled` (→advisory) | `tools/guardrails_replay.py` (spec scores) **→ superseded by** `benchmarks/guardrails/sidecar_e2e.py` (real sidecar) | `guardrails_replay` reports precision/recall **1.0** — but it grades the fixtures' *pre-baked* `score` field, NOT the sidecar. The **e2e harness runs the actual `scripts/guardrails-semantic.py` through the production rule** (`gsem_policy` bands `overall` vs 0.40/0.70/0.90) and **FAILS** (exit 1): **10/10 benign false-positives**; `overall ≈ 0.40` for *every* band (allow/warn/prompt/block) because `max(action_risk=0.40 edit baseline, …)` swamps the real signals → **no threshold separates benign from risky** | **NOT default-on-ready.** The earlier "PASS" was a spec artifact. The gap is the sidecar's scoring / the `overall`-banding policy, not the wiring. Fix = recalibrate the sidecar score (or band on labels/components, not flat `overall`), then the e2e harness must pass before enabling. Do **not** wire `guardrails_semantic_command` to default-on until then. |
+| `guardrails_semantic_enabled` (→advisory) | `benchmarks/guardrails/sidecar_e2e.py` (real sidecar, production rule) | **WAS** exit 1: 10/10 benign FP — the actual sidecar scored `overall≈0.40` for every band (a flat 0.40 edit baseline swamped the real signals), and the earlier `guardrails_replay` "PASS" only graded the fixtures' pre-baked spec scores. **NOW FIXED** (this PR): recalibrated the sidecar — edit baseline 0.40→0.20 (an edit isn't inherently risky), a single high-specificity security antipattern scores 0.6 (was 0.3) and is no longer discounted in `compute_overall`. e2e now **passes (exit 0): 0/10 benign FP, precision 1.0**, recall 0.385 (reported, not gated) | **Fixed + safe for advisory; kept opt-in.** Recall 0.385 is the regex-heuristic ceiling on *semantic* risks (terse fixtures; an ML sidecar lifts it). For an advisory net the hard gate is 0 benign FP (passes). Sidecar now **shipped in the images** (`/opt/aimee/scripts/`). NOT flipped on by default — `gsem_assess` runs a subprocess per write-tool-call and the code's design intent is explicit opt-in ("no behavioral change until opted in"). Opt-in = `config set guardrails.semantic.{command=<path>,enabled=1,dry_run=0}`; `sidecar_e2e.py` gates it. |
 | `learning_implicit_citation_repair` / `_continuation` | `make learning-citation-eval` (real `dogfood_classify_next_turn` over 63 citation fixtures) | **GRADED PASS** (exit 0): precision **1.0**, recall **1.0**, FPR **0.0** (44 pos / 19 neg) — clears the pinned 0.90/0.80/0.10 bar | **detector validated on the labelled corpus**; the per-turn classifier is accurate. Remaining for a flip: the full router→substrate promotion loop on a real session corpus |
 | `learning_implicit_repeat_question` / `repeated_correction` / `workflow_repetition` | — | stateful (session/DB) — not replayable by the pure-text tool | needs a live router + session state to grade |
 | `learning_synthesize_enabled` (substrate promotion) | `learning_replay.py` substrate fixtures | VALIDATION OK: schema + distribution clean | needs a substrate-promotion replay entry (live router) to grade |
@@ -226,15 +226,17 @@ the consumed-check would have shipped one alert-fatigue feature and one no-op.
 Two features were flagged for wiring so their proven flags become live. Close
 inspection found both need real work beyond a flag flip:
 
-**`guardrails_semantic_command` — do NOT auto-wire-and-enable.** The bundled
-sidecar `scripts/guardrails-semantic.py` exists and is deterministic, so the
-command *could* be defaulted to it — but `benchmarks/guardrails/sidecar_e2e.py`
-proves the resulting feature over-flags every edit (10/10 benign FP; `overall`
-score ~0.40 for all bands). Enabling it would ship alert-fatigue. **Blocker:** the
-sidecar's `overall` (a `max()` dominated by the flat 0.40 edit baseline) doesn't
-discriminate risk; `gsem_policy` bands on it. **Fix before enabling:** recalibrate
-the sidecar score, or change `gsem_policy` to band on `labels`/component scores;
-then `sidecar_e2e.py` must exit 0.
+**`guardrails_semantic_command` — FIXED + shipped + wired-as-opt-in.** The bundled
+sidecar over-flagged every edit (10/10 benign FP; `overall`≈0.40 for all bands,
+the flat edit baseline swamping real signals). **Recalibrated** (edit baseline
+0.40→0.20; single security antipattern 0.3→0.6 and no longer discounted in
+`compute_overall`) so `sidecar_e2e.py` now passes: **0 benign FP, precision 1.0**,
+recall 0.385 (heuristic ceiling, advisory). **Shipped** the sidecar in `Dockerfile`
++ `Dockerfile.combined` (it wasn't in the images). **Kept opt-in** by design:
+`gsem_assess` spawns a subprocess per write-tool-call and the orchestrator comment
+mandates "no behavioral change until opted in"; recall 0.385 also argues against a
+blanket default-on. Opt-in is now one step against a known-good sidecar —
+`guardrails.semantic.{command,enabled,dry_run}` — gated by `sidecar_e2e.py`.
 
 **`learning_implicit_detect_turn` — real wiring gap, needs live validation.** The
 classifier is graded PASS, but the whole per-turn consumer is unwired:

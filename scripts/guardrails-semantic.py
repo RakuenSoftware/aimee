@@ -88,7 +88,11 @@ def score_action_risk(tool, shell_cmd):
             return 0.5
         return 0.3
     if tool in ACTION_RISK_EDIT_TOOLS:
-        return 0.4
+        # An edit is not inherently risky — the risk lives in the diff content
+        # (secret/verification/antipattern signals), not the act of editing. A
+        # 0.4 baseline equalled the warn threshold, so every edit warned and
+        # benign edits were indistinguishable from risky ones. Keep it below warn.
+        return 0.2
     if tool in ACTION_RISK_READ_TOOLS:
         return 0.1
     return 0.2
@@ -152,9 +156,13 @@ def score_antipattern_similarity(old_excerpt, new_excerpt, diff_summary):
     for category, patterns in ANTIPATTERN_CATEGORIES:
         hits = sum(1 for p in patterns if p.search(text))
         if hits >= 2:
-            score = min(0.5 + hits * 0.1, 0.9)
+            score = min(0.7 + hits * 0.1, 0.95)
         elif hits == 1:
-            score = 0.3
+            # These patterns are high-specificity security antipatterns
+            # ("missing bearer", "treat missing role as admin", "serialize api
+            # token", "remove verify step", ...) — a single confident match is a
+            # real risk, not noise. Score it above the warn floor so it surfaces.
+            score = 0.6
         else:
             score = 0.0
         if score > best_score:
@@ -188,8 +196,14 @@ def score_drift_risk(paths, active_task):
 
 
 def compute_overall(action_risk, diff_risk, drift_risk, antipattern_similarity):
-    """Compute overall risk as weighted maximum."""
-    return max(action_risk, diff_risk, drift_risk * 0.5, antipattern_similarity * 0.6)
+    """Compute overall risk as weighted maximum.
+
+    A confirmed antipattern is a direct risk signal, so it is no longer
+    discounted (was *0.6, which kept single-match security antipatterns below the
+    warn floor). Drift stays a soft signal (*0.5) — on its own a task/path
+    keyword mismatch is weak evidence and must not flag benign edits.
+    """
+    return max(action_risk, diff_risk, drift_risk * 0.5, antipattern_similarity)
 
 
 def get_recommendation(overall):
