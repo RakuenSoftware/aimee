@@ -61,10 +61,6 @@ int pgvec_memory_deep_candidates(int64_t *ids, int max);
 int pgvec_memory_deep_search(const float *vec, int dim, int limit, int64_t *ids, double *scores,
                              int max);
 
-/* Deep tier: cosine of two memories' deep embeddings. Returns 1 (both present,
- * *out set), 0 (either missing), -1 (error). */
-int pgvec_memory_deep_similarity(int64_t id_a, int64_t id_b, double *out);
-
 /* Upsert a single kb embedding row.  Extracts project from payload_json. */
 int pgvec_kb_upsert(int64_t point_id, const float *vec, int dim, const char *payload_json);
 

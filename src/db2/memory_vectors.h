@@ -19,7 +19,6 @@ int pgvec_memory_vector_deep_update(int64_t memory_id, const float *vec, int dim
 int pgvec_memory_vector_deep_candidates(int64_t *ids, int max);
 int pgvec_memory_vector_deep_search(const float *vec, int dim, int limit, int64_t *ids,
                                     double *scores, int max);
-int pgvec_memory_vector_deep_similarity(int64_t id_a, int64_t id_b, double *out);
 int pgvec_memory_vector_search_record_type(const char *record_type, const float *vec, int dim,
                                            int limit, int64_t *ids, double *scores, int max);
 int pgvec_memory_vector_search_with_kinds(const float *vec, int dim, const char *const *kinds,

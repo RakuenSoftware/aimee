@@ -457,38 +457,6 @@ int pgvec_memory_deep_search(const float *vec, int dim, int limit, int64_t *ids,
    return (rc == AIMEE_PG_ERR) ? -1 : n;
 }
 
-/* Deep cosine similarity between two memories' deep embeddings. Writes the cosine
- * to *out and returns 1 when BOTH rows have a deep embedding; returns 0 when either
- * lacks one (caller treats it as "can't confirm" — a no-op), -1 on error. A
- * precision guard for offline passes (e.g. contradiction pre-filtering), never a
- * blocker — partial deep coverage simply means fewer pairs get the extra check. */
-int pgvec_memory_deep_similarity(int64_t id_a, int64_t id_b, double *out)
-{
-   if (!out)
-      return -1;
-   void *pg = db2_conn();
-   if (!pg)
-      return -1;
-   static const char *sql = "SELECT 1.0 - (a.embedding_deep <=> b.embedding_deep) "
-                            "FROM memory_embeddings a, memory_embeddings b "
-                            "WHERE a.point_id = :a AND b.point_id = :b "
-                            "AND a.embedding_deep IS NOT NULL AND b.embedding_deep IS NOT NULL";
-   char errbuf[256];
-   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
-   if (!stmt)
-      return 0; /* halfvec unavailable — can't confirm */
-   aimee_pg_bind_int64(stmt, "a", id_a);
-   aimee_pg_bind_int64(stmt, "b", id_b);
-   int have = 0;
-   if (aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
-   {
-      *out = aimee_pg_column_double(stmt, 0);
-      have = 1;
-   }
-   aimee_pg_finalize(stmt);
-   return have;
-}
-
 /* -------------------------------------------------------------------------
  * KB upsert
  * ---------------------------------------------------------------------- */
