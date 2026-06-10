@@ -75,8 +75,17 @@ Legend — Tier: **A**=harness exists, run it · **B**=harness needs a per-flag 
 ### Tier B — add a per-flag on/off knob to an existing suite, then becomes Tier A
 
 > NB: the memory suite is **shell scripts** (`benchmarks/suite/run-direct.sh`,
-> `run-llm.sh`), **not** a `runner.py`. The knob = a `--config-variant` pass-through
-> that sets the flag via `aimee config set` between the two runs.
+> `run-llm.sh`), **not** a `runner.py`. The A/B knob is **LANDED** in
+> `run-direct.sh`: `--config-variant KEY=VALUE` captures the flag's prior value,
+> sets it via the aimee CLI for the run, and restores it on exit (trap, even on
+> abort). Run twice to isolate one flag:
+> ```bash
+> benchmarks/suite/run-direct.sh --bench longmemeval_s --config-variant memory_rerank_enabled=0   # baseline
+> benchmarks/suite/run-direct.sh --bench longmemeval_s --config-variant memory_rerank_enabled=1   # variant
+> ```
+> The set/capture/restore plumbing is validated structurally (stub CLI); the run
+> itself still needs a live aimee-server + corpora (user-gated). `AIMEE_BIN`
+> overrides the CLI path.
 
 | Flag | Suite it rides | Tests | Next action |
 |---|---|---|---|
@@ -248,7 +257,7 @@ Recommended as a reviewable change with `.254` live validation, not a blind edit
 
 | Step | What | State |
 |---|---|---|
-| 1 | Build missing harness primitives | **in progress**: `learning_replay.py` + the real-classifier replay (`make learning-citation-eval`) landed (this PR); suite `--config-variant` knob + a live-router substrate replay + per-pass curator eval = backlog |
+| 1 | Build missing harness primitives | **mostly done (this PR)**: `learning_replay.py` + real-classifier replay (`make learning-citation-eval`); `guardrails/sidecar_e2e.py`; the suite `--config-variant` A/B knob (`run-direct.sh`). Backlog: a live-router substrate replay + per-pass curator eval |
 | 2 | Pin acceptance criteria per flag | **this doc** (defaults pinned; per-flag numbers fill as corpora land) |
 | 3 | Clear Tier A | **partial**: `demotion_enabled` boundary validated on fixtures (poison_gate PASS); live recall A/B still needs aimee-server + corpora via `! <cmd>` |
 | 4 | Run safety (Tier S) in shadow | **partial**: `guardrails_semantic_enabled` advisory precision/recall = 1.0 on 75 fixtures (guardrails_replay PASS); live FP-on-benign confirmation + dashboards still user-gated |
