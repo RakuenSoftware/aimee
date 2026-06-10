@@ -66,6 +66,21 @@ void config_parse_memory_rerank_section(config_t *cfg, cJSON *root)
          cfg->memory_rerank_mix = item->valuedouble;
    }
 }
+void config_parse_memory_deep_embedding_section(config_t *cfg, cJSON *root)
+{
+   cJSON *item = NULL;
+   cJSON *mem_deep = cJSON_GetObjectItemCaseSensitive(root, "memory_deep_embedding");
+   if (cJSON_IsObject(mem_deep))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(mem_deep, "enabled");
+      if (cJSON_IsBool(item))
+         cfg->memory_deep_embedding_enabled = cJSON_IsTrue(item);
+      item = cJSON_GetObjectItemCaseSensitive(mem_deep, "command");
+      if (cJSON_IsString(item) && item->valuestring[0])
+         snprintf(cfg->memory_deep_embedding_command, sizeof(cfg->memory_deep_embedding_command),
+                  "%s", item->valuestring);
+   }
+}
 void config_parse_memory_query_expansion_section(config_t *cfg, cJSON *root)
 {
    cJSON *item = NULL;

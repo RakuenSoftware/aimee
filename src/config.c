@@ -779,6 +779,8 @@ int config_load(config_t *cfg)
 
    config_parse_memory_rerank_section(cfg, root);
 
+   config_parse_memory_deep_embedding_section(cfg, root);
+
    config_parse_memory_query_expansion_section(cfg, root);
 
    config_parse_memory_recall_lanes_section(cfg, root);
