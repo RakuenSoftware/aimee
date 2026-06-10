@@ -1290,6 +1290,101 @@ int pgvec_curator_claim_delete(int64_t point_id)
    return (rc == AIMEE_PG_DONE) ? 0 : -1;
 }
 
+/* Deep tier (curator claims): store / compare a deep embedding of the claim's
+ * subject+attribute on subj_attr_deep_vec — the precision layer for fuzzy
+ * contradiction mining. Mirrors the entity deep update/similarity. */
+int pgvec_curator_claim_deep_update(int64_t point_id, const float *vec, int dim)
+{
+   if (!vec || dim <= 0)
+      return 0;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   char *vec_text = build_vec_text(vec, dim);
+   if (!vec_text)
+      return -1;
+   static const char *sql =
+       "UPDATE curator_claim_vectors SET subj_attr_deep_vec = :embedding::halfvec "
+       "WHERE point_id = :point_id";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+   {
+      free(vec_text);
+      return -1;
+   }
+   aimee_pg_bind_int64(stmt, "point_id", point_id);
+   aimee_pg_bind_text(stmt, "embedding", vec_text);
+   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
+   aimee_pg_finalize(stmt);
+   free(vec_text);
+   return (rc == AIMEE_PG_DONE) ? 0 : -1;
+}
+
+/* Deep cosine of two claims' stored subject+attribute deep embeddings. Returns 1
+ * when BOTH have one (*out set), 0 when either lacks it (caller no-ops), -1 error. */
+int pgvec_curator_claim_deep_similarity(int64_t point_a, int64_t point_b, double *out)
+{
+   if (!out)
+      return -1;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   static const char *sql =
+       "SELECT 1.0 - (a.subj_attr_deep_vec <=> b.subj_attr_deep_vec) "
+       "FROM curator_claim_vectors a, curator_claim_vectors b "
+       "WHERE a.point_id = :a AND b.point_id = :b "
+       "AND a.subj_attr_deep_vec IS NOT NULL AND b.subj_attr_deep_vec IS NOT NULL";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+      return 0;
+   aimee_pg_bind_int64(stmt, "a", point_a);
+   aimee_pg_bind_int64(stmt, "b", point_b);
+   int have = 0;
+   if (aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
+   {
+      *out = aimee_pg_column_double(stmt, 0);
+      have = 1;
+   }
+   aimee_pg_finalize(stmt);
+   return have;
+}
+
+/* Look up a claim row's first-class fields by point_id (for fuzzy-contradiction
+ * candidate comparison). Returns 1 on a hit, 0 if absent, -1 on error. Any out
+ * buffer may be NULL to skip. */
+int pgvec_curator_claim_fields(int64_t point_id, char *artifact_out, int alen, char *subject_out,
+                               int slen, char *value_out, int vlen)
+{
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   static const char *sql = "SELECT artifact_id, subject, value FROM curator_claim_vectors "
+                            "WHERE point_id = :point_id";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+      return -1;
+   aimee_pg_bind_int64(stmt, "point_id", point_id);
+   int have = 0;
+   if (aimee_pg_step(stmt, errbuf, sizeof(errbuf)) == AIMEE_PG_ROW)
+   {
+      const char *a = aimee_pg_column_text(stmt, 0);
+      const char *s = aimee_pg_column_text(stmt, 1);
+      const char *v = aimee_pg_column_text(stmt, 2);
+      if (artifact_out && alen > 0)
+         snprintf(artifact_out, (size_t)alen, "%s", a ? a : "");
+      if (subject_out && slen > 0)
+         snprintf(subject_out, (size_t)slen, "%s", s ? s : "");
+      if (value_out && vlen > 0)
+         snprintf(value_out, (size_t)vlen, "%s", v ? v : "");
+      have = 1;
+   }
+   aimee_pg_finalize(stmt);
+   return have;
+}
+
 int pgvec_curator_claim_search(const char *which_vec, const char *claim_kind, const float *vec,
                                int dim, int limit, int64_t *ids, double *scores, int max)
 {

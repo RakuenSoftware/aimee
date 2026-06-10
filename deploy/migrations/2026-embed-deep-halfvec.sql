@@ -53,4 +53,10 @@ ALTER TABLE curator_entity_vectors ADD COLUMN IF NOT EXISTS embedding_deep halfv
 CREATE INDEX IF NOT EXISTS idx_curator_entity_vectors_deep_hnsw
     ON curator_entity_vectors USING hnsw (embedding_deep halfvec_cosine_ops);
 
+-- Fuzzy contradiction mining: a deep embedding of the claim's subject+attribute,
+-- used to confirm a semantic contradiction candidate before linking it.
+ALTER TABLE curator_claim_vectors ADD COLUMN IF NOT EXISTS subj_attr_deep_vec halfvec(2560);
+CREATE INDEX IF NOT EXISTS idx_curator_claim_vectors_subj_attr_deep_hnsw
+    ON curator_claim_vectors USING hnsw (subj_attr_deep_vec halfvec_cosine_ops);
+
 COMMIT;

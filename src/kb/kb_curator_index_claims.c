@@ -115,6 +115,17 @@ int kb_curator_index_claims_one(const kb_curator_extract_opts_t *opts)
       if (pgvec_curator_claim_upsert(pid, subj_vec, val_vec, CURATOR_CLAIM_DIM, id, subject,
                                      attribute, value, claim_kind, payload ? payload : "{}") != 0)
          aimee_log(LOG_WARN, "kb.curator.claims", "claim vector upsert failed for %s", id);
+      else if (cfg.memory_deep_embedding_enabled && cfg.memory_deep_embedding_command[0])
+      {
+         /* Deep tier: store a deep embedding of subject+attribute for fuzzy
+          * contradiction mining (precision guard). Best-effort; never blocks. */
+         float subj_deep[DEEP_EMBED_MAX_DIM];
+         int dd =
+             memory_embed_text(subj_attr[0] ? subj_attr : value_text,
+                               cfg.memory_deep_embedding_command, subj_deep, DEEP_EMBED_MAX_DIM);
+         if (dd > 0)
+            pgvec_curator_claim_deep_update(pid, subj_deep, dd);
+      }
    }
    else
    {

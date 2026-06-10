@@ -18,11 +18,116 @@
 #include "db2/artifacts.h"
 #include "db2/db2_internal.h"
 #include "db2/db_postgres.h"
+#include "db2/pgvec_transport.h"
 
 #include <string.h>
 
 /* Max claim pairs linked per drain call (bounds work per poll). */
 #define CONTRA_BATCH 32
+
+/* Fuzzy contradiction mining (opt-in via the 4B deep tier). The exact pass above
+ * only catches claims with an IDENTICAL subject+attribute text; this phase finds
+ * pairs whose subject+attribute are *semantically* the same (high live subj_attr
+ * cosine) but phrased differently, with a different value. Every fuzzy link is
+ * REQUIRED to be confirmed in the 4B deep space — it never fires on the live
+ * embedding alone — so it cannot manufacture contradictions the deep model
+ * disagrees with. All thresholds are deliberately conservative; tune on a real
+ * corpus before relying on it. Live dim matches the claim indexer's 384. */
+#define CONTRA_CLAIM_DIM      384
+#define CONTRA_FUZZY_BATCH    16   /* deep-ready claims probed per drain call */
+#define CONTRA_FUZZY_K        5    /* nearest subj_attr candidates per claim */
+#define CONTRA_FUZZY_LIVE_MIN 0.80 /* live subj_attr cosine to even consider a pair */
+#define CONTRA_FUZZY_DEEP_MIN 0.75 /* 4B-deep cosine required to link (the guard) */
+
+/* Fuzzy, deep-confirmed contradiction mining. Returns the number of new
+ * `contradicts` links written, or 0 when the deep tier is off (the guard is
+ * mandatory). Best-effort throughout: any embed/search/lookup miss just skips. */
+static int mine_fuzzy_contradictions(void)
+{
+   config_t cfg;
+   if (config_load(&cfg) != 0 || !cfg.memory_deep_embedding_enabled ||
+       !cfg.memory_deep_embedding_command[0])
+      return 0;
+   const char *live_cmd = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+
+   struct fuzzy_claim
+   {
+      int64_t pid;
+      char artifact[64], subject[256], attribute[256], value[256];
+   } batch[CONTRA_FUZZY_BATCH];
+   int nb = 0;
+   {
+      static const char *bs =
+          "SELECT point_id, artifact_id, subject, attribute, value FROM curator_claim_vectors"
+          " WHERE subj_attr_deep_vec IS NOT NULL ORDER BY point_id DESC LIMIT 16";
+      char e[256] = "";
+      aimee_pg_stmt_t *st = aimee_pg_prepare(conn, bs, e, sizeof(e));
+      if (st)
+      {
+         while (nb < CONTRA_FUZZY_BATCH && aimee_pg_step(st, e, sizeof(e)) == AIMEE_PG_ROW)
+         {
+            batch[nb].pid = aimee_pg_column_int64(st, 0);
+            const char *a = aimee_pg_column_text(st, 1);
+            const char *s = aimee_pg_column_text(st, 2);
+            const char *at = aimee_pg_column_text(st, 3);
+            const char *v = aimee_pg_column_text(st, 4);
+            snprintf(batch[nb].artifact, sizeof(batch[nb].artifact), "%s", a ? a : "");
+            snprintf(batch[nb].subject, sizeof(batch[nb].subject), "%s", s ? s : "");
+            snprintf(batch[nb].attribute, sizeof(batch[nb].attribute), "%s", at ? at : "");
+            snprintf(batch[nb].value, sizeof(batch[nb].value), "%s", v ? v : "");
+            nb++;
+         }
+         aimee_pg_finalize(st);
+      }
+   }
+
+   int written = 0;
+   for (int i = 0; i < nb; i++)
+   {
+      if (!batch[i].artifact[0])
+         continue;
+      char subj_attr[520];
+      snprintf(subj_attr, sizeof(subj_attr), "%s %s", batch[i].subject, batch[i].attribute);
+      float lvec[CONTRA_CLAIM_DIM];
+      if (memory_embed_text(subj_attr, live_cmd, lvec, CONTRA_CLAIM_DIM) != CONTRA_CLAIM_DIM)
+         continue;
+
+      int64_t cand[CONTRA_FUZZY_K];
+      double cscore[CONTRA_FUZZY_K];
+      int nc = pgvec_curator_claim_search("subj_attr", NULL, lvec, CONTRA_CLAIM_DIM, CONTRA_FUZZY_K,
+                                          cand, cscore, CONTRA_FUZZY_K);
+      for (int j = 0; j < nc; j++)
+      {
+         if (cand[j] == batch[i].pid || cscore[j] < CONTRA_FUZZY_LIVE_MIN)
+            continue;
+         char cart[64] = "", csubj[256] = "", cval[256] = "";
+         if (pgvec_curator_claim_fields(cand[j], cart, sizeof(cart), csubj, sizeof(csubj), cval,
+                                        sizeof(cval)) != 1)
+            continue;
+         /* Fuzzy case only: a DIFFERENT subject text (identical-subject pairs are
+          * the exact pass's job) asserting a DIFFERENT value. */
+         if (!cart[0] || strcmp(cart, batch[i].artifact) == 0 ||
+             strcmp(csubj, batch[i].subject) == 0 || strcmp(cval, batch[i].value) == 0)
+            continue;
+         /* Mandatory deep confirmation: both sides deep-embedded AND deep-similar. */
+         double dsim = 0.0;
+         if (pgvec_curator_claim_deep_similarity(batch[i].pid, cand[j], &dsim) != 1 ||
+             dsim < CONTRA_FUZZY_DEEP_MIN)
+            continue;
+         if (db2_artifact_link(batch[i].artifact, cart, "contradicts") == 0)
+         {
+            aimee_log(LOG_INFO, "kb.curator.contradict",
+                      "fuzzy contradiction: '%s' vs '%s' (live=%.3f deep=%.3f)", batch[i].subject,
+                      csubj, cscore[j], dsim);
+            written++;
+         }
+      }
+   }
+   return written;
+}
 
 int kb_curator_detect_contradictions_one(const kb_curator_extract_opts_t *opts)
 {
@@ -72,6 +177,11 @@ int kb_curator_detect_contradictions_one(const kb_curator_extract_opts_t *opts)
       if (db2_artifact_link(from_ids[i], to_ids[i], "contradicts") == 0)
          written++;
    }
+
+   /* Opt-in fuzzy phase: semantic subject+attribute matches the exact join misses,
+    * each mandatorily confirmed in the 4B deep space. No-op when the deep tier is off. */
+   written += mine_fuzzy_contradictions();
+
    if (written > 0)
       aimee_log(LOG_INFO, "kb.curator.contradict", "linked %d contradicting claim pair(s)",
                 written);

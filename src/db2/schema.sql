@@ -770,6 +770,17 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         RAISE NOTICE 'curator_entity_vectors.embedding_deep column skipped (%)', SQLERRM;
     END;
 
+    -- Deep tier for fuzzy contradiction mining: a halfvec(2560) deep embedding of
+    -- the claim's subject+attribute, used to confirm a semantic contradiction
+    -- candidate before linking it.
+    BEGIN
+        EXECUTE $T$
+            ALTER TABLE curator_claim_vectors ADD COLUMN IF NOT EXISTS subj_attr_deep_vec halfvec(2560)
+        $T$;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'curator_claim_vectors.subj_attr_deep_vec column skipped (%)', SQLERRM;
+    END;
+
     EXECUTE $T$
         CREATE INDEX IF NOT EXISTS idx_memory_embeddings_record_type
             ON memory_embeddings (record_type)
@@ -824,6 +835,14 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'curator_entity_vectors deep HNSW index skipped (%)', SQLERRM;
+    END;
+    BEGIN
+        EXECUTE $T$
+            CREATE INDEX IF NOT EXISTS idx_curator_claim_vectors_subj_attr_deep_hnsw
+                ON curator_claim_vectors USING hnsw (subj_attr_deep_vec halfvec_cosine_ops)
+        $T$;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'curator_claim_vectors deep HNSW index skipped (%)', SQLERRM;
     END;
     BEGIN
         EXECUTE $T$

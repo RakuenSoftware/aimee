@@ -161,6 +161,15 @@ int pgvec_curator_claim_upsert(int64_t point_id, const float *subj_attr_vec, con
 /* Delete a single curator_claim_vectors row by point_id. */
 int pgvec_curator_claim_delete(int64_t point_id);
 
+/* Deep tier (curator claims): store / compare a deep embedding of subject+attribute
+ * (subj_attr_deep_vec) for fuzzy contradiction mining. similarity returns 1
+ * (present, *out set), 0 (none), -1 (error). fields looks up a claim row's
+ * artifact_id/subject/value by point_id (1 hit, 0 absent, -1 error). */
+int pgvec_curator_claim_deep_update(int64_t point_id, const float *vec, int dim);
+int pgvec_curator_claim_deep_similarity(int64_t point_a, int64_t point_b, double *out);
+int pgvec_curator_claim_fields(int64_t point_id, char *artifact_out, int alen, char *subject_out,
+                               int slen, char *value_out, int vlen);
+
 /* Search curator_claim_vectors by cosine distance.  which_vec selects the
  * named vector column to rank on: "subj_attr" or "value" (any other value is
  * rejected, returns -1).  claim_kind is an optional equality filter; pass

@@ -13,6 +13,50 @@
 #include "db2_test_shim.h"
 #include "../kb/kb_curator_contradictions.h"
 
+/* Link stubs for the opt-in fuzzy phase: it is gated behind the deep tier (off in
+ * these tests), so mine_fuzzy_contradictions returns before calling any of these
+ * at runtime — they exist only to satisfy the linker. */
+int memory_embed_text(const char *text, const char *command, float *out, int max_dim)
+{
+   (void)text;
+   (void)command;
+   (void)out;
+   (void)max_dim;
+   return 0;
+}
+int pgvec_curator_claim_search(const char *which_vec, const char *claim_kind, const float *vec,
+                               int dim, int limit, int64_t *ids, double *scores, int max)
+{
+   (void)which_vec;
+   (void)claim_kind;
+   (void)vec;
+   (void)dim;
+   (void)limit;
+   (void)ids;
+   (void)scores;
+   (void)max;
+   return 0;
+}
+int pgvec_curator_claim_deep_similarity(int64_t a, int64_t b, double *out)
+{
+   (void)a;
+   (void)b;
+   (void)out;
+   return 0;
+}
+int pgvec_curator_claim_fields(int64_t point_id, char *artifact_out, int alen, char *subject_out,
+                               int slen, char *value_out, int vlen)
+{
+   (void)point_id;
+   (void)artifact_out;
+   (void)alen;
+   (void)subject_out;
+   (void)slen;
+   (void)value_out;
+   (void)vlen;
+   return 0;
+}
+
 static void seed(sqlite3 *db, const char *sql)
 {
    assert(sqlite3_exec(db, sql, NULL, NULL, NULL) == SQLITE_OK);
