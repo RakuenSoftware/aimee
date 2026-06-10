@@ -558,7 +558,8 @@ int config_save(const config_t *cfg)
           cfg->memory_improve_min_cluster > 0 || cfg->memory_improve_max_confidence > 0.0)
       {
          cJSON *improve = cJSON_AddObjectToObject(memory, "improve");
-         cJSON_AddBoolToObject(improve, "dedupe_enabled", cfg->memory_improve_dedupe_enabled ? 1 : 0);
+         cJSON_AddBoolToObject(improve, "dedupe_enabled",
+                               cfg->memory_improve_dedupe_enabled ? 1 : 0);
          cJSON_AddBoolToObject(improve, "summarise_enabled",
                                cfg->memory_improve_summarise_enabled ? 1 : 0);
          if (cfg->memory_improve_min_cluster > 0)
