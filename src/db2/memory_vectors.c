@@ -65,6 +65,18 @@ int pgvec_memory_vector_delete_point(int64_t point_id)
    return pgvec_memory_delete(point_id);
 }
 
+int pgvec_memory_vector_deep_update(int64_t memory_id, const float *vec, int dim)
+{
+   if (!vec || dim <= 0)
+      return 0;
+   return pgvec_memory_deep_update(memory_id, vec, dim);
+}
+
+int pgvec_memory_vector_deep_candidates(int64_t *ids, int max)
+{
+   return pgvec_memory_deep_candidates(ids, max);
+}
+
 int pgvec_memory_vector_search_record_type(const char *record_type, const float *vec, int dim,
                                            int limit, int64_t *ids, double *scores, int max)
 {

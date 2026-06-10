@@ -402,6 +402,59 @@ int memory_embed(int64_t memory_id, const char *command)
    return memory_sync_vec_row(memory_id, vec, dim);
 }
 
+/* Deep tier: re-embed one memory with the larger deep model and write it to the
+ * halfvec embedding_deep column (the live `embedding` is untouched). Mirrors
+ * memory_embed but uses the deep command + a larger buffer. Requires a real
+ * command (no builtin fallback — the deep tier is an opt-in external model). */
+int memory_embed_deep(int64_t memory_id, const char *command)
+{
+   if (memory_id <= 0 || !command || !command[0])
+      return -1;
+
+   char key[512];
+   char content[2560];
+   if (db2_memory_get_key_content(memory_id, key, sizeof(key), content, sizeof(content)) != 0)
+      return -1;
+
+   char text[3072];
+   snprintf(text, sizeof(text), "%s: %s", key, content);
+
+   float vec[DEEP_EMBED_MAX_DIM];
+   int dim = memory_embed_text(text, command, vec, DEEP_EMBED_MAX_DIM);
+   if (dim <= 0)
+      return -1;
+
+   return pgvec_memory_vector_deep_update(memory_id, vec, dim);
+}
+
+/* Deep tier backfill: re-embed up to max_rows memories that still lack a deep
+ * embedding. Throttled by the caller (one bounded batch per maintenance cycle) so
+ * a large corpus fills in over time without blocking. Returns the number of rows
+ * successfully deep-embedded; a per-row failure is logged and skipped (it is
+ * retried on a later cycle). */
+int memory_deep_backfill(const char *command, int max_rows)
+{
+   if (!command || !command[0] || max_rows <= 0)
+      return 0;
+   if (max_rows > 1000)
+      max_rows = 1000;
+
+   int64_t ids[1000];
+   int n = pgvec_memory_vector_deep_candidates(ids, max_rows);
+   if (n <= 0)
+      return 0;
+
+   int done = 0;
+   for (int i = 0; i < n; i++)
+   {
+      if (memory_embed_deep(ids[i], command) == 0)
+         done++;
+      else
+         aimee_log(LOG_WARN, "memory", "deep backfill skipped memory %lld", (long long)ids[i]);
+   }
+   return done;
+}
+
 /* memory_episode_row and memory_relation_row used to live here; the row
  * mappers moved into db2 with db2_memory_episodes_search and
  * db2_memory_relations_search. */

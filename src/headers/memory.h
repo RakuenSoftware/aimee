@@ -937,6 +937,11 @@ int memory_graph_normalize(void);
 
 int memory_embed(int64_t memory_id, const char *command);
 int memory_embed_text(const char *text, const char *command, float *out, int max_dim);
+/* Deep tier: re-embed one memory with the deep model into embedding_deep. */
+int memory_embed_deep(int64_t memory_id, const char *command);
+/* Deep tier: backfill up to max_rows memories lacking a deep embedding (one
+ * throttled batch). Returns the number deep-embedded. */
+int memory_deep_backfill(const char *command, int max_rows);
 double cosine_similarity(const float *a, const float *b, int dim);
 
 /* --- Effectiveness Tracking --- */
@@ -1553,14 +1558,15 @@ void memory_recall_metrics(int64_t *assemblies_total, int64_t *session_start_ass
  * path that can touch an LLM and it stays off by default.
  *
  * See docs/proposals/done/scheduled-memory-maintenance-cycles.md. */
-#define MEMORY_MAINTENANCE_MODE_REPLAY    (1u << 0)
-#define MEMORY_MAINTENANCE_MODE_COMPACT   (1u << 1)
-#define MEMORY_MAINTENANCE_MODE_PRUNE     (1u << 2)
-#define MEMORY_MAINTENANCE_MODE_SUMMARIZE (1u << 3)
+#define MEMORY_MAINTENANCE_MODE_REPLAY     (1u << 0)
+#define MEMORY_MAINTENANCE_MODE_COMPACT    (1u << 1)
+#define MEMORY_MAINTENANCE_MODE_PRUNE      (1u << 2)
+#define MEMORY_MAINTENANCE_MODE_SUMMARIZE  (1u << 3)
+#define MEMORY_MAINTENANCE_MODE_DEEP_EMBED (1u << 4)
 
 #define MEMORY_MAINTENANCE_MODES_DEFAULT                                                           \
    (MEMORY_MAINTENANCE_MODE_REPLAY | MEMORY_MAINTENANCE_MODE_COMPACT |                             \
-    MEMORY_MAINTENANCE_MODE_PRUNE)
+    MEMORY_MAINTENANCE_MODE_PRUNE | MEMORY_MAINTENANCE_MODE_DEEP_EMBED)
 
 #define MEMORY_MAINTENANCE_DEFAULT_INTERVAL_SECS 900 /* 15 min */
 
@@ -1579,6 +1585,7 @@ typedef struct
    int profile_cards_refreshed;
    int merged;
    int summarized;
+   int deep_embedded; /* deep-tier rows backfilled this cycle */
    double elapsed_ms;
    int64_t memory_count_before;
    int64_t memory_count_after;
