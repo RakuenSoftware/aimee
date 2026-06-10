@@ -20,11 +20,14 @@ Endpoints:
   GET  /health                                         -> {"status":"ok","model":...,"dim":N}
 
 Config (env):
-  EMBEDDER_PORT   listen port (default 8080)
-  EMBEDDER_MODEL  sentence-transformers model id (default pplx-embed-v1-0.6b)
-  RERANKER_MODEL  cross-encoder model id (default ettin-reranker-400m-v1)
+  EMBEDDER_PORT     listen port (default 8080)
+  EMBEDDER_MODEL    sentence-transformers model id (default pplx-embed-v1-0.6b)
+  RERANKER_MODEL    cross-encoder model id (default ettin-reranker-400m-v1)
+  EMBEDDER_THREADS  torch intra-op threads (default min(8, ncpu))
+  EMBEDDER_QUANTIZE fp32 (default) | int8 (torch dynamic; ~3.3x faster, drifts —
+                    pair with the 4b deep tier; see below)
 
-Dependencies: pip install "sentence-transformers>=3.3" einops
+Dependencies: pip install "sentence-transformers>=3.3" "transformers>=5.2" einops
 """
 
 import json
@@ -44,6 +47,14 @@ PORT = int(os.environ.get("EMBEDDER_PORT", "8080"))
 # an explicit EMBEDDER_THREADS wins. Set OMP before torch is imported.
 EMBEDDER_THREADS = int(os.environ.get("EMBEDDER_THREADS", "0")) or min(8, os.cpu_count() or 8)
 os.environ.setdefault("OMP_NUM_THREADS", str(EMBEDDER_THREADS))
+# Optional int8 dynamic quantization. Pure torch (no optimum/onnx), so it composes
+# with the transformers>=5.2 the Ettin reranker needs — unlike the q4 ONNX path.
+# EMBEDDER_QUANTIZE=int8 runs ~3.3x faster on CPU (58ms vs 190ms/embed @ 8 threads)
+# but the embedding drifts (~0.90 cosine vs fp32): dynamic quant is per-tensor and
+# uncalibrated. INTENDED PAIRING: serve int8 only when the 4b deep tier is enabled
+# (it re-embeds for quality, backstopping the drift); serve fp32 when the 0.6b is
+# the sole tier. The deep-tier deployment sets this to int8; the default is fp32.
+EMBEDDER_QUANTIZE = os.environ.get("EMBEDDER_QUANTIZE", "fp32").strip().lower()
 
 _model = None
 _dim = 0
@@ -68,9 +79,14 @@ def load_model():
     # trust_remote_code: the Qwen3-based embedders (pplx-embed, gte-Qwen2) ship
     # custom modelling code on the Hub.
     _model = SentenceTransformer(MODEL_NAME, trust_remote_code=True)
-    _dim = _model.get_sentence_embedding_dimension() or 0
+    _dim = _model.get_sentence_embedding_dimension() or 0  # read before quantizing
+    if EMBEDDER_QUANTIZE == "int8":
+        import torch.ao.quantization as ao_q
+
+        _model = ao_q.quantize_dynamic(_model, {torch.nn.Linear}, dtype=torch.qint8)
     sys.stderr.write(
-        f"embedder-server: loaded {MODEL_NAME} dim={_dim} threads={EMBEDDER_THREADS}\n"
+        f"embedder-server: loaded {MODEL_NAME} dim={_dim} threads={EMBEDDER_THREADS}"
+        f" quant={EMBEDDER_QUANTIZE}\n"
     )
     return _model
 
@@ -114,7 +130,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.rstrip("/") == "/health":
-            self._send(200, {"status": "ok", "model": MODEL_NAME, "dim": _dim})
+            self._send(
+                200,
+                {"status": "ok", "model": MODEL_NAME, "dim": _dim, "quantize": EMBEDDER_QUANTIZE},
+            )
         else:
             self._send(404, {"error": "not found"})
 
