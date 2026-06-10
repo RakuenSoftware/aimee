@@ -182,17 +182,65 @@ production binary on a real corpus, which stays user-gated.
 | Flag | Harness | Result | Verdict |
 |---|---|---|---|
 | `demotion_enabled` | `benchmarks/memory/poison_gate.py` | PASS (exit 0): all clean rows retrieved CORRECT; only closed-outcome poison rows (`poison_refresh`, `poison_snapshot`) suppressed — declared-confidence / trusted-source / frequency fields correctly ignored | **decision boundary sound** — safe to run the live shadow→live(2) ladder; the gate does not over-suppress |
-| `guardrails_semantic_enabled` (→advisory) | `tools/guardrails_replay.py` (75 fixtures) | PASS (exit 0): precision **1.0**, recall **1.0**, **0** false-positives on benign; yellow-zone advisory recall **1.0** vs deterministic **0.0** (+1.0); per-label precision 1.0 (secret_leak/task_drift/verification_bypass) | **precision floor cleared** → the enable→advisory flip is supported on fixtures; blocking stage still needs the live FP-on-benign confirmation |
+| `guardrails_semantic_enabled` (→advisory) | `tools/guardrails_replay.py` (spec scores) **→ superseded by** `benchmarks/guardrails/sidecar_e2e.py` (real sidecar) | `guardrails_replay` reports precision/recall **1.0** — but it grades the fixtures' *pre-baked* `score` field, NOT the sidecar. The **e2e harness runs the actual `scripts/guardrails-semantic.py` through the production rule** (`gsem_policy` bands `overall` vs 0.40/0.70/0.90) and **FAILS** (exit 1): **10/10 benign false-positives**; `overall ≈ 0.40` for *every* band (allow/warn/prompt/block) because `max(action_risk=0.40 edit baseline, …)` swamps the real signals → **no threshold separates benign from risky** | **NOT default-on-ready.** The earlier "PASS" was a spec artifact. The gap is the sidecar's scoring / the `overall`-banding policy, not the wiring. Fix = recalibrate the sidecar score (or band on labels/components, not flat `overall`), then the e2e harness must pass before enabling. Do **not** wire `guardrails_semantic_command` to default-on until then. |
 | `learning_implicit_citation_repair` / `_continuation` | `make learning-citation-eval` (real `dogfood_classify_next_turn` over 63 citation fixtures) | **GRADED PASS** (exit 0): precision **1.0**, recall **1.0**, FPR **0.0** (44 pos / 19 neg) — clears the pinned 0.90/0.80/0.10 bar | **detector validated on the labelled corpus**; the per-turn classifier is accurate. Remaining for a flip: the full router→substrate promotion loop on a real session corpus |
 | `learning_implicit_repeat_question` / `repeated_correction` / `workflow_repetition` | — | stateful (session/DB) — not replayable by the pure-text tool | needs a live router + session state to grade |
 | `learning_synthesize_enabled` (substrate promotion) | `learning_replay.py` substrate fixtures | VALIDATION OK: schema + distribution clean | needs a substrate-promotion replay entry (live router) to grade |
 
-What this changes: `demotion_enabled` and `guardrails_semantic_enabled`(advisory)
-move to "boundary validated on fixtures — remaining arm is the live-binary/real-
-corpus run", and the two **citation implicit-signal detectors are graded PASS
-against the real classifier** (the metric is now bound to the build via
-`make learning-citation-eval`, not a Python re-implementation). These are the
-closest flips.
+### Default flips applied (this PR) — "default-on to proven worth"
+
+Acting on the determinations, with each flip gated by whether the feature is
+actually *consumed* (no inert default-on theatre):
+
+- **`demotion_enabled`: 0 → 1 (shadow). FLIPPED.** poison_gate proved the score
+  boundary suppresses only closed-outcome poison, never clean rows; gate
+  criterion #4 (*shadow before acting*) makes shadow the correct on-state. At 1,
+  `kb_demote_run` (wired from `kb_service_agent.c`) computes scores + fits
+  profiles but demotes nothing (live suppression only at `>= 2`). One config bump
+  from live after real-recall shadow review. Save guard flipped to emit-when-≠1.
+- **`guardrails_semantic_enabled`: NOT flipped.** The e2e harness shows the
+  bundled sidecar over-flags every edit (above). Proven-not-ready.
+- **`learning_implicit_citation_repair` / `_continuation`: NOT flipped — they are
+  *inert*.** The classifier is graded PASS, but `learning_implicit_detect_turn`
+  is **never called in any production path** (only defined). Flipping the flag
+  changes nothing until the detector is wired into the per-turn loop (a real
+  wiring gap — see below). Wiring it needs post-citation cross-turn context and
+  live validation, so it is a scoped change, not a blind flip.
+
+The audit lesson: of the three "proven" flags, only **demotion** was both proven
+*and* cleanly consumable. Guardrails was proven-on-spec but broken-in-practice;
+the citation detectors were proven-in-logic but unwired. Flipping defaults without
+the consumed-check would have shipped one alert-fatigue feature and one no-op.
+
+### Requested wirings — investigation findings
+
+Two features were flagged for wiring so their proven flags become live. Close
+inspection found both need real work beyond a flag flip:
+
+**`guardrails_semantic_command` — do NOT auto-wire-and-enable.** The bundled
+sidecar `scripts/guardrails-semantic.py` exists and is deterministic, so the
+command *could* be defaulted to it — but `benchmarks/guardrails/sidecar_e2e.py`
+proves the resulting feature over-flags every edit (10/10 benign FP; `overall`
+score ~0.40 for all bands). Enabling it would ship alert-fatigue. **Blocker:** the
+sidecar's `overall` (a `max()` dominated by the flat 0.40 edit baseline) doesn't
+discriminate risk; `gsem_policy` bands on it. **Fix before enabling:** recalibrate
+the sidecar score, or change `gsem_policy` to band on `labels`/component scores;
+then `sidecar_e2e.py` must exit 0.
+
+**`learning_implicit_detect_turn` — real wiring gap, needs live validation.** The
+classifier is graded PASS, but the whole per-turn consumer is unwired:
+`dogfood_autolabel_next_turn_live()` (the documented site `detect_turn` should
+follow) has **no caller** either. Memory-citation *moments* are logged live
+(`dogfood_log_moment_live`, e.g. from `memory_briefing`), setting
+`g_last_record_id`, but nothing consumes them on the next turn. **Integration
+point:** call `dogfood_autolabel_next_turn_live(text)` then
+`learning_implicit_detect_turn(text)` at the **primary user-turn boundary** —
+crucially NOT in `agent_run*` (which also runs for delegates/sub-agents → would
+mis-fire and pollute signals). The existing `g_last_record_id` gate gives the
+required post-citation context for free. **Why not done here:** the correct
+primary-turn boundary isn't identifiable without live tracing, and the change
+touches the core turn loop with no autonomous way to validate it doesn't mis-fire.
+Recommended as a reviewable change with `.254` live validation, not a blind edit.
 
 ---
 

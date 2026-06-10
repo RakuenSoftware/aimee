@@ -193,7 +193,9 @@ int main(void)
       cfg.calibration_buckets = 20;
       cfg.calibration_tau_memory_auto = 0.91;
       snprintf(cfg.calibration_command, sizeof(cfg.calibration_command), "calib --json");
-      cfg.demotion_enabled = 1;
+      /* demotion_enabled now defaults to 1 (shadow); set 2 (live) to prove the
+       * non-default value survives the emit-when-!=1 save guard. */
+      cfg.demotion_enabled = 2;
       cfg.demotion_window = 128;
       cfg.bandit_live_decision_enabled = 1;
       cfg.bandit_exploration_fraction = 0.2;
@@ -360,7 +362,7 @@ int main(void)
       assert(cfg2.calibration_buckets == 20);
       assert(cfg2.calibration_tau_memory_auto > 0.90 && cfg2.calibration_tau_memory_auto < 0.92);
       assert(strcmp(cfg2.calibration_command, "calib --json") == 0);
-      assert(cfg2.demotion_enabled == 1 && cfg2.demotion_window == 128);
+      assert(cfg2.demotion_enabled == 2 && cfg2.demotion_window == 128);
       assert(cfg2.bandit_live_decision_enabled == 1);
       assert(cfg2.bandit_exploration_fraction > 0.19 && cfg2.bandit_exploration_fraction < 0.21);
       assert(strcmp(cfg2.bandit_optimize_command, "bopt --json") == 0);
