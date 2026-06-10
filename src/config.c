@@ -419,6 +419,13 @@ static void config_set_defaults(config_t *cfg)
    cfg->memory_fetch_budget_shape_aware = 1;
    cfg->kb_search_max_results = 50;
    cfg->memory_routing_enabled = 1;
+   /* Default-on to preserve behavior: profile-card refresh ran ungated in the
+    * maintenance REPLAY pass before the enable-gate was wired. Maintenance is
+    * itself default-off, so this is a no-op until maintenance is enabled. */
+   cfg->memory_profile_cards_enabled = 1;
+   /* Default-on to preserve behavior: dedupe of duplicate-key memories ran ungated
+    * in the maintenance COMPACT pass before the enable-gate was wired. */
+   cfg->memory_improve_dedupe_enabled = 1;
    cfg->memory_hard_negative_log[0] = '\0';
    cfg->dogfood_enabled = 1;
    cfg->dogfood_log_dir[0] = '\0';

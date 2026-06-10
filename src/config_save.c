@@ -433,7 +433,7 @@ int config_save(const config_t *cfg)
        cfg->memory_pagerank_relations[0] ||
        (cfg->memory_citations_mode[0] && strcmp(cfg->memory_citations_mode, "off") != 0) ||
        cfg->memory_citations_reprompt_on_miss || cfg->memory_citations_strip_unverified ||
-       cfg->memory_profile_cards_enabled || cfg->memory_profile_cards_min_obs > 0 ||
+       !cfg->memory_profile_cards_enabled || cfg->memory_profile_cards_min_obs > 0 ||
        cfg->memory_profile_cards_stale_secs > 0 || cfg->memory_briefing_enabled ||
        cfg->memory_briefing_limit_tokens > 0 || cfg->memory_aggregation_enabled ||
        cfg->memory_aggregation_max_items > 0 || cfg->memory_prospective_enabled ||
@@ -444,7 +444,9 @@ int config_save(const config_t *cfg)
        cfg->memory_recall_limit_tokens_session > 0 || cfg->memory_recall_limit_tokens_turn > 0 ||
        cfg->memory_directives_enabled || cfg->memory_directives_failure_threshold > 0 ||
        cfg->memory_directives_max_matches > 0 || cfg->memory_rewrite_enabled ||
-       cfg->memory_rewrite_command[0])
+       cfg->memory_rewrite_command[0] || !cfg->memory_improve_dedupe_enabled ||
+       cfg->memory_improve_summarise_enabled || cfg->memory_improve_min_cluster > 0 ||
+       cfg->memory_improve_max_confidence > 0.0)
    {
       cJSON *memory = cJSON_AddObjectToObject(root, "memory");
       if (cfg->disposition_count > 0 || cfg->disposition_global_count > 0 ||
@@ -542,7 +544,7 @@ int config_save(const config_t *cfg)
          cJSON_AddBoolToObject(citations_cfg, "strip_unverified",
                                cfg->memory_citations_strip_unverified ? 1 : 0);
       }
-      if (cfg->memory_profile_cards_enabled || cfg->memory_profile_cards_min_obs > 0 ||
+      if (!cfg->memory_profile_cards_enabled || cfg->memory_profile_cards_min_obs > 0 ||
           cfg->memory_profile_cards_stale_secs > 0)
       {
          cJSON *pc_cfg = cJSON_AddObjectToObject(memory, "profile_cards");
@@ -551,6 +553,18 @@ int config_save(const config_t *cfg)
             cJSON_AddNumberToObject(pc_cfg, "min_observations", cfg->memory_profile_cards_min_obs);
          if (cfg->memory_profile_cards_stale_secs > 0)
             cJSON_AddNumberToObject(pc_cfg, "stale_secs", cfg->memory_profile_cards_stale_secs);
+      }
+      if (!cfg->memory_improve_dedupe_enabled || cfg->memory_improve_summarise_enabled ||
+          cfg->memory_improve_min_cluster > 0 || cfg->memory_improve_max_confidence > 0.0)
+      {
+         cJSON *improve = cJSON_AddObjectToObject(memory, "improve");
+         cJSON_AddBoolToObject(improve, "dedupe_enabled", cfg->memory_improve_dedupe_enabled ? 1 : 0);
+         cJSON_AddBoolToObject(improve, "summarise_enabled",
+                               cfg->memory_improve_summarise_enabled ? 1 : 0);
+         if (cfg->memory_improve_min_cluster > 0)
+            cJSON_AddNumberToObject(improve, "min_cluster", cfg->memory_improve_min_cluster);
+         if (cfg->memory_improve_max_confidence > 0.0)
+            cJSON_AddNumberToObject(improve, "max_confidence", cfg->memory_improve_max_confidence);
       }
       if (cfg->memory_briefing_enabled || cfg->memory_briefing_limit_tokens > 0)
       {

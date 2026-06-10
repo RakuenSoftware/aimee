@@ -1,0 +1,194 @@
+# Flag rollout readiness tracker
+
+Status of every default-OFF feature flag against the project's bar for flipping it
+permanently ON. This is the burn-down checklist for the rollout program; update the
+per-flag rows as harnesses land and criteria clear.
+
+Precedents that set the bar: `virtual_context_enabled` and `kb_fusion_mode` were the
+only two flags ever flipped, both via a rollout-validation report
+(`docs/validation/virtual-context-rollout-validation.md`). This tracker generalises
+that discipline to the rest of the tree.
+
+---
+
+## The gate (must clear in order)
+
+A flag may flip default-ON only after **all six** clear:
+
+1. **Code-complete + `make unit-tests` green with the flag forced ON.**
+2. **An A/B harness that isolates *this* flag** (on vs off) on a **real, labelled
+   corpus** — not synthetic-only.
+3. **Numeric acceptance criteria pinned _before_ the run** (see defaults below).
+4. **Shadow mode** for anything that changes a decision or blocks (safety,
+   calibration, demotion): record "would it have agreed" before it acts.
+5. **Default flip + cheap, documented rollback**, zero data lock-in.
+6. **Observability** (dashboard/alert) for risky flips.
+
+### Default acceptance criteria (pin per-flag; override only with justification)
+
+Derived from `retrieval-abstention-confidence-gate.md §B.7` and
+`recall-economy-progressive-disclosure.md`:
+
+- **Quality**: primary metric improves OR is neutral (within noise) vs baseline.
+- **No regression**: false-omission / wrong-answer rate rises by **≤ 2pp absolute**.
+- **Cost budget**: p95 latency and injected-token deltas within a stated bound
+  (e.g. "lower p95 injected bytes at equal-or-better correctness").
+- **Auditability**: bench exports per-query evidence traces.
+- **Stability**: if a threshold sits near a decision boundary, decision
+  reproducibility across runs is demonstrated.
+- If the corpus is too small for stable percentages → **keep default-off, collect
+  more labelled data.**
+
+Safety flags are a **two-stage** flip: enable→advisory (drop `_dry_run`), then
+advisory→blocking (drop `_advisory_only`) only on a pinned **precision floor**.
+
+---
+
+## Ground-truth wiring audit (2026-06-10)
+
+Every default-off flag was grepped for production readers (excluding `src/config*.c`
+and `src/tests/`). Result classes:
+
+- **WIRED** — gates real behaviour. The blocker is *measurement* (no bench), not code.
+- **INERT TOGGLE** — the `*_enabled` field is never read in production; the feature
+  behind it is reachable another way (explicit tool / different gate). The *automatic,
+  config-gated* half was scaffolded but never wired.
+
+There are **no fully-dead features**. There are **5 inert toggles** (see §Inert flags).
+
+---
+
+## Readiness matrix
+
+Legend — Tier: **A**=harness exists, run it · **B**=harness needs a per-flag knob ·
+**C**=no harness, build it · **S**=safety, two-stage · **X**=do-not-auto-flip ·
+**0**=inert toggle (wire-or-remove). Tests: ✓ good · ~ light · ✗ none/smoke.
+
+### Tier A — flip-ready, just run against pinned criteria
+
+| Flag | Harness (isolates it today) | Tests | Pinned criteria | Next action |
+|---|---|---|---|---|
+| `ingress_preinject_enabled` | `bench/ingress_token_bench.py` (per-request on/off) | ~ | lower p95 bytes, **correctness Δ ≥ 0** | bench measures bytes only — add a correctness arm (LongMemEval/coding on/off), then run |
+| `demotion_enabled` (0→1→2) | `benchmarks/memory/poison_gate.py` (deterministic) | ✓ | clean-accuracy Δ ≥ −noise; poison gate PASS | run shadow(1) on real recall, then live(2) |
+| `bandit_live_decision_enabled` | `aimee memory benchmark code-graph-fusion --arm …` | ✓ | MRR/nDCG@5 ≥ baseline at fixed explore budget | pin floor, run ablation arms |
+
+### Tier B — add a per-flag on/off knob to an existing suite, then becomes Tier A
+
+> NB: the memory suite is **shell scripts** (`benchmarks/suite/run-direct.sh`,
+> `run-llm.sh`), **not** a `runner.py`. The knob = a `--config-variant` pass-through
+> that sets the flag via `aimee config set` between the two runs.
+
+| Flag | Suite it rides | Tests | Next action |
+|---|---|---|---|
+| `memory_rerank_enabled` (+`_mode`,`_top_k`,`_mix`) | LongMemEval/LocOMo | ✗ | add variant knob; A/B on retrieval suites |
+| `memory_query_expansion_mode` | LongMemEval/LocOMo | ✗ | same |
+| `memory_rewrite_enabled`/`_hyde`/`_decompose` | long-context suites | ✗ | same |
+| `kb_ranker_enabled` | code-graph-fusion | ✗ | add as an ablation arm |
+| `cache_aware_rewrite_enabled` | — (needs **cost** harness) | ~ | build cache-hit/token A/B; correctness must be neutral |
+| `memory_recall_lanes_enabled` | LongMemEval | ✓ | add variant knob |
+
+### Tier C — no harness; build the eval before any flip discussion
+
+These are **wired** (gate real code) but unmeasurable today.
+
+| Flag | Prod reader | Tests | Build needed |
+|---|---|---|---|
+| `learning_synthesize_enabled` + 6 `learning_implicit_*` | `learning_router.c`, `kb_curator_drain.c` | ~ | **runner over existing `benchmarks/learning/` fixtures** — fixtures ready, see `learning_replay.py` (this PR) |
+| `memory_scenes_enabled` | `memory_core_helpers.inc` | ✗ | labelled scene-retrieval corpus + runner |
+| `memory_negation_enabled` | `memory_core_helpers.inc` | ✗ | negation/absence corpus + runner |
+| `memory_salience_enabled` | `memory_core_helpers.inc` | ✗ | per-flag arm in retrieval suite |
+| `memory_surprise_enabled` | `memory_core_helpers.inc` | ✗ | same |
+| `memory_pagerank_enabled` | `memory_core_helpers.inc` | ✗ | same |
+| `memory_derive_facts_enabled` | `memory_assemble.c` | ✗ | date/quant-arithmetic Q&A corpus |
+| `memory_failure_detection_enabled` | `memory_assemble.c` | ✗ | abstention corpus (see retrieval-abstention proposal) |
+| `memory_fetch_budget_enabled` | `memory_core_search.inc` | ✗ | cost/correctness A/B |
+| `memory_context_budget_enabled` | `memory_assemble.c` | ✗ | assembly-mode A/B (top-K vs token-budget) |
+| `memory_aggregation_enabled` | `memory_core_search.inc` | ✗ | coverage-query corpus |
+| `memory_episode_summaries_enabled` | `cmd_memory_vector.c` | ✗ | session-close summary quality eval |
+| `memory_lifecycle_enabled` (+`_hide_archived`) | `memory_core_helpers.inc` | ✗ | recall-with-archival A/B |
+| `memory_cognify_enabled`/`_async` | `memory_improve.c`, `kb.c` | ✗(0 asserts) | extraction-quality eval |
+| `identity_working_profile_injection_enabled` | `prompts.c` | ✗(smoke) | task-accuracy A/B with/without injection |
+| `drift_detect_shadow_enabled` | `kb_detect.c` | ~ | already shadow-only by design; needs precision eval |
+| `kb_curator_*` (10 flags) | `kb_curator_drain.c` + pass files | ~/✗ | per-pass artifact-quality (LLM-judge) + **cost budget**; `curator_eval.py` exists but doesn't isolate passes |
+| `review_scheduler_enabled` | `kb_reflection.c` | ✗ | reflection-usefulness eval (hard) |
+| `skills_review/curator/manage/eval_gate` | `server.c`, `skill_*.c` | ~ | skill-lifecycle outcome eval |
+
+### Tier S — safety, two-stage flip
+
+| Flag | Harness | Tests | Path |
+|---|---|---|---|
+| `guardrails_semantic_enabled`→drop `_dry_run`→drop `_advisory_only` | `tools/guardrails_replay.py` (55 fixtures, precision/recall) | ✓(18) | run replay → pin precision floor on 35 yellow-zone + 0 regressions on 10 benign → enable advisory; block only if precision clears `_allow_ml_only_block` |
+| `integrity_enabled`→drop `integrity_dry_run` | none yet | ✓(14) | **build ingest-pattern fixture corpus**; run dry-run shadow → drop dry-run if FP≈0 |
+| `calibration_enabled` (0→1→2→3) | none isolated | ✓(14) | use built-in shadow(1)→A/B(2) ladder; pin promotion-threshold agreement |
+
+### Tier X — do NOT auto-flip (opt-in by design)
+
+Mode/cost/posture changes, not quality improvements — leave user-driven, document only:
+`autonomous`, `ecomode`, `aux_enabled`, `ensemble_enabled`, `computer_use_enabled`,
+`claude-proxy` (rewrites the user's Claude config), Codex ingress (already
+always-available), `rewind_auto_snapshot`. Low-risk operational flips on a smoke test
+alone: `worktree_gc_enabled`.
+
+---
+
+## Inert flags — wire or remove (decision required)
+
+These `*_enabled` toggles have **zero production readers**; only config parse/save and
+one config-surface test reference them. The feature behind each is reachable another
+way, so the *toggle* is vestigial — but it is a **misleading control surface**: a user
+can `config set` it, it persists, shows in `config show`, and silently does nothing.
+
+| Flag | Feature reachable via | Disposition |
+|---|---|---|
+| `memory_profile_cards_enabled` | runs in maintenance, gated by `_min_obs`/`_stale_secs` (both read) | **wire** the toggle as the master gate, or **remove** it and document profile-cards as always-on-in-maintenance |
+| `memory_briefing_enabled` (+`_limit_tokens`) | `aimee memory briefing` / MCP `memory_briefing` tool / session-lifecycle | toggle was meant to **auto-inject** briefing at session start — wire that path, or remove the toggle (briefing stays a manual tool) |
+| `memory_directives_enabled` (+`_failure_threshold`,`_max_matches`) | `aimee memory directive(s)` CLI + `session_briefing_directives` | toggle gates **auto-create-on-confident-failure** + **auto-surface-per-turn** — wire those, or remove and keep directives manual |
+| `memory_improve_dedupe_enabled` | `memory_improve_dedupe()` callable | improve loop doesn't consult the toggle — wire it as the gate, or remove |
+| `memory_improve_summarise_enabled` | `memory_improve_summarise()` callable | same |
+
+**Why not just delete them?**
+1. Deleting a flag here is **not** deleting nothing — the feature is live. Removal
+   forces a decision about the feature's *permanent* gate (always-on? manual-only?).
+2. These are **rollout seams**, not litter. The repo's method is "land seam off →
+   validate → wire → flip"; an unread `*_enabled` is the expected mid-rollout state.
+   Deleting it throws away the integration point the next person re-adds.
+3. **But** inert config IS a real harm (misleading surface). So the disposition is
+   per-flag: **finish the wiring** (small, for the four live-feature cases) or
+   **remove the toggle and document the feature's fixed behaviour** — a product call,
+   not a reflex `git rm`.
+
+Recommended: wire `profile_cards`/`improve_*` (trivial — connect the existing gate),
+and take `briefing`/`directives` auto-mode as scoped follow-ups (the auto-inject /
+auto-create paths are real features worth finishing).
+
+---
+
+## Execution plan (program steps 1–5)
+
+| Step | What | State |
+|---|---|---|
+| 1 | Build missing harness primitives | **in progress**: `learning_replay.py` landed (this PR); suite `--config-variant` knob + per-pass curator eval = backlog |
+| 2 | Pin acceptance criteria per flag | **this doc** (defaults pinned; per-flag numbers fill as corpora land) |
+| 3 | Clear Tier A | **user-gated**: needs live aimee-server + corpora; run via `! <cmd>` (see runbook below) |
+| 4 | Run safety (Tier S) in shadow | **user-gated**: enable advisory + replay; dashboards |
+| 5 | Stop treating Tier X as default candidates | **done** (documented above) |
+
+### What can be done autonomously vs needs you
+
+- **Autonomous (no infra)**: this tracker, harness *code*, fixture corpora, the
+  inert-flag wiring.
+- **Needs you (`! <cmd>`)**: every actual bench run — they require a live
+  aimee-server, Postgres/pgvector, full corpora, and often a GPU/delegate judge. Per
+  project setup, autonomous remote/live runs are classifier-gated; run them
+  collaboratively.
+
+### Tier-A runbook (paste-ready, fill the live server)
+
+```bash
+# ingress pre-injection — bytes + correctness A/B
+aimee config set ingress_preinject_enabled 0 && python3 bench/ingress_token_bench.py --prompts bench/ingress_prompts.txt --out off.json
+aimee config set ingress_preinject_enabled 1 && python3 bench/ingress_token_bench.py --prompts bench/ingress_prompts.txt --out on.json
+# demotion — shadow then poison gate
+aimee config set demotion_enabled 1   # shadow
+python3 benchmarks/memory/poison_gate.py --fixtures benchmarks/memory/poison_fixtures.json --output benchmarks/results/memory_poison_report.json
+```
