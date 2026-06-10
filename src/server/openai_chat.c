@@ -18,6 +18,8 @@
 #include "server_http.h"
 #include "openai_shape.h"
 #include "ingress_preinject.h"
+#include "dogfood.h"                /* dogfood_autolabel_next_turn_live */
+#include "learning_implicit.h"      /* learning_implicit_detect_turn */
 #include "openai_responses_store.h" /* previous_response_id continuation store */
 #include "openai_runs_store.h"      /* GET /v1/runs/{id} record store */
 #include "aimee.h"                  /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
@@ -788,6 +790,24 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
 
    /* Heal orphaned tool calls/results — each Codex turn is stateless full-history. */
    message_history_repair(messages);
+
+   /* Per-turn learning signals (primary external-agent turn — this is the
+    * converged chat-completions path that Anthropic /v1/messages and Codex
+    * /v1/responses both translate into; delegates use a different path). On this
+    * turn's user text we (1) autolabel the PRIOR turn's memory-citation moment
+    * and (2) emit the implicit citation_then_{repair,continuation} learning
+    * signal. Both are self-gating: they no-op unless a prior moment was logged
+    * (g_last_record_id) and the relevant flags are on. Runs BEFORE pre-injection
+    * recall below, which would overwrite g_last_record_id with this turn's moment. */
+   {
+      char *turn_text = ingress_preinject_query_from_messages(messages);
+      if (turn_text)
+      {
+         dogfood_autolabel_next_turn_live(turn_text);
+         learning_implicit_detect_turn(turn_text);
+         free(turn_text);
+      }
+   }
 
    /* P1 context pre-injection (config: ingress_preinject_enabled, default off):
     * prepend a fusion-recall <aimee-context> envelope to the system prompt so the

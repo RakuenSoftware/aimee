@@ -209,17 +209,19 @@ actually *consumed* (no inert default-on theatre):
   from live after real-recall shadow review. Save guard flipped to emit-when-≠1.
 - **`guardrails_semantic_enabled`: NOT flipped.** The e2e harness shows the
   bundled sidecar over-flags every edit (above). Proven-not-ready.
-- **`learning_implicit_citation_repair` / `_continuation`: NOT flipped — they are
-  *inert*.** The classifier is graded PASS, but `learning_implicit_detect_turn`
-  is **never called in any production path** (only defined). Flipping the flag
-  changes nothing until the detector is wired into the per-turn loop (a real
-  wiring gap — see below). Wiring it needs post-citation cross-turn context and
-  live validation, so it is a scoped change, not a blind flip.
+- **`learning_implicit_citation_repair` / `_continuation`: 0 → 1. FLIPPED — after
+  wiring the detector.** The classifier is graded PASS, but the flag was inert
+  until this PR wired `learning_implicit_detect_turn` into the primary chat turn
+  (`openai_chat.c`, see below). Now consumed + self-gating + operator-reviewed, so
+  flipped on per "default-on to proven worth". Needs `.254` live validation;
+  trivially revertible.
 
 The audit lesson: of the three "proven" flags, only **demotion** was both proven
-*and* cleanly consumable. Guardrails was proven-on-spec but broken-in-practice;
-the citation detectors were proven-in-logic but unwired. Flipping defaults without
-the consumed-check would have shipped one alert-fatigue feature and one no-op.
+*and* immediately consumable. Guardrails was proven-on-spec but broken-in-practice
+(fixed here); the citation detectors were proven-in-logic but unwired (wired here).
+The consumed-check is what turned "flip three proven flags" into "fix one, wire
+one, flip one cleanly" — without it, this PR would have shipped an alert-fatigue
+feature and a no-op under the banner of "proven".
 
 ### Requested wirings — investigation findings
 
@@ -238,20 +240,25 @@ mandates "no behavioral change until opted in"; recall 0.385 also argues against
 blanket default-on. Opt-in is now one step against a known-good sidecar —
 `guardrails.semantic.{command,enabled,dry_run}` — gated by `sidecar_e2e.py`.
 
-**`learning_implicit_detect_turn` — real wiring gap, needs live validation.** The
-classifier is graded PASS, but the whole per-turn consumer is unwired:
-`dogfood_autolabel_next_turn_live()` (the documented site `detect_turn` should
-follow) has **no caller** either. Memory-citation *moments* are logged live
+**`learning_implicit_detect_turn` — WIRED (this PR); needs `.254` live validation.**
+The classifier is graded PASS, but the whole per-turn consumer was unwired:
+`dogfood_autolabel_next_turn_live()` (the documented site `detect_turn` follows)
+had **no caller** either. Citation *moments* are logged live
 (`dogfood_log_moment_live`, e.g. from `memory_briefing`), setting
-`g_last_record_id`, but nothing consumes them on the next turn. **Integration
-point:** call `dogfood_autolabel_next_turn_live(text)` then
-`learning_implicit_detect_turn(text)` at the **primary user-turn boundary** —
-crucially NOT in `agent_run*` (which also runs for delegates/sub-agents → would
-mis-fire and pollute signals). The existing `g_last_record_id` gate gives the
-required post-citation context for free. **Why not done here:** the correct
-primary-turn boundary isn't identifiable without live tracing, and the change
-touches the core turn loop with no autonomous way to validate it doesn't mis-fire.
-Recommended as a reviewable change with `.254` live validation, not a blind edit.
+`g_last_record_id`, but nothing consumed them next-turn. **Now wired** at
+`server/openai_chat.c` — the converged chat-completions path that the Anthropic
+`/v1/messages` and Codex `/v1/responses` ingresses both translate into, and which
+delegates do **not** use (so no per-delegate mis-fire). The call sits **before**
+this turn's pre-injection recall (which would overwrite `g_last_record_id`) and is
+**self-gating**: `dogfood_autolabel_next_turn_live` + `detect_turn` no-op unless a
+prior citation moment was logged and the relevant flags are on. Signals feed
+**operator-reviewed** learning proposals (bounded blast radius). Compiles + links;
+`learning_implicit_citation_{repair,continuation}` flipped default-on (proven +
+now consumed). **Still needs `.254` live validation** that it fires on real
+post-citation turns and not spuriously — flip the flags off if it mis-fires
+(trivially revertible). **NB:** `learning_implicit_*` lack config-file persistence
+(a pre-existing systemic gap across all five) — defaults apply at startup; adding
+a `learning.implicit.*` parse/save block is a separate follow-up.
 
 ---
 

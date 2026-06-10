@@ -443,8 +443,16 @@ static void config_set_defaults(config_t *cfg)
    cfg->learning_proposal_ttl_days = 7;
    cfg->learning_max_commits_per_week = 25;
    config_learning_defaults(cfg); /* learning.synthesize.* + learning.embed.* */
-   cfg->learning_implicit_citation_repair = 0;
-   cfg->learning_implicit_citation_continuation = 0;
+   /* Default-on: the citation_then_{repair,continuation} detector is graded PASS
+    * (precision/recall 1.0 on the labelled corpus via make learning-citation-eval)
+    * and is now wired into the primary chat turn (openai_chat.c). It is
+    * self-gating (fires only after a memory-citation moment) and emits operator-
+    * reviewed learning proposals, so the blast radius is bounded. The 3 stateful
+    * implicit heuristics below stay off (their detectors need session/DB state and
+    * are not yet validated). NB: learning_implicit_* lack config-file persistence
+    * (a pre-existing systemic gap) — these defaults apply at startup. */
+   cfg->learning_implicit_citation_repair = 1;
+   cfg->learning_implicit_citation_continuation = 1;
    cfg->learning_implicit_repeat_question = 0;
    cfg->learning_implicit_repeated_correction = 0;
    cfg->learning_implicit_workflow_repetition = 0;
