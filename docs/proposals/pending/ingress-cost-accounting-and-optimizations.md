@@ -202,6 +202,21 @@ proposal must name this boundary explicitly: kb-side generation cost is **out of
 scope** for this server-local ledger (or needs its own kb-side audit hook + a
 cross-process report), so it is never falsely assumed covered.
 
+A twelfth pass found one more streaming-accounting mismatch. (23) **Not all
+`stream:true` paths are provider-incremental streams.** The OpenAI/Codex
+compatibility stream handlers in `openai_chat.c` are explicitly
+**compute-then-chunk**: they call `agent_execute()` / `agent_execute_messages()`
+to completion, then emit synthetic SSE chunks (`chat_stream_handler`,
+`completion_stream_handler`, `responses_stream_handler`). `server_http.c`
+`sse_emit` / `sse_event_emit` also ignore write failures, so these handlers
+cannot reliably tell whether the client disconnected during emission. Therefore
+the proposal's aborted-stream rule must be split: provider-incremental streams
+(native Anthropic relay / true provider SSE) can produce `partial` usage, while
+compute-then-chunk OpenAI/Codex streams should write realized spend once the
+provider call returns successfully, even if the client disconnects before all
+synthetic chunks are delivered. Treating those as partial or no-row would
+undercount real spend.
+
 ## Goal
 
 Ingress requests are a cost blind spot. Normal agent and delegate calls are
@@ -517,11 +532,16 @@ estimates** and **avoided estimated cost**.
   summaries, it must be `usage_kind=estimated` and excluded from spend totals by
   default.
 - **Failure / aborted streams:** no realized-spend row on provider error. A
-  stream cut before `finish` (client cancel, network drop) never reaches the
-  finish-time write, so usage is lost unless the tap accumulates incrementally;
-  emit a `usage_kind=partial` row with whatever was observed (or none) rather
-  than silently dropping the turn. Failed calls, if reported, are operational
-  telemetry, not cost rows.
+  provider-incremental stream cut before `finish` (client cancel, network drop)
+  may never reach the finish-time write, so usage is lost unless the tap
+  accumulates incrementally; emit a `usage_kind=partial` row with whatever was
+  observed (or none) rather than silently dropping the turn. **Do not apply that
+  rule blindly to OpenAI/Codex compatibility streaming**: those handlers are
+  compute-then-chunk, so the provider call and usage are complete before SSE
+  emission. For those paths, write realized spend after a successful provider
+  return and before/during synthetic chunk emission; client disconnect during
+  chunk delivery is delivery telemetry, not partial provider spend. Failed calls,
+  if reported, are operational telemetry, not cost rows.
 - **Source + model:** record source/client explicitly (Claude Code, Codex,
   webchat, OpenAI-compatible ingress, delegate) and resolve a real billable
   `model` (see §2a) instead of the empty string `agent_log_call` writes today.
@@ -769,7 +789,9 @@ with a benchmark showing no quality regression.
   `(source, request_id, attempt)` produces exactly one row (index or in-process
   guard), and the migration that creates the uniqueness constraint is exercised.
 - **Aborted stream:** a stream cut before `finish` writes a `partial` row (or
-  none), never a silently dropped turn.
+  none) for provider-incremental streams, never a silently dropped turn. A
+  compute-then-chunk OpenAI/Codex stream that completes the provider call writes a
+  realized row even if the client disconnects during synthetic SSE delivery.
 - **Buffered ingress:** provider usage writes **exactly one** audit row with
   resolved source + billable model; **no row** on provider failure.
 - **Native Anthropic streaming:** final `message_delta.usage` is observed while
