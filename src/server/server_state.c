@@ -15,6 +15,7 @@
 #include "compute_pool.h"
 #include "cJSON.h"
 #include "json_fluent.h"
+#include "session_credentials.h"
 #include "dogfood.h"
 #include "commands.h"
 #include "platform_path.h"

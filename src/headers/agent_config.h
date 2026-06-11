@@ -40,4 +40,11 @@ void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len);
  * NULL/empty to clear. Thread-local (each turn runs on its own worker thread). */
 void agent_set_request_codex_creds(const char *token, const char *account_id);
 
+/* Per-turn session id for the session-scoped credential keyring lookup (see
+ * session_credentials.h). Set at the start of a chat/delegate turn from the
+ * request, cleared (NULL/empty) otherwise. When set, agent_resolve_auth prefers
+ * a client-pushed session key for the agent over the server-stored api_key/env.
+ * Thread-local. */
+void agent_set_request_session(const char *session_id);
+
 #endif /* DEC_AGENT_CONFIG_H */

@@ -969,6 +969,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/sessions/close", NULL, RM_EXACT, "session.close", 0, rh_dispatch_op},
     {"POST", "/v1/sessions/get", NULL, RM_EXACT, "session.get", 0, rh_dispatch_op},
     {"POST", "/v1/sessions/brief", NULL, RM_EXACT, "session.brief", 0, rh_dispatch_op},
+    {"POST", "/v1/session/credentials", NULL, RM_EXACT, "session.credentials", 0, rh_dispatch_op},
     {"GET", "/v1/sessions/presence", NULL, RM_EXACT, "session.presence", 0, rh_dispatch_op},
     {"POST", "/v1/toolsets/resolve", NULL, RM_EXACT, "toolset.resolve", 0, rh_dispatch_op},
     {"POST", "/v1/blast_radius/preview", NULL, RM_EXACT, "blast_radius.preview", 0, rh_dispatch_op},

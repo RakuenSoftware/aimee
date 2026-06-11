@@ -546,6 +546,7 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/worktree_gc.c
     ${AIMEE_SRC_DIR}/workspace_manifest.c
     ${AIMEE_SRC_DIR}/server/agent_config.c
+    ${AIMEE_SRC_DIR}/server/session_credentials.c
     ${AIMEE_SRC_DIR}/cmd_describe.c
     ${AIMEE_SRC_DIR}/history.c
     ${AIMEE_SRC_DIR}/role_templates.c
@@ -752,6 +753,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_persona.c
     ${AIMEE_SRC_DIR}/cli_roles.c
     ${AIMEE_SRC_DIR}/cli_workspace_serve.c
+    ${AIMEE_SRC_DIR}/cli_agent_keys.c
     ${AIMEE_SRC_DIR}/cli_remote.c
     ${AIMEE_SRC_DIR}/server/delegate_plan.c
     ${AIMEE_SRC_DIR}/acp_server.c

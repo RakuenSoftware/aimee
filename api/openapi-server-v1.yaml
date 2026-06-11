@@ -1657,6 +1657,29 @@ paths:
       summary: Scan/re-index the codebase (async; poll GET /runs/{id})
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /session/credentials:
+    post:
+      summary: Push client-held agent credentials into the session's RAM keyring
+      description: >-
+        The thin client pushes its agent API keys (and Codex OAuth creds) once
+        per session. The server caches them in memory keyed by session id and
+        NEVER persists them; agent auth resolution prefers these over any
+        server-stored key, so credentials need not live on the server.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id]
+              properties:
+                session_id: { type: string }
+                agents:
+                  type: object
+                  additionalProperties: { type: string }
+                codex_oauth_token: { type: string }
+                codex_account_id: { type: string }
+      responses: { "200": { description: Stored count, content: { application/json: { schema: { type: object } } } } }
   /index/ingest:
     post:
       summary: Index client-pushed workspace files (async; poll GET /runs/{id})

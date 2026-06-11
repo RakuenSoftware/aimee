@@ -2,6 +2,7 @@
 #include "aimee.h"
 #include "util.h"
 #include "agent_config.h"
+#include "session_credentials.h"
 #include "model_registry.h"
 #include "platform_path.h"
 #include "provider_cli_adapter.h"
@@ -10,6 +11,12 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+/* Per-turn session id, set from the request in the chat/delegate workers (setter
+ * below). Lets auth resolution + routing-availability consult the session-scoped
+ * RAM-only credential keyring the thin client pushed once per session
+ * (session_credentials.h) — so agent keys need not be stored on the server. */
+static _Thread_local char g_request_session_id[128];
 
 /* --- Config path --- */
 
@@ -203,6 +210,17 @@ int agent_has_resolvable_credentials(const agent_t *agent)
       return 1;
    if (agent->auth_cmd[0] || agent_api_key_literal(agent->api_key))
       return 1;
+   /* A client-pushed session key (or codex-oauth creds) for this turn makes the
+    * agent usable even with no server-stored key. */
+   if (g_request_session_id[0])
+   {
+      char k[MAX_API_KEY_LEN];
+      if (session_creds_get(g_request_session_id, agent->name, k, sizeof(k)))
+         return 1;
+      if (strcmp(agent->auth_type, "codex-oauth") == 0 &&
+          session_creds_get_codex(g_request_session_id, k, sizeof(k), NULL, 0))
+         return 1;
+   }
    for (int i = 0; i < agent->credential_count; i++)
    {
       const char *value = getenv(agent->credentials[i].api_key_env);
@@ -216,6 +234,14 @@ int agent_has_resolvable_credentials(const agent_t *agent)
  * Thread-local: each chat/delegate turn runs on its own worker thread. */
 static _Thread_local char g_request_codex_token[MAX_API_KEY_LEN];
 static _Thread_local char g_request_codex_account_id[128];
+
+void agent_set_request_session(const char *session_id)
+{
+   if (session_id && session_id[0])
+      snprintf(g_request_session_id, sizeof(g_request_session_id), "%s", session_id);
+   else
+      g_request_session_id[0] = '\0';
+}
 
 void agent_set_request_codex_creds(const char *token, const char *account_id)
 {
@@ -266,19 +292,28 @@ void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len)
          append_header_line(buf, buf_len, "X-Title: aimee");
    }
 
-   /* Codex (ChatGPT OAuth): when the thin client supplied an account id this
-    * turn and the agent's stored headers don't already carry it, inject the
-    * headers the codex backend requires. Keyed on the codex-oauth auth type so
-    * it fires regardless of the provider label (the codex adapter's provider is
-    * "chatgpt"). Lets a codex agent be configured without server-held creds. */
-   if (strcmp(agent->auth_type, "codex-oauth") == 0 && g_request_codex_account_id[0] &&
-       !strstr(buf, "ChatGPT-Account-ID:"))
+   /* Codex (ChatGPT OAuth): inject the headers the codex backend requires from
+    * the client-supplied account id (per-turn push, else the session keyring),
+    * unless the agent's stored headers already carry it. Keyed on the
+    * codex-oauth auth type so it fires regardless of the provider label (the
+    * codex adapter's provider is "chatgpt"). Lets a codex agent be configured
+    * without server-held creds. */
+   if (strcmp(agent->auth_type, "codex-oauth") == 0 && !strstr(buf, "ChatGPT-Account-ID:"))
    {
-      if (!strstr(buf, "originator:"))
-         append_header_line(buf, buf_len, "originator: codex_cli_rs");
-      char line[160];
-      snprintf(line, sizeof(line), "ChatGPT-Account-ID: %s", g_request_codex_account_id);
-      append_header_line(buf, buf_len, line);
+      char acct[128];
+      acct[0] = '\0';
+      if (g_request_codex_account_id[0])
+         snprintf(acct, sizeof(acct), "%s", g_request_codex_account_id);
+      else if (g_request_session_id[0])
+         session_creds_get_codex(g_request_session_id, NULL, 0, acct, sizeof(acct));
+      if (acct[0])
+      {
+         if (!strstr(buf, "originator:"))
+            append_header_line(buf, buf_len, "originator: codex_cli_rs");
+         char line[160];
+         snprintf(line, sizeof(line), "ChatGPT-Account-ID: %s", acct);
+         append_header_line(buf, buf_len, line);
+      }
    }
 }
 
@@ -1350,16 +1385,30 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
    if (strcmp(auth_type, "none") == 0)
       return 0;
 
+   /* A client-pushed, session-scoped key for THIS agent (RAM-only keyring,
+    * session_credentials.h) takes precedence over any server-stored api_key — so
+    * agent keys need not live on the server. */
+   char session_key[MAX_API_KEY_LEN];
+   int have_session_key =
+       (g_request_session_id[0] &&
+        session_creds_get(g_request_session_id, agent->name, session_key, sizeof(session_key)));
+
    if (strcmp(auth_type, "codex-oauth") == 0)
    {
-      /* Prefer the token the thin client supplied this turn (its live,
-       * CLI-refreshed ~/.codex/auth.json); fall back to a server-side file. */
+      /* Codex OAuth token, in precedence: per-turn token (legacy direct push) >
+       * session keyring (pushed once/session) > server-side file. */
       if (g_request_codex_token[0])
       {
          snprintf(buf, buf_len, "Authorization: Bearer %s", g_request_codex_token);
          return 0;
       }
       char token[MAX_API_KEY_LEN];
+      if (g_request_session_id[0] &&
+          session_creds_get_codex(g_request_session_id, token, sizeof(token), NULL, 0))
+      {
+         snprintf(buf, buf_len, "Authorization: Bearer %s", token);
+         return 0;
+      }
       if (agent_read_codex_oauth_token(token, sizeof(token)) != 0)
          return -1;
       snprintf(buf, buf_len, "Authorization: Bearer %s", token);
@@ -1400,9 +1449,14 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
       return 0;
    }
 
-   /* x-api-key auth (Anthropic): resolve via auth_cmd or api_key */
+   /* x-api-key auth (Anthropic): resolve via session keyring, auth_cmd or api_key */
    if (strcmp(auth_type, "x-api-key") == 0)
    {
+      if (have_session_key)
+      {
+         snprintf(buf, buf_len, "x-api-key: %s", session_key);
+         return 0;
+      }
       if (agent->auth_cmd[0])
       {
          char *auth_tokens[32];
@@ -1449,6 +1503,11 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
    if (strcmp(agent->provider, "gemini") == 0 &&
        (!auth_type[0] || strcmp(auth_type, "api_key") == 0))
    {
+      if (have_session_key)
+      {
+         snprintf(buf, buf_len, "x-goog-api-key: %s", session_key);
+         return 0;
+      }
       if (agent_api_key_literal(agent->api_key))
       {
          snprintf(buf, buf_len, "x-goog-api-key: %s", agent->api_key);
@@ -1462,7 +1521,12 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
       }
    }
 
-   /* Default: bearer token from api_key */
+   /* Default: bearer token — session keyring first, then stored api_key. */
+   if (have_session_key)
+   {
+      snprintf(buf, buf_len, "Authorization: Bearer %s", session_key);
+      return 0;
+   }
    if (agent_api_key_literal(agent->api_key))
    {
       snprintf(buf, buf_len, "Authorization: Bearer %s", agent->api_key);

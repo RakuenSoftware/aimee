@@ -21,7 +21,7 @@ TEST_CORE_OBJS = $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/main
                  $(OBJDIR)/json_fluent.o $(OBJDIR)/markdown.o
 # Extended set for tests that need workspace/worktree/guardrails functions (pulls in agents).
 TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/workspace.o $(DB1_OBJS) \
-                             $(OBJDIR)/server/agent_config.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
+                             $(OBJDIR)/server/agent_config.o $(OBJDIR)/server/session_credentials.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
                              $(OBJDIR)/posix/cmd_describe.o \
                              $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/server/skill_review.o $(OBJDIR)/server/skill_curator.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_gemini.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/server/cli_acp.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
                              $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/server/agent_eval.o $(OBJDIR)/server/agent_eval_memory_support.o $(OBJDIR)/server/agent_eval_baseline.o \
@@ -78,7 +78,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-guardrails $(TESTPREFIX)/unit-test-memory $(TESTPREFIX)/unit-test-tasks \
                $(TESTPREFIX)/unit-test-cmd-hooks-scope \
                $(TESTPREFIX)/unit-test-agent $(TESTPREFIX)/unit-test-agent-repair $(TESTPREFIX)/unit-test-script-runner $(TESTPREFIX)/unit-test-provider-cli-adapter $(TESTPREFIX)/unit-test-cli-acp $(TESTPREFIX)/unit-test-acp-server $(TESTPREFIX)/unit-test-extractors \
-               $(TESTPREFIX)/unit-test-text $(TESTPREFIX)/unit-test-config $(TESTPREFIX)/unit-test-config-surface $(TESTPREFIX)/unit-test-ingress-preinject $(TESTPREFIX)/unit-test-attention-guard $(TESTPREFIX)/unit-test-codex-auth $(TESTPREFIX)/unit-test-code-audit $(TESTPREFIX)/unit-test-code-audit-graph $(TESTPREFIX)/unit-test-db2-code-audit $(TESTPREFIX)/unit-test-cron-config $(TESTPREFIX)/unit-test-cron-runtime $(TESTPREFIX)/unit-test-feedback \
+               $(TESTPREFIX)/unit-test-text $(TESTPREFIX)/unit-test-config $(TESTPREFIX)/unit-test-config-surface $(TESTPREFIX)/unit-test-ingress-preinject $(TESTPREFIX)/unit-test-attention-guard $(TESTPREFIX)/unit-test-codex-auth $(TESTPREFIX)/unit-test-session-credentials $(TESTPREFIX)/unit-test-code-audit $(TESTPREFIX)/unit-test-code-audit-graph $(TESTPREFIX)/unit-test-db2-code-audit $(TESTPREFIX)/unit-test-cron-config $(TESTPREFIX)/unit-test-cron-runtime $(TESTPREFIX)/unit-test-feedback \
                $(TESTPREFIX)/unit-test-render $(TESTPREFIX)/unit-test-index $(TESTPREFIX)/unit-test-manuscript $(TESTPREFIX)/unit-test-persona $(TESTPREFIX)/unit-test-server-http $(TESTPREFIX)/unit-test-openai-shape $(TESTPREFIX)/unit-test-openai-responses-store \
                $(TESTPREFIX)/unit-test-feedback-shadow $(TESTPREFIX)/unit-test-graph-fusion $(TESTPREFIX)/unit-test-code-vectors $(TESTPREFIX)/unit-test-graph-scoring $(TESTPREFIX)/unit-test-code-projection $(TESTPREFIX)/unit-test-entity-nodes $(TESTPREFIX)/unit-test-memory-advanced $(TESTPREFIX)/unit-test-memory-health \
                $(TESTPREFIX)/unit-test-memory-ranker-boundary \
@@ -547,6 +547,10 @@ $(TESTPREFIX)/unit-test-ingress-preinject: $(OBJDIR)/tests/test_ingress_preinjec
 
 $(TESTPREFIX)/unit-test-codex-auth: $(OBJDIR)/tests/test_codex_auth.o \
                      $(OBJDIR)/codex_auth.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-session-credentials: $(OBJDIR)/tests/test_session_credentials.o \
+                     $(OBJDIR)/server/session_credentials.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-attention-guard: $(OBJDIR)/tests/test_attention_guard.o \
@@ -1715,7 +1719,7 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(OBJDIR)/server/openai_shape.o \
                            $(OBJDIR)/server/openai_runs_store.o $(OBJDIR)/server/server_auth.o \
                            $(OBJDIR)/server/compute_pool.o \
-                           $(OBJDIR)/server/agent_config.o \
+                           $(OBJDIR)/server/agent_config.o $(OBJDIR)/server/session_credentials.o \
                            $(OBJDIR)/persona.o $(OBJDIR)/prompts.o \
                            $(OBJDIR)/role_templates.o \
                            $(OBJDIR)/dstr.o $(OBJDIR)/working_profile.o \

@@ -697,9 +697,14 @@ void delegate_worker(void *arg)
       agent_set_durable_job(cctx->background_job_id);
    }
    cJSON *req = cctx->req;
-   /* Thin-client-supplied Codex OAuth creds for this delegate turn (empty/absent
-    * clears the thread-local). Used by agent_resolve_auth/headers for a
-    * codex-oauth delegate. */
+   /* Per-turn credential context: credential-session id (RAM keyring; a
+    * dedicated field decoupled from the chat session id) + any per-turn Codex
+    * creds (legacy direct push). Empty/absent clears them. */
+   {
+      const char *cred_sid = jo_str(req, "cred_session_id", NULL);
+      agent_set_request_session((cred_sid && cred_sid[0]) ? cred_sid
+                                                          : compute_request_session_id(req));
+   }
    agent_set_request_codex_creds(jo_str(req, "codex_oauth_token", NULL),
                                  jo_str(req, "codex_account_id", NULL));
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
