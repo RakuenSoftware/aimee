@@ -1,7 +1,7 @@
 # Proposal: ingress cost-accounting coverage + request-level cost optimizations
 
-- **State:** draft - pending review (revised after PR #180 review + repeated
-  file-by-file codebase audits)
+- **State:** draft - pending review (consolidated after PR #180 review + twelve
+  file-by-file codebase audits; findings integrated below)
 - **Author:** JBailes
 - **Date:** 2026-06-11
 - **Charter roles:** Evaluate-Optimize (cost-shaped reward into the existing
@@ -42,180 +42,76 @@
 
 ## Revision note
 
-This supersedes the first draft, which proposed new `cost_pricing.{c,h}`, a new
-db2 usage ledger, a new `aimee usage` CLI, and raw-dollar bandit rewards. The PR
-#180 review correctly showed that aimee **already ships** cache-aware pricing
-(`token_tracker.c`, `token_estimate_cost`), an audit ledger with much of the
-needed schema (`db1/token_audit.c`: `session_id, delegation_id, model,
-prompt/completion/cache tokens, estimated_cost_usd`), a reader (`cmd_usage`
-→ `db1_token_audit_*`), a usage/cost summary route (`/v1/insights/overview`), and
-model-registry price fields (`cost_in_per_mtok` / `cost_out_per_mtok`). All
-verified in-tree. The objective is therefore **coverage and correctness of the
-existing machinery for ingress requests**, not new accounting. Every §1–§6 below
-is rewritten accordingly.
+This is a heavily revised draft. v1 proposed new machinery — a `cost_pricing.{c,h}`
+module, a DB2 usage ledger, an `aimee usage` CLI, and raw-dollar bandit rewards.
+The PR #180 review and a series of file-by-file codebase audits showed aimee
+**already ships** the core machinery: cache-aware pricing (`token_tracker.c`,
+`token_estimate_cost`), an audit ledger with most of the needed schema
+(`db1/token_audit.c`), a reader (`cmd_usage` → `db1_token_audit_*`), a usage/cost
+summary route (`insights.overview`), and registry price fields
+(`model_registry.h`). The objective is therefore **coverage and correctness of the
+existing machinery for ingress requests**, not new accounting.
 
-This revision also folds in second-pass review findings: Anthropic
-`/v1/messages` is intentionally a stateless proxy and is **not** a current
-pre-injection surface; the shipped pre-injection seam is in `openai_chat.c`; the
-`<aimee-context>` envelope is per-turn query-derived and therefore not
-inherently a stable cache prefix; and the current `token_audit` schema lacks
-several fields this proposal needs (`source`, `usage_kind`, requested-vs-served
-model, duration/stop metadata, optimization metadata). Those are explicit work
-items below rather than assumptions.
+Two framing corrections from the audits underpin everything below: Anthropic
+`/v1/messages` is intentionally a stateless proxy and is **not** a pre-injection
+surface (the shipped seam is `openai_chat.c`), and the `<aimee-context>` envelope
+is per-turn query-derived, so it is **not** an inherently stable cache prefix.
 
-A third pass added a **file-by-file codebase audit** that confirmed the above and
-surfaced four issues no review named, now folded in with file:line evidence:
-(1) pricing lives in **four** divergent sources — token_tracker (substring +
-cache), the model registry (exact, no cache), `delegate_ensemble.c` (a third
-flat-rate calculator), and `models_dev_snapshot.json` — so the same model id can
-be priced differently by different paths (§0/§1); (2) `db1_token_audit_by_model`
-filters out every empty-model row, so the model-write fix and the filter fix must
-land together or history shows a false zero (§0/§2); (3) the aimee-owned outbound
-Anthropic `system` is a **flat string**, so the cache carve-out's real work is a
-string→content-block conversion, not a flag (§3); (4) `stream_options.include_usage`
-is set nowhere and aborted streams drop usage (§2).
+### Findings map
 
-This pass adds three remaining blockers: (5) OpenAI/Codex ingress does **not**
-go through `agent_log_call` either — `openai_chat.c` calls `agent_execute()` and
-`agent_execute_messages()` directly, and `agent_execute()` explicitly leaves
-logging to its callers — so those handlers need first-class audit writes, not
-only attribution fixes; (6) the registered HTTP handler signatures only receive
-`body`/`resp`/`cap`, so source/principal/idempotency/request-id metadata is
-unavailable unless `server_http.c` exposes a request context; (7) HUD, dashboard,
-frontend, and webchat consumers currently sum `estimated_cost_usd` as a scalar,
-so new `estimated` / `avoided` / `partial` rows will inflate spend unless every
-reader is updated with the same semantics.
+The audits produced 23 verified, in-tree findings; they are grouped by theme here
+and carried with file:line evidence in §0. The `(N)` numbers are stable
+references used elsewhere in this doc.
 
-A fifth pass (four more parallel audits) verified 5–7 and corrected/added five
-points: (8) **`/v1/runs` already writes a row** (detached worker →
-`agent_run_with_tools` → `agent_log_call`), so it must get attribution **only**,
-not a new write — adding one double-counts; the new writes belong only to the six
-synchronous no-log handlers; (9) a **thread-local context is insufficient** —
-the `/v1/runs` worker is a detached pthread that does not inherit request-thread
-TLS, so its context must be captured into the job struct at enqueue; (10)
-**`session_id()` is PPID-process-wide**, so all ingress rows collapse into one
-session and per-source attribution must come from the request context, not
-`session_id()`; (11) **idempotency contradicts the additive reconcile** — a
-UNIQUE index is required and the reconcile creates none (and `NOT NULL` columns
-need defaults), so an explicit migration or in-process idempotency is needed; (12)
-the scalar-spend reader set is **eight** files incl. `server_compute.c:1469`
-cost-fold and `webchat/socket.go`, but `Chat.tsx` does not price client-side so
-§1 propagates to the UI for free.
-
-A sixth pass checked the webchat OpenAI proxy and embedding ingress: (13)
-`webchat/openai.go` authenticates OpenAI-compatible clients at the webchat edge,
-then `proxyV1` strips `Authorization` and forwards over the aimee-server UDS
-without adding replacement source/session/principal context, so server-side
-request-context accounting will see webchat-originated OpenAI traffic as generic
-trusted local traffic unless the proxy stamps explicit forwarding metadata; (14)
-`/v1/embeddings` is an OpenAI-compatible ingress route proxied by webchat, but
-`embeddings_handler` calls `memory_embed_text` and returns OpenAI-style
-`usage.prompt_tokens` without using the LLM audit path, so embeddings need an
-explicit non-LLM / estimate-only / separate embedding-spend classification rather
-than being folded into chat/completion cost.
-
-A seventh pass verified 13–14 and refined both. (13) **The UDS source-erasure is
-systemic, not webchat-specific**: `server_http_authorize` trusts any `!is_tcp`
-connection and grants `CAPS_ALL`, so the thin CLI, MCP, and webchat all arrive as
-anonymous trusted-local — yet the HTTP-over-UDS path captures no peer identity
-while the legacy NDJSON socket already derives `uid:<peer_uid>`. The fix is both
-capturing the UDS peer UID as a baseline principal and requiring proxies to stamp
-forwarding metadata. (14) **Embeddings cost $0 today**: the embedder is local
-(builtin hash or a local command), the model is in no price table, and
-`usage.prompt_tokens` is a `chars/4` estimate — so the default is to **exclude**
-embeddings from spend, with a remote-embedder pricing hook as future-only work;
-the non-LLM ingress surface is bounded to `/v1/embeddings` (+ usage-less
-`/v1/models`).
-
-An eighth pass found two implementation hazards that would make a correct ledger
-still report wrong numbers. (15) `src/db1/agent_log.c` has separate agent metrics
-that join `agent_log` to `token_audit` by `(agent_name, role)` or agent name
-alone, not by a call id; that is a many-to-many join that can multiply cost by
-the number of matching log rows and cannot represent ingress token rows that have
-no `agent_log` row. The proposal must add a stable `call_id` / `agent_log_id`
-link (or stop joining these tables for cost) and include `cmd_agent` / agent
-stats in the reader migration. (16) Proxy-stamped source/principal headers are
-only safe if the server establishes a trust boundary: TCP clients and untrusted
-UDS peers must not be able to spoof `X-Aimee-Source` / principal forwarding
-headers, and `X-Request-ID` alone must not become an idempotency key because it
-is caller-controlled.
-
-A ninth pass verified 15–16 and found two more, in different layers. (17) **DB1
-write concurrency / best-effort drops.** DB1 is one shared `sqlite3*`
-(`db1_init.c:19`, `SQLITE_OPEN_FULLMUTEX` + `journal_mode=WAL` + a busy handler
-that gives up after 15 retries, `:22-68`); every HTTP connection already runs on
-a detached worker thread (`server_http.c` `conn_worker`) and `/v1/runs` on its own
-detached pthread, so concurrent `token_audit` writes happen today. The existing
-insert is `(void)`-ignored best-effort, so under the added per-turn write volume
-in the streaming hot path the busy handler can exhaust and **silently drop** a row
-(undercount), and the synchronous insert adds tail latency. The proposal must
-state explicit best-effort semantics, consider moving audit writes off the request
-thread (async/batched queue), and load-test tail latency + drop rate. (18) **No
-trusted-UDS-peer mechanism exists** — findings 7/13/16 all assume a peer UID, but
-the HTTP-over-UDS path never extracts `SO_PEERCRED` (`peer_uid` is set only in
-tests), grants `CAPS_ALL` to every UDS peer uniformly (`server_http.c:312-325`),
-and validates no forwarding header. So peer-UID capture and a trusted-peer
-allowlist are **net-new code** (the legacy NDJSON socket already derives
-`uid:<peer_uid>`, and `platform_ipc_peer_cred()` exists but is uncalled on the
-HTTP path), and that mechanism is a prerequisite before any forwarded source/
-principal can be trusted.
-
-A tenth pass found two contract/security gaps in the ninth-pass fix. (19)
-**A UID allowlist is not enough to trust forwarded identity.** In the expected
-local deployment, webchat, the thin CLI, MCP, and ad-hoc local tools often run as
-the same Unix user, so `trusted_uds_peer_uids=[1000]` would trust **every**
-same-user UDS client to set `X-Aimee-Source` / principal headers. Peer UID is a
-baseline principal, not a proxy-authentication mechanism. Forwarded identity
-needs a second proof such as a server-minted internal proxy token/HMAC, a
-dedicated proxy-only socket, or another capability that arbitrary same-user
-clients cannot guess; inbound forwarding headers from all other clients must be
-stripped before request context is built. (20) **Extending `insights.overview`
-is still an API contract change.** The current OpenAPI entry is just
-`type: object`, `/v1/openapi.yaml` serves the generated
-`src/server/openapi_server_data.h`, and the thin client has a custom
-`print_insights_overview` in `src/cli_rpc_routes.inc` that prints only
-`estimated_cost_usd`. Source/usage-kind realized-vs-estimated semantics must be
-added to the server OpenAPI schema, regenerated into the embedded data header,
-and taught to the thin-client printer; otherwise the new fields are present in
-JSON but invisible or undocumented to clients.
-
-An eleventh pass verified 19–20 (correcting one premise) and enumerated the full
-ingress surface. (19, corrected) In the **primary container deploy**, webchat runs
-as **root (uid 0)** while aimee-server runs as **uid 1000** (`Dockerfile.server`,
-`deploy/container/webchat-lib.sh`: "webchat must run as root … drops aimee-server/
-kb to the unprivileged aimee user"), so a peer-UID check **can** distinguish the
-webchat proxy there — the same-user collision is specific to local/source deploys.
-The robust cross-deploy mechanism is still a proxy credential, and aimee **already
-has the pattern**: `$AIMEE_HOME/server.token` is a shared secret webchat already
-reads for the OpenAI-proxy bearer, so the trusted-forwarding credential should
-reuse that established file/HMAC pattern rather than invent one. (21) **Webchat
-has a second, undocumented usage contract.** Browser clients get usage as an SSE
-event with only `{in, out, cost}` (`webchat/socket.go`, `chat.go`) — not in
-OpenAPI — so surfacing realized-vs-estimated to the browser needs a `usage_kind`
-field added to that SSE shape too, in addition to `insights.overview`. (22)
-**aimee-kb-side LLM spend is entirely outside `token_audit`.** The enumeration
-confirmed the aimee-server HTTP ingress surface is fully bounded (MCP is internal-
-only and logged via the agent loop), but `/v1/rules/generate`, curator/deep-
-extraction, and similar paths make **paid provider calls inside the separate
-aimee-kb process**, which has no access to aimee-server's DB1 `token_audit`. The
-proposal must name this boundary explicitly: kb-side generation cost is **out of
-scope** for this server-local ledger (or needs its own kb-side audit hook + a
-cross-process report), so it is never falsely assumed covered.
-
-A twelfth pass found one more streaming-accounting mismatch. (23) **Not all
-`stream:true` paths are provider-incremental streams.** The OpenAI/Codex
-compatibility stream handlers in `openai_chat.c` are explicitly
-**compute-then-chunk**: they call `agent_execute()` / `agent_execute_messages()`
-to completion, then emit synthetic SSE chunks (`chat_stream_handler`,
-`completion_stream_handler`, `responses_stream_handler`). `server_http.c`
-`sse_emit` / `sse_event_emit` also ignore write failures, so these handlers
-cannot reliably tell whether the client disconnected during emission. Therefore
-the proposal's aborted-stream rule must be split: provider-incremental streams
-(native Anthropic relay / true provider SSE) can produce `partial` usage, while
-compute-then-chunk OpenAI/Codex streams should write realized spend once the
-provider call returns successfully, even if the client disconnects before all
-synthetic chunks are delivered. Treating those as partial or no-row would
-undercount real spend.
+- **Pricing (§1).** (1) Pricing lives in **four** divergent sources —
+  `token_tracker.c` (substring match, the only one with cache prices), the model
+  registry (exact match, no cache prices), `delegate_ensemble.c` (a third
+  flat-rate calculator), and `models_dev_snapshot.json` — so the same model id can
+  be priced differently by different paths.
+- **Audit schema & migration (§2).** (2) `by_model` filters out every empty-model
+  row, so the model-write fix and the filter/backfill must land together or
+  history shows a false zero. (11) Idempotency needs a UNIQUE index the additive
+  reconcile will not create, and SQLite cannot add a `NOT NULL` column without a
+  default. (15) `agent_log`↔`token_audit` is joined by agent-name/role — an N×M
+  join that multiplies cost/cache sums — so a shared `call_id` is required.
+- **Ingress write coverage (§2).** (5) The six synchronous OpenAI/Codex handlers
+  go through `agent_execute()` and write **no** audit row today; (8) but `/v1/runs`
+  already logs (detached worker → `agent_log_call`), so it needs attribution
+  **only**, never a second write (double-count guard). (4)
+  `stream_options.include_usage` is set nowhere and the OpenAI buffered parser
+  drops cache tokens. (14) `/v1/embeddings` is a local $0 embedder → exclude from
+  spend by default. (22) aimee-kb-side LLM spend (`/v1/rules/generate`, curator
+  extraction) runs in a **separate process** outside this ledger → out of scope.
+  (23) OpenAI/Codex streaming is **compute-then-chunk**, so it writes realized
+  spend on provider return; only provider-incremental streams (native Anthropic
+  relay) can be `partial`.
+- **Request context & threading (§0/§2).** (6) HTTP handlers receive only
+  `(body, resp, cap)` — no source/principal/idempotency/request-id. (9) A
+  thread-local context breaks for the detached `/v1/runs` pthread → capture into
+  the job struct at enqueue. (10) `session_id()` is PPID-process-wide, so ingress
+  source must come from the request context, not `session_id()`.
+- **Identity & trust (§0).** (13) `webchat/openai.go::proxyV1` strips
+  `Authorization` over the UDS and stamps no replacement identity. (16/18) The
+  HTTP-over-UDS path never captures `SO_PEERCRED` and grants `CAPS_ALL` to every
+  UDS peer, so peer-UID capture and a trusted-peer mechanism are **net-new** code.
+  (19) A UID allowlist is insufficient in a same-user local deploy (though the
+  container deploy runs webchat as root vs the server as uid 1000); the robust
+  answer is a proxy credential, reusing the existing `$AIMEE_HOME/server.token`
+  pattern.
+- **Cache shaping (§3).** (3) The aimee-owned outbound Anthropic `system` is a
+  **flat string**, so placing `cache_control` on a stable block requires
+  converting it to a content-block array — the real work, not a flag.
+- **Storage / concurrency (§0).** (17) DB1 is a single shared SQLite handle and the
+  audit insert is `(void)` best-effort, so under the added per-turn write volume a
+  WAL busy-handler exhaustion can **silently drop** a row (undercount) → prefer an
+  async/batched off-thread write and load-test drop rate + tail latency.
+- **Readers & API contract (§7).** (7/12) Eight consumers sum `estimated_cost_usd`
+  as scalar spend (incl. `server_compute.c` cost-fold and the agent-log join) and
+  must learn `usage_kind` semantics; `Chat.tsx` does not price client-side, so §1
+  propagates to it for free. (20) `insights.overview` is OpenAPI `type: object`,
+  served from a generated header, with a thin-client printer that shows only
+  `estimated_cost_usd` — all three must learn the new fields. (21) Webchat's
+  browser usage SSE `{in, out, cost}` is a separate, undocumented contract.
 
 ## Goal
 
@@ -540,8 +436,13 @@ estimates** and **avoided estimated cost**.
   compute-then-chunk, so the provider call and usage are complete before SSE
   emission. For those paths, write realized spend after a successful provider
   return and before/during synthetic chunk emission; client disconnect during
-  chunk delivery is delivery telemetry, not partial provider spend. Failed calls,
-  if reported, are operational telemetry, not cost rows.
+  chunk delivery is delivery telemetry, not partial provider spend. The split is
+  by **handler, not by the word "OpenAI"**: the compatibility handlers in
+  `openai_chat.c` (`chat_stream_handler` / `completion_stream_handler` /
+  `responses_stream_handler`) are compute-then-chunk, whereas the OpenAI-*upstream*
+  sub-path of `anthropic_http.c::messages_stream` feeds real provider SSE through
+  the translator and **is** provider-incremental — so the partial rule applies
+  there. Failed calls, if reported, are operational telemetry, not cost rows.
 - **Source + model:** record source/client explicitly (Claude Code, Codex,
   webchat, OpenAI-compatible ingress, delegate) and resolve a real billable
   `model` (see §2a) instead of the empty string `agent_log_call` writes today.
