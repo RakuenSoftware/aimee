@@ -215,6 +215,15 @@ int handle_pipeline_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *base = jo_str(req, "base_branch", "testing");
    const char *head_branch = jo_str(req, "head_branch", NULL);
 
+   /* A dedicated proposal branch/worktree is mandatory (§1): the pipeline must
+    * have a repo to create it in. There is no internal-only mode. */
+   if (!repo_root[0])
+      return server_send_error(
+          conn,
+          "pipeline: repo_root is required (the pipeline writes the proposal/PR into a "
+          "dedicated branch/worktree); pass --repo-root",
+          NULL);
+
    /* Reject (never silently truncate) an over-long question set before it can be
     * mistaken as fully answered (#14). */
    cJSON *qreq = cJSON_GetObjectItemCaseSensitive(req, "questions");
@@ -517,15 +526,21 @@ static size_t rtp_cd_prefix(const rtp_run_t *run, char *buf, size_t cap)
    return (n > 0 && (size_t)n < cap) ? (size_t)n : 0;
 }
 
-static int git_head_sha(const rtp_run_t *run, char *out, size_t cap)
+/* `git rev-parse <ref>` in the recorded checkout. out is empty on failure. */
+static int git_rev_parse(const rtp_run_t *run, const char *ref, char *out, size_t cap)
 {
-   char cmd[RTP_PATH_LEN + 64];
+   char *eref = shell_escape(ref);
+   char cmd[RTP_PATH_LEN + 96];
    size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
-   snprintf(cmd + p, sizeof(cmd) - p, "git rev-parse HEAD 2>/dev/null");
+   snprintf(cmd + p, sizeof(cmd) - p, "git rev-parse '%s' 2>/dev/null", eref ? eref : ref);
+   free(eref);
    int rc = 0;
    char *o = mcp_git_run(cmd, &rc);
    if (!o)
+   {
+      out[0] = '\0';
       return -1;
+   }
    char *nl = strchr(o, '\n');
    if (nl)
       *nl = '\0';
@@ -533,6 +548,11 @@ static int git_head_sha(const rtp_run_t *run, char *out, size_t cap)
    snprintf(out, cap, "%s", ok == 0 ? o : "");
    free(o);
    return ok;
+}
+
+static int git_head_sha(const rtp_run_t *run, char *out, size_t cap)
+{
+   return git_rev_parse(run, "HEAD", out, cap);
 }
 
 /* `git diff <base>...HEAD` in the recorded checkout; caller frees. */
@@ -625,6 +645,19 @@ static int open_and_record_pr(rtp_run_t *run, const char *phase)
 
    char sha[RTP_HASH_LEN] = {0};
    git_head_sha(run, sha, sizeof(sha));
+   /* also record the base branch's SHA at open time so base drift is detectable
+    * and explainable at gate/merge (#3/§ repo state). Try the local ref, then
+    * origin/<base>. */
+   char bsha[RTP_HASH_LEN] = {0};
+   if (run->base_branch[0])
+   {
+      if (git_rev_parse(run, run->base_branch, bsha, sizeof(bsha)) != 0 || !bsha[0])
+      {
+         char originref[RTP_NAME_LEN + 8];
+         snprintf(originref, sizeof(originref), "origin/%s", run->base_branch);
+         git_rev_parse(run, originref, bsha, sizeof(bsha));
+      }
+   }
    if (strcmp(phase, RTP_PHASE_IMPL) == 0)
    {
       run->impl_pr_number = pr;
@@ -637,6 +670,8 @@ static int open_and_record_pr(rtp_run_t *run, const char *phase)
    }
    if (sha[0])
       snprintf(run->head_sha, sizeof(run->head_sha), "%s", sha);
+   if (bsha[0])
+      snprintf(run->base_sha, sizeof(run->base_sha), "%s", bsha);
    rtp_run_update(run);
    return 0;
 }
@@ -953,7 +988,7 @@ static int prepare_proposal_workspace(rtp_run_t *run)
    if (run->worktree_path[0])
       return 0; /* already selected */
    if (!run->repo_root[0])
-      return 0; /* no repo -> internal-file mode is acceptable */
+      return -1; /* a dedicated worktree is mandatory; there is no internal mode (§1) */
    if (!run->head_branch[0])
       snprintf(run->head_branch, sizeof(run->head_branch), "roundtable/proposal-%d", run->id);
    char wt[RTP_PATH_LEN];
@@ -978,18 +1013,14 @@ static int prepare_proposal_workspace(rtp_run_t *run)
 }
 
 /* Write the proposal content into the dedicated worktree as the real working
- * file (the PR content) and commit it on the branch, recording proposal_ref.
- * Returns 0 on success, -1 on any failure (write or real commit failure, or a
- * repo recorded with no worktree — never writes into repo_root, #2). With no
- * repo at all it uses the internal-file fallback. */
+ * file (the PR content), commit it on the branch, and ONLY THEN record
+ * proposal_ref + hash in the durable ledger (#2: never claim an uncommitted
+ * artifact as current). Returns 0 on success, -1 on any failure (no worktree —
+ * never writes into repo_root, #1; write failure; real commit failure). */
 static int write_proposal_file(rtp_run_t *run, const char *content, const char *hash)
 {
    if (!run->worktree_path[0])
-   {
-      if (run->repo_root[0])
-         return -1; /* worktree creation failed earlier; refuse the user checkout */
-      return persist_origin(run, RTP_PHASE_PROPOSAL, content, hash); /* no repo -> internal */
-   }
+      return -1; /* dedicated worktree mandatory; never repo_root, never internal (#1) */
    const char *base = run->worktree_path;
    char rel[RTP_PATH_LEN];
    snprintf(rel, sizeof(rel), "docs/proposals/pending/roundtable-proposal-%d.md", run->id);
@@ -1006,11 +1037,9 @@ static int write_proposal_file(rtp_run_t *run, const char *content, const char *
    int closed = fclose(f);
    if (wrote != len || closed != 0)
       return -1; /* do not proceed on a partial/failed write */
-   snprintf(run->proposal_ref, sizeof(run->proposal_ref), "%s", path);
-   snprintf(run->proposal_origin_hash, sizeof(run->proposal_origin_hash), "%s", hash);
-   rtp_run_update(run);
-   /* commit on the dedicated branch so the reviewed file IS the PR content; an
-    * unchanged file (re-review of the same content) is a no-op, not a failure. */
+
+   /* commit on the dedicated branch BEFORE touching the ledger; an unchanged
+    * file (re-review of the same content) is a no-op, not a failure. */
    char *erel = shell_escape(rel);
    char cmd[RTP_PATH_LEN * 2 + 320];
    size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
@@ -1022,7 +1051,14 @@ static int write_proposal_file(rtp_run_t *run, const char *content, const char *
    int rc = 0;
    char *o = mcp_git_run(cmd, &rc);
    free(o);
-   return rc == 0 ? 0 : -1; /* a real add/commit failure stops the pipeline */
+   if (rc != 0)
+      return -1; /* a real add/commit failure stops the pipeline (ledger unchanged) */
+
+   /* commit succeeded -> the working file IS now the branch content: record it. */
+   snprintf(run->proposal_ref, sizeof(run->proposal_ref), "%s", path);
+   snprintf(run->proposal_origin_hash, sizeof(run->proposal_origin_hash), "%s", hash);
+   rtp_run_update(run);
+   return 0;
 }
 
 static int draft_complete(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *latest,
@@ -1122,7 +1158,20 @@ static int submit_chunked_review(server_conn_t *conn, rtp_run_t *run, const char
    rtp_chunk_plan(artifact, budget_bytes, &plan);
    int group = rtp_pass_max_group(run->id, phase) + 1;
 
-   persist_origin(run, phase, artifact, plan.origin_hash);
+   /* Record the whole origin for chunk re-derivation (#34). For the PR phase the
+    * origin is the diff (kept in an internal working file). For the proposal
+    * phase the origin is ALREADY the committed branch file (written by the
+    * write-back in advance); don't clobber proposal_ref with an internal blob —
+    * just pin the chunk index to that committed content hash. */
+   if (strcmp(phase, RTP_PHASE_IMPL) == 0)
+      persist_origin(run, phase, artifact, plan.origin_hash);
+   else
+   {
+      snprintf(run->proposal_origin_hash, sizeof(run->proposal_origin_hash), "%s",
+               plan.origin_hash);
+      snprintf(run->chunk_index_ref, sizeof(run->chunk_index_ref), "origin:%s", plan.origin_hash);
+      rtp_run_update(run);
+   }
 
    int submitted = 0;
    for (int i = 0; i < plan.count; i++)
@@ -1605,6 +1654,25 @@ static int validate_pr_for_merge(rtp_run_t *run, rtp_gate_t *gate, int gate_no, 
       cJSON_AddStringToObject(resp, "state", mp);
       cJSON_AddStringToObject(resp, "note", why);
       return -1;
+   }
+   /* explain base movement since open (#3): the base SHA recorded at PR-open vs
+    * the current base SHA — surfaced (the base advancing as other PRs merge is
+    * normal; a changed base BRANCH was already hard-rejected above). */
+   if (run->base_sha[0] && run->base_branch[0])
+   {
+      char curbase[RTP_HASH_LEN] = {0};
+      if (git_rev_parse(run, run->base_branch, curbase, sizeof(curbase)) != 0 || !curbase[0])
+      {
+         char originref[RTP_NAME_LEN + 8];
+         snprintf(originref, sizeof(originref), "origin/%s", run->base_branch);
+         git_rev_parse(run, originref, curbase, sizeof(curbase));
+      }
+      if (curbase[0] && strcmp(curbase, run->base_sha) != 0)
+      {
+         cJSON_AddBoolToObject(resp, "base_moved", 1);
+         cJSON_AddStringToObject(resp, "base_sha_at_open", run->base_sha);
+         cJSON_AddStringToObject(resp, "base_sha_now", curbase);
+      }
    }
    /* worktree cleanliness (§5): a dirty dedicated worktree blocks the merge — the
     * verdict is preserved in *_merge_pending until the tree is clean. */
