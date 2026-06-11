@@ -139,6 +139,26 @@ UDS peers must not be able to spoof `X-Aimee-Source` / principal forwarding
 headers, and `X-Request-ID` alone must not become an idempotency key because it
 is caller-controlled.
 
+A ninth pass verified 15–16 and found two more, in different layers. (17) **DB1
+write concurrency / best-effort drops.** DB1 is one shared `sqlite3*`
+(`db1_init.c:19`, `SQLITE_OPEN_FULLMUTEX` + `journal_mode=WAL` + a busy handler
+that gives up after 15 retries, `:22-68`); every HTTP connection already runs on
+a detached worker thread (`server_http.c` `conn_worker`) and `/v1/runs` on its own
+detached pthread, so concurrent `token_audit` writes happen today. The existing
+insert is `(void)`-ignored best-effort, so under the added per-turn write volume
+in the streaming hot path the busy handler can exhaust and **silently drop** a row
+(undercount), and the synchronous insert adds tail latency. The proposal must
+state explicit best-effort semantics, consider moving audit writes off the request
+thread (async/batched queue), and load-test tail latency + drop rate. (18) **No
+trusted-UDS-peer mechanism exists** — findings 7/13/16 all assume a peer UID, but
+the HTTP-over-UDS path never extracts `SO_PEERCRED` (`peer_uid` is set only in
+tests), grants `CAPS_ALL` to every UDS peer uniformly (`server_http.c:312-325`),
+and validates no forwarding header. So peer-UID capture and a trusted-peer
+allowlist are **net-new code** (the legacy NDJSON socket already derives
+`uid:<peer_uid>`, and `platform_ipc_peer_cred()` exists but is uncalled on the
+HTTP path), and that mechanism is a prerequisite before any forwarded source/
+principal can be trusted.
+
 ## Goal
 
 Ingress requests are a cost blind spot. Normal agent and delegate calls are
@@ -259,7 +279,25 @@ optimization surface aimee already has, not a new one.
   (a) capture the UDS peer UID on accept as a baseline principal (parity with
   NDJSON), and (b) require forwarding proxies — webchat first — to stamp trusted
   internal headers for source, principal/session, original request id, and
-  idempotency. Attribution cannot rely on the forwarded HTTP request alone.
+  idempotency. Attribution cannot rely on the forwarded HTTP request alone. **Both
+  are net-new code:** `handle_conn` never calls `platform_ipc_peer_cred()` today
+  (it exists but is uncalled on the HTTP path), and there is no trusted-peer
+  allowlist — so distinguishing a trusted proxy (webchat) from an arbitrary UDS
+  peer, and gating forwarded-header acceptance on it, must be built before any
+  forwarded source/principal is trusted (it is a security prerequisite, not a
+  config knob).
+- **DB1 is a single shared SQLite handle, and audit writes are best-effort.** DB1
+  is one process-wide `sqlite3*` (`db1_init.c:19`) opened `SQLITE_OPEN_FULLMUTEX`
+  with `journal_mode=WAL` and a busy handler that retries 15× (20–150 ms) then
+  **gives up** (`:22-68`). Every HTTP connection already runs on a detached worker
+  thread and `/v1/runs` on its own pthread, so concurrent `token_audit` writes
+  happen today; the insert is `(void)`-ignored, so a busy-handler exhaustion
+  **silently drops** the row. Adding a synchronous per-turn insert to the six
+  streaming/buffered hot paths raises both contention (→ dropped rows = undercount)
+  and tail latency. The accounting design must (i) state best-effort semantics
+  explicitly, (ii) prefer an **async/batched** audit-write queue off the request
+  thread, and (iii) load-test drop rate + tail latency before flipping the
+  accounting flag on.
 - **A thread-local context is NOT sufficient — it breaks for `/v1/runs`.** The
   cited precedent `ingress_preinject_set_request_disabled()` is `static __thread`
   (`ingress_preinject.c:28`) and works **only because the turn runs synchronously
@@ -604,10 +642,14 @@ metrics must use the new call key instead of the current agent-name join.
 - `ingress_dedup_enabled` + `ingress_dedup_window_ms` (§4)
 - `reasoning_effort_cap_enabled` (§5)
 - `cost_reward_lambda` + `cost_reward_enabled` (§6; 0 / off ⇒ pure side-metadata)
+- `ingress_audit_async` (§0/§2; write audit rows via an off-thread queue rather
+  than synchronously in the streaming hot path)
+- `trusted_uds_peer_uids` (§0 finding 18; allowlist of UDS peer UIDs whose
+  forwarded source/principal headers are honored — empty ⇒ trust nothing)
 
-These are all scalar bool/int flags, so each needs only a `config.h` struct field
-+ a `config_fields.c` row (+ a `test_config.c` round-trip); `config_sections.c` /
-`config_save.c` are touched only if a flag is nested under a new compound object.
+Most are scalar bool/int flags needing only a `config.h` struct field + a
+`config_fields.c` row (+ a `test_config.c` round-trip); `trusted_uds_peer_uids` is
+a list, so it (and only it) also touches `config_sections.c` / `config_save.c`.
 The §1 pricing unification and the §2 model-write / `by_model` fixes are **not**
 flagged — they are correctness fixes that land on by default.
 
@@ -691,6 +733,15 @@ with a benchmark showing no quality regression.
   row stay visible in source-aware usage summaries but do not contaminate
   `cmd_agent` agent stats. A fixture with two `agent_log` rows and two matching
   `token_audit` rows proves cost is not multiplied four ways.
+- **DB1 write concurrency:** a load test with the new write sites firing from
+  multiple request threads + the `/v1/runs` worker measures `token_audit` drop
+  rate (busy-handler exhaustion) and tail latency; async mode keeps both within
+  budget and the request thread is not blocked on the insert.
+- **UDS trust boundary:** an untrusted UDS peer (UID not in `trusted_uds_peer_uids`)
+  cannot set source/principal via forwarded headers — they are ignored; a TCP
+  client's `X-Forwarded-*`/principal headers are always ignored; only an
+  allowlisted peer's forwarding is honored; a UDS request with no forwarding still
+  attributes to its captured peer UID.
 - **API/auth:** any new usage route has route/spec parity, CLI RPC coverage where
   exposed, and `server_auth.c` capability tests. If only `insights.overview` is
   extended, test the existing route and capability.
