@@ -8,6 +8,8 @@
 #include "cli_stream_sink.h"
 #include "config.h"
 #include "primary_session_adapter.h"
+#include "provider_cli_adapter.h"
+#include "workspace_provider.h"
 #include "prompts.h"
 #include "persona.h"
 #include "server_http.h"
@@ -989,6 +991,66 @@ void chat_stream_worker(void *arg)
       compute_error(cctx, "conversation compaction is not supported for claude CLI chat");
       compute_ctx_free(cctx);
       return;
+   }
+
+   /* Detached (thin-client) workspace: the `claude` binary, its login, and the
+    * working tree live on the CLIENT, not this (possibly containerized) server.
+    * Run claude on the client over the reverse channel via the provider-cli
+    * streaming path, reusing the same delta->SSE sink. Co-located turns fall
+    * through to the local spawn below. */
+   {
+      int detached_bound = workspace_turn_bind_active(cwd);
+      const workspace_provider_t *wsp = workspace_provider_active();
+      if (detached_bound && wsp && wsp->kind == WS_PROVIDER_DETACHED && wsp->exec_stream)
+      {
+         if (aimee_path_is_absolute(cwd) && !strstr(cwd, "/.."))
+            run_cmd_set_cwd(cwd);
+         if (aimee_sid && aimee_sid[0])
+            session_id_set_override(aimee_sid);
+
+         char *sys = read_webchat_system_prompt(cctx);
+         agent_t cag;
+         memset(&cag, 0, sizeof(cag));
+         snprintf(cag.name, sizeof(cag.name), "claude");
+         snprintf(cag.backend, sizeof(cag.backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
+         snprintf(cag.cli_kind, sizeof(cag.cli_kind), "claude");
+         if (cfg.claude_model[0])
+            snprintf(cag.model, sizeof(cag.model), "%s", cfg.claude_model);
+
+         stream_event(cctx, "turn_start", NULL, NULL);
+         agent_tools_set_tool_event_cb(chat_tool_event_cb, cctx);
+         cli_stream_relay_t relay = {cctx, 0};
+         cli_stream_sink_set(chat_cli_stream_cb, &relay);
+
+         agent_result_t result;
+         memset(&result, 0, sizeof(result));
+         int rc = provider_cli_adapter_execute(provider_cli_adapter_get("claude"), &cag,
+                                               run_cmd_get_cwd(), sys ? sys : "", message, &result);
+
+         cli_stream_sink_clear();
+         agent_tools_set_tool_event_cb(NULL, NULL);
+         session_id_clear_override();
+         workspace_turn_unbind_active();
+         run_cmd_set_cwd(NULL);
+         free(sys);
+
+         if (rc != 0)
+         {
+            compute_error(cctx, result.error[0] ? result.error : "claude provider failed");
+            free(result.response);
+            compute_ctx_free(cctx);
+            return;
+         }
+         if (result.response && result.response[0] && !relay.emitted)
+            stream_event(cctx, "text", "content", result.response);
+         stream_event(cctx, "turn_end", NULL, NULL);
+         stream_event(cctx, "done", NULL, NULL);
+         free(result.response);
+         compute_ok(cctx);
+         compute_ctx_free(cctx);
+         return;
+      }
+      workspace_turn_unbind_active();
    }
 
    const char *claude_sid = provider_sid;
