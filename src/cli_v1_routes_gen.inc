@@ -192,6 +192,7 @@ static const struct
     {"delegate.roundtable", "POST", "/v1/delegate/roundtable"},
     {"eval.run", "POST", "/v1/eval/run"},
     {"graph.sync_code", "POST", "/v1/graph/sync_code"},
+    {"index.ingest", "POST", "/v1/index/ingest"},
     {"index.scan", "POST", "/v1/index/scan"},
     {"kb.build", "POST", "/v1/kb/build"},
     {"kb.ingest", "POST", "/v1/kb/ingest"},

@@ -490,6 +490,7 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/memory_provider.c
     ${AIMEE_SRC_DIR}/plugin_c_hook.c
     ${AIMEE_SRC_DIR}/config_plugin.c
+    ${AIMEE_SRC_DIR}/code_collect.c
     ${AIMEE_SRC_DIR}/events.c
     ${AIMEE_SRC_DIR}/model_registry.c
     ${AIMEE_SRC_DIR}/models_dev.c
@@ -1122,6 +1123,7 @@ add_executable(aimee
     ${CLI_SRCS}
     ${CLIENT_SUPPORT_SRCS}
     ${AIMEE_SRC_DIR}/aimee_home.c
+    ${AIMEE_SRC_DIR}/code_collect.c
     ${AIMEE_SRC_DIR}/dstr.c
     ${AIMEE_SRC_DIR}/history.c
     ${AIMEE_SRC_DIR}/markdown.c

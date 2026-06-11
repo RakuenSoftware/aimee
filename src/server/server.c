@@ -1028,6 +1028,9 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"memory.read", handle_memory_read},
     {"memory.benchmark", handle_memory_benchmark},
     {"index.scan", handle_index_scan},
+    /* index.ingest reuses the scan handler: the request carries client-pushed
+     * files, which index_scan_thread relays to kb instead of scanning. */
+    {"index.ingest", handle_index_scan},
     {"index.find", handle_index_find},
     {"index.list", handle_index_list},
     {"index.blast_radius", handle_index_blast_radius},

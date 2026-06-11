@@ -150,6 +150,20 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (config_save(&cfg) != 0)
       return server_send_error(conn, "workspace: failed to save config", NULL);
 
+   /* A `detached` workspace's root lives on the client; this server cannot
+    * enumerate or read it, so we don't discover projects or kick a server-side
+    * scan (which would read this host's filesystem). Ingestion is client-driven:
+    * the thin client pushes file contents via POST /v1/index/ingest. */
+   if (is_detached)
+   {
+      cJSON *resp = jo_ok();
+      jo_add_str(resp, "path", abs);
+      jo_add_str(resp, "provider", "detached");
+      cJSON_AddArrayToObject(resp, "projects");
+      cJSON_AddNumberToObject(resp, "project_count", 0);
+      return send_and_free(conn, resp);
+   }
+
    char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
    int count =
        workspace_discover_projects(abs, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);

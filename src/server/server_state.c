@@ -304,7 +304,11 @@ static void *index_scan_thread(void *arg)
 
    kb_client_index_scan_result_t res;
    memset(&res, 0, sizeof(res));
-   int kb_rc = kb_client_index_scan(name, root, force, &res);
+   /* index.ingest carries client-pushed {"rel_path","content"} files (a detached
+    * workspace this server cannot see); relay to kb. Detached so the push frees it. */
+   cJSON *files = cJSON_DetachItemFromObjectCaseSensitive(c->req, "files");
+   int kb_rc = files ? kb_client_code_scan_push(name, root, force, files, &res)
+                     : kb_client_index_scan(name, root, force, &res);
    cJSON *resp = (cJSON *)kb_client_index_scan_format_response(kb_rc, &res);
    if (resp)
    {

@@ -1,27 +1,46 @@
 /* test_attention_guard.c: unit tests for the P3 attention-guard pure helpers
- * (scoring with recency decay, op classification, kind weights). The stateful
- * hook handler (handle_attention_guard) is exercised by a scripted functional
- * smoke, not here; stubs satisfy the linker for its unused dependencies. */
+ * (scoring with recency decay, op classification, kind weights) plus a
+ * functional test of the hook handler's raw-scan enforcement (inert by default,
+ * blocking only at a positive ingress_max_raw_scans cap). */
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 #include "cli_attention_guard.h"
 
-/* Stubs for handle_attention_guard's deps (it is not called here). */
+/* Stubs/fakes for handle_attention_guard's deps. read_stdin + aimee_home are
+ * driven by the functional test below via these globals. */
+static const char *g_stdin_json = NULL;
+static char g_home[256] = "/tmp";
+
 char *read_stdin(void)
 {
-   return NULL;
+   return g_stdin_json ? strdup(g_stdin_json) : NULL;
 }
 const char *aimee_home(void)
 {
-   return "/tmp";
+   return g_home;
 }
 int platform_mkdir_p(const char *path, int mode)
 {
-   (void)path;
-   (void)mode;
+   /* Real recursive mkdir so the handler can persist its per-session raw-scan
+    * log (the cap test depends on that count surviving across invocations). */
+   char buf[512];
+   snprintf(buf, sizeof(buf), "%s", path);
+   for (char *p = buf + 1; *p; p++)
+   {
+      if (*p == '/')
+      {
+         *p = '\0';
+         mkdir(buf, (mode_t)mode);
+         *p = '/';
+      }
+   }
+   mkdir(buf, (mode_t)mode);
    return 0;
 }
 
@@ -85,12 +104,75 @@ static void test_score(void)
    printf("score OK\n");
 }
 
+/* Hook input for a recursive raw scan (the Bash `grep -r` form). */
+#define RAW_SCAN_HOOK                                                                              \
+   "{\"session_id\":\"agtest\",\"tool_name\":\"Bash\","                                            \
+   "\"tool_input\":{\"command\":\"grep -r TODO src\"}}"
+
+static void write_config(const char *body)
+{
+   char path[320];
+   snprintf(path, sizeof(path), "%s/aimee.yaml", g_home);
+   FILE *f = fopen(path, "wb");
+   assert(f);
+   if (body)
+      fputs(body, f);
+   fclose(f);
+}
+
+static void rm_path(const char *p)
+{
+   remove(p);
+}
+
+/* Functional test of the raw-scan enforcement: inert unless a positive
+ * ingress_max_raw_scans cap is configured. */
+static void test_guard_enforcement(void)
+{
+   /* Isolated, real temp home so config + the session log persist. */
+   snprintf(g_home, sizeof(g_home), "/tmp/aimee_ag_test_%d", (int)getpid());
+   mkdir(g_home, 0700);
+   char logpath[400], cfgpath[400];
+   snprintf(logpath, sizeof(logpath), "%s/.cache/attention/agtest.json", g_home);
+   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", g_home);
+   g_stdin_json = RAW_SCAN_HOOK;
+
+   /* (1) Inert default: no aimee.yaml at all -> raw scans allowed (exit 0). */
+   rm_path(cfgpath);
+   rm_path(logpath);
+   assert(handle_attention_guard() == 0);
+   assert(handle_attention_guard() == 0); /* still allowed, repeatedly */
+
+   /* (2) Explicit 0 is also disabled. */
+   write_config("ingress_max_raw_scans: 0\n");
+   rm_path(logpath);
+   assert(handle_attention_guard() == 0);
+
+   /* (3) Positive cap of 2: first two scans allowed, the third is blocked. */
+   write_config("ingress_max_raw_scans: 2\n");
+   rm_path(logpath);
+   assert(handle_attention_guard() == 0); /* used 0 -> allow, count 1 */
+   assert(handle_attention_guard() == 0); /* used 1 -> allow, count 2 */
+   assert(handle_attention_guard() == 2); /* used 2 >= cap -> block */
+
+   /* (4) AIMEE_GUARD=0 bypasses even with a cap hit. */
+   setenv("AIMEE_GUARD", "0", 1);
+   assert(handle_attention_guard() == 0);
+   unsetenv("AIMEE_GUARD");
+
+   rm_path(logpath);
+   rm_path(cfgpath);
+   g_stdin_json = NULL;
+   printf("enforcement OK\n");
+}
+
 int main(void)
 {
    printf("attention_guard: ");
    test_classify();
    test_weight();
    test_score();
+   test_guard_enforcement();
    printf("all tests passed\n");
    return 0;
 }

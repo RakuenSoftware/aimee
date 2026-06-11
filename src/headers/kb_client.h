@@ -949,6 +949,16 @@ typedef struct
 int kb_client_index_scan(const char *name, const char *root, int force,
                          kb_client_index_scan_result_t *out);
 
+/* Push a set of caller-supplied source files to aimee-kb for indexing,
+ * bypassing server-side filesystem enumeration. `files_arr_v` is a cJSON array
+ * of {"rel_path","content"} objects (typed void * to keep this header
+ * cJSON-free); it is ADOPTED (freed by this call) and may be NULL to let the kb
+ * scan its own filesystem. Used by the thin-client workspace push path, where
+ * the server cannot see the client's tree. Same return contract as
+ * kb_client_index_scan. */
+int kb_client_code_scan_push(const char *name, const char *root, int force, void *files_arr_v,
+                             kb_client_index_scan_result_t *out);
+
 /* Internal: map a parsed aimee-kb response into the result struct.
  * Exposed so unit tests can pin the wire contract directly without
  * spinning up a fake socket. `resp` is a const cJSON * (typed as void *
