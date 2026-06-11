@@ -85,8 +85,10 @@ static void record_avoided_turn(const char *model, double avoided_cost)
 
 /* Dedup eligibility for the buffered completion path (§4): only when the flag is
  * on and the client supplied an explicit Idempotency-Key. The caller has already
- * rejected streaming, and this path runs no tools — both v1 requirements. */
-static int dedup_eligible(char *key, size_t key_cap, const char *model, const char *endpoint,
+ * rejected streaming, and this path runs no tools — both v1 requirements. The key
+ * is built from the RESOLVED backend (ag), so it is computed after agent/config
+ * resolution and two requests resolving to a different backend never collide. */
+static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const char *endpoint,
                           const char *body, const char *context, int *ttl_out)
 {
    config_t cfg;
@@ -95,8 +97,24 @@ static int dedup_eligible(char *key, size_t key_cap, const char *model, const ch
    const char *idem = request_context_idempotency_key();
    if (!idem || !idem[0])
       return 0;
-   response_dedup_key(request_context_principal(), model, endpoint, idem, body, context, key,
-                      key_cap);
+   const request_context_t *rc = request_context_get();
+   /* Behaviour-affecting config flags that can change generation for this path. */
+   char flags[96];
+   snprintf(flags, sizeof(flags), "cs%d rc%d pi%d dw%d", cfg.cache_shaping_enabled,
+            cfg.reasoning_cap_enabled, cfg.ingress_preinject_enabled, cfg.dedup_window_seconds);
+   response_dedup_key_inputs_t in = {
+       .principal = request_context_principal(),
+       .source = rc ? rc->source : "",
+       .provider = ag ? ag->provider : "",
+       .model = ag ? ag->model : "",
+       .endpoint = endpoint,
+       .stream = 0,
+       .idempotency_key = idem,
+       .body = body,
+       .context = context,
+       .behavior_flags = flags,
+   };
+   response_dedup_key(&in, key, key_cap);
    if (ttl_out)
       *ttl_out =
           cfg.dedup_window_seconds > 0 ? cfg.dedup_window_seconds : RESPONSE_DEDUP_TTL_SECONDS;
@@ -133,15 +151,44 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
     * provider call below; on a hit it is freed unused. */
    char *pi_env = ingress_preinject_build(prompt, 0);
 
-   /* §4 short-window dedup: serve a re-sent identical request (same principal,
-    * model, endpoint, body, idempotency key, AND pre-injected context) from the
-    * TTL cache without paying for the provider call again. Buffered + non-stream
-    * + tool-free here. */
-   char dedup_key[224] = "";
+   /* Resolve the backend BEFORE dedup so the key carries the resolved
+    * provider/model — two requests resolving to a different backend must not
+    * collide even with an identical body. Honour the requested model: "aimee"
+    * (or empty) means the default agent; any other value selects a configured
+    * agent by name, falling back to the default when it doesn't match one. */
+   agent_config_t acfg;
+   if (agent_load_config(&acfg) != 0)
+   {
+      free(pi_env);
+      free(prompt);
+      openai_format_error(resp, cap, "server_error", "no agent configuration available");
+      return 503;
+   }
+   agent_t *ag = NULL;
+   if (model[0] && strcmp(model, "aimee") != 0)
+      ag = agent_find(&acfg, model);
+   if (!ag)
+      ag = agent_find(&acfg, acfg.default_agent);
+   if (!ag && acfg.agent_count > 0)
+      ag = &acfg.agents[0];
+   if (!ag)
+   {
+      free(pi_env);
+      free(prompt);
+      openai_format_error(resp, cap, "server_error", "no agent configured");
+      return 503;
+   }
+
+   /* §4 short-window dedup: serve a re-sent identical request (same account/source
+    * boundary, RESOLVED provider+model, endpoint, stream mode, idempotency key,
+    * body, pre-injected context, AND behaviour-config flags) from the TTL cache
+    * without paying for the provider call again. Buffered + non-stream + tool-free
+    * here. The key is built from the resolved agent above. */
+   char dedup_key[288] = "";
    int dedup_ttl = RESPONSE_DEDUP_TTL_SECONDS;
    const char *endpoint = chat ? "/v1/chat/completions" : "/v1/completions";
    int dedup_on =
-       dedup_eligible(dedup_key, sizeof(dedup_key), model, endpoint, body, pi_env, &dedup_ttl);
+       dedup_eligible(dedup_key, sizeof(dedup_key), ag, endpoint, body, pi_env, &dedup_ttl);
    if (dedup_on)
    {
       char *cached = NULL;
@@ -162,32 +209,6 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
             record_avoided_turn(model, avoided);
          return 200;
       }
-   }
-
-   agent_config_t acfg;
-   if (agent_load_config(&acfg) != 0)
-   {
-      free(pi_env);
-      free(prompt);
-      openai_format_error(resp, cap, "server_error", "no agent configuration available");
-      return 503;
-   }
-   /* Honour the requested model: "aimee" (or empty) means the default agent;
-    * any other value selects a configured agent by name, falling back to the
-    * default when it doesn't match one. */
-   agent_t *ag = NULL;
-   if (model[0] && strcmp(model, "aimee") != 0)
-      ag = agent_find(&acfg, model);
-   if (!ag)
-      ag = agent_find(&acfg, acfg.default_agent);
-   if (!ag && acfg.agent_count > 0)
-      ag = &acfg.agents[0];
-   if (!ag)
-   {
-      free(pi_env);
-      free(prompt);
-      openai_format_error(resp, cap, "server_error", "no agent configured");
-      return 503;
    }
 
    /* Honour the OpenAI sampling params when present, else fall back to the

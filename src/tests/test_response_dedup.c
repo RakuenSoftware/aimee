@@ -9,34 +9,70 @@
 
 static void test_key_isolation(void)
 {
-   char k1[256], k2[256], k3[256], k4[256];
-   response_dedup_key("uid:1", "gpt-4o", "/v1/chat/completions", "idem-a", "{\"x\":1}", "ctx", k1,
-                      sizeof(k1));
+   char k1[256], k2[256], k3[256], k4[256], k5[256], k6[256], k7[256];
+   /* Baseline. */
+   response_dedup_key_inputs_t base = {.principal = "uid:1",
+                                       .source = "openai-ingress",
+                                       .provider = "openai",
+                                       .model = "gpt-4o",
+                                       .endpoint = "/v1/chat/completions",
+                                       .stream = 0,
+                                       .idempotency_key = "idem-a",
+                                       .body = "{\"x\":1}",
+                                       .context = "ctx",
+                                       .behavior_flags = "cs0 rc0"};
+   response_dedup_key(&base, k1, sizeof(k1));
+
    /* Different principal -> different key (no cross-account reads). */
-   response_dedup_key("uid:2", "gpt-4o", "/v1/chat/completions", "idem-a", "{\"x\":1}", "ctx", k2,
-                      sizeof(k2));
-   /* Different body -> different key. */
-   response_dedup_key("uid:1", "gpt-4o", "/v1/chat/completions", "idem-a", "{\"x\":2}", "ctx", k3,
-                      sizeof(k3));
-   /* Different pre-injected context, identical body -> different key (no stale
-    * replay after the injected memory/context moved). */
-   response_dedup_key("uid:1", "gpt-4o", "/v1/chat/completions", "idem-a", "{\"x\":1}", "ctx-NEW",
-                      k4, sizeof(k4));
+   response_dedup_key_inputs_t v = base;
+   v.principal = "uid:2";
+   response_dedup_key(&v, k2, sizeof(k2));
+   /* Different body. */
+   v = base;
+   v.body = "{\"x\":2}";
+   response_dedup_key(&v, k3, sizeof(k3));
+   /* Different pre-injected context, identical body. */
+   v = base;
+   v.context = "ctx-NEW";
+   response_dedup_key(&v, k4, sizeof(k4));
+   /* Different RESOLVED model — same requested-but-resolved-different must not
+    * collide (the core finding-2 fix). */
+   v = base;
+   v.model = "gpt-4o-mini";
+   response_dedup_key(&v, k5, sizeof(k5));
+   /* Different resolved provider. */
+   v = base;
+   v.provider = "azure";
+   response_dedup_key(&v, k6, sizeof(k6));
+   /* Different behaviour-config flags. */
+   v = base;
+   v.behavior_flags = "cs1 rc0";
+   response_dedup_key(&v, k7, sizeof(k7));
+
    assert(strcmp(k1, k2) != 0);
    assert(strcmp(k1, k3) != 0);
    assert(strcmp(k1, k4) != 0);
+   assert(strcmp(k1, k5) != 0);
+   assert(strcmp(k1, k6) != 0);
+   assert(strcmp(k1, k7) != 0);
 
    /* Identical inputs -> identical key (deterministic). */
    char k1b[256];
-   response_dedup_key("uid:1", "gpt-4o", "/v1/chat/completions", "idem-a", "{\"x\":1}", "ctx", k1b,
-                      sizeof(k1b));
+   response_dedup_key(&base, k1b, sizeof(k1b));
    assert(strcmp(k1, k1b) == 0);
 
    /* Empty principal collapses to a stable "anon" marker, not an empty field. */
+   response_dedup_key_inputs_t anon = base;
+   anon.principal = "";
    char ka[256];
-   response_dedup_key("", "gpt-4o", "/v1/chat/completions", "idem-a", "{}", "", ka, sizeof(ka));
+   response_dedup_key(&anon, ka, sizeof(ka));
    assert(strncmp(ka, "anon|", 5) == 0);
-   PASS("dedup: key isolation + determinism + context");
+
+   /* NULL inputs -> empty key, no crash. */
+   char kn[8] = "x";
+   response_dedup_key(NULL, kn, sizeof(kn));
+   assert(kn[0] == '\0');
+   PASS("dedup: key isolation incl. resolved backend + flags");
 }
 
 static void test_get_put_roundtrip(void)

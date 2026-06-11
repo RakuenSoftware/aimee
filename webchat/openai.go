@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -68,8 +70,34 @@ func (s *server) handleOpenAIModels(w http.ResponseWriter, r *http.Request) {
 // flush incrementally (ReverseProxy disables buffering for text/event-stream).
 // The webchat bearer is stripped before forwarding; the UDS is a trusted local
 // channel that does not itself require the bearer.
+// openAIUserField buffers and restores the request body, returning the OpenAI
+// `user` field (the standard end-user identifier). Used to give per-client
+// attribution to a shared-bearer proxy surface where no other per-client
+// identity exists.
+func openAIUserField(r *http.Request) string {
+	if r.Body == nil {
+		return ""
+	}
+	buf, err := io.ReadAll(r.Body)
+	_ = r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(buf))
+	if err != nil || len(buf) == 0 {
+		return ""
+	}
+	var v struct {
+		User string `json:"user"`
+	}
+	_ = json.Unmarshal(buf, &v)
+	return strings.TrimSpace(v.User)
+}
+
 func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath string) {
 	sock := s.aimeeHTTPSockPath()
+	// Per-client identity for attribution: the webchat OpenAI proxy authenticates
+	// with a single shared bearer, so distinct clients have no built-in identity.
+	// Use the OpenAI `user` field (when present) so two clients are not collapsed
+	// into one principal/session after the auth header is stripped.
+	clientID := openAIUserField(r)
 	proxy := &httputil.ReverseProxy{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -83,18 +111,27 @@ func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath st
 			req.Host = "aimee"
 			// Strip the webchat bearer (the UDS is a trusted local channel), but
 			// preserve the account boundary across the strip: when the shared
-			// ingress proxy secret is configured, stamp it plus the principal /
-			// source so aimee-server attributes this traffic to the webchat proxy
-			// rather than collapsing it to the process uid. The client's
-			// Idempotency-Key (if any) is forwarded unchanged by ReverseProxy.
+			// ingress proxy secret is configured, stamp it plus the principal,
+			// source, and a per-client session key so aimee-server can distinguish
+			// clients/sessions rather than collapsing them under one principal and
+			// the process-wide session. A client may stamp its own X-Aimee-*
+			// headers; those are preserved. The Idempotency-Key (if any) is
+			// forwarded unchanged by ReverseProxy.
 			req.Header.Del("Authorization")
 			if secret := strings.TrimSpace(os.Getenv("AIMEE_INGRESS_PROXY_SECRET")); secret != "" {
 				req.Header.Set("X-Aimee-Proxy-Authorization", secret)
-				if req.Header.Get("X-Aimee-Principal") == "" {
-					req.Header.Set("X-Aimee-Principal", "webchat")
-				}
 				if req.Header.Get("X-Aimee-Source") == "" {
 					req.Header.Set("X-Aimee-Source", "webchat")
+				}
+				if req.Header.Get("X-Aimee-Principal") == "" {
+					if clientID != "" {
+						req.Header.Set("X-Aimee-Principal", "webchat:"+clientID)
+					} else {
+						req.Header.Set("X-Aimee-Principal", "webchat")
+					}
+				}
+				if req.Header.Get("X-Aimee-Session-Key") == "" && clientID != "" {
+					req.Header.Set("X-Aimee-Session-Key", "webchat:"+clientID)
 				}
 			}
 		},

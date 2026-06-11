@@ -20,15 +20,31 @@
 /* Default short window (seconds). */
 #define RESPONSE_DEDUP_TTL_SECONDS 5
 
-/* Build a stable dedup key from every behaviour-affecting input the ingress
- * handler can see. principal is the account boundary (empty -> "anon"); body and
- * context are hashed so the key stays bounded. `context` is the pre-injected
- * memory/<aimee-context> envelope (or "") — folding it in prevents a stale reply
- * being replayed for an identical body after the injected context changed.
- * Writes a NUL-terminated key into out. Pure and deterministic; unit-tested. */
-void response_dedup_key(const char *principal, const char *model, const char *endpoint,
-                        const char *idempotency_key, const char *body, const char *context,
-                        char *out, size_t out_cap);
+/* Every behaviour-affecting input the ingress handler can see, folded into the
+ * dedup key. The RESOLVED backend (provider/model) must be supplied — i.e. the
+ * key is built AFTER agent/config resolution — so two requests that resolve to a
+ * different backend or behaviour config never collide. principal is the account
+ * boundary (empty -> "anon"); source is the turn-origin/account source; body,
+ * context (the pre-injected <aimee-context> envelope), and behavior_flags (a
+ * string of the generation-affecting config flags) are hashed so the key stays
+ * bounded. */
+typedef struct
+{
+   const char *principal;       /* auth/account boundary */
+   const char *source;          /* turn-origin / account source */
+   const char *provider;        /* resolved provider */
+   const char *model;           /* resolved model (not the requested alias) */
+   const char *endpoint;        /* request endpoint */
+   int stream;                  /* stream mode (0/1) */
+   const char *idempotency_key; /* explicit Idempotency-Key */
+   const char *body;            /* exact request body */
+   const char *context;         /* pre-injected context envelope */
+   const char *behavior_flags;  /* behaviour-affecting config flags */
+} response_dedup_key_inputs_t;
+
+/* Build a stable dedup key from `in`. Writes a NUL-terminated key into out (empty
+ * when `in` is NULL). Pure and deterministic; unit-tested. */
+void response_dedup_key(const response_dedup_key_inputs_t *in, char *out, size_t out_cap);
 
 /* Look up a live (unexpired) entry for `key` as of `now` (unix seconds). On a
  * hit, *resp_out is set to a malloc'd copy of the cached response (caller frees)

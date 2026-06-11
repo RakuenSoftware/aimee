@@ -33,21 +33,33 @@ static uint64_t fnv1a(const char *s)
    return h;
 }
 
-void response_dedup_key(const char *principal, const char *model, const char *endpoint,
-                        const char *idempotency_key, const char *body, const char *context,
-                        char *out, size_t out_cap)
+void response_dedup_key(const response_dedup_key_inputs_t *in, char *out, size_t out_cap)
 {
    if (!out || out_cap == 0)
       return;
-   uint64_t body_hash = fnv1a(body ? body : "");
+   if (!in)
+   {
+      out[0] = '\0';
+      return;
+   }
+   uint64_t body_hash = fnv1a(in->body ? in->body : "");
    /* The pre-injected context (memory/<aimee-context> envelope) changes the model
     * input even when the request body is identical, so it MUST be in the key — or
     * a repeat body could replay a stale answer after the injected context moved. */
-   uint64_t ctx_hash = fnv1a(context ? context : "");
-   snprintf(out, out_cap, "%s|%s|%s|%s|%016llx|%016llx",
-            principal && principal[0] ? principal : "anon", model ? model : "",
-            endpoint ? endpoint : "", idempotency_key ? idempotency_key : "",
-            (unsigned long long)body_hash, (unsigned long long)ctx_hash);
+   uint64_t ctx_hash = fnv1a(in->context ? in->context : "");
+   uint64_t flags_hash = fnv1a(in->behavior_flags ? in->behavior_flags : "");
+   /* Every behaviour-affecting input the handler can see: the auth/source boundary
+    * (principal|source), the RESOLVED backend identity (provider|model|endpoint)
+    * and stream mode — built after agent/config resolution so two requests that
+    * resolve to a different backend never collide — the explicit idempotency key,
+    * and hashes of the body, the pre-injected context, and the behaviour-config
+    * flags. */
+   snprintf(out, out_cap, "%s|%s|%s|%s|%s|s%d|%s|%016llx|%016llx|%016llx",
+            in->principal && in->principal[0] ? in->principal : "anon",
+            in->source ? in->source : "", in->provider ? in->provider : "",
+            in->model ? in->model : "", in->endpoint ? in->endpoint : "", in->stream ? 1 : 0,
+            in->idempotency_key ? in->idempotency_key : "", (unsigned long long)body_hash,
+            (unsigned long long)ctx_hash, (unsigned long long)flags_hash);
 }
 
 int response_dedup_get(const char *key, long now, char **resp_out, double *cost_out)
