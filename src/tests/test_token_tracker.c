@@ -105,17 +105,20 @@ static void test_specific_match_wins(void)
 
 static void test_compound_id_no_false_match(void)
 {
-   /* Realistic unrelated/compound model ids must not be priced by an accidental
-    * substring hit against the static table. Anthropic/OpenAI keys are absent
-    * from these ids, so they resolve to 0 here (the registry fallback, when
-    * linked, prices known ids by exact lookup instead). NOTE: token_tracker's
-    * static table is still substring-matched, so a short OpenAI key embedded in
-    * an id (e.g. "...-o1-...") can still false-positive; eliminating that fully
-    * is the registry exact-lookup path's job (a documented follow-up). */
+   /* Prefix matching (on the provider-stripped id) means a short static key
+    * embedded mid-string must NOT match — the false positive substring matching
+    * allowed. "my-service-o1-wrapper" contains "o1" but is not o1. */
    token_usage_t u = {.input_tokens = 1000000, .output_tokens = 1000000};
    assert(near_equal(token_estimate_cost("acme-internal-summarizer-v2", &u), 0.0));
    assert(near_equal(token_estimate_cost("my-llama3-finetune", &u), 0.0));
-   PASS("cost: compound id no false match");
+   assert(near_equal(token_estimate_cost("my-service-o1-wrapper", &u), 0.0)); /* not o1 */
+   assert(near_equal(token_estimate_cost("acme-gpt-4o-clone", &u), 0.0));     /* not gpt-4o */
+
+   /* A provider-qualified id still resolves by stripping the prefix. */
+   token_usage_t in = {.input_tokens = 1000000};
+   assert(near_equal(token_estimate_cost("anthropic/claude-opus-4", &in), 15.0));
+   assert(near_equal(token_estimate_cost("openrouter:openai/gpt-4o", &in), 2.50));
+   PASS("cost: prefix match — no mid-string false match");
 }
 
 static int fake_registry_price(const char *model, double *in_per_mtok, double *out_per_mtok)

@@ -59,40 +59,49 @@ static int token_ascii_eq_ci(char a, char b)
    return tolower((unsigned char)a) == tolower((unsigned char)b);
 }
 
-static const char *token_strcasestr_local(const char *haystack, const char *needle)
+/* Strip a leading provider qualifier ("provider/model" or "provider:model",
+ * possibly nested) by taking the segment after the last '/' or ':'. */
+static const char *token_normalize_model(const char *model)
 {
-   if (!haystack || !needle)
-      return NULL;
-   if (!*needle)
-      return haystack;
-
-   size_t needle_len = strlen(needle);
-   for (const char *p = haystack; *p; p++)
-   {
-      size_t i = 0;
-      while (i < needle_len && p[i] && token_ascii_eq_ci(p[i], needle[i]))
-         i++;
-      if (i == needle_len)
-         return p;
-   }
-   return NULL;
+   const char *s = model;
+   const char *sep = strrchr(s, '/');
+   if (sep)
+      s = sep + 1;
+   sep = strrchr(s, ':');
+   if (sep)
+      s = sep + 1;
+   return s;
 }
 
-/* Return the most specific (longest) matching entry rather than the first one
- * in table order. With first-match, the result depends on row ordering — e.g.
- * "gpt-4o-mini" must precede "gpt-4o" — which is a silent mispricing hazard if
- * the table is ever reordered. Longest-match makes the lookup order-independent
- * (the longer substring is always the more specific model) while preserving the
- * results the carefully-ordered table already produces. */
+/* Case-insensitive: does `id` begin with `prefix`? */
+static int token_starts_with_ci(const char *id, const char *prefix)
+{
+   while (*prefix)
+   {
+      if (!*id || !token_ascii_eq_ci(*id, *prefix))
+         return 0;
+      id++;
+      prefix++;
+   }
+   return 1;
+}
+
+/* Match the table key as a PREFIX of the (provider-stripped) model id, taking the
+ * most specific (longest) match. Prefix rather than substring avoids false
+ * positives from short keys appearing mid-string — e.g. "o1" must not match
+ * "my-service-o1-wrapper" — while still matching dated/versioned ids like
+ * "gpt-4o-2024-11-20" and provider-qualified ids like "anthropic/claude-opus-4".
+ * Longest-match keeps the lookup independent of table order. */
 static const model_price_t *find_price(const char *model)
 {
    if (!model || !model[0])
       return NULL;
+   const char *id = token_normalize_model(model);
    const model_price_t *best = NULL;
    size_t best_len = 0;
    for (int i = 0; i < PRICING_COUNT; i++)
    {
-      if (token_strcasestr_local(model, pricing[i].model_substr))
+      if (token_starts_with_ci(id, pricing[i].model_substr))
       {
          size_t len = strlen(pricing[i].model_substr);
          if (len > best_len)
