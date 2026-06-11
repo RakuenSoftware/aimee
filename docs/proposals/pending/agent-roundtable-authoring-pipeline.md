@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 sixth review)
+- **Date:** 2026-06-11 (revised post-PR-#183 seventh review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -293,6 +293,41 @@ actually captures.
     Otherwise draft passes drop their result or are mis-shaped into review fields.
     **Resolved in §2, §4, and §10.**
 
+## PR #183 seventh review — chunk aggregation, retries, and stale async work
+
+The current shape now closes the `/v1/runs` eviction race, but four implementation
+edges still need to be explicit before this can be built without hidden correctness
+holes.
+
+28. **Chunked review needs an artifact-level aggregate, not independent green
+    slices.** §2 allows large proposals/diffs to be reviewed as chunks, but §3's
+    done-bar currently reads like it evaluates "the latest REVIEW result" as if
+    there is always one result for the whole artifact. If each chunk can pass
+    independently, cross-chunk invariants, renamed symbols, duplicated logic, and
+    missing sections can still be wrong. A chunked pass needs a manifest, per-chunk
+    child results, a deterministic aggregate row, and a final whole-artifact
+    synthesis/check before the phase can pass. **Resolved in §2, §3, §4, and §10.**
+29. **Attempt retries need their own ceiling.** `roundtable_pipeline_max_passes`
+    correctly bounds correctness passes, but capture faults and cancelled/failed
+    attempts are infrastructure retries under the same pass id. Counting those as
+    outer passes makes one transient capture failure consume a correctness pass;
+    not counting them without a separate bound can loop forever. Add an attempt
+    retry cap per pass, with costs still charged to the phase. **Resolved in §3,
+    §4, §6, and §10.**
+30. **Late worker finalization must not advance stale state.** Async op-runs can
+    outlive a pipeline cancel, abandon, fail-return, or retry. A late result from
+    an older `attempt_no`/`run_id` must be recorded as terminal history, but it
+    cannot update the current pass aggregate, satisfy the done-bar, or resume a
+    gate after the pass was superseded. **Resolved in §4, §5, and §10.**
+31. **Pipeline cancellation must bridge to child op-run cancellation.** The repo
+    already has `/v1/runs/{id}/stop` and `handle_delegate_roundtable` polls
+    `__run_id` through `openai_runs_store_cancel_requested`. A new pipeline
+    `cancel`/`abandon` action that only flips the ledger row leaves the roundtable
+    worker running and later finalizing stale work (#30). The action must request
+    stop on the active child `run_id`, mark the attempt cancelled/abandoned in the
+    ledger, and tolerate the worker's eventual terminal write. **Resolved in §4,
+    §5, and §10.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -382,6 +417,10 @@ Both phases use the **same** engine; they differ only in input and brief.
   mode only; the agent applies fixes between passes. For large diffs, the driving
   agent must pass an artifact file/path or chunked diff slices rather than an
   unbounded inline string, and the ledger stores the diff ref plus content hash.
+  Chunking is a pass-level manifest, not a set of unrelated mini-reviews: every
+  chunk stores an input hash and result, the pass stores the aggregate, and the
+  done-bar can pass only after all chunks are covered plus a whole-artifact
+  synthesis/check has considered cross-chunk invariants (#28).
   Pipeline-owned PR reviews use the async op-run path with validated pass
   metadata, not a direct synchronous roundtable dispatch. The brief carries the
   *fixes just applied*, the *invariants* the change must not break, and the
@@ -425,6 +464,13 @@ The driving agent computes the bar from the structured items
 (agent-directed-pr-review P1b); it never re-judges convergence itself — it trusts
 the engine's deterministic saturation logic as exposed through `converged`.
 
+For chunked reviews (#28), the done-bar is evaluated on the **aggregate pass
+result**, not on any one child chunk. Every manifest entry must have a completed,
+valid REVIEW result over the expected chunk hash, and the aggregate must include a
+whole-artifact synthesis/check for cross-chunk findings before the phase can pass.
+Any missing, stale, truncated, degraded, or failed chunk keeps the aggregate
+blocked.
+
 **Pass ceiling (configurable; cost backstop, not an early-exit).** `roundtable_pipeline_max_passes`
 bounds outer passes. **Default 0 = unbounded** — review runs until the done-bar,
 honoring correctness-over-pass-count. When an operator sets a positive cap and the
@@ -441,7 +487,10 @@ prevents cross-pass echo.)
 **Non-termination backstop.** Besides the optional pass ceiling, the inherited
 `ensemble_max_cost_usd` (per call) and a new cumulative
 `roundtable_pipeline_max_cost_usd` (per phase, §6) bound spend; either tripping
-escalates to the human rather than silently passing.
+escalates to the human rather than silently passing. Infrastructure retries under
+one pass id are separately bounded by `roundtable_pipeline_max_attempts_per_pass`
+(#29) so capture failures do not consume correctness passes but also cannot spin
+forever.
 
 ## §4 Hybrid state — the resumable pipeline ledger
 
@@ -469,9 +518,11 @@ Either way, the durable record holds:
   chunk manifest, and content hashes, not unbounded inline text as the primary
   representation;
 - the current brief plus compact gate digest;
-- per-pass history: each outer pass's child roundtable `run_id`, status,
-  `converged`, blocking/suggestion counts, `cost_usd`, `rounds_run`, `best_round`,
-  result hash, and any payload/chunk refs;
+- per-pass history: each outer pass's status, aggregate child `run_id` if
+  single-call, `converged`, blocking/suggestion counts, `cost_usd`, `rounds_run`,
+  `best_round`, result hash, and any payload/chunk refs; for chunked passes, a
+  manifest plus aggregate row that records per-chunk results and the
+  whole-artifact synthesis/check (#28);
 - per-attempt history under each pass: `attempt_no`, child `run_id`, submitted and
   terminal timestamps, captured/lost status, terminal flags, result hash, and cost
   if the result was available;
@@ -520,9 +571,18 @@ If a result is still not captured (a genuine fault), the attempt is marked
 stable `pipeline_pass_id` but a new `attempt_no`/`run_id`. That retry is idempotent
 only if the stored artifact/diff hash still matches; if the input changed, the old
 pass is stale and the pipeline starts a new pass instead. Retries are bounded by
-the pass ceiling and cost cap, with lost attempts booked as overhead when cost is
-known. A human is involved only if capture keeps failing across re-runs (#19) —
-never on a single transient miss.
+`roundtable_pipeline_max_attempts_per_pass` plus the phase cost cap (#29), with
+lost attempts booked as overhead when cost is known. A human is involved only if
+capture keeps failing across bounded re-runs (#19) — never on a single transient
+miss.
+
+Async workers are allowed to finish after the pipeline state changes, so ledger
+writes must be conditional. The finalize hook records every terminal
+`run_id`/`attempt_no`, but only the **current active attempt** for a non-cancelled,
+non-abandoned pass may update the pass aggregate, satisfy the done-bar, or advance
+the state machine. A late terminal result from a cancelled, abandoned, failed-back,
+or superseded attempt remains audit history and cannot resurrect stale state
+(#30).
 
 This makes the human gate a durable checkpoint: `status` shows where it is and
 the evidence; `gate pass|fail --reason "…"` records the verdict and resumes the
@@ -551,6 +611,12 @@ the existing `autopilot` pipeline handler, but it must not leave two unrelated
 "pipeline" namespaces with different IDs. The gate action is net-new; today's
 autopilot actions cover `start`, `advance`, `status`, `list`, `cancel`, `resume`,
 `link-plan`, and `link-job`, not pass/fail gates.
+
+Pipeline `cancel`/`abandon` cannot be ledger-only. If a child roundtable op-run is
+active, the action must request cancellation through the child `run_id`
+(`/v1/runs/{id}/stop` / `openai_runs_store_request_cancel` semantics), mark the
+active attempt cancelled or abandoned, and leave the finalize hook free to record
+the eventual terminal state without advancing stale state (#30/#31).
 
 Before a **pass** can merge or advance, the resumed agent revalidates the stored
 worktree/PR state through Aimee's workspace-aware git surface (`git_pr` /
@@ -586,6 +652,10 @@ roundtable config surface is scalar keys like `roundtable.max_rounds`,
   `zero_blocking_suggestions` | `zero_blocking_questions_answered`.
 - `roundtable_pipeline_max_passes` — int, **default 0 (unbounded)**; >0 = outer
   pass ceiling that escalates (never auto-passes) on hit.
+- `roundtable_pipeline_max_attempts_per_pass` — int, default 2; bounds
+  infrastructure retries (`lost_result`, capture failure, queue/worker failure,
+  cancellation retry) under the same stable pass id without consuming outer
+  correctness passes.
 - `roundtable_pipeline_max_cost_usd` — double, cumulative per-phase spend cap;
   0 = unbounded; tripping escalates.
 - *(optional, deferred)* per-phase overrides (`…_proposal` / `…_pr` suffixes) if
@@ -655,11 +725,14 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
   `autopilot` extension). Wire the server-worker capture seam: validate
   `pipeline_pass_id`, inject private `__pipeline_pass_id`, preserve it through
   async enqueue, and extend `op_run_worker_run`'s finalize path or hook to persist
-  every terminal attempt to the ledger (#18/#20-#25). No loop yet; states/gates
-  settable manually. Mergeable alone, with restart tests.
+  every terminal attempt to the ledger (#18/#20-#25). The finalize hook must be
+  current-attempt guarded so late workers cannot advance stale state (#30), and
+  pipeline cancel/abandon must request child-run stop when one is active (#31).
+  No loop yet; states/gates settable manually. Mergeable alone, with restart tests.
 - **P1 — Outer review loop + done-bar.** The REVIEW⇄revise loop over
   `ensemble_review`, the configurable done-bar evaluator, the pass ceiling +
-  escalation, the echo guard. Drives the PR phase first (single mode, simplest).
+  escalation, the attempt retry ceiling, the echo guard. Drives the PR phase first
+  (single mode, simplest).
 - **P2 — Proposal phase (DRAFT + REVIEW).** Add the `drafting` DRAFT step and the
   proposal-review loop; wire proposal PR create/merge through the workspace-aware
   git/PR surface.
@@ -710,7 +783,8 @@ ledger) before the full idea→merge pipeline of P2/P3.
 - **Lost-result re-run (#19)** — simulate a genuine capture fault: the pass is
   marked `lost_result` and auto re-runs under the **same `pipeline_pass_id`** (no
   double-counted pass; lost attempt booked as overhead), escalating to the human
-  only after repeated capture failures, never on the first miss.
+  only after `roundtable_pipeline_max_attempts_per_pass` is exhausted or the phase
+  cost cap trips, never on the first miss.
 - **Attempt accounting (#23/#25)** — successful, failed, cancelled, malformed,
   capture-failed, and lost attempts all get attempt rows and preserve run IDs,
   terminal status, flags, result hashes, and known cost without overwriting prior
@@ -718,6 +792,17 @@ ledger) before the full idea→merge pipeline of P2/P3.
 - **Replay hash pinning (#24)** — mutate the proposal/diff between a lost attempt
   and retry; the pipeline refuses to reuse the old pass id and starts a new pass
   because the artifact hash changed.
+- **Chunk aggregate done-bar (#28)** — split a diff/proposal into multiple chunks
+  with a cross-chunk invariant violation; individual chunks can complete, but the
+  phase cannot pass until the aggregate whole-artifact synthesis/check records the
+  violation resolved. Missing or stale chunk hashes keep the aggregate blocked.
+- **Late finalization guard (#30)** — start an attempt, supersede/cancel/abandon
+  it, then let the old worker finish; the terminal attempt row is recorded, but it
+  does not update the current aggregate, pass the done-bar, open a gate, or resume
+  the pipeline.
+- **Pipeline child cancellation (#31)** — cancelling/abandoning a pipeline with an
+  active roundtable run requests child op-run cancellation, persists the cancelled
+  attempt, and tolerates the worker's later terminal write.
 - **DRAFT skeleton + expansion (#9)** — a DRAFT call returns a skeleton within the
   8 KB cap without truncating mid-structure; the author-revise loop grows it to a
   full proposal in the working file, and REVIEW reviews the file/chunks, not the
@@ -744,7 +829,8 @@ ledger) before the full idea→merge pipeline of P2/P3.
   the run has a dedicated branch/worktree or an explicit operator override.
 - **Large payload handling** — a diff/proposal larger than a single MCP/op-run
   payload is reviewed through artifact refs or chunks, and the ledger stores
-  hashes so stale chunks are detected.
+  hashes so stale chunks are detected; chunked results are aggregated before the
+  done-bar is evaluated.
 - **Fail-return** — a `fail --reason` re-enters the review loop with the reason
   present in the next brief (asserted in the reviewer prompt).
 - **Panel diversity** — resolve `ensemble.reference_models` through agent config;
