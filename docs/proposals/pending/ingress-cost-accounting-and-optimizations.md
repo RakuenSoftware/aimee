@@ -30,8 +30,9 @@
   reward on the existing `delegate_routing` bandit close), `src/server/server_http.c`
   + `src/headers/server_http.h` + `src/server/server_auth.c` (request-context
   propagation + UDS peer-UID capture for source, idempotency, principal, and
-  request-id metadata), `webchat/openai.go` and `webchat/socket.go` (webchat
-  proxy/session source attribution),
+  request-id metadata), `api/openapi-server-v1.yaml`,
+  `src/server/openapi_server_data.h`, `src/cli_rpc_routes.inc`,
+  `webchat/openai.go` and `webchat/socket.go` (webchat proxy/session source attribution),
   `src/cmd_agent.c`, dashboard/HUD/frontend readers that consume token-audit totals, config
   plumbing (`src/headers/config.h`,
   `src/config_fields.c`, `src/config_sections.c`, `src/config_save.c`), route and
@@ -159,6 +160,25 @@ allowlist are **net-new code** (the legacy NDJSON socket already derives
 HTTP path), and that mechanism is a prerequisite before any forwarded source/
 principal can be trusted.
 
+A tenth pass found two contract/security gaps in the ninth-pass fix. (19)
+**A UID allowlist is not enough to trust forwarded identity.** In the expected
+local deployment, webchat, the thin CLI, MCP, and ad-hoc local tools often run as
+the same Unix user, so `trusted_uds_peer_uids=[1000]` would trust **every**
+same-user UDS client to set `X-Aimee-Source` / principal headers. Peer UID is a
+baseline principal, not a proxy-authentication mechanism. Forwarded identity
+needs a second proof such as a server-minted internal proxy token/HMAC, a
+dedicated proxy-only socket, or another capability that arbitrary same-user
+clients cannot guess; inbound forwarding headers from all other clients must be
+stripped before request context is built. (20) **Extending `insights.overview`
+is still an API contract change.** The current OpenAPI entry is just
+`type: object`, `/v1/openapi.yaml` serves the generated
+`src/server/openapi_server_data.h`, and the thin client has a custom
+`print_insights_overview` in `src/cli_rpc_routes.inc` that prints only
+`estimated_cost_usd`. Source/usage-kind realized-vs-estimated semantics must be
+added to the server OpenAPI schema, regenerated into the embedded data header,
+and taught to the thin-client printer; otherwise the new fields are present in
+JSON but invisible or undocumented to clients.
+
 ## Goal
 
 Ingress requests are a cost blind spot. Normal agent and delegate calls are
@@ -285,7 +305,9 @@ optimization surface aimee already has, not a new one.
   allowlist — so distinguishing a trusted proxy (webchat) from an arbitrary UDS
   peer, and gating forwarded-header acceptance on it, must be built before any
   forwarded source/principal is trusted (it is a security prerequisite, not a
-  config knob).
+  config knob). A UID allowlist by itself is insufficient when the proxy and
+  arbitrary local clients run as the same user; forwarded headers need a
+  proxy-only credential or equivalent second factor.
 - **DB1 is a single shared SQLite handle, and audit writes are best-effort.** DB1
   is one process-wide `sqlite3*` (`db1_init.c:19`) opened `SQLITE_OPEN_FULLMUTEX`
   with `journal_mode=WAL` and a busy handler that retries 15× (20–150 ms) then
@@ -414,9 +436,10 @@ estimates** and **avoided estimated cost**.
   pthread (and SSE may offload), the context for those paths must be **captured
   into the job/work struct at enqueue**, and the thread-local must be reset per
   request so it never leaks across reused worker threads. Forwarded identity
-  headers must be accepted only from trusted internal proxies/peer UIDs and
-  ignored or stripped on TCP and untrusted UDS requests, so external callers
-  cannot spoof source or principal.
+  headers must be accepted only from authenticated internal proxies and ignored
+  or stripped on TCP and untrusted UDS requests, so external callers cannot spoof
+  source or principal. Captured peer UID is the fallback principal; it is not
+  enough to authenticate a proxy's forwarded user/session identity.
 - **Fix `by_model` alongside the model write (prerequisite, not optional).**
   Populating `served_model` is pointless while `db1_token_audit_by_model` filters
   empty models out: either backfill legacy rows' model from their `tool_name`
@@ -625,6 +648,15 @@ Any new route requires:
 - `server_auth.c` capability policy, not just route registration; and
 - tests for auth denial as well as route/spec parity.
 
+Extending an existing route still has contract work. If `insights.overview` is
+the usage surface, `api/openapi-server-v1.yaml` must stop describing it as an
+opaque `type: object` and document the realized/estimated/avoided/partial
+breakdown, source/model arrays, and backwards-compatible legacy fields. After
+that, regenerate `src/server/openapi_server_data.h` (`src/gen_openapi_server.py`)
+so `/v1/openapi.yaml` serves the updated contract, and update
+`src/cli_rpc_routes.inc::print_insights_overview` so the thin client displays the
+new spend semantics instead of only the legacy `estimated_cost_usd` scalar.
+
 Regardless of whether a new route is added, every existing consumer of
 `token_audit` must learn the same semantics: `cmd_usage`, `insights.overview`,
 HUD, dashboard JSON, `cmd_agent` / agent stats, the React context panel, and
@@ -644,12 +676,15 @@ metrics must use the new call key instead of the current agent-name join.
 - `cost_reward_lambda` + `cost_reward_enabled` (§6; 0 / off ⇒ pure side-metadata)
 - `ingress_audit_async` (§0/§2; write audit rows via an off-thread queue rather
   than synchronously in the streaming hot path)
-- `trusted_uds_peer_uids` (§0 finding 18; allowlist of UDS peer UIDs whose
-  forwarded source/principal headers are honored — empty ⇒ trust nothing)
+- `trusted_ingress_proxy_token` or equivalent proxy credential (§0 findings
+  18–19; required before forwarded source/principal headers are honored)
 
 Most are scalar bool/int flags needing only a `config.h` struct field + a
-`config_fields.c` row (+ a `test_config.c` round-trip); `trusted_uds_peer_uids` is
-a list, so it (and only it) also touches `config_sections.c` / `config_save.c`.
+`config_fields.c` row (+ a `test_config.c` round-trip). If the trusted-proxy
+mechanism is a list or structured policy rather than one token, it also touches
+`config_sections.c` / `config_save.c`. Do not rely on a bare UID list for
+forwarded identity; peer UID is only the fallback principal when no proxy
+credential is present.
 The §1 pricing unification and the §2 model-write / `by_model` fixes are **not**
 flagged — they are correctness fixes that land on by default.
 
@@ -690,8 +725,10 @@ with a benchmark showing no quality regression.
   next request on a reused worker thread. Webchat OpenAI proxy requests arrive at
   aimee-server with trusted source/session/principal metadata after
   `Authorization` is stripped. TCP clients and untrusted UDS peers cannot spoof
-  forwarded source/principal headers, and caller-supplied `X-Request-ID` is
-  preserved only as correlation metadata, not as the sole idempotency key.
+  forwarded source/principal headers, same-UID non-proxy UDS clients are not
+  trusted merely because their UID matches webchat, and caller-supplied
+  `X-Request-ID` is preserved only as correlation metadata, not as the sole
+  idempotency key.
 - **Source attribution:** ingress rows carry a per-client source derived from the
   request context (session key/principal/UDS peer UID), **not** the PPID-shared
   `session_id()`; two distinct clients do not collapse into one `top_sessions`
@@ -737,11 +774,16 @@ with a benchmark showing no quality regression.
   multiple request threads + the `/v1/runs` worker measures `token_audit` drop
   rate (busy-handler exhaustion) and tail latency; async mode keeps both within
   budget and the request thread is not blocked on the insert.
-- **UDS trust boundary:** an untrusted UDS peer (UID not in `trusted_uds_peer_uids`)
-  cannot set source/principal via forwarded headers — they are ignored; a TCP
-  client's `X-Forwarded-*`/principal headers are always ignored; only an
-  allowlisted peer's forwarding is honored; a UDS request with no forwarding still
-  attributes to its captured peer UID.
+- **UDS/proxy trust boundary:** an untrusted UDS peer cannot set source/principal
+  via forwarded headers — they are ignored; a same-UID but non-proxy UDS peer also
+  cannot set them; a TCP client's `X-Forwarded-*`/principal headers are always
+  ignored; only a peer with the proxy credential can forward identity; a UDS
+  request with no forwarding still attributes to its captured peer UID.
+- **OpenAPI/thin-client contract:** extending `insights.overview` updates
+  `api/openapi-server-v1.yaml` with a concrete response schema, regenerates
+  `src/server/openapi_server_data.h`, and updates `src/cli_rpc_routes.inc` so
+  remote `aimee insights` displays realized spend separately from estimated,
+  avoided, and partial rows.
 - **API/auth:** any new usage route has route/spec parity, CLI RPC coverage where
   exposed, and `server_auth.c` capability tests. If only `insights.overview` is
   extended, test the existing route and capability.
