@@ -335,3 +335,25 @@ int handle_index_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *resp = (cJSON *)kb_client_index_scan_format_response(kb_rc, &res);
    return send_and_free(conn, resp);
 }
+
+/* session.credentials: the thin client pushes its agent API keys (+ Codex OAuth
+ * creds) once per session; we cache them in the RAM-only, session-scoped keyring
+ * (session_credentials.h) and NEVER persist them. agent_resolve_auth then
+ * prefers these over any server-stored key, so agent keys need not live on the
+ * server. Body: {session_id, agents:{name:key,...}, codex_oauth_token,
+ * codex_account_id}. */
+int handle_session_credentials(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *sid = jo_str(req, "session_id", NULL);
+   if (!sid || !sid[0])
+      return server_send_error(conn, "session.credentials requires session_id", NULL);
+   char *body = cJSON_PrintUnformatted(req);
+   int n = body ? session_creds_ingest_json(sid, body) : -1;
+   free(body);
+   if (n < 0)
+      return server_send_error(conn, "session.credentials: invalid body", NULL);
+   cJSON *resp = jo_ok();
+   cJSON_AddNumberToObject(resp, "stored", n);
+   return send_and_free(conn, resp);
+}

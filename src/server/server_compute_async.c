@@ -449,9 +449,11 @@ static void chat_stream_worker_pooled(void *arg)
 
    if (!locked && sid[0])
       presence_emit_turn_started(sid, turn_id);
-   /* Thin-client-supplied Codex OAuth creds for this turn (empty/absent clears
-    * the thread-local, so a non-codex turn on this pooled thread can't reuse a
-    * prior turn's token). agent_resolve_auth/headers pick them up. */
+   /* Per-turn credential context: the session id (for the RAM session keyring
+    * the client pushed once per session) + any per-turn Codex creds (legacy
+    * direct push). Empty/absent clears the thread-locals so a turn on this
+    * pooled thread can't reuse a prior turn's creds. */
+   agent_set_request_session(sid);
    agent_set_request_codex_creds(jo_str(cctx->req, "codex_oauth_token", NULL),
                                  jo_str(cctx->req, "codex_account_id", NULL));
    chat_stream_worker(arg);

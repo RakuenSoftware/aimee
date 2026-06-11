@@ -33,6 +33,7 @@ const method_policy_t method_registry[] = {
     {"hooks.post", CAP_TOOL_EXECUTE, "post-tool hook"},
     {"hooks.session_start", CAP_TOOL_EXECUTE, "session-start hook"},
     /* Sessions (prefix) */
+    {"session.credentials", CAP_CHAT, "push session agent credentials"},
     {"session.*", CAP_SESSION_READ, "session operation"},
     {"trajectory.export", CAP_SESSION_READ, "trajectory export"},
     {"trajectory.batch", CAP_DELEGATE, "trajectory batch generation"},

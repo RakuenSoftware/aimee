@@ -122,6 +122,10 @@ void agent_set_request_codex_creds(const char *token, const char *account_id)
    (void)token;
    (void)account_id;
 }
+void agent_set_request_session(const char *session_id)
+{
+   (void)session_id;
+}
 
 int agent_load_config(agent_config_t *cfg)
 {
