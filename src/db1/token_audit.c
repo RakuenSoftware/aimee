@@ -22,14 +22,19 @@ void db1_token_audit_ensure_idem_index(void)
    sqlite3 *db = db1_conn();
    if (!db)
       return;
-   /* Partial unique index: only rows with a real request_id are constrained, so
-    * the many internal rows (empty request_id) are unaffected and existing rows
-    * (all empty request_id before this column existed) never collide. The
-    * request_id/attempt columns are added by db1_reconcile_columns at init; this
-    * runs after, lazily, on the first insert. */
+   /* Idempotency is keyed on the client's EXPLICIT Idempotency-Key, scoped by the
+    * account boundary (principal) and source — NOT the caller-controllable
+    * request_id, so a retry under the same key dedups even when its request id is
+    * freshly generated, and two principals sharing a key never collide. Partial:
+    * only rows with a real idempotency_key are constrained; the many internal /
+    * keyless rows are unaffected. Drop the earlier request_id-based index (an
+    * existing DB may still carry it). The columns are added by
+    * db1_reconcile_columns at init; this runs after, lazily, on the first insert. */
+   sqlite3_exec(db, "DROP INDEX IF EXISTS idx_token_audit_idem", NULL, NULL, NULL);
    sqlite3_exec(db,
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_token_audit_idem"
-                " ON token_audit(source, request_id, attempt) WHERE request_id != ''",
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_token_audit_idem2"
+                " ON token_audit(source, principal, idempotency_key, attempt)"
+                " WHERE idempotency_key != ''",
                 NULL, NULL, NULL);
 }
 
@@ -53,18 +58,18 @@ int db1_token_audit_insert(const db1_token_audit_row_t *row)
    }
 
    sqlite3_stmt *stmt = NULL;
-   /* OR IGNORE so a duplicate (source, request_id, attempt) — a retried or
-    * late-finalized provider call — is silently dropped rather than double-counted.
-    * The partial unique index only constrains rows with a non-empty request_id;
-    * internal rows (empty request_id) are never deduped. */
+   /* OR IGNORE so a duplicate (source, principal, idempotency_key, attempt) — a
+    * retry under the same explicit Idempotency-Key — is silently dropped rather
+    * than double-counted. The partial unique index only constrains rows with a
+    * non-empty idempotency_key; internal / keyless rows are never deduped. */
    static const char *sql =
        "INSERT OR IGNORE INTO token_audit"
        " (session_id, delegation_id, project_name, tool_name, role, model, source,"
        "  requested_model, stop_reason, usage_kind, agent_log_id,"
-       "  request_id, attempt, principal, served_model, duration_ms, metadata,"
+       "  request_id, idempotency_key, attempt, principal, served_model, duration_ms, metadata,"
        "  prompt_tokens, completion_tokens, cache_write_tokens, cache_read_tokens,"
        "  estimated_cost_usd)"
-       " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+       " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
 
@@ -82,16 +87,18 @@ int db1_token_audit_insert(const db1_token_audit_row_t *row)
                      SQLITE_TRANSIENT);
    sqlite3_bind_int64(stmt, 11, row->agent_log_id);
    sqlite3_bind_text(stmt, 12, row->request_id ? row->request_id : "", -1, SQLITE_TRANSIENT);
-   sqlite3_bind_int(stmt, 13, row->attempt);
-   sqlite3_bind_text(stmt, 14, row->principal ? row->principal : "", -1, SQLITE_TRANSIENT);
-   sqlite3_bind_text(stmt, 15, row->served_model ? row->served_model : "", -1, SQLITE_TRANSIENT);
-   sqlite3_bind_int(stmt, 16, row->duration_ms);
-   sqlite3_bind_text(stmt, 17, row->metadata ? row->metadata : "", -1, SQLITE_TRANSIENT);
-   sqlite3_bind_int(stmt, 18, row->prompt_tokens);
-   sqlite3_bind_int(stmt, 19, row->completion_tokens);
-   sqlite3_bind_int(stmt, 20, row->cache_write_tokens);
-   sqlite3_bind_int(stmt, 21, row->cache_read_tokens);
-   sqlite3_bind_double(stmt, 22, row->estimated_cost_usd);
+   sqlite3_bind_text(stmt, 13, row->idempotency_key ? row->idempotency_key : "", -1,
+                     SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 14, row->attempt);
+   sqlite3_bind_text(stmt, 15, row->principal ? row->principal : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 16, row->served_model ? row->served_model : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 17, row->duration_ms);
+   sqlite3_bind_text(stmt, 18, row->metadata ? row->metadata : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 19, row->prompt_tokens);
+   sqlite3_bind_int(stmt, 20, row->completion_tokens);
+   sqlite3_bind_int(stmt, 21, row->cache_write_tokens);
+   sqlite3_bind_int(stmt, 22, row->cache_read_tokens);
+   sqlite3_bind_double(stmt, 23, row->estimated_cost_usd);
 
    int rc = sqlite3_step(stmt);
    sqlite3_finalize(stmt);

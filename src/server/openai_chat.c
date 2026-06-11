@@ -76,6 +76,7 @@ static void record_avoided_turn(const char *model, double avoided_cost)
        .requested_model = model ? model : "",
        .usage_kind = "avoided",
        .request_id = rc ? rc->request_id : "",
+       .idempotency_key = rc ? rc->idempotency_key : "",
        .principal = rc ? rc->principal : "",
        .estimated_cost_usd = avoided_cost,
    };

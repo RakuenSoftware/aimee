@@ -22,22 +22,30 @@ static void test_set_get_roundtrip(void)
 {
    request_context_t ctx;
    memset(&ctx, 0, sizeof(ctx));
+   snprintf(ctx.method, sizeof(ctx.method), "%s", "POST");
+   snprintf(ctx.path, sizeof(ctx.path), "%s", "/v1/chat/completions");
    snprintf(ctx.request_id, sizeof(ctx.request_id), "%s", "1234-7");
    snprintf(ctx.idempotency_key, sizeof(ctx.idempotency_key), "%s", "idem-abc");
+   snprintf(ctx.session_key, sizeof(ctx.session_key), "%s", "sess-77");
    snprintf(ctx.principal, sizeof(ctx.principal), "%s", "uid:1000");
    snprintf(ctx.source, sizeof(ctx.source), "%s", "openai-ingress");
    ctx.peer_uid = 1000;
    ctx.transport = REQ_TRANSPORT_UDS;
+   ctx.capabilities = 0x7u;
    ctx.trusted = 1;
    request_context_set(&ctx);
 
    const request_context_t *got = request_context_get();
    assert(got != NULL);
+   assert(strcmp(got->method, "POST") == 0);
+   assert(strcmp(got->path, "/v1/chat/completions") == 0);
    assert(strcmp(got->request_id, "1234-7") == 0);
    assert(strcmp(got->idempotency_key, "idem-abc") == 0);
+   assert(strcmp(got->session_key, "sess-77") == 0);
    assert(strcmp(got->principal, "uid:1000") == 0);
    assert(got->peer_uid == 1000);
    assert(got->transport == REQ_TRANSPORT_UDS);
+   assert(got->capabilities == 0x7u);
    assert(got->trusted == 1);
    assert(strcmp(request_context_idempotency_key(), "idem-abc") == 0);
    assert(strcmp(request_context_principal(), "uid:1000") == 0);

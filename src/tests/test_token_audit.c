@@ -468,34 +468,42 @@ static void test_spend_breakdown_realized_only(void)
 
 static void test_idempotency_guard(void)
 {
-   /* Two inserts with the same (source, request_id, attempt) collapse to one row
-    * — a retried/late-finalized provider call cannot double-count. A different
-    * attempt, or an empty request_id, is not constrained. */
+   /* Idempotency is keyed on the explicit idempotency_key scoped by
+    * (source, principal, attempt) — NOT request_id. Two inserts under the same
+    * key (even with different request ids) collapse to one row. */
    db1_token_audit_row_t a = {.tool_name = "gpt-4o",
                               .model = "gpt-4o",
                               .source = "openai-ingress",
-                              .request_id = "req-IDEM-1",
+                              .request_id = "trace-A",
+                              .idempotency_key = "IDEM-1",
+                              .principal = "uid:9001",
                               .attempt = 0,
                               .estimated_cost_usd = 0.10};
    assert(db1_token_audit_insert(&a) == 0);
-   assert(db1_token_audit_insert(&a) == 0); /* duplicate ignored, still rc 0 */
-   assert(count_where("request_id", "req-IDEM-1") == 1);
+   db1_token_audit_row_t a_retry = a;
+   a_retry.request_id = "trace-B-different";      /* a fresh/generated request id */
+   assert(db1_token_audit_insert(&a_retry) == 0); /* same key -> duplicate ignored */
+   assert(count_where("idempotency_key", "IDEM-1") == 1);
+
+   /* A different principal sharing the same idempotency key does NOT collide. */
+   db1_token_audit_row_t other_principal = a;
+   other_principal.principal = "uid:9002";
+   assert(db1_token_audit_insert(&other_principal) == 0);
+   assert(count_where("idempotency_key", "IDEM-1") == 2);
 
    /* A second attempt of the same request is a distinct row. */
    db1_token_audit_row_t a2 = a;
    a2.attempt = 1;
    assert(db1_token_audit_insert(&a2) == 0);
-   assert(count_where("request_id", "req-IDEM-1") == 2);
+   assert(count_where("idempotency_key", "IDEM-1") == 3);
 
-   /* Empty request_id is never deduped (internal rows): two identical inserts
-    * both land. */
+   /* Empty idempotency_key is never deduped (internal/keyless rows): two
+    * identical inserts both land. */
    db1_token_audit_row_t bare = {
        .tool_name = "gpt-4o", .model = "gpt-4o", .source = "agent", .estimated_cost_usd = 0.01};
    assert(db1_token_audit_insert(&bare) == 0);
    assert(db1_token_audit_insert(&bare) == 0);
-   /* Both bare rows present (plus any earlier 'agent'-source rows from this run);
-    * assert at least the two we just inserted carry an empty request_id. */
-   assert(count_where("request_id", "") >= 2);
+   assert(count_where("idempotency_key", "") >= 2);
 }
 
 static void test_top_sessions_per_client(void)
@@ -572,6 +580,34 @@ static void test_trusted_source_overrides_ingress(void)
                              -1, &st, NULL) == SQLITE_OK);
    assert(sqlite3_step(st) == SQLITE_ROW);
    assert(strcmp((const char *)sqlite3_column_text(st, 0), "agent") == 0);
+   sqlite3_finalize(st);
+}
+
+static void test_ingress_session_attribution(void)
+{
+   /* An ingress request carrying X-Aimee-Session-Key attributes its audit row to
+    * that session, not the server's process-wide session — so two webchat
+    * sessions do not fold into one. */
+   request_context_t ctx;
+   memset(&ctx, 0, sizeof(ctx));
+   snprintf(ctx.session_key, sizeof(ctx.session_key), "%s", "webchat-sess-AAA");
+   snprintf(ctx.source, sizeof(ctx.source), "%s", "webchat");
+   request_context_set(&ctx);
+
+   agent_result_t r;
+   memset(&r, 0, sizeof(r));
+   snprintf(r.agent_name, sizeof(r.agent_name), "sessbot");
+   snprintf(r.model, sizeof(r.model), "gpt-4o");
+   r.prompt_tokens = 10;
+   agent_record_token_audit(&r, "", "openai-ingress");
+   request_context_clear();
+
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db1_conn(),
+                             "SELECT session_id FROM token_audit WHERE tool_name='sessbot'", -1,
+                             &st, NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   assert(strcmp((const char *)sqlite3_column_text(st, 0), "webchat-sess-AAA") == 0);
    sqlite3_finalize(st);
 }
 
@@ -658,6 +694,7 @@ int main(void)
    test_top_sessions_per_client();
    test_served_model_and_duration();
    test_trusted_source_overrides_ingress();
+   test_ingress_session_attribution();
    test_delegation_cost_realized_only();
    db1_shutdown();
    printf("test_token_audit: ok\n");

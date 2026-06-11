@@ -98,8 +98,12 @@ double delegate_cost_estimate_usd(const char *provider, const char *model, int p
           .input_tokens = prompt_tokens,
           .output_tokens = completion_tokens,
       };
-      double cost = token_estimate_cost(model, &usage);
-      if (cost > 0.0)
+      int priced = 0;
+      double cost = token_estimate_cost_ex(model, &usage, &priced);
+      /* Return the real price when the model is KNOWN — including a genuine $0
+       * for a free model — so a free model is not mistaken for unknown and
+       * flat-rated. Only fall back when no source prices the model. */
+      if (priced)
          return cost;
    }
    /* Last resort: a coarse flat rate so ensemble economics stay non-zero for

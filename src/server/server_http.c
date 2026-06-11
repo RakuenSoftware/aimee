@@ -1471,16 +1471,24 @@ static long http_peer_uid(int fd, int is_tcp)
  * another account's attribution. With no secret configured, no client-supplied
  * principal/source is ever trusted. The idempotency key is read on any transport
  * (it only ever dedups the caller's own identical requests). */
-static void populate_request_context(int fd, int is_tcp, const char *buf, const char *request_id)
+static void populate_request_context(int fd, int is_tcp, const char *buf, const char *request_id,
+                                     const char *method, const char *path)
 {
    request_context_t ctx;
    memset(&ctx, 0, sizeof(ctx));
+   snprintf(ctx.method, sizeof(ctx.method), "%s", method ? method : "");
+   snprintf(ctx.path, sizeof(ctx.path), "%s", path ? path : "");
    snprintf(ctx.request_id, sizeof(ctx.request_id), "%s", request_id ? request_id : "");
    ctx.transport = is_tcp ? REQ_TRANSPORT_TCP : REQ_TRANSPORT_UDS;
    ctx.peer_uid = http_peer_uid(fd, is_tcp);
+   ctx.capabilities = server_http_conn_caps(is_tcp, g_bearer, g_remote_writes);
    ctx.trusted = 0;
 
    http_header(buf, "Idempotency-Key", ctx.idempotency_key, sizeof(ctx.idempotency_key));
+   /* X-Aimee-Session-Key: the per-session boundary (read during auth too). Carry
+    * it so ingress audit rows attribute to the originating session, not just the
+    * server's process-wide session. */
+   http_header(buf, "X-Aimee-Session-Key", ctx.session_key, sizeof(ctx.session_key));
 
    /* Server-derived principal from the kernel-verified UDS peer uid. */
    if (ctx.peer_uid >= 0)
@@ -1564,7 +1572,7 @@ static void handle_conn(int fd, int is_tcp)
    /* Establish the per-request context (#3) for this worker thread before any
     * handler runs. Overwritten on every request, so thread reuse cannot leak a
     * prior request's identity. */
-   populate_request_context(fd, is_tcp, buf, request_id);
+   populate_request_context(fd, is_tcp, buf, request_id, method, path);
 
    /* Authorize before reading the body: TCP requires a valid bearer; the UDS
     * relies on filesystem permissions. A session-scoping key without a

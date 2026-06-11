@@ -135,6 +135,13 @@ void token_tracker_set_registry_price_fn(token_registry_price_fn fn)
 
 double token_estimate_cost(const char *model, const token_usage_t *usage)
 {
+   return token_estimate_cost_ex(model, usage, NULL);
+}
+
+double token_estimate_cost_ex(const char *model, const token_usage_t *usage, int *priced)
+{
+   if (priced)
+      *priced = 0;
    if (!usage)
       return 0.0;
 
@@ -142,8 +149,13 @@ double token_estimate_cost(const char *model, const token_usage_t *usage)
     * the registry (operator / models.dev overrides + providers the table omits)
     * is then authoritative for the BASE prices, so an override actually takes
     * effect. Cache prices stay from the static table — the registry carries none.
-    * A 0/0 registry entry means "unknown", not "free", and does not override. */
+    * A 0/0 registry entry means "unknown", not "free", and does not override.
+    * `known` tracks whether any source actually prices the model: a static-table
+    * match (a 0 there is an intentional free price) or a nonzero registry price.
+    * It lets the delegate path tell a free model (cost 0, known) from an unknown
+    * one (cost 0, not known) rather than flat-rating the free one. */
    double in_mtok = 0.0, out_mtok = 0.0, cw_mtok = 0.0, cr_mtok = 0.0;
+   int known = 0;
    const model_price_t *p = find_price(model);
    if (p)
    {
@@ -151,6 +163,7 @@ double token_estimate_cost(const char *model, const token_usage_t *usage)
       out_mtok = p->output_per_mtok;
       cw_mtok = p->cache_write_per_mtok;
       cr_mtok = p->cache_read_per_mtok;
+      known = 1;
    }
    if (model && model[0] && g_registry_price_fn)
    {
@@ -159,9 +172,12 @@ double token_estimate_cost(const char *model, const token_usage_t *usage)
       {
          in_mtok = r_in;
          out_mtok = r_out;
+         known = 1;
       }
    }
 
+   if (priced)
+      *priced = known;
    return (double)usage->input_tokens * in_mtok / 1e6 +
           (double)usage->output_tokens * out_mtok / 1e6 +
           (double)usage->cache_write_tokens * cw_mtok / 1e6 +

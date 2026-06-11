@@ -56,14 +56,18 @@ extern "C"
        * (agent_name, role) key. */
       long long agent_log_id;
       /* Idempotency + attribution (proposal §2/#3). request_id is the ingress
-       * request id; attempt distinguishes retries of the same request. Together
-       * with source they form the idempotency key: a row with a non-empty
-       * request_id is inserted at most once per (source, request_id, attempt), so
-       * a retried or late-finalized provider call cannot double-count. principal
-       * is the account/tenant boundary of the client (e.g. "uid:1000"). All
-       * default to empty; empty request_id disables the idempotency guard for
-       * that row (internal agent rows). NULL == empty. */
+       * request id (tracing only, caller-controllable, NOT the idempotency key).
+       * idempotency_key is the client's explicit Idempotency-Key — the actual
+       * dedup key — and attempt is a server attempt id distinguishing deliberate
+       * re-runs. Together with the account boundary they form the idempotency
+       * tuple: a row with a non-empty idempotency_key is inserted at most once per
+       * (source, principal, idempotency_key, attempt), so a retry under the same
+       * key cannot double-count, and two principals sharing a key never collide.
+       * principal is the account/tenant boundary of the client (e.g. "uid:1000").
+       * All default to empty; an empty idempotency_key disables the guard for that
+       * row (internal agent rows, or ingress without an explicit key). NULL == empty. */
       const char *request_id;
+      const char *idempotency_key;
       int attempt;
       const char *principal;
       /* served_model is the model aimee selected to serve (which may differ from
@@ -82,12 +86,13 @@ extern "C"
    } db1_token_audit_row_t;
 
    /* Insert one audit row. Returns 0 on success, -1 on error. A row carrying a
-    * non-empty request_id is inserted with idempotency: a duplicate
-    * (source, request_id, attempt) is ignored (still returns 0), never double-counted. */
+    * non-empty idempotency_key is inserted with idempotency: a duplicate
+    * (source, principal, idempotency_key, attempt) is ignored (still returns 0),
+    * never double-counted. */
    int db1_token_audit_insert(const db1_token_audit_row_t *row);
 
-   /* Create the (source, request_id, attempt) idempotency index on the live DB.
-    * Idempotent; called once after schema reconcile at init. */
+   /* Create the (source, principal, idempotency_key, attempt) idempotency index on
+    * the live DB. Idempotent; created lazily on first insert. */
    void db1_token_audit_ensure_idem_index(void);
 
    /* Sum estimated_cost_usd across rows tagged with this delegation_id.

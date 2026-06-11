@@ -18,6 +18,14 @@ typedef struct
  * cost authority shared by the agent audit and delegate economics paths. */
 double token_estimate_cost(const char *model, const token_usage_t *usage);
 
+/* As token_estimate_cost, but also reports whether the model is PRICED (known) —
+ * set *priced to 1 when the static table lists it (a 0 there is an intentional
+ * free price) or the registry returns a nonzero price, else 0. This disambiguates
+ * a genuinely free/zero-priced model (cost 0, priced=1) from an unknown one
+ * (cost 0, priced=0), so callers (delegate economics) do not flat-rate a free
+ * model as unknown spend. *priced may be NULL. */
+double token_estimate_cost_ex(const char *model, const token_usage_t *usage, int *priced);
+
 /* Registry-price fallback hook. token_estimate_cost calls this (when installed)
  * on a static-table miss, so it covers registry-only providers (gemini, groq,
  * mistral) and models.dev / operator overrides. The hook is installed by a

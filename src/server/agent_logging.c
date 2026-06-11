@@ -33,7 +33,7 @@ typedef struct
 {
    char session_id[128], delegation_id[128], project_name[64], tool_name[128], role[64];
    char model[128], source[64], requested_model[128], stop_reason[40], usage_kind[24];
-   char request_id[64], principal[128], served_model[128], metadata[256];
+   char request_id[64], idempotency_key[128], principal[128], served_model[128], metadata[256];
    long long agent_log_id;
    int attempt;
    int duration_ms;
@@ -63,6 +63,7 @@ static void audit_entry_to_row(const audit_async_entry_t *e, db1_token_audit_row
    row->usage_kind = e->usage_kind;
    row->agent_log_id = e->agent_log_id;
    row->request_id = e->request_id;
+   row->idempotency_key = e->idempotency_key;
    row->attempt = e->attempt;
    row->principal = e->principal;
    row->served_model = e->served_model;
@@ -130,6 +131,7 @@ static int audit_async_enqueue(const db1_token_audit_row_t *row)
    CPY(e->stop_reason, row->stop_reason);
    CPY(e->usage_kind, row->usage_kind);
    CPY(e->request_id, row->request_id);
+   CPY(e->idempotency_key, row->idempotency_key);
    CPY(e->principal, row->principal);
    CPY(e->served_model, row->served_model);
    CPY(e->metadata, row->metadata);
@@ -232,8 +234,12 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
    /* Tagging the audit row with the active delegation id lets cost-fold attribute
     * a child's spend back to the parent without contaminating session_id sums. */
    const char *deleg_id = delegation_active_id();
+   /* Per-session attribution: an ingress request that carried an X-Aimee-Session-Key
+    * is attributed to that session rather than the server's process-wide one, so
+    * two webchat sessions do not fold into one. Falls back to session() otherwise. */
+   const char *eff_session = (rctx && rctx->session_key[0]) ? rctx->session_key : session_id();
    db1_token_audit_row_t row = {
-       .session_id = session_id(),
+       .session_id = eff_session,
        .delegation_id = deleg_id ? deleg_id : "",
        .project_name = "",
        .tool_name = result->agent_name,
@@ -247,6 +253,7 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
        .agent_log_id = g_agent_log_id,
        .usage_kind = usage_kind ? usage_kind : "realized",
        .request_id = rctx ? rctx->request_id : "",
+       .idempotency_key = rctx ? rctx->idempotency_key : "",
        .attempt = 0,
        .principal = rctx ? rctx->principal : "",
        /* Served model (what aimee selected) distinct from the provider-reported

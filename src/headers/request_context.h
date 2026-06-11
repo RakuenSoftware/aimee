@@ -32,13 +32,17 @@ typedef enum
 
 typedef struct
 {
+   char method[8];            /* HTTP method (GET/POST/...) */
+   char path[256];            /* request path (query stripped) */
    char request_id[64];       /* echoed X-Request-ID / generated <pid>-<seq> */
    char idempotency_key[128]; /* Idempotency-Key header, empty if absent */
+   char session_key[128];     /* X-Aimee-Session-Key — per-session boundary, empty if absent */
    char principal[128];       /* account/tenant boundary; empty = anonymous */
    char source[64];           /* turn-origin tag for token_audit, empty = default */
    long peer_uid;             /* UDS peer uid (SO_PEERCRED), -1 if unknown */
    req_transport_t transport;
-   int trusted; /* 1 = principal/source headers may be honoured */
+   unsigned int capabilities; /* route capability/scope bits for this connection */
+   int trusted;               /* 1 = principal/source headers may be honoured */
 } request_context_t;
 
 /* Set the active request context for the current thread (shallow copy). Pass

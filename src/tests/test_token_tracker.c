@@ -61,6 +61,35 @@ static void test_unknown_model(void)
    PASS("cost: unknown model returns 0");
 }
 
+static void test_priced_disambiguation(void)
+{
+   /* token_estimate_cost_ex reports whether the model is PRICED (known), so a
+    * caller can tell a free model (cost 0, priced) from an unknown one (cost 0,
+    * not priced) instead of flat-rating the free one. */
+   token_usage_t u = {.input_tokens = 1000, .output_tokens = 500};
+   int priced = -1;
+
+   /* A model the static table prices is known. */
+   double known = token_estimate_cost_ex("gpt-4o-2024-11-20", &u, &priced);
+   assert(priced == 1);
+   assert(known > 0.0);
+
+   /* An unknown model is not priced (so the delegate path flat-rates it, not the
+    * cost authority). */
+   priced = -1;
+   double unknown = token_estimate_cost_ex("some-unknown-model-xyz", &u, &priced);
+   assert(priced == 0);
+   assert(near_equal(unknown, 0.0));
+
+   /* A zero-token request against a known model is priced (0 cost, but known). */
+   token_usage_t zero = {0};
+   priced = -1;
+   double free_known = token_estimate_cost_ex("gpt-4o-2024-11-20", &zero, &priced);
+   assert(priced == 1);
+   assert(near_equal(free_known, 0.0));
+   PASS("cost: priced (known) vs unknown disambiguation");
+}
+
 static void test_null_usage(void)
 {
    double cost = token_estimate_cost("claude-3-5-sonnet", NULL);
@@ -193,6 +222,7 @@ int main(void)
    test_cache_tokens_anthropic();
    test_openai_model();
    test_unknown_model();
+   test_priced_disambiguation();
    test_null_usage();
    test_null_model();
    test_zero_tokens();
