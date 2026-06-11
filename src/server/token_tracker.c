@@ -99,6 +99,23 @@ static const model_price_t *find_price(const char *model)
    return best;
 }
 
+/* --- Registry-price fallback hook ---
+ *
+ * Installed by token_tracker_registry.c (linked into the server and the pricing
+ * tests) so token_estimate_cost can price providers absent from the static table
+ * (gemini, groq, mistral) and honour models.dev / operator overrides — one cost
+ * authority — without a hard token_tracker -> model_registry link dependency on
+ * the many unrelated binaries that link token_tracker.o. A function pointer (vs a
+ * weak symbol) is used deliberately: under -flto a weak default defined in this
+ * TU is inlined into token_estimate_cost and the strong override never takes
+ * effect, whereas the indirect call cannot be devirtualised away. */
+static token_registry_price_fn g_registry_price_fn = NULL;
+
+void token_tracker_set_registry_price_fn(token_registry_price_fn fn)
+{
+   g_registry_price_fn = fn;
+}
+
 /* --- Cost estimation --- */
 
 double token_estimate_cost(const char *model, const token_usage_t *usage)
@@ -106,12 +123,20 @@ double token_estimate_cost(const char *model, const token_usage_t *usage)
    if (!usage)
       return 0.0;
    const model_price_t *p = find_price(model);
-   if (!p)
-      return 0.0;
+   if (p)
+      return (double)usage->input_tokens * p->input_per_mtok / 1e6 +
+             (double)usage->output_tokens * p->output_per_mtok / 1e6 +
+             (double)usage->cache_write_tokens * p->cache_write_per_mtok / 1e6 +
+             (double)usage->cache_read_tokens * p->cache_read_per_mtok / 1e6;
 
-   double cost = (double)usage->input_tokens * p->input_per_mtok / 1e6 +
-                 (double)usage->output_tokens * p->output_per_mtok / 1e6 +
-                 (double)usage->cache_write_tokens * p->cache_write_per_mtok / 1e6 +
-                 (double)usage->cache_read_tokens * p->cache_read_per_mtok / 1e6;
-   return cost;
+   /* Static table missed — fall back to the model registry (when its bridge is
+    * linked). A 0/0 registry entry means "unknown", not "free", so it yields 0. */
+   if (model && model[0] && g_registry_price_fn)
+   {
+      double in_mtok = 0.0, out_mtok = 0.0;
+      if (g_registry_price_fn(model, &in_mtok, &out_mtok) && (in_mtok > 0.0 || out_mtok > 0.0))
+         return (double)usage->input_tokens * in_mtok / 1e6 +
+                (double)usage->output_tokens * out_mtok / 1e6;
+   }
+   return 0.0;
 }

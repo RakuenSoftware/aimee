@@ -31,14 +31,29 @@ static int g_captured_count = 0;
 
 int model_capability_get(const char *provider, const char *model_id, model_capability_t *out)
 {
-   if (!out || !provider || strcmp(provider, "priced") != 0 || !model_id || !model_id[0])
+   (void)provider;
+   if (!out || !model_id)
       return 0;
-   memset(out, 0, sizeof(*out));
-   snprintf(out->provider, sizeof(out->provider), "%s", provider);
-   snprintf(out->model_id, sizeof(out->model_id), "%s", model_id);
-   out->cost_in_per_mtok = 1.0;
-   out->cost_out_per_mtok = 3.0;
-   return 1;
+   /* The unified cost path (token_estimate_cost) looks models up by id with the
+    * provider inferred, so key this stub on the model id rather than requiring an
+    * explicit provider — matching how the real registry resolves these. */
+   if (strncmp(model_id, "priced-", 7) == 0)
+   {
+      memset(out, 0, sizeof(*out));
+      snprintf(out->provider, sizeof(out->provider), "%s", "priced");
+      snprintf(out->model_id, sizeof(out->model_id), "%s", model_id);
+      out->cost_in_per_mtok = 1.0;
+      out->cost_out_per_mtok = 3.0;
+      return 1;
+   }
+   /* A registry entry that resolves but is priced 0/0 — "unknown", not "free". */
+   if (strncmp(model_id, "zero-", 5) == 0)
+   {
+      memset(out, 0, sizeof(*out));
+      snprintf(out->model_id, sizeof(out->model_id), "%s", model_id);
+      return 1;
+   }
+   return 0;
 }
 
 int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agent_result_t *out)
@@ -337,6 +352,11 @@ static void test_delegate_cost_estimate_uses_token_tracker(void)
    /* A genuinely unknown model falls back to a non-zero flat estimate. */
    double unknown = delegate_cost_estimate_usd(NULL, "totally-unknown-model-xyz", 1000, 1000);
    assert(unknown > 0.0);
+
+   /* A registry entry priced 0/0 is "unknown", not "free": it must fall back to
+    * the flat estimate rather than recording $0. */
+   double zero = delegate_cost_estimate_usd(NULL, "zero-priced-model", 1000, 1000);
+   assert(zero > 0.0);
    printf("  test_delegate_cost_estimate_uses_token_tracker: ok\n");
 }
 

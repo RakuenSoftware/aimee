@@ -9,7 +9,6 @@
 #include "delegate_ensemble.h"
 #include "agent_exec.h"
 #include "log.h"
-#include "model_registry.h"
 #include "token_tracker.h"
 
 #include <stdio.h>
@@ -89,10 +88,12 @@ static double fallback_token_cost(int prompt_tokens, int completion_tokens)
 double delegate_cost_estimate_usd(const char *provider, const char *model, int prompt_tokens,
                                   int completion_tokens)
 {
+   (void)provider; /* token_estimate_cost infers the provider from the model id */
    if (model && model[0])
    {
-      /* Primary: the shared cache-aware authority that agent_log_call bills
-       * against, so the ensemble path no longer keeps a divergent price source. */
+      /* token_estimate_cost is the single cost authority (static cache-aware
+       * table + model-registry fallback), the same one agent_log_call bills
+       * against, so the ensemble path keeps no divergent price source. */
       token_usage_t usage = {
           .input_tokens = prompt_tokens,
           .output_tokens = completion_tokens,
@@ -100,18 +101,9 @@ double delegate_cost_estimate_usd(const char *provider, const char *model, int p
       double cost = token_estimate_cost(model, &usage);
       if (cost > 0.0)
          return cost;
-
-      /* Fallback: the model registry covers providers the token_tracker table
-       * does not (e.g. gemini, groq, mistral). A non-zero registry price means
-       * the model is genuinely priced — a 0/0 entry is "unknown", not "free",
-       * so it falls through to the flat-rate estimate below. */
-      model_capability_t cap;
-      if (model_capability_get(provider, model, &cap) &&
-          (cap.cost_in_per_mtok > 0.0 || cap.cost_out_per_mtok > 0.0))
-         return (double)prompt_tokens * cap.cost_in_per_mtok / 1000000.0 +
-                (double)completion_tokens * cap.cost_out_per_mtok / 1000000.0;
    }
-   /* Last resort: a coarse flat rate so ensemble economics stay non-zero. */
+   /* Last resort: a coarse flat rate so ensemble economics stay non-zero for
+    * models neither the table nor the registry prices. */
    return fallback_token_cost(prompt_tokens, completion_tokens);
 }
 
@@ -129,6 +121,12 @@ static double result_token_cost(const agent_config_t *acfg, const agent_result_t
 {
    if (!result)
       return 0.0;
+   /* Prefer the model actually served (recorded on the result, and updated
+    * across fallback-model swaps) over re-deriving it from the configured agent
+    * by name — so observed cost reflects what really ran. */
+   if (result->model[0])
+      return delegate_cost_estimate_usd(NULL, result->model, result->prompt_tokens,
+                                        result->completion_tokens);
    const char *agent = result->agent_name[0] ? result->agent_name : fallback_agent;
    return agent_token_cost(acfg, agent, result->prompt_tokens, result->completion_tokens);
 }

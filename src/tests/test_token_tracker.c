@@ -102,6 +102,21 @@ static void test_specific_match_wins(void)
    PASS("cost: most-specific model match wins");
 }
 
+static void test_compound_id_no_false_match(void)
+{
+   /* Realistic unrelated/compound model ids must not be priced by an accidental
+    * substring hit against the static table. Anthropic/OpenAI keys are absent
+    * from these ids, so they resolve to 0 here (the registry fallback, when
+    * linked, prices known ids by exact lookup instead). NOTE: token_tracker's
+    * static table is still substring-matched, so a short OpenAI key embedded in
+    * an id (e.g. "...-o1-...") can still false-positive; eliminating that fully
+    * is the registry exact-lookup path's job (a documented follow-up). */
+   token_usage_t u = {.input_tokens = 1000000, .output_tokens = 1000000};
+   assert(near_equal(token_estimate_cost("acme-internal-summarizer-v2", &u), 0.0));
+   assert(near_equal(token_estimate_cost("my-llama3-finetune", &u), 0.0));
+   PASS("cost: compound id no false match");
+}
+
 /* --- Main --- */
 
 int main(void)
@@ -116,6 +131,7 @@ int main(void)
    test_null_model();
    test_zero_tokens();
    test_specific_match_wins();
+   test_compound_id_no_false_match();
 
    printf("All token_tracker tests passed.\n");
    return 0;

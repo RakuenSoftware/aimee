@@ -1034,6 +1034,8 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       memcpy(&fb_agent, agent, sizeof(fb_agent));
       snprintf(fb_agent.model, MAX_MODEL_LEN, "%s", agent->fallback_model);
       fb_agent.fallback_model[0] = '\0';
+      /* The fallback model is now the served model — record it for accounting. */
+      snprintf(out->model, MAX_MODEL_LEN, "%s", fb_agent.model);
 
       if (is_anthropic_provider(&fb_agent))
          track_simple_anthropic_payload_rewrite(driver, &fb_agent, system_prompt, user_prompt);
