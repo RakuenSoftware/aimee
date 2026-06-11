@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 fourth review)
+- **Date:** 2026-06-11 (revised post-PR-#183 fifth review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -222,6 +222,51 @@ to make it concrete.
     if capture keeps failing across re-runs (a real fault), never on the first
     miss. **Resolved in §3 and §4.**
 
+## PR #183 fifth review — pass identity, worker capture, and replay safety
+
+The fourth review picked the right Hybrid seam (`op_run_worker_run`), but the
+proposal still needs to define how pipeline pass identity reaches that seam
+safely and how retry accounting stays correct.
+
+20. **`__pipeline_pass_id` is not forwarded by today's `ensemble_review` tool.**
+    `handle_mcp_ensemble_review` currently constructs a fresh body containing only
+    `prompt`, `mode:"review"`, `brief`, `rounds`, and `turns` before calling
+    `server_http_submit_op_run`; unknown caller args are not copied. So the text's
+    "thread `__pipeline_pass_id` into the request body" cannot be implemented
+    from the pipeline unless the callable surface grows a pipeline-owned
+    `pipeline_pass_id` parameter (or `server_http_submit_op_run` gains metadata
+    parameters) and forwards it deliberately. **Resolved in §4, §8, and §10.**
+21. **Pass IDs must be server-owned and state-validated.** A user-facing MCP arg
+    named `__pipeline_pass_id` would let any caller with `CAP_DELEGATE` try to
+    write arbitrary pass rows. The pipeline surface should accept a normal
+    `pipeline_pass_id` only from the pipeline orchestrator/gate command, validate
+    that the pass belongs to an active roundtable pipeline in the expected state,
+    and then inject the private `__pipeline_pass_id` internally. Raw
+    double-underscore fields remain server-private. **Resolved in §4, §8, and
+    §10.**
+22. **Capture only works on the async op-run path.** The worker capture seam is
+    present for `/v1/delegate/roundtable` and `server_http_submit_op_run`, but a
+    direct synchronous `server_dispatch("delegate.roundtable")` call bypasses
+    `op_run_worker_run`. The pipeline must require async op-run submission for
+    both DRAFT and REVIEW passes, or add an equivalent capture hook to any direct
+    path it uses. **Resolved in §2, §4, §8, and §10.**
+23. **A stable pass id still needs per-attempt rows.** Re-running a lost pass under
+    the same `pipeline_pass_id` is correct for loop accounting, but the ledger must
+    preserve each attempt (`attempt_no`, `run_id`, status, terminal flags, result
+    hash, captured/lost marker, cost if known). Otherwise a retry overwrites the
+    evidence needed to explain overhead and repeated capture failures. **Resolved
+    in §4 and §10.**
+24. **Replay is idempotent only if the artifact input is hash-pinned.** A lost
+    result should be re-run over the *same* proposal/diff. Before retrying, the
+    pipeline must compare the current artifact/diff hash to the pass input hash;
+    if it changed, the old pass is stale and a new pass id is required. **Resolved
+    in §4 and §10.**
+25. **The worker must persist failed/cancelled terminal states too.** Done-bar
+    evaluation needs completed results, but durable diagnostics need failed,
+    cancelled, malformed, and capture-failed attempts as well. The capture hook
+    must write terminal status for every op-run outcome, not just successful
+    roundtable JSON. **Resolved in §4 and §10.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -300,15 +345,19 @@ Both phases use the **same** engine; they differ only in input and brief.
   skeleton into the full proposal across the author-revise passes. The full
   proposal lives in the working file/PR, not in the DRAFT artifact; REVIEW reviews
   the file (or chunked sections for large proposals, like the diff path below),
-  not the truncated artifact. The brief carries the proposal's *goal*, the
-  *invariants* it must satisfy, and the human's seed *questions*.
+  not the truncated artifact. Pipeline-owned DRAFT and REVIEW calls must use the
+  async op-run path so server-worker result capture runs. The brief carries the
+  proposal's *goal*, the *invariants* it must satisfy, and the human's seed
+  *questions*.
 - **PR phase (A).** Input = unified diff (normally `git diff <base>...HEAD`;
   aimee has no PR-fetch and needs none — `agent-directed-pr-review` §6). REVIEW
   mode only; the agent applies fixes between passes. For large diffs, the driving
   agent must pass an artifact file/path or chunked diff slices rather than an
   unbounded inline string, and the ledger stores the diff ref plus content hash.
-  The brief carries the *fixes just applied*, the *invariants* the change must
-  not break, and the *questions* the author is unsure about.
+  Pipeline-owned PR reviews use the async op-run path with validated pass
+  metadata, not a direct synchronous roundtable dispatch. The brief carries the
+  *fixes just applied*, the *invariants* the change must not break, and the
+  *questions* the author is unsure about.
 
 The brief is **open-mandate** (agent-directed-pr-review §2): it weights attention
 and seeds the questions, but every reviewer is still told to report any blocking
@@ -395,6 +444,9 @@ Either way, the durable record holds:
 - per-pass history: each outer pass's child roundtable `run_id`, status,
   `converged`, blocking/suggestion counts, `cost_usd`, `rounds_run`, `best_round`,
   result hash, and any payload/chunk refs;
+- per-attempt history under each pass: `attempt_no`, child `run_id`, submitted and
+  terminal timestamps, captured/lost status, terminal flags, result hash, and cost
+  if the result was available;
 - repository/worktree state: repo root, remote, base branch, head branch,
   workspace id/provider (`shared`, `detached`, or `mirror`), dedicated worktree
   path if any, head/base commit SHAs, dirty-state snapshot, PR number(s), PR URLs,
@@ -408,20 +460,30 @@ oldest-reused) and non-durable. Capture must not depend on the *driving agent*
 being awake to poll — under Hybrid the agent owns the loop, not the child-run
 completion path. Instead, the worker that **already runs the roundtable** owns
 capture: `op_run_worker_run` (`server_http_routes.inc:339`) executes the async
-`delegate.roundtable` and calls `openai_runs_store_finalize` at terminal. Thread a
-`__pipeline_pass_id` into the request body the same way `__run_id` is injected
-today (`:419`) and extend that finalize path to **also persist the structured pass
-result** (items + severities + `count`, `converged`, validity flags,
-`items_round`, `artifact_round`, counts, `cost_usd`, `rounds_run`) into the DB1
-ledger row before the run record can be evicted. The `/v1/runs` id is retained
-only as a historical pointer; the ledger row is the source of truth for the
-done-bar and the gate digest.
+`delegate.roundtable` and calls `openai_runs_store_finalize` at terminal. The
+pipeline creates a DB1 pass row first, then the pipeline-owned callable surface
+forwards a normal `pipeline_pass_id` that is validated against the active
+pipeline/pass state and injected internally as private `__pipeline_pass_id` (raw
+double-underscore fields are not user API). `server_http_submit_op_run` /
+`rh_dispatch_op_async` must preserve that private metadata alongside the existing
+`__run_id` injection (`:419`). Extend the finalize path, preferably through a
+narrow op-run-finalize hook rather than hard-coding roundtable ledger writes into
+generic HTTP routing, to **also persist the structured pass result** (items +
+severities + `count`, `converged`, validity flags, `items_round`,
+`artifact_round`, counts, `cost_usd`, `rounds_run`) into the DB1 ledger row before
+the run record can be evicted. Failed, cancelled, malformed, and capture-failed
+terminal states are recorded too. The `/v1/runs` id is retained only as a
+historical pointer; the ledger row is the source of truth for the done-bar and the
+gate digest.
 
-If a result is still not captured (a genuine fault), the pass is marked
-`lost_result` and the pipeline **auto re-runs the review pass** under a stable
-`pipeline_pass_id` (idempotent over the same artifact; bounded by the pass ceiling
-and cost cap, the lost attempt booked as overhead). A human is involved only if
-capture keeps failing across re-runs (#19) — never on a single transient miss.
+If a result is still not captured (a genuine fault), the attempt is marked
+`lost_result` and the pipeline **auto re-runs the review pass** under the same
+stable `pipeline_pass_id` but a new `attempt_no`/`run_id`. That retry is idempotent
+only if the stored artifact/diff hash still matches; if the input changed, the old
+pass is stale and the pipeline starts a new pass instead. Retries are bounded by
+the pass ceiling and cost cap, with lost attempts booked as overhead when cost is
+known. A human is involved only if capture keeps failing across re-runs (#19) —
+never on a single transient miss.
 
 This makes the human gate a durable checkpoint: `status` shows where it is and
 the evidence; `gate pass|fail --reason "…"` records the verdict and resumes the
@@ -532,6 +594,11 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
 - **Hard:** durable DB1 checkpointing for the roundtable pipeline. `/v1/runs`
   remains a child-run polling surface only because its store is bounded and
   non-durable.
+- **Hard:** a pipeline-owned async submission contract. The existing
+  `ensemble_review` MCP surface does not forward arbitrary metadata, so the
+  pipeline needs an explicit `pipeline_pass_id`/attempt submission path that
+  validates state and injects private `__pipeline_pass_id` before
+  `op_run_worker_run` finalizes the child run.
 - **Hard:** workspace-aware git/forge authority for PR create/merge and diff
   capture. Pipeline git/gh operations must route through Aimee's git tools or
   workspace provider so shared, detached, and mirror workspaces behave consistently.
@@ -544,12 +611,13 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
 
 - **P0 — Ledger + states + namespace decision.** Choose the DB shape
   (`roundtable_pipeline_runs` tables vs explicit migration of DB1 `pipelines`),
-  add the state enum/transitions, artifact refs/hashes, child run references, and
-  the CLI/MCP/HTTP namespace decision (`pipeline` vs `autopilot` extension). Wire
-  the server-worker capture seam: thread `__pipeline_pass_id` and extend
-  `op_run_worker_run`'s finalize path to persist the terminal structured result to
-  the ledger (#18). No loop yet; states/gates settable manually. Mergeable alone,
-  with restart tests.
+  add the state enum/transitions, artifact refs/hashes, pass/attempt rows, child
+  run references, and the CLI/MCP/HTTP namespace decision (`pipeline` vs
+  `autopilot` extension). Wire the server-worker capture seam: validate
+  `pipeline_pass_id`, inject private `__pipeline_pass_id`, preserve it through
+  async enqueue, and extend `op_run_worker_run`'s finalize path or hook to persist
+  every terminal attempt to the ledger (#18/#20-#25). No loop yet; states/gates
+  settable manually. Mergeable alone, with restart tests.
 - **P1 — Outer review loop + done-bar.** The REVIEW⇄revise loop over
   `ensemble_review`, the configurable done-bar evaluator, the pass ceiling +
   escalation, the echo guard. Drives the PR phase first (single mode, simplest).
@@ -585,10 +653,24 @@ ledger) before the full idea→merge pipeline of P2/P3.
   result is already in DB1 because `op_run_worker_run`'s finalize path wrote it
   (keyed by `__pipeline_pass_id`), **with the driving agent killed** for the
   window. The done-bar/digest are unaffected by the evicted `/v1/runs` record.
+- **Pass-id forwarding (#20/#21)** — submit a pipeline-owned `ensemble_review` /
+  draft roundtable pass and assert the private `__pipeline_pass_id` reaches
+  `op_run_worker_run`; an arbitrary user-supplied double-underscore id is rejected
+  or ignored, and a stale/non-owned pass id cannot mutate the ledger.
+- **Async-only capture (#22)** — prove pipeline-owned DRAFT and REVIEW calls go
+  through async op-run capture; any direct synchronous roundtable dispatch is
+  either forbidden for pipeline passes or has an equivalent capture hook.
 - **Lost-result re-run (#19)** — simulate a genuine capture fault: the pass is
   marked `lost_result` and auto re-runs under the **same `pipeline_pass_id`** (no
   double-counted pass; lost attempt booked as overhead), escalating to the human
   only after repeated capture failures, never on the first miss.
+- **Attempt accounting (#23/#25)** — successful, failed, cancelled, malformed,
+  capture-failed, and lost attempts all get attempt rows and preserve run IDs,
+  terminal status, flags, result hashes, and known cost without overwriting prior
+  attempts.
+- **Replay hash pinning (#24)** — mutate the proposal/diff between a lost attempt
+  and retry; the pipeline refuses to reuse the old pass id and starts a new pass
+  because the artifact hash changed.
 - **DRAFT skeleton + expansion (#9)** — a DRAFT call returns a skeleton within the
   8 KB cap without truncating mid-structure; the author-revise loop grows it to a
   full proposal in the working file, and REVIEW reviews the file/chunks, not the
