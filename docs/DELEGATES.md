@@ -346,6 +346,61 @@ The supported setup/provider names are:
 - `openai`
 - local delegates registered through `./add-local-delegate.sh`
 
+### Local-CLI agents on a thin client
+
+`claude` (and any agent whose backend launches a local binary — the `claude -p`
+provider-CLI / tmux path) needs the CLI executable, its login, and the working
+tree **on the same machine as execution**. On a co-located server that is the
+server host. On a **remote/containerized `aimee-server` driven by a thin
+client**, none of those live on the server — they live on your machine.
+
+So when the active workspace is `detached` (a thin client is serving it over the
+reverse channel — see workspace client-push), aimee runs the CLI agent **on the
+client**: it marshals the same `claude -p` invocation over the runner reverse
+channel, the client spawns it against its own tree with its own `~/.claude`
+login, and streams the output back into the turn token-by-token. No Claude
+credential is ever sent to or stored on the server. Co-located deployments are
+unchanged (the server forks the CLI locally as before).
+
+Practical notes:
+- Configure the agent as usual (`aimee agent add claude … --provider claude`,
+  or `aimee config set provider claude` to make it the primary); the thin-client
+  routing is automatic when the workspace is `detached`.
+- If no client is currently serving the workspace, the CLI agent cannot run
+  (there is nowhere with the binary) — start the client / `aimee workspace serve`
+  for that root, or use an HTTP provider.
+
+#### Claude via the CLI is primary-only by default
+
+Claude run via the `claude` CLI / tmux login — authenticated by the **interactive
+Claude subscription login, not an API key** — is **primary-only by default**. It
+can be your interactive primary (`aimee chat`), but it is **not** eligible as a
+delegate (neither auto-routed nor `aimee delegate … --via claude`). Attempting to
+use it as a delegate fails with a message pointing you here.
+
+This gate is **Claude-CLI-specific**. It does not affect any other agent: API-key
+/ HTTP agents (`minimax`, `openai`, `anthropic` with a key, `gemini-cli`,
+`mistral`, …) and other CLI agents (e.g. the Codex CLI) delegate normally.
+
+> ⚠️ **Anthropic account-risk warning.** Using a personal **Claude subscription**
+> (Pro/Max) to drive **automated / headless delegation** may violate Anthropic's
+> terms of service and can result in **suspension or termination of your
+> account**. The terms generally distinguish interactive use of a subscription
+> from programmatic/automation use, which is what delegate fan-out is. For
+> automated or delegated Claude workloads, use an **Anthropic API key** (billed
+> per token) instead — add an `anthropic` agent with `--key`.
+
+To opt in anyway, at your own risk:
+
+```bash
+aimee config set claude_cli_delegate_enabled true
+```
+
+This prints the warning once, at the time you enable it. With the flag on,
+Claude-via-CLI may be routed to / selected as a delegate (and, on a thin client,
+runs on the client exactly like the primary path above). Set it back to `false`
+to restore the primary-only default. The default is `false`.
+
 ### Config format
 
 The exact file content depends on the providers you register. `codex` and

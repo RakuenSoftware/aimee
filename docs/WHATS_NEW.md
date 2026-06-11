@@ -25,6 +25,23 @@ secrets; see [THIN_CLIENT.md](THIN_CLIENT.md).
   the path locally, registers it as `detached`, and pushes the files to the
   server (`POST /v1/index/ingest`, chunked under aimee-kb's body cap) — the
   server never reads the client filesystem. `aimee index scan [path]` re-pushes.
+- **Local-CLI agents (Claude) run on the thin client**: a `claude` agent needs
+  the `claude` binary, its login, and the working tree where it executes — none
+  of which exist on a remote/containerized `aimee-server`. When the active
+  workspace is `detached` (a thin client is serving it), aimee now marshals the
+  `claude -p` run over the existing runner reverse channel so it executes **on
+  the client**, against the client's tree with the client's `~/.claude` login,
+  and **streams the output back into the chat turn token-by-token**. No Claude
+  credential is sent to or stored on the server. Co-located deployments are
+  unchanged. See [DELEGATES.md](DELEGATES.md).
+- **Claude via the CLI is primary-only by default**: Claude run via the `claude`
+  CLI / tmux login (authenticated by the Claude subscription login, not an API
+  key) can be your interactive primary but is **not** usable as a delegate unless
+  you opt in with `aimee config set claude_cli_delegate_enabled true`. Driving a
+  personal Claude subscription as an automated delegate may violate Anthropic's
+  terms and risk account action; enabling the flag prints that warning once. This
+  gate is Claude-CLI-specific — all other agents (API-key/HTTP, and other CLI
+  agents like the Codex CLI) are unaffected.
 - **Attention guard inert by default**: recursive raw scans flow freely unless a
   positive `ingress_max_raw_scans` cap is configured; the destructive-file guard
   is unchanged. The Claude Code integration also re-points stale hook/MCP command

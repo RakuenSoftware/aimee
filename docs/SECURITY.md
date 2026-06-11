@@ -249,6 +249,27 @@ secret store worth attacking.
 
 See [THIN_CLIENT.md](THIN_CLIENT.md) for operational details.
 
+## Local-CLI agent execution stays on the client
+
+A local-CLI agent (Claude via `claude -p`, and peers whose backend launches a
+local binary) executes where its binary and login live — the **client** — even
+when it is driven through a remote `aimee-server`. On a detached workspace the
+server marshals the CLI invocation over the runner reverse channel and the client
+spawns it locally, authenticating with the client's own login (e.g. `~/.claude`).
+
+- No Claude/CLI credential is transmitted to or stored on the server; the server
+  only relays the prompt and streams the output.
+- The CLI runs against the client's working tree, under the client user's
+  identity — the server gains no new ability to execute binaries it does not have.
+- This keeps the server from being a place where third-party agent logins
+  accumulate, consistent with the broader thin-client custody posture (agent API
+  keys are client-held; see [DELEGATES.md](DELEGATES.md)). On a plaintext-HTTP
+  LAN deployment, the prompt relayed to the server is only as confidential as
+  that network — use TLS / a trusted network for the server endpoint.
+- Claude run via the `claude` CLI login (not an API key) is **primary-only by
+  default** — see [DELEGATES.md](DELEGATES.md#claude-via-the-cli-is-primary-only-by-default)
+  for the account-risk rationale and the `claude_cli_delegate_enabled` opt-in.
+
 ## Explicit Non-Goals
 
 This security model does not aim to provide:

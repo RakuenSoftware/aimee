@@ -242,7 +242,11 @@ int workspace_turn_bind_active(const char *cwd)
          ws_runner_queue_t *q = ws_runner_registry_get_or_create(cfg.workspaces[i]);
          if (q)
          {
-            ws_detached_provider_init(&t_turn_detached, ws_runner_queue_transport, q);
+            /* Bind both the unary and streaming transports off the same queue so
+             * file/exec ops marshal as today AND a local-CLI agent (exec_stream)
+             * can stream its output back from the client. */
+            ws_detached_provider_init_ex(&t_turn_detached, ws_runner_queue_transport,
+                                         ws_runner_queue_transport_stream, q);
             workspace_provider_set_active(&t_turn_detached.base);
             t_turn_bound = 1;
             return 1;

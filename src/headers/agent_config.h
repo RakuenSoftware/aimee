@@ -47,4 +47,12 @@ void agent_set_request_codex_creds(const char *token, const char *account_id);
  * Thread-local. */
 void agent_set_request_session(const char *session_id);
 
+/* True if `agent` is the Claude CLI (`claude` / `claude-code`) run via tmux or
+ * the provider-CLI binary — authenticated by the interactive `claude` login, not
+ * an API key. Used to keep Claude-via-CLI primary-only by default (gated as a
+ * delegate behind config.claude_cli_delegate_enabled). All other agents,
+ * including other CLI agents (Codex CLI, gemini-cli) and API-key/HTTP agents,
+ * return 0. */
+int agent_is_claude_cli(const agent_t *agent);
+
 #endif /* DEC_AGENT_CONFIG_H */

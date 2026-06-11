@@ -22,6 +22,7 @@
 #include "session_compact.h"
 #include "liveness.h"
 #include "provider_cli_adapter.h"
+#include "workspace_provider.h"
 #include "config.h"
 #include "cJSON.h"
 #include <ctype.h>
@@ -346,8 +347,20 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
 
    /* Dispatch to tmux-CLI backend if configured */
    if (strcmp(agent->backend, AGENT_BACKEND_TMUX_CLI) == 0)
+   {
+      /* On a detached (thin-client) workspace the server has no tmux and no
+       * `claude` binary — they live on the client. Run the same CLI agent on the
+       * client via the provider-cli streaming path (claude -p over exec_stream)
+       * when its cli_kind has a remote argv builder. Co-located turns keep using
+       * the local tmux session. */
+      const workspace_provider_t *ws = workspace_provider_active();
+      const provider_cli_adapter_t *cli = provider_cli_adapter_get(agent->cli_kind);
+      if (ws && ws->kind == WS_PROVIDER_DETACHED && ws->exec_stream && cli && cli->build_argv)
+         return provider_cli_adapter_execute(cli, agent, run_cmd_get_cwd(), system_prompt,
+                                             user_prompt, out);
       return agent_execute_cli_session(agent, network, system_prompt, user_prompt, max_tokens,
                                        temperature, out);
+   }
 
    /* Dispatch to provider-CLI backend. Some legacy provider-CLI configs now
     * bridge into Aimee's native HTTP provider loop instead of spawning a CLI. */

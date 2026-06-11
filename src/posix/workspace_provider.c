@@ -7,11 +7,17 @@
  * co-located deployment pays nothing for going through the interface. */
 #include "workspace_provider.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <glob.h>
+#include <poll.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 static int shared_read_all(const workspace_provider_t *p, const char *path, char **out, size_t *len)
 {
@@ -171,6 +177,165 @@ static char *shared_exec_shell(const workspace_provider_t *p, const char *cmd, i
    return run_cmd(cmd, exit_code);
 }
 
+static int set_nonblock(int fd)
+{
+   int fl = fcntl(fd, F_GETFL, 0);
+   return (fl < 0) ? -1 : fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+}
+
+/* Fork/exec argv with `stdin_data` piped to the child and its stdout streamed
+ * out through `on_chunk` as it is produced. A poll loop drives the stdin write
+ * and stdout read together so neither side deadlocks on a full pipe. This is
+ * what the client-side runner uses to execute a local-CLI agent (claude -p). */
+static int shared_exec_stream(const workspace_provider_t *p, const char *const argv[],
+                              const char *stdin_data, size_t stdin_len, const char *cwd,
+                              ws_exec_chunk_fn on_chunk, void *cb_ctx)
+{
+   (void)p;
+   if (!argv || !argv[0])
+      return -1;
+
+   int in_pipe[2] = {-1, -1};
+   int out_pipe[2] = {-1, -1};
+   if (pipe(in_pipe) != 0)
+      return -1;
+   if (pipe(out_pipe) != 0)
+   {
+      close(in_pipe[0]);
+      close(in_pipe[1]);
+      return -1;
+   }
+
+   pid_t pid = fork();
+   if (pid < 0)
+   {
+      close(in_pipe[0]);
+      close(in_pipe[1]);
+      close(out_pipe[0]);
+      close(out_pipe[1]);
+      return -1;
+   }
+   if (pid == 0)
+   {
+      /* child */
+      dup2(in_pipe[0], STDIN_FILENO);
+      dup2(out_pipe[1], STDOUT_FILENO);
+      close(in_pipe[0]);
+      close(in_pipe[1]);
+      close(out_pipe[0]);
+      close(out_pipe[1]);
+      if (cwd && cwd[0] && chdir(cwd) != 0)
+         _exit(127);
+      execvp(argv[0], (char *const *)argv);
+      _exit(127);
+   }
+
+   /* parent */
+   close(in_pipe[0]);
+   close(out_pipe[1]);
+   int in_fd = in_pipe[1];
+   int out_fd = out_pipe[0];
+   set_nonblock(in_fd);
+   set_nonblock(out_fd);
+
+   struct sigaction old_pipe, ignore_pipe;
+   memset(&ignore_pipe, 0, sizeof(ignore_pipe));
+   ignore_pipe.sa_handler = SIG_IGN;
+   sigemptyset(&ignore_pipe.sa_mask);
+   int restore_pipe = sigaction(SIGPIPE, &ignore_pipe, &old_pipe) == 0;
+
+   size_t in_off = 0;
+   if (!stdin_data || stdin_len == 0)
+   {
+      close(in_fd);
+      in_fd = -1;
+   }
+   int aborted = 0;
+
+   for (;;)
+   {
+      /* drain stdout */
+      for (;;)
+      {
+         char buf[8192];
+         ssize_t r = read(out_fd, buf, sizeof(buf));
+         if (r > 0)
+         {
+            if (on_chunk && on_chunk(cb_ctx, buf, (size_t)r) != 0)
+            {
+               aborted = 1;
+               break;
+            }
+            continue;
+         }
+         if (r == 0)
+         {
+            close(out_fd);
+            out_fd = -1;
+            break;
+         }
+         if (r < 0 && errno == EINTR)
+            continue;
+         break; /* EAGAIN — poll below */
+      }
+      if (aborted || out_fd < 0)
+         break;
+
+      /* push stdin */
+      while (in_fd >= 0 && in_off < stdin_len)
+      {
+         ssize_t n = write(in_fd, stdin_data + in_off, stdin_len - in_off);
+         if (n > 0)
+         {
+            in_off += (size_t)n;
+            continue;
+         }
+         if (n < 0 && errno == EINTR)
+            continue;
+         break; /* EAGAIN, or write error → close below */
+      }
+      if (in_fd >= 0 && in_off >= stdin_len)
+      {
+         close(in_fd);
+         in_fd = -1;
+      }
+
+      struct pollfd pfds[2];
+      nfds_t nfds = 0;
+      if (out_fd >= 0)
+      {
+         pfds[nfds].fd = out_fd;
+         pfds[nfds].events = POLLIN;
+         nfds++;
+      }
+      if (in_fd >= 0)
+      {
+         pfds[nfds].fd = in_fd;
+         pfds[nfds].events = POLLOUT;
+         nfds++;
+      }
+      if (nfds == 0)
+         break;
+      poll(pfds, nfds, 1000);
+   }
+
+   if (in_fd >= 0)
+      close(in_fd);
+   if (out_fd >= 0)
+      close(out_fd);
+   if (aborted)
+      kill(pid, SIGKILL);
+   if (restore_pipe)
+      sigaction(SIGPIPE, &old_pipe, NULL);
+
+   int status = 0;
+   while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
+      ;
+   if (aborted)
+      return -1;
+   return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
 static const workspace_provider_t g_shared_provider = {
     .kind = WS_PROVIDER_SHARED,
     .read_all = shared_read_all,
@@ -179,6 +344,7 @@ static const workspace_provider_t g_shared_provider = {
     .list = shared_list,
     .exec = shared_exec,
     .exec_shell = shared_exec_shell,
+    .exec_stream = shared_exec_stream,
 };
 
 const workspace_provider_t *workspace_provider_shared(void)
