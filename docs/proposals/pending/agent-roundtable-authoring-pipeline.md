@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 twenty-second review)
+- **Date:** 2026-06-11 (revised post-PR-#183 twenty-third review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -726,6 +726,24 @@ effect.
     surface the blocked merge reason without losing the verdict. **Resolved in §1,
     §4, §5, §9, and §10.**
 
+## PR #183 twenty-third review — the gate TTL must not abandon a human's approval
+
+#56 adds `*_merge_pending`, but the gate TTL (#47) was written for the
+*awaiting-human* gate states and does not yet say it stops there.
+
+57. **The unanswered-gate TTL must not apply to `*_merge_pending` — a pass verdict
+    cannot be auto-abandoned because infra is slow.** `roundtable_pipeline_gate_ttl_h`
+    (#47) moves an **unanswered** gate to `abandoned`, which is right while the
+    pipeline waits on a *human*. But `*_merge_pending` is post-pass: the human
+    already approved, and the wait is on the *merge* (hung CI, branch protection,
+    transient `gh` failure). Abandoning that state would silently discard a human's
+    approval and force a full re-review. So the TTL applies **only** to
+    awaiting-human `*_pending` states. A blocked `*_merge_pending` retries with
+    backoff and surfaces the merge blocker, preserving the verdict; it leaves the
+    state only by a successful merge, an explicit operator `cancel`/`abandon` (#31),
+    or — if wanted — a *separate, clearly-named* merge-block escalation timer that
+    **escalates to a human, never auto-abandons**. **Resolved in §4, §5, §6, and §10.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -1119,6 +1137,13 @@ merge SHA and advances; still unmerged retries or parks with the latest merge
 blocker; merged at a different head marks the gate evidence stale and stops for
 operator review.
 
+**The unanswered-gate TTL does not apply here (#57).** `roundtable_pipeline_gate_ttl_h`
+abandons an *awaiting-human* `*_pending` gate; `*_merge_pending` is post-pass —
+the human already approved — so it is **never** auto-abandoned for slowness. A
+blocked merge retries with backoff and surfaces the blocker, leaving the state only
+by a successful merge, an explicit operator `cancel`/`abandon`, or a separate
+merge-block escalation that pings a human rather than discarding the verdict.
+
 If the implementation chooses the distinct-capability path, it must first make the
 capability model able to represent that authority (#54). The current mask has no
 spare low bit (`CAPS_ALL` is `0xFFFFu`), so gate resolution is not just another
@@ -1199,8 +1224,10 @@ roundtable config surface is scalar keys like `roundtable.max_rounds`,
   requires a fresh reconciliation and stale gate digest rather than silently
   combining DB1 token-audit totals, child-run estimates, and db2 usage rows (#52).
 - `roundtable_pipeline_gate_ttl_h` — int hours, **default 0 (no expiry)**; >0 moves
-  a gate left unanswered past the TTL to `abandoned` with full child-run-stop +
-  cleanup (#31), never an auto-pass (#47).
+  an **awaiting-human** `*_pending` gate left unanswered past the TTL to `abandoned`
+  with full child-run-stop + cleanup (#31), never an auto-pass (#47). It does **not**
+  apply to `*_merge_pending` — a post-pass merge is never auto-abandoned for
+  slowness (#57).
 - `roundtable_pipeline_parked_releases_slot` — bool, default chosen by
   implementation policy; if true, a parked human gate releases the single active
   pipeline admission slot while retaining branch/PR ownership guards (#48).
@@ -1517,6 +1544,10 @@ ledger) before the full idea→merge pipeline of P2/P3.
   is dropped and correctly re-ingested from the origin on resume (same content
   hash, retrieval still works); with a TTL set, an unanswered gate moves to
   `abandoned` with child-run-stop + cleanup, never an auto-pass.
+- **Merge-pending survives the TTL (#57)** — with a gate TTL set, a pipeline in
+  `*_merge_pending` whose merge is blocked past the TTL is **not** abandoned: the
+  verdict is preserved, the merge retries/surfaces the blocker, and only a
+  successful merge or explicit operator abandon leaves the state.
 - **Parked-gate admission (#48)** — with one pipeline parked at a gate, start a
   second pipeline only if the selected policy releases the active slot; either way,
   branch/PR ownership prevents two active/restarted runs from mutating the same
