@@ -51,6 +51,10 @@ extern "C"
        * paths set "estimated"/"avoided" so readers can exclude them from spend.
        * NULL defaults to "realized". */
       const char *usage_kind;
+      /* The agent_log row this audit row belongs to (0 = none, e.g. ingress rows
+       * with no agent_log row). Lets agent stats join 1:1 instead of by the lossy
+       * (agent_name, role) key. */
+      long long agent_log_id;
       int prompt_tokens;
       int completion_tokens;
       int cache_write_tokens;

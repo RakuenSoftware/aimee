@@ -23,6 +23,11 @@ const char *delegation_active_id(void);
  * The runs worker is a dedicated detached thread, so it is scoped to that turn. */
 static __thread char g_ingress_source[40] = "";
 
+/* The agent_log row id for the call currently being logged, set by agent_log_call
+ * so the token_audit row it writes links back 1:1. 0 outside agent_log_call (e.g.
+ * direct ingress writes, which have no agent_log row). */
+static __thread long long g_agent_log_id = 0;
+
 void agent_set_ingress_source(const char *source)
 {
    snprintf(g_ingress_source, sizeof(g_ingress_source), "%s", source ? source : "");
@@ -63,6 +68,7 @@ void agent_record_token_audit(const agent_result_t *result, const char *role, co
        .source = eff_source,
        .requested_model = result->requested_model,
        .stop_reason = result->stop_reason,
+       .agent_log_id = g_agent_log_id,
        .prompt_tokens = usage.input_tokens,
        .completion_tokens = usage.output_tokens,
        .cache_write_tokens = usage.cache_write_tokens,
@@ -87,8 +93,11 @@ void agent_log_call(const agent_result_t *result, const char *role)
        .confidence = result->confidence,
        .session_id = NULL,
    };
-   (void)db1_agent_log_insert(&row);
+   long long log_id = db1_agent_log_insert(&row);
 
+   /* Link the cost row to this agent_log row (1:1) for agent stats, then clear. */
+   g_agent_log_id = log_id > 0 ? log_id : 0;
    /* Internal agent/delegate execution; tag the cost row accordingly. */
    agent_record_token_audit(result, role, "agent");
+   g_agent_log_id = 0;
 }

@@ -348,45 +348,58 @@ static void test_ingress_source_override(void)
    sqlite3_finalize(st);
 }
 
-static void test_ingress_excluded_from_agent_stats(void)
+static long long insert_agent_log(const char *agent, const char *role)
 {
-   /* Agent stats must reflect only agent_log-backed spend; an ingress row that
-    * shares the agent name must NOT inflate it (no agent_log row exists for it). */
    db1_agent_log_insert_row_t log = {
-       .agent_name = "statbot",
-       .role = "execute",
+       .agent_name = agent,
+       .role = role,
        .prompt_tokens = 10,
        .completion_tokens = 5,
        .success = 1,
        .confidence = -1,
    };
-   assert(db1_agent_log_insert(&log) == 0);
-   db1_token_audit_row_t agent_row = {
-       .tool_name = "statbot",
-       .role = "execute",
-       .model = "gpt-4o",
-       .source = "agent",
-       .prompt_tokens = 10,
-       .completion_tokens = 5,
-       .estimated_cost_usd = 0.10,
-   };
-   db1_token_audit_row_t ingress_row = {
-       .tool_name = "statbot",
-       .role = "execute",
-       .model = "gpt-4o",
-       .source = "openai-ingress",
-       .prompt_tokens = 999,
-       .completion_tokens = 999,
-       .estimated_cost_usd = 9.99,
-   };
-   assert(db1_token_audit_insert(&agent_row) == 0);
-   assert(db1_token_audit_insert(&ingress_row) == 0);
+   long long id = db1_agent_log_insert(&log);
+   assert(id > 0);
+   return id;
+}
+
+static void test_agent_stats_join_is_1to1(void)
+{
+   /* Agent stats join token_audit by agent_log_id (1:1), so: (a) ingress rows
+    * with no agent_log row do not inflate stats, and (b) two calls to the same
+    * agent do not multiply cost via the old (agent_name, role) cartesian join. */
+   long long id1 = insert_agent_log("statbot", "execute");
+   long long id2 = insert_agent_log("statbot", "execute");
+
+   db1_token_audit_row_t a = {.tool_name = "statbot",
+                              .role = "execute",
+                              .model = "gpt-4o",
+                              .source = "agent",
+                              .agent_log_id = id1,
+                              .estimated_cost_usd = 0.10};
+   db1_token_audit_row_t b = {.tool_name = "statbot",
+                              .role = "execute",
+                              .model = "gpt-4o",
+                              .source = "agent",
+                              .agent_log_id = id2,
+                              .estimated_cost_usd = 0.20};
+   /* An ingress row sharing the agent name, with no agent_log link. */
+   db1_token_audit_row_t ingress = {.tool_name = "statbot",
+                                    .role = "execute",
+                                    .model = "gpt-4o",
+                                    .source = "openai-ingress",
+                                    .agent_log_id = 0,
+                                    .estimated_cost_usd = 9.99};
+   assert(db1_token_audit_insert(&a) == 0);
+   assert(db1_token_audit_insert(&b) == 0);
+   assert(db1_token_audit_insert(&ingress) == 0);
 
    db1_agent_log_agent_stats_t stats[4];
    int n = db1_agent_log_agent_stats("statbot", stats, 4);
    assert(n == 1);
-   /* Only the agent row's $0.10 — the ingress $9.99 is excluded. */
-   assert(stats[0].total_estimated_cost_usd > 0.09 && stats[0].total_estimated_cost_usd < 0.11);
+   /* Exactly $0.10 + $0.20 = $0.30 — not multiplied (would be $0.60 under the
+    * old cartesian join) and not inflated by the $9.99 ingress row. */
+   assert(stats[0].total_estimated_cost_usd > 0.29 && stats[0].total_estimated_cost_usd < 0.31);
 }
 
 static void test_dashboard_rows(void)
@@ -416,7 +429,7 @@ int main(void)
    test_agent_log_call_records_served_model();
    test_record_token_audit_ingress_source();
    test_ingress_source_override();
-   test_ingress_excluded_from_agent_stats();
+   test_agent_stats_join_is_1to1();
    test_cost_for_delegation();
    db1_shutdown();
    printf("test_token_audit: ok\n");
