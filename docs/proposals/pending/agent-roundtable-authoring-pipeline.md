@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 sixteenth review)
+- **Date:** 2026-06-11 (revised post-PR-#183 seventeenth review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -604,6 +604,25 @@ codebase.
     merge as already covered hides a build gap at the most important state
     transition. **Resolved in §5, §8, §9, and §10.**
 
+## PR #183 seventeenth review — reuse the cost-accounting ledger; correct the merge claim
+
+Two follow-ons from the sixteenth review's own resolutions.
+
+51. **Implementation-agent spend (#49) should consume the cost-accounting
+    proposal's ledger, not invent parallel accounting.** `ingress-cost-accounting-and-optimizations.md`
+    (the in-flight #180/#185 work) builds a db2 `usage_ledger` (`src/db2/usage_ledger.c`)
+    + a typed `/v1/usage/*` surface that already records per-turn agent cost. The
+    whole-pipeline cost cap's *implementation* component must read from that ledger
+    (the same pattern the ingress-compression proposal uses to cede cache work to
+    the cost proposal), marking implementation cost **incomplete evidence** when the
+    ledger has no row yet — never a second cost-accounting path. If that ledger has
+    not landed, the cap is scoped to roundtable child-run cost only
+    (`…_max_roundtable_cost_usd`) and says so, rather than silently summing a subset.
+    **Resolved in §3, §6, and §8.**
+
+(The What-exists table is also corrected here: PR **merge** is *not* a `git_pr`
+action today — #50 — so it is listed as a gap, not as existing.)
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -631,7 +650,8 @@ codebase.
 | Multi-round panel, DRAFT + REVIEW modes, deterministic convergence, dedup, severity, cost/deadline bounds | **exists** (engine, `testing`) |
 | Directed review (brief), structured items returned, `ensemble_review` MCP tool (review mode) | **in tree on `testing`** (`mcp_tools.c:610`, `handle_mcp_ensemble_review`); verify result contract (§8) |
 | A **draft**-capable callable path | **gap** — `ensemble_review` forces review mode; DRAFT needs `/v1/delegate/roundtable --mode draft` or a draft MCP sibling (§8) |
-| PR open / merge, diff capture | **exists via workspace-aware git/PR tools** (`git_pr`, `mcp_git_run`, `gh`/`git` underneath) |
+| PR **open** / diff capture | **exists** (`git_pr` create/view/edit, `mcp_git_run`) |
+| PR **merge** | **gap — `git_pr` has no merge action** (only `merge_status`); needs a merge executor (#50, §5) |
 | Outer REVIEW⇄revise loop, done-bar evaluation, pass ceiling + escalation | **net-new** (§3) |
 | The two human gates + the two fail-return edges | **net-new** (§5) |
 | Persisted, resumable roundtable pipeline ledger (hybrid state) | **net-new or explicit DB1 pipeline extension** (§4) |
@@ -1017,10 +1037,12 @@ roundtable config surface is scalar keys like `roundtable.max_rounds`,
   0 = unbounded; tripping escalates. **Accumulates across fail-return re-entries of
   the phase; a fail-return never resets it** (#46).
 - `roundtable_pipeline_max_total_cost_usd` — double, cumulative pipeline spend
-  cap; 0 = unbounded; tripping escalates (#46). The implementation must define
-  whether this is roundtable-child-run cost only or includes normal implementation
-  agent spend via token/cost accounting (#49); unknown in-scope implementation
-  cost blocks claiming the cap is satisfied.
+  cap; 0 = unbounded; tripping escalates (#46). Implementation-phase spend is read
+  from the **cost-accounting proposal's `usage_ledger` / `/v1/usage/*`** (#51), not
+  a second accounting path; where that ledger has no row yet, implementation cost is
+  marked **incomplete evidence** and the cap cannot be claimed satisfied. If that
+  ledger has not landed, the cap is scoped to roundtable child-run cost only
+  (a `…_max_roundtable_cost_usd` spelling) and says so (#49).
 - `roundtable_pipeline_gate_ttl_h` — int hours, **default 0 (no expiry)**; >0 moves
   a gate left unanswered past the TTL to `abandoned` with full child-run-stop +
   cleanup (#31), never an auto-pass (#47).
@@ -1100,6 +1122,9 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
 - **Hard if exposing HTTP:** route namespace selection. `GET /v1/pipeline/status`
   already belongs to the KB/corpus ingest pipeline, so roundtable-authoring routes
   must use a distinct namespace or remain CLI/MCP-only in v1 (#45).
+- **Soft:** the cost-accounting proposal's `usage_ledger` / `/v1/usage/*` for
+  whole-pipeline cost that includes implementation-phase spend (#51). Absent it,
+  the total cap is roundtable-child-run-cost only and says so (#49).
 - **Soft:** the `git diff` range helper (agent-directed-pr-review P2) for the PR
   phase input; otherwise the pipeline captures the diff through the
   workspace-aware git surface.
