@@ -687,10 +687,10 @@ static void persist_pass_artifact(const rtp_run_t *run, int pass_id, const char 
    fclose(f);
 }
 
-static char *read_pass_artifact(const rtp_run_t *run, int pass_id)
+static char *read_text_file(const char *path)
 {
-   char path[RTP_PATH_LEN];
-   pass_file_path(run, pass_id, path, sizeof(path));
+   if (!path || !path[0])
+      return NULL;
    FILE *f = fopen(path, "rb");
    if (!f)
       return NULL;
@@ -712,6 +712,13 @@ static char *read_pass_artifact(const rtp_run_t *run, int pass_id)
    fclose(f);
    b[rd] = '\0';
    return b;
+}
+
+static char *read_pass_artifact(const rtp_run_t *run, int pass_id)
+{
+   char path[RTP_PATH_LEN];
+   pass_file_path(run, pass_id, path, sizeof(path));
+   return read_text_file(path);
 }
 
 static int submit_pass(server_conn_t *conn, rtp_run_t *run, const char *phase, const char *mode,
@@ -1365,13 +1372,17 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
              conn, "pipeline: nothing to advance in this state without an artifact", NULL);
       rtp_run_get(id, &run);
    }
-   /* For a PR-phase review with no supplied artifact, the controller captures
-    * the diff itself via the workspace-aware git surface (#2). */
+   /* REVIEW with no supplied artifact: the controller obtains it itself rather
+    * than requiring the caller to re-provide it. For the proposal phase that is
+    * the stored DRAFT skeleton / working proposal file (#1); for the PR phase it
+    * is the captured diff via the workspace-aware git surface (#2). */
    char *captured_diff = NULL;
-   if ((!artifact || !artifact[0]) && strcmp(mode, RTP_MODE_REVIEW) == 0 &&
-       strcmp(phase, RTP_PHASE_IMPL) == 0 && run.head_branch[0])
+   if ((!artifact || !artifact[0]) && strcmp(mode, RTP_MODE_REVIEW) == 0)
    {
-      captured_diff = capture_diff(&run);
+      if (strcmp(phase, RTP_PHASE_IMPL) == 0 && run.head_branch[0])
+         captured_diff = capture_diff(&run);
+      else if (strcmp(phase, RTP_PHASE_PROPOSAL) == 0 && run.proposal_ref[0])
+         captured_diff = read_text_file(run.proposal_ref);
       if (captured_diff)
          artifact = captured_diff;
    }
@@ -1567,16 +1578,24 @@ int handle_pipeline_gate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "usage: aimee pipeline gate <id> pass|fail [--reason ...]",
                                NULL);
 
+   rtp_run_t run;
+   if (rtp_run_get(id, &run) != 0)
+      return server_send_error(conn, "pipeline: not found", NULL);
+
+   /* Enforce the unanswered-gate TTL FIRST (#47), before authority/verdict: an
+    * expired *_pending gate is abandoned and can never be passed/merged, even by
+    * an authorized caller invoking pipeline.gate directly. */
+   config_t gcfg;
+   if (config_load(&gcfg) == 0 && maybe_ttl_abandon(id, &run, &gcfg))
+      return server_send_error(conn, "pipeline: gate TTL exceeded; pipeline abandoned (not passed)",
+                               NULL);
+
    /* Authority separation (#53): the driving agent (CAP_DELEGATE) must not be
     * able to resolve its own gate. v1 requires an enrolled local operator
     * principal that a delegate-driving session does not possess. */
    if (!gate_authorized(req))
       return server_send_error(
           conn, "pipeline: gate resolution requires an enrolled local operator principal", NULL);
-
-   rtp_run_t run;
-   if (rtp_run_get(id, &run) != 0)
-      return server_send_error(conn, "pipeline: not found", NULL);
 
    /* Exactly-once (#55): act only from the matching *_pending state. */
    int gate_no;
