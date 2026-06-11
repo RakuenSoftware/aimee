@@ -497,6 +497,17 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (provider && provider[0])
       snprintf(ag->provider, sizeof(ag->provider), "%s", provider);
 
+   /* `--provider codex` is a convenience alias for the Codex (ChatGPT OAuth)
+    * adapter, whose provider is "chatgpt" (the responses-wire delegate driver)
+    * and whose auth is codex-oauth. Without this, a literal provider "codex"
+    * routes to a chat-completions path the codex backend rejects. */
+   if (strcmp(ag->provider, "codex") == 0)
+   {
+      snprintf(ag->provider, sizeof(ag->provider), "chatgpt");
+      if (!auth_type || !auth_type[0])
+         snprintf(ag->auth_type, sizeof(ag->auth_type), "codex-oauth");
+   }
+
    const char *roles = opt_get(&opts, "roles");
    if (roles && roles[0])
       server_agent_set_roles_csv(ag, roles);

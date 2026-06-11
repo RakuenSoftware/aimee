@@ -296,26 +296,6 @@ int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* --- Index handlers --- */
 
-static void *index_scan_thread(void *arg)
-{
-   kb_proxy_ctx_t *c = arg;
-   const char *name = jo_str(c->req, "name", NULL);
-   const char *root = jo_str(c->req, "root", NULL);
-   int force = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(c->req, "force")) ? 1 : 0;
-
-   kb_client_index_scan_result_t res;
-   memset(&res, 0, sizeof(res));
-   int kb_rc = kb_client_index_scan(name, root, force, &res);
-   cJSON *resp = (cJSON *)kb_client_index_scan_format_response(kb_rc, &res);
-   if (resp)
-   {
-      kb_proxy_write_response(c->conn_fd, resp);
-      cJSON_Delete(resp);
-   }
-   kb_proxy_ctx_free(c);
-   return NULL;
-}
-
 int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -325,8 +305,18 @@ int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if ((name && name[0] && (!root || !root[0])) || (root && root[0] && (!name || !name[0])))
       return server_send_error(conn, "index.scan requires both name and root, or neither", NULL);
 
-   kb_proxy_spawn(conn, req, index_scan_thread);
-   return 0;
+   /* Synchronous (inline kb scan + send_and_free), like handle_index_ingest:
+    * over /v1 this runs in the async op-run worker (HTTP already returned the
+    * run handle) and over NDJSON in the per-connection worker, so blocking here
+    * is fine. A kb_proxy_spawn detached-thread reply is NOT captured by the
+    * op-run's loopback_rpc (it reads the socketpair synchronously), which is why
+    * a remote /v1 index.scan previously failed with "rpc produced no response". */
+   int force = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "force")) ? 1 : 0;
+   kb_client_index_scan_result_t res;
+   memset(&res, 0, sizeof(res));
+   int kb_rc = kb_client_index_scan(name, root, force, &res);
+   cJSON *resp = (cJSON *)kb_client_index_scan_format_response(kb_rc, &res);
+   return send_and_free(conn, resp);
 }
 
 int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
