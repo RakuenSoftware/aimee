@@ -286,6 +286,35 @@ static void test_agent_log_call_records_served_model(void)
    assert(count_where("source", "agent") >= 1);
 }
 
+static void test_record_token_audit_ingress_source(void)
+{
+   /* The shared helper the ingress handlers use: it records one cost row tagged
+    * with the given source, billed to the served model, and (unlike
+    * agent_log_call) writes no agent_log row. */
+   agent_result_t r;
+   memset(&r, 0, sizeof(r));
+   snprintf(r.agent_name, sizeof(r.agent_name), "primary");
+   snprintf(r.model, sizeof(r.model), "claude-3-5-sonnet");
+   r.prompt_tokens = 2000;
+   r.completion_tokens = 1000;
+   r.success = 1;
+   agent_record_token_audit(&r, "", "openai-ingress");
+
+   /* Exactly one row for this served model under the ingress source. */
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db1_conn(),
+                             "SELECT COUNT(*), COALESCE(SUM(estimated_cost_usd), 0)"
+                             " FROM token_audit"
+                             " WHERE source = 'openai-ingress' AND model = 'claude-3-5-sonnet'",
+                             -1, &st, NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   int cnt = sqlite3_column_int(st, 0);
+   double cost = sqlite3_column_double(st, 1);
+   sqlite3_finalize(st);
+   assert(cnt == 1);
+   assert(cost > 0.0); /* billed against the served model, not $0 */
+}
+
 static void test_dashboard_rows(void)
 {
    db1_token_audit_dashboard_row_t rows[4];
@@ -311,6 +340,7 @@ int main(void)
    test_by_model_relabels_empty();
    test_by_source_groups_and_relabels();
    test_agent_log_call_records_served_model();
+   test_record_token_audit_ingress_source();
    test_cost_for_delegation();
    db1_shutdown();
    printf("test_token_audit: ok\n");

@@ -117,6 +117,10 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       return 502;
    }
 
+   /* Cost accounting for the OpenAI-compatible ingress: this handler runs the
+    * provider call directly (no agent_log_call), so record the turn's spend. */
+   agent_record_token_audit(&result, "", "openai-ingress");
+
    long created = (long)time(NULL);
    char id[48];
    snprintf(id, sizeof(id), "%s-%ld", chat ? "chatcmpl" : "cmpl", created);
@@ -482,6 +486,9 @@ static int responses_handler(const char *body, char *resp, int cap)
       return 502;
    }
 
+   /* Cost accounting: buffered /v1/responses runs the provider call directly. */
+   agent_record_token_audit(&result, "", "openai-ingress");
+
    long created = (long)time(NULL);
    char id[64];
    responses_mint_id(created, id, sizeof(id));
@@ -588,6 +595,9 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
    }
    else
    {
+      /* Cost accounting: streaming chat/completions runs the provider call
+       * directly (no agent_log_call). */
+      agent_record_token_audit(&result, "", "openai-ingress");
       const char *txt = result.response;
       size_t n = strlen(txt);
       for (size_t off = 0; off < n; off += OPENAI_STREAM_CHUNK)
@@ -652,6 +662,8 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
    }
    else
    {
+      /* Cost accounting: streaming completions runs the provider call directly. */
+      agent_record_token_audit(&result, "", "openai-ingress");
       const char *txt = result.response;
       size_t n = strlen(txt);
       for (size_t off = 0; off < n; off += OPENAI_STREAM_CHUNK)
@@ -835,6 +847,22 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
 
    if (openai_format_responses_created(id, model, created, frame, sizeof(frame)) > 0)
       emit(ctx, "response.created", frame);
+
+   if (erc == 0)
+   {
+      /* Cost accounting: streaming /v1/responses runs the provider call directly.
+       * agent_execute_messages returns a parsed_response_t (no model/agent name),
+       * so synthesize the fields the audit needs from the served agent. */
+      agent_result_t ar;
+      memset(&ar, 0, sizeof(ar));
+      snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
+      snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
+      ar.prompt_tokens = parsed.prompt_tokens;
+      ar.completion_tokens = parsed.completion_tokens;
+      ar.cache_write_tokens = parsed.cache_write_tokens;
+      ar.cache_read_tokens = parsed.cache_read_tokens;
+      agent_record_token_audit(&ar, "", "openai-ingress");
+   }
 
    if (erc == 0 && parsed.is_tool_call && parsed.call_count > 0)
    {

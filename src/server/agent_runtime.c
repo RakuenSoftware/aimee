@@ -1888,24 +1888,11 @@ void agent_print_context(const agent_config_t *cfg)
 
 /* --- Logging --- */
 
-void agent_log_call(const agent_result_t *result, const char *role)
+void agent_record_token_audit(const agent_result_t *result, const char *role, const char *source)
 {
-   db1_agent_log_insert_row_t row = {
-       .agent_name = result->agent_name,
-       .role = role ? role : "",
-       .prompt_tokens = result->prompt_tokens,
-       .completion_tokens = result->completion_tokens,
-       .latency_ms = result->latency_ms,
-       .success = result->success,
-       .error = result->error[0] ? result->error : NULL,
-       .turns = result->turns,
-       .tool_calls = result->tool_calls,
-       .confidence = result->confidence,
-       .session_id = NULL,
-   };
-   (void)db1_agent_log_insert(&row);
+   if (!result)
+      return;
 
-   /* Also persist normalised usage to token_audit */
    token_usage_t usage = {
        .input_tokens = result->prompt_tokens,
        .output_tokens = result->completion_tokens,
@@ -1924,28 +1911,44 @@ void agent_log_call(const agent_result_t *result, const char *role)
     * attribute the child's spend back to the parent without
     * contaminating session_id-keyed sums. */
    const char *deleg_id = delegation_active_id();
-   {
-      db1_token_audit_row_t row = {
-          .session_id = session_id(),
-          .delegation_id = deleg_id ? deleg_id : "",
-          .project_name = "",
-          .tool_name = result->agent_name,
-          .role = role ? role : "",
-          /* The served model (consistent with the cost key above), so the
-           * by-model breakdown attributes spend to the real model rather than
-           * the agent name. */
-          .model = bill_model,
-          /* Internal agent/delegate execution. Ingress handlers tag their own
-           * origin (e.g. "openai-ingress") when they start writing audit rows. */
-          .source = "agent",
-          .prompt_tokens = usage.input_tokens,
-          .completion_tokens = usage.output_tokens,
-          .cache_write_tokens = usage.cache_write_tokens,
-          .cache_read_tokens = usage.cache_read_tokens,
-          .estimated_cost_usd = cost,
-      };
-      (void)db1_token_audit_insert(&row);
-   }
+   db1_token_audit_row_t row = {
+       .session_id = session_id(),
+       .delegation_id = deleg_id ? deleg_id : "",
+       .project_name = "",
+       .tool_name = result->agent_name,
+       .role = role ? role : "",
+       /* The served model (consistent with the cost key above), so the by-model
+        * breakdown attributes spend to the real model rather than the agent. */
+       .model = bill_model,
+       .source = source ? source : "",
+       .prompt_tokens = usage.input_tokens,
+       .completion_tokens = usage.output_tokens,
+       .cache_write_tokens = usage.cache_write_tokens,
+       .cache_read_tokens = usage.cache_read_tokens,
+       .estimated_cost_usd = cost,
+   };
+   (void)db1_token_audit_insert(&row);
+}
+
+void agent_log_call(const agent_result_t *result, const char *role)
+{
+   db1_agent_log_insert_row_t row = {
+       .agent_name = result->agent_name,
+       .role = role ? role : "",
+       .prompt_tokens = result->prompt_tokens,
+       .completion_tokens = result->completion_tokens,
+       .latency_ms = result->latency_ms,
+       .success = result->success,
+       .error = result->error[0] ? result->error : NULL,
+       .turns = result->turns,
+       .tool_calls = result->tool_calls,
+       .confidence = result->confidence,
+       .session_id = NULL,
+   };
+   (void)db1_agent_log_insert(&row);
+
+   /* Internal agent/delegate execution; tag the cost row accordingly. */
+   agent_record_token_audit(result, role, "agent");
 }
 
 int agent_get_stats(const char *name, agent_stats_t *out, int max)

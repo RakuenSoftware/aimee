@@ -72,6 +72,12 @@ int agent_execute_guarded(agent_t *ag, const agent_network_t *net, const char *r
 
 /* Logging */
 void agent_log_call(const agent_result_t *result, const char *role);
+/* Persist one model call's normalised usage + cost to token_audit, billed
+ * against the served model and tagged with the given turn-origin source (e.g.
+ * "agent", "openai-ingress"). agent_log_call calls this for the internal agent
+ * path; ingress handlers that run a provider call directly (and so never reach
+ * agent_log_call) call it to record their spend. */
+void agent_record_token_audit(const agent_result_t *result, const char *role, const char *source);
 int agent_get_stats(const char *name, agent_stats_t *out, int max);
 
 /* Task type classification */
