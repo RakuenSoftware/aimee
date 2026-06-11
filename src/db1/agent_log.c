@@ -406,8 +406,11 @@ int db1_agent_log_metrics_by_role(db1_agent_log_metric_t *out, int max)
        "       COALESCE(SUM(ta.cache_read_tokens), 0),"
        "       COALESCE(SUM(ta.estimated_cost_usd), 0.0)"
        " FROM agent_log al"
+       /* Only join internal agent rows: ingress-sourced rows have no agent_log
+        * row and must not inflate agent stats (they match by agent name only). */
        " LEFT JOIN token_audit ta"
        "   ON ta.tool_name = al.agent_name AND ta.role = al.role"
+       "  AND ta.source IN ('', 'agent')"
        " GROUP BY al.role ORDER BY COUNT(*) DESC LIMIT ?";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
@@ -446,7 +449,10 @@ int db1_agent_log_agent_stats(const char *agent_name_or_null, db1_agent_log_agen
              "       COALESCE(SUM(ta.cache_read_tokens), 0),"
              "       COALESCE(SUM(ta.estimated_cost_usd), 0.0)"
              " FROM agent_log al"
-             " LEFT JOIN token_audit ta ON ta.tool_name = al.agent_name"
+             /* Exclude ingress-sourced rows: they have no agent_log row and
+              * would otherwise inflate agent stats via the agent-name match. */
+             " LEFT JOIN token_audit ta"
+             "   ON ta.tool_name = al.agent_name AND ta.source IN ('', 'agent')"
              " WHERE al.agent_name = ?"
              " GROUP BY al.agent_name LIMIT ?"
            : "SELECT al.agent_name, COUNT(*), SUM(al.prompt_tokens), SUM(al.completion_tokens),"
@@ -455,7 +461,10 @@ int db1_agent_log_agent_stats(const char *agent_name_or_null, db1_agent_log_agen
              "       COALESCE(SUM(ta.cache_read_tokens), 0),"
              "       COALESCE(SUM(ta.estimated_cost_usd), 0.0)"
              " FROM agent_log al"
-             " LEFT JOIN token_audit ta ON ta.tool_name = al.agent_name"
+             /* Exclude ingress-sourced rows: they have no agent_log row and
+              * would otherwise inflate agent stats via the agent-name match. */
+             " LEFT JOIN token_audit ta"
+             "   ON ta.tool_name = al.agent_name AND ta.source IN ('', 'agent')"
              " GROUP BY al.agent_name ORDER BY COUNT(*) DESC LIMIT ?";
    sqlite3_stmt *stmt = NULL;
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)

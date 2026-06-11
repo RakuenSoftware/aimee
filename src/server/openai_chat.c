@@ -1063,7 +1063,12 @@ static void *run_job_worker(void *arg)
     * by role within the same config — the model field is informational here.) */
    (void)ag;
    agent_tools_set_tool_event_cb(runs_tool_event_cb, (void *)j->run_id);
+   /* /v1/runs drives the agent loop (which logs via agent_log_call); tag that
+    * row as ingress so the run's spend is distinguishable from internal agent
+    * execution, without writing a second row. */
+   agent_set_ingress_source("openai-ingress");
    int erc = agent_run_with_tools(&acfg, "execute", NULL, j->prompt, j->max_tokens, &result);
+   agent_set_ingress_source("");
    agent_tools_set_tool_event_cb(NULL, NULL);
 
    /* Honor a cancel requested while the (blocking) step ran. */

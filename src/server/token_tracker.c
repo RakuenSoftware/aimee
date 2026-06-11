@@ -3,7 +3,13 @@
 #include <ctype.h>
 #include <string.h>
 
-/* --- Pricing table (USD per million tokens) --- */
+/* --- Pricing table (USD per million tokens) ---
+ *
+ * pricing_refreshed: 2026-06-11. Static fallback prices for models the registry
+ * does not cover; operator / models.dev overrides flow through the registry
+ * fallback in token_estimate_cost. Re-verify against published provider pricing
+ * when bumping this date. */
+#define TOKEN_PRICING_REFRESHED "2026-06-11"
 
 typedef struct
 {

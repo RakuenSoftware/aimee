@@ -315,6 +315,72 @@ static void test_record_token_audit_ingress_source(void)
    assert(cost > 0.0); /* billed against the served model, not $0 */
 }
 
+static void test_ingress_source_override(void)
+{
+   /* A thread-scoped ingress source overrides the caller's source on the row,
+    * so /v1/runs (which logs "agent" from inside the run loop) is tagged as
+    * ingress without a second row. */
+   agent_set_ingress_source("openai-ingress");
+   agent_result_t r;
+   memset(&r, 0, sizeof(r));
+   snprintf(r.agent_name, sizeof(r.agent_name), "runbot");
+   snprintf(r.model, sizeof(r.model), "gpt-4o");
+   r.prompt_tokens = 100;
+   r.completion_tokens = 50;
+   agent_record_token_audit(&r, "execute", "agent"); /* caller passes "agent" */
+   agent_set_ingress_source("");                     /* clear for later tests */
+
+   assert(count_where("tool_name", "runbot") == 1);
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db1_conn(),
+                             "SELECT source FROM token_audit WHERE tool_name = 'runbot'", -1, &st,
+                             NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   assert(strcmp((const char *)sqlite3_column_text(st, 0), "openai-ingress") == 0);
+   sqlite3_finalize(st);
+}
+
+static void test_ingress_excluded_from_agent_stats(void)
+{
+   /* Agent stats must reflect only agent_log-backed spend; an ingress row that
+    * shares the agent name must NOT inflate it (no agent_log row exists for it). */
+   db1_agent_log_insert_row_t log = {
+       .agent_name = "statbot",
+       .role = "execute",
+       .prompt_tokens = 10,
+       .completion_tokens = 5,
+       .success = 1,
+       .confidence = -1,
+   };
+   assert(db1_agent_log_insert(&log) == 0);
+   db1_token_audit_row_t agent_row = {
+       .tool_name = "statbot",
+       .role = "execute",
+       .model = "gpt-4o",
+       .source = "agent",
+       .prompt_tokens = 10,
+       .completion_tokens = 5,
+       .estimated_cost_usd = 0.10,
+   };
+   db1_token_audit_row_t ingress_row = {
+       .tool_name = "statbot",
+       .role = "execute",
+       .model = "gpt-4o",
+       .source = "openai-ingress",
+       .prompt_tokens = 999,
+       .completion_tokens = 999,
+       .estimated_cost_usd = 9.99,
+   };
+   assert(db1_token_audit_insert(&agent_row) == 0);
+   assert(db1_token_audit_insert(&ingress_row) == 0);
+
+   db1_agent_log_agent_stats_t stats[4];
+   int n = db1_agent_log_agent_stats("statbot", stats, 4);
+   assert(n == 1);
+   /* Only the agent row's $0.10 — the ingress $9.99 is excluded. */
+   assert(stats[0].total_estimated_cost_usd > 0.09 && stats[0].total_estimated_cost_usd < 0.11);
+}
+
 static void test_dashboard_rows(void)
 {
    db1_token_audit_dashboard_row_t rows[4];
@@ -341,6 +407,8 @@ int main(void)
    test_by_source_groups_and_relabels();
    test_agent_log_call_records_served_model();
    test_record_token_audit_ingress_source();
+   test_ingress_source_override();
+   test_ingress_excluded_from_agent_stats();
    test_cost_for_delegation();
    db1_shutdown();
    printf("test_token_audit: ok\n");

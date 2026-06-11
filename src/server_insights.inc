@@ -41,6 +41,22 @@ static int handle_insights_overview(server_ctx_t *ctx, server_conn_t *conn, cJSO
    }
    cJSON_AddItemToObject(resp, "models", jmodels);
 
+   /* Sources (turn origin: internal "agent" vs the ingress surfaces) */
+   db1_token_audit_source_summary_t sources[16];
+   int n_sources = db1_token_audit_by_source(since_hours, sources, 16);
+   cJSON *jsources = cJSON_CreateArray();
+   for (int i = 0; i < n_sources; i++)
+   {
+      cJSON *s = cJSON_CreateObject();
+      cJSON_AddStringToObject(s, "source", sources[i].source);
+      cJSON_AddNumberToObject(s, "calls", sources[i].calls);
+      cJSON_AddNumberToObject(s, "prompt_tokens", (double)sources[i].prompt_tokens);
+      cJSON_AddNumberToObject(s, "completion_tokens", (double)sources[i].completion_tokens);
+      cJSON_AddNumberToObject(s, "estimated_cost_usd", sources[i].estimated_cost_usd);
+      cJSON_AddItemToArray(jsources, s);
+   }
+   cJSON_AddItemToObject(resp, "sources", jsources);
+
    /* Roles */
    db1_token_audit_role_summary_t roles[16];
    int n_roles = db1_token_audit_by_role(since_hours, roles, 16);

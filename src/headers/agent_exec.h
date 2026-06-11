@@ -78,6 +78,11 @@ void agent_log_call(const agent_result_t *result, const char *role);
  * path; ingress handlers that run a provider call directly (and so never reach
  * agent_log_call) call it to record their spend. */
 void agent_record_token_audit(const agent_result_t *result, const char *role, const char *source);
+/* Set a per-thread ingress source that overrides the source on any token_audit
+ * row written on this thread (incl. via agent_log_call). Used by ingress workers
+ * (e.g. /v1/runs) so spend driven through the agent loop is attributed to the
+ * ingress origin. Pass "" to clear. */
+void agent_set_ingress_source(const char *source);
 int agent_get_stats(const char *name, agent_stats_t *out, int max);
 
 /* Task type classification */

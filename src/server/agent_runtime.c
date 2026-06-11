@@ -1888,10 +1888,28 @@ void agent_print_context(const agent_config_t *cfg)
 
 /* --- Logging --- */
 
+/* Optional per-thread ingress source. The /v1/runs worker runs the agentic loop,
+ * which logs via agent_log_call with source="agent"; setting this on that worker
+ * thread retags the row with the ingress origin instead, so the run's spend is
+ * distinguishable from internal agent execution — without writing a second row.
+ * The runs worker is a dedicated detached thread, so the thread-local is scoped
+ * to that turn. */
+static __thread char g_ingress_source[40] = "";
+
+void agent_set_ingress_source(const char *source)
+{
+   snprintf(g_ingress_source, sizeof(g_ingress_source), "%s", source ? source : "");
+}
+
 void agent_record_token_audit(const agent_result_t *result, const char *role, const char *source)
 {
    if (!result)
       return;
+
+   /* A thread-scoped ingress source (set by an ingress worker) overrides the
+    * caller's source, so e.g. /v1/runs spend is tagged as ingress rather than
+    * the "agent" that agent_log_call passes from inside the run loop. */
+   const char *eff_source = g_ingress_source[0] ? g_ingress_source : (source ? source : "");
 
    token_usage_t usage = {
        .input_tokens = result->prompt_tokens,
@@ -1920,7 +1938,7 @@ void agent_record_token_audit(const agent_result_t *result, const char *role, co
        /* The served model (consistent with the cost key above), so the by-model
         * breakdown attributes spend to the real model rather than the agent. */
        .model = bill_model,
-       .source = source ? source : "",
+       .source = eff_source,
        .prompt_tokens = usage.input_tokens,
        .completion_tokens = usage.output_tokens,
        .cache_write_tokens = usage.cache_write_tokens,
