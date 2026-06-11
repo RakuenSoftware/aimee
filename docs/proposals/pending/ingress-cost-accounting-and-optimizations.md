@@ -179,6 +179,29 @@ added to the server OpenAPI schema, regenerated into the embedded data header,
 and taught to the thin-client printer; otherwise the new fields are present in
 JSON but invisible or undocumented to clients.
 
+An eleventh pass verified 19–20 (correcting one premise) and enumerated the full
+ingress surface. (19, corrected) In the **primary container deploy**, webchat runs
+as **root (uid 0)** while aimee-server runs as **uid 1000** (`Dockerfile.server`,
+`deploy/container/webchat-lib.sh`: "webchat must run as root … drops aimee-server/
+kb to the unprivileged aimee user"), so a peer-UID check **can** distinguish the
+webchat proxy there — the same-user collision is specific to local/source deploys.
+The robust cross-deploy mechanism is still a proxy credential, and aimee **already
+has the pattern**: `$AIMEE_HOME/server.token` is a shared secret webchat already
+reads for the OpenAI-proxy bearer, so the trusted-forwarding credential should
+reuse that established file/HMAC pattern rather than invent one. (21) **Webchat
+has a second, undocumented usage contract.** Browser clients get usage as an SSE
+event with only `{in, out, cost}` (`webchat/socket.go`, `chat.go`) — not in
+OpenAPI — so surfacing realized-vs-estimated to the browser needs a `usage_kind`
+field added to that SSE shape too, in addition to `insights.overview`. (22)
+**aimee-kb-side LLM spend is entirely outside `token_audit`.** The enumeration
+confirmed the aimee-server HTTP ingress surface is fully bounded (MCP is internal-
+only and logged via the agent loop), but `/v1/rules/generate`, curator/deep-
+extraction, and similar paths make **paid provider calls inside the separate
+aimee-kb process**, which has no access to aimee-server's DB1 `token_audit`. The
+proposal must name this boundary explicitly: kb-side generation cost is **out of
+scope** for this server-local ledger (or needs its own kb-side audit hook + a
+cross-process report), so it is never falsely assumed covered.
+
 ## Goal
 
 Ingress requests are a cost blind spot. Normal agent and delegate calls are
@@ -305,9 +328,12 @@ optimization surface aimee already has, not a new one.
   allowlist — so distinguishing a trusted proxy (webchat) from an arbitrary UDS
   peer, and gating forwarded-header acceptance on it, must be built before any
   forwarded source/principal is trusted (it is a security prerequisite, not a
-  config knob). A UID allowlist by itself is insufficient when the proxy and
-  arbitrary local clients run as the same user; forwarded headers need a
-  proxy-only credential or equivalent second factor.
+  config knob). A UID allowlist by itself is insufficient in a same-user local
+  deploy (proxy and arbitrary clients share a UID) — though in the container
+  deploy webchat is root and the server is uid 1000, so UID *can* separate them
+  there. The robust cross-deploy answer is a proxy credential, and aimee already
+  ships the pattern: webchat reads `$AIMEE_HOME/server.token`, so reuse that
+  shared-secret/HMAC rather than invent a new factor.
 - **DB1 is a single shared SQLite handle, and audit writes are best-effort.** DB1
   is one process-wide `sqlite3*` (`db1_init.c:19`) opened `SQLITE_OPEN_FULLMUTEX`
   with `journal_mode=WAL` and a busy handler that retries 15× (20–150 ms) then
@@ -656,6 +682,11 @@ that, regenerate `src/server/openapi_server_data.h` (`src/gen_openapi_server.py`
 so `/v1/openapi.yaml` serves the updated contract, and update
 `src/cli_rpc_routes.inc::print_insights_overview` so the thin client displays the
 new spend semantics instead of only the legacy `estimated_cost_usd` scalar.
+Webchat is a **separate, undocumented** wire contract: the browser receives usage
+as an SSE event carrying only `{in, out, cost}` (`webchat/socket.go`,
+`webchat/chat.go`), so surfacing realized-vs-estimated to the browser means adding
+a `usage_kind` (or a realized-cost field) to that SSE shape too — it is not
+covered by the OpenAPI change.
 
 Regardless of whether a new route is added, every existing consumer of
 `token_audit` must learn the same semantics: `cmd_usage`, `insights.overview`,
@@ -801,5 +832,10 @@ with a benchmark showing no quality regression.
 - No silent message-trimming or model substitution; routing stays in the bandit.
 - No mutation of Anthropic Messages ingress by default; it remains a stateless
   proxy unless a separate opt-in phase changes that contract.
+- **aimee-kb-side LLM spend is out of scope.** Provider calls made inside the
+  separate aimee-kb process (`/v1/rules/generate`, curator/deep-extraction) do not
+  reach aimee-server's DB1 `token_audit`; this ledger is server-local. Folding kb
+  cost in is a separate effort (a kb-side audit hook + cross-process report), and
+  this proposal must not be read as covering it.
 - No external proxy, menu-bar widget, standalone dashboard, or log-scraping of
   other tools' files — aimee owns the request path.
