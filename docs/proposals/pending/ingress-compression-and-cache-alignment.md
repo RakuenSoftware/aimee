@@ -2,17 +2,19 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#181 fourth review)
+- **Date:** 2026-06-11 (revised post-PR-#181 fifth review)
 - **Charter roles:** Rewrite (envelope compression / cache placement),
-  Recall (rehydration handle), Extract / Gate-Promote (failure-mined
+  Recall (recovery resolver / rehydration handle), Extract / Gate-Promote (failure-mined
   corrections), Calibrate / Evaluate-Optimize (token + accuracy A/B).
 - **Scope:** `src/server/ingress_preinject.c` (a structured envelope IR + the
   compression hook over it), `src/server/openai_chat.c` (cache-prefix placement
   at the live Codex/OpenAI seam), `src/server/server_http.c` +
-  `api/openapi-server-v1.yaml` (compression request override if exposed),
+  `api/openapi-server-v1.yaml` + generated `src/server/openapi_server_data.h`
+  (compression request override if exposed),
   `src/server/anthropic_http.c` (a *separate opt-in phase* — see §2.3 / §7),
   `src/server/server_mcp.c` +
-  `src/server/server_mcp_call_table.inc` + `src/mcp_tools.c` (rehydration tool +
+  `src/server/server_mcp_call_table.inc` + `src/mcp_tools.c` (rehydration tool,
+  any missing durable resolver tools such as `memory_get` / code-span read,
   discovery metadata + goldens), config plumbing (`src/headers/config.h`,
   `src/config.c`, `src/config_fields.c`, `src/config_sections.c`,
   `src/config_save.c`), the learning machinery (`src/db2/learning.c/.h`,
@@ -48,8 +50,8 @@ This proposal sits between three siblings and must not duplicate them:
   **bounded envelope assembly**, **progressive disclosure (preview + pull-handle)**,
   **learned shortcuts**, and **intent annotation** — *which records, at what size,
   in what shape* enter the envelope. This proposal's envelope IR (§1) and
-  rehydration handle (§3) are designed to **be** that proposal's preview/read
-  contract where it has one, not a parallel scheme.
+  recovery resolver contract (§3) are designed to **be** that proposal's
+  preview/read contract where it has one, not a parallel scheme.
 - `docs/proposals/pending/ingress-cost-accounting-and-optimizations.md` owns
   **provider usage extraction, USD pricing, the ledger, `/v1/usage/*`, generic
   cached-token reporting, and the `cache_control` *marking* mechanism**
@@ -505,6 +507,78 @@ registration step, which the hook installer may not perform.
 the reachability fixture must assert the MCP-tool registration, not just the hook
 wiring.
 
+## PR #181 fifth review — callable resolver surfaces and generated artifacts
+
+The fourth review made the resolver split internally consistent, but another
+pass against the current tree found five implementation gaps around *whether the
+named resolvers actually exist on the surfaces the envelope steers the agent to*.
+
+### 26. Durable code-span read is not an Aimee MCP tool today
+
+`ingress_preinject.c` steers co-registered agents to
+`find_symbol, lsp_references, ast_grep_search, search_graph, get_context_block`.
+The MCP call table exposes `find_symbol`, but that tool returns file paths and
+line ranges only; it does not return file contents. The MCP tool list does not
+currently expose `read_file`, `code_search`, or a range-read tool. Those exist in
+the delegate/agent toolset, but not as Aimee MCP tools. Therefore the fourth
+review's claim that the code folder can recover via an "existing durable
+code/file-span read surface" is true only for clients that already have their own
+filesystem tools, not for the Aimee MCP surface that the envelope advertises.
+
+**→ Resolved in §3.1, §3.4, §3.5, §6, §7, and §8** by requiring either a real
+Aimee MCP `code_span_get`/range-read resolver with tool metadata and auth tests,
+or an explicit per-client native-file-tool reachability proof before lossy code
+folds are allowed.
+
+### 27. `memory_get` is a proposal dependency, not an existing MCP tool
+
+The backend chain exists (`memory.get` / `kb_client_memory_get`), but
+`mcp_build_tools_list()` and `server_mcp_call_table.inc` do not expose a
+`memory_get` MCP tool today. If this proposal emits memory preview handles before
+the recall-economy proposal lands, the model will see handles it cannot open.
+
+**→ Resolved in §3.1, §3.5, and §7** by making recall-economy's `memory_get`
+tool either an explicit prerequisite or an in-scope wrapper with metadata,
+goldens, and handler wiring.
+
+### 28. The goal text still promises a rehydration handle for every folded entry
+
+After the resolver split, durable code and durable memory do not recover through
+the rehydration handle store; they recover through code-span read or `memory_get`.
+The goal section still says every resident form is paired with a rehydration
+handle, which would reintroduce unnecessary handle-store work for durable data
+and contradict §1.1's re-read-pointer design.
+
+**→ Resolved in the Goal and §3.1** by replacing "rehydration handle" with
+"recovery resolver" for durable folds and reserving `rehydrate` for ephemeral
+stored bytes.
+
+### 29. OpenAPI changes require regenerating the embedded server spec
+
+The proposal scopes `api/openapi-server-v1.yaml`, but `/v1/openapi.yaml` and
+`/v1/openapi.json` are served from generated `src/server/openapi_server_data.h`.
+`src/Makefile` regenerates that header from the YAML. If `X-Aimee-Compress` or
+any other request header becomes public documentation, updating only the YAML
+leaves the runtime-served spec stale.
+
+**→ Resolved in §1.4, §6, and §7** by adding the generated header and API
+conformance/docs generation to the acceptance work.
+
+### 30. Inline Responses interception is a state-machine change, not just a tool definition
+
+`agent_execute_messages()` is deliberately a wire adapter: it forwards the
+client's `tools` array, calls the provider once, and surfaces `function_call`
+items back to Codex for the client to execute. It does not run Aimee's agent
+tool loop. If Aimee injects a synthetic `rehydrate` or `code_span_get` function
+definition, the provider can return a synthetic function call that Aimee must
+consume itself, produce a `function_call_output`, continue the provider turn,
+and hide or account for that internal call in both buffered and SSE Responses.
+Otherwise the synthetic call leaks to Codex as an unknown client tool.
+
+**→ Resolved in §2.6, §3.5, §6, and §8** by making inline interception a separate
+request/response state-machine design with call-id handling, streaming parity,
+and tests that synthetic resolver calls are not leaked to the client.
+
 ## Goal
 
 Cut the per-turn token cost *and* the per-turn dollar cost of pre-injection
@@ -515,14 +589,16 @@ better when a session goes wrong. Four levers:
    later, typed tool-result previews) over a *typed envelope IR* before it enters
    `<aimee-context>`, so more signal fits under the same budget and the attention
    guard fights less filler. The resident form is treated as intentionally lossy
-   and is always paired with a rehydration handle (§3).
+   only when the applicable recovery resolver is reachable (§3).
 2. **Cache-prefix placement** — keep genuinely volatile, per-turn envelope content
    *after* the provider's cacheable prefix so it does not invalidate cached
    history. This owns only the *placement invariant*; the `cache_control` marking
    mechanism and ledger belong to the cost-accounting proposal.
-3. **Reversible compression + a rehydration tool** — keep the uncompressed
-   original locally behind a capability-bound, TTL-scoped handle, and expose an
-   MCP tool so the model recovers full fidelity only when it needs it.
+3. **Recovery resolvers + a rehydration tool** — durable folds reopen through
+   their durable resolver (`memory_get`, code-span/range read); ephemeral folds
+   keep the uncompressed original locally behind a capability-bound, TTL-scoped
+   handle and expose `rehydrate` so the model recovers full fidelity only when
+   it needs it.
 4. **Failure-mined corrections** — a pass that turns a badly-ended session into a
    *learning signal* routed through the existing proposal/review machinery, not a
    direct memory write.
@@ -622,7 +698,10 @@ If a per-call escape is exposed, it requires actual HTTP plumbing:
 - carry it as request-scoped/thread-local state into `ingress_preinject_build()`;
 - cover buffered chat/completions, buffered Responses, streaming chat/completions,
   and streaming Responses tests;
-- document it in the OpenAPI surface if it is part of the public `/v1` contract.
+- document it in the OpenAPI surface if it is part of the public `/v1` contract,
+  then regenerate `src/server/openapi_server_data.h` from
+  `api/openapi-server-v1.yaml` so `/v1/openapi.yaml` and `/v1/openapi.json`
+  serve the updated header contract.
 
 ---
 
@@ -736,30 +815,40 @@ The Responses continuation path is especially important because it prepends the
 stored transcript before building the envelope; the prefix classifier must not
 accidentally treat a growing transcript as cache-stable. The `agent_execute_messages()`
 path is also where Codex supplies its own `tools` array and receives tool calls
-back, so any inline rehydration-tool interception must be tested there rather
-than only on the legacy chat path.
+back. Any inline resolver-tool interception there is a **new Responses
+state-machine**, not a small request-shaping tweak: Aimee must consume the
+synthetic function call itself, emit the corresponding `function_call_output` to
+the provider, continue the provider turn, preserve call ids, and avoid leaking
+the synthetic tool call to the client in both buffered and SSE modes.
 
 ---
 
-## §3 Reversible compression + a rehydration tool
+## §3 Recovery resolvers + a rehydration tool
 
 ### §3.1 Approach — headroom's CCR, unified with recall-economy's pull-handle
 
-Store the byte-exact pre-fold original of every lossy entry behind a handle and
-expose recovery as an MCP tool. **Do not** invent a second handle scheme:
+Give every lossy fold a callable recovery resolver, but store byte-exact
+pre-fold bytes behind a handle only for ephemeral entries that cannot be re-read.
+**Do not** invent a second handle scheme:
 recall-economy introduces id-addressable pull-handles at the MCP tool layer and
 its concrete durable-memory surface is `memory_get` over the existing
 `memory.get` / `kb_client_memory_get` backend. This proposal aligns to that
 surface rather than creating a generic `fetch` verb:
 
 - `memory_get` — recall-economy: durable memory preview → full memory record.
-- existing code/file-span reads — durable code preview → full source span, using
-  the code search / structure read surface already available to the agent.
+- code-span/range read — durable code preview → full source span. This is **not**
+  currently an Aimee MCP tool: `find_symbol` returns path/line metadata, while
+  `read_file` lives in the delegate/agent toolset. P1/P2 must either add a real
+  Aimee MCP resolver such as `code_span_get` (path/project + line range, with
+  workspace authorization), or prove that the target client has a native
+  filesystem read tool for the same workspace before allowing lossy code folds.
 - `rehydrate` — this proposal: folded ephemeral/compressed resident form →
   byte-exact original for data that cannot be re-read cheaply or safely.
 
 If the projects later choose a generic `fetch` verb, it must be adopted in
-recall-economy too; this proposal should not fork that contract. The MCP surface
+recall-economy too; this proposal should not fork that contract. Because
+`memory_get` is not an MCP tool in the current tree, this proposal either waits
+for recall-economy to land that wrapper or includes it in scope. The MCP surface
 touched is `server_mcp.c` **and** `server_mcp_call_table.inc`, with discovery
 metadata in `src/mcp_tools.c` and the tool goldens updated (regen via
 `DUMP_TOOLS=1`).
@@ -817,15 +906,17 @@ by ingress:
 - **Anthropic:** gated on §2.3/P5.
 
 Contract: per target ingress, P2 must **(a)** prove **the fold's resolver** is
-reachable end-to-end — the durable code/file-span read for a code fold,
+reachable end-to-end — a callable code-span/range read for a code fold,
 `memory_get` for a memory fold, `rehydrate` for an ephemeral fold (§3.1) — or
 **(b)** restrict that ingress to non-lossy folds (byte-equivalent only) and
 previews rich enough to stand alone. A **lossy** fold is permitted only where its
 resolver's reachability is proven. The first phase's code folder is therefore
-gated on code-span-read reachability (a surface that already exists wherever the
-preinject `explore-with` tools do), **not** on `rehydrate`, which need not exist
-yet. This is the concrete gate that turns §1.3's "lossy is safe" from an
-assumption into a tested precondition.
+gated on **actual code-span-read reachability**, not on `rehydrate`, which need
+not exist yet. For Aimee MCP clients, `find_symbol` alone is insufficient because
+it returns locations rather than contents; either add a `code_span_get`-style MCP
+tool or prove a client-native `read_file`/range-read tool is available and scoped
+to the same workspace. This is the concrete gate that turns §1.3's "lossy is
+safe" from an assumption into a tested precondition.
 
 **Store topology.** The handle store is in-process and assumes the mint (envelope
 build) and the `rehydrate` call land in the **same server process** — true for
@@ -844,15 +935,23 @@ complete:
 - config fields for TTL, LRU cap, and enablement are load/save round-tripped,
   exposed through `aimee config`, generated into `docs/gen/configuration.md`, and
   covered by config-surface tests;
-- the durable pull path matches recall-economy's `memory_get` / existing source
-  read surfaces instead of adding a parallel generic `fetch`;
+- the durable pull path matches recall-economy's `memory_get`; if recall-economy
+  has not landed that MCP wrapper, this proposal must either depend on it or add
+  the wrapper itself over the existing `memory.get` / `kb_client_memory_get`
+  backend;
+- durable code recovery is backed by a callable resolver (`code_span_get` or a
+  proven client-native range read), not merely `find_symbol` metadata;
 - MCP discovery metadata and generated tool goldens include the new
   `rehydrate` surface, and the handle shape is visible enough for the model to
   know which resolver applies;
 - any inline OpenAI/Codex tool-definition injection is capability-gated and
   tested against the same route authorization, workspace/session scope,
   read-only bearer behavior, and remote TCP restrictions as the existing
-  HTTP/MCP surface.
+  HTTP/MCP surface;
+- inline OpenAI/Codex interception owns the full Responses continuation state:
+  synthetic resolver calls are consumed by Aimee, converted into
+  `function_call_output`, re-submitted to the provider, and hidden from the client
+  unless the client explicitly opted into seeing internal resolver events.
 
 ---
 
@@ -992,6 +1091,10 @@ this proposal.
   installed config, OpenAI/Codex tool-definition injection or interception denied
   when route auth / workspace / session / remote TCP policy does not allow it,
   and lossy folds disabled on ingresses that fail the reachability fixture.
+  The fixture must distinguish `find_symbol` location discovery from actual
+  content recovery: code folds need a callable `code_span_get`/range-read or
+  proven client-native `read_file`, and memory folds need a callable `memory_get`
+  MCP wrapper if memory handles are emitted.
 - **Prompt-injection / sensitivity fixtures** — for both compressed previews and
   rehydrated originals (a folded preview must not become an injection vector, and
   a rehydrate must not cross scope).
@@ -1004,10 +1107,21 @@ this proposal.
 - **Responses/Codex prefix telemetry** — `agent_execute_messages()` records the
   provider-facing prefix through the existing `payload_rewrite` subsystem with a
   real session id for both buffered and streaming Responses.
+- **Inline Responses interception** — if synthetic resolver tools are injected,
+  tests cover buffered and SSE Responses where the provider calls the synthetic
+  tool; Aimee consumes it, returns `function_call_output`, continues the provider
+  turn, preserves call ids, and does not leak the internal tool call to Codex.
 - **Config/doc surface** — every new flag round-trips through load/save and
   `aimee config`, appears in `docs/gen/configuration.md`, and is covered by
   `test_config`, `test_config_surface`, and `test_cmd_config`.
+- **MCP metadata parity** — `mcp_build_tools_list()` and
+  `server_mcp_call_table.inc` agree for `memory_get`, `code_span_get`/range read,
+  and `rehydrate`, with generated/golden tool metadata updated.
 - **Request-body serialization** (§2.4) asserting client cache controls survive.
+- **Runtime OpenAPI freshness** — if `X-Aimee-Compress` is documented, both
+  `api/openapi-server-v1.yaml` and generated `src/server/openapi_server_data.h`
+  are updated, and the served `/v1/openapi.yaml` / `/v1/openapi.json` content
+  includes the header.
 - **Latency / KB-call budget** — P0/P1 may add secondary structure lookups and
   handle storage work to a per-turn hot path that already calls code search and
   memory context. Bench output must include p50/p95 ingress build latency and KB
@@ -1022,15 +1136,17 @@ this proposal.
   enablement. Blocks everything else.
 - **P1 — Code folder (§1.2/§1.3/§1.4)** behind `ingress_compress_enabled`,
   including the span-enrichment fallback and `X-Aimee-Compress` plumbing if the
-  header is exposed, plus the full config/docs/test surface for that flag.
-  Lossy-by-contract, every fold carrying a `transform` tag. Token/latency A/B +
-  harness upgrades; no default flip.
+  header is exposed, plus the full config/docs/test surface for that flag and
+  regenerated OpenAPI embed if the header is public. Lossy-by-contract, every
+  fold carrying a `transform` tag. Token/latency A/B + harness upgrades; no
+  default flip.
 - **P2 — Durable-read reachability + accuracy A/B for the code folder.** The code
-  folder recovers via the **existing** durable code/file-span read surface, so its
-  forced-rehydration accuracy A/B and its default-flip candidacy need only the
-  reachability fixtures (§3.4) and the `memory_get`/source-read alignment — **not**
-  the new in-process handle store. This is the first measurable win and does not
-  block on building `rehydrate`.
+  folder recovers via a durable code-span/range read, so its
+  forced-rehydration accuracy A/B and its default-flip candidacy need a real
+  callable resolver: either add an Aimee MCP `code_span_get`-style tool or prove
+  the target client has a scoped native file read. `memory_get` is required only
+  before memory handles are emitted. This phase does **not** require the new
+  in-process handle store or `rehydrate`.
 - **P2e — Rehydration handle (§3) for ephemeral folds.** When ephemeral folding
   (JSON/tool-result) enters scope it brings the in-process handle store with the
   full §3.2 safety contract, the `rehydrate` MCP tool + metadata goldens, and the
@@ -1039,9 +1155,10 @@ this proposal.
 - **P3 — Cache-prefix placement (§2)** on every Codex/OpenAI injection path:
   capability table, no-op default, integration with `payload_rewrite`, placement
   invariant + body-serialization tests, `agent_execute_messages()` session-scoped
-  prefix tracking, realized-cache telemetry consumed from `token_tracker` / the
-  cost-accounting ledger. Does not add a duplicate cache-marking flag; ships
-  after the accounting surface.
+  prefix tracking, and, if synthetic resolver tools are injected, the full
+  Responses continuation/interception loop. Realized-cache telemetry is consumed
+  from `token_tracker` / the cost-accounting ledger. Does not add a duplicate
+  cache-marking flag; ships after the accounting surface.
 - **P4 — Failure-mined corrections (§4)** emitting learning signals, default-off,
   promoted through the existing review/Gate-Promote path, preferably by
   refactoring `kb_mining.c` recurrence rather than creating a parallel miner;
@@ -1065,6 +1182,11 @@ this proposal.
   If OpenAI/Codex inline tool interception is implemented, it must also inherit
   the route authorization and remote-client denial rules from the existing
   HTTP/MCP surface (§3.5).
+- **Durable resolver as a data-exfil path.** Adding `memory_get` or
+  `code_span_get` exposes read surfaces that are separate from the ephemeral
+  `rehydrate` store. They need the same workspace/session/bearer scoping and
+  denial tests; `find_symbol` metadata alone must not be treated as content
+  authorization.
 - **Inert or misplaced flags.** New names such as `ingress_compress_enabled`,
   `ingress_rehydrate_*`, or `curator_failure_mining_enabled` can look reviewed
   while remaining unsettable. Mitigated by requiring config load/save, CLI,
@@ -1097,3 +1219,11 @@ this proposal.
   preferable, but the model must not be misled into thinking it recovered the exact
   folded text. Mitigated by carrying the version/hash drift signal and testing it
   (§6), and by reserving the byte-exact guarantee for stored-bytes ephemeral folds.
+- **Synthetic Responses tool-call leakage.** If Aimee injects resolver functions
+  into `agent_execute_messages()` and fails to consume them internally, Codex will
+  receive unknown synthetic calls or mismatched `function_call_output` state.
+  Mitigated by treating inline interception as a full Responses continuation
+  state machine with buffered/SSE parity tests (§2.6, §6).
+- **Runtime API spec drift.** Updating `api/openapi-server-v1.yaml` without
+  regenerating `src/server/openapi_server_data.h` leaves `/v1/openapi.yaml` stale.
+  Mitigated by making the generated embed part of the acceptance gate (§1.4, §6).
