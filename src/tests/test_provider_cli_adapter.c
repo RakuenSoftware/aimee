@@ -11,7 +11,6 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include "provider_cli_adapter.h"
-#include "workspace_provider.h"
 
 static agent_t g_seen_agent;
 static char g_seen_system[256];
@@ -322,82 +321,12 @@ static void test_tool_result_format(void)
    assert(strstr(buf, "\"ok\":true") != NULL);
 }
 
-/* A detached workspace must run the CLI agent on the client via exec_stream
- * (not fork/exec locally). This mock stands in for the reverse channel: it
- * records the marshalled argv + stdin and streams back claude stream-json. */
-static char g_mock_argv0[64];
-static char g_mock_argv_join[512];
-static char g_mock_stdin[128];
-static int g_mock_called;
-
-static int mock_exec_stream(const workspace_provider_t *p, const char *const argv[],
-                            const char *stdin_data, size_t stdin_len, const char *cwd,
-                            ws_exec_chunk_fn on_chunk, void *cb_ctx)
-{
-   (void)p;
-   (void)cwd;
-   g_mock_called = 1;
-   snprintf(g_mock_argv0, sizeof(g_mock_argv0), "%s", argv[0] ? argv[0] : "");
-   g_mock_argv_join[0] = '\0';
-   for (int i = 0; argv[i]; i++)
-   {
-      strncat(g_mock_argv_join, argv[i], sizeof(g_mock_argv_join) - strlen(g_mock_argv_join) - 2);
-      strncat(g_mock_argv_join, " ", sizeof(g_mock_argv_join) - strlen(g_mock_argv_join) - 1);
-   }
-   snprintf(g_mock_stdin, sizeof(g_mock_stdin), "%.*s", (int)stdin_len,
-            stdin_data ? stdin_data : "");
-
-   /* two claude stream-json text deltas, split across chunk boundaries */
-   const char *c1 = "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_delta\","
-                    "\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello \"}}}\n{\"type\":\"str";
-   const char *c2 = "eam_event\",\"event\":{\"type\":\"content_block_delta\","
-                    "\"delta\":{\"type\":\"text_delta\",\"text\":\"world\"}}}\n";
-   if (on_chunk(cb_ctx, c1, strlen(c1)) != 0)
-      return -1;
-   if (on_chunk(cb_ctx, c2, strlen(c2)) != 0)
-      return -1;
-   return 0;
-}
-
-static void test_detached_routes_to_exec_stream(void)
-{
-   const provider_cli_adapter_t *claude = provider_cli_adapter_get("claude");
-   assert(claude != NULL && claude->build_argv != NULL);
-
-   workspace_provider_t mock = {0};
-   mock.kind = WS_PROVIDER_DETACHED;
-   mock.exec_stream = mock_exec_stream;
-
-   g_mock_called = 0;
-   workspace_provider_set_active(&mock);
-
-   agent_t agent;
-   memset(&agent, 0, sizeof(agent));
-   snprintf(agent.name, sizeof(agent.name), "claude");
-   snprintf(agent.backend, sizeof(agent.backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
-   snprintf(agent.cli_kind, sizeof(agent.cli_kind), "claude");
-
-   agent_result_t out;
-   int rc = provider_cli_adapter_execute(claude, &agent, "/work", "be brief", "say hi", &out);
-   workspace_provider_clear_active();
-
-   assert(g_mock_called == 1);                  /* ran on the client, not locally */
-   assert(strcmp(g_mock_argv0, "claude") == 0); /* claude argv was marshalled */
-   assert(strstr(g_mock_argv_join, "stream-json") != NULL);
-   assert(strcmp(g_mock_stdin, "say hi") == 0); /* prompt fed on stdin */
-   assert(rc == 0);
-   assert(out.success == 1);
-   assert(out.response && strcmp(out.response, "Hello world") == 0); /* deltas reassembled */
-   free(out.response);
-}
-
 int main(void)
 {
    test_registry_and_caps();
    test_common_json_parse_text_tool_and_error();
    test_claude_parse_stream_json();
    test_claude_stream_json_does_not_duplicate_final_result();
-   test_detached_routes_to_exec_stream();
    test_gemini_native_adapter_execution();
    test_gemini_native_bearer_mechanism();
    test_mistral_native_adapter_execution();

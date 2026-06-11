@@ -23,7 +23,7 @@ TEST_CORE_OBJS = $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/main
 TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/workspace.o $(DB1_OBJS) \
                              $(OBJDIR)/server/agent_config.o $(OBJDIR)/server/session_credentials.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
                              $(OBJDIR)/posix/cmd_describe.o \
-                             $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/server/skill_review.o $(OBJDIR)/server/skill_curator.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_stream_sink.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_gemini.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/server/cli_acp.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
+                             $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/server/skill_review.o $(OBJDIR)/server/skill_curator.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_gemini.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/server/cli_acp.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
                              $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/server/agent_eval.o $(OBJDIR)/server/agent_eval_memory_support.o $(OBJDIR)/server/agent_eval_baseline.o \
                              $(OBJDIR)/server/agent_coord.o $(OBJDIR)/server/agent_tools.o $(OBJDIR)/server/script_runner.o $(OBJDIR)/server/script_rpc.o $(OBJDIR)/toolset.o $(OBJDIR)/server/tool_args_coerce.o $(OBJDIR)/server/tool_schema_sanitizer.o \
                              $(OBJDIR)/server/kb_client.o $(OBJDIR)/server/kb_client_cache.o $(OBJDIR)/server/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/server/kb_client_index_parse.o $(OBJDIR)/server/kb_client_memory.o $(OBJDIR)/server/kb_client_memory_mutations.o $(OBJDIR)/server/kb_client_agent.o $(OBJDIR)/server/kb_client_dashboard.o $(OBJDIR)/server/kb_client_tasks.o $(OBJDIR)/server/kb_client_data.o $(OBJDIR)/tests/server/kb_client_tool_registry.o $(OBJDIR)/server/kb_client_prospective.o $(OBJDIR)/shared/kb_paths.o $(OBJDIR)/cli_client.o \
@@ -509,14 +509,14 @@ $(TESTPREFIX)/unit-test-script-runner: $(OBJDIR)/tests/test_script_runner.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-provider-cli-adapter: $(OBJDIR)/tests/test_provider_cli_adapter.o \
-                      $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_stream_sink.o $(OBJDIR)/server/cli_codex.o \
+                      $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o \
                       $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_gemini.o $(OBJDIR)/server/cli_mistral.o \
                       $(OBJDIR)/server/cli_acp.o $(OBJDIR)/posix/workspace_provider.o \
                       $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cli-acp: $(OBJDIR)/tests/test_cli_acp.o \
-                      $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_stream_sink.o $(OBJDIR)/server/cli_codex.o \
+                      $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o \
                       $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_gemini.o $(OBJDIR)/server/cli_mistral.o \
                       $(OBJDIR)/server/cli_acp.o $(OBJDIR)/posix/workspace_provider.o \
                       $(TEST_CORE_OBJS)
