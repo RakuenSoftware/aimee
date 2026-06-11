@@ -134,6 +134,23 @@ extern "C"
     * Pass 0 for all-time. */
    int db1_token_audit_totals(int since_hours, db1_token_audit_totals_t *out);
 
+   /* Realized-vs-estimated-vs-avoided spend breakdown (proposal §7). The single
+    * SQL authority for spend semantics: it groups token_audit cost by usage_kind
+    * so consumers report realized spend separately from estimated, avoided, and
+    * partial rows rather than copy-pasting `WHERE usage_kind = 'realized'`.
+    * `spend_cost_usd` is the billable total (realized + estimated + partial);
+    * avoided rows (dedup-skipped) are reported but excluded from spend. */
+   typedef struct
+   {
+      double realized_cost_usd;  /* provider-reported usage */
+      double estimated_cost_usd; /* no provider usage; aimee-estimated */
+      double avoided_cost_usd;   /* dedup-skipped; NOT counted as spend */
+      double partial_cost_usd;   /* partially-attributed */
+      double spend_cost_usd;     /* realized + estimated + partial (excludes avoided) */
+   } db1_token_audit_spend_t;
+
+   int db1_token_audit_spend_breakdown(int since_hours, db1_token_audit_spend_t *out);
+
    /* Per-role aggregates ordered by total prompt+completion tokens DESC.
     * Pass 0 for all-time. */
    int db1_token_audit_by_role(int since_hours, db1_token_audit_role_summary_t *out, int max);

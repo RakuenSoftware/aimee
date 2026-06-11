@@ -402,6 +402,49 @@ static void test_agent_stats_join_is_1to1(void)
    assert(stats[0].total_estimated_cost_usd > 0.29 && stats[0].total_estimated_cost_usd < 0.31);
 }
 
+static void test_spend_breakdown_excludes_avoided(void)
+{
+   /* The §7 spend authority groups cost by usage_kind. Measure deltas against a
+    * baseline so this is independent of the rows other tests already inserted. */
+   db1_token_audit_spend_t before;
+   assert(db1_token_audit_spend_breakdown(0, &before) == 0);
+
+   db1_token_audit_row_t realized = {.session_id = "sb-real",
+                                     .tool_name = "gpt-4o",
+                                     .role = "implement",
+                                     .model = "gpt-4o",
+                                     .usage_kind = "realized",
+                                     .estimated_cost_usd = 0.25};
+   db1_token_audit_row_t estimated = {.session_id = "sb-est",
+                                      .tool_name = "gpt-4o",
+                                      .role = "implement",
+                                      .model = "gpt-4o",
+                                      .usage_kind = "estimated",
+                                      .estimated_cost_usd = 0.50};
+   db1_token_audit_row_t avoided = {.session_id = "sb-avoid",
+                                    .tool_name = "gpt-4o",
+                                    .role = "implement",
+                                    .model = "gpt-4o",
+                                    .usage_kind = "avoided",
+                                    .estimated_cost_usd = 1.00};
+   assert(db1_token_audit_insert(&realized) == 0);
+   assert(db1_token_audit_insert(&estimated) == 0);
+   assert(db1_token_audit_insert(&avoided) == 0);
+
+   db1_token_audit_spend_t after;
+   assert(db1_token_audit_spend_breakdown(0, &after) == 0);
+
+   double d_real = after.realized_cost_usd - before.realized_cost_usd;
+   double d_est = after.estimated_cost_usd - before.estimated_cost_usd;
+   double d_avoid = after.avoided_cost_usd - before.avoided_cost_usd;
+   double d_total = after.spend_cost_usd - before.spend_cost_usd;
+   assert(d_real > 0.249 && d_real < 0.251);
+   assert(d_est > 0.499 && d_est < 0.501);
+   assert(d_avoid > 0.999 && d_avoid < 1.001);
+   /* Billable total moved by realized + estimated only — avoided is excluded. */
+   assert(d_total > 0.749 && d_total < 0.751);
+}
+
 static void test_dashboard_rows(void)
 {
    db1_token_audit_dashboard_row_t rows[4];
@@ -431,6 +474,7 @@ int main(void)
    test_ingress_source_override();
    test_agent_stats_join_is_1to1();
    test_cost_for_delegation();
+   test_spend_breakdown_excludes_avoided();
    db1_shutdown();
    printf("test_token_audit: ok\n");
    return 0;

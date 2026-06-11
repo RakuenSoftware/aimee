@@ -121,6 +121,57 @@ int db1_token_audit_totals(int since_hours, db1_token_audit_totals_t *out)
    return rc;
 }
 
+int db1_token_audit_spend_breakdown(int since_hours, db1_token_audit_spend_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+
+   static const char *sql_recent =
+       "SELECT usage_kind, COALESCE(SUM(estimated_cost_usd), 0.0) FROM token_audit"
+       " WHERE created_at >= datetime('now', ?) GROUP BY usage_kind";
+   static const char *sql_all =
+       "SELECT usage_kind, COALESCE(SUM(estimated_cost_usd), 0.0) FROM token_audit"
+       " GROUP BY usage_kind";
+   const char *sql = since_hours > 0 ? sql_recent : sql_all;
+   sqlite3_stmt *stmt = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   char since[32];
+   if (since_hours > 0)
+   {
+      snprintf(since, sizeof(since), "-%d hours", since_hours);
+      sqlite3_bind_text(stmt, 1, since, -1, SQLITE_TRANSIENT);
+   }
+
+   while (sqlite3_step(stmt) == SQLITE_ROW)
+   {
+      const unsigned char *kind = sqlite3_column_text(stmt, 0);
+      double cost = sqlite3_column_double(stmt, 1);
+      const char *k = kind ? (const char *)kind : "";
+      /* Empty/legacy usage_kind defaults to realized (matches the column
+       * default and the insert helper). */
+      if (k[0] == '\0' || strcmp(k, "realized") == 0)
+         out->realized_cost_usd += cost;
+      else if (strcmp(k, "estimated") == 0)
+         out->estimated_cost_usd += cost;
+      else if (strcmp(k, "avoided") == 0)
+         out->avoided_cost_usd += cost;
+      else if (strcmp(k, "partial") == 0)
+         out->partial_cost_usd += cost;
+      else
+         out->realized_cost_usd += cost; /* unknown kind -> conservative: spend */
+   }
+   sqlite3_finalize(stmt);
+
+   out->spend_cost_usd = out->realized_cost_usd + out->estimated_cost_usd + out->partial_cost_usd;
+   return 0;
+}
+
 int db1_token_audit_by_role(int since_hours, db1_token_audit_role_summary_t *out, int max)
 {
    if (!out || max <= 0)

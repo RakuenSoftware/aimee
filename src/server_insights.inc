@@ -25,6 +25,22 @@ static int handle_insights_overview(server_ctx_t *ctx, server_conn_t *conn, cJSO
    cJSON_AddNumberToObject(resp, "cache_read_tokens", (double)totals.cache_read_tokens);
    cJSON_AddNumberToObject(resp, "estimated_cost_usd", totals.estimated_cost_usd);
 
+   /* Spend breakdown by usage_kind (§7): realized provider-reported spend is
+    * reported separately from estimated, avoided (dedup-skipped, not billable),
+    * and partial rows. The legacy estimated_cost_usd above stays for backwards
+    * compatibility; `spend.total` is the billable figure (excludes avoided). */
+   db1_token_audit_spend_t spend;
+   if (db1_token_audit_spend_breakdown(since_hours, &spend) == 0)
+   {
+      cJSON *jspend = cJSON_CreateObject();
+      cJSON_AddNumberToObject(jspend, "realized", spend.realized_cost_usd);
+      cJSON_AddNumberToObject(jspend, "estimated", spend.estimated_cost_usd);
+      cJSON_AddNumberToObject(jspend, "avoided", spend.avoided_cost_usd);
+      cJSON_AddNumberToObject(jspend, "partial", spend.partial_cost_usd);
+      cJSON_AddNumberToObject(jspend, "total", spend.spend_cost_usd);
+      cJSON_AddItemToObject(resp, "spend", jspend);
+   }
+
    /* Models */
    db1_token_audit_model_summary_t models[16];
    int n_models = db1_token_audit_by_model(since_hours, models, 16);
