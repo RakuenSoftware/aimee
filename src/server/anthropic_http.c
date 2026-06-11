@@ -535,6 +535,28 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    sse_parser_free(&pc.parser);
 
    anthropic_stream_finish(xl);
+
+   /* Cost accounting for the OpenAI-via-translator streaming ingress: tap the
+    * usage captured off the upstream OpenAI stream (prompt count preferring the
+    * upstream-reported value over the estimate, plus completion and cached
+    * tokens) and write one ingress cost row, mirroring the native relay path. */
+   {
+      int in_tok = 0, out_tok = 0, cr_tok = 0;
+      anthropic_stream_get_usage(xl, &in_tok, &out_tok, &cr_tok);
+      if (in_tok > 0 || out_tok > 0)
+      {
+         agent_result_t ar;
+         memset(&ar, 0, sizeof(ar));
+         snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
+         snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
+         snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
+         ar.prompt_tokens = in_tok;
+         ar.completion_tokens = out_tok;
+         ar.cache_read_tokens = cr_tok;
+         agent_record_token_audit(&ar, "", "anthropic-ingress");
+      }
+   }
+
    anthropic_stream_free(xl);
 
 cleanup:
