@@ -15,14 +15,23 @@
 #include "mcp_git.h"
 #include "openai_runs_store.h"
 #include "roundtable_pipeline.h"
+#include "roundtable_pipeline_chunk.h"
 #include "roundtable_pipeline_eval.h"
 #include "server_http.h"
 
+#include "agent_config.h"
+#include "delegate_ensemble.h" /* ENSEMBLE_MAX_REFS */
 #include "local_operator.h"
+#include "model_registry.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* ~4 bytes per token is a conservative budget conversion; the per-chunk byte
+ * budget reserves headroom for the brief/role/peer-note framing (section 2). */
+#define RTP_BYTES_PER_TOKEN  4
+#define RTP_CHUNK_RESERVE_FR 4 /* reserve 1/4 of the budget for framing */
 
 /* ---------------------------------------------------------------- helpers -- */
 
@@ -134,9 +143,37 @@ static cJSON *build_digest(const rtp_run_t *run, const rtp_pass_t *latest, int h
    return d;
 }
 
-/* forward decl: the shared merge executor (defined in the gate section). */
+/* forward decls: defined later in the file. */
 static void execute_gate_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no, cJSON *req,
                                cJSON *resp);
+static int resolve_panel(const config_t *cfg, rtp_panel_t *out);
+
+/* Open a human gate: record the gate (PR + expected head SHA as the merge-intent
+ * key), move to *_pending, and release re-creatable resources (#47) — the
+ * review-scoped chunk index is dropped (it re-derives from the retained origin
+ * hash on resume) and, if configured, the parked gate releases the single active
+ * admission slot so another pipeline can run while a human is away. */
+static void enter_gate(int id, int gate_no, int pr)
+{
+   rtp_run_t run;
+   if (rtp_run_get(id, &run) != 0)
+      return;
+   rtp_gate_create(id, gate_no, pr, run.head_sha, NULL);
+   rtp_run_set_state(id, gate_no == 2 ? RTP_STATE_GATE2_PENDING : RTP_STATE_GATE1_PENDING, NULL);
+
+   config_t cfg;
+   int parked_releases =
+       (config_load(&cfg) == 0) ? cfg.roundtable_pipeline_parked_releases_slot : 1;
+   if (rtp_run_get(id, &run) == 0)
+   {
+      /* the chunk index is re-creatable from the retained origin, so dropping it
+       * while parked leaks nothing (#34/#47); it re-derives on the next pass. */
+      run.chunk_index_ref[0] = '\0';
+      if (parked_releases)
+         snprintf(run.admission_class, sizeof(run.admission_class), RTP_ADMIT_WAITING_HUMAN);
+      rtp_run_update(&run);
+   }
+}
 
 /* ------------------------------------------------------------- handlers ---- */
 
@@ -188,6 +225,24 @@ int handle_pipeline_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_AddNumberToObject(resp, "pipeline_id", id);
    cJSON_AddStringToObject(resp, "state", RTP_STATE_DRAFTING);
    cJSON_AddStringToObject(resp, "done_bar", done_bar);
+
+   /* Surface panel diversity now so a single-provider panel is flagged before
+    * the loop runs (section 7): a mono-provider panel can converge on its own
+    * blind spots, so its "converged" is weaker evidence. */
+   rtp_panel_t panel;
+   if (resolve_panel(&cfg, &panel) == 0)
+   {
+      cJSON *pj = cJSON_AddObjectToObject(resp, "panel");
+      cJSON_AddNumberToObject(pj, "requested", panel.requested);
+      cJSON_AddNumberToObject(pj, "resolved", panel.resolved);
+      cJSON_AddNumberToObject(pj, "distinct_providers", panel.distinct_providers);
+      cJSON_AddNumberToObject(pj, "min_context_tokens", panel.min_context_tokens);
+      cJSON_AddBoolToObject(pj, "diverse", rtp_panel_diverse(&panel) ? 1 : 0);
+      if (!rtp_panel_diverse(&panel))
+         cJSON_AddStringToObject(
+             pj, "warning",
+             "single-provider panel — convergence may reflect shared blind spots (section 7)");
+   }
    return server_send_ok(conn, resp);
 }
 
@@ -379,6 +434,233 @@ static int submit_pass(server_conn_t *conn, rtp_run_t *run, const char *phase, c
    return server_send_ok(conn, resp);
 }
 
+/* Resolve the ensemble panel to provider identity + min context budget (section
+ * 7/#36). Returns 0 on success (fills out), -1 if a participant has an unknown
+ * context window and no fallback is configured. */
+static int resolve_panel(const config_t *cfg, rtp_panel_t *out)
+{
+   agent_config_t acfg;
+   if (agent_load_config(&acfg) != 0)
+   {
+      memset(out, 0, sizeof(*out));
+      return 0; /* no registry -> treat as unresolved, caller decides */
+   }
+   rtp_participant_t parts[ENSEMBLE_MAX_REFS];
+   int n = cfg->ensemble_reference_count;
+   if (n > ENSEMBLE_MAX_REFS)
+      n = ENSEMBLE_MAX_REFS;
+   for (int i = 0; i < n; i++)
+   {
+      agent_t *ag = agent_find(&acfg, cfg->ensemble_reference_models[i]);
+      if (ag)
+      {
+         parts[i].provider = ag->provider;
+         parts[i].context_tokens = ag->middleware.context_window > 0
+                                       ? ag->middleware.context_window
+                                       : model_context_window(ag->model);
+      }
+      else
+      {
+         parts[i].provider = NULL;
+         parts[i].context_tokens = 0;
+      }
+   }
+   int fallback = cfg->roundtable_pipeline_unknown_context_tokens;
+   int rc = rtp_panel_summarize(parts, n, fallback, out);
+   /* providers point into acfg, which is about to free; copy what we need first.
+    * out only stores counts/min, not provider strings, so this is safe. */
+   return rc;
+}
+
+/* Per-chunk byte budget from the panel's smallest participant (#33), reserving
+ * framing headroom. 0 = no budget resolved (single-shot review). */
+static int chunk_budget_bytes(const rtp_panel_t *panel)
+{
+   if (!panel || panel->min_context_tokens <= 0)
+      return 0;
+   long bytes = (long)panel->min_context_tokens * RTP_BYTES_PER_TOKEN;
+   bytes -= bytes / RTP_CHUNK_RESERVE_FR;
+   if (bytes < 1024)
+      bytes = 1024;
+   if (bytes > 1 << 20)
+      bytes = 1 << 20;
+   return (int)bytes;
+}
+
+/* Submit one chunk-pass of a chunked review group. */
+static int submit_chunk_pass(server_conn_t *conn, rtp_run_t *run, const char *phase,
+                             const char *artifact, const char *artifact_hash, int group,
+                             int chunk_index, int chunk_total)
+{
+   int pass_no = rtp_pass_max_no(run->id, phase) + 1;
+   int pass_id = 0;
+   if (rtp_pass_create(run->id, phase, RTP_MODE_REVIEW, pass_no, artifact_hash, &pass_id) != 0)
+      return -1;
+   rtp_pass_t p;
+   if (rtp_pass_get(pass_id, &p) == 0)
+   {
+      p.is_chunked = 1;
+      p.chunk_group = group;
+      p.chunk_index = chunk_index;
+      p.chunk_total = chunk_total;
+      rtp_pass_update(&p);
+   }
+   cJSON *body = cJSON_CreateObject();
+   cJSON_AddStringToObject(body, "task", artifact ? artifact : "");
+   cJSON_AddStringToObject(body, "mode", "review");
+   if (run->brief[0])
+      cJSON_AddStringToObject(body, "brief", run->brief);
+   cJSON_AddNumberToObject(body, "pipeline_pass_id", pass_id);
+   char *bj = cJSON_PrintUnformatted(body);
+   cJSON_Delete(body);
+   char rr[2048];
+   int rc = server_http_submit_op_run("delegate.roundtable", bj ? bj : "{}", conn->capabilities, rr,
+                                      (int)sizeof(rr));
+   free(bj);
+   if (rc < 200 || rc >= 300)
+   {
+      if (rtp_pass_get(pass_id, &p) == 0)
+      {
+         snprintf(p.status, sizeof(p.status), RTP_PASS_FAILED);
+         rtp_pass_update(&p);
+      }
+      return -1;
+   }
+   return pass_id;
+}
+
+/* Chunked review submission (#28/#37): split the retained origin into
+ * budget-sized chunks, submit a review pass per chunk plus a whole-artifact
+ * synthesis pass, all sharing a new chunk_group. The origin hash is recorded so
+ * chunks are always re-derivable (no leaky index, #34/#47). */
+static int submit_chunked_review(server_conn_t *conn, rtp_run_t *run, const char *phase,
+                                 const char *artifact, int budget_bytes)
+{
+   rtp_chunk_plan_t plan;
+   rtp_chunk_plan(artifact, budget_bytes, &plan);
+   int group = rtp_pass_max_group(run->id, phase) + 1;
+
+   /* record the whole-origin hash on the run so chunks re-derive from it. */
+   if (strcmp(phase, RTP_PHASE_IMPL) == 0)
+   {
+      snprintf(run->diff_origin_hash, sizeof(run->diff_origin_hash), "%s", plan.origin_hash);
+      snprintf(run->chunk_index_ref, sizeof(run->chunk_index_ref), "origin:%s", plan.origin_hash);
+   }
+   else
+   {
+      snprintf(run->proposal_origin_hash, sizeof(run->proposal_origin_hash), "%s",
+               plan.origin_hash);
+      snprintf(run->chunk_index_ref, sizeof(run->chunk_index_ref), "origin:%s", plan.origin_hash);
+   }
+   rtp_run_update(run);
+
+   int submitted = 0;
+   for (int i = 0; i < plan.count; i++)
+   {
+      char *chunk = (char *)malloc((size_t)plan.chunks[i].len + 1);
+      if (!chunk)
+         continue;
+      memcpy(chunk, artifact + plan.chunks[i].offset, (size_t)plan.chunks[i].len);
+      chunk[plan.chunks[i].len] = '\0';
+      if (submit_chunk_pass(conn, run, phase, chunk, plan.chunks[i].hash, group, i, plan.count) > 0)
+         submitted++;
+      free(chunk);
+   }
+
+   /* whole-artifact synthesis member (chunk_index = -1): an inline digest built
+    * from the chunks that fit the smallest participant budget; omitted spans are
+    * a coverage gap the aggregate must not hide (#39). */
+   rtp_assembly_t asm_unit;
+   rtp_assembly_build(&plan, budget_bytes, &asm_unit);
+   char synth[4096];
+   int sn = snprintf(synth, sizeof(synth),
+                     "Whole-artifact synthesis review. Consider cross-chunk invariants across the "
+                     "%d chunks of this artifact (origin %s). selected_spans=%d omitted_spans=%d. "
+                     "Report any blocking issue that only appears across chunk boundaries.",
+                     plan.count, plan.origin_hash, asm_unit.selected_count, asm_unit.omitted_count);
+   (void)sn;
+   int spass = submit_chunk_pass(conn, run, phase, synth, plan.origin_hash, group, -1, plan.count);
+
+   cJSON *resp = jo_ok();
+   cJSON_AddNumberToObject(resp, "pipeline_id", run->id);
+   cJSON_AddStringToObject(resp, "action", "chunked_submitted");
+   cJSON_AddStringToObject(resp, "phase", phase);
+   cJSON_AddNumberToObject(resp, "chunk_group", group);
+   cJSON_AddNumberToObject(resp, "chunks", plan.count);
+   cJSON_AddNumberToObject(resp, "chunks_submitted", submitted);
+   cJSON_AddBoolToObject(resp, "synthesis_submitted", spass > 0 ? 1 : 0);
+   cJSON_AddNumberToObject(resp, "budget_bytes", budget_bytes);
+   cJSON_AddBoolToObject(resp, "over_budget", plan.over_budget ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "truncated", plan.truncated ? 1 : 0);
+   cJSON_AddNumberToObject(resp, "omitted_spans", asm_unit.omitted_count);
+   return server_send_ok(conn, resp);
+}
+
+/* Decide the next action for an in-flight / captured chunked-review group. */
+static int decide_chunked_group(server_conn_t *conn, rtp_run_t *run, const char *phase, int group)
+{
+   /* any member still in flight -> wait. */
+   /* (a member pass is open with a pending current attempt) */
+   rtp_group_agg_t agg;
+   if (rtp_pass_group_agg(run->id, phase, group, &agg) != 0)
+      return server_send_error(conn, "pipeline: could not aggregate chunk group", NULL);
+
+   int members = agg.total + (agg.synthesis_present ? 1 : 0);
+   int captured = agg.done + (agg.synthesis_done ? 1 : 0) + agg.any_invalid;
+   if (captured < members)
+   {
+      cJSON *resp = jo_ok();
+      cJSON_AddStringToObject(resp, "action", "waiting");
+      cJSON_AddStringToObject(resp, "note", "chunked review in flight");
+      cJSON_AddNumberToObject(resp, "chunk_group", group);
+      cJSON_AddNumberToObject(resp, "members", members);
+      cJSON_AddNumberToObject(resp, "captured", captured);
+      return server_send_ok(conn, resp);
+   }
+
+   int aggregate_done =
+       rtp_chunk_aggregate_done(agg.total, agg.done, agg.synthesis_done, agg.any_invalid);
+
+   cJSON *resp = jo_ok();
+   cJSON_AddNumberToObject(resp, "chunk_group", group);
+   cJSON_AddNumberToObject(resp, "blocking", agg.blocking_count);
+   if (agg.any_invalid)
+   {
+      cJSON_AddStringToObject(resp, "action", "escalate");
+      cJSON_AddStringToObject(resp, "note",
+                              "a chunk produced invalid evidence; human attention required");
+      return server_send_ok(conn, resp);
+   }
+   if (aggregate_done && agg.blocking_count == 0)
+   {
+      int pr = strcmp(phase, RTP_PHASE_IMPL) == 0 ? run->impl_pr_number : run->proposal_pr_number;
+      if (pr <= 0)
+      {
+         cJSON_AddStringToObject(resp, "action", "open_pr");
+         cJSON_AddStringToObject(resp, "note",
+                                 "chunked done-bar met; open the PR then advance for the gate");
+         return server_send_ok(conn, resp);
+      }
+      int gate_no = strcmp(phase, RTP_PHASE_IMPL) == 0 ? 2 : 1;
+      enter_gate(run->id, gate_no, pr);
+      cJSON_AddStringToObject(resp, "action", "gate_pending");
+      return server_send_ok(conn, resp);
+   }
+   if (!aggregate_done)
+   {
+      cJSON_AddStringToObject(resp, "action", "escalate");
+      cJSON_AddStringToObject(
+          resp, "note", "chunk coverage incomplete (a member failed/omitted); human review needed");
+      return server_send_ok(conn, resp);
+   }
+   /* aggregate complete but blocking findings remain -> revise. */
+   cJSON_AddStringToObject(resp, "action", "revise");
+   cJSON_AddStringToObject(resp, "note",
+                           "cross-chunk blocking findings remain; revise the artifact and advance "
+                           "with the new version");
+   return server_send_ok(conn, resp);
+}
+
 int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -423,6 +705,11 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    rtp_pass_t latest;
    int have = rtp_pass_latest(id, phase, &latest) == 0;
+
+   /* A chunked-review group is the active review unit: aggregate it, unless the
+    * caller supplied a new artifact (a revise -> re-chunk into a fresh group). */
+   if (have && latest.chunk_group > 0 && !(artifact && artifact[0]))
+      return decide_chunked_group(conn, &run, phase, latest.chunk_group);
 
    /* If a pass is in flight (open + a pending current attempt), wait. */
    if (have && strcmp(latest.status, RTP_PASS_OPEN) == 0)
@@ -469,9 +756,7 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
             return server_send_ok(conn, resp);
          }
          int gate_no = strcmp(phase, RTP_PHASE_IMPL) == 0 ? 2 : 1;
-         rtp_gate_create(id, gate_no, pr, run.head_sha, NULL);
-         rtp_run_set_state(id, gate_no == 2 ? RTP_STATE_GATE2_PENDING : RTP_STATE_GATE1_PENDING,
-                           NULL);
+         enter_gate(id, gate_no, pr);
          rtp_run_get(id, &run);
          cJSON *resp = jo_ok();
          cJSON_AddStringToObject(resp, "action", "gate_pending");
@@ -553,6 +838,24 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if ((!artifact || !artifact[0]) && strcmp(mode, RTP_MODE_REVIEW) == 0)
       return server_send_error(
           conn, "pipeline: review needs the artifact (--artifact <diff|proposal>)", NULL);
+
+   /* For a REVIEW pass, resolve the panel and chunk the artifact when it exceeds
+    * the smallest participant's context budget (#28/#33/#37). DRAFT is always a
+    * single skeleton pass (#9). */
+   if (strcmp(mode, RTP_MODE_REVIEW) == 0 && artifact && artifact[0])
+   {
+      rtp_panel_t panel;
+      int prc = resolve_panel(&cfg, &panel);
+      if (prc < 0)
+         return server_send_error(
+             conn,
+             "pipeline: a panel participant has an unknown context window and no fallback is "
+             "set (roundtable.pipeline_unknown_context_tokens)",
+             NULL);
+      int budget = chunk_budget_bytes(&panel);
+      if (budget > 0 && rtp_chunk_needed(artifact, budget))
+         return submit_chunked_review(conn, &run, phase, artifact, budget);
+   }
    return submit_pass(conn, &run, phase, mode, artifact, artifact_hash);
 }
 
@@ -613,6 +916,17 @@ static void execute_gate_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gat
    {
       const char *next = gate_no == 2 ? RTP_STATE_DONE : RTP_STATE_IMPLEMENTING;
       rtp_run_set_state(id, next, RTP_PHASE_IMPL);
+      /* reclaim the active admission slot for the implementing phase (the gate
+       * may have parked it, #47/#48). gate2 -> done is terminal, no reclaim. */
+      if (gate_no == 1)
+      {
+         rtp_run_t r2;
+         if (rtp_run_get(id, &r2) == 0 && strcmp(r2.admission_class, RTP_ADMIT_ACTIVE) != 0)
+         {
+            snprintf(r2.admission_class, sizeof(r2.admission_class), RTP_ADMIT_ACTIVE);
+            rtp_run_update(&r2);
+         }
+      }
       cJSON_AddBoolToObject(resp, "merged", 1);
       cJSON_AddStringToObject(resp, "merge_sha", gate->merge_sha);
       cJSON_AddStringToObject(resp, "state", next);

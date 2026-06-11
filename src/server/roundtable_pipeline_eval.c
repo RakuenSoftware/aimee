@@ -135,3 +135,63 @@ int rtp_gate_authority_ok(const char *provided_principal, const char *active_ope
       return 0;
    return strcmp(provided_principal, active_operator_id) == 0 ? 1 : 0;
 }
+
+int rtp_panel_summarize(const rtp_participant_t *parts, int n, int fallback_tokens,
+                        rtp_panel_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->requested = n;
+   if (!parts || n <= 0)
+      return fallback_tokens > 0 ? 0 : -1;
+
+   const char *seen[32];
+   int seen_n = 0;
+   int min_budget = 0;
+   int have_min = 0;
+   for (int i = 0; i < n; i++)
+   {
+      const char *prov = parts[i].provider;
+      if (!prov || !prov[0])
+      {
+         out->unknown_unresolved++;
+         /* an unresolved participant contributes an unknown budget too. */
+      }
+      else
+      {
+         out->resolved++;
+         int dup = 0;
+         for (int j = 0; j < seen_n; j++)
+            if (strcmp(seen[j], prov) == 0)
+            {
+               dup = 1;
+               break;
+            }
+         if (!dup && seen_n < (int)(sizeof(seen) / sizeof(seen[0])))
+            seen[seen_n++] = prov;
+      }
+
+      int budget = parts[i].context_tokens;
+      if (budget <= 0)
+      {
+         if (fallback_tokens <= 0)
+            return -1; /* unknown budget is a hard validation error (#36) */
+         budget = fallback_tokens;
+         out->used_fallback = 1;
+      }
+      if (!have_min || budget < min_budget)
+      {
+         min_budget = budget;
+         have_min = 1;
+      }
+   }
+   out->distinct_providers = seen_n;
+   out->min_context_tokens = have_min ? min_budget : (fallback_tokens > 0 ? fallback_tokens : 0);
+   return 0;
+}
+
+int rtp_panel_diverse(const rtp_panel_t *p)
+{
+   return (p && p->distinct_providers >= 2) ? 1 : 0;
+}

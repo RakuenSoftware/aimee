@@ -136,9 +136,24 @@ extern "C"
       int chunk_total;
       int chunk_done;
       int synthesis_done;
+      int chunk_group; /* >0 groups the chunk-passes of one chunked review */
+      int chunk_index; /* >=0 chunk ordinal; -1 = the whole-artifact synthesis */
       char created_at[RTP_TS_LEN];
       char updated_at[RTP_TS_LEN];
    } rtp_pass_t;
+
+   /* Aggregate over the passes of one chunked-review group (#28): every member
+    * must have a valid completed result and the synthesis member must be done. */
+   typedef struct
+   {
+      int total;       /* chunk members (excludes the synthesis row) */
+      int done;        /* chunk members captured/done with a valid envelope */
+      int any_invalid; /* a member captured with an invalid envelope */
+      int synthesis_present;
+      int synthesis_done;
+      int blocking_count; /* summed blocking across the group */
+      int suggestion_count;
+   } rtp_group_agg_t;
 
    typedef struct
    {
@@ -206,6 +221,11 @@ extern "C"
    int rtp_pass_latest(int pipeline_id, const char *phase, rtp_pass_t *out);
    /* Highest pass_no for pipeline+phase, or 0 if none. */
    int rtp_pass_max_no(int pipeline_id, const char *phase);
+   /* Highest chunk_group for a pipeline+phase, or 0 if none. */
+   int rtp_pass_max_group(int pipeline_id, const char *phase);
+   /* Aggregate the passes of one chunked-review group. Returns 0 ok, -1 error. */
+   int rtp_pass_group_agg(int pipeline_id, const char *phase, int chunk_group,
+                          rtp_group_agg_t *out);
 
    /* ---- attempts ---- */
    int rtp_attempt_create(int pass_id, int attempt_no, const char *run_id, int *out_id);

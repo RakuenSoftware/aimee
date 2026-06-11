@@ -299,15 +299,17 @@ static void rtp_map_pass(rtp_pass_t *p, sqlite3_stmt *s)
    p->chunk_total = sqlite3_column_int(s, 21);
    p->chunk_done = sqlite3_column_int(s, 22);
    p->synthesis_done = sqlite3_column_int(s, 23);
-   db1_copy_col_text(p->created_at, sizeof(p->created_at), s, 24);
-   db1_copy_col_text(p->updated_at, sizeof(p->updated_at), s, 25);
+   p->chunk_group = sqlite3_column_int(s, 24);
+   p->chunk_index = sqlite3_column_int(s, 25);
+   db1_copy_col_text(p->created_at, sizeof(p->created_at), s, 26);
+   db1_copy_col_text(p->updated_at, sizeof(p->updated_at), s, 27);
 }
 
 #define RTP_PASS_COLS                                                                              \
    "id, pipeline_id, phase, mode, pass_no, status, artifact_hash, converged, envelope_valid,"      \
    " blocking_count, suggestion_count, nit_count, open_questions, coverage_gaps, items_round,"     \
    " artifact_round, best_round, rounds_run, cost_usd, result_hash, is_chunked, chunk_total,"      \
-   " chunk_done, synthesis_done, created_at, updated_at"
+   " chunk_done, synthesis_done, chunk_group, chunk_index, created_at, updated_at"
 
 int rtp_pass_get(int id, rtp_pass_t *out)
 {
@@ -344,7 +346,7 @@ int rtp_pass_update(const rtp_pass_t *p)
        " envelope_valid=?, blocking_count=?, suggestion_count=?, nit_count=?, open_questions=?,"
        " coverage_gaps=?, items_round=?, artifact_round=?, best_round=?, rounds_run=?, cost_usd=?,"
        " result_hash=?, is_chunked=?, chunk_total=?, chunk_done=?, synthesis_done=?,"
-       " updated_at=datetime('now') WHERE id=?";
+       " chunk_group=?, chunk_index=?, updated_at=datetime('now') WHERE id=?";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
    int i = 1;
@@ -367,6 +369,8 @@ int rtp_pass_update(const rtp_pass_t *p)
    sqlite3_bind_int(stmt, i++, p->chunk_total);
    sqlite3_bind_int(stmt, i++, p->chunk_done);
    sqlite3_bind_int(stmt, i++, p->synthesis_done);
+   sqlite3_bind_int(stmt, i++, p->chunk_group);
+   sqlite3_bind_int(stmt, i++, p->chunk_index);
    sqlite3_bind_int(stmt, i++, p->id);
    int rc = sqlite3_step(stmt);
    int changed = (rc == SQLITE_DONE) ? sqlite3_changes(db) : 0;
@@ -419,6 +423,75 @@ int rtp_pass_max_no(int pipeline_id, const char *phase)
       n = sqlite3_column_int(stmt, 0);
    sqlite3_finalize(stmt);
    return n;
+}
+
+int rtp_pass_max_group(int pipeline_id, const char *phase)
+{
+   if (pipeline_id <= 0 || !phase)
+      return 0;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return 0;
+   sqlite3_stmt *stmt = NULL;
+   static const char *sql =
+       "SELECT COALESCE(MAX(chunk_group),0) FROM roundtable_pipeline_passes WHERE pipeline_id=?"
+       " AND phase=?";
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return 0;
+   sqlite3_bind_int(stmt, 1, pipeline_id);
+   sqlite3_bind_text(stmt, 2, phase, -1, SQLITE_TRANSIENT);
+   int n = 0;
+   if (sqlite3_step(stmt) == SQLITE_ROW)
+      n = sqlite3_column_int(stmt, 0);
+   sqlite3_finalize(stmt);
+   return n;
+}
+
+int rtp_pass_group_agg(int pipeline_id, const char *phase, int chunk_group, rtp_group_agg_t *out)
+{
+   if (!out || pipeline_id <= 0 || !phase || chunk_group <= 0)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+   sqlite3_stmt *stmt = NULL;
+   static const char *sql =
+       "SELECT chunk_index, status, envelope_valid, blocking_count, suggestion_count"
+       " FROM roundtable_pipeline_passes WHERE pipeline_id=? AND phase=? AND chunk_group=?";
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_int(stmt, 1, pipeline_id);
+   sqlite3_bind_text(stmt, 2, phase, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 3, chunk_group);
+   while (sqlite3_step(stmt) == SQLITE_ROW)
+   {
+      int idx = sqlite3_column_int(stmt, 0);
+      const unsigned char *st = sqlite3_column_text(stmt, 1);
+      int valid = sqlite3_column_int(stmt, 2);
+      int blocking = sqlite3_column_int(stmt, 3);
+      int sugg = sqlite3_column_int(stmt, 4);
+      int captured = st && (strcmp((const char *)st, "captured") == 0 ||
+                            strcmp((const char *)st, "done") == 0);
+      out->blocking_count += blocking;
+      out->suggestion_count += sugg;
+      if (idx < 0) /* the synthesis member */
+      {
+         out->synthesis_present = 1;
+         if (captured && valid)
+            out->synthesis_done = 1;
+         else if (captured && !valid)
+            out->any_invalid = 1;
+         continue;
+      }
+      out->total++;
+      if (captured && valid)
+         out->done++;
+      else if (captured && !valid)
+         out->any_invalid = 1;
+   }
+   sqlite3_finalize(stmt);
+   return 0;
 }
 
 /* ------------------------------------------------------------ attempts ---- */

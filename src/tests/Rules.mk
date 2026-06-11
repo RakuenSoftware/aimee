@@ -316,6 +316,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-db1-cost-fold \
                $(TESTPREFIX)/unit-test-db1-roundtable-pipeline \
                $(TESTPREFIX)/unit-test-roundtable-pipeline-eval \
+               $(TESTPREFIX)/unit-test-roundtable-pipeline-chunk \
                $(TESTPREFIX)/unit-test-roundtable-pipeline-capture \
                $(TESTPREFIX)/unit-test-db1-session-paths \
                $(TESTPREFIX)/unit-test-interaction-events \
@@ -1648,6 +1649,12 @@ $(TESTPREFIX)/unit-test-db1-roundtable-pipeline: \
 
 $(TESTPREFIX)/unit-test-roundtable-pipeline-eval: \
                                        $(OBJDIR)/tests/test_roundtable_pipeline_eval.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_eval.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-roundtable-pipeline-chunk: \
+                                       $(OBJDIR)/tests/test_roundtable_pipeline_chunk.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_chunk.o \
                                        $(OBJDIR)/server/roundtable_pipeline_eval.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

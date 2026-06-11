@@ -114,6 +114,36 @@ extern "C"
    int rtp_gate_authority_ok(const char *provided_principal, const char *active_operator_id,
                              int operator_active);
 
+   /* Panel diversity + context-budget resolution (proposal section 7, #36). A
+    * resolved participant carries its provider identity and context window; the
+    * summary reports distinct providers (diversity) and the minimum budget used
+    * to size review chunks. */
+   typedef struct
+   {
+      const char *provider; /* resolved provider id; NULL/"" if unresolved */
+      int context_tokens;   /* resolved context window; 0 if unknown */
+   } rtp_participant_t;
+
+   typedef struct
+   {
+      int requested;
+      int resolved;
+      int distinct_providers;
+      int min_context_tokens; /* smallest resolved budget, or fallback applied */
+      int used_fallback;      /* an unknown budget was replaced by the fallback */
+      int unknown_unresolved; /* a participant name did not resolve to an agent */
+   } rtp_panel_t;
+
+   /* Summarize a resolved panel. fallback_tokens is the conservative budget used
+    * when a participant's context window is unknown; if <= 0, an unknown budget
+    * is a hard validation error and this returns -1 (#36). Returns 0 otherwise. */
+   int rtp_panel_summarize(const rtp_participant_t *parts, int n, int fallback_tokens,
+                           rtp_panel_t *out);
+
+   /* A panel is diverse iff >= 2 distinct resolved providers converged on it; a
+    * single-provider panel can agree on its own blind spots (section 7). */
+   int rtp_panel_diverse(const rtp_panel_t *p);
+
 #ifdef __cplusplus
 }
 #endif

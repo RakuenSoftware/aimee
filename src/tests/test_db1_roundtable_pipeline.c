@@ -226,6 +226,55 @@ static void test_gates(void)
    printf("  gates: ok\n");
 }
 
+static void test_chunk_group(void)
+{
+   teardown_db();
+   setup_db();
+   int pid = 0;
+   assert(rtp_run_create("idea", NULL, "/r", "testing", &pid) == 0);
+   assert(rtp_pass_max_group(pid, RTP_PHASE_IMPL) == 0);
+
+   /* a chunked review group: 2 chunk members + 1 synthesis member. */
+   int group = rtp_pass_max_group(pid, RTP_PHASE_IMPL) + 1;
+   int ids[3];
+   for (int i = 0; i < 3; i++)
+   {
+      int chunk_index = (i < 2) ? i : -1; /* -1 = synthesis */
+      assert(rtp_pass_create(pid, RTP_PHASE_IMPL, RTP_MODE_REVIEW, i + 1, "h", &ids[i]) == 0);
+      rtp_pass_t p;
+      assert(rtp_pass_get(ids[i], &p) == 0);
+      p.is_chunked = 1;
+      p.chunk_group = group;
+      p.chunk_index = chunk_index;
+      assert(rtp_pass_update(&p) == 0);
+   }
+   assert(rtp_pass_max_group(pid, RTP_PHASE_IMPL) == 1);
+
+   rtp_group_agg_t agg;
+   assert(rtp_pass_group_agg(pid, RTP_PHASE_IMPL, group, &agg) == 0);
+   assert(agg.total == 2);
+   assert(agg.synthesis_present == 1);
+   assert(agg.done == 0 && agg.synthesis_done == 0); /* nothing captured yet */
+
+   /* capture chunk 0 valid, chunk 1 valid+blocking, synthesis valid. */
+   for (int i = 0; i < 3; i++)
+   {
+      rtp_pass_t p;
+      assert(rtp_pass_get(ids[i], &p) == 0);
+      snprintf(p.status, sizeof(p.status), RTP_PASS_CAPTURED);
+      p.envelope_valid = 1;
+      if (i == 1)
+         p.blocking_count = 2;
+      assert(rtp_pass_update(&p) == 0);
+   }
+   assert(rtp_pass_group_agg(pid, RTP_PHASE_IMPL, group, &agg) == 0);
+   assert(agg.total == 2 && agg.done == 2);
+   assert(agg.synthesis_done == 1);
+   assert(agg.any_invalid == 0);
+   assert(agg.blocking_count == 2);
+   printf("  chunk group aggregate: ok\n");
+}
+
 int main(void)
 {
    setup_db();
@@ -233,6 +282,7 @@ int main(void)
    test_admission();
    test_pass_and_attempts();
    test_gates();
+   test_chunk_group();
    teardown_db();
    printf("test_db1_roundtable_pipeline: all passed\n");
    return 0;
