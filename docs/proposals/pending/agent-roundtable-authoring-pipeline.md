@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 thirteenth review)
+- **Date:** 2026-06-11 (revised post-PR-#183 fourteenth review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -508,6 +508,32 @@ No new feedback prompted this pass; a fresh read of the loop's *outer* mechanics
     duplicate is a hard error, not a silent second PR. **Resolved in §1, §5, and
     §10.**
 
+## PR #183 fourteenth review — validity envelope and HTTP namespace
+
+The thirteenth review closed more loop mechanics, but a fresh pass over the
+server routing and run-capture code found two more buildability gaps.
+
+44. **The validity predicate cannot be a raw `roundtable_result_t` helper, and it
+    must not gate capture.** #41 names `roundtable_result_valid_terminal(result)`,
+    but some invalidity inputs are outside `roundtable_result_t`: `items_truncated`
+    is added by HTTP serialization, `lost_result` is a ledger/attempt state, and
+    capture-failed/malformed terminal attempts may not have a parsed engine result
+    at all. The worker must first persist the terminal **capture envelope** (run
+    id, attempt status, raw/sanitized result snapshot hash, parse status, HTTP
+    serialization flags, and engine flags when present). The canonical predicate
+    then evaluates that envelope for done-bar eligibility. It must never decide
+    whether the terminal attempt is recorded; invalid terminal evidence is exactly
+    what the ledger needs for retries and audits. **Resolved in §3, §4, and §10.**
+45. **`/v1/pipeline/status` is already the KB/corpus pipeline status route.** The
+    proposal says the implementation may add `aimee pipeline status|gate` as a
+    CLI/MCP/HTTP surface, but Aimee's KB sidecar already exposes
+    `GET /v1/pipeline/status` for asynchronous knowledge ingest status (with
+    `/v1/corpus/pipeline/status` as the newer corpus-specific spelling). A new
+    roundtable-authoring HTTP API must not reuse or overload that path. If an HTTP
+    surface is added, it needs an unambiguous namespace such as
+    `/v1/roundtable/pipelines/...` or `/v1/authoring/pipelines/...`; otherwise v1
+    can remain CLI/MCP-only. **Resolved in §5, §8, §10, and §12.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -635,15 +661,19 @@ Two distinct loop levels — keep them un-confused:
 its review loop only when the latest REVIEW result satisfies the configured bar,
 read from real engine fields (`roundtable_result_t`):
 
-Every bar first requires `roundtable_result_valid_terminal(result) == true` — the
-**single canonical validity predicate** (#41), false on any of `truncated`,
-`items_truncated`, `degraded`, `cost_capped`, `deadline_hit`, `cancelled`,
-`lost_result`, or an `items_round`/`artifact_round` provenance mismatch. The
-done-bar, the chunk-aggregate, the capture hook, and the gate digest all consult
-this one predicate rather than re-listing flags inline, so no consumer can pass on
-a subset. For review-mode done-bars the surfaced `artifact_round`/`best_round`
-provenance must match the evaluated `items_round`, and the gate digest explains any
-mismatch rather than silently passing.
+Every bar first requires `roundtable_terminal_envelope_valid(envelope) == true` —
+the **single canonical validity predicate** (#41/#44), evaluated over the captured
+terminal envelope rather than only raw `roundtable_result_t`. It is false on any
+of `truncated`, `items_truncated`, `degraded`, `cost_capped`, `deadline_hit`,
+`cancelled`, `lost_result`, capture/parse failure, or an
+`items_round`/`artifact_round` provenance mismatch. The done-bar, the
+chunk-aggregate, and the gate digest all consult this one predicate rather than
+re-listing flags inline, so no consumer can pass on a subset. The worker capture
+hook records every terminal envelope first and only then marks whether that
+envelope is valid for done-bar use; invalid evidence is still durable. For
+review-mode done-bars the surfaced `artifact_round`/`best_round` provenance must
+match the evaluated `items_round`, and the gate digest explains any mismatch
+rather than silently passing.
 
 - `zero_blocking` *(default)* — `converged == true` and no `items[]` of
   `severity == "blocking"`. Suggestions/nits are surfaced in the gate digest but
@@ -739,8 +769,9 @@ Either way, the durable record holds:
   findings back to assembly spans, source refs, and participant sources; compact
   `item.sources` strings are display hints only (#40);
 - per-attempt history under each pass: `attempt_no`, child `run_id`, submitted and
-  terminal timestamps, captured/lost status, terminal flags, result hash, and cost
-  if the result was available;
+  terminal timestamps, captured/lost status, terminal envelope parse status,
+  HTTP serialization flags (`items_truncated`), engine terminal flags, result
+  snapshot/hash, and cost if the result was available (#44);
 - repository/worktree state: repo root, remote, base branch, head branch,
   workspace id/provider (`shared`, `detached`, or `mirror`), dedicated worktree
   path if any, head/base commit SHAs, dirty-state snapshot, PR number(s), PR URLs,
@@ -765,15 +796,20 @@ narrow op-run-finalize hook rather than hard-coding roundtable ledger writes int
 generic HTTP routing, to **also persist the pass result** into the DB1 ledger row
 before the run record can be evicted. The hook **no-ops when `__pipeline_pass_id`
 is absent**, so ordinary `ensemble_review`/roundtable calls are untouched. What it
-persists is **mode-appropriate** (#27): for a REVIEW pass, the items + severities
-+ `count`, `converged`, validity flags, `items_round`, `artifact_round`, counts,
-`cost_usd`, `rounds_run`, and `items_truncated` when the HTTP response serialized
-only a prefix of the item list (#38); for a DRAFT pass, the artifact **ref +
-content hash** + `best_round`/`artifact_round` + validity flags (the skeleton text
-itself lands in the working file, not as a ledger blob, per #9). Failed,
-cancelled, malformed, and capture-failed terminal states are recorded too. The
-`/v1/runs` id is retained only as a historical pointer; the ledger row is the
-source of truth for the done-bar and the gate digest.
+persists is the terminal **capture envelope** first (#44): run id, attempt status,
+raw/sanitized result snapshot hash, parse status, HTTP serialization flags, and
+engine flags when available. The mode-specific parsed fields then hang off that
+envelope (#27): for a REVIEW pass, the items + severities + `count`, `converged`,
+validity flags, `items_round`, `artifact_round`, counts, `cost_usd`, `rounds_run`,
+and `items_truncated` when the HTTP response serialized only a prefix of the item
+list (#38); for a DRAFT pass, the artifact **ref + content hash** +
+`best_round`/`artifact_round` + validity flags (the skeleton text itself lands in
+the working file, not as a ledger blob, per #9). Failed, cancelled, malformed, and
+capture-failed terminal states are recorded too. The canonical validity predicate
+is evaluated **after** this record is durable; it controls done-bar eligibility,
+not whether the attempt is captured. The `/v1/runs` id is retained only as a
+historical pointer; the ledger row is the source of truth for the done-bar and the
+gate digest.
 
 **The agent reads terminal from the ledger, not `/v1/runs` (#26).** Because the
 worker writes the result to DB1 at terminal, the driving agent learns a pass
@@ -822,11 +858,13 @@ returns to the prior review phase. The fail reason is durable in the ledger so t
 re-review is genuinely directed by it.
 
 The command/API surface must be explicit in implementation. The proposal may add
-`aimee pipeline status|gate` as a new first-class CLI/MCP/HTTP surface, or extend
-the existing `autopilot` pipeline handler, but it must not leave two unrelated
-"pipeline" namespaces with different IDs. The gate action is net-new; today's
-autopilot actions cover `start`, `advance`, `status`, `list`, `cancel`, `resume`,
-`link-plan`, and `link-job`, not pass/fail gates.
+`aimee pipeline status|gate` as a new first-class CLI/MCP surface, or extend the
+existing `autopilot` pipeline handler, but it must not leave two unrelated
+"pipeline" namespaces with different IDs. If an HTTP API is added, it must avoid
+the existing KB/corpus route `GET /v1/pipeline/status`; use a namespaced path such
+as `/v1/roundtable/pipelines/...` or `/v1/authoring/pipelines/...` (#45). The gate
+action is net-new; today's autopilot actions cover `start`, `advance`, `status`,
+`list`, `cancel`, `resume`, `link-plan`, and `link-job`, not pass/fail gates.
 
 Pipeline `cancel`/`abandon` cannot be ledger-only. If a child roundtable op-run is
 active, the action must request cancellation through the child `run_id`
@@ -941,6 +979,9 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
 - **Hard:** workspace-aware git/forge authority for PR create/merge and diff
   capture. Pipeline git/gh operations must route through Aimee's git tools or
   workspace provider so shared, detached, and mirror workspaces behave consistently.
+- **Hard if exposing HTTP:** route namespace selection. `GET /v1/pipeline/status`
+  already belongs to the KB/corpus ingest pipeline, so roundtable-authoring routes
+  must use a distinct namespace or remain CLI/MCP-only in v1 (#45).
 - **Soft:** the `git diff` range helper (agent-directed-pr-review P2) for the PR
   phase input; otherwise the pipeline captures the diff through the
   workspace-aware git surface.
@@ -1085,10 +1126,15 @@ ledger) before the full idea→merge pipeline of P2/P3.
   `items_round` / `artifact_round` provenance prevents a done-bar pass and
   escalates.
 - **Single validity predicate (#41)** — a table-driven test trips each invalidity
-  flag in turn and asserts that **every** consumer (done-bar, chunk-aggregate,
-  capture hook, gate digest) rejects it via `roundtable_result_valid_terminal`; no
-  consumer re-implements the check, so a newly added flag cannot be honored by some
-  sites and ignored by others.
+  flag in turn and asserts that **every** eligibility consumer (done-bar,
+  chunk-aggregate, gate digest) rejects it via
+  `roundtable_terminal_envelope_valid`; no consumer re-implements the check, so a
+  newly added flag cannot be honored by some sites and ignored by others.
+- **Capture-before-validity (#44)** — feed successful, failed, cancelled,
+  malformed, oversized, and `items_truncated` terminal snapshots through the worker
+  hook; every attempt gets a durable envelope row before validity is evaluated, and
+  invalid envelopes are retained for retry/audit while blocked from satisfying the
+  done-bar.
 - **Question cap** — a brief with >16 questions is rejected or split before using
   `zero_blocking_questions_answered`; overflow cannot be silently treated as
   answered.
@@ -1102,6 +1148,9 @@ ledger) before the full idea→merge pipeline of P2/P3.
 - **Workspace authority** — run proposal/implementation PR operations in shared
   and detached workspaces; git/gh calls route through `mcp_git_run`/`git_pr` and
   forge-token state is surfaced when required.
+- **HTTP namespace collision (#45)** — assert that any authoring-pipeline HTTP
+  route does not occupy `GET /v1/pipeline/status`, and that the existing KB/corpus
+  pipeline status endpoint and generated docs/tests continue to pass unchanged.
 - **Branch/worktree isolation** — dirty user checkout blocks the pipeline unless
   the run has a dedicated branch/worktree or an explicit operator override.
 - **Large payload handling** — a diff/proposal larger than a single MCP/op-run
@@ -1140,7 +1189,9 @@ ledger) before the full idea→merge pipeline of P2/P3.
   bounded live store and is not durable across restarts.
 - **CLI/API namespace:** add `aimee pipeline ...` as a new surface, or extend the
   existing `autopilot` pipeline actions with gate/status operations? The answer
-  must keep IDs and help text unambiguous.
+  must keep IDs and help text unambiguous. If HTTP is exposed, it must not collide
+  with the existing KB/corpus `GET /v1/pipeline/status` route; choose a distinct
+  roundtable/authoring namespace or defer HTTP.
 - **Who is the driving agent at the gate?** When paused at a human gate across
   sessions, does a fresh agent resume from the ledger automatically, or does the
   human re-invoke `aimee pipeline resume <id>`?
