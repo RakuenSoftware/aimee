@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#181 sixth review)
+- **Date:** 2026-06-11 (revised post-PR-#181 seventh review)
 - **Charter roles:** Rewrite (envelope compression / cache placement),
   Recall (recovery resolver / rehydration handle), Extract / Gate-Promote (failure-mined
   corrections), Calibrate / Evaluate-Optimize (token + accuracy A/B).
@@ -23,7 +23,10 @@
   mining, `src/payload_rewrite.c` + `src/headers/payload_rewrite.h` +
   `src/headers/token_tracker.h` for cache-prefix integration including the
   `agent_execute_messages()` Responses wire path,
-  `bench/ingress_token_bench.py` + `benchmarks/learning/learning_replay.py`
+  workspace-provider / runner surfaces (`src/headers/workspace_provider.h`,
+  `src/server/workspace_provider_detached.c`, `src/server/server_runner_endpoints.inc`)
+  if code-span recovery reads source, `bench/ingress_token_bench.py` +
+  `benchmarks/learning/learning_replay.py`
   for the accuracy/token A/B, config surface tests (`src/tests/test_config.c`,
   `src/tests/test_config_surface.c`, `src/tests/test_cmd_config.c`), generated
   config docs (`docs/gen/configuration.md` via `scripts/gen-reference-docs.py`),
@@ -32,7 +35,7 @@
 
 ## Design at a glance
 
-For readers not following the review history below (gaps 1–31 record how the
+For readers not following the review history below (gaps 1–34 record how the
 contract was hardened and can be read as an appendix), the design is four
 default-off levers added to the pre-injection path, mined from headroom:
 
@@ -620,6 +623,53 @@ per-session token delta including resolver round-trips, by task class; the §1
 default flip requires **net** positive, not just resident reduction) **and §8**
 (recovery-cost risk).
 
+## PR #181 seventh review — source authority and metric attribution
+
+The sixth review added the right net-economics gate, but another pass through the
+codebase found three places where the implementation contract still needs to be
+tighter.
+
+### 32. `code_span_get` must respect workspace-provider authority
+
+Adding a server-side code-span resolver cannot simply open `project/file_path`
+from the server filesystem. Aimee now has a workspace-provider boundary:
+`shared` reads local files, `detached` marshals file ops over the runner channel,
+and `mirror` may serve a reconstructed checkout. The code index can identify a
+path, but the authoritative source content for the active session may live behind
+the workspace provider or client-native tools. A resolver that bypasses that
+boundary can read stale mirror content, fail for detached workspaces, or leak a
+server path unrelated to the user's active workspace.
+
+**→ Resolved in §3.1, §3.4, §3.5, §6, §7, and §8** by requiring `code_span_get`
+to resolve through the active workspace provider / runner channel, or by making
+client-native `read_file` reachability the only allowed recovery path for those
+workspaces.
+
+### 33. Server-dispatch `index.structure` drops `line_end`
+
+The KB HTTP `/v1/code/structure` endpoint emits `line_end`, and
+`kb_client_index_structure()` parses it, but the server NDJSON/RPC
+`handle_index_structure()` currently serializes only `name`, `kind`, and `line`.
+Any client using the server-dispatch `index.structure` route to enrich spans will
+lose the end line and fall back to start-line-only spans. That makes a range-read
+resolver under-specified and risks fetching too little or too much source.
+
+**→ Resolved in §1.2, §3.1, and §6** by making `line_end` propagation through the
+server-dispatch route and tests part of span-enrichment work.
+
+### 34. Net-token attribution needs compression/resolver telemetry, not aggregate usage only
+
+The sixth review correctly gates on resident-saved-minus-recovery-spent tokens,
+but `token_tracker_t` and the current provider usage paths expose aggregate
+request usage, not which tokens came from a specific compressed entry, resolver
+call, recovered span, or synthetic Responses continuation. Without per-entry
+transform telemetry, the benchmark can show a net session delta but cannot decide
+which fold type, task class, or resolver should remain enabled.
+
+**→ Resolved in §1.1, §6, and §7** by adding per-entry compression accounting:
+entry id, transform, resident tokens saved, resolver invoked/not invoked,
+recovered bytes/tokens, provider round-trips, and latency.
+
 ## Goal
 
 Cut the per-turn token cost *and* the per-turn dollar cost of pre-injection
@@ -679,6 +729,10 @@ list. Each entry carries, minimally:
   assembler when present;
 - `transform` — which fold was applied (`none` | `code_fold` | `json_fold`), so
   the metadata is visible to the model and the test suite.
+- `metrics` — entry id, original/resident byte and token estimates, transform,
+  resolver kind, resolver invoked/not invoked, recovered bytes/tokens, provider
+  round-trips, and latency. Aggregate provider usage cannot attribute net savings
+  to a specific fold, so this per-entry telemetry is part of the IR contract.
 
 Where recall-economy has already landed its preview/read contract, this IR
 **is** that contract extended with `original_ref` + `transform`; it is not a
@@ -704,7 +758,10 @@ Span-aware folding has a real data dependency: P0/P1 must either extend
 `/v1/code/search` and `code_search_hit_t` with `line`/`line_end`/`kind`, or do a
 bounded secondary `index_structure`/`find_symbol` lookup for selected files. When
 spans are absent, the folder falls back to path + snippet folding and must not
-pretend it has a byte-exact body span.
+pretend it has a byte-exact body span. If the enrichment path uses the server
+NDJSON/RPC `index.structure` handler, that route must also propagate `line_end`;
+today the KB HTTP endpoint emits it and the client parses it, but
+`handle_index_structure()` serializes only `line`.
 
 ### §1.3 The resident form is intentionally lossy (resolves review #2)
 
@@ -883,6 +940,9 @@ surface rather than creating a generic `fetch` verb:
   Aimee MCP resolver such as `code_span_get` (path/project + line range, with
   workspace authorization), or prove that the target client has a native
   filesystem read tool for the same workspace before allowing lossy code folds.
+  A server-side `code_span_get` must read through the active workspace-provider
+  boundary (`shared`, `detached`, or `mirror`) rather than directly opening the
+  indexed path on the server host.
 - `rehydrate` — this proposal: folded ephemeral/compressed resident form →
   byte-exact original for data that cannot be re-read cheaply or safely.
 
@@ -981,7 +1041,9 @@ complete:
   the wrapper itself over the existing `memory.get` / `kb_client_memory_get`
   backend;
 - durable code recovery is backed by a callable resolver (`code_span_get` or a
-  proven client-native range read), not merely `find_symbol` metadata;
+  proven client-native range read), not merely `find_symbol` metadata. If Aimee
+  owns the resolver, it uses the workspace provider / detached-runner channel and
+  carries the active workspace identity in the handle or request;
 - MCP discovery metadata and generated tool goldens include the new
   `rehydrate` surface, and the handle shape is visible enough for the model to
   know which resolver applies;
@@ -1125,7 +1187,8 @@ this proposal.
   broken out **by task class**. The §1 default flip requires net positive; a task
   class where recovery is frequent enough to erase the saving must keep folds
   non-lossy there or not flip. Latency from recovery round-trips counts against the
-  same gate.
+  same gate. The attribution comes from §1.1 per-entry compression/resolver
+  telemetry, not only aggregate provider usage.
 - **Realized cache** — provider `cache_read` / `cache_creation` tokens, read from
   the cost-accounting proposal's **ledger fields** (not re-derived), under both
   placements (§2.2).
@@ -1143,7 +1206,9 @@ this proposal.
   The fixture must distinguish `find_symbol` location discovery from actual
   content recovery: code folds need a callable `code_span_get`/range-read or
   proven client-native `read_file`, and memory folds need a callable `memory_get`
-  MCP wrapper if memory handles are emitted.
+  MCP wrapper if memory handles are emitted. For server-owned `code_span_get`,
+  tests cover shared, detached, and mirror workspace-provider behavior or the
+  implementation explicitly restricts the resolver to supported provider kinds.
 - **Prompt-injection / sensitivity fixtures** — for both compressed previews and
   rehydrated originals (a folded preview must not become an injection vector, and
   a rehydrate must not cross scope).
@@ -1166,6 +1231,9 @@ this proposal.
 - **MCP metadata parity** — `mcp_build_tools_list()` and
   `server_mcp_call_table.inc` agree for `memory_get`, `code_span_get`/range read,
   and `rehydrate`, with generated/golden tool metadata updated.
+- **Span propagation parity** — `/v1/code/search`, `/v1/code/structure`, the
+  server-dispatch `index.structure` route, and the MCP/envelope rendering path
+  preserve `line` and `line_end` consistently when span enrichment is enabled.
 - **Request-body serialization** (§2.4) asserting client cache controls survive.
 - **Runtime OpenAPI freshness** — if `X-Aimee-Compress` is documented, both
   `api/openapi-server-v1.yaml` and generated `src/server/openapi_server_data.h`
@@ -1193,9 +1261,11 @@ this proposal.
   folder recovers via a durable code-span/range read, so its
   forced-rehydration accuracy A/B and its default-flip candidacy need a real
   callable resolver: either add an Aimee MCP `code_span_get`-style tool or prove
-  the target client has a scoped native file read. `memory_get` is required only
-  before memory handles are emitted. This phase does **not** require the new
-  in-process handle store or `rehydrate`.
+  the target client has a scoped native file read. If Aimee adds `code_span_get`,
+  it resolves through the workspace-provider / detached-runner boundary and
+  includes `line_end` propagation fixes on server-dispatch `index.structure`.
+  `memory_get` is required only before memory handles are emitted. This phase
+  does **not** require the new in-process handle store or `rehydrate`.
 - **P2e — Rehydration handle (§3) for ephemeral folds.** When ephemeral folding
   (JSON/tool-result) enters scope it brings the in-process handle store with the
   full §3.2 safety contract, the `rehydrate` MCP tool + metadata goldens, and the
@@ -1236,6 +1306,12 @@ this proposal.
   `rehydrate` store. They need the same workspace/session/bearer scoping and
   denial tests; `find_symbol` metadata alone must not be treated as content
   authorization.
+- **Workspace-provider bypass.** A server-side `code_span_get` that opens indexed
+  paths directly can read stale mirror content, fail for detached workspaces, or
+  cross into a server-local path outside the user's active workspace. Mitigated by
+  routing source reads through the workspace provider / detached-runner boundary,
+  or by restricting lossy code folds to clients with proven native file-read
+  authority for the same workspace.
 - **Inert or misplaced flags.** New names such as `ingress_compress_enabled`,
   `ingress_rehydrate_*`, or `curator_failure_mining_enabled` can look reviewed
   while remaining unsettable. Mitigated by requiring config load/save, CLI,
@@ -1268,6 +1344,11 @@ this proposal.
   preferable, but the model must not be misled into thinking it recovered the exact
   folded text. Mitigated by carrying the version/hash drift signal and testing it
   (§6), and by reserving the byte-exact guarantee for stored-bytes ephemeral folds.
+- **Span truncation through server dispatch.** `line_end` exists in the KB HTTP
+  code-structure response, but the server-dispatch `index.structure` route
+  currently drops it. A code fold that depends on that route may recover only a
+  start line or an over-broad range. Mitigated by span propagation parity tests
+  before enabling lossy code folds.
 - **Synthetic Responses tool-call leakage.** If Aimee injects resolver functions
   into `agent_execute_messages()` and fails to consume them internally, Codex will
   receive unknown synthetic calls or mismatched `function_call_output` state.
@@ -1283,3 +1364,7 @@ this proposal.
   numbers look excellent. Mitigated by measuring recovery rate and net token delta
   per task class (§6) and gating the §1 default flip on **net** positive, never on
   resident reduction alone.
+- **Aggregate usage hides bad transforms.** Provider usage can show a net session
+  win while one transform or resolver is consistently negative. Mitigated by
+  per-entry compression/resolver telemetry in the IR and task-class breakdowns
+  before any default flip (§1.1, §6).
