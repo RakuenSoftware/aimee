@@ -268,9 +268,10 @@ void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len)
 
    /* Codex (ChatGPT OAuth): when the thin client supplied an account id this
     * turn and the agent's stored headers don't already carry it, inject the
-    * headers the codex backend requires. Lets a codex agent be configured
-    * without the server holding any codex creds. */
-   if (strcmp(agent->provider, "codex") == 0 && g_request_codex_account_id[0] &&
+    * headers the codex backend requires. Keyed on the codex-oauth auth type so
+    * it fires regardless of the provider label (the codex adapter's provider is
+    * "chatgpt"). Lets a codex agent be configured without server-held creds. */
+   if (strcmp(agent->auth_type, "codex-oauth") == 0 && g_request_codex_account_id[0] &&
        !strstr(buf, "ChatGPT-Account-ID:"))
    {
       if (!strstr(buf, "originator:"))
