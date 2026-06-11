@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 fifteenth review)
+- **Date:** 2026-06-11 (revised post-PR-#183 sixteenth review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -566,6 +566,44 @@ A fresh pass over the *cost* and *resource-lifecycle* of the long-lived states
     **never** an auto-pass. A parked pipeline must not pin a growing index. **Resolved
     in §4, §5, §6, and §10.**
 
+## PR #183 sixteenth review — admission, merge execution, and cost scope
+
+The fifteenth review added parked-gate cleanup and a total cap, but those changes
+expose three places where the proposal still overstates or contradicts the current
+codebase.
+
+48. **"One pipeline at a time" conflicts with parked gates unless admission is
+    explicit.** §11 says v1 has one pipeline run at a time, while #47 talks about
+    many parked pipelines and released resources. Implementation must choose the
+    admission rule: either a parked gate continues to occupy the single authoring
+    slot (simple, but one forgotten gate blocks all future runs), or entering a
+    gate transitions the run to a `parked`/`waiting_human` class that releases the
+    active slot while retaining ledger ownership and preventing two active
+    reviewers from mutating the same branch/PR. Without that distinction, the gate
+    lifecycle is ambiguous and resource cleanup can accidentally introduce
+    unscheduled parallel pipelines. **Resolved in §1, §4, §5, §10, §11, and §12.**
+49. **The whole-pipeline cost cap must define whether implementation-agent spend
+    is in scope.** #46 says the total cap spans proposal + implementation + PR
+    phases, but the ledger costs described so far are roundtable pass costs. The
+    implementation phase is "normal coding," not a roundtable call, and may not
+    expose comparable `cost_usd` without using Aimee's token-audit / agent-cost
+    surfaces. Choose one contract: either the cap is explicitly
+    `roundtable_pipeline_max_roundtable_cost_usd` (roundtable child runs only), or
+    the ledger must ingest non-roundtable implementation-agent spend from the
+    existing token/cost accounting and mark unknown implementation cost as
+    incomplete evidence. A cap that claims to include implementation but only sums
+    review passes is misleading. **Resolved in §3, §4, §6, and §10.**
+50. **`git_pr` does not merge today; pass→merge needs a real executor contract.**
+    The proposal's table says PR open/merge/diff capture exists via
+    `git_pr`/`mcp_git_run`, but the current `git_pr` tool supports
+    create/view/list/edit/checks/watch/merge_status/wait — not merge. A gate pass
+    must either add a first-class workspace-aware `git_pr action=merge` (with
+    admin/squash/rebase options, expected head SHA, and captured merge SHA) or
+    explicitly use `mcp_git_run`/`gh pr merge` through the workspace/forge-token
+    authority and persist the command, output, exit code, and merge SHA. Treating
+    merge as already covered hides a build gap at the most important state
+    transition. **Resolved in §5, §8, §9, and §10.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -634,7 +672,11 @@ Transitions:
    which pushes the fix to the **same recorded implementation branch/PR** (#43).
 
 Every state is durable (§4) so a human gate can be answered hours or days later,
-across a server restart or a new agent session.
+across a server restart or a new agent session. For v1 admission control, only
+one pipeline may be **active** in drafting/review/implementing at a time; an
+unanswered gate may either keep that active slot or enter an explicit
+`parked`/`waiting_human` class that releases it (#48). The implementation must
+choose one rule and record it in the ledger before allowing another run to start.
 
 ## §2 The two roundtable applications
 
@@ -691,7 +733,8 @@ Two distinct loop levels — keep them un-confused:
 
 **Done-bar (configurable; correctness condition, not a budget).** A phase leaves
 its review loop only when the latest REVIEW result satisfies the configured bar,
-read from real engine fields (`roundtable_result_t`):
+read from the captured terminal envelope built from real engine fields plus
+serialization/attempt state:
 
 Every bar first requires `roundtable_terminal_envelope_valid(envelope) == true` —
 the **single canonical validity predicate** (#41/#44), evaluated over the captured
@@ -755,13 +798,15 @@ prevents cross-pass echo.)
 
 **Non-termination backstop.** Besides the optional pass ceiling, the inherited
 `ensemble_max_cost_usd` (per call), a cumulative `roundtable_pipeline_max_cost_usd`
-(per phase), and a cumulative `roundtable_pipeline_max_total_cost_usd` (whole
-pipeline, §6) bound spend; any tripping escalates to the human rather than silently
-passing. **The per-phase cap accumulates across fail-return re-entries of that
-phase — a fail-return never resets it** (#46) — and the whole-pipeline cap spans
-proposal + implementation + PR phases together. Infrastructure retries under one
-pass id are separately bounded by `roundtable_pipeline_max_attempts_per_pass` (#29)
-so capture failures do not consume correctness passes but also cannot spin forever.
+(per phase), and a cumulative total cap (§6) bound spend; any tripping escalates
+to the human rather than silently passing. **The per-phase cap accumulates across
+fail-return re-entries of that phase — a fail-return never resets it** (#46). The
+total cap's accounting scope must be explicit (#49): either it covers roundtable
+child-run costs only, or it also includes normal implementation-agent spend from
+the existing token/cost accounting and treats unknown implementation cost as
+incomplete evidence. Infrastructure retries under one pass id are separately
+bounded by `roundtable_pipeline_max_attempts_per_pass` (#29) so capture failures
+do not consume correctness passes but also cannot spin forever.
 
 ## §4 Hybrid state — the resumable pipeline ledger
 
@@ -784,7 +829,9 @@ must choose one explicit path:
 
 Either way, the durable record holds:
 
-- pipeline id, state (§1), phase, created/updated timestamps, and schema version;
+- pipeline id, state (§1), phase, admission class (`active` vs `parked` /
+  `waiting_human` if parked gates release the single active slot), created/updated
+  timestamps, and schema version (#48);
 - artifact refs: proposal path/blob/ref, implementation branch, diff ref or
   chunk manifest, whole-origin ref/hash (working blob/path, db2 `docs` row, or
   explicit artifact payload), review-chunk index refs (`kb_documents` rows if that
@@ -810,7 +857,9 @@ Either way, the durable record holds:
   workspace id/provider (`shared`, `detached`, or `mirror`), dedicated worktree
   path if any, head/base commit SHAs, dirty-state snapshot, PR number(s), PR URLs,
   merge SHAs, forge-token/`gh` authority status, and last checked mergeability;
-- the human-gate verdicts, fail reasons, actor/timestamp, and resume action taken.
+- the human-gate verdicts, fail reasons, actor/timestamp, resume action taken,
+  and cost-scope evidence for total-cap accounting, including whether
+  implementation-agent spend is included, unknown, or out of scope (#49).
 
 **Result capture is server-worker-owned, not agent-poll (#10/#12/#18).** The
 done-bar is read from the roundtable run's structured result, but that lives in
@@ -884,6 +933,11 @@ worktree per open pipeline. An optional `roundtable_pipeline_gate_ttl_h` (§6) m
 a gate left unanswered past the TTL to `abandoned` with full child-run-stop +
 cleanup (#31) — never an auto-pass.
 
+If v1 keeps the "one active pipeline" limit, this parked state must also say
+whether the gate still occupies that slot or has released it; releasing the slot
+requires branch/PR-level ownership checks so a second active pipeline cannot
+mutate the same recorded branch or PR (#48).
+
 ## §5 The two human gates
 
 At `gate1_pending` / `gate2_pending` the agent **pauses** and surfaces a compact
@@ -935,6 +989,12 @@ cannot complete under policy (auth, protected branch, hung checks), the pipeline
 parks at the gate with the reason surfaced — it never reports a phase advanced
 when the merge did not land.
 
+Because `git_pr` does not currently merge (#50), implementation must either add a
+workspace-aware `git_pr action=merge` or explicitly route the merge through
+`mcp_git_run`/`gh pr merge` with the workspace/forge-token authority. The ledger
+records the executor, command/options, expected head SHA, output, exit code, and
+merge SHA.
+
 ## §6 Config
 
 New keys (full plumbing: `config.h` field, `config_fields.c`,
@@ -956,12 +1016,17 @@ roundtable config surface is scalar keys like `roundtable.max_rounds`,
 - `roundtable_pipeline_max_cost_usd` — double, cumulative per-phase spend cap;
   0 = unbounded; tripping escalates. **Accumulates across fail-return re-entries of
   the phase; a fail-return never resets it** (#46).
-- `roundtable_pipeline_max_total_cost_usd` — double, cumulative whole-pipeline
-  spend cap across proposal + implementation + PR phases; 0 = unbounded; tripping
-  escalates (#46).
+- `roundtable_pipeline_max_total_cost_usd` — double, cumulative pipeline spend
+  cap; 0 = unbounded; tripping escalates (#46). The implementation must define
+  whether this is roundtable-child-run cost only or includes normal implementation
+  agent spend via token/cost accounting (#49); unknown in-scope implementation
+  cost blocks claiming the cap is satisfied.
 - `roundtable_pipeline_gate_ttl_h` — int hours, **default 0 (no expiry)**; >0 moves
   a gate left unanswered past the TTL to `abandoned` with full child-run-stop +
   cleanup (#31), never an auto-pass (#47).
+- `roundtable_pipeline_parked_releases_slot` — bool, default chosen by
+  implementation policy; if true, a parked human gate releases the single active
+  pipeline admission slot while retaining branch/PR ownership guards (#48).
 - `roundtable_pipeline_unknown_context_tokens` — int, conservative fallback chunk
   input budget used only when a panel participant's context window cannot be
   resolved; alternatively the implementation may make unknown context a hard
@@ -1029,6 +1094,9 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
 - **Hard:** workspace-aware git/forge authority for PR create/merge and diff
   capture. Pipeline git/gh operations must route through Aimee's git tools or
   workspace provider so shared, detached, and mirror workspaces behave consistently.
+- **Hard for merge:** a pass→merge executor. `git_pr` can create/view/edit/check
+  PRs and report merge status, but it does not merge today; add `git_pr merge` or
+  route `gh pr merge` through `mcp_git_run` with captured evidence (#50).
 - **Hard if exposing HTTP:** route namespace selection. `GET /v1/pipeline/status`
   already belongs to the KB/corpus ingest pipeline, so roundtable-authoring routes
   must use a distinct namespace or remain CLI/MCP-only in v1 (#45).
@@ -1061,8 +1129,8 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
   git/PR surface.
 - **P3 — Human gates + fail-return edges** end to end, with the durable digest,
   PR/worktree drift validation through the workspace-aware git surface,
-  mergeability/auth checks, and reason-to-brief feedback. This closes the full
-  loop.
+  mergeability/auth checks, an explicit merge executor (#50), parked-gate admission
+  policy (#48), and reason-to-brief feedback. This closes the full loop.
 - **P4 — Config surface** for all keys + generated docs + tests (lands with the
   phase that first reads each key, not deferred).
 
@@ -1217,10 +1285,22 @@ ledger) before the full idea→merge pipeline of P2/P3.
   the phase; the per-phase cap continues from its prior total (does not reset), and
   a whole-pipeline cap trips across proposal + implementation + PR phases, each
   escalating rather than auto-passing.
+- **Total cost accounting scope (#49)** — run a pipeline with implementation-agent
+  work between review phases; assert the total cap either explicitly excludes that
+  spend (roundtable-only naming/contract) or includes it from token/cost accounting,
+  and unknown in-scope implementation cost prevents claiming the cap is satisfied.
 - **Parked-gate resource release + TTL (#47)** — at a gate, the review-scoped index
   is dropped and correctly re-ingested from the origin on resume (same content
   hash, retrieval still works); with a TTL set, an unanswered gate moves to
   `abandoned` with child-run-stop + cleanup, never an auto-pass.
+- **Parked-gate admission (#48)** — with one pipeline parked at a gate, start a
+  second pipeline only if the selected policy releases the active slot; either way,
+  branch/PR ownership prevents two active/restarted runs from mutating the same
+  recorded branch or PR.
+- **Merge executor contract (#50)** — pass a gate with a mergeable PR and assert
+  the pipeline uses either `git_pr action=merge` or an explicitly authorized
+  `mcp_git_run`/`gh pr merge`, records expected head SHA/output/exit code/merge
+  SHA, and does not advance when the command fails or merges a different head.
 
 ## §11 Non-goals (v1)
 
@@ -1237,7 +1317,11 @@ ledger) before the full idea→merge pipeline of P2/P3.
 - A fully autonomous, gate-less pipeline — the two human gates are mandatory by
   design; "configurable max passes" bounds cost, it does not remove the human.
 - Engine changes to the roundtable. The pipeline is strictly on top.
-- Multi-proposal/parallel-pipeline scheduling (one pipeline run at a time in v1).
+- Multi-proposal/parallel-pipeline scheduling beyond the explicit parked-gate
+  admission rule (#48). v1 may allow many parked/waiting-human rows only if they
+  do not count as active and branch/PR ownership prevents mutation overlap; it
+  still permits at most one active drafting/review/implementing runner unless a
+  later proposal adds scheduling.
 
 ## §12 Open questions
 
@@ -1253,6 +1337,11 @@ ledger) before the full idea→merge pipeline of P2/P3.
 - **Who is the driving agent at the gate?** When paused at a human gate across
   sessions, does a fresh agent resume from the ledger automatically, or does the
   human re-invoke `aimee pipeline resume <id>`?
+- **Parked-gate admission:** does a human gate release the single active pipeline
+  slot (`roundtable_pipeline_parked_releases_slot=true`) or block new authoring
+  runs until answered/abandoned?
+- **Cost scope:** is `roundtable_pipeline_max_total_cost_usd` roundtable-only, or
+  does it include normal implementation-agent spend via token/cost accounting?
 - **Per-phase config:** do the proposal and PR phases want independent done-bars /
   ceilings by default, or one shared set with optional overrides?
 - **DRAFT seeding:** does the `drafting` step take only the idea, or also a
