@@ -23,11 +23,11 @@ extern "C"
     * engine fields. */
    typedef struct
    {
-      int present;       /* a terminal result was captured at all */
-      int parse_ok;      /* the result JSON parsed */
-      int has_error;     /* the result carried an "error" field */
-      int lost_result;   /* capture genuinely failed (run evicted / no payload) */
-      int is_draft;      /* draft-mode pass (artifact, no items) vs review */
+      int present;     /* a terminal result was captured at all */
+      int parse_ok;    /* the result JSON parsed */
+      int has_error;   /* the result carried an "error" field */
+      int lost_result; /* capture genuinely failed (run evicted / no payload) */
+      int is_draft;    /* draft-mode pass (artifact, no items) vs review */
       int artifact_present;
       /* engine terminal flags */
       int converged;
@@ -79,10 +79,10 @@ extern "C"
    /* Outer-loop next action (proposal section 3). */
    typedef enum
    {
-      RTP_ACT_PASS = 0,     /* done-bar met -> surface gate / advance */
-      RTP_ACT_REVISE = 1,   /* blocking items remain -> revise + re-review */
-      RTP_ACT_RETRY = 2,    /* infra fault -> re-run same pass id, new attempt */
-      RTP_ACT_ESCALATE = 3  /* ceiling/cost/invalid-evidence -> escalate to human */
+      RTP_ACT_PASS = 0,    /* done-bar met -> surface gate / advance */
+      RTP_ACT_REVISE = 1,  /* blocking items remain -> revise + re-review */
+      RTP_ACT_RETRY = 2,   /* infra fault -> re-run same pass id, new attempt */
+      RTP_ACT_ESCALATE = 3 /* ceiling/cost/invalid-evidence -> escalate to human */
    } rtp_action_t;
 
    typedef struct
@@ -95,9 +95,9 @@ extern "C"
 
    typedef struct
    {
-      int pass_no;                /* current outer pass, 1-based */
-      int attempt_no;             /* current attempt within the pass, 1-based */
-      double phase_cost_usd;      /* cumulative phase spend so far */
+      int pass_no;           /* current outer pass, 1-based */
+      int attempt_no;        /* current attempt within the pass, 1-based */
+      double phase_cost_usd; /* cumulative phase spend so far */
       int accepted_question_count;
    } rtp_loop_state_t;
 

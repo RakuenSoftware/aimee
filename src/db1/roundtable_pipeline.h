@@ -59,17 +59,17 @@ extern "C"
 #define RTP_CAP_CANCELLED "cancelled"
 #define RTP_CAP_FAILED    "failed"
 
-#define RTP_TS_LEN      32
-#define RTP_HASH_LEN    72
-#define RTP_SHORT_LEN   32
-#define RTP_NAME_LEN    128
-#define RTP_PATH_LEN    512
-#define RTP_IDEA_LEN    2048
-#define RTP_BRIEF_LEN   4096
-#define RTP_DIGEST_LEN  4096
-#define RTP_SNAP_LEN    8192
-#define RTP_REASON_LEN  1024
-#define RTP_RUNID_LEN   128
+#define RTP_TS_LEN     32
+#define RTP_HASH_LEN   72
+#define RTP_SHORT_LEN  32
+#define RTP_NAME_LEN   128
+#define RTP_PATH_LEN   512
+#define RTP_IDEA_LEN   2048
+#define RTP_BRIEF_LEN  4096
+#define RTP_DIGEST_LEN 4096
+#define RTP_SNAP_LEN   8192
+#define RTP_REASON_LEN 1024
+#define RTP_RUNID_LEN  128
 
    typedef struct
    {
@@ -218,8 +218,8 @@ extern "C"
    int rtp_attempt_supersede_others(int pass_id, int keep_attempt_id);
 
    /* ---- gates ---- */
-   int rtp_gate_create(int pipeline_id, int gate_no, int pr_number,
-                       const char *expected_head_sha, int *out_id);
+   int rtp_gate_create(int pipeline_id, int gate_no, int pr_number, const char *expected_head_sha,
+                       int *out_id);
    int rtp_gate_get(int pipeline_id, int gate_no, rtp_gate_t *out);
    int rtp_gate_update(const rtp_gate_t *gate);
 

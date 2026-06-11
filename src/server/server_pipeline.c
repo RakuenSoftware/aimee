@@ -63,10 +63,8 @@ static void env_from_ledger(const rtp_pass_t *p, const rtp_attempt_t *a, rtp_env
       e->cost_capped = a->cost_capped;
       e->deadline_hit = a->deadline_hit;
       e->cancelled = a->cancelled;
-      e->has_error = (strcmp(a->capture_status, RTP_CAP_FAILED) == 0 && !a->truncated &&
-                      !a->degraded)
-                         ? 1
-                         : 0;
+      e->has_error =
+          (strcmp(a->capture_status, RTP_CAP_FAILED) == 0 && !a->truncated && !a->degraded) ? 1 : 0;
       e->cost_usd = a->cost_usd;
       e->cost_known = a->cost_known;
    }
@@ -386,7 +384,8 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    int id = (int)jo_num(req, "pipeline_id", 0);
    if (id <= 0)
-      return server_send_error(conn, "usage: aimee pipeline advance <id> [--artifact <text>]", NULL);
+      return server_send_error(conn, "usage: aimee pipeline advance <id> [--artifact <text>]",
+                               NULL);
    rtp_run_t run;
    if (rtp_run_get(id, &run) != 0)
       return server_send_error(conn, "pipeline: not found", NULL);
@@ -429,8 +428,7 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (have && strcmp(latest.status, RTP_PASS_OPEN) == 0)
    {
       rtp_attempt_t a;
-      if (rtp_attempt_current(latest.id, &a) == 0 &&
-          strcmp(a.capture_status, RTP_CAP_PENDING) == 0)
+      if (rtp_attempt_current(latest.id, &a) == 0 && strcmp(a.capture_status, RTP_CAP_PENDING) == 0)
       {
          cJSON *resp = jo_ok();
          cJSON_AddStringToObject(resp, "action", "waiting");
@@ -507,8 +505,8 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          rtp_pass_update(&latest);
          cJSON *body = cJSON_CreateObject();
          cJSON_AddStringToObject(body, "task", artifact);
-         cJSON_AddStringToObject(body, "mode", strcmp(latest.mode, RTP_MODE_DRAFT) == 0 ? "draft"
-                                                                                       : "review");
+         cJSON_AddStringToObject(body, "mode",
+                                 strcmp(latest.mode, RTP_MODE_DRAFT) == 0 ? "draft" : "review");
          if (run.brief[0])
             cJSON_AddStringToObject(body, "brief", run.brief);
          cJSON_AddNumberToObject(body, "pipeline_pass_id", latest.id);
@@ -548,9 +546,8 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       if (strcmp(run.state, RTP_STATE_IMPLEMENTING) == 0 && artifact && artifact[0])
          rtp_run_set_state(id, RTP_STATE_PR_REVIEW, RTP_PHASE_IMPL);
       else
-         return server_send_error(conn,
-                                  "pipeline: nothing to advance in this state without an artifact",
-                                  NULL);
+         return server_send_error(
+             conn, "pipeline: nothing to advance in this state without an artifact", NULL);
       rtp_run_get(id, &run);
    }
    if ((!artifact || !artifact[0]) && strcmp(mode, RTP_MODE_REVIEW) == 0)

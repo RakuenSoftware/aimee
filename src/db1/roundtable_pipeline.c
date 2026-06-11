@@ -82,9 +82,9 @@ static void rtp_map_run(rtp_run_t *r, sqlite3_stmt *s)
    db1_copy_col_text(r->updated_at, sizeof(r->updated_at), s, 34);
 }
 
-#define RTP_RUN_COLS                                                                              \
-   "id, idea, state, phase, admission_class, schema_version, done_bar, brief, gate_digest,"       \
-   " proposal_ref, proposal_origin_hash, diff_ref, diff_origin_hash, chunk_index_ref, repo_root," \
+#define RTP_RUN_COLS                                                                               \
+   "id, idea, state, phase, admission_class, schema_version, done_bar, brief, gate_digest,"        \
+   " proposal_ref, proposal_origin_hash, diff_ref, diff_origin_hash, chunk_index_ref, repo_root,"  \
    " remote, base_branch, head_branch, workspace_id, workspace_provider, worktree_path, head_sha," \
    " base_sha, proposal_pr_number, proposal_pr_url, impl_pr_number, impl_pr_url, cost_scope,"      \
    " cost_source, cost_version, proposal_phase_cost_usd, impl_phase_cost_usd, total_cost_usd,"     \
@@ -98,8 +98,7 @@ int rtp_run_get(int id, rtp_run_t *out)
    if (!db)
       return -1;
    sqlite3_stmt *stmt = NULL;
-   static const char *sql =
-       "SELECT " RTP_RUN_COLS " FROM roundtable_pipeline_runs WHERE id = ?";
+   static const char *sql = "SELECT " RTP_RUN_COLS " FROM roundtable_pipeline_runs WHERE id = ?";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
    sqlite3_bind_int(stmt, 1, id);
@@ -304,10 +303,10 @@ static void rtp_map_pass(rtp_pass_t *p, sqlite3_stmt *s)
    db1_copy_col_text(p->updated_at, sizeof(p->updated_at), s, 25);
 }
 
-#define RTP_PASS_COLS                                                                          \
-   "id, pipeline_id, phase, mode, pass_no, status, artifact_hash, converged, envelope_valid,"  \
-   " blocking_count, suggestion_count, nit_count, open_questions, coverage_gaps, items_round," \
-   " artifact_round, best_round, rounds_run, cost_usd, result_hash, is_chunked, chunk_total,"  \
+#define RTP_PASS_COLS                                                                              \
+   "id, pipeline_id, phase, mode, pass_no, status, artifact_hash, converged, envelope_valid,"      \
+   " blocking_count, suggestion_count, nit_count, open_questions, coverage_gaps, items_round,"     \
+   " artifact_round, best_round, rounds_run, cost_usd, result_hash, is_chunked, chunk_total,"      \
    " chunk_done, synthesis_done, created_at, updated_at"
 
 int rtp_pass_get(int id, rtp_pass_t *out)
@@ -383,9 +382,9 @@ int rtp_pass_latest(int pipeline_id, const char *phase, rtp_pass_t *out)
    if (!db)
       return -1;
    sqlite3_stmt *stmt = NULL;
-   static const char *sql = "SELECT " RTP_PASS_COLS
-                            " FROM roundtable_pipeline_passes WHERE pipeline_id=? AND phase=?"
-                            " ORDER BY pass_no DESC LIMIT 1";
+   static const char *sql =
+       "SELECT " RTP_PASS_COLS " FROM roundtable_pipeline_passes WHERE pipeline_id=? AND phase=?"
+       " ORDER BY pass_no DESC LIMIT 1";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
    sqlite3_bind_int(stmt, 1, pipeline_id);
@@ -474,9 +473,9 @@ static void rtp_map_attempt(rtp_attempt_t *a, sqlite3_stmt *s)
    db1_copy_col_text(a->terminal_at, sizeof(a->terminal_at), s, 21);
 }
 
-#define RTP_ATTEMPT_COLS                                                                       \
-   "id, pass_id, attempt_no, run_id, is_current, capture_status, terminal_status, parse_status," \
-   " envelope_valid, items_truncated, truncated, degraded, cost_capped, deadline_hit, cancelled," \
+#define RTP_ATTEMPT_COLS                                                                           \
+   "id, pass_id, attempt_no, run_id, is_current, capture_status, terminal_status, parse_status,"   \
+   " envelope_valid, items_truncated, truncated, degraded, cost_capped, deadline_hit, cancelled,"  \
    " lost_result, result_hash, result_snapshot, cost_usd, cost_known, submitted_at, terminal_at"
 
 int rtp_attempt_get_by_run(const char *run_id, rtp_attempt_t *out)

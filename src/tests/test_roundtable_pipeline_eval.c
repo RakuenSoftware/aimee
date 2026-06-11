@@ -38,8 +38,8 @@ static void test_validity_predicate(void)
       const char *name;
       int *flag;
    } flags[] = {
-       {"truncated", &e.truncated},   {"items_truncated", &e.items_truncated},
-       {"degraded", &e.degraded},     {"cost_capped", &e.cost_capped},
+       {"truncated", &e.truncated},       {"items_truncated", &e.items_truncated},
+       {"degraded", &e.degraded},         {"cost_capped", &e.cost_capped},
        {"deadline_hit", &e.deadline_hit}, {"cancelled", &e.cancelled},
        {"lost_result", &e.lost_result},
    };

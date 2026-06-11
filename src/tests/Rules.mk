@@ -767,6 +767,10 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
 	                                $(OBJDIR)/cmd_init.o \
 	                                $(OBJDIR)/server/server_trigger.o $(OBJDIR)/db1/db1_trigger.o \
 	                                $(OBJDIR)/db1/pipelines.o $(OBJDIR)/db1/token_audit.o \
+	                                $(OBJDIR)/db1/roundtable_pipeline.o $(OBJDIR)/db1/local_operator.o \
+	                                $(OBJDIR)/server/server_pipeline.o \
+	                                $(OBJDIR)/server/roundtable_pipeline_capture.o \
+	                                $(OBJDIR)/server/roundtable_pipeline_eval.o \
 	                                $(OBJDIR)/server/delegate_backend.o $(OBJDIR)/server/delegate_backend_local.o \
 	                                $(OBJDIR)/server/delegate_backend_ssh.o $(OBJDIR)/server/delegate_backend_docker.o \
 	                                $(OBJDIR)/server/model_provider.o $(OBJDIR)/server/openai_profile.o \
@@ -1746,6 +1750,8 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(OBJDIR)/persona.o $(OBJDIR)/prompts.o \
                            $(OBJDIR)/role_templates.o \
                            $(OBJDIR)/dstr.o $(OBJDIR)/working_profile.o \
+                           $(OBJDIR)/server/roundtable_pipeline_capture.o \
+                           $(OBJDIR)/server/roundtable_pipeline_eval.o \
                            $(DB1_OBJS) \
                            $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

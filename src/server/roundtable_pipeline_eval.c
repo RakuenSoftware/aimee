@@ -108,9 +108,8 @@ rtp_action_t rtp_loop_decide(const rtp_loop_cfg_t *cfg, const rtp_loop_state_t *
       return RTP_ACT_ESCALATE;
    }
 
-   rtp_donebar_result_t db =
-       rtp_donebar_eval(cfg ? cfg->done_bar : RTP_DONEBAR_ZERO_BLOCKING, e,
-                        st ? st->accepted_question_count : 0);
+   rtp_donebar_result_t db = rtp_donebar_eval(cfg ? cfg->done_bar : RTP_DONEBAR_ZERO_BLOCKING, e,
+                                              st ? st->accepted_question_count : 0);
    if (db == RTP_DONEBAR_MET)
       return RTP_ACT_PASS;
    if (db == RTP_DONEBAR_INVALID)
