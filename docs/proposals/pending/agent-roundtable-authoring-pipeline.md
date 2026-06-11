@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 review)
+- **Date:** 2026-06-11 (revised post-PR-#183 third review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -13,9 +13,11 @@
   (`src/headers/config.h`, `src/config.c`, `src/config_fields.c`,
   `src/config_sections.c`, `src/config_save.c`), and the
   driving-agent runbook/skill. It **depends on** the roundtable engine (already on
-  `testing`) and on `agent-directed-pr-review` P1a–c (the brief + structured items
-  + the `ensemble_review` MCP tool). It reuses `gh`/`git` for PR/merge. No changes
-  to the roundtable engine itself.
+  `testing`) and the in-tree `ensemble_review` review surface, with the remaining
+  review contract narrowed to stable terminal result shape/payload semantics. It
+  routes PR/merge/diff work through Aimee's workspace-aware git/PR tools rather
+  than assuming a raw local `gh`/`git` shell. No changes to the roundtable engine
+  itself.
 
 ## Design at a glance
 
@@ -139,6 +141,53 @@ premise.
     performs only after the human pass, with CI-state and branch-policy
     preconditions surfaced rather than assumed.
 
+## PR #183 third review — orchestration ownership and gate correctness
+
+The updated proposal is much closer to the implementation, but a third pass found
+several remaining gaps at the boundary between a durable pipeline and Aimee's
+current live-tool/workspace surfaces:
+
+12. **Eager result capture cannot be a best-effort driving-agent poll.** §4 says
+    the driving agent copies `/v1/runs` results into DB1 "the moment" the child run
+    reaches terminal. If the agent is asleep, disconnected, waiting at a gate, or
+    delayed behind other work, the same eviction/restart race from #10 remains.
+    The capture must be owned by the pipeline orchestrator itself: either a
+    server-side pipeline worker submits the child run and writes the terminal
+    result to DB1 in the same completion path, or the pipeline does not advance
+    and explicitly marks the pass `lost_result`. **Resolved in §4 and §9.**
+13. **The done-bar must treat degraded or incomplete runs as not done.** The
+    current bars check `converged` and item severities, but the real result also
+    carries `truncated`, `degraded`, `cost_capped`, `deadline_hit`, `cancelled`,
+    `items_round`, and `artifact_round`. A pass with truncated items, a degraded
+    best-effort result, a cost/deadline stop, cancellation, or ambiguous
+    items/artifact provenance cannot satisfy a correctness gate. **Resolved in §3
+    and §10.**
+14. **The questions-done bar needs a cap policy.** `roundtable_result_t` can track
+    only `ROUNDTABLE_MAX_QUESTIONS` (16) answered questions / coverage gaps, and
+    long briefs are 4 KB-normalized. `zero_blocking_questions_answered` must reject
+    or split briefs with >16 questions; otherwise "every brief question answered"
+    silently means "every retained question." **Resolved in §3 and §10.**
+15. **GitHub operations must use Aimee's workspace authority, not raw local shell
+    assumptions.** Aimee has a shared/detached/mirror workspace resource plane,
+    `mcp_git_run`, `git_pr`, and a per-workspace forge-token broker. A pipeline
+    resumed from another surface may not have the same local cwd or `gh` auth as
+    the original session. All git/gh operations need to route through the existing
+    workspace provider/git tools and record the workspace id/provider plus forge
+    token availability. **Resolved in §4, §5, §8, and §10.**
+16. **The pipeline needs branch/worktree isolation rules.** "One pipeline at a
+    time" does not protect the user's current checkout. The proposal must require
+    a dedicated proposal branch and implementation branch, and either a dedicated
+    worktree or an explicit clean-worktree preflight before any write. Dirty
+    user changes are a hard stop unless the user explicitly opts into using that
+    checkout. **Resolved in §1, §4, §5, and §10.**
+17. **The dependency section regressed into duplicate/stale wording.** §8 repeats
+    the DRAFT dependency and the relationship section still describes
+    `agent-directed-pr-review` as a pending hard dependency even after #8 says
+    review mode is in tree. The proposal should make the contract precise:
+    review-mode surface exists; remaining gaps are draft-callability, stable
+    terminal result capture, and pipeline orchestration. **Resolved in the
+    relationship table and §8.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -148,14 +197,13 @@ premise.
   `items[]` with a corroboration `count`, plus `answered_questions[]` and
   `coverage_gaps[]`), a deterministic `converged` predicate, `best_round`, and
   inherited cost/deadline bounds. **This proposal adds no engine code.**
-- **`agent-directed-pr-review.md` (pending) is the callable surface and remains a
-  hard dependency for the final contract.** The current tree already exposes an
-  `ensemble_review` MCP entry that queues `delegate.roundtable`, but this
-  pipeline still depends on that proposal's P1 contract being complete: P1a (the
-  **brief**: focus/fixes/invariants/questions, open mandate), P1b (return the
-  structured items to the caller in a stable shape), and P1c (the MCP/async run
-  bridge, `CAP_DELEGATE`-gated). This pipeline is the *orchestration on top* of
-  that surface.
+- **`agent-directed-pr-review.md` (pending) is no longer a broad hard dependency
+  for review mode.** The current tree already exposes `ensemble_review` with a
+  directed brief and structured roundtable result over the async bridge. This
+  pipeline depends only on the stable interface contract that proposal documents:
+  terminal result shape, polling/cancellation semantics, payload bounds, and the
+  item/artifact provenance fields. Draft callability and durable pipeline
+  orchestration remain this proposal's responsibility.
 - **`agent-roundtable-collaborative-drafting.md` (pending residual)** lists
   deeper convergence/economics tests; this proposal's validation (§10) exercises
   exactly those at pipeline scale.
@@ -167,7 +215,7 @@ premise.
 | Multi-round panel, DRAFT + REVIEW modes, deterministic convergence, dedup, severity, cost/deadline bounds | **exists** (engine, `testing`) |
 | Directed review (brief), structured items returned, `ensemble_review` MCP tool (review mode) | **in tree on `testing`** (`mcp_tools.c:610`, `handle_mcp_ensemble_review`); verify result contract (§8) |
 | A **draft**-capable callable path | **gap** — `ensemble_review` forces review mode; DRAFT needs `/v1/delegate/roundtable --mode draft` or a draft MCP sibling (§8) |
-| PR open / merge, diff capture (`git diff`) | **exists** (`gh`, `git`) |
+| PR open / merge, diff capture | **exists via workspace-aware git/PR tools** (`git_pr`, `mcp_git_run`, `gh`/`git` underneath) |
 | Outer REVIEW⇄revise loop, done-bar evaluation, pass ceiling + escalation | **net-new** (§3) |
 | The two human gates + the two fail-return edges | **net-new** (§5) |
 | Persisted, resumable roundtable pipeline ledger (hybrid state) | **net-new or explicit DB1 pipeline extension** (§4) |
@@ -188,15 +236,18 @@ Transitions:
    working `artifact` — but that artifact is `char[8192]`-capped (#9), so DRAFT
    yields a section outline + goal/scope, which the `proposal_review` author-revise
    loop expands section by section. A full proposal is never expected from one
-   DRAFT call.
+   DRAFT call. The pipeline creates or selects a dedicated proposal branch/worktree
+   before writing the proposal file.
 2. **proposal_review** — the §3 outer loop: REVIEW the draft, author-revise from
    the items, re-REVIEW, until the done-bar (§3). Then the agent opens the proposal
-   PR (`gh pr create`, base `testing`, per repo flow) and moves to `gate1_pending`.
+   PR through the workspace-aware PR surface (base `testing`, per repo flow) and
+   moves to `gate1_pending`.
 3. **gate1_pending** — human gate 1 (§5). **pass** → merge proposal PR, move to
    `implementing`. **fail** → the human's reason is appended to the brief and the
    state returns to `proposal_review`.
-4. **implementing** — the agent implements the merged proposal (normal coding;
-   not a roundtable activity), opens the implementation PR, captures the diff.
+4. **implementing** — the agent implements the merged proposal on a dedicated
+   implementation branch/worktree (normal coding; not a roundtable activity),
+   opens the implementation PR, captures the diff.
 5. **pr_review** — the §3 outer loop in REVIEW mode over the diff: REVIEW,
    agent-fix, re-REVIEW, until the done-bar.
 6. **gate2_pending** — human gate 2 (§5). **pass** → merge the implementation PR,
@@ -242,13 +293,22 @@ Two distinct loop levels — keep them un-confused:
 its review loop only when the latest REVIEW result satisfies the configured bar,
 read from real engine fields (`roundtable_result_t`):
 
+Every bar first requires a valid completed result: `truncated == false`,
+`degraded == false`, `cost_capped == false`, `deadline_hit == false`,
+`cancelled == false`, and result provenance that the gate digest can explain. For
+review-mode done-bars, `items_round` must be the round being evaluated; if the
+surfaced artifact comes from a different `artifact_round`/`best_round`, the digest
+must say so and the phase cannot silently pass on mismatched evidence.
+
 - `zero_blocking` *(default)* — `converged == true` and no `items[]` of
   `severity == "blocking"`. Suggestions/nits are surfaced in the gate digest but
   don't block.
 - `zero_blocking_suggestions` — also requires no `suggestion`-severity items
   (nits allowed). Stricter, more passes.
-- `zero_blocking_questions_answered` — `zero_blocking` plus every brief question
-  present in `answered_questions[]` and `coverage_gaps[]` empty.
+- `zero_blocking_questions_answered` — `zero_blocking` plus every accepted brief
+  question present in `answered_questions[]` and `coverage_gaps[]` empty. The
+  brief must contain at most `ROUNDTABLE_MAX_QUESTIONS` (16) questions or be split
+  into multiple review passes; overflow is not treated as answered.
 
 The driving agent computes the bar from the structured items
 (agent-directed-pr-review P1b); it never re-judges convergence itself — it trusts
@@ -302,19 +362,23 @@ Either way, the durable record holds:
   `converged`, blocking/suggestion counts, `cost_usd`, `rounds_run`, `best_round`,
   result hash, and any payload/chunk refs;
 - repository/worktree state: repo root, remote, base branch, head branch,
-  head/base commit SHAs, dirty-state snapshot, PR number(s), PR URLs, merge SHAs,
-  and last checked mergeability;
+  workspace id/provider (`shared`, `detached`, or `mirror`), dedicated worktree
+  path if any, head/base commit SHAs, dirty-state snapshot, PR number(s), PR URLs,
+  merge SHAs, forge-token/`gh` authority status, and last checked mergeability;
 - the human-gate verdicts, fail reasons, actor/timestamp, and resume action taken.
 
-**Result capture is eager, not lazy (#10).** The done-bar is read from the
+**Result capture is orchestrator-owned, not lazy (#10/#12).** The done-bar is read from the
 roundtable run's structured result, but that lives in `/v1/runs` /
 `openai_runs_store`, which is bounded (`OPENAI_RUNS_STORE_MAX 256`, oldest-reused)
-and non-durable. The driving agent therefore copies the structured pass result
-(items + severities + `count`, `converged`, counts, `cost_usd`, `rounds_run`)
-into the DB1 ledger the **moment the run reaches a terminal state** — before any
-further pass, gate, or restart can evict the `/v1/runs` record. The `/v1/runs` id
-is retained only as a historical pointer; the ledger row is the source of truth
-for the done-bar and the gate digest.
+and non-durable. The pipeline orchestrator therefore owns result capture: it
+submits the child run, observes terminal completion, and writes the structured
+pass result (items + severities + `count`, `converged`, validity flags,
+`items_round`, `artifact_round`, counts, `cost_usd`, `rounds_run`) into DB1 in the
+same completion path before any next state transition. If the terminal result
+cannot be captured, the pass is recorded as `lost_result` and the pipeline
+escalates; it never evaluates the done-bar from a missing or later-evicted
+`/v1/runs` record. The `/v1/runs` id is retained only as a historical pointer; the
+ledger row is the source of truth for the done-bar and the gate digest.
 
 This makes the human gate a durable checkpoint: `status` shows where it is and
 the evidence; `gate pass|fail --reason "…"` records the verdict and resumes the
@@ -345,12 +409,14 @@ autopilot actions cover `start`, `advance`, `status`, `list`, `cancel`, `resume`
 `link-plan`, and `link-job`, not pass/fail gates.
 
 Before a **pass** can merge or advance, the resumed agent revalidates the stored
-worktree/PR state: the PR still exists, its head SHA matches the ledger or the
-digest is marked stale, the base branch is still the intended target (`testing`),
-the worktree is clean enough for the operation, `gh`/GitHub auth is available,
-and mergeability has not changed underneath the gate. A failed validation returns
-to the relevant review phase or asks the human for a fresh verdict with the stale
-evidence called out.
+worktree/PR state through Aimee's workspace-aware git surface (`git_pr` /
+`mcp_git_run`, not an unqualified local shell): the PR still exists, its head SHA
+matches the ledger or the digest is marked stale, the base branch is still the
+intended target (`testing`), the dedicated worktree is clean enough for the
+operation, `gh`/GitHub authority is available through local auth or the
+per-workspace forge-token broker, and mergeability has not changed underneath the
+gate. A failed validation returns to the relevant review phase or asks the human
+for a fresh verdict with the stale evidence called out.
 
 **Merge is an explicit, policy-aware step, not an assumed `gh pr merge` (#11).**
 This repo bases PRs on `testing`, enforces branch policy, and has run with CI
@@ -420,15 +486,15 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
   draft MCP sibling — never by overloading the review-only tool. And per #9 the
   DRAFT artifact is ~8 KB-capped, so this path yields a skeleton, not a full
   proposal.
-- **Hard for proposal drafting:** a callable `ROUNDTABLE_DRAFT` path. The existing
-  `/v1/delegate/roundtable` / `aimee delegate roundtable --mode draft` surface is
-  enough if the driving agent can call it; otherwise add a narrow draft MCP
-  sibling rather than overloading the review-only `ensemble_review` tool.
 - **Hard:** durable DB1 checkpointing for the roundtable pipeline. `/v1/runs`
   remains a child-run polling surface only because its store is bounded and
   non-durable.
+- **Hard:** workspace-aware git/forge authority for PR create/merge and diff
+  capture. Pipeline git/gh operations must route through Aimee's git tools or
+  workspace provider so shared, detached, and mirror workspaces behave consistently.
 - **Soft:** the `git diff` range helper (agent-directed-pr-review P2) for the PR
-  phase input; otherwise the agent runs `git diff` itself.
+  phase input; otherwise the pipeline captures the diff through the
+  workspace-aware git surface.
 - **Repo flow:** PRs base `testing`; main promotion is separate and out of scope.
 
 ## §9 Phasing
@@ -436,16 +502,19 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
 - **P0 — Ledger + states + namespace decision.** Choose the DB shape
   (`roundtable_pipeline_runs` tables vs explicit migration of DB1 `pipelines`),
   add the state enum/transitions, artifact refs/hashes, child run references, and
-  the CLI/MCP/HTTP namespace decision (`pipeline` vs `autopilot` extension). No
-  loop yet; states/gates settable manually. Mergeable alone, with restart tests.
+  the CLI/MCP/HTTP namespace decision (`pipeline` vs `autopilot` extension). Also
+  choose the orchestrator-owned terminal result capture path. No loop yet;
+  states/gates settable manually. Mergeable alone, with restart tests.
 - **P1 — Outer review loop + done-bar.** The REVIEW⇄revise loop over
   `ensemble_review`, the configurable done-bar evaluator, the pass ceiling +
   escalation, the echo guard. Drives the PR phase first (single mode, simplest).
 - **P2 — Proposal phase (DRAFT + REVIEW).** Add the `drafting` DRAFT step and the
-  proposal-review loop; wire `gh pr create`/merge for the proposal PR.
+  proposal-review loop; wire proposal PR create/merge through the workspace-aware
+  git/PR surface.
 - **P3 — Human gates + fail-return edges** end to end, with the durable digest,
-  PR/worktree drift validation, mergeability/auth checks, and reason-to-brief
-  feedback. This closes the full loop.
+  PR/worktree drift validation through the workspace-aware git surface,
+  mergeability/auth checks, and reason-to-brief feedback. This closes the full
+  loop.
 - **P4 — Config surface** for all keys + generated docs + tests (lands with the
   phase that first reads each key, not deferred).
 
@@ -466,16 +535,23 @@ ledger) before the full idea→merge pipeline of P2/P3.
 - **Run-store separation** — kill/restart after child `/v1/runs` records are gone;
   the pipeline still resumes from DB1 and marks missing child run details as
   historical evidence, not lost state.
-- **Eager result capture (#10)** — drive ≥256 sibling runs (or force eviction)
-  between a pass completing and the done-bar being read; the pass result is already
-  in DB1, so the done-bar and digest are unaffected by the evicted `/v1/runs`
-  record.
+- **Orchestrator-owned result capture (#10/#12)** — drive ≥256 sibling runs (or
+  force eviction) between a child run completing and an agent polling it; the pass
+  result is already in DB1 because capture happened in the orchestrator's terminal
+  completion path. Simulate a missed terminal result and assert the pass becomes
+  `lost_result`, not done.
 - **DRAFT skeleton + expansion (#9)** — a DRAFT call returns a skeleton within the
   8 KB cap without truncating mid-structure; the author-revise loop grows it to a
   full proposal in the working file, and REVIEW reviews the file/chunks, not the
   capped artifact.
 - **Done-bar config** — each of the three bars stops the loop at the right point
   (suggestions block under bar 2; questions must be answered under bar 3).
+- **Done-bar validity flags** — `truncated`, `degraded`, `cost_capped`,
+  `deadline_hit`, `cancelled`, lost result, or ambiguous `items_round` /
+  `artifact_round` provenance prevents a done-bar pass and escalates.
+- **Question cap** — a brief with >16 questions is rejected or split before using
+  `zero_blocking_questions_answered`; overflow cannot be silently treated as
+  answered.
 - **Pass-ceiling escalation** — with a low cap and an unresolvable seeded issue,
   the loop escalates to the human at the cap and never auto-passes.
 - **Resumability** — kill and restart between a review pass and a gate; the ledger
@@ -483,6 +559,11 @@ ledger) before the full idea→merge pipeline of P2/P3.
 - **Git/PR drift** — mutate the PR head SHA, target branch, or mergeability while
   paused at a gate; the pass action refuses stale evidence and requires a fresh
   review or human confirmation.
+- **Workspace authority** — run proposal/implementation PR operations in shared
+  and detached workspaces; git/gh calls route through `mcp_git_run`/`git_pr` and
+  forge-token state is surfaced when required.
+- **Branch/worktree isolation** — dirty user checkout blocks the pipeline unless
+  the run has a dedicated branch/worktree or an explicit operator override.
 - **Large payload handling** — a diff/proposal larger than a single MCP/op-run
   payload is reviewed through artifact refs or chunks, and the ledger stores
   hashes so stale chunks are detected.
@@ -495,8 +576,9 @@ ledger) before the full idea→merge pipeline of P2/P3.
 
 ## §11 Non-goals (v1)
 
-- Server-side git or GitHub API (no PR fetch, no inline-comment posting); the
-  agent uses `gh`/`git` (agent-directed-pr-review §11).
+- New server-side GitHub review/comment APIs (no PR fetch, no inline-comment
+  posting). The pipeline uses Aimee's existing workspace-aware git/PR tool surface,
+  which may call `gh`/`git` underneath with the right workspace/forge authority.
 - Storing whole proposals or large diffs as unbounded DB blobs. DB1 stores refs,
   manifests, hashes, and compact digests; working files/blobs carry the large
   content.
