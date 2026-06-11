@@ -2,22 +2,26 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#181 review)
+- **Date:** 2026-06-11 (revised post-PR-#181 second review)
 - **Charter roles:** Rewrite (envelope compression / cache placement),
   Recall (rehydration handle), Extract / Gate-Promote (failure-mined
   corrections), Calibrate / Evaluate-Optimize (token + accuracy A/B).
 - **Scope:** `src/server/ingress_preinject.c` (a structured envelope IR + the
   compression hook over it), `src/server/openai_chat.c` (cache-prefix placement
-  at the live Codex/OpenAI seam), `src/server/anthropic_http.c` (a *separate
-  opt-in phase* — see §2.3 / §7), `src/server/server_mcp.c` +
+  at the live Codex/OpenAI seam), `src/server/server_http.c` +
+  `api/openapi-server-v1.yaml` (compression request override if exposed),
+  `src/server/anthropic_http.c` (a *separate opt-in phase* — see §2.3 / §7),
+  `src/server/server_mcp.c` +
   `src/server/server_mcp_call_table.inc` + `src/mcp_tools.c` (rehydration tool +
   discovery metadata + goldens), config plumbing (`src/headers/config.h`,
   `src/config.c`, `src/config_fields.c`, `src/config_sections.c`,
   `src/config_save.c`), the learning machinery (`src/db2/learning.c/.h`,
   `src/kb/kb_learning_synth.c`, `src/config_learning.c`, the
-  `interaction_event_embeddings` table) for failure mining, `bench/ingress_token_bench.py`
-  + `benchmarks/learning/learning_replay.py` (a dependency — still untracked, see
-  §6) for the accuracy/token A/B, unit + integration tests, docs. No new
+  `interaction_event_embeddings` table, `src/kb/kb_mining.c`) for failure
+  mining, `src/payload_rewrite.c` + `src/headers/payload_rewrite.h` +
+  `src/headers/token_tracker.h` for cache-prefix integration,
+  `bench/ingress_token_bench.py` + `benchmarks/learning/learning_replay.py`
+  for the accuracy/token A/B, unit + integration tests, docs. No new
   long-lived service; the ML prose compressor is explicitly out of scope (§5).
 
 ## Provenance
@@ -50,15 +54,17 @@ This proposal sits between three siblings and must not duplicate them:
   that decides what is safe to mark, and consumes that proposal's ledger fields
   for its benchmarks. The premise conflict between the two is reconciled in §2.1.
 - `docs/proposals/done/context-preinjection-ingress.md` shipped the envelope
-  itself (`ingress_preinject_build()`, confidence steering, the attention guard)
-  and the symbol-span machinery (`line_start`/`line_end`) §1 builds on.
+  itself (`ingress_preinject_build()`, confidence steering, the attention guard).
+  Symbol spans exist on `find_symbol` / structure reads, but **not** on today's
+  `code_search_hit_t` returned to the ingress path; §1 now treats span-enriched
+  code entries as a required shape upgrade, not a field that already exists.
 
 ## PR #181 review — gaps and how they are resolved
 
 The first revision was directionally useful but under-specified the
 implementation contract. The eight blocking gaps found in review against the
-current tree are preserved verbatim below, each annotated with where the revised
-design resolves it. The body sections (§1–§8) are rewritten to match.
+current tree are captured below, each annotated with where the revised design
+resolves it. The body sections (§1–§8) are rewritten to match.
 
 ### 1. The current ingress envelope is not typed enough for the proposed router
 
@@ -131,7 +137,8 @@ enough to cache (system/persona/history) and which parts are intentionally after
 the cache boundary (`<aimee-context>`).
 
 **→ Resolved in §2.1** (ownership ceded: cost-accounting owns marking + the flag;
-this proposal owns only the placement invariant and reuses `ingress_cache_marking_enabled`)
+this proposal owns only the placement invariant and does not add a duplicate
+cache-marking flag)
 **and §2.2** (the premise is reconciled empirically — the envelope is per-turn
 volatile, so the stable prefix is system/persona/history and `<aimee-context>`
 goes *after* the cache boundary, settled by measured cache reads not assertion).
@@ -233,14 +240,16 @@ Claude-Code-hook-only nature of the guard log and the "abandoned turn" caveat ar
 stated; explicit-correction mining defers to the existing implicit-correction
 detector.
 
-### 8. Validation dependencies are not all landed in the PR
+### 8. Validation dependencies are not all complete
 
-The PR adds only this proposal file. Locally, `benchmarks/learning/learning_replay.py`
-is still untracked, so the proposal should treat it as a dependency unless it
-lands separately first. `bench/ingress_token_bench.py` exists, but today it is a
-preinject on/off token bench; it does not yet provide per-stage resident tokens,
-provider cache reads/writes, or correctness outcomes. Those harness upgrades are
-part of the proposal's required work, not existing validation.
+The PR adds only this proposal file. `benchmarks/learning/learning_replay.py`
+exists on `origin/testing`, but it is not yet a live compression/rehydration
+accuracy harness: it needs a prediction emitter and fixtures that force
+rehydration. `bench/ingress_token_bench.py` exists, but today it is a preinject
+on/off token bench; it does not yet provide per-stage resident tokens, provider
+cache reads/writes, compression-on/off arms, latency, or correctness outcomes.
+Those harness upgrades are part of the proposal's required work, not existing
+validation.
 
 Add acceptance gates for:
 
@@ -251,7 +260,89 @@ Add acceptance gates for:
 - prompt-injection/sensitivity fixtures for compressed previews and originals.
 
 **→ Resolved in §6** (every gate above is enumerated; the harness upgrades are
-listed as in-scope work; `learning_replay.py` is declared an external dependency).
+listed as in-scope work; `learning_replay.py` is treated as a partial dependency,
+not a complete gate).
+
+## PR #181 second review — remaining gaps after the update
+
+The updated revision resolves the first eight blockers, but a second pass against
+`origin/testing` found seven remaining implementation gaps that must be carried
+by the proposal.
+
+### 9. Code-search hits do not expose symbol spans
+
+`code_search_hit_t` currently carries only `project`, `file_path`, `snippet`, and
+`rank`. `line` / `line_end` exist on `term_hit_t` (`find_symbol`) and
+`definition_t` (`index_structure`), and the MCP `find_symbol` tool renders those
+spans, but `kb_client_index_code_search()` does not parse or return them. The
+code folder therefore cannot simply "use existing `line_start`/`line_end`" from
+the preinject search result.
+
+**→ Resolved in §1.2** by making span enrichment part of P0/P1: either extend
+`/v1/code/search` and `code_search_hit_t` with `line`/`line_end`/`kind`, or run a
+bounded secondary structure lookup per selected file. The first code folder must
+fall back to snippet/path-only folding when spans are absent.
+
+### 10. The compression escape header needs HTTP plumbing
+
+The proposal adds `x-aimee-compress: 0`, but only `X-Aimee-Preinject` is parsed
+today in `server_http.c` and forwarded through a thread-local override. A new
+compression header is not just config work; it needs request-header parsing,
+thread-local/request-scoped state, tests for buffered and streaming routes, and
+OpenAPI/API docs if it becomes a supported header.
+
+**→ Resolved in §1.4** and P1 scope.
+
+### 11. Cache-prefix work must integrate with `payload_rewrite`
+
+The repo already has `payload_rewrite_prefix_hash()`,
+`payload_rewrite_track_request()`, DB1 `payload_rewrite_state`, and the
+`payload_rewrite_status` MCP tool behind `cache_aware_rewrite_enabled`. The
+proposal's placement invariant and prefix-stability tests should not create a
+second prefix-hash/state machine. They must either extend this subsystem or
+explicitly supersede it.
+
+**→ Resolved in §2.5** and P3.
+
+### 12. "Reuse `ingress_cache_marking_enabled`" is too strong
+
+`ingress_cache_marking_enabled` belongs to the cost-accounting proposal's
+request-mutation mechanism. Placement can be behaviorally relevant even when
+marking is off, and it may need shadow telemetry before marking is enabled.
+Tying placement entirely to the marking flag couples two rollout risks.
+
+**→ Resolved in §2.1** by narrowing the claim: no duplicate marking flag, but P3
+may need an internal/shadow placement gate or use `cache_aware_rewrite_enabled`
+for the existing prefix subsystem.
+
+### 13. OpenAI ingress has multiple injection sites
+
+`openai_chat.c` calls `ingress_preinject_build()` in legacy chat/completions,
+Responses buffered continuations, streaming chat/completions, and Responses
+streaming. The proposal says "Codex/OpenAI seam" but P3 cannot be implemented at
+one call site and be done; all four paths need equivalent placement, disable
+semantics, body serialization tests, and continuation behavior checks.
+
+**→ Resolved in §2.6** and P3.
+
+### 14. Failure mining overlaps existing KB mining
+
+`interaction_event_embeddings` are already mined by `src/kb/kb_mining.c`, and
+the recurrence job writes `workflow_pattern` artifacts directly with
+`db2_artifact_write()`. If this proposal introduces a learning-signal path for
+failure mining, it must decide whether to extend/replace that mining job, or it
+will create parallel artifacts/proposals from the same failure clusters.
+
+**→ Resolved in §4.4** by making the mining integration explicit.
+
+### 15. Validation text is stale on `learning_replay.py`
+
+`benchmarks/learning/learning_replay.py` exists on `origin/testing`. The
+remaining gap is not that the file is untracked; it is that the harness is a
+schema/metric runner and still needs a live `aimee learning replay` prediction
+emitter plus compression-specific fixtures.
+
+**→ Resolved in §6**.
 
 ## Goal
 
@@ -314,17 +405,19 @@ one compressor:
 
 - **Code folder** (headroom's `CodeCompressor`, AST-aware in spirit; a
   conservative line/brace folder in C to start): for `code_hit` entries, strip
-  blank-line runs and optionally comment bodies, and — using the existing
-  `line_start`/`line_end` symbol spans from `context-preinjection-ingress.md` P2
-  — prefer signature + relevant span over whole blocks.
+  blank-line runs and optionally comment bodies, and — after P0/P1 span
+  enrichment — prefer signature + relevant span over whole blocks.
 
 The **JSON folder** (headroom's `SmartCrusher`) is deferred to when typed
 `tool_result` previews exist in the IR (memory/tool-result previews from
 recall-economy, or a future tool-output envelope). It is specified here only so
 the IR's `transform` enum reserves room for it.
 
-Gated by a new config bool `ingress_compress_enabled` (default **off**), with a
-per-call `x-aimee-compress: 0` header escape, mirroring `ingress_preinject_enabled`.
+Span-aware folding has a real data dependency: P0/P1 must either extend
+`/v1/code/search` and `code_search_hit_t` with `line`/`line_end`/`kind`, or do a
+bounded secondary `index_structure`/`find_symbol` lookup for selected files. When
+spans are absent, the folder falls back to path + snippet folding and must not
+pretend it has a byte-exact body span.
 
 ### §1.3 The resident form is intentionally lossy (resolves review #2)
 
@@ -343,6 +436,17 @@ removes detail that some tasks need. The corrected contract:
   where the omitted detail is required *and* confirms the model rehydrates when
   it needs it.
 
+### §1.4 Compression gate and request override (resolves review #10)
+
+Gated by a new config bool `ingress_compress_enabled` (default **off**). If a
+per-call escape is exposed, it requires actual HTTP plumbing:
+
+- parse `X-Aimee-Compress: 0` in `server_http.c` alongside `X-Aimee-Preinject`;
+- carry it as request-scoped/thread-local state into `ingress_preinject_build()`;
+- cover buffered chat/completions, buffered Responses, streaming chat/completions,
+  and streaming Responses tests;
+- document it in the OpenAPI surface if it is part of the public `/v1` contract.
+
 ---
 
 ## §2 Cache-prefix placement at the ingress seams
@@ -353,7 +457,10 @@ The cost-accounting proposal owns the **mechanism**: provider usage extraction,
 USD pricing, the ledger, `/v1/usage/*`, generic cached-token reporting, and the
 `cache_control` *marking* of the envelope (`ingress_cache_marking_enabled` /
 `ingress_cache_min_chars`). This proposal does **not** re-own any of it and adds
-**no new cache flag** — it reuses `ingress_cache_marking_enabled`.
+**no duplicate user-facing cache-marking flag**. Placement may still need an
+internal/shadow gate, or may ride the existing `cache_aware_rewrite_enabled`
+prefix subsystem (§2.5), because placement telemetry and cache marking are
+different rollout risks.
 
 This proposal owns one thing the other does not: the **placement invariant** —
 ensuring that whatever is marked cacheable is actually byte-stable turn-to-turn,
@@ -416,6 +523,33 @@ OpenAI-compatible delegates expose no usable control. The contract:
   **client-supplied** cache controls are preserved untouched;
 - bench output (§6) that separates **resident-token** reduction from **realized**
   provider cache reads/writes.
+
+### §2.5 Reuse the existing prefix-state subsystem (resolves review #11)
+
+Aimee already has prompt-cache-aware prefix machinery:
+`payload_rewrite_prefix_hash()`, `payload_rewrite_track_request()`,
+DB1 `payload_rewrite_state`, `cache_aware_rewrite_enabled`, and the
+`payload_rewrite_status` MCP tool. P3 must extend that subsystem rather than
+create a second prefix hash / state table:
+
+- define the stable prefix hash in terms of the provider-facing bytes actually
+  sent after placement;
+- include `<aimee-context>` only when the experiment intentionally classifies it
+  as stable;
+- record placement shadow decisions in the existing DB1 state or a clearly named
+  sibling column/table;
+- consume normalized usage from `token_tracker.h` / the cost-accounting ledger
+  rather than parsing provider usage twice.
+
+### §2.6 Cover every OpenAI/Responses injection path (resolves review #13)
+
+`openai_chat.c` has multiple pre-injection sites: buffered chat/completions,
+buffered Responses continuations, streaming chat/completions, and streaming
+Responses. P3 is not complete until all of them share the same placement rule,
+request override behavior, continuation behavior, and body-serialization tests.
+The Responses continuation path is especially important because it prepends the
+stored transcript before building the envelope; the prefix classifier must not
+accidentally treat a growing transcript as cache-stable.
 
 ---
 
@@ -515,6 +649,21 @@ yields a record that is cross-agent, ranked, deduped, contradiction-checked, and
 **human/Gate-Promote-reviewed before** it becomes durable. This is the place
 Aimee's design is strictly better than headroom's.
 
+### §4.4 Integrate with existing KB mining (resolves review #14)
+
+Failure clusters in `interaction_event_embeddings` are already consumed by
+`src/kb/kb_mining.c`; the recurrence job currently writes `workflow_pattern`
+artifacts directly through `db2_artifact_write()`. §4 must either:
+
+- refactor that recurrence job to emit `learning_signals` / `learning_proposals`
+  first, then let review/Gate-Promote commit the artifact; or
+- create a distinct failure-mining job with a non-overlapping event filter and
+  dedup key so the same cluster does not produce both a direct artifact and a
+  learning proposal.
+
+The preferred path is the first one, because it reuses the existing
+high-watermark mining job and removes the parallel-promotion behavior.
+
 ---
 
 ## §5 What is explicitly out of scope
@@ -541,11 +690,15 @@ Aimee's design is strictly better than headroom's.
 The gate for every default-on flip, per the flag-rollout-readiness bar. The
 harness upgrades below are **in-scope work**, not pre-existing validation.
 
-**Dependencies.** `benchmarks/learning/learning_replay.py` is **still untracked**
-locally; this proposal depends on it landing (separately or as part of P1).
+**Dependencies.** `benchmarks/learning/learning_replay.py` exists on
+`origin/testing`, but it is a schema/metric runner: without `--predictions` it
+does not exercise the live detector, and its own docstring still calls out the
+missing `aimee learning replay --fixtures …` prediction emitter. This proposal
+depends on that live prediction wire plus compression-specific fixtures.
 `bench/ingress_token_bench.py` today is only a preinject on/off **token** bench —
-it has no per-stage resident tokens, no provider cache reads/writes, and no
-correctness outcomes. Adding those is part of this proposal.
+it has no per-stage resident tokens, no provider cache reads/writes, no
+compression-on/off arm, and no correctness outcomes. Adding those is part of
+this proposal.
 
 **Acceptance gates:**
 
@@ -567,6 +720,10 @@ correctness outcomes. Adding those is part of this proposal.
 - **Prefix-stability invariant** (§2) and **byte-exact rehydration round-trip**
   (§3) as hard unit-suite invariants.
 - **Request-body serialization** (§2.4) asserting client cache controls survive.
+- **Latency / KB-call budget** — P0/P1 may add secondary structure lookups and
+  handle storage work to a per-turn hot path that already calls code search and
+  memory context. Bench output must include p50/p95 ingress build latency and KB
+  request counts.
 
 ---
 
@@ -575,18 +732,21 @@ correctness outcomes. Adding those is part of this proposal.
 - **P0 — Envelope IR (§1.1).** Refactor `ingress_preinject_build()` to assemble a
   typed entry list and render from it. No behavior change, no flag; pure
   enablement. Blocks everything else.
-- **P1 — Code folder (§1.2/§1.3)** behind `ingress_compress_enabled`, lossy-by-
-  contract, every fold carrying a `transform` tag. Token A/B + harness upgrades;
-  no default flip.
+- **P1 — Code folder (§1.2/§1.3/§1.4)** behind `ingress_compress_enabled`,
+  including the span-enrichment fallback and `X-Aimee-Compress` plumbing if the
+  header is exposed. Lossy-by-contract, every fold carrying a `transform` tag.
+  Token/latency A/B + harness upgrades; no default flip.
 - **P2 — Rehydration handle (§3)** with the full §3.2 safety contract, unified
   with recall-economy's pull-handle. Unblocks aggressive folding + the
   forced-rehydration accuracy A/B → candidate default flip for §1.
-- **P3 — Cache-prefix placement (§2)** on the Codex/OpenAI seam: capability table,
-  no-op default, placement invariant + body-serialization test, realized-cache
-  telemetry consumed from the cost-accounting ledger. Reuses
-  `ingress_cache_marking_enabled`; ships after that proposal's accounting surface.
+- **P3 — Cache-prefix placement (§2)** on every Codex/OpenAI injection path:
+  capability table, no-op default, integration with `payload_rewrite`, placement
+  invariant + body-serialization tests, realized-cache telemetry consumed from
+  `token_tracker` / the cost-accounting ledger. Does not add a duplicate
+  cache-marking flag; ships after the accounting surface.
 - **P4 — Failure-mined corrections (§4)** emitting learning signals, default-off,
-  promoted through the existing review/Gate-Promote path.
+  promoted through the existing review/Gate-Promote path, preferably by
+  refactoring `kb_mining.c` recurrence rather than creating a parallel miner.
 - **P5 — Anthropic ingress injection (§2.3)** as a separate opt-in phase behind
   its own gate, with system-block-array preservation and the Claude-Code MCP
   tool-call proof.
@@ -608,3 +768,11 @@ correctness outcomes. Adding those is part of this proposal.
 - **Provider cache semantics drift.** §2 depends on current Anthropic/OpenAI
   caching rules — re-verify against the live Claude API reference before
   implementing, not from memory.
+- **Hot-path latency regression.** A span-enriched IR can add KB lookups or body
+  serialization to every turn. Keep P0 behavior-preserving, cache per-request
+  lookups, and block default flips on p95 ingress-build latency as well as
+  token/correctness metrics.
+- **Duplicate learning outputs.** If §4 mines the same
+  `interaction_event_embeddings` clusters that `kb_mining.c` already promotes,
+  users will see both artifacts and learning proposals for one failure pattern.
+  Refactor the existing mining job or use a disjoint dedup key before enabling.
