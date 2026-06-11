@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#181 seventh review)
+- **Date:** 2026-06-11 (revised post-PR-#181 eighth review)
 - **Charter roles:** Rewrite (envelope compression / cache placement),
   Recall (recovery resolver / rehydration handle), Extract / Gate-Promote (failure-mined
   corrections), Calibrate / Evaluate-Optimize (token + accuracy A/B).
@@ -670,6 +670,30 @@ which fold type, task class, or resolver should remain enabled.
 entry id, transform, resident tokens saved, resolver invoked/not invoked,
 recovered bytes/tokens, provider round-trips, and latency.
 
+## PR #181 eighth review — the "low-risk first phase" is no longer low-risk
+
+Rounds 5–7 attached a heavy dependency tail to the code folder — a `code_span_get`
+MCP tool that does not exist (#26), workspace-provider authority (#32), a
+server-dispatch `line_end` fix (#33), reachability proof (#16/#22), and per-entry
+telemetry (#34). The phasing still calls this the lowest-risk first phase; it no
+longer is. One re-sequencing recovers an immediate win.
+
+### 35. Split byte-equivalent folding (zero-dependency) from lossy folding (full tail)
+
+§3.4(b) already exempts **non-lossy, byte-equivalent** folds from needing any
+resolver. Blank-line and trailing-whitespace collapse remove provably-redundant
+bytes and lose nothing — so they need no `code_span_get`, no workspace-provider
+authority, no reachability proof, no handle store, and they trivially pass the
+net-economics gate (#31) because the recovery rate is zero (nothing is folded
+out). The proposal currently bundles these with comment-strip and signature+span
+under one "lossy-by-contract" code folder (P1), which forces the entire dependency
+tail before *any* default flip and forfeits a real, immediate benefit.
+
+**→ Resolved in §1.2, §1.3, and §7** by splitting the code folder into **P1a**
+(byte-equivalent only — the true low-risk first flip, no resolver/authority/
+telemetry dependency) and **P1b** (lossy comment/span folding — carries the full
+tail from #16/#22/#26/#32/#33/#34).
+
 ## Goal
 
 Cut the per-turn token cost *and* the per-turn dollar cost of pre-injection
@@ -745,9 +769,15 @@ so there is no reliable JSON target yet. The first phase therefore ships exactly
 one compressor:
 
 - **Code folder** (headroom's `CodeCompressor`, AST-aware in spirit; a
-  conservative line/brace folder in C to start): for `code_hit` entries, strip
-  blank-line runs and optionally comment bodies, and — after P0/P1 span
-  enrichment — prefer signature + relevant span over whole blocks.
+  conservative line/brace folder in C to start), in two tiers by loss (resolves
+  review #35):
+  - **byte-equivalent (P1a):** collapse blank-line runs and trailing whitespace
+    on `code_hit` entries. Provably lossless, so per §3.4(b) it needs **no**
+    recovery resolver and ships first as the low-risk default-flip candidate.
+  - **lossy (P1b):** strip comment bodies and, after span enrichment, prefer
+    signature + relevant span over whole blocks. This tier is what pulls in a
+    callable resolver, workspace authority, `line_end`, reachability proof, and
+    the per-entry telemetry tail.
 
 The **JSON folder** (headroom's `SmartCrusher`) is deferred to when typed
 `tool_result` previews exist in the IR (memory/tool-result previews from
@@ -779,6 +809,12 @@ removes detail that some tasks need. The corrected contract:
 - the default-on flip is **blocked** until the accuracy A/B (§6) includes tasks
   where the omitted detail is required *and* confirms the model rehydrates when
   it needs it.
+
+Because **byte-equivalent** folds (P1a — blank-line/whitespace collapse) lose
+nothing, they are exempt from the resolver requirement (§3.4(b)), the
+rehydrate-handle pairing, and the forced-rehydration accuracy gate; they need only
+the resident-token and net-economics measurement. Only the **lossy** tier (P1b)
+is blocked on resolver reachability and the accuracy A/B.
 
 ### §1.4 Compression gate and request override (resolves review #10)
 
@@ -1251,14 +1287,18 @@ this proposal.
 - **P0 — Envelope IR (§1.1).** Refactor `ingress_preinject_build()` to assemble a
   typed entry list and render from it. No behavior change, no flag; pure
   enablement. Blocks everything else.
-- **P1 — Code folder (§1.2/§1.3/§1.4)** behind `ingress_compress_enabled`,
-  including the span-enrichment fallback and `X-Aimee-Compress` plumbing if the
-  header is exposed, plus the full config/docs/test surface for that flag and
-  regenerated OpenAPI embed if the header is public. Lossy-by-contract, every
-  fold carrying a `transform` tag. Token/latency A/B + harness upgrades; no
-  default flip.
-- **P2 — Durable-read reachability + accuracy A/B for the code folder.** The code
-  folder recovers via a durable code-span/range read, so its
+- **P1a — Byte-equivalent code fold (§1.2/§1.3)** behind `ingress_compress_enabled`,
+  with the full config/docs/test surface for that flag and the regenerated OpenAPI
+  embed if `X-Aimee-Compress` is public. Blank-line/whitespace collapse only —
+  provably lossless, **no** resolver/authority/handle dependency. Token/latency +
+  net-economics A/B (recovery rate is zero). **This is the first default-flip
+  candidate** and the proposal's earliest real win.
+- **P1b — Lossy code fold (§1.2/§1.3/§1.4)** — comment-strip + signature/span,
+  every fold carrying a `transform` tag and a reachable resolver. Pulls in the
+  span-enrichment fallback, `X-Aimee-Compress` per-call escape, and the per-entry
+  telemetry (#34). No default flip until P2.
+- **P2 — Durable-read reachability + accuracy A/B for the lossy fold (P1b).** A
+  lossy code fold recovers via a durable code-span/range read, so its
   forced-rehydration accuracy A/B and its default-flip candidacy need a real
   callable resolver: either add an Aimee MCP `code_span_get`-style tool or prove
   the target client has a scoped native file read. If Aimee adds `code_span_get`,
