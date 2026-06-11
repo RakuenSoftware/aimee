@@ -20,9 +20,10 @@ int db1_token_audit_insert(const db1_token_audit_row_t *row)
    static const char *sql =
        "INSERT INTO token_audit"
        " (session_id, delegation_id, project_name, tool_name, role, model, source,"
+       "  requested_model, stop_reason, usage_kind,"
        "  prompt_tokens, completion_tokens, cache_write_tokens, cache_read_tokens,"
        "  estimated_cost_usd)"
-       " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+       " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
 
@@ -33,11 +34,16 @@ int db1_token_audit_insert(const db1_token_audit_row_t *row)
    sqlite3_bind_text(stmt, 5, row->role ? row->role : "", -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(stmt, 6, row->model ? row->model : "", -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(stmt, 7, row->source ? row->source : "", -1, SQLITE_TRANSIENT);
-   sqlite3_bind_int(stmt, 8, row->prompt_tokens);
-   sqlite3_bind_int(stmt, 9, row->completion_tokens);
-   sqlite3_bind_int(stmt, 10, row->cache_write_tokens);
-   sqlite3_bind_int(stmt, 11, row->cache_read_tokens);
-   sqlite3_bind_double(stmt, 12, row->estimated_cost_usd);
+   sqlite3_bind_text(stmt, 8, row->requested_model ? row->requested_model : "", -1,
+                     SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 9, row->stop_reason ? row->stop_reason : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 10, row->usage_kind ? row->usage_kind : "realized", -1,
+                     SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 11, row->prompt_tokens);
+   sqlite3_bind_int(stmt, 12, row->completion_tokens);
+   sqlite3_bind_int(stmt, 13, row->cache_write_tokens);
+   sqlite3_bind_int(stmt, 14, row->cache_read_tokens);
+   sqlite3_bind_double(stmt, 15, row->estimated_cost_usd);
 
    int rc = sqlite3_step(stmt);
    sqlite3_finalize(stmt);

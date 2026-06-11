@@ -41,6 +41,16 @@ extern "C"
        * internal agent/delegate execution; ingress handlers set their own
        * (e.g. "openai-ingress", "anthropic-ingress"). Empty on legacy rows. */
       const char *source;
+      /* The model the client asked for, when it differs from the served/billable
+       * `model` (e.g. Claude Code requests a model but aimee serves its primary).
+       * Empty when not applicable. NULL is treated as empty. */
+      const char *requested_model;
+      /* Provider stop/finish reason for the turn, when known. NULL == empty. */
+      const char *stop_reason;
+      /* "realized" (default) for actual provider spend; ingress estimate/dedup
+       * paths set "estimated"/"avoided" so readers can exclude them from spend.
+       * NULL defaults to "realized". */
+      const char *usage_kind;
       int prompt_tokens;
       int completion_tokens;
       int cache_write_tokens;

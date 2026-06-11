@@ -294,11 +294,19 @@ static void test_record_token_audit_ingress_source(void)
    agent_result_t r;
    memset(&r, 0, sizeof(r));
    snprintf(r.agent_name, sizeof(r.agent_name), "primary");
-   snprintf(r.model, sizeof(r.model), "claude-3-5-sonnet");
+   snprintf(r.model, sizeof(r.model), "claude-3-5-sonnet");                 /* served */
+   snprintf(r.requested_model, sizeof(r.requested_model), "claude-opus-4"); /* client asked */
+   snprintf(r.stop_reason, sizeof(r.stop_reason), "end_turn");
    r.prompt_tokens = 2000;
    r.completion_tokens = 1000;
    r.success = 1;
    agent_record_token_audit(&r, "", "openai-ingress");
+
+   /* requested model recorded separately from served; stop_reason captured;
+    * usage_kind defaults to "realized". */
+   assert(count_where("requested_model", "claude-opus-4") == 1);
+   assert(count_where("stop_reason", "end_turn") == 1);
+   assert(count_where("usage_kind", "realized") >= 1);
 
    /* Exactly one row for this served model under the ingress source. */
    sqlite3_stmt *st = NULL;

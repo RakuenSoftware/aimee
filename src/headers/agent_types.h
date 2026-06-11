@@ -254,6 +254,13 @@ typedef struct
     * in the agent's fallback_model. Used for cost estimation and the token_audit
     * model column; empty falls back to agent_name. */
    char model[MAX_MODEL_LEN];
+   /* The model the client requested, when it differs from the served `model`
+    * (ingress: e.g. Claude Code asks for a model, aimee serves its primary).
+    * Empty for internal agent calls. Recorded separately in the audit. */
+   char requested_model[MAX_MODEL_LEN];
+   /* Provider stop/finish reason for the turn (e.g. "end_turn", "tool_use",
+    * "stop", "length"), when the parser captured it. Empty otherwise. */
+   char stop_reason[32];
    char *response;
    int prompt_tokens;
    int completion_tokens;

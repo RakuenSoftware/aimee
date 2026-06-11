@@ -29,6 +29,9 @@ typedef struct
    /* Provider-reported model id echoed in the response (often more specific than
     * the requested/served alias, e.g. a dated version). Empty when absent. */
    char model[MAX_MODEL_LEN];
+   /* Provider stop/finish reason (Anthropic stop_reason / OpenAI finish_reason),
+    * captured for the audit. Empty when absent. */
+   char stop_reason[32];
 } parsed_response_t;
 
 /* --- Request builders --- */

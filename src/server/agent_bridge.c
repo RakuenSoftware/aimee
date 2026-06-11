@@ -364,6 +364,8 @@ void agent_parse_response_openai(cJSON *root, parsed_response_t *out)
 
    cJSON *choice = cJSON_GetArrayItem(choices, 0);
    cJSON *finish = cJSON_GetObjectItem(choice, "finish_reason");
+   if (finish && cJSON_IsString(finish) && finish->valuestring)
+      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", finish->valuestring);
    cJSON *message = cJSON_GetObjectItem(choice, "message");
    if (!message)
       return;
@@ -810,6 +812,8 @@ void agent_parse_response_anthropic(cJSON *root, parsed_response_t *out)
 
    /* Check stop_reason for tool_use */
    cJSON *stop = cJSON_GetObjectItem(root, "stop_reason");
+   if (stop && cJSON_IsString(stop) && stop->valuestring)
+      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", stop->valuestring);
    int has_tool_use = (stop && cJSON_IsString(stop) && strcmp(stop->valuestring, "tool_use") == 0);
 
    cJSON *content = cJSON_GetObjectItem(root, "content");

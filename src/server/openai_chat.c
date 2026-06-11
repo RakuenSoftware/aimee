@@ -119,6 +119,7 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
 
    /* Cost accounting for the OpenAI-compatible ingress: this handler runs the
     * provider call directly (no agent_log_call), so record the turn's spend. */
+   snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
    agent_record_token_audit(&result, "", "openai-ingress");
 
    long created = (long)time(NULL);
@@ -487,6 +488,7 @@ static int responses_handler(const char *body, char *resp, int cap)
    }
 
    /* Cost accounting: buffered /v1/responses runs the provider call directly. */
+   snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
    agent_record_token_audit(&result, "", "openai-ingress");
 
    long created = (long)time(NULL);
@@ -597,6 +599,7 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
    {
       /* Cost accounting: streaming chat/completions runs the provider call
        * directly (no agent_log_call). */
+      snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
       agent_record_token_audit(&result, "", "openai-ingress");
       const char *txt = result.response;
       size_t n = strlen(txt);
@@ -663,6 +666,7 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
    else
    {
       /* Cost accounting: streaming completions runs the provider call directly. */
+      snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
       agent_record_token_audit(&result, "", "openai-ingress");
       const char *txt = result.response;
       size_t n = strlen(txt);
@@ -857,10 +861,12 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
       memset(&ar, 0, sizeof(ar));
       snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
       snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
+      snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model);
       ar.prompt_tokens = parsed.prompt_tokens;
       ar.completion_tokens = parsed.completion_tokens;
       ar.cache_write_tokens = parsed.cache_write_tokens;
       ar.cache_read_tokens = parsed.cache_read_tokens;
+      snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
       agent_record_token_audit(&ar, "", "openai-ingress");
    }
 

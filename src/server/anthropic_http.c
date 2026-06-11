@@ -245,6 +245,10 @@ static int messages_buffered(const char *body, char *resp, int cap)
       memset(&ar, 0, sizeof(ar));
       snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
       snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
+      /* Claude Code's requested model is recorded separately; aimee serves its
+       * configured primary, so requested and served typically differ. */
+      snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
+      snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
       ar.prompt_tokens = parsed.prompt_tokens;
       ar.completion_tokens = parsed.completion_tokens;
       ar.cache_write_tokens = parsed.cache_write_tokens;
@@ -507,6 +511,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
          memset(&ar, 0, sizeof(ar));
          snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
          snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
+         snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
          ar.prompt_tokens = relay.input_tokens;
          ar.completion_tokens = relay.output_tokens;
          ar.cache_write_tokens = relay.cache_write_tokens;
