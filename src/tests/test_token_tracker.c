@@ -157,12 +157,37 @@ static void test_registry_overrides_base_keeps_cache(void)
    PASS("cost: registry overrides base, keeps static cache");
 }
 
+static void test_cost_shaped_reward(void)
+{
+   /* Failure always scores 0 regardless of cost. */
+   assert(near_equal(cost_shaped_reward(0, 0.0, 30, 500), 0.0));
+   assert(near_equal(cost_shaped_reward(0, 1.0, 30, 500), 0.0));
+
+   /* A free success scores a full 1.0. */
+   assert(near_equal(cost_shaped_reward(1, 0.0, 30, 500), 1.0));
+
+   /* lambda<=0 or ref<=0 disables shaping -> raw success. */
+   assert(near_equal(cost_shaped_reward(1, 1.0, 0, 500), 1.0));
+   assert(near_equal(cost_shaped_reward(1, 1.0, 30, 0), 1.0));
+
+   /* ref = 500 milli-USD = $0.50. A success costing exactly the reference (or
+    * more) is discounted by the full lambda (30% -> reward 0.70). */
+   assert(near_equal(cost_shaped_reward(1, 0.50, 30, 500), 0.70));
+   assert(near_equal(cost_shaped_reward(1, 5.00, 30, 500), 0.70));
+
+   /* Half the reference cost -> half the penalty (0.15 -> reward 0.85). */
+   assert(near_equal(cost_shaped_reward(1, 0.25, 30, 500), 0.85));
+
+   PASS("cost: cost-shaped bandit reward");
+}
+
 /* --- Main --- */
 
 int main(void)
 {
    printf("token_tracker: unit tests\n");
    test_registry_overrides_base_keeps_cache();
+   test_cost_shaped_reward();
 
    test_known_anthropic_model();
    test_cache_tokens_anthropic();

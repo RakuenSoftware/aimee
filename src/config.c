@@ -482,6 +482,9 @@ static void config_set_defaults(config_t *cfg)
    cfg->cache_aware_rewrite_hard_context_threshold = 0.85;
    cfg->cache_aware_rewrite_max_defer_turns = 20;
    cfg->cache_aware_rewrite_segment_check_turns = 5;
+   cfg->cost_reward_enabled = 0;
+   cfg->cost_reward_lambda_pct = 30;
+   cfg->cost_reward_ref_usd_milli = 500;
    cfg->guardrails_semantic_enabled = 0;
    cfg->guardrails_semantic_dry_run = 1;
    cfg->guardrails_semantic_advisory_only = 1;

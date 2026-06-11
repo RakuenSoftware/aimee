@@ -959,6 +959,20 @@ void config_parse_transport_section(config_t *cfg, cJSON *root)
             cfg->cache_aware_rewrite_segment_check_turns = (int)item->valuedouble;
       }
    }
+
+   cJSON *cre = cJSON_GetObjectItemCaseSensitive(root, "cost_reward");
+   if (cJSON_IsObject(cre))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(cre, "enabled");
+      if (cJSON_IsBool(item))
+         cfg->cost_reward_enabled = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(cre, "lambda_pct");
+      if (cJSON_IsNumber(item) && item->valuedouble >= 0)
+         cfg->cost_reward_lambda_pct = (int)item->valuedouble;
+      item = cJSON_GetObjectItemCaseSensitive(cre, "ref_usd_milli");
+      if (cJSON_IsNumber(item) && item->valuedouble > 0)
+         cfg->cost_reward_ref_usd_milli = (int)item->valuedouble;
+   }
 }
 void config_parse_guardrails_section(config_t *cfg, cJSON *root)
 {

@@ -31,4 +31,12 @@ typedef int (*token_registry_price_fn)(const char *model, double *in_per_mtok,
                                        double *out_per_mtok);
 void token_tracker_set_registry_price_fn(token_registry_price_fn fn);
 
+/* Cost-shaped reward for the delegate-routing bandit. Combines task success with
+ * a spend penalty so the bandit prefers cheaper arms when quality is comparable:
+ *   reward = clamp01(success - (lambda_pct/100) * min(cost_usd / cost_ref, 1))
+ * where cost_ref = ref_usd_milli / 1000 (milli-USD). A failed call (success=0)
+ * always scores 0; a free success scores 1; an expensive success is discounted
+ * by at most lambda_pct. Pure/deterministic so it is unit-tested directly. */
+double cost_shaped_reward(int success, double cost_usd, int lambda_pct, int ref_usd_milli);
+
 #endif /* DEC_TOKEN_TRACKER_H */

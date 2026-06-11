@@ -13,6 +13,7 @@
 #include "cmd_agent_delegate_impl.h"
 #include "compute_concurrency.h"
 #include "config.h"
+#include "token_tracker.h"
 #include "delegate_credential_retry.h"
 #include "delegate_launch.h"
 #include "delegate_source_authority.h"
@@ -1501,9 +1502,21 @@ void delegate_worker(void *arg)
    delegate_record_exit_learning(sid, role, &result, rc, max_turns, &acfg, target_agent);
 
    /* Close the delegate_routing bandit decision (if one was sampled) with the run
-    * outcome: success (rc == 0) -> 1.0, otherwise 0.0. Best-effort. */
+    * outcome. By default success (rc == 0) -> 1.0, otherwise 0.0. When the
+    * cost_reward flag is enabled, shape the success reward down by the delegate's
+    * realized spend so the bandit prefers cheaper arms at comparable quality. */
    if (dr_decision_id[0] && dr_arm_id[0])
-      kb_client_bandit_close("delegate_routing", dr_decision_id, dr_arm_id, rc == 0 ? 1.0 : 0.0);
+   {
+      double reward = rc == 0 ? 1.0 : 0.0;
+      config_t rcfg;
+      if (rc == 0 && config_load(&rcfg) == 0 && rcfg.cost_reward_enabled)
+      {
+         double dcost = db1_token_audit_cost_for_delegation(deleg_id);
+         reward = cost_shaped_reward(1, dcost, rcfg.cost_reward_lambda_pct,
+                                     rcfg.cost_reward_ref_usd_milli);
+      }
+      kb_client_bandit_close("delegate_routing", dr_decision_id, dr_arm_id, reward);
+   }
 
    /* Reconcile delegate sibling-worktree edits via PR or supervisor review. */
    if (delegate_worktree_path[0] && delegate_git_root[0] && !delegate_allows_writes &&

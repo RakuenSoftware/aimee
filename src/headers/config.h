@@ -837,6 +837,18 @@ typedef struct config
    int cache_aware_rewrite_max_defer_turns;
    int cache_aware_rewrite_segment_check_turns;
 
+   /* Cost-shaped delegate-routing bandit reward (cost_reward.*).
+    * cost_reward_enabled: 0 = off (default; the bandit learns from the binary
+    *   success outcome only), 1 = on (subtract a normalized cost penalty so the
+    *   router can prefer cheaper arms when quality is similar).
+    * cost_reward_lambda_pct: penalty weight as a percent (default 30 = 0.30);
+    *   reward = clamp01(success - lambda * min(cost / cost_ref, 1)).
+    * cost_reward_ref_usd_milli: per-turn cost ($, in milli-dollars) that maps to a
+    *   full normalized penalty (default 500 = $0.50). */
+   int cost_reward_enabled;
+   int cost_reward_lambda_pct;
+   int cost_reward_ref_usd_milli;
+
    /* Neural-assisted semantic guardrails (guardrails.semantic.*).
     * semantic_enabled: 0 = off (default), 1 = on.
     * semantic_dry_run: 1 = shadow mode — score is logged but never changes outcome

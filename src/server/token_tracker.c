@@ -167,3 +167,24 @@ double token_estimate_cost(const char *model, const token_usage_t *usage)
           (double)usage->cache_write_tokens * cw_mtok / 1e6 +
           (double)usage->cache_read_tokens * cr_mtok / 1e6;
 }
+
+double cost_shaped_reward(int success, double cost_usd, int lambda_pct, int ref_usd_milli)
+{
+   double base = success ? 1.0 : 0.0;
+   if (!success)
+      return 0.0;
+   if (lambda_pct <= 0 || ref_usd_milli <= 0)
+      return base;
+   double ref_usd = (double)ref_usd_milli / 1000.0;
+   double frac = cost_usd / ref_usd;
+   if (frac < 0.0)
+      frac = 0.0;
+   if (frac > 1.0)
+      frac = 1.0;
+   double reward = base - ((double)lambda_pct / 100.0) * frac;
+   if (reward < 0.0)
+      reward = 0.0;
+   if (reward > 1.0)
+      reward = 1.0;
+   return reward;
+}

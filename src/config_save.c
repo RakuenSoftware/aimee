@@ -373,6 +373,14 @@ int config_save(const config_t *cfg)
       cJSON_AddNumberToObject(cr, "segment_check_turns",
                               cfg->cache_aware_rewrite_segment_check_turns);
    }
+   if (cfg->cost_reward_enabled || cfg->cost_reward_lambda_pct != 30 ||
+       cfg->cost_reward_ref_usd_milli != 500)
+   {
+      cJSON *cre = cJSON_AddObjectToObject(root, "cost_reward");
+      cJSON_AddBoolToObject(cre, "enabled", cfg->cost_reward_enabled ? 1 : 0);
+      cJSON_AddNumberToObject(cre, "lambda_pct", cfg->cost_reward_lambda_pct);
+      cJSON_AddNumberToObject(cre, "ref_usd_milli", cfg->cost_reward_ref_usd_milli);
+   }
    if (cfg->guardrails_semantic_enabled || !cfg->guardrails_semantic_dry_run ||
        !cfg->guardrails_semantic_advisory_only || cfg->guardrails_semantic_command[0] ||
        cfg->guardrails_semantic_warn_threshold != 0.40 ||
