@@ -449,11 +449,15 @@ static void chat_stream_worker_pooled(void *arg)
 
    if (!locked && sid[0])
       presence_emit_turn_started(sid, turn_id);
-   /* Per-turn credential context: the session id (for the RAM session keyring
-    * the client pushed once per session) + any per-turn Codex creds (legacy
-    * direct push). Empty/absent clears the thread-locals so a turn on this
-    * pooled thread can't reuse a prior turn's creds. */
-   agent_set_request_session(sid);
+   /* Per-turn credential context: the credential-session id (for the RAM
+    * keyring the client pushed once per session — a dedicated field decoupled
+    * from the chat session id) + any per-turn Codex creds (legacy direct push).
+    * Empty/absent clears the thread-locals so a turn on this pooled thread can't
+    * reuse a prior turn's creds. */
+   {
+      const char *cred_sid = jo_str(cctx->req, "cred_session_id", NULL);
+      agent_set_request_session((cred_sid && cred_sid[0]) ? cred_sid : sid);
+   }
    agent_set_request_codex_creds(jo_str(cctx->req, "codex_oauth_token", NULL),
                                  jo_str(cctx->req, "codex_account_id", NULL));
    chat_stream_worker(arg);

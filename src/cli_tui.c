@@ -1,6 +1,7 @@
 /* cli_tui.c: built-in terminal UI for aimee's default chat command */
 #include "aimee_home.h"
 #include "cli_client.h"
+#include "cli_agent_keys.h"
 #include "cli_tui.h"
 #include "aimee_client.h"
 #include "history.h"
@@ -361,7 +362,7 @@ builtin_chat_send_ex(const char *sock, const char *provider_session_id,
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "message", message);
-   cli_attach_codex_creds(req); /* codex-oauth primary auths from this host */
+   cli_session_creds_prime(req); /* client-held agent keys for this turn */
    char cwd[CLI_TUI_PATH_MAX];
    if (getcwd(cwd, sizeof(cwd)))
       cJSON_AddStringToObject(req, "cwd", cwd);

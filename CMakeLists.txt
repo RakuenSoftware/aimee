@@ -753,6 +753,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_persona.c
     ${AIMEE_SRC_DIR}/cli_roles.c
     ${AIMEE_SRC_DIR}/cli_workspace_serve.c
+    ${AIMEE_SRC_DIR}/cli_agent_keys.c
     ${AIMEE_SRC_DIR}/cli_remote.c
     ${AIMEE_SRC_DIR}/server/delegate_plan.c
     ${AIMEE_SRC_DIR}/acp_server.c

@@ -3,10 +3,11 @@
  * Unported commands fail in cli_main before reaching the server.
  * =================================================================== */
 
-#include "util.h"         /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
-#include "aimee_client.h" /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
-#include "code_collect.h" /* code_collect_files: thin-client workspace push */
-#include "codex_auth.h"   /* codex_local_auth: thin-client codex OAuth creds */
+#include "util.h"           /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
+#include "aimee_client.h"   /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
+#include "code_collect.h"   /* code_collect_files: thin-client workspace push */
+#include "codex_auth.h"     /* codex_local_auth: thin-client codex OAuth creds */
+#include "cli_agent_keys.h" /* cli_session_creds_prime: client-held agent keys */
 #if !defined(_WIN32) && !defined(_WIN64)
 #include "aimee_home.h"
 #include <dirent.h>
@@ -1750,7 +1751,7 @@ static cJSON *marshal_delegate(int argc, char **argv)
    rpc_parse(argc, argv, bool_flags, &opts);
 
    cJSON *req = marshal_no_args("delegate");
-   cli_attach_codex_creds(req); /* so a codex-oauth delegate auths from this host */
+   cli_session_creds_prime(req); /* client-held agent keys for this delegate turn */
 
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "role", opts.positional[0]);
