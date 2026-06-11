@@ -129,9 +129,12 @@ func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath st
 					req.Header.Set("X-Aimee-Principal", "webchat:"+webUser)
 					req.Header.Set("X-Aimee-Session-Key", "webchat:"+webUser)
 				} else {
-					// External shared-bearer client (no per-client identity): the
-					// single trusted "webchat" service account. No session key is
-					// stamped — aimee-server attributes via the webchat peer UID.
+					// External shared-bearer client: a shared credential carries no
+					// per-client identity, so these requests are INTENTIONALLY
+					// attributed to the single trusted "webchat" service account
+					// (the stamped principal; no session key). Per-client distinction
+					// requires a webchat session (PAM user) or per-user tokens. See
+					// the proposal's webchat shared-bearer note.
 					req.Header.Set("X-Aimee-Principal", "webchat")
 				}
 			}

@@ -683,9 +683,25 @@ with a benchmark showing no quality regression.
   idempotency key.
 - **Source attribution:** ingress rows carry a per-client source derived from the
   request context (session key/principal/UDS peer UID), **not** the PPID-shared
-  `session_id()`; two distinct clients do not collapse into one `top_sessions`
-  row; a UDS request with no forwarding metadata still attributes to its peer UID
-  rather than an anonymous blank source.
+  `session_id()`; two distinct clients with distinguishable identity do not
+  collapse into one `top_sessions` row; a UDS request with no forwarding metadata
+  still attributes to its peer UID rather than an anonymous blank source.
+- **Webchat OpenAI shared-bearer clients (explicit non-goal for per-client
+  attribution):** the webchat OpenAI proxy surface (`/v1/chat/completions`,
+  `/v1/completions`, `/v1/responses`, `/v1/embeddings`) authenticates external
+  callers with a single shared bearer, which by construction carries **no**
+  trusted per-client identity. All stamped metadata is server-derived, never
+  client-chosen: a request with a valid webchat session cookie is attributed to
+  the trusted PAM username (`webchat:<pam-user>`) — so distinct logged-in users do
+  **not** collapse — and a request with only the shared bearer is **intentionally
+  attributed to the single trusted `webchat` service account** (principal
+  `webchat`, no session key). The OpenAI `user` request-body field is deliberately
+  ignored for attribution (a client must not be able to choose its own audit
+  identity). The "two distinct clients do not collapse" criterion therefore
+  applies to clients that present a distinguishable trusted identity — a webchat
+  session today, or per-user OpenAI tokens if that surface later adds per-user
+  auth — and NOT to anonymous callers sharing one credential, which are one
+  account by definition.
 - **Idempotency:** a retried or late-finalized call with the same
   `(source, request_id, attempt)` produces exactly one row (index or in-process
   guard), and the migration that creates the uniqueness constraint is exercised.
