@@ -388,6 +388,47 @@ removes the detached workspace when the bridge exits or remote launch fails.
 Delegate routes are exposed over `/v1/delegate/*`, but TCP access requires an
 unscoped bearer and `aimee.api.remote_writes: full`.
 
+#### Local-CLI agents run on the client
+
+A *local-CLI* agent — Claude (`claude -p`), and the other agents whose backend
+launches a local binary — is not an HTTP call: aimee drives the actual CLI
+process. That process, its login (`~/.claude`), and the working tree all live on
+the **client**, not on a remote/containerized `aimee-server`. So when the active
+workspace is `detached`, aimee marshals the CLI run to the client over the **same
+reverse channel**, rather than fork/execing on the server (which has no such
+binary):
+
+```mermaid
+sequenceDiagram
+    participant Cli as aimee thin client
+    participant SRV as aimee-server (remote)
+    participant Claude as claude -p (on client)
+    Cli->>SRV: POST /v1/chat/stream  (cwd in a detached workspace)
+    SRV->>SRV: build claude argv + system prompt (server-side)
+    SRV->>Cli: runner op {exec_stream, argv, stdin, cwd}
+    Cli->>Claude: spawn locally (client's tree + ~/.claude login)
+    Claude-->>Cli: stream-json stdout
+    Cli-->>SRV: /v1/runner/respond {partial, chunk} … {done, rc}
+    SRV-->>Cli: chat SSE text deltas (token-by-token)
+```
+
+- **Generic seam.** The reverse-channel op is a generic *spawn argv + stdin,
+  stream stdout back* primitive (`exec_stream`). All CLI-specific logic — the
+  argv, the `stream-json` parsing — stays on the server; the client only spawns
+  and pipes, so one mechanism serves every local-CLI provider.
+- **Streaming.** The runner channel carries a series of partial chunk responses
+  followed by a final exit status; the server parses each stream-json text delta
+  and forwards it into the chat SSE, so a remote CLI turn streams token-by-token
+  (the same UX as the HTTP-streaming primary path).
+- **No credentials on the server.** The CLI authenticates with the client's own
+  login; no Claude/CLI credential is sent to or stored on the server.
+- **Co-located unchanged.** When the workspace is not detached (the server is on
+  the same host as the CLI), the agent fork/execs locally exactly as before.
+- This routing applies to all CLI entry points: the primary chat turn
+  (`aimee config set provider claude` + `aimee chat`) and CLI delegates
+  (`aimee delegate … --via claude`). See [DELEGATES.md](DELEGATES.md#local-cli-agents-on-a-thin-client)
+  and [SECURITY.md](SECURITY.md).
+
 ### 9.4 A delegate task
 
 ```mermaid

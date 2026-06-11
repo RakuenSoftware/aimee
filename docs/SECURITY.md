@@ -221,6 +221,24 @@ Security implications:
 - Token scope matters because overbroad tokens enlarge the blast radius of theft or misuse.
 - Server-side validation matters because local identity alone is insufficient for broader operations.
 
+## Local-CLI agent execution stays on the client
+
+A local-CLI agent (Claude via `claude -p`, and peers whose backend launches a
+local binary) executes where its binary and login live — the **client** — even
+when it is driven through a remote `aimee-server`. On a detached workspace the
+server marshals the CLI invocation over the runner reverse channel and the client
+spawns it locally, authenticating with the client's own login (e.g. `~/.claude`).
+
+- No Claude/CLI credential is transmitted to or stored on the server; the server
+  only relays the prompt and streams the output.
+- The CLI runs against the client's working tree, under the client user's
+  identity — the server gains no new ability to execute binaries it does not have.
+- This keeps the server from being a place where third-party agent logins
+  accumulate, consistent with the broader thin-client custody posture (agent API
+  keys are client-held; see [DELEGATES.md](DELEGATES.md)). On a plaintext-HTTP
+  LAN deployment, the prompt relayed to the server is only as confidential as
+  that network — use TLS / a trusted network for the server endpoint.
+
 ## Explicit Non-Goals
 
 This security model does not aim to provide:
