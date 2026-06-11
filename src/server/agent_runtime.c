@@ -1923,7 +1923,11 @@ void agent_log_call(const agent_result_t *result, const char *role)
           .project_name = "",
           .tool_name = result->agent_name,
           .role = role ? role : "",
-          .model = "",
+          /* Record the served model so the by-model breakdown is populated.
+           * The agent name is the model alias today (cost is keyed off it
+           * just above), so model and cost stay consistent; a later phase
+           * threads the provider-reported model through agent_result_t. */
+          .model = result->agent_name,
           .prompt_tokens = usage.input_tokens,
           .completion_tokens = usage.output_tokens,
           .cache_write_tokens = usage.cache_write_tokens,

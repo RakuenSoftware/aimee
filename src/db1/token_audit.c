@@ -232,29 +232,33 @@ int db1_token_audit_by_model(int since_hours, db1_token_audit_model_summary_t *o
    if (!db)
       return -1;
 
-   /* Empty-model rows are skipped via WHERE so the response array isn't
-    * polluted by older audit entries written before model was tracked. */
-   static const char *sql_recent = "SELECT COALESCE(model, ''), COUNT(*),"
-                                   " COALESCE(SUM(prompt_tokens), 0),"
-                                   " COALESCE(SUM(completion_tokens), 0),"
-                                   " COALESCE(SUM(estimated_cost_usd), 0.0)"
-                                   " FROM token_audit"
-                                   " WHERE created_at >= datetime('now', ?)"
-                                   "   AND COALESCE(model, '') != ''"
-                                   " GROUP BY model"
-                                   " ORDER BY COALESCE(SUM(prompt_tokens), 0) +"
-                                   "          COALESCE(SUM(completion_tokens), 0) DESC"
-                                   " LIMIT ?";
-   static const char *sql_all = "SELECT COALESCE(model, ''), COUNT(*),"
-                                " COALESCE(SUM(prompt_tokens), 0),"
-                                " COALESCE(SUM(completion_tokens), 0),"
-                                " COALESCE(SUM(estimated_cost_usd), 0.0)"
-                                " FROM token_audit"
-                                " WHERE COALESCE(model, '') != ''"
-                                " GROUP BY model"
-                                " ORDER BY COALESCE(SUM(prompt_tokens), 0) +"
-                                "          COALESCE(SUM(completion_tokens), 0) DESC"
-                                " LIMIT ?";
+   /* Empty-model rows (legacy entries written before the model was tracked)
+    * are surfaced as "(unattributed)" rather than dropped via WHERE, so
+    * historical spend does not silently vanish once newer rows carry a
+    * model. GROUP BY 1 groups on the relabelled expression. */
+   static const char *sql_recent =
+       "SELECT CASE WHEN COALESCE(model, '') = '' THEN '(unattributed)' ELSE model END,"
+       " COUNT(*),"
+       " COALESCE(SUM(prompt_tokens), 0),"
+       " COALESCE(SUM(completion_tokens), 0),"
+       " COALESCE(SUM(estimated_cost_usd), 0.0)"
+       " FROM token_audit"
+       " WHERE created_at >= datetime('now', ?)"
+       " GROUP BY 1"
+       " ORDER BY COALESCE(SUM(prompt_tokens), 0) +"
+       "          COALESCE(SUM(completion_tokens), 0) DESC"
+       " LIMIT ?";
+   static const char *sql_all =
+       "SELECT CASE WHEN COALESCE(model, '') = '' THEN '(unattributed)' ELSE model END,"
+       " COUNT(*),"
+       " COALESCE(SUM(prompt_tokens), 0),"
+       " COALESCE(SUM(completion_tokens), 0),"
+       " COALESCE(SUM(estimated_cost_usd), 0.0)"
+       " FROM token_audit"
+       " GROUP BY 1"
+       " ORDER BY COALESCE(SUM(prompt_tokens), 0) +"
+       "          COALESCE(SUM(completion_tokens), 0) DESC"
+       " LIMIT ?";
    const char *sql = since_hours > 0 ? sql_recent : sql_all;
    sqlite3_stmt *stmt = NULL;
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)

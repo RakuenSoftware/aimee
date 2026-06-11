@@ -148,6 +148,53 @@ static void test_cost_for_delegation(void)
    assert(db1_token_audit_cost_for_delegation(NULL) == 0.0);
 }
 
+static void test_by_model_relabels_empty(void)
+{
+   /* Insert one row with a real model and one legacy row with an empty
+    * model. by_model must surface BOTH — the empty one relabelled as
+    * "(unattributed)" rather than dropped — so historical spend stays
+    * visible once the model column starts being populated. */
+   db1_token_audit_row_t with_model = {
+       .session_id = "bm1",
+       .tool_name = "claude-opus-4",
+       .role = "implement",
+       .model = "claude-opus-4",
+       .prompt_tokens = 50,
+       .completion_tokens = 20,
+       .estimated_cost_usd = 0.30,
+   };
+   db1_token_audit_row_t legacy_empty = {
+       .session_id = "bm2",
+       .tool_name = "legacy-agent",
+       .role = "implement",
+       .model = "", /* legacy row written before model was tracked */
+       .prompt_tokens = 11,
+       .completion_tokens = 4,
+       .estimated_cost_usd = 0.02,
+   };
+   assert(db1_token_audit_insert(&with_model) == 0);
+   assert(db1_token_audit_insert(&legacy_empty) == 0);
+
+   db1_token_audit_model_summary_t models[16];
+   int n = db1_token_audit_by_model(0, models, 16);
+   assert(n > 0);
+
+   int saw_real = 0, saw_unattributed = 0;
+   for (int i = 0; i < n; i++)
+   {
+      assert(models[i].model[0] != '\0'); /* no label is ever empty */
+      if (strcmp(models[i].model, "claude-opus-4") == 0)
+         saw_real = 1;
+      if (strcmp(models[i].model, "(unattributed)") == 0)
+      {
+         saw_unattributed = 1;
+         assert(models[i].prompt_tokens >= 11);
+      }
+   }
+   assert(saw_real);
+   assert(saw_unattributed);
+}
+
 static void test_dashboard_rows(void)
 {
    db1_token_audit_dashboard_row_t rows[4];
@@ -168,8 +215,9 @@ int main(void)
    test_totals_and_filters();
    test_grouped_views();
    test_dashboard_rows();
-   /* Runs last because it inserts additional rows that would skew the
-    * counts checked by the totals/grouped/dashboard tests above. */
+   /* These run after the count-sensitive tests because they insert
+    * additional rows that would skew the totals/grouped/dashboard counts. */
+   test_by_model_relabels_empty();
    test_cost_for_delegation();
    db1_shutdown();
    printf("test_token_audit: ok\n");

@@ -72,16 +72,31 @@ static const char *token_strcasestr_local(const char *haystack, const char *need
    return NULL;
 }
 
+/* Return the most specific (longest) matching entry rather than the first one
+ * in table order. With first-match, the result depends on row ordering — e.g.
+ * "gpt-4o-mini" must precede "gpt-4o" — which is a silent mispricing hazard if
+ * the table is ever reordered. Longest-match makes the lookup order-independent
+ * (the longer substring is always the more specific model) while preserving the
+ * results the carefully-ordered table already produces. */
 static const model_price_t *find_price(const char *model)
 {
    if (!model || !model[0])
       return NULL;
+   const model_price_t *best = NULL;
+   size_t best_len = 0;
    for (int i = 0; i < PRICING_COUNT; i++)
    {
       if (token_strcasestr_local(model, pricing[i].model_substr))
-         return &pricing[i];
+      {
+         size_t len = strlen(pricing[i].model_substr);
+         if (len > best_len)
+         {
+            best = &pricing[i];
+            best_len = len;
+         }
+      }
    }
-   return NULL;
+   return best;
 }
 
 /* --- Cost estimation --- */

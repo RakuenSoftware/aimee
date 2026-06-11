@@ -83,6 +83,25 @@ static void test_zero_tokens(void)
    PASS("cost: zero tokens = zero cost");
 }
 
+static void test_specific_match_wins(void)
+{
+   /* Both "gpt-4o-mini" and "gpt-4o" are substrings of a gpt-4o-mini id.
+    * The lookup must pick the more specific (longer) match regardless of
+    * table order — mini is $0.15/M in, not gpt-4o's $2.50/M. */
+   token_usage_t u = {.input_tokens = 1000000, .output_tokens = 0};
+   double mini = token_estimate_cost("gpt-4o-mini-2024-07-18", &u);
+   assert(near_equal(mini, 0.15)); /* gpt-4o-mini input, not gpt-4o */
+
+   /* o3-mini ($1.10/M) must not resolve to o3 ($10.00/M). */
+   double o3mini = token_estimate_cost("o3-mini", &u);
+   assert(near_equal(o3mini, 1.10));
+
+   /* Plain gpt-4o still resolves to gpt-4o. */
+   double base = token_estimate_cost("gpt-4o-2024-11-20", &u);
+   assert(near_equal(base, 2.50));
+   PASS("cost: most-specific model match wins");
+}
+
 /* --- Main --- */
 
 int main(void)
@@ -96,6 +115,7 @@ int main(void)
    test_null_usage();
    test_null_model();
    test_zero_tokens();
+   test_specific_match_wins();
 
    printf("All token_tracker tests passed.\n");
    return 0;
