@@ -80,6 +80,22 @@ frontend, and webchat consumers currently sum `estimated_cost_usd` as a scalar,
 so new `estimated` / `avoided` / `partial` rows will inflate spend unless every
 reader is updated with the same semantics.
 
+A fifth pass (four more parallel audits) verified 5–7 and corrected/added five
+points: (8) **`/v1/runs` already writes a row** (detached worker →
+`agent_run_with_tools` → `agent_log_call`), so it must get attribution **only**,
+not a new write — adding one double-counts; the new writes belong only to the six
+synchronous no-log handlers; (9) a **thread-local context is insufficient** —
+the `/v1/runs` worker is a detached pthread that does not inherit request-thread
+TLS, so its context must be captured into the job struct at enqueue; (10)
+**`session_id()` is PPID-process-wide**, so all ingress rows collapse into one
+session and per-source attribution must come from the request context, not
+`session_id()`; (11) **idempotency contradicts the additive reconcile** — a
+UNIQUE index is required and the reconcile creates none (and `NOT NULL` columns
+need defaults), so an explicit migration or in-process idempotency is needed; (12)
+the scalar-spend reader set is **eight** files incl. `server_compute.c:1469`
+cost-fold and `webchat/socket.go`, but `Chat.tsx` does not price client-side so
+§1 propagates to the UI for free.
+
 ## Goal
 
 Ingress requests are a cost blind spot. Normal agent and delegate calls are
@@ -161,32 +177,61 @@ optimization surface aimee already has, not a new one.
   real models while legacy rows stay empty, the by-model surface shows a
   **false-zero history** — recent ingress spend appears while all prior spend
   vanishes. The model write-fix and the filter/backfill must land together (§2).
-- **OpenAI/Codex ingress currently bypasses `agent_log_call` entirely.**
-  `agent_execute()` intentionally does **not** log (`agent_runtime.c:1093-1095`),
-  and `openai_chat.c` calls it directly for `/v1/chat/completions`,
-  `/v1/completions`, `/v1/responses`, and `/v1/runs` (`run_completion`,
-  `responses_handler`, `run_worker`). Streaming `/v1/responses` uses
-  `agent_execute_messages()`, a local one-step provider helper that also has no
-  token-audit write. So the OpenAI-compatible ingress is not merely missing
-  source attribution; most of it writes **no** `token_audit` row at all today.
-  The implementation must add exactly-one-row audit writes at these ingress
-  completion points, while preserving `agent_execute()`'s no-log contract to
-  avoid double logging in normal agent/delegate paths.
+- **Most OpenAI/Codex ingress bypasses `agent_log_call` — but `/v1/runs` does
+  NOT, and that asymmetry is a double-count trap.** `agent_execute()`
+  intentionally does **not** log (`agent_runtime.c:1092-1095`: "callers … handle
+  logging … Do not log here to avoid double-logging"), and `openai_chat.c` calls
+  it (or `agent_execute_messages()`, a one-step helper that also never logs)
+  directly for the **six** synchronous handlers: buffered + streaming
+  `/v1/chat/completions`, buffered + streaming `/v1/completions`, buffered
+  `/v1/responses`, and streaming `/v1/responses`. Those write **no** `token_audit`
+  row today. **`/v1/runs` is different**: `runs_handler` spawns a detached worker
+  (`pthread_create` + `pthread_detach`, `openai_chat.c:1156-1164`) that calls
+  `agent_run_with_tools()` → `agent_log_call()` (`agent_runtime.c:406`), so it
+  **already writes a row**. Therefore the implementation must add new writes only
+  to the six no-log handlers; for `/v1/runs` it must add **attribution only**, not
+  a second write, or it double-counts. The general rule: never add an ingress
+  write to any path that already flows through `agent_run*` / `agent_log_call`.
 - **The HTTP ingress handlers cannot currently see the metadata this proposal
   needs.** `server_http_completion_fn` and stream handler typedefs receive only
   `(body, resp, cap)` or `(body, emit, ctx)`; `Authorization`, `x-api-key`,
   `X-Aimee-Session-Key`, idempotency headers, request id, route path, TCP-vs-UDS,
-  and derived bearer capabilities are consumed in `server_http.c` and then
-  discarded. Source attribution, account isolation, idempotent dedup, and audit
-  row identity therefore require either a small thread-local request context
-  (matching the existing `ingress_preinject_set_request_disabled()` pattern) or
-  widening the registered handler signatures before any ingress writer lands.
-- **Existing usage readers assume every row is spend.** `hud.c`,
-  `dashboard.c` / `server/dashboard_server.c`, `frontend/src/pages/Chat.tsx`, and
-  webchat's usage event shape all sum `estimated_cost_usd` directly. Once
-  `usage_kind=estimated|avoided|partial` exists, these readers must filter or
-  split realized spend from advisory/avoided values, otherwise the UI will show
-  avoided cost as money spent.
+  and derived bearer capabilities are consumed in `server_http.c:1422-1451`
+  (a `request_id` is even generated, `:1424-1430`) and then discarded — only
+  logged, never passed to handlers. Source attribution, account isolation,
+  idempotent dedup, and audit row identity therefore require widening the handler
+  signatures (or a request context) before any ingress writer lands.
+- **A thread-local context is NOT sufficient — it breaks for `/v1/runs`.** The
+  cited precedent `ingress_preinject_set_request_disabled()` is `static __thread`
+  (`ingress_preinject.c:28`) and works **only because the turn runs synchronously
+  on the request thread**. The six synchronous handlers above keep that property,
+  so a thread-local context would reach them. But the `/v1/runs` worker runs on a
+  **detached pthread** that does not inherit the request thread's TLS, and SSE
+  paths may offload via `sse_offload` — so any offloaded path must have its
+  context **captured into the job/work struct at enqueue**, not read from a
+  thread-local. The proposal's "survive offloaded workers" requirement is only met
+  by capture-at-enqueue.
+- **`session_id()` is process-wide for ingress, so per-source attribution cannot
+  use it.** `session_id()` keys off the server's PPID (`config.c`), so **every**
+  HTTP ingress request resolves to the **same** shared id. Consequences: ingress
+  rows all collapse into one row in `db1_insights_top_sessions` (which JOINs
+  `token_audit.session_id`), and `cost_for_delegation` only separates by
+  `delegation_id`. The new `source` (and any per-client attribution) must derive
+  from the **request context** (`X-Aimee-Session-Key` / principal), not from
+  `session_id()`; otherwise top-sessions and per-source spend are meaningless for
+  ingress.
+- **Existing usage readers assume every row is spend — full list.** The audit
+  found **eight** consumers that sum `estimated_cost_usd` (or token-audit totals)
+  with no `usage_kind` filter: `src/hud.c`, `src/cmd_core.c` (`cmd_usage`),
+  `src/dashboard.c`, `src/server/dashboard_server.c`, `src/server_insights.inc`,
+  `src/server/server_compute.c:1469` (the cost-fold query),
+  `webchat/socket.go` (`streamEvent.Cost`), and `frontend/src/pages/Chat.tsx`.
+  Once `usage_kind=estimated|avoided|partial` exists, all of them (plus the eight
+  SQL aggregations in `token_audit.c`) must split realized spend from
+  advisory/avoided values, or the UI shows avoided cost as money spent. One
+  upside: `Chat.tsx` only *displays* a server-sent `cost` (it does **not** compute
+  price client-side), so unifying pricing server-side (§1) propagates to the UI
+  with no frontend change.
 
 ## §1 One pricing source of truth (extend, don't add)
 
@@ -232,23 +277,30 @@ estimates** and **avoided estimated cost**.
   `served_model` or `billable_model`, `provider_model`, `duration_ms`,
   `stop_reason`, and `optimizations_json` / `avoided_cost_usd` if dedup/cache
   savings are reported. If the decision is to avoid migration, state exactly how
-  each field is represented and which reports lose fidelity. The migration is
-  additive-only — `db1_reconcile_columns`
-  (`db_schema.c:78`) adds missing columns but creates no indexes and runs no
-  data migration, so column adds are safe but the empty-model backfill below is a
-  separate step.
-- **Row identity / idempotency:** give each attempted provider call a stable
-  request/turn id, and make successful audit insertion idempotent on that id (or
-  on `(source, request_id, attempt)`). This is required for retries, background
-  `/v1/runs`, and stream-abort cleanup paths; otherwise a retry or late finalizer
-  can double-count spend.
+  each field is represented and which reports lose fidelity. Two migration
+  constraints the audit surfaced: `db1_reconcile_columns` (`db_schema.c:78`)
+  **only adds columns** (no index, no data migration), and SQLite cannot
+  `ALTER TABLE ADD COLUMN` a `NOT NULL` column without a default — so every new
+  column must ship with a default, and the empty-model backfill and any index are
+  **separate explicit steps**, not part of the additive reconcile.
+- **Row identity / idempotency (and its migration cost).** Give each attempted
+  provider call a stable request/turn id and make successful insertion idempotent
+  on `(source, request_id, attempt)` — required for retries, background `/v1/runs`,
+  and stream-abort cleanup. **But idempotency needs a UNIQUE index, which the
+  additive reconcile does not create** (there is none on `token_audit` today, and
+  db1's indexes are only created at table-creation in `schema.sql`). Resolve the
+  contradiction explicitly: either add a one-off index-creation migration step, or
+  enforce idempotency in-process (a seen-set keyed by request id) and accept that
+  a crash between provider-return and insert can drop — not duplicate — a row.
 - **Request context prerequisite:** before adding source-aware audit rows or
   dedup, expose a per-request context from `server_http.c` to registered handlers:
   method/path, generated `X-Request-ID`, inbound idempotency key, session key,
   remote/local transport, bearer scope/principal (or local UID), and selected
-  route capability. The existing thread-local preinject override is a precedent,
-  but this context must be reset for every request and safe for offloaded stream
-  or `/v1/runs` worker threads.
+  route capability. The thread-local preinject override is a precedent for the
+  **synchronous** handlers only; because the `/v1/runs` worker is a detached
+  pthread (and SSE may offload), the context for those paths must be **captured
+  into the job/work struct at enqueue**, and the thread-local must be reset per
+  request so it never leaks across reused worker threads.
 - **Fix `by_model` alongside the model write (prerequisite, not optional).**
   Populating `served_model` is pointless while `db1_token_audit_by_model` filters
   empty models out: either backfill legacy rows' model from their `tool_name`
@@ -268,11 +320,14 @@ estimates** and **avoided estimated cost**.
   `completion_tokens`. The provider request builder has to insert the option, not
   only the parser.
 - **OpenAI/Codex direct ingress paths:** add one audit write for each successful
-  provider call in `openai_chat.c`: buffered `/v1/chat/completions`,
-  `/v1/completions`, buffered `/v1/responses`, streaming `/v1/responses`
-  (`agent_execute_messages()` result), and `/v1/runs` worker completion. Do not
+  provider call in the **six no-log handlers**: buffered + streaming
+  `/v1/chat/completions`, buffered + streaming `/v1/completions`, buffered
+  `/v1/responses`, and streaming `/v1/responses` (`agent_execute_messages()`
+  result). **Do NOT add a write to `/v1/runs`** — its detached worker already
+  logs through `agent_run_with_tools()` → `agent_log_call()`; it needs the
+  source/attribution fix only, fed by the context captured at enqueue. And do not
   add logging inside `agent_execute()` itself; normal `agent_run*` paths already
-  call `agent_log_call()`.
+  call `agent_log_call()`. Net: new writes only where no row exists today.
 - **Buffered path:** parse the provider JSON `usage` block after a 200 response
   and before translating it back to the client. The Anthropic parser already
   extracts cache tokens (`agent_bridge.c:791-796`), but the **OpenAI buffered
@@ -471,14 +526,24 @@ with a benchmark showing no quality regression.
   default; source/model breakdowns are stable in `cmd_usage`,
   `insights.overview`, HUD, dashboard JSON, React context panel, and webchat
   usage events.
-- **OpenAI/Codex ingress audit:** buffered chat/completions, completions,
-  responses, streaming responses, and `/v1/runs` each write exactly one realized
-  row on successful provider completion; `agent_execute()` remains no-log; normal
-  `agent_run*` paths still write exactly one row through `agent_log_call()`.
-- **Request context:** registered handlers see request id, idempotency key,
-  source/principal/session metadata, and route identity; context resets per
-  request and survives offloaded stream/run workers without leaking to the next
-  request.
+- **OpenAI/Codex ingress audit (double-count guard):** each of the six
+  synchronous no-log handlers (buffered+streaming chat/completions,
+  buffered+streaming completions, buffered+streaming responses) writes **exactly
+  one** realized row; **`/v1/runs` still writes exactly one** row (via its
+  existing `agent_log_call`) and gains source attribution **without** a second
+  write; `agent_execute()` remains no-log; normal `agent_run*` paths are
+  unchanged. Explicit assertion: no turn produces two rows.
+- **Request context / threading:** registered handlers see request id, idempotency
+  key, source/principal/session metadata, and route identity; the `/v1/runs`
+  detached worker sees the **same** context via capture-at-enqueue (not a
+  thread-local), and the thread-local resets per request so it never leaks to the
+  next request on a reused worker thread.
+- **Source attribution:** ingress rows carry a per-client source derived from the
+  request context (session key/principal), **not** the PPID-shared `session_id()`;
+  two distinct clients do not collapse into one `top_sessions` row.
+- **Idempotency:** a retried or late-finalized call with the same
+  `(source, request_id, attempt)` produces exactly one row (index or in-process
+  guard), and the migration that creates the uniqueness constraint is exercised.
 - **Aborted stream:** a stream cut before `finish` writes a `partial` row (or
   none), never a silently dropped turn.
 - **Buffered ingress:** provider usage writes **exactly one** audit row with
