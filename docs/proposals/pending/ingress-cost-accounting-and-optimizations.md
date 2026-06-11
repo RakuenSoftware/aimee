@@ -1,7 +1,7 @@
 # Proposal: ingress cost-accounting coverage + request-level cost optimizations
 
-- **State:** draft - pending review (revised after PR #180 review + a file-by-file
-  codebase audit)
+- **State:** draft - pending review (revised after PR #180 review + repeated
+  file-by-file codebase audits)
 - **Author:** JBailes
 - **Date:** 2026-06-11
 - **Charter roles:** Evaluate-Optimize (cost-shaped reward into the existing
@@ -12,7 +12,9 @@
   Anthropic relay path + buffered path; resolve the billable model),
   `src/server/anthropic_ingress.c` (`anthropic_stream_feed_openai` - capture full
   normalized OpenAI-stream usage, not just `completion_tokens`),
-  `src/server/openai_chat.c` (the live OpenAI/Codex pre-injection seam),
+  `src/server/openai_chat.c` (the live OpenAI/Codex inference and pre-injection
+  seam; direct ingress audit rows for chat/completions, completions, responses,
+  streaming responses, and runs),
   `src/server/agent_runtime.c` (`agent_log_call` - fix model attribution so rows
   resolve a real billable model), `src/server/token_tracker.c` +
   `src/headers/token_tracker.h` (single pricing source of truth, reconciled with
@@ -23,10 +25,13 @@
   metadata/splitting only if needed by the OpenAI/Codex seam),
   `src/server_insights.inc` (the `insights.overview` implementation),
   `src/cmd_core.c` (`cmd_usage`), `src/server/server_compute.c` (cost-shaped
-  reward on the existing `delegate_routing` bandit close), config plumbing
-  (`src/headers/config.h`, `src/config_fields.c`, `src/config_sections.c`,
-  `src/config_save.c`), route and auth registration only if a new API method is
-  still justified. DB2 only if a shared/multi-machine analytics need is
+  reward on the existing `delegate_routing` bandit close), `src/server/server_http.c`
+  + `src/headers/server_http.h` (request-context propagation for source,
+  idempotency, principal, and request-id metadata), dashboard/HUD/frontend
+  readers that consume token-audit totals, config plumbing (`src/headers/config.h`,
+  `src/config_fields.c`, `src/config_sections.c`, `src/config_save.c`), route and
+  auth registration only if a new API method is still justified. DB2 only if a
+  shared/multi-machine analytics need is
   established (§2). Unit + integration tests. No new service, no new model.
 
 ## Revision note
@@ -63,6 +68,17 @@ land together or history shows a false zero (§0/§2); (3) the aimee-owned outbo
 Anthropic `system` is a **flat string**, so the cache carve-out's real work is a
 string→content-block conversion, not a flag (§3); (4) `stream_options.include_usage`
 is set nowhere and aborted streams drop usage (§2).
+
+This pass adds three remaining blockers: (5) OpenAI/Codex ingress does **not**
+go through `agent_log_call` either — `openai_chat.c` calls `agent_execute()` and
+`agent_execute_messages()` directly, and `agent_execute()` explicitly leaves
+logging to its callers — so those handlers need first-class audit writes, not
+only attribution fixes; (6) the registered HTTP handler signatures only receive
+`body`/`resp`/`cap`, so source/principal/idempotency/request-id metadata is
+unavailable unless `server_http.c` exposes a request context; (7) HUD, dashboard,
+frontend, and webchat consumers currently sum `estimated_cost_usd` as a scalar,
+so new `estimated` / `avoided` / `partial` rows will inflate spend unless every
+reader is updated with the same semantics.
 
 ## Goal
 
@@ -145,6 +161,32 @@ optimization surface aimee already has, not a new one.
   real models while legacy rows stay empty, the by-model surface shows a
   **false-zero history** — recent ingress spend appears while all prior spend
   vanishes. The model write-fix and the filter/backfill must land together (§2).
+- **OpenAI/Codex ingress currently bypasses `agent_log_call` entirely.**
+  `agent_execute()` intentionally does **not** log (`agent_runtime.c:1093-1095`),
+  and `openai_chat.c` calls it directly for `/v1/chat/completions`,
+  `/v1/completions`, `/v1/responses`, and `/v1/runs` (`run_completion`,
+  `responses_handler`, `run_worker`). Streaming `/v1/responses` uses
+  `agent_execute_messages()`, a local one-step provider helper that also has no
+  token-audit write. So the OpenAI-compatible ingress is not merely missing
+  source attribution; most of it writes **no** `token_audit` row at all today.
+  The implementation must add exactly-one-row audit writes at these ingress
+  completion points, while preserving `agent_execute()`'s no-log contract to
+  avoid double logging in normal agent/delegate paths.
+- **The HTTP ingress handlers cannot currently see the metadata this proposal
+  needs.** `server_http_completion_fn` and stream handler typedefs receive only
+  `(body, resp, cap)` or `(body, emit, ctx)`; `Authorization`, `x-api-key`,
+  `X-Aimee-Session-Key`, idempotency headers, request id, route path, TCP-vs-UDS,
+  and derived bearer capabilities are consumed in `server_http.c` and then
+  discarded. Source attribution, account isolation, idempotent dedup, and audit
+  row identity therefore require either a small thread-local request context
+  (matching the existing `ingress_preinject_set_request_disabled()` pattern) or
+  widening the registered handler signatures before any ingress writer lands.
+- **Existing usage readers assume every row is spend.** `hud.c`,
+  `dashboard.c` / `server/dashboard_server.c`, `frontend/src/pages/Chat.tsx`, and
+  webchat's usage event shape all sum `estimated_cost_usd` directly. Once
+  `usage_kind=estimated|avoided|partial` exists, these readers must filter or
+  split realized spend from advisory/avoided values, otherwise the UI will show
+  avoided cost as money spent.
 
 ## §1 One pricing source of truth (extend, don't add)
 
@@ -186,14 +228,27 @@ provider usage, distinguishing **billable realized usage** from **local
 estimates** and **avoided estimated cost**.
 
 - **Minimum schema migration:** add fields (or a tightly-linked extension table)
-  for `source`, `usage_kind`, `requested_model`, `served_model` or
-  `billable_model`, `duration_ms`, `stop_reason`, and `optimizations_json` /
-  `avoided_cost_usd` if dedup/cache savings are reported. If the decision is to
-  avoid migration, state exactly how each field is represented and which reports
-  lose fidelity. The migration is additive-only — `db1_reconcile_columns`
+  for `source`, `usage_kind`, `request_id` or `turn_id`, `requested_model`,
+  `served_model` or `billable_model`, `provider_model`, `duration_ms`,
+  `stop_reason`, and `optimizations_json` / `avoided_cost_usd` if dedup/cache
+  savings are reported. If the decision is to avoid migration, state exactly how
+  each field is represented and which reports lose fidelity. The migration is
+  additive-only — `db1_reconcile_columns`
   (`db_schema.c:78`) adds missing columns but creates no indexes and runs no
   data migration, so column adds are safe but the empty-model backfill below is a
   separate step.
+- **Row identity / idempotency:** give each attempted provider call a stable
+  request/turn id, and make successful audit insertion idempotent on that id (or
+  on `(source, request_id, attempt)`). This is required for retries, background
+  `/v1/runs`, and stream-abort cleanup paths; otherwise a retry or late finalizer
+  can double-count spend.
+- **Request context prerequisite:** before adding source-aware audit rows or
+  dedup, expose a per-request context from `server_http.c` to registered handlers:
+  method/path, generated `X-Request-ID`, inbound idempotency key, session key,
+  remote/local transport, bearer scope/principal (or local UID), and selected
+  route capability. The existing thread-local preinject override is a precedent,
+  but this context must be reset for every request and safe for offloaded stream
+  or `/v1/runs` worker threads.
 - **Fix `by_model` alongside the model write (prerequisite, not optional).**
   Populating `served_model` is pointless while `db1_token_audit_by_model` filters
   empty models out: either backfill legacy rows' model from their `tool_name`
@@ -212,6 +267,12 @@ estimates** and **avoided estimated cost**.
   normalized `token_usage_t` (input + cache + output), not just
   `completion_tokens`. The provider request builder has to insert the option, not
   only the parser.
+- **OpenAI/Codex direct ingress paths:** add one audit write for each successful
+  provider call in `openai_chat.c`: buffered `/v1/chat/completions`,
+  `/v1/completions`, buffered `/v1/responses`, streaming `/v1/responses`
+  (`agent_execute_messages()` result), and `/v1/runs` worker completion. Do not
+  add logging inside `agent_execute()` itself; normal `agent_run*` paths already
+  call `agent_log_call()`.
 - **Buffered path:** parse the provider JSON `usage` block after a 200 response
   and before translating it back to the client. The Anthropic parser already
   extracts cache tokens (`agent_bridge.c:791-796`), but the **OpenAI buffered
@@ -247,6 +308,11 @@ the existing `agent_log_call` empty-model weakness: **provider-reported model
 requested model**. Record the requested model separately when it differs (Claude
 Code asks for one model; aimee serves the configured primary), so attribution is
 auditable rather than silently wrong. Agent names are not pricing keys.
+
+This also requires extending response/result shapes: `parsed_response_t` and
+`agent_result_t` currently carry token counts but no provider-reported model and
+no stop reason, so parsers must extract those fields before the ledger writer can
+honor the precedence rule.
 
 ## §3 Cache-aware request shaping, scoped to real ingress ownership
 
@@ -297,6 +363,10 @@ narrow.
   resolved model, endpoint/provider, behavior-relevant config flags, the
   exact preinject/context identity, behavior-affecting request headers, auth
   principal or tenant boundary, and stream/non-stream mode.
+- **Request-context dependency:** the idempotency key and account/source boundary
+  are not available to `openai_chat.c` / `anthropic_http.c` today because handler
+  signatures receive only the body. §2's request context must land before dedup,
+  or dedup can only key on unsafe body-derived data.
 - **v1 eligibility:** buffered only, no tools / no server-side tools, non-stream,
   successful `200` only, explicit idempotency key, and no request surface that can
   consume changing memory/context unless that context hash is in the key. Anything
@@ -359,6 +429,13 @@ Any new route requires:
 - `server_auth.c` capability policy, not just route registration; and
 - tests for auth denial as well as route/spec parity.
 
+Regardless of whether a new route is added, every existing consumer of
+`token_audit` must learn the same semantics: `cmd_usage`, `insights.overview`,
+HUD, dashboard JSON, the React context panel, and webchat usage events must report
+realized spend separately from estimated, avoided, and partial rows. A single SQL
+helper for spend totals is preferable to copy-pasting `WHERE usage_kind =
+'realized'` across consumers.
+
 ## Config (all default-off, flag-rollout-readiness program)
 
 - `ingress_usage_accounting_enabled` (§2 — observe + audit ingress turns)
@@ -391,8 +468,17 @@ with a benchmark showing no quality regression.
 - **Schema/reporting:** additive migration preserves existing `token_audit` rows;
   **by-model no longer hides legacy empty-model rows** (false-zero migration
   test); spend totals exclude `estimated`, `avoided`, and `partial` rows by
-  default; source/model breakdowns are stable in `cmd_usage` and
-  `insights.overview`.
+  default; source/model breakdowns are stable in `cmd_usage`,
+  `insights.overview`, HUD, dashboard JSON, React context panel, and webchat
+  usage events.
+- **OpenAI/Codex ingress audit:** buffered chat/completions, completions,
+  responses, streaming responses, and `/v1/runs` each write exactly one realized
+  row on successful provider completion; `agent_execute()` remains no-log; normal
+  `agent_run*` paths still write exactly one row through `agent_log_call()`.
+- **Request context:** registered handlers see request id, idempotency key,
+  source/principal/session metadata, and route identity; context resets per
+  request and survives offloaded stream/run workers without leaking to the next
+  request.
 - **Aborted stream:** a stream cut before `finish` writes a `partial` row (or
   none), never a silently dropped turn.
 - **Buffered ingress:** provider usage writes **exactly one** audit row with
@@ -413,7 +499,8 @@ with a benchmark showing no quality regression.
   string.
 - **Dedup:** TTL; per-source/account/agent/model/endpoint/flags/context/stream
   key separation; no-tools/no-stream/200-only/idempotency-key eligibility;
-  error-response bypass; avoided cost does not inflate spend totals.
+  error-response bypass; no dedup when request context is unavailable; avoided
+  cost does not inflate spend totals.
 - **Bandit reward:** reward stays in `[0,1]`; cost affects arm selection only
   through normalized shaping, never raw dollars; side-metadata mode leaves arm
   selection unchanged; missing realized cost falls back safely.
