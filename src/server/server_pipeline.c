@@ -978,11 +978,35 @@ static int resubmit_same_pass(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *l
  * attempt result's `artifact`). Store it as the proposal working artifact
  * (ref + hash, #34), mark the pass done, and transition drafting ->
  * proposal_review — NOT to a PR/gate. */
+/* `git -C <repo> worktree add -B <branch> <wt> [<from_ref>]`. Returns 0/-1. */
+static int create_worktree(const rtp_run_t *run, const char *branch, const char *wt,
+                           const char *from_ref)
+{
+   char *erepo = shell_escape(run->repo_root);
+   char *ewt = shell_escape(wt);
+   char *ebr = shell_escape(branch);
+   char *efrom = (from_ref && from_ref[0]) ? shell_escape(from_ref) : NULL;
+   char cmd[RTP_PATH_LEN * 3 + 160];
+   if (efrom)
+      snprintf(cmd, sizeof(cmd), "git -C '%s' worktree add -B '%s' '%s' '%s' 2>&1",
+               erepo ? erepo : run->repo_root, ebr ? ebr : branch, ewt ? ewt : wt, efrom);
+   else
+      snprintf(cmd, sizeof(cmd), "git -C '%s' worktree add -B '%s' '%s' 2>&1",
+               erepo ? erepo : run->repo_root, ebr ? ebr : branch, ewt ? ewt : wt);
+   free(erepo);
+   free(ewt);
+   free(ebr);
+   free(efrom);
+   int rc = 0;
+   char *o = mcp_git_run(cmd, &rc);
+   free(o);
+   return rc == 0 ? 0 : -1;
+}
+
 /* Create/select the dedicated proposal branch + worktree before writing the
- * proposal file (proposal §1). Returns 0 when a worktree is ready OR no repo is
- * recorded at all (internal-file mode); returns -1 when a repo_root IS recorded
- * but the dedicated worktree could not be created — the caller must then refuse
- * to write rather than mutate the user's checkout (#2). */
+ * proposal file (proposal §1). Returns 0 when a worktree is ready; -1 when no
+ * repo is recorded or the worktree could not be created — the caller must then
+ * refuse to write rather than mutate the user's checkout (#2). */
 static int prepare_proposal_workspace(rtp_run_t *run)
 {
    if (run->worktree_path[0])
@@ -993,21 +1017,39 @@ static int prepare_proposal_workspace(rtp_run_t *run)
       snprintf(run->head_branch, sizeof(run->head_branch), "roundtable/proposal-%d", run->id);
    char wt[RTP_PATH_LEN];
    snprintf(wt, sizeof(wt), "%s/roundtable_pipeline/%d/wt", aimee_home(), run->id);
-   char *erepo = shell_escape(run->repo_root);
-   char *ewt = shell_escape(wt);
-   char *ebr = shell_escape(run->head_branch);
-   char cmd[RTP_PATH_LEN * 3 + 128];
-   snprintf(cmd, sizeof(cmd), "git -C '%s' worktree add -B '%s' '%s' 2>&1",
-            erepo ? erepo : run->repo_root, ebr ? ebr : run->head_branch, ewt ? ewt : wt);
-   free(erepo);
-   free(ewt);
-   free(ebr);
-   int rc = 0;
-   char *o = mcp_git_run(cmd, &rc);
-   free(o);
-   if (rc != 0)
+   if (create_worktree(run, run->head_branch, wt, NULL) != 0)
       return -1; /* do NOT fall back to repo_root — never touch the user checkout */
    snprintf(run->worktree_path, sizeof(run->worktree_path), "%s", wt);
+   rtp_run_update(run);
+   return 0;
+}
+
+/* After gate 1, the implementation phase gets its OWN dedicated branch/worktree
+ * (proposal §1, #2): `roundtable/impl-<id>` branched from the (now-merged) base,
+ * in a separate worktree, so the impl PR is never opened from the proposal
+ * branch. Resets the head/worktree/PR fields. Returns 0/-1. */
+static int prepare_impl_workspace(rtp_run_t *run)
+{
+   if (!run->repo_root[0])
+      return -1;
+   char branch[RTP_NAME_LEN];
+   snprintf(branch, sizeof(branch), "roundtable/impl-%d", run->id);
+   char wt[RTP_PATH_LEN];
+   snprintf(wt, sizeof(wt), "%s/roundtable_pipeline/%d/wt-impl", aimee_home(), run->id);
+   const char *from = run->base_branch[0] ? run->base_branch : "testing";
+   if (create_worktree(run, branch, wt, from) != 0)
+   {
+      char originref[RTP_NAME_LEN + 8];
+      snprintf(originref, sizeof(originref), "origin/%s", from);
+      if (create_worktree(run, branch, wt, originref) != 0)
+         return -1;
+   }
+   snprintf(run->head_branch, sizeof(run->head_branch), "%s", branch);
+   snprintf(run->worktree_path, sizeof(run->worktree_path), "%s", wt);
+   run->head_sha[0] = '\0';
+   run->base_sha[0] = '\0';
+   run->impl_pr_number = 0;
+   run->impl_pr_url[0] = '\0';
    rtp_run_update(run);
    return 0;
 }
@@ -1600,195 +1642,7 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* ----------------------------------------------------------------- gate ---- */
 
-/* Run the policy-aware merge for an approved gate, record full evidence into the
- * gate row, and advance on success. Shared by gate-pass and the *_merge_pending
- * crash-recovery reconcile (#56). Fills `resp`. */
-/* Revalidate the PR + worktree before honoring a gate verdict (proposal §5):
- * the PR still exists and is OPEN, its base is still the intended branch, its
- * head matches the approved SHA (drift #56), it is not conflicting, and the
- * worktree is clean. On any mismatch fills `resp` (merge_pending) and returns
- * -1; the verdict is preserved and the merge is not attempted. */
-static int validate_pr_for_merge(rtp_run_t *run, rtp_gate_t *gate, int gate_no, cJSON *resp)
-{
-   const char *mp = gate_no == 2 ? RTP_STATE_GATE2_MERGE_PENDING : RTP_STATE_GATE1_MERGE_PENDING;
-   char cmd[RTP_PATH_LEN + 160];
-   size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
-   snprintf(cmd + p, sizeof(cmd) - p,
-            "gh pr view %d --json state,baseRefName,mergeable,headRefOid 2>/dev/null",
-            gate->pr_number);
-   int rc = 0;
-   char *out = mcp_git_run(cmd, &rc);
-   cJSON *j = (out && rc == 0 && out[0]) ? cJSON_Parse(out) : NULL;
-   free(out);
-   if (!j)
-   {
-      cJSON_AddBoolToObject(resp, "merged", 0);
-      cJSON_AddStringToObject(resp, "state", mp);
-      cJSON_AddStringToObject(
-          resp, "note",
-          "PR not found / forge unavailable / unparseable; verdict preserved, retry later.");
-      return -1;
-   }
-   const char *state = jo_str(j, "state", "");
-   const char *base = jo_str(j, "baseRefName", "");
-   const char *mergeable = jo_str(j, "mergeable", "");
-   const char *head = jo_str(j, "headRefOid", "");
-   const char *why = NULL;
-   if (state[0] && strcmp(state, "OPEN") != 0)
-      why = "PR is no longer OPEN (closed or merged elsewhere)";
-   else if (base[0] && run->base_branch[0] && strcmp(base, run->base_branch) != 0)
-      why = "PR base branch changed from the approved target";
-   else if (gate->expected_head_sha[0] && head[0] && strcmp(head, gate->expected_head_sha) != 0)
-   {
-      cJSON_AddBoolToObject(resp, "head_drift", 1);
-      cJSON_AddStringToObject(resp, "current_head_sha", head);
-      cJSON_AddStringToObject(resp, "expected_head_sha", gate->expected_head_sha);
-      why = "PR head drifted from the approved SHA; the gate verdict is stale";
-   }
-   else if (mergeable[0] && strcmp(mergeable, "CONFLICTING") == 0)
-      why = "PR is not mergeable (conflicting)";
-   cJSON_Delete(j);
-   if (why)
-   {
-      cJSON_AddBoolToObject(resp, "merged", 0);
-      cJSON_AddStringToObject(resp, "state", mp);
-      cJSON_AddStringToObject(resp, "note", why);
-      return -1;
-   }
-   /* explain base movement since open (#3): the base SHA recorded at PR-open vs
-    * the current base SHA — surfaced (the base advancing as other PRs merge is
-    * normal; a changed base BRANCH was already hard-rejected above). */
-   if (run->base_sha[0] && run->base_branch[0])
-   {
-      char curbase[RTP_HASH_LEN] = {0};
-      if (git_rev_parse(run, run->base_branch, curbase, sizeof(curbase)) != 0 || !curbase[0])
-      {
-         char originref[RTP_NAME_LEN + 8];
-         snprintf(originref, sizeof(originref), "origin/%s", run->base_branch);
-         git_rev_parse(run, originref, curbase, sizeof(curbase));
-      }
-      if (curbase[0] && strcmp(curbase, run->base_sha) != 0)
-      {
-         cJSON_AddBoolToObject(resp, "base_moved", 1);
-         cJSON_AddStringToObject(resp, "base_sha_at_open", run->base_sha);
-         cJSON_AddStringToObject(resp, "base_sha_now", curbase);
-      }
-   }
-   /* worktree cleanliness (§5): a dirty dedicated worktree blocks the merge — the
-    * verdict is preserved in *_merge_pending until the tree is clean. */
-   if (rtp_git_cwd(run)[0])
-   {
-      char wc[RTP_PATH_LEN + 64];
-      size_t wp = rtp_cd_prefix(run, wc, sizeof(wc));
-      snprintf(wc + wp, sizeof(wc) - wp, "git status --porcelain 2>/dev/null");
-      int wrc = 0;
-      char *wo = mcp_git_run(wc, &wrc);
-      int dirty = (wo && wo[0]) ? 1 : 0;
-      free(wo);
-      if (dirty)
-      {
-         cJSON_AddBoolToObject(resp, "merged", 0);
-         cJSON_AddBoolToObject(resp, "worktree_dirty", 1);
-         cJSON_AddStringToObject(resp, "state", mp);
-         cJSON_AddStringToObject(resp, "note",
-                                 "the dedicated worktree is dirty; commit/clean it before merging "
-                                 "— verdict preserved.");
-         return -1;
-      }
-   }
-   return 0;
-}
-
-static void execute_gate_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no, cJSON *req,
-                               cJSON *resp)
-{
-   /* Revalidate the PR + worktree before merging (§5): existence, OPEN state,
-    * base branch, head drift (#56), mergeability, worktree cleanliness. On any
-    * mismatch the verdict is preserved in *_merge_pending and we do not merge. */
-   if (validate_pr_for_merge(run, gate, gate_no, resp) != 0)
-      return;
-
-   /* Policy-aware merge executor (#50), pinned to the recorded checkout (#3) and
-    * keyed by the approved head SHA (--match-head-commit) so a drift between the
-    * pre-check and the merge still refuses (idempotent for #55). */
-   const char *admin =
-       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "admin")) ? " --admin" : "";
-   char match[160] = {0};
-   if (gate->expected_head_sha[0])
-   {
-      char *e = shell_escape(gate->expected_head_sha);
-      snprintf(match, sizeof(match), " --match-head-commit '%s'", e ? e : gate->expected_head_sha);
-      free(e);
-   }
-   char cmd[RTP_PATH_LEN + 256];
-   size_t pfx = rtp_cd_prefix(run, cmd, sizeof(cmd));
-   snprintf(cmd + pfx, sizeof(cmd) - pfx, "gh pr merge %d --merge%s%s 2>&1", gate->pr_number, admin,
-            match);
-   int exit_code = 0;
-   char *out = mcp_git_run(cmd, &exit_code);
-   int merged = (exit_code == 0);
-   char merge_sha[RTP_HASH_LEN] = {0};
-   if (out)
-      snprintf(gate->merge_output, sizeof(gate->merge_output), "%s", out);
-   free(out);
-   if (merged)
-   {
-      /* recover the merge commit SHA from the recorded checkout. */
-      char vcmd[RTP_PATH_LEN + 96];
-      size_t vp = rtp_cd_prefix(run, vcmd, sizeof(vcmd));
-      snprintf(vcmd + vp, sizeof(vcmd) - vp,
-               "gh pr view %d --json mergeCommit -q .mergeCommit.oid 2>/dev/null", gate->pr_number);
-      int vrc = 0;
-      char *vout = mcp_git_run(vcmd, &vrc);
-      if (vout)
-      {
-         char *nl = strchr(vout, '\n');
-         if (nl)
-            *nl = '\0';
-         if (vrc == 0)
-            snprintf(merge_sha, sizeof(merge_sha), "%s", vout);
-         free(vout);
-      }
-   }
-   snprintf(gate->merge_executor, sizeof(gate->merge_executor), "gh pr merge");
-   snprintf(gate->merge_command, sizeof(gate->merge_command), "gh pr merge %d --merge%s%s",
-            gate->pr_number, admin, match);
-   gate->merge_exit_code = exit_code;
-   if (merged && merge_sha[0])
-      snprintf(gate->merge_sha, sizeof(gate->merge_sha), "%s", merge_sha);
-   rtp_gate_update(gate);
-
-   if (merged)
-   {
-      const char *next = gate_no == 2 ? RTP_STATE_DONE : RTP_STATE_IMPLEMENTING;
-      rtp_run_set_state(id, next, RTP_PHASE_IMPL);
-      /* reclaim the active admission slot for the implementing phase (the gate
-       * may have parked it, #47/#48). gate2 -> done is terminal, no reclaim. */
-      if (gate_no == 1)
-      {
-         rtp_run_t r2;
-         if (rtp_run_get(id, &r2) == 0 && strcmp(r2.admission_class, RTP_ADMIT_ACTIVE) != 0)
-         {
-            snprintf(r2.admission_class, sizeof(r2.admission_class), RTP_ADMIT_ACTIVE);
-            rtp_run_update(&r2);
-         }
-      }
-      cJSON_AddBoolToObject(resp, "merged", 1);
-      cJSON_AddStringToObject(resp, "merge_sha", gate->merge_sha);
-      cJSON_AddStringToObject(resp, "state", next);
-   }
-   else
-   {
-      const char *mp = gate_no == 2 ? RTP_STATE_GATE2_MERGE_PENDING : RTP_STATE_GATE1_MERGE_PENDING;
-      cJSON_AddBoolToObject(resp, "merged", 0);
-      cJSON_AddStringToObject(resp, "state", mp);
-      cJSON_AddStringToObject(
-          resp, "note",
-          "merge did not land (auth / protected branch / drift / hung checks). Verdict preserved; "
-          "call pipeline.advance to reconcile/retry, or pipeline.cancel.");
-   }
-   (void)run;
-}
+#include "server_pipeline_merge.inc"
 
 static int gate_authorized(cJSON *req)
 {
