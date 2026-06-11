@@ -1,7 +1,8 @@
 /* server_compute_async.c: dedicated async lanes for tool.execute and chat.send_stream */
 #include "server_compute_impl.h"
 #include "aimee.h"
-#include "json_fluent.h" /* jo_ok */
+#include "agent_config.h" /* agent_set_request_codex_creds */
+#include "json_fluent.h"  /* jo_ok, jo_str */
 #include "agent_tools.h"
 #include "compute_pool.h"
 #include "guardrails.h"
@@ -448,6 +449,17 @@ static void chat_stream_worker_pooled(void *arg)
 
    if (!locked && sid[0])
       presence_emit_turn_started(sid, turn_id);
+   /* Per-turn credential context: the credential-session id (for the RAM
+    * keyring the client pushed once per session — a dedicated field decoupled
+    * from the chat session id) + any per-turn Codex creds (legacy direct push).
+    * Empty/absent clears the thread-locals so a turn on this pooled thread can't
+    * reuse a prior turn's creds. */
+   {
+      const char *cred_sid = jo_str(cctx->req, "cred_session_id", NULL);
+      agent_set_request_session((cred_sid && cred_sid[0]) ? cred_sid : sid);
+   }
+   agent_set_request_codex_creds(jo_str(cctx->req, "codex_oauth_token", NULL),
+                                 jo_str(cctx->req, "codex_account_id", NULL));
    chat_stream_worker(arg);
    if (locked)
       presence_turn_release(lock_session, lock_turn);

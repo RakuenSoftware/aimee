@@ -58,9 +58,11 @@ int attn_weight_for(attn_op_t op);
 
 /* `aimee attention-guard` PreToolUse-hook entry. Reads the host hook JSON from
  * stdin, updates the per-session attention log, and returns the hook exit code
- * (2 = block a hard-destructive op on a high-attention file, or block a raw
- * recursive scan when ingress_max_raw_scans is exhausted; 0 = allow). Never
- * blocks on read/soft ops. Set AIMEE_GUARD=0 to bypass. */
+ * (2 = block a hard-destructive op on a high-attention file, or — only when a
+ * positive ingress_max_raw_scans cap is configured — block a raw recursive scan
+ * once that per-session cap is exhausted; 0 = allow). With no cap configured
+ * (the default) raw scans are never blocked. Never blocks on read/soft ops. Set
+ * AIMEE_GUARD=0 to bypass. */
 int handle_attention_guard(void);
 
 #endif /* DEC_CLI_ATTENTION_GUARD_H */

@@ -633,6 +633,14 @@ typedef struct config
     * gating + enforce:true auto-generated config for the current project. */
    int verify_enabled;
 
+   /* Allow Claude run via the `claude` CLI / tmux login (authenticated by the
+    * interactive Claude subscription login, NOT an API key) to be used as a
+    * DELEGATE. Default 0: Claude-via-CLI is primary-only, because driving a
+    * personal Claude subscription as an automated delegate may violate
+    * Anthropic's terms and risk account action. Set to 1 to opt in (see
+    * DELEGATES.md). Does not affect API-key/HTTP agents or other CLI agents. */
+   int claude_cli_delegate_enabled;
+
    /* Verify scope. When 0 (default), `aimee git verify` and the push/PR verify
     * gate apply only to the session's current project (the repo the session is
     * rooted in). Cross-project repositories are neither auto-configured (no

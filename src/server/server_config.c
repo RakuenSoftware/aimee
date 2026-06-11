@@ -100,5 +100,16 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "key", key);
    cJSON_AddItemToObject(resp, "value", config_field_value_json(&cfg, f));
+   /* One-time setup warning: enabling delegate use of Claude-via-CLI carries an
+    * Anthropic account-action risk. Surfaced here (not on every delegate call)
+    * and in DELEGATES.md. */
+   if (strcmp(key, "claude_cli_delegate_enabled") == 0 && cfg.claude_cli_delegate_enabled)
+      cJSON_AddStringToObject(
+          resp, "notice",
+          "WARNING: Claude run via the `claude` CLI / tmux login (not an API key) can now be used "
+          "as a delegate. Driving a personal Anthropic Claude subscription through "
+          "automated/headless delegation may violate Anthropic's terms of service and risk "
+          "suspension or termination of your account. Use an Anthropic API key (billed per token) "
+          "for automated/delegated workloads. See DELEGATES.md.");
    return server_send_ok(conn, resp);
 }

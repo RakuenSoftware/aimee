@@ -731,6 +731,8 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "verify_enabled", 1);
    if (cfg->verify_cross_project)
       cJSON_AddBoolToObject(root, "verify_cross_project", 1);
+   if (cfg->claude_cli_delegate_enabled)
+      cJSON_AddBoolToObject(root, "claude_cli_delegate_enabled", 1);
    if (cfg->ingress_preinject_enabled)
       cJSON_AddBoolToObject(root, "ingress_preinject_enabled", 1);
    if (cfg->ingress_preinject_assembly_budget != 6144)

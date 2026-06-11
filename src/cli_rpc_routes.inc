@@ -3,8 +3,11 @@
  * Unported commands fail in cli_main before reaching the server.
  * =================================================================== */
 
-#include "util.h"         /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
-#include "aimee_client.h" /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
+#include "util.h"           /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
+#include "aimee_client.h"   /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
+#include "code_collect.h"   /* code_collect_files: thin-client workspace push */
+#include "codex_auth.h"     /* codex_local_auth: thin-client codex OAuth creds */
+#include "cli_agent_keys.h" /* cli_session_creds_prime: client-held agent keys */
 #if !defined(_WIN32) && !defined(_WIN64)
 #include "aimee_home.h"
 #include <dirent.h>
@@ -23,6 +26,24 @@ static void __attribute__((unused)) cli_rpc_sleep_ms(int ms)
 #else
    usleep((useconds_t)ms * 1000);
 #endif
+}
+
+/* Attach this machine's Codex OAuth creds to an outbound request so a remote
+ * server can authenticate a codex-oauth agent WITHOUT the server storing any
+ * codex credential. No-op unless the endpoint is remote-tcp and ~/.codex/auth.json
+ * is readable; the creds are consumed server-side only when a codex agent runs.
+ * Declared in cli_client.h so cli_tui.c (chat) can call it too. */
+void cli_attach_codex_creds(cJSON *req)
+{
+   if (!req || !cli_rpc_remote_endpoint_is_tcp())
+      return;
+   char token[8192];
+   char account[256];
+   if (codex_local_auth(token, sizeof(token), account, sizeof(account)) != 0)
+      return;
+   cJSON_AddStringToObject(req, "codex_oauth_token", token);
+   if (account[0])
+      cJSON_AddStringToObject(req, "codex_account_id", account);
 }
 
 /* --- Minimal arg parser (no util.h dependency) --- */
@@ -1730,6 +1751,7 @@ static cJSON *marshal_delegate(int argc, char **argv)
    rpc_parse(argc, argv, bool_flags, &opts);
 
    cJSON *req = marshal_no_args("delegate");
+   cli_session_creds_prime(req); /* client-held agent keys for this delegate turn */
 
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "role", opts.positional[0]);
@@ -6764,6 +6786,300 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
       waited += step_ms;
    }
 }
+
+/* --- Thin-client workspace push (detached-workspace ingestion) ---------------
+ *
+ * When a thin client talks to a remote aimee-server over TCP, the server cannot
+ * see this host's filesystem. So `aimee workspace add <path>` resolves the path
+ * locally, registers it as a `detached` workspace (server stores it verbatim and
+ * skips its own scan), then pushes the file contents itself to
+ * POST /v1/index/ingest. `aimee index scan` re-pushes. The collector is POSIX
+ * only, so these helpers are no-ops on Windows (the reverse-channel serve path
+ * still works there; client-push indexing does not). */
+#if defined(AIMEE_POSIX)
+
+/* Pull the human-readable message out of an {"error":...} envelope (object or
+ * string form); returns NULL when there is no error. */
+static const char *cli_ws_err_message(cJSON *resp)
+{
+   if (!resp)
+      return NULL;
+   cJSON *err = cJSON_GetObjectItemCaseSensitive(resp, "error");
+   if (cJSON_IsString(err))
+      return err->valuestring;
+   if (cJSON_IsObject(err))
+   {
+      cJSON *m = cJSON_GetObjectItemCaseSensitive(err, "message");
+      if (cJSON_IsString(m))
+         return m->valuestring;
+      return "error";
+   }
+   /* Dispatch-error envelope: {"status":"error","message":"..."} (e.g. an op-run
+    * that failed with PAYLOAD_TOO_LARGE). Without this the failure has no "error"
+    * key and would be silently counted as success. */
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   if (cJSON_IsString(status) && strcmp(status->valuestring, "error") == 0)
+   {
+      cJSON *m = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      return (cJSON_IsString(m) && m->valuestring) ? m->valuestring : "error";
+   }
+   return NULL;
+}
+
+/* Collect <abs_root>'s source files locally and push them to the server's
+ * /v1/index/ingest in size-bounded batches, blocking on each op-run. The kb
+ * code-scan upserts per project+path, so batches accumulate. Returns 0 on
+ * success, nonzero if any batch failed. */
+
+/* Per-batch content budget. The binding limit is aimee-kb's 1 MB request-body
+ * cap (the server relays each batch on to kb); JSON escaping inflates the wire
+ * body above the raw content total, so budget well under 1 MB. */
+#define CLI_INGEST_BATCH_BYTES (600 * 1024)
+
+/* POST one batch of files (adopted/freed) as project `name`/`root`, polling the
+ * async op-run to completion. Returns 0 on success. */
+static int cli_ws_ingest_batch(const char *remote, const char *bearer, const char *name,
+                               const char *root, cJSON *batch)
+{
+   cJSON *body = cJSON_CreateObject();
+   if (!body)
+   {
+      cJSON_Delete(batch);
+      return 1;
+   }
+   cJSON_AddStringToObject(body, "name", name);
+   cJSON_AddStringToObject(body, "root", root);
+   cJSON_AddItemToObject(body, "files", batch); /* adopt */
+   char *body_json = cJSON_PrintUnformatted(body);
+   cJSON_Delete(body);
+   if (!body_json)
+      return 1;
+
+   cJSON *resp = cli_v1_run_and_poll(remote, bearer, "POST", "/v1/index/ingest", body_json, 600000);
+   free(body_json);
+   if (!resp)
+      return 1;
+   const char *err = cli_ws_err_message(resp);
+   int rc = err ? 1 : 0;
+   if (err)
+      fprintf(stderr, "aimee: index ingest batch failed: %s\n", err);
+   cJSON_Delete(resp);
+   return rc;
+}
+
+static int cli_ws_ingest_root(const char *remote, const char *bearer, const char *abs_root)
+{
+   const char *base = strrchr(abs_root, '/');
+   base = (base && base[1]) ? base + 1 : abs_root;
+
+   cJSON *all = cJSON_CreateArray();
+   if (!all)
+      return 1;
+   int n = code_collect_files(abs_root, all);
+   if (n == 0)
+   {
+      cJSON_Delete(all);
+      printf("no indexable files found in %s\n", abs_root);
+      return 0;
+   }
+
+   /* Split into sub-cap batches: pop files off the front into a batch, flushing
+    * whenever the next file would push the batch over the byte budget. */
+   int pushed = 0, failed = 0, batches = 0;
+   cJSON *batch = cJSON_CreateArray();
+   size_t batch_bytes = 0;
+   cJSON *f = NULL;
+   while (batch && (f = cJSON_DetachItemFromArray(all, 0)) != NULL)
+   {
+      cJSON *c = cJSON_GetObjectItemCaseSensitive(f, "content");
+      cJSON *rp = cJSON_GetObjectItemCaseSensitive(f, "rel_path");
+      size_t flen = (cJSON_IsString(c) ? strlen(c->valuestring) : 0) +
+                    (cJSON_IsString(rp) ? strlen(rp->valuestring) : 0) + 64;
+      int have = cJSON_GetArraySize(batch);
+      if (have > 0 && batch_bytes + flen > CLI_INGEST_BATCH_BYTES)
+      {
+         if (cli_ws_ingest_batch(remote, bearer, base, abs_root, batch) == 0)
+            pushed += have;
+         else
+            failed += have;
+         batches++;
+         batch = cJSON_CreateArray();
+         batch_bytes = 0;
+         if (!batch)
+         {
+            cJSON_Delete(f);
+            break;
+         }
+      }
+      cJSON_AddItemToArray(batch, f); /* adopt */
+      batch_bytes += flen;
+   }
+   if (batch && cJSON_GetArraySize(batch) > 0)
+   {
+      int have = cJSON_GetArraySize(batch);
+      if (cli_ws_ingest_batch(remote, bearer, base, abs_root, batch) == 0)
+         pushed += have;
+      else
+         failed += have;
+      batches++;
+   }
+   else
+   {
+      cJSON_Delete(batch);
+   }
+   cJSON_Delete(all);
+
+   if (n >= CODE_COLLECT_MAX_FILES)
+      fprintf(stderr,
+              "aimee: note: '%s' hit the %d-file ingest cap; the rest of the tree was "
+              "not pushed\n",
+              abs_root, CODE_COLLECT_MAX_FILES);
+   printf("ingested %d file(s) from %s (%d batch%s)%s\n", pushed, abs_root, batches,
+          batches == 1 ? "" : "es", failed ? " — some batches failed" : "");
+   return failed ? 1 : 0;
+}
+
+int cli_workspace_add_remote(const char *path)
+{
+   if (!path || !path[0])
+   {
+      fprintf(stderr, "usage: aimee workspace add <path>\n");
+      return 1;
+   }
+   char *abs = realpath(path, NULL);
+   if (!abs)
+   {
+      fprintf(stderr, "aimee: workspace: cannot resolve path '%s' on this host\n", path);
+      return 1;
+   }
+
+   char *remote = cli_rpc_client_endpoint();
+   char *bearer = cli_rpc_client_bearer();
+
+   /* Register as detached so the server keeps the client path verbatim (no
+    * server-side realpath) and skips its own filesystem scan. */
+   cJSON *reg = cJSON_CreateObject();
+   cJSON_AddStringToObject(reg, "root", abs);
+   cJSON_AddStringToObject(reg, "provider", "detached");
+   char *reg_json = cJSON_PrintUnformatted(reg);
+   cJSON_Delete(reg);
+
+   int status = 0;
+   cJSON *rresp = cli_v1_send(remote, bearer, "POST", "/v1/workspaces", reg_json, 60000, &status);
+   free(reg_json);
+
+   const char *err = cli_ws_err_message(rresp);
+   int already = (err && strstr(err, "already registered"));
+   if ((!rresp || status < 200 || status >= 300) && !already)
+   {
+      fprintf(stderr, "aimee: workspace add failed (HTTP %d)%s%s\n", status, err ? ": " : "",
+              err ? err : "");
+      if (rresp)
+         cJSON_Delete(rresp);
+      free(abs);
+      free(remote);
+      free(bearer);
+      return 1;
+   }
+   if (rresp)
+      cJSON_Delete(rresp);
+   printf("workspace registered: %s (detached)\n", abs);
+
+   int rc = cli_ws_ingest_root(remote, bearer, abs);
+   free(abs);
+   free(remote);
+   free(bearer);
+   return rc;
+}
+
+int cli_index_scan_remote(int argc, char **argv)
+{
+   /* Positional args mirror `index scan [name] [root]`; flags (e.g. --force) are
+    * ignored for the push path (a push is always a full re-collect). */
+   const char *pos[2] = {NULL, NULL};
+   int npos = 0;
+   for (int i = 0; i < argc; i++)
+   {
+      if (argv[i] && argv[i][0] == '-')
+         continue;
+      if (npos < 2)
+         pos[npos] = argv[i];
+      npos++;
+   }
+   const char *root_arg = (npos >= 2) ? pos[1] : (npos == 1 ? pos[0] : NULL);
+
+   char *remote = cli_rpc_client_endpoint();
+   char *bearer = cli_rpc_client_bearer();
+   int rc = 0;
+
+   if (root_arg)
+   {
+      char *abs = realpath(root_arg, NULL);
+      if (!abs)
+      {
+         fprintf(stderr, "aimee: index scan: cannot resolve path '%s' on this host\n", root_arg);
+         free(remote);
+         free(bearer);
+         return 1;
+      }
+      rc = cli_ws_ingest_root(remote, bearer, abs);
+      free(abs);
+      free(remote);
+      free(bearer);
+      return rc;
+   }
+
+   /* No path: re-ingest every detached workspace the server knows about. */
+   int status = 0;
+   cJSON *list = cli_v1_send(remote, bearer, "GET", "/v1/workspaces", NULL, 60000, &status);
+   if (!list)
+   {
+      fprintf(stderr, "aimee: index scan: could not list workspaces (HTTP %d)\n", status);
+      free(remote);
+      free(bearer);
+      return 1;
+   }
+   cJSON *arr = cJSON_GetObjectItemCaseSensitive(list, "workspaces");
+   int any = 0;
+   cJSON *w = NULL;
+   cJSON_ArrayForEach(w, arr)
+   {
+      cJSON *prov = cJSON_GetObjectItemCaseSensitive(w, "provider");
+      cJSON *p = cJSON_GetObjectItemCaseSensitive(w, "path");
+      if (cJSON_IsString(prov) && strcmp(prov->valuestring, "detached") == 0 && cJSON_IsString(p) &&
+          p->valuestring && p->valuestring[0])
+      {
+         any = 1;
+         if (cli_ws_ingest_root(remote, bearer, p->valuestring) != 0)
+            rc = 1;
+      }
+   }
+   cJSON_Delete(list);
+   if (!any)
+      printf("no detached workspaces to scan; add one with 'aimee workspace add <path>'\n");
+   free(remote);
+   free(bearer);
+   return rc;
+}
+
+#else /* !AIMEE_POSIX */
+
+int cli_workspace_add_remote(const char *path)
+{
+   (void)path;
+   fprintf(stderr, "aimee: remote workspace add is not supported on this platform\n");
+   return 1;
+}
+
+int cli_index_scan_remote(int argc, char **argv)
+{
+   (void)argc;
+   (void)argv;
+   fprintf(stderr, "aimee: remote index scan is not supported on this platform\n");
+   return 1;
+}
+
+#endif /* AIMEE_POSIX */
 
 /* cli_v1_dispatch_local: dispatch a pre-marshalled {method, ...params} request to its
  * first-class /v1 route over the co-located transport — the local aimee-http.sock

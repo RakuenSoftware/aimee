@@ -1012,6 +1012,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"hooks.session_start", handle_hooks_session_start},
     {"session.create", handle_session_create},
     {"session.list", handle_session_list},
+    {"session.credentials", handle_session_credentials},
     {"session.get", handle_session_get},
     {"session.close", handle_session_close},
     {"session.brief", handle_session_brief},
@@ -1029,6 +1030,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"memory.read", handle_memory_read},
     {"memory.benchmark", handle_memory_benchmark},
     {"index.scan", handle_index_scan},
+    {"index.ingest", handle_index_ingest},
     {"index.find", handle_index_find},
     {"index.list", handle_index_list},
     {"index.blast_radius", handle_index_blast_radius},
@@ -1233,7 +1235,8 @@ static size_t method_size_limit(const char *method)
       size_t max;
    } limits[] = {
        {"memory.", LIMIT_MEMORY},    {"tool.", LIMIT_TOOL}, {"delegate", LIMIT_DELEGATE},
-       {"mcp.call", LIMIT_DELEGATE}, {"chat.", LIMIT_CHAT}, {NULL, LIMIT_DEFAULT},
+       {"mcp.call", LIMIT_DELEGATE}, {"chat.", LIMIT_CHAT}, {"index.ingest", LIMIT_INGEST},
+       {NULL, LIMIT_DEFAULT},
    };
 
    for (int i = 0; limits[i].prefix; i++)

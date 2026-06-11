@@ -6,9 +6,12 @@
  * Bash command, blocks (exit 2) when the command text mentions a path the log
  * scores at/above the high-attention threshold. Substring-matching known
  * high-attention paths against the command avoids fragile shell parsing.
- * Recursive raw scans are blocked by default and redirected toward Aimee's
- * indexed exploration tools; ingress_max_raw_scans allows a capped number per
- * session.
+ * The raw-scan redirect is OPT-IN: it is inert unless ingress_max_raw_scans is
+ * set to a positive cap, in which case a session may run that many recursive
+ * raw scans before further ones are redirected toward Aimee's indexed
+ * exploration tools. With no cap configured (the default, and what a thin-client
+ * host with no aimee.yaml sees) raw scans are never blocked. AIMEE_GUARD=0
+ * disables the guard entirely.
  */
 #include "cli_attention_guard.h"
 #include "cli_session_start.h" /* read_stdin */
@@ -433,21 +436,28 @@ int handle_attention_guard(void)
 
    if (op == ATTN_OP_RAW_SCAN)
    {
+      /* The raw-scan cap is OPT-IN: ingress_max_raw_scans <= 0 (the default,
+       * and what a thin-client host with no aimee.yaml sees) means the guard is
+       * disabled, so raw scans flow freely. Only a positive cap is enforced —
+       * after that many scans this session, redirect to the indexed tools. */
       int ingress_max_raw_scans = attn_config_ingress_max_raw_scans();
-      int used = attn_raw_scan_count(arr, now_ts);
-      if (ingress_max_raw_scans <= 0 || used >= ingress_max_raw_scans)
+      if (ingress_max_raw_scans > 0)
       {
-         fprintf(stderr,
-                 "aimee attention-guard: recursive raw scans are disabled or exhausted for this "
-                 "context. "
-                 "Use Aimee's indexed tools instead: find_symbol, ast_grep_search, "
-                 "search_graph, or get_context_block. Set ingress_max_raw_scans above 0 "
-                 "only when raw scanning is intentional.\n");
-         exit_code = 2;
-      }
-      else
-      {
-         attn_record(arr, ATTN_RAW_SCAN_PATH, 1, now_ts);
+         int used = attn_raw_scan_count(arr, now_ts);
+         if (used >= ingress_max_raw_scans)
+         {
+            fprintf(stderr,
+                    "aimee attention-guard: this session has hit its raw-scan cap (%d). Aimee "
+                    "indexes this repo — explore through it instead: find_symbol, "
+                    "ast_grep_search, search_graph, or get_context_block. Raise "
+                    "ingress_max_raw_scans (or set AIMEE_GUARD=0) to bypass.\n",
+                    ingress_max_raw_scans);
+            exit_code = 2;
+         }
+         else
+         {
+            attn_record(arr, ATTN_RAW_SCAN_PATH, 1, now_ts);
+         }
       }
    }
    else if (op == ATTN_OP_HARD && bash_cmd && bash_cmd[0])

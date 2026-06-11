@@ -388,6 +388,50 @@ removes the detached workspace when the bridge exits or remote launch fails.
 Delegate routes are exposed over `/v1/delegate/*`, but TCP access requires an
 unscoped bearer and `aimee.api.remote_writes: full`.
 
+#### Local-CLI agents run on the client
+
+A `--provider claude` agent runs the **standard `claude` CLI over tmux** — not an
+HTTP call, and **not** `claude -p` print mode: aimee drives an interactive tmux
+session. That session, the `claude` process, its login (`~/.claude`), and the
+working tree all live on the **client**, not on a remote/containerized
+`aimee-server`. So when the active workspace is `detached`, the tmux session
+driver (`cli_session`) marshals its tmux commands to the client over the **same
+reverse channel** used for file/exec ops, rather than running tmux on the server
+(which has no `claude` or tmux):
+
+```mermaid
+sequenceDiagram
+    participant Cli as aimee thin client
+    participant SRV as aimee-server (remote)
+    participant Tmux as tmux + claude (on client)
+    Cli->>SRV: POST /v1/chat/stream  (cwd in a detached workspace)
+    SRV->>Cli: runner op {exec_shell, "tmux new-session … claude"}
+    Cli->>Tmux: run tmux command locally (client's tree + ~/.claude login)
+    SRV->>Cli: runner op {exec_shell, "tmux paste-buffer / send-keys"} (prompt)
+    loop until pane output is stable
+      SRV->>Cli: runner op {exec_shell, "tmux capture-pane -p"}
+      Cli-->>SRV: captured pane text
+    end
+    SRV-->>Cli: chat SSE (final assistant text)
+```
+
+- **Reuses the existing exec seam.** The tmux commands ride the same
+  `exec_shell` reverse-channel op as the bash tool; the client just runs them
+  locally. No new client capability and no `claude -p`.
+- **No credentials on the server.** `claude` authenticates with the client's own
+  `~/.claude` login; no Claude credential is sent to or stored on the server.
+- **Co-located unchanged.** When the workspace is not detached (the server is on
+  the same host as the CLI), the tmux session runs locally exactly as before.
+- **Claude via the CLI is primary-only by default.** Claude run via the `claude`
+  CLI/tmux login (not an API key) is allowed as the interactive primary but is
+  gated out of delegate routing unless `claude_cli_delegate_enabled` is set —
+  automating a personal Claude subscription as a delegate risks Anthropic account
+  action. The routing above applies to the primary chat turn always, and to a
+  Claude-CLI delegate only when that flag is enabled; this gate is
+  Claude-CLI-specific (other CLI/API agents are unaffected). See
+  [DELEGATES.md](DELEGATES.md#claude-via-the-cli-is-primary-only-by-default) and
+  [SECURITY.md](SECURITY.md).
+
 ### 9.4 A delegate task
 
 ```mermaid

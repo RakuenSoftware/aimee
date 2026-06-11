@@ -293,7 +293,7 @@ CORE_SRCS = db1/db.c db1/db_schema.c config.c config_sections.c config_database.
             compact.c platform_random.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
             client_integrations.c mcp_tools.c mcp_skill_tools.c mcp_tools_gateway.c events.c \
             model_registry.c models_dev.c models_dev_cache.c lsp_client.c lsp_manager.c plugin.c \
-            plugin_ctx.c plugin_loader.c memory_provider.c plugin_c_hook.c config_plugin.c
+            plugin_ctx.c plugin_loader.c memory_provider.c plugin_c_hook.c config_plugin.c code_collect.c codex_auth.c
 CORE_OBJS = $(CORE_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o
 
 # --- Layer 0b: DB1 (user-local tier) ---
@@ -317,7 +317,7 @@ DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
 DATA_SRCS = memory_core.c memory_logic.c memory_effective.c memory_health.c memory_conflict.c memory_context.c memory_assemble.c memory_advanced.c memory_prospective.c memory_lifecycle.c memory_directives.c memory_maintenance.c memory_graph.c memory_graph_fusion.c memory_scan.c memory_improve.c memory_episodes.c \
             index.c extractors.c extractors_extra.c extractors_new_langs.c \
             context_discover.c tasks.c learning_router.c learning_implicit.c dogfood.c working_profile.c guardrails.c guardrails_orchestrator.c guardrails_tdd.c workflow_learn.c session_state.c session_briefing.c file_safety.c branch_ownership.c integrity_gate.c conversation_context.c payload_rewrite.c guardrails_semantic.c \
-            workspace.c worktree_gc.c workspace_manifest.c workspace_handle.c server/agent_config.c cmd_describe.c \
+            workspace.c worktree_gc.c workspace_manifest.c workspace_handle.c server/agent_config.c server/session_credentials.c cmd_describe.c \
             history.c role_templates.c skill.c skill_rollback.c skill_review.c skill_curator.c conversation.c \
             trajectory_export.c trajectory_batch.c \
             memory_profile_pack.c wiki_render.c \
@@ -349,7 +349,7 @@ CMD_SRCS = prompts.c persona.c hardware_probe.c curator_profile.c server/delegat
 CMD_OBJS = $(CMD_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Pure client (aimee) ---
-CLI_SRCS = cli_main.c cli_session_start.c cli_attention_guard.c cli_code_audit.c cli_tui.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c server/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c acp_server.c cli_workspace_serve.c
+CLI_SRCS = cli_main.c cli_session_start.c cli_attention_guard.c cli_code_audit.c cli_tui.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c server/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c acp_server.c cli_workspace_serve.c cli_agent_keys.c
 ifeq ($(WITH_TLS),1)
 CLI_SRCS += aimee_tls.c
 TLS_OBJS = $(OBJDIR)/aimee_tls.o
@@ -363,7 +363,7 @@ CLIENT_PLATFORM_OBJS = $(filter %/platform_ipc.o %/platform_net.o %/platform_pat
 # with full flags; --gc-sections trims the unused remainder). util.o supplies
 # run_cmd/run_cmd_set_cwd for the provider exec_shell op the runner now serves.
 CLIENT_RUNNER_OBJS = $(OBJDIR)/server/workspace_provider_detached.o $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o
-CLIENT_SUPPORT_OBJS = $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o $(OBJDIR)/aimee_home.o $(OBJDIR)/history.o $(OBJDIR)/markdown.o $(CLIENT_PLATFORM_OBJS) $(CLIENT_RUNNER_OBJS)
+CLIENT_SUPPORT_OBJS = $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o $(OBJDIR)/aimee_home.o $(OBJDIR)/history.o $(OBJDIR)/markdown.o $(OBJDIR)/code_collect.o $(OBJDIR)/codex_auth.o $(CLIENT_PLATFORM_OBJS) $(CLIENT_RUNNER_OBJS)
 CLIENT_COMPILE_OBJS = $(CLI_OBJS) $(CLIENT_PLATFORM_OBJS) $(OBJDIR)/dstr.o $(OBJDIR)/history.o $(OBJDIR)/markdown.o
 $(CLIENT_COMPILE_OBJS): C_FLAGS := $(CLIENT_C_FLAGS)
 

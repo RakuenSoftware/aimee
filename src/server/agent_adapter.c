@@ -14,7 +14,7 @@ static const agent_adapter_t g_adapters[] = {
         .provider = "chatgpt",
         .display_name = "Codex",
         .default_endpoint = "https://chatgpt.com/backend-api/codex",
-        .default_model = "gpt-5.4",
+        .default_model = "gpt-5.5",
         .auth_type = "codex-oauth",
         .capabilities = AGENT_ADAPTER_CAP_DELEGATE_TURN | AGENT_ADAPTER_CAP_PRIMARY_CONVERSATION |
                         AGENT_ADAPTER_CAP_DIRECT_HTTP | AGENT_ADAPTER_CAP_PRIMARY_SESSION,
