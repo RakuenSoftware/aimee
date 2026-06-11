@@ -508,36 +508,60 @@ static void test_idempotency_guard(void)
 
 static void test_top_sessions_per_client(void)
 {
-   /* Two ingress clients sharing the server's process-wide session_id but with
-    * distinct principals must NOT collapse into one top_sessions row. */
-   db1_token_audit_row_t c1 = {.session_id = "proc-shared",
+   /* The audit writer puts the per-client identity in session_id (the principal
+    * for direct ingress, the session key for proxy ingress), and top_sessions
+    * groups by session_id, so distinct clients do not collapse — including: */
+
+   /* (a) two direct-ingress clients with distinct principals. */
+   db1_token_audit_row_t c1 = {.session_id = "uid:5001", /* = principal for direct ingress */
                                .tool_name = "gpt-4o",
                                .model = "gpt-4o",
                                .source = "openai-ingress",
                                .principal = "uid:5001",
                                .estimated_cost_usd = 0.30};
-   db1_token_audit_row_t c2 = {.session_id = "proc-shared",
+   db1_token_audit_row_t c2 = {.session_id = "uid:5002",
                                .tool_name = "gpt-4o",
                                .model = "gpt-4o",
                                .source = "openai-ingress",
                                .principal = "uid:5002",
                                .estimated_cost_usd = 0.20};
+   /* (b) two webchat clients that SHARE the constant trusted principal "webchat"
+    * but carry different per-client session keys — the regression case. */
+   db1_token_audit_row_t w1 = {.session_id = "webchat:alice", /* = session key */
+                               .tool_name = "gpt-4o",
+                               .model = "gpt-4o",
+                               .source = "webchat",
+                               .principal = "webchat",
+                               .estimated_cost_usd = 0.40};
+   db1_token_audit_row_t w2 = {.session_id = "webchat:bob",
+                               .tool_name = "gpt-4o",
+                               .model = "gpt-4o",
+                               .source = "webchat",
+                               .principal = "webchat",
+                               .estimated_cost_usd = 0.10};
    assert(db1_token_audit_insert(&c1) == 0);
    assert(db1_token_audit_insert(&c2) == 0);
+   assert(db1_token_audit_insert(&w1) == 0);
+   assert(db1_token_audit_insert(&w2) == 0);
 
-   db1_insights_top_session_t tops[16];
-   int n = db1_insights_top_sessions(0, tops, 16);
-   int saw1 = 0, saw2 = 0;
+   db1_insights_top_session_t tops[32];
+   int n = db1_insights_top_sessions(0, tops, 32);
+   int saw1 = 0, saw2 = 0, sawA = 0, sawB = 0;
    for (int i = 0; i < n; i++)
    {
       if (strcmp(tops[i].session_id, "uid:5001") == 0)
          saw1 = 1;
       if (strcmp(tops[i].session_id, "uid:5002") == 0)
          saw2 = 1;
+      if (strcmp(tops[i].session_id, "webchat:alice") == 0)
+         sawA = 1;
+      if (strcmp(tops[i].session_id, "webchat:bob") == 0)
+         sawB = 1;
    }
-   /* Both principals surface as distinct rows (keyed by principal, not the
-    * shared session_id). */
+   /* All four clients surface as distinct rows; the two webchat clients do NOT
+    * collapse under the shared "webchat" principal. */
    assert(saw1 && saw2);
+   assert(sawA && sawB);
 }
 
 static void test_trusted_source_overrides_ingress(void)

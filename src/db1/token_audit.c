@@ -514,12 +514,13 @@ int db1_insights_top_sessions(int since_hours, db1_insights_top_session_t *out, 
    if (!db)
       return -1;
 
-   /* Group by a per-CLIENT key — the request principal (account/tenant boundary)
-    * when present, else the internal session_id — so two distinct ingress clients
-    * (which share the server's process-wide session_id) do not collapse into one
-    * row. Internal agent rows (empty principal) still group by session_id. */
+   /* Group by session_id, which the audit writer sets to the per-CLIENT identity
+    * for ingress rows (a trusted session key like "webchat:alice", else the
+    * principal like "uid:1000", else the server session). So distinct clients —
+    * including webchat clients that share the constant trusted principal
+    * "webchat" but carry different session keys — do not collapse into one row. */
    static const char *sql_recent =
-       "SELECT COALESCE(NULLIF(ta.principal,''), ta.session_id), COALESCE(MAX(ss.title),''),"
+       "SELECT ta.session_id, COALESCE(MAX(ss.title),''),"
        " COALESCE(MAX(ta.model),''),"
        " COALESCE(SUM(ta.prompt_tokens),0), COALESCE(SUM(ta.completion_tokens),0),"
        " COALESCE(SUM(ta.estimated_cost_usd),0.0), COALESCE(MIN(ta.created_at),'')"
@@ -527,17 +528,17 @@ int db1_insights_top_sessions(int since_hours, db1_insights_top_session_t *out, 
        " LEFT JOIN server_sessions ss ON ss.id = ta.session_id"
        " WHERE (ta.usage_kind = 'realized' OR ta.usage_kind = '' OR ta.usage_kind IS NULL)"
        " AND ta.created_at >= datetime('now', ?)"
-       " GROUP BY COALESCE(NULLIF(ta.principal,''), ta.session_id)"
+       " GROUP BY ta.session_id"
        " ORDER BY SUM(ta.estimated_cost_usd) DESC LIMIT ?";
    static const char *sql_all =
-       "SELECT COALESCE(NULLIF(ta.principal,''), ta.session_id), COALESCE(MAX(ss.title),''),"
+       "SELECT ta.session_id, COALESCE(MAX(ss.title),''),"
        " COALESCE(MAX(ta.model),''),"
        " COALESCE(SUM(ta.prompt_tokens),0), COALESCE(SUM(ta.completion_tokens),0),"
        " COALESCE(SUM(ta.estimated_cost_usd),0.0), COALESCE(MIN(ta.created_at),'')"
        " FROM token_audit ta"
        " LEFT JOIN server_sessions ss ON ss.id = ta.session_id"
        " WHERE (ta.usage_kind = 'realized' OR ta.usage_kind = '' OR ta.usage_kind IS NULL)"
-       " GROUP BY COALESCE(NULLIF(ta.principal,''), ta.session_id)"
+       " GROUP BY ta.session_id"
        " ORDER BY SUM(ta.estimated_cost_usd) DESC LIMIT ?";
    const char *sql = since_hours > 0 ? sql_recent : sql_all;
    sqlite3_stmt *stmt = NULL;

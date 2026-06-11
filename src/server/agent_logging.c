@@ -234,10 +234,22 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
    /* Tagging the audit row with the active delegation id lets cost-fold attribute
     * a child's spend back to the parent without contaminating session_id sums. */
    const char *deleg_id = delegation_active_id();
-   /* Per-session attribution: an ingress request that carried an X-Aimee-Session-Key
-    * is attributed to that session rather than the server's process-wide one, so
-    * two webchat sessions do not fold into one. Falls back to session() otherwise. */
-   const char *eff_session = (rctx && rctx->session_key[0]) ? rctx->session_key : session_id();
+   /* Per-CLIENT attribution for ingress rows, in one consistent field so
+    * top_sessions distinguishes distinct clients (it groups by session_id):
+    *   (1) a trusted X-Aimee-Session-Key (e.g. "webchat:alice") — distinguishes
+    *       clients that share a constant trusted principal like "webchat";
+    *   (2) else, for ingress, the principal (e.g. "uid:1000") — distinguishes
+    *       clients that share the server's process-wide session;
+    *   (3) else the server session().
+    * Internal agent rows (not ingress) always use session() so internal work is
+    * grouped by its real session, not by the requesting principal. */
+   const char *eff_session;
+   if (rctx && rctx->session_key[0])
+      eff_session = rctx->session_key;
+   else if (is_ingress && rctx && rctx->principal[0])
+      eff_session = rctx->principal;
+   else
+      eff_session = session_id();
    db1_token_audit_row_t row = {
        .session_id = eff_session,
        .delegation_id = deleg_id ? deleg_id : "",

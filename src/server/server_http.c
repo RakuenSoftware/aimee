@@ -1485,10 +1485,6 @@ static void populate_request_context(int fd, int is_tcp, const char *buf, const 
    ctx.trusted = 0;
 
    http_header(buf, "Idempotency-Key", ctx.idempotency_key, sizeof(ctx.idempotency_key));
-   /* X-Aimee-Session-Key: the per-session boundary (read during auth too). Carry
-    * it so ingress audit rows attribute to the originating session, not just the
-    * server's process-wide session. */
-   http_header(buf, "X-Aimee-Session-Key", ctx.session_key, sizeof(ctx.session_key));
 
    /* Server-derived principal from the kernel-verified UDS peer uid. */
    if (ctx.peer_uid >= 0)
@@ -1516,6 +1512,11 @@ static void populate_request_context(int fd, int is_tcp, const char *buf, const 
          ctx.trusted = 1;
    }
 
+   /* The principal, source, AND session key are attribution identity that aimee
+    * trusts onto the audit row, so they are honoured ONLY from a trusted proxy
+    * (the secret matched above). A plain authorized TCP client or a same-uid UDS
+    * client is NOT a trusted proxy and cannot choose its audit principal/source/
+    * session. */
    if (ctx.trusted)
    {
       char principal[128] = "";
@@ -1524,6 +1525,7 @@ static void populate_request_context(int fd, int is_tcp, const char *buf, const 
          snprintf(ctx.principal, sizeof(ctx.principal), "%s", principal);
       if (http_header(buf, "X-Aimee-Source", source, sizeof(source)) && source[0])
          snprintf(ctx.source, sizeof(ctx.source), "%s", source);
+      http_header(buf, "X-Aimee-Session-Key", ctx.session_key, sizeof(ctx.session_key));
    }
 
    request_context_set(&ctx);
