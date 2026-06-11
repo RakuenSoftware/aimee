@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 twelfth review)
+- **Date:** 2026-06-11 (revised post-PR-#183 thirteenth review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -480,6 +480,34 @@ will check a stale subset — exactly how #38 happened in the first place.
     trips each individual flag, so a newly added flag can never be honored by some
     sites and silently ignored by others. **Resolved in §3, §4, and §10.**
 
+## PR #183 thirteenth review — per-pass version freshness and fail-return PR identity
+
+No new feedback prompted this pass; a fresh read of the loop's *outer* mechanics
+(the part the inner-engine reviews never reached) found two real holes.
+
+42. **Each revise pass re-ingests; the review-scoped index must supersede the
+    prior version, or retrieval serves stale spans.** Every author-revise / agent-fix
+    pass produces a *new* artifact version. The orchestrator-assembled retrieval
+    (#37) pulls cross-chunk spans from the review-scoped db2 index, so that index
+    must be re-ingested per pass **and the prior version's chunks superseded** before
+    the new pass retrieves — otherwise #37 serves spans from an earlier revision: a
+    fixed bug reappears, a deleted section is still "found," a renamed symbol
+    resolves to its old name. Each pass pins retrieval to its own artifact content
+    hash; the assembly manifest (#39) records that version; chunks from superseded
+    versions are never retrieval-eligible for the current pass. Review-scoped cleanup
+    (#35) therefore runs **per version**, not only at pipeline end. **Resolved in §2,
+    §3, §4, and §10.**
+43. **Fail-return must update the existing PR, not open a duplicate.** The fail
+    edges (gate1 → `proposal_review`, gate2 → `implementing`) revise an artifact
+    whose PR is already open and recorded in the ledger. The revise loop must push
+    to the **same recorded branch/PR**, updating it in place — never open a second
+    PR for the same pipeline phase. On re-entry the orchestrator validates the
+    recorded branch/PR still exists and targets `testing` (the §5 drift check),
+    pushes the revision, and the human gate re-evaluates the **updated** PR with a
+    fresh review digest. A fail-return that orphaned the prior PR or opened a
+    duplicate is a hard error, not a silent second PR. **Resolved in §1, §5, and
+    §10.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -536,14 +564,16 @@ Transitions:
    moves to `gate1_pending`.
 3. **gate1_pending** — human gate 1 (§5). **pass** → merge proposal PR, move to
    `implementing`. **fail** → the human's reason is appended to the brief and the
-   state returns to `proposal_review`.
+   state returns to `proposal_review`, which re-revises and **pushes to the same
+   recorded proposal branch/PR** (never a duplicate, #43).
 4. **implementing** — the agent implements the merged proposal on a dedicated
    implementation branch/worktree (normal coding; not a roundtable activity),
    opens the implementation PR, captures the diff.
 5. **pr_review** — the §3 outer loop in REVIEW mode over the diff: REVIEW,
    agent-fix, re-REVIEW, until the done-bar.
 6. **gate2_pending** — human gate 2 (§5). **pass** → merge the implementation PR,
-   move to `done`. **fail** → reason → brief, state returns to `implementing`.
+   move to `done`. **fail** → reason → brief, state returns to `implementing`,
+   which pushes the fix to the **same recorded implementation branch/PR** (#43).
 
 Every state is durable (§4) so a human gate can be answered hours or days later,
 across a server restart or a new agent session.
@@ -579,7 +609,10 @@ Both phases use the **same** engine; they differ only in input and brief.
   inline unit — panelists are not assumed to retrieve or read files (#32/#35/#37).
   Each assembled unit records an assembly manifest with selected span refs/ranges/
   hashes, token/byte budget, and omitted candidates; required omissions block the
-  aggregate instead of being hidden (#39).
+  aggregate instead of being hidden (#39). **Every revise pass re-ingests the new
+  artifact version and supersedes the prior version's review-scoped chunks** (#42),
+  so retrieval is always pinned to the current pass's content hash and never serves
+  a span from an earlier revision.
   Pipeline-owned PR reviews use the async op-run path with validated pass
   metadata, not a direct synchronous roundtable dispatch. The brief carries the
   *fixes just applied*, the *invariants* the change must not break, and the
@@ -950,6 +983,14 @@ ledger) before the full idea→merge pipeline of P2/P3.
 - **Loop correctness** — a fixture proposal/diff with N seeded blocking issues:
   the loop reaches the done-bar only after all N are resolved; the digest counts
   match the engine items; the ledger records each pass's `run_id`/cost.
+- **Per-pass version freshness (#42)** — revise an artifact so a span that existed
+  in pass *k* is deleted/renamed in pass *k+1*; the pass *k+1* aggregate retrieval
+  returns only the new version's spans (pinned to its content hash), never the
+  superseded chunk, and superseded review-scoped chunks are cleaned up.
+- **Fail-return updates the same PR (#43)** — fail a gate, re-revise, and assert
+  the revision is pushed to the **recorded** branch/PR (head SHA advances, PR
+  number unchanged); no second PR is opened, and an orphaned/duplicate PR is a hard
+  error.
 - **DRAFT/REVIEW callable split** — the proposal phase invokes a draft-capable
   roundtable path that returns an `artifact`; the review phases invoke the
   review-capable path that returns structured items for the done-bar.
