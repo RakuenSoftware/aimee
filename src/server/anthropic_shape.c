@@ -37,7 +37,8 @@ static cJSON *text_block(const char *text, size_t len, int with_cache_control)
    return block;
 }
 
-void agent_anthropic_set_system(cJSON *req, const char *system_prompt, int cache_marking)
+void agent_anthropic_set_system(cJSON *req, const char *system_prompt, int cache_marking,
+                                int min_chars)
 {
    if (!req || !system_prompt || !system_prompt[0])
       return;
@@ -64,6 +65,16 @@ void agent_anthropic_set_system(cJSON *req, const char *system_prompt, int cache
       }
    }
 
+   /* Apply the min-size floor to the ACTUAL cacheable stable prefix, not the
+    * whole prompt: a tiny stable prefix in front of a large volatile context must
+    * not get a cache boundary. Below the floor (or with no stable content) we emit
+    * the plain string and mark nothing cacheable. */
+   if (!prefix_has_content || (min_chars > 0 && prefix_len < (size_t)min_chars))
+   {
+      cJSON_AddStringToObject(req, "system", system_prompt);
+      return;
+   }
+
    if (!ctx)
    {
       /* No volatile context — the whole system is stable; cache it as one block. */
@@ -72,13 +83,6 @@ void agent_anthropic_set_system(cJSON *req, const char *system_prompt, int cache
       if (b)
          cJSON_AddItemToArray(arr, b);
       cJSON_AddItemToObject(req, "system", arr);
-      return;
-   }
-   if (!prefix_has_content)
-   {
-      /* System is entirely the volatile envelope (no stable prefix to cache);
-       * emit the plain string so nothing volatile is marked cacheable. */
-      cJSON_AddStringToObject(req, "system", system_prompt);
       return;
    }
    /* Stable prefix + volatile context: cache the prefix only, leave the rest

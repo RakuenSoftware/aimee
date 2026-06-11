@@ -47,12 +47,16 @@ struct cJSON *agent_build_request_anthropic(const agent_t *agent, struct cJSON *
                                             int max_tokens, double temperature);
 
 /* Set the Anthropic `system` field on an outbound request (§3 cache-aware
- * shaping). When cache_marking is non-zero, emit a content-block array
- * [{type:"text", text, cache_control:{type:"ephemeral"}}] so the provider caches
- * the stable system prefix across calls; otherwise emit a plain string. Adds
- * nothing when system_prompt is empty. Anthropic-only: callers build
- * Anthropic-format requests, so this never reaches a non-Anthropic provider. */
-void agent_anthropic_set_system(struct cJSON *req, const char *system_prompt, int cache_marking);
+ * shaping). When cache_marking is non-zero, the STABLE prefix (the text before
+ * the volatile per-turn <aimee-context> envelope) is emitted as a cache_control
+ * content block while the volatile context is left uncached; otherwise a plain
+ * string is emitted. The min_chars floor is applied to the actual cacheable
+ * STABLE prefix (not the whole prompt): when that prefix is shorter than
+ * min_chars (>0), the request is left uncached. Adds nothing when system_prompt
+ * is empty. Anthropic-only: callers build Anthropic-format requests, so this
+ * never reaches a non-Anthropic provider. */
+void agent_anthropic_set_system(struct cJSON *req, const char *system_prompt, int cache_marking,
+                                int min_chars);
 
 /* Build a Gemini generateContent request.
  * cache_name: "cachedContents/..." from gemini_prompt_cache_create(), or "" for uncached. */
