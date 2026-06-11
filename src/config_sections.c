@@ -973,6 +973,14 @@ void config_parse_transport_section(config_t *cfg, cJSON *root)
       if (cJSON_IsNumber(item) && item->valuedouble > 0)
          cfg->cost_reward_ref_usd_milli = (int)item->valuedouble;
    }
+
+   cJSON *rcap = cJSON_GetObjectItemCaseSensitive(root, "reasoning_cap");
+   if (cJSON_IsObject(rcap))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(rcap, "enabled");
+      if (cJSON_IsBool(item))
+         cfg->reasoning_cap_enabled = cJSON_IsTrue(item) ? 1 : 0;
+   }
 }
 void config_parse_guardrails_section(config_t *cfg, cJSON *root)
 {

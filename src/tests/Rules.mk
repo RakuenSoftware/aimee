@@ -168,6 +168,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-token-audit \
                $(TESTPREFIX)/unit-test-windows \
                $(TESTPREFIX)/unit-test-token-tracker \
+               $(TESTPREFIX)/unit-test-reasoning-cap \
                $(TESTPREFIX)/unit-test-tool-prompts \
                $(TESTPREFIX)/unit-test-delegate-token-budget \
                $(TESTPREFIX)/unit-test-delegate-context-shed \
@@ -1370,6 +1371,10 @@ $(TESTPREFIX)/unit-test-session-compact: $(OBJDIR)/tests/test_session_compact.o 
 
 $(TESTPREFIX)/unit-test-token-tracker: $(OBJDIR)/tests/test_token_tracker.o \
                                $(OBJDIR)/server/token_tracker.o $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-reasoning-cap: $(OBJDIR)/tests/test_reasoning_cap.o \
+                               $(OBJDIR)/reasoning_cap.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-token-audit: $(OBJDIR)/tests/test_token_audit.o \

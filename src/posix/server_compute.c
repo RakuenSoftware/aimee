@@ -16,6 +16,7 @@
 #include "workspace_turn.h"
 #include "cJSON.h"
 #include "token_tracker.h"
+#include "reasoning_cap.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
@@ -352,8 +353,16 @@ static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message,
    const char *codex_model =
        chat_model_passthrough_allowed(model) ? model : (cfg ? cfg->codex_model : "");
    creq.model = codex_model && codex_model[0] ? codex_model : NULL;
+   int codex_effort_explicit = chat_codex_effort_allowed(effort);
    const char *codex_effort =
-       chat_codex_effort_allowed(effort) ? effort : (cfg ? cfg->model_reasoning_effort : "");
+       codex_effort_explicit ? effort : (cfg ? cfg->model_reasoning_effort : "");
+   /* §5: cap (only lower) the config-derived effort by turn complexity. An
+    * explicit per-request override is left untouched. */
+   if (cfg && cfg->reasoning_cap_enabled && !codex_effort_explicit)
+   {
+      int score = reasoning_complexity_score(1, message ? strlen(message) : 0, 1);
+      codex_effort = reasoning_effort_capped(codex_effort, score);
+   }
    creq.reasoning_effort = chat_codex_effort_allowed(codex_effort) ? codex_effort : NULL;
    creq.timeout_ms = -1;
    creq.autonomous = cfg && cfg->autonomous;
@@ -994,8 +1003,16 @@ void chat_stream_worker(void *arg)
       argv[argc++] = "--model";
       argv[argc++] = (char *)claude_model;
    }
+   int claude_effort_explicit = chat_claude_effort_allowed(effort_override);
    const char *claude_effort =
-       chat_claude_effort_allowed(effort_override) ? effort_override : cfg.model_reasoning_effort;
+       claude_effort_explicit ? effort_override : cfg.model_reasoning_effort;
+   /* §5: cap (only lower) the config-derived effort by turn complexity; leave an
+    * explicit per-request override untouched. */
+   if (cfg.reasoning_cap_enabled && !claude_effort_explicit)
+   {
+      int score = reasoning_complexity_score(1, message ? strlen(message) : 0, 1);
+      claude_effort = reasoning_effort_capped(claude_effort, score);
+   }
    if (chat_claude_effort_allowed(claude_effort))
    {
       argv[argc++] = "--effort";

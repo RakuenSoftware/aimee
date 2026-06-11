@@ -485,6 +485,7 @@ static void config_set_defaults(config_t *cfg)
    cfg->cost_reward_enabled = 0;
    cfg->cost_reward_lambda_pct = 30;
    cfg->cost_reward_ref_usd_milli = 500;
+   cfg->reasoning_cap_enabled = 0;
    cfg->guardrails_semantic_enabled = 0;
    cfg->guardrails_semantic_dry_run = 1;
    cfg->guardrails_semantic_advisory_only = 1;

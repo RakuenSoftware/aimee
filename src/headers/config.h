@@ -849,6 +849,14 @@ typedef struct config
    int cost_reward_lambda_pct;
    int cost_reward_ref_usd_milli;
 
+   /* Complexity-score reasoning-effort cap (reasoning_cap.*; §5).
+    * reasoning_cap_enabled: 0 = off (default), 1 = on. When on, a deterministic
+    *   0-10 complexity score for the turn caps (only ever lowers) the reasoning
+    *   effort that would otherwise be sent to a reasoning-effort-capable provider
+    *   surface (Codex/OpenAI enum, Claude --effort). An explicit per-request
+    *   override and providers without a reasoning surface are left untouched. */
+   int reasoning_cap_enabled;
+
    /* Neural-assisted semantic guardrails (guardrails.semantic.*).
     * semantic_enabled: 0 = off (default), 1 = on.
     * semantic_dry_run: 1 = shadow mode — score is logged but never changes outcome
