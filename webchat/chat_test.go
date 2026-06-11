@@ -322,6 +322,81 @@ func TestHandleOpenAIChatCompletionsProxiesV1(t *testing.T) {
 	}
 }
 
+func TestOpenAIProxyStampsTrustedMetadata(t *testing.T) {
+	// With the proxy secret configured, the proxy must STRIP any client-supplied
+	// X-Aimee-* identity and stamp its own trusted metadata: principal/source =
+	// the constant "webchat" account (no webchat session in this external-client
+	// path), the proxy secret, and a within-account session key from the OpenAI
+	// `user` field.
+	t.Setenv("AIMEE_INGRESS_PROXY_SECRET", "topsecret")
+
+	var gotPrincipal, gotSource, gotProxyAuth, gotSession string
+	s := openAIChatServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPrincipal = r.Header.Get("X-Aimee-Principal")
+		gotSource = r.Header.Get("X-Aimee-Source")
+		gotProxyAuth = r.Header.Get("X-Aimee-Proxy-Authorization")
+		gotSession = r.Header.Get("X-Aimee-Session-Key")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"x","object":"chat.completion","choices":[]}`)
+	})
+
+	body := `{"model":"aimee","user":"bob","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("X-Aimee-Principal", "victim") // spoof attempt — must be stripped
+	req.Header.Set("X-Aimee-Proxy-Authorization", "forged")
+	rr := httptest.NewRecorder()
+	s.handleOpenAIChatCompletions(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if gotPrincipal != "webchat" {
+		t.Fatalf("principal = %q, want trusted constant \"webchat\" (spoof must be stripped)", gotPrincipal)
+	}
+	if gotSource != "webchat" {
+		t.Fatalf("source = %q, want \"webchat\"", gotSource)
+	}
+	if gotProxyAuth != "topsecret" {
+		t.Fatalf("proxy auth = %q, want the configured secret (forged must be replaced)", gotProxyAuth)
+	}
+	if gotSession != "webchat:bob" {
+		t.Fatalf("session key = %q, want within-account \"webchat:bob\"", gotSession)
+	}
+}
+
+func TestOpenAIProxyNoSecretStampsNothing(t *testing.T) {
+	// Without the configured secret, the proxy must NOT stamp trusted identity —
+	// and must still strip any spoofed X-Aimee-* headers so nothing untrusted
+	// reaches aimee-server.
+	t.Setenv("AIMEE_INGRESS_PROXY_SECRET", "")
+
+	var gotPrincipal, gotProxyAuth string
+	s := openAIChatServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPrincipal = r.Header.Get("X-Aimee-Principal")
+		gotProxyAuth = r.Header.Get("X-Aimee-Proxy-Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"x","object":"chat.completion","choices":[]}`)
+	})
+
+	body := `{"model":"aimee","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("X-Aimee-Principal", "victim")
+	rr := httptest.NewRecorder()
+	s.handleOpenAIChatCompletions(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	if gotPrincipal != "" {
+		t.Fatalf("principal = %q, want empty (no secret -> no stamp, spoof stripped)", gotPrincipal)
+	}
+	if gotProxyAuth != "" {
+		t.Fatalf("proxy auth = %q, want empty", gotProxyAuth)
+	}
+}
+
 func TestHandleOpenAIChatCompletionsStreamsSSE(t *testing.T) {
 	s := openAIChatServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

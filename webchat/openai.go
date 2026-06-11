@@ -91,14 +91,37 @@ func openAIUserField(r *http.Request) string {
 	return strings.TrimSpace(v.User)
 }
 
+// sessionUsername resolves the TRUSTED webchat identity (the PAM username from a
+// server-validated session cookie), or "" when there is no valid session. This is
+// the identity webchat already authenticated — not anything the client supplies.
+func (s *server) sessionUsername(r *http.Request) string {
+	if s == nil || s.sessions == nil {
+		return ""
+	}
+	cookie, err := r.Cookie("session")
+	if err != nil {
+		return ""
+	}
+	username, err := s.sessions.ValidateSession(cookie.Value)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(username)
+}
+
 func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath string) {
 	sock := s.aimeeHTTPSockPath()
-	// The webchat OpenAI proxy authenticates clients with ONE shared bearer, so the
-	// only TRUSTED identity at this surface is the proxy account itself ("webchat").
-	// The OpenAI `user` field is client-supplied and untrusted; we use it only as a
-	// best-effort session hint scoped within the webchat account (a client can at
-	// most mislabel its own session, never change the trusted principal).
-	clientID := openAIUserField(r)
+	// Prefer webchat's OWN trusted identity: a server-validated session resolves
+	// to the PAM username, which we stamp as a trusted per-user principal/session
+	// so distinct webchat users never collapse in attribution. Only when there is
+	// no webchat session (an external shared-bearer OpenAI client) do we fall back
+	// to the "webchat" account, using the untrusted OpenAI `user` body field merely
+	// as a within-account session hint.
+	webUser := s.sessionUsername(r)
+	clientID := ""
+	if webUser == "" {
+		clientID = openAIUserField(r)
+	}
 	proxy := &httputil.ReverseProxy{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -114,11 +137,10 @@ func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath st
 			// also strip any client-supplied X-Aimee-* identity headers BEFORE
 			// stamping our own — otherwise an external OpenAI client could send
 			// X-Aimee-Principal: victim and, because we add the trusted proxy
-			// secret, aimee-server would attribute the request to victim. The
-			// principal and source are the trusted constant "webchat" account,
-			// server-stamped and never derived from client input; only the
-			// within-account session key uses the (untrusted) client `user` field.
-			// The Idempotency-Key (not an identity header) is forwarded unchanged.
+			// secret, aimee-server would attribute the request to victim. All stamped
+			// identity is server-derived: a validated webchat (PAM) session, or the
+			// constant "webchat" account. The Idempotency-Key (not an identity header)
+			// is forwarded unchanged.
 			req.Header.Del("Authorization")
 			req.Header.Del("X-Aimee-Proxy-Authorization")
 			req.Header.Del("X-Aimee-Principal")
@@ -126,13 +148,20 @@ func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath st
 			req.Header.Del("X-Aimee-Session-Key")
 			if secret := strings.TrimSpace(os.Getenv("AIMEE_INGRESS_PROXY_SECRET")); secret != "" {
 				req.Header.Set("X-Aimee-Proxy-Authorization", secret)
-				// Trusted, server-stamped account boundary — a constant, NEVER
-				// derived from client input.
-				req.Header.Set("X-Aimee-Principal", "webchat")
 				req.Header.Set("X-Aimee-Source", "webchat")
-				// Untrusted within-account session hint from the client `user` field.
-				if clientID != "" {
-					req.Header.Set("X-Aimee-Session-Key", "webchat:"+clientID)
+				if webUser != "" {
+					// TRUSTED: server-validated webchat PAM session. Distinct users
+					// get distinct trusted principals/sessions.
+					req.Header.Set("X-Aimee-Principal", "webchat:"+webUser)
+					req.Header.Set("X-Aimee-Session-Key", "webchat:"+webUser)
+				} else {
+					// External shared-bearer client: the trusted boundary is the
+					// webchat account; the untrusted OpenAI `user` is only a
+					// within-account session hint.
+					req.Header.Set("X-Aimee-Principal", "webchat")
+					if clientID != "" {
+						req.Header.Set("X-Aimee-Session-Key", "webchat:"+clientID)
+					}
 				}
 			}
 		},
