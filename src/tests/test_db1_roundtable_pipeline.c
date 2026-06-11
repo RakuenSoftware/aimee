@@ -270,7 +270,7 @@ static void test_chunk_group(void)
    assert(rtp_pass_group_agg(pid, RTP_PHASE_IMPL, group, &agg) == 0);
    assert(agg.total == 2 && agg.done == 2);
    assert(agg.synthesis_done == 1);
-   assert(agg.any_invalid == 0);
+   assert(agg.invalid == 0);
    assert(agg.blocking_count == 2);
 
    /* a synthesis member that omitted required spans blocks the aggregate even
@@ -280,8 +280,27 @@ static void test_chunk_group(void)
    synth.chunk_omitted = 1;
    assert(rtp_pass_update(&synth) == 0);
    assert(rtp_pass_group_agg(pid, RTP_PHASE_IMPL, group, &agg) == 0);
-   assert(agg.any_invalid == 1);
+   assert(agg.invalid == 1);
    assert(agg.synthesis_done == 0);
+
+   /* TWO invalid members must both be counted (#4): a boolean would under-count
+    * and leave captured<members forever. Mark both chunk members invalid. */
+   for (int i = 0; i < 2; i++)
+   {
+      rtp_pass_t cp;
+      assert(rtp_pass_get(ids[i], &cp) == 0);
+      snprintf(cp.status, sizeof(cp.status), RTP_PASS_CAPTURED);
+      cp.envelope_valid = 0;
+      assert(rtp_pass_update(&cp) == 0);
+   }
+   assert(rtp_pass_group_agg(pid, RTP_PHASE_IMPL, group, &agg) == 0);
+   assert(agg.invalid == 3); /* 2 chunks + the omitted synthesis */
+   assert(agg.done == 0);
+   /* every member is now terminal (2 invalid chunks + 1 invalid synthesis), so a
+    * decision loop sees captured==members and escalates, not "waiting". */
+   int members = agg.total + (agg.synthesis_present ? 1 : 0);
+   int captured = agg.done + (agg.synthesis_done ? 1 : 0) + agg.invalid;
+   assert(captured == members);
    printf("  chunk group aggregate: ok\n");
 }
 

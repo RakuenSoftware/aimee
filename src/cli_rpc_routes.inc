@@ -2915,6 +2915,35 @@ static cJSON *marshal_pipeline_request(const char *method, int argc, char **argv
          cJSON_AddStringToObject(req, "repo_root", v);
       if ((v = rpc_get(&opts, "brief")) && v[0])
          cJSON_AddStringToObject(req, "brief", v);
+      /* PR-lifecycle fields (#2). */
+      if ((v = rpc_get(&opts, "head-branch")) && v[0])
+         cJSON_AddStringToObject(req, "head_branch", v);
+      if ((v = rpc_get(&opts, "remote")) && v[0])
+         cJSON_AddStringToObject(req, "remote", v);
+      if ((v = rpc_get(&opts, "worktree-path")) && v[0])
+         cJSON_AddStringToObject(req, "worktree_path", v);
+      /* strict question-count gate (#3): --questions "q1||q2||q3" -> array. */
+      if ((v = rpc_get(&opts, "questions")) && v[0])
+      {
+         cJSON *qarr = cJSON_AddArrayToObject(req, "questions");
+         char *dup = strdup(v);
+         if (dup)
+         {
+            char *s = dup;
+            while (s && *s)
+            {
+               char *sep = strstr(s, "||");
+               if (sep)
+                  *sep = '\0';
+               while (*s == ' ')
+                  s++;
+               if (*s)
+                  cJSON_AddItemToArray(qarr, cJSON_CreateString(s));
+               s = sep ? sep + 2 : NULL;
+            }
+            free(dup);
+         }
+      }
    }
    else if (strcmp(method, "pipeline.list") == 0)
    {

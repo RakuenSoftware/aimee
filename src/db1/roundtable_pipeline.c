@@ -499,18 +499,18 @@ int rtp_pass_group_agg(int pipeline_id, const char *phase, int chunk_group, rtp_
           * is NOT a complete whole-artifact check — it blocks the aggregate
           * regardless of the roundtable verdict (#39). */
          if (omitted > 0 || over_budget)
-            out->any_invalid = 1;
+            out->invalid++;
          else if (captured && valid)
             out->synthesis_done = 1;
          else if (captured && !valid)
-            out->any_invalid = 1;
+            out->invalid++;
          continue;
       }
       out->total++;
       if (captured && valid)
          out->done++;
       else if (captured && !valid)
-         out->any_invalid = 1;
+         out->invalid++; /* count EACH invalid chunk, not a boolean (#4) */
    }
    sqlite3_finalize(stmt);
    return 0;

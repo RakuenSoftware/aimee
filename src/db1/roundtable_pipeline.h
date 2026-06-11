@@ -152,11 +152,11 @@ extern "C"
     * must have a valid completed result and the synthesis member must be done. */
    typedef struct
    {
-      int total;       /* chunk members (excludes the synthesis row) */
-      int done;        /* chunk members captured/done with a valid envelope */
-      int any_invalid; /* a member captured with an invalid envelope */
+      int total;   /* chunk members (excludes the synthesis row) */
+      int done;    /* chunk members captured/done with a valid envelope */
+      int invalid; /* members (chunk OR synthesis) captured with invalid evidence */
       int synthesis_present;
-      int synthesis_done;
+      int synthesis_done; /* synthesis captured+valid AND no omitted/over-budget spans */
       int blocking_count; /* summed blocking across the group */
       int suggestion_count;
    } rtp_group_agg_t;

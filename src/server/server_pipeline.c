@@ -25,6 +25,7 @@
 #include "local_operator.h"
 #include "model_registry.h"
 #include "platform_path.h" /* platform_mkdir_p */
+#include "util.h"          /* shell_escape */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -458,12 +459,43 @@ static void attach_prompt_brief(cJSON *body, const char *artifact, const char *b
    }
 }
 
-/* ---- PR / git lifecycle (#2), routed through the workspace-aware git surface -- */
+/* ---- PR / git lifecycle (#2), pinned to the pipeline's recorded checkout (#3) -- */
 
-static int git_head_sha(char *out, size_t cap)
+/* The directory the pipeline's git/gh operations must run in: the recorded
+ * dedicated worktree, else the repo root. Empty -> the server's active
+ * workspace (back-compat). Every git/gh command below is anchored to it so the
+ * pipeline never operates on the wrong checkout/branch. */
+static const char *rtp_git_cwd(const rtp_run_t *run)
 {
+   if (run->worktree_path[0])
+      return run->worktree_path;
+   if (run->repo_root[0])
+      return run->repo_root;
+   return "";
+}
+
+/* Prepend `cd '<cwd>' && ` (escaped) when a checkout is recorded. */
+static size_t rtp_cd_prefix(const rtp_run_t *run, char *buf, size_t cap)
+{
+   const char *cwd = rtp_git_cwd(run);
+   if (!cwd[0])
+   {
+      buf[0] = '\0';
+      return 0;
+   }
+   char *e = shell_escape(cwd);
+   int n = snprintf(buf, cap, "cd '%s' && ", e ? e : cwd);
+   free(e);
+   return (n > 0 && (size_t)n < cap) ? (size_t)n : 0;
+}
+
+static int git_head_sha(const rtp_run_t *run, char *out, size_t cap)
+{
+   char cmd[RTP_PATH_LEN + 64];
+   size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
+   snprintf(cmd + p, sizeof(cmd) - p, "git rev-parse HEAD 2>/dev/null");
    int rc = 0;
-   char *o = mcp_git_run("git rev-parse HEAD 2>/dev/null", &rc);
+   char *o = mcp_git_run(cmd, &rc);
    if (!o)
       return -1;
    char *nl = strchr(o, '\n');
@@ -475,12 +507,15 @@ static int git_head_sha(char *out, size_t cap)
    return ok;
 }
 
-/* `git diff <base>...HEAD`; caller frees. NULL on failure/empty diff. */
-static char *capture_diff(const char *base)
+/* `git diff <base>...HEAD` in the recorded checkout; caller frees. */
+static char *capture_diff(const rtp_run_t *run)
 {
-   char cmd[256];
-   snprintf(cmd, sizeof(cmd), "git diff %s...HEAD 2>/dev/null",
-            (base && base[0]) ? base : "HEAD~1");
+   const char *base = run->base_branch[0] ? run->base_branch : "HEAD~1";
+   char *eb = shell_escape(base);
+   char cmd[RTP_PATH_LEN + 128];
+   size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
+   snprintf(cmd + p, sizeof(cmd) - p, "git diff '%s'...HEAD 2>/dev/null", eb ? eb : base);
+   free(eb);
    int rc = 0;
    char *o = mcp_git_run(cmd, &rc);
    if (o && rc == 0 && o[0])
@@ -508,52 +543,60 @@ static int parse_pr_number(const char *text)
    return best;
 }
 
-/* Open the phase PR via git_pr create and record number/url + the current head
- * SHA into the ledger (#2). The PR is opened on the recorded head_branch; the
- * agent must have pushed its commits first. Returns 0 on success. */
+/* Open the phase PR with `gh pr create` in the recorded checkout, on the
+ * recorded head_branch + base, and record number/url + current head SHA (#2/#3).
+ * The agent must have pushed its commits first. Returns 0 on success. */
 static int open_and_record_pr(rtp_run_t *run, const char *phase)
 {
-   cJSON *args = cJSON_CreateObject();
-   cJSON_AddStringToObject(args, "action", "create");
    char title[256];
    snprintf(title, sizeof(title), "%s: %.180s",
             strcmp(phase, RTP_PHASE_IMPL) == 0 ? "impl" : "proposal", run->idea);
-   cJSON_AddStringToObject(args, "title", title);
-   cJSON_AddStringToObject(args, "base", run->base_branch[0] ? run->base_branch : "testing");
    char body[512];
    snprintf(body, sizeof(body),
             "Roundtable authoring pipeline #%d (%s phase). Done-bar met; PR opened by the pipeline "
             "controller.",
             run->id, phase);
-   cJSON_AddStringToObject(args, "body", body);
-   cJSON *res = handle_git_pr(args);
-   cJSON_Delete(args);
+   char *et = shell_escape(title);
+   char *eb = shell_escape(body);
+   char *ebase = shell_escape(run->base_branch[0] ? run->base_branch : "testing");
+   char *ehead = run->head_branch[0] ? shell_escape(run->head_branch) : NULL;
 
+   char cmd[RTP_PATH_LEN + 1280];
+   size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
+   if (ehead)
+      snprintf(cmd + p, sizeof(cmd) - p,
+               "gh pr create --title '%s' --body '%s' --base '%s' --head '%s' 2>&1", et ? et : "",
+               eb ? eb : "", ebase ? ebase : "testing", ehead);
+   else
+      snprintf(cmd + p, sizeof(cmd) - p, "gh pr create --title '%s' --body '%s' --base '%s' 2>&1",
+               et ? et : "", eb ? eb : "", ebase ? ebase : "testing");
+   free(et);
+   free(eb);
+   free(ebase);
+   free(ehead);
+
+   int rc = 0;
+   char *out = mcp_git_run(cmd, &rc);
    int pr = 0;
    char url[RTP_PATH_LEN] = {0};
-   if (res)
+   if (out && rc == 0)
    {
-      cJSON *content = cJSON_GetObjectItemCaseSensitive(res, "content");
-      cJSON *first = cJSON_IsArray(content) ? cJSON_GetArrayItem(content, 0) : NULL;
-      cJSON *txt = first ? cJSON_GetObjectItemCaseSensitive(first, "text") : NULL;
-      if (cJSON_IsString(txt) && !strstr(txt->valuestring, "error"))
+      const char *u = strstr(out, "http");
+      if (u)
       {
-         const char *u = strstr(txt->valuestring, "http");
-         if (u)
-         {
-            snprintf(url, sizeof(url), "%s", u);
-            char *cut = strpbrk(url, " \n\"");
-            if (cut)
-               *cut = '\0';
-         }
-         pr = parse_pr_number(url[0] ? url : txt->valuestring);
+         snprintf(url, sizeof(url), "%s", u);
+         char *cut = strpbrk(url, " \n\"");
+         if (cut)
+            *cut = '\0';
       }
-      cJSON_Delete(res);
+      pr = parse_pr_number(url[0] ? url : out);
    }
+   free(out);
    if (pr <= 0)
       return -1;
+
    char sha[RTP_HASH_LEN] = {0};
-   git_head_sha(sha, sizeof(sha));
+   git_head_sha(run, sha, sizeof(sha));
    if (strcmp(phase, RTP_PHASE_IMPL) == 0)
    {
       run->impl_pr_number = pr;
@@ -570,15 +613,16 @@ static int open_and_record_pr(rtp_run_t *run, const char *phase)
    return 0;
 }
 
-/* The PR's current head SHA via the forge, for drift detection (#56). Empty on
- * failure. */
-static void pr_current_head(int pr_number, char *out, size_t cap)
+/* The PR's current head SHA via the forge (in the recorded checkout), for drift
+ * detection (#56). Empty on failure. */
+static void pr_current_head(const rtp_run_t *run, int pr_number, char *out, size_t cap)
 {
    out[0] = '\0';
    if (pr_number <= 0)
       return;
-   char cmd[160];
-   snprintf(cmd, sizeof(cmd), "gh pr view %d --json headRefOid -q .headRefOid 2>/dev/null",
+   char cmd[RTP_PATH_LEN + 128];
+   size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
+   snprintf(cmd + p, sizeof(cmd) - p, "gh pr view %d --json headRefOid -q .headRefOid 2>/dev/null",
             pr_number);
    int rc = 0;
    char *o = mcp_git_run(cmd, &rc);
@@ -866,8 +910,11 @@ static int decide_chunked_group(server_conn_t *conn, rtp_run_t *run, const char 
    if (rtp_pass_group_agg(run->id, phase, group, &agg) != 0)
       return server_send_error(conn, "pipeline: could not aggregate chunk group", NULL);
 
+   /* Each member is terminal once it is valid (done/synthesis_done) OR invalid;
+    * `invalid` is a COUNT so two-or-more invalid members are all accounted for
+    * and the group never gets stuck "waiting" (#4). */
    int members = agg.total + (agg.synthesis_present ? 1 : 0);
-   int captured = agg.done + (agg.synthesis_done ? 1 : 0) + agg.any_invalid;
+   int captured = agg.done + (agg.synthesis_done ? 1 : 0) + agg.invalid;
    if (captured < members)
    {
       cJSON *resp = jo_ok();
@@ -880,16 +927,18 @@ static int decide_chunked_group(server_conn_t *conn, rtp_run_t *run, const char 
    }
 
    int aggregate_done =
-       rtp_chunk_aggregate_done(agg.total, agg.done, agg.synthesis_done, agg.any_invalid);
+       rtp_chunk_aggregate_done(agg.total, agg.done, agg.synthesis_done, agg.invalid > 0);
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "chunk_group", group);
    cJSON_AddNumberToObject(resp, "blocking", agg.blocking_count);
-   if (agg.any_invalid)
+   cJSON_AddNumberToObject(resp, "invalid_members", agg.invalid);
+   if (agg.invalid > 0)
    {
       cJSON_AddStringToObject(resp, "action", "escalate");
       cJSON_AddStringToObject(resp, "note",
-                              "a chunk produced invalid evidence; human attention required");
+                              "one or more chunk members produced invalid evidence; human "
+                              "attention required");
       return server_send_ok(conn, resp);
    }
    if (aggregate_done && agg.blocking_count == 0)
@@ -1117,13 +1166,36 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if ((!artifact || !artifact[0]) && strcmp(mode, RTP_MODE_REVIEW) == 0 &&
        strcmp(phase, RTP_PHASE_IMPL) == 0 && run.head_branch[0])
    {
-      captured_diff = capture_diff(run.base_branch);
+      captured_diff = capture_diff(&run);
       if (captured_diff)
          artifact = captured_diff;
    }
+
+   /* DRAFT with no artifact: build the prompt from the stored human idea + brief
+    * focus, so the "idea -> DRAFT skeleton" flow works without the caller
+    * supplying anything (#1/#9). The skeleton lands in the working file via the
+    * author-revise loop; DRAFT is never expected to emit a full proposal. */
+   char *draft_prompt = NULL;
+   if ((!artifact || !artifact[0]) && strcmp(mode, RTP_MODE_DRAFT) == 0)
+   {
+      size_t cap = RTP_IDEA_LEN + RTP_BRIEF_LEN + 512;
+      draft_prompt = (char *)malloc(cap);
+      if (draft_prompt)
+      {
+         snprintf(draft_prompt, cap,
+                  "Draft a concise PROPOSAL SKELETON (section outline + goal/scope, NOT a finished "
+                  "proposal; the author-revise loop expands it) for this idea:\n\n%s\n\n%s",
+                  run.idea, run.brief[0] ? run.brief : "");
+         artifact = draft_prompt;
+      }
+   }
+
    if ((!artifact || !artifact[0]) && strcmp(mode, RTP_MODE_REVIEW) == 0)
+   {
+      free(captured_diff);
       return server_send_error(
           conn, "pipeline: review needs the artifact (--artifact <diff|proposal>)", NULL);
+   }
 
    /* For a REVIEW pass, resolve the panel and chunk the artifact when it exceeds
     * the smallest participant's context budget (#28/#33/#37). DRAFT is always a
@@ -1135,6 +1207,7 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       if (prc < 0)
       {
          free(captured_diff);
+         free(draft_prompt);
          return server_send_error(
              conn,
              "pipeline: a panel participant has an unknown context window and no fallback is "
@@ -1146,11 +1219,13 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       {
          int r = submit_chunked_review(conn, &run, phase, artifact, budget);
          free(captured_diff);
+         free(draft_prompt);
          return r;
       }
    }
    int r = submit_pass(conn, &run, phase, mode, artifact, artifact_hash);
    free(captured_diff);
+   free(draft_prompt);
    return r;
 }
 
@@ -1169,7 +1244,7 @@ static void execute_gate_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gat
    if (gate->expected_head_sha[0])
    {
       char cur[RTP_HASH_LEN];
-      pr_current_head(gate->pr_number, cur, sizeof(cur));
+      pr_current_head(run, gate->pr_number, cur, sizeof(cur));
       if (cur[0] && strcmp(cur, gate->expected_head_sha) != 0)
       {
          const char *mp =
@@ -1188,46 +1263,51 @@ static void execute_gate_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gat
       }
    }
 
-   cJSON *margs = cJSON_CreateObject();
-   cJSON_AddStringToObject(margs, "action", "merge");
-   cJSON_AddNumberToObject(margs, "number", gate->pr_number);
-   if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "admin")))
-      cJSON_AddBoolToObject(margs, "admin", 1);
+   /* Policy-aware merge executor (#50), pinned to the recorded checkout (#3) and
+    * keyed by the approved head SHA (--match-head-commit) so a drift between the
+    * pre-check and the merge still refuses (idempotent for #55). */
+   const char *admin =
+       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "admin")) ? " --admin" : "";
+   char match[160] = {0};
    if (gate->expected_head_sha[0])
-      cJSON_AddStringToObject(margs, "expected_head_sha", gate->expected_head_sha);
-   cJSON *mres = handle_git_pr(margs);
-   cJSON_Delete(margs);
-
-   int merged = 0;
-   char merge_sha[RTP_HASH_LEN] = {0};
-   int exit_code = -1;
-   if (mres)
    {
-      cJSON *content = cJSON_GetObjectItemCaseSensitive(mres, "content");
-      cJSON *first = cJSON_IsArray(content) ? cJSON_GetArrayItem(content, 0) : NULL;
-      cJSON *txt = first ? cJSON_GetObjectItemCaseSensitive(first, "text") : NULL;
-      if (cJSON_IsString(txt))
-      {
-         cJSON *mj = cJSON_Parse(txt->valuestring);
-         if (mj)
-         {
-            merged = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(mj, "merged"));
-            cJSON *es = cJSON_GetObjectItemCaseSensitive(mj, "exit_code");
-            if (cJSON_IsNumber(es))
-               exit_code = (int)es->valuedouble;
-            cJSON *ms = cJSON_GetObjectItemCaseSensitive(mj, "merge_sha");
-            if (cJSON_IsString(ms))
-               snprintf(merge_sha, sizeof(merge_sha), "%s", ms->valuestring);
-            cJSON *out = cJSON_GetObjectItemCaseSensitive(mj, "output");
-            if (cJSON_IsString(out))
-               snprintf(gate->merge_output, sizeof(gate->merge_output), "%s", out->valuestring);
-            cJSON_Delete(mj);
-         }
-      }
-      cJSON_Delete(mres);
+      char *e = shell_escape(gate->expected_head_sha);
+      snprintf(match, sizeof(match), " --match-head-commit '%s'", e ? e : gate->expected_head_sha);
+      free(e);
    }
-   snprintf(gate->merge_executor, sizeof(gate->merge_executor), "git_pr");
-   snprintf(gate->merge_command, sizeof(gate->merge_command), "gh pr merge %d", gate->pr_number);
+   char cmd[RTP_PATH_LEN + 256];
+   size_t pfx = rtp_cd_prefix(run, cmd, sizeof(cmd));
+   snprintf(cmd + pfx, sizeof(cmd) - pfx, "gh pr merge %d --merge%s%s 2>&1", gate->pr_number, admin,
+            match);
+   int exit_code = 0;
+   char *out = mcp_git_run(cmd, &exit_code);
+   int merged = (exit_code == 0);
+   char merge_sha[RTP_HASH_LEN] = {0};
+   if (out)
+      snprintf(gate->merge_output, sizeof(gate->merge_output), "%s", out);
+   free(out);
+   if (merged)
+   {
+      /* recover the merge commit SHA from the recorded checkout. */
+      char vcmd[RTP_PATH_LEN + 96];
+      size_t vp = rtp_cd_prefix(run, vcmd, sizeof(vcmd));
+      snprintf(vcmd + vp, sizeof(vcmd) - vp,
+               "gh pr view %d --json mergeCommit -q .mergeCommit.oid 2>/dev/null", gate->pr_number);
+      int vrc = 0;
+      char *vout = mcp_git_run(vcmd, &vrc);
+      if (vout)
+      {
+         char *nl = strchr(vout, '\n');
+         if (nl)
+            *nl = '\0';
+         if (vrc == 0)
+            snprintf(merge_sha, sizeof(merge_sha), "%s", vout);
+         free(vout);
+      }
+   }
+   snprintf(gate->merge_executor, sizeof(gate->merge_executor), "gh pr merge");
+   snprintf(gate->merge_command, sizeof(gate->merge_command), "gh pr merge %d --merge%s%s",
+            gate->pr_number, admin, match);
    gate->merge_exit_code = exit_code;
    if (merged && merge_sha[0])
       snprintf(gate->merge_sha, sizeof(gate->merge_sha), "%s", merge_sha);
