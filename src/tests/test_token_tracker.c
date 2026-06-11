@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
 #include "token_tracker.h"
 
 #define PASS(name) printf("  %s: ok\n", name)
@@ -117,11 +118,48 @@ static void test_compound_id_no_false_match(void)
    PASS("cost: compound id no false match");
 }
 
+static int fake_registry_price(const char *model, double *in_per_mtok, double *out_per_mtok)
+{
+   if (strcmp(model, "claude-3-5-sonnet") == 0)
+   {
+      *in_per_mtok = 99.0; /* deliberately != the static table's $3 base */
+      *out_per_mtok = 1.0;
+      return 1;
+   }
+   if (strcmp(model, "registry-only-model") == 0)
+   {
+      *in_per_mtok = 5.0;
+      *out_per_mtok = 7.0;
+      return 1;
+   }
+   return 0;
+}
+
+static void test_registry_overrides_base_keeps_cache(void)
+{
+   token_tracker_set_registry_price_fn(fake_registry_price);
+
+   /* claude-3-5-sonnet is in the static table (base $3/$15, cache $3.75/$0.30).
+    * The registry is authoritative for BASE, so the override ($99 in) wins... */
+   token_usage_t base_in = {.input_tokens = 1000000};
+   assert(near_equal(token_estimate_cost("claude-3-5-sonnet", &base_in), 99.0));
+   /* ...while cache pricing stays from the static table (registry has none). */
+   token_usage_t cw = {.cache_write_tokens = 1000000};
+   assert(near_equal(token_estimate_cost("claude-3-5-sonnet", &cw), 3.75));
+
+   /* A model only the registry knows is priced by it (no static cache). */
+   assert(near_equal(token_estimate_cost("registry-only-model", &base_in), 5.0));
+
+   token_tracker_set_registry_price_fn(NULL); /* restore for other tests */
+   PASS("cost: registry overrides base, keeps static cache");
+}
+
 /* --- Main --- */
 
 int main(void)
 {
    printf("token_tracker: unit tests\n");
+   test_registry_overrides_base_keeps_cache();
 
    test_known_anthropic_model();
    test_cache_tokens_anthropic();

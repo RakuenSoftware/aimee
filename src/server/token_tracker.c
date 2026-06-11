@@ -128,21 +128,33 @@ double token_estimate_cost(const char *model, const token_usage_t *usage)
 {
    if (!usage)
       return 0.0;
+
+   /* Base input/output and cache prices ($/MTok). The static table seeds both;
+    * the registry (operator / models.dev overrides + providers the table omits)
+    * is then authoritative for the BASE prices, so an override actually takes
+    * effect. Cache prices stay from the static table — the registry carries none.
+    * A 0/0 registry entry means "unknown", not "free", and does not override. */
+   double in_mtok = 0.0, out_mtok = 0.0, cw_mtok = 0.0, cr_mtok = 0.0;
    const model_price_t *p = find_price(model);
    if (p)
-      return (double)usage->input_tokens * p->input_per_mtok / 1e6 +
-             (double)usage->output_tokens * p->output_per_mtok / 1e6 +
-             (double)usage->cache_write_tokens * p->cache_write_per_mtok / 1e6 +
-             (double)usage->cache_read_tokens * p->cache_read_per_mtok / 1e6;
-
-   /* Static table missed — fall back to the model registry (when its bridge is
-    * linked). A 0/0 registry entry means "unknown", not "free", so it yields 0. */
+   {
+      in_mtok = p->input_per_mtok;
+      out_mtok = p->output_per_mtok;
+      cw_mtok = p->cache_write_per_mtok;
+      cr_mtok = p->cache_read_per_mtok;
+   }
    if (model && model[0] && g_registry_price_fn)
    {
-      double in_mtok = 0.0, out_mtok = 0.0;
-      if (g_registry_price_fn(model, &in_mtok, &out_mtok) && (in_mtok > 0.0 || out_mtok > 0.0))
-         return (double)usage->input_tokens * in_mtok / 1e6 +
-                (double)usage->output_tokens * out_mtok / 1e6;
+      double r_in = 0.0, r_out = 0.0;
+      if (g_registry_price_fn(model, &r_in, &r_out) && (r_in > 0.0 || r_out > 0.0))
+      {
+         in_mtok = r_in;
+         out_mtok = r_out;
+      }
    }
-   return 0.0;
+
+   return (double)usage->input_tokens * in_mtok / 1e6 +
+          (double)usage->output_tokens * out_mtok / 1e6 +
+          (double)usage->cache_write_tokens * cw_mtok / 1e6 +
+          (double)usage->cache_read_tokens * cr_mtok / 1e6;
 }
