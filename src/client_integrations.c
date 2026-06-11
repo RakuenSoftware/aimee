@@ -869,6 +869,11 @@ static void ensure_claude_code_mcp(const char *settings_path)
 static void ensure_aimee_event_hook(cJSON *hooks, const char *event, const char *subcommand,
                                     const char *matcher, int *dirty)
 {
+   const char *aimee_bin = resolved_aimee_bin_path();
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "AIMEE_HOOK_CLIENT=claude %s %s", aimee_bin ? aimee_bin : "aimee",
+            subcommand);
+
    cJSON *arr = cJSON_GetObjectItemCaseSensitive(hooks, event);
    if (!cJSON_IsArray(arr))
    {
@@ -884,15 +889,21 @@ static void ensure_aimee_event_hook(cJSON *hooks, const char *event, const char 
          continue;
       for (int j = 0; j < cJSON_GetArraySize(hook_arr); j++)
       {
-         cJSON *cmd = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(hook_arr, j), "command");
-         if (cJSON_IsString(cmd) && strstr(cmd->valuestring, subcommand))
-            return; /* already installed */
+         cJSON *cmdj = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(hook_arr, j), "command");
+         if (cJSON_IsString(cmdj) && strstr(cmdj->valuestring, subcommand))
+         {
+            /* Found this aimee hook. Re-point it if its command references a
+             * different (e.g. stale or transient) binary path, so a reinstall
+             * to a new location heals the hook instead of leaving it dangling. */
+            if (strcmp(cmdj->valuestring, cmd) != 0)
+            {
+               cJSON_SetValuestring(cmdj, cmd);
+               *dirty = 1;
+            }
+            return;
+         }
       }
    }
-   const char *aimee_bin = resolved_aimee_bin_path();
-   char cmd[512];
-   snprintf(cmd, sizeof(cmd), "AIMEE_HOOK_CLIENT=claude %s %s", aimee_bin ? aimee_bin : "aimee",
-            subcommand);
    cJSON *entry = cJSON_CreateObject();
    cJSON *hook_arr = cJSON_CreateArray();
    cJSON *hook = cJSON_CreateObject();
@@ -970,7 +981,20 @@ static void ensure_claude_code_hooks(const char *settings_path)
          cJSON *cmd = cJSON_GetObjectItemCaseSensitive(h, "command");
          if (cJSON_IsString(cmd) && (strstr(cmd->valuestring, "aimee hooks post") ||
                                      strstr(cmd->valuestring, "aimee-client hooks post")))
+         {
             found_aimee = 1;
+            /* Re-point a stale/transient binary path to the resolved one, so a
+             * reinstall heals this hook (mirrors ensure_aimee_event_hook). */
+            const char *bin = resolved_aimee_bin_path();
+            char want[512];
+            snprintf(want, sizeof(want), "AIMEE_HOOK_CLIENT=claude %s hooks post",
+                     bin ? bin : "aimee");
+            if (strcmp(cmd->valuestring, want) != 0)
+            {
+               cJSON_SetValuestring(cmd, want);
+               dirty = 1;
+            }
+         }
       }
       if (!found_aimee)
          continue;
