@@ -143,7 +143,20 @@ static char *build_provider_body(const delegate_driver_t *driver, const agent_t 
    if (!req)
       return NULL;
    if (stream)
+   {
       cJSON_AddBoolToObject(req, "stream", 1);
+      /* Ask OpenAI-compatible providers to emit a final usage chunk so the
+       * translator can record realized (not estimated) cost. Only OpenAI-family
+       * providers honour stream_options.include_usage; the Anthropic provider has
+       * its own usage in message_start/message_delta and takes a separate body
+       * builder, so this is never sent to it. */
+      if (!driver_is_anthropic(driver))
+      {
+         cJSON *so = cJSON_AddObjectToObject(req, "stream_options");
+         if (so)
+            cJSON_AddBoolToObject(so, "include_usage", 1);
+      }
+   }
    body = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
    return body;
@@ -237,6 +250,24 @@ static int messages_buffered(const char *body, char *resp, int cap)
          driver->parse_response(provider_resp, response, &parsed);
       else
          agent_parse_response_openai(provider_resp, &parsed);
+
+      /* Cost accounting: the Anthropic /v1/messages ingress is a raw provider
+       * proxy (no agent_log_call), so record this turn's spend, billed against
+       * the served model and tagged as ingress. */
+      agent_result_t ar;
+      memset(&ar, 0, sizeof(ar));
+      snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
+      snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
+      /* Claude Code's requested model is recorded separately; aimee serves its
+       * configured primary, so requested and served typically differ. */
+      snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
+      snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
+      ar.prompt_tokens = parsed.prompt_tokens;
+      ar.completion_tokens = parsed.completion_tokens;
+      ar.cache_write_tokens = parsed.cache_write_tokens;
+      ar.cache_read_tokens = parsed.cache_read_tokens;
+      if (agent_ingress_accounting_enabled())
+         agent_record_token_audit(&ar, "", "anthropic-ingress");
    }
 
    mint_msg_id(msg_id, sizeof(msg_id));
@@ -278,6 +309,13 @@ typedef struct
    size_t data_len;
    size_t data_cap;
    int emitted;
+   /* Usage observed by tapping the relayed Anthropic SSE (message_start carries
+    * input + cache tokens, message_delta the final output_tokens), for the
+    * ingress cost row written after the stream. The relayed bytes are unchanged. */
+   int input_tokens;
+   int output_tokens;
+   int cache_write_tokens;
+   int cache_read_tokens;
 } anthropic_relay_ctx_t;
 
 static int prov_line_cb(const char *line, size_t len, void *ud)
@@ -328,12 +366,42 @@ static int relay_append_data(anthropic_relay_ctx_t *c, const char *data)
    return 0;
 }
 
+/* Observe usage on the relayed Anthropic SSE without altering it. message_start
+ * carries input + cache tokens under message.usage; message_delta carries the
+ * final cumulative output_tokens under usage. */
+static void relay_capture_usage(anthropic_relay_ctx_t *c, const char *event, const char *data)
+{
+   if (!data || !data[0])
+      return;
+   if (strcmp(event, "message_start") != 0 && strcmp(event, "message_delta") != 0)
+      return;
+   cJSON *root = cJSON_Parse(data);
+   if (!root)
+      return;
+   cJSON *msg = cJSON_GetObjectItem(root, "message");
+   cJSON *usage = cJSON_GetObjectItem(msg ? msg : root, "usage");
+   if (cJSON_IsObject(usage))
+   {
+      cJSON *it;
+      if ((it = cJSON_GetObjectItem(usage, "input_tokens")) && cJSON_IsNumber(it))
+         c->input_tokens = it->valueint;
+      if ((it = cJSON_GetObjectItem(usage, "output_tokens")) && cJSON_IsNumber(it))
+         c->output_tokens = it->valueint;
+      if ((it = cJSON_GetObjectItem(usage, "cache_creation_input_tokens")) && cJSON_IsNumber(it))
+         c->cache_write_tokens = it->valueint;
+      if ((it = cJSON_GetObjectItem(usage, "cache_read_input_tokens")) && cJSON_IsNumber(it))
+         c->cache_read_tokens = it->valueint;
+   }
+   cJSON_Delete(root);
+}
+
 static void relay_flush(anthropic_relay_ctx_t *c)
 {
    const char *event = c->event[0] ? c->event : "message";
 
    if (c->data_len > 0 && strcmp(c->data, "[DONE]") != 0)
    {
+      relay_capture_usage(c, event, c->data);
       c->emit(c->emit_ctx, event, c->data);
       c->emitted++;
    }
@@ -449,6 +517,24 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       relay_flush(&relay);
       if (stream_status != 200)
          relay_emit_transport_error(&relay, stream_status);
+      /* Cost accounting for the native Anthropic streaming ingress, from the
+       * usage tapped off the relayed SSE. A clean 200 is realized spend; an
+       * aborted stream that still observed usage is recorded as partial so the
+       * observed tokens are not silently lost. */
+      if ((relay.input_tokens > 0 || relay.output_tokens > 0) && agent_ingress_accounting_enabled())
+      {
+         agent_result_t ar;
+         memset(&ar, 0, sizeof(ar));
+         snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
+         snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
+         snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
+         ar.prompt_tokens = relay.input_tokens;
+         ar.completion_tokens = relay.output_tokens;
+         ar.cache_write_tokens = relay.cache_write_tokens;
+         ar.cache_read_tokens = relay.cache_read_tokens;
+         agent_record_token_audit_kind(&ar, "", "anthropic-ingress",
+                                       stream_status == 200 ? "realized" : "partial");
+      }
       sse_parser_free(&relay.parser);
       free(relay.data);
       goto cleanup;
@@ -461,11 +547,35 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    sse_parser_init(&pc.parser);
    pc.xl = xl;
-   agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", prov_chunk_cb, &pc,
-                          ag->timeout_ms, extra[0] ? extra : NULL);
+   int xlate_status = agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", prov_chunk_cb,
+                                             &pc, ag->timeout_ms, extra[0] ? extra : NULL);
    sse_parser_free(&pc.parser);
 
    anthropic_stream_finish(xl);
+
+   /* Cost accounting for the OpenAI-via-translator streaming ingress: tap the
+    * usage captured off the upstream OpenAI stream (prompt count preferring the
+    * upstream-reported value over the estimate, plus completion and cached
+    * tokens) and write one ingress cost row, mirroring the native relay path. A
+    * clean 200 is realized; an aborted stream with observed usage is partial. */
+   {
+      int in_tok = 0, out_tok = 0, cr_tok = 0;
+      anthropic_stream_get_usage(xl, &in_tok, &out_tok, &cr_tok);
+      if ((in_tok > 0 || out_tok > 0) && agent_ingress_accounting_enabled())
+      {
+         agent_result_t ar;
+         memset(&ar, 0, sizeof(ar));
+         snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
+         snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
+         snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
+         ar.prompt_tokens = in_tok;
+         ar.completion_tokens = out_tok;
+         ar.cache_read_tokens = cr_tok;
+         agent_record_token_audit_kind(&ar, "", "anthropic-ingress",
+                                       xlate_status == 200 ? "realized" : "partial");
+      }
+   }
+
    anthropic_stream_free(xl);
 
 cleanup:

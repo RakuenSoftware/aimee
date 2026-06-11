@@ -23,6 +23,13 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
 
 double delegate_ensemble_cost_usd(const delegate_ensemble_result_t *r);
 
+/* Estimate the USD cost of a single delegate/model call. Routes through the
+ * shared cache-aware pricing authority (token_estimate_cost), falling back to
+ * the model registry for providers it does not cover, then to a coarse flat
+ * rate for genuinely unpriced models. provider may be NULL (inferred). */
+double delegate_cost_estimate_usd(const char *provider, const char *model, int prompt_tokens,
+                                  int completion_tokens);
+
 typedef enum
 {
    ROUNDTABLE_DRAFT = 0,

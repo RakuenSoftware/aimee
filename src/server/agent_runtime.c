@@ -591,21 +591,15 @@ static cJSON *build_request_anthropic(const agent_t *agent, const char *system_p
    int tok = (max_tokens > 0) ? max_tokens : 4096;
    cJSON_AddNumberToObject(req, "max_tokens", tok);
 
-   if (system_prompt && system_prompt[0])
-   {
-      /* Use content block array with cache_control for prompt caching.
-       * This tells the API to cache the system prompt prefix across calls
-       * with the same content, reducing cost for repeated delegate calls. */
-      cJSON *sys_arr = cJSON_CreateArray();
-      cJSON *block = cJSON_CreateObject();
-      cJSON_AddStringToObject(block, "type", "text");
-      cJSON_AddStringToObject(block, "text", system_prompt);
-      cJSON *cc = cJSON_CreateObject();
-      cJSON_AddStringToObject(cc, "type", "ephemeral");
-      cJSON_AddItemToObject(block, "cache_control", cc);
-      cJSON_AddItemToArray(sys_arr, block);
-      cJSON_AddItemToObject(req, "system", sys_arr);
-   }
+   /* §3 cache-aware shaping: mark the stable system prefix cacheable (cache_control)
+    * only when the flag is on, matching the tool-bearing builder. Default-off so
+    * this request-mutating optimization lands dark behind the flag (config load is
+    * cheap/mtime-cached). The min-size floor is applied to the stable prefix inside
+    * the helper, not the whole prompt. */
+   config_t cs_cfg;
+   int cs_marking = (config_load(&cs_cfg) == 0 && cs_cfg.cache_shaping_enabled) ? 1 : 0;
+   agent_anthropic_set_system(req, system_prompt, cs_marking,
+                              cs_marking ? cs_cfg.cache_min_chars : 0);
 
    cJSON *messages = cJSON_CreateArray();
    cJSON *user = cJSON_CreateObject();
@@ -684,6 +678,11 @@ static void parse_response_openai(cJSON *root, agent_result_t *out)
    out->completion_tokens = parsed.completion_tokens;
    out->cache_write_tokens = parsed.cache_write_tokens;
    out->cache_read_tokens = parsed.cache_read_tokens;
+   /* Prefer the provider-reported model over the served alias set at entry. */
+   if (parsed.model[0])
+      snprintf(out->model, MAX_MODEL_LEN, "%s", parsed.model);
+   if (parsed.stop_reason[0])
+      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", parsed.stop_reason);
 
    if (parsed.content && parsed.content[0])
    {
@@ -911,6 +910,14 @@ static void parse_response_anthropic(cJSON *root, agent_result_t *out)
       if (ot && cJSON_IsNumber(ot))
          out->completion_tokens = ot->valueint;
    }
+
+   /* Prefer the provider-reported model over the served alias set at entry. */
+   cJSON *mdl = cJSON_GetObjectItem(root, "model");
+   if (mdl && cJSON_IsString(mdl) && mdl->valuestring)
+      snprintf(out->model, MAX_MODEL_LEN, "%s", mdl->valuestring);
+   cJSON *sr = cJSON_GetObjectItem(root, "stop_reason");
+   if (sr && cJSON_IsString(sr) && sr->valuestring)
+      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", sr->valuestring);
 }
 
 static void parse_response(const char *body, const agent_t *agent, agent_result_t *out)
@@ -949,6 +956,8 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
 {
    memset(out, 0, sizeof(*out));
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", agent->name);
+   snprintf(out->model, MAX_MODEL_LEN, "%s", agent->model);
+   snprintf(out->served_model, MAX_MODEL_LEN, "%s", agent->model);
 
    if (!user_prompt || !user_prompt[0])
    {
@@ -1033,6 +1042,9 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       memcpy(&fb_agent, agent, sizeof(fb_agent));
       snprintf(fb_agent.model, MAX_MODEL_LEN, "%s", agent->fallback_model);
       fb_agent.fallback_model[0] = '\0';
+      /* The fallback model is now the served model — record it for accounting. */
+      snprintf(out->model, MAX_MODEL_LEN, "%s", fb_agent.model);
+      snprintf(out->served_model, MAX_MODEL_LEN, "%s", fb_agent.model);
 
       if (is_anthropic_provider(&fb_agent))
          track_simple_anthropic_payload_rewrite(driver, &fb_agent, system_prompt, user_prompt);
@@ -1883,56 +1895,9 @@ void agent_print_context(const agent_config_t *cfg)
    }
 }
 
-/* --- Logging --- */
-
-void agent_log_call(const agent_result_t *result, const char *role)
-{
-   db1_agent_log_insert_row_t row = {
-       .agent_name = result->agent_name,
-       .role = role ? role : "",
-       .prompt_tokens = result->prompt_tokens,
-       .completion_tokens = result->completion_tokens,
-       .latency_ms = result->latency_ms,
-       .success = result->success,
-       .error = result->error[0] ? result->error : NULL,
-       .turns = result->turns,
-       .tool_calls = result->tool_calls,
-       .confidence = result->confidence,
-       .session_id = NULL,
-   };
-   (void)db1_agent_log_insert(&row);
-
-   /* Also persist normalised usage to token_audit */
-   token_usage_t usage = {
-       .input_tokens = result->prompt_tokens,
-       .output_tokens = result->completion_tokens,
-       .cache_write_tokens = result->cache_write_tokens,
-       .cache_read_tokens = result->cache_read_tokens,
-   };
-   double cost = token_estimate_cost(result->agent_name, &usage);
-   /* delegation_active_id is exported by server_compute when the call
-    * happens inside a delegate worker; weak-stub returns NULL elsewhere
-    * (CLI, tests). Tagging the audit row with this id lets cost-fold
-    * attribute the child's spend back to the parent without
-    * contaminating session_id-keyed sums. */
-   const char *deleg_id = delegation_active_id();
-   {
-      db1_token_audit_row_t row = {
-          .session_id = session_id(),
-          .delegation_id = deleg_id ? deleg_id : "",
-          .project_name = "",
-          .tool_name = result->agent_name,
-          .role = role ? role : "",
-          .model = "",
-          .prompt_tokens = usage.input_tokens,
-          .completion_tokens = usage.output_tokens,
-          .cache_write_tokens = usage.cache_write_tokens,
-          .cache_read_tokens = usage.cache_read_tokens,
-          .estimated_cost_usd = cost,
-      };
-      (void)db1_token_audit_insert(&row);
-   }
-}
+/* --- Logging ---
+ * agent_log_call / agent_record_token_audit / agent_set_ingress_source moved to
+ * agent_logging.c (this file is at the line-count limit). */
 
 int agent_get_stats(const char *name, agent_stats_t *out, int max)
 {

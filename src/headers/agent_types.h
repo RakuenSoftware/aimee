@@ -248,6 +248,24 @@ typedef struct
 typedef struct
 {
    char agent_name[MAX_AGENT_NAME];
+   /* The model actually served to the provider for this call. Distinct from
+    * agent_name (the configured agent identity, e.g. "codex") because an agent
+    * may serve a different model id (e.g. "gpt-5.4"), and a turn-0 400 may swap
+    * in the agent's fallback_model. Used for cost estimation and the token_audit
+    * model column; empty falls back to agent_name. */
+   char model[MAX_MODEL_LEN];
+   /* The model aimee SELECTED to serve (the agent's configured/fallback model),
+    * set at execution entry and never overwritten by the provider-reported model.
+    * Lets the audit distinguish what aimee served from what the provider echoed
+    * in `model`. Empty falls back to `model` in the audit. */
+   char served_model[MAX_MODEL_LEN];
+   /* The model the client requested, when it differs from the served `model`
+    * (ingress: e.g. Claude Code asks for a model, aimee serves its primary).
+    * Empty for internal agent calls. Recorded separately in the audit. */
+   char requested_model[MAX_MODEL_LEN];
+   /* Provider stop/finish reason for the turn (e.g. "end_turn", "tool_use",
+    * "stop", "length"), when the parser captured it. Empty otherwise. */
+   char stop_reason[32];
    char *response;
    int prompt_tokens;
    int completion_tokens;

@@ -2,7 +2,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "aimee.h" /* MAX_PATH_LEN, pulled in before agent_types.h */
+#include "agent_exec.h"
 #include "db1.h"
+#include "request_context.h"
 #include <sqlite3.h>
 
 /* Private to src/db1/, but this test adjusts timestamps directly. */
@@ -148,6 +151,539 @@ static void test_cost_for_delegation(void)
    assert(db1_token_audit_cost_for_delegation(NULL) == 0.0);
 }
 
+static void test_by_model_relabels_empty(void)
+{
+   /* Insert one row with a real model and one legacy row with an empty
+    * model. by_model must surface BOTH — the empty one relabelled as
+    * "(unattributed)" rather than dropped — so historical spend stays
+    * visible once the model column starts being populated. */
+   db1_token_audit_row_t with_model = {
+       .session_id = "bm1",
+       .tool_name = "claude-opus-4",
+       .role = "implement",
+       .model = "claude-opus-4",
+       .prompt_tokens = 50,
+       .completion_tokens = 20,
+       .estimated_cost_usd = 0.30,
+   };
+   db1_token_audit_row_t legacy_empty = {
+       .session_id = "bm2",
+       .tool_name = "legacy-agent",
+       .role = "implement",
+       .model = "", /* legacy row written before model was tracked */
+       .prompt_tokens = 11,
+       .completion_tokens = 4,
+       .estimated_cost_usd = 0.02,
+   };
+   assert(db1_token_audit_insert(&with_model) == 0);
+   assert(db1_token_audit_insert(&legacy_empty) == 0);
+
+   db1_token_audit_model_summary_t models[16];
+   int n = db1_token_audit_by_model(0, models, 16);
+   assert(n > 0);
+
+   int saw_real = 0, saw_unattributed = 0;
+   for (int i = 0; i < n; i++)
+   {
+      assert(models[i].model[0] != '\0'); /* no label is ever empty */
+      if (strcmp(models[i].model, "claude-opus-4") == 0)
+         saw_real = 1;
+      if (strcmp(models[i].model, "(unattributed)") == 0)
+      {
+         saw_unattributed = 1;
+         assert(models[i].prompt_tokens >= 11);
+      }
+   }
+   assert(saw_real);
+   assert(saw_unattributed);
+}
+
+static int count_where(const char *col, const char *val)
+{
+   char sql[160];
+   snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM token_audit WHERE %s = ?", col);
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db1_conn(), sql, -1, &st, NULL) == SQLITE_OK);
+   sqlite3_bind_text(st, 1, val, -1, SQLITE_TRANSIENT);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   int n = sqlite3_column_int(st, 0);
+   sqlite3_finalize(st);
+   return n;
+}
+
+static void test_by_source_groups_and_relabels(void)
+{
+   /* Rows tagged with a turn origin group by source; an untagged (legacy)
+    * row surfaces as "(unattributed)" rather than being dropped. */
+   db1_token_audit_row_t ingress = {
+       .session_id = "src1",
+       .tool_name = "gpt-4o",
+       .role = "implement",
+       .model = "gpt-4o",
+       .source = "openai-ingress",
+       .prompt_tokens = 40,
+       .completion_tokens = 10,
+       .estimated_cost_usd = 0.05,
+   };
+   db1_token_audit_row_t untagged = {
+       .session_id = "src2",
+       .tool_name = "gpt-4o",
+       .role = "implement",
+       .model = "gpt-4o",
+       .source = "", /* legacy row before source was tracked */
+       .prompt_tokens = 5,
+       .completion_tokens = 2,
+       .estimated_cost_usd = 0.01,
+   };
+   assert(db1_token_audit_insert(&ingress) == 0);
+   assert(db1_token_audit_insert(&untagged) == 0);
+
+   db1_token_audit_source_summary_t sources[16];
+   int n = db1_token_audit_by_source(0, sources, 16);
+   assert(n > 0);
+   int saw_ingress = 0, saw_unattributed = 0;
+   for (int i = 0; i < n; i++)
+   {
+      assert(sources[i].source[0] != '\0'); /* no label is ever empty */
+      if (strcmp(sources[i].source, "openai-ingress") == 0)
+         saw_ingress = 1;
+      if (strcmp(sources[i].source, "(unattributed)") == 0)
+         saw_unattributed = 1;
+   }
+   assert(saw_ingress);
+   assert(saw_unattributed);
+}
+
+static void test_agent_log_call_records_served_model(void)
+{
+   /* The broken path the model-attribution fix targets: an agent whose
+    * name differs from its served model. agent_log_call must record the
+    * MODEL in token_audit.model (and key cost off it), not the agent name. */
+   agent_result_t r;
+   memset(&r, 0, sizeof(r));
+   snprintf(r.agent_name, sizeof(r.agent_name), "codex");
+   snprintf(r.model, sizeof(r.model), "gpt-4o"); /* priced, so cost must be > 0 */
+   r.prompt_tokens = 1000;
+   r.completion_tokens = 500;
+   r.success = 1;
+   agent_log_call(&r, "implement");
+
+   /* model column carries the served model, with non-zero cost keyed off it. */
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db1_conn(),
+                             "SELECT COALESCE(SUM(estimated_cost_usd), 0) FROM token_audit"
+                             " WHERE model = 'gpt-4o'",
+                             -1, &st, NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   double cost = sqlite3_column_double(st, 0);
+   sqlite3_finalize(st);
+   assert(cost > 0.0); /* would be 0 if cost were keyed off "codex" */
+
+   /* The agent name must NOT leak into the model column... */
+   assert(count_where("model", "codex") == 0);
+   /* ...but it is still recorded as the tool/agent identity. */
+   assert(count_where("tool_name", "codex") >= 1);
+   /* Internal agent execution is tagged with the "agent" source. */
+   assert(count_where("source", "agent") >= 1);
+}
+
+static void test_record_token_audit_ingress_source(void)
+{
+   /* The shared helper the ingress handlers use: it records one cost row tagged
+    * with the given source, billed to the served model, and (unlike
+    * agent_log_call) writes no agent_log row. */
+   agent_result_t r;
+   memset(&r, 0, sizeof(r));
+   snprintf(r.agent_name, sizeof(r.agent_name), "primary");
+   snprintf(r.model, sizeof(r.model), "claude-3-5-sonnet");                 /* served */
+   snprintf(r.requested_model, sizeof(r.requested_model), "claude-opus-4"); /* client asked */
+   snprintf(r.stop_reason, sizeof(r.stop_reason), "end_turn");
+   r.prompt_tokens = 2000;
+   r.completion_tokens = 1000;
+   r.success = 1;
+   agent_record_token_audit(&r, "", "openai-ingress");
+
+   /* requested model recorded separately from served; stop_reason captured;
+    * usage_kind defaults to "realized". */
+   assert(count_where("requested_model", "claude-opus-4") == 1);
+   assert(count_where("stop_reason", "end_turn") == 1);
+   assert(count_where("usage_kind", "realized") >= 1);
+
+   /* Exactly one row for this served model under the ingress source. */
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db1_conn(),
+                             "SELECT COUNT(*), COALESCE(SUM(estimated_cost_usd), 0)"
+                             " FROM token_audit"
+                             " WHERE source = 'openai-ingress' AND model = 'claude-3-5-sonnet'",
+                             -1, &st, NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   int cnt = sqlite3_column_int(st, 0);
+   double cost = sqlite3_column_double(st, 1);
+   sqlite3_finalize(st);
+   assert(cnt == 1);
+   assert(cost > 0.0); /* billed against the served model, not $0 */
+}
+
+static void test_ingress_source_override(void)
+{
+   /* A thread-scoped ingress source overrides the caller's source on the row,
+    * so /v1/runs (which logs "agent" from inside the run loop) is tagged as
+    * ingress without a second row. */
+   agent_set_ingress_source("openai-ingress");
+   agent_result_t r;
+   memset(&r, 0, sizeof(r));
+   snprintf(r.agent_name, sizeof(r.agent_name), "runbot");
+   snprintf(r.model, sizeof(r.model), "gpt-4o");
+   r.prompt_tokens = 100;
+   r.completion_tokens = 50;
+   agent_record_token_audit(&r, "execute", "agent"); /* caller passes "agent" */
+   agent_set_ingress_source("");                     /* clear for later tests */
+
+   assert(count_where("tool_name", "runbot") == 1);
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db1_conn(),
+                             "SELECT source FROM token_audit WHERE tool_name = 'runbot'", -1, &st,
+                             NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   assert(strcmp((const char *)sqlite3_column_text(st, 0), "openai-ingress") == 0);
+   sqlite3_finalize(st);
+}
+
+static long long insert_agent_log(const char *agent, const char *role)
+{
+   db1_agent_log_insert_row_t log = {
+       .agent_name = agent,
+       .role = role,
+       .prompt_tokens = 10,
+       .completion_tokens = 5,
+       .success = 1,
+       .confidence = -1,
+   };
+   long long id = db1_agent_log_insert(&log);
+   assert(id > 0);
+   return id;
+}
+
+static void test_agent_stats_join_is_1to1(void)
+{
+   /* Agent stats join token_audit by agent_log_id (1:1), so: (a) ingress rows
+    * with no agent_log row do not inflate stats, and (b) two calls to the same
+    * agent do not multiply cost via the old (agent_name, role) cartesian join. */
+   long long id1 = insert_agent_log("statbot", "execute");
+   long long id2 = insert_agent_log("statbot", "execute");
+
+   db1_token_audit_row_t a = {.tool_name = "statbot",
+                              .role = "execute",
+                              .model = "gpt-4o",
+                              .source = "agent",
+                              .agent_log_id = id1,
+                              .estimated_cost_usd = 0.10};
+   db1_token_audit_row_t b = {.tool_name = "statbot",
+                              .role = "execute",
+                              .model = "gpt-4o",
+                              .source = "agent",
+                              .agent_log_id = id2,
+                              .estimated_cost_usd = 0.20};
+   /* An ingress row sharing the agent name, with no agent_log link. */
+   db1_token_audit_row_t ingress = {.tool_name = "statbot",
+                                    .role = "execute",
+                                    .model = "gpt-4o",
+                                    .source = "openai-ingress",
+                                    .agent_log_id = 0,
+                                    .estimated_cost_usd = 9.99};
+   assert(db1_token_audit_insert(&a) == 0);
+   assert(db1_token_audit_insert(&b) == 0);
+   assert(db1_token_audit_insert(&ingress) == 0);
+
+   db1_agent_log_agent_stats_t stats[4];
+   int n = db1_agent_log_agent_stats("statbot", stats, 4);
+   assert(n == 1);
+   /* Exactly $0.10 + $0.20 = $0.30 — not multiplied (would be $0.60 under the
+    * old cartesian join) and not inflated by the $9.99 ingress row. */
+   assert(stats[0].total_estimated_cost_usd > 0.29 && stats[0].total_estimated_cost_usd < 0.31);
+}
+
+static void test_spend_breakdown_realized_only(void)
+{
+   /* The §7 spend authority groups cost by usage_kind. Measure deltas against a
+    * baseline so this is independent of the rows other tests already inserted.
+    * Billable spend is realized ONLY: estimated, avoided, and partial are
+    * reported separately but never folded into the total. */
+   db1_token_audit_spend_t before;
+   assert(db1_token_audit_spend_breakdown(0, &before) == 0);
+   db1_token_audit_totals_t tot_before;
+   assert(db1_token_audit_totals(0, &tot_before) == 0);
+
+   db1_token_audit_row_t realized = {.session_id = "sb-real",
+                                     .tool_name = "gpt-4o",
+                                     .role = "implement",
+                                     .model = "gpt-4o",
+                                     .usage_kind = "realized",
+                                     .estimated_cost_usd = 0.25};
+   db1_token_audit_row_t estimated = {.session_id = "sb-est",
+                                      .tool_name = "gpt-4o",
+                                      .role = "implement",
+                                      .model = "gpt-4o",
+                                      .usage_kind = "estimated",
+                                      .estimated_cost_usd = 0.50};
+   db1_token_audit_row_t avoided = {.session_id = "sb-avoid",
+                                    .tool_name = "gpt-4o",
+                                    .role = "implement",
+                                    .model = "gpt-4o",
+                                    .usage_kind = "avoided",
+                                    .estimated_cost_usd = 1.00};
+   db1_token_audit_row_t partial = {.session_id = "sb-part",
+                                    .tool_name = "gpt-4o",
+                                    .role = "implement",
+                                    .model = "gpt-4o",
+                                    .usage_kind = "partial",
+                                    .estimated_cost_usd = 0.10};
+   assert(db1_token_audit_insert(&realized) == 0);
+   assert(db1_token_audit_insert(&estimated) == 0);
+   assert(db1_token_audit_insert(&avoided) == 0);
+   assert(db1_token_audit_insert(&partial) == 0);
+
+   db1_token_audit_spend_t after;
+   assert(db1_token_audit_spend_breakdown(0, &after) == 0);
+
+   double d_real = after.realized_cost_usd - before.realized_cost_usd;
+   double d_est = after.estimated_cost_usd - before.estimated_cost_usd;
+   double d_avoid = after.avoided_cost_usd - before.avoided_cost_usd;
+   double d_part = after.partial_cost_usd - before.partial_cost_usd;
+   double d_total = after.spend_cost_usd - before.spend_cost_usd;
+   assert(d_real > 0.249 && d_real < 0.251);
+   assert(d_est > 0.499 && d_est < 0.501);
+   assert(d_avoid > 0.999 && d_avoid < 1.001);
+   assert(d_part > 0.099 && d_part < 0.101);
+   /* Billable total moved by the realized $0.25 ONLY. */
+   assert(d_total > 0.249 && d_total < 0.251);
+
+   /* The legacy totals reader is realized-only too: cost delta is $0.25, never
+    * the estimated/avoided/partial rows. */
+   db1_token_audit_totals_t tot_after;
+   assert(db1_token_audit_totals(0, &tot_after) == 0);
+   double d_cost = tot_after.estimated_cost_usd - tot_before.estimated_cost_usd;
+   assert(d_cost > 0.249 && d_cost < 0.251);
+}
+
+static void test_idempotency_guard(void)
+{
+   /* Idempotency is keyed on the explicit idempotency_key scoped by
+    * (source, principal, attempt) — NOT request_id. Two inserts under the same
+    * key (even with different request ids) collapse to one row. */
+   db1_token_audit_row_t a = {.tool_name = "gpt-4o",
+                              .model = "gpt-4o",
+                              .source = "openai-ingress",
+                              .request_id = "trace-A",
+                              .idempotency_key = "IDEM-1",
+                              .principal = "uid:9001",
+                              .attempt = 0,
+                              .estimated_cost_usd = 0.10};
+   assert(db1_token_audit_insert(&a) == 0);
+   db1_token_audit_row_t a_retry = a;
+   a_retry.request_id = "trace-B-different";      /* a fresh/generated request id */
+   assert(db1_token_audit_insert(&a_retry) == 0); /* same key -> duplicate ignored */
+   assert(count_where("idempotency_key", "IDEM-1") == 1);
+
+   /* A different principal sharing the same idempotency key does NOT collide. */
+   db1_token_audit_row_t other_principal = a;
+   other_principal.principal = "uid:9002";
+   assert(db1_token_audit_insert(&other_principal) == 0);
+   assert(count_where("idempotency_key", "IDEM-1") == 2);
+
+   /* A second attempt of the same request is a distinct row. */
+   db1_token_audit_row_t a2 = a;
+   a2.attempt = 1;
+   assert(db1_token_audit_insert(&a2) == 0);
+   assert(count_where("idempotency_key", "IDEM-1") == 3);
+
+   /* Empty idempotency_key is never deduped (internal/keyless rows): two
+    * identical inserts both land. */
+   db1_token_audit_row_t bare = {
+       .tool_name = "gpt-4o", .model = "gpt-4o", .source = "agent", .estimated_cost_usd = 0.01};
+   assert(db1_token_audit_insert(&bare) == 0);
+   assert(db1_token_audit_insert(&bare) == 0);
+   assert(count_where("idempotency_key", "") >= 2);
+}
+
+static void test_top_sessions_per_client(void)
+{
+   /* The audit writer puts the per-client identity in session_id (the principal
+    * for direct ingress, the session key for proxy ingress), and top_sessions
+    * groups by session_id, so distinct clients do not collapse — including: */
+
+   /* (a) two direct-ingress clients with distinct principals. */
+   db1_token_audit_row_t c1 = {.session_id = "uid:5001", /* = principal for direct ingress */
+                               .tool_name = "gpt-4o",
+                               .model = "gpt-4o",
+                               .source = "openai-ingress",
+                               .principal = "uid:5001",
+                               .estimated_cost_usd = 0.30};
+   db1_token_audit_row_t c2 = {.session_id = "uid:5002",
+                               .tool_name = "gpt-4o",
+                               .model = "gpt-4o",
+                               .source = "openai-ingress",
+                               .principal = "uid:5002",
+                               .estimated_cost_usd = 0.20};
+   /* (b) two webchat clients that SHARE the constant trusted principal "webchat"
+    * but carry different per-client session keys — the regression case. */
+   db1_token_audit_row_t w1 = {.session_id = "webchat:alice", /* = session key */
+                               .tool_name = "gpt-4o",
+                               .model = "gpt-4o",
+                               .source = "webchat",
+                               .principal = "webchat",
+                               .estimated_cost_usd = 0.40};
+   db1_token_audit_row_t w2 = {.session_id = "webchat:bob",
+                               .tool_name = "gpt-4o",
+                               .model = "gpt-4o",
+                               .source = "webchat",
+                               .principal = "webchat",
+                               .estimated_cost_usd = 0.10};
+   assert(db1_token_audit_insert(&c1) == 0);
+   assert(db1_token_audit_insert(&c2) == 0);
+   assert(db1_token_audit_insert(&w1) == 0);
+   assert(db1_token_audit_insert(&w2) == 0);
+
+   db1_insights_top_session_t tops[32];
+   int n = db1_insights_top_sessions(0, tops, 32);
+   int saw1 = 0, saw2 = 0, sawA = 0, sawB = 0;
+   for (int i = 0; i < n; i++)
+   {
+      if (strcmp(tops[i].session_id, "uid:5001") == 0)
+         saw1 = 1;
+      if (strcmp(tops[i].session_id, "uid:5002") == 0)
+         saw2 = 1;
+      if (strcmp(tops[i].session_id, "webchat:alice") == 0)
+         sawA = 1;
+      if (strcmp(tops[i].session_id, "webchat:bob") == 0)
+         sawB = 1;
+   }
+   /* All four clients surface as distinct rows; the two webchat clients do NOT
+    * collapse under the shared "webchat" principal. */
+   assert(saw1 && saw2);
+   assert(sawA && sawB);
+}
+
+static void test_trusted_source_overrides_ingress(void)
+{
+   /* A trusted request-supplied source (X-Aimee-Source) refines an ingress row's
+    * source — so webchat is distinguishable from another OpenAI client — but an
+    * internal "agent" row on the same thread keeps "agent". */
+   request_context_t ctx;
+   memset(&ctx, 0, sizeof(ctx));
+   snprintf(ctx.request_id, sizeof(ctx.request_id), "%s", "rq-src-1");
+   snprintf(ctx.source, sizeof(ctx.source), "%s", "webchat");
+   request_context_set(&ctx);
+
+   agent_result_t ing;
+   memset(&ing, 0, sizeof(ing));
+   snprintf(ing.agent_name, sizeof(ing.agent_name), "srcbot");
+   snprintf(ing.model, sizeof(ing.model), "gpt-4o");
+   ing.prompt_tokens = 10;
+   agent_record_token_audit(&ing, "", "openai-ingress"); /* ingress -> webchat */
+
+   agent_result_t internal;
+   memset(&internal, 0, sizeof(internal));
+   snprintf(internal.agent_name, sizeof(internal.agent_name), "srcbot2");
+   snprintf(internal.model, sizeof(internal.model), "gpt-4o");
+   internal.prompt_tokens = 10;
+   agent_record_token_audit(&internal, "", "agent"); /* internal -> stays agent */
+
+   request_context_clear();
+
+   /* The ingress row took the trusted source; the agent row did not. */
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db1_conn(), "SELECT source FROM token_audit WHERE tool_name='srcbot'",
+                             -1, &st, NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   assert(strcmp((const char *)sqlite3_column_text(st, 0), "webchat") == 0);
+   sqlite3_finalize(st);
+   assert(count_where("source", "agent") >= 1); /* the internal row stayed agent */
+   /* And the agent row's source is NOT webchat. */
+   assert(sqlite3_prepare_v2(db1_conn(), "SELECT source FROM token_audit WHERE tool_name='srcbot2'",
+                             -1, &st, NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   assert(strcmp((const char *)sqlite3_column_text(st, 0), "agent") == 0);
+   sqlite3_finalize(st);
+}
+
+static void test_ingress_session_attribution(void)
+{
+   /* An ingress request carrying X-Aimee-Session-Key attributes its audit row to
+    * that session, not the server's process-wide session — so two webchat
+    * sessions do not fold into one. */
+   request_context_t ctx;
+   memset(&ctx, 0, sizeof(ctx));
+   snprintf(ctx.session_key, sizeof(ctx.session_key), "%s", "webchat-sess-AAA");
+   snprintf(ctx.source, sizeof(ctx.source), "%s", "webchat");
+   request_context_set(&ctx);
+
+   agent_result_t r;
+   memset(&r, 0, sizeof(r));
+   snprintf(r.agent_name, sizeof(r.agent_name), "sessbot");
+   snprintf(r.model, sizeof(r.model), "gpt-4o");
+   r.prompt_tokens = 10;
+   agent_record_token_audit(&r, "", "openai-ingress");
+   request_context_clear();
+
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db1_conn(),
+                             "SELECT session_id FROM token_audit WHERE tool_name='sessbot'", -1,
+                             &st, NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   assert(strcmp((const char *)sqlite3_column_text(st, 0), "webchat-sess-AAA") == 0);
+   sqlite3_finalize(st);
+}
+
+static void test_delegation_cost_realized_only(void)
+{
+   /* db1_token_audit_cost_for_delegation sums REALIZED rows only — estimated /
+    * avoided / partial rows must not shape the delegate-routing reward. */
+   db1_token_audit_row_t real = {.delegation_id = "dg-real",
+                                 .tool_name = "code",
+                                 .model = "gpt",
+                                 .usage_kind = "realized",
+                                 .estimated_cost_usd = 0.20};
+   db1_token_audit_row_t est = {.delegation_id = "dg-real",
+                                .tool_name = "code",
+                                .model = "gpt",
+                                .usage_kind = "estimated",
+                                .estimated_cost_usd = 5.00};
+   db1_token_audit_row_t avoid = {.delegation_id = "dg-real",
+                                  .tool_name = "code",
+                                  .model = "gpt",
+                                  .usage_kind = "avoided",
+                                  .estimated_cost_usd = 9.00};
+   assert(db1_token_audit_insert(&real) == 0);
+   assert(db1_token_audit_insert(&est) == 0);
+   assert(db1_token_audit_insert(&avoid) == 0);
+   double c = db1_token_audit_cost_for_delegation("dg-real");
+   assert(c > 0.199 && c < 0.201); /* realized $0.20 only, not $14.20 */
+}
+
+static void test_served_model_and_duration(void)
+{
+   /* served_model (what aimee chose) is recorded distinct from the
+    * provider-reported model, and duration_ms is captured. */
+   db1_token_audit_row_t r = {.session_id = "sd1",
+                              .tool_name = "agent",
+                              .model = "provider-echo-2025",
+                              .served_model = "aimee-primary",
+                              .source = "agent",
+                              .duration_ms = 1234,
+                              .estimated_cost_usd = 0.01};
+   assert(db1_token_audit_insert(&r) == 0);
+   assert(count_where("served_model", "aimee-primary") == 1);
+
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(
+              db1_conn(), "SELECT duration_ms FROM token_audit WHERE served_model='aimee-primary'",
+              -1, &st, NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   assert(sqlite3_column_int(st, 0) == 1234);
+   sqlite3_finalize(st);
+}
+
 static void test_dashboard_rows(void)
 {
    db1_token_audit_dashboard_row_t rows[4];
@@ -168,9 +704,22 @@ int main(void)
    test_totals_and_filters();
    test_grouped_views();
    test_dashboard_rows();
-   /* Runs last because it inserts additional rows that would skew the
-    * counts checked by the totals/grouped/dashboard tests above. */
+   /* These run after the count-sensitive tests because they insert
+    * additional rows that would skew the totals/grouped/dashboard counts. */
+   test_by_model_relabels_empty();
+   test_by_source_groups_and_relabels();
+   test_agent_log_call_records_served_model();
+   test_record_token_audit_ingress_source();
+   test_ingress_source_override();
+   test_agent_stats_join_is_1to1();
    test_cost_for_delegation();
+   test_spend_breakdown_realized_only();
+   test_idempotency_guard();
+   test_top_sessions_per_client();
+   test_served_model_and_duration();
+   test_trusted_source_overrides_ingress();
+   test_ingress_session_attribution();
+   test_delegation_cost_realized_only();
    db1_shutdown();
    printf("test_token_audit: ok\n");
    return 0;

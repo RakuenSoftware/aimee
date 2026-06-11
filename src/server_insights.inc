@@ -25,6 +25,22 @@ static int handle_insights_overview(server_ctx_t *ctx, server_conn_t *conn, cJSO
    cJSON_AddNumberToObject(resp, "cache_read_tokens", (double)totals.cache_read_tokens);
    cJSON_AddNumberToObject(resp, "estimated_cost_usd", totals.estimated_cost_usd);
 
+   /* Spend breakdown by usage_kind (§7): realized provider-reported spend is
+    * reported separately from estimated, avoided (dedup-skipped, not billable),
+    * and partial rows. The legacy estimated_cost_usd above stays for backwards
+    * compatibility; `spend.total` is the billable figure (excludes avoided). */
+   db1_token_audit_spend_t spend;
+   if (db1_token_audit_spend_breakdown(since_hours, &spend) == 0)
+   {
+      cJSON *jspend = cJSON_CreateObject();
+      cJSON_AddNumberToObject(jspend, "realized", spend.realized_cost_usd);
+      cJSON_AddNumberToObject(jspend, "estimated", spend.estimated_cost_usd);
+      cJSON_AddNumberToObject(jspend, "avoided", spend.avoided_cost_usd);
+      cJSON_AddNumberToObject(jspend, "partial", spend.partial_cost_usd);
+      cJSON_AddNumberToObject(jspend, "total", spend.spend_cost_usd);
+      cJSON_AddItemToObject(resp, "spend", jspend);
+   }
+
    /* Models */
    db1_token_audit_model_summary_t models[16];
    int n_models = db1_token_audit_by_model(since_hours, models, 16);
@@ -40,6 +56,22 @@ static int handle_insights_overview(server_ctx_t *ctx, server_conn_t *conn, cJSO
       cJSON_AddItemToArray(jmodels, m);
    }
    cJSON_AddItemToObject(resp, "models", jmodels);
+
+   /* Sources (turn origin: internal "agent" vs the ingress surfaces) */
+   db1_token_audit_source_summary_t sources[16];
+   int n_sources = db1_token_audit_by_source(since_hours, sources, 16);
+   cJSON *jsources = cJSON_CreateArray();
+   for (int i = 0; i < n_sources; i++)
+   {
+      cJSON *s = cJSON_CreateObject();
+      cJSON_AddStringToObject(s, "source", sources[i].source);
+      cJSON_AddNumberToObject(s, "calls", sources[i].calls);
+      cJSON_AddNumberToObject(s, "prompt_tokens", (double)sources[i].prompt_tokens);
+      cJSON_AddNumberToObject(s, "completion_tokens", (double)sources[i].completion_tokens);
+      cJSON_AddNumberToObject(s, "estimated_cost_usd", sources[i].estimated_cost_usd);
+      cJSON_AddItemToArray(jsources, s);
+   }
+   cJSON_AddItemToObject(resp, "sources", jsources);
 
    /* Roles */
    db1_token_audit_role_summary_t roles[16];

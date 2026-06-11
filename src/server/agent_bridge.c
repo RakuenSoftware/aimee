@@ -6,6 +6,7 @@
 #include "util.h"
 #include "agent_request_shaping.h"
 #include "agent_protocol.h"
+#include "config.h"
 #include "log.h"
 #include "model_sampling.h"
 #include "tool_call_args.h"
@@ -193,8 +194,15 @@ cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSO
    int tok = (max_tokens > 0) ? max_tokens : 4096;
    cJSON_AddNumberToObject(req, "max_tokens", tok);
 
-   if (system_prompt && system_prompt[0])
-      cJSON_AddStringToObject(req, "system", system_prompt);
+   /* §3 cache-aware shaping: when enabled, mark the aimee-owned STABLE system
+    * prefix cacheable on this (tool-bearing) Anthropic request, matching the
+    * non-tools path. Default-off so the flag-rollout program can flip it
+    * deliberately. The cache_min_chars floor is applied to the stable prefix
+    * inside the helper, not the whole prompt. */
+   config_t cfg;
+   int cache_marking = (config_load(&cfg) == 0 && cfg.cache_shaping_enabled) ? 1 : 0;
+   agent_anthropic_set_system(req, system_prompt, cache_marking,
+                              cache_marking ? cfg.cache_min_chars : 0);
 
    if (safe_messages)
       cJSON_AddItemToObject(req, "messages", safe_messages);
@@ -331,9 +339,20 @@ static char *openai_content_to_text(cJSON *content, int include_thinking)
    }
    return out;
 }
+
+/* Capture the provider-reported model id (the response's "model" field) into the
+ * parsed result, so billing can prefer it over the requested/served alias. */
+static void parse_capture_model(cJSON *root, parsed_response_t *out)
+{
+   cJSON *m = cJSON_GetObjectItem(root, "model");
+   if (m && cJSON_IsString(m) && m->valuestring)
+      snprintf(out->model, sizeof(out->model), "%s", m->valuestring);
+}
+
 void agent_parse_response_openai(cJSON *root, parsed_response_t *out)
 {
    memset(out, 0, sizeof(*out));
+   parse_capture_model(root, out);
 
    /* Usage */
    cJSON *usage = cJSON_GetObjectItem(root, "usage");
@@ -353,6 +372,8 @@ void agent_parse_response_openai(cJSON *root, parsed_response_t *out)
 
    cJSON *choice = cJSON_GetArrayItem(choices, 0);
    cJSON *finish = cJSON_GetObjectItem(choice, "finish_reason");
+   if (finish && cJSON_IsString(finish) && finish->valuestring)
+      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", finish->valuestring);
    cJSON *message = cJSON_GetObjectItem(choice, "message");
    if (!message)
       return;
@@ -777,6 +798,7 @@ void agent_parse_response_responses(const char *body, parsed_response_t *out)
 void agent_parse_response_anthropic(cJSON *root, parsed_response_t *out)
 {
    memset(out, 0, sizeof(*out));
+   parse_capture_model(root, out);
 
    /* Usage */
    cJSON *usage = cJSON_GetObjectItem(root, "usage");
@@ -798,6 +820,8 @@ void agent_parse_response_anthropic(cJSON *root, parsed_response_t *out)
 
    /* Check stop_reason for tool_use */
    cJSON *stop = cJSON_GetObjectItem(root, "stop_reason");
+   if (stop && cJSON_IsString(stop) && stop->valuestring)
+      snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", stop->valuestring);
    int has_tool_use = (stop && cJSON_IsString(stop) && strcmp(stop->valuestring, "tool_use") == 0);
 
    cJSON *content = cJSON_GetObjectItem(root, "content");

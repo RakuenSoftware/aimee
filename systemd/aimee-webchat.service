@@ -6,6 +6,11 @@ After=network.target
 Type=simple
 User=root
 Environment=HOME=/root
+# Trusted-proxy secret so the OpenAI proxy stamps trusted X-Aimee-Principal/Source
+# metadata that aimee-server honours. `aimee webchat enable` provisions this
+# automatically (a drop-in EnvironmentFile, plus the matching
+# ingress_trusted_proxy_secret in aimee config). Set it manually otherwise:
+#   Environment=AIMEE_INGRESS_PROXY_SECRET=<shared-secret>
 ExecStart=/usr/local/bin/aimee-webchat --port 8080
 WorkingDirectory=/root/aimee
 Restart=on-failure

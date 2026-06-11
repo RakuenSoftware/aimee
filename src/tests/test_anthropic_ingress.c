@@ -332,6 +332,38 @@ static void test_stream_text(void)
    PASS("stream_text");
 }
 
+static void test_stream_usage_tap(void)
+{
+   /* The translator captures the full upstream usage, not just completion: the
+    * upstream prompt_tokens overrides the begin-time estimate, and OpenAI prompt
+    * caching (prompt_tokens_details.cached_tokens) is surfaced for cost. */
+   capture_t cap;
+   anthropic_stream_xlate_t *st;
+   memset(&cap, 0, sizeof(cap));
+
+   st = anthropic_stream_begin("msg_u1", "minimax", 7 /* estimate */, cap_emit, &cap);
+   assert(st != NULL);
+   anthropic_stream_feed_openai(st, "{\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}");
+   anthropic_stream_feed_openai(st, "{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],"
+                                    "\"usage\":{\"prompt_tokens\":123,\"completion_tokens\":45,"
+                                    "\"prompt_tokens_details\":{\"cached_tokens\":40}}}");
+
+   int in_tok = -1, out_tok = -1, cr_tok = -1;
+   anthropic_stream_get_usage(st, &in_tok, &out_tok, &cr_tok);
+   /* Upstream-reported prompt count wins over the 7-token estimate. */
+   assert(in_tok == 123);
+   assert(out_tok == 45);
+   assert(cr_tok == 40);
+
+   anthropic_stream_finish(st);
+   anthropic_stream_free(st);
+
+   /* NULL state / NULL out pointers are tolerated. */
+   anthropic_stream_get_usage(NULL, &in_tok, NULL, NULL);
+   assert(in_tok == 0);
+   PASS("stream_usage_tap");
+}
+
 static void test_stream_tool_call(void)
 {
    capture_t cap;
@@ -415,6 +447,7 @@ int main(void)
    test_response_tool_use();
    test_response_empty_gets_text_block();
    test_stream_text();
+   test_stream_usage_tap();
    test_stream_tool_call();
    test_stream_text_then_tool();
    printf("all anthropic_ingress tests passed\n");

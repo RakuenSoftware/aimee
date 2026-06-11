@@ -178,7 +178,7 @@ static void insert_agent_log_row(const char *agent_name, const char *role, int s
        .confidence = 90,
        .session_id = "sess-test",
    };
-   assert(db1_agent_log_insert(&row) == 0);
+   assert(db1_agent_log_insert(&row) > 0);
 }
 
 #include "test_memory_cases_a.inc"

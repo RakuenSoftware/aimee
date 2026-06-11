@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +16,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/RakuenSoftware/smoothgui/auth"
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestHandleChatInitRulesCreatesRulesFile(t *testing.T) {
@@ -319,6 +323,135 @@ func TestHandleOpenAIChatCompletionsProxiesV1(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), `"object":"chat.completion"`) {
 		t.Fatalf("upstream response not proxied back: %q", rr.Body.String())
+	}
+}
+
+func TestOpenAIProxyStampsTrustedMetadata(t *testing.T) {
+	// External shared-bearer client (no webchat session): the proxy must STRIP any
+	// client-supplied X-Aimee-* identity and stamp its own trusted metadata —
+	// principal/source = the constant "webchat" service account + the proxy secret.
+	// No session key is stamped (the client-supplied `user` field is NOT used for
+	// attribution, so a client cannot choose its own audit identity).
+	t.Setenv("AIMEE_INGRESS_PROXY_SECRET", "topsecret")
+
+	var gotPrincipal, gotSource, gotProxyAuth, gotSession string
+	s := openAIChatServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPrincipal = r.Header.Get("X-Aimee-Principal")
+		gotSource = r.Header.Get("X-Aimee-Source")
+		gotProxyAuth = r.Header.Get("X-Aimee-Proxy-Authorization")
+		gotSession = r.Header.Get("X-Aimee-Session-Key")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"x","object":"chat.completion","choices":[]}`)
+	})
+
+	body := `{"model":"aimee","user":"bob","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("X-Aimee-Principal", "victim") // spoof attempt — must be stripped
+	req.Header.Set("X-Aimee-Proxy-Authorization", "forged")
+	req.Header.Set("X-Aimee-Session-Key", "spoofed-session") // spoof — must be stripped
+	rr := httptest.NewRecorder()
+	s.handleOpenAIChatCompletions(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if gotPrincipal != "webchat" {
+		t.Fatalf("principal = %q, want trusted constant \"webchat\" (spoof must be stripped)", gotPrincipal)
+	}
+	if gotSource != "webchat" {
+		t.Fatalf("source = %q, want \"webchat\"", gotSource)
+	}
+	if gotProxyAuth != "topsecret" {
+		t.Fatalf("proxy auth = %q, want the configured secret (forged must be replaced)", gotProxyAuth)
+	}
+	if gotSession != "" {
+		t.Fatalf("session key = %q, want empty (client-supplied user/session not used)", gotSession)
+	}
+}
+
+func TestOpenAIProxyTrustedSessionStampsPAMUser(t *testing.T) {
+	// A request carrying a VALID webchat session cookie must be attributed to the
+	// trusted PAM username — X-Aimee-Principal / X-Aimee-Session-Key = webchat:<user>
+	// — so distinct logged-in webchat users get distinct trusted attribution and do
+	// not collapse. This is the proposal's "trusted per-client" requirement.
+	t.Setenv("AIMEE_INGRESS_PROXY_SECRET", "topsecret")
+
+	var gotPrincipal, gotSession string
+	s := openAIChatServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPrincipal = r.Header.Get("X-Aimee-Principal")
+		gotSession = r.Header.Get("X-Aimee-Session-Key")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"x","object":"chat.completion","choices":[]}`)
+	})
+
+	// Back the server with a real session store and a valid "alice" session.
+	// Pin to one connection so the in-memory DB (and the sessions table the store
+	// creates on it) is shared across the store's calls.
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	defer db.Close()
+	for _, m := range auth.Migrations {
+		if _, err := db.Exec(m); err != nil {
+			t.Fatalf("auth migration: %v", err)
+		}
+	}
+	s.sessions = auth.NewSessionStore(db, time.Hour)
+	token, err := s.sessions.CreateSession("alice")
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	body := `{"model":"aimee","user":"attacker-chosen","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.AddCookie(&http.Cookie{Name: "session", Value: token})
+	rr := httptest.NewRecorder()
+	s.handleOpenAIChatCompletions(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if gotPrincipal != "webchat:alice" {
+		t.Fatalf("principal = %q, want trusted \"webchat:alice\" (the PAM session user)", gotPrincipal)
+	}
+	if gotSession != "webchat:alice" {
+		t.Fatalf("session key = %q, want \"webchat:alice\" (not the client `user` field)", gotSession)
+	}
+}
+
+func TestOpenAIProxyNoSecretStampsNothing(t *testing.T) {
+	// Without the configured secret, the proxy must NOT stamp trusted identity —
+	// and must still strip any spoofed X-Aimee-* headers so nothing untrusted
+	// reaches aimee-server.
+	t.Setenv("AIMEE_INGRESS_PROXY_SECRET", "")
+
+	var gotPrincipal, gotProxyAuth string
+	s := openAIChatServer(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPrincipal = r.Header.Get("X-Aimee-Principal")
+		gotProxyAuth = r.Header.Get("X-Aimee-Proxy-Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"x","object":"chat.completion","choices":[]}`)
+	})
+
+	body := `{"model":"aimee","messages":[{"role":"user","content":"hi"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("X-Aimee-Principal", "victim")
+	rr := httptest.NewRecorder()
+	s.handleOpenAIChatCompletions(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d", rr.Code)
+	}
+	if gotPrincipal != "" {
+		t.Fatalf("principal = %q, want empty (no secret -> no stamp, spoof stripped)", gotPrincipal)
+	}
+	if gotProxyAuth != "" {
+		t.Fatalf("proxy auth = %q, want empty", gotProxyAuth)
 	}
 }
 

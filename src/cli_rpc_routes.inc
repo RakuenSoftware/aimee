@@ -3650,6 +3650,26 @@ static void print_insights_overview(cJSON *resp)
    printf("  cache read:      %lld\n", cr);
    printf("  cost:            $%.4f\n", cost);
 
+   /* Spend breakdown by usage_kind (§7), when the server reports it. The
+    * billable figure is spend.total (excludes dedup-avoided cost). */
+   cJSON *spend = cJSON_GetObjectItemCaseSensitive(resp, "spend");
+   if (cJSON_IsObject(spend))
+   {
+      double s_real = 0.0, s_est = 0.0, s_avoid = 0.0, s_total = 0.0;
+      if ((j = cJSON_GetObjectItemCaseSensitive(spend, "realized")) && cJSON_IsNumber(j))
+         s_real = j->valuedouble;
+      if ((j = cJSON_GetObjectItemCaseSensitive(spend, "estimated")) && cJSON_IsNumber(j))
+         s_est = j->valuedouble;
+      if ((j = cJSON_GetObjectItemCaseSensitive(spend, "avoided")) && cJSON_IsNumber(j))
+         s_avoid = j->valuedouble;
+      if ((j = cJSON_GetObjectItemCaseSensitive(spend, "total")) && cJSON_IsNumber(j))
+         s_total = j->valuedouble;
+      printf("  spend (billable):$%.4f  (realized $%.4f, estimated $%.4f", s_total, s_real, s_est);
+      if (s_avoid > 0.0)
+         printf(", avoided $%.4f", s_avoid);
+      printf(")\n");
+   }
+
    cJSON *models = cJSON_GetObjectItemCaseSensitive(resp, "models");
    int n_models = cJSON_IsArray(models) ? cJSON_GetArraySize(models) : 0;
    if (n_models == 0)

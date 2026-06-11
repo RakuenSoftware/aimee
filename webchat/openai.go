@@ -68,8 +68,34 @@ func (s *server) handleOpenAIModels(w http.ResponseWriter, r *http.Request) {
 // flush incrementally (ReverseProxy disables buffering for text/event-stream).
 // The webchat bearer is stripped before forwarding; the UDS is a trusted local
 // channel that does not itself require the bearer.
+// sessionUsername resolves the TRUSTED webchat identity (the PAM username from a
+// server-validated session cookie), or "" when there is no valid session. This is
+// the identity webchat already authenticated — not anything the client supplies.
+func (s *server) sessionUsername(r *http.Request) string {
+	if s == nil || s.sessions == nil {
+		return ""
+	}
+	cookie, err := r.Cookie("session")
+	if err != nil {
+		return ""
+	}
+	username, err := s.sessions.ValidateSession(cookie.Value)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(username)
+}
+
 func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath string) {
 	sock := s.aimeeHTTPSockPath()
+	// All stamped identity is server-derived (never client-supplied): the PAM
+	// username from a server-validated webchat session gives a TRUSTED per-user
+	// principal/session so distinct webchat users do not collapse; an external
+	// client with only the shared bearer (no session) attributes to the single
+	// trusted "webchat" service account. The client-supplied OpenAI `user` field
+	// is deliberately NOT used for attribution — it would let a client choose its
+	// own audit identity, which is not trusted.
+	webUser := s.sessionUsername(r)
 	proxy := &httputil.ReverseProxy{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
@@ -81,7 +107,37 @@ func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath st
 			req.URL.Host = "aimee"
 			req.URL.Path = upstreamPath
 			req.Host = "aimee"
+			// Strip the webchat bearer (the UDS is a trusted local channel). CRITICAL:
+			// also strip any client-supplied X-Aimee-* identity headers BEFORE
+			// stamping our own — otherwise an external OpenAI client could send
+			// X-Aimee-Principal: victim and, because we add the trusted proxy
+			// secret, aimee-server would attribute the request to victim. All stamped
+			// identity is server-derived: a validated webchat (PAM) session, or the
+			// constant "webchat" account. The Idempotency-Key (not an identity header)
+			// is forwarded unchanged.
 			req.Header.Del("Authorization")
+			req.Header.Del("X-Aimee-Proxy-Authorization")
+			req.Header.Del("X-Aimee-Principal")
+			req.Header.Del("X-Aimee-Source")
+			req.Header.Del("X-Aimee-Session-Key")
+			if secret := strings.TrimSpace(os.Getenv("AIMEE_INGRESS_PROXY_SECRET")); secret != "" {
+				req.Header.Set("X-Aimee-Proxy-Authorization", secret)
+				req.Header.Set("X-Aimee-Source", "webchat")
+				if webUser != "" {
+					// TRUSTED: server-validated webchat PAM session. Distinct users
+					// get distinct trusted principals/sessions.
+					req.Header.Set("X-Aimee-Principal", "webchat:"+webUser)
+					req.Header.Set("X-Aimee-Session-Key", "webchat:"+webUser)
+				} else {
+					// External shared-bearer client: a shared credential carries no
+					// per-client identity, so these requests are INTENTIONALLY
+					// attributed to the single trusted "webchat" service account
+					// (the stamped principal; no session key). Per-client distinction
+					// requires a webchat session (PAM user) or per-user tokens. See
+					// the proposal's webchat shared-bearer note.
+					req.Header.Set("X-Aimee-Principal", "webchat")
+				}
+			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
 			writeJSONError(w, http.StatusBadGateway, "aimee-server unavailable")

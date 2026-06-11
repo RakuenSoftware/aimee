@@ -2,6 +2,11 @@
  *
  * Hand-rolled HTTP/1.1 server on a dedicated Unix socket, mirroring the
  * aimee-kb HTTP server. First resource: /v1/personas. */
+/* _GNU_SOURCE: struct ucred / SO_PEERCRED peer-credential capture is a GNU
+ * extension; declare it before any include. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "server_http.h"
 #include "server.h" /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
@@ -20,6 +25,7 @@
 #include "openapi_server_data.h" /* AIMEE_OPENAPI_SERVER_YAML_STR (generated from api/openapi-server-v1.yaml) */
 #include "openai_runs_store.h"
 #include "presence.h"
+#include "request_context.h"
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -1408,7 +1414,7 @@ static int sse_offload(int fd, sse_stream_fn fn, const char *id, const char *req
 /* Extract a request header value (case-insensitive name match) from the raw
  * request `buf` into out[n], trimmed of leading whitespace and the trailing
  * CR/LF. Returns 1 if found, 0 otherwise (out gets ""). */
-static int http_header(const char *buf, const char *name, char *out, size_t n)
+int http_header(const char *buf, const char *name, char *out, size_t n)
 {
    if (out && n)
       out[0] = '\0';
@@ -1475,6 +1481,12 @@ static void handle_conn(int fd, int is_tcp)
       server_http_request_id(inbound, (int)getpid(), atomic_fetch_add(&s_req_seq, 1) + 1,
                              request_id, sizeof(request_id));
    }
+
+   /* Establish the per-request context (#3) for this worker thread before any
+    * handler runs. Overwritten on every request, so thread reuse cannot leak a
+    * prior request's identity. */
+   server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path,
+                                        server_http_conn_caps(is_tcp, g_bearer, g_remote_writes));
 
    /* Authorize before reading the body: TCP requires a valid bearer; the UDS
     * relies on filesystem permissions. A session-scoping key without a

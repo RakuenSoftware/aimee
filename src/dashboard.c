@@ -172,6 +172,9 @@ char *api_token_audit(void)
       cJSON_AddNumberToObject(obj, "cache_write_tokens", (double)rows[i].cache_write_tokens);
       cJSON_AddNumberToObject(obj, "cache_read_tokens", (double)rows[i].cache_read_tokens);
       cJSON_AddNumberToObject(obj, "estimated_cost_usd", rows[i].estimated_cost_usd);
+      /* REALIZED spend rows (the reader excludes estimated/avoided/partial);
+       * declare it so consumers report realized separately (§7). */
+      cJSON_AddStringToObject(obj, "usage_kind", "realized");
       cJSON_AddNumberToObject(obj, "call_count", rows[i].call_count);
       cJSON_AddStringToObject(obj, "last_seen", rows[i].last_seen);
       cJSON_AddItemToArray(arr, obj);

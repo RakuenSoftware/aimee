@@ -8,7 +8,7 @@
 #include <stdio.h>
 #include <string.h>
 
-int db1_agent_log_insert(const db1_agent_log_insert_row_t *row)
+long long db1_agent_log_insert(const db1_agent_log_insert_row_t *row)
 {
    if (!row || !row->agent_name || !row->role)
       return -1;
@@ -41,7 +41,7 @@ int db1_agent_log_insert(const db1_agent_log_insert_row_t *row)
 
    int rc = sqlite3_step(stmt);
    sqlite3_finalize(stmt);
-   return (rc == SQLITE_DONE) ? 0 : -1;
+   return (rc == SQLITE_DONE) ? (long long)sqlite3_last_insert_rowid(db) : -1;
 }
 
 static void fill_display(db1_agent_log_display_t *d, sqlite3_stmt *s)
@@ -406,8 +406,10 @@ int db1_agent_log_metrics_by_role(db1_agent_log_metric_t *out, int max)
        "       COALESCE(SUM(ta.cache_read_tokens), 0),"
        "       COALESCE(SUM(ta.estimated_cost_usd), 0.0)"
        " FROM agent_log al"
-       " LEFT JOIN token_audit ta"
-       "   ON ta.tool_name = al.agent_name AND ta.role = al.role"
+       /* 1:1 link via agent_log_id: each agent_log row joins exactly its own
+        * cost row. Avoids the (agent_name, role) join's N×M multiplication, and
+        * ingress rows (agent_log_id 0) never match. */
+       " LEFT JOIN token_audit ta ON ta.agent_log_id = al.id"
        " GROUP BY al.role ORDER BY COUNT(*) DESC LIMIT ?";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
@@ -446,7 +448,9 @@ int db1_agent_log_agent_stats(const char *agent_name_or_null, db1_agent_log_agen
              "       COALESCE(SUM(ta.cache_read_tokens), 0),"
              "       COALESCE(SUM(ta.estimated_cost_usd), 0.0)"
              " FROM agent_log al"
-             " LEFT JOIN token_audit ta ON ta.tool_name = al.agent_name"
+             /* 1:1 link via agent_log_id (see metrics_by_role): no N×M, and
+              * ingress rows never match. */
+             " LEFT JOIN token_audit ta ON ta.agent_log_id = al.id"
              " WHERE al.agent_name = ?"
              " GROUP BY al.agent_name LIMIT ?"
            : "SELECT al.agent_name, COUNT(*), SUM(al.prompt_tokens), SUM(al.completion_tokens),"
@@ -455,7 +459,9 @@ int db1_agent_log_agent_stats(const char *agent_name_or_null, db1_agent_log_agen
              "       COALESCE(SUM(ta.cache_read_tokens), 0),"
              "       COALESCE(SUM(ta.estimated_cost_usd), 0.0)"
              " FROM agent_log al"
-             " LEFT JOIN token_audit ta ON ta.tool_name = al.agent_name"
+             /* 1:1 link via agent_log_id (see metrics_by_role): no N×M, and
+              * ingress rows never match. */
+             " LEFT JOIN token_audit ta ON ta.agent_log_id = al.id"
              " GROUP BY al.agent_name ORDER BY COUNT(*) DESC LIMIT ?";
    sqlite3_stmt *stmt = NULL;
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)

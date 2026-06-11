@@ -44,6 +44,16 @@ int hud_gather(hud_status_t *out)
       out->total_estimated_cost_usd = totals.estimated_cost_usd;
    }
 
+   /* Realized-vs-estimated-vs-avoided-vs-partial spend breakdown (§7). */
+   db1_token_audit_spend_t spend;
+   if (db1_token_audit_spend_breakdown(0, &spend) == 0)
+   {
+      out->spend_realized_usd = spend.realized_cost_usd;
+      out->spend_estimated_usd = spend.estimated_cost_usd;
+      out->spend_avoided_usd = spend.avoided_cost_usd;
+      out->spend_partial_usd = spend.partial_cost_usd;
+   }
+
    if (db1_guardrail_event_session_advisory_count(session_id(), &out->semantic_warn_count) != 0)
       out->semantic_warn_count = 0;
 
@@ -75,8 +85,12 @@ void hud_print(const hud_status_t *s)
           s->total_completion_tokens);
    if (s->total_cache_write_tokens > 0 || s->total_cache_read_tokens > 0)
       printf(" | cache: %lldw / %lldr", s->total_cache_write_tokens, s->total_cache_read_tokens);
-   if (s->total_estimated_cost_usd > 0.0)
+   if (s->spend_realized_usd > 0.0)
+      printf(" | realized ~$%.4f", s->spend_realized_usd);
+   else if (s->total_estimated_cost_usd > 0.0)
       printf(" | ~$%.4f", s->total_estimated_cost_usd);
+   if (s->spend_avoided_usd > 0.0)
+      printf(" (avoided ~$%.4f)", s->spend_avoided_usd);
    printf("\n");
    printf("  Turns:       %d  |  Tool calls: %d\n", s->total_turns, s->total_tool_calls);
    printf("  Avg latency: %.0f ms\n", s->avg_latency_ms);
@@ -112,6 +126,16 @@ char *hud_json(const hud_status_t *s)
    cJSON_AddNumberToObject(obj, "total_cache_write_tokens", (double)s->total_cache_write_tokens);
    cJSON_AddNumberToObject(obj, "total_cache_read_tokens", (double)s->total_cache_read_tokens);
    cJSON_AddNumberToObject(obj, "total_estimated_cost_usd", s->total_estimated_cost_usd);
+   /* Spend by usage_kind (§7): realized billable spend reported separately from
+    * estimated, avoided, and partial. `spend.total` is realized-only. */
+   {
+      cJSON *spend = cJSON_AddObjectToObject(obj, "spend");
+      cJSON_AddNumberToObject(spend, "realized", s->spend_realized_usd);
+      cJSON_AddNumberToObject(spend, "estimated", s->spend_estimated_usd);
+      cJSON_AddNumberToObject(spend, "avoided", s->spend_avoided_usd);
+      cJSON_AddNumberToObject(spend, "partial", s->spend_partial_usd);
+      cJSON_AddNumberToObject(spend, "total", s->spend_realized_usd);
+   }
    cJSON_AddNumberToObject(obj, "total_turns", s->total_turns);
    cJSON_AddNumberToObject(obj, "total_tool_calls", s->total_tool_calls);
    cJSON_AddNumberToObject(obj, "avg_latency_ms", s->avg_latency_ms);

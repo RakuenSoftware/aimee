@@ -40,7 +40,10 @@ extern "C"
       const char *session_id; /* may be NULL/"" */
    } db1_agent_log_insert_row_t;
 
-   int db1_agent_log_insert(const db1_agent_log_insert_row_t *row);
+   /* Insert one agent_log row. Returns the new row id (> 0) on success, or -1 on
+    * error. The id links the matching token_audit row (agent_log_id) so agent
+    * stats join 1:1 instead of by the lossy (agent_name, role) key. */
+   long long db1_agent_log_insert(const db1_agent_log_insert_row_t *row);
 
    /* Read-side row used by list/search helpers. Strings are owned by
     * the struct; sized to common display needs (long input/output
