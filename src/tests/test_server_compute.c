@@ -288,6 +288,11 @@ agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const conf
    (void)min_context;
    return agent_route(cfg, role);
 }
+int agent_is_claude_cli(const agent_t *agent)
+{
+   (void)agent;
+   return 0; /* stub: the claude-cli delegate gate is exercised in test_agent */
+}
 agent_t *agent_find(agent_config_t *cfg, const char *name)
 {
    if (!cfg || !name)
