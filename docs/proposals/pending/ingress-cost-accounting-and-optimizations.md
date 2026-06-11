@@ -1,6 +1,7 @@
 # Proposal: ingress cost-accounting coverage + request-level cost optimizations
 
-- **State:** draft - pending review (revised after PR #180 review)
+- **State:** draft - pending review (revised after PR #180 review + a file-by-file
+  codebase audit)
 - **Author:** JBailes
 - **Date:** 2026-06-11
 - **Charter roles:** Evaluate-Optimize (cost-shaped reward into the existing
@@ -51,6 +52,18 @@ several fields this proposal needs (`source`, `usage_kind`, requested-vs-served
 model, duration/stop metadata, optimization metadata). Those are explicit work
 items below rather than assumptions.
 
+A third pass added a **file-by-file codebase audit** that confirmed the above and
+surfaced four issues no review named, now folded in with file:line evidence:
+(1) pricing lives in **four** divergent sources — token_tracker (substring +
+cache), the model registry (exact, no cache), `delegate_ensemble.c` (a third
+flat-rate calculator), and `models_dev_snapshot.json` — so the same model id can
+be priced differently by different paths (§0/§1); (2) `db1_token_audit_by_model`
+filters out every empty-model row, so the model-write fix and the filter fix must
+land together or history shows a false zero (§0/§2); (3) the aimee-owned outbound
+Anthropic `system` is a **flat string**, so the cache carve-out's real work is a
+string→content-block conversion, not a flag (§3); (4) `stream_options.include_usage`
+is set nowhere and aborted streams drop usage (§2).
+
 ## Goal
 
 Ingress requests are a cost blind spot. Normal agent and delegate calls are
@@ -63,13 +76,25 @@ optimization surface aimee already has, not a new one.
 
 ## §0 What already exists, corrected
 
-- **Pricing is already cache-aware and shared.** `token_usage_t`
-  (`token_tracker.h`) carries `input/output/cache_write/cache_read`;
-  `token_estimate_cost()` (`token_tracker.c`) applies per-MTok input/output +
-  cache-read/write multipliers via an internal substring table. The **model registry**
-  (`model_registry.h`) separately carries `cost_in_per_mtok` /
-  `cost_out_per_mtok`. Two price sources already exist — §1 reconciles them rather
-  than adding a third.
+- **Pricing is split across four sources, and they disagree.** A full audit
+  found more divergence than "two sources":
+  1. `token_tracker.c:17-47` — a 17-row table with the **only** cache-price
+     fields, matched by case-insensitive **substring**, first-match-wins
+     (`find_price` / `token_strcasestr_local`, `:56-85`).
+  2. `model_registry` — `cost_in_per_mtok` / `cost_out_per_mtok`
+     (`model_registry.h:39-40`), a 9-row static table (`model_registry.c:439-469`)
+     plus a dynamic models.dev cache and an override JSON, matched by **exact**
+     provider-qualified `strcasecmp`, with **no cache-price fields**.
+  3. `delegate_ensemble.c:88-99` (`model_token_cost`) — uses the registry and
+     falls back to a flat `0.000015`/token (`:21`), **bypassing token_tracker**,
+     so ensemble cost silently loses Anthropic cache pricing.
+  4. `data/models_dev_snapshot.json` (10 models, `inputCost`/`outputCost`, no
+     cache) loaded into the registry via `models_dev_cache.c`.
+  Because token_tracker is substring and the registry is exact, the **same model
+  id can be priced differently by different code paths**, and their coverage
+  differs (17 vs 9 models). The substring matcher is also a mispricing vector
+  (table-order dependence; an adversarial/compound id can match an Anthropic
+  price). §1 collapses these to one authority and adds a drift test.
 - **The audit ledger already covers the basic counters.** `db1/token_audit.c`
   inserts `(session_id, delegation_id, project_name, tool_name, role, model,
   prompt_tokens, completion_tokens, cache_write_tokens, cache_read_tokens,
@@ -110,10 +135,16 @@ optimization surface aimee already has, not a new one.
   `delegate_routing` with `rc == 0 ? 1.0 : 0.0`, and `kb_client_bandit_close`
   documents reward as `[0,1]` over beta-style posteriors. Raw dollars cannot be
   the reward (§6).
-- **`agent_log_call` mis-attributes the model.** It estimates cost from
-  `result->agent_name` and writes an empty `model` for those rows; and
-  `anthropic_http.c` ignores Claude Code's *requested* model and routes to the
-  configured primary agent. Billable-model resolution is its own work item.
+- **`agent_log_call` mis-attributes the model, and `by_model` hides the
+  fallout.** It estimates cost from `result->agent_name` (`agent_runtime.c:1912`)
+  and writes an **empty** `model` (`:1926`); and `anthropic_http.c:163-165` reads
+  the client's *requested* model but routes to the configured primary
+  (`resolve_primary`). Crucially, `db1_token_audit_by_model`
+  (`token_audit.c:243,253`) filters `WHERE COALESCE(model,'') != ''`, so **every
+  existing row is already excluded** from by-model. If ingress rows start writing
+  real models while legacy rows stay empty, the by-model surface shows a
+  **false-zero history** — recent ingress spend appears while all prior spend
+  vanishes. The model write-fix and the filter/backfill must land together (§2).
 
 ## §1 One pricing source of truth (extend, don't add)
 
@@ -133,6 +164,20 @@ optimization surface aimee already has, not a new one.
 - Treat provider-reported model aliases as normalization inputs. Cost lookup
   should use the billable provider model after alias resolution, not an agent
   nickname or a user-requested model string.
+- **Route `delegate_ensemble.c` through the same lookup.** Its `model_token_cost`
+  is a third calculator that bypasses token_tracker and flat-rates unknowns at
+  `0.000015`/token; once one authority exists, ensemble cost must use it so it
+  picks up cache pricing and so §6's "realized delegate cost" is consistent.
+- **Add a drift test, not just ambiguity tests.** Beyond ordering cases
+  (`gpt-4o-mini` before `gpt-4o`), assert token_tracker and the registry agree on
+  price for every model both know — substring-vs-exact divergence is the actual
+  bug, and a compound/adversarial id must not match an Anthropic price.
+- **Disambiguate zero-price from free.** The registry lists `minimax` at
+  `0.0/0.0`, which the ensemble path treats as "unknown" and silently flat-rates.
+  Use an explicit `is_priced` signal (or sentinel) so a real zero never falls
+  through, and close the coverage gap for the delegates aimee actually runs
+  (minimax / mimo-2.5 / mistral) plus the o-series / gemini rows the registry and
+  snapshot omit today.
 
 ## §2 Cover ingress turns in the existing audit (token_audit), not a new ledger
 
@@ -145,7 +190,16 @@ estimates** and **avoided estimated cost**.
   `billable_model`, `duration_ms`, `stop_reason`, and `optimizations_json` /
   `avoided_cost_usd` if dedup/cache savings are reported. If the decision is to
   avoid migration, state exactly how each field is represented and which reports
-  lose fidelity.
+  lose fidelity. The migration is additive-only — `db1_reconcile_columns`
+  (`db_schema.c:78`) adds missing columns but creates no indexes and runs no
+  data migration, so column adds are safe but the empty-model backfill below is a
+  separate step.
+- **Fix `by_model` alongside the model write (prerequisite, not optional).**
+  Populating `served_model` is pointless while `db1_token_audit_by_model` filters
+  empty models out: either backfill legacy rows' model from their `tool_name`
+  (the agent name, which is the model alias today) or relabel empty-model rows as
+  `"(unattributed)"` instead of dropping them, so enabling ingress accounting
+  does not make historical spend appear to vanish.
 - **Native Anthropic relay path:** add a usage-observing tap to
   `anthropic_relay_chunk_cb` (or route native streams through a thin
   usage-observing relay) that parses `message_start` / `message_delta.usage`
@@ -159,13 +213,19 @@ estimates** and **avoided estimated cost**.
   `completion_tokens`. The provider request builder has to insert the option, not
   only the parser.
 - **Buffered path:** parse the provider JSON `usage` block after a 200 response
-  and before translating it back to the client. Use provider parser fields where
-  already available, but verify cache tokens survive parser normalization.
+  and before translating it back to the client. The Anthropic parser already
+  extracts cache tokens (`agent_bridge.c:791-796`), but the **OpenAI buffered
+  parser drops them** — this is an *add extraction* task, not just "verify they
+  survive normalization."
 - **`count_tokens`:** never writes a realized spend row. If exposed in usage
   summaries, it must be `usage_kind=estimated` and excluded from spend totals by
   default.
-- **Failure:** no realized-spend row on provider error. If failed calls are
-  reported at all, they are operational telemetry, not cost rows.
+- **Failure / aborted streams:** no realized-spend row on provider error. A
+  stream cut before `finish` (client cancel, network drop) never reaches the
+  finish-time write, so usage is lost unless the tap accumulates incrementally;
+  emit a `usage_kind=partial` row with whatever was observed (or none) rather
+  than silently dropping the turn. Failed calls, if reported, are operational
+  telemetry, not cost rows.
 - **Source + model:** record source/client explicitly (Claude Code, Codex,
   webchat, OpenAI-compatible ingress, delegate) and resolve a real billable
   `model` (see §2a) instead of the empty string `agent_log_call` writes today.
@@ -213,6 +273,15 @@ request metadata.
   the provider is Anthropic. OpenAI-compatible — no-op or provider-specific
   automatic caching; never emit Anthropic cache metadata. Translated
   OpenAI-via-Anthropic vs non-Anthropic driver paths must be handled explicitly.
+- **The owned outbound `system` is a flat string today.** For the aimee-built
+  path, `agent_build_request_anthropic` emits `cJSON_AddStringToObject(req,
+  "system", system_prompt)` (`agent_bridge.c:197`) — a string, not a content-block
+  array. So even on an aimee-owned request, placing `cache_control` on a stable
+  block first requires restructuring `system` into a `[{type:"text", ...,
+  cache_control:{...}}, ...]` array (Anthropic only), keeping the string form for
+  every other provider. That conversion — not the flag — is the bulk of §3's
+  Anthropic work, and it is why the OpenAI/Codex seam (no portable cache metadata,
+  just prefix ordering) is the cheaper first target.
 - **Negative tests required:** prove cache metadata is never leaked to an
   unsupported provider's request body; prove existing client-supplied
   `cache_control` blocks are preserved; prove Anthropic system arrays are not
@@ -300,6 +369,12 @@ Any new route requires:
 - `reasoning_effort_cap_enabled` (§5)
 - `cost_reward_lambda` + `cost_reward_enabled` (§6; 0 / off ⇒ pure side-metadata)
 
+These are all scalar bool/int flags, so each needs only a `config.h` struct field
++ a `config_fields.c` row (+ a `test_config.c` round-trip); `config_sections.c` /
+`config_save.c` are touched only if a flag is nested under a new compound object.
+The §1 pricing unification and the §2 model-write / `by_model` fixes are **not**
+flagged — they are correctness fixes that land on by default.
+
 Accounting (§2) is pure observation and is the first flag to flip; schema/report
 changes should land before request mutation. The request-mutating optimizations
 (§3–§5) and the shaped reward (§6) stay off until each clears the readiness bar
@@ -308,10 +383,18 @@ with a benchmark showing no quality regression.
 ## Testing
 
 - **Pricing:** unknown-model → 0.0; cache-read/write fields applied; registry
-  lookup/fallback; ambiguous substring ordering; provider alias normalization.
-- **Schema/reporting:** migration preserves existing `token_audit` rows; spend
-  totals exclude `estimated` and `avoided` rows by default; source/model
-  breakdowns are stable in `cmd_usage` and `insights.overview`.
+  lookup/fallback; ambiguous substring ordering; provider alias normalization;
+  **drift test** (token_tracker ≡ registry for every shared model);
+  compound/adversarial id must not match an Anthropic price; zero-price (`minimax
+  0.0/0.0`) is not silently flat-rated; `delegate_ensemble` cost uses the unified
+  lookup.
+- **Schema/reporting:** additive migration preserves existing `token_audit` rows;
+  **by-model no longer hides legacy empty-model rows** (false-zero migration
+  test); spend totals exclude `estimated`, `avoided`, and `partial` rows by
+  default; source/model breakdowns are stable in `cmd_usage` and
+  `insights.overview`.
+- **Aborted stream:** a stream cut before `finish` writes a `partial` row (or
+  none), never a silently dropped turn.
 - **Buffered ingress:** provider usage writes **exactly one** audit row with
   resolved source + billable model; **no row** on provider failure.
 - **Native Anthropic streaming:** final `message_delta.usage` is observed while
@@ -322,9 +405,12 @@ with a benchmark showing no quality regression.
   the option.
 - **count_tokens:** asserts **no** spend ledger row.
 - **Prompt-cache/request shaping:** OpenAI/Codex seam handles stable-vs-volatile
-  preinject placement; Anthropic structured-JSON insertion only under the
-  explicit opt-in carve-out; below-floor no-op; unsupported-provider no-op; no
-  cache-metadata leakage; existing client cache controls preserved.
+  preinject placement; the aimee-owned Anthropic `system` is emitted as a
+  content-block array (not a flat string) with `cache_control` on the stable block
+  only under the explicit opt-in carve-out; below-floor no-op;
+  unsupported-provider no-op; no cache-metadata leakage; existing client cache
+  controls preserved; non-Anthropic providers still receive a plain `system`
+  string.
 - **Dedup:** TTL; per-source/account/agent/model/endpoint/flags/context/stream
   key separation; no-tools/no-stream/200-only/idempotency-key eligibility;
   error-response bypass; avoided cost does not inflate spend totals.
