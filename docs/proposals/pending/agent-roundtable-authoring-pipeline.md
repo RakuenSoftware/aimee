@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 eighth review)
+- **Date:** 2026-06-11 (revised post-PR-#183 ninth review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -46,9 +46,11 @@ when hit without reaching the done-bar (it never auto-passes a not-done artifact
 
 **Design invariant — always keep the origin artifact.** Chunking is allowed
 anywhere in the pipeline, but it is never a substitute for the whole: every
-artifact (proposal, diff) is stored *whole* in db2 alongside its chunks, so the
-full origin is always retrievable and no step ever has to reconstruct it from
-slices. Chunk to fit a call; retrieve the origin when correctness needs it.
+artifact (proposal, diff) has a durable whole-origin ref/hash in the pipeline
+ledger (working blob/path, db2 `docs.normalized_text`, or an explicit artifact
+payload), and chunk rows point back to that origin. `kb_documents` is a chunk
+index, not the whole-origin store. Chunk to fit a call; retrieve the origin when
+correctness needs it.
 
 ## PR #183 review — gaps and how they are resolved
 
@@ -340,12 +342,13 @@ Gap #28 correctly demands a whole-artifact aggregate over chunks, but its own
 resolution has two holes: the aggregate can't re-read what didn't fit, and nothing
 says how big a chunk is.
 
-32. **Store the artifact in db2 as whole text + chunks and *retrieve* — don't
+32. **Store the artifact origin plus db2 chunks and *retrieve* — don't
     agonize over "fit it in one call vs. summarize it."** §3 requires a
     whole-artifact synthesis/check, and an artifact large enough to be chunked
     won't fit one review call. The resolution is Aimee's core competency, not a
-    bespoke manifest: ingest the artifact-under-review into db2's existing
-    `kb_documents` chunk store, which already gives everything the aggregate needs —
+    bespoke manifest: retain the artifact origin separately and ingest
+    review-scoped chunks into db2's existing `kb_documents` chunk store, which
+    gives the aggregate most of what it needs —
     `chunk_index` + `prev_chunk_id`/`next_chunk_id` make the whole text
     reconstructable by walking the chain, `heading_path` is a section manifest for
     free, `file_hash` tracks staleness, and vector + FTS retrieval are built in.
@@ -353,11 +356,11 @@ says how big a chunk is.
     check is a reviewer given **db2 retrieval over the artifact's own chunks**, so
     it pulls cross-chunk context (the other definition of a symbol, a missing
     section, a renamed reference) on demand instead of needing the full text inline.
-    Because both the whole and the chunks are stored, the "fit it in one call vs.
-    summarize" decision never has to be made. The artifact lives in a
-    **review-scoped/ephemeral project namespace**, cleaned up on pipeline
-    completion, so it never pollutes durable memory. **Resolved in §2, §3, §4, and
-    §10.**
+    Because both the origin and the chunks are retained, the "fit it in one call
+    vs. summarize" decision never has to be made. The chunk index lives in a
+    review-scoped namespace/contract, cleaned up on pipeline completion, so it
+    never pollutes durable memory. **Resolved in §2, §3, §4, and §10; corrected by
+    #34/#35 for the exact origin store and cleanup primitive.**
 33. **The chunk threshold must derive from the panel's *minimum* participant
     context budget, not a fixed size.** The panel is heterogeneous
     (`ensemble_reference_models` resolve to different models with different context
@@ -368,6 +371,37 @@ says how big a chunk is.
     panel** (resolved per run), reserving headroom for the brief, role framing, and
     peer notes, with the resolved budget and threshold recorded in the chunk
     manifest. **Resolved in §2 and §10.**
+
+## PR #183 ninth review — correcting the db2 origin and context-budget contracts
+
+The eighth review made the right move by grounding chunk aggregation in db2, but
+it overstates what the current KB tables and APIs provide.
+
+34. **`kb_documents` stores chunks, not the whole artifact.** The schema has
+    `kb_documents.content` per chunk plus `prev_chunk_id`/`next_chunk_id`; the
+    normal project build path calls `db2_kb_file_index_upsert(..., NULL)`, so
+    `kb_file_index.content` is not a reliable whole-text copy either. If the
+    pipeline needs the origin text, it must store a separate origin ref/blob:
+    working file/blob + hash in DB1, a db2 `docs.normalized_text` row via
+    `kb.docs.push`, or an explicit DB2 artifact payload. The chunk manifest then
+    references both the origin ref and the `kb_documents` rows. **Resolved in §2,
+    §3, §4, §10, and §11.**
+35. **Review-scoped KB indexing is not a current public primitive.** The available
+    KB surfaces are project-oriented (`kb.build`/`kb.update` over a path+project,
+    `/v1/maintenance/clear` for an entire project) plus corpus staging
+    (`kb.docs.push` into `docs`). A pipeline-specific ephemeral namespace cannot
+    be assumed unless the implementation either creates a synthetic review project
+    with safe cleanup, adds a per-file/per-scope cleanup API, or adds direct
+    pipeline artifact indexing. Otherwise cleanup can delete unrelated project KB
+    data or leave review chunks behind. **Resolved in §2, §4, §8, §9, and §10.**
+36. **Minimum panel context budget can be unknown.** The code can hold
+    `agent.middleware.context_window`, and some runtime paths use
+    `model_context_window(model)`, but configured agents and discovered
+    `model_catalog` rows can still have `context_window == 0`. The pipeline cannot
+    size chunks from "minimum participant context" unless every panelist resolves
+    a positive budget; otherwise it must use a conservative default, probe first,
+    or fail configuration validation with a clear remediation. **Resolved in §2,
+    §6, §7, and §10.**
 
 ## Relationship to existing proposals
 
@@ -462,9 +496,9 @@ Both phases use the **same** engine; they differ only in input and brief.
   chunk stores an input hash and result, the pass stores the aggregate, and the
   done-bar can pass only after all chunks are covered plus a whole-artifact
   synthesis/check has considered cross-chunk invariants (#28). **Chunking never
-  discards the origin: the artifact-under-review is ingested whole into db2
-  (`kb_documents`) alongside its chunks, so the full text is always retained and
-  the cross-chunk check retrieves any span on demand (#32).**
+  discards the origin:** the pipeline records a whole-origin ref/hash separately
+  from chunk rows (#34), and the cross-chunk check retrieves needed spans from
+  the origin plus review-scoped chunks on demand (#32/#35).
   Pipeline-owned PR reviews use the async op-run path with validated pass
   metadata, not a direct synchronous roundtable dispatch. The brief carries the
   *fixes just applied*, the *invariants* the change must not break, and the
@@ -514,11 +548,11 @@ valid REVIEW result over the expected chunk hash, and the aggregate must include
 whole-artifact synthesis/check for cross-chunk findings before the phase can pass.
 Any missing, stale, truncated, degraded, or failed chunk keeps the aggregate
 blocked. The whole-artifact check is **retrieval-backed, not a re-ingest** (#32):
-the artifact is stored whole + chunked in db2 (`kb_documents`), so the
-cross-chunk reviewer pulls the other definition of a symbol, a missing section, or
-a renamed reference via vector/FTS + the `prev_chunk_id`/`next_chunk_id` chain on
-demand — it never needs the full text in one context window, and the origin
-artifact is always retained, never replaced by its chunks.
+the pipeline stores the origin separately (#34) and indexes review-scoped chunks,
+so the cross-chunk reviewer pulls the other definition of a symbol, a missing
+section, or a renamed reference via vector/FTS + the `prev_chunk_id`/
+`next_chunk_id` chain on demand — it never needs the full text in one context
+window, and the origin artifact is always retained, never replaced by its chunks.
 
 **Pass ceiling (configurable; cost backstop, not an early-exit).** `roundtable_pipeline_max_passes`
 bounds outer passes. **Default 0 = unbounded** — review runs until the done-bar,
@@ -564,9 +598,10 @@ Either way, the durable record holds:
 
 - pipeline id, state (§1), phase, created/updated timestamps, and schema version;
 - artifact refs: proposal path/blob/ref, implementation branch, diff ref or
-  chunk manifest, the db2 `kb_documents` ingest ref (the **whole** artifact +
-  chunks, per the origin-retention invariant), and content hashes — not unbounded
-  inline text as the primary representation;
+  chunk manifest, whole-origin ref/hash (working blob/path, db2 `docs` row, or
+  explicit artifact payload), review-chunk index refs (`kb_documents` rows if that
+  backend is used), and content hashes — not unbounded inline text as the primary
+  representation;
 - the current brief plus compact gate digest;
 - per-pass history: each outer pass's status, aggregate child `run_id` if
   single-call, `converged`, blocking/suggestion counts, `cost_usd`, `rounds_run`,
@@ -708,6 +743,10 @@ roundtable config surface is scalar keys like `roundtable.max_rounds`,
   correctness passes.
 - `roundtable_pipeline_max_cost_usd` — double, cumulative per-phase spend cap;
   0 = unbounded; tripping escalates.
+- `roundtable_pipeline_unknown_context_tokens` — int, conservative fallback chunk
+  input budget used only when a panel participant's context window cannot be
+  resolved; alternatively the implementation may make unknown context a hard
+  validation error instead of accepting this key (#36).
 - *(optional, deferred)* per-phase overrides (`…_proposal` / `…_pr` suffixes) if
   the proposal and PR phases want different bars.
 
@@ -725,6 +764,11 @@ Convergence is only as meaningful as the panel. To keep the quality gate honest
   provider/model identity, not just string uniqueness. A single-provider panel can
   converge on its own blind spots. Validation (§10) asserts ≥2 distinct providers
   for a pipeline run or warns.
+- **Context-budget resolution** — the same participant-resolution pass must also
+  resolve a positive context budget for every panelist, using
+  `agent.middleware.context_window`, model defaults, or a configured conservative
+  fallback. Unknown budgets are surfaced before chunking (#36), not discovered by
+  truncating a reviewer mid-pass.
 - **Open mandate** (§2) so direction never suppresses out-of-scope findings.
 - **Corroboration surfacing** — the gate digest shows `item.count` so the human
   sees whether a finding was one panelist or all of them.
@@ -758,6 +802,11 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
   pipeline needs an explicit `pipeline_pass_id`/attempt submission path that
   validates state and injects private `__pipeline_pass_id` before
   `op_run_worker_run` finalizes the child run.
+- **Hard for chunked review:** a pipeline-owned review-artifact indexing contract.
+  Existing KB build/update is project/path oriented and `kb.docs.push` stores whole
+  staged docs, but neither is automatically a review-scoped, cleanup-safe chunk
+  index. The implementation must choose synthetic review projects, per-file/scope
+  cleanup, or a direct artifact-index API (#35).
 - **Hard:** workspace-aware git/forge authority for PR create/merge and diff
   capture. Pipeline git/gh operations must route through Aimee's git tools or
   workspace provider so shared, detached, and mirror workspaces behave consistently.
@@ -770,9 +819,11 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
 
 - **P0 — Ledger + states + namespace decision.** Choose the DB shape
   (`roundtable_pipeline_runs` tables vs explicit migration of DB1 `pipelines`),
-  add the state enum/transitions, artifact refs/hashes, pass/attempt rows, child
-  run references, and the CLI/MCP/HTTP namespace decision (`pipeline` vs
-  `autopilot` extension). Wire the server-worker capture seam: validate
+  add the state enum/transitions, artifact origin refs/hashes, chunk-index refs,
+  pass/attempt rows, child run references, and the CLI/MCP/HTTP namespace decision
+  (`pipeline` vs `autopilot` extension). Choose the review-artifact indexing and
+  cleanup contract (#35) before depending on chunked done-bars. Wire the
+  server-worker capture seam: validate
   `pipeline_pass_id`, inject private `__pipeline_pass_id`, preserve it through
   async enqueue, and extend `op_run_worker_run`'s finalize path or hook to persist
   every terminal attempt to the ledger (#18/#20-#25). The finalize hook must be
@@ -846,16 +897,23 @@ ledger) before the full idea→merge pipeline of P2/P3.
   with a cross-chunk invariant violation; individual chunks can complete, but the
   phase cannot pass until the aggregate whole-artifact synthesis/check records the
   violation resolved. Missing or stale chunk hashes keep the aggregate blocked.
-- **Origin retention + retrieval-backed aggregate (#32, origin invariant)** — the
-  artifact is ingested whole + chunked into db2 (`kb_documents`); the whole text is
-  recoverable via the `prev/next` chain and `chunk_index`, the cross-chunk check
-  resolves a planted cross-chunk reference by **retrieval** (no full re-ingest),
-  and the review-scoped namespace is cleaned up on pipeline completion without
-  touching durable memory.
+- **Origin retention + retrieval-backed aggregate (#32/#34, origin invariant)** —
+  the artifact has a durable whole-origin ref/hash separate from chunk rows; chunk
+  rows can be walked by `prev/next` and `chunk_index`, but the full text is
+  recovered from the origin ref (`docs.normalized_text`, working blob/path, or
+  artifact payload), not assumed to live in `kb_documents`.
+- **Review-scoped index cleanup (#35)** — index a review artifact without touching
+  the real project KB; cleanup deletes only that pipeline's review chunks/docs.
+  A test must prove `/v1/maintenance/clear` or any chosen cleanup path cannot wipe
+  unrelated project data.
 - **Chunk threshold from min panel context (#33)** — a heterogeneous panel sizes
   chunks to the smallest participant context budget (resolved per run, reserving
   brief/role/peer-note headroom); a chunk that would overflow the smallest model is
   never submitted to it.
+- **Unknown context fallback (#36)** — configure one participant with no
+  `context_window` and no model default; the pipeline either rejects the run with a
+  clear validation error or uses the configured conservative fallback and records
+  that fallback in the chunk manifest.
 - **Late finalization guard (#30)** — start an attempt, supersede/cancel/abandon
   it, then let the old worker finish; the terminal attempt row is recorded, but it
   does not update the current aggregate, pass the done-bar, open a gate, or resume
@@ -904,8 +962,9 @@ ledger) before the full idea→merge pipeline of P2/P3.
   posting). The pipeline uses Aimee's existing workspace-aware git/PR tool surface,
   which may call `gh`/`git` underneath with the right workspace/forge authority.
 - Storing whole proposals or large diffs as unbounded DB blobs. DB1 stores refs,
-  manifests, hashes, and compact digests; working files/blobs carry the large
-  content.
+  manifests, hashes, and compact digests; working files/blobs, db2 `docs`, or an
+  explicit artifact payload carry the large origin content. `kb_documents` remains
+  a chunk index, not the canonical whole-origin store.
 - Expecting DRAFT mode to emit a complete proposal (#9). The 8 KB artifact cap
   means DRAFT produces a skeleton; the author-revise loop expands it in the working
   file. Generating long-form text inside the roundtable artifact is out of scope.
