@@ -384,6 +384,10 @@ static void op_run_worker_run(void *arg)
    char *snap = op_run_snapshot(j->run_id, j->op, status_str, j->created, buf);
    openai_runs_store_finalize(j->run_id, ok ? terminal_status : OPENAI_RUN_FAILED,
                               snap ? snap : buf);
+   /* Pipeline-owned result capture (#18): persist the terminal attempt into the
+    * durable DB1 ledger before the bounded /v1/runs record can be evicted. This
+    * no-ops for ordinary (non-pipeline) op-runs. */
+   rtp_seam_finalize(j->run_id, ok, terminal_status == OPENAI_RUN_CANCELLED, buf);
    free(snap);
    free(buf);
    free(j->line);
@@ -422,6 +426,25 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
 
    cJSON_DeleteItemFromObjectCaseSensitive(req, "__run_id");
    cJSON_AddStringToObject(req, "__run_id", id);
+
+   /* Pipeline-owned submission seam (#20/#21): a validated `pipeline_pass_id`
+    * registers an attempt row keyed to this run id and is forwarded internally
+    * as the private `__pipeline_pass_id`. A caller-supplied double-underscore id
+    * is never honored. An unknown / non-owned pass id is rejected. */
+   cJSON_DeleteItemFromObjectCaseSensitive(req, "__pipeline_pass_id");
+   cJSON *ppid = cJSON_GetObjectItemCaseSensitive(req, "pipeline_pass_id");
+   if (ppid && cJSON_IsNumber(ppid))
+   {
+      int pass_id = (int)ppid->valuedouble;
+      cJSON_DeleteItemFromObjectCaseSensitive(req, "pipeline_pass_id");
+      if (rtp_seam_register_attempt(pass_id, id) < 0)
+      {
+         cJSON_Delete(req);
+         return err_json(resp, cap, 403, "invalid or non-owned pipeline_pass_id");
+      }
+      cJSON_AddNumberToObject(req, "__pipeline_pass_id", pass_id);
+   }
+
    char *line = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
    if (!line)

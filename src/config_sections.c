@@ -1134,6 +1134,33 @@ void config_parse_roundtable_section(config_t *cfg, cJSON *root)
    item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "turns");
    if (cJSON_IsString(item) && item->valuestring && item->valuestring[0])
       snprintf(cfg->roundtable_turns, sizeof(cfg->roundtable_turns), "%s", item->valuestring);
+
+   /* Authoring pipeline (roundtable.pipeline_*). */
+   item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "pipeline_done_bar");
+   if (cJSON_IsString(item) && item->valuestring && item->valuestring[0])
+      snprintf(cfg->roundtable_pipeline_done_bar, sizeof(cfg->roundtable_pipeline_done_bar), "%s",
+               item->valuestring);
+   item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "pipeline_max_passes");
+   if (cJSON_IsNumber(item) && item->valuedouble >= 0)
+      cfg->roundtable_pipeline_max_passes = (int)item->valuedouble;
+   item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "pipeline_max_attempts_per_pass");
+   if (cJSON_IsNumber(item) && item->valuedouble >= 1)
+      cfg->roundtable_pipeline_max_attempts_per_pass = (int)item->valuedouble;
+   item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "pipeline_max_cost_usd");
+   if (cJSON_IsNumber(item) && item->valuedouble >= 0)
+      cfg->roundtable_pipeline_max_cost_usd = item->valuedouble;
+   item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "pipeline_max_total_cost_usd");
+   if (cJSON_IsNumber(item) && item->valuedouble >= 0)
+      cfg->roundtable_pipeline_max_total_cost_usd = item->valuedouble;
+   item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "pipeline_gate_ttl_h");
+   if (cJSON_IsNumber(item) && item->valuedouble >= 0)
+      cfg->roundtable_pipeline_gate_ttl_h = (int)item->valuedouble;
+   item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "pipeline_parked_releases_slot");
+   if (cJSON_IsBool(item))
+      cfg->roundtable_pipeline_parked_releases_slot = cJSON_IsTrue(item) ? 1 : 0;
+   item = cJSON_GetObjectItemCaseSensitive(roundtable_cfg, "pipeline_unknown_context_tokens");
+   if (cJSON_IsNumber(item) && item->valuedouble > 0)
+      cfg->roundtable_pipeline_unknown_context_tokens = (int)item->valuedouble;
 }
 
 void config_parse_kb_section2(config_t *cfg, cJSON *root)
