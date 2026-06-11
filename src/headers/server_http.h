@@ -76,6 +76,20 @@ extern "C"
     *   the old behavior. */
    uint32_t server_http_route_caps(const char *method, const char *path);
    uint32_t server_http_conn_caps(int is_tcp, const char *bearer, int remote_writes);
+
+   /* Parse one HTTP header value (case-insensitive name) from a raw request
+    * buffer into out (NUL-terminated, bounded by n). Returns 1 when found, 0
+    * otherwise. Shared with the request-context populator. */
+   int http_header(const char *buf, const char *name, char *out, size_t n);
+
+   /* Populate the thread-local request context (#3) from the connection socket
+    * and request headers (request id, idempotency key, transport, peer-cred
+    * principal, and — only from a trusted proxy — stamped principal/source/
+    * session). `caps` is the connection's effective capability set. Lives in
+    * server_http_reqctx.c. */
+   void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
+                                             const char *request_id, const char *method,
+                                             const char *path, uint32_t caps);
    int server_http_route_allowed(int is_tcp, const char *bearer, const char *method,
                                  const char *path, int remote_writes);
 

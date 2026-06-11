@@ -1414,7 +1414,7 @@ static int sse_offload(int fd, sse_stream_fn fn, const char *id, const char *req
 /* Extract a request header value (case-insensitive name match) from the raw
  * request `buf` into out[n], trimmed of leading whitespace and the trailing
  * CR/LF. Returns 1 if found, 0 otherwise (out gets ""). */
-static int http_header(const char *buf, const char *name, char *out, size_t n)
+int http_header(const char *buf, const char *name, char *out, size_t n)
 {
    if (out && n)
       out[0] = '\0';
@@ -1440,95 +1440,6 @@ static int http_header(const char *buf, const char *name, char *out, size_t n)
       line = eol ? eol + 2 : NULL;
    }
    return 0;
-}
-
-/* Capture the Unix-domain peer's uid via SO_PEERCRED; returns -1 on TCP or when
- * the platform/socket cannot report it. */
-static long http_peer_uid(int fd, int is_tcp)
-{
-   if (is_tcp)
-      return -1;
-#ifdef SO_PEERCRED
-   struct ucred cred;
-   socklen_t len = sizeof(cred);
-   if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) == 0)
-      return (long)cred.uid;
-#endif
-   return -1;
-}
-
-/* Populate the thread-local request context (#3) from the socket and headers so
- * the buffered ingress handlers, the audit writer, and §4 dedup can read a
- * request id, idempotency key, principal, and transport without threading them
- * through every signature.
- *
- * Trust model: the principal is, by default, derived from the KERNEL-VERIFIED
- * Unix-domain peer uid (uid:N) — the server's own attribution, which a client
- * cannot forge. A client/proxy-supplied X-Aimee-Principal / X-Aimee-Source is
- * honoured ONLY when the request presents X-Aimee-Proxy-Authorization equal to
- * the configured ingress_trusted_proxy_secret. Being on the local socket is NOT
- * sufficient — a same-host, same-uid non-proxy client must not be able to spoof
- * another account's attribution. With no secret configured, no client-supplied
- * principal/source is ever trusted. The idempotency key is read on any transport
- * (it only ever dedups the caller's own identical requests). */
-static void populate_request_context(int fd, int is_tcp, const char *buf, const char *request_id,
-                                     const char *method, const char *path)
-{
-   request_context_t ctx;
-   memset(&ctx, 0, sizeof(ctx));
-   snprintf(ctx.method, sizeof(ctx.method), "%s", method ? method : "");
-   snprintf(ctx.path, sizeof(ctx.path), "%s", path ? path : "");
-   snprintf(ctx.request_id, sizeof(ctx.request_id), "%s", request_id ? request_id : "");
-   ctx.transport = is_tcp ? REQ_TRANSPORT_TCP : REQ_TRANSPORT_UDS;
-   ctx.peer_uid = http_peer_uid(fd, is_tcp);
-   ctx.capabilities = server_http_conn_caps(is_tcp, g_bearer, g_remote_writes);
-   ctx.trusted = 0;
-
-   http_header(buf, "Idempotency-Key", ctx.idempotency_key, sizeof(ctx.idempotency_key));
-
-   /* Server-derived principal from the kernel-verified UDS peer uid. */
-   if (ctx.peer_uid >= 0)
-      snprintf(ctx.principal, sizeof(ctx.principal), "uid:%ld", ctx.peer_uid);
-
-   /* A proxy is trusted to stamp identity only by presenting the shared secret.
-    * The secret comes from config, or the AIMEE_INGRESS_PROXY_SECRET environment
-    * variable — the latter so a co-located proxy that aimee-server launches (the
-    * webchat OpenAI proxy) inherits the same secret without a separate file. */
-   config_t cfg;
-   const char *secret = "";
-   if (config_load(&cfg) == 0 && cfg.ingress_trusted_proxy_secret[0])
-      secret = cfg.ingress_trusted_proxy_secret;
-   else
-   {
-      const char *env = getenv("AIMEE_INGRESS_PROXY_SECRET");
-      if (env && env[0])
-         secret = env;
-   }
-   if (secret[0])
-   {
-      char proxy_auth[160] = "";
-      if (http_header(buf, "X-Aimee-Proxy-Authorization", proxy_auth, sizeof(proxy_auth)) &&
-          server_ct_equal(proxy_auth, secret))
-         ctx.trusted = 1;
-   }
-
-   /* The principal, source, AND session key are attribution identity that aimee
-    * trusts onto the audit row, so they are honoured ONLY from a trusted proxy
-    * (the secret matched above). A plain authorized TCP client or a same-uid UDS
-    * client is NOT a trusted proxy and cannot choose its audit principal/source/
-    * session. */
-   if (ctx.trusted)
-   {
-      char principal[128] = "";
-      char source[64] = "";
-      if (http_header(buf, "X-Aimee-Principal", principal, sizeof(principal)) && principal[0])
-         snprintf(ctx.principal, sizeof(ctx.principal), "%s", principal);
-      if (http_header(buf, "X-Aimee-Source", source, sizeof(source)) && source[0])
-         snprintf(ctx.source, sizeof(ctx.source), "%s", source);
-      http_header(buf, "X-Aimee-Session-Key", ctx.session_key, sizeof(ctx.session_key));
-   }
-
-   request_context_set(&ctx);
 }
 
 static void handle_conn(int fd, int is_tcp)
@@ -1574,7 +1485,8 @@ static void handle_conn(int fd, int is_tcp)
    /* Establish the per-request context (#3) for this worker thread before any
     * handler runs. Overwritten on every request, so thread reuse cannot leak a
     * prior request's identity. */
-   populate_request_context(fd, is_tcp, buf, request_id, method, path);
+   server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path,
+                                        server_http_conn_caps(is_tcp, g_bearer, g_remote_writes));
 
    /* Authorize before reading the body: TCP requires a valid bearer; the UDS
     * relies on filesystem permissions. A session-scoping key without a

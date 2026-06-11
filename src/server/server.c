@@ -20,6 +20,7 @@
 #include "server_cron.h"
 #include "commands.h"
 #include "agent.h"
+#include "agent_exec.h" /* agent_audit_async_flush — drain audit queue at shutdown */
 #include "agent_config.h"
 #include "provider_catalog.h"
 #include "delegate_credentials.h"
@@ -1664,6 +1665,10 @@ void server_shutdown(server_ctx_t *ctx)
    platform_evloop_destroy(&ctx->evloop);
    /* Drop our pid file so a future server can detect that we are gone. */
    server_pid_clear(ctx->socket_path);
+   /* Drain any audit rows still queued in the async writer before closing DB1, so
+    * rows enqueued near shutdown are not lost (the writer thread is detached). The
+    * request/compute pools are already drained above, so no new rows arrive. */
+   agent_audit_async_flush();
    db1_shutdown();
    LOG_INFO("server", "shut down");
 }

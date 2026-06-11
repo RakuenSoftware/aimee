@@ -753,7 +753,7 @@ $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o \
 	                                $(OBJDIR)/server/server_config.o $(OBJDIR)/config_fields.o \
 	                                $(OBJDIR)/server/skill_review.o $(OBJDIR)/tests/support/skill_jobs_stub.o \
-	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o \
+	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_reqctx.o \
 	                                $(OBJDIR)/tests/support/toolset_stub.o \
 	                                $(OBJDIR)/cJSON.o $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
 	                                $(OBJDIR)/db1/model_catalog.o \
@@ -1730,7 +1730,7 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
-                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/presence.o \
+                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/presence.o \
                            $(OBJDIR)/server/workspace_runner_registry.o $(OBJDIR)/server/workspace_runner_queue.o \
                            $(OBJDIR)/forge_credentials.o \
                            $(OBJDIR)/delivery_target.o \

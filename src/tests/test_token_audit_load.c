@@ -19,7 +19,11 @@
 
 #include "aimee.h" /* MAX_PATH_LEN, pulled in before agent_types.h */
 #include "agent_exec.h"
+#include "config.h"
+#include "request_context.h"
 #include "db1.h"
+#include <stdlib.h>
+#include <sys/stat.h>
 #include <sqlite3.h>
 
 extern sqlite3 *db1_conn(void);
@@ -151,12 +155,156 @@ static void test_async_nonblocking_no_drops(void)
    assert(enqueue_ns < sync_ns);
 }
 
+/* ── Real ingress-writer concurrency ─────────────────────────────────────────
+ * Drives the ACTUAL ingress write site (agent_record_token_audit) — exercising
+ * the request-context read, the config read (async decision), the cost authority,
+ * and the audit insert — from multiple request threads PLUS a /v1/runs-style
+ * worker (the ingress-source thread override + a captured request context), with
+ * ingress_audit_async enabled in config. */
+
+#define ING_REQ_THREADS 6
+#define ING_PER_THREAD  150
+#define RUNS_WORKER_N   300
+
+static int ingress_total(void)
+{
+   return ING_REQ_THREADS * ING_PER_THREAD + RUNS_WORKER_N;
+}
+
+typedef struct
+{
+   int id;
+   long max_ns;
+} ingress_arg_t;
+
+/* A request thread: establishes its own per-request context (request id +
+ * per-client principal) the way populate_request_context() does, then makes the
+ * exact call the OpenAI/Anthropic buffered+streaming handlers make. */
+static void *ingress_request_thread(void *arg)
+{
+   ingress_arg_t *w = (ingress_arg_t *)arg;
+   request_context_t ctx;
+   memset(&ctx, 0, sizeof(ctx));
+   snprintf(ctx.request_id, sizeof(ctx.request_id), "req-%d", w->id);
+   snprintf(ctx.principal, sizeof(ctx.principal), "uid:%d", 7000 + w->id);
+   request_context_set(&ctx);
+
+   agent_result_t result;
+   memset(&result, 0, sizeof(result));
+   snprintf(result.agent_name, sizeof(result.agent_name), "ingressbot");
+   snprintf(result.model, sizeof(result.model), "gpt-4o");
+   result.prompt_tokens = 10;
+   result.completion_tokens = 5;
+   result.success = 1;
+   for (int i = 0; i < ING_PER_THREAD; i++)
+   {
+      long t0 = now_ns();
+      agent_record_token_audit(&result, "", "openai-ingress");
+      long dt = now_ns() - t0;
+      if (dt > w->max_ns)
+         w->max_ns = dt;
+   }
+   request_context_clear();
+   return NULL;
+}
+
+/* The /v1/runs worker: re-establishes the captured request context on its own
+ * thread and tags spend via the ingress-source override, the way run_job_worker
+ * does, then logs through the agent path (source "agent" -> retagged ingress). */
+static void *runs_worker_thread(void *arg)
+{
+   ingress_arg_t *w = (ingress_arg_t *)arg;
+   request_context_t ctx;
+   memset(&ctx, 0, sizeof(ctx));
+   snprintf(ctx.request_id, sizeof(ctx.request_id), "run-%d", w->id);
+   snprintf(ctx.principal, sizeof(ctx.principal), "uid:runs");
+   request_context_set(&ctx);
+   agent_set_ingress_source("openai-ingress");
+
+   agent_result_t result;
+   memset(&result, 0, sizeof(result));
+   snprintf(result.agent_name, sizeof(result.agent_name), "runbot");
+   snprintf(result.model, sizeof(result.model), "gpt-4o");
+   result.prompt_tokens = 12;
+   result.completion_tokens = 6;
+   result.success = 1;
+   for (int i = 0; i < RUNS_WORKER_N; i++)
+   {
+      long t0 = now_ns();
+      agent_record_token_audit(&result, "execute", "agent");
+      long dt = now_ns() - t0;
+      if (dt > w->max_ns)
+         w->max_ns = dt;
+   }
+   agent_set_ingress_source("");
+   request_context_clear();
+   return NULL;
+}
+
+static void test_real_ingress_writer_concurrency(void)
+{
+   pthread_t req[ING_REQ_THREADS], runs;
+   ingress_arg_t reqargs[ING_REQ_THREADS], runargs = {.id = 0, .max_ns = 0};
+   long t0 = now_ns();
+   for (int i = 0; i < ING_REQ_THREADS; i++)
+   {
+      reqargs[i].id = i;
+      reqargs[i].max_ns = 0;
+      assert(pthread_create(&req[i], NULL, ingress_request_thread, &reqargs[i]) == 0);
+   }
+   assert(pthread_create(&runs, NULL, runs_worker_thread, &runargs) == 0);
+
+   long tail = 0;
+   for (int i = 0; i < ING_REQ_THREADS; i++)
+   {
+      pthread_join(req[i], NULL);
+      if (reqargs[i].max_ns > tail)
+         tail = reqargs[i].max_ns;
+   }
+   pthread_join(runs, NULL);
+   if (runargs.max_ns > tail)
+      tail = runargs.max_ns;
+
+   /* Drain the async writer (if config enabled it) before counting. */
+   agent_audit_async_flush();
+   long total_us = (now_ns() - t0) / 1000;
+
+   int landed = count_source("openai-ingress");
+   int attempted = ingress_total();
+   printf("  ingress: %d request inserts + %d /v1/runs inserts via "
+          "agent_record_token_audit in %ld us, tail %ld us, drops=%d\n",
+          ING_REQ_THREADS * ING_PER_THREAD, RUNS_WORKER_N, total_us, tail / 1000,
+          attempted - landed);
+   /* Acceptance: the real ingress write path, driven concurrently from request
+    * threads + the /v1/runs worker, drops nothing. */
+   assert(landed == attempted);
+   assert(tail < 5L * 1000000000L);
+}
+
+/* Best-effort: point config at a temp home and enable ingress_audit_async so the
+ * real-writer test exercises the async config path. Falls back to default config
+ * (synchronous inline writes) if the temp config cannot be written. */
+static void enable_async_config(void)
+{
+   const char *home = "/tmp/aimee_audit_load_home";
+   mkdir(home, 0700);
+   setenv("AIMEE_HOME", home, 1);
+   setenv("AIMEE_NO_CACHE", "1", 1); /* always re-read config */
+   config_t cfg;
+   if (config_load(&cfg) != 0)
+      return;
+   cfg.ingress_audit_async = 1;
+   (void)config_save(&cfg);
+}
+
 int main(void)
 {
    printf("token_audit load: DB1 write-concurrency acceptance\n");
    assert(db1_init(":memory:") == 0);
    test_sync_concurrency_no_drops();
    test_async_nonblocking_no_drops();
+   enable_async_config();
+   test_real_ingress_writer_concurrency();
    db1_shutdown();
    printf("All token_audit load tests passed.\n");
    return 0;
