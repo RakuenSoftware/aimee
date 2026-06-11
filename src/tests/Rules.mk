@@ -166,6 +166,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-tdd \
                $(TESTPREFIX)/unit-test-compact \
                $(TESTPREFIX)/unit-test-token-audit \
+               $(TESTPREFIX)/unit-test-token-audit-load \
                $(TESTPREFIX)/unit-test-windows \
                $(TESTPREFIX)/unit-test-token-tracker \
                $(TESTPREFIX)/unit-test-reasoning-cap \
@@ -1393,6 +1394,10 @@ $(TESTPREFIX)/unit-test-anthropic-shape: $(OBJDIR)/tests/test_anthropic_shape.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-token-audit: $(OBJDIR)/tests/test_token_audit.o \
+                              $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-token-audit-load: $(OBJDIR)/tests/test_token_audit_load.o \
                               $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

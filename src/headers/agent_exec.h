@@ -90,6 +90,15 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
  * this before writing their cost rows so ingress accounting can be flipped on
  * deliberately; internal agent accounting (agent_log_call) is unaffected. */
 int agent_ingress_accounting_enabled(void);
+/* Async-audit writer (ingress_audit_async rollout knob; DB1 write-concurrency
+ * acceptance). enqueue_row hands a copy of `row` (a const db1_token_audit_row_t*,
+ * opaque here to keep the db1 type out of this header) to the background writer so
+ * the request thread is not blocked on the DB insert — returns 0 when enqueued,
+ * -1 when the bounded ring is full (caller inserts inline, never dropping a row).
+ * flush blocks until the queue has fully drained (clean shutdown + load-test
+ * validation of drop rate). */
+int agent_audit_async_enqueue_row(const void *row);
+void agent_audit_async_flush(void);
 /* Set a per-thread ingress source that overrides the source on any token_audit
  * row written on this thread (incl. via agent_log_call). Used by ingress workers
  * (e.g. /v1/runs) so spend driven through the agent loop is attributed to the

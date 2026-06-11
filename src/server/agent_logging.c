@@ -45,6 +45,8 @@ static audit_async_entry_t g_audit_ring[AUDIT_ASYNC_SLOTS];
 static int g_audit_head, g_audit_tail; /* tail == head => empty */
 static pthread_mutex_t g_audit_mtx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t g_audit_cv = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_audit_drained = PTHREAD_COND_INITIALIZER;
+static long g_audit_pending; /* enqueued but not yet inserted by the writer */
 static pthread_t g_audit_thread;
 static int g_audit_thread_started;
 
@@ -92,6 +94,14 @@ static void *audit_writer_main(void *arg)
       db1_token_audit_row_t row;
       audit_entry_to_row(&e, &row);
       (void)db1_token_audit_insert(&row);
+
+      /* Mark the item drained so a flush (clean shutdown / tests) can wait for
+       * the queue to empty. */
+      pthread_mutex_lock(&g_audit_mtx);
+      if (g_audit_pending > 0)
+         g_audit_pending--;
+      pthread_cond_broadcast(&g_audit_drained);
+      pthread_mutex_unlock(&g_audit_mtx);
    }
    return NULL;
 }
@@ -145,9 +155,30 @@ static int audit_async_enqueue(const db1_token_audit_row_t *row)
    e->cache_read_tokens = row->cache_read_tokens;
    e->estimated_cost_usd = row->estimated_cost_usd;
    g_audit_head = next;
+   g_audit_pending++;
    pthread_cond_signal(&g_audit_cv);
    pthread_mutex_unlock(&g_audit_mtx);
    return 0;
+}
+
+/* Public async-audit API (rollout knob + validation). enqueue_row copies the row
+ * into the ring for the background writer, returning 0 when enqueued or -1 when
+ * full (caller inserts inline so a row is never dropped). flush blocks until the
+ * queue has fully drained — used for clean shutdown and by the load test to
+ * count landed rows. */
+int agent_audit_async_enqueue_row(const void *row)
+{
+   if (!row)
+      return -1;
+   return audit_async_enqueue((const db1_token_audit_row_t *)row);
+}
+
+void agent_audit_async_flush(void)
+{
+   pthread_mutex_lock(&g_audit_mtx);
+   while (g_audit_pending > 0)
+      pthread_cond_wait(&g_audit_drained, &g_audit_mtx);
+   pthread_mutex_unlock(&g_audit_mtx);
 }
 
 /* Per-thread ingress source: the /v1/runs worker sets this so spend logged via
