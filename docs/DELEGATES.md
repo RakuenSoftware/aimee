@@ -81,6 +81,15 @@ flowchart TD
 
 ### Configuration
 
+> **Thin client (remote server):** API keys are held on the client, not the
+> server. `aimee agent add <name> <endpoint> <model> --key K` against a remote
+> `aimee-server` stores `K` locally (`~/.config/aimee/agent-keys.json`) and
+> strips it before forwarding the definition; the key is pushed once per session
+> to a RAM-only keyring on the server and never persisted. Codex agents take no
+> key (`--provider codex` sources the OAuth token from `~/.codex/auth.json`). You
+> configure agents per machine. See [THIN_CLIENT.md](THIN_CLIENT.md) and
+> [SECURITY.md](SECURITY.md#agent-credential-custody-thin-client).
+
 Use `aimee agent local` for local or LAN OpenAI-compatible runtimes such as
 `llama-server` and Ollama. The command is idempotent: re-running it updates the
 same delegate, probes `/v1/models`, probes llama.cpp `/slots` when available,
