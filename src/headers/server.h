@@ -46,6 +46,7 @@ typedef struct cJSON cJSON;
 #define LIMIT_TOOL     (4 * 1024 * 1024) /* 4MB for tool I/O */
 #define LIMIT_DELEGATE (4 * 1024 * 1024) /* 4MB: supports 2MB prompt-file + JSON overhead */
 #define LIMIT_CHAT     (512 * 1024)      /* 512KB for chat messages */
+#define LIMIT_INGEST   (1024 * 1024)     /* 1MB: client-pushed code files (kb req cap) */
 #define LIMIT_DEFAULT  (256 * 1024)      /* 256KB default */
 
 /* JSON framing limits */
@@ -262,6 +263,7 @@ int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_benchmark(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_index_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_blast_radius(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

@@ -456,6 +456,10 @@ int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "index.scan");
 }
+int handle_index_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "index.ingest");
+}
 int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "index.find");
