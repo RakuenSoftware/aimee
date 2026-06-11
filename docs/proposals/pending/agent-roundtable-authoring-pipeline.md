@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 tenth review)
+- **Date:** 2026-06-11 (revised post-PR-#183 eleventh review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -427,6 +427,39 @@ how review participants actually run shows that mis-locates the work.
     capability. Review correctness then never depends on whether a given model can
     retrieve or read files. **Resolved in §2, §3, and §10.**
 
+## PR #183 eleventh review — serialization and assembly provenance
+
+The tenth review moved retrieval to the right actor (the orchestrator), but the
+proposal still leaves three build-time correctness gaps at the response/ledger
+boundary.
+
+38. **`items_truncated` is a separate terminal-invalid flag, not covered by
+    `truncated`.** The engine sets `result.truncated` for brief/question/context
+    truncation and item-count overflow, but `add_roundtable_arrays` can still clip
+    serialized `items[]` at `ROUNDTABLE_ITEMS_JSON_BUDGET` and emit
+    `items_truncated: true` without changing `result.truncated`. A done-bar or gate
+    digest that reads only `truncated == false` can pass with missing findings.
+    The capture hook must persist `items_truncated`, and every done-bar must treat
+    it as invalid terminal evidence. **Resolved in §3, §4, and §10.**
+39. **Orchestrator-assembled inline review needs a budgeted assembly manifest.**
+    #37 says the orchestrator retrieves cross-chunk spans and hands reviewers a
+    self-contained inline unit, but it does not bound or explain that assembled
+    prompt. The current HTTP body ceiling is large, while reviewer context and
+    output fields are much smaller; over-assembling can silently omit the exact
+    span needed for correctness. Each review unit and aggregate call needs a
+    recorded assembly manifest: origin/chunk refs, selected span ids/ranges/hashes,
+    token/byte estimate against the resolved minimum participant budget, and any
+    omitted candidate spans. Required omissions keep the aggregate blocked and
+    surface as coverage gaps. **Resolved in §2, §3, §4, and §10.**
+40. **Item display fields are too small to be the only source provenance.**
+    `roundtable_review_item_t.location[128]`, `summary[256]`,
+    `recommendation[256]`, and `sources[256]` are display-sized fields. They
+    cannot safely carry long cross-chunk evidence chains, many participant
+    sources, or gate-audit provenance. The ledger must store a sidecar mapping
+    from item identity/result hash to the assembly spans and source refs that
+    produced it; `item.sources` remains a display hint, not the durable evidence
+    model. **Resolved in §4, §5, and §10.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -524,6 +557,9 @@ Both phases use the **same** engine; they differ only in input and brief.
   from chunk rows (#34), and the **orchestrator** retrieves needed spans from the
   origin plus review-scoped chunks and hands each review call a self-contained
   inline unit — panelists are not assumed to retrieve or read files (#32/#35/#37).
+  Each assembled unit records an assembly manifest with selected span refs/ranges/
+  hashes, token/byte budget, and omitted candidates; required omissions block the
+  aggregate instead of being hidden (#39).
   Pipeline-owned PR reviews use the async op-run path with validated pass
   metadata, not a direct synchronous roundtable dispatch. The brief carries the
   *fixes just applied*, the *invariants* the change must not break, and the
@@ -548,10 +584,11 @@ read from real engine fields (`roundtable_result_t`):
 
 Every bar first requires a valid completed result: `truncated == false`,
 `degraded == false`, `cost_capped == false`, `deadline_hit == false`,
-`cancelled == false`, and result provenance that the gate digest can explain. For
-review-mode done-bars, `items_round` must be the round being evaluated; if the
-surfaced artifact comes from a different `artifact_round`/`best_round`, the digest
-must say so and the phase cannot silently pass on mismatched evidence.
+`cancelled == false`, `items_truncated != true`, and result provenance that the
+gate digest can explain. For review-mode done-bars, `items_round` must be the
+round being evaluated; if the surfaced artifact comes from a different
+`artifact_round`/`best_round`, the digest must say so and the phase cannot
+silently pass on mismatched evidence.
 
 - `zero_blocking` *(default)* — `converged == true` and no `items[]` of
   `severity == "blocking"`. Suggestions/nits are surfaced in the gate digest but
@@ -581,7 +618,10 @@ missing section, a renamed reference) via vector/FTS + the `prev_chunk_id`/
 aggregate review call. A heterogeneous, possibly-remote panelist is never assumed
 to retrieve or read files; it reviews the inline digest. The full text is never
 needed in one context window, and the origin is always retained, never replaced by
-its chunks.
+its chunks. The aggregate also validates each assembled inline unit's budget and
+manifest (#39): selected spans must hash back to the retained origin/chunks, any
+omitted required span is a coverage gap, and no unit may pass if the manifest says
+the resolved minimum participant context budget was exceeded.
 
 **Pass ceiling (configurable; cost backstop, not an early-exit).** `roundtable_pipeline_max_passes`
 bounds outer passes. **Default 0 = unbounded** — review runs until the done-bar,
@@ -631,12 +671,18 @@ Either way, the durable record holds:
   explicit artifact payload), review-chunk index refs (`kb_documents` rows if that
   backend is used), and content hashes — not unbounded inline text as the primary
   representation;
+- assembly manifests for orchestrator-built review units and aggregate checks:
+  selected origin/chunk span refs, ranges, hashes, input budget estimates, and
+  omitted candidate spans (#39);
 - the current brief plus compact gate digest;
 - per-pass history: each outer pass's status, aggregate child `run_id` if
   single-call, `converged`, blocking/suggestion counts, `cost_usd`, `rounds_run`,
   `best_round`, result hash, and any payload/chunk refs; for chunked passes, a
   manifest plus aggregate row that records per-chunk results and the
   whole-artifact synthesis/check (#28);
+- per-item provenance sidecars keyed by item identity/result hash, mapping
+  findings back to assembly spans, source refs, and participant sources; compact
+  `item.sources` strings are display hints only (#40);
 - per-attempt history under each pass: `attempt_no`, child `run_id`, submitted and
   terminal timestamps, captured/lost status, terminal flags, result hash, and cost
   if the result was available;
@@ -666,12 +712,13 @@ before the run record can be evicted. The hook **no-ops when `__pipeline_pass_id
 is absent**, so ordinary `ensemble_review`/roundtable calls are untouched. What it
 persists is **mode-appropriate** (#27): for a REVIEW pass, the items + severities
 + `count`, `converged`, validity flags, `items_round`, `artifact_round`, counts,
-`cost_usd`, `rounds_run`; for a DRAFT pass, the artifact **ref + content hash** +
-`best_round`/`artifact_round` + validity flags (the skeleton text itself lands in
-the working file, not as a ledger blob, per #9). Failed, cancelled, malformed, and
-capture-failed terminal states are recorded too. The `/v1/runs` id is retained
-only as a historical pointer; the ledger row is the source of truth for the
-done-bar and the gate digest.
+`cost_usd`, `rounds_run`, and `items_truncated` when the HTTP response serialized
+only a prefix of the item list (#38); for a DRAFT pass, the artifact **ref +
+content hash** + `best_round`/`artifact_round` + validity flags (the skeleton text
+itself lands in the working file, not as a ledger blob, per #9). Failed,
+cancelled, malformed, and capture-failed terminal states are recorded too. The
+`/v1/runs` id is retained only as a historical pointer; the ledger row is the
+source of truth for the done-bar and the gate digest.
 
 **The agent reads terminal from the ledger, not `/v1/runs` (#26).** Because the
 worker writes the result to DB1 at terminal, the driving agent learns a pass
@@ -940,6 +987,15 @@ ledger) before the full idea→merge pipeline of P2/P3.
   because the orchestrator pre-retrieved the needed spans and passed a
   self-contained inline unit; the panel's tool access is never load-bearing for
   review correctness.
+- **Assembled input budget/provenance (#39)** — build an aggregate review unit
+  where retrieved candidate spans exceed the smallest participant budget; the
+  assembly manifest records selected/omitted spans and hashes, omitted required
+  spans block the aggregate with a coverage gap, and no over-budget inline unit is
+  submitted as valid evidence.
+- **Item source provenance sidecar (#40)** — generate a finding whose evidence
+  spans many chunks/participants so `item.sources` would be clipped; the gate
+  digest still links the item identity/result hash to the durable sidecar spans
+  and source refs, not just the display string.
 - **Chunk threshold from min panel context (#33)** — a heterogeneous panel sizes
   chunks to the smallest participant context budget (resolved per run, reserving
   brief/role/peer-note headroom); a chunk that would overflow the smallest model is
@@ -961,9 +1017,10 @@ ledger) before the full idea→merge pipeline of P2/P3.
   capped artifact.
 - **Done-bar config** — each of the three bars stops the loop at the right point
   (suggestions block under bar 2; questions must be answered under bar 3).
-- **Done-bar validity flags** — `truncated`, `degraded`, `cost_capped`,
-  `deadline_hit`, `cancelled`, lost result, or ambiguous `items_round` /
-  `artifact_round` provenance prevents a done-bar pass and escalates.
+- **Done-bar validity flags (#38)** — `truncated`, `items_truncated`, `degraded`,
+  `cost_capped`, `deadline_hit`, `cancelled`, lost result, or ambiguous
+  `items_round` / `artifact_round` provenance prevents a done-bar pass and
+  escalates.
 - **Question cap** — a brief with >16 questions is rejected or split before using
   `zero_blocking_questions_answered`; overflow cannot be silently treated as
   answered.
