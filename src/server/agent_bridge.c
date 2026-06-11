@@ -331,9 +331,20 @@ static char *openai_content_to_text(cJSON *content, int include_thinking)
    }
    return out;
 }
+
+/* Capture the provider-reported model id (the response's "model" field) into the
+ * parsed result, so billing can prefer it over the requested/served alias. */
+static void parse_capture_model(cJSON *root, parsed_response_t *out)
+{
+   cJSON *m = cJSON_GetObjectItem(root, "model");
+   if (m && cJSON_IsString(m) && m->valuestring)
+      snprintf(out->model, sizeof(out->model), "%s", m->valuestring);
+}
+
 void agent_parse_response_openai(cJSON *root, parsed_response_t *out)
 {
    memset(out, 0, sizeof(*out));
+   parse_capture_model(root, out);
 
    /* Usage */
    cJSON *usage = cJSON_GetObjectItem(root, "usage");
@@ -777,6 +788,7 @@ void agent_parse_response_responses(const char *body, parsed_response_t *out)
 void agent_parse_response_anthropic(cJSON *root, parsed_response_t *out)
 {
    memset(out, 0, sizeof(*out));
+   parse_capture_model(root, out);
 
    /* Usage */
    cJSON *usage = cJSON_GetObjectItem(root, "usage");

@@ -26,6 +26,9 @@ typedef struct
    int completion_tokens;
    int cache_write_tokens; /* Anthropic: cache_creation_input_tokens */
    int cache_read_tokens;  /* Anthropic: cache_read_input_tokens */
+   /* Provider-reported model id echoed in the response (often more specific than
+    * the requested/served alias, e.g. a dated version). Empty when absent. */
+   char model[MAX_MODEL_LEN];
 } parsed_response_t;
 
 /* --- Request builders --- */

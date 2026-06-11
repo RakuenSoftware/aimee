@@ -658,6 +658,31 @@ static void test_parse_response_openai_sanitizes_invalid_tool_arguments(void)
    printf("parse_response_openai_sanitizes_invalid_tool_arguments OK\n");
 }
 
+static void test_parse_response_captures_provider_model(void)
+{
+   /* The provider-reported model (response "model" field, often a more specific
+    * dated version) is captured for billing precedence. */
+   const char *oai = "{\"model\":\"gpt-4o-2024-11-20\",\"usage\":{\"prompt_tokens\":1,"
+                     "\"completion_tokens\":1},\"choices\":[{\"message\":{\"content\":\"hi\"}}]}";
+   cJSON *root = cJSON_Parse(oai);
+   assert(root != NULL);
+   parsed_response_t p;
+   agent_parse_response_openai(root, &p);
+   assert(strcmp(p.model, "gpt-4o-2024-11-20") == 0);
+   agent_free_parsed_response(&p);
+   cJSON_Delete(root);
+
+   const char *ant = "{\"model\":\"claude-3-5-sonnet-20241022\",\"content\":[{\"type\":\"text\","
+                     "\"text\":\"hi\"}],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}";
+   root = cJSON_Parse(ant);
+   assert(root != NULL);
+   agent_parse_response_anthropic(root, &p);
+   assert(strcmp(p.model, "claude-3-5-sonnet-20241022") == 0);
+   agent_free_parsed_response(&p);
+   cJSON_Delete(root);
+   printf("parse_response_captures_provider_model OK\n");
+}
+
 static void test_delegate_rescue_parses_mistral_bracket(void)
 {
    parsed_response_t parsed;
@@ -1289,6 +1314,7 @@ int main(void)
    test_openai_provider_fixed_temperature_fallback();
    test_agent_config_recommended_sampling_roundtrip();
    test_parse_response_openai_sanitizes_invalid_tool_arguments();
+   test_parse_response_captures_provider_model();
    test_delegate_rescue_parses_mistral_bracket();
    test_delegate_rescue_parses_fenced_json();
    test_delegate_rescue_detects_invoke_markup();

@@ -684,6 +684,9 @@ static void parse_response_openai(cJSON *root, agent_result_t *out)
    out->completion_tokens = parsed.completion_tokens;
    out->cache_write_tokens = parsed.cache_write_tokens;
    out->cache_read_tokens = parsed.cache_read_tokens;
+   /* Prefer the provider-reported model over the served alias set at entry. */
+   if (parsed.model[0])
+      snprintf(out->model, MAX_MODEL_LEN, "%s", parsed.model);
 
    if (parsed.content && parsed.content[0])
    {
@@ -911,6 +914,11 @@ static void parse_response_anthropic(cJSON *root, agent_result_t *out)
       if (ot && cJSON_IsNumber(ot))
          out->completion_tokens = ot->valueint;
    }
+
+   /* Prefer the provider-reported model over the served alias set at entry. */
+   cJSON *mdl = cJSON_GetObjectItem(root, "model");
+   if (mdl && cJSON_IsString(mdl) && mdl->valuestring)
+      snprintf(out->model, MAX_MODEL_LEN, "%s", mdl->valuestring);
 }
 
 static void parse_response(const char *body, const agent_t *agent, agent_result_t *out)
@@ -1888,12 +1896,10 @@ void agent_print_context(const agent_config_t *cfg)
 
 /* --- Logging --- */
 
-/* Optional per-thread ingress source. The /v1/runs worker runs the agentic loop,
- * which logs via agent_log_call with source="agent"; setting this on that worker
- * thread retags the row with the ingress origin instead, so the run's spend is
- * distinguishable from internal agent execution — without writing a second row.
- * The runs worker is a dedicated detached thread, so the thread-local is scoped
- * to that turn. */
+/* Per-thread ingress source: the /v1/runs worker sets this so spend logged via
+ * agent_log_call (source="agent") from inside the run loop is retagged with the
+ * ingress origin instead — distinguishing it from internal execution, no 2nd row.
+ * The runs worker is a dedicated detached thread, so it is scoped to that turn. */
 static __thread char g_ingress_source[40] = "";
 
 void agent_set_ingress_source(const char *source)
@@ -1906,9 +1912,7 @@ void agent_record_token_audit(const agent_result_t *result, const char *role, co
    if (!result)
       return;
 
-   /* A thread-scoped ingress source (set by an ingress worker) overrides the
-    * caller's source, so e.g. /v1/runs spend is tagged as ingress rather than
-    * the "agent" that agent_log_call passes from inside the run loop. */
+   /* A thread-scoped ingress source overrides the caller's source (see above). */
    const char *eff_source = g_ingress_source[0] ? g_ingress_source : (source ? source : "");
 
    token_usage_t usage = {
