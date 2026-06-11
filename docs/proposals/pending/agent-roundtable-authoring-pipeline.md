@@ -25,7 +25,7 @@ quality gates**:
 
 ```
 [Human] idea
-  → DRAFT roundtable generates a first proposal
+  → DRAFT roundtable generates a first proposal skeleton (8KB-capped; expanded in review)
   → REVIEW roundtable ⇄ author-revise  (until done-bar)        ← proposal quality gate
   → open proposal PR
   → [Human gate 1] pass / fail
@@ -86,6 +86,59 @@ part of the proposal rather than left to interpretation:
    draft-capable MCP surface), while REVIEW loops use `ensemble_review`.
    **Resolved in §1, §2, and §8.**
 
+## PR #183 second review — feasibility and accuracy against the engine
+
+A second pass that read the engine buffers and the in-tree MCP surface (not just
+the proposal headers) found four more items — one of which contradicts a core
+premise.
+
+8. **The `agent-directed-pr-review` dependency is overstated; the review surface
+   is already on `testing`.** `ensemble_review` is fully registered
+   (`src/mcp_tools.c:610`) and dispatched (`handle_mcp_ensemble_review`,
+   `server_mcp.c:1502`): its schema already accepts a `diff` (minLength 20) **and**
+   a `brief` (string or `{focus,fixes,invariants,questions}`), queues
+   `delegate.roundtable`, returns a run id, and its result already exposes the
+   structured `items`/`items_round` vs `artifact_round` distinction. So P1a (brief)
+   + P1b (items) + P1c (tool) are effectively landed for **review** mode. The real
+   remaining dependency is narrow: confirm the `/v1/runs` result contract is stable
+   enough to evaluate the done-bar, and add a **draft**-capable callable path
+   (#9/§8). **Resolved in §8 and the What-exists table** (downgraded from "hard
+   dependency on an unmerged proposal" to "review surface in tree; verify result
+   contract").
+
+9. **DRAFT mode cannot generate a full-length proposal.** The roundtable
+   `artifact` is `xstrdup0(res.response)` (`delegate_ensemble.c:592`), and every
+   participant/aggregator `response` is a fixed `char[8192]`
+   (`delegate_ensemble.h:14`) produced under a ~4096-token aggregator cap
+   (`:390`). 8 KB is ~150–250 lines of markdown; real proposals in this tree run
+   300–1400 lines. So "DRAFT generates a first proposal" is **not feasible as one
+   call** — the artifact truncates. This is distinct from gap #5 (storage): #5 is
+   "don't inline large artifacts into the ledger," this is "the engine cannot
+   *emit* one." **Resolved in §1, §2, and §11** by having DRAFT produce a
+   **skeleton/outline** that the author-revise loop expands section by section,
+   never expecting a complete proposal from a single DRAFT artifact.
+
+10. **The done-bar result must be captured to DB1 at pass completion — the
+    `/v1/runs` record is eviction-prone.** The done-bar is read by polling
+    `/v1/runs/{id}`, backed by the same `openai_runs_store`
+    (`OPENAI_RUNS_STORE_MAX 256`, oldest-reused, in-process, non-durable —
+    `openai_runs_store.c:15`). A long pass (up to `roundtable_deadline_ms`, default
+    10 min), 256 sibling runs, or a restart can evict the record **before** the
+    agent reads it. Gap #2 moved the *ledger* to DB1 but left the *result-capture
+    race* open. **Resolved in §4** by requiring the structured pass result (items,
+    counts, `converged`, cost) to be persisted into the DB1 ledger the moment the
+    run reaches a terminal state — the `/v1/runs` record is a transient read, never
+    the retained result.
+
+11. **The "pass → merge" edges need explicit merge authority and CI assumptions.**
+    Both gates end in the agent merging a PR to `testing`, but this repo's flow
+    bases PRs on `testing`, may require `gh pr merge --admin` (CI has been
+    billing-suspended, so checks can hang), and enforces branch policy. The pass
+    edge cannot assume an unattended `gh pr merge` succeeds. **Resolved in §5 and
+    §8** by stating the merge is an explicit, possibly admin-gated step the agent
+    performs only after the human pass, with CI-state and branch-policy
+    preconditions surfaced rather than assumed.
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -112,7 +165,8 @@ part of the proposal rather than left to interpretation:
 | Capability | Status |
 |---|---|
 | Multi-round panel, DRAFT + REVIEW modes, deterministic convergence, dedup, severity, cost/deadline bounds | **exists** (engine, `testing`) |
-| Directed review (brief), structured items returned, `ensemble_review` MCP tool | **partial in tree; dependency on final agent-directed-pr-review P1a–c contract** |
+| Directed review (brief), structured items returned, `ensemble_review` MCP tool (review mode) | **in tree on `testing`** (`mcp_tools.c:610`, `handle_mcp_ensemble_review`); verify result contract (§8) |
+| A **draft**-capable callable path | **gap** — `ensemble_review` forces review mode; DRAFT needs `/v1/delegate/roundtable --mode draft` or a draft MCP sibling (§8) |
 | PR open / merge, diff capture (`git diff`) | **exists** (`gh`, `git`) |
 | Outer REVIEW⇄revise loop, done-bar evaluation, pass ceiling + escalation | **net-new** (§3) |
 | The two human gates + the two fail-return edges | **net-new** (§5) |
@@ -128,9 +182,13 @@ States (persisted in the §4 ledger):
 Transitions:
 
 1. **drafting** — DRAFT roundtable turns the human idea (+ any seed brief) into a
-   first proposal artifact. One roundtable call in `ROUNDTABLE_DRAFT` mode
-   (through `/v1/delegate/roundtable` / `aimee delegate roundtable --mode draft`,
-   or an explicit draft-capable MCP surface) produces the working `artifact`.
+   first proposal **skeleton**, not a finished proposal. One roundtable call in
+   `ROUNDTABLE_DRAFT` mode (through `/v1/delegate/roundtable` / `aimee delegate
+   roundtable --mode draft`, or an explicit draft-capable MCP surface) produces the
+   working `artifact` — but that artifact is `char[8192]`-capped (#9), so DRAFT
+   yields a section outline + goal/scope, which the `proposal_review` author-revise
+   loop expands section by section. A full proposal is never expected from one
+   DRAFT call.
 2. **proposal_review** — the §3 outer loop: REVIEW the draft, author-revise from
    the items, re-REVIEW, until the done-bar (§3). Then the agent opens the proposal
    PR (`gh pr create`, base `testing`, per repo flow) and moves to `gate1_pending`.
@@ -152,10 +210,13 @@ across a server restart or a new agent session.
 Both phases use the **same** engine; they differ only in input and brief.
 
 - **Proposal phase (B).** Input = proposal markdown. **Both** modes (per decision):
-  DRAFT to generate the first artifact in `drafting`, then REVIEW to gate it in
-  `proposal_review`. The brief carries the proposal's *goal*, the *invariants* it
-  must satisfy, and the human's seed *questions*. Author-revise between REVIEW
-  passes is done by the driving agent (it is the proposal's author).
+  DRAFT to generate the first **skeleton** in `drafting` (8 KB-capped, #9), then
+  REVIEW to gate it in `proposal_review`, with the driving agent expanding the
+  skeleton into the full proposal across the author-revise passes. The full
+  proposal lives in the working file/PR, not in the DRAFT artifact; REVIEW reviews
+  the file (or chunked sections for large proposals, like the diff path below),
+  not the truncated artifact. The brief carries the proposal's *goal*, the
+  *invariants* it must satisfy, and the human's seed *questions*.
 - **PR phase (A).** Input = unified diff (normally `git diff <base>...HEAD`;
   aimee has no PR-fetch and needs none — `agent-directed-pr-review` §6). REVIEW
   mode only; the agent applies fixes between passes. For large diffs, the driving
@@ -245,6 +306,16 @@ Either way, the durable record holds:
   and last checked mergeability;
 - the human-gate verdicts, fail reasons, actor/timestamp, and resume action taken.
 
+**Result capture is eager, not lazy (#10).** The done-bar is read from the
+roundtable run's structured result, but that lives in `/v1/runs` /
+`openai_runs_store`, which is bounded (`OPENAI_RUNS_STORE_MAX 256`, oldest-reused)
+and non-durable. The driving agent therefore copies the structured pass result
+(items + severities + `count`, `converged`, counts, `cost_usd`, `rounds_run`)
+into the DB1 ledger the **moment the run reaches a terminal state** — before any
+further pass, gate, or restart can evict the `/v1/runs` record. The `/v1/runs` id
+is retained only as a historical pointer; the ledger row is the source of truth
+for the done-bar and the gate digest.
+
 This makes the human gate a durable checkpoint: `status` shows where it is and
 the evidence; `gate pass|fail --reason "…"` records the verdict and resumes the
 loop. The driving agent reconstructs its position from the ledger on any new
@@ -280,6 +351,16 @@ the worktree is clean enough for the operation, `gh`/GitHub auth is available,
 and mergeability has not changed underneath the gate. A failed validation returns
 to the relevant review phase or asks the human for a fresh verdict with the stale
 evidence called out.
+
+**Merge is an explicit, policy-aware step, not an assumed `gh pr merge` (#11).**
+This repo bases PRs on `testing`, enforces branch policy, and has run with CI
+billing suspended (so required checks can hang or fail fast). The pass→merge edge
+therefore: (a) runs only after the human pass; (b) surfaces CI/mergeability state
+in the gate digest rather than assuming green; (c) may require `gh pr merge
+--admin` and states so; and (d) records the merge SHA in the ledger. If the merge
+cannot complete under policy (auth, protected branch, hung checks), the pipeline
+parks at the gate with the reason surfaced — it never reports a phase advanced
+when the merge did not land.
 
 ## §6 Config
 
@@ -324,12 +405,21 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
 
 ## §8 Dependencies
 
-- **Hard:** `agent-directed-pr-review` P1a (brief) + P1b (structured items
-  returned) + P1c (`ensemble_review` MCP tool over the async bridge) as a stable
-  callable contract. The current tree has an `ensemble_review` MCP route that
-  queues `delegate.roundtable`, but the pipeline still needs the final structured
-  result shape, status/polling contract, cancellation behavior, and payload
-  limits from that proposal. Without P1b it cannot evaluate the done-bar.
+- **Mostly satisfied (review mode):** `ensemble_review` is already on `testing`
+  with the brief (string or `{focus,fixes,invariants,questions}`), the structured
+  `items`/`items_round`/`artifact_round` result, and the run-id/poll lifecycle
+  (`mcp_tools.c:610`, `handle_mcp_ensemble_review`). The remaining dependency on
+  `agent-directed-pr-review` is **narrow**: confirm the `/v1/runs` result shape is
+  stable and complete enough to evaluate the done-bar (the items array with
+  severities and `count`), and treat any tightening of that contract as a shared
+  interface, not a blocker. The pipeline is *not* gated on that proposal merging
+  wholesale.
+- **Hard for proposal drafting (open gap):** a callable `ROUNDTABLE_DRAFT` path.
+  `ensemble_review` forces review mode, so DRAFT must go through
+  `/v1/delegate/roundtable` / `aimee delegate roundtable --mode draft`, or a narrow
+  draft MCP sibling — never by overloading the review-only tool. And per #9 the
+  DRAFT artifact is ~8 KB-capped, so this path yields a skeleton, not a full
+  proposal.
 - **Hard for proposal drafting:** a callable `ROUNDTABLE_DRAFT` path. The existing
   `/v1/delegate/roundtable` / `aimee delegate roundtable --mode draft` surface is
   enough if the driving agent can call it; otherwise add a narrow draft MCP
@@ -376,6 +466,14 @@ ledger) before the full idea→merge pipeline of P2/P3.
 - **Run-store separation** — kill/restart after child `/v1/runs` records are gone;
   the pipeline still resumes from DB1 and marks missing child run details as
   historical evidence, not lost state.
+- **Eager result capture (#10)** — drive ≥256 sibling runs (or force eviction)
+  between a pass completing and the done-bar being read; the pass result is already
+  in DB1, so the done-bar and digest are unaffected by the evicted `/v1/runs`
+  record.
+- **DRAFT skeleton + expansion (#9)** — a DRAFT call returns a skeleton within the
+  8 KB cap without truncating mid-structure; the author-revise loop grows it to a
+  full proposal in the working file, and REVIEW reviews the file/chunks, not the
+  capped artifact.
 - **Done-bar config** — each of the three bars stops the loop at the right point
   (suggestions block under bar 2; questions must be answered under bar 3).
 - **Pass-ceiling escalation** — with a low cap and an unresolvable seeded issue,
@@ -402,6 +500,9 @@ ledger) before the full idea→merge pipeline of P2/P3.
 - Storing whole proposals or large diffs as unbounded DB blobs. DB1 stores refs,
   manifests, hashes, and compact digests; working files/blobs carry the large
   content.
+- Expecting DRAFT mode to emit a complete proposal (#9). The 8 KB artifact cap
+  means DRAFT produces a skeleton; the author-revise loop expands it in the working
+  file. Generating long-form text inside the roundtable artifact is out of scope.
 - A fully autonomous, gate-less pipeline — the two human gates are mandatory by
   design; "configurable max passes" bounds cost, it does not remove the human.
 - Engine changes to the roundtable. The pipeline is strictly on top.
