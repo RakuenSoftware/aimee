@@ -51,6 +51,14 @@ below remain authoritative for everything else.
   `cost_version` are recorded per pipeline and a switch requires re-reconciliation.
 - **Per-phase config:** one shared key set for v1; per-phase `…_proposal`/`…_pr`
   overrides are deferred (§6).
+- **Chunk index (#34/#42/#47):** chunks are **derived on demand from the retained
+  whole origin** (an `origin:<hash>` ref + the origin content hash), not a
+  separate durable store. Re-deriving each pass gives per-pass freshness (#42)
+  and parked-gate release (#47) at no cost, and the origin is always recoverable
+  (#34). A chunked review is a **group of passes** (N chunk-passes + 1 synthesis
+  pass sharing a `chunk_group`), reusing the existing capture/seam machinery; the
+  phase passes only when every chunk member is valid and the synthesis member is
+  done (#28). v1 does not use a db2 review-scoped KB index.
 
 ## Design at a glance
 
