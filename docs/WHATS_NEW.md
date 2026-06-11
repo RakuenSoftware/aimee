@@ -5,6 +5,21 @@ current version and prints it once after an upgrade.
 
 ---
 
+## Unreleased (testing)
+
+- **Local-CLI agents (Claude) run on the thin client**: a `claude` agent
+  (provider-CLI backend) needs the `claude` binary, its login, and the working
+  tree where it executes — none of which exist on a remote/containerized
+  `aimee-server`. When the active workspace is `detached` (a thin client is
+  serving it), aimee now marshals the `claude -p` run over the existing runner
+  reverse channel so it executes **on the client**, against the client's tree
+  with the client's `~/.claude` login, and **streams the output back into the
+  chat turn token-by-token**. No Claude credential is sent to or stored on the
+  server. Co-located deployments are unchanged. Works for the primary chat turn
+  and `aimee delegate … --via claude`. See [DELEGATES.md](DELEGATES.md).
+
+---
+
 ## v0.2.0
 
 - **Docker-first deployment**: run `aimee-server` + `aimee-kb` as containers, either one

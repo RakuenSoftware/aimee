@@ -43,6 +43,11 @@ typedef struct
 
 typedef struct workspace_provider workspace_provider_t;
 
+/* Streaming exec chunk callback: invoked with each piece of the child's stdout
+ * as it is produced (binary-safe — `len` bytes at `data`, not NUL-terminated).
+ * Return 0 to keep going, non-zero to abort the run early. */
+typedef int (*ws_exec_chunk_fn)(void *cb_ctx, const char *data, size_t len);
+
 struct workspace_provider
 {
    ws_provider_kind_t kind;
@@ -85,6 +90,19 @@ struct workspace_provider
       mcp_git shell-string call sites. `shared` runs it locally via run_cmd; a
       future `detached` provider marshals it to the client-side runner. */
    char *(*exec_shell)(const workspace_provider_t *p, const char *cmd, int *exit_code);
+
+   /* Run `argv` (NULL-terminated) with `stdin_data` (`stdin_len` bytes, may be
+    * NULL/0) written to the child's stdin, in working directory `cwd` (NULL =
+    * inherit). The child's stdout is delivered incrementally via `on_chunk`
+    * (may be NULL to discard); stderr is left on the child's stderr. Returns the
+    * exit status (0 = success), or -1 on spawn failure. `shared` runs the
+    * process on the server host; `detached` marshals it to the client-side
+    * runner and streams the chunks back over the reverse channel. This is the
+    * seam for running a local-CLI agent (e.g. `claude -p`) on the client. May be
+    * NULL on a provider that does not support streaming exec. */
+   int (*exec_stream)(const workspace_provider_t *p, const char *const argv[],
+                      const char *stdin_data, size_t stdin_len, const char *cwd,
+                      ws_exec_chunk_fn on_chunk, void *cb_ctx);
 };
 
 /* The process-wide `shared` (co-located) provider. Never NULL. */

@@ -5,6 +5,7 @@
 #include "agent_exec.h"
 #include "agent_tools.h" /* agent_tools_set_tool_event_cb — stream tool events */
 #include "cli_codex.h"
+#include "cli_stream_sink.h"
 #include "config.h"
 #include "primary_session_adapter.h"
 #include "prompts.h"
@@ -524,6 +525,24 @@ static void chat_tool_event_cb(const char *phase, const char *name, void *ud)
    stream_event(cctx, ev, "name", name ? name : "");
 }
 
+/* Relay a local-CLI agent's streamed text deltas (claude -p on a detached
+ * client, over the reverse channel) into the chat SSE as they arrive. */
+typedef struct
+{
+   compute_ctx_t *cctx;
+   int emitted;
+} cli_stream_relay_t;
+
+static void chat_cli_stream_cb(void *ctx, const char *text, size_t len)
+{
+   (void)len;
+   cli_stream_relay_t *r = (cli_stream_relay_t *)ctx;
+   if (!r || !text || !text[0])
+      return;
+   stream_event(r->cctx, "text", "content", text);
+   r->emitted = 1;
+}
+
 static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, const char *cwd,
                                      const char *aimee_sid, const char *provider,
                                      const char *model_override, const config_t *cfg)
@@ -590,11 +609,18 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
       stream_event(cctx, "text", "content", drift);
    agent_tools_set_tool_event_cb(chat_tool_event_cb, cctx);
 
+   /* Stream a local-CLI agent's text deltas live into the SSE (claude -p run on
+    * the detached client over the reverse channel). No-op for HTTP providers /
+    * co-located runs; provider_cli only emits when a sink is installed. */
+   cli_stream_relay_t relay = {cctx, 0};
+   cli_stream_sink_set(chat_cli_stream_cb, &relay);
+
    agent_result_t result;
    memset(&result, 0, sizeof(result));
    int rc = agent_run_with_tools(&acfg, "code", system_prompt ? system_prompt : "", message,
                                  AGENT_DEFAULT_MAX_TOKENS, &result);
 
+   cli_stream_sink_clear();
    agent_tools_set_tool_event_cb(NULL, NULL);
    session_id_clear_override();
    workspace_turn_unbind_active();
@@ -609,7 +635,9 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
       return;
    }
 
-   if (result.response && result.response[0])
+   /* If deltas already streamed (CLI agent on the client), the client has
+    * reconstructed the full text from them — don't re-emit the whole response. */
+   if (result.response && result.response[0] && !relay.emitted)
       stream_event(cctx, "text", "content", result.response);
    stream_event(cctx, "turn_end", NULL, NULL);
    stream_event(cctx, "done", NULL, NULL);

@@ -8,23 +8,27 @@
 
 #define CLAUDE_ARG_MAX 48
 
-static int claude_spawn(const provider_cli_cfg_t *cfg, const char *task_prompt, int *stdin_fd,
-                        int *stdout_fd, pid_t *pid_out)
+/* Build `claude -p` argv into tokens[]. The leading *split_count tokens (the
+ * parsed cli_cmd, default "claude") are heap-allocated; the rest are borrowed.
+ * The prompt is NOT in argv — it is fed on stdin by the caller. Returns argc or
+ * -1. Shared by the local spawn and the detached (thin-client) exec_stream path. */
+static int claude_build_argv(const provider_cli_cfg_t *cfg, char **tokens, int cap,
+                             int *split_count)
 {
-   (void)task_prompt;
-   char *tokens[CLAUDE_ARG_MAX + 1] = {0};
    char err[128];
    const agent_t *agent = cfg ? cfg->agent : NULL;
    const char *cmd = (agent && agent->cli_cmd[0]) ? agent->cli_cmd : "claude";
-   int count = provider_cli_split_command(cmd, tokens, CLAUDE_ARG_MAX, err, sizeof(err));
+   int count = provider_cli_split_command(cmd, tokens, cap, err, sizeof(err));
    if (count < 0)
       return -1;
+   if (split_count)
+      *split_count = count;
 
    int argc = count;
 #define CLAUDE_ADD_ARG(s)                                                                          \
    do                                                                                              \
    {                                                                                               \
-      if (argc >= CLAUDE_ARG_MAX)                                                                  \
+      if (argc >= cap)                                                                             \
       {                                                                                            \
          provider_cli_free_tokens(tokens, count);                                                  \
          return -1;                                                                                \
@@ -61,9 +65,21 @@ static int claude_spawn(const provider_cli_cfg_t *cfg, const char *task_prompt, 
       CLAUDE_ADD_ARG(agent->model);
    }
 #undef CLAUDE_ADD_ARG
+   return argc;
+}
+
+static int claude_spawn(const provider_cli_cfg_t *cfg, const char *task_prompt, int *stdin_fd,
+                        int *stdout_fd, pid_t *pid_out)
+{
+   (void)task_prompt;
+   char *tokens[CLAUDE_ARG_MAX + 1] = {0};
+   int split = 0;
+   int argc = claude_build_argv(cfg, tokens, CLAUDE_ARG_MAX, &split);
+   if (argc < 0)
+      return -1;
 
    int rc = provider_cli_spawn_argv(cfg, tokens, stdin_fd, stdout_fd, pid_out);
-   provider_cli_free_tokens(tokens, count);
+   provider_cli_free_tokens(tokens, split);
    return rc;
 }
 
@@ -219,5 +235,6 @@ const provider_cli_adapter_t claude_provider_cli_adapter = {
     .format_tool_result = provider_cli_format_json_tool_result,
     .is_write_event = provider_cli_event_is_write,
     .build_prompt = claude_build_prompt,
+    .build_argv = claude_build_argv,
     .execute = NULL,
 };

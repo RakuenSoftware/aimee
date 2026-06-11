@@ -74,6 +74,16 @@ extern "C"
       int (*build_prompt)(const provider_cli_cfg_t *cfg, const char *system_prompt,
                           const char *task, char *buf, size_t buf_sz);
 
+      /* Build the adapter's full argv into tokens[] (caller array of >= cap+1
+       * slots), NUL-terminating it. The first *split_count tokens are
+       * heap-allocated (the parsed cli_cmd) and must be freed with
+       * provider_cli_free_tokens(tokens, *split_count); the remaining tokens are
+       * borrowed literals / agent fields. Returns argc (>=0) or -1 on error.
+       * Adapters that can run on a DETACHED (thin-client) workspace implement
+       * this so the same argv that spawn() would fork locally is instead
+       * marshalled to the client and run there. NULL = no remote support. */
+      int (*build_argv)(const provider_cli_cfg_t *cfg, char **tokens, int cap, int *split_count);
+
       /* Native provider bridge for routes that historically used provider-CLI
        * config but should execute through Aimee's HTTP provider loop. */
       const char *native_provider;

@@ -356,8 +356,74 @@ static char *detached_exec_shell(const workspace_provider_t *p, const char *cmd,
    return out;
 }
 
-void ws_detached_provider_init(ws_detached_provider_t *out, ws_detached_transport_fn transport,
-                               void *ctx)
+/* Bridge a streaming transport's partial responses (cJSON {"chunk":<b64>}) to
+ * the provider-level (data,len) chunk callback the caller passed to
+ * exec_stream. */
+typedef struct
+{
+   ws_exec_chunk_fn on_chunk;
+   void *cb_ctx;
+} detached_stream_bridge_t;
+
+static int detached_partial_bridge(void *ctx, cJSON *partial)
+{
+   detached_stream_bridge_t *b = (detached_stream_bridge_t *)ctx;
+   if (!b || !b->on_chunk)
+      return 0;
+   const cJSON *c = cJSON_GetObjectItemCaseSensitive(partial, "chunk");
+   if (!cJSON_IsString(c) || !c->valuestring)
+      return 0;
+   char *dec = NULL;
+   size_t dl = 0;
+   if (b64_decode(c->valuestring, &dec, &dl) != 0)
+      return 0;
+   int rc = b->on_chunk(b->cb_ctx, dec, dl);
+   free(dec);
+   return rc;
+}
+
+static int detached_exec_stream(const workspace_provider_t *p, const char *const argv[],
+                                const char *stdin_data, size_t stdin_len, const char *cwd,
+                                ws_exec_chunk_fn on_chunk, void *cb_ctx)
+{
+   const ws_detached_provider_t *self = (const ws_detached_provider_t *)p;
+   if (!self->stream_transport || !argv || !argv[0])
+      return -1;
+
+   cJSON *req = op_request("exec_stream");
+   if (!req)
+      return -1;
+   cJSON *jargv = cJSON_AddArrayToObject(req, "argv");
+   for (int i = 0; argv[i]; i++)
+      cJSON_AddItemToArray(jargv, cJSON_CreateString(argv[i]));
+   if (stdin_data && stdin_len > 0)
+   {
+      char *enc = b64_encode(stdin_data, stdin_len);
+      if (enc)
+      {
+         cJSON_AddStringToObject(req, "stdin", enc);
+         free(enc);
+      }
+   }
+   if (cwd && cwd[0])
+      cJSON_AddStringToObject(req, "cwd", cwd);
+
+   detached_stream_bridge_t bridge = {on_chunk, cb_ctx};
+   cJSON *final = NULL;
+   int trc =
+       self->stream_transport(self->transport_ctx, req, detached_partial_bridge, &bridge, &final);
+   int rc = -1;
+   if (trc == 0 && final)
+   {
+      const cJSON *jrc = cJSON_GetObjectItemCaseSensitive(final, "rc");
+      rc = cJSON_IsNumber(jrc) ? (int)jrc->valuedouble : -1;
+   }
+   cJSON_Delete(final);
+   return rc;
+}
+
+void ws_detached_provider_init_ex(ws_detached_provider_t *out, ws_detached_transport_fn transport,
+                                  ws_detached_stream_transport_fn stream_transport, void *ctx)
 {
    if (!out)
       return;
@@ -368,8 +434,19 @@ void ws_detached_provider_init(ws_detached_provider_t *out, ws_detached_transpor
    out->base.list = detached_list;
    out->base.exec = detached_exec;
    out->base.exec_shell = detached_exec_shell;
+   /* Only expose exec_stream when a streaming transport is bound, so callers can
+    * test `ws->exec_stream != NULL` to decide whether to route a CLI agent to
+    * the client (a mock/unary-only provider leaves it off → local fork/exec). */
+   out->base.exec_stream = stream_transport ? detached_exec_stream : NULL;
    out->transport = transport;
+   out->stream_transport = stream_transport;
    out->transport_ctx = ctx;
+}
+
+void ws_detached_provider_init(ws_detached_provider_t *out, ws_detached_transport_fn transport,
+                               void *ctx)
+{
+   ws_detached_provider_init_ex(out, transport, NULL, ctx);
 }
 
 /* --- runner end: execute an op locally via the shared provider --- */
@@ -387,7 +464,19 @@ int ws_runner_serve_once(cJSON *(*fetch)(void *), int (*post)(void *, cJSON *), 
    cJSON *op = fetch(ctx);
    if (!op)
       return 0; /* nothing pending — caller re-polls */
-   cJSON *resp = ws_detached_runner_handle(op);
+
+   const char *opname = req_str(op, "op");
+   cJSON *resp;
+   if (opname && strcmp(opname, "exec_stream") == 0)
+   {
+      /* Streaming op: handle_stream posts each stdout chunk through `post` as a
+       * partial; we post the terminal response below. */
+      resp = ws_detached_runner_handle_stream(op, post, ctx);
+   }
+   else
+   {
+      resp = ws_detached_runner_handle(op);
+   }
    cJSON_Delete(op);
    if (!resp)
    {
@@ -397,6 +486,78 @@ int ws_runner_serve_once(cJSON *(*fetch)(void *), int (*post)(void *, cJSON *), 
          cJSON_AddBoolToObject(resp, "ok", 0);
    }
    return post(ctx, resp) == 0 ? 1 : -1;
+}
+
+/* Bridge the shared provider's (data,len) stdout chunks to {"partial":true,
+ * "chunk":<b64>} responses posted through the runner's `emit`. */
+typedef struct
+{
+   int (*emit)(void *ctx, cJSON *partial);
+   void *ctx;
+} runner_emit_bridge_t;
+
+static int runner_emit_chunk(void *cb_ctx, const char *data, size_t len)
+{
+   runner_emit_bridge_t *e = (runner_emit_bridge_t *)cb_ctx;
+   char *enc = b64_encode(data, len);
+   if (!enc)
+      return -1;
+   cJSON *partial = cJSON_CreateObject();
+   if (!partial)
+   {
+      free(enc);
+      return -1;
+   }
+   cJSON_AddBoolToObject(partial, "ok", 1);
+   cJSON_AddBoolToObject(partial, "partial", 1);
+   cJSON_AddStringToObject(partial, "chunk", enc);
+   free(enc);
+   return e->emit(e->ctx, partial); /* emit takes ownership */
+}
+
+cJSON *ws_detached_runner_handle_stream(const cJSON *request,
+                                        int (*emit)(void *ctx, cJSON *partial), void *emit_ctx)
+{
+   const char *op = req_str(request, "op");
+   if (!op || strcmp(op, "exec_stream") != 0)
+      return NULL;
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+
+   const workspace_provider_t *ws = workspace_provider_shared();
+   const cJSON *jargv = cJSON_GetObjectItemCaseSensitive(request, "argv");
+   int n = cJSON_IsArray(jargv) ? cJSON_GetArraySize(jargv) : 0;
+   const char **argv = (n > 0) ? calloc((size_t)n + 1, sizeof(char *)) : NULL;
+   if (n <= 0 || !argv || !ws->exec_stream)
+   {
+      cJSON_AddBoolToObject(resp, "ok", 0);
+      cJSON_AddNumberToObject(resp, "rc", -1);
+      free(argv);
+      return resp;
+   }
+   for (int i = 0; i < n; i++)
+   {
+      const cJSON *a = cJSON_GetArrayItem(jargv, i);
+      argv[i] = (cJSON_IsString(a) && a->valuestring) ? a->valuestring : "";
+   }
+
+   char *stdin_buf = NULL;
+   size_t stdin_len = 0;
+   const char *b64stdin = req_str(request, "stdin");
+   if (b64stdin)
+      (void)b64_decode(b64stdin, &stdin_buf, &stdin_len);
+   const char *cwd = req_str(request, "cwd");
+
+   runner_emit_bridge_t eb = {emit, emit_ctx};
+   int rc = ws->exec_stream(ws, argv, stdin_buf, stdin_len, cwd, runner_emit_chunk, &eb);
+
+   free(stdin_buf);
+   free(argv);
+   cJSON_AddBoolToObject(resp, "ok", 1);
+   cJSON_AddNumberToObject(resp, "rc", rc);
+   return resp;
 }
 
 cJSON *ws_detached_runner_handle(const cJSON *request)
