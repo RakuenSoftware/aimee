@@ -100,8 +100,8 @@ one.
   one lookup, no third table.
 - `token_estimate_cost()` keeps its current signature and the "0.0 on unknown
   model" contract; add a unit-tested registry fallback path.
-- If the MIT-licensed `tokencost` data seeds any prices, pin attribution + a
-  dated `pricing_refreshed` marker in whichever file becomes authoritative.
+- Pin a dated `pricing_refreshed` marker in whichever file becomes authoritative
+  so price drift is auditable.
 
 ## §2 Cover ingress turns in the existing audit (token_audit), not a new ledger
 
@@ -262,4 +262,5 @@ each clears the readiness bar with a benchmark showing no quality regression.
 - No SQLite `tracker.db`; per-row ledger stays in DB1, DB2 only if shared
   analytics is justified (§2).
 - No silent message-trimming or model substitution; routing stays in the bandit.
-- No external proxy / menubar / dashboard.html / log-scraping from `tokencost`.
+- No external proxy, menu-bar widget, standalone dashboard, or log-scraping of
+  other tools' files — aimee owns the request path.
