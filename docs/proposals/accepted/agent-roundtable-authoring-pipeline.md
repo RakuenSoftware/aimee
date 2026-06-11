@@ -1,6 +1,6 @@
 # Proposal: Agent roundtable authoring pipeline (idea → reviewed proposal → implementation → reviewed PR)
 
-- **State:** draft — pending review
+- **State:** accepted — implementing (branch `feat/roundtable-authoring-pipeline`)
 - **Author:** JBailes
 - **Date:** 2026-06-11 (consolidated — 23 PR-#183 review rounds / 57 findings folded into the design sections and indexed in Appendix A)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
@@ -19,6 +19,38 @@
   than assuming a raw local `gh`/`git` shell, and it may need a narrowly-scoped
   auth/capability-policy change for human gate resolution. No changes to the
   roundtable engine itself.
+
+## Implementation decisions (resolved open questions, §12)
+
+The implementation resolves the §12 open questions as follows; the design sections
+below remain authoritative for everything else.
+
+- **Ledger home (#1/#2):** a **new namespaced DB1 table set** —
+  `roundtable_pipeline_runs` + `roundtable_pipeline_passes` +
+  `roundtable_pipeline_attempts` + `roundtable_pipeline_gates`
+  (`src/db1/schema.sql`, domain API in `src/db1/roundtable_pipeline.{c,h}`). The
+  autopilot `pipelines` table is left untouched, so old autopilot actions keep
+  working and the two namespaces never collide.
+- **CLI/API namespace (#3/#45):** a new `aimee pipeline …` CLI/MCP surface
+  (`status`, `gate`, `list`, `cancel`, `resume`, plus the loop driver), distinct
+  from `autopilot`. Any HTTP exposure uses `/v1/roundtable/pipelines/…`, never the
+  KB/corpus `GET /v1/pipeline/status`.
+- **Gate authority (#53/#54):** **no new capability bit** (the 16-bit `CAPS_ALL`
+  mask is full). Gate *resolution* (`gate pass|fail`) is **operator/local-out-of-band
+  only** — it requires a local (UDS) operator principal and is refused over the
+  TCP/reverse-channel surface a delegate-driving session uses. The driving agent
+  may surface a gate (move to `*_pending`, build the digest), check status, refresh
+  the digest, cancel, and resume, but it can never pass its own gate.
+- **Parked-gate admission (#48):** controlled by
+  `roundtable_pipeline_parked_releases_slot` (default **true** — a parked gate
+  releases the single active slot), with branch/PR ownership guards preventing two
+  runs from mutating the same recorded branch/PR.
+- **Cost scope (#49/#51):** the total cap is **roundtable-child-run cost only**
+  (`roundtable_pipeline_max_total_cost_usd` scoped to `roundtable_only`) until the
+  cost-accounting `usage_ledger` lands; the pinned `cost_scope`/`cost_source`/
+  `cost_version` are recorded per pipeline and a switch requires re-reconciliation.
+- **Per-phase config:** one shared key set for v1; per-phase `…_proposal`/`…_pr`
+  overrides are deferred (§6).
 
 ## Design at a glance
 

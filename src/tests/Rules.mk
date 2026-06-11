@@ -314,6 +314,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-tool-schema-sanitizer \
                $(TESTPREFIX)/unit-test-toolset \
                $(TESTPREFIX)/unit-test-db1-cost-fold \
+               $(TESTPREFIX)/unit-test-db1-roundtable-pipeline \
                $(TESTPREFIX)/unit-test-db1-session-paths \
                $(TESTPREFIX)/unit-test-interaction-events \
                $(TESTPREFIX)/unit-test-trajectory \
@@ -1631,6 +1632,12 @@ $(TESTPREFIX)/unit-test-db1-cost-fold: \
                                        $(OBJDIR)/tests/test_db1_cost_fold.o \
                                        $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                        $(OBJDIR)/db1/cost_fold.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-db1-roundtable-pipeline: \
+                                       $(OBJDIR)/tests/test_db1_roundtable_pipeline.o \
+                                       $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                       $(OBJDIR)/db1/roundtable_pipeline.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-db1-session-paths: \
