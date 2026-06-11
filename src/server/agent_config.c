@@ -212,6 +212,23 @@ int agent_has_resolvable_credentials(const agent_t *agent)
    return agent_provider_env_value(agent->provider, NULL, 0);
 }
 
+/* Per-turn Codex OAuth creds supplied by the thin client (see agent_config.h).
+ * Thread-local: each chat/delegate turn runs on its own worker thread. */
+static _Thread_local char g_request_codex_token[MAX_API_KEY_LEN];
+static _Thread_local char g_request_codex_account_id[128];
+
+void agent_set_request_codex_creds(const char *token, const char *account_id)
+{
+   if (token && token[0])
+      snprintf(g_request_codex_token, sizeof(g_request_codex_token), "%s", token);
+   else
+      g_request_codex_token[0] = '\0';
+   if (account_id && account_id[0])
+      snprintf(g_request_codex_account_id, sizeof(g_request_codex_account_id), "%s", account_id);
+   else
+      g_request_codex_account_id[0] = '\0';
+}
+
 static void append_header_line(char *buf, size_t buf_len, const char *line)
 {
    if (!buf || buf_len == 0 || !line || !line[0])
@@ -247,6 +264,21 @@ void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len)
          append_header_line(buf, buf_len, "HTTP-Referer: https://github.com/JBailes/aimee");
       if (!strstr(buf, "X-Title:"))
          append_header_line(buf, buf_len, "X-Title: aimee");
+   }
+
+   /* Codex (ChatGPT OAuth): when the thin client supplied an account id this
+    * turn and the agent's stored headers don't already carry it, inject the
+    * headers the codex backend requires. Keyed on the codex-oauth auth type so
+    * it fires regardless of the provider label (the codex adapter's provider is
+    * "chatgpt"). Lets a codex agent be configured without server-held creds. */
+   if (strcmp(agent->auth_type, "codex-oauth") == 0 && g_request_codex_account_id[0] &&
+       !strstr(buf, "ChatGPT-Account-ID:"))
+   {
+      if (!strstr(buf, "originator:"))
+         append_header_line(buf, buf_len, "originator: codex_cli_rs");
+      char line[160];
+      snprintf(line, sizeof(line), "ChatGPT-Account-ID: %s", g_request_codex_account_id);
+      append_header_line(buf, buf_len, line);
    }
 }
 
@@ -1320,6 +1352,13 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
 
    if (strcmp(auth_type, "codex-oauth") == 0)
    {
+      /* Prefer the token the thin client supplied this turn (its live,
+       * CLI-refreshed ~/.codex/auth.json); fall back to a server-side file. */
+      if (g_request_codex_token[0])
+      {
+         snprintf(buf, buf_len, "Authorization: Bearer %s", g_request_codex_token);
+         return 0;
+      }
       char token[MAX_API_KEY_LEN];
       if (agent_read_codex_oauth_token(token, sizeof(token)) != 0)
          return -1;

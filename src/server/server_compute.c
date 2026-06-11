@@ -697,6 +697,11 @@ void delegate_worker(void *arg)
       agent_set_durable_job(cctx->background_job_id);
    }
    cJSON *req = cctx->req;
+   /* Thin-client-supplied Codex OAuth creds for this delegate turn (empty/absent
+    * clears the thread-local). Used by agent_resolve_auth/headers for a
+    * codex-oauth delegate. */
+   agent_set_request_codex_creds(jo_str(req, "codex_oauth_token", NULL),
+                                 jo_str(req, "codex_account_id", NULL));
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
    cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
    cJSON *jmax = cJSON_GetObjectItemCaseSensitive(req, "max_tokens");

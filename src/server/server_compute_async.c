@@ -1,7 +1,8 @@
 /* server_compute_async.c: dedicated async lanes for tool.execute and chat.send_stream */
 #include "server_compute_impl.h"
 #include "aimee.h"
-#include "json_fluent.h" /* jo_ok */
+#include "agent_config.h" /* agent_set_request_codex_creds */
+#include "json_fluent.h"  /* jo_ok, jo_str */
 #include "agent_tools.h"
 #include "compute_pool.h"
 #include "guardrails.h"
@@ -448,6 +449,11 @@ static void chat_stream_worker_pooled(void *arg)
 
    if (!locked && sid[0])
       presence_emit_turn_started(sid, turn_id);
+   /* Thin-client-supplied Codex OAuth creds for this turn (empty/absent clears
+    * the thread-local, so a non-codex turn on this pooled thread can't reuse a
+    * prior turn's token). agent_resolve_auth/headers pick them up. */
+   agent_set_request_codex_creds(jo_str(cctx->req, "codex_oauth_token", NULL),
+                                 jo_str(cctx->req, "codex_account_id", NULL));
    chat_stream_worker(arg);
    if (locked)
       presence_turn_release(lock_session, lock_turn);
