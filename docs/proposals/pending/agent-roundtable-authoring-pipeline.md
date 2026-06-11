@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 ninth review)
+- **Date:** 2026-06-11 (revised post-PR-#183 tenth review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -403,6 +403,30 @@ it overstates what the current KB tables and APIs provide.
     or fail configuration validation with a clear remediation. **Resolved in §2,
     §6, §7, and §10.**
 
+## PR #183 tenth review — who retrieves: orchestrator assembles, participants review inline
+
+Gap #32 said the whole-artifact check is "a reviewer given db2 retrieval." Reading
+how review participants actually run shows that mis-locates the work.
+
+37. **Review participants review the *inline task text*; they cannot be assumed to
+    retrieve from db2 or read the working tree.** `ensemble_review` /
+    `handle_delegate_roundtable` passes the artifact as inline `task` text, and each
+    participant runs via `agent_run_named(…, ensemble_reference_models[i],
+    "review", …)` — a **heterogeneous, often remote** model whose tool access
+    (file-read, KB-search) is per-agent and not guaranteed. The `review` charter
+    role's "inspect repository files" is best-effort: it works only where that
+    participant has file tools + workspace binding, it is not db2 retrieval, and a
+    remote delegate panelist may have neither. So #32's "reviewer given db2
+    retrieval over the artifact's chunks" is the wrong seam. The correct one: the
+    **orchestrator** (which holds the origin ref and db2) pre-assembles each review
+    unit and passes it **inline** — for a chunk, the chunk text + brief +
+    orchestrator-retrieved cross-chunk spans (the other definition of a symbol, the
+    referenced section); for the whole-artifact aggregate, a self-contained digest
+    of per-chunk findings + the cross-cutting spans the invariants need. db2/origin
+    storage (#32/#34) is what the *orchestrator* retrieves from, never a per-panelist
+    capability. Review correctness then never depends on whether a given model can
+    retrieve or read files. **Resolved in §2, §3, and §10.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -497,8 +521,9 @@ Both phases use the **same** engine; they differ only in input and brief.
   done-bar can pass only after all chunks are covered plus a whole-artifact
   synthesis/check has considered cross-chunk invariants (#28). **Chunking never
   discards the origin:** the pipeline records a whole-origin ref/hash separately
-  from chunk rows (#34), and the cross-chunk check retrieves needed spans from
-  the origin plus review-scoped chunks on demand (#32/#35).
+  from chunk rows (#34), and the **orchestrator** retrieves needed spans from the
+  origin plus review-scoped chunks and hands each review call a self-contained
+  inline unit — panelists are not assumed to retrieve or read files (#32/#35/#37).
   Pipeline-owned PR reviews use the async op-run path with validated pass
   metadata, not a direct synchronous roundtable dispatch. The brief carries the
   *fixes just applied*, the *invariants* the change must not break, and the
@@ -547,12 +572,16 @@ result**, not on any one child chunk. Every manifest entry must have a completed
 valid REVIEW result over the expected chunk hash, and the aggregate must include a
 whole-artifact synthesis/check for cross-chunk findings before the phase can pass.
 Any missing, stale, truncated, degraded, or failed chunk keeps the aggregate
-blocked. The whole-artifact check is **retrieval-backed, not a re-ingest** (#32):
-the pipeline stores the origin separately (#34) and indexes review-scoped chunks,
-so the cross-chunk reviewer pulls the other definition of a symbol, a missing
-section, or a renamed reference via vector/FTS + the `prev_chunk_id`/
-`next_chunk_id` chain on demand — it never needs the full text in one context
-window, and the origin artifact is always retained, never replaced by its chunks.
+blocked. The whole-artifact check is **retrieval-backed, but the orchestrator
+retrieves — not the panelists** (#32/#37): the pipeline stores the origin
+separately (#34) and indexes review-scoped chunks, and the **orchestrator** pulls
+the cross-chunk spans the invariants need (the other definition of a symbol, a
+missing section, a renamed reference) via vector/FTS + the `prev_chunk_id`/
+`next_chunk_id` chain, then passes a **self-contained inline unit** to the
+aggregate review call. A heterogeneous, possibly-remote panelist is never assumed
+to retrieve or read files; it reviews the inline digest. The full text is never
+needed in one context window, and the origin is always retained, never replaced by
+its chunks.
 
 **Pass ceiling (configurable; cost backstop, not an early-exit).** `roundtable_pipeline_max_passes`
 bounds outer passes. **Default 0 = unbounded** — review runs until the done-bar,
@@ -906,6 +935,11 @@ ledger) before the full idea→merge pipeline of P2/P3.
   the real project KB; cleanup deletes only that pipeline's review chunks/docs.
   A test must prove `/v1/maintenance/clear` or any chosen cleanup path cannot wipe
   unrelated project data.
+- **Orchestrator-assembled inline review (#37)** — a participant configured with
+  **no file or KB-search tools** still produces a correct cross-chunk finding,
+  because the orchestrator pre-retrieved the needed spans and passed a
+  self-contained inline unit; the panel's tool access is never load-bearing for
+  review correctness.
 - **Chunk threshold from min panel context (#33)** — a heterogeneous panel sizes
   chunks to the smallest participant context budget (resolved per run, reserving
   brief/role/peer-note headroom); a chunk that would overflow the smallest model is
