@@ -6775,49 +6775,115 @@ static const char *cli_ws_err_message(cJSON *resp)
 }
 
 /* Collect <abs_root>'s source files locally and push them to the server's
- * /v1/index/ingest, blocking until the indexing op-run completes. Returns 0 on
- * success, nonzero on error. */
-static int cli_ws_ingest_root(const char *remote, const char *bearer, const char *abs_root)
-{
-   const char *base = strrchr(abs_root, '/');
-   base = (base && base[1]) ? base + 1 : abs_root;
+ * /v1/index/ingest in size-bounded batches, blocking on each op-run. The kb
+ * code-scan upserts per project+path, so batches accumulate. Returns 0 on
+ * success, nonzero if any batch failed. */
 
+/* Keep each ingest POST comfortably under the server's 4 MB request-body cap
+ * (SHTTP_MAX_BODY); a single file is capped well below this by code_collect. */
+#define CLI_INGEST_BATCH_BYTES (3 * 1024 * 1024)
+
+/* POST one batch of files (adopted/freed) as project `name`/`root`, polling the
+ * async op-run to completion. Returns 0 on success. */
+static int cli_ws_ingest_batch(const char *remote, const char *bearer, const char *name,
+                               const char *root, cJSON *batch)
+{
    cJSON *body = cJSON_CreateObject();
    if (!body)
+   {
+      cJSON_Delete(batch);
       return 1;
-   cJSON_AddStringToObject(body, "name", base);
-   cJSON_AddStringToObject(body, "root", abs_root);
-   cJSON *files = cJSON_AddArrayToObject(body, "files");
-   int n = files ? code_collect_files(abs_root, files) : 0;
-
+   }
+   cJSON_AddStringToObject(body, "name", name);
+   cJSON_AddStringToObject(body, "root", root);
+   cJSON_AddItemToObject(body, "files", batch); /* adopt */
    char *body_json = cJSON_PrintUnformatted(body);
    cJSON_Delete(body);
    if (!body_json)
       return 1;
 
-   /* /v1/index/ingest is async (rh_dispatch_op_async): POST + poll the run. */
    cJSON *resp = cli_v1_run_and_poll(remote, bearer, "POST", "/v1/index/ingest", body_json, 600000);
    free(body_json);
    if (!resp)
-   {
-      fprintf(stderr, "aimee: index ingest failed for %s (transport error)\n", abs_root);
       return 1;
-   }
    const char *err = cli_ws_err_message(resp);
+   int rc = err ? 1 : 0;
    if (err)
-   {
-      fprintf(stderr, "aimee: index ingest failed for %s: %s\n", abs_root, err);
-      cJSON_Delete(resp);
-      return 1;
-   }
+      fprintf(stderr, "aimee: index ingest batch failed: %s\n", err);
    cJSON_Delete(resp);
+   return rc;
+}
+
+static int cli_ws_ingest_root(const char *remote, const char *bearer, const char *abs_root)
+{
+   const char *base = strrchr(abs_root, '/');
+   base = (base && base[1]) ? base + 1 : abs_root;
+
+   cJSON *all = cJSON_CreateArray();
+   if (!all)
+      return 1;
+   int n = code_collect_files(abs_root, all);
+   if (n == 0)
+   {
+      cJSON_Delete(all);
+      printf("no indexable files found in %s\n", abs_root);
+      return 0;
+   }
+
+   /* Split into sub-cap batches: pop files off the front into a batch, flushing
+    * whenever the next file would push the batch over the byte budget. */
+   int pushed = 0, failed = 0, batches = 0;
+   cJSON *batch = cJSON_CreateArray();
+   size_t batch_bytes = 0;
+   cJSON *f = NULL;
+   while (batch && (f = cJSON_DetachItemFromArray(all, 0)) != NULL)
+   {
+      cJSON *c = cJSON_GetObjectItemCaseSensitive(f, "content");
+      cJSON *rp = cJSON_GetObjectItemCaseSensitive(f, "rel_path");
+      size_t flen = (cJSON_IsString(c) ? strlen(c->valuestring) : 0) +
+                    (cJSON_IsString(rp) ? strlen(rp->valuestring) : 0) + 64;
+      int have = cJSON_GetArraySize(batch);
+      if (have > 0 && batch_bytes + flen > CLI_INGEST_BATCH_BYTES)
+      {
+         if (cli_ws_ingest_batch(remote, bearer, base, abs_root, batch) == 0)
+            pushed += have;
+         else
+            failed += have;
+         batches++;
+         batch = cJSON_CreateArray();
+         batch_bytes = 0;
+         if (!batch)
+         {
+            cJSON_Delete(f);
+            break;
+         }
+      }
+      cJSON_AddItemToArray(batch, f); /* adopt */
+      batch_bytes += flen;
+   }
+   if (batch && cJSON_GetArraySize(batch) > 0)
+   {
+      int have = cJSON_GetArraySize(batch);
+      if (cli_ws_ingest_batch(remote, bearer, base, abs_root, batch) == 0)
+         pushed += have;
+      else
+         failed += have;
+      batches++;
+   }
+   else
+   {
+      cJSON_Delete(batch);
+   }
+   cJSON_Delete(all);
 
    if (n >= CODE_COLLECT_MAX_FILES)
-      fprintf(stderr, "aimee: note: '%s' hit the %d-file ingest cap; the rest of the tree was "
-                      "not pushed\n",
+      fprintf(stderr,
+              "aimee: note: '%s' hit the %d-file ingest cap; the rest of the tree was "
+              "not pushed\n",
               abs_root, CODE_COLLECT_MAX_FILES);
-   printf("ingested %d file(s) from %s\n", n, abs_root);
-   return 0;
+   printf("ingested %d file(s) from %s (%d batch%s)%s\n", pushed, abs_root, batches,
+          batches == 1 ? "" : "es", failed ? " — some batches failed" : "");
+   return failed ? 1 : 0;
 }
 
 int cli_workspace_add_remote(const char *path)
