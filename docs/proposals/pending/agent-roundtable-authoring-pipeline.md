@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 fifth review)
+- **Date:** 2026-06-11 (revised post-PR-#183 sixth review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -267,6 +267,32 @@ safely and how retry accounting stays correct.
     must write terminal status for every op-run outcome, not just successful
     roundtable JSON. **Resolved in §4 and §10.**
 
+## PR #183 sixth review — closing the read side and the DRAFT path
+
+Moving the *write* to the worker (gaps #18/#20–25) was right, but two ends of that
+design are still open: how the agent *reads* terminal, and what a DRAFT pass
+actually captures.
+
+26. **The agent's terminal-detection poll target must be the durable ledger row,
+    not `/v1/runs`.** The worker now writes the result to DB1, but the proposal
+    never says how the *driving agent* learns a pass reached terminal. If it polls
+    `/v1/runs/{id}`, the **read** side still races eviction (a long pass + ≥256
+    sibling runs + a sleeping agent) — the exact race the worker-capture removed,
+    just moved downstream. The agent must poll the **durable ledger pass row**
+    (`aimee pipeline status` / the DB1 row's `captured`/terminal marker), treating
+    `/v1/runs` as a best-effort live view only. Only then is the race closed on
+    both ends. **Resolved in §4 and §10.**
+27. **The capture contract is review-shaped; a DRAFT pass has no defined durable
+    result.** Gap #22 routes *both* DRAFT and REVIEW through the async op-run
+    worker, but §4's capture lists only review fields (`items`/severities/`count`/
+    `items_round`/`artifact_round`). A DRAFT pass produces an **artifact** (the
+    skeleton), not items, and per #9 that artifact is 8 KB-capped. Capture must
+    persist the **mode-appropriate** payload: for DRAFT, the artifact ref + content
+    hash + `best_round`/`artifact_round` + validity flags (with the skeleton text
+    landing in the working file, not as a ledger blob); for REVIEW, the items.
+    Otherwise draft passes drop their result or are mis-shaped into review fields.
+    **Resolved in §2, §4, and §10.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -346,8 +372,10 @@ Both phases use the **same** engine; they differ only in input and brief.
   proposal lives in the working file/PR, not in the DRAFT artifact; REVIEW reviews
   the file (or chunked sections for large proposals, like the diff path below),
   not the truncated artifact. Pipeline-owned DRAFT and REVIEW calls must use the
-  async op-run path so server-worker result capture runs. The brief carries the
-  proposal's *goal*, the *invariants* it must satisfy, and the human's seed
+  async op-run path so server-worker result capture runs; the DRAFT pass is
+  captured as an artifact **ref + hash** (mode-appropriate, #27), with the skeleton
+  text written to the working file, not stored as a ledger blob. The brief carries
+  the proposal's *goal*, the *invariants* it must satisfy, and the human's seed
   *questions*.
 - **PR phase (A).** Input = unified diff (normally `git diff <base>...HEAD`;
   aimee has no PR-fetch and needs none — `agent-directed-pr-review` §6). REVIEW
@@ -468,13 +496,24 @@ double-underscore fields are not user API). `server_http_submit_op_run` /
 `rh_dispatch_op_async` must preserve that private metadata alongside the existing
 `__run_id` injection (`:419`). Extend the finalize path, preferably through a
 narrow op-run-finalize hook rather than hard-coding roundtable ledger writes into
-generic HTTP routing, to **also persist the structured pass result** (items +
-severities + `count`, `converged`, validity flags, `items_round`,
-`artifact_round`, counts, `cost_usd`, `rounds_run`) into the DB1 ledger row before
-the run record can be evicted. Failed, cancelled, malformed, and capture-failed
-terminal states are recorded too. The `/v1/runs` id is retained only as a
-historical pointer; the ledger row is the source of truth for the done-bar and the
-gate digest.
+generic HTTP routing, to **also persist the pass result** into the DB1 ledger row
+before the run record can be evicted. The hook **no-ops when `__pipeline_pass_id`
+is absent**, so ordinary `ensemble_review`/roundtable calls are untouched. What it
+persists is **mode-appropriate** (#27): for a REVIEW pass, the items + severities
++ `count`, `converged`, validity flags, `items_round`, `artifact_round`, counts,
+`cost_usd`, `rounds_run`; for a DRAFT pass, the artifact **ref + content hash** +
+`best_round`/`artifact_round` + validity flags (the skeleton text itself lands in
+the working file, not as a ledger blob, per #9). Failed, cancelled, malformed, and
+capture-failed terminal states are recorded too. The `/v1/runs` id is retained
+only as a historical pointer; the ledger row is the source of truth for the
+done-bar and the gate digest.
+
+**The agent reads terminal from the ledger, not `/v1/runs` (#26).** Because the
+worker writes the result to DB1 at terminal, the driving agent learns a pass
+completed by polling the **durable ledger pass row** (`aimee pipeline status` / the
+row's `captured`/terminal marker), never by polling `/v1/runs/{id}`. `/v1/runs`
+remains a best-effort live view; the ledger row is what the agent waits on, so the
+eviction race is closed on the read side as well as the write side.
 
 If a result is still not captured (a genuine fault), the attempt is marked
 `lost_result` and the pipeline **auto re-runs the review pass** under the same
@@ -642,6 +681,14 @@ ledger) before the full idea→merge pipeline of P2/P3.
 - **DRAFT/REVIEW callable split** — the proposal phase invokes a draft-capable
   roundtable path that returns an `artifact`; the review phases invoke the
   review-capable path that returns structured items for the done-bar.
+- **Mode-appropriate capture (#27)** — a DRAFT pass persists an artifact ref +
+  hash + `best_round`/flags (skeleton text in the working file, not the ledger);
+  a REVIEW pass persists items/severities/`count`; neither is mis-shaped into the
+  other, and the finalize hook no-ops for a non-pipeline `ensemble_review` call.
+- **Agent reads terminal from the ledger (#26)** — with `/v1/runs` forced to evict
+  the run and the agent asleep through terminal, the agent still detects completion
+  by polling the durable ledger pass row; it never depends on `/v1/runs` being
+  present to learn a pass finished.
 - **Ledger compatibility** — if reusing DB1 `pipelines`, old autopilot
   `start/status/list/cancel/resume/link-*` behavior remains intact; if using a new
   table, pipeline IDs and command names are unambiguous.
