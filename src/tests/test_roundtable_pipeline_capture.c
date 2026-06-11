@@ -94,7 +94,6 @@ static void test_seam_register_and_finalize(void)
    setup_db();
    int pass_id = 0;
    int pid = make_pipeline_pass(&pass_id);
-   (void)pid;
 
    /* not a pipeline run */
    assert(rtp_seam_register_attempt(0, "oprun_x") == 0);
@@ -128,6 +127,12 @@ static void test_seam_register_and_finalize(void)
    assert(p.converged == 1);
    assert(p.blocking_count == 0);
    assert(strcmp(p.status, RTP_PASS_CAPTURED) == 0);
+
+   /* cumulative cost roll-up into the run (#46): impl phase + total = 0.5. */
+   rtp_run_t run;
+   assert(rtp_run_get(pid, &run) == 0);
+   assert(run.impl_phase_cost_usd > 0.49 && run.impl_phase_cost_usd < 0.51);
+   assert(run.total_cost_usd > 0.49 && run.total_cost_usd < 0.51);
    printf("  seam register + finalize: ok\n");
 }
 

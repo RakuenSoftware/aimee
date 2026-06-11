@@ -205,6 +205,24 @@ int rtp_seam_finalize(const char *run_id, int http_ok, int cancelled, const char
    snprintf(att.terminal_at, sizeof(att.terminal_at), "captured");
    rtp_attempt_update(&att);
 
+   /* Cumulative cost roll-up (#46/#19): every terminal attempt with a known cost
+    * accumulates into the phase and pipeline totals — including lost/superseded
+    * attempts, which are booked as overhead. The per-phase cap therefore never
+    * resets across fail-return re-entries. */
+   if (have_pass && env.cost_known && env.cost_usd > 0.0)
+   {
+      rtp_run_t run2;
+      if (rtp_run_get(pass.pipeline_id, &run2) == 0)
+      {
+         if (strcmp(pass.phase, RTP_PHASE_IMPL) == 0)
+            run2.impl_phase_cost_usd += env.cost_usd;
+         else
+            run2.proposal_phase_cost_usd += env.cost_usd;
+         run2.total_cost_usd += env.cost_usd;
+         rtp_run_update(&run2);
+      }
+   }
+
    /* Only the current (non-superseded) attempt of a live pass updates the
     * aggregate and can satisfy the done-bar; a late/superseded terminal stays
     * audit history (#30). */
