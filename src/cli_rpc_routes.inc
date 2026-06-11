@@ -6,6 +6,7 @@
 #include "util.h"         /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
 #include "aimee_client.h" /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
 #include "code_collect.h" /* code_collect_files: thin-client workspace push */
+#include "codex_auth.h"   /* codex_local_auth: thin-client codex OAuth creds */
 #if !defined(_WIN32) && !defined(_WIN64)
 #include "aimee_home.h"
 #include <dirent.h>
@@ -24,6 +25,24 @@ static void __attribute__((unused)) cli_rpc_sleep_ms(int ms)
 #else
    usleep((useconds_t)ms * 1000);
 #endif
+}
+
+/* Attach this machine's Codex OAuth creds to an outbound request so a remote
+ * server can authenticate a codex-oauth agent WITHOUT the server storing any
+ * codex credential. No-op unless the endpoint is remote-tcp and ~/.codex/auth.json
+ * is readable; the creds are consumed server-side only when a codex agent runs.
+ * Declared in cli_client.h so cli_tui.c (chat) can call it too. */
+void cli_attach_codex_creds(cJSON *req)
+{
+   if (!req || !cli_rpc_remote_endpoint_is_tcp())
+      return;
+   char token[8192];
+   char account[256];
+   if (codex_local_auth(token, sizeof(token), account, sizeof(account)) != 0)
+      return;
+   cJSON_AddStringToObject(req, "codex_oauth_token", token);
+   if (account[0])
+      cJSON_AddStringToObject(req, "codex_account_id", account);
 }
 
 /* --- Minimal arg parser (no util.h dependency) --- */
@@ -1731,6 +1750,7 @@ static cJSON *marshal_delegate(int argc, char **argv)
    rpc_parse(argc, argv, bool_flags, &opts);
 
    cJSON *req = marshal_no_args("delegate");
+   cli_attach_codex_creds(req); /* so a codex-oauth delegate auths from this host */
 
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "role", opts.positional[0]);

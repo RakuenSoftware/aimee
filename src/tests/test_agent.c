@@ -402,6 +402,31 @@ static void test_provider_env_credentials_and_headers(void)
                old_gemini_mechanism[0] ? old_gemini_mechanism : NULL);
 }
 
+/* A thin-client-supplied per-turn Codex OAuth token takes precedence over any
+ * server-side file, and the account id is injected as the ChatGPT-Account-ID
+ * header; clearing removes both. */
+static void test_codex_oauth_request_creds(void)
+{
+   agent_t ag;
+   char auth[512];
+   char headers[512];
+   memset(&ag, 0, sizeof(ag));
+   snprintf(ag.provider, sizeof(ag.provider), "%s", "codex");
+   snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "codex-oauth");
+
+   agent_set_request_codex_creds("REQ-TOKEN", "acct-1");
+   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(strcmp(auth, "Authorization: Bearer REQ-TOKEN") == 0);
+   agent_build_extra_headers(&ag, headers, sizeof(headers));
+   assert(strstr(headers, "ChatGPT-Account-ID: acct-1") != NULL);
+   assert(strstr(headers, "originator: codex_cli_rs") != NULL);
+
+   /* Clearing the per-turn creds removes the token path + header injection. */
+   agent_set_request_codex_creds(NULL, NULL);
+   agent_build_extra_headers(&ag, headers, sizeof(headers));
+   assert(strstr(headers, "ChatGPT-Account-ID:") == NULL);
+}
+
 static void test_agent_config_provider_cli_roundtrip(void)
 {
    const char *cfg_dir = config_default_dir();
@@ -1855,6 +1880,7 @@ int main(void)
    test_current_code_only_role_tool_policy();
    test_current_code_only_dispatch_blocks_stale_context_tools();
    test_provider_env_credentials_and_headers();
+   test_codex_oauth_request_creds();
    test_agent_config_provider_cli_roundtrip();
    test_agent_adapter_registry();
    test_provider_cli_shell_exec_uses_argv_not_shell();

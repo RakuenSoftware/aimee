@@ -32,4 +32,12 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len);
 int agent_has_resolvable_credentials(const agent_t *agent);
 void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len);
 
+/* Per-turn Codex OAuth creds supplied by the thin client (its ~/.codex/auth.json
+ * is the live, refreshed source; the server has no such file). Set at the start
+ * of a chat/delegate turn and cleared at the end. When set, agent_resolve_auth
+ * uses `token` for a codex-oauth agent in preference to the server's file, and
+ * agent_build_extra_headers injects ChatGPT-Account-ID from `account_id`. Pass
+ * NULL/empty to clear. Thread-local (each turn runs on its own worker thread). */
+void agent_set_request_codex_creds(const char *token, const char *account_id);
+
 #endif /* DEC_AGENT_CONFIG_H */

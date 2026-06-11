@@ -234,6 +234,11 @@ char *cli_rpc_client_bearer(void);
 int cli_workspace_add_remote(const char *path);
 int cli_index_scan_remote(int argc, char **argv);
 
+/* Attach this machine's Codex OAuth creds (~/.codex/auth.json) to an outbound
+ * request body when talking to a remote tcp server, so the server can auth a
+ * codex-oauth agent without holding any codex credential. No-op otherwise. */
+void cli_attach_codex_creds(cJSON *req);
+
 /* Launch metadata parsed from server output */
 typedef struct
 {

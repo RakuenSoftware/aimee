@@ -117,6 +117,12 @@ static void *drain_pipe_thread(void *arg)
    return NULL;
 }
 
+void agent_set_request_codex_creds(const char *token, const char *account_id)
+{
+   (void)token;
+   (void)account_id;
+}
+
 int agent_load_config(agent_config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));
