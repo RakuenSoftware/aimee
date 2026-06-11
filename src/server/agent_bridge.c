@@ -6,6 +6,7 @@
 #include "util.h"
 #include "agent_request_shaping.h"
 #include "agent_protocol.h"
+#include "config.h"
 #include "log.h"
 #include "model_sampling.h"
 #include "tool_call_args.h"
@@ -193,8 +194,12 @@ cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSO
    int tok = (max_tokens > 0) ? max_tokens : 4096;
    cJSON_AddNumberToObject(req, "max_tokens", tok);
 
-   if (system_prompt && system_prompt[0])
-      cJSON_AddStringToObject(req, "system", system_prompt);
+   /* §3 cache-aware shaping: when enabled, mark the aimee-owned system prefix
+    * cacheable on this (tool-bearing) Anthropic request, matching the non-tools
+    * path. Default-off so the flag-rollout program can flip it deliberately. */
+   config_t cfg;
+   int cache_marking = (config_load(&cfg) == 0 && cfg.cache_shaping_enabled) ? 1 : 0;
+   agent_anthropic_set_system(req, system_prompt, cache_marking);
 
    if (safe_messages)
       cJSON_AddItemToObject(req, "messages", safe_messages);

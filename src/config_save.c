@@ -391,6 +391,11 @@ int config_save(const config_t *cfg)
       cJSON *ddp = cJSON_AddObjectToObject(root, "dedup");
       cJSON_AddBoolToObject(ddp, "enabled", cfg->dedup_enabled ? 1 : 0);
    }
+   if (cfg->cache_shaping_enabled)
+   {
+      cJSON *csh = cJSON_AddObjectToObject(root, "cache_shaping");
+      cJSON_AddBoolToObject(csh, "enabled", cfg->cache_shaping_enabled ? 1 : 0);
+   }
    if (cfg->guardrails_semantic_enabled || !cfg->guardrails_semantic_dry_run ||
        !cfg->guardrails_semantic_advisory_only || cfg->guardrails_semantic_command[0] ||
        cfg->guardrails_semantic_warn_threshold != 0.40 ||

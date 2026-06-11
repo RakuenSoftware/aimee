@@ -866,6 +866,14 @@ typedef struct config
     * boundary so one caller never reads another's response. */
    int dedup_enabled;
 
+   /* Cache-aware request shaping for the aimee-owned Anthropic path (§3).
+    * cache_shaping_enabled: 0 = off (default), 1 = on. When on, the tool-bearing
+    * Anthropic request builder marks the aimee-owned system prefix cacheable
+    * (cache_control: ephemeral content block), matching the no-tools path, so the
+    * provider caches the stable system prompt across calls. Anthropic-only; never
+    * alters the stateless /v1/messages proxy or any non-Anthropic provider. */
+   int cache_shaping_enabled;
+
    /* Neural-assisted semantic guardrails (guardrails.semantic.*).
     * semantic_enabled: 0 = off (default), 1 = on.
     * semantic_dry_run: 1 = shadow mode — score is logged but never changes outcome

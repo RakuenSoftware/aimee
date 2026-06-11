@@ -989,6 +989,14 @@ void config_parse_transport_section(config_t *cfg, cJSON *root)
       if (cJSON_IsBool(item))
          cfg->dedup_enabled = cJSON_IsTrue(item) ? 1 : 0;
    }
+
+   cJSON *csh = cJSON_GetObjectItemCaseSensitive(root, "cache_shaping");
+   if (cJSON_IsObject(csh))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(csh, "enabled");
+      if (cJSON_IsBool(item))
+         cfg->cache_shaping_enabled = cJSON_IsTrue(item) ? 1 : 0;
+   }
 }
 void config_parse_guardrails_section(config_t *cfg, cJSON *root)
 {

@@ -591,21 +591,10 @@ static cJSON *build_request_anthropic(const agent_t *agent, const char *system_p
    int tok = (max_tokens > 0) ? max_tokens : 4096;
    cJSON_AddNumberToObject(req, "max_tokens", tok);
 
-   if (system_prompt && system_prompt[0])
-   {
-      /* Use content block array with cache_control for prompt caching.
-       * This tells the API to cache the system prompt prefix across calls
-       * with the same content, reducing cost for repeated delegate calls. */
-      cJSON *sys_arr = cJSON_CreateArray();
-      cJSON *block = cJSON_CreateObject();
-      cJSON_AddStringToObject(block, "type", "text");
-      cJSON_AddStringToObject(block, "text", system_prompt);
-      cJSON *cc = cJSON_CreateObject();
-      cJSON_AddStringToObject(cc, "type", "ephemeral");
-      cJSON_AddItemToObject(block, "cache_control", cc);
-      cJSON_AddItemToArray(sys_arr, block);
-      cJSON_AddItemToObject(req, "system", sys_arr);
-   }
+   /* Cache the system prefix across calls (cache_control), reducing cost for
+    * repeated delegate calls. Shared with the tool-bearing Anthropic builder
+    * (agent_anthropic_set_system); this no-tools path always cache-marks. */
+   agent_anthropic_set_system(req, system_prompt, 1);
 
    cJSON *messages = cJSON_CreateArray();
    cJSON *user = cJSON_CreateObject();

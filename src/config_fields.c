@@ -158,6 +158,7 @@ const config_field_t config_fields[] = {
      CFG_INT},
     {"reasoning_cap_enabled", offsetof(config_t, reasoning_cap_enabled), sizeof(int), 0, CFG_BOOL},
     {"dedup_enabled", offsetof(config_t, dedup_enabled), sizeof(int), 0, CFG_BOOL},
+    {"cache_shaping_enabled", offsetof(config_t, cache_shaping_enabled), sizeof(int), 0, CFG_BOOL},
     {"guardrails_semantic_enabled", offsetof(config_t, guardrails_semantic_enabled), sizeof(int), 0,
      CFG_BOOL},
     {"guardrails_semantic_dry_run", offsetof(config_t, guardrails_semantic_dry_run), sizeof(int), 0,
