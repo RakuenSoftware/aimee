@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 eighteenth review)
+- **Date:** 2026-06-11 (revised post-PR-#183 nineteenth review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -643,6 +643,27 @@ make explicit.
     and re-surfaces the gate digest before claiming a cap is satisfied. **Resolved
     in §4, §5, §6, §8, and §10.**
 
+## PR #183 nineteenth review — the gate's own authorization
+
+Eighteen rounds hardened what the gate *evaluates*; none specified who may *resolve*
+it. That is the integrity of the whole design.
+
+53. **The gate verdict must be human/operator-authorized, distinct from the
+    driving agent's `CAP_DELEGATE` — or the agent can self-approve its own merge.**
+    The two human gates are the load-bearing control (§11: they "do not remove the
+    human"). But every pipeline/delegate action in the tree is gated by
+    `CAP_DELEGATE` (`server_auth.c`: `delegate.roundtable`, `delegate.*`, `jobs.*`),
+    which the driving agent **already holds** to run the roundtable. If
+    `pipeline gate <id> pass|fail` is gated the same way, the driving agent can
+    `pass` its own gate and trigger the merge — defeating the gate entirely and
+    turning the pipeline into the gate-less autonomous machine §11 forbids. The gate
+    *resolution* needs a **separate authority not granted to a delegate-driving
+    session**: a distinct capability (e.g. `CAP_PIPELINE_GATE`), an operator/human
+    principal, or an out-of-band confirmation. The agent may *surface* a gate (move
+    to `*_pending`, build the digest) but must never be able to *resolve* it. A
+    negative test asserts a session holding only the agent's caps is **denied**
+    `gate pass`. **Resolved in §5, §8, §10, and §11.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -1003,6 +1024,17 @@ reason becomes a brief `focus`/`questions` entry for the next loop, and the stat
 returns to the prior review phase. The fail reason is durable in the ledger so the
 re-review is genuinely directed by it.
 
+**Resolving a gate requires authority the driving agent does not have (#53).** The
+agent may *surface* a gate — move the pipeline to `*_pending`, build the digest —
+but `gate pass|fail` is the one action it must not be able to call on itself,
+because passing triggers the merge. Since the driving agent holds `CAP_DELEGATE`
+(to run the roundtable) and every existing pipeline/delegate method is
+`CAP_DELEGATE`-gated, the gate resolution must require a **separate** authority not
+present in a delegate-driving session: a distinct capability (e.g.
+`CAP_PIPELINE_GATE`), an operator/human principal, or an out-of-band confirmation.
+Without that separation the two human gates are decorative — the agent could pass
+its own.
+
 The command/API surface must be explicit in implementation. The proposal may add
 `aimee pipeline status|gate` as a new first-class CLI/MCP surface, or extend the
 existing `autopilot` pipeline handler, but it must not leave two unrelated
@@ -1154,6 +1186,10 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
 - **Hard if exposing HTTP:** route namespace selection. `GET /v1/pipeline/status`
   already belongs to the KB/corpus ingest pipeline, so roundtable-authoring routes
   must use a distinct namespace or remain CLI/MCP-only in v1 (#45).
+- **Hard:** a gate-resolution authority distinct from `CAP_DELEGATE` (#53). Every
+  pipeline/delegate method today maps to `CAP_DELEGATE`, which the driving agent
+  holds; `gate pass|fail` must require a capability/principal that a delegate-driving
+  session does not have, or the agent can self-approve its own merge.
 - **Soft:** the cost-accounting proposal's `usage_ledger` / `/v1/usage/*` for
   whole-pipeline cost that includes implementation-phase spend (#51). Absent it,
   the total cap is roundtable-child-run-cost only and says so (#49). Any
@@ -1355,6 +1391,10 @@ ledger) before the full idea→merge pipeline of P2/P3.
   ledger keeps the original source pinned or explicitly reconciles and marks the
   gate digest stale. Missing in-scope usage rows block "cap satisfied"; a
   roundtable-only configuration uses the explicit roundtable-only key/contract.
+- **Gate authority separation (#53)** — a session holding only the driving agent's
+  caps (`CAP_DELEGATE`) can surface a gate but is **denied** `gate pass|fail`; only
+  the separate gate authority (capability/operator principal/out-of-band) can
+  resolve it. The negative test proves an agent cannot self-approve and merge.
 - **Parked-gate resource release + TTL (#47)** — at a gate, the review-scoped index
   is dropped and correctly re-ingested from the origin on resume (same content
   hash, retrieval still works); with a TTL set, an unanswered gate moves to
@@ -1381,7 +1421,9 @@ ledger) before the full idea→merge pipeline of P2/P3.
   means DRAFT produces a skeleton; the author-revise loop expands it in the working
   file. Generating long-form text inside the roundtable artifact is out of scope.
 - A fully autonomous, gate-less pipeline — the two human gates are mandatory by
-  design; "configurable max passes" bounds cost, it does not remove the human.
+  design; "configurable max passes" bounds cost, it does not remove the human. This
+  is **enforced by authority separation (#53)**, not convention: the driving agent
+  cannot resolve a gate, so the pipeline cannot self-approve its way to a merge.
 - Engine changes to the roundtable. The pipeline is strictly on top.
 - Multi-proposal/parallel-pipeline scheduling beyond the explicit parked-gate
   admission rule (#48). v1 may allow many parked/waiting-human rows only if they
