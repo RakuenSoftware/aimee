@@ -316,6 +316,30 @@ static void test_ensemble_cost_uses_model_registry_prices(void)
    printf("  test_ensemble_cost_uses_model_registry_prices: ok\n");
 }
 
+static void test_delegate_cost_estimate_uses_token_tracker(void)
+{
+   /* Real models priced in the shared token_tracker authority must be billed
+    * through it (same source agent_log_call uses), not a divergent calculator. */
+   double in_cost = delegate_cost_estimate_usd("anthropic", "claude-3-5-sonnet", 1000000, 0);
+   assert(in_cost > 2.99 && in_cost < 3.01); /* $3.00/MTok input */
+   double out_cost = delegate_cost_estimate_usd(NULL, "gpt-4o", 0, 1000000);
+   assert(out_cost > 9.99 && out_cost < 10.01); /* $10.00/MTok output */
+
+   /* A model the token_tracker table does not cover but the registry does
+    * still prices via the registry fallback (no coverage regression). */
+   model_capability_t cap;
+   if (model_capability_get("gemini", "gemini-1.5-pro", &cap) && cap.cost_in_per_mtok > 0.0)
+   {
+      double g = delegate_cost_estimate_usd("gemini", "gemini-1.5-pro", 1000000, 0);
+      assert(g > 0.0);
+   }
+
+   /* A genuinely unknown model falls back to a non-zero flat estimate. */
+   double unknown = delegate_cost_estimate_usd(NULL, "totally-unknown-model-xyz", 1000, 1000);
+   assert(unknown > 0.0);
+   printf("  test_delegate_cost_estimate_uses_token_tracker: ok\n");
+}
+
 static void test_ensemble_disabled(void)
 {
    config_t cfg = make_cfg(0, 2, 10.0); /* disabled */
@@ -799,6 +823,7 @@ int main(void)
    test_ensemble_basic();
    test_ensemble_cost_cap();
    test_ensemble_cost_uses_model_registry_prices();
+   test_delegate_cost_estimate_uses_token_tracker();
    test_ensemble_min_successful_degradation();
    test_ensemble_routes_to_distinct_agents();
    test_roundtable_parallel_basic();

@@ -10,6 +10,7 @@
 #include "agent_exec.h"
 #include "log.h"
 #include "model_registry.h"
+#include "token_tracker.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,16 +86,32 @@ static double fallback_token_cost(int prompt_tokens, int completion_tokens)
    return (double)(prompt_tokens + completion_tokens) * ENSEMBLE_COST_PER_TOKEN;
 }
 
-static double model_token_cost(const char *provider, const char *model, int prompt_tokens,
-                               int completion_tokens)
+double delegate_cost_estimate_usd(const char *provider, const char *model, int prompt_tokens,
+                                  int completion_tokens)
 {
-   model_capability_t cap;
-   if (model && model[0] && model_capability_get(provider, model, &cap) &&
-       (cap.cost_in_per_mtok > 0.0 || cap.cost_out_per_mtok > 0.0))
+   if (model && model[0])
    {
-      return (double)prompt_tokens * cap.cost_in_per_mtok / 1000000.0 +
-             (double)completion_tokens * cap.cost_out_per_mtok / 1000000.0;
+      /* Primary: the shared cache-aware authority that agent_log_call bills
+       * against, so the ensemble path no longer keeps a divergent price source. */
+      token_usage_t usage = {
+          .input_tokens = prompt_tokens,
+          .output_tokens = completion_tokens,
+      };
+      double cost = token_estimate_cost(model, &usage);
+      if (cost > 0.0)
+         return cost;
+
+      /* Fallback: the model registry covers providers the token_tracker table
+       * does not (e.g. gemini, groq, mistral). A non-zero registry price means
+       * the model is genuinely priced — a 0/0 entry is "unknown", not "free",
+       * so it falls through to the flat-rate estimate below. */
+      model_capability_t cap;
+      if (model_capability_get(provider, model, &cap) &&
+          (cap.cost_in_per_mtok > 0.0 || cap.cost_out_per_mtok > 0.0))
+         return (double)prompt_tokens * cap.cost_in_per_mtok / 1000000.0 +
+                (double)completion_tokens * cap.cost_out_per_mtok / 1000000.0;
    }
+   /* Last resort: a coarse flat rate so ensemble economics stay non-zero. */
    return fallback_token_cost(prompt_tokens, completion_tokens);
 }
 
@@ -103,7 +120,7 @@ static double agent_token_cost(const agent_config_t *acfg, const char *agent_nam
 {
    const agent_t *ag = find_agent_cost_model(acfg, agent_name);
    if (ag)
-      return model_token_cost(ag->provider, ag->model, prompt_tokens, completion_tokens);
+      return delegate_cost_estimate_usd(ag->provider, ag->model, prompt_tokens, completion_tokens);
    return fallback_token_cost(prompt_tokens, completion_tokens);
 }
 
