@@ -2,6 +2,11 @@
  *
  * Hand-rolled HTTP/1.1 server on a dedicated Unix socket, mirroring the
  * aimee-kb HTTP server. First resource: /v1/personas. */
+/* _GNU_SOURCE: struct ucred / SO_PEERCRED peer-credential capture is a GNU
+ * extension; declare it before any include. */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include "server_http.h"
 #include "server.h" /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
@@ -20,6 +25,7 @@
 #include "openapi_server_data.h" /* AIMEE_OPENAPI_SERVER_YAML_STR (generated from api/openapi-server-v1.yaml) */
 #include "openai_runs_store.h"
 #include "presence.h"
+#include "request_context.h"
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -1436,6 +1442,55 @@ static int http_header(const char *buf, const char *name, char *out, size_t n)
    return 0;
 }
 
+/* Capture the Unix-domain peer's uid via SO_PEERCRED; returns -1 on TCP or when
+ * the platform/socket cannot report it. */
+static long http_peer_uid(int fd, int is_tcp)
+{
+   if (is_tcp)
+      return -1;
+#ifdef SO_PEERCRED
+   struct ucred cred;
+   socklen_t len = sizeof(cred);
+   if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &cred, &len) == 0)
+      return (long)cred.uid;
+#endif
+   return -1;
+}
+
+/* Populate the thread-local request context (#3) from the socket and headers so
+ * the buffered ingress handlers, the audit writer, and §4 dedup can read a
+ * request id, idempotency key, principal, and transport without threading them
+ * through every signature. The Unix-domain socket is trusted (same host); on it
+ * a proxy/client may stamp X-Aimee-Principal / X-Aimee-Source. A TCP request is
+ * untrusted: those headers are ignored so a remote caller cannot spoof another
+ * account's attribution. The idempotency key is read on any transport (it only
+ * ever dedups the caller's own identical requests). */
+static void populate_request_context(int fd, int is_tcp, const char *buf, const char *request_id)
+{
+   request_context_t ctx;
+   memset(&ctx, 0, sizeof(ctx));
+   snprintf(ctx.request_id, sizeof(ctx.request_id), "%s", request_id ? request_id : "");
+   ctx.transport = is_tcp ? REQ_TRANSPORT_TCP : REQ_TRANSPORT_UDS;
+   ctx.peer_uid = http_peer_uid(fd, is_tcp);
+   ctx.trusted = is_tcp ? 0 : 1;
+
+   http_header(buf, "Idempotency-Key", ctx.idempotency_key, sizeof(ctx.idempotency_key));
+
+   if (ctx.trusted)
+   {
+      char principal[128] = "";
+      char source[64] = "";
+      if (http_header(buf, "X-Aimee-Principal", principal, sizeof(principal)) && principal[0])
+         snprintf(ctx.principal, sizeof(ctx.principal), "%s", principal);
+      else if (ctx.peer_uid >= 0)
+         snprintf(ctx.principal, sizeof(ctx.principal), "uid:%ld", ctx.peer_uid);
+      if (http_header(buf, "X-Aimee-Source", source, sizeof(source)) && source[0])
+         snprintf(ctx.source, sizeof(ctx.source), "%s", source);
+   }
+
+   request_context_set(&ctx);
+}
+
 static void handle_conn(int fd, int is_tcp)
 {
    char buf[SHTTP_READ_MAX];
@@ -1475,6 +1530,11 @@ static void handle_conn(int fd, int is_tcp)
       server_http_request_id(inbound, (int)getpid(), atomic_fetch_add(&s_req_seq, 1) + 1,
                              request_id, sizeof(request_id));
    }
+
+   /* Establish the per-request context (#3) for this worker thread before any
+    * handler runs. Overwritten on every request, so thread reuse cannot leak a
+    * prior request's identity. */
+   populate_request_context(fd, is_tcp, buf, request_id);
 
    /* Authorize before reading the body: TCP requires a valid bearer; the UDS
     * relies on filesystem permissions. A session-scoping key without a
