@@ -181,7 +181,13 @@ static void test_draft_completion(void)
    assert(rtp_run_get(pid, &run) == 0);
    assert(strcmp(run.state, RTP_STATE_PROPOSAL_REVIEW) == 0);
    assert(run.proposal_ref[0] != '\0');
-   /* the skeleton was written to the working file. */
+   /* the proposal lands on a dedicated branch + worktree as a real proposal file
+    * (the PR content), not an internal origin blob (#1/§1). */
+   assert(strcmp(run.head_branch, "roundtable/proposal-1") == 0 ||
+          strncmp(run.head_branch, "roundtable/proposal-", 20) == 0);
+   assert(run.worktree_path[0] != '\0');
+   assert(strstr(run.proposal_ref, "docs/proposals/pending/roundtable-proposal-") != NULL);
+   /* the skeleton was written to that working file. */
    FILE *f = fopen(run.proposal_ref, "rb");
    assert(f != NULL);
    char buf[256] = {0};

@@ -641,28 +641,8 @@ static int open_and_record_pr(rtp_run_t *run, const char *phase)
    return 0;
 }
 
-/* The PR's current head SHA via the forge (in the recorded checkout), for drift
- * detection (#56). Empty on failure. */
-static void pr_current_head(const rtp_run_t *run, int pr_number, char *out, size_t cap)
-{
-   out[0] = '\0';
-   if (pr_number <= 0)
-      return;
-   char cmd[RTP_PATH_LEN + 128];
-   size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
-   snprintf(cmd + p, sizeof(cmd) - p, "gh pr view %d --json headRefOid -q .headRefOid 2>/dev/null",
-            pr_number);
-   int rc = 0;
-   char *o = mcp_git_run(cmd, &rc);
-   if (o && rc == 0)
-   {
-      char *nl = strchr(o, '\n');
-      if (nl)
-         *nl = '\0';
-      snprintf(out, cap, "%s", o);
-   }
-   free(o);
-}
+/* (PR head/state revalidation is done in validate_pr_for_merge via a single
+ * `gh pr view --json state,baseRefName,mergeable,headRefOid` query.) */
 
 /* Per-pass artifact is persisted to a durable working file so a lost-result
  * attempt can be auto re-run under the same pass id without the caller resending
@@ -963,6 +943,79 @@ static int resubmit_same_pass(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *l
  * attempt result's `artifact`). Store it as the proposal working artifact
  * (ref + hash, #34), mark the pass done, and transition drafting ->
  * proposal_review — NOT to a PR/gate. */
+/* Create/select the dedicated proposal branch + worktree before writing the
+ * proposal file (proposal §1). When a repo_root is recorded and no worktree is
+ * selected yet, create a `roundtable/proposal-<id>` branch in a private worktree
+ * so the proposal lands on a dedicated branch, not the user's checkout.
+ * Best-effort: with no repo / git failure it falls back to an internal file. */
+static void prepare_proposal_workspace(rtp_run_t *run)
+{
+   if (run->worktree_path[0] || !run->repo_root[0])
+      return;
+   if (!run->head_branch[0])
+      snprintf(run->head_branch, sizeof(run->head_branch), "roundtable/proposal-%d", run->id);
+   char wt[RTP_PATH_LEN];
+   snprintf(wt, sizeof(wt), "%s/roundtable_pipeline/%d/wt", aimee_home(), run->id);
+   char *erepo = shell_escape(run->repo_root);
+   char *ewt = shell_escape(wt);
+   char *ebr = shell_escape(run->head_branch);
+   char cmd[RTP_PATH_LEN * 3 + 128];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' worktree add -B '%s' '%s' 2>&1",
+            erepo ? erepo : run->repo_root, ebr ? ebr : run->head_branch, ewt ? ewt : wt);
+   free(erepo);
+   free(ewt);
+   free(ebr);
+   int rc = 0;
+   char *o = mcp_git_run(cmd, &rc);
+   free(o);
+   if (rc == 0)
+      snprintf(run->worktree_path, sizeof(run->worktree_path), "%s", wt);
+   rtp_run_update(run);
+}
+
+/* Write the proposal content into the dedicated worktree as the real working
+ * file (the PR content) and commit it on the branch, recording proposal_ref to
+ * that path. Falls back to an internal file when no repo/worktree is available. */
+static void write_proposal_file(rtp_run_t *run, const char *content, const char *hash)
+{
+   const char *base =
+       run->worktree_path[0] ? run->worktree_path : (run->repo_root[0] ? run->repo_root : NULL);
+   if (!base)
+   {
+      persist_origin(run, RTP_PHASE_PROPOSAL, content, hash); /* internal fallback */
+      return;
+   }
+   char rel[RTP_PATH_LEN];
+   snprintf(rel, sizeof(rel), "docs/proposals/pending/roundtable-proposal-%d.md", run->id);
+   char dir[RTP_PATH_LEN];
+   snprintf(dir, sizeof(dir), "%s/docs/proposals/pending", base);
+   platform_mkdir_p(dir, 0755);
+   char path[RTP_PATH_LEN];
+   snprintf(path, sizeof(path), "%s/%s", base, rel);
+   FILE *f = fopen(path, "wb");
+   if (!f)
+   {
+      persist_origin(run, RTP_PHASE_PROPOSAL, content, hash);
+      return;
+   }
+   fwrite(content, 1, strlen(content), f);
+   fclose(f);
+   snprintf(run->proposal_ref, sizeof(run->proposal_ref), "%s", path);
+   snprintf(run->proposal_origin_hash, sizeof(run->proposal_origin_hash), "%s", hash);
+   rtp_run_update(run);
+   /* commit on the dedicated branch so the reviewed file IS the PR content. */
+   char *erel = shell_escape(rel);
+   char cmd[RTP_PATH_LEN * 2 + 256];
+   size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
+   snprintf(cmd + p, sizeof(cmd) - p,
+            "git add '%s' && git commit -q -m 'roundtable proposal #%d (skeleton/revision)' 2>&1",
+            erel ? erel : rel, run->id);
+   free(erel);
+   int rc = 0;
+   char *o = mcp_git_run(cmd, &rc);
+   free(o);
+}
+
 static int draft_complete(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *latest,
                           const rtp_attempt_t *att)
 {
@@ -986,7 +1039,10 @@ static int draft_complete(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *lates
    }
    char hash[RTP_CHUNK_HASH_LEN];
    rtp_chunk_hash(skeleton, (int)strlen(skeleton), hash, sizeof(hash));
-   persist_origin(run, RTP_PHASE_PROPOSAL, skeleton, hash);
+   /* land the skeleton on a dedicated branch/worktree as the real proposal file
+    * (the PR content), not an internal blob (#1/§1). */
+   prepare_proposal_workspace(run);
+   write_proposal_file(run, skeleton, hash);
    free(skeleton);
    snprintf(latest->status, sizeof(latest->status), RTP_PASS_DONE);
    rtp_pass_update(latest);
@@ -1450,34 +1506,81 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 /* Run the policy-aware merge for an approved gate, record full evidence into the
  * gate row, and advance on success. Shared by gate-pass and the *_merge_pending
  * crash-recovery reconcile (#56). Fills `resp`. */
+/* Revalidate the PR + worktree before honoring a gate verdict (proposal §5):
+ * the PR still exists and is OPEN, its base is still the intended branch, its
+ * head matches the approved SHA (drift #56), it is not conflicting, and the
+ * worktree is clean. On any mismatch fills `resp` (merge_pending) and returns
+ * -1; the verdict is preserved and the merge is not attempted. */
+static int validate_pr_for_merge(rtp_run_t *run, rtp_gate_t *gate, int gate_no, cJSON *resp)
+{
+   const char *mp = gate_no == 2 ? RTP_STATE_GATE2_MERGE_PENDING : RTP_STATE_GATE1_MERGE_PENDING;
+   char cmd[RTP_PATH_LEN + 160];
+   size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
+   snprintf(cmd + p, sizeof(cmd) - p,
+            "gh pr view %d --json state,baseRefName,mergeable,headRefOid 2>/dev/null",
+            gate->pr_number);
+   int rc = 0;
+   char *out = mcp_git_run(cmd, &rc);
+   cJSON *j = (out && rc == 0 && out[0]) ? cJSON_Parse(out) : NULL;
+   free(out);
+   if (!j)
+   {
+      cJSON_AddBoolToObject(resp, "merged", 0);
+      cJSON_AddStringToObject(resp, "state", mp);
+      cJSON_AddStringToObject(
+          resp, "note",
+          "PR not found / forge unavailable / unparseable; verdict preserved, retry later.");
+      return -1;
+   }
+   const char *state = jo_str(j, "state", "");
+   const char *base = jo_str(j, "baseRefName", "");
+   const char *mergeable = jo_str(j, "mergeable", "");
+   const char *head = jo_str(j, "headRefOid", "");
+   const char *why = NULL;
+   if (state[0] && strcmp(state, "OPEN") != 0)
+      why = "PR is no longer OPEN (closed or merged elsewhere)";
+   else if (base[0] && run->base_branch[0] && strcmp(base, run->base_branch) != 0)
+      why = "PR base branch changed from the approved target";
+   else if (gate->expected_head_sha[0] && head[0] && strcmp(head, gate->expected_head_sha) != 0)
+   {
+      cJSON_AddBoolToObject(resp, "head_drift", 1);
+      cJSON_AddStringToObject(resp, "current_head_sha", head);
+      cJSON_AddStringToObject(resp, "expected_head_sha", gate->expected_head_sha);
+      why = "PR head drifted from the approved SHA; the gate verdict is stale";
+   }
+   else if (mergeable[0] && strcmp(mergeable, "CONFLICTING") == 0)
+      why = "PR is not mergeable (conflicting)";
+   cJSON_Delete(j);
+   if (why)
+   {
+      cJSON_AddBoolToObject(resp, "merged", 0);
+      cJSON_AddStringToObject(resp, "state", mp);
+      cJSON_AddStringToObject(resp, "note", why);
+      return -1;
+   }
+   /* worktree cleanliness — surfaced (the merge is remote, so not hard-failed). */
+   if (rtp_git_cwd(run)[0])
+   {
+      char wc[RTP_PATH_LEN + 64];
+      size_t wp = rtp_cd_prefix(run, wc, sizeof(wc));
+      snprintf(wc + wp, sizeof(wc) - wp, "git status --porcelain 2>/dev/null");
+      int wrc = 0;
+      char *wo = mcp_git_run(wc, &wrc);
+      if (wo && wo[0])
+         cJSON_AddBoolToObject(resp, "worktree_dirty", 1);
+      free(wo);
+   }
+   return 0;
+}
+
 static void execute_gate_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no, cJSON *req,
                                cJSON *resp)
 {
-   /* Drift guard (#56): if the PR head moved away from the SHA the human
-    * approved, the verdict no longer applies — stop for a fresh review rather
-    * than merging unreviewed commits. (gh's --match-head-commit also refuses,
-    * but we surface it explicitly and mark the evidence stale.) */
-   if (gate->expected_head_sha[0])
-   {
-      char cur[RTP_HASH_LEN];
-      pr_current_head(run, gate->pr_number, cur, sizeof(cur));
-      if (cur[0] && strcmp(cur, gate->expected_head_sha) != 0)
-      {
-         const char *mp =
-             gate_no == 2 ? RTP_STATE_GATE2_MERGE_PENDING : RTP_STATE_GATE1_MERGE_PENDING;
-         cJSON_AddBoolToObject(resp, "merged", 0);
-         cJSON_AddBoolToObject(resp, "head_drift", 1);
-         cJSON_AddStringToObject(resp, "expected_head_sha", gate->expected_head_sha);
-         cJSON_AddStringToObject(resp, "current_head_sha", cur);
-         cJSON_AddStringToObject(resp, "state", mp);
-         cJSON_AddStringToObject(
-             resp, "note",
-             "PR head drifted from the approved SHA; the gate verdict is stale. Re-review the new "
-             "head (pipeline fail->re-review) before merging.");
-         (void)run;
-         return;
-      }
-   }
+   /* Revalidate the PR + worktree before merging (§5): existence, OPEN state,
+    * base branch, head drift (#56), mergeability, worktree cleanliness. On any
+    * mismatch the verdict is preserved in *_merge_pending and we do not merge. */
+   if (validate_pr_for_merge(run, gate, gate_no, resp) != 0)
+      return;
 
    /* Policy-aware merge executor (#50), pinned to the recorded checkout (#3) and
     * keyed by the approved head SHA (--match-head-commit) so a drift between the
