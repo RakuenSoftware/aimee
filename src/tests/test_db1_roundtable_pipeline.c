@@ -118,6 +118,19 @@ static void test_admission(void)
    assert(n == 1);                      /* only parked b is non-terminal */
    n = rtp_run_list(RTP_STATE_DONE, rows, 8);
    assert(n == 1);
+
+   /* branch/PR ownership guard (#48): a non-terminal run owns its head_branch. */
+   rtp_run_t pb;
+   assert(rtp_run_get(b, &pb) == 0);
+   snprintf(pb.head_branch, sizeof(pb.head_branch), "feat/shared");
+   snprintf(pb.repo_root, sizeof(pb.repo_root), "/r");
+   assert(rtp_run_update(&pb) == 0);
+   assert(rtp_run_branch_owner("/r", "feat/shared", 0) == b);
+   assert(rtp_run_branch_owner("/r", "feat/shared", b) == 0); /* exclude self */
+   assert(rtp_run_branch_owner("/r", "feat/other", 0) == 0);
+   /* a terminal run does not own its branch. */
+   assert(rtp_run_set_state(b, RTP_STATE_ABANDONED, NULL) == 0);
+   assert(rtp_run_branch_owner("/r", "feat/shared", 0) == 0);
    printf("  admission + list: ok\n");
 }
 
@@ -223,6 +236,12 @@ static void test_gates(void)
    assert(strcmp(g2.verdict, "pass") == 0);
    assert(strcmp(g2.merge_sha, "mergesha1") == 0);
    assert(strcmp(g2.merge_executor, "git_pr") == 0);
+
+   /* gate-age TTL (#47): a freshly created gate is not over any positive TTL, and
+    * hours<=0 (no TTL) never trips. */
+   assert(rtp_gate_age_exceeds_hours(pid, 1, 0) == 0); /* TTL disabled */
+   assert(rtp_gate_age_exceeds_hours(pid, 1, 1) == 0); /* just created */
+   assert(rtp_gate_age_exceeds_hours(pid, 9, 1) == 0); /* no such gate */
    printf("  gates: ok\n");
 }
 

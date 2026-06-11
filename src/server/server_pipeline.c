@@ -94,7 +94,10 @@ static void env_from_ledger(const rtp_pass_t *p, const rtp_attempt_t *a, rtp_env
    e->artifact_round = p->artifact_round;
    e->best_round = p->best_round;
    e->rounds_run = p->rounds_run;
-   e->artifact_present = e->is_draft ? 1 : 0; /* aggregate doesn't store artifact text */
+   /* DRAFT validity is decided directly from the attempt (draft_complete), not
+    * via this reconstruction; mirror the captured attempt's verdict so the
+    * predicate stays consistent rather than assuming an artifact always exists. */
+   e->artifact_present = (e->is_draft && a) ? a->envelope_valid : 0;
 }
 
 static void load_loop_cfg(const config_t *cfg, const rtp_run_t *run, rtp_loop_cfg_t *out)
@@ -151,6 +154,7 @@ static cJSON *build_digest(const rtp_run_t *run, const rtp_pass_t *latest, int h
 static void execute_gate_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no, cJSON *req,
                                cJSON *resp);
 static int resolve_panel(const config_t *cfg, rtp_panel_t *out);
+static int maybe_ttl_abandon(int id, rtp_run_t *run, const config_t *cfg);
 
 /* Open a human gate: record the gate (PR + expected head SHA as the merge-intent
  * key), move to *_pending, and release re-creatable resources (#47) — the
@@ -209,6 +213,20 @@ int handle_pipeline_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    const char *repo_root = jo_str(req, "repo_root", "");
    const char *base = jo_str(req, "base_branch", "testing");
+   const char *head_branch = jo_str(req, "head_branch", NULL);
+
+   /* Reject (never silently truncate) an over-long question set before it can be
+    * mistaken as fully answered (#14). */
+   cJSON *qreq = cJSON_GetObjectItemCaseSensitive(req, "questions");
+   if (cJSON_IsArray(qreq) && cJSON_GetArraySize(qreq) > RTP_MAX_BRIEF_QUESTIONS)
+      return server_send_error(
+          conn, "pipeline: too many questions (max 16); split into multiple review passes", NULL);
+
+   /* Branch/PR ownership guard (#48): even with the active slot free (parked
+    * gate), a second run may not target a branch another non-terminal run owns. */
+   if (head_branch && head_branch[0] && rtp_run_branch_owner(repo_root, head_branch, 0) > 0)
+      return server_send_error(
+          conn, "pipeline: head_branch is already owned by another active pipeline", NULL);
 
    int id = 0;
    if (rtp_run_create(idea, done_bar, repo_root, base, &id) != 0 || id <= 0)
@@ -307,6 +325,11 @@ int handle_pipeline_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (rtp_run_get(id, &run) != 0)
       return server_send_error(conn, "pipeline: not found", NULL);
 
+   /* lazily enforce the unanswered-gate TTL when the run is observed (#47). */
+   config_t scfg;
+   if (config_load(&scfg) == 0)
+      maybe_ttl_abandon(id, &run, &scfg);
+
    const char *phase = phase_for_state(run.state);
    rtp_pass_t latest;
    int have = rtp_pass_latest(id, phase, &latest) == 0;
@@ -353,6 +376,8 @@ int handle_pipeline_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    const char *filter = jo_str(req, "state", NULL);
+   config_t lcfg;
+   int have_cfg = (config_load(&lcfg) == 0);
    rtp_run_t rows[64];
    int n = rtp_run_list(filter, rows, 64);
    if (n < 0)
@@ -361,6 +386,9 @@ int handle_pipeline_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *arr = cJSON_AddArrayToObject(resp, "pipelines");
    for (int i = 0; i < n; i++)
    {
+      /* lazily enforce the unanswered-gate TTL on each observed run (#47). */
+      if (have_cfg)
+         maybe_ttl_abandon(rows[i].id, &rows[i], &lcfg);
       cJSON *o = cJSON_CreateObject();
       cJSON_AddNumberToObject(o, "pipeline_id", rows[i].id);
       cJSON_AddStringToObject(o, "state", rows[i].state);
@@ -636,6 +664,56 @@ static void pr_current_head(const rtp_run_t *run, int pr_number, char *out, size
    free(o);
 }
 
+/* Per-pass artifact is persisted to a durable working file so a lost-result
+ * attempt can be auto re-run under the same pass id without the caller resending
+ * it (#19), and the content hash pins the replay (#24). */
+static void pass_file_path(const rtp_run_t *run, int pass_id, char *buf, size_t cap)
+{
+   snprintf(buf, cap, "%s/roundtable_pipeline/%d/pass-%d.txt", aimee_home(), run->id, pass_id);
+}
+
+static void persist_pass_artifact(const rtp_run_t *run, int pass_id, const char *artifact)
+{
+   char dir[RTP_PATH_LEN];
+   snprintf(dir, sizeof(dir), "%s/roundtable_pipeline/%d", aimee_home(), run->id);
+   platform_mkdir_p(dir, 0700);
+   char path[RTP_PATH_LEN];
+   pass_file_path(run, pass_id, path, sizeof(path));
+   FILE *f = fopen(path, "wb");
+   if (!f)
+      return;
+   if (artifact)
+      fwrite(artifact, 1, strlen(artifact), f);
+   fclose(f);
+}
+
+static char *read_pass_artifact(const rtp_run_t *run, int pass_id)
+{
+   char path[RTP_PATH_LEN];
+   pass_file_path(run, pass_id, path, sizeof(path));
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return NULL;
+   fseek(f, 0, SEEK_END);
+   long n = ftell(f);
+   fseek(f, 0, SEEK_SET);
+   if (n < 0)
+   {
+      fclose(f);
+      return NULL;
+   }
+   char *b = (char *)malloc((size_t)n + 1);
+   if (!b)
+   {
+      fclose(f);
+      return NULL;
+   }
+   size_t rd = fread(b, 1, (size_t)n, f);
+   fclose(f);
+   b[rd] = '\0';
+   return b;
+}
+
 static int submit_pass(server_conn_t *conn, rtp_run_t *run, const char *phase, const char *mode,
                        const char *artifact, const char *artifact_hash)
 {
@@ -643,6 +721,18 @@ static int submit_pass(server_conn_t *conn, rtp_run_t *run, const char *phase, c
    int pass_id = 0;
    if (rtp_pass_create(run->id, phase, mode, pass_no, artifact_hash, &pass_id) != 0)
       return server_send_error(conn, "pipeline: could not create pass", NULL);
+
+   /* pin the pass to the content hash + persist the artifact for auto-retry. */
+   char ahash[RTP_CHUNK_HASH_LEN];
+   rtp_chunk_hash(artifact ? artifact : "", artifact ? (int)strlen(artifact) : 0, ahash,
+                  sizeof(ahash));
+   rtp_pass_t pp;
+   if (rtp_pass_get(pass_id, &pp) == 0)
+   {
+      snprintf(pp.artifact_hash, sizeof(pp.artifact_hash), "%s", ahash);
+      rtp_pass_update(&pp);
+   }
+   persist_pass_artifact(run, pass_id, artifact);
 
    cJSON *body = cJSON_CreateObject();
    attach_prompt_brief(body, artifact, run->brief);
@@ -812,6 +902,119 @@ static int persist_origin(rtp_run_t *run, const char *phase, const char *artifac
    snprintf(run->chunk_index_ref, sizeof(run->chunk_index_ref), "origin:%s", origin_hash);
    rtp_run_update(run);
    return 0;
+}
+
+/* Auto re-run a lost-result pass under the SAME pass id + a new attempt (#19),
+ * pinned to the persisted artifact's hash (#24). Escalates if the artifact is
+ * unavailable or its hash drifted. Driven by the controller, not the caller. */
+static int resubmit_same_pass(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *latest)
+{
+   char *a = read_pass_artifact(run, latest->id);
+   if (!a)
+   {
+      cJSON *resp = jo_ok();
+      cJSON_AddStringToObject(resp, "action", "escalate");
+      cJSON_AddStringToObject(resp, "note",
+                              "capture fault and the pass artifact is unavailable to re-run; human "
+                              "attention required");
+      return server_send_ok(conn, resp);
+   }
+   char h[RTP_CHUNK_HASH_LEN];
+   rtp_chunk_hash(a, (int)strlen(a), h, sizeof(h));
+   if (latest->artifact_hash[0] && strcmp(h, latest->artifact_hash) != 0)
+   {
+      free(a);
+      cJSON *resp = jo_ok();
+      cJSON_AddStringToObject(resp, "action", "escalate");
+      cJSON_AddStringToObject(
+          resp, "note", "artifact changed since the lost attempt; not reusing the pass id (#24)");
+      return server_send_ok(conn, resp);
+   }
+   snprintf(latest->status, sizeof(latest->status), RTP_PASS_OPEN);
+   rtp_pass_update(latest);
+   cJSON *body = cJSON_CreateObject();
+   attach_prompt_brief(body, a, run->brief);
+   cJSON_AddStringToObject(body, "mode",
+                           strcmp(latest->mode, RTP_MODE_DRAFT) == 0 ? "draft" : "review");
+   cJSON_AddNumberToObject(body, "pipeline_pass_id", latest->id);
+   char *bj = cJSON_PrintUnformatted(body);
+   cJSON_Delete(body);
+   free(a);
+   char rr[4096];
+   int rc = server_http_submit_op_run("delegate.roundtable", bj ? bj : "{}", conn->capabilities, rr,
+                                      (int)sizeof(rr));
+   free(bj);
+   cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "action", (rc >= 200 && rc < 300) ? "retrying" : "error");
+   cJSON_AddNumberToObject(resp, "pass_id", latest->id);
+   cJSON_AddStringToObject(resp, "note",
+                           "lost-result auto re-run under the same pass id, new attempt (#19)");
+   return server_send_ok(conn, resp);
+}
+
+/* DRAFT completion (#1/#9): a valid DRAFT pass produced a skeleton (in the
+ * attempt result's `artifact`). Store it as the proposal working artifact
+ * (ref + hash, #34), mark the pass done, and transition drafting ->
+ * proposal_review — NOT to a PR/gate. */
+static int draft_complete(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *latest,
+                          const rtp_attempt_t *att)
+{
+   char *skeleton = NULL;
+   cJSON *snap = att->result_snapshot[0] ? cJSON_Parse(att->result_snapshot) : NULL;
+   if (snap)
+   {
+      cJSON *a = cJSON_GetObjectItemCaseSensitive(snap, "artifact");
+      if (cJSON_IsString(a) && a->valuestring[0])
+         skeleton = strdup(a->valuestring);
+      cJSON_Delete(snap);
+   }
+   if (!skeleton || !skeleton[0])
+   {
+      free(skeleton);
+      cJSON *resp = jo_ok();
+      cJSON_AddStringToObject(resp, "action", "escalate");
+      cJSON_AddStringToObject(resp, "note",
+                              "DRAFT produced no skeleton artifact; human attention required");
+      return server_send_ok(conn, resp);
+   }
+   char hash[RTP_CHUNK_HASH_LEN];
+   rtp_chunk_hash(skeleton, (int)strlen(skeleton), hash, sizeof(hash));
+   persist_origin(run, RTP_PHASE_PROPOSAL, skeleton, hash);
+   free(skeleton);
+   snprintf(latest->status, sizeof(latest->status), RTP_PASS_DONE);
+   rtp_pass_update(latest);
+   rtp_run_set_state(run->id, RTP_STATE_PROPOSAL_REVIEW, RTP_PHASE_PROPOSAL);
+   cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "action", "drafted");
+   cJSON_AddStringToObject(resp, "state", RTP_STATE_PROPOSAL_REVIEW);
+   cJSON_AddStringToObject(resp, "proposal_ref", run->proposal_ref);
+   cJSON_AddStringToObject(
+       resp, "note",
+       "DRAFT skeleton stored as the proposal working artifact; entering proposal_review");
+   return server_send_ok(conn, resp);
+}
+
+/* Unanswered-gate TTL (#47/#57): an awaiting-human *_pending gate older than the
+ * configured TTL moves to abandoned with child-run stop — never an auto-pass,
+ * and never applied to *_merge_pending. Returns 1 if it abandoned the run. */
+static int maybe_ttl_abandon(int id, rtp_run_t *run, const config_t *cfg)
+{
+   if (cfg->roundtable_pipeline_gate_ttl_h <= 0)
+      return 0;
+   int gate_no = 0;
+   if (strcmp(run->state, RTP_STATE_GATE1_PENDING) == 0)
+      gate_no = 1;
+   else if (strcmp(run->state, RTP_STATE_GATE2_PENDING) == 0)
+      gate_no = 2;
+   else
+      return 0;
+   if (!rtp_gate_age_exceeds_hours(id, gate_no, cfg->roundtable_pipeline_gate_ttl_h))
+      return 0;
+   stop_inflight(id, RTP_PHASE_PROPOSAL);
+   stop_inflight(id, RTP_PHASE_IMPL);
+   rtp_run_set_state(id, RTP_STATE_ABANDONED, NULL);
+   rtp_run_get(id, run);
+   return 1;
 }
 
 /* Chunked review submission (#28/#37): persist the whole origin, split it into
@@ -991,6 +1194,14 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (is_terminal_state(run.state))
       return server_send_error(conn, "pipeline: terminal", NULL);
 
+   /* unanswered-gate TTL (#47): abandon an over-age awaiting-human gate before
+    * doing anything else. Never applies to *_merge_pending (#57). */
+   {
+      config_t tcfg;
+      if (config_load(&tcfg) == 0 && maybe_ttl_abandon(id, &run, &tcfg))
+         return server_send_error(conn, "pipeline: gate TTL exceeded; pipeline abandoned", NULL);
+   }
+
    /* *_merge_pending is a post-pass recovery state (#56): reconcile the recorded
     * merge intent rather than re-asking the human. The verdict is preserved; the
     * TTL never abandons it (#57). */
@@ -1049,6 +1260,28 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       rtp_attempt_t a;
       int hav_a = rtp_attempt_current(latest.id, &a) == 0;
+
+      /* DRAFT completion is NOT a review done-bar (#1): a valid skeleton is
+       * stored as the proposal working artifact and transitions drafting ->
+       * proposal_review; it never opens a PR/gate. */
+      if (strcmp(latest.mode, RTP_MODE_DRAFT) == 0)
+      {
+         int maxa = cfg.roundtable_pipeline_max_attempts_per_pass > 0
+                        ? cfg.roundtable_pipeline_max_attempts_per_pass
+                        : 2;
+         if (hav_a && a.envelope_valid)
+            return draft_complete(conn, &run, &latest, &a);
+         if (hav_a && a.attempt_no < maxa)
+            return resubmit_same_pass(conn, &run, &latest);
+         cJSON *resp = jo_ok();
+         cJSON_AddStringToObject(resp, "action", "escalate");
+         cJSON_AddStringToObject(
+             resp, "note",
+             "DRAFT did not produce a valid skeleton within the retry ceiling; human attention "
+             "required");
+         return server_send_ok(conn, resp);
+      }
+
       rtp_envelope_t env;
       env_from_ledger(&latest, hav_a ? &a : NULL, &env);
 
@@ -1101,36 +1334,8 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          return server_send_ok(conn, resp);
       }
       if (act == RTP_ACT_RETRY)
-      {
-         if (!artifact || !artifact[0])
-         {
-            cJSON *resp = jo_ok();
-            cJSON_AddStringToObject(resp, "action", "retry");
-            cJSON_AddStringToObject(
-                resp, "note", "capture fault; re-call advance with the same artifact to re-run");
-            return server_send_ok(conn, resp);
-         }
-         /* new attempt under the same pass id. */
-         int attempt_no = rtp_attempt_max_no(latest.id) + 1;
-         (void)attempt_no; /* the seam allocates + supersedes on submit */
-         snprintf(latest.status, sizeof(latest.status), RTP_PASS_OPEN);
-         rtp_pass_update(&latest);
-         cJSON *body = cJSON_CreateObject();
-         attach_prompt_brief(body, artifact, run.brief);
-         cJSON_AddStringToObject(body, "mode",
-                                 strcmp(latest.mode, RTP_MODE_DRAFT) == 0 ? "draft" : "review");
-         cJSON_AddNumberToObject(body, "pipeline_pass_id", latest.id);
-         char *bj = cJSON_PrintUnformatted(body);
-         cJSON_Delete(body);
-         char rr[4096];
-         int rc = server_http_submit_op_run("delegate.roundtable", bj ? bj : "{}",
-                                            conn->capabilities, rr, (int)sizeof(rr));
-         free(bj);
-         cJSON *resp = jo_ok();
-         cJSON_AddStringToObject(resp, "action", (rc >= 200 && rc < 300) ? "submitted" : "error");
-         cJSON_AddNumberToObject(resp, "pass_id", latest.id);
-         return server_send_ok(conn, resp);
-      }
+         /* automatic: re-run the same pass id from the persisted artifact (#19). */
+         return resubmit_same_pass(conn, &run, &latest);
       /* RTP_ACT_REVISE */
       if (!(artifact && artifact[0]))
       {

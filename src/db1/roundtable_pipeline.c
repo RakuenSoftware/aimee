@@ -245,6 +245,32 @@ int rtp_run_count_active(void)
    return n;
 }
 
+int rtp_run_branch_owner(const char *repo_root, const char *head_branch, int exclude_id)
+{
+   if (!head_branch || !head_branch[0])
+      return 0;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return 0;
+   sqlite3_stmt *stmt = NULL;
+   /* a non-terminal run on the same head_branch (and repo_root when both set). */
+   static const char *sql = "SELECT id FROM roundtable_pipeline_runs WHERE head_branch=? AND id<>?"
+                            " AND state NOT IN ('done','failed','abandoned')"
+                            " AND (?='' OR repo_root='' OR repo_root=?) ORDER BY id DESC LIMIT 1";
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return 0;
+   const char *rr = repo_root ? repo_root : "";
+   sqlite3_bind_text(stmt, 1, head_branch, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 2, exclude_id);
+   sqlite3_bind_text(stmt, 3, rr, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 4, rr, -1, SQLITE_TRANSIENT);
+   int owner = 0;
+   if (sqlite3_step(stmt) == SQLITE_ROW)
+      owner = sqlite3_column_int(stmt, 0);
+   sqlite3_finalize(stmt);
+   return owner;
+}
+
 /* -------------------------------------------------------------- passes ---- */
 
 int rtp_pass_create(int pipeline_id, const char *phase, const char *mode, int pass_no,
@@ -801,4 +827,27 @@ int rtp_gate_update(const rtp_gate_t *g)
    int changed = (rc == SQLITE_DONE) ? sqlite3_changes(db) : 0;
    sqlite3_finalize(stmt);
    return changed > 0 ? 0 : -1;
+}
+
+int rtp_gate_age_exceeds_hours(int pipeline_id, int gate_no, int hours)
+{
+   if (pipeline_id <= 0 || hours <= 0)
+      return 0;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return 0;
+   sqlite3_stmt *stmt = NULL;
+   static const char *sql =
+       "SELECT (strftime('%s','now') - strftime('%s', created_at)) > (? * 3600)"
+       " FROM roundtable_pipeline_gates WHERE pipeline_id=? AND gate_no=? ORDER BY id DESC LIMIT 1";
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return 0;
+   sqlite3_bind_int(stmt, 1, hours);
+   sqlite3_bind_int(stmt, 2, pipeline_id);
+   sqlite3_bind_int(stmt, 3, gate_no);
+   int over = 0;
+   if (sqlite3_step(stmt) == SQLITE_ROW)
+      over = sqlite3_column_int(stmt, 0);
+   sqlite3_finalize(stmt);
+   return over ? 1 : 0;
 }

@@ -217,6 +217,10 @@ extern "C"
    int rtp_run_list(const char *state_filter, rtp_run_t *out, int max);
    /* Count runs whose admission_class == 'active' (section 1 admission control). */
    int rtp_run_count_active(void);
+   /* The id of a non-terminal run that already owns head_branch (optionally
+    * scoped to repo_root), excluding exclude_id; 0 if none. Branch/PR ownership
+    * guard so two runs can't mutate the same branch/PR (#48). */
+   int rtp_run_branch_owner(const char *repo_root, const char *head_branch, int exclude_id);
 
    /* ---- passes ---- */
    int rtp_pass_create(int pipeline_id, const char *phase, const char *mode, int pass_no,
@@ -248,6 +252,9 @@ extern "C"
                        int *out_id);
    int rtp_gate_get(int pipeline_id, int gate_no, rtp_gate_t *out);
    int rtp_gate_update(const rtp_gate_t *gate);
+   /* 1 if the gate row's created_at is older than `hours` (unanswered-gate TTL,
+    * #47/#57); 0 otherwise or on error. */
+   int rtp_gate_age_exceeds_hours(int pipeline_id, int gate_no, int hours);
 
 #ifdef __cplusplus
 }
