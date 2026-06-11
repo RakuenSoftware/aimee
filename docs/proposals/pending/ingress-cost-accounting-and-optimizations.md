@@ -263,9 +263,3 @@ each clears the readiness bar with a benchmark showing no quality regression.
   analytics is justified (§2).
 - No silent message-trimming or model substitution; routing stays in the bandit.
 - No external proxy / menubar / dashboard.html / log-scraping from `tokencost`.
-
-## Attribution
-
-Modelled on the MIT-licensed `tokencost` project (cache-multiplier economics,
-complexity heuristic, dedup idea). Any seeded pricing data carries attribution +
-a dated refresh marker in the single source-of-truth file.
