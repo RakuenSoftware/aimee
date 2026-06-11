@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#181 fifth review)
+- **Date:** 2026-06-11 (revised post-PR-#181 sixth review)
 - **Charter roles:** Rewrite (envelope compression / cache placement),
   Recall (recovery resolver / rehydration handle), Extract / Gate-Promote (failure-mined
   corrections), Calibrate / Evaluate-Optimize (token + accuracy A/B).
@@ -29,6 +29,23 @@
   config docs (`docs/gen/configuration.md` via `scripts/gen-reference-docs.py`),
   unit + integration tests, docs. No new long-lived service; the ML prose
   compressor is explicitly out of scope (§5).
+
+## Design at a glance
+
+For readers not following the review history below (gaps 1–31 record how the
+contract was hardened and can be read as an appendix), the design is four
+default-off levers added to the pre-injection path, mined from headroom:
+
+1. **Compress** envelope content over a typed IR — code folder first (§1).
+2. **Place** volatile per-turn context *after* the provider cache prefix (§2).
+3. **Recover** folded detail through a *callable* resolver — `code_span_get` /
+   `memory_get` for durable data, `rehydrate` for ephemeral (§3).
+4. **Learn** from failed sessions via the existing learning-signal pipeline (§4).
+
+Phasing is P0→P5 (§7). Two hard gates dominate (§6): a lossy fold ships only where
+its resolver is *provably reachable* on that ingress, and a default flip requires a
+**net** token win (resident savings minus recovery round-trips) on Aimee's own
+corpora — not merely a resident-token reduction.
 
 ## Provenance
 
@@ -579,6 +596,30 @@ Otherwise the synthetic call leaks to Codex as an unknown client tool.
 request/response state-machine design with call-id handling, streaming parity,
 and tests that synthetic resolver calls are not leaked to the client.
 
+## PR #181 sixth review — net token economics, not just resident reduction
+
+The first five rounds hardened the *mechanism* (resolvers, handles, reachability,
+security, generated artifacts). One economic gap remains: nothing yet proves the
+levers net out positive once the agent's recovery round-trips are counted.
+
+### 31. Validation measures resident reduction but not net cost or recovery rate
+
+A lossy fold saves resident tokens on the turn it is injected, but if the agent
+then calls the resolver (`code_span_get` / `memory_get` / `rehydrate`) to recover
+the folded-out detail, that round-trip costs a tool call **plus the full recovered
+span** — often as many tokens as were saved, plus latency. The headline "token
+reduction" therefore only holds when recovery is *rare*. §6 measures resident
+reduction, realized cache, and forced-rehydration correctness, but never the
+**net** token delta (resident savings − recovery overhead) nor the **recovery
+rate** that determines the sign of that delta. On body-heavy task classes, net
+savings can be near zero or negative while resident reduction still looks large —
+the same trap behind headroom's resident-only "60–95%" numbers.
+
+**→ Resolved in §6** (a net-economics gate: report recovery rate and net
+per-session token delta including resolver round-trips, by task class; the §1
+default flip requires **net** positive, not just resident reduction) **and §8**
+(recovery-cost risk).
+
 ## Goal
 
 Cut the per-turn token cost *and* the per-turn dollar cost of pre-injection
@@ -1077,6 +1118,14 @@ this proposal.
 
 - **Resident reduction** — bytes/tokens by IR section and `transform`, compression
   on vs off.
+- **Net token economics (resolves review #31)** — beyond resident reduction, the
+  bench reports the **recovery rate** (fraction of lossy folds the agent re-opens
+  via a resolver) and the **net** per-session token delta = resident tokens saved
+  − recovery round-trip tokens (the resolver tool call + the recovered span),
+  broken out **by task class**. The §1 default flip requires net positive; a task
+  class where recovery is frequent enough to erase the saving must keep folds
+  non-lossy there or not flip. Latency from recovery round-trips counts against the
+  same gate.
 - **Realized cache** — provider `cache_read` / `cache_creation` tokens, read from
   the cost-accounting proposal's **ledger fields** (not re-derived), under both
   placements (§2.2).
@@ -1227,3 +1276,10 @@ this proposal.
 - **Runtime API spec drift.** Updating `api/openapi-server-v1.yaml` without
   regenerating `src/server/openapi_server_data.h` leaves `/v1/openapi.yaml` stale.
   Mitigated by making the generated embed part of the acceptance gate (§1.4, §6).
+- **Recovery round-trips erase the saving.** Resident-token reduction is not net
+  reduction: a frequently re-opened fold spends a resolver tool call plus the full
+  recovered span, sometimes exceeding what was saved, plus latency — so an
+  aggressively-folded but body-heavy task class can net negative while the resident
+  numbers look excellent. Mitigated by measuring recovery rate and net token delta
+  per task class (§6) and gating the §1 default flip on **net** positive, never on
+  resident reduction alone.
