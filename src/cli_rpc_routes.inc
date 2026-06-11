@@ -6761,7 +6761,9 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
  * string form); returns NULL when there is no error. */
 static const char *cli_ws_err_message(cJSON *resp)
 {
-   cJSON *err = resp ? cJSON_GetObjectItemCaseSensitive(resp, "error") : NULL;
+   if (!resp)
+      return NULL;
+   cJSON *err = cJSON_GetObjectItemCaseSensitive(resp, "error");
    if (cJSON_IsString(err))
       return err->valuestring;
    if (cJSON_IsObject(err))
@@ -6771,6 +6773,15 @@ static const char *cli_ws_err_message(cJSON *resp)
          return m->valuestring;
       return "error";
    }
+   /* Dispatch-error envelope: {"status":"error","message":"..."} (e.g. an op-run
+    * that failed with PAYLOAD_TOO_LARGE). Without this the failure has no "error"
+    * key and would be silently counted as success. */
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   if (cJSON_IsString(status) && strcmp(status->valuestring, "error") == 0)
+   {
+      cJSON *m = cJSON_GetObjectItemCaseSensitive(resp, "message");
+      return (cJSON_IsString(m) && m->valuestring) ? m->valuestring : "error";
+   }
    return NULL;
 }
 
@@ -6779,9 +6790,10 @@ static const char *cli_ws_err_message(cJSON *resp)
  * code-scan upserts per project+path, so batches accumulate. Returns 0 on
  * success, nonzero if any batch failed. */
 
-/* Keep each ingest POST comfortably under the server's 4 MB request-body cap
- * (SHTTP_MAX_BODY); a single file is capped well below this by code_collect. */
-#define CLI_INGEST_BATCH_BYTES (3 * 1024 * 1024)
+/* Per-batch content budget. The binding limit is aimee-kb's 1 MB request-body
+ * cap (the server relays each batch on to kb); JSON escaping inflates the wire
+ * body above the raw content total, so budget well under 1 MB. */
+#define CLI_INGEST_BATCH_BYTES (600 * 1024)
 
 /* POST one batch of files (adopted/freed) as project `name`/`root`, polling the
  * async op-run to completion. Returns 0 on success. */

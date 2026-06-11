@@ -46,6 +46,7 @@ typedef struct cJSON cJSON;
 #define LIMIT_TOOL     (4 * 1024 * 1024) /* 4MB for tool I/O */
 #define LIMIT_DELEGATE (4 * 1024 * 1024) /* 4MB: supports 2MB prompt-file + JSON overhead */
 #define LIMIT_CHAT     (512 * 1024)      /* 512KB for chat messages */
+#define LIMIT_INGEST   (1024 * 1024)     /* 1MB: client-pushed code files (kb req cap) */
 #define LIMIT_DEFAULT  (256 * 1024)      /* 256KB default */
 
 /* JSON framing limits */
