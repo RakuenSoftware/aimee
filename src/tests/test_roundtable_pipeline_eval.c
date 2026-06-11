@@ -189,12 +189,27 @@ static void test_loop_decide(void)
    printf("  loop decide: ok\n");
 }
 
+static void test_gate_authority(void)
+{
+   /* No enrolled operator -> nobody can resolve a gate. */
+   assert(rtp_gate_authority_ok("op-uuid", "op-uuid", 0) == 0);
+   /* A delegate-driving session presents no operator principal -> denied (#53). */
+   assert(rtp_gate_authority_ok(NULL, "op-uuid", 1) == 0);
+   assert(rtp_gate_authority_ok("", "op-uuid", 1) == 0);
+   /* Wrong principal -> denied. */
+   assert(rtp_gate_authority_ok("attacker", "op-uuid", 1) == 0);
+   /* Matching enrolled active operator -> allowed. */
+   assert(rtp_gate_authority_ok("op-uuid", "op-uuid", 1) == 1);
+   printf("  gate authority: ok\n");
+}
+
 int main(void)
 {
    test_validity_predicate();
    test_done_bars();
    test_chunk_aggregate();
    test_loop_decide();
+   test_gate_authority();
    printf("test_roundtable_pipeline_eval: all passed\n");
    return 0;
 }

@@ -242,6 +242,13 @@ static const struct
     {"workers", "", "workers", NULL, NULL, 0},
     {"insights", NULL, "insights.overview", NULL, NULL, 0},
     {"worktree", "gc", "worktree.gc", NULL, NULL, 60000},
+    {"pipeline", "start", "pipeline.start", NULL, NULL, 60000},
+    {"pipeline", "status", "pipeline.status", NULL, NULL, 0},
+    {"pipeline", "list", "pipeline.list", NULL, NULL, 0},
+    {"pipeline", "cancel", "pipeline.cancel", NULL, NULL, 0},
+    {"pipeline", "resume", "pipeline.resume", NULL, NULL, 0},
+    {"pipeline", "advance", "pipeline.advance", NULL, NULL, 300000},
+    {"pipeline", "gate", "pipeline.gate", NULL, NULL, 300000},
     {"work", "add", "work.add", NULL, NULL, 0},
     {"work", "add-batch", "work.add_batch", NULL, NULL, 0},
     {"work", "claim", "work.claim", NULL, NULL, 0},
@@ -2884,6 +2891,61 @@ static cJSON *marshal_graph_explain(int argc, char **argv)
    return req;
 }
 
+/* Roundtable authoring pipeline (pipeline.*). */
+static cJSON *marshal_pipeline_request(const char *method, int argc, char **argv)
+{
+   static const char *bool_flags[] = {"admin", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "method", method);
+   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   const char *v;
+
+   if (strcmp(method, "pipeline.start") == 0)
+   {
+      if (opts.pos_count > 0)
+         cJSON_AddStringToObject(req, "idea", opts.positional[0]);
+      if ((v = rpc_get(&opts, "done-bar")) && v[0])
+         cJSON_AddStringToObject(req, "done_bar", v);
+      if ((v = rpc_get(&opts, "base-branch")) && v[0])
+         cJSON_AddStringToObject(req, "base_branch", v);
+      if ((v = rpc_get(&opts, "repo-root")) && v[0])
+         cJSON_AddStringToObject(req, "repo_root", v);
+      if ((v = rpc_get(&opts, "brief")) && v[0])
+         cJSON_AddStringToObject(req, "brief", v);
+   }
+   else if (strcmp(method, "pipeline.list") == 0)
+   {
+      if ((v = rpc_get(&opts, "state")) && v[0])
+         cJSON_AddStringToObject(req, "state", v);
+   }
+   else if (strcmp(method, "pipeline.gate") == 0)
+   {
+      if (opts.pos_count > 0)
+         cJSON_AddNumberToObject(req, "pipeline_id", atoi(opts.positional[0]));
+      if (opts.pos_count > 1)
+         cJSON_AddStringToObject(req, "verdict", opts.positional[1]);
+      if ((v = rpc_get(&opts, "reason")) && v[0])
+         cJSON_AddStringToObject(req, "reason", v);
+      if ((v = rpc_get(&opts, "operator-principal")) && v[0])
+         cJSON_AddStringToObject(req, "operator_principal", v);
+      if (rpc_get(&opts, "admin"))
+         cJSON_AddTrueToObject(req, "admin");
+   }
+   else /* status / cancel / resume / advance */
+   {
+      if (opts.pos_count > 0)
+         cJSON_AddNumberToObject(req, "pipeline_id", atoi(opts.positional[0]));
+      if ((v = rpc_get(&opts, "artifact")) && v[0])
+         cJSON_AddStringToObject(req, "artifact", v);
+      if ((v = rpc_get(&opts, "artifact-hash")) && v[0])
+         cJSON_AddStringToObject(req, "artifact_hash", v);
+   }
+   return req;
+}
+
 static cJSON *marshal_request(const char *method, int argc, char **argv)
 {
    if (strcmp(method, "init.run") == 0)
@@ -3121,6 +3183,8 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_identity_snapshot(argc, argv);
    if (strcmp(method, "identity.diff") == 0)
       return marshal_identity_diff(argc, argv);
+   if (strncmp(method, "pipeline.", 9) == 0)
+      return marshal_pipeline_request(method, argc, argv);
    return NULL;
 }
 

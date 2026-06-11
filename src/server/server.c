@@ -18,6 +18,7 @@
 #include "trigger_scheduler.h"
 #include "server_trigger.h"
 #include "server_cron.h"
+#include "server_pipeline.h" /* roundtable authoring pipeline (pipeline.*) */
 #include "commands.h"
 #include "agent.h"
 #include "agent_config.h"
@@ -1157,6 +1158,13 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"config.show", handle_config_show},
     {"config.get", handle_config_get},
     {"config.set", handle_config_set},
+    {"pipeline.start", handle_pipeline_start},
+    {"pipeline.status", handle_pipeline_status},
+    {"pipeline.list", handle_pipeline_list},
+    {"pipeline.cancel", handle_pipeline_cancel},
+    {"pipeline.resume", handle_pipeline_resume},
+    {"pipeline.advance", handle_pipeline_advance},
+    {"pipeline.gate", handle_pipeline_gate},
     {"aux.test", handle_aux_test},
     {"delegate.reply", handle_delegate_reply},
     {"delegate.log", handle_delegate_log},

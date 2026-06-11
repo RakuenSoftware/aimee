@@ -106,6 +106,14 @@ extern "C"
    rtp_action_t rtp_loop_decide(const rtp_loop_cfg_t *cfg, const rtp_loop_state_t *st,
                                 const rtp_envelope_t *e);
 
+   /* Gate-resolution authority (#53/#54). The driving agent holds CAP_DELEGATE
+    * but must NOT be able to pass its own gate, because passing triggers the
+    * merge. v1 uses an operator principal (no spare capability bit): resolution
+    * is allowed iff a local operator is enrolled+active and the caller presents
+    * the matching principal. Returns 1 iff allowed. */
+   int rtp_gate_authority_ok(const char *provided_principal, const char *active_operator_id,
+                             int operator_active);
+
 #ifdef __cplusplus
 }
 #endif

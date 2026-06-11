@@ -124,3 +124,15 @@ rtp_action_t rtp_loop_decide(const rtp_loop_cfg_t *cfg, const rtp_loop_state_t *
       return RTP_ACT_ESCALATE;
    return RTP_ACT_REVISE;
 }
+
+int rtp_gate_authority_ok(const char *provided_principal, const char *active_operator_id,
+                          int operator_active)
+{
+   if (!operator_active)
+      return 0; /* no enrolled operator -> nobody can resolve a gate yet */
+   if (!provided_principal || !provided_principal[0])
+      return 0; /* a delegate-driving session presents no operator principal */
+   if (!active_operator_id || !active_operator_id[0])
+      return 0;
+   return strcmp(provided_principal, active_operator_id) == 0 ? 1 : 0;
+}
