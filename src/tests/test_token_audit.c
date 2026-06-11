@@ -408,6 +408,8 @@ static void test_spend_breakdown_excludes_avoided(void)
     * baseline so this is independent of the rows other tests already inserted. */
    db1_token_audit_spend_t before;
    assert(db1_token_audit_spend_breakdown(0, &before) == 0);
+   db1_token_audit_totals_t tot_before;
+   assert(db1_token_audit_totals(0, &tot_before) == 0);
 
    db1_token_audit_row_t realized = {.session_id = "sb-real",
                                      .tool_name = "gpt-4o",
@@ -443,6 +445,13 @@ static void test_spend_breakdown_excludes_avoided(void)
    assert(d_avoid > 0.999 && d_avoid < 1.001);
    /* Billable total moved by realized + estimated only — avoided is excluded. */
    assert(d_total > 0.749 && d_total < 0.751);
+
+   /* The legacy totals reader also excludes the avoided row: its cost delta is
+    * realized + estimated ($0.75), never the $1.00 avoided. */
+   db1_token_audit_totals_t tot_after;
+   assert(db1_token_audit_totals(0, &tot_after) == 0);
+   double d_cost = tot_after.estimated_cost_usd - tot_before.estimated_cost_usd;
+   assert(d_cost > 0.749 && d_cost < 0.751);
 }
 
 static void test_dashboard_rows(void)

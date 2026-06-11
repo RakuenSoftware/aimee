@@ -386,6 +386,11 @@ int config_save(const config_t *cfg)
       cJSON *rcap = cJSON_AddObjectToObject(root, "reasoning_cap");
       cJSON_AddBoolToObject(rcap, "enabled", cfg->reasoning_cap_enabled ? 1 : 0);
    }
+   if (cfg->dedup_enabled)
+   {
+      cJSON *ddp = cJSON_AddObjectToObject(root, "dedup");
+      cJSON_AddBoolToObject(ddp, "enabled", cfg->dedup_enabled ? 1 : 0);
+   }
    if (cfg->guardrails_semantic_enabled || !cfg->guardrails_semantic_dry_run ||
        !cfg->guardrails_semantic_advisory_only || cfg->guardrails_semantic_command[0] ||
        cfg->guardrails_semantic_warn_threshold != 0.40 ||

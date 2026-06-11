@@ -33,6 +33,10 @@
 #include "agent_tools.h" /* agent_tools_set_tool_event_cb — /v1/runs tool events */
 #include "agent_types.h"
 #include "memory.h" /* memory_embed_text */
+#include "request_context.h"
+#include "response_dedup.h"
+#include "token_tracker.h"
+#include "token_audit.h" /* db1_token_audit_insert for the avoided-turn row */
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdio.h>
@@ -46,6 +50,41 @@
 /* Cap on the running /v1/responses transcript carried between turns via
  * previous_response_id. Bounds memory and the prompt we feed back to the agent. */
 #define OPENAI_RESP_TRANSCRIPT_MAX (32 * 1024)
+
+/* Record a dedup cache hit as a non-billable usage_kind=avoided audit row: the
+ * provider call was skipped, so the avoided estimated cost is logged separately
+ * and never added to spend totals (see db1_token_audit_spend_breakdown). Tokens
+ * are zero because no real call happened. */
+static void record_avoided_turn(const char *model, double avoided_cost)
+{
+   db1_token_audit_row_t row = {
+       .session_id = "",
+       .tool_name = model && model[0] ? model : "aimee",
+       .role = "",
+       .model = model && model[0] ? model : "aimee",
+       .source = "openai-ingress",
+       .requested_model = model ? model : "",
+       .usage_kind = "avoided",
+       .estimated_cost_usd = avoided_cost,
+   };
+   (void)db1_token_audit_insert(&row);
+}
+
+/* Dedup eligibility for the buffered completion path (§4): only when the flag is
+ * on and the client supplied an explicit Idempotency-Key. The caller has already
+ * rejected streaming, and this path runs no tools — both v1 requirements. */
+static int dedup_eligible(char *key, size_t key_cap, const char *model, const char *endpoint,
+                          const char *body)
+{
+   config_t cfg;
+   if (config_load(&cfg) != 0 || !cfg.dedup_enabled)
+      return 0;
+   const char *idem = request_context_idempotency_key();
+   if (!idem || !idem[0])
+      return 0;
+   response_dedup_key(request_context_principal(), model, endpoint, idem, body, key, key_cap);
+   return 1;
+}
 
 /* Shared body for both endpoints. chat != 0 selects the chat.completion shape
  * (and chat-request parse); otherwise the legacy text_completion shape. */
@@ -69,6 +108,32 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       openai_format_error(resp, cap, "invalid_request_error",
                           "streaming responses are not yet supported on this endpoint");
       return 400;
+   }
+
+   /* §4 short-window dedup: serve a re-sent identical request (same principal,
+    * model, endpoint, body, idempotency key) from the TTL cache without paying
+    * for the provider call again. Buffered + non-stream + tool-free here. */
+   char dedup_key[200] = "";
+   const char *endpoint = chat ? "/v1/chat/completions" : "/v1/completions";
+   int dedup_on = dedup_eligible(dedup_key, sizeof(dedup_key), model, endpoint, body);
+   if (dedup_on)
+   {
+      char *cached = NULL;
+      double avoided = 0.0;
+      if (response_dedup_get(dedup_key, (long)time(NULL), &cached, &avoided))
+      {
+         int n = snprintf(resp, cap, "%s", cached);
+         free(cached);
+         free(prompt);
+         if (n < 0 || n >= cap)
+         {
+            openai_format_error(resp, cap, "server_error",
+                                "cached response did not fit the buffer");
+            return 500;
+         }
+         record_avoided_turn(model, avoided);
+         return 200;
+      }
    }
 
    agent_config_t acfg;
@@ -137,6 +202,20 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
    {
       openai_format_error(resp, cap, "server_error", "response did not fit the buffer");
       return 500;
+   }
+
+   /* Cache this successful, tool-free 200 so an immediate identical retry under
+    * the same idempotency key is served without a second provider call. The
+    * stored cost is the realized spend, replayed as the avoided cost on a hit. */
+   if (dedup_on)
+   {
+      token_usage_t usage = {.input_tokens = result.prompt_tokens,
+                             .output_tokens = result.completion_tokens,
+                             .cache_write_tokens = result.cache_write_tokens,
+                             .cache_read_tokens = result.cache_read_tokens};
+      const char *bill_model = result.model[0] ? result.model : model;
+      double cost = token_estimate_cost(bill_model, &usage);
+      response_dedup_put(dedup_key, resp, cost, (long)time(NULL), RESPONSE_DEDUP_TTL_SECONDS);
    }
    return 200;
 }

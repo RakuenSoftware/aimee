@@ -857,6 +857,15 @@ typedef struct config
     *   override and providers without a reasoning surface are left untouched. */
    int reasoning_cap_enabled;
 
+   /* Short-window response dedup for buffered ingress (response_dedup.*; §4).
+    * dedup_enabled: 0 = off (default), 1 = on. When on, a re-sent identical
+    * buffered, non-streaming, tool-free completion carrying an explicit
+    * Idempotency-Key is served from a small TTL cache instead of paying for the
+    * provider call again; the avoided call is recorded as usage_kind=avoided
+    * (not spend). Strictly per-principal: the cache key carries the account
+    * boundary so one caller never reads another's response. */
+   int dedup_enabled;
+
    /* Neural-assisted semantic guardrails (guardrails.semantic.*).
     * semantic_enabled: 0 = off (default), 1 = on.
     * semantic_dry_run: 1 = shadow mode — score is logged but never changes outcome

@@ -8,6 +8,13 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Spend readers must exclude usage_kind='avoided' rows (dedup-skipped calls, §4):
+ * they carry an estimated cost for reporting but were never billed, so they must
+ * not inflate spend totals or per-dimension breakdowns. The all-rows breakdown
+ * (db1_token_audit_spend_breakdown) deliberately does NOT use this — it reports
+ * avoided separately. */
+#define TA_NOT_AVOIDED "usage_kind != 'avoided'"
+
 int db1_token_audit_insert(const db1_token_audit_row_t *row)
 {
    if (!row)
@@ -88,13 +95,14 @@ int db1_token_audit_totals(int since_hours, db1_token_audit_totals_t *out)
                                    " COALESCE(SUM(cache_read_tokens), 0),"
                                    " COALESCE(SUM(estimated_cost_usd), 0.0)"
                                    " FROM token_audit"
-                                   " WHERE created_at >= datetime('now', ?)";
+                                   " WHERE " TA_NOT_AVOIDED " AND created_at >= datetime('now', ?)";
    static const char *sql_all = "SELECT COUNT(*), COALESCE(SUM(prompt_tokens), 0),"
                                 " COALESCE(SUM(completion_tokens), 0),"
                                 " COALESCE(SUM(cache_write_tokens), 0),"
                                 " COALESCE(SUM(cache_read_tokens), 0),"
                                 " COALESCE(SUM(estimated_cost_usd), 0.0)"
-                                " FROM token_audit";
+                                " FROM token_audit"
+                                " WHERE " TA_NOT_AVOIDED;
    const char *sql = since_hours > 0 ? sql_recent : sql_all;
    sqlite3_stmt *stmt = NULL;
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
@@ -186,7 +194,7 @@ int db1_token_audit_by_role(int since_hours, db1_token_audit_role_summary_t *out
                                    " COALESCE(SUM(completion_tokens), 0),"
                                    " COALESCE(SUM(estimated_cost_usd), 0.0)"
                                    " FROM token_audit"
-                                   " WHERE created_at >= datetime('now', ?)"
+                                   " WHERE " TA_NOT_AVOIDED " AND created_at >= datetime('now', ?)"
                                    " GROUP BY role"
                                    " ORDER BY COALESCE(SUM(prompt_tokens), 0) +"
                                    "          COALESCE(SUM(completion_tokens), 0) DESC"
@@ -196,7 +204,7 @@ int db1_token_audit_by_role(int since_hours, db1_token_audit_role_summary_t *out
                                 " COALESCE(SUM(completion_tokens), 0),"
                                 " COALESCE(SUM(estimated_cost_usd), 0.0)"
                                 " FROM token_audit"
-                                " GROUP BY role"
+                                " WHERE " TA_NOT_AVOIDED " GROUP BY role"
                                 " ORDER BY COALESCE(SUM(prompt_tokens), 0) +"
                                 "          COALESCE(SUM(completion_tokens), 0) DESC"
                                 " LIMIT ?";
@@ -241,7 +249,7 @@ int db1_token_audit_by_tool(int since_hours, db1_token_audit_tool_summary_t *out
                                    " COALESCE(SUM(completion_tokens), 0),"
                                    " COALESCE(SUM(estimated_cost_usd), 0.0)"
                                    " FROM token_audit"
-                                   " WHERE created_at >= datetime('now', ?)"
+                                   " WHERE " TA_NOT_AVOIDED " AND created_at >= datetime('now', ?)"
                                    " GROUP BY tool_name"
                                    " ORDER BY COALESCE(SUM(prompt_tokens), 0) +"
                                    "          COALESCE(SUM(completion_tokens), 0) DESC"
@@ -251,7 +259,7 @@ int db1_token_audit_by_tool(int since_hours, db1_token_audit_tool_summary_t *out
                                 " COALESCE(SUM(completion_tokens), 0),"
                                 " COALESCE(SUM(estimated_cost_usd), 0.0)"
                                 " FROM token_audit"
-                                " GROUP BY tool_name"
+                                " WHERE " TA_NOT_AVOIDED " GROUP BY tool_name"
                                 " ORDER BY COALESCE(SUM(prompt_tokens), 0) +"
                                 "          COALESCE(SUM(completion_tokens), 0) DESC"
                                 " LIMIT ?";
@@ -302,7 +310,7 @@ int db1_token_audit_by_model(int since_hours, db1_token_audit_model_summary_t *o
        " COALESCE(SUM(completion_tokens), 0),"
        " COALESCE(SUM(estimated_cost_usd), 0.0)"
        " FROM token_audit"
-       " WHERE created_at >= datetime('now', ?)"
+       " WHERE " TA_NOT_AVOIDED " AND created_at >= datetime('now', ?)"
        " GROUP BY 1"
        " ORDER BY COALESCE(SUM(prompt_tokens), 0) +"
        "          COALESCE(SUM(completion_tokens), 0) DESC"
@@ -314,7 +322,7 @@ int db1_token_audit_by_model(int since_hours, db1_token_audit_model_summary_t *o
        " COALESCE(SUM(completion_tokens), 0),"
        " COALESCE(SUM(estimated_cost_usd), 0.0)"
        " FROM token_audit"
-       " GROUP BY 1"
+       " WHERE " TA_NOT_AVOIDED " GROUP BY 1"
        " ORDER BY COALESCE(SUM(prompt_tokens), 0) +"
        "          COALESCE(SUM(completion_tokens), 0) DESC"
        " LIMIT ?";
@@ -363,7 +371,7 @@ int db1_token_audit_by_source(int since_hours, db1_token_audit_source_summary_t 
        " COALESCE(SUM(completion_tokens), 0),"
        " COALESCE(SUM(estimated_cost_usd), 0.0)"
        " FROM token_audit"
-       " WHERE created_at >= datetime('now', ?)"
+       " WHERE " TA_NOT_AVOIDED " AND created_at >= datetime('now', ?)"
        " GROUP BY 1"
        " ORDER BY COALESCE(SUM(prompt_tokens), 0) +"
        "          COALESCE(SUM(completion_tokens), 0) DESC"
@@ -375,7 +383,7 @@ int db1_token_audit_by_source(int since_hours, db1_token_audit_source_summary_t 
        " COALESCE(SUM(completion_tokens), 0),"
        " COALESCE(SUM(estimated_cost_usd), 0.0)"
        " FROM token_audit"
-       " GROUP BY 1"
+       " WHERE " TA_NOT_AVOIDED " GROUP BY 1"
        " ORDER BY COALESCE(SUM(prompt_tokens), 0) +"
        "          COALESCE(SUM(completion_tokens), 0) DESC"
        " LIMIT ?";
@@ -461,7 +469,8 @@ int db1_insights_top_sessions(int since_hours, db1_insights_top_session_t *out, 
        " COALESCE(SUM(ta.estimated_cost_usd),0.0), COALESCE(MIN(ta.created_at),'')"
        " FROM token_audit ta"
        " LEFT JOIN server_sessions ss ON ss.id = ta.session_id"
-       " WHERE ta.created_at >= datetime('now', ?)"
+       " WHERE ta.usage_kind != 'avoided'"
+       " AND ta.created_at >= datetime('now', ?)"
        " GROUP BY ta.session_id"
        " ORDER BY SUM(ta.estimated_cost_usd) DESC LIMIT ?";
    static const char *sql_all =
@@ -470,6 +479,7 @@ int db1_insights_top_sessions(int since_hours, db1_insights_top_session_t *out, 
        " COALESCE(SUM(ta.estimated_cost_usd),0.0), COALESCE(MIN(ta.created_at),'')"
        " FROM token_audit ta"
        " LEFT JOIN server_sessions ss ON ss.id = ta.session_id"
+       " WHERE ta.usage_kind != 'avoided'"
        " GROUP BY ta.session_id"
        " ORDER BY SUM(ta.estimated_cost_usd) DESC LIMIT ?";
    const char *sql = since_hours > 0 ? sql_recent : sql_all;
@@ -558,7 +568,7 @@ int db1_token_audit_list_dashboard(db1_token_audit_dashboard_row_t *out, int max
        " COALESCE(SUM(cache_write_tokens), 0), COALESCE(SUM(cache_read_tokens), 0),"
        " COALESCE(SUM(estimated_cost_usd), 0.0), COUNT(*), COALESCE(MAX(created_at), '')"
        " FROM token_audit"
-       " GROUP BY tool_name, role"
+       " WHERE " TA_NOT_AVOIDED " GROUP BY tool_name, role"
        " ORDER BY COALESCE(SUM(estimated_cost_usd), 0.0) DESC,"
        "          COALESCE(MAX(created_at), '') DESC"
        " LIMIT ?";

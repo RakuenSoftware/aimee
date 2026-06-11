@@ -981,6 +981,14 @@ void config_parse_transport_section(config_t *cfg, cJSON *root)
       if (cJSON_IsBool(item))
          cfg->reasoning_cap_enabled = cJSON_IsTrue(item) ? 1 : 0;
    }
+
+   cJSON *ddp = cJSON_GetObjectItemCaseSensitive(root, "dedup");
+   if (cJSON_IsObject(ddp))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(ddp, "enabled");
+      if (cJSON_IsBool(item))
+         cfg->dedup_enabled = cJSON_IsTrue(item) ? 1 : 0;
+   }
 }
 void config_parse_guardrails_section(config_t *cfg, cJSON *root)
 {
