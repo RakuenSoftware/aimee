@@ -21,7 +21,9 @@
   the model registry), `src/headers/model_registry.h` (`cost_in_per_mtok` /
   `cost_out_per_mtok` - the authoritative base-price fields),
   `src/db1/token_audit.c` + `src/db1/schema.sql` (the existing audit ledger plus
-  any required migration fields), `src/server/ingress_preinject.c` (envelope
+  any required migration fields), `src/db1/agent_log.c` + `src/db1/agent_log.h`
+  (agent metrics currently join token_audit by lossy agent/role keys),
+  `src/server/ingress_preinject.c` (envelope
   metadata/splitting only if needed by the OpenAI/Codex seam),
   `src/server_insights.inc` (the `insights.overview` implementation),
   `src/cmd_core.c` (`cmd_usage`), `src/server/server_compute.c` (cost-shaped
@@ -30,7 +32,7 @@
   propagation + UDS peer-UID capture for source, idempotency, principal, and
   request-id metadata), `webchat/openai.go` and `webchat/socket.go` (webchat
   proxy/session source attribution),
-  dashboard/HUD/frontend readers that consume token-audit totals, config
+  `src/cmd_agent.c`, dashboard/HUD/frontend readers that consume token-audit totals, config
   plumbing (`src/headers/config.h`,
   `src/config_fields.c`, `src/config_sections.c`, `src/config_save.c`), route and
   auth registration only if a new API method is still justified. DB2 only if a
@@ -123,6 +125,19 @@ forwarding metadata. (14) **Embeddings cost $0 today**: the embedder is local
 embeddings from spend, with a remote-embedder pricing hook as future-only work;
 the non-LLM ingress surface is bounded to `/v1/embeddings` (+ usage-less
 `/v1/models`).
+
+An eighth pass found two implementation hazards that would make a correct ledger
+still report wrong numbers. (15) `src/db1/agent_log.c` has separate agent metrics
+that join `agent_log` to `token_audit` by `(agent_name, role)` or agent name
+alone, not by a call id; that is a many-to-many join that can multiply cost by
+the number of matching log rows and cannot represent ingress token rows that have
+no `agent_log` row. The proposal must add a stable `call_id` / `agent_log_id`
+link (or stop joining these tables for cost) and include `cmd_agent` / agent
+stats in the reader migration. (16) Proxy-stamped source/principal headers are
+only safe if the server establishes a trust boundary: TCP clients and untrusted
+UDS peers must not be able to spoof `X-Aimee-Source` / principal forwarding
+headers, and `X-Request-ID` alone must not become an idempotency key because it
+is caller-controlled.
 
 ## Goal
 
@@ -264,14 +279,26 @@ optimization surface aimee already has, not a new one.
   from the **request context** (`X-Aimee-Session-Key` / principal), not from
   `session_id()`; otherwise top-sessions and per-source spend are meaningless for
   ingress.
-- **Existing usage readers assume every row is spend — full list.** The audit
-  found **eight** consumers that sum `estimated_cost_usd` (or token-audit totals)
+- **Existing usage readers assume every row is spend.** The audit
+  originally found eight consumers that sum `estimated_cost_usd` (or token-audit totals)
   with no `usage_kind` filter: `src/hud.c`, `src/cmd_core.c` (`cmd_usage`),
   `src/dashboard.c`, `src/server/dashboard_server.c`, `src/server_insights.inc`,
   `src/server/server_compute.c:1469` (the cost-fold query),
   `webchat/socket.go` (`streamEvent.Cost`), and `frontend/src/pages/Chat.tsx`.
-  Once `usage_kind=estimated|avoided|partial` exists, all of them (plus the eight
-  SQL aggregations in `token_audit.c`) must split realized spend from
+- **Agent stats are a separate cost-reporting path, and the join is already
+  lossy.** `db1_agent_log_metrics_by_role` and `db1_agent_log_agent_stats`
+  (`src/db1/agent_log.c`) join `agent_log` to `token_audit` on `tool_name =
+  agent_name` plus role, or on agent name alone. That is not a one-row-per-call
+  relationship: multiple agent_log rows join every matching token_audit row, so
+  cost/cache totals can be multiplied, and future ingress rows with no
+  corresponding `agent_log` row either disappear from agent stats or contaminate
+  an agent bucket by name. This reaches `cmd_agent` through `agent_get_stats`.
+  The accounting migration must add a stable call key (`agent_log_id` or
+  `call_id`) shared by both tables, or remove cost aggregation from agent_log
+  joins and read spend only from token_audit's source-aware summaries.
+- Once `usage_kind=estimated|avoided|partial` exists, all direct readers (plus
+  the eight SQL aggregations in `token_audit.c`, the agent_log joins above, and
+  CLI/frontend surfaces that display them) must split realized spend from
   advisory/avoided values, or the UI shows avoided cost as money spent. One
   upside: `Chat.tsx` only *displays* a server-sent `cost` (it does **not** compute
   price client-side), so unifying pricing server-side (§1) propagates to the UI
@@ -319,9 +346,10 @@ estimates** and **avoided estimated cost**.
 - **Minimum schema migration:** add fields (or a tightly-linked extension table)
   for `source`, `usage_kind`, `request_id` or `turn_id`, `requested_model`,
   `served_model` or `billable_model`, `provider_model`, `duration_ms`,
-  `stop_reason`, and `optimizations_json` / `avoided_cost_usd` if dedup/cache
-  savings are reported. If the decision is to avoid migration, state exactly how
-  each field is represented and which reports lose fidelity. Two migration
+  `stop_reason`, a stable `call_id` / `agent_log_id` for rows that correspond to
+  an `agent_log` call, and `optimizations_json` / `avoided_cost_usd` if
+  dedup/cache savings are reported. If the decision is to avoid migration, state
+  exactly how each field is represented and which reports lose fidelity. Two migration
   constraints the audit surfaced: `db1_reconcile_columns` (`db_schema.c:78`)
   **only adds columns** (no index, no data migration), and SQLite cannot
   `ALTER TABLE ADD COLUMN` a `NOT NULL` column without a default — so every new
@@ -336,6 +364,9 @@ estimates** and **avoided estimated cost**.
   contradiction explicitly: either add a one-off index-creation migration step, or
   enforce idempotency in-process (a seen-set keyed by request id) and accept that
   a crash between provider-return and insert can drop — not duplicate — a row.
+  Do not use caller-controlled `X-Request-ID` alone as this key; keep it as
+  external correlation metadata and derive audit idempotency from an explicit
+  idempotency key, a server-generated attempt id, and the source/account boundary.
 - **Request context prerequisite:** before adding source-aware audit rows or
   dedup, expose a per-request context from `server_http.c` to registered handlers:
   method/path, generated `X-Request-ID`, inbound idempotency key, session key,
@@ -344,7 +375,10 @@ estimates** and **avoided estimated cost**.
   **synchronous** handlers only; because the `/v1/runs` worker is a detached
   pthread (and SSE may offload), the context for those paths must be **captured
   into the job/work struct at enqueue**, and the thread-local must be reset per
-  request so it never leaks across reused worker threads.
+  request so it never leaks across reused worker threads. Forwarded identity
+  headers must be accepted only from trusted internal proxies/peer UIDs and
+  ignored or stripped on TCP and untrusted UDS requests, so external callers
+  cannot spoof source or principal.
 - **Fix `by_model` alongside the model write (prerequisite, not optional).**
   Populating `served_model` is pointless while `db1_token_audit_by_model` filters
   empty models out: either backfill legacy rows' model from their `tool_name`
@@ -407,6 +441,11 @@ estimates** and **avoided estimated cost**.
   Webchat-proxied OpenAI-compatible requests need explicit forwarding metadata
   because the proxy intentionally removes the client `Authorization` header
   before the request reaches aimee-server.
+- **Agent-log relationship:** for normal `agent_log_call` rows, write a shared
+  call id into both `agent_log` and `token_audit` (or insert `agent_log` first and
+  store its row id in `token_audit`). For direct ingress rows that intentionally
+  have no `agent_log` row, leave that link empty and keep them out of agent-log
+  aggregates. Never join the two tables by agent name/role for cost.
 - **DB1 vs DB2:** keep the per-row ledger in DB1 (local, where `cmd_usage` and
   `insights.overview` already read). Add a DB2 mirror/aggregate **only** if a
   specific shared/multi-machine optimization-analytics need is established; if so,
@@ -550,10 +589,11 @@ Any new route requires:
 
 Regardless of whether a new route is added, every existing consumer of
 `token_audit` must learn the same semantics: `cmd_usage`, `insights.overview`,
-HUD, dashboard JSON, the React context panel, and webchat usage events must report
-realized spend separately from estimated, avoided, and partial rows. A single SQL
-helper for spend totals is preferable to copy-pasting `WHERE usage_kind =
-'realized'` across consumers.
+HUD, dashboard JSON, `cmd_agent` / agent stats, the React context panel, and
+webchat usage events must report realized spend separately from estimated,
+avoided, and partial rows. A single SQL helper for spend totals is preferable to
+copy-pasting `WHERE usage_kind = 'realized'` across consumers, and agent-log
+metrics must use the new call key instead of the current agent-name join.
 
 ## Config (all default-off, flag-rollout-readiness program)
 
@@ -588,8 +628,9 @@ with a benchmark showing no quality regression.
   **by-model no longer hides legacy empty-model rows** (false-zero migration
   test); spend totals exclude `estimated`, `avoided`, and `partial` rows by
   default; source/model breakdowns are stable in `cmd_usage`,
-  `insights.overview`, HUD, dashboard JSON, React context panel, and webchat
-  usage events.
+  `insights.overview`, HUD, dashboard JSON, `cmd_agent` / agent stats, React
+  context panel, and webchat usage events. Agent-log metrics do not multiply
+  token_audit rows when multiple calls share the same agent/role.
 - **OpenAI/Codex ingress audit (double-count guard):** each of the six
   synchronous no-log handlers (buffered+streaming chat/completions,
   buffered+streaming completions, buffered+streaming responses) writes **exactly
@@ -606,7 +647,9 @@ with a benchmark showing no quality regression.
   thread-local), and the thread-local resets per request so it never leaks to the
   next request on a reused worker thread. Webchat OpenAI proxy requests arrive at
   aimee-server with trusted source/session/principal metadata after
-  `Authorization` is stripped.
+  `Authorization` is stripped. TCP clients and untrusted UDS peers cannot spoof
+  forwarded source/principal headers, and caller-supplied `X-Request-ID` is
+  preserved only as correlation metadata, not as the sole idempotency key.
 - **Source attribution:** ingress rows carry a per-client source derived from the
   request context (session key/principal/UDS peer UID), **not** the PPID-shared
   `session_id()`; two distinct clients do not collapse into one `top_sessions`
@@ -643,6 +686,11 @@ with a benchmark showing no quality regression.
   selection unchanged; missing realized cost falls back safely.
 - **Model attribution:** ingress and `agent_log_call` rows resolve a non-empty
   billable model per §2a precedence; requested-vs-served divergence recorded.
+- **Agent-log join:** normal agent calls write a shared `call_id` / `agent_log_id`
+  into `agent_log` and `token_audit`; direct ingress rows without an `agent_log`
+  row stay visible in source-aware usage summaries but do not contaminate
+  `cmd_agent` agent stats. A fixture with two `agent_log` rows and two matching
+  `token_audit` rows proves cost is not multiplied four ways.
 - **API/auth:** any new usage route has route/spec parity, CLI RPC coverage where
   exposed, and `server_auth.c` capability tests. If only `insights.overview` is
   extended, test the existing route and capability.
