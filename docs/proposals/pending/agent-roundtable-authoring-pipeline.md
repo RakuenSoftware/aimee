@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 eleventh review)
+- **Date:** 2026-06-11 (revised post-PR-#183 twelfth review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -460,6 +460,26 @@ boundary.
     produced it; `item.sources` remains a display hint, not the durable evidence
     model. **Resolved in §4, §5, and §10.**
 
+## PR #183 twelfth review — one validity predicate, not a scattered conjunction
+
+Gap #38 is a symptom of a pattern. Validity flags have accreted across reviews
+(#13 added `truncated`/`degraded`/`cost_capped`/`deadline_hit`/`cancelled`; #38
+adds `items_truncated`), and the done-bar, the chunk-aggregate, the capture hook,
+and the gate digest each re-list the conjunction inline. The next consumer written
+will check a stale subset — exactly how #38 happened in the first place.
+
+41. **Define one canonical "valid terminal result" predicate; no call site may
+    check a subset.** Centralize validity as a single contract —
+    `roundtable_result_valid_terminal(result)` returning false on any of
+    `truncated`, `items_truncated` (#38), `degraded`, `cost_capped`,
+    `deadline_hit`, `cancelled`, `lost_result` (#19), or an
+    `items_round`/`artifact_round` provenance mismatch (#13) — and have the done-bar
+    (#3), the chunk-aggregate (#28), the worker capture hook (#18), and the gate
+    digest all consult **that one predicate**. A future invalidity flag updates the
+    predicate in one place. A test asserts every consumer rejects a result that
+    trips each individual flag, so a newly added flag can never be honored by some
+    sites and silently ignored by others. **Resolved in §3, §4, and §10.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -582,13 +602,15 @@ Two distinct loop levels — keep them un-confused:
 its review loop only when the latest REVIEW result satisfies the configured bar,
 read from real engine fields (`roundtable_result_t`):
 
-Every bar first requires a valid completed result: `truncated == false`,
-`degraded == false`, `cost_capped == false`, `deadline_hit == false`,
-`cancelled == false`, `items_truncated != true`, and result provenance that the
-gate digest can explain. For review-mode done-bars, `items_round` must be the
-round being evaluated; if the surfaced artifact comes from a different
-`artifact_round`/`best_round`, the digest must say so and the phase cannot
-silently pass on mismatched evidence.
+Every bar first requires `roundtable_result_valid_terminal(result) == true` — the
+**single canonical validity predicate** (#41), false on any of `truncated`,
+`items_truncated`, `degraded`, `cost_capped`, `deadline_hit`, `cancelled`,
+`lost_result`, or an `items_round`/`artifact_round` provenance mismatch. The
+done-bar, the chunk-aggregate, the capture hook, and the gate digest all consult
+this one predicate rather than re-listing flags inline, so no consumer can pass on
+a subset. For review-mode done-bars the surfaced `artifact_round`/`best_round`
+provenance must match the evaluated `items_round`, and the gate digest explains any
+mismatch rather than silently passing.
 
 - `zero_blocking` *(default)* — `converged == true` and no `items[]` of
   `severity == "blocking"`. Suggestions/nits are surfaced in the gate digest but
@@ -1021,6 +1043,11 @@ ledger) before the full idea→merge pipeline of P2/P3.
   `cost_capped`, `deadline_hit`, `cancelled`, lost result, or ambiguous
   `items_round` / `artifact_round` provenance prevents a done-bar pass and
   escalates.
+- **Single validity predicate (#41)** — a table-driven test trips each invalidity
+  flag in turn and asserts that **every** consumer (done-bar, chunk-aggregate,
+  capture hook, gate digest) rejects it via `roundtable_result_valid_terminal`; no
+  consumer re-implements the check, so a newly added flag cannot be honored by some
+  sites and ignored by others.
 - **Question cap** — a brief with >16 questions is rejected or split before using
   `zero_blocking_questions_answered`; overflow cannot be silently treated as
   answered.
