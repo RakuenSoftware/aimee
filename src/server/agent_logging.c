@@ -181,16 +181,34 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
    if (!result)
       return;
 
-   /* A thread-scoped ingress source overrides the caller's source (see above). */
-   const char *eff_source = g_ingress_source[0] ? g_ingress_source : (source ? source : "");
+   /* Per-request idempotency + attribution (#3): the request context carries the
+    * ingress request id, the client principal/account boundary, and — when a
+    * trusted proxy stamped one — a per-client source (e.g. "webchat"). */
+   const request_context_t *rctx = request_context_get();
+
+   /* Effective turn-origin source precedence: (1) a thread-scoped override set by
+    * an ingress worker such as /v1/runs, (2) a trusted request-supplied source
+    * (X-Aimee-Source via a trusted proxy) — but ONLY refining an ingress row, so
+    * direct ingress rows distinguish webchat from another OpenAI-compatible client
+    * while internal "agent" rows on the same request thread stay "agent", (3) the
+    * caller's constant. */
+   const char *base_source = source ? source : "";
+   const char *eff_source;
+   if (g_ingress_source[0])
+      eff_source = g_ingress_source;
+   else if (rctx && rctx->source[0] && strcmp(base_source, "agent") != 0)
+      eff_source = rctx->source;
+   else
+      eff_source = base_source;
 
    /* ingress_audit_async rollout knob: an ingress row may be handed to the
     * background writer so the response is not blocked on the DB insert. The
     * master accounting gate (ingress_usage_accounting_enabled) is enforced by the
     * ingress call sites (see agent_ingress_accounting_enabled), NOT here, so this
-    * shared primitive carries no policy. The config load is paid only for ingress
-    * rows and is mtime-cached. */
-   int is_ingress = eff_source[0] && strstr(eff_source, "-ingress") != NULL;
+    * shared primitive carries no policy. "is ingress" is any non-internal origin
+    * (anything but the internal "agent"/empty source). The config load is paid
+    * only for ingress rows and is mtime-cached. */
+   int is_ingress = eff_source[0] && strcmp(eff_source, "agent") != 0;
    int async = 0;
    if (is_ingress)
    {
@@ -198,11 +216,6 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
       if (config_load(&gcfg) == 0)
          async = gcfg.ingress_audit_async;
    }
-
-   /* Per-request idempotency + attribution (#3): carry the ingress request id
-    * (so a retried/late finalize cannot double-count via the unique index) and
-    * the client principal/account boundary onto the row. */
-   const request_context_t *rctx = request_context_get();
 
    token_usage_t usage = {
        .input_tokens = result->prompt_tokens,

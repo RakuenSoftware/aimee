@@ -65,11 +65,14 @@ static void record_avoided_turn(const char *model, double avoided_cost)
     * guard on (source, request_id, attempt). */
    const request_context_t *rc = request_context_get();
    db1_token_audit_row_t row = {
-       .session_id = "",
+       /* Attribute the avoided saving to the same source/session boundary as a
+        * realized request: a trusted per-client source when stamped, else the
+        * ingress origin; session_id mirrors the realized path's session(). */
+       .session_id = session_id(),
        .tool_name = model && model[0] ? model : "aimee",
        .role = "",
        .model = model && model[0] ? model : "aimee",
-       .source = "openai-ingress",
+       .source = (rc && rc->source[0]) ? rc->source : "openai-ingress",
        .requested_model = model ? model : "",
        .usage_kind = "avoided",
        .request_id = rc ? rc->request_id : "",
@@ -975,7 +978,8 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
       ar.cache_write_tokens = parsed.cache_write_tokens;
       ar.cache_read_tokens = parsed.cache_read_tokens;
       snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
-      agent_record_token_audit(&ar, "", "openai-ingress");
+      if (agent_ingress_accounting_enabled())
+         agent_record_token_audit(&ar, "", "openai-ingress");
    }
 
    if (erc == 0 && parsed.is_tool_call && parsed.call_count > 0)

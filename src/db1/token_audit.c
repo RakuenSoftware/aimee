@@ -106,9 +106,11 @@ double db1_token_audit_cost_for_delegation(const char *delegation_id)
    if (!db)
       return 0.0;
 
+   /* Realized-only: the cost-fold + delegate-routing reward must see billable
+    * spend, not estimated/avoided/partial rows. */
    sqlite3_stmt *stmt = NULL;
    static const char *sql = "SELECT COALESCE(SUM(estimated_cost_usd), 0.0)"
-                            " FROM token_audit WHERE delegation_id = ?";
+                            " FROM token_audit WHERE delegation_id = ? AND " TA_REALIZED;
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return 0.0;
    sqlite3_bind_text(stmt, 1, delegation_id, -1, SQLITE_TRANSIENT);

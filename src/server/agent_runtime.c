@@ -591,10 +591,16 @@ static cJSON *build_request_anthropic(const agent_t *agent, const char *system_p
    int tok = (max_tokens > 0) ? max_tokens : 4096;
    cJSON_AddNumberToObject(req, "max_tokens", tok);
 
-   /* Cache the system prefix across calls (cache_control), reducing cost for
-    * repeated delegate calls. Shared with the tool-bearing Anthropic builder
-    * (agent_anthropic_set_system); this no-tools path always cache-marks. */
-   agent_anthropic_set_system(req, system_prompt, 1);
+   /* §3 cache-aware shaping: mark the system prefix cacheable (cache_control)
+    * only when the flag is on, matching the tool-bearing builder. Default-off so
+    * this request-mutating optimization lands dark behind the flag (config load is
+    * cheap/mtime-cached). */
+   config_t cs_cfg;
+   int cs_marking = (config_load(&cs_cfg) == 0 && cs_cfg.cache_shaping_enabled) ? 1 : 0;
+   if (cs_marking && cs_cfg.cache_min_chars > 0 &&
+       (!system_prompt || (int)strlen(system_prompt) < cs_cfg.cache_min_chars))
+      cs_marking = 0;
+   agent_anthropic_set_system(req, system_prompt, cs_marking);
 
    cJSON *messages = cJSON_CreateArray();
    cJSON *user = cJSON_CreateObject();

@@ -5,6 +5,7 @@
 #include "aimee.h" /* MAX_PATH_LEN, pulled in before agent_types.h */
 #include "agent_exec.h"
 #include "db1.h"
+#include "request_context.h"
 #include <sqlite3.h>
 
 /* Private to src/db1/, but this test adjusts timestamps directly. */
@@ -531,6 +532,75 @@ static void test_top_sessions_per_client(void)
    assert(saw1 && saw2);
 }
 
+static void test_trusted_source_overrides_ingress(void)
+{
+   /* A trusted request-supplied source (X-Aimee-Source) refines an ingress row's
+    * source — so webchat is distinguishable from another OpenAI client — but an
+    * internal "agent" row on the same thread keeps "agent". */
+   request_context_t ctx;
+   memset(&ctx, 0, sizeof(ctx));
+   snprintf(ctx.request_id, sizeof(ctx.request_id), "%s", "rq-src-1");
+   snprintf(ctx.source, sizeof(ctx.source), "%s", "webchat");
+   request_context_set(&ctx);
+
+   agent_result_t ing;
+   memset(&ing, 0, sizeof(ing));
+   snprintf(ing.agent_name, sizeof(ing.agent_name), "srcbot");
+   snprintf(ing.model, sizeof(ing.model), "gpt-4o");
+   ing.prompt_tokens = 10;
+   agent_record_token_audit(&ing, "", "openai-ingress"); /* ingress -> webchat */
+
+   agent_result_t internal;
+   memset(&internal, 0, sizeof(internal));
+   snprintf(internal.agent_name, sizeof(internal.agent_name), "srcbot2");
+   snprintf(internal.model, sizeof(internal.model), "gpt-4o");
+   internal.prompt_tokens = 10;
+   agent_record_token_audit(&internal, "", "agent"); /* internal -> stays agent */
+
+   request_context_clear();
+
+   /* The ingress row took the trusted source; the agent row did not. */
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db1_conn(), "SELECT source FROM token_audit WHERE tool_name='srcbot'",
+                             -1, &st, NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   assert(strcmp((const char *)sqlite3_column_text(st, 0), "webchat") == 0);
+   sqlite3_finalize(st);
+   assert(count_where("source", "agent") >= 1); /* the internal row stayed agent */
+   /* And the agent row's source is NOT webchat. */
+   assert(sqlite3_prepare_v2(db1_conn(), "SELECT source FROM token_audit WHERE tool_name='srcbot2'",
+                             -1, &st, NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   assert(strcmp((const char *)sqlite3_column_text(st, 0), "agent") == 0);
+   sqlite3_finalize(st);
+}
+
+static void test_delegation_cost_realized_only(void)
+{
+   /* db1_token_audit_cost_for_delegation sums REALIZED rows only — estimated /
+    * avoided / partial rows must not shape the delegate-routing reward. */
+   db1_token_audit_row_t real = {.delegation_id = "dg-real",
+                                 .tool_name = "code",
+                                 .model = "gpt",
+                                 .usage_kind = "realized",
+                                 .estimated_cost_usd = 0.20};
+   db1_token_audit_row_t est = {.delegation_id = "dg-real",
+                                .tool_name = "code",
+                                .model = "gpt",
+                                .usage_kind = "estimated",
+                                .estimated_cost_usd = 5.00};
+   db1_token_audit_row_t avoid = {.delegation_id = "dg-real",
+                                  .tool_name = "code",
+                                  .model = "gpt",
+                                  .usage_kind = "avoided",
+                                  .estimated_cost_usd = 9.00};
+   assert(db1_token_audit_insert(&real) == 0);
+   assert(db1_token_audit_insert(&est) == 0);
+   assert(db1_token_audit_insert(&avoid) == 0);
+   double c = db1_token_audit_cost_for_delegation("dg-real");
+   assert(c > 0.199 && c < 0.201); /* realized $0.20 only, not $14.20 */
+}
+
 static void test_served_model_and_duration(void)
 {
    /* served_model (what aimee chose) is recorded distinct from the
@@ -587,6 +657,8 @@ int main(void)
    test_idempotency_guard();
    test_top_sessions_per_client();
    test_served_model_and_duration();
+   test_trusted_source_overrides_ingress();
+   test_delegation_cost_realized_only();
    db1_shutdown();
    printf("test_token_audit: ok\n");
    return 0;
