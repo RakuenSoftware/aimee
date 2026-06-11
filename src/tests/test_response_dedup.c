@@ -117,6 +117,50 @@ static void test_empty_inputs_ignored(void)
    PASS("dedup: empty inputs ignored");
 }
 
+static void test_long_inputs_bounded_and_hit(void)
+{
+   /* A long idempotency key / model (the fields that used to be embedded
+    * verbatim and could overflow the 192-byte slot) must still produce a BOUNDED
+    * key, so an eligible retry actually hits (regression for the
+    * truncated-key-never-hits bug). The principal stays verbatim but is bounded by
+    * request_context (<=127); here we use a realistic-length one. */
+   char principal[100], long_idem[300], long_model[200];
+   memset(principal, 'P', sizeof(principal) - 1);
+   principal[sizeof(principal) - 1] = '\0';
+   memset(long_idem, 'K', sizeof(long_idem) - 1);
+   long_idem[sizeof(long_idem) - 1] = '\0';
+   memset(long_model, 'M', sizeof(long_model) - 1);
+   long_model[sizeof(long_model) - 1] = '\0';
+
+   response_dedup_key_inputs_t in = {.principal = principal,
+                                     .source = "openai-ingress",
+                                     .provider = "openai",
+                                     .model = long_model,
+                                     .endpoint = "/v1/chat/completions",
+                                     .idempotency_key = long_idem,
+                                     .body = "{\"x\":1}",
+                                     .context = "ctx",
+                                     .behavior_flags = "cs0 rc0"};
+   char key[512];
+   response_dedup_key(&in, key, sizeof(key));
+   /* The composed key fits a cache slot (well under 192 bytes) despite the long
+    * inputs, because the discriminators are digested to a fixed width. */
+   assert(strlen(key) < 192);
+
+   response_dedup_clear();
+   response_dedup_put(key, "CACHED-LONG", 0.5, 1000, 5);
+   char *out = NULL;
+   /* Re-derive the key from identical inputs and confirm it HITS (it would miss
+    * if either the stored or lookup key were silently truncated). */
+   char key2[512];
+   response_dedup_key(&in, key2, sizeof(key2));
+   assert(strcmp(key, key2) == 0);
+   assert(response_dedup_get(key2, 1001, &out, NULL) == 1);
+   assert(out && strcmp(out, "CACHED-LONG") == 0);
+   free(out);
+   PASS("dedup: long inputs stay bounded and still hit");
+}
+
 static void test_bounded_eviction(void)
 {
    response_dedup_clear();
@@ -144,6 +188,7 @@ int main(void)
    test_get_put_roundtrip();
    test_ttl_expiry();
    test_empty_inputs_ignored();
+   test_long_inputs_bounded_and_hit();
    test_bounded_eviction();
    response_dedup_clear();
    printf("All response_dedup tests passed.\n");

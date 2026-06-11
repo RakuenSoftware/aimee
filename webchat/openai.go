@@ -109,29 +109,27 @@ func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath st
 			req.URL.Host = "aimee"
 			req.URL.Path = upstreamPath
 			req.Host = "aimee"
-			// Strip the webchat bearer (the UDS is a trusted local channel), but
-			// preserve the account boundary across the strip: when the shared
-			// ingress proxy secret is configured, stamp it plus the principal,
-			// source, and a per-client session key so aimee-server can distinguish
-			// clients/sessions rather than collapsing them under one principal and
-			// the process-wide session. A client may stamp its own X-Aimee-*
-			// headers; those are preserved. The Idempotency-Key (if any) is
-			// forwarded unchanged by ReverseProxy.
+			// Strip the webchat bearer (the UDS is a trusted local channel). CRITICAL:
+			// also strip any client-supplied X-Aimee-* identity headers BEFORE
+			// stamping our own — otherwise an external OpenAI client could send
+			// X-Aimee-Principal: victim and, because we add the trusted proxy
+			// secret, aimee-server would attribute the request to victim. The only
+			// trusted per-client signal at this shared-bearer surface is the
+			// server-derived OpenAI `user` field. The Idempotency-Key (not an
+			// identity header) is forwarded unchanged by ReverseProxy.
 			req.Header.Del("Authorization")
+			req.Header.Del("X-Aimee-Proxy-Authorization")
+			req.Header.Del("X-Aimee-Principal")
+			req.Header.Del("X-Aimee-Source")
+			req.Header.Del("X-Aimee-Session-Key")
 			if secret := strings.TrimSpace(os.Getenv("AIMEE_INGRESS_PROXY_SECRET")); secret != "" {
 				req.Header.Set("X-Aimee-Proxy-Authorization", secret)
-				if req.Header.Get("X-Aimee-Source") == "" {
-					req.Header.Set("X-Aimee-Source", "webchat")
-				}
-				if req.Header.Get("X-Aimee-Principal") == "" {
-					if clientID != "" {
-						req.Header.Set("X-Aimee-Principal", "webchat:"+clientID)
-					} else {
-						req.Header.Set("X-Aimee-Principal", "webchat")
-					}
-				}
-				if req.Header.Get("X-Aimee-Session-Key") == "" && clientID != "" {
+				req.Header.Set("X-Aimee-Source", "webchat")
+				if clientID != "" {
+					req.Header.Set("X-Aimee-Principal", "webchat:"+clientID)
 					req.Header.Set("X-Aimee-Session-Key", "webchat:"+clientID)
+				} else {
+					req.Header.Set("X-Aimee-Principal", "webchat")
 				}
 			}
 		},

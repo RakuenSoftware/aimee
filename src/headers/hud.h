@@ -14,7 +14,14 @@ typedef struct
    long long total_completion_tokens;
    long long total_cache_write_tokens;
    long long total_cache_read_tokens;
-   double total_estimated_cost_usd;
+   double total_estimated_cost_usd; /* legacy: all-rows cost (kept for compat) */
+   /* Spend by usage_kind (§7): realized is the billable spend; estimated, avoided
+    * (dedup-skipped), and partial (aborted) are reported separately and excluded
+    * from the billable figure. */
+   double spend_realized_usd;
+   double spend_estimated_usd;
+   double spend_avoided_usd;
+   double spend_partial_usd;
    int total_turns;
    int total_tool_calls;
    double avg_latency_ms;
