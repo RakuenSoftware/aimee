@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 seventeenth review)
+- **Date:** 2026-06-11 (revised post-PR-#183 eighteenth review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -623,6 +623,26 @@ Two follow-ons from the sixteenth review's own resolutions.
 (The What-exists table is also corrected here: PR **merge** is *not* a `git_pr`
 action today — #50 — so it is listed as a gap, not as existing.)
 
+## PR #183 eighteenth review — pin cost sources and validate the ledger dependency
+
+The seventeenth revision correctly avoids inventing a parallel implementation-cost
+ledger, but the codebase currently has DB1 `token_audit` / `cost_fold_log` while
+the proposed db2 `usage_ledger` is still pending. That leaves one more boundary to
+make explicit.
+
+52. **Pipeline cost evidence must pin its accounting source and scope.** A pipeline
+    may start before the cost-accounting proposal lands, resume after it lands, or
+    carry both roundtable child-run `cost_usd` and implementation-agent cost rows.
+    The durable ledger therefore needs a per-pipeline/per-phase `cost_scope` and
+    `cost_source` snapshot (for example `roundtable_result_cost`,
+    `db1_token_audit_cost_fold`, or `db2_usage_ledger`), plus a pricing/schema
+    version or reconciliation timestamp. It must not silently mix DB1 audit sums,
+    roundtable result estimates, and future db2 usage rows across retries or
+    resume. If the configured source changes, the pipeline marks cost evidence
+    stale/incomplete, recomputes from a single authoritative source where possible,
+    and re-surfaces the gate digest before claiming a cap is satisfied. **Resolved
+    in §4, §5, §6, §8, and §10.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -914,6 +934,14 @@ not whether the attempt is captured. The `/v1/runs` id is retained only as a
 historical pointer; the ledger row is the source of truth for the done-bar and the
 gate digest.
 
+Cost evidence in that ledger is not just a number. Each pipeline and phase records
+the accounting scope/source/version used to compute it (#52): roundtable-result
+child-run cost, DB1 `token_audit` / `cost_fold_log`, or the cost-accounting
+proposal's db2 `usage_ledger`. A resumed pipeline may continue with the pinned
+source, or explicitly reconcile to a newer authoritative source and mark prior
+gate evidence stale until the digest is regenerated; it cannot mix sources inside
+one cap decision.
+
 **The agent reads terminal from the ledger, not `/v1/runs` (#26).** Because the
 worker writes the result to DB1 at terminal, the driving agent learns a pass
 completed by polling the **durable ledger pass row** (`aimee pipeline status` / the
@@ -967,7 +995,8 @@ digest, then waits for the verdict:
 - the converged-review **digest**: blocking/suggestion/nit counts, the
   highest-corroboration items (`item.count`), answered questions, and any
   `coverage_gaps`;
-- pipeline economics: total outer passes, cumulative `cost_usd`, rounds.
+- pipeline economics: total outer passes, cumulative `cost_usd`, rounds, and the
+  pinned cost scope/source/version behind that number (#52).
 
 **pass** advances (merge → next phase). **fail** captures the human's reason; the
 reason becomes a brief `focus`/`questions` entry for the next loop, and the state
@@ -1042,7 +1071,10 @@ roundtable config surface is scalar keys like `roundtable.max_rounds`,
   a second accounting path; where that ledger has no row yet, implementation cost is
   marked **incomplete evidence** and the cap cannot be claimed satisfied. If that
   ledger has not landed, the cap is scoped to roundtable child-run cost only
-  (a `…_max_roundtable_cost_usd` spelling) and says so (#49).
+  (a `…_max_roundtable_cost_usd` spelling) and says so (#49). The selected
+  accounting scope/source/version is pinned in the pipeline ledger; changing it
+  requires a fresh reconciliation and stale gate digest rather than silently
+  combining DB1 token-audit totals, child-run estimates, and db2 usage rows (#52).
 - `roundtable_pipeline_gate_ttl_h` — int hours, **default 0 (no expiry)**; >0 moves
   a gate left unanswered past the TTL to `abandoned` with full child-run-stop +
   cleanup (#31), never an auto-pass (#47).
@@ -1124,7 +1156,10 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
   must use a distinct namespace or remain CLI/MCP-only in v1 (#45).
 - **Soft:** the cost-accounting proposal's `usage_ledger` / `/v1/usage/*` for
   whole-pipeline cost that includes implementation-phase spend (#51). Absent it,
-  the total cap is roundtable-child-run-cost only and says so (#49).
+  the total cap is roundtable-child-run-cost only and says so (#49). Any
+  implementation that bridges from current DB1 `token_audit` / `cost_fold_log` to
+  future db2 `usage_ledger` must version and pin the accounting source per
+  pipeline, not mix both in one cap decision (#52).
 - **Soft:** the `git diff` range helper (agent-directed-pr-review P2) for the PR
   phase input; otherwise the pipeline captures the diff through the
   workspace-aware git surface.
@@ -1314,6 +1349,12 @@ ledger) before the full idea→merge pipeline of P2/P3.
   work between review phases; assert the total cap either explicitly excludes that
   spend (roundtable-only naming/contract) or includes it from token/cost accounting,
   and unknown in-scope implementation cost prevents claiming the cap is satisfied.
+- **Cost-source pinning + usage-ledger fallback (#51/#52)** — start a pipeline while
+  only DB1 `token_audit` / `cost_fold_log` and roundtable `cost_usd` are available,
+  then resume after a db2 `usage_ledger` implementation is present; assert the
+  ledger keeps the original source pinned or explicitly reconciles and marks the
+  gate digest stale. Missing in-scope usage rows block "cap satisfied"; a
+  roundtable-only configuration uses the explicit roundtable-only key/contract.
 - **Parked-gate resource release + TTL (#47)** — at a gate, the review-scoped index
   is dropped and correctly re-ingested from the origin on resume (same content
   hash, retrieval still works); with a TTL set, an unanswered gate moves to
