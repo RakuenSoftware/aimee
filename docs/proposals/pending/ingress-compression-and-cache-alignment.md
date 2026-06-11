@@ -266,8 +266,8 @@ not a complete gate).
 ## PR #181 second review — remaining gaps after the update
 
 The updated revision resolves the first eight blockers, but a second pass against
-`origin/testing` found seven remaining implementation gaps that must be carried
-by the proposal.
+`origin/testing` found eight remaining implementation gaps (9–16) that must be
+carried by the proposal.
 
 ### 9. Code-search hits do not expose symbol spans
 
@@ -344,6 +344,27 @@ emitter plus compression-specific fixtures.
 
 **→ Resolved in §6**.
 
+### 16. Rehydration assumes the external agent can call Aimee's MCP tools
+
+The reversibility lever (§3) — and, in fact, the existing `explore-with` steer
+shipped in `context-preinjection-ingress.md` — only pays off if the model can
+actually invoke the named tools. `ingress_preinject_format_envelope()` injects
+envelope *text* that *names* tools (`explore-with: …`); on the OpenAI/Codex seam
+`openai_chat.c` forwards the **client's** `tools` array and runs a `function_call`
+loop where tool calls are executed by the client. Injecting text that names
+`rehydrate` does **not** make it callable: the external agent can only call it if
+it has Aimee's MCP server configured on its side, or if the ingress injects the
+tool definition into the request and intercepts the resulting tool call inline.
+The first revision raised reachability only for Anthropic (§2.3/§3.3); it is in
+fact a precondition on **every** ingress, including the primary OpenAI/Codex one.
+
+**→ Resolved in §3.4** (reachability is a stated per-ingress precondition; a
+*lossy* fold is permitted only on an ingress where `rehydrate` reachability is
+proven end-to-end, otherwise the fold degrades to byte-equivalent-only or a
+stand-alone-sufficient preview; reachability becomes a P2 acceptance check, not
+an assumption) — this also makes the §1.3 "lossy is safe because §3 recovers it"
+claim conditional on a tested fact.
+
 ## Goal
 
 Cut the per-turn token cost *and* the per-turn dollar cost of pre-injection
@@ -387,7 +408,13 @@ list. Each entry carries, minimally:
   preview/read contract;
 - `sensitivity` / `scope` — session, workspace, tenant (drives §3.2 and redaction);
 - `preview` — the rendered text that goes resident in the envelope;
-- `original_ref` — pointer/handle to the byte-exact pre-fold original (§3);
+- `original_ref` — how to recover the byte-exact pre-fold original (§3). For
+  **durable** sources (code spans, memory records) this is a **re-read pointer**
+  (project/file/line-range, or record id + version) re-fetched on demand — cheaper
+  than copying bytes into the store every turn and version-checked for free. For
+  **ephemeral** sources (tool output that will not survive the turn) it is the
+  **stored bytes**. Copying every code-hit body into the store on the per-turn hot
+  path is explicitly avoided (see the latency risk in §8);
 - `budget` — bytes/tokens this entry is allowed, from recall-economy's bounded
   assembler when present;
 - `transform` — which fold was applied (`none` | `code_fold` | `json_fold`), so
@@ -543,9 +570,10 @@ create a second prefix hash / state table:
 
 ### §2.6 Cover every OpenAI/Responses injection path (resolves review #13)
 
-`openai_chat.c` has multiple pre-injection sites: buffered chat/completions,
-buffered Responses continuations, streaming chat/completions, and streaming
-Responses. P3 is not complete until all of them share the same placement rule,
+`openai_chat.c` calls `ingress_preinject_build()` at **five** sites spanning the
+legacy chat/completions, buffered Responses continuation, streaming
+chat/completions, and streaming Responses variants. P3 is not complete until all
+of them share the same placement rule,
 request override behavior, continuation behavior, and body-serialization tests.
 The Responses continuation path is especially important because it prepends the
 stored transcript before building the envelope; the prefix classifier must not
@@ -591,13 +619,42 @@ path to potentially sensitive originals, so:
 - **Recoverable failure:** on expired/unauthorized/unknown handle, the tool
   returns clear error text steering the model to `fetch` (rerun recall) instead —
   never a silent empty result.
+- **Lifetime config:** the store's TTL and size are config-driven —
+  `ingress_rehydrate_ttl_s` and `ingress_rehydrate_max_entries` (LRU cap) — so
+  the per-turn memory cost is bounded and tunable, default-off with §1.
 
 ### §3.3 Payoff
 
 Lets §1 fold **aggressively** (optimize resident density, not "safe to lose"),
 because the detail is deferred behind a tool call the model makes iff it needs it
-— but only to the extent §3.2's handle is actually reachable in that ingress
-(which, for Anthropic, is gated on §2.3/P5).
+— but only to the extent §3.4's reachability precondition holds in that ingress.
+
+### §3.4 Tool reachability is a per-ingress precondition (resolves review #16)
+
+`rehydrate` is only useful where the external agent can call it, and that differs
+by ingress:
+
+- **Claude Code hook path:** Aimee's MCP server is client-registered (shipped in
+  `context-preinjection-ingress.md` P3), so `rehydrate`/`fetch` are callable today.
+- **OpenAI/Codex wire ingress:** callable only if the client has Aimee's MCP
+  configured, or if the ingress injects the tool definition into the request and
+  intercepts the resulting tool call inline (the `function_call` loop Codex
+  already drives). Injecting envelope text that *names* the tool is not enough.
+- **Anthropic:** gated on §2.3/P5.
+
+Contract: per target ingress, P2 must **(a)** prove `rehydrate` is reachable
+end-to-end, or **(b)** restrict that ingress to non-lossy folds (byte-equivalent
+only) and previews rich enough to stand alone. A **lossy** fold is permitted only
+where reachability is proven. This is the concrete gate that turns §1.3's "lossy
+is safe" from an assumption into a tested precondition.
+
+**Store topology.** The handle store is in-process and assumes the mint (envelope
+build) and the `rehydrate` call land in the **same server process** — true for
+Aimee's single-process threaded server and the single-container Docker deploy, so
+the cross-thread mint→rehydrate path works with a mutex. A **multi-replica /
+load-balanced** deployment can route `rehydrate` to a replica that never minted
+the handle; there it must fall back to `fetch` (re-recall) or a clearly named
+shared store. This is documented as a known limitation, not silently broken.
 
 ---
 
@@ -776,3 +833,9 @@ this proposal.
   `interaction_event_embeddings` clusters that `kb_mining.c` already promotes,
   users will see both artifacts and learning proposals for one failure pattern.
   Refactor the existing mining job or use a disjoint dedup key before enabling.
+- **Rehydration unreachable on the target ingress.** If `rehydrate` is not
+  callable (client lacks Aimee's MCP, or a multi-replica deploy routes the call to
+  another process — §3.4), an aggressively lossy fold silently strands detail the
+  model cannot recover. Mitigated by gating lossy folds on proven per-ingress
+  reachability (§3.4) and falling back to byte-equivalent folds / stand-alone
+  previews otherwise — reachability is a P2 acceptance check, not an assumption.
