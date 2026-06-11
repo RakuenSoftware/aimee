@@ -893,6 +893,23 @@ void delegate_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
+   /* Claude run via the `claude` CLI/tmux login (not an API key) is primary-only
+    * by default: driving a personal Claude subscription as an automated delegate
+    * may breach Anthropic's terms. Opt in with `claude_cli_delegate_enabled`.
+    * (Concise here — the risk warning is shown once at setup when the flag is
+    * enabled, and in DELEGATES.md.) */
+   if (agent_is_claude_cli(target_agent) && !route_cfg.claude_cli_delegate_enabled)
+   {
+      char errmsg[320];
+      snprintf(errmsg, sizeof(errmsg),
+               "agent '%s' is Claude via the `claude` CLI and is primary-only by default; "
+               "set claude_cli_delegate_enabled=true to allow it as a delegate "
+               "(see DELEGATES.md for the Anthropic account-risk warning)",
+               target_agent->name);
+      delegation_compute_error(cctx, errmsg);
+      compute_ctx_free(cctx);
+      return;
+   }
    if (target_agent && timeout_ms > 0)
       target_agent->timeout_ms = timeout_ms;
    delegate_apply_max_turns_policy(&acfg, role, max_turns);

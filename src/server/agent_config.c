@@ -1104,6 +1104,20 @@ static agent_t *agent_pick_random(agent_t **candidates, int count)
    return candidates[seed % (unsigned int)count];
 }
 
+int agent_is_claude_cli(const agent_t *agent)
+{
+   if (!agent)
+      return 0;
+   /* Only the Claude CLI (`claude` / `claude-code`) run via tmux or the
+    * provider-CLI binary — i.e. authenticated by the interactive `claude` login,
+    * NOT an API key. Other CLI agents (Codex CLI, gemini-cli, …) are not gated. */
+   if (strcmp(agent->cli_kind, "claude") != 0 && strcmp(agent->cli_kind, "claude-code") != 0)
+      return 0;
+   return strcmp(agent->backend, AGENT_BACKEND_TMUX_CLI) == 0 ||
+          strcmp(agent->backend, AGENT_BACKEND_PROVIDER_CLI) == 0 ||
+          strcmp(agent->backend, AGENT_BACKEND_CLI_STDIO) == 0;
+}
+
 agent_t *agent_route(agent_config_t *cfg, const char *role)
 {
    agent_t *def = NULL;

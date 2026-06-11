@@ -11,8 +11,10 @@
 #include "db_schema.h"
 #include "db1.h"
 #include "agent.h"
+#include "agent_config.h"
 #include "agent_tools.h"
 #include "agent_adapter.h"
+#include "provider_cli_adapter.h"
 #include "agent_protocol.h"
 #include "agent_shell.h"
 #include "cJSON.h"
@@ -1860,6 +1862,33 @@ static void test_agent_loop_per_call_timeout(void)
    assert(agent_loop_per_call_timeout_ms(10000, 40000, 35000) == -1);
 }
 
+static void test_claude_cli_predicate(void)
+{
+   agent_t a;
+
+   /* claude via tmux/CLI login → gated (primary-only by default). */
+   memset(&a, 0, sizeof(a));
+   snprintf(a.backend, sizeof(a.backend), "%s", AGENT_BACKEND_TMUX_CLI);
+   snprintf(a.cli_kind, sizeof(a.cli_kind), "claude");
+   assert(agent_is_claude_cli(&a) == 1);
+   snprintf(a.cli_kind, sizeof(a.cli_kind), "claude-code");
+   assert(agent_is_claude_cli(&a) == 1);
+   snprintf(a.backend, sizeof(a.backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
+   snprintf(a.cli_kind, sizeof(a.cli_kind), "claude");
+   assert(agent_is_claude_cli(&a) == 1);
+
+   /* Claude-only: other CLI agents (Codex CLI, gemini-cli) are NOT gated. */
+   snprintf(a.cli_kind, sizeof(a.cli_kind), "codex");
+   assert(agent_is_claude_cli(&a) == 0);
+   snprintf(a.cli_kind, sizeof(a.cli_kind), "gemini");
+   assert(agent_is_claude_cli(&a) == 0);
+
+   /* plain HTTP/API-key agent → not gated. */
+   memset(&a, 0, sizeof(a));
+   snprintf(a.backend, sizeof(a.backend), "openai");
+   assert(agent_is_claude_cli(&a) == 0);
+}
+
 int main(void)
 {
    char tmp_home[512];
@@ -1874,6 +1903,7 @@ int main(void)
    test_agent_has_role();
    test_agent_find();
    test_agent_route();
+   test_claude_cli_predicate();
    test_agent_loop_per_call_timeout();
    test_agent_route_health_filter();
    test_agent_route_with_caps_honors_tools_enabled();

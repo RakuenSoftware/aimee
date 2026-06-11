@@ -357,10 +357,40 @@ Practical notes:
 - Configure the agent as usual (`aimee agent add claude … --provider claude`,
   or `aimee config set provider claude` to make it the primary); the thin-client
   routing is automatic when the workspace is `detached`.
-- It works for both the primary chat turn and `aimee delegate … --via claude`.
 - If no client is currently serving the workspace, the CLI agent cannot run
   (there is nowhere with the binary) — start the client / `aimee workspace serve`
   for that root, or use an HTTP provider.
+
+#### Claude via the CLI is primary-only by default
+
+Claude run via the `claude` CLI / tmux login — authenticated by the **interactive
+Claude subscription login, not an API key** — is **primary-only by default**. It
+can be your interactive primary (`aimee chat`), but it is **not** eligible as a
+delegate (neither auto-routed nor `aimee delegate … --via claude`). Attempting to
+use it as a delegate fails with a message pointing you here.
+
+This gate is **Claude-CLI-specific**. It does not affect any other agent: API-key
+/ HTTP agents (`minimax`, `openai`, `anthropic` with a key, `gemini-cli`,
+`mistral`, …) and other CLI agents (e.g. the Codex CLI) delegate normally.
+
+> ⚠️ **Anthropic account-risk warning.** Using a personal **Claude subscription**
+> (Pro/Max) to drive **automated / headless delegation** may violate Anthropic's
+> terms of service and can result in **suspension or termination of your
+> account**. The terms generally distinguish interactive use of a subscription
+> from programmatic/automation use, which is what delegate fan-out is. For
+> automated or delegated Claude workloads, use an **Anthropic API key** (billed
+> per token) instead — add an `anthropic` agent with `--key`.
+
+To opt in anyway, at your own risk:
+
+```bash
+aimee config set claude_cli_delegate_enabled true
+```
+
+This prints the warning once, at the time you enable it. With the flag on,
+Claude-via-CLI may be routed to / selected as a delegate (and, on a thin client,
+runs on the client exactly like the primary path above). Set it back to `false`
+to restore the primary-only default. The default is `false`.
 
 ### Config format
 

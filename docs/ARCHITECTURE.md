@@ -424,10 +424,15 @@ sequenceDiagram
   login; no Claude/CLI credential is sent to or stored on the server.
 - **Co-located unchanged.** When the workspace is not detached (the server is on
   the same host as the CLI), the agent fork/execs locally exactly as before.
-- This routing applies to all CLI entry points: the primary chat turn
-  (`aimee config set provider claude` + `aimee chat`) and CLI delegates
-  (`aimee delegate … --via claude`). See [DELEGATES.md](DELEGATES.md#local-cli-agents-on-a-thin-client)
-  and [SECURITY.md](SECURITY.md).
+- **Claude via the CLI is primary-only by default.** Claude run via the `claude`
+  CLI/tmux login (not an API key) is allowed as the interactive primary but is
+  gated out of delegate routing unless `claude_cli_delegate_enabled` is set —
+  automating a personal Claude subscription as a delegate risks Anthropic account
+  action. The routing above applies to the primary chat turn always, and to a
+  Claude-CLI delegate only when that flag is enabled; this gate is
+  Claude-CLI-specific (other CLI/API agents are unaffected). See
+  [DELEGATES.md](DELEGATES.md#claude-via-the-cli-is-primary-only-by-default) and
+  [SECURITY.md](SECURITY.md).
 
 ### 9.4 A delegate task
 
