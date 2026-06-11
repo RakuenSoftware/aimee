@@ -949,6 +949,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
 {
    memset(out, 0, sizeof(*out));
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", agent->name);
+   snprintf(out->model, MAX_MODEL_LEN, "%s", agent->model);
 
    if (!user_prompt || !user_prompt[0])
    {
@@ -1909,7 +1910,12 @@ void agent_log_call(const agent_result_t *result, const char *role)
        .cache_write_tokens = result->cache_write_tokens,
        .cache_read_tokens = result->cache_read_tokens,
    };
-   double cost = token_estimate_cost(result->agent_name, &usage);
+   /* Bill against the model actually served to the provider, not the agent
+    * identity: an agent named "codex" may serve "gpt-5.4", and a turn-0 400 may
+    * have swapped in the fallback model. Fall back to the agent name only when
+    * no served model was recorded (e.g. the dedup cache-hit path). */
+   const char *bill_model = result->model[0] ? result->model : result->agent_name;
+   double cost = token_estimate_cost(bill_model, &usage);
    /* delegation_active_id is exported by server_compute when the call
     * happens inside a delegate worker; weak-stub returns NULL elsewhere
     * (CLI, tests). Tagging the audit row with this id lets cost-fold
@@ -1923,11 +1929,10 @@ void agent_log_call(const agent_result_t *result, const char *role)
           .project_name = "",
           .tool_name = result->agent_name,
           .role = role ? role : "",
-          /* Record the served model so the by-model breakdown is populated.
-           * The agent name is the model alias today (cost is keyed off it
-           * just above), so model and cost stay consistent; a later phase
-           * threads the provider-reported model through agent_result_t. */
-          .model = result->agent_name,
+          /* The served model (consistent with the cost key above), so the
+           * by-model breakdown attributes spend to the real model rather than
+           * the agent name. */
+          .model = bill_model,
           .prompt_tokens = usage.input_tokens,
           .completion_tokens = usage.output_tokens,
           .cache_write_tokens = usage.cache_write_tokens,

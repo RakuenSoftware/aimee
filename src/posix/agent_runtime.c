@@ -342,6 +342,7 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
       *updated_messages = NULL;
    memset(out, 0, sizeof(*out));
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", agent->name);
+   snprintf(out->model, MAX_MODEL_LEN, "%s", agent->model);
    agent_t native_provider_agent;
 
    /* Dispatch to tmux-CLI backend if configured */
@@ -759,6 +760,8 @@ native_provider_http:
          response_body = NULL;
          snprintf(fb_agent.model, MAX_MODEL_LEN, "%s", fb_agent.fallback_model);
          fb_agent.fallback_model[0] = '\0';
+         /* The fallback model is now the served model — record it for accounting. */
+         snprintf(out->model, MAX_MODEL_LEN, "%s", fb_agent.model);
 
          cJSON *fb_req;
          if (chatgpt)

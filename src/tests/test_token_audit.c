@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "aimee.h" /* MAX_PATH_LEN, pulled in before agent_types.h */
+#include "agent_exec.h"
 #include "db1.h"
 #include <sqlite3.h>
 
@@ -195,6 +197,50 @@ static void test_by_model_relabels_empty(void)
    assert(saw_unattributed);
 }
 
+static int count_where(const char *col, const char *val)
+{
+   char sql[160];
+   snprintf(sql, sizeof(sql), "SELECT COUNT(*) FROM token_audit WHERE %s = ?", col);
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db1_conn(), sql, -1, &st, NULL) == SQLITE_OK);
+   sqlite3_bind_text(st, 1, val, -1, SQLITE_TRANSIENT);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   int n = sqlite3_column_int(st, 0);
+   sqlite3_finalize(st);
+   return n;
+}
+
+static void test_agent_log_call_records_served_model(void)
+{
+   /* The broken path the model-attribution fix targets: an agent whose
+    * name differs from its served model. agent_log_call must record the
+    * MODEL in token_audit.model (and key cost off it), not the agent name. */
+   agent_result_t r;
+   memset(&r, 0, sizeof(r));
+   snprintf(r.agent_name, sizeof(r.agent_name), "codex");
+   snprintf(r.model, sizeof(r.model), "gpt-4o"); /* priced, so cost must be > 0 */
+   r.prompt_tokens = 1000;
+   r.completion_tokens = 500;
+   r.success = 1;
+   agent_log_call(&r, "implement");
+
+   /* model column carries the served model, with non-zero cost keyed off it. */
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(db1_conn(),
+                             "SELECT COALESCE(SUM(estimated_cost_usd), 0) FROM token_audit"
+                             " WHERE model = 'gpt-4o'",
+                             -1, &st, NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   double cost = sqlite3_column_double(st, 0);
+   sqlite3_finalize(st);
+   assert(cost > 0.0); /* would be 0 if cost were keyed off "codex" */
+
+   /* The agent name must NOT leak into the model column... */
+   assert(count_where("model", "codex") == 0);
+   /* ...but it is still recorded as the tool/agent identity. */
+   assert(count_where("tool_name", "codex") >= 1);
+}
+
 static void test_dashboard_rows(void)
 {
    db1_token_audit_dashboard_row_t rows[4];
@@ -218,6 +264,7 @@ int main(void)
    /* These run after the count-sensitive tests because they insert
     * additional rows that would skew the totals/grouped/dashboard counts. */
    test_by_model_relabels_empty();
+   test_agent_log_call_records_served_model();
    test_cost_for_delegation();
    db1_shutdown();
    printf("test_token_audit: ok\n");
