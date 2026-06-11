@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 fourteenth review)
+- **Date:** 2026-06-11 (revised post-PR-#183 fifteenth review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -534,6 +534,38 @@ server routing and run-capture code found two more buildability gaps.
     `/v1/roundtable/pipelines/...` or `/v1/authoring/pipelines/...`; otherwise v1
     can remain CLI/MCP-only. **Resolved in §5, §8, §10, and §12.**
 
+## PR #183 fifteenth review — spend bound across fail-return, and the parked-gate lifecycle
+
+A fresh pass over the *cost* and *resource-lifecycle* of the long-lived states
+(not the engine) found two more holes the prior rounds left open.
+
+46. **The per-phase cost cap's behavior across fail-return is unspecified, and
+    there is no whole-pipeline ceiling.** `roundtable_pipeline_max_cost_usd` is
+    per-phase, but a gate **fail** returns to the same review phase and runs more
+    passes. The proposal never says whether the cap **resets, continues, or
+    accumulates** across fail-return re-entries — so a repeatedly-failed gate could
+    have no real spend bound (if it resets) or surprise the operator (if it
+    accumulates). Specify: the per-phase cap **accumulates across all re-entries of
+    that phase** (a fail-return never resets it), and add a **whole-pipeline**
+    cumulative ceiling (`roundtable_pipeline_max_total_cost_usd`, default 0 =
+    unbounded) bounding proposal + implementation + PR phases together. Tripping
+    either escalates to the human, never auto-passes. The ledger already records
+    per-pass cost, so this is a sum, not new accounting. **Resolved in §3, §4, §6,
+    and §10.**
+47. **A never-answered gate holds resources indefinitely; define the park
+    lifecycle.** Gates are designed to "sit for hours or days," and explicit
+    `cancel`/`abandon` (#31) covers *intentional* teardown — but nothing covers a
+    gate simply left unanswered. While parked, the pipeline pins the review-scoped
+    db2 index, the worktree, and the branch; across many open pipelines that index
+    grows unbounded. Specify: (a) on entering a `*_pending` gate the pipeline
+    **releases re-creatable resources** — the review-scoped db2 index is dropped and
+    re-ingested from the retained origin (#42) on resume, and the worktree may be
+    released — keeping only the durable ledger + origin ref; (b) an optional gate
+    TTL (`roundtable_pipeline_gate_ttl_h`, default 0 = no expiry) that on expiry
+    moves the pipeline to `abandoned` with full child-run-stop + cleanup (#31),
+    **never** an auto-pass. A parked pipeline must not pin a growing index. **Resolved
+    in §4, §5, §6, and §10.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -722,12 +754,14 @@ anchors on its own prior output. (The engine already dedupes within a call; this
 prevents cross-pass echo.)
 
 **Non-termination backstop.** Besides the optional pass ceiling, the inherited
-`ensemble_max_cost_usd` (per call) and a new cumulative
-`roundtable_pipeline_max_cost_usd` (per phase, §6) bound spend; either tripping
-escalates to the human rather than silently passing. Infrastructure retries under
-one pass id are separately bounded by `roundtable_pipeline_max_attempts_per_pass`
-(#29) so capture failures do not consume correctness passes but also cannot spin
-forever.
+`ensemble_max_cost_usd` (per call), a cumulative `roundtable_pipeline_max_cost_usd`
+(per phase), and a cumulative `roundtable_pipeline_max_total_cost_usd` (whole
+pipeline, §6) bound spend; any tripping escalates to the human rather than silently
+passing. **The per-phase cap accumulates across fail-return re-entries of that
+phase — a fail-return never resets it** (#46) — and the whole-pipeline cap spans
+proposal + implementation + PR phases together. Infrastructure retries under one
+pass id are separately bounded by `roundtable_pipeline_max_attempts_per_pass` (#29)
+so capture failures do not consume correctness passes but also cannot spin forever.
 
 ## §4 Hybrid state — the resumable pipeline ledger
 
@@ -841,6 +875,15 @@ the evidence; `gate pass|fail --reason "…"` records the verdict and resumes th
 loop. The driving agent reconstructs its position from the ledger on any new
 session and validates branch/PR drift before continuing.
 
+**Parked gates release re-creatable resources (#47).** On entering a `*_pending`
+gate the pipeline keeps only the durable ledger + whole-origin ref and **releases
+what it can rebuild**: the review-scoped db2 index is dropped (and re-ingested from
+the retained origin, #42, when the loop resumes), and the worktree may be released.
+A pipeline parked for days therefore does not pin a growing review index or a
+worktree per open pipeline. An optional `roundtable_pipeline_gate_ttl_h` (§6) moves
+a gate left unanswered past the TTL to `abandoned` with full child-run-stop +
+cleanup (#31) — never an auto-pass.
+
 ## §5 The two human gates
 
 At `gate1_pending` / `gate2_pending` the agent **pauses** and surfaces a compact
@@ -911,7 +954,14 @@ roundtable config surface is scalar keys like `roundtable.max_rounds`,
   cancellation retry) under the same stable pass id without consuming outer
   correctness passes.
 - `roundtable_pipeline_max_cost_usd` — double, cumulative per-phase spend cap;
-  0 = unbounded; tripping escalates.
+  0 = unbounded; tripping escalates. **Accumulates across fail-return re-entries of
+  the phase; a fail-return never resets it** (#46).
+- `roundtable_pipeline_max_total_cost_usd` — double, cumulative whole-pipeline
+  spend cap across proposal + implementation + PR phases; 0 = unbounded; tripping
+  escalates (#46).
+- `roundtable_pipeline_gate_ttl_h` — int hours, **default 0 (no expiry)**; >0 moves
+  a gate left unanswered past the TTL to `abandoned` with full child-run-stop +
+  cleanup (#31), never an auto-pass (#47).
 - `roundtable_pipeline_unknown_context_tokens` — int, conservative fallback chunk
   input budget used only when a panel participant's context window cannot be
   resolved; alternatively the implementation may make unknown context a hard
@@ -1163,6 +1213,14 @@ ledger) before the full idea→merge pipeline of P2/P3.
   a single resolved provider warns; a ≥2-provider panel does not.
 - **Cost accounting** — cumulative per-phase cost matches the sum of per-pass
   `cost_usd`; the per-phase cap trips correctly.
+- **Cost across fail-return + whole-pipeline cap (#46)** — fail a gate and re-enter
+  the phase; the per-phase cap continues from its prior total (does not reset), and
+  a whole-pipeline cap trips across proposal + implementation + PR phases, each
+  escalating rather than auto-passing.
+- **Parked-gate resource release + TTL (#47)** — at a gate, the review-scoped index
+  is dropped and correctly re-ingested from the origin on resume (same content
+  hash, retrieval still works); with a TTL set, an unanswered gate moves to
+  `abandoned` with child-run-stop + cleanup, never an auto-pass.
 
 ## §11 Non-goals (v1)
 
