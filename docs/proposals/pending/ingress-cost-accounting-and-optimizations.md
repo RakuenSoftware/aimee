@@ -26,9 +26,10 @@
   `src/server_insights.inc` (the `insights.overview` implementation),
   `src/cmd_core.c` (`cmd_usage`), `src/server/server_compute.c` (cost-shaped
   reward on the existing `delegate_routing` bandit close), `src/server/server_http.c`
-  + `src/headers/server_http.h` (request-context propagation for source,
-  idempotency, principal, and request-id metadata), `webchat/openai.go` and
-  `webchat/socket.go` (webchat proxy/session source attribution),
+  + `src/headers/server_http.h` + `src/server/server_auth.c` (request-context
+  propagation + UDS peer-UID capture for source, idempotency, principal, and
+  request-id metadata), `webchat/openai.go` and `webchat/socket.go` (webchat
+  proxy/session source attribution),
   dashboard/HUD/frontend readers that consume token-audit totals, config
   plumbing (`src/headers/config.h`,
   `src/config_fields.c`, `src/config_sections.c`, `src/config_save.c`), route and
@@ -109,6 +110,19 @@ trusted local traffic unless the proxy stamps explicit forwarding metadata; (14)
 `usage.prompt_tokens` without using the LLM audit path, so embeddings need an
 explicit non-LLM / estimate-only / separate embedding-spend classification rather
 than being folded into chat/completion cost.
+
+A seventh pass verified 13–14 and refined both. (13) **The UDS source-erasure is
+systemic, not webchat-specific**: `server_http_authorize` trusts any `!is_tcp`
+connection and grants `CAPS_ALL`, so the thin CLI, MCP, and webchat all arrive as
+anonymous trusted-local — yet the HTTP-over-UDS path captures no peer identity
+while the legacy NDJSON socket already derives `uid:<peer_uid>`. The fix is both
+capturing the UDS peer UID as a baseline principal and requiring proxies to stamp
+forwarding metadata. (14) **Embeddings cost $0 today**: the embedder is local
+(builtin hash or a local command), the model is in no price table, and
+`usage.prompt_tokens` is a `chars/4` estimate — so the default is to **exclude**
+embeddings from spend, with a remote-embedder pricing hook as future-only work;
+the non-LLM ingress surface is bounded to `/v1/embeddings` (+ usage-less
+`/v1/models`).
 
 ## Goal
 
@@ -215,15 +229,22 @@ optimization surface aimee already has, not a new one.
   logged, never passed to handlers. Source attribution, account isolation,
   idempotent dedup, and audit row identity therefore require widening the handler
   signatures (or a request context) before any ingress writer lands.
-- **Webchat's OpenAI proxy erases source/principal context unless it stamps
-  replacement metadata.** `webchat/openai.go` validates the caller's webchat
-  OpenAI bearer token, then `proxyV1` removes `Authorization` before forwarding
-  `/v1/chat/completions`, `/v1/completions`, `/v1/responses`, and
-  `/v1/embeddings` over the UDS. If the server context layer only inspects the
-  forwarded HTTP request, these calls look like anonymous local traffic instead
-  of webchat traffic tied to a session/user. The proxy must add trusted internal
-  forwarding headers or an equivalent side channel for source, principal/session,
-  original request id, and idempotency.
+- **Source/principal erasure over UDS is systemic, not webchat-specific.** The
+  audit confirmed `webchat/openai.go::proxyV1` validates the webchat bearer, then
+  `req.Header.Del("Authorization")` (`:84`) and forwards `/v1/chat/completions`,
+  `/v1/completions`, `/v1/responses`, `/v1/embeddings` over the UDS with **no**
+  replacement headers — webchat HAS identity it could stamp (PAM username,
+  `aimee_session_id`, `attach_id`) but forwards none. But the deeper fact is that
+  **every** UDS HTTP client is indistinguishable: `server_http_authorize` returns
+  0 for `!is_tcp` ("UDS: filesystem-permission auth, no token") and
+  `server_http_conn_caps` grants `CAPS_ALL`, so the thin CLI, MCP, and webchat all
+  arrive as anonymous trusted-local with no caller identity. Notably the **HTTP-
+  over-UDS path captures no peer identity, whereas the legacy NDJSON socket already
+  derives `uid:<peer_uid>`** (`server_auth.c:263-265`). Two complementary fixes:
+  (a) capture the UDS peer UID on accept as a baseline principal (parity with
+  NDJSON), and (b) require forwarding proxies — webchat first — to stamp trusted
+  internal headers for source, principal/session, original request id, and
+  idempotency. Attribution cannot rely on the forwarded HTTP request alone.
 - **A thread-local context is NOT sufficient — it breaks for `/v1/runs`.** The
   cited precedent `ingress_preinject_set_request_disabled()` is `static __thread`
   (`ingress_preinject.c:28`) and works **only because the turn runs synchronously
@@ -353,12 +374,19 @@ estimates** and **avoided estimated cost**.
   call `agent_log_call()`. Net: new writes only where no row exists today. Keep
   `/v1/embeddings` out of this LLM list unless embedding provider spend is
   intentionally added as a separate usage kind.
-- **Embeddings ingress is not chat/completion spend.** `/v1/embeddings` returns
-  OpenAI-style usage, but the implementation is embedder-backed rather than a
-  chat/completion provider turn. Either exclude it from spend dashboards, record
-  it as estimate-only local usage, or add an explicit embedding usage kind and
-  embedder pricing source if external embedding billing is possible. Do not let
-  embedding prompt tokens inflate LLM model cost.
+- **Embeddings ingress costs $0 today — default to excluding it.**
+  `embeddings_handler` (`openai_chat.c`) calls `memory_embed_text`, which is
+  **local**: the builtin hash embedder (`memory_embed_text_builtin`) or a local
+  `embedding_command` via `platform_exec_pipe` — no paid API, and the embedder
+  model id is absent from every price table (so `token_estimate_cost` → 0.0
+  regardless). Its `usage.prompt_tokens` is itself a `chars/4` **estimate**, not
+  provider-reported. So the correct default is **exclude embeddings from spend**,
+  not "record as estimate-only." A remote-embedder cost hook is future-only — the
+  `embedding_endpoint` / `embedding_model` config fields exist but are **unused**
+  by `memory_embed_text` today; only if a remote embedder is wired does an
+  explicit embedding usage-kind + embedder pricing source become real. The non-LLM
+  ingress surface is **bounded**: the only other non-chat route is `/v1/models`
+  (no usage). Never let embedding tokens inflate LLM by-model cost.
 - **Buffered path:** parse the provider JSON `usage` block after a 200 response
   and before translating it back to the client. The Anthropic parser already
   extracts cache tokens (`agent_bridge.c:791-796`), but the **OpenAI buffered
@@ -568,9 +596,10 @@ with a benchmark showing no quality regression.
   one** realized row; **`/v1/runs` still writes exactly one** row (via its
   existing `agent_log_call`) and gains source attribution **without** a second
   write; `agent_execute()` remains no-log; normal `agent_run*` paths are
-  unchanged. `/v1/embeddings` is either excluded from LLM spend or recorded under
-  an explicit embedding usage kind, and never appears as chat/completion model
-  spend. Explicit assertion: no turn produces two rows.
+  unchanged. `/v1/embeddings` is **excluded from spend by default** (local $0
+  embedder) and never appears as chat/completion model spend; if a remote embedder
+  is wired it records under a distinct embedding usage-kind. Explicit assertion: no
+  turn produces two rows.
 - **Request context / threading:** registered handlers see request id, idempotency
   key, source/principal/session metadata, and route identity; the `/v1/runs`
   detached worker sees the **same** context via capture-at-enqueue (not a
@@ -579,8 +608,10 @@ with a benchmark showing no quality regression.
   aimee-server with trusted source/session/principal metadata after
   `Authorization` is stripped.
 - **Source attribution:** ingress rows carry a per-client source derived from the
-  request context (session key/principal), **not** the PPID-shared `session_id()`;
-  two distinct clients do not collapse into one `top_sessions` row.
+  request context (session key/principal/UDS peer UID), **not** the PPID-shared
+  `session_id()`; two distinct clients do not collapse into one `top_sessions`
+  row; a UDS request with no forwarding metadata still attributes to its peer UID
+  rather than an anonymous blank source.
 - **Idempotency:** a retried or late-finalized call with the same
   `(source, request_id, attempt)` produces exactly one row (index or in-process
   guard), and the migration that creates the uniqueness constraint is exercised.
