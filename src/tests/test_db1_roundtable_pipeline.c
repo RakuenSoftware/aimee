@@ -272,6 +272,16 @@ static void test_chunk_group(void)
    assert(agg.synthesis_done == 1);
    assert(agg.any_invalid == 0);
    assert(agg.blocking_count == 2);
+
+   /* a synthesis member that omitted required spans blocks the aggregate even
+    * when captured+valid (#39). */
+   rtp_pass_t synth;
+   assert(rtp_pass_get(ids[2], &synth) == 0); /* ids[2] is the synthesis member */
+   synth.chunk_omitted = 1;
+   assert(rtp_pass_update(&synth) == 0);
+   assert(rtp_pass_group_agg(pid, RTP_PHASE_IMPL, group, &agg) == 0);
+   assert(agg.any_invalid == 1);
+   assert(agg.synthesis_done == 0);
    printf("  chunk group aggregate: ok\n");
 }
 

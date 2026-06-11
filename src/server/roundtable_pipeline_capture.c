@@ -236,7 +236,8 @@ int rtp_seam_finalize(const char *run_id, int http_ok, int cancelled, const char
    pass.blocking_count = env.blocking_count;
    pass.suggestion_count = env.suggestion_count;
    pass.nit_count = env.nit_count;
-   pass.open_questions = 0; /* refined by the driver from accepted-question set */
+   pass.answered_count = env.answered_count; /* accepted brief questions answered (#3) */
+   pass.open_questions = 0;                  /* refined by the driver from accepted-question set */
    pass.coverage_gaps = env.coverage_gap_count;
    pass.items_round = env.items_round;
    pass.artifact_round = env.artifact_round;

@@ -110,9 +110,11 @@ static void test_seam_register_and_finalize(void)
    /* finalize for an unrelated run id is a no-op (ordinary ensemble_review). */
    assert(rtp_seam_finalize("oprun_not_pipeline", 1, 0, "{\"converged\":true}") == 0);
 
-   /* finalize the real run with a valid converged review. */
+   /* finalize the real run with a valid converged review that answers 2 of the
+    * brief's questions (persisted for the strict questions bar, #3). */
    const char *good = "{\"converged\":true,\"rounds_run\":1,\"items_round\":1,"
-                      "\"artifact_round\":1,\"best_round\":1,\"cost_usd\":0.5,\"items\":[]}";
+                      "\"artifact_round\":1,\"best_round\":1,\"cost_usd\":0.5,\"items\":[],"
+                      "\"answered_questions\":[{\"answered\":true},{\"answered\":true}]}";
    assert(rtp_seam_finalize("oprun_a", 1, 0, good) == 1);
 
    assert(rtp_attempt_get_by_run("oprun_a", &a) == 0);
@@ -126,6 +128,7 @@ static void test_seam_register_and_finalize(void)
    assert(p.envelope_valid == 1);
    assert(p.converged == 1);
    assert(p.blocking_count == 0);
+   assert(p.answered_count == 2); /* persisted for the strict questions bar (#3) */
    assert(strcmp(p.status, RTP_PASS_CAPTURED) == 0);
 
    /* cumulative cost roll-up into the run (#46): impl phase + total = 0.5. */

@@ -78,8 +78,9 @@ static void rtp_map_run(rtp_run_t *r, sqlite3_stmt *s)
    r->proposal_phase_cost_usd = sqlite3_column_double(s, 30);
    r->impl_phase_cost_usd = sqlite3_column_double(s, 31);
    r->total_cost_usd = sqlite3_column_double(s, 32);
-   db1_copy_col_text(r->created_at, sizeof(r->created_at), s, 33);
-   db1_copy_col_text(r->updated_at, sizeof(r->updated_at), s, 34);
+   r->accepted_question_count = sqlite3_column_int(s, 33);
+   db1_copy_col_text(r->created_at, sizeof(r->created_at), s, 34);
+   db1_copy_col_text(r->updated_at, sizeof(r->updated_at), s, 35);
 }
 
 #define RTP_RUN_COLS                                                                               \
@@ -88,7 +89,7 @@ static void rtp_map_run(rtp_run_t *r, sqlite3_stmt *s)
    " remote, base_branch, head_branch, workspace_id, workspace_provider, worktree_path, head_sha," \
    " base_sha, proposal_pr_number, proposal_pr_url, impl_pr_number, impl_pr_url, cost_scope,"      \
    " cost_source, cost_version, proposal_phase_cost_usd, impl_phase_cost_usd, total_cost_usd,"     \
-   " created_at, updated_at"
+   " accepted_question_count, created_at, updated_at"
 
 int rtp_run_get(int id, rtp_run_t *out)
 {
@@ -128,7 +129,7 @@ int rtp_run_update(const rtp_run_t *r)
        " worktree_path=?, head_sha=?, base_sha=?, proposal_pr_number=?, proposal_pr_url=?,"
        " impl_pr_number=?, impl_pr_url=?, cost_scope=?, cost_source=?, cost_version=?,"
        " proposal_phase_cost_usd=?, impl_phase_cost_usd=?, total_cost_usd=?,"
-       " updated_at=datetime('now') WHERE id=?";
+       " accepted_question_count=?, updated_at=datetime('now') WHERE id=?";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
    int i = 1;
@@ -164,6 +165,7 @@ int rtp_run_update(const rtp_run_t *r)
    sqlite3_bind_double(stmt, i++, r->proposal_phase_cost_usd);
    sqlite3_bind_double(stmt, i++, r->impl_phase_cost_usd);
    sqlite3_bind_double(stmt, i++, r->total_cost_usd);
+   sqlite3_bind_int(stmt, i++, r->accepted_question_count);
    sqlite3_bind_int(stmt, i++, r->id);
    int rc = sqlite3_step(stmt);
    int changed = (rc == SQLITE_DONE) ? sqlite3_changes(db) : 0;
@@ -301,15 +303,21 @@ static void rtp_map_pass(rtp_pass_t *p, sqlite3_stmt *s)
    p->synthesis_done = sqlite3_column_int(s, 23);
    p->chunk_group = sqlite3_column_int(s, 24);
    p->chunk_index = sqlite3_column_int(s, 25);
-   db1_copy_col_text(p->created_at, sizeof(p->created_at), s, 26);
-   db1_copy_col_text(p->updated_at, sizeof(p->updated_at), s, 27);
+   p->answered_count = sqlite3_column_int(s, 26);
+   p->chunk_offset = sqlite3_column_int(s, 27);
+   p->chunk_len = sqlite3_column_int(s, 28);
+   p->chunk_omitted = sqlite3_column_int(s, 29);
+   p->chunk_over_budget = sqlite3_column_int(s, 30);
+   db1_copy_col_text(p->created_at, sizeof(p->created_at), s, 31);
+   db1_copy_col_text(p->updated_at, sizeof(p->updated_at), s, 32);
 }
 
 #define RTP_PASS_COLS                                                                              \
    "id, pipeline_id, phase, mode, pass_no, status, artifact_hash, converged, envelope_valid,"      \
    " blocking_count, suggestion_count, nit_count, open_questions, coverage_gaps, items_round,"     \
    " artifact_round, best_round, rounds_run, cost_usd, result_hash, is_chunked, chunk_total,"      \
-   " chunk_done, synthesis_done, chunk_group, chunk_index, created_at, updated_at"
+   " chunk_done, synthesis_done, chunk_group, chunk_index, answered_count, chunk_offset,"          \
+   " chunk_len, chunk_omitted, chunk_over_budget, created_at, updated_at"
 
 int rtp_pass_get(int id, rtp_pass_t *out)
 {
@@ -346,7 +354,8 @@ int rtp_pass_update(const rtp_pass_t *p)
        " envelope_valid=?, blocking_count=?, suggestion_count=?, nit_count=?, open_questions=?,"
        " coverage_gaps=?, items_round=?, artifact_round=?, best_round=?, rounds_run=?, cost_usd=?,"
        " result_hash=?, is_chunked=?, chunk_total=?, chunk_done=?, synthesis_done=?,"
-       " chunk_group=?, chunk_index=?, updated_at=datetime('now') WHERE id=?";
+       " chunk_group=?, chunk_index=?, answered_count=?, chunk_offset=?, chunk_len=?,"
+       " chunk_omitted=?, chunk_over_budget=?, updated_at=datetime('now') WHERE id=?";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
    int i = 1;
@@ -371,6 +380,11 @@ int rtp_pass_update(const rtp_pass_t *p)
    sqlite3_bind_int(stmt, i++, p->synthesis_done);
    sqlite3_bind_int(stmt, i++, p->chunk_group);
    sqlite3_bind_int(stmt, i++, p->chunk_index);
+   sqlite3_bind_int(stmt, i++, p->answered_count);
+   sqlite3_bind_int(stmt, i++, p->chunk_offset);
+   sqlite3_bind_int(stmt, i++, p->chunk_len);
+   sqlite3_bind_int(stmt, i++, p->chunk_omitted);
+   sqlite3_bind_int(stmt, i++, p->chunk_over_budget);
    sqlite3_bind_int(stmt, i++, p->id);
    int rc = sqlite3_step(stmt);
    int changed = (rc == SQLITE_DONE) ? sqlite3_changes(db) : 0;
@@ -457,7 +471,8 @@ int rtp_pass_group_agg(int pipeline_id, const char *phase, int chunk_group, rtp_
       return -1;
    sqlite3_stmt *stmt = NULL;
    static const char *sql =
-       "SELECT chunk_index, status, envelope_valid, blocking_count, suggestion_count"
+       "SELECT chunk_index, status, envelope_valid, blocking_count, suggestion_count,"
+       " chunk_omitted, chunk_over_budget"
        " FROM roundtable_pipeline_passes WHERE pipeline_id=? AND phase=? AND chunk_group=?";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
@@ -471,6 +486,8 @@ int rtp_pass_group_agg(int pipeline_id, const char *phase, int chunk_group, rtp_
       int valid = sqlite3_column_int(stmt, 2);
       int blocking = sqlite3_column_int(stmt, 3);
       int sugg = sqlite3_column_int(stmt, 4);
+      int omitted = sqlite3_column_int(stmt, 5);
+      int over_budget = sqlite3_column_int(stmt, 6);
       int captured = st && (strcmp((const char *)st, "captured") == 0 ||
                             strcmp((const char *)st, "done") == 0);
       out->blocking_count += blocking;
@@ -478,7 +495,12 @@ int rtp_pass_group_agg(int pipeline_id, const char *phase, int chunk_group, rtp_
       if (idx < 0) /* the synthesis member */
       {
          out->synthesis_present = 1;
-         if (captured && valid)
+         /* a synthesis unit that omitted required spans or overflowed the budget
+          * is NOT a complete whole-artifact check — it blocks the aggregate
+          * regardless of the roundtable verdict (#39). */
+         if (omitted > 0 || over_budget)
+            out->any_invalid = 1;
+         else if (captured && valid)
             out->synthesis_done = 1;
          else if (captured && !valid)
             out->any_invalid = 1;

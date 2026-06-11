@@ -20,9 +20,11 @@
 #include "server_http.h"
 
 #include "agent_config.h"
+#include "aimee_home.h"        /* aimee_home() for the origin working dir */
 #include "delegate_ensemble.h" /* ENSEMBLE_MAX_REFS */
 #include "local_operator.h"
 #include "model_registry.h"
+#include "platform_path.h" /* platform_mkdir_p */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -86,7 +88,7 @@ static void env_from_ledger(const rtp_pass_t *p, const rtp_attempt_t *a, rtp_env
    e->suggestion_count = p->suggestion_count;
    e->nit_count = p->nit_count;
    e->coverage_gap_count = p->coverage_gaps;
-   e->answered_count = 0;
+   e->answered_count = p->answered_count; /* persisted from capture (#3) */
    e->items_round = p->items_round;
    e->artifact_round = p->artifact_round;
    e->best_round = p->best_round;
@@ -102,6 +104,7 @@ static void load_loop_cfg(const config_t *cfg, const rtp_run_t *run, rtp_loop_cf
                                     ? cfg->roundtable_pipeline_max_attempts_per_pass
                                     : 2;
    out->max_phase_cost_usd = cfg->roundtable_pipeline_max_cost_usd;
+   out->max_total_cost_usd = cfg->roundtable_pipeline_max_total_cost_usd;
 }
 
 static double phase_cost(const rtp_run_t *run, const char *phase)
@@ -210,14 +213,60 @@ int handle_pipeline_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (rtp_run_create(idea, done_bar, repo_root, base, &id) != 0 || id <= 0)
       return server_send_error(conn, "pipeline: could not create pipeline", NULL);
 
-   /* seed the brief from the idea + any seed questions. */
+   /* seed the brief from the idea + any seed questions. When `questions` are
+    * supplied the brief is stored as a JSON object so they reach the panel and
+    * the strict questions bar can be enforced (#3/#14); accepted_question_count
+    * is recorded (capped at RTP_MAX_BRIEF_QUESTIONS). Also capture repo/branch
+    * state for the PR lifecycle (#2). */
    rtp_run_t run;
    if (rtp_run_get(id, &run) == 0)
    {
-      snprintf(run.brief, sizeof(run.brief), "goal: %s", idea);
       const char *seed = jo_str(req, "brief", NULL);
-      if (seed && seed[0])
+      cJSON *questions = cJSON_GetObjectItemCaseSensitive(req, "questions");
+      if (cJSON_IsArray(questions) && cJSON_GetArraySize(questions) > 0)
+      {
+         cJSON *bo = cJSON_CreateObject();
+         cJSON *focus = cJSON_AddArrayToObject(bo, "focus");
+         char goal[RTP_IDEA_LEN + 16];
+         snprintf(goal, sizeof(goal), "goal: %s", idea);
+         cJSON_AddItemToArray(focus, cJSON_CreateString(goal));
+         if (seed && seed[0])
+            cJSON_AddItemToArray(focus, cJSON_CreateString(seed));
+         cJSON *qarr = cJSON_AddArrayToObject(bo, "questions");
+         int qc = 0;
+         cJSON *q = NULL;
+         cJSON_ArrayForEach(q, questions)
+         {
+            if (cJSON_IsString(q) && q->valuestring[0] && qc < RTP_MAX_BRIEF_QUESTIONS)
+            {
+               cJSON_AddItemToArray(qarr, cJSON_CreateString(q->valuestring));
+               qc++;
+            }
+         }
+         char *bs = cJSON_PrintUnformatted(bo);
+         cJSON_Delete(bo);
+         if (bs)
+         {
+            snprintf(run.brief, sizeof(run.brief), "%s", bs);
+            free(bs);
+         }
+         run.accepted_question_count = qc;
+      }
+      else if (seed && seed[0])
          snprintf(run.brief, sizeof(run.brief), "%s", seed);
+      else
+         snprintf(run.brief, sizeof(run.brief), "goal: %s", idea);
+
+      /* repo/branch capture for the PR lifecycle (#2). */
+      const char *hb = jo_str(req, "head_branch", NULL);
+      if (hb && hb[0])
+         snprintf(run.head_branch, sizeof(run.head_branch), "%s", hb);
+      const char *remote = jo_str(req, "remote", NULL);
+      if (remote && remote[0])
+         snprintf(run.remote, sizeof(run.remote), "%s", remote);
+      const char *wt = jo_str(req, "worktree_path", NULL);
+      if (wt && wt[0])
+         snprintf(run.worktree_path, sizeof(run.worktree_path), "%s", wt);
       rtp_run_update(&run);
    }
 
@@ -388,6 +437,161 @@ int handle_pipeline_resume(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* Submit a roundtable pass (draft or review) as a pipeline-owned op-run. The
  * worker captures the terminal envelope into the ledger (#18). */
+
+/* Attach the artifact as `prompt` (handle_delegate_roundtable reads "prompt",
+ * min 20 chars — #1) and the brief — as a JSON object when run.brief holds one
+ * (so questions/invariants/fixes reach the panel and the questions bar can be
+ * enforced, #3), otherwise as a focus string. */
+static void attach_prompt_brief(cJSON *body, const char *artifact, const char *brief_str)
+{
+   cJSON_AddStringToObject(body, "prompt", artifact ? artifact : "");
+   if (brief_str && brief_str[0])
+   {
+      cJSON *bo = cJSON_Parse(brief_str);
+      if (bo && cJSON_IsObject(bo))
+         cJSON_AddItemToObject(body, "brief", bo);
+      else
+      {
+         cJSON_Delete(bo);
+         cJSON_AddStringToObject(body, "brief", brief_str);
+      }
+   }
+}
+
+/* ---- PR / git lifecycle (#2), routed through the workspace-aware git surface -- */
+
+static int git_head_sha(char *out, size_t cap)
+{
+   int rc = 0;
+   char *o = mcp_git_run("git rev-parse HEAD 2>/dev/null", &rc);
+   if (!o)
+      return -1;
+   char *nl = strchr(o, '\n');
+   if (nl)
+      *nl = '\0';
+   int ok = (rc == 0 && o[0]) ? 0 : -1;
+   snprintf(out, cap, "%s", ok == 0 ? o : "");
+   free(o);
+   return ok;
+}
+
+/* `git diff <base>...HEAD`; caller frees. NULL on failure/empty diff. */
+static char *capture_diff(const char *base)
+{
+   char cmd[256];
+   snprintf(cmd, sizeof(cmd), "git diff %s...HEAD 2>/dev/null",
+            (base && base[0]) ? base : "HEAD~1");
+   int rc = 0;
+   char *o = mcp_git_run(cmd, &rc);
+   if (o && rc == 0 && o[0])
+      return o;
+   free(o);
+   return NULL;
+}
+
+/* The last run of digits in a PR URL (".../pull/<n>") is the PR number. */
+static int parse_pr_number(const char *text)
+{
+   int best = 0;
+   for (const char *p = text ? text : ""; *p;)
+   {
+      if (*p >= '0' && *p <= '9')
+      {
+         int v = 0;
+         while (*p >= '0' && *p <= '9')
+            v = v * 10 + (*p++ - '0');
+         best = v;
+      }
+      else
+         p++;
+   }
+   return best;
+}
+
+/* Open the phase PR via git_pr create and record number/url + the current head
+ * SHA into the ledger (#2). The PR is opened on the recorded head_branch; the
+ * agent must have pushed its commits first. Returns 0 on success. */
+static int open_and_record_pr(rtp_run_t *run, const char *phase)
+{
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "create");
+   char title[256];
+   snprintf(title, sizeof(title), "%s: %.180s",
+            strcmp(phase, RTP_PHASE_IMPL) == 0 ? "impl" : "proposal", run->idea);
+   cJSON_AddStringToObject(args, "title", title);
+   cJSON_AddStringToObject(args, "base", run->base_branch[0] ? run->base_branch : "testing");
+   char body[512];
+   snprintf(body, sizeof(body),
+            "Roundtable authoring pipeline #%d (%s phase). Done-bar met; PR opened by the pipeline "
+            "controller.",
+            run->id, phase);
+   cJSON_AddStringToObject(args, "body", body);
+   cJSON *res = handle_git_pr(args);
+   cJSON_Delete(args);
+
+   int pr = 0;
+   char url[RTP_PATH_LEN] = {0};
+   if (res)
+   {
+      cJSON *content = cJSON_GetObjectItemCaseSensitive(res, "content");
+      cJSON *first = cJSON_IsArray(content) ? cJSON_GetArrayItem(content, 0) : NULL;
+      cJSON *txt = first ? cJSON_GetObjectItemCaseSensitive(first, "text") : NULL;
+      if (cJSON_IsString(txt) && !strstr(txt->valuestring, "error"))
+      {
+         const char *u = strstr(txt->valuestring, "http");
+         if (u)
+         {
+            snprintf(url, sizeof(url), "%s", u);
+            char *cut = strpbrk(url, " \n\"");
+            if (cut)
+               *cut = '\0';
+         }
+         pr = parse_pr_number(url[0] ? url : txt->valuestring);
+      }
+      cJSON_Delete(res);
+   }
+   if (pr <= 0)
+      return -1;
+   char sha[RTP_HASH_LEN] = {0};
+   git_head_sha(sha, sizeof(sha));
+   if (strcmp(phase, RTP_PHASE_IMPL) == 0)
+   {
+      run->impl_pr_number = pr;
+      snprintf(run->impl_pr_url, sizeof(run->impl_pr_url), "%s", url);
+   }
+   else
+   {
+      run->proposal_pr_number = pr;
+      snprintf(run->proposal_pr_url, sizeof(run->proposal_pr_url), "%s", url);
+   }
+   if (sha[0])
+      snprintf(run->head_sha, sizeof(run->head_sha), "%s", sha);
+   rtp_run_update(run);
+   return 0;
+}
+
+/* The PR's current head SHA via the forge, for drift detection (#56). Empty on
+ * failure. */
+static void pr_current_head(int pr_number, char *out, size_t cap)
+{
+   out[0] = '\0';
+   if (pr_number <= 0)
+      return;
+   char cmd[160];
+   snprintf(cmd, sizeof(cmd), "gh pr view %d --json headRefOid -q .headRefOid 2>/dev/null",
+            pr_number);
+   int rc = 0;
+   char *o = mcp_git_run(cmd, &rc);
+   if (o && rc == 0)
+   {
+      char *nl = strchr(o, '\n');
+      if (nl)
+         *nl = '\0';
+      snprintf(out, cap, "%s", o);
+   }
+   free(o);
+}
+
 static int submit_pass(server_conn_t *conn, rtp_run_t *run, const char *phase, const char *mode,
                        const char *artifact, const char *artifact_hash)
 {
@@ -397,10 +601,8 @@ static int submit_pass(server_conn_t *conn, rtp_run_t *run, const char *phase, c
       return server_send_error(conn, "pipeline: could not create pass", NULL);
 
    cJSON *body = cJSON_CreateObject();
-   cJSON_AddStringToObject(body, "task", artifact ? artifact : "");
+   attach_prompt_brief(body, artifact, run->brief);
    cJSON_AddStringToObject(body, "mode", strcmp(mode, RTP_MODE_DRAFT) == 0 ? "draft" : "review");
-   if (run->brief[0])
-      cJSON_AddStringToObject(body, "brief", run->brief);
    cJSON_AddNumberToObject(body, "pipeline_pass_id", pass_id);
    char *bj = cJSON_PrintUnformatted(body);
    cJSON_Delete(body);
@@ -487,10 +689,13 @@ static int chunk_budget_bytes(const rtp_panel_t *panel)
    return (int)bytes;
 }
 
-/* Submit one chunk-pass of a chunked review group. */
+/* Submit one chunk-pass of a chunked review group. For a chunk member, span =
+ * {offset,len}; for the synthesis member (chunk_index == -1), omitted/over_budget
+ * record the assembly manifest so the aggregate blocks on incomplete coverage. */
 static int submit_chunk_pass(server_conn_t *conn, rtp_run_t *run, const char *phase,
                              const char *artifact, const char *artifact_hash, int group,
-                             int chunk_index, int chunk_total)
+                             int chunk_index, int chunk_total, int span_offset, int span_len,
+                             int omitted, int over_budget)
 {
    int pass_no = rtp_pass_max_no(run->id, phase) + 1;
    int pass_id = 0;
@@ -503,13 +708,15 @@ static int submit_chunk_pass(server_conn_t *conn, rtp_run_t *run, const char *ph
       p.chunk_group = group;
       p.chunk_index = chunk_index;
       p.chunk_total = chunk_total;
+      p.chunk_offset = span_offset;
+      p.chunk_len = span_len;
+      p.chunk_omitted = omitted;
+      p.chunk_over_budget = over_budget;
       rtp_pass_update(&p);
    }
    cJSON *body = cJSON_CreateObject();
-   cJSON_AddStringToObject(body, "task", artifact ? artifact : "");
+   attach_prompt_brief(body, artifact, run->brief);
    cJSON_AddStringToObject(body, "mode", "review");
-   if (run->brief[0])
-      cJSON_AddStringToObject(body, "brief", run->brief);
    cJSON_AddNumberToObject(body, "pipeline_pass_id", pass_id);
    char *bj = cJSON_PrintUnformatted(body);
    cJSON_Delete(body);
@@ -529,10 +736,46 @@ static int submit_chunk_pass(server_conn_t *conn, rtp_run_t *run, const char *ph
    return pass_id;
 }
 
-/* Chunked review submission (#28/#37): split the retained origin into
- * budget-sized chunks, submit a review pass per chunk plus a whole-artifact
- * synthesis pass, all sharing a new chunk_group. The origin hash is recorded so
- * chunks are always re-derivable (no leaky index, #34/#47). */
+/* Persist the whole origin to a durable working file and record its ref+hash on
+ * the run (#34: origin always recoverable; chunks re-derive from it, #42/#47).
+ * Returns 0 on success. The path goes into proposal_ref/diff_ref. */
+static int persist_origin(rtp_run_t *run, const char *phase, const char *artifact,
+                          const char *origin_hash)
+{
+   char dir[RTP_PATH_LEN];
+   snprintf(dir, sizeof(dir), "%s/roundtable_pipeline/%d", aimee_home(), run->id);
+   platform_mkdir_p(dir, 0700);
+   char path[RTP_PATH_LEN];
+   snprintf(path, sizeof(path), "%s/origin-%s.txt", dir, phase);
+   FILE *f = fopen(path, "wb");
+   if (!f)
+      return -1;
+   size_t len = strlen(artifact);
+   size_t wrote = fwrite(artifact, 1, len, f);
+   fclose(f);
+   if (wrote != len)
+      return -1;
+   if (strcmp(phase, RTP_PHASE_IMPL) == 0)
+   {
+      snprintf(run->diff_ref, sizeof(run->diff_ref), "%s", path);
+      snprintf(run->diff_origin_hash, sizeof(run->diff_origin_hash), "%s", origin_hash);
+   }
+   else
+   {
+      snprintf(run->proposal_ref, sizeof(run->proposal_ref), "%s", path);
+      snprintf(run->proposal_origin_hash, sizeof(run->proposal_origin_hash), "%s", origin_hash);
+   }
+   snprintf(run->chunk_index_ref, sizeof(run->chunk_index_ref), "origin:%s", origin_hash);
+   rtp_run_update(run);
+   return 0;
+}
+
+/* Chunked review submission (#28/#37): persist the whole origin, split it into
+ * budget-sized chunks, submit a review pass per chunk (recording each span's
+ * offset/len/hash, #39), then submit a whole-artifact synthesis pass whose
+ * prompt is the actual concatenated selected-span text — a self-contained inline
+ * unit the panel reviews without needing tools (#37). Omitted/over-budget spans
+ * are recorded on the synthesis member so the aggregate blocks on them (#39). */
 static int submit_chunked_review(server_conn_t *conn, rtp_run_t *run, const char *phase,
                                  const char *artifact, int budget_bytes)
 {
@@ -540,19 +783,7 @@ static int submit_chunked_review(server_conn_t *conn, rtp_run_t *run, const char
    rtp_chunk_plan(artifact, budget_bytes, &plan);
    int group = rtp_pass_max_group(run->id, phase) + 1;
 
-   /* record the whole-origin hash on the run so chunks re-derive from it. */
-   if (strcmp(phase, RTP_PHASE_IMPL) == 0)
-   {
-      snprintf(run->diff_origin_hash, sizeof(run->diff_origin_hash), "%s", plan.origin_hash);
-      snprintf(run->chunk_index_ref, sizeof(run->chunk_index_ref), "origin:%s", plan.origin_hash);
-   }
-   else
-   {
-      snprintf(run->proposal_origin_hash, sizeof(run->proposal_origin_hash), "%s",
-               plan.origin_hash);
-      snprintf(run->chunk_index_ref, sizeof(run->chunk_index_ref), "origin:%s", plan.origin_hash);
-   }
-   rtp_run_update(run);
+   persist_origin(run, phase, artifact, plan.origin_hash);
 
    int submitted = 0;
    for (int i = 0; i < plan.count; i++)
@@ -562,24 +793,52 @@ static int submit_chunked_review(server_conn_t *conn, rtp_run_t *run, const char
          continue;
       memcpy(chunk, artifact + plan.chunks[i].offset, (size_t)plan.chunks[i].len);
       chunk[plan.chunks[i].len] = '\0';
-      if (submit_chunk_pass(conn, run, phase, chunk, plan.chunks[i].hash, group, i, plan.count) > 0)
+      if (submit_chunk_pass(conn, run, phase, chunk, plan.chunks[i].hash, group, i, plan.count,
+                            plan.chunks[i].offset, plan.chunks[i].len, 0, 0) > 0)
          submitted++;
       free(chunk);
    }
 
-   /* whole-artifact synthesis member (chunk_index = -1): an inline digest built
-    * from the chunks that fit the smallest participant budget; omitted spans are
-    * a coverage gap the aggregate must not hide (#39). */
+   /* whole-artifact synthesis member (chunk_index = -1): the orchestrator
+    * RETRIEVES the selected spans from the retained origin and concatenates them
+    * into a self-contained inline unit (#32/#37), bounded by the smallest panel
+    * budget. */
    rtp_assembly_t asm_unit;
    rtp_assembly_build(&plan, budget_bytes, &asm_unit);
-   char synth[4096];
-   int sn = snprintf(synth, sizeof(synth),
-                     "Whole-artifact synthesis review. Consider cross-chunk invariants across the "
-                     "%d chunks of this artifact (origin %s). selected_spans=%d omitted_spans=%d. "
-                     "Report any blocking issue that only appears across chunk boundaries.",
-                     plan.count, plan.origin_hash, asm_unit.selected_count, asm_unit.omitted_count);
-   (void)sn;
-   int spass = submit_chunk_pass(conn, run, phase, synth, plan.origin_hash, group, -1, plan.count);
+   size_t cap = (size_t)(budget_bytes > 0 ? budget_bytes : 4096) + 1024;
+   char *synth = (char *)malloc(cap);
+   int spass = -1;
+   if (synth)
+   {
+      size_t pos = 0;
+      pos += (size_t)snprintf(
+          synth + pos, cap - pos,
+          "Whole-artifact synthesis review (origin %s, %d chunks, %d span(s) included, %d "
+          "omitted). Check cross-chunk invariants — a definition in one span used in another, a "
+          "renamed reference, a missing section. Report any blocking issue spanning chunk "
+          "boundaries.\n\n",
+          plan.origin_hash, plan.count, asm_unit.selected_count, asm_unit.omitted_count);
+      for (int i = 0; i < asm_unit.selected_count && pos < cap - 64; i++)
+      {
+         const rtp_chunk_t *c = &plan.chunks[asm_unit.selected[i]];
+         pos += (size_t)snprintf(synth + pos, cap - pos, "--- span %d [%d..%d] ---\n", c->index,
+                                 c->offset, c->offset + c->len);
+         int n = c->len;
+         if (pos + (size_t)n >= cap - 32)
+            n = (int)(cap - 32 - pos);
+         if (n > 0)
+         {
+            memcpy(synth + pos, artifact + c->offset, (size_t)n);
+            pos += (size_t)n;
+            synth[pos++] = '\n';
+         }
+      }
+      synth[pos < cap ? pos : cap - 1] = '\0';
+      spass = submit_chunk_pass(conn, run, phase, synth, plan.origin_hash, group, -1, plan.count, 0,
+                                0, asm_unit.omitted_count,
+                                (plan.over_budget || asm_unit.over_budget) ? 1 : 0);
+      free(synth);
+   }
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "pipeline_id", run->id);
@@ -593,6 +852,8 @@ static int submit_chunked_review(server_conn_t *conn, rtp_run_t *run, const char
    cJSON_AddBoolToObject(resp, "over_budget", plan.over_budget ? 1 : 0);
    cJSON_AddBoolToObject(resp, "truncated", plan.truncated ? 1 : 0);
    cJSON_AddNumberToObject(resp, "omitted_spans", asm_unit.omitted_count);
+   cJSON_AddStringToObject(resp, "origin_ref",
+                           strcmp(phase, RTP_PHASE_IMPL) == 0 ? run->diff_ref : run->proposal_ref);
    return server_send_ok(conn, resp);
 }
 
@@ -636,10 +897,17 @@ static int decide_chunked_group(server_conn_t *conn, rtp_run_t *run, const char 
       int pr = strcmp(phase, RTP_PHASE_IMPL) == 0 ? run->impl_pr_number : run->proposal_pr_number;
       if (pr <= 0)
       {
-         cJSON_AddStringToObject(resp, "action", "open_pr");
-         cJSON_AddStringToObject(resp, "note",
-                                 "chunked done-bar met; open the PR then advance for the gate");
-         return server_send_ok(conn, resp);
+         /* controller opens + records the PR when a head branch is known (#2). */
+         if (run->head_branch[0] && open_and_record_pr(run, phase) == 0)
+            pr = strcmp(phase, RTP_PHASE_IMPL) == 0 ? run->impl_pr_number : run->proposal_pr_number;
+         else
+         {
+            cJSON_AddStringToObject(resp, "action", "open_pr");
+            cJSON_AddStringToObject(
+                resp, "note",
+                "chunked done-bar met; set head_branch + push, then advance to open the gate");
+            return server_send_ok(conn, resp);
+         }
       }
       int gate_no = strcmp(phase, RTP_PHASE_IMPL) == 0 ? 2 : 1;
       enter_gate(run->id, gate_no, pr);
@@ -737,7 +1005,8 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
       rtp_loop_cfg_t lc;
       load_loop_cfg(&cfg, &run, &lc);
-      rtp_loop_state_t ls = {latest.pass_no, hav_a ? a.attempt_no : 1, phase_cost(&run, phase), 0};
+      rtp_loop_state_t ls = {latest.pass_no, hav_a ? a.attempt_no : 1, phase_cost(&run, phase),
+                             run.total_cost_usd, run.accepted_question_count};
       rtp_action_t act = rtp_loop_decide(&lc, &ls, &env);
 
       if (act == RTP_ACT_PASS)
@@ -748,12 +1017,21 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          int pr = strcmp(phase, RTP_PHASE_IMPL) == 0 ? run.impl_pr_number : run.proposal_pr_number;
          if (pr <= 0)
          {
-            cJSON *resp = jo_ok();
-            cJSON_AddStringToObject(resp, "action", "open_pr");
-            cJSON_AddStringToObject(
-                resp, "note",
-                "done-bar met; open the PR (git_pr create) then call advance to surface the gate");
-            return server_send_ok(conn, resp);
+            /* controller opens + records the PR via git_pr when a head branch is
+             * known; otherwise it asks the agent to push a branch first (#2). */
+            if (run.head_branch[0] && open_and_record_pr(&run, phase) == 0)
+               pr =
+                   strcmp(phase, RTP_PHASE_IMPL) == 0 ? run.impl_pr_number : run.proposal_pr_number;
+            else
+            {
+               cJSON *resp = jo_ok();
+               cJSON_AddStringToObject(resp, "action", "open_pr");
+               cJSON_AddStringToObject(
+                   resp, "note",
+                   "done-bar met; set head_branch (pipeline.start) + push commits, then advance to "
+                   "open the gate");
+               return server_send_ok(conn, resp);
+            }
          }
          int gate_no = strcmp(phase, RTP_PHASE_IMPL) == 0 ? 2 : 1;
          enter_gate(id, gate_no, pr);
@@ -789,11 +1067,9 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          snprintf(latest.status, sizeof(latest.status), RTP_PASS_OPEN);
          rtp_pass_update(&latest);
          cJSON *body = cJSON_CreateObject();
-         cJSON_AddStringToObject(body, "task", artifact);
+         attach_prompt_brief(body, artifact, run.brief);
          cJSON_AddStringToObject(body, "mode",
                                  strcmp(latest.mode, RTP_MODE_DRAFT) == 0 ? "draft" : "review");
-         if (run.brief[0])
-            cJSON_AddStringToObject(body, "brief", run.brief);
          cJSON_AddNumberToObject(body, "pipeline_pass_id", latest.id);
          char *bj = cJSON_PrintUnformatted(body);
          cJSON_Delete(body);
@@ -835,6 +1111,16 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
              conn, "pipeline: nothing to advance in this state without an artifact", NULL);
       rtp_run_get(id, &run);
    }
+   /* For a PR-phase review with no supplied artifact, the controller captures
+    * the diff itself via the workspace-aware git surface (#2). */
+   char *captured_diff = NULL;
+   if ((!artifact || !artifact[0]) && strcmp(mode, RTP_MODE_REVIEW) == 0 &&
+       strcmp(phase, RTP_PHASE_IMPL) == 0 && run.head_branch[0])
+   {
+      captured_diff = capture_diff(run.base_branch);
+      if (captured_diff)
+         artifact = captured_diff;
+   }
    if ((!artifact || !artifact[0]) && strcmp(mode, RTP_MODE_REVIEW) == 0)
       return server_send_error(
           conn, "pipeline: review needs the artifact (--artifact <diff|proposal>)", NULL);
@@ -847,16 +1133,25 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       rtp_panel_t panel;
       int prc = resolve_panel(&cfg, &panel);
       if (prc < 0)
+      {
+         free(captured_diff);
          return server_send_error(
              conn,
              "pipeline: a panel participant has an unknown context window and no fallback is "
              "set (roundtable.pipeline_unknown_context_tokens)",
              NULL);
+      }
       int budget = chunk_budget_bytes(&panel);
       if (budget > 0 && rtp_chunk_needed(artifact, budget))
-         return submit_chunked_review(conn, &run, phase, artifact, budget);
+      {
+         int r = submit_chunked_review(conn, &run, phase, artifact, budget);
+         free(captured_diff);
+         return r;
+      }
    }
-   return submit_pass(conn, &run, phase, mode, artifact, artifact_hash);
+   int r = submit_pass(conn, &run, phase, mode, artifact, artifact_hash);
+   free(captured_diff);
+   return r;
 }
 
 /* ----------------------------------------------------------------- gate ---- */
@@ -867,6 +1162,32 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 static void execute_gate_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no, cJSON *req,
                                cJSON *resp)
 {
+   /* Drift guard (#56): if the PR head moved away from the SHA the human
+    * approved, the verdict no longer applies — stop for a fresh review rather
+    * than merging unreviewed commits. (gh's --match-head-commit also refuses,
+    * but we surface it explicitly and mark the evidence stale.) */
+   if (gate->expected_head_sha[0])
+   {
+      char cur[RTP_HASH_LEN];
+      pr_current_head(gate->pr_number, cur, sizeof(cur));
+      if (cur[0] && strcmp(cur, gate->expected_head_sha) != 0)
+      {
+         const char *mp =
+             gate_no == 2 ? RTP_STATE_GATE2_MERGE_PENDING : RTP_STATE_GATE1_MERGE_PENDING;
+         cJSON_AddBoolToObject(resp, "merged", 0);
+         cJSON_AddBoolToObject(resp, "head_drift", 1);
+         cJSON_AddStringToObject(resp, "expected_head_sha", gate->expected_head_sha);
+         cJSON_AddStringToObject(resp, "current_head_sha", cur);
+         cJSON_AddStringToObject(resp, "state", mp);
+         cJSON_AddStringToObject(
+             resp, "note",
+             "PR head drifted from the approved SHA; the gate verdict is stale. Re-review the new "
+             "head (pipeline fail->re-review) before merging.");
+         (void)run;
+         return;
+      }
+   }
+
    cJSON *margs = cJSON_CreateObject();
    cJSON_AddStringToObject(margs, "action", "merge");
    cJSON_AddNumberToObject(margs, "number", gate->pr_number);

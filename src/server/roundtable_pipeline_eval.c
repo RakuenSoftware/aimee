@@ -121,6 +121,8 @@ rtp_action_t rtp_loop_decide(const rtp_loop_cfg_t *cfg, const rtp_loop_state_t *
       return RTP_ACT_ESCALATE;
    if (cfg && cfg->max_phase_cost_usd > 0.0 && st && st->phase_cost_usd >= cfg->max_phase_cost_usd)
       return RTP_ACT_ESCALATE;
+   if (cfg && cfg->max_total_cost_usd > 0.0 && st && st->total_cost_usd >= cfg->max_total_cost_usd)
+      return RTP_ACT_ESCALATE;
    return RTP_ACT_REVISE;
 }
 

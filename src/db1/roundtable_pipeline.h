@@ -106,6 +106,7 @@ extern "C"
       double proposal_phase_cost_usd;
       double impl_phase_cost_usd;
       double total_cost_usd;
+      int accepted_question_count; /* questions in the brief (for the strict bar) */
       char created_at[RTP_TS_LEN];
       char updated_at[RTP_TS_LEN];
    } rtp_run_t;
@@ -136,8 +137,13 @@ extern "C"
       int chunk_total;
       int chunk_done;
       int synthesis_done;
-      int chunk_group; /* >0 groups the chunk-passes of one chunked review */
-      int chunk_index; /* >=0 chunk ordinal; -1 = the whole-artifact synthesis */
+      int chunk_group;       /* >0 groups the chunk-passes of one chunked review */
+      int chunk_index;       /* >=0 chunk ordinal; -1 = the whole-artifact synthesis */
+      int answered_count;    /* accepted brief questions answered (strict bar) */
+      int chunk_offset;      /* this chunk's byte offset into the origin */
+      int chunk_len;         /* this chunk's byte length */
+      int chunk_omitted;     /* synthesis member: required spans omitted (coverage gap) */
+      int chunk_over_budget; /* synthesis member: a span overflowed the budget */
       char created_at[RTP_TS_LEN];
       char updated_at[RTP_TS_LEN];
    } rtp_pass_t;

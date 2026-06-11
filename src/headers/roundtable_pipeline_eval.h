@@ -90,7 +90,8 @@ extern "C"
       const char *done_bar;
       int max_passes;            /* 0 = unbounded (default) */
       int max_attempts_per_pass; /* >= 1 */
-      double max_phase_cost_usd; /* 0 = unbounded */
+      double max_phase_cost_usd; /* per-phase cap; 0 = unbounded */
+      double max_total_cost_usd; /* whole-pipeline cap; 0 = unbounded (#46) */
    } rtp_loop_cfg_t;
 
    typedef struct
@@ -98,6 +99,7 @@ extern "C"
       int pass_no;           /* current outer pass, 1-based */
       int attempt_no;        /* current attempt within the pass, 1-based */
       double phase_cost_usd; /* cumulative phase spend so far */
+      double total_cost_usd; /* cumulative whole-pipeline spend so far (#46) */
       int accepted_question_count;
    } rtp_loop_state_t;
 
