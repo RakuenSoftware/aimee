@@ -364,12 +364,20 @@ or stored on the server. Co-located deployments are unchanged (the tmux session
 runs locally). (`claude -p` print mode is **not** used.)
 
 Practical notes:
-- Configure the agent as usual (`aimee agent add claude … --provider claude`,
-  or `aimee config set provider claude` to make it the primary); the thin-client
-  routing is automatic when the workspace is `detached`.
+- Configure it with `--provider claude` (which sets the tmux-cli backend — the
+  endpoint argument is a placeholder and the model becomes `claude --model <m>`):
+
+  ```bash
+  aimee agent add claude claude sonnet --provider claude   # tmux-cli claude agent
+  aimee config set provider claude                          # use it as the primary
+  ```
+
+  (`aimee agent setup claude` does the same but only against a co-located server;
+  on a thin client use `agent add --provider claude`.) The thin-client routing is
+  automatic when the workspace is `detached`.
 - If no client is currently serving the workspace, the CLI agent cannot run
-  (there is nowhere with the binary) — start the client / `aimee workspace serve`
-  for that root, or use an HTTP provider.
+  (there is nowhere with the binary) — start the client / open `aimee chat` for
+  that root, or use an HTTP provider.
 
 #### Claude via the CLI is primary-only by default
 

@@ -508,6 +508,26 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          snprintf(ag->auth_type, sizeof(ag->auth_type), "codex-oauth");
    }
 
+   /* `--provider claude`/`claude-code` configures the standard `claude` CLI run
+    * over tmux (login-based, not an API key) — the same tmux-cli backend
+    * `agent setup claude` produces, but reachable from a thin client (where
+    * `agent setup` has no local server). Without this it would be stored as a
+    * generic HTTP agent pointing at a bogus endpoint. The tmux session runs on
+    * the client over the reverse channel for a detached workspace; the `model`
+    * arg becomes `claude --model <model>`. */
+   if (strcmp(ag->provider, "claude") == 0 || strcmp(ag->provider, "claude-code") == 0)
+   {
+      int is_code = strcmp(ag->provider, "claude-code") == 0;
+      snprintf(ag->backend, sizeof(ag->backend), "%s", AGENT_BACKEND_TMUX_CLI);
+      snprintf(ag->cli_kind, sizeof(ag->cli_kind), "%s", is_code ? "claude-code" : "claude");
+      if (ag->model[0])
+         snprintf(ag->cli_cmd, sizeof(ag->cli_cmd), "claude --model %s", ag->model);
+      else
+         snprintf(ag->cli_cmd, sizeof(ag->cli_cmd), "claude");
+      ag->session_reuse = 1;
+      ag->endpoint[0] = '\0'; /* tmux CLI has no HTTP endpoint */
+   }
+
    const char *roles = opt_get(&opts, "roles");
    if (roles && roles[0])
       server_agent_set_roles_csv(ag, roles);
