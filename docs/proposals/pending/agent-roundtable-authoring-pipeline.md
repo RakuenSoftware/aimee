@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 third review)
+- **Date:** 2026-06-11 (revised post-PR-#183 fourth review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -188,6 +188,40 @@ current live-tool/workspace surfaces:
     terminal result capture, and pipeline orchestration. **Resolved in the
     relationship table and §8.**
 
+## PR #183 fourth review — reconciling capture ownership with the Hybrid decision
+
+The third review correctly demanded orchestrator-owned result capture (#12), but
+its wording ("in the same completion path") implies a *server-side* orchestrator,
+which collides with the chosen **Hybrid** architecture (the external agent drives
+the loop; only state is persisted). Two items resolve that, and a real seam exists
+to make it concrete.
+
+18. **"Orchestrator-owned capture" is unresolved against Hybrid — name the seam.**
+    Under Hybrid the driving agent owns the *loop*, but it cannot be "in the same
+    completion path" as a child run; if capture depends on the agent polling, #10's
+    eviction race is still live whenever the agent is asleep or at a gate. The
+    resolution is **not** to promote the agent to a server-side orchestrator (that
+    is the architecture the user did *not* pick). It is to use the worker that
+    *already runs the roundtable*: `op_run_worker_run`
+    (`server_http_routes.inc:339`) executes the async `delegate.roundtable` and
+    calls `openai_runs_store_finalize` at terminal. Thread a `__pipeline_pass_id`
+    into the request body exactly as `__run_id` is injected today (`:419`), and
+    extend that finalize path to **also write the structured terminal result into
+    the DB1 pipeline-ledger row**. The agent stays the loop/gate orchestrator; the
+    server worker — which already runs and finalizes the run — closes the capture
+    race durably. This is the genuine Hybrid: agent owns the loop, server owns
+    durable capture of each child run it already executes. **Resolved in §4 and §9.**
+
+19. **`lost_result` should re-run the pass, not escalate to a human.** A capture
+    miss (eviction, restart mid-pass) is an infrastructure hiccup, not a
+    correctness decision that needs a human. The pipeline should **auto re-run the
+    review pass** — it is idempotent over the same artifact; a re-run produces a
+    fresh, valid result reviewing the same input — bounded by the pass ceiling and
+    cost cap, under a **stable `pipeline_pass_id`** so the lost attempt's cost is
+    booked as overhead without double-counting the pass. Escalate to the human only
+    if capture keeps failing across re-runs (a real fault), never on the first
+    miss. **Resolved in §3 and §4.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -367,18 +401,27 @@ Either way, the durable record holds:
   merge SHAs, forge-token/`gh` authority status, and last checked mergeability;
 - the human-gate verdicts, fail reasons, actor/timestamp, and resume action taken.
 
-**Result capture is orchestrator-owned, not lazy (#10/#12).** The done-bar is read from the
-roundtable run's structured result, but that lives in `/v1/runs` /
-`openai_runs_store`, which is bounded (`OPENAI_RUNS_STORE_MAX 256`, oldest-reused)
-and non-durable. The pipeline orchestrator therefore owns result capture: it
-submits the child run, observes terminal completion, and writes the structured
-pass result (items + severities + `count`, `converged`, validity flags,
-`items_round`, `artifact_round`, counts, `cost_usd`, `rounds_run`) into DB1 in the
-same completion path before any next state transition. If the terminal result
-cannot be captured, the pass is recorded as `lost_result` and the pipeline
-escalates; it never evaluates the done-bar from a missing or later-evicted
-`/v1/runs` record. The `/v1/runs` id is retained only as a historical pointer; the
-ledger row is the source of truth for the done-bar and the gate digest.
+**Result capture is server-worker-owned, not agent-poll (#10/#12/#18).** The
+done-bar is read from the roundtable run's structured result, but that lives in
+`/v1/runs` / `openai_runs_store`, which is bounded (`OPENAI_RUNS_STORE_MAX 256`,
+oldest-reused) and non-durable. Capture must not depend on the *driving agent*
+being awake to poll — under Hybrid the agent owns the loop, not the child-run
+completion path. Instead, the worker that **already runs the roundtable** owns
+capture: `op_run_worker_run` (`server_http_routes.inc:339`) executes the async
+`delegate.roundtable` and calls `openai_runs_store_finalize` at terminal. Thread a
+`__pipeline_pass_id` into the request body the same way `__run_id` is injected
+today (`:419`) and extend that finalize path to **also persist the structured pass
+result** (items + severities + `count`, `converged`, validity flags,
+`items_round`, `artifact_round`, counts, `cost_usd`, `rounds_run`) into the DB1
+ledger row before the run record can be evicted. The `/v1/runs` id is retained
+only as a historical pointer; the ledger row is the source of truth for the
+done-bar and the gate digest.
+
+If a result is still not captured (a genuine fault), the pass is marked
+`lost_result` and the pipeline **auto re-runs the review pass** under a stable
+`pipeline_pass_id` (idempotent over the same artifact; bounded by the pass ceiling
+and cost cap, the lost attempt booked as overhead). A human is involved only if
+capture keeps failing across re-runs (#19) — never on a single transient miss.
 
 This makes the human gate a durable checkpoint: `status` shows where it is and
 the evidence; `gate pass|fail --reason "…"` records the verdict and resumes the
@@ -502,9 +545,11 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
 - **P0 — Ledger + states + namespace decision.** Choose the DB shape
   (`roundtable_pipeline_runs` tables vs explicit migration of DB1 `pipelines`),
   add the state enum/transitions, artifact refs/hashes, child run references, and
-  the CLI/MCP/HTTP namespace decision (`pipeline` vs `autopilot` extension). Also
-  choose the orchestrator-owned terminal result capture path. No loop yet;
-  states/gates settable manually. Mergeable alone, with restart tests.
+  the CLI/MCP/HTTP namespace decision (`pipeline` vs `autopilot` extension). Wire
+  the server-worker capture seam: thread `__pipeline_pass_id` and extend
+  `op_run_worker_run`'s finalize path to persist the terminal structured result to
+  the ledger (#18). No loop yet; states/gates settable manually. Mergeable alone,
+  with restart tests.
 - **P1 — Outer review loop + done-bar.** The REVIEW⇄revise loop over
   `ensemble_review`, the configurable done-bar evaluator, the pass ceiling +
   escalation, the echo guard. Drives the PR phase first (single mode, simplest).
@@ -535,11 +580,15 @@ ledger) before the full idea→merge pipeline of P2/P3.
 - **Run-store separation** — kill/restart after child `/v1/runs` records are gone;
   the pipeline still resumes from DB1 and marks missing child run details as
   historical evidence, not lost state.
-- **Orchestrator-owned result capture (#10/#12)** — drive ≥256 sibling runs (or
-  force eviction) between a child run completing and an agent polling it; the pass
-  result is already in DB1 because capture happened in the orchestrator's terminal
-  completion path. Simulate a missed terminal result and assert the pass becomes
-  `lost_result`, not done.
+- **Server-worker result capture (#10/#12/#18)** — drive ≥256 sibling runs (or
+  force eviction) between a child run completing and any agent poll; the pass
+  result is already in DB1 because `op_run_worker_run`'s finalize path wrote it
+  (keyed by `__pipeline_pass_id`), **with the driving agent killed** for the
+  window. The done-bar/digest are unaffected by the evicted `/v1/runs` record.
+- **Lost-result re-run (#19)** — simulate a genuine capture fault: the pass is
+  marked `lost_result` and auto re-runs under the **same `pipeline_pass_id`** (no
+  double-counted pass; lost attempt booked as overhead), escalating to the human
+  only after repeated capture failures, never on the first miss.
 - **DRAFT skeleton + expansion (#9)** — a DRAFT call returns a skeleton within the
   8 KB cap without truncating mid-structure; the author-revise loop grows it to a
   full proposal in the working file, and REVIEW reviews the file/chunks, not the
