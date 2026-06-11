@@ -5,11 +5,32 @@
 #include "aimee.h"
 #include "cli_session.h"
 #include "util.h"
+#include "workspace_provider.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+
+/* Run a tmux shell command for the session. On a detached (thin-client)
+ * workspace the standard `claude` CLI, tmux, and the working tree live on the
+ * CLIENT, so marshal the command over the reverse channel to run there; a
+ * co-located turn runs it locally. Same contract as run_cmd: returns malloc'd
+ * combined output (caller frees) and sets *exit_code. */
+static char *sess_run(const char *cmd, int *exit_code)
+{
+   const workspace_provider_t *ws = workspace_provider_active();
+   if (ws && ws->kind == WS_PROVIDER_DETACHED && ws->exec_shell)
+      return ws->exec_shell(ws, cmd, exit_code);
+   return run_cmd(cmd, exit_code);
+}
+
+/* True when this turn's tmux session runs on a detached client. */
+static int sess_detached(void)
+{
+   const workspace_provider_t *ws = workspace_provider_active();
+   return ws && ws->kind == WS_PROVIDER_DETACHED && ws->exec_shell && ws->write_all;
+}
 
 /* djb2 hash */
 static unsigned long djb2(const char *s)
@@ -38,7 +59,7 @@ int cli_session_is_alive(const cli_session_t *s)
    char cmd[CLI_SESSION_NAME_MAX + 64];
    snprintf(cmd, sizeof(cmd), "tmux has-session -t '%s' 2>/dev/null", s->session_name);
    int rc;
-   char *out = run_cmd(cmd, &rc);
+   char *out = sess_run(cmd, &rc);
    free(out);
    return rc == 0;
 }
@@ -81,7 +102,7 @@ int cli_session_create(cli_session_t *s, const char *session_name, const char *c
    }
    free(esc_cli);
    int rc;
-   char *out = run_cmd(create_cmd, &rc);
+   char *out = sess_run(create_cmd, &rc);
    free(out);
    if (rc != 0)
       return -1;
@@ -92,7 +113,7 @@ int cli_session_create(cli_session_t *s, const char *session_name, const char *c
       msleep_ms(500);
       char cap_cmd[256];
       snprintf(cap_cmd, sizeof(cap_cmd), "tmux capture-pane -p -t '%s' 2>/dev/null", session_name);
-      char *cap = run_cmd(cap_cmd, &rc);
+      char *cap = sess_run(cap_cmd, &rc);
       int has_output = (cap && strlen(cap) > 2);
       free(cap);
       if (has_output)
@@ -116,7 +137,7 @@ void cli_session_destroy(cli_session_t *s)
    char cmd[CLI_SESSION_NAME_MAX + 64];
    snprintf(cmd, sizeof(cmd), "tmux kill-session -t '%s' 2>/dev/null", s->session_name);
    int rc;
-   char *out = run_cmd(cmd, &rc);
+   char *out = sess_run(cmd, &rc);
    free(out);
    s->active = 0;
 }
@@ -126,17 +147,46 @@ int cli_session_send(cli_session_t *s, const char *message)
    if (!s->active || !message)
       return -1;
 
-   /* Write message to temp file to avoid quoting issues */
+   /* Write message to a temp file to avoid quoting issues. The file must live on
+    * the same host as the tmux session: on a detached workspace that is the
+    * CLIENT (write via the provider), else the local fs. */
+   int detached = sess_detached();
    char tmpfile[64];
    snprintf(tmpfile, sizeof(tmpfile), "/tmp/aimee_msg_%d.txt", (int)getpid());
-   FILE *f = fopen(tmpfile, "w");
-   if (!f)
+
+   /* Build the message with a trailing newline for CLI submission. */
+   size_t mlen = strlen(message);
+   int need_nl = (mlen == 0 || message[mlen - 1] != '\n');
+   size_t blen = mlen + (need_nl ? 1 : 0);
+   char *buf = malloc(blen + 1);
+   if (!buf)
       return -1;
-   fputs(message, f);
-   /* Ensure message ends with newline for CLI submission */
-   if (message[0] && message[strlen(message) - 1] != '\n')
-      fputc('\n', f);
-   fclose(f);
+   memcpy(buf, message, mlen);
+   if (need_nl)
+      buf[mlen] = '\n';
+   buf[blen] = '\0';
+
+   if (detached)
+   {
+      const workspace_provider_t *ws = workspace_provider_active();
+      if (ws->write_all(ws, tmpfile, buf, blen) != 0)
+      {
+         free(buf);
+         return -1;
+      }
+   }
+   else
+   {
+      FILE *f = fopen(tmpfile, "w");
+      if (!f)
+      {
+         free(buf);
+         return -1;
+      }
+      fwrite(buf, 1, blen, f);
+      fclose(f);
+   }
+   free(buf);
 
    /* Load temp file as tmux buffer, paste into session, then press Enter */
    char cmd[512];
@@ -144,25 +194,37 @@ int cli_session_send(cli_session_t *s, const char *message)
    char *out;
 
    snprintf(cmd, sizeof(cmd), "tmux load-buffer -b aimee_msg '%s' 2>/dev/null", tmpfile);
-   out = run_cmd(cmd, &rc);
+   out = sess_run(cmd, &rc);
    free(out);
    if (rc != 0)
    {
-      unlink(tmpfile);
+      if (detached)
+      {
+         snprintf(cmd, sizeof(cmd), "rm -f '%s'", tmpfile);
+         free(sess_run(cmd, &rc));
+      }
+      else
+         unlink(tmpfile);
       return -1;
    }
 
    snprintf(cmd, sizeof(cmd), "tmux paste-buffer -b aimee_msg -t '%s' -d 2>/dev/null",
             s->session_name);
-   out = run_cmd(cmd, &rc);
+   out = sess_run(cmd, &rc);
    free(out);
 
    /* Send Enter to submit */
    snprintf(cmd, sizeof(cmd), "tmux send-keys -t '%s' Enter 2>/dev/null", s->session_name);
-   out = run_cmd(cmd, &rc);
+   out = sess_run(cmd, &rc);
    free(out);
 
-   unlink(tmpfile);
+   if (detached)
+   {
+      snprintf(cmd, sizeof(cmd), "rm -f '%s'", tmpfile);
+      free(sess_run(cmd, &rc));
+   }
+   else
+      unlink(tmpfile);
    s->last_activity = time(NULL);
    return 0;
 }
@@ -176,7 +238,7 @@ int cli_session_capture(cli_session_t *s, char *out, size_t out_max)
    cli_session_capture_cmd(s, cap_cmd, sizeof(cap_cmd));
 
    int rc;
-   char *cap = run_cmd(cap_cmd, &rc);
+   char *cap = sess_run(cap_cmd, &rc);
    if (!cap || rc != 0)
    {
       free(cap);

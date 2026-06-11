@@ -12,12 +12,13 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (94)
+## CLI-settable keys (95)
 
 | Key | Type |
 |-----|------|
 | `autonomous` | bool |
 | `cache_aware_rewrite_enabled` | bool |
+| `claude_cli_delegate_enabled` | bool |
 | `claude_model` | string |
 | `cross_verify` | bool |
 | `db2_url` | string |

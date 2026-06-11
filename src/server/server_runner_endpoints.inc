@@ -150,6 +150,20 @@ int handle_workspace_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (config_save(&cfg) != 0)
       return server_send_error(conn, "workspace: failed to save config", NULL);
 
+   /* A `detached` workspace's root lives on the client; this server cannot
+    * enumerate or read it, so we don't discover projects or kick a server-side
+    * scan (which would read this host's filesystem). Ingestion is client-driven:
+    * the thin client pushes file contents via POST /v1/index/ingest. */
+   if (is_detached)
+   {
+      cJSON *resp = jo_ok();
+      jo_add_str(resp, "path", abs);
+      jo_add_str(resp, "provider", "detached");
+      cJSON_AddArrayToObject(resp, "projects");
+      cJSON_AddNumberToObject(resp, "project_count", 0);
+      return send_and_free(conn, resp);
+   }
+
    char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
    int count =
        workspace_discover_projects(abs, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);
@@ -290,4 +304,56 @@ int handle_runner_respond(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (ws_runner_registry_respond(argv[0], owned) != 0)
       return server_send_error(conn, "runner.respond: no runner registered for workspace", NULL);
    return send_and_free(conn, jo_ok());
+}
+
+/* index.ingest: a thin client pushes the {"rel_path","content"} contents of a
+ * `detached` workspace this server cannot see; relay them to aimee-kb's code
+ * scan. SYNCHRONOUS (inline kb push + send_and_free) — unlike index.scan it must
+ * not use the kb_proxy_spawn detached-thread path, because /v1/index/ingest is
+ * served by the async op-run worker via loopback_rpc (server_http.c), which runs
+ * server_dispatch on a socketpair and reads the response synchronously: a reply
+ * written later on a detached thread is lost ("rpc produced no response"). The
+ * op-run worker runs off the listener thread, so blocking here is fine. */
+int handle_index_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *name = jo_str(req, "name", NULL);
+   const char *root = jo_str(req, "root", NULL);
+   if (!name || !name[0] || !root || !root[0])
+      return server_send_error(conn, "index.ingest requires both name and root", NULL);
+   if (!cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(req, "files")))
+      return server_send_error(conn, "index.ingest requires a files array", NULL);
+
+   int force = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "force")) ? 1 : 0;
+   /* Detach the client-pushed array so kb_client_code_scan_push adopts (frees)
+    * it without a double-free when req is released. */
+   cJSON *files = cJSON_DetachItemFromObjectCaseSensitive(req, "files");
+
+   kb_client_index_scan_result_t res;
+   memset(&res, 0, sizeof(res));
+   int kb_rc = kb_client_code_scan_push(name, root, force, files, &res);
+   cJSON *resp = (cJSON *)kb_client_index_scan_format_response(kb_rc, &res);
+   return send_and_free(conn, resp);
+}
+
+/* session.credentials: the thin client pushes its agent API keys (+ Codex OAuth
+ * creds) once per session; we cache them in the RAM-only, session-scoped keyring
+ * (session_credentials.h) and NEVER persist them. agent_resolve_auth then
+ * prefers these over any server-stored key, so agent keys need not live on the
+ * server. Body: {session_id, agents:{name:key,...}, codex_oauth_token,
+ * codex_account_id}. */
+int handle_session_credentials(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *sid = jo_str(req, "session_id", NULL);
+   if (!sid || !sid[0])
+      return server_send_error(conn, "session.credentials requires session_id", NULL);
+   char *body = cJSON_PrintUnformatted(req);
+   int n = body ? session_creds_ingest_json(sid, body) : -1;
+   free(body);
+   if (n < 0)
+      return server_send_error(conn, "session.credentials: invalid body", NULL);
+   cJSON *resp = jo_ok();
+   cJSON_AddNumberToObject(resp, "stored", n);
+   return send_and_free(conn, resp);
 }

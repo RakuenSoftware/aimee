@@ -1,145 +1,18 @@
 /* kb_client_index.c: thin client wrappers for the aimee-kb /v1 code-index API */
 #include "kb_client.h"
 #include "kb_client_internal.h"
+#include "code_collect.h"
 #include "cJSON.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef AIMEE_POSIX
-#include <dirent.h>
-#include <sys/stat.h>
-#endif
 
 /* Scan timeout is generous because canonical scans of large monorepos can take
  * tens of seconds. The shared v1 helpers choose remote HTTP when configured and
  * otherwise tunnel the same /v1 route over the local UDS transport. */
 #define KB_CLIENT_INDEX_SCAN_TIMEOUT_MS (5 * 60 * 1000)
 #define KB_CLIENT_INDEX_READ_TIMEOUT_MS (5 * 1000)
-
-#ifdef AIMEE_POSIX
-/* Limits for remote push-based scan: keep request sizes sane. */
-#define KB_INDEX_PUSH_MAX_FILES      4096
-#define KB_INDEX_PUSH_MAX_FILE_BYTES (256 * 1024)
-
-static int kb_index_ext_ok(const char *name)
-{
-   static const char *const exts[] = {".c",    ".h",   ".cc",    ".cpp",  ".cxx", ".m",    ".py",
-                                      ".go",   ".rs",  ".ts",    ".tsx",  ".js",  ".jsx",  ".md",
-                                      ".yaml", ".yml", ".toml",  ".json", ".sh",  ".bash", ".rb",
-                                      ".java", ".kt",  ".swift", NULL};
-   const char *dot = strrchr(name, '.');
-   if (!dot || dot == name)
-      return 0;
-   for (int i = 0; exts[i]; i++)
-      if (strcmp(dot, exts[i]) == 0)
-         return 1;
-   return 0;
-}
-
-static int kb_index_dir_skip(const char *name)
-{
-   static const char *const skip[] = {"node_modules", "__pycache__", "vendor", "target",
-                                      "build",        "dist",        "out",    NULL};
-   if (name[0] == '.') /* .git, .aimee, .cache, .svn, hidden dirs */
-      return 1;
-   for (int i = 0; skip[i]; i++)
-      if (strcmp(name, skip[i]) == 0)
-         return 1;
-   return 0;
-}
-
-/* Walk root/rel recursively, appending {"rel_path","content"} entries to
- * files_arr.  Stops at KB_INDEX_PUSH_MAX_FILES.  Returns 0 always; errors on
- * individual files are silently skipped (best-effort collection). */
-static void kb_index_collect_files(const char *root, const char *rel, cJSON *files_arr, int *count)
-{
-   char path[4096];
-   if (rel && rel[0])
-      snprintf(path, sizeof(path), "%s/%s", root, rel);
-   else
-      snprintf(path, sizeof(path), "%s", root);
-
-   DIR *dir = opendir(path);
-   if (!dir)
-      return;
-
-   struct dirent *ent;
-   while (*count < KB_INDEX_PUSH_MAX_FILES && (ent = readdir(dir)) != NULL)
-   {
-      if (ent->d_name[0] == '.' &&
-          (ent->d_name[1] == '\0' || (ent->d_name[1] == '.' && ent->d_name[2] == '\0')))
-         continue; /* skip . and .. */
-
-      char full[4096];
-      snprintf(full, sizeof(full), "%s/%s", path, ent->d_name);
-
-      struct stat st;
-      if (stat(full, &st) != 0)
-         continue;
-
-      char rel_child[4096];
-      if (rel && rel[0])
-         snprintf(rel_child, sizeof(rel_child), "%s/%s", rel, ent->d_name);
-      else
-         snprintf(rel_child, sizeof(rel_child), "%s", ent->d_name);
-
-      if (S_ISDIR(st.st_mode))
-      {
-         if (!kb_index_dir_skip(ent->d_name))
-            kb_index_collect_files(root, rel_child, files_arr, count);
-      }
-      else if (S_ISREG(st.st_mode))
-      {
-         if (!kb_index_ext_ok(ent->d_name))
-            continue;
-         if (st.st_size <= 0 || st.st_size > KB_INDEX_PUSH_MAX_FILE_BYTES)
-            continue;
-
-         FILE *fp = fopen(full, "rb");
-         if (!fp)
-            continue;
-         size_t sz = (size_t)st.st_size;
-         char *buf = malloc(sz + 1);
-         if (!buf)
-         {
-            fclose(fp);
-            continue;
-         }
-         size_t got = fread(buf, 1, sz, fp);
-         fclose(fp);
-         if (got != sz)
-         {
-            free(buf);
-            continue;
-         }
-         buf[sz] = '\0';
-
-         /* Skip binary files by scanning for null bytes. */
-         int binary = 0;
-         for (size_t i = 0; i < sz && !binary; i++)
-            if ((unsigned char)buf[i] == '\0')
-               binary = 1;
-         if (binary)
-         {
-            free(buf);
-            continue;
-         }
-
-         cJSON *entry = cJSON_CreateObject();
-         if (entry)
-         {
-            cJSON_AddStringToObject(entry, "rel_path", rel_child);
-            cJSON_AddStringToObject(entry, "content", buf);
-            cJSON_AddItemToArray(files_arr, entry);
-            (*count)++;
-         }
-         free(buf);
-      }
-   }
-   closedir(dir);
-}
-#endif /* AIMEE_POSIX */
 
 static int kb_index_find_parse(cJSON *resp, term_hit_t *out, int max)
 {
@@ -261,11 +134,15 @@ static int kb_index_find_callers_parse(cJSON *resp, caller_hit_t *out, int max)
    return count;
 }
 
-static int kb_client_index_scan_v1(const char *name, const char *root, int force,
-                                   kb_client_index_scan_result_t *out)
+int kb_client_code_scan_push(const char *name, const char *root, int force, void *files_arr_v,
+                             kb_client_index_scan_result_t *out)
 {
+   cJSON *files_arr = (cJSON *)files_arr_v;
+
    if (!name || !name[0] || !root || !root[0])
    {
+      if (files_arr)
+         cJSON_Delete(files_arr);
       if (out)
       {
          out->skipped = 1;
@@ -278,27 +155,20 @@ static int kb_client_index_scan_v1(const char *name, const char *root, int force
 
    cJSON *req = cJSON_CreateObject();
    if (!req)
+   {
+      if (files_arr)
+         cJSON_Delete(files_arr);
       return kb_client_index_scan_apply_response(NULL, out);
+   }
    cJSON_AddStringToObject(req, "project", name);
    cJSON_AddStringToObject(req, "root_path", root);
    if (force)
       cJSON_AddBoolToObject(req, "force", 1);
-
-#ifdef AIMEE_POSIX
-   /* When aimee-kb is remote (AIMEE_KB_API_URL set), the container cannot
-    * reach the host filesystem via root_path.  Enumerate and push file
-    * contents so the handler can index without filesystem access, using the
-    * {"rel_path","content"} format the /v1/code/scan handler accepts. */
-   if (kb_client_v1_base_url())
-   {
-      cJSON *files_arr = cJSON_AddArrayToObject(req, "files");
-      if (files_arr)
-      {
-         int pushed = 0;
-         kb_index_collect_files(root, NULL, files_arr, &pushed);
-      }
-   }
-#endif
+   /* Caller-supplied {"rel_path","content"} entries (adopted) let the kb index
+    * without filesystem access — used both for a remote kb and for files the
+    * thin client pushes for a workspace the server cannot see. */
+   if (files_arr)
+      cJSON_AddItemToObject(req, "files", files_arr);
 
    char *json = kb_client_v1_post_json("/v1/code/scan", req, KB_CLIENT_INDEX_SCAN_TIMEOUT_MS, NULL);
    cJSON_Delete(req);
@@ -313,6 +183,24 @@ static int kb_client_index_scan_v1(const char *name, const char *root, int force
    if (resp)
       cJSON_Delete(resp);
    return rc;
+}
+
+static int kb_client_index_scan_v1(const char *name, const char *root, int force,
+                                   kb_client_index_scan_result_t *out)
+{
+   cJSON *files_arr = NULL;
+#ifdef AIMEE_POSIX
+   /* When aimee-kb is remote (AIMEE_KB_API_URL set), the container cannot reach
+    * the host filesystem via root_path.  Enumerate and push file contents so
+    * the handler can index without filesystem access. */
+   if (name && name[0] && root && root[0] && kb_client_v1_base_url())
+   {
+      files_arr = cJSON_CreateArray();
+      if (files_arr)
+         code_collect_files(root, files_arr);
+   }
+#endif
+   return kb_client_code_scan_push(name, root, force, files_arr, out);
 }
 
 int kb_client_index_scan(const char *name, const char *root, int force,

@@ -17,8 +17,14 @@
 
 static ws_runner_queue_t g_q;
 
+static int q_post(void *ctx, cJSON *resp)
+{
+   return ws_runner_queue_respond((ws_runner_queue_t *)ctx, resp);
+}
+
 /* Runner: drain the queue, execute each op against the local fs, respond.
- * Exits when poll returns NULL (queue closed). */
+ * Streaming ops (exec_stream) post their stdout chunks as partials through
+ * q_post, then the terminal response below. Exits when poll returns NULL. */
 static void *runner_thread(void *arg)
 {
    (void)arg;
@@ -27,11 +33,37 @@ static void *runner_thread(void *arg)
       cJSON *req = ws_runner_queue_poll(&g_q, 5000);
       if (!req)
          break;
-      cJSON *resp = ws_detached_runner_handle(req);
+      const cJSON *opj = cJSON_GetObjectItemCaseSensitive(req, "op");
+      const char *op = (opj && cJSON_IsString(opj)) ? opj->valuestring : "";
+      cJSON *resp = (strcmp(op, "exec_stream") == 0)
+                        ? ws_detached_runner_handle_stream(req, q_post, &g_q)
+                        : ws_detached_runner_handle(req);
       cJSON_Delete(req);
       ws_runner_queue_respond(&g_q, resp);
    }
    return NULL;
+}
+
+/* Streaming chunk collector: appends each delivered chunk to a growing buffer. */
+typedef struct
+{
+   char *buf;
+   size_t len;
+   int calls;
+} chunk_collector_t;
+
+static int collect_chunk(void *cb_ctx, const char *data, size_t len)
+{
+   chunk_collector_t *c = (chunk_collector_t *)cb_ctx;
+   char *grown = realloc(c->buf, c->len + len + 1);
+   if (!grown)
+      return -1;
+   c->buf = grown;
+   memcpy(c->buf + c->len, data, len);
+   c->len += len;
+   c->buf[c->len] = '\0';
+   c->calls++;
+   return 0;
 }
 
 int main(void)
@@ -46,9 +78,10 @@ int main(void)
    pthread_t th;
    assert(pthread_create(&th, NULL, runner_thread, NULL) == 0);
 
-   /* The detached provider's transport is the queue. */
+   /* The detached provider's transport is the queue (both unary + streaming). */
    ws_detached_provider_t dp;
-   ws_detached_provider_init(&dp, ws_runner_queue_transport, &g_q);
+   ws_detached_provider_init_ex(&dp, ws_runner_queue_transport, ws_runner_queue_transport_stream,
+                                &g_q);
    const workspace_provider_t *ws = &dp.base;
 
    /* write -> read across threads, binary-safe (embedded NUL) */
@@ -77,6 +110,38 @@ int main(void)
    assert(ws->exec(ws, argv, &eout, 4096) == 0);
    assert(eout && strstr(eout, "queue-ok") != NULL);
    free(eout);
+
+   /* exec_stream: stdout streamed back as partials, reassembled by the collector.
+    * This is the seam a local-CLI agent (claude -p) runs through on the client. */
+   assert(ws->exec_stream != NULL);
+   {
+      const char *sargv[] = {"sh", "-c", "printf 'one\\ntwo\\nthree\\n'", NULL};
+      chunk_collector_t cc = {0};
+      int rc = ws->exec_stream(ws, sargv, NULL, 0, dir, collect_chunk, &cc);
+      assert(rc == 0);
+      assert(cc.buf && strstr(cc.buf, "one") && strstr(cc.buf, "two") && strstr(cc.buf, "three"));
+      free(cc.buf);
+   }
+
+   /* exec_stream feeds stdin to the child (claude reads its prompt on stdin). */
+   {
+      const char *catargv[] = {"cat", NULL};
+      const char prompt[] = "streamed-prompt-payload";
+      chunk_collector_t cc = {0};
+      int rc = ws->exec_stream(ws, catargv, prompt, sizeof(prompt) - 1, dir, collect_chunk, &cc);
+      assert(rc == 0);
+      assert(cc.buf && strcmp(cc.buf, prompt) == 0);
+      free(cc.buf);
+   }
+
+   /* a failed exec_stream surfaces the child's non-zero exit status */
+   {
+      const char *failargv[] = {"sh", "-c", "exit 3", NULL};
+      chunk_collector_t cc = {0};
+      int rc = ws->exec_stream(ws, failargv, NULL, 0, dir, collect_chunk, &cc);
+      assert(rc == 3);
+      free(cc.buf);
+   }
 
    /* close unblocks the runner thread's poll; transport after close fails */
    ws_runner_queue_close(&g_q);

@@ -81,6 +81,15 @@ flowchart TD
 
 ### Configuration
 
+> **Thin client (remote server):** API keys are held on the client, not the
+> server. `aimee agent add <name> <endpoint> <model> --key K` against a remote
+> `aimee-server` stores `K` locally (`~/.config/aimee/agent-keys.json`) and
+> strips it before forwarding the definition; the key is pushed once per session
+> to a RAM-only keyring on the server and never persisted. Codex agents take no
+> key (`--provider codex` sources the OAuth token from `~/.codex/auth.json`). You
+> configure agents per machine. See [THIN_CLIENT.md](THIN_CLIENT.md) and
+> [SECURITY.md](SECURITY.md#agent-credential-custody-thin-client).
+
 Use `aimee agent local` for local or LAN OpenAI-compatible runtimes such as
 `llama-server` and Ollama. The command is idempotent: re-running it updates the
 same delegate, probes `/v1/models`, probes llama.cpp `/slots` when available,
@@ -336,6 +345,70 @@ The supported setup/provider names are:
 - `copilot`
 - `openai`
 - local delegates registered through `./add-local-delegate.sh`
+
+### Local-CLI agents on a thin client
+
+`claude` (a `--provider claude` agent runs the **standard `claude` CLI over
+tmux**) needs the CLI executable, its login, tmux, and the working tree **on the
+same machine as execution**. On a co-located server that is the server host. On
+a **remote/containerized `aimee-server` driven by a thin client**, none of those
+live on the server — they live on your machine.
+
+So when the active workspace is `detached` (a thin client is serving it over the
+reverse channel — see workspace client-push), aimee runs the standard `claude`
+CLI over tmux **on the client**: the tmux session driver marshals its tmux
+commands (`new-session`/`paste-buffer`/`capture-pane`/…) over the runner reverse
+channel, so the session, the `claude` process, and its `~/.claude` login all live
+on your machine, against your working tree. No Claude credential is ever sent to
+or stored on the server. Co-located deployments are unchanged (the tmux session
+runs locally). (`claude -p` print mode is **not** used.)
+
+Practical notes:
+- Configure it with `--provider claude` (which sets the tmux-cli backend — the
+  endpoint argument is a placeholder and the model becomes `claude --model <m>`):
+
+  ```bash
+  aimee agent add claude claude sonnet --provider claude   # tmux-cli claude agent
+  aimee config set provider claude                          # use it as the primary
+  ```
+
+  (`aimee agent setup claude` does the same but only against a co-located server;
+  on a thin client use `agent add --provider claude`.) The thin-client routing is
+  automatic when the workspace is `detached`.
+- If no client is currently serving the workspace, the CLI agent cannot run
+  (there is nowhere with the binary) — start the client / open `aimee chat` for
+  that root, or use an HTTP provider.
+
+#### Claude via the CLI is primary-only by default
+
+Claude run via the `claude` CLI / tmux login — authenticated by the **interactive
+Claude subscription login, not an API key** — is **primary-only by default**. It
+can be your interactive primary (`aimee chat`), but it is **not** eligible as a
+delegate (neither auto-routed nor `aimee delegate … --via claude`). Attempting to
+use it as a delegate fails with a message pointing you here.
+
+This gate is **Claude-CLI-specific**. It does not affect any other agent: API-key
+/ HTTP agents (`minimax`, `openai`, `anthropic` with a key, `gemini-cli`,
+`mistral`, …) and other CLI agents (e.g. the Codex CLI) delegate normally.
+
+> ⚠️ **Anthropic account-risk warning.** Using a personal **Claude subscription**
+> (Pro/Max) to drive **automated / headless delegation** may violate Anthropic's
+> terms of service and can result in **suspension or termination of your
+> account**. The terms generally distinguish interactive use of a subscription
+> from programmatic/automation use, which is what delegate fan-out is. For
+> automated or delegated Claude workloads, use an **Anthropic API key** (billed
+> per token) instead — add an `anthropic` agent with `--key`.
+
+To opt in anyway, at your own risk:
+
+```bash
+aimee config set claude_cli_delegate_enabled true
+```
+
+This prints the warning once, at the time you enable it. With the flag on,
+Claude-via-CLI may be routed to / selected as a delegate (and, on a thin client,
+runs on the client exactly like the primary path above). Set it back to `false`
+to restore the primary-only default. The default is `false`.
 
 ### Config format
 

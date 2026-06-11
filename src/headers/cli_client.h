@@ -225,6 +225,20 @@ int cli_rpc_remote_endpoint_is_tcp(void);
 char *cli_rpc_client_endpoint(void);
 char *cli_rpc_client_bearer(void);
 
+/* Thin-client workspace push: when the configured endpoint is a remote
+ * "tcp:host:port" the server cannot see this host's filesystem, so
+ * `aimee workspace add <path>` resolves the path locally, registers it as a
+ * `detached` workspace, and pushes the file contents to POST /v1/index/ingest;
+ * `aimee index scan [path]` re-pushes (all detached workspaces when no path).
+ * Return 0 on success. POSIX only (no-op error on Windows). */
+int cli_workspace_add_remote(const char *path);
+int cli_index_scan_remote(int argc, char **argv);
+
+/* Attach this machine's Codex OAuth creds (~/.codex/auth.json) to an outbound
+ * request body when talking to a remote tcp server, so the server can auth a
+ * codex-oauth agent without holding any codex credential. No-op otherwise. */
+void cli_attach_codex_creds(cJSON *req);
+
 /* Launch metadata parsed from server output */
 typedef struct
 {

@@ -117,6 +117,16 @@ static void *drain_pipe_thread(void *arg)
    return NULL;
 }
 
+void agent_set_request_codex_creds(const char *token, const char *account_id)
+{
+   (void)token;
+   (void)account_id;
+}
+void agent_set_request_session(const char *session_id)
+{
+   (void)session_id;
+}
+
 int agent_load_config(agent_config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));
@@ -277,6 +287,11 @@ agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const conf
    (void)required_caps;
    (void)min_context;
    return agent_route(cfg, role);
+}
+int agent_is_claude_cli(const agent_t *agent)
+{
+   (void)agent;
+   return 0; /* stub: the claude-cli delegate gate is exercised in test_agent */
 }
 agent_t *agent_find(agent_config_t *cfg, const char *name)
 {

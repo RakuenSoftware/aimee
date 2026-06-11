@@ -11,8 +11,10 @@
 #include "db_schema.h"
 #include "db1.h"
 #include "agent.h"
+#include "agent_config.h"
 #include "agent_tools.h"
 #include "agent_adapter.h"
+#include "provider_cli_adapter.h"
 #include "agent_protocol.h"
 #include "agent_shell.h"
 #include "cJSON.h"
@@ -400,6 +402,31 @@ static void test_provider_env_credentials_and_headers(void)
    restore_env("GOOGLE_API_KEY", old_google[0] ? old_google : NULL);
    restore_env("GEMINI_API_KEY_AUTH_MECHANISM",
                old_gemini_mechanism[0] ? old_gemini_mechanism : NULL);
+}
+
+/* A thin-client-supplied per-turn Codex OAuth token takes precedence over any
+ * server-side file, and the account id is injected as the ChatGPT-Account-ID
+ * header; clearing removes both. */
+static void test_codex_oauth_request_creds(void)
+{
+   agent_t ag;
+   char auth[512];
+   char headers[512];
+   memset(&ag, 0, sizeof(ag));
+   snprintf(ag.provider, sizeof(ag.provider), "%s", "codex");
+   snprintf(ag.auth_type, sizeof(ag.auth_type), "%s", "codex-oauth");
+
+   agent_set_request_codex_creds("REQ-TOKEN", "acct-1");
+   assert(agent_resolve_auth(&ag, auth, sizeof(auth)) == 0);
+   assert(strcmp(auth, "Authorization: Bearer REQ-TOKEN") == 0);
+   agent_build_extra_headers(&ag, headers, sizeof(headers));
+   assert(strstr(headers, "ChatGPT-Account-ID: acct-1") != NULL);
+   assert(strstr(headers, "originator: codex_cli_rs") != NULL);
+
+   /* Clearing the per-turn creds removes the token path + header injection. */
+   agent_set_request_codex_creds(NULL, NULL);
+   agent_build_extra_headers(&ag, headers, sizeof(headers));
+   assert(strstr(headers, "ChatGPT-Account-ID:") == NULL);
 }
 
 static void test_agent_config_provider_cli_roundtrip(void)
@@ -1835,6 +1862,33 @@ static void test_agent_loop_per_call_timeout(void)
    assert(agent_loop_per_call_timeout_ms(10000, 40000, 35000) == -1);
 }
 
+static void test_claude_cli_predicate(void)
+{
+   agent_t a;
+
+   /* claude via tmux/CLI login → gated (primary-only by default). */
+   memset(&a, 0, sizeof(a));
+   snprintf(a.backend, sizeof(a.backend), "%s", AGENT_BACKEND_TMUX_CLI);
+   snprintf(a.cli_kind, sizeof(a.cli_kind), "claude");
+   assert(agent_is_claude_cli(&a) == 1);
+   snprintf(a.cli_kind, sizeof(a.cli_kind), "claude-code");
+   assert(agent_is_claude_cli(&a) == 1);
+   snprintf(a.backend, sizeof(a.backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
+   snprintf(a.cli_kind, sizeof(a.cli_kind), "claude");
+   assert(agent_is_claude_cli(&a) == 1);
+
+   /* Claude-only: other CLI agents (Codex CLI, gemini-cli) are NOT gated. */
+   snprintf(a.cli_kind, sizeof(a.cli_kind), "codex");
+   assert(agent_is_claude_cli(&a) == 0);
+   snprintf(a.cli_kind, sizeof(a.cli_kind), "gemini");
+   assert(agent_is_claude_cli(&a) == 0);
+
+   /* plain HTTP/API-key agent → not gated. */
+   memset(&a, 0, sizeof(a));
+   snprintf(a.backend, sizeof(a.backend), "openai");
+   assert(agent_is_claude_cli(&a) == 0);
+}
+
 int main(void)
 {
    char tmp_home[512];
@@ -1849,12 +1903,14 @@ int main(void)
    test_agent_has_role();
    test_agent_find();
    test_agent_route();
+   test_claude_cli_predicate();
    test_agent_loop_per_call_timeout();
    test_agent_route_health_filter();
    test_agent_route_with_caps_honors_tools_enabled();
    test_current_code_only_role_tool_policy();
    test_current_code_only_dispatch_blocks_stale_context_tools();
    test_provider_env_credentials_and_headers();
+   test_codex_oauth_request_creds();
    test_agent_config_provider_cli_roundtrip();
    test_agent_adapter_registry();
    test_provider_cli_shell_exec_uses_argv_not_shell();

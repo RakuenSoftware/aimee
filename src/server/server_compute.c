@@ -38,7 +38,16 @@
 #include "provider_catalog.h"
 #include "role_templates.h"
 #include "workspace.h"
+#include "workspace_provider.h"
+#include "workspace_turn.h"
 #include "cJSON.h"
+
+/* Defined in agent_runtime_tmux.c (no shared header). Drives the standard CLI
+ * agent over a tmux session, which runs on the client over the reverse channel
+ * when the active workspace is detached. */
+int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
+                              const char *system_prompt, const char *user_prompt, int max_tokens,
+                              double temperature, agent_result_t *out);
 #include <ctype.h>
 #include <errno.h>
 #include <pthread.h>
@@ -697,6 +706,16 @@ void delegate_worker(void *arg)
       agent_set_durable_job(cctx->background_job_id);
    }
    cJSON *req = cctx->req;
+   /* Per-turn credential context: credential-session id (RAM keyring; a
+    * dedicated field decoupled from the chat session id) + any per-turn Codex
+    * creds (legacy direct push). Empty/absent clears them. */
+   {
+      const char *cred_sid = jo_str(req, "cred_session_id", NULL);
+      agent_set_request_session((cred_sid && cred_sid[0]) ? cred_sid
+                                                          : compute_request_session_id(req));
+   }
+   agent_set_request_codex_creds(jo_str(req, "codex_oauth_token", NULL),
+                                 jo_str(req, "codex_account_id", NULL));
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
    cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
    cJSON *jmax = cJSON_GetObjectItemCaseSensitive(req, "max_tokens");
@@ -805,6 +824,59 @@ void delegate_worker(void *arg)
       }
       via_name = inline_acp_name;
    }
+
+   /* Claude over the standard `claude` CLI/tmux on a DETACHED (thin-client)
+    * workspace: claude runs its own interactive session on the CLIENT (the tmux
+    * driver marshals its commands over the reverse channel) against the client's
+    * tree, doing its own edits — so it bypasses the server-side worktree
+    * isolation / write-guard machinery below (which assumes a local fs), exactly
+    * as the primary chat path does. Gated by claude_cli_delegate_enabled. */
+   if (via_name && via_name[0])
+   {
+      agent_t *cag = agent_find(&acfg, via_name);
+      if (cag && agent_is_claude_cli(cag))
+      {
+         int detached_bound = workspace_turn_bind_active(cwd);
+         const workspace_provider_t *wsp = workspace_provider_active();
+         if (detached_bound && wsp && wsp->kind == WS_PROVIDER_DETACHED && wsp->exec_shell)
+         {
+            config_t gate_cfg;
+            config_load(&gate_cfg);
+            if (!gate_cfg.claude_cli_delegate_enabled)
+            {
+               workspace_turn_unbind_active();
+               char m[320];
+               snprintf(m, sizeof(m),
+                        "agent '%s' is Claude via the `claude` CLI and is primary-only by default; "
+                        "set claude_cli_delegate_enabled=true to allow it as a delegate "
+                        "(see DELEGATES.md for the Anthropic account-risk warning)",
+                        cag->name);
+               delegation_compute_error(cctx, m);
+               compute_ctx_free(cctx);
+               return;
+            }
+            if (cwd[0] == '/' && !strstr(cwd, "/.."))
+               run_cmd_set_cwd(cwd);
+            char *tmpl = NULL;
+            const char *sysp = delegate_assemble_system_prompt(system_prompt, role, prompt, cwd,
+                                                               persona_override, cwd, &tmpl);
+            agent_result_t result;
+            memset(&result, 0, sizeof(result));
+            int rc = agent_execute_cli_session(cag, NULL, sysp ? sysp : "", prompt,
+                                               AGENT_DEFAULT_MAX_TOKENS, 0.3, &result);
+            run_cmd_set_cwd(NULL);
+            workspace_turn_unbind_active();
+            free(tmpl);
+            cJSON *resp = delegate_build_result_response(deleg_id, rc, &result, &acfg, role, cag,
+                                                         -1, 0, NULL, NULL);
+            free(result.response);
+            compute_respond(cctx, resp);
+            compute_ctx_free(cctx);
+            return;
+         }
+         workspace_turn_unbind_active();
+      }
+   }
    unsigned required_caps = cJSON_IsNumber(jreq_caps) ? (unsigned)jreq_caps->valuedouble : 0;
    int min_context = cJSON_IsNumber(jmin_ctx) ? (int)jmin_ctx->valuedouble : 0;
    {
@@ -879,6 +951,23 @@ void delegate_worker(void *arg)
       snprintf(errmsg, sizeof(errmsg),
                "no configured model supports required capabilities (caps=%s, min_context=%d)",
                caps_buf[0] ? caps_buf : "none", min_context);
+      delegation_compute_error(cctx, errmsg);
+      compute_ctx_free(cctx);
+      return;
+   }
+   /* Claude run via the `claude` CLI/tmux login (not an API key) is primary-only
+    * by default: driving a personal Claude subscription as an automated delegate
+    * may breach Anthropic's terms. Opt in with `claude_cli_delegate_enabled`.
+    * (Concise here — the risk warning is shown once at setup when the flag is
+    * enabled, and in DELEGATES.md.) */
+   if (agent_is_claude_cli(target_agent) && !route_cfg.claude_cli_delegate_enabled)
+   {
+      char errmsg[320];
+      snprintf(errmsg, sizeof(errmsg),
+               "agent '%s' is Claude via the `claude` CLI and is primary-only by default; "
+               "set claude_cli_delegate_enabled=true to allow it as a delegate "
+               "(see DELEGATES.md for the Anthropic account-risk warning)",
+               target_agent->name);
       delegation_compute_error(cctx, errmsg);
       compute_ctx_free(cctx);
       return;

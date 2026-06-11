@@ -490,6 +490,8 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/memory_provider.c
     ${AIMEE_SRC_DIR}/plugin_c_hook.c
     ${AIMEE_SRC_DIR}/config_plugin.c
+    ${AIMEE_SRC_DIR}/code_collect.c
+    ${AIMEE_SRC_DIR}/codex_auth.c
     ${AIMEE_SRC_DIR}/events.c
     ${AIMEE_SRC_DIR}/model_registry.c
     ${AIMEE_SRC_DIR}/models_dev.c
@@ -544,6 +546,7 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/worktree_gc.c
     ${AIMEE_SRC_DIR}/workspace_manifest.c
     ${AIMEE_SRC_DIR}/server/agent_config.c
+    ${AIMEE_SRC_DIR}/server/session_credentials.c
     ${AIMEE_SRC_DIR}/cmd_describe.c
     ${AIMEE_SRC_DIR}/history.c
     ${AIMEE_SRC_DIR}/role_templates.c
@@ -750,6 +753,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_persona.c
     ${AIMEE_SRC_DIR}/cli_roles.c
     ${AIMEE_SRC_DIR}/cli_workspace_serve.c
+    ${AIMEE_SRC_DIR}/cli_agent_keys.c
     ${AIMEE_SRC_DIR}/cli_remote.c
     ${AIMEE_SRC_DIR}/server/delegate_plan.c
     ${AIMEE_SRC_DIR}/acp_server.c
@@ -1122,6 +1126,8 @@ add_executable(aimee
     ${CLI_SRCS}
     ${CLIENT_SUPPORT_SRCS}
     ${AIMEE_SRC_DIR}/aimee_home.c
+    ${AIMEE_SRC_DIR}/code_collect.c
+    ${AIMEE_SRC_DIR}/codex_auth.c
     ${AIMEE_SRC_DIR}/dstr.c
     ${AIMEE_SRC_DIR}/history.c
     ${AIMEE_SRC_DIR}/markdown.c

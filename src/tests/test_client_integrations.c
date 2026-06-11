@@ -355,6 +355,69 @@ static void test_claude_hooks_patch_existing_matcher(void)
    system(cmd);
 }
 
+/* A stale aimee hook command (e.g. an old/transient binary path) is re-pointed
+ * to the resolved binary, so a reinstall heals the hook rather than leaving it
+ * dangling at a path that no longer exists. */
+static void test_claude_hooks_repoint_stale_command(void)
+{
+   char tmpdir[512];
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-claude-hooks3-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(tmpdir) != NULL);
+
+   char settings_path[512];
+   snprintf(settings_path, sizeof(settings_path), "%s/settings.json", tmpdir);
+   FILE *fp = fopen(settings_path, "w");
+   assert(fp != NULL);
+   /* A stale PreToolUse attention-guard AND a stale PostToolUse hooks-post entry,
+    * both referencing a transient /tmp build path. */
+   fputs("{\"hooks\":{"
+         "\"PreToolUse\":[{\"matcher\":\"Bash\",\"hooks\":[{\"type\":\"command\","
+         "\"command\":\"AIMEE_HOOK_CLIENT=claude /tmp/old-build/aimee attention-guard\"}]}],"
+         "\"PostToolUse\":[{\"matcher\":\"Edit|EnterWorktree|ExitWorktree\","
+         "\"hooks\":[{\"type\":\"command\","
+         "\"command\":\"AIMEE_HOOK_CLIENT=claude /tmp/old-build/aimee hooks post\"}]}]"
+         "}}",
+         fp);
+   fclose(fp);
+
+   ensure_claude_code_hooks(settings_path);
+
+   cJSON *root = read_json_file(settings_path);
+   assert(cJSON_IsObject(root));
+   cJSON *hooks = cJSON_GetObjectItemCaseSensitive(root, "hooks");
+
+   /* Both the PreToolUse attention-guard and the PostToolUse hooks-post commands
+    * are re-pointed off the stale /tmp path to the resolved binary. */
+   const char *events[] = {"PreToolUse", "PostToolUse"};
+   const char *needles[] = {"attention-guard", "hooks post"};
+   for (int e = 0; e < 2; e++)
+   {
+      cJSON *arr = cJSON_GetObjectItemCaseSensitive(hooks, events[e]);
+      assert(cJSON_IsArray(arr));
+      const char *found = NULL;
+      for (int i = 0; i < cJSON_GetArraySize(arr); i++)
+      {
+         cJSON *hook_arr = cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(arr, i), "hooks");
+         for (int j = 0; cJSON_IsArray(hook_arr) && j < cJSON_GetArraySize(hook_arr); j++)
+         {
+            cJSON *cmd =
+                cJSON_GetObjectItemCaseSensitive(cJSON_GetArrayItem(hook_arr, j), "command");
+            if (cJSON_IsString(cmd) && strstr(cmd->valuestring, needles[e]))
+               found = cmd->valuestring;
+         }
+      }
+      assert(found != NULL);
+      assert(strstr(found, "/tmp/old-build/aimee") == NULL);
+      assert(strstr(found, "AIMEE_HOOK_CLIENT=claude ") == found);
+      assert(strstr(found, needles[e]) != NULL);
+   }
+   cJSON_Delete(root);
+
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
+   system(cmd);
+}
+
 /* --- Test Codex plugin config (TOML-like) non-destructive update --- */
 
 static void test_codex_plugin_enabled_fresh(void)
@@ -916,6 +979,7 @@ int main(void)
    test_claude_mcp_creates_fresh_settings();
    test_claude_hooks_create_post_hook_on_fresh_settings();
    test_claude_hooks_patch_existing_matcher();
+   test_claude_hooks_repoint_stale_command();
    test_codex_plugin_enabled_fresh();
    test_codex_plugin_enabled_preserves_existing();
    test_codex_plugin_enabled_idempotent();

@@ -3,6 +3,7 @@
 #include "aimee_client.h"
 #include "cli_remote.h"
 #include "cli_client.h"
+#include "cli_agent_keys.h"
 #include "cli_session_start.h"
 #include "cli_attention_guard.h"
 #include "cli_code_audit.h"
@@ -1909,6 +1910,24 @@ int main(int argc, char **argv)
     * not a single forwarded RPC, so it is driven here rather than via a route. */
    if (strcmp(cmd, "workspace") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "serve") == 0)
       return cmd_workspace_serve(sub_argc >= 2 ? sub_argv[1] : NULL);
+
+   /* Thin-client workspace push: against a remote (tcp) server the workspace
+    * root lives on THIS host, which the server cannot read. Resolve + register +
+    * ingest from the client rather than forwarding the raw path (which the
+    * server would try to realpath against its own filesystem and reject). */
+   if (cli_rpc_remote_endpoint_is_tcp())
+   {
+      if (strcmp(cmd, "workspace") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "add") == 0)
+         return cli_workspace_add_remote(sub_argc >= 2 ? sub_argv[1] : NULL);
+      if (strcmp(cmd, "index") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "scan") == 0)
+         return cli_index_scan_remote(sub_argc - 1, sub_argv + 1);
+      /* `agent add ... --key K` against a remote server: keep K on THIS host
+       * (local keyring) and strip it before forwarding the agent definition, so
+       * the server never stores the credential. Falls through to forward the
+       * (key-stripped) agent.add. */
+      if (strcmp(cmd, "agent") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "add") == 0)
+         cli_agent_add_localize_key(&sub_argc, sub_argv);
+   }
 
    /* Route through native server RPCs when possible. */
    {

@@ -102,6 +102,15 @@ aimee workspace remove <path>                      # unregister a root (the chec
 
 Registered roots live in `aimee.yaml` under `workspaces:`. Removing one only drops it from that list; it never deletes your checkout.
 
+#### Thin client (remote server)
+
+When the `aimee` CLI targets a **remote** `aimee-server`, the workspace root is on
+*your* machine, which the server cannot read. `aimee workspace add <path>` then
+resolves the path locally, registers it as a `detached` workspace, and **pushes
+the source files to the server** (`POST /v1/index/ingest`, chunked) to populate
+the code index; `aimee index scan [path]` re-pushes. The server never reads the
+client filesystem. See [THIN_CLIENT.md](THIN_CLIENT.md).
+
 ## Session Isolation
 
 Each session gets its own git worktree for every project in the workspace, its own state file, and its own branch. Two concurrent sessions do not clobber each other.

@@ -8,6 +8,12 @@
 #include <string.h>
 #include <unistd.h>
 
+/* run_cmd cwd control (util.c): the active turn binds the thread-local working
+ * directory to the (client) workspace root. On a detached thin-client turn the
+ * tmux session runs on the client, so the session must be created in the
+ * client's cwd, not the server's process cwd. */
+extern const char *run_cmd_get_cwd(void);
+
 int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
                               const char *system_prompt, const char *user_prompt, int max_tokens,
                               double temperature, agent_result_t *out)
@@ -35,8 +41,14 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
 
    const char *cli_cmd = agent->cli_cmd[0] ? agent->cli_cmd : "claude";
 
+   /* Prefer the turn's bound cwd (the client workspace root on a detached
+    * thin-client turn, where the tmux session actually runs); fall back to the
+    * server process cwd for a co-located turn that did not bind one. */
    char cwd[MAX_PATH_LEN] = {0};
-   if (getcwd(cwd, sizeof(cwd)) == NULL)
+   const char *turn_cwd = run_cmd_get_cwd();
+   if (turn_cwd && turn_cwd[0])
+      snprintf(cwd, sizeof(cwd), "%s", turn_cwd);
+   else if (getcwd(cwd, sizeof(cwd)) == NULL)
       cwd[0] = '\0';
 
    cli_session_t sess;

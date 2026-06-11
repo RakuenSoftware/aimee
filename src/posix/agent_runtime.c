@@ -344,7 +344,10 @@ static int agent_execute_with_tools_internal(const agent_t *agent, const agent_n
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", agent->name);
    agent_t native_provider_agent;
 
-   /* Dispatch to tmux-CLI backend if configured */
+   /* Dispatch to tmux-CLI backend if configured. The tmux session driver
+    * (cli_session) runs on the client over the reverse channel when the turn's
+    * workspace is detached, so a thin-client `claude` agent runs the standard
+    * `claude` CLI over tmux on the client — no `claude -p` involved. */
    if (strcmp(agent->backend, AGENT_BACKEND_TMUX_CLI) == 0)
       return agent_execute_cli_session(agent, network, system_prompt, user_prompt, max_tokens,
                                        temperature, out);

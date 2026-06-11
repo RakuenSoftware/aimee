@@ -947,6 +947,11 @@ int provider_cli_adapter_execute(const provider_cli_adapter_t *adapter, const ag
        .user_prompt = user_prompt,
    };
 
+   /* NB: a thin-client (detached workspace) `claude` agent runs the standard
+    * `claude` CLI over tmux on the client — that is the tmux-cli backend routed
+    * through cli_session over the reverse channel, NOT this provider-cli path
+    * (which would use `claude -p`). So there is no detached special-case here. */
+
    if (adapter->execute)
       return adapter->execute(&cfg, out);
 
