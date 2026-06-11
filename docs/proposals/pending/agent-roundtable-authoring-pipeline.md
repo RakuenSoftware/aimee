@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 twentieth review)
+- **Date:** 2026-06-11 (revised post-PR-#183 twenty-first review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -685,6 +685,25 @@ path it names is not drop-in for the current server.
     / local-UDS-only out-of-band confirmation whose denial semantics are tested
     separately. **Resolved in §5, §8, §9, §10, and §12.**
 
+## PR #183 twenty-first review — gate resolution must be exactly-once
+
+#53/#54 settled *who* may resolve a gate; neither settled *whether resolution is
+once-only*. `gate pass` is a side-effecting transition (it merges and advances),
+so at-least-once delivery is a real hazard.
+
+55. **A double `gate pass` must not double-merge or double-advance.** A second
+    invocation — network retry, double submission, two authorized operators, or a
+    resume racing another resume — must be a no-op or a clear "already resolved"
+    error, never a second merge. Gate resolution must: (a) act **only** when the
+    pipeline is in the matching `*_pending` state and **atomically** transition out
+    of it, so a concurrent or repeat call observes a non-pending state and stops;
+    (b) make the merge **idempotent** — keyed by the recorded PR + expected head SHA
+    (the §5 drift check, #43), so retrying a merge of an already-merged PR is a
+    no-op, not a duplicate or a hard error; (c) record the verdict once with
+    actor/timestamp. Without this guard the merge side effect is exposed to
+    at-least-once delivery, and a flaky client could merge twice or skip a phase.
+    **Resolved in §4, §5, and §10.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -1055,6 +1074,15 @@ present in a delegate-driving session: a distinct capability (e.g.
 `CAP_PIPELINE_GATE`), an operator/human principal, or an out-of-band confirmation.
 Without that separation the two human gates are decorative — the agent could pass
 its own.
+
+**Gate resolution is exactly-once (#55).** `gate pass|fail` both records a verdict
+and (on pass) merges + advances, so it must be a guarded, idempotent transition,
+not a fire-and-forget command. It acts only when the pipeline is in the matching
+`*_pending` state and atomically leaves that state, so a repeat or concurrent call
+sees a non-pending state and returns "already resolved" rather than merging again;
+the merge itself is keyed by the recorded PR + expected head SHA (the drift check
+above), so a retried merge of an already-merged PR is a no-op. A flaky client must
+not be able to merge twice or skip a phase.
 
 If the implementation chooses the distinct-capability path, it must first make the
 capability model able to represent that authority (#54). The current mask has no
@@ -1433,6 +1461,10 @@ ledger) before the full idea→merge pipeline of P2/P3.
   caps (`CAP_DELEGATE`) can surface a gate but is **denied** `gate pass|fail`; only
   the separate gate authority (capability/operator principal/out-of-band) can
   resolve it. The negative test proves an agent cannot self-approve and merge.
+- **Exactly-once gate resolution (#55)** — call `gate pass` twice (and concurrently)
+  on a `*_pending` pipeline; exactly one merge + advance occurs, the second call
+  returns "already resolved," and a retried merge of an already-merged PR is a
+  no-op — never a double-merge or a skipped phase.
 - **Gate capability representation (#54)** — if a distinct gate capability is
   added, assert `CAPS_ALL`, `CAPS_AUTHENTICATED`, scoped/unscoped TCP bearer
   behavior, `server_http_route_caps`, capability advertising/OpenAPI docs, and
