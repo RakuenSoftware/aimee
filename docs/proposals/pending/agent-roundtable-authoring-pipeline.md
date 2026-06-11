@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 twenty-third review)
+- **Date:** 2026-06-11 (consolidated — 23 PR-#183 review rounds / 57 findings folded into the design sections and indexed in Appendix A)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -53,696 +53,9 @@ payload), and chunk rows point back to that origin. `kb_documents` is a chunk
 index, not the whole-origin store. Chunk to fit a call; retrieve the origin when
 correctness needs it.
 
-## PR #183 review — gaps and how they are resolved
-
-The initial proposal is directionally aligned with the roundtable work, but a
-review against the current tree found several implementation gaps that need to be
-part of the proposal rather than left to interpretation:
-
-1. **`pipeline_run` cannot be a blank-slate name.** Aimee already has a durable
-   DB1 `pipelines` table and `autopilot` pipeline handler
-   (`db1_pipeline_t`, `handle_autopilot`) with `start/status/list/cancel/resume`
-   style actions. It tracks a narrow plan/job pipeline, not proposal artifacts,
-   PR refs, pass history, gate verdicts, or GitHub state. The proposal must either
-   extend that schema deliberately or create a namespaced
-   `roundtable_pipeline_runs` table; it must not introduce an ambiguous second
-   "pipeline" surface. **Resolved in §4, §5, §9, §10, and §12.**
-2. **`/v1/runs` is not a durable checkpoint store.** `openai_runs_store` is an
-   in-process live store, bounded to 256 records, oldest-reused, and not durable
-   across restarts. It is suitable for child roundtable/op-run IDs, not for a
-   human gate that can sit for hours or days. **Resolved in §4, §8, §9, and §12.**
-3. **The CLI/API surface is underspecified.** The text proposes
-   `aimee pipeline status|gate`, but the existing callable pipeline surface is
-   the `autopilot` MCP handler and does not have a gate action. The proposal must
-   define whether this is a new first-class CLI/MCP/HTTP route or an extension of
-   `autopilot`, with route tests and no name collision. **Resolved in §5, §9,
-   and §10.**
-4. **GitHub/worktree state must be resumable too.** Reusing `gh`/`git` is fine,
-   but the ledger needs enough branch, commit, remote, PR, mergeability, and auth
-   assumptions to detect drift when a gate resumes in a later session. **Resolved
-   in §4, §5, and §10.**
-5. **Large artifacts cannot be blindly inlined.** Proposal markdown and PR diffs
-   can exceed MCP/op-run payload and snapshot limits. The ledger should store
-   artifact refs plus content hashes and pass diffs/proposals by path, blob, or
-   chunked capture where needed, not unbounded text blobs. **Resolved in §2, §4,
-   §10, and §11.**
-6. **Panel diversity validation must resolve agent configs.** The configured
-   `ensemble.reference_models` are agent/model names; provider diversity is not
-   the same as string uniqueness. The validator must resolve each participant's
-   provider/model at runtime before warning or passing. **Resolved in §7 and
-   §10.**
-7. **DRAFT and REVIEW do not use the same callable tool today.** The current
-   `ensemble_review` MCP bridge forces review mode; the DRAFT phase should call
-   the existing roundtable route/CLI with `mode=draft` (or add an explicit
-   draft-capable MCP surface), while REVIEW loops use `ensemble_review`.
-   **Resolved in §1, §2, and §8.**
-
-## PR #183 second review — feasibility and accuracy against the engine
-
-A second pass that read the engine buffers and the in-tree MCP surface (not just
-the proposal headers) found four more items — one of which contradicts a core
-premise.
-
-8. **The `agent-directed-pr-review` dependency is overstated; the review surface
-   is already on `testing`.** `ensemble_review` is fully registered
-   (`src/mcp_tools.c:610`) and dispatched (`handle_mcp_ensemble_review`,
-   `server_mcp.c:1502`): its schema already accepts a `diff` (minLength 20) **and**
-   a `brief` (string or `{focus,fixes,invariants,questions}`), queues
-   `delegate.roundtable`, returns a run id, and its result already exposes the
-   structured `items`/`items_round` vs `artifact_round` distinction. So P1a (brief)
-   + P1b (items) + P1c (tool) are effectively landed for **review** mode. The real
-   remaining dependency is narrow: confirm the `/v1/runs` result contract is stable
-   enough to evaluate the done-bar, and add a **draft**-capable callable path
-   (#9/§8). **Resolved in §8 and the What-exists table** (downgraded from "hard
-   dependency on an unmerged proposal" to "review surface in tree; verify result
-   contract").
-
-9. **DRAFT mode cannot generate a full-length proposal.** The roundtable
-   `artifact` is `xstrdup0(res.response)` (`delegate_ensemble.c:592`), and every
-   participant/aggregator `response` is a fixed `char[8192]`
-   (`delegate_ensemble.h:14`) produced under a ~4096-token aggregator cap
-   (`:390`). 8 KB is ~150–250 lines of markdown; real proposals in this tree run
-   300–1400 lines. So "DRAFT generates a first proposal" is **not feasible as one
-   call** — the artifact truncates. This is distinct from gap #5 (storage): #5 is
-   "don't inline large artifacts into the ledger," this is "the engine cannot
-   *emit* one." **Resolved in §1, §2, and §11** by having DRAFT produce a
-   **skeleton/outline** that the author-revise loop expands section by section,
-   never expecting a complete proposal from a single DRAFT artifact.
-
-10. **The done-bar result must be captured to DB1 at pass completion — the
-    `/v1/runs` record is eviction-prone.** The done-bar is read by polling
-    `/v1/runs/{id}`, backed by the same `openai_runs_store`
-    (`OPENAI_RUNS_STORE_MAX 256`, oldest-reused, in-process, non-durable —
-    `openai_runs_store.c:15`). A long pass (up to `roundtable_deadline_ms`, default
-    10 min), 256 sibling runs, or a restart can evict the record **before** the
-    agent reads it. Gap #2 moved the *ledger* to DB1 but left the *result-capture
-    race* open. **Resolved in §4** by requiring the structured pass result (items,
-    counts, `converged`, cost) to be persisted into the DB1 ledger the moment the
-    run reaches a terminal state — the `/v1/runs` record is a transient read, never
-    the retained result.
-
-11. **The "pass → merge" edges need explicit merge authority and CI assumptions.**
-    Both gates end in the agent merging a PR to `testing`, but this repo's flow
-    bases PRs on `testing`, may require `gh pr merge --admin` (CI has been
-    billing-suspended, so checks can hang), and enforces branch policy. The pass
-    edge cannot assume an unattended `gh pr merge` succeeds. **Resolved in §5 and
-    §8** by stating the merge is an explicit, possibly admin-gated step the agent
-    performs only after the human pass, with CI-state and branch-policy
-    preconditions surfaced rather than assumed.
-
-## PR #183 third review — orchestration ownership and gate correctness
-
-The updated proposal is much closer to the implementation, but a third pass found
-several remaining gaps at the boundary between a durable pipeline and Aimee's
-current live-tool/workspace surfaces:
-
-12. **Eager result capture cannot be a best-effort driving-agent poll.** §4 says
-    the driving agent copies `/v1/runs` results into DB1 "the moment" the child run
-    reaches terminal. If the agent is asleep, disconnected, waiting at a gate, or
-    delayed behind other work, the same eviction/restart race from #10 remains.
-    The capture must be owned by the pipeline orchestrator itself: either a
-    server-side pipeline worker submits the child run and writes the terminal
-    result to DB1 in the same completion path, or the pipeline does not advance
-    and explicitly marks the pass `lost_result`. **Resolved in §4 and §9.**
-13. **The done-bar must treat degraded or incomplete runs as not done.** The
-    current bars check `converged` and item severities, but the real result also
-    carries `truncated`, `degraded`, `cost_capped`, `deadline_hit`, `cancelled`,
-    `items_round`, and `artifact_round`. A pass with truncated items, a degraded
-    best-effort result, a cost/deadline stop, cancellation, or ambiguous
-    items/artifact provenance cannot satisfy a correctness gate. **Resolved in §3
-    and §10.**
-14. **The questions-done bar needs a cap policy.** `roundtable_result_t` can track
-    only `ROUNDTABLE_MAX_QUESTIONS` (16) answered questions / coverage gaps, and
-    long briefs are 4 KB-normalized. `zero_blocking_questions_answered` must reject
-    or split briefs with >16 questions; otherwise "every brief question answered"
-    silently means "every retained question." **Resolved in §3 and §10.**
-15. **GitHub operations must use Aimee's workspace authority, not raw local shell
-    assumptions.** Aimee has a shared/detached/mirror workspace resource plane,
-    `mcp_git_run`, `git_pr`, and a per-workspace forge-token broker. A pipeline
-    resumed from another surface may not have the same local cwd or `gh` auth as
-    the original session. All git/gh operations need to route through the existing
-    workspace provider/git tools and record the workspace id/provider plus forge
-    token availability. **Resolved in §4, §5, §8, and §10.**
-16. **The pipeline needs branch/worktree isolation rules.** "One pipeline at a
-    time" does not protect the user's current checkout. The proposal must require
-    a dedicated proposal branch and implementation branch, and either a dedicated
-    worktree or an explicit clean-worktree preflight before any write. Dirty
-    user changes are a hard stop unless the user explicitly opts into using that
-    checkout. **Resolved in §1, §4, §5, and §10.**
-17. **The dependency section regressed into duplicate/stale wording.** §8 repeats
-    the DRAFT dependency and the relationship section still describes
-    `agent-directed-pr-review` as a pending hard dependency even after #8 says
-    review mode is in tree. The proposal should make the contract precise:
-    review-mode surface exists; remaining gaps are draft-callability, stable
-    terminal result capture, and pipeline orchestration. **Resolved in the
-    relationship table and §8.**
-
-## PR #183 fourth review — reconciling capture ownership with the Hybrid decision
-
-The third review correctly demanded orchestrator-owned result capture (#12), but
-its wording ("in the same completion path") implies a *server-side* orchestrator,
-which collides with the chosen **Hybrid** architecture (the external agent drives
-the loop; only state is persisted). Two items resolve that, and a real seam exists
-to make it concrete.
-
-18. **"Orchestrator-owned capture" is unresolved against Hybrid — name the seam.**
-    Under Hybrid the driving agent owns the *loop*, but it cannot be "in the same
-    completion path" as a child run; if capture depends on the agent polling, #10's
-    eviction race is still live whenever the agent is asleep or at a gate. The
-    resolution is **not** to promote the agent to a server-side orchestrator (that
-    is the architecture the user did *not* pick). It is to use the worker that
-    *already runs the roundtable*: `op_run_worker_run`
-    (`server_http_routes.inc:339`) executes the async `delegate.roundtable` and
-    calls `openai_runs_store_finalize` at terminal. Thread a `__pipeline_pass_id`
-    into the request body exactly as `__run_id` is injected today (`:419`), and
-    extend that finalize path to **also write the structured terminal result into
-    the DB1 pipeline-ledger row**. The agent stays the loop/gate orchestrator; the
-    server worker — which already runs and finalizes the run — closes the capture
-    race durably. This is the genuine Hybrid: agent owns the loop, server owns
-    durable capture of each child run it already executes. **Resolved in §4 and §9.**
-
-19. **`lost_result` should re-run the pass, not escalate to a human.** A capture
-    miss (eviction, restart mid-pass) is an infrastructure hiccup, not a
-    correctness decision that needs a human. The pipeline should **auto re-run the
-    review pass** — it is idempotent over the same artifact; a re-run produces a
-    fresh, valid result reviewing the same input — bounded by the pass ceiling and
-    cost cap, under a **stable `pipeline_pass_id`** so the lost attempt's cost is
-    booked as overhead without double-counting the pass. Escalate to the human only
-    if capture keeps failing across re-runs (a real fault), never on the first
-    miss. **Resolved in §3 and §4.**
-
-## PR #183 fifth review — pass identity, worker capture, and replay safety
-
-The fourth review picked the right Hybrid seam (`op_run_worker_run`), but the
-proposal still needs to define how pipeline pass identity reaches that seam
-safely and how retry accounting stays correct.
-
-20. **`__pipeline_pass_id` is not forwarded by today's `ensemble_review` tool.**
-    `handle_mcp_ensemble_review` currently constructs a fresh body containing only
-    `prompt`, `mode:"review"`, `brief`, `rounds`, and `turns` before calling
-    `server_http_submit_op_run`; unknown caller args are not copied. So the text's
-    "thread `__pipeline_pass_id` into the request body" cannot be implemented
-    from the pipeline unless the callable surface grows a pipeline-owned
-    `pipeline_pass_id` parameter (or `server_http_submit_op_run` gains metadata
-    parameters) and forwards it deliberately. **Resolved in §4, §8, and §10.**
-21. **Pass IDs must be server-owned and state-validated.** A user-facing MCP arg
-    named `__pipeline_pass_id` would let any caller with `CAP_DELEGATE` try to
-    write arbitrary pass rows. The pipeline surface should accept a normal
-    `pipeline_pass_id` only from the pipeline orchestrator/gate command, validate
-    that the pass belongs to an active roundtable pipeline in the expected state,
-    and then inject the private `__pipeline_pass_id` internally. Raw
-    double-underscore fields remain server-private. **Resolved in §4, §8, and
-    §10.**
-22. **Capture only works on the async op-run path.** The worker capture seam is
-    present for `/v1/delegate/roundtable` and `server_http_submit_op_run`, but a
-    direct synchronous `server_dispatch("delegate.roundtable")` call bypasses
-    `op_run_worker_run`. The pipeline must require async op-run submission for
-    both DRAFT and REVIEW passes, or add an equivalent capture hook to any direct
-    path it uses. **Resolved in §2, §4, §8, and §10.**
-23. **A stable pass id still needs per-attempt rows.** Re-running a lost pass under
-    the same `pipeline_pass_id` is correct for loop accounting, but the ledger must
-    preserve each attempt (`attempt_no`, `run_id`, status, terminal flags, result
-    hash, captured/lost marker, cost if known). Otherwise a retry overwrites the
-    evidence needed to explain overhead and repeated capture failures. **Resolved
-    in §4 and §10.**
-24. **Replay is idempotent only if the artifact input is hash-pinned.** A lost
-    result should be re-run over the *same* proposal/diff. Before retrying, the
-    pipeline must compare the current artifact/diff hash to the pass input hash;
-    if it changed, the old pass is stale and a new pass id is required. **Resolved
-    in §4 and §10.**
-25. **The worker must persist failed/cancelled terminal states too.** Done-bar
-    evaluation needs completed results, but durable diagnostics need failed,
-    cancelled, malformed, and capture-failed attempts as well. The capture hook
-    must write terminal status for every op-run outcome, not just successful
-    roundtable JSON. **Resolved in §4 and §10.**
-
-## PR #183 sixth review — closing the read side and the DRAFT path
-
-Moving the *write* to the worker (gaps #18/#20–25) was right, but two ends of that
-design are still open: how the agent *reads* terminal, and what a DRAFT pass
-actually captures.
-
-26. **The agent's terminal-detection poll target must be the durable ledger row,
-    not `/v1/runs`.** The worker now writes the result to DB1, but the proposal
-    never says how the *driving agent* learns a pass reached terminal. If it polls
-    `/v1/runs/{id}`, the **read** side still races eviction (a long pass + ≥256
-    sibling runs + a sleeping agent) — the exact race the worker-capture removed,
-    just moved downstream. The agent must poll the **durable ledger pass row**
-    (`aimee pipeline status` / the DB1 row's `captured`/terminal marker), treating
-    `/v1/runs` as a best-effort live view only. Only then is the race closed on
-    both ends. **Resolved in §4 and §10.**
-27. **The capture contract is review-shaped; a DRAFT pass has no defined durable
-    result.** Gap #22 routes *both* DRAFT and REVIEW through the async op-run
-    worker, but §4's capture lists only review fields (`items`/severities/`count`/
-    `items_round`/`artifact_round`). A DRAFT pass produces an **artifact** (the
-    skeleton), not items, and per #9 that artifact is 8 KB-capped. Capture must
-    persist the **mode-appropriate** payload: for DRAFT, the artifact ref + content
-    hash + `best_round`/`artifact_round` + validity flags (with the skeleton text
-    landing in the working file, not as a ledger blob); for REVIEW, the items.
-    Otherwise draft passes drop their result or are mis-shaped into review fields.
-    **Resolved in §2, §4, and §10.**
-
-## PR #183 seventh review — chunk aggregation, retries, and stale async work
-
-The current shape now closes the `/v1/runs` eviction race, but four implementation
-edges still need to be explicit before this can be built without hidden correctness
-holes.
-
-28. **Chunked review needs an artifact-level aggregate, not independent green
-    slices.** §2 allows large proposals/diffs to be reviewed as chunks, but §3's
-    done-bar currently reads like it evaluates "the latest REVIEW result" as if
-    there is always one result for the whole artifact. If each chunk can pass
-    independently, cross-chunk invariants, renamed symbols, duplicated logic, and
-    missing sections can still be wrong. A chunked pass needs a manifest, per-chunk
-    child results, a deterministic aggregate row, and a final whole-artifact
-    synthesis/check before the phase can pass. **Resolved in §2, §3, §4, and §10.**
-29. **Attempt retries need their own ceiling.** `roundtable_pipeline_max_passes`
-    correctly bounds correctness passes, but capture faults and cancelled/failed
-    attempts are infrastructure retries under the same pass id. Counting those as
-    outer passes makes one transient capture failure consume a correctness pass;
-    not counting them without a separate bound can loop forever. Add an attempt
-    retry cap per pass, with costs still charged to the phase. **Resolved in §3,
-    §4, §6, and §10.**
-30. **Late worker finalization must not advance stale state.** Async op-runs can
-    outlive a pipeline cancel, abandon, fail-return, or retry. A late result from
-    an older `attempt_no`/`run_id` must be recorded as terminal history, but it
-    cannot update the current pass aggregate, satisfy the done-bar, or resume a
-    gate after the pass was superseded. **Resolved in §4, §5, and §10.**
-31. **Pipeline cancellation must bridge to child op-run cancellation.** The repo
-    already has `/v1/runs/{id}/stop` and `handle_delegate_roundtable` polls
-    `__run_id` through `openai_runs_store_cancel_requested`. A new pipeline
-    `cancel`/`abandon` action that only flips the ledger row leaves the roundtable
-    worker running and later finalizing stale work (#30). The action must request
-    stop on the active child `run_id`, mark the attempt cancelled/abandoned in the
-    ledger, and tolerate the worker's eventual terminal write. **Resolved in §4,
-    §5, and §10.**
-
-## PR #183 eighth review — making chunked review actually buildable
-
-Gap #28 correctly demands a whole-artifact aggregate over chunks, but its own
-resolution has two holes: the aggregate can't re-read what didn't fit, and nothing
-says how big a chunk is.
-
-32. **Store the artifact origin plus db2 chunks and *retrieve* — don't
-    agonize over "fit it in one call vs. summarize it."** §3 requires a
-    whole-artifact synthesis/check, and an artifact large enough to be chunked
-    won't fit one review call. The resolution is Aimee's core competency, not a
-    bespoke manifest: retain the artifact origin separately and ingest
-    review-scoped chunks into db2's existing `kb_documents` chunk store, which
-    gives the aggregate most of what it needs —
-    `chunk_index` + `prev_chunk_id`/`next_chunk_id` make the whole text
-    reconstructable by walking the chain, `heading_path` is a section manifest for
-    free, `file_hash` tracks staleness, and vector + FTS retrieval are built in.
-    Per-chunk review passes review each chunk; the whole-artifact aggregate/seams
-    check is a reviewer given **db2 retrieval over the artifact's own chunks**, so
-    it pulls cross-chunk context (the other definition of a symbol, a missing
-    section, a renamed reference) on demand instead of needing the full text inline.
-    Because both the origin and the chunks are retained, the "fit it in one call
-    vs. summarize" decision never has to be made. The chunk index lives in a
-    review-scoped namespace/contract, cleaned up on pipeline completion, so it
-    never pollutes durable memory. **Resolved in §2, §3, §4, and §10; corrected by
-    #34/#35 for the exact origin store and cleanup primitive.**
-33. **The chunk threshold must derive from the panel's *minimum* participant
-    context budget, not a fixed size.** The panel is heterogeneous
-    (`ensemble_reference_models` resolve to different models with different context
-    windows — the same resolution §7 already does for diversity). A chunk sized for
-    the largest-context participant overflows the smallest and silently truncates
-    its review; sized for the smallest, it wastes the largest and inflates pass
-    count and cost. Chunking is sized to the **min context budget across the active
-    panel** (resolved per run), reserving headroom for the brief, role framing, and
-    peer notes, with the resolved budget and threshold recorded in the chunk
-    manifest. **Resolved in §2 and §10.**
-
-## PR #183 ninth review — correcting the db2 origin and context-budget contracts
-
-The eighth review made the right move by grounding chunk aggregation in db2, but
-it overstates what the current KB tables and APIs provide.
-
-34. **`kb_documents` stores chunks, not the whole artifact.** The schema has
-    `kb_documents.content` per chunk plus `prev_chunk_id`/`next_chunk_id`; the
-    normal project build path calls `db2_kb_file_index_upsert(..., NULL)`, so
-    `kb_file_index.content` is not a reliable whole-text copy either. If the
-    pipeline needs the origin text, it must store a separate origin ref/blob:
-    working file/blob + hash in DB1, a db2 `docs.normalized_text` row via
-    `kb.docs.push`, or an explicit DB2 artifact payload. The chunk manifest then
-    references both the origin ref and the `kb_documents` rows. **Resolved in §2,
-    §3, §4, §10, and §11.**
-35. **Review-scoped KB indexing is not a current public primitive.** The available
-    KB surfaces are project-oriented (`kb.build`/`kb.update` over a path+project,
-    `/v1/maintenance/clear` for an entire project) plus corpus staging
-    (`kb.docs.push` into `docs`). A pipeline-specific ephemeral namespace cannot
-    be assumed unless the implementation either creates a synthetic review project
-    with safe cleanup, adds a per-file/per-scope cleanup API, or adds direct
-    pipeline artifact indexing. Otherwise cleanup can delete unrelated project KB
-    data or leave review chunks behind. **Resolved in §2, §4, §8, §9, and §10.**
-36. **Minimum panel context budget can be unknown.** The code can hold
-    `agent.middleware.context_window`, and some runtime paths use
-    `model_context_window(model)`, but configured agents and discovered
-    `model_catalog` rows can still have `context_window == 0`. The pipeline cannot
-    size chunks from "minimum participant context" unless every panelist resolves
-    a positive budget; otherwise it must use a conservative default, probe first,
-    or fail configuration validation with a clear remediation. **Resolved in §2,
-    §6, §7, and §10.**
-
-## PR #183 tenth review — who retrieves: orchestrator assembles, participants review inline
-
-Gap #32 said the whole-artifact check is "a reviewer given db2 retrieval." Reading
-how review participants actually run shows that mis-locates the work.
-
-37. **Review participants review the *inline task text*; they cannot be assumed to
-    retrieve from db2 or read the working tree.** `ensemble_review` /
-    `handle_delegate_roundtable` passes the artifact as inline `task` text, and each
-    participant runs via `agent_run_named(…, ensemble_reference_models[i],
-    "review", …)` — a **heterogeneous, often remote** model whose tool access
-    (file-read, KB-search) is per-agent and not guaranteed. The `review` charter
-    role's "inspect repository files" is best-effort: it works only where that
-    participant has file tools + workspace binding, it is not db2 retrieval, and a
-    remote delegate panelist may have neither. So #32's "reviewer given db2
-    retrieval over the artifact's chunks" is the wrong seam. The correct one: the
-    **orchestrator** (which holds the origin ref and db2) pre-assembles each review
-    unit and passes it **inline** — for a chunk, the chunk text + brief +
-    orchestrator-retrieved cross-chunk spans (the other definition of a symbol, the
-    referenced section); for the whole-artifact aggregate, a self-contained digest
-    of per-chunk findings + the cross-cutting spans the invariants need. db2/origin
-    storage (#32/#34) is what the *orchestrator* retrieves from, never a per-panelist
-    capability. Review correctness then never depends on whether a given model can
-    retrieve or read files. **Resolved in §2, §3, and §10.**
-
-## PR #183 eleventh review — serialization and assembly provenance
-
-The tenth review moved retrieval to the right actor (the orchestrator), but the
-proposal still leaves three build-time correctness gaps at the response/ledger
-boundary.
-
-38. **`items_truncated` is a separate terminal-invalid flag, not covered by
-    `truncated`.** The engine sets `result.truncated` for brief/question/context
-    truncation and item-count overflow, but `add_roundtable_arrays` can still clip
-    serialized `items[]` at `ROUNDTABLE_ITEMS_JSON_BUDGET` and emit
-    `items_truncated: true` without changing `result.truncated`. A done-bar or gate
-    digest that reads only `truncated == false` can pass with missing findings.
-    The capture hook must persist `items_truncated`, and every done-bar must treat
-    it as invalid terminal evidence. **Resolved in §3, §4, and §10.**
-39. **Orchestrator-assembled inline review needs a budgeted assembly manifest.**
-    #37 says the orchestrator retrieves cross-chunk spans and hands reviewers a
-    self-contained inline unit, but it does not bound or explain that assembled
-    prompt. The current HTTP body ceiling is large, while reviewer context and
-    output fields are much smaller; over-assembling can silently omit the exact
-    span needed for correctness. Each review unit and aggregate call needs a
-    recorded assembly manifest: origin/chunk refs, selected span ids/ranges/hashes,
-    token/byte estimate against the resolved minimum participant budget, and any
-    omitted candidate spans. Required omissions keep the aggregate blocked and
-    surface as coverage gaps. **Resolved in §2, §3, §4, and §10.**
-40. **Item display fields are too small to be the only source provenance.**
-    `roundtable_review_item_t.location[128]`, `summary[256]`,
-    `recommendation[256]`, and `sources[256]` are display-sized fields. They
-    cannot safely carry long cross-chunk evidence chains, many participant
-    sources, or gate-audit provenance. The ledger must store a sidecar mapping
-    from item identity/result hash to the assembly spans and source refs that
-    produced it; `item.sources` remains a display hint, not the durable evidence
-    model. **Resolved in §4, §5, and §10.**
-
-## PR #183 twelfth review — one validity predicate, not a scattered conjunction
-
-Gap #38 is a symptom of a pattern. Validity flags have accreted across reviews
-(#13 added `truncated`/`degraded`/`cost_capped`/`deadline_hit`/`cancelled`; #38
-adds `items_truncated`), and the done-bar, the chunk-aggregate, the capture hook,
-and the gate digest each re-list the conjunction inline. The next consumer written
-will check a stale subset — exactly how #38 happened in the first place.
-
-41. **Define one canonical "valid terminal result" predicate; no call site may
-    check a subset.** Centralize validity as a single contract —
-    `roundtable_result_valid_terminal(result)` returning false on any of
-    `truncated`, `items_truncated` (#38), `degraded`, `cost_capped`,
-    `deadline_hit`, `cancelled`, `lost_result` (#19), or an
-    `items_round`/`artifact_round` provenance mismatch (#13) — and have the done-bar
-    (#3), the chunk-aggregate (#28), the worker capture hook (#18), and the gate
-    digest all consult **that one predicate**. A future invalidity flag updates the
-    predicate in one place. A test asserts every consumer rejects a result that
-    trips each individual flag, so a newly added flag can never be honored by some
-    sites and silently ignored by others. **Resolved in §3, §4, and §10.**
-
-## PR #183 thirteenth review — per-pass version freshness and fail-return PR identity
-
-No new feedback prompted this pass; a fresh read of the loop's *outer* mechanics
-(the part the inner-engine reviews never reached) found two real holes.
-
-42. **Each revise pass re-ingests; the review-scoped index must supersede the
-    prior version, or retrieval serves stale spans.** Every author-revise / agent-fix
-    pass produces a *new* artifact version. The orchestrator-assembled retrieval
-    (#37) pulls cross-chunk spans from the review-scoped db2 index, so that index
-    must be re-ingested per pass **and the prior version's chunks superseded** before
-    the new pass retrieves — otherwise #37 serves spans from an earlier revision: a
-    fixed bug reappears, a deleted section is still "found," a renamed symbol
-    resolves to its old name. Each pass pins retrieval to its own artifact content
-    hash; the assembly manifest (#39) records that version; chunks from superseded
-    versions are never retrieval-eligible for the current pass. Review-scoped cleanup
-    (#35) therefore runs **per version**, not only at pipeline end. **Resolved in §2,
-    §3, §4, and §10.**
-43. **Fail-return must update the existing PR, not open a duplicate.** The fail
-    edges (gate1 → `proposal_review`, gate2 → `implementing`) revise an artifact
-    whose PR is already open and recorded in the ledger. The revise loop must push
-    to the **same recorded branch/PR**, updating it in place — never open a second
-    PR for the same pipeline phase. On re-entry the orchestrator validates the
-    recorded branch/PR still exists and targets `testing` (the §5 drift check),
-    pushes the revision, and the human gate re-evaluates the **updated** PR with a
-    fresh review digest. A fail-return that orphaned the prior PR or opened a
-    duplicate is a hard error, not a silent second PR. **Resolved in §1, §5, and
-    §10.**
-
-## PR #183 fourteenth review — validity envelope and HTTP namespace
-
-The thirteenth review closed more loop mechanics, but a fresh pass over the
-server routing and run-capture code found two more buildability gaps.
-
-44. **The validity predicate cannot be a raw `roundtable_result_t` helper, and it
-    must not gate capture.** #41 names `roundtable_result_valid_terminal(result)`,
-    but some invalidity inputs are outside `roundtable_result_t`: `items_truncated`
-    is added by HTTP serialization, `lost_result` is a ledger/attempt state, and
-    capture-failed/malformed terminal attempts may not have a parsed engine result
-    at all. The worker must first persist the terminal **capture envelope** (run
-    id, attempt status, raw/sanitized result snapshot hash, parse status, HTTP
-    serialization flags, and engine flags when present). The canonical predicate
-    then evaluates that envelope for done-bar eligibility. It must never decide
-    whether the terminal attempt is recorded; invalid terminal evidence is exactly
-    what the ledger needs for retries and audits. **Resolved in §3, §4, and §10.**
-45. **`/v1/pipeline/status` is already the KB/corpus pipeline status route.** The
-    proposal says the implementation may add `aimee pipeline status|gate` as a
-    CLI/MCP/HTTP surface, but Aimee's KB sidecar already exposes
-    `GET /v1/pipeline/status` for asynchronous knowledge ingest status (with
-    `/v1/corpus/pipeline/status` as the newer corpus-specific spelling). A new
-    roundtable-authoring HTTP API must not reuse or overload that path. If an HTTP
-    surface is added, it needs an unambiguous namespace such as
-    `/v1/roundtable/pipelines/...` or `/v1/authoring/pipelines/...`; otherwise v1
-    can remain CLI/MCP-only. **Resolved in §5, §8, §10, and §12.**
-
-## PR #183 fifteenth review — spend bound across fail-return, and the parked-gate lifecycle
-
-A fresh pass over the *cost* and *resource-lifecycle* of the long-lived states
-(not the engine) found two more holes the prior rounds left open.
-
-46. **The per-phase cost cap's behavior across fail-return is unspecified, and
-    there is no whole-pipeline ceiling.** `roundtable_pipeline_max_cost_usd` is
-    per-phase, but a gate **fail** returns to the same review phase and runs more
-    passes. The proposal never says whether the cap **resets, continues, or
-    accumulates** across fail-return re-entries — so a repeatedly-failed gate could
-    have no real spend bound (if it resets) or surprise the operator (if it
-    accumulates). Specify: the per-phase cap **accumulates across all re-entries of
-    that phase** (a fail-return never resets it), and add a **whole-pipeline**
-    cumulative ceiling (`roundtable_pipeline_max_total_cost_usd`, default 0 =
-    unbounded) bounding proposal + implementation + PR phases together. Tripping
-    either escalates to the human, never auto-passes. The ledger already records
-    per-pass cost, so this is a sum, not new accounting. **Resolved in §3, §4, §6,
-    and §10.**
-47. **A never-answered gate holds resources indefinitely; define the park
-    lifecycle.** Gates are designed to "sit for hours or days," and explicit
-    `cancel`/`abandon` (#31) covers *intentional* teardown — but nothing covers a
-    gate simply left unanswered. While parked, the pipeline pins the review-scoped
-    db2 index, the worktree, and the branch; across many open pipelines that index
-    grows unbounded. Specify: (a) on entering a `*_pending` gate the pipeline
-    **releases re-creatable resources** — the review-scoped db2 index is dropped and
-    re-ingested from the retained origin (#42) on resume, and the worktree may be
-    released — keeping only the durable ledger + origin ref; (b) an optional gate
-    TTL (`roundtable_pipeline_gate_ttl_h`, default 0 = no expiry) that on expiry
-    moves the pipeline to `abandoned` with full child-run-stop + cleanup (#31),
-    **never** an auto-pass. A parked pipeline must not pin a growing index. **Resolved
-    in §4, §5, §6, and §10.**
-
-## PR #183 sixteenth review — admission, merge execution, and cost scope
-
-The fifteenth review added parked-gate cleanup and a total cap, but those changes
-expose three places where the proposal still overstates or contradicts the current
-codebase.
-
-48. **"One pipeline at a time" conflicts with parked gates unless admission is
-    explicit.** §11 says v1 has one pipeline run at a time, while #47 talks about
-    many parked pipelines and released resources. Implementation must choose the
-    admission rule: either a parked gate continues to occupy the single authoring
-    slot (simple, but one forgotten gate blocks all future runs), or entering a
-    gate transitions the run to a `parked`/`waiting_human` class that releases the
-    active slot while retaining ledger ownership and preventing two active
-    reviewers from mutating the same branch/PR. Without that distinction, the gate
-    lifecycle is ambiguous and resource cleanup can accidentally introduce
-    unscheduled parallel pipelines. **Resolved in §1, §4, §5, §10, §11, and §12.**
-49. **The whole-pipeline cost cap must define whether implementation-agent spend
-    is in scope.** #46 says the total cap spans proposal + implementation + PR
-    phases, but the ledger costs described so far are roundtable pass costs. The
-    implementation phase is "normal coding," not a roundtable call, and may not
-    expose comparable `cost_usd` without using Aimee's token-audit / agent-cost
-    surfaces. Choose one contract: either the cap is explicitly
-    `roundtable_pipeline_max_roundtable_cost_usd` (roundtable child runs only), or
-    the ledger must ingest non-roundtable implementation-agent spend from the
-    existing token/cost accounting and mark unknown implementation cost as
-    incomplete evidence. A cap that claims to include implementation but only sums
-    review passes is misleading. **Resolved in §3, §4, §6, and §10.**
-50. **`git_pr` does not merge today; pass→merge needs a real executor contract.**
-    The proposal's table says PR open/merge/diff capture exists via
-    `git_pr`/`mcp_git_run`, but the current `git_pr` tool supports
-    create/view/list/edit/checks/watch/merge_status/wait — not merge. A gate pass
-    must either add a first-class workspace-aware `git_pr action=merge` (with
-    admin/squash/rebase options, expected head SHA, and captured merge SHA) or
-    explicitly use `mcp_git_run`/`gh pr merge` through the workspace/forge-token
-    authority and persist the command, output, exit code, and merge SHA. Treating
-    merge as already covered hides a build gap at the most important state
-    transition. **Resolved in §5, §8, §9, and §10.**
-
-## PR #183 seventeenth review — reuse the cost-accounting ledger; correct the merge claim
-
-Two follow-ons from the sixteenth review's own resolutions.
-
-51. **Implementation-agent spend (#49) should consume the cost-accounting
-    proposal's ledger, not invent parallel accounting.** `ingress-cost-accounting-and-optimizations.md`
-    (the in-flight #180/#185 work) builds a db2 `usage_ledger` (`src/db2/usage_ledger.c`)
-    + a typed `/v1/usage/*` surface that already records per-turn agent cost. The
-    whole-pipeline cost cap's *implementation* component must read from that ledger
-    (the same pattern the ingress-compression proposal uses to cede cache work to
-    the cost proposal), marking implementation cost **incomplete evidence** when the
-    ledger has no row yet — never a second cost-accounting path. If that ledger has
-    not landed, the cap is scoped to roundtable child-run cost only
-    (`…_max_roundtable_cost_usd`) and says so, rather than silently summing a subset.
-    **Resolved in §3, §6, and §8.**
-
-(The What-exists table is also corrected here: PR **merge** is *not* a `git_pr`
-action today — #50 — so it is listed as a gap, not as existing.)
-
-## PR #183 eighteenth review — pin cost sources and validate the ledger dependency
-
-The seventeenth revision correctly avoids inventing a parallel implementation-cost
-ledger, but the codebase currently has DB1 `token_audit` / `cost_fold_log` while
-the proposed db2 `usage_ledger` is still pending. That leaves one more boundary to
-make explicit.
-
-52. **Pipeline cost evidence must pin its accounting source and scope.** A pipeline
-    may start before the cost-accounting proposal lands, resume after it lands, or
-    carry both roundtable child-run `cost_usd` and implementation-agent cost rows.
-    The durable ledger therefore needs a per-pipeline/per-phase `cost_scope` and
-    `cost_source` snapshot (for example `roundtable_result_cost`,
-    `db1_token_audit_cost_fold`, or `db2_usage_ledger`), plus a pricing/schema
-    version or reconciliation timestamp. It must not silently mix DB1 audit sums,
-    roundtable result estimates, and future db2 usage rows across retries or
-    resume. If the configured source changes, the pipeline marks cost evidence
-    stale/incomplete, recomputes from a single authoritative source where possible,
-    and re-surfaces the gate digest before claiming a cap is satisfied. **Resolved
-    in §4, §5, §6, §8, and §10.**
-
-## PR #183 nineteenth review — the gate's own authorization
-
-Eighteen rounds hardened what the gate *evaluates*; none specified who may *resolve*
-it. That is the integrity of the whole design.
-
-53. **The gate verdict must be human/operator-authorized, distinct from the
-    driving agent's `CAP_DELEGATE` — or the agent can self-approve its own merge.**
-    The two human gates are the load-bearing control (§11: they "do not remove the
-    human"). But every pipeline/delegate action in the tree is gated by
-    `CAP_DELEGATE` (`server_auth.c`: `delegate.roundtable`, `delegate.*`, `jobs.*`),
-    which the driving agent **already holds** to run the roundtable. If
-    `pipeline gate <id> pass|fail` is gated the same way, the driving agent can
-    `pass` its own gate and trigger the merge — defeating the gate entirely and
-    turning the pipeline into the gate-less autonomous machine §11 forbids. The gate
-    *resolution* needs a **separate authority not granted to a delegate-driving
-    session**: a distinct capability (e.g. `CAP_PIPELINE_GATE`), an operator/human
-    principal, or an out-of-band confirmation. The agent may *surface* a gate (move
-    to `*_pending`, build the digest) but must never be able to *resolve* it. A
-    negative test asserts a session holding only the agent's caps is **denied**
-    `gate pass`. **Resolved in §5, §8, §10, and §11.**
-
-## PR #183 twentieth review — gate authority cannot assume a spare capability bit
-
-The nineteenth review fixed the security model conceptually, but one implementation
-path it names is not drop-in for the current server.
-
-54. **A new `CAP_PIPELINE_GATE` requires a capability-mask migration, not just a
-    constant.** `src/headers/server.h` already consumes bits 0-15
-    (`CAP_DASHBOARD_READ` is `1u << 15`) and defines `CAPS_ALL` as `0xFFFFu`.
-    The `/v1` transport derives TCP/UDS caps from that mask, and the route registry
-    reuses the same `uint32_t` values while still treating `CAPS_ALL` as the full
-    trusted set. Adding `CAP_PIPELINE_GATE = 1u << 16` without updating `CAPS_ALL`,
-    scoped/unscoped bearer behavior, route-cap tests, and capability advertising
-    would make the gate unreachable or inconsistently authorized. The proposal must
-    choose one of two buildable designs: (a) widen/redefine the capability model
-    and update `CAPS_ALL`, `CAPS_AUTHENTICATED`, `server_http_conn_caps`,
-    `server_http_route_allowed`, OpenAPI/capability docs, and auth tests; or (b)
-    avoid a new cap bit and implement gate resolution through an operator principal
-    / local-UDS-only out-of-band confirmation whose denial semantics are tested
-    separately. **Resolved in §5, §8, §9, §10, and §12.**
-
-## PR #183 twenty-first review — gate resolution must be exactly-once
-
-#53/#54 settled *who* may resolve a gate; neither settled *whether resolution is
-once-only*. `gate pass` is a side-effecting transition (it merges and advances),
-so at-least-once delivery is a real hazard.
-
-55. **A double `gate pass` must not double-merge or double-advance.** A second
-    invocation — network retry, double submission, two authorized operators, or a
-    resume racing another resume — must be a no-op or a clear "already resolved"
-    error, never a second merge. Gate resolution must: (a) act **only** when the
-    pipeline is in the matching `*_pending` state and **atomically** transition out
-    of it, so a concurrent or repeat call observes a non-pending state and stops;
-    (b) make the merge **idempotent** — keyed by the recorded PR + expected head SHA
-    (the §5 drift check, #43), so retrying a merge of an already-merged PR is a
-    no-op, not a duplicate or a hard error; (c) record the verdict once with
-    actor/timestamp. Without this guard the merge side effect is exposed to
-    at-least-once delivery, and a flaky client could merge twice or skip a phase.
-    **Resolved in §4, §5, and §10.**
-
-## PR #183 twenty-second review — exactly-once needs crash recovery, not just concurrency guards
-
-#55 makes repeated gate calls idempotent, but the external merge is outside the
-DB transaction. Aimee has DB1 transaction patterns (`BEGIN IMMEDIATE`), but GitHub
-merge execution happens through `git_pr`/`mcp_git_run`/`gh` after the ledger write,
-so a crash can still land between the local state transition and the remote side
-effect.
-
-56. **`gate pass` needs a durable merge-intent / recovery state before the external
-    merge.** If the implementation atomically leaves `gate*_pending` and then
-    crashes before recording `merge_sha`, restart sees a non-pending pipeline that
-    is neither merged nor reviewable. Conversely, if it merges first and crashes
-    before advancing, restart may try to merge again without knowing the first
-    merge succeeded. The ledger needs an explicit, resumable side-effect protocol:
-    record a gate verdict plus `merge_intent` / `merge_pending` row keyed by PR
-    number + expected head SHA under a DB transaction; execute the merge; then
-    reconcile by reading PR/merge status and record `merge_sha` before advancing to
-    `implementing`/`done`. On resume, `merge_pending` is a first-class state: if the
-    PR is already merged at the expected head, finish the advance; if not, retry or
-    surface the blocked merge reason without losing the verdict. **Resolved in §1,
-    §4, §5, §9, and §10.**
-
-## PR #183 twenty-third review — the gate TTL must not abandon a human's approval
-
-#56 adds `*_merge_pending`, but the gate TTL (#47) was written for the
-*awaiting-human* gate states and does not yet say it stops there.
-
-57. **The unanswered-gate TTL must not apply to `*_merge_pending` — a pass verdict
-    cannot be auto-abandoned because infra is slow.** `roundtable_pipeline_gate_ttl_h`
-    (#47) moves an **unanswered** gate to `abandoned`, which is right while the
-    pipeline waits on a *human*. But `*_merge_pending` is post-pass: the human
-    already approved, and the wait is on the *merge* (hung CI, branch protection,
-    transient `gh` failure). Abandoning that state would silently discard a human's
-    approval and force a full re-review. So the TTL applies **only** to
-    awaiting-human `*_pending` states. A blocked `*_merge_pending` retries with
-    backoff and surfaces the merge blocker, preserving the verdict; it leaves the
-    state only by a successful merge, an explicit operator `cancel`/`abandon` (#31),
-    or — if wanted — a *separate, clearly-named* merge-block escalation timer that
-    **escalates to a human, never auto-abandons**. **Resolved in §4, §5, §6, and §10.**
+> The design below is authoritative and self-contained. It was hardened over 23
+> review rounds; every `(#NN)` reference resolves to **Appendix A — Decision log**
+> at the end, which indexes all 57 findings and their in-tree grounding.
 
 ## Relationship to existing proposals
 
@@ -1607,3 +920,78 @@ ledger) before the full idea→merge pipeline of P2/P3.
   ceilings by default, or one shared set with optional overrides?
 - **DRAFT seeding:** does the `drafting` step take only the idea, or also a
   pointer to sibling/related proposals so the first draft starts grounded?
+
+---
+
+## Appendix A — Decision log (PR #183 review, 57 findings)
+
+This proposal was hardened over 23 review passes against the live tree. Each
+decision below is **already implemented in the design sections above**; this log
+is the compact traceability index for the `(#NN)` references and records the
+key in-tree grounding. Grouped by review round to show how the contract evolved.
+
+**Round 1 — ledger, surfaces, and callable shape (§1, §2, §4, §5, §7–§10).**
+1. No blank-slate `pipeline_run` name — a DB1 `pipelines`/`autopilot` table already exists; namespace or migrate deliberately (§4, §12).
+2. `/v1/runs` (`openai_runs_store`, 256-bounded, non-durable) is not a checkpoint store; the ledger is DB1 (§4).
+3. CLI/API surface explicit — new `pipeline` namespace or `autopilot` extension, no collision (§5, §9).
+4. GitHub/worktree state must be resumable (branch/PR/SHA/mergeability/auth in the ledger) (§4, §5).
+5. No unbounded inline artifacts — store refs + hashes (§2, §4, §11).
+6. Panel-diversity check resolves agent→provider identity, not string uniqueness (§7).
+7. DRAFT and REVIEW use different callable paths (review-only `ensemble_review`) (§1, §2, §8).
+
+**Round 2 — engine feasibility (§1–§4, §8, §11).**
+8. The `ensemble_review` review surface is already on `testing`; dependency is narrow (§8).
+9. DRAFT can't emit a full proposal — artifact is `char[8192]`-capped; it yields a skeleton (§1, §2, §11).
+10–12. Result capture must be durable and **server-worker-owned**, not an agent poll, because `/v1/runs` evicts (§4).
+13. Done-bar rejects `degraded`/`truncated`/`cost_capped`/`deadline_hit`/`cancelled` (§3).
+14. Questions-done bar caps at `ROUNDTABLE_MAX_QUESTIONS` (16) (§3).
+15. Git ops route through Aimee's workspace authority, not raw shell (§4, §5).
+16. Dedicated proposal/impl branches + clean-worktree preflight (§1, §4, §5).
+17. Dependency wording de-duplicated (§8).
+
+**Round 3–5 — capture seam, pass identity, retrieval owner (§2–§4, §8).**
+18. Capture rides the existing `op_run_worker_run` finalize hook (the Hybrid seam) (§4).
+19. `lost_result` auto re-runs the pass (stable `pipeline_pass_id`), not human-escalate (§4).
+20–25. Pipeline-owned async submission: validated `pipeline_pass_id` → private `__pipeline_pass_id`; async-only path; per-attempt rows; hash-pinned replay; persist failed/cancelled terminals (§2, §4, §8).
+26. Agent reads terminal from the **durable ledger row**, not `/v1/runs` (§4).
+27. Capture is mode-appropriate — DRAFT persists artifact ref+hash, REVIEW persists items (§2, §4).
+
+**Round 6–9 — chunked review and origin (§2, §3, §6, §7).**
+28. Chunked review needs an artifact-level aggregate, not independent green slices (§2, §3).
+29. Infra retries get their own ceiling (`…_max_attempts_per_pass`) (§3, §6).
+30. Late finalization can't advance superseded state (current-attempt guard) (§4).
+31. Pipeline cancel/abandon bridges to child `/v1/runs/{id}/stop` (§4, §5).
+32. Store the **whole origin** + db2 chunks; the aggregate **retrieves** (no re-ingest) (§2, §3).
+33. Chunk threshold = the panel's **minimum** participant context budget (§2).
+34. `kb_documents` is a chunk index, not the whole-origin store — keep a separate origin ref (`docs.normalized_text`/blob) (§2, §4).
+35. Review-scoped indexing needs a real cleanup-safe primitive (synthetic project / scoped cleanup) (§2, §8).
+36. Unknown panel context → conservative fallback or hard validation error (§6, §7).
+
+**Round 10–12 — who retrieves, serialization, validity (§1–§4, §6).**
+37. The **orchestrator** retrieves and hands each panelist a self-contained inline unit; panelists aren't assumed to retrieve/read files (§2, §3).
+38. `items_truncated` (HTTP-serializer flag, not a struct field) is terminal-invalid evidence (§3, §4).
+39. Inline review units carry a budgeted assembly manifest (spans, budget, omissions) (§2, §3, §4).
+40. Display-sized item fields aren't durable provenance — keep an identity→spans sidecar (§4).
+41. One canonical `roundtable_result_valid_terminal()` predicate; no consumer checks a subset (§3, §4).
+42. Each revise pass re-ingests and **supersedes** the prior version's chunks (no stale spans) (§2, §3).
+43. Fail-return updates the **same** recorded PR, never a duplicate (§1, §5).
+
+**Round 13–15 — cost scope and parked-gate lifecycle (§3–§6).**
+44. The validity predicate runs on a captured **envelope** (incl. serialization/ledger flags), and never gates capture (§3, §4).
+45. `/v1/pipeline/status` is the KB/corpus route — authoring needs a distinct namespace (§5, §8, §12).
+46. Per-phase cost cap **accumulates across fail-returns**; add a whole-pipeline `…_max_total_cost_usd` (§3, §6).
+47. Parked gates release re-creatable resources (drop+re-ingest index from origin); optional `…_gate_ttl_h` → `abandoned`, never auto-pass (§4, §5, §6).
+48. Admission: a parked gate either holds or releases the single v1 slot (`…_parked_releases_slot`), with branch/PR mutual exclusion (§1, §4, §5, §11, §12).
+49. Whole-pipeline cap must define implementation-spend scope; unknown impl cost = incomplete evidence (§3, §4, §6).
+50. `git_pr` has **no merge action** (only `merge_status`) — pass→merge needs a real executor (§5, §8, §9).
+
+**Round 16–19 — cost provenance and gate authority (§3–§6, §8, §10, §11).**
+51. Implementation spend reads the cost-accounting proposal's db2 `usage_ledger`/`/v1/usage/*`, not a parallel path (§3, §6, §8).
+52. Cost evidence pins `cost_scope`/`cost_source`/version (DB1 `token_audit`/`cost_fold_log` today vs future db2 `usage_ledger`); never mixes sources in one cap decision (§4, §5, §6, §8).
+53. The gate verdict needs authority the driving agent lacks — `CAP_DELEGATE` ≠ gate authority, or the agent self-approves its own merge (§5, §8, §11).
+54. A new `CAP_PIPELINE_GATE` needs a cap-mask migration (`CAPS_ALL` is `0xFFFFu`, bits 0–15 full); else use an operator-principal/UDS-only path (§5, §8, §9, §12).
+
+**Round 20–23 — exactly-once, crash recovery, and approval safety (§1, §4, §5, §6).**
+55. Gate resolution is exactly-once — guarded `*_pending` transition + idempotent merge (PR+head SHA); a double `pass` can't double-merge (§5).
+56. The external merge needs a durable `*_merge_pending` saga state: intent → merge → reconcile→`merge_sha` before advancing; recover on restart (§1, §4, §5).
+57. The unanswered-gate TTL applies **only** to awaiting-human `*_pending`, never `*_merge_pending` — a slow merge can't auto-abandon a human's approval (§4, §5, §6).
