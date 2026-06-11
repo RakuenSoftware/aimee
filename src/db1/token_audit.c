@@ -19,10 +19,10 @@ int db1_token_audit_insert(const db1_token_audit_row_t *row)
    sqlite3_stmt *stmt = NULL;
    static const char *sql =
        "INSERT INTO token_audit"
-       " (session_id, delegation_id, project_name, tool_name, role, model,"
+       " (session_id, delegation_id, project_name, tool_name, role, model, source,"
        "  prompt_tokens, completion_tokens, cache_write_tokens, cache_read_tokens,"
        "  estimated_cost_usd)"
-       " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+       " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
 
@@ -32,11 +32,12 @@ int db1_token_audit_insert(const db1_token_audit_row_t *row)
    sqlite3_bind_text(stmt, 4, row->tool_name ? row->tool_name : "", -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(stmt, 5, row->role ? row->role : "", -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(stmt, 6, row->model ? row->model : "", -1, SQLITE_TRANSIENT);
-   sqlite3_bind_int(stmt, 7, row->prompt_tokens);
-   sqlite3_bind_int(stmt, 8, row->completion_tokens);
-   sqlite3_bind_int(stmt, 9, row->cache_write_tokens);
-   sqlite3_bind_int(stmt, 10, row->cache_read_tokens);
-   sqlite3_bind_double(stmt, 11, row->estimated_cost_usd);
+   sqlite3_bind_text(stmt, 7, row->source ? row->source : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 8, row->prompt_tokens);
+   sqlite3_bind_int(stmt, 9, row->completion_tokens);
+   sqlite3_bind_int(stmt, 10, row->cache_write_tokens);
+   sqlite3_bind_int(stmt, 11, row->cache_read_tokens);
+   sqlite3_bind_double(stmt, 12, row->estimated_cost_usd);
 
    int rc = sqlite3_step(stmt);
    sqlite3_finalize(stmt);
@@ -276,6 +277,67 @@ int db1_token_audit_by_model(int since_hours, db1_token_audit_model_summary_t *o
    while (n < max && sqlite3_step(stmt) == SQLITE_ROW)
    {
       db1_copy_col_text(out[n].model, sizeof(out[n].model), stmt, 0);
+      out[n].calls = sqlite3_column_int(stmt, 1);
+      out[n].prompt_tokens = sqlite3_column_int64(stmt, 2);
+      out[n].completion_tokens = sqlite3_column_int64(stmt, 3);
+      out[n].estimated_cost_usd = sqlite3_column_double(stmt, 4);
+      n++;
+   }
+   sqlite3_finalize(stmt);
+   return n;
+}
+
+int db1_token_audit_by_source(int since_hours, db1_token_audit_source_summary_t *out, int max)
+{
+   if (!out || max <= 0)
+      return 0;
+
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+
+   /* Empty-source rows (legacy entries written before the source was tracked)
+    * surface as "(unattributed)" rather than dropped, mirroring by_model. */
+   static const char *sql_recent =
+       "SELECT CASE WHEN COALESCE(source, '') = '' THEN '(unattributed)' ELSE source END,"
+       " COUNT(*),"
+       " COALESCE(SUM(prompt_tokens), 0),"
+       " COALESCE(SUM(completion_tokens), 0),"
+       " COALESCE(SUM(estimated_cost_usd), 0.0)"
+       " FROM token_audit"
+       " WHERE created_at >= datetime('now', ?)"
+       " GROUP BY 1"
+       " ORDER BY COALESCE(SUM(prompt_tokens), 0) +"
+       "          COALESCE(SUM(completion_tokens), 0) DESC"
+       " LIMIT ?";
+   static const char *sql_all =
+       "SELECT CASE WHEN COALESCE(source, '') = '' THEN '(unattributed)' ELSE source END,"
+       " COUNT(*),"
+       " COALESCE(SUM(prompt_tokens), 0),"
+       " COALESCE(SUM(completion_tokens), 0),"
+       " COALESCE(SUM(estimated_cost_usd), 0.0)"
+       " FROM token_audit"
+       " GROUP BY 1"
+       " ORDER BY COALESCE(SUM(prompt_tokens), 0) +"
+       "          COALESCE(SUM(completion_tokens), 0) DESC"
+       " LIMIT ?";
+   const char *sql = since_hours > 0 ? sql_recent : sql_all;
+   sqlite3_stmt *stmt = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   int param = 1;
+   char since[32];
+   if (since_hours > 0)
+   {
+      snprintf(since, sizeof(since), "-%d hours", since_hours);
+      sqlite3_bind_text(stmt, param++, since, -1, SQLITE_TRANSIENT);
+   }
+   sqlite3_bind_int(stmt, param, max);
+
+   int n = 0;
+   while (n < max && sqlite3_step(stmt) == SQLITE_ROW)
+   {
+      db1_copy_col_text(out[n].source, sizeof(out[n].source), stmt, 0);
       out[n].calls = sqlite3_column_int(stmt, 1);
       out[n].prompt_tokens = sqlite3_column_int64(stmt, 2);
       out[n].completion_tokens = sqlite3_column_int64(stmt, 3);

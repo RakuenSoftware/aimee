@@ -37,6 +37,10 @@ extern "C"
       const char *tool_name;
       const char *role;
       const char *model;
+      /* Origin of the turn: where the request entered aimee. "agent" for
+       * internal agent/delegate execution; ingress handlers set their own
+       * (e.g. "openai-ingress", "anthropic-ingress"). Empty on legacy rows. */
+      const char *source;
       int prompt_tokens;
       int completion_tokens;
       int cache_write_tokens;
@@ -92,6 +96,15 @@ extern "C"
 
    typedef struct
    {
+      char source[64];
+      int calls;
+      int64_t prompt_tokens;
+      int64_t completion_tokens;
+      double estimated_cost_usd;
+   } db1_token_audit_source_summary_t;
+
+   typedef struct
+   {
       char tool_name[DB1_TOKEN_AUDIT_TOOL_LEN];
       char role[DB1_TOKEN_AUDIT_ROLE_LEN];
       int64_t prompt_tokens;
@@ -116,8 +129,12 @@ extern "C"
    int db1_token_audit_by_tool(int since_hours, db1_token_audit_tool_summary_t *out, int max);
 
    /* Per-model aggregates ordered by total prompt+completion tokens DESC.
-    * Pass 0 for all-time. Empty-model rows are excluded. */
+    * Pass 0 for all-time. Empty-model rows surface as "(unattributed)". */
    int db1_token_audit_by_model(int since_hours, db1_token_audit_model_summary_t *out, int max);
+
+   /* Per-source (turn origin) aggregates ordered by total tokens DESC. Pass 0
+    * for all-time. Empty-source rows surface as "(unattributed)". */
+   int db1_token_audit_by_source(int since_hours, db1_token_audit_source_summary_t *out, int max);
 
    /* Dashboard view grouped by (tool_name, role), ordered by estimated
     * cost DESC, newest activity tiebreaker. */

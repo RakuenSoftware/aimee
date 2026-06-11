@@ -1935,6 +1935,9 @@ void agent_log_call(const agent_result_t *result, const char *role)
            * by-model breakdown attributes spend to the real model rather than
            * the agent name. */
           .model = bill_model,
+          /* Internal agent/delegate execution. Ingress handlers tag their own
+           * origin (e.g. "openai-ingress") when they start writing audit rows. */
+          .source = "agent",
           .prompt_tokens = usage.input_tokens,
           .completion_tokens = usage.output_tokens,
           .cache_write_tokens = usage.cache_write_tokens,

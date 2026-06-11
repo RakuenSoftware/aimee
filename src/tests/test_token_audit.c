@@ -210,6 +210,49 @@ static int count_where(const char *col, const char *val)
    return n;
 }
 
+static void test_by_source_groups_and_relabels(void)
+{
+   /* Rows tagged with a turn origin group by source; an untagged (legacy)
+    * row surfaces as "(unattributed)" rather than being dropped. */
+   db1_token_audit_row_t ingress = {
+       .session_id = "src1",
+       .tool_name = "gpt-4o",
+       .role = "implement",
+       .model = "gpt-4o",
+       .source = "openai-ingress",
+       .prompt_tokens = 40,
+       .completion_tokens = 10,
+       .estimated_cost_usd = 0.05,
+   };
+   db1_token_audit_row_t untagged = {
+       .session_id = "src2",
+       .tool_name = "gpt-4o",
+       .role = "implement",
+       .model = "gpt-4o",
+       .source = "", /* legacy row before source was tracked */
+       .prompt_tokens = 5,
+       .completion_tokens = 2,
+       .estimated_cost_usd = 0.01,
+   };
+   assert(db1_token_audit_insert(&ingress) == 0);
+   assert(db1_token_audit_insert(&untagged) == 0);
+
+   db1_token_audit_source_summary_t sources[16];
+   int n = db1_token_audit_by_source(0, sources, 16);
+   assert(n > 0);
+   int saw_ingress = 0, saw_unattributed = 0;
+   for (int i = 0; i < n; i++)
+   {
+      assert(sources[i].source[0] != '\0'); /* no label is ever empty */
+      if (strcmp(sources[i].source, "openai-ingress") == 0)
+         saw_ingress = 1;
+      if (strcmp(sources[i].source, "(unattributed)") == 0)
+         saw_unattributed = 1;
+   }
+   assert(saw_ingress);
+   assert(saw_unattributed);
+}
+
 static void test_agent_log_call_records_served_model(void)
 {
    /* The broken path the model-attribution fix targets: an agent whose
@@ -239,6 +282,8 @@ static void test_agent_log_call_records_served_model(void)
    assert(count_where("model", "codex") == 0);
    /* ...but it is still recorded as the tool/agent identity. */
    assert(count_where("tool_name", "codex") >= 1);
+   /* Internal agent execution is tagged with the "agent" source. */
+   assert(count_where("source", "agent") >= 1);
 }
 
 static void test_dashboard_rows(void)
@@ -264,6 +309,7 @@ int main(void)
    /* These run after the count-sensitive tests because they insert
     * additional rows that would skew the totals/grouped/dashboard counts. */
    test_by_model_relabels_empty();
+   test_by_source_groups_and_relabels();
    test_agent_log_call_records_served_model();
    test_cost_for_delegation();
    db1_shutdown();
