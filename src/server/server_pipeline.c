@@ -944,14 +944,16 @@ static int resubmit_same_pass(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *l
  * (ref + hash, #34), mark the pass done, and transition drafting ->
  * proposal_review — NOT to a PR/gate. */
 /* Create/select the dedicated proposal branch + worktree before writing the
- * proposal file (proposal §1). When a repo_root is recorded and no worktree is
- * selected yet, create a `roundtable/proposal-<id>` branch in a private worktree
- * so the proposal lands on a dedicated branch, not the user's checkout.
- * Best-effort: with no repo / git failure it falls back to an internal file. */
-static void prepare_proposal_workspace(rtp_run_t *run)
+ * proposal file (proposal §1). Returns 0 when a worktree is ready OR no repo is
+ * recorded at all (internal-file mode); returns -1 when a repo_root IS recorded
+ * but the dedicated worktree could not be created — the caller must then refuse
+ * to write rather than mutate the user's checkout (#2). */
+static int prepare_proposal_workspace(rtp_run_t *run)
 {
-   if (run->worktree_path[0] || !run->repo_root[0])
-      return;
+   if (run->worktree_path[0])
+      return 0; /* already selected */
+   if (!run->repo_root[0])
+      return 0; /* no repo -> internal-file mode is acceptable */
    if (!run->head_branch[0])
       snprintf(run->head_branch, sizeof(run->head_branch), "roundtable/proposal-%d", run->id);
    char wt[RTP_PATH_LEN];
@@ -968,23 +970,27 @@ static void prepare_proposal_workspace(rtp_run_t *run)
    int rc = 0;
    char *o = mcp_git_run(cmd, &rc);
    free(o);
-   if (rc == 0)
-      snprintf(run->worktree_path, sizeof(run->worktree_path), "%s", wt);
+   if (rc != 0)
+      return -1; /* do NOT fall back to repo_root — never touch the user checkout */
+   snprintf(run->worktree_path, sizeof(run->worktree_path), "%s", wt);
    rtp_run_update(run);
+   return 0;
 }
 
 /* Write the proposal content into the dedicated worktree as the real working
- * file (the PR content) and commit it on the branch, recording proposal_ref to
- * that path. Falls back to an internal file when no repo/worktree is available. */
-static void write_proposal_file(rtp_run_t *run, const char *content, const char *hash)
+ * file (the PR content) and commit it on the branch, recording proposal_ref.
+ * Returns 0 on success, -1 on any failure (write or real commit failure, or a
+ * repo recorded with no worktree — never writes into repo_root, #2). With no
+ * repo at all it uses the internal-file fallback. */
+static int write_proposal_file(rtp_run_t *run, const char *content, const char *hash)
 {
-   const char *base =
-       run->worktree_path[0] ? run->worktree_path : (run->repo_root[0] ? run->repo_root : NULL);
-   if (!base)
+   if (!run->worktree_path[0])
    {
-      persist_origin(run, RTP_PHASE_PROPOSAL, content, hash); /* internal fallback */
-      return;
+      if (run->repo_root[0])
+         return -1; /* worktree creation failed earlier; refuse the user checkout */
+      return persist_origin(run, RTP_PHASE_PROPOSAL, content, hash); /* no repo -> internal */
    }
+   const char *base = run->worktree_path;
    char rel[RTP_PATH_LEN];
    snprintf(rel, sizeof(rel), "docs/proposals/pending/roundtable-proposal-%d.md", run->id);
    char dir[RTP_PATH_LEN];
@@ -994,26 +1000,29 @@ static void write_proposal_file(rtp_run_t *run, const char *content, const char 
    snprintf(path, sizeof(path), "%s/%s", base, rel);
    FILE *f = fopen(path, "wb");
    if (!f)
-   {
-      persist_origin(run, RTP_PHASE_PROPOSAL, content, hash);
-      return;
-   }
-   fwrite(content, 1, strlen(content), f);
-   fclose(f);
+      return -1;
+   size_t len = strlen(content);
+   size_t wrote = fwrite(content, 1, len, f);
+   int closed = fclose(f);
+   if (wrote != len || closed != 0)
+      return -1; /* do not proceed on a partial/failed write */
    snprintf(run->proposal_ref, sizeof(run->proposal_ref), "%s", path);
    snprintf(run->proposal_origin_hash, sizeof(run->proposal_origin_hash), "%s", hash);
    rtp_run_update(run);
-   /* commit on the dedicated branch so the reviewed file IS the PR content. */
+   /* commit on the dedicated branch so the reviewed file IS the PR content; an
+    * unchanged file (re-review of the same content) is a no-op, not a failure. */
    char *erel = shell_escape(rel);
-   char cmd[RTP_PATH_LEN * 2 + 256];
+   char cmd[RTP_PATH_LEN * 2 + 320];
    size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
    snprintf(cmd + p, sizeof(cmd) - p,
-            "git add '%s' && git commit -q -m 'roundtable proposal #%d (skeleton/revision)' 2>&1",
-            erel ? erel : rel, run->id);
+            "git add '%s' && { git diff --cached --quiet -- '%s' || git commit -q -m 'roundtable "
+            "proposal #%d (skeleton/revision)'; } 2>&1",
+            erel ? erel : rel, erel ? erel : rel, run->id);
    free(erel);
    int rc = 0;
    char *o = mcp_git_run(cmd, &rc);
    free(o);
+   return rc == 0 ? 0 : -1; /* a real add/commit failure stops the pipeline */
 }
 
 static int draft_complete(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *latest,
@@ -1040,10 +1049,30 @@ static int draft_complete(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *lates
    char hash[RTP_CHUNK_HASH_LEN];
    rtp_chunk_hash(skeleton, (int)strlen(skeleton), hash, sizeof(hash));
    /* land the skeleton on a dedicated branch/worktree as the real proposal file
-    * (the PR content), not an internal blob (#1/§1). */
-   prepare_proposal_workspace(run);
-   write_proposal_file(run, skeleton, hash);
+    * (the PR content), not an internal blob (#1/§1). A git failure must NOT
+    * proceed into proposal_review or mutate the user's checkout (#2). */
+   if (prepare_proposal_workspace(run) != 0)
+   {
+      free(skeleton);
+      cJSON *resp = jo_ok();
+      cJSON_AddStringToObject(resp, "action", "escalate");
+      cJSON_AddStringToObject(
+          resp, "note",
+          "could not create the dedicated proposal worktree/branch; human attention required");
+      return server_send_ok(conn, resp);
+   }
+   int wrc = write_proposal_file(run, skeleton, hash);
    free(skeleton);
+   if (wrc != 0)
+   {
+      cJSON *resp = jo_ok();
+      cJSON_AddStringToObject(resp, "action", "escalate");
+      cJSON_AddStringToObject(
+          resp, "note",
+          "could not write/commit the proposal file to the dedicated branch; human attention "
+          "required");
+      return server_send_ok(conn, resp);
+   }
    snprintf(latest->status, sizeof(latest->status), RTP_PASS_DONE);
    rtp_pass_update(latest);
    rtp_run_set_state(run->id, RTP_STATE_PROPOSAL_REVIEW, RTP_PHASE_PROPOSAL);
@@ -1469,6 +1498,25 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
           conn, "pipeline: review needs the artifact (--artifact <diff|proposal>)", NULL);
    }
 
+   /* Proposal-phase REVIEW reviews the working file: write the (possibly revised)
+    * artifact back to the dedicated branch FIRST so the reviewed content is the
+    * PR content, not a stale skeleton (#1/§2). An unchanged artifact is a no-op
+    * commit; a write/commit failure stops rather than reviewing a phantom file. */
+   if (strcmp(mode, RTP_MODE_REVIEW) == 0 && strcmp(phase, RTP_PHASE_PROPOSAL) == 0 && artifact &&
+       artifact[0])
+   {
+      char phash[RTP_CHUNK_HASH_LEN];
+      rtp_chunk_hash(artifact, (int)strlen(artifact), phash, sizeof(phash));
+      if (write_proposal_file(&run, artifact, phash) != 0)
+      {
+         free(captured_diff);
+         free(draft_prompt);
+         return server_send_error(
+             conn, "pipeline: could not sync the revised proposal to its branch before review",
+             NULL);
+      }
+   }
+
    /* For a REVIEW pass, resolve the panel and chunk the artifact when it exceeds
     * the smallest participant's context budget (#28/#33/#37). DRAFT is always a
     * single skeleton pass (#9). */
@@ -1558,7 +1606,8 @@ static int validate_pr_for_merge(rtp_run_t *run, rtp_gate_t *gate, int gate_no, 
       cJSON_AddStringToObject(resp, "note", why);
       return -1;
    }
-   /* worktree cleanliness — surfaced (the merge is remote, so not hard-failed). */
+   /* worktree cleanliness (§5): a dirty dedicated worktree blocks the merge — the
+    * verdict is preserved in *_merge_pending until the tree is clean. */
    if (rtp_git_cwd(run)[0])
    {
       char wc[RTP_PATH_LEN + 64];
@@ -1566,9 +1615,18 @@ static int validate_pr_for_merge(rtp_run_t *run, rtp_gate_t *gate, int gate_no, 
       snprintf(wc + wp, sizeof(wc) - wp, "git status --porcelain 2>/dev/null");
       int wrc = 0;
       char *wo = mcp_git_run(wc, &wrc);
-      if (wo && wo[0])
-         cJSON_AddBoolToObject(resp, "worktree_dirty", 1);
+      int dirty = (wo && wo[0]) ? 1 : 0;
       free(wo);
+      if (dirty)
+      {
+         cJSON_AddBoolToObject(resp, "merged", 0);
+         cJSON_AddBoolToObject(resp, "worktree_dirty", 1);
+         cJSON_AddStringToObject(resp, "state", mp);
+         cJSON_AddStringToObject(resp, "note",
+                                 "the dedicated worktree is dirty; commit/clean it before merging "
+                                 "— verdict preserved.");
+         return -1;
+      }
    }
    return 0;
 }
