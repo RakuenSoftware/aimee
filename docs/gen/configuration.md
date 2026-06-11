@@ -12,16 +12,23 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (95)
+## CLI-settable keys (106)
 
 | Key | Type |
 |-----|------|
 | `autonomous` | bool |
 | `cache_aware_rewrite_enabled` | bool |
+| `cache_min_chars` | int |
+| `cache_shaping_enabled` | bool |
 | `claude_cli_delegate_enabled` | bool |
 | `claude_model` | string |
+| `cost_reward_enabled` | bool |
+| `cost_reward_lambda_pct` | int |
+| `cost_reward_ref_usd_milli` | int |
 | `cross_verify` | bool |
 | `db2_url` | string |
+| `dedup_enabled` | bool |
+| `dedup_window_seconds` | int |
 | `dogfood_autolabel_continuation` | bool |
 | `dogfood_autolabel_repair` | bool |
 | `dogfood_autolabel_repeat_question` | bool |
@@ -43,9 +50,12 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `guardrails_semantic_prompt_threshold` | float |
 | `guardrails_semantic_warn_threshold` | float |
 | `identity_working_profile_injection_enabled` | bool |
+| `ingress_audit_async` | bool |
 | `ingress_max_raw_scans` | int |
 | `ingress_preinject_assembly_budget` | int |
 | `ingress_preinject_enabled` | bool |
+| `ingress_trusted_proxy_secret` | string |
+| `ingress_usage_accounting_enabled` | bool |
 | `integrity_dry_run` | bool |
 | `integrity_enabled` | bool |
 | `kb_api_bearer_token` | string |
@@ -107,28 +117,33 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `openai_key_cmd` | string |
 | `openai_model` | string |
 | `provider` | string |
+| `reasoning_cap_enabled` | bool |
 | `verify_cross_project` | bool |
 | `verify_enabled` | bool |
 | `virtual_context_assembly_budget` | int |
 | `virtual_context_enabled` | bool |
 
-## Config-file sections (38)
+## Config-file sections (43)
 
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`.
 
 - **`aimee`** — `api`
 - **`auxiliary`** — `default_max_tokens`, `default_model`, `default_provider`, `enabled`, `tasks`
+- **`cache_shaping`** — `enabled`, `min_chars`
 - **`charter`** — `hard_constraints`, `safety_axioms`, `tone_boundaries`, `values`, `working_profile_drift_limit`
 - **`compact`** — `enabled`, `head_bytes`, `per_tool`, `tail_bytes`, `threshold`
 - **`computer_use`** — `allowed_domains`, `default_navigation`, `enabled`, `redact_sensitive_screenshots`
 - **`concurrency`** — `default`, `per_model`, `per_provider`, `preempt`
 - **`context`** — `engine`
+- **`cost_reward`** — `enabled`, `lambda_pct`, `ref_usd_milli`
 - **`cross_verify`** — `enabled`, `prompt`, `role`, `verify_cmd`
 - **`db2`** — `vector`
+- **`dedup`** — `enabled`, `window_seconds`
 - **`dogfood`** — `commit_raw`, `enabled`, `inline_tagging`, `log_dir`
 - **`ensemble`** — `aggregator`, `enabled`, `max_cost_usd`, `min_successful`, `reference_models`
 - **`guardrails`** — `semantic`
 - **`identity`** — `working_profile_injection`
+- **`ingress`** — `audit_async`, `trusted_proxy_secret`, `usage_accounting_enabled`
 - **`integrity`** — `dry_run`, `enabled`
 - **`intelligence`** — `bandit`, `bandit_optimize_command`, `calibrate`, `constraint_solver_command`, `demotion`, `kb`, `planner`, `planner_search_command`, `ranker_fuse_command`, `ranking`, `reasoning`, `reasoning_datalog_command`, `synthesize`
 - **`kb`** — `api`, `background_ingest`, `connection_workers`, `curator`, `evidence`, `maintenance`, `mining`, `search_max_results`, `worker_count`
@@ -144,6 +159,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`memory_window`** — `kb_neighbour_expand`, `radius`
 - **`model_meta`** — `capability_routing`, `refresh_minutes`
 - **`otel`** — `endpoint`, `service_name`
+- **`reasoning_cap`** — `enabled`
 - **`retry`** — `base_ms`, `max_attempts`, `max_ms`
 - **`rewind`** — `auto_snapshot`
 - **`roundtable`** — `converge_threshold`, `deadline_ms`, `max_rounds`, `turns`
