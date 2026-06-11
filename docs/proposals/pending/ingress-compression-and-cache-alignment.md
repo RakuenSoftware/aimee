@@ -2,7 +2,8 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#181 eighth review)
+- **Date:** 2026-06-11 (consolidated after eight PR-#181 review rounds; all 35
+  findings verified in-tree and folded into the body)
 - **Charter roles:** Rewrite (envelope compression / cache placement),
   Recall (recovery resolver / rehydration handle), Extract / Gate-Promote (failure-mined
   corrections), Calibrate / Evaluate-Optimize (token + accuracy A/B).
@@ -35,8 +36,8 @@
 
 ## Design at a glance
 
-For readers not following the review history below (gaps 1–34 record how the
-contract was hardened and can be read as an appendix), the design is four
+For readers not following the review history (the "Review findings (resolved)"
+map below records how eight rounds hardened the contract), the design is four
 default-off levers added to the pre-injection path, mined from headroom:
 
 1. **Compress** envelope content over a typed IR — code folder first (§1).
@@ -85,614 +86,65 @@ This proposal sits between three siblings and must not duplicate them:
   `code_search_hit_t` returned to the ingress path; §1 now treats span-enriched
   code entries as a required shape upgrade, not a field that already exists.
 
-## PR #181 review — gaps and how they are resolved
-
-The first revision was directionally useful but under-specified the
-implementation contract. The eight blocking gaps found in review against the
-current tree are captured below, each annotated with where the revised design
-resolves it. The body sections (§1–§8) are rewritten to match.
-
-### 1. The current ingress envelope is not typed enough for the proposed router
-
-`ingress_preinject_build()` currently assembles one rendered string from three
-sources: a compact code-hit list (`ingress_preinject_format_code_block()`), the
-opaque rendered `memory.context_block`, and the optional audit context file. It
-does **not** carry per-entry content-type tags, raw tool-output entries, or a
-structured list of records that a ContentRouter-style compressor can dispatch
-over.
-
-That means §1 cannot be implemented as a small hook over today's final envelope.
-It needs an explicit P0/P1 dependency on a structured envelope IR (or on
-recall-economy's preview/read contract) before rendering. The proposal should
-define that IR minimally: source kind, record id/handle, sensitivity/scope,
-rendered preview, original bytes pointer/handle, byte budget metadata, and the
-compression transform applied. Without that, JSON folding has no reliable target
-and code folding risks re-parsing already-rendered prose.
-
-Related correction: "JSON tool-output entries" are not currently part of the
-pre-injection envelope, so JSON compression should either be scoped to future
-memory/tool-result previews or removed from the first phase.
-
-**→ Resolved in §1.1** (the envelope IR is now P0, defined field-by-field) **and
-§1.2** (the first phase folds only the code block; JSON folding is deferred to
-when typed tool-result previews exist).
-
-### 2. Several "structural" transforms are lossy, not information-preserving
-
-Dropping null/empty JSON fields, eliding repeated array elements, stripping
-comments, and replacing code with signatures + spans can all remove information
-that matters to a task. §1 currently says these are information-preserving for
-the LLM consumer; that is too strong. The safe contract should be:
-
-- the folded resident form is intentionally lossy/summarized unless proven
-  byte-equivalent;
-- every lossy fold must carry an explicit `rehydrate` handle and enough visible
-  metadata for the model to know when to open it;
-- default-on is blocked until the accuracy A/B includes tasks where the omitted
-  detail is necessary and confirms the model actually rehydrates when needed.
-
-The byte-exact original in §3 mitigates loss only if the handle is available,
-authorized, and discoverable in that ingress. It does not make the resident text
-itself information-preserving.
-
-**→ Resolved in §1.3** ("intentionally lossy unless byte-equivalent"; every fold
-carries a visible handle + transform tag) **and §6** (the forced-rehydration
-accuracy gate blocks any default flip).
-
-### 3. Cache-prefix alignment overlaps and conflicts with the cost-accounting proposal
-
-`docs/proposals/pending/ingress-cost-accounting-and-optimizations.md` already
-claims ownership of usage capture, cached-token accounting, and Anthropic
-`cache_control` marking for the ingress envelope. This proposal also claims
-cache-token telemetry and cache placement. The two need an explicit ownership
-split or they will design the same flags and request mutations twice.
-
-Suggested split:
-
-- cost-accounting owns provider usage extraction, USD pricing, ledger writes,
-  `/v1/usage/*`, and generic cache-token reporting;
-- this proposal owns only the byte-placement invariant needed for pre-injected
-  context after the accounting surface exists;
-- the flag names must not fork (`ingress_cache_marking_enabled` vs. any new
-  cache-alignment flag), and benchmarks should consume the same ledger fields.
-
-There is also a premise mismatch: the cost proposal describes the envelope as
-"large and constant across a session", while this proposal correctly treats it
-as volatile per turn. The merged design should state which parts are stable
-enough to cache (system/persona/history) and which parts are intentionally after
-the cache boundary (`<aimee-context>`).
-
-**→ Resolved in §2.1** (ownership ceded: cost-accounting owns marking + the flag;
-this proposal owns only the placement invariant and does not add a duplicate
-cache-marking flag)
-**and §2.2** (the premise is reconciled empirically — the envelope is per-turn
-volatile, so the stable prefix is system/persona/history and `<aimee-context>`
-goes *after* the cache boundary, settled by measured cache reads not assertion).
-
-### 4. Anthropic injection is not a simple stateless-proxy-preserving change
-
-`src/server/anthropic_http.c` explicitly documents the Anthropic Messages path
-as a stateless wire-format proxy that does not run Aimee's agent loop, memory,
-persona, or toolset because Claude Code owns its own context and tools. Injecting
-an Aimee envelope into that path would require:
-
-- extracting a query from Anthropic messages without changing client-owned tool
-  state;
-- calling `ingress_preinject_build()` from the Anthropic path;
-- preserving Anthropic `system` block arrays and `cache_control` metadata instead
-  of flattening everything through `anthropic_system_to_text()`;
-- adding per-request and config gates separate from the existing OpenAI/Codex
-  seam; and
-- proving Claude Code can actually call the advertised Aimee MCP tools if the
-  envelope tells it to `rehydrate` or use a durable pull-handle such as
-  `memory_get`.
-
-The current text says injection can happen "without abandoning" the stateless
-contract because the proxy still forwards. That is not precise enough. The
-proposal should define Anthropic support as a separate opt-in phase with tests
-for direct Anthropic-provider passthrough and non-Anthropic delegate translation.
-
-**→ Resolved in §2.3** (Anthropic is carved out as a separate opt-in phase, P5,
-behind its own gate, with the precise mutation list and the `anthropic_system_to_text()`
-block-array preservation requirement) — the false "without abandoning" claim is
-removed.
-
-### 5. Provider cache semantics are provider-specific, not one placement rule
-
-Anthropic, OpenAI, OpenAI-compatible delegates, and Gemini-style providers expose
-different cache controls. Anthropic has explicit `cache_control` blocks; OpenAI
-prompt caching is automatic and prefix/min-token dependent; many compatible
-providers expose no usable controls. §2 should not imply one "latest point" or
-"breakpoint" abstraction covers every ingress.
-
-Required implementation contract:
-
-- provider capability detection before mutating any request;
-- no-op behavior for providers without explicit cache controls;
-- tests that serialize the exact provider request body and assert that existing
-  client-supplied cache controls are preserved;
-- benchmark output that separates resident-token reduction from realized
-  provider cache reads/writes.
-
-**→ Resolved in §2.4** (a per-provider capability table; no-op default; a
-body-serialization test that asserts client cache controls are preserved) **and
-§6** (resident vs. realized-cache reporting is a distinct acceptance gate).
-
-### 6. Rehydration handles need security, lifetime, and topology rules
-
-An in-process TTL LRU is a reasonable first storage primitive, but the proposal
-does not yet specify the safety contract. Rehydration handles must be:
-
-- scoped to session, workspace, and memory sensitivity/tenant;
-- unguessable or capability-bound, not just short ids;
-- invalidated on source record version/hash changes;
-- safe across concurrent requests and server restarts, or explicitly documented
-  as best-effort;
-- hidden from logs where they would expose access to sensitive originals; and
-- unavailable/expired in a way the model can recover from (`memory_get` /
-  durable source fallback, rerun recall, or clear error text).
-
-Also, the MCP tool surface lives in `server_mcp_call_table.inc` /
-`server_mcp.c`, not only `server_mcp.c`; tool discovery metadata in
-`mcp_tools.c` and tests/goldens must be included in scope.
-
-**→ Resolved in §3.2** (the full handle safety contract: scope, capability-bound
-ids, version invalidation, best-effort-across-restart, log hygiene, expiry
-fallback) **and the Scope line** (`server_mcp_call_table.inc` + `mcp_tools.c` +
-goldens added).
-
-### 7. Failure-mined corrections should route through existing learning machinery
-
-The repo already has a learning proposal surface (`learning_propose`,
-`learning_review`), implicit learning detectors, `interaction_events`, and
-`guardrail_events`. §4 should not write directly to durable memory after mining a
-bad session. It should emit a learning signal/proposal with evidence and let the
-existing review / Gate-Promote machinery decide whether to promote it into a
-memory, rule, or artifact.
-
-The proposed signal sources also need grounding:
-
-- the attention guard's per-session log is a Claude Code hook artifact, not a
-  general server-side session outcome log;
-- "abandoned/retried turn" is not currently a reliable observable across all
-  ingresses;
-- explicit user corrections overlap with `learning_implicit_repeated_correction`
-  and should reuse that path rather than create a parallel detector.
-
-**→ Resolved in §4** (rewritten to emit a `db2_learning_signal_insert` →
-`db2_learning_proposal_insert` signal that the existing review/accept path
-promotes to a sink; no direct memory write). Signal sources are re-grounded on
-the `interaction_event_embeddings` table (`failure_mode`/`cluster_key`); the
-Claude-Code-hook-only nature of the guard log and the "abandoned turn" caveat are
-stated; explicit-correction mining defers to the existing implicit-correction
-detector.
-
-### 8. Validation dependencies are not all complete
-
-The PR adds only this proposal file. `benchmarks/learning/learning_replay.py`
-exists on `origin/testing`, but it is not yet a live compression/rehydration
-accuracy harness: it needs a prediction emitter and fixtures that force
-rehydration. `bench/ingress_token_bench.py` exists, but today it is a preinject
-on/off token bench; it does not yet provide per-stage resident tokens, provider
-cache reads/writes, compression-on/off arms, latency, or correctness outcomes.
-Those harness upgrades are part of the proposal's required work, not existing
-validation.
-
-Add acceptance gates for:
-
-- resident bytes/tokens by section and transform;
-- realized provider cache read/write tokens via the accounting proposal's ledger;
-- answer correctness with forced rehydration-needed cases;
-- handle expiry and unauthorized rehydration behavior; and
-- prompt-injection/sensitivity fixtures for compressed previews and originals.
-
-**→ Resolved in §6** (every gate above is enumerated; the harness upgrades are
-listed as in-scope work; `learning_replay.py` is treated as a partial dependency,
-not a complete gate).
-
-## PR #181 second review — remaining gaps after the update
-
-The updated revision resolves the first eight blockers, but a second pass against
-`origin/testing` found eight remaining implementation gaps (9–16) that must be
-carried by the proposal.
-
-### 9. Code-search hits do not expose symbol spans
-
-`code_search_hit_t` currently carries only `project`, `file_path`, `snippet`, and
-`rank`. `line` / `line_end` exist on `term_hit_t` (`find_symbol`) and
-`definition_t` (`index_structure`), and the MCP `find_symbol` tool renders those
-spans, but `kb_client_index_code_search()` does not parse or return them. The
-code folder therefore cannot simply "use existing `line_start`/`line_end`" from
-the preinject search result.
-
-**→ Resolved in §1.2** by making span enrichment part of P0/P1: either extend
-`/v1/code/search` and `code_search_hit_t` with `line`/`line_end`/`kind`, or run a
-bounded secondary structure lookup per selected file. The first code folder must
-fall back to snippet/path-only folding when spans are absent.
-
-### 10. The compression escape header needs HTTP plumbing
-
-The proposal adds `x-aimee-compress: 0`, but only `X-Aimee-Preinject` is parsed
-today in `server_http.c` and forwarded through a thread-local override. A new
-compression header is not just config work; it needs request-header parsing,
-thread-local/request-scoped state, tests for buffered and streaming routes, and
-OpenAPI/API docs if it becomes a supported header.
-
-**→ Resolved in §1.4** and P1 scope.
-
-### 11. Cache-prefix work must integrate with `payload_rewrite`
-
-The repo already has `payload_rewrite_prefix_hash()`,
-`payload_rewrite_track_request()`, DB1 `payload_rewrite_state`, and the
-`payload_rewrite_status` MCP tool behind `cache_aware_rewrite_enabled`. The
-proposal's placement invariant and prefix-stability tests should not create a
-second prefix-hash/state machine. They must either extend this subsystem or
-explicitly supersede it.
-
-**→ Resolved in §2.5** and P3.
-
-### 12. "Reuse `ingress_cache_marking_enabled`" is too strong
-
-`ingress_cache_marking_enabled` belongs to the cost-accounting proposal's
-request-mutation mechanism. Placement can be behaviorally relevant even when
-marking is off, and it may need shadow telemetry before marking is enabled.
-Tying placement entirely to the marking flag couples two rollout risks.
-
-**→ Resolved in §2.1** by narrowing the claim: no duplicate marking flag, but P3
-may need an internal/shadow placement gate or use `cache_aware_rewrite_enabled`
-for the existing prefix subsystem.
-
-### 13. OpenAI ingress has multiple injection sites
-
-`openai_chat.c` calls `ingress_preinject_build()` in legacy chat/completions,
-Responses buffered continuations, streaming chat/completions, and Responses
-streaming. The proposal says "Codex/OpenAI seam" but P3 cannot be implemented at
-one call site and be done; all four paths need equivalent placement, disable
-semantics, body serialization tests, and continuation behavior checks.
-
-**→ Resolved in §2.6** and P3.
-
-### 14. Failure mining overlaps existing KB mining
-
-`interaction_event_embeddings` are already mined by `src/kb/kb_mining.c`, and
-the recurrence job writes `workflow_pattern` artifacts directly with
-`db2_artifact_write()`. If this proposal introduces a learning-signal path for
-failure mining, it must decide whether to extend/replace that mining job, or it
-will create parallel artifacts/proposals from the same failure clusters.
-
-**→ Resolved in §4.4** by making the mining integration explicit.
-
-### 15. Validation text is stale on `learning_replay.py`
-
-`benchmarks/learning/learning_replay.py` exists on `origin/testing`. The
-remaining gap is not that the file is untracked; it is that the harness is a
-schema/metric runner and still needs a live `aimee learning replay` prediction
-emitter plus compression-specific fixtures.
-
-**→ Resolved in §6**.
-
-### 16. Rehydration assumes the external agent can call Aimee's MCP tools
-
-The reversibility lever (§3) — and, in fact, the existing `explore-with` steer
-shipped in `context-preinjection-ingress.md` — only pays off if the model can
-actually invoke the named tools. `ingress_preinject_format_envelope()` injects
-envelope *text* that *names* tools (`explore-with: …`); on the OpenAI/Codex seam
-`openai_chat.c` forwards the **client's** `tools` array and runs a `function_call`
-loop where tool calls are executed by the client. Injecting text that names
-`rehydrate` does **not** make it callable: the external agent can only call it if
-it has Aimee's MCP server configured on its side, or if the ingress injects the
-tool definition into the request and intercepts the resulting tool call inline.
-The first revision raised reachability only for Anthropic (§2.3/§3.3); it is in
-fact a precondition on **every** ingress, including the primary OpenAI/Codex one.
-
-**→ Resolved in §3.4** (reachability is a stated per-ingress precondition; a
-*lossy* fold is permitted only on an ingress where `rehydrate` reachability is
-proven end-to-end, otherwise the fold degrades to byte-equivalent-only or a
-stand-alone-sufficient preview; reachability becomes a P2 acceptance check, not
-an assumption) — this also makes the §1.3 "lossy is safe because §3 recovers it"
-claim conditional on a tested fact.
-
-## PR #181 third review — remaining gaps after the reachability update
-
-The reachability update closes the largest conceptual hole, but a third pass
-against the current tree found five more gaps that need to be part of the
-proposal before implementation starts.
-
-### 17. New config flags need the full generated config surface
-
-`ingress_compress_enabled`, `ingress_rehydrate_ttl_s`,
-`ingress_rehydrate_max_entries`, and `curator_failure_mining_enabled` do not
-exist in the codebase today. Adding names in prose is not enough: every new flag
-needs an explicit section/field decision, load/save wiring, CLI config
-get/set/list behavior, generated documentation, and tests. Existing related
-surfaces are split today: `ingress_preinject_enabled` is a top-level field,
-while `cache_aware_rewrite_enabled` is exposed under
-`transport.cache_aware_rewrite`. The proposal must decide whether the new fields
-are top-level ingress fields, nested transport fields, or a new section, and it
-must not leave inert names that the operator cannot set or inspect.
-
-**→ Resolved in §1.4, §3.2, §3.5, §4.5, §6, and §7** by making config placement,
-docs generation, and config tests explicit acceptance work.
-
-### 18. Recall-economy's pull-handle is `memory_get`, not a generic `fetch`
-
-The recall-economy proposal's concrete pull surface is a sibling MCP
-`memory_get` tool over the existing `memory.get` backend (`kb_client_memory_get`),
-with `get_context_block` extension only as an option. The current text's generic
-`fetch` verb would fork that design and create handles the agent may not be able
-to resolve. If this proposal wants a generic `fetch`, recall-economy must adopt
-that too; otherwise this proposal should align to `memory_get` for durable
-memory records and reserve `rehydrate` for folded ephemeral/compressed originals.
-
-**→ Resolved in §3.1 and §3.5** by removing the assumed two-verb `fetch`/`rehydrate`
-namespace and aligning the durable read path to recall-economy's `memory_get`
-surface.
-
-### 19. Responses/Codex cache telemetry does not currently carry session state
-
-`agent_execute_messages()` forwards the caller's Responses tools and reports
-tool calls back to the client, but it does not call `payload_rewrite_track_request()`
-and its provider retry call currently passes no session id into the retry/context
-path. If P3 only hooks the older `agent_execute()` path, cache-prefix state and
-prefix hashes will not be session-scoped for the primary Codex wire ingress. The
-proposal must explicitly include the Responses buffered and streaming paths in
-the payload-rewrite/session-id integration, not just the envelope insertion
-points.
-
-**→ Resolved in §2.5, §2.6, §6, and §7** by adding a P3 requirement for
-`agent_execute_messages()` to record the provider-facing prefix in the existing
-payload-rewrite subsystem with real session scope.
-
-### 20. Tool definition injection would expand the server's read authority
-
-The OpenAI/Codex fallback in §3.4 says Aimee could inject a `rehydrate` tool
-definition and intercept the resulting tool call inline. That is a materially
-different security surface from merely naming an MCP tool in text. It would
-create a server-mediated function-call bridge for compressed originals and
-possibly memory/code reads. That bridge must inherit the same route authorization,
-workspace/session scoping, read-only bearer behavior, and remote TCP restrictions
-as the rest of the HTTP/MCP surface; it cannot become an unauthenticated way for
-remote clients to ask Aimee to read hidden originals.
-
-**→ Resolved in §3.4, §3.5, §6, and §8** by making injected-tool interception a
-separate capability-gated implementation path with denial tests.
-
-### 21. Claude Code MCP reachability should be proven from installation config
-
-The proposal currently infers Claude Code reachability from the completed
-context-preinjection proposal. The implementation should prove it from the
-actual integration installer/config and an end-to-end hook-session fixture: the
-model should see the compressed handle and be able to call the registered MCP
-tool in the same session. This is especially important because lossy compression
-is gated on reachability.
-
-**→ Resolved in §3.4 and §6** by weakening the claim from "callable today" to
-"must be validated from installed config" and adding a fixture requirement.
-
-## PR #181 fourth review — internal consistency after the resolver split
-
-The third review split recovery into three resolvers (§3.1: `memory_get` for
-durable memory, code/file-span read for durable code, `rehydrate` for ephemeral),
-but the lossy-fold gate, the byte-exact promise, and the phasing still read as if
-`rehydrate` were the only recovery path. Four consistency gaps follow.
-
-### 22. The reachability gate targets `rehydrate`, but the first phase recovers via a code-span read
-
-§3.4(a) gates a lossy fold on proving **`rehydrate`** is reachable. But the first
-shipped fold is the **code folder** (§1.2), whose resolver is the durable
-code/file-span read surface (§3.1), *not* `rehydrate`. As written, the very first
-phase's reachability check is aimed at the wrong tool — and `rehydrate` may not
-even be built yet when the code folder ships.
-
-**→ Resolved in §3.4** by generalizing the gate to *the fold's resolver*
-(`memory_get` / code-span read / `rehydrate`, whichever a given fold depends on),
-so the code folder is gated on code-span-read reachability — a surface that
-already exists wherever the preinject `explore-with` tools do.
-
-### 23. A re-read pointer does not return the byte-exact pre-fold original
-
-§1.1 calls `original_ref` "the byte-exact pre-fold original," but for durable
-**re-read pointers** the source can drift between fold time (turn N) and read time
-(the agent may have edited the file or the record mid-session). A re-read returns
-the **current** content plus a version/hash drift signal — equal to the pre-fold
-bytes only when nothing changed. Only **stored bytes** (ephemeral) are
-unconditionally byte-exact. The §6 "byte-exact rehydration round-trip" invariant
-silently assumes the stored-bytes case.
-
-**→ Resolved in §1.1** (recovery guarantee split by resolver) **and §6** (the
-round-trip test is split: stored-bytes = byte-exact; re-read pointer = current
-content with a correct drift flag).
-
-### 24. The rehydrate handle store is not on the critical path to the first flip
-
-Because the first fold (code) recovers via a re-read, the in-process handle store
-and the `rehydrate` tool (P2) are not required to ship the code folder or to take
-its forced-rehydration accuracy A/B. The handle store is only needed once
-**ephemeral** folding (JSON/tool-result) lands, since that is the only data that
-cannot be re-read.
-
-**→ Resolved in §7** by moving the handle store onto the ephemeral-folding path
-and letting P1's code folder reach its default-flip candidate on code-span-read
-reachability alone — shortening the path to the first measurable win.
-
-### 25. "Claude config has Aimee's MCP registered" is a different install step from the hooks
-
-The done context-preinjection proposal wired Claude Code **hooks**
-(SessionStart/UserPromptSubmit/PreCompact/PreToolUse) — it did not necessarily
-register Aimee's **MCP server** with the client. Hooks inject context; they do not
-make `memory_get`/`rehydrate` callable. Reachability depends on the separate MCP
-registration step, which the hook installer may not perform.
-
-**→ Resolved in §3.4** by stating the two installer actions are distinct and that
-the reachability fixture must assert the MCP-tool registration, not just the hook
-wiring.
-
-## PR #181 fifth review — callable resolver surfaces and generated artifacts
-
-The fourth review made the resolver split internally consistent, but another
-pass against the current tree found five implementation gaps around *whether the
-named resolvers actually exist on the surfaces the envelope steers the agent to*.
-
-### 26. Durable code-span read is not an Aimee MCP tool today
-
-`ingress_preinject.c` steers co-registered agents to
-`find_symbol, lsp_references, ast_grep_search, search_graph, get_context_block`.
-The MCP call table exposes `find_symbol`, but that tool returns file paths and
-line ranges only; it does not return file contents. The MCP tool list does not
-currently expose `read_file`, `code_search`, or a range-read tool. Those exist in
-the delegate/agent toolset, but not as Aimee MCP tools. Therefore the fourth
-review's claim that the code folder can recover via an "existing durable
-code/file-span read surface" is true only for clients that already have their own
-filesystem tools, not for the Aimee MCP surface that the envelope advertises.
-
-**→ Resolved in §3.1, §3.4, §3.5, §6, §7, and §8** by requiring either a real
-Aimee MCP `code_span_get`/range-read resolver with tool metadata and auth tests,
-or an explicit per-client native-file-tool reachability proof before lossy code
-folds are allowed.
-
-### 27. `memory_get` is a proposal dependency, not an existing MCP tool
-
-The backend chain exists (`memory.get` / `kb_client_memory_get`), but
-`mcp_build_tools_list()` and `server_mcp_call_table.inc` do not expose a
-`memory_get` MCP tool today. If this proposal emits memory preview handles before
-the recall-economy proposal lands, the model will see handles it cannot open.
-
-**→ Resolved in §3.1, §3.5, and §7** by making recall-economy's `memory_get`
-tool either an explicit prerequisite or an in-scope wrapper with metadata,
-goldens, and handler wiring.
-
-### 28. The goal text still promises a rehydration handle for every folded entry
-
-After the resolver split, durable code and durable memory do not recover through
-the rehydration handle store; they recover through code-span read or `memory_get`.
-The goal section still says every resident form is paired with a rehydration
-handle, which would reintroduce unnecessary handle-store work for durable data
-and contradict §1.1's re-read-pointer design.
-
-**→ Resolved in the Goal and §3.1** by replacing "rehydration handle" with
-"recovery resolver" for durable folds and reserving `rehydrate` for ephemeral
-stored bytes.
-
-### 29. OpenAPI changes require regenerating the embedded server spec
-
-The proposal scopes `api/openapi-server-v1.yaml`, but `/v1/openapi.yaml` and
-`/v1/openapi.json` are served from generated `src/server/openapi_server_data.h`.
-`src/Makefile` regenerates that header from the YAML. If `X-Aimee-Compress` or
-any other request header becomes public documentation, updating only the YAML
-leaves the runtime-served spec stale.
-
-**→ Resolved in §1.4, §6, and §7** by adding the generated header and API
-conformance/docs generation to the acceptance work.
-
-### 30. Inline Responses interception is a state-machine change, not just a tool definition
-
-`agent_execute_messages()` is deliberately a wire adapter: it forwards the
-client's `tools` array, calls the provider once, and surfaces `function_call`
-items back to Codex for the client to execute. It does not run Aimee's agent
-tool loop. If Aimee injects a synthetic `rehydrate` or `code_span_get` function
-definition, the provider can return a synthetic function call that Aimee must
-consume itself, produce a `function_call_output`, continue the provider turn,
-and hide or account for that internal call in both buffered and SSE Responses.
-Otherwise the synthetic call leaks to Codex as an unknown client tool.
-
-**→ Resolved in §2.6, §3.5, §6, and §8** by making inline interception a separate
-request/response state-machine design with call-id handling, streaming parity,
-and tests that synthetic resolver calls are not leaked to the client.
-
-## PR #181 sixth review — net token economics, not just resident reduction
-
-The first five rounds hardened the *mechanism* (resolvers, handles, reachability,
-security, generated artifacts). One economic gap remains: nothing yet proves the
-levers net out positive once the agent's recovery round-trips are counted.
-
-### 31. Validation measures resident reduction but not net cost or recovery rate
-
-A lossy fold saves resident tokens on the turn it is injected, but if the agent
-then calls the resolver (`code_span_get` / `memory_get` / `rehydrate`) to recover
-the folded-out detail, that round-trip costs a tool call **plus the full recovered
-span** — often as many tokens as were saved, plus latency. The headline "token
-reduction" therefore only holds when recovery is *rare*. §6 measures resident
-reduction, realized cache, and forced-rehydration correctness, but never the
-**net** token delta (resident savings − recovery overhead) nor the **recovery
-rate** that determines the sign of that delta. On body-heavy task classes, net
-savings can be near zero or negative while resident reduction still looks large —
-the same trap behind headroom's resident-only "60–95%" numbers.
-
-**→ Resolved in §6** (a net-economics gate: report recovery rate and net
-per-session token delta including resolver round-trips, by task class; the §1
-default flip requires **net** positive, not just resident reduction) **and §8**
-(recovery-cost risk).
-
-## PR #181 seventh review — source authority and metric attribution
-
-The sixth review added the right net-economics gate, but another pass through the
-codebase found three places where the implementation contract still needs to be
-tighter.
-
-### 32. `code_span_get` must respect workspace-provider authority
-
-Adding a server-side code-span resolver cannot simply open `project/file_path`
-from the server filesystem. Aimee now has a workspace-provider boundary:
-`shared` reads local files, `detached` marshals file ops over the runner channel,
-and `mirror` may serve a reconstructed checkout. The code index can identify a
-path, but the authoritative source content for the active session may live behind
-the workspace provider or client-native tools. A resolver that bypasses that
-boundary can read stale mirror content, fail for detached workspaces, or leak a
-server path unrelated to the user's active workspace.
-
-**→ Resolved in §3.1, §3.4, §3.5, §6, §7, and §8** by requiring `code_span_get`
-to resolve through the active workspace provider / runner channel, or by making
-client-native `read_file` reachability the only allowed recovery path for those
-workspaces.
-
-### 33. Server-dispatch `index.structure` drops `line_end`
-
-The KB HTTP `/v1/code/structure` endpoint emits `line_end`, and
-`kb_client_index_structure()` parses it, but the server NDJSON/RPC
-`handle_index_structure()` currently serializes only `name`, `kind`, and `line`.
-Any client using the server-dispatch `index.structure` route to enrich spans will
-lose the end line and fall back to start-line-only spans. That makes a range-read
-resolver under-specified and risks fetching too little or too much source.
-
-**→ Resolved in §1.2, §3.1, and §6** by making `line_end` propagation through the
-server-dispatch route and tests part of span-enrichment work.
-
-### 34. Net-token attribution needs compression/resolver telemetry, not aggregate usage only
-
-The sixth review correctly gates on resident-saved-minus-recovery-spent tokens,
-but `token_tracker_t` and the current provider usage paths expose aggregate
-request usage, not which tokens came from a specific compressed entry, resolver
-call, recovered span, or synthetic Responses continuation. Without per-entry
-transform telemetry, the benchmark can show a net session delta but cannot decide
-which fold type, task class, or resolver should remain enabled.
-
-**→ Resolved in §1.1, §6, and §7** by adding per-entry compression accounting:
-entry id, transform, resident tokens saved, resolver invoked/not invoked,
-recovered bytes/tokens, provider round-trips, and latency.
-
-## PR #181 eighth review — the "low-risk first phase" is no longer low-risk
-
-Rounds 5–7 attached a heavy dependency tail to the code folder — a `code_span_get`
-MCP tool that does not exist (#26), workspace-provider authority (#32), a
-server-dispatch `line_end` fix (#33), reachability proof (#16/#22), and per-entry
-telemetry (#34). The phasing still calls this the lowest-risk first phase; it no
-longer is. One re-sequencing recovers an immediate win.
-
-### 35. Split byte-equivalent folding (zero-dependency) from lossy folding (full tail)
-
-§3.4(b) already exempts **non-lossy, byte-equivalent** folds from needing any
-resolver. Blank-line and trailing-whitespace collapse remove provably-redundant
-bytes and lose nothing — so they need no `code_span_get`, no workspace-provider
-authority, no reachability proof, no handle store, and they trivially pass the
-net-economics gate (#31) because the recovery rate is zero (nothing is folded
-out). The proposal currently bundles these with comment-strip and signature+span
-under one "lossy-by-contract" code folder (P1), which forces the entire dependency
-tail before *any* default flip and forfeits a real, immediate benefit.
-
-**→ Resolved in §1.2, §1.3, and §7** by splitting the code folder into **P1a**
-(byte-equivalent only — the true low-risk first flip, no resolver/authority/
-telemetry dependency) and **P1b** (lossy comment/span folding — carries the full
-tail from #16/#22/#26/#32/#33/#34).
+## Review findings (resolved)
+
+Eight review rounds against the live tree hardened this contract; all 35 findings
+are resolved in the body sections (§1–§8) and were re-verified in-tree — the seven
+load-bearing code claims especially: the five OpenAI/Responses injection sites in
+`openai_chat.c`, the server-dispatch `index.structure` route dropping `line_end`
+(the KB HTTP route emits it), the absent `memory_get`/`code_span_get` MCP tools,
+the `payload_rewrite` prefix subsystem, the `db2/learning.*` signal→proposal
+pipeline, `interaction_event_embeddings` + the `kb_mining.c` recurrence job, and
+the `agent_execute_messages()` Responses path. The findings are grouped by theme
+below; each `#N` is the stable reference used by the "(resolves review #N)" tags
+in the body.
+
+- **Envelope IR & compression (§1).** #1 the envelope is one opaque string, not a
+  typed IR a router can dispatch over → §1.1. #9 `code_search_hit_t` carries no
+  symbol spans, and #33 the server-dispatch `index.structure` route drops
+  `line_end` (the KB HTTP route emits it) → §1.2. #2 folds are lossy, not
+  information-preserving, and #23 a durable re-read returns *current* content with
+  a drift signal, not byte-exact pre-fold bytes → §1.1/§1.3. #35 split
+  byte-equivalent (P1a, zero-dependency) from lossy (P1b) folding → §1.2/§7. #10
+  the `X-Aimee-Compress` escape needs real HTTP plumbing and #29 OpenAPI edits
+  must regenerate the embedded server spec → §1.4. #34 net-saving attribution
+  needs per-entry compression/resolver telemetry, not aggregate usage → §1.1/§6.
+- **Cache-prefix placement (§2).** #3/#12 the marking mechanism, ledger, and
+  `ingress_cache_marking_enabled` belong to the cost-accounting proposal; this one
+  owns only the placement invariant → §2.1 (the envelope-volatile vs
+  "stable-anchor" premise mismatch is settled empirically → §2.2). #4 Anthropic
+  injection is not a free stateless-proxy-preserving change → §2.3/P5. #5 cache
+  controls are provider-specific — capability table, no-op default → §2.4. #11
+  reuse the existing `payload_rewrite` prefix subsystem, and #19 the Responses
+  path (`agent_execute_messages()`) carries no session state for prefix telemetry
+  → §2.5. #13 `ingress_preinject_build()` is called at five OpenAI sites, and #30
+  inline Responses tool interception is a full continuation state machine → §2.6.
+- **Recovery resolvers & rehydration (§3).** #6 handles need scope, capability-
+  binding, version invalidation, topology, and log-hygiene rules → §3.2. #18/#27
+  the durable pull-handle is recall-economy's `memory_get` (a backend, not yet an
+  MCP tool), not a generic `fetch` → §3.1. #26/#22 durable code recovery needs a
+  callable `code_span_get`/range read (which does not exist — `find_symbol`
+  returns locations only), and the first lossy phase gates on *that* reachability,
+  not on `rehydrate` → §3.1/§3.4. #16/#21/#25 resolver reachability is a
+  per-ingress precondition proven from the installed MCP config, distinct from the
+  context-preinjection *hooks* → §3.4. #20/#32 injected tools and a server-side
+  `code_span_get` must respect route auth and the workspace-provider boundary →
+  §3.5. #24/#28 durable folds never need the handle store; only ephemeral folds do
+  (P2 vs P2e) → §3.1/§7.
+- **Failure mining (§4).** #7 route corrections through the existing
+  `db2/learning.*` signal→proposal→review pipeline, not a direct memory write →
+  §4.1. #14 the `kb_mining.c` recurrence job already promotes the same
+  `interaction_event_embeddings` clusters → refactor it or use a disjoint dedup
+  key → §4.4.
+- **Config surface (cross-cutting).** #17 every new flag
+  (`ingress_compress_enabled`, `ingress_rehydrate_*`, the failure-mining gate)
+  needs full load/save, CLI, generated docs, and config-surface tests, or it is a
+  dead switch → §1.4/§3.5/§4.5.
+- **Validation (§6).** #8/#15 the harnesses are not pre-existing —
+  `learning_replay.py` needs the live prediction wire and `ingress_token_bench.py`
+  needs per-stage, cache, and correctness arms → §6 (in scope). #31 the
+  default-flip gate is **net** token economics (resident savings − recovery
+  round-trips, by task class), not resident reduction alone → §6.
 
 ## Goal
 
