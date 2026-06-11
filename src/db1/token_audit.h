@@ -55,6 +55,17 @@ extern "C"
        * with no agent_log row). Lets agent stats join 1:1 instead of by the lossy
        * (agent_name, role) key. */
       long long agent_log_id;
+      /* Idempotency + attribution (proposal §2/#3). request_id is the ingress
+       * request id; attempt distinguishes retries of the same request. Together
+       * with source they form the idempotency key: a row with a non-empty
+       * request_id is inserted at most once per (source, request_id, attempt), so
+       * a retried or late-finalized provider call cannot double-count. principal
+       * is the account/tenant boundary of the client (e.g. "uid:1000"). All
+       * default to empty; empty request_id disables the idempotency guard for
+       * that row (internal agent rows). NULL == empty. */
+      const char *request_id;
+      int attempt;
+      const char *principal;
       int prompt_tokens;
       int completion_tokens;
       int cache_write_tokens;
@@ -62,8 +73,14 @@ extern "C"
       double estimated_cost_usd;
    } db1_token_audit_row_t;
 
-   /* Insert one audit row. Returns 0 on success, -1 on error. */
+   /* Insert one audit row. Returns 0 on success, -1 on error. A row carrying a
+    * non-empty request_id is inserted with idempotency: a duplicate
+    * (source, request_id, attempt) is ignored (still returns 0), never double-counted. */
    int db1_token_audit_insert(const db1_token_audit_row_t *row);
+
+   /* Create the (source, request_id, attempt) idempotency index on the live DB.
+    * Idempotent; called once after schema reconcile at init. */
+   void db1_token_audit_ensure_idem_index(void);
 
    /* Sum estimated_cost_usd across rows tagged with this delegation_id.
     * Returns 0.0 for unknown delegation or DB-not-initialized. Used by
@@ -134,19 +151,20 @@ extern "C"
     * Pass 0 for all-time. */
    int db1_token_audit_totals(int since_hours, db1_token_audit_totals_t *out);
 
-   /* Realized-vs-estimated-vs-avoided spend breakdown (proposal §7). The single
-    * SQL authority for spend semantics: it groups token_audit cost by usage_kind
-    * so consumers report realized spend separately from estimated, avoided, and
-    * partial rows rather than copy-pasting `WHERE usage_kind = 'realized'`.
-    * `spend_cost_usd` is the billable total (realized + estimated + partial);
-    * avoided rows (dedup-skipped) are reported but excluded from spend. */
+   /* Realized-vs-estimated-vs-avoided-vs-partial spend breakdown (proposal §7).
+    * The single SQL authority for spend semantics: it groups token_audit cost by
+    * usage_kind so consumers report realized spend separately from estimated,
+    * avoided, and partial rows rather than copy-pasting a WHERE clause.
+    * `spend_cost_usd` is the billable total and is REALIZED ONLY — estimated
+    * (no provider usage), avoided (dedup-skipped), and partial (aborted) rows are
+    * reported individually but are never folded into the billable total. */
    typedef struct
    {
-      double realized_cost_usd;  /* provider-reported usage */
+      double realized_cost_usd;  /* provider-reported usage (the billable spend) */
       double estimated_cost_usd; /* no provider usage; aimee-estimated */
       double avoided_cost_usd;   /* dedup-skipped; NOT counted as spend */
-      double partial_cost_usd;   /* partially-attributed */
-      double spend_cost_usd;     /* realized + estimated + partial (excludes avoided) */
+      double partial_cost_usd;   /* aborted mid-stream; NOT counted as spend */
+      double spend_cost_usd;     /* realized only — excludes estimated/avoided/partial */
    } db1_token_audit_spend_t;
 
    int db1_token_audit_spend_breakdown(int since_hours, db1_token_audit_spend_t *out);

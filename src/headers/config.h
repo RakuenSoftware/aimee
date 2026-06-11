@@ -874,6 +874,26 @@ typedef struct config
     * alters the stateless /v1/messages proxy or any non-Anthropic provider. */
    int cache_shaping_enabled;
 
+   /* Ingress cost-accounting rollout knobs (ingress.*; §2/§4/#3).
+    * ingress_usage_accounting_enabled: 0 = off (default), 1 = on. Master gate for
+    *   writing ingress cost rows (OpenAI/Codex + Anthropic /v1/messages + /v1/runs).
+    *   Off by default per the flag-rollout program; flip to begin accounting.
+    * ingress_audit_async: 0 = write the cost row inline (default), 1 = hand it to
+    *   a background writer so the response is not blocked on the DB insert.
+    * ingress_trusted_proxy_secret: shared secret that authorises a front proxy to
+    *   stamp X-Aimee-Principal / X-Aimee-Source on a request. EMPTY (default) means
+    *   NO client-supplied principal/source is ever trusted — the server derives the
+    *   principal from the kernel-verified UDS peer uid instead. A request is trusted
+    *   only when it presents X-Aimee-Proxy-Authorization equal to this secret.
+    * dedup_window_seconds: §4 dedup TTL (default 5).
+    * cache_min_chars: §3 only cache-marks a system prompt at least this many bytes
+    *   long, so tiny prompts are not marked (default 0 = always mark when on). */
+   int ingress_usage_accounting_enabled;
+   int ingress_audit_async;
+   char ingress_trusted_proxy_secret[128];
+   int dedup_window_seconds;
+   int cache_min_chars;
+
    /* Neural-assisted semantic guardrails (guardrails.semantic.*).
     * semantic_enabled: 0 = off (default), 1 = on.
     * semantic_dry_run: 1 = shadow mode — score is logged but never changes outcome

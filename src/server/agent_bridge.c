@@ -199,6 +199,11 @@ cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSO
     * path. Default-off so the flag-rollout program can flip it deliberately. */
    config_t cfg;
    int cache_marking = (config_load(&cfg) == 0 && cfg.cache_shaping_enabled) ? 1 : 0;
+   /* Skip cache-marking a system prompt below the configured minimum size: tiny
+    * prefixes are not worth a cache breakpoint (cache_min_chars, default 0). */
+   if (cache_marking && cfg.cache_min_chars > 0 &&
+       (!system_prompt || (int)strlen(system_prompt) < cfg.cache_min_chars))
+      cache_marking = 0;
    agent_anthropic_set_system(req, system_prompt, cache_marking);
 
    if (safe_messages)

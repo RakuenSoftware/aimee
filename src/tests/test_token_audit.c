@@ -402,10 +402,12 @@ static void test_agent_stats_join_is_1to1(void)
    assert(stats[0].total_estimated_cost_usd > 0.29 && stats[0].total_estimated_cost_usd < 0.31);
 }
 
-static void test_spend_breakdown_excludes_avoided(void)
+static void test_spend_breakdown_realized_only(void)
 {
    /* The §7 spend authority groups cost by usage_kind. Measure deltas against a
-    * baseline so this is independent of the rows other tests already inserted. */
+    * baseline so this is independent of the rows other tests already inserted.
+    * Billable spend is realized ONLY: estimated, avoided, and partial are
+    * reported separately but never folded into the total. */
    db1_token_audit_spend_t before;
    assert(db1_token_audit_spend_breakdown(0, &before) == 0);
    db1_token_audit_totals_t tot_before;
@@ -429,9 +431,16 @@ static void test_spend_breakdown_excludes_avoided(void)
                                     .model = "gpt-4o",
                                     .usage_kind = "avoided",
                                     .estimated_cost_usd = 1.00};
+   db1_token_audit_row_t partial = {.session_id = "sb-part",
+                                    .tool_name = "gpt-4o",
+                                    .role = "implement",
+                                    .model = "gpt-4o",
+                                    .usage_kind = "partial",
+                                    .estimated_cost_usd = 0.10};
    assert(db1_token_audit_insert(&realized) == 0);
    assert(db1_token_audit_insert(&estimated) == 0);
    assert(db1_token_audit_insert(&avoided) == 0);
+   assert(db1_token_audit_insert(&partial) == 0);
 
    db1_token_audit_spend_t after;
    assert(db1_token_audit_spend_breakdown(0, &after) == 0);
@@ -439,19 +448,53 @@ static void test_spend_breakdown_excludes_avoided(void)
    double d_real = after.realized_cost_usd - before.realized_cost_usd;
    double d_est = after.estimated_cost_usd - before.estimated_cost_usd;
    double d_avoid = after.avoided_cost_usd - before.avoided_cost_usd;
+   double d_part = after.partial_cost_usd - before.partial_cost_usd;
    double d_total = after.spend_cost_usd - before.spend_cost_usd;
    assert(d_real > 0.249 && d_real < 0.251);
    assert(d_est > 0.499 && d_est < 0.501);
    assert(d_avoid > 0.999 && d_avoid < 1.001);
-   /* Billable total moved by realized + estimated only — avoided is excluded. */
-   assert(d_total > 0.749 && d_total < 0.751);
+   assert(d_part > 0.099 && d_part < 0.101);
+   /* Billable total moved by the realized $0.25 ONLY. */
+   assert(d_total > 0.249 && d_total < 0.251);
 
-   /* The legacy totals reader also excludes the avoided row: its cost delta is
-    * realized + estimated ($0.75), never the $1.00 avoided. */
+   /* The legacy totals reader is realized-only too: cost delta is $0.25, never
+    * the estimated/avoided/partial rows. */
    db1_token_audit_totals_t tot_after;
    assert(db1_token_audit_totals(0, &tot_after) == 0);
    double d_cost = tot_after.estimated_cost_usd - tot_before.estimated_cost_usd;
-   assert(d_cost > 0.749 && d_cost < 0.751);
+   assert(d_cost > 0.249 && d_cost < 0.251);
+}
+
+static void test_idempotency_guard(void)
+{
+   /* Two inserts with the same (source, request_id, attempt) collapse to one row
+    * — a retried/late-finalized provider call cannot double-count. A different
+    * attempt, or an empty request_id, is not constrained. */
+   db1_token_audit_row_t a = {.tool_name = "gpt-4o",
+                              .model = "gpt-4o",
+                              .source = "openai-ingress",
+                              .request_id = "req-IDEM-1",
+                              .attempt = 0,
+                              .estimated_cost_usd = 0.10};
+   assert(db1_token_audit_insert(&a) == 0);
+   assert(db1_token_audit_insert(&a) == 0); /* duplicate ignored, still rc 0 */
+   assert(count_where("request_id", "req-IDEM-1") == 1);
+
+   /* A second attempt of the same request is a distinct row. */
+   db1_token_audit_row_t a2 = a;
+   a2.attempt = 1;
+   assert(db1_token_audit_insert(&a2) == 0);
+   assert(count_where("request_id", "req-IDEM-1") == 2);
+
+   /* Empty request_id is never deduped (internal rows): two identical inserts
+    * both land. */
+   db1_token_audit_row_t bare = {
+       .tool_name = "gpt-4o", .model = "gpt-4o", .source = "agent", .estimated_cost_usd = 0.01};
+   assert(db1_token_audit_insert(&bare) == 0);
+   assert(db1_token_audit_insert(&bare) == 0);
+   /* Both bare rows present (plus any earlier 'agent'-source rows from this run);
+    * assert at least the two we just inserted carry an empty request_id. */
+   assert(count_where("request_id", "") >= 2);
 }
 
 static void test_dashboard_rows(void)
@@ -483,7 +526,8 @@ int main(void)
    test_ingress_source_override();
    test_agent_stats_join_is_1to1();
    test_cost_for_delegation();
-   test_spend_breakdown_excludes_avoided();
+   test_spend_breakdown_realized_only();
+   test_idempotency_guard();
    db1_shutdown();
    printf("test_token_audit: ok\n");
    return 0;

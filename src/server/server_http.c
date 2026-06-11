@@ -1460,11 +1460,17 @@ static long http_peer_uid(int fd, int is_tcp)
 /* Populate the thread-local request context (#3) from the socket and headers so
  * the buffered ingress handlers, the audit writer, and §4 dedup can read a
  * request id, idempotency key, principal, and transport without threading them
- * through every signature. The Unix-domain socket is trusted (same host); on it
- * a proxy/client may stamp X-Aimee-Principal / X-Aimee-Source. A TCP request is
- * untrusted: those headers are ignored so a remote caller cannot spoof another
- * account's attribution. The idempotency key is read on any transport (it only
- * ever dedups the caller's own identical requests). */
+ * through every signature.
+ *
+ * Trust model: the principal is, by default, derived from the KERNEL-VERIFIED
+ * Unix-domain peer uid (uid:N) — the server's own attribution, which a client
+ * cannot forge. A client/proxy-supplied X-Aimee-Principal / X-Aimee-Source is
+ * honoured ONLY when the request presents X-Aimee-Proxy-Authorization equal to
+ * the configured ingress_trusted_proxy_secret. Being on the local socket is NOT
+ * sufficient — a same-host, same-uid non-proxy client must not be able to spoof
+ * another account's attribution. With no secret configured, no client-supplied
+ * principal/source is ever trusted. The idempotency key is read on any transport
+ * (it only ever dedups the caller's own identical requests). */
 static void populate_request_context(int fd, int is_tcp, const char *buf, const char *request_id)
 {
    request_context_t ctx;
@@ -1472,9 +1478,23 @@ static void populate_request_context(int fd, int is_tcp, const char *buf, const 
    snprintf(ctx.request_id, sizeof(ctx.request_id), "%s", request_id ? request_id : "");
    ctx.transport = is_tcp ? REQ_TRANSPORT_TCP : REQ_TRANSPORT_UDS;
    ctx.peer_uid = http_peer_uid(fd, is_tcp);
-   ctx.trusted = is_tcp ? 0 : 1;
+   ctx.trusted = 0;
 
    http_header(buf, "Idempotency-Key", ctx.idempotency_key, sizeof(ctx.idempotency_key));
+
+   /* Server-derived principal from the kernel-verified UDS peer uid. */
+   if (ctx.peer_uid >= 0)
+      snprintf(ctx.principal, sizeof(ctx.principal), "uid:%ld", ctx.peer_uid);
+
+   /* A proxy is trusted to stamp identity only by presenting the shared secret. */
+   config_t cfg;
+   if (config_load(&cfg) == 0 && cfg.ingress_trusted_proxy_secret[0])
+   {
+      char proxy_auth[160] = "";
+      if (http_header(buf, "X-Aimee-Proxy-Authorization", proxy_auth, sizeof(proxy_auth)) &&
+          strcmp(proxy_auth, cfg.ingress_trusted_proxy_secret) == 0)
+         ctx.trusted = 1;
+   }
 
    if (ctx.trusted)
    {
@@ -1482,8 +1502,6 @@ static void populate_request_context(int fd, int is_tcp, const char *buf, const 
       char source[64] = "";
       if (http_header(buf, "X-Aimee-Principal", principal, sizeof(principal)) && principal[0])
          snprintf(ctx.principal, sizeof(ctx.principal), "%s", principal);
-      else if (ctx.peer_uid >= 0)
-         snprintf(ctx.principal, sizeof(ctx.principal), "uid:%ld", ctx.peer_uid);
       if (http_header(buf, "X-Aimee-Source", source, sizeof(source)) && source[0])
          snprintf(ctx.source, sizeof(ctx.source), "%s", source);
    }

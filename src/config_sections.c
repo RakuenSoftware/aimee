@@ -996,6 +996,32 @@ void config_parse_transport_section(config_t *cfg, cJSON *root)
       item = cJSON_GetObjectItemCaseSensitive(csh, "enabled");
       if (cJSON_IsBool(item))
          cfg->cache_shaping_enabled = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(csh, "min_chars");
+      if (cJSON_IsNumber(item) && item->valuedouble >= 0)
+         cfg->cache_min_chars = (int)item->valuedouble;
+   }
+
+   cJSON *ing = cJSON_GetObjectItemCaseSensitive(root, "ingress");
+   if (cJSON_IsObject(ing))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(ing, "usage_accounting_enabled");
+      if (cJSON_IsBool(item))
+         cfg->ingress_usage_accounting_enabled = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(ing, "audit_async");
+      if (cJSON_IsBool(item))
+         cfg->ingress_audit_async = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(ing, "trusted_proxy_secret");
+      if (cJSON_IsString(item) && item->valuestring)
+         snprintf(cfg->ingress_trusted_proxy_secret, sizeof(cfg->ingress_trusted_proxy_secret),
+                  "%s", item->valuestring);
+   }
+
+   cJSON *ddw = cJSON_GetObjectItemCaseSensitive(root, "dedup");
+   if (cJSON_IsObject(ddw))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(ddw, "window_seconds");
+      if (cJSON_IsNumber(item) && item->valuedouble > 0)
+         cfg->dedup_window_seconds = (int)item->valuedouble;
    }
 }
 void config_parse_guardrails_section(config_t *cfg, cJSON *root)

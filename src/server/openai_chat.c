@@ -74,7 +74,7 @@ static void record_avoided_turn(const char *model, double avoided_cost)
  * on and the client supplied an explicit Idempotency-Key. The caller has already
  * rejected streaming, and this path runs no tools — both v1 requirements. */
 static int dedup_eligible(char *key, size_t key_cap, const char *model, const char *endpoint,
-                          const char *body)
+                          const char *body, int *ttl_out)
 {
    config_t cfg;
    if (config_load(&cfg) != 0 || !cfg.dedup_enabled)
@@ -83,6 +83,9 @@ static int dedup_eligible(char *key, size_t key_cap, const char *model, const ch
    if (!idem || !idem[0])
       return 0;
    response_dedup_key(request_context_principal(), model, endpoint, idem, body, key, key_cap);
+   if (ttl_out)
+      *ttl_out =
+          cfg.dedup_window_seconds > 0 ? cfg.dedup_window_seconds : RESPONSE_DEDUP_TTL_SECONDS;
    return 1;
 }
 
@@ -114,8 +117,9 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
     * model, endpoint, body, idempotency key) from the TTL cache without paying
     * for the provider call again. Buffered + non-stream + tool-free here. */
    char dedup_key[200] = "";
+   int dedup_ttl = RESPONSE_DEDUP_TTL_SECONDS;
    const char *endpoint = chat ? "/v1/chat/completions" : "/v1/completions";
-   int dedup_on = dedup_eligible(dedup_key, sizeof(dedup_key), model, endpoint, body);
+   int dedup_on = dedup_eligible(dedup_key, sizeof(dedup_key), model, endpoint, body, &dedup_ttl);
    if (dedup_on)
    {
       char *cached = NULL;
@@ -131,7 +135,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
                                 "cached response did not fit the buffer");
             return 500;
          }
-         record_avoided_turn(model, avoided);
+         if (agent_ingress_accounting_enabled())
+            record_avoided_turn(model, avoided);
          return 200;
       }
    }
@@ -185,7 +190,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
    /* Cost accounting for the OpenAI-compatible ingress: this handler runs the
     * provider call directly (no agent_log_call), so record the turn's spend. */
    snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
-   agent_record_token_audit(&result, "", "openai-ingress");
+   if (agent_ingress_accounting_enabled())
+      agent_record_token_audit(&result, "", "openai-ingress");
 
    long created = (long)time(NULL);
    char id[48];
@@ -215,7 +221,7 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
                              .cache_read_tokens = result.cache_read_tokens};
       const char *bill_model = result.model[0] ? result.model : model;
       double cost = token_estimate_cost(bill_model, &usage);
-      response_dedup_put(dedup_key, resp, cost, (long)time(NULL), RESPONSE_DEDUP_TTL_SECONDS);
+      response_dedup_put(dedup_key, resp, cost, (long)time(NULL), dedup_ttl);
    }
    return 200;
 }
@@ -568,7 +574,8 @@ static int responses_handler(const char *body, char *resp, int cap)
 
    /* Cost accounting: buffered /v1/responses runs the provider call directly. */
    snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
-   agent_record_token_audit(&result, "", "openai-ingress");
+   if (agent_ingress_accounting_enabled())
+      agent_record_token_audit(&result, "", "openai-ingress");
 
    long created = (long)time(NULL);
    char id[64];
@@ -679,7 +686,8 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
       /* Cost accounting: streaming chat/completions runs the provider call
        * directly (no agent_log_call). */
       snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
-      agent_record_token_audit(&result, "", "openai-ingress");
+      if (agent_ingress_accounting_enabled())
+         agent_record_token_audit(&result, "", "openai-ingress");
       const char *txt = result.response;
       size_t n = strlen(txt);
       for (size_t off = 0; off < n; off += OPENAI_STREAM_CHUNK)
@@ -746,7 +754,8 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
    {
       /* Cost accounting: streaming completions runs the provider call directly. */
       snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
-      agent_record_token_audit(&result, "", "openai-ingress");
+      if (agent_ingress_accounting_enabled())
+         agent_record_token_audit(&result, "", "openai-ingress");
       const char *txt = result.response;
       size_t n = strlen(txt);
       for (size_t off = 0; off < n; off += OPENAI_STREAM_CHUNK)
@@ -1072,6 +1081,12 @@ typedef struct
    double temperature;
    int max_tokens;
    long created;
+   /* Request context captured at enqueue time (#3): the worker runs on a
+    * separate thread, so the request-thread's context is snapshotted here and
+    * re-established on the worker before the run, giving the run's audit rows the
+    * originating request id / principal / source. */
+   request_context_t reqctx;
+   int has_reqctx;
 } run_job_t;
 
 /* Build a run object with no output text at the given status into buf. Returns
@@ -1148,12 +1163,21 @@ static void *run_job_worker(void *arg)
     * by role within the same config — the model field is informational here.) */
    (void)ag;
    agent_tools_set_tool_event_cb(runs_tool_event_cb, (void *)j->run_id);
+   /* Re-establish the originating request context on this worker thread (#3) so
+    * the run's audit rows carry the request id / principal captured at enqueue.
+    * Prefer the request-supplied source over the constant when the proxy stamped
+    * one. */
+   if (j->has_reqctx)
+      request_context_set(&j->reqctx);
    /* /v1/runs drives the agent loop (which logs via agent_log_call); tag that
     * row as ingress so the run's spend is distinguishable from internal agent
     * execution, without writing a second row. */
-   agent_set_ingress_source("openai-ingress");
+   agent_set_ingress_source((j->has_reqctx && j->reqctx.source[0]) ? j->reqctx.source
+                                                                   : "openai-ingress");
    int erc = agent_run_with_tools(&acfg, "execute", NULL, j->prompt, j->max_tokens, &result);
    agent_set_ingress_source("");
+   if (j->has_reqctx)
+      request_context_clear();
    agent_tools_set_tool_event_cb(NULL, NULL);
 
    /* Honor a cancel requested while the (blocking) step ran. */
@@ -1290,6 +1314,16 @@ static int runs_handler(const char *body, char *resp, int cap)
    j->temperature = temperature;
    j->max_tokens = max_tokens;
    j->created = created;
+   /* Snapshot the request context now, on the request thread, so the worker can
+    * re-establish it (capture-at-enqueue, #3). */
+   {
+      const request_context_t *rc = request_context_get();
+      if (rc)
+      {
+         j->reqctx = *rc;
+         j->has_reqctx = 1;
+      }
+   }
 
    pthread_t th;
    if (pthread_create(&th, NULL, run_job_worker, j) != 0)

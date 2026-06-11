@@ -170,12 +170,25 @@ void server_http_set_count_tokens_handler(server_http_completion_fn fn)
 }
 
 /* The ingress cost write is exercised by test_token_audit via the shared helper;
- * here we only validate the SSE usage tap, so a no-op stub suffices. */
+ * here we only validate the SSE usage tap, so no-op stubs suffice. */
 void agent_record_token_audit(const agent_result_t *result, const char *role, const char *source)
 {
    (void)result;
    (void)role;
    (void)source;
+}
+void agent_record_token_audit_kind(const agent_result_t *result, const char *role,
+                                   const char *source, const char *usage_kind)
+{
+   (void)result;
+   (void)role;
+   (void)source;
+   (void)usage_kind;
+}
+/* Enable accounting in this unit so the tap/record path is exercised. */
+int agent_ingress_accounting_enabled(void)
+{
+   return 1;
 }
 
 #include "../server/anthropic_http.c"

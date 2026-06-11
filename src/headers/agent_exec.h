@@ -78,6 +78,18 @@ void agent_log_call(const agent_result_t *result, const char *role);
  * path; ingress handlers that run a provider call directly (and so never reach
  * agent_log_call) call it to record their spend. */
 void agent_record_token_audit(const agent_result_t *result, const char *role, const char *source);
+/* As agent_record_token_audit, but stamps an explicit usage_kind: "realized"
+ * (provider-reported, the billable default), "partial" (observed usage from a
+ * stream that aborted before completion), or "estimated" (no provider usage).
+ * Lets streaming ingress preserve observed tokens as partial spend rather than
+ * dropping them when the provider stream errors mid-flight. */
+void agent_record_token_audit_kind(const agent_result_t *result, const char *role,
+                                   const char *source, const char *usage_kind);
+/* Master gate (proposal §2/§7 rollout knob): returns 1 when
+ * ingress_usage_accounting_enabled is set. The stateless ingress handlers call
+ * this before writing their cost rows so ingress accounting can be flipped on
+ * deliberately; internal agent accounting (agent_log_call) is unaffected. */
+int agent_ingress_accounting_enabled(void);
 /* Set a per-thread ingress source that overrides the source on any token_audit
  * row written on this thread (incl. via agent_log_call). Used by ingress workers
  * (e.g. /v1/runs) so spend driven through the agent loop is attributed to the

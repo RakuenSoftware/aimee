@@ -6,16 +6,140 @@
  * override used by ingress workers such as /v1/runs. */
 #include "aimee.h"
 #include "agent_exec.h"
-#include "config.h" /* session_id() */
+#include "config.h" /* session_id(), config_load */
 #include "db1.h"    /* token_audit + agent_log inserts */
 #include "token_tracker.h"
+#include "request_context.h" /* per-request id / principal / idempotency */
 
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 
 /* Exported by server_compute when the call happens inside a delegate worker;
  * weak-stub returns NULL elsewhere (CLI, tests). */
 const char *delegation_active_id(void);
+
+/* ── Asynchronous audit writer (ingress_audit_async rollout knob) ────────────
+ * When enabled, an audit row is copied into a bounded ring and inserted by a
+ * single background thread, so the request is not blocked on the DB write. The
+ * thread is started lazily on first async use; tests (which never enable it)
+ * never spawn it. If the ring is full the caller falls back to an inline insert,
+ * so a row is never dropped. Strings are fully materialized into the entry — the
+ * source db1_token_audit_row_t points at caller/stack memory that does not
+ * outlive the call. */
+#define AUDIT_ASYNC_SLOTS 256
+
+typedef struct
+{
+   char session_id[128], delegation_id[128], project_name[64], tool_name[128], role[64];
+   char model[128], source[64], requested_model[128], stop_reason[40], usage_kind[24];
+   char request_id[64], principal[128];
+   long long agent_log_id;
+   int attempt;
+   int prompt_tokens, completion_tokens, cache_write_tokens, cache_read_tokens;
+   double estimated_cost_usd;
+} audit_async_entry_t;
+
+static audit_async_entry_t g_audit_ring[AUDIT_ASYNC_SLOTS];
+static int g_audit_head, g_audit_tail; /* tail == head => empty */
+static pthread_mutex_t g_audit_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_audit_cv = PTHREAD_COND_INITIALIZER;
+static pthread_t g_audit_thread;
+static int g_audit_thread_started;
+
+static void audit_entry_to_row(const audit_async_entry_t *e, db1_token_audit_row_t *row)
+{
+   memset(row, 0, sizeof(*row));
+   row->session_id = e->session_id;
+   row->delegation_id = e->delegation_id;
+   row->project_name = e->project_name;
+   row->tool_name = e->tool_name;
+   row->role = e->role;
+   row->model = e->model;
+   row->source = e->source;
+   row->requested_model = e->requested_model;
+   row->stop_reason = e->stop_reason;
+   row->usage_kind = e->usage_kind;
+   row->agent_log_id = e->agent_log_id;
+   row->request_id = e->request_id;
+   row->attempt = e->attempt;
+   row->principal = e->principal;
+   row->prompt_tokens = e->prompt_tokens;
+   row->completion_tokens = e->completion_tokens;
+   row->cache_write_tokens = e->cache_write_tokens;
+   row->cache_read_tokens = e->cache_read_tokens;
+   row->estimated_cost_usd = e->estimated_cost_usd;
+}
+
+static void *audit_writer_main(void *arg)
+{
+   (void)arg;
+   for (;;)
+   {
+      audit_async_entry_t e;
+      pthread_mutex_lock(&g_audit_mtx);
+      while (g_audit_tail == g_audit_head)
+         pthread_cond_wait(&g_audit_cv, &g_audit_mtx);
+      e = g_audit_ring[g_audit_tail];
+      g_audit_tail = (g_audit_tail + 1) % AUDIT_ASYNC_SLOTS;
+      pthread_mutex_unlock(&g_audit_mtx);
+
+      db1_token_audit_row_t row;
+      audit_entry_to_row(&e, &row);
+      (void)db1_token_audit_insert(&row);
+   }
+   return NULL;
+}
+
+/* Copy `row` into the ring for the background writer. Returns 0 on success, -1
+ * when the ring is full (caller inserts inline). */
+static int audit_async_enqueue(const db1_token_audit_row_t *row)
+{
+   pthread_mutex_lock(&g_audit_mtx);
+   int next = (g_audit_head + 1) % AUDIT_ASYNC_SLOTS;
+   if (next == g_audit_tail)
+   {
+      pthread_mutex_unlock(&g_audit_mtx);
+      return -1; /* full — fall back to inline */
+   }
+   if (!g_audit_thread_started)
+   {
+      if (pthread_create(&g_audit_thread, NULL, audit_writer_main, NULL) != 0)
+      {
+         pthread_mutex_unlock(&g_audit_mtx);
+         return -1;
+      }
+      pthread_detach(g_audit_thread);
+      g_audit_thread_started = 1;
+   }
+   audit_async_entry_t *e = &g_audit_ring[g_audit_head];
+   memset(e, 0, sizeof(*e));
+#define CPY(dst, src) snprintf((dst), sizeof(dst), "%s", (src) ? (src) : "")
+   CPY(e->session_id, row->session_id);
+   CPY(e->delegation_id, row->delegation_id);
+   CPY(e->project_name, row->project_name);
+   CPY(e->tool_name, row->tool_name);
+   CPY(e->role, row->role);
+   CPY(e->model, row->model);
+   CPY(e->source, row->source);
+   CPY(e->requested_model, row->requested_model);
+   CPY(e->stop_reason, row->stop_reason);
+   CPY(e->usage_kind, row->usage_kind);
+   CPY(e->request_id, row->request_id);
+   CPY(e->principal, row->principal);
+#undef CPY
+   e->agent_log_id = row->agent_log_id;
+   e->attempt = row->attempt;
+   e->prompt_tokens = row->prompt_tokens;
+   e->completion_tokens = row->completion_tokens;
+   e->cache_write_tokens = row->cache_write_tokens;
+   e->cache_read_tokens = row->cache_read_tokens;
+   e->estimated_cost_usd = row->estimated_cost_usd;
+   g_audit_head = next;
+   pthread_cond_signal(&g_audit_cv);
+   pthread_mutex_unlock(&g_audit_mtx);
+   return 0;
+}
 
 /* Per-thread ingress source: the /v1/runs worker sets this so spend logged via
  * agent_log_call (source="agent") from inside the run loop is retagged with the
@@ -33,13 +157,45 @@ void agent_set_ingress_source(const char *source)
    snprintf(g_ingress_source, sizeof(g_ingress_source), "%s", source ? source : "");
 }
 
+int agent_ingress_accounting_enabled(void)
+{
+   config_t cfg;
+   return config_load(&cfg) == 0 && cfg.ingress_usage_accounting_enabled;
+}
+
 void agent_record_token_audit(const agent_result_t *result, const char *role, const char *source)
+{
+   agent_record_token_audit_kind(result, role, source, "realized");
+}
+
+void agent_record_token_audit_kind(const agent_result_t *result, const char *role,
+                                   const char *source, const char *usage_kind)
 {
    if (!result)
       return;
 
    /* A thread-scoped ingress source overrides the caller's source (see above). */
    const char *eff_source = g_ingress_source[0] ? g_ingress_source : (source ? source : "");
+
+   /* ingress_audit_async rollout knob: an ingress row may be handed to the
+    * background writer so the response is not blocked on the DB insert. The
+    * master accounting gate (ingress_usage_accounting_enabled) is enforced by the
+    * ingress call sites (see agent_ingress_accounting_enabled), NOT here, so this
+    * shared primitive carries no policy. The config load is paid only for ingress
+    * rows and is mtime-cached. */
+   int is_ingress = eff_source[0] && strstr(eff_source, "-ingress") != NULL;
+   int async = 0;
+   if (is_ingress)
+   {
+      config_t gcfg;
+      if (config_load(&gcfg) == 0)
+         async = gcfg.ingress_audit_async;
+   }
+
+   /* Per-request idempotency + attribution (#3): carry the ingress request id
+    * (so a retried/late finalize cannot double-count via the unique index) and
+    * the client principal/account boundary onto the row. */
+   const request_context_t *rctx = request_context_get();
 
    token_usage_t usage = {
        .input_tokens = result->prompt_tokens,
@@ -69,13 +225,20 @@ void agent_record_token_audit(const agent_result_t *result, const char *role, co
        .requested_model = result->requested_model,
        .stop_reason = result->stop_reason,
        .agent_log_id = g_agent_log_id,
+       .usage_kind = usage_kind ? usage_kind : "realized",
+       .request_id = rctx ? rctx->request_id : "",
+       .attempt = 0,
+       .principal = rctx ? rctx->principal : "",
        .prompt_tokens = usage.input_tokens,
        .completion_tokens = usage.output_tokens,
        .cache_write_tokens = usage.cache_write_tokens,
        .cache_read_tokens = usage.cache_read_tokens,
        .estimated_cost_usd = cost,
    };
-   (void)db1_token_audit_insert(&row);
+   /* Async only for ingress rows (where the response is waiting); fall back to an
+    * inline insert when async is off or the ring is full. */
+   if (!async || audit_async_enqueue(&row) != 0)
+      (void)db1_token_audit_insert(&row);
 }
 
 void agent_log_call(const agent_result_t *result, const char *role)

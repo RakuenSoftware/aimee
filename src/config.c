@@ -488,6 +488,11 @@ static void config_set_defaults(config_t *cfg)
    cfg->reasoning_cap_enabled = 0;
    cfg->dedup_enabled = 0;
    cfg->cache_shaping_enabled = 0;
+   cfg->ingress_usage_accounting_enabled = 0;
+   cfg->ingress_audit_async = 0;
+   cfg->ingress_trusted_proxy_secret[0] = '\0';
+   cfg->dedup_window_seconds = 5;
+   cfg->cache_min_chars = 0;
    cfg->guardrails_semantic_enabled = 0;
    cfg->guardrails_semantic_dry_run = 1;
    cfg->guardrails_semantic_advisory_only = 1;

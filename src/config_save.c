@@ -386,15 +386,27 @@ int config_save(const config_t *cfg)
       cJSON *rcap = cJSON_AddObjectToObject(root, "reasoning_cap");
       cJSON_AddBoolToObject(rcap, "enabled", cfg->reasoning_cap_enabled ? 1 : 0);
    }
-   if (cfg->dedup_enabled)
+   if (cfg->dedup_enabled || cfg->dedup_window_seconds != 5)
    {
       cJSON *ddp = cJSON_AddObjectToObject(root, "dedup");
       cJSON_AddBoolToObject(ddp, "enabled", cfg->dedup_enabled ? 1 : 0);
+      cJSON_AddNumberToObject(ddp, "window_seconds", cfg->dedup_window_seconds);
    }
-   if (cfg->cache_shaping_enabled)
+   if (cfg->cache_shaping_enabled || cfg->cache_min_chars != 0)
    {
       cJSON *csh = cJSON_AddObjectToObject(root, "cache_shaping");
       cJSON_AddBoolToObject(csh, "enabled", cfg->cache_shaping_enabled ? 1 : 0);
+      cJSON_AddNumberToObject(csh, "min_chars", cfg->cache_min_chars);
+   }
+   if (cfg->ingress_usage_accounting_enabled || cfg->ingress_audit_async ||
+       cfg->ingress_trusted_proxy_secret[0])
+   {
+      cJSON *ing = cJSON_AddObjectToObject(root, "ingress");
+      cJSON_AddBoolToObject(ing, "usage_accounting_enabled",
+                            cfg->ingress_usage_accounting_enabled ? 1 : 0);
+      cJSON_AddBoolToObject(ing, "audit_async", cfg->ingress_audit_async ? 1 : 0);
+      if (cfg->ingress_trusted_proxy_secret[0])
+         cJSON_AddStringToObject(ing, "trusted_proxy_secret", cfg->ingress_trusted_proxy_secret);
    }
    if (cfg->guardrails_semantic_enabled || !cfg->guardrails_semantic_dry_run ||
        !cfg->guardrails_semantic_advisory_only || cfg->guardrails_semantic_command[0] ||
