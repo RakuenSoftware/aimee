@@ -71,9 +71,9 @@ func (s *server) handleOpenAIModels(w http.ResponseWriter, r *http.Request) {
 // The webchat bearer is stripped before forwarding; the UDS is a trusted local
 // channel that does not itself require the bearer.
 // openAIUserField buffers and restores the request body, returning the OpenAI
-// `user` field (the standard end-user identifier). Used to give per-client
-// attribution to a shared-bearer proxy surface where no other per-client
-// identity exists.
+// `user` field (the standard end-user identifier). This value is CLIENT-SUPPLIED
+// and therefore NOT a trust boundary: it is only used as a within-account session
+// hint, never as the principal.
 func openAIUserField(r *http.Request) string {
 	if r.Body == nil {
 		return ""
@@ -93,10 +93,11 @@ func openAIUserField(r *http.Request) string {
 
 func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath string) {
 	sock := s.aimeeHTTPSockPath()
-	// Per-client identity for attribution: the webchat OpenAI proxy authenticates
-	// with a single shared bearer, so distinct clients have no built-in identity.
-	// Use the OpenAI `user` field (when present) so two clients are not collapsed
-	// into one principal/session after the auth header is stripped.
+	// The webchat OpenAI proxy authenticates clients with ONE shared bearer, so the
+	// only TRUSTED identity at this surface is the proxy account itself ("webchat").
+	// The OpenAI `user` field is client-supplied and untrusted; we use it only as a
+	// best-effort session hint scoped within the webchat account (a client can at
+	// most mislabel its own session, never change the trusted principal).
 	clientID := openAIUserField(r)
 	proxy := &httputil.ReverseProxy{
 		Transport: &http.Transport{
@@ -113,10 +114,11 @@ func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath st
 			// also strip any client-supplied X-Aimee-* identity headers BEFORE
 			// stamping our own — otherwise an external OpenAI client could send
 			// X-Aimee-Principal: victim and, because we add the trusted proxy
-			// secret, aimee-server would attribute the request to victim. The only
-			// trusted per-client signal at this shared-bearer surface is the
-			// server-derived OpenAI `user` field. The Idempotency-Key (not an
-			// identity header) is forwarded unchanged by ReverseProxy.
+			// secret, aimee-server would attribute the request to victim. The
+			// principal and source are the trusted constant "webchat" account,
+			// server-stamped and never derived from client input; only the
+			// within-account session key uses the (untrusted) client `user` field.
+			// The Idempotency-Key (not an identity header) is forwarded unchanged.
 			req.Header.Del("Authorization")
 			req.Header.Del("X-Aimee-Proxy-Authorization")
 			req.Header.Del("X-Aimee-Principal")
@@ -124,12 +126,13 @@ func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath st
 			req.Header.Del("X-Aimee-Session-Key")
 			if secret := strings.TrimSpace(os.Getenv("AIMEE_INGRESS_PROXY_SECRET")); secret != "" {
 				req.Header.Set("X-Aimee-Proxy-Authorization", secret)
+				// Trusted, server-stamped account boundary — a constant, NEVER
+				// derived from client input.
+				req.Header.Set("X-Aimee-Principal", "webchat")
 				req.Header.Set("X-Aimee-Source", "webchat")
+				// Untrusted within-account session hint from the client `user` field.
 				if clientID != "" {
-					req.Header.Set("X-Aimee-Principal", "webchat:"+clientID)
 					req.Header.Set("X-Aimee-Session-Key", "webchat:"+clientID)
-				} else {
-					req.Header.Set("X-Aimee-Principal", "webchat")
 				}
 			}
 		},

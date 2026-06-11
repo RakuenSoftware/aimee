@@ -55,12 +55,61 @@ static void test_empty_system_adds_nothing(void)
    PASS("shape: empty/NULL system adds nothing");
 }
 
+static int json_has_substr(cJSON *node, const char *needle)
+{
+   char *s = cJSON_PrintUnformatted(node);
+   int found = s && strstr(s, needle) != NULL;
+   free(s);
+   return found;
+}
+
+static void test_volatile_context_not_cached(void)
+{
+   /* A system that is ENTIRELY the per-turn <aimee-context> envelope must NOT be
+    * marked cacheable (no cache_control), or the cache is busted every turn. */
+   const char *vol = "<aimee-context confidence=\"high\">recent files: foo.c</aimee-context>";
+   cJSON *req = cJSON_CreateObject();
+   agent_anthropic_set_system(req, vol, 1);
+   cJSON *sys = cJSON_GetObjectItem(req, "system");
+   assert(cJSON_IsString(sys)); /* plain string, not a cache-marked block */
+   assert(!json_has_substr(sys, "cache_control"));
+   cJSON_Delete(req);
+   PASS("shape: volatile <aimee-context> is not cache-marked");
+}
+
+static void test_stable_prefix_cached_volatile_not(void)
+{
+   /* A stable persona prefix followed by the volatile <aimee-context> envelope:
+    * cache ONLY the stable prefix; leave the context uncached. */
+   const char *mixed = "You are aimee, a helpful agent.\n<aimee-context confidence=\"high\">files: "
+                       "x</aimee-context>";
+   cJSON *req = cJSON_CreateObject();
+   agent_anthropic_set_system(req, mixed, 1);
+   cJSON *sys = cJSON_GetObjectItem(req, "system");
+   assert(cJSON_IsArray(sys));
+   assert(cJSON_GetArraySize(sys) == 2);
+
+   cJSON *stable = cJSON_GetArrayItem(sys, 0);
+   cJSON *vol = cJSON_GetArrayItem(sys, 1);
+   /* Stable prefix: cached, and does NOT contain the volatile marker. */
+   assert(cJSON_IsObject(cJSON_GetObjectItem(stable, "cache_control")));
+   assert(strstr(cJSON_GetObjectItem(stable, "text")->valuestring, "You are aimee") != NULL);
+   assert(strstr(cJSON_GetObjectItem(stable, "text")->valuestring, "<aimee-context") == NULL);
+   /* Volatile block: holds the context, and is NOT cache-marked. */
+   assert(cJSON_GetObjectItem(vol, "cache_control") == NULL);
+   assert(strstr(cJSON_GetObjectItem(vol, "text")->valuestring, "<aimee-context") != NULL);
+   cJSON_Delete(req);
+   PASS("shape: stable prefix cached, volatile context not");
+}
+
 int main(void)
 {
    printf("anthropic_shape: unit tests\n");
    test_plain_string_when_unmarked();
    test_cached_block_when_marked();
    test_empty_system_adds_nothing();
+   test_volatile_context_not_cached();
+   test_stable_prefix_cached_volatile_not();
    printf("All anthropic_shape tests passed.\n");
    return 0;
 }
