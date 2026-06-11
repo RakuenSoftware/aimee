@@ -169,6 +169,15 @@ void server_http_set_count_tokens_handler(server_http_completion_fn fn)
    (void)fn;
 }
 
+/* The ingress cost write is exercised by test_token_audit via the shared helper;
+ * here we only validate the SSE usage tap, so a no-op stub suffices. */
+void agent_record_token_audit(const agent_result_t *result, const char *role, const char *source)
+{
+   (void)result;
+   (void)role;
+   (void)source;
+}
+
 #include "../server/anthropic_http.c"
 
 typedef struct
@@ -327,6 +336,39 @@ static void test_anthropic_relay_round_trip(void)
    sse_parser_free(&relay.parser);
    free(relay.data);
    PASS("anthropic_relay_round_trip");
+}
+
+static void test_anthropic_relay_usage_capture(void)
+{
+   anthropic_relay_ctx_t relay;
+   emit_capture_t cap;
+   const char *chunk =
+       "event: message_start\n"
+       "data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-3-5-sonnet\","
+       "\"usage\":{\"input_tokens\":120,\"cache_creation_input_tokens\":30,"
+       "\"cache_read_input_tokens\":10,\"output_tokens\":1}}}\n\n"
+       "event: message_delta\n"
+       "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":55}}\n\n";
+
+   memset(&relay, 0, sizeof(relay));
+   memset(&cap, 0, sizeof(cap));
+   sse_parser_init(&relay.parser);
+   relay.emit = cap_emit;
+   relay.emit_ctx = &cap;
+
+   assert(anthropic_relay_chunk_cb(chunk, strlen(chunk), &relay) == 0);
+   relay_flush(&relay);
+
+   /* Usage tapped off the relayed SSE (the relayed bytes are unchanged): input +
+    * cache from message_start, final output from message_delta. */
+   assert(relay.input_tokens == 120);
+   assert(relay.output_tokens == 55);
+   assert(relay.cache_write_tokens == 30);
+   assert(relay.cache_read_tokens == 10);
+
+   sse_parser_free(&relay.parser);
+   free(relay.data);
+   PASS("anthropic_relay_usage_capture");
 }
 
 static void test_relay_append_data_growth(void)
@@ -571,6 +613,7 @@ int main(void)
 {
    test_translate_request_anthropic_passthrough();
    test_anthropic_relay_round_trip();
+   test_anthropic_relay_usage_capture();
    test_relay_append_data_growth();
    test_relay_transport_error();
    test_messages_buffered_anthropic_preserves_request_shape();
