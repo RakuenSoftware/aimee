@@ -27,8 +27,10 @@
   `src/cmd_core.c` (`cmd_usage`), `src/server/server_compute.c` (cost-shaped
   reward on the existing `delegate_routing` bandit close), `src/server/server_http.c`
   + `src/headers/server_http.h` (request-context propagation for source,
-  idempotency, principal, and request-id metadata), dashboard/HUD/frontend
-  readers that consume token-audit totals, config plumbing (`src/headers/config.h`,
+  idempotency, principal, and request-id metadata), `webchat/openai.go` and
+  `webchat/socket.go` (webchat proxy/session source attribution),
+  dashboard/HUD/frontend readers that consume token-audit totals, config
+  plumbing (`src/headers/config.h`,
   `src/config_fields.c`, `src/config_sections.c`, `src/config_save.c`), route and
   auth registration only if a new API method is still justified. DB2 only if a
   shared/multi-machine analytics need is
@@ -95,6 +97,18 @@ need defaults), so an explicit migration or in-process idempotency is needed; (1
 the scalar-spend reader set is **eight** files incl. `server_compute.c:1469`
 cost-fold and `webchat/socket.go`, but `Chat.tsx` does not price client-side so
 §1 propagates to the UI for free.
+
+A sixth pass checked the webchat OpenAI proxy and embedding ingress: (13)
+`webchat/openai.go` authenticates OpenAI-compatible clients at the webchat edge,
+then `proxyV1` strips `Authorization` and forwards over the aimee-server UDS
+without adding replacement source/session/principal context, so server-side
+request-context accounting will see webchat-originated OpenAI traffic as generic
+trusted local traffic unless the proxy stamps explicit forwarding metadata; (14)
+`/v1/embeddings` is an OpenAI-compatible ingress route proxied by webchat, but
+`embeddings_handler` calls `memory_embed_text` and returns OpenAI-style
+`usage.prompt_tokens` without using the LLM audit path, so embeddings need an
+explicit non-LLM / estimate-only / separate embedding-spend classification rather
+than being folded into chat/completion cost.
 
 ## Goal
 
@@ -201,6 +215,15 @@ optimization surface aimee already has, not a new one.
   logged, never passed to handlers. Source attribution, account isolation,
   idempotent dedup, and audit row identity therefore require widening the handler
   signatures (or a request context) before any ingress writer lands.
+- **Webchat's OpenAI proxy erases source/principal context unless it stamps
+  replacement metadata.** `webchat/openai.go` validates the caller's webchat
+  OpenAI bearer token, then `proxyV1` removes `Authorization` before forwarding
+  `/v1/chat/completions`, `/v1/completions`, `/v1/responses`, and
+  `/v1/embeddings` over the UDS. If the server context layer only inspects the
+  forwarded HTTP request, these calls look like anonymous local traffic instead
+  of webchat traffic tied to a session/user. The proxy must add trusted internal
+  forwarding headers or an equivalent side channel for source, principal/session,
+  original request id, and idempotency.
 - **A thread-local context is NOT sufficient — it breaks for `/v1/runs`.** The
   cited precedent `ingress_preinject_set_request_disabled()` is `static __thread`
   (`ingress_preinject.c:28`) and works **only because the turn runs synchronously
@@ -327,7 +350,15 @@ estimates** and **avoided estimated cost**.
   logs through `agent_run_with_tools()` → `agent_log_call()`; it needs the
   source/attribution fix only, fed by the context captured at enqueue. And do not
   add logging inside `agent_execute()` itself; normal `agent_run*` paths already
-  call `agent_log_call()`. Net: new writes only where no row exists today.
+  call `agent_log_call()`. Net: new writes only where no row exists today. Keep
+  `/v1/embeddings` out of this LLM list unless embedding provider spend is
+  intentionally added as a separate usage kind.
+- **Embeddings ingress is not chat/completion spend.** `/v1/embeddings` returns
+  OpenAI-style usage, but the implementation is embedder-backed rather than a
+  chat/completion provider turn. Either exclude it from spend dashboards, record
+  it as estimate-only local usage, or add an explicit embedding usage kind and
+  embedder pricing source if external embedding billing is possible. Do not let
+  embedding prompt tokens inflate LLM model cost.
 - **Buffered path:** parse the provider JSON `usage` block after a 200 response
   and before translating it back to the client. The Anthropic parser already
   extracts cache tokens (`agent_bridge.c:791-796`), but the **OpenAI buffered
@@ -345,6 +376,9 @@ estimates** and **avoided estimated cost**.
 - **Source + model:** record source/client explicitly (Claude Code, Codex,
   webchat, OpenAI-compatible ingress, delegate) and resolve a real billable
   `model` (see §2a) instead of the empty string `agent_log_call` writes today.
+  Webchat-proxied OpenAI-compatible requests need explicit forwarding metadata
+  because the proxy intentionally removes the client `Authorization` header
+  before the request reaches aimee-server.
 - **DB1 vs DB2:** keep the per-row ledger in DB1 (local, where `cmd_usage` and
   `insights.overview` already read). Add a DB2 mirror/aggregate **only** if a
   specific shared/multi-machine optimization-analytics need is established; if so,
@@ -421,7 +455,9 @@ narrow.
 - **Request-context dependency:** the idempotency key and account/source boundary
   are not available to `openai_chat.c` / `anthropic_http.c` today because handler
   signatures receive only the body. §2's request context must land before dedup,
-  or dedup can only key on unsafe body-derived data.
+  or dedup can only key on unsafe body-derived data. Webchat's OpenAI proxy must
+  also preserve or restamp the idempotency key and source/account boundary when
+  forwarding to aimee-server.
 - **v1 eligibility:** buffered only, no tools / no server-side tools, non-stream,
   successful `200` only, explicit idempotency key, and no request surface that can
   consume changing memory/context unless that context hash is in the key. Anything
@@ -532,12 +568,16 @@ with a benchmark showing no quality regression.
   one** realized row; **`/v1/runs` still writes exactly one** row (via its
   existing `agent_log_call`) and gains source attribution **without** a second
   write; `agent_execute()` remains no-log; normal `agent_run*` paths are
-  unchanged. Explicit assertion: no turn produces two rows.
+  unchanged. `/v1/embeddings` is either excluded from LLM spend or recorded under
+  an explicit embedding usage kind, and never appears as chat/completion model
+  spend. Explicit assertion: no turn produces two rows.
 - **Request context / threading:** registered handlers see request id, idempotency
   key, source/principal/session metadata, and route identity; the `/v1/runs`
   detached worker sees the **same** context via capture-at-enqueue (not a
   thread-local), and the thread-local resets per request so it never leaks to the
-  next request on a reused worker thread.
+  next request on a reused worker thread. Webchat OpenAI proxy requests arrive at
+  aimee-server with trusted source/session/principal metadata after
+  `Authorization` is stripped.
 - **Source attribution:** ingress rows carry a per-client source derived from the
   request context (session key/principal), **not** the PPID-shared `session_id()`;
   two distinct clients do not collapse into one `top_sessions` row.
@@ -564,8 +604,9 @@ with a benchmark showing no quality regression.
   string.
 - **Dedup:** TTL; per-source/account/agent/model/endpoint/flags/context/stream
   key separation; no-tools/no-stream/200-only/idempotency-key eligibility;
-  error-response bypass; no dedup when request context is unavailable; avoided
-  cost does not inflate spend totals.
+  error-response bypass; no dedup when request context is unavailable; webchat
+  proxy preserves or restamps idempotency/source metadata; avoided cost does not
+  inflate spend totals.
 - **Bandit reward:** reward stays in `[0,1]`; cost affects arm selection only
   through normalized shaping, never raw dollars; side-metadata mode leaves arm
   selection unchanged; missing realized cost falls back safely.
