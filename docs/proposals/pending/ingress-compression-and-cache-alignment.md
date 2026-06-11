@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#181 second review)
+- **Date:** 2026-06-11 (revised post-PR-#181 third review)
 - **Charter roles:** Rewrite (envelope compression / cache placement),
   Recall (rehydration handle), Extract / Gate-Promote (failure-mined
   corrections), Calibrate / Evaluate-Optimize (token + accuracy A/B).
@@ -19,10 +19,14 @@
   `src/kb/kb_learning_synth.c`, `src/config_learning.c`, the
   `interaction_event_embeddings` table, `src/kb/kb_mining.c`) for failure
   mining, `src/payload_rewrite.c` + `src/headers/payload_rewrite.h` +
-  `src/headers/token_tracker.h` for cache-prefix integration,
+  `src/headers/token_tracker.h` for cache-prefix integration including the
+  `agent_execute_messages()` Responses wire path,
   `bench/ingress_token_bench.py` + `benchmarks/learning/learning_replay.py`
-  for the accuracy/token A/B, unit + integration tests, docs. No new
-  long-lived service; the ML prose compressor is explicitly out of scope (§5).
+  for the accuracy/token A/B, config surface tests (`src/tests/test_config.c`,
+  `src/tests/test_config_surface.c`, `src/tests/test_cmd_config.c`), generated
+  config docs (`docs/gen/configuration.md` via `scripts/gen-reference-docs.py`),
+  unit + integration tests, docs. No new long-lived service; the ML prose
+  compressor is explicitly out of scope (§5).
 
 ## Provenance
 
@@ -158,7 +162,8 @@ an Aimee envelope into that path would require:
 - adding per-request and config gates separate from the existing OpenAI/Codex
   seam; and
 - proving Claude Code can actually call the advertised Aimee MCP tools if the
-  envelope tells it to `rehydrate` or `fetch`.
+  envelope tells it to `rehydrate` or use a durable pull-handle such as
+  `memory_get`.
 
 The current text says injection can happen "without abandoning" the stateless
 contract because the proxy still forwards. That is not precise enough. The
@@ -202,8 +207,8 @@ does not yet specify the safety contract. Rehydration handles must be:
 - safe across concurrent requests and server restarts, or explicitly documented
   as best-effort;
 - hidden from logs where they would expose access to sensitive originals; and
-- unavailable/expired in a way the model can recover from (`fetch` fallback,
-  rerun recall, or clear error text).
+- unavailable/expired in a way the model can recover from (`memory_get` /
+  durable source fallback, rerun recall, or clear error text).
 
 Also, the MCP tool surface lives in `server_mcp_call_table.inc` /
 `server_mcp.c`, not only `server_mcp.c`; tool discovery metadata in
@@ -365,6 +370,83 @@ stand-alone-sufficient preview; reachability becomes a P2 acceptance check, not
 an assumption) — this also makes the §1.3 "lossy is safe because §3 recovers it"
 claim conditional on a tested fact.
 
+## PR #181 third review — remaining gaps after the reachability update
+
+The reachability update closes the largest conceptual hole, but a third pass
+against the current tree found five more gaps that need to be part of the
+proposal before implementation starts.
+
+### 17. New config flags need the full generated config surface
+
+`ingress_compress_enabled`, `ingress_rehydrate_ttl_s`,
+`ingress_rehydrate_max_entries`, and `curator_failure_mining_enabled` do not
+exist in the codebase today. Adding names in prose is not enough: every new flag
+needs an explicit section/field decision, load/save wiring, CLI config
+get/set/list behavior, generated documentation, and tests. Existing related
+surfaces are split today: `ingress_preinject_enabled` is a top-level field,
+while `cache_aware_rewrite_enabled` is exposed under
+`transport.cache_aware_rewrite`. The proposal must decide whether the new fields
+are top-level ingress fields, nested transport fields, or a new section, and it
+must not leave inert names that the operator cannot set or inspect.
+
+**→ Resolved in §1.4, §3.2, §3.5, §4.5, §6, and §7** by making config placement,
+docs generation, and config tests explicit acceptance work.
+
+### 18. Recall-economy's pull-handle is `memory_get`, not a generic `fetch`
+
+The recall-economy proposal's concrete pull surface is a sibling MCP
+`memory_get` tool over the existing `memory.get` backend (`kb_client_memory_get`),
+with `get_context_block` extension only as an option. The current text's generic
+`fetch` verb would fork that design and create handles the agent may not be able
+to resolve. If this proposal wants a generic `fetch`, recall-economy must adopt
+that too; otherwise this proposal should align to `memory_get` for durable
+memory records and reserve `rehydrate` for folded ephemeral/compressed originals.
+
+**→ Resolved in §3.1 and §3.5** by removing the assumed two-verb `fetch`/`rehydrate`
+namespace and aligning the durable read path to recall-economy's `memory_get`
+surface.
+
+### 19. Responses/Codex cache telemetry does not currently carry session state
+
+`agent_execute_messages()` forwards the caller's Responses tools and reports
+tool calls back to the client, but it does not call `payload_rewrite_track_request()`
+and its provider retry call currently passes no session id into the retry/context
+path. If P3 only hooks the older `agent_execute()` path, cache-prefix state and
+prefix hashes will not be session-scoped for the primary Codex wire ingress. The
+proposal must explicitly include the Responses buffered and streaming paths in
+the payload-rewrite/session-id integration, not just the envelope insertion
+points.
+
+**→ Resolved in §2.5, §2.6, §6, and §7** by adding a P3 requirement for
+`agent_execute_messages()` to record the provider-facing prefix in the existing
+payload-rewrite subsystem with real session scope.
+
+### 20. Tool definition injection would expand the server's read authority
+
+The OpenAI/Codex fallback in §3.4 says Aimee could inject a `rehydrate` tool
+definition and intercept the resulting tool call inline. That is a materially
+different security surface from merely naming an MCP tool in text. It would
+create a server-mediated function-call bridge for compressed originals and
+possibly memory/code reads. That bridge must inherit the same route authorization,
+workspace/session scoping, read-only bearer behavior, and remote TCP restrictions
+as the rest of the HTTP/MCP surface; it cannot become an unauthenticated way for
+remote clients to ask Aimee to read hidden originals.
+
+**→ Resolved in §3.4, §3.5, §6, and §8** by making injected-tool interception a
+separate capability-gated implementation path with denial tests.
+
+### 21. Claude Code MCP reachability should be proven from installation config
+
+The proposal currently infers Claude Code reachability from the completed
+context-preinjection proposal. The implementation should prove it from the
+actual integration installer/config and an end-to-end hook-session fixture: the
+model should see the compressed handle and be able to call the registered MCP
+tool in the same session. This is especially important because lossy compression
+is gated on reachability.
+
+**→ Resolved in §3.4 and §6** by weakening the claim from "callable today" to
+"must be validated from installed config" and adding a fixture requirement.
+
 ## Goal
 
 Cut the per-turn token cost *and* the per-turn dollar cost of pre-injection
@@ -465,8 +547,15 @@ removes detail that some tasks need. The corrected contract:
 
 ### §1.4 Compression gate and request override (resolves review #10)
 
-Gated by a new config bool `ingress_compress_enabled` (default **off**). If a
-per-call escape is exposed, it requires actual HTTP plumbing:
+Gated by a new config bool `ingress_compress_enabled` (default **off**), with the
+same level of config surface as existing fields: `src/headers/config.h`,
+`src/config.c`, `src/config_fields.c`, `src/config_sections.c`,
+`src/config_save.c`, `aimee config get/set/list` behavior, generated docs, and
+config-surface tests. The implementation must explicitly decide whether this is
+a top-level ingress field beside `ingress_preinject_enabled` or part of a nested
+section; the proposal does not assume that a prose-only flag exists.
+
+If a per-call escape is exposed, it requires actual HTTP plumbing:
 
 - parse `X-Aimee-Compress: 0` in `server_http.c` alongside `X-Aimee-Preinject`;
 - carry it as request-scoped/thread-local state into `ingress_preinject_build()`;
@@ -530,7 +619,8 @@ it is not precise. Injecting into the Anthropic path requires, at minimum:
   metadata rather than flattening through `anthropic_system_to_text()`;
 - a per-request + config gate separate from the OpenAI/Codex seam;
 - proving Claude Code will actually call the advertised Aimee MCP tools when the
-  envelope tells it to `rehydrate` / `fetch`.
+  envelope tells it to `rehydrate` or use a durable pull-handle such as
+  `memory_get`.
 
 Therefore Anthropic injection is **P5**, its own opt-in phase behind its own gate,
 with tests for direct Anthropic-provider passthrough *and* non-Anthropic delegate
@@ -567,6 +657,12 @@ create a second prefix hash / state table:
   sibling column/table;
 - consume normalized usage from `token_tracker.h` / the cost-accounting ledger
   rather than parsing provider usage twice.
+- wire the Responses/Codex `agent_execute_messages()` path into the same state:
+  pass a real session id through the retry/context path, call the prefix tracking
+  hook on the provider-facing body, and cover both buffered and streaming
+  Responses. Today that path forwards tool calls to the client and is a separate
+  request-shaping path from `agent_execute()`, so it will otherwise miss
+  session-scoped prefix telemetry.
 
 ### §2.6 Cover every OpenAI/Responses injection path (resolves review #13)
 
@@ -577,7 +673,10 @@ of them share the same placement rule,
 request override behavior, continuation behavior, and body-serialization tests.
 The Responses continuation path is especially important because it prepends the
 stored transcript before building the envelope; the prefix classifier must not
-accidentally treat a growing transcript as cache-stable.
+accidentally treat a growing transcript as cache-stable. The `agent_execute_messages()`
+path is also where Codex supplies its own `tools` array and receives tool calls
+back, so any inline rehydration-tool interception must be tested there rather
+than only on the legacy chat path.
 
 ---
 
@@ -587,17 +686,22 @@ accidentally treat a growing transcript as cache-stable.
 
 Store the byte-exact pre-fold original of every lossy entry behind a handle and
 expose recovery as an MCP tool. **Do not** invent a second handle scheme:
-recall-economy introduces id-addressable pull-handles at the MCP tool layer. This
-proposal **extends that same handle** with a `rehydrate` verb. One namespace, two
-verbs:
+recall-economy introduces id-addressable pull-handles at the MCP tool layer and
+its concrete durable-memory surface is `memory_get` over the existing
+`memory.get` / `kb_client_memory_get` backend. This proposal aligns to that
+surface rather than creating a generic `fetch` verb:
 
-- `fetch` — recall-economy: preview → full ranked record.
-- `rehydrate` — this proposal: folded resident form → byte-exact original.
+- `memory_get` — recall-economy: durable memory preview → full memory record.
+- existing code/file-span reads — durable code preview → full source span, using
+  the code search / structure read surface already available to the agent.
+- `rehydrate` — this proposal: folded ephemeral/compressed resident form →
+  byte-exact original for data that cannot be re-read cheaply or safely.
 
-If recall-economy lands first, this is additive to its tool; if this lands first,
-the handle is designed to accept `fetch` later. The MCP surface touched is
-`server_mcp.c` **and** `server_mcp_call_table.inc`, with discovery metadata in
-`src/mcp_tools.c` and the tool goldens updated (regen via `DUMP_TOOLS=1`).
+If the projects later choose a generic `fetch` verb, it must be adopted in
+recall-economy too; this proposal should not fork that contract. The MCP surface
+touched is `server_mcp.c` **and** `server_mcp_call_table.inc`, with discovery
+metadata in `src/mcp_tools.c` and the tool goldens updated (regen via
+`DUMP_TOOLS=1`).
 
 ### §3.2 Handle safety contract (resolves review #6)
 
@@ -617,11 +721,14 @@ path to potentially sensitive originals, so:
 - **Log hygiene:** handles and originals are never written to logs where they
   would expose sensitive content.
 - **Recoverable failure:** on expired/unauthorized/unknown handle, the tool
-  returns clear error text steering the model to `fetch` (rerun recall) instead —
-  never a silent empty result.
-- **Lifetime config:** the store's TTL and size are config-driven —
-  `ingress_rehydrate_ttl_s` and `ingress_rehydrate_max_entries` (LRU cap) — so
-  the per-turn memory cost is bounded and tunable, default-off with §1.
+  returns clear error text steering the model to the durable resolver
+  (`memory_get`, code/file-span read, or rerun recall) instead — never a silent
+  empty result.
+- **Lifetime config:** the store's TTL and size are config-driven, but the
+  implementation must choose and fully plumb the names/section:
+  `ingress_rehydrate_ttl_s` / `ingress_rehydrate_max_entries` as top-level
+  ingress fields, or a nested `ingress.rehydrate.*` equivalent. Either way the
+  per-turn memory cost is bounded, tunable, documented, and default-off with §1.
 
 ### §3.3 Payoff
 
@@ -634,8 +741,10 @@ because the detail is deferred behind a tool call the model makes iff it needs i
 `rehydrate` is only useful where the external agent can call it, and that differs
 by ingress:
 
-- **Claude Code hook path:** Aimee's MCP server is client-registered (shipped in
-  `context-preinjection-ingress.md` P3), so `rehydrate`/`fetch` are callable today.
+- **Claude Code hook path:** expected to work only when the installed Claude
+  config has Aimee's MCP server registered. P2 must prove this from the actual
+  integration installer/config and an end-to-end hook-session fixture; the done
+  context-preinjection proposal is not enough proof by itself.
 - **OpenAI/Codex wire ingress:** callable only if the client has Aimee's MCP
   configured, or if the ingress injects the tool definition into the request and
   intercepts the resulting tool call inline (the `function_call` loop Codex
@@ -653,8 +762,27 @@ build) and the `rehydrate` call land in the **same server process** — true for
 Aimee's single-process threaded server and the single-container Docker deploy, so
 the cross-thread mint→rehydrate path works with a mutex. A **multi-replica /
 load-balanced** deployment can route `rehydrate` to a replica that never minted
-the handle; there it must fall back to `fetch` (re-recall) or a clearly named
-shared store. This is documented as a known limitation, not silently broken.
+the handle; there it must fall back to the durable resolver / rerun recall or a
+clearly named shared store. This is documented as a known limitation, not
+silently broken.
+
+### §3.5 Config, tool metadata, and injected-tool safety (resolves review #17/#18/#20)
+
+The rehydration phase is not complete until the surrounding surfaces are
+complete:
+
+- config fields for TTL, LRU cap, and enablement are load/save round-tripped,
+  exposed through `aimee config`, generated into `docs/gen/configuration.md`, and
+  covered by config-surface tests;
+- the durable pull path matches recall-economy's `memory_get` / existing source
+  read surfaces instead of adding a parallel generic `fetch`;
+- MCP discovery metadata and generated tool goldens include the new
+  `rehydrate` surface, and the handle shape is visible enough for the model to
+  know which resolver applies;
+- any inline OpenAI/Codex tool-definition injection is capability-gated and
+  tested against the same route authorization, workspace/session scope,
+  read-only bearer behavior, and remote TCP restrictions as the existing
+  HTTP/MCP surface.
 
 ---
 
@@ -696,7 +824,12 @@ pipeline already has, instead of a parallel writer.
   repeated-correction detector; §4 **reuses that path** rather than adding a
   parallel one.
 
-Gated default-off behind `curator_failure_mining_enabled`.
+Gated default-off, but not by a prose-only flag. Because this work rides the
+existing `kb_mining.c` recurrence path, the preferred gate is
+`kb_mining_enabled` plus a narrower per-job failure-learning gate such as
+`kb_mining_failure_learning_enabled`. If the implementation keeps the separate
+name `curator_failure_mining_enabled`, it must add the full config plumbing,
+generated docs, CLI visibility, and tests listed in §4.5.
 
 ### §4.3 Why a signal, not a file
 
@@ -720,6 +853,20 @@ artifacts directly through `db2_artifact_write()`. §4 must either:
 
 The preferred path is the first one, because it reuses the existing
 high-watermark mining job and removes the parallel-promotion behavior.
+
+### §4.5 Config surface for failure mining (resolves review #17)
+
+Failure mining must not introduce a dead switch. The accepted implementation
+must choose one of these two config shapes:
+
+- extend the existing KB mining surface (`kb_mining_enabled` plus a narrower
+  failure-learning job toggle), which matches the code that already owns
+  `interaction_event_embeddings` recurrence; or
+- add `curator_failure_mining_enabled` as a real field with load/save, CLI,
+  generated docs, config-surface tests, and a clear reason it should not live
+  under KB mining.
+
+Either way, the default is off until the validation gates pass.
 
 ---
 
@@ -771,11 +918,21 @@ this proposal.
   trusted transitively.**
 - **Handle safety** — handle expiry, unauthorized-scope rehydration, and
   version-mismatch all return the §3.2 recoverable error, proven by test.
+- **Tool reachability and authorization** — Claude Code reachability proven from
+  installed config, OpenAI/Codex tool-definition injection or interception denied
+  when route auth / workspace / session / remote TCP policy does not allow it,
+  and lossy folds disabled on ingresses that fail the reachability fixture.
 - **Prompt-injection / sensitivity fixtures** — for both compressed previews and
   rehydrated originals (a folded preview must not become an injection vector, and
   a rehydrate must not cross scope).
 - **Prefix-stability invariant** (§2) and **byte-exact rehydration round-trip**
   (§3) as hard unit-suite invariants.
+- **Responses/Codex prefix telemetry** — `agent_execute_messages()` records the
+  provider-facing prefix through the existing `payload_rewrite` subsystem with a
+  real session id for both buffered and streaming Responses.
+- **Config/doc surface** — every new flag round-trips through load/save and
+  `aimee config`, appears in `docs/gen/configuration.md`, and is covered by
+  `test_config`, `test_config_surface`, and `test_cmd_config`.
 - **Request-body serialization** (§2.4) asserting client cache controls survive.
 - **Latency / KB-call budget** — P0/P1 may add secondary structure lookups and
   handle storage work to a per-turn hot path that already calls code search and
@@ -791,19 +948,25 @@ this proposal.
   enablement. Blocks everything else.
 - **P1 — Code folder (§1.2/§1.3/§1.4)** behind `ingress_compress_enabled`,
   including the span-enrichment fallback and `X-Aimee-Compress` plumbing if the
-  header is exposed. Lossy-by-contract, every fold carrying a `transform` tag.
-  Token/latency A/B + harness upgrades; no default flip.
+  header is exposed, plus the full config/docs/test surface for that flag.
+  Lossy-by-contract, every fold carrying a `transform` tag. Token/latency A/B +
+  harness upgrades; no default flip.
 - **P2 — Rehydration handle (§3)** with the full §3.2 safety contract, unified
-  with recall-economy's pull-handle. Unblocks aggressive folding + the
-  forced-rehydration accuracy A/B → candidate default flip for §1.
+  with recall-economy's `memory_get` / source-read pull surfaces, tool metadata
+  goldens, installed-client reachability fixtures, and injected-tool auth denial
+  tests. Unblocks aggressive folding + the forced-rehydration accuracy A/B →
+  candidate default flip for §1.
 - **P3 — Cache-prefix placement (§2)** on every Codex/OpenAI injection path:
   capability table, no-op default, integration with `payload_rewrite`, placement
-  invariant + body-serialization tests, realized-cache telemetry consumed from
-  `token_tracker` / the cost-accounting ledger. Does not add a duplicate
-  cache-marking flag; ships after the accounting surface.
+  invariant + body-serialization tests, `agent_execute_messages()` session-scoped
+  prefix tracking, realized-cache telemetry consumed from `token_tracker` / the
+  cost-accounting ledger. Does not add a duplicate cache-marking flag; ships
+  after the accounting surface.
 - **P4 — Failure-mined corrections (§4)** emitting learning signals, default-off,
   promoted through the existing review/Gate-Promote path, preferably by
-  refactoring `kb_mining.c` recurrence rather than creating a parallel miner.
+  refactoring `kb_mining.c` recurrence rather than creating a parallel miner;
+  use `kb_mining_enabled` plus a narrower job gate or add a fully plumbed
+  `curator_failure_mining_enabled` field.
 - **P5 — Anthropic ingress injection (§2.3)** as a separate opt-in phase behind
   its own gate, with system-block-array preservation and the Claude-Code MCP
   tool-call proof.
@@ -819,6 +982,13 @@ this proposal.
   accuracy gate (§6) — never flip a default on token count alone.
 - **Rehydration handle as a data-exfil path.** Mitigated by the §3.2 scope +
   capability-binding + log-hygiene contract and the sensitivity fixtures (§6).
+  If OpenAI/Codex inline tool interception is implemented, it must also inherit
+  the route authorization and remote-client denial rules from the existing
+  HTTP/MCP surface (§3.5).
+- **Inert or misplaced flags.** New names such as `ingress_compress_enabled`,
+  `ingress_rehydrate_*`, or `curator_failure_mining_enabled` can look reviewed
+  while remaining unsettable. Mitigated by requiring config load/save, CLI,
+  generated docs, and config-surface tests as part of each phase (§6).
 - **Premise wrong (envelope actually stable).** If measurement (§2.2) shows the
   envelope is cache-friendly after all, the two proposals reconcile on the data;
   no code is committed to either premise before the bench reports.
@@ -834,8 +1004,9 @@ this proposal.
   users will see both artifacts and learning proposals for one failure pattern.
   Refactor the existing mining job or use a disjoint dedup key before enabling.
 - **Rehydration unreachable on the target ingress.** If `rehydrate` is not
-  callable (client lacks Aimee's MCP, or a multi-replica deploy routes the call to
-  another process — §3.4), an aggressively lossy fold silently strands detail the
-  model cannot recover. Mitigated by gating lossy folds on proven per-ingress
-  reachability (§3.4) and falling back to byte-equivalent folds / stand-alone
-  previews otherwise — reachability is a P2 acceptance check, not an assumption.
+  callable (client lacks Aimee's MCP, the installed Claude config does not expose
+  the tool, or a multi-replica deploy routes the call to another process — §3.4),
+  an aggressively lossy fold silently strands detail the model cannot recover.
+  Mitigated by gating lossy folds on proven per-ingress reachability (§3.4) and
+  falling back to byte-equivalent folds / stand-alone previews otherwise —
+  reachability is a P2 acceptance check, not an assumption.
