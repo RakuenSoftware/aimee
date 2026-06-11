@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 twenty-first review)
+- **Date:** 2026-06-11 (revised post-PR-#183 twenty-second review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -704,6 +704,28 @@ so at-least-once delivery is a real hazard.
     at-least-once delivery, and a flaky client could merge twice or skip a phase.
     **Resolved in §4, §5, and §10.**
 
+## PR #183 twenty-second review — exactly-once needs crash recovery, not just concurrency guards
+
+#55 makes repeated gate calls idempotent, but the external merge is outside the
+DB transaction. Aimee has DB1 transaction patterns (`BEGIN IMMEDIATE`), but GitHub
+merge execution happens through `git_pr`/`mcp_git_run`/`gh` after the ledger write,
+so a crash can still land between the local state transition and the remote side
+effect.
+
+56. **`gate pass` needs a durable merge-intent / recovery state before the external
+    merge.** If the implementation atomically leaves `gate*_pending` and then
+    crashes before recording `merge_sha`, restart sees a non-pending pipeline that
+    is neither merged nor reviewable. Conversely, if it merges first and crashes
+    before advancing, restart may try to merge again without knowing the first
+    merge succeeded. The ledger needs an explicit, resumable side-effect protocol:
+    record a gate verdict plus `merge_intent` / `merge_pending` row keyed by PR
+    number + expected head SHA under a DB transaction; execute the merge; then
+    reconcile by reading PR/merge status and record `merge_sha` before advancing to
+    `implementing`/`done`. On resume, `merge_pending` is a first-class state: if the
+    PR is already merged at the expected head, finish the advance; if not, retry or
+    surface the blocked merge reason without losing the verdict. **Resolved in §1,
+    §4, §5, §9, and §10.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -742,7 +764,7 @@ so at-least-once delivery is a real hazard.
 
 States (persisted in the §4 ledger):
 
-`drafting → proposal_review → gate1_pending → implementing → pr_review → gate2_pending → done` (plus `failed`/`abandoned`).
+`drafting → proposal_review → gate1_pending → gate1_merge_pending → implementing → pr_review → gate2_pending → gate2_merge_pending → done` (plus `failed`/`abandoned`).
 
 Transitions:
 
@@ -759,18 +781,22 @@ Transitions:
    the items, re-REVIEW, until the done-bar (§3). Then the agent opens the proposal
    PR through the workspace-aware PR surface (base `testing`, per repo flow) and
    moves to `gate1_pending`.
-3. **gate1_pending** — human gate 1 (§5). **pass** → merge proposal PR, move to
-   `implementing`. **fail** → the human's reason is appended to the brief and the
-   state returns to `proposal_review`, which re-revises and **pushes to the same
-   recorded proposal branch/PR** (never a duplicate, #43).
+3. **gate1_pending** — human gate 1 (§5). **pass** records the verdict and a
+   durable merge intent, then moves to `gate1_merge_pending`; successful merge
+   reconciliation moves to `implementing`. **fail** → the human's reason is
+   appended to the brief and the state returns to `proposal_review`, which
+   re-revises and **pushes to the same recorded proposal branch/PR** (never a
+   duplicate, #43).
 4. **implementing** — the agent implements the merged proposal on a dedicated
    implementation branch/worktree (normal coding; not a roundtable activity),
    opens the implementation PR, captures the diff.
 5. **pr_review** — the §3 outer loop in REVIEW mode over the diff: REVIEW,
    agent-fix, re-REVIEW, until the done-bar.
-6. **gate2_pending** — human gate 2 (§5). **pass** → merge the implementation PR,
-   move to `done`. **fail** → reason → brief, state returns to `implementing`,
-   which pushes the fix to the **same recorded implementation branch/PR** (#43).
+6. **gate2_pending** — human gate 2 (§5). **pass** records the verdict and a
+   durable merge intent, then moves to `gate2_merge_pending`; successful merge
+   reconciliation moves to `done`. **fail** → reason → brief, state returns to
+   `implementing`, which pushes the fix to the **same recorded implementation
+   branch/PR** (#43).
 
 Every state is durable (§4) so a human gate can be answered hours or days later,
 across a server restart or a new agent session. For v1 admission control, only
@@ -959,7 +985,8 @@ Either way, the durable record holds:
   path if any, head/base commit SHAs, dirty-state snapshot, PR number(s), PR URLs,
   merge SHAs, forge-token/`gh` authority status, and last checked mergeability;
 - the human-gate verdicts, fail reasons, actor/timestamp, resume action taken,
-  and cost-scope evidence for total-cap accounting, including whether
+  merge-intent / merge-pending records keyed by PR number + expected head SHA
+  (#56), and cost-scope evidence for total-cap accounting, including whether
   implementation-agent spend is included, unknown, or out of scope (#49).
 
 **Result capture is server-worker-owned, not agent-poll (#10/#12/#18).** The
@@ -1078,11 +1105,19 @@ its own.
 **Gate resolution is exactly-once (#55).** `gate pass|fail` both records a verdict
 and (on pass) merges + advances, so it must be a guarded, idempotent transition,
 not a fire-and-forget command. It acts only when the pipeline is in the matching
-`*_pending` state and atomically leaves that state, so a repeat or concurrent call
-sees a non-pending state and returns "already resolved" rather than merging again;
-the merge itself is keyed by the recorded PR + expected head SHA (the drift check
-above), so a retried merge of an already-merged PR is a no-op. A flaky client must
-not be able to merge twice or skip a phase.
+`*_pending` state and atomically leaves that state by writing a durable
+`gate*_merge_pending` intent (#56), so a repeat or concurrent call sees a
+non-pending state and returns "already resolving/resolved" rather than merging
+again; the merge itself is keyed by the recorded PR + expected head SHA (the drift
+check above), so a retried merge of an already-merged PR is a no-op. A flaky client
+must not be able to merge twice or skip a phase.
+
+Because the merge is an external side effect, `gate*_merge_pending` is a recovery
+state, not just an implementation detail (#56). On restart/resume, the pipeline
+reconciles the recorded PR + expected head: already merged at that head records the
+merge SHA and advances; still unmerged retries or parks with the latest merge
+blocker; merged at a different head marks the gate evidence stale and stops for
+operator review.
 
 If the implementation chooses the distinct-capability path, it must first make the
 capability model able to represent that authority (#54). The current mask has no
@@ -1123,8 +1158,8 @@ therefore: (a) runs only after the human pass; (b) surfaces CI/mergeability stat
 in the gate digest rather than assuming green; (c) may require `gh pr merge
 --admin` and states so; and (d) records the merge SHA in the ledger. If the merge
 cannot complete under policy (auth, protected branch, hung checks), the pipeline
-parks at the gate with the reason surfaced — it never reports a phase advanced
-when the merge did not land.
+parks in the merge-pending recovery state with the reason surfaced — it never
+reports a phase advanced when the merge did not land.
 
 Because `git_pr` does not currently merge (#50), implementation must either add a
 workspace-aware `git_pr action=merge` or explicitly route the merge through
@@ -1292,7 +1327,8 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
 - **P3 — Human gates + fail-return edges** end to end, with the durable digest,
   PR/worktree drift validation through the workspace-aware git surface,
   mergeability/auth checks, an explicit merge executor (#50), parked-gate admission
-  policy (#48), and reason-to-brief feedback. This closes the full loop.
+  policy (#48), durable merge-intent / merge-pending recovery (#56), and
+  reason-to-brief feedback. This closes the full loop.
 - **P4 — Config surface** for all keys + generated docs + tests (lands with the
   phase that first reads each key, not deferred).
 
@@ -1465,6 +1501,12 @@ ledger) before the full idea→merge pipeline of P2/P3.
   on a `*_pending` pipeline; exactly one merge + advance occurs, the second call
   returns "already resolved," and a retried merge of an already-merged PR is a
   no-op — never a double-merge or a skipped phase.
+- **Merge-pending crash recovery (#56)** — crash after the authorized gate verdict
+  is persisted but before merge, and again after the remote merge succeeds but
+  before `merge_sha`/advance is recorded. On restart, the pipeline resumes from
+  `gate*_merge_pending`, reconciles PR number + expected head SHA, either retries
+  or records the already-landed merge SHA, and advances exactly once. A PR merged
+  at a different head stops as stale evidence.
 - **Gate capability representation (#54)** — if a distinct gate capability is
   added, assert `CAPS_ALL`, `CAPS_AUTHENTICATED`, scoped/unscoped TCP bearer
   behavior, `server_http_route_caps`, capability advertising/OpenAPI docs, and
