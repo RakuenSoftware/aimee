@@ -5,11 +5,16 @@
 #include "agent_exec.h"
 #include "agent_tools.h" /* agent_tools_set_tool_event_cb — stream tool events */
 #include "cli_codex.h"
-#include "cli_stream_sink.h"
 #include "config.h"
 #include "primary_session_adapter.h"
-#include "provider_cli_adapter.h"
 #include "workspace_provider.h"
+
+/* Defined in agent_runtime_tmux.c (no shared header; agent_runtime.c forward-
+ * declares it the same way). Drives the standard CLI agent over a tmux session,
+ * which runs on the client over the reverse channel for a detached workspace. */
+int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
+                              const char *system_prompt, const char *user_prompt, int max_tokens,
+                              double temperature, agent_result_t *out);
 #include "prompts.h"
 #include "persona.h"
 #include "server_http.h"
@@ -527,24 +532,6 @@ static void chat_tool_event_cb(const char *phase, const char *name, void *ud)
    stream_event(cctx, ev, "name", name ? name : "");
 }
 
-/* Relay a local-CLI agent's streamed text deltas (claude -p on a detached
- * client, over the reverse channel) into the chat SSE as they arrive. */
-typedef struct
-{
-   compute_ctx_t *cctx;
-   int emitted;
-} cli_stream_relay_t;
-
-static void chat_cli_stream_cb(void *ctx, const char *text, size_t len)
-{
-   (void)len;
-   cli_stream_relay_t *r = (cli_stream_relay_t *)ctx;
-   if (!r || !text || !text[0])
-      return;
-   stream_event(r->cctx, "text", "content", text);
-   r->emitted = 1;
-}
-
 static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, const char *cwd,
                                      const char *aimee_sid, const char *provider,
                                      const char *model_override, const config_t *cfg)
@@ -611,18 +598,11 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
       stream_event(cctx, "text", "content", drift);
    agent_tools_set_tool_event_cb(chat_tool_event_cb, cctx);
 
-   /* Stream a local-CLI agent's text deltas live into the SSE (claude -p run on
-    * the detached client over the reverse channel). No-op for HTTP providers /
-    * co-located runs; provider_cli only emits when a sink is installed. */
-   cli_stream_relay_t relay = {cctx, 0};
-   cli_stream_sink_set(chat_cli_stream_cb, &relay);
-
    agent_result_t result;
    memset(&result, 0, sizeof(result));
    int rc = agent_run_with_tools(&acfg, "code", system_prompt ? system_prompt : "", message,
                                  AGENT_DEFAULT_MAX_TOKENS, &result);
 
-   cli_stream_sink_clear();
    agent_tools_set_tool_event_cb(NULL, NULL);
    session_id_clear_override();
    workspace_turn_unbind_active();
@@ -637,9 +617,7 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
       return;
    }
 
-   /* If deltas already streamed (CLI agent on the client), the client has
-    * reconstructed the full text from them — don't re-emit the whole response. */
-   if (result.response && result.response[0] && !relay.emitted)
+   if (result.response && result.response[0])
       stream_event(cctx, "text", "content", result.response);
    stream_event(cctx, "turn_end", NULL, NULL);
    stream_event(cctx, "done", NULL, NULL);
@@ -993,15 +971,16 @@ void chat_stream_worker(void *arg)
       return;
    }
 
-   /* Detached (thin-client) workspace: the `claude` binary, its login, and the
+   /* Detached (thin-client) workspace: the `claude` CLI, its login, tmux, and the
     * working tree live on the CLIENT, not this (possibly containerized) server.
-    * Run claude on the client over the reverse channel via the provider-cli
-    * streaming path, reusing the same delta->SSE sink. Co-located turns fall
-    * through to the local spawn below. */
+    * Run the STANDARD `claude` CLI over tmux on the client — the cli_session
+    * driver marshals its tmux commands over the reverse channel — rather than
+    * the local `claude -p` path below. Co-located turns fall through to the
+    * local claude path. */
    {
       int detached_bound = workspace_turn_bind_active(cwd);
       const workspace_provider_t *wsp = workspace_provider_active();
-      if (detached_bound && wsp && wsp->kind == WS_PROVIDER_DETACHED && wsp->exec_stream)
+      if (detached_bound && wsp && wsp->kind == WS_PROVIDER_DETACHED && wsp->exec_shell)
       {
          if (aimee_path_is_absolute(cwd) && !strstr(cwd, "/.."))
             run_cmd_set_cwd(cwd);
@@ -1012,23 +991,20 @@ void chat_stream_worker(void *arg)
          agent_t cag;
          memset(&cag, 0, sizeof(cag));
          snprintf(cag.name, sizeof(cag.name), "claude");
-         snprintf(cag.backend, sizeof(cag.backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
+         snprintf(cag.backend, sizeof(cag.backend), "%s", AGENT_BACKEND_TMUX_CLI);
          snprintf(cag.cli_kind, sizeof(cag.cli_kind), "claude");
          if (cfg.claude_model[0])
-            snprintf(cag.model, sizeof(cag.model), "%s", cfg.claude_model);
+            snprintf(cag.cli_cmd, sizeof(cag.cli_cmd), "claude --model %s", cfg.claude_model);
+         else
+            snprintf(cag.cli_cmd, sizeof(cag.cli_cmd), "claude");
+         cag.session_reuse = 1;
 
          stream_event(cctx, "turn_start", NULL, NULL);
-         agent_tools_set_tool_event_cb(chat_tool_event_cb, cctx);
-         cli_stream_relay_t relay = {cctx, 0};
-         cli_stream_sink_set(chat_cli_stream_cb, &relay);
-
          agent_result_t result;
          memset(&result, 0, sizeof(result));
-         int rc = provider_cli_adapter_execute(provider_cli_adapter_get("claude"), &cag,
-                                               run_cmd_get_cwd(), sys ? sys : "", message, &result);
+         int rc = agent_execute_cli_session(&cag, NULL, sys ? sys : "", message,
+                                            AGENT_DEFAULT_MAX_TOKENS, 0.3, &result);
 
-         cli_stream_sink_clear();
-         agent_tools_set_tool_event_cb(NULL, NULL);
          session_id_clear_override();
          workspace_turn_unbind_active();
          run_cmd_set_cwd(NULL);
@@ -1036,12 +1012,12 @@ void chat_stream_worker(void *arg)
 
          if (rc != 0)
          {
-            compute_error(cctx, result.error[0] ? result.error : "claude provider failed");
+            compute_error(cctx, result.error[0] ? result.error : "claude tmux session failed");
             free(result.response);
             compute_ctx_free(cctx);
             return;
          }
-         if (result.response && result.response[0] && !relay.emitted)
+         if (result.response && result.response[0])
             stream_event(cctx, "text", "content", result.response);
          stream_event(cctx, "turn_end", NULL, NULL);
          stream_event(cctx, "done", NULL, NULL);

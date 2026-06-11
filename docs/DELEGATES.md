@@ -348,19 +348,20 @@ The supported setup/provider names are:
 
 ### Local-CLI agents on a thin client
 
-`claude` (and any agent whose backend launches a local binary — the `claude -p`
-provider-CLI / tmux path) needs the CLI executable, its login, and the working
-tree **on the same machine as execution**. On a co-located server that is the
-server host. On a **remote/containerized `aimee-server` driven by a thin
-client**, none of those live on the server — they live on your machine.
+`claude` (a `--provider claude` agent runs the **standard `claude` CLI over
+tmux**) needs the CLI executable, its login, tmux, and the working tree **on the
+same machine as execution**. On a co-located server that is the server host. On
+a **remote/containerized `aimee-server` driven by a thin client**, none of those
+live on the server — they live on your machine.
 
 So when the active workspace is `detached` (a thin client is serving it over the
-reverse channel — see workspace client-push), aimee runs the CLI agent **on the
-client**: it marshals the same `claude -p` invocation over the runner reverse
-channel, the client spawns it against its own tree with its own `~/.claude`
-login, and streams the output back into the turn token-by-token. No Claude
-credential is ever sent to or stored on the server. Co-located deployments are
-unchanged (the server forks the CLI locally as before).
+reverse channel — see workspace client-push), aimee runs the standard `claude`
+CLI over tmux **on the client**: the tmux session driver marshals its tmux
+commands (`new-session`/`paste-buffer`/`capture-pane`/…) over the runner reverse
+channel, so the session, the `claude` process, and its `~/.claude` login all live
+on your machine, against your working tree. No Claude credential is ever sent to
+or stored on the server. Co-located deployments are unchanged (the tmux session
+runs locally). (`claude -p` print mode is **not** used.)
 
 Practical notes:
 - Configure the agent as usual (`aimee agent add claude … --provider claude`,

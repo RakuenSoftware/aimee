@@ -3,14 +3,7 @@
 
 #include "aimee.h"
 #include "cJSON.h"
-#include "cli_stream_sink.h"
 #include "util.h"
-#include "workspace_provider.h"
-
-/* run_cmd cwd control (util.c): the active turn binds the thread-local working
- * directory to the (client) workspace root; the detached exec_stream carries it
- * so the CLI agent runs in the right tree on the client. */
-extern const char *run_cmd_get_cwd(void);
 
 #include <errno.h>
 #include <fcntl.h>
@@ -50,28 +43,6 @@ static int provider_cli_buf_append(provider_cli_buf_t *buf, const char *text)
       buf->cap = next;
    }
    memcpy(buf->text + buf->len, text, n);
-   buf->len += n;
-   buf->text[buf->len] = '\0';
-   return 0;
-}
-
-/* Append `n` raw bytes (binary-safe; keeps a trailing NUL for line scanning). */
-static int provider_cli_buf_append_n(provider_cli_buf_t *buf, const char *data, size_t n)
-{
-   if (!buf || !data || n == 0)
-      return 0;
-   if (buf->len + n + 1 > buf->cap)
-   {
-      size_t next = buf->cap ? buf->cap : 4096;
-      while (next < buf->len + n + 1)
-         next *= 2;
-      char *grown = realloc(buf->text, next);
-      if (!grown)
-         return -1;
-      buf->text = grown;
-      buf->cap = next;
-   }
-   memcpy(buf->text + buf->len, data, n);
    buf->len += n;
    buf->text[buf->len] = '\0';
    return 0;
@@ -948,128 +919,6 @@ const provider_cli_adapter_t *provider_cli_adapter_get(const char *cli_kind)
    return NULL;
 }
 
-/* Streaming consumer for the detached (thin-client) path: accumulates the full
- * stdout for the final parse, and incrementally parses complete stream-json
- * lines so each assistant text delta is forwarded to the per-turn chat sink. */
-typedef struct
-{
-   const provider_cli_adapter_t *adapter;
-   provider_cli_buf_t raw;  /* whole stdout, parsed once at the end */
-   provider_cli_buf_t line; /* current partial line */
-} provider_cli_remote_consumer_t;
-
-static void provider_cli_remote_emit_line(provider_cli_remote_consumer_t *r)
-{
-   if (!r->line.text || !r->line.len)
-      return;
-   if (cli_stream_sink_active() && r->adapter->parse_line)
-   {
-      cli_event_t ev;
-      memset(&ev, 0, sizeof(ev));
-      if (r->adapter->parse_line(r->line.text, &ev) && ev.type == CLI_EVENT_TEXT_DELTA &&
-          ev.text[0])
-         cli_stream_sink_emit(ev.text, strlen(ev.text));
-   }
-   r->line.len = 0;
-   if (r->line.text)
-      r->line.text[0] = '\0';
-}
-
-static int provider_cli_remote_on_chunk(void *cb_ctx, const char *data, size_t len)
-{
-   provider_cli_remote_consumer_t *r = (provider_cli_remote_consumer_t *)cb_ctx;
-   if (provider_cli_buf_append_n(&r->raw, data, len) != 0)
-      return -1;
-   for (size_t i = 0; i < len; i++)
-   {
-      char c = data[i];
-      if (c == '\n')
-         provider_cli_remote_emit_line(r);
-      else if (provider_cli_buf_append_n(&r->line, &c, 1) != 0)
-         return -1;
-   }
-   return 0;
-}
-
-/* Run the CLI agent on the client over the detached provider's exec_stream:
- * build the same argv spawn() would fork locally, feed the prompt on stdin, and
- * stream stdout back. Returns 0/-1 like provider_cli_adapter_execute and fills
- * `out`. Precondition: ws->exec_stream && adapter->build_argv are non-NULL. */
-static int provider_cli_run_detached(const provider_cli_adapter_t *adapter,
-                                     const provider_cli_cfg_t *cfg, const workspace_provider_t *ws,
-                                     agent_result_t *out)
-{
-   char *tokens[PROVIDER_CLI_MAX_ARGS + 1] = {0};
-   int split = 0;
-   int argc = adapter->build_argv(cfg, tokens, PROVIDER_CLI_MAX_ARGS, &split);
-   if (argc < 0)
-   {
-      snprintf(out->error, sizeof(out->error), "failed to build %s argv", adapter->display_name);
-      return -1;
-   }
-
-   size_t prompt_cap =
-       (cfg->system_prompt ? strlen(cfg->system_prompt) : 0) + strlen(cfg->user_prompt) + 256;
-   char *prompt = malloc(prompt_cap);
-   if (!prompt)
-   {
-      provider_cli_free_tokens(tokens, split);
-      snprintf(out->error, sizeof(out->error), "out of memory");
-      return -1;
-   }
-   int prompt_rc =
-       adapter->build_prompt
-           ? adapter->build_prompt(cfg, cfg->system_prompt, cfg->user_prompt, prompt, prompt_cap)
-           : provider_cli_default_build_prompt(cfg, cfg->system_prompt, cfg->user_prompt, prompt,
-                                               prompt_cap);
-   if (prompt_rc != 0)
-   {
-      free(prompt);
-      provider_cli_free_tokens(tokens, split);
-      snprintf(out->error, sizeof(out->error), "failed to build prompt for %s",
-               adapter->display_name);
-      return -1;
-   }
-
-   const char *cwd = run_cmd_get_cwd();
-   if ((!cwd || !cwd[0]) && cfg->cwd && cfg->cwd[0])
-      cwd = cfg->cwd;
-
-   struct timespec start, end;
-   clock_gettime(CLOCK_MONOTONIC, &start);
-
-   provider_cli_remote_consumer_t consumer = {0};
-   consumer.adapter = adapter;
-   int rc = ws->exec_stream(ws, (const char *const *)tokens, prompt, strlen(prompt), cwd,
-                            provider_cli_remote_on_chunk, &consumer);
-   provider_cli_remote_emit_line(&consumer); /* flush a trailing partial line */
-   free(prompt);
-   provider_cli_free_tokens(tokens, split);
-   free(consumer.line.text);
-
-   clock_gettime(CLOCK_MONOTONIC, &end);
-   out->latency_ms =
-       (int)((end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000);
-
-   if (rc < 0 && (!consumer.raw.text || !consumer.raw.text[0]))
-   {
-      free(consumer.raw.text);
-      snprintf(out->error, sizeof(out->error), "%s did not run on the client (reverse channel)",
-               adapter->display_name);
-      return -1;
-   }
-   if (!consumer.raw.text || !consumer.raw.text[0])
-   {
-      free(consumer.raw.text);
-      snprintf(out->error, sizeof(out->error), "empty response from %s", adapter->display_name);
-      return -1;
-   }
-
-   int prc = provider_cli_parse_output(adapter, consumer.raw.text, out);
-   free(consumer.raw.text);
-   return prc;
-}
-
 int provider_cli_adapter_execute(const provider_cli_adapter_t *adapter, const agent_t *agent,
                                  const char *cwd, const char *system_prompt,
                                  const char *user_prompt, agent_result_t *out)
@@ -1098,16 +947,10 @@ int provider_cli_adapter_execute(const provider_cli_adapter_t *adapter, const ag
        .user_prompt = user_prompt,
    };
 
-   /* Detached (thin-client) workspace: the `claude`/CLI binary, its auth, and
-    * the working tree live on the client, not this server. Marshal the spawn
-    * over the reverse channel so it runs there, streaming output back. Falls
-    * through to the local fork/exec when co-located (shared provider) or when
-    * the adapter has no remote argv builder. */
-   {
-      const workspace_provider_t *ws = workspace_provider_active();
-      if (ws && ws->kind == WS_PROVIDER_DETACHED && ws->exec_stream && adapter->build_argv)
-         return provider_cli_run_detached(adapter, &cfg, ws, out);
-   }
+   /* NB: a thin-client (detached workspace) `claude` agent runs the standard
+    * `claude` CLI over tmux on the client — that is the tmux-cli backend routed
+    * through cli_session over the reverse channel, NOT this provider-cli path
+    * (which would use `claude -p`). So there is no detached special-case here. */
 
    if (adapter->execute)
       return adapter->execute(&cfg, out);

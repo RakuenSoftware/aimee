@@ -251,14 +251,15 @@ See [THIN_CLIENT.md](THIN_CLIENT.md) for operational details.
 
 ## Local-CLI agent execution stays on the client
 
-A local-CLI agent (Claude via `claude -p`, and peers whose backend launches a
-local binary) executes where its binary and login live — the **client** — even
-when it is driven through a remote `aimee-server`. On a detached workspace the
-server marshals the CLI invocation over the runner reverse channel and the client
-spawns it locally, authenticating with the client's own login (e.g. `~/.claude`).
+A `--provider claude` agent runs the standard `claude` CLI in a tmux session,
+which executes where the binary and login live — the **client** — even when it
+is driven through a remote `aimee-server`. On a detached workspace the tmux
+session driver marshals its tmux commands over the runner reverse channel and the
+client runs them locally, with `claude` authenticating via the client's own login
+(`~/.claude`). (`claude -p` print mode is not used.)
 
-- No Claude/CLI credential is transmitted to or stored on the server; the server
-  only relays the prompt and streams the output.
+- No Claude credential is transmitted to or stored on the server; the server only
+  relays the prompt and reads back the captured session output.
 - The CLI runs against the client's working tree, under the client user's
   identity — the server gains no new ability to execute binaries it does not have.
 - This keeps the server from being a place where third-party agent logins

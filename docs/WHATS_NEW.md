@@ -25,15 +25,16 @@ secrets; see [THIN_CLIENT.md](THIN_CLIENT.md).
   the path locally, registers it as `detached`, and pushes the files to the
   server (`POST /v1/index/ingest`, chunked under aimee-kb's body cap) — the
   server never reads the client filesystem. `aimee index scan [path]` re-pushes.
-- **Local-CLI agents (Claude) run on the thin client**: a `claude` agent needs
-  the `claude` binary, its login, and the working tree where it executes — none
-  of which exist on a remote/containerized `aimee-server`. When the active
-  workspace is `detached` (a thin client is serving it), aimee now marshals the
-  `claude -p` run over the existing runner reverse channel so it executes **on
-  the client**, against the client's tree with the client's `~/.claude` login,
-  and **streams the output back into the chat turn token-by-token**. No Claude
-  credential is sent to or stored on the server. Co-located deployments are
-  unchanged. See [DELEGATES.md](DELEGATES.md).
+- **Claude runs on the thin client (standard `claude` CLI over tmux)**: a
+  `--provider claude` agent runs the standard `claude` CLI in a tmux session — it
+  needs the `claude` binary, tmux, its login, and the working tree, none of which
+  exist on a remote/containerized `aimee-server`. When the active workspace is
+  `detached` (a thin client is serving it), aimee now runs that tmux session **on
+  the client** by marshalling its tmux commands over the existing runner reverse
+  channel, against the client's tree with the client's `~/.claude` login. No
+  Claude credential is sent to or stored on the server, and `claude -p` print
+  mode is not used. Co-located deployments are unchanged. See
+  [DELEGATES.md](DELEGATES.md).
 - **Claude via the CLI is primary-only by default**: Claude run via the `claude`
   CLI / tmux login (authenticated by the Claude subscription login, not an API
   key) can be your interactive primary but is **not** usable as a delegate unless
