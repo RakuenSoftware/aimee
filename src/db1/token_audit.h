@@ -66,6 +66,14 @@ extern "C"
       const char *request_id;
       int attempt;
       const char *principal;
+      /* served_model is the model aimee selected to serve (which may differ from
+       * the provider-reported `model` above when the provider echoes a canonical
+       * variant); duration_ms is the call latency; metadata is a free-form JSON
+       * string for optimization metadata (dedup/cache/route hints). All optional;
+       * NULL == empty / 0. */
+      const char *served_model;
+      int duration_ms;
+      const char *metadata;
       int prompt_tokens;
       int completion_tokens;
       int cache_write_tokens;

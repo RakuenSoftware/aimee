@@ -930,6 +930,7 @@ int provider_cli_adapter_execute(const provider_cli_adapter_t *adapter, const ag
    {
       snprintf(out->agent_name, MAX_AGENT_NAME, "%s", agent->name);
       snprintf(out->model, MAX_MODEL_LEN, "%s", agent->model);
+      snprintf(out->served_model, MAX_MODEL_LEN, "%s", agent->model);
    }
 
    if (!adapter)

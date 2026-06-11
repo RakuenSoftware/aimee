@@ -61,10 +61,10 @@ int db1_token_audit_insert(const db1_token_audit_row_t *row)
        "INSERT OR IGNORE INTO token_audit"
        " (session_id, delegation_id, project_name, tool_name, role, model, source,"
        "  requested_model, stop_reason, usage_kind, agent_log_id,"
-       "  request_id, attempt, principal,"
+       "  request_id, attempt, principal, served_model, duration_ms, metadata,"
        "  prompt_tokens, completion_tokens, cache_write_tokens, cache_read_tokens,"
        "  estimated_cost_usd)"
-       " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+       " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
       return -1;
 
@@ -84,11 +84,14 @@ int db1_token_audit_insert(const db1_token_audit_row_t *row)
    sqlite3_bind_text(stmt, 12, row->request_id ? row->request_id : "", -1, SQLITE_TRANSIENT);
    sqlite3_bind_int(stmt, 13, row->attempt);
    sqlite3_bind_text(stmt, 14, row->principal ? row->principal : "", -1, SQLITE_TRANSIENT);
-   sqlite3_bind_int(stmt, 15, row->prompt_tokens);
-   sqlite3_bind_int(stmt, 16, row->completion_tokens);
-   sqlite3_bind_int(stmt, 17, row->cache_write_tokens);
-   sqlite3_bind_int(stmt, 18, row->cache_read_tokens);
-   sqlite3_bind_double(stmt, 19, row->estimated_cost_usd);
+   sqlite3_bind_text(stmt, 15, row->served_model ? row->served_model : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 16, row->duration_ms);
+   sqlite3_bind_text(stmt, 17, row->metadata ? row->metadata : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 18, row->prompt_tokens);
+   sqlite3_bind_int(stmt, 19, row->completion_tokens);
+   sqlite3_bind_int(stmt, 20, row->cache_write_tokens);
+   sqlite3_bind_int(stmt, 21, row->cache_read_tokens);
+   sqlite3_bind_double(stmt, 22, row->estimated_cost_usd);
 
    int rc = sqlite3_step(stmt);
    sqlite3_finalize(stmt);
@@ -502,24 +505,30 @@ int db1_insights_top_sessions(int since_hours, db1_insights_top_session_t *out, 
    if (!db)
       return -1;
 
+   /* Group by a per-CLIENT key — the request principal (account/tenant boundary)
+    * when present, else the internal session_id — so two distinct ingress clients
+    * (which share the server's process-wide session_id) do not collapse into one
+    * row. Internal agent rows (empty principal) still group by session_id. */
    static const char *sql_recent =
-       "SELECT ta.session_id, COALESCE(ss.title,''), COALESCE(MAX(ta.model),''),"
+       "SELECT COALESCE(NULLIF(ta.principal,''), ta.session_id), COALESCE(MAX(ss.title),''),"
+       " COALESCE(MAX(ta.model),''),"
        " COALESCE(SUM(ta.prompt_tokens),0), COALESCE(SUM(ta.completion_tokens),0),"
        " COALESCE(SUM(ta.estimated_cost_usd),0.0), COALESCE(MIN(ta.created_at),'')"
        " FROM token_audit ta"
        " LEFT JOIN server_sessions ss ON ss.id = ta.session_id"
        " WHERE (ta.usage_kind = 'realized' OR ta.usage_kind = '' OR ta.usage_kind IS NULL)"
        " AND ta.created_at >= datetime('now', ?)"
-       " GROUP BY ta.session_id"
+       " GROUP BY COALESCE(NULLIF(ta.principal,''), ta.session_id)"
        " ORDER BY SUM(ta.estimated_cost_usd) DESC LIMIT ?";
    static const char *sql_all =
-       "SELECT ta.session_id, COALESCE(ss.title,''), COALESCE(MAX(ta.model),''),"
+       "SELECT COALESCE(NULLIF(ta.principal,''), ta.session_id), COALESCE(MAX(ss.title),''),"
+       " COALESCE(MAX(ta.model),''),"
        " COALESCE(SUM(ta.prompt_tokens),0), COALESCE(SUM(ta.completion_tokens),0),"
        " COALESCE(SUM(ta.estimated_cost_usd),0.0), COALESCE(MIN(ta.created_at),'')"
        " FROM token_audit ta"
        " LEFT JOIN server_sessions ss ON ss.id = ta.session_id"
        " WHERE (ta.usage_kind = 'realized' OR ta.usage_kind = '' OR ta.usage_kind IS NULL)"
-       " GROUP BY ta.session_id"
+       " GROUP BY COALESCE(NULLIF(ta.principal,''), ta.session_id)"
        " ORDER BY SUM(ta.estimated_cost_usd) DESC LIMIT ?";
    const char *sql = since_hours > 0 ? sql_recent : sql_all;
    sqlite3_stmt *stmt = NULL;

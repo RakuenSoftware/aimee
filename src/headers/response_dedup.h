@@ -21,11 +21,14 @@
 #define RESPONSE_DEDUP_TTL_SECONDS 5
 
 /* Build a stable dedup key from every behaviour-affecting input the ingress
- * handler can see. principal is the account boundary (empty -> "anon"); body is
- * hashed so the key stays bounded. Writes a NUL-terminated key into out. Pure
- * and deterministic so it is unit-tested directly. */
+ * handler can see. principal is the account boundary (empty -> "anon"); body and
+ * context are hashed so the key stays bounded. `context` is the pre-injected
+ * memory/<aimee-context> envelope (or "") — folding it in prevents a stale reply
+ * being replayed for an identical body after the injected context changed.
+ * Writes a NUL-terminated key into out. Pure and deterministic; unit-tested. */
 void response_dedup_key(const char *principal, const char *model, const char *endpoint,
-                        const char *idempotency_key, const char *body, char *out, size_t out_cap);
+                        const char *idempotency_key, const char *body, const char *context,
+                        char *out, size_t out_cap);
 
 /* Look up a live (unexpired) entry for `key` as of `now` (unix seconds). On a
  * hit, *resp_out is set to a malloc'd copy of the cached response (caller frees)

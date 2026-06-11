@@ -33,9 +33,10 @@ typedef struct
 {
    char session_id[128], delegation_id[128], project_name[64], tool_name[128], role[64];
    char model[128], source[64], requested_model[128], stop_reason[40], usage_kind[24];
-   char request_id[64], principal[128];
+   char request_id[64], principal[128], served_model[128], metadata[256];
    long long agent_log_id;
    int attempt;
+   int duration_ms;
    int prompt_tokens, completion_tokens, cache_write_tokens, cache_read_tokens;
    double estimated_cost_usd;
 } audit_async_entry_t;
@@ -64,6 +65,9 @@ static void audit_entry_to_row(const audit_async_entry_t *e, db1_token_audit_row
    row->request_id = e->request_id;
    row->attempt = e->attempt;
    row->principal = e->principal;
+   row->served_model = e->served_model;
+   row->duration_ms = e->duration_ms;
+   row->metadata = e->metadata;
    row->prompt_tokens = e->prompt_tokens;
    row->completion_tokens = e->completion_tokens;
    row->cache_write_tokens = e->cache_write_tokens;
@@ -127,9 +131,12 @@ static int audit_async_enqueue(const db1_token_audit_row_t *row)
    CPY(e->usage_kind, row->usage_kind);
    CPY(e->request_id, row->request_id);
    CPY(e->principal, row->principal);
+   CPY(e->served_model, row->served_model);
+   CPY(e->metadata, row->metadata);
 #undef CPY
    e->agent_log_id = row->agent_log_id;
    e->attempt = row->attempt;
+   e->duration_ms = row->duration_ms;
    e->prompt_tokens = row->prompt_tokens;
    e->completion_tokens = row->completion_tokens;
    e->cache_write_tokens = row->cache_write_tokens;
@@ -229,6 +236,10 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
        .request_id = rctx ? rctx->request_id : "",
        .attempt = 0,
        .principal = rctx ? rctx->principal : "",
+       /* Served model (what aimee selected) distinct from the provider-reported
+        * `model`; falls back to model when not separately recorded. */
+       .served_model = result->served_model[0] ? result->served_model : bill_model,
+       .duration_ms = result->latency_ms,
        .prompt_tokens = usage.input_tokens,
        .completion_tokens = usage.output_tokens,
        .cache_write_tokens = usage.cache_write_tokens,

@@ -1372,8 +1372,9 @@ paths:
         explicit spend semantics: the top-level estimated_cost_usd is the legacy
         all-rows figure (kept for backwards compatibility), while the spend object
         breaks cost down by usage_kind so realized provider-reported spend is
-        separated from estimated, avoided (dedup-skipped, not billable), and
-        partial rows. spend.total is the billable figure and excludes avoided.
+        separated from estimated, avoided (dedup-skipped), and partial (aborted)
+        rows. spend.total is the billable figure and is REALIZED ONLY — estimated,
+        avoided, and partial are reported individually but excluded from the total.
       responses:
         "200":
           description: Insights
@@ -1396,11 +1397,11 @@ paths:
                     type: object
                     description: Cost broken down by usage_kind (§ ingress cost-accounting).
                     properties:
-                      realized: { type: number, description: Provider-reported usage. }
-                      estimated: { type: number, description: No provider usage; aimee-estimated. }
+                      realized: { type: number, description: Provider-reported usage (the billable spend). }
+                      estimated: { type: number, description: No provider usage; aimee-estimated. Not in total. }
                       avoided: { type: number, description: Dedup-skipped; not counted as spend. }
-                      partial: { type: number, description: Partially-attributed. }
-                      total: { type: number, description: Billable total (realized + estimated + partial). }
+                      partial: { type: number, description: Aborted mid-stream; not counted as spend. }
+                      total: { type: number, description: Billable total — realized only (excludes estimated/avoided/partial). }
                   models:
                     type: array
                     items:

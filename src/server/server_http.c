@@ -1486,13 +1486,25 @@ static void populate_request_context(int fd, int is_tcp, const char *buf, const 
    if (ctx.peer_uid >= 0)
       snprintf(ctx.principal, sizeof(ctx.principal), "uid:%ld", ctx.peer_uid);
 
-   /* A proxy is trusted to stamp identity only by presenting the shared secret. */
+   /* A proxy is trusted to stamp identity only by presenting the shared secret.
+    * The secret comes from config, or the AIMEE_INGRESS_PROXY_SECRET environment
+    * variable — the latter so a co-located proxy that aimee-server launches (the
+    * webchat OpenAI proxy) inherits the same secret without a separate file. */
    config_t cfg;
+   const char *secret = "";
    if (config_load(&cfg) == 0 && cfg.ingress_trusted_proxy_secret[0])
+      secret = cfg.ingress_trusted_proxy_secret;
+   else
+   {
+      const char *env = getenv("AIMEE_INGRESS_PROXY_SECRET");
+      if (env && env[0])
+         secret = env;
+   }
+   if (secret[0])
    {
       char proxy_auth[160] = "";
       if (http_header(buf, "X-Aimee-Proxy-Authorization", proxy_auth, sizeof(proxy_auth)) &&
-          strcmp(proxy_auth, cfg.ingress_trusted_proxy_secret) == 0)
+          server_ct_equal(proxy_auth, secret))
          ctx.trusted = 1;
    }
 

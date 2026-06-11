@@ -81,7 +81,22 @@ func (s *server) proxyV1(w http.ResponseWriter, r *http.Request, upstreamPath st
 			req.URL.Host = "aimee"
 			req.URL.Path = upstreamPath
 			req.Host = "aimee"
+			// Strip the webchat bearer (the UDS is a trusted local channel), but
+			// preserve the account boundary across the strip: when the shared
+			// ingress proxy secret is configured, stamp it plus the principal /
+			// source so aimee-server attributes this traffic to the webchat proxy
+			// rather than collapsing it to the process uid. The client's
+			// Idempotency-Key (if any) is forwarded unchanged by ReverseProxy.
 			req.Header.Del("Authorization")
+			if secret := strings.TrimSpace(os.Getenv("AIMEE_INGRESS_PROXY_SECRET")); secret != "" {
+				req.Header.Set("X-Aimee-Proxy-Authorization", secret)
+				if req.Header.Get("X-Aimee-Principal") == "" {
+					req.Header.Set("X-Aimee-Principal", "webchat")
+				}
+				if req.Header.Get("X-Aimee-Source") == "" {
+					req.Header.Set("X-Aimee-Source", "webchat")
+				}
+			}
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
 			writeJSONError(w, http.StatusBadGateway, "aimee-server unavailable")

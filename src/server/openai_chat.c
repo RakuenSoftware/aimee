@@ -57,6 +57,13 @@
  * are zero because no real call happened. */
 static void record_avoided_turn(const char *model, double avoided_cost)
 {
+   /* Carry the request-context attribution (#3) so an avoided row is attributed
+    * to the same principal/request as a realized one. The avoided cost is a
+    * special value (the prior realized cost replayed), so this writes directly
+    * rather than via agent_record_token_audit (which recomputes cost from tokens
+    * that are zero here); db1_token_audit_insert still applies the idempotency
+    * guard on (source, request_id, attempt). */
+   const request_context_t *rc = request_context_get();
    db1_token_audit_row_t row = {
        .session_id = "",
        .tool_name = model && model[0] ? model : "aimee",
@@ -65,6 +72,8 @@ static void record_avoided_turn(const char *model, double avoided_cost)
        .source = "openai-ingress",
        .requested_model = model ? model : "",
        .usage_kind = "avoided",
+       .request_id = rc ? rc->request_id : "",
+       .principal = rc ? rc->principal : "",
        .estimated_cost_usd = avoided_cost,
    };
    (void)db1_token_audit_insert(&row);
@@ -74,7 +83,7 @@ static void record_avoided_turn(const char *model, double avoided_cost)
  * on and the client supplied an explicit Idempotency-Key. The caller has already
  * rejected streaming, and this path runs no tools — both v1 requirements. */
 static int dedup_eligible(char *key, size_t key_cap, const char *model, const char *endpoint,
-                          const char *body, int *ttl_out)
+                          const char *body, const char *context, int *ttl_out)
 {
    config_t cfg;
    if (config_load(&cfg) != 0 || !cfg.dedup_enabled)
@@ -82,7 +91,8 @@ static int dedup_eligible(char *key, size_t key_cap, const char *model, const ch
    const char *idem = request_context_idempotency_key();
    if (!idem || !idem[0])
       return 0;
-   response_dedup_key(request_context_principal(), model, endpoint, idem, body, key, key_cap);
+   response_dedup_key(request_context_principal(), model, endpoint, idem, body, context, key,
+                      key_cap);
    if (ttl_out)
       *ttl_out =
           cfg.dedup_window_seconds > 0 ? cfg.dedup_window_seconds : RESPONSE_DEDUP_TTL_SECONDS;
@@ -113,13 +123,21 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       return 400;
    }
 
+   /* Build the pre-injection envelope up front: it is part of the model input,
+    * so the §4 dedup key must hash it (a stale reply must not be replayed after
+    * the injected memory/context changes). On a cache miss it is reused for the
+    * provider call below; on a hit it is freed unused. */
+   char *pi_env = ingress_preinject_build(prompt, 0);
+
    /* §4 short-window dedup: serve a re-sent identical request (same principal,
-    * model, endpoint, body, idempotency key) from the TTL cache without paying
-    * for the provider call again. Buffered + non-stream + tool-free here. */
-   char dedup_key[200] = "";
+    * model, endpoint, body, idempotency key, AND pre-injected context) from the
+    * TTL cache without paying for the provider call again. Buffered + non-stream
+    * + tool-free here. */
+   char dedup_key[224] = "";
    int dedup_ttl = RESPONSE_DEDUP_TTL_SECONDS;
    const char *endpoint = chat ? "/v1/chat/completions" : "/v1/completions";
-   int dedup_on = dedup_eligible(dedup_key, sizeof(dedup_key), model, endpoint, body, &dedup_ttl);
+   int dedup_on =
+       dedup_eligible(dedup_key, sizeof(dedup_key), model, endpoint, body, pi_env, &dedup_ttl);
    if (dedup_on)
    {
       char *cached = NULL;
@@ -128,6 +146,7 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       {
          int n = snprintf(resp, cap, "%s", cached);
          free(cached);
+         free(pi_env);
          free(prompt);
          if (n < 0 || n >= cap)
          {
@@ -144,6 +163,7 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
    agent_config_t acfg;
    if (agent_load_config(&acfg) != 0)
    {
+      free(pi_env);
       free(prompt);
       openai_format_error(resp, cap, "server_error", "no agent configuration available");
       return 503;
@@ -160,6 +180,7 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
       ag = &acfg.agents[0];
    if (!ag)
    {
+      free(pi_env);
       free(prompt);
       openai_format_error(resp, cap, "server_error", "no agent configured");
       return 503;
@@ -172,9 +193,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
 
    agent_result_t result;
    memset(&result, 0, sizeof(result));
-   /* P1 pre-injection: prepend the <aimee-context> envelope as the system
-    * prompt (config ingress_preinject_enabled; no-op when off/empty). */
-   char *pi_env = ingress_preinject_build(prompt, 0);
+   /* pi_env (the <aimee-context> envelope) was built up front for the dedup key;
+    * reuse it as the system prompt here. */
    int erc = agent_execute(ag, pi_env, prompt, max_tokens, temperature, &result);
    free(pi_env);
    free(prompt);

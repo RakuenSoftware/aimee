@@ -952,6 +952,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
    memset(out, 0, sizeof(*out));
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", agent->name);
    snprintf(out->model, MAX_MODEL_LEN, "%s", agent->model);
+   snprintf(out->served_model, MAX_MODEL_LEN, "%s", agent->model);
 
    if (!user_prompt || !user_prompt[0])
    {
@@ -1038,6 +1039,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
       fb_agent.fallback_model[0] = '\0';
       /* The fallback model is now the served model — record it for accounting. */
       snprintf(out->model, MAX_MODEL_LEN, "%s", fb_agent.model);
+      snprintf(out->served_model, MAX_MODEL_LEN, "%s", fb_agent.model);
 
       if (is_anthropic_provider(&fb_agent))
          track_simple_anthropic_payload_rewrite(driver, &fb_agent, system_prompt, user_prompt);

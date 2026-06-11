@@ -34,14 +34,20 @@ static uint64_t fnv1a(const char *s)
 }
 
 void response_dedup_key(const char *principal, const char *model, const char *endpoint,
-                        const char *idempotency_key, const char *body, char *out, size_t out_cap)
+                        const char *idempotency_key, const char *body, const char *context,
+                        char *out, size_t out_cap)
 {
    if (!out || out_cap == 0)
       return;
    uint64_t body_hash = fnv1a(body ? body : "");
-   snprintf(out, out_cap, "%s|%s|%s|%s|%016llx", principal && principal[0] ? principal : "anon",
-            model ? model : "", endpoint ? endpoint : "", idempotency_key ? idempotency_key : "",
-            (unsigned long long)body_hash);
+   /* The pre-injected context (memory/<aimee-context> envelope) changes the model
+    * input even when the request body is identical, so it MUST be in the key — or
+    * a repeat body could replay a stale answer after the injected context moved. */
+   uint64_t ctx_hash = fnv1a(context ? context : "");
+   snprintf(out, out_cap, "%s|%s|%s|%s|%016llx|%016llx",
+            principal && principal[0] ? principal : "anon", model ? model : "",
+            endpoint ? endpoint : "", idempotency_key ? idempotency_key : "",
+            (unsigned long long)body_hash, (unsigned long long)ctx_hash);
 }
 
 int response_dedup_get(const char *key, long now, char **resp_out, double *cost_out)

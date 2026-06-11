@@ -254,6 +254,11 @@ typedef struct
     * in the agent's fallback_model. Used for cost estimation and the token_audit
     * model column; empty falls back to agent_name. */
    char model[MAX_MODEL_LEN];
+   /* The model aimee SELECTED to serve (the agent's configured/fallback model),
+    * set at execution entry and never overwritten by the provider-reported model.
+    * Lets the audit distinguish what aimee served from what the provider echoed
+    * in `model`. Empty falls back to `model` in the audit. */
+   char served_model[MAX_MODEL_LEN];
    /* The model the client requested, when it differs from the served `model`
     * (ingress: e.g. Claude Code asks for a model, aimee serves its primary).
     * Empty for internal agent calls. Recorded separately in the audit. */

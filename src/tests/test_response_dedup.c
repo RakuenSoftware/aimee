@@ -9,29 +9,34 @@
 
 static void test_key_isolation(void)
 {
-   char k1[256], k2[256], k3[256];
-   response_dedup_key("uid:1", "gpt-4o", "/v1/chat/completions", "idem-a", "{\"x\":1}", k1,
+   char k1[256], k2[256], k3[256], k4[256];
+   response_dedup_key("uid:1", "gpt-4o", "/v1/chat/completions", "idem-a", "{\"x\":1}", "ctx", k1,
                       sizeof(k1));
    /* Different principal -> different key (no cross-account reads). */
-   response_dedup_key("uid:2", "gpt-4o", "/v1/chat/completions", "idem-a", "{\"x\":1}", k2,
+   response_dedup_key("uid:2", "gpt-4o", "/v1/chat/completions", "idem-a", "{\"x\":1}", "ctx", k2,
                       sizeof(k2));
    /* Different body -> different key. */
-   response_dedup_key("uid:1", "gpt-4o", "/v1/chat/completions", "idem-a", "{\"x\":2}", k3,
+   response_dedup_key("uid:1", "gpt-4o", "/v1/chat/completions", "idem-a", "{\"x\":2}", "ctx", k3,
                       sizeof(k3));
+   /* Different pre-injected context, identical body -> different key (no stale
+    * replay after the injected memory/context moved). */
+   response_dedup_key("uid:1", "gpt-4o", "/v1/chat/completions", "idem-a", "{\"x\":1}", "ctx-NEW",
+                      k4, sizeof(k4));
    assert(strcmp(k1, k2) != 0);
    assert(strcmp(k1, k3) != 0);
+   assert(strcmp(k1, k4) != 0);
 
    /* Identical inputs -> identical key (deterministic). */
    char k1b[256];
-   response_dedup_key("uid:1", "gpt-4o", "/v1/chat/completions", "idem-a", "{\"x\":1}", k1b,
+   response_dedup_key("uid:1", "gpt-4o", "/v1/chat/completions", "idem-a", "{\"x\":1}", "ctx", k1b,
                       sizeof(k1b));
    assert(strcmp(k1, k1b) == 0);
 
    /* Empty principal collapses to a stable "anon" marker, not an empty field. */
    char ka[256];
-   response_dedup_key("", "gpt-4o", "/v1/chat/completions", "idem-a", "{}", ka, sizeof(ka));
+   response_dedup_key("", "gpt-4o", "/v1/chat/completions", "idem-a", "{}", "", ka, sizeof(ka));
    assert(strncmp(ka, "anon|", 5) == 0);
-   PASS("dedup: key isolation + determinism");
+   PASS("dedup: key isolation + determinism + context");
 }
 
 static void test_get_put_roundtrip(void)

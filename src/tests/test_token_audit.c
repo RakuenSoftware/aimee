@@ -497,6 +497,63 @@ static void test_idempotency_guard(void)
    assert(count_where("request_id", "") >= 2);
 }
 
+static void test_top_sessions_per_client(void)
+{
+   /* Two ingress clients sharing the server's process-wide session_id but with
+    * distinct principals must NOT collapse into one top_sessions row. */
+   db1_token_audit_row_t c1 = {.session_id = "proc-shared",
+                               .tool_name = "gpt-4o",
+                               .model = "gpt-4o",
+                               .source = "openai-ingress",
+                               .principal = "uid:5001",
+                               .estimated_cost_usd = 0.30};
+   db1_token_audit_row_t c2 = {.session_id = "proc-shared",
+                               .tool_name = "gpt-4o",
+                               .model = "gpt-4o",
+                               .source = "openai-ingress",
+                               .principal = "uid:5002",
+                               .estimated_cost_usd = 0.20};
+   assert(db1_token_audit_insert(&c1) == 0);
+   assert(db1_token_audit_insert(&c2) == 0);
+
+   db1_insights_top_session_t tops[16];
+   int n = db1_insights_top_sessions(0, tops, 16);
+   int saw1 = 0, saw2 = 0;
+   for (int i = 0; i < n; i++)
+   {
+      if (strcmp(tops[i].session_id, "uid:5001") == 0)
+         saw1 = 1;
+      if (strcmp(tops[i].session_id, "uid:5002") == 0)
+         saw2 = 1;
+   }
+   /* Both principals surface as distinct rows (keyed by principal, not the
+    * shared session_id). */
+   assert(saw1 && saw2);
+}
+
+static void test_served_model_and_duration(void)
+{
+   /* served_model (what aimee chose) is recorded distinct from the
+    * provider-reported model, and duration_ms is captured. */
+   db1_token_audit_row_t r = {.session_id = "sd1",
+                              .tool_name = "agent",
+                              .model = "provider-echo-2025",
+                              .served_model = "aimee-primary",
+                              .source = "agent",
+                              .duration_ms = 1234,
+                              .estimated_cost_usd = 0.01};
+   assert(db1_token_audit_insert(&r) == 0);
+   assert(count_where("served_model", "aimee-primary") == 1);
+
+   sqlite3_stmt *st = NULL;
+   assert(sqlite3_prepare_v2(
+              db1_conn(), "SELECT duration_ms FROM token_audit WHERE served_model='aimee-primary'",
+              -1, &st, NULL) == SQLITE_OK);
+   assert(sqlite3_step(st) == SQLITE_ROW);
+   assert(sqlite3_column_int(st, 0) == 1234);
+   sqlite3_finalize(st);
+}
+
 static void test_dashboard_rows(void)
 {
    db1_token_audit_dashboard_row_t rows[4];
@@ -528,6 +585,8 @@ int main(void)
    test_cost_for_delegation();
    test_spend_breakdown_realized_only();
    test_idempotency_guard();
+   test_top_sessions_per_client();
+   test_served_model_and_duration();
    db1_shutdown();
    printf("test_token_audit: ok\n");
    return 0;
