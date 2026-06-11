@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#183 nineteenth review)
+- **Date:** 2026-06-11 (revised post-PR-#183 twentieth review)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
   (roundtable application), Gate-Promote (human pass/fail gates), Calibrate
   (done-bar + pass ceiling config), Persist (resumable ledger).
@@ -16,8 +16,9 @@
   `testing`) and the in-tree `ensemble_review` review surface, with the remaining
   review contract narrowed to stable terminal result shape/payload semantics. It
   routes PR/merge/diff work through Aimee's workspace-aware git/PR tools rather
-  than assuming a raw local `gh`/`git` shell. No changes to the roundtable engine
-  itself.
+  than assuming a raw local `gh`/`git` shell, and it may need a narrowly-scoped
+  auth/capability-policy change for human gate resolution. No changes to the
+  roundtable engine itself.
 
 ## Design at a glance
 
@@ -664,6 +665,26 @@ it. That is the integrity of the whole design.
     negative test asserts a session holding only the agent's caps is **denied**
     `gate pass`. **Resolved in §5, §8, §10, and §11.**
 
+## PR #183 twentieth review — gate authority cannot assume a spare capability bit
+
+The nineteenth review fixed the security model conceptually, but one implementation
+path it names is not drop-in for the current server.
+
+54. **A new `CAP_PIPELINE_GATE` requires a capability-mask migration, not just a
+    constant.** `src/headers/server.h` already consumes bits 0-15
+    (`CAP_DASHBOARD_READ` is `1u << 15`) and defines `CAPS_ALL` as `0xFFFFu`.
+    The `/v1` transport derives TCP/UDS caps from that mask, and the route registry
+    reuses the same `uint32_t` values while still treating `CAPS_ALL` as the full
+    trusted set. Adding `CAP_PIPELINE_GATE = 1u << 16` without updating `CAPS_ALL`,
+    scoped/unscoped bearer behavior, route-cap tests, and capability advertising
+    would make the gate unreachable or inconsistently authorized. The proposal must
+    choose one of two buildable designs: (a) widen/redefine the capability model
+    and update `CAPS_ALL`, `CAPS_AUTHENTICATED`, `server_http_conn_caps`,
+    `server_http_route_allowed`, OpenAPI/capability docs, and auth tests; or (b)
+    avoid a new cap bit and implement gate resolution through an operator principal
+    / local-UDS-only out-of-band confirmation whose denial semantics are tested
+    separately. **Resolved in §5, §8, §9, §10, and §12.**
+
 ## Relationship to existing proposals
 
 - **The roundtable engine is done** (`docs/proposals/done/agent-roundtable-collaborative-drafting.md`,
@@ -1035,6 +1056,13 @@ present in a delegate-driving session: a distinct capability (e.g.
 Without that separation the two human gates are decorative — the agent could pass
 its own.
 
+If the implementation chooses the distinct-capability path, it must first make the
+capability model able to represent that authority (#54). The current mask has no
+spare low bit (`CAPS_ALL` is `0xFFFFu`), so gate resolution is not just another
+method-registry row. A v1 implementation may instead make `gate pass|fail`
+operator-principal or local-UDS-only/out-of-band while keeping the driving agent's
+surface limited to gate creation, status, digest refresh, cancel, and resume.
+
 The command/API surface must be explicit in implementation. The proposal may add
 `aimee pipeline status|gate` as a new first-class CLI/MCP surface, or extend the
 existing `autopilot` pipeline handler, but it must not leave two unrelated
@@ -1190,6 +1218,12 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
   pipeline/delegate method today maps to `CAP_DELEGATE`, which the driving agent
   holds; `gate pass|fail` must require a capability/principal that a delegate-driving
   session does not have, or the agent can self-approve its own merge.
+- **Hard if using a new capability bit:** capability-mask migration (#54). The
+  current 16-bit `CAPS_ALL` / low-bit capability set is full; adding
+  `CAP_PIPELINE_GATE` requires updating the cap constants/composites, TCP bearer
+  scope derivation, route authorization, capability/OpenAPI docs, and tests. If
+  that migration is deferred, gate resolution must use an operator-principal or
+  local/out-of-band authority instead of a new cap bit.
 - **Soft:** the cost-accounting proposal's `usage_ledger` / `/v1/usage/*` for
   whole-pipeline cost that includes implementation-phase spend (#51). Absent it,
   the total cap is roundtable-child-run-cost only and says so (#49). Any
@@ -1215,7 +1249,11 @@ These make a clean done-bar correspond to *correctness*, which is the real targe
   every terminal attempt to the ledger (#18/#20-#25). The finalize hook must be
   current-attempt guarded so late workers cannot advance stale state (#30), and
   pipeline cancel/abandon must request child-run stop when one is active (#31).
-  No loop yet; states/gates settable manually. Mergeable alone, with restart tests.
+  Choose the gate-resolution authority shape in this phase too: either migrate the
+  capability mask for a real gate cap, or make gate resolution
+  operator-principal/local-out-of-band and prove delegate-driving sessions cannot
+  call it (#53/#54). No loop yet; states/gates settable manually. Mergeable alone,
+  with restart tests.
 - **P1 — Outer review loop + done-bar.** The REVIEW⇄revise loop over
   `ensemble_review`, the configurable done-bar evaluator, the pass ceiling +
   escalation, the attempt retry ceiling, the echo guard. Drives the PR phase first
@@ -1395,6 +1433,12 @@ ledger) before the full idea→merge pipeline of P2/P3.
   caps (`CAP_DELEGATE`) can surface a gate but is **denied** `gate pass|fail`; only
   the separate gate authority (capability/operator principal/out-of-band) can
   resolve it. The negative test proves an agent cannot self-approve and merge.
+- **Gate capability representation (#54)** — if a distinct gate capability is
+  added, assert `CAPS_ALL`, `CAPS_AUTHENTICATED`, scoped/unscoped TCP bearer
+  behavior, `server_http_route_caps`, capability advertising/OpenAPI docs, and
+  route-allowed tests all agree on whether the gate route is reachable. If no new
+  bit is added, assert the operator/local confirmation path denies delegate-only
+  sessions and still lets an authorized human resolve the gate.
 - **Parked-gate resource release + TTL (#47)** — at a gate, the review-scoped index
   is dropped and correctly re-ingested from the origin on resume (same content
   hash, retrieval still works); with a TTL set, an unanswered gate moves to
@@ -1445,6 +1489,10 @@ ledger) before the full idea→merge pipeline of P2/P3.
 - **Who is the driving agent at the gate?** When paused at a human gate across
   sessions, does a fresh agent resume from the ledger automatically, or does the
   human re-invoke `aimee pipeline resume <id>`?
+- **Gate authority shape:** should gate resolution widen/rework the capability
+  mask to add a real gate capability, or should it be operator-principal /
+  local-out-of-band only for v1? The current `CAPS_ALL == 0xFFFFu` mask leaves no
+  spare low bit for a simple `CAP_PIPELINE_GATE` constant.
 - **Parked-gate admission:** does a human gate release the single active pipeline
   slot (`roundtable_pipeline_parked_releases_slot=true`) or block new authoring
   runs until answered/abandoned?
