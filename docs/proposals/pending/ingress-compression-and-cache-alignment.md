@@ -2,7 +2,7 @@
 
 - **State:** draft — pending review
 - **Author:** JBailes
-- **Date:** 2026-06-11 (revised post-PR-#181 third review)
+- **Date:** 2026-06-11 (revised post-PR-#181 fourth review)
 - **Charter roles:** Rewrite (envelope compression / cache placement),
   Recall (rehydration handle), Extract / Gate-Promote (failure-mined
   corrections), Calibrate / Evaluate-Optimize (token + accuracy A/B).
@@ -447,6 +447,64 @@ is gated on reachability.
 **→ Resolved in §3.4 and §6** by weakening the claim from "callable today" to
 "must be validated from installed config" and adding a fixture requirement.
 
+## PR #181 fourth review — internal consistency after the resolver split
+
+The third review split recovery into three resolvers (§3.1: `memory_get` for
+durable memory, code/file-span read for durable code, `rehydrate` for ephemeral),
+but the lossy-fold gate, the byte-exact promise, and the phasing still read as if
+`rehydrate` were the only recovery path. Four consistency gaps follow.
+
+### 22. The reachability gate targets `rehydrate`, but the first phase recovers via a code-span read
+
+§3.4(a) gates a lossy fold on proving **`rehydrate`** is reachable. But the first
+shipped fold is the **code folder** (§1.2), whose resolver is the durable
+code/file-span read surface (§3.1), *not* `rehydrate`. As written, the very first
+phase's reachability check is aimed at the wrong tool — and `rehydrate` may not
+even be built yet when the code folder ships.
+
+**→ Resolved in §3.4** by generalizing the gate to *the fold's resolver*
+(`memory_get` / code-span read / `rehydrate`, whichever a given fold depends on),
+so the code folder is gated on code-span-read reachability — a surface that
+already exists wherever the preinject `explore-with` tools do.
+
+### 23. A re-read pointer does not return the byte-exact pre-fold original
+
+§1.1 calls `original_ref` "the byte-exact pre-fold original," but for durable
+**re-read pointers** the source can drift between fold time (turn N) and read time
+(the agent may have edited the file or the record mid-session). A re-read returns
+the **current** content plus a version/hash drift signal — equal to the pre-fold
+bytes only when nothing changed. Only **stored bytes** (ephemeral) are
+unconditionally byte-exact. The §6 "byte-exact rehydration round-trip" invariant
+silently assumes the stored-bytes case.
+
+**→ Resolved in §1.1** (recovery guarantee split by resolver) **and §6** (the
+round-trip test is split: stored-bytes = byte-exact; re-read pointer = current
+content with a correct drift flag).
+
+### 24. The rehydrate handle store is not on the critical path to the first flip
+
+Because the first fold (code) recovers via a re-read, the in-process handle store
+and the `rehydrate` tool (P2) are not required to ship the code folder or to take
+its forced-rehydration accuracy A/B. The handle store is only needed once
+**ephemeral** folding (JSON/tool-result) lands, since that is the only data that
+cannot be re-read.
+
+**→ Resolved in §7** by moving the handle store onto the ephemeral-folding path
+and letting P1's code folder reach its default-flip candidate on code-span-read
+reachability alone — shortening the path to the first measurable win.
+
+### 25. "Claude config has Aimee's MCP registered" is a different install step from the hooks
+
+The done context-preinjection proposal wired Claude Code **hooks**
+(SessionStart/UserPromptSubmit/PreCompact/PreToolUse) — it did not necessarily
+register Aimee's **MCP server** with the client. Hooks inject context; they do not
+make `memory_get`/`rehydrate` callable. Reachability depends on the separate MCP
+registration step, which the hook installer may not perform.
+
+**→ Resolved in §3.4** by stating the two installer actions are distinct and that
+the reachability fixture must assert the MCP-tool registration, not just the hook
+wiring.
+
 ## Goal
 
 Cut the per-turn token cost *and* the per-turn dollar cost of pre-injection
@@ -490,13 +548,16 @@ list. Each entry carries, minimally:
   preview/read contract;
 - `sensitivity` / `scope` — session, workspace, tenant (drives §3.2 and redaction);
 - `preview` — the rendered text that goes resident in the envelope;
-- `original_ref` — how to recover the byte-exact pre-fold original (§3). For
-  **durable** sources (code spans, memory records) this is a **re-read pointer**
-  (project/file/line-range, or record id + version) re-fetched on demand — cheaper
-  than copying bytes into the store every turn and version-checked for free. For
-  **ephemeral** sources (tool output that will not survive the turn) it is the
-  **stored bytes**. Copying every code-hit body into the store on the per-turn hot
-  path is explicitly avoided (see the latency risk in §8);
+- `original_ref` — how to recover the original (§3). Recovery guarantees differ by
+  resolver. For **durable** sources (code spans, memory records) this is a
+  **re-read pointer** (project/file/line-range, or record id + version) re-fetched
+  on demand — cheaper than copying bytes into the store every turn. A re-read
+  returns the **current** durable content plus a version/hash **drift signal**; it
+  equals the pre-fold bytes only when the source has not changed (the agent may
+  have edited it mid-session), so it is *not* an unconditional byte-exact replay.
+  For **ephemeral** sources (tool output that will not survive the turn) it is the
+  **stored bytes**, which *are* byte-exact. Copying every code-hit body into the
+  store on the per-turn hot path is explicitly avoided (see the latency risk in §8);
 - `budget` — bytes/tokens this entry is allowed, from recall-economy's bounded
   assembler when present;
 - `transform` — which fold was applied (`none` | `code_fold` | `json_fold`), so
@@ -742,20 +803,29 @@ because the detail is deferred behind a tool call the model makes iff it needs i
 by ingress:
 
 - **Claude Code hook path:** expected to work only when the installed Claude
-  config has Aimee's MCP server registered. P2 must prove this from the actual
-  integration installer/config and an end-to-end hook-session fixture; the done
-  context-preinjection proposal is not enough proof by itself.
+  config has Aimee's MCP server registered. Note this is a **separate installer
+  action** from the context-preinjection *hooks* the done proposal shipped — hooks
+  inject context but do not make `memory_get`/`rehydrate` callable. P2 must prove
+  reachability from the actual integration installer/config and an end-to-end
+  hook-session fixture that asserts the **MCP-tool registration**, not just the
+  hook wiring; the done context-preinjection proposal is not enough proof by
+  itself.
 - **OpenAI/Codex wire ingress:** callable only if the client has Aimee's MCP
   configured, or if the ingress injects the tool definition into the request and
   intercepts the resulting tool call inline (the `function_call` loop Codex
   already drives). Injecting envelope text that *names* the tool is not enough.
 - **Anthropic:** gated on §2.3/P5.
 
-Contract: per target ingress, P2 must **(a)** prove `rehydrate` is reachable
-end-to-end, or **(b)** restrict that ingress to non-lossy folds (byte-equivalent
-only) and previews rich enough to stand alone. A **lossy** fold is permitted only
-where reachability is proven. This is the concrete gate that turns §1.3's "lossy
-is safe" from an assumption into a tested precondition.
+Contract: per target ingress, P2 must **(a)** prove **the fold's resolver** is
+reachable end-to-end — the durable code/file-span read for a code fold,
+`memory_get` for a memory fold, `rehydrate` for an ephemeral fold (§3.1) — or
+**(b)** restrict that ingress to non-lossy folds (byte-equivalent only) and
+previews rich enough to stand alone. A **lossy** fold is permitted only where its
+resolver's reachability is proven. The first phase's code folder is therefore
+gated on code-span-read reachability (a surface that already exists wherever the
+preinject `explore-with` tools do), **not** on `rehydrate`, which need not exist
+yet. This is the concrete gate that turns §1.3's "lossy is safe" from an
+assumption into a tested precondition.
 
 **Store topology.** The handle store is in-process and assumes the mint (envelope
 build) and the `rehydrate` call land in the **same server process** — true for
@@ -925,8 +995,12 @@ this proposal.
 - **Prompt-injection / sensitivity fixtures** — for both compressed previews and
   rehydrated originals (a folded preview must not become an injection vector, and
   a rehydrate must not cross scope).
-- **Prefix-stability invariant** (§2) and **byte-exact rehydration round-trip**
-  (§3) as hard unit-suite invariants.
+- **Prefix-stability invariant** (§2) and **recovery round-trip** (§3) as hard
+  unit-suite invariants — split by resolver: an **ephemeral stored-bytes**
+  rehydrate is byte-exact, while a **durable re-read pointer** returns current
+  content and must surface a correct drift flag when the source changed between
+  fold and read (the test mutates the source and asserts the flag, not byte
+  equality).
 - **Responses/Codex prefix telemetry** — `agent_execute_messages()` records the
   provider-facing prefix through the existing `payload_rewrite` subsystem with a
   real session id for both buffered and streaming Responses.
@@ -951,11 +1025,17 @@ this proposal.
   header is exposed, plus the full config/docs/test surface for that flag.
   Lossy-by-contract, every fold carrying a `transform` tag. Token/latency A/B +
   harness upgrades; no default flip.
-- **P2 — Rehydration handle (§3)** with the full §3.2 safety contract, unified
-  with recall-economy's `memory_get` / source-read pull surfaces, tool metadata
-  goldens, installed-client reachability fixtures, and injected-tool auth denial
-  tests. Unblocks aggressive folding + the forced-rehydration accuracy A/B →
-  candidate default flip for §1.
+- **P2 — Durable-read reachability + accuracy A/B for the code folder.** The code
+  folder recovers via the **existing** durable code/file-span read surface, so its
+  forced-rehydration accuracy A/B and its default-flip candidacy need only the
+  reachability fixtures (§3.4) and the `memory_get`/source-read alignment — **not**
+  the new in-process handle store. This is the first measurable win and does not
+  block on building `rehydrate`.
+- **P2e — Rehydration handle (§3) for ephemeral folds.** When ephemeral folding
+  (JSON/tool-result) enters scope it brings the in-process handle store with the
+  full §3.2 safety contract, the `rehydrate` MCP tool + metadata goldens, and the
+  injected-tool auth-denial tests. Only ephemeral data needs it; durable folds
+  never do.
 - **P3 — Cache-prefix placement (§2)** on every Codex/OpenAI injection path:
   capability table, no-op default, integration with `payload_rewrite`, placement
   invariant + body-serialization tests, `agent_execute_messages()` session-scoped
@@ -1003,10 +1083,17 @@ this proposal.
   `interaction_event_embeddings` clusters that `kb_mining.c` already promotes,
   users will see both artifacts and learning proposals for one failure pattern.
   Refactor the existing mining job or use a disjoint dedup key before enabling.
-- **Rehydration unreachable on the target ingress.** If `rehydrate` is not
-  callable (client lacks Aimee's MCP, the installed Claude config does not expose
-  the tool, or a multi-replica deploy routes the call to another process — §3.4),
-  an aggressively lossy fold silently strands detail the model cannot recover.
-  Mitigated by gating lossy folds on proven per-ingress reachability (§3.4) and
-  falling back to byte-equivalent folds / stand-alone previews otherwise —
-  reachability is a P2 acceptance check, not an assumption.
+- **Resolver unreachable on the target ingress.** If a lossy fold's resolver is
+  not callable (client lacks Aimee's MCP, the installed Claude config registers the
+  hooks but not the MCP tools, the durable code-span read is unavailable, or a
+  multi-replica deploy routes `rehydrate` to another process — §3.4), the fold
+  silently strands detail the model cannot recover. Mitigated by gating lossy folds
+  on proven per-ingress **resolver** reachability (§3.4) and falling back to
+  byte-equivalent folds / stand-alone previews otherwise — a P2 acceptance check,
+  not an assumption.
+- **Source drift on durable re-read.** A re-read pointer returns *current* content,
+  not the pre-fold bytes (§1.1); if the agent edited the file/record after the fold,
+  the rehydrated detail differs from what was summarized. Usually current content is
+  preferable, but the model must not be misled into thinking it recovered the exact
+  folded text. Mitigated by carrying the version/hash drift signal and testing it
+  (§6), and by reserving the byte-exact guarantee for stored-bytes ephemeral folds.
