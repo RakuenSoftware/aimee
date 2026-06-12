@@ -337,6 +337,7 @@ static void compute_update_background_job(compute_ctx_t *cctx, cJSON *resp)
       db1_agent_job_t job;
       if (db1_agent_job_get(cctx->background_job_id, &job) == 0)
          cursor_turn = job.cursor_turn;
+      db1_agent_job_free(&job); /* zero-init by get on miss; safe either way */
    }
 
    db1_agent_job_update(cctx->background_job_id, job_status, cursor_turn, result);

@@ -17,12 +17,20 @@ static void delegate_status_quarantine_degenerate_done(int job_id, db1_agent_job
    const char *message = "delegate returned raw tool-call markup or another degenerate response";
    db1_agent_job_update(job_id, "failed", job->cursor_turn, message);
    snprintf(job->status, sizeof(job->status), "%s", "failed");
-   snprintf(job->result, sizeof(job->result), "%s", message);
+   /* result is now heap-owned: replace it (free old, strdup new) — NOT
+    * snprintf into a char* (whose sizeof is 8). */
+   char *dup = strdup(message);
+   if (dup)
+   {
+      free(job->result);
+      job->result = dup;
+   }
 }
 
 static void delegate_status_populate_job(cJSON *resp, int job_id)
 {
    db1_agent_job_t job;
+   memset(&job, 0, sizeof(job)); /* so the single-exit free is safe on every branch */
    cJSON_AddNumberToObject(resp, "job_id", job_id);
 
    if (job_id <= 0)
@@ -58,6 +66,7 @@ static void delegate_status_populate_job(cJSON *resp, int job_id)
       if (job.updated_at[0])
          cJSON_AddStringToObject(resp, "updated_at", job.updated_at);
    }
+   db1_agent_job_free(&job);
 }
 
 int handle_delegate_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

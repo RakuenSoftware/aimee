@@ -105,15 +105,22 @@ int handle_jobs_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       limit = 100;
 
    db1_agent_job_t jobs[100];
-   int n = db1_agent_job_list_recent(jobs, limit);
+   /* include_heavy=0: the list serializes with agent_job_to_json(...,0,0) and
+    * never emits prompt/result, so do not load (and then free) up to 100 ×
+    * the result ceiling of bodies. */
+   int n = db1_agent_job_list_recent(jobs, limit, 0);
    if (n < 0)
       return server_send_error(conn, "jobs list: could not read agent jobs", NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "job_count", n);
    cJSON *arr = cJSON_AddArrayToObject(resp, "jobs");
-   for (int i = 0; arr && i < n; i++)
-      cJSON_AddItemToArray(arr, agent_job_to_json(&jobs[i], 0, 0));
+   for (int i = 0; i < n; i++)
+   {
+      if (arr)
+         cJSON_AddItemToArray(arr, agent_job_to_json(&jobs[i], 0, 0));
+      db1_agent_job_free(&jobs[i]);
+   }
 
    return server_send_ok(conn, resp);
 }
@@ -138,6 +145,7 @@ int handle_jobs_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       cJSON_AddStringToObject(resp, "job_status", job.status);
       cJSON_AddItemToObject(resp, "job", agent_job_to_json(&job, 1, 1));
+      db1_agent_job_free(&job);
    }
 
    return server_send_ok(conn, resp);
@@ -164,6 +172,7 @@ int handle_jobs_logs(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON_AddStringToObject(resp, "job_status", job.status);
       cJSON_AddItemToObject(resp, "job", agent_job_to_json(&job, 1, 1));
       cJSON_AddStringToObject(resp, "log", job.result);
+      db1_agent_job_free(&job);
    }
 
    return server_send_ok(conn, resp);
