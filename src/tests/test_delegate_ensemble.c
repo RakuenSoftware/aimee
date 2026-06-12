@@ -31,14 +31,29 @@ static int g_captured_count = 0;
 
 int model_capability_get(const char *provider, const char *model_id, model_capability_t *out)
 {
-   if (!out || !provider || strcmp(provider, "priced") != 0 || !model_id || !model_id[0])
+   (void)provider;
+   if (!out || !model_id)
       return 0;
-   memset(out, 0, sizeof(*out));
-   snprintf(out->provider, sizeof(out->provider), "%s", provider);
-   snprintf(out->model_id, sizeof(out->model_id), "%s", model_id);
-   out->cost_in_per_mtok = 1.0;
-   out->cost_out_per_mtok = 3.0;
-   return 1;
+   /* The unified cost path (token_estimate_cost) looks models up by id with the
+    * provider inferred, so key this stub on the model id rather than requiring an
+    * explicit provider — matching how the real registry resolves these. */
+   if (strncmp(model_id, "priced-", 7) == 0)
+   {
+      memset(out, 0, sizeof(*out));
+      snprintf(out->provider, sizeof(out->provider), "%s", "priced");
+      snprintf(out->model_id, sizeof(out->model_id), "%s", model_id);
+      out->cost_in_per_mtok = 1.0;
+      out->cost_out_per_mtok = 3.0;
+      return 1;
+   }
+   /* A registry entry that resolves but is priced 0/0 — "unknown", not "free". */
+   if (strncmp(model_id, "zero-", 5) == 0)
+   {
+      memset(out, 0, sizeof(*out));
+      snprintf(out->model_id, sizeof(out->model_id), "%s", model_id);
+      return 1;
+   }
+   return 0;
 }
 
 int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agent_result_t *out)
@@ -314,6 +329,35 @@ static void test_ensemble_cost_uses_model_registry_prices(void)
     * 600 * $15/MTok = $0.009, so this catches regressions to global pricing. */
    assert(result.cost_usd > 0.00109 && result.cost_usd < 0.00111);
    printf("  test_ensemble_cost_uses_model_registry_prices: ok\n");
+}
+
+static void test_delegate_cost_estimate_uses_token_tracker(void)
+{
+   /* Real models priced in the shared token_tracker authority must be billed
+    * through it (same source agent_log_call uses), not a divergent calculator. */
+   double in_cost = delegate_cost_estimate_usd("anthropic", "claude-3-5-sonnet", 1000000, 0);
+   assert(in_cost > 2.99 && in_cost < 3.01); /* $3.00/MTok input */
+   double out_cost = delegate_cost_estimate_usd(NULL, "gpt-4o", 0, 1000000);
+   assert(out_cost > 9.99 && out_cost < 10.01); /* $10.00/MTok output */
+
+   /* A model the token_tracker table does not cover but the registry does
+    * still prices via the registry fallback (no coverage regression). */
+   model_capability_t cap;
+   if (model_capability_get("gemini", "gemini-1.5-pro", &cap) && cap.cost_in_per_mtok > 0.0)
+   {
+      double g = delegate_cost_estimate_usd("gemini", "gemini-1.5-pro", 1000000, 0);
+      assert(g > 0.0);
+   }
+
+   /* A genuinely unknown model falls back to a non-zero flat estimate. */
+   double unknown = delegate_cost_estimate_usd(NULL, "totally-unknown-model-xyz", 1000, 1000);
+   assert(unknown > 0.0);
+
+   /* A registry entry priced 0/0 is "unknown", not "free": it must fall back to
+    * the flat estimate rather than recording $0. */
+   double zero = delegate_cost_estimate_usd(NULL, "zero-priced-model", 1000, 1000);
+   assert(zero > 0.0);
+   printf("  test_delegate_cost_estimate_uses_token_tracker: ok\n");
 }
 
 static void test_ensemble_disabled(void)
@@ -799,6 +843,7 @@ int main(void)
    test_ensemble_basic();
    test_ensemble_cost_cap();
    test_ensemble_cost_uses_model_registry_prices();
+   test_delegate_cost_estimate_uses_token_tracker();
    test_ensemble_min_successful_degradation();
    test_ensemble_routes_to_distinct_agents();
    test_roundtable_parallel_basic();

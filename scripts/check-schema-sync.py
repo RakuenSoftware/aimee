@@ -121,6 +121,11 @@ DB1_ONLY_TABLES = {
     "roadmap_dispatch",
     "roadmap_unit_dispatch",
     "roadmap_milestone_lease",
+    # roundtable authoring pipeline ledger (per-machine, DB1-owned)
+    "roundtable_pipeline_runs",
+    "roundtable_pipeline_passes",
+    "roundtable_pipeline_attempts",
+    "roundtable_pipeline_gates",
 }
 
 # Sole DB1-owned lexical index. Lives only in db1/schema.sql.

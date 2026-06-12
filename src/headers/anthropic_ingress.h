@@ -86,6 +86,13 @@ void anthropic_stream_feed_openai(anthropic_stream_xlate_t *st, const char *data
 /* Close any open content block and emit message_delta + message_stop. */
 void anthropic_stream_finish(anthropic_stream_xlate_t *st);
 
+/* Read the usage tapped from the upstream OpenAI stream: the prompt count
+ * (upstream-reported if seen, else the begin-time estimate), the completion
+ * count, and any cached prompt tokens. Any out pointer may be NULL. Lets the
+ * caller write an accurate ingress cost row for the OpenAI-via-translator path. */
+void anthropic_stream_get_usage(const anthropic_stream_xlate_t *st, int *input_tokens,
+                                int *output_tokens, int *cache_read_tokens);
+
 /* Free translator state (does not emit). */
 void anthropic_stream_free(anthropic_stream_xlate_t *st);
 

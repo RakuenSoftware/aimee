@@ -90,10 +90,15 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 				}
 				sseWrite(w, "session", map[string]string{"id": evt.ID})
 			case "usage":
+				kind := evt.Kind
+				if kind == "" {
+					kind = "realized"
+				}
 				sseWrite(w, "usage", map[string]any{
-					"in":   evt.In,
-					"out":  evt.Out,
-					"cost": evt.Cost,
+					"in":         evt.In,
+					"out":        evt.Out,
+					"cost":       evt.Cost,
+					"usage_kind": kind,
 				})
 			case "done":
 				doneSent = true

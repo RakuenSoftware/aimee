@@ -242,6 +242,13 @@ static const struct
     {"workers", "", "workers", NULL, NULL, 0},
     {"insights", NULL, "insights.overview", NULL, NULL, 0},
     {"worktree", "gc", "worktree.gc", NULL, NULL, 60000},
+    {"pipeline", "start", "pipeline.start", NULL, NULL, 60000},
+    {"pipeline", "status", "pipeline.status", NULL, NULL, 0},
+    {"pipeline", "list", "pipeline.list", NULL, NULL, 0},
+    {"pipeline", "cancel", "pipeline.cancel", NULL, NULL, 0},
+    {"pipeline", "resume", "pipeline.resume", NULL, NULL, 0},
+    {"pipeline", "advance", "pipeline.advance", NULL, NULL, 300000},
+    {"pipeline", "gate", "pipeline.gate", NULL, NULL, 300000},
     {"work", "add", "work.add", NULL, NULL, 0},
     {"work", "add-batch", "work.add_batch", NULL, NULL, 0},
     {"work", "claim", "work.claim", NULL, NULL, 0},
@@ -2884,6 +2891,100 @@ static cJSON *marshal_graph_explain(int argc, char **argv)
    return req;
 }
 
+/* Roundtable authoring pipeline (pipeline.*). */
+static cJSON *marshal_pipeline_request(const char *method, int argc, char **argv)
+{
+   static const char *bool_flags[] = {"admin", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bool_flags, &opts);
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "method", method);
+   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   const char *v;
+
+   if (strcmp(method, "pipeline.start") == 0)
+   {
+      if (opts.pos_count > 0)
+         cJSON_AddStringToObject(req, "idea", opts.positional[0]);
+      if ((v = rpc_get(&opts, "done-bar")) && v[0])
+         cJSON_AddStringToObject(req, "done_bar", v);
+      if ((v = rpc_get(&opts, "base-branch")) && v[0])
+         cJSON_AddStringToObject(req, "base_branch", v);
+      if ((v = rpc_get(&opts, "repo-root")) && v[0])
+         cJSON_AddStringToObject(req, "repo_root", v);
+      if ((v = rpc_get(&opts, "brief")) && v[0])
+         cJSON_AddStringToObject(req, "brief", v);
+      /* PR-lifecycle fields (#2). */
+      if ((v = rpc_get(&opts, "head-branch")) && v[0])
+         cJSON_AddStringToObject(req, "head_branch", v);
+      if ((v = rpc_get(&opts, "remote")) && v[0])
+         cJSON_AddStringToObject(req, "remote", v);
+      if ((v = rpc_get(&opts, "worktree-path")) && v[0])
+         cJSON_AddStringToObject(req, "worktree_path", v);
+      /* strict question-count gate (#3): --questions "q1||q2||q3" -> array. */
+      if ((v = rpc_get(&opts, "questions")) && v[0])
+      {
+         cJSON *qarr = cJSON_AddArrayToObject(req, "questions");
+         char *dup = strdup(v);
+         if (dup)
+         {
+            char *s = dup;
+            while (s && *s)
+            {
+               char *sep = strstr(s, "||");
+               if (sep)
+                  *sep = '\0';
+               while (*s == ' ')
+                  s++;
+               if (*s)
+                  cJSON_AddItemToArray(qarr, cJSON_CreateString(s));
+               s = sep ? sep + 2 : NULL;
+            }
+            free(dup);
+         }
+      }
+   }
+   else if (strcmp(method, "pipeline.list") == 0)
+   {
+      if ((v = rpc_get(&opts, "state")) && v[0])
+         cJSON_AddStringToObject(req, "state", v);
+   }
+   else if (strcmp(method, "pipeline.gate") == 0)
+   {
+      if (opts.pos_count > 0)
+         cJSON_AddNumberToObject(req, "pipeline_id", atoi(opts.positional[0]));
+      if (opts.pos_count > 1)
+         cJSON_AddStringToObject(req, "verdict", opts.positional[1]);
+      if ((v = rpc_get(&opts, "reason")) && v[0])
+         cJSON_AddStringToObject(req, "reason", v);
+      if ((v = rpc_get(&opts, "operator-principal")) && v[0])
+         cJSON_AddStringToObject(req, "operator_principal", v);
+      if (rpc_get(&opts, "admin"))
+         cJSON_AddTrueToObject(req, "admin");
+   }
+   else /* status / cancel / resume / advance */
+   {
+      if (opts.pos_count > 0)
+         cJSON_AddNumberToObject(req, "pipeline_id", atoi(opts.positional[0]));
+      if ((v = rpc_get(&opts, "artifact")) && v[0])
+         cJSON_AddStringToObject(req, "artifact", v);
+      if ((v = rpc_get(&opts, "artifact-hash")) && v[0])
+         cJSON_AddStringToObject(req, "artifact_hash", v);
+      /* resume can repair repo/workspace metadata after an impl-workspace failure
+       * (#3): the same fields accepted by start. */
+      if ((v = rpc_get(&opts, "repo-root")) && v[0])
+         cJSON_AddStringToObject(req, "repo_root", v);
+      if ((v = rpc_get(&opts, "remote")) && v[0])
+         cJSON_AddStringToObject(req, "remote", v);
+      if ((v = rpc_get(&opts, "head-branch")) && v[0])
+         cJSON_AddStringToObject(req, "head_branch", v);
+      if ((v = rpc_get(&opts, "worktree-path")) && v[0])
+         cJSON_AddStringToObject(req, "worktree_path", v);
+   }
+   return req;
+}
+
 static cJSON *marshal_request(const char *method, int argc, char **argv)
 {
    if (strcmp(method, "init.run") == 0)
@@ -3121,6 +3222,8 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_identity_snapshot(argc, argv);
    if (strcmp(method, "identity.diff") == 0)
       return marshal_identity_diff(argc, argv);
+   if (strncmp(method, "pipeline.", 9) == 0)
+      return marshal_pipeline_request(method, argc, argv);
    return NULL;
 }
 
@@ -3649,6 +3752,26 @@ static void print_insights_overview(cJSON *resp)
    printf("  cache write:     %lld\n", cw);
    printf("  cache read:      %lld\n", cr);
    printf("  cost:            $%.4f\n", cost);
+
+   /* Spend breakdown by usage_kind (§7), when the server reports it. The
+    * billable figure is spend.total (excludes dedup-avoided cost). */
+   cJSON *spend = cJSON_GetObjectItemCaseSensitive(resp, "spend");
+   if (cJSON_IsObject(spend))
+   {
+      double s_real = 0.0, s_est = 0.0, s_avoid = 0.0, s_total = 0.0;
+      if ((j = cJSON_GetObjectItemCaseSensitive(spend, "realized")) && cJSON_IsNumber(j))
+         s_real = j->valuedouble;
+      if ((j = cJSON_GetObjectItemCaseSensitive(spend, "estimated")) && cJSON_IsNumber(j))
+         s_est = j->valuedouble;
+      if ((j = cJSON_GetObjectItemCaseSensitive(spend, "avoided")) && cJSON_IsNumber(j))
+         s_avoid = j->valuedouble;
+      if ((j = cJSON_GetObjectItemCaseSensitive(spend, "total")) && cJSON_IsNumber(j))
+         s_total = j->valuedouble;
+      printf("  spend (billable):$%.4f  (realized $%.4f, estimated $%.4f", s_total, s_real, s_est);
+      if (s_avoid > 0.0)
+         printf(", avoided $%.4f", s_avoid);
+      printf(")\n");
+   }
 
    cJSON *models = cJSON_GetObjectItemCaseSensitive(resp, "models");
    int n_models = cJSON_IsArray(models) ? cJSON_GetArraySize(models) : 0;

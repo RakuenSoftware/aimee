@@ -53,7 +53,21 @@ DEDICATED = {
 # hooks (hooks.pre/post/session_start) and the tool-execution bridge
 # (tool.execute) became first-class routes (POST /v1/hooks/*, /v1/tools/execute)
 # so /v1/rpc could be retired; CAP_TOOL_EXECUTE keeps them local/full-tier only.
-EXCLUDED: set = set()
+# pipeline.* — the roundtable authoring pipeline control surface is CLI/MCP-only
+# in v1 (docs/proposals/accepted/agent-roundtable-authoring-pipeline.md §5/§12,
+# decision #45). HTTP is deliberately deferred: it must NOT collide with the
+# existing KB/corpus `GET /v1/pipeline/status`, so if exposed later it uses a
+# distinct `/v1/roundtable/pipelines/...` namespace. Gate resolution is also
+# operator/local-only (#53), which the bearer-scoped HTTP surface does not model.
+EXCLUDED: set = {
+    "pipeline.start",
+    "pipeline.status",
+    "pipeline.list",
+    "pipeline.cancel",
+    "pipeline.resume",
+    "pipeline.advance",
+    "pipeline.gate",
+}
 # NB: the long-running / LLM methods (kb.build/ingest/update, graph.sync_code,
 # index.scan, memory.benchmark, curator.synthesize, rules.generate, eval.run)
 # were previously excluded; they are now first-class via rh_dispatch_op_async

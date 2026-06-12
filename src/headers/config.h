@@ -845,6 +845,63 @@ typedef struct config
    int cache_aware_rewrite_max_defer_turns;
    int cache_aware_rewrite_segment_check_turns;
 
+   /* Cost-shaped delegate-routing bandit reward (cost_reward.*).
+    * cost_reward_enabled: 0 = off (default; the bandit learns from the binary
+    *   success outcome only), 1 = on (subtract a normalized cost penalty so the
+    *   router can prefer cheaper arms when quality is similar).
+    * cost_reward_lambda_pct: penalty weight as a percent (default 30 = 0.30);
+    *   reward = clamp01(success - lambda * min(cost / cost_ref, 1)).
+    * cost_reward_ref_usd_milli: per-turn cost ($, in milli-dollars) that maps to a
+    *   full normalized penalty (default 500 = $0.50). */
+   int cost_reward_enabled;
+   int cost_reward_lambda_pct;
+   int cost_reward_ref_usd_milli;
+
+   /* Complexity-score reasoning-effort cap (reasoning_cap.*; §5).
+    * reasoning_cap_enabled: 0 = off (default), 1 = on. When on, a deterministic
+    *   0-10 complexity score for the turn caps (only ever lowers) the reasoning
+    *   effort that would otherwise be sent to a reasoning-effort-capable provider
+    *   surface (Codex/OpenAI enum, Claude --effort). An explicit per-request
+    *   override and providers without a reasoning surface are left untouched. */
+   int reasoning_cap_enabled;
+
+   /* Short-window response dedup for buffered ingress (response_dedup.*; §4).
+    * dedup_enabled: 0 = off (default), 1 = on. When on, a re-sent identical
+    * buffered, non-streaming, tool-free completion carrying an explicit
+    * Idempotency-Key is served from a small TTL cache instead of paying for the
+    * provider call again; the avoided call is recorded as usage_kind=avoided
+    * (not spend). Strictly per-principal: the cache key carries the account
+    * boundary so one caller never reads another's response. */
+   int dedup_enabled;
+
+   /* Cache-aware request shaping for the aimee-owned Anthropic path (§3).
+    * cache_shaping_enabled: 0 = off (default), 1 = on. When on, the tool-bearing
+    * Anthropic request builder marks the aimee-owned system prefix cacheable
+    * (cache_control: ephemeral content block), matching the no-tools path, so the
+    * provider caches the stable system prompt across calls. Anthropic-only; never
+    * alters the stateless /v1/messages proxy or any non-Anthropic provider. */
+   int cache_shaping_enabled;
+
+   /* Ingress cost-accounting rollout knobs (ingress.*; §2/§4/#3).
+    * ingress_usage_accounting_enabled: 0 = off (default), 1 = on. Master gate for
+    *   writing ingress cost rows (OpenAI/Codex + Anthropic /v1/messages + /v1/runs).
+    *   Off by default per the flag-rollout program; flip to begin accounting.
+    * ingress_audit_async: 0 = write the cost row inline (default), 1 = hand it to
+    *   a background writer so the response is not blocked on the DB insert.
+    * ingress_trusted_proxy_secret: shared secret that authorises a front proxy to
+    *   stamp X-Aimee-Principal / X-Aimee-Source on a request. EMPTY (default) means
+    *   NO client-supplied principal/source is ever trusted — the server derives the
+    *   principal from the kernel-verified UDS peer uid instead. A request is trusted
+    *   only when it presents X-Aimee-Proxy-Authorization equal to this secret.
+    * dedup_window_seconds: §4 dedup TTL (default 5).
+    * cache_min_chars: §3 only cache-marks a system prompt at least this many bytes
+    *   long, so tiny prompts are not marked (default 0 = always mark when on). */
+   int ingress_usage_accounting_enabled;
+   int ingress_audit_async;
+   char ingress_trusted_proxy_secret[128];
+   int dedup_window_seconds;
+   int cache_min_chars;
+
    /* Neural-assisted semantic guardrails (guardrails.semantic.*).
     * semantic_enabled: 0 = off (default), 1 = on.
     * semantic_dry_run: 1 = shadow mode — score is logged but never changes outcome
@@ -1231,6 +1288,19 @@ typedef struct config
    int roundtable_converge_threshold;
    int roundtable_deadline_ms;
    char roundtable_turns[16];
+
+   /* Roundtable authoring pipeline (roundtable.pipeline_*). The outer
+    * REVIEW<->revise loop, done-bar, and cost/pass backstops; see
+    * docs/proposals/accepted/agent-roundtable-authoring-pipeline.md section 6. */
+   char roundtable_pipeline_done_bar[40];      /* zero_blocking | zero_blocking_suggestions
+                                                * | zero_blocking_questions_answered */
+   int roundtable_pipeline_max_passes;         /* 0 = unbounded (default) */
+   int roundtable_pipeline_max_attempts_per_pass; /* infra-retry ceiling, default 2 */
+   double roundtable_pipeline_max_cost_usd;    /* per-phase cap; 0 = unbounded */
+   double roundtable_pipeline_max_total_cost_usd; /* whole-pipeline cap; 0 = unbounded */
+   int roundtable_pipeline_gate_ttl_h;         /* awaiting-human gate TTL hours; 0 = none */
+   int roundtable_pipeline_parked_releases_slot; /* bool: parked gate frees the active slot */
+   int roundtable_pipeline_unknown_context_tokens; /* conservative chunk budget fallback */
 
    /* Context engine selection (context.engine).
     * Empty string means use the default "compactor" engine. */

@@ -23,7 +23,7 @@ TEST_CORE_OBJS = $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/main
 TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/workspace.o $(DB1_OBJS) \
                              $(OBJDIR)/server/agent_config.o $(OBJDIR)/server/session_credentials.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
                              $(OBJDIR)/posix/cmd_describe.o \
-                             $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/server/skill_review.o $(OBJDIR)/server/skill_curator.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_gemini.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/server/cli_acp.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
+                             $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/skill_review.o $(OBJDIR)/server/skill_curator.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_gemini.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/server/cli_acp.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
                              $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/server/agent_eval.o $(OBJDIR)/server/agent_eval_memory_support.o $(OBJDIR)/server/agent_eval_baseline.o \
                              $(OBJDIR)/server/agent_coord.o $(OBJDIR)/server/agent_tools.o $(OBJDIR)/server/script_runner.o $(OBJDIR)/server/script_rpc.o $(OBJDIR)/toolset.o $(OBJDIR)/server/tool_args_coerce.o $(OBJDIR)/server/tool_schema_sanitizer.o \
                              $(OBJDIR)/server/kb_client.o $(OBJDIR)/server/kb_client_cache.o $(OBJDIR)/server/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/server/kb_client_index_parse.o $(OBJDIR)/server/kb_client_memory.o $(OBJDIR)/server/kb_client_memory_mutations.o $(OBJDIR)/server/kb_client_agent.o $(OBJDIR)/server/kb_client_dashboard.o $(OBJDIR)/server/kb_client_tasks.o $(OBJDIR)/server/kb_client_data.o $(OBJDIR)/tests/server/kb_client_tool_registry.o $(OBJDIR)/server/kb_client_prospective.o $(OBJDIR)/shared/kb_paths.o $(OBJDIR)/cli_client.o \
@@ -166,8 +166,13 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-tdd \
                $(TESTPREFIX)/unit-test-compact \
                $(TESTPREFIX)/unit-test-token-audit \
+               $(TESTPREFIX)/unit-test-token-audit-load \
                $(TESTPREFIX)/unit-test-windows \
                $(TESTPREFIX)/unit-test-token-tracker \
+               $(TESTPREFIX)/unit-test-reasoning-cap \
+               $(TESTPREFIX)/unit-test-request-context \
+               $(TESTPREFIX)/unit-test-response-dedup \
+               $(TESTPREFIX)/unit-test-anthropic-shape \
                $(TESTPREFIX)/unit-test-tool-prompts \
                $(TESTPREFIX)/unit-test-delegate-token-budget \
                $(TESTPREFIX)/unit-test-delegate-context-shed \
@@ -314,6 +319,11 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-tool-schema-sanitizer \
                $(TESTPREFIX)/unit-test-toolset \
                $(TESTPREFIX)/unit-test-db1-cost-fold \
+               $(TESTPREFIX)/unit-test-db1-roundtable-pipeline \
+               $(TESTPREFIX)/unit-test-roundtable-pipeline-eval \
+               $(TESTPREFIX)/unit-test-roundtable-pipeline-chunk \
+               $(TESTPREFIX)/unit-test-roundtable-pipeline-ctl \
+               $(TESTPREFIX)/unit-test-roundtable-pipeline-capture \
                $(TESTPREFIX)/unit-test-db1-session-paths \
                $(TESTPREFIX)/unit-test-interaction-events \
                $(TESTPREFIX)/unit-test-trajectory \
@@ -656,7 +666,7 @@ $(TESTPREFIX)/unit-test-workspace: $(OBJDIR)/tests/test_workspace.o \
 
 $(TESTPREFIX)/unit-test-primary-session-adapter: $(OBJDIR)/tests/test_primary_session_adapter.o \
                                $(OBJDIR)/server/primary_session_adapter.o $(OBJDIR)/server/agent_adapter.o \
-                               $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/tool_call_args.o \
+                               $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                $(OBJDIR)/server/agent_request_shaping.o \
                                $(OBJDIR)/server/context_engine.o \
                                $(OBJDIR)/tests/support/mock_agent_http.o \
@@ -757,7 +767,7 @@ $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o \
 	                                $(OBJDIR)/server/server_config.o $(OBJDIR)/config_fields.o \
 	                                $(OBJDIR)/server/skill_review.o $(OBJDIR)/tests/support/skill_jobs_stub.o \
-	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o \
+	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_reqctx.o \
 	                                $(OBJDIR)/tests/support/toolset_stub.o \
 	                                $(OBJDIR)/cJSON.o $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
 	                                $(OBJDIR)/db1/model_catalog.o \
@@ -1105,7 +1115,7 @@ $(TESTPREFIX)/unit-test-http-retry: $(OBJDIR)/tests/test_http_retry.o $(OBJDIR)/
                             $(OBJDIR)/server/openrouter_profile.o $(OBJDIR)/server/ollama_profile.o \
                             $(OBJDIR)/server/llama_native_profile.o $(OBJDIR)/server/mistral_profile.o \
                             $(OBJDIR)/server/minimax_profile.o \
-                            $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o \
+                            $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o \
                             $(OBJDIR)/posix/agent_bridge.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1324,7 +1334,7 @@ $(TESTPREFIX)/unit-test-skill: $(OBJDIR)/tests/test_skill.o \
 
 $(TESTPREFIX)/unit-test-web-search: $(OBJDIR)/tests/test_web_search.o \
                             $(OBJDIR)/server/web_search.o $(TEST_CORE_OBJS) \
-                            $(OBJDIR)/dstr.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/tool_call_args.o \
+                            $(OBJDIR)/dstr.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                             $(OBJDIR)/server/agent_request_shaping.o \
                             $(OBJDIR)/posix/agent_bridge.o $(OBJDIR)/server/http_retry.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1340,7 +1350,7 @@ $(TESTPREFIX)/unit-test-compact: $(OBJDIR)/tests/test_compact.o $(OBJDIR)/compac
 $(TESTPREFIX)/unit-test-compact-prune: $(OBJDIR)/tests/test_compact_prune.o \
                                           $(OBJDIR)/server/compact_prune.o \
                                           $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o \
-                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/tool_call_args.o \
+                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
                                           $(OBJDIR)/server/delegate_driver.o \
                                           $(OBJDIR)/server/delegate_openai.o \
@@ -1353,7 +1363,7 @@ $(TESTPREFIX)/unit-test-compact-prune: $(OBJDIR)/tests/test_compact_prune.o \
 
 $(TESTPREFIX)/unit-test-session-compact-focused: $(OBJDIR)/tests/test_session_compact_focused.o \
                                           $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o \
-                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/tool_call_args.o \
+                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
                                           $(OBJDIR)/server/delegate_driver.o \
                                           $(OBJDIR)/server/delegate_openai.o \
@@ -1366,7 +1376,7 @@ $(TESTPREFIX)/unit-test-session-compact-focused: $(OBJDIR)/tests/test_session_co
 
 $(TESTPREFIX)/unit-test-session-compact: $(OBJDIR)/tests/test_session_compact.o \
                                           $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o \
-                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/tool_call_args.o \
+                                          $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                           $(OBJDIR)/server/agent_request_shaping.o \
                                           $(OBJDIR)/server/delegate_driver.o \
                                           $(OBJDIR)/server/delegate_openai.o \
@@ -1381,7 +1391,27 @@ $(TESTPREFIX)/unit-test-token-tracker: $(OBJDIR)/tests/test_token_tracker.o \
                                $(OBJDIR)/server/token_tracker.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-reasoning-cap: $(OBJDIR)/tests/test_reasoning_cap.o \
+                               $(OBJDIR)/reasoning_cap.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-request-context: $(OBJDIR)/tests/test_request_context.o \
+                               $(OBJDIR)/server/request_context.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-response-dedup: $(OBJDIR)/tests/test_response_dedup.o \
+                               $(OBJDIR)/server/response_dedup.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-anthropic-shape: $(OBJDIR)/tests/test_anthropic_shape.o \
+                               $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-token-audit: $(OBJDIR)/tests/test_token_audit.o \
+                              $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-token-audit-load: $(OBJDIR)/tests/test_token_audit_load.o \
                               $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1633,6 +1663,43 @@ $(TESTPREFIX)/unit-test-db1-cost-fold: \
                                        $(OBJDIR)/db1/cost_fold.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-db1-roundtable-pipeline: \
+                                       $(OBJDIR)/tests/test_db1_roundtable_pipeline.o \
+                                       $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                       $(OBJDIR)/db1/roundtable_pipeline.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-roundtable-pipeline-eval: \
+                                       $(OBJDIR)/tests/test_roundtable_pipeline_eval.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_eval.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-roundtable-pipeline-chunk: \
+                                       $(OBJDIR)/tests/test_roundtable_pipeline_chunk.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_chunk.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_eval.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-roundtable-pipeline-ctl: \
+                                       $(OBJDIR)/tests/test_roundtable_pipeline_ctl.o \
+                                       $(OBJDIR)/server/server_pipeline.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_eval.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_chunk.o \
+                                       $(OBJDIR)/db1/roundtable_pipeline.o \
+                                       $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                       $(OBJDIR)/db1/local_operator.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-roundtable-pipeline-capture: \
+                                       $(OBJDIR)/tests/test_roundtable_pipeline_capture.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_capture.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_eval.o \
+                                       $(OBJDIR)/db1/roundtable_pipeline.o \
+                                       $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                       $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-db1-session-paths: \
                                        $(OBJDIR)/tests/test_db1_session_paths.o \
                                        $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
@@ -1658,6 +1725,8 @@ $(TESTPREFIX)/unit-test-delegate-patch-coordinator: $(OBJDIR)/tests/test_delegat
 
 $(TESTPREFIX)/unit-test-delegate-ensemble: $(OBJDIR)/tests/test_delegate_ensemble.o \
                                        $(OBJDIR)/server/delegate_ensemble.o \
+                                       $(OBJDIR)/server/token_tracker.o \
+                                       $(OBJDIR)/server/token_tracker_registry.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1670,7 +1739,7 @@ $(TESTPREFIX)/unit-test-agent-runtime-messages: $(OBJDIR)/tests/test_agent_runti
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-minimax-tool-call-args: $(OBJDIR)/tests/test_minimax_tool_call_args.o \
-                                    $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/tool_call_args.o \
+                                    $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                     $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -1712,7 +1781,7 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
-                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/presence.o \
+                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/presence.o \
                            $(OBJDIR)/server/workspace_runner_registry.o $(OBJDIR)/server/workspace_runner_queue.o \
                            $(OBJDIR)/forge_credentials.o \
                            $(OBJDIR)/delivery_target.o \
@@ -1723,6 +1792,8 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(OBJDIR)/persona.o $(OBJDIR)/prompts.o \
                            $(OBJDIR)/role_templates.o \
                            $(OBJDIR)/dstr.o $(OBJDIR)/working_profile.o \
+                           $(OBJDIR)/server/roundtable_pipeline_capture.o \
+                           $(OBJDIR)/server/roundtable_pipeline_eval.o \
                            $(DB1_OBJS) \
                            $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1778,7 +1849,7 @@ $(TESTPREFIX)/unit-test-delegate-driver: $(OBJDIR)/tests/test_delegate_driver.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-agent-http: $(OBJDIR)/tests/test_agent_http.o \
-                                $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/tool_call_args.o \
+                                $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                                 $(OBJDIR)/server/agent_request_shaping.o \
                                 $(OBJDIR)/server/delegate_driver.o \
                                 $(OBJDIR)/server/delegate_openai.o \
@@ -1959,7 +2030,7 @@ $(TESTPREFIX)/unit-test-delegate-backend-docker: $(OBJDIR)/tests/test_delegate_b
 
 $(TESTPREFIX)/unit-test-otel: $(OBJDIR)/tests/test_otel.o \
                      $(OBJDIR)/server/otel.o \
-                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/tool_call_args.o \
+                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                      $(OBJDIR)/server/agent_request_shaping.o \
                      $(OBJDIR)/server/http_retry.o \
                      $(TEST_CORE_OBJS) \
@@ -2010,7 +2081,7 @@ $(TESTPREFIX)/unit-test-kb-pki: $(OBJDIR)/tests/test_kb_pki.o \
 $(TESTPREFIX)/unit-test-context-engine: $(OBJDIR)/tests/test_context_engine.o \
                      $(OBJDIR)/server/context_engine.o \
                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o \
-                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/tool_call_args.o \
+                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                      $(OBJDIR)/server/agent_request_shaping.o \
                      $(OBJDIR)/server/delegate_driver.o \
                      $(OBJDIR)/server/delegate_openai.o \
@@ -2062,7 +2133,7 @@ $(TESTPREFIX)/unit-test-plugin-loader: $(OBJDIR)/tests/test_plugin_loader.o \
                      $(OBJDIR)/plugin_loader.o $(OBJDIR)/plugin.o $(OBJDIR)/plugin_ctx.o \
                      $(OBJDIR)/memory_provider.o $(OBJDIR)/server/context_engine.o \
                      $(OBJDIR)/server/session_compact.o $(OBJDIR)/server/compact_prune.o \
-                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/tool_call_args.o \
+                     $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o \
                      $(OBJDIR)/server/agent_request_shaping.o \
                      $(OBJDIR)/server/delegate_driver.o \
                      $(OBJDIR)/server/delegate_openai.o \

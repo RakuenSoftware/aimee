@@ -482,6 +482,17 @@ static void config_set_defaults(config_t *cfg)
    cfg->cache_aware_rewrite_hard_context_threshold = 0.85;
    cfg->cache_aware_rewrite_max_defer_turns = 20;
    cfg->cache_aware_rewrite_segment_check_turns = 5;
+   cfg->cost_reward_enabled = 0;
+   cfg->cost_reward_lambda_pct = 30;
+   cfg->cost_reward_ref_usd_milli = 500;
+   cfg->reasoning_cap_enabled = 0;
+   cfg->dedup_enabled = 0;
+   cfg->cache_shaping_enabled = 0;
+   cfg->ingress_usage_accounting_enabled = 0;
+   cfg->ingress_audit_async = 0;
+   cfg->ingress_trusted_proxy_secret[0] = '\0';
+   cfg->dedup_window_seconds = 5;
+   cfg->cache_min_chars = 0;
    cfg->guardrails_semantic_enabled = 0;
    cfg->guardrails_semantic_dry_run = 1;
    cfg->guardrails_semantic_advisory_only = 1;
@@ -544,6 +555,15 @@ static void config_set_defaults(config_t *cfg)
    cfg->roundtable_converge_threshold = 10;
    cfg->roundtable_deadline_ms = 600000;
    snprintf(cfg->roundtable_turns, sizeof(cfg->roundtable_turns), "parallel");
+   snprintf(cfg->roundtable_pipeline_done_bar, sizeof(cfg->roundtable_pipeline_done_bar),
+            "zero_blocking");
+   cfg->roundtable_pipeline_max_passes = 0;            /* unbounded: correctness over budget */
+   cfg->roundtable_pipeline_max_attempts_per_pass = 2; /* infra-retry ceiling */
+   cfg->roundtable_pipeline_max_cost_usd = 0.0;
+   cfg->roundtable_pipeline_max_total_cost_usd = 0.0;
+   cfg->roundtable_pipeline_gate_ttl_h = 0;
+   cfg->roundtable_pipeline_parked_releases_slot = 1;
+   cfg->roundtable_pipeline_unknown_context_tokens = 8000;
    cfg->mcp_osv_enabled = 1;
    cfg->mcp_osv_offline = 0;
    cfg->mcp_osv_enforce = 1;

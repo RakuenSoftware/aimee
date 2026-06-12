@@ -378,7 +378,7 @@ static void test_backfill_agent_name_from_agent_log(void)
        .confidence = 80,
        .session_id = "test-session",
    };
-   assert(db1_agent_log_insert(&log_row) == 0);
+   assert(db1_agent_log_insert(&log_row) > 0);
 
    assert(db1_agent_job_backfill_agent_names_from_log() >= 1);
    db1_agent_job_t row;

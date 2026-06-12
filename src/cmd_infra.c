@@ -12,6 +12,7 @@
 #include "db1.h"
 #include "memory.h"
 #include "platform_process.h"
+#include "platform_random.h"
 #include "cJSON.h"
 #include "headers/mcp_git.h"
 #include "headers/git_verify.h"
@@ -975,6 +976,66 @@ void cmd_dashboard(app_ctx_t *ctx, int argc, char **argv)
 #define WEBCHAT_SERVICE_SRC  "systemd/aimee-webchat.service"
 #define WEBCHAT_SERVICE_DEST "/etc/systemd/system/" WEBCHAT_SERVICE_NAME
 
+/* Provision the ingress trusted-proxy secret so the webchat OpenAI proxy actually
+ * stamps trusted principal/source metadata in a normal deployment (otherwise the
+ * proxy strips identity headers but stamps nothing, since AIMEE_INGRESS_PROXY_SECRET
+ * is unset). Generates a per-deployment secret if one is not already configured,
+ * persists it to aimee config (so aimee-server trusts it — it reads the secret
+ * from config), writes a 0600 EnvironmentFile carrying AIMEE_INGRESS_PROXY_SECRET,
+ * and drops a systemd unit override that loads it for aimee-webchat. Best-effort:
+ * logs and continues on failure rather than blocking enable. */
+static void webchat_provision_proxy_secret(void)
+{
+   config_t cfg;
+   config_load(&cfg);
+   if (!cfg.ingress_trusted_proxy_secret[0])
+   {
+      char secret[33];
+      if (platform_random_hex(secret, 32) != 0)
+      {
+         fprintf(stderr, "webchat: could not generate ingress proxy secret; "
+                         "trusted attribution will be off until configured\n");
+         return;
+      }
+      snprintf(cfg.ingress_trusted_proxy_secret, sizeof(cfg.ingress_trusted_proxy_secret), "%s",
+               secret);
+      if (config_save(&cfg) != 0)
+         fprintf(stderr, "webchat: warning: failed to persist ingress proxy secret to config\n");
+   }
+
+   /* EnvironmentFile carrying the secret for the webchat process. */
+   char envpath[MAX_PATH_LEN];
+   snprintf(envpath, sizeof(envpath), "%s/ingress-proxy.env", config_default_dir());
+   FILE *ef = fopen(envpath, "w");
+   if (ef)
+   {
+      fprintf(ef, "AIMEE_INGRESS_PROXY_SECRET=%s\n", cfg.ingress_trusted_proxy_secret);
+      fclose(ef);
+      chmod(envpath, 0600);
+   }
+   else
+   {
+      fprintf(stderr, "webchat: warning: could not write %s\n", envpath);
+      return;
+   }
+
+   /* systemd drop-in so the installed unit loads the EnvironmentFile. */
+   const char *dropdir = "/etc/systemd/system/" WEBCHAT_SERVICE_NAME ".d";
+   mkdir(dropdir, 0755);
+   char dropconf[MAX_PATH_LEN];
+   snprintf(dropconf, sizeof(dropconf), "%s/10-ingress-proxy.conf", dropdir);
+   FILE *dc = fopen(dropconf, "w");
+   if (dc)
+   {
+      fprintf(dc, "[Service]\nEnvironmentFile=%s\n", envpath);
+      fclose(dc);
+   }
+   else
+   {
+      fprintf(stderr, "webchat: warning: could not write %s (run as root?)\n", dropconf);
+   }
+}
+
 static void webchat_enable(void)
 {
    /* Find the service file relative to a workspace root or CWD */
@@ -996,6 +1057,10 @@ static void webchat_enable(void)
       fprintf(stderr, "webchat: failed to copy service file (run as root?)\n");
       return;
    }
+
+   /* Provision the trusted-proxy secret + unit override so trusted principal/
+    * source metadata is stamped (proposal #3). */
+   webchat_provision_proxy_secret();
 
    /* Reload systemd, enable, and start */
    const char *reload[] = {"systemctl", "daemon-reload", NULL};

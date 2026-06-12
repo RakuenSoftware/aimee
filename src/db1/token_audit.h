@@ -37,6 +37,47 @@ extern "C"
       const char *tool_name;
       const char *role;
       const char *model;
+      /* Origin of the turn: where the request entered aimee. "agent" for
+       * internal agent/delegate execution; ingress handlers set their own
+       * (e.g. "openai-ingress", "anthropic-ingress"). Empty on legacy rows. */
+      const char *source;
+      /* The model the client asked for, when it differs from the served/billable
+       * `model` (e.g. Claude Code requests a model but aimee serves its primary).
+       * Empty when not applicable. NULL is treated as empty. */
+      const char *requested_model;
+      /* Provider stop/finish reason for the turn, when known. NULL == empty. */
+      const char *stop_reason;
+      /* "realized" (default) for actual provider spend; ingress estimate/dedup
+       * paths set "estimated"/"avoided" so readers can exclude them from spend.
+       * NULL defaults to "realized". */
+      const char *usage_kind;
+      /* The agent_log row this audit row belongs to (0 = none, e.g. ingress rows
+       * with no agent_log row). Lets agent stats join 1:1 instead of by the lossy
+       * (agent_name, role) key. */
+      long long agent_log_id;
+      /* Idempotency + attribution (proposal §2/#3). request_id is the ingress
+       * request id (tracing only, caller-controllable, NOT the idempotency key).
+       * idempotency_key is the client's explicit Idempotency-Key — the actual
+       * dedup key — and attempt is a server attempt id distinguishing deliberate
+       * re-runs. Together with the account boundary they form the idempotency
+       * tuple: a row with a non-empty idempotency_key is inserted at most once per
+       * (source, principal, idempotency_key, attempt), so a retry under the same
+       * key cannot double-count, and two principals sharing a key never collide.
+       * principal is the account/tenant boundary of the client (e.g. "uid:1000").
+       * All default to empty; an empty idempotency_key disables the guard for that
+       * row (internal agent rows, or ingress without an explicit key). NULL == empty. */
+      const char *request_id;
+      const char *idempotency_key;
+      int attempt;
+      const char *principal;
+      /* served_model is the model aimee selected to serve (which may differ from
+       * the provider-reported `model` above when the provider echoes a canonical
+       * variant); duration_ms is the call latency; metadata is a free-form JSON
+       * string for optimization metadata (dedup/cache/route hints). All optional;
+       * NULL == empty / 0. */
+      const char *served_model;
+      int duration_ms;
+      const char *metadata;
       int prompt_tokens;
       int completion_tokens;
       int cache_write_tokens;
@@ -44,8 +85,15 @@ extern "C"
       double estimated_cost_usd;
    } db1_token_audit_row_t;
 
-   /* Insert one audit row. Returns 0 on success, -1 on error. */
+   /* Insert one audit row. Returns 0 on success, -1 on error. A row carrying a
+    * non-empty idempotency_key is inserted with idempotency: a duplicate
+    * (source, principal, idempotency_key, attempt) is ignored (still returns 0),
+    * never double-counted. */
    int db1_token_audit_insert(const db1_token_audit_row_t *row);
+
+   /* Create the (source, principal, idempotency_key, attempt) idempotency index on
+    * the live DB. Idempotent; created lazily on first insert. */
+   void db1_token_audit_ensure_idem_index(void);
 
    /* Sum estimated_cost_usd across rows tagged with this delegation_id.
     * Returns 0.0 for unknown delegation or DB-not-initialized. Used by
@@ -92,6 +140,15 @@ extern "C"
 
    typedef struct
    {
+      char source[64];
+      int calls;
+      int64_t prompt_tokens;
+      int64_t completion_tokens;
+      double estimated_cost_usd;
+   } db1_token_audit_source_summary_t;
+
+   typedef struct
+   {
       char tool_name[DB1_TOKEN_AUDIT_TOOL_LEN];
       char role[DB1_TOKEN_AUDIT_ROLE_LEN];
       int64_t prompt_tokens;
@@ -107,6 +164,24 @@ extern "C"
     * Pass 0 for all-time. */
    int db1_token_audit_totals(int since_hours, db1_token_audit_totals_t *out);
 
+   /* Realized-vs-estimated-vs-avoided-vs-partial spend breakdown (proposal §7).
+    * The single SQL authority for spend semantics: it groups token_audit cost by
+    * usage_kind so consumers report realized spend separately from estimated,
+    * avoided, and partial rows rather than copy-pasting a WHERE clause.
+    * `spend_cost_usd` is the billable total and is REALIZED ONLY — estimated
+    * (no provider usage), avoided (dedup-skipped), and partial (aborted) rows are
+    * reported individually but are never folded into the billable total. */
+   typedef struct
+   {
+      double realized_cost_usd;  /* provider-reported usage (the billable spend) */
+      double estimated_cost_usd; /* no provider usage; aimee-estimated */
+      double avoided_cost_usd;   /* dedup-skipped; NOT counted as spend */
+      double partial_cost_usd;   /* aborted mid-stream; NOT counted as spend */
+      double spend_cost_usd;     /* realized only — excludes estimated/avoided/partial */
+   } db1_token_audit_spend_t;
+
+   int db1_token_audit_spend_breakdown(int since_hours, db1_token_audit_spend_t *out);
+
    /* Per-role aggregates ordered by total prompt+completion tokens DESC.
     * Pass 0 for all-time. */
    int db1_token_audit_by_role(int since_hours, db1_token_audit_role_summary_t *out, int max);
@@ -116,8 +191,12 @@ extern "C"
    int db1_token_audit_by_tool(int since_hours, db1_token_audit_tool_summary_t *out, int max);
 
    /* Per-model aggregates ordered by total prompt+completion tokens DESC.
-    * Pass 0 for all-time. Empty-model rows are excluded. */
+    * Pass 0 for all-time. Empty-model rows surface as "(unattributed)". */
    int db1_token_audit_by_model(int since_hours, db1_token_audit_model_summary_t *out, int max);
+
+   /* Per-source (turn origin) aggregates ordered by total tokens DESC. Pass 0
+    * for all-time. Empty-source rows surface as "(unattributed)". */
+   int db1_token_audit_by_source(int since_hours, db1_token_audit_source_summary_t *out, int max);
 
    /* Dashboard view grouped by (tool_name, role), ordered by estimated
     * cost DESC, newest activity tiebreaker. */

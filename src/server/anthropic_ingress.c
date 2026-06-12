@@ -417,14 +417,16 @@ struct anthropic_stream_xlate
 {
    anthropic_sse_emit_fn emit;
    void *ctx;
-   int block_open;       /* a content block is currently open */
-   int block_is_tool;    /* the open block is tool_use (else text) */
-   int cur_index;        /* Anthropic content index of the open block */
-   int next_index;       /* index to assign to the next opened block */
-   int cur_tc_index;     /* OpenAI tool_calls[].index bound to the open tool block */
-   int any_tool;         /* at least one tool_use block was emitted */
-   int output_tokens;    /* from a usage chunk, if any */
-   char stop_reason[24]; /* mapped finish_reason, "" until known */
+   int block_open;        /* a content block is currently open */
+   int block_is_tool;     /* the open block is tool_use (else text) */
+   int cur_index;         /* Anthropic content index of the open block */
+   int next_index;        /* index to assign to the next opened block */
+   int cur_tc_index;      /* OpenAI tool_calls[].index bound to the open tool block */
+   int any_tool;          /* at least one tool_use block was emitted */
+   int input_tokens;      /* estimate at begin; overwritten by an upstream usage chunk */
+   int output_tokens;     /* from a usage chunk, if any */
+   int cache_read_tokens; /* OpenAI prompt_tokens_details.cached_tokens, if any */
+   char stop_reason[24];  /* mapped finish_reason, "" until known */
 };
 
 /* Print `obj` and hand it to the emit callback as `event`'s data, then free it. */
@@ -540,6 +542,7 @@ anthropic_stream_xlate_t *anthropic_stream_begin(const char *msg_id, const char 
    st->emit = emit;
    st->ctx = ctx;
    st->cur_tc_index = -1;
+   st->input_tokens = input_tokens > 0 ? input_tokens : 0;
 
    o = cJSON_CreateObject();
    cJSON_AddStringToObject(o, "type", "message_start");
@@ -601,6 +604,18 @@ void anthropic_stream_feed_openai(anthropic_stream_xlate_t *st, const char *data
       const cJSON *ct = cJSON_GetObjectItemCaseSensitive(usage, "completion_tokens");
       if (cJSON_IsNumber(ct))
          st->output_tokens = ct->valueint;
+      /* Prefer the upstream-reported prompt count over the begin-time estimate. */
+      const cJSON *pt = cJSON_GetObjectItemCaseSensitive(usage, "prompt_tokens");
+      if (cJSON_IsNumber(pt))
+         st->input_tokens = pt->valueint;
+      /* OpenAI prompt caching surfaces cached input under prompt_tokens_details. */
+      const cJSON *ptd = cJSON_GetObjectItemCaseSensitive(usage, "prompt_tokens_details");
+      if (cJSON_IsObject(ptd))
+      {
+         const cJSON *cached = cJSON_GetObjectItemCaseSensitive(ptd, "cached_tokens");
+         if (cJSON_IsNumber(cached))
+            st->cache_read_tokens = cached->valueint;
+      }
    }
 
    choices = cJSON_GetObjectItemCaseSensitive(root, "choices");
@@ -660,6 +675,17 @@ void anthropic_stream_finish(anthropic_stream_xlate_t *st)
    o = cJSON_CreateObject();
    cJSON_AddStringToObject(o, "type", "message_stop");
    xlate_emit(st, "message_stop", o);
+}
+
+void anthropic_stream_get_usage(const anthropic_stream_xlate_t *st, int *input_tokens,
+                                int *output_tokens, int *cache_read_tokens)
+{
+   if (input_tokens)
+      *input_tokens = st ? st->input_tokens : 0;
+   if (output_tokens)
+      *output_tokens = st ? st->output_tokens : 0;
+   if (cache_read_tokens)
+      *cache_read_tokens = st ? st->cache_read_tokens : 0;
 }
 
 void anthropic_stream_free(anthropic_stream_xlate_t *st)

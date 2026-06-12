@@ -210,6 +210,10 @@ type streamEvent struct {
 	In   int64   `json:"in,omitempty"`
 	Out  int64   `json:"out,omitempty"`
 	Cost float64 `json:"cost,omitempty"`
+	// usage_kind: realized (provider-reported) vs estimated/avoided/partial. The
+	// webchat chat path uses provider-reported usage, so it is realized unless the
+	// server overrides it.
+	Kind string `json:"kind,omitempty"`
 }
 
 // chatStream sends chat.send_stream and calls cb for each intermediate event.

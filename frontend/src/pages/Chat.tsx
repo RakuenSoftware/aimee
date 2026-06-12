@@ -668,11 +668,13 @@ const COLLAB_MAX_ACTIVE = 10;
 function ContextPanel({ open, onToggle, sessionUsage, sessionId, msgCount, metrics }: {
   open: boolean;
   onToggle: () => void;
-  sessionUsage: { in: number; out: number; cost: number };
+  sessionUsage: { in: number; out: number; cost: number; kind: string };
   sessionId: string;
   msgCount: number;
   metrics: MetricRow[];
 }) {
+  // metrics rows are realized spend (the server reader filters out
+  // estimated/avoided/partial), so this total is realized billable spend.
   const totalCost = metrics.reduce((s, m) => s + m.estimated_cost_usd, 0);
   const totalTokens = metrics.reduce((s, m) => s + m.tokens + m.cache_write_tokens + m.cache_read_tokens, 0);
   const sessionTokens = sessionUsage.in + sessionUsage.out;
@@ -743,9 +745,11 @@ function ContextPanel({ open, onToggle, sessionUsage, sessionId, msgCount, metri
         </div>
 
         <div style={{ marginBottom: 12 }}>
-          <div style={{ color: tokens.textSecondary, fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>Spend</div>
+          <div style={{ color: tokens.textSecondary, fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>Spend (realized)</div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-            <span style={{ color: tokens.textFaint, fontSize: '12px' }}>Session</span>
+            <span style={{ color: tokens.textFaint, fontSize: '12px' }}>
+              Session{sessionUsage.kind && sessionUsage.kind !== 'realized' ? ` (${sessionUsage.kind})` : ''}
+            </span>
             <span style={{ color: sessionUsage.cost > 0 ? tokens.text : tokens.textPale, fontSize: '12px' }}>
               {sessionUsage.cost > 0 ? `~$${sessionUsage.cost.toFixed(4)}` : '—'}
             </span>
@@ -753,7 +757,7 @@ function ContextPanel({ open, onToggle, sessionUsage, sessionId, msgCount, metri
           {totalCost > 0 && (
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                <span style={{ color: tokens.textFaint, fontSize: '12px' }}>All-time</span>
+                <span style={{ color: tokens.textFaint, fontSize: '12px' }}>All-time realized</span>
                 <span style={{ color: tokens.textPale, fontSize: '12px' }}>${totalCost.toFixed(4)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
@@ -1451,7 +1455,7 @@ export default function Chat() {
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const [lastUsage, setLastUsage] = useState<{ in: number; out: number; cost: number } | null>(null);
-  const [sessionUsage, setSessionUsage] = useState<{ in: number; out: number; cost: number }>({ in: 0, out: 0, cost: 0 });
+  const [sessionUsage, setSessionUsage] = useState<{ in: number; out: number; cost: number; kind: string }>({ in: 0, out: 0, cost: 0, kind: 'realized' });
   const [allTimeMetrics, setAllTimeMetrics] = useState<MetricRow[]>([]);
   const [promptTier, setPromptTier] = useState<'MINIMAL' | 'STANDARD' | 'EXTENDED'>('STANDARD');
   const [projectRoot, setProjectRoot] = useState(loadProjectRoot);
@@ -1716,7 +1720,7 @@ export default function Chat() {
   }, []);
 
   useEffect(() => {
-    setSessionUsage({ in: 0, out: 0, cost: 0 });
+    setSessionUsage({ in: 0, out: 0, cost: 0, kind: 'realized' });
   }, [activeIdx]);
 
   /* Keep activeChannelRef in sync for SSE handler closure */
@@ -2484,8 +2488,11 @@ export default function Chat() {
           out: Number(data.out ?? 0),
           cost: Number(data.cost ?? 0),
         };
+        // usage_kind distinguishes realized (provider-reported, billable) spend
+        // from estimated/avoided/partial; default realized for the chat path.
+        const kind = typeof data.usage_kind === 'string' && data.usage_kind ? data.usage_kind : 'realized';
         setLastUsage(u);
-        setSessionUsage(prev => ({ in: prev.in + u.in, out: prev.out + u.out, cost: prev.cost + u.cost }));
+        setSessionUsage(prev => ({ in: prev.in + u.in, out: prev.out + u.out, cost: prev.cost + u.cost, kind }));
         break;
       }
       case 'turn_summary': {
