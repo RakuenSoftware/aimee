@@ -22,6 +22,7 @@
 #include "kb_evidence_embed.h"
 #include "kb_learning_synth.h"
 #include "kb_service_code_embed.h"
+#include "kb.h"
 #include "index.h"
 #include "aimee.h"
 #include "config.h"
@@ -124,6 +125,27 @@ static void *drain_thread_main(void *arg)
          if (total > 0)
             aimee_log(LOG_DEBUG, "kb.code.embed",
                       "embedded %d code/doc vector(s) across %d project(s)", total, np);
+      }
+
+      /* KB-docs ingest drain — the in-ingest replacement for `kb build`. For
+       * each indexed project, chunk + embed prose/doc files (markdown, rst, txt,
+       * …) into the curated kb_documents layer, reading content from DB2
+       * file_contents (no disk). Bounded per poll; backfills then idles cheaply.
+       * Same embedder gate as the code drain. */
+      if (cfg.embedding_command[0])
+      {
+         project_info_t projects[128];
+         int np = index_list_projects(projects, 128);
+         int total = 0;
+         for (int i = 0; i < np; i++)
+         {
+            int e = kb_doc_refresh(projects[i].name, cfg.embedding_command, 200);
+            if (e > 0)
+               total += e;
+         }
+         if (total > 0)
+            aimee_log(LOG_DEBUG, "kb.docs.ingest", "ingested %d doc chunk(s) across %d project(s)",
+                      total, np);
       }
 
       /* Candidate-generation synthesis drain — the heavy LLM pass, on the
