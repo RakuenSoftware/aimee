@@ -32,7 +32,7 @@ static void test_direct_delegate_handoff_json_response(void)
    close(fds[1]);
    char buf[8192];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n > 0);
+   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
    buf[n] = '\0';
    close(fds[0]);
    /* (WP-B) async-only: status+result persist to the job row; the rich handoff_*
@@ -41,7 +41,7 @@ static void test_direct_delegate_handoff_json_response(void)
    assert(strstr(g_last_agent_prompt, "delegate_result_v1") != NULL);
    assert(g_agent_calls == 1);
    db1_agent_job_t job;
-   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(delegate_current_job(&job) == 0);
    assert(strcmp(job.status, "done") == 0);
    db1_agent_job_free(&job);
    cJSON_Delete(req);
@@ -82,7 +82,7 @@ static void test_direct_delegate_handoff_repair_attempt(void)
    close(fds[1]);
    char buf[8192];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n > 0);
+   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
    buf[n] = '\0';
    close(fds[0]);
    /* (WP-B) async-only: handoff_* sync metadata gone; prompt + agent-call count
@@ -90,7 +90,7 @@ static void test_direct_delegate_handoff_repair_attempt(void)
    assert(strstr(g_last_agent_prompt, "Repair it now") != NULL);
    assert(g_agent_calls == 2);
    db1_agent_job_t job;
-   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(delegate_current_job(&job) == 0);
    assert(strcmp(job.status, "done") == 0);
    db1_agent_job_free(&job);
    cJSON_Delete(req);
@@ -125,13 +125,13 @@ static void test_direct_delegate_handoff_repair_failure_is_error(void)
    close(fds[1]);
    char buf[8192];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n > 0);
+   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
    buf[n] = '\0';
    close(fds[0]);
    /* (WP-B) async-only: the invalid-handoff error is persisted to the job row. */
    assert(g_agent_calls == 2);
    db1_agent_job_t job;
-   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(delegate_current_job(&job) == 0);
    assert(strstr(job.result, "invalid delegate handoff") != NULL);
    db1_agent_job_free(&job);
    cJSON_Delete(req);
@@ -163,12 +163,12 @@ static void test_direct_delegate_review_auto_tools_uses_tools(void)
    close(fds[1]);
    char buf[2048];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n > 0);
+   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
    buf[n] = '\0';
    close(fds[0]);
    /* (WP-B) async-only: read the persisted job, not the connection. */
    db1_agent_job_t job;
-   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(delegate_current_job(&job) == 0);
    assert(strcmp(job.status, "done") == 0);
    db1_agent_job_free(&job);
    assert(g_agent_run_calls == 0);
@@ -202,12 +202,12 @@ static void test_direct_delegate_reviewer_alias_auto_tools_uses_tools(void)
    close(fds[1]);
    char buf[2048];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n > 0);
+   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
    buf[n] = '\0';
    close(fds[0]);
    /* (WP-B) async-only: read the persisted job, not the connection. */
    db1_agent_job_t job;
-   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(delegate_current_job(&job) == 0);
    assert(strcmp(job.status, "done") == 0);
    db1_agent_job_free(&job);
    assert(g_agent_run_calls == 0);
@@ -245,12 +245,12 @@ static void test_direct_delegate_explicit_tools_forces_tools(void)
    close(fds[1]);
    char buf[2048];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n > 0);
+   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
    buf[n] = '\0';
    close(fds[0]);
    /* (WP-B) async-only: read the persisted job, not the connection. */
    db1_agent_job_t job;
-   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(delegate_current_job(&job) == 0);
    assert(strcmp(job.status, "done") == 0);
    db1_agent_job_free(&job);
    assert(g_agent_run_calls == 0);
@@ -288,7 +288,7 @@ static void test_direct_delegate_one_turn_diagnose_suppresses_default_tools(void
    close(fds[1]);
    char buf[2048];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n > 0);
+   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
    close(fds[0]);
    assert(g_agent_run_calls == 1 && g_agent_tool_run_calls == 0);
    assert(g_last_agent_max_turns == 1);
@@ -322,12 +322,12 @@ static void test_readonly_code_delegate_disables_write_enforce(void)
    close(fds[1]);
    char buf[2048];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n > 0);
+   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
    buf[n] = '\0';
    close(fds[0]);
    /* (WP-B) async-only: read the persisted job, not the connection. */
    db1_agent_job_t job;
-   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(delegate_current_job(&job) == 0);
    assert(strcmp(job.status, "done") == 0);
    db1_agent_job_free(&job);
    assert(g_agent_tool_run_calls == 1);
@@ -362,12 +362,12 @@ static void test_readonly_refactor_delegate_disables_write_enforce(void)
    close(fds[1]);
    char buf[2048];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n > 0);
+   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
    buf[n] = '\0';
    close(fds[0]);
    /* (WP-B) async-only: read the persisted job, not the connection. */
    db1_agent_job_t job;
-   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(delegate_current_job(&job) == 0);
    assert(strcmp(job.status, "done") == 0);
    db1_agent_job_free(&job);
    assert(g_agent_tool_run_calls == 1);
@@ -402,13 +402,13 @@ static void test_direct_delegate_max_turns_override(void)
    close(fds[1]);
    char buf[2048];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n > 0);
+   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
    buf[n] = '\0';
    close(fds[0]);
    assert(g_last_agent_max_turns == 40);
-   cJSON *resp = cJSON_Parse(buf);
-   assert(cJSON_IsObject(resp));
-   cJSON_Delete(resp);
+   /* (WP-B) async-only: the {job_id,"pending"} envelope is captured in
+    * g_last_response; the override is asserted above via g_last_agent_max_turns. */
+   assert(cJSON_IsObject(g_last_response));
    cJSON_Delete(req);
    reset_last_response();
    free(conn);

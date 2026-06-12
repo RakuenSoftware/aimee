@@ -70,7 +70,7 @@ static void assert_role_gets_evidence_bundle_with_cwd(const char *role, const ch
    close(fds[1]);
    char buf[4096];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n > 0);
+   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
    buf[n] = '\0';
    close(fds[0]);
    assert(strstr(g_last_agent_prompt, "Parent Worktree Diff Evidence") != NULL);
@@ -82,7 +82,7 @@ static void assert_role_gets_evidence_bundle_with_cwd(const char *role, const ch
     * {job_id,pending} envelope). The read-only delegate ran in the parent
     * workspace (asserted above via the evidence bundle + zero worktree calls). */
    db1_agent_job_t job;
-   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(delegate_current_job(&job) == 0);
    assert(strcmp(job.status, "done") == 0);
    db1_agent_job_free(&job);
    cJSON_Delete(req);
@@ -127,7 +127,7 @@ static void test_read_only_delegate_uses_parent_workspace(void)
 
    char buf[4096];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n > 0);
+   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
    buf[n] = '\0';
    close(fds[0]);
 
@@ -136,7 +136,7 @@ static void test_read_only_delegate_uses_parent_workspace(void)
    assert(strstr(g_last_agent_prompt, "Validation Evidence Bundle") != NULL);
    /* (WP-B) async-only: read the persisted job rather than the connection. */
    db1_agent_job_t job;
-   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(delegate_current_job(&job) == 0);
    assert(strcmp(job.status, "done") == 0);
    db1_agent_job_free(&job);
    cJSON_Delete(req);
@@ -178,7 +178,7 @@ static void test_read_only_branch_delegate_rejected(void)
 
    char buf[4096];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n > 0);
+   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
    buf[n] = '\0';
    close(fds[0]);
 
@@ -187,7 +187,7 @@ static void test_read_only_branch_delegate_rejected(void)
    assert(g_agent_tool_run_calls == 0);
    /* (WP-B) async-only: the rejection error is persisted to the job row. */
    db1_agent_job_t job;
-   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(delegate_current_job(&job) == 0);
    assert(strstr(job.result, "read-only delegates must use the parent worktree") != NULL);
    db1_agent_job_free(&job);
    cJSON_Delete(req);

@@ -79,13 +79,13 @@ static void test_direct_delegate_rejects_raw_tool_call_markup(void)
    close(fds[1]);
    char buf[8192];
    ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
-   assert(n > 0);
+   assert(n >= 0); /* (WP-B) async: response in g_last_response, pipe empty */
    buf[n] = '\0';
    close(fds[0]);
    /* (WP-B) async-only: the degenerate-response rejection is persisted to the
     * job row (status failed; message in result). */
    db1_agent_job_t job;
-   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(delegate_current_job(&job) == 0);
    assert(strstr(job.result, "degenerate response") != NULL);
    db1_agent_job_free(&job);
    cJSON_Delete(req);

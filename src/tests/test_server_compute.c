@@ -1632,20 +1632,18 @@ static void test_delegate_launch_rejects_packet_without_handoff_schema(void)
    printf("  PASS: test_delegate_launch_rejects_packet_without_handoff_schema\n");
 }
 
-/* Async-only (WP-B): handle_delegate returns a {job_id,"pending"} envelope over
- * the connection; the worker persists its real status/result to the job row.
- * Load the job named by an envelope's job_id. An error delegate's message lands
- * in job.result (so strstr(job.result, msg) is a status-agnostic check); a
- * successful delegate is status "done" with the response in job.result. */
-static int delegate_envelope_job(const char *envelope, db1_agent_job_t *out_job)
+/* Async-only (WP-B): handle_delegate returns a {job_id,"pending"} envelope,
+ * captured by the stubbed server_send_ok into g_last_response (NOT written to the
+ * connection — the worker's compute_respond persists status/result to the job row
+ * instead, so the test pipe stays empty). Load the job named by that envelope's
+ * job_id. An error delegate's message lands in job.result (so strstr(job.result,
+ * msg) is a status-agnostic check); a successful delegate is status "done". */
+static int delegate_current_job(db1_agent_job_t *out_job)
 {
-   cJSON *e = cJSON_Parse(envelope);
-   assert(cJSON_IsObject(e));
-   cJSON *jid = cJSON_GetObjectItemCaseSensitive(e, "job_id");
+   assert(g_last_response != NULL);
+   cJSON *jid = cJSON_GetObjectItemCaseSensitive(g_last_response, "job_id");
    assert(cJSON_IsNumber(jid));
-   int job_id = jid->valueint;
-   cJSON_Delete(e);
-   return db1_agent_job_get(job_id, out_job);
+   return db1_agent_job_get(jid->valueint, out_job);
 }
 
 #include "test_server_compute_handoff.inc"
