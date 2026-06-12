@@ -39,7 +39,6 @@ int handle_mcp_delegate_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *args
    cJSON *jp = cJSON_GetObjectItemCaseSensitive(args, "prompt");
    cJSON *jb = cJSON_GetObjectItemCaseSensitive(args, "branch");
    cJSON *jdcwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
-   cJSON *jbg = cJSON_GetObjectItemCaseSensitive(args, "background");
    cJSON *jpersona = cJSON_GetObjectItemCaseSensitive(args, "persona");
    /* A persona is required for every delegate (it sets the delegate's identity
     * and principles). */
@@ -64,8 +63,11 @@ int handle_mcp_delegate_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *args
       cJSON_AddStringToObject(dreq, "cwd", jdcwd->valuestring);
    else
       add_resolved_delegate_cwd(dreq, args, sid);
-   if (!cJSON_IsBool(jbg) || cJSON_IsTrue(jbg))
-      cJSON_AddBoolToObject(dreq, "background", 1);
+   /* Delegates are always async (WP-B): the in-model tool always returns a
+    * job_id and the model polls delegate_status. Set background=1 for
+    * back-compat with a mixed-version server during rollout (a current server
+    * ignores the field). */
+   cJSON_AddBoolToObject(dreq, "background", 1);
    int rc = handle_delegate(ctx, conn, dreq);
    cJSON_Delete(dreq);
    return rc;

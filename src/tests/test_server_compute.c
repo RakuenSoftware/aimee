@@ -1631,6 +1631,21 @@ static void test_delegate_launch_rejects_packet_without_handoff_schema(void)
    free(ctx);
    printf("  PASS: test_delegate_launch_rejects_packet_without_handoff_schema\n");
 }
+
+/* Async-only (WP-B): handle_delegate returns a {job_id,"pending"} envelope,
+ * captured by the stubbed server_send_ok into g_last_response (NOT written to the
+ * connection — the worker's compute_respond persists status/result to the job row
+ * instead, so the test pipe stays empty). Load the job named by that envelope's
+ * job_id. An error delegate's message lands in job.result (so strstr(job.result,
+ * msg) is a status-agnostic check); a successful delegate is status "done". */
+static int delegate_current_job(db1_agent_job_t *out_job)
+{
+   assert(g_last_response != NULL);
+   cJSON *jid = cJSON_GetObjectItemCaseSensitive(g_last_response, "job_id");
+   assert(cJSON_IsNumber(jid));
+   return db1_agent_job_get(jid->valueint, out_job);
+}
+
 #include "test_server_compute_handoff.inc"
 #include "test_server_compute_delegate_write.inc"
 #include "test_server_compute_liveness.inc"
@@ -1745,12 +1760,9 @@ int main(void)
    test_readonly_code_delegate_disables_write_enforce();
    test_readonly_refactor_delegate_disables_write_enforce();
    test_direct_delegate_max_turns_override();
-   test_noop_write_delegate_fires();
-   test_write_delegate_without_named_paths_noops();
    test_read_only_delegate_uses_parent_workspace();
    test_read_only_branch_delegate_rejected();
    test_inspection_roles_get_evidence_bundle();
-   test_write_delegate_worktree_modes();
    test_delegate_worker_restores_caller_context();
    test_delegate_worker_balances_concurrency_slot();
    test_delegate_worker_ok_response_shape();

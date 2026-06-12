@@ -18,8 +18,15 @@ static const char *sci_getenv(const char *key)
 }
 
 /* Drive one delegate end to end: handle_delegate captures the worker, we run it
- * synchronously, then parse the JSON it wrote to the connection fd. Returns the
- * parsed response (caller frees) or NULL. */
+ * synchronously, then map the persisted job row back to the old {status,message}
+ * vocabulary. Returns the synthetic response (caller frees) or NULL.
+ *
+ * (WP-B) async-only: handle_delegate returns the {job_id,"pending"} envelope via
+ * the stubbed server_send_ok (captured in g_last_response, NOT written to the
+ * connection — the pipe stays empty). The worker persists the real status/result
+ * to the job row. We map done->ok, cancelled->cancelled, else->error so the
+ * invariant cases (which mainly assert thread-local context restoration) still
+ * read a status. */
 static cJSON *sci_drive_delegate(cJSON *req)
 {
    int fds[2];
@@ -34,15 +41,26 @@ static cJSON *sci_drive_delegate(cJSON *req)
    g_submitted_fn(g_submitted_arg);
    g_submitted_arg = NULL;
    close(fds[1]);
-   char buf[16384];
-   ssize_t n = read(fds[0], buf, sizeof(buf) - 1);
    close(fds[0]);
    free(conn);
    free(ctx);
-   if (n <= 0)
+   cJSON *jid =
+       g_last_response ? cJSON_GetObjectItemCaseSensitive(g_last_response, "job_id") : NULL;
+   if (!cJSON_IsNumber(jid))
       return NULL;
-   buf[n] = '\0';
-   return cJSON_Parse(buf);
+   cJSON *out = cJSON_CreateObject();
+   db1_agent_job_t job;
+   if (db1_agent_job_get(jid->valueint, &job) == 0)
+   {
+      const char *st = strcmp(job.status, "done") == 0        ? "ok"
+                       : strcmp(job.status, "cancelled") == 0 ? "cancelled"
+                                                              : "error";
+      cJSON_AddStringToObject(out, "status", st);
+      if (job.result && job.result[0])
+         cJSON_AddStringToObject(out, "message", job.result);
+      db1_agent_job_free(&job);
+   }
+   return out;
 }
 
 /* Establish a sentinel "outer delegate" context; assert the worker restores it. */
@@ -104,7 +122,7 @@ static void test_delegate_worker_balances_concurrency_slot(void)
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "role", "execute");
    cJSON_AddStringToObject(req, "persona", "engineer");
-   cJSON_AddStringToObject(req, "prompt", "concurrency balance");
+   cJSON_AddStringToObject(req, "prompt", "concurrency balance characterization");
    cJSON *resp = sci_drive_delegate(req);
    cJSON_Delete(req);
 
@@ -119,7 +137,12 @@ static void test_delegate_worker_balances_concurrency_slot(void)
    printf("  PASS: test_delegate_worker_balances_concurrency_slot\n");
 }
 
-/* The success response carries the canonical delegate envelope fields. */
+/* (WP-B) async-only: a successful delegate persists to a durable, pollable job
+ * row — status "done" with the provider's response text in job.result. The rich
+ * synchronous envelope (delegation_id / turns / tool_calls / agent / token
+ * counts) the worker once wrote over the connection is no longer delivered here;
+ * `delegate.status` polling surfaces what the job row preserves. sci_drive_delegate
+ * maps the row back to {status:"ok", message:<result>}. */
 static void test_delegate_worker_ok_response_shape(void)
 {
    reset_last_response();
@@ -130,21 +153,14 @@ static void test_delegate_worker_ok_response_shape(void)
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "role", "execute");
    cJSON_AddStringToObject(req, "persona", "engineer");
-   cJSON_AddStringToObject(req, "prompt", "response shape");
+   cJSON_AddStringToObject(req, "prompt", "response shape characterization");
    cJSON *resp = sci_drive_delegate(req);
    cJSON_Delete(req);
 
    assert(resp != NULL);
-   assert(cJSON_IsString(cJSON_GetObjectItem(resp, "delegation_id")));
-   assert(cJSON_GetObjectItem(resp, "delegation_id")->valuestring[0] != '\0');
    assert(strcmp(cJSON_GetObjectItem(resp, "status")->valuestring, "ok") == 0);
-   assert(strcmp(cJSON_GetObjectItem(resp, "response")->valuestring, "the delegate result text") ==
+   assert(strcmp(cJSON_GetObjectItem(resp, "message")->valuestring, "the delegate result text") ==
           0);
-   assert(cJSON_HasObjectItem(resp, "turns"));
-   assert(cJSON_HasObjectItem(resp, "tool_calls"));
-   assert(cJSON_HasObjectItem(resp, "agent"));
-   assert(cJSON_HasObjectItem(resp, "prompt_tokens"));
-   assert(cJSON_HasObjectItem(resp, "completion_tokens"));
    cJSON_Delete(resp);
 
    reset_last_response();
@@ -169,7 +185,7 @@ static void test_delegate_worker_restores_state_on_error(void)
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "role", "execute");
    cJSON_AddStringToObject(req, "persona", "engineer");
-   cJSON_AddStringToObject(req, "prompt", "error-path restore");
+   cJSON_AddStringToObject(req, "prompt", "error-path restore characterization");
    cJSON *resp = sci_drive_delegate(req);
    cJSON_Delete(req);
 
@@ -205,7 +221,7 @@ static void test_delegate_worker_sets_session_override_during_run(void)
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "role", "execute");
    cJSON_AddStringToObject(req, "persona", "engineer");
-   cJSON_AddStringToObject(req, "prompt", "session-during-run");
+   cJSON_AddStringToObject(req, "prompt", "session-during-run characterization");
    cJSON_AddStringToObject(req, "session_id", "run-session");
    cJSON *resp = sci_drive_delegate(req);
    cJSON_Delete(req);
