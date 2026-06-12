@@ -23,19 +23,24 @@
 
 void config_kb_curator_defaults(config_t *cfg)
 {
-   cfg->kb_curator_extract_docs_enabled = 0;
+   /* The deep-curator (larger LLM) pipeline is default-ON: it drains gradually
+    * in the background (rate-limited by kb_curator_max_jobs_per_hour) and refines
+    * what the 0.6B embedder already indexed. Every stage degrades to a no-op when
+    * its prerequisite (a configured curator/judge/synthesize command, or upstream
+    * curator rows) is absent, so default-on is safe on a bare deploy. */
+   cfg->kb_curator_extract_docs_enabled = 1;
    cfg->kb_curator_extract_prompt_version[0] = '\0';
    cfg->kb_curator_embed_model_version[0] = '\0';
    cfg->kb_curator_invalidation_notify_socket[0] = '\0';
-   cfg->kb_curator_extract_code_enabled = 0;
-   cfg->kb_curator_resolve_entities_enabled = 0;
-   cfg->kb_curator_index_narrative_enabled = 0;
-   cfg->kb_curator_index_claims_enabled = 0;
-   cfg->kb_curator_detect_contradictions_enabled = 0;
-   cfg->kb_curator_index_code_unit_enabled = 0;
-   cfg->kb_curator_link_artifacts_enabled = 0;
-   cfg->kb_curator_synthesize_enabled = 0;
-   cfg->kb_curator_promote_entity_enabled = 0;
+   cfg->kb_curator_extract_code_enabled = 1;
+   cfg->kb_curator_resolve_entities_enabled = 1;
+   cfg->kb_curator_index_narrative_enabled = 1;
+   cfg->kb_curator_index_claims_enabled = 1;
+   cfg->kb_curator_detect_contradictions_enabled = 1;
+   cfg->kb_curator_index_code_unit_enabled = 1;
+   cfg->kb_curator_link_artifacts_enabled = 1;
+   cfg->kb_curator_synthesize_enabled = 1;
+   cfg->kb_curator_promote_entity_enabled = 1;
    cfg->kb_curator_promote_min_sources = 3;
    cfg->kb_curator_extract_command[0] = '\0';
    cfg->kb_curator_judge_command[0] = '\0';
