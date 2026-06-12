@@ -368,14 +368,14 @@ CLIENT_COMPILE_OBJS = $(CLI_OBJS) $(CLIENT_PLATFORM_OBJS) $(OBJDIR)/dstr.o $(OBJ
 $(CLIENT_COMPILE_OBJS): C_FLAGS := $(CLIENT_C_FLAGS)
 
 # --- Server ---
-SERVER_SRCS = server/server_main.c server/server.c server/server_http.c server/server_http_reqctx.c server/request_context.c server/response_dedup.c server/anthropic_shape.c server/anthropic_ingress.c server/anthropic_http.c server/openai_shape.c server/openai_chat.c server/ingress_preinject.c server/openai_responses_store.c server/openai_runs_store.c server/server_api.c server/server_auth.c server/server_session.c server/server_hooks.c server/server_state.c server/server_plugin.c server/server_memory_benchmark.c server/server_work.c server/workspace_provider_detached.c server/workspace_runner_queue.c server/workspace_runner_registry.c server/workspace_turn.c \
+SERVER_SRCS = server/server_main.c server/server.c server/server_http.c server/server_http_reqctx.c server/server_http_identity.c server/request_context.c server/response_dedup.c server/anthropic_shape.c server/anthropic_ingress.c server/anthropic_http.c server/openai_shape.c server/openai_chat.c server/ingress_preinject.c server/openai_responses_store.c server/openai_runs_store.c server/server_api.c server/server_auth.c server/server_session.c server/server_hooks.c server/server_state.c server/server_plugin.c server/server_memory_benchmark.c server/server_work.c server/workspace_provider_detached.c server/workspace_runner_queue.c server/workspace_runner_registry.c server/workspace_turn.c \
               server/server_delegate_monitor.c server/server_coord_dispatcher.c server/server_session_pools.c server/presence.c \
               server/server_agent.c server/server_compute.c server/server_skill_jobs.c server/server_delegate_status.c server/server_compute_async.c server/server_jobs_aux.c server/server_skill.c server/server_mcp.c server/server_mcp_tools.c server/server_mcp_delegate.c server/server_mcp_process.c server/server_mcp_skill.c server/server_mcp_learning.c server/server_mcp_workflows.c server/server_mcp_gateway.c server/session_search_tool.c server/compute_pool.c cli_client.c \
               server/roundtable_pipeline_eval.c server/roundtable_pipeline_capture.c server/roundtable_pipeline_chunk.c server/server_pipeline.c \
               server/compute_concurrency.c server/provider_catalog.c \
               server/dashboard_server.c hud.c cmd_identity.c prompts.c persona.c working_profile.c \
               server/delegate_role.c server/delegate_depth.c server/delegate_prompt.c server/delegate_run_phases.c server/delegate_routing.c server/delegate_launch.c server/delegate_source_authority.c server/delegate_economics.c server/delegate_credentials.c server/delegate_credential_retry.c server/delegate_patch_coordinator.c server/delegate_ensemble.c server/delegate_checkout.c cmd_init.c \
-              server/trigger_scheduler.c server/server_trigger.c server/server_cron.c server/server_trajectory.c server/server_config.c
+              server/trigger_scheduler.c server/server_trigger.c server/server_cron.c server/server_trajectory.c server/server_config.c server/vault_principal.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(OBJDIR)/%.o)
 SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) guardrails_orchestrator.c,$(DATA_SRCS))
 SERVER_DATA_OBJS = $(SERVER_DATA_SRCS:%.c=$(OBJDIR)/server/%.o) \

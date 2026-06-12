@@ -591,9 +591,9 @@ cJSON *mcp_build_tools_list(void)
           build_tool(
               "delegate",
               "Delegate a task to an aimee delegate agent instead of provider-native "
-              "sub-agent tools (spawn_agent/Agent). Async by default, returns a job_id; "
-              "poll delegate_status. Has SSH to homelab hosts and full tool execution. If "
-              "already a sub-agent, return findings.",
+              "sub-agent tools (spawn_agent/Agent). Always async: returns a job_id; "
+              "poll delegate_status for the result. Has SSH to homelab hosts and full tool "
+              "execution. If already a sub-agent, return findings.",
               cJSON_Parse(
                   "{\"type\":\"object\",\"properties\":{"
                   "\"role\":{\"type\":\"string\",\"description\":\"Delegation role (e.g. code, "
@@ -605,10 +605,7 @@ cJSON *mcp_build_tools_list(void)
                   "qa, security, reviewer, architect, or custom); sets the delegate's identity "
                   "and principles.\"},"
                   "\"cwd\":{\"type\":\"string\",\"description\":\"Optional cwd to anchor delegate "
-                  "worktree isolation; defaults to the active MCP session worktree.\"},"
-                  "\"background\":{\"type\":\"boolean\",\"description\":\"Run async, returns a "
-                  "job_id (default true for MCP); poll delegate_status. Pass false for short "
-                  "calls only.\"}},"
+                  "worktree isolation; defaults to the active MCP session worktree.\"}},"
                   "\"required\":[\"role\",\"prompt\",\"persona\"]}")));
    }
    /* delegate_status */

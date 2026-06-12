@@ -510,11 +510,6 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       }
       config_t cfg;
       config_load(&cfg);
-      if (!cfg.ensemble_enabled)
-      {
-         fprintf(stderr, "error: ensemble is disabled. Set ensemble.enabled: true in aimee.yaml\n");
-         return;
-      }
       agent_config_t acfg;
       if (agent_load_config(&acfg) != 0)
       {

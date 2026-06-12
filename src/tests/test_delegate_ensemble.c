@@ -224,7 +224,7 @@ static config_t make_cfg(int enabled, int min_ok, double max_cost)
 {
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   cfg.ensemble_enabled = enabled;
+   (void)enabled;
    cfg.ensemble_min_successful = min_ok;
    cfg.ensemble_max_cost_usd = max_cost;
    cfg.ensemble_reference_count = 3;
@@ -358,17 +358,6 @@ static void test_delegate_cost_estimate_uses_token_tracker(void)
    double zero = delegate_cost_estimate_usd(NULL, "zero-priced-model", 1000, 1000);
    assert(zero > 0.0);
    printf("  test_delegate_cost_estimate_uses_token_tracker: ok\n");
-}
-
-static void test_ensemble_disabled(void)
-{
-   config_t cfg = make_cfg(0, 2, 10.0); /* disabled */
-   agent_config_t acfg = make_acfg();
-   delegate_ensemble_result_t result;
-
-   int rc = delegate_ensemble_run(&acfg, &cfg, "any prompt", &result);
-   assert(rc == -1);
-   printf("  test_ensemble_disabled: ok\n");
 }
 
 static void test_ensemble_null_args(void)
@@ -838,7 +827,6 @@ static void test_roundtable_deadline_returns_best_so_far(void)
 int main(void)
 {
    printf("delegate_ensemble tests\n");
-   test_ensemble_disabled();
    test_ensemble_null_args();
    test_ensemble_basic();
    test_ensemble_cost_cap();

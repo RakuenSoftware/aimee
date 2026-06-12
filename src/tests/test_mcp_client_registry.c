@@ -236,7 +236,7 @@ static void test_namespaced_tools_and_dispatch(void)
    cJSON *public_tools = mcp_build_tools_list();
    assert(cJSON_IsArray(public_tools));
    int saw_namespaced = 0;
-   int saw_delegate_background = 0;
+   int saw_delegate_background_absent = 0;
    int saw_delegate_cwd = 0;
    int saw_delegate_status = 0;
    int saw_job_start_queue_desc = 0;
@@ -271,10 +271,10 @@ static void test_namespaced_tools_and_dispatch(void)
       {
          cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
          cJSON *props = cJSON_GetObjectItemCaseSensitive(schema, "properties");
-         cJSON *background = cJSON_GetObjectItemCaseSensitive(props, "background");
-         cJSON *type = cJSON_GetObjectItemCaseSensitive(background, "type");
-         if (cJSON_IsString(type) && strcmp(type->valuestring, "boolean") == 0)
-            saw_delegate_background = 1;
+         /* (WP-B) delegates are always async; the tool no longer exposes a
+          * `background` param. */
+         if (!cJSON_GetObjectItemCaseSensitive(props, "background"))
+            saw_delegate_background_absent = 1;
          cJSON *cwd = cJSON_GetObjectItemCaseSensitive(props, "cwd");
          cJSON *cwd_type = cJSON_GetObjectItemCaseSensitive(cwd, "type");
          if (cJSON_IsString(cwd_type) && strcmp(cwd_type->valuestring, "string") == 0)
@@ -282,7 +282,7 @@ static void test_namespaced_tools_and_dispatch(void)
       }
    }
    assert(saw_namespaced);
-   assert(saw_delegate_background);
+   assert(saw_delegate_background_absent);
    assert(saw_delegate_cwd);
    assert(saw_delegate_status);
    assert(saw_job_start_queue_desc);

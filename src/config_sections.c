@@ -1149,9 +1149,6 @@ void config_parse_ensemble_section(config_t *cfg, cJSON *root)
    cJSON *ensemble_cfg = cJSON_GetObjectItemCaseSensitive(root, "ensemble");
    if (cJSON_IsObject(ensemble_cfg))
    {
-      item = cJSON_GetObjectItemCaseSensitive(ensemble_cfg, "enabled");
-      if (cJSON_IsBool(item))
-         cfg->ensemble_enabled = cJSON_IsTrue(item) ? 1 : 0;
       item = cJSON_GetObjectItemCaseSensitive(ensemble_cfg, "aggregator");
       if (cJSON_IsString(item) && item->valuestring)
          snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",

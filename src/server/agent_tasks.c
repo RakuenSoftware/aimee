@@ -402,29 +402,33 @@ int agent_job_resume(agent_config_t *cfg, int job_id, agent_result_t *out)
 
    memset(out, 0, sizeof(*out));
 
+   /* job.prompt/result are heap-owned after a successful get; every exit below
+    * goes through `out:` so they are freed exactly once. On a miss the get
+    * zero-inits the struct, so the free is still safe. */
    db1_agent_job_t job;
+   int rc = -1;
    if (db1_agent_job_get(job_id, &job) != 0)
    {
       snprintf(out->error, sizeof(out->error), "job %d not found", job_id);
-      return -1;
+      goto out;
    }
 
    if (strcmp(job.status, "done") == 0)
    {
       snprintf(out->error, sizeof(out->error), "job %d already completed", job_id);
-      return -1;
+      goto out;
    }
    if (strcmp(job.status, "cancelled") == 0)
    {
       snprintf(out->error, sizeof(out->error), "job %d is cancelled", job_id);
-      return -1;
+      goto out;
    }
    if (strcmp(job.status, "running") == 0 && job.heartbeat_at[0])
    {
       if (!db1_agent_job_heartbeat_is_stale(job.heartbeat_at, 10))
       {
          snprintf(out->error, sizeof(out->error), "job %d is still active", job_id);
-         return -1;
+         goto out;
       }
    }
 
@@ -435,11 +439,11 @@ int agent_job_resume(agent_config_t *cfg, int job_id, agent_result_t *out)
    if (db1_agent_job_take_lease(job_id, pid) != 0)
    {
       snprintf(out->error, sizeof(out->error), "failed to take lease for job %d", job_id);
-      return -1;
+      goto out;
    }
    agent_set_durable_job(job_id);
 
-   int rc = agent_run(cfg, job.role, NULL, job.prompt, AGENT_DEFAULT_MAX_TOKENS, out);
+   rc = agent_run(cfg, job.role, NULL, job.prompt, AGENT_DEFAULT_MAX_TOKENS, out);
    agent_set_durable_job(0);
    int cursor_turn = out->turns > job.cursor_turn ? out->turns : job.cursor_turn;
    if (rc == 0 && liveness_reject_degenerate_response(
@@ -453,6 +457,8 @@ int agent_job_resume(agent_config_t *cfg, int job_id, agent_result_t *out)
    db1_agent_job_update(job_id, (rc == 0) ? "done" : "failed", cursor_turn,
                         out->response ? out->response : out->error);
 
+out:
+   db1_agent_job_free(&job);
    return rc;
 }
 

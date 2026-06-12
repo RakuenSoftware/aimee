@@ -19,20 +19,27 @@ extern "C"
 #define DB1_AJ_ROLE_LEN   32
 #define DB1_AJ_AGENT_LEN  64
 #define DB1_AJ_STATUS_LEN 32
-#define DB1_AJ_PROMPT_LEN 4096
-#define DB1_AJ_RESULT_LEN 4096
 #define DB1_AJ_TS_LEN     32
 
 #define DB1_AJ_TOOL_LEN 64
+
+   /* Ceiling on a stored result, enforced at the write chokepoint
+    * (db1_agent_job_update). prompt/result are otherwise unbounded heap; this
+    * truncates-with-marker so a single runaway delegate cannot store an
+    * arbitrarily large blob. Inbound prompt size is bounded separately by the
+    * request-body cap. */
+#define DB1_AJ_RESULT_STORE_MAX (1u << 20) /* 1 MiB */
 
    typedef struct
    {
       int id;
       char role[DB1_AJ_ROLE_LEN];
-      char prompt[DB1_AJ_PROMPT_LEN];
+      /* prompt/result are heap-owned, never NULL after a successful
+       * db1_agent_job_get/list_recent; free with db1_agent_job_free. */
+      char *prompt;
       char agent_name[DB1_AJ_AGENT_LEN];
       char status[DB1_AJ_STATUS_LEN];
-      char result[DB1_AJ_RESULT_LEN];
+      char *result;
       int cursor_turn;
       char lease_owner[32];
       char heartbeat_at[DB1_AJ_TS_LEN];
@@ -100,8 +107,15 @@ extern "C"
    int db1_agent_job_classify_stale(int job_id, int idle_threshold_secs, int in_tool_threshold_secs,
                                     char *out_state, size_t out_state_cap);
 
-   /* Load by id. Returns 0 on hit, -1 on miss. */
+   /* Load by id. Returns 0 on hit, -1 on miss. On hit, out->prompt and
+    * out->result are heap-allocated (never NULL) and must be released with
+    * db1_agent_job_free. On miss, out is zero-initialized (free is still safe). */
    int db1_agent_job_get(int job_id, db1_agent_job_t *out);
+
+   /* Release the heap-owned fields (prompt/result) of a job loaded by
+    * db1_agent_job_get / db1_agent_job_list_recent. Idempotent and NULL-safe:
+    * tolerates a zero-initialized struct (a failed get) and double calls. */
+   void db1_agent_job_free(db1_agent_job_t *job);
 
    /* Repair finished job rows created before routed agent metadata was
     * persisted. Matches blank agent_name rows to nearby agent_log rows with
@@ -116,8 +130,13 @@ extern "C"
     * Returns 0 on success, -1 on error. */
    int db1_agent_job_take_lease(int job_id, const char *owner);
 
-   /* List most recent `max` jobs (ORDER BY id DESC). Returns count. */
-   int db1_agent_job_list_recent(db1_agent_job_t *out, int max);
+   /* List most recent `max` jobs (ORDER BY id DESC). Returns count. Each
+    * returned row owns heap prompt/result; free every returned row with
+    * db1_agent_job_free. When include_heavy == 0, the (potentially large)
+    * prompt/result are returned as empty strings (not loaded) so list callers
+    * that do not serialize them avoid up to max × the result ceiling of
+    * allocation; pass 1 only when the bodies are actually needed. */
+   int db1_agent_job_list_recent(db1_agent_job_t *out, int max, int include_heavy);
 
    /* Ids of jobs currently in status='running', up to `max`. */
    int db1_agent_job_list_running_ids(int *out_ids, int max);

@@ -130,13 +130,36 @@ void db1_agent_job_update(int job_id, const char *status, int cursor_turn, const
 
    char cursor[32];
    snprintf(cursor, sizeof(cursor), "%d", cursor_turn);
+
+   /* Stored-result ceiling: prompt/result are now unbounded heap, so bound the
+    * stored result to keep a single runaway delegate from persisting an
+    * arbitrarily large blob (a poll/list memory-pressure surface). Over the
+    * ceiling we store a truncated copy with an explicit marker rather than
+    * silently dropping the tail. */
+   const char *result_text = result ? result : "";
+   char *capped = NULL;
+   size_t rlen = strlen(result_text);
+   if (rlen > DB1_AJ_RESULT_STORE_MAX)
+   {
+      static const char marker[] = "\n\n[truncated: result exceeded storage ceiling]";
+      size_t keep = DB1_AJ_RESULT_STORE_MAX - (sizeof(marker) - 1);
+      capped = malloc(keep + sizeof(marker));
+      if (capped)
+      {
+         memcpy(capped, result_text, keep);
+         memcpy(capped + keep, marker, sizeof(marker)); /* includes NUL */
+         result_text = capped;
+      }
+   }
+
    sqlite3_bind_text(stmt, 1, status, -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(stmt, 2, cursor, -1, SQLITE_TRANSIENT);
-   sqlite3_bind_text(stmt, 3, result ? result : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(stmt, 3, result_text, -1, SQLITE_TRANSIENT);
    sqlite3_bind_int(stmt, 4, job_id);
    sqlite3_bind_text(stmt, 5, status, -1, SQLITE_TRANSIENT);
    (void)sqlite3_step(stmt);
    sqlite3_finalize(stmt);
+   free(capped);
 }
 
 void db1_agent_job_set_agent(int job_id, const char *agent_name)
@@ -296,10 +319,10 @@ int db1_agent_job_get(int job_id, db1_agent_job_t *out)
    {
       out->id = sqlite3_column_int(stmt, 0);
       db1_copy_col_text(out->role, sizeof(out->role), stmt, 1);
-      db1_copy_col_text(out->prompt, sizeof(out->prompt), stmt, 2);
+      out->prompt = db1_dup_col_text(stmt, 2);
       db1_copy_col_text(out->agent_name, sizeof(out->agent_name), stmt, 3);
       db1_copy_col_text(out->status, sizeof(out->status), stmt, 4);
-      db1_copy_col_text(out->result, sizeof(out->result), stmt, 5);
+      out->result = db1_dup_col_text(stmt, 5);
       const unsigned char *cursor_txt = sqlite3_column_text(stmt, 6);
       out->cursor_turn = cursor_txt ? atoi((const char *)cursor_txt) : 0;
       db1_copy_col_text(out->lease_owner, sizeof(out->lease_owner), stmt, 7);
@@ -358,7 +381,17 @@ int db1_agent_job_take_lease(int job_id, const char *owner)
    return (rc == SQLITE_DONE && sqlite3_changes(db) > 0) ? 0 : -1;
 }
 
-int db1_agent_job_list_recent(db1_agent_job_t *out, int max)
+void db1_agent_job_free(db1_agent_job_t *job)
+{
+   if (!job)
+      return;
+   free(job->prompt);
+   free(job->result);
+   job->prompt = NULL;
+   job->result = NULL;
+}
+
+int db1_agent_job_list_recent(db1_agent_job_t *out, int max, int include_heavy)
 {
    if (!out || max <= 0)
       return 0;
@@ -384,10 +417,10 @@ int db1_agent_job_list_recent(db1_agent_job_t *out, int max)
       memset(o, 0, sizeof(*o));
       o->id = sqlite3_column_int(stmt, 0);
       db1_copy_col_text(o->role, sizeof(o->role), stmt, 1);
-      db1_copy_col_text(o->prompt, sizeof(o->prompt), stmt, 2);
+      o->prompt = include_heavy ? db1_dup_col_text(stmt, 2) : strdup("");
       db1_copy_col_text(o->agent_name, sizeof(o->agent_name), stmt, 3);
       db1_copy_col_text(o->status, sizeof(o->status), stmt, 4);
-      db1_copy_col_text(o->result, sizeof(o->result), stmt, 5);
+      o->result = include_heavy ? db1_dup_col_text(stmt, 5) : strdup("");
       const unsigned char *cursor_txt = sqlite3_column_text(stmt, 6);
       o->cursor_turn = cursor_txt ? atoi((const char *)cursor_txt) : 0;
       db1_copy_col_text(o->lease_owner, sizeof(o->lease_owner), stmt, 7);
