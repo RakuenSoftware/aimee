@@ -2,9 +2,6 @@
  * reconcile for the roundtable authoring pipeline gates. Included by
  * server_pipeline.c (kept as an .inc to stay under the per-file line cap). */
 
-/* Run the policy-aware merge for an approved gate, record full evidence into the
- * gate row, and advance on success. Shared by gate-pass and the *_merge_pending
- * crash-recovery reconcile (#56). Fills `resp`. */
 /* Revalidate the PR + worktree before honoring a gate verdict (proposal §5):
  * the PR still exists and is OPEN, its base is still the intended branch, its
  * head matches the approved SHA (drift #56), it is not conflicting, and the
@@ -114,6 +111,9 @@ static void advance_after_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int ga
    }
    const char *next = gate_no == 2 ? RTP_STATE_DONE : RTP_STATE_IMPLEMENTING;
    rtp_run_set_state(id, next, RTP_PHASE_IMPL);
+   /* the merge itself succeeded and is recorded — always report that truthfully. */
+   cJSON_AddBoolToObject(resp, "merged", 1);
+   cJSON_AddStringToObject(resp, "merge_sha", gate->merge_sha);
    if (gate_no == 1)
    {
       rtp_run_t r2;
@@ -124,16 +124,35 @@ static void advance_after_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int ga
             snprintf(r2.admission_class, sizeof(r2.admission_class), RTP_ADMIT_ACTIVE);
             rtp_run_update(&r2);
          }
-         /* the implementation phase gets its own dedicated branch/worktree (#2). */
-         if (prepare_impl_workspace(&r2) != 0)
+         /* the implementation phase gets its own dedicated branch/worktree off the
+          * merge commit (#2). If that fails we must NOT silently continue with the
+          * proposal branch: clear the proposal head/worktree so nothing reuses
+          * them, and escalate — the merge stands but the impl workspace needs
+          * operator attention. */
+         if (prepare_impl_workspace(&r2, gate->merge_sha) != 0)
+         {
+            r2.head_branch[0] = '\0';
+            r2.worktree_path[0] = '\0';
+            r2.head_sha[0] = '\0';
+            r2.base_sha[0] = '\0';
+            r2.impl_pr_number = 0;
+            r2.impl_pr_url[0] = '\0';
+            rtp_run_update(&r2);
+            *run = r2;
+            cJSON_AddStringToObject(resp, "action", "escalate");
+            cJSON_AddStringToObject(resp, "state", RTP_STATE_IMPLEMENTING);
+            cJSON_AddBoolToObject(resp, "impl_workspace_error", 1);
             cJSON_AddStringToObject(
-                resp, "impl_workspace_warning",
-                "could not create the dedicated implementation worktree; check repo_root");
+                resp, "note",
+                "gate-1 merge landed, but the dedicated implementation worktree could not be "
+                "created off the merge commit; the proposal branch was NOT reused — set up the "
+                "impl "
+                "workspace (repo_root/remote) and resume.");
+            return;
+         }
          *run = r2;
       }
    }
-   cJSON_AddBoolToObject(resp, "merged", 1);
-   cJSON_AddStringToObject(resp, "merge_sha", gate->merge_sha);
    cJSON_AddStringToObject(resp, "state", next);
 }
 

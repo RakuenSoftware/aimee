@@ -1025,25 +1025,51 @@ static int prepare_proposal_workspace(rtp_run_t *run)
 }
 
 /* After gate 1, the implementation phase gets its OWN dedicated branch/worktree
- * (proposal §1, #2): `roundtable/impl-<id>` branched from the (now-merged) base,
- * in a separate worktree, so the impl PR is never opened from the proposal
- * branch. Resets the head/worktree/PR fields. Returns 0/-1. */
-static int prepare_impl_workspace(rtp_run_t *run)
+ * (proposal §1, #2): `roundtable/impl-<id>` branched from the actual MERGE COMMIT
+ * the proposal landed on (so it contains the approved proposal), in a separate
+ * worktree. `gh pr merge` lands remotely and does not move the local base, so we
+ * fetch first and branch from merge_sha (or the freshly-fetched origin/<base>),
+ * never a stale local base (#1). Resets head/worktree/PR fields. Returns 0/-1. */
+static int prepare_impl_workspace(rtp_run_t *run, const char *merge_sha)
 {
    if (!run->repo_root[0])
       return -1;
+   const char *base = run->base_branch[0] ? run->base_branch : "testing";
+   const char *remote = run->remote[0] ? run->remote : "origin";
+
+   /* refresh the local view of the remote base so the merge commit is present. */
+   char *erepo = shell_escape(run->repo_root);
+   char *erem = shell_escape(remote);
+   char *ebase = shell_escape(base);
+   char fcmd[RTP_PATH_LEN + 160];
+   snprintf(fcmd, sizeof(fcmd), "git -C '%s' fetch '%s' '%s' 2>&1", erepo ? erepo : run->repo_root,
+            erem ? erem : remote, ebase ? ebase : base);
+   free(erepo);
+   free(erem);
+   free(ebase);
+   int frc = 0;
+   char *fo = mcp_git_run(fcmd, &frc);
+   free(fo);
+
    char branch[RTP_NAME_LEN];
    snprintf(branch, sizeof(branch), "roundtable/impl-%d", run->id);
    char wt[RTP_PATH_LEN];
    snprintf(wt, sizeof(wt), "%s/roundtable_pipeline/%d/wt-impl", aimee_home(), run->id);
-   const char *from = run->base_branch[0] ? run->base_branch : "testing";
-   if (create_worktree(run, branch, wt, from) != 0)
-   {
-      char originref[RTP_NAME_LEN + 8];
-      snprintf(originref, sizeof(originref), "origin/%s", from);
-      if (create_worktree(run, branch, wt, originref) != 0)
-         return -1;
-   }
+   char originref[RTP_NAME_LEN + 8];
+   snprintf(originref, sizeof(originref), "%s/%s", remote, base);
+
+   /* prefer the exact merge commit (contains the approved proposal); fall back to
+    * the freshly-fetched remote-tracking base, then the local base. */
+   int ok = -1;
+   if (merge_sha && merge_sha[0])
+      ok = create_worktree(run, branch, wt, merge_sha);
+   if (ok != 0)
+      ok = create_worktree(run, branch, wt, originref);
+   if (ok != 0)
+      ok = create_worktree(run, branch, wt, base);
+   if (ok != 0)
+      return -1;
+
    snprintf(run->head_branch, sizeof(run->head_branch), "%s", branch);
    snprintf(run->worktree_path, sizeof(run->worktree_path), "%s", wt);
    run->head_sha[0] = '\0';
