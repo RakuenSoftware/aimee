@@ -13,7 +13,7 @@
    "create_epistemic_directive {anchor_entity,anchor_file,cause,priority,question,topic,valid_until} req:question\n" \
    "create_note {content,tags,title} req:content,title\n" \
    "create_prospective_memory {action_text,anchor_entity,anchor_file,recurrence,trigger_text,valid_until} req:action_text,trigger_text\n" \
-   "delegate {background,branch,cwd,persona,prompt,role} req:persona,prompt,role\n" \
+   "delegate {branch,cwd,persona,prompt,role} req:persona,prompt,role\n" \
    "delegate_reply {content,delegation_id} req:content,delegation_id\n" \
    "delegate_status {job_id} req:job_id\n" \
    "diagnose_evidence {content,diagnosis_id,hypothesis_id,rank,source,stance} req:content,diagnosis_id,hypothesis_id,stance\n" \

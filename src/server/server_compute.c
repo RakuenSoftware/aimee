@@ -1724,64 +1724,59 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!cctx)
       return server_send_error(conn, "out of memory", NULL);
 
-   cJSON *jbackground = cJSON_GetObjectItemCaseSensitive(req, "background");
-   if (cJSON_IsTrue(jbackground))
+   /* Async-only (WP-B): every delegate is a durable, pollable job. There is no
+    * synchronous delegate path — the connection is closed at dispatch and the
+    * caller polls delegate.status. The legacy `background` request field is
+    * accepted-and-ignored for one release (older clients may still send it). */
+   cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
+   cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
+   const char *role =
+       delegate_role_canonicalize(cJSON_IsString(jrole) ? jrole->valuestring : "execute");
+   const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
+
+   /* Cheap, request-only pre-flight validation, surfaced inline as an error
+    * response before the job is created (the persona check lives in the MCP
+    * layer and the worker). */
+   if (!prompt[0])
    {
-      cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
-      cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
-      const char *role =
-          delegate_role_canonicalize(cJSON_IsString(jrole) ? jrole->valuestring : "execute");
-      const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
-
-      if (!prompt[0])
-      {
-         compute_ctx_free(cctx);
-         return server_send_error(conn, "missing prompt", NULL);
-      }
-      if (strlen(prompt) < 20)
-      {
-         char errmsg[64];
-         snprintf(errmsg, sizeof(errmsg), "prompt too short (%zu chars)", strlen(prompt));
-         compute_ctx_free(cctx);
-         return server_send_error(conn, errmsg, NULL);
-      }
-
-      char lease_owner[32];
-      snprintf(lease_owner, sizeof(lease_owner), "%d", (int)getpid());
-      int job_id = db1_agent_job_create(role, prompt, "", lease_owner);
-      if (job_id <= 0)
-      {
-         compute_ctx_free(cctx);
-         return server_send_error(conn, "failed to create delegate job", NULL);
-      }
-
-      cctx->background_job_id = job_id;
-#ifdef AIMEE_POSIX
-      if (cctx->conn_fd >= 0)
-         close(cctx->conn_fd);
-#endif
-      cctx->conn_fd = -1;
-
-      if (delegate_dispatch(ctx, cctx) != 0)
-      {
-         db1_agent_job_update(job_id, "failed", 0, "compute queue full");
-         compute_ctx_free(cctx);
-         return server_send_error(conn, "compute queue full", NULL);
-      }
-
-      cJSON *resp = jo_ok();
-      cJSON_AddNumberToObject(resp, "job_id", job_id);
-      cJSON_AddStringToObject(resp, "job_status", "pending");
-      return server_send_ok(conn, resp);
+      compute_ctx_free(cctx);
+      return server_send_error(conn, "missing prompt", NULL);
    }
+   if (strlen(prompt) < 20)
+   {
+      char errmsg[64];
+      snprintf(errmsg, sizeof(errmsg), "prompt too short (%zu chars)", strlen(prompt));
+      compute_ctx_free(cctx);
+      return server_send_error(conn, errmsg, NULL);
+   }
+
+   char lease_owner[32];
+   snprintf(lease_owner, sizeof(lease_owner), "%d", (int)getpid());
+   int job_id = db1_agent_job_create(role, prompt, "", lease_owner);
+   if (job_id <= 0)
+   {
+      compute_ctx_free(cctx);
+      return server_send_error(conn, "failed to create delegate job", NULL);
+   }
+
+   cctx->background_job_id = job_id;
+#ifdef AIMEE_POSIX
+   if (cctx->conn_fd >= 0)
+      close(cctx->conn_fd);
+#endif
+   cctx->conn_fd = -1;
 
    if (delegate_dispatch(ctx, cctx) != 0)
    {
+      db1_agent_job_update(job_id, "failed", 0, "compute queue full");
       compute_ctx_free(cctx);
       return server_send_error(conn, "compute queue full", NULL);
    }
 
-   return 0; /* Response will be sent by worker thread */
+   cJSON *resp = jo_ok();
+   cJSON_AddNumberToObject(resp, "job_id", job_id);
+   cJSON_AddStringToObject(resp, "job_status", "pending");
+   return server_send_ok(conn, resp);
 }
 
 /* Mixture-of-Agents ensemble aggregate. Reached over the first-class
