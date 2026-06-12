@@ -13,6 +13,7 @@
 #include "db_schema.h"
 #include "db1.h"
 #include "server.h"
+#include "vault_service.h" /* vault_status_t for the inject-api-key stub */
 #include <sqlite3.h>
 /* Private to src/db1/, but test_server_compute reads delegation_spawns and
  * delegation_messages directly to assert state written by the shims. */
@@ -166,6 +167,21 @@ char *role_template_build(const char *project_root, const char *role, const char
 
 void agent_http_init(void)
 {
+}
+
+/* WP-C.1: the delegate worker calls vault_service_inject_api_key, but these tests
+ * always run with an empty cctx->vault_principal so the vault branch is skipped;
+ * stub it to resolve the symbol (linking the real one would pull in the crypto +
+ * config chain). */
+vault_status_t vault_service_inject_api_key(const char *principal, const char *agent, char *api_key,
+                                            size_t api_key_len, long now_epoch)
+{
+   (void)principal;
+   (void)agent;
+   (void)api_key;
+   (void)api_key_len;
+   (void)now_epoch;
+   return VAULT_NO_ENTRY;
 }
 
 int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt, const char *prompt,

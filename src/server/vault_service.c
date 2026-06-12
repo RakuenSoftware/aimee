@@ -8,6 +8,7 @@
 #include "vault_store.h"
 #include "log.h"
 #include <openssl/crypto.h>
+#include <stdlib.h>
 #include <string.h>
 
 const char *vault_status_str(vault_status_t s)
@@ -149,4 +150,20 @@ vault_status_t vault_service_lock(const char *principal)
       return VAULT_ERR_UNATTESTED;
    vault_kek_cache_evict(principal);
    return VAULT_OK;
+}
+
+vault_status_t vault_service_inject_api_key(const char *principal, const char *agent, char *api_key,
+                                            size_t api_key_len, long now_epoch)
+{
+   if (!api_key || !api_key_len)
+      return VAULT_ERR_BADARG;
+   char *tmp = malloc(api_key_len);
+   if (!tmp)
+      return VAULT_ERR_IO;
+   vault_status_t st = vault_service_get(principal, agent, "api_key", tmp, api_key_len, now_epoch);
+   if (st == VAULT_OK)
+      snprintf(api_key, api_key_len, "%s", tmp); /* overwrite only on a real hit */
+   OPENSSL_cleanse(tmp, api_key_len);
+   free(tmp);
+   return st;
 }

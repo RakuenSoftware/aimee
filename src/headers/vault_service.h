@@ -66,4 +66,13 @@ vault_status_t vault_service_delete(const char *principal, const char *agent, co
 /* Lock the principal's vault: evict its cached KEK (the `vault lock` path). */
 vault_status_t vault_service_lock(const char *principal);
 
+/* Delegate use-path helper: if `principal` has a vaulted "api_key" credential for
+ * `agent`, decrypt it and overwrite `api_key` (capacity api_key_len). On any
+ * non-OK status `api_key` is left UNTOUCHED (so a config/env key survives a
+ * miss). Returns VAULT_OK (injected), VAULT_NO_ENTRY (use env), VAULT_ERR_LOCKED
+ * (caller must fail the delegate), or an error. The transient plaintext lives
+ * only inside this call and is OPENSSL_cleanse'd. */
+vault_status_t vault_service_inject_api_key(const char *principal, const char *agent, char *api_key,
+                                            size_t api_key_len, long now_epoch);
+
 #endif /* DEC_VAULT_SERVICE_H */

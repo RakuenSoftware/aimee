@@ -993,27 +993,19 @@ void delegate_worker(void *arg)
    delegate_apply_max_turns_policy(&acfg, role, max_turns);
    if (cctx->background_job_id > 0 && target_agent)
       db1_agent_job_set_agent(cctx->background_job_id, target_agent->name);
-   /* WP-C.1 vault-FIRST: a per-principal vaulted credential for this agent
-    * overrides the env-pool lease entirely (D14). The attested principal was
-    * captured on the live conn (WP-C.0) and copied into cctx; an un-attested
-    * delegate (blank principal) or an agent with no vault entry falls through to
-    * the env pool. A vaulted-but-LOCKED credential fails the delegate (never a
-    * silent downgrade to env, D15). The decrypted secret lands in the per-call
-    * acfg's api_key (same lifetime as the env path) and the transient buffer is
-    * cleansed immediately. */
+   /* WP-C.1 vault-FIRST (D14): a per-principal vaulted credential overrides the
+    * env-pool lease entirely; a blank principal or no vault entry falls through
+    * to env; a vaulted-but-LOCKED credential fails the delegate (no silent
+    * downgrade, D15). Decrypt happens inside the helper, into acfg's api_key. */
    int vault_hit = 0;
    if (target_agent && cctx->vault_principal[0])
    {
-      char vsecret[MAX_API_KEY_LEN];
-      vault_status_t vst = vault_service_get(cctx->vault_principal, target_agent->name, "api_key",
-                                             vsecret, sizeof(vsecret), time(NULL));
+      vault_status_t vst =
+          vault_service_inject_api_key(cctx->vault_principal, target_agent->name,
+                                       target_agent->api_key, MAX_API_KEY_LEN, time(NULL));
       if (vst == VAULT_OK)
-      {
-         snprintf(target_agent->api_key, MAX_API_KEY_LEN, "%s", vsecret);
          vault_hit = 1;
-      }
-      OPENSSL_cleanse(vsecret, sizeof(vsecret));
-      if (vst == VAULT_ERR_LOCKED)
+      else if (vst == VAULT_ERR_LOCKED)
       {
          delegation_compute_error(cctx, "vault locked: run `aimee vault unlock`");
          compute_ctx_free(cctx);

@@ -25,8 +25,8 @@
  * their own server_conn_t that never receives _apply — so a streaming request
  * carries an empty principal (ATTEST_NONE). This is fail-closed (no vault, never
  * a wrong vault) and has zero impact on WP-C.1: every vault-consuming path — the
- * /v1/vault/* routes and the delegate credential use-path — is dispatched through
- * the NON-streaming loopback bridge, and webchat vault ops (C.2) likewise ride
+ * POST /v1/vault routes and the delegate credential use-path — is dispatched
+ * through the NON-streaming loopback bridge, and webchat vault ops (C.2) ride
  * the token-bearing first-class routes, not the streaming OpenAI proxy. Wiring
  * identity onto the streaming conns is deferred to C.2 where it becomes
  * exercisable + testable. */
