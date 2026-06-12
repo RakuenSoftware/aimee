@@ -993,27 +993,22 @@ void delegate_worker(void *arg)
    delegate_apply_max_turns_policy(&acfg, role, max_turns);
    if (cctx->background_job_id > 0 && target_agent)
       db1_agent_job_set_agent(cctx->background_job_id, target_agent->name);
-   /* WP-C.1 vault-FIRST (D14): a per-principal vaulted credential overrides the
-    * env-pool lease entirely; a blank principal or no vault entry falls through
-    * to env; a vaulted-but-LOCKED credential fails the delegate (no silent
-    * downgrade, D15). Decrypt happens inside the helper, into acfg's api_key. */
+   /* WP-C.1 vault-FIRST (D14/D15): vaulted cred beats env lease; LOCKED fails; miss -> env. */
    int vault_hit = 0;
    if (target_agent && cctx->vault_principal[0])
    {
       vault_status_t vst =
           vault_service_inject_api_key(cctx->vault_principal, target_agent->name,
                                        target_agent->api_key, MAX_API_KEY_LEN, time(NULL));
-      if (vst == VAULT_OK)
-         vault_hit = 1;
-      else if (vst == VAULT_ERR_LOCKED)
+      vault_hit = (vst == VAULT_OK);
+      if (vst == VAULT_ERR_LOCKED)
       {
          delegation_compute_error(cctx, "vault locked: run `aimee vault unlock`");
          compute_ctx_free(cctx);
          return;
       }
    }
-   /* Lease one credential from a configured pool for this delegate run (skipped
-    * when the vault already supplied this agent's credential). */
+   /* Lease one credential from a configured pool (skipped on a vault hit). */
    if (!vault_hit && target_agent && target_agent->credential_count > 0)
    {
       char leased_env[MAX_CRED_ENV_VAR_LEN] = "";
@@ -1707,11 +1702,9 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
     * not be opened on the server's own fs. A NULL conn is an in-process caller. */
    cctx->conn_caps = conn ? conn->capabilities : CAPS_ALL;
 
-   /* WP-C.0: capture the attested vault identity while the conn is live (hop 3 of
-    * 3). The detached worker resolves credentials after conn_fd is closed and no
-    * thread-local survives, so the principal must be copied here — it is the only
-    * identity key the worker trusts for the vault (never the body session_id). A
-    * NULL conn (in-process caller) is un-attested => no vault. */
+   /* WP-C.0 (hop 3 of 3): copy the attested vault identity while the conn is live;
+    * the detached worker (conn_fd closed, no thread-local) trusts only this
+    * principal for the vault, never the body session_id. NULL conn => no vault. */
    if (conn)
    {
       cctx->attested_transport = conn->attested_transport;
