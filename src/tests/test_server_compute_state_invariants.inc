@@ -42,7 +42,30 @@ static cJSON *sci_drive_delegate(cJSON *req)
    if (n <= 0)
       return NULL;
    buf[n] = '\0';
-   return cJSON_Parse(buf);
+   /* (WP-B) async-only: handle_delegate returns the {job_id,"pending"} envelope;
+    * the worker persists the real status/result to the job row. Return a
+    * synthetic {status,message} object mapping the job back to the old vocabulary
+    * (done->ok, cancelled->cancelled, else->error) so the invariant cases (which
+    * mainly assert thread-local context restoration) still read a status. */
+   cJSON *env = cJSON_Parse(buf);
+   cJSON *jid = env ? cJSON_GetObjectItemCaseSensitive(env, "job_id") : NULL;
+   cJSON *out = cJSON_CreateObject();
+   if (cJSON_IsNumber(jid))
+   {
+      db1_agent_job_t job;
+      if (db1_agent_job_get(jid->valueint, &job) == 0)
+      {
+         const char *st = strcmp(job.status, "done") == 0          ? "ok"
+                          : strcmp(job.status, "cancelled") == 0   ? "cancelled"
+                                                                    : "error";
+         cJSON_AddStringToObject(out, "status", st);
+         if (job.result && job.result[0])
+            cJSON_AddStringToObject(out, "message", job.result);
+         db1_agent_job_free(&job);
+      }
+   }
+   cJSON_Delete(env);
+   return out;
 }
 
 /* Establish a sentinel "outer delegate" context; assert the worker restores it. */

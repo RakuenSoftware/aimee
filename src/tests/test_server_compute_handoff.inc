@@ -35,14 +35,15 @@ static void test_direct_delegate_handoff_json_response(void)
    assert(n > 0);
    buf[n] = '\0';
    close(fds[0]);
-   cJSON *resp = cJSON_Parse(buf);
-   assert(cJSON_IsObject(resp));
-   assert(strcmp(cJSON_GetObjectItem(resp, "status")->valuestring, "ok") == 0);
-   assert(cJSON_IsTrue(cJSON_GetObjectItem(resp, "handoff_valid")));
-   assert(strcmp(cJSON_GetObjectItem(resp, "handoff_status")->valuestring, "done") == 0);
+   /* (WP-B) async-only: status+result persist to the job row; the rich handoff_*
+    * sync-response metadata is no longer delivered. Handoff-contract injection +
+    * agent-call count prove the path ran; success via the persisted job status. */
    assert(strstr(g_last_agent_prompt, "delegate_result_v1") != NULL);
    assert(g_agent_calls == 1);
-   cJSON_Delete(resp);
+   db1_agent_job_t job;
+   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(strcmp(job.status, "done") == 0);
+   db1_agent_job_free(&job);
    cJSON_Delete(req);
    reset_last_response();
    free(conn);
@@ -84,15 +85,14 @@ static void test_direct_delegate_handoff_repair_attempt(void)
    assert(n > 0);
    buf[n] = '\0';
    close(fds[0]);
-   cJSON *resp = cJSON_Parse(buf);
-   assert(cJSON_IsObject(resp));
-   assert(strcmp(cJSON_GetObjectItem(resp, "status")->valuestring, "ok") == 0);
-   assert(cJSON_IsTrue(cJSON_GetObjectItem(resp, "handoff_valid")));
-   assert(cJSON_IsTrue(cJSON_GetObjectItem(resp, "handoff_repair_attempted")));
-   assert(strcmp(cJSON_GetObjectItem(resp, "handoff_status")->valuestring, "done") == 0);
+   /* (WP-B) async-only: handoff_* sync metadata gone; prompt + agent-call count
+    * prove the malformed-handoff repair path ran; success via job status. */
    assert(strstr(g_last_agent_prompt, "Repair it now") != NULL);
    assert(g_agent_calls == 2);
-   cJSON_Delete(resp);
+   db1_agent_job_t job;
+   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(strcmp(job.status, "done") == 0);
+   db1_agent_job_free(&job);
    cJSON_Delete(req);
    reset_last_response();
    free(conn);
@@ -128,15 +128,12 @@ static void test_direct_delegate_handoff_repair_failure_is_error(void)
    assert(n > 0);
    buf[n] = '\0';
    close(fds[0]);
-   cJSON *resp = cJSON_Parse(buf);
-   assert(cJSON_IsObject(resp));
-   assert(strcmp(cJSON_GetObjectItem(resp, "status")->valuestring, "error") == 0);
-   assert(!cJSON_IsTrue(cJSON_GetObjectItem(resp, "handoff_valid")));
-   assert(cJSON_IsTrue(cJSON_GetObjectItem(resp, "handoff_repair_attempted")));
-   assert(strstr(cJSON_GetObjectItem(resp, "message")->valuestring, "invalid delegate handoff") !=
-          NULL);
+   /* (WP-B) async-only: the invalid-handoff error is persisted to the job row. */
    assert(g_agent_calls == 2);
-   cJSON_Delete(resp);
+   db1_agent_job_t job;
+   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(strstr(job.result, "invalid delegate handoff") != NULL);
+   db1_agent_job_free(&job);
    cJSON_Delete(req);
    reset_last_response();
    free(conn);
@@ -169,12 +166,13 @@ static void test_direct_delegate_review_auto_tools_uses_tools(void)
    assert(n > 0);
    buf[n] = '\0';
    close(fds[0]);
-   cJSON *resp = cJSON_Parse(buf);
-   assert(cJSON_IsObject(resp));
-   assert(strcmp(cJSON_GetObjectItem(resp, "status")->valuestring, "ok") == 0);
+   /* (WP-B) async-only: read the persisted job, not the connection. */
+   db1_agent_job_t job;
+   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(strcmp(job.status, "done") == 0);
+   db1_agent_job_free(&job);
    assert(g_agent_run_calls == 0);
    assert(g_agent_tool_run_calls == 1);
-   cJSON_Delete(resp);
    cJSON_Delete(req);
    reset_last_response();
    free(conn);
@@ -207,12 +205,13 @@ static void test_direct_delegate_reviewer_alias_auto_tools_uses_tools(void)
    assert(n > 0);
    buf[n] = '\0';
    close(fds[0]);
-   cJSON *resp = cJSON_Parse(buf);
-   assert(cJSON_IsObject(resp));
-   assert(strcmp(cJSON_GetObjectItem(resp, "status")->valuestring, "ok") == 0);
+   /* (WP-B) async-only: read the persisted job, not the connection. */
+   db1_agent_job_t job;
+   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(strcmp(job.status, "done") == 0);
+   db1_agent_job_free(&job);
    assert(g_agent_run_calls == 0);
    assert(g_agent_tool_run_calls == 1);
-   cJSON_Delete(resp);
    cJSON_Delete(req);
    reset_last_response();
    free(conn);
@@ -249,16 +248,17 @@ static void test_direct_delegate_explicit_tools_forces_tools(void)
    assert(n > 0);
    buf[n] = '\0';
    close(fds[0]);
-   cJSON *resp = cJSON_Parse(buf);
-   assert(cJSON_IsObject(resp));
-   assert(strcmp(cJSON_GetObjectItem(resp, "status")->valuestring, "ok") == 0);
+   /* (WP-B) async-only: read the persisted job, not the connection. */
+   db1_agent_job_t job;
+   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(strcmp(job.status, "done") == 0);
+   db1_agent_job_free(&job);
    assert(g_agent_run_calls == 0);
    assert(g_agent_tool_run_calls == 1);
    assert(g_budget_release_calls == 1);
    assert(g_budget_last_grant == 1);
    assert(g_agent_seen_compute_override == 0);
    assert(g_agent_seen_budget_release_calls == 1);
-   cJSON_Delete(resp);
    cJSON_Delete(req);
    reset_last_response();
    free(conn);
@@ -325,12 +325,13 @@ static void test_readonly_code_delegate_disables_write_enforce(void)
    assert(n > 0);
    buf[n] = '\0';
    close(fds[0]);
-   cJSON *resp = cJSON_Parse(buf);
-   assert(cJSON_IsObject(resp));
-   assert(strcmp(cJSON_GetObjectItem(resp, "status")->valuestring, "ok") == 0);
+   /* (WP-B) async-only: read the persisted job, not the connection. */
+   db1_agent_job_t job;
+   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(strcmp(job.status, "done") == 0);
+   db1_agent_job_free(&job);
    assert(g_agent_tool_run_calls == 1);
    assert(g_last_write_enforce == 0);
-   cJSON_Delete(resp);
    cJSON_Delete(req);
    reset_last_response();
    free(conn);
@@ -364,12 +365,13 @@ static void test_readonly_refactor_delegate_disables_write_enforce(void)
    assert(n > 0);
    buf[n] = '\0';
    close(fds[0]);
-   cJSON *resp = cJSON_Parse(buf);
-   assert(cJSON_IsObject(resp));
-   assert(strcmp(cJSON_GetObjectItem(resp, "status")->valuestring, "ok") == 0);
+   /* (WP-B) async-only: read the persisted job, not the connection. */
+   db1_agent_job_t job;
+   assert(delegate_envelope_job(buf, &job) == 0);
+   assert(strcmp(job.status, "done") == 0);
+   db1_agent_job_free(&job);
    assert(g_agent_tool_run_calls == 1);
    assert(g_last_write_enforce == 0);
-   cJSON_Delete(resp);
    cJSON_Delete(req);
    reset_last_response();
    free(conn);
