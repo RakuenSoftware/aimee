@@ -7,7 +7,9 @@
 #endif
 #include "vault_store.h"
 #include "vault_crypto.h"
+#include "cJSON.h"
 #include <assert.h>
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -158,6 +160,170 @@ static void test_salt_is_stable(void)
    printf("  PASS: test_salt_is_stable\n");
 }
 
+/* Count files directly under <home>/.vault/, and assert none escaped it. The
+ * filename is base64url(principal), which has no '/', so an attacker-influenced
+ * principal can neither traverse out of .vault/ nor introduce a subdirectory. */
+static int count_vault_files(void)
+{
+   char dir[320];
+   snprintf(dir, sizeof(dir), "%s/.vault", g_home);
+   DIR *d = opendir(dir);
+   if (!d)
+      return 0;
+   int n = 0;
+   struct dirent *e;
+   while ((e = readdir(d)))
+   {
+      if (e->d_name[0] == '.')
+         continue;
+      /* No path separator may appear in a vault filename. */
+      assert(strchr(e->d_name, '/') == NULL);
+      n++;
+   }
+   closedir(d);
+   return n;
+}
+
+/* BLOCKER 2 (roundtable): the store's headline claim — an attacker-influenced
+ * principal name can neither traverse the path nor collide with another. */
+static void test_attacker_principal_filename_safety(void)
+{
+   uint8_t kek[VAULT_KEK_LEN];
+   make_kek(kek, 42);
+   int before = count_vault_files();
+
+   /* A traversal attempt round-trips AND lands strictly inside .vault/. */
+   const char *evil = "webuser:../../../etc/escape";
+   uint8_t salt[VAULT_SALT_LEN];
+   assert(vault_store_get_or_create_salt(evil, salt) == 0);
+   assert(vault_store_set(evil, kek, "claude", "api_key", "escape-secret") == 0);
+   char out[64];
+   assert(vault_store_get(evil, kek, "claude", "api_key", out, sizeof(out)) == 0);
+   assert(strcmp(out, "escape-secret") == 0);
+   /* Nothing leaked outside .vault/ (no traversal). */
+   char escaped[400];
+   snprintf(escaped, sizeof(escaped), "%s/../escape", g_home);
+   assert(access(escaped, F_OK) != 0);
+   snprintf(escaped, sizeof(escaped), "/etc/escape");
+   assert(access(escaped, F_OK) != 0);
+
+   /* Names a naive encoder might fold must resolve to DISTINCT files and never
+    * read each other's secret. */
+   assert(vault_store_get_or_create_salt("webuser:a/b", salt) == 0);
+   assert(vault_store_get_or_create_salt("webuser:a_b", salt) == 0);
+   assert(vault_store_set("webuser:a/b", kek, "claude", "api_key", "secret-AB-slash") == 0);
+   assert(vault_store_set("webuser:a_b", kek, "claude", "api_key", "secret-AB-under") == 0);
+   assert(vault_store_get("webuser:a/b", kek, "claude", "api_key", out, sizeof(out)) == 0);
+   assert(strcmp(out, "secret-AB-slash") == 0); /* not overwritten by a_b */
+   assert(vault_store_get("webuser:a_b", kek, "claude", "api_key", out, sizeof(out)) == 0);
+   assert(strcmp(out, "secret-AB-under") == 0);
+
+   /* Case must not fold either. */
+   assert(vault_store_get_or_create_salt("webuser:Alice", salt) == 0);
+   assert(vault_store_get_or_create_salt("webuser:alice", salt) == 0);
+   assert(vault_store_set("webuser:Alice", kek, "claude", "api_key", "upper") == 0);
+   assert(vault_store_set("webuser:alice", kek, "claude", "api_key", "lower") == 0);
+   assert(vault_store_get("webuser:Alice", kek, "claude", "api_key", out, sizeof(out)) == 0);
+   assert(strcmp(out, "upper") == 0);
+
+   /* 5 distinct principals touched here => 5 new flat files, all inside .vault/. */
+   assert(count_vault_files() == before + 5);
+   printf("  PASS: test_attacker_principal_filename_safety\n");
+}
+
+/* Locate the vault file for `principal` by matching the stored "principal"
+ * field; returns 1 + path on success. */
+static int find_vault_file(const char *principal, char *path, size_t cap)
+{
+   char dir[320];
+   snprintf(dir, sizeof(dir), "%s/.vault", g_home);
+   DIR *d = opendir(dir);
+   if (!d)
+      return 0;
+   struct dirent *e;
+   int found = 0;
+   while (!found && (e = readdir(d)))
+   {
+      if (e->d_name[0] == '.')
+         continue;
+      char p[640];
+      snprintf(p, sizeof(p), "%s/%s", dir, e->d_name);
+      FILE *f = fopen(p, "rb");
+      if (!f)
+         continue;
+      char buf[8192];
+      size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+      fclose(f);
+      buf[n] = '\0';
+      cJSON *root = cJSON_Parse(buf);
+      cJSON *jp = root ? cJSON_GetObjectItemCaseSensitive(root, "principal") : NULL;
+      if (cJSON_IsString(jp) && strcmp(jp->valuestring, principal) == 0)
+      {
+         snprintf(path, cap, "%s", p);
+         found = 1;
+      }
+      cJSON_Delete(root);
+   }
+   closedir(d);
+   return found;
+}
+
+/* BLOCKER 3 (roundtable): build_aad must bind agent+cred WITHIN a principal, so
+ * an intra-principal slot swap (two of the user's own agents) fails closed. */
+static void test_intra_principal_aad_swap(void)
+{
+   const char *p = "uid:9100";
+   uint8_t kek[VAULT_KEK_LEN];
+   make_kek(kek, 91);
+   uint8_t salt[VAULT_SALT_LEN];
+   assert(vault_store_get_or_create_salt(p, salt) == 0);
+   assert(vault_store_set(p, kek, "claude", "api_key", "CLAUDE-SECRET") == 0);
+   assert(vault_store_set(p, kek, "openai", "api_key", "OPENAI-SECRET") == 0);
+
+   /* Read the file, swap the four crypto fields between the two entries while
+    * keeping each entry's agent/cred labels, write back. */
+   char path[640];
+   assert(find_vault_file(p, path, sizeof(path)));
+   FILE *f = fopen(path, "rb");
+   assert(f);
+   char buf[16384];
+   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+   fclose(f);
+   buf[n] = '\0';
+   cJSON *root = cJSON_Parse(buf);
+   assert(root);
+   cJSON *creds = cJSON_GetObjectItemCaseSensitive(root, "creds");
+   assert(cJSON_IsArray(creds) && cJSON_GetArraySize(creds) == 2);
+   cJSON *e0 = cJSON_GetArrayItem(creds, 0);
+   cJSON *e1 = cJSON_GetArrayItem(creds, 1);
+   const char *fields[] = {"wrapped_dek", "nonce", "ciphertext", "tag"};
+   for (int i = 0; i < 4; i++)
+   {
+      cJSON *a = cJSON_GetObjectItemCaseSensitive(e0, fields[i]);
+      cJSON *b = cJSON_GetObjectItemCaseSensitive(e1, fields[i]);
+      char *av = strdup(a->valuestring), *bv = strdup(b->valuestring);
+      cJSON_SetValuestring(a, bv);
+      cJSON_SetValuestring(b, av);
+      free(av);
+      free(bv);
+   }
+   char *txt = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   f = fopen(path, "wb");
+   assert(f);
+   fwrite(txt, 1, strlen(txt), f);
+   fclose(f);
+   free(txt);
+
+   /* Both entries now carry the OTHER's ciphertext under their own (agent,cred)
+    * AAD -> the GCM tag fails to authenticate -> fail closed, never the swapped
+    * secret. */
+   char out[64];
+   assert(vault_store_get(p, kek, "claude", "api_key", out, sizeof(out)) == -1);
+   assert(vault_store_get(p, kek, "openai", "api_key", out, sizeof(out)) == -1);
+   printf("  PASS: test_intra_principal_aad_swap\n");
+}
+
 int main(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-vault-test-%d", (int)getpid());
@@ -173,6 +339,8 @@ int main(void)
    test_principal_isolation();
    test_replace_list_delete();
    test_salt_is_stable();
+   test_attacker_principal_filename_safety();
+   test_intra_principal_aad_swap();
 
    char rm[320];
    snprintf(rm, sizeof(rm), "rm -rf %s", g_home);

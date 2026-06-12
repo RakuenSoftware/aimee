@@ -10,11 +10,19 @@
 #include "cJSON.h"
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
 #include <fcntl.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+/* Serializes the load->mutate->write critical section so concurrent set/set or
+ * set/delete for the same principal cannot lose an update (the file is a single
+ * read-modify-write per op). One global lock is sufficient at the vault's low
+ * write rate; reads rely on the atomic rename for a consistent snapshot. */
+static pthread_mutex_t g_vault_write_mu = PTHREAD_MUTEX_INITIALIZER;
 
 #define VAULT_FILE_VERSION 1
 #define VAULT_SECRET_MAX   4096 /* max credential plaintext length */
@@ -174,7 +182,12 @@ static int write_vault_file(const char *principal, cJSON *root)
       return -1;
    if (platform_mkdir_p(dir, 0700) != 0)
       return -1;
-   if ((size_t)snprintf(tmp, sizeof(tmp), "%s.tmp.%d", path, (int)getpid()) >= sizeof(tmp))
+   /* Unique per writer: pid + a process-wide atomic counter, so two threads of
+    * the same process writing the same principal never share one tmp path (in
+    * addition to the g_vault_write_mu serialization). */
+   static atomic_uint s_tmp_seq = 0;
+   unsigned seq = atomic_fetch_add(&s_tmp_seq, 1);
+   if ((size_t)snprintf(tmp, sizeof(tmp), "%s.tmp.%d.%u", path, (int)getpid(), seq) >= sizeof(tmp))
       return -1;
 
    char *txt = cJSON_PrintUnformatted(root);
@@ -253,36 +266,44 @@ int vault_store_get_or_create_salt(const char *principal, uint8_t salt[VAULT_SAL
    if (!principal || !principal[0] || !salt)
       return -1;
 
+   /* Held across the load->(maybe create+write) so two concurrent unlocks of the
+    * same new principal cannot each create a file with a different salt (the
+    * second would orphan the first's cached KEK). */
+   pthread_mutex_lock(&g_vault_write_mu);
+   int rc = -1;
    cJSON *root = load_vault(principal);
    if (root)
    {
       cJSON *js = cJSON_GetObjectItemCaseSensitive(root, "salt");
-      int ok = cJSON_IsString(js) &&
-               b64url_decode(js->valuestring, salt, VAULT_SALT_LEN) == VAULT_SALT_LEN;
-      cJSON_Delete(root);
-      return ok ? 0 : -1;
+      rc = (cJSON_IsString(js) &&
+            b64url_decode(js->valuestring, salt, VAULT_SALT_LEN) == VAULT_SALT_LEN)
+               ? 0
+               : -1;
+      goto done;
    }
 
    /* No file yet: create one with a fresh random salt + empty creds list. */
    if (vault_crypto_random(salt, VAULT_SALT_LEN) != 0)
-      return -1;
+      goto done;
    root = cJSON_CreateObject();
    if (!root)
-      return -1;
-   char *salt_b64 = b64url_encode(salt, VAULT_SALT_LEN);
-   if (!salt_b64)
+      goto done;
    {
-      cJSON_Delete(root);
-      return -1;
+      char *salt_b64 = b64url_encode(salt, VAULT_SALT_LEN);
+      if (!salt_b64)
+         goto done;
+      cJSON_AddNumberToObject(root, "version", VAULT_FILE_VERSION);
+      cJSON_AddStringToObject(root, "principal", principal);
+      cJSON_AddStringToObject(root, "kdf_version", VAULT_KDF_VERSION);
+      cJSON_AddStringToObject(root, "salt", salt_b64);
+      cJSON_AddArrayToObject(root, "creds");
+      free(salt_b64);
+      rc = write_vault_file(principal, root);
    }
-   cJSON_AddNumberToObject(root, "version", VAULT_FILE_VERSION);
-   cJSON_AddStringToObject(root, "principal", principal);
-   cJSON_AddStringToObject(root, "kdf_version", VAULT_KDF_VERSION);
-   cJSON_AddStringToObject(root, "salt", salt_b64);
-   cJSON_AddArrayToObject(root, "creds");
-   free(salt_b64);
-   int rc = write_vault_file(principal, root);
+
+done:
    cJSON_Delete(root);
+   pthread_mutex_unlock(&g_vault_write_mu);
    if (rc != 0)
       OPENSSL_cleanse(salt, VAULT_SALT_LEN);
    return rc;
@@ -308,9 +329,13 @@ int vault_store_set(const char *principal, const uint8_t kek[VAULT_KEK_LEN], con
    if (pt_len > VAULT_SECRET_MAX)
       return -1;
 
+   pthread_mutex_lock(&g_vault_write_mu);
    cJSON *root = load_vault(principal);
    if (!root) /* must be unlocked/created first */
+   {
+      pthread_mutex_unlock(&g_vault_write_mu);
       return -1;
+   }
 
    int rc = -1;
    uint8_t dek[VAULT_DEK_LEN] = {0};
@@ -361,6 +386,7 @@ out:
       free(ct);
    }
    cJSON_Delete(root);
+   pthread_mutex_unlock(&g_vault_write_mu);
    return rc;
 }
 
@@ -490,9 +516,13 @@ int vault_store_delete(const char *principal, const char *agent, const char *cre
 {
    if (!principal || !agent || !cred)
       return -1;
+   pthread_mutex_lock(&g_vault_write_mu);
    cJSON *root = load_vault(principal);
    if (!root)
+   {
+      pthread_mutex_unlock(&g_vault_write_mu);
       return 0; /* nothing to delete */
+   }
    cJSON *creds = creds_array(root);
    int rc = 0;
    if (creds)
@@ -505,5 +535,6 @@ int vault_store_delete(const char *principal, const char *agent, const char *cre
       }
    }
    cJSON_Delete(root);
+   pthread_mutex_unlock(&g_vault_write_mu);
    return rc;
 }

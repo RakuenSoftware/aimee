@@ -773,6 +773,7 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
 	                                $(OBJDIR)/server/server_config.o $(OBJDIR)/config_fields.o \
 	                                $(OBJDIR)/server/skill_review.o $(OBJDIR)/tests/support/skill_jobs_stub.o \
 	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/vault_principal.o \
+	                                $(OBJDIR)/tests/support/vault_handlers_stub.o \
 	                                $(OBJDIR)/tests/support/toolset_stub.o \
 	                                $(OBJDIR)/cJSON.o $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
 	                                $(OBJDIR)/db1/model_catalog.o \
