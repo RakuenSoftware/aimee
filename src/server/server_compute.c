@@ -707,6 +707,20 @@ void delegate_worker(void *arg)
       }
       agent_set_durable_job(cctx->background_job_id);
    }
+   /* Cleanup-relevant state, hoisted + zero-initialised so the single
+    * delegate_fail: error path releases exactly what was acquired — each
+    * cleanup action is guarded by its own zero value, so an early exit that
+    * never set these is a no-op. (This also fixes pre-existing credential-lease
+    * leaks at the depth/spawn-limit exits, which returned without releasing.) */
+   char deleg_id[64] = "";
+   agent_t *target_agent = NULL;
+   char leased_cred_name[MAX_CRED_NAME_LEN] = "";
+   char credential_state_path[MAX_PATH_LEN] = "";
+   char *resolved_prompt = NULL;
+   char *template_sys_prompt = NULL;
+   char delegate_worktree_path[MAX_PATH_LEN] = "";
+   char delegate_git_root[MAX_PATH_LEN] = "";
+   char delegate_work_name[32] = "";
    cJSON *req = cctx->req;
    /* Per-turn credential context: credential-session id (RAM keyring; a
     * dedicated field decoupled from the chat session id) + any per-turn Codex
@@ -784,7 +798,6 @@ void delegate_worker(void *arg)
        force_tools = delegate_role_auto_tools_for_invocation(role, max_turns, explicit_tools);
    force_tools = force_tools || (toolset_override && toolset_override[0]);
    /* Generate delegation ID if not provided */
-   char deleg_id[64];
    if (cJSON_IsString(jid) && jid->valuestring[0])
       snprintf(deleg_id, sizeof(deleg_id), "%s", jid->valuestring);
    else
@@ -943,8 +956,7 @@ void delegate_worker(void *arg)
 
    config_t route_cfg;
    config_load(&route_cfg);
-   agent_t *target_agent =
-       agent_route_with_caps(&acfg, role, &route_cfg, required_caps, min_context);
+   target_agent = agent_route_with_caps(&acfg, role, &route_cfg, required_caps, min_context);
    if (!target_agent)
    {
       char caps_buf[128];
@@ -980,8 +992,6 @@ void delegate_worker(void *arg)
    if (cctx->background_job_id > 0 && target_agent)
       db1_agent_job_set_agent(cctx->background_job_id, target_agent->name);
    /* Lease one credential from a configured pool for this delegate run. */
-   char leased_cred_name[MAX_CRED_NAME_LEN] = "";
-   char credential_state_path[MAX_PATH_LEN] = "";
    if (target_agent && target_agent->credential_count > 0)
    {
       char leased_env[MAX_CRED_ENV_VAR_LEN] = "";
@@ -1035,8 +1045,7 @@ void delegate_worker(void *arg)
                "Reduce nesting or increase max_delegation_depth in config.",
                current_depth, max_depth);
       delegation_compute_error(cctx, errmsg);
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
 
    /* Determine effective parent ID: in-process thread-local takes priority;
@@ -1070,13 +1079,11 @@ void delegate_worker(void *arg)
                   "Reduce sub-delegation fan-out or increase max_delegation_spawns.",
                   total_spawns, max_spawns);
          delegation_compute_error(cctx, errmsg);
-         compute_ctx_free(cctx);
-         return;
+         goto delegate_fail;
       }
    }
 
    /* Resolve @path/to/file references in the delegate prompt */
-   char *resolved_prompt = NULL;
    if (strchr(prompt, '@'))
    {
       resolved_prompt = resolve_file_references(prompt, cwd[0] ? cwd : ".");
@@ -1087,13 +1094,9 @@ void delegate_worker(void *arg)
    int delegate_allows_writes = role_allows_writes && delegate_prompt_allows_writes(prompt);
    if (branch && !delegate_allows_writes)
    {
-      free(resolved_prompt);
-      if (target_agent && leased_cred_name[0])
-         delegate_credentials_release(target_agent->name, leased_cred_name);
       delegation_compute_error(cctx, "read-only delegates must use the parent worktree; branch "
                                      "requests require a sibling delegate worktree");
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
    /* Isolate a write delegate in its own sibling worktree only when it runs
     * concurrently — a background job, a parallel (coord) task, or an explicit
@@ -1106,10 +1109,8 @@ void delegate_worker(void *arg)
    if (cwd[0] && cwd[0] == '/' && !strstr(cwd, "/../") && !strstr(cwd, "/.."))
       run_cmd_set_cwd(cwd);
 
-   /* Read-only delegates use parent workspace; write-capable delegates use sibling worktrees. */
-   char delegate_worktree_path[MAX_PATH_LEN] = "";
-   char delegate_git_root[MAX_PATH_LEN] = "";
-   char delegate_work_name[32] = "";
+   /* Read-only delegates use parent workspace; write-capable delegates use sibling worktrees.
+    * (worktree path/git_root/work_name are hoisted for delegate_fail: cleanup.) */
    int delegate_worktree_attempted = 0;
    int delegate_shared_worktree = 0;
    {
@@ -1130,16 +1131,8 @@ void delegate_worker(void *arg)
                "refusing to run write-capable delegate in parent worktree '%s': "
                "could not create an isolated delegate worktree",
                cwd[0] ? cwd : delegate_git_root);
-      free(resolved_prompt);
-      if (target_agent && leased_cred_name[0])
-      {
-         delegate_credentials_release(target_agent->name, leased_cred_name);
-         leased_cred_name[0] = '\0';
-      }
-      run_cmd_set_cwd(NULL);
       delegation_compute_error(cctx, errmsg);
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
 
    /* Rewrite operator-cwd absolute paths so provider/tool writes stay isolated. */
@@ -1175,7 +1168,6 @@ void delegate_worker(void *arg)
    /* Assemble the system prompt: per-role template (or fallback), persona
     * identity/principles, and token-budget shedding. template_sys_prompt owns
     * the buffer (NULL when the static fallback literal is in use). */
-   char *template_sys_prompt = NULL;
    system_prompt =
        delegate_assemble_system_prompt(system_prompt, role, prompt, cwd, persona_override,
                                        delegate_worktree_path, &template_sys_prompt);
@@ -1292,23 +1284,12 @@ void delegate_worker(void *arg)
       if (drift_rc < 0)
       {
          aimee_log(LOG_WARN, "delegate", "named-file drift guard (pre-flight): %s", drift_err);
-         if (delegate_worktree_path[0] && delegate_git_root[0])
-            worktree_cleanup(delegate_git_root, deleg_id, delegate_work_name);
-         free(template_sys_prompt);
-         free(resolved_prompt);
-         if (target_agent && leased_cred_name[0])
-         {
-            delegate_credentials_release(target_agent->name, leased_cred_name);
-            leased_cred_name[0] = '\0';
-         }
-         run_cmd_set_cwd(NULL);
          cJSON *eresp = cJSON_CreateObject();
          cJSON_AddStringToObject(eresp, "delegation_id", deleg_id);
          cJSON_AddStringToObject(eresp, "status", "error");
          cJSON_AddStringToObject(eresp, "message", drift_err);
          compute_respond(cctx, eresp);
-         compute_ctx_free(cctx);
-         return;
+         goto delegate_fail;
       }
    }
 
@@ -1338,7 +1319,6 @@ void delegate_worker(void *arg)
                            : "delegation %s cancelled while queued for concurrency slot",
                 deleg_id, conc.model);
       delegate_run_ctx_restore(&run_ctx);
-      free(resolved_prompt);
       cJSON *cresp = cJSON_CreateObject();
       cJSON_AddStringToObject(cresp, "delegation_id", deleg_id);
       cJSON_AddStringToObject(cresp, "status", queue_full ? "error" : "cancelled");
@@ -1347,17 +1327,7 @@ void delegate_worker(void *arg)
                                   ? "delegate concurrency queue full"
                                   : "delegation cancelled while waiting for concurrency slot");
       compute_respond(cctx, cresp);
-      if (delegate_worktree_path[0] && delegate_git_root[0])
-         worktree_cleanup(delegate_git_root, deleg_id, delegate_work_name);
-      free(template_sys_prompt);
-      if (target_agent && leased_cred_name[0])
-      {
-         delegate_credentials_release(target_agent->name, leased_cred_name);
-         leased_cred_name[0] = '\0';
-      }
-      run_cmd_set_cwd(NULL);
-      compute_ctx_free(cctx);
-      return;
+      goto delegate_fail;
    }
    if (cctx->background_job_id > 0 && conc.model[0])
       db1_agent_job_heartbeat_ext(cctx->background_job_id, "", 0);
@@ -1642,6 +1612,22 @@ void delegate_worker(void *arg)
    /* Clear thread-local CWD */
    run_cmd_set_cwd(NULL);
 
+   compute_ctx_free(cctx);
+   return;
+
+   /* Single error-cleanup path for every pre-run error exit. Each action is
+    * guarded by its own zero-initialised state, so an exit that never reached a
+    * given acquisition is a no-op. Reached only by `goto delegate_fail` after
+    * the exit has already sent its own error response; the success path returns
+    * above and never falls through. */
+delegate_fail:
+   run_cmd_set_cwd(NULL);
+   free(resolved_prompt);
+   free(template_sys_prompt);
+   if (target_agent && leased_cred_name[0])
+      delegate_credentials_release(target_agent->name, leased_cred_name);
+   if (delegate_worktree_path[0] && delegate_git_root[0])
+      worktree_cleanup(delegate_git_root, deleg_id, delegate_work_name);
    compute_ctx_free(cctx);
 }
 
