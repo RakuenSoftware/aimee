@@ -1053,6 +1053,28 @@ static int prepare_proposal_workspace(rtp_run_t *run)
    return 0;
 }
 
+/* 1 iff `ref` provably contains `sha` (sha is an ancestor of ref), via
+ * `git merge-base --is-ancestor`. Used to refuse branching the impl worktree
+ * from a base that does not contain the merged proposal. */
+static int ref_contains_commit(const rtp_run_t *run, const char *ref, const char *sha)
+{
+   if (!ref || !ref[0] || !sha || !sha[0])
+      return 0;
+   char *erepo = shell_escape(run->repo_root);
+   char *eref = shell_escape(ref);
+   char *esha = shell_escape(sha);
+   char cmd[RTP_PATH_LEN + 160];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' merge-base --is-ancestor '%s' '%s' 2>/dev/null",
+            erepo ? erepo : run->repo_root, esha ? esha : sha, eref ? eref : ref);
+   free(erepo);
+   free(eref);
+   free(esha);
+   int rc = 0;
+   char *o = mcp_git_run(cmd, &rc);
+   free(o);
+   return rc == 0 ? 1 : 0; /* exit 0 = sha is an ancestor of (contained in) ref */
+}
+
 /* After gate 1, the implementation phase gets its OWN dedicated branch/worktree
  * (proposal §1, #2): `roundtable/impl-<id>` branched from the actual MERGE COMMIT
  * the proposal landed on (so it contains the approved proposal), in a separate
@@ -1091,17 +1113,33 @@ static int prepare_impl_workspace(rtp_run_t *run, const char *merge_sha)
    char originref[RTP_NAME_LEN + 8];
    snprintf(originref, sizeof(originref), "%s/%s", remote, base);
 
-   /* prefer the exact merge commit (contains the approved proposal); fall back to
-    * the freshly-fetched remote-tracking base, then the local base. */
    int ok = -1;
    if (merge_sha && merge_sha[0])
+   {
+      /* The impl branch MUST contain the accepted, merged proposal: branch from
+       * the exact merge commit. If that fails (e.g. the fetch failed so the
+       * commit isn't local), fall back ONLY to a base ref proven to CONTAIN the
+       * merge commit — never a possibly-stale base (#). Otherwise it's an
+       * impl-workspace failure. */
       ok = create_worktree(run, branch, wt, merge_sha);
-   if (ok != 0)
+      if (ok != 0 && ref_contains_commit(run, originref, merge_sha))
+         ok = create_worktree(run, branch, wt, originref);
+      if (ok != 0 && ref_contains_commit(run, base, merge_sha))
+         ok = create_worktree(run, branch, wt, base);
+      if (ok != 0)
+         return -1; /* cannot place impl on a base containing the merge -> fail */
+   }
+   else
+   {
+      /* no recorded merge SHA (best-effort): freshly-fetched remote base, then
+       * local base. (advance_after_merge no longer advances without a SHA, so
+       * this path is only reached in degraded/manual cases.) */
       ok = create_worktree(run, branch, wt, originref);
-   if (ok != 0)
-      ok = create_worktree(run, branch, wt, base);
-   if (ok != 0)
-      return -1;
+      if (ok != 0)
+         ok = create_worktree(run, branch, wt, base);
+      if (ok != 0)
+         return -1;
+   }
 
    snprintf(run->head_branch, sizeof(run->head_branch), "%s", branch);
    snprintf(run->worktree_path, sizeof(run->worktree_path), "%s", wt);
