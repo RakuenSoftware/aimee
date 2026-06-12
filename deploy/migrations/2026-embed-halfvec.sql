@@ -75,4 +75,47 @@ BEGIN
 END
 $MIG$;
 
+-- Also catch UNDIMENSIONED `vector` columns. A pre-fix schema.sql created
+-- code_embeddings.embedding as bare `vector` (no dimension) instead of
+-- halfvec(__EMBED_DIM__) like every other embedding column. format_type reports
+-- those as plain `vector`, so the `vector(%` loop above skips them, and the HNSW
+-- index (halfvec_cosine_ops) can never build on them. The bare column carries no
+-- dimension of its own, so we cast it at the dimension the rest of the corpus
+-- already uses — read from any sibling halfvec column converted above — keeping
+-- this script config-free. (If no halfvec column exists yet, there is no
+-- reference dimension and we leave the column for a fresh schema apply.)
+DO $BARE$
+DECLARE
+    r          RECORD;
+    target_dim text;
+BEGIN
+    SELECT (regexp_match(format_type(a.atttypid, a.atttypmod), '\((\d+)\)'))[1]
+      INTO target_dim
+      FROM pg_attribute a
+      JOIN pg_class c     ON c.oid = a.attrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT a.attisdropped
+       AND format_type(a.atttypid, a.atttypmod) LIKE 'halfvec(%'
+     LIMIT 1;
+
+    IF target_dim IS NULL THEN
+        RAISE NOTICE 'halfvec migration: undimensioned vector column(s) present but no sibling halfvec column to read a dimension from; leaving for a fresh schema apply';
+    ELSE
+        FOR r IN
+            SELECT c.relname AS tbl, a.attname AS col
+              FROM pg_attribute a
+              JOIN pg_class c     ON c.oid = a.attrelid
+              JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT a.attisdropped
+               AND format_type(a.atttypid, a.atttypmod) = 'vector'
+        LOOP
+            EXECUTE format('ALTER TABLE %I ALTER COLUMN %I TYPE halfvec(%s) USING %I::halfvec(%s)',
+                           r.tbl, r.col, target_dim, r.col, target_dim);
+            RAISE NOTICE 'halfvec migration: %.% vector -> halfvec(%) (undimensioned; dim from sibling halfvec column)',
+                         r.tbl, r.col, target_dim;
+        END LOOP;
+    END IF;
+END
+$BARE$;
+
 COMMIT;

@@ -570,12 +570,35 @@ int main(int argc, char **argv)
       }
    }
 
-   /* DB2 owns project, workspace, and global knowledge for aimee-kb. */
-   if (db2_init(kb_cfg.db2_url) != 0)
+   /* DB2 owns project, workspace, and global knowledge for aimee-kb.
+    *
+    * Wait out a not-yet-ready Postgres on a bounded backoff instead of exiting
+    * on the first failure. In a container/plugin deploy aimee-kb and its Postgres
+    * come up as sibling services; Postgres is routinely still starting (or, as
+    * seen on the smoothnas plugin runtime, started slightly later) when kb boots.
+    * A hard exit here turns that ordinary startup race into a hard outage: the
+    * process dies with DB2 reported "unavailable" and, absent an external
+    * supervisor that restarts it, the kb stays down until a manual restart. The
+    * retry is bounded, so a genuinely misconfigured/missing DB2 still surfaces as
+    * a startup failure — just after giving a slow Postgres time to arrive. */
    {
-      fprintf(stderr, "aimee-kb: DB2 init failed for %s\n", kb_cfg.db2_url);
-      agent_http_cleanup();
-      return 1;
+      const int db2_max_attempts = 24; /* ~2 min at 5s spacing */
+      const int db2_retry_secs = 5;
+      int attempt = 1;
+      while (db2_init(kb_cfg.db2_url) != 0)
+      {
+         if (attempt >= db2_max_attempts)
+         {
+            fprintf(stderr, "aimee-kb: DB2 init failed for %s after %d attempts (%ds)\n",
+                    kb_cfg.db2_url, attempt, attempt * db2_retry_secs);
+            agent_http_cleanup();
+            return 1;
+         }
+         fprintf(stderr, "aimee-kb: DB2 not ready (%s); retry %d/%d in %ds\n", kb_cfg.db2_url,
+                 attempt, db2_max_attempts, db2_retry_secs);
+         sleep(db2_retry_secs);
+         attempt++;
+      }
    }
 
    /* Diagnostic mode: run the fusion off-vs-on recall probe and exit without
