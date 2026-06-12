@@ -37,9 +37,14 @@ static int code_dir_skip(const char *name)
    return 0;
 }
 
-/* Walk root/rel recursively, appending {"rel_path","content"} entries to
- * files_arr. Stops at CODE_COLLECT_MAX_FILES. */
-static void code_collect_walk(const char *root, const char *rel, cJSON *files_arr, int *count)
+/* Walk root/rel recursively, invoking cb(rel_path, content, ctx) for each
+ * indexable file. There is deliberately no file-count cap: the tree shape is
+ * bounded by the directory skips and per-file size/extension/binary filters
+ * above, and callers that need to bound a single network request stream the
+ * files into byte-sized batches rather than relying on a fixed file count.
+ * Stops early (returning 1) if cb returns non-zero. */
+static int code_collect_walk(const char *root, const char *rel, code_collect_file_cb cb, void *ctx,
+                             int *count)
 {
    char path[4096];
    if (rel && rel[0])
@@ -49,10 +54,11 @@ static void code_collect_walk(const char *root, const char *rel, cJSON *files_ar
 
    DIR *dir = opendir(path);
    if (!dir)
-      return;
+      return 0;
 
+   int stop = 0;
    struct dirent *ent;
-   while (*count < CODE_COLLECT_MAX_FILES && (ent = readdir(dir)) != NULL)
+   while (!stop && (ent = readdir(dir)) != NULL)
    {
       if (ent->d_name[0] == '.' &&
           (ent->d_name[1] == '\0' || (ent->d_name[1] == '.' && ent->d_name[2] == '\0')))
@@ -74,7 +80,7 @@ static void code_collect_walk(const char *root, const char *rel, cJSON *files_ar
       if (S_ISDIR(st.st_mode))
       {
          if (!code_dir_skip(ent->d_name))
-            code_collect_walk(root, rel_child, files_arr, count);
+            stop = code_collect_walk(root, rel_child, cb, ctx, count);
       }
       else if (S_ISREG(st.st_mode))
       {
@@ -113,30 +119,56 @@ static void code_collect_walk(const char *root, const char *rel, cJSON *files_ar
             continue;
          }
 
-         cJSON *entry = cJSON_CreateObject();
-         if (entry)
-         {
-            cJSON_AddStringToObject(entry, "rel_path", rel_child);
-            cJSON_AddStringToObject(entry, "content", buf);
-            cJSON_AddItemToArray(files_arr, entry);
+         if (cb(rel_child, buf, ctx) != 0)
+            stop = 1;
+         else
             (*count)++;
-         }
          free(buf);
       }
    }
    closedir(dir);
+   return stop;
+}
+
+int code_collect_files_cb(const char *root, code_collect_file_cb cb, void *ctx)
+{
+   if (!root || !root[0] || !cb)
+      return 0;
+   int count = 0;
+   code_collect_walk(root, NULL, cb, ctx, &count);
+   return count;
+}
+
+/* Array-append callback: collect every file into a cJSON array (no cap). Used by
+ * the server-side local scan, which pushes the result in a single request. */
+static int code_collect_append_cb(const char *rel_path, const char *content, void *ctx)
+{
+   cJSON *files_arr = (cJSON *)ctx;
+   cJSON *entry = cJSON_CreateObject();
+   if (!entry)
+      return 0; /* skip this file, keep walking */
+   cJSON_AddStringToObject(entry, "rel_path", rel_path);
+   cJSON_AddStringToObject(entry, "content", content);
+   cJSON_AddItemToArray(files_arr, entry);
+   return 0;
 }
 
 int code_collect_files(const char *root, cJSON *files_arr)
 {
    if (!root || !root[0] || !files_arr)
       return 0;
-   int count = 0;
-   code_collect_walk(root, NULL, files_arr, &count);
-   return count;
+   return code_collect_files_cb(root, code_collect_append_cb, files_arr);
 }
 
 #else /* !AIMEE_POSIX */
+
+int code_collect_files_cb(const char *root, code_collect_file_cb cb, void *ctx)
+{
+   (void)root;
+   (void)cb;
+   (void)ctx;
+   return 0;
+}
 
 int code_collect_files(const char *root, cJSON *files_arr)
 {
