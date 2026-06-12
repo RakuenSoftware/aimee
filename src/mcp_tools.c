@@ -650,6 +650,8 @@ cJSON *mcp_build_tools_list(void)
                           "\"required\":[\"diff\"]}")));
    }
 
+#include "mcp_tools_pipeline.inc"
+
    /* preview_blast_radius */
    {
       cJSON *s = cJSON_CreateObject();

@@ -27,6 +27,7 @@
 #include "server_mcp_workflows.h"
 #include "server_mcp_gateway.h"
 #include "server_http.h"
+#include "server_pipeline.h" /* handle_pipeline_* for the pipeline.* MCP tools */
 #include "headers/conversation_context.h"
 #include "headers/payload_rewrite.h"
 #include "headers/session_search_tool.h"
@@ -1583,6 +1584,45 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       if (owns_jargs)
          cJSON_Delete(jargs);
       return rc;
+   }
+
+   /* Roundtable authoring pipeline tools (first-class MCP citizens): route each
+    * pipeline_* tool to its handler, which sends its own response on conn (like
+    * ensemble_review/delegate). Capability is enforced against the matching
+    * pipeline.* method (status/list = read; others = delegate; gate also needs an
+    * operator principal inside the handler). MCP arg names mirror the method's. */
+   if (strncmp(tool, "pipeline_", 9) == 0)
+   {
+      static const struct
+      {
+         const char *tool;
+         const char *method;
+         int (*fn)(server_ctx_t *, server_conn_t *, cJSON *);
+      } pipeline_tools[] = {
+          {"pipeline_start", "pipeline.start", handle_pipeline_start},
+          {"pipeline_status", "pipeline.status", handle_pipeline_status},
+          {"pipeline_list", "pipeline.list", handle_pipeline_list},
+          {"pipeline_cancel", "pipeline.cancel", handle_pipeline_cancel},
+          {"pipeline_resume", "pipeline.resume", handle_pipeline_resume},
+          {"pipeline_advance", "pipeline.advance", handle_pipeline_advance},
+          {"pipeline_gate", "pipeline.gate", handle_pipeline_gate},
+      };
+      for (size_t i = 0; i < sizeof(pipeline_tools) / sizeof(pipeline_tools[0]); i++)
+      {
+         if (strcmp(tool, pipeline_tools[i].tool) != 0)
+            continue;
+         uint32_t required = server_capability_for_method(pipeline_tools[i].method);
+         if (required && conn && (conn->capabilities & required) == 0)
+         {
+            if (owns_jargs)
+               cJSON_Delete(jargs);
+            return server_send_error(conn, "forbidden: insufficient capabilities", NULL);
+         }
+         int rc = pipeline_tools[i].fn(ctx, conn, jargs);
+         if (owns_jargs)
+            cJSON_Delete(jargs);
+         return rc;
+      }
    }
 
    struct mcp_call call = {ctx, conn, jargs, sid, tool, &structured};

@@ -2,7 +2,7 @@
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 88
+#define MCP_TOOLS_GOLDEN_COUNT 95
 #define MCP_TOOLS_GOLDEN \
    "ask_user {choices,question} req:question\n" \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n" \
@@ -70,6 +70,13 @@
    "memory_recall {limit_tokens,session_start,task_hint} req:\n" \
    "mutate {confidence,content,id,key,kind,reason,tier,verb} req:verb\n" \
    "payload_rewrite_status {} req:\n" \
+   "pipeline_advance {artifact,pipeline_id} req:pipeline_id\n" \
+   "pipeline_cancel {pipeline_id} req:pipeline_id\n" \
+   "pipeline_gate {admin,operator_principal,pipeline_id,reason,verdict} req:operator_principal,pipeline_id,verdict\n" \
+   "pipeline_list {state} req:\n" \
+   "pipeline_resume {head_branch,pipeline_id,remote,repo_root,worktree_path} req:pipeline_id\n" \
+   "pipeline_start {base_branch,brief,done_bar,head_branch,idea,questions,remote,repo_root} req:idea,repo_root\n" \
+   "pipeline_status {pipeline_id} req:pipeline_id\n" \
    "preview_blast_radius {paths,project} req:paths,project\n" \
    "record_attempt {approach,lesson,outcome,task_context} req:approach,outcome\n" \
    "resolve_epistemic_directive {id,note,resolution_memory_id,suppress} req:id\n" \
