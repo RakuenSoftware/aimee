@@ -772,6 +772,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_session_pools.c
     ${AIMEE_SRC_DIR}/server/presence.c
     ${AIMEE_SRC_DIR}/server/vault_principal.c
+    ${AIMEE_SRC_DIR}/server/vault_crypto.c
     ${AIMEE_SRC_DIR}/server/server_state.c
     ${AIMEE_SRC_DIR}/server/server_plugin.c
     ${AIMEE_SRC_DIR}/server/server_work.c
