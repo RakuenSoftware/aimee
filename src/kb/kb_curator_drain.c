@@ -21,6 +21,8 @@
 #include "kb_curator_promote.h"
 #include "kb_evidence_embed.h"
 #include "kb_learning_synth.h"
+#include "kb_service_code_embed.h"
+#include "index.h"
 #include "aimee.h"
 #include "config.h"
 #include "kb_background.h"
@@ -96,6 +98,32 @@ static void *drain_thread_main(void *arg)
          int n = kb_evidence_embed_drain(cfg.kb_evidence_embed_batch, embed_cmd);
          if (n > 0)
             aimee_log(LOG_DEBUG, "kb.evidence.embed", "drained %d evidence op(s)", n);
+      }
+
+      /* Code-vector embed drain — pipeline stage 2 (the 0.6B embedder), runs
+       * every poll. Indexing (the structural scan) populates the `files` table
+       * for everything ingested — code AND docs/config; this embeds those rows
+       * into code_embeddings via the configured embedder, incrementally: the
+       * "changed_files" scope skips any file whose content_hash already matches,
+       * so a poll with nothing new is cheap, and a fresh 23k-file ingest catches
+       * up over a handful of polls (max_points caps each project per poll). It is
+       * gated only on an embedder being configured — no external LLM, no curator
+       * gate — so embeddings appear automatically right after ingest. */
+      if (cfg.embedding_command[0])
+      {
+         project_info_t projects[128];
+         int np = index_list_projects(projects, 128);
+         int total = 0;
+         for (int i = 0; i < np; i++)
+         {
+            kb_code_embed_result_t r;
+            memset(&r, 0, sizeof(r));
+            if (kb_code_embed_refresh(projects[i].name, "changed_files", NULL, 0, 0, 0, 0, &r) == 0)
+               total += (int)r.embedded;
+         }
+         if (total > 0)
+            aimee_log(LOG_DEBUG, "kb.code.embed",
+                      "embedded %d code/doc vector(s) across %d project(s)", total, np);
       }
 
       /* Candidate-generation synthesis drain — the heavy LLM pass, on the

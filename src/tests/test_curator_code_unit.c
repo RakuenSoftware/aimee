@@ -14,7 +14,29 @@
 
 #include "db2_test_shim.h"
 #include "cJSON.h"
+#include "config.h"
 #include "kb/kb_curator_grounding.h"
+
+/* The deep-curator code-extract gate is now ON by compiled default, but the
+ * gate-off tests below need it OFF. Point AIMEE_HOME at an isolated temp config
+ * with the extract gates disabled so the real config_load() the queue functions
+ * call reports the gate off deterministically (and the run never touches the
+ * developer's real ~/.config/aimee). */
+static void test_force_curator_gate_off(void)
+{
+   static char dir[] = "/tmp/aimee-curtest-XXXXXX";
+   static int done = 0;
+   if (done)
+      return;
+   done = 1;
+   if (mkdtemp(dir))
+      setenv("AIMEE_HOME", dir, 1);
+   config_t cfg;
+   config_load(&cfg);
+   cfg.kb_curator_extract_code_enabled = 0;
+   cfg.kb_curator_extract_docs_enabled = 0;
+   config_save(&cfg);
+}
 
 /* Forward declarations (headers live in src/, not src/headers/). */
 typedef struct
@@ -282,6 +304,7 @@ int main(void)
 {
    printf("curator_code_unit:\n");
 
+   test_force_curator_gate_off();
    test_queue_code_unit_gate_off();
    test_queue_code_units_for_project_gate_off();
    test_queue_null_args();

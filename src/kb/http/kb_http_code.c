@@ -581,13 +581,14 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
       return 503;
    }
 
-   if (!pushed_files)
-   {
-      config_t cfg;
-      config_load(&cfg);
-      if (cfg.kb_curator_extract_code_enabled)
-         kb_curator_queue_code_units_for_project(project, root_path);
-   }
+   /* Queue code units for the deep curator on BOTH paths — a local scan and a
+    * thin-client push (which sends `files`). The queue reads code units from DB2
+    * by project name (it ignores root_path, so the server need not see the
+    * client's filesystem) and self-gates on kb_curator_extract_code_enabled.
+    * Previously this ran only for `!pushed_files`, so workspaces ingested from a
+    * thin client were never queued for curation. The 0.6B embed pass is driven
+    * separately by the curator drain. */
+   kb_curator_queue_code_units_for_project(project, root_path);
 
    snprintf(out_buf, (size_t)out_cap,
             "{\"status\":\"ok\",\"skipped\":false,\"project\":\"%s\",\"files\":%d,"
