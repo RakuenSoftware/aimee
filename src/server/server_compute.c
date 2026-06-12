@@ -1812,6 +1812,31 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
+/* Convene the ensemble panel from the enabled agents in the registry when no
+ * explicit ensemble.reference_models is configured. The ensemble / roundtable is
+ * core functionality and must work out of the box — it should not require a
+ * separate, operator-only config list on top of the agents the user has already
+ * set up. Caps at ENSEMBLE_MAX_REFS; defaults the aggregator to the first
+ * panellist when unset. */
+static void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acfg)
+{
+   if (cfg->ensemble_reference_count > 0)
+      return;
+   int n = 0;
+   for (int i = 0; i < acfg->agent_count && n < ENSEMBLE_MAX_REFS; i++)
+   {
+      if (!acfg->agents[i].enabled || !acfg->agents[i].name[0])
+         continue;
+      snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]), "%s",
+               acfg->agents[i].name);
+      n++;
+   }
+   cfg->ensemble_reference_count = n;
+   if (!cfg->ensemble_aggregator[0] && n > 0)
+      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
+               cfg->ensemble_reference_models[0]);
+}
+
 /* Mixture-of-Agents ensemble aggregate. Reached over the first-class
  * POST /v1/delegate/aggregate route (method "delegate.aggregate"), dispatched
  * async via rh_dispatch_op_async — so this runs on a detached op-run worker
@@ -1841,12 +1866,13 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
       return server_send_error(conn, "could not load agents.json", NULL);
+   ensemble_default_panel_from_agents(&cfg, &acfg);
 
    delegate_ensemble_result_t result;
    int rc = delegate_ensemble_run(&acfg, &cfg, prompt, &result);
    if (rc != 0)
-      return server_send_error(
-          conn, "ensemble run failed (check ensemble.enabled / ensemble.reference_models)", NULL);
+      return server_send_error(conn, "ensemble run failed (no enabled agents in agents.json?)",
+                               NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "response", result.response);
@@ -1923,14 +1949,15 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
       free(brief.rendered);
       return server_send_error(conn, "could not load agents.json", NULL);
    }
+   ensemble_default_panel_from_agents(&cfg, &acfg);
 
    roundtable_result_t result;
    int rc = delegate_roundtable_run(&acfg, &cfg, prompt, &opts, &result);
    if (rc != 0)
    {
       free(brief.rendered);
-      return server_send_error(
-          conn, "roundtable run failed (check ensemble.enabled / ensemble.reference_models)", NULL);
+      return server_send_error(conn, "roundtable run failed (no enabled agents in agents.json?)",
+                               NULL);
    }
 
    cJSON *resp = jo_ok();

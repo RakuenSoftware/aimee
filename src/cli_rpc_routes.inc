@@ -1722,6 +1722,7 @@ static cJSON *marshal_delegate_roundtable(int argc, char **argv)
    rpc_opts_t opts;
    rpc_parse(argc, argv, bool_flags, &opts);
    cJSON *req = marshal_no_args("delegate.roundtable");
+   cli_session_creds_prime(req); /* client-held agent keys for the panel this turn */
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "prompt", opts.positional[0]);
    const char *mode = rpc_get(&opts, "mode");
@@ -7118,7 +7119,8 @@ static int ws_ingest_collect_cb(const char *rel_path, const char *content, void 
    ws_ingest_ctx_t *s = (ws_ingest_ctx_t *)ctx;
    size_t flen = strlen(content) + strlen(rel_path) + 64;
 
-   if (s->batch && cJSON_GetArraySize(s->batch) > 0 && s->batch_bytes + flen > CLI_INGEST_BATCH_BYTES)
+   if (s->batch && cJSON_GetArraySize(s->batch) > 0 &&
+       s->batch_bytes + flen > CLI_INGEST_BATCH_BYTES)
       ws_ingest_flush(s);
 
    if (!s->batch)
