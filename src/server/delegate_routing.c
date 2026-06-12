@@ -98,7 +98,16 @@ int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
       }
       if (min_context > 0)
       {
-         if (!have_cap || cap.context_window <= 0 || cap.context_window < min_context)
+         /* Effective context window: prefer the agent's explicit override
+          * (agents.json `middleware.context_window`, set via `aimee agent
+          * --ctx` or auto-detected by `ag_probe_slots`); fall back to the
+          * model capability catalog (models.dev override/cache, then the
+          * built-in heuristic). This keeps onboarding a new model a config or
+          * catalog change rather than a code edit to the registry table. */
+         int effective_ctx = ag->middleware.context_window > 0
+                                 ? ag->middleware.context_window
+                                 : (have_cap ? cap.context_window : 0);
+         if (effective_ctx <= 0 || effective_ctx < min_context)
          {
             ag->enabled = 0;
             continue;

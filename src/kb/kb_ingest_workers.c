@@ -27,8 +27,12 @@
 #include "db2/canonical_index.h"
 #include "db2/kb_runtime_state.h"
 #include "db2/kb_service_backend.h"
+#include "db2/kb_payload.h"
+#include "db2/db_postgres.h"
 #include "db2/lifecycle.h"
 #include "db2/pgvec_kb_service.h"
+#include "kb_doc_hash.h"
+#include "memory.h"
 
 #include <pthread.h>
 #include <stdint.h>
@@ -438,4 +442,154 @@ void kb_ingest_workers_stop(kb_service_ctx_t *ctx)
       pthread_join(ctx->bg_watch_thread, NULL);
       ctx->bg_watch_active = 0;
    }
+}
+
+/* ---- KB document ingestion (the in-ingest replacement for `kb build`) ---- */
+
+/* Chunk an in-memory document — used when the content lives in DB2 (pushed by a
+ * thin client) or comes from a non-file source (e.g. a PDF converted to text),
+ * rather than being read from local disk. Reuses kb.c's heading-aware chunker. */
+static int chunk_content(const char *content, size_t len, text_chunk_t *chunks, int max_chunks)
+{
+   if (!content)
+      return 0;
+   FILE *f = fmemopen((void *)content, len, "r");
+   if (!f)
+      return 0;
+   int n = chunk_stream(f, chunks, max_chunks);
+   fclose(f);
+   return n;
+}
+
+/* General document-ingest entry point. Chunk one document's text `content` into
+ * kb_documents and embed each chunk into the KB vector store under `project`,
+ * keyed by `source_path`. Source-agnostic by design: the workspace doc-refresh
+ * below feeds it from DB2 file_contents today, and future sources (e.g. a PDF
+ * converted to text) call this same function. Skips work when the content hash
+ * is unchanged. Returns chunks embedded, or -1 on error. */
+int kb_ingest_doc_content(const char *project, const char *source_path, const char *content,
+                          size_t len, const char *embedding_cmd)
+{
+   if (!project || !project[0] || !source_path || !source_path[0] || !content ||
+       !db2_is_initialized())
+      return -1;
+   const char *effective_cmd = kb_effective_embedding_cmd(embedding_cmd);
+
+   char hash[KB_DOC_HASH_HEX_LEN + 1];
+   kb_doc_content_hash(content, (int)len, hash);
+
+   char stored[KB_DOC_HASH_HEX_LEN + 1] = "";
+   if (db2_kb_documents_get_stored_hash(project, source_path, stored, sizeof(stored)) == 1 &&
+       strcmp(stored, hash) == 0)
+      return 0; /* unchanged — already ingested */
+
+   delete_file_chunks(project, source_path);
+
+   text_chunk_t *chunks = malloc(MAX_CHUNKS_PER_FILE * sizeof(text_chunk_t));
+   if (!chunks)
+      return -1;
+   int n_chunks = chunk_content(content, len, chunks, MAX_CHUNKS_PER_FILE);
+
+   int embedded = 0;
+   int64_t prev_doc_id = 0;
+   for (int ci = 0; ci < n_chunks; ci++)
+   {
+      int64_t doc_id = db2_kb_documents_insert_chunk(
+          project, source_path, hash, ci, chunks[ci].heading_path, chunks[ci].line_start,
+          chunks[ci].line_end, chunks[ci].content, chunks[ci].token_count);
+      if (doc_id < 0)
+         continue;
+      db2_kb_documents_link_neighbours(doc_id, prev_doc_id);
+      prev_doc_id = doc_id;
+      if (!effective_cmd[0])
+         continue;
+
+      char embed_text[4096];
+      kb_async_make_embed_text(chunks[ci].heading_path, chunks[ci].content, embed_text,
+                               sizeof(embed_text));
+      float vec[EMBED_MAX_DIM];
+      int dim = memory_embed_text(embed_text, effective_cmd, vec, EMBED_MAX_DIM);
+      if (dim > 0)
+      {
+         accept_generated_embedding(doc_id, vec, dim);
+         sync_vector_embedding(doc_id, vec, dim);
+         embedded++;
+      }
+   }
+   free(chunks);
+   db2_kb_file_index_upsert(project, source_path, hash, NULL);
+   return embedded;
+}
+
+/* Background driver (the in-ingest replacement for the old `kb build` command):
+ * ingest indexed prose/doc files for `project` that aren't in the KB-docs layer
+ * yet, reading content straight from DB2 file_contents (no disk — works for the
+ * thin-client push deploy). Bounded by `max_docs` per call so the curator drain
+ * makes steady progress without monopolising. Returns chunks embedded. */
+int kb_doc_refresh(const char *project, const char *embedding_cmd, int max_docs)
+{
+   if (!project || !project[0] || !db2_is_initialized())
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   if (max_docs <= 0)
+      max_docs = 200;
+
+   /* Prose/doc files only (code is served by the code-embedding layer). Pull
+    * only files with no chunks in kb_documents yet, bounded. */
+   static const char *sql =
+       "SELECT f.path, fc.content FROM files f"
+       " JOIN file_contents fc ON fc.file_id = f.id"
+       " JOIN projects p ON f.project_id = p.id"
+       " WHERE p.name = ?1"
+       "   AND (f.path LIKE '%.md' OR f.path LIKE '%.markdown' OR f.path LIKE '%.rst'"
+       "        OR f.path LIKE '%.txt' OR f.path LIKE '%.adoc' OR f.path LIKE '%.org')"
+       "   AND NOT EXISTS (SELECT 1 FROM kb_documents kd"
+       "                   WHERE kd.project = p.name AND kd.file_path = f.path)"
+       " LIMIT ?2";
+
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_int(st, "?2", max_docs);
+
+   /* Collect rows first: kb_ingest_doc_content issues its own statements, and
+    * the pg layer allows only one active statement on a connection. */
+   typedef struct
+   {
+      char path[1024];
+      char *content;
+   } doc_row_t;
+   doc_row_t *rows = calloc((size_t)max_docs, sizeof(doc_row_t));
+   int n = 0;
+   if (rows)
+   {
+      while (n < max_docs && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      {
+         const char *path = aimee_pg_column_text(st, 0);
+         const char *body = aimee_pg_column_text(st, 1);
+         if (!path || !body)
+            continue;
+         snprintf(rows[n].path, sizeof(rows[n].path), "%s", path);
+         rows[n].content = strdup(body);
+         if (rows[n].content)
+            n++;
+      }
+   }
+   aimee_pg_finalize(st);
+
+   int embedded = 0;
+   for (int i = 0; i < n; i++)
+   {
+      int e = kb_ingest_doc_content(project, rows[i].path, rows[i].content, strlen(rows[i].content),
+                                    embedding_cmd);
+      if (e > 0)
+         embedded += e;
+      free(rows[i].content);
+   }
+   free(rows);
+   return embedded;
 }
