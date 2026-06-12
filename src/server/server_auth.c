@@ -87,6 +87,14 @@ const method_policy_t method_registry[] = {
     {"delegate.aggregate", CAP_DELEGATE, "Mixture-of-Agents ensemble aggregate"},
     {"delegate.roundtable", CAP_DELEGATE, "multi-round agent roundtable"},
     {"delegate.status", CAP_DELEGATE, "delegate status"},
+    /* Credential vault (WP-C.1): UDS-only in practice — the service layer refuses
+     * any non-ATTEST_UDS_PEERCRED principal — but gated here as CAP_DELEGATE so a
+     * scoped/read-only TCP bearer cannot even reach the route. */
+    {"vault.unlock", CAP_DELEGATE, "unlock the credential vault"},
+    {"vault.set", CAP_DELEGATE, "store a vault credential"},
+    {"vault.list", CAP_DELEGATE, "list vault credential names"},
+    {"vault.delete", CAP_DELEGATE, "delete a vault credential"},
+    {"vault.lock", CAP_DELEGATE, "lock the credential vault"},
     {"jobs.list", CAP_DELEGATE, "list delegate jobs"},
     {"jobs.status", CAP_DELEGATE, "delegate job status"},
     {"jobs.logs", CAP_DELEGATE, "delegate job logs"},
