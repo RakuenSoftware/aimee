@@ -184,6 +184,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-slop-detect \
                $(TESTPREFIX)/unit-test-vault-principal \
                $(TESTPREFIX)/unit-test-vault-crypto \
+               $(TESTPREFIX)/unit-test-vault-kek-cache \
                $(TESTPREFIX)/unit-test-prompts \
                $(TESTPREFIX)/unit-test-cmd-session \
                $(TESTPREFIX)/unit-test-model-registry \
@@ -1775,6 +1776,10 @@ $(TESTPREFIX)/unit-test-vault-principal: $(OBJDIR)/tests/test_vault_principal.o 
 
 $(TESTPREFIX)/unit-test-vault-crypto: $(OBJDIR)/tests/test_vault_crypto.o \
                               $(OBJDIR)/server/vault_crypto.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-vault-kek-cache: $(OBJDIR)/tests/test_vault_kek_cache.o \
+                              $(OBJDIR)/server/vault_kek_cache.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
 
 $(TESTPREFIX)/unit-test-prompts: $(OBJDIR)/tests/test_prompts.o \
