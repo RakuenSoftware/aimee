@@ -1339,8 +1339,10 @@ int main(void)
       memset(&cfg, 0, sizeof(cfg));
       int rc2 = config_load(&cfg);
       assert(rc2 == 0);
-      assert(cfg.memory_rerank_enabled == 0);
-      assert(cfg.memory_rerank_command[0] == '\0');
+      /* Reranking (pipeline stage 3) is default-ON with the rerank-remote.py
+       * command; it degrades to plain hybrid ordering if the service is absent. */
+      assert(cfg.memory_rerank_enabled == 1);
+      assert(strcmp(cfg.memory_rerank_command, "python3 /opt/aimee/scripts/rerank-remote.py") == 0);
       assert(cfg.memory_rerank_top_k == 0);
       assert(cfg.memory_rerank_mix == 0.0);
       assert(cfg.memory_query_expansion_mode[0] == '\0');
