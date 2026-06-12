@@ -306,7 +306,6 @@ int main(void)
    assert(cfgA.aux_default_max_tokens != cfgB.aux_default_max_tokens);
    assert(cfgA.model_meta_refresh_minutes != cfgB.model_meta_refresh_minutes);
    assert(cfgA.model_meta_capability_routing == 1 && cfgB.model_meta_capability_routing == 0);
-   assert(cfgA.ensemble_enabled == 1 && cfgB.ensemble_enabled == 0);
    assert(cfgA.ensemble_min_successful != cfgB.ensemble_min_successful);
    assert(cfgA.ensemble_max_cost_usd != cfgB.ensemble_max_cost_usd);
 

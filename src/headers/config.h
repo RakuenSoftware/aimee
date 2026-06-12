@@ -1270,12 +1270,10 @@ typedef struct config
    char db2_vector_corpus_index[16];
    int64_t db2_vector_corpus_diskann_threshold;
    /* Mixture-of-Agents ensemble (ensemble.*).
-    * ensemble_enabled: 0 = disabled (default), 1 = available for explicit invocation.
     * ensemble_reference_models: diverse model/agent names for the fan-out.
     * ensemble_aggregator: agent name for the synthesis pass.
     * ensemble_min_successful: min references that must succeed before degrading (default 2).
     * ensemble_max_cost_usd: hard per-call cost cap in USD (default 1.0). */
-   int ensemble_enabled;
    char ensemble_reference_models[8][128];
    int ensemble_reference_count;
    char ensemble_aggregator[128];
@@ -1292,14 +1290,14 @@ typedef struct config
    /* Roundtable authoring pipeline (roundtable.pipeline_*). The outer
     * REVIEW<->revise loop, done-bar, and cost/pass backstops; see
     * docs/proposals/accepted/agent-roundtable-authoring-pipeline.md section 6. */
-   char roundtable_pipeline_done_bar[40];      /* zero_blocking | zero_blocking_suggestions
-                                                * | zero_blocking_questions_answered */
-   int roundtable_pipeline_max_passes;         /* 0 = unbounded (default) */
-   int roundtable_pipeline_max_attempts_per_pass; /* infra-retry ceiling, default 2 */
-   double roundtable_pipeline_max_cost_usd;    /* per-phase cap; 0 = unbounded */
-   double roundtable_pipeline_max_total_cost_usd; /* whole-pipeline cap; 0 = unbounded */
-   int roundtable_pipeline_gate_ttl_h;         /* awaiting-human gate TTL hours; 0 = none */
-   int roundtable_pipeline_parked_releases_slot; /* bool: parked gate frees the active slot */
+   char roundtable_pipeline_done_bar[40];          /* zero_blocking | zero_blocking_suggestions
+                                                    * | zero_blocking_questions_answered */
+   int roundtable_pipeline_max_passes;             /* 0 = unbounded (default) */
+   int roundtable_pipeline_max_attempts_per_pass;  /* infra-retry ceiling, default 2 */
+   double roundtable_pipeline_max_cost_usd;        /* per-phase cap; 0 = unbounded */
+   double roundtable_pipeline_max_total_cost_usd;  /* whole-pipeline cap; 0 = unbounded */
+   int roundtable_pipeline_gate_ttl_h;             /* awaiting-human gate TTL hours; 0 = none */
+   int roundtable_pipeline_parked_releases_slot;   /* bool: parked gate frees the active slot */
    int roundtable_pipeline_unknown_context_tokens; /* conservative chunk budget fallback */
 
    /* Context engine selection (context.engine).

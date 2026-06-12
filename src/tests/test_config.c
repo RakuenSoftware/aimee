@@ -212,7 +212,6 @@ int main(void)
       cfg.integrity_enabled = 1;
       cfg.integrity_dry_run = 0;
       /* ensemble.* (+ reference_models array) */
-      cfg.ensemble_enabled = 1;
       snprintf(cfg.ensemble_aggregator, sizeof(cfg.ensemble_aggregator), "synthesizer");
       cfg.ensemble_min_successful = 3;
       cfg.ensemble_reference_count = 2;
@@ -378,7 +377,7 @@ int main(void)
       assert(cfg2.dogfood_enabled == 0 && cfg2.dogfood_commit_raw == 1);
       assert(strcmp(cfg2.dogfood_log_dir, "/tmp/df-rt") == 0);
       assert(cfg2.integrity_enabled == 1 && cfg2.integrity_dry_run == 0);
-      assert(cfg2.ensemble_enabled == 1 && cfg2.ensemble_min_successful == 3);
+      assert(cfg2.ensemble_min_successful == 3);
       assert(strcmp(cfg2.ensemble_aggregator, "synthesizer") == 0);
       assert(cfg2.ensemble_reference_count == 2 &&
              strcmp(cfg2.ensemble_reference_models[1], "m-b") == 0);

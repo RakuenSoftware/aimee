@@ -1804,10 +1804,6 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
 
    config_t cfg;
    config_load(&cfg);
-   if (!cfg.ensemble_enabled)
-      return server_send_error(
-          conn, "Mixture-of-Agents ensemble disabled (set ensemble.enabled=true)", NULL);
-
    agent_config_t acfg;
    memset(&acfg, 0, sizeof(acfg));
    if (agent_load_config(&acfg) != 0)
@@ -1844,9 +1840,6 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
 
    config_t cfg;
    config_load(&cfg);
-   if (!cfg.ensemble_enabled)
-      return server_send_error(conn, "agent roundtable disabled (set ensemble.enabled=true)", NULL);
-
    roundtable_opts_t opts;
    memset(&opts, 0, sizeof(opts));
    opts.mode = ROUNDTABLE_DRAFT;
