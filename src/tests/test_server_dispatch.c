@@ -416,6 +416,37 @@ int handle_session_presence(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "session.presence");
 }
+/* The roundtable pipeline handlers are STUBBED here (this test only exercises
+ * dispatch-table routing) so the real server_pipeline.o — which drags in the
+ * op-run/git/agent-config/chunk graph — is not linked into the dispatch test. */
+int handle_pipeline_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "pipeline.start");
+}
+int handle_pipeline_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "pipeline.status");
+}
+int handle_pipeline_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "pipeline.list");
+}
+int handle_pipeline_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "pipeline.cancel");
+}
+int handle_pipeline_resume(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "pipeline.resume");
+}
+int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "pipeline.advance");
+}
+int handle_pipeline_gate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "pipeline.gate");
+}
 int handle_trajectory_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "trajectory.export");
