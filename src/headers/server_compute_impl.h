@@ -29,6 +29,13 @@ typedef struct
     * path the server must not open on its own filesystem (workspace-resource-
     * plane AC #6 — the worktree_cwd-trust hole). */
    uint32_t conn_caps;
+   /* WP-C.0: the attested vault principal + transport, copied from the conn
+    * while it is live (create_compute_ctx) so the detached worker — which runs
+    * after conn_fd is closed and no thread-local survives — can resolve the
+    * right per-user vault. Empty principal => un-attested => no vault. This is
+    * the ONLY identity key the worker trusts (never the body session_id). */
+   attested_transport_t attested_transport;
+   char vault_principal[VAULT_PRINCIPAL_MAX];
    cJSON *req; /* owned by this context */
    /* Unified-presence turn arbitration. When a chat request carries an
     * attach_id and a presence exists for the session, handle_chat_send_stream

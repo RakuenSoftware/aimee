@@ -27,6 +27,7 @@
 #include "roundtable_pipeline_capture.h" /* pipeline op-run capture seam (#18/#20) */
 #include "presence.h"
 #include "request_context.h"
+#include "server_http_identity.h" /* WP-C.0 attested-identity capture/threading */
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -934,6 +935,11 @@ static int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap
    memset(&fake, 0, sizeof(fake));
    fake.fd = sp[1];
    fake.capabilities = conn_caps;
+   /* WP-C.0 hop 2 of 3: the memset above zeroes the attested identity; restore
+    * the real one captured by handle_conn so every /v1 request — which only ever
+    * reaches server_dispatch through this synthesized conn — carries the caller's
+    * vault principal through to create_compute_ctx (same thread, identity live). */
+   server_http_identity_apply(&fake);
    pthread_mutex_init(&fake.mutex, NULL);
    pthread_cond_init(&fake.can_close, NULL);
 
@@ -1712,8 +1718,14 @@ static void handle_conn(int fd, int is_tcp)
     * CAPS_ALL, TCP => bearer-scoped) so loopback_rpc / server_dispatch re-check
     * per-method capability. Reset to the read-only default afterward. */
    g_rpc_conn_caps = server_http_conn_caps(is_tcp, g_bearer, g_remote_writes);
+   /* WP-C.0 hop 1 of 3: capture the attested vault identity (kernel UDS peer uid,
+    * or a server.token-gated webuser assertion) into thread-locals, live until
+    * loopback_rpc copies it into the synthesized conn. Cleared after the route so
+    * a reused worker thread cannot leak it into the next request. */
+   server_http_identity_capture(fd, is_tcp, buf, g_bearer);
    int status = server_http_route(method, path, body, body_len, resp, SHTTP_RESP_MAX);
    g_rpc_conn_caps = CAPS_READ_ONLY;
+   server_http_identity_clear();
    send_response(fd, status, resp, request_id);
    LOG_INFO("server.http", "%s %s -> %d req_id=%s", method, path, status, request_id);
    free(resp);

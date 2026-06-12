@@ -7,6 +7,7 @@
 #include "compute_pool.h"
 #include "platform_event.h"
 #include "provider_catalog.h"
+#include "vault_principal.h"
 
 /* Forward declaration */
 typedef struct cJSON cJSON;
@@ -147,6 +148,14 @@ typedef struct
    int refcount;              /* in-flight ephemeral jobs holding this conn */
    int closing;               /* set by conn_close once teardown is committed */
    char active_verify_session[SERVER_SESSION_ID_MAX]; /* sync git.verify cancellation key */
+   /* WP-C.0: attested identity for the credential vault, captured while the conn
+    * is live and propagated across the loopback_rpc fake-conn boundary. The
+    * vault principal ("uid:<n>" / "webuser:<name>" / "" when un-attested) is the
+    * single security key for the vault file + KEK cache — derived from the
+    * kernel-attested peer_uid or the server.token-gated webuser assertion, NEVER
+    * a client-supplied session_id. Empty principal => no vault (fail-closed). */
+   attested_transport_t attested_transport;
+   char vault_principal[VAULT_PRINCIPAL_MAX];
 } server_conn_t;
 
 typedef struct
