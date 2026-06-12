@@ -140,7 +140,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`db2`** — `vector`
 - **`dedup`** — `enabled`, `window_seconds`
 - **`dogfood`** — `commit_raw`, `enabled`, `inline_tagging`, `log_dir`
-- **`ensemble`** — `aggregator`, `enabled`, `max_cost_usd`, `min_successful`, `reference_models`
+- **`ensemble`** — `aggregator`, `max_cost_usd`, `min_successful`, `reference_models`
 - **`guardrails`** — `semantic`
 - **`identity`** — `working_profile_injection`
 - **`ingress`** — `audit_async`, `trusted_proxy_secret`, `usage_accounting_enabled`

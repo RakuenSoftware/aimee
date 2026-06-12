@@ -1037,9 +1037,6 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
 
    memset(out, 0, sizeof(*out));
 
-   if (!cfg->ensemble_enabled)
-      return -1;
-
    int ref_count = cfg->ensemble_reference_count;
    if (ref_count <= 0 || ref_count > ENSEMBLE_MAX_REFS)
       return -1;
@@ -1148,8 +1145,6 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       return -1;
    memset(out, 0, sizeof(*out));
 
-   if (!cfg->ensemble_enabled)
-      return -1;
    int ref_count = cfg->ensemble_reference_count;
    if (ref_count <= 0 || ref_count > ENSEMBLE_MAX_REFS)
       return -1;

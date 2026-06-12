@@ -60,13 +60,12 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
    }
 
    /* ensemble.* */
-   if (cfg->ensemble_enabled || cfg->ensemble_aggregator[0] || cfg->ensemble_min_successful != 2 ||
+   if (cfg->ensemble_aggregator[0] || cfg->ensemble_min_successful != 2 ||
        cfg->ensemble_max_cost_usd != 1.0 || cfg->ensemble_reference_count > 0)
    {
       cJSON *e = cJSON_AddObjectToObject(root, "ensemble");
       if (e)
       {
-         cJSON_AddBoolToObject(e, "enabled", cfg->ensemble_enabled ? 1 : 0);
          if (cfg->ensemble_aggregator[0])
             cJSON_AddStringToObject(e, "aggregator", cfg->ensemble_aggregator);
          cJSON_AddNumberToObject(e, "min_successful", cfg->ensemble_min_successful);
