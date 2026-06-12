@@ -275,7 +275,7 @@ void cmd_jobs(app_ctx_t *ctx, int argc, char **argv)
       if (db1_init(db1_cfg.db1_path) != 0)
          fatal("jobs list: could not initialize DB1");
       db1_agent_job_t jobs[20];
-      int n = db1_agent_job_list_recent(jobs, 20);
+      int n = db1_agent_job_list_recent(jobs, 20, 0); /* list view omits prompt/result */
       printf("%-6s %-12s %-10s %-6s %-12s %s\n", "ID", "Role", "Status", "Turn", "Agent",
              "Created");
       for (int i = 0; i < n; i++)
@@ -287,6 +287,7 @@ void cmd_jobs(app_ctx_t *ctx, int argc, char **argv)
             snprintf(turn, sizeof(turn), "--");
          printf("%-6d %-12s %-10s %-6s %-12s %s\n", jobs[i].id, jobs[i].role, jobs[i].status, turn,
                 jobs[i].agent_name, jobs[i].created_at);
+         db1_agent_job_free(&jobs[i]);
       }
    }
    else if ((strcmp(argv[0], "status") == 0 || strcmp(argv[0], "show") == 0) && argc >= 2)
@@ -312,6 +313,7 @@ void cmd_jobs(app_ctx_t *ctx, int argc, char **argv)
             printf("Heartbeat: %s\n", job.heartbeat_at);
          printf("Created:   %s\n", job.created_at);
          printf("Updated:   %s\n", job.updated_at);
+         db1_agent_job_free(&job);
       }
       else
       {

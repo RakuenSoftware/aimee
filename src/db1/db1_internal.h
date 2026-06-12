@@ -10,6 +10,8 @@
 #include <sqlite3.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -28,6 +30,17 @@ extern "C"
    {
       const unsigned char *v = sqlite3_column_text(stmt, col);
       snprintf(dst, cap, "%s", v ? (const char *)v : "");
+   }
+
+   /* Heap-allocating sibling of db1_copy_col_text for unbounded TEXT columns
+    * (e.g. agent_jobs.prompt/result). Returns a malloc'd copy of the column,
+    * or strdup("") for a NULL column — NEVER NULL on success, so `field[0]`
+    * guards on the result stay valid. Returns NULL only on allocation failure.
+    * Caller owns the returned pointer. */
+   static inline char *db1_dup_col_text(sqlite3_stmt *stmt, int col)
+   {
+      const unsigned char *v = sqlite3_column_text(stmt, col);
+      return strdup(v ? (const char *)v : "");
    }
 
 #ifdef __cplusplus
