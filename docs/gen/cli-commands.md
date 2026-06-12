@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 50
+Total commands: 51
 
 ## Core commands
 
@@ -171,6 +171,20 @@ Subcommands:
   list             List named toolsets
   show <name>      Show a toolset definition
   resolve <name>   Print the resolved tool list
+```
+
+### `aimee vault`
+
+Per-user encrypted agent credentials.
+
+Subcommands:
+
+```
+  unlock                       Unlock the vault (creates a local root key)
+  set <agent> <name> <secret>  Store an encrypted credential
+  list                         List stored credential names (no secrets)
+  delete <agent> <name>        Remove a credential
+  lock                         Lock the vault (evict the cached key)
 ```
 
 ### `aimee version`

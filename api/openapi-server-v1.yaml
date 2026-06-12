@@ -1139,6 +1139,31 @@ paths:
       summary: Status of a delegate job
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Delegate status, content: { application/json: { schema: { type: object } } } } }
+  /vault/unlock:
+    post:
+      summary: Unlock the per-user credential vault with the client root key (UDS-only)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Unlocked, content: { application/json: { schema: { type: object } } } } }
+  /vault/set:
+    post:
+      summary: Store an encrypted credential in the unlocked vault
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Stored, content: { application/json: { schema: { type: object } } } } }
+  /vault/list:
+    post:
+      summary: List vault credential names (no secrets)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Credential names, content: { application/json: { schema: { type: object } } } } }
+  /vault/delete:
+    post:
+      summary: Remove a credential from the vault
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Deleted, content: { application/json: { schema: { type: object } } } } }
+  /vault/lock:
+    post:
+      summary: Lock the vault (evict the cached key)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Locked, content: { application/json: { schema: { type: object } } } } }
   /delegate/reply:
     post:
       summary: Reply to a delegate
