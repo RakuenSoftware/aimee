@@ -76,83 +76,11 @@ static int kb_async_pending_from_resp(cJSON *resp)
    return (int)pending->valuedouble;
 }
 
-static void kb_cmd_build(app_ctx_t *ctx, int argc, char **argv)
-{
-   static const char *bool_flags[] = {"force", NULL};
-   opt_parsed_t opts;
-   opt_parse(argc, argv, bool_flags, &opts);
-
-   const char *path = opt_get(&opts, "path");
-   const char *project = opt_get(&opts, "project");
-   int force = opt_get_flag(&opts, "force");
-
-   /* Resolve path */
-   char root[MAX_PATH_LEN];
-   if (path && path[0])
-      snprintf(root, sizeof(root), "%s", path);
-   else if (!getcwd(root, sizeof(root)))
-      root[0] = '\0';
-
-   /* Load config for embedding command */
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
-
-   char proj[256];
-   kb_resolve_project(project, root, proj, sizeof(proj));
-
-   if (ctx->json_output)
-   {
-      /* JSON mode: suppress status messages */
-   }
-   else
-   {
-      printf("Building KB for project '%s' from %s...\n", proj, root);
-      printf("  embedding: %s\n", embed_cmd);
-   }
-
-   char *resp_json = kb_client_build_json(root, proj, embed_cmd, force);
-   cJSON *resp = resp_json ? cJSON_Parse(resp_json) : NULL;
-   free(resp_json);
-
-   cJSON *status = resp ? cJSON_GetObjectItemCaseSensitive(resp, "status") : NULL;
-   int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
-   if (!ok)
-   {
-      const char *msg = "kb build failed";
-      if (resp)
-      {
-         cJSON *m = cJSON_GetObjectItemCaseSensitive(resp, "message");
-         if (cJSON_IsString(m) && m->valuestring[0])
-            msg = m->valuestring;
-      }
-      if (!ctx->json_output)
-         fprintf(stderr, "KB build failed: %s\n", msg);
-      else
-         printf("{\"status\":\"error\",\"message\":\"%s\"}\n", msg);
-      cJSON_Delete(resp);
-      return;
-   }
-
-   kb_stats_t stats;
-   kb_extract_stats(resp, &stats);
-
-   if (ctx->json_output)
-   {
-      printf("{\"status\":\"ok\",\"project\":\"%s\","
-             "\"files_indexed\":%d,\"chunks_added\":%d,\"embeddings\":%d}\n",
-             proj, stats.files_indexed, stats.chunks_added, stats.embeddings_added);
-   }
-   else
-   {
-      printf("Done.\n");
-      print_stats(&stats);
-      int pending = kb_async_pending_from_resp(resp);
-      if (pending > 0)
-         printf("  async queue: %d pending job(s)\n", pending);
-   }
-   cJSON_Delete(resp);
-}
+/* `kb build` was removed: knowledge-base document ingestion is no longer a
+ * separate command. Prose/doc files are now chunked + embedded into the KB-docs
+ * layer automatically during workspace ingestion (the curator drain's
+ * kb_doc_refresh pass, reading content from DB2), which also works on the thin-
+ * client/remote deploy where the server cannot read the project from disk. */
 
 /* ------------------------------------------------------------------ */
 /* kb update                                                            */
@@ -984,7 +912,6 @@ static void kb_cmd_curator_profile(app_ctx_t *ctx, int argc, char **argv)
 }
 
 static const subcmd_t kb_subcmds[] = {
-    {"build", "Build KB from project docs (--path DIR, --project NAME, --force)", kb_cmd_build},
     {"repair", "Rebuild KB vector state from project docs (--path DIR, --project NAME)",
      kb_cmd_repair},
     {"update", "Incrementally update KB (only re-indexes changed files)", kb_cmd_update},

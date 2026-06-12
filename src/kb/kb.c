@@ -4,6 +4,7 @@
 #include "aimee.h"
 #if !defined(AIMEE_DB2_DISABLED)
 #include "db2/kb_payload.h"
+#include "db2/db_postgres.h"
 #include "db2/kb_service_backend.h"
 #include "db2/memory_query.h"
 #include "db2/vector_index_ops.h"
@@ -22,6 +23,7 @@
 #include "kb_fusion.h"
 #include "kb_neardup.h"
 #include "memory.h"
+#include "kb_doc_hash.h"
 #include "log.h"
 #include "dstr.h"
 #include "lifecycle.h"
@@ -282,7 +284,7 @@ static int should_index_file(const char *rel_path, char includes[][KB_GLOB_MAX],
 /* File walking                                                         */
 /* ------------------------------------------------------------------ */
 
-#define MAX_FILES 4096
+#define MAX_FILES        4096
 
 typedef struct
 {
@@ -361,19 +363,9 @@ static int collect_files(const char *root, const char *rel, char includes[][KB_G
 /* Markdown chunking                                                    */
 /* ------------------------------------------------------------------ */
 
-#define MAX_CHUNKS_PER_FILE 256
-#define MAX_HEADING_LEN     256
-#define CHUNK_BUF_SIZE      (KB_DEFAULT_CHUNK_SIZE * 8) /* ~4KB */
-#define KB_MINHASH_LIMIT    64
-
-typedef struct
-{
-   char heading_path[MAX_HEADING_LEN]; /* e.g. "## Section > ### Subsection" */
-   char content[CHUNK_BUF_SIZE];
-   int line_start;
-   int line_end;
-   int token_count;
-} text_chunk_t;
+/* MAX_CHUNKS_PER_FILE / MAX_HEADING_LEN / CHUNK_BUF_SIZE and text_chunk_t now
+ * live in kb.h (shared with kb_ingest_workers.c's document-ingest entry points). */
+#define KB_MINHASH_LIMIT 64
 
 /* Detect markdown heading level: returns 1-6 or 0 if not a heading. */
 static int heading_level(const char *line)
@@ -461,12 +453,11 @@ static int flush_chunk(text_chunk_t *chunks, int n_chunks, int max_chunks, const
 }
 
 /* Read a file and split it into chunks. Returns number of chunks produced. */
-static int chunk_file(const char *path, text_chunk_t *chunks, int max_chunks)
+/* Chunk a heading-structured text stream (markdown/prose) into `chunks`. The
+ * caller owns `f` (so the same logic serves both a file on disk and an
+ * in-memory document). */
+int chunk_stream(FILE *f, text_chunk_t *chunks, int max_chunks)
 {
-   FILE *f = fopen(path, "r");
-   if (!f)
-      return 0;
-
    char heading_stack[3][MAX_HEADING_LEN];
    memset(heading_stack, 0, sizeof(heading_stack));
    char heading_path[MAX_HEADING_LEN] = "";
@@ -545,7 +536,6 @@ static int chunk_file(const char *path, text_chunk_t *chunks, int max_chunks)
          }
       }
    }
-   fclose(f);
 
    /* Flush remaining buffer */
    if (buf_tokens > 0)
@@ -553,6 +543,16 @@ static int chunk_file(const char *path, text_chunk_t *chunks, int max_chunks)
                              chunk_line_start, line_num);
 
    return n_chunks < max_chunks ? n_chunks : max_chunks;
+}
+
+static int chunk_file(const char *path, text_chunk_t *chunks, int max_chunks)
+{
+   FILE *f = fopen(path, "r");
+   if (!f)
+      return 0;
+   int n = chunk_stream(f, chunks, max_chunks);
+   fclose(f);
+   return n;
 }
 
 /* ------------------------------------------------------------------ */
@@ -569,7 +569,7 @@ static int chunk_file(const char *path, text_chunk_t *chunks, int max_chunks)
 /* Forward an embedding to pgvector for runtime dense search. The
  * conn parameter is unused — kept gone from the signature to mirror the
  * kb_service_backend equivalent. */
-static int sync_vector_embedding(int64_t doc_id, const float *vec, int dim)
+int sync_vector_embedding(int64_t doc_id, const float *vec, int dim)
 {
    if (!vec || dim <= 0)
       return 0;
@@ -587,14 +587,14 @@ static int sync_vector_embedding(int64_t doc_id, const float *vec, int dim)
    return rc;
 }
 
-static const char *kb_effective_embedding_cmd(const char *embedding_cmd)
+const char *kb_effective_embedding_cmd(const char *embedding_cmd)
 {
    return (embedding_cmd && embedding_cmd[0]) ? embedding_cmd : "builtin";
 }
 
 /* pgvector owns vector bytes. This hook exists to keep the sync/async call
  * shape explicit while the actual pgvector upsert is batched below. */
-static int accept_generated_embedding(int64_t doc_id, const float *vec, int dim)
+int accept_generated_embedding(int64_t doc_id, const float *vec, int dim)
 {
    (void)doc_id;
    (void)vec;
@@ -607,7 +607,7 @@ static int accept_generated_embedding(int64_t doc_id, const float *vec, int dim)
  * Caps at 1024 ids per call; a single source file producing >1024
  * chunks is far past the chunker's MAX_CHUNKS_PER_FILE (256), so the
  * cap is comfortably above any realistic value. */
-static void delete_file_chunks(const char *project, const char *file_path)
+void delete_file_chunks(const char *project, const char *file_path)
 {
    /* Invalidate curator artifacts derived from this file before its chunks go
     * away; the post-ingest queue then re-extracts the (changed) source, and a
@@ -630,8 +630,8 @@ static void delete_file_chunks(const char *project, const char *file_path)
 /* Async embedding queue                                                */
 /* ------------------------------------------------------------------ */
 
-static void kb_async_make_embed_text(const char *heading_path, const char *content, char *out,
-                                     size_t out_len)
+void kb_async_make_embed_text(const char *heading_path, const char *content, char *out,
+                              size_t out_len)
 {
    if (heading_path && heading_path[0])
       snprintf(out, out_len, "%s\n%s", heading_path, content ? content : "");
