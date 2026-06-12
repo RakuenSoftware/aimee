@@ -457,6 +457,34 @@ int handle_pipeline_resume(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (is_terminal_state(run.state))
       return server_send_error(conn, "pipeline: terminal, cannot resume", NULL);
 
+   /* Repair/replace repo + workspace metadata on resume (#3): after an
+    * impl-workspace failure the head_branch/worktree are cleared, so the operator
+    * supplies corrected values here and the next advance rebuilds the workspace. */
+   int repaired = 0;
+   const char *v;
+   if ((v = jo_str(req, "repo_root", NULL)) && v[0])
+   {
+      snprintf(run.repo_root, sizeof(run.repo_root), "%s", v);
+      repaired = 1;
+   }
+   if ((v = jo_str(req, "remote", NULL)) && v[0])
+   {
+      snprintf(run.remote, sizeof(run.remote), "%s", v);
+      repaired = 1;
+   }
+   if ((v = jo_str(req, "head_branch", NULL)) && v[0])
+   {
+      snprintf(run.head_branch, sizeof(run.head_branch), "%s", v);
+      repaired = 1;
+   }
+   if ((v = jo_str(req, "worktree_path", NULL)) && v[0])
+   {
+      snprintf(run.worktree_path, sizeof(run.worktree_path), "%s", v);
+      repaired = 1;
+   }
+   if (repaired)
+      rtp_run_update(&run);
+
    /* a parked run can re-claim the active slot only if none is taken. */
    if (strcmp(run.admission_class, RTP_ADMIT_ACTIVE) != 0)
    {
@@ -468,6 +496,7 @@ int handle_pipeline_resume(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "pipeline_id", id);
    cJSON_AddStringToObject(resp, "state", run.state);
+   cJSON_AddBoolToObject(resp, "repaired", repaired ? 1 : 0);
    cJSON_AddStringToObject(resp, "next",
                            "call pipeline.advance to continue the loop or resolve the gate");
    return server_send_ok(conn, resp);
@@ -1037,12 +1066,16 @@ static int prepare_impl_workspace(rtp_run_t *run, const char *merge_sha)
    const char *base = run->base_branch[0] ? run->base_branch : "testing";
    const char *remote = run->remote[0] ? run->remote : "origin";
 
-   /* refresh the local view of the remote base so the merge commit is present. */
+   /* refresh the remote-tracking base ref so the merge commit is present locally.
+    * Use an explicit refspec — a plain `fetch <remote> <base>` only updates
+    * FETCH_HEAD, not refs/remotes/<remote>/<base>, so the fallback could branch
+    * from a stale origin/<base> (#2). */
    char *erepo = shell_escape(run->repo_root);
    char *erem = shell_escape(remote);
    char *ebase = shell_escape(base);
-   char fcmd[RTP_PATH_LEN + 160];
-   snprintf(fcmd, sizeof(fcmd), "git -C '%s' fetch '%s' '%s' 2>&1", erepo ? erepo : run->repo_root,
+   char fcmd[RTP_PATH_LEN + 256];
+   snprintf(fcmd, sizeof(fcmd), "git -C '%s' fetch '%s' '%s:refs/remotes/%s/%s' 2>&1",
+            erepo ? erepo : run->repo_root, erem ? erem : remote, ebase ? ebase : base,
             erem ? erem : remote, ebase ? ebase : base);
    free(erepo);
    free(erem);
@@ -1428,6 +1461,23 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
    if (strncmp(run.state, "gate", 4) == 0)
       return server_send_error(conn, "pipeline: at a gate; use pipeline.gate to resolve", NULL);
+
+   /* Recovery (#3): if we are implementing but the dedicated impl worktree is
+    * missing (a prior prepare_impl_workspace failure cleared it), rebuild it from
+    * gate-1's recorded merge commit — using any repo metadata just supplied via
+    * pipeline.resume — before doing anything else. */
+   if (strcmp(run.state, RTP_STATE_IMPLEMENTING) == 0 && !run.worktree_path[0])
+   {
+      rtp_gate_t g1;
+      const char *msha = (rtp_gate_get(id, 1, &g1) == 0) ? g1.merge_sha : "";
+      if (prepare_impl_workspace(&run, msha) != 0)
+         return server_send_error(
+             conn,
+             "pipeline: implementation worktree missing and could not be rebuilt; supply a "
+             "valid repo_root/remote via 'pipeline resume' and retry",
+             NULL);
+      rtp_run_get(id, &run);
+   }
 
    config_t cfg;
    if (config_load(&cfg) != 0)

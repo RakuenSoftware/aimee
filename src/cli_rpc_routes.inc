@@ -2971,6 +2971,16 @@ static cJSON *marshal_pipeline_request(const char *method, int argc, char **argv
          cJSON_AddStringToObject(req, "artifact", v);
       if ((v = rpc_get(&opts, "artifact-hash")) && v[0])
          cJSON_AddStringToObject(req, "artifact_hash", v);
+      /* resume can repair repo/workspace metadata after an impl-workspace failure
+       * (#3): the same fields accepted by start. */
+      if ((v = rpc_get(&opts, "repo-root")) && v[0])
+         cJSON_AddStringToObject(req, "repo_root", v);
+      if ((v = rpc_get(&opts, "remote")) && v[0])
+         cJSON_AddStringToObject(req, "remote", v);
+      if ((v = rpc_get(&opts, "head-branch")) && v[0])
+         cJSON_AddStringToObject(req, "head_branch", v);
+      if ((v = rpc_get(&opts, "worktree-path")) && v[0])
+         cJSON_AddStringToObject(req, "worktree_path", v);
    }
    return req;
 }
