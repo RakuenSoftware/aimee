@@ -24,18 +24,18 @@
  * outputs are OPENSSL_cleanse'd. Callers MUST treat -1 as fatal for the op and
  * never use a partially-written output. */
 
-#define VAULT_ROOT_KEY_LEN   32 /* client-held high-entropy root key */
-#define VAULT_KEK_LEN        32 /* HKDF-derived key-encryption key */
-#define VAULT_DEK_LEN        32 /* per-credential data-encryption key */
-#define VAULT_GCM_NONCE_LEN  12 /* 96-bit AES-GCM nonce */
-#define VAULT_GCM_TAG_LEN    16 /* AES-GCM authentication tag */
+#define VAULT_ROOT_KEY_LEN    32 /* client-held high-entropy root key */
+#define VAULT_KEK_LEN         32 /* HKDF-derived key-encryption key */
+#define VAULT_DEK_LEN         32 /* per-credential data-encryption key */
+#define VAULT_GCM_NONCE_LEN   12 /* 96-bit AES-GCM nonce */
+#define VAULT_GCM_TAG_LEN     16 /* AES-GCM authentication tag */
 #define VAULT_WRAPPED_DEK_LEN 40 /* RFC 3394 wrap of a 32-byte key = 40 bytes */
-#define VAULT_SALT_LEN       16 /* per-principal HKDF salt */
+#define VAULT_SALT_LEN        16 /* per-principal HKDF salt */
 
 /* The HKDF `info` label + a recorded version tag for the vault-file header so
  * the derivation can evolve without ambiguity. */
-#define VAULT_KEK_INFO       "aimee-vault-kek-v1"
-#define VAULT_KDF_VERSION    "hkdf-sha256-v1"
+#define VAULT_KEK_INFO    "aimee-vault-kek-v1"
+#define VAULT_KDF_VERSION "hkdf-sha256-v1"
 
 /* Fill out[0..n) with cryptographically-strong random bytes. 0 on success;
  * -1 (fail-closed) if the RNG is unavailable — callers must abort the vault op,
@@ -62,8 +62,9 @@ int vault_dek_unwrap(const uint8_t kek[VAULT_KEK_LEN], const uint8_t wrapped[VAU
  * pt_len bytes; tag receives the 16-byte authentication tag. 0 on success, -1 on
  * failure (outputs cleansed). aad may be NULL iff aad_len == 0. */
 int vault_secret_encrypt(const uint8_t dek[VAULT_DEK_LEN], const uint8_t *aad, size_t aad_len,
-                         const uint8_t *plaintext, size_t pt_len, uint8_t nonce[VAULT_GCM_NONCE_LEN],
-                         uint8_t *ciphertext, uint8_t tag[VAULT_GCM_TAG_LEN]);
+                         const uint8_t *plaintext, size_t pt_len,
+                         uint8_t nonce[VAULT_GCM_NONCE_LEN], uint8_t *ciphertext,
+                         uint8_t tag[VAULT_GCM_TAG_LEN]);
 
 /* AES-256-GCM decrypt + authenticate. Writes plaintext ONLY if the GCM tag
  * verifies (EVP_DecryptFinal_ex == 1); on any failure plaintext is cleansed and

@@ -25,7 +25,8 @@ static void test_unattested_refused(void)
 {
    uint8_t rk[VAULT_ROOT_KEY_LEN];
    root_key(rk, 1);
-   assert(vault_service_unlock("", ATTEST_UDS_PEERCRED, rk, sizeof(rk), T0) == VAULT_ERR_UNATTESTED);
+   assert(vault_service_unlock("", ATTEST_UDS_PEERCRED, rk, sizeof(rk), T0) ==
+          VAULT_ERR_UNATTESTED);
    char out[64];
    assert(vault_service_get("", "claude", "api_key", out, sizeof(out), T0) == VAULT_NO_ENTRY);
    printf("  PASS: test_unattested_refused\n");

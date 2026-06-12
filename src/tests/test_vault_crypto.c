@@ -84,8 +84,8 @@ static void test_secret_gcm_roundtrip(void)
    uint8_t nonce[VAULT_GCM_NONCE_LEN], tag[VAULT_GCM_TAG_LEN];
    uint8_t ct[64];
    assert(pt_len <= sizeof(ct));
-   assert(vault_secret_encrypt(dek, aad, sizeof(aad) - 1, (const uint8_t *)secret, pt_len, nonce, ct,
-                               tag) == 0);
+   assert(vault_secret_encrypt(dek, aad, sizeof(aad) - 1, (const uint8_t *)secret, pt_len, nonce,
+                               ct, tag) == 0);
    /* Ciphertext must differ from plaintext. */
    assert(memcmp(ct, secret, pt_len) != 0);
 
@@ -122,8 +122,8 @@ static void test_secret_tamper_and_wrong_key_fail_closed(void)
    const uint8_t aad[] = "uid:1000|claude|api_key";
    size_t pt_len = strlen(secret);
    uint8_t nonce[VAULT_GCM_NONCE_LEN], tag[VAULT_GCM_TAG_LEN], ct[32], out[32];
-   assert(vault_secret_encrypt(dek, aad, sizeof(aad) - 1, (const uint8_t *)secret, pt_len, nonce, ct,
-                               tag) == 0);
+   assert(vault_secret_encrypt(dek, aad, sizeof(aad) - 1, (const uint8_t *)secret, pt_len, nonce,
+                               ct, tag) == 0);
 
    /* Wrong DEK. */
    uint8_t wrong_dek[VAULT_DEK_LEN];
@@ -145,8 +145,8 @@ static void test_secret_tamper_and_wrong_key_fail_closed(void)
    /* AAD substitution: a ciphertext encrypted for one (principal|agent|cred)
     * must NOT decrypt under a different identity slot — blocks row/file swap. */
    const uint8_t aad_other[] = "uid:1001|claude|api_key";
-   assert(vault_secret_decrypt(dek, aad_other, sizeof(aad_other) - 1, nonce, ct, pt_len, tag, out) ==
-          -1);
+   assert(vault_secret_decrypt(dek, aad_other, sizeof(aad_other) - 1, nonce, ct, pt_len, tag,
+                               out) == -1);
    printf("  PASS: test_secret_tamper_and_wrong_key_fail_closed\n");
 }
 
@@ -170,8 +170,8 @@ static void test_full_envelope_roundtrip(void)
    const uint8_t aad[] = "webuser:alice|openai|api_key";
    size_t pt_len = strlen(secret);
    uint8_t nonce[VAULT_GCM_NONCE_LEN], tag[VAULT_GCM_TAG_LEN], ct[64];
-   assert(vault_secret_encrypt(dek, aad, sizeof(aad) - 1, (const uint8_t *)secret, pt_len, nonce, ct,
-                               tag) == 0);
+   assert(vault_secret_encrypt(dek, aad, sizeof(aad) - 1, (const uint8_t *)secret, pt_len, nonce,
+                               ct, tag) == 0);
 
    /* Reverse: re-derive KEK, unwrap DEK, decrypt. */
    uint8_t kek2[VAULT_KEK_LEN], dek2[VAULT_DEK_LEN], out[64];

@@ -32,8 +32,7 @@ int vault_kek_derive(const uint8_t *root_key, size_t root_key_len, const uint8_t
 
    int rc = -1;
    size_t outlen = VAULT_KEK_LEN;
-   if (EVP_PKEY_derive_init(pctx) == 1 &&
-       EVP_PKEY_CTX_set_hkdf_md(pctx, EVP_sha256()) == 1 &&
+   if (EVP_PKEY_derive_init(pctx) == 1 && EVP_PKEY_CTX_set_hkdf_md(pctx, EVP_sha256()) == 1 &&
        EVP_PKEY_CTX_set1_hkdf_salt(pctx, salt, (int)salt_len) == 1 &&
        EVP_PKEY_CTX_set1_hkdf_key(pctx, root_key, (int)root_key_len) == 1 &&
        EVP_PKEY_CTX_add1_hkdf_info(pctx, (const unsigned char *)VAULT_KEK_INFO,
@@ -66,8 +65,7 @@ int vault_dek_wrap(const uint8_t kek[VAULT_KEK_LEN], const uint8_t dek[VAULT_DEK
    int outl = 0, finl = 0;
    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_wrap(), NULL, kek, NULL) == 1 &&
        EVP_EncryptUpdate(ctx, wrapped, &outl, dek, VAULT_DEK_LEN) == 1 &&
-       EVP_EncryptFinal_ex(ctx, wrapped + outl, &finl) == 1 &&
-       outl + finl == VAULT_WRAPPED_DEK_LEN)
+       EVP_EncryptFinal_ex(ctx, wrapped + outl, &finl) == 1 && outl + finl == VAULT_WRAPPED_DEK_LEN)
       rc = 0;
 
    EVP_CIPHER_CTX_free(ctx);
@@ -104,8 +102,9 @@ int vault_dek_unwrap(const uint8_t kek[VAULT_KEK_LEN], const uint8_t wrapped[VAU
 }
 
 int vault_secret_encrypt(const uint8_t dek[VAULT_DEK_LEN], const uint8_t *aad, size_t aad_len,
-                         const uint8_t *plaintext, size_t pt_len, uint8_t nonce[VAULT_GCM_NONCE_LEN],
-                         uint8_t *ciphertext, uint8_t tag[VAULT_GCM_TAG_LEN])
+                         const uint8_t *plaintext, size_t pt_len,
+                         uint8_t nonce[VAULT_GCM_NONCE_LEN], uint8_t *ciphertext,
+                         uint8_t tag[VAULT_GCM_TAG_LEN])
 {
    if (!dek || !nonce || !tag || (pt_len && (!plaintext || !ciphertext)) || (aad_len && !aad))
       return -1;

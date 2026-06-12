@@ -79,8 +79,8 @@ vault_status_t vault_service_set(const char *principal, const char *agent, const
    if (vault_kek_cache_get(principal, now_epoch, kek) != 0)
       return VAULT_ERR_LOCKED; /* must unlock first */
 
-   vault_status_t st = vault_store_set(principal, kek, agent, cred, secret) == 0 ? VAULT_OK
-                                                                                 : VAULT_ERR_IO;
+   vault_status_t st =
+       vault_store_set(principal, kek, agent, cred, secret) == 0 ? VAULT_OK : VAULT_ERR_IO;
    OPENSSL_cleanse(kek, sizeof(kek));
    return st;
 }

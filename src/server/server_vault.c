@@ -50,11 +50,11 @@ static int hex_decode(const char *hex, uint8_t *out, size_t n)
    {
       int hi = -1, lo = -1;
       char c = hex[i * 2], d = hex[i * 2 + 1];
-      hi = (c >= '0' && c <= '9') ? c - '0'
+      hi = (c >= '0' && c <= '9')   ? c - '0'
            : (c >= 'a' && c <= 'f') ? c - 'a' + 10
            : (c >= 'A' && c <= 'F') ? c - 'A' + 10
                                     : -1;
-      lo = (d >= '0' && d <= '9') ? d - '0'
+      lo = (d >= '0' && d <= '9')   ? d - '0'
            : (d >= 'a' && d <= 'f') ? d - 'a' + 10
            : (d >= 'A' && d <= 'F') ? d - 'A' + 10
                                     : -1;
@@ -153,7 +153,8 @@ int handle_vault_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!cJSON_IsString(ja) || !cJSON_IsString(jc))
       return server_send_error(conn, "vault: delete requires agent, cred", NULL);
 
-   vault_status_t st = vault_service_delete(conn->vault_principal, ja->valuestring, jc->valuestring);
+   vault_status_t st =
+       vault_service_delete(conn->vault_principal, ja->valuestring, jc->valuestring);
    if (st != VAULT_OK)
       return vault_send_status_error(conn, st);
 

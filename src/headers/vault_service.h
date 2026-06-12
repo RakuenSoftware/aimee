@@ -18,7 +18,7 @@
 typedef enum
 {
    VAULT_OK = 0,
-   VAULT_NO_ENTRY,      /* no such credential — caller falls back to env/agents.json (D15) */
+   VAULT_NO_ENTRY,       /* no such credential — caller falls back to env/agents.json (D15) */
    VAULT_ERR_UNATTESTED, /* empty principal / un-attested conn — refuse (no uid:0) */
    VAULT_ERR_TRANSPORT,  /* operation not permitted on this transport (e.g. root-key over TCP) */
    VAULT_ERR_LOCKED,     /* entry exists but the KEK is not cached/expired — HARD error (D15) */
