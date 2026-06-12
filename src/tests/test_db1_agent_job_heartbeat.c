@@ -15,6 +15,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -103,8 +104,60 @@ static void test_heartbeat_ext_writes_fields(void)
    assert(row.current_tool[0] == '\0');
    assert(row.api_call_count == 9);
 
+   db1_agent_job_free(&row);
    teardown_db();
    printf("  PASS: test_heartbeat_ext_writes_fields\n");
+}
+
+/* WP-A: prompt/result are heap-backed (was a fixed char[4096]); a prompt or
+ * result larger than the old 4096 cap must round-trip intact, and a result
+ * over the storage ceiling must be truncated-with-marker, not the full blob. */
+static void test_uncapped_prompt_result_round_trip(void)
+{
+   setup_db();
+
+   const size_t big = 50000; /* >> the old 4096 cap */
+   char *big_prompt = malloc(big + 1);
+   assert(big_prompt);
+   memset(big_prompt, 'P', big);
+   big_prompt[big] = '\0';
+
+   int job = db1_agent_job_create("code", big_prompt, "agent", "owner");
+   assert(job > 0);
+
+   db1_agent_job_t row;
+   assert(db1_agent_job_get(job, &row) == 0);
+   assert(strlen(row.prompt) == big); /* not clipped at 4096 */
+   assert(row.prompt[big - 1] == 'P');
+   db1_agent_job_free(&row);
+
+   const size_t big_res = 60000; /* > old cap, < storage ceiling */
+   char *big_result = malloc(big_res + 1);
+   assert(big_result);
+   memset(big_result, 'R', big_res);
+   big_result[big_res] = '\0';
+   db1_agent_job_update(job, "done", 1, big_result);
+   assert(db1_agent_job_get(job, &row) == 0);
+   assert(strlen(row.result) == big_res);
+   db1_agent_job_free(&row);
+
+   /* Over the storage ceiling -> truncated with marker, never the full blob. */
+   const size_t over = (size_t)DB1_AJ_RESULT_STORE_MAX + 100000;
+   char *huge = malloc(over + 1);
+   assert(huge);
+   memset(huge, 'H', over);
+   huge[over] = '\0';
+   db1_agent_job_update(job, "done", 1, huge);
+   assert(db1_agent_job_get(job, &row) == 0);
+   assert(strlen(row.result) <= DB1_AJ_RESULT_STORE_MAX);
+   assert(strstr(row.result, "[truncated") != NULL);
+   db1_agent_job_free(&row);
+
+   free(big_prompt);
+   free(big_result);
+   free(huge);
+   teardown_db();
+   printf("  PASS: test_uncapped_prompt_result_round_trip\n");
 }
 
 static void test_classify_stale_fresh(void)
@@ -393,6 +446,7 @@ int main(void)
 {
    printf("db1_agent_job_heartbeat:\n");
    test_heartbeat_ext_writes_fields();
+   test_uncapped_prompt_result_round_trip();
    test_classify_stale_fresh();
    test_classify_stale_in_tool();
    test_classify_stale_idle();
