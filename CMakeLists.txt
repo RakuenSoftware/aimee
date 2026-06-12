@@ -774,6 +774,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/vault_principal.c
     ${AIMEE_SRC_DIR}/server/vault_crypto.c
     ${AIMEE_SRC_DIR}/server/vault_kek_cache.c
+    ${AIMEE_SRC_DIR}/server/vault_store.c
     ${AIMEE_SRC_DIR}/server/server_state.c
     ${AIMEE_SRC_DIR}/server/server_plugin.c
     ${AIMEE_SRC_DIR}/server/server_work.c
