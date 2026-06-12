@@ -904,7 +904,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         EXECUTE $T$
             CREATE TABLE IF NOT EXISTS code_embeddings (
                 point_id     BIGINT PRIMARY KEY,
-                embedding    vector,
+                embedding    halfvec(__EMBED_DIM__),
                 project      TEXT NOT NULL DEFAULT '',
                 node_key     TEXT NOT NULL DEFAULT '',
                 file_path    TEXT NOT NULL DEFAULT '',
