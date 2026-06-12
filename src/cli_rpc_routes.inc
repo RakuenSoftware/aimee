@@ -296,6 +296,11 @@ static const struct
     {"config", "get", "config.get", NULL, NULL, 0},
     {"config", "set", "config.set", NULL, NULL, 0},
     {"config", "", "config.show", NULL, NULL, 0},
+    {"vault", "unlock", "vault.unlock", NULL, NULL, 0},
+    {"vault", "set", "vault.set", NULL, NULL, 0},
+    {"vault", "list", "vault.list", NULL, "credentials", 0},
+    {"vault", "delete", "vault.delete", NULL, NULL, 0},
+    {"vault", "lock", "vault.lock", NULL, NULL, 0},
     {"episode", "list", "episode.list", NULL, "episodes", 0},
     {"trigger", "list", "trigger.list", NULL, "triggers", 0},
     {"trigger", "status", "trigger.status", NULL, NULL, 0},
@@ -2984,6 +2989,95 @@ static cJSON *marshal_pipeline_request(const char *method, int argc, char **argv
    return req;
 }
 
+/* Load the client-held 32-byte vault root key (hex), generating + persisting it
+ * at <aimee_home>/vault-root.key (0600) on first use. The root key NEVER leaves
+ * the client except as the unlock payload (WP-C: the server stores only the
+ * salt + ciphertext, never the root key). Returns 0 on success. */
+static int vault_client_root_key_hex(char out[65])
+{
+   const char *home = aimee_home();
+   if (!home || !home[0])
+      return -1;
+   char path[1024];
+   if ((size_t)snprintf(path, sizeof(path), "%s/vault-root.key", home) >= sizeof(path))
+      return -1;
+   FILE *f = fopen(path, "r");
+   if (f)
+   {
+      size_t n = fread(out, 1, 64, f);
+      fclose(f);
+      if (n == 64)
+      {
+         out[64] = '\0';
+         return 0;
+      }
+   }
+   /* Read 32 bytes of kernel entropy directly — the thin client links no crypto
+    * or platform-random library. (On a platform without /dev/urandom this fails
+    * closed: unlock sends no root key and the server rejects it.) */
+   unsigned char raw[32];
+   FILE *ur = fopen("/dev/urandom", "rb");
+   if (!ur)
+      return -1;
+   size_t got = fread(raw, 1, sizeof(raw), ur);
+   fclose(ur);
+   if (got != sizeof(raw))
+      return -1;
+   for (size_t i = 0; i < sizeof(raw); i++)
+      snprintf(out + i * 2, 3, "%02x", raw[i]);
+   out[64] = '\0';
+   f = fopen(path, "w");
+   if (!f)
+      return -1;
+   size_t w = fwrite(out, 1, 64, f);
+   fclose(f);
+   if (w != 64)
+      return -1;
+   chmod(path, 0600);
+   return 0;
+}
+
+/* `aimee vault unlock` — derive + cache the KEK server-side from the client root
+ * key. The key is generated on first use and persisted at 0600 client-side. */
+static cJSON *marshal_vault_unlock(int argc, char **argv)
+{
+   (void)argc;
+   (void)argv;
+   cJSON *req = marshal_no_args("vault.unlock");
+   char rk[65];
+   if (vault_client_root_key_hex(rk) == 0)
+      cJSON_AddStringToObject(req, "root_key_hex", rk);
+   return req;
+}
+
+/* `aimee vault set <agent> <cred> <secret>` */
+static cJSON *marshal_vault_set(int argc, char **argv)
+{
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("vault.set");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "agent", opts.positional[0]);
+   if (opts.pos_count > 1)
+      cJSON_AddStringToObject(req, "cred", opts.positional[1]);
+   if (opts.pos_count > 2)
+      cJSON_AddStringToObject(req, "secret", opts.positional[2]);
+   return req;
+}
+
+/* `aimee vault delete <agent> <cred>` */
+static cJSON *marshal_vault_delete(int argc, char **argv)
+{
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("vault.delete");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "agent", opts.positional[0]);
+   if (opts.pos_count > 1)
+      cJSON_AddStringToObject(req, "cred", opts.positional[1]);
+   return req;
+}
+
 static cJSON *marshal_request(const char *method, int argc, char **argv)
 {
    if (strcmp(method, "init.run") == 0)
@@ -3001,6 +3095,16 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
    if (strcmp(method, "api.enable") == 0)
       return marshal_api_enable(argc, argv);
    if (strcmp(method, "api.disable") == 0)
+      return marshal_no_args(method);
+   if (strcmp(method, "vault.unlock") == 0)
+      return marshal_vault_unlock(argc, argv);
+   if (strcmp(method, "vault.set") == 0)
+      return marshal_vault_set(argc, argv);
+   if (strcmp(method, "vault.delete") == 0)
+      return marshal_vault_delete(argc, argv);
+   if (strcmp(method, "vault.list") == 0)
+      return marshal_no_args(method);
+   if (strcmp(method, "vault.lock") == 0)
       return marshal_no_args(method);
    if (strcmp(method, "delegate.backend_exec") == 0)
       return marshal_delegate_backend_exec(argc, argv);
