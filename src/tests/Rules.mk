@@ -319,6 +319,11 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-tool-schema-sanitizer \
                $(TESTPREFIX)/unit-test-toolset \
                $(TESTPREFIX)/unit-test-db1-cost-fold \
+               $(TESTPREFIX)/unit-test-db1-roundtable-pipeline \
+               $(TESTPREFIX)/unit-test-roundtable-pipeline-eval \
+               $(TESTPREFIX)/unit-test-roundtable-pipeline-chunk \
+               $(TESTPREFIX)/unit-test-roundtable-pipeline-ctl \
+               $(TESTPREFIX)/unit-test-roundtable-pipeline-capture \
                $(TESTPREFIX)/unit-test-db1-session-paths \
                $(TESTPREFIX)/unit-test-interaction-events \
                $(TESTPREFIX)/unit-test-trajectory \
@@ -769,6 +774,10 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
 	                                $(OBJDIR)/cmd_init.o \
 	                                $(OBJDIR)/server/server_trigger.o $(OBJDIR)/db1/db1_trigger.o \
 	                                $(OBJDIR)/db1/pipelines.o $(OBJDIR)/db1/token_audit.o \
+	                                $(OBJDIR)/db1/roundtable_pipeline.o $(OBJDIR)/db1/local_operator.o \
+	                                $(OBJDIR)/server/server_pipeline.o \
+	                                $(OBJDIR)/server/roundtable_pipeline_capture.o \
+	                                $(OBJDIR)/server/roundtable_pipeline_eval.o \
 	                                $(OBJDIR)/server/delegate_backend.o $(OBJDIR)/server/delegate_backend_local.o \
 	                                $(OBJDIR)/server/delegate_backend_ssh.o $(OBJDIR)/server/delegate_backend_docker.o \
 	                                $(OBJDIR)/server/model_provider.o $(OBJDIR)/server/openai_profile.o \
@@ -1658,6 +1667,43 @@ $(TESTPREFIX)/unit-test-db1-cost-fold: \
                                        $(OBJDIR)/db1/cost_fold.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-db1-roundtable-pipeline: \
+                                       $(OBJDIR)/tests/test_db1_roundtable_pipeline.o \
+                                       $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                       $(OBJDIR)/db1/roundtable_pipeline.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-roundtable-pipeline-eval: \
+                                       $(OBJDIR)/tests/test_roundtable_pipeline_eval.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_eval.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-roundtable-pipeline-chunk: \
+                                       $(OBJDIR)/tests/test_roundtable_pipeline_chunk.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_chunk.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_eval.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-roundtable-pipeline-ctl: \
+                                       $(OBJDIR)/tests/test_roundtable_pipeline_ctl.o \
+                                       $(OBJDIR)/server/server_pipeline.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_eval.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_chunk.o \
+                                       $(OBJDIR)/db1/roundtable_pipeline.o \
+                                       $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                       $(OBJDIR)/db1/local_operator.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-roundtable-pipeline-capture: \
+                                       $(OBJDIR)/tests/test_roundtable_pipeline_capture.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_capture.o \
+                                       $(OBJDIR)/server/roundtable_pipeline_eval.o \
+                                       $(OBJDIR)/db1/roundtable_pipeline.o \
+                                       $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                       $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-db1-session-paths: \
                                        $(OBJDIR)/tests/test_db1_session_paths.o \
                                        $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
@@ -1750,6 +1796,8 @@ $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                            $(OBJDIR)/persona.o $(OBJDIR)/prompts.o \
                            $(OBJDIR)/role_templates.o \
                            $(OBJDIR)/dstr.o $(OBJDIR)/working_profile.o \
+                           $(OBJDIR)/server/roundtable_pipeline_capture.o \
+                           $(OBJDIR)/server/roundtable_pipeline_eval.o \
                            $(DB1_OBJS) \
                            $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

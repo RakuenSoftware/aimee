@@ -162,7 +162,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`reasoning_cap`** — `enabled`
 - **`retry`** — `base_ms`, `max_attempts`, `max_ms`
 - **`rewind`** — `auto_snapshot`
-- **`roundtable`** — `converge_threshold`, `deadline_ms`, `max_rounds`, `turns`
+- **`roundtable`** — `converge_threshold`, `deadline_ms`, `max_rounds`, `pipeline_done_bar`, `pipeline_gate_ttl_h`, `pipeline_max_attempts_per_pass`, `pipeline_max_cost_usd`, `pipeline_max_passes`, `pipeline_max_total_cost_usd`, `pipeline_parked_releases_slot`, `pipeline_unknown_context_tokens`, `turns`
 - **`sandbox`** — `allow_paths`, `mode`, `network`
 - **`script`** — `allowed_tools`
 - **`search`** — `backend`, `max_results`, `searxng_url`, `tavily_api_key`

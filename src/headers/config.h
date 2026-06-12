@@ -1289,6 +1289,19 @@ typedef struct config
    int roundtable_deadline_ms;
    char roundtable_turns[16];
 
+   /* Roundtable authoring pipeline (roundtable.pipeline_*). The outer
+    * REVIEW<->revise loop, done-bar, and cost/pass backstops; see
+    * docs/proposals/accepted/agent-roundtable-authoring-pipeline.md section 6. */
+   char roundtable_pipeline_done_bar[40];      /* zero_blocking | zero_blocking_suggestions
+                                                * | zero_blocking_questions_answered */
+   int roundtable_pipeline_max_passes;         /* 0 = unbounded (default) */
+   int roundtable_pipeline_max_attempts_per_pass; /* infra-retry ceiling, default 2 */
+   double roundtable_pipeline_max_cost_usd;    /* per-phase cap; 0 = unbounded */
+   double roundtable_pipeline_max_total_cost_usd; /* whole-pipeline cap; 0 = unbounded */
+   int roundtable_pipeline_gate_ttl_h;         /* awaiting-human gate TTL hours; 0 = none */
+   int roundtable_pipeline_parked_releases_slot; /* bool: parked gate frees the active slot */
+   int roundtable_pipeline_unknown_context_tokens; /* conservative chunk budget fallback */
+
    /* Context engine selection (context.engine).
     * Empty string means use the default "compactor" engine. */
    char context_engine[64];

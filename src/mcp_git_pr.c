@@ -261,6 +261,88 @@ cJSON *handle_git_pr(cJSON *args)
       return r;
    }
 
+   if (strcmp(action, "merge") == 0)
+   {
+      /* Policy-aware merge executor (authoring-pipeline #50). The caller passes
+       * the PR number, optional merge_method (merge|squash|rebase, default
+       * merge), optional admin (gh pr merge --admin for branch-policy/CI-billing
+       * cases this repo hits), and optional expected_head_sha for drift safety
+       * (gh refuses the merge if the head moved). Captures executor/command/
+       * exit/output and the resulting merge SHA so the ledger has full
+       * evidence. */
+      cJSON *jnum = cJSON_GetObjectItemCaseSensitive(args, "number");
+      if (!cJSON_IsNumber(jnum))
+         return mcp_text("error: 'number' parameter is required for merge");
+      int pr_num = jnum->valueint;
+
+      cJSON *jmethod = cJSON_GetObjectItemCaseSensitive(args, "merge_method");
+      const char *mflag = "--merge";
+      if (cJSON_IsString(jmethod))
+      {
+         if (strcmp(jmethod->valuestring, "squash") == 0)
+            mflag = "--squash";
+         else if (strcmp(jmethod->valuestring, "rebase") == 0)
+            mflag = "--rebase";
+      }
+      cJSON *jadmin = cJSON_GetObjectItemCaseSensitive(args, "admin");
+      const char *admin = cJSON_IsTrue(jadmin) ? " --admin" : "";
+
+      char match[160] = {0};
+      cJSON *jhead = cJSON_GetObjectItemCaseSensitive(args, "expected_head_sha");
+      if (cJSON_IsString(jhead) && jhead->valuestring[0])
+      {
+         /* only allow a hex SHA to flow into the shell command. */
+         const char *h = jhead->valuestring;
+         int ok = 1;
+         for (const char *p = h; *p; p++)
+            if (!((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f') || (*p >= 'A' && *p <= 'F')))
+            {
+               ok = 0;
+               break;
+            }
+         if (ok && h[0])
+            snprintf(match, sizeof(match), " --match-head-commit %s", h);
+      }
+
+      char cmd[512];
+      snprintf(cmd, sizeof(cmd), "gh pr merge %d %s%s%s 2>&1", pr_num, mflag, admin, match);
+      int rc = 0;
+      char *out = mcp_git_run(cmd, &rc);
+      cJSON *res = cJSON_CreateObject();
+      cJSON_AddStringToObject(res, "executor", "git_pr");
+      cJSON_AddStringToObject(res, "command", cmd);
+      cJSON_AddNumberToObject(res, "exit_code", rc);
+      cJSON_AddStringToObject(res, "output", out ? out : "");
+      free(out);
+      if (rc == 0)
+      {
+         /* recover the merge commit SHA for the ledger. */
+         char vcmd[128];
+         snprintf(vcmd, sizeof(vcmd), "gh pr view %d --json mergeCommit -q .mergeCommit.oid 2>&1",
+                  pr_num);
+         int vrc = 0;
+         char *vout = mcp_git_run(vcmd, &vrc);
+         if (vout)
+         {
+            char *nl = strchr(vout, '\n');
+            if (nl)
+               *nl = '\0';
+            cJSON_AddStringToObject(res, "merge_sha", vrc == 0 ? vout : "");
+            free(vout);
+         }
+         cJSON_AddBoolToObject(res, "merged", 1);
+      }
+      else
+      {
+         cJSON_AddBoolToObject(res, "merged", 0);
+      }
+      char *s = cJSON_PrintUnformatted(res);
+      cJSON_Delete(res);
+      cJSON *r = mcp_text(s ? s : "{\"merged\":false}");
+      free(s);
+      return r;
+   }
+
    if (strcmp(action, "view") == 0)
    {
       cJSON *jnum = cJSON_GetObjectItemCaseSensitive(args, "number");
@@ -503,5 +585,5 @@ cJSON *handle_git_pr(cJSON *args)
    }
 
    return mcp_text(
-       "error: unknown action. Use create/view/list/edit/checks/watch/merge_status/wait");
+       "error: unknown action. Use create/view/list/edit/checks/watch/merge_status/merge/wait");
 }

@@ -555,6 +555,15 @@ static void config_set_defaults(config_t *cfg)
    cfg->roundtable_converge_threshold = 10;
    cfg->roundtable_deadline_ms = 600000;
    snprintf(cfg->roundtable_turns, sizeof(cfg->roundtable_turns), "parallel");
+   snprintf(cfg->roundtable_pipeline_done_bar, sizeof(cfg->roundtable_pipeline_done_bar),
+            "zero_blocking");
+   cfg->roundtable_pipeline_max_passes = 0;            /* unbounded: correctness over budget */
+   cfg->roundtable_pipeline_max_attempts_per_pass = 2; /* infra-retry ceiling */
+   cfg->roundtable_pipeline_max_cost_usd = 0.0;
+   cfg->roundtable_pipeline_max_total_cost_usd = 0.0;
+   cfg->roundtable_pipeline_gate_ttl_h = 0;
+   cfg->roundtable_pipeline_parked_releases_slot = 1;
+   cfg->roundtable_pipeline_unknown_context_tokens = 8000;
    cfg->mcp_osv_enabled = 1;
    cfg->mcp_osv_offline = 0;
    cfg->mcp_osv_enforce = 1;

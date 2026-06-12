@@ -24,6 +24,7 @@
 #include "ingress_preinject.h"
 #include "openapi_server_data.h" /* AIMEE_OPENAPI_SERVER_YAML_STR (generated from api/openapi-server-v1.yaml) */
 #include "openai_runs_store.h"
+#include "roundtable_pipeline_capture.h" /* pipeline op-run capture seam (#18/#20) */
 #include "presence.h"
 #include "request_context.h"
 #include "cJSON.h"

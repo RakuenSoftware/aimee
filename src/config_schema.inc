@@ -83,5 +83,6 @@
 {"model_meta", SCHEMA_OBJECT, 0},
 {"db2", SCHEMA_OBJECT, 0},
 {"ensemble", SCHEMA_OBJECT, 0},
+{"roundtable", SCHEMA_OBJECT, 0},
 {"cron_jobs", SCHEMA_ARRAY, 0},
 {NULL, 0, 0},

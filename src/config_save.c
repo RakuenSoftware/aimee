@@ -80,9 +80,17 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
       }
    }
 
-   /* roundtable.* */
+   /* roundtable.* (including the authoring-pipeline keys, roundtable.pipeline_*) */
    if (cfg->roundtable_max_rounds != 3 || cfg->roundtable_converge_threshold != 10 ||
-       cfg->roundtable_deadline_ms != 600000 || strcmp(cfg->roundtable_turns, "parallel") != 0)
+       cfg->roundtable_deadline_ms != 600000 || strcmp(cfg->roundtable_turns, "parallel") != 0 ||
+       strcmp(cfg->roundtable_pipeline_done_bar, "zero_blocking") != 0 ||
+       cfg->roundtable_pipeline_max_passes != 0 ||
+       cfg->roundtable_pipeline_max_attempts_per_pass != 2 ||
+       cfg->roundtable_pipeline_max_cost_usd != 0.0 ||
+       cfg->roundtable_pipeline_max_total_cost_usd != 0.0 ||
+       cfg->roundtable_pipeline_gate_ttl_h != 0 ||
+       cfg->roundtable_pipeline_parked_releases_slot != 1 ||
+       cfg->roundtable_pipeline_unknown_context_tokens != 8000)
    {
       cJSON *rt = cJSON_AddObjectToObject(root, "roundtable");
       if (rt)
@@ -91,6 +99,19 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
          cJSON_AddNumberToObject(rt, "converge_threshold", cfg->roundtable_converge_threshold);
          cJSON_AddNumberToObject(rt, "deadline_ms", cfg->roundtable_deadline_ms);
          cJSON_AddStringToObject(rt, "turns", cfg->roundtable_turns);
+         cJSON_AddStringToObject(rt, "pipeline_done_bar", cfg->roundtable_pipeline_done_bar);
+         cJSON_AddNumberToObject(rt, "pipeline_max_passes", cfg->roundtable_pipeline_max_passes);
+         cJSON_AddNumberToObject(rt, "pipeline_max_attempts_per_pass",
+                                 cfg->roundtable_pipeline_max_attempts_per_pass);
+         cJSON_AddNumberToObject(rt, "pipeline_max_cost_usd",
+                                 cfg->roundtable_pipeline_max_cost_usd);
+         cJSON_AddNumberToObject(rt, "pipeline_max_total_cost_usd",
+                                 cfg->roundtable_pipeline_max_total_cost_usd);
+         cJSON_AddNumberToObject(rt, "pipeline_gate_ttl_h", cfg->roundtable_pipeline_gate_ttl_h);
+         cJSON_AddBoolToObject(rt, "pipeline_parked_releases_slot",
+                               cfg->roundtable_pipeline_parked_releases_slot ? 1 : 0);
+         cJSON_AddNumberToObject(rt, "pipeline_unknown_context_tokens",
+                                 cfg->roundtable_pipeline_unknown_context_tokens);
       }
    }
 
