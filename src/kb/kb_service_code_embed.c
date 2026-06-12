@@ -10,14 +10,20 @@
 #include "../db2/db_postgres.h"
 #include "../db2/entity_nodes.h"
 #include "../db2/pgvec_kb_service.h"
+#include "../db2/lifecycle.h"
+#include "config.h"
+#include "memory.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 
-#define CE_ERRBUF               256
-#define CE_TEXT_CAP             4096
+#define CE_ERRBUF   256
+#define CE_TEXT_CAP 4096
+/* Upper bound on the embedding dimension we will buffer: 1024 for the default
+ * 0.6B embedder, 2560 for the 4B deep tier. */
+#define CE_EMBED_MAX_DIM        2560
 #define CE_FALLBACK_MAX_CALLS   5
 #define CE_FALLBACK_MAX_IMPORTS 5
 
@@ -372,8 +378,19 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
       return 0;
    }
 
-   /* Ensure code collection ready (dim=384 to match memory_embeddings). */
-   pgvec_kb_service_ensure_code_collection(384);
+   /* Embed each code unit with the configured embedder (pipeline stage 2 — the
+    * 0.6B model by default) at the deployment's embedding dimension, the same
+    * dimension as the halfvec code_embeddings column. The earlier hardcoded
+    * 384-dim deterministic hash never matched the 1024-d halfvec column, so every
+    * upsert failed and no code vectors were ever stored. */
+   config_t ce_cfg;
+   config_load(&ce_cfg);
+   const char *embed_command = ce_cfg.embedding_command[0] ? ce_cfg.embedding_command : "builtin";
+   int embed_dim = db2_embedding_dim();
+   if (embed_dim <= 0 || embed_dim > CE_EMBED_MAX_DIM)
+      embed_dim = 1024;
+
+   pgvec_kb_service_ensure_code_collection(embed_dim);
 
    int embedded = 0;
    int skipped = 0;
@@ -430,29 +447,19 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
          continue;
       }
 
-      /* Embed using deterministic fallback (text-to-float via simple hash).
-       * Production embedding uses kb_service embedding pipeline; this fallback
-       * gives a stable non-zero vector from text tokens for testing. */
-      float vec[384];
-      memset(vec, 0, sizeof(vec));
+      /* Embed the deterministic fallback text with the configured embedder
+       * (embed_command runs the 0.6B embedder; "builtin" falls back to a stable
+       * deterministic vector when no embedder is configured, e.g. in tests). */
+      float vec[CE_EMBED_MAX_DIM];
+      int dim = memory_embed_text(text, embed_command, vec, embed_dim);
+      if (dim != embed_dim)
       {
-         /* Simple deterministic hash embedding: project text chars into dims. */
-         const unsigned char *tp = (const unsigned char *)text;
-         for (int c = 0; *tp && c < 65536; c++, tp++)
-            vec[*tp % 384] += 1.0f / 256.0f;
-         /* Normalise. */
-         float len = 0.0f;
-         for (int d = 0; d < 384; d++)
-            len += vec[d] * vec[d];
-         if (len > 0.0f)
-         {
-            len = 1.0f / __builtin_sqrtf(len);
-            for (int d = 0; d < 384; d++)
-               vec[d] *= len;
-         }
+         db2_code_index_op_record(point_id, project, node_key, rows[i].path, 0,
+                                  "code embedding failed (embedder unavailable or dim mismatch)");
+         continue;
       }
 
-      int up = pgvec_kb_service_code_upsert(point_id, vec, 384, project, node_key, rows[i].path, "",
+      int up = pgvec_kb_service_code_upsert(point_id, vec, dim, project, node_key, rows[i].path, "",
                                             rows[i].hash, body_hash, payload);
       /* Per-chunk replay bookkeeping so a failed embed is retried by
        * `memory repair --reset-stuck`, not orphaned. */
