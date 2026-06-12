@@ -365,6 +365,12 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
 int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_launch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* Credential vault (WP-C.1): resolve the attested principal from the conn. */
+int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_vault_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_vault_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_vault_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_vault_lock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_jobs_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_jobs_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_jobs_logs(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

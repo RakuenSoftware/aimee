@@ -19,6 +19,8 @@
 #include "delegate_source_authority.h"
 #include "server_coord_dispatcher.h"
 #include "delegate_credentials.h"
+#include "vault_service.h" /* WP-C.1 vault-first credential resolution */
+#include <openssl/crypto.h>
 #include "delegate_economics.h"
 #include "delegate_run_phases.h"
 #include "db1/delegate_learning.h"
@@ -991,8 +993,36 @@ void delegate_worker(void *arg)
    delegate_apply_max_turns_policy(&acfg, role, max_turns);
    if (cctx->background_job_id > 0 && target_agent)
       db1_agent_job_set_agent(cctx->background_job_id, target_agent->name);
-   /* Lease one credential from a configured pool for this delegate run. */
-   if (target_agent && target_agent->credential_count > 0)
+   /* WP-C.1 vault-FIRST: a per-principal vaulted credential for this agent
+    * overrides the env-pool lease entirely (D14). The attested principal was
+    * captured on the live conn (WP-C.0) and copied into cctx; an un-attested
+    * delegate (blank principal) or an agent with no vault entry falls through to
+    * the env pool. A vaulted-but-LOCKED credential fails the delegate (never a
+    * silent downgrade to env, D15). The decrypted secret lands in the per-call
+    * acfg's api_key (same lifetime as the env path) and the transient buffer is
+    * cleansed immediately. */
+   int vault_hit = 0;
+   if (target_agent && cctx->vault_principal[0])
+   {
+      char vsecret[MAX_API_KEY_LEN];
+      vault_status_t vst = vault_service_get(cctx->vault_principal, target_agent->name, "api_key",
+                                             vsecret, sizeof(vsecret), time(NULL));
+      if (vst == VAULT_OK)
+      {
+         snprintf(target_agent->api_key, MAX_API_KEY_LEN, "%s", vsecret);
+         vault_hit = 1;
+      }
+      OPENSSL_cleanse(vsecret, sizeof(vsecret));
+      if (vst == VAULT_ERR_LOCKED)
+      {
+         delegation_compute_error(cctx, "vault locked: run `aimee vault unlock`");
+         compute_ctx_free(cctx);
+         return;
+      }
+   }
+   /* Lease one credential from a configured pool for this delegate run (skipped
+    * when the vault already supplied this agent's credential). */
+   if (!vault_hit && target_agent && target_agent->credential_count > 0)
    {
       char leased_env[MAX_CRED_ENV_VAR_LEN] = "";
       const char *dir = config_output_dir();

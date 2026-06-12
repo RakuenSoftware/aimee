@@ -874,6 +874,15 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/delegate/backend_list", NULL, RM_EXACT, "delegate.backend_list", 0,
      rh_dispatch_op},
     {"POST", "/v1/delegate/status", NULL, RM_EXACT, "delegate.status", 0, rh_dispatch_op},
+    /* Credential vault (WP-C.1): the vault gates on the attested UDS principal
+     * (a TCP caller gets no principal and the service refuses the root-key push),
+     * so these are dispatched through the same inline bridge as the delegate
+     * methods. None stream. */
+    {"POST", "/v1/vault/unlock", NULL, RM_EXACT, "vault.unlock", 0, rh_dispatch_op},
+    {"POST", "/v1/vault/set", NULL, RM_EXACT, "vault.set", 0, rh_dispatch_op},
+    {"POST", "/v1/vault/list", NULL, RM_EXACT, "vault.list", 0, rh_dispatch_op},
+    {"POST", "/v1/vault/delete", NULL, RM_EXACT, "vault.delete", 0, rh_dispatch_op},
+    {"POST", "/v1/vault/lock", NULL, RM_EXACT, "vault.lock", 0, rh_dispatch_op},
     /* Background-only over /v1: the thin client forces `background` (returns a
      * job_id to poll via the /v1/jobs routes); a foreground delegate streams and
      * would tie up a listener thread, so remote callers use background mode. */
