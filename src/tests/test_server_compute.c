@@ -1710,6 +1710,41 @@ static void test_delegate_prompt_append_block(void)
    printf("  PASS: test_delegate_prompt_append_block\n");
 }
 
+/* WP-C.0 hop 3 of 3: create_compute_ctx must copy the attested vault identity
+ * from the (still-live) conn into the compute_ctx, so the detached worker — which
+ * runs after conn_fd is closed and no thread-local survives — can resolve the
+ * right per-user vault from the only identity key it is allowed to trust. */
+static void test_create_compute_ctx_threads_vault_identity(void)
+{
+   server_conn_t conn;
+   memset(&conn, 0, sizeof(conn));
+   conn.fd = -1; /* dup(-1) -> -1, fine for this no-I/O construction test */
+   conn.attested_transport = ATTEST_UDS_PEERCRED;
+   snprintf(conn.vault_principal, sizeof(conn.vault_principal), "uid:1234");
+
+   cJSON *req = cJSON_CreateObject();
+   compute_ctx_t *cctx = create_compute_ctx(NULL, &conn, req);
+   assert(cctx != NULL);
+   assert(cctx->attested_transport == ATTEST_UDS_PEERCRED);
+   assert(strcmp(cctx->vault_principal, "uid:1234") == 0);
+   compute_ctx_free(cctx);
+   cJSON_Delete(req);
+
+   /* A conn with no attested identity (the un-attested default) yields an empty
+    * principal => no vault (fail-closed). */
+   server_conn_t bare;
+   memset(&bare, 0, sizeof(bare));
+   bare.fd = -1;
+   cJSON *req2 = cJSON_CreateObject();
+   compute_ctx_t *c2 = create_compute_ctx(NULL, &bare, req2);
+   assert(c2 != NULL);
+   assert(c2->attested_transport == ATTEST_NONE);
+   assert(c2->vault_principal[0] == '\0');
+   compute_ctx_free(c2);
+   cJSON_Delete(req2);
+   printf("  PASS: test_create_compute_ctx_threads_vault_identity\n");
+}
+
 int main(void)
 {
    /* DB1 owns delegation_spawns + delegation_messages. */
@@ -1770,6 +1805,7 @@ int main(void)
    test_delegate_worker_sets_session_override_during_run();
    test_delegate_worker_concurrency_cancelled_restores();
    test_delegate_worker_concurrency_queue_full_errors();
+   test_create_compute_ctx_threads_vault_identity();
    db1_shutdown();
    reset_last_response();
    printf("server_compute: all tests passed\n");

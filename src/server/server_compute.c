@@ -1685,6 +1685,17 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
     * not be opened on the server's own fs. A NULL conn is an in-process caller. */
    cctx->conn_caps = conn ? conn->capabilities : CAPS_ALL;
 
+   /* WP-C.0: capture the attested vault identity while the conn is live (hop 3 of
+    * 3). The detached worker resolves credentials after conn_fd is closed and no
+    * thread-local survives, so the principal must be copied here — it is the only
+    * identity key the worker trusts for the vault (never the body session_id). A
+    * NULL conn (in-process caller) is un-attested => no vault. */
+   if (conn)
+   {
+      cctx->attested_transport = conn->attested_transport;
+      snprintf(cctx->vault_principal, sizeof(cctx->vault_principal), "%s", conn->vault_principal);
+   }
+
    /* Clone the request since the original will be freed after dispatch */
    cctx->req = cJSON_Duplicate(req, 1);
 
