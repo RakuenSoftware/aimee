@@ -1119,9 +1119,21 @@ static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_ca
    if (required_caps == 0 && min_context <= 0)
       return 1;
 
+   /* An explicit per-agent context_window override (agents.json
+    * `middleware.context_window`, set via `aimee agent --ctx` or auto-detected
+    * by `ag_probe_slots`) is authoritative for the min_context gate, so a model
+    * the capability catalog doesn't know about is a config change rather than a
+    * code change to the registry table. */
+   int override_ctx = ag->middleware.context_window;
+
    model_capability_t caps;
    if (model_capability_get(ag->provider, ag->model, &caps) == 0)
-      return missing_caps == 0 && min_context <= 0;
+   {
+      if (missing_caps != 0)
+         return 0;
+      /* No catalog entry: the override is the only context signal we have. */
+      return min_context <= 0 || (override_ctx > 0 && override_ctx >= min_context);
+   }
 
    if (ag->tools_enabled)
       caps.flags |= MODEL_CAP_TOOLS;
@@ -1129,7 +1141,8 @@ static int agent_satisfies_required_caps(const agent_t *ag, unsigned required_ca
       caps.flags &= ~MODEL_CAP_TOOLS;
    if (required_caps && (caps.flags & required_caps) != required_caps)
       return 0;
-   if (min_context > 0 && caps.context_window > 0 && caps.context_window < min_context)
+   int effective_ctx = override_ctx > 0 ? override_ctx : caps.context_window;
+   if (min_context > 0 && effective_ctx > 0 && effective_ctx < min_context)
       return 0;
    if (caps.deprecated)
       return 0;
