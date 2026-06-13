@@ -4,6 +4,7 @@
 #include "rel_types_store.h"
 #include "../headers/rel_types.h"
 #include "entity_edges.h"
+#include "ontology_evolution.h" /* db2_ontology_eval_observe (§2 / P4) */
 #include "db2_internal.h"
 #include "db_postgres.h"
 
@@ -157,6 +158,9 @@ fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_
       long id = db2_rel_types_stage_provisional(norm);
       if (id <= 0)
          return v;
+      /* §2: count the sighting so the promotion pipeline can evaluate this novel
+       * type once it crosses the occurrence threshold. */
+      (void)db2_ontology_eval_observe(norm);
       (void)db2_entity_edge_upsert_semantic(source, norm, target, (int)id, (int)head_kind,
                                             (int)tail_kind, cls, conf, NULL);
       return v;
