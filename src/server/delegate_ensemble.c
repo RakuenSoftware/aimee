@@ -406,7 +406,13 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
       }
    }
 
-   return agent_run_with_tools_write_enforce(&agg_cfg, role, NULL, synthesis_prompt, 4096, 0, out);
+   /* Synthesis is pure text/JSON merging of the panel's responses — it needs no
+    * tools. Running it through the tool-use loop breaks aggregators whose model
+    * has no tool-calling support (e.g. MiniMax), which then return empty and
+    * collapse the whole round to a degraded, artifact-less result. Use the
+    * plain (no-tools) role-routed path; default_agent still selects the
+    * configured aggregator. */
+   return agent_run_ex(&agg_cfg, role, NULL, synthesis_prompt, 4096, 0.3, out);
 }
 
 static char *build_round_prompt(const char *task, const char *artifact, const char *peer_notes,

@@ -157,6 +157,43 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    return 0;
 }
 
+/* The aggregator/synthesis step runs through the no-tools role-routed path
+ * (agent_run_ex) so non-tool models can synthesize. Mirror the aggregator
+ * branch of the tool-enabled stub below. */
+int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
+                 const char *user_prompt, int max_tokens, double temperature, agent_result_t *out)
+{
+   (void)cfg;
+   (void)system_prompt;
+   (void)user_prompt;
+   (void)max_tokens;
+   (void)temperature;
+   memset(out, 0, sizeof(*out));
+   char buf[128];
+   g_aggregator_calls++;
+   if (g_aggregator_mode == 1)
+      out->response =
+          strdup(g_aggregator_calls == 1 ? "synthesized answer 1" : "inferior final artifact");
+   else if (g_aggregator_mode == 2)
+   {
+      size_t n = 26000;
+      out->response = malloc(n);
+      memset(out->response, 'a', n - 2);
+      out->response[n - 2] = '\n';
+      out->response[n - 1] = '\0';
+   }
+   else
+   {
+      snprintf(buf, sizeof(buf), "synthesized answer %d", g_aggregator_calls);
+      out->response = strdup(buf);
+   }
+   out->prompt_tokens = 200;
+   out->completion_tokens = 100;
+   snprintf(out->agent_name, sizeof(out->agent_name), "%s", role ? role : "");
+   out->success = 1;
+   return 0;
+}
+
 int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
                                        const char *system_prompt, const char *user_prompt,
                                        int max_tokens, int enforce_writes, agent_result_t *out)
