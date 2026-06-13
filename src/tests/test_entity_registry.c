@@ -77,6 +77,28 @@ int main(void)
    assert(db2_entity_alias_bind("", cid, 1) == -1);
    assert(db2_entity_alias_bind("dangle", 999999, 1) == -1); /* target must exist */
 
+   /* first-class merge / unmerge (reversible via the merged_into follow). */
+   int64_t m_from = db2_entity_register_named("oldname box", NODE_DEVICE);
+   int64_t m_into = db2_entity_register_named("newname box", NODE_DEVICE);
+   assert(m_from > 0 && m_into > 0);
+   int64_t mid = db2_entity_merge(m_from, m_into);
+   assert(mid > 0);
+   assert(db2_entity_resolve("oldname box") == m_into); /* merged -> follows */
+   assert(db2_entity_unmerge(mid) == 0);
+   assert(db2_entity_resolve("oldname box") == m_from); /* restored */
+   assert(db2_entity_unmerge(mid) == -1);               /* already undone */
+   assert(db2_entity_merge(m_from, m_from) == -1);      /* self-merge rejected */
+   assert(db2_entity_merge(m_from, 999999) == -1);      /* missing target rejected */
+
+   /* entity_name_conflicts queue. */
+   int64_t conf = db2_entity_conflict_record("ambiguous theo");
+   assert(conf > 0);
+   assert(db2_entity_conflict_record("ambiguous theo") == conf); /* idempotent on name */
+   assert(db2_entity_conflict_count("open") == 1);
+   assert(db2_entity_conflict_set_status(conf, ENTITY_CONFLICT_RESOLVED) == 0);
+   assert(db2_entity_conflict_count("open") == 0);
+   assert(db2_entity_conflict_count(NULL) == 1);
+
    db2_test_shim_close();
    printf("entity_registry: all tests passed\n");
    return 0;

@@ -238,3 +238,158 @@ int db2_entity_aliases_for(int64_t canonical_id, char (*out)[128], int max)
    aimee_pg_finalize(st);
    return n;
 }
+
+int64_t db2_entity_merge(int64_t from_id, int64_t into_id)
+{
+   if (from_id <= 0 || into_id <= 0 || from_id == into_id)
+      return -1;
+   if (db2_entity_kind(from_id) < 0 || db2_entity_kind(into_id) < 0)
+      return -1; /* both endpoints must exist */
+   if (db2_entity_mark_merged(from_id, into_id) != 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[ER_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "INSERT INTO entity_merges (from_id, into_id) VALUES (?1, ?2) RETURNING id", err,
+       sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", from_id);
+   aimee_pg_bind_int64(st, "?2", into_id);
+   int64_t mid = -1;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      mid = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   return mid;
+}
+
+int db2_entity_unmerge(int64_t merge_id)
+{
+   if (merge_id <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[ER_ERRBUF] = "";
+   /* Load the not-yet-undone merge record. */
+   aimee_pg_stmt_t *q = aimee_pg_prepare(
+       conn, "SELECT from_id FROM entity_merges WHERE id = ?1 AND undone = 0 LIMIT 1", err,
+       sizeof(err));
+   if (!q)
+      return -1;
+   aimee_pg_bind_int64(q, "?1", merge_id);
+   int64_t from_id = 0;
+   if (aimee_pg_step(q, err, sizeof(err)) == AIMEE_PG_ROW)
+      from_id = aimee_pg_column_int64(q, 0);
+   aimee_pg_finalize(q);
+   if (from_id <= 0)
+      return -1; /* unknown id or already undone */
+
+   /* Restore the entity to active (aliases never moved, so resolve stops
+    * following merged_into and the entity is whole again). */
+   aimee_pg_stmt_t *u = aimee_pg_prepare(
+       conn,
+       "UPDATE entity_registry SET status = 'active', merged_into = 0 WHERE canonical_id = ?1", err,
+       sizeof(err));
+   if (!u)
+      return -1;
+   aimee_pg_bind_int64(u, "?1", from_id);
+   int rc = aimee_pg_step(u, err, sizeof(err));
+   aimee_pg_finalize(u);
+   if (rc != AIMEE_PG_DONE)
+      return -1;
+
+   aimee_pg_stmt_t *m = aimee_pg_prepare(conn, "UPDATE entity_merges SET undone = 1 WHERE id = ?1",
+                                         err, sizeof(err));
+   if (!m)
+      return -1;
+   aimee_pg_bind_int64(m, "?1", merge_id);
+   rc = aimee_pg_step(m, err, sizeof(err));
+   aimee_pg_finalize(m);
+   return rc == AIMEE_PG_DONE ? 0 : -1;
+}
+
+int64_t db2_entity_conflict_record(const char *name)
+{
+   if (!name || !name[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char norm[256];
+   entity_name_normalize(name, norm, sizeof(norm));
+   if (!norm[0])
+      return -1;
+   char err[ER_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "INSERT INTO entity_name_conflicts (name_norm, status, priority) VALUES (?1, 'open', 1)"
+       " ON CONFLICT (name_norm) DO UPDATE SET priority = entity_name_conflicts.priority + 1",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", norm);
+   int rc = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   if (rc != AIMEE_PG_DONE)
+      return -1;
+   aimee_pg_stmt_t *qid = aimee_pg_prepare(
+       conn, "SELECT id FROM entity_name_conflicts WHERE name_norm = ?1 LIMIT 1", err, sizeof(err));
+   if (!qid)
+      return -1;
+   aimee_pg_bind_text(qid, "?1", norm);
+   int64_t id = -1;
+   if (aimee_pg_step(qid, err, sizeof(err)) == AIMEE_PG_ROW)
+      id = aimee_pg_column_int64(qid, 0);
+   aimee_pg_finalize(qid);
+   return id;
+}
+
+int db2_entity_conflict_set_status(int64_t conflict_id, const char *status)
+{
+   if (conflict_id <= 0 || !status || !status[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[ER_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "UPDATE entity_name_conflicts SET status = ?2 WHERE id = ?1", err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", conflict_id);
+   aimee_pg_bind_text(st, "?2", status);
+   int rc = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return rc == AIMEE_PG_DONE ? 0 : -1;
+}
+
+int db2_entity_conflict_count(const char *status)
+{
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[ER_ERRBUF] = "";
+   aimee_pg_stmt_t *st;
+   if (status && status[0])
+   {
+      st = aimee_pg_prepare(conn, "SELECT COUNT(*) FROM entity_name_conflicts WHERE status = ?1",
+                            err, sizeof(err));
+      if (!st)
+         return -1;
+      aimee_pg_bind_text(st, "?1", status);
+   }
+   else
+   {
+      st = aimee_pg_prepare(conn, "SELECT COUNT(*) FROM entity_name_conflicts", err, sizeof(err));
+      if (!st)
+         return -1;
+   }
+   int c = -1;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      c = aimee_pg_column_int(st, 0);
+   aimee_pg_finalize(st);
+   return c;
+}
