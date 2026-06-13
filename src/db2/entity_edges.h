@@ -40,6 +40,19 @@ extern "C"
                               int64_t window_id, int relation_id, int subject_kind, int object_kind,
                               int *out_added);
 
+   /* Typed-fact (§1 / P1) semantic-edge writer: like db2_entity_edge_upsert but
+    * stamps edge_class='semantic' so the row is separable from co-occurrence rows
+    * sharing this table (R1-A1). The single commit point for semantic edges is
+    * the typed-fact gate (db2_fact_commit) — callers route through it, not here
+    * directly. Bumps weight on a repeat (source,relation,target). 0/-1. */
+   int db2_entity_edge_upsert_semantic(const char *source, const char *relation, const char *target,
+                                       int relation_id, int subject_kind, int object_kind,
+                                       int *out_added);
+
+   /* Recall over typed facts: edges where (source=entity OR target=entity) AND
+    * edge_class='semantic' (co-occurrence rows excluded). Returns count. */
+   int db2_entity_edges_semantic_by_entity(const char *entity, edge_t *out, int max);
+
    /* List edges where source = entity OR target = entity (symmetric).
     * Fills full edge_t rows. Returns count. */
    int db2_entity_edge_list_by_entity(const char *entity, edge_t *out, int max);
