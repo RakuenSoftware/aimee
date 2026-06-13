@@ -199,6 +199,30 @@ int rtp_run_set_state(int id, const char *state, const char *phase)
    return changed > 0 ? 0 : -1;
 }
 
+int rtp_run_cas_state(int id, const char *expected, const char *next)
+{
+   if (id <= 0 || !expected || !next)
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+   sqlite3_stmt *stmt = NULL;
+   /* The WHERE ... AND state=? makes the transition atomic: SQLite serializes the
+    * UPDATE, so of two concurrent callers exactly one matches `expected` and
+    * changes a row; the loser changes zero rows and gets -1. */
+   static const char *sql = "UPDATE roundtable_pipeline_runs SET state=?,"
+                            " updated_at=datetime('now') WHERE id=? AND state=?";
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(stmt, 1, next, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 2, id);
+   sqlite3_bind_text(stmt, 3, expected, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(stmt);
+   int changed = (rc == SQLITE_DONE) ? sqlite3_changes(db) : 0;
+   sqlite3_finalize(stmt);
+   return changed > 0 ? 0 : -1;
+}
+
 int rtp_run_list(const char *state_filter, rtp_run_t *out, int max)
 {
    if (!out || max <= 0)

@@ -46,6 +46,12 @@ static int validate_pr_for_merge(rtp_run_t *run, rtp_gate_t *gate, int gate_no, 
    }
    else if (mergeable[0] && strcmp(mergeable, "CONFLICTING") == 0)
       why = "PR is not mergeable (conflicting)";
+   else if (mergeable[0] && strcmp(mergeable, "MERGEABLE") != 0)
+      /* Anything that is neither MERGEABLE nor CONFLICTING (notably UNKNOWN,
+       * which GitHub returns while it is still computing mergeability) is not
+       * "assume green" (§5): park in *_merge_pending and re-check, rather than
+       * attempting a merge against an unknown state. */
+      why = "PR mergeability not yet known (UNKNOWN); verdict preserved, re-check shortly";
    cJSON_Delete(j);
    if (why)
    {

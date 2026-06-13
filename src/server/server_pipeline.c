@@ -1824,16 +1824,28 @@ int handle_pipeline_gate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    if (strcmp(verdict, "fail") == 0)
    {
+      /* Exactly-once (#55): atomically claim the transition out of the matching
+       * *_pending state. A concurrent/duplicate `gate` that already moved the
+       * run loses the CAS and is told so rather than re-resolving. */
+      if (rtp_run_cas_state(id, run.state, review_back) != 0)
+         return server_send_error(conn, "pipeline: gate already resolved or resolving", NULL);
+      snprintf(run.state, sizeof(run.state), "%s", review_back); /* keep struct consistent */
       rtp_gate_update(&gate);
-      /* fail reason -> brief, return to the review phase (#43 same PR). */
+      /* fail reason -> brief, return to the review phase (#43 same PR). Reserve the
+       * buffer tail so a near-full brief never silently truncates the human's
+       * reason — the fail-return contract requires the reason reach the panel. */
       if (reason && reason[0])
       {
+         char suffix[RTP_BRIEF_LEN];
+         int sn = snprintf(suffix, sizeof(suffix), "\nhuman-gate-%d fail: %s", gate_no, reason);
+         int room = (int)sizeof(run.brief) - (sn < 0 ? 0 : sn) - 1;
+         if (room < 0)
+            room = 0;
          char nb[RTP_BRIEF_LEN];
-         snprintf(nb, sizeof(nb), "%s\nhuman-gate-%d fail: %s", run.brief, gate_no, reason);
+         snprintf(nb, sizeof(nb), "%.*s%s", room, run.brief, suffix);
          snprintf(run.brief, sizeof(run.brief), "%s", nb);
       }
-      rtp_run_update(&run);
-      rtp_run_set_state(id, review_back, NULL);
+      rtp_run_update(&run); /* persists brief + the CAS'd state */
       cJSON *resp = jo_ok();
       cJSON_AddStringToObject(resp, "verdict", "fail");
       cJSON_AddStringToObject(resp, "state", review_back);
@@ -1843,11 +1855,15 @@ int handle_pipeline_gate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
 
    /* pass: atomically write the merge intent + move to *_merge_pending (#56),
-    * then run the policy-aware merge and advance on success. */
+    * then run the policy-aware merge and advance on success. The CAS is the
+    * exactly-once guard (#55): only the caller that moves the run out of
+    * *_pending runs the merge; a racing duplicate gets "already resolving". */
    const char *merge_state =
        gate_no == 2 ? RTP_STATE_GATE2_MERGE_PENDING : RTP_STATE_GATE1_MERGE_PENDING;
+   if (rtp_run_cas_state(id, run.state, merge_state) != 0)
+      return server_send_error(conn, "pipeline: gate already resolved or resolving", NULL);
+   snprintf(run.state, sizeof(run.state), "%s", merge_state); /* keep struct consistent */
    rtp_gate_update(&gate);
-   rtp_run_set_state(id, merge_state, NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "verdict", "pass");

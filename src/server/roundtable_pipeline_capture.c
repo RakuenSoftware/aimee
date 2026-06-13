@@ -214,9 +214,13 @@ int rtp_seam_finalize(const char *run_id, int http_ok, int cancelled, const char
       rtp_run_t run2;
       if (rtp_run_get(pass.pipeline_id, &run2) == 0)
       {
+         /* Attribute to a phase by an explicit whitelist, not a catch-all else,
+          * so a future phase cannot silently misbill to the proposal bucket
+          * (#7). v1 has exactly two phases; an unknown phase still counts toward
+          * the whole-pipeline total but is not misattributed to a per-phase cap. */
          if (strcmp(pass.phase, RTP_PHASE_IMPL) == 0)
             run2.impl_phase_cost_usd += env.cost_usd;
-         else
+         else if (strcmp(pass.phase, RTP_PHASE_PROPOSAL) == 0)
             run2.proposal_phase_cost_usd += env.cost_usd;
          run2.total_cost_usd += env.cost_usd;
          rtp_run_update(&run2);
