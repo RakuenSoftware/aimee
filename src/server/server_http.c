@@ -1722,7 +1722,7 @@ static void handle_conn(int fd, int is_tcp)
     * or a server.token-gated webuser assertion) into thread-locals, live until
     * loopback_rpc copies it into the synthesized conn. Cleared after the route so
     * a reused worker thread cannot leak it into the next request. */
-   server_http_identity_capture(fd, is_tcp, buf, g_bearer);
+   server_http_identity_capture(fd, is_tcp, buf);
    int status = server_http_route(method, path, body, body_len, resp, SHTTP_RESP_MAX);
    g_rpc_conn_caps = CAPS_READ_ONLY;
    server_http_identity_clear();

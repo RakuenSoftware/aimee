@@ -35,9 +35,10 @@
  *   fd      - the connection socket (SO_PEERCRED source for UDS).
  *   is_tcp  - 1 for the network listener, 0 for the local UDS socket.
  *   buf     - the raw HTTP request (read for the X-Aimee-Webuser / Authorization headers).
- *   bearer  - the configured server.token bearer (empty when none), required to
- *             honor a webuser assertion. */
-void server_http_identity_capture(int fd, int is_tcp, const char *buf, const char *bearer);
+ * A webuser assertion is honored only when the request's Bearer matches the
+ * server.token file (the secret the webchat backend holds), read from AIMEE_HOME
+ * — NOT the configured TCP /v1 bearer, which is an independent secret. */
+void server_http_identity_capture(int fd, int is_tcp, const char *buf);
 
 /* Copy the captured identity onto a (synthesized) connection — loopback_rpc's
  * hop 2. Safe to call with no prior capture: writes the un-attested defaults. */
