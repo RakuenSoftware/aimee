@@ -1012,7 +1012,9 @@ delegate for review. Full guide: [`docs/DELEGATES.md`](docs/DELEGATES.md).
 
 **Roundtable:** `aimee delegate roundtable` reuses `ensemble.enabled`,
 `ensemble.reference_models`, `ensemble.aggregator`, `ensemble.min_successful`,
-and `ensemble.max_cost_usd`. `roundtable.max_rounds` defaults to `3`,
+and `ensemble.max_cost_usd` (optional; unset or `0` means no cost cap, the
+default — set a positive value to cap a run). The panel and aggregator ship
+configured, so the roundtable runs with no setup. `roundtable.max_rounds` defaults to `3`,
 `roundtable.converge_threshold` to `10`, `roundtable.deadline_ms` to `600000`,
 and `roundtable.turns` to `parallel`. Draft mode returns a shared artifact;
 review mode returns a consolidated review, and `--apply` asks a final draft turn
