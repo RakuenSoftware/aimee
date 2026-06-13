@@ -589,6 +589,7 @@ Start here:
 
 | Document | Description |
 |----------|-------------|
+| **[Quickstart](docs/QUICKSTART.md)** | **Zero to working in a few minutes**: run the server, install the client, wire your tool. |
 | **[How aimee learns](docs/KNOWLEDGE.md)** | **The vision and the mechanisms**, the company-wide knowledge base, self-learning pipeline, cross-domain synthesis, and delegation economics. |
 | **[Manual](MANUAL.md)** | **The complete user reference**, installation, configuration, current command contract, and feature guides. |
 | **[Architecture](docs/ARCHITECTURE.md)** | System design, processes, storage/trust boundaries, layering, and request lifecycles. |

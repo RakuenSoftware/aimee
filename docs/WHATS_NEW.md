@@ -54,6 +54,25 @@ secrets; see [THIN_CLIENT.md](THIN_CLIENT.md).
   `aimee agent add … --provider codex` is accepted as an alias for the Codex
   adapter.
 
+Delegation defaults and the roundtable — see [DELEGATES.md](DELEGATES.md).
+
+- **Delegates work out of the box**: a default agent roster, the ensemble panel,
+  and `remote_writes=full` ship seeded, so `aimee delegate …` and the roundtable
+  run on a fresh install with no setup.
+- **Roundtable runs through the delegate core**: `aimee delegate aggregate`
+  (mixture-of-agents) and `aimee delegate roundtable` fan out to a panel and an
+  aggregator synthesizes one answer; the run executes through the delegate path,
+  so it stays inside session state, cost accounting, and the audit trail. Cost is
+  folded onto the originating session.
+- **Use delegates, not agents**: the host AI's own sub-agent tool is blocked
+  (Claude Code's `Task` included), always on. The block points the agent at
+  `aimee delegate <role>` / `aimee delegate roundtable … --mode review`.
+- **Output limits come from the model**: token caps are derived from the model
+  registry instead of a hardcoded 4096, so large-context models use their real
+  ceiling.
+- **`ensemble.max_cost_usd` is optional**: a per-run cost cap is now opt-in —
+  unset (or 0) means no limit, the default. Set a positive value to cap a run.
+
 ---
 
 ## v0.2.0
