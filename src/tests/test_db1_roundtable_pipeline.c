@@ -347,6 +347,19 @@ static void test_cas_exactly_once(void)
 
    /* CAS against a non-existent id also fails cleanly. */
    assert(rtp_run_cas_state(999999, RTP_STATE_GATE1_PENDING, RTP_STATE_DONE) == -1);
+
+   /* Fail-path transition (gate -> review_back) is the same primitive: from a
+    * fresh gate-pending run, the first claim to proposal_review wins and a stale
+    * duplicate loses, so a duplicate `gate fail` cannot re-enter the review loop
+    * twice either. */
+   int id2 = 0;
+   assert(rtp_run_create("cas fail path", RTP_DONEBAR_ZERO_BLOCKING, "/repo", "testing", &id2) ==
+          0);
+   assert(rtp_run_set_state(id2, RTP_STATE_GATE1_PENDING, NULL) == 0);
+   assert(rtp_run_cas_state(id2, RTP_STATE_GATE1_PENDING, RTP_STATE_PROPOSAL_REVIEW) == 0);
+   assert(rtp_run_cas_state(id2, RTP_STATE_GATE1_PENDING, RTP_STATE_PROPOSAL_REVIEW) == -1);
+   assert(rtp_run_get(id2, &r) == 0);
+   assert(strcmp(r.state, RTP_STATE_PROPOSAL_REVIEW) == 0);
    printf("  cas exactly-once: ok\n");
 }
 

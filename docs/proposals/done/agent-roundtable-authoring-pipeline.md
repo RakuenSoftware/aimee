@@ -1,6 +1,12 @@
 # Proposal: Agent roundtable authoring pipeline (idea → reviewed proposal → implementation → reviewed PR)
 
-- **State:** accepted — implementing (branch `feat/roundtable-authoring-pipeline`)
+- **State:** done — implemented and merged to `testing` across 17 commits
+  (P0–P4 + 11 implementation-review rounds + chunked-review + first-class MCP;
+  PR #193). Full unit suite green (`-Werror`, build-integrity clean); 6 pipeline
+  test files / 37 test fns cover the §10 matrix. A post-merge completeness
+  roundtable then closed four findings (§55 gate exactly-once CAS,
+  mergeable=UNKNOWN merge policy, fail-reason brief fidelity, per-phase cost
+  whitelist). Original branch `feat/roundtable-authoring-pipeline`.
 - **Author:** JBailes
 - **Date:** 2026-06-11 (consolidated — 23 PR-#183 review rounds / 57 findings folded into the design sections and indexed in Appendix A)
 - **Charter roles:** Orchestrate (pipeline state machine), Draft/Review
