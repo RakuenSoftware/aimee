@@ -151,6 +151,13 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	// Aggregate dashboard endpoint — all panels in one server round-trip
 	mux.HandleFunc("/api/dashboard", s.requireAuth(s.handleDashboardAll))
 
+	// Credential vault (WP-C.2c): the user re-presents their login password to
+	// unlock; calls carry the server.token bearer + X-Aimee-Webuser so
+	// aimee-server resolves this user's webuser: vault.
+	mux.HandleFunc("/api/vault/unlock", s.requireAuth(s.handleVaultUnlock))
+	mux.HandleFunc("/api/vault/password", s.requireAuth(s.handleVaultPassword))
+	mux.HandleFunc("/api/vault/credentials", s.requireAuth(s.handleVaultCredentials))
+
 	// Live endpoints backed by aimee-server socket
 	mux.HandleFunc("/api/agents", s.requireAuth(s.handleAgents))
 	mux.HandleFunc("/api/rules", s.requireAuth(s.handleCollabRulesList))
