@@ -65,6 +65,33 @@ static void test_apikey_ref_not_serialized(void)
    printf("  PASS: test_apikey_ref_not_serialized\n");
 }
 
+/* The save fallback (api_key_disk empty -> write api_key) must emit the
+ * reference, never a resolved secret. An in-memory agent created without a load
+ * (e.g. `agent add $VAR`) holds the unexpanded reference in api_key. */
+static void test_apikey_ref_fallback_save(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 1;
+   agent_t *ag = &cfg.agents[0];
+   snprintf(ag->name, sizeof(ag->name), "memref");
+   snprintf(ag->endpoint, sizeof(ag->endpoint), "https://api.example/v1");
+   snprintf(ag->model, sizeof(ag->model), "m");
+   ag->enabled = 1;
+   snprintf(ag->api_key, sizeof(ag->api_key), "$AIMEE_APIKEY_FALLBACK_TEST");
+   /* api_key_disk intentionally left empty (zeroed by memset). */
+
+   assert(agent_save_config(&cfg) == 0);
+   FILE *f = fopen(agent_config_path(), "r");
+   assert(f != NULL);
+   char buf[8192];
+   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+   fclose(f);
+   buf[n] = '\0';
+   assert(strstr(buf, "$AIMEE_APIKEY_FALLBACK_TEST") != NULL); /* reference via fallback */
+   printf("  PASS: test_apikey_ref_fallback_save\n");
+}
+
 int main(void)
 {
    char tmp_template[] = "/tmp/aimee-agent-apikey-XXXXXX";
@@ -73,6 +100,7 @@ int main(void)
    setenv("AIMEE_HOME", tmp_home, 1);
 
    test_apikey_ref_not_serialized();
+   test_apikey_ref_fallback_save();
 
    printf("agent_apikey: all tests passed\n");
    return 0;

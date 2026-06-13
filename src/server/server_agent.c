@@ -496,8 +496,11 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          /* An env reference is not a secret: store it UNEXPANDED so agents.json
           * holds "$VAR", not the resolved value. agent_load_config expands it
           * from the environment at run time. Expanding here would serialize the
-          * plaintext key to disk — the exact leak the literal branch avoids. */
+          * plaintext key to disk — the exact leak the literal branch avoids.
+          * api_key_disk is set explicitly too, so the on-disk form is correct
+          * regardless of how the agent is re-saved later. */
          snprintf(ag->api_key, sizeof(ag->api_key), "%s", key);
+         snprintf(ag->api_key_disk, sizeof(ag->api_key_disk), "%s", key);
       }
       else
       {
@@ -518,7 +521,8 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                    conn, "vault locked: run `aimee vault unlock` before adding a key", NULL);
             return server_send_error(conn, "could not store credential in the vault", NULL);
          }
-         ag->api_key[0] = '\0'; /* the secret lives only in the vault */
+         ag->api_key[0] = '\0';      /* the secret lives only in the vault */
+         ag->api_key_disk[0] = '\0'; /* and nothing goes to agents.json */
       }
    }
    const char *auth_cmd = opt_get(&opts, "auth-cmd");
