@@ -3,6 +3,7 @@
 
 #include "agent_types.h"
 #include "config.h"
+#include "vault_principal.h" /* VAULT_PRINCIPAL_MAX for the per-turn vault principal */
 
 int agent_load_config(agent_config_t *cfg);
 int agent_save_config(const agent_config_t *cfg);
@@ -47,17 +48,29 @@ void agent_set_request_codex_creds(const char *token, const char *account_id);
  * Thread-local. */
 void agent_set_request_session(const char *session_id);
 
+/* The attested vault principal (WP-C) for the in-flight chat turn, thread-local.
+ * The chat worker sets it from its compute_ctx around the agent loop and clears
+ * it after, so a delegate the chat spawns in-process (decoupled from the
+ * originating connection) can still reach the same user's vault:
+ * create_compute_ctx falls back to this when its conn carries no principal. Set
+ * strictly for the agent-loop duration; empty otherwise. NEVER a client value. */
+void agent_set_request_vault_principal(const char *principal);
+const char *agent_get_request_vault_principal(void);
+
 /* Snapshot of the per-turn, thread-local credential context (session id + Codex
- * creds). agent_set_request_session / agent_set_request_codex_creds bind these
+ * creds + WP-C vault principal). agent_set_request_session /
+ * agent_set_request_codex_creds / agent_set_request_vault_principal bind these
  * on the dispatching thread, but a parallel fan-out (agent_run_parallel) runs
  * each agent on a fresh worker thread that does NOT inherit thread-locals — so
  * the dispatcher snapshots its context and each worker restores it, or the
- * panel runs keyless. */
+ * panel runs keyless. The vault principal rides along so a fan-out delegate
+ * reaches the originating user's vault just like a same-thread delegate. */
 typedef struct
 {
    char session_id[128];
    char codex_token[MAX_API_KEY_LEN];
    char codex_account_id[128];
+   char vault_principal[VAULT_PRINCIPAL_MAX];
 } agent_request_creds_t;
 
 void agent_request_creds_snapshot(agent_request_creds_t *out);
