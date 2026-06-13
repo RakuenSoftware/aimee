@@ -28,6 +28,14 @@ static pthread_mutex_t g_vault_write_mu = PTHREAD_MUTEX_INITIALIZER;
 #define VAULT_SECRET_MAX   4096 /* max credential plaintext length */
 #define VAULT_AAD_MAX      320  /* "principal|agent|cred" (160 + 64 + 64 + seps) */
 
+/* A fixed 32-byte sentinel AES-KW-wrapped under the KEK is the vault's key-check
+ * verifier: it lets unlock + rekey prove a derived KEK is correct WITHOUT any
+ * stored credential, closing the empty-vault rekey fail-open. (Not secret — its
+ * only role is that AES-KW unwrap fails the RFC 3394 ICV under the wrong KEK.) */
+static const uint8_t VAULT_KEK_CHECK_SENTINEL[VAULT_DEK_LEN] = {
+    0x61, 0x69, 0x6d, 0x65, 0x65, 0x2d, 0x76, 0x61, 0x75, 0x6c, 0x74, 0x2d, 0x6b, 0x65, 0x6b, 0x2d,
+    0x63, 0x68, 0x65, 0x63, 0x6b, 0x2d, 0x76, 0x31, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77};
+
 /* Detach + free the (agent,cred) entry from the creds array if present. */
 static void remove_cred(cJSON *creds, cJSON *entry)
 {
@@ -474,6 +482,81 @@ out:
    return rc;
 }
 
+int vault_store_salt_readonly(const char *principal, uint8_t salt[VAULT_SALT_LEN])
+{
+   if (!principal || !principal[0] || !salt)
+      return -1;
+   cJSON *root = load_vault(principal);
+   if (!root)
+      return -1;
+   cJSON *js = cJSON_GetObjectItemCaseSensitive(root, "salt");
+   int ok =
+       cJSON_IsString(js) && b64url_decode(js->valuestring, salt, VAULT_SALT_LEN) == VAULT_SALT_LEN;
+   cJSON_Delete(root);
+   if (!ok)
+      OPENSSL_cleanse(salt, VAULT_SALT_LEN);
+   return ok ? 0 : -1;
+}
+
+/* True if `kek` unwraps the stored kek_check verifier to the sentinel. */
+static int kek_check_matches(cJSON *root, const uint8_t kek[VAULT_KEK_LEN])
+{
+   cJSON *jc = cJSON_GetObjectItemCaseSensitive(root, "kek_check");
+   uint8_t wrapped[VAULT_WRAPPED_DEK_LEN], out[VAULT_DEK_LEN];
+   if (!cJSON_IsString(jc) ||
+       b64url_decode(jc->valuestring, wrapped, sizeof(wrapped)) != VAULT_WRAPPED_DEK_LEN ||
+       vault_dek_unwrap(kek, wrapped, out) != 0)
+      return 0;
+   int ok = memcmp(out, VAULT_KEK_CHECK_SENTINEL, VAULT_DEK_LEN) == 0;
+   OPENSSL_cleanse(out, sizeof(out));
+   return ok;
+}
+
+/* Wrap the sentinel under `kek` into the root's kek_check field. 0 on success. */
+static int kek_check_set(cJSON *root, const uint8_t kek[VAULT_KEK_LEN])
+{
+   uint8_t wrapped[VAULT_WRAPPED_DEK_LEN];
+   if (vault_dek_wrap(kek, VAULT_KEK_CHECK_SENTINEL, wrapped) != 0)
+      return -1;
+   char *enc = b64url_encode(wrapped, sizeof(wrapped));
+   if (!enc)
+      return -1;
+   cJSON *existing = cJSON_GetObjectItemCaseSensitive(root, "kek_check");
+   if (cJSON_IsString(existing))
+      cJSON_SetValuestring(existing, enc);
+   else
+      cJSON_AddStringToObject(root, "kek_check", enc);
+   free(enc);
+   return 0;
+}
+
+int vault_store_unlock_check(const char *principal, const uint8_t kek[VAULT_KEK_LEN])
+{
+   if (!principal || !kek)
+      return -1;
+   pthread_mutex_lock(&g_vault_write_mu);
+   cJSON *root = load_vault(principal);
+   if (!root)
+   {
+      pthread_mutex_unlock(&g_vault_write_mu);
+      return -1;
+   }
+   int rc;
+   if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root, "kek_check")))
+   {
+      /* Established already: this KEK is valid only if it unwraps the verifier. */
+      rc = kek_check_matches(root, kek) ? 0 : -1;
+   }
+   else
+   {
+      /* First unlock: establish the verifier from this KEK (write-back). */
+      rc = (kek_check_set(root, kek) == 0 && write_vault_file(principal, root) == 0) ? 0 : -1;
+   }
+   cJSON_Delete(root);
+   pthread_mutex_unlock(&g_vault_write_mu);
+   return rc;
+}
+
 int vault_store_rekey(const char *principal, const uint8_t old_kek[VAULT_KEK_LEN],
                       const uint8_t new_kek[VAULT_KEK_LEN])
 {
@@ -487,7 +570,18 @@ int vault_store_rekey(const char *principal, const uint8_t old_kek[VAULT_KEK_LEN
       return -1; /* no vault to rekey */
    }
 
-   int rc = 0;
+   /* Validate the OLD KEK against the key-check verifier FIRST — independent of
+    * credential count, so an empty vault cannot be rekeyed with a wrong old
+    * password. A vault with no verifier was never unlocked: refuse. */
+   if (!cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root, "kek_check")) ||
+       !kek_check_matches(root, old_kek))
+   {
+      cJSON_Delete(root);
+      pthread_mutex_unlock(&g_vault_write_mu);
+      return -1;
+   }
+
+   int rc = kek_check_set(root, new_kek); /* re-wrap the verifier under the new KEK */
    cJSON *creds = creds_array(root);
    cJSON *e = NULL;
    if (creds)

@@ -41,6 +41,21 @@ typedef struct
  * created. 0 on success (salt filled), -1 on error. */
 int vault_store_get_or_create_salt(const char *principal, uint8_t salt[VAULT_SALT_LEN]);
 
+/* Read an EXISTING principal's salt without creating the vault file. Returns 0 on
+ * success, -1 if the vault does not exist or is corrupt. Used by rekey so a
+ * password change against a non-existent principal fails closed without
+ * materializing an (attacker-controlled) vault. */
+int vault_store_salt_readonly(const char *principal, uint8_t salt[VAULT_SALT_LEN]);
+
+/* Validate a derived KEK against the principal's stored key-check verifier — a
+ * fixed sentinel wrapped under the KEK — so a wrong password is caught
+ * immediately and INDEPENDENTLY of how many credentials exist (an empty vault is
+ * the normal fresh state). On the FIRST unlock (no verifier yet) the verifier is
+ * established from this KEK and 0 is returned. Thereafter: 0 if the KEK matches,
+ * -1 if it does not (wrong password/root key) or the vault is missing/corrupt.
+ * Call right after deriving the KEK at unlock, before caching it. */
+int vault_store_unlock_check(const char *principal, const uint8_t kek[VAULT_KEK_LEN]);
+
 /* Encrypt `secret` for (principal, agent, cred) under `kek` and upsert it into
  * the principal's vault file (fresh DEK + nonce each time; existing entry
  * replaced). The vault file must already exist (unlock establishes it). 0 on
