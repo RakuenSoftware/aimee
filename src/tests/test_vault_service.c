@@ -283,6 +283,32 @@ static void test_server_inject_after_restart(void)
    printf("  PASS: test_server_inject_after_restart\n");
 }
 
+/* WP-C.4 server principal: a delegate credential pushed with NO per-user
+ * principal (the TCP thin-client case) lands in the server-owned vault and is
+ * resolved autonomously by inject — no unlock, survives a cache clear. */
+static void test_server_principal_vault(void)
+{
+   /* No unlock, no user principal — set_server just works. */
+   assert(vault_service_set_server("claude", VAULT_API_KEY_CRED, "sk-server-owned") == VAULT_OK);
+
+   /* inject with an EMPTY principal (the TCP case) resolves from the server vault. */
+   char key[64] = "PRESET";
+   assert(vault_service_inject_api_key("", "claude", key, sizeof(key), T0) == VAULT_OK);
+   assert(strcmp(key, "sk-server-owned") == 0);
+
+   /* A missing agent is NO_ENTRY; api_key untouched. */
+   char k2[64] = "KEEP";
+   assert(vault_service_inject_api_key("", "absent", k2, sizeof(k2), T0) == VAULT_NO_ENTRY);
+   assert(strcmp(k2, "KEEP") == 0);
+
+   /* Survives a restart: the server principal needs no KEK cache. */
+   vault_kek_cache_clear();
+   char k3[64] = "PRESET";
+   assert(vault_service_inject_api_key("", "claude", k3, sizeof(k3), T0) == VAULT_OK);
+   assert(strcmp(k3, "sk-server-owned") == 0);
+   printf("  PASS: test_server_principal_vault\n");
+}
+
 int main(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-vaultsvc-test-%d", (int)getpid());
@@ -302,6 +328,7 @@ int main(void)
    test_webuser_rekey();
    test_rekey_empty_and_missing_vault();
    test_server_inject_after_restart();
+   test_server_principal_vault();
 
    vault_kek_cache_clear();
    char rm[320];

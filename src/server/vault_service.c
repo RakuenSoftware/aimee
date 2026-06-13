@@ -74,6 +74,50 @@ static vault_status_t vault_service_get_server(const char *principal, const char
    return VAULT_ERR_CRYPTO; /* decrypt/tamper — fail closed */
 }
 
+/* Read (agent, cred) from the SERVER principal's vault under the server master KEK
+ * — no client, no unlock. VAULT_OK / VAULT_NO_ENTRY (no file or no entry) /
+ * VAULT_ERR_* (fail closed). */
+static vault_status_t vault_service_get_server_principal(const char *agent, const char *cred,
+                                                         char *out, size_t out_len)
+{
+   if (out && out_len)
+      out[0] = '\0';
+   if (!agent || !cred || !out || !out_len)
+      return VAULT_ERR_BADARG;
+   uint8_t kek[VAULT_KEK_LEN];
+   if (vault_server_kek(kek) != 0)
+      return VAULT_ERR_CRYPTO;
+   int rc = vault_store_get(VAULT_SERVER_PRINCIPAL, kek, agent, cred, out, out_len);
+   OPENSSL_cleanse(kek, sizeof(kek));
+   if (rc == 0)
+      return VAULT_OK;
+   if (rc == VAULT_STORE_NO_ENTRY)
+      return VAULT_NO_ENTRY;
+   return VAULT_ERR_CRYPTO; /* decrypt/tamper — fail closed */
+}
+
+vault_status_t vault_service_set_server(const char *agent, const char *cred, const char *secret)
+{
+   if (!agent || !agent[0] || !cred || !cred[0] || !secret)
+      return VAULT_ERR_BADARG;
+   uint8_t kek[VAULT_KEK_LEN];
+   if (vault_server_kek(kek) != 0)
+      return VAULT_ERR_CRYPTO; /* fail-closed: no server KEK -> never store plaintext */
+
+   /* The vault file must exist before set; create it (the stored salt is unused
+    * for the server KEK, which is derived from the master key, not salt+root). */
+   uint8_t salt[VAULT_SALT_LEN];
+   vault_status_t st;
+   if (vault_store_get_or_create_salt(VAULT_SERVER_PRINCIPAL, salt) != 0)
+      st = VAULT_ERR_IO;
+   else
+      st = vault_store_set(VAULT_SERVER_PRINCIPAL, kek, agent, cred, secret) == 0 ? VAULT_OK
+                                                                                  : VAULT_ERR_IO;
+   OPENSSL_cleanse(kek, sizeof(kek));
+   OPENSSL_cleanse(salt, sizeof(salt));
+   return st;
+}
+
 vault_status_t vault_service_unlock(const char *principal, attested_transport_t transport,
                                     const uint8_t *root_key, size_t root_key_len, long now_epoch)
 {
@@ -299,6 +343,11 @@ vault_status_t vault_service_inject_api_key(const char *principal, const char *a
        vault_service_get_server(principal, agent, VAULT_API_KEY_CRED, tmp, api_key_len);
    if (st == VAULT_NO_ENTRY)
       st = vault_service_get(principal, agent, VAULT_API_KEY_CRED, tmp, api_key_len, now_epoch);
+   /* Last: the server-owned vault (delegate creds pushed from a TCP thin client,
+    * which has no per-user principal). Only on a clean miss — a LOCKED user cred
+    * stays a hard error (D15), never silently downgraded to the server vault. */
+   if (st == VAULT_NO_ENTRY)
+      st = vault_service_get_server_principal(agent, VAULT_API_KEY_CRED, tmp, api_key_len);
    if (st == VAULT_OK)
       snprintf(api_key, api_key_len, "%s", tmp); /* overwrite only on a real hit */
    OPENSSL_cleanse(tmp, api_key_len);

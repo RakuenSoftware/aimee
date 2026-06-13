@@ -64,6 +64,18 @@ vault_status_t vault_service_rekey_password(const char *principal, attested_tran
 vault_status_t vault_service_set(const char *principal, const char *agent, const char *cred,
                                  const char *secret, long now_epoch);
 
+/* The SERVER-owned principal (WP-C.4): a vault whose KEK is the server master key
+ * (vault_server_key), needing no client root key / login / unlock. This is where
+ * delegate credentials pushed from a remote (TCP) thin client live, so the server
+ * can read them autonomously over any transport. Encrypted at rest like any other
+ * vault; the server-key trust boundary applies (see vault_server_key.h). */
+#define VAULT_SERVER_PRINCIPAL "server"
+
+/* Store `secret` for (agent, cred) under the server principal, encrypted under the
+ * server master KEK. No unlock required — usable from a TCP client. Returns
+ * VAULT_OK, or VAULT_ERR_CRYPTO/IO on a fail-closed error. */
+vault_status_t vault_service_set_server(const char *agent, const char *cred, const char *secret);
+
 /* The use-path: resolve (agent, cred) for `principal` into `out`. Returns:
  *   VAULT_OK         + plaintext written;
  *   VAULT_NO_ENTRY   when there is no such credential (or no/blank principal) —
