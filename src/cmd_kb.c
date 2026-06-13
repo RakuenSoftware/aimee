@@ -103,7 +103,11 @@ static void kb_cmd_update(app_ctx_t *ctx, int argc, char **argv)
 
    config_t cfg;
    config_load(&cfg);
-   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
+   /* Pass NULL when no local embedder is configured (the thin client has none)
+    * so the kb embeds with its OWN embedder; defaulting to "builtin" (384-dim
+    * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
+    * nothing. */
+   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : NULL;
 
    char proj[256];
    kb_resolve_project(project, root, proj, sizeof(proj));
@@ -175,7 +179,11 @@ static void kb_cmd_search(app_ctx_t *ctx, int argc, char **argv)
 
    config_t cfg;
    config_load(&cfg);
-   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
+   /* Pass NULL when no local embedder is configured (the thin client has none)
+    * so the kb embeds with its OWN embedder; defaulting to "builtin" (384-dim
+    * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
+    * nothing. */
+   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : NULL;
 
    char proj[256];
    kb_resolve_project(project, NULL, proj, sizeof(proj));
@@ -453,7 +461,11 @@ static void kb_cmd_repair(app_ctx_t *ctx, int argc, char **argv)
 
    config_t cfg;
    config_load(&cfg);
-   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
+   /* Pass NULL when no local embedder is configured (the thin client has none)
+    * so the kb embeds with its OWN embedder; defaulting to "builtin" (384-dim
+    * hash) would mismatch a real-embedder corpus (1024/2560-dim) and return
+    * nothing. */
+   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : NULL;
 
    char proj[256];
    kb_resolve_project(project, root, proj, sizeof(proj));
