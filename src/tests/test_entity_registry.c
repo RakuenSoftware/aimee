@@ -93,11 +93,37 @@ int main(void)
    /* entity_name_conflicts queue. */
    int64_t conf = db2_entity_conflict_record("ambiguous theo");
    assert(conf > 0);
+   assert(db2_entity_conflict_priority("ambiguous theo") == 1);
    assert(db2_entity_conflict_record("ambiguous theo") == conf); /* idempotent on name */
+   assert(db2_entity_conflict_priority("ambiguous theo") == 2);  /* repeat bumps priority */
    assert(db2_entity_conflict_count("open") == 1);
    assert(db2_entity_conflict_set_status(conf, ENTITY_CONFLICT_RESOLVED) == 0);
    assert(db2_entity_conflict_count("open") == 0);
    assert(db2_entity_conflict_count(NULL) == 1);
+   /* re-recording a resolved conflict bumps priority but does NOT reopen it. */
+   assert(db2_entity_conflict_record("ambiguous theo") == conf);
+   assert(db2_entity_conflict_priority("ambiguous theo") == 3);
+   assert(db2_entity_conflict_count("open") == 0);
+   assert(db2_entity_conflict_priority("never recorded") == -1);
+
+   /* merge state machine: cycle, already-merged, and single-hop after a chain. */
+   int64_t x = db2_entity_register_named("xenon box", NODE_DEVICE);
+   int64_t y = db2_entity_register_named("yttrium box", NODE_DEVICE);
+   int64_t z = db2_entity_register_named("zinc box", NODE_DEVICE);
+   assert(x > 0 && y > 0 && z > 0);
+   int64_t mxy = db2_entity_merge(x, y); /* X -> Y */
+   assert(mxy > 0);
+   assert(db2_entity_resolve("xenon box") == y);
+   assert(db2_entity_merge(y, x) == -1);         /* cycle: target X no longer active */
+   assert(db2_entity_resolve("xenon box") == y); /* X still merged into Y */
+   assert(db2_entity_merge(x, z) == -1);         /* X already merged -> not active */
+   int64_t myz = db2_entity_merge(y, z);         /* Y -> Z (Y still active) */
+   assert(myz > 0);
+   assert(db2_entity_resolve("xenon box") == y); /* single hop: Y, not Z */
+   assert(db2_entity_resolve("yttrium box") == z);
+   /* unmerging X->Y restores X even though Y is itself now merged. */
+   assert(db2_entity_unmerge(mxy) == 0);
+   assert(db2_entity_resolve("xenon box") == x);
 
    db2_test_shim_close();
    printf("entity_registry: all tests passed\n");

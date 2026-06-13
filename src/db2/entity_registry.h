@@ -86,6 +86,10 @@ extern "C"
    /* Count conflicts in a given status (NULL = all). >=0, or -1 on error. */
    int db2_entity_conflict_count(const char *status);
 
+   /* The priority counter for a name's conflict row (>=0), or -1 if absent /
+    * error. Lets callers observe the bump-on-repeat behavior. */
+   int db2_entity_conflict_priority(const char *name);
+
 #ifdef __cplusplus
 }
 #endif
