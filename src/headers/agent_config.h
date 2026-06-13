@@ -47,6 +47,22 @@ void agent_set_request_codex_creds(const char *token, const char *account_id);
  * Thread-local. */
 void agent_set_request_session(const char *session_id);
 
+/* Snapshot of the per-turn, thread-local credential context (session id + Codex
+ * creds). agent_set_request_session / agent_set_request_codex_creds bind these
+ * on the dispatching thread, but a parallel fan-out (agent_run_parallel) runs
+ * each agent on a fresh worker thread that does NOT inherit thread-locals — so
+ * the dispatcher snapshots its context and each worker restores it, or the
+ * panel runs keyless. */
+typedef struct
+{
+   char session_id[128];
+   char codex_token[MAX_API_KEY_LEN];
+   char codex_account_id[128];
+} agent_request_creds_t;
+
+void agent_request_creds_snapshot(agent_request_creds_t *out);
+void agent_request_creds_restore(const agent_request_creds_t *creds);
+
 /* True if `agent` is the Claude CLI (`claude` / `claude-code`) run via tmux or
  * the provider-CLI binary — authenticated by the interactive `claude` login, not
  * an API key. Used to keep Claude-via-CLI primary-only by default (gated as a

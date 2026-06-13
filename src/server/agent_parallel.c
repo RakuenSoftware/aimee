@@ -7,6 +7,7 @@
  * (delegate_ensemble.c) and the sibling vote (agent_coord.c).
  */
 #include "aimee.h"
+#include "agent_config.h" /* agent_request_creds_t: inherit per-turn creds */
 #include "agent_exec.h"
 #include "config.h" /* aimee_resolve_compute_threads */
 
@@ -19,11 +20,16 @@ typedef struct
    agent_config_t *cfg;
    agent_task_t *task;
    agent_result_t *result;
+   const agent_request_creds_t *creds;
 } parallel_ctx_t;
 
 static void *parallel_worker(void *arg)
 {
    parallel_ctx_t *ctx = (parallel_ctx_t *)arg;
+   /* This worker is a fresh thread: re-bind the dispatcher's per-turn credential
+    * context (thread-locals are not inherited) so the agent resolves its
+    * client-held session key instead of running keyless. */
+   agent_request_creds_restore(ctx->creds);
    /* Per-task temperature, defaulting to the historical 0.3 when unset (0). */
    double temp = ctx->task->temperature > 0.0 ? ctx->task->temperature : 0.3;
    if (ctx->task->agent && ctx->task->agent[0])
@@ -85,12 +91,18 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
       return 0;
    }
 
+   /* Snapshot the dispatcher's per-turn credential context once; each worker
+    * thread restores it (thread-locals don't cross pthread_create). */
+   agent_request_creds_t creds;
+   agent_request_creds_snapshot(&creds);
+
    for (int i = 0; i < task_count; i++)
    {
       memset(&out[i], 0, sizeof(out[i]));
       ctxs[i].cfg = cfg;
       ctxs[i].task = &tasks[i];
       ctxs[i].result = &out[i];
+      ctxs[i].creds = &creds;
    }
 
    int ceiling = parallel_worker_ceiling();
