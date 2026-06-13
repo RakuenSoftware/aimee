@@ -508,7 +508,30 @@ int agent_load_config(agent_config_t *cfg)
          ag->enabled = (!v || !cJSON_IsBool(v)) ? 1 : cJSON_IsTrue(v);
 
          v = cJSON_GetObjectItem(a, "tools_enabled");
-         ag->tools_enabled = (v && cJSON_IsBool(v)) ? cJSON_IsTrue(v) : 0;
+         if (v && cJSON_IsBool(v))
+         {
+            /* Explicit operator setting always wins (force on or off). */
+            ag->tools_enabled = cJSON_IsTrue(v);
+         }
+         else
+         {
+            /* Absent: derive the default from the backing model's intrinsic
+             * tool capability. `tools_enabled` is both a capability signal and
+             * an execution policy; defaulting it to a blanket 0 made every
+             * delegate that omits the key look tool-INCAPABLE to the routing
+             * filter (delegate_filter_route_capabilities), so tool-requiring
+             * roles (e.g. `review`) found zero candidates even though the
+             * underlying model (mistral / minimax / openai / anthropic / …)
+             * fully supports tool calls. Deriving from the model's real
+             * capability makes a tool-capable delegate usable for tool roles by
+             * default; a model with no known tool capability still defaults off;
+             * and an explicit "tools_enabled": false above still opts out. */
+            model_capability_t mc;
+            ag->tools_enabled =
+                (model_capability_get(ag->provider, ag->model, &mc) && (mc.flags & MODEL_CAP_TOOLS))
+                    ? 1
+                    : 0;
+         }
 
          v = cJSON_GetObjectItem(a, "recommended_sampling");
          ag->recommended_sampling = (v && cJSON_IsBool(v)) ? cJSON_IsTrue(v) : 0;
