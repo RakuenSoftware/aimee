@@ -77,29 +77,72 @@ type vaultErr struct{ msg string }
 
 func (e *vaultErr) Error() string { return e.msg }
 
-// pass an aimee-server /v1 response through to the browser, mapping transport
-// failures to a stable JSON error.
-func (s *server) vaultRelay(w http.ResponseWriter, st int, data []byte, err error) {
+// vaultSafeErrorMessage extracts ONLY a short server-generated error string from
+// an aimee-server error envelope (e.g. "vault locked"), never the raw body —
+// defense in depth so nothing unexpected reaches the browser.
+func vaultSafeErrorMessage(data []byte) string {
+	var e struct {
+		Error   any    `json:"error"`
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(data, &e)
+	if s, ok := e.Error.(string); ok && s != "" {
+		return s
+	}
+	if m, ok := e.Error.(map[string]any); ok {
+		if ms, ok := m["message"].(string); ok && ms != "" {
+			return ms
+		}
+	}
+	if e.Message != "" {
+		return e.Message
+	}
+	return "vault: request failed"
+}
+
+// vaultRelayStatus is the browser response for a MUTATION (unlock/set/delete/
+// rekey): a fixed {"status":"ok"} on success, a sanitized error otherwise. It
+// NEVER echoes the upstream body — webchat is the user-facing trust boundary, so
+// no aimee-server bytes are passed through verbatim.
+func (s *server) vaultRelayStatus(w http.ResponseWriter, st int, data []byte, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
 		writeJSONError(w, http.StatusServiceUnavailable, "vault: aimee-server unavailable")
 		return
 	}
 	if st != http.StatusOK {
-		// Forward aimee-server's own error envelope (locked / unattested / etc.).
-		if len(data) > 0 {
-			w.WriteHeader(st)
-			w.Write(data)
-			return
-		}
-		writeJSONError(w, st, "vault: request failed")
-		return
-	}
-	if len(data) > 0 {
-		w.Write(data)
+		writeJSONError(w, st, vaultSafeErrorMessage(data))
 		return
 	}
 	w.Write([]byte(`{"status":"ok"}`))
+}
+
+// vaultRelayList is the browser response for GET (names only). It decodes the
+// upstream response and re-marshals a strict {agent,cred} allowlist, so a
+// secret/value/KEK field can NEVER reach the browser even if upstream regresses.
+func (s *server) vaultRelayList(w http.ResponseWriter, st int, data []byte, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "vault: aimee-server unavailable")
+		return
+	}
+	if st != http.StatusOK {
+		writeJSONError(w, st, vaultSafeErrorMessage(data))
+		return
+	}
+	var up struct {
+		Credentials []struct {
+			Agent string `json:"agent"`
+			Cred  string `json:"cred"`
+		} `json:"credentials"`
+	}
+	_ = json.Unmarshal(data, &up)
+	creds := make([]map[string]string, 0, len(up.Credentials))
+	for _, c := range up.Credentials {
+		creds = append(creds, map[string]string{"agent": c.Agent, "cred": c.Cred})
+	}
+	out, _ := json.Marshal(map[string]any{"status": "ok", "credentials": creds})
+	w.Write(out)
 }
 
 // POST /api/vault/unlock {password} — derive + cache the user's vault KEK.
@@ -119,7 +162,7 @@ func (s *server) handleVaultUnlock(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	body, _ := json.Marshal(map[string]string{"password": req.Password})
 	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, "/v1/vault/unlock", body)
-	s.vaultRelay(w, st, data, err)
+	s.vaultRelayStatus(w, st, data, err)
 }
 
 // POST /api/vault/password {old_password,new_password} — re-key on password change.
@@ -140,7 +183,7 @@ func (s *server) handleVaultPassword(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	body, _ := json.Marshal(map[string]string{"old_password": req.OldPassword, "new_password": req.NewPassword})
 	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, "/v1/vault/rekey", body)
-	s.vaultRelay(w, st, data, err)
+	s.vaultRelayStatus(w, st, data, err)
 }
 
 // /api/vault/credentials — GET list (names only), POST set {agent,cred,secret},
@@ -152,7 +195,7 @@ func (s *server) handleVaultCredentials(w http.ResponseWriter, r *http.Request) 
 	switch r.Method {
 	case http.MethodGet:
 		st, data, err := s.v1RequestWebuser(ctx, user, http.MethodPost, "/v1/vault/list", []byte(`{}`))
-		s.vaultRelay(w, st, data, err)
+		s.vaultRelayList(w, st, data, err)
 	case http.MethodPost:
 		var req struct {
 			Agent  string `json:"agent"`
@@ -165,7 +208,7 @@ func (s *server) handleVaultCredentials(w http.ResponseWriter, r *http.Request) 
 		}
 		body, _ := json.Marshal(map[string]string{"agent": req.Agent, "cred": req.Cred, "secret": req.Secret})
 		st, data, err := s.v1RequestWebuser(ctx, user, http.MethodPost, "/v1/vault/set", body)
-		s.vaultRelay(w, st, data, err)
+		s.vaultRelayStatus(w, st, data, err)
 	case http.MethodDelete:
 		var req struct {
 			Agent string `json:"agent"`
@@ -177,7 +220,7 @@ func (s *server) handleVaultCredentials(w http.ResponseWriter, r *http.Request) 
 		}
 		body, _ := json.Marshal(map[string]string{"agent": req.Agent, "cred": req.Cred})
 		st, data, err := s.v1RequestWebuser(ctx, user, http.MethodPost, "/v1/vault/delete", body)
-		s.vaultRelay(w, st, data, err)
+		s.vaultRelayStatus(w, st, data, err)
 	default:
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 	}

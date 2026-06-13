@@ -36,7 +36,7 @@ func TestVaultUnlockSendsWebuserAndBearer(t *testing.T) {
 	rr := httptest.NewRecorder()
 	s.handleVaultUnlock(rr, req)
 
-	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "webuser:alice") {
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"status":"ok"`) {
 		t.Fatalf("unlock: code=%d body=%q", rr.Code, rr.Body.String())
 	}
 	if gotAuth != "Bearer sekret-token" {
@@ -72,6 +72,48 @@ func TestVaultUnlockFailsClosedWithoutServerToken(t *testing.T) {
 	}
 	if rr.Code == http.StatusOK {
 		t.Fatalf("expected a non-200 fail-closed status, got 200: %q", rr.Body.String())
+	}
+}
+
+// Defense in depth: even if aimee-server (wrongly) echoes a secret/value/KEK in
+// a vault response, the webchat boundary must NOT relay it to the browser.
+func TestVaultResponsesNeverLeakSecrets(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/vault/list", func(w http.ResponseWriter, r *http.Request) {
+		// A deliberately-leaky upstream: a secret/value/wrapped_dek alongside names.
+		w.Write([]byte(`{"status":"ok","credentials":[{"agent":"claude","cred":"api_key","secret":"sk-LEAKED","value":"sk-LEAKED2","wrapped_dek":"WRAPKEYLEAK"}]}`))
+	})
+	mux.HandleFunc("/v1/vault/unlock", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"status":"ok","kek":"RAWKEKLEAK","root_key":"sk-LEAKED3"}`))
+	})
+	cfg := startFakeV1(t, mux)
+	if err := os.WriteFile(filepath.Join(filepath.Dir(cfg.socketPath), "server.token"),
+		[]byte("tok\n"), 0600); err != nil {
+		t.Fatalf("write server.token: %v", err)
+	}
+	s := &server{cfg: cfg}
+
+	// list must surface only names.
+	rr := httptest.NewRecorder()
+	s.handleVaultCredentials(rr, withUser(httptest.NewRequest(http.MethodGet, "/api/vault/credentials", nil), "eve"))
+	body := rr.Body.String()
+	for _, leak := range []string{"sk-LEAKED", "sk-LEAKED2", "WRAPKEYLEAK"} {
+		if strings.Contains(body, leak) {
+			t.Fatalf("list leaked %q to the browser: %s", leak, body)
+		}
+	}
+	if !strings.Contains(body, `"agent":"claude"`) || !strings.Contains(body, `"cred":"api_key"`) {
+		t.Fatalf("list dropped the names: %s", body)
+	}
+
+	// unlock must surface only {status:ok}, never the upstream key fields.
+	rr2 := httptest.NewRecorder()
+	s.handleVaultUnlock(rr2, withUser(httptest.NewRequest(http.MethodPost, "/api/vault/unlock", strings.NewReader(`{"password":"p"}`)), "eve"))
+	b2 := rr2.Body.String()
+	for _, leak := range []string{"RAWKEKLEAK", "sk-LEAKED3"} {
+		if strings.Contains(b2, leak) {
+			t.Fatalf("unlock leaked %q to the browser: %s", leak, b2)
+		}
 	}
 }
 
