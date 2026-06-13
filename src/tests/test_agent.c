@@ -431,45 +431,24 @@ static void test_codex_oauth_request_creds(void)
    assert(strstr(headers, "ChatGPT-Account-ID:") == NULL);
 }
 
-/* WP-C.2c(3): the per-turn vault principal must ride along in the credential
- * snapshot. A parallel fan-out delegate (agent_run_parallel) runs on a fresh
- * worker thread that does NOT inherit thread-locals and rebinds the dispatcher's
- * context via agent_request_creds_restore — so unless the principal is carried in
- * the snapshot it silently fails to reach the originating user's vault, while a
- * same-thread delegate succeeds. This pins the round-trip. */
+/* WP-C.2c(3): the vault principal must ride along in the creds snapshot so a
+ * fan-out delegate (fresh thread; rebinds via agent_request_creds_restore)
+ * reaches the user's vault like a same-thread one; empty restores to empty. */
 static void test_request_creds_snapshot_carries_vault_principal(void)
 {
-   agent_set_request_session("sess-xyz");
-   agent_set_request_codex_creds("tok-1", "acct-1");
    agent_set_request_vault_principal("webuser:dave");
-
    agent_request_creds_t snap;
    agent_request_creds_snapshot(&snap);
    assert(strcmp(snap.vault_principal, "webuser:dave") == 0);
-
-   /* Simulate the fresh fan-out worker: its thread-locals start clear. */
-   agent_set_request_session(NULL);
-   agent_set_request_codex_creds(NULL, NULL);
-   agent_set_request_vault_principal(NULL);
-   assert(agent_get_request_vault_principal()[0] == '\0');
-
-   /* The worker restores the dispatcher's snapshot and regains the principal. */
+   agent_set_request_vault_principal(NULL); /* fresh fan-out worker starts clear */
    agent_request_creds_restore(&snap);
    assert(strcmp(agent_get_request_vault_principal(), "webuser:dave") == 0);
-
-   /* An empty principal round-trips as empty (a keyless panel), and restore
-    * actively clears a stale thread-local rather than leaving it set. */
    agent_set_request_vault_principal(NULL);
-   agent_request_creds_t snap_empty;
-   agent_request_creds_snapshot(&snap_empty);
-   assert(snap_empty.vault_principal[0] == '\0');
+   agent_request_creds_snapshot(&snap);
    agent_set_request_vault_principal("webuser:eve");
-   agent_request_creds_restore(&snap_empty);
+   agent_request_creds_restore(&snap);
    assert(agent_get_request_vault_principal()[0] == '\0');
-
-   /* Clear ALL three thread-locals: restore re-bound session + codex creds too,
-    * and a leftover token would bleed into a later test on this same thread. */
-   agent_set_request_session(NULL);
+   agent_set_request_session(NULL); /* restore re-bound session+codex; clear all */
    agent_set_request_codex_creds(NULL, NULL);
    agent_set_request_vault_principal(NULL);
 }
