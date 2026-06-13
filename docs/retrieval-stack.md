@@ -80,12 +80,18 @@ cast (`deploy/migrations/2026-embed-halfvec.sql`). Back up DB2 first.
 ## Reranking
 
 An optional cross-encoder reranker refines the top-k of a recall before it is
-returned. It is configured independently of the embedder:
+returned. It is served by the same embedder sidecar, sized to match the embedder
+tier: the default `aimee-embedder` image bakes the **1B** Ettin reranker
+(`cross-encoder/ettin-reranker-1b-v1`) alongside the 4B embedder; the
+`aimee-embedder-0.6b` image bakes the **400M** reranker
+(`cross-encoder/ettin-reranker-400m-v1`) alongside the 0.6B embedder. Build-time
+override: `--build-arg RERANKER_MODEL=<hf id>`.
+
+It is configured independently of the embedder dimension:
 
 - `memory_rerank_enabled` — master toggle.
-- `memory_rerank_command` — the reranker command (e.g. the Ettin
-  `cross-encoder/ettin-reranker-400m-v1` cross-encoder served by the embedder
-  sidecar).
+- `memory_rerank_command` — the reranker command (the Ettin cross-encoder served
+  by the embedder sidecar, via `rerank-remote.py`).
 - `memory_rerank_mode`, `memory_rerank_top_k` — strategy and depth.
 
 The reranker is dimension-agnostic — it scores `(query, candidate)` text pairs
