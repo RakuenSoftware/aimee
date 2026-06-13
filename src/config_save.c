@@ -61,7 +61,7 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
 
    /* ensemble.* */
    if (cfg->ensemble_aggregator[0] || cfg->ensemble_min_successful != 2 ||
-       cfg->ensemble_max_cost_usd != 1.0 || cfg->ensemble_reference_count > 0)
+       cfg->ensemble_max_cost_usd > 0.0 || cfg->ensemble_reference_count > 0)
    {
       cJSON *e = cJSON_AddObjectToObject(root, "ensemble");
       if (e)
@@ -69,7 +69,9 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
          if (cfg->ensemble_aggregator[0])
             cJSON_AddStringToObject(e, "aggregator", cfg->ensemble_aggregator);
          cJSON_AddNumberToObject(e, "min_successful", cfg->ensemble_min_successful);
-         cJSON_AddNumberToObject(e, "max_cost_usd", cfg->ensemble_max_cost_usd);
+         /* Only persist a cap when one is set; 0/unset = no limit (the default). */
+         if (cfg->ensemble_max_cost_usd > 0.0)
+            cJSON_AddNumberToObject(e, "max_cost_usd", cfg->ensemble_max_cost_usd);
          if (cfg->ensemble_reference_count > 0)
          {
             cJSON *refs = cJSON_AddArrayToObject(e, "reference_models");

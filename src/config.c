@@ -550,7 +550,7 @@ static void config_set_defaults(config_t *cfg)
    snprintf(cfg->db2_vector_corpus_index, sizeof(cfg->db2_vector_corpus_index), "auto");
    cfg->db2_vector_corpus_diskann_threshold = 1000000;
    cfg->ensemble_min_successful = 2;
-   cfg->ensemble_max_cost_usd = 1.0;
+   cfg->ensemble_max_cost_usd = 0.0; /* 0 = no cost cap (unlimited) by default */
    cfg->roundtable_max_rounds = 3;
    cfg->roundtable_converge_threshold = 10;
    cfg->roundtable_deadline_ms = 600000;
