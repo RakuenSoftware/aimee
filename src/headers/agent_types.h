@@ -23,8 +23,12 @@ struct cJSON;
  * remaining loop budget drops below this, the loop stops cleanly instead of
  * issuing a doomed short-timeout call that the provider-health tracker would
  * misread as "provider unreachable" (see posix/agent_runtime.c). */
-#define AGENT_LOOP_MIN_CALL_MS     60000
-#define AGENT_DEFAULT_MAX_TOKENS   4096
+#define AGENT_LOOP_MIN_CALL_MS 60000
+/* 0 = "no explicit cap configured" — the request layer then derives the output
+ * ceiling from the model registry (model_max_output) rather than a hardcoded
+ * default, so every model gets its own full output budget. An agent may still
+ * pin a smaller cap explicitly in agents.json / --max-tokens. */
+#define AGENT_DEFAULT_MAX_TOKENS   0
 #define MAX_EXEC_ROLES             8
 #define MAX_EXEC_PROMPT_LEN        4096
 #define AGENT_DEFAULT_MAX_TURNS    20

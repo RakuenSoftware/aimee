@@ -400,12 +400,14 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
    {
       const char *agg = cfg->ensemble_aggregator;
       const char *at = strchr(agg, '@');
+      /* max_tokens 0 = derive from the aggregator model's own output ceiling, so
+       * a reasoning aggregator isn't truncated mid-synthesis (was a hard 4096). */
       if (!at)
-         return agent_run_named(&agg_cfg, agg, "review", NULL, synthesis_prompt, 4096, 0.3, out);
+         return agent_run_named(&agg_cfg, agg, "review", NULL, synthesis_prompt, 0, 0.3, out);
       const char *role = (at[1]) ? at + 1 : "review";
-      return agent_run_ex(&agg_cfg, role, NULL, synthesis_prompt, 4096, 0.3, out);
+      return agent_run_ex(&agg_cfg, role, NULL, synthesis_prompt, 0, 0.3, out);
    }
-   return agent_run_ex(&agg_cfg, "review", NULL, synthesis_prompt, 4096, 0.3, out);
+   return agent_run_ex(&agg_cfg, "review", NULL, synthesis_prompt, 0, 0.3, out);
 }
 
 static char *build_round_prompt(const char *task, const char *artifact, const char *peer_notes,

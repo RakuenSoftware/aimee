@@ -136,6 +136,29 @@ static void test_context_window(void)
    assert(model_context_window("GPT-4o") == 128000);
 }
 
+static void test_max_output(void)
+{
+   /* Static-table models return their pinned output ceiling. */
+   assert(model_max_output("openai", "gpt-4o") == 16384);
+   assert(model_max_output("anthropic", "claude-sonnet-4-6") == 8192);
+
+   /* Inferred (heuristic) models: reasoning families get a higher ceiling than
+    * plain chat, both well above the old hardcoded 4096 default. */
+   assert(model_max_output("minimax", "MiniMax-M3") == 32768);      /* reasoning */
+   assert(model_max_output(NULL, "mistral-medium-latest") == 8192); /* non-reasoning */
+
+   /* Never starves a reasoning model at 4096 (the bug this replaced). */
+   assert(model_max_output("minimax", "MiniMax-M3") > 4096);
+
+   /* Inferred ceiling is clamped to the model's context window. */
+   assert(model_max_output("openai", "gpt-3.5-turbo") <= model_context_window("gpt-3.5-turbo"));
+
+   /* Unknown model still yields a usable, non-zero cap (never 0). */
+   assert(model_max_output(NULL, "some-unknown-model") == 8192);
+   assert(model_max_output(NULL, "") == 8192);
+   assert(model_max_output(NULL, NULL) == 8192);
+}
+
 static void test_alias_list(void)
 {
    int total = model_alias_list(NULL, 0);
@@ -380,6 +403,8 @@ int main(void)
    printf("provider_detect OK, ");
    test_context_window();
    printf("context_window OK, ");
+   test_max_output();
+   printf("max_output OK, ");
    test_alias_list();
    printf("alias_list OK, ");
    test_model_capability_get();

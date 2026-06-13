@@ -65,6 +65,12 @@ struct cJSON *agent_build_request_gemini(const agent_t *agent, struct cJSON *mes
                                          int max_tokens, double temperature,
                                          const char *cache_name);
 
+/* Resolve the output-token cap for an outbound request: an explicit caller
+ * `requested` (>0) wins, else the agent's pinned max_tokens (>0), else the
+ * model's registry ceiling (model_max_output). Never returns 0 — request
+ * builders emit a concrete, model-appropriate cap rather than a hardcoded one. */
+int agent_request_max_tokens(const agent_t *agent, int requested);
+
 /* --- Response parsers --- */
 
 void agent_parse_response_openai(struct cJSON *root, parsed_response_t *out);
