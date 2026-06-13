@@ -23,6 +23,7 @@
 
 void test_agent_route_with_caps_honors_tools_enabled(void);
 void test_agent_route_with_caps_honors_context_override(void);
+void test_tools_enabled_capability_default(void);
 
 /* --- Expose tool functions for testing via redeclaration --- */
 char *tool_bash(const char *command, int timeout_ms);
@@ -1914,6 +1915,7 @@ int main(void)
    test_provider_env_credentials_and_headers();
    test_codex_oauth_request_creds();
    test_agent_config_provider_cli_roundtrip();
+   test_tools_enabled_capability_default();
    test_agent_adapter_registry();
    test_provider_cli_shell_exec_uses_argv_not_shell();
    test_provider_cli_shell_timeout_covers_prompt_write();

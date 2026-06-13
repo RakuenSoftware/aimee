@@ -525,7 +525,40 @@ int agent_load_config(agent_config_t *cfg)
          ag->enabled = (!v || !cJSON_IsBool(v)) ? 1 : cJSON_IsTrue(v);
 
          v = cJSON_GetObjectItem(a, "tools_enabled");
-         ag->tools_enabled = (v && cJSON_IsBool(v)) ? cJSON_IsTrue(v) : 0;
+         if (v && cJSON_IsBool(v))
+         {
+            /* Explicit operator setting always wins (force on or off). */
+            ag->tools_enabled = cJSON_IsTrue(v);
+         }
+         else
+         {
+            /* Absent key: derive the default from the backing model's intrinsic
+             * tool capability instead of a blanket 0. `tools_enabled` is both a
+             * capability signal and an execution policy; defaulting it to 0 made
+             * every delegate that omits the key look tool-INCAPABLE to the
+             * routing filter (delegate_filter_route_capabilities), so
+             * tool-requiring roles (e.g. `review`) found zero candidates even
+             * though the underlying model (mistral / minimax / openai /
+             * anthropic / …) fully supports tool calls.
+             *
+             * Invariants that bound the risk of deriving policy from capability:
+             *  - Operator intent is never overridden: an explicit
+             *    "tools_enabled": true|false is honoured verbatim (the branch
+             *    above). This only sets the value when the operator left it
+             *    UNSPECIFIED, so there is no intent to bypass.
+             *  - The lookup is total and offline: model_capability_get resolves
+             *    via on-disk overrides/caches and a pure in-code heuristic,
+             *    never the network, and returns 0 for an unknown or empty model.
+             *    It therefore cannot fail or block startup, and an unrecognised
+             *    model fails SAFE to tools-off (conservative default preserved
+             *    exactly where capability is unknown). */
+            model_capability_t mc;
+            ag->tools_enabled =
+                (ag->model[0] && model_capability_get(ag->provider, ag->model, &mc) &&
+                 (mc.flags & MODEL_CAP_TOOLS))
+                    ? 1
+                    : 0;
+         }
 
          v = cJSON_GetObjectItem(a, "recommended_sampling");
          ag->recommended_sampling = (v && cJSON_IsBool(v)) ? cJSON_IsTrue(v) : 0;
