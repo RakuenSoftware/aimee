@@ -1886,6 +1886,7 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    opts.max_rounds = cfg.roundtable_max_rounds > 0 ? cfg.roundtable_max_rounds : 3;
    opts.converge_threshold = cfg.roundtable_converge_threshold;
    opts.deadline_ms = cfg.roundtable_deadline_ms;
+   opts.parent_session_id = compute_request_session_id(req); /* fold panel cost onto it */
    cJSON *jrun = cJSON_GetObjectItemCaseSensitive(req, "__run_id");
    if (cJSON_IsString(jrun) && jrun->valuestring && jrun->valuestring[0])
    {
@@ -1901,7 +1902,6 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    opts.brief_truncated = brief.truncated;
    opts.questions = brief.question_ptrs;
    opts.question_count = brief.question_count;
-
    cJSON *jmode = cJSON_GetObjectItemCaseSensitive(req, "mode");
    if (cJSON_IsString(jmode) && strcmp(jmode->valuestring, "review") == 0)
       opts.mode = ROUNDTABLE_REVIEW;
