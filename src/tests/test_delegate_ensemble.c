@@ -215,6 +215,58 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
    return 0;
 }
 
+/* Stubs for the delegate-run core's economics deps. agent_find returns NULL so
+ * the (server-side cred pool) lease path is skipped — the panel agents are
+ * client-held and have no pool — and the run falls through to the agent_run
+ * stubs above; cost-fold is a no-op in the test (no parent session bound). */
+agent_t *agent_find(agent_config_t *cfg, const char *name)
+{
+   (void)cfg;
+   (void)name;
+   return NULL;
+}
+static int g_cost_fold_calls = 0;
+static double g_cost_fold_total = 0.0;
+int db1_cost_fold_record(const char *parent_sid, const char *child_sid, double cost,
+                         const char *source)
+{
+   (void)child_sid;
+   (void)source;
+   if (parent_sid && parent_sid[0])
+   {
+      g_cost_fold_calls++;
+      g_cost_fold_total += cost;
+   }
+   return 0;
+}
+int delegate_credentials_load_file(const char *path, time_t now_epoch)
+{
+   (void)path;
+   (void)now_epoch;
+   return 0;
+}
+int delegate_credentials_acquire(const char *principal, const char *agent_name,
+                                 const agent_credential_t *creds, int count, char *cred_name,
+                                 size_t cred_name_sz, char *env, size_t env_sz)
+{
+   (void)principal;
+   (void)agent_name;
+   (void)creds;
+   (void)count;
+   (void)cred_name;
+   (void)cred_name_sz;
+   (void)env;
+   (void)env_sz;
+   return -1;
+}
+void delegate_credentials_release(const char *principal, const char *agent_name,
+                                  const char *cred_name)
+{
+   (void)principal;
+   (void)agent_name;
+   (void)cred_name;
+}
+
 int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
                                        const char *system_prompt, const char *user_prompt,
                                        int max_tokens, int enforce_writes, agent_result_t *out)
@@ -474,6 +526,43 @@ static void test_roundtable_parallel_basic(void)
    assert(g_parallel_calls == 2);
    delegate_roundtable_result_free(&result);
    printf("  test_roundtable_parallel_basic: ok\n");
+}
+
+/* The ensemble runs through the delegate path: each billable panel + aggregator
+ * run folds its cost onto the originating session (db1_cost_fold_record), and
+ * only when a parent session is set. */
+static void test_roundtable_folds_cost_to_parent_session(void)
+{
+   reset_modes();
+   g_cost_fold_calls = 0;
+   g_cost_fold_total = 0.0;
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   opts.parent_session_id = "parent-sess";
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft a short proposal", &opts, &result);
+   assert(rc == 0);
+   /* >= 2 panel participants + the aggregator all folded onto the parent. */
+   assert(g_cost_fold_calls >= 3);
+   assert(g_cost_fold_total > 0.0);
+   delegate_roundtable_result_free(&result);
+
+   /* No parent session -> no fold (the other tests run with parent unset). */
+   g_cost_fold_calls = 0;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   rc = delegate_roundtable_run(&acfg, &cfg, "draft again", &opts, &result);
+   assert(rc == 0);
+   assert(g_cost_fold_calls == 0);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_folds_cost_to_parent_session: ok\n");
 }
 
 static void test_roundtable_sequential_uses_named_agents(void)
@@ -893,6 +982,7 @@ int main(void)
    test_ensemble_min_successful_degradation();
    test_ensemble_routes_to_distinct_agents();
    test_roundtable_parallel_basic();
+   test_roundtable_folds_cost_to_parent_session();
    test_roundtable_sequential_uses_named_agents();
    test_roundtable_degrades_on_min_success();
    test_roundtable_preflight_cap_warns_observed_cap_stops();

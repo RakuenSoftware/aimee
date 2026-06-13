@@ -56,6 +56,9 @@ typedef struct
    int question_count;
    int (*cancel_requested)(void *ctx);
    void *cancel_ctx;
+   /* Originating session: panel + aggregator runs fold their cost onto it via
+    * db1_cost_fold_record, so the ensemble is accounted like a delegate. */
+   const char *parent_session_id;
 } roundtable_opts_t;
 
 typedef struct
