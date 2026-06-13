@@ -85,6 +85,12 @@ vault_status_t vault_service_set(const char *principal, const char *agent, const
  * VAULT_OK, or VAULT_ERR_CRYPTO/IO on a fail-closed error. */
 vault_status_t vault_service_set_server(const char *agent, const char *cred, const char *secret);
 
+/* Read (agent, cred) from the server principal's vault under the server master KEK
+ * — no client, no unlock. VAULT_OK (plaintext written), VAULT_NO_ENTRY (no file or
+ * no such entry), or VAULT_ERR_* (fail closed). `out` is cleansed on non-OK. */
+vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
+                                                  size_t out_len);
+
 /* The use-path: resolve (agent, cred) for `principal` into `out`. Returns:
  *   VAULT_OK         + plaintext written;
  *   VAULT_NO_ENTRY   when there is no such credential (or no/blank principal) —
