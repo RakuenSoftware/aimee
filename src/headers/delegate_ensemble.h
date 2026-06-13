@@ -14,8 +14,10 @@ typedef struct
    char response[8192];
    int success;
    double cost_usd;
-   int degraded;    /* 1 = returned best single candidate, not synthesized */
-   int cost_capped; /* 1 = aborted before aggregation due to cost cap */
+   int degraded;            /* 1 = returned best single candidate, not synthesized */
+   int cost_capped;         /* 1 = aborted before aggregation due to cost cap */
+   int participants_total;  /* reference models fanned out this run */
+   int participants_failed; /* participants that returned no usable response (partial failure) */
 } delegate_ensemble_result_t;
 
 int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char *prompt,
@@ -92,6 +94,9 @@ typedef struct
    int deadline_hit;
    int cancelled;
    int best_round;
+   int participants_total;  /* reference models per round (panel size) */
+   int participants_failed; /* participants that returned no usable response in the final round run
+                             */
    double cost_usd;
    roundtable_review_item_t items[ROUNDTABLE_MAX_REVIEW_ITEMS];
    int item_count;

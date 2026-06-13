@@ -1857,6 +1857,8 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    cJSON_AddStringToObject(resp, "response", result.response);
    cJSON_AddBoolToObject(resp, "degraded", result.degraded ? 1 : 0);
    cJSON_AddBoolToObject(resp, "cost_capped", result.cost_capped ? 1 : 0);
+   cJSON_AddNumberToObject(resp, "participants_total", result.participants_total);
+   cJSON_AddNumberToObject(resp, "participants_failed", result.participants_failed);
    cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
    return server_send_ok(conn, resp);
 }
@@ -1950,6 +1952,8 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    cJSON_AddBoolToObject(resp, "deadline_hit", result.deadline_hit ? 1 : 0);
    cJSON_AddBoolToObject(resp, "cancelled", result.cancelled ? 1 : 0);
    cJSON_AddNumberToObject(resp, "best_round", result.best_round);
+   cJSON_AddNumberToObject(resp, "participants_total", result.participants_total);
+   cJSON_AddNumberToObject(resp, "participants_failed", result.participants_failed);
    cJSON_AddNumberToObject(resp, "items_round", result.items_round);
    cJSON_AddNumberToObject(resp, "artifact_round", result.artifact_round);
    cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
