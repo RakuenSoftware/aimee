@@ -47,6 +47,15 @@ void agent_set_request_codex_creds(const char *token, const char *account_id);
  * Thread-local. */
 void agent_set_request_session(const char *session_id);
 
+/* The attested vault principal (WP-C) for the in-flight chat turn, thread-local.
+ * The chat worker sets it from its compute_ctx around the agent loop and clears
+ * it after, so a delegate the chat spawns in-process (decoupled from the
+ * originating connection) can still reach the same user's vault:
+ * create_compute_ctx falls back to this when its conn carries no principal. Set
+ * strictly for the agent-loop duration; empty otherwise. NEVER a client value. */
+void agent_set_request_vault_principal(const char *principal);
+const char *agent_get_request_vault_principal(void);
+
 /* Snapshot of the per-turn, thread-local credential context (session id + Codex
  * creds). agent_set_request_session / agent_set_request_codex_creds bind these
  * on the dispatching thread, but a parallel fan-out (agent_run_parallel) runs

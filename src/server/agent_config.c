@@ -2,6 +2,7 @@
 #include "aimee.h"
 #include "util.h"
 #include "agent_config.h"
+#include "vault_principal.h" /* VAULT_PRINCIPAL_MAX for the per-turn vault principal */
 #include "session_credentials.h"
 #include "model_registry.h"
 #include "platform_path.h"
@@ -241,6 +242,24 @@ void agent_set_request_session(const char *session_id)
       snprintf(g_request_session_id, sizeof(g_request_session_id), "%s", session_id);
    else
       g_request_session_id[0] = '\0';
+}
+
+/* WP-C.2c(3): the attested vault principal for the in-flight chat turn, so a
+ * chat-spawned delegate (dispatched through the conn-decoupled agent loop) can
+ * reach the originating user's vault. */
+static _Thread_local char g_request_vault_principal[VAULT_PRINCIPAL_MAX];
+
+void agent_set_request_vault_principal(const char *principal)
+{
+   if (principal && principal[0])
+      snprintf(g_request_vault_principal, sizeof(g_request_vault_principal), "%s", principal);
+   else
+      g_request_vault_principal[0] = '\0';
+}
+
+const char *agent_get_request_vault_principal(void)
+{
+   return g_request_vault_principal;
 }
 
 void agent_set_request_codex_creds(const char *token, const char *account_id)

@@ -1705,14 +1705,14 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
     * not be opened on the server's own fs. A NULL conn is an in-process caller. */
    cctx->conn_caps = conn ? conn->capabilities : CAPS_ALL;
 
-   /* WP-C.0 (hop 3 of 3): copy the attested vault identity while the conn is live;
-    * the detached worker (conn_fd closed, no thread-local) trusts only this
-    * principal for the vault, never the body session_id. NULL conn => no vault. */
+   /* WP-C vault identity: the live conn's attested principal (hop 3), else the
+    * chat turn's thread-local (a chat-spawned delegate, decoupled from the conn;
+    * the thread-local is cleared per-turn so it can't leak across turns). */
    if (conn)
-   {
       cctx->attested_transport = conn->attested_transport;
-      snprintf(cctx->vault_principal, sizeof(cctx->vault_principal), "%s", conn->vault_principal);
-   }
+   snprintf(cctx->vault_principal, sizeof(cctx->vault_principal), "%s",
+            (conn && conn->vault_principal[0]) ? conn->vault_principal
+                                               : agent_get_request_vault_principal());
 
    /* Clone the request since the original will be freed after dispatch */
    cctx->req = cJSON_Duplicate(req, 1);
