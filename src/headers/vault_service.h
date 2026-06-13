@@ -48,6 +48,17 @@ vault_status_t vault_service_unlock_password(const char *principal, attested_tra
                                              const uint8_t *password, size_t password_len,
                                              long now_epoch);
 
+/* Re-wrap a webuser vault on a login-password change (WP-C.2): derive the old +
+ * new KEKs (scrypt over the principal's stored salt) and re-wrap every DEK; the
+ * stored credentials are NOT re-encrypted. On success the new KEK is cached (the
+ * vault stays unlocked under the new password). Requires ATTEST_WEBCHAT_TRUSTED.
+ * Fail-closed: a wrong old password (KEK can't unwrap) leaves the vault
+ * untouched. The caller OPENSSL_cleanse's both passwords. */
+vault_status_t vault_service_rekey_password(const char *principal, attested_transport_t transport,
+                                            const uint8_t *old_password, size_t old_len,
+                                            const uint8_t *new_password, size_t new_len,
+                                            long now_epoch);
+
 /* Store `secret` for (agent, cred) under the principal's cached KEK. Requires an
  * unlocked vault (VAULT_ERR_LOCKED otherwise). */
 vault_status_t vault_service_set(const char *principal, const char *agent, const char *cred,

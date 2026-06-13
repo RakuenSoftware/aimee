@@ -879,6 +879,7 @@ static const http_route_t g_v1_routes[] = {
      * so these are dispatched through the same inline bridge as the delegate
      * methods. None stream. */
     {"POST", "/v1/vault/unlock", NULL, RM_EXACT, "vault.unlock", 0, rh_dispatch_op},
+    {"POST", "/v1/vault/rekey", NULL, RM_EXACT, "vault.rekey", 0, rh_dispatch_op},
     {"POST", "/v1/vault/set", NULL, RM_EXACT, "vault.set", 0, rh_dispatch_op},
     {"POST", "/v1/vault/list", NULL, RM_EXACT, "vault.list", 0, rh_dispatch_op},
     {"POST", "/v1/vault/delete", NULL, RM_EXACT, "vault.delete", 0, rh_dispatch_op},

@@ -145,14 +145,13 @@ static void test_webuser_password_unlock(void)
    assert(vault_service_get(p, "claude", "api_key", out, sizeof(out), T0) == VAULT_OK);
    assert(strcmp(out, "sk-webuser-secret") == 0);
 
-   /* A different password derives a different KEK -> the stored cred fails closed
-    * (lock first so the cache miss forces re-derivation). */
+   /* A wrong password is caught immediately by the key-check verifier (no KEK
+    * cached), so the vault stays locked. */
    assert(vault_service_lock(p) == VAULT_OK);
    const uint8_t wrong[] = "not-alices-password";
    assert(vault_service_unlock_password(p, ATTEST_WEBCHAT_TRUSTED, wrong, sizeof(wrong) - 1, T0) ==
-          VAULT_OK); /* unlock "succeeds" (caches a KEK) ... */
-   assert(vault_service_get(p, "claude", "api_key", out, sizeof(out), T0) ==
-          VAULT_ERR_CRYPTO); /* ... but the wrong KEK cannot decrypt -> fail closed */
+          VAULT_ERR_CRYPTO);
+   assert(vault_service_get(p, "claude", "api_key", out, sizeof(out), T0) == VAULT_ERR_LOCKED);
 
    /* The right password again decrypts. */
    assert(vault_service_lock(p) == VAULT_OK);
@@ -161,6 +160,92 @@ static void test_webuser_password_unlock(void)
    assert(vault_service_get(p, "claude", "api_key", out, sizeof(out), T0) == VAULT_OK);
    assert(strcmp(out, "sk-webuser-secret") == 0);
    printf("  PASS: test_webuser_password_unlock\n");
+}
+
+/* WP-C.2b: password-change re-key. The stored credential survives a rekey
+ * (re-wrapped, not re-encrypted), the new password decrypts it, the old no
+ * longer does, and a wrong old password leaves the vault untouched. */
+static void test_webuser_rekey(void)
+{
+   const char *p = "webuser:bob";
+   const uint8_t old_pw[] = "bob-old-password";
+   const uint8_t new_pw[] = "bob-new-password";
+   assert(vault_service_unlock_password(p, ATTEST_WEBCHAT_TRUSTED, old_pw, sizeof(old_pw) - 1,
+                                        T0) == VAULT_OK);
+   assert(vault_service_set(p, "claude", "api_key", "bob-secret", T0) == VAULT_OK);
+
+   /* Transport gate + bad args. */
+   assert(vault_service_rekey_password(p, ATTEST_UDS_PEERCRED, old_pw, sizeof(old_pw) - 1, new_pw,
+                                       sizeof(new_pw) - 1, T0) == VAULT_ERR_TRANSPORT);
+
+   /* Wrong OLD password: rekey fails closed, vault untouched (old pw still works). */
+   const uint8_t wrong_old[] = "not-bobs-old-password";
+   assert(vault_service_rekey_password(p, ATTEST_WEBCHAT_TRUSTED, wrong_old, sizeof(wrong_old) - 1,
+                                       new_pw, sizeof(new_pw) - 1, T0) == VAULT_ERR_CRYPTO);
+   assert(vault_service_lock(p) == VAULT_OK);
+   assert(vault_service_unlock_password(p, ATTEST_WEBCHAT_TRUSTED, old_pw, sizeof(old_pw) - 1,
+                                        T0) == VAULT_OK);
+   char out[64];
+   assert(vault_service_get(p, "claude", "api_key", out, sizeof(out), T0) == VAULT_OK);
+   assert(strcmp(out, "bob-secret") == 0); /* untouched by the failed rekey */
+
+   /* Correct rekey: re-wrap under the new password; the new KEK is cached. */
+   assert(vault_service_rekey_password(p, ATTEST_WEBCHAT_TRUSTED, old_pw, sizeof(old_pw) - 1,
+                                       new_pw, sizeof(new_pw) - 1, T0) == VAULT_OK);
+   assert(vault_service_get(p, "claude", "api_key", out, sizeof(out), T0) == VAULT_OK);
+   assert(strcmp(out, "bob-secret") == 0); /* same secret, now under the new KEK */
+
+   /* The OLD password no longer matches the re-keyed verifier (caught at unlock). */
+   assert(vault_service_lock(p) == VAULT_OK);
+   assert(vault_service_unlock_password(p, ATTEST_WEBCHAT_TRUSTED, old_pw, sizeof(old_pw) - 1,
+                                        T0) == VAULT_ERR_CRYPTO);
+   /* The NEW password does. */
+   assert(vault_service_lock(p) == VAULT_OK);
+   assert(vault_service_unlock_password(p, ATTEST_WEBCHAT_TRUSTED, new_pw, sizeof(new_pw) - 1,
+                                        T0) == VAULT_OK);
+   assert(vault_service_get(p, "claude", "api_key", out, sizeof(out), T0) == VAULT_OK);
+   assert(strcmp(out, "bob-secret") == 0);
+   printf("  PASS: test_webuser_rekey\n");
+}
+
+/* WP-C.2b roundtable blocker fix: rekey must validate the old password even with
+ * ZERO credentials (the normal fresh state), and must not fail-open or
+ * materialize a vault for a non-existent principal. */
+static void test_rekey_empty_and_missing_vault(void)
+{
+   const uint8_t old_pw[] = "carol-old", new_pw[] = "carol-new", wrong[] = "carol-wrong";
+
+   /* (b) rekey of a principal with NO vault at all -> fail closed, creates nothing. */
+   assert(vault_service_rekey_password("webuser:nobody", ATTEST_WEBCHAT_TRUSTED, old_pw,
+                                       sizeof(old_pw) - 1, new_pw, sizeof(new_pw) - 1,
+                                       T0) == VAULT_ERR_CRYPTO);
+   uint8_t salt[VAULT_SALT_LEN];
+   assert(vault_store_salt_readonly("webuser:nobody", salt) == -1); /* no vault materialized */
+
+   /* Provision + unlock an EMPTY vault (no credential stored). */
+   const char *p = "webuser:carol";
+   assert(vault_service_unlock_password(p, ATTEST_WEBCHAT_TRUSTED, old_pw, sizeof(old_pw) - 1,
+                                        T0) == VAULT_OK);
+
+   /* (a) rekey of the empty vault with a WRONG old password MUST fail closed —
+    * this is the fail-open the verifier closes. */
+   assert(vault_service_rekey_password(p, ATTEST_WEBCHAT_TRUSTED, wrong, sizeof(wrong) - 1, new_pw,
+                                       sizeof(new_pw) - 1, T0) == VAULT_ERR_CRYPTO);
+   /* The old password still unlocks (vault untouched by the failed rekey). */
+   assert(vault_service_lock(p) == VAULT_OK);
+   assert(vault_service_unlock_password(p, ATTEST_WEBCHAT_TRUSTED, old_pw, sizeof(old_pw) - 1,
+                                        T0) == VAULT_OK);
+
+   /* (c) correct rekey on the empty vault succeeds; afterward only the new
+    * password unlocks. */
+   assert(vault_service_rekey_password(p, ATTEST_WEBCHAT_TRUSTED, old_pw, sizeof(old_pw) - 1,
+                                       new_pw, sizeof(new_pw) - 1, T0) == VAULT_OK);
+   assert(vault_service_lock(p) == VAULT_OK);
+   assert(vault_service_unlock_password(p, ATTEST_WEBCHAT_TRUSTED, old_pw, sizeof(old_pw) - 1,
+                                        T0) == VAULT_ERR_CRYPTO);
+   assert(vault_service_unlock_password(p, ATTEST_WEBCHAT_TRUSTED, new_pw, sizeof(new_pw) - 1,
+                                        T0) == VAULT_OK);
+   printf("  PASS: test_rekey_empty_and_missing_vault\n");
 }
 
 int main(void)
@@ -179,6 +264,8 @@ int main(void)
    test_ttl_expiry_locks();
    test_list_and_delete();
    test_webuser_password_unlock();
+   test_webuser_rekey();
+   test_rekey_empty_and_missing_vault();
 
    vault_kek_cache_clear();
    char rm[320];

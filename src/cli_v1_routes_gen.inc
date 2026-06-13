@@ -163,6 +163,7 @@ static const struct
     {"vault.delete", "POST", "/v1/vault/delete"},
     {"vault.list", "POST", "/v1/vault/list"},
     {"vault.lock", "POST", "/v1/vault/lock"},
+    {"vault.rekey", "POST", "/v1/vault/rekey"},
     {"vault.set", "POST", "/v1/vault/set"},
     {"vault.unlock", "POST", "/v1/vault/unlock"},
     {"wm.context", "POST", "/v1/wm/context"},

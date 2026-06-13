@@ -91,6 +91,7 @@ const method_policy_t method_registry[] = {
      * any non-ATTEST_UDS_PEERCRED principal — but gated here as CAP_DELEGATE so a
      * scoped/read-only TCP bearer cannot even reach the route. */
     {"vault.unlock", CAP_DELEGATE, "unlock the credential vault"},
+    {"vault.rekey", CAP_DELEGATE, "re-key the credential vault (password change)"},
     {"vault.set", CAP_DELEGATE, "store a vault credential"},
     {"vault.list", CAP_DELEGATE, "list vault credential names"},
     {"vault.delete", CAP_DELEGATE, "delete a vault credential"},
