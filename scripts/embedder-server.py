@@ -6,10 +6,11 @@ serves embeddings over HTTP, so the aimee-kb container can embed without paying
 a multi-second model reload on every call. The thin embed-remote.py client in the
 kb image talks to this service; this service holds the model.
 
-Default model: perplexity-ai/pplx-embed-v1-0.6b (1024-dim, Qwen3-based,
-retrieval-optimized, prefix-free). The reported dimension is whatever the loaded
-model produces — it MUST match config embedding_dim and the schema vector(N)
-columns, or vector inserts fail.
+Default model: perplexity-ai/pplx-embed-v1-4b (2560-dim, Qwen3-based,
+retrieval-optimized, prefix-free); the lighter pplx-embed-v1-0.6b (1024-dim) is
+the alternate tier. The reported dimension is whatever the loaded model produces
+— it MUST match config embedding_dim and the schema vector(N) columns, or vector
+inserts fail.
 
 Also serves a cross-encoder reranker (lazy-loaded) for the aimee memory rerank
 stage, reusing the resident torch stack instead of a second container.
@@ -21,7 +22,7 @@ Endpoints:
 
 Config (env):
   EMBEDDER_PORT     listen port (default 8080)
-  EMBEDDER_MODEL    sentence-transformers model id (default pplx-embed-v1-0.6b)
+  EMBEDDER_MODEL    sentence-transformers model id (default pplx-embed-v1-4b)
   RERANKER_MODEL    cross-encoder model id (default ettin-reranker-400m-v1)
   EMBEDDER_THREADS  torch intra-op threads (default min(8, ncpu))
   EMBEDDER_QUANTIZE fp32 (default) | int8 (torch dynamic; ~3.3x faster, drifts —
@@ -35,7 +36,7 @@ import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-MODEL_NAME = os.environ.get("EMBEDDER_MODEL", "perplexity-ai/pplx-embed-v1-0.6b")
+MODEL_NAME = os.environ.get("EMBEDDER_MODEL", "perplexity-ai/pplx-embed-v1-4b")
 # Cross-encoder reranker, served from the same process (it reuses the resident
 # torch/sentence-transformers stack). Lazy-loaded on first /rerank so the embedder
 # starts and stays healthy even if reranking is never used.

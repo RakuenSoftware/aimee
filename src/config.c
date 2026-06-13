@@ -418,12 +418,13 @@ static void config_set_defaults(config_t *cfg)
    cfg->memory_fetch_budget_base = 128;
    cfg->memory_fetch_budget_shape_aware = 1;
    cfg->kb_search_max_results = 50;
-   /* Embedding dimension of the default embedder (pplx-embed-v1-0.6b = 1024).
-    * Must match the schema vector(N) columns and the embedder model. */
-   cfg->embedding_dim = 1024;
+   /* Embedding dimension of the default embedder (pplx-embed-v1-4b = 2560).
+    * Must match the schema vector(N) columns and the embedder model. Set to
+    * 1024 (with the pplx-embed-v1-0.6b embedder image) for the lighter tier. */
+   cfg->embedding_dim = 2560;
    /* The cross-encoder rerank stage (ettin-reranker-400m-v1, served by the
     * embedder service /rerank, client scripts/rerank-remote.py) is the third
-    * pipeline stage after the 0.6B embedder, and is default-ON: every retrieval
+    * pipeline stage after the embedder, and is default-ON: every retrieval
     * runs a top-K cross-encoder pass over the dense/lexical candidates. It
     * degrades safely to plain hybrid ordering if the reranker service is absent
     * or errors, so default-on is safe even without the embedder container. */
