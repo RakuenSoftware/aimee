@@ -36,10 +36,17 @@ if [ ! -f "$AIMEE_HOME/aimee.yaml" ] && [ -f /opt/aimee/defaults/aimee.yaml ]; t
     mkdir -p "$AIMEE_HOME"
     cp /opt/aimee/defaults/aimee.yaml "$AIMEE_HOME/aimee.yaml"
 fi
+# Seed the default delegate roster (definitions only; keys are client-held) so
+# delegates / the roundtable work out of the box. Never clobber an operator's.
+if [ ! -f "$AIMEE_HOME/agents.json" ] && [ -f /opt/aimee/defaults/agents.json ]; then
+    mkdir -p "$AIMEE_HOME"
+    cp /opt/aimee/defaults/agents.json "$AIMEE_HOME/agents.json"
+fi
 # Ensure aimee (uid 1000) owns its home + workspaces so it can write on an empty
 # bind mount. On smoothfs tiers ownership is forced to 1000 regardless; harmless.
 chown aimee:aimee "$AIMEE_HOME" "${AIMEE_WORKSPACES_DIR:-/var/lib/aimee-workspaces}" 2>/dev/null || true
 [ -f "$AIMEE_HOME/aimee.yaml" ] && chown aimee:aimee "$AIMEE_HOME/aimee.yaml" 2>/dev/null || true
+[ -f "$AIMEE_HOME/agents.json" ] && chown aimee:aimee "$AIMEE_HOME/agents.json" 2>/dev/null || true
 
 kb_pid=""
 server_pid=""
