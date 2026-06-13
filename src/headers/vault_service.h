@@ -86,6 +86,15 @@ vault_status_t vault_service_delete(const char *principal, const char *agent, co
 /* Lock the principal's vault: evict its cached KEK (the `vault lock` path). */
 vault_status_t vault_service_lock(const char *principal);
 
+/* The canonical credential name for an agent's primary key in the vault store
+ * and in the delegate-credential cooldown pool (WP-C.3). */
+#define VAULT_API_KEY_CRED "api_key"
+
+/* WP-C.3 codex-oauth: a principal may vault their Codex OAuth token + account id
+ * under these names; a vaulted token overrides the on-disk/session token. */
+#define VAULT_CODEX_TOKEN_CRED   "codex_oauth_token"
+#define VAULT_CODEX_ACCOUNT_CRED "codex_account_id"
+
 /* Delegate use-path helper: if `principal` has a vaulted "api_key" credential for
  * `agent`, decrypt it and overwrite `api_key` (capacity api_key_len). On any
  * non-OK status `api_key` is left UNTOUCHED (so a config/env key survives a
