@@ -18,7 +18,18 @@
  *      thread cannot leak one request's identity into the next.
  * create_compute_ctx then copies the conn's identity into compute_ctx_t for the
  * detached worker. The principal is the ONLY identity key the vault trusts —
- * never a client-supplied session_id. */
+ * never a client-supplied session_id.
+ *
+ * KNOWN GAP (tracked for WP-C.2): the streaming chat/responses/messages branches
+ * in handle_conn return before this capture runs, and the SSE handlers build
+ * their own server_conn_t that never receives _apply — so a streaming request
+ * carries an empty principal (ATTEST_NONE). This is fail-closed (no vault, never
+ * a wrong vault) and has zero impact on WP-C.1: every vault-consuming path — the
+ * POST /v1/vault routes and the delegate credential use-path — is dispatched
+ * through the NON-streaming loopback bridge, and webchat vault ops (C.2) ride
+ * the token-bearing first-class routes, not the streaming OpenAI proxy. Wiring
+ * identity onto the streaming conns is deferred to C.2 where it becomes
+ * exercisable + testable. */
 
 /* Capture this request's attested identity into the per-thread state.
  *   fd      - the connection socket (SO_PEERCRED source for UDS).

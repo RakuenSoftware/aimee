@@ -22,10 +22,12 @@
  * memset() collapses to — every vault path is fail-closed against it. */
 typedef enum
 {
-   ATTEST_NONE = 0,        /* un-attested: no vault (a missed hop must not become uid:0) */
-   ATTEST_TCP_BEARER,      /* network conn authorized by bearer; no OS-user attestation -> no vault (D17) */
+   ATTEST_NONE = 0,   /* un-attested: no vault (a missed hop must not become uid:0) */
+   ATTEST_TCP_BEARER, /* network conn authorized by bearer; no OS-user attestation -> no vault (D17)
+                       */
    ATTEST_UDS_PEERCRED,    /* local UDS conn, kernel-attested peer uid -> uid:<n> principal */
-   ATTEST_WEBCHAT_TRUSTED, /* webchat backend asserting webuser:<name> under server.token (WP-C.2) */
+   ATTEST_WEBCHAT_TRUSTED, /* webchat backend asserting webuser:<name> under server.token (WP-C.2)
+                            */
 } attested_transport_t;
 
 /* Max length of a vault principal string ("webuser:" + a 128-byte username, or

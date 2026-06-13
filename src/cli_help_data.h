@@ -190,6 +190,12 @@
      "  show             Show all config values\n"
      "  get <key>        Get one config value\n"
      "  set <key> <val>  Set one config value\n"},
+    {"vault", "Per-user encrypted agent credentials", CLIENT_TIER_CORE, 0,
+     "  unlock                       Unlock the vault (creates a local root key)\n"
+     "  set <agent> <name> <secret>  Store an encrypted credential\n"
+     "  list                         List stored credential names (no secrets)\n"
+     "  delete <agent> <name>        Remove a credential\n"
+     "  lock                         Lock the vault (evict the cached key)\n"},
     {"kb", "Project knowledge base", CLIENT_TIER_CORE, 1,
      "  search <query>   Search the knowledge base\n"
      "  build            Build the knowledge base for a project\n"
