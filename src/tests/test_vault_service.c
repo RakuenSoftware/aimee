@@ -120,6 +120,49 @@ static void test_list_and_delete(void)
    printf("  PASS: test_list_and_delete\n");
 }
 
+/* WP-C.2: the webuser password unlock (scrypt). */
+static void test_webuser_password_unlock(void)
+{
+   const char *p = "webuser:alice";
+   const uint8_t pw[] = "alice-login-password";
+
+   /* set before unlock => locked. */
+   assert(vault_service_set(p, "claude", "api_key", "s", T0) == VAULT_ERR_LOCKED);
+
+   /* Password unlock requires the webchat-trusted transport. */
+   assert(vault_service_unlock_password(p, ATTEST_UDS_PEERCRED, pw, sizeof(pw) - 1, T0) ==
+          VAULT_ERR_TRANSPORT);
+   assert(vault_service_unlock_password(p, ATTEST_TCP_BEARER, pw, sizeof(pw) - 1, T0) ==
+          VAULT_ERR_TRANSPORT);
+   assert(vault_service_unlock_password("", ATTEST_WEBCHAT_TRUSTED, pw, sizeof(pw) - 1, T0) ==
+          VAULT_ERR_UNATTESTED);
+
+   /* Unlock + round-trip. */
+   assert(vault_service_unlock_password(p, ATTEST_WEBCHAT_TRUSTED, pw, sizeof(pw) - 1, T0) ==
+          VAULT_OK);
+   assert(vault_service_set(p, "claude", "api_key", "sk-webuser-secret", T0) == VAULT_OK);
+   char out[64];
+   assert(vault_service_get(p, "claude", "api_key", out, sizeof(out), T0) == VAULT_OK);
+   assert(strcmp(out, "sk-webuser-secret") == 0);
+
+   /* A different password derives a different KEK -> the stored cred fails closed
+    * (lock first so the cache miss forces re-derivation). */
+   assert(vault_service_lock(p) == VAULT_OK);
+   const uint8_t wrong[] = "not-alices-password";
+   assert(vault_service_unlock_password(p, ATTEST_WEBCHAT_TRUSTED, wrong, sizeof(wrong) - 1, T0) ==
+          VAULT_OK); /* unlock "succeeds" (caches a KEK) ... */
+   assert(vault_service_get(p, "claude", "api_key", out, sizeof(out), T0) ==
+          VAULT_ERR_CRYPTO); /* ... but the wrong KEK cannot decrypt -> fail closed */
+
+   /* The right password again decrypts. */
+   assert(vault_service_lock(p) == VAULT_OK);
+   assert(vault_service_unlock_password(p, ATTEST_WEBCHAT_TRUSTED, pw, sizeof(pw) - 1, T0) ==
+          VAULT_OK);
+   assert(vault_service_get(p, "claude", "api_key", out, sizeof(out), T0) == VAULT_OK);
+   assert(strcmp(out, "sk-webuser-secret") == 0);
+   printf("  PASS: test_webuser_password_unlock\n");
+}
+
 int main(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-vaultsvc-test-%d", (int)getpid());
@@ -135,6 +178,7 @@ int main(void)
    test_locked_vs_missing();
    test_ttl_expiry_locks();
    test_list_and_delete();
+   test_webuser_password_unlock();
 
    vault_kek_cache_clear();
    char rm[320];

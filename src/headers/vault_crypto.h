@@ -32,10 +32,20 @@
 #define VAULT_WRAPPED_DEK_LEN 40 /* RFC 3394 wrap of a 32-byte key = 40 bytes */
 #define VAULT_SALT_LEN        16 /* per-principal HKDF salt */
 
-/* The HKDF `info` label + a recorded version tag for the vault-file header so
- * the derivation can evolve without ambiguity. */
-#define VAULT_KEK_INFO    "aimee-vault-kek-v1"
-#define VAULT_KDF_VERSION "hkdf-sha256-v1"
+/* The HKDF `info` label + recorded version tags for the vault-file header so the
+ * derivation can evolve without ambiguity. uid: principals use HKDF over a
+ * high-entropy client root key; webuser: principals (WP-C.2) use scrypt over the
+ * lower-entropy login password (memory-hard offline-attack defense). */
+#define VAULT_KEK_INFO           "aimee-vault-kek-v1"
+#define VAULT_KDF_VERSION        "hkdf-sha256-v1"
+#define VAULT_KDF_VERSION_SCRYPT "scrypt-n17-r8-p1-v1"
+
+/* scrypt parameters for the webuser password KDF (D18): N=2^17, r=8, p=1. Memory
+ * cost ≈ 128*N*r ≈ 128 MiB, so the OpenSSL maxmem guard must allow it. */
+#define VAULT_SCRYPT_N      (1u << 17)
+#define VAULT_SCRYPT_R      8u
+#define VAULT_SCRYPT_P      1u
+#define VAULT_SCRYPT_MAXMEM ((uint64_t)512 * 1024 * 1024)
 
 /* Fill out[0..n) with cryptographically-strong random bytes. 0 on success;
  * -1 (fail-closed) if the RNG is unavailable — callers must abort the vault op,
@@ -47,6 +57,12 @@ int vault_crypto_random(uint8_t *out, size_t n);
  * VAULT_ROOT_KEY_LEN. 0 on success, -1 on failure (KEK cleansed). */
 int vault_kek_derive(const uint8_t *root_key, size_t root_key_len, const uint8_t *salt,
                      size_t salt_len, uint8_t kek[VAULT_KEK_LEN]);
+
+/* Derive the 32-byte KEK from a login password + per-principal salt via scrypt
+ * (memory-hard; WP-C.2 webuser path). 0 on success, -1 on failure (KEK cleansed).
+ * The caller OPENSSL_cleanse's the password after this returns. */
+int vault_kek_derive_scrypt(const uint8_t *password, size_t password_len, const uint8_t *salt,
+                            size_t salt_len, uint8_t kek[VAULT_KEK_LEN]);
 
 /* AES-KW (RFC 3394) wrap/unwrap of a DEK under the KEK. Unwrap returns -1 if the
  * built-in integrity check fails (wrong KEK or tampered wrapped_dek) — DEK

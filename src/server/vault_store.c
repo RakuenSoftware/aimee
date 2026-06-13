@@ -294,7 +294,11 @@ int vault_store_get_or_create_salt(const char *principal, uint8_t salt[VAULT_SAL
          goto done;
       cJSON_AddNumberToObject(root, "version", VAULT_FILE_VERSION);
       cJSON_AddStringToObject(root, "principal", principal);
-      cJSON_AddStringToObject(root, "kdf_version", VAULT_KDF_VERSION);
+      /* Record which KDF unlock will use: webuser: principals derive the KEK from
+       * the login password via scrypt; uid: principals use HKDF over a root key. */
+      cJSON_AddStringToObject(root, "kdf_version",
+                              strncmp(principal, "webuser:", 8) == 0 ? VAULT_KDF_VERSION_SCRYPT
+                                                                     : VAULT_KDF_VERSION);
       cJSON_AddStringToObject(root, "salt", salt_b64);
       cJSON_AddArrayToObject(root, "creds");
       free(salt_b64);

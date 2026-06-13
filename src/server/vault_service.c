@@ -68,6 +68,38 @@ vault_status_t vault_service_unlock(const char *principal, attested_transport_t 
    return st;
 }
 
+vault_status_t vault_service_unlock_password(const char *principal, attested_transport_t transport,
+                                             const uint8_t *password, size_t password_len,
+                                             long now_epoch)
+{
+   if (!principal || !principal[0])
+      return VAULT_ERR_UNATTESTED;
+   /* The password unlock is for the webchat-asserted webuser principal only,
+    * honored under the server.token trust boundary (ATTEST_WEBCHAT_TRUSTED). A
+    * uid:/TCP conn must use the root-key unlock instead. */
+   if (transport != ATTEST_WEBCHAT_TRUSTED)
+      return VAULT_ERR_TRANSPORT;
+   if (!password || password_len == 0)
+      return VAULT_ERR_BADARG;
+
+   uint8_t salt[VAULT_SALT_LEN];
+   if (vault_store_get_or_create_salt(principal, salt) != 0)
+      return VAULT_ERR_IO;
+
+   uint8_t kek[VAULT_KEK_LEN];
+   vault_status_t st = VAULT_OK;
+   if (vault_kek_derive_scrypt(password, password_len, salt, sizeof(salt), kek) != 0)
+      st = VAULT_ERR_CRYPTO;
+   else if (vault_kek_cache_put(principal, kek, now_epoch) != 0)
+      st = VAULT_ERR_LOCKED;
+
+   OPENSSL_cleanse(kek, sizeof(kek));
+   OPENSSL_cleanse(salt, sizeof(salt));
+   if (st == VAULT_OK)
+      LOG_INFO("vault", "webuser vault unlocked (scrypt)");
+   return st;
+}
+
 vault_status_t vault_service_set(const char *principal, const char *agent, const char *cred,
                                  const char *secret, long now_epoch)
 {
