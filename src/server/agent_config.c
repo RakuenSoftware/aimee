@@ -281,6 +281,7 @@ void agent_request_creds_snapshot(agent_request_creds_t *out)
    snprintf(out->session_id, sizeof(out->session_id), "%s", g_request_session_id);
    snprintf(out->codex_token, sizeof(out->codex_token), "%s", g_request_codex_token);
    snprintf(out->codex_account_id, sizeof(out->codex_account_id), "%s", g_request_codex_account_id);
+   snprintf(out->vault_principal, sizeof(out->vault_principal), "%s", g_request_vault_principal);
 }
 
 void agent_request_creds_restore(const agent_request_creds_t *creds)
@@ -289,6 +290,7 @@ void agent_request_creds_restore(const agent_request_creds_t *creds)
       return;
    agent_set_request_session(creds->session_id);
    agent_set_request_codex_creds(creds->codex_token, creds->codex_account_id);
+   agent_set_request_vault_principal(creds->vault_principal);
 }
 
 static void append_header_line(char *buf, size_t buf_len, const char *line)

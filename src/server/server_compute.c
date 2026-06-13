@@ -1705,9 +1705,9 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
     * not be opened on the server's own fs. A NULL conn is an in-process caller. */
    cctx->conn_caps = conn ? conn->capabilities : CAPS_ALL;
 
-   /* WP-C vault identity: the live conn's attested principal (hop 3), else the
-    * chat turn's thread-local (a chat-spawned delegate, decoupled from the conn;
-    * the thread-local is cleared per-turn so it can't leak across turns). */
+   /* WP-C vault identity: the conn's attested principal (hop 3) wins; else fall back
+    * to the chat turn's per-turn thread-local — the chat-spawned delegate's loopback
+    * conn carries no restored identity, and the TL is cleared per turn (no leak). */
    if (conn)
       cctx->attested_transport = conn->attested_transport;
    snprintf(cctx->vault_principal, sizeof(cctx->vault_principal), "%s",

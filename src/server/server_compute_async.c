@@ -461,9 +461,16 @@ static void chat_stream_worker_pooled(void *arg)
    agent_set_request_codex_creds(jo_str(cctx->req, "codex_oauth_token", NULL),
                                  jo_str(cctx->req, "codex_account_id", NULL));
    /* WP-C.2c(3): carry the attested vault principal across the conn-decoupled
-    * agent loop so a delegate this chat spawns reaches the user's vault. Bounded
-    * strictly to the agent-loop execution + cleared after, so a later delegate on
-    * this pooled thread can never inherit a prior turn's principal. */
+    * agent loop so a delegate this chat spawns reaches the user's vault — both a
+    * same-thread delegate (via create_compute_ctx's thread-local fallback when its
+    * loopback conn carries no restored identity) and a parallel fan-out delegate
+    * (which inherits it via agent_request_creds_snapshot, now extended to capture
+    * this thread-local). Two layers keep it from leaking across turns on this
+    * pooled thread: (1) this set is UNCONDITIONAL at the top of every turn — an
+    * empty cctx->vault_principal clears it, so the next turn never sees a prior
+    * turn's value; (2) we clear it after the worker. chat_stream_worker is a plain
+    * call with no longjmp/pthread_exit/cancellation in its tree, so the post-call
+    * clear always runs on return; together the two make the guard robust. */
    agent_set_request_vault_principal(cctx->vault_principal);
    chat_stream_worker(arg);
    agent_set_request_vault_principal(NULL);
