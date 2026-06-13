@@ -121,6 +121,9 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
    return count;
 }
 
+static void fill_aggregator_response(agent_result_t *out, const char *who);
+static int is_synthesis_prompt(const char *p);
+
 int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
                     const char *system_prompt, const char *user_prompt, int max_tokens,
                     double temperature, agent_result_t *out)
@@ -131,8 +134,15 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    (void)user_prompt;
    (void)max_tokens;
    (void)temperature;
-   g_named_calls++;
    memset(out, 0, sizeof(*out));
+   /* A bare-name aggregator is dispatched here with the synthesis prompt; it is
+    * the aggregator, not a panel participant, so it is not a "named" call. */
+   if (is_synthesis_prompt(user_prompt))
+   {
+      fill_aggregator_response(out, name);
+      return 0;
+   }
+   g_named_calls++;
    if (role && strcmp(role, "review") == 0 &&
        strstr(user_prompt ? user_prompt : "", "Repair this malformed roundtable review"))
    {
@@ -157,18 +167,11 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
    return 0;
 }
 
-/* The aggregator/synthesis step runs through the no-tools role-routed path
- * (agent_run_ex) so non-tool models can synthesize. Mirror the aggregator
- * branch of the tool-enabled stub below. */
-int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
-                 const char *user_prompt, int max_tokens, double temperature, agent_result_t *out)
+/* The aggregator/synthesis step runs without tools: by NAME (agent_run_named)
+ * when the aggregator is a bare agent name (a name is not a role, so role-
+ * routing can't reach it), else by role (agent_run_ex). Both land here. */
+static void fill_aggregator_response(agent_result_t *out, const char *who)
 {
-   (void)cfg;
-   (void)system_prompt;
-   (void)user_prompt;
-   (void)max_tokens;
-   (void)temperature;
-   memset(out, 0, sizeof(*out));
    char buf[128];
    g_aggregator_calls++;
    if (g_aggregator_mode == 1)
@@ -189,8 +192,26 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
    }
    out->prompt_tokens = 200;
    out->completion_tokens = 100;
-   snprintf(out->agent_name, sizeof(out->agent_name), "%s", role ? role : "");
+   snprintf(out->agent_name, sizeof(out->agent_name), "%s", who ? who : "");
    out->success = 1;
+}
+
+/* True for the aggregator/synthesis prompt (vs a panel round or a repair). */
+static int is_synthesis_prompt(const char *p)
+{
+   return p && (strstr(p, "synthesis aggregator") || strstr(p, "consolidating"));
+}
+
+int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_prompt,
+                 const char *user_prompt, int max_tokens, double temperature, agent_result_t *out)
+{
+   (void)cfg;
+   (void)system_prompt;
+   (void)user_prompt;
+   (void)max_tokens;
+   (void)temperature;
+   memset(out, 0, sizeof(*out));
+   fill_aggregator_response(out, role);
    return 0;
 }
 
