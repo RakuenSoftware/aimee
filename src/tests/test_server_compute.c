@@ -123,6 +123,10 @@ void agent_set_request_codex_creds(const char *token, const char *account_id)
    (void)token;
    (void)account_id;
 }
+int agent_request_codex_token_present(void)
+{
+   return 0;
+}
 void agent_set_request_session(const char *session_id)
 {
    (void)session_id;
@@ -192,6 +196,19 @@ vault_status_t vault_service_inject_api_key(const char *principal, const char *a
    (void)agent;
    (void)api_key;
    (void)api_key_len;
+   (void)now_epoch;
+   return VAULT_NO_ENTRY;
+}
+/* WP-C.3: delegate_credential_retry.o (linked here) calls vault_service_get for
+ * the codex-oauth override; these tests run keyless, so stub it to a miss. */
+vault_status_t vault_service_get(const char *principal, const char *agent, const char *cred,
+                                 char *out, size_t out_cap, long now_epoch)
+{
+   (void)principal;
+   (void)agent;
+   (void)cred;
+   (void)out;
+   (void)out_cap;
    (void)now_epoch;
    return VAULT_NO_ENTRY;
 }

@@ -8,7 +8,14 @@
  *
  * Process-global lease state, mutex-protected. Empty agent.credentials
  * (the default) is treated as "no pool — fall through to api_key", so
- * existing single-token agents are unaffected. */
+ * existing single-token agents are unaffected.
+ *
+ * WP-C.3: every row is keyed by (principal, agent, cred). The shared
+ * agents.json env-var pool uses an EMPTY principal ("") — a 429 there is
+ * global and cools the credential for everyone, exactly as before. A
+ * per-principal VAULT credential passes its `uid:`/`webuser:` principal, so
+ * one principal's 429-cooldown and health are isolated from another's even
+ * when they vault the same agent. A NULL principal is normalised to "". */
 #ifndef DEC_DELEGATE_CREDENTIALS_H
 #define DEC_DELEGATE_CREDENTIALS_H 1
 
@@ -18,6 +25,7 @@
 #include "aimee.h" /* MAX_PATH_LEN — agent_types.h uses it without including */
 #include "agent_types.h"
 #include "failover.h"
+#include "vault_principal.h" /* VAULT_PRINCIPAL_MAX — pool rows are keyed by principal */
 
 #ifdef __cplusplus
 extern "C"
@@ -34,18 +42,29 @@ extern "C"
     * returns -1 with credential_count == 0; an error return with
     * credential_count > 0 means every credential is in use or cooling
     * and the caller should retry after a backoff. */
-   int delegate_credentials_acquire(const char *agent_name, const agent_credential_t *creds,
-                                    int credential_count, char *out_name, size_t out_name_cap,
-                                    char *out_env_var, size_t out_env_var_cap);
+   int delegate_credentials_acquire(const char *principal, const char *agent_name,
+                                    const agent_credential_t *creds, int credential_count,
+                                    char *out_name, size_t out_name_cap, char *out_env_var,
+                                    size_t out_env_var_cap);
 
    /* Release a previously-acquired lease so siblings can pick it up.
-    * No-op for unknown (agent_name, cred_name) pairs. */
-   void delegate_credentials_release(const char *agent_name, const char *cred_name);
+    * No-op for unknown (principal, agent_name, cred_name) rows. */
+   void delegate_credentials_release(const char *principal, const char *agent_name,
+                                     const char *cred_name);
 
    /* Mark a credential as cooling for `seconds` seconds. Used after a 429
     * so siblings skip the entry until the cooldown elapses. The
     * credential remains leased until the caller also calls _release. */
-   void delegate_credentials_cooldown(const char *agent_name, const char *cred_name, int seconds);
+   void delegate_credentials_cooldown(const char *principal, const char *agent_name,
+                                      const char *cred_name, int seconds);
+
+   /* Read-only: seconds remaining on the (principal, agent, cred) cooldown, or 0
+    * if the credential is unknown or not cooling. The vault use-path consults
+    * this to apply per-principal 429 backpressure to a single vaulted credential
+    * without taking an exclusive lease (a user's own key may be used by their
+    * concurrent delegates). Creates no row. */
+   int delegate_credentials_cooldown_remaining(const char *principal, const char *agent_name,
+                                               const char *cred_name, time_t now_epoch);
 
    /* Default cooldown applied when a delegate run fails with a rate-
     * limit / 429 / overloaded error and a credential lease was held.
@@ -105,14 +124,15 @@ extern "C"
    /* Parse provider x-ratelimit-* response headers for the acting credential.
     * raw_headers is a CRLF/LF-separated header block. Reset values are relative
     * seconds and are stored as absolute epoch seconds using now_epoch. */
-   int delegate_credentials_capture_headers(const char *agent_name, const char *cred_name,
-                                            const char *raw_headers, time_t now_epoch);
+   int delegate_credentials_capture_headers(const char *principal, const char *agent_name,
+                                            const char *cred_name, const char *raw_headers,
+                                            time_t now_epoch);
 
    /* Mark a credential according to the failover classifier. Returns 1 when
     * the reason changed credential health, 0 for unrelated reasons. */
-   int delegate_credentials_report_failure(const char *agent_name, const char *cred_name,
-                                           failover_reason_t reason, const char *error,
-                                           time_t now_epoch);
+   int delegate_credentials_report_failure(const char *principal, const char *agent_name,
+                                           const char *cred_name, failover_reason_t reason,
+                                           const char *error, time_t now_epoch);
 
    failover_reason_t delegate_credentials_classify_failure(const char *provider, const char *error);
 
@@ -120,12 +140,19 @@ extern "C"
     * the next available member from the same pool. Returns 1 when a new
     * credential was leased, 0 when the error is not pool-rotatable or no
     * member is available, and -1 for invalid arguments. On rotatable failures
-    * the old lease is always released, even when no replacement is available. */
-   int delegate_credentials_rotate_after_failure(
-       const char *agent_name, const agent_credential_t *creds, int credential_count,
-       const char *provider, char *leased_cred_name, size_t leased_cred_name_cap, char *out_env_var,
-       size_t out_env_var_cap, const char *error, time_t now_epoch);
+    * the old lease is always released, even when no replacement is available.
+    * Env-pool rotation only — callers pass the shared "" principal. */
+   int delegate_credentials_rotate_after_failure(const char *principal, const char *agent_name,
+                                                 const agent_credential_t *creds,
+                                                 int credential_count, const char *provider,
+                                                 char *leased_cred_name,
+                                                 size_t leased_cred_name_cap, char *out_env_var,
+                                                 size_t out_env_var_cap, const char *error,
+                                                 time_t now_epoch);
 
+   /* Operator-facing health snapshot of the SHARED env pool (principal == "").
+    * Per-principal vault rows are intentionally not surfaced here (they are
+    * per-user, not operator-configured). */
    int delegate_credentials_snapshot(const char *agent_name, delegate_credential_snapshot_t *out,
                                      int max);
 
