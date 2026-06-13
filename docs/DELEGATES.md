@@ -351,6 +351,24 @@ The panel is configured under `ensemble` in `aimee.yaml`:
 Cost is folded onto the originating session, so a roundtable run shows up in the
 same cost accounting as the rest of that session's work.
 
+### Partial-failure and degradation metadata
+
+Large panels can lose participants mid-run (a provider 429s, a model times out).
+Both `aggregate` and `roundtable` keep running on the survivors and report what
+happened in the result rather than silently dropping the failures:
+
+| Field | Meaning |
+|-------|---------|
+| `participants_total` | Reference models fanned out (the panel size) |
+| `participants_failed` | Participants that returned no usable response (for `roundtable`, the final executed round) |
+| `degraded` | The run returned the best single candidate instead of a synthesized answer (e.g. fewer than `min_successful` answered) |
+| `cost_capped` | The run stopped early because the observed cost reached `max_cost_usd` |
+| `deadline_hit` *(roundtable)* | The per-run `deadline_ms` elapsed; the best artifact so far is returned |
+
+`participants_failed > 0` with `degraded = 0` means the panel lost some members
+but still had enough to synthesize — the answer is sound but thinner than a full
+panel. `degraded = 1` means the result is a single survivor's answer.
+
 ## Configuration Reference
 
 Delegates are stored in:

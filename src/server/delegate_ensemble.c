@@ -1135,6 +1135,12 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
    for (int i = 0; i < ref_count; i++)
       ensemble_fold_cost(acfg, &results[i], cfg->ensemble_reference_models[i]);
 
+   /* Partial-failure metadata: how many of the fanned-out participants returned
+    * no usable response. Set before any early return so degraded/cost-capped
+    * results still carry it. */
+   out->participants_total = ref_count;
+   out->participants_failed = ref_count - count_successful(results, ref_count);
+
    double cost = estimate_cost(acfg, results, cfg->ensemble_reference_models, ref_count);
    out->cost_usd = cost;
 
@@ -1260,6 +1266,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
    if (!artifact || !peer_notes)
       goto fail;
 
+   out->participants_total = cfg->ensemble_reference_count; /* panel size per round */
+
    for (int round = 1; round <= local.max_rounds; round++)
    {
       if (local.cancel_requested && local.cancel_requested(local.cancel_ctx))
@@ -1303,6 +1311,10 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
             free(results[i].response);
          goto fail;
       }
+      /* Partial-failure metadata: participants that returned no usable response
+       * this round (raw model results, before review-JSON repair). Ends holding
+       * the final executed round's count. */
+      out->participants_failed = ref_count - count_successful(results, ref_count);
       if (local.cancel_requested && local.cancel_requested(local.cancel_ctx))
       {
          out->cancelled = 1;

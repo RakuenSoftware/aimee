@@ -395,6 +395,9 @@ static void test_ensemble_basic(void)
    assert(!result.cost_capped);
    assert(result.response[0] != '\0');
    assert(delegate_ensemble_cost_usd(&result) > 0.0);
+   /* Partial-failure metadata: all 3 participants succeeded. */
+   assert(result.participants_total == 3);
+   assert(result.participants_failed == 0);
    printf("  test_ensemble_basic: ok\n");
 }
 
@@ -408,6 +411,9 @@ static void test_ensemble_min_successful_degradation(void)
    assert(rc == 0);
    assert(result.degraded == 1);
    assert(!result.cost_capped);
+   /* Partial-failure metadata: only 1 of 3 participants returned a response. */
+   assert(result.participants_total == 3);
+   assert(result.participants_failed == 2);
    g_parallel_mode = 0;
    printf("  test_ensemble_min_successful_degradation: ok\n");
 }
@@ -524,6 +530,9 @@ static void test_roundtable_parallel_basic(void)
    assert(result.best_round > 0);
    assert(result.cost_usd > 0.0);
    assert(g_parallel_calls == 2);
+   /* Partial-failure metadata: full panel, no failures. */
+   assert(result.participants_total == 3);
+   assert(result.participants_failed == 0);
    delegate_roundtable_result_free(&result);
    printf("  test_roundtable_parallel_basic: ok\n");
 }
@@ -607,6 +616,9 @@ static void test_roundtable_degrades_on_min_success(void)
    assert(result.degraded == 1);
    assert(result.artifact != NULL);
    assert(strstr(result.artifact, "only one answer") != NULL);
+   /* Partial-failure metadata: panel of 3, only 1 participant responded. */
+   assert(result.participants_total == 3);
+   assert(result.participants_failed == 2);
    delegate_roundtable_result_free(&result);
    g_parallel_mode = 0;
    printf("  test_roundtable_degrades_on_min_success: ok\n");
