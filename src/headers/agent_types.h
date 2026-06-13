@@ -181,6 +181,13 @@ typedef struct
    char endpoint[MAX_ENDPOINT_LEN];
    char model[MAX_MODEL_LEN];
    char api_key[MAX_API_KEY_LEN];
+   /* The verbatim on-disk api_key — a "$VAR" reference (or, legacy, a literal).
+    * `api_key` above holds the RESOLVED value for runtime use (agent_expand_env
+    * at load); this preserves the reference so agent_save_config never
+    * re-serializes a resolved $VAR secret back into agents.json as plaintext.
+    * Empty for agents created in-memory (e.g. `agent add $VAR`), where save falls
+    * back to api_key (still the unexpanded reference at that point). */
+   char api_key_disk[MAX_API_KEY_LEN];
    char auth_cmd[MAX_AUTH_CMD_LEN];
    char auth_type[16];
    char provider[16];

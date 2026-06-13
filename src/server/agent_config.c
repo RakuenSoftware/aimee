@@ -490,7 +490,13 @@ int agent_load_config(agent_config_t *cfg)
 
          v = cJSON_GetObjectItem(a, "api_key");
          if (v && cJSON_IsString(v))
+         {
+            /* Keep the verbatim on-disk form ($VAR ref) for re-save, and resolve
+             * a separate runtime copy. Without this, a save would write the
+             * expanded secret back to agents.json as plaintext. */
+            snprintf(ag->api_key_disk, MAX_API_KEY_LEN, "%s", v->valuestring);
             agent_expand_env(v->valuestring, ag->api_key, MAX_API_KEY_LEN);
+         }
 
          /* Optional credential pool. Each entry is {name, api_key_env};
           * sibling delegates lease distinct entries via the lease pool in
@@ -853,8 +859,14 @@ int agent_save_config(const agent_config_t *cfg)
       JSON_ADD_STR(a, "name", ag->name);
       JSON_ADD_STR(a, "endpoint", ag->endpoint);
       JSON_ADD_STR(a, "model", ag->model);
-      if (ag->api_key[0])
-         JSON_ADD_STR(a, "api_key", ag->api_key);
+      /* Persist the on-disk reference form ($VAR), never a resolved secret. Falls
+       * back to api_key for in-memory agents (e.g. `agent add $VAR`, which stores
+       * the unexpanded reference there); literal secrets belong in the vault. */
+      {
+         const char *disk_key = ag->api_key_disk[0] ? ag->api_key_disk : ag->api_key;
+         if (disk_key[0])
+            JSON_ADD_STR(a, "api_key", disk_key);
+      }
       if (ag->auth_cmd[0])
          JSON_ADD_STR(a, "auth_cmd", ag->auth_cmd);
       if (strcmp(ag->auth_type, "bearer") != 0)
