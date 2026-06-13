@@ -1076,7 +1076,17 @@ static void test_known_subagent_tools_blocked(void)
    assert(rc == 2);
    assert(strstr(msg, "BLOCKED") != NULL);
    assert(strstr(msg, "guardrails") != NULL);
-   assert(strstr(msg, "delegate MCP tool") != NULL);
+   assert(strstr(msg, "aimee delegate") != NULL);
+
+   /* Claude Code's actual sub-agent tool name (Task) should be blocked too */
+   rc = pre_tool_check("Task",
+                       "{\"subagent_type\":\"Explore\","
+                       "\"prompt\":\"Find the installer code\","
+                       "\"description\":\"Find installer\"}",
+                       &state, MODE_APPROVE, "/tmp", msg, sizeof(msg));
+   assert(rc == 2);
+   assert(strstr(msg, "BLOCKED") != NULL);
+   assert(strstr(msg, "aimee delegate") != NULL);
 
    /* Codex sub-agent tool should also be blocked */
    rc = pre_tool_check("spawn_agent",
@@ -1093,7 +1103,7 @@ static void test_known_subagent_tools_blocked(void)
                        msg, sizeof(msg));
    assert(rc == 2);
    assert(strstr(msg, "guardrails") != NULL);
-   assert(strstr(msg, "delegate MCP tool") != NULL);
+   assert(strstr(msg, "aimee delegate") != NULL);
 
    guardrails_close_test_sqlite();
 }

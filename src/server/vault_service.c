@@ -232,7 +232,8 @@ vault_status_t vault_service_inject_api_key(const char *principal, const char *a
    char *tmp = malloc(api_key_len);
    if (!tmp)
       return VAULT_ERR_IO;
-   vault_status_t st = vault_service_get(principal, agent, "api_key", tmp, api_key_len, now_epoch);
+   vault_status_t st =
+       vault_service_get(principal, agent, VAULT_API_KEY_CRED, tmp, api_key_len, now_epoch);
    if (st == VAULT_OK)
       snprintf(api_key, api_key_len, "%s", tmp); /* overwrite only on a real hit */
    OPENSSL_cleanse(tmp, api_key_len);

@@ -274,6 +274,11 @@ void agent_set_request_codex_creds(const char *token, const char *account_id)
       g_request_codex_account_id[0] = '\0';
 }
 
+int agent_request_codex_token_present(void)
+{
+   return g_request_codex_token[0] != '\0';
+}
+
 void agent_request_creds_snapshot(agent_request_creds_t *out)
 {
    if (!out)

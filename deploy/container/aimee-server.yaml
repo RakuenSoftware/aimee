@@ -15,6 +15,16 @@ aimee:
     http_port: 8740
     bearer_token: "aimee-local-dev"
     rate_limit_per_min: 0
+    # This image binds /v1 on 0.0.0.0 so a thin client drives it remotely,
+    # including delegates/roundtables/tools — which require remote_writes="full".
+    # The image also forces this via AIMEE_API_REMOTE_WRITES (Dockerfile.server) so
+    # it survives a fresh redeploy that reseeds this file. Trusted networks only
+    # (ships a known dev bearer); for any exposed deployment set your own bearer +
+    # TLS and lower this:
+    #   remote_writes: data   # data writes (memory/work/rules/skill), cap-gated
+    #   remote_writes: "off"  # TCP bearer is read/query/chat only
+    remote_writes: "full"
+
     # remote_writes controls what a TCP bearer may do over the published port:
     #   off    read/query/chat only (mutations are local-UDS-only)
     #   data   + data writes (memory/work/rules/skill), capability-gated
@@ -23,9 +33,6 @@ aimee:
     # `aimee` client driving this server can run delegates and the roundtable
     # without extra setup. The bearer token above is the trust boundary, so
     # OVERRIDE IT (and front with TLS) for any deployment exposed beyond a
-    # trusted network.
-    remote_writes: "full"
-
 # Delegate roundtable / MoA ensemble, on by default. The panel is the seeded
 # agents.json roster; a thin client pushes the per-agent API keys per session
 # (no keys are baked in), so the roundtable works once a client has connected.

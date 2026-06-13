@@ -729,6 +729,9 @@ void delegate_worker(void *arg)
    char deleg_id[64] = "";
    agent_t *target_agent = NULL;
    char leased_cred_name[MAX_CRED_NAME_LEN] = "";
+   /* WP-C.3: the credential-pool row key. "" for the shared env pool; the request
+    * principal for a vaulted credential, so its 429-cooldown is per-principal. */
+   char leased_principal[VAULT_PRINCIPAL_MAX] = "";
    char credential_state_path[MAX_PATH_LEN] = "";
    char *resolved_prompt = NULL;
    char *template_sys_prompt = NULL;
@@ -996,46 +999,29 @@ void delegate_worker(void *arg)
    delegate_apply_max_turns_policy(&acfg, role, max_turns);
    if (cctx->background_job_id > 0 && target_agent)
       db1_agent_job_set_agent(cctx->background_job_id, target_agent->name);
-   /* WP-C.1 vault-FIRST (D14/D15): vaulted cred beats env lease; LOCKED fails; miss -> env. */
-   int vault_hit = 0;
-   if (target_agent && cctx->vault_principal[0])
+   /* Resolve the credential (WP-C.1 vault-FIRST + WP-C.3 per-principal cooldown):
+    * sets target_agent->api_key on a hit and names the pool row to release on
+    * exit; the worker maps a non-OK status to a delegate error. */
+   int cooldown_secs = 0;
+   delegate_cred_resolve_status_t cred_status = delegate_resolve_credentials(
+       target_agent ? cctx->vault_principal : NULL, target_agent, leased_principal,
+       sizeof(leased_principal), leased_cred_name, sizeof(leased_cred_name), credential_state_path,
+       sizeof(credential_state_path), &cooldown_secs);
+   if (cred_status != DELEGATE_CRED_RESOLVE_OK)
    {
-      vault_status_t vst =
-          vault_service_inject_api_key(cctx->vault_principal, target_agent->name,
-                                       target_agent->api_key, MAX_API_KEY_LEN, time(NULL));
-      vault_hit = (vst == VAULT_OK);
-      if (vst == VAULT_ERR_LOCKED)
-      {
-         delegation_compute_error(cctx, "vault locked: run `aimee vault unlock`");
-         compute_ctx_free(cctx);
-         return;
-      }
-   }
-   /* Lease one credential from a configured pool (skipped on a vault hit). */
-   if (!vault_hit && target_agent && target_agent->credential_count > 0)
-   {
-      char leased_env[MAX_CRED_ENV_VAR_LEN] = "";
-      const char *dir = config_output_dir();
-      snprintf(credential_state_path, sizeof(credential_state_path),
-               "%s/delegate-credential-state.tsv", dir ? dir : "/tmp");
-      (void)delegate_credentials_load_file(credential_state_path, time(NULL));
-      if (delegate_credentials_acquire(
-              target_agent->name, target_agent->credentials, target_agent->credential_count,
-              leased_cred_name, sizeof(leased_cred_name), leased_env, sizeof(leased_env)) == 0)
-      {
-         const char *value = getenv(leased_env);
-         if (value && value[0])
-            snprintf(target_agent->api_key, MAX_API_KEY_LEN, "%s", value);
-      }
+      char errmsg[200];
+      if (cred_status == DELEGATE_CRED_RESOLVE_LOCKED)
+         snprintf(errmsg, sizeof(errmsg), "vault locked: run `aimee vault unlock`");
+      else if (cred_status == DELEGATE_CRED_RESOLVE_COOLING)
+         snprintf(errmsg, sizeof(errmsg),
+                  "vault credential for agent '%s' is rate-limited; retry in %ds",
+                  target_agent->name, cooldown_secs);
       else
-      {
-         char errmsg[256];
          snprintf(errmsg, sizeof(errmsg), "no available credential in pool for agent '%s'",
                   target_agent->name);
-         delegation_compute_error(cctx, errmsg);
-         compute_ctx_free(cctx);
-         return;
-      }
+      delegation_compute_error(cctx, errmsg);
+      compute_ctx_free(cctx);
+      return;
    }
 
    /* Enforce delegation depth limit.
@@ -1621,12 +1607,13 @@ void delegate_worker(void *arg)
       if (!result.success)
          reason = delegate_credentials_classify_failure(target_agent->provider, result.error);
       if (reason != FAILOVER_NONE)
-         delegate_credentials_report_failure(target_agent->name, leased_cred_name, reason,
-                                             result.error, time(NULL));
-      delegate_credentials_release(target_agent->name, leased_cred_name);
+         delegate_credentials_report_failure(leased_principal, target_agent->name, leased_cred_name,
+                                             reason, result.error, time(NULL));
+      delegate_credentials_release(leased_principal, target_agent->name, leased_cred_name);
       if (credential_state_path[0])
          (void)delegate_credentials_save_file(credential_state_path);
       leased_cred_name[0] = '\0';
+      leased_principal[0] = '\0';
    }
 
    /* Clear thread-local CWD */
@@ -1645,7 +1632,7 @@ delegate_fail:
    free(resolved_prompt);
    free(template_sys_prompt);
    if (target_agent && leased_cred_name[0])
-      delegate_credentials_release(target_agent->name, leased_cred_name);
+      delegate_credentials_release(leased_principal, target_agent->name, leased_cred_name);
    if (delegate_worktree_path[0] && delegate_git_root[0])
       worktree_cleanup(delegate_git_root, deleg_id, delegate_work_name);
    compute_ctx_free(cctx);
@@ -1899,6 +1886,7 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    opts.max_rounds = cfg.roundtable_max_rounds > 0 ? cfg.roundtable_max_rounds : 3;
    opts.converge_threshold = cfg.roundtable_converge_threshold;
    opts.deadline_ms = cfg.roundtable_deadline_ms;
+   opts.parent_session_id = compute_request_session_id(req); /* fold panel cost onto it */
    cJSON *jrun = cJSON_GetObjectItemCaseSensitive(req, "__run_id");
    if (cJSON_IsString(jrun) && jrun->valuestring && jrun->valuestring[0])
    {
@@ -1914,7 +1902,6 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    opts.brief_truncated = brief.truncated;
    opts.questions = brief.question_ptrs;
    opts.question_count = brief.question_count;
-
    cJSON *jmode = cJSON_GetObjectItemCaseSensitive(req, "mode");
    if (cJSON_IsString(jmode) && strcmp(jmode->valuestring, "review") == 0)
       opts.mode = ROUNDTABLE_REVIEW;

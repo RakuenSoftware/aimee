@@ -8,6 +8,10 @@
 #include "aimee.h"
 #include "delegate_ensemble.h"
 #include "agent_exec.h"
+#include "agent_config.h"
+#include "config.h"
+#include "delegate_credentials.h"
+#include "cost_fold.h"
 #include "log.h"
 #include "token_tracker.h"
 
@@ -142,6 +146,69 @@ static double estimate_cost(const agent_config_t *acfg, const agent_result_t *re
    for (int i = 0; i < count; i++)
       total += result_token_cost(acfg, &results[i], fallback_agents ? fallback_agents[i] : NULL);
    return total;
+}
+
+/* Originating session of the in-flight roundtable, set at delegate_roundtable_run
+ * entry. Read by the delegate-run core + panel cost-fold so each model call is
+ * accounted onto the caller's session like a delegate. */
+static _Thread_local const char *g_rt_parent_sid = NULL;
+
+/* Fold a completed panel/aggregator run's cost onto the originating session, the
+ * same accounting a real delegate does. No-op without a parent session or a
+ * billable result. */
+static void ensemble_fold_cost(const agent_config_t *acfg, const agent_result_t *r,
+                               const char *fallback_agent)
+{
+   if (!g_rt_parent_sid || !g_rt_parent_sid[0] || !r || !r->success)
+      return;
+   double cost = result_token_cost(acfg, r, fallback_agent);
+   if (cost > 0.0)
+      (void)db1_cost_fold_record(g_rt_parent_sid, "ensemble", cost, "ensemble");
+}
+
+/* Synchronous delegate run: the delegate economics core — a credential lease for
+ * agents with a server-side pool, plus cost-fold accounting — wrapped around a
+ * no-tools agent run. The ensemble dispatches its aggregator (and any serial
+ * participant) through this so the work runs as a delegate rather than a raw
+ * in-process agent call. delegate_worker stays the async-job path; this is its
+ * synchronous sibling. A non-empty name routes by name; NULL routes by role. */
+static int delegate_run_inline(agent_config_t *acfg, const char *agent_name, const char *role,
+                               const char *system_prompt, const char *user_prompt, int max_tokens,
+                               double temperature, agent_result_t *out)
+{
+   agent_t *ag = (agent_name && agent_name[0]) ? agent_find(acfg, agent_name) : NULL;
+   char leased_cred[MAX_CRED_NAME_LEN] = "";
+   int leased = 0;
+   /* Client-held-credential agents (the usual panel) have no pool, so this is
+    * skipped and keys resolve from the session keyring as before; a pooled agent
+    * leases one credential for the call, exactly like delegate_worker. */
+   if (ag && ag->credential_count > 0)
+   {
+      char leased_env[MAX_CRED_ENV_VAR_LEN] = "";
+      char state_path[MAX_PATH_LEN];
+      const char *dir = config_output_dir();
+      snprintf(state_path, sizeof(state_path), "%s/delegate-credential-state.tsv",
+               dir ? dir : "/tmp");
+      (void)delegate_credentials_load_file(state_path, time(NULL));
+      if (delegate_credentials_acquire(NULL, ag->name, ag->credentials, ag->credential_count,
+                                       leased_cred, sizeof(leased_cred), leased_env,
+                                       sizeof(leased_env)) == 0)
+      {
+         const char *v = getenv(leased_env);
+         if (v && v[0])
+            snprintf(ag->api_key, MAX_API_KEY_LEN, "%s", v);
+         leased = 1;
+      }
+   }
+   int rc =
+       (agent_name && agent_name[0])
+           ? agent_run_named(acfg, agent_name, role, system_prompt, user_prompt, max_tokens,
+                             temperature, out)
+           : agent_run_ex(acfg, role, system_prompt, user_prompt, max_tokens, temperature, out);
+   ensemble_fold_cost(acfg, out, agent_name);
+   if (leased && ag)
+      delegate_credentials_release(NULL, ag->name, leased_cred);
+   return rc;
 }
 
 static long monotonic_ms(void)
@@ -403,11 +470,11 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
       /* max_tokens 0 = derive from the aggregator model's own output ceiling, so
        * a reasoning aggregator isn't truncated mid-synthesis (was a hard 4096). */
       if (!at)
-         return agent_run_named(&agg_cfg, agg, "review", NULL, synthesis_prompt, 0, 0.3, out);
+         return delegate_run_inline(&agg_cfg, agg, "review", NULL, synthesis_prompt, 0, 0.3, out);
       const char *role = (at[1]) ? at + 1 : "review";
-      return agent_run_ex(&agg_cfg, role, NULL, synthesis_prompt, 0, 0.3, out);
+      return delegate_run_inline(&agg_cfg, NULL, role, NULL, synthesis_prompt, 0, 0.3, out);
    }
-   return agent_run_ex(&agg_cfg, "review", NULL, synthesis_prompt, 0, 0.3, out);
+   return delegate_run_inline(&agg_cfg, NULL, "review", NULL, synthesis_prompt, 0, 0.3, out);
 }
 
 static char *build_round_prompt(const char *task, const char *artifact, const char *peer_notes,
@@ -985,6 +1052,9 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
       tasks[i].max_tokens = 0;
    }
    agent_run_parallel(acfg, tasks, ref_count, results);
+   /* Account each participant's run onto the originating session, like a delegate. */
+   for (int i = 0; i < ref_count; i++)
+      ensemble_fold_cost(acfg, &results[i], cfg->ensemble_reference_models[i]);
    for (int i = 0; i < ref_count; i++)
       free(prompts[i]);
    return 0;
@@ -1061,6 +1131,9 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
    memset(results, 0, sizeof(results));
 
    agent_run_parallel(acfg, tasks, ref_count, results);
+   /* Account each participant's run onto the originating session, like a delegate. */
+   for (int i = 0; i < ref_count; i++)
+      ensemble_fold_cost(acfg, &results[i], cfg->ensemble_reference_models[i]);
 
    double cost = estimate_cost(acfg, results, cfg->ensemble_reference_models, ref_count);
    out->cost_usd = cost;
@@ -1169,6 +1242,12 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       local.converge_threshold = 10;
    if (local.brief_truncated)
       out->truncated = 1;
+
+   /* Bind the originating session for this thread so panel + aggregator runs fold
+    * their cost onto it. Set unconditionally on every entry (NULL when there's no
+    * parent), so a reused worker thread can't inherit a prior turn's session; it's
+    * only read while this call runs the panel/aggregator on this same thread. */
+   g_rt_parent_sid = local.parent_session_id;
 
    long start_ms = monotonic_ms();
    char *artifact = xstrdup0("");

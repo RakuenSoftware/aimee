@@ -14,6 +14,7 @@
 
 typedef struct
 {
+   char principal[VAULT_PRINCIPAL_MAX]; /* "" = shared env pool; uid:/webuser: = vault */
    char agent_name[MAX_AGENT_NAME];
    char cred_name[MAX_CRED_NAME_LEN];
    int leased;                  /* 1 = currently leased */
@@ -45,15 +46,22 @@ static time_t now_epoch_seconds(void)
    return now > 0 ? now : 0;
 }
 
-/* Caller holds g_mu. Locate or create the per-(agent, cred) row. */
-static cred_lease_state_t *find_or_create_locked(const char *agent_name, const char *cred_name,
-                                                 int *allocation_failed)
+/* NULL principal is normalised to the shared "" pool. */
+static const char *pr_norm(const char *principal)
 {
+   return (principal && principal[0]) ? principal : "";
+}
+
+/* Caller holds g_mu. Locate or create the per-(principal, agent, cred) row. */
+static cred_lease_state_t *find_or_create_locked(const char *principal, const char *agent_name,
+                                                 const char *cred_name, int *allocation_failed)
+{
+   const char *pr = pr_norm(principal);
    if (allocation_failed)
       *allocation_failed = 0;
    for (int i = 0; i < g_state_count; i++)
    {
-      if (strcmp(g_state[i].agent_name, agent_name) == 0 &&
+      if (strcmp(g_state[i].principal, pr) == 0 && strcmp(g_state[i].agent_name, agent_name) == 0 &&
           strcmp(g_state[i].cred_name, cred_name) == 0)
          return &g_state[i];
    }
@@ -73,6 +81,7 @@ static cred_lease_state_t *find_or_create_locked(const char *agent_name, const c
    }
    cred_lease_state_t *slot = &g_state[g_state_count++];
    memset(slot, 0, sizeof(*slot));
+   snprintf(slot->principal, sizeof(slot->principal), "%s", pr);
    snprintf(slot->agent_name, sizeof(slot->agent_name), "%s", agent_name);
    snprintf(slot->cred_name, sizeof(slot->cred_name), "%s", cred_name);
    slot->status = DELEGATE_CRED_STATUS_OK;
@@ -123,9 +132,10 @@ static long long state_headroom(const cred_lease_state_t *slot)
    return best;
 }
 
-int delegate_credentials_acquire(const char *agent_name, const agent_credential_t *creds,
-                                 int credential_count, char *out_name, size_t out_name_cap,
-                                 char *out_env_var, size_t out_env_var_cap)
+int delegate_credentials_acquire(const char *principal, const char *agent_name,
+                                 const agent_credential_t *creds, int credential_count,
+                                 char *out_name, size_t out_name_cap, char *out_env_var,
+                                 size_t out_env_var_cap)
 {
    if (!agent_name || !agent_name[0] || !creds || credential_count <= 0)
       return -1;
@@ -145,7 +155,8 @@ int delegate_credentials_acquire(const char *agent_name, const agent_credential_
       if (!cred->name[0])
          continue;
       int allocation_failed = 0;
-      cred_lease_state_t *slot = find_or_create_locked(agent_name, cred->name, &allocation_failed);
+      cred_lease_state_t *slot =
+          find_or_create_locked(principal, agent_name, cred->name, &allocation_failed);
       if (allocation_failed)
          break;
       if (!slot)
@@ -174,14 +185,16 @@ int delegate_credentials_acquire(const char *agent_name, const agent_credential_
    return -1;
 }
 
-void delegate_credentials_release(const char *agent_name, const char *cred_name)
+void delegate_credentials_release(const char *principal, const char *agent_name,
+                                  const char *cred_name)
 {
    if (!agent_name || !agent_name[0] || !cred_name || !cred_name[0])
       return;
+   const char *pr = pr_norm(principal);
    pthread_mutex_lock(&g_mu);
    for (int i = 0; i < g_state_count; i++)
    {
-      if (strcmp(g_state[i].agent_name, agent_name) == 0 &&
+      if (strcmp(g_state[i].principal, pr) == 0 && strcmp(g_state[i].agent_name, agent_name) == 0 &&
           strcmp(g_state[i].cred_name, cred_name) == 0)
       {
          g_state[i].leased = 0;
@@ -191,14 +204,15 @@ void delegate_credentials_release(const char *agent_name, const char *cred_name)
    pthread_mutex_unlock(&g_mu);
 }
 
-void delegate_credentials_cooldown(const char *agent_name, const char *cred_name, int seconds)
+void delegate_credentials_cooldown(const char *principal, const char *agent_name,
+                                   const char *cred_name, int seconds)
 {
    if (!agent_name || !agent_name[0] || !cred_name || !cred_name[0] || seconds <= 0)
       return;
    long long until = now_monotonic_ms() + (long long)seconds * 1000LL;
    time_t epoch_until = now_epoch_seconds() + (time_t)seconds;
    pthread_mutex_lock(&g_mu);
-   cred_lease_state_t *slot = find_or_create_locked(agent_name, cred_name, NULL);
+   cred_lease_state_t *slot = find_or_create_locked(principal, agent_name, cred_name, NULL);
    if (slot)
    {
       slot->cooldown_until_ms = until;
@@ -206,6 +220,41 @@ void delegate_credentials_cooldown(const char *agent_name, const char *cred_name
       slot->status = DELEGATE_CRED_STATUS_RATE_LIMITED;
    }
    pthread_mutex_unlock(&g_mu);
+}
+
+int delegate_credentials_cooldown_remaining(const char *principal, const char *agent_name,
+                                            const char *cred_name, time_t now_epoch)
+{
+   if (!agent_name || !agent_name[0] || !cred_name || !cred_name[0])
+      return 0;
+   if (now_epoch <= 0)
+      now_epoch = now_epoch_seconds();
+   const char *pr = pr_norm(principal);
+   long long now_ms = now_monotonic_ms();
+   int remaining = 0;
+   pthread_mutex_lock(&g_mu);
+   for (int i = 0; i < g_state_count; i++)
+   {
+      if (strcmp(g_state[i].principal, pr) != 0 || strcmp(g_state[i].agent_name, agent_name) != 0 ||
+          strcmp(g_state[i].cred_name, cred_name) != 0)
+         continue;
+      /* Honour whichever clock still shows the credential cooling: the monotonic
+       * deadline (live process) and the wall-clock epoch (restored from disk). */
+      if (g_state[i].cooldown_until_ms > now_ms)
+      {
+         int ms = (int)(g_state[i].cooldown_until_ms - now_ms);
+         remaining = ms / 1000 + (ms % 1000 ? 1 : 0);
+      }
+      if (g_state[i].cooldown_until_epoch > now_epoch)
+      {
+         int sec = (int)(g_state[i].cooldown_until_epoch - now_epoch);
+         if (sec > remaining)
+            remaining = sec;
+      }
+      break;
+   }
+   pthread_mutex_unlock(&g_mu);
+   return remaining;
 }
 
 int delegate_credentials_is_rate_limit(const char *error)
@@ -331,8 +380,9 @@ static void capture_header(delegate_ratelimit_state_t *rl, const char *line, siz
       rl->tok_reset_1h = now_epoch + (time_t)parse_header_long(value);
 }
 
-int delegate_credentials_capture_headers(const char *agent_name, const char *cred_name,
-                                         const char *raw_headers, time_t now_epoch)
+int delegate_credentials_capture_headers(const char *principal, const char *agent_name,
+                                         const char *cred_name, const char *raw_headers,
+                                         time_t now_epoch)
 {
    if (!agent_name || !agent_name[0] || !cred_name || !cred_name[0] || !raw_headers)
       return -1;
@@ -340,7 +390,7 @@ int delegate_credentials_capture_headers(const char *agent_name, const char *cre
       now_epoch = now_epoch_seconds();
 
    pthread_mutex_lock(&g_mu);
-   cred_lease_state_t *slot = find_or_create_locked(agent_name, cred_name, NULL);
+   cred_lease_state_t *slot = find_or_create_locked(principal, agent_name, cred_name, NULL);
    if (!slot)
    {
       pthread_mutex_unlock(&g_mu);
@@ -379,9 +429,9 @@ static time_t earliest_reset(const delegate_ratelimit_state_t *rl)
    return best;
 }
 
-int delegate_credentials_report_failure(const char *agent_name, const char *cred_name,
-                                        failover_reason_t reason, const char *error,
-                                        time_t now_epoch)
+int delegate_credentials_report_failure(const char *principal, const char *agent_name,
+                                        const char *cred_name, failover_reason_t reason,
+                                        const char *error, time_t now_epoch)
 {
    if (!agent_name || !agent_name[0] || !cred_name || !cred_name[0])
       return 0;
@@ -389,7 +439,7 @@ int delegate_credentials_report_failure(const char *agent_name, const char *cred
       now_epoch = now_epoch_seconds();
 
    pthread_mutex_lock(&g_mu);
-   cred_lease_state_t *slot = find_or_create_locked(agent_name, cred_name, NULL);
+   cred_lease_state_t *slot = find_or_create_locked(principal, agent_name, cred_name, NULL);
    if (!slot)
    {
       pthread_mutex_unlock(&g_mu);
@@ -427,7 +477,7 @@ int delegate_credentials_report_failure(const char *agent_name, const char *cred
    return changed;
 }
 
-int delegate_credentials_rotate_after_failure(const char *agent_name,
+int delegate_credentials_rotate_after_failure(const char *principal, const char *agent_name,
                                               const agent_credential_t *creds, int credential_count,
                                               const char *provider, char *leased_cred_name,
                                               size_t leased_cred_name_cap, char *out_env_var,
@@ -441,13 +491,14 @@ int delegate_credentials_rotate_after_failure(const char *agent_name,
    if (reason == FAILOVER_NONE)
       return 0;
 
-   (void)delegate_credentials_report_failure(agent_name, leased_cred_name, reason, error,
+   (void)delegate_credentials_report_failure(principal, agent_name, leased_cred_name, reason, error,
                                              now_epoch);
-   delegate_credentials_release(agent_name, leased_cred_name);
+   delegate_credentials_release(principal, agent_name, leased_cred_name);
    leased_cred_name[0] = '\0';
    out_env_var[0] = '\0';
-   return delegate_credentials_acquire(agent_name, creds, credential_count, leased_cred_name,
-                                       leased_cred_name_cap, out_env_var, out_env_var_cap) == 0
+   return delegate_credentials_acquire(principal, agent_name, creds, credential_count,
+                                       leased_cred_name, leased_cred_name_cap, out_env_var,
+                                       out_env_var_cap) == 0
               ? 1
               : 0;
 }
@@ -461,6 +512,10 @@ int delegate_credentials_snapshot(const char *agent_name, delegate_credential_sn
    pthread_mutex_lock(&g_mu);
    for (int i = 0; i < g_state_count && n < max; i++)
    {
+      /* Operator view = the shared env pool only; per-principal vault rows
+       * (principal != "") are a per-user concern, not surfaced here. */
+      if (g_state[i].principal[0])
+         continue;
       if (agent_name && agent_name[0] && strcmp(agent_name, g_state[i].agent_name) != 0)
          continue;
       snprintf(out[n].agent_name, sizeof(out[n].agent_name), "%s", g_state[i].agent_name);
@@ -533,26 +588,31 @@ int delegate_credentials_save_file(const char *path)
 
    pthread_mutex_lock(&g_mu);
    state_refresh_wallclock_locked(now_epoch_seconds());
-   fprintf(fp, "aimee-delegate-credential-state-v1\n");
+   /* v2 adds a leading principal column; v1 readers are gone but v1 files still
+    * load (principal defaults to the shared ""). */
+   fprintf(fp, "aimee-delegate-credential-state-v2\n");
    for (int i = 0; i < g_state_count; i++)
    {
+      char principal[VAULT_PRINCIPAL_MAX];
       char agent[MAX_AGENT_NAME];
       char cred[MAX_CRED_NAME_LEN];
       char last_error[sizeof(g_state[i].last_error)];
+      sanitize_field(principal, sizeof(principal), g_state[i].principal);
       sanitize_field(agent, sizeof(agent), g_state[i].agent_name);
       sanitize_field(cred, sizeof(cred), g_state[i].cred_name);
       sanitize_field(last_error, sizeof(last_error), g_state[i].last_error);
       fprintf(fp,
-              "%s\t%s\t%d\t%lld\t%d\t%d\t%lld\t%d\t%d\t%lld\t%ld\t%ld\t%lld\t%ld\t%ld\t%lld\t%"
+              "%s\t%s\t%s\t%d\t%lld\t%d\t%d\t%lld\t%d\t%d\t%lld\t%ld\t%ld\t%lld\t%ld\t%ld\t%lld\t%"
               "lld\t%s\n",
-              agent, cred, (int)g_state[i].status, (long long)g_state[i].cooldown_until_epoch,
-              g_state[i].rl.req_limit, g_state[i].rl.req_remaining,
-              (long long)g_state[i].rl.req_reset, g_state[i].rl.req_limit_1h,
-              g_state[i].rl.req_remaining_1h, (long long)g_state[i].rl.req_reset_1h,
-              g_state[i].rl.tok_limit, g_state[i].rl.tok_remaining,
-              (long long)g_state[i].rl.tok_reset, g_state[i].rl.tok_limit_1h,
-              g_state[i].rl.tok_remaining_1h, (long long)g_state[i].rl.tok_reset_1h,
-              (long long)g_state[i].rl.captured_at, last_error);
+              principal, agent, cred, (int)g_state[i].status,
+              (long long)g_state[i].cooldown_until_epoch, g_state[i].rl.req_limit,
+              g_state[i].rl.req_remaining, (long long)g_state[i].rl.req_reset,
+              g_state[i].rl.req_limit_1h, g_state[i].rl.req_remaining_1h,
+              (long long)g_state[i].rl.req_reset_1h, g_state[i].rl.tok_limit,
+              g_state[i].rl.tok_remaining, (long long)g_state[i].rl.tok_reset,
+              g_state[i].rl.tok_limit_1h, g_state[i].rl.tok_remaining_1h,
+              (long long)g_state[i].rl.tok_reset_1h, (long long)g_state[i].rl.captured_at,
+              last_error);
    }
    pthread_mutex_unlock(&g_mu);
 
@@ -624,7 +684,12 @@ int delegate_credentials_load_file(const char *path, time_t now_epoch)
       fclose(fp);
       return 0;
    }
-   if (strncmp(line, "aimee-delegate-credential-state-v1", 34) != 0)
+   int has_principal_col; /* v2 prepends a principal field; v1 has none */
+   if (strncmp(line, "aimee-delegate-credential-state-v2", 34) == 0)
+      has_principal_col = 1;
+   else if (strncmp(line, "aimee-delegate-credential-state-v1", 34) == 0)
+      has_principal_col = 0;
+   else
    {
       fclose(fp);
       return -1;
@@ -635,11 +700,14 @@ int delegate_credentials_load_file(const char *path, time_t now_epoch)
    {
       line[strcspn(line, "\r\n")] = '\0';
       char *cursor = line;
+      char *principal = has_principal_col ? next_field(&cursor) : "";
       char *agent = next_field(&cursor);
       char *cred = next_field(&cursor);
+      if (!principal)
+         principal = "";
       if (!agent || !agent[0] || !cred || !cred[0])
          continue;
-      cred_lease_state_t *slot = find_or_create_locked(agent, cred, NULL);
+      cred_lease_state_t *slot = find_or_create_locked(principal, agent, cred, NULL);
       if (!slot)
          continue;
       slot->leased = 0;

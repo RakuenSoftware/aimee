@@ -136,7 +136,7 @@ const char *guardrails_canonical_tool_name(const char *tool_name)
    if (strcmp(tool_name, "grep") == 0 || strcmp(tool_name, "Grep") == 0)
       return "Grep";
    if (strcmp(tool_name, "Agent") == 0 || strcmp(tool_name, "spawn_agent") == 0 ||
-       strcmp(tool_name, "RemoteTrigger") == 0)
+       strcmp(tool_name, "RemoteTrigger") == 0 || strcmp(tool_name, "Task") == 0)
       return "Subagent";
 
    return tool_name;
@@ -1593,10 +1593,11 @@ int pre_tool_check(const char *tool_name, const char *input_json, session_state_
    if (is_subagent_tool(tool_name))
    {
       snprintf(msg_buf, msg_len,
-               "BLOCKED: provider-native sub-agent tools such as spawn_agent or Agent "
-               "are outside aimee's primary-agent guardrail model. Use the aimee "
-               "delegate MCP tool or `aimee delegate <role> \"<task>\"` so the child "
-               "inherits the current session guardrails.");
+               "BLOCKED: sub-agent tools (Task, Agent, spawn_agent, …) are outside aimee's "
+               "guardrail model. Delegate instead: `aimee delegate <role> \"<task>\" "
+               "--persona <persona>`, or `aimee delegate roundtable \"<task>\" --mode review` "
+               "for a multi-model panel. aimee delegates run on the cheapest capable model, are "
+               "cost-tracked, see the shared memory + KB, and inherit this session's guardrails.");
       audit_log("subagent_blocked",
                 "provider sub-agent tool blocked — keep delegation inside aimee");
       cJSON_Delete(root);

@@ -99,6 +99,15 @@ ENV AIMEE_HOME=/var/lib/aimee
 # published container port reaches it. The bearer token in the baked aimee.yaml
 # is still required on every request.
 ENV AIMEE_SERVER_HTTP_BIND=1
+# Since this image binds /v1 on 0.0.0.0 for a remote thin client to drive it —
+# including delegates, roundtables and tools — permit those routes over TCP by
+# default (they are gated behind aimee.api.remote_writes=full in
+# server_http_route_allowed). Applied on EVERY start regardless of the
+# seeded/mounted aimee.yaml (config_server_api.c), so a fresh/wiped redeploy can't
+# silently reseed "off" and drop CAP_DELEGATE (delegate/tool 403). This image
+# ships a known dev bearer and is trusted-network only; override to off/data (and
+# set your own bearer + TLS) for any exposed deployment.
+ENV AIMEE_API_REMOTE_WRITES=full
 # Standalone by default: no kb configured. Point AIMEE_KB_API_URL at a running
 # aimee-kb (e.g. http://aimee-kb:8741) to enable the shared/vector features.
 # Mirror tier (workspace-resource-plane §3): the per-workspace bare mirrors +
