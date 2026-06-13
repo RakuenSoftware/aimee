@@ -994,6 +994,17 @@ ALTER TABLE entity_edges ADD COLUMN IF NOT EXISTS edge_origin TEXT NOT NULL DEFA
 -- rows that share this table (typed-fact §1 / P1, R1-A1 storage boundary). Recall
 -- paths filter on it; the typed write gate sets it to 'semantic'.
 ALTER TABLE entity_edges ADD COLUMN IF NOT EXISTS edge_class TEXT NOT NULL DEFAULT 'cooccurrence';
+-- typed-fact §4/§5 (P3): provenance-keyed confidence class (A/B/C) + numeric band,
+-- and bitemporal transaction-time on semantic edges (asserted_at..superseded_at;
+-- superseded_at='' = currently believed) plus a hard_delete tombstone (suppressed).
+-- valid_from/valid_until (already present) carry valid-time. Defaults match a
+-- Class C speculation so untyped/legacy rows read as the most conservative class.
+ALTER TABLE entity_edges ADD COLUMN IF NOT EXISTS confidence_class TEXT NOT NULL DEFAULT 'C'
+  CHECK (confidence_class IN ('A', 'B', 'C'));
+ALTER TABLE entity_edges ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION NOT NULL DEFAULT 0.4;
+ALTER TABLE entity_edges ADD COLUMN IF NOT EXISTS asserted_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE entity_edges ADD COLUMN IF NOT EXISTS superseded_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE entity_edges ADD COLUMN IF NOT EXISTS suppressed BIGINT NOT NULL DEFAULT 0;
 
 -- rel_types: the typed-relationship ontology (typed-fact §1 / P1). The live
 -- overlay of the in-code SEED_ONTOLOGY; carries promoted/provisional (§2) types.

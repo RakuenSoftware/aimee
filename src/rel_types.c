@@ -172,6 +172,22 @@ static const rel_type_def_t SEED_ONTOLOGY[] = {
      SENS_PII,
      0,
      REL_STATUS_ACTIVE},
+    /* also_known_as: alternate name/handle for an entity. §4's hard_delete
+     * exemplar — a stale alias actively misleads, so a correction tombstones it
+     * (suppress + supersede, still retained) rather than archiving it inert.
+     * Tail is ANY (the alias label may be free-form). */
+    {"also_known_as",
+     {NODE_PERSON},
+     1,
+     {NODE_OTHER},
+     1,
+     0,
+     NULL,
+     CORR_HARD_DELETE,
+     "identity",
+     SENS_NORMAL,
+     0,
+     REL_STATUS_ACTIVE},
 };
 
 static const int SEED_COUNT = (int)(sizeof(SEED_ONTOLOGY) / sizeof(SEED_ONTOLOGY[0]));

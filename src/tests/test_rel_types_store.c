@@ -29,8 +29,8 @@ int main(void)
    assert(db2_rel_types_resolve("definitely_not_a_relation", NULL) == 0);
 
    /* ACCEPT -> a semantic edge is written. */
-   assert(db2_fact_commit("alice", NODE_PERSON, "works_for", "acme", NODE_ORG, 1) ==
-          FACT_GATE_ACCEPT);
+   assert(db2_fact_commit("alice", NODE_PERSON, "works_for", "acme", NODE_ORG, FACT_AUTHORITY_MODEL,
+                          1) == FACT_GATE_ACCEPT);
    edge_t e[8];
    int n = db2_entity_edges_semantic_by_entity("alice", e, 8);
    assert(n == 1);
@@ -38,25 +38,25 @@ int main(void)
    assert(strcmp(e[0].source, "alice") == 0 && strcmp(e[0].target, "acme") == 0);
 
    /* REJECT_KIND -> no write. */
-   assert(db2_fact_commit("printer", NODE_DEVICE, "works_for", "acme", NODE_ORG, 1) ==
-          FACT_GATE_REJECT_KIND);
+   assert(db2_fact_commit("printer", NODE_DEVICE, "works_for", "acme", NODE_ORG,
+                          FACT_AUTHORITY_MODEL, 1) == FACT_GATE_REJECT_KIND);
    assert(semantic_count("printer") == 0);
 
    /* NOVEL -> staged provisional + a Class-C semantic edge. */
-   assert(db2_fact_commit("bob", NODE_PERSON, "frobnicates", "thing", NODE_OTHER, 1) ==
-          FACT_GATE_NOVEL);
+   assert(db2_fact_commit("bob", NODE_PERSON, "frobnicates", "thing", NODE_OTHER,
+                          FACT_AUTHORITY_MODEL, 1) == FACT_GATE_NOVEL);
    assert(semantic_count("bob") == 1);
    long pid = 0;
    assert(db2_rel_types_resolve("frobnicates", &pid) == 1 && pid > 0); /* now in table */
 
    /* Flag off -> verdict still computed, but nothing is written. */
-   assert(db2_fact_commit("carol", NODE_PERSON, "works_for", "globex", NODE_ORG, 0) ==
-          FACT_GATE_ACCEPT);
+   assert(db2_fact_commit("carol", NODE_PERSON, "works_for", "globex", NODE_ORG,
+                          FACT_AUTHORITY_MODEL, 0) == FACT_GATE_ACCEPT);
    assert(semantic_count("carol") == 0);
 
    /* Re-commit the same triple bumps weight, not a second row. */
-   assert(db2_fact_commit("alice", NODE_PERSON, "works_for", "acme", NODE_ORG, 1) ==
-          FACT_GATE_ACCEPT);
+   assert(db2_fact_commit("alice", NODE_PERSON, "works_for", "acme", NODE_ORG, FACT_AUTHORITY_MODEL,
+                          1) == FACT_GATE_ACCEPT);
    assert(semantic_count("alice") == 1);
 
    db2_test_shim_close();

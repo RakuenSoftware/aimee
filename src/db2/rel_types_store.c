@@ -123,7 +123,8 @@ long db2_rel_types_stage_provisional(const char *rel_type)
 
 fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_kind,
                                     const char *rel_type, const char *target,
-                                    memory_node_kind_t tail_kind, int enabled)
+                                    memory_node_kind_t tail_kind, fact_authority_t authority,
+                                    int enabled)
 {
    const rel_type_def_t *def = NULL;
    fact_gate_verdict_t v = memory_fact_gate_check(head_kind, rel_type, tail_kind, &def);
@@ -135,24 +136,29 @@ fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_
    char norm[REL_TYPE_NAME_MAX];
    rel_type_normalize(rel_type, norm, sizeof(norm));
 
+   /* §5: provenance-keyed class. user -> A, model+ACCEPT -> B, model NOVEL -> C. */
+   const char *cls = fact_class_for(authority, v);
+   double conf = fact_class_confidence(cls);
+
    if (v == FACT_GATE_ACCEPT)
    {
       long id = 0;
       if (db2_rel_types_resolve(norm, &id) != 1)
          return v; /* ontology not seeded / DB issue — do not write unresolved */
       (void)db2_entity_edge_upsert_semantic(source, norm, target, (int)id, (int)head_kind,
-                                            (int)tail_kind, NULL);
+                                            (int)tail_kind, cls, conf, NULL);
       return v;
    }
    if (v == FACT_GATE_NOVEL)
    {
-      /* Stage as provisional (Class C) so the edge's relation_id resolves; no
-       * kind validation for a novel type — that is promotion's job (§2). */
+      /* Stage as provisional so the edge's relation_id resolves; no kind validation
+       * for a novel type — that is promotion's job (§2). cls is already Class C here
+       * (fact_class_for maps NOVEL -> C regardless of authority). */
       long id = db2_rel_types_stage_provisional(norm);
       if (id <= 0)
          return v;
       (void)db2_entity_edge_upsert_semantic(source, norm, target, (int)id, (int)head_kind,
-                                            (int)tail_kind, NULL);
+                                            (int)tail_kind, cls, conf, NULL);
       return v;
    }
    /* REJECT_KIND / BADARG: never write an unvalidated semantic edge. */
