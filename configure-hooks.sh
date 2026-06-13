@@ -175,7 +175,7 @@ if [ -d "$HOME_DIR/.claude" ] || command -v claude &>/dev/null; then
     configure_json_hooks "Claude Code" \
         "$CLAUDE_SETTINGS" \
         "PreToolUse" "PostToolUse" "SessionStart" \
-        "Edit|Write|MultiEdit|Bash|Read|Glob|Grep" "Edit|Write|MultiEdit" \
+        "Edit|Write|MultiEdit|Bash|Read|Glob|Grep|Task" "Edit|Write|MultiEdit" \
         "$CLAUDE_SETTINGS" "claude"
 
     # Ensure Gemini is in the auto-allow list if permissions are already set
