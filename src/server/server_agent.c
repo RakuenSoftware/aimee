@@ -10,6 +10,7 @@
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
 #include "log.h"
+#include "vault_service.h" /* vault_service_set / set_server, VAULT_API_KEY_CRED */
 #include <pthread.h>
 #include <string.h>
 #include <stdlib.h>
@@ -484,9 +485,42 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    ag->max_parallel = AGENT_DEFAULT_MAX_PARALLEL;
    ag->enabled = opt_has(&opts, "disabled") ? 0 : 1;
 
+   /* A literal --key is a secret: vault it (encrypted at rest), never persist it
+    * in agents.json. A $VAR reference is not a secret — keep it as a reference
+    * that resolves from the environment at run time. */
    const char *key = opt_get(&opts, "key");
    if (key && key[0])
-      agent_expand_env(key, ag->api_key, sizeof(ag->api_key));
+   {
+      if (key[0] == '$')
+      {
+         /* An env reference is not a secret: store it UNEXPANDED so agents.json
+          * holds "$VAR", not the resolved value. agent_load_config expands it
+          * from the environment at run time. Expanding here would serialize the
+          * plaintext key to disk — the exact leak the literal branch avoids. */
+         snprintf(ag->api_key, sizeof(ag->api_key), "%s", key);
+      }
+      else
+      {
+         /* A local/webchat caller with a per-user vault gets a dual-access entry
+          * (requires the vault unlocked); a remote (TCP) caller has no per-user
+          * principal, so the secret lands in the server-owned vault, which the
+          * server can decrypt autonomously. On any failure we REFUSE rather than
+          * write the secret to agents.json in plaintext. */
+         const char *principal = (conn && conn->vault_principal[0]) ? conn->vault_principal : NULL;
+         vault_status_t vst =
+             principal
+                 ? vault_service_set(principal, ag->name, VAULT_API_KEY_CRED, key, (long)time(NULL))
+                 : vault_service_set_server(ag->name, VAULT_API_KEY_CRED, key);
+         if (vst != VAULT_OK)
+         {
+            if (vst == VAULT_ERR_LOCKED)
+               return server_send_error(
+                   conn, "vault locked: run `aimee vault unlock` before adding a key", NULL);
+            return server_send_error(conn, "could not store credential in the vault", NULL);
+         }
+         ag->api_key[0] = '\0'; /* the secret lives only in the vault */
+      }
+   }
    const char *auth_cmd = opt_get(&opts, "auth-cmd");
    if (auth_cmd && auth_cmd[0])
       snprintf(ag->auth_cmd, sizeof(ag->auth_cmd), "%s", auth_cmd);

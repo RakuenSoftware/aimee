@@ -64,6 +64,27 @@ vault_status_t vault_service_rekey_password(const char *principal, attested_tran
 vault_status_t vault_service_set(const char *principal, const char *agent, const char *cred,
                                  const char *secret, long now_epoch);
 
+/* The SERVER-owned principal (WP-C.4): a vault whose KEK is the server master key
+ * (vault_server_key), needing no client root key / login / unlock. This is where
+ * delegate credentials pushed from a remote (TCP) thin client live, so the server
+ * can read them autonomously over any transport. Encrypted at rest like any other
+ * vault; the server-key trust boundary applies (see vault_server_key.h).
+ *
+ * TENANCY (deliberate): this is a SINGLE shared namespace, not per-user. That is
+ * correct because aimee-server is one person's personal agent and the TCP path is
+ * gated only by the deploy bearer — i.e. a single trust domain (a TCP caller that
+ * can push here can already drive the server). Webchat users, who DO share one
+ * server under distinct logins, get isolated `webuser:` vaults and never land
+ * here. If aimee-server ever becomes multi-tenant over TCP (distinct identities
+ * behind one listener), this principal MUST be namespaced by the attested
+ * identity, or one tenant's delegate would resolve another's key. */
+#define VAULT_SERVER_PRINCIPAL "server"
+
+/* Store `secret` for (agent, cred) under the server principal, encrypted under the
+ * server master KEK. No unlock required — usable from a TCP client. Returns
+ * VAULT_OK, or VAULT_ERR_CRYPTO/IO on a fail-closed error. */
+vault_status_t vault_service_set_server(const char *agent, const char *cred, const char *secret);
+
 /* The use-path: resolve (agent, cred) for `principal` into `out`. Returns:
  *   VAULT_OK         + plaintext written;
  *   VAULT_NO_ENTRY   when there is no such credential (or no/blank principal) —
