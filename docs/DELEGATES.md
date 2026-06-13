@@ -8,10 +8,12 @@
 
 ## Quick Start
 
-Use these commands to get delegation working quickly:
+Delegation already works on a fresh install (see the note above) — `aimee
+delegate …` routes to the shipped roster. Use these commands only to **add your
+own** local provider on top of the defaults:
 
 ```bash
-# 1) Configure a local delegate provider
+# 1) Add a local delegate provider (optional — defaults already work)
 aimee agent local local http://localhost:8080 --model MODEL --slots 4 --ctx 131072
 
 # 2) Inspect the registered delegates and their routing data
@@ -20,7 +22,7 @@ aimee --json agent list
 # Optional auto-detect helper for local Ollama/llama.cpp
 ./add-local-delegate.sh
 
-# 3) Use aimee normally; the primary agent will route delegateable work automatically
+# 3) Use aimee normally; the primary agent routes delegateable work automatically.
 # See the Usage section below for realistic delegation scenarios.
 ```
 

@@ -9,7 +9,8 @@ For the full picture, see the [Manual](../MANUAL.md) and
 
 ## 1. Run the server
 
-One container holds both binaries. Postgres and the embedder come up alongside it.
+One container runs both binaries — the server and the knowledge base. Postgres
+and the embedder come up alongside it.
 
 ```bash
 git clone https://github.com/RakuenSoftware/aimee.git
@@ -27,6 +28,9 @@ curl -H 'Authorization: Bearer aimee-local-dev' http://localhost:8740/v1/kb/stat
 
 Set a real bearer for anything past loopback. `aimee-local-dev` is a dev
 convenience.
+
+The default embedder is the 4B (`pplx-embed-v1-4b`, 2560-dim). On a tight host,
+use the lighter 0.6B: `AIMEE_EMBEDDER_IMAGE=ghcr.io/rakuensoftware/aimee-embedder-0.6b:latest AIMEE_EMBEDDING_DIM=1024 docker compose -f compose.combined.yaml up --build -d`.
 
 ## 2. Install the client
 
@@ -57,6 +61,11 @@ It registers aimee's SessionStart/PreToolUse/PostToolUse hooks and MCP server fo
 every tool it finds — Claude Code, Codex CLI, Gemini CLI, Copilot. From here,
 every session starts knowing what the last one learned, sensitive files are
 blocked before a write lands, and you can hand work to cheaper models.
+
+The host AI's own sub-agent tool (Claude's `Task`, Codex's `spawn_agent`) is
+blocked on purpose — fan work out through `aimee delegate` instead, so it stays
+in aimee's session state, cost accounting, and audit trail. See
+[Delegates](DELEGATES.md).
 
 To run your tool's front end on aimee's model instead of its built-in vendor:
 
