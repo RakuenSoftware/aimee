@@ -152,14 +152,13 @@ fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_
    if (v == FACT_GATE_NOVEL)
    {
       /* Stage as provisional so the edge's relation_id resolves; no kind validation
-       * for a novel type — that is promotion's job (§2). A novel type is model
-       * speculation, so it is at best Class C even from a user-authored turn. */
+       * for a novel type — that is promotion's job (§2). cls is already Class C here
+       * (fact_class_for maps NOVEL -> C regardless of authority). */
       long id = db2_rel_types_stage_provisional(norm);
       if (id <= 0)
          return v;
       (void)db2_entity_edge_upsert_semantic(source, norm, target, (int)id, (int)head_kind,
-                                            (int)tail_kind, FACT_CLASS_C,
-                                            fact_class_confidence(FACT_CLASS_C), NULL);
+                                            (int)tail_kind, cls, conf, NULL);
       return v;
    }
    /* REJECT_KIND / BADARG: never write an unvalidated semantic edge. */

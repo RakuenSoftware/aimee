@@ -41,9 +41,10 @@ extern "C"
    /* Rank of a class for conflict resolution: A=3, B=2, C=1, else 0. */
    int fact_class_rank(const char *cls);
 
-   /* The class a write earns from its authority + gate verdict: a user authority
-    * always earns A; a model ACCEPT earns B; anything else (model NOVEL/reject)
-    * earns C. Returns a static FACT_CLASS_* string. */
+   /* The class a write earns from its authority + gate verdict: a NOVEL rel_type
+    * is always Class C (speculation, even from a user); otherwise a user authority
+    * earns A and a model ACCEPT earns B. Returns a static FACT_CLASS_* string.
+    * This is the single source of truth — callers route NOVEL through it too. */
    const char *fact_class_for(fact_authority_t authority, fact_gate_verdict_t verdict);
 
    /* §5 maintenance modes (counterparts to memory_run_maintenance promote/expire).

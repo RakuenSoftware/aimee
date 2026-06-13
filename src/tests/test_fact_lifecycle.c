@@ -76,9 +76,11 @@ static void test_pure(void)
    assert(fact_class_confidence(NULL) == 0.4);
    assert(fact_class_rank("A") == 3 && fact_class_rank("B") == 2 && fact_class_rank("C") == 1);
    assert(fact_class_rank("x") == 0 && fact_class_rank(NULL) == 0);
-   assert(strcmp(fact_class_for(FACT_AUTHORITY_USER, FACT_GATE_NOVEL), "A") == 0);
+   assert(strcmp(fact_class_for(FACT_AUTHORITY_USER, FACT_GATE_ACCEPT), "A") == 0);
    assert(strcmp(fact_class_for(FACT_AUTHORITY_MODEL, FACT_GATE_ACCEPT), "B") == 0);
    assert(strcmp(fact_class_for(FACT_AUTHORITY_MODEL, FACT_GATE_NOVEL), "C") == 0);
+   /* a novel rel_type is speculation — Class C even from a user authority. */
+   assert(strcmp(fact_class_for(FACT_AUTHORITY_USER, FACT_GATE_NOVEL), "C") == 0);
    printf("  PASS: test_pure\n");
 }
 

@@ -214,12 +214,21 @@ int db2_entity_edge_upsert_semantic(const char *source, const char *relation, co
       return rc == AIMEE_PG_DONE ? 0 : -1;
    }
 
+   /* asserted_at is stamped from the host clock in UTC (not SQL CURRENT_TIMESTAMP,
+    * whose timezone differs between Postgres' session zone and the sqlite shim) so
+    * it shares one clock with db2_fact_expire_speculative's cutoff — the lexical
+    * compare there is then also chronological regardless of DB timezone. */
+   time_t now_t = time(NULL);
+   struct tm now_tm;
+   gmtime_r(&now_t, &now_tm);
+   char asserted_at[32];
+   strftime(asserted_at, sizeof(asserted_at), "%Y-%m-%d %H:%M:%S", &now_tm);
+
    static const char *ins =
        "INSERT INTO entity_edges (source, relation, target, weight,"
        " relation_id, subject_kind, object_kind, edge_class, confidence_class, confidence,"
        " asserted_at)"
-       " VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, 'semantic', ?7, ?8,"
-       " to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))";
+       " VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, 'semantic', ?7, ?8, ?9)";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, ins, err, sizeof(err));
    if (!st)
       return -1;
@@ -231,6 +240,7 @@ int db2_entity_edge_upsert_semantic(const char *source, const char *relation, co
    aimee_pg_bind_int(st, "?6", object_kind);
    aimee_pg_bind_text(st, "?7", confidence_class);
    aimee_pg_bind_double(st, "?8", confidence);
+   aimee_pg_bind_text(st, "?9", asserted_at);
    int rc = aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
    if (rc != AIMEE_PG_DONE)

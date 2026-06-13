@@ -999,7 +999,8 @@ ALTER TABLE entity_edges ADD COLUMN IF NOT EXISTS edge_class TEXT NOT NULL DEFAU
 -- superseded_at='' = currently believed) plus a hard_delete tombstone (suppressed).
 -- valid_from/valid_until (already present) carry valid-time. Defaults match a
 -- Class C speculation so untyped/legacy rows read as the most conservative class.
-ALTER TABLE entity_edges ADD COLUMN IF NOT EXISTS confidence_class TEXT NOT NULL DEFAULT 'C';
+ALTER TABLE entity_edges ADD COLUMN IF NOT EXISTS confidence_class TEXT NOT NULL DEFAULT 'C'
+  CHECK (confidence_class IN ('A', 'B', 'C'));
 ALTER TABLE entity_edges ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION NOT NULL DEFAULT 0.4;
 ALTER TABLE entity_edges ADD COLUMN IF NOT EXISTS asserted_at TEXT NOT NULL DEFAULT '';
 ALTER TABLE entity_edges ADD COLUMN IF NOT EXISTS superseded_at TEXT NOT NULL DEFAULT '';

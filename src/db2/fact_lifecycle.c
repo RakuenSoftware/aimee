@@ -39,11 +39,16 @@ int fact_class_rank(const char *cls)
 
 const char *fact_class_for(fact_authority_t authority, fact_gate_verdict_t verdict)
 {
+   /* A novel rel_type is speculation — Class C even from a user turn (it is the
+    * ontology, not the speaker, that is unproven). Checked first so this is the
+    * single source of truth and db2_fact_commit need not special-case NOVEL. */
+   if (verdict == FACT_GATE_NOVEL)
+      return FACT_CLASS_C;
    if (authority == FACT_AUTHORITY_USER)
-      return FACT_CLASS_A; /* a direct user assertion always earns A (§5) */
+      return FACT_CLASS_A; /* a direct user assertion of a known relation earns A */
    if (verdict == FACT_GATE_ACCEPT)
       return FACT_CLASS_B; /* model inference consistent with the ontology */
-   return FACT_CLASS_C;    /* model speculation / novel rel_type */
+   return FACT_CLASS_C;    /* anything else (reject/badarg) — conservative */
 }
 
 int db2_fact_expire_speculative(int ttl_days)
