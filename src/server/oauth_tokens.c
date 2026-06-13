@@ -34,7 +34,11 @@
 
 static int oauth_secret_store(const char *client_name, const char *vcred, const char *value)
 {
-   return vault_service_set_server(client_name, vcred, value) == VAULT_OK ? 0 : -1;
+   if (vault_service_set_server(client_name, vcred, value) == VAULT_OK)
+      return 0;
+   aimee_log(LOG_WARN, "oauth_flow", "vault store failed for %s/%s (token not persisted)",
+             client_name, vcred);
+   return -1;
 }
 
 /* Load from the vault; if absent, lazily migrate a legacy db1/secrets plaintext
@@ -51,8 +55,12 @@ static int oauth_secret_load(const char *client_name, const char *vcred, const c
    snprintf(key, sizeof(key), db1_fmt, client_name);
    if (db1_secret_load(key, buf, len) == 0 && buf[0])
    {
-      (void)vault_service_set_server(client_name, vcred, buf); /* migrate -> encrypted */
-      (void)db1_secret_remove(key);                            /* scrub the plaintext */
+      /* Scrub the plaintext ONLY after a durable encrypted copy exists. If the
+       * vault write fails (e.g. no master key), keep the plaintext and retry the
+       * migration on the next read — never delete the only copy of the token. The
+       * value is valid either way, so we still return it to the caller. */
+      if (vault_service_set_server(client_name, vcred, buf) == VAULT_OK)
+         (void)db1_secret_remove(key);
       return 0;
    }
    buf[0] = '\0';

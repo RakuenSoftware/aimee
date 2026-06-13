@@ -327,12 +327,16 @@ int main(void)
       assert(oauth_token_load(client, loaded, sizeof(loaded)) == 0);
       assert(strcmp(loaded, "legacy-access-token") == 0);
 
-      /* The legacy plaintext entry is scrubbed... */
+      /* Both legacy plaintext keys that load touches (access + expires) are
+       * scrubbed once migrated. (The refresh token is only read during a network
+       * refresh, so it migrates lazily then — not on a plain load.) */
       char chk[256];
       snprintf(key, sizeof(key), OAUTH_KEY_ACCESS_TOKEN, client);
       assert(db1_secret_load(key, chk, sizeof(chk)) != 0);
+      snprintf(key, sizeof(key), OAUTH_KEY_EXPIRES_AT, client);
+      assert(db1_secret_load(key, chk, sizeof(chk)) != 0);
 
-      /* ...and a subsequent load still works (now from the vault). */
+      /* ...and a subsequent load still works (now from the vault, no plaintext). */
       assert(oauth_token_load(client, loaded, sizeof(loaded)) == 0);
       assert(strcmp(loaded, "legacy-access-token") == 0);
 
