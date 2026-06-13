@@ -126,10 +126,17 @@ static int kb_search_handler(const char *body, char *resp, int cap)
    const char *format =
        (cJSON_IsString(jf) && strcmp(jf->valuestring, "text") == 0) ? "text" : "json";
 
+   /* Let the kb embed the query with ITS OWN configured embedder — the kb owns
+    * the corpus and its embedder. Forward the server's embedding_command only
+    * when one is explicitly set (co-located deploy, shared config); pass NULL
+    * otherwise. NEVER default to "builtin": in a split deploy the server has no
+    * embedder, and a 384-dim builtin query vector cannot match a real-embedder
+    * corpus (1024/2560-dim) — the dim mismatch yields zero hits even though the
+    * corpus is fully embedded. */
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    config_load(&cfg);
-   const char *emb = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
+   const char *emb = cfg.embedding_command[0] ? cfg.embedding_command : NULL;
 
    char *j = kb_client_search_json(project, jq->valuestring, emb, max_results, format);
    cJSON_Delete(req);
