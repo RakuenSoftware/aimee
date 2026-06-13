@@ -60,7 +60,8 @@ out-of-range value falls back to the `2560` default (the default embedder is the
 
 `halfvec` (fp16) is used throughout: it halves index memory versus `vector`
 (fp32) at negligible recall cost, and it lifts the index dimension ceiling from
-2000 to 4000 — required for the 4B's 2560 dims.
+2000 to 4000 — required for the 4B's 2560 dims. This needs pgvector ≥ 0.7 (the
+bundled `pgvector/pgvector:pg16` image has it); older pgvector caps at 2000.
 
 The code-side embedding buffers are sized by `EMBED_MAX_DIM` (2560 in
 `src/headers/aimee.h`), large enough to hold either model's output; the embed
