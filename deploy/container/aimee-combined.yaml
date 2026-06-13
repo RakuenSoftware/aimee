@@ -27,6 +27,15 @@ aimee:
     #   remote_writes: "off"  # TCP bearer is read/query/chat only
     remote_writes: "full"
 
+# Delegate roundtable / MoA ensemble, on by default with the seeded agents.json
+# roster as the panel; a thin client pushes the per-agent keys per session.
+ensemble:
+  enabled: true
+  reference_models:
+    - minimax
+    - mistral
+    - mimo-2.5
+
 # --- kb: real semantic embeddings via the persistent embedder service ---
 embedding_command: "python3 /opt/aimee/scripts/embed-remote.py"
 

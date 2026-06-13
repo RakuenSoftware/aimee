@@ -151,6 +151,9 @@ RUN chmod +x /usr/local/bin/aimee-server-entrypoint
 # Kept OUTSIDE $AIMEE_HOME so a bind-mounted (empty) volume can't shadow it; the
 # entrypoint seeds it into $AIMEE_HOME/aimee.yaml on first start.
 COPY deploy/container/aimee-server.yaml /opt/aimee/defaults/aimee.yaml
+# Default delegate roster (definitions only; keys are client-held). The
+# entrypoint seeds it into $AIMEE_HOME/agents.json on first start.
+COPY deploy/container/agents.json /opt/aimee/defaults/agents.json
 
 # Runs as root: the entrypoint bootstraps the webchat PAM user and runs webchat
 # (pam_unix needs /etc/shadow), then drops aimee-server to the "aimee" user.

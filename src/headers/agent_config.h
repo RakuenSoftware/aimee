@@ -41,6 +41,10 @@ void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len);
  * NULL/empty to clear. Thread-local (each turn runs on its own worker thread). */
 void agent_set_request_codex_creds(const char *token, const char *account_id);
 
+/* 1 when a per-turn Codex OAuth token is currently bound (a fresh client push).
+ * WP-C.3: the vault-backed codex override defers to a live client push. */
+int agent_request_codex_token_present(void);
+
 /* Per-turn session id for the session-scoped credential keyring lookup (see
  * session_credentials.h). Set at the start of a chat/delegate turn from the
  * request, cleared (NULL/empty) otherwise. When set, agent_resolve_auth prefers
