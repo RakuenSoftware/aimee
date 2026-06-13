@@ -9,6 +9,7 @@
 #include "config.h"
 #include "log.h"
 #include "model_sampling.h"
+#include "model_registry.h"
 #include "tool_call_args.h"
 #include "cJSON.h"
 #include <string.h>
@@ -115,6 +116,16 @@ static void openrouter_add_routing_hint(const agent_t *agent, cJSON *req)
    }
    cJSON_AddItemToObject(req, "models", models);
 }
+int agent_request_max_tokens(const agent_t *agent, int requested)
+{
+   if (requested > 0)
+      return requested; /* caller pinned an explicit budget (e.g. a short ping) */
+   if (agent && agent->max_tokens > 0)
+      return agent->max_tokens; /* agents.json / --max-tokens pinned a cap */
+   /* No explicit cap: use the model's own output ceiling, never a hardcoded one. */
+   return model_max_output(agent ? agent->provider : NULL, agent ? agent->model : NULL);
+}
+
 cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *tools,
                                   int max_tokens, double temperature)
 {
@@ -140,8 +151,7 @@ cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *
          cJSON_AddStringToObject(req, "tool_choice", "auto");
    }
 
-   if (max_tokens > 0)
-      cJSON_AddNumberToObject(req, "max_tokens", max_tokens);
+   cJSON_AddNumberToObject(req, "max_tokens", agent_request_max_tokens(agent, max_tokens));
    if (agent_is_mistral_vibe_model(agent))
    {
       cJSON_AddStringToObject(req, "reasoning_effort", "high");
@@ -191,8 +201,7 @@ cJSON *agent_build_request_anthropic(const agent_t *agent, cJSON *messages, cJSO
    cJSON *safe_messages = provider_payload_without_private_fields(messages);
    cJSON_AddStringToObject(req, "model", agent->model);
 
-   int tok = (max_tokens > 0) ? max_tokens : 4096;
-   cJSON_AddNumberToObject(req, "max_tokens", tok);
+   cJSON_AddNumberToObject(req, "max_tokens", agent_request_max_tokens(agent, max_tokens));
 
    /* §3 cache-aware shaping: when enabled, mark the aimee-owned STABLE system
     * prefix cacheable on this (tool-bearing) Anthropic request, matching the
@@ -1632,8 +1641,7 @@ cJSON *agent_build_request_gemini(const agent_t *agent, cJSON *messages, cJSON *
 
    /* Generation config */
    cJSON *gen_cfg = cJSON_CreateObject();
-   if (max_tokens > 0)
-      cJSON_AddNumberToObject(gen_cfg, "maxOutputTokens", max_tokens);
+   cJSON_AddNumberToObject(gen_cfg, "maxOutputTokens", agent_request_max_tokens(agent, max_tokens));
    if (temperature >= 0)
       cJSON_AddNumberToObject(gen_cfg, "temperature", temperature);
    cJSON_AddItemToObject(req, "generationConfig", gen_cfg);

@@ -545,8 +545,7 @@ static cJSON *build_request_openai(const agent_t *agent, const char *system_prom
 
    cJSON_AddItemToObject(req, "messages", messages);
 
-   if (max_tokens > 0)
-      cJSON_AddNumberToObject(req, "max_tokens", max_tokens);
+   cJSON_AddNumberToObject(req, "max_tokens", agent_request_max_tokens(agent, max_tokens));
    model_sampling_apply_openai(agent, req, temperature);
 
    return req;
@@ -588,8 +587,7 @@ static cJSON *build_request_anthropic(const agent_t *agent, const char *system_p
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "model", agent->model);
 
-   int tok = (max_tokens > 0) ? max_tokens : 4096;
-   cJSON_AddNumberToObject(req, "max_tokens", tok);
+   cJSON_AddNumberToObject(req, "max_tokens", agent_request_max_tokens(agent, max_tokens));
 
    /* §3 cache-aware shaping: mark the stable system prefix cacheable (cache_control)
     * only when the flag is on, matching the tool-bearing builder. Default-off so
@@ -994,8 +992,8 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
    /* Run PRE_LLM_CALL hooks — appends ephemeral context to user msg, never system_prompt. */
    char *augmented_prompt = plugin_chook_apply_pre_llm(user_prompt);
    const char *effective_user = augmented_prompt ? augmented_prompt : user_prompt;
-   /* Build request body */
-   int tok = (max_tokens > 0) ? max_tokens : agent->max_tokens;
+   /* Build request body — derive the output cap from the model when unpinned. */
+   int tok = agent_request_max_tokens(agent, max_tokens);
    if (is_anthropic_provider(agent))
       track_simple_anthropic_payload_rewrite(driver, agent, system_prompt, effective_user);
    cJSON *req = build_request(agent, system_prompt, effective_user, tok, temperature);

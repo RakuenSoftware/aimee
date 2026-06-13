@@ -105,6 +105,14 @@ cJSON *agent_build_request_openai(const agent_t *agent, cJSON *messages, cJSON *
    return out;
 }
 
+/* Stub: the ingress passes the incoming request's max_tokens through this
+ * resolver; an explicit value wins, otherwise a model-derived ceiling applies. */
+int agent_request_max_tokens(const agent_t *agent, int requested)
+{
+   (void)agent;
+   return requested > 0 ? requested : 8192;
+}
+
 int agent_http_post(const char *url, const char *auth_header, const char *body, char **response_buf,
                     int timeout_ms, const char *extra_headers)
 {

@@ -537,7 +537,7 @@ native_provider_http:
    int final_instruction_added = 0;
    int final_tool_retry_count = 0;
    int degenerate_retry_count = 0;
-   int tok = (max_tokens > 0) ? max_tokens : agent->max_tokens;
+   int tok = agent_request_max_tokens(agent, max_tokens);
    int max_t = agent_resolve_max_turns(agent, role);
    int initial_max_t = max_t;
    int final_after_turns = delegate_final_after_turns_for_role(role);

@@ -230,9 +230,9 @@ static int messages_buffered(const char *body, char *resp, int cap)
    if (driver_is_anthropic(driver))
       prov_body = build_anthropic_provider_body(req, ag, 0);
    else
-      prov_body =
-          build_provider_body(driver, ag, messages, tools, system_text,
-                              jo_int(req, "max_tokens", 4096), jo_num(req, "temperature", 1.0), 0);
+      prov_body = build_provider_body(driver, ag, messages, tools, system_text,
+                                      agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
+                                      jo_num(req, "temperature", 1.0), 0);
    http_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &response, ag->timeout_ms,
                                  extra[0] ? extra : NULL);
    if (http_status != 200 || !response)
@@ -499,9 +499,9 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    if (driver_is_anthropic(driver))
       prov_body = build_anthropic_provider_body(req, ag, 1);
    else
-      prov_body =
-          build_provider_body(driver, ag, messages, tools, system_text,
-                              jo_int(req, "max_tokens", 4096), jo_num(req, "temperature", 1.0), 1);
+      prov_body = build_provider_body(driver, ag, messages, tools, system_text,
+                                      agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
+                                      jo_num(req, "temperature", 1.0), 1);
 
    if (driver_is_anthropic(driver))
    {

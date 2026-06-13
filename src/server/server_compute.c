@@ -760,7 +760,7 @@ void delegate_worker(void *arg)
    const char *role =
        delegate_role_canonicalize(cJSON_IsString(jrole) ? jrole->valuestring : "execute");
    const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
-   int max_tokens = cJSON_IsNumber(jmax) ? (int)jmax->valuedouble : 4096;
+   int max_tokens = cJSON_IsNumber(jmax) ? (int)jmax->valuedouble : 0; /* 0 => model-derived */
    const char *system_prompt = cJSON_IsString(jsystem) ? jsystem->valuestring : NULL;
    const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : NULL;
    const char *cwd = cJSON_IsString(jcwd) ? jcwd->valuestring : "";

@@ -42,6 +42,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/workspace.o $(DB1_OBJS) \
                              $(OBJDIR)/server/openrouter_profile.o $(OBJDIR)/server/ollama_profile.o \
                              $(OBJDIR)/server/llama_native_profile.o $(OBJDIR)/server/mistral_profile.o \
                              $(OBJDIR)/server/minimax_profile.o \
+                             $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                              $(PLATFORM_AGENT_OBJS)
 
 TEST_MCP_CLIENT_OBJS = $(OBJDIR)/server/mcp_client.o \

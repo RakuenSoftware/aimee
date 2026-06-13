@@ -91,6 +91,15 @@ int model_alias_list(model_info_t *out, int max);
 int model_context_window(const char *model_id);
 
 /*
+ * The model's output-token ceiling (max_output), used as a request's max_tokens
+ * when no explicit cap was pinned by the caller or agent config. Resolves the
+ * registry's per-model max_output (static table or inferred from family +
+ * context window); returns a conservative fallback for an unknown model, never
+ * 0. provider may be NULL/empty (inferred from the model id).
+ */
+int model_max_output(const char *provider, const char *model_id);
+
+/*
  * Heuristic offline capability lookup. This is intentionally local and
  * conservative: operator/model.dev overrides can replace these values later.
  * Provider may be NULL or empty, in which case it is inferred from the model
