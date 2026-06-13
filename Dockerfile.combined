@@ -142,6 +142,9 @@ COPY scripts/embed-remote.py scripts/rerank-remote.py scripts/llm-chat.py \
 # this single merged file carries the server's /v1 settings AND the kb's sidecar
 # command selection (incl. embedding_command).
 COPY deploy/container/aimee-combined.yaml /opt/aimee/defaults/aimee.yaml
+# Default delegate roster (definitions only; keys are client-held). The
+# entrypoint seeds it into $AIMEE_HOME/agents.json on first start.
+COPY deploy/container/agents.json /opt/aimee/defaults/agents.json
 # Co-located webchat browser UI: the Go service, the single-file React SPA, the
 # PAM stack for browser login, and the bootstrap/launch helpers. webchat shares
 # AIMEE_HOME so its Unix-socket transports line up with the server.
