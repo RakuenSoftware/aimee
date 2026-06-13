@@ -305,6 +305,10 @@ static const node_entry_t node_table[] = {{"file", NODE_FILE},
                                           {"person", NODE_PERSON},
                                           {"place", NODE_PLACE},
                                           {"time_expr", NODE_TIME_EXPR},
+                                          {"device", NODE_DEVICE},
+                                          {"org", NODE_ORG},
+                                          {"ip", NODE_IP},
+                                          {"scalar", NODE_SCALAR},
                                           {NULL, NODE_OTHER}};
 
 memory_relation_kind_t memory_ontology_relation_from_text(const char *label)

@@ -181,6 +181,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-delegate-economics \
                $(TESTPREFIX)/unit-test-delegate-patch-coordinator \
                $(TESTPREFIX)/unit-test-delegate-ensemble \
+               $(TESTPREFIX)/unit-test-rel-types \
+               $(TESTPREFIX)/unit-test-memory-fact-gate \
                $(TESTPREFIX)/unit-test-sandbox \
                $(TESTPREFIX)/unit-test-slop-detect \
                $(TESTPREFIX)/unit-test-vault-principal \
@@ -1419,6 +1421,15 @@ $(TESTPREFIX)/unit-test-token-tracker: $(OBJDIR)/tests/test_token_tracker.o \
 $(TESTPREFIX)/unit-test-reasoning-cap: $(OBJDIR)/tests/test_reasoning_cap.o \
                                $(OBJDIR)/reasoning_cap.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# typed-fact P1: pure ontology + write-gate (no DB), so a minimal link.
+$(TESTPREFIX)/unit-test-rel-types: $(OBJDIR)/tests/test_rel_types.o \
+                               $(OBJDIR)/rel_types.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-memory-fact-gate: $(OBJDIR)/tests/test_memory_fact_gate.o \
+                               $(OBJDIR)/memory_fact_gate.o $(OBJDIR)/rel_types.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-request-context: $(OBJDIR)/tests/test_request_context.o \
                                $(OBJDIR)/server/request_context.o
