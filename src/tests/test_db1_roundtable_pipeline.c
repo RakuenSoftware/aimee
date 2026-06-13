@@ -323,10 +323,51 @@ static void test_chunk_group(void)
    printf("  chunk group aggregate: ok\n");
 }
 
+/* #55 exactly-once: rtp_run_cas_state moves the run only when the current state
+ * still matches `expected`; a second/stale attempt from the same `expected`
+ * loses. This is the primitive that makes a duplicate `gate pass` unable to
+ * merge twice. */
+static void test_cas_exactly_once(void)
+{
+   int id = 0;
+   assert(rtp_run_create("cas test", RTP_DONEBAR_ZERO_BLOCKING, "/repo", "testing", &id) == 0);
+   assert(rtp_run_set_state(id, RTP_STATE_GATE1_PENDING, NULL) == 0);
+
+   /* First claim from GATE1_PENDING -> GATE1_MERGE_PENDING wins. */
+   assert(rtp_run_cas_state(id, RTP_STATE_GATE1_PENDING, RTP_STATE_GATE1_MERGE_PENDING) == 0);
+   rtp_run_t r;
+   assert(rtp_run_get(id, &r) == 0);
+   assert(strcmp(r.state, RTP_STATE_GATE1_MERGE_PENDING) == 0);
+
+   /* A concurrent/duplicate caller still expecting GATE1_PENDING loses (no row
+    * changed) and must NOT re-trigger the merge. */
+   assert(rtp_run_cas_state(id, RTP_STATE_GATE1_PENDING, RTP_STATE_GATE1_MERGE_PENDING) == -1);
+   assert(rtp_run_get(id, &r) == 0);
+   assert(strcmp(r.state, RTP_STATE_GATE1_MERGE_PENDING) == 0); /* unchanged */
+
+   /* CAS against a non-existent id also fails cleanly. */
+   assert(rtp_run_cas_state(999999, RTP_STATE_GATE1_PENDING, RTP_STATE_DONE) == -1);
+
+   /* Fail-path transition (gate -> review_back) is the same primitive: from a
+    * fresh gate-pending run, the first claim to proposal_review wins and a stale
+    * duplicate loses, so a duplicate `gate fail` cannot re-enter the review loop
+    * twice either. */
+   int id2 = 0;
+   assert(rtp_run_create("cas fail path", RTP_DONEBAR_ZERO_BLOCKING, "/repo", "testing", &id2) ==
+          0);
+   assert(rtp_run_set_state(id2, RTP_STATE_GATE1_PENDING, NULL) == 0);
+   assert(rtp_run_cas_state(id2, RTP_STATE_GATE1_PENDING, RTP_STATE_PROPOSAL_REVIEW) == 0);
+   assert(rtp_run_cas_state(id2, RTP_STATE_GATE1_PENDING, RTP_STATE_PROPOSAL_REVIEW) == -1);
+   assert(rtp_run_get(id2, &r) == 0);
+   assert(strcmp(r.state, RTP_STATE_PROPOSAL_REVIEW) == 0);
+   printf("  cas exactly-once: ok\n");
+}
+
 int main(void)
 {
    setup_db();
    test_run_lifecycle();
+   test_cas_exactly_once();
    test_admission();
    test_pass_and_attempts();
    test_gates();
