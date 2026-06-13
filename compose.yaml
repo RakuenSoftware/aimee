@@ -22,6 +22,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.embedder
+      # Default 4b (2560-dim). Set EMBEDDER_MODEL (+ AIMEE_EMBEDDING_DIM on the kb)
+      # to build the lighter 0.6b tier, e.g. for a resource-limited host.
+      args:
+        EMBEDDER_MODEL: ${EMBEDDER_MODEL:-perplexity-ai/pplx-embed-v1-4b}
     volumes:
       - aimee-embedder-models:/opt/models
     healthcheck:
@@ -49,6 +53,8 @@ services:
       AIMEE_DB2_URL: postgresql://aimee:aimee@postgres:5432/aimee_shared
       # Real semantic embeddings via the resident embedder service.
       AIMEE_EMBEDDER_URL: http://embedder:8080
+      # Must match the embedder model's output dim (empty = config default 2560).
+      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
       # Point at any OpenAI-compatible endpoint to enable the synthesis /
       # curator passes; the optional `llm` profile below brings up a local
       # llama.cpp server.

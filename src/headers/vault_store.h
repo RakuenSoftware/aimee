@@ -63,6 +63,34 @@ int vault_store_unlock_check(const char *principal, const uint8_t kek[VAULT_KEK_
 int vault_store_set(const char *principal, const uint8_t kek[VAULT_KEK_LEN], const char *agent,
                     const char *cred, const char *secret);
 
+/* Like vault_store_set, but ALSO wraps the per-credential DEK under `server_kek`
+ * (stored as "wrapped_dek_server") so the SERVER can decrypt the credential
+ * autonomously — dual-access wrap (WP-C.4). `server_kek` must be non-NULL; both
+ * wraps are written or the upsert fails (fail-closed: never store a credential
+ * the server cannot later read). 0 on success, -1 on error. */
+int vault_store_set_dual(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+                         const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
+                         const char *cred, const char *secret);
+
+/* Decrypt the (agent, cred) credential for `principal` using the SERVER wrap
+ * ("wrapped_dek_server") under `server_kek` — NO user KEK / unlock required. This
+ * is the autonomous server use-path. Returns 0 on success, VAULT_STORE_NO_ENTRY
+ * if there is no such credential OR the entry predates dual-wrap (no server wrap
+ * — caller falls back / backfills at next user unlock), or -1 on error (wrong
+ * server_kek, tamper, corrupt file — fail closed). `out` is cleansed on any
+ * non-success. */
+int vault_store_get_server(const char *principal, const uint8_t server_kek[VAULT_KEK_LEN],
+                           const char *agent, const char *cred, char *out, size_t out_len);
+
+/* Backfill the server wrap (WP-C.4) for every credential that lacks one: unwrap
+ * each DEK under `user_kek`, wrap it under `server_kek`, add "wrapped_dek_server".
+ * Called at unlock (when the user KEK is available) so credentials written before
+ * dual-wrap become server-decryptable. Entries already carrying a server wrap are
+ * left untouched. Atomic: if ANY unwrap fails (wrong user_kek / tamper) nothing
+ * is written and -1 is returned. 0 on success (incl. nothing to do). */
+int vault_store_add_server_wraps(const char *principal, const uint8_t user_kek[VAULT_KEK_LEN],
+                                 const uint8_t server_kek[VAULT_KEK_LEN]);
+
 /* Decrypt the (agent, cred) credential for `principal` under `kek` into `out`.
  * Returns 0 on success, VAULT_STORE_NO_ENTRY if no such credential (caller falls
  * back), or -1 on error (wrong KEK, tamper, corrupt file — fail closed). `out` is

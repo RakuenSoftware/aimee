@@ -29,6 +29,13 @@ KB_URL="${KB_URL:-http://localhost:8741}"
 BEARER="${BEARER:-aimee-local-dev}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.combined.yaml}"
 SERVICE="${SERVICE:-aimee-server-kb}"
+
+# Smoke tests validate the retrieval pipeline, not a specific model. Default to
+# the light 0.6b embedder (1024-dim) so `up --build` is fast and fits CI runners;
+# the shipped default is the 4b (2560-dim). Pre-set either var to override.
+: "${EMBEDDER_MODEL:=perplexity-ai/pplx-embed-v1-0.6b}"
+: "${AIMEE_EMBEDDING_DIM:=1024}"
+export EMBEDDER_MODEL AIMEE_EMBEDDING_DIM
 WAIT_SECONDS="${WAIT_SECONDS:-300}"
 DO_UP=0
 DO_DOWN=0

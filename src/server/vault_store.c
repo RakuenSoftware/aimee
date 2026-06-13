@@ -332,8 +332,11 @@ static int add_b64_field(cJSON *obj, const char *name, const uint8_t *bin, size_
    return 0;
 }
 
-int vault_store_set(const char *principal, const uint8_t kek[VAULT_KEK_LEN], const char *agent,
-                    const char *cred, const char *secret)
+/* Shared set implementation. When `server_kek` is non-NULL the DEK is wrapped a
+ * second time under it ("wrapped_dek_server") for dual-access (WP-C.4). */
+static int vault_store_set_impl(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+                                const uint8_t *server_kek, const char *agent, const char *cred,
+                                const char *secret)
 {
    if (!principal || !kek || !agent || !agent[0] || !cred || !cred[0] || !secret)
       return -1;
@@ -351,7 +354,8 @@ int vault_store_set(const char *principal, const uint8_t kek[VAULT_KEK_LEN], con
 
    int rc = -1;
    uint8_t dek[VAULT_DEK_LEN] = {0};
-   uint8_t wrapped[VAULT_WRAPPED_DEK_LEN], nonce[VAULT_GCM_NONCE_LEN], tag[VAULT_GCM_TAG_LEN];
+   uint8_t wrapped[VAULT_WRAPPED_DEK_LEN], wrapped_server[VAULT_WRAPPED_DEK_LEN],
+       nonce[VAULT_GCM_NONCE_LEN], tag[VAULT_GCM_TAG_LEN];
    uint8_t *ct = malloc(pt_len ? pt_len : 1);
    char aad[VAULT_AAD_MAX];
    if (!ct)
@@ -364,6 +368,11 @@ int vault_store_set(const char *principal, const uint8_t kek[VAULT_KEK_LEN], con
                             nonce, ct, tag) != 0)
       goto out;
    if (vault_dek_wrap(kek, dek, wrapped) != 0)
+      goto out;
+   /* Dual-access: a second wrap of the same DEK under the server KEK. Fail-closed
+    * — if requested but it can't be produced, store nothing (never a credential
+    * the server cannot later read). */
+   if (server_kek && vault_dek_wrap(server_kek, dek, wrapped_server) != 0)
       goto out;
 
    /* Build the cred object, replacing any existing entry for (agent,cred). */
@@ -380,7 +389,9 @@ int vault_store_set(const char *principal, const uint8_t kek[VAULT_KEK_LEN], con
       if (add_b64_field(obj, "wrapped_dek", wrapped, sizeof(wrapped)) != 0 ||
           add_b64_field(obj, "nonce", nonce, sizeof(nonce)) != 0 ||
           add_b64_field(obj, "ciphertext", ct, pt_len) != 0 ||
-          add_b64_field(obj, "tag", tag, sizeof(tag)) != 0)
+          add_b64_field(obj, "tag", tag, sizeof(tag)) != 0 ||
+          (server_kek &&
+           add_b64_field(obj, "wrapped_dek_server", wrapped_server, sizeof(wrapped_server)) != 0))
       {
          cJSON_Delete(obj);
          goto out;
@@ -400,6 +411,21 @@ out:
    cJSON_Delete(root);
    pthread_mutex_unlock(&g_vault_write_mu);
    return rc;
+}
+
+int vault_store_set(const char *principal, const uint8_t kek[VAULT_KEK_LEN], const char *agent,
+                    const char *cred, const char *secret)
+{
+   return vault_store_set_impl(principal, kek, NULL, agent, cred, secret);
+}
+
+int vault_store_set_dual(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
+                         const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
+                         const char *cred, const char *secret)
+{
+   if (!server_kek)
+      return -1;
+   return vault_store_set_impl(principal, kek, server_kek, agent, cred, secret);
 }
 
 int vault_store_get(const char *principal, const uint8_t kek[VAULT_KEK_LEN], const char *agent,
@@ -479,6 +505,143 @@ out:
    if (rc != 0 && out && out_len)
       OPENSSL_cleanse(out, out_len);
    cJSON_Delete(root);
+   return rc;
+}
+
+int vault_store_get_server(const char *principal, const uint8_t server_kek[VAULT_KEK_LEN],
+                           const char *agent, const char *cred, char *out, size_t out_len)
+{
+   if (out && out_len)
+      out[0] = '\0';
+   if (!principal || !server_kek || !agent || !cred || !out || !out_len)
+      return -1;
+
+   cJSON *root = load_vault(principal);
+   if (!root)
+      return VAULT_STORE_NO_ENTRY; /* no file -> no entry, fall back */
+
+   int rc = -1;
+   uint8_t dek[VAULT_DEK_LEN] = {0};
+   uint8_t *pt = NULL;
+   size_t pt_alloc = 0;
+   cJSON *e = find_cred(root, agent, cred);
+   if (!e)
+   {
+      rc = VAULT_STORE_NO_ENTRY;
+      goto out;
+   }
+   {
+      cJSON *jw = cJSON_GetObjectItemCaseSensitive(e, "wrapped_dek_server");
+      cJSON *jn = cJSON_GetObjectItemCaseSensitive(e, "nonce");
+      cJSON *jc = cJSON_GetObjectItemCaseSensitive(e, "ciphertext");
+      cJSON *jt = cJSON_GetObjectItemCaseSensitive(e, "tag");
+      /* A legacy entry (pre-dual-wrap) has no server wrap: report NO_ENTRY so the
+       * caller falls back / backfills at the next user unlock, never an error. */
+      if (!cJSON_IsString(jw))
+      {
+         rc = VAULT_STORE_NO_ENTRY;
+         goto out;
+      }
+      if (!cJSON_IsString(jn) || !cJSON_IsString(jc) || !cJSON_IsString(jt))
+         goto out;
+      uint8_t wrapped[VAULT_WRAPPED_DEK_LEN], nonce[VAULT_GCM_NONCE_LEN], tag[VAULT_GCM_TAG_LEN];
+      if (b64url_decode(jw->valuestring, wrapped, sizeof(wrapped)) != VAULT_WRAPPED_DEK_LEN ||
+          b64url_decode(jn->valuestring, nonce, sizeof(nonce)) != VAULT_GCM_NONCE_LEN ||
+          b64url_decode(jt->valuestring, tag, sizeof(tag)) != VAULT_GCM_TAG_LEN)
+         goto out;
+      size_t ct_cap = strlen(jc->valuestring); /* >= decoded length */
+      pt = malloc(ct_cap + 1);
+      pt_alloc = ct_cap + 1;
+      uint8_t *ctbuf = malloc(ct_cap + 1);
+      if (!pt || !ctbuf)
+      {
+         free(ctbuf);
+         goto out;
+      }
+      int ct_len = b64url_decode(jc->valuestring, ctbuf, ct_cap + 1);
+      char aad[VAULT_AAD_MAX];
+      if (ct_len < 0 || build_aad(principal, agent, cred, aad, sizeof(aad)) < 0 ||
+          (size_t)ct_len >= out_len)
+      {
+         free(ctbuf);
+         goto out;
+      }
+      if (vault_dek_unwrap(server_kek, wrapped, dek) != 0 ||
+          vault_secret_decrypt(dek, (const uint8_t *)aad, strlen(aad), nonce, ctbuf, (size_t)ct_len,
+                               tag, pt) != 0)
+      {
+         OPENSSL_cleanse(ctbuf, ct_cap + 1);
+         free(ctbuf);
+         goto out; /* fail-closed: wrong server KEK / tamper / AAD mismatch */
+      }
+      memcpy(out, pt, (size_t)ct_len);
+      out[ct_len] = '\0';
+      OPENSSL_cleanse(ctbuf, ct_cap + 1);
+      free(ctbuf);
+      rc = 0;
+   }
+
+out:
+   OPENSSL_cleanse(dek, sizeof(dek));
+   if (pt)
+   {
+      OPENSSL_cleanse(pt, pt_alloc);
+      free(pt);
+   }
+   if (rc != 0 && out && out_len)
+      OPENSSL_cleanse(out, out_len);
+   cJSON_Delete(root);
+   return rc;
+}
+
+int vault_store_add_server_wraps(const char *principal, const uint8_t user_kek[VAULT_KEK_LEN],
+                                 const uint8_t server_kek[VAULT_KEK_LEN])
+{
+   if (!principal || !user_kek || !server_kek)
+      return -1;
+   pthread_mutex_lock(&g_vault_write_mu);
+   cJSON *root = load_vault(principal);
+   if (!root)
+   {
+      pthread_mutex_unlock(&g_vault_write_mu);
+      return 0; /* no vault -> nothing to backfill */
+   }
+
+   int rc = 0;
+   int changed = 0;
+   cJSON *creds = creds_array(root);
+   cJSON *e = NULL;
+   if (creds)
+   {
+      cJSON_ArrayForEach(e, creds)
+      {
+         if (cJSON_IsString(cJSON_GetObjectItemCaseSensitive(e, "wrapped_dek_server")))
+            continue; /* already dual-wrapped */
+         cJSON *jw = cJSON_GetObjectItemCaseSensitive(e, "wrapped_dek");
+         uint8_t wrapped[VAULT_WRAPPED_DEK_LEN], dek[VAULT_DEK_LEN],
+             rewrapped[VAULT_WRAPPED_DEK_LEN];
+         if (!cJSON_IsString(jw) ||
+             b64url_decode(jw->valuestring, wrapped, sizeof(wrapped)) != VAULT_WRAPPED_DEK_LEN ||
+             vault_dek_unwrap(user_kek, wrapped, dek) != 0 ||
+             vault_dek_wrap(server_kek, dek, rewrapped) != 0)
+         {
+            OPENSSL_cleanse(dek, sizeof(dek));
+            rc = -1; /* wrong user KEK / tamper -> abort, write nothing */
+            break;
+         }
+         OPENSSL_cleanse(dek, sizeof(dek));
+         if (add_b64_field(e, "wrapped_dek_server", rewrapped, sizeof(rewrapped)) != 0)
+         {
+            rc = -1;
+            break;
+         }
+         changed = 1;
+      }
+   }
+   if (rc == 0 && changed)
+      rc = write_vault_file(principal, root);
+   cJSON_Delete(root);
+   pthread_mutex_unlock(&g_vault_write_mu);
    return rc;
 }
 

@@ -50,6 +50,9 @@ feature-tracking reference rather than a complete roadmap.
 | Context injection (primary agent via hooks, delegate agents via agent_context) | Done | Injects execution context differently for primary and delegated agents while preserving the same working model. | agent.c, cmd_hooks.c |
 | Multi-delegate coordination (planner/critic/worker) | Done | Coordinates multiple delegate roles so planning, critique, and implementation can be split across agents. | agent_coord.c |
 | Quorum voting (across delegate agents) | Done | Compares outputs from multiple delegates and resolves decisions through quorum-based agreement. | agent_coord.c |
+| Roundtable / ensemble (MoA) | Done | `aimee delegate aggregate` fans out to a panel and an aggregator synthesizes one answer; `aimee delegate roundtable` runs multiple rounds. Runs through the delegate core; cost folds onto the originating session. Panel/aggregator ship configured. | delegate_ensemble.c |
+| Sub-agent tool block (delegates, not agents) | Done | Blocks the host AI's own sub-agent launchers (Claude `Task`, Codex `spawn_agent`) and points the agent at `aimee delegate`. Always on. | guardrails_orchestrator.c, cli_main.c |
+| Model-derived output limits | Done | Delegate/ingress output token caps come from the model registry rather than a fixed default. | model_registry.c |
 | Durable delegate jobs (create, heartbeat, resume) | Done | Persists delegate job state so work can survive interruptions and be resumed later. | agent_jobs.c |
 | Per-turn heartbeat updates (delegate agents) | Done | Emits heartbeat updates during delegate execution so long-running work remains observable. | agent.c, agent_jobs.c |
 | Project descriptions (via delegate agent) | Done | Uses a delegate agent to generate or refresh project descriptions from repository context. | cmd_describe.c, workspace.c |

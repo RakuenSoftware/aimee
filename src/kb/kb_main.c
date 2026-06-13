@@ -537,8 +537,10 @@ int main(int argc, char **argv)
 
    /* aimee-kb owns DB2; tell the DB2 layer the deployment's embedding dimension
     * (one embedder: 1024 pplx-0.6b / 2560 pplx-4b) before any db2_init() so the
-    * halfvec embedding columns are created at the right size. */
-   db2_set_embedding_dim(kb_cfg.embedding_dim);
+    * halfvec embedding columns are created at the right size. AIMEE_EMBEDDING_DIM
+    * overrides the configured value (containerized deploys without a writable
+    * aimee.yaml). */
+   db2_set_embedding_dim(config_resolve_embedding_dim(&kb_cfg));
 
    /* AIMEE_DB2_URL, when set, is the source of truth and overrides any db2_url
     * cached in aimee.yaml from a previous boot — applied here unconditionally,

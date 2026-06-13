@@ -384,7 +384,7 @@ corresponding `config_*.c` module.
 | `embedding_command` | string | External command that produces embeddings (sidecar). |
 | `embedding_model` | string | Embedding model name. |
 | `embedding_endpoint` | string | Embedding service URL. |
-| `embedding_dim` | int | Embedding dimensionality. |
+| `embedding_dim` | int | Embedding dimensionality; must match the embedder model. Default `2560` (pplx-embed-v1-4b); set `1024` for the pplx-embed-v1-0.6b tier. |
 
 **Memory & retrieval**
 
@@ -1012,7 +1012,9 @@ delegate for review. Full guide: [`docs/DELEGATES.md`](docs/DELEGATES.md).
 
 **Roundtable:** `aimee delegate roundtable` reuses `ensemble.enabled`,
 `ensemble.reference_models`, `ensemble.aggregator`, `ensemble.min_successful`,
-and `ensemble.max_cost_usd`. `roundtable.max_rounds` defaults to `3`,
+and `ensemble.max_cost_usd` (optional; unset or `0` means no cost cap, the
+default — set a positive value to cap a run). The panel and aggregator ship
+configured, so the roundtable runs with no setup. `roundtable.max_rounds` defaults to `3`,
 `roundtable.converge_threshold` to `10`, `roundtable.deadline_ms` to `600000`,
 and `roundtable.turns` to `parallel`. Draft mode returns a shared artifact;
 review mode returns a consolidated review, and `--apply` asks a final draft turn
@@ -1373,9 +1375,11 @@ install only the thin client ([§3.2](#32-install-the-thin-client)) and point it
 the server. Four compose files ship, built from three images: `aimee-server`
 (`Dockerfile.server`), `aimee-kb` (`Dockerfile`), and the co-located
 `aimee-server+kb` (`Dockerfile.combined`). Every stack also brings up a
-`pgvector/pgvector:pg16` Postgres and a CPU embedder sidecar (`all-MiniLM-L6-v2`,
-`Dockerfile.embedder`); the kb auto-applies its DB2 schema (`pg_trgm`/`vector`
-extensions + tables) on first boot.
+`pgvector/pgvector:pg16` Postgres and a CPU embedder sidecar (`pplx-embed-v1-4b`,
+2560-dim, the default; `Dockerfile.embedder`); the kb auto-applies its DB2 schema
+(`pg_trgm`/`vector` extensions + tables) on first boot. The lighter
+`pplx-embed-v1-0.6b` tier ships as the `aimee-embedder-0.6b` image
+(`AIMEE_EMBEDDER_IMAGE` + `embedding_dim: 1024`).
 
 | Compose file | Brings up | Use when |
 |--------------|-----------|----------|

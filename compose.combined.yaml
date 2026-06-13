@@ -45,6 +45,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.embedder
+      # Default 4b (2560-dim). Set EMBEDDER_MODEL (+ AIMEE_EMBEDDING_DIM on the
+      # server/kb) to build the lighter 0.6b tier, e.g. for a resource-limited host.
+      args:
+        EMBEDDER_MODEL: ${EMBEDDER_MODEL:-perplexity-ai/pplx-embed-v1-4b}
     volumes:
       - aimee-embedder-models:/opt/models
     healthcheck:
@@ -80,6 +84,8 @@ services:
       AIMEE_DB1_URL: sqlite:///var/lib/aimee/aimee.db
       AIMEE_DB2_URL: postgresql://aimee:aimee@postgres:5432/aimee_shared
       AIMEE_EMBEDDER_URL: http://embedder:8080
+      # Must match the embedder model's output dim (empty = config default 2560).
+      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
       AIMEE_SERVER_HTTP_BIND: "1"
       AIMEE_KB_HTTP_BIND: "1"
       AIMEE_KB_API_URL: http://127.0.0.1:8741

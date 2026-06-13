@@ -398,9 +398,11 @@ install only the [thin client](#2-install-the-thin-client)). Four compose files
 ship; pick by topology. They build from three reusable images: **`aimee-server`**
 (`Dockerfile.server`), **`aimee-kb`** (`Dockerfile`), and **`aimee-server+kb`**
 (`Dockerfile.combined`). Every stack also brings up a `pgvector/pgvector:pg16`
-Postgres (DB2) and a CPU embedder sidecar (`all-MiniLM-L6-v2`, `Dockerfile.embedder`);
-the kb auto-applies its DB2 schema (tables + `pg_trgm`/`vector` extensions) on first
-boot.
+Postgres (DB2) and a CPU embedder sidecar (`pplx-embed-v1-4b`, 2560-dim, the
+default; `Dockerfile.embedder`); the kb auto-applies its DB2 schema (tables +
+`pg_trgm`/`vector` extensions) on first boot. The lighter `pplx-embed-v1-0.6b`
+tier is published as the `aimee-embedder-0.6b` image — set `AIMEE_EMBEDDER_IMAGE`
+to it and `embedding_dim: 1024` to use it instead.
 
 > **`docker compose ... up --build` needs no credentials.** The default build ships
 > the **server + kb** services only. The optional browser UI (`aimee-webchat`) pulls
@@ -589,6 +591,7 @@ Start here:
 
 | Document | Description |
 |----------|-------------|
+| **[Quickstart](docs/QUICKSTART.md)** | **Zero to working in a few minutes**: run the server, install the client, wire your tool. |
 | **[How aimee learns](docs/KNOWLEDGE.md)** | **The vision and the mechanisms**, the company-wide knowledge base, self-learning pipeline, cross-domain synthesis, and delegation economics. |
 | **[Manual](MANUAL.md)** | **The complete user reference**, installation, configuration, current command contract, and feature guides. |
 | **[Architecture](docs/ARCHITECTURE.md)** | System design, processes, storage/trust boundaries, layering, and request lifecycles. |

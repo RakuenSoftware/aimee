@@ -21,4 +21,9 @@ void config_parse_database(config_t *cfg, cJSON *root);
  * other config consumers are unaffected. */
 int config_apply_db2_url_env_override(config_t *cfg);
 
+/* Effective embedding dim: AIMEE_EMBEDDING_DIM env override (1..EMBED_MAX_DIM)
+ * when set, else cfg->embedding_dim. Pass the result to db2_set_embedding_dim()
+ * so the schema columns match the running embedder. Non-mutating. */
+int config_resolve_embedding_dim(const config_t *cfg);
+
 #endif

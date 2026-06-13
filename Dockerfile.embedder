@@ -3,14 +3,16 @@
 # model per call. Kept separate from the kb image so torch/sentence-transformers
 # never bloat the slim kb runtime.
 #
-# Default model: perplexity-ai/pplx-embed-v1-0.6b (Feb 2026, MIT, Qwen3-based,
-# 1024-dim, retrieval-optimized, prefix-free, INT8-native) — replacing the 2021
-# all-MiniLM-L6-v2 (384-dim). Override at build time with
+# Default model: perplexity-ai/pplx-embed-v1-4b (Feb 2026, MIT, Qwen3-based,
+# 2560-dim, retrieval-optimized, prefix-free) — the higher-fidelity tier, default
+# since embedding throughput is not the bottleneck. The lighter
+# perplexity-ai/pplx-embed-v1-0.6b (1024-dim) is published as the separate
+# aimee-embedder-0.6b image. Override at build time with
 #   --build-arg EMBEDDER_MODEL=<hf id>  (must match config embedding_dim + the
-#   schema vector(N) columns — pplx-embed-v1-0.6b is 1024).
+#   schema vector(N) columns — pplx-embed-v1-4b is 2560, 0.6b is 1024).
 FROM python:3.11-slim AS embedder
 
-ARG EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-0.6b
+ARG EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-4b
 # Cross-encoder reranker served from the same process (aimee's memory rerank
 # stage). Small/CPU-friendly by design — it scores top-K (~50) pairs per query.
 ARG RERANKER_MODEL=cross-encoder/ettin-reranker-400m-v1

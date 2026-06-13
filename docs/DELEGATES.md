@@ -1,11 +1,19 @@
 # Delegate Agents
 
+> **Delegates ship configured.** A default roster (local + subscription-backed
+> tier-0 agents) and the roundtable panel come on out of the box, so
+> `aimee delegate …` and `aimee delegate roundtable …` work on a fresh install
+> with nothing to set up. This page is for adding your own providers, changing
+> the panel, or understanding the routing.
+
 ## Quick Start
 
-Use these commands to get delegation working quickly:
+Delegation already works on a fresh install (see the note above) — `aimee
+delegate …` routes to the shipped roster. Use these commands only to **add your
+own** local provider on top of the defaults:
 
 ```bash
-# 1) Configure a local delegate provider
+# 1) Add a local delegate provider (optional — defaults already work)
 aimee agent local local http://localhost:8080 --model MODEL --slots 4 --ctx 131072
 
 # 2) Inspect the registered delegates and their routing data
@@ -14,7 +22,7 @@ aimee --json agent list
 # Optional auto-detect helper for local Ollama/llama.cpp
 ./add-local-delegate.sh
 
-# 3) Use aimee normally; the primary agent will route delegateable work automatically
+# 3) Use aimee normally; the primary agent routes delegateable work automatically.
 # See the Usage section below for realistic delegation scenarios.
 ```
 
@@ -28,14 +36,16 @@ The primary agent does not need delegate configuration. It integrates with `aime
 ## Primary Agent Constraint
 
 Provider-native sub-agent tools are not Aimee delegation. Primary agents must
-not use Codex `spawn_agent`, Claude `Agent`, or similar remote-agent launchers
-for delegated or parallel work. Use the Aimee MCP `delegate` tool or
+not use Codex `spawn_agent`, Claude `Agent`/`Task`, or similar remote-agent
+launchers for delegated or parallel work. Use the Aimee MCP `delegate` tool or
 `aimee delegate <role> "<task>"` instead.
 
-Aimee guardrails block provider-native sub-agent tool calls when the client
-surfaces them through hooks. Routing through Aimee delegates keeps the work
-inside Aimee's session state, worktree isolation, depth/spawn limits, routing,
-and audit trail.
+The guard is always on: when a client surfaces a sub-agent tool through hooks
+(including Claude Code's `Task`), Aimee blocks the call and points the agent at
+`aimee delegate <role> --persona <persona>` or
+`aimee delegate roundtable "<task>" --mode review`. Routing through Aimee
+delegates keeps the work inside Aimee's session state, worktree isolation,
+depth/spawn limits, routing, and audit trail.
 
 ## How It Works
 
@@ -308,6 +318,38 @@ During a long coding session, use a `summarize` delegate to fold older context i
 - Reserve higher-tier delegates for roles such as `reason` when the task genuinely benefits from stronger reasoning.
 - Assign multiple roles to a delegate only when the model is actually suitable for those tasks.
 - Keep at least one low-cost delegate enabled to maximize the benefit of automatic routing; keep multiple tier-0 delegates enabled when you want the zero-cost layer to absorb rate limits or provider-specific failures.
+
+## Roundtable and ensemble (MoA)
+
+Two commands run a panel of models instead of one delegate and synthesize a
+single answer. Both ship configured — the panel and aggregator come on by
+default.
+
+```bash
+# Mixture-of-agents: fan out to diverse models, one aggregator synthesizes
+aimee delegate aggregate "Design a migration plan for the auth schema"
+
+# Multi-round collaborative drafting/review (review mode for a diff)
+aimee delegate roundtable "Is this migration plan sound?" --mode review
+```
+
+`aggregate` runs the reference panel in parallel and an aggregator folds their
+answers into one. `roundtable` runs multiple rounds — each round's panel sees the
+prior round — and returns the best round's artifact. Both run through the delegate
+core, so the work stays inside Aimee's session state, cost accounting, and audit
+trail (not the host AI's own sub-agent tools, which are blocked).
+
+The panel is configured under `ensemble` in `aimee.yaml`:
+
+| Field | Meaning |
+|-------|---------|
+| `reference_models` | The panel: diverse model/agent names to fan out to |
+| `aggregator` | Agent that synthesizes the panel's answers |
+| `min_successful` | Minimum panelists that must answer before degrading (default 2) |
+| `max_cost_usd` | Optional per-run cost cap in USD. **Unset/0 means no limit (the default).** Set a positive value to cap a run |
+
+Cost is folded onto the originating session, so a roundtable run shows up in the
+same cost accounting as the rest of that session's work.
 
 ## Configuration Reference
 
