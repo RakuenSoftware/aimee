@@ -66,6 +66,30 @@ static void test_master_key_file_locked_down(void)
    printf("  PASS: test_master_key_file_locked_down\n");
 }
 
+/* F1 (roundtable): a present-but-unreadable/wrong-size master key must fail
+ * closed and NEVER be overwritten — otherwise one transient read error would
+ * orphan every existing server wrap. Run LAST: it corrupts the key file. */
+static void test_bad_master_key_not_overwritten(void)
+{
+   char path[512];
+   snprintf(path, sizeof(path), "%s/.vault/.server-master.key", g_home);
+   /* Clobber the (valid) key with a wrong-size file. */
+   FILE *f = fopen(path, "wb");
+   assert(f);
+   const char junk[10] = "BADKEYDATA";
+   assert(fwrite(junk, 1, sizeof(junk), f) == sizeof(junk));
+   fclose(f);
+
+   vault_server_key_reset_for_test();
+   uint8_t kek[VAULT_KEK_LEN];
+   assert(vault_server_kek(kek) == -1); /* fail closed, do not mint */
+
+   /* The bad file must be untouched (not overwritten with a fresh 32-byte key). */
+   struct stat st;
+   assert(stat(path, &st) == 0 && st.st_size == (off_t)sizeof(junk));
+   printf("  PASS: test_bad_master_key_not_overwritten\n");
+}
+
 int main(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-svrkey-test-%d", (int)getpid());
@@ -78,6 +102,7 @@ int main(void)
    test_stable_cached();
    test_survives_restart();
    test_master_key_file_locked_down();
+   test_bad_master_key_not_overwritten(); /* must run last: corrupts the key file */
 
    char rm[320];
    snprintf(rm, sizeof(rm), "rm -rf %s", g_home);
