@@ -760,7 +760,7 @@ void delegate_worker(void *arg)
    const char *role =
        delegate_role_canonicalize(cJSON_IsString(jrole) ? jrole->valuestring : "execute");
    const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
-   int max_tokens = cJSON_IsNumber(jmax) ? (int)jmax->valuedouble : 4096;
+   int max_tokens = cJSON_IsNumber(jmax) ? (int)jmax->valuedouble : 0; /* 0 => model-derived */
    const char *system_prompt = cJSON_IsString(jsystem) ? jsystem->valuestring : NULL;
    const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : NULL;
    const char *cwd = cJSON_IsString(jcwd) ? jcwd->valuestring : "";
@@ -1705,14 +1705,14 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
     * not be opened on the server's own fs. A NULL conn is an in-process caller. */
    cctx->conn_caps = conn ? conn->capabilities : CAPS_ALL;
 
-   /* WP-C.0 (hop 3 of 3): copy the attested vault identity while the conn is live;
-    * the detached worker (conn_fd closed, no thread-local) trusts only this
-    * principal for the vault, never the body session_id. NULL conn => no vault. */
+   /* WP-C vault identity: the conn's attested principal (hop 3) wins; else fall back
+    * to the chat turn's per-turn thread-local — the chat-spawned delegate's loopback
+    * conn carries no restored identity, and the TL is cleared per turn (no leak). */
    if (conn)
-   {
       cctx->attested_transport = conn->attested_transport;
-      snprintf(cctx->vault_principal, sizeof(cctx->vault_principal), "%s", conn->vault_principal);
-   }
+   snprintf(cctx->vault_principal, sizeof(cctx->vault_principal), "%s",
+            (conn && conn->vault_principal[0]) ? conn->vault_principal
+                                               : agent_get_request_vault_principal());
 
    /* Clone the request since the original will be freed after dispatch */
    cctx->req = cJSON_Duplicate(req, 1);

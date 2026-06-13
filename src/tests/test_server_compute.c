@@ -127,6 +127,18 @@ void agent_set_request_session(const char *session_id)
 {
    (void)session_id;
 }
+/* Functional stub: store the per-turn vault principal so the create_compute_ctx
+ * fallback (WP-C.2c(3)) is exercisable. */
+static char g_stub_vault_principal[VAULT_PRINCIPAL_MAX];
+void agent_set_request_vault_principal(const char *principal)
+{
+   snprintf(g_stub_vault_principal, sizeof(g_stub_vault_principal), "%s",
+            principal ? principal : "");
+}
+const char *agent_get_request_vault_principal(void)
+{
+   return g_stub_vault_principal;
+}
 
 int agent_load_config(agent_config_t *cfg)
 {
@@ -1758,6 +1770,35 @@ static void test_create_compute_ctx_threads_vault_identity(void)
    assert(c2->vault_principal[0] == '\0');
    compute_ctx_free(c2);
    cJSON_Delete(req2);
+
+   /* WP-C.2c(3): a conn with NO principal falls back to the per-turn thread-local
+    * (set by the chat worker) so a chat-spawned delegate inherits the user's
+    * principal. */
+   agent_set_request_vault_principal("webuser:carol");
+   server_conn_t bare2;
+   memset(&bare2, 0, sizeof(bare2));
+   bare2.fd = -1;
+   cJSON *req3 = cJSON_CreateObject();
+   compute_ctx_t *c3 = create_compute_ctx(NULL, &bare2, req3);
+   assert(c3 != NULL);
+   assert(strcmp(c3->vault_principal, "webuser:carol") == 0);
+   compute_ctx_free(c3);
+   cJSON_Delete(req3);
+
+   /* The conn principal still WINS when present (the thread-local doesn't
+    * override an attested conn). */
+   server_conn_t named;
+   memset(&named, 0, sizeof(named));
+   named.fd = -1;
+   named.attested_transport = ATTEST_UDS_PEERCRED;
+   snprintf(named.vault_principal, sizeof(named.vault_principal), "uid:1000");
+   cJSON *req4 = cJSON_CreateObject();
+   compute_ctx_t *c4 = create_compute_ctx(NULL, &named, req4);
+   assert(c4 != NULL);
+   assert(strcmp(c4->vault_principal, "uid:1000") == 0); /* conn wins over thread-local */
+   compute_ctx_free(c4);
+   cJSON_Delete(req4);
+   agent_set_request_vault_principal(NULL); /* clear for other tests */
    printf("  PASS: test_create_compute_ctx_threads_vault_identity\n");
 }
 

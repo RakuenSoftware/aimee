@@ -306,9 +306,33 @@ static int model_capability_get_heuristic(const char *provider, const char *mode
       out->flags = MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_STREAMING;
    }
 
+   /* Output-token ceiling inferred when the model isn't in the static table.
+    * Reasoning models must budget for a (sometimes large) hidden reasoning trace
+    * plus the visible answer, so they get a higher ceiling than plain chat
+    * models; both are clamped to the context window. This is the model-specified
+    * cap the request builders use instead of any hardcoded default. */
+   if (out->max_output <= 0)
+      out->max_output = (out->flags & MODEL_CAP_REASONING) ? 32768 : 8192;
+   if (out->context_window > 0 && out->max_output > out->context_window)
+      out->max_output = out->context_window;
+
    out->deprecated = model_contains_ci(model_id, "deprecated") ? 1 : 0;
    capability_set_modalities(out);
    return 1;
+}
+
+/* The model's output-token ceiling, the single source of truth for a request's
+ * max_tokens when the caller/agent didn't pin one explicitly. Resolves the
+ * registry's per-model max_output (static table or inferred); falls back to a
+ * conservative ceiling only for a genuinely unknown model. Never returns 0, so
+ * callers can always emit a concrete, model-appropriate cap. */
+int model_max_output(const char *provider, const char *model_id)
+{
+   model_capability_t cap;
+   if (model_id && model_id[0] && model_capability_get(provider, model_id, &cap) &&
+       cap.max_output > 0)
+      return cap.max_output;
+   return 8192;
 }
 
 unsigned model_capability_flag_from_name(const char *name)

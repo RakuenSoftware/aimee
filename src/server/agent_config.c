@@ -2,6 +2,7 @@
 #include "aimee.h"
 #include "util.h"
 #include "agent_config.h"
+#include "vault_principal.h" /* VAULT_PRINCIPAL_MAX for the per-turn vault principal */
 #include "session_credentials.h"
 #include "model_registry.h"
 #include "platform_path.h"
@@ -243,6 +244,24 @@ void agent_set_request_session(const char *session_id)
       g_request_session_id[0] = '\0';
 }
 
+/* WP-C.2c(3): the attested vault principal for the in-flight chat turn, so a
+ * chat-spawned delegate (dispatched through the conn-decoupled agent loop) can
+ * reach the originating user's vault. */
+static _Thread_local char g_request_vault_principal[VAULT_PRINCIPAL_MAX];
+
+void agent_set_request_vault_principal(const char *principal)
+{
+   if (principal && principal[0])
+      snprintf(g_request_vault_principal, sizeof(g_request_vault_principal), "%s", principal);
+   else
+      g_request_vault_principal[0] = '\0';
+}
+
+const char *agent_get_request_vault_principal(void)
+{
+   return g_request_vault_principal;
+}
+
 void agent_set_request_codex_creds(const char *token, const char *account_id)
 {
    if (token && token[0])
@@ -262,6 +281,7 @@ void agent_request_creds_snapshot(agent_request_creds_t *out)
    snprintf(out->session_id, sizeof(out->session_id), "%s", g_request_session_id);
    snprintf(out->codex_token, sizeof(out->codex_token), "%s", g_request_codex_token);
    snprintf(out->codex_account_id, sizeof(out->codex_account_id), "%s", g_request_codex_account_id);
+   snprintf(out->vault_principal, sizeof(out->vault_principal), "%s", g_request_vault_principal);
 }
 
 void agent_request_creds_restore(const agent_request_creds_t *creds)
@@ -270,6 +290,7 @@ void agent_request_creds_restore(const agent_request_creds_t *creds)
       return;
    agent_set_request_session(creds->session_id);
    agent_set_request_codex_creds(creds->codex_token, creds->codex_account_id);
+   agent_set_request_vault_principal(creds->vault_principal);
 }
 
 static void append_header_line(char *buf, size_t buf_len, const char *line)

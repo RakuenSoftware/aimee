@@ -848,7 +848,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    char extra_headers[512];
    agent_build_extra_headers(agent, extra_headers, sizeof(extra_headers));
 
-   int tok = (max_tokens > 0) ? max_tokens : agent->max_tokens;
+   int tok = agent_request_max_tokens(agent, max_tokens);
    cJSON *req = driver->build_request(agent, messages, tools, system_prompt, tok, temperature);
    if (!req)
       return -1;
