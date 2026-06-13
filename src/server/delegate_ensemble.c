@@ -384,35 +384,28 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
    memset(out, 0, sizeof(*out));
 
    agent_config_t agg_cfg = *acfg;
-   const char *role = "review"; /* default aggregator role */
-
-   if (cfg->ensemble_aggregator[0])
-   {
-      const char *agg = cfg->ensemble_aggregator;
-      const char *at = strchr(agg, '@');
-      if (at)
-      {
-         size_t role_len = (size_t)(at - agg);
-         if (role_len >= sizeof(agg_cfg.default_agent))
-            role_len = sizeof(agg_cfg.default_agent) - 1;
-         memcpy(agg_cfg.default_agent, agg, role_len);
-         agg_cfg.default_agent[role_len] = '\0';
-         role = agg_cfg.default_agent;
-      }
-      else
-      {
-         snprintf(agg_cfg.default_agent, sizeof(agg_cfg.default_agent), "%s", agg);
-         role = agg_cfg.default_agent;
-      }
-   }
 
    /* Synthesis is pure text/JSON merging of the panel's responses — it needs no
     * tools. Running it through the tool-use loop breaks aggregators whose model
     * has no tool-calling support (e.g. MiniMax), which then return empty and
-    * collapse the whole round to a degraded, artifact-less result. Use the
-    * plain (no-tools) role-routed path; default_agent still selects the
-    * configured aggregator. */
-   return agent_run_ex(&agg_cfg, role, NULL, synthesis_prompt, 4096, 0.3, out);
+    * collapse the whole round to a degraded, artifact-less result. So all paths
+    * below use a no-tools run.
+    *
+    * The aggregator may be configured as a bare agent NAME (what the default
+    * panel picks — its first panellist) or as "<...>@<role>". A bare name must
+    * be dispatched by NAME (agent_run_named): agent_run_ex selects by role and
+    * an agent's name is not one of its roles, so a name routed as a role finds
+    * nothing and returns empty. A role form (or no aggregator) routes by role. */
+   if (cfg->ensemble_aggregator[0])
+   {
+      const char *agg = cfg->ensemble_aggregator;
+      const char *at = strchr(agg, '@');
+      if (!at)
+         return agent_run_named(&agg_cfg, agg, "review", NULL, synthesis_prompt, 4096, 0.3, out);
+      const char *role = (at[1]) ? at + 1 : "review";
+      return agent_run_ex(&agg_cfg, role, NULL, synthesis_prompt, 4096, 0.3, out);
+   }
+   return agent_run_ex(&agg_cfg, "review", NULL, synthesis_prompt, 4096, 0.3, out);
 }
 
 static char *build_round_prompt(const char *task, const char *artifact, const char *peer_notes,
