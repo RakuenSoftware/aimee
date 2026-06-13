@@ -17,11 +17,15 @@ aimee:
     http_port: 8740
     bearer_token: "aimee-local-dev"
     rate_limit_per_min: 0
-    # Mutating /v1 routes are local-UDS-only by default; over the published TCP
-    # port a bearer is read/query/chat only. Opt into remote writes here:
+    # This combined all-in-one binds /v1 on 0.0.0.0 so a thin client drives it
+    # remotely, including delegates/roundtables/tools — which require
+    # remote_writes="full". The image also forces this via AIMEE_API_REMOTE_WRITES
+    # (Dockerfile.combined) so it survives a fresh redeploy that reseeds this file.
+    # Trusted networks only (this ships a known dev bearer); for any exposed
+    # deployment set your own bearer + TLS and lower this:
     #   remote_writes: data   # data writes (memory/work/rules/skill), cap-gated
-    #   remote_writes: full   # + delegate/tool over /v1/rpc — trusted nets only
-    remote_writes: "off"
+    #   remote_writes: "off"  # TCP bearer is read/query/chat only
+    remote_writes: "full"
 
 # --- kb: real semantic embeddings via the persistent embedder service ---
 embedding_command: "python3 /opt/aimee/scripts/embed-remote.py"

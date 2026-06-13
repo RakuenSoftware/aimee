@@ -109,6 +109,17 @@ ENV AIMEE_HOME=/var/lib/aimee
 # loopback HTTP via AIMEE_KB_API_URL. The entrypoint owns the kb lifecycle; the
 # server no longer autostarts a kb (that socket transport was retired, #2747).
 ENV AIMEE_SERVER_HTTP_BIND=1
+# This combined all-in-one is the trusted-network dogfood image: it binds /v1 on
+# 0.0.0.0 specifically so a thin client drives it remotely — including delegates,
+# roundtables and tools (the headline workflow). Those routes are gated behind
+# aimee.api.remote_writes=full, so set it here as deploy truth. Without it a fresh
+# (re)deploy seeds remote_writes="off" (first-start-only seed in the entrypoint)
+# and the network bearer silently loses CAP_DELEGATE — delegate/tool /v1 calls
+# 403. The env applies on EVERY start regardless of the seeded/mounted aimee.yaml
+# (config_server_api.c), so it survives the wipe-and-reinstall redeploy path.
+# Trusted networks only (this image ships a known dev bearer); override to
+# `off`/`data` (and set your own bearer + TLS) for any exposed deployment.
+ENV AIMEE_API_REMOTE_WRITES=full
 ENV AIMEE_KB_API_URL=http://127.0.0.1:8741
 ENV AIMEE_DB1_URL=sqlite:///var/lib/aimee/aimee.db
 # kb: bind its /v1 on 0.0.0.0 (so it can optionally be published for inspection)
