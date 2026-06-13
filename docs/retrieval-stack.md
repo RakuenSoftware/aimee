@@ -13,11 +13,12 @@ for the HuggingFace / sentence-transformers stack). Two reference models:
 
 | Model | `embedding_dim` | Notes |
 |-------|-----------------|-------|
-| `pplx-embed-v1-0.6b` (default) | `1024` | Fast; the default for most deployments. |
-| `pplx-embed-v1-4b` | `2560` | Higher quality; needs more RAM/compute. Exceeds pgvector's 2000-dim `vector` index cap, which is why all columns use `halfvec`. |
+| `pplx-embed-v1-4b` (default) | `2560` | Higher quality; the default, since embedding throughput is not the bottleneck. Needs more RAM/compute. Exceeds pgvector's 2000-dim `vector` index cap, which is why all columns use `halfvec`. |
+| `pplx-embed-v1-0.6b` | `1024` | Lighter tier — fast, low memory. Published as the `aimee-embedder-0.6b` image. |
 
-Pick one. A deployment that wants the 4B's quality runs the 4B everywhere; a
-deployment that wants speed/low memory runs the 0.6B everywhere.
+Pick one. The default `aimee-embedder` image bakes the 4B. To run the lighter
+0.6B instead, point at the `aimee-embedder-0.6b` image (`AIMEE_EMBEDDER_IMAGE`)
+and set `embedding_dim: 1024` — no rebuild needed.
 
 ## Configuration
 
@@ -50,8 +51,8 @@ schema, `db_apply_schema_postgres()` substitutes the placeholder with the
 configured dimension — the one place the schema is materialized — so every
 `halfvec` column (`memory_embeddings`, `kb_embeddings`, and the
 `curator_*_vectors` tables) is created at the right size. An unset or
-out-of-range value falls back to the `1024` default rather than emitting invalid
-DDL.
+out-of-range value falls back to the `2560` default (the default embedder is the
+4B) rather than emitting invalid DDL.
 
 `halfvec` (fp16) is used throughout: it halves index memory versus `vector`
 (fp32) at negligible recall cost, and it lifts the index dimension ceiling from
