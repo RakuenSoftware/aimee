@@ -7,6 +7,7 @@
 
 #include "oauth_pkce.h"
 #include "oauth_flow.h"
+#include "db1.h" /* db1_secret_* — plant/verify legacy plaintext for the migration test */
 #include "aimee.h"
 #include "platform_test_util.h"
 
@@ -307,6 +308,36 @@ int main(void)
       /* After removal, load should fail */
       rc = oauth_token_load(client, loaded, sizeof(loaded));
       assert(rc != 0);
+   }
+
+   /* --- legacy plaintext (db1/secrets) is migrated into the vault on read --- */
+   {
+      const char *client = "test-oauth-migrate";
+      char key[256];
+      /* Plant a legacy plaintext access token + future expiry the old way. */
+      snprintf(key, sizeof(key), OAUTH_KEY_ACCESS_TOKEN, client);
+      assert(db1_secret_store(key, "legacy-access-token") == 0);
+      char ea[32];
+      snprintf(ea, sizeof(ea), "%ld", (long)time(NULL) + 7200);
+      snprintf(key, sizeof(key), OAUTH_KEY_EXPIRES_AT, client);
+      assert(db1_secret_store(key, ea) == 0);
+
+      /* Load migrates it to the encrypted vault and returns the value. */
+      char loaded[1024];
+      assert(oauth_token_load(client, loaded, sizeof(loaded)) == 0);
+      assert(strcmp(loaded, "legacy-access-token") == 0);
+
+      /* The legacy plaintext entry is scrubbed... */
+      char chk[256];
+      snprintf(key, sizeof(key), OAUTH_KEY_ACCESS_TOKEN, client);
+      assert(db1_secret_load(key, chk, sizeof(chk)) != 0);
+
+      /* ...and a subsequent load still works (now from the vault). */
+      assert(oauth_token_load(client, loaded, sizeof(loaded)) == 0);
+      assert(strcmp(loaded, "legacy-access-token") == 0);
+
+      oauth_token_remove(client);
+      assert(oauth_token_load(client, loaded, sizeof(loaded)) != 0);
    }
 
    /* --- oauth_token_get: returns -1 when no token stored --- */

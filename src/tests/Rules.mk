@@ -2082,6 +2082,11 @@ $(TESTPREFIX)/unit-test-oauth-pkce: $(OBJDIR)/tests/test_oauth_pkce.o \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(OBJDIR)/server/oauth_tokens.o \
                      $(OBJDIR)/db1/secrets.o \
+                     $(OBJDIR)/server/vault_service.o \
+                     $(OBJDIR)/server/vault_store.o \
+                     $(OBJDIR)/server/vault_crypto.o \
+                     $(OBJDIR)/server/vault_kek_cache.o \
+                     $(OBJDIR)/server/vault_server_key.o \
                      $(OBJDIR)/platform_random.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

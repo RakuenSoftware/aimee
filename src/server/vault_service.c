@@ -77,8 +77,8 @@ static vault_status_t vault_service_get_server_wrap(const char *principal, const
 /* Read (agent, cred) from the SERVER principal's vault under the server master KEK
  * — no client, no unlock. VAULT_OK / VAULT_NO_ENTRY (no file or no entry) /
  * VAULT_ERR_* (fail closed). */
-static vault_status_t vault_service_get_server_principal(const char *agent, const char *cred,
-                                                         char *out, size_t out_len)
+vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
+                                                  size_t out_len)
 {
    if (out && out_len)
       out[0] = '\0';
