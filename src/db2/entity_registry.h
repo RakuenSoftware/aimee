@@ -62,6 +62,34 @@ extern "C"
     * -1 on error (bad args / DB failure). */
    int db2_entity_aliases_for(int64_t canonical_id, char (*out)[128], int max);
 
+   /* First-class merge: collapse `from_id` into `into_id` (mark merged + record an
+    * audit row so it is reversible). Reversible without moving aliases — resolve
+    * follows the merged_into pointer (single hop). Returns the merge audit id (>0)
+    * or -1. */
+   int64_t db2_entity_merge(int64_t from_id, int64_t into_id);
+
+   /* Reverse a recorded merge: restore the merged entity to active and mark the
+    * audit row undone. 0 on success, -1 on error / unknown / already-undone. */
+   int db2_entity_unmerge(int64_t merge_id);
+
+   /* entity_name_conflicts: the true-ambiguity queue (§3 tier 3). Record an open
+    * conflict for a name (idempotent on name_norm; bumps priority on repeat).
+    * Returns the row id (>0) or -1. */
+   int64_t db2_entity_conflict_record(const char *name);
+
+   /* Set a conflict's status (use one of the literals below). 0/-1. */
+#define ENTITY_CONFLICT_OPEN     "open"
+#define ENTITY_CONFLICT_RESOLVED "resolved"
+#define ENTITY_CONFLICT_FAILED   "failed"
+   int db2_entity_conflict_set_status(int64_t conflict_id, const char *status);
+
+   /* Count conflicts in a given status (NULL = all). >=0, or -1 on error. */
+   int db2_entity_conflict_count(const char *status);
+
+   /* The priority counter for a name's conflict row (>=0), or -1 if absent /
+    * error. Lets callers observe the bump-on-repeat behavior. */
+   int db2_entity_conflict_priority(const char *name);
+
 #ifdef __cplusplus
 }
 #endif
