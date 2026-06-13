@@ -142,6 +142,11 @@ static void *drain_thread_main(void *arg)
             int e = kb_doc_refresh(projects[i].name, cfg.embedding_command, 200);
             if (e > 0)
                total += e;
+            /* Self-heal chunks that exist but lost their embedding (partial
+             * ingest, late embedder, or a vector-store dim reset). */
+            int b = kb_doc_embed_backfill(projects[i].name, cfg.embedding_command, 200);
+            if (b > 0)
+               total += b;
          }
          if (total > 0)
             aimee_log(LOG_DEBUG, "kb.docs.ingest", "ingested %d doc chunk(s) across %d project(s)",
