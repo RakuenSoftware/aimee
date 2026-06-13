@@ -93,6 +93,10 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
  * Bounded by `max_docs`. Returns chunks embedded. Replaces the old `kb build`
  * command — doc ingestion now happens automatically during workspace ingest. */
 int kb_doc_refresh(const char *project, const char *embedding_cmd, int max_docs);
+/* Embed kb_documents chunks that have no kb_embeddings row yet (self-healing
+ * backfill for partial ingests, late-configured embedders, or a vector-store
+ * reset that preserved chunk text). Returns chunks embedded, -1 on error. */
+int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int max_chunks);
 
 /* Search the knowledge base.
  *

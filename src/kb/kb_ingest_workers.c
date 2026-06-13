@@ -594,3 +594,79 @@ int kb_doc_refresh(const char *project, const char *embedding_cmd, int max_docs)
    free(rows);
    return embedded;
 }
+
+/* Self-healing embedding backfill: embed kb_documents chunks that exist but have
+ * NO kb_embeddings row. kb_doc_refresh's gate is "file has no chunks yet", so a
+ * chunk left unembedded never gets a second chance — this covers the cases that
+ * leaves behind: a partial ingest, an embedder that was unavailable at ingest
+ * time (embedding_command added later), or a vector-store reset that drops the
+ * halfvec columns while the chunk text survives (e.g. an embedding-dim change).
+ * Re-embeds in place (no re-chunk), bounded per call. Returns chunks embedded. */
+int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int max_chunks)
+{
+   if (!project || !project[0] || !db2_is_initialized())
+      return -1;
+   const char *effective_cmd = kb_effective_embedding_cmd(embedding_cmd);
+   if (!effective_cmd[0])
+      return 0; /* no embedder configured — nothing to do */
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   if (max_chunks <= 0)
+      max_chunks = 200;
+
+   static const char *sql =
+       "SELECT kd.id, kd.heading_path, kd.content FROM kb_documents kd"
+       " WHERE kd.project = ?1"
+       "   AND NOT EXISTS (SELECT 1 FROM kb_embeddings ke WHERE ke.point_id = kd.id)"
+       " LIMIT ?2";
+
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_int(st, "?2", max_chunks);
+
+   /* Collect rows first: sync_vector_embedding issues its own statements and the
+    * pg layer allows only one active statement per connection. */
+   typedef struct
+   {
+      int64_t id;
+      char heading[512];
+      char *content;
+   } chunk_row_t;
+   chunk_row_t *rows = calloc((size_t)max_chunks, sizeof(chunk_row_t));
+   int n = 0;
+   if (rows)
+   {
+      while (n < max_chunks && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      {
+         int64_t id = aimee_pg_column_int64(st, 0);
+         const char *heading = aimee_pg_column_text(st, 1);
+         const char *body = aimee_pg_column_text(st, 2);
+         if (id <= 0 || !body)
+            continue;
+         rows[n].id = id;
+         snprintf(rows[n].heading, sizeof(rows[n].heading), "%s", heading ? heading : "");
+         rows[n].content = strdup(body);
+         if (rows[n].content)
+            n++;
+      }
+   }
+   aimee_pg_finalize(st);
+
+   int embedded = 0;
+   for (int i = 0; i < n; i++)
+   {
+      char embed_text[4096];
+      kb_async_make_embed_text(rows[i].heading, rows[i].content, embed_text, sizeof(embed_text));
+      float vec[EMBED_MAX_DIM];
+      int dim = memory_embed_text(embed_text, effective_cmd, vec, EMBED_MAX_DIM);
+      if (dim > 0 && sync_vector_embedding(rows[i].id, vec, dim) == 0)
+         embedded++;
+      free(rows[i].content);
+   }
+   free(rows);
+   return embedded;
+}
