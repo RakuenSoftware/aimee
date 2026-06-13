@@ -1767,6 +1767,51 @@ int main(void)
          platform_unsetenv("AIMEE_DB2_URL");
    }
 
+   /* AIMEE_EMBEDDING_DIM env override */
+   {
+      char *saved = getenv("AIMEE_EMBEDDING_DIM");
+      if (saved)
+         saved = strdup(saved);
+
+      config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      cfg.embedding_dim = 2560;
+
+      /* valid env -> overrides, returns 1 */
+      platform_setenv("AIMEE_EMBEDDING_DIM", "1024");
+      assert(config_apply_embedding_dim_env_override(&cfg) == 1);
+      assert(cfg.embedding_dim == 1024);
+
+      /* unset -> leaves value untouched, returns 0 */
+      platform_unsetenv("AIMEE_EMBEDDING_DIM");
+      assert(config_apply_embedding_dim_env_override(&cfg) == 0);
+      assert(cfg.embedding_dim == 1024);
+
+      /* empty -> treated as unset, returns 0 */
+      platform_setenv("AIMEE_EMBEDDING_DIM", "");
+      assert(config_apply_embedding_dim_env_override(&cfg) == 0);
+      assert(cfg.embedding_dim == 1024);
+
+      /* non-numeric / out-of-range -> rejected, value unchanged, returns 0 */
+      platform_setenv("AIMEE_EMBEDDING_DIM", "abc");
+      assert(config_apply_embedding_dim_env_override(&cfg) == 0);
+      assert(cfg.embedding_dim == 1024);
+      platform_setenv("AIMEE_EMBEDDING_DIM", "999999");
+      assert(config_apply_embedding_dim_env_override(&cfg) == 0);
+      assert(cfg.embedding_dim == 1024);
+
+      /* NULL cfg -> no crash, returns 0 */
+      assert(config_apply_embedding_dim_env_override(NULL) == 0);
+
+      if (saved)
+      {
+         platform_setenv("AIMEE_EMBEDDING_DIM", saved);
+         free(saved);
+      }
+      else
+         platform_unsetenv("AIMEE_EMBEDDING_DIM");
+   }
+
    printf("all tests passed\n");
    return 0;
 }

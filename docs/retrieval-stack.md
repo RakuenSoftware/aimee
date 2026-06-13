@@ -32,6 +32,10 @@ Keep the two in sync: `embedding_dim` must equal the dimension
 `embedding_command` actually returns, or vector inserts will be rejected by
 Postgres.
 
+`AIMEE_EMBEDDING_DIM` overrides `embedding_dim` from the environment — useful for
+a containerized deploy with no writable `aimee.yaml` (set it alongside
+`AIMEE_EMBEDDER_IMAGE` when pinning the 0.6b tier: `AIMEE_EMBEDDING_DIM=1024`).
+
 ## How the dimension flows into the schema
 
 The DB2 schema (`src/db2/schema.sql`) declares its embedding columns with a

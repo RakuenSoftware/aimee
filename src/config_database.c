@@ -58,3 +58,25 @@ int config_apply_db2_url_env_override(config_t *cfg)
    }
    return 0;
 }
+
+/* AIMEE_EMBEDDING_DIM lets a containerized deploy set the embedder dimension
+ * without a writable aimee.yaml — it must match the running embedder model
+ * (1024 for pplx-embed-v1-0.6b, 2560 for the default pplx-embed-v1-4b). */
+int config_apply_embedding_dim_env_override(config_t *cfg)
+{
+   if (!cfg)
+      return 0;
+   const char *env = getenv("AIMEE_EMBEDDING_DIM");
+   if (!env || !env[0])
+      return 0;
+   char *end = NULL;
+   long v = strtol(env, &end, 10);
+   if (end && *end == '\0' && v >= 1 && v <= EMBED_MAX_DIM)
+   {
+      cfg->embedding_dim = (int)v;
+      return 1;
+   }
+   fprintf(stderr, "aimee: config warning: AIMEE_EMBEDDING_DIM must be 1..%d, got \"%s\"\n",
+           EMBED_MAX_DIM, env);
+   return 0;
+}

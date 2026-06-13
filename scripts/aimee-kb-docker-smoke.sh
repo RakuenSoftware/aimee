@@ -11,7 +11,7 @@
 #   3. /v1/version             — build identifies itself
 #   4. /v1/capabilities        — capability manifest serves
 #   5. POST /v1/search         — DB2-backed query path works (empty result is OK)
-#   6. embedder /embed         — real 384-dim embedding round-trip (in-network)
+#   6. embedder /embed         — real embedding round-trip (in-network)
 #
 # The embedder port is not published by compose.yaml, so its checks run inside
 # the kb container via `docker compose exec` (the kb image ships curl).
@@ -34,6 +34,13 @@ set -euo pipefail
 KB_URL="${KB_URL:-http://localhost:8741}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}"
 WAIT_SECONDS="${WAIT_SECONDS:-300}"
+
+# Smoke tests validate the retrieval pipeline, not a specific model. Default to
+# the light 0.6b embedder (1024-dim) so `up --build` is fast and fits CI runners;
+# the shipped default is the 4b (2560-dim). Pre-set either var to override.
+: "${EMBEDDER_MODEL:=perplexity-ai/pplx-embed-v1-0.6b}"
+: "${AIMEE_EMBEDDING_DIM:=1024}"
+export EMBEDDER_MODEL AIMEE_EMBEDDING_DIM
 DO_UP=0
 DO_DOWN=0
 

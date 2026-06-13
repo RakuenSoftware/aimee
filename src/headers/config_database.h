@@ -21,4 +21,9 @@ void config_parse_database(config_t *cfg, cJSON *root);
  * other config consumers are unaffected. */
 int config_apply_db2_url_env_override(config_t *cfg);
 
+/* Overrides cfg->embedding_dim from AIMEE_EMBEDDING_DIM when set (1..EMBED_MAX_DIM).
+ * Apply AFTER config_load and BEFORE db2_set_embedding_dim() so the schema columns
+ * match the running embedder. Returns 1 if applied. */
+int config_apply_embedding_dim_env_override(config_t *cfg);
+
 #endif
