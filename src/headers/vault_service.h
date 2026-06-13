@@ -39,6 +39,15 @@ const char *vault_status_str(vault_status_t s);
 vault_status_t vault_service_unlock(const char *principal, attested_transport_t transport,
                                     const uint8_t *root_key, size_t root_key_len, long now_epoch);
 
+/* Unlock the `webuser:` vault (WP-C.2): derive the KEK from the login password
+ * via scrypt and cache it. Requires an ATTEST_WEBCHAT_TRUSTED principal (the
+ * webchat backend's server.token-gated assertion) with a non-empty principal and
+ * password — refused on any other transport (VAULT_ERR_TRANSPORT). The caller
+ * must OPENSSL_cleanse `password`. */
+vault_status_t vault_service_unlock_password(const char *principal, attested_transport_t transport,
+                                             const uint8_t *password, size_t password_len,
+                                             long now_epoch);
+
 /* Store `secret` for (agent, cred) under the principal's cached KEK. Requires an
  * unlocked vault (VAULT_ERR_LOCKED otherwise). */
 vault_status_t vault_service_set(const char *principal, const char *agent, const char *cred,

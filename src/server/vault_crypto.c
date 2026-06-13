@@ -46,6 +46,28 @@ int vault_kek_derive(const uint8_t *root_key, size_t root_key_len, const uint8_t
    return rc;
 }
 
+int vault_kek_derive_scrypt(const uint8_t *password, size_t password_len, const uint8_t *salt,
+                            size_t salt_len, uint8_t kek[VAULT_KEK_LEN])
+{
+   if (!kek)
+      return -1;
+   memset(kek, 0, VAULT_KEK_LEN);
+   /* A password may be any length incl. empty-rejected by the caller; salt must
+    * be present. */
+   if (!password || (!salt && salt_len) || salt_len == 0)
+      return -1;
+
+   /* EVP_PBE_scrypt returns 1 on success; a non-1 (incl. the memory-limit guard)
+    * is fail-closed. */
+   if (EVP_PBE_scrypt((const char *)password, password_len, salt, salt_len, VAULT_SCRYPT_N,
+                      VAULT_SCRYPT_R, VAULT_SCRYPT_P, VAULT_SCRYPT_MAXMEM, kek, VAULT_KEK_LEN) != 1)
+   {
+      OPENSSL_cleanse(kek, VAULT_KEK_LEN);
+      return -1;
+   }
+   return 0;
+}
+
 int vault_dek_wrap(const uint8_t kek[VAULT_KEK_LEN], const uint8_t dek[VAULT_DEK_LEN],
                    uint8_t wrapped[VAULT_WRAPPED_DEK_LEN])
 {

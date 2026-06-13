@@ -71,17 +71,35 @@ static int hex_decode(const char *hex, uint8_t *out, size_t n)
 int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   cJSON *jrk = cJSON_GetObjectItemCaseSensitive(req, "root_key_hex");
-   if (!cJSON_IsString(jrk))
-      return server_send_error(conn, "vault: missing root_key_hex", NULL);
+   vault_status_t st;
 
-   uint8_t root_key[VAULT_ROOT_KEY_LEN];
-   if (hex_decode(jrk->valuestring, root_key, sizeof(root_key)) != 0)
-      return server_send_error(conn, "vault: root_key_hex must be 64 hex chars", NULL);
-
-   vault_status_t st = vault_service_unlock(conn->vault_principal, conn->attested_transport,
-                                            root_key, sizeof(root_key), time(NULL));
-   OPENSSL_cleanse(root_key, sizeof(root_key));
+   /* A webchat-asserted webuser principal unlocks with its login password
+    * (scrypt KEK, WP-C.2); a kernel-attested uid: peer unlocks with its 32-byte
+    * client root key (hex). The transport — not the request body — selects the
+    * path, so a request can't pick the wrong (weaker) unlock for its identity. */
+   if (conn->attested_transport == ATTEST_WEBCHAT_TRUSTED)
+   {
+      cJSON *jpw = cJSON_GetObjectItemCaseSensitive(req, "password");
+      if (!cJSON_IsString(jpw))
+         return server_send_error(conn, "vault: missing password", NULL);
+      st = vault_service_unlock_password(conn->vault_principal, conn->attested_transport,
+                                         (const uint8_t *)jpw->valuestring,
+                                         strlen(jpw->valuestring), time(NULL));
+      /* Best-effort scrub of the request-body copy of the password. */
+      OPENSSL_cleanse(jpw->valuestring, strlen(jpw->valuestring));
+   }
+   else
+   {
+      cJSON *jrk = cJSON_GetObjectItemCaseSensitive(req, "root_key_hex");
+      if (!cJSON_IsString(jrk))
+         return server_send_error(conn, "vault: missing root_key_hex", NULL);
+      uint8_t root_key[VAULT_ROOT_KEY_LEN];
+      if (hex_decode(jrk->valuestring, root_key, sizeof(root_key)) != 0)
+         return server_send_error(conn, "vault: root_key_hex must be 64 hex chars", NULL);
+      st = vault_service_unlock(conn->vault_principal, conn->attested_transport, root_key,
+                                sizeof(root_key), time(NULL));
+      OPENSSL_cleanse(root_key, sizeof(root_key));
+   }
    if (st != VAULT_OK)
       return vault_send_status_error(conn, st);
 

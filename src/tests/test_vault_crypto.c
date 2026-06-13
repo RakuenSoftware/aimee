@@ -182,10 +182,48 @@ static void test_full_envelope_roundtrip(void)
    printf("  PASS: test_full_envelope_roundtrip\n");
 }
 
+/* WP-C.2: scrypt KEK derivation for the webuser password path — deterministic,
+ * salt- and password-sensitive, and usable as a KEK in the full envelope. */
+static void test_scrypt_kek_derive(void)
+{
+   const uint8_t pw[] = "correct horse battery staple";
+   uint8_t salt1[VAULT_SALT_LEN], salt2[VAULT_SALT_LEN];
+   memset(salt1, 0x31, sizeof(salt1));
+   memset(salt2, 0x32, sizeof(salt2));
+
+   uint8_t k1[VAULT_KEK_LEN], k1b[VAULT_KEK_LEN], k2[VAULT_KEK_LEN];
+   assert(vault_kek_derive_scrypt(pw, sizeof(pw) - 1, salt1, sizeof(salt1), k1) == 0);
+   assert(vault_kek_derive_scrypt(pw, sizeof(pw) - 1, salt1, sizeof(salt1), k1b) == 0);
+   assert(memcmp(k1, k1b, VAULT_KEK_LEN) == 0); /* deterministic */
+   assert(vault_kek_derive_scrypt(pw, sizeof(pw) - 1, salt2, sizeof(salt2), k2) == 0);
+   assert(memcmp(k1, k2, VAULT_KEK_LEN) != 0); /* salt changes the KEK */
+
+   const uint8_t pw2[] = "wrong password";
+   uint8_t k3[VAULT_KEK_LEN];
+   assert(vault_kek_derive_scrypt(pw2, sizeof(pw2) - 1, salt1, sizeof(salt1), k3) == 0);
+   assert(memcmp(k1, k3, VAULT_KEK_LEN) != 0); /* password changes the KEK */
+
+   /* A scrypt-derived KEK round-trips a credential like any other KEK. */
+   uint8_t dek[VAULT_DEK_LEN], wrapped[VAULT_WRAPPED_DEK_LEN], out[VAULT_DEK_LEN];
+   assert(vault_crypto_random(dek, sizeof(dek)) == 0);
+   assert(vault_dek_wrap(k1, dek, wrapped) == 0);
+   assert(vault_dek_unwrap(k1, wrapped, out) == 0);
+   assert(memcmp(out, dek, VAULT_DEK_LEN) == 0);
+   /* The HKDF and scrypt KEKs for the same salt differ (distinct KDFs). */
+   uint8_t root[VAULT_ROOT_KEY_LEN], hk[VAULT_KEK_LEN];
+   memset(root, 0x55, sizeof(root));
+   assert(vault_kek_derive(root, sizeof(root), salt1, sizeof(salt1), hk) == 0);
+   assert(memcmp(hk, k1, VAULT_KEK_LEN) != 0);
+
+   assert(vault_kek_derive_scrypt(pw, sizeof(pw) - 1, salt1, 0, k1) == -1); /* salt required */
+   printf("  PASS: test_scrypt_kek_derive\n");
+}
+
 int main(void)
 {
    test_random_distinct_and_sized();
    test_kek_derive_deterministic_and_salted();
+   test_scrypt_kek_derive();
    test_dek_wrap_roundtrip_and_tamper();
    test_secret_gcm_roundtrip();
    test_secret_fresh_nonce_per_encrypt();
