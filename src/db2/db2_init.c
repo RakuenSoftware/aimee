@@ -48,7 +48,7 @@ static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
  * 1024 for pplx-0.6b, 2560 for pplx-4b). Set from the loaded config by the
  * server / aimee-kb startup via db2_set_embedding_dim() before db2_init(), so
  * this layer needs no config dependency. 0 = unset -> db2_embedding_dim()
- * reports the 1024 default. */
+ * reports the 2560 default (the default embedder is pplx-4b). */
 static int g_embed_dim = 0;
 
 void db2_set_embedding_dim(int dim)
@@ -58,7 +58,7 @@ void db2_set_embedding_dim(int dim)
 
 int db2_embedding_dim(void)
 {
-   return g_embed_dim > 0 ? g_embed_dim : 1024;
+   return g_embed_dim > 0 ? g_embed_dim : 2560;
 }
 static pthread_key_t g_thread_conn_key;
 static pthread_once_t g_thread_conn_key_once = PTHREAD_ONCE_INIT;
@@ -249,7 +249,7 @@ int db2_init(const char *libpq_url)
     * embedding_dim drives the dimension of the DB2 halfvec embedding columns.
     * The dimension is supplied by db2_set_embedding_dim() at startup (the server
     * and aimee-kb, which hold the loaded config) so this low-level layer stays
-    * config-free; it defaults to 1024 when unset. */
+    * config-free; it defaults to 2560 when unset. */
    if (db_apply_schema_postgres(conn, db2_embedding_dim(), errbuf, sizeof(errbuf)) != 0)
    {
       /* Surface the postgres error so callers see WHICH statement failed.

@@ -4,6 +4,7 @@
 #include "agent_exec.h"
 #include "agent_config.h"
 #include "config.h"
+#include "config_database.h"
 #include "db1.h"
 #include "delegate_credentials.h"
 #include "db2/lifecycle.h"
@@ -47,7 +48,7 @@ static int bootstrap_db2(const config_t *cfg, int json_output)
       return 0;
    }
 
-   db2_set_embedding_dim(cfg->embedding_dim);
+   db2_set_embedding_dim(config_resolve_embedding_dim(cfg));
    if (db2_init(cfg->db2_url) == 0)
    {
       int schema_ok = 0;

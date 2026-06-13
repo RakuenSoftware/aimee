@@ -47,8 +47,9 @@
 #endif
 
 /* Fallback kb_embeddings dimension when config.embedding_dim is unset; the
- * default embedder is pplx-embed-v1-0.6b (1024-dim). */
-#define KB_DEFAULT_DIM 1024
+ * default embedder is pplx-embed-v1-4b (2560-dim). Advisory only — the real
+ * column dimension comes from the schema (see kbiw_process_job). */
+#define KB_DEFAULT_DIM 2560
 
 /* ------------------------------------------------------------------ */
 /* notify: wake parked workers (called by kb_handle_ingest on enqueue) */

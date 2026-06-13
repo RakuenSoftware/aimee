@@ -13,11 +13,12 @@ for the HuggingFace / sentence-transformers stack). Two reference models:
 
 | Model | `embedding_dim` | Notes |
 |-------|-----------------|-------|
-| `pplx-embed-v1-0.6b` (default) | `1024` | Fast; the default for most deployments. |
-| `pplx-embed-v1-4b` | `2560` | Higher quality; needs more RAM/compute. Exceeds pgvector's 2000-dim `vector` index cap, which is why all columns use `halfvec`. |
+| `pplx-embed-v1-4b` (default) | `2560` | Higher quality; the default, since embedding throughput is not the bottleneck. Needs more RAM/compute. Exceeds pgvector's 2000-dim `vector` index cap, which is why all columns use `halfvec`. |
+| `pplx-embed-v1-0.6b` | `1024` | Lighter tier — fast, low memory. Published as the `aimee-embedder-0.6b` image. |
 
-Pick one. A deployment that wants the 4B's quality runs the 4B everywhere; a
-deployment that wants speed/low memory runs the 0.6B everywhere.
+Pick one. The default `aimee-embedder` image bakes the 4B. To run the lighter
+0.6B instead, point at the `aimee-embedder-0.6b` image (`AIMEE_EMBEDDER_IMAGE`)
+and set `embedding_dim: 1024` — no rebuild needed.
 
 ## Configuration
 
@@ -30,6 +31,10 @@ Two config keys define the embedder:
 Keep the two in sync: `embedding_dim` must equal the dimension
 `embedding_command` actually returns, or vector inserts will be rejected by
 Postgres.
+
+`AIMEE_EMBEDDING_DIM` overrides `embedding_dim` from the environment — useful for
+a containerized deploy with no writable `aimee.yaml` (set it alongside
+`AIMEE_EMBEDDER_IMAGE` when pinning the 0.6b tier: `AIMEE_EMBEDDING_DIM=1024`).
 
 ## How the dimension flows into the schema
 
@@ -50,12 +55,13 @@ schema, `db_apply_schema_postgres()` substitutes the placeholder with the
 configured dimension — the one place the schema is materialized — so every
 `halfvec` column (`memory_embeddings`, `kb_embeddings`, and the
 `curator_*_vectors` tables) is created at the right size. An unset or
-out-of-range value falls back to the `1024` default rather than emitting invalid
-DDL.
+out-of-range value falls back to the `2560` default (the default embedder is the
+4B) rather than emitting invalid DDL.
 
 `halfvec` (fp16) is used throughout: it halves index memory versus `vector`
 (fp32) at negligible recall cost, and it lifts the index dimension ceiling from
-2000 to 4000 — required for the 4B's 2560 dims.
+2000 to 4000 — required for the 4B's 2560 dims. This needs pgvector ≥ 0.7 (the
+bundled `pgvector/pgvector:pg16` image has it); older pgvector caps at 2000.
 
 The code-side embedding buffers are sized by `EMBED_MAX_DIM` (2560 in
 `src/headers/aimee.h`), large enough to hold either model's output; the embed
