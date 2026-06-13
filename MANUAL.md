@@ -1375,11 +1375,13 @@ install only the thin client ([§3.2](#32-install-the-thin-client)) and point it
 the server. Four compose files ship, built from three images: `aimee-server`
 (`Dockerfile.server`), `aimee-kb` (`Dockerfile`), and the co-located
 `aimee-server+kb` (`Dockerfile.combined`). Every stack also brings up a
-`pgvector/pgvector:pg16` Postgres and a CPU embedder sidecar (`pplx-embed-v1-4b`,
-2560-dim, the default; `Dockerfile.embedder`); the kb auto-applies its DB2 schema
-(`pg_trgm`/`vector` extensions + tables) on first boot. The lighter
-`pplx-embed-v1-0.6b` tier ships as the `aimee-embedder-0.6b` image
-(`AIMEE_EMBEDDER_IMAGE` + `embedding_dim: 1024`).
+`pgvector/pgvector:pg16` Postgres and a CPU embedder sidecar
+(`Dockerfile.embedder`); the kb auto-applies its DB2 schema (`pg_trgm`/`vector`
+extensions + tables) on first boot. The sidecar ships in two tiers (embedder +
+matching reranker in one image): the default `aimee-embedder` (4b/2560 + 1b
+reranker) and the lighter `aimee-embedder-0.6b` (0.6b/1024 + 400m reranker) via
+`AIMEE_EMBEDDER_IMAGE` + `embedding_dim: 1024`. Trade-offs:
+[retrieval-stack.md](docs/retrieval-stack.md#choosing-a-tier).
 
 | Compose file | Brings up | Use when |
 |--------------|-----------|----------|
