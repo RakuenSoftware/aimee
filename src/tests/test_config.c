@@ -1767,7 +1767,7 @@ int main(void)
          platform_unsetenv("AIMEE_DB2_URL");
    }
 
-   /* AIMEE_EMBEDDING_DIM env override */
+   /* AIMEE_EMBEDDING_DIM env override (config_resolve_embedding_dim) */
    {
       char *saved = getenv("AIMEE_EMBEDDING_DIM");
       if (saved)
@@ -1777,31 +1777,27 @@ int main(void)
       memset(&cfg, 0, sizeof(cfg));
       cfg.embedding_dim = 2560;
 
-      /* valid env -> overrides, returns 1 */
-      platform_setenv("AIMEE_EMBEDDING_DIM", "1024");
-      assert(config_apply_embedding_dim_env_override(&cfg) == 1);
-      assert(cfg.embedding_dim == 1024);
-
-      /* unset -> leaves value untouched, returns 0 */
+      /* unset -> returns the cfg value */
       platform_unsetenv("AIMEE_EMBEDDING_DIM");
-      assert(config_apply_embedding_dim_env_override(&cfg) == 0);
-      assert(cfg.embedding_dim == 1024);
+      assert(config_resolve_embedding_dim(&cfg) == 2560);
 
-      /* empty -> treated as unset, returns 0 */
+      /* valid env -> overrides */
+      platform_setenv("AIMEE_EMBEDDING_DIM", "1024");
+      assert(config_resolve_embedding_dim(&cfg) == 1024);
+
+      /* empty -> treated as unset, falls back to cfg */
       platform_setenv("AIMEE_EMBEDDING_DIM", "");
-      assert(config_apply_embedding_dim_env_override(&cfg) == 0);
-      assert(cfg.embedding_dim == 1024);
+      assert(config_resolve_embedding_dim(&cfg) == 2560);
 
-      /* non-numeric / out-of-range -> rejected, value unchanged, returns 0 */
+      /* non-numeric / out-of-range -> rejected, falls back to cfg */
       platform_setenv("AIMEE_EMBEDDING_DIM", "abc");
-      assert(config_apply_embedding_dim_env_override(&cfg) == 0);
-      assert(cfg.embedding_dim == 1024);
+      assert(config_resolve_embedding_dim(&cfg) == 2560);
       platform_setenv("AIMEE_EMBEDDING_DIM", "999999");
-      assert(config_apply_embedding_dim_env_override(&cfg) == 0);
-      assert(cfg.embedding_dim == 1024);
+      assert(config_resolve_embedding_dim(&cfg) == 2560);
 
-      /* NULL cfg -> no crash, returns 0 */
-      assert(config_apply_embedding_dim_env_override(NULL) == 0);
+      /* NULL cfg with no env -> 0 (no crash) */
+      platform_unsetenv("AIMEE_EMBEDDING_DIM");
+      assert(config_resolve_embedding_dim(NULL) == 0);
 
       if (saved)
       {

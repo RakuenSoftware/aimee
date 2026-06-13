@@ -48,8 +48,7 @@ static int bootstrap_db2(const config_t *cfg, int json_output)
       return 0;
    }
 
-   config_apply_embedding_dim_env_override(cfg);
-   db2_set_embedding_dim(cfg->embedding_dim);
+   db2_set_embedding_dim(config_resolve_embedding_dim(cfg));
    if (db2_init(cfg->db2_url) == 0)
    {
       int schema_ok = 0;

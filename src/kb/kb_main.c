@@ -540,8 +540,7 @@ int main(int argc, char **argv)
     * halfvec embedding columns are created at the right size. AIMEE_EMBEDDING_DIM
     * overrides the configured value (containerized deploys without a writable
     * aimee.yaml). */
-   config_apply_embedding_dim_env_override(&kb_cfg);
-   db2_set_embedding_dim(kb_cfg.embedding_dim);
+   db2_set_embedding_dim(config_resolve_embedding_dim(&kb_cfg));
 
    /* AIMEE_DB2_URL, when set, is the source of truth and overrides any db2_url
     * cached in aimee.yaml from a previous boot — applied here unconditionally,
