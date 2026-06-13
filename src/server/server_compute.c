@@ -510,6 +510,18 @@ static const char *compute_request_session_id(cJSON *req)
    return NULL;
 }
 
+/* Bind this request's per-turn creds (RAM-keyring session id + Codex creds),
+ * shared by every delegate entry so single delegate and aggregate/roundtable
+ * panels resolve client-held keys identically; without it a panel runs keyless. */
+static void bind_request_session_creds(cJSON *req)
+{
+   const char *cred_sid = jo_str(req, "cred_session_id", NULL);
+   agent_set_request_session((cred_sid && cred_sid[0]) ? cred_sid
+                                                       : compute_request_session_id(req));
+   agent_set_request_codex_creds(jo_str(req, "codex_oauth_token", NULL),
+                                 jo_str(req, "codex_account_id", NULL));
+}
+
 static int delegate_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx)
 {
    if (g_delegate_dispatch_override)
@@ -724,16 +736,7 @@ void delegate_worker(void *arg)
    char delegate_git_root[MAX_PATH_LEN] = "";
    char delegate_work_name[32] = "";
    cJSON *req = cctx->req;
-   /* Per-turn credential context: credential-session id (RAM keyring; a
-    * dedicated field decoupled from the chat session id) + any per-turn Codex
-    * creds (legacy direct push). Empty/absent clears them. */
-   {
-      const char *cred_sid = jo_str(req, "cred_session_id", NULL);
-      agent_set_request_session((cred_sid && cred_sid[0]) ? cred_sid
-                                                          : compute_request_session_id(req));
-   }
-   agent_set_request_codex_creds(jo_str(req, "codex_oauth_token", NULL),
-                                 jo_str(req, "codex_account_id", NULL));
+   bind_request_session_creds(req);
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
    cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
    cJSON *jmax = cJSON_GetObjectItemCaseSensitive(req, "max_tokens");
@@ -1805,12 +1808,8 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
-/* Convene the ensemble panel from the enabled agents in the registry when no
- * explicit ensemble.reference_models is configured. The ensemble / roundtable is
- * core functionality and must work out of the box — it should not require a
- * separate, operator-only config list on top of the agents the user has already
- * set up. Caps at ENSEMBLE_MAX_REFS; defaults the aggregator to the first
- * panellist when unset. */
+/* Convene the ensemble panel from enabled registry agents when no explicit
+ * ensemble.reference_models is set. Caps at ENSEMBLE_MAX_REFS; aggregator -> 0. */
 static void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acfg)
 {
    if (cfg->ensemble_reference_count > 0)
@@ -1832,10 +1831,9 @@ static void ensemble_default_panel_from_agents(config_t *cfg, const agent_config
 
 /* Mixture-of-Agents ensemble aggregate. Reached over the first-class
  * POST /v1/delegate/aggregate route (method "delegate.aggregate"), dispatched
- * async via rh_dispatch_op_async — so this runs on a detached op-run worker
- * thread, never the buffered listener, and the LLM fan-out may block here. The
- * run result is finalized into /v1/runs/{id}. Before this entry point existed,
- * delegate_ensemble_run had no caller in any shipped binary. */
+ * async via rh_dispatch_op_async onto a detached op-run worker (never the
+ * buffered listener — the LLM fan-out may block here); result finalized into
+ * /v1/runs/{id}. */
 int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -1860,6 +1858,7 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    if (agent_load_config(&acfg) != 0)
       return server_send_error(conn, "could not load agents.json", NULL);
    ensemble_default_panel_from_agents(&cfg, &acfg);
+   bind_request_session_creds(req);
 
    delegate_ensemble_result_t result;
    int rc = delegate_ensemble_run(&acfg, &cfg, prompt, &result);
@@ -1943,6 +1942,7 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
       return server_send_error(conn, "could not load agents.json", NULL);
    }
    ensemble_default_panel_from_agents(&cfg, &acfg);
+   bind_request_session_creds(req);
 
    roundtable_result_t result;
    int rc = delegate_roundtable_run(&acfg, &cfg, prompt, &opts, &result);
