@@ -746,9 +746,9 @@ static void emit_pretool_rewrite_unsupported_json(int rewrite_rc, const char *re
  * These must never escape the session guardrails. */
 static int client_tool_is_subagent(const char *tool_name)
 {
-   return tool_name &&
-          (strcmp(tool_name, "Agent") == 0 || strcmp(tool_name, "spawn_agent") == 0 ||
-           strcmp(tool_name, "RemoteTrigger") == 0 || strcmp(tool_name, "Subagent") == 0);
+   return tool_name && (strcmp(tool_name, "Agent") == 0 || strcmp(tool_name, "spawn_agent") == 0 ||
+                        strcmp(tool_name, "RemoteTrigger") == 0 ||
+                        strcmp(tool_name, "Subagent") == 0 || strcmp(tool_name, "Task") == 0);
 }
 
 /* Fail-closed guard for the pre-hook's fail-open paths: the server normally
