@@ -1266,7 +1266,8 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
    if (!artifact || !peer_notes)
       goto fail;
 
-   out->participants_total = cfg->ensemble_reference_count; /* panel size per round */
+   out->participants_total = ref_count; /* panel size per round (== MoA source) */
+   out->participants_failed = 0;        /* set to the best round's count as it is chosen */
 
    for (int round = 1; round <= local.max_rounds; round++)
    {
@@ -1312,9 +1313,10 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          goto fail;
       }
       /* Partial-failure metadata: participants that returned no usable response
-       * this round (raw model results, before review-JSON repair). Ends holding
-       * the final executed round's count. */
-      out->participants_failed = ref_count - count_successful(results, ref_count);
+       * this round (raw model results, before review-JSON repair). Recorded into
+       * out->participants_failed wherever this round is adopted as best_round, so
+       * the surfaced count matches the returned artifact's provenance. */
+      int round_failed = ref_count - count_successful(results, ref_count);
       if (local.cancel_requested && local.cancel_requested(local.cancel_ctx))
       {
          out->cancelled = 1;
@@ -1385,6 +1387,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
             free(best_artifact);
             best_artifact = xstrdup0(results[best].response);
             out->best_round = round;
+            out->participants_failed = round_failed;
          }
          for (int i = 0; i < ref_count; i++)
             free(results[i].response);
@@ -1412,6 +1415,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                best_artifact = xstrdup0(results[best].response);
                best_score = score;
                out->best_round = round;
+               out->participants_failed = round_failed;
             }
          }
          for (int i = 0; i < ref_count; i++)
@@ -1480,6 +1484,7 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          best_artifact = xstrdup0(agg_result.response);
          best_score = score;
          out->best_round = round;
+         out->participants_failed = round_failed;
       }
       free(agg_result.response);
 

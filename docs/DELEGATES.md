@@ -360,7 +360,7 @@ happened in the result rather than silently dropping the failures:
 | Field | Meaning |
 |-------|---------|
 | `participants_total` | Reference models fanned out (the panel size) |
-| `participants_failed` | Participants that returned no usable response (for `roundtable`, the final executed round) |
+| `participants_failed` | Participants that returned no usable response (for `roundtable`, the count from the round whose artifact was selected — the `best_round`) |
 | `degraded` | The run returned the best single candidate instead of a synthesized answer (e.g. fewer than `min_successful` answered) |
 | `cost_capped` | The run stopped early because the observed cost reached `max_cost_usd` |
 | `deadline_hit` *(roundtable)* | The per-run `deadline_ms` elapsed; the best artifact so far is returned |
