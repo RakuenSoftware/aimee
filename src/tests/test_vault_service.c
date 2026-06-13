@@ -288,6 +288,11 @@ static void test_server_inject_after_restart(void)
  * resolved autonomously by inject — no unlock, survives a cache clear. */
 static void test_server_principal_vault(void)
 {
+   /* Pin the namespace: the server vault is a single shared principal. If this
+    * ever needs per-tenant isolation (multi-tenant TCP), this assert fails and
+    * forces the change to be deliberate (see vault_service.h tenancy note). */
+   assert(strcmp(VAULT_SERVER_PRINCIPAL, "server") == 0);
+
    /* No unlock, no user principal — set_server just works. */
    assert(vault_service_set_server("claude", VAULT_API_KEY_CRED, "sk-server-owned") == VAULT_OK);
 

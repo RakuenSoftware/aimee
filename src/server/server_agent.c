@@ -493,7 +493,11 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       if (key[0] == '$')
       {
-         agent_expand_env(key, ag->api_key, sizeof(ag->api_key));
+         /* An env reference is not a secret: store it UNEXPANDED so agents.json
+          * holds "$VAR", not the resolved value. agent_load_config expands it
+          * from the environment at run time. Expanding here would serialize the
+          * plaintext key to disk — the exact leak the literal branch avoids. */
+         snprintf(ag->api_key, sizeof(ag->api_key), "%s", key);
       }
       else
       {

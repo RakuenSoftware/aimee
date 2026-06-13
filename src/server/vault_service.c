@@ -53,8 +53,8 @@ static void vault_service_backfill_server_wraps(const char *principal,
  * client unlock / KEK cache. Returns VAULT_OK (plaintext written), VAULT_NO_ENTRY
  * (no such cred, or a legacy user-only entry — caller falls back to the user KEK
  * path), or VAULT_ERR_* (fail closed). */
-static vault_status_t vault_service_get_server(const char *principal, const char *agent,
-                                               const char *cred, char *out, size_t out_len)
+static vault_status_t vault_service_get_server_wrap(const char *principal, const char *agent,
+                                                    const char *cred, char *out, size_t out_len)
 {
    if (out && out_len)
       out[0] = '\0';
@@ -340,7 +340,7 @@ vault_status_t vault_service_inject_api_key(const char *principal, const char *a
     * unlock, survives restart. Fall back to the user-KEK path only for legacy
     * creds not yet dual-wrapped (those get backfilled at the next user unlock). */
    vault_status_t st =
-       vault_service_get_server(principal, agent, VAULT_API_KEY_CRED, tmp, api_key_len);
+       vault_service_get_server_wrap(principal, agent, VAULT_API_KEY_CRED, tmp, api_key_len);
    if (st == VAULT_NO_ENTRY)
       st = vault_service_get(principal, agent, VAULT_API_KEY_CRED, tmp, api_key_len, now_epoch);
    /* Last: the server-owned vault (delegate creds pushed from a TCP thin client,
