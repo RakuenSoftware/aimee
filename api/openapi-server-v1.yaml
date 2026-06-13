@@ -1141,9 +1141,14 @@ paths:
       responses: { "200": { description: Delegate status, content: { application/json: { schema: { type: object } } } } }
   /vault/unlock:
     post:
-      summary: Unlock the per-user credential vault with the client root key (UDS-only)
+      summary: "Unlock the credential vault (uid root key over UDS, or webuser login password under server.token)"
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Unlocked, content: { application/json: { schema: { type: object } } } } }
+  /vault/rekey:
+    post:
+      summary: Re-key a webuser vault on a login-password change (re-wraps DEKs, no re-encryption)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Re-keyed, content: { application/json: { schema: { type: object } } } } }
   /vault/set:
     post:
       summary: Store an encrypted credential in the unlocked vault

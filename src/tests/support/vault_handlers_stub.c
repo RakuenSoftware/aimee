@@ -17,6 +17,12 @@ int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)req;
    return vault_stub(conn);
 }
+int handle_vault_rekey(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   return vault_stub(conn);
+}
 int handle_vault_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

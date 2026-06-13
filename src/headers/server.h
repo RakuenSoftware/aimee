@@ -367,6 +367,7 @@ int handle_delegate_launch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Credential vault (WP-C.1): resolve the attested principal from the conn. */
 int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_vault_rekey(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_vault_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_vault_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_vault_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

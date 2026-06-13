@@ -111,6 +111,32 @@ int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
+/* POST /v1/vault/rekey — re-wrap a webuser vault on a login-password change.
+ * Takes {old_password, new_password}; webchat-trusted transport only. */
+int handle_vault_rekey(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cJSON *jold = cJSON_GetObjectItemCaseSensitive(req, "old_password");
+   cJSON *jnew = cJSON_GetObjectItemCaseSensitive(req, "new_password");
+   if (!cJSON_IsString(jold) || !cJSON_IsString(jnew))
+      return server_send_error(conn, "vault: rekey requires old_password, new_password", NULL);
+
+   vault_status_t st = vault_service_rekey_password(
+       conn->vault_principal, conn->attested_transport, (const uint8_t *)jold->valuestring,
+       strlen(jold->valuestring), (const uint8_t *)jnew->valuestring, strlen(jnew->valuestring),
+       time(NULL));
+   OPENSSL_cleanse(jold->valuestring, strlen(jold->valuestring));
+   OPENSSL_cleanse(jnew->valuestring, strlen(jnew->valuestring));
+   if (st != VAULT_OK)
+      return vault_send_status_error(conn, st);
+
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return server_send_error(conn, "vault: out of memory", NULL);
+   cJSON_AddStringToObject(resp, "status", "ok");
+   return server_send_ok(conn, resp);
+}
+
 /* POST /v1/vault/set — store a credential under the unlocked vault. */
 int handle_vault_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {

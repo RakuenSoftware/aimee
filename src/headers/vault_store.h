@@ -68,4 +68,12 @@ int vault_store_list(const char *principal, vault_store_entry_t *out, int max);
  * success (incl. already-absent), -1 on error. */
 int vault_store_delete(const char *principal, const char *agent, const char *cred);
 
+/* Re-wrap every credential's DEK from `old_kek` to `new_kek` (the password-change
+ * path, WP-C.2): unwrap each DEK under old_kek, re-wrap under new_kek; the DEKs,
+ * nonces, ciphertext and tags are untouched (no secret is re-encrypted). Atomic:
+ * if ANY unwrap fails (wrong old_kek / tamper) nothing is written and -1 is
+ * returned (fail-closed). 0 on success (incl. an empty vault). */
+int vault_store_rekey(const char *principal, const uint8_t old_kek[VAULT_KEK_LEN],
+                      const uint8_t new_kek[VAULT_KEK_LEN]);
+
 #endif /* DEC_VAULT_STORE_H */

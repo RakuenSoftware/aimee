@@ -474,6 +474,56 @@ out:
    return rc;
 }
 
+int vault_store_rekey(const char *principal, const uint8_t old_kek[VAULT_KEK_LEN],
+                      const uint8_t new_kek[VAULT_KEK_LEN])
+{
+   if (!principal || !old_kek || !new_kek)
+      return -1;
+   pthread_mutex_lock(&g_vault_write_mu);
+   cJSON *root = load_vault(principal);
+   if (!root)
+   {
+      pthread_mutex_unlock(&g_vault_write_mu);
+      return -1; /* no vault to rekey */
+   }
+
+   int rc = 0;
+   cJSON *creds = creds_array(root);
+   cJSON *e = NULL;
+   if (creds)
+   {
+      cJSON_ArrayForEach(e, creds)
+      {
+         cJSON *jw = cJSON_GetObjectItemCaseSensitive(e, "wrapped_dek");
+         uint8_t wrapped[VAULT_WRAPPED_DEK_LEN], dek[VAULT_DEK_LEN],
+             rewrapped[VAULT_WRAPPED_DEK_LEN];
+         if (!cJSON_IsString(jw) ||
+             b64url_decode(jw->valuestring, wrapped, sizeof(wrapped)) != VAULT_WRAPPED_DEK_LEN ||
+             vault_dek_unwrap(old_kek, wrapped, dek) != 0 ||
+             vault_dek_wrap(new_kek, dek, rewrapped) != 0)
+         {
+            OPENSSL_cleanse(dek, sizeof(dek));
+            rc = -1; /* wrong old KEK / tamper -> abort, write nothing */
+            break;
+         }
+         char *enc = b64url_encode(rewrapped, sizeof(rewrapped));
+         OPENSSL_cleanse(dek, sizeof(dek));
+         if (!enc)
+         {
+            rc = -1;
+            break;
+         }
+         cJSON_SetValuestring(jw, enc);
+         free(enc);
+      }
+   }
+   if (rc == 0)
+      rc = write_vault_file(principal, root);
+   cJSON_Delete(root);
+   pthread_mutex_unlock(&g_vault_write_mu);
+   return rc;
+}
+
 int vault_store_has_entry(const char *principal, const char *agent, const char *cred)
 {
    if (!principal || !agent || !cred)
