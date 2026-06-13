@@ -31,11 +31,12 @@ COMPOSE_FILE="${COMPOSE_FILE:-compose.combined.yaml}"
 SERVICE="${SERVICE:-aimee-server-kb}"
 
 # Smoke tests validate the retrieval pipeline, not a specific model. Default to
-# the light 0.6b embedder (1024-dim) so `up --build` is fast and fits CI runners;
-# the shipped default is the 4b (2560-dim). Pre-set either var to override.
+# the light tier (0.6b embedder/1024-dim + 400m reranker) so `up --build` is fast
+# and fits CI runners; the shipped default is the 4b + 1b reranker. Override any.
 : "${EMBEDDER_MODEL:=perplexity-ai/pplx-embed-v1-0.6b}"
+: "${RERANKER_MODEL:=cross-encoder/ettin-reranker-400m-v1}"
 : "${AIMEE_EMBEDDING_DIM:=1024}"
-export EMBEDDER_MODEL AIMEE_EMBEDDING_DIM
+export EMBEDDER_MODEL RERANKER_MODEL AIMEE_EMBEDDING_DIM
 WAIT_SECONDS="${WAIT_SECONDS:-300}"
 DO_UP=0
 DO_DOWN=0
