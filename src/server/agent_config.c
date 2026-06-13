@@ -255,6 +255,23 @@ void agent_set_request_codex_creds(const char *token, const char *account_id)
       g_request_codex_account_id[0] = '\0';
 }
 
+void agent_request_creds_snapshot(agent_request_creds_t *out)
+{
+   if (!out)
+      return;
+   snprintf(out->session_id, sizeof(out->session_id), "%s", g_request_session_id);
+   snprintf(out->codex_token, sizeof(out->codex_token), "%s", g_request_codex_token);
+   snprintf(out->codex_account_id, sizeof(out->codex_account_id), "%s", g_request_codex_account_id);
+}
+
+void agent_request_creds_restore(const agent_request_creds_t *creds)
+{
+   if (!creds)
+      return;
+   agent_set_request_session(creds->session_id);
+   agent_set_request_codex_creds(creds->codex_token, creds->codex_account_id);
+}
+
 static void append_header_line(char *buf, size_t buf_len, const char *line)
 {
    if (!buf || buf_len == 0 || !line || !line[0])
