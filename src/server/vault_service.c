@@ -5,6 +5,7 @@
 #include "vault_service.h"
 #include "vault_crypto.h"
 #include "vault_kek_cache.h"
+#include "vault_server_key.h"
 #include "vault_store.h"
 #include "log.h"
 #include <openssl/crypto.h>
@@ -35,6 +36,44 @@ const char *vault_status_str(vault_status_t s)
    return "error";
 }
 
+/* Add the server wrap to any user-only credentials for `principal` using the live
+ * user KEK (WP-C.4 dual-access backfill). Best-effort; logs on failure. */
+static void vault_service_backfill_server_wraps(const char *principal,
+                                                const uint8_t user_kek[VAULT_KEK_LEN])
+{
+   uint8_t server_kek[VAULT_KEK_LEN];
+   if (vault_server_kek(server_kek) != 0)
+      return;
+   if (vault_store_add_server_wraps(principal, user_kek, server_kek) != 0)
+      LOG_WARN("vault", "server-wrap backfill failed (creds remain user-only until next unlock)");
+   OPENSSL_cleanse(server_kek, sizeof(server_kek));
+}
+
+/* The autonomous server use-path: decrypt (agent, cred) via the server wrap, no
+ * client unlock / KEK cache. Returns VAULT_OK (plaintext written), VAULT_NO_ENTRY
+ * (no such cred, or a legacy user-only entry — caller falls back to the user KEK
+ * path), or VAULT_ERR_* (fail closed). */
+static vault_status_t vault_service_get_server(const char *principal, const char *agent,
+                                               const char *cred, char *out, size_t out_len)
+{
+   if (out && out_len)
+      out[0] = '\0';
+   if (!principal || !principal[0])
+      return VAULT_NO_ENTRY;
+   if (!agent || !cred || !out || !out_len)
+      return VAULT_ERR_BADARG;
+   uint8_t server_kek[VAULT_KEK_LEN];
+   if (vault_server_kek(server_kek) != 0)
+      return VAULT_ERR_CRYPTO;
+   int rc = vault_store_get_server(principal, server_kek, agent, cred, out, out_len);
+   OPENSSL_cleanse(server_kek, sizeof(server_kek));
+   if (rc == 0)
+      return VAULT_OK;
+   if (rc == VAULT_STORE_NO_ENTRY)
+      return VAULT_NO_ENTRY;
+   return VAULT_ERR_CRYPTO; /* decrypt/tamper — fail closed */
+}
+
 vault_status_t vault_service_unlock(const char *principal, attested_transport_t transport,
                                     const uint8_t *root_key, size_t root_key_len, long now_epoch)
 {
@@ -62,6 +101,12 @@ vault_status_t vault_service_unlock(const char *principal, attested_transport_t 
       st = VAULT_ERR_CRYPTO; /* wrong root key — caught by the key-check verifier */
    else if (vault_kek_cache_put(principal, kek, now_epoch) != 0)
       st = VAULT_ERR_LOCKED; /* cache full of live principals — reject, don't evict */
+
+   /* WP-C.4 dual-access backfill: now that we hold the user KEK, add the server
+    * wrap to any credentials written before dual-wrap so the server can decrypt
+    * them autonomously. Best-effort — never fail the unlock on a backfill error. */
+   if (st == VAULT_OK)
+      vault_service_backfill_server_wraps(principal, kek);
 
    OPENSSL_cleanse(kek, sizeof(kek));
    OPENSSL_cleanse(salt, sizeof(salt));
@@ -96,6 +141,10 @@ vault_status_t vault_service_unlock_password(const char *principal, attested_tra
       st = VAULT_ERR_CRYPTO; /* wrong password — caught by the key-check verifier */
    else if (vault_kek_cache_put(principal, kek, now_epoch) != 0)
       st = VAULT_ERR_LOCKED;
+
+   /* WP-C.4 dual-access backfill (see vault_service_unlock). */
+   if (st == VAULT_OK)
+      vault_service_backfill_server_wraps(principal, kek);
 
    OPENSSL_cleanse(kek, sizeof(kek));
    OPENSSL_cleanse(salt, sizeof(salt));
@@ -152,9 +201,20 @@ vault_status_t vault_service_set(const char *principal, const char *agent, const
    if (vault_kek_cache_get(principal, now_epoch, kek) != 0)
       return VAULT_ERR_LOCKED; /* must unlock first */
 
-   vault_status_t st =
-       vault_store_set(principal, kek, agent, cred, secret) == 0 ? VAULT_OK : VAULT_ERR_IO;
+   /* WP-C.4 dual-access: wrap the DEK under BOTH the user KEK and the server KEK
+    * so the server can decrypt this credential autonomously after a restart.
+    * Fail-closed if the server KEK is unavailable — never store a user-only cred
+    * the server cannot later read (that is the bug this whole change fixes). */
+   uint8_t server_kek[VAULT_KEK_LEN];
+   vault_status_t st;
+   if (vault_server_kek(server_kek) != 0)
+      st = VAULT_ERR_CRYPTO;
+   else
+      st = vault_store_set_dual(principal, kek, server_kek, agent, cred, secret) == 0
+               ? VAULT_OK
+               : VAULT_ERR_IO;
    OPENSSL_cleanse(kek, sizeof(kek));
+   OPENSSL_cleanse(server_kek, sizeof(server_kek));
    return st;
 }
 
@@ -232,8 +292,13 @@ vault_status_t vault_service_inject_api_key(const char *principal, const char *a
    char *tmp = malloc(api_key_len);
    if (!tmp)
       return VAULT_ERR_IO;
+   /* Server-first (WP-C.4): the server wrap decrypts autonomously — no client
+    * unlock, survives restart. Fall back to the user-KEK path only for legacy
+    * creds not yet dual-wrapped (those get backfilled at the next user unlock). */
    vault_status_t st =
-       vault_service_get(principal, agent, VAULT_API_KEY_CRED, tmp, api_key_len, now_epoch);
+       vault_service_get_server(principal, agent, VAULT_API_KEY_CRED, tmp, api_key_len);
+   if (st == VAULT_NO_ENTRY)
+      st = vault_service_get(principal, agent, VAULT_API_KEY_CRED, tmp, api_key_len, now_epoch);
    if (st == VAULT_OK)
       snprintf(api_key, api_key_len, "%s", tmp); /* overwrite only on a real hit */
    OPENSSL_cleanse(tmp, api_key_len);

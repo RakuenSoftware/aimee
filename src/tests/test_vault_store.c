@@ -324,6 +324,92 @@ static void test_intra_principal_aad_swap(void)
    printf("  PASS: test_intra_principal_aad_swap\n");
 }
 
+/* WP-C.4 dual-access: a credential written with set_dual carries a second DEK
+ * wrap under the server KEK; the server can decrypt it with NO user KEK, while
+ * the user path is unchanged. A wrong server KEK fails closed. */
+static void test_dual_wrap_server_get(void)
+{
+   const char *p = "uid:4242";
+   uint8_t salt[VAULT_SALT_LEN];
+   assert(vault_store_get_or_create_salt(p, salt) == 0);
+   uint8_t kek[VAULT_KEK_LEN], skek[VAULT_KEK_LEN];
+   make_kek(kek, 42);
+   make_kek(skek, 200); /* distinct server KEK */
+   const char *secret = "sk-dual-access-secret";
+   assert(vault_store_set_dual(p, kek, skek, "claude", "api_key", secret) == 0);
+
+   char out[256];
+   /* user path still works */
+   assert(vault_store_get(p, kek, "claude", "api_key", out, sizeof(out)) == 0);
+   assert(strcmp(out, secret) == 0);
+   /* server path works WITHOUT the user KEK */
+   assert(vault_store_get_server(p, skek, "claude", "api_key", out, sizeof(out)) == 0);
+   assert(strcmp(out, secret) == 0);
+   /* wrong server KEK fails closed (not the secret, not NO_ENTRY) */
+   uint8_t bad[VAULT_KEK_LEN];
+   make_kek(bad, 201);
+   assert(vault_store_get_server(p, bad, "claude", "api_key", out, sizeof(out)) == -1);
+   printf("  PASS: test_dual_wrap_server_get\n");
+}
+
+/* A legacy (user-only) entry has no server wrap: the server get reports NO_ENTRY
+ * (fall back), and backfill adds the wrap so it becomes server-decryptable. A
+ * backfill under the wrong user KEK fails closed and writes nothing. */
+static void test_server_get_legacy_then_backfill(void)
+{
+   const char *p = "uid:4343";
+   uint8_t salt[VAULT_SALT_LEN];
+   assert(vault_store_get_or_create_salt(p, salt) == 0);
+   uint8_t kek[VAULT_KEK_LEN], skek[VAULT_KEK_LEN];
+   make_kek(kek, 43);
+   make_kek(skek, 210);
+   const char *secret = "legacy-user-only";
+   assert(vault_store_set(p, kek, "openai", "api_key", secret) == 0); /* user-only */
+
+   char out[256];
+   assert(vault_store_get_server(p, skek, "openai", "api_key", out, sizeof(out)) ==
+          VAULT_STORE_NO_ENTRY);
+   assert(vault_store_add_server_wraps(p, kek, skek) == 0);
+   assert(vault_store_get_server(p, skek, "openai", "api_key", out, sizeof(out)) == 0);
+   assert(strcmp(out, secret) == 0);
+
+   /* Wrong user KEK -> backfill fails closed; the entry stays user-only. */
+   const char *p2 = "uid:4344";
+   assert(vault_store_get_or_create_salt(p2, salt) == 0);
+   assert(vault_store_set(p2, kek, "gemini", "api_key", "x") == 0);
+   uint8_t badkek[VAULT_KEK_LEN];
+   make_kek(badkek, 99);
+   assert(vault_store_add_server_wraps(p2, badkek, skek) == -1);
+   assert(vault_store_get_server(p2, skek, "gemini", "api_key", out, sizeof(out)) ==
+          VAULT_STORE_NO_ENTRY);
+   printf("  PASS: test_server_get_legacy_then_backfill\n");
+}
+
+/* The dual-wrapped file stores the server wrap but never the plaintext. */
+static void test_dual_wrap_at_rest_ciphertext_only(void)
+{
+   const char *p = "uid:4545";
+   uint8_t salt[VAULT_SALT_LEN];
+   assert(vault_store_get_or_create_salt(p, salt) == 0);
+   uint8_t kek[VAULT_KEK_LEN], skek[VAULT_KEK_LEN];
+   make_kek(kek, 45);
+   make_kek(skek, 220);
+   const char *secret = "DUAL-PLAINTEXT-NOT-ON-DISK";
+   assert(vault_store_set_dual(p, kek, skek, "claude", "api_key", secret) == 0);
+
+   char path[640];
+   assert(find_vault_file(p, path, sizeof(path)));
+   FILE *f = fopen(path, "rb");
+   assert(f);
+   char buf[16384];
+   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+   fclose(f);
+   buf[n] = '\0';
+   assert(strstr(buf, "wrapped_dek_server") != NULL);
+   assert(strstr(buf, secret) == NULL);
+   printf("  PASS: test_dual_wrap_at_rest_ciphertext_only\n");
+}
+
 int main(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-vault-test-%d", (int)getpid());
@@ -341,6 +427,9 @@ int main(void)
    test_salt_is_stable();
    test_attacker_principal_filename_safety();
    test_intra_principal_aad_swap();
+   test_dual_wrap_server_get();
+   test_server_get_legacy_then_backfill();
+   test_dual_wrap_at_rest_ciphertext_only();
 
    char rm[320];
    snprintf(rm, sizeof(rm), "rm -rf %s", g_home);

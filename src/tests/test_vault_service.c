@@ -248,6 +248,41 @@ static void test_rekey_empty_and_missing_vault(void)
    printf("  PASS: test_rekey_empty_and_missing_vault\n");
 }
 
+/* WP-C.4: the autonomous server path. After a "restart" (the user KEK cache is
+ * cleared, so the user vault is LOCKED), a dual-wrapped credential is STILL
+ * injectable via the server wrap — the whole point: aimee-server can drive
+ * delegates without the client re-unlocking. A genuinely missing credential is
+ * still NO_ENTRY and leaves the caller's api_key untouched. */
+static void test_server_inject_after_restart(void)
+{
+   const char *p = "uid:7000";
+   uint8_t rk[VAULT_ROOT_KEY_LEN];
+   root_key(rk, 7);
+   assert(vault_service_unlock(p, ATTEST_UDS_PEERCRED, rk, sizeof(rk), T0) == VAULT_OK);
+   assert(vault_service_set(p, "claude", "api_key", "sk-autonomous", T0) == VAULT_OK);
+
+   /* While unlocked, inject works. */
+   char key[64] = "PRESET";
+   assert(vault_service_inject_api_key(p, "claude", key, sizeof(key), T0) == VAULT_OK);
+   assert(strcmp(key, "sk-autonomous") == 0);
+
+   /* Simulate a restart: drop every cached user KEK -> the user vault is locked. */
+   vault_kek_cache_clear();
+   char out[64];
+   assert(vault_service_get(p, "claude", "api_key", out, sizeof(out), T0) == VAULT_ERR_LOCKED);
+   /* Inject still succeeds via the server wrap with NO unlock. */
+   char key2[64] = "PRESET";
+   assert(vault_service_inject_api_key(p, "claude", key2, sizeof(key2), T0) == VAULT_OK);
+   assert(strcmp(key2, "sk-autonomous") == 0);
+
+   /* A truly missing credential is NO_ENTRY; api_key left untouched (env fallback). */
+   char key3[64] = "KEEP";
+   assert(vault_service_inject_api_key(p, "absent-agent", key3, sizeof(key3), T0) ==
+          VAULT_NO_ENTRY);
+   assert(strcmp(key3, "KEEP") == 0);
+   printf("  PASS: test_server_inject_after_restart\n");
+}
+
 int main(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-vaultsvc-test-%d", (int)getpid());
@@ -266,6 +301,7 @@ int main(void)
    test_webuser_password_unlock();
    test_webuser_rekey();
    test_rekey_empty_and_missing_vault();
+   test_server_inject_after_restart();
 
    vault_kek_cache_clear();
    char rm[320];
