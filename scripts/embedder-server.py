@@ -23,7 +23,7 @@ Endpoints:
 Config (env):
   EMBEDDER_PORT     listen port (default 8080)
   EMBEDDER_MODEL    sentence-transformers model id (default pplx-embed-v1-4b)
-  RERANKER_MODEL    cross-encoder model id (default ettin-reranker-400m-v1)
+  RERANKER_MODEL    cross-encoder model id (default ettin-reranker-1b-v1)
   EMBEDDER_THREADS  torch intra-op threads (default min(8, ncpu))
   EMBEDDER_QUANTIZE fp32 (default) | int8 (torch dynamic; ~3.3x faster, drifts —
                     pair with the 4b deep tier; see below)
@@ -40,7 +40,7 @@ MODEL_NAME = os.environ.get("EMBEDDER_MODEL", "perplexity-ai/pplx-embed-v1-4b")
 # Cross-encoder reranker, served from the same process (it reuses the resident
 # torch/sentence-transformers stack). Lazy-loaded on first /rerank so the embedder
 # starts and stays healthy even if reranking is never used.
-RERANKER_MODEL = os.environ.get("RERANKER_MODEL", "cross-encoder/ettin-reranker-400m-v1")
+RERANKER_MODEL = os.environ.get("RERANKER_MODEL", "cross-encoder/ettin-reranker-1b-v1")
 PORT = int(os.environ.get("EMBEDDER_PORT", "8080"))
 # CPU serving tuning. A single short embed does not scale past ~8 intra-op
 # threads — on a 32-core host pplx-embed-0.6b is 269ms at 32 threads but 189ms at

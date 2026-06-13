@@ -72,9 +72,10 @@ jobs:
           - { name: aimee-kb,        dockerfile: Dockerfile }
           - { name: aimee-server-kb, dockerfile: Dockerfile.combined }
           - { name: aimee-embedder,  dockerfile: Dockerfile.embedder }
-          # Lighter alternate embedder tier: same Dockerfile, 0.6b model baked in.
-          # Pair with embedding_dim: 1024 (see docs). Default is the 4b above.
-          - { name: aimee-embedder-0.6b, dockerfile: Dockerfile.embedder, extra_build_args: "EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-0.6b" }
+          # Lighter alternate tier: same Dockerfile, 0.6b embedder + 400m reranker
+          # baked in. Pair with embedding_dim: 1024 (see docs). Default (above) is
+          # the 4b embedder + 1b reranker.
+          - { name: aimee-embedder-0.6b, dockerfile: Dockerfile.embedder, embedder_arg: "EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-0.6b", reranker_arg: "RERANKER_MODEL=cross-encoder/ettin-reranker-400m-v1" }
         platform:
           - { arch: amd64, runner: ubuntu-latest }
           - { arch: arm64, runner: ubuntu-24.04-arm }
@@ -111,7 +112,8 @@ jobs:
           build-args: |
             AIMEE_VERSION=${{ needs.prep.outputs.version }}
             WITH_WEBCHAT=1
-            ${{ matrix.image.extra_build_args }}
+            ${{ matrix.image.embedder_arg }}
+            ${{ matrix.image.reranker_arg }}
           # webchat's SPA pulls @rakuensoftware/smoothgui from GitHub Packages,
           # whose npm registry requires an authenticated token (even for public
           # reads). Prefer a repo/org NPM_TOKEN secret (a PAT with read:packages);

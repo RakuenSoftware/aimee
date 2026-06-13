@@ -422,7 +422,8 @@ static void config_set_defaults(config_t *cfg)
     * Must match the schema vector(N) columns and the embedder model. Set to
     * 1024 (with the pplx-embed-v1-0.6b embedder image) for the lighter tier. */
    cfg->embedding_dim = 2560;
-   /* The cross-encoder rerank stage (ettin-reranker-400m-v1, served by the
+   /* The cross-encoder rerank stage (Ettin reranker sized to the embedder tier:
+    * 1b with the 4b embedder, 400m with the 0.6b; served by the
     * embedder service /rerank, client scripts/rerank-remote.py) is the third
     * pipeline stage after the embedder, and is default-ON: every retrieval
     * runs a top-K cross-encoder pass over the dense/lexical candidates. It
