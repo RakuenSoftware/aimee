@@ -213,6 +213,14 @@ extern "C"
    /* Full update of all mutable columns from the struct, keyed by out->id. */
    int rtp_run_update(const rtp_run_t *run);
    int rtp_run_set_state(int id, const char *state, const char *phase);
+   /* Atomic compare-and-swap of the run state: move id from `expected` to `next`
+    * only if the row's current state still equals `expected`. Returns 0 when
+    * exactly one row changed (the caller won the transition), -1 otherwise (no
+    * match — already resolved/resolving). Makes gate resolution exactly-once
+    * (#55) so two concurrent `gate pass` calls cannot both merge. `expected` and
+    * `next` must differ: a no-op SET changes zero rows and would report a false
+    * "already resolved" (-1). */
+   int rtp_run_cas_state(int id, const char *expected, const char *next);
    /* List by state filter (NULL = all non-terminal). Returns count or -1. */
    int rtp_run_list(const char *state_filter, rtp_run_t *out, int max);
    /* Count runs whose admission_class == 'active' (section 1 admission control). */

@@ -876,6 +876,7 @@ static void setup_gemini(app_ctx_t *ctx, agent_config_t *cfg)
    snprintf(ag->auth_type, sizeof(ag->auth_type), "oauth");
    snprintf(ag->provider, sizeof(ag->provider), "openai");
    ag->api_key[0] = '\0';
+   ag->api_key_disk[0] = '\0';
    ag->extra_headers[0] = '\0';
    ag->cost_tier = 1;
    ag->max_tokens = AGENT_DEFAULT_MAX_TOKENS;
@@ -1106,6 +1107,7 @@ static void setup_gemini_oauth(app_ctx_t *ctx, agent_config_t *cfg)
    snprintf(ag->auth_type, sizeof(ag->auth_type), "oauth");
    snprintf(ag->provider, sizeof(ag->provider), "openai");
    ag->api_key[0] = '\0';
+   ag->api_key_disk[0] = '\0';
    ag->extra_headers[0] = '\0';
    ag->cost_tier = 0;
    ag->max_tokens = AGENT_DEFAULT_MAX_TOKENS;
@@ -1230,6 +1232,7 @@ static void setup_openai(app_ctx_t *ctx, agent_config_t *cfg)
 
    snprintf(ag->provider, sizeof(ag->provider), "openai");
    ag->api_key[0] = '\0';
+   ag->api_key_disk[0] = '\0';
    ag->extra_headers[0] = '\0';
    ag->cost_tier = (tier_buf[0] >= '0' && tier_buf[0] <= '9') ? atoi(tier_buf) : 1;
    ag->max_tokens = AGENT_DEFAULT_MAX_TOKENS;
@@ -1346,6 +1349,7 @@ static void setup_copilot(app_ctx_t *ctx, agent_config_t *cfg)
    snprintf(ag->auth_type, sizeof(ag->auth_type), "%s", auth_type_str);
    snprintf(ag->provider, sizeof(ag->provider), "openai");
    ag->api_key[0] = '\0';
+   ag->api_key_disk[0] = '\0';
    ag->extra_headers[0] = '\0';
    ag->cost_tier = 0;
    ag->max_tokens = AGENT_DEFAULT_MAX_TOKENS;
