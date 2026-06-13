@@ -156,6 +156,94 @@ int db2_entity_edge_list_by_entity(const char *entity, edge_t *out, int max)
    return n;
 }
 
+int db2_entity_edge_upsert_semantic(const char *source, const char *relation, const char *target,
+                                    int relation_id, int subject_kind, int object_kind,
+                                    int *out_added)
+{
+   if (out_added)
+      *out_added = 0;
+   if (!source || !relation || !target)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[EE_ERRBUF] = "";
+
+   /* Probe for an existing semantic triple; bump its weight if present (plain
+    * probe-then-write so it works whether or not the unique index exists).
+    * Correction/supersede semantics for contradictory objects are §4 (P3). */
+   static const char *probe = "SELECT id FROM entity_edges WHERE source=?1 AND relation=?2 AND"
+                              " target=?3 AND edge_class='semantic' LIMIT 1";
+   aimee_pg_stmt_t *ps = aimee_pg_prepare(conn, probe, err, sizeof(err));
+   if (!ps)
+      return -1;
+   aimee_pg_bind_text(ps, "?1", source);
+   aimee_pg_bind_text(ps, "?2", relation);
+   aimee_pg_bind_text(ps, "?3", target);
+   int found = (aimee_pg_step(ps, err, sizeof(err)) == AIMEE_PG_ROW);
+   int64_t existing_id = found ? aimee_pg_column_int64(ps, 0) : 0;
+   aimee_pg_finalize(ps);
+
+   if (found)
+   {
+      static const char *bump = "UPDATE entity_edges SET weight = weight + 1 WHERE id = ?1";
+      aimee_pg_stmt_t *u = aimee_pg_prepare(conn, bump, err, sizeof(err));
+      if (!u)
+         return -1;
+      aimee_pg_bind_int64(u, "?1", existing_id);
+      int rc = aimee_pg_step(u, err, sizeof(err));
+      aimee_pg_finalize(u);
+      return rc == AIMEE_PG_DONE ? 0 : -1;
+   }
+
+   static const char *ins = "INSERT INTO entity_edges (source, relation, target, weight,"
+                            " relation_id, subject_kind, object_kind, edge_class)"
+                            " VALUES (?1, ?2, ?3, 1, ?4, ?5, ?6, 'semantic')";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, ins, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", source);
+   aimee_pg_bind_text(st, "?2", relation);
+   aimee_pg_bind_text(st, "?3", target);
+   aimee_pg_bind_int(st, "?4", relation_id);
+   aimee_pg_bind_int(st, "?5", subject_kind);
+   aimee_pg_bind_int(st, "?6", object_kind);
+   int rc = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   if (rc != AIMEE_PG_DONE)
+      return -1;
+   if (out_added)
+      *out_added = 1;
+   return 0;
+}
+
+int db2_entity_edges_semantic_by_entity(const char *entity, edge_t *out, int max)
+{
+   if (!entity || !out || max <= 0)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+   static const char *sql = "SELECT id, source, relation, target, weight FROM entity_edges"
+                            " WHERE source = ?1 AND edge_class = 'semantic'"
+                            " UNION ALL"
+                            " SELECT id, source, relation, target, weight FROM entity_edges"
+                            " WHERE target = ?2 AND edge_class = 'semantic'"
+                            " LIMIT ?3";
+   char err[EE_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_text(st, "?1", entity);
+   aimee_pg_bind_text(st, "?2", entity);
+   aimee_pg_bind_int(st, "?3", max);
+   int n = 0;
+   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      edge_row_from_stmt_pg(st, &out[n++]);
+   aimee_pg_finalize(st);
+   return n;
+}
+
 static int neighbor_collect(aimee_pg_stmt_t *st, db2_entity_neighbor_t *out, int max, char *err,
                             size_t errlen)
 {
