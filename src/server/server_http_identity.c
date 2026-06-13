@@ -8,9 +8,11 @@
 #endif
 #include "server_http_identity.h"
 #include "server_http.h" /* http_header */
-#include "server.h"      /* server_ct_equal */
+#include "server.h"      /* server_ct_equal, SERVER_TOKEN_FILE */
+#include "aimee_home.h"  /* aimee_home */
 #include "platform_ipc.h"
 #include "vault_principal.h"
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -23,7 +25,46 @@ static _Thread_local long tl_peer_uid = -1;
 static _Thread_local attested_transport_t tl_transport = ATTEST_NONE;
 static _Thread_local char tl_principal[VAULT_PRINCIPAL_MAX] = "";
 
-void server_http_identity_capture(int fd, int is_tcp, const char *buf, const char *bearer)
+/* The shared secret that authenticates a webchat `webuser:` assertion is the
+ * server.token file (0600, in AIMEE_HOME — the secret only the webchat backend
+ * holds), NOT the configured TCP /v1 bearer (g_bearer): those are independent
+ * secrets, and g_bearer is empty on a UDS-only server. Loaded once and cached
+ * (token rotation needs a restart, as with g_bearer). Returns NULL if absent. */
+static const char *server_token_secret(void)
+{
+   static char tok[256];
+   static int loaded = 0;
+   static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+   pthread_mutex_lock(&mu);
+   if (!loaded)
+   {
+      const char *home = aimee_home();
+      char path[1024];
+      if (home && home[0] &&
+          (size_t)snprintf(path, sizeof(path), "%s/%s", home, SERVER_TOKEN_FILE) < sizeof(path))
+      {
+         FILE *f = fopen(path, "rb");
+         if (f)
+         {
+            if (fgets(tok, sizeof(tok), f))
+            {
+               size_t n = strlen(tok);
+               while (n && (tok[n - 1] == '\n' || tok[n - 1] == '\r' || tok[n - 1] == ' ' ||
+                            tok[n - 1] == '\t'))
+                  tok[--n] = '\0';
+               if (tok[0])
+                  loaded = 1; /* cache only a non-empty token; else retry next call */
+            }
+            fclose(f);
+         }
+      }
+   }
+   const char *out = loaded ? tok : NULL;
+   pthread_mutex_unlock(&mu);
+   return out;
+}
+
+void server_http_identity_capture(int fd, int is_tcp, const char *buf)
 {
    long peer_uid = -1;
    if (!is_tcp)
@@ -40,9 +81,10 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf, const cha
       /* A webuser assertion is honored only with the valid server.token bearer
        * (the secret only the webchat backend holds). A spoofed header without it
        * is refused by vault_principal_resolve (empty principal). */
+      const char *tok = server_token_secret();
       char wauth[512] = "";
-      if (bearer && bearer[0] && http_header(buf, "Authorization", wauth, sizeof(wauth)) &&
-          strncmp(wauth, "Bearer ", 7) == 0 && server_ct_equal(wauth + 7, bearer))
+      if (tok && http_header(buf, "Authorization", wauth, sizeof(wauth)) &&
+          strncmp(wauth, "Bearer ", 7) == 0 && server_ct_equal(wauth + 7, tok))
          webuser_token_ok = 1;
    }
 
