@@ -50,6 +50,8 @@ int main(void)
    assert(seen_frob && seen_wob);
    assert(db2_ontology_eval_candidates(0, cand, 8) == -1); /* bad threshold */
    assert(db2_ontology_eval_candidates(99, cand, 8) == 0); /* none that high */
+   /* bound LIMIT must cap the result: 3 pending at threshold>=1, capped to 2. */
+   assert(db2_ontology_eval_candidates(1, cand, 2) == 2);
 
    /* approve(): promotes the provisional rel_type to active + marks approved.
     * Stage a provisional row first (as the commit path would). */

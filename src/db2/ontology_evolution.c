@@ -32,19 +32,24 @@ long db2_ontology_eval_observe(const char *rel_type)
    rel_type_normalize(rel_type, norm, sizeof(norm));
    if (!norm[0])
       return -1;
-   /* Insert or bump in one statement; RETURNING reads the new count. A bump only
-    * touches occurrence_count — a previously rejected/mapped type keeps its
-    * status (so it cannot silently re-surface as a candidate). */
-   static const char *sql = "INSERT INTO ontology_evaluations (rel_type, occurrence_count, status)"
-                            " VALUES (?1, 1, 'pending')"
-                            " ON CONFLICT (rel_type) DO UPDATE"
-                            " SET occurrence_count = ontology_evaluations.occurrence_count + 1"
-                            " RETURNING occurrence_count";
+   char now_utc[32];
+   oe_now_utc(now_utc, sizeof(now_utc));
+   /* Insert or bump in one statement; RETURNING reads the new count. created_at is
+    * stamped only on the initial INSERT — the DO UPDATE touches only
+    * occurrence_count, so a previously rejected/mapped type keeps its status (it
+    * cannot silently re-surface as a candidate) and its original created_at. */
+   static const char *sql =
+       "INSERT INTO ontology_evaluations (rel_type, occurrence_count, status, created_at)"
+       " VALUES (?1, 1, 'pending', ?2)"
+       " ON CONFLICT (rel_type) DO UPDATE"
+       " SET occurrence_count = ontology_evaluations.occurrence_count + 1"
+       " RETURNING occurrence_count";
    char err[OE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", norm);
+   aimee_pg_bind_text(st, "?2", now_utc);
    long c = -1;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       c = (long)aimee_pg_column_int64(st, 0);
