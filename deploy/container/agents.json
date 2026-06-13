@@ -1,0 +1,61 @@
+{
+  "_comment": "Default delegate roster baked into the aimee-server / aimee-combined image and seeded into $AIMEE_HOME/agents.json on first start (only if absent). DEFINITIONS ONLY — no API keys live here. A thin client pushes its client-held keys per session (POST /v1/session/credentials), which the server caches in RAM keyed by agent name; codex uses client-sourced OAuth. Override by mounting your own agents.json over $AIMEE_HOME/agents.json.",
+  "agents": [
+    {
+      "name": "minimax",
+      "provider": "minimax",
+      "model": "MiniMax-M3",
+      "endpoint": "https://api.minimax.io/v1/chat/completions",
+      "auth_type": "bearer",
+      "enabled": 1,
+      "tools_enabled": 1,
+      "cost_tier": 0,
+      "max_parallel": 3,
+      "roles": ["code", "review", "explain", "refactor", "draft", "execute", "summarize", "format", "diagnose", "validate"]
+    },
+    {
+      "name": "mistral",
+      "model": "mistral-medium-latest",
+      "endpoint": "https://api.mistral.ai/v1/chat/completions",
+      "auth_type": "bearer",
+      "enabled": 1,
+      "tools_enabled": 1,
+      "cost_tier": 0,
+      "max_parallel": 3,
+      "roles": ["code", "review", "explain", "refactor", "draft", "execute", "summarize", "format", "diagnose", "validate"]
+    },
+    {
+      "name": "mimo-2.5",
+      "model": "mimo-v2.5-pro",
+      "endpoint": "https://token-plan-ams.xiaomimimo.com/v1/chat/completions",
+      "auth_type": "bearer",
+      "enabled": 1,
+      "tools_enabled": 1,
+      "cost_tier": 0,
+      "max_parallel": 3,
+      "roles": ["code", "review", "explain", "refactor", "draft", "execute", "summarize", "format", "diagnose", "validate"]
+    },
+    {
+      "name": "codex",
+      "provider": "chatgpt",
+      "model": "gpt-5.5",
+      "endpoint": "https://chatgpt.com/backend-api/codex",
+      "enabled": 1,
+      "tools_enabled": 0,
+      "cost_tier": 0,
+      "max_parallel": 3,
+      "roles": ["code", "review", "explain", "refactor", "draft", "execute", "summarize", "format", "diagnose", "validate"]
+    },
+    {
+      "name": "claude",
+      "provider": "claude",
+      "model": "sonnet",
+      "endpoint": "",
+      "enabled": 1,
+      "tools_enabled": 0,
+      "cost_tier": 0,
+      "max_parallel": 3,
+      "roles": ["summarize", "format", "draft", "explain"]
+    }
+  ]
+}

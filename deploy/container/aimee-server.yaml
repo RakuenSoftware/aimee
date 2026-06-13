@@ -15,9 +15,24 @@ aimee:
     http_port: 8740
     bearer_token: "aimee-local-dev"
     rate_limit_per_min: 0
-    # Mutating /v1 routes are local-UDS-only by default; over the published TCP
-    # port a bearer is read/query/chat only. Opt into remote writes here:
-    #   remote_writes: data   # data writes (memory/work/rules/skill), cap-gated
-    #   remote_writes: full   # + delegate/tool over /v1/rpc (CAPS_ALL) — trusted nets only
-    remote_writes: "off"
+    # remote_writes controls what a TCP bearer may do over the published port:
+    #   off    read/query/chat only (mutations are local-UDS-only)
+    #   data   + data writes (memory/work/rules/skill), capability-gated
+    #   full   + delegate/tool/roundtable (CAPS_ALL)
+    # Default `full` so the thin-client model works out of the box: a remote
+    # `aimee` client driving this server can run delegates and the roundtable
+    # without extra setup. The bearer token above is the trust boundary, so
+    # OVERRIDE IT (and front with TLS) for any deployment exposed beyond a
+    # trusted network.
+    remote_writes: "full"
+
+# Delegate roundtable / MoA ensemble, on by default. The panel is the seeded
+# agents.json roster; a thin client pushes the per-agent API keys per session
+# (no keys are baked in), so the roundtable works once a client has connected.
+ensemble:
+  enabled: true
+  reference_models:
+    - minimax
+    - mistral
+    - mimo-2.5
 
