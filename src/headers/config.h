@@ -1273,7 +1273,8 @@ typedef struct config
     * ensemble_reference_models: diverse model/agent names for the fan-out.
     * ensemble_aggregator: agent name for the synthesis pass.
     * ensemble_min_successful: min references that must succeed before degrading (default 2).
-    * ensemble_max_cost_usd: hard per-call cost cap in USD (default 1.0). */
+    * ensemble_max_cost_usd: optional per-run cost cap in USD; 0 (or unset) means
+    * no limit, which is the default. Set a positive value to cap a run. */
    char ensemble_reference_models[8][128];
    int ensemble_reference_count;
    char ensemble_aggregator[128];
