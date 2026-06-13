@@ -52,8 +52,14 @@ extern "C"
    /* The entity's kind, or -1 if canonical_id is unknown. */
    int db2_entity_kind(int64_t canonical_id);
 
+   /* Mark `from_id` as merged into `into_id`: sets status='merged' + merged_into so
+    * db2_entity_resolve transparently follows it (one hop). A P2 primitive that
+    * full merge/unmerge (P2b) builds on. 0 on success, -1 on error/bad args. */
+   int db2_entity_mark_merged(int64_t from_id, int64_t into_id);
+
    /* List the (non-suppressed) display names bound to `canonical_id` into out
-    * (each <= name_cap). Returns the count written (>=0), or -1 on error. */
+    * (each truncated to 128 bytes incl. NUL). Returns the count written (>=0), or
+    * -1 on error (bad args / DB failure). */
    int db2_entity_aliases_for(int64_t canonical_id, char (*out)[128], int max);
 
 #ifdef __cplusplus

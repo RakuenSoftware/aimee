@@ -17,6 +17,10 @@ static void test_normalize(void)
    assert(strcmp(out, "my main box") == 0);
    entity_name_normalize("192.168.1.254", out, sizeof(out));
    assert(strcmp(out, "192.168.1.254") == 0); /* punctuation preserved */
+   entity_name_normalize(NULL, out, sizeof(out));
+   assert(out[0] == '\0');
+   entity_name_normalize("", out, sizeof(out));
+   assert(out[0] == '\0');
    printf("  PASS: test_normalize\n");
 }
 
@@ -53,6 +57,25 @@ int main(void)
    /* unknown name resolves to 0 (not an error). */
    assert(db2_entity_resolve("never seen this") == 0);
    assert(db2_entity_kind(999999) == -1);
+
+   /* merged_into is followed exactly one hop on resolve. */
+   int64_t a = db2_entity_register_named("alpha box", NODE_DEVICE);
+   int64_t b = db2_entity_register_named("beta box", NODE_DEVICE);
+   int64_t cc = db2_entity_register_named("gamma box", NODE_DEVICE);
+   assert(a > 0 && b > 0 && cc > 0);
+   assert(db2_entity_mark_merged(a, b) == 0);
+   assert(db2_entity_resolve("alpha box") == b); /* A -> B */
+   assert(db2_entity_mark_merged(b, cc) == 0);
+   assert(db2_entity_resolve("alpha box") == b); /* single hop: B, not C */
+   assert(db2_entity_resolve("beta box") == cc); /* B -> C */
+   assert(db2_entity_mark_merged(0, b) == -1);   /* bad args */
+   assert(db2_entity_mark_merged(b, b) == -1);   /* self-merge rejected */
+
+   /* NULL / empty / dangling input. */
+   assert(db2_entity_register_named(NULL, NODE_DEVICE) == -1);
+   assert(db2_entity_resolve("") == 0);
+   assert(db2_entity_alias_bind("", cid, 1) == -1);
+   assert(db2_entity_alias_bind("dangle", 999999, 1) == -1); /* target must exist */
 
    db2_test_shim_close();
    printf("entity_registry: all tests passed\n");
