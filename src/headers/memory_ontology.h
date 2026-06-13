@@ -35,6 +35,12 @@ typedef enum
    NODE_PERSON = 10,
    NODE_PLACE = 11,
    NODE_TIME_EXPR = 12,
+   /* Identity/world-fact kinds (typed-fact layer, §1). Appended (not reordered)
+    * so existing persisted integer codes are unaffected. */
+   NODE_DEVICE = 13,
+   NODE_ORG = 14,
+   NODE_IP = 15,
+   NODE_SCALAR = 16, /* value-typed object: age=30, port=8740, … */
    NODE_OTHER = 99
 } memory_node_kind_t;
 
