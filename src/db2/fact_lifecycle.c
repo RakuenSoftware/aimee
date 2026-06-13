@@ -12,8 +12,16 @@
 
 #define FL_ERRBUF 256
 
-/* Shared "now" expression (matches asserted_at's stored format). */
-#define FL_NOW_SQL "to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')"
+/* Host-clock UTC "now" in the stored text format, so every transaction-time
+ * stamp (asserted_at, superseded_at) shares one clock — independent of the DB
+ * session timezone — and lexical compares stay chronological. */
+static void fl_now_utc(char *buf, size_t n)
+{
+   time_t now_t = time(NULL);
+   struct tm tmv;
+   gmtime_r(&now_t, &tmv);
+   strftime(buf, n, "%Y-%m-%d %H:%M:%S", &tmv);
+}
 
 double fact_class_confidence(const char *cls)
 {
@@ -66,11 +74,13 @@ int db2_fact_expire_speculative(int ttl_days)
    gmtime_r(&cutoff_t, &tmv);
    char cutoff[32];
    strftime(cutoff, sizeof(cutoff), "%Y-%m-%d %H:%M:%S", &tmv);
+   char now_utc[32];
+   fl_now_utc(now_utc, sizeof(now_utc));
 
    /* Supersede unconfirmed (weight<=1) Class C edges asserted before the cutoff
     * and still active. The row is retained (only stamped) per "always keep the
     * origin artifact". asserted_at='' (legacy/un-stamped) is left alone. */
-   static const char *sql = "UPDATE entity_edges SET superseded_at = " FL_NOW_SQL
+   static const char *sql = "UPDATE entity_edges SET superseded_at = ?2"
                             " WHERE edge_class = 'semantic' AND confidence_class = 'C'"
                             "   AND superseded_at = '' AND suppressed = 0 AND weight <= 1"
                             "   AND asserted_at <> '' AND asserted_at < ?1";
@@ -79,6 +89,7 @@ int db2_fact_expire_speculative(int ttl_days)
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", cutoff);
+   aimee_pg_bind_text(st, "?2", now_utc);
    int rc = aimee_pg_step(st, err, sizeof(err));
    int changes = aimee_pg_stmt_changes(st);
    aimee_pg_finalize(st);
@@ -133,13 +144,16 @@ int db2_fact_retract(const char *source, const char *relation, fact_authority_t 
    if (behavior == CORR_IMMUTABLE && authority != FACT_AUTHORITY_USER)
       return FACT_RETRACT_IMMUTABLE;
 
+   char now_utc[32];
+   fl_now_utc(now_utc, sizeof(now_utc));
+
    /* supersede (and user-overridden immutable): stamp superseded_at.
     * hard_delete: tombstone (suppressed=1) + stamp, still retained + auditable. */
    const char *sql = (behavior == CORR_HARD_DELETE)
-                         ? "UPDATE entity_edges SET suppressed = 1, superseded_at = " FL_NOW_SQL
+                         ? "UPDATE entity_edges SET suppressed = 1, superseded_at = ?3"
                            " WHERE source = ?1 AND relation = ?2 AND edge_class = 'semantic'"
                            "   AND superseded_at = '' AND suppressed = 0"
-                         : "UPDATE entity_edges SET superseded_at = " FL_NOW_SQL
+                         : "UPDATE entity_edges SET superseded_at = ?3"
                            " WHERE source = ?1 AND relation = ?2 AND edge_class = 'semantic'"
                            "   AND superseded_at = '' AND suppressed = 0";
    char err[FL_ERRBUF] = "";
@@ -148,6 +162,7 @@ int db2_fact_retract(const char *source, const char *relation, fact_authority_t 
       return -1;
    aimee_pg_bind_text(st, "?1", source);
    aimee_pg_bind_text(st, "?2", norm);
+   aimee_pg_bind_text(st, "?3", now_utc);
    int rc = aimee_pg_step(st, err, sizeof(err));
    int changes = aimee_pg_stmt_changes(st);
    aimee_pg_finalize(st);
