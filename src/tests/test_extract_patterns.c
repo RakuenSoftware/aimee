@@ -56,6 +56,8 @@ static void test_retraction(void)
    assert(memory_pattern_is_retraction("scratch that") == 1);
    assert(memory_pattern_is_retraction("please disregard the last thing") == 1);
    assert(memory_pattern_is_retraction("my name is Theo") == 0);
+   /* tightened cues: a bare "forget" reminder is not a retraction. */
+   assert(memory_pattern_is_retraction("don't forget to call mom") == 0);
    assert(memory_pattern_is_retraction("") == 0);
    assert(memory_pattern_is_retraction(NULL) == 0);
    printf("  PASS: test_retraction\n");

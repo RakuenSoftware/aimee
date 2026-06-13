@@ -190,9 +190,15 @@ int memory_pattern_is_retraction(const char *text)
 {
    if (!text || !text[0])
       return 0;
-   static const char *cues[] = {"forget",      "delete that", "delete the",   "that's wrong",
-                                "thats wrong", "no longer",   "scratch that", "ignore that",
-                                "never mind",  "nevermind",   "disregard",    "that is wrong"};
+   /* A recall-oriented pre-filter: a positive only flags the turn for closer
+    * inspection (the actual retraction in db2_fact_retract still needs an
+    * explicit subject + relation), so it never deletes on its own. Cues are kept
+    * specific enough to avoid the obvious false positives ("don't forget to ...").
+    */
+   static const char *cues[] = {"forget that",   "forget about", "forget my",    "forget what",
+                                "delete that",   "delete the",   "that's wrong", "thats wrong",
+                                "that is wrong", "no longer",    "scratch that", "ignore that",
+                                "never mind",    "nevermind",    "disregard"};
    for (size_t i = 0; i < sizeof(cues) / sizeof(cues[0]); i++)
       if (ci_find(text, cues[i], 0) >= 0)
          return 1;
@@ -202,6 +208,8 @@ int memory_pattern_is_retraction(const char *text)
 /* Trim leading/trailing ASCII whitespace, copying at most cap-1 bytes. */
 static void copy_trimmed(char *dst, size_t cap, const char *src, int len)
 {
+   if (cap == 0)
+      return; /* defensive: no room even for the NUL */
    int s = 0, e = len;
    while (s < e && isspace((unsigned char)src[s]))
       s++;
