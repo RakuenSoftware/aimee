@@ -96,6 +96,168 @@ def render_cli(entries):
 
 CFG_TYPE = {"CFG_STRING": "string", "CFG_BOOL": "bool", "CFG_INT": "int", "CFG_FLOAT": "float"}
 
+# Curated one-line descriptions for the CLI-settable keys (the `aimee config set`
+# surface). A key in the generated table with no entry here renders "—" and is
+# counted as undescribed so the gap is visible (see render_config).
+CFG_KEY_DESC = {
+    "autonomous": "Run autonomously (auto-advance preauthorized gates) vs interactive.",
+    "cache_aware_rewrite_enabled": "Rewrite prompts to align with the provider's prompt cache.",
+    "cache_min_chars": "Minimum prompt size (chars) before cache-shaping applies.",
+    "cache_shaping_enabled": "Enable prompt cache-shaping.",
+    "claude_cli_delegate_enabled": "Allow delegating to the local Claude CLI agent.",
+    "claude_model": "Default Claude model (empty = CLI default).",
+    "cost_reward_enabled": "Factor token cost into the reward signal.",
+    "cost_reward_lambda_pct": "Cost-penalty weight (percent) in the reward.",
+    "cost_reward_ref_usd_milli": "Reference cost (USD-milli) normalizing the cost reward.",
+    "cross_verify": "Enable cross-model verification of outputs.",
+    "db2_url": "DB2 connection URL (aimee's vector / knowledge-base store).",
+    "dedup_enabled": "Deduplicate near-identical responses.",
+    "dedup_window_seconds": "Window (seconds) for response dedup.",
+    "dogfood_autolabel_continuation": "Auto-label continuation turns for dogfood capture.",
+    "dogfood_autolabel_repair": "Auto-label repair turns for dogfood capture.",
+    "dogfood_autolabel_repeat_question": "Auto-label repeated-question turns.",
+    "dogfood_commit_raw": "Commit raw (unredacted) dogfood transcripts.",
+    "dogfood_enabled": "Capture sessions as dogfood training/eval data.",
+    "dogfood_inline_tagging": "Inline-tag dogfood events during the session.",
+    "dogfood_log_dir": "Directory for dogfood logs.",
+    "ecomode": "Reduce background compute (eco mode).",
+    "embedding_command": "Command that produces embeddings (overrides the endpoint).",
+    "embedding_dim": "Embedding vector dimension.",
+    "embedding_endpoint": "Embeddings provider endpoint URL.",
+    "embedding_model": "Embeddings model name.",
+    "guardrail_mode": "Guardrail enforcement mode (off / warn / block).",
+    "guardrails_semantic_allow_ml_only_block": "Allow blocking on the ML classifier alone.",
+    "guardrails_semantic_block_threshold": "Semantic score threshold to block.",
+    "guardrails_semantic_command": "External semantic-guardrail classifier command.",
+    "guardrails_semantic_dry_run": "Evaluate but don't enforce semantic guardrails.",
+    "guardrails_semantic_enabled": "Enable the semantic guardrail classifier.",
+    "guardrails_semantic_prompt_threshold": "Semantic score threshold for prompt-level flags.",
+    "guardrails_semantic_warn_threshold": "Semantic score threshold to warn.",
+    "identity_working_profile_injection_enabled": "Inject the working-profile identity into prompts.",
+    "ingress_audit_async": "Audit ingress requests asynchronously.",
+    "ingress_max_raw_scans": "Max raw-content scans per ingress request.",
+    "ingress_preinject_assembly_budget": "Token budget for ingress context pre-injection.",
+    "ingress_preinject_enabled": "Enable `<aimee-context>` pre-injection on ingress.",
+    "ingress_trusted_proxy_secret": "Shared secret authenticating a trusted ingress proxy.",
+    "ingress_usage_accounting_enabled": "Account token usage on ingress requests.",
+    "integrity_dry_run": "Run integrity checks without enforcing.",
+    "integrity_enabled": "Enable the integrity gate.",
+    "kb_api_bearer_token": "Bearer token for the aimee-kb API.",
+    "kb_api_http_port": "HTTP port the aimee-kb API listens on.",
+    "kb_evidence_emit_enabled": "Emit evidence records from KB ingest.",
+    "kb_mining_enabled": "Enable background KB mining.",
+    "kb_mining_min_poll_s": "Minimum interval (s) between KB mining polls.",
+    "kb_search_max_results": "Default max results for KB search.",
+    "learning_implicit_citation_continuation": "Implicit-learning signal: citation on continuation.",
+    "learning_implicit_citation_repair": "Implicit-learning signal: citation on repair.",
+    "learning_implicit_repeat_question": "Implicit-learning signal: repeated question.",
+    "learning_implicit_repeated_correction": "Implicit-learning signal: repeated correction.",
+    "learning_implicit_workflow_repetition": "Implicit-learning signal: workflow repetition.",
+    "learning_max_commits_per_week": "Cap on learning-derived commits per week.",
+    "learning_proposal_ttl_days": "TTL (days) for learning proposals.",
+    "learning_router_enabled": "Enable the learning router.",
+    "max_iterations": "Per-turn iteration cap for interactive chat (default 15).",
+    "max_iterations_delegate": "Per-turn iteration cap for delegate sessions (default 25).",
+    "memory_abstain_enabled": "Allow memory recall to abstain on low confidence.",
+    "memory_abstain_gate": "Confidence gate for memory abstention.",
+    "memory_bm25_weight": "BM25 (lexical) weight in hybrid memory recall.",
+    "memory_chunk_min_confidence": "Minimum confidence to keep a memory chunk.",
+    "memory_coref_mode": "Coreference-resolution mode for memory.",
+    "memory_coref_window": "Coreference lookback window.",
+    "memory_fetch_budget_base": "Base token budget for memory fetch.",
+    "memory_fetch_budget_enabled": "Enable token-budgeted memory fetch.",
+    "memory_fetch_budget_shape_aware": "Shape-aware memory fetch budgeting.",
+    "memory_hard_negative_log": "Path to the hard-negative recall log file (empty = disabled).",
+    "memory_improve_dedupe_enabled": "Dedupe during memory-improve.",
+    "memory_improve_summarise_enabled": "Summarise during memory-improve.",
+    "memory_kb_neighbour_expand": "Expand recall to KB neighbours.",
+    "memory_maintenance_trigger_inserts": "Inserts before a maintenance cycle triggers.",
+    "memory_maintenance_trigger_secs": "Seconds before a maintenance cycle triggers.",
+    "memory_negation_enabled": "Detect/handle negation in memory.",
+    "memory_profile_cards_enabled": "Maintain profile cards from observations.",
+    "memory_profile_cards_min_obs": "Min observations before a profile card forms.",
+    "memory_profile_cards_stale_secs": "Profile-card staleness (seconds).",
+    "memory_query_expansion_k": "Number of expanded queries for recall.",
+    "memory_query_expansion_mode": "Query-expansion mode.",
+    "memory_rerank_command": "External reranker command.",
+    "memory_rerank_enabled": "Enable cross-encoder reranking of recall.",
+    "memory_rerank_mode": "Reranker mode.",
+    "memory_rerank_top_k": "Top-K candidates to rerank.",
+    "memory_rewrite_command": "External query-rewrite command.",
+    "memory_rewrite_decompose": "Decompose queries during rewrite.",
+    "memory_rewrite_enabled": "Enable query rewriting for recall.",
+    "memory_rewrite_hyde": "Use HyDE (hypothetical-document) rewrite.",
+    "memory_rewrite_max_subqueries": "Max sub-queries produced by rewrite.",
+    "memory_scenes_enabled": "Cluster memories into scenes.",
+    "memory_scenes_min_cluster_size": "Min cluster size for a scene.",
+    "memory_scenes_top_m": "Top-M scenes to consider.",
+    "memory_semantic_weight": "Semantic (vector) weight in hybrid recall.",
+    "memory_window_radius": "Neighbour radius for memory-window expansion.",
+    "openai_endpoint": "OpenAI-compatible endpoint URL.",
+    "openai_key_cmd": "Command that prints the OpenAI API key.",
+    "openai_model": "OpenAI model name.",
+    "provider": "Default model provider.",
+    "reasoning_cap_enabled": "Cap the model's reasoning effort.",
+    "typed_facts_enabled": "Enable the typed-fact knowledge layer (master gate; default off).",
+    "verify_cross_project": "Let `aimee git verify` span other projects.",
+    "verify_enabled": "Master gate for `aimee git verify` (default off).",
+    "virtual_context_assembly_budget": "Token budget for virtual-context assembly.",
+    "virtual_context_enabled": "Enable virtual-context assembly.",
+}
+
+# One-line description per config-file section (what the section governs). Child
+# keys are listed by name; deeply-nested sub-objects are noted in the description.
+SECTION_DESC = {
+    "aimee": "Core API/runtime settings.",
+    "auxiliary": "Auxiliary (cheap/background) model used for side tasks.",
+    "cache_shaping": "Prompt-cache shaping.",
+    "charter": "Operating charter: values, constraints, safety axioms, tone.",
+    "compact": "Transcript compaction thresholds.",
+    "computer_use": "Computer-use (browser) tool settings.",
+    "concurrency": "Per-model / per-provider concurrency limits.",
+    "context": "Context-engine selection.",
+    "cost_reward": "Cost-aware reward shaping.",
+    "cron_jobs": "Scheduled job definitions (array of objects).",
+    "cross_verify": "Cross-model output verification.",
+    "db2": "DB2 / vector store settings.",
+    "dedup": "Response deduplication.",
+    "dogfood": "Session capture for dogfood data.",
+    "ensemble": "Roundtable ensemble panel + aggregator.",
+    "guardrails": "Semantic guardrail policy.",
+    "identity": "Working-profile identity injection.",
+    "ingress": "Ingress (proxy frontends) behavior.",
+    "integrity": "Integrity gate.",
+    "intelligence": "Intelligence subsystems (bandit, planner, ranking, reasoning) + their external commands; most children are nested objects.",
+    "kb": "Knowledge-base client + curator / evidence / maintenance / mining (nested objects).",
+    "learning": "Learning subsystem (router, implicit, embed, synthesize; nested objects).",
+    "lsp_servers": "LSP server definitions (array of objects).",
+    "mcp": "MCP integration (e.g. OSV).",
+    "mcp_clients": "MCP client connections (array of objects).",
+    "memory": "Memory subsystem; most children (recall, rerank, lifecycle, …) are nested objects with their own keys.",
+    "memory_maintenance": "Memory maintenance scheduling.",
+    "memory_negation": "Negation handling in memory.",
+    "memory_query_expansion": "Recall query expansion.",
+    "memory_recall_lanes": "Per-lane recall floors / caps.",
+    "memory_rerank": "Recall reranking.",
+    "memory_rewrite": "Recall query rewriting.",
+    "memory_window": "Memory-window neighbour expansion.",
+    "model_meta": "Model metadata + capability routing.",
+    "otel": "OpenTelemetry export.",
+    "reasoning_cap": "Reasoning-effort cap.",
+    "retry": "Provider retry / backoff.",
+    "rewind": "Auto-snapshot / rewind.",
+    "roundtable": "Roundtable pipeline thresholds, caps, gates, and turns.",
+    "sandbox": "Tool sandbox (paths, network, mode).",
+    "script": "Script-tool allowlist.",
+    "search": "Web-search backend (Tavily / SearXNG).",
+    "session": "Session / worktree limits.",
+    "skills": "Skill subsystem (capability, curator, dispatch, eval, manage, review; nested objects).",
+    "transport": "Transport tweaks (cache-aware rewrite).",
+    "trigger": "Trigger listener (auth, concurrency).",
+    "trigger_rules": "Trigger rule definitions (array of objects).",
+    "workspaces": "Workspace definitions (array of objects).",
+}
+
 
 def parse_config_fields():
     # Each entry is `{"<key>", offsetof(...), <size>, <flag>, CFG_<TYPE>}`. The
@@ -178,6 +340,7 @@ def render_config(fields, sections, flat):
            "2. **Environment variables** — `AIMEE_*` runtime/deployment overrides.",
            "3. **External & provider environment** — provider keys, endpoints, proxy, editor.",
            "4. **Workflow engine** — workflow definition + custom-block (`blocks.yaml`) schema.",
+           "5. **Other config files** — `agents.json`, toolsets, guardrails.",
            "",
            "CLI commands + flags are documented separately in "
            "[`cli-commands.md`](cli-commands.md).",
@@ -196,22 +359,31 @@ def render_config(fields, sections, flat):
            "sections listed at the end.",
            ""]
 
+    undescribed = sorted(k for k, _ in fields if k not in CFG_KEY_DESC)
     out.append(f"## CLI-settable keys ({len(fields)})")
     out.append("")
-    out.append("| Key | Type |")
-    out.append("|-----|------|")
+    out.append("| Key | Type | Description |")
+    out.append("|-----|------|-------------|")
     for key, typ in sorted(fields):
-        out.append(f"| `{key}` | {typ} |")
+        out.append(f"| `{key}` | {typ} | {CFG_KEY_DESC.get(key, '—')} |")
     out.append("")
+    if undescribed:
+        out.append("> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): "
+                   + ", ".join(f"`{k}`" for k in undescribed))
+        out.append("")
 
     out.append(f"## Config-file sections ({len(sections)})")
     out.append("")
     out.append("Set in the config JSON as `{\"<section>\": {\"<key>\": ...}}`. Keys "
-               "are derived from the section parsers in `src/config*.c`.")
+               "are derived from the section parsers in `src/config*.c`; a key shown "
+               "as a bare name that is itself a nested object is noted in the section "
+               "description (see *Coverage & limitations*).")
     out.append("")
     for sect in sorted(sections):
         keys = ", ".join(f"`{k}`" for k in sorted(sections[sect]))
-        out.append(f"- **`{sect}`** — {keys}")
+        desc = SECTION_DESC.get(sect)
+        lead = f"_{desc}_ Keys: " if desc else ""
+        out.append(f"- **`{sect}`** — {lead}{keys}")
     out.append("")
 
     if flat:
@@ -635,6 +807,123 @@ def render_workflow(catalog, consts):
     return "\n".join(out).rstrip() + "\n"
 
 
+# ─── Separate config files (agents.json, toolsets) ────────────────────────────
+
+AGENT_FIELD_DESC = {
+    "agents": "Top-level: array of agent definitions.",
+    "default_agent": "Top-level: name of the default agent.",
+    "name": "Agent identifier.",
+    "desc": "Human description of the agent.",
+    "enabled": "Whether the agent is active.",
+    "provider": "Provider name.",
+    "model": "Model name.",
+    "endpoint": "Provider endpoint URL.",
+    "backend": "Execution backend (http / cli / ssh / docker).",
+    "api_key": "Inline API key (prefer `api_key_env` or the vault).",
+    "api_key_env": "Env var name holding the agent's API key.",
+    "access_token": "Static auth token for the endpoint.",
+    "auth_cmd": "Command that prints an auth token.",
+    "auth_type": "Auth scheme (bearer / oauth / none).",
+    "credentials": "Credential block / reference.",
+    "tokens": "Token budget / accounting block.",
+    "context_window": "Model context window (tokens).",
+    "max_tokens": "Max output tokens.",
+    "max_turns": "Max agent-loop turns.",
+    "max_parallel": "Max concurrent calls to this agent.",
+    "timeout_ms": "Per-call timeout (ms).",
+    "cost_limit": "Per-agent cost cap (USD).",
+    "cost_tier": "Cost-tier label for routing.",
+    "auto_compact_pct": "Context % at which to auto-compact.",
+    "context_warn_pct": "Context % at which to warn.",
+    "stall_threshold": "Stall-detection threshold.",
+    "roles": "Roles this agent serves (review, plan, …).",
+    "exec_roles": "Roles this agent may execute with tools.",
+    "exec_system_prompt": "System prompt for exec/tool runs.",
+    "tools_enabled": "Allow tool use for this agent.",
+    "inject_respond_tool": "Inject the `respond` tool.",
+    "middleware": "Per-agent middleware overrides (e.g. `context_window`, `max_tokens`).",
+    "recommended_sampling": "Provider-recommended sampling parameters.",
+    "extra_headers": "Extra HTTP headers for requests.",
+    "fallback_model": "Fallback model on failure.",
+    "fallback_chain": "Ordered fallback agent chain.",
+    "session_reuse": "Reuse a session across calls.",
+    "cli_cmd": "CLI command for a cli-backend agent.",
+    "cli_kind": "CLI agent kind (claude / codex / opencode).",
+    "cli_idle_timeout_ms": "Idle timeout (ms) for a CLI agent.",
+    "ssh_entry": "SSH entry point (ssh backend).",
+    "ssh_key": "SSH key path (ssh backend).",
+    "user": "Remote user (ssh backend).",
+    "target_host": "Target host (relay / tunnel).",
+    "target_port": "Target port (relay / tunnel).",
+    "host": "Target host.",
+    "port": "Target port (relay / tunnel).",
+    "ip": "Bind/target IP (relay / tunnel).",
+    "cidr": "Allowed CIDR (relay / tunnel networking).",
+    "hosts": "Allowed hosts (relay / tunnel).",
+    "networks": "Allowed networks.",
+    "network": "Network mode (backend sandbox).",
+    "relay_key": "Relay auth key.",
+    "relay_ssh": "SSH relay config.",
+    "tunnel": "Tunnel config.",
+    "tunnels": "Tunnel definitions.",
+    "reconnect_delay": "Delay between reconnects (ms).",
+    "max_reconnects": "Max reconnect attempts (streaming / relay).",
+}
+
+AGENT_FIELD_RE = re.compile(r'cJSON_GetObjectItem(?:CaseSensitive)?\(\s*\w+\s*,\s*"([a-z_]+)"\s*\)')
+
+
+def parse_agent_fields():
+    f = SRC / "server" / "agent_config.c"
+    if not f.exists():
+        return set()
+    return set(AGENT_FIELD_RE.findall(f.read_text(encoding="utf-8")))
+
+
+def render_config_files(agent_fields):
+    out = ["## Other configuration files",
+           "",
+           "Beyond the config store, aimee reads a few standalone JSON/policy files "
+           "(paths under `$AIMEE_HOME` unless an env override is set).",
+           "",
+           "### `agents.json` — agent / model definitions",
+           "",
+           "`{\"default_agent\": \"<name>\", \"agents\": [ {<agent>}, … ]}`. Each agent "
+           "object's fields (scanned from `src/server/agent_config.c`):",
+           "",
+           "| Field | Description |",
+           "|-------|-------------|"]
+    undescribed = []
+    for k in sorted(agent_fields):
+        d = AGENT_FIELD_DESC.get(k)
+        if d:
+            out.append(f"| `{k}` | {d} |")
+        else:
+            undescribed.append(k)
+    out.append("")
+    if undescribed:
+        out.append("> **Undocumented agent fields** (add to `AGENT_FIELD_DESC`): "
+                   + ", ".join(f"`{k}`" for k in undescribed))
+        out.append("")
+    out += [
+        "### Toolsets — `AIMEE_TOOLSETS_CONFIG` (or the config `toolsets` map)",
+        "",
+        "Named tool allowlists. `{\"toolsets\": {\"<name>\": { … }}}`; each toolset:",
+        "",
+        "- `tools` / `allowed_tools` — the tool names the set permits.",
+        "- `include` — inherit another toolset's tools.",
+        "- `script` — script-tool configuration for the set.",
+        "",
+        "### Guardrails — `AIMEE_GUARDRAILS_PATH`",
+        "",
+        "A policy file governing path read/write classification and pre-tool "
+        "enforcement (antipattern blocking). It is a behavioral policy rather than a "
+        "flat key schema; the tunable thresholds are exposed as the `guardrails` "
+        "section + `guardrails_semantic_*` / `guardrail_mode` keys documented above.",
+    ]
+    return "\n".join(out).rstrip() + "\n"
+
+
 def render_limitations():
     return "\n".join([
         "## Coverage & limitations",
@@ -653,10 +942,11 @@ def render_limitations():
         "`api_key_env`; only the common defaults are listed.",
         "- **Compile-time `-D` defines** used as build-level configuration are not "
         "scanned (they are not runtime-overridable config).",
-        "- **Separate config files** — agent definitions (`agents.json`), toolsets, "
-        "guardrails policy, and per-workflow definitions — have their own schemas. "
-        "Custom workflow blocks (`blocks.yaml`) and the workflow definition schema are "
-        "documented above; the others are out of this reference's stated scope.",
+        "- **Separate config files** — `agents.json`, toolsets, guardrails, and "
+        "custom workflow blocks (`blocks.yaml`) / workflow definitions are documented "
+        "in their own sections above. Per-agent field set is scanned from "
+        "`agent_config.c`; the guardrails *policy* is behavioral (path classification "
+        "+ pre-tool enforcement), with its tunables exposed as config keys.",
         "",
         "If the scan ever finds a config var with no description, it is emitted under "
         "an **Undocumented** heading in the relevant section — so a new option cannot "
@@ -678,6 +968,7 @@ def main():
            + render_env(parse_env_vars()).rstrip() + "\n\n"
            + render_external_env(parse_external_env()).rstrip() + "\n\n"
            + render_workflow(parse_block_catalog(), parse_engine_consts()).rstrip() + "\n\n"
+           + render_config_files(parse_agent_fields()).rstrip() + "\n\n"
            + render_limitations())
     targets = {GEN / "cli-commands.md": cli, GEN / "configuration.md": cfg}
 

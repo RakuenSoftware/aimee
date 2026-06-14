@@ -8,6 +8,7 @@ This reference covers every configurable surface:
 2. **Environment variables** — `AIMEE_*` runtime/deployment overrides.
 3. **External & provider environment** — provider keys, endpoints, proxy, editor.
 4. **Workflow engine** — workflow definition + custom-block (`blocks.yaml`) schema.
+5. **Other config files** — `agents.json`, toolsets, guardrails.
 
 CLI commands + flags are documented separately in [`cli-commands.md`](cli-commands.md).
 
@@ -23,164 +24,164 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 
 ## CLI-settable keys (103)
 
-| Key | Type |
-|-----|------|
-| `autonomous` | bool |
-| `cache_aware_rewrite_enabled` | bool |
-| `cache_min_chars` | int |
-| `cache_shaping_enabled` | bool |
-| `claude_cli_delegate_enabled` | bool |
-| `claude_model` | string |
-| `cost_reward_enabled` | bool |
-| `cost_reward_lambda_pct` | int |
-| `cost_reward_ref_usd_milli` | int |
-| `cross_verify` | bool |
-| `db2_url` | string |
-| `dedup_enabled` | bool |
-| `dedup_window_seconds` | int |
-| `dogfood_autolabel_continuation` | bool |
-| `dogfood_autolabel_repair` | bool |
-| `dogfood_autolabel_repeat_question` | bool |
-| `dogfood_commit_raw` | bool |
-| `dogfood_enabled` | bool |
-| `dogfood_inline_tagging` | bool |
-| `dogfood_log_dir` | string |
-| `ecomode` | bool |
-| `embedding_command` | string |
-| `embedding_dim` | int |
-| `embedding_endpoint` | string |
-| `embedding_model` | string |
-| `guardrail_mode` | string |
-| `guardrails_semantic_allow_ml_only_block` | bool |
-| `guardrails_semantic_block_threshold` | float |
-| `guardrails_semantic_command` | string |
-| `guardrails_semantic_dry_run` | bool |
-| `guardrails_semantic_enabled` | bool |
-| `guardrails_semantic_prompt_threshold` | float |
-| `guardrails_semantic_warn_threshold` | float |
-| `identity_working_profile_injection_enabled` | bool |
-| `ingress_audit_async` | bool |
-| `ingress_max_raw_scans` | int |
-| `ingress_preinject_assembly_budget` | int |
-| `ingress_preinject_enabled` | bool |
-| `ingress_trusted_proxy_secret` | string |
-| `ingress_usage_accounting_enabled` | bool |
-| `integrity_dry_run` | bool |
-| `integrity_enabled` | bool |
-| `kb_api_bearer_token` | string |
-| `kb_api_http_port` | int |
-| `kb_evidence_emit_enabled` | bool |
-| `kb_mining_enabled` | bool |
-| `kb_mining_min_poll_s` | int |
-| `kb_search_max_results` | int |
-| `learning_implicit_citation_continuation` | bool |
-| `learning_implicit_citation_repair` | bool |
-| `learning_implicit_repeat_question` | bool |
-| `learning_implicit_repeated_correction` | bool |
-| `learning_implicit_workflow_repetition` | bool |
-| `learning_max_commits_per_week` | int |
-| `learning_proposal_ttl_days` | int |
-| `learning_router_enabled` | bool |
-| `max_iterations` | int |
-| `max_iterations_delegate` | int |
-| `memory_abstain_enabled` | bool |
-| `memory_abstain_gate` | float |
-| `memory_bm25_weight` | float |
-| `memory_chunk_min_confidence` | float |
-| `memory_coref_mode` | string |
-| `memory_coref_window` | int |
-| `memory_fetch_budget_base` | int |
-| `memory_fetch_budget_enabled` | bool |
-| `memory_fetch_budget_shape_aware` | bool |
-| `memory_hard_negative_log` | string |
-| `memory_improve_dedupe_enabled` | bool |
-| `memory_improve_summarise_enabled` | bool |
-| `memory_kb_neighbour_expand` | bool |
-| `memory_maintenance_trigger_inserts` | int |
-| `memory_maintenance_trigger_secs` | int |
-| `memory_negation_enabled` | bool |
-| `memory_profile_cards_enabled` | bool |
-| `memory_profile_cards_min_obs` | int |
-| `memory_profile_cards_stale_secs` | int |
-| `memory_query_expansion_k` | int |
-| `memory_query_expansion_mode` | string |
-| `memory_rerank_command` | string |
-| `memory_rerank_enabled` | bool |
-| `memory_rerank_mode` | string |
-| `memory_rerank_top_k` | int |
-| `memory_rewrite_command` | string |
-| `memory_rewrite_decompose` | bool |
-| `memory_rewrite_enabled` | bool |
-| `memory_rewrite_hyde` | bool |
-| `memory_rewrite_max_subqueries` | int |
-| `memory_scenes_enabled` | bool |
-| `memory_scenes_min_cluster_size` | int |
-| `memory_scenes_top_m` | int |
-| `memory_semantic_weight` | float |
-| `memory_window_radius` | int |
-| `openai_endpoint` | string |
-| `openai_key_cmd` | string |
-| `openai_model` | string |
-| `provider` | string |
-| `reasoning_cap_enabled` | bool |
-| `typed_facts_enabled` | bool |
-| `verify_cross_project` | bool |
-| `verify_enabled` | bool |
-| `virtual_context_assembly_budget` | int |
-| `virtual_context_enabled` | bool |
+| Key | Type | Description |
+|-----|------|-------------|
+| `autonomous` | bool | Run autonomously (auto-advance preauthorized gates) vs interactive. |
+| `cache_aware_rewrite_enabled` | bool | Rewrite prompts to align with the provider's prompt cache. |
+| `cache_min_chars` | int | Minimum prompt size (chars) before cache-shaping applies. |
+| `cache_shaping_enabled` | bool | Enable prompt cache-shaping. |
+| `claude_cli_delegate_enabled` | bool | Allow delegating to the local Claude CLI agent. |
+| `claude_model` | string | Default Claude model (empty = CLI default). |
+| `cost_reward_enabled` | bool | Factor token cost into the reward signal. |
+| `cost_reward_lambda_pct` | int | Cost-penalty weight (percent) in the reward. |
+| `cost_reward_ref_usd_milli` | int | Reference cost (USD-milli) normalizing the cost reward. |
+| `cross_verify` | bool | Enable cross-model verification of outputs. |
+| `db2_url` | string | DB2 connection URL (aimee's vector / knowledge-base store). |
+| `dedup_enabled` | bool | Deduplicate near-identical responses. |
+| `dedup_window_seconds` | int | Window (seconds) for response dedup. |
+| `dogfood_autolabel_continuation` | bool | Auto-label continuation turns for dogfood capture. |
+| `dogfood_autolabel_repair` | bool | Auto-label repair turns for dogfood capture. |
+| `dogfood_autolabel_repeat_question` | bool | Auto-label repeated-question turns. |
+| `dogfood_commit_raw` | bool | Commit raw (unredacted) dogfood transcripts. |
+| `dogfood_enabled` | bool | Capture sessions as dogfood training/eval data. |
+| `dogfood_inline_tagging` | bool | Inline-tag dogfood events during the session. |
+| `dogfood_log_dir` | string | Directory for dogfood logs. |
+| `ecomode` | bool | Reduce background compute (eco mode). |
+| `embedding_command` | string | Command that produces embeddings (overrides the endpoint). |
+| `embedding_dim` | int | Embedding vector dimension. |
+| `embedding_endpoint` | string | Embeddings provider endpoint URL. |
+| `embedding_model` | string | Embeddings model name. |
+| `guardrail_mode` | string | Guardrail enforcement mode (off / warn / block). |
+| `guardrails_semantic_allow_ml_only_block` | bool | Allow blocking on the ML classifier alone. |
+| `guardrails_semantic_block_threshold` | float | Semantic score threshold to block. |
+| `guardrails_semantic_command` | string | External semantic-guardrail classifier command. |
+| `guardrails_semantic_dry_run` | bool | Evaluate but don't enforce semantic guardrails. |
+| `guardrails_semantic_enabled` | bool | Enable the semantic guardrail classifier. |
+| `guardrails_semantic_prompt_threshold` | float | Semantic score threshold for prompt-level flags. |
+| `guardrails_semantic_warn_threshold` | float | Semantic score threshold to warn. |
+| `identity_working_profile_injection_enabled` | bool | Inject the working-profile identity into prompts. |
+| `ingress_audit_async` | bool | Audit ingress requests asynchronously. |
+| `ingress_max_raw_scans` | int | Max raw-content scans per ingress request. |
+| `ingress_preinject_assembly_budget` | int | Token budget for ingress context pre-injection. |
+| `ingress_preinject_enabled` | bool | Enable `<aimee-context>` pre-injection on ingress. |
+| `ingress_trusted_proxy_secret` | string | Shared secret authenticating a trusted ingress proxy. |
+| `ingress_usage_accounting_enabled` | bool | Account token usage on ingress requests. |
+| `integrity_dry_run` | bool | Run integrity checks without enforcing. |
+| `integrity_enabled` | bool | Enable the integrity gate. |
+| `kb_api_bearer_token` | string | Bearer token for the aimee-kb API. |
+| `kb_api_http_port` | int | HTTP port the aimee-kb API listens on. |
+| `kb_evidence_emit_enabled` | bool | Emit evidence records from KB ingest. |
+| `kb_mining_enabled` | bool | Enable background KB mining. |
+| `kb_mining_min_poll_s` | int | Minimum interval (s) between KB mining polls. |
+| `kb_search_max_results` | int | Default max results for KB search. |
+| `learning_implicit_citation_continuation` | bool | Implicit-learning signal: citation on continuation. |
+| `learning_implicit_citation_repair` | bool | Implicit-learning signal: citation on repair. |
+| `learning_implicit_repeat_question` | bool | Implicit-learning signal: repeated question. |
+| `learning_implicit_repeated_correction` | bool | Implicit-learning signal: repeated correction. |
+| `learning_implicit_workflow_repetition` | bool | Implicit-learning signal: workflow repetition. |
+| `learning_max_commits_per_week` | int | Cap on learning-derived commits per week. |
+| `learning_proposal_ttl_days` | int | TTL (days) for learning proposals. |
+| `learning_router_enabled` | bool | Enable the learning router. |
+| `max_iterations` | int | Per-turn iteration cap for interactive chat (default 15). |
+| `max_iterations_delegate` | int | Per-turn iteration cap for delegate sessions (default 25). |
+| `memory_abstain_enabled` | bool | Allow memory recall to abstain on low confidence. |
+| `memory_abstain_gate` | float | Confidence gate for memory abstention. |
+| `memory_bm25_weight` | float | BM25 (lexical) weight in hybrid memory recall. |
+| `memory_chunk_min_confidence` | float | Minimum confidence to keep a memory chunk. |
+| `memory_coref_mode` | string | Coreference-resolution mode for memory. |
+| `memory_coref_window` | int | Coreference lookback window. |
+| `memory_fetch_budget_base` | int | Base token budget for memory fetch. |
+| `memory_fetch_budget_enabled` | bool | Enable token-budgeted memory fetch. |
+| `memory_fetch_budget_shape_aware` | bool | Shape-aware memory fetch budgeting. |
+| `memory_hard_negative_log` | string | Path to the hard-negative recall log file (empty = disabled). |
+| `memory_improve_dedupe_enabled` | bool | Dedupe during memory-improve. |
+| `memory_improve_summarise_enabled` | bool | Summarise during memory-improve. |
+| `memory_kb_neighbour_expand` | bool | Expand recall to KB neighbours. |
+| `memory_maintenance_trigger_inserts` | int | Inserts before a maintenance cycle triggers. |
+| `memory_maintenance_trigger_secs` | int | Seconds before a maintenance cycle triggers. |
+| `memory_negation_enabled` | bool | Detect/handle negation in memory. |
+| `memory_profile_cards_enabled` | bool | Maintain profile cards from observations. |
+| `memory_profile_cards_min_obs` | int | Min observations before a profile card forms. |
+| `memory_profile_cards_stale_secs` | int | Profile-card staleness (seconds). |
+| `memory_query_expansion_k` | int | Number of expanded queries for recall. |
+| `memory_query_expansion_mode` | string | Query-expansion mode. |
+| `memory_rerank_command` | string | External reranker command. |
+| `memory_rerank_enabled` | bool | Enable cross-encoder reranking of recall. |
+| `memory_rerank_mode` | string | Reranker mode. |
+| `memory_rerank_top_k` | int | Top-K candidates to rerank. |
+| `memory_rewrite_command` | string | External query-rewrite command. |
+| `memory_rewrite_decompose` | bool | Decompose queries during rewrite. |
+| `memory_rewrite_enabled` | bool | Enable query rewriting for recall. |
+| `memory_rewrite_hyde` | bool | Use HyDE (hypothetical-document) rewrite. |
+| `memory_rewrite_max_subqueries` | int | Max sub-queries produced by rewrite. |
+| `memory_scenes_enabled` | bool | Cluster memories into scenes. |
+| `memory_scenes_min_cluster_size` | int | Min cluster size for a scene. |
+| `memory_scenes_top_m` | int | Top-M scenes to consider. |
+| `memory_semantic_weight` | float | Semantic (vector) weight in hybrid recall. |
+| `memory_window_radius` | int | Neighbour radius for memory-window expansion. |
+| `openai_endpoint` | string | OpenAI-compatible endpoint URL. |
+| `openai_key_cmd` | string | Command that prints the OpenAI API key. |
+| `openai_model` | string | OpenAI model name. |
+| `provider` | string | Default model provider. |
+| `reasoning_cap_enabled` | bool | Cap the model's reasoning effort. |
+| `typed_facts_enabled` | bool | Enable the typed-fact knowledge layer (master gate; default off). |
+| `verify_cross_project` | bool | Let `aimee git verify` span other projects. |
+| `verify_enabled` | bool | Master gate for `aimee git verify` (default off). |
+| `virtual_context_assembly_budget` | int | Token budget for virtual-context assembly. |
+| `virtual_context_enabled` | bool | Enable virtual-context assembly. |
 
 ## Config-file sections (48)
 
-Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`.
+Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
-- **`aimee`** — `api`
-- **`auxiliary`** — `default_max_tokens`, `default_model`, `default_provider`, `enabled`, `tasks`
-- **`cache_shaping`** — `enabled`, `min_chars`
-- **`charter`** — `hard_constraints`, `safety_axioms`, `tone_boundaries`, `values`, `working_profile_drift_limit`
-- **`compact`** — `enabled`, `head_bytes`, `per_tool`, `tail_bytes`, `threshold`
-- **`computer_use`** — `allowed_domains`, `default_navigation`, `enabled`, `redact_sensitive_screenshots`
-- **`concurrency`** — `default`, `per_model`, `per_provider`, `preempt`
-- **`context`** — `engine`
-- **`cost_reward`** — `enabled`, `lambda_pct`, `ref_usd_milli`
-- **`cron_jobs`** — `context_from`, `deliver`, `enabled`, `id`, `mode`, `pre_wake_gate`, `prompt`, `schedule`, `script`, `skills`, `when_context_contains`, `workdir`
-- **`cross_verify`** — `enabled`, `prompt`, `role`, `verify_cmd`
-- **`db2`** — `vector`
-- **`dedup`** — `enabled`, `window_seconds`
-- **`dogfood`** — `commit_raw`, `enabled`, `inline_tagging`, `log_dir`
-- **`ensemble`** — `aggregator`, `max_cost_usd`, `min_successful`, `reference_models`
-- **`guardrails`** — `semantic`
-- **`identity`** — `working_profile_injection`
-- **`ingress`** — `audit_async`, `trusted_proxy_secret`, `usage_accounting_enabled`
-- **`integrity`** — `dry_run`, `enabled`
-- **`intelligence`** — `bandit`, `bandit_optimize_command`, `calibrate`, `constraint_solver_command`, `demotion`, `kb`, `planner`, `planner_search_command`, `ranker_fuse_command`, `ranking`, `reasoning`, `reasoning_datalog_command`, `synthesize`
-- **`kb`** — `api`, `background_ingest`, `connection_workers`, `curator`, `evidence`, `maintenance`, `mining`, `search_max_results`, `worker_count`
-- **`learning`** — `embed`, `implicit`, `router`, `synthesize`
-- **`lsp_servers`** — `args`, `command`, `extensions`, `name`
-- **`mcp`** — `osv`
-- **`mcp_clients`** — `bearer_token_env`, `command`, `cwd`, `name`, `transport`, `url`
-- **`memory`** — `abstain`, `aggregation`, `bm25_weight`, `briefing`, `citations`, `cognify`, `context_budget`, `coref`, `derive_facts`, `directives`, `dispositions`, `episode_summaries`, `failure_detection`, `fetch_budget`, `hard_negative_log`, `improve`, `lifecycle`, `pagerank`, `profile_cards`, `prospective`, `recall`, `rewrite`, `routing`, `salience`, `scenes`, `semantic_weight`
-- **`memory_maintenance`** — `enabled`, `interval_seconds`, `summarize_enabled`, `trigger_inserts`, `trigger_secs`
-- **`memory_negation`** — `enabled`
-- **`memory_query_expansion`** — `k`, `mode`
-- **`memory_recall_lanes`** — `enabled`, `fact_kinds`, `floor_fact`, `floor_summary`, `k_fact`, `k_summary`, `summary_kinds`
-- **`memory_rerank`** — `command`, `enabled`, `mix`, `top_k`
-- **`memory_rewrite`** — `command`, `decompose`, `enabled`, `hyde`, `max_subqueries`
-- **`memory_window`** — `kb_neighbour_expand`, `radius`
-- **`model_meta`** — `capability_routing`, `refresh_minutes`
-- **`otel`** — `endpoint`, `service_name`
-- **`reasoning_cap`** — `enabled`
-- **`retry`** — `base_ms`, `max_attempts`, `max_ms`
-- **`rewind`** — `auto_snapshot`
-- **`roundtable`** — `converge_threshold`, `deadline_ms`, `max_rounds`, `pipeline_done_bar`, `pipeline_gate_ttl_h`, `pipeline_max_attempts_per_pass`, `pipeline_max_cost_usd`, `pipeline_max_passes`, `pipeline_max_total_cost_usd`, `pipeline_parked_releases_slot`, `pipeline_unknown_context_tokens`, `turns`
-- **`sandbox`** — `allow_paths`, `mode`, `network`
-- **`script`** — `allowed_tools`
-- **`search`** — `backend`, `max_results`, `searxng_url`, `tavily_api_key`
-- **`session`** — `max_sessions`, `max_worktrees`, `stale_threshold_secs`, `virtual_context`
-- **`skills`** — `capability`, `curator`, `dispatch`, `eval`, `manage`, `review`
-- **`transport`** — `cache_aware_rewrite`
-- **`trigger`** — `auth_token`, `max_concurrent`
-- **`trigger_rules`** — `event`, `pipeline`, `schedule`, `source`
-- **`workspaces`** — `head`, `path`, `provider`, `remote`
+- **`aimee`** — _Core API/runtime settings._ Keys: `api`
+- **`auxiliary`** — _Auxiliary (cheap/background) model used for side tasks._ Keys: `default_max_tokens`, `default_model`, `default_provider`, `enabled`, `tasks`
+- **`cache_shaping`** — _Prompt-cache shaping._ Keys: `enabled`, `min_chars`
+- **`charter`** — _Operating charter: values, constraints, safety axioms, tone._ Keys: `hard_constraints`, `safety_axioms`, `tone_boundaries`, `values`, `working_profile_drift_limit`
+- **`compact`** — _Transcript compaction thresholds._ Keys: `enabled`, `head_bytes`, `per_tool`, `tail_bytes`, `threshold`
+- **`computer_use`** — _Computer-use (browser) tool settings._ Keys: `allowed_domains`, `default_navigation`, `enabled`, `redact_sensitive_screenshots`
+- **`concurrency`** — _Per-model / per-provider concurrency limits._ Keys: `default`, `per_model`, `per_provider`, `preempt`
+- **`context`** — _Context-engine selection._ Keys: `engine`
+- **`cost_reward`** — _Cost-aware reward shaping._ Keys: `enabled`, `lambda_pct`, `ref_usd_milli`
+- **`cron_jobs`** — _Scheduled job definitions (array of objects)._ Keys: `context_from`, `deliver`, `enabled`, `id`, `mode`, `pre_wake_gate`, `prompt`, `schedule`, `script`, `skills`, `when_context_contains`, `workdir`
+- **`cross_verify`** — _Cross-model output verification._ Keys: `enabled`, `prompt`, `role`, `verify_cmd`
+- **`db2`** — _DB2 / vector store settings._ Keys: `vector`
+- **`dedup`** — _Response deduplication._ Keys: `enabled`, `window_seconds`
+- **`dogfood`** — _Session capture for dogfood data._ Keys: `commit_raw`, `enabled`, `inline_tagging`, `log_dir`
+- **`ensemble`** — _Roundtable ensemble panel + aggregator._ Keys: `aggregator`, `max_cost_usd`, `min_successful`, `reference_models`
+- **`guardrails`** — _Semantic guardrail policy._ Keys: `semantic`
+- **`identity`** — _Working-profile identity injection._ Keys: `working_profile_injection`
+- **`ingress`** — _Ingress (proxy frontends) behavior._ Keys: `audit_async`, `trusted_proxy_secret`, `usage_accounting_enabled`
+- **`integrity`** — _Integrity gate._ Keys: `dry_run`, `enabled`
+- **`intelligence`** — _Intelligence subsystems (bandit, planner, ranking, reasoning) + their external commands; most children are nested objects._ Keys: `bandit`, `bandit_optimize_command`, `calibrate`, `constraint_solver_command`, `demotion`, `kb`, `planner`, `planner_search_command`, `ranker_fuse_command`, `ranking`, `reasoning`, `reasoning_datalog_command`, `synthesize`
+- **`kb`** — _Knowledge-base client + curator / evidence / maintenance / mining (nested objects)._ Keys: `api`, `background_ingest`, `connection_workers`, `curator`, `evidence`, `maintenance`, `mining`, `search_max_results`, `worker_count`
+- **`learning`** — _Learning subsystem (router, implicit, embed, synthesize; nested objects)._ Keys: `embed`, `implicit`, `router`, `synthesize`
+- **`lsp_servers`** — _LSP server definitions (array of objects)._ Keys: `args`, `command`, `extensions`, `name`
+- **`mcp`** — _MCP integration (e.g. OSV)._ Keys: `osv`
+- **`mcp_clients`** — _MCP client connections (array of objects)._ Keys: `bearer_token_env`, `command`, `cwd`, `name`, `transport`, `url`
+- **`memory`** — _Memory subsystem; most children (recall, rerank, lifecycle, …) are nested objects with their own keys._ Keys: `abstain`, `aggregation`, `bm25_weight`, `briefing`, `citations`, `cognify`, `context_budget`, `coref`, `derive_facts`, `directives`, `dispositions`, `episode_summaries`, `failure_detection`, `fetch_budget`, `hard_negative_log`, `improve`, `lifecycle`, `pagerank`, `profile_cards`, `prospective`, `recall`, `rewrite`, `routing`, `salience`, `scenes`, `semantic_weight`
+- **`memory_maintenance`** — _Memory maintenance scheduling._ Keys: `enabled`, `interval_seconds`, `summarize_enabled`, `trigger_inserts`, `trigger_secs`
+- **`memory_negation`** — _Negation handling in memory._ Keys: `enabled`
+- **`memory_query_expansion`** — _Recall query expansion._ Keys: `k`, `mode`
+- **`memory_recall_lanes`** — _Per-lane recall floors / caps._ Keys: `enabled`, `fact_kinds`, `floor_fact`, `floor_summary`, `k_fact`, `k_summary`, `summary_kinds`
+- **`memory_rerank`** — _Recall reranking._ Keys: `command`, `enabled`, `mix`, `top_k`
+- **`memory_rewrite`** — _Recall query rewriting._ Keys: `command`, `decompose`, `enabled`, `hyde`, `max_subqueries`
+- **`memory_window`** — _Memory-window neighbour expansion._ Keys: `kb_neighbour_expand`, `radius`
+- **`model_meta`** — _Model metadata + capability routing._ Keys: `capability_routing`, `refresh_minutes`
+- **`otel`** — _OpenTelemetry export._ Keys: `endpoint`, `service_name`
+- **`reasoning_cap`** — _Reasoning-effort cap._ Keys: `enabled`
+- **`retry`** — _Provider retry / backoff._ Keys: `base_ms`, `max_attempts`, `max_ms`
+- **`rewind`** — _Auto-snapshot / rewind._ Keys: `auto_snapshot`
+- **`roundtable`** — _Roundtable pipeline thresholds, caps, gates, and turns._ Keys: `converge_threshold`, `deadline_ms`, `max_rounds`, `pipeline_done_bar`, `pipeline_gate_ttl_h`, `pipeline_max_attempts_per_pass`, `pipeline_max_cost_usd`, `pipeline_max_passes`, `pipeline_max_total_cost_usd`, `pipeline_parked_releases_slot`, `pipeline_unknown_context_tokens`, `turns`
+- **`sandbox`** — _Tool sandbox (paths, network, mode)._ Keys: `allow_paths`, `mode`, `network`
+- **`script`** — _Script-tool allowlist._ Keys: `allowed_tools`
+- **`search`** — _Web-search backend (Tavily / SearXNG)._ Keys: `backend`, `max_results`, `searxng_url`, `tavily_api_key`
+- **`session`** — _Session / worktree limits._ Keys: `max_sessions`, `max_worktrees`, `stale_threshold_secs`, `virtual_context`
+- **`skills`** — _Skill subsystem (capability, curator, dispatch, eval, manage, review; nested objects)._ Keys: `capability`, `curator`, `dispatch`, `eval`, `manage`, `review`
+- **`transport`** — _Transport tweaks (cache-aware rewrite)._ Keys: `cache_aware_rewrite`
+- **`trigger`** — _Trigger listener (auth, concurrency)._ Keys: `auth_token`, `max_concurrent`
+- **`trigger_rules`** — _Trigger rule definitions (array of objects)._ Keys: `event`, `pipeline`, `schedule`, `source`
+- **`workspaces`** — _Workspace definitions (array of objects)._ Keys: `head`, `path`, `provider`, `remote`
 
 ## Other top-level config-file keys (5)
 
@@ -498,6 +499,86 @@ blocks:
 
 `AIMEE_WORKFLOW_REPO` (repo the engine operates on) and `AIMEE_WORKFLOW_BASE` (base branch for freeze/diff) — see Environment variables above.
 
+## Other configuration files
+
+Beyond the config store, aimee reads a few standalone JSON/policy files (paths under `$AIMEE_HOME` unless an env override is set).
+
+### `agents.json` — agent / model definitions
+
+`{"default_agent": "<name>", "agents": [ {<agent>}, … ]}`. Each agent object's fields (scanned from `src/server/agent_config.c`):
+
+| Field | Description |
+|-------|-------------|
+| `access_token` | Static auth token for the endpoint. |
+| `agents` | Top-level: array of agent definitions. |
+| `api_key` | Inline API key (prefer `api_key_env` or the vault). |
+| `api_key_env` | Env var name holding the agent's API key. |
+| `auth_cmd` | Command that prints an auth token. |
+| `auth_type` | Auth scheme (bearer / oauth / none). |
+| `auto_compact_pct` | Context % at which to auto-compact. |
+| `backend` | Execution backend (http / cli / ssh / docker). |
+| `cidr` | Allowed CIDR (relay / tunnel networking). |
+| `cli_cmd` | CLI command for a cli-backend agent. |
+| `cli_idle_timeout_ms` | Idle timeout (ms) for a CLI agent. |
+| `cli_kind` | CLI agent kind (claude / codex / opencode). |
+| `context_warn_pct` | Context % at which to warn. |
+| `context_window` | Model context window (tokens). |
+| `cost_limit` | Per-agent cost cap (USD). |
+| `cost_tier` | Cost-tier label for routing. |
+| `credentials` | Credential block / reference. |
+| `default_agent` | Top-level: name of the default agent. |
+| `desc` | Human description of the agent. |
+| `enabled` | Whether the agent is active. |
+| `endpoint` | Provider endpoint URL. |
+| `exec_roles` | Roles this agent may execute with tools. |
+| `exec_system_prompt` | System prompt for exec/tool runs. |
+| `extra_headers` | Extra HTTP headers for requests. |
+| `fallback_chain` | Ordered fallback agent chain. |
+| `fallback_model` | Fallback model on failure. |
+| `hosts` | Allowed hosts (relay / tunnel). |
+| `inject_respond_tool` | Inject the `respond` tool. |
+| `ip` | Bind/target IP (relay / tunnel). |
+| `max_parallel` | Max concurrent calls to this agent. |
+| `max_reconnects` | Max reconnect attempts (streaming / relay). |
+| `max_tokens` | Max output tokens. |
+| `max_turns` | Max agent-loop turns. |
+| `middleware` | Per-agent middleware overrides (e.g. `context_window`, `max_tokens`). |
+| `model` | Model name. |
+| `name` | Agent identifier. |
+| `network` | Network mode (backend sandbox). |
+| `networks` | Allowed networks. |
+| `port` | Target port (relay / tunnel). |
+| `provider` | Provider name. |
+| `recommended_sampling` | Provider-recommended sampling parameters. |
+| `reconnect_delay` | Delay between reconnects (ms). |
+| `relay_key` | Relay auth key. |
+| `relay_ssh` | SSH relay config. |
+| `roles` | Roles this agent serves (review, plan, …). |
+| `session_reuse` | Reuse a session across calls. |
+| `ssh_entry` | SSH entry point (ssh backend). |
+| `ssh_key` | SSH key path (ssh backend). |
+| `stall_threshold` | Stall-detection threshold. |
+| `target_host` | Target host (relay / tunnel). |
+| `target_port` | Target port (relay / tunnel). |
+| `timeout_ms` | Per-call timeout (ms). |
+| `tokens` | Token budget / accounting block. |
+| `tools_enabled` | Allow tool use for this agent. |
+| `tunnel` | Tunnel config. |
+| `tunnels` | Tunnel definitions. |
+| `user` | Remote user (ssh backend). |
+
+### Toolsets — `AIMEE_TOOLSETS_CONFIG` (or the config `toolsets` map)
+
+Named tool allowlists. `{"toolsets": {"<name>": { … }}}`; each toolset:
+
+- `tools` / `allowed_tools` — the tool names the set permits.
+- `include` — inherit another toolset's tools.
+- `script` — script-tool configuration for the set.
+
+### Guardrails — `AIMEE_GUARDRAILS_PATH`
+
+A policy file governing path read/write classification and pre-tool enforcement (antipattern blocking). It is a behavioral policy rather than a flat key schema; the tunable thresholds are exposed as the `guardrails` section + `guardrails_semantic_*` / `guardrail_mode` keys documented above.
+
 ## Coverage & limitations
 
 This reference is generated by scanning the canonical source tables, which covers the scalar/keyed config surface but has known blind spots — listed here so a reader can tell *deliberately out of scope* from *not auto-derived*:
@@ -505,6 +586,6 @@ This reference is generated by scanning the canonical source tables, which cover
 - **Array/object element fields** are captured when the parser iterates with `cJSON_ArrayForEach` over a section's array; fields read through other access patterns (`cJSON_GetArrayItem`, indexing) or nested more than one object deep may appear only under their parent section name.
 - **Env vars built at runtime** (a name assembled with `snprintf`/concatenation and passed to `getenv(var)`) are not discoverable by the string-literal scan. Provider API-key vars are the known case and are handled via each agent's `api_key_env`; only the common defaults are listed.
 - **Compile-time `-D` defines** used as build-level configuration are not scanned (they are not runtime-overridable config).
-- **Separate config files** — agent definitions (`agents.json`), toolsets, guardrails policy, and per-workflow definitions — have their own schemas. Custom workflow blocks (`blocks.yaml`) and the workflow definition schema are documented above; the others are out of this reference's stated scope.
+- **Separate config files** — `agents.json`, toolsets, guardrails, and custom workflow blocks (`blocks.yaml`) / workflow definitions are documented in their own sections above. Per-agent field set is scanned from `agent_config.c`; the guardrails *policy* is behavioral (path classification + pre-tool enforcement), with its tunables exposed as config keys.
 
 If the scan ever finds a config var with no description, it is emitted under an **Undocumented** heading in the relevant section — so a new option cannot silently bypass this reference.
