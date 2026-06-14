@@ -492,7 +492,8 @@ CREATE INDEX IF NOT EXISTS idx_artifacts_review
 -- keys a retrieval_event so an audit trace can reconstruct what grounded a turn.
 -- Nullable (legacy/proactive events have none); a partial unique index makes one
 -- turn map to one event (and enables the P1.5 idempotent two-writer merge).
-ALTER TABLE artifacts ADD COLUMN IF NOT EXISTS turn_id TEXT DEFAULT NULL;
+ALTER TABLE artifacts ADD COLUMN IF NOT EXISTS turn_id TEXT DEFAULT NULL
+    CHECK (turn_id IS NULL OR length(turn_id) <= 128);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_artifacts_turn_event
     ON artifacts (turn_id) WHERE kind = 'retrieval_event' AND turn_id IS NOT NULL;
 

@@ -68,6 +68,16 @@ static void test_retrieval_event_turn(void)
           0);
    assert(got_id[0] == '\0');
 
+   /* DUPLICATE turn_id is first-wins: a second write for the same turn returns the
+    * AUTHORITATIVE (first) event id, and by_turn still resolves to that one event. */
+   char dup_id[64];
+   assert(db2_demotion_retrieval_event_write_turn("turn-abc", "fp2", "Recall", NULL, 0, dup_id,
+                                                  sizeof(dup_id)) == 0);
+   assert(strcmp(dup_id, ev_id) == 0); /* returned the first event's id, not the orphan's */
+   char reget[64];
+   assert(db2_demotion_retrieval_event_by_turn("turn-abc", reget, sizeof(reget), NULL, 0) == 1);
+   assert(strcmp(reget, ev_id) == 0); /* still resolves to the original */
+
    /* a NULL/"" turn_id behaves like the base writer (no stamp, still written) and
     * such events are never found by a turn lookup. */
    char ev2[64];
