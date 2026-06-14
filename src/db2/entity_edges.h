@@ -44,9 +44,12 @@ extern "C"
     * stamps edge_class='semantic' so the row is separable from co-occurrence rows
     * sharing this table (R1-A1). The single commit point for semantic edges is
     * the typed-fact gate (db2_fact_commit) — callers route through it, not here
-    * directly. Bumps weight on a repeat (source,relation,target). 0/-1. */
+    * directly. Bumps weight on a repeat (source,relation,target) and upgrades the
+    * stored confidence_class/confidence when the new write outranks it (§5; never
+    * downgrades). confidence_class is FACT_CLASS_* (NULL/empty -> "C"). 0/-1. */
    int db2_entity_edge_upsert_semantic(const char *source, const char *relation, const char *target,
                                        int relation_id, int subject_kind, int object_kind,
+                                       const char *confidence_class, double confidence,
                                        int *out_added);
 
    /* Recall over typed facts: edges where (source=entity OR target=entity) AND

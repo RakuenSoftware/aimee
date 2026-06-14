@@ -774,6 +774,10 @@ int config_load(config_t *cfg)
    if (cJSON_IsNumber(item) && item->valuedouble >= 0)
       cfg->ingress_max_raw_scans = (int)item->valuedouble;
 
+   item = cJSON_GetObjectItemCaseSensitive(root, "typed_facts_enabled");
+   if (cJSON_IsBool(item))
+      cfg->typed_facts_enabled = cJSON_IsTrue(item);
+
    item = cJSON_GetObjectItemCaseSensitive(root, "embedding_command");
    if (cJSON_IsString(item) && item->valuestring[0])
       snprintf(cfg->embedding_command, sizeof(cfg->embedding_command), "%s", item->valuestring);

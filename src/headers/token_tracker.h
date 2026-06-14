@@ -26,6 +26,15 @@ double token_estimate_cost(const char *model, const token_usage_t *usage);
  * model as unknown spend. *priced may be NULL. */
 double token_estimate_cost_ex(const char *model, const token_usage_t *usage, int *priced);
 
+/* Resolve the billable model for the audit/cost key by precedence (ingress
+ * cost-accounting §2a): provider-reported model (most specific, echoed in the
+ * response) > served model (what aimee actually routed to) > requested model
+ * (what the client asked for). Agent names are NEVER pricing keys. Returns one of
+ * the inputs verbatim, or "" when none is set (the by-model breakdown maps "" to
+ * "(unattributed)" rather than mis-pricing it). Inputs may be NULL. */
+const char *token_billable_model(const char *provider_model, const char *served_model,
+                                 const char *requested_model);
+
 /* Registry-price fallback hook. token_estimate_cost calls this (when installed)
  * on a static-table miss, so it covers registry-only providers (gemini, groq,
  * mistral) and models.dev / operator overrides. The hook is installed by a

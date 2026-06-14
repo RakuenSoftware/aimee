@@ -44,6 +44,7 @@ const config_field_t config_fields[] = {
     {"ingress_preinject_assembly_budget", offsetof(config_t, ingress_preinject_assembly_budget),
      sizeof(int), 0, CFG_INT},
     {"ingress_max_raw_scans", offsetof(config_t, ingress_max_raw_scans), sizeof(int), 0, CFG_INT},
+    {"typed_facts_enabled", offsetof(config_t, typed_facts_enabled), sizeof(int), 0, CFG_BOOL},
     {"memory_rerank_command", offsetof(config_t, memory_rerank_command),
      sizeof(((config_t *)0)->memory_rerank_command), 0, CFG_STRING},
     {"memory_rerank_top_k", offsetof(config_t, memory_rerank_top_k), sizeof(int), 0, CFG_INT},
