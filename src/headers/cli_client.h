@@ -267,6 +267,10 @@ int cmd_optimize_run(int argc, char **argv, int json_output);
  * /v1 HTTP API. Defined in cli_persona.c. */
 int cmd_persona_client_run(int argc, char **argv, int json_output);
 
+/* `aimee workflow <blocks|validate|show|list|new>` — inspect/validate workflow
+ * definitions locally. Defined in cmd_workflow.c. */
+int cmd_workflow_client_run(int argc, char **argv, int json_output);
+
 /* `aimee roles <list|show|edit|rm>` — manage delegate role templates over the
  * server's /v1 HTTP API. Defined in cli_roles.c. */
 int cmd_roles_client_run(int argc, char **argv, int json_output);

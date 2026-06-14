@@ -215,6 +215,12 @@
      "  compare --baseline <a> --candidate <b>  Per-metric delta between two arms\n"
      "  promote --point <p> --candidate <a> [--guarded] [--apply]  Gate/apply a promotion "
      "(credible interval)\n"},
+    {"workflow", "Inspect & validate development workflows", CLIENT_TIER_ADVANCED, 0,
+     "  blocks                 List the composable block catalog\n"
+     "  validate <file.yaml>   Typed-graph validate a workflow definition\n"
+     "  show <file.yaml>       Print the canonical form + version hash\n"
+     "  list                   List workflows under $AIMEE_HOME/workflows\n"
+     "  new <file.yaml>        Scaffold a starter workflow\n"},
     {"code", "Code-health audit", CLIENT_TIER_ADVANCED, 0,
      "  audit [dir] [--json] [--fix]   File-health audit (untested files,\n"
      "                         TODO/FIXME markers, debt score) over the tree;\n"

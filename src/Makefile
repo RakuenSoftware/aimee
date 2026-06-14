@@ -90,7 +90,7 @@ endif
 # would fail trying to write .d dependency files into non-existent subdirectories.
 _DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/db2)
 
-C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1 -Idb2 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
+C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1 -Idb2 -Iworkflow $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
 
 # DB2 client flags are discovered with pkg-config because provider headers are
 # not always installed under the compiler default include path. See
@@ -293,7 +293,8 @@ CORE_SRCS = db1/db.c db1/db_schema.c config.c config_sections.c config_database.
             compact.c platform_random.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
             client_integrations.c mcp_tools.c mcp_skill_tools.c mcp_tools_gateway.c events.c \
             model_registry.c models_dev.c models_dev_cache.c lsp_client.c lsp_manager.c plugin.c \
-            plugin_ctx.c plugin_loader.c memory_provider.c plugin_c_hook.c config_plugin.c code_collect.c codex_auth.c
+            plugin_ctx.c plugin_loader.c memory_provider.c plugin_c_hook.c config_plugin.c code_collect.c codex_auth.c \
+            workflow/wfe_iface.c workflow/wfe_def.c workflow/wfe_validate.c workflow/wfe_canonical.c
 CORE_OBJS = $(CORE_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o
 
 # --- Layer 0b: DB1 (user-local tier) ---
@@ -302,7 +303,7 @@ CORE_OBJS = $(CORE_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o
 # of the tree call typed domain functions declared in db1/*.h and never
 # see a handle. db1/*_mock.c are alternative implementations linked by
 # tests that want to exercise the API contract without a real backend.
-DB1_SRCS = db1/db1_init.c db1/db1_write.c db1/wm.c db1/fsnap.c db1/checkpoints.c db1/roadmap_runtime.c db1/clarify.c db1/diagnose.c db1/workflow_session.c db1/caches.c db1/primary_sessions.c db1/env.c db1/delegations.c db1/delegation_checkpoint.c db1/decisions.c db1/eval.c db1/runtime_state.c db1/server_sessions.c db1/session_state.c db1/session_paths.c db1/token_audit.c db1/agent_log.c db1/agent_jobs.c db1/coord_jobs.c db1/work_queue.c db1/execution_plans.c db1/pipelines.c db1/roundtable_pipeline.c db1/secrets.c db1/cognify_jobs.c db1/cost_fold.c db1/local_operator.c db1/project_clones.c db1/git_ownership.c db1/tool_local_availability.c db1/model_catalog.c db1/execution_trace.c db1/working_profile_local.c db1/windows.c db1/diagnostics.c db1/maintenance.c db1/conv_context.c db1/payload_rewrite_state.c db1/guardrail_events.c db1/db1_trigger.c db1/db1_cron_jobs.c db1/delegate_learning.c db1/interaction_events.c db1/mcp_osv_cache.c
+DB1_SRCS = db1/db1_init.c db1/db1_write.c db1/wm.c db1/fsnap.c db1/checkpoints.c db1/roadmap_runtime.c db1/clarify.c db1/diagnose.c db1/workflow_session.c db1/caches.c db1/primary_sessions.c db1/env.c db1/delegations.c db1/delegation_checkpoint.c db1/decisions.c db1/eval.c db1/runtime_state.c db1/server_sessions.c db1/session_state.c db1/session_paths.c db1/token_audit.c db1/agent_log.c db1/agent_jobs.c db1/coord_jobs.c db1/work_queue.c db1/execution_plans.c db1/pipelines.c db1/roundtable_pipeline.c db1/secrets.c db1/cognify_jobs.c db1/cost_fold.c db1/local_operator.c db1/project_clones.c db1/git_ownership.c db1/tool_local_availability.c db1/model_catalog.c db1/execution_trace.c db1/working_profile_local.c db1/windows.c db1/diagnostics.c db1/maintenance.c db1/conv_context.c db1/payload_rewrite_state.c db1/guardrail_events.c db1/db1_trigger.c db1/db1_cron_jobs.c db1/delegate_learning.c db1/interaction_events.c db1/mcp_osv_cache.c db1/wfe_store.c
 DB1_OBJS = $(DB1_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Layer 0c: DB2 (shared knowledge tier) ---
@@ -349,7 +350,7 @@ CMD_SRCS = prompts.c persona.c hardware_probe.c curator_profile.c server/delegat
 CMD_OBJS = $(CMD_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Pure client (aimee) ---
-CLI_SRCS = cli_main.c cli_session_start.c cli_attention_guard.c cli_code_audit.c cli_tui.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c server/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c acp_server.c cli_workspace_serve.c cli_agent_keys.c
+CLI_SRCS = cli_main.c cli_session_start.c cli_attention_guard.c cli_code_audit.c cli_tui.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c server/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c acp_server.c cli_workspace_serve.c cli_agent_keys.c cmd_workflow.c
 ifeq ($(WITH_TLS),1)
 CLI_SRCS += aimee_tls.c
 TLS_OBJS = $(OBJDIR)/aimee_tls.o
@@ -363,7 +364,7 @@ CLIENT_PLATFORM_OBJS = $(filter %/platform_ipc.o %/platform_net.o %/platform_pat
 # with full flags; --gc-sections trims the unused remainder). util.o supplies
 # run_cmd/run_cmd_set_cwd for the provider exec_shell op the runner now serves.
 CLIENT_RUNNER_OBJS = $(OBJDIR)/server/workspace_provider_detached.o $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o
-CLIENT_SUPPORT_OBJS = $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o $(OBJDIR)/aimee_home.o $(OBJDIR)/history.o $(OBJDIR)/markdown.o $(OBJDIR)/code_collect.o $(OBJDIR)/codex_auth.o $(CLIENT_PLATFORM_OBJS) $(CLIENT_RUNNER_OBJS)
+CLIENT_SUPPORT_OBJS = $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o $(OBJDIR)/aimee_home.o $(OBJDIR)/history.o $(OBJDIR)/markdown.o $(OBJDIR)/code_collect.o $(OBJDIR)/codex_auth.o $(OBJDIR)/yaml.o $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_def.o $(OBJDIR)/workflow/wfe_validate.o $(OBJDIR)/workflow/wfe_canonical.o $(CLIENT_PLATFORM_OBJS) $(CLIENT_RUNNER_OBJS)
 CLIENT_COMPILE_OBJS = $(CLI_OBJS) $(CLIENT_PLATFORM_OBJS) $(OBJDIR)/dstr.o $(OBJDIR)/history.o $(OBJDIR)/markdown.o
 $(CLIENT_COMPILE_OBJS): C_FLAGS := $(CLIENT_C_FLAGS)
 
@@ -375,7 +376,9 @@ SERVER_SRCS = server/server_main.c server/server.c server/server_http.c server/s
               server/compute_concurrency.c server/provider_catalog.c \
               server/dashboard_server.c hud.c cmd_identity.c prompts.c persona.c working_profile.c \
               server/delegate_role.c server/delegate_depth.c server/delegate_prompt.c server/delegate_run_phases.c server/delegate_routing.c server/delegate_launch.c server/delegate_source_authority.c server/delegate_economics.c server/delegate_credentials.c server/delegate_credential_retry.c server/delegate_patch_coordinator.c server/delegate_ensemble.c server/delegate_checkout.c cmd_init.c \
-              server/trigger_scheduler.c server/server_trigger.c server/server_cron.c server/server_trajectory.c server/server_config.c server/vault_principal.c server/vault_crypto.c server/vault_kek_cache.c server/vault_server_key.c server/vault_store.c server/vault_service.c server/server_vault.c
+              server/trigger_scheduler.c server/server_trigger.c server/server_cron.c server/server_trajectory.c server/server_config.c server/vault_principal.c server/vault_crypto.c server/vault_kek_cache.c server/vault_server_key.c server/vault_store.c server/vault_service.c server/server_vault.c \
+              workflow/wfe_engine.c workflow/wfe_blocks.c workflow/wfe_approval.c \
+              workflow/wfe_verdict.c workflow/wfe_roundtable.c workflow/wfe_autonomy.c
 SERVER_OBJS = $(SERVER_SRCS:%.c=$(OBJDIR)/%.o)
 SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) guardrails_orchestrator.c,$(DATA_SRCS))
 SERVER_DATA_OBJS = $(SERVER_DATA_SRCS:%.c=$(OBJDIR)/server/%.o) \
