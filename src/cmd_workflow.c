@@ -16,8 +16,9 @@
 static void print_blocks(void)
 {
    static const wfe_block_type_t order[] = {
-       WFE_BLK_AUTHOR_PROPOSAL, WFE_BLK_AUTHOR_PLAN, WFE_BLK_IMPLEMENT, WFE_BLK_FREEZE,
-       WFE_BLK_GATE_ROUNDTABLE, WFE_BLK_GATE_HUMAN,  WFE_BLK_PR_OPEN,   WFE_BLK_MERGE};
+       WFE_BLK_AUTHOR_PROPOSAL, WFE_BLK_AUTHOR_PLAN, WFE_BLK_IMPLEMENT,
+       WFE_BLK_DOCUMENT,        WFE_BLK_FREEZE,      WFE_BLK_GATE_ROUNDTABLE,
+       WFE_BLK_GATE_HUMAN,      WFE_BLK_PR_OPEN,     WFE_BLK_MERGE};
    printf("Workflow block catalog:\n");
    for (size_t i = 0; i < sizeof order / sizeof order[0]; i++)
    {

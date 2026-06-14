@@ -19,6 +19,10 @@ static const struct
     {WFE_BLK_AUTHOR_PROPOSAL, "author.proposal", WFE_ART_PROPOSAL, 0, {WFE_ART_NONE}},
     {WFE_BLK_AUTHOR_PLAN, "author.plan", WFE_ART_PLAN, 1, {WFE_ART_PROPOSAL, WFE_ART_NONE}},
     {WFE_BLK_IMPLEMENT, "implement", WFE_ART_BRANCH, 1, {WFE_ART_PLAN, WFE_ART_NONE}},
+    /* document the effort: a delegate writes docs onto the branch (consumes a
+     * branch, produces the documented branch) -> composes between implement and
+     * freeze, or anywhere a branch is in hand. */
+    {WFE_BLK_DOCUMENT, "document", WFE_ART_BRANCH, 1, {WFE_ART_BRANCH, WFE_ART_NONE}},
     {WFE_BLK_FREEZE, "freeze", WFE_ART_FROZEN_DIFF, 1, {WFE_ART_BRANCH, WFE_ART_NONE}},
     {WFE_BLK_GATE_ROUNDTABLE,
      "gate.roundtable",

@@ -69,6 +69,11 @@ int main(void)
    assert(wfe_block_from_name("author.proposal") == WFE_BLK_AUTHOR_PROPOSAL);
    assert(wfe_block_from_name("gate.roundtable") == WFE_BLK_GATE_ROUNDTABLE);
    assert(wfe_block_from_name("nonsense") == WFE_BLK_UNKNOWN);
+   /* the composable documentation block: branch -> branch */
+   assert(wfe_block_from_name("document") == WFE_BLK_DOCUMENT);
+   assert(wfe_block_output(WFE_BLK_DOCUMENT) == WFE_ART_BRANCH);
+   assert(wfe_block_accepts_input(WFE_BLK_DOCUMENT, WFE_ART_BRANCH) == 1);
+   assert(wfe_block_accepts_input(WFE_BLK_DOCUMENT, WFE_ART_PROPOSAL) == 0);
    assert(wfe_block_output(WFE_BLK_AUTHOR_PROPOSAL) == WFE_ART_PROPOSAL);
    assert(wfe_block_output(WFE_BLK_MERGE) == WFE_ART_NONE);
    assert(wfe_block_accepts_input(WFE_BLK_AUTHOR_PLAN, WFE_ART_PROPOSAL) == 1);

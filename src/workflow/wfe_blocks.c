@@ -143,6 +143,21 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
    return wfe_step_advanced(handle, head[0] ? head : dhash, 0.0);
 }
 
+/* document: a delegate documents the effort by writing docs onto the branch.
+ * Like implement, the produced artifact is the (now-documented) branch. */
+static wfe_step_result_t exec_document(wfe_ctx *ctx, const wfe_node_t *node)
+{
+   (void)ctx;
+   /* Production: dispatch a delegate to document the change on the branch
+    * (README/CHANGELOG/docs/ + inline comments). Integration-gated like the
+    * other delegate-driven blocks; the produced artifact is the branch head. */
+   char base[64] = "", head[64] = "", dhash[65] = "", err[128];
+   wfe_git_freeze(repo_dir(), "HEAD", base, head, dhash, err, sizeof err);
+   char handle[80];
+   snprintf(handle, sizeof handle, "%s.out", node->id);
+   return wfe_step_advanced(handle, head[0] ? head : dhash, 0.0);
+}
+
 /* freeze: capture the cumulative diff at a stable freeze commit. */
 static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
 {
@@ -182,6 +197,7 @@ void wfe_register_default_executors(void)
    wfe_register_block_executor(WFE_BLK_AUTHOR_PROPOSAL, exec_author);
    wfe_register_block_executor(WFE_BLK_AUTHOR_PLAN, exec_author);
    wfe_register_block_executor(WFE_BLK_IMPLEMENT, exec_implement);
+   wfe_register_block_executor(WFE_BLK_DOCUMENT, exec_document);
    wfe_register_block_executor(WFE_BLK_FREEZE, exec_freeze);
    wfe_register_block_executor(WFE_BLK_PR_OPEN, exec_pr_open);
    wfe_register_block_executor(WFE_BLK_MERGE, exec_merge);
