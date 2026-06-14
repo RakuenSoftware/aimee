@@ -958,6 +958,12 @@ typedef struct config
     *   the TCP listener (0 = unlimited, default); over-limit ⇒ 429 +
     *   Retry-After. The UDS listener is never rate-limited. */
    int server_api_http_port;
+   /* server_api_tls_port: TCP port for /v1 over native TLS (0 = disabled, default).
+    * Terminates TLS in aimee-server itself (cert+key at <config>/tls/server.crt +
+    * server.key); refuses to bind unless server_api_bearer_token is set. A TLS+bearer
+    * connection is an attested write path for the credential vault (native-TLS
+    * provisioning). Streaming (SSE) over TLS is not yet supported (phase 1c). */
+   int server_api_tls_port;
    char server_api_bearer_token[256];
    int server_api_rate_limit_per_min;
    /* server_api_max_event_streams: cap on concurrent SSE event streams

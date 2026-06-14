@@ -1,0 +1,43 @@
+/* server_tls.h: native TLS termination for aimee-server (native-TLS phase 1b).
+ *
+ * Plain server TLS — the server presents a cert+key; the client verifies the
+ * server and authenticates with the bearer. No client certificate (not mTLS):
+ * a TLS+bearer connection is the attested write path for the credential vault.
+ * Each TLS connection is handled by its own conn_worker thread, which owns the
+ * SSL end to end (accept -> use -> SSL_free); SSE-offload is refused over TLS
+ * (it dups the fd to a second thread that cannot share the SSL — phase 1c). */
+#ifndef DEC_SERVER_TLS_H
+#define DEC_SERVER_TLS_H 1
+
+#include <openssl/ssl.h>
+
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
+   /* Build the process-wide server SSL_CTX from the cert + key PEM files. Returns
+    * 0 on success, -1 on failure (logged). Idempotent (no-op once initialized). */
+   int server_tls_init(const char *cert_path, const char *key_path);
+
+   /* 1 once server_tls_init has succeeded, else 0. */
+   int server_tls_enabled(void);
+
+   /* Run the TLS handshake on an accepted fd. Returns a new SSL* (caller owns it:
+    * SSL_shutdown + SSL_free) on success, or NULL on handshake failure. */
+   SSL *server_tls_accept(int fd);
+
+   /* server_tls_init from the default location (<config>/tls/server.crt + .key). */
+   int server_tls_init_default(void);
+
+   /* Per-connection lifecycle for the conn worker: handshake an accepted fd and
+    * register its SSL on the conn-io shim (NULL on failure — caller closes fd);
+    * and the teardown (unregister + shutdown + free). */
+   SSL *server_tls_begin(int fd);
+   void server_tls_end(int fd, SSL *ssl);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* DEC_SERVER_TLS_H */

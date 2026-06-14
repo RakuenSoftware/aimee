@@ -26,6 +26,10 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
          if (cJSON_IsNumber(item))
             cfg->server_api_http_port = (int)item->valuedouble;
 
+         item = cJSON_GetObjectItemCaseSensitive(api, "tls_port");
+         if (cJSON_IsNumber(item))
+            cfg->server_api_tls_port = (int)item->valuedouble;
+
          item = cJSON_GetObjectItemCaseSensitive(api, "bearer_token");
          if (cJSON_IsString(item) && item->valuestring)
             strncpy(cfg->server_api_bearer_token, item->valuestring,

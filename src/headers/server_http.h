@@ -25,7 +25,7 @@ extern "C"
     * the UDS bound, -1 on error. Idempotent-safe: a second call while running
     * returns -1. rate_limit_per_min caps authorized TCP requests per 60s
     * window (0 = unlimited); over-limit ⇒ 429 + Retry-After. */
-   int server_http_start(const char *uds_path, int tcp_port, const char *bearer_token,
+   int server_http_start(const char *uds_path, int tcp_port, int tls_port, const char *bearer_token,
                          int rate_limit_per_min, int remote_writes);
 
    /* Pure authorization decision for one HTTP request (no I/O — unit-testable).

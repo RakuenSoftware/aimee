@@ -30,6 +30,11 @@ extern "C"
    int server_conn_io_read(int fd, void *buf, int n);
    int server_conn_io_write_all(int fd, const void *buf, int n);
 
+   /* 1 if `fd` has a registered SSL (a TLS connection), else 0. Used to refuse
+    * SSE-offload over TLS (the offload dups the fd to a thread that can't share
+    * the conn's SSL). */
+   int server_conn_io_has_ssl(int fd);
+
 #ifdef __cplusplus
 }
 #endif
