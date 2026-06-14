@@ -771,6 +771,16 @@ struct cJSON *kb_client_memory_briefing(int limit_tokens);
  * memory_get_context_block(). */
 char *kb_client_memory_context_block(const char *query, const char *block_type, int limit);
 
+/* Auditable-correctness P1: ask the KB to record a single per-turn
+ * retrieval_event keyed by `turn_id` (a UUID), listing the int64 memory row ids
+ * surfaced into the turn. `role` is the recall op (e.g. "Recall"),
+ * `query_fingerprint` identifies the turn query. Returns 0 on success (event
+ * written), -1 on bad args or kb error. The KB write uses the already-merged
+ * db2_demotion_retrieval_event_write_turn (first-wins on duplicate turn_id). */
+int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *role,
+                                            const char *query_fingerprint, const int64_t *ids,
+                                            int n_ids);
+
 /* Fetch the entity profile card via aimee-kb.  Returns 0 on success
  * (|out| filled) or -1 if kb is unreachable or the entity is missing.
  * Mirrors memory_get_entity_profile(). */

@@ -63,4 +63,19 @@ char *ingress_preinject_apply(const char *instructions, const char *envelope);
  * not auto-reset, so the HTTP layer sets it (to 0 or 1) on every request. */
 void ingress_preinject_set_request_disabled(int disabled);
 
+/* Auditable-correctness P1: the per-turn retrieval-event id (a UUID).
+ *
+ * mint generates a fresh UUID into `buf` (>=37 bytes). set/turn_id are a
+ * thread-local seam, mirroring the request-disabled override: the HTTP layer
+ * mints a turn_id and calls set() before dispatching, so the same id can be
+ * surfaced to the client (the `X-Aimee-Retrieval-Event` response header) AND
+ * keyed onto the retrieval_event emitted during context assembly. When the HTTP
+ * layer has not set one (e.g. a direct ingress_preinject_build call),
+ * ingress_preinject_build mints its own. Set per request; like the disable
+ * override it does not auto-reset — the HTTP layer sets it (or "" to clear) on
+ * every request. */
+void ingress_preinject_mint_turn_id(char *buf, size_t len);
+void ingress_preinject_set_turn_id(const char *turn_id);
+const char *ingress_preinject_turn_id(void);
+
 #endif /* DEC_INGRESS_PREINJECT_H */

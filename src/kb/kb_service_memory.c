@@ -10,6 +10,7 @@
 #include "config.h"
 #include "db2/kb_service_backend.h"
 #include "db2/bandit.h"
+#include "db2/demotion.h" /* db2_demotion_retrieval_event_write_turn (auditable-correctness P1) */
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
 #include "kb_service_memory.h"
@@ -739,6 +740,53 @@ int kb_handle_memory_context_block(int fd, cJSON *req)
 
    cJSON *resp = db2_kb_service_memory_context_block_json(query_j->valuestring, block_type, limit);
    return kb_reply_or_error(fd, resp, "failed to build context block");
+}
+
+/* Auditable-correctness P1: record one per-turn retrieval_event keyed by the
+ * caller-visible turn_id, listing the int64 memory rows surfaced into the turn.
+ * The emission decision (the kb_evidence_emit_enabled flag) is made server-side
+ * by the ingress before this action is called; this handler is the dumb writer.
+ * Uses the already-merged turn-keyed writer (first-wins on a duplicate turn_id).
+ * Returns {status:ok, retrieval_event_id} on success. */
+int kb_handle_evidence_emit_retrieval_event(int fd, cJSON *req)
+{
+   cJSON *turn_j = cJSON_GetObjectItemCaseSensitive(req, "turn_id");
+   cJSON *role_j = cJSON_GetObjectItemCaseSensitive(req, "role");
+   cJSON *fp_j = cJSON_GetObjectItemCaseSensitive(req, "query_fingerprint");
+   cJSON *ids_j = cJSON_GetObjectItemCaseSensitive(req, "surfaced_ids");
+   if (!cJSON_IsString(turn_j) || !turn_j->valuestring[0])
+      return kb_send_error(fd, "evidence.emit_retrieval_event requires turn_id");
+   const char *role =
+       cJSON_IsString(role_j) && role_j->valuestring[0] ? role_j->valuestring : "Recall";
+   const char *fp = cJSON_IsString(fp_j) ? fp_j->valuestring : "";
+
+   int n = cJSON_IsArray(ids_j) ? cJSON_GetArraySize(ids_j) : 0;
+   int64_t *ids = NULL;
+   int n_ids = 0;
+   if (n > 0)
+   {
+      ids = (int64_t *)calloc((size_t)n, sizeof(int64_t));
+      if (!ids)
+         return kb_send_error(fd, "out of memory");
+      for (int i = 0; i < n; i++)
+      {
+         cJSON *e = cJSON_GetArrayItem(ids_j, i);
+         if (cJSON_IsNumber(e) && e->valuedouble > 0)
+            ids[n_ids++] = (int64_t)e->valuedouble;
+      }
+   }
+
+   char ev_id[64] = "";
+   int rc = db2_demotion_retrieval_event_write_turn(turn_j->valuestring, fp, role, ids, n_ids,
+                                                    ev_id, sizeof(ev_id));
+   free(ids);
+   if (rc != 0)
+      return kb_send_error(fd, "failed to write retrieval_event");
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "retrieval_event_id", ev_id);
+   return kb_reply_or_error(fd, resp, "failed to write retrieval_event");
 }
 
 int kb_handle_memory_entity_profile(int fd, cJSON *req)

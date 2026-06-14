@@ -281,7 +281,9 @@ typedef struct config
    int ingress_preinject_enabled;
    int ingress_preinject_assembly_budget;
    int ingress_max_raw_scans;
-   int typed_facts_enabled; /* typed-fact knowledge layer master gate (default off) */
+   int typed_facts_enabled;      /* typed-fact knowledge layer master gate (default off) */
+   int kb_evidence_emit_enabled; /* auditable-correctness: emit per-turn retrieval_event (default
+                                    off) */
    int memory_pagerank_enabled;
    int memory_pagerank_iterations;
    double memory_pagerank_weight;

@@ -1599,6 +1599,37 @@ char *kb_client_memory_context_block(const char *query, const char *block_type, 
    return out;
 }
 
+int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *role,
+                                            const char *query_fingerprint, const int64_t *ids,
+                                            int n_ids)
+{
+   if (!turn_id || !turn_id[0])
+      return -1;
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "turn_id", turn_id);
+   if (role && role[0])
+      cJSON_AddStringToObject(req, "role", role);
+   if (query_fingerprint && query_fingerprint[0])
+      cJSON_AddStringToObject(req, "query_fingerprint", query_fingerprint);
+   cJSON *arr = cJSON_AddArrayToObject(req, "surfaced_ids");
+   for (int i = 0; arr && ids && i < n_ids; i++)
+      cJSON_AddItemToArray(arr, cJSON_CreateNumber((double)ids[i]));
+
+   char *json = kb_v1_action_request("evidence.emit_retrieval_event", req);
+   if (!json)
+      return -1;
+
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   if (!resp)
+      return -1;
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
+   cJSON_Delete(resp);
+   return ok ? 0 : -1;
+}
+
 char *kb_client_memory_lint_json(void)
 {
    cJSON *req = cJSON_CreateObject();

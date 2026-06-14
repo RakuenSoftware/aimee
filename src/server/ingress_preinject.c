@@ -8,6 +8,8 @@
 #include "config.h"
 #include "kb_client.h"
 #include "dstr.h"
+#include "platform_random.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,6 +34,52 @@ static __thread int g_request_disabled = 0;
 void ingress_preinject_set_request_disabled(int disabled)
 {
    g_request_disabled = disabled ? 1 : 0;
+}
+
+/* Per-turn retrieval-event id (auditable-correctness P1). Thread-local for the
+ * same reason as the disable override: the ingress runs synchronously on the
+ * request thread. A UUID is 36 chars; 40 leaves room for the NUL. */
+static __thread char g_turn_id[40] = "";
+
+void ingress_preinject_mint_turn_id(char *buf, size_t len)
+{
+   if (!buf || len == 0)
+      return;
+   unsigned char raw[16];
+   if (platform_random_bytes(raw, sizeof(raw)) != 0)
+      memset(raw, 0, sizeof(raw));
+   snprintf(buf, len, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+            raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7], raw[8], raw[9], raw[10],
+            raw[11], raw[12], raw[13], raw[14], raw[15]);
+}
+
+void ingress_preinject_set_turn_id(const char *turn_id)
+{
+   if (turn_id && turn_id[0])
+      snprintf(g_turn_id, sizeof(g_turn_id), "%s", turn_id);
+   else
+      g_turn_id[0] = '\0';
+}
+
+const char *ingress_preinject_turn_id(void)
+{
+   return g_turn_id;
+}
+
+/* A stable, non-reversible fingerprint of the turn query (FNV-1a 64-bit, hex).
+ * Recorded on the retrieval_event instead of the raw prompt so the audit row
+ * correlates turns (same query → same fingerprint) without persisting user
+ * prompt text. The /v1/audit/trace read never surfaces the query, so a hash
+ * loses nothing for reconstructibility. */
+static void ingress_query_fingerprint(const char *q, char *out, size_t len)
+{
+   uint64_t h = 1469598103934665603ULL; /* FNV-1a offset basis */
+   for (const unsigned char *p = (const unsigned char *)(q ? q : ""); *p; p++)
+   {
+      h ^= (uint64_t)*p;
+      h *= 1099511628211ULL; /* FNV-1a prime */
+   }
+   snprintf(out, len, "q:%016llx", (unsigned long long)h);
 }
 
 const char *ingress_preinject_confidence(double top_score)
@@ -366,6 +414,40 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       double ms = mem_n >= 4 ? 0.7 : (mem_n >= 2 ? 0.4 : 0.1);
       if (ms > score)
          score = ms;
+   }
+
+   /* Auditable-correctness P1: emit a single-writer, turn-keyed retrieval_event
+    * recording the memory rows surfaced into this turn's context. Default-off
+    * (kb_evidence_emit_enabled). Observation-only — the envelope and the answer
+    * are byte-identical whether or not this fires; the only added work is one
+    * synchronous KB write. The id is the one the HTTP layer minted (and surfaced
+    * to the client as X-Aimee-Retrieval-Event); if none was set (e.g. a direct
+    * build call) we mint one here so the event is still reconstructible. This is
+    * the dedicated single-writer foundation; P1.5 folds the emit into the
+    * retrieval handlers with the idempotent two-writer upsert. */
+   if (cfg.kb_evidence_emit_enabled && mem_n > 0)
+   {
+      const char *tid = ingress_preinject_turn_id();
+      char minted[40];
+      if (!tid || !tid[0])
+      {
+         ingress_preinject_mint_turn_id(minted, sizeof(minted));
+         tid = minted;
+      }
+      /* mems[] holds the full set of memory previews surfaced into this turn
+       * (mem_n <= the diagnose cap of 5), so recording all of them is the
+       * complete memory evidence for the turn, not a truncation. */
+      int64_t ids[5];
+      int n_ids = 0;
+      for (int i = 0; i < mem_n && n_ids < (int)(sizeof(ids) / sizeof(ids[0])); i++)
+         if (mems[i].memory.id > 0)
+            ids[n_ids++] = mems[i].memory.id;
+      if (n_ids > 0)
+      {
+         char fp[32];
+         ingress_query_fingerprint(query, fp, sizeof(fp));
+         (void)kb_client_evidence_emit_retrieval_event(tid, "Recall", fp, ids, n_ids);
+      }
    }
 
    char *audit = ingress_preinject_read_audit_context();

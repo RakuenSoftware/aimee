@@ -57,6 +57,8 @@ int kb_handle_memory_link_query(int fd, cJSON *req);
 int kb_handle_memory_link_delete(int fd, cJSON *req);
 int kb_handle_memory_briefing(int fd, cJSON *req);
 int kb_handle_memory_context_block(int fd, cJSON *req);
+/* Auditable-correctness P1: record a per-turn retrieval_event keyed by turn_id. */
+int kb_handle_evidence_emit_retrieval_event(int fd, cJSON *req);
 int kb_handle_memory_entity_profile(int fd, cJSON *req);
 int kb_handle_memory_entity_edges(int fd, cJSON *req);
 int kb_handle_memory_search_graph(int fd, cJSON *req);
