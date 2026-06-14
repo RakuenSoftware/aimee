@@ -1053,6 +1053,7 @@ static const struct
     {"memory.briefing", kb_handle_memory_briefing},
     {"memory.context_block", kb_handle_memory_context_block},
     {"evidence.emit_retrieval_event", kb_handle_evidence_emit_retrieval_event},
+    {"evidence.trace_retrieval_event", kb_handle_evidence_trace_retrieval_event},
     {"memory.entity_profile", kb_handle_memory_entity_profile},
     {"memory.entity_edges", kb_handle_memory_entity_edges},
     {"memory.search_graph", kb_handle_memory_search_graph},
