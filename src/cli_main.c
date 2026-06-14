@@ -1915,6 +1915,12 @@ int main(int argc, char **argv)
       return client_help_command(1, help_arg);
    }
 
+   /* agent key import: client-orchestrated migration of the local keyring into the
+    * server vault (P3) — read agent-keys.json here, push each via vault.set_server. */
+   if (strcmp(cmd, "agent") == 0 && sub_argc >= 2 && strcmp(sub_argv[0], "key") == 0 &&
+       strcmp(sub_argv[1], "import") == 0)
+      return cli_agent_key_import(sub_argc - 2, sub_argv + 2, json_output);
+
    /* agent setup: two-step OAuth device flow, needs special client orchestration */
    if (strcmp(cmd, "agent") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "setup") == 0)
       return handle_agent_setup_cmd(sub_argc - 1, sub_argv + 1, json_output);

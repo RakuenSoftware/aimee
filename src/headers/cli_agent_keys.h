@@ -17,6 +17,17 @@
  * (~/.config/aimee/agent-keys.json, mode 0600). Returns 0 on success. */
 int cli_agent_key_set(const char *agent_name, const char *api_key);
 
+/* Load the local keyring as a cJSON object {agent_name: api_key, ...} (empty
+ * object if none). Caller owns the result (cJSON_Delete). Used by `agent key
+ * import` to migrate client-held keys into the server vault (P3). */
+cJSON *cli_agent_keys_load(void);
+
+/* `aimee agent key import [--scrub]` (P3): push each local keyring entry into the
+ * server vault under the server principal via vault.set_server, reporting per
+ * agent. --scrub removes an entry only after a confirmed store. Returns 0 unless
+ * a non-refusal error occurred. */
+int cli_agent_key_import(int argc, char **argv, int json_output);
+
 /* For `aimee agent add <name> ... --key <K>` against a remote server: store K in
  * the LOCAL keyring (keyed by <name> = argv[1]) and strip `--key <K>` from argv
  * in place (decrementing *argc) so the key is never forwarded to / stored on the
