@@ -55,6 +55,77 @@ int db2_demotion_retrieval_event_write(const char *query_fingerprint, const char
    return 0;
 }
 
+int db2_demotion_retrieval_event_write_turn(const char *turn_id, const char *query_fingerprint,
+                                            const char *role, const int64_t *surfaced_ids,
+                                            int n_surfaced, char *id_out, int id_out_len)
+{
+   char id[64];
+   if (db2_demotion_retrieval_event_write(query_fingerprint, role, surfaced_ids, n_surfaced, id,
+                                          sizeof(id)) != 0)
+      return -1;
+
+   /* Stamp the caller-visible turn_id (single follow-up UPDATE, like the
+    * attribution writer stamps model_version). The partial unique index rejects a
+    * duplicate turn_id — tolerable: the event row still exists un-stamped and the
+    * first turn-stamped event remains authoritative (P1 single-writer; the
+    * idempotent merge is P1.5). */
+   if (turn_id && turn_id[0])
+   {
+      void *conn = db2_conn();
+      if (conn)
+      {
+         char err[256] = "";
+         aimee_pg_stmt_t *st = aimee_pg_prepare(
+             conn, "UPDATE artifacts SET turn_id = ?1 WHERE id = ?2", err, sizeof(err));
+         if (st)
+         {
+            aimee_pg_bind_text(st, "?1", turn_id);
+            aimee_pg_bind_text(st, "?2", id);
+            (void)aimee_pg_step(st, err, sizeof(err)); /* conflict -> left un-stamped */
+            aimee_pg_finalize(st);
+         }
+      }
+   }
+
+   if (id_out && id_out_len > 0)
+      snprintf(id_out, (size_t)id_out_len, "%s", id);
+   return 0;
+}
+
+int db2_demotion_retrieval_event_by_turn(const char *turn_id, char *id_out, int id_out_len,
+                                         char *payload_out, int payload_out_len)
+{
+   if (id_out && id_out_len > 0)
+      id_out[0] = '\0';
+   if (payload_out && payload_out_len > 0)
+      payload_out[0] = '\0';
+   if (!turn_id || !turn_id[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT id, payload FROM artifacts"
+                        " WHERE kind = 'retrieval_event' AND turn_id = ?1 LIMIT 1",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", turn_id);
+   int found = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      found = 1;
+      if (id_out && id_out_len > 0)
+         snprintf(id_out, (size_t)id_out_len, "%s", aimee_pg_column_text(st, 0));
+      if (payload_out && payload_out_len > 0)
+         snprintf(payload_out, (size_t)payload_out_len, "%s", aimee_pg_column_text(st, 1));
+   }
+   aimee_pg_finalize(st);
+   return found;
+}
+
 int db2_demotion_retrieval_attribution_write(const char *retrieval_event_id,
                                              int64_t surfaced_row_id, const char *verdict,
                                              double weight)

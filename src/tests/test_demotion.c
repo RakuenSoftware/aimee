@@ -46,6 +46,46 @@ static void test_retrieval_event_write(void)
    printf("  retrieval_event_write: ok\n");
 }
 
+/* ---- 1b. turn-keyed event write + lookup (auditable-correctness P1) ---- */
+static void test_retrieval_event_turn(void)
+{
+   open_db();
+
+   int64_t ids[2] = {11, 22};
+   char ev_id[64];
+   assert(db2_demotion_retrieval_event_write_turn("turn-abc", "fp", "Recall", ids, 2, ev_id,
+                                                  sizeof(ev_id)) == 0);
+
+   /* look it up by the caller-visible turn_id. */
+   char got_id[64], payload[8192];
+   assert(db2_demotion_retrieval_event_by_turn("turn-abc", got_id, sizeof(got_id), payload,
+                                               sizeof(payload)) == 1);
+   assert(strcmp(got_id, ev_id) == 0);
+   assert(strstr(payload, "\"surfaced_ids\":[11,22]") != NULL);
+
+   /* an unknown turn -> no event (0), not an error. */
+   assert(db2_demotion_retrieval_event_by_turn("turn-missing", got_id, sizeof(got_id), NULL, 0) ==
+          0);
+   assert(got_id[0] == '\0');
+
+   /* a NULL/"" turn_id behaves like the base writer (no stamp, still written) and
+    * such events are never found by a turn lookup. */
+   char ev2[64];
+   assert(db2_demotion_retrieval_event_write_turn(NULL, "fp", "Recall", NULL, 0, ev2,
+                                                  sizeof(ev2)) == 0);
+   assert(strlen(ev2) == 36);
+
+   /* legacy (turn-less) events do not collide on the partial unique index. */
+   assert(db2_demotion_retrieval_event_write("fp", "Recall", NULL, 0, NULL, 0) == 0);
+   assert(db2_demotion_retrieval_event_write("fp", "Recall", NULL, 0, NULL, 0) == 0);
+
+   /* bad args. */
+   assert(db2_demotion_retrieval_event_by_turn(NULL, got_id, sizeof(got_id), NULL, 0) == -1);
+
+   close_db();
+   printf("  retrieval_event_turn: ok\n");
+}
+
 /* ---- 2. retrieval_attribution_write ---- */
 static void test_retrieval_attribution_write(void)
 {
@@ -204,6 +244,7 @@ int main(void)
    printf("demotion:\n");
 
    test_retrieval_event_write();
+   test_retrieval_event_turn();
    test_retrieval_attribution_write();
    test_demotion_score_empty();
    test_demotion_score_basic();
