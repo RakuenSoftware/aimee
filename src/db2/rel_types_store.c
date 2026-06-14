@@ -4,6 +4,7 @@
 #include "rel_types_store.h"
 #include "../headers/rel_types.h"
 #include "entity_edges.h"
+#include "entity_registry.h"    /* db2_entity_register_named (§3 endpoint resolution) */
 #include "ontology_evolution.h" /* db2_ontology_eval_observe (§2 / P4) */
 #include "db2_internal.h"
 #include "db_postgres.h"
@@ -122,6 +123,40 @@ long db2_rel_types_stage_provisional(const char *rel_type)
    return db2_rel_types_resolve(norm, &id) == 1 ? id : -1;
 }
 
+/* Entity-kind endpoints (people/places/devices/orgs/ips) are canonicalized
+ * through the registry (§3) so aliased names ("DevBox" / "the workstation")
+ * collapse to one node's preferred name; scalar/other values are stored verbatim
+ * (an age or IP literal is not an entity to canonicalize). */
+static int fact_kind_is_entity(memory_node_kind_t k)
+{
+   switch (k)
+   {
+   case NODE_PERSON:
+   case NODE_PLACE:
+   case NODE_DEVICE:
+   case NODE_ORG:
+   case NODE_IP:
+      return 1;
+   default:
+      return 0;
+   }
+}
+
+static void fact_canonical_endpoint(const char *in, memory_node_kind_t kind, char *out, size_t cap)
+{
+   if (fact_kind_is_entity(kind))
+   {
+      int64_t cid = db2_entity_register_named(in, (int)kind); /* get-or-create */
+      char names[1][128];
+      if (cid > 0 && db2_entity_aliases_for(cid, names, 1) == 1 && names[0][0])
+      {
+         snprintf(out, cap, "%s", names[0]); /* canonical (preferred) name */
+         return;
+      }
+   }
+   snprintf(out, cap, "%s", in); /* scalar/other, or registry unavailable */
+}
+
 fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_kind,
                                     const char *rel_type, const char *target,
                                     memory_node_kind_t tail_kind, fact_authority_t authority,
@@ -137,34 +172,37 @@ fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_
    char norm[REL_TYPE_NAME_MAX];
    rel_type_normalize(rel_type, norm, sizeof(norm));
 
+   if (v != FACT_GATE_ACCEPT && v != FACT_GATE_NOVEL)
+      return v; /* REJECT_KIND / BADARG: never write an unvalidated semantic edge */
+
    /* §5: provenance-keyed class. user -> A, model+ACCEPT -> B, model NOVEL -> C. */
    const char *cls = fact_class_for(authority, v);
    double conf = fact_class_confidence(cls);
+
+   /* §3: canonicalize entity-kind endpoints so aliased names share one node. */
+   char csrc[128], ctgt[128];
+   fact_canonical_endpoint(source, head_kind, csrc, sizeof(csrc));
+   fact_canonical_endpoint(target, tail_kind, ctgt, sizeof(ctgt));
 
    if (v == FACT_GATE_ACCEPT)
    {
       long id = 0;
       if (db2_rel_types_resolve(norm, &id) != 1)
          return v; /* ontology not seeded / DB issue — do not write unresolved */
-      (void)db2_entity_edge_upsert_semantic(source, norm, target, (int)id, (int)head_kind,
+      (void)db2_entity_edge_upsert_semantic(csrc, norm, ctgt, (int)id, (int)head_kind,
                                             (int)tail_kind, cls, conf, NULL);
       return v;
    }
-   if (v == FACT_GATE_NOVEL)
-   {
-      /* Stage as provisional so the edge's relation_id resolves; no kind validation
-       * for a novel type — that is promotion's job (§2). cls is already Class C here
-       * (fact_class_for maps NOVEL -> C regardless of authority). */
-      long id = db2_rel_types_stage_provisional(norm);
-      if (id <= 0)
-         return v;
-      /* §2: count the sighting so the promotion pipeline can evaluate this novel
-       * type once it crosses the occurrence threshold. */
-      (void)db2_ontology_eval_observe(norm);
-      (void)db2_entity_edge_upsert_semantic(source, norm, target, (int)id, (int)head_kind,
-                                            (int)tail_kind, cls, conf, NULL);
+   /* FACT_GATE_NOVEL: stage as provisional so the edge's relation_id resolves; no
+    * kind validation for a novel type — that is promotion's job (§2). cls is
+    * already Class C here (fact_class_for maps NOVEL -> C regardless of authority). */
+   long id = db2_rel_types_stage_provisional(norm);
+   if (id <= 0)
       return v;
-   }
-   /* REJECT_KIND / BADARG: never write an unvalidated semantic edge. */
+   /* §2: count the sighting so the promotion pipeline can evaluate this novel type
+    * once it crosses the occurrence threshold. */
+   (void)db2_ontology_eval_observe(norm);
+   (void)db2_entity_edge_upsert_semantic(csrc, norm, ctgt, (int)id, (int)head_kind, (int)tail_kind,
+                                         cls, conf, NULL);
    return v;
 }

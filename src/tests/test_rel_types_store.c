@@ -4,6 +4,7 @@
 #include "../headers/memory.h" /* edge_t (needs aimee.h first) */
 #include "../db2/rel_types_store.h"
 #include "../db2/entity_edges.h"
+#include "../db2/entity_registry.h"
 #include "../db2/db2_test_shim.h"
 #include <assert.h>
 #include <stdio.h>
@@ -77,6 +78,17 @@ int main(void)
    db2_entity_neighbor_t nb[16];
    int nn = db2_entity_edge_neighbors("zoe", nb, 16, 50);
    assert(nn == 1 && strcmp(nb[0].node, "quux") == 0);
+
+   /* §3 endpoint resolution: an entity-kind source given via an alias is stored
+    * under its canonical (preferred) name, so aliased facts share one node.
+    * (Names chosen to not collide with entities registered by earlier commits.) */
+   int64_t rid = db2_entity_register_named("Wilhelmina", NODE_PERSON);
+   assert(rid > 0);
+   assert(db2_entity_alias_bind("Billie", rid, 0) == 0);
+   assert(db2_fact_commit("Billie", NODE_PERSON, "works_for", "acme", NODE_ORG,
+                          FACT_AUTHORITY_MODEL, 1) == FACT_GATE_ACCEPT);
+   assert(semantic_count("Wilhelmina") >= 1); /* stored under the canonical name */
+   assert(semantic_count("Billie") == 0);     /* not under the alias */
 
    db2_test_shim_close();
    printf("rel_types_store: all tests passed\n");
