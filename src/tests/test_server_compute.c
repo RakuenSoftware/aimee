@@ -118,10 +118,32 @@ static void *drain_pipe_thread(void *arg)
    return NULL;
 }
 
+/* P1: controllable fixtures for the codex-oauth vault fallback test (default values
+ * reproduce the prior always-miss stub behaviour, so existing tests are unaffected). */
+static int g_codex_set_called;
+static char g_codex_set_token[256];
+static char g_codex_set_account[256];
+static vault_status_t g_codex_perturn_status = VAULT_NO_ENTRY;
+static vault_status_t g_codex_srv_status = VAULT_NO_ENTRY;
+static const char *g_codex_perturn_token = "";
+static const char *g_codex_srv_token = "";
+static void codex_fixture_reset(void)
+{
+   g_codex_set_called = 0;
+   g_codex_set_token[0] = '\0';
+   g_codex_set_account[0] = '\0';
+   g_codex_perturn_status = VAULT_NO_ENTRY;
+   g_codex_srv_status = VAULT_NO_ENTRY;
+   g_codex_perturn_token = "";
+   g_codex_srv_token = "";
+}
 void agent_set_request_codex_creds(const char *token, const char *account_id)
 {
-   (void)token;
-   (void)account_id;
+   g_codex_set_called++;
+   if (token)
+      snprintf(g_codex_set_token, sizeof(g_codex_set_token), "%s", token);
+   if (account_id)
+      snprintf(g_codex_set_account, sizeof(g_codex_set_account), "%s", account_id);
 }
 int agent_request_codex_token_present(void)
 {
@@ -206,22 +228,26 @@ vault_status_t vault_service_get(const char *principal, const char *agent, const
 {
    (void)principal;
    (void)agent;
-   (void)cred;
-   (void)out;
-   (void)out_cap;
    (void)now_epoch;
-   return VAULT_NO_ENTRY;
+   if (out && out_cap)
+      out[0] = '\0';
+   if (g_codex_perturn_status == VAULT_OK && cred && strcmp(cred, VAULT_CODEX_TOKEN_CRED) == 0 &&
+       out && out_cap)
+      snprintf(out, out_cap, "%s", g_codex_perturn_token);
+   return g_codex_perturn_status;
 }
-/* cred-vault-consolidation P1: the codex-oauth override now also probes the
- * server principal; stub it to a miss for these keyless tests. */
+/* cred-vault-consolidation P1: the codex-oauth override now also probes the server
+ * principal; controllable via g_codex_srv_* (defaults to a miss). */
 vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
                                                   size_t out_len)
 {
    (void)agent;
-   (void)cred;
-   (void)out;
-   (void)out_len;
-   return VAULT_NO_ENTRY;
+   if (out && out_len)
+      out[0] = '\0';
+   if (g_codex_srv_status == VAULT_OK && cred && strcmp(cred, VAULT_CODEX_TOKEN_CRED) == 0 && out &&
+       out_len)
+      snprintf(out, out_len, "%s", g_codex_srv_token);
+   return g_codex_srv_status;
 }
 
 int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt, const char *prompt,
@@ -1830,8 +1856,51 @@ static void test_create_compute_ctx_threads_vault_identity(void)
    printf("  PASS: test_create_compute_ctx_threads_vault_identity\n");
 }
 
+/* P1 (cred-vault-consolidation): the codex-oauth override prefers the attested
+ * per-turn principal, falls back to the server-owned vault for a TCP thin client
+ * with no per-turn principal, and treats a LOCKED per-turn cred as a hard miss
+ * (D15 — never silently downgraded to the server vault). */
+static void test_codex_oauth_vault_server_principal_fallback(void)
+{
+   agent_t ag;
+   memset(&ag, 0, sizeof(ag));
+   snprintf(ag.name, sizeof(ag.name), "codex");
+   snprintf(ag.auth_type, sizeof(ag.auth_type), "codex-oauth");
+   ag.credential_count = 0;
+   char lp[160] = "", lc[64] = "", csp[512] = "";
+   int cd = 0;
+
+   /* (a) no per-turn principal; the server-owned vault has the token -> applied. */
+   codex_fixture_reset();
+   g_codex_srv_status = VAULT_OK;
+   g_codex_srv_token = "srv-codex-token";
+   delegate_resolve_credentials("", &ag, lp, sizeof lp, lc, sizeof lc, csp, sizeof csp, &cd);
+   assert(g_codex_set_called == 1);
+   assert(strcmp(g_codex_set_token, "srv-codex-token") == 0);
+
+   /* (b) per-turn principal LOCKED -> hard miss; the server principal is NOT
+    * consulted and no creds are applied (D15). */
+   codex_fixture_reset();
+   g_codex_perturn_status = VAULT_ERR_LOCKED;
+   g_codex_srv_status = VAULT_OK;
+   g_codex_srv_token = "srv-codex-token";
+   delegate_resolve_credentials("uid:1000", &ag, lp, sizeof lp, lc, sizeof lc, csp, sizeof csp,
+                                &cd);
+   assert(g_codex_set_called == 0);
+
+   /* (c) both miss -> no creds applied. */
+   codex_fixture_reset();
+   delegate_resolve_credentials("uid:1000", &ag, lp, sizeof lp, lc, sizeof lc, csp, sizeof csp,
+                                &cd);
+   assert(g_codex_set_called == 0);
+
+   codex_fixture_reset();
+   printf("PASS: codex oauth vault server-principal fallback + D15 locked hard-miss\n");
+}
+
 int main(void)
 {
+   test_codex_oauth_vault_server_principal_fallback();
    /* DB1 owns delegation_spawns + delegation_messages. */
    assert(db1_init(":memory:") == 0);
    test_delegate_rewrite_prompt_cwd();

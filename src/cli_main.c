@@ -536,8 +536,11 @@ static int handle_agent_setup_cmd(int argc, char **argv, int json_output)
    /* `agent setup` must run against the SAME server that will STORE the result
     * (codex-auth.json + the server vault). On a thin-client deployment that is the
     * configured remote; only spin up / require a local server when no remote is set
-    * (otherwise the device flow provisions a local server the deployment never uses). */
-   if (!cli_rpc_remote_endpoint_is_tcp())
+    * (otherwise the device flow provisions a local server the deployment never uses).
+    * Use has_remote_endpoint (true for ANY configured remote, tcp OR unix) to match
+    * exactly when cli_v1_dispatch routes off-box via cli_rpc_client_endpoint() — an
+    * is_tcp() check would wrongly require a local server for a unix-socket remote. */
+   if (!cli_rpc_has_remote_endpoint())
    {
       const char *sock = cli_ensure_server_for_method("agent.setup");
       if (!sock)
