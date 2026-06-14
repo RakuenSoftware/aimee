@@ -189,6 +189,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-ontology-evolution \
                $(TESTPREFIX)/unit-test-extract-patterns \
                $(TESTPREFIX)/unit-test-fact-ingest \
+               $(TESTPREFIX)/unit-test-pii-gate \
                $(TESTPREFIX)/unit-test-sandbox \
                $(TESTPREFIX)/unit-test-slop-detect \
                $(TESTPREFIX)/unit-test-vault-principal \
@@ -1465,6 +1466,11 @@ $(TESTPREFIX)/unit-test-extract-patterns: $(OBJDIR)/tests/test_extract_patterns.
 # typed-fact P5: pattern-first ingest pipeline (§6 -> §1), shim.
 $(TESTPREFIX)/unit-test-fact-ingest: $(OBJDIR)/tests/test_fact_ingest.o \
                                $(TEST_DATA_OBJS_MOCK)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# typed-fact P5: per-attribute PII recall gating (§7). Pure.
+$(TESTPREFIX)/unit-test-pii-gate: $(OBJDIR)/tests/test_pii_gate.o \
+                               $(OBJDIR)/memory_pii_gate.o $(OBJDIR)/rel_types.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-request-context: $(OBJDIR)/tests/test_request_context.o \
