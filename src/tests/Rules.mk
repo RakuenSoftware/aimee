@@ -205,6 +205,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-store \
                $(TESTPREFIX)/unit-test-vault-service \
                $(TESTPREFIX)/unit-test-vault-server-key \
+               $(TESTPREFIX)/unit-test-vault-capability \
                $(TESTPREFIX)/unit-test-prompts \
                $(TESTPREFIX)/unit-test-cmd-session \
                $(TESTPREFIX)/unit-test-model-registry \
@@ -1944,6 +1945,11 @@ $(TESTPREFIX)/unit-test-vault-service: $(OBJDIR)/tests/test_vault_service.o \
 
 $(TESTPREFIX)/unit-test-vault-server-key: $(OBJDIR)/tests/test_vault_server_key.o \
                               $(OBJDIR)/server/vault_server_key.o $(OBJDIR)/server/vault_crypto.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-vault-capability: $(OBJDIR)/tests/test_vault_capability.o \
+                              $(OBJDIR)/server/vault_capability.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

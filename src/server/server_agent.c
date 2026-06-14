@@ -504,16 +504,22 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       }
       else
       {
-         /* A local/webchat caller with a per-user vault gets a dual-access entry
-          * (requires the vault unlocked); a remote (TCP) caller has no per-user
-          * principal, so the secret lands in the server-owned vault, which the
-          * server can decrypt autonomously. On any failure we REFUSE rather than
-          * write the secret to agents.json in plaintext. */
+         /* A client-supplied key goes into the CALLER's own attested per-user vault
+          * (dual-access entry; requires the vault unlocked). A TCP bearer has no
+          * attested principal, so it must NOT silently mint a server-owned
+          * credential (D2b) — that was an ungated write path. Refuse and point at
+          * the explicit, capability-gated `vault set --server`. On any failure we
+          * REFUSE rather than write the secret to agents.json in plaintext. */
          const char *principal = (conn && conn->vault_principal[0]) ? conn->vault_principal : NULL;
+         if (!principal)
+            return server_send_error(
+                conn,
+                "vault: `agent add --key` requires an attested (UDS/webchat) connection; "
+                "provision a shared key with `aimee vault set-server` over a local "
+                "connection holding the vault:write:server capability",
+                NULL);
          vault_status_t vst =
-             principal
-                 ? vault_service_set(principal, ag->name, VAULT_API_KEY_CRED, key, (long)time(NULL))
-                 : vault_service_set_server(ag->name, VAULT_API_KEY_CRED, key);
+             vault_service_set(principal, ag->name, VAULT_API_KEY_CRED, key, (long)time(NULL));
          if (vst != VAULT_OK)
          {
             if (vst == VAULT_ERR_LOCKED)

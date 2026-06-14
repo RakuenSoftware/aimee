@@ -1184,6 +1184,16 @@ paths:
       summary: Store an encrypted credential in the unlocked vault
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Stored, content: { application/json: { schema: { type: object } } } } }
+  /vault/set_server:
+    post:
+      summary: Store a credential under the server-owned principal (attested + vault:write:server)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Stored, content: { application/json: { schema: { type: object } } } } }
+  /vault/capability:
+    post:
+      summary: Manage the vault:write:server capability allow-list (UDS-only)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Updated, content: { application/json: { schema: { type: object } } } } }
   /vault/list:
     post:
       summary: List vault credential names (no secrets)

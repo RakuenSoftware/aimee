@@ -298,6 +298,8 @@ static const struct
     {"config", "", "config.show", NULL, NULL, 0},
     {"vault", "unlock", "vault.unlock", NULL, NULL, 0},
     {"vault", "set", "vault.set", NULL, NULL, 0},
+    {"vault", "set-server", "vault.set_server", NULL, NULL, 0},
+    {"vault", "capability", "vault.capability", NULL, NULL, 0},
     {"vault", "list", "vault.list", NULL, "credentials", 0},
     {"vault", "delete", "vault.delete", NULL, NULL, 0},
     {"vault", "lock", "vault.lock", NULL, NULL, 0},
@@ -3079,6 +3081,34 @@ static cJSON *marshal_vault_set(int argc, char **argv)
    return req;
 }
 
+/* `aimee vault set-server <agent> <cred> <secret>` */
+static cJSON *marshal_vault_set_server(int argc, char **argv)
+{
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("vault.set_server");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "agent", opts.positional[0]);
+   if (opts.pos_count > 1)
+      cJSON_AddStringToObject(req, "cred", opts.positional[1]);
+   if (opts.pos_count > 2)
+      cJSON_AddStringToObject(req, "secret", opts.positional[2]);
+   return req;
+}
+
+/* `aimee vault capability <grant|revoke|list> [principal]` */
+static cJSON *marshal_vault_capability(int argc, char **argv)
+{
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("vault.capability");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "action", opts.positional[0]);
+   if (opts.pos_count > 1)
+      cJSON_AddStringToObject(req, "principal", opts.positional[1]);
+   return req;
+}
+
 /* `aimee vault delete <agent> <cred>` */
 static cJSON *marshal_vault_delete(int argc, char **argv)
 {
@@ -3114,6 +3144,10 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_vault_unlock(argc, argv);
    if (strcmp(method, "vault.set") == 0)
       return marshal_vault_set(argc, argv);
+   if (strcmp(method, "vault.set_server") == 0)
+      return marshal_vault_set_server(argc, argv);
+   if (strcmp(method, "vault.capability") == 0)
+      return marshal_vault_capability(argc, argv);
    if (strcmp(method, "vault.delete") == 0)
       return marshal_vault_delete(argc, argv);
    if (strcmp(method, "vault.list") == 0)

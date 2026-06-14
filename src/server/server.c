@@ -1151,6 +1151,8 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"vault.unlock", handle_vault_unlock},
     {"vault.rekey", handle_vault_rekey},
     {"vault.set", handle_vault_set},
+    {"vault.set_server", handle_vault_set_server},
+    {"vault.capability", handle_vault_capability},
     {"vault.list", handle_vault_list},
     {"vault.delete", handle_vault_delete},
     {"vault.lock", handle_vault_lock},
