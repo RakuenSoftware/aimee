@@ -256,11 +256,12 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
        .cache_write_tokens = result->cache_write_tokens,
        .cache_read_tokens = result->cache_read_tokens,
    };
-   /* Bill against the model actually served to the provider, not the agent
-    * identity: an agent named "codex" may serve "gpt-5.4", and a turn-0 400 may
-    * have swapped in the fallback model. Fall back to the agent name only when
-    * no served model was recorded (e.g. the dedup cache-hit path). */
-   const char *bill_model = result->model[0] ? result->model : result->agent_name;
+   /* Bill against the real model by precedence (§2a), never the agent identity:
+    * provider-reported > served (what aimee routed to) > requested (what the client
+    * asked for). An agent named "codex" may serve "gpt-5.4"; agent names are not
+    * pricing keys. "" (all unset) lands in the by-model "(unattributed)" bucket. */
+   const char *bill_model =
+       token_billable_model(result->model, result->served_model, result->requested_model);
    double cost = token_estimate_cost(bill_model, &usage);
    /* Tagging the audit row with the active delegation id lets cost-fold attribute
     * a child's spend back to the parent without contaminating session_id sums. */

@@ -210,6 +210,20 @@ static void test_cost_shaped_reward(void)
    PASS("cost: cost-shaped bandit reward");
 }
 
+static void test_billable_model(void)
+{
+   /* §2a precedence: provider-reported > served > requested. */
+   assert(strcmp(token_billable_model("gpt-5.4", "primary", "claude"), "gpt-5.4") == 0);
+   assert(strcmp(token_billable_model("", "served-x", "req-y"), "served-x") == 0);
+   assert(strcmp(token_billable_model("", "", "req-y"), "req-y") == 0);
+   /* nothing known -> "" (the by-model breakdown maps it to "(unattributed)"),
+    * never an agent name. */
+   assert(strcmp(token_billable_model("", "", ""), "") == 0);
+   assert(strcmp(token_billable_model(NULL, NULL, NULL), "") == 0);
+   assert(strcmp(token_billable_model(NULL, "served-z", NULL), "served-z") == 0);
+   PASS("cost: billable-model precedence (provider > served > requested)");
+}
+
 /* --- Main --- */
 
 int main(void)
@@ -217,6 +231,7 @@ int main(void)
    printf("token_tracker: unit tests\n");
    test_registry_overrides_base_keeps_cache();
    test_cost_shaped_reward();
+   test_billable_model();
 
    test_known_anthropic_model();
    test_cache_tokens_anthropic();
