@@ -26,7 +26,8 @@ typedef struct wfe_node
 {
    char id[WFE_ID_LEN];
    wfe_block_type_t block;
-   const cJSON *params; /* borrowed from def->raw; may be NULL */
+   char custom_name[WFE_NAME_LEN]; /* set iff block == WFE_BLK_CUSTOM */
+   const cJSON *params;            /* borrowed from def->raw; may be NULL */
    wfe_binding_t ins[WFE_MAX_INS];
    int n_ins;
    /* control edges (node ids; "" = none) */
@@ -55,6 +56,52 @@ wfe_artifact_type_t wfe_block_output(wfe_block_type_t t);
 int wfe_block_accepts_input(wfe_block_type_t t, wfe_artifact_type_t in);
 /* 1 if the block requires at least one bound input (author.proposal does not). */
 int wfe_block_requires_input(wfe_block_type_t t);
+
+/* Node-aware variants: resolve a custom block's typed I/O from the registry
+ * (by node->custom_name); fall back to the built-in catalog otherwise. The
+ * validator uses these so custom + built-in blocks type-check identically. */
+wfe_artifact_type_t wfe_node_output(const wfe_node_t *n);
+int wfe_node_accepts_input(const wfe_node_t *n, wfe_artifact_type_t in);
+int wfe_node_requires_input(const wfe_node_t *n);
+
+/* ---- Custom block registry (wfe_custom.c): built-ins ∪ $AIMEE_HOME/workflows/
+ * blocks.yaml. Loaded lazily; the artifact type system + validator consult it. */
+typedef enum
+{
+   WFE_EXEC_COMMAND = 0,
+   WFE_EXEC_DELEGATE
+} wfe_custom_exec_t;
+
+#define WFE_CUSTOM_ARGV_MAX 32  /* max argv elements in a command executor */
+#define WFE_CUSTOM_ARG_MAX  512 /* max bytes per argv element (reject, not truncate) */
+
+typedef struct
+{
+   char name[WFE_NAME_LEN];
+   wfe_artifact_type_t consumes; /* WFE_ART_NONE = source */
+   wfe_artifact_type_t produces; /* branch or none only */
+   wfe_custom_exec_t executor;
+   /* OWNED (strdup'd) so the registry does not depend on the parsed YAML tree
+    * staying alive -- no use-after-free if the tree is freed/reloaded. */
+   char *argv[WFE_CUSTOM_ARGV_MAX + 1]; /* NULL-terminated (command executor) */
+   int argc;
+   char persona[WFE_NAME_LEN];
+   char *prompt; /* owned or NULL (delegate executor) */
+} wfe_custom_block_t;
+
+/* Ensure the registry is loaded (idempotent; reads $AIMEE_HOME/workflows/
+ * blocks.yaml if present + operator-owned). Returns 0 on success (incl. no
+ * file), -1 if the file exists but is unsafe/invalid. */
+int wfe_custom_registry_ensure(char *err, size_t errlen);
+/* Force a (re)load from an explicit path (tests). */
+int wfe_custom_registry_load(const char *path, char *err, size_t errlen);
+void wfe_custom_registry_reset(void); /* test helper */
+const wfe_custom_block_t *wfe_custom_lookup(const char *name);
+int wfe_custom_count(void);
+const wfe_custom_block_t *wfe_custom_at(int i);
+/* Whether `command`-executor custom blocks are opt-in enabled (blocks.yaml
+ * top-level allow_command: true). */
+int wfe_custom_commands_allowed(void);
 
 /* ---- Parse / free / lookup ---- */
 wfe_def_t *wfe_def_parse(const char *yaml_text, char *err, size_t errlen);

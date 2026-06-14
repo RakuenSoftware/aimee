@@ -7,6 +7,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* display name (the custom block's name for WFE_BLK_CUSTOM, else the catalog). */
+static const char *node_block_name(const wfe_node_t *n)
+{
+   return (n->block == WFE_BLK_CUSTOM) ? n->custom_name : wfe_block_name(n->block);
+}
+
 static int param_bool(const cJSON *params, const char *key, int dflt)
 {
    if (!params)
@@ -40,10 +46,9 @@ static int check_inputs(const wfe_def_t *def, const wfe_node_t *n, char *err, si
             return -1;
          }
 
-   if (wfe_block_requires_input(n->block) && n->n_ins == 0)
+   if (wfe_node_requires_input(n) && n->n_ins == 0)
    {
-      snprintf(err, errlen, "node '%s' (%s) requires an input binding", n->id,
-               wfe_block_name(n->block));
+      snprintf(err, errlen, "node '%s' (%s) requires an input binding", n->id, node_block_name(n));
       return -1;
    }
 
@@ -57,14 +62,13 @@ static int check_inputs(const wfe_def_t *def, const wfe_node_t *n, char *err, si
                   b->input_name, b->producer_id);
          return -1;
       }
-      wfe_artifact_type_t out = wfe_block_output(prod->block);
-      if (!wfe_block_accepts_input(n->block, out))
+      wfe_artifact_type_t out = wfe_node_output(prod);
+      if (!wfe_node_accepts_input(n, out))
       {
          snprintf(err, errlen,
                   "node '%s' (%s): input '%s' bound to '%s' which produces %s "
                   "(not an accepted input type)",
-                  n->id, wfe_block_name(n->block), b->input_name, b->producer_id,
-                  wfe_artifact_name(out));
+                  n->id, node_block_name(n), b->input_name, b->producer_id, wfe_artifact_name(out));
          return -1;
       }
    }
