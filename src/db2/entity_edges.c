@@ -75,8 +75,11 @@ int db2_entity_edge_upsert(const char *source, const char *relation, const char 
    /* Slow path (pre-migration): probe then insert-or-update. */
    int existed = 0;
    {
+      /* Co-occurrence upsert must not find/bump a typed 'semantic' edge that
+       * happens to share this triple (R1-A1). */
       static const char *check_sql = "SELECT id FROM entity_edges"
-                                     " WHERE source = ?1 AND relation = ?2 AND target = ?3";
+                                     " WHERE source = ?1 AND relation = ?2 AND target = ?3"
+                                     " AND edge_class <> 'semantic'";
       char err[EE_ERRBUF] = "";
       aimee_pg_stmt_t *st = aimee_pg_prepare(conn, check_sql, err, sizeof(err));
       if (!st)
@@ -91,7 +94,8 @@ int db2_entity_edge_upsert(const char *source, const char *relation, const char 
    if (existed)
    {
       static const char *bump_sql = "UPDATE entity_edges SET weight = weight + 1"
-                                    " WHERE source = ?1 AND relation = ?2 AND target = ?3";
+                                    " WHERE source = ?1 AND relation = ?2 AND target = ?3"
+                                    " AND edge_class <> 'semantic'";
       char err[EE_ERRBUF] = "";
       aimee_pg_stmt_t *st = aimee_pg_prepare(conn, bump_sql, err, sizeof(err));
       if (!st)
@@ -136,11 +140,14 @@ int db2_entity_edge_list_by_entity(const char *entity, edge_t *out, int max)
    if (!conn)
       return 0;
 
+   /* Co-occurrence recall excludes typed-fact 'semantic' edges (R1-A1 storage
+    * boundary): legacy rows default to 'cooccurrence', so <> 'semantic' keeps
+    * them and only filters the typed layer out. */
    static const char *sql = "SELECT id, source, relation, target, weight FROM entity_edges"
-                            " WHERE source = ?1"
+                            " WHERE source = ?1 AND edge_class <> 'semantic'"
                             " UNION ALL"
                             " SELECT id, source, relation, target, weight FROM entity_edges"
-                            " WHERE target = ?2"
+                            " WHERE target = ?2 AND edge_class <> 'semantic'"
                             " LIMIT ?3";
    char err[EE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -307,9 +314,11 @@ int db2_entity_edge_neighbors(const char *entity, db2_entity_neighbor_t *out, in
       return 0;
    char sql[512];
    snprintf(sql, sizeof(sql),
-            "SELECT target, weight FROM entity_edges WHERE source = ?1"
+            "SELECT target, weight FROM entity_edges"
+            " WHERE source = ?1 AND edge_class <> 'semantic'"
             " UNION ALL"
-            " SELECT source, weight FROM entity_edges WHERE target = ?2"
+            " SELECT source, weight FROM entity_edges"
+            " WHERE target = ?2 AND edge_class <> 'semantic'"
             " LIMIT %d",
             limit_sql);
    char err[EE_ERRBUF] = "";
@@ -341,10 +350,10 @@ int db2_entity_edge_neighbors_filtered(const char *entity, const char *rel_a, co
    {
       snprintf(sql, sizeof(sql),
                "SELECT target, weight FROM entity_edges"
-               " WHERE source = ?1 AND relation IN (?2, ?3)"
+               " WHERE source = ?1 AND relation IN (?2, ?3) AND edge_class <> 'semantic'"
                " UNION ALL"
                " SELECT source, weight FROM entity_edges"
-               " WHERE target = ?4 AND relation IN (?5, ?6)"
+               " WHERE target = ?4 AND relation IN (?5, ?6) AND edge_class <> 'semantic'"
                "%s LIMIT %d",
                order_by_weight ? " ORDER BY weight DESC" : "", limit_sql);
       aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -363,10 +372,10 @@ int db2_entity_edge_neighbors_filtered(const char *entity, const char *rel_a, co
 
    snprintf(sql, sizeof(sql),
             "SELECT target, weight FROM entity_edges"
-            " WHERE source = ?1 AND relation = ?2"
+            " WHERE source = ?1 AND relation = ?2 AND edge_class <> 'semantic'"
             " UNION ALL"
             " SELECT source, weight FROM entity_edges"
-            " WHERE target = ?3 AND relation = ?4"
+            " WHERE target = ?3 AND relation = ?4 AND edge_class <> 'semantic'"
             "%s LIMIT %d",
             order_by_weight ? " ORDER BY weight DESC" : "", limit_sql);
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -389,7 +398,7 @@ int db2_entity_edge_walk_step(const char *node, edge_t *out, int max)
    if (!conn)
       return 0;
    static const char *sql = "SELECT id, source, relation, target, weight FROM entity_edges"
-                            " WHERE source = ?1 OR target = ?2"
+                            " WHERE (source = ?1 OR target = ?2) AND edge_class <> 'semantic'"
                             " ORDER BY weight DESC LIMIT 50";
    char err[EE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -417,7 +426,7 @@ int db2_entity_edge_walk_step_typed(const char *node, db2_entity_edge_typed_t *o
                             "       COALESCE(object_kind, 99) AS ok,"
                             "       weight"
                             " FROM entity_edges"
-                            " WHERE source = ?1 OR target = ?2"
+                            " WHERE (source = ?1 OR target = ?2) AND edge_class <> 'semantic'"
                             " ORDER BY weight DESC LIMIT 50";
    char err[EE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -453,7 +462,7 @@ int db2_entity_edge_top_targets_by_relation(const char *source, const char *rela
    char sql[512];
    snprintf(sql, sizeof(sql),
             "SELECT target, SUM(weight) AS w FROM entity_edges"
-            " WHERE LOWER(source) = LOWER(?1) AND relation = ?2"
+            " WHERE LOWER(source) = LOWER(?1) AND relation = ?2 AND edge_class <> 'semantic'"
             " GROUP BY target ORDER BY w DESC LIMIT %d",
             max);
    char err[EE_ERRBUF] = "";
@@ -479,10 +488,10 @@ int db2_entity_edge_top_partners_by_relation(const char *entity, const char *rel
    snprintf(sql, sizeof(sql),
             "SELECT partner, SUM(w) AS total FROM ("
             "  SELECT target AS partner, weight AS w FROM entity_edges"
-            "  WHERE LOWER(source) = LOWER(?1) AND relation = ?2"
+            "  WHERE LOWER(source) = LOWER(?1) AND relation = ?2 AND edge_class <> 'semantic'"
             "  UNION ALL"
             "  SELECT source AS partner, weight AS w FROM entity_edges"
-            "  WHERE LOWER(target) = LOWER(?3) AND relation = ?4"
+            "  WHERE LOWER(target) = LOWER(?3) AND relation = ?4 AND edge_class <> 'semantic'"
             ") sub GROUP BY partner ORDER BY total DESC LIMIT %d",
             max);
    char err[EE_ERRBUF] = "";
@@ -508,6 +517,7 @@ int db2_entity_edge_top_distinct_triples(edge_t *out, int max)
    char sql[256];
    snprintf(sql, sizeof(sql),
             "SELECT DISTINCT 0 AS id, source, relation, target, weight FROM entity_edges"
+            " WHERE edge_class <> 'semantic'"
             " ORDER BY weight DESC LIMIT %d",
             max);
    char err[EE_ERRBUF] = "";
@@ -532,10 +542,10 @@ int db2_entity_edge_co_targets(const char *node, const char *relation, int min_w
    char sql[1024];
    snprintf(sql, sizeof(sql),
             "SELECT target FROM entity_edges"
-            " WHERE source = ?1 AND relation = ?2 AND weight > ?3"
+            " WHERE source = ?1 AND relation = ?2 AND weight > ?3 AND edge_class <> 'semantic'"
             " UNION"
             " SELECT source FROM entity_edges"
-            " WHERE target = ?4 AND relation = ?5 AND weight > ?6"
+            " WHERE target = ?4 AND relation = ?5 AND weight > ?6 AND edge_class <> 'semantic'"
             " LIMIT %d",
             max);
    char err[EE_ERRBUF] = "";
@@ -598,7 +608,9 @@ int db2_entity_edge_outbound_neighbors(const char *source, db2_entity_neighbor_t
    if (!conn)
       return 0;
    char sql[256];
-   snprintf(sql, sizeof(sql), "SELECT target, weight FROM entity_edges WHERE source = ?1 LIMIT %d",
+   snprintf(sql, sizeof(sql),
+            "SELECT target, weight FROM entity_edges"
+            " WHERE source = ?1 AND edge_class <> 'semantic' LIMIT %d",
             limit_sql);
    char err[EE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -622,9 +634,10 @@ int db2_entity_edge_search_by_token(const char *token, edge_t *out, int max, int
    char sql[1024];
    snprintf(sql, sizeof(sql),
             "SELECT id, source, relation, target, weight FROM entity_edges"
-            " WHERE LOWER(source) = LOWER(?1)"
+            " WHERE (LOWER(source) = LOWER(?1)"
             "    OR LOWER(target) = LOWER(?2)"
-            "    OR LOWER(relation) = LOWER(?3)"
+            "    OR LOWER(relation) = LOWER(?3))"
+            "   AND edge_class <> 'semantic'"
             " ORDER BY weight DESC LIMIT %d",
             limit_sql);
    char err[EE_ERRBUF] = "";
@@ -947,10 +960,10 @@ int db2_entity_edge_neighbors_weighted(const char *entity, db2_entity_edge_weigh
    char sql[768];
    snprintf(sql, sizeof(sql),
             "SELECT target, weight, utility_score, utility_touched_at"
-            " FROM entity_edges WHERE source = ?1"
+            " FROM entity_edges WHERE source = ?1 AND edge_class <> 'semantic'"
             " UNION ALL"
             " SELECT source, weight, utility_score, utility_touched_at"
-            " FROM entity_edges WHERE target = ?2"
+            " FROM entity_edges WHERE target = ?2 AND edge_class <> 'semantic'"
             " LIMIT %d",
             limit_sql);
    char err[EE_ERRBUF] = "";
@@ -999,10 +1012,10 @@ int db2_entity_edge_two_hop_neighbors(const char *entity, int max, int limit_per
    snprintf(sql, sizeof(sql),
             "WITH hop1 AS ("
             "  SELECT target AS node, weight FROM entity_edges"
-            "  WHERE source = ?1 LIMIT %d"
+            "  WHERE source = ?1 AND edge_class <> 'semantic' LIMIT %d"
             "  UNION ALL"
             "  SELECT source AS node, weight FROM entity_edges"
-            "  WHERE target = ?2 LIMIT %d"
+            "  WHERE target = ?2 AND edge_class <> 'semantic' LIMIT %d"
             ")"
             " SELECT node, weight, 1 AS hop FROM hop1"
             " UNION ALL"
@@ -1010,6 +1023,7 @@ int db2_entity_edge_two_hop_neighbors(const char *entity, int max, int limit_per
             " FROM entity_edges e"
             " JOIN hop1 h ON (e.source = h.node)"
             " WHERE e.target != ?3"
+            "   AND e.edge_class <> 'semantic'"
             "   AND e.target NOT IN (SELECT node FROM hop1)"
             " LIMIT %d",
             limit_per_hop, limit_per_hop, max);
@@ -1070,7 +1084,7 @@ int db2_entity_edge_explain_by_entity(const char *entity, db2_entity_edge_explai
             "SELECT id, source, relation, target, weight,"
             "       COALESCE(structural_weight, 0), COALESCE(utility_score, 0.0),"
             "       COALESCE(edge_origin, '')"
-            " FROM entity_edges WHERE source = ?1 OR target = ?2"
+            " FROM entity_edges WHERE (source = ?1 OR target = ?2) AND edge_class <> 'semantic'"
             " ORDER BY (COALESCE(structural_weight,0) + weight) DESC LIMIT %d",
             max);
    char err[EE_ERRBUF] = "";

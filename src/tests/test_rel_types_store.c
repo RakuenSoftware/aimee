@@ -59,6 +59,25 @@ int main(void)
                           1) == FACT_GATE_ACCEPT);
    assert(semantic_count("alice") == 1);
 
+   /* R1-A1 read-side boundary: legacy co-occurrence reads exclude 'semantic'
+    * edges. Give "zoe" one co-occurrence edge and one semantic edge, then verify
+    * each recall path returns only the co-occurrence side. */
+   int added = 0;
+   assert(db2_entity_edge_upsert("zoe", "co_seen_with", "quux", 0, 0, 0, 0, &added) == 0);
+   assert(db2_fact_commit("zoe", NODE_PERSON, "works_for", "initech", NODE_ORG,
+                          FACT_AUTHORITY_MODEL, 1) == FACT_GATE_ACCEPT);
+   edge_t ze[16];
+   int m = db2_entity_edge_list_by_entity("zoe", ze, 16);
+   assert(m == 1 && strcmp(ze[0].relation, "co_seen_with") == 0);
+   assert(semantic_count("zoe") == 1); /* semantic recall sees only the typed edge */
+   int w = db2_entity_edge_walk_step("zoe", ze, 16);
+   assert(w == 1 && strcmp(ze[0].relation, "co_seen_with") == 0);
+   int s = db2_entity_edge_search_by_token("zoe", ze, 16, 16);
+   assert(s == 1 && strcmp(ze[0].relation, "co_seen_with") == 0);
+   db2_entity_neighbor_t nb[16];
+   int nn = db2_entity_edge_neighbors("zoe", nb, 16, 50);
+   assert(nn == 1 && strcmp(nb[0].node, "quux") == 0);
+
    db2_test_shim_close();
    printf("rel_types_store: all tests passed\n");
    return 0;
