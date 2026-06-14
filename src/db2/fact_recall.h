@@ -23,6 +23,15 @@ extern "C"
    int db2_fact_recall_block(const char *entity, int turn_requests_sensitive, char *out,
                              size_t cap);
 
+   /* Query-scoped recall: the user's own facts PLUS facts about any registered
+    * entity whose (>=3-char) alias appears in `query` (resolved through the
+    * registry, so "DevBox"/"the workstation" collapse to one node). Each entity's
+    * facts are §7 PII-gated exactly as db2_fact_recall_block. Bounded by an
+    * internal entity cap and the caller's buffer. Returns the total facts written
+    * (>=0), or -1 on bad args. */
+   int db2_fact_recall_in_query(const char *query, int turn_requests_sensitive, char *out,
+                                size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

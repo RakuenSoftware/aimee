@@ -1243,12 +1243,13 @@ cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *b
                                           (block_type && block_type[0]) ? block_type : "general",
                                           limit > 0 ? limit : 5);
 
-   /* §7 read: surface the user's current typed facts (PII-gated) into the
-    * envelope, appended after the memory block. */
+   /* §7 read: surface current typed facts (PII-gated) into the envelope — the
+    * user's own facts plus facts about any entity named in the turn. Appended
+    * after the memory block. */
    char facts[2048] = "";
-   if (typed_enabled)
+   if (typed_enabled && query && query[0])
    {
-      int fr = db2_fact_recall_block("user", requests_sensitive, facts, sizeof(facts));
+      int fr = db2_fact_recall_in_query(query, requests_sensitive, facts, sizeof(facts));
       if (fr < 0) /* recall affects prompt content, so a persistent failure is worth surfacing */
          LOG_WARN("memory", "typed-fact recall failed (db2 unavailable?)");
    }
