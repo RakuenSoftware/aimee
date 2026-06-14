@@ -34,6 +34,7 @@ Dependencies: pip install "sentence-transformers>=3.3" "transformers>=5.2" einop
 import json
 import os
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MODEL_NAME = os.environ.get("EMBEDDER_MODEL", "perplexity-ai/pplx-embed-v1-4b")
@@ -60,20 +61,23 @@ EMBEDDER_QUANTIZE = os.environ.get("EMBEDDER_QUANTIZE", "fp32").strip().lower()
 _model = None
 _dim = 0
 _reranker = None
+# First-boot load/fetch state. The model is no longer baked into the image (see
+# Dockerfile.embedder) — it is fetched once into the HF_HOME volume on first
+# start, which takes minutes for a multi-GB model. Load runs in a background
+# thread (main() serves immediately) and /health reports the state. /health is
+# 200 ONLY when "ok", so a compose `depends_on: condition: service_healthy` gate
+# means the model is actually ready (the KB never starts against an unloaded
+# model); a long Dockerfile HEALTHCHECK start-period covers the cold-fetch window
+# so the "loading" 503s don't trip the container.
+_load_status = "loading"  # loading | ok | error
+_load_error = ""
 
 
 def load_model():
     global _model, _dim
     if _model is not None:
         return _model
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError:
-        sys.stderr.write(
-            "embedder-server: sentence-transformers not installed"
-            ' (pip install "sentence-transformers>=3.3" einops)\n'
-        )
-        sys.exit(1)
+    from sentence_transformers import SentenceTransformer  # raises on missing dep
     import torch
 
     torch.set_num_threads(EMBEDDER_THREADS)
@@ -102,8 +106,29 @@ def load_reranker():
     return _reranker
 
 
+def _background_load():
+    """Fetch (cold volume) + load the models off the request path. The embedder
+    is the critical path: once it loads, /health flips to "ok" and /embed serves.
+    The reranker is best-effort — a failure degrades reranking, not embedding."""
+    global _load_status, _load_error
+    try:
+        load_model()
+        _load_status = "ok"
+    except Exception as exc:  # noqa: BLE001
+        _load_error = str(exc)
+        _load_status = "error"
+        sys.stderr.write(f"embedder-server: model load failed: {exc}\n")
+        sys.stderr.flush()
+        return
+    try:
+        load_reranker()
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(f"embedder-server: reranker load failed (rerank degraded): {exc}\n")
+    sys.stderr.flush()
+
+
 def embed(text: str):
-    vec = load_model().encode(text, normalize_embeddings=True)
+    vec = _model.encode(text, normalize_embeddings=True)
     return vec.tolist()
 
 
@@ -131,10 +156,19 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.rstrip("/") == "/health":
-            self._send(
-                200,
-                {"status": "ok", "model": MODEL_NAME, "dim": _dim, "quantize": EMBEDDER_QUANTIZE},
-            )
+            # 200 ONLY when ready (so compose service_healthy == model loaded);
+            # "loading" and "error" are 503. dim is the model's true dimension
+            # once loaded (0 while loading) — the KB reads it to size the schema,
+            # so it is never a placeholder.
+            payload = {
+                "status": _load_status,
+                "model": MODEL_NAME,
+                "dim": _dim,
+                "quantize": EMBEDDER_QUANTIZE,
+            }
+            if _load_status == "error":
+                payload["error"] = _load_error
+            self._send(200 if _load_status == "ok" else 503, payload)
         else:
             self._send(404, {"error": "not found"})
 
@@ -142,6 +176,11 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.rstrip("/")
         if path not in ("/embed", "/rerank"):
             self._send(404, {"error": "not found"})
+            return
+        # Refuse work until the model is loaded — never serve against a not-yet-
+        # loaded model (no 0-vector fallback). The KB treats 503 as "warming up".
+        if _load_status != "ok":
+            self._send(503, {"error": "embedder warming up", "status": _load_status})
             return
         length = int(self.headers.get("content-length", "0") or "0")
         raw = self.rfile.read(length) if length else b""
@@ -163,11 +202,13 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    # Fail fast if the model can't load, so the container healthcheck flips
-    # rather than silently serving 500s.
-    load_model()
+    # Serve immediately; load the model in the background. On a cold volume the
+    # first-boot fetch of a multi-GB model takes minutes, and blocking here would
+    # trip the healthcheck before the server is even up. /health reports "loading"
+    # (503) until ready; /embed + /rerank return 503 meanwhile.
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    sys.stderr.write(f"embedder-server: {MODEL_NAME} ready on :{PORT}\n")
+    threading.Thread(target=_background_load, daemon=True).start()
+    sys.stderr.write(f"embedder-server: serving on :{PORT}; loading {MODEL_NAME} in background\n")
     sys.stderr.flush()
     server.serve_forever()
 

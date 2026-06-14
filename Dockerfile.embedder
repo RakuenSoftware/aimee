@@ -37,37 +37,33 @@ RUN apt-get update \
 RUN pip install --index-url https://download.pytorch.org/whl/cpu torch \
     && pip install -U "sentence-transformers>=3.3" "transformers>=5.2" einops
 
-# Pre-download EMBEDDER_MODEL at build time so runtime needs no network. The model
-# id is read from the env so the build, the runtime, and an override all agree on
-# one source of truth. HuggingFace downloads are flaky during CI image builds
-# (transient network/CDN errors fail the whole release), so retry with backoff;
-# the final attempt is unguarded so an image that genuinely couldn't fetch the
-# model still fails the build rather than shipping without it (a cached model
-# makes the re-verify a fast no-op).
-RUN for i in 1 2 3 4 5; do \
-        python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['EMBEDDER_MODEL'], trust_remote_code=True)" && break; \
-        echo "model download attempt $i failed; retrying in $((i * 10))s"; \
-        sleep $((i * 10)); \
-    done; \
-    python -c "import os; from sentence_transformers import SentenceTransformer; SentenceTransformer(os.environ['EMBEDDER_MODEL'], trust_remote_code=True)"
-
-# Pre-download the cross-encoder reranker too (same retry rationale).
-RUN for i in 1 2 3 4 5; do \
-        python -c "import os; from sentence_transformers import CrossEncoder; CrossEncoder(os.environ['RERANKER_MODEL'], trust_remote_code=True)" && break; \
-        echo "reranker download attempt $i failed; retrying in $((i * 10))s"; \
-        sleep $((i * 10)); \
-    done; \
-    python -c "import os; from sentence_transformers import CrossEncoder; CrossEncoder(os.environ['RERANKER_MODEL'], trust_remote_code=True)"
+# Models are NOT baked into the image. Baking the multi-GB 4b embedder + 1b
+# reranker re-downloaded several GB into every release build (×2 arches) and made
+# the published image multi-GB to push and to convert to an LXC template. Instead
+# embedder-server.py fetches EMBEDDER_MODEL + RERANKER_MODEL at startup, once,
+# into HF_HOME (/opt/models — the persistent aimee-embedder-models volume), so a
+# restart/recreate/image-update reuses the cached weights and only `down -v`
+# re-downloads. Switching tier (…-0.6b / …-400m) or model is an env-var change,
+# no rebuild. During the cold first-boot fetch /health reports "loading" (503)
+# and /embed returns 503 — never a 0-vector against an unloaded model.
 
 COPY scripts/embedder-server.py /opt/aimee/scripts/embedder-server.py
 
+# Create HF_HOME (/opt/models) explicitly — the removed build-time model
+# pre-download used to create it; now it must exist and be owned by the embedder
+# user so the runtime fetch can write the weights (and a fresh named volume
+# mounted here inherits this ownership).
 RUN useradd --system --home-dir /opt/aimee --shell /usr/sbin/nologin embedder \
+    && mkdir -p /opt/models \
     && chown -R embedder:embedder /opt/models /opt/aimee
 USER embedder
 WORKDIR /opt/aimee
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+# start-period is long: on a cold volume the first boot downloads the model
+# (minutes for the multi-GB 4b) before /health returns 200, and failures during
+# start-period don't count. Subsequent boots reuse the volume and are fast.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=900s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1
 
 ENTRYPOINT ["python", "/opt/aimee/scripts/embedder-server.py"]
