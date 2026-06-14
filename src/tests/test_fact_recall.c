@@ -99,6 +99,25 @@ int main(void)
    assert(strstr(buf, "age: 30") != NULL);
    assert(db2_fact_recall_in_query(NULL, 0, buf, sizeof(buf)) == -1);
 
+   /* multi-entity: a query naming two devices recalls both. */
+   int64_t rt = db2_entity_register_named("RouterX", NODE_DEVICE);
+   assert(rt > 0);
+   assert(db2_fact_commit("RouterX", NODE_DEVICE, "device_has_ip", "10.0.0.9", NODE_IP,
+                          FACT_AUTHORITY_USER, 1) == FACT_GATE_ACCEPT);
+   n = db2_fact_recall_in_query("compare devbox and routerx", 1, buf, sizeof(buf));
+   assert(strstr(buf, "10.0.0.5") != NULL); /* DevBox */
+   assert(strstr(buf, "10.0.0.9") != NULL); /* RouterX */
+
+   /* PII gating still applies in the query path: the user's PII age is withheld
+    * when the turn does not request sensitive info (even while an entity matches). */
+   n = db2_fact_recall_in_query("what about devbox", 0, buf, sizeof(buf));
+   assert(strstr(buf, "device_has_ip: 10.0.0.5") != NULL); /* NORMAL device fact passes */
+   assert(strstr(buf, "age: 30") == NULL);                 /* user PII withheld */
+
+   /* tight caller buffer: bounded, NUL-terminated, no overflow. */
+   n = db2_fact_recall_in_query("devbox", 1, buf, 12);
+   assert(n >= 0 && strlen(buf) < 12);
+
    /* bad args. */
    assert(db2_fact_recall_block(NULL, 0, buf, sizeof(buf)) == -1);
    assert(db2_fact_recall_block("user", 0, NULL, 10) == -1);

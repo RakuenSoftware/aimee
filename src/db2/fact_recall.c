@@ -86,7 +86,11 @@ int db2_fact_recall_in_query(const char *query, int turn_requests_sensitive, cha
    /* Entities mentioned in the query: any active entity whose alias (>=3 chars,
     * to avoid noise) is a substring of the lowercased query. LIKE + || is
     * portable across Postgres and the sqlite shim (position()/instr() are not).
-    * Skip "user" (already done above). Return each entity's preferred name. */
+    * Skip "user" (already done above). Return each entity's preferred name.
+    * name_norm is a trusted stored value (?1 is bound, no injection); the only
+    * wart is that an alias literally containing a LIKE wildcard (% or _) — rare,
+    * since names seldom do — would over-match. Acceptable: it only recalls a few
+    * extra of the user's own facts, never leaks (each is still §7 PII-gated). */
    static const char *sql =
        "SELECT (SELECT name FROM entity_aliases p WHERE p.canonical_id = r.canonical_id"
        "          AND p.suppressed = 0 ORDER BY is_preferred DESC, id ASC LIMIT 1) AS pref"
