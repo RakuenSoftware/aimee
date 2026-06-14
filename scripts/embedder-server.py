@@ -58,6 +58,13 @@ os.environ.setdefault("OMP_NUM_THREADS", str(EMBEDDER_THREADS))
 # the sole tier. The deep-tier deployment sets this to int8; the default is fp32.
 EMBEDDER_QUANTIZE = os.environ.get("EMBEDDER_QUANTIZE", "fp32").strip().lower()
 
+# CI/test stub: serve deterministic fixed-dimension vectors without downloading
+# or loading any model. e2e-docker uses this so CI exercises the real
+# kb -> embedder -> pgvector wiring (at the deployment's real dim, e.g. 2560 or
+# 1024 — never the retired 384) without a multi-GB cold model fetch. Off in prod.
+EMBEDDER_STUB = os.environ.get("EMBEDDER_STUB", "").strip() not in ("", "0", "false", "no")
+STUB_DIM = int(os.environ.get("EMBEDDER_STUB_DIM", os.environ.get("AIMEE_EMBEDDING_DIM", "2560")) or "2560")
+
 _model = None
 _dim = 0
 _reranker = None
@@ -106,11 +113,37 @@ def load_reranker():
     return _reranker
 
 
+def _stub_embed(text):
+    """Deterministic unit-norm pseudo-embedding of fixed dimension STUB_DIM, with
+    no model. Same text -> same vector (so recall finds it); different text ->
+    different vector. CI-only; not a real semantic embedding."""
+    import hashlib
+    import math
+
+    out = []
+    counter = 0
+    while len(out) < STUB_DIM:
+        h = hashlib.sha256(f"{text}\x00{counter}".encode("utf-8")).digest()
+        for i in range(0, len(h), 2):
+            if len(out) >= STUB_DIM:
+                break
+            out.append((int.from_bytes(h[i : i + 2], "big") / 65535.0) - 0.5)
+        counter += 1
+    norm = math.sqrt(sum(x * x for x in out)) or 1.0
+    return [x / norm for x in out]
+
+
 def _background_load():
     """Fetch (cold volume) + load the models off the request path. The embedder
     is the critical path: once it loads, /health flips to "ok" and /embed serves.
     The reranker is best-effort — a failure degrades reranking, not embedding."""
-    global _load_status, _load_error
+    global _load_status, _load_error, _dim
+    if EMBEDDER_STUB:
+        _dim = STUB_DIM
+        _load_status = "ok"
+        sys.stderr.write(f"embedder-server: STUB mode, dim={STUB_DIM} (no model loaded)\n")
+        sys.stderr.flush()
+        return
     try:
         load_model()
         _load_status = "ok"
@@ -128,6 +161,8 @@ def _background_load():
 
 
 def embed(text: str):
+    if EMBEDDER_STUB:
+        return _stub_embed(text)
     vec = _model.encode(text, normalize_embeddings=True)
     return vec.tolist()
 
@@ -138,6 +173,16 @@ def rerank(pairs):
     contract (memory_core_search.inc: JSON pairs in, JSON float array out)."""
     if not pairs:
         return []
+    if EMBEDDER_STUB:
+        # Deterministic stub score from the embedding cosine — keeps CI's rerank
+        # path exercised without a model.
+        import math
+
+        out = []
+        for q, c in pairs:
+            qv, cv = _stub_embed(str(q)), _stub_embed(str(c))
+            out.append(float(sum(a * b for a, b in zip(qv, cv))))
+        return out
     scores = load_reranker().predict([[str(q), str(c)] for q, c in pairs])
     return [float(s) for s in scores]
 

@@ -40,6 +40,10 @@ services:
       args:
         EMBEDDER_MODEL: ${EMBEDDER_MODEL:-perplexity-ai/pplx-embed-v1-4b}
         RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ettin-reranker-1b-v1}
+      # CI stub embedder (off in prod): e2e sets these to serve fixed-dim
+      # vectors with no model download. EMBEDDER_STUB_DIM matches the schema dim.
+      EMBEDDER_STUB: ${EMBEDDER_STUB:-}
+      EMBEDDER_STUB_DIM: ${EMBEDDER_STUB_DIM:-}
     # Tier is a RUNTIME choice now: models are fetched at startup into the volume
     # (not baked), so EMBEDDER_MODEL / RERANKER_MODEL select the tier with no
     # rebuild. Light tier: EMBEDDER_MODEL=...-0.6b, RERANKER_MODEL=...-400m-v1,
