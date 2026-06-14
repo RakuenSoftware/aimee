@@ -1940,12 +1940,12 @@ int main(int argc, char **argv)
          return cli_workspace_add_remote(sub_argc >= 2 ? sub_argv[1] : NULL);
       if (strcmp(cmd, "index") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "scan") == 0)
          return cli_index_scan_remote(sub_argc - 1, sub_argv + 1);
-      /* `agent add ... --key K` against a remote server: keep K on THIS host
-       * (local keyring) and strip it before forwarding the agent definition, so
-       * the server never stores the credential. Falls through to forward the
-       * (key-stripped) agent.add. */
-      if (strcmp(cmd, "agent") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "add") == 0)
-         cli_agent_add_localize_key(&sub_argc, sub_argv);
+      /* `agent add ... --key K` is forwarded verbatim: the server vaults the key
+       * (the permanent credential store, P4) over an attested connection — a
+       * native-TLS provisioning conn (#304) or local UDS — and REFUSES it over a
+       * plaintext TCP bearer (D2b), so the secret is never localized client-side
+       * or written to agents.json. The legacy client-held localize path was
+       * retired in P4b. */
    }
 
    /* Route through native server RPCs when possible. */

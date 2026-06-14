@@ -17,13 +17,6 @@
 /* Include the route implementation directly so static marshal helpers are testable. */
 #include "../cli_rpc_routes.inc"
 
-/* marshal_delegate now primes client-held creds; stub it for this pure
- * marshalling test (cli_agent_keys.o + its HTTP deps aren't linked here). */
-void cli_session_creds_prime(cJSON *req)
-{
-   (void)req;
-}
-
 static void test_delegate_max_turns_marshaled(void)
 {
    char *argv[] = {"review",

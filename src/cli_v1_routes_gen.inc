@@ -136,7 +136,6 @@ static const struct
     {"session.brief", "POST", "/v1/sessions/brief"},
     {"session.close", "POST", "/v1/sessions/close"},
     {"session.create", "POST", "/v1/sessions/create"},
-    {"session.credentials", "POST", "/v1/session/credentials"},
     {"session.get", "POST", "/v1/sessions/get"},
     {"session.presence", "GET", "/v1/sessions/presence"},
     {"skill.archive", "POST", "/v1/skills/archive"},

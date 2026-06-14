@@ -1013,7 +1013,6 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"hooks.session_start", handle_hooks_session_start},
     {"session.create", handle_session_create},
     {"session.list", handle_session_list},
-    {"session.credentials", handle_session_credentials},
     {"session.get", handle_session_get},
     {"session.close", handle_session_close},
     {"session.brief", handle_session_brief},

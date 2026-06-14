@@ -458,8 +458,10 @@ static void chat_stream_worker_pooled(void *arg)
       const char *cred_sid = jo_str(cctx->req, "cred_session_id", NULL);
       agent_set_request_session((cred_sid && cred_sid[0]) ? cred_sid : sid);
    }
-   agent_set_request_codex_creds(jo_str(cctx->req, "codex_oauth_token", NULL),
-                                 jo_str(cctx->req, "codex_account_id", NULL));
+   /* Clear any per-turn codex creds on this pooled thread; the vault is the source
+    * now (delegate_credential_retry sets them from the vault) and the client no
+    * longer pushes a codex token in the request body (P4b). */
+   agent_set_request_codex_creds(NULL, NULL);
    /* WP-C.2c(3): carry the attested vault principal across the conn-decoupled
     * agent loop so a delegate this chat spawns reaches the user's vault — both a
     * same-thread delegate (via create_compute_ctx's thread-local fallback when its
