@@ -93,6 +93,8 @@ const method_policy_t method_registry[] = {
     {"vault.unlock", CAP_DELEGATE, "unlock the credential vault"},
     {"vault.rekey", CAP_DELEGATE, "re-key the credential vault (password change)"},
     {"vault.set", CAP_DELEGATE, "store a vault credential"},
+    {"vault.set_server", CAP_DELEGATE, "store a server-principal vault credential"},
+    {"vault.capability", CAP_DELEGATE, "manage the vault:write:server capability"},
     {"vault.list", CAP_DELEGATE, "list vault credential names"},
     {"vault.delete", CAP_DELEGATE, "delete a vault credential"},
     {"vault.lock", CAP_DELEGATE, "lock the credential vault"},

@@ -370,6 +370,8 @@ int handle_delegate_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_vault_rekey(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_vault_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_vault_set_server(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_vault_capability(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_vault_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_vault_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_vault_lock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
