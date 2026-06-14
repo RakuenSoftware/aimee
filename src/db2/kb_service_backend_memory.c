@@ -8,6 +8,8 @@
 #include "aimee.h"
 #include "memory_lint.h"
 #include "config.h"
+#include "fact_ingest.h"             /* db2_fact_ingest_text (typed-fact §6 ingress hook) */
+#include "memory_extract_patterns.h" /* memory_pattern_is_retraction */
 #include "decision_log.h"
 #include "memory.h"
 #include "memory_export.h"
@@ -1214,6 +1216,18 @@ cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *b
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
+
+   /* typed-fact §6 ingress hook: extract high-precision facts from the turn query
+    * and route them through the typed gate, KB-side where db2 is live (the server
+    * has no DB2 connection). Default-off via typed_facts_enabled. A retraction-cue
+    * turn ("forget that ...") is a correction, not an assertion, so skip ingest. */
+   if (query && query[0])
+   {
+      config_t cfg;
+      config_load(&cfg);
+      if (cfg.typed_facts_enabled && !memory_pattern_is_retraction(query))
+         (void)db2_fact_ingest_text(query, FACT_AUTHORITY_USER, 1);
+   }
 
    char *block = memory_get_context_block(query ? query : "",
                                           (block_type && block_type[0]) ? block_type : "general",
