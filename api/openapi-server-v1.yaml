@@ -338,6 +338,129 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workflow/blocks:
+    get:
+      summary: Composable workflow block catalog (built-ins + custom registry)
+      responses:
+        "200":
+          description: "{blocks:[{name,produces,accepts[],custom,requires_input,executor?}]}"
+          content:
+            application/json:
+              schema: { type: object }
+  /workflow/defs:
+    get:
+      summary: List saved workflow definitions
+      responses:
+        "200":
+          description: "{defs:[{name,valid,version}]}"
+          content:
+            application/json:
+              schema: { type: object }
+  /workflow/defs/{name}:
+    get:
+      summary: One workflow definition (canonical form, version, node graph)
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: "{valid,name,version,canonical,def,error?}"
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid workflow name
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: Workflow not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workflow/validate:
+    post:
+      summary: Validate posted workflow YAML without saving
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [yaml]
+              properties:
+                yaml: { type: string }
+      responses:
+        "200":
+          description: "{valid,name,version,canonical,def,error?}"
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Malformed request
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workflow/save:
+    post:
+      summary: Canonical-normalize + save a workflow (optimistic lock on prev_version)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, yaml]
+              properties:
+                name: { type: string }
+                yaml: { type: string }
+                prev_version: { type: string }
+      responses:
+        "200":
+          description: "{name,version}"
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid definition or name
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "409":
+          description: Version conflict / already exists
+          content:
+            application/json:
+              schema: { type: object }
+  /workflow/items:
+    get:
+      summary: List workflow work items (run-state rows)
+      responses:
+        "200":
+          description: "{items:[{id,workflow,version,stage,state,mode,pause_reason,repo}]}"
+          content:
+            application/json:
+              schema: { type: object }
+  /workflow/items/{id}:
+    get:
+      summary: One work item's run-state
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Work-item run-state
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: Work item not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /kb/search:
     post:
       summary: Search the knowledge base (proxied to aimee-kb)

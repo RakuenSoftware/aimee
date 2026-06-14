@@ -119,6 +119,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/", s.requireAuth(s.handleRoot))
 	mux.HandleFunc("/chat", s.requireAuth(s.handleSPA))
 	mux.HandleFunc("/dashboard", s.requireAuth(s.handleSPA))
+	mux.HandleFunc("/workflows", s.requireAuth(s.handleSPA))
 
 	// Chat API (session required)
 	mux.HandleFunc("/api/chat/send", s.requireAuth(s.handleChatSend))
@@ -150,6 +151,15 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 
 	// Aggregate dashboard endpoint — all panels in one server round-trip
 	mux.HandleFunc("/api/dashboard", s.requireAuth(s.handleDashboardAll))
+
+	// Workflow visual composer (W7): proxy to aimee-server /v1/workflow/*.
+	mux.HandleFunc("/api/workflow/blocks", s.requireAuth(s.handleWorkflowBlocks))
+	mux.HandleFunc("/api/workflow/defs", s.requireAuth(s.handleWorkflowDefs))
+	mux.HandleFunc("/api/workflow/defs/", s.requireAuth(s.handleWorkflowDefs))
+	mux.HandleFunc("/api/workflow/validate", s.requireAuth(s.handleWorkflowValidate))
+	mux.HandleFunc("/api/workflow/save", s.requireAuth(s.handleWorkflowSave))
+	mux.HandleFunc("/api/workflow/items", s.requireAuth(s.handleWorkflowItems))
+	mux.HandleFunc("/api/workflow/items/", s.requireAuth(s.handleWorkflowItems))
 
 	// Credential vault (WP-C.2c): the user re-presents their login password to
 	// unlock; calls carry the server.token bearer + X-Aimee-Webuser so
