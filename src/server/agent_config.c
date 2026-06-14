@@ -4,7 +4,6 @@
 #include "agent_config.h"
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX for the per-turn vault principal */
 #include "vault_service.h"   /* vault_service_* : the permanent credential store (P4) */
-#include "session_credentials.h"
 #include "model_registry.h"
 #include "platform_path.h"
 #include "provider_cli_adapter.h"
@@ -15,9 +14,10 @@
 #include <unistd.h>
 
 /* Per-turn session id, set from the request in the chat/delegate workers (setter
- * below). Lets auth resolution + routing-availability consult the session-scoped
- * RAM-only credential keyring the thin client pushed once per session
- * (session_credentials.h) — so agent keys need not be stored on the server. */
+ * below) and carried in the creds snapshot so a fan-out worker inherits the
+ * originating turn's session identity. (Credentials no longer ride this: the
+ * permanent vault is the single source — the legacy session-scoped RAM keyring
+ * was retired in P4b.) */
 static _Thread_local char g_request_session_id[128];
 
 /* --- Config path --- */
@@ -225,17 +225,6 @@ int agent_has_resolvable_credentials(const agent_t *agent)
                           sizeof(k)))
          return 1;
    }
-   /* A client-pushed session key (or codex-oauth creds) for this turn also makes
-    * the agent usable (legacy RAM keyring, retired in P4b). */
-   if (g_request_session_id[0])
-   {
-      char k[MAX_API_KEY_LEN];
-      if (session_creds_get(g_request_session_id, agent->name, k, sizeof(k)))
-         return 1;
-      if (strcmp(agent->auth_type, "codex-oauth") == 0 &&
-          session_creds_get_codex(g_request_session_id, k, sizeof(k), NULL, 0))
-         return 1;
-   }
    for (int i = 0; i < agent->credential_count; i++)
    {
       const char *value = getenv(agent->credentials[i].api_key_env);
@@ -390,10 +379,9 @@ void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len)
       acct[0] = '\0';
       if (g_request_codex_account_id[0])
          snprintf(acct, sizeof(acct), "%s", g_request_codex_account_id);
-      else if (!agent_vault_get(agent->name, VAULT_CODEX_ACCOUNT_CRED, acct, sizeof(acct)) &&
-               g_request_session_id[0])
-         /* vault miss (acct left empty by the helper) -> legacy session keyring. */
-         session_creds_get_codex(g_request_session_id, NULL, 0, acct, sizeof(acct));
+      else
+         /* miss leaves acct empty (helper guarantees) -> header is skipped below. */
+         (void)agent_vault_get(agent->name, VAULT_CODEX_ACCOUNT_CRED, acct, sizeof(acct));
       if (acct[0])
       {
          if (!strstr(buf, "originator:"))
@@ -1548,8 +1536,8 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
    if (strcmp(auth_type, "codex-oauth") == 0)
    {
       /* Codex OAuth token, in precedence: per-turn token (set by the vault delegate
-       * path, or legacy direct push) > the permanent VAULT (turn principal, then
-       * server principal) > session keyring (legacy, retired P4b) > server file. */
+       * path) > the permanent VAULT (turn principal, then server principal) >
+       * server-side file (legacy on-disk codex auth). */
       if (g_request_codex_token[0])
       {
          snprintf(buf, buf_len, "Authorization: Bearer %s", g_request_codex_token);
@@ -1557,12 +1545,6 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
       }
       char token[MAX_API_KEY_LEN];
       if (agent_vault_get(agent->name, VAULT_CODEX_TOKEN_CRED, token, sizeof(token)))
-      {
-         snprintf(buf, buf_len, "Authorization: Bearer %s", token);
-         return 0;
-      }
-      if (g_request_session_id[0] &&
-          session_creds_get_codex(g_request_session_id, token, sizeof(token), NULL, 0))
       {
          snprintf(buf, buf_len, "Authorization: Bearer %s", token);
          return 0;
@@ -1610,24 +1592,20 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
    /* Credential precedence for the in-flight turn (P4): the permanent VAULT wins
     * — resolved for the turn's attested principal with autonomous server-principal
     * fallback, so EVERY connection (primary chat, webchat, in-model tool, delegate)
-    * is served from the one store. Then a client-pushed session-scoped key (the
-    * legacy RAM keyring, retired in P4b), then the agent's stored api_key / env
-    * below. vault_service_inject_api_key handles the dual-wrap (server-wrap ->
-    * user-KEK -> server principal) AND is robust to an empty principal (it just
-    * resolves the server principal); a locked/miss result falls through here, while
-    * the delegate path keeps its own D15 hard-fail-on-locked. Computed only for the
-    * key-bearing auth types below (not codex-oauth / auth_cmd), to avoid a wasted
-    * decrypt on turns that never consult it. */
+    * is served from the one store; then the agent's stored api_key / env below.
+    * vault_service_inject_api_key handles the dual-wrap (server-wrap -> user-KEK ->
+    * server principal) AND is robust to an empty principal (it just resolves the
+    * server principal); a locked/miss result falls through here, while the delegate
+    * path keeps its own D15 hard-fail-on-locked. Computed only for the key-bearing
+    * auth types below (not codex-oauth / auth_cmd), to avoid a wasted decrypt on
+    * turns that never consult it. */
    char primary_key[MAX_API_KEY_LEN];
    int have_primary_key =
        (vault_service_inject_api_key(agent_get_request_vault_principal(), agent->name, primary_key,
                                      sizeof(primary_key), time(NULL)) == VAULT_OK &&
         primary_key[0]);
-   if (!have_primary_key && g_request_session_id[0] &&
-       session_creds_get(g_request_session_id, agent->name, primary_key, sizeof(primary_key)))
-      have_primary_key = 1;
 
-   /* x-api-key auth (Anthropic): resolve via session keyring, auth_cmd or api_key */
+   /* x-api-key auth (Anthropic): resolve via the vault, auth_cmd or api_key */
    if (strcmp(auth_type, "x-api-key") == 0)
    {
       if (have_primary_key)

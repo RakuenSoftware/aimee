@@ -518,8 +518,10 @@ static void bind_request_session_creds(cJSON *req)
    const char *cred_sid = jo_str(req, "cred_session_id", NULL);
    agent_set_request_session((cred_sid && cred_sid[0]) ? cred_sid
                                                        : compute_request_session_id(req));
-   agent_set_request_codex_creds(jo_str(req, "codex_oauth_token", NULL),
-                                 jo_str(req, "codex_account_id", NULL));
+   /* Clear any per-turn codex creds carried on this pooled thread; the vault is the
+    * source now (delegate_credential_retry sets them from the vault), and the
+    * client no longer pushes a codex token in the request body (P4b). */
+   agent_set_request_codex_creds(NULL, NULL);
 }
 
 static int delegate_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx)
