@@ -1,0 +1,178 @@
+/* test_wfe_roundtable.c -- W5: the fail-closed gate decision rule + the
+ * gate.roundtable executor through the engine with a mock panel provider. */
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+
+#include "db1.h"
+#include "lifecycle.h"
+#include "wfe_engine.h"
+#include "wfe_iface.h"
+#include "wfe_roundtable.h"
+#include "wfe_verdict.h"
+
+static wfe_verdict_t mk(const char *persona, wfe_verdict_kind_t k, const char *hash, int hs)
+{
+   wfe_verdict_t v;
+   memset(&v, 0, sizeof v);
+   snprintf(v.persona, sizeof v.persona, "%s", persona);
+   v.schema_version = WFE_VERDICT_SCHEMA;
+   snprintf(v.reviewed_content_hash, sizeof v.reviewed_content_hash, "%s", hash ? hash : "");
+   v.kind = k;
+   v.high_sev_blockers = hs;
+   return v;
+}
+
+/* ---- mock panel provider for the engine sub-test ---- */
+static int g_mode; /* 0=approve all required, 1=request changes, 2=unreachable */
+static int mock_panel(const char *artifact_hash, const char *const *required, int nreq,
+                      const char *const *eligible, int nelig, wfe_verdict_t *out, int max)
+{
+   (void)eligible;
+   (void)nelig;
+   if (g_mode == 2)
+      return -1;
+   int n = 0;
+   for (int i = 0; i < nreq && n < max; i++)
+      out[n++] =
+          mk(required[i], g_mode == 0 ? WFE_V_APPROVE : WFE_V_REQUEST_CHANGES, artifact_hash, 0);
+   return n;
+}
+
+static const char *RT = "name: rt\n"
+                        "start: draft\n"
+                        "nodes:\n"
+                        "  - id: draft\n"
+                        "    block: author.proposal\n"
+                        "    next: gate\n"
+                        "  - id: gate\n"
+                        "    block: gate.roundtable\n"
+                        "    in:\n"
+                        "      src: draft.out\n"
+                        "    params:\n"
+                        "      panel:\n"
+                        "        required:\n"
+                        "          - security\n"
+                        "          - architect\n"
+                        "      quorum: 2\n"
+                        "    on_pass: pr\n"
+                        "    on_fail: draft\n"
+                        "  - id: pr\n"
+                        "    block: pr.open\n"
+                        "    in:\n"
+                        "      src: draft.out\n"
+                        "    next: done\n"
+                        "  - id: done\n"
+                        "    block: merge\n"
+                        "    in:\n"
+                        "      pr: pr.out\n";
+
+static void setup_home(void)
+{
+   char d[] = "/tmp/wfe_rt_XXXXXX";
+   char *dir = mkdtemp(d);
+   assert(dir);
+   char wf[128];
+   snprintf(wf, sizeof wf, "%s/workflows", dir);
+   mkdir(wf, 0755);
+   char p[200];
+   snprintf(p, sizeof p, "%s/rt.yaml", wf);
+   FILE *f = fopen(p, "wb");
+   assert(f);
+   fputs(RT, f);
+   fclose(f);
+   setenv("AIMEE_HOME", dir, 1);
+}
+
+int main(void)
+{
+   printf("wfe-roundtable: ");
+   const char *req2[] = {"security", "architect"};
+
+   /* --- effective quorum (single-lens floor) --- */
+   assert(wfe_gate_effective_quorum(0, 4) == 4);
+   assert(wfe_gate_effective_quorum(1, 1) == 2); /* floor of 2 */
+   assert(wfe_gate_effective_quorum(3, 2) == 3);
+   assert(wfe_gate_effective_quorum(5, 4) == 5);
+
+   /* --- decision matrix (pure) --- */
+   {
+      char rs[160];
+      /* both approve, quorum 2, no high-sev -> APPROVE */
+      wfe_verdict_t a[] = {mk("security", WFE_V_APPROVE, "H", 0),
+                           mk("architect", WFE_V_APPROVE, "H", 0)};
+      assert(wfe_gate_decide(a, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_APPROVE);
+
+      /* missing a required persona -> DEGRADED */
+      wfe_verdict_t b[] = {mk("security", WFE_V_APPROVE, "H", 0)};
+      assert(wfe_gate_decide(b, 1, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_DEGRADED);
+
+      /* high-sev blocker present -> CHANGES even if quorum met */
+      wfe_verdict_t c[] = {mk("security", WFE_V_APPROVE, "H", 0),
+                           mk("architect", WFE_V_APPROVE, "H", 1)};
+      assert(wfe_gate_decide(c, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_CHANGES);
+
+      /* COMMENT counts as present-not-approve -> below quorum -> CHANGES */
+      wfe_verdict_t d[] = {mk("security", WFE_V_APPROVE, "H", 0),
+                           mk("architect", WFE_V_COMMENT, "H", 0)};
+      assert(wfe_gate_decide(d, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_CHANGES);
+
+      /* tampered hash: reviewed a different artifact -> coerced REQUEST_CHANGES */
+      wfe_verdict_t e[] = {mk("security", WFE_V_APPROVE, "WRONG", 0),
+                           mk("architect", WFE_V_APPROVE, "H", 0)};
+      assert(wfe_gate_decide(e, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_CHANGES);
+
+      /* malformed -> coerced REQUEST_CHANGES */
+      wfe_verdict_t g[] = {mk("security", WFE_V_APPROVE, "H", 0),
+                           mk("architect", WFE_V_MALFORMED, "H", 0)};
+      assert(wfe_gate_decide(g, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_CHANGES);
+   }
+
+   /* --- engine integration via mock provider --- */
+   setup_home();
+   assert(db1_init(":memory:") == 0);
+
+   /* mode 0: panel approves -> gate advances -> accepted */
+   {
+      wfe_reset_block_executors();
+      wfe_register_stub_executors();
+      wfe_register_roundtable_gate();
+      g_mode = 0;
+      wfe_set_panel_provider(mock_panel);
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("rt", "r0", "p0", "interactive", id, err, sizeof err) == 0);
+      assert(wfe_engine_run(id, err, sizeof err) == 0);
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.state, "accepted") == 0);
+   }
+
+   /* mode 1: panel requests changes -> gate loops -> max_attempts -> pending_human */
+   {
+      g_mode = 1;
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("rt", "r1", "p1", "interactive", id, err, sizeof err) == 0);
+      assert(wfe_engine_run(id, err, sizeof err) == 0);
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.state, "active") == 0);
+      assert(strcmp(wi.pause_reason, "pending_human") == 0);
+   }
+
+   /* default (live §0) provider: cannot compose -> DEGRADED -> pending */
+   {
+      wfe_set_panel_provider(NULL);
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("rt", "r2", "p2", "interactive", id, err, sizeof err) == 0);
+      assert(wfe_engine_run(id, err, sizeof err) == 0);
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.state, "active") == 0);
+      assert(strncmp(wi.pause_reason, "panel_", 6) == 0); /* panel_unreachable */
+   }
+
+   printf("ok\n");
+   return 0;
+}
