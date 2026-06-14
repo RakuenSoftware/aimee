@@ -9,6 +9,7 @@
 #include "cmd_agent_delegate_impl.h"
 #include "delegate_role.h"
 #include "model_registry.h"
+#include "log.h"
 #include "posix/agent_tools_internal.h"
 #include "cJSON.h"
 
@@ -103,6 +104,15 @@ int model_capability_get(const char *provider, const char *model_id, model_capab
    if (strstr(model_id, "deprecated"))
       out->deprecated = 1;
    return 1;
+}
+
+/* delegate_routing.c logs a warning when it relaxes an unmet inferred modality
+ * cap; stub it (this test doesn't link log.o). */
+void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
+{
+   (void)level;
+   (void)module;
+   (void)fmt;
 }
 
 void model_capability_flags_string(unsigned flags, char *out, size_t out_len)
@@ -864,6 +874,63 @@ static void test_capability_filter_honors_tools_enabled(void)
    printf("  PASS: test_capability_filter_honors_tools_enabled\n");
 }
 
+/* An inferred modality cap (vision/pdf/audio) that no model satisfies must NOT
+ * hard-fail the fleet: it is relaxed to the hard caps (tools + min_context) so
+ * the text models stay routable. Guards the fleet-wide false-fail where a text
+ * task merely mentioning an image required vision no model had. */
+static void test_capability_filter_relaxes_unmet_modality(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 2;
+   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "text-a");
+   snprintf(cfg.agents[0].model, sizeof(cfg.agents[0].model), "text-model");
+   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "openai");
+   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "diagnose");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 1;
+
+   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "text-b");
+   snprintf(cfg.agents[1].model, sizeof(cfg.agents[1].model), "text-model");
+   snprintf(cfg.agents[1].provider, sizeof(cfg.agents[1].provider), "openai");
+   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "diagnose");
+   cfg.agents[1].role_count = 1;
+   cfg.agents[1].enabled = 1;
+   cfg.agents[1].tools_enabled = 1;
+
+   /* Require TOOLS (hard) + VISION (soft); no text-model has vision. The hard
+    * TOOLS must be enforced, the unmet VISION relaxed -> both kept, no error. */
+   char errbuf[128];
+   assert(delegate_filter_route_capabilities(&cfg, "diagnose", MODEL_CAP_TOOLS | MODEL_CAP_VISION,
+                                             0, 0, errbuf, sizeof(errbuf)) == 0);
+   assert(cfg.agents[0].enabled == 1);
+   assert(cfg.agents[1].enabled == 1);
+   printf("  PASS: test_capability_filter_relaxes_unmet_modality\n");
+}
+
+/* A hard capability (tools) that no model satisfies still fails closed — only the
+ * inferred modality caps are soft. */
+static void test_capability_filter_hard_cap_still_fails(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 1;
+   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "metadata-only");
+   snprintf(cfg.agents[0].model, sizeof(cfg.agents[0].model), "notools-model");
+   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "openai");
+   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "diagnose");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 0;
+
+   char errbuf[128];
+   assert(delegate_filter_route_capabilities(&cfg, "diagnose", MODEL_CAP_TOOLS, 0, 0, errbuf,
+                                             sizeof(errbuf)) == -1);
+   assert(cfg.agents[0].enabled == 0);
+   printf("  PASS: test_capability_filter_hard_cap_still_fails\n");
+}
+
 static void test_capability_inference_audio_extension_not_keyword(void)
 {
    /* Regression: prompts describing audio *features* in code (e.g.
@@ -1013,6 +1080,8 @@ int main(void)
    test_capability_filter_drops_deprecated_on_auto_route();
    test_capability_filter_enforces_min_context();
    test_capability_filter_honors_tools_enabled();
+   test_capability_filter_relaxes_unmet_modality();
+   test_capability_filter_hard_cap_still_fails();
    test_capability_inference_audio_extension_not_keyword();
    test_capability_inference_detects_modalities();
    printf("All tests passed.\n");

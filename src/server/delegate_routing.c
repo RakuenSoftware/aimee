@@ -2,6 +2,7 @@
 #include "cmd_agent_delegate_impl.h"
 #include "util.h"
 #include "model_registry.h"
+#include "log.h"
 #include <ctype.h>
 #include <string.h>
 
@@ -16,10 +17,14 @@ void delegate_infer_capability_requirements(const char *prompt, int tools_enable
 
    if (prompt && prompt[0])
    {
+      /* Vision is INFERRED from text and is a SOFT routing preference (see
+       * MODEL_CAP_MODALITY_SOFT): the router relaxes it when no model qualifies.
+       * Markdown image syntax ("![") is deliberately NOT a trigger — it appears in
+       * any doc/diff under review and never means the model must decode an image. */
       if (str_contains_ci(prompt, ".png") || str_contains_ci(prompt, ".jpg") ||
           str_contains_ci(prompt, ".jpeg") || str_contains_ci(prompt, ".webp") ||
           str_contains_ci(prompt, ".gif") || str_contains_ci(prompt, "screenshot") ||
-          str_contains_ci(prompt, "image_url") || str_contains_ci(prompt, "!["))
+          str_contains_ci(prompt, "image_url"))
          required |= MODEL_CAP_VISION;
       if (str_contains_ci(prompt, ".pdf") || str_contains_ci(prompt, " pdf "))
          required |= MODEL_CAP_PDF;
@@ -47,6 +52,37 @@ void delegate_infer_capability_requirements(const char *prompt, int tools_enable
       *min_context_out = min_context;
 }
 
+/* Does this agent satisfy the filter (caps + min_context, and not a dropped
+ * deprecated model)? Pure predicate — no mutation — so the relaxation pass below
+ * can dry-run it before deciding which capabilities to actually enforce.
+ * Effective context window prefers the agent's explicit override (agents.json
+ * `middleware.context_window`, via `aimee agent --ctx` or `ag_probe_slots`), then
+ * the model capability catalog, so onboarding a model is a config/catalog change
+ * not a registry code edit. */
+static int agent_meets_filter(const agent_t *ag, unsigned required_caps, int min_context,
+                              int drop_deprecated)
+{
+   model_capability_t cap;
+   int have_cap = model_capability_get(ag->provider, ag->model, &cap);
+   if (drop_deprecated && have_cap && cap.deprecated)
+      return 0;
+   unsigned effective_flags = have_cap ? cap.flags : 0;
+   if (ag->tools_enabled)
+      effective_flags |= MODEL_CAP_TOOLS;
+   else
+      effective_flags &= ~MODEL_CAP_TOOLS;
+   if (required_caps && (effective_flags & required_caps) != required_caps)
+      return 0;
+   if (min_context > 0)
+   {
+      int effective_ctx = ag->middleware.context_window > 0 ? ag->middleware.context_window
+                                                            : (have_cap ? cap.context_window : 0);
+      if (effective_ctx <= 0 || effective_ctx < min_context)
+         return 0;
+   }
+   return 1;
+}
+
 int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
                                        unsigned required_caps, int min_context, int drop_deprecated,
                                        char *errbuf, size_t errbuf_sz)
@@ -59,6 +95,47 @@ int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
       return 0;
 
    int role_candidates = 0;
+   for (int i = 0; i < cfg->agent_count; i++)
+   {
+      agent_t *ag = &cfg->agents[i];
+      if (ag->enabled && (agent_has_role(ag, role) || agent_is_exec_role(ag, role)))
+         role_candidates++;
+   }
+   if (role_candidates == 0)
+      return 0;
+
+   /* Modality caps (vision/pdf/audio) are inferred from prompt TEXT and so are
+    * best-effort: if requiring them would disable EVERY role candidate but the
+    * hard caps (tools + min_context) alone would keep some, relax the modality
+    * caps and route on the hard set — never hard-fail a text task fleet-wide just
+    * because it mentioned an image/pdf/audio filename. */
+   unsigned eff = required_caps;
+   if (required_caps & MODEL_CAP_MODALITY_SOFT)
+   {
+      int kept_full = 0, kept_hard = 0;
+      unsigned hard = required_caps & ~MODEL_CAP_MODALITY_SOFT;
+      for (int i = 0; i < cfg->agent_count; i++)
+      {
+         agent_t *ag = &cfg->agents[i];
+         if (!ag->enabled || (!agent_has_role(ag, role) && !agent_is_exec_role(ag, role)))
+            continue;
+         if (agent_meets_filter(ag, required_caps, min_context, drop_deprecated))
+            kept_full++;
+         if (agent_meets_filter(ag, hard, min_context, drop_deprecated))
+            kept_hard++;
+      }
+      if (kept_full == 0 && kept_hard > 0)
+      {
+         char sc[128];
+         model_capability_flags_string(required_caps & MODEL_CAP_MODALITY_SOFT, sc, sizeof(sc));
+         aimee_log(LOG_WARN, "delegate.route",
+                   "no model satisfies inferred modality caps (%s) for role '%s'; routing on hard "
+                   "caps only",
+                   sc[0] ? sc : "-", role);
+         eff = hard;
+      }
+   }
+
    int kept = 0;
    for (int i = 0; i < cfg->agent_count; i++)
    {
@@ -67,56 +144,15 @@ int delegate_filter_route_capabilities(agent_config_t *cfg, const char *role,
          continue;
       if (!agent_has_role(ag, role) && !agent_is_exec_role(ag, role))
          continue;
-      role_candidates++;
-
-      model_capability_t cap;
-      int have_cap = model_capability_get(ag->provider, ag->model, &cap);
-      if (have_cap)
-      {
-         if (ag->tools_enabled)
-            cap.flags |= MODEL_CAP_TOOLS;
-         else
-            cap.flags &= ~MODEL_CAP_TOOLS;
-      }
-      if (drop_deprecated && have_cap && cap.deprecated)
+      if (!agent_meets_filter(ag, eff, min_context, drop_deprecated))
       {
          ag->enabled = 0;
          continue;
       }
-      if (required_caps)
-      {
-         unsigned effective_flags = have_cap ? cap.flags : 0;
-         if (ag->tools_enabled)
-            effective_flags |= MODEL_CAP_TOOLS;
-         else
-            effective_flags &= ~MODEL_CAP_TOOLS;
-         if ((effective_flags & required_caps) != required_caps)
-         {
-            ag->enabled = 0;
-            continue;
-         }
-      }
-      if (min_context > 0)
-      {
-         /* Effective context window: prefer the agent's explicit override
-          * (agents.json `middleware.context_window`, set via `aimee agent
-          * --ctx` or auto-detected by `ag_probe_slots`); fall back to the
-          * model capability catalog (models.dev override/cache, then the
-          * built-in heuristic). This keeps onboarding a new model a config or
-          * catalog change rather than a code edit to the registry table. */
-         int effective_ctx = ag->middleware.context_window > 0
-                                 ? ag->middleware.context_window
-                                 : (have_cap ? cap.context_window : 0);
-         if (effective_ctx <= 0 || effective_ctx < min_context)
-         {
-            ag->enabled = 0;
-            continue;
-         }
-      }
       kept++;
    }
 
-   if (role_candidates > 0 && kept == 0)
+   if (kept == 0)
    {
       char caps[128];
       model_capability_flags_string(required_caps, caps, sizeof(caps));
