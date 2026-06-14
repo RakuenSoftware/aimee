@@ -184,6 +184,18 @@ double token_estimate_cost_ex(const char *model, const token_usage_t *usage, int
           (double)usage->cache_read_tokens * cr_mtok / 1e6;
 }
 
+const char *token_billable_model(const char *provider_model, const char *served_model,
+                                 const char *requested_model)
+{
+   if (provider_model && provider_model[0])
+      return provider_model;
+   if (served_model && served_model[0])
+      return served_model;
+   if (requested_model && requested_model[0])
+      return requested_model;
+   return "";
+}
+
 double cost_shaped_reward(int success, double cost_usd, int lambda_pct, int ref_usd_milli)
 {
    double base = success ? 1.0 : 0.0;
