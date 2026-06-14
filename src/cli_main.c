@@ -533,18 +533,28 @@ static int handle_agent_setup_cmd(int argc, char **argv, int json_output)
       return 1;
    }
 
-   const char *sock = cli_ensure_server_for_method("agent.setup");
-   if (!sock)
+   /* `agent setup` must run against the SAME server that will STORE the result
+    * (codex-auth.json + the server vault). On a thin-client deployment that is the
+    * configured remote; only spin up / require a local server when no remote is set
+    * (otherwise the device flow provisions a local server the deployment never uses).
+    * Use has_remote_endpoint (true for ANY configured remote, tcp OR unix) to match
+    * exactly when cli_v1_dispatch routes off-box via cli_rpc_client_endpoint() — an
+    * is_tcp() check would wrongly require a local server for a unix-socket remote. */
+   if (!cli_rpc_has_remote_endpoint())
    {
-      print_server_unavailable();
-      return 1;
+      const char *sock = cli_ensure_server_for_method("agent.setup");
+      if (!sock)
+      {
+         print_server_unavailable();
+         return 1;
+      }
    }
 
    /* Step 1: request device code */
    cJSON *req1 = cJSON_CreateObject();
    cJSON_AddStringToObject(req1, "method", "agent.setup");
    cJSON_AddStringToObject(req1, "provider", provider);
-   cJSON *resp1 = cli_v1_dispatch_local(req1, 15000);
+   cJSON *resp1 = cli_v1_dispatch(req1, 15000);
    cJSON_Delete(req1);
 
    if (!resp1)
@@ -631,7 +641,7 @@ static int handle_agent_setup_cmd(int argc, char **argv, int json_output)
    cJSON_AddNumberToObject(req2, "expires_in", expires_s);
 
    int poll_timeout_ms = (expires_s + 60) * 1000;
-   cJSON *resp2 = cli_v1_dispatch_local(req2, poll_timeout_ms);
+   cJSON *resp2 = cli_v1_dispatch(req2, poll_timeout_ms);
    cJSON_Delete(req2);
 
    if (!resp2)

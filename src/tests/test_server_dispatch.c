@@ -531,6 +531,10 @@ int handle_kb_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "kb.search");
 }
+int handle_evidence_trace(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "evidence.trace_retrieval_event");
+}
 int handle_curator_implements(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "curator.implements");
@@ -1415,6 +1419,17 @@ static void test_routing(void)
                         strlen("{\"method\":\"trajectory.batch\",\"tasks_path\":\"tasks\"}"));
    assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "trajectory.batch") == 0);
    assert(strcmp(g_last_handler, "trajectory.batch") == 0);
+   cJSON_Delete(json);
+
+   /* Auditable-correctness P1: /v1/audit/trace's op must resolve to the
+    * server-side KB-forward handler (regression guard for the bug where the
+    * cloned KB-proxy route never reached the KB). */
+   json = dispatch_json(
+       ctx, conn, "{\"method\":\"evidence.trace_retrieval_event\",\"turn_id\":\"t1\"}",
+       strlen("{\"method\":\"evidence.trace_retrieval_event\",\"turn_id\":\"t1\"}"));
+   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring,
+                 "evidence.trace_retrieval_event") == 0);
+   assert(strcmp(g_last_handler, "evidence.trace_retrieval_event") == 0);
    cJSON_Delete(json);
 
    json = dispatch_json(ctx, conn, "{\"method\":\"rules.delete\",\"id\":1}",

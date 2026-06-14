@@ -1630,6 +1630,17 @@ int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *rol
    return ok ? 0 : -1;
 }
 
+char *kb_client_evidence_trace_retrieval_event(const char *turn_id)
+{
+   if (!turn_id || !turn_id[0])
+      return NULL;
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "turn_id", turn_id);
+   /* Pass the KB action's response through verbatim (status + four-state
+    * trace_status + retrieval_event_id + event). kb_v1_action_request owns req. */
+   return kb_v1_action_request("evidence.trace_retrieval_event", req);
+}
+
 char *kb_client_memory_lint_json(void)
 {
    cJSON *req = cJSON_CreateObject();

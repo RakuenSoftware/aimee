@@ -541,6 +541,10 @@ int handle_blast_radius_preview(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
 
 /* --- KB handlers --- */
 
+/* Auditable-correctness /v1/audit/trace handler (kept in a textual include to
+ * stay under the per-file line cap). */
+#include "server_state_audit.inc"
+
 int handle_kb_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
