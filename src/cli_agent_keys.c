@@ -68,6 +68,11 @@ static cJSON *load_keys(void)
    return root;
 }
 
+cJSON *cli_agent_keys_load(void)
+{
+   return load_keys();
+}
+
 int cli_agent_key_set(const char *agent_name, const char *api_key)
 {
    if (!agent_name || !agent_name[0])
@@ -241,4 +246,67 @@ void cli_session_creds_prime(cJSON *req)
       touch_push_marker();
    if (resp)
       cJSON_Delete(resp);
+}
+
+/* `aimee agent key import [--scrub]` (P3): migrate client-held agent-keys.json
+ * entries into the server vault under the server principal (vault.set_server).
+ * Reports per agent; --scrub removes an entry only after a confirmed vault store.
+ * Idempotent (re-runnable). Over a plaintext-TCP remote the server refuses
+ * (P2a/D2b) and the entry is left intact — provision over an attested
+ * (UDS/webchat) connection holding the vault:write:server capability. */
+int cli_agent_key_import(int argc, char **argv, int json_output)
+{
+   (void)json_output;
+   int scrub = 0;
+   for (int i = 0; i < argc; i++)
+      if (strcmp(argv[i], "--scrub") == 0)
+         scrub = 1;
+
+   cJSON *keys = cli_agent_keys_load();
+   int total = 0, vaulted = 0, refused = 0, errors = 0;
+   cJSON *entry = NULL;
+   cJSON_ArrayForEach(entry, keys)
+   {
+      const char *agent = entry->string;
+      if (!agent || !agent[0] || !cJSON_IsString(entry) || !entry->valuestring[0])
+         continue;
+      total++;
+      cJSON *req = cJSON_CreateObject();
+      cJSON_AddStringToObject(req, "method", "vault.set_server");
+      cJSON_AddStringToObject(req, "agent", agent);
+      cJSON_AddStringToObject(req, "cred", "api_key");
+      cJSON_AddStringToObject(req, "secret", entry->valuestring);
+      cJSON *resp = cli_v1_dispatch(req, 30000);
+      cJSON_Delete(req);
+
+      cJSON *st = resp ? cJSON_GetObjectItemCaseSensitive(resp, "status") : NULL;
+      int ok = st && cJSON_IsString(st) && strcmp(st->valuestring, "ok") == 0;
+      if (ok)
+      {
+         vaulted++;
+         printf("  %-16s vaulted\n", agent);
+         if (scrub)
+            cli_agent_key_set(agent, NULL);
+      }
+      else
+      {
+         cJSON *msg = resp ? cJSON_GetObjectItemCaseSensitive(resp, "message") : NULL;
+         const char *m = (msg && cJSON_IsString(msg)) ? msg->valuestring : "no server response";
+         if (strstr(m, "attested") || strstr(m, "capability"))
+            refused++;
+         else
+            errors++;
+         printf("  %-16s SKIPPED (%s)\n", agent, m);
+      }
+      cJSON_Delete(resp);
+   }
+   cJSON_Delete(keys);
+
+   printf("agent key import: %d vaulted, %d refused, %d error (of %d)%s\n", vaulted, refused,
+          errors, total, scrub ? "; migrated entries scrubbed from the local keyring" : "");
+   if (refused > 0)
+      printf("note: server-principal writes need an attested (UDS/webchat) connection holding the "
+             "vault:write:server capability — run this on the server host over UDS, or grant the "
+             "capability.\n");
+   return errors > 0 ? 1 : 0;
 }
