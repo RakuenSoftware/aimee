@@ -215,7 +215,9 @@ int agent_has_resolvable_credentials(const agent_t *agent)
    if (agent->auth_cmd[0] || agent_api_key_literal(agent->api_key))
       return 1;
    /* A credential in the permanent vault (this turn's principal or the server
-    * principal) makes the agent usable with no on-disk key — the P4 primary path. */
+    * principal) makes the agent usable with no on-disk key — the P4 primary path.
+    * For codex we probe the TOKEN, not the account id: a vaulted account without a
+    * token is NOT a usable credential (the token is what authenticates). */
    {
       char k[MAX_API_KEY_LEN];
       int is_codex = strcmp(agent->auth_type, "codex-oauth") == 0;
@@ -278,8 +280,15 @@ const char *agent_get_request_vault_principal(void)
  * permanent vault: the turn's attested principal first, then the autonomous
  * server principal (the path that serves a thin-client TCP/TLS conn with no
  * per-user identity). Returns 1 + fills out on a hit, 0 on miss/locked/error so
- * the caller falls through to the remaining (legacy/env) tiers. Never the secret
- * source of truth's only reader — every server-side cred path consults this. */
+ * the caller falls through to the remaining (legacy/env) tiers.
+ *
+ * Threat model for the server-principal fallback: the server vault holds the
+ * operator's shared default keys, and aimee-server is a SINGLE-owner personal
+ * agent (the server bearer already gates every /v1 op), so serving the server
+ * key when the turn's principal has no entry is the intended "all agents work
+ * for all connections" behavior, not a cross-tenant leak — a per-user
+ * (webuser:/uid:) entry OVERRIDES it when present. Every request that reaches
+ * here is already bearer-authenticated. */
 static int agent_vault_get(const char *agent_name, const char *cred, char *out, size_t out_len)
 {
    if (!agent_name || !agent_name[0] || !out || out_len == 0)
@@ -381,9 +390,9 @@ void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len)
       acct[0] = '\0';
       if (g_request_codex_account_id[0])
          snprintf(acct, sizeof(acct), "%s", g_request_codex_account_id);
-      else if (agent_vault_get(agent->name, VAULT_CODEX_ACCOUNT_CRED, acct, sizeof(acct)))
-         ; /* resolved from the permanent vault (turn principal -> server principal) */
-      else if (g_request_session_id[0])
+      else if (!agent_vault_get(agent->name, VAULT_CODEX_ACCOUNT_CRED, acct, sizeof(acct)) &&
+               g_request_session_id[0])
+         /* vault miss (acct left empty by the helper) -> legacy session keyring. */
          session_creds_get_codex(g_request_session_id, NULL, 0, acct, sizeof(acct));
       if (acct[0])
       {
@@ -1536,22 +1545,6 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
    if (strcmp(auth_type, "none") == 0)
       return 0;
 
-   /* Credential precedence for the in-flight turn (P4): the permanent VAULT wins
-    * — resolved for the turn's attested principal with autonomous server-principal
-    * fallback, so EVERY connection (primary chat, webchat, in-model tool, delegate)
-    * is served from the one store. Then a client-pushed session-scoped key (the
-    * legacy RAM keyring, retired in P4b), then the agent's stored api_key / env
-    * below. vault_service_inject_api_key handles the dual-wrap (server-wrap ->
-    * user-KEK -> server principal); a locked/miss result falls through. */
-   char primary_key[MAX_API_KEY_LEN];
-   int have_primary_key =
-       (vault_service_inject_api_key(agent_get_request_vault_principal(), agent->name, primary_key,
-                                     sizeof(primary_key), time(NULL)) == VAULT_OK &&
-        primary_key[0]);
-   if (!have_primary_key && g_request_session_id[0] &&
-       session_creds_get(g_request_session_id, agent->name, primary_key, sizeof(primary_key)))
-      have_primary_key = 1;
-
    if (strcmp(auth_type, "codex-oauth") == 0)
    {
       /* Codex OAuth token, in precedence: per-turn token (set by the vault delegate
@@ -1613,6 +1606,26 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
       snprintf(buf, buf_len, "Authorization: Bearer %s", token);
       return 0;
    }
+
+   /* Credential precedence for the in-flight turn (P4): the permanent VAULT wins
+    * — resolved for the turn's attested principal with autonomous server-principal
+    * fallback, so EVERY connection (primary chat, webchat, in-model tool, delegate)
+    * is served from the one store. Then a client-pushed session-scoped key (the
+    * legacy RAM keyring, retired in P4b), then the agent's stored api_key / env
+    * below. vault_service_inject_api_key handles the dual-wrap (server-wrap ->
+    * user-KEK -> server principal) AND is robust to an empty principal (it just
+    * resolves the server principal); a locked/miss result falls through here, while
+    * the delegate path keeps its own D15 hard-fail-on-locked. Computed only for the
+    * key-bearing auth types below (not codex-oauth / auth_cmd), to avoid a wasted
+    * decrypt on turns that never consult it. */
+   char primary_key[MAX_API_KEY_LEN];
+   int have_primary_key =
+       (vault_service_inject_api_key(agent_get_request_vault_principal(), agent->name, primary_key,
+                                     sizeof(primary_key), time(NULL)) == VAULT_OK &&
+        primary_key[0]);
+   if (!have_primary_key && g_request_session_id[0] &&
+       session_creds_get(g_request_session_id, agent->name, primary_key, sizeof(primary_key)))
+      have_primary_key = 1;
 
    /* x-api-key auth (Anthropic): resolve via session keyring, auth_cmd or api_key */
    if (strcmp(auth_type, "x-api-key") == 0)
