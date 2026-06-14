@@ -54,7 +54,9 @@ rel_sensitivity_t memory_pii_rel_sensitivity(const char *rel_type)
 
 int memory_pii_should_inject(rel_sensitivity_t sens, double confidence, int turn_requests_sensitive)
 {
-   if (confidence < PII_GATE_CONFIDENCE_FLOOR)
+   /* Fail closed on a below-floor OR non-finite confidence: `confidence != confidence`
+    * is true only for NaN, which would otherwise slip past the `<` comparison. */
+   if (!(confidence >= PII_GATE_CONFIDENCE_FLOOR))
       return 0;
    switch (sens)
    {

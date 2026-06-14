@@ -2,6 +2,7 @@
 #include "../headers/memory_pii_gate.h"
 #include "../headers/rel_types.h"
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 
 int main(void)
@@ -35,6 +36,8 @@ int main(void)
    assert(memory_pii_should_inject(SENS_PII, 0.3, 1) == 0); /* below floor */
    /* SECRET: never injected, even when asked at full confidence. */
    assert(memory_pii_should_inject(SENS_SECRET, 1.0, 1) == 0);
+   /* non-finite confidence fails closed (must not slip past the floor check). */
+   assert(memory_pii_should_inject(SENS_NORMAL, NAN, 1) == 0);
 
    printf("pii_gate: all tests passed\n");
    return 0;
