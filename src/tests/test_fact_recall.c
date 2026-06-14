@@ -5,6 +5,8 @@
 #include "../db2/fact_lifecycle.h"
 #include "../db2/rel_types_store.h"
 #include "../db2/db2_test_shim.h"
+#include "../db2/db2_internal.h"
+#include "../db2/db_postgres.h"
 #include "../headers/memory_ontology.h"
 #include <assert.h>
 #include <stdio.h>
@@ -35,6 +37,34 @@ int main(void)
    assert(n == 2);
    assert(strstr(buf, "works_for: acme") != NULL);
    assert(strstr(buf, "age: 30") != NULL);
+
+   /* defensive: a row whose formatted line would exceed the internal 256B buffer
+    * is skipped (never truncated into the prompt, never over-read). db2_fact_commit
+    * caps endpoints below this, so insert the long-target row directly. */
+   {
+      void *conn = db2_conn();
+      assert(conn);
+      char longt[400];
+      memset(longt, 'z', sizeof(longt) - 1);
+      longt[sizeof(longt) - 1] = '\0';
+      char err[256] = "";
+      aimee_pg_stmt_t *ins = aimee_pg_prepare(
+          conn,
+          "INSERT INTO entity_edges (source, relation, target, weight, edge_class,"
+          " confidence_class, confidence) VALUES ('user', 'bio', ?1, 1, 'semantic', 'C', 0.9)",
+          err, sizeof(err));
+      assert(ins);
+      aimee_pg_bind_text(ins, "?1", longt);
+      assert(aimee_pg_step(ins, err, sizeof(err)) == AIMEE_PG_DONE);
+      aimee_pg_finalize(ins);
+   }
+   n = db2_fact_recall_block("user", 1, buf, sizeof(buf));
+   assert(n == 2); /* works_for + age; the over-long bio row skipped */
+   assert(strstr(buf, "bio") == NULL);
+
+   /* tight caller buffer: the first line doesn't fit -> no facts, NUL-terminated. */
+   n = db2_fact_recall_block("user", 1, buf, 16);
+   assert(n == 0 && buf[0] == '\0');
 
    /* unknown entity -> nothing. */
    n = db2_fact_recall_block("nobody-here", 0, buf, sizeof(buf));

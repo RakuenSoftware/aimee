@@ -12,6 +12,7 @@
 #include "fact_recall.h"             /* db2_fact_recall_block (typed-fact §7 recall) */
 #include "memory_extract_patterns.h" /* memory_pattern_is_retraction */
 #include "memory_pii_gate.h"         /* memory_pii_turn_requests_sensitive */
+#include "log.h"                     /* LOG_WARN */
 #include "decision_log.h"
 #include "memory.h"
 #include "memory_export.h"
@@ -1246,7 +1247,11 @@ cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *b
     * envelope, appended after the memory block. */
    char facts[2048] = "";
    if (typed_enabled)
-      (void)db2_fact_recall_block("user", requests_sensitive, facts, sizeof(facts));
+   {
+      int fr = db2_fact_recall_block("user", requests_sensitive, facts, sizeof(facts));
+      if (fr < 0) /* recall affects prompt content, so a persistent failure is worth surfacing */
+         LOG_WARN("memory", "typed-fact recall failed (db2 unavailable?)");
+   }
 
    cJSON_AddStringToObject(resp, "status", "ok");
    if (facts[0])

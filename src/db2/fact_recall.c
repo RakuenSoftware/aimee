@@ -50,7 +50,10 @@ int db2_fact_recall_block(const char *entity, int turn_requests_sensitive, char 
          continue;
       char line[256];
       int n = snprintf(line, sizeof(line), "- %s: %s\n", rel, tgt);
-      if (n <= 0)
+      /* Skip empty or over-long lines: snprintf returns the would-be length, so a
+       * line >= sizeof(line) was truncated — never memcpy that length (it would
+       * over-read the stack buffer) and never inject a truncated fact. */
+      if (n <= 0 || (size_t)n >= sizeof(line))
          continue;
       if (used + (size_t)n >= cap) /* respect the caller's buffer */
          break;
