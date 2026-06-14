@@ -41,6 +41,9 @@ typedef enum
    WFE_BLK_GATE_HUMAN,
    WFE_BLK_PR_OPEN,
    WFE_BLK_MERGE,
+   WFE_BLK_GATE_CI,         /* built-in: poll the PR's CI, fail-closed */
+   WFE_BLK_CHECK_MERGEABLE, /* built-in: refuse on a merge conflict */
+   WFE_BLK_CUSTOM,          /* config-defined block (spec carried on the node) */
    WFE_BLK__COUNT
 } wfe_block_type_t;
 
@@ -61,7 +64,10 @@ typedef enum
    WFE_PAUSE_PENDING_HUMAN,
    WFE_PAUSE_PANEL_DEGRADED,
    WFE_PAUSE_BUDGET_EXCEEDED,
-   WFE_PAUSE_PANEL_UNREACHABLE
+   WFE_PAUSE_PANEL_UNREACHABLE,
+   WFE_PAUSE_CI_PENDING,   /* gate.ci: CI still running / not yet conclusive */
+   WFE_PAUSE_MERGE_PENDING /* check.mergeable / merge: forge merge state could not
+                            * be determined (transient/unknown) -- re-drive later */
 } wfe_pause_reason_t;
 
 typedef struct

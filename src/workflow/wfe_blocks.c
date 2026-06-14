@@ -93,6 +93,43 @@ int wfe_git_freeze(const char *repo_dir_in, const char *base_branch, char out_ba
    return 0;
 }
 
+/* ---- forge seam (gate.ci / check.mergeable / merge) ---- */
+
+/* Default live provider would call `gh`, but PR-identity threading is
+ * integration-gated, so until that lands it fails closed (unknown -> park,
+ * merge unavailable). Tests inject a mock to exercise the state mapping. */
+static wfe_ci_status_t live_ci_status(const char *repo, const char *pr)
+{
+   (void)repo;
+   (void)pr;
+   return WFE_CI_NONE;
+}
+static int live_mergeable(const char *repo, const char *pr)
+{
+   (void)repo;
+   (void)pr;
+   return -1;
+}
+static int live_is_merged(const char *repo, const char *pr)
+{
+   (void)repo;
+   (void)pr;
+   return -1;
+}
+static wfe_merge_result_t live_merge(const char *repo, const char *pr)
+{
+   (void)repo;
+   (void)pr;
+   return WFE_MERGE_ERROR;
+}
+static const wfe_forge_t LIVE_FORGE = {live_ci_status, live_mergeable, live_is_merged, live_merge};
+static const wfe_forge_t *g_forge = &LIVE_FORGE;
+
+void wfe_set_forge_provider(const wfe_forge_t *p)
+{
+   g_forge = p ? p : &LIVE_FORGE;
+}
+
 /* ---- executors ---- */
 
 /* author.proposal / author.plan: drive a delegate to produce/edit the artifact,
@@ -187,13 +224,117 @@ static wfe_step_result_t exec_pr_open(wfe_ctx *ctx, const wfe_node_t *node)
    return wfe_step_advanced(handle, "", 0.0);
 }
 
-/* merge: merge the approved PR. */
+/* the PR ref the forge ops act on. Live wiring would resolve a real PR number
+ * stored when pr.open ran; for now we pass the work-item id (the mock ignores
+ * it; the live provider is gated). */
+static const char *pr_ref(wfe_ctx *ctx)
+{
+   const char *wi = wfe_ctx_work_item(ctx);
+   return wi ? wi : "";
+}
+
+/* merge: idempotent + race-safe. The never-re-merge invariant is enforced by
+ * requiring a CONFIRMED not-merged state before we ever call merge():
+ *   is_merged == 1  -> idempotent no-op success (already merged)
+ *   is_merged <  0  -> state could not be determined (transient forge error) ->
+ *                      park; we never call merge() when we can't confirm the PR
+ *                      is unmerged, so a transient error can never double-merge.
+ *   is_merged == 0  -> confirmed unmerged: the forge merge act is the single
+ *                      decision (already-race -> success, not-mergeable -> loop,
+ *                      transient error -> park for a human re-drive). */
 static wfe_step_result_t exec_merge(wfe_ctx *ctx, const wfe_node_t *node)
 {
-   (void)ctx;
-   (void)node;
-   /* Production: `gh pr merge --squash`. Terminal on success. */
-   return wfe_step_advanced("merged", "", 0.0);
+   const char *repo = wfe_ctx_repo(ctx), *pr = pr_ref(ctx);
+   int im = g_forge->is_merged(repo, pr);
+   if (im == 1)
+      return wfe_step_advanced("merged", "", 0.0); /* idempotent no-op */
+   if (im < 0)
+      return wfe_step_pending(WFE_PAUSE_MERGE_PENDING); /* unconfirmed -> never merge */
+   switch (g_forge->merge(repo, pr))
+   {
+   case WFE_MERGE_OK:
+   case WFE_MERGE_ALREADY:
+      return wfe_step_advanced("merged", "", 0.0);
+   case WFE_MERGE_NOT_MERGEABLE:
+      return wfe_step_looped();
+   default:
+      /* transient/unknown forge error on the merge act itself: park for a human
+       * re-drive rather than hard-failing the run. We only reach here with a
+       * confirmed-unmerged PR, so this can never double-merge. */
+      (void)node;
+      return wfe_step_pending(WFE_PAUSE_MERGE_PENDING);
+   }
+}
+
+/* gate.ci: only an explicit all-green advances; everything else fails closed. */
+static wfe_step_result_t exec_gate_ci(wfe_ctx *ctx, const wfe_node_t *node)
+{
+   switch (g_forge->ci_status(wfe_ctx_repo(ctx), pr_ref(ctx)))
+   {
+   case WFE_CI_SUCCESS:
+   {
+      char h[80];
+      snprintf(h, sizeof h, "%s.out", node->id);
+      return wfe_step_advanced(h, "", 0.0);
+   }
+   case WFE_CI_FAILURE:
+      return wfe_step_looped();
+   default: /* PENDING or NONE/unknown -> park, never advance */
+      return wfe_step_pending(WFE_PAUSE_CI_PENDING);
+   }
+}
+
+/* check.mergeable: mergeable (1) advances; conflict (0) loops back to fix it;
+ * unknown (-1, transient forge error) parks -- it never advances on an
+ * undetermined state (fail closed), and uses the merge-state pause reason rather
+ * than the CI one so the park is labelled correctly. */
+static wfe_step_result_t exec_check_mergeable(wfe_ctx *ctx, const wfe_node_t *node)
+{
+   int m = g_forge->mergeable(wfe_ctx_repo(ctx), pr_ref(ctx));
+   if (m == 1)
+   {
+      char h[80];
+      snprintf(h, sizeof h, "%s.out", node->id);
+      return wfe_step_advanced(h, "", 0.0);
+   }
+   if (m == 0)
+      return wfe_step_looped();
+   return wfe_step_pending(WFE_PAUSE_MERGE_PENDING); /* unknown -> park, never advance */
+}
+
+/* custom: the one generic executor for config-defined blocks. */
+static wfe_step_result_t exec_custom(wfe_ctx *ctx, const wfe_node_t *node)
+{
+   const wfe_custom_block_t *c = wfe_custom_lookup(node->custom_name);
+   if (!c)
+      return wfe_step_failed();
+   char head[64] = "", base[64] = "", dhash[65] = "", err[128] = "";
+   char handle[80];
+   snprintf(handle, sizeof handle, "%s.out", node->id);
+
+   if (c->executor == WFE_EXEC_COMMAND)
+   {
+      if (!wfe_custom_commands_allowed())
+         return wfe_step_failed(); /* opt-in: lifecycle allow_command not set */
+      if (c->argc == 0)
+         return wfe_step_failed();
+      /* argv is the registry's OWNED, length-bounded, all-string, NULL-terminated
+       * array (validated at load); run it directly (no shell) in the repo. */
+      char *out = NULL;
+      int rc = safe_exec_capture((const char *const *)c->argv, &out, 1 << 20);
+      free(out);
+      if (rc != 0)
+         return wfe_step_failed();
+   }
+   /* delegate executor is integration-gated (like implement/document). */
+
+   if (c->produces == WFE_ART_BRANCH)
+   {
+      if (wfe_git_freeze(repo_dir(), "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
+         return wfe_step_failed();
+      return wfe_step_advanced(handle, head, 0.0);
+   }
+   return wfe_step_advanced(handle, "", 0.0); /* produces: none (sink) */
 }
 
 void wfe_register_default_executors(void)
@@ -205,4 +346,7 @@ void wfe_register_default_executors(void)
    wfe_register_block_executor(WFE_BLK_FREEZE, exec_freeze);
    wfe_register_block_executor(WFE_BLK_PR_OPEN, exec_pr_open);
    wfe_register_block_executor(WFE_BLK_MERGE, exec_merge);
+   wfe_register_block_executor(WFE_BLK_GATE_CI, exec_gate_ci);
+   wfe_register_block_executor(WFE_BLK_CHECK_MERGEABLE, exec_check_mergeable);
+   wfe_register_block_executor(WFE_BLK_CUSTOM, exec_custom);
 }

@@ -103,6 +103,18 @@ nodes:
       pr: code_pr.out
     params:
       policy: pr_review
+    on_pass: check_mergeable
+    on_fail: impl
+  - id: check_mergeable
+    block: check.mergeable
+    in:
+      pr: code_pr.out
+    on_pass: gate_ci
+    on_fail: impl
+  - id: gate_ci
+    block: gate.ci
+    in:
+      pr: code_pr.out
     on_pass: merge
     on_fail: impl
   - id: merge

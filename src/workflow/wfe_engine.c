@@ -155,6 +155,10 @@ static const char *pause_name(wfe_pause_reason_t r)
       return "budget_exceeded";
    case WFE_PAUSE_PANEL_UNREACHABLE:
       return "panel_unreachable";
+   case WFE_PAUSE_CI_PENDING:
+      return "ci_pending";
+   case WFE_PAUSE_MERGE_PENDING:
+      return "merge_pending";
    default:
       return "";
    }
@@ -172,6 +176,10 @@ static wfe_pause_reason_t pause_from_name(const char *s)
       return WFE_PAUSE_BUDGET_EXCEEDED;
    if (strcmp(s, "panel_unreachable") == 0)
       return WFE_PAUSE_PANEL_UNREACHABLE;
+   if (strcmp(s, "ci_pending") == 0)
+      return WFE_PAUSE_CI_PENDING;
+   if (strcmp(s, "merge_pending") == 0)
+      return WFE_PAUSE_MERGE_PENDING;
    return WFE_PAUSE_NONE;
 }
 

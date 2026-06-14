@@ -41,6 +41,9 @@ static const struct
      1,
      {WFE_ART_PROPOSAL, WFE_ART_FROZEN_DIFF, WFE_ART_NONE}},
     {WFE_BLK_MERGE, "merge", WFE_ART_NONE, 1, {WFE_ART_PR, WFE_ART_NONE}},
+    /* safety gates: poll the PR's CI / mergeability (pr -> verdict). */
+    {WFE_BLK_GATE_CI, "gate.ci", WFE_ART_VERDICT, 1, {WFE_ART_PR, WFE_ART_NONE}},
+    {WFE_BLK_CHECK_MERGEABLE, "check.mergeable", WFE_ART_VERDICT, 1, {WFE_ART_PR, WFE_ART_NONE}},
 };
 static const int CATALOG_N = (int)(sizeof(CATALOG) / sizeof(CATALOG[0]));
 
@@ -75,6 +78,11 @@ wfe_block_type_t wfe_block_from_name(const char *name)
    for (int i = 0; i < CATALOG_N; i++)
       if (strcmp(CATALOG[i].name, name) == 0)
          return CATALOG[i].t;
+   /* fall through to the config-defined registry (consults already-loaded
+    * state only -- callers ensure() before parse/validate, never here, to
+    * avoid reentrancy during registry load). */
+   if (wfe_custom_lookup(name))
+      return WFE_BLK_CUSTOM;
    return WFE_BLK_UNKNOWN;
 }
 
@@ -154,6 +162,8 @@ static int parse_node(wfe_node_t *n, const cJSON *jn, char *err, size_t errlen)
       snprintf(err, errlen, "node '%s': unknown block '%s'", n->id, blk ? blk : "");
       return -1;
    }
+   if (n->block == WFE_BLK_CUSTOM)
+      copy_str(n->custom_name, sizeof n->custom_name, blk);
 
    n->params = cJSON_GetObjectItemCaseSensitive(jn, "params");
    copy_str(n->next, sizeof n->next, obj_str(jn, "next"));
@@ -191,6 +201,13 @@ wfe_def_t *wfe_def_parse(const char *yaml_text, char *err, size_t errlen)
 {
    if (err && errlen)
       err[0] = '\0';
+   /* make config-defined block names resolvable before we parse node blocks */
+   char cerr[256];
+   if (wfe_custom_registry_ensure(cerr, sizeof cerr) != 0)
+   {
+      snprintf(err, errlen, "custom block registry: %s", cerr);
+      return NULL;
+   }
    cJSON *root = yaml_parse(yaml_text ? yaml_text : "");
    if (!root || !cJSON_IsObject(root))
    {
