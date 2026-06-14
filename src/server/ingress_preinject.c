@@ -66,6 +66,22 @@ const char *ingress_preinject_turn_id(void)
    return g_turn_id;
 }
 
+/* A stable, non-reversible fingerprint of the turn query (FNV-1a 64-bit, hex).
+ * Recorded on the retrieval_event instead of the raw prompt so the audit row
+ * correlates turns (same query → same fingerprint) without persisting user
+ * prompt text. The /v1/audit/trace read never surfaces the query, so a hash
+ * loses nothing for reconstructibility. */
+static void ingress_query_fingerprint(const char *q, char *out, size_t len)
+{
+   uint64_t h = 1469598103934665603ULL; /* FNV-1a offset basis */
+   for (const unsigned char *p = (const unsigned char *)(q ? q : ""); *p; p++)
+   {
+      h ^= (uint64_t)*p;
+      h *= 1099511628211ULL; /* FNV-1a prime */
+   }
+   snprintf(out, len, "q:%016llx", (unsigned long long)h);
+}
+
 const char *ingress_preinject_confidence(double top_score)
 {
    /* Thresholds chosen so a clear top hit is "high", a plausible-but-thin match
@@ -418,13 +434,20 @@ char *ingress_preinject_build(const char *query, int request_disabled)
          ingress_preinject_mint_turn_id(minted, sizeof(minted));
          tid = minted;
       }
+      /* mems[] holds the full set of memory previews surfaced into this turn
+       * (mem_n <= the diagnose cap of 5), so recording all of them is the
+       * complete memory evidence for the turn, not a truncation. */
       int64_t ids[5];
       int n_ids = 0;
       for (int i = 0; i < mem_n && n_ids < (int)(sizeof(ids) / sizeof(ids[0])); i++)
          if (mems[i].memory.id > 0)
             ids[n_ids++] = mems[i].memory.id;
       if (n_ids > 0)
-         (void)kb_client_evidence_emit_retrieval_event(tid, "Recall", query, ids, n_ids);
+      {
+         char fp[32];
+         ingress_query_fingerprint(query, fp, sizeof(fp));
+         (void)kb_client_evidence_emit_retrieval_event(tid, "Recall", fp, ids, n_ids);
+      }
    }
 
    char *audit = ingress_preinject_read_audit_context();
