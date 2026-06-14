@@ -8,7 +8,8 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http.h"
-#include "server.h" /* CAP_* / CAPS_* capability bits, server_capability_for_method */
+#include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
+#include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
 #include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
 #include <time.h>
@@ -1007,15 +1008,10 @@ const char *server_http_default_path(void)
  * ignore the return value. */
 static int write_all_fd(int fd, const char *buf, int len)
 {
-   int off = 0;
-   while (off < len)
-   {
-      int n = (int)write(fd, buf + off, (size_t)(len - off));
-      if (n <= 0)
-         return -1;
-      off += n;
-   }
-   return off;
+   /* Routes through the conn-io shim: over the fd's SSL if one is registered
+    * (native TLS), else raw write. With nothing registered this is byte-identical
+    * to the previous raw write loop, so all existing callers are unaffected. */
+   return server_conn_io_write_all(fd, buf, len);
 }
 
 /* Buffered HTTP response writers (request_id_header, retrieval_event_header,
@@ -1411,7 +1407,7 @@ static void handle_conn(int fd, int is_tcp)
    int total = 0;
    while (total < SHTTP_READ_MAX - 1)
    {
-      int n = (int)read(fd, buf + total, (size_t)(SHTTP_READ_MAX - 1 - total));
+      int n = server_conn_io_read(fd, buf + total, (int)(SHTTP_READ_MAX - 1 - total));
       if (n <= 0)
          break;
       total += n;
@@ -1601,7 +1597,7 @@ static void handle_conn(int fd, int is_tcp)
          }
          while (already < body_len)
          {
-            int n = (int)read(fd, body + already, (size_t)(body_len - already));
+            int n = server_conn_io_read(fd, body + already, (int)(body_len - already));
             if (n <= 0)
                break;
             already += n;
