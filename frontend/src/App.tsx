@@ -4,10 +4,12 @@ import { AppShell, Toast } from '@rakuensoftware/smoothgui';
 import type { NavItem } from '@rakuensoftware/smoothgui';
 import Chat from './pages/Chat';
 import Dashboard from './pages/Dashboard';
+import Workflows from './pages/Workflows';
 
 const NAV_ITEMS: NavItem[] = [
   { label: 'Chat', icon: '💬', route: '/chat', section: 'Main' },
   { label: 'Dashboard', icon: '📊', route: '/dashboard', section: 'Main' },
+  { label: 'Workflows', icon: '🔀', route: '/workflows', section: 'Main' },
 ];
 
 function LogoutButton() {
@@ -77,6 +79,7 @@ export default function App() {
         <Routes>
           <Route path="/chat" element={<Chat />} />
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/workflows" element={<Workflows />} />
           <Route path="*" element={<Navigate to="/chat" replace />} />
         </Routes>
       </AppShell>

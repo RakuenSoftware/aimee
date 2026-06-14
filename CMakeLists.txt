@@ -804,6 +804,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_mcp_skill.c
     ${AIMEE_SRC_DIR}/server/server_mcp_learning.c
     ${AIMEE_SRC_DIR}/server/server_mcp_workflows.c
+    ${AIMEE_SRC_DIR}/server/server_workflow_api.c
     ${AIMEE_SRC_DIR}/server/server_mcp_gateway.c
     ${AIMEE_SRC_DIR}/server/session_search_tool.c
     ${AIMEE_SRC_DIR}/server/compute_pool.c
@@ -1337,6 +1338,7 @@ target_include_directories(aimee-server PRIVATE
     ${AIMEE_SRC_DIR}/vendor/headers
     ${AIMEE_SRC_DIR}/db1
     ${AIMEE_SRC_DIR}/db2
+    ${AIMEE_SRC_DIR}/workflow
 )
 target_compile_options(aimee-server PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_compile_definitions(aimee-server PRIVATE AIMEE_DB2_DISABLED)
