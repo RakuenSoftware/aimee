@@ -257,10 +257,14 @@ void cli_session_creds_prime(cJSON *req)
 int cli_agent_key_import(int argc, char **argv, int json_output)
 {
    (void)json_output;
-   int scrub = 0;
+   int scrub = 0, dry = 0;
    for (int i = 0; i < argc; i++)
+   {
       if (strcmp(argv[i], "--scrub") == 0)
          scrub = 1;
+      else if (strcmp(argv[i], "--dry-run") == 0)
+         dry = 1;
+   }
 
    cJSON *keys = cli_agent_keys_load();
    int total = 0, vaulted = 0, refused = 0, errors = 0;
@@ -271,6 +275,12 @@ int cli_agent_key_import(int argc, char **argv, int json_output)
       if (!agent || !agent[0] || !cJSON_IsString(entry) || !entry->valuestring[0])
          continue;
       total++;
+      if (dry)
+      {
+         /* Preview only — never send the secret or mutate the keyring. */
+         printf("  %-16s would vault (dry-run)\n", agent);
+         continue;
+      }
       cJSON *req = cJSON_CreateObject();
       cJSON_AddStringToObject(req, "method", "vault.set_server");
       cJSON_AddStringToObject(req, "agent", agent);
@@ -302,6 +312,12 @@ int cli_agent_key_import(int argc, char **argv, int json_output)
    }
    cJSON_Delete(keys);
 
+   if (dry)
+   {
+      printf("agent key import (dry-run): %d entr%s would be sent; nothing changed\n", total,
+             total == 1 ? "y" : "ies");
+      return 0;
+   }
    printf("agent key import: %d vaulted, %d refused, %d error (of %d)%s\n", vaulted, refused,
           errors, total, scrub ? "; migrated entries scrubbed from the local keyring" : "");
    if (refused > 0)
