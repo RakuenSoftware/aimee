@@ -19,8 +19,11 @@ extern "C"
     * (§6) and route each through the typed gate db2_fact_commit with `authority`
     * (§5 class keying). `enabled` is the master gate (config.typed_facts_enabled):
     * when 0 the gate is observe-only and nothing is written. Returns the number of
-    * triples the gate would commit (ACCEPT or NOVEL) when enabled — i.e. the count
-    * actually written — or 0 when disabled / nothing matched, or -1 on bad args.
+    * extracted triples the gate accepted or staged (verdict ACCEPT or NOVEL) when
+    * enabled — note a re-ingest of an already-known triple still counts (it bumps
+    * the edge weight rather than inserting a row), so this is a "facts gated in"
+    * count, not a "new rows inserted" count. 0 when disabled / nothing matched, -1
+    * on bad args.
     *
     * Retraction is NOT handled here: callers should first check
     * memory_pattern_is_retraction() and route a correction through

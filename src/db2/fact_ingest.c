@@ -22,8 +22,9 @@ int db2_fact_ingest_text(const char *text, fact_authority_t authority, int enabl
       const pattern_triple_t *t = &triples[i];
       fact_gate_verdict_t v = db2_fact_commit(t->subject, t->subject_kind, t->rel_type, t->object,
                                               t->object_kind, authority, enabled);
-      /* Count only what the gate actually persists when enabled: ACCEPT writes a
-       * validated edge, NOVEL stages a provisional rel_type + a Class-C edge.
+      /* Count the triples the gate let through when enabled: ACCEPT writes/bumps a
+       * validated edge, NOVEL stages a provisional rel_type + a Class-C edge. A
+       * re-ingest of a known triple still counts (it bumps weight, no new row).
        * REJECT_KIND / BADARG write nothing. */
       if (enabled && (v == FACT_GATE_ACCEPT || v == FACT_GATE_NOVEL))
          written++;
