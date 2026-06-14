@@ -504,22 +504,27 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       }
       else
       {
-         /* A client-supplied key goes into the CALLER's own attested per-user vault
-          * (dual-access entry; requires the vault unlocked). A TCP bearer has no
-          * attested principal, so it must NOT silently mint a server-owned
-          * credential (D2b) — that was an ungated write path. Refuse and point at
-          * the explicit, capability-gated `vault set --server`. On any failure we
-          * REFUSE rather than write the secret to agents.json in plaintext. */
+         /* Where the client-supplied key lands depends on the attested transport:
+          *  - a per-user principal (UDS uid: / webchat webuser:) -> the caller's own
+          *    vault (dual-access; requires the vault unlocked);
+          *  - a native-TLS+bearer conn (the operator over a confidential channel,
+          *    no per-user identity) -> the server-owned vault, so the key works for
+          *    ALL connections automatically (native-TLS provisioning);
+          *  - a plaintext TCP bearer -> REFUSED (D2b): it must not silently mint a
+          *    server credential over an unencrypted channel.
+          * On any failure we REFUSE rather than write the secret to agents.json. */
          const char *principal = (conn && conn->vault_principal[0]) ? conn->vault_principal : NULL;
-         if (!principal)
+         int tls_bearer = conn && conn->attested_transport == ATTEST_TLS_BEARER;
+         if (!principal && !tls_bearer)
             return server_send_error(
                 conn,
-                "vault: `agent add --key` requires an attested (UDS/webchat) connection; "
-                "provision a shared key with `aimee vault set-server` over a local "
-                "connection holding the vault:write:server capability",
+                "vault: `agent add --key` over a plaintext connection cannot store a credential; "
+                "use a native-TLS (https) connection, or an attested local/webchat connection",
                 NULL);
          vault_status_t vst =
-             vault_service_set(principal, ag->name, VAULT_API_KEY_CRED, key, (long)time(NULL));
+             principal
+                 ? vault_service_set(principal, ag->name, VAULT_API_KEY_CRED, key, (long)time(NULL))
+                 : vault_service_set_server(ag->name, VAULT_API_KEY_CRED, key);
          if (vst != VAULT_OK)
          {
             if (vst == VAULT_ERR_LOCKED)

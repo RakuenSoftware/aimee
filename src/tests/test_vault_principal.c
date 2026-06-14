@@ -12,7 +12,27 @@ static attested_transport_t resolve(int is_tcp, long uid, const char *webuser, i
                                     char *out)
 {
    out[0] = '\xff'; /* poison: prove the resolver writes/clears it */
-   return vault_principal_resolve(is_tcp, uid, webuser, token_ok, out, VAULT_PRINCIPAL_MAX);
+   return vault_principal_resolve(is_tcp, 0 /*is_tls*/, uid, webuser, token_ok, out,
+                                  VAULT_PRINCIPAL_MAX);
+}
+
+/* A native-TLS+bearer conn: attested for server-principal writes, no per-user
+ * principal (server-principal vault). A valid webuser assertion still wins. */
+static void test_tls_bearer_attested_no_principal(void)
+{
+   char p[VAULT_PRINCIPAL_MAX];
+   /* TLS over the network, no uid/webuser -> ATTEST_TLS_BEARER, empty principal. */
+   assert(vault_principal_resolve(1, 1, -1, NULL, 0, p, sizeof(p)) == ATTEST_TLS_BEARER);
+   assert(p[0] == '\0');
+   /* A spoofed webuser (no token) over TLS is still TLS_BEARER, no principal. */
+   assert(vault_principal_resolve(1, 1, -1, "alice", 0, p, sizeof(p)) == ATTEST_TLS_BEARER);
+   assert(p[0] == '\0');
+   /* A valid webuser assertion still wins (per-user webchat vault). */
+   assert(vault_principal_resolve(1, 1, -1, "alice", 1, p, sizeof(p)) == ATTEST_WEBCHAT_TRUSTED);
+   assert(strcmp(p, "webuser:alice") == 0);
+   /* Plaintext TCP (no TLS) is NOT attested for server writes. */
+   assert(vault_principal_resolve(1, 0, -1, NULL, 0, p, sizeof(p)) == ATTEST_TCP_BEARER);
+   printf("  PASS: test_tls_bearer_attested_no_principal\n");
 }
 
 /* A kernel-attested UDS peer with uid > 0 owns a uid: vault. */
@@ -97,10 +117,10 @@ static void test_short_buffer_fails_closed(void)
 {
    char small[8];
    small[0] = '\xff';
-   assert(vault_principal_resolve(0, 1000, NULL, 0, small, sizeof(small)) == ATTEST_NONE);
+   assert(vault_principal_resolve(0, 0, 1000, NULL, 0, small, sizeof(small)) == ATTEST_NONE);
    assert(small[0] == '\0');
    /* NULL out is also safe. */
-   assert(vault_principal_resolve(0, 1000, NULL, 0, NULL, 0) == ATTEST_NONE);
+   assert(vault_principal_resolve(0, 0, 1000, NULL, 0, NULL, 0) == ATTEST_NONE);
    printf("  PASS: test_short_buffer_fails_closed\n");
 }
 
@@ -112,6 +132,7 @@ int main(void)
    test_tcp_gets_no_principal();
    test_webuser_with_token_honored();
    test_webuser_without_token_refused();
+   test_tls_bearer_attested_no_principal();
    test_short_buffer_fails_closed();
    printf("vault_principal: all tests passed\n");
    return 0;

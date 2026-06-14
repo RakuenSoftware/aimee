@@ -172,12 +172,14 @@ static void vault_cred_fingerprint(const char *secret, char *out, size_t out_len
    snprintf(out, out_len, "%02x%02x%02x%02x", dig[0], dig[1], dig[2], dig[3]);
 }
 
-/* True iff the connection is an attested local/webchat transport (never a bare TCP
- * bearer) — the D2b precondition for any server-principal write. */
+/* True iff the connection is an attested transport — local UDS, trusted webchat,
+ * or native-TLS+bearer — never a plaintext TCP bearer. The D2b precondition for
+ * any server-principal write. */
 static int vault_conn_is_attested(const server_conn_t *conn)
 {
    return conn && (conn->attested_transport == ATTEST_UDS_PEERCRED ||
-                   conn->attested_transport == ATTEST_WEBCHAT_TRUSTED);
+                   conn->attested_transport == ATTEST_WEBCHAT_TRUSTED ||
+                   conn->attested_transport == ATTEST_TLS_BEARER);
 }
 
 /* POST /v1/vault/set_server — store a CLIENT-SUPPLIED credential under the
@@ -212,11 +214,13 @@ int handle_vault_set_server(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    char fp[16];
    vault_cred_fingerprint(js->valuestring, fp, sizeof(fp));
-   /* vault_conn_is_attested guaranteed UDS or webchat — log the actual one. */
+   /* vault_conn_is_attested guaranteed an attested transport — log which one. */
+   const char *transport = conn->attested_transport == ATTEST_WEBCHAT_TRUSTED ? "webchat"
+                           : conn->attested_transport == ATTEST_TLS_BEARER    ? "tls"
+                                                                              : "uds";
    aimee_log(LOG_WARN, "vault.audit",
              "server-principal write by=%s transport=%s agent=%s cred=%s fp=%s",
-             conn->vault_principal,
-             conn->attested_transport == ATTEST_WEBCHAT_TRUSTED ? "webchat" : "uds",
+             conn->vault_principal[0] ? conn->vault_principal : "(server)", transport,
              ja->valuestring, jc->valuestring, fp);
 
    cJSON *resp = cJSON_CreateObject();

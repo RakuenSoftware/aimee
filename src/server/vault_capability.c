@@ -234,6 +234,12 @@ int vault_capability_revoke(const char *principal)
 
 int vault_capability_server_write_allowed(attested_transport_t transport, const char *principal)
 {
+   /* A native-TLS+bearer conn is the operator over a confidential channel: the
+    * server bearer IS the authority, so no separate per-principal capability grant
+    * is required (native-TLS provisioning). A local UDS / webchat principal, by
+    * contrast, must hold an explicitly granted vault:write:server capability. */
+   if (transport == ATTEST_TLS_BEARER)
+      return 1;
    int attested = (transport == ATTEST_UDS_PEERCRED || transport == ATTEST_WEBCHAT_TRUSTED);
    return attested && vault_capability_has(principal);
 }

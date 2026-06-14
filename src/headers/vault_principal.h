@@ -23,11 +23,14 @@
 typedef enum
 {
    ATTEST_NONE = 0,   /* un-attested: no vault (a missed hop must not become uid:0) */
-   ATTEST_TCP_BEARER, /* network conn authorized by bearer; no OS-user attestation -> no vault (D17)
-                       */
+   ATTEST_TCP_BEARER, /* plaintext network conn authorized by bearer; no OS-user attestation and no
+                         confidential channel -> no server-principal writes (D2b) */
    ATTEST_UDS_PEERCRED,    /* local UDS conn, kernel-attested peer uid -> uid:<n> principal */
    ATTEST_WEBCHAT_TRUSTED, /* webchat backend asserting webuser:<name> under server.token (WP-C.2)
                             */
+   ATTEST_TLS_BEARER,      /* native-TLS conn authorized by bearer: the bearer over a confidential
+                              channel is the operator's authority -> server-principal writes allowed
+                              (native-TLS provisioning); no per-user principal (uses VAULT_SERVER) */
 } attested_transport_t;
 
 /* Max length of a vault principal string ("webuser:" + a 128-byte username, or
@@ -55,7 +58,8 @@ typedef enum
  * uid 0 is deliberately given NO principal: a zeroed/uninitialised conn (a missed
  * threading hop, or loopback's memset) reads as uid 0, so treating it as a real
  * principal would collapse to acting as root. out must be >= VAULT_PRINCIPAL_MAX. */
-attested_transport_t vault_principal_resolve(int is_tcp, long peer_uid, const char *webuser,
-                                             int webuser_token_ok, char *out, size_t out_len);
+attested_transport_t vault_principal_resolve(int is_tcp, int is_tls, long peer_uid,
+                                             const char *webuser, int webuser_token_ok, char *out,
+                                             size_t out_len);
 
 #endif /* DEC_VAULT_PRINCIPAL_H */
