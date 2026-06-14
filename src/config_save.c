@@ -764,6 +764,8 @@ int config_save(const config_t *cfg)
       cJSON_AddNumberToObject(root, "ingress_max_raw_scans", cfg->ingress_max_raw_scans);
    if (cfg->typed_facts_enabled)
       cJSON_AddBoolToObject(root, "typed_facts_enabled", 1);
+   if (cfg->kb_evidence_emit_enabled)
+      cJSON_AddBoolToObject(root, "kb_evidence_emit_enabled", 1);
 
    /* Cross-verification */
    if (cfg->cross_verify || cfg->verify_cmd[0] || cfg->verify_role[0])
