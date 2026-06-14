@@ -781,6 +781,11 @@ int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *rol
                                             const char *query_fingerprint, const int64_t *ids,
                                             int n_ids);
 
+/* Auditable-correctness P1: the /v1/audit/trace read — forward to the KB
+ * evidence.trace_retrieval_event action and return its JSON response verbatim
+ * (malloc'd, caller frees; NULL on bad arg or kb error). */
+char *kb_client_evidence_trace_retrieval_event(const char *turn_id);
+
 /* Fetch the entity profile card via aimee-kb.  Returns 0 on success
  * (|out| filled) or -1 if kb is unreachable or the entity is missing.
  * Mirrors memory_get_entity_profile(). */

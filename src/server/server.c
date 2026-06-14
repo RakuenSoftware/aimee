@@ -1042,6 +1042,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"blast_radius.preview", handle_blast_radius_preview},
     /* KB */
     {"kb.search", handle_kb_search},
+    {"evidence.trace_retrieval_event", handle_evidence_trace},
     {"curator.implements", handle_curator_implements},
     {"curator.synthesize", handle_curator_synthesize},
     {"curator.contradictions", handle_curator_contradictions},
