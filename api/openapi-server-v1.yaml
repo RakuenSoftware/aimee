@@ -617,6 +617,36 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /audit/trace:
+    post:
+      summary: Per-turn retrieval-evidence trace (proxied to aimee-kb)
+      description: >-
+        Reconstruct what a turn retrieved: given the caller-visible turn_id (the
+        X-Aimee-Retrieval-Event response-header value), return the per-turn
+        retrieval_event and its surfaced ids. trace_status is one of the
+        exhaustive states ok / not_instrumented / not_evaluated /
+        evidence_unavailable (P1 produces ok and evidence_unavailable). Requires
+        aimee-kb. Gated by kb_evidence_emit_enabled at emit time.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [turn_id]
+              properties:
+                turn_id: { type: string }
+      responses:
+        "200":
+          description: Trace bundle ({status, trace_status, turn_id, retrieval_event_id?, event?})
+          content:
+            application/json:
+              schema: { type: object }
+        "502":
+          description: Knowledge service (aimee-kb) unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /notes:
     get:
       summary: List notes (proxied to aimee-kb)

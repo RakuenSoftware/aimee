@@ -789,6 +789,54 @@ int kb_handle_evidence_emit_retrieval_event(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to write retrieval_event");
 }
 
+/* Auditable-correctness P1: the /v1/audit/trace read. Look up the per-turn
+ * retrieval_event by its caller-visible turn_id and return a four-state status.
+ * Only two states are reachable in P1's single-writer foundation:
+ *   - "ok"                   : a retrieval_event durably exists for the turn.
+ *   - "evidence_unavailable" : the turn id resolves to no durable event (never
+ *                              landed — e.g. DB2 was down at emit) or the read
+ *                              itself errored.
+ * The other two states are defined but produced by later phases:
+ *   - "not_instrumented"     : a path that emits no evidence (e.g. the Anthropic
+ *                              relay) — needs the per-path awareness of P1b.
+ *   - "not_evaluated"        : fidelity skipped on a tool-loop turn — P3.
+ * Never a falsely-empty success: a missing event is an explicit status, and the
+ * action always returns status:ok (the lookup ran) with trace_status set. */
+int kb_handle_evidence_trace_retrieval_event(int fd, cJSON *req)
+{
+   cJSON *turn_j = cJSON_GetObjectItemCaseSensitive(req, "turn_id");
+   if (!cJSON_IsString(turn_j) || !turn_j->valuestring[0])
+      return kb_send_error(fd, "audit.trace requires turn_id");
+
+   char ev_id[64] = "";
+   char payload[8192] = "";
+   int rc = db2_demotion_retrieval_event_by_turn(turn_j->valuestring, ev_id, sizeof(ev_id), payload,
+                                                 sizeof(payload));
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "turn_id", turn_j->valuestring);
+   if (rc == 1)
+   {
+      cJSON_AddStringToObject(resp, "trace_status", "ok");
+      cJSON_AddStringToObject(resp, "retrieval_event_id", ev_id);
+      /* Embed the event payload (surfaced ids etc.) as a structured object when
+       * it parses, else as the raw string — never silently dropped. */
+      cJSON *ev = payload[0] ? cJSON_Parse(payload) : NULL;
+      if (ev)
+         cJSON_AddItemToObject(resp, "event", ev);
+      else if (payload[0])
+         cJSON_AddStringToObject(resp, "event_raw", payload);
+   }
+   else
+   {
+      cJSON_AddStringToObject(resp, "trace_status", "evidence_unavailable");
+      cJSON_AddStringToObject(resp, "detail",
+                              rc < 0 ? "lookup error" : "no durable retrieval_event for this turn");
+   }
+   return kb_reply_or_error(fd, resp, "failed to trace retrieval_event");
+}
+
 int kb_handle_memory_entity_profile(int fd, cJSON *req)
 {
    cJSON *entity_j = cJSON_GetObjectItemCaseSensitive(req, "entity");

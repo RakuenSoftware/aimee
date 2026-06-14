@@ -351,8 +351,8 @@ static void op_run_worker_run(void *arg)
    char *buf = (char *)malloc(SHTTP_RESP_MAX);
    if (!buf)
    {
-      char *snap = op_run_snapshot(j->run_id, j->op, "failed", j->created,
-                                   "{\"error\":\"out of memory\"}");
+      char *snap =
+          op_run_snapshot(j->run_id, j->op, "failed", j->created, "{\"error\":\"out of memory\"}");
       openai_runs_store_finalize(j->run_id, OPENAI_RUN_FAILED, snap ? snap : "{}");
       free(snap);
       free(j->line);
@@ -476,8 +476,8 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
    {
       if (compute_pool_submit(&ctx->pool, op_run_worker_run, j) != 0)
       {
-         char *failed =
-             op_run_snapshot(id, op_method, "failed", created, "{\"error\":\"compute queue full\"}");
+         char *failed = op_run_snapshot(id, op_method, "failed", created,
+                                        "{\"error\":\"compute queue full\"}");
          openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
          free(failed);
          free(j->line);
@@ -491,8 +491,8 @@ static int submit_op_run_internal(const char *op_method, const char *body_json, 
       pthread_t th;
       if (pthread_create(&th, NULL, op_run_worker_thread, j) != 0)
       {
-         char *failed =
-             op_run_snapshot(id, op_method, "failed", created, "{\"error\":\"could not start run\"}");
+         char *failed = op_run_snapshot(id, op_method, "failed", created,
+                                        "{\"error\":\"could not start run\"}");
          openai_runs_store_finalize(id, OPENAI_RUN_FAILED, failed ? failed : queued);
          free(failed);
          free(j->line);
@@ -975,6 +975,8 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/curator/invalidated", NULL, RM_EXACT, "curator.invalidated", 0, rh_dispatch_op},
     {"POST", "/v1/graph/explain", NULL, RM_EXACT, "graph.explain", 0, rh_dispatch_op},
     {"POST", "/v1/code/audit", NULL, RM_EXACT, "code.audit", 0, rh_dispatch_op},
+    {"POST", "/v1/audit/trace", NULL, RM_EXACT, "evidence.trace_retrieval_event", 0,
+     rh_dispatch_op},
     {"POST", "/v1/trajectory/batch", NULL, RM_EXACT, "trajectory.batch", 0, rh_dispatch_op},
 
     /* work.* / wm.* / skill.* / session.* / toolset.* / mcp.* / trigger.* and
