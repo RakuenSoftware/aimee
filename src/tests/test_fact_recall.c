@@ -4,6 +4,7 @@
 #include "../db2/fact_recall.h"
 #include "../db2/fact_lifecycle.h"
 #include "../db2/rel_types_store.h"
+#include "../db2/entity_registry.h"
 #include "../db2/db2_test_shim.h"
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
@@ -76,6 +77,27 @@ int main(void)
    assert(n == 1);
    assert(strstr(buf, "works_for") == NULL); /* superseded -> not current */
    assert(strstr(buf, "age: 30") != NULL);
+
+   /* query-scoped recall: the user's facts PLUS facts about an entity named in the
+    * turn. Register DevBox (+alias) with a fact, then a query mentioning it. */
+   int64_t dev = db2_entity_register_named("DevBox", NODE_DEVICE);
+   assert(dev > 0);
+   assert(db2_entity_alias_bind("the workstation", dev, 0) == 0);
+   assert(db2_fact_commit("DevBox", NODE_DEVICE, "device_has_ip", "10.0.0.5", NODE_IP,
+                          FACT_AUTHORITY_USER, 1) == FACT_GATE_ACCEPT);
+   /* a query mentioning DevBox surfaces its fact (request sensitive so any PII
+    * passes; we only assert the entity-scoping here). */
+   n = db2_fact_recall_in_query("what is the ip of devbox", 1, buf, sizeof(buf));
+   assert(strstr(buf, "device_has_ip: 10.0.0.5") != NULL); /* DevBox fact recalled */
+   assert(strstr(buf, "age: 30") != NULL);                 /* user fact also present */
+   /* the entity is reachable via its alias too (registry resolution). */
+   n = db2_fact_recall_in_query("tell me about the workstation", 1, buf, sizeof(buf));
+   assert(strstr(buf, "device_has_ip: 10.0.0.5") != NULL);
+   /* a query naming no known entity -> just the user's facts. */
+   n = db2_fact_recall_in_query("what's the weather", 1, buf, sizeof(buf));
+   assert(strstr(buf, "device_has_ip") == NULL);
+   assert(strstr(buf, "age: 30") != NULL);
+   assert(db2_fact_recall_in_query(NULL, 0, buf, sizeof(buf)) == -1);
 
    /* bad args. */
    assert(db2_fact_recall_block(NULL, 0, buf, sizeof(buf)) == -1);

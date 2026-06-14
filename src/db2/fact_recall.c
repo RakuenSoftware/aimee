@@ -65,3 +65,63 @@ int db2_fact_recall_block(const char *entity, int turn_requests_sensitive, char 
    aimee_pg_finalize(st);
    return written;
 }
+
+#define FR_MAX_ENTITIES 8
+
+int db2_fact_recall_in_query(const char *query, int turn_requests_sensitive, char *out, size_t cap)
+{
+   if (!query || !out || cap == 0)
+      return -1;
+   out[0] = '\0';
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   /* The user's own facts first. */
+   int total = db2_fact_recall_block("user", turn_requests_sensitive, out, cap);
+   if (total < 0)
+      total = 0;
+   size_t used = strlen(out);
+
+   /* Entities mentioned in the query: any active entity whose alias (>=3 chars,
+    * to avoid noise) is a substring of the lowercased query. LIKE + || is
+    * portable across Postgres and the sqlite shim (position()/instr() are not).
+    * Skip "user" (already done above). Return each entity's preferred name. */
+   static const char *sql =
+       "SELECT (SELECT name FROM entity_aliases p WHERE p.canonical_id = r.canonical_id"
+       "          AND p.suppressed = 0 ORDER BY is_preferred DESC, id ASC LIMIT 1) AS pref"
+       " FROM entity_registry r"
+       " WHERE r.status = 'active'"
+       "   AND EXISTS (SELECT 1 FROM entity_aliases a WHERE a.canonical_id = r.canonical_id"
+       "                 AND a.suppressed = 0 AND length(a.name_norm) >= 3"
+       "                 AND lower(?1) LIKE '%' || a.name_norm || '%')"
+       " LIMIT ?2";
+   char err[FR_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return total;
+   aimee_pg_bind_text(st, "?1", query);
+   aimee_pg_bind_int(st, "?2", FR_MAX_ENTITIES);
+
+   char names[FR_MAX_ENTITIES][128];
+   int nnames = 0;
+   while (nnames < FR_MAX_ENTITIES && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *pref = aimee_pg_column_text(st, 0);
+      if (pref && pref[0] && strcmp(pref, "user") != 0)
+         snprintf(names[nnames++], 128, "%s", pref);
+   }
+   aimee_pg_finalize(st);
+
+   /* Recall each mentioned entity's facts into the remaining buffer. */
+   for (int i = 0; i < nnames && used + 1 < cap; i++)
+   {
+      int en = db2_fact_recall_block(names[i], turn_requests_sensitive, out + used, cap - used);
+      if (en > 0)
+      {
+         total += en;
+         used = strlen(out);
+      }
+   }
+   return total;
+}
