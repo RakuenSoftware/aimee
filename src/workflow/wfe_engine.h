@@ -15,6 +15,8 @@ typedef struct wfe_ctx wfe_ctx;
 const char *wfe_ctx_work_item(const wfe_ctx *c);
 const wfe_def_t *wfe_ctx_def(const wfe_ctx *c);
 const wfe_node_t *wfe_ctx_node(const wfe_ctx *c);
+const char *wfe_ctx_repo(const wfe_ctx *c);          /* normalized repo url */
+const char *wfe_ctx_proposal_path(const wfe_ctx *c); /* proposal artifact path */
 
 /* Load a workflow definition by name from $AIMEE_HOME/workflows/<name>.yaml.
  * Caller frees with wfe_def_free. */

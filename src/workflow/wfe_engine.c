@@ -31,6 +31,14 @@ const wfe_node_t *wfe_ctx_node(const wfe_ctx *c)
 {
    return c ? c->node : NULL;
 }
+const char *wfe_ctx_repo(const wfe_ctx *c)
+{
+   return (c && c->wi) ? c->wi->repo : NULL;
+}
+const char *wfe_ctx_proposal_path(const wfe_ctx *c)
+{
+   return (c && c->wi) ? c->wi->proposal_path : NULL;
+}
 
 wfe_def_t *wfe_load_workflow(const char *name, char *err, size_t errlen)
 {
