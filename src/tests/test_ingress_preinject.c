@@ -69,6 +69,28 @@ const char *config_default_dir(void)
 {
    return "/tmp/aimee-test";
 }
+int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *role,
+                                            const char *query_fingerprint, const int64_t *ids,
+                                            int n_ids)
+{
+   (void)turn_id;
+   (void)role;
+   (void)query_fingerprint;
+   (void)ids;
+   (void)n_ids;
+   return 0;
+}
+/* Stub: deterministic but varying-per-call, so the mint-uniqueness assertion
+ * holds without linking the platform layer into this pure unit test. */
+int platform_random_bytes(void *buf, size_t len)
+{
+   static unsigned char ctr = 0;
+   unsigned char *p = (unsigned char *)buf;
+   for (size_t i = 0; i < len; i++)
+      p[i] = (unsigned char)(ctr + i);
+   ctr++;
+   return 0;
+}
 
 static void test_confidence_tiers(void)
 {
@@ -197,6 +219,34 @@ static void test_budgeted_build_uses_memory_previews(void)
    printf("budgeted_build_uses_memory_previews OK\n");
 }
 
+/* Auditable-correctness P1: the per-turn retrieval-event id seam. */
+static void test_turn_id_mint_and_thread_local(void)
+{
+   /* mint produces a canonical 8-4-4-4-12 UUID. */
+   char a[40], b[40];
+   ingress_preinject_mint_turn_id(a, sizeof(a));
+   ingress_preinject_mint_turn_id(b, sizeof(b));
+   assert(strlen(a) == 36);
+   assert(a[8] == '-' && a[13] == '-' && a[18] == '-' && a[23] == '-');
+   for (int i = 0; a[i]; i++)
+   {
+      char c = a[i];
+      assert(c == '-' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
+   }
+   assert(strcmp(a, b) != 0); /* random — two mints differ */
+
+   /* the thread-local set/get round-trips and clears on NULL/"" */
+   assert(ingress_preinject_turn_id()[0] == '\0'); /* unset by default */
+   ingress_preinject_set_turn_id("turn-xyz");
+   assert(strcmp(ingress_preinject_turn_id(), "turn-xyz") == 0);
+   ingress_preinject_set_turn_id(NULL);
+   assert(ingress_preinject_turn_id()[0] == '\0');
+   ingress_preinject_set_turn_id("turn-2");
+   ingress_preinject_set_turn_id("");
+   assert(ingress_preinject_turn_id()[0] == '\0');
+   printf("turn_id_mint_and_thread_local OK\n");
+}
+
 int main(void)
 {
    printf("ingress_preinject: ");
@@ -206,6 +256,7 @@ int main(void)
    test_query_from_messages();
    test_apply();
    test_budgeted_build_uses_memory_previews();
+   test_turn_id_mint_and_thread_local();
    printf("all tests passed\n");
    return 0;
 }

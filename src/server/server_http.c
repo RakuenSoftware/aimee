@@ -1018,56 +1018,10 @@ static int write_all_fd(int fd, const char *buf, int len)
    return off;
 }
 
-/* Build the optional `X-Request-ID: <id>\r\n` header line into dst (or ""). */
-static void request_id_header(char *dst, size_t n, const char *request_id)
-{
-   if (request_id && request_id[0])
-      snprintf(dst, n, "X-Request-ID: %s\r\n", request_id);
-   else if (n)
-      dst[0] = '\0';
-}
-
-static void send_response(int fd, int status, const char *body, const char *request_id)
-{
-   const char *reason = status == 200   ? "OK"
-                        : status == 400 ? "Bad Request"
-                        : status == 401 ? "Unauthorized"
-                        : status == 403 ? "Forbidden"
-                        : status == 404 ? "Not Found"
-                        : status == 429 ? "Too Many Requests"
-                        : status == 500 ? "Internal Server Error"
-                        : status == 503 ? "Service Unavailable"
-                                        : "OK";
-   char rid[96];
-   request_id_header(rid, sizeof(rid), request_id);
-   char head[320];
-   int blen = body ? (int)strlen(body) : 0;
-   int hlen = snprintf(head, sizeof(head),
-                       "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n"
-                       "Content-Length: %d\r\n%sConnection: close\r\n\r\n",
-                       status, reason, blen, rid);
-   write_all_fd(fd, head, hlen);
-   if (blen > 0)
-      write_all_fd(fd, body, blen);
-}
-
-/* 429 Too Many Requests with a Retry-After header (seconds until the rate
- * window resets). */
-static void send_rate_limited(int fd, int retry_after, const char *request_id)
-{
-   const char *body =
-       "{\"error\":{\"message\":\"rate limit exceeded\",\"type\":\"rate_limit_error\"}}";
-   int blen = (int)strlen(body);
-   char rid[96];
-   request_id_header(rid, sizeof(rid), request_id);
-   char head[320];
-   int hlen = snprintf(head, sizeof(head),
-                       "HTTP/1.1 429 Too Many Requests\r\nContent-Type: application/json\r\n"
-                       "Retry-After: %d\r\nContent-Length: %d\r\n%sConnection: close\r\n\r\n",
-                       retry_after, blen, rid);
-   write_all_fd(fd, head, hlen);
-   write_all_fd(fd, body, blen);
-}
+/* Buffered HTTP response writers (request_id_header, retrieval_event_header,
+ * send_response, send_rate_limited) live in this textual include to keep this
+ * file under the per-file line cap. Included here, before their first use. */
+#include "server_http_response.inc"
 
 /* ── SSE streaming for /v1/chat/completions ─────────────────────────────── */
 
@@ -1087,11 +1041,13 @@ static void write_sse_headers(int fd, const char *request_id)
 {
    char rid[96];
    request_id_header(rid, sizeof(rid), request_id);
-   char head[256];
+   char reh[80];
+   retrieval_event_header(reh, sizeof(reh));
+   char head[336];
    int hlen = snprintf(head, sizeof(head),
                        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
-                       "Cache-Control: no-cache\r\n%sConnection: close\r\n\r\n",
-                       rid);
+                       "Cache-Control: no-cache\r\n%s%sConnection: close\r\n\r\n",
+                       rid, reh);
    write_all_fd(fd, head, hlen);
 }
 
@@ -1512,6 +1468,10 @@ static void handle_conn(int fd, int is_tcp)
       ingress_preinject_set_request_disabled(
           http_header(buf, "X-Aimee-Preinject", preinject, sizeof(preinject)) &&
           strcmp(preinject, "0") == 0);
+      /* Auditable-correctness P1: clear any turn id left by a prior request on
+       * this reused worker thread; the OpenAI-family ingress dispatch mints a
+       * fresh one below when evidence emission is on. */
+      ingress_preinject_set_turn_id("");
       int az = server_http_authorize(is_tcp, g_bearer, has_auth ? auth : NULL,
                                      has_api_key ? api_key : NULL, has_skey);
       if (az != 0)
@@ -1670,6 +1630,28 @@ static void handle_conn(int fd, int is_tcp)
       LOG_INFO("server.http", "%s %s -> 200 (chat stream) req_id=%s", method, path, request_id);
       free(body);
       return;
+   }
+
+   /* Auditable-correctness P1: for OpenAI-family ingress endpoints, mint the
+    * per-turn retrieval-event id up-front — before any response header is
+    * written — when evidence emission is on. The same id is then (a) surfaced
+    * to the client via the X-Aimee-Retrieval-Event response header and (b)
+    * reused by ingress_preinject_build for the emitted retrieval_event. Gated
+    * on the endpoint + flag so flag-off / non-ingress requests are byte-
+    * identical on the wire (config is read only for these three paths, which
+    * already pay a config_load inside the ingress builder). */
+   if (strcmp(method, "POST") == 0 &&
+       (strcmp(path, "/v1/chat/completions") == 0 || strcmp(path, "/v1/completions") == 0 ||
+        strcmp(path, "/v1/responses") == 0))
+   {
+      config_t evcfg;
+      config_load(&evcfg);
+      if (evcfg.kb_evidence_emit_enabled)
+      {
+         char tid[40];
+         ingress_preinject_mint_turn_id(tid, sizeof(tid));
+         ingress_preinject_set_turn_id(tid);
+      }
    }
 
    /* Streaming completions take the SSE path (separate from the buffered unary

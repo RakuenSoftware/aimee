@@ -76,6 +76,7 @@ static const struct
     {"dogfood.tag", "POST", "/v1/dogfood/tag"},
     {"episode.list", "GET", "/v1/episode/list"},
     {"eval.results", "GET", "/v1/eval/results"},
+    {"evidence.trace_retrieval_event", "POST", "/v1/audit/trace"},
     {"graph.explain", "POST", "/v1/graph/explain"},
     {"hooks.post", "POST", "/v1/hooks/post"},
     {"hooks.pre", "POST", "/v1/hooks/pre"},

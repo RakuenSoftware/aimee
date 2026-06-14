@@ -96,6 +96,12 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-dashboard \
                $(TESTPREFIX)/unit-test-log $(TESTPREFIX)/unit-test-server-dispatch \
                $(TESTPREFIX)/unit-test-aimee-home \
+               $(TESTPREFIX)/unit-test-workflow \
+               $(TESTPREFIX)/unit-test-wfe-engine \
+               $(TESTPREFIX)/unit-test-wfe-blocks \
+               $(TESTPREFIX)/unit-test-wfe-approval \
+               $(TESTPREFIX)/unit-test-wfe-roundtable \
+               $(TESTPREFIX)/unit-test-wfe-autonomy \
                $(TESTPREFIX)/unit-test-cli-profile \
                $(TESTPREFIX)/unit-test-cmd-profile \
                $(TESTPREFIX)/unit-test-kb-client-index \
@@ -894,6 +900,67 @@ $(TESTPREFIX)/unit-test-server-jobs-aux: $(OBJDIR)/tests/test_server_jobs_aux.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-compute-concurrency: $(OBJDIR)/tests/test_compute_concurrency.o $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Workflow engine W1: pure (yaml/cJSON/dstr only), no DB/config needed.
+$(TESTPREFIX)/unit-test-workflow: $(OBJDIR)/tests/test_workflow.o \
+                                  $(OBJDIR)/workflow/wfe_def.o $(OBJDIR)/workflow/wfe_iface.o \
+                                  $(OBJDIR)/workflow/wfe_validate.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                  $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Workflow engine W2: state machine + engine (DB1-backed).
+$(TESTPREFIX)/unit-test-wfe-engine: $(OBJDIR)/tests/test_wfe_engine.o \
+                                    $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_engine.o \
+                                    $(OBJDIR)/workflow/wfe_def.o $(OBJDIR)/workflow/wfe_iface.o \
+                                    $(OBJDIR)/workflow/wfe_validate.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                    $(OBJDIR)/aimee_home.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
+                                    $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Workflow engine W3: block executors (freeze is real git; others integration-gated).
+$(TESTPREFIX)/unit-test-wfe-blocks: $(OBJDIR)/tests/test_wfe_blocks.o \
+                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \
+                                    $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
+                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
+                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/aimee_home.o \
+                                    $(OBJDIR)/util.o $(OBJDIR)/posix/util.o $(OBJDIR)/yaml.o \
+                                    $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Workflow engine W4: HMAC approval signer + gate.human.
+$(TESTPREFIX)/unit-test-wfe-approval: $(OBJDIR)/tests/test_wfe_approval.o \
+                                      $(OBJDIR)/workflow/wfe_approval.o $(OBJDIR)/workflow/wfe_engine.o \
+                                      $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                      $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
+                                      $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
+                                      $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/aimee_home.o \
+                                      $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Workflow engine W5: roundtable verdict rule + gate.roundtable (mock panel).
+$(TESTPREFIX)/unit-test-wfe-roundtable: $(OBJDIR)/tests/test_wfe_roundtable.o \
+                                        $(OBJDIR)/workflow/wfe_roundtable.o \
+                                        $(OBJDIR)/workflow/wfe_verdict.o $(OBJDIR)/workflow/wfe_engine.o \
+                                        $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                        $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
+                                        $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
+                                        $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/aimee_home.o \
+                                        $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Workflow engine W6: autonomy driver + gate-override.
+$(TESTPREFIX)/unit-test-wfe-autonomy: $(OBJDIR)/tests/test_wfe_autonomy.o \
+                                      $(OBJDIR)/workflow/wfe_autonomy.o $(OBJDIR)/workflow/wfe_approval.o \
+                                      $(OBJDIR)/workflow/wfe_roundtable.o $(OBJDIR)/workflow/wfe_verdict.o \
+                                      $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/db1/db1_init.o \
+                                      $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/wfe_store.o \
+                                      $(OBJDIR)/workflow/wfe_def.o $(OBJDIR)/workflow/wfe_iface.o \
+                                      $(OBJDIR)/workflow/wfe_validate.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                      $(OBJDIR)/aimee_home.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
+                                      $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-provider-catalog: $(OBJDIR)/tests/test_provider_catalog.o $(TEST_CORE_OBJS)

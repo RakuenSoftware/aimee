@@ -368,6 +368,7 @@ set(DB1_SRCS
     ${AIMEE_SRC_DIR}/db1/delegate_learning.c
     ${AIMEE_SRC_DIR}/db1/interaction_events.c
     ${AIMEE_SRC_DIR}/db1/mcp_osv_cache.c
+    ${AIMEE_SRC_DIR}/db1/wfe_store.c
 )
 
 set(DB2_SRCS
@@ -498,6 +499,10 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/models_dev_cache.c
     ${AIMEE_SRC_DIR}/lsp_client.c
     ${AIMEE_SRC_DIR}/lsp_manager.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_iface.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_def.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_validate.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_canonical.c
     ${AIMEE_SRC_DIR}/vendor/cJSON.c
     ${PLATFORM_CORE_SRCS}
 )
@@ -757,6 +762,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_remote.c
     ${AIMEE_SRC_DIR}/server/delegate_plan.c
     ${AIMEE_SRC_DIR}/acp_server.c
+    ${AIMEE_SRC_DIR}/cmd_workflow.c
 )
 # `workspace serve` + the reverse-channel host the detached-workspace runner so
 # the client serves its working tree to a remote aimee-server. It now builds on
@@ -842,6 +848,12 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/cmd_session_lifecycle.c
     ${AIMEE_SRC_DIR}/cmd_hooks_scope.c
     ${AIMEE_SRC_DIR}/server/server_session_start_stubs.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_engine.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_blocks.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_approval.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_verdict.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_roundtable.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_autonomy.c
     ${PLATFORM_SERVER_SRCS}
 )
 set(SERVER_DATA_SRCS ${DATA_SRCS})
@@ -959,6 +971,7 @@ target_include_directories(aimee-core PUBLIC
     ${AIMEE_SRC_DIR}/vendor/headers
     ${AIMEE_SRC_DIR}/db1
     ${AIMEE_SRC_DIR}/db2
+    ${AIMEE_SRC_DIR}/workflow
 )
 target_compile_options(aimee-core PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee-core PUBLIC Threads::Threads)
@@ -1138,8 +1151,13 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/history.c
     ${AIMEE_SRC_DIR}/markdown.c
     ${AIMEE_SRC_DIR}/vendor/cJSON.c
+    ${AIMEE_SRC_DIR}/yaml.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_iface.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_def.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_validate.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_canonical.c
 )
-target_include_directories(aimee PRIVATE ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/vendor/headers ${AIMEE_SRC_DIR}/db1 ${AIMEE_SRC_DIR}/db2)
+target_include_directories(aimee PRIVATE ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/vendor/headers ${AIMEE_SRC_DIR}/db1 ${AIMEE_SRC_DIR}/db2 ${AIMEE_SRC_DIR}/workflow)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_link_libraries(aimee PRIVATE Threads::Threads)
 if(NOT WIN32)

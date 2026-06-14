@@ -126,6 +126,10 @@ DB1_ONLY_TABLES = {
     "roundtable_pipeline_passes",
     "roundtable_pipeline_attempts",
     "roundtable_pipeline_gates",
+    # workflow engine work-item state + audit (per-user, DB1-owned)
+    "lifecycle_work_item",
+    "lifecycle_event",
+    "lifecycle_stage_attempt",
 }
 
 # Sole DB1-owned lexical index. Lives only in db1/schema.sql.

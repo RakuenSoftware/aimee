@@ -324,6 +324,7 @@ static const struct
     {"agent", "probe", "agent.probe", NULL, NULL, 300000},
     {"mcp", "audit", "mcp.audit", NULL, "items", 0},
     {"mcp", "recheck", "mcp.recheck", NULL, "items", 300000},
+    {"audit", "trace", "evidence.trace_retrieval_event", NULL, NULL, 0},
     {"get_help", NULL, "get_help", "mcp.call", NULL, 0},
     {"get-help", NULL, "get_help", "mcp.call", NULL, 0},
     {"verify", NULL, "git.verify", "mcp.call", NULL, 900000},
@@ -986,6 +987,18 @@ static cJSON *marshal_config_get(int argc, char **argv)
    cJSON *req = marshal_no_args("config.get");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "key", opts.positional[0]);
+   return req;
+}
+
+/* Auditable-correctness P1: `aimee audit trace <turn_id>` → the turn_id param. */
+static cJSON *marshal_audit_trace(int argc, char **argv)
+{
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
+
+   cJSON *req = marshal_no_args("evidence.trace_retrieval_event");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "turn_id", opts.positional[0]);
    return req;
 }
 
@@ -3260,6 +3273,8 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_no_args(method);
    if (strcmp(method, "config.get") == 0)
       return marshal_config_get(argc, argv);
+   if (strcmp(method, "evidence.trace_retrieval_event") == 0)
+      return marshal_audit_trace(argc, argv);
    if (strcmp(method, "config.set") == 0)
       return marshal_config_set(argc, argv);
    if (strcmp(method, "aux.test") == 0)

@@ -1,0 +1,111 @@
+# Default "build" development workflow -- one composition of the block catalog.
+# proposal -> roundtable -> PR-with-proposal -> user-approve -> plan ->
+# roundtable -> implement -> freeze -> roundtable -> code PR -> user pass/fail
+# (pass -> merge; fail -> back to implement). No engine privilege over a
+# user-authored workflow; clone and edit freely (`aimee workflow new`).
+name: build
+start: draft
+nodes:
+  - id: draft
+    block: author.proposal
+    params:
+      with_user: true
+    next: proposal_gate
+  - id: proposal_gate
+    block: gate.roundtable
+    in:
+      src: draft.out
+    params:
+      panel:
+        required:
+          - security
+          - architect
+          - qa
+          - reviewer
+        eligible:
+          - contrarian
+      quorum: 4
+      max_rounds: 6
+    on_pass: proposal_pr
+    on_fail: draft
+  - id: proposal_pr
+    block: pr.open
+    in:
+      src: draft.out
+    next: proposal_approve
+  - id: proposal_approve
+    block: gate.human
+    in:
+      pr: proposal_pr.out
+    params:
+      policy: pr_review
+    next: plan
+  - id: plan
+    block: author.plan
+    in:
+      proposal: draft.out
+    next: plan_gate
+  - id: plan_gate
+    block: gate.roundtable
+    in:
+      src: plan.out
+    params:
+      panel:
+        required:
+          - security
+          - architect
+          - qa
+          - reviewer
+      quorum: 4
+      max_rounds: 6
+    on_pass: impl
+    on_fail: plan
+  - id: impl
+    block: implement
+    in:
+      plan: plan.out
+    params:
+      fanout: max
+    next: document
+  - id: document
+    block: document
+    in:
+      src: impl.out
+    next: freeze
+  - id: freeze
+    block: freeze
+    in:
+      branch: document.out
+    next: impl_gate
+  - id: impl_gate
+    block: gate.roundtable
+    in:
+      src: freeze.out
+    params:
+      panel:
+        required:
+          - security
+          - architect
+          - qa
+          - reviewer
+      quorum: 4
+      max_rounds: 6
+    on_pass: code_pr
+    on_fail: impl
+  - id: code_pr
+    block: pr.open
+    in:
+      src: freeze.out
+    next: pr_passfail
+  - id: pr_passfail
+    block: gate.human
+    in:
+      pr: code_pr.out
+    params:
+      policy: pr_review
+    on_pass: merge
+    on_fail: impl
+  - id: merge
+    block: merge
+    in:
+      pr: code_pr.out
