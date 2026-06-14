@@ -5625,6 +5625,32 @@ static void pt_print_delegate_launch(const char *method, cJSON *resp)
 }
 static void pt_print_kb_search(const char *method, cJSON *resp)
 {
+   (void)method;
+   /* The kb /v1/search response (relayed by kb.search) is
+    * {"hits":[{artifact_id,score,excerpt}], ...}. Render that. (Older callers
+    * returned {"results":[{file_path,heading_path,score}]} — kept as a fallback.) */
+   cJSON *hits = cJSON_GetObjectItemCaseSensitive(resp, "hits");
+   if (cJSON_IsArray(hits))
+   {
+      if (cJSON_GetArraySize(hits) == 0)
+      {
+         printf("No results.\n");
+         return;
+      }
+      cJSON *h;
+      cJSON_ArrayForEach(h, hits)
+      {
+         cJSON *score = cJSON_GetObjectItemCaseSensitive(h, "score");
+         cJSON *id = cJSON_GetObjectItemCaseSensitive(h, "artifact_id");
+         cJSON *ex = cJSON_GetObjectItemCaseSensitive(h, "excerpt");
+         printf("  %.4f  %s\n", cJSON_IsNumber(score) ? score->valuedouble : 0.0,
+                cJSON_IsString(id) ? id->valuestring : "?");
+         if (cJSON_IsString(ex) && ex->valuestring[0])
+            printf("        %.200s\n", ex->valuestring);
+      }
+      return;
+   }
+
    cJSON *results = cJSON_GetObjectItemCaseSensitive(resp, "results");
    if (!cJSON_IsArray(results) || cJSON_GetArraySize(results) == 0)
    {
