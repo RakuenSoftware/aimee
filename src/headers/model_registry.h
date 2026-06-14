@@ -30,6 +30,14 @@ enum
    MODEL_CAP_STREAMING = 1 << 5,
 };
 
+/* Modality capabilities (vision/pdf/audio) are INFERRED from prompt TEXT
+ * (delegate_infer_capability_requirements) — a heuristic that over-triggers on a
+ * text task merely mentioning an image/pdf/audio filename. They are therefore
+ * BEST-EFFORT routing preferences: when requiring them would disable every
+ * candidate, the router relaxes them and routes on the hard caps (tools) +
+ * min_context instead, rather than hard-failing the whole task fleet-wide. */
+#define MODEL_CAP_MODALITY_SOFT (MODEL_CAP_VISION | MODEL_CAP_PDF | MODEL_CAP_AUDIO)
+
 typedef struct
 {
    char provider[MODEL_PROVIDER_MAX];
