@@ -90,7 +90,7 @@ endif
 # would fail trying to write .d dependency files into non-existent subdirectories.
 _DUMMY := $(shell mkdir -p $(OBJDIR) $(OBJDIR)/posix $(OBJDIR)/linux $(OBJDIR)/mac $(OBJDIR)/windows $(OBJDIR)/tests $(OBJDIR)/db1 $(OBJDIR)/db2)
 
-C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1 -Idb2 $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
+C_FLAGS = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -Wall -Wextra -Werror -Wno-unused-parameter -Wno-format-truncation -Wno-unused-result -MMD -MP -I. -Iheaders -Ivendor/headers -Idb1 -Idb2 -Iworkflow $(VERSION_FLAGS) $(EXTRA_C_FLAGS)
 
 # DB2 client flags are discovered with pkg-config because provider headers are
 # not always installed under the compiler default include path. See
@@ -293,7 +293,8 @@ CORE_SRCS = db1/db.c db1/db_schema.c config.c config_sections.c config_database.
             compact.c platform_random.c slop_detect.c proxy_bootstrap.c reasoning_cap.c \
             client_integrations.c mcp_tools.c mcp_skill_tools.c mcp_tools_gateway.c events.c \
             model_registry.c models_dev.c models_dev_cache.c lsp_client.c lsp_manager.c plugin.c \
-            plugin_ctx.c plugin_loader.c memory_provider.c plugin_c_hook.c config_plugin.c code_collect.c codex_auth.c
+            plugin_ctx.c plugin_loader.c memory_provider.c plugin_c_hook.c config_plugin.c code_collect.c codex_auth.c \
+            workflow/wfe_iface.c workflow/wfe_def.c workflow/wfe_validate.c workflow/wfe_canonical.c
 CORE_OBJS = $(CORE_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o
 
 # --- Layer 0b: DB1 (user-local tier) ---
@@ -349,7 +350,7 @@ CMD_SRCS = prompts.c persona.c hardware_probe.c curator_profile.c server/delegat
 CMD_OBJS = $(CMD_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Pure client (aimee) ---
-CLI_SRCS = cli_main.c cli_session_start.c cli_attention_guard.c cli_code_audit.c cli_tui.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c server/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c acp_server.c cli_workspace_serve.c cli_agent_keys.c
+CLI_SRCS = cli_main.c cli_session_start.c cli_attention_guard.c cli_code_audit.c cli_tui.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c server/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c acp_server.c cli_workspace_serve.c cli_agent_keys.c cmd_workflow.c
 ifeq ($(WITH_TLS),1)
 CLI_SRCS += aimee_tls.c
 TLS_OBJS = $(OBJDIR)/aimee_tls.o
@@ -363,7 +364,7 @@ CLIENT_PLATFORM_OBJS = $(filter %/platform_ipc.o %/platform_net.o %/platform_pat
 # with full flags; --gc-sections trims the unused remainder). util.o supplies
 # run_cmd/run_cmd_set_cwd for the provider exec_shell op the runner now serves.
 CLIENT_RUNNER_OBJS = $(OBJDIR)/server/workspace_provider_detached.o $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o
-CLIENT_SUPPORT_OBJS = $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o $(OBJDIR)/aimee_home.o $(OBJDIR)/history.o $(OBJDIR)/markdown.o $(OBJDIR)/code_collect.o $(OBJDIR)/codex_auth.o $(CLIENT_PLATFORM_OBJS) $(CLIENT_RUNNER_OBJS)
+CLIENT_SUPPORT_OBJS = $(OBJDIR)/cJSON.o $(OBJDIR)/dstr.o $(OBJDIR)/aimee_home.o $(OBJDIR)/history.o $(OBJDIR)/markdown.o $(OBJDIR)/code_collect.o $(OBJDIR)/codex_auth.o $(OBJDIR)/yaml.o $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_def.o $(OBJDIR)/workflow/wfe_validate.o $(OBJDIR)/workflow/wfe_canonical.o $(CLIENT_PLATFORM_OBJS) $(CLIENT_RUNNER_OBJS)
 CLIENT_COMPILE_OBJS = $(CLI_OBJS) $(CLIENT_PLATFORM_OBJS) $(OBJDIR)/dstr.o $(OBJDIR)/history.o $(OBJDIR)/markdown.o
 $(CLIENT_COMPILE_OBJS): C_FLAGS := $(CLIENT_C_FLAGS)
 

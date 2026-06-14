@@ -96,6 +96,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-dashboard \
                $(TESTPREFIX)/unit-test-log $(TESTPREFIX)/unit-test-server-dispatch \
                $(TESTPREFIX)/unit-test-aimee-home \
+               $(TESTPREFIX)/unit-test-workflow \
                $(TESTPREFIX)/unit-test-cli-profile \
                $(TESTPREFIX)/unit-test-cmd-profile \
                $(TESTPREFIX)/unit-test-kb-client-index \
@@ -894,6 +895,13 @@ $(TESTPREFIX)/unit-test-server-jobs-aux: $(OBJDIR)/tests/test_server_jobs_aux.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-compute-concurrency: $(OBJDIR)/tests/test_compute_concurrency.o $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Workflow engine W1: pure (yaml/cJSON/dstr only), no DB/config needed.
+$(TESTPREFIX)/unit-test-workflow: $(OBJDIR)/tests/test_workflow.o \
+                                  $(OBJDIR)/workflow/wfe_def.o $(OBJDIR)/workflow/wfe_iface.o \
+                                  $(OBJDIR)/workflow/wfe_validate.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                  $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-provider-catalog: $(OBJDIR)/tests/test_provider_catalog.o $(TEST_CORE_OBJS)

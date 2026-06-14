@@ -1732,6 +1732,9 @@ int main(int argc, char **argv)
     * renders points/baseline/replay client-side. */
    if (strcmp(cmd, "optimize") == 0)
       return cmd_optimize_run(sub_argc, sub_argv, json_output);
+   /* workflow definitions are local files; inspect/validate without a server. */
+   if (strcmp(cmd, "workflow") == 0)
+      return cmd_workflow_client_run(sub_argc, sub_argv, json_output);
 #ifndef _WIN32
    /* manuscript mode talks to the server over the Unix-domain /v1 socket
     * (http_uds_client, AF_UNIX), which the Windows client does not build. */
