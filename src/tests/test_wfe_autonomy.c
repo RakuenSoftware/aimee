@@ -146,6 +146,7 @@ int main(void)
    {
       char id[80] = "", err[256] = "";
       assert(wfe_work_item_create("auto", "a5", "a5", "interactive", id, err, sizeof err) == 0);
+      assert(wfe_engine_run(id, err, sizeof err) == 0); /* park at the human gate "approve" */
       int forced = 0;
       for (int k = 0; k < WFE_MAX_OVERRIDES + 1; k++)
       {

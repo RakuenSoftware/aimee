@@ -14,16 +14,24 @@ int wfe_gate_effective_quorum(int requested, int nreq)
    return q;
 }
 
-/* Coerce a verdict to its effective kind under the integrity rules. */
-static wfe_verdict_kind_t effective_kind(const wfe_verdict_t *v, const char *artifact_hash)
+/* A verdict is structurally trustworthy iff its schema is known, it is not
+ * malformed, and it reviewed the artifact actually under review. */
+static int structurally_valid(const wfe_verdict_t *v, const char *artifact_hash)
 {
    if (v->schema_version != WFE_VERDICT_SCHEMA)
-      return WFE_V_REQUEST_CHANGES;
+      return 0;
    if (v->kind == WFE_V_MALFORMED)
-      return WFE_V_REQUEST_CHANGES;
+      return 0;
    if (artifact_hash && artifact_hash[0] && strcmp(v->reviewed_content_hash, artifact_hash) != 0)
-      return WFE_V_REQUEST_CHANGES; /* reviewed a different artifact */
-   return v->kind;
+      return 0;
+   return 1;
+}
+
+/* Coerce a verdict to its effective kind under the integrity rules
+ * (structurally-untrustworthy verdicts fail closed to REQUEST_CHANGES). */
+static wfe_verdict_kind_t effective_kind(const wfe_verdict_t *v, const char *artifact_hash)
+{
+   return structurally_valid(v, artifact_hash) ? v->kind : WFE_V_REQUEST_CHANGES;
 }
 
 wfe_gate_decision_t wfe_gate_decide(const wfe_verdict_t *verdicts, int n,
@@ -54,10 +62,11 @@ wfe_gate_decision_t wfe_gate_decide(const wfe_verdict_t *verdicts, int n,
    int approve = 0, high_sev = 0;
    for (int i = 0; i < n; i++)
    {
-      wfe_verdict_kind_t k = effective_kind(&verdicts[i], artifact_hash);
-      if (verdicts[i].high_sev_blockers > 0)
+      /* only trust blocker counts from structurally-valid verdicts; an
+       * untrustworthy verdict already fails the gate via effective_kind. */
+      if (structurally_valid(&verdicts[i], artifact_hash) && verdicts[i].high_sev_blockers > 0)
          high_sev += verdicts[i].high_sev_blockers;
-      if (k == WFE_V_APPROVE)
+      if (effective_kind(&verdicts[i], artifact_hash) == WFE_V_APPROVE)
          approve++;
    }
 

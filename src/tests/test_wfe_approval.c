@@ -72,24 +72,26 @@ int main(void)
    /* --- sign/verify round-trip + tamper detection --- */
    {
       char sig[65] = "";
-      assert(wfe_approval_sign("wi_1", "approve", "hashA", "ts1", sig) == 0);
-      assert(wfe_approval_verify("wi_1", "approve", "hashA", "ts1", sig) == 1);
-      assert(wfe_approval_verify("wi_1", "approve", "hashB", "ts1", sig) ==
+      assert(wfe_approval_sign("wi_1", "approve", "hashA", "alice", "ts1", sig) == 0);
+      assert(wfe_approval_verify("wi_1", "approve", "hashA", "alice", "ts1", sig) == 1);
+      assert(wfe_approval_verify("wi_1", "approve", "hashB", "alice", "ts1", sig) ==
              0); /* artifact changed */
-      assert(wfe_approval_verify("wi_2", "approve", "hashA", "ts1", sig) ==
+      assert(wfe_approval_verify("wi_2", "approve", "hashA", "alice", "ts1", sig) ==
              0); /* wrong work item */
-      assert(wfe_approval_verify("wi_1", "approve", "hashA", "ts1", "deadbeef") == 0);
+      assert(wfe_approval_verify("wi_1", "approve", "hashA", "bob", "ts1", sig) ==
+             0); /* actor bound to the MAC */
+      assert(wfe_approval_verify("wi_1", "approve", "hashA", "alice", "ts1", "deadbeef") == 0);
    }
 
    /* --- a different key cannot forge a valid signature --- */
    {
       char sig[65] = "";
-      assert(wfe_approval_sign("wi_1", "approve", "hashA", "ts1", sig) == 0);
+      assert(wfe_approval_sign("wi_1", "approve", "hashA", "alice", "ts1", sig) == 0);
       char kp[256];
       wfe_approval_key_path(kp, sizeof kp);
       remove(kp);
       assert(wfe_approval_ensure_key() == 0); /* fresh, different key */
-      assert(wfe_approval_verify("wi_1", "approve", "hashA", "ts1", sig) == 0);
+      assert(wfe_approval_verify("wi_1", "approve", "hashA", "alice", "ts1", sig) == 0);
    }
 
    /* --- db1 approval store: present iff matching hash --- */

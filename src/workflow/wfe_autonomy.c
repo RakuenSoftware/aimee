@@ -81,6 +81,26 @@ int wfe_gate_override(const char *work_item_id, const char *gate, const char *re
       snprintf(err, errlen, "unknown work item");
       return -1;
    }
+   /* override only the gate the work item is actually parked at, and never a
+    * roundtable gate (override is a human-gate affordance — fail closed). */
+   if (gate && strcmp(gate, wi.current_stage) != 0)
+   {
+      snprintf(err, errlen, "gate '%s' is not the current stage '%s'", gate, wi.current_stage);
+      return -1;
+   }
+   {
+      char ferr[256];
+      wfe_def_t *def = wfe_load_workflow(wi.workflow_name, ferr, sizeof ferr);
+      const wfe_node_t *node = def ? wfe_def_node(def, wi.current_stage) : NULL;
+      int is_roundtable = node && node->block == WFE_BLK_GATE_ROUNDTABLE;
+      if (def)
+         wfe_def_free(def);
+      if (is_roundtable)
+      {
+         snprintf(err, errlen, "cannot override a roundtable gate ('%s')", wi.current_stage);
+         return -1;
+      }
+   }
    if (wi.override_count >= WFE_MAX_OVERRIDES)
    {
       db1_work_item_set_terminal(work_item_id, "rejected");

@@ -20,11 +20,11 @@ int wfe_approval_ensure_key(void);
 /* HMAC-SHA256 sign the approval tuple into out_hex (65 bytes). Returns 0 on
  * success, -1 if the key is unavailable. */
 int wfe_approval_sign(const char *work_item_id, const char *gate, const char *content_hash,
-                      const char *ts, char out_hex[65]);
+                      const char *actor, const char *ts, char out_hex[65]);
 
-/* Constant-time verify. Returns 1 if valid, 0 otherwise. */
+/* Constant-time verify (the MAC also binds the actor). Returns 1 if valid. */
 int wfe_approval_verify(const char *work_item_id, const char *gate, const char *content_hash,
-                        const char *ts, const char *sig_hex);
+                        const char *actor, const char *ts, const char *sig_hex);
 
 /* Record a signed approval for a gate against the current artifact content hash
  * (stored as a lifecycle_event of kind "approve"). Returns 0 on success. */

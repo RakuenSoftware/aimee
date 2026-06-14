@@ -232,8 +232,16 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
       return -1;
    }
 
-   /* --- atomic critical section: cost reservation + step + state update --- */
-   int txn = (db1_lifecycle_txn_begin() == 0);
+   /* --- atomic critical section: cost reservation + step + state update.
+    * Fail closed: if we cannot open the transaction we must NOT mutate the
+    * work item outside it (a half-applied step would corrupt the ledger). --- */
+   if (db1_lifecycle_txn_begin() != 0)
+   {
+      snprintf(err, errlen, "could not begin advance transaction");
+      wfe_def_free(def);
+      return -1;
+   }
+   int txn = 1;
 
    /* cost pre-flight (estimate is 0 for stubs; executors report actuals). */
    if (wi.work_item_max_cost_usd > 0 && wi.cum_cost_usd >= wi.work_item_max_cost_usd)
