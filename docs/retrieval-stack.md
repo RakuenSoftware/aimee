@@ -10,8 +10,9 @@ sized to that model's output dimension.
 The embedder is any command that reads text on stdin and writes a JSON float
 array on stdout (`scripts/embedder-server.py` provides an HTTP sidecar wrapper
 for the HuggingFace / sentence-transformers stack). It ships in two tiers — one
-embedder paired with a matching-size cross-encoder reranker, baked into one
-image:
+embedder and a cross-encoder reranker sized to the same tier, baked into one
+image. (The reranker emits a scalar score, so its size is a quality choice, not
+a dimension constraint.)
 
 | Image | Embedder (`embedding_dim`) | Reranker |
 |-------|----------------------------|----------|
@@ -29,15 +30,15 @@ deployments.
 - Recall and ranking are noticeably better, especially on large or noisy
   corpora and on queries that lean on meaning over keywords.
 - Costs: the model weights are several GB (slower image pull and first build),
-  the 4b holds ~16 GB resident in fp32, and a CPU embed runs ~1–2 s versus the
-  0.6b's ~0.2 s. None of that is in the request hot path — embedding happens at
-  ingest and on the query, not per token — but it sets a RAM floor and slows a
-  cold re-embed of a large corpus.
+  the default image holds ~20 GB resident in fp32 (~16 GB embedder + ~4 GB
+  reranker), and a CPU embed runs ~1–2 s versus the 0.6b's ~0.2 s. None of that
+  is in the request hot path — embedding happens at ingest and on the query, not
+  per token — but it sets a RAM floor and slows a cold re-embed of a large corpus.
 
 **0.6b + 400m (light).** Pick it for laptops, small VMs, CI, or any host short
 on memory.
-- ~1 GB of weights, a couple of GB resident, embeds in ~0.2 s. Fast to pull,
-  fast to re-embed, runs anywhere.
+- ~2 GB of weights (embedder + reranker), a couple of GB resident, embeds in
+  ~0.2 s. Fits a small host; fast to pull, fast to re-embed.
 - Lower recall and weaker reranking than the 4b/1b — fine for smaller corpora
   and keyword-ish queries, weaker on large-corpus semantic search.
 
@@ -67,7 +68,8 @@ pairing with `--build-arg EMBEDDER_MODEL=… --build-arg RERANKER_MODEL=…`.
 Two config keys define the embedder:
 
 - `embedding_command` — the command that produces embeddings.
-- `embedding_dim` — the dimension that command emits (1024 or 2560). This is the
+- `embedding_dim` — the dimension that command emits (1024 for the light image,
+  2560 for the default; any value for a custom-built image). This is the
   single source of truth for vector-column dimensions.
 
 Keep the two in sync: `embedding_dim` must equal the dimension
