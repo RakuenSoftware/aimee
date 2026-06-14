@@ -130,32 +130,36 @@ static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
    return wfe_step_advanced(handle, hash, 0.0);
 }
 
-/* implement: delegate fan-out that writes code on the work item's branch. */
+/* implement: produces the work item's branch. In production a delegate fan-out
+ * writes the code; that live dispatch is integration-gated (see file header).
+ * What this does NOW: captures the current branch head SHA as the produced
+ * artifact, and fails closed if the repo is unavailable (never emits an empty
+ * artifact). */
 static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
 {
    (void)ctx;
-   /* Production: dispatch as many delegates as the plan allows against the
-    * branch. The produced artifact is the branch; its hash is the head SHA. */
-   char base[64] = "", head[64] = "", dhash[65] = "", err[128];
-   wfe_git_freeze(repo_dir(), "HEAD", base, head, dhash, err, sizeof err);
+   char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
+   if (wfe_git_freeze(repo_dir(), "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
+      return wfe_step_failed();
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
-   return wfe_step_advanced(handle, head[0] ? head : dhash, 0.0);
+   return wfe_step_advanced(handle, head, 0.0);
 }
 
-/* document: a delegate documents the effort by writing docs onto the branch.
- * Like implement, the produced artifact is the (now-documented) branch. */
+/* document: produces the (documented) branch. In production a delegate writes
+ * docs onto the branch (README/CHANGELOG/docs/ + inline comments); that live
+ * dispatch is integration-gated (see file header). What this does NOW: captures
+ * the current branch head SHA as the produced artifact, and fails closed if the
+ * repo is unavailable. */
 static wfe_step_result_t exec_document(wfe_ctx *ctx, const wfe_node_t *node)
 {
    (void)ctx;
-   /* Production: dispatch a delegate to document the change on the branch
-    * (README/CHANGELOG/docs/ + inline comments). Integration-gated like the
-    * other delegate-driven blocks; the produced artifact is the branch head. */
-   char base[64] = "", head[64] = "", dhash[65] = "", err[128];
-   wfe_git_freeze(repo_dir(), "HEAD", base, head, dhash, err, sizeof err);
+   char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
+   if (wfe_git_freeze(repo_dir(), "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
+      return wfe_step_failed();
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
-   return wfe_step_advanced(handle, head[0] ? head : dhash, 0.0);
+   return wfe_step_advanced(handle, head, 0.0);
 }
 
 /* freeze: capture the cumulative diff at a stable freeze commit. */
