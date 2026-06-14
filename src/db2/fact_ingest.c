@@ -1,8 +1,14 @@
-/* fact_ingest.c: pattern-first typed-fact ingest pipeline (§6 -> §1). P5.
- * See fact_ingest.h. */
+/* fact_ingest.c: pattern-first typed-fact ingest pipeline (§6 -> §1) + the
+ * per-turn ingress orchestration (§4/§6/§7). P5. See fact_ingest.h. */
 #include "fact_ingest.h"
+#include "fact_lifecycle.h"                     /* db2_fact_retract */
+#include "fact_recall.h"                        /* db2_fact_recall_in_query */
 #include "rel_types_store.h"                    /* db2_fact_commit */
-#include "../headers/memory_extract_patterns.h" /* memory_extract_patterns */
+#include "../headers/aimee.h"                   /* config_t */
+#include "../headers/config.h"                  /* config_load */
+#include "../headers/memory_extract_patterns.h" /* memory_extract_patterns, retraction */
+#include "../headers/memory_pii_gate.h"         /* memory_pii_turn_requests_sensitive */
+#include "../headers/log.h"                     /* LOG_WARN */
 
 #define FI_MAX_TRIPLES 16
 
@@ -30,4 +36,43 @@ int db2_fact_ingest_text(const char *text, fact_authority_t authority, int enabl
          written++;
    }
    return written;
+}
+
+int db2_typed_fact_ingress(const char *query, char *facts_out, size_t facts_cap)
+{
+   if (facts_out && facts_cap)
+      facts_out[0] = '\0';
+   if (!query || !query[0])
+      return 0;
+
+   config_t cfg;
+   config_load(&cfg);
+   if (!cfg.typed_facts_enabled)
+      return 0;
+
+   int requests_sensitive = memory_pii_turn_requests_sensitive(query);
+
+   if (memory_pattern_is_retraction(query))
+   {
+      /* §4: a retraction turn corrects rather than asserts. Retract the named
+       * attribute about the user; a user retraction always wins. An imprecise attr
+       * safely no-ops (retract only affects facts that exist). */
+      char attr[128];
+      if (memory_pattern_possessive_attr(query, attr, sizeof(attr)))
+         (void)db2_fact_retract("user", attr, FACT_AUTHORITY_USER);
+   }
+   else
+   {
+      /* §6 write: extract facts from the turn and route them through the gate. */
+      (void)db2_fact_ingest_text(query, FACT_AUTHORITY_USER, 1);
+   }
+
+   /* §7 read: the user's facts + facts about any entity named in the turn,
+    * PII-gated, into the envelope. */
+   if (!facts_out || !facts_cap)
+      return 0;
+   int fr = db2_fact_recall_in_query(query, requests_sensitive, facts_out, facts_cap);
+   if (fr < 0) /* recall affects prompt content, so a persistent failure is worth surfacing */
+      LOG_WARN("memory", "typed-fact recall failed (db2 unavailable?)");
+   return fr < 0 ? 0 : fr;
 }

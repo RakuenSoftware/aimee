@@ -30,6 +30,14 @@ extern "C"
     * db2_fact_retract() instead of ingesting the turn as new assertions. */
    int db2_fact_ingest_text(const char *text, fact_authority_t authority, int enabled);
 
+   /* The full per-turn typed-fact ingress orchestration (the KB context_block
+    * seam): when config.typed_facts_enabled, run §6 ingest — or §4 retraction on a
+    * retraction-cue turn — then write the §7-PII-gated recall block (the user's
+    * facts + facts about entities named in the turn) into facts_out. No-op with
+    * facts_out="" when the flag is off or the query is empty. Returns the number
+    * of recalled facts (>=0). */
+   int db2_typed_fact_ingress(const char *query, char *facts_out, size_t facts_cap);
+
 #ifdef __cplusplus
 }
 #endif

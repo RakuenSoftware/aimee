@@ -108,11 +108,34 @@ static void test_extract(void)
    printf("  PASS: test_extract\n");
 }
 
+static void test_possessive_attr(void)
+{
+   char a[64];
+   assert(memory_pattern_possessive_attr("forget my email", a, sizeof(a)) == 1);
+   assert(strcmp(a, "email") == 0);
+   assert(memory_pattern_possessive_attr("please forget my favorite color", a, sizeof(a)) == 1);
+   assert(strcmp(a, "favorite color") == 0);
+   /* the value clause after "is" is not part of the attribute. */
+   assert(memory_pattern_possessive_attr("my email is wrong", a, sizeof(a)) == 1);
+   assert(strcmp(a, "email") == 0);
+   /* trailing punctuation / words capped. */
+   assert(memory_pattern_possessive_attr("forget my city.", a, sizeof(a)) == 1);
+   assert(strcmp(a, "city") == 0);
+   /* no "my <attr>" possessive -> 0. */
+   assert(memory_pattern_possessive_attr("that's wrong", a, sizeof(a)) == 0);
+   assert(memory_pattern_possessive_attr("the army is here", a, sizeof(a)) ==
+          0); /* word boundary */
+   assert(memory_pattern_possessive_attr("", a, sizeof(a)) == 0);
+   assert(memory_pattern_possessive_attr(NULL, a, sizeof(a)) == 0);
+   printf("  PASS: test_possessive_attr\n");
+}
+
 int main(void)
 {
    test_classify();
    test_retraction();
    test_extract();
+   test_possessive_attr();
    printf("extract_patterns: all tests passed\n");
    return 0;
 }

@@ -8,11 +8,7 @@
 #include "aimee.h"
 #include "memory_lint.h"
 #include "config.h"
-#include "fact_ingest.h"             /* db2_fact_ingest_text (typed-fact §6 ingress hook) */
-#include "fact_recall.h"             /* db2_fact_recall_block (typed-fact §7 recall) */
-#include "memory_extract_patterns.h" /* memory_pattern_is_retraction */
-#include "memory_pii_gate.h"         /* memory_pii_turn_requests_sensitive */
-#include "log.h"                     /* LOG_WARN */
+#include "fact_ingest.h" /* db2_typed_fact_ingress (typed-fact §4/§6/§7 ingress) */
 #include "decision_log.h"
 #include "memory.h"
 #include "memory_export.h"
@@ -1220,39 +1216,15 @@ cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *b
    if (!resp)
       return NULL;
 
-   /* typed-fact ingress, KB-side where db2 is live (the server has no DB2
-    * connection). Default-off via typed_facts_enabled. */
-   int typed_enabled = 0, requests_sensitive = 0;
-   if (query && query[0])
-   {
-      config_t cfg;
-      config_load(&cfg);
-      typed_enabled = cfg.typed_facts_enabled;
-      if (typed_enabled)
-      {
-         requests_sensitive = memory_pii_turn_requests_sensitive(query);
-         /* §6 write: extract facts from the turn and route them through the typed
-          * gate — unless the turn is a retraction cue (a correction, not an
-          * assertion). */
-         if (!memory_pattern_is_retraction(query))
-            (void)db2_fact_ingest_text(query, FACT_AUTHORITY_USER, 1);
-      }
-   }
+   /* typed-fact ingress (§4/§6/§7), KB-side where db2 is live — the server has no
+    * DB2 connection. Default-off via typed_facts_enabled; writes facts="" when off.
+    * Orchestration lives in fact_ingest so this handler stays focused + small. */
+   char facts[2048] = "";
+   (void)db2_typed_fact_ingress(query, facts, sizeof(facts));
 
    char *block = memory_get_context_block(query ? query : "",
                                           (block_type && block_type[0]) ? block_type : "general",
                                           limit > 0 ? limit : 5);
-
-   /* §7 read: surface current typed facts (PII-gated) into the envelope — the
-    * user's own facts plus facts about any entity named in the turn. Appended
-    * after the memory block. */
-   char facts[2048] = "";
-   if (typed_enabled && query && query[0])
-   {
-      int fr = db2_fact_recall_in_query(query, requests_sensitive, facts, sizeof(facts));
-      if (fr < 0) /* recall affects prompt content, so a persistent failure is worth surfacing */
-         LOG_WARN("memory", "typed-fact recall failed (db2 unavailable?)");
-   }
 
    cJSON_AddStringToObject(resp, "status", "ok");
    if (facts[0])
