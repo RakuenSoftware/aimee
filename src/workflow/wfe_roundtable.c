@@ -7,7 +7,7 @@
 #include <string.h>
 
 #include "cJSON.h"
-#include "lifecycle.h"
+#include "wfe_store.h"
 #include "wfe_def.h"
 #include "wfe_engine.h"
 #include "wfe_iface.h"

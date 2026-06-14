@@ -7,7 +7,7 @@
 #include <sys/stat.h>
 
 #include "db1.h"
-#include "lifecycle.h"
+#include "wfe_store.h"
 #include "wfe_engine.h"
 #include "wfe_iface.h"
 #include "wfe_roundtable.h"

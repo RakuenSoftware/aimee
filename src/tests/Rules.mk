@@ -912,7 +912,7 @@ $(TESTPREFIX)/unit-test-workflow: $(OBJDIR)/tests/test_workflow.o \
 # Workflow engine W2: state machine + engine (DB1-backed).
 $(TESTPREFIX)/unit-test-wfe-engine: $(OBJDIR)/tests/test_wfe_engine.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/lifecycle.o $(OBJDIR)/workflow/wfe_engine.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_engine.o \
                                     $(OBJDIR)/workflow/wfe_def.o $(OBJDIR)/workflow/wfe_iface.o \
                                     $(OBJDIR)/workflow/wfe_validate.o $(OBJDIR)/workflow/wfe_canonical.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
@@ -923,7 +923,7 @@ $(TESTPREFIX)/unit-test-wfe-engine: $(OBJDIR)/tests/test_wfe_engine.o \
 $(TESTPREFIX)/unit-test-wfe-blocks: $(OBJDIR)/tests/test_wfe_blocks.o \
                                     $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                    $(OBJDIR)/db1/lifecycle.o $(OBJDIR)/workflow/wfe_def.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
                                     $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
                                     $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/aimee_home.o \
                                     $(OBJDIR)/util.o $(OBJDIR)/posix/util.o $(OBJDIR)/yaml.o \
@@ -934,7 +934,7 @@ $(TESTPREFIX)/unit-test-wfe-blocks: $(OBJDIR)/tests/test_wfe_blocks.o \
 $(TESTPREFIX)/unit-test-wfe-approval: $(OBJDIR)/tests/test_wfe_approval.o \
                                       $(OBJDIR)/workflow/wfe_approval.o $(OBJDIR)/workflow/wfe_engine.o \
                                       $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                      $(OBJDIR)/db1/lifecycle.o $(OBJDIR)/workflow/wfe_def.o \
+                                      $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
                                       $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
                                       $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/aimee_home.o \
                                       $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
@@ -945,7 +945,7 @@ $(TESTPREFIX)/unit-test-wfe-roundtable: $(OBJDIR)/tests/test_wfe_roundtable.o \
                                         $(OBJDIR)/workflow/wfe_roundtable.o \
                                         $(OBJDIR)/workflow/wfe_verdict.o $(OBJDIR)/workflow/wfe_engine.o \
                                         $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
-                                        $(OBJDIR)/db1/lifecycle.o $(OBJDIR)/workflow/wfe_def.o \
+                                        $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
                                         $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
                                         $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/aimee_home.o \
                                         $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
@@ -956,7 +956,7 @@ $(TESTPREFIX)/unit-test-wfe-autonomy: $(OBJDIR)/tests/test_wfe_autonomy.o \
                                       $(OBJDIR)/workflow/wfe_autonomy.o $(OBJDIR)/workflow/wfe_approval.o \
                                       $(OBJDIR)/workflow/wfe_roundtable.o $(OBJDIR)/workflow/wfe_verdict.o \
                                       $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/db1/db1_init.o \
-                                      $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/lifecycle.o \
+                                      $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/wfe_store.o \
                                       $(OBJDIR)/workflow/wfe_def.o $(OBJDIR)/workflow/wfe_iface.o \
                                       $(OBJDIR)/workflow/wfe_validate.o $(OBJDIR)/workflow/wfe_canonical.o \
                                       $(OBJDIR)/aimee_home.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \

@@ -6,7 +6,7 @@
 #include <string.h>
 
 #include "aimee_home.h"
-#include "lifecycle.h"
+#include "wfe_store.h"
 
 /* Loop-back safety bound (config-overridable in W6). */
 #define WFE_MAX_ATTEMPTS 20

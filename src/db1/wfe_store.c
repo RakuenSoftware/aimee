@@ -1,5 +1,5 @@
-/* db1/lifecycle.c: workflow-engine work-item state + audit log accessors. */
-#include "lifecycle.h"
+/* db1/wfe_store.c: workflow-engine work-item state + audit log accessors. */
+#include "wfe_store.h"
 #include "db1_internal.h"
 
 #include <sqlite3.h>
