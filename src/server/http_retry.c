@@ -9,6 +9,15 @@
 #include <string.h>
 #include <unistd.h>
 
+/* Thread-local progress callback (see http_retry.h). Each connection/turn runs on
+ * its own worker thread, so a thread-local matches the delegate run's lifetime. */
+static _Thread_local http_progress_cb_t g_progress_cb;
+
+void http_set_progress_cb(http_progress_cb_t cb)
+{
+   g_progress_cb = cb;
+}
+
 int http_should_retry(int http_status)
 {
    failover_reason_t reason = failover_classify(NULL, http_status, NULL);
@@ -124,6 +133,12 @@ int http_retry_post_context(const char *url, const char *auth_header, const char
       aimee_log(LOG_INFO, "http_retry", "attempt %d/%d: HTTP %d (provider=%s model=%s)",
                 attempt + 1, effective_max_attempts, http_status, provider ? provider : "?",
                 model ? model : "?");
+
+      /* A completed model attempt is forward progress: refresh the running
+       * delegate's heartbeat so a slow-but-progressing job (any model slower than
+       * the stale-monitor idle threshold) is not auto-cancelled as stalled. */
+      if (g_progress_cb)
+         g_progress_cb();
 
       failover_reason_t reason =
           failover_classify(provider, http_status, response_buf ? *response_buf : NULL);

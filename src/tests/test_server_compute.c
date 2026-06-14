@@ -166,6 +166,15 @@ const char *agent_get_request_vault_principal(void)
    return g_stub_vault_principal;
 }
 
+/* Delegate per-turn heartbeat (server_delegate_monitor.o not linked here). */
+void server_delegate_heartbeat_begin(int job_id)
+{
+   (void)job_id;
+}
+void server_delegate_heartbeat_end(void)
+{
+}
+
 int agent_load_config(agent_config_t *cfg)
 {
    memset(cfg, 0, sizeof(*cfg));

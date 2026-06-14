@@ -1,10 +1,52 @@
 /* test_http_retry.c: unit tests for HTTP retry with exponential backoff */
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "aimee.h"
 #include "failover.h"
 #include "http_retry.h"
+
+/* http_retry_post_context records failover events via interaction_events.o ->
+ * db1_conn; this test binary doesn't link db1. Stub it to NULL so recording
+ * no-ops (the real path guards on a NULL connection). */
+void *db1_conn(void)
+{
+   return NULL;
+}
+
+/* --- progress callback (per-turn delegate heartbeat seam) --- */
+
+static int g_progress_calls;
+static void count_progress(void)
+{
+   g_progress_calls++;
+}
+
+/* The progress callback fires once per HTTP attempt while registered, and not at
+ * all after it is cleared — the seam that lets a slow delegate bump its heartbeat
+ * each turn so the stale-monitor doesn't cancel it. Uses an unreachable endpoint
+ * so each attempt fails fast (connection refused) with a tiny backoff. */
+static void test_progress_cb_fires_per_attempt(void)
+{
+   g_progress_calls = 0;
+   http_set_progress_cb(count_progress);
+   char *resp = NULL;
+   (void)http_retry_post_context("http://127.0.0.1:1/x", NULL, "{}", &resp, 500, NULL, 2, 1, 1,
+                                 "test", "test-model", NULL);
+   free(resp);
+   http_set_progress_cb(NULL);
+   assert(g_progress_calls == 2); /* one per attempt */
+
+   /* Cleared: no further callbacks. */
+   g_progress_calls = 0;
+   resp = NULL;
+   (void)http_retry_post_context("http://127.0.0.1:1/x", NULL, "{}", &resp, 500, NULL, 1, 1, 1,
+                                 "test", "test-model", NULL);
+   free(resp);
+   assert(g_progress_calls == 0);
+   printf("  PASS: test_progress_cb_fires_per_attempt\n");
+}
 
 /* --- http_should_retry tests --- */
 
@@ -207,6 +249,7 @@ int main(void)
    test_failover_status_classification();
    test_failover_priority_and_actions();
    test_provider_specific_failover_classification();
+   test_progress_cb_fires_per_attempt();
 
    printf("all http_retry tests passed.\n");
    return 0;
