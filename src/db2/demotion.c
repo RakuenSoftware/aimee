@@ -55,6 +55,94 @@ int db2_demotion_retrieval_event_write(const char *query_fingerprint, const char
    return 0;
 }
 
+int db2_demotion_retrieval_event_write_turn(const char *turn_id, const char *query_fingerprint,
+                                            const char *role, const int64_t *surfaced_ids,
+                                            int n_surfaced, char *id_out, int id_out_len)
+{
+   char id[64];
+   if (db2_demotion_retrieval_event_write(query_fingerprint, role, surfaced_ids, n_surfaced, id,
+                                          sizeof(id)) != 0)
+      return -1;
+
+   /* Stamp the caller-visible turn_id (single follow-up UPDATE, like the
+    * attribution writer stamps model_version). NOTE: the INSERT + this UPDATE are
+    * not one transaction — a crash between them leaves a NULL-stamped event,
+    * recoverable on the turn's retry (first-wins preserved). On a duplicate
+    * turn_id the partial unique index makes this UPDATE fail; we then return the
+    * AUTHORITATIVE event's id (so callers attribute to the reachable event, not
+    * this orphan) — the closest P1 gets to the P1.5 idempotent merge. */
+   if (turn_id && turn_id[0])
+   {
+      void *conn = db2_conn();
+      if (conn)
+      {
+         char err[256] = "";
+         aimee_pg_stmt_t *st = aimee_pg_prepare(
+             conn, "UPDATE artifacts SET turn_id = ?1 WHERE id = ?2", err, sizeof(err));
+         if (st)
+         {
+            aimee_pg_bind_text(st, "?1", turn_id);
+            aimee_pg_bind_text(st, "?2", id);
+            int rc = aimee_pg_step(st, err, sizeof(err));
+            aimee_pg_finalize(st);
+            if (rc != AIMEE_PG_DONE) /* duplicate turn_id (unique conflict) */
+            {
+               char auth[64];
+               if (db2_demotion_retrieval_event_by_turn(turn_id, auth, sizeof(auth), NULL, 0) == 1)
+               {
+                  if (id_out && id_out_len > 0)
+                     snprintf(id_out, (size_t)id_out_len, "%s", auth);
+                  return 0;
+               }
+            }
+         }
+      }
+   }
+
+   if (id_out && id_out_len > 0)
+      snprintf(id_out, (size_t)id_out_len, "%s", id);
+   return 0;
+}
+
+int db2_demotion_retrieval_event_by_turn(const char *turn_id, char *id_out, int id_out_len,
+                                         char *payload_out, int payload_out_len)
+{
+   if (id_out && id_out_len > 0)
+      id_out[0] = '\0';
+   if (payload_out && payload_out_len > 0)
+      payload_out[0] = '\0';
+   if (!turn_id || !turn_id[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT id, payload FROM artifacts"
+                        " WHERE kind = 'retrieval_event' AND turn_id = ?1 LIMIT 1",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", turn_id);
+   int rc = aimee_pg_step(st, err, sizeof(err));
+   int found = 0;
+   if (rc == AIMEE_PG_ROW)
+   {
+      found = 1;
+      if (id_out && id_out_len > 0)
+         snprintf(id_out, (size_t)id_out_len, "%s", aimee_pg_column_text(st, 0));
+      if (payload_out && payload_out_len > 0)
+         snprintf(payload_out, (size_t)payload_out_len, "%s", aimee_pg_column_text(st, 1));
+   }
+   aimee_pg_finalize(st);
+   /* Distinguish a DB error (-1) from a genuine no-event (0): /v1/audit/trace
+    * must report evidence_unavailable on failure, never a falsely-empty trace. */
+   if (rc == AIMEE_PG_ERR)
+      return -1;
+   return found;
+}
+
 int db2_demotion_retrieval_attribution_write(const char *retrieval_event_id,
                                              int64_t surfaced_row_id, const char *verdict,
                                              double weight)
