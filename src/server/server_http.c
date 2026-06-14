@@ -10,6 +10,7 @@
 #include "server_http.h"
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
+#include "server_tls.h"     /* native TLS termination (phase 1b) */
 #include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
 #include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
 #include <time.h>
@@ -988,6 +989,7 @@ int server_http_route(const char *method, const char *path, const char *body, in
 
 static int g_listen_fd = -1;    /* UDS listener (always bound) */
 static int g_tcp_fd = -1;       /* optional localhost TCP listener */
+static int g_tls_fd = -1;       /* optional native-TLS listener (phase 1b) */
 static char g_bearer[256] = ""; /* configured TCP bearer (empty = none) */
 static int g_rate_limit = 0;    /* TCP requests / 60s (0 = unlimited) */
 static int g_remote_writes = 0; /* aimee.api.remote_writes: SERVER_REMOTE_WRITES_* */
@@ -1337,6 +1339,12 @@ static void *sse_offload_thread(void *arg)
  * case the caller should send an error on fd and not stream. */
 static int sse_offload(int fd, sse_stream_fn fn, const char *id, const char *request_id)
 {
+   /* SSE offload dups the fd to a detached thread; a TLS conn's SSL is owned by
+    * this conn's worker and cannot be shared with the dup (and the dup has no SSL
+    * registered → it would emit plaintext on the TLS socket). Refuse over TLS; the
+    * caller turns this into a 503. SSE-over-TLS is phase 1c. */
+   if (server_conn_io_has_ssl(fd))
+      return -1;
    if (atomic_fetch_add(&g_sse_live, 1) >= g_sse_max)
    {
       atomic_fetch_sub(&g_sse_live, 1);
@@ -1729,56 +1737,10 @@ typedef struct
 {
    int fd;
    int is_tcp;
+   int is_tls;
 } conn_job_t;
 
-static void *conn_worker(void *arg)
-{
-   conn_job_t *j = (conn_job_t *)arg;
-   handle_conn(j->fd, j->is_tcp);
-   close(j->fd);
-   atomic_fetch_sub(&g_conn_live, 1);
-   free(j);
-   return NULL;
-}
-
-/* Hand an accepted connection to a detached worker (which closes fd). Returns 1
- * if offloaded, 0 if the caller should handle it inline (cap hit / no
- * resources). */
-static int conn_offload(int fd, int is_tcp)
-{
-   if (atomic_fetch_add(&g_conn_live, 1) >= CONN_LIVE_MAX)
-   {
-      atomic_fetch_sub(&g_conn_live, 1);
-      return 0;
-   }
-   conn_job_t *j = (conn_job_t *)malloc(sizeof(*j));
-   if (!j)
-   {
-      atomic_fetch_sub(&g_conn_live, 1);
-      return 0;
-   }
-   j->fd = fd;
-   j->is_tcp = is_tcp;
-   pthread_attr_t attr;
-   pthread_attr_t *ap = NULL;
-   if (pthread_attr_init(&attr) == 0)
-   {
-      if (pthread_attr_setstacksize(&attr, (size_t)32 * 1024 * 1024) == 0)
-         ap = &attr;
-   }
-   pthread_t t;
-   int rc = pthread_create(&t, ap, conn_worker, j);
-   if (ap)
-      pthread_attr_destroy(&attr);
-   if (rc != 0)
-   {
-      free(j);
-      atomic_fetch_sub(&g_conn_live, 1);
-      return 0;
-   }
-   pthread_detach(t);
-   return 1;
-}
+#include "server_http_conn_worker.inc"
 
 /* Single accept loop over both listeners: poll the UDS (and the TCP fd when
  * bound), accept whichever is ready, and hand each connection to a per-
@@ -1788,9 +1750,9 @@ static void *listener_thread(void *arg)
    (void)arg;
    while (g_running)
    {
-      struct pollfd pfds[2];
+      struct pollfd pfds[3];
       int n = 0;
-      int uds_idx = -1, tcp_idx = -1;
+      int uds_idx = -1, tcp_idx = -1, tls_idx = -1;
       if (g_listen_fd >= 0)
       {
          pfds[n].fd = g_listen_fd;
@@ -1802,6 +1764,12 @@ static void *listener_thread(void *arg)
          pfds[n].fd = g_tcp_fd;
          pfds[n].events = POLLIN;
          tcp_idx = n++;
+      }
+      if (g_tls_fd >= 0)
+      {
+         pfds[n].fd = g_tls_fd;
+         pfds[n].events = POLLIN;
+         tls_idx = n++;
       }
       if (n == 0)
          break;
@@ -1819,7 +1787,7 @@ static void *listener_thread(void *arg)
       if (uds_idx >= 0 && (pfds[uds_idx].revents & POLLIN))
       {
          int fd = accept(g_listen_fd, NULL, NULL);
-         if (fd >= 0 && !conn_offload(fd, 0))
+         if (fd >= 0 && !conn_offload(fd, 0, 0))
          {
             handle_conn(fd, 0);
             close(fd);
@@ -1828,11 +1796,19 @@ static void *listener_thread(void *arg)
       if (tcp_idx >= 0 && (pfds[tcp_idx].revents & POLLIN))
       {
          int fd = accept(g_tcp_fd, NULL, NULL);
-         if (fd >= 0 && !conn_offload(fd, 1))
+         if (fd >= 0 && !conn_offload(fd, 1, 0))
          {
             handle_conn(fd, 1);
             close(fd);
          }
+      }
+      if (tls_idx >= 0 && (pfds[tls_idx].revents & POLLIN))
+      {
+         int fd = accept(g_tls_fd, NULL, NULL);
+         /* TLS conns must run in a worker (the handshake + SSL live there); if the
+          * conn cap is hit we drop rather than handle inline (no SSL here). */
+         if (fd >= 0 && !conn_offload(fd, 1, 1))
+            close(fd);
       }
    }
    return NULL;
@@ -1880,7 +1856,7 @@ static int tcp_listen(int tcp_port, const char *bearer_token)
    return fd;
 }
 
-int server_http_start(const char *uds_path, int tcp_port, const char *bearer_token,
+int server_http_start(const char *uds_path, int tcp_port, int tls_port, const char *bearer_token,
                       int rate_limit_per_min, int remote_writes)
 {
    if (g_running || g_listen_fd >= 0)
@@ -1914,6 +1890,20 @@ int server_http_start(const char *uds_path, int tcp_port, const char *bearer_tok
    g_rate_state.window_start = 0;
    g_rate_state.count = 0;
    g_tcp_fd = tcp_listen(tcp_port, bearer_token);
+
+   /* Optional native-TLS listener (phase 1b): terminate TLS in-process from
+    * <config>/tls/server.{crt,key}. A TLS+bearer conn is the vault's attested
+    * write path. */
+   if (tls_port > 0)
+   {
+      if (server_tls_init_default() == 0)
+         g_tls_fd = tcp_listen(tls_port, bearer_token);
+      else
+         /* This is the vault's attested write path — make a misconfigured cert/key
+          * loud (the UDS listener still comes up; the operator must fix the cert). */
+         LOG_ERROR("server.http", "tls_port=%d set but TLS cert/key not loadable; TLS DISABLED",
+                   tls_port);
+   }
 
    g_running = 1;
    /* The listener thread runs dispatch-backed /v1 routes inline (rh_dispatch_op
@@ -1971,5 +1961,11 @@ void server_http_stop(void)
       shutdown(g_tcp_fd, SHUT_RDWR);
       close(g_tcp_fd);
       g_tcp_fd = -1;
+   }
+   if (g_tls_fd >= 0)
+   {
+      shutdown(g_tls_fd, SHUT_RDWR);
+      close(g_tls_fd);
+      g_tls_fd = -1;
    }
 }
