@@ -182,6 +182,35 @@ static int vault_conn_is_attested(const server_conn_t *conn)
                    conn->attested_transport == ATTEST_TLS_BEARER);
 }
 
+void vault_audit_server_write(const server_conn_t *conn, const char *agent, const char *cred,
+                              const char *secret)
+{
+   char fp[16];
+   vault_cred_fingerprint(secret ? secret : "", fp, sizeof(fp));
+   /* Explicit switch so a future attested transport cannot silently fall through
+    * to a wrong label; only attested transports reach a server-vault write. */
+   const char *transport;
+   switch (conn ? conn->attested_transport : ATTEST_NONE)
+   {
+   case ATTEST_WEBCHAT_TRUSTED:
+      transport = "webchat";
+      break;
+   case ATTEST_TLS_BEARER:
+      transport = "tls";
+      break;
+   case ATTEST_UDS_PEERCRED:
+      transport = "uds";
+      break;
+   default:
+      transport = "unknown";
+      break;
+   }
+   aimee_log(LOG_WARN, "vault.audit",
+             "server-principal write by=%s transport=%s agent=%s cred=%s fp=%s",
+             (conn && conn->vault_principal[0]) ? conn->vault_principal : "(server)", transport,
+             agent ? agent : "?", cred ? cred : "?", fp);
+}
+
 /* POST /v1/vault/set_server — store a CLIENT-SUPPLIED credential under the
  * server-owned principal (autonomous decrypt). Gated (D2b/D2c): an attested
  * transport AND the vault:write:server capability for the caller's principal.
@@ -212,16 +241,7 @@ int handle_vault_set_server(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (st != VAULT_OK)
       return vault_send_status_error(conn, st);
 
-   char fp[16];
-   vault_cred_fingerprint(js->valuestring, fp, sizeof(fp));
-   /* vault_conn_is_attested guaranteed an attested transport — log which one. */
-   const char *transport = conn->attested_transport == ATTEST_WEBCHAT_TRUSTED ? "webchat"
-                           : conn->attested_transport == ATTEST_TLS_BEARER    ? "tls"
-                                                                              : "uds";
-   aimee_log(LOG_WARN, "vault.audit",
-             "server-principal write by=%s transport=%s agent=%s cred=%s fp=%s",
-             conn->vault_principal[0] ? conn->vault_principal : "(server)", transport,
-             ja->valuestring, jc->valuestring, fp);
+   vault_audit_server_write(conn, ja->valuestring, jc->valuestring, js->valuestring);
 
    cJSON *resp = cJSON_CreateObject();
    if (!resp)

@@ -28,8 +28,14 @@ attested_transport_t vault_principal_resolve(int is_tcp, int is_tls, long peer_u
     * (or a misconfigured webchat forwarding an end-user header) and must NOT be
     * silently promoted to server-principal authority just because the socket has
     * TLS — that would let any webchat end-user mint a server credential. Such a
-    * tokenless webuser is refused (classified by raw transport, no server write). */
-   int tls_bearer = is_tls && !webuser_asserted;
+    * tokenless webuser is refused (classified by raw transport, no server write).
+    *
+    * Gated on is_tcp as well: TLS_BEARER is a NETWORK provisioning channel. A
+    * local UDS fd never carries an SSL handle (only the network listener wraps
+    * TLS), but requiring is_tcp makes that intent explicit and fail-closed — a
+    * (misconfigured) UDS+SSL conn falls through to the kernel-attested uid: path
+    * rather than gaining bearer-only server-write authority. */
+   int tls_bearer = is_tcp && is_tls && !webuser_asserted;
 
    /* A webuser assertion is honored ONLY under the server.token trust boundary
     * (the secret only the webchat backend holds). Asserted WITHOUT a valid token

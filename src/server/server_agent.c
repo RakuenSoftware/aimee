@@ -536,6 +536,11 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                    conn, "vault locked: run `aimee vault unlock` before adding a key", NULL);
             return server_send_error(conn, "could not store credential in the vault", NULL);
          }
+         /* A server-principal write (no per-user principal) is a credential-minting
+          * event: audit it identically to handle_vault_set_server so it is never
+          * silent. A per-user dual-access write is the caller's own vault. */
+         if (!principal)
+            vault_audit_server_write(conn, ag->name, VAULT_API_KEY_CRED, key);
          ag->api_key[0] = '\0';      /* the secret lives only in the vault */
          ag->api_key_disk[0] = '\0'; /* and nothing goes to agents.json */
       }
