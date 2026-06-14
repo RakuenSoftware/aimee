@@ -90,6 +90,27 @@ int main(void)
    assert(semantic_count("Wilhelmina") >= 1); /* stored under the canonical name */
    assert(semantic_count("Billie") == 0);     /* not under the alias */
 
+   /* a SECOND alias collapses to the same node; a SCALAR object is stored verbatim
+    * (only entity-kind endpoints are canonicalized). */
+   assert(db2_entity_alias_bind("Will", rid, 0) == 0);
+   assert(db2_fact_commit("Will", NODE_PERSON, "has_role", "engineer", NODE_SCALAR,
+                          FACT_AUTHORITY_MODEL, 1) == FACT_GATE_ACCEPT);
+   edge_t we[8];
+   int wn = db2_entity_edges_semantic_by_entity("Wilhelmina", we, 8);
+   assert(wn == 2); /* works_for + has_role, both under the canonical node */
+   int found_role = 0;
+   for (int i = 0; i < wn; i++)
+      if (strcmp(we[i].relation, "has_role") == 0)
+      {
+         assert(strcmp(we[i].target, "engineer") == 0); /* scalar stored verbatim */
+         found_role = 1;
+      }
+   assert(found_role);
+   /* re-commit via an alias bumps weight on the canonical edge, no new row. */
+   assert(db2_fact_commit("Billie", NODE_PERSON, "works_for", "acme", NODE_ORG,
+                          FACT_AUTHORITY_MODEL, 1) == FACT_GATE_ACCEPT);
+   assert(db2_entity_edges_semantic_by_entity("Wilhelmina", we, 8) == 2);
+
    db2_test_shim_close();
    printf("rel_types_store: all tests passed\n");
    return 0;

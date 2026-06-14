@@ -13,6 +13,9 @@
 #include <string.h>
 
 #define RTS_ERRBUF 256
+/* Entity endpoint / alias name width — matches entity_aliases.name and the
+ * edge source/target columns (db2_entity_aliases_for writes into char[128]). */
+#define FACT_ENDPOINT_MAX 128
 
 /* Serialize a kinds list to comma-separated canonical kind text (for the table;
  * validation itself uses the in-code seed). */
@@ -147,7 +150,7 @@ static void fact_canonical_endpoint(const char *in, memory_node_kind_t kind, cha
    if (fact_kind_is_entity(kind))
    {
       int64_t cid = db2_entity_register_named(in, (int)kind); /* get-or-create */
-      char names[1][128];
+      char names[1][FACT_ENDPOINT_MAX];
       if (cid > 0 && db2_entity_aliases_for(cid, names, 1) == 1 && names[0][0])
       {
          snprintf(out, cap, "%s", names[0]); /* canonical (preferred) name */
@@ -180,7 +183,7 @@ fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_
    double conf = fact_class_confidence(cls);
 
    /* §3: canonicalize entity-kind endpoints so aliased names share one node. */
-   char csrc[128], ctgt[128];
+   char csrc[FACT_ENDPOINT_MAX], ctgt[FACT_ENDPOINT_MAX];
    fact_canonical_endpoint(source, head_kind, csrc, sizeof(csrc));
    fact_canonical_endpoint(target, tail_kind, ctgt, sizeof(ctgt));
 
