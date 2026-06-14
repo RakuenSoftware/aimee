@@ -6,8 +6,9 @@
 #include <stdio.h>
 #include <string.h>
 
-attested_transport_t vault_principal_resolve(int is_tcp, long peer_uid, const char *webuser,
-                                             int webuser_token_ok, char *out, size_t out_len)
+attested_transport_t vault_principal_resolve(int is_tcp, int is_tls, long peer_uid,
+                                             const char *webuser, int webuser_token_ok, char *out,
+                                             size_t out_len)
 {
    if (out && out_len)
       out[0] = '\0';
@@ -15,6 +16,26 @@ attested_transport_t vault_principal_resolve(int is_tcp, long peer_uid, const ch
       return ATTEST_NONE;
 
    int webuser_asserted = webuser && webuser[0];
+   /* A bearer-authorized native-TLS conn (confidential channel) is the operator's
+    * authority for server-principal writes — but it carries no OS-user/webuser
+    * identity, so it gets the same EMPTY per-user principal as plain TCP. The
+    * distinct classification is what later authorizes server-principal writes
+    * (vault_capability_server_write_allowed); a TCP_BEARER (plaintext) does not.
+    *
+    * TLS_BEARER is granted ONLY to a conn that asserts NO webuser at all (a clean
+    * operator/CLI connection). A conn that DOES assert a webuser is a webchat hop:
+    * with a valid token it wins the per-user vault below; without one it is a spoof
+    * (or a misconfigured webchat forwarding an end-user header) and must NOT be
+    * silently promoted to server-principal authority just because the socket has
+    * TLS — that would let any webchat end-user mint a server credential. Such a
+    * tokenless webuser is refused (classified by raw transport, no server write).
+    *
+    * Gated on is_tcp as well: TLS_BEARER is a NETWORK provisioning channel. A
+    * local UDS fd never carries an SSL handle (only the network listener wraps
+    * TLS), but requiring is_tcp makes that intent explicit and fail-closed — a
+    * (misconfigured) UDS+SSL conn falls through to the kernel-attested uid: path
+    * rather than gaining bearer-only server-write authority. */
+   int tls_bearer = is_tcp && is_tls && !webuser_asserted;
 
    /* A webuser assertion is honored ONLY under the server.token trust boundary
     * (the secret only the webchat backend holds). Asserted WITHOUT a valid token
@@ -30,7 +51,10 @@ attested_transport_t vault_principal_resolve(int is_tcp, long peer_uid, const ch
     * principal entirely — it must NOT fall through to the uid: path, or a
     * request from the shared webchat service account would silently receive that
     * account's uid: vault, leaking credentials across webchat users (the whole
-    * reason the webuser: principal exists). Classify by transport, no vault. */
+    * reason the webuser: principal exists). It is likewise NOT promoted to
+    * TLS_BEARER (tls_bearer is false whenever a webuser is asserted): a tokenless
+    * webuser never earns server-principal authority. Classify by raw transport
+    * (no server write), no vault. */
    if (webuser_asserted)
       return is_tcp ? ATTEST_TCP_BEARER : ATTEST_UDS_PEERCRED;
 
@@ -45,8 +69,9 @@ attested_transport_t vault_principal_resolve(int is_tcp, long peer_uid, const ch
       return ATTEST_UDS_PEERCRED;
    }
 
-   /* Plain TCP: bearer-authorized at the network edge but with no OS-user
-    * attestation. Direct-TCP multi-user vault is out of scope (D17) -> no
-    * principal. */
-   return ATTEST_TCP_BEARER;
+   /* TCP at the network edge, bearer-authorized but no OS-user attestation. A
+    * native-TLS conn (confidential channel) is the operator-attested write path;
+    * plaintext TCP is not (D2b). Direct-TCP multi-user per-user vault is still out
+    * of scope (D17) -> empty principal either way. */
+   return tls_bearer ? ATTEST_TLS_BEARER : ATTEST_TCP_BEARER;
 }
