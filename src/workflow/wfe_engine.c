@@ -262,18 +262,32 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
    out->last_status = r.status;
    if (r.cost_usd > 0)
       db1_work_item_add_cost(work_item_id, r.cost_usd);
+   /* post-executor budget re-check: a single step's cost can push over the cap,
+    * which the pre-flight (before the executor) cannot see. Bound overshoot to
+    * one step by parking now. */
+   int over_budget =
+       (wi.work_item_max_cost_usd > 0 &&
+        wi.cum_cost_usd + (r.cost_usd > 0 ? r.cost_usd : 0) >= wi.work_item_max_cost_usd);
 
    if (r.status == WFE_STEP_PENDING)
    {
-      db1_work_item_set_pause(work_item_id, pause_name(r.pause_reason), node->id);
-      db1_lifecycle_event_add(work_item_id, node->id, "pause", "engine", pause_name(r.pause_reason),
-                              r.content_hash, r.cost_usd);
+      /* a PENDING step MUST carry a reason; never write an empty pause_reason
+       * (an empty reason reads as "not parked" on the next advance -> infinite
+       * re-run of a gate). Fail closed to "unspecified". */
+      const char *pr = pause_name(r.pause_reason);
+      if (!pr[0])
+         pr = "unspecified";
+      db1_work_item_set_pause(work_item_id, pr, node->id);
+      db1_lifecycle_event_add(work_item_id, node->id, "pause", "engine", pr, r.content_hash,
+                              r.cost_usd);
       out->pause_reason = r.pause_reason;
       snprintf(out->next_stage, sizeof out->next_stage, "%s", node->id);
    }
    else if (r.status == WFE_STEP_FAILED)
    {
-      db1_work_item_set_pause(work_item_id, "", "failed");
+      /* park with a NON-empty pause_reason so the next advance treats it as
+       * parked (an empty reason reads as "not parked" -> re-runs the node). */
+      db1_work_item_set_pause(work_item_id, "failed", node->id);
       db1_lifecycle_event_add(work_item_id, node->id, "failed", "engine", "", "", r.cost_usd);
    }
    else
@@ -301,7 +315,7 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
          if (r.status == WFE_STEP_LOOPED)
          {
             int att = db1_stage_attempt_inc(work_item_id, next);
-            if (att > WFE_MAX_ATTEMPTS)
+            if (att >= WFE_MAX_ATTEMPTS)
             {
                db1_work_item_set_pause(work_item_id, "pending_human", next);
                db1_lifecycle_event_add(work_item_id, node->id, "pause", "engine", "max_attempts",
@@ -320,6 +334,16 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
                                  r.status == WFE_STEP_LOOPED ? "loop" : "advance", "engine", next,
                                  r.content_hash, r.cost_usd);
          snprintf(out->next_stage, sizeof out->next_stage, "%s", next);
+         if (over_budget)
+         {
+            /* the step advanced but its cost crossed the cap: park before the
+             * next stage so a human must resume --budget-bump. */
+            db1_work_item_set_pause(work_item_id, "budget_exceeded", next);
+            db1_lifecycle_event_add(work_item_id, next, "pause", "engine", "budget_exceeded", "",
+                                    0);
+            out->last_status = WFE_STEP_PENDING;
+            out->pause_reason = WFE_PAUSE_BUDGET_EXCEEDED;
+         }
       }
    }
 

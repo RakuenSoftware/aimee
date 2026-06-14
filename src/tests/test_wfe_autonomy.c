@@ -136,7 +136,7 @@ int main(void)
       db1_work_item_t wi;
       assert(db1_work_item_get(id, &wi) == 1);
       assert(strcmp(wi.pause_reason, "pending_human") == 0);
-      assert(wfe_gate_override(id, "approve", "ship it", err, sizeof err) == 0);
+      assert(wfe_gate_override(id, "approve", "alice", "ship it", err, sizeof err) == 0);
       assert(wfe_engine_run(id, err, sizeof err) == 0);
       assert(db1_work_item_get(id, &wi) == 1);
       assert(strcmp(wi.state, "accepted") == 0);
@@ -150,7 +150,10 @@ int main(void)
       int forced = 0;
       for (int k = 0; k < WFE_MAX_OVERRIDES + 1; k++)
       {
-         int rc = wfe_gate_override(id, "approve", "x", err, sizeof err);
+         /* each override clears the pause; re-park (as if the gate re-fired after
+          * a stale approval) so the next override is on a parked item. */
+         db1_work_item_set_pause(id, "pending_human", "approve");
+         int rc = wfe_gate_override(id, "approve", "alice", "x", err, sizeof err);
          if (rc == 1)
             forced = 1;
       }

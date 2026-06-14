@@ -21,7 +21,7 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen);
  * run advances. On the (WFE_MAX_OVERRIDES+1)th override the work item is forced
  * to terminal `rejected`. Returns 0 on success, 1 if it forced rejection, -1 on
  * error. */
-int wfe_gate_override(const char *work_item_id, const char *gate, const char *reason, char *err,
-                      size_t errlen);
+int wfe_gate_override(const char *work_item_id, const char *gate, const char *actor,
+                      const char *reason, char *err, size_t errlen);
 
 #endif /* DEC_WFE_AUTONOMY_H */

@@ -23,7 +23,10 @@ static int human_gate_auto_ok(const wfe_node_t *node)
        node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "optional") : NULL;
    if (policy && cJSON_IsString(policy) && strcmp(policy->valuestring, "preauthorized") == 0)
       return 1;
-   if (optional && cJSON_IsTrue(optional))
+   /* accept optional written as bool/int/string (YAML emitters vary) */
+   if (optional &&
+       (cJSON_IsTrue(optional) || (cJSON_IsNumber(optional) && optional->valuedouble != 0) ||
+        (cJSON_IsString(optional) && strcasecmp(optional->valuestring, "true") == 0)))
       return 1;
    return 0;
 }
@@ -63,7 +66,11 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
        * a forged approval.) */
       if (wfe_approval_record(work_item_id, wi.current_stage, wi.content_hash,
                               "autonomous-preauth") != 0)
-         return 0;
+      {
+         snprintf(err, errlen, "autonomy: could not record preauth approval at '%s'",
+                  wi.current_stage);
+         return -1; /* surface the failure; do not silently park forever */
+      }
       db1_lifecycle_event_add(work_item_id, wi.current_stage, "resume", "autonomous",
                               "preauthorized", wi.content_hash, 0);
       db1_work_item_clear_pause(work_item_id);
@@ -72,13 +79,25 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
    return -1;
 }
 
-int wfe_gate_override(const char *work_item_id, const char *gate, const char *reason, char *err,
-                      size_t errlen)
+int wfe_gate_override(const char *work_item_id, const char *gate, const char *actor,
+                      const char *reason, char *err, size_t errlen)
 {
+   /* the override is attributed to the authenticated caller; the call site (CLI /
+    * v1) must pass the real principal — it is bound into the approval MAC. */
+   const char *act = (actor && actor[0]) ? actor : "user";
    db1_work_item_t wi;
    if (db1_work_item_get(work_item_id, &wi) != 1)
    {
       snprintf(err, errlen, "unknown work item");
+      return -1;
+   }
+   /* override is only meaningful on a PARKED, active work item — refuse to
+    * record an override approval against an active/terminal item (otherwise a
+    * caller could mint approvals + burn the cap on a work item not at a gate). */
+   if (strcmp(wi.state, "active") != 0 || !wi.pause_reason[0])
+   {
+      snprintf(err, errlen, "work item is not parked at a gate (state=%s pause=%s)", wi.state,
+               wi.pause_reason);
       return -1;
    }
    /* override only the gate the work item is actually parked at, and never a
@@ -104,18 +123,18 @@ int wfe_gate_override(const char *work_item_id, const char *gate, const char *re
    if (wi.override_count >= WFE_MAX_OVERRIDES)
    {
       db1_work_item_set_terminal(work_item_id, "rejected");
-      db1_lifecycle_event_add(work_item_id, gate, "rejected", "user", "override cap reached", "",
-                              0);
+      db1_lifecycle_event_add(work_item_id, gate, "rejected", act, "override cap reached", "", 0);
       return 1;
    }
-   /* an override is a recorded human approval bound to the current artifact */
-   if (wfe_approval_record(work_item_id, gate, wi.content_hash, "user-override") != 0)
+   /* an override is a recorded human approval bound to the current artifact +
+    * the authenticated actor (the MAC covers actor). */
+   if (wfe_approval_record(work_item_id, gate, wi.content_hash, act) != 0)
    {
       snprintf(err, errlen, "could not sign override (approval key?)");
       return -1;
    }
    db1_work_item_inc_override(work_item_id);
-   db1_lifecycle_event_add(work_item_id, gate, "override", "user", reason ? reason : "",
+   db1_lifecycle_event_add(work_item_id, gate, "override", act, reason ? reason : "",
                            wi.content_hash, 0);
    db1_work_item_clear_pause(work_item_id);
    return 0;

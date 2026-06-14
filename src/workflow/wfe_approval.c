@@ -27,19 +27,22 @@ static int load_key(unsigned char key[WFE_KEY_LEN])
 {
    char path[1024];
    wfe_approval_key_path(path, sizeof path);
-   /* Refuse a key file with looser-than-0600 perms (a local user could read the
-    * HMAC secret and forge approvals). */
+   /* Symlink-safe, TOCTOU-free: open with O_NOFOLLOW, then fstat the actual fd
+    * (not a path) and refuse anything with looser-than-0600 perms, a non-regular
+    * file, or extra hardlinks — a local attacker must not be able to substitute
+    * the HMAC trust root. */
+   int fd = open(path, O_RDONLY | O_NOFOLLOW);
+   if (fd < 0)
+      return -1;
    struct stat st;
-   if (stat(path, &st) != 0)
+   if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || (st.st_mode & 0077) || st.st_nlink != 1)
+   {
+      close(fd);
       return -1;
-   if (st.st_mode & 0077)
-      return -1;
-   FILE *f = fopen(path, "rb");
-   if (!f)
-      return -1;
-   size_t n = fread(key, 1, WFE_KEY_LEN, f);
-   fclose(f);
-   return n == WFE_KEY_LEN ? 0 : -1;
+   }
+   ssize_t n = read(fd, key, WFE_KEY_LEN);
+   close(fd);
+   return n == (ssize_t)WFE_KEY_LEN ? 0 : -1;
 }
 
 int wfe_approval_ensure_key(void)
