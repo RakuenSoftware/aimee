@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 51
+Total commands: 52
 
 ## Core commands
 
@@ -522,6 +522,20 @@ Subcommands:
   gc               Release stale claims
   sync-proposals   Close items whose proposal moved out of pending/
   stats            Show queue statistics
+```
+
+### `aimee workflow`
+
+Inspect & validate development workflows.
+
+Subcommands:
+
+```
+  blocks                 List the composable block catalog
+  validate <file.yaml>   Typed-graph validate a workflow definition
+  show <file.yaml>       Print the canonical form + version hash
+  list                   List workflows under $AIMEE_HOME/workflows
+  new <file.yaml>        Scaffold a starter workflow
 ```
 
 ### `aimee workspace`
