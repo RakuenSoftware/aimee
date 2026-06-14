@@ -8,6 +8,10 @@
 #include <openssl/err.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/time.h>
 
 static SSL_CTX *g_ctx = NULL;
 static pthread_mutex_t g_ctx_mu = PTHREAD_MUTEX_INITIALIZER;
@@ -32,12 +36,21 @@ int server_tls_init(const char *cert_path, const char *key_path)
    /* Modern floor; no client-cert verification (plain server TLS — the bearer is
     * the caller's authentication, the TLS is the channel). */
    SSL_CTX_set_min_proto_version(ctx, TLS1_2_VERSION);
+   /* The private key authenticates the server; warn loudly if it is readable by
+    * group/other (defense-in-depth — the operator should 0600 it). */
+   struct stat kst;
+   if (stat(key_path, &kst) == 0 && (kst.st_mode & 077))
+      aimee_log(LOG_WARN, "server.tls",
+                "TLS private key %s is group/world-readable (mode %o) — "
+                "restrict it to 0600",
+                key_path, kst.st_mode & 0777);
+
    if (SSL_CTX_use_certificate_chain_file(ctx, cert_path) != 1 ||
        SSL_CTX_use_PrivateKey_file(ctx, key_path, SSL_FILETYPE_PEM) != 1 ||
        SSL_CTX_check_private_key(ctx) != 1)
    {
-      aimee_log(LOG_WARN, "server.tls", "failed to load TLS cert/key (%s, %s)", cert_path,
-                key_path);
+      aimee_log(LOG_WARN, "server.tls", "failed to load TLS cert/key (%s, %s): %s", cert_path,
+                key_path, ERR_error_string(ERR_get_error(), NULL));
       SSL_CTX_free(ctx);
       pthread_mutex_unlock(&g_ctx_mu);
       return -1;
@@ -58,6 +71,11 @@ SSL *server_tls_accept(int fd)
    SSL_CTX *ctx = g_ctx;
    if (!ctx || fd < 0)
       return NULL;
+   /* Bound the handshake (and subsequent blocking reads) so a stalled peer cannot
+    * pin a per-conn worker thread indefinitely (the conn cap is small). */
+   struct timeval tv = {.tv_sec = 30, .tv_usec = 0};
+   setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+   setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
    SSL *ssl = SSL_new(ctx);
    if (!ssl)
       return NULL;

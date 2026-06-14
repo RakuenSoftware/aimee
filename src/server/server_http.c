@@ -1898,8 +1898,10 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
       if (server_tls_init_default() == 0)
          g_tls_fd = tcp_listen(tls_port, bearer_token);
       else
-         LOG_WARN("server.http", "tls_port=%d set but TLS cert/key not loadable; TLS disabled",
-                  tls_port);
+         /* This is the vault's attested write path — make a misconfigured cert/key
+          * loud (the UDS listener still comes up; the operator must fix the cert). */
+         LOG_ERROR("server.http", "tls_port=%d set but TLS cert/key not loadable; TLS DISABLED",
+                   tls_port);
    }
 
    g_running = 1;
