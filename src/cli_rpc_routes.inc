@@ -7399,6 +7399,50 @@ cJSON *cli_v1_dispatch_local(cJSON *req, int timeout_ms)
    return resp;
 }
 
+/* cli_v1_dispatch: like cli_v1_dispatch_local, but routes to a configured remote
+ * /v1 endpoint when one is set (cli_rpc_client_endpoint), falling back to the
+ * co-located local UDS otherwise. Flows that must run against the SAME server that
+ * will STORE the result — e.g. `agent setup` (codex-auth.json + the server vault) —
+ * use this, since on a thin-client deployment that server is the remote, not a
+ * local one. */
+cJSON *cli_v1_dispatch(cJSON *req, int timeout_ms)
+{
+   if (!req)
+      return NULL;
+   cJSON *mj = cJSON_GetObjectItemCaseSensitive(req, "method");
+   const char *method = (cJSON_IsString(mj) && mj->valuestring) ? mj->valuestring : NULL;
+   if (!method)
+      return NULL;
+   if (timeout_ms <= 0)
+      timeout_ms = CLIENT_DEFAULT_TIMEOUT_MS;
+
+   const char *async_verb = NULL;
+   const char *async_path = cli_v1_async_route_for_method(method, &async_verb);
+   const char *rest_verb = NULL;
+   const char *rest_path = NULL;
+   char pathid_buf[1100];
+   if (!async_path)
+      rest_path = cli_v1_pathid_build(method, req, pathid_buf, sizeof(pathid_buf), &rest_verb);
+   if (!async_path && !rest_path)
+      rest_path = cli_v1_route_for_method(method, &rest_verb);
+
+   char *body = cJSON_PrintUnformatted(req);
+   if (!body)
+      return NULL;
+   char *remote = cli_rpc_client_endpoint();
+   char *bearer = remote ? cli_rpc_client_bearer() : NULL;
+   cJSON *resp = NULL;
+   int status = 0;
+   if (async_path)
+      resp = cli_v1_run_and_poll(remote, bearer, async_verb, async_path, body, timeout_ms);
+   else if (rest_path)
+      resp = cli_v1_send(remote, bearer, rest_verb, rest_path, body, timeout_ms, &status);
+   free(bearer);
+   free(remote);
+   free(body);
+   return resp;
+}
+
 /* --- Main RPC forward function --- */
 
 int cli_rpc_forward(const char *socket_path, const cli_rpc_route_t *route, int json_output,
