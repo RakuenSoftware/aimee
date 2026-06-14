@@ -234,6 +234,61 @@ static int is_my_word(const char *text, int i)
    return isspace((unsigned char)text[i + 2]);
 }
 
+/* Case-insensitive: does `needle` start at hay[pos]? NUL-safe (a short hay stops
+ * the compare on its terminator). */
+static int ci_starts_at(const char *hay, int pos, const char *needle)
+{
+   for (int k = 0; needle[k]; k++)
+      if (tolower((unsigned char)hay[pos + k]) != tolower((unsigned char)needle[k]))
+         return 0;
+   return 1;
+}
+
+int memory_pattern_possessive_attr(const char *text, char *out, size_t out_len)
+{
+   if (!text || !out || out_len == 0)
+      return 0;
+   out[0] = '\0';
+   int len = (int)strlen(text);
+   for (int i = 0; i < len; i++)
+   {
+      if (!is_my_word(text, i))
+         continue;
+      int s = i + 2;
+      while (s < len && isspace((unsigned char)text[s]))
+         s++;
+      /* Read the attribute up to a sentence terminator, a " is "/" was " (the
+       * value clause we don't want), or after ~3 words (avoid grabbing a whole
+       * sentence like "forget my email and the rest"). */
+      int e = s, words = 0, in_word = 0;
+      while (e < len)
+      {
+         char c = text[e];
+         if (c == '.' || c == '!' || c == '?' || c == '\n')
+            break;
+         if (c == ' ')
+         {
+            if (ci_starts_at(text, e, " is ") || ci_starts_at(text, e, " was "))
+               break;
+            if (in_word)
+            {
+               if (++words >= 3)
+                  break;
+               in_word = 0;
+            }
+         }
+         else
+         {
+            in_word = 1;
+         }
+         e++;
+      }
+      copy_trimmed(out, out_len, text + s, e - s);
+      return out[0] ? 1 : 0;
+   }
+   return 0;
+}
+
 int memory_extract_patterns(const char *text, pattern_triple_t *out, int max)
 {
    if (!text || !out || max <= 0)

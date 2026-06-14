@@ -46,6 +46,15 @@ extern "C"
     * "ignore that"), else 0. Case-insensitive. NULL/empty -> 0. */
    int memory_pattern_is_retraction(const char *text);
 
+   /* The attribute a retraction turn refers to: the word(s) after "my " up to a
+    * sentence terminator, " is "/" was ", or ~3 words. E.g. "forget my email" ->
+    * "email", "forget my favorite color please" -> "favorite color". Writes the
+    * raw attribute into out (the caller normalizes it via the rel_type path).
+    * Returns 1 when a "my <attr>" possessive is present, else 0. Pairs with
+    * memory_pattern_is_retraction to drive db2_fact_retract; because retraction
+    * only affects facts that actually exist, an imprecise attr safely no-ops. */
+   int memory_pattern_possessive_attr(const char *text, char *out, size_t out_len);
+
    /* A candidate triple extracted before the model. rel_type is a normalized
     * guess; the §1 gate still decides whether it is written and how. */
    typedef struct
