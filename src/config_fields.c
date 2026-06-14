@@ -189,6 +189,7 @@ const config_field_t config_fields[] = {
     {"kb_mining_enabled", offsetof(config_t, kb_mining_enabled), sizeof(int), 0, CFG_BOOL},
     {"kb_mining_min_poll_s", offsetof(config_t, kb_mining_min_poll_s), sizeof(int), 0, CFG_INT},
     {"verify_enabled", offsetof(config_t, verify_enabled), sizeof(int), 1, CFG_BOOL},
+    {"vault_only", offsetof(config_t, vault_only), sizeof(int), 1, CFG_BOOL},
     {"claude_cli_delegate_enabled", offsetof(config_t, claude_cli_delegate_enabled), sizeof(int), 1,
      CFG_BOOL},
     {"verify_cross_project", offsetof(config_t, verify_cross_project), sizeof(int), 1, CFG_BOOL},

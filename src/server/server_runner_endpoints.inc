@@ -345,6 +345,21 @@ int handle_index_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_session_credentials(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
+   /* WP-4/D11: when vault_only is set, the legacy client RAM-push path is retired
+    * — the server vault is the sole credential source. Reject explicitly so an
+    * un-upgraded thin client gets a clear error instead of silently relying on a
+    * push that no longer authenticates anything. */
+   {
+      config_t vc;
+      config_load(&vc);
+      if (vc.vault_only)
+         return server_send_error(
+             conn,
+             "session.credentials disabled: vault_only is set — the server vault is the sole "
+             "credential source (provision with `aimee vault set-server` / `aimee agent key "
+             "import`)",
+             NULL);
+   }
    const char *sid = jo_str(req, "session_id", NULL);
    if (!sid || !sid[0])
       return server_send_error(conn, "session.credentials requires session_id", NULL);

@@ -2,6 +2,7 @@
 #include "aimee.h"
 #include "util.h"
 #include "agent_config.h"
+#include "config.h" /* config_load — vault_only gate on the legacy codex disk read (WP-4/D12) */
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX for the per-turn vault principal */
 #include "session_credentials.h"
 #include "model_registry.h"
@@ -1472,6 +1473,15 @@ static int agent_read_codex_oauth_token(char *token, size_t token_len)
    if (!token || token_len == 0)
       return -1;
    token[0] = '\0';
+
+   /* WP-4/D12: under vault_only the codex token comes only from the vault — skip
+    * the legacy on-disk codex-auth.json / ~/.codex/auth.json fallback. */
+   {
+      config_t vc;
+      config_load(&vc);
+      if (vc.vault_only)
+         return -1;
+   }
 
    char path[MAX_PATH_LEN];
    snprintf(path, sizeof(path), "%s/codex-auth.json", config_default_dir());

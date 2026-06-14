@@ -71,6 +71,9 @@ int main(void)
       /* directives auto-create ran ungated before the toggle was wired; default-on
        * preserves it. */
       assert(cfg.memory_directives_enabled == 1);
+      /* WP-4: vault_only is the legacy-retirement cutover lever; default off so the
+       * migration window keeps the legacy paths as fallback. */
+      assert(cfg.vault_only == 0);
    }
 
    /* --- config_save + config_load round-trip --- */
@@ -267,6 +270,7 @@ int main(void)
                "--background-index");
       cfg.lsp_servers[0].extension_count = 1;
       snprintf(cfg.lsp_servers[0].extensions[0], sizeof(cfg.lsp_servers[0].extensions[0]), "c");
+      cfg.vault_only = 1; /* WP-4: must survive config_save round-trip */
       config_save(&cfg);
 
       static config_t cfg2;
@@ -283,6 +287,7 @@ int main(void)
       assert(cfg2.server_api_rate_limit_per_min == 60);
       assert(cfg2.server_api_max_event_streams == 512);
       assert(strcmp(cfg2.server_api_client_transport, "http") == 0);
+      assert(cfg2.vault_only == 1);
       /* regression: remote_writes used to be parsed but never written by config_save,
        * so any save silently reset it to off. */
       assert(cfg2.server_api_remote_writes == SERVER_REMOTE_WRITES_FULL);

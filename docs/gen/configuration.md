@@ -12,7 +12,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (108)
+## CLI-settable keys (109)
 
 | Key | Type |
 |-----|------|
@@ -120,6 +120,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `provider` | string |
 | `reasoning_cap_enabled` | bool |
 | `typed_facts_enabled` | bool |
+| `vault_only` | bool |
 | `verify_cross_project` | bool |
 | `verify_enabled` | bool |
 | `virtual_context_assembly_budget` | int |

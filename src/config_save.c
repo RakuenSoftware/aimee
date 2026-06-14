@@ -751,6 +751,9 @@ int config_save(const config_t *cfg)
    /* Verify gating: only persist when enabled (default-off is the absence). */
    if (cfg->verify_enabled)
       cJSON_AddBoolToObject(root, "verify_enabled", 1);
+   /* Credential-vault sole-source cutover (WP-4): persist only when set. */
+   if (cfg->vault_only)
+      cJSON_AddBoolToObject(root, "vault_only", 1);
    if (cfg->verify_cross_project)
       cJSON_AddBoolToObject(root, "verify_cross_project", 1);
    if (cfg->claude_cli_delegate_enabled)

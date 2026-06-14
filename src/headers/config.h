@@ -636,6 +636,14 @@ typedef struct config
     * gating + enforce:true auto-generated config for the current project. */
    int verify_enabled;
 
+   /* Credential-vault consolidation (WP-4/D10-D12): when 1, the server vault is
+    * the SOLE credential source — the legacy paths are refused/skipped: the
+    * client `/v1/session/credentials` RAM push is rejected, and the on-disk
+    * codex-auth.json read is bypassed. Default 0 keeps the vault-first behavior
+    * with the legacy paths as fallback (the migration window). Flip to 1 only
+    * after `aimee agent key import` has moved every credential into the vault. */
+   int vault_only;
+
    /* Allow Claude run via the `claude` CLI / tmux login (authenticated by the
     * interactive Claude subscription login, NOT an API key) to be used as a
     * DELEGATE. Default 0: Claude-via-CLI is primary-only, because driving a
