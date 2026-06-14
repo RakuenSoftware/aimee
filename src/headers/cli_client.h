@@ -47,6 +47,10 @@ int cli_server_available(const char *socket_path);
  * {status:"error",...} body. Replaces the legacy NDJSON
  * connect/authenticate/request sequence with first-class /v1 dispatch routes. */
 cJSON *cli_v1_dispatch_local(cJSON *req, int timeout_ms);
+/* Remote-aware sibling of cli_v1_dispatch_local: routes to a configured remote /v1
+ * endpoint when one is set, else the co-located local server. Used by flows (e.g.
+ * `agent setup`) that must run against the same server that stores the result. */
+cJSON *cli_v1_dispatch(cJSON *req, int timeout_ms);
 
 /* ── /v1 HTTP transport (aimee.api.client_transport) ───────────────────────
  * First-party clients can reach aimee-server over its /v1 HTTP surface

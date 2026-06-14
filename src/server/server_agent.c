@@ -1417,6 +1417,21 @@ int handle_agent_setup_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       sagent_jwt_account_id(j_id_token->valuestring, chatgpt_account_id,
                             sizeof(chatgpt_account_id));
 
+   /* Consolidate codex OAuth into the server-owned vault (cred-vault-consolidation
+    * WP-2/D5): the delegate use-path prefers the vaulted token (via the server
+    * principal, which decrypts autonomously and is the only principal a TCP thin
+    * client has). The disk codex-auth.json written below stays as a migration-era
+    * fallback until WP-4 retires it. A vault failure is non-fatal here — the disk
+    * copy still authenticates — but is logged so the gap is observable. */
+   if (final_token && final_token[0])
+   {
+      if (vault_service_set_server("codex", VAULT_CODEX_TOKEN_CRED, final_token) != VAULT_OK)
+         aimee_log(LOG_WARN, "codex.setup",
+                   "vault store failed for codex token; relying on disk codex-auth.json");
+      if (chatgpt_account_id[0])
+         (void)vault_service_set_server("codex", VAULT_CODEX_ACCOUNT_CRED, chatgpt_account_id);
+   }
+
    /* Write auth JSON to disk */
    cJSON *auth_json = cJSON_CreateObject();
    cJSON_AddStringToObject(auth_json, "access_token", final_token);

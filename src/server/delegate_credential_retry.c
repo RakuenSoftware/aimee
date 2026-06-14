@@ -21,19 +21,43 @@
  * codex token (overwritten by the next turn's bind on this worker thread). */
 static void codex_oauth_apply_vault_override(const char *principal, const agent_t *target_agent)
 {
-   if (!principal || !principal[0] || !target_agent)
+   if (!target_agent)
       return;
    if (strcmp(target_agent->auth_type, "codex-oauth") != 0)
       return;
    if (agent_request_codex_token_present())
       return; /* a live client push is authoritative */
-   char tok[MAX_API_KEY_LEN];
-   if (vault_service_get(principal, target_agent->name, VAULT_CODEX_TOKEN_CRED, tok, sizeof(tok),
-                         time(NULL)) != VAULT_OK)
-      return;
+
+   char tok[MAX_API_KEY_LEN] = "";
    char acct[128] = "";
-   (void)vault_service_get(principal, target_agent->name, VAULT_CODEX_ACCOUNT_CRED, acct,
-                           sizeof(acct), time(NULL));
+   vault_status_t st = VAULT_NO_ENTRY;
+
+   /* An attested per-turn principal (UDS/webchat) wins; a LOCKED user cred is a
+    * hard miss here, NOT silently downgraded to the server vault (D15). */
+   if (principal && principal[0])
+   {
+      st = vault_service_get(principal, target_agent->name, VAULT_CODEX_TOKEN_CRED, tok,
+                             sizeof(tok), time(NULL));
+      if (st == VAULT_ERR_LOCKED)
+         return;
+      if (st == VAULT_OK)
+         (void)vault_service_get(principal, target_agent->name, VAULT_CODEX_ACCOUNT_CRED, acct,
+                                 sizeof(acct), time(NULL));
+   }
+
+   /* Fall back to the server-owned vault: codex creds provisioned over a TCP thin
+    * client have no per-user principal and live under the server principal (WP-2). */
+   if (st != VAULT_OK)
+   {
+      st = vault_service_get_server_principal(target_agent->name, VAULT_CODEX_TOKEN_CRED, tok,
+                                              sizeof(tok));
+      if (st == VAULT_OK)
+         (void)vault_service_get_server_principal(target_agent->name, VAULT_CODEX_ACCOUNT_CRED,
+                                                  acct, sizeof(acct));
+   }
+
+   if (st != VAULT_OK || !tok[0])
+      return;
    agent_set_request_codex_creds(tok, acct[0] ? acct : NULL);
    OPENSSL_cleanse(tok, sizeof(tok));
    OPENSSL_cleanse(acct, sizeof(acct));
