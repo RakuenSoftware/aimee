@@ -20,9 +20,16 @@ attested_transport_t vault_principal_resolve(int is_tcp, int is_tls, long peer_u
     * authority for server-principal writes — but it carries no OS-user/webuser
     * identity, so it gets the same EMPTY per-user principal as plain TCP. The
     * distinct classification is what later authorizes server-principal writes
-    * (vault_capability_server_write_allowed); a TCP_BEARER (plaintext) does not. A
-    * valid webuser assertion still wins (per-user webchat vault) below. */
-   int tls_bearer = is_tls && !(webuser_asserted && webuser_token_ok);
+    * (vault_capability_server_write_allowed); a TCP_BEARER (plaintext) does not.
+    *
+    * TLS_BEARER is granted ONLY to a conn that asserts NO webuser at all (a clean
+    * operator/CLI connection). A conn that DOES assert a webuser is a webchat hop:
+    * with a valid token it wins the per-user vault below; without one it is a spoof
+    * (or a misconfigured webchat forwarding an end-user header) and must NOT be
+    * silently promoted to server-principal authority just because the socket has
+    * TLS — that would let any webchat end-user mint a server credential. Such a
+    * tokenless webuser is refused (classified by raw transport, no server write). */
+   int tls_bearer = is_tls && !webuser_asserted;
 
    /* A webuser assertion is honored ONLY under the server.token trust boundary
     * (the secret only the webchat backend holds). Asserted WITHOUT a valid token
@@ -38,9 +45,12 @@ attested_transport_t vault_principal_resolve(int is_tcp, int is_tls, long peer_u
     * principal entirely — it must NOT fall through to the uid: path, or a
     * request from the shared webchat service account would silently receive that
     * account's uid: vault, leaking credentials across webchat users (the whole
-    * reason the webuser: principal exists). Classify by transport, no vault. */
+    * reason the webuser: principal exists). It is likewise NOT promoted to
+    * TLS_BEARER (tls_bearer is false whenever a webuser is asserted): a tokenless
+    * webuser never earns server-principal authority. Classify by raw transport
+    * (no server write), no vault. */
    if (webuser_asserted)
-      return tls_bearer ? ATTEST_TLS_BEARER : (is_tcp ? ATTEST_TCP_BEARER : ATTEST_UDS_PEERCRED);
+      return is_tcp ? ATTEST_TCP_BEARER : ATTEST_UDS_PEERCRED;
 
    if (!is_tcp)
    {

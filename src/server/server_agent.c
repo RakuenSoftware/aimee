@@ -10,7 +10,8 @@
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
 #include "log.h"
-#include "vault_service.h" /* vault_service_set / set_server, VAULT_API_KEY_CRED */
+#include "vault_service.h"    /* vault_service_set / set_server, VAULT_API_KEY_CRED */
+#include "vault_capability.h" /* vault_capability_server_write_allowed (single server-write gate) */
 #include <pthread.h>
 #include <string.h>
 #include <stdlib.h>
@@ -507,15 +508,18 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          /* Where the client-supplied key lands depends on the attested transport:
           *  - a per-user principal (UDS uid: / webchat webuser:) -> the caller's own
           *    vault (dual-access; requires the vault unlocked);
-          *  - a native-TLS+bearer conn (the operator over a confidential channel,
-          *    no per-user identity) -> the server-owned vault, so the key works for
-          *    ALL connections automatically (native-TLS provisioning);
-          *  - a plaintext TCP bearer -> REFUSED (D2b): it must not silently mint a
-          *    server credential over an unencrypted channel.
+          *  - a connection with no per-user identity -> the server-owned vault, so
+          *    the key works for ALL connections automatically (native-TLS
+          *    provisioning). Whether that is permitted is decided by the SAME gate
+          *    handle_vault_set_server uses (vault_capability_server_write_allowed),
+          *    so "who may mint a server credential" lives in exactly one place:
+          *    native-TLS+bearer is allowed; a plaintext TCP bearer is REFUSED (D2b)
+          *    — it must not silently mint a server credential over an unencrypted
+          *    channel — as is any un-attested conn (e.g. UDS uid 0).
           * On any failure we REFUSE rather than write the secret to agents.json. */
          const char *principal = (conn && conn->vault_principal[0]) ? conn->vault_principal : NULL;
-         int tls_bearer = conn && conn->attested_transport == ATTEST_TLS_BEARER;
-         if (!principal && !tls_bearer)
+         attested_transport_t transport = conn ? conn->attested_transport : ATTEST_NONE;
+         if (!principal && !vault_capability_server_write_allowed(transport, NULL))
             return server_send_error(
                 conn,
                 "vault: `agent add --key` over a plaintext connection cannot store a credential; "

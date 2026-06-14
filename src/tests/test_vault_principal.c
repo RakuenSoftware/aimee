@@ -17,21 +17,29 @@ static attested_transport_t resolve(int is_tcp, long uid, const char *webuser, i
 }
 
 /* A native-TLS+bearer conn: attested for server-principal writes, no per-user
- * principal (server-principal vault). A valid webuser assertion still wins. */
+ * principal (server-principal vault). A valid webuser assertion still wins; a
+ * tokenless webuser is NOT promoted to server authority. */
 static void test_tls_bearer_attested_no_principal(void)
 {
    char p[VAULT_PRINCIPAL_MAX];
    /* TLS over the network, no uid/webuser -> ATTEST_TLS_BEARER, empty principal. */
    assert(vault_principal_resolve(1, 1, -1, NULL, 0, p, sizeof(p)) == ATTEST_TLS_BEARER);
    assert(p[0] == '\0');
-   /* A spoofed webuser (no token) over TLS is still TLS_BEARER, no principal. */
-   assert(vault_principal_resolve(1, 1, -1, "alice", 0, p, sizeof(p)) == ATTEST_TLS_BEARER);
+   /* A spoofed/tokenless webuser over TLS is REFUSED server authority: it is NOT
+    * promoted to TLS_BEARER, it falls back to the raw transport (TCP_BEARER), with
+    * no vault principal. (A misconfigured webchat forwarding an end-user header
+    * must never mint a server credential merely because the socket has TLS.) */
+   assert(vault_principal_resolve(1, 1, -1, "alice", 0, p, sizeof(p)) == ATTEST_TCP_BEARER);
    assert(p[0] == '\0');
    /* A valid webuser assertion still wins (per-user webchat vault). */
    assert(vault_principal_resolve(1, 1, -1, "alice", 1, p, sizeof(p)) == ATTEST_WEBCHAT_TRUSTED);
    assert(strcmp(p, "webuser:alice") == 0);
    /* Plaintext TCP (no TLS) is NOT attested for server writes. */
    assert(vault_principal_resolve(1, 0, -1, NULL, 0, p, sizeof(p)) == ATTEST_TCP_BEARER);
+   /* A short output buffer fails closed even over TLS (no TLS_BEARER on a buffer
+    * too small to hold a principal). */
+   char small[4];
+   assert(vault_principal_resolve(1, 1, -1, NULL, 0, small, sizeof(small)) == ATTEST_NONE);
    printf("  PASS: test_tls_bearer_attested_no_principal\n");
 }
 
