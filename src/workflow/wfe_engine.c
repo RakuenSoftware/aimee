@@ -241,15 +241,24 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
       wfe_def_free(def);
       return -1;
    }
-   int txn = 1;
+
+   /* Every state-mutating DB write below is checked; on ANY failure we roll the
+    * whole step back (goto txn_fail) so the work item is never left advanced but
+    * un-parked, or otherwise half-applied. (Audit/counter writes are
+    * non-corrupting and left unchecked.) */
+#define WFE_CKW(call)                                                                              \
+   do                                                                                              \
+   {                                                                                               \
+      if ((call) != 0)                                                                             \
+         goto txn_fail;                                                                            \
+   } while (0)
 
    /* cost pre-flight (estimate is 0 for stubs; executors report actuals). */
    if (wi.work_item_max_cost_usd > 0 && wi.cum_cost_usd >= wi.work_item_max_cost_usd)
    {
-      db1_work_item_set_pause(work_item_id, "budget_exceeded", node->id);
+      WFE_CKW(db1_work_item_set_pause(work_item_id, "budget_exceeded", node->id));
       db1_lifecycle_event_add(work_item_id, node->id, "pause", "engine", "budget_exceeded", "", 0);
-      if (txn)
-         db1_lifecycle_txn_commit();
+      db1_lifecycle_txn_commit();
       out->last_status = WFE_STEP_PENDING;
       out->pause_reason = WFE_PAUSE_BUDGET_EXCEEDED;
       snprintf(out->next_stage, sizeof out->next_stage, "%s", node->id);
@@ -261,7 +270,7 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
    wfe_step_result_t r = fn(&ctx, node);
    out->last_status = r.status;
    if (r.cost_usd > 0)
-      db1_work_item_add_cost(work_item_id, r.cost_usd);
+      WFE_CKW(db1_work_item_add_cost(work_item_id, r.cost_usd));
    /* post-executor budget re-check: a single step's cost can push over the cap,
     * which the pre-flight (before the executor) cannot see. Bound overshoot to
     * one step by parking now. */
@@ -277,7 +286,7 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
       const char *pr = pause_name(r.pause_reason);
       if (!pr[0])
          pr = "unspecified";
-      db1_work_item_set_pause(work_item_id, pr, node->id);
+      WFE_CKW(db1_work_item_set_pause(work_item_id, pr, node->id));
       db1_lifecycle_event_add(work_item_id, node->id, "pause", "engine", pr, r.content_hash,
                               r.cost_usd);
       out->pause_reason = r.pause_reason;
@@ -287,7 +296,7 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
    {
       /* park with a NON-empty pause_reason so the next advance treats it as
        * parked (an empty reason reads as "not parked" -> re-runs the node). */
-      db1_work_item_set_pause(work_item_id, "failed", node->id);
+      WFE_CKW(db1_work_item_set_pause(work_item_id, "failed", node->id));
       db1_lifecycle_event_add(work_item_id, node->id, "failed", "engine", "", "", r.cost_usd);
    }
    else
@@ -296,7 +305,7 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
       if (r.status == WFE_STEP_ADVANCED && (!next || !next[0]))
       {
          /* terminal node reached */
-         db1_work_item_set_terminal(work_item_id, "accepted");
+         WFE_CKW(db1_work_item_set_terminal(work_item_id, "accepted"));
          db1_lifecycle_event_add(work_item_id, node->id, "terminal", "engine", "accepted",
                                  r.content_hash, r.cost_usd);
          out->terminal = 1;
@@ -305,8 +314,7 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
       else if (!next || !next[0])
       {
          snprintf(err, errlen, "node '%s' looped with no on_fail edge", node->id);
-         if (txn)
-            db1_lifecycle_txn_rollback();
+         db1_lifecycle_txn_rollback();
          wfe_def_free(def);
          return -1;
       }
@@ -317,19 +325,18 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
             int att = db1_stage_attempt_inc(work_item_id, next);
             if (att >= WFE_MAX_ATTEMPTS)
             {
-               db1_work_item_set_pause(work_item_id, "pending_human", next);
+               WFE_CKW(db1_work_item_set_pause(work_item_id, "pending_human", next));
                db1_lifecycle_event_add(work_item_id, node->id, "pause", "engine", "max_attempts",
                                        "", r.cost_usd);
                out->last_status = WFE_STEP_PENDING;
                out->pause_reason = WFE_PAUSE_PENDING_HUMAN;
                snprintf(out->next_stage, sizeof out->next_stage, "%s", next);
-               if (txn)
-                  db1_lifecycle_txn_commit();
+               db1_lifecycle_txn_commit();
                wfe_def_free(def);
                return 0;
             }
          }
-         db1_work_item_set_stage(work_item_id, next, r.content_hash);
+         WFE_CKW(db1_work_item_set_stage(work_item_id, next, r.content_hash));
          db1_lifecycle_event_add(work_item_id, node->id,
                                  r.status == WFE_STEP_LOOPED ? "loop" : "advance", "engine", next,
                                  r.content_hash, r.cost_usd);
@@ -338,7 +345,7 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
          {
             /* the step advanced but its cost crossed the cap: park before the
              * next stage so a human must resume --budget-bump. */
-            db1_work_item_set_pause(work_item_id, "budget_exceeded", next);
+            WFE_CKW(db1_work_item_set_pause(work_item_id, "budget_exceeded", next));
             db1_lifecycle_event_add(work_item_id, next, "pause", "engine", "budget_exceeded", "",
                                     0);
             out->last_status = WFE_STEP_PENDING;
@@ -347,10 +354,16 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
       }
    }
 
-   if (txn)
-      db1_lifecycle_txn_commit();
+   db1_lifecycle_txn_commit();
    wfe_def_free(def);
    return 0;
+
+txn_fail:
+   db1_lifecycle_txn_rollback();
+   snprintf(err, errlen, "advance: a state write failed; rolled back");
+   wfe_def_free(def);
+   return -1;
+#undef WFE_CKW
 }
 
 int wfe_engine_run(const char *work_item_id, char *err, size_t errlen)
