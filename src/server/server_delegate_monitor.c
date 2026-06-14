@@ -1,6 +1,7 @@
 /* server_delegate_monitor.c: see server_delegate_monitor.h */
 
 #include "server_delegate_monitor.h"
+#include "http_retry.h" /* http_set_progress_cb */
 #include "log.h"
 
 #include <pthread.h>
@@ -18,6 +19,30 @@ int db1_agent_job_list_running_ids(int *out_ids, int max);
 int db1_agent_job_classify_stale(int job_id, int idle_threshold_secs, int in_tool_threshold_secs,
                                  char *out_state, size_t out_state_cap);
 int db1_agent_job_cancel_by_id(int job_id, const char *reason);
+void db1_agent_job_heartbeat(int job_id);
+
+/* Per-turn heartbeat for the in-flight background delegate on this thread. The
+ * http_retry progress callback fires after every model HTTP attempt; bumping the
+ * heartbeat there keeps a slow-but-progressing delegate alive (see header). */
+static _Thread_local int g_hb_job_id;
+
+static void delegate_heartbeat_cb(void)
+{
+   if (g_hb_job_id > 0)
+      db1_agent_job_heartbeat(g_hb_job_id);
+}
+
+void server_delegate_heartbeat_begin(int job_id)
+{
+   g_hb_job_id = job_id > 0 ? job_id : 0;
+   http_set_progress_cb(job_id > 0 ? delegate_heartbeat_cb : NULL);
+}
+
+void server_delegate_heartbeat_end(void)
+{
+   http_set_progress_cb(NULL);
+   g_hb_job_id = 0;
+}
 
 /* Defaults from delegate-reliability-heartbeat-and-cost-rollup.md §1. */
 #define DEFAULT_IDLE_THRESHOLD_SECS    450

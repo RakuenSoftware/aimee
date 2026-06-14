@@ -32,6 +32,16 @@ extern "C"
     * without spawning the thread. */
    int server_delegate_monitor_sweep(int idle_threshold_secs, int in_tool_threshold_secs);
 
+   /* Bind/unbind a per-turn heartbeat for the in-flight background delegate on
+    * THIS thread. begin() registers an http_retry progress callback that bumps
+    * agent_jobs.heartbeat_at after every model HTTP attempt, so a slow-but-
+    * progressing delegate (each turn bounded by the agent timeout, under the
+    * stale idle threshold) is not auto-cancelled as stalled — the reason only the
+    * fastest model used to survive the fleet. job_id <= 0 is a no-op. Always pair
+    * begin() with end(). */
+   void server_delegate_heartbeat_begin(int job_id);
+   void server_delegate_heartbeat_end(void);
+
 #ifdef __cplusplus
 }
 #endif

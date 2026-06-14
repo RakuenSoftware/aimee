@@ -50,4 +50,13 @@ int http_retry_post_context(const char *url, const char *auth_header, const char
                             int max_attempts, int base_ms, int max_ms, const char *provider,
                             const char *model, const char *session_id);
 
+/* Register a thread-local progress callback invoked after every model HTTP
+ * attempt (decoupled from db1: the server side installs a callback that bumps the
+ * running delegate job's heartbeat). This keeps a slow-but-progressing delegate —
+ * any model whose run exceeds the stale-monitor idle threshold across multiple
+ * turns — from being auto-cancelled as "stalled" (the reason only the fastest
+ * model survived the fleet). Pass NULL to clear. */
+typedef void (*http_progress_cb_t)(void);
+void http_set_progress_cb(http_progress_cb_t cb);
+
 #endif /* DEC_HTTP_RETRY_H */
