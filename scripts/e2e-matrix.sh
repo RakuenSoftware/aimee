@@ -54,6 +54,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Models are fetched at runtime now (not baked into the image), so CI must use a
+# SMALL, ungated model + matching dim — otherwise every e2e run would cold-download
+# the multi-GB 4b/1b default. all-MiniLM-L6-v2 (384-dim, ~90 MB) + a tiny
+# cross-encoder fetch in well under the embedder's start_period. compose reads
+# these via ${...}; exporting here covers every topology + the build args.
+export EMBEDDER_MODEL="${EMBEDDER_MODEL:-sentence-transformers/all-MiniLM-L6-v2}"
+export RERANKER_MODEL="${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}"
+export AIMEE_EMBEDDING_DIM="${AIMEE_EMBEDDING_DIM:-384}"
+
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 selected() { case ",$ONLY," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 have_docker() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
