@@ -17,6 +17,8 @@
 
 #include <stddef.h>
 
+#include "vault_principal.h" /* attested_transport_t */
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -38,6 +40,11 @@ extern "C"
    /* Copy the newline-separated list of granted principals (no secrets) into `out`.
     * Returns the count (>=0), or -1 on error. */
    int vault_capability_list(char *out, size_t out_len);
+
+   /* The server-principal write gate (D2b/D2c): returns 1 iff `transport` is an
+    * attested local/webchat transport (never a bare TCP bearer) AND `principal`
+    * holds vault:write:server. The single source of truth for the gate. */
+   int vault_capability_server_write_allowed(attested_transport_t transport, const char *principal);
 
    /* Test seam: override the store path (NULL resets to the default). */
    void vault_capability_set_path_for_test(const char *path);

@@ -129,6 +129,16 @@ static int cap_write_atomic(const char *path, const char *content, size_t conten
       unlink(tmp);
       return -1;
    }
+   /* fsync the parent dir so the rename (the new directory entry) is durable. */
+   if (slash)
+   {
+      int dfd = open(dir, O_RDONLY | O_DIRECTORY);
+      if (dfd >= 0)
+      {
+         (void)fsync(dfd);
+         close(dfd);
+      }
+   }
    return 0;
 }
 
@@ -220,6 +230,12 @@ int vault_capability_revoke(const char *principal)
    }
    pthread_mutex_unlock(&g_cap_mu);
    return rc;
+}
+
+int vault_capability_server_write_allowed(attested_transport_t transport, const char *principal)
+{
+   int attested = (transport == ATTEST_UDS_PEERCRED || transport == ATTEST_WEBCHAT_TRUSTED);
+   return attested && vault_capability_has(principal);
 }
 
 int vault_capability_has(const char *principal)

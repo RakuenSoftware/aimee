@@ -194,15 +194,17 @@ int handle_vault_set_server(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!cJSON_IsString(ja) || !cJSON_IsString(jc) || !cJSON_IsString(js))
       return server_send_error(conn, "vault: set_server requires agent, cred, secret", NULL);
 
-   if (!vault_conn_is_attested(conn))
-      return server_send_error(
-          conn, "vault: server-principal write requires an attested (UDS/webchat) connection",
-          NULL);
-   if (!vault_capability_has(conn->vault_principal))
+   if (!vault_capability_server_write_allowed(conn->attested_transport, conn->vault_principal))
+   {
+      if (!vault_conn_is_attested(conn))
+         return server_send_error(
+             conn, "vault: server-principal write requires an attested (UDS/webchat) connection",
+             NULL);
       return server_send_error(conn,
                                "vault: caller lacks the vault:write:server capability (grant it "
                                "with `aimee vault capability grant <principal>` over UDS)",
                                NULL);
+   }
 
    vault_status_t st = vault_service_set_server(ja->valuestring, jc->valuestring, js->valuestring);
    if (st != VAULT_OK)
@@ -210,9 +212,12 @@ int handle_vault_set_server(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    char fp[16];
    vault_cred_fingerprint(js->valuestring, fp, sizeof(fp));
+   /* vault_conn_is_attested guaranteed UDS or webchat — log the actual one. */
    aimee_log(LOG_WARN, "vault.audit",
-             "server-principal write by=%s transport=uds agent=%s cred=%s fp=%s",
-             conn->vault_principal, ja->valuestring, jc->valuestring, fp);
+             "server-principal write by=%s transport=%s agent=%s cred=%s fp=%s",
+             conn->vault_principal,
+             conn->attested_transport == ATTEST_WEBCHAT_TRUSTED ? "webchat" : "uds",
+             ja->valuestring, jc->valuestring, fp);
 
    cJSON *resp = cJSON_CreateObject();
    if (!resp)

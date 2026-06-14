@@ -39,6 +39,15 @@ int main(void)
    assert(vault_capability_list(buf, sizeof(buf)) == 1);
    assert(vault_capability_revoke("uid:1000") == 0);
 
+   /* the server-principal write gate: attested transport AND capability.
+    * webuser:alice is granted; uid:1000 is not (revoked above). */
+   assert(vault_capability_server_write_allowed(ATTEST_UDS_PEERCRED, "webuser:alice") == 1);
+   assert(vault_capability_server_write_allowed(ATTEST_WEBCHAT_TRUSTED, "webuser:alice") == 1);
+   assert(vault_capability_server_write_allowed(ATTEST_TCP_BEARER, "webuser:alice") == 0);
+   assert(vault_capability_server_write_allowed(ATTEST_NONE, "webuser:alice") == 0);
+   assert(vault_capability_server_write_allowed(ATTEST_UDS_PEERCRED, "uid:1000") == 0);
+   assert(vault_capability_server_write_allowed(ATTEST_UDS_PEERCRED, "") == 0);
+
    /* validation: empty / NULL / multi-line principals are rejected */
    assert(vault_capability_grant("") == -1);
    assert(vault_capability_grant(NULL) == -1);
