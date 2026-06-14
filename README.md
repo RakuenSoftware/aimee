@@ -398,11 +398,14 @@ install only the [thin client](#2-install-the-thin-client)). Four compose files
 ship; pick by topology. They build from three reusable images: **`aimee-server`**
 (`Dockerfile.server`), **`aimee-kb`** (`Dockerfile`), and **`aimee-server+kb`**
 (`Dockerfile.combined`). Every stack also brings up a `pgvector/pgvector:pg16`
-Postgres (DB2) and a CPU embedder sidecar (`pplx-embed-v1-4b`, 2560-dim, the
-default; `Dockerfile.embedder`); the kb auto-applies its DB2 schema (tables +
-`pg_trgm`/`vector` extensions) on first boot. The lighter `pplx-embed-v1-0.6b`
-tier is published as the `aimee-embedder-0.6b` image — set `AIMEE_EMBEDDER_IMAGE`
-to it and `embedding_dim: 1024` to use it instead.
+Postgres (DB2) and a CPU embedder sidecar (`Dockerfile.embedder`); the kb
+auto-applies its DB2 schema (tables + `pg_trgm`/`vector` extensions) on first
+boot. The sidecar ships in two tiers — embedder + reranker baked into one image:
+the default `aimee-embedder` (`pplx-embed-v1-4b`, 2560-dim, + `ettin-reranker-1b`)
+and the lighter `aimee-embedder-0.6b` (`pplx-embed-v1-0.6b`, 1024-dim, +
+`ettin-reranker-400m`) for low-memory hosts. Switch with `AIMEE_EMBEDDER_IMAGE`
+plus `embedding_dim: 1024` (or `AIMEE_EMBEDDING_DIM=1024`). Trade-offs:
+[retrieval-stack.md](docs/retrieval-stack.md#choosing-a-tier).
 
 > **`docker compose ... up --build` needs no credentials.** The default build ships
 > the **server + kb** services only. The optional browser UI (`aimee-webchat`) pulls

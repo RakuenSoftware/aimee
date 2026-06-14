@@ -9,23 +9,67 @@ sized to that model's output dimension.
 
 The embedder is any command that reads text on stdin and writes a JSON float
 array on stdout (`scripts/embedder-server.py` provides an HTTP sidecar wrapper
-for the HuggingFace / sentence-transformers stack). Two reference models:
+for the HuggingFace / sentence-transformers stack). It ships in two tiers — one
+embedder and a cross-encoder reranker sized to the same tier, baked into one
+image. (The reranker emits a scalar score, so its size is a quality choice, not
+a dimension constraint.)
 
-| Model | `embedding_dim` | Notes |
-|-------|-----------------|-------|
-| `pplx-embed-v1-4b` (default) | `2560` | Higher quality; the default, since embedding throughput is not the bottleneck. Needs more RAM/compute. Exceeds pgvector's 2000-dim `vector` index cap, which is why all columns use `halfvec`. |
-| `pplx-embed-v1-0.6b` | `1024` | Lighter tier — fast, low memory. Published as the `aimee-embedder-0.6b` image. |
+| Image | Embedder (`embedding_dim`) | Reranker |
+|-------|----------------------------|----------|
+| `aimee-embedder` (default) | `pplx-embed-v1-4b` (`2560`) | `ettin-reranker-1b` |
+| `aimee-embedder-0.6b` | `pplx-embed-v1-0.6b` (`1024`) | `ettin-reranker-400m` |
 
-Pick one. The default `aimee-embedder` image bakes the 4B. To run the lighter
-0.6B instead, point at the `aimee-embedder-0.6b` image (`AIMEE_EMBEDDER_IMAGE`)
-and set `embedding_dim: 1024` — no rebuild needed.
+### Choosing a tier
+
+Run one tier per deployment. The 4b/1b image is the default; the 0.6b/400m
+image is for hosts that can't spare the memory.
+
+**4b + 1b (default).** Best retrieval quality and reranking. Pick it when the
+host has the RAM and embedding throughput isn't your bottleneck — most server
+deployments.
+- Recall and ranking are noticeably better, especially on large or noisy
+  corpora and on queries that lean on meaning over keywords.
+- Costs: the model weights are several GB (slower image pull and first build),
+  the default image holds ~20 GB resident in fp32 (~16 GB embedder + ~4 GB
+  reranker), and a CPU embed runs ~1–2 s versus the 0.6b's ~0.2 s. None of that
+  is in the request hot path — embedding happens at ingest and on the query, not
+  per token — but it sets a RAM floor and slows a cold re-embed of a large corpus.
+
+**0.6b + 400m (light).** Pick it for laptops, small VMs, CI, or any host short
+on memory.
+- ~2 GB of weights (embedder + reranker), a couple of GB resident, embeds in
+  ~0.2 s. Fits a small host; fast to pull, fast to re-embed.
+- Lower recall and weaker reranking than the 4b/1b — fine for smaller corpora
+  and keyword-ish queries, weaker on large-corpus semantic search.
+
+Rule of thumb: default to 4b/1b; drop to 0.6b/400m only when RAM or pull size
+forces it. The retrieval pipeline (hybrid search, reranking, fusion) is
+identical either way — only the model sizes differ.
+
+### Switching tiers
+
+The default `aimee-embedder` image bakes the 4b + 1b. To run the light tier,
+point at the `aimee-embedder-0.6b` image and set the dimension to match:
+
+```bash
+AIMEE_EMBEDDER_IMAGE=ghcr.io/rakuensoftware/aimee-embedder-0.6b:latest
+AIMEE_EMBEDDING_DIM=1024   # or embedding_dim: 1024 in aimee.yaml
+```
+
+No rebuild needed — both images are published. On an **empty** database that's
+all it takes. On a **populated** one the dimension change needs a re-embed (the
+`halfvec` columns are sized to `embedding_dim`, so 1024 and 2560 vectors can't
+share a column) — see [Switching embedders on an existing
+database](#switching-embedders-on-an-existing-database) below. Build a custom
+pairing with `--build-arg EMBEDDER_MODEL=… --build-arg RERANKER_MODEL=…`.
 
 ## Configuration
 
 Two config keys define the embedder:
 
 - `embedding_command` — the command that produces embeddings.
-- `embedding_dim` — the dimension that command emits (1024 or 2560). This is the
+- `embedding_dim` — the dimension that command emits (1024 for the light image,
+  2560 for the default; any value for a custom-built image). This is the
   single source of truth for vector-column dimensions.
 
 Keep the two in sync: `embedding_dim` must equal the dimension
@@ -72,10 +116,14 @@ helpers store whatever dimension the embedder actually returns.
 `db2_init()` never reshapes an existing column (a routine schema-apply must not
 touch the corpus). If you change `embedding_dim` against a populated database,
 the schema-apply emits a `NOTICE`: the columns are still the old type/dimension
-and vector ops degrade until you migrate. Switching dimension (e.g. 0.6B ⇆ 4B,
-or off legacy 384-dim all-MiniLM) requires **re-embedding** the corpus at the
-new dimension; a same-dimension `vector → halfvec` change only needs an in-place
-cast (`deploy/migrations/2026-embed-halfvec.sql`). Back up DB2 first.
+and vector ops degrade until you migrate. Switching dimension (0.6b 1024 ⇆ 4b
+2560) requires **re-embedding** the corpus at the new dimension. Drop the
+embedding rows (`kb_embeddings`, `memory_embeddings`, the `curator_*_vectors`),
+restart the kb so it recreates the columns at the new `embedding_dim`, then let
+the curator drain re-embed — it backfills any `kb_documents` chunk missing a
+vector. Chunk text and `file_contents` are untouched. A same-dimension
+`vector → halfvec` change only needs an in-place cast
+(`deploy/migrations/2026-embed-halfvec.sql`). Back up DB2 first.
 
 ## Reranking
 
