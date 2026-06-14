@@ -9,7 +9,9 @@
 #include "memory_lint.h"
 #include "config.h"
 #include "fact_ingest.h"             /* db2_fact_ingest_text (typed-fact §6 ingress hook) */
+#include "fact_recall.h"             /* db2_fact_recall_block (typed-fact §7 recall) */
 #include "memory_extract_patterns.h" /* memory_pattern_is_retraction */
+#include "memory_pii_gate.h"         /* memory_pii_turn_requests_sensitive */
 #include "decision_log.h"
 #include "memory.h"
 #include "memory_export.h"
@@ -1217,23 +1219,56 @@ cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *b
    if (!resp)
       return NULL;
 
-   /* typed-fact §6 ingress hook: extract high-precision facts from the turn query
-    * and route them through the typed gate, KB-side where db2 is live (the server
-    * has no DB2 connection). Default-off via typed_facts_enabled. A retraction-cue
-    * turn ("forget that ...") is a correction, not an assertion, so skip ingest. */
+   /* typed-fact ingress, KB-side where db2 is live (the server has no DB2
+    * connection). Default-off via typed_facts_enabled. */
+   int typed_enabled = 0, requests_sensitive = 0;
    if (query && query[0])
    {
       config_t cfg;
       config_load(&cfg);
-      if (cfg.typed_facts_enabled && !memory_pattern_is_retraction(query))
-         (void)db2_fact_ingest_text(query, FACT_AUTHORITY_USER, 1);
+      typed_enabled = cfg.typed_facts_enabled;
+      if (typed_enabled)
+      {
+         requests_sensitive = memory_pii_turn_requests_sensitive(query);
+         /* §6 write: extract facts from the turn and route them through the typed
+          * gate — unless the turn is a retraction cue (a correction, not an
+          * assertion). */
+         if (!memory_pattern_is_retraction(query))
+            (void)db2_fact_ingest_text(query, FACT_AUTHORITY_USER, 1);
+      }
    }
 
    char *block = memory_get_context_block(query ? query : "",
                                           (block_type && block_type[0]) ? block_type : "general",
                                           limit > 0 ? limit : 5);
+
+   /* §7 read: surface the user's current typed facts (PII-gated) into the
+    * envelope, appended after the memory block. */
+   char facts[2048] = "";
+   if (typed_enabled)
+      (void)db2_fact_recall_block("user", requests_sensitive, facts, sizeof(facts));
+
    cJSON_AddStringToObject(resp, "status", "ok");
-   cJSON_AddStringToObject(resp, "block", block ? block : "");
+   if (facts[0])
+   {
+      const char *bl = block ? block : "";
+      size_t need = strlen(bl) + strlen(facts) + 32;
+      char *combined = malloc(need);
+      if (combined)
+      {
+         snprintf(combined, need, "%s\n## Known facts\n%s", bl, facts);
+         cJSON_AddStringToObject(resp, "block", combined);
+         free(combined);
+      }
+      else
+      {
+         cJSON_AddStringToObject(resp, "block", bl);
+      }
+   }
+   else
+   {
+      cJSON_AddStringToObject(resp, "block", block ? block : "");
+   }
    free(block);
    return resp;
 }
