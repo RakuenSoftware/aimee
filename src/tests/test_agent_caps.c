@@ -43,6 +43,44 @@ void test_agent_route_with_caps_honors_tools_enabled(void)
    assert(agent_route_with_caps(&cfg, "review", &sys_cfg, MODEL_CAP_TOOLS, 0) == NULL);
 }
 
+/* Inferred modality caps (vision/pdf/audio) are best-effort: when no configured
+ * model advertises the soft cap, the router relaxes it and routes on the hard
+ * caps (tools) instead of returning no route — the fix for the fleet-wide
+ * "no configured model supports required capabilities (caps=tools,vision)"
+ * false-fail. A hard cap (tools) is never relaxed. */
+void test_agent_route_with_caps_relaxes_soft_modality(void)
+{
+   agent_config_t cfg;
+   config_t sys_cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   memset(&sys_cfg, 0, sizeof(sys_cfg));
+   sys_cfg.model_meta_capability_routing = 1;
+
+   cfg.agent_count = 1;
+   strcpy(cfg.default_agent, "mistral");
+   strcpy(cfg.agents[0].name, "mistral");
+   strcpy(cfg.agents[0].provider, "mistral"); /* TOOLS+STREAMING, no VISION */
+   strcpy(cfg.agents[0].model, "mistral-medium-latest");
+   strcpy(cfg.agents[0].roles[0], "review");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 1;
+   strcpy(cfg.agents[0].api_key, "test-key");
+
+   /* Requiring TOOLS|VISION: mistral has tools but not vision. The unmet soft
+    * VISION is relaxed and the agent still routes (not NULL). */
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, MODEL_CAP_TOOLS | MODEL_CAP_VISION, 0) ==
+          &cfg.agents[0]);
+
+   /* The hard cap (tools) is still enforced through the relaxation: drop tools
+    * support and even the relaxed (tools-only) retry finds no route. */
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 0;
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, MODEL_CAP_TOOLS | MODEL_CAP_VISION, 0) ==
+          NULL);
+   printf("  PASS: test_agent_route_with_caps_relaxes_soft_modality\n");
+}
+
 /* Routing must honor the per-agent context_window override so onboarding a
  * model the capability catalog doesn't know about is a config change, not a
  * code change to the registry table. */

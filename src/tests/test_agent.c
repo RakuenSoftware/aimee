@@ -22,6 +22,7 @@
 #include "platform_test_util.h"
 
 void test_agent_route_with_caps_honors_tools_enabled(void);
+void test_agent_route_with_caps_relaxes_soft_modality(void);
 void test_agent_route_with_caps_honors_context_override(void);
 void test_tools_enabled_capability_default(void);
 
@@ -1931,6 +1932,7 @@ int main(void)
    test_agent_loop_per_call_timeout();
    test_agent_route_health_filter();
    test_agent_route_with_caps_honors_tools_enabled();
+   test_agent_route_with_caps_relaxes_soft_modality();
    test_agent_route_with_caps_honors_context_override();
    test_current_code_only_role_tool_policy();
    test_current_code_only_dispatch_blocks_stale_context_tools();
