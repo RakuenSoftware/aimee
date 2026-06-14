@@ -212,6 +212,17 @@ vault_status_t vault_service_get(const char *principal, const char *agent, const
    (void)now_epoch;
    return VAULT_NO_ENTRY;
 }
+/* cred-vault-consolidation P1: the codex-oauth override now also probes the
+ * server principal; stub it to a miss for these keyless tests. */
+vault_status_t vault_service_get_server_principal(const char *agent, const char *cred, char *out,
+                                                  size_t out_len)
+{
+   (void)agent;
+   (void)cred;
+   (void)out;
+   (void)out_len;
+   return VAULT_NO_ENTRY;
+}
 
 int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt, const char *prompt,
               int max_tokens, agent_result_t *result)
