@@ -100,6 +100,14 @@ static void sha256_compute(const unsigned char *data, size_t len, unsigned char 
    }
 }
 
+int wfe_sha256_raw(const void *data, size_t len, unsigned char out[32])
+{
+   if (!out)
+      return -1;
+   sha256_compute((const unsigned char *)(data ? data : ""), data ? len : 0, out);
+   return 0;
+}
+
 int wfe_sha256_hex(const void *data, size_t len, char out_hex[65])
 {
    if (!data || !out_hex)

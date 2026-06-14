@@ -99,6 +99,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-workflow \
                $(TESTPREFIX)/unit-test-wfe-engine \
                $(TESTPREFIX)/unit-test-wfe-blocks \
+               $(TESTPREFIX)/unit-test-wfe-approval \
                $(TESTPREFIX)/unit-test-cli-profile \
                $(TESTPREFIX)/unit-test-cmd-profile \
                $(TESTPREFIX)/unit-test-kb-client-index \
@@ -925,6 +926,16 @@ $(TESTPREFIX)/unit-test-wfe-blocks: $(OBJDIR)/tests/test_wfe_blocks.o \
                                     $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/aimee_home.o \
                                     $(OBJDIR)/util.o $(OBJDIR)/posix/util.o $(OBJDIR)/yaml.o \
                                     $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Workflow engine W4: HMAC approval signer + gate.human.
+$(TESTPREFIX)/unit-test-wfe-approval: $(OBJDIR)/tests/test_wfe_approval.o \
+                                      $(OBJDIR)/workflow/wfe_approval.o $(OBJDIR)/workflow/wfe_engine.o \
+                                      $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                      $(OBJDIR)/db1/lifecycle.o $(OBJDIR)/workflow/wfe_def.o \
+                                      $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
+                                      $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/aimee_home.o \
+                                      $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-provider-catalog: $(OBJDIR)/tests/test_provider_catalog.o $(TEST_CORE_OBJS)

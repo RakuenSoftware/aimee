@@ -72,5 +72,7 @@ char *wfe_def_canonical(const wfe_def_t *def);
 int wfe_def_compute_version(const wfe_def_t *def, char out_hex[65]);
 /* sha256 hex helper. Returns 0 on success. */
 int wfe_sha256_hex(const void *data, size_t len, char out_hex[65]);
+/* sha256 raw 32-byte digest (used for HMAC in the approval signer). */
+int wfe_sha256_raw(const void *data, size_t len, unsigned char out[32]);
 
 #endif /* DEC_WFE_DEF_H */
