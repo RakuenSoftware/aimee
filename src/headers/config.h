@@ -1288,12 +1288,16 @@ typedef struct config
     * ensemble_min_successful: min references that must succeed before degrading (default 2).
     * ensemble_max_cost_usd: optional per-run cost cap in USD; 0 (or unset) means
     * no limit, which is the default. Set a positive value to cap a run. */
-   char ensemble_reference_models[8][128];
+   /* First dim = ENSEMBLE_MAX_REFS (delegate_ensemble.h); a _Static_assert in
+    * delegate_ensemble.c enforces they stay in sync. config.h can't include that
+    * header (it would cycle), so the literal is kept here. */
+   char ensemble_reference_models[32][128];
    int ensemble_reference_count;
    /* Optional per-participant review persona, paired by index with
     * ensemble_reference_models. Empty entries fall back to the engine's diverse
-    * default lineup. Width = PERSONA_NAME_MAX (persona.h). */
-   char ensemble_reference_personas[8][64];
+    * default lineup. Width = PERSONA_NAME_MAX (persona.h); first dim =
+    * ENSEMBLE_MAX_REFS. */
+   char ensemble_reference_personas[32][64];
    int ensemble_reference_persona_count;
    char ensemble_aggregator[128];
    int ensemble_min_successful;
