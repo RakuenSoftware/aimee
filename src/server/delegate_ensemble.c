@@ -1150,7 +1150,8 @@ static char *panel_persona_prompt(const config_t *cfg, roundtable_mode_t mode, i
 
 static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const char *task,
                               const char *artifact, const char *peer_notes, roundtable_mode_t mode,
-                              int round, const char *brief, agent_result_t *results)
+                              int round, const char *brief, agent_result_t *results,
+                              int deadline_ms)
 {
    int ref_count = cfg->ensemble_reference_count;
    agent_task_t tasks[ENSEMBLE_MAX_REFS];
@@ -1174,7 +1175,9 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
       tasks[i].temperature = 0.3 + (0.05 * i);
       tasks[i].max_tokens = 0;
    }
-   agent_run_parallel(acfg, tasks, ref_count, results);
+   /* deadline_ms bounds the panel barrier so one hung panelist can't wedge the
+    * whole round past the roundtable deadline. */
+   agent_run_parallel(acfg, tasks, ref_count, results, deadline_ms);
    /* Account each participant's run onto the originating session, like a delegate. */
    for (int i = 0; i < ref_count; i++)
       ensemble_fold_cost(acfg, &results[i], cfg->ensemble_reference_models[i]);
@@ -1289,7 +1292,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
    agent_result_t results[ENSEMBLE_MAX_REFS];
    memset(results, 0, sizeof(results));
 
-   agent_run_parallel(acfg, tasks, ref_count, results);
+   agent_run_parallel(acfg, tasks, ref_count, results, 0 /* MoA aggregate: no deadline */);
    /* Account each participant's run onto the originating session, like a delegate. */
    for (int i = 0; i < ref_count; i++)
       ensemble_fold_cost(acfg, &results[i], cfg->ensemble_reference_models[i]);
@@ -1511,11 +1514,21 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
 
       agent_result_t results[ENSEMBLE_MAX_REFS];
       memset(results, 0, sizeof(results));
+      /* Remaining roundtable budget bounds this round's parallel panel so a hung
+       * panelist is abandoned at the deadline instead of wedging the barrier
+       * forever (floor at 5s so a near-exhausted budget still attempts the panel).
+       * 0 when no deadline is configured. */
+      int panel_deadline_ms = 0;
+      if (local.deadline_ms > 0)
+      {
+         long remaining = (long)local.deadline_ms - (monotonic_ms() - start_ms);
+         panel_deadline_ms = remaining > 5000 ? (int)remaining : 5000;
+      }
       int rc = local.turns == ROUNDTABLE_SEQUENTIAL
                    ? run_round_sequential(acfg, cfg, task, artifact, &peer_notes, local.mode, round,
                                           local.brief, results)
                    : run_round_parallel(acfg, cfg, task, artifact, peer_notes, local.mode, round,
-                                        local.brief, results);
+                                        local.brief, results, panel_deadline_ms);
       if (rc != 0)
       {
          for (int i = 0; i < ref_count; i++)

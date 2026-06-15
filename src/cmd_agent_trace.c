@@ -123,7 +123,7 @@ void cmd_dispatch(app_ctx_t *ctx, int argc, char **argv)
    }
 
    agent_http_init();
-   int successes = agent_run_parallel(&cfg, tasks, n, results);
+   int successes = agent_run_parallel(&cfg, tasks, n, results, 0 /* no deadline */);
    agent_http_cleanup();
 
    /* Output results */
