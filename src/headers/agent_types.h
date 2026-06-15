@@ -227,6 +227,11 @@ typedef struct
     * (Vibe-backed Mistral subscription-plan route), and "vibe-plan" (Vibe planning agent).
     * Empty when the backend is not provider-cli. */
    char cli_kind[16];
+   /* 1 if this CLI agent was installed + OAuth'd ON the aimee-server host (via
+    * `aimee agent add <vendor>-oauth`), so it runs as a real server-side delegate
+    * — distinct from a client-only claude. The roundtable panel seats a
+    * server-hosted, authenticated claude; a client-only one stays excluded. */
+   int is_server_hosted;
 } agent_t;
 
 typedef struct

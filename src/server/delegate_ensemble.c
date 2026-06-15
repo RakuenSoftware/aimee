@@ -1244,13 +1244,14 @@ void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acf
    {
       if (!acfg->agents[i].enabled || !acfg->agents[i].name[0])
          continue;
-      /* Skip agents that cannot run as a server-side HTTP delegate. claude-CLI
-       * has no HTTP endpoint (it runs on the thin client over the reverse
-       * channel and is primary-only by default), so seating it in the auto-panel
-       * just burns a slot on a "failed to build request URL" participant. Mirror
-       * the manual delegate route's gate: include it only when the operator opts
-       * in via claude_cli_delegate_enabled. */
-      if (agent_is_claude_cli(&acfg->agents[i]) && !cfg->claude_cli_delegate_enabled)
+      /* Skip a CLIENT-ONLY claude-CLI: it has no HTTP endpoint (it runs on the
+       * thin client over the reverse channel, primary-only by default), so
+       * seating it just burns a slot on a "failed to build request URL"
+       * participant. A SERVER-HOSTED, OAuth'd claude (`is_server_hosted`, via
+       * `aimee agent add claude-oauth`) runs on the server and IS seatable.
+       * Otherwise mirror the manual route's gate (claude_cli_delegate_enabled). */
+      if (agent_is_claude_cli(&acfg->agents[i]) && !acfg->agents[i].is_server_hosted &&
+          !cfg->claude_cli_delegate_enabled)
          continue;
       snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]), "%s",
                acfg->agents[i].name);

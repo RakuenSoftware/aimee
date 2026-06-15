@@ -7,6 +7,7 @@
 #include "agent_tunnel.h"
 #include "commands.h"
 #include "cJSON.h"
+#include "aimee_client.h" /* aimee_client_request: drive server-side OAuth-CLI setup */
 #include <dirent.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -1372,6 +1373,143 @@ static void setup_copilot(app_ctx_t *ctx, agent_config_t *cfg)
    fprintf(stderr, "\nTest with: aimee agent test copilot\n");
 }
 
+/* --- server-hosted OAuth CLI agents (claude-oauth / codex-oauth) --- */
+
+/* POST a {vendor,...} body to a /v1/agent/cli_oauth_* route; returns the parsed
+ * JSON response (caller cJSON_Delete) or NULL on transport/HTTP error. */
+static cJSON *cli_oauth_post(const char *path, cJSON *body)
+{
+   char *bs = cJSON_PrintUnformatted(body);
+   if (!bs)
+      return NULL;
+   int st = 0;
+   char *resp = aimee_client_request("POST", path, bs, &st);
+   free(bs);
+   if (!resp || st < 200 || st >= 300)
+   {
+      cJSON *e = (resp && resp[0]) ? cJSON_Parse(resp) : NULL;
+      const char *msg = NULL;
+      if (e)
+      {
+         cJSON *m = cJSON_GetObjectItemCaseSensitive(e, "error");
+         if (cJSON_IsString(m))
+            msg = m->valuestring;
+      }
+      fprintf(stderr, "server error (%d)%s%s\n", st, msg ? ": " : "", msg ? msg : "");
+      cJSON_Delete(e);
+      free(resp);
+      return NULL;
+   }
+   cJSON *j = cJSON_Parse(resp);
+   free(resp);
+   return j;
+}
+
+static const char *json_str(cJSON *o, const char *key)
+{
+   cJSON *v = cJSON_GetObjectItemCaseSensitive(o, key);
+   return cJSON_IsString(v) ? v->valuestring : "";
+}
+
+/* Drive the server-side install + OAuth login for `vendor` to completion. */
+static void setup_server_oauth_cli(const char *vendor)
+{
+   fprintf(stderr, "\n=== %s — server-hosted OAuth setup ===\n", vendor);
+   fprintf(stderr, "Installing the %s CLI on aimee-server and starting its login...\n", vendor);
+
+   cJSON *start_body = cJSON_CreateObject();
+   cJSON_AddStringToObject(start_body, "vendor", vendor);
+   cJSON *started = cli_oauth_post("/v1/agent/cli_oauth_start", start_body);
+   cJSON_Delete(start_body);
+   if (!started)
+   {
+      fprintf(stderr,
+              "Could not start %s setup (is the server reachable and "
+              "server_cli_oauth_enabled=true?).\n",
+              vendor);
+      return;
+   }
+   char session[128];
+   snprintf(session, sizeof(session), "%s", json_str(started, "session"));
+   const char *url = json_str(started, "url");
+   const char *code = json_str(started, "code");
+   int needs_code_back = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(started, "needs_code_back"));
+
+   fprintf(stderr, "\n1. Open this URL in your browser and authorize:\n   %s\n", url);
+   if (code[0])
+      fprintf(stderr, "2. Enter this one-time code on that page: %s\n", code);
+   cJSON_Delete(started);
+
+   if (needs_code_back)
+   {
+      fprintf(stderr, "\nAfter authorizing, paste the code shown back here: ");
+      fflush(stderr);
+      char line[600];
+      if (fgets(line, sizeof(line), stdin))
+      {
+         line[strcspn(line, "\r\n")] = '\0';
+         cJSON *cb = cJSON_CreateObject();
+         cJSON_AddStringToObject(cb, "vendor", vendor);
+         cJSON_AddStringToObject(cb, "session", session);
+         cJSON_AddStringToObject(cb, "code", line);
+         cJSON *r = cli_oauth_post("/v1/agent/cli_oauth_code", cb);
+         cJSON_Delete(cb);
+         if (!r)
+         {
+            fprintf(stderr, "Failed to submit the code.\n");
+            return;
+         }
+         cJSON_Delete(r);
+      }
+   }
+
+   fprintf(stderr, "\nWaiting for authentication");
+   for (int i = 0; i < 100; i++)
+   {
+      fprintf(stderr, ".");
+      fflush(stderr);
+      sleep(3);
+      cJSON *pb = cJSON_CreateObject();
+      cJSON_AddStringToObject(pb, "vendor", vendor);
+      cJSON_AddStringToObject(pb, "session", session);
+      cJSON *pr = cli_oauth_post("/v1/agent/cli_oauth_poll", pb);
+      cJSON_Delete(pb);
+      if (!pr)
+         continue;
+      const char *state = json_str(pr, "state");
+      if (strcmp(state, "authenticated") == 0)
+      {
+         fprintf(stderr, "\n✓ %s authenticated and registered as a server-side agent '%s'.\n",
+                 vendor, json_str(pr, "agent"));
+         fprintf(stderr, "Test with: aimee delegate review --persona reviewer --via %s \"...\"\n",
+                 json_str(pr, "agent"));
+         cJSON_Delete(pr);
+         return;
+      }
+      if (strcmp(state, "failed") == 0)
+      {
+         fprintf(stderr, "\n%s login failed: %s\n", vendor, json_str(pr, "error"));
+         cJSON_Delete(pr);
+         return;
+      }
+      cJSON_Delete(pr);
+   }
+   fprintf(stderr, "\nTimed out waiting for %s authentication.\n", vendor);
+}
+
+static void setup_claude_oauth(app_ctx_t *ctx, agent_config_t *cfg)
+{
+   (void)ctx;
+   (void)cfg;
+   setup_server_oauth_cli("claude");
+}
+static void setup_codex_oauth_server(app_ctx_t *ctx, agent_config_t *cfg)
+{
+   (void)ctx;
+   (void)cfg;
+   setup_server_oauth_cli("codex");
+}
+
 /* --- agent setup dispatch --- */
 
 typedef struct
@@ -1382,9 +1520,12 @@ typedef struct
 
 static const setup_provider_t setup_providers[] = {
     {"codex", setup_codex_oauth},
-    {"codex-oauth", setup_codex_oauth},
+    /* server-hosted: install the CLI on aimee-server + OAuth there (vs the
+     * client-side device flow that bare `codex` still runs). */
+    {"codex-oauth", setup_codex_oauth_server},
     {"codex-cli", setup_codex},
     {"claude", setup_claude},
+    {"claude-oauth", setup_claude_oauth},
     {"claude-code", setup_claude_code},
     {"copilot", setup_copilot},
     {"minimax", setup_minimax},
@@ -1403,9 +1544,11 @@ void ag_setup(app_ctx_t *ctx, int argc, char **argv)
    if (argc < 1)
    {
       fprintf(stderr, "usage: aimee agent setup <provider>\n");
-      fprintf(stderr, "Providers: codex, codex-oauth, codex-cli, claude, claude-code, minimax, "
-                      "mistral, mistral-cli, mistral-plan, copilot, gemini, gemini-cli, "
-                      "gemini-oauth, openai\n");
+      fprintf(
+          stderr,
+          "Providers: codex, codex-oauth, codex-cli, claude, claude-oauth, claude-code, minimax, "
+          "mistral, mistral-cli, mistral-plan, copilot, gemini, gemini-cli, "
+          "gemini-oauth, openai\n");
       exit(1);
    }
    const char *provider = argv[0];
@@ -1418,7 +1561,8 @@ void ag_setup(app_ctx_t *ctx, int argc, char **argv)
       }
    }
    fatal("unknown setup provider: %s "
-         "(available: codex, codex-oauth, codex-cli, claude, claude-code, minimax, mistral, "
+         "(available: codex, codex-oauth, codex-cli, claude, claude-oauth, claude-code, minimax, "
+         "mistral, "
          "mistral-cli, mistral-plan, copilot, gemini, gemini-cli, gemini-oauth, openai)",
          provider);
 }

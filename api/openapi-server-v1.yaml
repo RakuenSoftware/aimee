@@ -1567,6 +1567,21 @@ paths:
       summary: Poll agent setup progress
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Setup status, content: { application/json: { schema: { type: object } } } } }
+  /agent/cli_oauth_start:
+    post:
+      summary: Install a vendor CLI on the server and start its OAuth login (claude/codex)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Verification URL + code, content: { application/json: { schema: { type: object } } } } }
+  /agent/cli_oauth_code:
+    post:
+      summary: Submit the operator-pasted code into a server-side CLI OAuth login (claude)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Submitted, content: { application/json: { schema: { type: object } } } } }
+  /agent/cli_oauth_poll:
+    post:
+      summary: Poll a server-side CLI OAuth login; register the agent on success
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Login state, content: { application/json: { schema: { type: object } } } } }
   /agent/episodes:
     post:
       summary: List an agent's episodes
