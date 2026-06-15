@@ -72,7 +72,7 @@ int main(void)
    assert(n == 0 && buf[0] == '\0');
 
    /* superseded facts are excluded from current-state recall. */
-   assert(db2_fact_retract("user", "works_for", FACT_AUTHORITY_USER) >= 1);
+   assert(db2_fact_retract("user", "works_for", NULL, FACT_AUTHORITY_USER) >= 1);
    n = db2_fact_recall_block("user", 1, buf, sizeof(buf));
    assert(n == 1);
    assert(strstr(buf, "works_for") == NULL); /* superseded -> not current */

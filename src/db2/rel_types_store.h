@@ -23,6 +23,10 @@ extern "C"
     * sets *out_id when present, 0 when absent, -1 on error. */
    int db2_rel_types_resolve(const char *rel_type, long *out_id);
 
+   /* §1: is `rel_type` ACTIVE in the live ontology table (promoted/operator type
+    * the in-code seed doesn't carry)? 1 = active, 0 = absent/provisional, -1 err. */
+   int db2_rel_types_active(const char *rel_type);
+
    /* Stage a novel rel_type as a provisional row (status='provisional') so a
     * Class-C semantic edge has a resolvable relation_id (§1 "provisional rel_type",
     * promotion is §2). Idempotent. Returns the row id (>0) or -1. */

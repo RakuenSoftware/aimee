@@ -101,6 +101,34 @@ int db2_rel_types_resolve(const char *rel_type, long *out_id)
    return found;
 }
 
+/* §1: is `rel_type` an ACTIVE relation in the live ontology table? A promoted
+ * (§2) or operator-added type is known even though it is not in the in-code seed;
+ * the gate (seed-only) returns NOVEL for it, so the commit path consults this to
+ * avoid re-staging an already-active type as provisional. Returns 1 if active,
+ * 0 if not (or only provisional), -1 on DB error. */
+int db2_rel_types_active(const char *rel_type)
+{
+   if (!rel_type || !rel_type[0])
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char norm[REL_TYPE_NAME_MAX];
+   rel_type_normalize(rel_type, norm, sizeof(norm));
+   if (!norm[0])
+      return 0;
+   static const char *sql =
+       "SELECT 1 FROM rel_types WHERE rel_type = ?1 AND status = 'active' LIMIT 1";
+   char err[RTS_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", norm);
+   int active = (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW) ? 1 : 0;
+   aimee_pg_finalize(st);
+   return active;
+}
+
 long db2_rel_types_stage_provisional(const char *rel_type)
 {
    if (!rel_type || !rel_type[0])
@@ -187,25 +215,45 @@ fact_gate_verdict_t db2_fact_commit(const char *source, memory_node_kind_t head_
    fact_canonical_endpoint(source, head_kind, csrc, sizeof(csrc));
    fact_canonical_endpoint(target, tail_kind, ctgt, sizeof(ctgt));
 
-   if (v == FACT_GATE_ACCEPT)
+   /* §1: a type the seed-only gate calls NOVEL may already be ACTIVE in the live
+    * ontology (promoted §2 or operator-added). Treat that as known — commit it
+    * normally with an ACCEPT-derived class — instead of re-staging it provisional
+    * (which would wrongly demote a promoted type's facts to Class C every write). */
+   int live_known = (v == FACT_GATE_NOVEL) && db2_rel_types_active(norm) == 1;
+   if (live_known)
+   {
+      cls = fact_class_for(authority, FACT_GATE_ACCEPT);
+      conf = fact_class_confidence(cls);
+   }
+
+   if (v == FACT_GATE_ACCEPT || live_known)
    {
       long id = 0;
       if (db2_rel_types_resolve(norm, &id) != 1)
-         return v; /* ontology not seeded / DB issue — do not write unresolved */
-      (void)db2_entity_edge_upsert_semantic(csrc, norm, ctgt, (int)id, (int)head_kind,
-                                            (int)tail_kind, cls, conf, NULL);
-      return v;
+         /* validated, but the relation_id couldn't be resolved (ontology not
+          * seeded / DB issue): DEFER — never write unresolved, and never report
+          * success or (for a live-known NOVEL) leave the caller thinking it should
+          * still stage a provisional. */
+         return FACT_GATE_DEFER;
+      /* §1: a failed write must NOT be reported as success — return DEFER so the
+       * caller retries rather than believing the fact was committed. */
+      if (db2_entity_edge_upsert_semantic(csrc, norm, ctgt, (int)id, (int)head_kind, (int)tail_kind,
+                                          cls, conf, NULL) != 0)
+         return FACT_GATE_DEFER;
+      return FACT_GATE_ACCEPT;
    }
-   /* FACT_GATE_NOVEL: stage as provisional so the edge's relation_id resolves; no
-    * kind validation for a novel type — that is promotion's job (§2). cls is
-    * already Class C here (fact_class_for maps NOVEL -> C regardless of authority). */
+   /* FACT_GATE_NOVEL (and not active in the live table): stage as provisional so
+    * the edge's relation_id resolves; no kind validation for a novel type — that
+    * is promotion's job (§2). cls is already Class C here (fact_class_for maps
+    * NOVEL -> C regardless of authority). */
    long id = db2_rel_types_stage_provisional(norm);
    if (id <= 0)
-      return v;
-   /* §2: count the sighting so the promotion pipeline can evaluate this novel type
-    * once it crosses the occurrence threshold. */
+      return FACT_GATE_DEFER; /* could not stage (DB issue) — defer, do not drop */
+   if (db2_entity_edge_upsert_semantic(csrc, norm, ctgt, (int)id, (int)head_kind, (int)tail_kind,
+                                       cls, conf, NULL) != 0)
+      return FACT_GATE_DEFER;
+   /* §2: count the sighting only after the edge actually committed, so a failed
+    * write doesn't inflate the promotion occurrence count. */
    (void)db2_ontology_eval_observe(norm);
-   (void)db2_entity_edge_upsert_semantic(csrc, norm, ctgt, (int)id, (int)head_kind, (int)tail_kind,
-                                         cls, conf, NULL);
    return v;
 }
