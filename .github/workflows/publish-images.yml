@@ -106,6 +106,16 @@ jobs:
           file: ${{ matrix.image.dockerfile }}
           platforms: linux/${{ matrix.platform.arch }}
           provenance: false
+          # Reuse layers across releases. Without this every release rebuilt all
+          # images on both arches from scratch — re-running the full LTO C build
+          # each time. Scoped per image+arch so the matrix legs never clobber each
+          # other. EXCLUDES aimee-embedder: its torch + baked multi-GB model layers
+          # would blow the 10 GB GHA cache budget and evict the (small, high-reuse)
+          # C-image caches, defeating the purpose. The embedder's real win is the
+          # runtime model fetch (embedder-runtime-fetch-autodim proposal), not the
+          # layer cache.
+          cache-from: ${{ matrix.image.name != 'aimee-embedder' && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          cache-to: ${{ matrix.image.name != 'aimee-embedder' && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
           # Published images bundle the optional browser UI (WITH_WEBCHAT=1); the
           # default `docker compose up --build` an end user runs leaves it off so it
           # needs no credentials. The aimee-kb image ignores WITH_WEBCHAT.

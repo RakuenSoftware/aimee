@@ -228,8 +228,9 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * aimee.api.{http_port,bearer_token} are configured). Best-effort: a bind
     * failure must not block the RPC server. */
    server_http_set_max_event_streams(cfg.server_api_max_event_streams);
-   if (server_http_start(NULL, cfg.server_api_http_port, cfg.server_api_bearer_token,
-                         cfg.server_api_rate_limit_per_min, cfg.server_api_remote_writes) != 0)
+   if (server_http_start(NULL, cfg.server_api_http_port, cfg.server_api_tls_port,
+                         cfg.server_api_bearer_token, cfg.server_api_rate_limit_per_min,
+                         cfg.server_api_remote_writes) != 0)
       LOG_WARN("server.http", "failed to start inbound /v1 HTTP listener");
 
    /* Install signal handlers */

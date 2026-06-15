@@ -259,6 +259,41 @@ static int rh_session_primary_clear(const route_req_t *rq, char *resp, int cap)
    return route_session_primary_clear(rq->id, resp, cap);
 }
 
+/* ── workflow visual composer (W7) ────────────────────────────────────────
+ * Read+author surface over the wfe_ definition model + DB1 run-state; logic in
+ * server_workflow_api.c (self-contained JSON envelopes). */
+static int rh_wf_blocks(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return wf_api_blocks(resp, cap);
+}
+static int rh_wf_list(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return wf_api_list(resp, cap);
+}
+static int rh_wf_get(const route_req_t *rq, char *resp, int cap)
+{
+   return wf_api_get(rq->id, resp, cap);
+}
+static int rh_wf_validate(const route_req_t *rq, char *resp, int cap)
+{
+   return wf_api_validate(rq->body, resp, cap);
+}
+static int rh_wf_save(const route_req_t *rq, char *resp, int cap)
+{
+   return wf_api_save(rq->body, resp, cap);
+}
+static int rh_wf_items(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return wf_api_items(resp, cap);
+}
+static int rh_wf_item(const route_req_t *rq, char *resp, int cap)
+{
+   return wf_api_item(rq->id, resp, cap);
+}
+
 /* The POST /v1/rpc bridge was retired once every dispatch method gained a
  * first-class /v1 route (op-parity complete; check-v1-method-coverage reports 0
  * excluded). The thin client and all co-located callers now use the dedicated
@@ -881,6 +916,8 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/vault/unlock", NULL, RM_EXACT, "vault.unlock", 0, rh_dispatch_op},
     {"POST", "/v1/vault/rekey", NULL, RM_EXACT, "vault.rekey", 0, rh_dispatch_op},
     {"POST", "/v1/vault/set", NULL, RM_EXACT, "vault.set", 0, rh_dispatch_op},
+    {"POST", "/v1/vault/set_server", NULL, RM_EXACT, "vault.set_server", 0, rh_dispatch_op},
+    {"POST", "/v1/vault/capability", NULL, RM_EXACT, "vault.capability", 0, rh_dispatch_op},
     {"POST", "/v1/vault/list", NULL, RM_EXACT, "vault.list", 0, rh_dispatch_op},
     {"POST", "/v1/vault/delete", NULL, RM_EXACT, "vault.delete", 0, rh_dispatch_op},
     {"POST", "/v1/vault/lock", NULL, RM_EXACT, "vault.lock", 0, rh_dispatch_op},
@@ -1004,7 +1041,6 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/sessions/close", NULL, RM_EXACT, "session.close", 0, rh_dispatch_op},
     {"POST", "/v1/sessions/get", NULL, RM_EXACT, "session.get", 0, rh_dispatch_op},
     {"POST", "/v1/sessions/brief", NULL, RM_EXACT, "session.brief", 0, rh_dispatch_op},
-    {"POST", "/v1/session/credentials", NULL, RM_EXACT, "session.credentials", 0, rh_dispatch_op},
     {"GET", "/v1/sessions/presence", NULL, RM_EXACT, "session.presence", 0, rh_dispatch_op},
     {"POST", "/v1/toolsets/resolve", NULL, RM_EXACT, "toolset.resolve", 0, rh_dispatch_op},
     {"POST", "/v1/blast_radius/preview", NULL, RM_EXACT, "blast_radius.preview", 0, rh_dispatch_op},
@@ -1083,6 +1119,17 @@ static const http_route_t g_v1_routes[] = {
 
     /* Unified presence: list / attach / detach / persona / events are
      * session-scoped on the owner's own presence. */
+    /* Workflow visual composer (W7): read+author the wfe_ definition model and
+     * read work-item run-state. Reads (incl. validate, which never mutates) are
+     * dashboard-read; save is session-admin (authoring write). */
+    {"GET", "/v1/workflow/blocks", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_blocks},
+    {"GET", "/v1/workflow/defs", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_list},
+    {"GET", "/v1/workflow/defs/", NULL, RM_PREFIX, NULL, CAP_DASHBOARD_READ, rh_wf_get},
+    {"POST", "/v1/workflow/validate", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_validate},
+    {"POST", "/v1/workflow/save", NULL, RM_EXACT, NULL, CAP_SESSION_ADMIN, rh_wf_save},
+    {"GET", "/v1/workflow/items", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_items},
+    {"GET", "/v1/workflow/items/", NULL, RM_PREFIX, NULL, CAP_DASHBOARD_READ, rh_wf_item},
+
     {"GET", "/v1/sessions", NULL, RM_EXACT, NULL, CAP_SESSION_READ, rh_sessions_list},
     {"POST", "/v1/sessions/", "/attach", RM_PREFIX, NULL, CAP_SESSION_READ, rh_session_attach},
     {"POST", "/v1/sessions/", "/detach", RM_PREFIX, NULL, CAP_SESSION_READ, rh_session_detach},

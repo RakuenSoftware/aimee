@@ -503,6 +503,7 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/workflow/wfe_def.c
     ${AIMEE_SRC_DIR}/workflow/wfe_validate.c
     ${AIMEE_SRC_DIR}/workflow/wfe_canonical.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_custom.c
     ${AIMEE_SRC_DIR}/vendor/cJSON.c
     ${PLATFORM_CORE_SRCS}
 )
@@ -551,7 +552,6 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/worktree_gc.c
     ${AIMEE_SRC_DIR}/workspace_manifest.c
     ${AIMEE_SRC_DIR}/server/agent_config.c
-    ${AIMEE_SRC_DIR}/server/session_credentials.c
     ${AIMEE_SRC_DIR}/cmd_describe.c
     ${AIMEE_SRC_DIR}/history.c
     ${AIMEE_SRC_DIR}/role_templates.c
@@ -782,6 +782,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/vault_kek_cache.c
     ${AIMEE_SRC_DIR}/server/vault_store.c
     ${AIMEE_SRC_DIR}/server/vault_service.c
+    ${AIMEE_SRC_DIR}/server/vault_capability.c
     ${AIMEE_SRC_DIR}/server/server_vault.c
     ${AIMEE_SRC_DIR}/server/server_state.c
     ${AIMEE_SRC_DIR}/server/server_plugin.c
@@ -802,6 +803,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_mcp_skill.c
     ${AIMEE_SRC_DIR}/server/server_mcp_learning.c
     ${AIMEE_SRC_DIR}/server/server_mcp_workflows.c
+    ${AIMEE_SRC_DIR}/server/server_workflow_api.c
     ${AIMEE_SRC_DIR}/server/server_mcp_gateway.c
     ${AIMEE_SRC_DIR}/server/session_search_tool.c
     ${AIMEE_SRC_DIR}/server/compute_pool.c
@@ -1156,6 +1158,7 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/workflow/wfe_def.c
     ${AIMEE_SRC_DIR}/workflow/wfe_validate.c
     ${AIMEE_SRC_DIR}/workflow/wfe_canonical.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_custom.c
 )
 target_include_directories(aimee PRIVATE ${AIMEE_SRC_DIR} ${AIMEE_SRC_DIR}/headers ${AIMEE_SRC_DIR}/vendor/headers ${AIMEE_SRC_DIR}/db1 ${AIMEE_SRC_DIR}/db2 ${AIMEE_SRC_DIR}/workflow)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
@@ -1334,6 +1337,7 @@ target_include_directories(aimee-server PRIVATE
     ${AIMEE_SRC_DIR}/vendor/headers
     ${AIMEE_SRC_DIR}/db1
     ${AIMEE_SRC_DIR}/db2
+    ${AIMEE_SRC_DIR}/workflow
 )
 target_compile_options(aimee-server PRIVATE ${AIMEE_COMMON_WARNINGS})
 target_compile_definitions(aimee-server PRIVATE AIMEE_DB2_DISABLED)

@@ -13,28 +13,48 @@
 #include <dirent.h>
 #endif
 
+static void print_accepts_builtin(wfe_block_type_t t)
+{
+   int any = 0;
+   for (wfe_artifact_type_t a = WFE_ART_PROPOSAL; a < WFE_ART__COUNT; a++)
+      if (wfe_block_accepts_input(t, a))
+      {
+         printf(" %s", wfe_artifact_name(a));
+         any = 1;
+      }
+   if (!any)
+      printf(" (none)");
+}
+
 static void print_blocks(void)
 {
-   static const wfe_block_type_t order[] = {
-       WFE_BLK_AUTHOR_PROPOSAL, WFE_BLK_AUTHOR_PLAN, WFE_BLK_IMPLEMENT,
-       WFE_BLK_DOCUMENT,        WFE_BLK_FREEZE,      WFE_BLK_GATE_ROUNDTABLE,
-       WFE_BLK_GATE_HUMAN,      WFE_BLK_PR_OPEN,     WFE_BLK_MERGE};
+   /* enumerate the live catalog: every built-in (incl. gate.ci / check.mergeable)
+    * plus the config-defined custom registry, so this never drifts from the
+    * blocks the validator + web composer actually know. */
+   char err[256] = "";
+   wfe_custom_registry_ensure(err, sizeof err);
    printf("Workflow block catalog:\n");
-   for (size_t i = 0; i < sizeof order / sizeof order[0]; i++)
+   for (wfe_block_type_t t = WFE_BLK_UNKNOWN + 1; t < WFE_BLK_CUSTOM; t++)
    {
-      wfe_block_type_t t = order[i];
       printf("  %-18s produces %-12s accepts:", wfe_block_name(t),
              wfe_artifact_name(wfe_block_output(t)));
-      int any = 0;
-      for (wfe_artifact_type_t a = WFE_ART_PROPOSAL; a < WFE_ART__COUNT; a++)
-         if (wfe_block_accepts_input(t, a))
-         {
-            printf(" %s", wfe_artifact_name(a));
-            any = 1;
-         }
-      if (!any)
-         printf(" (none)");
+      print_accepts_builtin(t);
       printf("\n");
+   }
+   int n = wfe_custom_count();
+   if (n > 0)
+      printf("Custom blocks ($AIMEE_HOME/workflows/blocks.yaml):\n");
+   for (int i = 0; i < n; i++)
+   {
+      const wfe_custom_block_t *c = wfe_custom_at(i);
+      if (!c)
+         continue;
+      printf("  %-18s produces %-12s accepts:", c->name, wfe_artifact_name(c->produces));
+      if (c->consumes != WFE_ART_NONE)
+         printf(" %s", wfe_artifact_name(c->consumes));
+      else
+         printf(" (none)");
+      printf("  [%s]\n", c->executor == WFE_EXEC_COMMAND ? "command" : "delegate");
    }
 }
 

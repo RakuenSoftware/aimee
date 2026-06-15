@@ -5,6 +5,7 @@
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
 #include "db1.h"
+#include "server_delegate_monitor.h" /* delegate heartbeat begin/end (keep slow delegates alive) */
 #include "server_compute_impl.h"
 #include "presence.h"
 #include "compute_pool.h"
@@ -518,8 +519,10 @@ static void bind_request_session_creds(cJSON *req)
    const char *cred_sid = jo_str(req, "cred_session_id", NULL);
    agent_set_request_session((cred_sid && cred_sid[0]) ? cred_sid
                                                        : compute_request_session_id(req));
-   agent_set_request_codex_creds(jo_str(req, "codex_oauth_token", NULL),
-                                 jo_str(req, "codex_account_id", NULL));
+   /* Clear any per-turn codex creds carried on this pooled thread; the vault is the
+    * source now (delegate_credential_retry sets them from the vault), and the
+    * client no longer pushes a codex token in the request body (P4b). */
+   agent_set_request_codex_creds(NULL, NULL);
 }
 
 static int delegate_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx)
@@ -1374,10 +1377,14 @@ void delegate_worker(void *arg)
    if (saved_toolset_env && saved_toolset_env[0])
       snprintf(saved_toolset_buf, sizeof(saved_toolset_buf), "%s", saved_toolset_env);
    platform_setenv("AIMEE_ACTIVE_TOOLSET", toolset_override ? toolset_override : "");
+   /* Keep this background delegate's heartbeat fresh per model turn so a slow
+    * model is not auto-cancelled mid-progress (restores non-minimax models). */
+   server_delegate_heartbeat_begin(cctx->background_job_id);
    rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,
                                            max_tokens, force_tools, delegate_allows_writes,
                                            leased_cred_name, sizeof(leased_cred_name),
                                            credential_state_path, &result);
+   server_delegate_heartbeat_end();
    concurrency_release_owner(conc_slot, deleg_id);
    delegate_run_ctx_restore(&run_ctx);
    (void)db1_delegation_spawn_complete(deleg_id);

@@ -29,6 +29,18 @@ int handle_vault_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)req;
    return vault_stub(conn);
 }
+int handle_vault_set_server(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   return vault_stub(conn);
+}
+int handle_vault_capability(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   return vault_stub(conn);
+}
 int handle_vault_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;

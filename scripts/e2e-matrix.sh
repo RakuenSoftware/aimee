@@ -54,6 +54,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Models are fetched at runtime now (not baked), so CI uses the STUB embedder
+# (EMBEDDER_STUB=1): deterministic fixed-dim vectors, no multi-GB cold download.
+# It exercises the real kb -> embedder -> pgvector wiring at the deployment's
+# real dim (2560 here, matching the 4b default schema_embedding_dim — never the
+# retired 384). compose reads these via ${...}; exporting covers every topology.
+export EMBEDDER_STUB="${EMBEDDER_STUB:-1}"
+export EMBEDDER_STUB_DIM="${EMBEDDER_STUB_DIM:-2560}"
+export AIMEE_EMBEDDING_DIM="${AIMEE_EMBEDDING_DIM:-2560}"
+
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 selected() { case ",$ONLY," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 have_docker() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }

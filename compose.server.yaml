@@ -37,12 +37,20 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.embedder
-      # Default tier: 4b embedder (2560-dim) + 1b reranker. For a resource-limited
-      # host, build the light tier: EMBEDDER_MODEL=...0.6b, RERANKER_MODEL=...400m-v1,
-      # and AIMEE_EMBEDDING_DIM=1024 on the kb.
       args:
         EMBEDDER_MODEL: ${EMBEDDER_MODEL:-perplexity-ai/pplx-embed-v1-4b}
         RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ettin-reranker-1b-v1}
+    # Tier is a RUNTIME choice now: models are fetched at startup into the volume
+    # (not baked), so EMBEDDER_MODEL / RERANKER_MODEL select the tier with no
+    # rebuild. Light tier: EMBEDDER_MODEL=...-0.6b, RERANKER_MODEL=...-400m-v1,
+    # AIMEE_EMBEDDING_DIM=1024 on the kb (the 4b is 2560).
+    environment:
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-perplexity-ai/pplx-embed-v1-4b}
+      RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/ettin-reranker-1b-v1}
+      # CI stub embedder (off in prod): e2e sets these to serve fixed-dim
+      # vectors with no model download. EMBEDDER_STUB_DIM matches the schema dim.
+      EMBEDDER_STUB: ${EMBEDDER_STUB:-}
+      EMBEDDER_STUB_DIM: ${EMBEDDER_STUB_DIM:-}
     volumes:
       - aimee-embedder-models:/opt/models
     healthcheck:
@@ -50,7 +58,9 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      # Long: a cold first boot downloads the model (minutes for the 4b) before
+      # /health returns 200; the volume makes every later boot fast.
+      start_period: 900s
 
   aimee-kb:
     restart: unless-stopped

@@ -7,9 +7,10 @@
 #define _GNU_SOURCE /* struct ucred / SO_PEERCRED via platform_ipc */
 #endif
 #include "server_http_identity.h"
-#include "server_http.h" /* http_header */
-#include "server.h"      /* server_ct_equal, SERVER_TOKEN_FILE */
-#include "aimee_home.h"  /* aimee_home */
+#include "server_http.h"    /* http_header */
+#include "server.h"         /* server_ct_equal, SERVER_TOKEN_FILE */
+#include "server_conn_io.h" /* server_conn_io_has_ssl — native-TLS attestation */
+#include "aimee_home.h"     /* aimee_home */
 #include "platform_ipc.h"
 #include "vault_principal.h"
 #include <pthread.h>
@@ -89,8 +90,12 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
    }
 
    tl_peer_uid = peer_uid;
-   tl_transport = vault_principal_resolve(is_tcp, peer_uid, webuser, webuser_token_ok, tl_principal,
-                                          sizeof(tl_principal));
+   /* A native-TLS connection (the fd has a registered SSL) is a confidential,
+    * bearer-authorized channel — the operator's authority for server-principal
+    * vault writes (native-TLS provisioning). */
+   int is_tls = server_conn_io_has_ssl(fd);
+   tl_transport = vault_principal_resolve(is_tcp, is_tls, peer_uid, webuser, webuser_token_ok,
+                                          tl_principal, sizeof(tl_principal));
 }
 
 void server_http_identity_apply(server_conn_t *conn)

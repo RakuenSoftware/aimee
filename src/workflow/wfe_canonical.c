@@ -193,7 +193,8 @@ static cJSON *normalize(const wfe_def_t *def)
       const wfe_node_t *nd = &def->nodes[idx[i]];
       cJSON *jn = cJSON_CreateObject();
       cJSON_AddStringToObject(jn, "id", nd->id);
-      cJSON_AddStringToObject(jn, "block", wfe_block_name(nd->block));
+      cJSON_AddStringToObject(
+          jn, "block", nd->block == WFE_BLK_CUSTOM ? nd->custom_name : wfe_block_name(nd->block));
       if (nd->n_ins > 0)
       {
          cJSON *jin = cJSON_CreateObject();
