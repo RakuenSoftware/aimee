@@ -1157,6 +1157,33 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
    return 0;
 }
 
+void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acfg)
+{
+   if (cfg->ensemble_reference_count > 0)
+      return;
+   int n = 0;
+   for (int i = 0; i < acfg->agent_count && n < ENSEMBLE_MAX_REFS; i++)
+   {
+      if (!acfg->agents[i].enabled || !acfg->agents[i].name[0])
+         continue;
+      /* Skip agents that cannot run as a server-side HTTP delegate. claude-CLI
+       * has no HTTP endpoint (it runs on the thin client over the reverse
+       * channel and is primary-only by default), so seating it in the auto-panel
+       * just burns a slot on a "failed to build request URL" participant. Mirror
+       * the manual delegate route's gate: include it only when the operator opts
+       * in via claude_cli_delegate_enabled. */
+      if (agent_is_claude_cli(&acfg->agents[i]) && !cfg->claude_cli_delegate_enabled)
+         continue;
+      snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]), "%s",
+               acfg->agents[i].name);
+      n++;
+   }
+   cfg->ensemble_reference_count = n;
+   if (!cfg->ensemble_aggregator[0] && n > 0)
+      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
+               cfg->ensemble_reference_models[0]);
+}
+
 int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char *prompt,
                           delegate_ensemble_result_t *out)
 {

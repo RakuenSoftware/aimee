@@ -246,6 +246,11 @@ agent_t *agent_find(agent_config_t *cfg, const char *name)
    (void)name;
    return NULL;
 }
+/* Stub: treat the agent literally named "claude" as the CLI-only agent. */
+int agent_is_claude_cli(const agent_t *agent)
+{
+   return agent && strcmp(agent->name, "claude") == 0;
+}
 static int g_cost_fold_calls = 0;
 static double g_cost_fold_total = 0.0;
 int db1_cost_fold_record(const char *parent_sid, const char *child_sid, double cost,
@@ -784,6 +789,44 @@ static void test_roundtable_review_brief_and_items_return(void)
    printf("  test_roundtable_review_brief_and_items_return: ok\n");
 }
 
+static void test_default_panel_excludes_claude_cli(void)
+{
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof(acfg));
+   acfg.agent_count = 3;
+   acfg.agents[0].enabled = 1;
+   snprintf(acfg.agents[0].name, MAX_AGENT_NAME, "mistral");
+   acfg.agents[1].enabled = 1;
+   snprintf(acfg.agents[1].name, MAX_AGENT_NAME, "claude"); /* CLI-only per stub */
+   acfg.agents[2].enabled = 1;
+   snprintf(acfg.agents[2].name, MAX_AGENT_NAME, "codex");
+
+   /* default: claude-CLI is skipped, aggregator defaults to the first seated */
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   ensemble_default_panel_from_agents(&cfg, &acfg);
+   assert(cfg.ensemble_reference_count == 2);
+   assert(strcmp(cfg.ensemble_reference_models[0], "mistral") == 0);
+   assert(strcmp(cfg.ensemble_reference_models[1], "codex") == 0);
+   assert(strcmp(cfg.ensemble_aggregator, "mistral") == 0);
+
+   /* opt-in seats claude too */
+   config_t cfg2;
+   memset(&cfg2, 0, sizeof(cfg2));
+   cfg2.claude_cli_delegate_enabled = 1;
+   ensemble_default_panel_from_agents(&cfg2, &acfg);
+   assert(cfg2.ensemble_reference_count == 3);
+
+   /* a configured panel is left untouched (no-op) */
+   config_t cfg3;
+   memset(&cfg3, 0, sizeof(cfg3));
+   cfg3.ensemble_reference_count = 1;
+   snprintf(cfg3.ensemble_reference_models[0], 128, "preset");
+   ensemble_default_panel_from_agents(&cfg3, &acfg);
+   assert(cfg3.ensemble_reference_count == 1);
+   printf("  test_default_panel_excludes_claude_cli: ok\n");
+}
+
 static void test_panel_persona_name_assignment(void)
 {
    config_t cfg;
@@ -1076,6 +1119,7 @@ int main(void)
    test_roundtable_summarize_forward_sets_truncated();
    test_roundtable_review_saturation_converges();
    test_roundtable_review_brief_and_items_return();
+   test_default_panel_excludes_claude_cli();
    test_panel_persona_name_assignment();
    test_roundtable_review_assigns_personas();
    test_roundtable_cost_capped_skips_question_pass();

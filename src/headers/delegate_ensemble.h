@@ -112,6 +112,13 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                             const roundtable_opts_t *opts, roundtable_result_t *out);
 void delegate_roundtable_result_free(roundtable_result_t *r);
 
+/* Seed cfg->ensemble_reference_models from the enabled agents when no panel is
+ * configured (no-op if ensemble_reference_count > 0). Skips agents that cannot
+ * run as a server-side HTTP delegate (claude-CLI unless
+ * claude_cli_delegate_enabled). Defaults the aggregator to the first seated
+ * model. */
+void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acfg);
+
 /* Persona name for review panelist `model_index`: a configured
  * ensemble.reference_personas[model_index] if set, else a round-robin over the
  * engine's diverse default lineup keyed on the stable model index. Returns NULL

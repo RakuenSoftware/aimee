@@ -1806,25 +1806,6 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* Convene the ensemble panel from enabled registry agents when no explicit
  * ensemble.reference_models is set. Caps at ENSEMBLE_MAX_REFS; aggregator -> 0. */
-static void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acfg)
-{
-   if (cfg->ensemble_reference_count > 0)
-      return;
-   int n = 0;
-   for (int i = 0; i < acfg->agent_count && n < ENSEMBLE_MAX_REFS; i++)
-   {
-      if (!acfg->agents[i].enabled || !acfg->agents[i].name[0])
-         continue;
-      snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]), "%s",
-               acfg->agents[i].name);
-      n++;
-   }
-   cfg->ensemble_reference_count = n;
-   if (!cfg->ensemble_aggregator[0] && n > 0)
-      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
-               cfg->ensemble_reference_models[0]);
-}
-
 /* Mixture-of-Agents ensemble aggregate. Reached over the first-class
  * POST /v1/delegate/aggregate route (method "delegate.aggregate"), dispatched
  * async via rh_dispatch_op_async onto a detached op-run worker (never the
