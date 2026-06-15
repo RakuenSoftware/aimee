@@ -261,8 +261,14 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
  * stubs above; cost-fold is a no-op in the test (no parent session bound). */
 agent_t *agent_find(agent_config_t *cfg, const char *name)
 {
-   (void)cfg;
-   (void)name;
+   /* Real linear search (matches the production resolver). make_acfg() has zero
+    * agents so existing tests still resolve to NULL (lease path skipped); the
+    * panel-authorization test populates agents to exercise the filter. */
+   if (!cfg || !name)
+      return NULL;
+   for (int i = 0; i < cfg->agent_count; i++)
+      if (strcmp(cfg->agents[i].name, name) == 0)
+         return &cfg->agents[i];
    return NULL;
 }
 /* Stub: treat the agent literally named "claude" as the CLI-only agent. */
@@ -877,6 +883,44 @@ static void test_default_panel_excludes_claude_cli(void)
    printf("  test_default_panel_excludes_claude_cli: ok\n");
 }
 
+static void test_panel_filter_drops_unauthorized_claude(void)
+{
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof(acfg));
+   acfg.agent_count = 2;
+   acfg.agents[0].enabled = 1;
+   snprintf(acfg.agents[0].name, MAX_AGENT_NAME, "mistral");
+   acfg.agents[1].enabled = 1;
+   snprintf(acfg.agents[1].name, MAX_AGENT_NAME, "claude"); /* claude-CLI per stub */
+
+   /* An EXPLICIT reference_models list naming an unauthorized claude drops it,
+    * keeps an ad-hoc (non-agent) model id, and repoints the aggregator. */
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.ensemble_reference_count = 3;
+   snprintf(cfg.ensemble_reference_models[0], 128, "mistral");
+   snprintf(cfg.ensemble_reference_models[1], 128, "claude");
+   snprintf(cfg.ensemble_reference_models[2], 128, "adhoc-model"); /* not an agent -> kept */
+   snprintf(cfg.ensemble_aggregator, sizeof(cfg.ensemble_aggregator), "claude");
+   ensemble_filter_panel_authorization(&cfg, &acfg);
+   assert(cfg.ensemble_reference_count == 2);
+   assert(strcmp(cfg.ensemble_reference_models[0], "mistral") == 0);
+   assert(strcmp(cfg.ensemble_reference_models[1], "adhoc-model") == 0);
+   assert(strcmp(cfg.ensemble_aggregator, "mistral") == 0); /* repointed off the dropped claude */
+
+   /* Authorized + server-hosted claude survives the explicit-list filter. */
+   acfg.agents[1].is_server_hosted = 1;
+   config_t cfg2;
+   memset(&cfg2, 0, sizeof(cfg2));
+   cfg2.claude_cli_delegate_enabled = 1;
+   cfg2.ensemble_reference_count = 2;
+   snprintf(cfg2.ensemble_reference_models[0], 128, "mistral");
+   snprintf(cfg2.ensemble_reference_models[1], 128, "claude");
+   ensemble_filter_panel_authorization(&cfg2, &acfg);
+   assert(cfg2.ensemble_reference_count == 2);
+   printf("  test_panel_filter_drops_unauthorized_claude: ok\n");
+}
+
 static void test_panel_persona_name_assignment(void)
 {
    config_t cfg;
@@ -1258,6 +1302,7 @@ int main(void)
    test_roundtable_review_saturation_converges();
    test_roundtable_review_brief_and_items_return();
    test_default_panel_excludes_claude_cli();
+   test_panel_filter_drops_unauthorized_claude();
    test_panel_persona_name_assignment();
    test_roundtable_review_assigns_personas();
    test_roundtable_aggregator_fallback_synthesizes();

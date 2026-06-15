@@ -1235,6 +1235,23 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
    return 0;
 }
 
+/* Is `ag` allowed to sit on a roundtable/ensemble panel? Enabled + named, and —
+ * for claude-CLI — AUTHORIZED as a delegate (claude_cli_delegate_enabled, the
+ * explicit, ToS-sensitive operator opt-in) AND able to run server-side
+ * (is_server_hosted, via `aimee agent add claude-oauth`). A client-only claude
+ * has no server endpoint and would just burn a slot on a "failed to build request
+ * URL" participant; server-hosting is capability, NOT authorization, so both are
+ * required. So an unauthorized or disabled claude is never seated, even after a
+ * server-side OAuth setup. Other enabled agents are eligible. */
+int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag)
+{
+   if (!ag || !ag->enabled || !ag->name[0])
+      return 0;
+   if (agent_is_claude_cli(ag) && (!cfg->claude_cli_delegate_enabled || !ag->is_server_hosted))
+      return 0;
+   return 1;
+}
+
 void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acfg)
 {
    if (cfg->ensemble_reference_count > 0)
@@ -1242,25 +1259,49 @@ void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acf
    int n = 0;
    for (int i = 0; i < acfg->agent_count && n < ENSEMBLE_MAX_REFS; i++)
    {
-      if (!acfg->agents[i].enabled || !acfg->agents[i].name[0])
-         continue;
-      /* Seat claude-CLI only when it is AUTHORIZED as a delegate
-       * (claude_cli_delegate_enabled — the explicit operator opt-in; running a
-       * Claude subscription as an automated delegate is ToS-sensitive) AND can
-       * actually run server-side (is_server_hosted, via `aimee agent add
-       * claude-oauth`; a client-only claude has no server endpoint and would just
-       * burn a slot on a "failed to build request URL" participant). Server-
-       * hosting is capability, NOT authorization — both are required. So an
-       * unauthorized claude (delegate gate off) or a disabled one (enabled is
-       * checked above) is never auto-seated, even after a server-side OAuth setup. */
-      if (agent_is_claude_cli(&acfg->agents[i]) &&
-          (!cfg->claude_cli_delegate_enabled || !acfg->agents[i].is_server_hosted))
+      if (!ensemble_panelist_eligible(cfg, &acfg->agents[i]))
          continue;
       snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]), "%s",
                acfg->agents[i].name);
       n++;
    }
    cfg->ensemble_reference_count = n;
+   if (!cfg->ensemble_aggregator[0] && n > 0)
+      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
+               cfg->ensemble_reference_models[0]);
+}
+
+void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *acfg)
+{
+   /* Applies the same eligibility rule to an EXPLICITLY configured
+    * ensemble.reference_models list: drop any entry that names a configured agent
+    * which is not panel-eligible (an unauthorized / disabled / client-only
+    * claude). An entry that is not a configured agent (an ad-hoc model id) is
+    * left as-is. Keeps reference_models and the aggregator consistent. */
+   int n = 0;
+   for (int i = 0; i < cfg->ensemble_reference_count; i++)
+   {
+      const char *name = cfg->ensemble_reference_models[i];
+      const agent_t *ag = agent_find((agent_config_t *)acfg, name);
+      if (ag && !ensemble_panelist_eligible(cfg, ag))
+      {
+         aimee_log(LOG_WARN, "delegate.panel",
+                   "dropping unauthorized panelist '%s' from the roundtable panel", name);
+         continue;
+      }
+      if (n != i)
+         snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]),
+                  "%s", name);
+      n++;
+   }
+   cfg->ensemble_reference_count = n;
+   /* If the aggregator named a now-dropped agent, repoint it to the first seat. */
+   if (cfg->ensemble_aggregator[0])
+   {
+      const agent_t *agg = agent_find((agent_config_t *)acfg, cfg->ensemble_aggregator);
+      if (agg && !ensemble_panelist_eligible(cfg, agg))
+         cfg->ensemble_aggregator[0] = '\0';
+   }
    if (!cfg->ensemble_aggregator[0] && n > 0)
       snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
                cfg->ensemble_reference_models[0]);

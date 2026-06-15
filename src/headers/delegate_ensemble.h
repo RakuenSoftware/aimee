@@ -124,6 +124,16 @@ void delegate_roundtable_result_free(roundtable_result_t *r);
  * model. */
 void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acfg);
 
+/* 1 if `ag` may sit on a panel: enabled + named, and a claude-CLI only when
+ * authorized (claude_cli_delegate_enabled) AND server-hosted (is_server_hosted). */
+int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag);
+
+/* Drop unauthorized/ineligible configured agents (e.g. an unauthorized claude)
+ * from an EXPLICIT ensemble.reference_models list and fix up the aggregator. Run
+ * after ensemble_default_panel_from_agents so both auto and explicit panels are
+ * authorization-gated. */
+void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *acfg);
+
 /* Persona name for review panelist `model_index`: a configured
  * ensemble.reference_personas[model_index] if set, else a round-robin over the
  * engine's diverse default lineup keyed on the stable model index. Returns NULL

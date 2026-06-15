@@ -1835,6 +1835,9 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    if (agent_load_config(&acfg) != 0)
       return server_send_error(conn, "could not load agents.json", NULL);
    ensemble_default_panel_from_agents(&cfg, &acfg);
+   /* Also gate an EXPLICIT reference_models list: never run an unauthorized
+    * claude as a panelist, however it got into the panel. */
+   ensemble_filter_panel_authorization(&cfg, &acfg);
    bind_request_session_creds(req);
 
    delegate_ensemble_result_t result;
@@ -1921,6 +1924,9 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
       return server_send_error(conn, "could not load agents.json", NULL);
    }
    ensemble_default_panel_from_agents(&cfg, &acfg);
+   /* Also gate an EXPLICIT reference_models list: never run an unauthorized
+    * claude as a panelist, however it got into the panel. */
+   ensemble_filter_panel_authorization(&cfg, &acfg);
    bind_request_session_creds(req);
 
    roundtable_result_t result;
