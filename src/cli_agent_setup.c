@@ -298,6 +298,7 @@ static int setup_oauth_cli_cmd(const char *vendor, int json_output)
       if (!setup_prompt_ex("\nAfter authorizing, paste the code shown back here: ", code,
                            sizeof(code), 1))
       {
+         secure_zero(code, sizeof(code));
          fprintf(stderr, "aimee agent setup: an authorization code is required\n");
          goto done;
       }
