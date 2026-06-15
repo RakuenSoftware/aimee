@@ -1346,15 +1346,16 @@ int pre_tool_check(const char *tool_name, const char *input_json, session_state_
     * session. Skipped when the target is already inside an aimee worktree or a
     * linked git worktree.
     *
-    * Also skipped when a `detached` workspace provider is active: that workspace
-    * is filesystem-authority on the CLIENT, so its file/exec tools marshal over
-    * the reverse channel — forcing them into a server-side worktree would rewrite
-    * paths to a checkout that does not exist on the client. Leave the path/command
-    * untouched and let the detached provider route it. */
+    * The PATH-tool branch is skipped when a `detached` workspace provider is
+    * active: that workspace is filesystem-authority on the CLIENT, so its file
+    * tools marshal over the reverse channel — forcing them into a server-side
+    * worktree would rewrite paths to a checkout that does not exist on the client.
+    * Shell tools are NOT exempted: bash still forks server-side (not yet
+    * marshalled), so it must keep worktree containment regardless of provider. */
    const workspace_provider_t *gr_ws_active = workspace_provider_active();
    int gr_detached_active = gr_ws_active && gr_ws_active->kind == WS_PROVIDER_DETACHED;
-   if (!gr_detached_active &&
-       (is_path_tool(tool_name) || (is_shell_tool(tool_name) && cmd && cJSON_IsString(cmd))))
+   if ((is_path_tool(tool_name) && !gr_detached_active) ||
+       (is_shell_tool(tool_name) && cmd && cJSON_IsString(cmd)))
    {
       /* Determine target path */
       const char *target = effective_cwd;

@@ -1385,10 +1385,10 @@ void delegate_worker(void *arg)
                                            leased_cred_name, sizeof(leased_cred_name),
                                            credential_state_path, &result);
    server_delegate_heartbeat_end();
-   if (detached_bound)
-      workspace_turn_unbind_active();
    concurrency_release_owner(conc_slot, deleg_id);
    delegate_run_ctx_restore(&run_ctx);
+   if (detached_bound) /* unbind last: keep the binding live for any teardown that consults it */
+      workspace_turn_unbind_active();
    (void)db1_delegation_spawn_complete(deleg_id);
 
    /* Post-run named-file drift check: verify named existing paths appear in response. */
