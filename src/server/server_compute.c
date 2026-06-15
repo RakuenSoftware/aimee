@@ -1003,8 +1003,13 @@ void delegate_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
-   if (target_agent && timeout_ms > 0)
-      target_agent->timeout_ms = timeout_ms;
+   /* Never let a delegate run with a non-positive timeout: timeout_ms <= 0
+    * disables the HTTP read deadline and a stalled provider hangs the worker
+    * forever, leaking its pool thread + concurrency slot (see
+    * delegate_effective_timeout_ms). Resolve request > agent-config > default. */
+   if (target_agent)
+      target_agent->timeout_ms =
+          delegate_effective_timeout_ms(timeout_ms, target_agent->timeout_ms);
    delegate_apply_max_turns_policy(&acfg, role, max_turns);
    if (cctx->background_job_id > 0 && target_agent)
       db1_agent_job_set_agent(cctx->background_job_id, target_agent->name);
