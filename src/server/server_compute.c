@@ -1377,14 +1377,16 @@ void delegate_worker(void *arg)
    if (saved_toolset_env && saved_toolset_env[0])
       snprintf(saved_toolset_buf, sizeof(saved_toolset_buf), "%s", saved_toolset_env);
    platform_setenv("AIMEE_ACTIVE_TOOLSET", toolset_override ? toolset_override : "");
-   /* Keep this background delegate's heartbeat fresh per model turn so a slow
-    * model is not auto-cancelled mid-progress (restores non-minimax models). */
+   /* Bind detached workspace: delegate reads the client's live files (no-op if shared). */
+   int detached_bound = cwd[0] ? workspace_turn_bind_active(cwd) : 0;
    server_delegate_heartbeat_begin(cctx->background_job_id);
    rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,
                                            max_tokens, force_tools, delegate_allows_writes,
                                            leased_cred_name, sizeof(leased_cred_name),
                                            credential_state_path, &result);
    server_delegate_heartbeat_end();
+   if (detached_bound)
+      workspace_turn_unbind_active();
    concurrency_release_owner(conc_slot, deleg_id);
    delegate_run_ctx_restore(&run_ctx);
    (void)db1_delegation_spawn_complete(deleg_id);
