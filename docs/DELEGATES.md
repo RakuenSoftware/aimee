@@ -445,9 +445,10 @@ Practical notes:
   aimee config set provider claude                          # use it as the primary
   ```
 
-  (`aimee agent setup claude` does the same but only against a co-located server;
-  on a thin client use `agent add --provider claude`.) The thin-client routing is
-  automatic when the workspace is `detached`.
+  (`aimee agent setup` is reserved for the four first-class providers — `openai`,
+  `anthropic`, `codex-oauth`, `claude-oauth` — so add a tmux-cli claude with
+  `agent add --provider claude`.) The thin-client routing is automatic when the
+  workspace is `detached`.
 - If no client is currently serving the workspace, the CLI agent cannot run
   (there is nowhere with the binary) — start the client / open `aimee chat` for
   that root, or use an HTTP provider.
