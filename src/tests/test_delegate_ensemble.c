@@ -13,6 +13,7 @@
 static int g_parallel_mode = 0; /* 0=all-succeed, 1=only-first-succeeds */
 static int g_aggregator_mode = 0;
 static int g_reason_mode = 0;
+static int g_scorer_calls = 0; /* counts run_quality_scorer ("reason" + score prompt) invocations */
 static int g_repair_mode = 0;
 static int g_parallel_calls = 0;
 static int g_named_calls = 0;
@@ -322,6 +323,8 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
    memset(out, 0, sizeof(*out));
    if (role && strcmp(role, "reason") == 0)
    {
+      if (strstr(user_prompt ? user_prompt : "", "Score this roundtable artifact"))
+         g_scorer_calls++;
       if (strstr(user_prompt ? user_prompt : "", "Answer the caller's roundtable review questions"))
          out->response = strdup("{\"answered_questions\":[{\"question\":\"does auth hold?\","
                                 "\"answer\":\"yes\",\"evidence\":\"review mentions auth\","
@@ -414,6 +417,7 @@ static void reset_modes(void)
    g_parallel_mode = 0;
    g_aggregator_mode = 0;
    g_reason_mode = 0;
+   g_scorer_calls = 0;
    g_repair_mode = 0;
    g_parallel_calls = 0;
    g_named_calls = 0;
@@ -942,6 +946,47 @@ static void test_roundtable_review_parses_fenced_json(void)
    printf("  test_roundtable_review_parses_fenced_json: ok\n");
 }
 
+static void test_roundtable_single_round_skips_scorer(void)
+{
+   /* The cross-round quality scorer (an extra serial LLM call) is pure overhead
+    * for a rounds:1 run and is skipped; multi-round still uses it. */
+   reset_modes();
+   g_parallel_mode = 5; /* panel returns valid review items */
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review once", &opts, &result);
+   assert(rc == 0);
+   assert(g_scorer_calls == 0);     /* no cross-round scorer call */
+   assert(g_aggregator_calls == 0); /* no synthesis LLM call — assembled from items */
+   assert(result.item_count >= 1);
+   assert(result.artifact && strstr(result.artifact, "authorization")); /* built from the items */
+   delegate_roundtable_result_free(&result);
+
+   /* multi-round still scores to pick the best round (regression guard). */
+   reset_modes();
+   g_aggregator_mode = 1;
+   g_reason_mode = 1;
+   config_t cfg2 = make_cfg(1, 2, 10.0);
+   roundtable_opts_t opts2;
+   memset(&opts2, 0, sizeof(opts2));
+   opts2.mode = ROUNDTABLE_DRAFT;
+   opts2.turns = ROUNDTABLE_PARALLEL;
+   opts2.max_rounds = 2;
+   opts2.converge_threshold = 0;
+   roundtable_result_t result2;
+   rc = delegate_roundtable_run(&acfg, &cfg2, "draft twice", &opts2, &result2);
+   assert(rc == 0);
+   assert(g_scorer_calls > 0);
+   delegate_roundtable_result_free(&result2);
+   printf("  test_roundtable_single_round_skips_scorer: ok\n");
+}
+
 static void test_roundtable_cost_capped_skips_question_pass(void)
 {
    reset_modes();
@@ -1187,6 +1232,7 @@ int main(void)
    test_roundtable_review_assigns_personas();
    test_roundtable_aggregator_fallback_synthesizes();
    test_roundtable_review_parses_fenced_json();
+   test_roundtable_single_round_skips_scorer();
    test_roundtable_cost_capped_skips_question_pass();
    test_roundtable_partial_question_answers_report_gaps();
    test_roundtable_draft_brief_questions_not_answered();
