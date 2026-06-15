@@ -24,6 +24,10 @@
 #define CONFIG_DEFAULT_BACKGROUND_THREADS              2
 #define CONFIG_DEFAULT_SESSION_THREADS                 4
 #define CONFIG_DEFAULT_KB_WORKER_THREADS               2
+/* Backstop ceiling on concurrent on-demand (I/O-bound) delegates. Delegates are
+ * gated by the per-model concurrency limiter, not a CPU pool; this only guards
+ * against pathological fan-out exhausting fds/memory. */
+#define CONFIG_DEFAULT_DELEGATE_MAX_INFLIGHT           512
 #define CONFIG_DEFAULT_CONCURRENCY_PREEMPT_REQUEUE_MAX 1
 
 /* Concurrency config: per-model and per-provider overrides */
@@ -76,6 +80,19 @@ static inline int aimee_resolve_session_threads(int configured)
          return (int)value;
    }
    return configured > 0 ? configured : aimee_default_session_threads();
+}
+
+static inline int aimee_resolve_delegate_max_inflight(int configured)
+{
+   const char *env = getenv("AIMEE_DELEGATE_MAX_INFLIGHT");
+   if (env && *env)
+   {
+      char *end = NULL;
+      long value = strtol(env, &end, 10);
+      if (end && *end == '\0' && value > 0)
+         return (int)value;
+   }
+   return configured > 0 ? configured : CONFIG_DEFAULT_DELEGATE_MAX_INFLIGHT;
 }
 
 #define CONFIG_MCP_MAX_CLIENTS          8
@@ -688,6 +705,11 @@ typedef struct config
    /* Per-session threadpool size for chat/tool/delegate work tied to an
     * aimee session. 0 = default to 4. */
    int session_threads;
+
+   /* Backstop ceiling on concurrent on-demand (I/O-bound) background delegates.
+    * Real throttling is the per-model concurrency limiter; this only guards
+    * pathological fan-out. 0 = default to 512. Key: delegate_max_inflight. */
+   int delegate_max_inflight;
 
    /* Per-model/provider concurrency limits: prevent rate-limit cascades.
     * concurrency_default = 0 uses CONCURRENCY_DEFAULT_LIMIT (5). */

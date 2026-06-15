@@ -1540,6 +1540,9 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    server_seed_config_defaults();
    int compute_threads = aimee_resolve_compute_threads(cfg.compute_threads);
    int session_threads = aimee_resolve_session_threads(cfg.session_threads);
+   /* Background (sessionless) delegates run on-demand, gated by the per-model
+    * concurrency limiter; this only sets the pathological-fan-out backstop. */
+   delegate_ondemand_set_ceiling(aimee_resolve_delegate_max_inflight(cfg.delegate_max_inflight));
    /* Mutex for ctx->conns array (accept inserts; conn_close swap-shrinks). */
    pthread_mutex_init(&ctx->conns_mutex, NULL);
    /* Provider concurrency slots: global active count per agent. */
@@ -1677,6 +1680,10 @@ void server_shutdown(server_ctx_t *ctx)
     * available to drain any queued server-side jobs they interact with. */
    server_compute_async_drain();
    server_session_pools_shutdown(ctx);
+   /* Give on-demand (sessionless) delegate threads a bounded window to finish.
+    * They bypass the compute budget and own no socket, so any straggler past the
+    * window only touches DB1 + its own ctx — safe to proceed. */
+   delegate_ondemand_drain(5000);
    /* Shut down compute pool (drain in-flight work) */
    compute_pool_shutdown(&ctx->pool);
    pthread_cond_destroy(&ctx->compute_budget_cond);

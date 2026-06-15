@@ -43,7 +43,9 @@ void server_compute_skill_review_async(server_ctx_t *ctx, const char *session_id
    cctx->async_slot = -1;
    cctx->req = req;
 
-   if (compute_pool_submit(&ctx->pool, delegate_worker, cctx) != 0)
+   /* Skill-review delegates are I/O-bound; run on-demand, not the CPU compute
+    * pool (see delegate_spawn_ondemand). */
+   if (delegate_spawn_ondemand(cctx) != 0)
    {
       compute_ctx_free(cctx);
       LOG_WARN("skill_review", "failed to submit review job for session %s", session_id);

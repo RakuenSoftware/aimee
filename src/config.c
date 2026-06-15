@@ -958,6 +958,10 @@ int config_load(config_t *cfg)
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
       cfg->session_threads = (int)item->valuedouble;
 
+   item = cJSON_GetObjectItemCaseSensitive(root, "delegate_max_inflight");
+   if (cJSON_IsNumber(item) && item->valuedouble > 0)
+      cfg->delegate_max_inflight = (int)item->valuedouble;
+
    /* Per-model/provider concurrency limits */
    config_parse_concurrency_section(cfg, root);
 
