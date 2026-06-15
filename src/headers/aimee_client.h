@@ -53,6 +53,11 @@ extern "C"
     * diagnostics; desc_sz is its buffer size. */
    int aimee_client_remote_active(char *desc_out, unsigned long desc_sz);
 
+   /* Like aimee_client_remote_active, but also reports via *is_https_out whether
+    * the resolved target is an https:// URL (so callers can select the tls:
+    * vs tcp: transport scheme). is_https_out may be NULL. */
+   int aimee_client_remote_active_scheme(char *desc_out, unsigned long desc_sz, int *is_https_out);
+
    /* Returns 1 if a remote target is in effect and copies its bearer token (the
     * second remote.conf line / --server-token / AIMEE_SERVER_TOKEN) into *tok_out
     * (empty string when the target has no token), else 0. Dependency-free (no
