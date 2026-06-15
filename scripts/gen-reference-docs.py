@@ -608,7 +608,7 @@ EXT_RE = re.compile(r'getenv\(\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*\)')
 # standard OS / platform vars aimee reads but does not define as configuration
 EXT_OS_IGNORE = {
     "HOME", "PATH", "PWD", "TEMP", "TMP", "TMPDIR", "LOCALAPPDATA", "APPDATA",
-    "USER", "USERNAME", "USERPROFILE", "SHELL", "PYTHONPATH",
+    "USER", "USERNAME", "USERPROFILE", "SHELL", "PYTHONPATH", "LANG",
     "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR",
 }
 # provider keys resolved via per-agent api_key_env (not getenv literals) — added so

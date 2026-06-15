@@ -11,6 +11,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +27,10 @@ static wfe_custom_block_t g_blocks[WFE_CUSTOM_MAX];
 static int g_count = 0;
 static int g_loaded = 0;
 static int g_allow_command = 0;
+/* Wall-clock cap for a command block (ms). Default ~120s per the proposal's
+ * operational contract; overridable via blocks.yaml `command_timeout_ms`. */
+#define WFE_CUSTOM_COMMAND_TIMEOUT_MS_DEFAULT 120000
+static int g_command_timeout_ms = WFE_CUSTOM_COMMAND_TIMEOUT_MS_DEFAULT;
 
 static wfe_artifact_type_t artifact_from_name(const char *s)
 {
@@ -52,6 +57,7 @@ void wfe_custom_registry_reset(void)
    g_count = 0;
    g_loaded = 0;
    g_allow_command = 0;
+   g_command_timeout_ms = WFE_CUSTOM_COMMAND_TIMEOUT_MS_DEFAULT;
 }
 
 int wfe_custom_count(void)
@@ -65,6 +71,10 @@ const wfe_custom_block_t *wfe_custom_at(int i)
 int wfe_custom_commands_allowed(void)
 {
    return g_allow_command;
+}
+int wfe_custom_command_timeout_ms(void)
+{
+   return g_command_timeout_ms;
 }
 
 const wfe_custom_block_t *wfe_custom_lookup(const char *name)
@@ -338,6 +348,12 @@ int wfe_custom_registry_load(const char *path, char *err, size_t errlen)
    }
    const cJSON *ac = cJSON_GetObjectItemCaseSensitive(root, "allow_command");
    int allow = ac && cJSON_IsTrue(ac);
+   const cJSON *ct = cJSON_GetObjectItemCaseSensitive(root, "command_timeout_ms");
+   int command_timeout_ms = WFE_CUSTOM_COMMAND_TIMEOUT_MS_DEFAULT;
+   /* Upper-bound the cast: a value > INT_MAX would wrap to a negative int, which
+    * the executor treats as "no limit" — the opposite of the operator's intent. */
+   if (ct && cJSON_IsNumber(ct) && ct->valuedouble > 0 && ct->valuedouble <= (double)INT_MAX)
+      command_timeout_ms = (int)ct->valuedouble;
 
    const cJSON *blocks = cJSON_GetObjectItemCaseSensitive(root, "blocks");
    int rc = 0;
@@ -370,6 +386,7 @@ int wfe_custom_registry_load(const char *path, char *err, size_t errlen)
       return -1;
    }
    g_allow_command = allow;
+   g_command_timeout_ms = command_timeout_ms;
    g_loaded = 1; /* set only on the final clean exit */
    return 0;
 }
