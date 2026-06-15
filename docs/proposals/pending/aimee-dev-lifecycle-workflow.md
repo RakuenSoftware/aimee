@@ -9,10 +9,10 @@
   allows**. aimee ships a default "build" workflow (the base lifecycle below);
   users can adjust it or define their own. This replaces the per-deployment
   convention living in an operator's memory/CLAUDE.md.
-- **BLOCKED-ON (hard prerequisite):**
-  [roundtable-panel-composition](roundtable-panel-composition.md) — see §0. The
-  roundtable gate cannot be a real multi-lens review until that ships. Builds on
-  the delegate/coord system and the `docs/proposals/` convention.
+- **BLOCKED-ON (hard prerequisite):** roundtable-panel-composition — see §0. The
+  roundtable gate cannot be a real multi-lens review until that ships.
+  **RESOLVED 2026-06-15: implemented and moved to `docs/proposals/done/`.** Builds
+  on the delegate/coord system and the `docs/proposals/` convention.
 
 ## Goal
 

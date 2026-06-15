@@ -625,6 +625,145 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /cli/session:
+    post:
+      summary: Create/ensure a server-hosted Claude PTY session (terminal forwarding)
+      description: >
+        Starts (or reuses) a detached tmux session running `claude` plus a
+        forkpty child, so a thin client can drive the raw interactive terminal
+        over /v1. Gated by `aimee.api.cli_session_forwarding` (404 when off).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id]
+              properties:
+                session_id: { type: string }
+                rows: { type: integer }
+                cols: { type: integer }
+      responses:
+        "200":
+          description: Session ready
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Invalid session id or body
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: CLI session forwarding disabled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    delete:
+      summary: Kill a server-hosted Claude PTY session
+      parameters:
+        - name: session_id
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        "200":
+          description: Session killed (no-op for unknown id)
+          content:
+            application/json:
+              schema: { type: object }
+  /cli/session/{id}/input:
+    post:
+      summary: Queue raw input (base64) to a PTY session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data]
+              properties:
+                data: { type: string, description: base64-encoded raw input bytes }
+      responses:
+        "200":
+          description: Input queued
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: Unknown session or invalid input
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /cli/session/{id}/resize:
+    post:
+      summary: Set the PTY window size
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rows: { type: integer }
+                cols: { type: integer }
+      responses:
+        "200":
+          description: Resize accepted
+          content:
+            application/json:
+              schema: { type: object }
+        "404":
+          description: Unknown session or bad dimensions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /cli/session/{id}/stream:
+    get:
+      summary: Stream raw PTY output as base64 SSE frames
+      description: >
+        Server-sent events; each `data:` frame is base64-encoded raw terminal
+        output. The pump also drains queued input and applies pending resizes.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: SSE stream of PTY output
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "404":
+          description: CLI session forwarding disabled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /cli/session/{id}:
+    delete:
+      summary: Kill a server-hosted Claude PTY session by id
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Session killed (no-op for unknown id)
+          content:
+            application/json:
+              schema: { type: object }
   /agents:
     get:
       summary: List configured agents and the default agent

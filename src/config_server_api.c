@@ -43,6 +43,10 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
          if (cJSON_IsNumber(item) && item->valuedouble > 0)
             cfg->server_api_max_event_streams = (int)item->valuedouble;
 
+         item = cJSON_GetObjectItemCaseSensitive(api, "cli_session_forwarding");
+         if (cJSON_IsBool(item))
+            cfg->server_api_cli_session_forwarding = cJSON_IsTrue(item) ? 1 : 0;
+
          item = cJSON_GetObjectItemCaseSensitive(api, "remote_writes");
          if (cJSON_IsString(item) && item->valuestring)
          {

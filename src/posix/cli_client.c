@@ -10,6 +10,9 @@
 #include "cli_server_compat.h"
 #include "platform_path.h"
 #include "cJSON.h"
+#ifdef WITH_TLS
+#include "aimee_tls.h" /* native-TLS /v1 transport for a tls: endpoint */
+#endif
 #define RPC_PROTOCOL_VERSION 1
 #include <signal.h>
 #include <stdio.h>
@@ -366,9 +369,11 @@ static int cli_http_connect(const char *endpoint, char *host_out, size_t host_n,
       return fd;
    }
 
-   /* TCP: "[tcp:]host:port". Split host (DNS / IPv4 / bracketed IPv6) and port. */
+   /* TCP: "[tcp:|tls:]host:port". Split host (DNS / IPv4 / bracketed IPv6) and
+    * port. A "tls:" endpoint connects the same TCP socket; the caller wraps it in
+    * a TLS handshake (cli_http_request). */
    const char *hp = endpoint;
-   if (strncmp(hp, "tcp:", 4) == 0)
+   if (strncmp(hp, "tcp:", 4) == 0 || strncmp(hp, "tls:", 4) == 0)
       hp += 4;
    char host[256];
    const char *port_str;
@@ -452,6 +457,113 @@ static int cli_http_connect(const char *endpoint, char *host_out, size_t host_n,
    return out_fd;
 }
 
+/* Transport write/read over either a plaintext fd or a TLS session (tlsp set).
+ * Mirrors aimee_client.c's io abstraction so the same request/response loop
+ * serves both a tcp: and a tls: endpoint. */
+static int cli_conn_write_all(int fd, void *tlsp, const void *buf, size_t len)
+{
+#ifdef WITH_TLS
+   if (tlsp)
+      return aimee_tls_write_all((aimee_tls_t *)tlsp, buf, len);
+#else
+   (void)tlsp;
+#endif
+   size_t total = 0;
+   while (total < len)
+   {
+      ssize_t n = write(fd, (const char *)buf + total, len - total);
+      if (n < 0)
+      {
+         if (errno == EINTR)
+            continue;
+         return -1;
+      }
+      total += (size_t)n;
+   }
+   return 0;
+}
+
+static long cli_conn_read(int fd, void *tlsp, void *buf, size_t len)
+{
+#ifdef WITH_TLS
+   if (tlsp)
+      return aimee_tls_read((aimee_tls_t *)tlsp, buf, len);
+#else
+   (void)tlsp;
+#endif
+   for (;;)
+   {
+      ssize_t n = read(fd, buf, len);
+      if (n < 0 && errno == EINTR)
+         continue;
+      return n;
+   }
+}
+
+/* Send an HTTP request and read the full response (server closes the conn) over
+ * an already-connected transport. Returns a malloc'd NUL-terminated buffer
+ * (caller frees) or NULL on error. */
+static char *cli_http_txn(int fd, void *tlsp, const char *method, const char *path,
+                          const char *host, const char *bearer, const char *body_json,
+                          int timeout_ms)
+{
+   size_t blen = body_json ? strlen(body_json) : 0;
+   size_t reqcap = blen + strlen(path) + strlen(host) + (bearer ? strlen(bearer) : 0) + 256;
+   char *req = malloc(reqcap);
+   if (!req)
+      return NULL;
+   int reqlen = cli_http_build_request(method, path, host, bearer, body_json, req, reqcap);
+   if (reqlen < 0 || cli_conn_write_all(fd, tlsp, req, (size_t)reqlen) != 0)
+   {
+      free(req);
+      return NULL;
+   }
+   free(req);
+
+   size_t cap = 8192, len = 0;
+   char *buf = malloc(cap);
+   if (!buf)
+      return NULL;
+   for (;;)
+   {
+      struct pollfd pfd = {.fd = fd, .events = POLLIN};
+      int rc = poll(&pfd, 1, timeout_ms);
+      if (rc <= 0)
+      {
+         free(buf);
+         return NULL;
+      }
+      if (len + 4096 > cap)
+      {
+         if (cap >= CLIENT_MAX_RESPONSE_SIZE)
+         {
+            free(buf);
+            return NULL;
+         }
+         size_t next = cap * 2;
+         char *grown = realloc(buf, next);
+         if (!grown)
+         {
+            free(buf);
+            return NULL;
+         }
+         buf = grown;
+         cap = next;
+      }
+      long n = cli_conn_read(fd, tlsp, buf + len, cap - len - 1);
+      if (n < 0)
+      {
+         free(buf);
+         return NULL;
+      }
+      if (n == 0)
+         break; /* EOF */
+      len += (size_t)n;
+   }
+   buf[len] = '\0';
+   return buf;
+}
+
 cJSON *cli_http_request(const char *endpoint, const char *method, const char *path,
                         const char *body_json, const char *bearer, int timeout_ms, int *http_status)
 {
@@ -463,95 +575,38 @@ cJSON *cli_http_request(const char *endpoint, const char *method, const char *pa
       timeout_ms = CLIENT_DEFAULT_TIMEOUT_MS;
 
    char host[256];
+   int is_tls = (strncmp(endpoint, "tls:", 4) == 0);
    int fd = cli_http_connect(endpoint, host, sizeof(host), timeout_ms);
    if (fd < 0)
       return NULL;
 
-   /* Build the request (sized for headers + body + slack). */
-   size_t blen = body_json ? strlen(body_json) : 0;
-   size_t reqcap = blen + strlen(path) + strlen(host) + (bearer ? strlen(bearer) : 0) + 256;
-   char *req = malloc(reqcap);
-   if (!req)
+   /* A tls: endpoint terminates TLS natively in the client (the server's
+    * native-TLS listener, #304). The TLS session wraps the connected fd; without
+    * WITH_TLS a tls: endpoint is unsupported. */
+   void *tls = NULL;
+   if (is_tls)
    {
+#ifdef WITH_TLS
+      tls = aimee_tls_connect(fd, host);
+      if (!tls)
+      {
+         close(fd);
+         return NULL;
+      }
+#else
       close(fd);
       return NULL;
-   }
-   int reqlen = cli_http_build_request(method, path, host, bearer, body_json, req, reqcap);
-   if (reqlen < 0)
-   {
-      free(req);
-      close(fd);
-      return NULL;
+#endif
    }
 
-   size_t total = 0;
-   while (total < (size_t)reqlen)
-   {
-      ssize_t n = write(fd, req + total, (size_t)reqlen - total);
-      if (n < 0)
-      {
-         if (errno == EINTR)
-            continue;
-         free(req);
-         close(fd);
-         return NULL;
-      }
-      total += (size_t)n;
-   }
-   free(req);
-
-   /* Read the full response (server sends Connection: close, so read to EOF). */
-   size_t cap = 8192, len = 0;
-   char *buf = malloc(cap);
-   if (!buf)
-   {
-      close(fd);
-      return NULL;
-   }
-   for (;;)
-   {
-      struct pollfd pfd = {.fd = fd, .events = POLLIN};
-      int rc = poll(&pfd, 1, timeout_ms);
-      if (rc <= 0)
-      {
-         free(buf);
-         close(fd);
-         return NULL;
-      }
-      if (len + 4096 > cap)
-      {
-         if (cap >= CLIENT_MAX_RESPONSE_SIZE)
-         {
-            free(buf);
-            close(fd);
-            return NULL;
-         }
-         size_t next = cap * 2;
-         char *grown = realloc(buf, next);
-         if (!grown)
-         {
-            free(buf);
-            close(fd);
-            return NULL;
-         }
-         buf = grown;
-         cap = next;
-      }
-      ssize_t n = read(fd, buf + len, cap - len - 1);
-      if (n < 0)
-      {
-         if (errno == EINTR)
-            continue;
-         free(buf);
-         close(fd);
-         return NULL;
-      }
-      if (n == 0)
-         break; /* EOF */
-      len += (size_t)n;
-   }
+   char *buf = cli_http_txn(fd, tls, method, path, host, bearer, body_json, timeout_ms);
+#ifdef WITH_TLS
+   if (tls)
+      aimee_tls_free(tls);
+#endif
    close(fd);
-   buf[len] = '\0';
+   if (!buf)
+      return NULL;
 
    /* Status line: "HTTP/1.1 <code> <reason>". */
    int status = 0;

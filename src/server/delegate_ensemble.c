@@ -13,6 +13,7 @@
 #include "delegate_credentials.h"
 #include "cost_fold.h"
 #include "log.h"
+#include "persona.h"
 #include "token_tracker.h"
 
 #include <stdio.h>
@@ -53,6 +54,34 @@ static int count_successful(const agent_result_t *results, int count)
          n++;
    }
    return n;
+}
+
+/* Parse JSON from a model response, tolerating a markdown code fence
+ * (```json ... ```) or surrounding prose. Panelists given a persona system
+ * prompt tend to wrap their JSON in a fence, which a strict cJSON_Parse rejects
+ * — leaving the review with zero items and an empty artifact. Try a strict parse
+ * first (bare JSON), then fall back to the substring from the first '{' to the
+ * last '}'. Returns NULL if neither yields valid JSON; caller owns the result. */
+static cJSON *parse_model_json_lenient(const char *text)
+{
+   if (!text || !text[0])
+      return NULL;
+   cJSON *root = cJSON_Parse(text);
+   if (root)
+      return root;
+   const char *open = strchr(text, '{');
+   const char *close = strrchr(text, '}');
+   if (!open || !close || close < open)
+      return NULL;
+   size_t len = (size_t)(close - open) + 1;
+   char *buf = (char *)malloc(len + 1);
+   if (!buf)
+      return NULL;
+   memcpy(buf, open, len);
+   buf[len] = '\0';
+   root = cJSON_Parse(buf);
+   free(buf);
+   return root;
 }
 
 static int best_candidate(const agent_result_t *results, int count)
@@ -463,18 +492,51 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
     * be dispatched by NAME (agent_run_named): agent_run_ex selects by role and
     * an agent's name is not one of its roles, so a name routed as a role finds
     * nothing and returns empty. A role form (or no aggregator) routes by role. */
+   /* Primary: the configured (or default) aggregator. max_tokens 0 = derive from
+    * the aggregator model's own output ceiling, so a reasoning aggregator isn't
+    * truncated mid-synthesis (was a hard 4096). */
+   const char *primary_name = NULL; /* bare-name aggregator we tried, to not retry it */
    if (cfg->ensemble_aggregator[0])
    {
       const char *agg = cfg->ensemble_aggregator;
       const char *at = strchr(agg, '@');
-      /* max_tokens 0 = derive from the aggregator model's own output ceiling, so
-       * a reasoning aggregator isn't truncated mid-synthesis (was a hard 4096). */
       if (!at)
-         return delegate_run_inline(&agg_cfg, agg, "review", NULL, synthesis_prompt, 0, 0.3, out);
-      const char *role = (at[1]) ? at + 1 : "review";
-      return delegate_run_inline(&agg_cfg, NULL, role, NULL, synthesis_prompt, 0, 0.3, out);
+      {
+         primary_name = agg;
+         if (delegate_run_inline(&agg_cfg, agg, "review", NULL, synthesis_prompt, 0, 0.3, out) ==
+                 0 &&
+             out->response && out->response[0])
+            return 0;
+      }
+      else
+      {
+         const char *role = (at[1]) ? at + 1 : "review";
+         if (delegate_run_inline(&agg_cfg, NULL, role, NULL, synthesis_prompt, 0, 0.3, out) == 0 &&
+             out->response && out->response[0])
+            return 0;
+      }
    }
-   return delegate_run_inline(&agg_cfg, NULL, "review", NULL, synthesis_prompt, 0, 0.3, out);
+   else if (delegate_run_inline(&agg_cfg, NULL, "review", NULL, synthesis_prompt, 0, 0.3, out) ==
+                0 &&
+            out->response && out->response[0])
+      return 0;
+
+   /* Fallback: the configured aggregator failed or returned empty. Try each
+    * panelist by name (no-tools) until one synthesizes — a single flaky
+    * aggregator model must not collapse the whole round to an artifact-less
+    * degrade when other capable panelists are available. */
+   for (int i = 0; i < cfg->ensemble_reference_count; i++)
+   {
+      const char *cand = cfg->ensemble_reference_models[i];
+      if (!cand[0] || (primary_name && strcmp(cand, primary_name) == 0))
+         continue;
+      free(out->response);
+      memset(out, 0, sizeof(*out));
+      if (delegate_run_inline(&agg_cfg, cand, "review", NULL, synthesis_prompt, 0, 0.3, out) == 0 &&
+          out->response && out->response[0])
+         return 0;
+   }
+   return -1;
 }
 
 static char *build_round_prompt(const char *task, const char *artifact, const char *peer_notes,
@@ -487,6 +549,7 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
              "\"category\":\"correctness|security|performance|maintainability|style\","
              "\"location\":\"file:line or artifact section\",\"summary\":\"one-sentence issue\","
              "\"recommendation\":\"...\"}],\"overall\":\"...\"}. "
+             "Output raw JSON only — no markdown, no ``` code fences, no prose. "
              "Do not invent stable keys; the engine computes identity keys."
            : "Return the next complete draft. Incorporate useful peer input and do not describe "
              "the process.";
@@ -631,7 +694,7 @@ static int run_convergence_tiebreak(agent_config_t *acfg, const char *task, cons
    {
       if (cost_usd)
          *cost_usd += result_token_cost(acfg, &res, "reason");
-      cJSON *j = cJSON_Parse(res.response);
+      cJSON *j = parse_model_json_lenient(res.response);
       cJSON *c = j ? cJSON_GetObjectItemCaseSensitive(j, "completion") : NULL;
       if (cJSON_IsNumber(c))
          completion = (int)c->valuedouble;
@@ -713,7 +776,7 @@ static int parse_review_issue_keys(const char *text, char keys[][128], int *coun
 {
    if (!text || !count || max <= 0)
       return -1;
-   cJSON *root = cJSON_Parse(text);
+   cJSON *root = parse_model_json_lenient(text);
    if (!root)
       return -1;
    cJSON *issues = cJSON_GetObjectItemCaseSensitive(root, "issues");
@@ -791,7 +854,7 @@ static void capture_review_items_from_text(const char *text, const char *source,
 {
    if (!text || !out)
       return;
-   cJSON *root = cJSON_Parse(text);
+   cJSON *root = parse_model_json_lenient(text);
    if (!root)
       return;
    cJSON *issues = review_items_array(root);
@@ -895,7 +958,7 @@ static void parse_question_answers(const char *text, const roundtable_opts_t *op
     * answer set never silently drops a question (§5). */
    mark_question_gaps(opts, out);
    int n = out->answered_question_count;
-   cJSON *root = text ? cJSON_Parse(text) : NULL;
+   cJSON *root = text ? parse_model_json_lenient(text) : NULL;
    if (!root)
       return; /* keep the gap-seeded result */
    cJSON *answers = cJSON_GetObjectItemCaseSensitive(root, "answered_questions");
@@ -1031,6 +1094,47 @@ static int review_saturated(char prev[][128], int prev_count, char cur[][128], i
    return 1;
 }
 
+/* Diverse default review lineup, round-robined across the panel by the
+ * participant's stable position in reference_models (not the shuffled slot), so
+ * persona<->model pairing is reproducible run to run. Pairs the contrarian
+ * `reviewer` with the constructive `reviewer-constructive`: one tries to break
+ * the change, one assesses it as written. */
+static const char *const PANEL_DEFAULT_PERSONAS[] = {"security", "architect", "qa", "reviewer",
+                                                     "reviewer-constructive"};
+#define PANEL_DEFAULT_PERSONA_COUNT                                                                \
+   ((int)(sizeof(PANEL_DEFAULT_PERSONAS) / sizeof(PANEL_DEFAULT_PERSONAS[0])))
+
+/* Persona name for review panelist `model_index`. Returns NULL for non-review
+ * modes (draft/aggregate keep their prior NULL-persona behavior) and when no
+ * persona applies. The returned pointer is a borrowed string literal or config
+ * field; do not free it. */
+const char *panel_persona_name(const config_t *cfg, roundtable_mode_t mode, int model_index)
+{
+   if (mode != ROUNDTABLE_REVIEW || !cfg || model_index < 0)
+      return NULL;
+   if (model_index < cfg->ensemble_reference_persona_count &&
+       cfg->ensemble_reference_personas[model_index][0])
+      return cfg->ensemble_reference_personas[model_index];
+   return PANEL_DEFAULT_PERSONAS[model_index % PANEL_DEFAULT_PERSONA_COUNT];
+}
+
+/* Compose the system prompt for review panelist `model_index`. Returns a heap
+ * string the caller must free, or NULL (no persona, or compose failed — both
+ * fall back to today's NULL-system-prompt behavior, never dropping a panelist).
+ * persona_compose_delegate_prompt resolves project->user->built-in and itself
+ * falls back to a usable persona, so an unknown custom name is non-fatal. */
+static char *panel_persona_prompt(const config_t *cfg, roundtable_mode_t mode, int model_index)
+{
+   const char *name = panel_persona_name(cfg, mode, model_index);
+   if (!name)
+      return NULL;
+   char *sys = persona_compose_delegate_prompt(name, NULL, NULL);
+   if (!sys)
+      aimee_log(LOG_INFO, "roundtable", "panelist %d: persona '%s' compose failed; no persona",
+                model_index, name);
+   return sys;
+}
+
 static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const char *task,
                               const char *artifact, const char *peer_notes, roundtable_mode_t mode,
                               int round, const char *brief, agent_result_t *results)
@@ -1038,15 +1142,21 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
    int ref_count = cfg->ensemble_reference_count;
    agent_task_t tasks[ENSEMBLE_MAX_REFS];
    char *prompts[ENSEMBLE_MAX_REFS];
+   char *personas[ENSEMBLE_MAX_REFS];
    memset(tasks, 0, sizeof(tasks));
    memset(prompts, 0, sizeof(prompts));
+   memset(personas, 0, sizeof(personas));
    for (int i = 0; i < ref_count; i++)
    {
       prompts[i] = build_round_prompt(task, artifact, peer_notes, mode, round, brief);
       if (!prompts[i])
          goto fail;
+      /* Per-participant persona (review mode only) is the system prompt; the
+       * round prompt still drives the output shape. */
+      personas[i] = panel_persona_prompt(cfg, mode, i);
       tasks[i].role = mode == ROUNDTABLE_REVIEW ? "review" : "draft";
       tasks[i].agent = cfg->ensemble_reference_models[i];
+      tasks[i].system_prompt = personas[i];
       tasks[i].user_prompt = prompts[i];
       tasks[i].temperature = 0.3 + (0.05 * i);
       tasks[i].max_tokens = 0;
@@ -1056,11 +1166,17 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
    for (int i = 0; i < ref_count; i++)
       ensemble_fold_cost(acfg, &results[i], cfg->ensemble_reference_models[i]);
    for (int i = 0; i < ref_count; i++)
+   {
       free(prompts[i]);
+      free(personas[i]);
+   }
    return 0;
 fail:
    for (int i = 0; i < ref_count; i++)
+   {
       free(prompts[i]);
+      free(personas[i]);
+   }
    return -1;
 }
 
@@ -1080,10 +1196,13 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
       char *prompt = build_round_prompt(task, artifact, *peer_notes, mode, round, brief);
       if (!prompt)
          return -1;
+      /* Persona binds to the stable model index `i`, not the shuffled slot. */
+      char *persona = panel_persona_prompt(cfg, mode, i);
       memset(&results[i], 0, sizeof(results[i]));
       agent_run_named(acfg, cfg->ensemble_reference_models[i],
-                      mode == ROUNDTABLE_REVIEW ? "review" : "draft", NULL, prompt, 0,
+                      mode == ROUNDTABLE_REVIEW ? "review" : "draft", persona, prompt, 0,
                       0.3 + (0.05 * i), &results[i]);
+      free(persona);
       if (results[i].response && results[i].response[0])
       {
          char label[256];
@@ -1098,6 +1217,33 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
       free(prompt);
    }
    return 0;
+}
+
+void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acfg)
+{
+   if (cfg->ensemble_reference_count > 0)
+      return;
+   int n = 0;
+   for (int i = 0; i < acfg->agent_count && n < ENSEMBLE_MAX_REFS; i++)
+   {
+      if (!acfg->agents[i].enabled || !acfg->agents[i].name[0])
+         continue;
+      /* Skip agents that cannot run as a server-side HTTP delegate. claude-CLI
+       * has no HTTP endpoint (it runs on the thin client over the reverse
+       * channel and is primary-only by default), so seating it in the auto-panel
+       * just burns a slot on a "failed to build request URL" participant. Mirror
+       * the manual delegate route's gate: include it only when the operator opts
+       * in via claude_cli_delegate_enabled. */
+      if (agent_is_claude_cli(&acfg->agents[i]) && !cfg->claude_cli_delegate_enabled)
+         continue;
+      snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]), "%s",
+               acfg->agents[i].name);
+      n++;
+   }
+   cfg->ensemble_reference_count = n;
+   if (!cfg->ensemble_aggregator[0] && n > 0)
+      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
+               cfg->ensemble_reference_models[0]);
 }
 
 int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char *prompt,

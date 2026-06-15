@@ -89,12 +89,26 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
       snprintf(out->error, sizeof(out->error), "out of memory");
       return -1;
    }
-   if (cli_session_recv(&sess, raw, CLI_SESSION_BUF_MAX) != 0)
+   /* Bound the receive: a CLI stuck in a provider retry loop (e.g. an Anthropic
+    * outage) animates its pane forever without the session dying, so the
+    * stability heuristic alone would hang indefinitely. Prefer the explicit
+    * per-CLI response timeout, then the agent timeout, then the default. */
+   int recv_timeout_ms =
+       agent->cli_idle_timeout_ms > 0
+           ? agent->cli_idle_timeout_ms
+           : (agent->timeout_ms > 0 ? agent->timeout_ms : AGENT_DEFAULT_TIMEOUT_MS);
+   int recv_rc = cli_session_recv(&sess, raw, CLI_SESSION_BUF_MAX, recv_timeout_ms);
+   if (recv_rc != 0)
    {
       free(raw);
-      cli_session_destroy(&sess);
-      snprintf(out->error, sizeof(out->error), "tmux session closed before %s responded",
-               agent->name);
+      cli_session_destroy(&sess); /* kill the (possibly wedged) session */
+      if (recv_rc == -2)
+         snprintf(out->error, sizeof(out->error),
+                  "%s CLI did not respond within %ds (provider may be unavailable)", agent->name,
+                  recv_timeout_ms / 1000);
+      else
+         snprintf(out->error, sizeof(out->error), "tmux session closed before %s responded",
+                  agent->name);
       return -1;
    }
 

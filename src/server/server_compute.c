@@ -1377,8 +1377,8 @@ void delegate_worker(void *arg)
    if (saved_toolset_env && saved_toolset_env[0])
       snprintf(saved_toolset_buf, sizeof(saved_toolset_buf), "%s", saved_toolset_env);
    platform_setenv("AIMEE_ACTIVE_TOOLSET", toolset_override ? toolset_override : "");
-   /* Keep this background delegate's heartbeat fresh per model turn so a slow
-    * model is not auto-cancelled mid-progress (restores non-minimax models). */
+   /* Bind detached workspace: delegate reads the client's live files (no-op if shared). */
+   int detached_bound = cwd[0] ? workspace_turn_bind_active(cwd) : 0;
    server_delegate_heartbeat_begin(cctx->background_job_id);
    rc = delegate_run_with_credential_retry(&acfg, target_agent, role, system_prompt, run_prompt,
                                            max_tokens, force_tools, delegate_allows_writes,
@@ -1387,6 +1387,8 @@ void delegate_worker(void *arg)
    server_delegate_heartbeat_end();
    concurrency_release_owner(conc_slot, deleg_id);
    delegate_run_ctx_restore(&run_ctx);
+   if (detached_bound) /* unbind last: keep the binding live for any teardown that consults it */
+      workspace_turn_unbind_active();
    (void)db1_delegation_spawn_complete(deleg_id);
 
    /* Post-run named-file drift check: verify named existing paths appear in response. */
@@ -1804,25 +1806,6 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* Convene the ensemble panel from enabled registry agents when no explicit
  * ensemble.reference_models is set. Caps at ENSEMBLE_MAX_REFS; aggregator -> 0. */
-static void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acfg)
-{
-   if (cfg->ensemble_reference_count > 0)
-      return;
-   int n = 0;
-   for (int i = 0; i < acfg->agent_count && n < ENSEMBLE_MAX_REFS; i++)
-   {
-      if (!acfg->agents[i].enabled || !acfg->agents[i].name[0])
-         continue;
-      snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]), "%s",
-               acfg->agents[i].name);
-      n++;
-   }
-   cfg->ensemble_reference_count = n;
-   if (!cfg->ensemble_aggregator[0] && n > 0)
-      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
-               cfg->ensemble_reference_models[0]);
-}
-
 /* Mixture-of-Agents ensemble aggregate. Reached over the first-class
  * POST /v1/delegate/aggregate route (method "delegate.aggregate"), dispatched
  * async via rh_dispatch_op_async onto a detached op-run worker (never the

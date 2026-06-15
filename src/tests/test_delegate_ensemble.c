@@ -17,6 +17,7 @@ static int g_repair_mode = 0;
 static int g_parallel_calls = 0;
 static int g_named_calls = 0;
 static int g_aggregator_calls = 0;
+static char g_aggregator_fallback_who[128] = "";
 static int g_cancel_after_checks = -1;
 static char g_last_parallel_prompt[8192];
 
@@ -28,6 +29,23 @@ static char g_last_parallel_prompt[8192];
 #define CAP_MAX 8
 static char g_captured_agents[CAP_MAX][128];
 static int g_captured_count = 0;
+/* Per-participant system prompt (persona) the engine sets on each fan-out task,
+ * captured to assert panel-composition wires a persona per panelist. The
+ * persona_compose stub returns strdup(name), so the captured system_prompt is
+ * the persona name. */
+static char g_captured_personas[CAP_MAX][128];
+
+/* Stub: the engine composes a panelist persona into the system prompt. Return a
+ * heap copy of the name so the caller's free() is balanced and the captured
+ * system_prompt is the persona name. */
+char *persona_compose_delegate_prompt(const char *name, const char *cwd, const char *base_prompt)
+{
+   (void)cwd;
+   (void)base_prompt;
+   if (!name)
+      return NULL;
+   return strdup(name);
+}
 
 int model_capability_get(const char *provider, const char *model_id, model_capability_t *out)
 {
@@ -64,8 +82,12 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
             count > 0 && tasks[0].user_prompt ? tasks[0].user_prompt : "");
    g_captured_count = count < CAP_MAX ? count : CAP_MAX;
    for (int i = 0; i < g_captured_count; i++)
+   {
       snprintf(g_captured_agents[i], sizeof(g_captured_agents[i]), "%s",
                tasks[i].agent ? tasks[i].agent : "(null)");
+      snprintf(g_captured_personas[i], sizeof(g_captured_personas[i]), "%s",
+               tasks[i].system_prompt ? tasks[i].system_prompt : "(null)");
+   }
    for (int i = 0; i < count; i++)
       memset(&out[i], 0, sizeof(out[i]));
    if (g_parallel_mode == 1)
@@ -97,6 +119,14 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
              "\"summary\":\"missing authorization check before write\"}],\"overall\":\"block\"}");
       else if (g_parallel_mode == 6 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
          out[i].response = strdup("{\"items\":[],\"overall\":\"ok\"}");
+      else if (g_parallel_mode == 8 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
+         /* review JSON wrapped in a markdown code fence + prose, as a persona'd
+          * panelist actually returns it — the lenient parser must still extract it. */
+         out[i].response =
+             strdup("Here is my review:\n```json\n"
+                    "{\"items\":[{\"severity\":\"blocking\",\"category\":\"correctness\","
+                    "\"location\":\"src/a.c:1\",\"summary\":\"subtracts instead of adding\","
+                    "\"recommendation\":\"use +\"}],\"overall\":\"block\"}\n```\n");
       else if (g_parallel_mode == 7 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
          out[i].response =
              strdup(i == 0 ? "{\"items\":[{\"severity\":\"blocking\",\"category\":\"correctness\","
@@ -185,6 +215,13 @@ static void fill_aggregator_response(agent_result_t *out, const char *who)
       out->response[n - 2] = '\n';
       out->response[n - 1] = '\0';
    }
+   else if (g_aggregator_mode == 3)
+   {
+      /* The primary aggregator returns empty (fails); a fallback panelist
+       * synthesizes. Records who actually produced the artifact. */
+      out->response = g_aggregator_calls == 1 ? NULL : strdup("fallback synthesized artifact");
+      snprintf(g_aggregator_fallback_who, sizeof(g_aggregator_fallback_who), "%s", who ? who : "");
+   }
    else
    {
       snprintf(buf, sizeof(buf), "synthesized answer %d", g_aggregator_calls);
@@ -224,6 +261,11 @@ agent_t *agent_find(agent_config_t *cfg, const char *name)
    (void)cfg;
    (void)name;
    return NULL;
+}
+/* Stub: treat the agent literally named "claude" as the CLI-only agent. */
+int agent_is_claude_cli(const agent_t *agent)
+{
+   return agent && strcmp(agent->name, "claude") == 0;
 }
 static int g_cost_fold_calls = 0;
 static double g_cost_fold_total = 0.0;
@@ -763,6 +805,143 @@ static void test_roundtable_review_brief_and_items_return(void)
    printf("  test_roundtable_review_brief_and_items_return: ok\n");
 }
 
+static void test_default_panel_excludes_claude_cli(void)
+{
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof(acfg));
+   acfg.agent_count = 3;
+   acfg.agents[0].enabled = 1;
+   snprintf(acfg.agents[0].name, MAX_AGENT_NAME, "mistral");
+   acfg.agents[1].enabled = 1;
+   snprintf(acfg.agents[1].name, MAX_AGENT_NAME, "claude"); /* CLI-only per stub */
+   acfg.agents[2].enabled = 1;
+   snprintf(acfg.agents[2].name, MAX_AGENT_NAME, "codex");
+
+   /* default: claude-CLI is skipped, aggregator defaults to the first seated */
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   ensemble_default_panel_from_agents(&cfg, &acfg);
+   assert(cfg.ensemble_reference_count == 2);
+   assert(strcmp(cfg.ensemble_reference_models[0], "mistral") == 0);
+   assert(strcmp(cfg.ensemble_reference_models[1], "codex") == 0);
+   assert(strcmp(cfg.ensemble_aggregator, "mistral") == 0);
+
+   /* opt-in seats claude too */
+   config_t cfg2;
+   memset(&cfg2, 0, sizeof(cfg2));
+   cfg2.claude_cli_delegate_enabled = 1;
+   ensemble_default_panel_from_agents(&cfg2, &acfg);
+   assert(cfg2.ensemble_reference_count == 3);
+
+   /* a configured panel is left untouched (no-op) */
+   config_t cfg3;
+   memset(&cfg3, 0, sizeof(cfg3));
+   cfg3.ensemble_reference_count = 1;
+   snprintf(cfg3.ensemble_reference_models[0], 128, "preset");
+   ensemble_default_panel_from_agents(&cfg3, &acfg);
+   assert(cfg3.ensemble_reference_count == 1);
+   printf("  test_default_panel_excludes_claude_cli: ok\n");
+}
+
+static void test_panel_persona_name_assignment(void)
+{
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.ensemble_reference_count = 6;
+   /* REVIEW mode: round-robin the diverse default lineup keyed on the model
+    * index (stable, independent of any sequential shuffle). */
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 0), "security") == 0);
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 1), "architect") == 0);
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 2), "qa") == 0);
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 3), "reviewer") == 0);
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 4), "reviewer-constructive") == 0);
+   /* wraps after the lineup is exhausted */
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 5), "security") == 0);
+   /* draft/aggregate keep their prior NULL-persona behavior */
+   assert(panel_persona_name(&cfg, ROUNDTABLE_DRAFT, 0) == NULL);
+   /* a configured persona pins to its model slot; an empty entry within the
+    * configured range still falls back to the default lineup */
+   cfg.ensemble_reference_persona_count = 2;
+   snprintf(cfg.ensemble_reference_personas[1], 64, "security");
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 1), "security") == 0); /* override */
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 0), "security") ==
+          0); /* empty->dflt */
+   assert(strcmp(panel_persona_name(&cfg, ROUNDTABLE_REVIEW, 3), "reviewer") ==
+          0); /* beyond->dflt */
+   printf("  test_panel_persona_name_assignment: ok\n");
+}
+
+static void test_roundtable_review_assigns_personas(void)
+{
+   reset_modes();
+   g_parallel_mode = 6; /* each review panelist returns {"items":[],"overall":"ok"} */
+   memset(g_captured_personas, 0, sizeof(g_captured_personas));
+   config_t cfg = make_cfg(1, 2, 10.0); /* 3 reference models, no configured personas */
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review a change", &opts, &result);
+   assert(rc == 0);
+   /* the engine wired a distinct default-lineup persona onto each panelist's
+    * system prompt (the compose stub echoes the persona name) */
+   assert(strcmp(g_captured_personas[0], "security") == 0);
+   assert(strcmp(g_captured_personas[1], "architect") == 0);
+   assert(strcmp(g_captured_personas[2], "qa") == 0);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_review_assigns_personas: ok\n");
+}
+
+static void test_roundtable_aggregator_fallback_synthesizes(void)
+{
+   reset_modes();
+   g_aggregator_mode = 3; /* primary aggregator returns empty; a fallback panelist synthesizes */
+   g_aggregator_fallback_who[0] = '\0';
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 2;
+   opts.converge_threshold = 0;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft needing synthesis", &opts, &result);
+   assert(rc == 0);
+   /* The primary aggregator returned empty on its first call; a fallback panelist
+    * synthesized rather than collapsing the round to an empty artifact. */
+   assert(result.artifact && result.artifact[0]);
+   assert(g_aggregator_calls >= 2); /* primary (empty) + at least one fallback attempt */
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_aggregator_fallback_synthesizes: ok\n");
+}
+
+static void test_roundtable_review_parses_fenced_json(void)
+{
+   reset_modes();
+   g_parallel_mode = 8; /* panelists return review JSON wrapped in a ```json fence + prose */
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review fenced", &opts, &result);
+   assert(rc == 0);
+   /* the lenient parser strips the markdown fence/prose, so the review items are
+    * captured instead of being dropped (which left artifact empty + degraded). */
+   assert(result.item_count >= 1);
+   assert(strcmp(result.items[0].severity, "blocking") == 0);
+   assert(strstr(result.items[0].summary, "subtract") != NULL);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_review_parses_fenced_json: ok\n");
+}
+
 static void test_roundtable_cost_capped_skips_question_pass(void)
 {
    reset_modes();
@@ -1003,6 +1182,11 @@ int main(void)
    test_roundtable_summarize_forward_sets_truncated();
    test_roundtable_review_saturation_converges();
    test_roundtable_review_brief_and_items_return();
+   test_default_panel_excludes_claude_cli();
+   test_panel_persona_name_assignment();
+   test_roundtable_review_assigns_personas();
+   test_roundtable_aggregator_fallback_synthesizes();
+   test_roundtable_review_parses_fenced_json();
    test_roundtable_cost_capped_skips_question_pass();
    test_roundtable_partial_question_answers_report_gaps();
    test_roundtable_draft_brief_questions_not_answered();

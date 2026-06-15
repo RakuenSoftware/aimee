@@ -306,8 +306,10 @@ static char *tcp_request(const char *url, const char *token, const char *method,
    return out;
 }
 
-int aimee_client_remote_active(char *desc_out, unsigned long desc_sz)
+int aimee_client_remote_active_scheme(char *desc_out, unsigned long desc_sz, int *is_https_out)
 {
+   if (is_https_out)
+      *is_https_out = 0;
    char url[512], tok[256];
    if (!resolve_remote(url, sizeof(url), tok, sizeof(tok)))
       return 0;
@@ -316,11 +318,20 @@ int aimee_client_remote_active(char *desc_out, unsigned long desc_sz)
       char host[256], port[16];
       int is_https = 0;
       if (parse_url(url, host, sizeof(host), port, sizeof(port), &is_https) == 0)
+      {
          snprintf(desc_out, desc_sz, "%s:%s", host, port);
+         if (is_https_out)
+            *is_https_out = is_https;
+      }
       else
          snprintf(desc_out, desc_sz, "%s", url);
    }
    return 1;
+}
+
+int aimee_client_remote_active(char *desc_out, unsigned long desc_sz)
+{
+   return aimee_client_remote_active_scheme(desc_out, desc_sz, NULL);
 }
 
 int aimee_client_remote_token(char *tok_out, unsigned long tok_sz)

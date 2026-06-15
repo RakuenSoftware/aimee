@@ -217,6 +217,11 @@ int main(void)
       cfg.ensemble_reference_count = 2;
       snprintf(cfg.ensemble_reference_models[0], sizeof(cfg.ensemble_reference_models[0]), "m-a");
       snprintf(cfg.ensemble_reference_models[1], sizeof(cfg.ensemble_reference_models[1]), "m-b");
+      cfg.ensemble_reference_persona_count = 2;
+      snprintf(cfg.ensemble_reference_personas[0], sizeof(cfg.ensemble_reference_personas[0]),
+               "security");
+      snprintf(cfg.ensemble_reference_personas[1], sizeof(cfg.ensemble_reference_personas[1]),
+               "reviewer-constructive");
       /* identity.working_profile_injection.* (+ fields array) */
       cfg.identity_working_profile_injection_enabled = 1;
       cfg.identity_working_profile_injection_fields_count = 1;
@@ -381,6 +386,9 @@ int main(void)
       assert(strcmp(cfg2.ensemble_aggregator, "synthesizer") == 0);
       assert(cfg2.ensemble_reference_count == 2 &&
              strcmp(cfg2.ensemble_reference_models[1], "m-b") == 0);
+      assert(cfg2.ensemble_reference_persona_count == 2 &&
+             strcmp(cfg2.ensemble_reference_personas[0], "security") == 0 &&
+             strcmp(cfg2.ensemble_reference_personas[1], "reviewer-constructive") == 0);
       assert(cfg2.identity_working_profile_injection_enabled == 1);
       assert(cfg2.identity_working_profile_injection_fields_count == 1 &&
              strcmp(cfg2.identity_working_profile_injection_fields[0], "tone") == 0);
