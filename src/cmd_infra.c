@@ -313,8 +313,8 @@ void cmd_git(app_ctx_t *ctx, int argc, char **argv)
 
       /* CLI path: no server context available — verify_run_waves falls back
        * to an ephemeral pool. The vast majority of verify invocations route
-       * through cli_rpc_lookup and end up server-side via mcp.call (see
-       * cli_rpc_routes.inc), so this branch is only hit when running aimee
+       * through cli_v1_lookup and end up server-side via mcp.call (see
+       * cli_v1_routes.inc), so this branch is only hit when running aimee
        * directly without a live server. */
       resp = handle_git_verify(NULL, args, NULL);
    }

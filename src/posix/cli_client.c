@@ -254,7 +254,7 @@ cli_transport_t cli_transport_parse(const char *s)
 }
 
 /* cli_v1_route_for_method / cli_v1_pathid_route_for_method now live in the shared
- * cli_rpc_routes.inc (included by both posix/ and windows/cli_client.c) so the
+ * cli_v1_routes.inc (included by both posix/ and windows/cli_client.c) so the
  * Windows thin client uses the same first-class /v1 routing. */
 
 /* Percent-encode `in` into `out` (cap incl. NUL): RFC3986 unreserved bytes pass
@@ -291,7 +291,7 @@ int cli_v1_pct_encode(const char *in, char *out, size_t cap)
    return 0;
 }
 
-/* cli_v1_pathid_route_for_method moved to the shared cli_rpc_routes.inc. */
+/* cli_v1_pathid_route_for_method moved to the shared cli_v1_routes.inc. */
 
 int cli_http_build_request(const char *method, const char *path, const char *host,
                            const char *bearer, const char *body, char *buf, size_t cap)
@@ -1068,7 +1068,7 @@ int cli_server_available(const char *socket_path)
    return cli_http_health_ok(CLIENT_CONNECT_TIMEOUT_MS);
 }
 
-/* cli_v1_dispatch_local now lives in the shared cli_rpc_routes.inc — it resolves the
+/* cli_v1_dispatch_local now lives in the shared cli_v1_routes.inc — it resolves the
  * method's first-class /v1 route (no more POST /v1/rpc bridge). */
 
 void cli_close(cli_conn_t *conn)
@@ -1653,4 +1653,4 @@ int cli_start_server(void)
    return 0;
 }
 
-#include "../cli_rpc_routes.inc"
+#include "../cli_v1_routes.inc"

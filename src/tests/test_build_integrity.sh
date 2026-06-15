@@ -486,7 +486,7 @@ fi
 
 route_drift=""
 for platform_client in posix/cli_client.c windows/cli_client.c; do
-    if ! grep -q '#include "../cli_rpc_routes.inc"' "$platform_client"; then
+    if ! grep -q '#include "../cli_v1_routes.inc"' "$platform_client"; then
         route_drift="$route_drift $platform_client:missing-shared-routes"
     fi
     if grep -q 'rpc_routes\[\]' "$platform_client"; then

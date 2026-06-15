@@ -423,8 +423,8 @@ static int client_delegate_plan(int argc, char **argv, int global_json_output)
       char parbuf[32];
       snprintf(parbuf, sizeof(parbuf), "%d", parallel > 0 ? parallel : 3);
       char *launch_argv[] = {"launch", (char *)output_path, "--parallel", parbuf};
-      cli_rpc_route_t route;
-      if (!cli_rpc_lookup("delegate", 4, launch_argv, &route))
+      cli_v1_route_t route;
+      if (!cli_v1_lookup("delegate", 4, launch_argv, &route))
       {
          cJSON_Delete(plan);
          fprintf(stderr, "aimee: delegate launch route unavailable\n");
@@ -440,7 +440,7 @@ static int client_delegate_plan(int argc, char **argv, int global_json_output)
       }
       if (!json_output)
          printf("Launching reviewed packet plan...\n");
-      int rc = cli_rpc_forward(sock, &route, json_output, NULL, NULL, 4, launch_argv);
+      int rc = cli_v1_forward(sock, &route, json_output, NULL, NULL, 4, launch_argv);
       cJSON_Delete(plan);
       return rc >= 0 ? rc : 1;
    }
@@ -854,7 +854,7 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
     * client's working tree over the reverse-channel so those tools act here (the
     * client never absorbs the engine or a DB). A co-located server uses the local
     * socket as before. */
-   int remote = cli_rpc_remote_endpoint_is_tcp();
+   int remote = cli_v1_remote_endpoint_is_tcp();
    const char *sock = NULL;
    if (remote)
    {
@@ -880,8 +880,8 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
    cJSON *resp;
    if (remote)
    {
-      char *endpoint = cli_rpc_client_endpoint();
-      char *bearer = cli_rpc_client_bearer();
+      char *endpoint = cli_v1_client_endpoint();
+      char *bearer = cli_v1_client_bearer();
       char *body = cJSON_PrintUnformatted(req);
       int status = 0;
       resp = (endpoint && body) ? cli_http_request(endpoint, "POST", "/v1/launch/run", body, bearer,
@@ -1387,7 +1387,7 @@ static char *acp_dispatch_prompt(const char *content, const char *session_id)
 {
    /* ACP turns run the agent locally (see launch_session_with_input); a remote
     * /v1 endpoint cannot serve them. */
-   if (cli_rpc_remote_endpoint_is_tcp())
+   if (cli_v1_remote_endpoint_is_tcp())
       return NULL;
    const char *sock = cli_ensure_server_for_method("chat.send_stream");
    if (!sock)
@@ -1453,7 +1453,7 @@ int main(int argc, char **argv)
 {
    /* Ignore SIGPIPE so write() to a dead aimee-server socket returns EPIPE
     * instead of terminating the CLI mid-RPC. cli_client retries via
-    * cli_rpc_forward; mcp-serve's reconnect loop reuses the same path.
+    * cli_v1_forward; mcp-serve's reconnect loop reuses the same path.
     * Without this, a server restart between two CLI calls killed the
     * caller and (for mcp-serve) showed up to Claude as
     * "MCP server disconnected". */
@@ -1779,7 +1779,7 @@ int main(int argc, char **argv)
     * root lives on THIS host, which the server cannot read. Resolve + register +
     * ingest from the client rather than forwarding the raw path (which the
     * server would try to realpath against its own filesystem and reject). */
-   if (cli_rpc_remote_endpoint_is_tcp())
+   if (cli_v1_remote_endpoint_is_tcp())
    {
       if (strcmp(cmd, "workspace") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "add") == 0)
          return cli_workspace_add_remote(sub_argc >= 2 ? sub_argv[1] : NULL);
@@ -1795,15 +1795,15 @@ int main(int argc, char **argv)
 
    /* Route through native server RPCs when possible. */
    {
-      cli_rpc_route_t route;
-      if (cli_rpc_lookup(cmd, sub_argc, sub_argv, &route))
+      cli_v1_route_t route;
+      if (cli_v1_lookup(cmd, sub_argc, sub_argv, &route))
       {
          const char *server_method = route.server_method ? route.server_method : route.method;
-         /* A configured remote /v1 endpoint is served over TCP by cli_rpc_forward;
+         /* A configured remote /v1 endpoint is served over TCP by cli_v1_forward;
           * there is no local socket to discover, so skip the socket preflight
           * (which would print "server unavailable") in that mode. */
          const char *sock = NULL;
-         if (!cli_rpc_has_remote_endpoint())
+         if (!cli_v1_has_remote_endpoint())
          {
             sock = cli_ensure_server_for_method(server_method);
             if (!sock)
@@ -1812,8 +1812,8 @@ int main(int argc, char **argv)
                return 1;
             }
          }
-         int rc = cli_rpc_forward(sock, &route, json_output, json_fields, response_profile,
-                                  sub_argc, sub_argv);
+         int rc = cli_v1_forward(sock, &route, json_output, json_fields, response_profile, sub_argc,
+                                 sub_argv);
          if (rc >= 0)
             return rc;
          fprintf(stderr, "aimee: server RPC request failed for '%s'\n", cmd);
