@@ -168,6 +168,49 @@ DB1) and `aimee-kb` (knowledge, DB2/DB3) split this work, and the
 
 ---
 
+## 7. Typed facts: a validated relationship layer
+
+Beyond free-text memory, aimee can record **typed facts** — relationships with
+real semantics, validated before they are stored. "Alice `works_for` Acme" or
+"the laptop `device_has_ip` 10.0.0.3" are not just sentences; they are triples
+checked against an ontology of what each relation *means*.
+
+- **An ontology defines each relation.** A `rel_types` table is the single source
+  of truth: every relation (`works_for`, `spouse`, `lives_in`, `device_has_ip`, …)
+  declares its allowed subject/object kinds (`PERSON`, `DEVICE`, `PLACE`, `ORG`,
+  `IP`, `SCALAR`, …), whether it is symmetric, its inverse, a correction policy,
+  and a PII sensitivity tier. A seed ontology ships in code (so it works during a
+  DB outage); the live table can be extended by operators or grown automatically
+  by promotion. Nothing rejects "the printer `works_for` the kernel" today —
+  the typed-fact gate does, because the kinds don't match.
+- **The write gate is the single commit point.** Every candidate triple — from
+  pattern extraction, model rewrite, or the curator — passes through one gate
+  before it becomes a stored edge. A known relation with valid kinds is committed;
+  a kind mismatch is rejected; a relation that is novel (not in the seed) is staged
+  provisionally and counts toward promotion. A relation already **active** in the
+  live ontology is treated as known even if it isn't in the seed. If the write
+  itself fails, the gate reports *defer* (never a false success) so the fact is
+  retried, not silently lost.
+- **Confidence classes track provenance.** A fact a user states is **Class A**; a
+  model inference consistent with the ontology is **Class B**; a novel/speculative
+  relation is **Class C**. Classes drive decay and durability — speculative facts
+  expire if never confirmed; confirmed model facts become durable.
+- **Corrections respect authority.** Each relation has a correction policy
+  (`supersede`, `hard_delete`, or `immutable`). Crucially, a **model or inferred
+  retraction can never delete a user-stated (Class-A) fact** — only the user can
+  retract their own facts; a model correction that contradicts the user is
+  refused. Retractions can target a specific old value or all values of a
+  relation, and corrected facts are archived (retained + auditable), never erased.
+- **PII is gated per relation.** Each relation carries a sensitivity tier so
+  personal facts can be withheld from contexts that shouldn't see them; an
+  unknown/learned relation fails closed to the restrictive tier.
+
+Typed facts are **off by default** — enable them with `typed_facts_enabled: true`
+in config. Validated facts join the same `<aimee-context>` envelope as the rest of
+the knowledge base, so recall and injection are unchanged.
+
+---
+
 ## Where this is today vs. where it's heading
 
 The substrate is real and shipping: the four-tier memory, the curator extraction

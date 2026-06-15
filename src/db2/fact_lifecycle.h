@@ -63,15 +63,26 @@ extern "C"
    /* §4 retraction. Negative return = not applied. */
 #define FACT_RETRACT_IMMUTABLE (-2) /* immutable rel_type, non-user authority refused */
 
-   /* Retract the active value(s) for (source, relation) on semantic edges,
-    * applying the rel_type's correction_behavior:
+   /* Retract value(s) for (source, relation) on semantic edges, applying the
+    * rel_type's correction_behavior:
     *   supersede    -> stamp superseded_at (archived, still auditable);
     *   hard_delete  -> set suppressed = 1 + stamp superseded_at (tombstone);
     *   immutable    -> refuse (return FACT_RETRACT_IMMUTABLE) UNLESS authority is
     *                   user, in which case it supersedes (the user always wins).
-    * Unknown / novel rel_types default to supersede. Returns the count of edges
-    * affected (>=0), FACT_RETRACT_IMMUTABLE on a refused immutable edit, or -1. */
-   int db2_fact_retract(const char *source, const char *relation, fact_authority_t authority);
+    * Unknown / novel rel_types default to supersede.
+    *
+    * `target` (the old value) scopes the retraction to the specific
+    * {source, relation, target} edge; NULL/empty retracts all current values of
+    * (source, relation).
+    *
+    * Authority guard (§4/§5): a non-user (model/inferred) authority must NOT
+    * retract a user-stated Class-A edge — such rows are skipped. A user authority
+    * is unrestricted (and also overrides `immutable`, above).
+    *
+    * Returns the count of edges affected (>=0), FACT_RETRACT_IMMUTABLE on a
+    * refused immutable edit, or -1 on bad args / DB error. */
+   int db2_fact_retract(const char *source, const char *relation, const char *target,
+                        fact_authority_t authority);
 
    /* Count currently-believed semantic edges touching `entity`: active
     * (superseded_at = '' AND suppressed = 0). The current-state recall filter

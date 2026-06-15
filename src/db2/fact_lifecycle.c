@@ -121,7 +121,8 @@ int db2_fact_promote_durable(int threshold)
    return rc == AIMEE_PG_DONE ? changes : -1;
 }
 
-int db2_fact_retract(const char *source, const char *relation, fact_authority_t authority)
+int db2_fact_retract(const char *source, const char *relation, const char *target,
+                     fact_authority_t authority)
 {
    if (!source || !source[0] || !relation || !relation[0])
       return -1;
@@ -147,15 +148,25 @@ int db2_fact_retract(const char *source, const char *relation, fact_authority_t 
    char now_utc[32];
    fl_now_utc(now_utc, sizeof(now_utc));
 
-   /* supersede (and user-overridden immutable): stamp superseded_at.
-    * hard_delete: tombstone (suppressed=1) + stamp, still retained + auditable. */
-   const char *sql = (behavior == CORR_HARD_DELETE)
-                         ? "UPDATE entity_edges SET suppressed = 1, superseded_at = ?3"
-                           " WHERE source = ?1 AND relation = ?2 AND edge_class = 'semantic'"
-                           "   AND superseded_at = '' AND suppressed = 0"
-                         : "UPDATE entity_edges SET superseded_at = ?3"
-                           " WHERE source = ?1 AND relation = ?2 AND edge_class = 'semantic'"
-                           "   AND superseded_at = '' AND suppressed = 0";
+   /* §4 scope: when `target` (the old value) is given, retract only that specific
+    * {subject, rel_type, old_value} edge; NULL retracts all current values of
+    * (subject, relation) — the "this no longer holds at all" case.
+    *
+    * §4/§5 authority guard: a non-user (model / inferred) retraction must NOT
+    * supersede or hard-delete a user-stated Class-A fact. Without this, a model
+    * correction could silently delete what the user explicitly said. A user
+    * retraction is unrestricted (it already overrides even `immutable` above). */
+   int has_target = target && target[0];
+   const char *set_clause = (behavior == CORR_HARD_DELETE)
+                                ? "UPDATE entity_edges SET suppressed = 1, superseded_at = ?3"
+                                : "UPDATE entity_edges SET superseded_at = ?3";
+   char sql[512];
+   snprintf(sql, sizeof sql,
+            "%s WHERE source = ?1 AND relation = ?2 AND edge_class = 'semantic'"
+            " AND superseded_at = '' AND suppressed = 0%s%s",
+            set_clause, has_target ? " AND target = ?4" : "",
+            authority != FACT_AUTHORITY_USER ? " AND confidence_class <> 'A'" : "");
+
    char err[FL_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -163,6 +174,8 @@ int db2_fact_retract(const char *source, const char *relation, fact_authority_t 
    aimee_pg_bind_text(st, "?1", source);
    aimee_pg_bind_text(st, "?2", norm);
    aimee_pg_bind_text(st, "?3", now_utc);
+   if (has_target)
+      aimee_pg_bind_text(st, "?4", target);
    int rc = aimee_pg_step(st, err, sizeof(err));
    int changes = aimee_pg_stmt_changes(st);
    aimee_pg_finalize(st);

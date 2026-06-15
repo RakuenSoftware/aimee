@@ -143,10 +143,14 @@ int main(void)
    (void)db2_fact_expire_speculative(30);
    assert(db2_fact_current_count("carol") == 1); /* confirmed C survives */
 
-   /* §4 retract — supersede (works_for default): active edges get superseded_at,
-    * row retained, not suppressed. */
+   /* §4/§5 retract authority guard: alice/works_for was upgraded to Class A by the
+    * user commit above, so a MODEL retraction must NOT touch it (a model may not
+    * delete a user-stated fact) — it returns 0 and the fact stands. A USER
+    * retraction then supersedes it (row retained, not suppressed). */
    assert(db2_fact_current_count("alice") == 1);
-   assert(db2_fact_retract("alice", "works_for", FACT_AUTHORITY_MODEL) >= 1);
+   assert(db2_fact_retract("alice", "works_for", NULL, FACT_AUTHORITY_MODEL) == 0);
+   assert(db2_fact_current_count("alice") == 1); /* model refused: Class A stands */
+   assert(db2_fact_retract("alice", "works_for", NULL, FACT_AUTHORITY_USER) >= 1);
    assert(db2_fact_current_count("alice") == 0);
    s = edge_state("alice", "works_for");
    assert(s.superseded[0] != '\0' && s.suppressed == 0);
@@ -154,24 +158,44 @@ int main(void)
    /* §4 retract — immutable (parent_of): model refused, user wins. */
    assert(db2_fact_commit("ann", NODE_PERSON, "parent_of", "ben", NODE_PERSON, FACT_AUTHORITY_USER,
                           1) == FACT_GATE_ACCEPT);
-   assert(db2_fact_retract("ann", "parent_of", FACT_AUTHORITY_MODEL) == FACT_RETRACT_IMMUTABLE);
+   assert(db2_fact_retract("ann", "parent_of", NULL, FACT_AUTHORITY_MODEL) ==
+          FACT_RETRACT_IMMUTABLE);
    assert(db2_fact_current_count("ann") == 1); /* unchanged */
-   assert(db2_fact_retract("ann", "parent_of", FACT_AUTHORITY_USER) >= 1);
+   assert(db2_fact_retract("ann", "parent_of", NULL, FACT_AUTHORITY_USER) >= 1);
    assert(db2_fact_current_count("ann") == 0);
 
-   /* §4 retract — hard_delete (also_known_as): tombstone (suppressed + superseded);
-    * not immutable, so a model authority may apply it. */
+   /* §4 retract — hard_delete (also_known_as) on a MODEL-authored (Class B) fact:
+    * not immutable and not user-stated, so a model authority may tombstone it
+    * (suppressed + superseded, row retained + auditable). */
+   assert(db2_fact_commit("frank", NODE_PERSON, "also_known_as", "frankie", NODE_OTHER,
+                          FACT_AUTHORITY_MODEL, 1) == FACT_GATE_ACCEPT);
+   assert(db2_fact_current_count("frank") == 1);
+   assert(db2_fact_retract("frank", "also_known_as", NULL, FACT_AUTHORITY_MODEL) >= 1);
+   s = edge_state("frank", "also_known_as");
+   assert(s.suppressed == 1 && s.superseded[0] != '\0');
+   assert(db2_fact_current_count("frank") == 0);
+
+   /* §4 retract — a user-stated (Class A) fact: model refused, user hard_deletes. */
    assert(db2_fact_commit("eve", NODE_PERSON, "also_known_as", "evie", NODE_OTHER,
                           FACT_AUTHORITY_USER, 1) == FACT_GATE_ACCEPT);
-   assert(db2_fact_current_count("eve") == 1);
-   assert(db2_fact_retract("eve", "also_known_as", FACT_AUTHORITY_MODEL) >= 1);
-   s = edge_state("eve", "also_known_as");
-   assert(s.suppressed == 1 && s.superseded[0] != '\0');
+   assert(db2_fact_retract("eve", "also_known_as", NULL, FACT_AUTHORITY_MODEL) == 0);
+   assert(db2_fact_current_count("eve") == 1); /* model refused */
+   assert(db2_fact_retract("eve", "also_known_as", NULL, FACT_AUTHORITY_USER) >= 1);
    assert(db2_fact_current_count("eve") == 0);
 
+   /* §4 retract — target (old-value) scoping: only the matching edge is retracted,
+    * sibling values of the same (subject, relation) are untouched. */
+   assert(db2_fact_commit("gus", NODE_PERSON, "works_for", "acme", NODE_ORG, FACT_AUTHORITY_USER,
+                          1) == FACT_GATE_ACCEPT);
+   assert(db2_fact_commit("gus", NODE_PERSON, "works_for", "globex", NODE_ORG, FACT_AUTHORITY_USER,
+                          1) == FACT_GATE_ACCEPT);
+   assert(db2_fact_current_count("gus") == 2);
+   assert(db2_fact_retract("gus", "works_for", "acme", FACT_AUTHORITY_USER) == 1);
+   assert(db2_fact_current_count("gus") == 1); /* globex remains */
+
    /* bad args / no-op. */
-   assert(db2_fact_retract(NULL, "works_for", FACT_AUTHORITY_MODEL) == -1);
-   assert(db2_fact_retract("nobody", "works_for", FACT_AUTHORITY_MODEL) == 0);
+   assert(db2_fact_retract(NULL, "works_for", NULL, FACT_AUTHORITY_MODEL) == -1);
+   assert(db2_fact_retract("nobody", "works_for", NULL, FACT_AUTHORITY_MODEL) == 0);
    assert(db2_fact_current_count("") == -1);
 
    db2_test_shim_close();
