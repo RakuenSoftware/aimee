@@ -616,7 +616,7 @@ static void ag_parallel(app_ctx_t *ctx, int argc, char **argv)
    }
 
    agent_http_init();
-   int ok = agent_run_parallel(&s_agent_cfg, tasks, n, results);
+   int ok = agent_run_parallel(&s_agent_cfg, tasks, n, results, 0 /* no deadline */);
    agent_http_cleanup();
 
    cJSON *arr = cJSON_CreateArray();

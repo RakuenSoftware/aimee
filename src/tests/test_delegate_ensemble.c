@@ -75,9 +75,11 @@ int model_capability_get(const char *provider, const char *model_id, model_capab
    return 0;
 }
 
-int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agent_result_t *out)
+int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agent_result_t *out,
+                       int deadline_ms)
 {
    (void)cfg;
+   (void)deadline_ms;
    g_parallel_calls++;
    snprintf(g_last_parallel_prompt, sizeof(g_last_parallel_prompt), "%s",
             count > 0 && tasks[0].user_prompt ? tasks[0].user_prompt : "");
