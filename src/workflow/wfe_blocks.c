@@ -318,13 +318,38 @@ static wfe_step_result_t exec_custom(wfe_ctx *ctx, const wfe_node_t *node)
          return wfe_step_failed(); /* opt-in: lifecycle allow_command not set */
       if (c->argc == 0)
          return wfe_step_failed();
+      /* A command block must NOT inherit the engine's environment (it carries
+       * AIMEE_APPROVAL_KEY, vault tokens, etc.): pass only a minimal allowlist
+       * (PATH/HOME/LANG — enough to run an ordinary build/lint tool; engine paths
+       * and secrets are deliberately withheld). Stack buffers outlive the
+       * synchronous exec call below. */
+      char e_path[2048], e_home[2048], e_lang[256];
+      const char *v;
+      char *envp[4];
+      int ei = 0;
+      v = getenv("PATH");
+      snprintf(e_path, sizeof e_path, "PATH=%s", (v && v[0]) ? v : "/usr/bin:/bin");
+      envp[ei++] = e_path;
+      if ((v = getenv("HOME")) && v[0])
+      {
+         snprintf(e_home, sizeof e_home, "HOME=%s", v);
+         envp[ei++] = e_home;
+      }
+      if ((v = getenv("LANG")) && v[0])
+      {
+         snprintf(e_lang, sizeof e_lang, "LANG=%s", v);
+         envp[ei++] = e_lang;
+      }
+      envp[ei] = NULL;
       /* argv is the registry's OWNED, length-bounded, all-string, NULL-terminated
-       * array (validated at load); run it directly (no shell) in the repo. */
+       * array (validated at load); run it directly (no shell), pinned to the
+       * work-item repo, under a wall-clock timeout (kill -> step failed). */
       char *out = NULL;
-      int rc = safe_exec_capture((const char *const *)c->argv, &out, 1 << 20);
+      int rc = safe_exec_capture_cwd_env_timeout((const char *const *)c->argv, repo_dir(), envp,
+                                                 &out, 1 << 20, wfe_custom_command_timeout_ms());
       free(out);
       if (rc != 0)
-         return wfe_step_failed();
+         return wfe_step_failed(); /* non-zero exit or SAFE_EXEC_TIMEOUT */
    }
    /* delegate executor is integration-gated (like implement/document). */
 
