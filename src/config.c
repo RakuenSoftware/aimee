@@ -555,7 +555,11 @@ static void config_set_defaults(config_t *cfg)
    cfg->ensemble_max_cost_usd = 0.0; /* 0 = no cost cap (unlimited) by default */
    cfg->roundtable_max_rounds = 3;
    cfg->roundtable_converge_threshold = 10;
-   cfg->roundtable_deadline_ms = 600000;
+   /* Saner default: 6 min (was 10). Long enough for a multi-round reasoning-model
+    * ensemble, short enough that a wedged run fails fast instead of a 10-min
+    * silent block. Overridable via roundtable.deadline_ms. Paired with the
+    * round-boundary progress logging so an in-flight run is observably advancing. */
+   cfg->roundtable_deadline_ms = 360000;
    snprintf(cfg->roundtable_turns, sizeof(cfg->roundtable_turns), "parallel");
    snprintf(cfg->roundtable_pipeline_done_bar, sizeof(cfg->roundtable_pipeline_done_bar),
             "zero_blocking");

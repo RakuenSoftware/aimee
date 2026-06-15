@@ -231,10 +231,16 @@ int handle_vault_set_server(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          return server_send_error(
              conn, "vault: server-principal write requires an attested (UDS/webchat) connection",
              NULL);
-      return server_send_error(conn,
-                               "vault: caller lacks the vault:write:server capability (grant it "
-                               "with `aimee vault capability grant <principal>` over UDS)",
-                               NULL);
+      /* Name the caller's resolved principal so the operator grants the RIGHT one
+       * — a UDS peer is `uid:<N>`, not the unix username, which is a common
+       * footgun (granting the username silently doesn't match). */
+      char msg[256];
+      const char *who = (conn && conn->vault_principal[0]) ? conn->vault_principal : "(unknown)";
+      snprintf(msg, sizeof msg,
+               "vault: caller (principal %s) lacks the vault:write:server capability "
+               "(grant it over UDS with `aimee vault capability grant %s`)",
+               who, who);
+      return server_send_error(conn, msg, NULL);
    }
 
    vault_status_t st = vault_service_set_server(ja->valuestring, jc->valuestring, js->valuestring);
