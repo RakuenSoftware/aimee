@@ -119,15 +119,25 @@ int main(void)
                            mk("architect", WFE_V_COMMENT, "H", 0)};
       assert(wfe_gate_decide(d, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_CHANGES);
 
-      /* tampered hash: reviewed a different artifact -> coerced REQUEST_CHANGES */
+      /* tampered hash on a REQUIRED persona: it never validly reviewed THIS
+       * artifact -> integrity failure -> DEGRADED (not a definitive CHANGES). */
       wfe_verdict_t e[] = {mk("security", WFE_V_APPROVE, "WRONG", 0),
                            mk("architect", WFE_V_APPROVE, "H", 0)};
-      assert(wfe_gate_decide(e, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_CHANGES);
+      assert(wfe_gate_decide(e, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_DEGRADED);
 
-      /* malformed -> coerced REQUEST_CHANGES */
+      /* malformed REQUIRED persona -> integrity failure -> DEGRADED */
       wfe_verdict_t g[] = {mk("security", WFE_V_APPROVE, "H", 0),
                            mk("architect", WFE_V_MALFORMED, "H", 0)};
-      assert(wfe_gate_decide(g, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_CHANGES);
+      assert(wfe_gate_decide(g, 2, req2, 2, 2, "H", rs, sizeof rs) == WFE_GATE_DEGRADED);
+
+      /* REGRESSION: an untrustworthy REQUIRED verdict must NOT be papered over by
+       * other panelists meeting quorum. required=[security] returns malformed
+       * while architect+qa validly approve (quorum 2 met): the required lens never
+       * reviewed the artifact, so the gate DEGRADES rather than APPROVES. */
+      const char *req1[] = {"security"};
+      wfe_verdict_t h[] = {mk("security", WFE_V_MALFORMED, "H", 0),
+                           mk("architect", WFE_V_APPROVE, "H", 0), mk("qa", WFE_V_APPROVE, "H", 0)};
+      assert(wfe_gate_decide(h, 3, req1, 1, 2, "H", rs, sizeof rs) == WFE_GATE_DEGRADED);
    }
 
    /* --- engine integration via mock provider --- */
