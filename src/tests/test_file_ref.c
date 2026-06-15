@@ -64,43 +64,63 @@ static void test_no_references_passthrough(void)
    printf("  no_references_passthrough: ok\n");
 }
 
-static void test_nonexistent_file_error(void)
+static void test_nonexistent_file_literal(void)
 {
+   /* A @token that isn't a real in-project file is left LITERAL (not a marker),
+    * so diffs/code carried in a prompt are never corrupted. */
    char *out = resolve_file_references("see @nonexistent.c for details", g_tmpdir);
    assert(out != NULL);
-   assert(strstr(out, "[file not found: @nonexistent.c]") != NULL);
+   assert(strstr(out, "@nonexistent.c") != NULL);
+   assert(strstr(out, "[file not found") == NULL);
    free(out);
 
-   printf("  nonexistent_file_error: ok\n");
+   printf("  nonexistent_file_literal: ok\n");
 }
 
-static void test_path_outside_project_rejected(void)
+static void test_path_outside_project_literal(void)
 {
-   /* Absolute path clearly outside tmpdir */
-   char prompt[256];
-   snprintf(prompt, sizeof(prompt), "read @/etc/passwd please");
-
-   char *out = resolve_file_references(prompt, g_tmpdir);
+   /* An absolute path outside the project is left literal and NEVER inlined. */
+   char *out = resolve_file_references("read @/etc/passwd please", g_tmpdir);
    assert(out != NULL);
-   assert(strstr(out, "[file outside project: @/etc/passwd]") != NULL);
-   /* Must NOT contain file content */
+   assert(strstr(out, "@/etc/passwd") != NULL);
+   assert(strstr(out, "root:") == NULL); /* content must not leak */
+   assert(strstr(out, "[file outside project") == NULL);
+   free(out);
+
+   printf("  path_outside_project_literal: ok\n");
+}
+
+static void test_traversal_literal(void)
+{
+   /* A path-traversal @token is left literal and never inlined. */
+   char *out = resolve_file_references("read @../../../etc/shadow", g_tmpdir);
+   assert(out != NULL);
+   assert(strstr(out, "@../../../etc/shadow") != NULL);
    assert(strstr(out, "root:") == NULL);
    free(out);
 
-   printf("  path_outside_project_rejected: ok\n");
+   printf("  traversal_literal: ok\n");
 }
 
-static void test_traversal_rejected(void)
+static void test_diff_passthrough(void)
 {
-   char prompt[256];
-   snprintf(prompt, sizeof(prompt), "read @../../../etc/shadow");
-
-   char *out = resolve_file_references(prompt, g_tmpdir);
+   /* The regression that made roundtables "sandbox-blind": a unified diff in the
+    * prompt must pass through unmangled — @@ hunk headers, decorators and emails
+    * are not file references. */
+   const char *diff = "diff --git a/x.py b/x.py\n"
+                      "@@ -1,3 +1,4 @@\n"
+                      " @property\n"
+                      "-old\n"
+                      "+new  # ping a@b.com\n";
+   char *out = resolve_file_references(diff, g_tmpdir);
    assert(out != NULL);
-   assert(strstr(out, "[file outside project:") != NULL);
+   assert(strstr(out, "@@ -1,3 +1,4 @@") != NULL); /* hunk header intact */
+   assert(strstr(out, "@property") != NULL);       /* decorator intact */
+   assert(strstr(out, "a@b.com") != NULL);         /* email intact */
+   assert(strstr(out, "[file") == NULL);           /* no markers injected */
    free(out);
 
-   printf("  traversal_rejected: ok\n");
+   printf("  diff_passthrough: ok\n");
 }
 
 static void test_max_3_refs_respected(void)
@@ -108,17 +128,18 @@ static void test_max_3_refs_respected(void)
    write_file("a.txt", "file A");
    write_file("b.txt", "file B");
    write_file("c.txt", "file C");
+   write_file("d.txt", "file D");
 
-   /* 4 references — first 3 should be resolved, 4th left as-is */
+   /* 4 references to REAL files — first 3 resolve, 4th hits the budget. (The
+    * limit applies only to real files now; a non-file 4th token would just be
+    * left literal.) */
    char *out = resolve_file_references("read @a.txt and @b.txt and @c.txt and @d.txt", g_tmpdir);
    assert(out != NULL);
    assert(strstr(out, "file A") != NULL);
    assert(strstr(out, "file B") != NULL);
    assert(strstr(out, "file C") != NULL);
-   /* 4th reference: d.txt is not resolved and the truncation is explicit */
+   assert(strstr(out, "file D") == NULL); /* 4th not inlined */
    assert(strstr(out, "[file reference limit reached: @d.txt left unresolved]") != NULL);
-   /* 4th reference must NOT produce a [file not found] marker */
-   assert(strstr(out, "[file not found: @d.txt]") == NULL);
    free(out);
 
    printf("  max_3_refs_respected: ok\n");
@@ -162,9 +183,10 @@ int main(void)
 
    test_valid_reference_inlined();
    test_no_references_passthrough();
-   test_nonexistent_file_error();
-   test_path_outside_project_rejected();
-   test_traversal_rejected();
+   test_nonexistent_file_literal();
+   test_path_outside_project_literal();
+   test_traversal_literal();
+   test_diff_passthrough();
    test_max_3_refs_respected();
    test_large_file_truncated();
    test_at_without_path_literal();

@@ -51,7 +51,10 @@ char *resolve_file_references(const char *prompt, const char *project_root)
       }
 
       const char *path_start = p + 1;
-      if (!*path_start || !is_path_char(*path_start))
+      /* Not a file reference: end-of-string, a non-path char, or a doubled '@'
+       * (a unified-diff hunk header "@@ -a,b +c,d @@"). Emit the '@' literally so
+       * diffs/code carried in the prompt are never corrupted. */
+      if (!*path_start || !is_path_char(*path_start) || *path_start == '@')
       {
          dstr_append_char(&out, *p++);
          continue;
@@ -71,14 +74,6 @@ char *resolve_file_references(const char *prompt, const char *project_root)
       memcpy(rel_path, path_start, path_len);
       rel_path[path_len] = '\0';
 
-      /* Past the limit: leave the reference unresolved with an explicit marker. */
-      if (refs_resolved >= FILE_REF_MAX_REFS)
-      {
-         dstr_appendf(&out, "[file reference limit reached: @%s left unresolved]", rel_path);
-         p = path_end;
-         continue;
-      }
-
       char abs_path[MAX_PATH_LEN];
       if (rel_path[0] == '/')
          snprintf(abs_path, sizeof(abs_path), "%s", rel_path);
@@ -87,30 +82,33 @@ char *resolve_file_references(const char *prompt, const char *project_root)
       else
          snprintf(abs_path, sizeof(abs_path), "%s", rel_path);
 
+      /* Only an EXISTING, in-project file is treated as a reference. A @token that
+       * escapes the root or doesn't resolve to a real file is emitted LITERALLY
+       * and is NOT counted against the budget: prompts routinely carry diffs and
+       * code whose '@' tokens (decorators like @property, emails, doc tags, diff
+       * hunk headers) are not file references, and rewriting them as markers
+       * corrupted the content and exhausted the ref budget (the roundtable
+       * "sandbox-blind" failure). */
       size_t abs_len = strlen(abs_path);
-      if (strstr(abs_path, "/../") != NULL ||
-          (abs_len >= 3 && strcmp(abs_path + abs_len - 3, "/..") == 0))
-      {
-         dstr_appendf(&out, "[file outside project: @%s]", rel_path);
-         p = path_end;
-         refs_resolved++;
-         continue;
-      }
-
-      if (project_root && project_root[0] && !path_within_root(project_root, abs_path))
-      {
-         dstr_appendf(&out, "[file outside project: @%s]", rel_path);
-         p = path_end;
-         refs_resolved++;
-         continue;
-      }
-
-      FILE *f = fopen(abs_path, "r");
+      int escapes = (strstr(abs_path, "/../") != NULL ||
+                     (abs_len >= 3 && strcmp(abs_path + abs_len - 3, "/..") == 0));
+      int in_root = !(project_root && project_root[0]) || path_within_root(project_root, abs_path);
+      FILE *f = (!escapes && in_root) ? fopen(abs_path, "r") : NULL;
       if (!f)
       {
-         dstr_appendf(&out, "[file not found: @%s]", rel_path);
+         dstr_append_char(&out, '@');
+         dstr_append(&out, rel_path, path_len);
          p = path_end;
-         refs_resolved++;
+         continue;
+      }
+
+      /* A real file past the per-prompt budget: explicit marker (diff/code never
+       * reaches here — its non-file @tokens are left literal above). */
+      if (refs_resolved >= FILE_REF_MAX_REFS)
+      {
+         dstr_appendf(&out, "[file reference limit reached: @%s left unresolved]", rel_path);
+         fclose(f);
+         p = path_end;
          continue;
       }
 
