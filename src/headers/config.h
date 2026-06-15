@@ -1290,6 +1290,11 @@ typedef struct config
     * no limit, which is the default. Set a positive value to cap a run. */
    char ensemble_reference_models[8][128];
    int ensemble_reference_count;
+   /* Optional per-participant review persona, paired by index with
+    * ensemble_reference_models. Empty entries fall back to the engine's diverse
+    * default lineup. Width = PERSONA_NAME_MAX (persona.h). */
+   char ensemble_reference_personas[8][64];
+   int ensemble_reference_persona_count;
    char ensemble_aggregator[128];
    int ensemble_min_successful;
    double ensemble_max_cost_usd;

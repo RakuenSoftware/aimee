@@ -61,7 +61,8 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
 
    /* ensemble.* */
    if (cfg->ensemble_aggregator[0] || cfg->ensemble_min_successful != 2 ||
-       cfg->ensemble_max_cost_usd > 0.0 || cfg->ensemble_reference_count > 0)
+       cfg->ensemble_max_cost_usd > 0.0 || cfg->ensemble_reference_count > 0 ||
+       cfg->ensemble_reference_persona_count > 0)
    {
       cJSON *e = cJSON_AddObjectToObject(root, "ensemble");
       if (e)
@@ -77,6 +78,12 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
             cJSON *refs = cJSON_AddArrayToObject(e, "reference_models");
             for (int i = 0; refs && i < cfg->ensemble_reference_count && i < 8; i++)
                cJSON_AddItemToArray(refs, cJSON_CreateString(cfg->ensemble_reference_models[i]));
+         }
+         if (cfg->ensemble_reference_persona_count > 0)
+         {
+            cJSON *ps = cJSON_AddArrayToObject(e, "reference_personas");
+            for (int i = 0; ps && i < cfg->ensemble_reference_persona_count && i < 8; i++)
+               cJSON_AddItemToArray(ps, cJSON_CreateString(cfg->ensemble_reference_personas[i]));
          }
       }
    }
