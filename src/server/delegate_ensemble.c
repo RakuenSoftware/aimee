@@ -464,18 +464,51 @@ static int run_aggregator(agent_config_t *acfg, const config_t *cfg, const char 
     * be dispatched by NAME (agent_run_named): agent_run_ex selects by role and
     * an agent's name is not one of its roles, so a name routed as a role finds
     * nothing and returns empty. A role form (or no aggregator) routes by role. */
+   /* Primary: the configured (or default) aggregator. max_tokens 0 = derive from
+    * the aggregator model's own output ceiling, so a reasoning aggregator isn't
+    * truncated mid-synthesis (was a hard 4096). */
+   const char *primary_name = NULL; /* bare-name aggregator we tried, to not retry it */
    if (cfg->ensemble_aggregator[0])
    {
       const char *agg = cfg->ensemble_aggregator;
       const char *at = strchr(agg, '@');
-      /* max_tokens 0 = derive from the aggregator model's own output ceiling, so
-       * a reasoning aggregator isn't truncated mid-synthesis (was a hard 4096). */
       if (!at)
-         return delegate_run_inline(&agg_cfg, agg, "review", NULL, synthesis_prompt, 0, 0.3, out);
-      const char *role = (at[1]) ? at + 1 : "review";
-      return delegate_run_inline(&agg_cfg, NULL, role, NULL, synthesis_prompt, 0, 0.3, out);
+      {
+         primary_name = agg;
+         if (delegate_run_inline(&agg_cfg, agg, "review", NULL, synthesis_prompt, 0, 0.3, out) ==
+                 0 &&
+             out->response && out->response[0])
+            return 0;
+      }
+      else
+      {
+         const char *role = (at[1]) ? at + 1 : "review";
+         if (delegate_run_inline(&agg_cfg, NULL, role, NULL, synthesis_prompt, 0, 0.3, out) == 0 &&
+             out->response && out->response[0])
+            return 0;
+      }
    }
-   return delegate_run_inline(&agg_cfg, NULL, "review", NULL, synthesis_prompt, 0, 0.3, out);
+   else if (delegate_run_inline(&agg_cfg, NULL, "review", NULL, synthesis_prompt, 0, 0.3, out) ==
+                0 &&
+            out->response && out->response[0])
+      return 0;
+
+   /* Fallback: the configured aggregator failed or returned empty. Try each
+    * panelist by name (no-tools) until one synthesizes — a single flaky
+    * aggregator model must not collapse the whole round to an artifact-less
+    * degrade when other capable panelists are available. */
+   for (int i = 0; i < cfg->ensemble_reference_count; i++)
+   {
+      const char *cand = cfg->ensemble_reference_models[i];
+      if (!cand[0] || (primary_name && strcmp(cand, primary_name) == 0))
+         continue;
+      free(out->response);
+      memset(out, 0, sizeof(*out));
+      if (delegate_run_inline(&agg_cfg, cand, "review", NULL, synthesis_prompt, 0, 0.3, out) == 0 &&
+          out->response && out->response[0])
+         return 0;
+   }
+   return -1;
 }
 
 static char *build_round_prompt(const char *task, const char *artifact, const char *peer_notes,

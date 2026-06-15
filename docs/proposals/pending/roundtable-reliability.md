@@ -70,15 +70,16 @@ Probed all six configured models on a tiny self-contained review:
 - **Deploy current `testing` to .254.** This is the single biggest lever — it
   brings #233 + #314 + #317 + this fix. (Operator-gated.)
 
-### Follow-ups (separate changes)
-- **Canonicalise the engine roundtable as THE multi-model gate** in docs/quickstart
-  so users stop hand-running tools-on per-model `aimee delegate review` jobs as a
-  roundtable substitute.
+### Follow-ups
+- **Canonicalise the engine roundtable as THE multi-model gate** in docs — DONE
+  (DELEGATES.md: use `aimee delegate roundtable --mode review`, not hand-run
+  per-model `aimee delegate review` jobs).
+- **Aggregator robustness** — DONE (`run_aggregator` falls back across the
+  panelists if the configured/default aggregator returns empty, instead of
+  collapsing the round to a single best candidate).
 - **Streamed/async progress + a saner default deadline** for the engine roundtable
-  so it is not a multi-minute silent block.
-- **Aggregator robustness:** the synthesis pass defaults to `reference_models[0]`;
-  fall back to the next healthy panelist if it fails, rather than degrading to a
-  single best candidate.
-- **Optional no-tools panel review on the manual path** (e.g. honour a
-  `--no-tools` / artifact-provided hint) so a hand-run per-model review of an
-  inline diff does not wander.
+  so it is not a multi-minute silent block. (Still open — larger change.)
+- **Optional no-tools panel review on the manual path** (a `--no-tools` /
+  artifact-provided hint) so a hand-run per-model review of an inline diff does
+  not wander. (Still open — needs the client-side delegate request builder
+  threaded; lower priority now the engine roundtable is documented as canonical.)

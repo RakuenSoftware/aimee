@@ -17,6 +17,7 @@ static int g_repair_mode = 0;
 static int g_parallel_calls = 0;
 static int g_named_calls = 0;
 static int g_aggregator_calls = 0;
+static char g_aggregator_fallback_who[128] = "";
 static int g_cancel_after_checks = -1;
 static char g_last_parallel_prompt[8192];
 
@@ -205,6 +206,13 @@ static void fill_aggregator_response(agent_result_t *out, const char *who)
       memset(out->response, 'a', n - 2);
       out->response[n - 2] = '\n';
       out->response[n - 1] = '\0';
+   }
+   else if (g_aggregator_mode == 3)
+   {
+      /* The primary aggregator returns empty (fails); a fallback panelist
+       * synthesizes. Records who actually produced the artifact. */
+      out->response = g_aggregator_calls == 1 ? NULL : strdup("fallback synthesized artifact");
+      snprintf(g_aggregator_fallback_who, sizeof(g_aggregator_fallback_who), "%s", who ? who : "");
    }
    else
    {
@@ -879,6 +887,30 @@ static void test_roundtable_review_assigns_personas(void)
    printf("  test_roundtable_review_assigns_personas: ok\n");
 }
 
+static void test_roundtable_aggregator_fallback_synthesizes(void)
+{
+   reset_modes();
+   g_aggregator_mode = 3; /* primary aggregator returns empty; a fallback panelist synthesizes */
+   g_aggregator_fallback_who[0] = '\0';
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_DRAFT;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 2;
+   opts.converge_threshold = 0;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "draft needing synthesis", &opts, &result);
+   assert(rc == 0);
+   /* The primary aggregator returned empty on its first call; a fallback panelist
+    * synthesized rather than collapsing the round to an empty artifact. */
+   assert(result.artifact && result.artifact[0]);
+   assert(g_aggregator_calls >= 2); /* primary (empty) + at least one fallback attempt */
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_aggregator_fallback_synthesizes: ok\n");
+}
+
 static void test_roundtable_cost_capped_skips_question_pass(void)
 {
    reset_modes();
@@ -1122,6 +1154,7 @@ int main(void)
    test_default_panel_excludes_claude_cli();
    test_panel_persona_name_assignment();
    test_roundtable_review_assigns_personas();
+   test_roundtable_aggregator_fallback_synthesizes();
    test_roundtable_cost_capped_skips_question_pass();
    test_roundtable_partial_question_answers_report_gaps();
    test_roundtable_draft_brief_questions_not_answered();
