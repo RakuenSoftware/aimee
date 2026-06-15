@@ -1566,8 +1566,11 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                   free(results[i].response);
                break;
             }
-            int score = run_quality_scorer(acfg, task, results[best].response, &out->cost_usd);
-            if (score > best_score)
+            /* Single-round: no cross-round comparison, so skip the scorer call. */
+            int score = local.max_rounds > 1
+                            ? run_quality_scorer(acfg, task, results[best].response, &out->cost_usd)
+                            : 0;
+            if (local.max_rounds <= 1 || score > best_score)
             {
                free(best_artifact);
                best_artifact = xstrdup0(results[best].response);
@@ -1635,8 +1638,15 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          free(prev_artifact_for_judge);
          break;
       }
-      int score = run_quality_scorer(acfg, task, agg_result.response, &out->cost_usd);
-      if (score > best_score)
+      /* The quality scorer exists only to compare candidates across rounds and
+       * pick the best. A single-round run has exactly one candidate, so skip the
+       * extra (large, sequential, external-LLM) scorer call and adopt this
+       * round's synthesis unconditionally — this removes a whole serial pass from
+       * the common `rounds:1` review. */
+      int score = local.max_rounds > 1
+                      ? run_quality_scorer(acfg, task, agg_result.response, &out->cost_usd)
+                      : 0;
+      if (local.max_rounds <= 1 || score > best_score)
       {
          free(best_artifact);
          best_artifact = xstrdup0(agg_result.response);
