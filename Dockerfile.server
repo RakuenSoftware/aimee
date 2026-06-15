@@ -82,6 +82,12 @@ FROM debian:bookworm-slim
 # only through aimee-kb, so it does not link libpq itself. curl is for the
 # container HEALTHCHECK. libpam0g + libpam-modules (pam_unix.so) back the
 # co-located aimee-webchat browser login.
+#
+# tmux + nodejs + npm are enablers for server-hosted OAuth CLI agents
+# (`aimee agent add claude-oauth` / `codex-oauth`): the vendor CLI is installed on
+# demand into the home-volume npm prefix (NPM_CONFIG_PREFIX below) and its OAuth
+# login runs in a server-side tmux session. nodejs is Debian bookworm's 18.x LTS
+# (claude-code and the codex CLI both support Node >= 18).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -91,10 +97,18 @@ RUN apt-get update \
         libsqlite3-0 \
         libssl3 \
         libzstd1 \
+        nodejs \
+        npm \
+        tmux \
         zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
 ENV AIMEE_HOME=/var/lib/aimee
+# On-demand-installed OAuth CLI agents (claude-code / codex) global-install here,
+# on the persistent home volume, so the CLI binaries survive container recreate
+# (their OAuth tokens live under $AIMEE_HOME too: ~/.claude, ~/.codex).
+ENV NPM_CONFIG_PREFIX=/var/lib/aimee/.npm-global
+ENV PATH=/var/lib/aimee/.npm-global/bin:$PATH
 # Serve the /v1 HTTP API on 0.0.0.0 (the binary defaults to loopback) so the
 # published container port reaches it. The bearer token in the baked aimee.yaml
 # is still required on every request.
