@@ -22,6 +22,18 @@
 #include <time.h>
 #include <ctype.h>
 
+/* The config arrays the engine fans out over must be sized to ENSEMBLE_MAX_REFS.
+ * config.h keeps the dim as a literal (it can't include this header), so catch
+ * any future drift at compile time rather than overrunning the stack arrays. */
+_Static_assert(sizeof(((config_t *)0)->ensemble_reference_models) /
+                       sizeof(((config_t *)0)->ensemble_reference_models[0]) ==
+                   ENSEMBLE_MAX_REFS,
+               "config_t.ensemble_reference_models first dim must equal ENSEMBLE_MAX_REFS");
+_Static_assert(sizeof(((config_t *)0)->ensemble_reference_personas) /
+                       sizeof(((config_t *)0)->ensemble_reference_personas[0]) ==
+                   ENSEMBLE_MAX_REFS,
+               "config_t.ensemble_reference_personas first dim must equal ENSEMBLE_MAX_REFS");
+
 /* Fallback when an ad-hoc model is absent from the capability registry. */
 #define ENSEMBLE_COST_PER_TOKEN 0.000015
 

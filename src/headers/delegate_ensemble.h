@@ -5,7 +5,12 @@
 #include "agent_config.h"
 #include "config.h"
 
-#define ENSEMBLE_MAX_REFS           8
+/* Max panelists in a roundtable/ensemble fan-out. Must match the
+ * ensemble_reference_models / ensemble_reference_personas array dims in config.h
+ * (a _Static_assert in delegate_ensemble.c enforces this). The fan-out arrays
+ * (agent_result_t results[N] ~1.4KB each, etc.) live on the compute-pool worker
+ * stack, which is 32 MB — so 32 panelists (~50KB frame) is well within budget. */
+#define ENSEMBLE_MAX_REFS           32
 #define ROUNDTABLE_MAX_REVIEW_ITEMS 128
 #define ROUNDTABLE_MAX_QUESTIONS    16
 

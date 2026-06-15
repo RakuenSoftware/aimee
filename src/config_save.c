@@ -76,13 +76,14 @@ static void config_save_misc_sections(const config_t *cfg, cJSON *root)
          if (cfg->ensemble_reference_count > 0)
          {
             cJSON *refs = cJSON_AddArrayToObject(e, "reference_models");
-            for (int i = 0; refs && i < cfg->ensemble_reference_count && i < 8; i++)
+            /* 32 = ENSEMBLE_MAX_REFS (delegate_ensemble.h). */
+            for (int i = 0; refs && i < cfg->ensemble_reference_count && i < 32; i++)
                cJSON_AddItemToArray(refs, cJSON_CreateString(cfg->ensemble_reference_models[i]));
          }
          if (cfg->ensemble_reference_persona_count > 0)
          {
             cJSON *ps = cJSON_AddArrayToObject(e, "reference_personas");
-            for (int i = 0; ps && i < cfg->ensemble_reference_persona_count && i < 8; i++)
+            for (int i = 0; ps && i < cfg->ensemble_reference_persona_count && i < 32; i++)
                cJSON_AddItemToArray(ps, cJSON_CreateString(cfg->ensemble_reference_personas[i]));
          }
       }
