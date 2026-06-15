@@ -62,7 +62,9 @@ static int setup_prompt_ex(const char *label, char *buf, size_t n, int secret)
 #ifndef _WIN32
    if (echo_off)
    {
-      tcsetattr(fileno(stdin), TCSAFLUSH, &old_t);
+      if (tcsetattr(fileno(stdin), TCSAFLUSH, &old_t) != 0)
+         fprintf(stderr, "\n(warning: could not restore terminal echo; run `stty echo` if later "
+                         "prompts are invisible)");
       fprintf(stderr, "\n"); /* echo the newline the user could not see */
    }
 #endif
@@ -73,15 +75,21 @@ static int setup_prompt_ex(const char *label, char *buf, size_t n, int secret)
       return 0;
    }
    size_t l = strlen(buf);
-   int had_newline = (l > 0 && buf[l - 1] == '\n');
-   if (!had_newline && !feof(stdin))
+   if (l > 0 && buf[l - 1] != '\n' && !feof(stdin))
    {
-      int c;
-      while ((c = getchar()) != '\n' && c != EOF)
-         ; /* drain the over-long line so it does not leak into the next prompt */
-      fprintf(stderr, "aimee agent setup: value too long (max %zu characters)\n", n - 1);
-      secure_zero(buf, n);
-      return 0;
+      /* fgets filled the buffer before storing a newline. Peek the next byte: if
+       * it is just the line terminator (the value fit exactly) consume it and
+       * accept; otherwise the line is genuinely too long — drain and reject so a
+       * truncated value is never used. */
+      int c = getchar();
+      if (c != '\n' && c != EOF)
+      {
+         while (c != '\n' && c != EOF)
+            c = getchar();
+         fprintf(stderr, "aimee agent setup: value too long (max %zu characters)\n", n - 1);
+         secure_zero(buf, n);
+         return 0;
+      }
    }
    while (l > 0 && isspace((unsigned char)buf[l - 1]))
       buf[--l] = '\0';
@@ -252,7 +260,17 @@ static int setup_oauth_cli_cmd(const char *vendor, int json_output)
    cJSON *j_code = cJSON_GetObjectItemCaseSensitive(started, "code");
    int needs_code_back = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(started, "needs_code_back"));
    if (cJSON_IsString(j_session))
+   {
+      /* Fail loudly rather than silently truncate a session the server won't
+       * then recognize on poll. */
+      if (strlen(j_session->valuestring) >= sizeof(session))
+      {
+         fprintf(stderr, "aimee agent setup: server returned an oversized session id\n");
+         cJSON_Delete(started);
+         return 1;
+      }
       snprintf(session, sizeof(session), "%s", j_session->valuestring);
+   }
    int have_url = cJSON_IsString(j_url) && j_url->valuestring[0] != '\0';
 
    /* A successful-but-incomplete start would otherwise stall in the poll loop;
@@ -271,18 +289,22 @@ static int setup_oauth_cli_cmd(const char *vendor, int json_output)
       fprintf(stderr, "2. Enter this one-time code on that page: %s\n", j_code->valuestring);
    cJSON_Delete(started);
 
+   /* From here on `session` (and any pasted code) are sensitive; route every exit
+    * through `done:` so the session buffer is scrubbed. */
+   int rc = 1;
    if (needs_code_back)
    {
       char code[600];
-      if (!setup_prompt_line("\nAfter authorizing, paste the code shown back here: ", code,
-                             sizeof(code)))
+      if (!setup_prompt_ex("\nAfter authorizing, paste the code shown back here: ", code,
+                           sizeof(code), 1))
       {
          fprintf(stderr, "aimee agent setup: an authorization code is required\n");
-         return 1;
+         goto done;
       }
       cJSON *r = setup_oauth_rpc("agent.cli_oauth_code", vendor, session, code, 60000);
+      secure_zero(code, sizeof(code));
       if (!r)
-         return 1;
+         goto done;
       cJSON_Delete(r);
    }
 
@@ -305,7 +327,7 @@ static int setup_oauth_cli_cmd(const char *vendor, int json_output)
                     "\naimee agent setup: lost contact with the server during %s "
                     "authentication\n",
                     vendor);
-            return 1;
+            goto done;
          }
          continue;
       }
@@ -332,7 +354,8 @@ static int setup_oauth_cli_cmd(const char *vendor, int json_output)
             fprintf(stderr, "Test with: aimee delegate review --via %s \"...\"\n", agent);
          }
          cJSON_Delete(pr);
-         return 0;
+         rc = 0;
+         goto done;
       }
       if (!oauth_state_is_pending(state))
       {
@@ -342,12 +365,15 @@ static int setup_oauth_cli_cmd(const char *vendor, int json_output)
                  state ? state : "failed", cJSON_IsString(j_err) ? ": " : "",
                  cJSON_IsString(j_err) ? j_err->valuestring : "");
          cJSON_Delete(pr);
-         return 1;
+         goto done;
       }
       cJSON_Delete(pr);
    }
    fprintf(stderr, "\nTimed out waiting for %s authentication.\n", vendor);
-   return 1;
+
+done:
+   secure_zero(session, sizeof(session));
+   return rc;
 }
 
 int handle_agent_setup_cmd(int argc, char **argv, int json_output)
