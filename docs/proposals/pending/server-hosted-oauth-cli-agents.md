@@ -69,6 +69,32 @@ CLI binaries (npm prefix) and OAuth tokens (`~/.claude`, `~/.codex`) both live
 under `/var/lib/aimee` (the bind-mounted home volume), so a container recreate
 keeps them — no re-auth after a redeploy.
 
+## Existing infrastructure to build on (discovered 2026-06-15)
+
+More of this exists than first assumed — the implementation *extends* it rather
+than starting fresh:
+- **`server_agent.c` already has a server-side `agent.setup` / `agent.setup_poll`
+  codex-oauth device flow** (start + poll handlers, `SAGENT_CODEX_*` device-auth
+  URLs). The OAuth state/poll skeleton is there.
+- **`sagent_configure_tmux_cli_agent`** already configures a server-side tmux-CLI
+  agent for `codex-cli` / `claude` / `claude-code` (`cli_kind`, `cli_cmd`, empty
+  HTTP endpoint). The server-side CLI agent shape exists.
+- The `claude` provider path (server_agent.c ~576) already sets up a tmux-run
+  `claude` agent — it just assumes `claude` is on PATH (it is not, on the minimal
+  image — hence the enablers + on-demand install).
+
+So the remaining work, concretely:
+1. **On-demand `npm i -g` install** of the vendor CLI when absent (new step in the
+   setup flow; idempotent).
+2. **`claude-oauth`**: a setup path that installs claude-code, runs
+   `claude setup-token` in a server tmux session, scrapes the URL, accepts the
+   pasted code back (`tmux send-keys`), and registers the tmux-CLI agent.
+3. **`codex-oauth`**: prefer the installed CLI's `codex login --device-auth`
+   (or keep the existing HTTP device flow) + register the tmux-CLI agent.
+4. **Panel eligibility**: relax the #318 `ensemble_default_panel_from_agents`
+   exclusion so a *server-hosted, authenticated* claude (distinct from the
+   client-only one) can be seated.
+
 ## Out of scope
 - Refreshing/rotating OAuth tokens automatically (the CLIs handle their own
   refresh; we surface re-auth instructions if a call 401s).
