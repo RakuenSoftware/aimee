@@ -413,6 +413,9 @@ int handle_agent_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_setup(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_setup_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_agent_cli_oauth_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_agent_cli_oauth_code(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_agent_cli_oauth_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
 /* MCP proxy handler (server_mcp.c) */
 int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

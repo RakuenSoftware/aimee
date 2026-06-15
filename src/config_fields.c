@@ -191,6 +191,8 @@ const config_field_t config_fields[] = {
     {"verify_enabled", offsetof(config_t, verify_enabled), sizeof(int), 1, CFG_BOOL},
     {"claude_cli_delegate_enabled", offsetof(config_t, claude_cli_delegate_enabled), sizeof(int), 1,
      CFG_BOOL},
+    {"server_cli_oauth_enabled", offsetof(config_t, server_cli_oauth_enabled), sizeof(int), 1,
+     CFG_BOOL},
     {"verify_cross_project", offsetof(config_t, verify_cross_project), sizeof(int), 1, CFG_BOOL},
     {"roundtable.max_rounds", offsetof(config_t, roundtable_max_rounds), sizeof(int), 0, CFG_INT},
     {"roundtable.converge_threshold", offsetof(config_t, roundtable_converge_threshold),

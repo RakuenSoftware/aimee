@@ -12,6 +12,8 @@
 #include "log.h"
 #include "vault_service.h"    /* vault_service_set / set_server, VAULT_API_KEY_CRED */
 #include "vault_capability.h" /* vault_capability_server_write_allowed (single server-write gate) */
+#include "server_cli_oauth.h" /* server-hosted OAuth CLI agent setup */
+#include "config.h"           /* server_cli_oauth_enabled gate */
 #include <pthread.h>
 #include <string.h>
 #include <stdlib.h>
@@ -1530,5 +1532,123 @@ int handle_agent_setup_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_AddBoolToObject(out, "is_new", is_new);
    if (chatgpt_account_id[0])
       cJSON_AddStringToObject(out, "oauth_account", chatgpt_account_id);
+   return server_send_ok(conn, out);
+}
+
+/* --- server-hosted OAuth CLI agents: agent.cli_oauth_{start,code,poll} ----- */
+
+static int sagent_cli_oauth_gate(server_conn_t *conn, cJSON *req, cli_oauth_vendor_t *v)
+{
+   config_t cfg;
+   config_load(&cfg);
+   if (!cfg.server_cli_oauth_enabled)
+      return server_send_error(conn,
+                               "server-hosted OAuth CLI agents are disabled; set "
+                               "server_cli_oauth_enabled=true to opt in (DELEGATES.md)",
+                               NULL);
+   cJSON *jv = cJSON_GetObjectItemCaseSensitive(req, "vendor");
+   if (!cJSON_IsString(jv) || cli_oauth_vendor_parse(jv->valuestring, v) != 0)
+      return server_send_error(conn, "vendor must be 'claude' or 'codex'", NULL);
+   return 0; /* allowed */
+}
+
+int handle_agent_cli_oauth_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cli_oauth_vendor_t v;
+   int gate = sagent_cli_oauth_gate(conn, req, &v);
+   if (gate != 0)
+      return gate; /* already responded */
+
+   char err[256] = "";
+   if (cli_oauth_install(v, err, sizeof(err)) != 0)
+      return server_send_error(conn, err[0] ? err : "CLI install failed", NULL);
+
+   cli_oauth_start_t st;
+   if (cli_oauth_start(v, &st, err, sizeof(err)) != 0)
+      return server_send_error(conn, err[0] ? err : "login start failed", NULL);
+
+   /* Audit the setup (who/when), never the secret. */
+   aimee_log(LOG_INFO, "agent.cli_oauth", "started %s server-side OAuth setup",
+             cli_oauth_vendor_name(v));
+
+   cJSON *out = jo_ok();
+   cJSON_AddStringToObject(out, "vendor", cli_oauth_vendor_name(v));
+   cJSON_AddStringToObject(out, "url", st.url);
+   if (st.code[0])
+      cJSON_AddStringToObject(out, "code", st.code);
+   cJSON_AddStringToObject(out, "session", st.session);
+   cJSON_AddBoolToObject(out, "needs_code_back", st.needs_code_back ? 1 : 0);
+   return server_send_ok(conn, out);
+}
+
+int handle_agent_cli_oauth_code(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cli_oauth_vendor_t v;
+   int gate = sagent_cli_oauth_gate(conn, req, &v);
+   if (gate != 0)
+      return gate;
+   cJSON *js = cJSON_GetObjectItemCaseSensitive(req, "session");
+   cJSON *jc = cJSON_GetObjectItemCaseSensitive(req, "code");
+   if (!cJSON_IsString(js) || !cJSON_IsString(jc))
+      return server_send_error(conn, "session and code are required", NULL);
+   char err[256] = "";
+   if (cli_oauth_submit_code(v, js->valuestring, jc->valuestring, err, sizeof(err)) != 0)
+      return server_send_error(conn, err[0] ? err : "failed to submit code", NULL);
+   return server_send_ok(conn, jo_ok());
+}
+
+/* Register the now-authenticated vendor CLI as a server-side tmux-CLI agent. */
+static void sagent_cli_oauth_register(cli_oauth_vendor_t v)
+{
+   agent_config_t acfg;
+   if (agent_load_config(&acfg) != 0)
+      memset(&acfg, 0, sizeof(acfg));
+   const char *name = cli_oauth_agent_name(v);
+   agent_t *ag = agent_find(&acfg, name);
+   if (!ag)
+   {
+      if (acfg.agent_count >= MAX_AGENTS)
+         return;
+      ag = &acfg.agents[acfg.agent_count++];
+   }
+   /* cli_kind/cli_cmd run the server-installed CLI over tmux (no HTTP endpoint).
+    * cost_tier 0 for codex (subscription), 1 for claude. */
+   sagent_configure_tmux_cli_agent(ag, name, name, name, name, v == CLI_OAUTH_CODEX ? 0 : 1);
+   ag->is_server_hosted = 1; /* distinct from a client-only claude (panel gate) */
+   agent_save_config(&acfg);
+}
+
+int handle_agent_cli_oauth_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cli_oauth_vendor_t v;
+   int gate = sagent_cli_oauth_gate(conn, req, &v);
+   if (gate != 0)
+      return gate;
+   cJSON *js = cJSON_GetObjectItemCaseSensitive(req, "session");
+   if (!cJSON_IsString(js))
+      return server_send_error(conn, "session is required", NULL);
+   cli_oauth_state_t state = CLI_OAUTH_PENDING;
+   char err[256] = "";
+   if (cli_oauth_poll(v, js->valuestring, &state, err, sizeof(err)) != 0)
+      return server_send_error(conn, err[0] ? err : "poll failed", NULL);
+
+   const char *s = state == CLI_OAUTH_AUTHENTICATED ? "authenticated"
+                   : state == CLI_OAUTH_FAILED      ? "failed"
+                                                    : "pending";
+   if (state == CLI_OAUTH_AUTHENTICATED)
+   {
+      sagent_cli_oauth_register(v);
+      aimee_log(LOG_INFO, "agent.cli_oauth", "%s authenticated and registered server-side",
+                cli_oauth_vendor_name(v));
+   }
+   cJSON *out = jo_ok();
+   cJSON_AddStringToObject(out, "state", s);
+   if (state == CLI_OAUTH_AUTHENTICATED)
+      cJSON_AddStringToObject(out, "agent", cli_oauth_agent_name(v));
+   if (state == CLI_OAUTH_FAILED && err[0])
+      cJSON_AddStringToObject(out, "error", err);
    return server_send_ok(conn, out);
 }

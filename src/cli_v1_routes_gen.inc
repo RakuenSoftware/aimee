@@ -16,6 +16,9 @@ static const struct
    const char *path;
 } CLI_V1_GEN_ROUTES[] = {
     {"agent.add", "POST", "/v1/agent/add"},
+    {"agent.cli_oauth_code", "POST", "/v1/agent/cli_oauth_code"},
+    {"agent.cli_oauth_poll", "POST", "/v1/agent/cli_oauth_poll"},
+    {"agent.cli_oauth_start", "POST", "/v1/agent/cli_oauth_start"},
     {"agent.disable", "POST", "/v1/agent/disable"},
     {"agent.enable", "POST", "/v1/agent/enable"},
     {"agent.episodes", "POST", "/v1/agent/episodes"},
