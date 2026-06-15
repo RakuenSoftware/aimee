@@ -42,10 +42,14 @@ int cli_session_send(cli_session_t *s, const char *message);
  * -1 on error. */
 int cli_session_capture(cli_session_t *s, char *out, size_t out_max);
 
-/* Polls capture-pane until output stabilises (hash-based) or session dies.
- * Writes captured text to out (NUL-terminated). Returns 0 on success,
- * -1 if the session exits before output stabilises. */
-int cli_session_recv(cli_session_t *s, char *out, size_t out_max);
+/* Polls capture-pane until output stabilises (hash-based), the session dies,
+ * or timeout_ms elapses. Writes captured text to out (NUL-terminated).
+ * Returns 0 on success, -1 if the session exits before output stabilises,
+ * and -2 if it did not stabilise within timeout_ms. timeout_ms <= 0 disables
+ * the wall-clock bound (legacy unbounded behaviour). The bound is the only
+ * thing that breaks a CLI wedged in a provider retry loop (e.g. an Anthropic
+ * outage), whose pane animates forever without the session dying. */
+int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms);
 
 /* --- Session name helpers --- */
 /* Build a deterministic session name: "aimee-<agent>-<hash(role)>".

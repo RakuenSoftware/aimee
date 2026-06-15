@@ -16,7 +16,8 @@
 #include <time.h>
 #include "persona.h"
 #include "role_templates.h"
-#include "util.h" /* safe_strdup */
+#include "util.h" /* safe_strdup, aimee_base64_* */
+#include "cli_session_pty.h"
 #include "config.h"
 #include "prompts.h"
 #include "delegate_role.h"
@@ -1188,6 +1189,17 @@ static void handle_messages_stream(int fd, const char *body, const char *request
    g_messages_stream_handler(body ? body : "", sse_event_emit, &fd);
 }
 
+static void handle_cli_session_stream(int fd, const char *id, const char *request_id)
+{
+   if (!cli_session_pty_forwarding_enabled())
+   {
+      send_response(fd, 404, "{\"error\":\"cli session forwarding disabled\"}", request_id);
+      return;
+   }
+   write_sse_headers(fd, request_id);
+   cli_session_pty_stream(id, fd);
+}
+
 /* GET /v1/runs/{id}/events: subscribe to the live run record. Flush already
  * buffered events, then block-and-flush new ones as the background worker
  * produces them, until a terminal event. A periodic SSE comment heartbeat
@@ -1570,6 +1582,23 @@ static void handle_conn(int fd, int is_tcp)
             LOG_INFO("server.http", "GET %s -> presence events req_id=%s", path, request_id);
             return;
          }
+      }
+   }
+
+   /* GET /v1/cli/session/{id}/stream takes the PTY-forwarding SSE path. */
+   if (strcmp(method, "GET") == 0 && strncmp(path, "/v1/cli/session/", 16) == 0)
+   {
+      const char *slash = strchr(path + 16, '/');
+      if (slash && strcmp(slash, "/stream") == 0)
+      {
+         char id[128];
+         size_t idlen = (size_t)(slash - (path + 16));
+         idlen = idlen < sizeof(id) ? idlen : sizeof(id) - 1;
+         memcpy(id, path + 16, idlen);
+         id[idlen] = '\0';
+         if (sse_offload(fd, handle_cli_session_stream, id, request_id) != 0)
+            send_response(fd, 503, "{\"error\":\"too many event streams\"}", request_id);
+         return;
       }
    }
 

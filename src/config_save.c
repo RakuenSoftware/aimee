@@ -1002,7 +1002,7 @@ int config_save(const config_t *cfg)
        cfg->server_api_bearer_token[0] || cfg->server_api_rate_limit_per_min > 0 ||
        cfg->server_api_client_transport[0] ||
        cfg->server_api_remote_writes > SERVER_REMOTE_WRITES_OFF ||
-       cfg->server_api_max_event_streams > 0)
+       cfg->server_api_max_event_streams > 0 || cfg->server_api_cli_session_forwarding)
    {
       cJSON *aimee_obj = cJSON_AddObjectToObject(root, "aimee");
       cJSON *api_obj = cJSON_AddObjectToObject(aimee_obj, "api");
@@ -1016,6 +1016,8 @@ int config_save(const config_t *cfg)
          cJSON_AddNumberToObject(api_obj, "rate_limit_per_min", cfg->server_api_rate_limit_per_min);
       if (cfg->server_api_max_event_streams > 0)
          cJSON_AddNumberToObject(api_obj, "max_event_streams", cfg->server_api_max_event_streams);
+      if (cfg->server_api_cli_session_forwarding)
+         cJSON_AddBoolToObject(api_obj, "cli_session_forwarding", 1);
       if (cfg->server_api_client_transport[0])
          cJSON_AddStringToObject(api_obj, "client_transport", cfg->server_api_client_transport);
       if (cfg->server_api_remote_writes >= SERVER_REMOTE_WRITES_FULL)

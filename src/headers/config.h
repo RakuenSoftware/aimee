@@ -972,6 +972,10 @@ typedef struct config
     * use; over-limit ⇒ 503. 0 = use the built-in default (256). Size this to the
     * expected number of concurrent presence subscribers + in-flight streams. */
    int server_api_max_event_streams;
+   /* server_api_cli_session_forwarding: enable the server-hosted Claude PTY
+    * session routes (/v1/cli/session*), which run claude in a tmux session on
+    * the server and forward its raw terminal to a thin client. Default off. */
+   int server_api_cli_session_forwarding;
    /* server_api_remote_writes: how far a TCP bearer may mutate (the UDS path is
     * always full). 0 = off (default; mutating routes local-UDS-only), 1 = data
     * (data-mutating /v1 routes allowed over TCP, capability-gated), 2 = full

@@ -171,6 +171,96 @@ static int rh_count_tokens(const route_req_t *rq, char *resp, int cap)
    return route_completion(g_count_tokens_handler, rq->body, resp, cap);
 }
 
+/* ── server-hosted Claude PTY session (terminal forwarding) ────────────────
+ * POST /v1/cli/session            — create/ensure a server-hosted claude session
+ * POST /v1/cli/session/<id>/input — queue raw input (base64) to the PTY
+ * POST /v1/cli/session/<id>/resize— set the PTY window size
+ * DELETE /v1/cli/session/<id>     — kill the session
+ * GET  /v1/cli/session/<id>/stream— SSE of raw PTY output (handle_conn, no handler)
+ * The cli_cmd is fixed server-side to "claude" (scope: Claude only) so a client
+ * cannot turn this into arbitrary command execution. */
+static int rh_cli_session_create(const route_req_t *rq, char *resp, int cap)
+{
+   if (!cli_session_pty_forwarding_enabled())
+      return err_json(resp, cap, 404, "cli session forwarding disabled");
+   cJSON *req = rq->body ? cJSON_Parse(rq->body) : NULL;
+   if (!req)
+      return err_json(resp, cap, 400, "invalid JSON body");
+   cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
+   const char *id = cJSON_IsString(jid) ? jid->valuestring : NULL;
+   if (!id || !id[0] || !is_safe_id(id))
+   {
+      cJSON_Delete(req);
+      return err_json(resp, cap, 400, "valid session_id required");
+   }
+   cJSON *jrows = cJSON_GetObjectItemCaseSensitive(req, "rows");
+   cJSON *jcols = cJSON_GetObjectItemCaseSensitive(req, "cols");
+   int rows = cJSON_IsNumber(jrows) ? jrows->valueint : 0;
+   int cols = cJSON_IsNumber(jcols) ? jcols->valueint : 0;
+   char err[160] = "";
+   int rc = cli_session_pty_ensure(id, "claude", NULL, rows, cols, err, sizeof(err));
+   cJSON_Delete(req);
+   if (rc != 0)
+      return err_json(resp, cap, 500, err[0] ? err : "failed to create session");
+   snprintf(resp, (size_t)cap, "{\"status\":\"ok\"}");
+   return 200;
+}
+static int rh_cli_session_input(const route_req_t *rq, char *resp, int cap)
+{
+   if (!cli_session_pty_forwarding_enabled())
+      return err_json(resp, cap, 404, "cli session forwarding disabled");
+   cJSON *req = rq->body ? cJSON_Parse(rq->body) : NULL;
+   if (!req)
+      return err_json(resp, cap, 400, "invalid JSON body");
+   cJSON *jd = cJSON_GetObjectItemCaseSensitive(req, "data");
+   if (!cJSON_IsString(jd))
+   {
+      cJSON_Delete(req);
+      return err_json(resp, cap, 400, "base64 \"data\" required");
+   }
+   size_t blen = strlen(jd->valuestring);
+   unsigned char *buf = malloc(blen + 1);
+   if (!buf)
+   {
+      cJSON_Delete(req);
+      return err_json(resp, cap, 500, "oom");
+   }
+   size_t n = aimee_base64_decode(jd->valuestring, buf, blen + 1);
+   int rc = (n == (size_t)-1) ? -1 : cli_session_pty_input(rq->id, buf, n);
+   free(buf);
+   cJSON_Delete(req);
+   if (rc != 0)
+      return err_json(resp, cap, 404, "unknown session or invalid input");
+   snprintf(resp, (size_t)cap, "{\"status\":\"ok\"}");
+   return 200;
+}
+static int rh_cli_session_resize(const route_req_t *rq, char *resp, int cap)
+{
+   if (!cli_session_pty_forwarding_enabled())
+      return err_json(resp, cap, 404, "cli session forwarding disabled");
+   cJSON *req = rq->body ? cJSON_Parse(rq->body) : NULL;
+   if (!req)
+      return err_json(resp, cap, 400, "invalid JSON body");
+   cJSON *jr = cJSON_GetObjectItemCaseSensitive(req, "rows");
+   cJSON *jc = cJSON_GetObjectItemCaseSensitive(req, "cols");
+   int rows = cJSON_IsNumber(jr) ? jr->valueint : 0;
+   int cols = cJSON_IsNumber(jc) ? jc->valueint : 0;
+   int rc = cli_session_pty_resize(rq->id, rows, cols);
+   cJSON_Delete(req);
+   if (rc != 0)
+      return err_json(resp, cap, 404, "unknown session or bad dimensions");
+   snprintf(resp, (size_t)cap, "{\"status\":\"ok\"}");
+   return 200;
+}
+static int rh_cli_session_delete(const route_req_t *rq, char *resp, int cap)
+{
+   if (!cli_session_pty_forwarding_enabled())
+      return err_json(resp, cap, 404, "cli session forwarding disabled");
+   cli_session_pty_kill(rq->id);
+   snprintf(resp, (size_t)cap, "{\"status\":\"ok\"}");
+   return 200;
+}
+
 static int rh_runs_get(const route_req_t *rq, char *resp, int cap)
 {
    return route_runs_get(rq->id, resp, cap);
@@ -1093,6 +1183,17 @@ static const http_route_t g_v1_routes[] = {
     /* Streaming chat over HTTP: dispatched by handle_conn; row exists for the
      * capability gate + conformance scan. */
     {"POST", "/v1/chat/stream", NULL, RM_EXACT, "chat.send_stream", 0, NULL},
+
+    /* Server-hosted Claude PTY session (terminal forwarding). All consume model
+     * budget (spawn/drive claude), so they map to the chat capability. The
+     * /stream row carries no handler — handle_conn offloads it to an SSE worker.
+     * The prefix rows precede nothing ambiguous: the one-segment <id> rule keeps
+     * /input and /resize and bare DELETE distinct. */
+    {"POST", "/v1/cli/session", NULL, RM_EXACT, NULL, CAP_CHAT, rh_cli_session_create},
+    {"POST", "/v1/cli/session/", "/input", RM_PREFIX, NULL, CAP_CHAT, rh_cli_session_input},
+    {"POST", "/v1/cli/session/", "/resize", RM_PREFIX, NULL, CAP_CHAT, rh_cli_session_resize},
+    {"GET", "/v1/cli/session/", "/stream", RM_PREFIX, NULL, CAP_CHAT, NULL},
+    {"DELETE", "/v1/cli/session/", NULL, RM_PREFIX, NULL, CAP_CHAT, rh_cli_session_delete},
 
     /* Runs: create (compute), cancel (compute), live events (read, streamed by
      * handle_conn), status (read). The /events and /stop rows precede the bare

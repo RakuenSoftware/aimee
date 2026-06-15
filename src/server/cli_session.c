@@ -49,6 +49,15 @@ static void msleep_ms(int ms)
    nanosleep(&ts, NULL);
 }
 
+/* Monotonic millisecond clock for wall-clock timeouts (immune to wall-time
+ * jumps). Mirrors the clock_gettime(CLOCK_MONOTONIC) idiom used elsewhere. */
+static long long mono_ms(void)
+{
+   struct timespec ts;
+   clock_gettime(CLOCK_MONOTONIC, &ts);
+   return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
 static void cli_session_capture_cmd(const cli_session_t *s, char *cmd, size_t cmd_len)
 {
    snprintf(cmd, cmd_len, "tmux capture-pane -p -t '%s' 2>/dev/null", s->session_name);
@@ -251,13 +260,14 @@ int cli_session_capture(cli_session_t *s, char *out, size_t out_max)
    return 0;
 }
 
-int cli_session_recv(cli_session_t *s, char *out, size_t out_max)
+int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms)
 {
    if (!s->active || !out || out_max == 0)
       return -1;
 
    int stable = 0;
    unsigned long prev_hash = 0;
+   long long start = mono_ms();
 
    for (;;)
    {
@@ -265,6 +275,18 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max)
       {
          out[0] = '\0';
          return -1;
+      }
+
+      /* Wall-clock backstop. Completion is detected by the pane going static
+       * (stability hash below), but a CLI stuck in a provider retry/backoff
+       * loop animates its spinner + elapsed-time counter forever, so the pane
+       * never stabilises and the session never dies. Without this bound the
+       * receive would hang indefinitely (the classic Anthropic-outage hang).
+       * timeout_ms <= 0 preserves the legacy unbounded behaviour. */
+      if (timeout_ms > 0 && (mono_ms() - start) >= timeout_ms)
+      {
+         out[0] = '\0';
+         return -2;
       }
 
       msleep_ms(CLI_SESSION_POLL_MS);
