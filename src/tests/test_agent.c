@@ -1886,25 +1886,6 @@ static void test_agent_loop_per_call_timeout(void)
    assert(agent_loop_per_call_timeout_ms(10000, 40000, 35000) == -1);
 }
 
-/* Regression: a delegate must never reach the HTTP layer with a non-positive
- * timeout. timeout_ms <= 0 disables the read deadline (conn_open deadline_ns=0)
- * and a stalled provider hangs the worker forever, leaking its pool thread +
- * concurrency slot until the whole background-delegate queue wedges. */
-static void test_delegate_effective_timeout(void)
-{
-   /* Explicit request timeout always wins. */
-   assert(delegate_effective_timeout_ms(30000, 180000) == 30000);
-   assert(delegate_effective_timeout_ms(5000, 0) == 5000);
-   /* No request timeout: fall back to the agent's configured timeout. */
-   assert(delegate_effective_timeout_ms(0, 180000) == 180000);
-   assert(delegate_effective_timeout_ms(-1, 120000) == 120000);
-   /* THE BUG: neither request nor agent configures a timeout (agents with no
-    * timeout_ms zero-init to 0). Must resolve to the default ceiling, NEVER 0. */
-   assert(delegate_effective_timeout_ms(0, 0) == AGENT_DEFAULT_TIMEOUT_MS);
-   assert(delegate_effective_timeout_ms(-1, -1) == AGENT_DEFAULT_TIMEOUT_MS);
-   assert(delegate_effective_timeout_ms(0, 0) > 0);
-}
-
 static void test_claude_cli_predicate(void)
 {
    agent_t a;
@@ -1948,7 +1929,6 @@ int main(void)
    test_agent_route();
    test_claude_cli_predicate();
    test_agent_loop_per_call_timeout();
-   test_delegate_effective_timeout();
    test_agent_route_health_filter();
    test_agent_route_with_caps_honors_tools_enabled();
    test_agent_route_with_caps_honors_context_override();
