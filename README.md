@@ -78,7 +78,7 @@ Each session gets its own git worktree, state file, and branch. Run two sessions
 | Codex CLI | Full hook support + MCP + local plugin | Yes, via the OpenAI Responses ingress (`/v1/responses`) | `./install.sh` |
 | OpenCode | TUI front end (`opencode attach`) | Yes, via the OpenAI-compatible ingress | `./install.sh` |
 | Gemini CLI | Full hook support | Provider CLI | `./install.sh` |
-| Mistral Vibe | Provider-CLI primary and subscription-plan delegates, including `mistral-plan` | Provider CLI | `aimee agent setup mistral-plan` |
+| Mistral Vibe | Provider-CLI primary and subscription-plan delegates | Provider CLI | `aimee agent add <name> <endpoint> <model> --provider mistral` |
 | GitHub Copilot | MCP server | Via the OpenAI-compatible model | `./install.sh` |
 | VS Code | MCP tools in Copilot Chat, or aimee as an OpenAI-compatible model | Yes, via `/v1/chat/completions` | [VS Code guide](docs/VSCODE.md) |
 
