@@ -240,6 +240,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-minimax-tool-call-args \
                $(TESTPREFIX)/unit-test-delegate-liveness \
                $(TESTPREFIX)/unit-test-agent-parallel \
+               $(TESTPREFIX)/unit-test-server-cli-oauth \
                $(TESTPREFIX)/unit-test-workspace-manifest \
                $(TESTPREFIX)/unit-test-lsp \
                $(TESTPREFIX)/unit-test-memory-retrieval-eval \
@@ -1922,6 +1923,10 @@ $(TESTPREFIX)/unit-test-delegate-liveness: $(OBJDIR)/tests/test_delegate_livenes
 
 $(TESTPREFIX)/unit-test-agent-parallel: $(OBJDIR)/tests/test_agent_parallel.o \
                                     $(OBJDIR)/server/agent_parallel.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-server-cli-oauth: $(OBJDIR)/tests/test_server_cli_oauth.o \
+                                    $(OBJDIR)/server/server_cli_oauth.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-agent-runtime-messages: $(OBJDIR)/tests/test_agent_runtime_messages.o \
