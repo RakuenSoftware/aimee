@@ -1244,14 +1244,17 @@ void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acf
    {
       if (!acfg->agents[i].enabled || !acfg->agents[i].name[0])
          continue;
-      /* Skip a CLIENT-ONLY claude-CLI: it has no HTTP endpoint (it runs on the
-       * thin client over the reverse channel, primary-only by default), so
-       * seating it just burns a slot on a "failed to build request URL"
-       * participant. A SERVER-HOSTED, OAuth'd claude (`is_server_hosted`, via
-       * `aimee agent add claude-oauth`) runs on the server and IS seatable.
-       * Otherwise mirror the manual route's gate (claude_cli_delegate_enabled). */
-      if (agent_is_claude_cli(&acfg->agents[i]) && !acfg->agents[i].is_server_hosted &&
-          !cfg->claude_cli_delegate_enabled)
+      /* Seat claude-CLI only when it is AUTHORIZED as a delegate
+       * (claude_cli_delegate_enabled — the explicit operator opt-in; running a
+       * Claude subscription as an automated delegate is ToS-sensitive) AND can
+       * actually run server-side (is_server_hosted, via `aimee agent add
+       * claude-oauth`; a client-only claude has no server endpoint and would just
+       * burn a slot on a "failed to build request URL" participant). Server-
+       * hosting is capability, NOT authorization — both are required. So an
+       * unauthorized claude (delegate gate off) or a disabled one (enabled is
+       * checked above) is never auto-seated, even after a server-side OAuth setup. */
+      if (agent_is_claude_cli(&acfg->agents[i]) &&
+          (!cfg->claude_cli_delegate_enabled || !acfg->agents[i].is_server_hosted))
          continue;
       snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]), "%s",
                acfg->agents[i].name);

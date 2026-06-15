@@ -832,20 +832,48 @@ static void test_default_panel_excludes_claude_cli(void)
    assert(strcmp(cfg.ensemble_reference_models[1], "codex") == 0);
    assert(strcmp(cfg.ensemble_aggregator, "mistral") == 0);
 
-   /* opt-in seats claude too */
+   /* claude needs BOTH authorization (claude_cli_delegate_enabled) AND
+    * server-hosting to be seated; neither alone is enough. */
+
+   /* (a) authorized but client-only (not server-hosted) -> still excluded */
    config_t cfg2;
    memset(&cfg2, 0, sizeof(cfg2));
    cfg2.claude_cli_delegate_enabled = 1;
    ensemble_default_panel_from_agents(&cfg2, &acfg);
-   assert(cfg2.ensemble_reference_count == 3);
+   assert(cfg2.ensemble_reference_count == 2);
 
-   /* a configured panel is left untouched (no-op) */
+   /* (b) server-hosted but NOT authorized -> still excluded (the key invariant:
+    * a server-side OAuth setup is not authorization to act as a panelist) */
+   acfg.agents[1].is_server_hosted = 1;
    config_t cfg3;
    memset(&cfg3, 0, sizeof(cfg3));
-   cfg3.ensemble_reference_count = 1;
-   snprintf(cfg3.ensemble_reference_models[0], 128, "preset");
    ensemble_default_panel_from_agents(&cfg3, &acfg);
-   assert(cfg3.ensemble_reference_count == 1);
+   assert(cfg3.ensemble_reference_count == 2);
+
+   /* (c) authorized AND server-hosted -> seated */
+   config_t cfg4;
+   memset(&cfg4, 0, sizeof(cfg4));
+   cfg4.claude_cli_delegate_enabled = 1;
+   ensemble_default_panel_from_agents(&cfg4, &acfg);
+   assert(cfg4.ensemble_reference_count == 3);
+
+   /* (d) disabled claude is never seated, even authorized + server-hosted */
+   acfg.agents[1].enabled = 0;
+   config_t cfg5;
+   memset(&cfg5, 0, sizeof(cfg5));
+   cfg5.claude_cli_delegate_enabled = 1;
+   ensemble_default_panel_from_agents(&cfg5, &acfg);
+   assert(cfg5.ensemble_reference_count == 2);
+   acfg.agents[1].enabled = 1;
+   acfg.agents[1].is_server_hosted = 0;
+
+   /* a configured panel is left untouched (no-op) */
+   config_t cfg6;
+   memset(&cfg6, 0, sizeof(cfg6));
+   cfg6.ensemble_reference_count = 1;
+   snprintf(cfg6.ensemble_reference_models[0], 128, "preset");
+   ensemble_default_panel_from_agents(&cfg6, &acfg);
+   assert(cfg6.ensemble_reference_count == 1);
    printf("  test_default_panel_excludes_claude_cli: ok\n");
 }
 
