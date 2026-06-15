@@ -558,7 +558,12 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
    const char *role_hint = mode == ROUNDTABLE_REVIEW ? "review and critique" : "draft and revise";
    const char *mode_task =
        mode == ROUNDTABLE_REVIEW
-           ? "Return only JSON: {\"items\":[{\"severity\":\"blocking|suggestion|nit\","
+           ? "You have NO filesystem, git, shell, or tool access in this review: the SHARED "
+             "ARTIFACT above is the complete and authoritative material under review. Judge it on "
+             "its own contents only. Never claim to have read files, run git, or grepped — and "
+             "never report a finding like \"the change is not applied / not in the tree\" (you "
+             "cannot observe the tree; the artifact is the change). "
+             "Return only JSON: {\"items\":[{\"severity\":\"blocking|suggestion|nit\","
              "\"category\":\"correctness|security|performance|maintainability|style\","
              "\"location\":\"file:line or artifact section\",\"summary\":\"one-sentence issue\","
              "\"recommendation\":\"...\"}],\"overall\":\"...\"}. "
@@ -643,9 +648,19 @@ static char *build_round_synthesis_prompt(const char *task, const char *prior_ar
       }
       pos += (size_t)n;
    }
-   n = snprintf(buf + pos, cap - pos,
-                "TASK: Produce the next shared %s. Do not mention the roundtable process.\n",
-                mode == ROUNDTABLE_REVIEW ? "consolidated review" : "artifact draft");
+   if (mode == ROUNDTABLE_REVIEW)
+      n = snprintf(buf + pos, cap - pos,
+                   "TASK: Produce the consolidated review as a SINGLE JSON object "
+                   "{\"items\":[{\"severity\":...,\"category\":...,\"location\":...,"
+                   "\"summary\":...,\"recommendation\":...}],\"overall\":...}. "
+                   "Output ONLY that JSON object — no analysis, no reasoning, no step-by-step "
+                   "commentary, no markdown fences, no text before or after. Emitting the final "
+                   "JSON directly (not your deliberation) is required so the verdict is never "
+                   "truncated. Do not mention the roundtable process.\n");
+   else
+      n = snprintf(buf + pos, cap - pos,
+                   "TASK: Produce the next shared artifact draft. Do not mention the roundtable "
+                   "process.\n");
    if (n < 0 || (size_t)n >= cap - pos)
    {
       free(buf);
@@ -1539,6 +1554,12 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          out->deadline_hit = 1;
          break;
       }
+      /* Progress: emit a round-boundary marker so a multi-minute run is observably
+       * advancing (in the server log) rather than a silent block. */
+      aimee_log(LOG_INFO, "roundtable.progress",
+                "round %d/%d: dispatching %d %s panelists (elapsed %lds)", round, local.max_rounds,
+                ref_count, local.mode == ROUNDTABLE_REVIEW ? "review" : "draft",
+                (long)((monotonic_ms() - start_ms) / 1000));
       if (cfg->ensemble_max_cost_usd > 0.0)
       {
          double preflight = estimated_round_cost(acfg, cfg, ref_count, 768);
@@ -1585,6 +1606,9 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
        * out->participants_failed wherever this round is adopted as best_round, so
        * the surfaced count matches the returned artifact's provenance. */
       int round_failed = ref_count - count_successful(results, ref_count);
+      aimee_log(LOG_INFO, "roundtable.progress",
+                "round %d/%d: %d/%d panelists responded; synthesizing", round, local.max_rounds,
+                ref_count - round_failed, ref_count);
       if (local.cancel_requested && local.cancel_requested(local.cancel_ctx))
       {
          out->cancelled = 1;

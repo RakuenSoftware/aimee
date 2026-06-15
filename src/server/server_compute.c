@@ -808,6 +808,12 @@ void delegate_worker(void *arg)
    int explicit_tools = cJSON_IsTrue(jtools),
        force_tools = delegate_role_auto_tools_for_invocation(role, max_turns, explicit_tools);
    force_tools = force_tools || (toolset_override && toolset_override[0]);
+   /* An explicit `tools:false` (CLI --no-tools) overrides the role's tools-on
+    * default: an artifact-provided panel review of an inline diff must run
+    * tools-off so weaker models don't burn their turns reading files and return
+    * nothing. Honored even for tools-on-by-default roles like `review`. */
+   if (cJSON_IsBool(jtools) && !cJSON_IsTrue(jtools))
+      force_tools = 0;
    /* Generate delegation ID if not provided */
    if (cJSON_IsString(jid) && jid->valuestring[0])
       snprintf(deleg_id, sizeof(deleg_id), "%s", jid->valuestring);

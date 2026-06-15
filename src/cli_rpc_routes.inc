@@ -1750,9 +1750,9 @@ static cJSON *marshal_delegate_roundtable(int argc, char **argv)
 
 static cJSON *marshal_delegate(int argc, char **argv)
 {
-   static const char *bool_flags[] = {"json",         "background", "durable", "coordination",
-                                      "plan",         "dry-run",    "tools",   "handoff-json",
-                                      "prompt-stdin", NULL};
+   static const char *bool_flags[] = {"json",         "background",   "durable", "coordination",
+                                      "plan",         "dry-run",      "tools",   "no-tools",
+                                      "handoff-json", "prompt-stdin", NULL};
    rpc_opts_t opts;
    rpc_parse(argc, argv, bool_flags, &opts);
 
@@ -1820,7 +1820,16 @@ static cJSON *marshal_delegate(int argc, char **argv)
     * /v1/delegate/run route (returns a job_id to poll via `aimee jobs`). */
    if (rpc_get(&opts, "background") || cli_rpc_has_remote_endpoint())
       cJSON_AddTrueToObject(req, "background");
-   if (rpc_get(&opts, "tools"))
+   /* --tools forces tools on; --no-tools forces them OFF even for a role that
+    * enables tools by default (e.g. `review`) — the right mode for an
+    * artifact-provided panel review of an inline diff, which otherwise wanders
+    * reading files and returns nothing. Explicit false overrides the role default
+    * server-side. */
+   /* --no-tools wins over --tools when both are passed (fail-safe: the explicit
+    * "off" is honored), matching the foreground delegate path's precedence. */
+   if (rpc_get(&opts, "no-tools"))
+      cJSON_AddFalseToObject(req, "tools");
+   else if (rpc_get(&opts, "tools"))
       cJSON_AddTrueToObject(req, "tools");
    if (toolset_override && toolset_override[0])
       cJSON_AddStringToObject(req, "toolset", toolset_override);
@@ -6326,12 +6335,29 @@ static void pt_print_identity_diff(const char *method, cJSON *resp)
       printf("  HIGH CONFIDENCE FLIPS: %d (investigate before continuing)\n", nflips);
 }
 
+/* delegate.roundtable: print the consolidated artifact in human mode (without
+ * this, a non-JSON `aimee delegate roundtable` printed nothing — the result was
+ * only reachable via --json or the run API). */
+static void pt_print_delegate_roundtable(const char *method, cJSON *resp)
+{
+   (void)method;
+   cJSON *art = cJSON_GetObjectItemCaseSensitive(resp, "artifact");
+   if (cJSON_IsString(art) && art->valuestring[0])
+      printf("%s\n", art->valuestring);
+   cJSON *rounds = cJSON_GetObjectItemCaseSensitive(resp, "rounds_run");
+   cJSON *converged = cJSON_GetObjectItemCaseSensitive(resp, "converged");
+   if (cJSON_IsNumber(rounds))
+      fprintf(stderr, "[roundtable: %d round(s)%s]\n", (int)rounds->valuedouble,
+              cJSON_IsTrue(converged) ? ", converged" : "");
+}
+
 typedef void (*pt_print_fn)(const char *method, cJSON *resp);
 static const struct
 {
    const char *method;
    pt_print_fn fn;
 } pt_print_table[] = {
+    {"delegate.roundtable", pt_print_delegate_roundtable},
     {"init.run", pt_print_init_run},
     {"migrate.v2", pt_print_migrate_v2},
     {"rules.generate", pt_print_rules_generate},
