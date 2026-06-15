@@ -21,9 +21,9 @@
 #define CONFIG_DEFAULT_MAX_DELEGATION_SPAWNS 50
 
 /* Server execution pool defaults */
-#define CONFIG_DEFAULT_BACKGROUND_THREADS              2
-#define CONFIG_DEFAULT_SESSION_THREADS                 4
-#define CONFIG_DEFAULT_KB_WORKER_THREADS               2
+#define CONFIG_DEFAULT_BACKGROUND_THREADS 2
+#define CONFIG_DEFAULT_SESSION_THREADS    4
+#define CONFIG_DEFAULT_KB_WORKER_THREADS  2
 /* Backstop ceiling on concurrent on-demand (I/O-bound) delegates. Delegates are
  * gated by the per-model concurrency limiter, not a CPU pool; this only guards
  * against pathological fan-out exhausting fds/memory. */

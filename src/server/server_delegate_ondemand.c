@@ -119,8 +119,8 @@ void delegate_ondemand_drain(int timeout_ms)
    pthread_mutex_lock(&g_delegate_inflight_mutex);
    while (g_delegate_inflight > 0)
    {
-      if (pthread_cond_timedwait(&g_delegate_inflight_cond, &g_delegate_inflight_mutex, &deadline) ==
-          ETIMEDOUT)
+      if (pthread_cond_timedwait(&g_delegate_inflight_cond, &g_delegate_inflight_mutex,
+                                 &deadline) == ETIMEDOUT)
          break;
    }
    int remaining = g_delegate_inflight;
