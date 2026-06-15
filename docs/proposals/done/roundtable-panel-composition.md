@@ -1,11 +1,14 @@
 # Proposal: Roundtable panel composition — diverse personas, wide fan-out
 
-- **State:** reviewed — READY (review convergence 2026-06-15: self multi-lens
-  review [security · architecture · QA · correctness · contrarian] resolved the
-  open questions below; a live delegate panel was attempted [architect/mistral,
-  security/minimax, qa/mimo] but degraded — mistral hit HTTP 429, the tool-less
-  models exhausted turns wandering with file tools enabled. That degradation is
-  itself first-hand evidence for the no-tools-review decision in §5.)
+- **State:** done — implemented 2026-06-15 (per-participant review personas, new
+  `reviewer-constructive` built-in, `ensemble.reference_personas` config; engine
+  wired in delegate_ensemble.c with unit tests; lint + unit suites green). The
+  review converged via a self multi-lens review [security · architecture · QA ·
+  correctness · contrarian] which resolved the open questions below; a live
+  delegate panel was attempted [architect/mistral, security/minimax, qa/mimo] but
+  degraded — mistral hit HTTP 429, the tool-less models exhausted turns wandering
+  with file tools enabled. That degradation is itself first-hand evidence for the
+  no-tools-review decision in §5, and for this very proposal's value.
 - **Author:** JBailes
 - **Date:** 2026-06-14 (reviewed 2026-06-15)
 - **Motivation:** the roundtable review is the project's quality gate, but today
