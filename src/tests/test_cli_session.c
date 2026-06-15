@@ -3,7 +3,102 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <time.h>
+#include <sys/stat.h>
 #include "cli_session.h"
+
+/* --- cli_session_recv timeout tests ---
+ *
+ * recv() shells out to `tmux has-session` / `tmux capture-pane`. We stub tmux
+ * with a fake script on PATH whose behaviour is selected by $FAKE_TMUX_MODE,
+ * so the receive loop can be driven deterministically without a real tmux:
+ *   changing → always alive, capture prints a new value each call (never
+ *              stabilises) → exercises the wall-clock timeout backstop
+ *   stable   → always alive, capture prints a constant → stabilises → OK
+ *   dead     → has-session fails → session-died path
+ */
+static char g_fake_dir[256];
+
+static long long test_mono_ms(void)
+{
+   struct timespec ts;
+   clock_gettime(CLOCK_MONOTONIC, &ts);
+   return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static void install_fake_tmux(void)
+{
+   snprintf(g_fake_dir, sizeof(g_fake_dir), "/tmp/aimee_faketmux_%d", (int)getpid());
+   mkdir(g_fake_dir, 0700);
+   char counter[300];
+   snprintf(counter, sizeof(counter), "%s/counter", g_fake_dir);
+   char script[320];
+   snprintf(script, sizeof(script), "%s/tmux", g_fake_dir);
+   FILE *f = fopen(script, "w");
+   assert(f != NULL);
+   fprintf(f,
+           "#!/bin/sh\n"
+           "case \"$1\" in\n"
+           "  has-session) [ \"$FAKE_TMUX_MODE\" = dead ] && exit 1; exit 0 ;;\n"
+           "  capture-pane)\n"
+           "    if [ \"$FAKE_TMUX_MODE\" = changing ]; then\n"
+           "      c=0; [ -f '%s' ] && c=$(cat '%s'); c=$((c+1)); echo \"$c\" > '%s';\n"
+           "      echo \"frame $c\";\n"
+           "    else echo 'STATIC OUTPUT'; fi; exit 0 ;;\n"
+           "  *) exit 0 ;;\n"
+           "esac\n",
+           counter, counter, counter);
+   fclose(f);
+   assert(chmod(script, 0700) == 0);
+
+   const char *old_path = getenv("PATH");
+   char newpath[4096];
+   snprintf(newpath, sizeof(newpath), "%s:%s", g_fake_dir, old_path ? old_path : "");
+   setenv("PATH", newpath, 1);
+}
+
+static cli_session_t fake_session(void)
+{
+   cli_session_t s;
+   memset(&s, 0, sizeof(s));
+   s.active = 1;
+   snprintf(s.session_name, sizeof(s.session_name), "aimee-faketest");
+   return s;
+}
+
+static void test_recv_timeout_on_changing_pane(void)
+{
+   setenv("FAKE_TMUX_MODE", "changing", 1);
+   cli_session_t s = fake_session();
+   char buf[8192];
+   long long t0 = test_mono_ms();
+   int rc = cli_session_recv(&s, buf, sizeof(buf), 1000);
+   long long elapsed = test_mono_ms() - t0;
+   /* The pane never stabilises, so recv must hit the wall-clock bound (-2)
+    * rather than hang. Allow generous slack above the 1000ms bound. */
+   assert(rc == -2);
+   assert(elapsed < 5000);
+}
+
+static void test_recv_ok_on_stable_pane(void)
+{
+   setenv("FAKE_TMUX_MODE", "stable", 1);
+   cli_session_t s = fake_session();
+   char buf[8192];
+   int rc = cli_session_recv(&s, buf, sizeof(buf), 10000);
+   assert(rc == 0);
+   assert(strstr(buf, "STATIC OUTPUT") != NULL);
+}
+
+static void test_recv_dead_session(void)
+{
+   setenv("FAKE_TMUX_MODE", "dead", 1);
+   cli_session_t s = fake_session();
+   char buf[8192];
+   int rc = cli_session_recv(&s, buf, sizeof(buf), 10000);
+   assert(rc == -1);
+}
 
 /* --- cli_session_make_name tests --- */
 
@@ -219,6 +314,20 @@ int main(void)
 
    printf("test_delta_non_prefix_falls_back_to_full... ");
    test_delta_non_prefix_falls_back_to_full();
+   printf("OK\n");
+
+   install_fake_tmux();
+
+   printf("test_recv_timeout_on_changing_pane... ");
+   test_recv_timeout_on_changing_pane();
+   printf("OK\n");
+
+   printf("test_recv_ok_on_stable_pane... ");
+   test_recv_ok_on_stable_pane();
+   printf("OK\n");
+
+   printf("test_recv_dead_session... ");
+   test_recv_dead_session();
    printf("OK\n");
 
    printf("All cli_session tests passed.\n");

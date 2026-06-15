@@ -11,6 +11,7 @@
 #include "mcp_client_registry.h"
 #include "server.h"
 #include "server_http.h"
+#include "cli_session_pty.h"
 #include "presence.h"
 #include "events.h"
 #include "agent_exec.h"
@@ -228,6 +229,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * aimee.api.{http_port,bearer_token} are configured). Best-effort: a bind
     * failure must not block the RPC server. */
    server_http_set_max_event_streams(cfg.server_api_max_event_streams);
+   cli_session_pty_set_forwarding(cfg.server_api_cli_session_forwarding);
    if (server_http_start(NULL, cfg.server_api_http_port, cfg.server_api_tls_port,
                          cfg.server_api_bearer_token, cfg.server_api_rate_limit_per_min,
                          cfg.server_api_remote_writes) != 0)

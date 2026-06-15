@@ -622,6 +622,7 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/agent_loop.c
     ${AIMEE_SRC_DIR}/server/liveness.c
     ${AIMEE_SRC_DIR}/server/cli_session.c
+    ${AIMEE_SRC_DIR}/server/cli_session_pty.c
     ${AIMEE_SRC_DIR}/server/cli_codex.c
     ${AIMEE_SRC_DIR}/server/cli_claude.c
     ${AIMEE_SRC_DIR}/server/cli_gemini.c

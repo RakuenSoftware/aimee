@@ -311,4 +311,12 @@ int is_safe_id(const char *s);
  * Returns 1 if a matching pattern was found, 0 otherwise. */
 int delegation_error_guidance(const char *error, char *buf, size_t len);
 
+/* Standard base64 (RFC 4648, '=' padded). Shared binary-safe codec for framing
+ * raw bytes over text channels (e.g. PTY bytes over SSE/NDJSON). */
+size_t aimee_base64_encoded_len(size_t in_len); /* bytes needed incl. NUL */
+size_t aimee_base64_encode(const unsigned char *in, size_t in_len, char *out, size_t out_cap);
+/* Decode NUL-terminated base64 (whitespace skipped); returns decoded byte count
+ * or (size_t)-1 on malformed input / insufficient out_cap. */
+size_t aimee_base64_decode(const char *in, unsigned char *out, size_t out_cap);
+
 #endif /* DEC_UTIL_H */

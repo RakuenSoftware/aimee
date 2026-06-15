@@ -245,6 +245,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-context-discover \
                $(TESTPREFIX)/unit-test-workflow-session \
                $(TESTPREFIX)/unit-test-cli-session \
+               $(TESTPREFIX)/unit-test-cli-session-pty \
                $(TESTPREFIX)/unit-test-cli-codex \
                $(TESTPREFIX)/unit-test-delegate-backend \
                $(TESTPREFIX)/unit-test-delegate-backend-local \
@@ -2001,6 +2002,7 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
                            $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/server/vault_principal.o $(OBJDIR)/server/presence.o \
+                           $(OBJDIR)/server/cli_session_pty.o $(OBJDIR)/server/cli_session.o $(OBJDIR)/posix/workspace_provider.o \
                            $(OBJDIR)/server/workspace_runner_registry.o $(OBJDIR)/server/workspace_runner_queue.o \
                            $(OBJDIR)/forge_credentials.o \
                            $(OBJDIR)/delivery_target.o \
@@ -2211,6 +2213,17 @@ $(TESTPREFIX)/unit-test-workflow-session: $(OBJDIR)/tests/test_workflow_session.
 
 $(TESTPREFIX)/unit-test-cli-session: $(OBJDIR)/tests/test_cli_session.o \
                      $(OBJDIR)/server/cli_session.o \
+                     $(OBJDIR)/posix/workspace_provider.o \
+                     $(OBJDIR)/util.o \
+                     $(OBJDIR)/text.o \
+                     $(OBJDIR)/cJSON.o \
+                     $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-cli-session-pty: $(OBJDIR)/tests/test_cli_session_pty.o \
+                     $(OBJDIR)/server/cli_session_pty.o \
+                     $(OBJDIR)/server/cli_session.o \
+                     $(OBJDIR)/posix/workspace_provider.o \
                      $(OBJDIR)/util.o \
                      $(OBJDIR)/text.o \
                      $(OBJDIR)/cJSON.o \
