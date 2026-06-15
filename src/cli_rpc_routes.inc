@@ -6726,12 +6726,15 @@ static char *cli_rpc_normalize_endpoint(const char *ep)
       n = sizeof(hostport) - 1;
    memcpy(hostport, rest, n);
    hostport[n] = '\0';
+   /* Strip any userinfo ("user:pass@host") so it can't corrupt the host:port the
+    * TLS/connect layer parses; credentials belong in the bearer, not the URL. */
+   char *at = strrchr(hostport, '@');
+   char *hp = at ? at + 1 : hostport;
    char out[320];
-   if (strchr(hostport, ':'))
-      snprintf(out, sizeof(out), "%s%s", scheme, hostport);
+   if (strchr(hp, ':'))
+      snprintf(out, sizeof(out), "%s%s", scheme, hp);
    else
-      snprintf(out, sizeof(out), "%s%s:%s", scheme, hostport,
-               strcmp(scheme, "tls:") == 0 ? "443" : "80");
+      snprintf(out, sizeof(out), "%s%s:%s", scheme, hp, strcmp(scheme, "tls:") == 0 ? "443" : "80");
    return strdup(out);
 }
 
