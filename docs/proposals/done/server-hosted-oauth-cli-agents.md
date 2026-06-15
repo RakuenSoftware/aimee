@@ -1,8 +1,11 @@
 # Proposal: Server-hosted OAuth CLI agents (claude / codex)
 
-- **State:** reviewed R1 (roundtable 2026-06-15: 5-model panel — security /
-  architect / QA / contrarian / constructive — 76 findings; the §"Security &
-  robustness contract" below resolves every blocking theme). Pending re-review.
+- **State:** done — implemented 2026-06-15 (image enablers; server_cli_oauth
+  module + unit test; agent.cli_oauth_{start,code,poll} routes + /v1 + OpenAPI;
+  server_cli_oauth_enabled opt-in gate; agent_t.is_server_hosted + panel
+  eligibility; `aimee agent add claude-oauth`/`codex-oauth` client command).
+  Roundtable R1 (5-model, 76 findings) hardened into the §"Security & robustness
+  contract" below, which the implementation follows.
 - **Author:** JBailes / Claude
 
 ## Goal
