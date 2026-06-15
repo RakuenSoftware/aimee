@@ -6697,28 +6697,70 @@ static char *cli_rpc_aimee_yaml_value(const char *key)
  * This is the only client path that reaches an aimee-server on another host
  * (e.g. a container's published port); the aimee-http.sock helpers above are
  * loopback-only. Caller frees. */
+/* Normalize a configured endpoint to a cli_http transport scheme. An https://
+ * URL becomes "tls:host:port" (native client TLS to the server's #304 TLS
+ * listener); http:// becomes "tcp:host:port"; an explicit tcp:/tls:/unix:
+ * endpoint passes through unchanged. Caller frees. */
+static char *cli_rpc_normalize_endpoint(const char *ep)
+{
+   if (!ep || !ep[0])
+      return NULL;
+   const char *scheme = NULL;
+   const char *rest = NULL;
+   if (strncmp(ep, "https://", 8) == 0)
+   {
+      scheme = "tls:";
+      rest = ep + 8;
+   }
+   else if (strncmp(ep, "http://", 7) == 0)
+   {
+      scheme = "tcp:";
+      rest = ep + 7;
+   }
+   if (!scheme)
+      return strdup(ep); /* tcp:/tls:/unix:/host:port already */
+   /* Take host[:port], dropping any trailing path; default the port by scheme. */
+   char hostport[300];
+   size_t n = strcspn(rest, "/");
+   if (n >= sizeof(hostport))
+      n = sizeof(hostport) - 1;
+   memcpy(hostport, rest, n);
+   hostport[n] = '\0';
+   /* Strip any userinfo ("user:pass@host") so it can't corrupt the host:port the
+    * TLS/connect layer parses; credentials belong in the bearer, not the URL. */
+   char *at = strrchr(hostport, '@');
+   char *hp = at ? at + 1 : hostport;
+   char out[320];
+   if (strchr(hp, ':'))
+      snprintf(out, sizeof(out), "%s%s", scheme, hp);
+   else
+      snprintf(out, sizeof(out), "%s%s:%s", scheme, hp, strcmp(scheme, "tls:") == 0 ? "443" : "80");
+   return strdup(out);
+}
+
 char *cli_rpc_client_endpoint(void)
 {
    const char *env = getenv("AIMEE_API_ENDPOINT");
    if (env && env[0])
-      return strdup(env);
+      return cli_rpc_normalize_endpoint(env);
    char *yaml = cli_rpc_aimee_yaml_value("client_endpoint:");
    if (yaml)
-      return yaml;
+   {
+      char *norm = cli_rpc_normalize_endpoint(yaml);
+      free(yaml);
+      return norm;
+   }
    /* Fall back to a --server / AIMEE_SERVER_URL / remote.conf target (aimee_client)
-    * by synthesizing the "tcp:host:port" endpoint cli_http_request expects. This
-    * is what makes the README's headline remote flow drive the WHOLE data/RPC
-    * plane (status, memory, kb, …), not just the lower-level AIMEE_API_ENDPOINT
-    * form. http reaches the published container port directly; an https:// target
-    * needs a TLS-terminating proxy, the same as the AIMEE_API_ENDPOINT tcp:
-    * transport. Keeping the bridge here (vs. cli_v1_send) means the shared
-    * dispatcher references no networking symbols, so the server/gateway/tests that
-    * link it pull only the dependency-free aimee_client resolver. */
+    * by synthesizing the transport endpoint cli_http_request expects: "tls:" for
+    * an https:// target (native client TLS, #304), else "tcp:". This makes the
+    * README's headline remote flow drive the WHOLE data/RPC plane (status,
+    * memory, kb, …), not just the lower-level AIMEE_API_ENDPOINT form. */
    char hostport[300];
-   if (aimee_client_remote_active(hostport, sizeof(hostport)))
+   int is_https = 0;
+   if (aimee_client_remote_active_scheme(hostport, sizeof(hostport), &is_https))
    {
       char ep[320];
-      snprintf(ep, sizeof(ep), "tcp:%s", hostport);
+      snprintf(ep, sizeof(ep), "%s%s", is_https ? "tls:" : "tcp:", hostport);
       return strdup(ep);
    }
    return NULL;
