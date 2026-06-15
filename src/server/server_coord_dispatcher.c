@@ -50,7 +50,9 @@ int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const cha
    cctx->async_slot = -1;
    cctx->coord_task_id = task_id;
    cctx->req = req;
-   if (compute_pool_submit(&ctx->pool, delegate_worker, cctx) != 0)
+   /* Coord-task delegates are I/O-bound; run on-demand, not the CPU compute
+    * pool (see delegate_spawn_ondemand). */
+   if (delegate_spawn_ondemand(cctx) != 0)
    {
       compute_ctx_free(cctx);
       return -1;

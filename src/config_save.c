@@ -805,6 +805,8 @@ int config_save(const config_t *cfg)
       cJSON_AddNumberToObject(root, "background_threads", cfg->compute_threads);
    if (cfg->session_threads)
       cJSON_AddNumberToObject(root, "session_threads", cfg->session_threads);
+   if (cfg->delegate_max_inflight)
+      cJSON_AddNumberToObject(root, "delegate_max_inflight", cfg->delegate_max_inflight);
 
    /* API retry settings (only save if non-default) */
    if (cfg->retry_max_attempts || cfg->retry_base_ms || cfg->retry_max_ms)

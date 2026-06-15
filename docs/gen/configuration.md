@@ -194,7 +194,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 106 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
+The binaries read 107 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
 
 ### Paths & assets
 
@@ -376,6 +376,12 @@ The binaries read 106 `AIMEE_*` environment variables (scanned from `getenv()` i
 |----------|-------------|
 | `AIMEE_ANTIPATTERNS_BYPASS` | Bypass the guardrail antipattern checks. |
 | `AIMEE_LOG_LEVEL` | Log level: `error` | `warn` | `info` | `debug`. |
+
+### Undocumented (add to `ENV_DESC` in gen-reference-docs.py)
+
+> These are read by the code but have no description yet — the generator surfaces them so the reference can't silently fall behind.
+
+`AIMEE_DELEGATE_MAX_INFLIGHT`
 
 ## External & provider environment
 

@@ -239,6 +239,18 @@ void compute_pool_shutdown(compute_pool_t *pool)
    (void)pool;
 }
 
+/* On-demand delegate execution (server_delegate_ondemand.c) is not linked here;
+ * server.c calls these at init/shutdown. No-op stubs. */
+void delegate_ondemand_set_ceiling(int ceiling)
+{
+   (void)ceiling;
+}
+
+void delegate_ondemand_drain(int timeout_ms)
+{
+   (void)timeout_ms;
+}
+
 int server_session_pool_submit(server_ctx_t *ctx, const char *session_id, void (*fn)(void *),
                                void *arg, int *thread_count_out)
 {
