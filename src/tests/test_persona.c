@@ -63,8 +63,9 @@ int main(void)
       persona_free(&p);
 
       /* --- reviewer built-ins: read-only, review-oriented roles, no gate --- */
-      const char *reviewers[] = {"qa", "security", "reviewer", "architect"};
-      for (int i = 0; i < 4; i++)
+      const char *reviewers[] = {"qa", "security", "reviewer", "architect",
+                                 "reviewer-constructive"};
+      for (int i = 0; i < 5; i++)
       {
          assert(persona_load(NULL, reviewers[i], &p) == 0);
          assert(p.builtin == 1);
@@ -78,6 +79,18 @@ int main(void)
          assert(p.brief_text && strstr(p.brief_text, "READ-ONLY delegates") != NULL);
          persona_free(&p);
       }
+
+      /* reviewer-constructive is a DISTINCT lens from the contrarian reviewer:
+       * its composed system prompt is constructive ("assess as written") and
+       * differs from the contrarian reviewer's prose. */
+      char *constructive = persona_compose_delegate_prompt("reviewer-constructive", NULL, NULL);
+      char *contrarian = persona_compose_delegate_prompt("reviewer", NULL, NULL);
+      assert(constructive && contrarian);
+      assert(strstr(constructive, "constructive") != NULL);
+      assert(strstr(constructive, "as written") != NULL);
+      assert(strcmp(constructive, contrarian) != 0);
+      free(constructive);
+      free(contrarian);
    }
 
    /* --- unknown name falls back to engineer --- */
@@ -215,7 +228,8 @@ int main(void)
       char dir[PATH_MAX];
       snprintf(dir, sizeof(dir), "%s/defaults", home);
       int w = persona_install_defaults(dir);
-      assert(w == 7); /* engineer, novel, songwriter, qa, security, reviewer, architect */
+      assert(w == 8); /* engineer, novel, songwriter, qa, security, reviewer, architect,
+                         reviewer-constructive */
       char path[PATH_MAX];
       snprintf(path, sizeof(path), "%s/novel.md", dir);
       FILE *f = fopen(path, "r");

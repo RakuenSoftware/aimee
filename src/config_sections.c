@@ -1173,6 +1173,23 @@ void config_parse_ensemble_section(config_t *cfg, cJSON *root)
             }
          }
       }
+      /* Optional per-participant review personas, paired by index with
+       * reference_models. Empty/missing entries fall back to the diverse default
+       * lineup in the engine. */
+      cJSON *personas = cJSON_GetObjectItemCaseSensitive(ensemble_cfg, "reference_personas");
+      if (cJSON_IsArray(personas))
+      {
+         cJSON *p;
+         cJSON_ArrayForEach(p, personas)
+         {
+            if (cJSON_IsString(p) && p->valuestring && cfg->ensemble_reference_persona_count < 8)
+            {
+               snprintf(cfg->ensemble_reference_personas[cfg->ensemble_reference_persona_count],
+                        sizeof(cfg->ensemble_reference_personas[0]), "%s", p->valuestring);
+               cfg->ensemble_reference_persona_count++;
+            }
+         }
+      }
    }
 }
 

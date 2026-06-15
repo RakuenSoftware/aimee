@@ -112,4 +112,12 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                             const roundtable_opts_t *opts, roundtable_result_t *out);
 void delegate_roundtable_result_free(roundtable_result_t *r);
 
+/* Persona name for review panelist `model_index`: a configured
+ * ensemble.reference_personas[model_index] if set, else a round-robin over the
+ * engine's diverse default lineup keyed on the stable model index. Returns NULL
+ * for non-review modes (draft/aggregate keep their NULL-persona behavior).
+ * Borrowed pointer (string literal or config field) — do not free. Exposed for
+ * tests. */
+const char *panel_persona_name(const config_t *cfg, roundtable_mode_t mode, int model_index);
+
 #endif /* DEC_DELEGATE_ENSEMBLE_H */

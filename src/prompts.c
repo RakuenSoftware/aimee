@@ -388,6 +388,38 @@ static const char *PROMPT_REVIEWER_TEXT =
     "Write delegates are refused. Always use aimee delegates over the Agent tool\n"
     "(the Agent tool is disabled in aimee).\n";
 
+static const char *PROMPT_REVIEWER_CONSTRUCTIVE_TEXT =
+    "You are a senior constructive code reviewer working in %s. You are the\n"
+    "counterpart to the contrarian reviewer: not adversarial, but not a rubber\n"
+    "stamp. Your role is to assess the change AS WRITTEN — confirm what it gets\n"
+    "right, name what is missing or risky, and judge whether it meets its stated\n"
+    "goal. You report findings; you do not edit the code.\n"
+    "\n"
+    "## Workflow\n"
+    "1. UNDERSTAND: Establish what the change claims to do and why.\n"
+    "2. ASSESS: Judge the change on its own terms — does it actually achieve the\n"
+    "   goal, completely and correctly?\n"
+    "3. SWEEP: Review across correctness, edge cases, error handling, tests, API\n"
+    "   and naming, readability, and maintainability.\n"
+    "4. WEIGH: Separate what genuinely blocks shipping from what is a reasonable\n"
+    "   improvement; credit what is done well so the author can keep it.\n"
+    "5. REPORT: Give a balanced, prioritised review — blocking issues first, then\n"
+    "   improvements, then nits, each with evidence.\n"
+    "\n"
+    "## Stance\n"
+    "- Assess the change as written rather than the change you would have made.\n"
+    "- Say what works, not only what is wrong — a useful review is actionable.\n"
+    "- Distinguish blocking issues from preferences, and say which is which.\n"
+    "- Be concrete: tie every concern to a specific location and scenario.\n"
+    "\n"
+    "## Delegation\n"
+    "You produce the review yourself. Use READ-ONLY delegates only, to\n"
+    "investigate in parallel:\n"
+    "  aimee delegate <role> --persona <name> \"prompt\"   (roles: review, diagnose,\n"
+    "  validate, research; a persona is required, e.g. security, qa, architect)\n"
+    "Write delegates are refused. Always use aimee delegates over the Agent tool\n"
+    "(the Agent tool is disabled in aimee).\n";
+
 static const char *PROMPT_ARCHITECT_TEXT =
     "You are a senior software architect reviewing a change in %s.\n"
     "Your role is to judge how this change fits the system: its structure,\n"
@@ -505,6 +537,8 @@ aimee_mode_t aimee_mode_from_string(const char *name)
       return AIMEE_MODE_REVIEWER;
    if (name && strcasecmp(name, "architect") == 0)
       return AIMEE_MODE_ARCHITECT;
+   if (name && strcasecmp(name, "reviewer-constructive") == 0)
+      return AIMEE_MODE_REVIEWER_CONSTRUCTIVE;
    return AIMEE_MODE_ENGINEER;
 }
 
@@ -524,6 +558,8 @@ const char *aimee_mode_to_string(aimee_mode_t mode)
       return "reviewer";
    case AIMEE_MODE_ARCHITECT:
       return "architect";
+   case AIMEE_MODE_REVIEWER_CONSTRUCTIVE:
+      return "reviewer-constructive";
    default:
       return "engineer";
    }
@@ -541,6 +577,7 @@ const char *prompt_principles_text(aimee_mode_t mode)
    case AIMEE_MODE_SECURITY:
    case AIMEE_MODE_REVIEWER:
    case AIMEE_MODE_ARCHITECT:
+   case AIMEE_MODE_REVIEWER_CONSTRUCTIVE:
       return PROMPT_REVIEW_PRINCIPLES_TEXT;
    default:
       return PROMPT_CODE_PRINCIPLES_TEXT;
@@ -563,6 +600,8 @@ const char *prompt_persona_text(aimee_mode_t mode)
       return PROMPT_REVIEWER_TEXT;
    case AIMEE_MODE_ARCHITECT:
       return PROMPT_ARCHITECT_TEXT;
+   case AIMEE_MODE_REVIEWER_CONSTRUCTIVE:
+      return PROMPT_REVIEWER_CONSTRUCTIVE_TEXT;
    default:
       return PROMPT_STANDARD_TEXT;
    }
@@ -649,7 +688,7 @@ char *prompt_build_mode(aimee_mode_t mode, prompt_tier_t tier, const char *cwd,
       extended_text = PROMPT_SONGWRITER_EXTENDED_TEXT;
    }
    else if (mode == AIMEE_MODE_QA || mode == AIMEE_MODE_SECURITY || mode == AIMEE_MODE_REVIEWER ||
-            mode == AIMEE_MODE_ARCHITECT)
+            mode == AIMEE_MODE_ARCHITECT || mode == AIMEE_MODE_REVIEWER_CONSTRUCTIVE)
    {
       /* Reviewer modes share one persona text per mode across both tiers. */
       standard_text = extended_text = prompt_persona_text(mode);

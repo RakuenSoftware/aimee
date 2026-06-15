@@ -13,6 +13,7 @@
 #include "delegate_credentials.h"
 #include "cost_fold.h"
 #include "log.h"
+#include "persona.h"
 #include "token_tracker.h"
 
 #include <stdio.h>
@@ -1031,6 +1032,47 @@ static int review_saturated(char prev[][128], int prev_count, char cur[][128], i
    return 1;
 }
 
+/* Diverse default review lineup, round-robined across the panel by the
+ * participant's stable position in reference_models (not the shuffled slot), so
+ * persona<->model pairing is reproducible run to run. Pairs the contrarian
+ * `reviewer` with the constructive `reviewer-constructive`: one tries to break
+ * the change, one assesses it as written. */
+static const char *const PANEL_DEFAULT_PERSONAS[] = {"security", "architect", "qa", "reviewer",
+                                                     "reviewer-constructive"};
+#define PANEL_DEFAULT_PERSONA_COUNT                                                                \
+   ((int)(sizeof(PANEL_DEFAULT_PERSONAS) / sizeof(PANEL_DEFAULT_PERSONAS[0])))
+
+/* Persona name for review panelist `model_index`. Returns NULL for non-review
+ * modes (draft/aggregate keep their prior NULL-persona behavior) and when no
+ * persona applies. The returned pointer is a borrowed string literal or config
+ * field; do not free it. */
+const char *panel_persona_name(const config_t *cfg, roundtable_mode_t mode, int model_index)
+{
+   if (mode != ROUNDTABLE_REVIEW || !cfg || model_index < 0)
+      return NULL;
+   if (model_index < cfg->ensemble_reference_persona_count &&
+       cfg->ensemble_reference_personas[model_index][0])
+      return cfg->ensemble_reference_personas[model_index];
+   return PANEL_DEFAULT_PERSONAS[model_index % PANEL_DEFAULT_PERSONA_COUNT];
+}
+
+/* Compose the system prompt for review panelist `model_index`. Returns a heap
+ * string the caller must free, or NULL (no persona, or compose failed — both
+ * fall back to today's NULL-system-prompt behavior, never dropping a panelist).
+ * persona_compose_delegate_prompt resolves project->user->built-in and itself
+ * falls back to a usable persona, so an unknown custom name is non-fatal. */
+static char *panel_persona_prompt(const config_t *cfg, roundtable_mode_t mode, int model_index)
+{
+   const char *name = panel_persona_name(cfg, mode, model_index);
+   if (!name)
+      return NULL;
+   char *sys = persona_compose_delegate_prompt(name, NULL, NULL);
+   if (!sys)
+      aimee_log(LOG_INFO, "roundtable", "panelist %d: persona '%s' compose failed; no persona",
+                model_index, name);
+   return sys;
+}
+
 static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const char *task,
                               const char *artifact, const char *peer_notes, roundtable_mode_t mode,
                               int round, const char *brief, agent_result_t *results)
@@ -1038,15 +1080,21 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
    int ref_count = cfg->ensemble_reference_count;
    agent_task_t tasks[ENSEMBLE_MAX_REFS];
    char *prompts[ENSEMBLE_MAX_REFS];
+   char *personas[ENSEMBLE_MAX_REFS];
    memset(tasks, 0, sizeof(tasks));
    memset(prompts, 0, sizeof(prompts));
+   memset(personas, 0, sizeof(personas));
    for (int i = 0; i < ref_count; i++)
    {
       prompts[i] = build_round_prompt(task, artifact, peer_notes, mode, round, brief);
       if (!prompts[i])
          goto fail;
+      /* Per-participant persona (review mode only) is the system prompt; the
+       * round prompt still drives the output shape. */
+      personas[i] = panel_persona_prompt(cfg, mode, i);
       tasks[i].role = mode == ROUNDTABLE_REVIEW ? "review" : "draft";
       tasks[i].agent = cfg->ensemble_reference_models[i];
+      tasks[i].system_prompt = personas[i];
       tasks[i].user_prompt = prompts[i];
       tasks[i].temperature = 0.3 + (0.05 * i);
       tasks[i].max_tokens = 0;
@@ -1056,11 +1104,17 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
    for (int i = 0; i < ref_count; i++)
       ensemble_fold_cost(acfg, &results[i], cfg->ensemble_reference_models[i]);
    for (int i = 0; i < ref_count; i++)
+   {
       free(prompts[i]);
+      free(personas[i]);
+   }
    return 0;
 fail:
    for (int i = 0; i < ref_count; i++)
+   {
       free(prompts[i]);
+      free(personas[i]);
+   }
    return -1;
 }
 
@@ -1080,10 +1134,13 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
       char *prompt = build_round_prompt(task, artifact, *peer_notes, mode, round, brief);
       if (!prompt)
          return -1;
+      /* Persona binds to the stable model index `i`, not the shuffled slot. */
+      char *persona = panel_persona_prompt(cfg, mode, i);
       memset(&results[i], 0, sizeof(results[i]));
       agent_run_named(acfg, cfg->ensemble_reference_models[i],
-                      mode == ROUNDTABLE_REVIEW ? "review" : "draft", NULL, prompt, 0,
+                      mode == ROUNDTABLE_REVIEW ? "review" : "draft", persona, prompt, 0,
                       0.3 + (0.05 * i), &results[i]);
+      free(persona);
       if (results[i].response && results[i].response[0])
       {
          char label[256];

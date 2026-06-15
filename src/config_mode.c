@@ -25,6 +25,8 @@ static aimee_mode_t mode_parse(const char *s)
       return AIMEE_MODE_REVIEWER;
    if (s && strcasecmp(s, "architect") == 0)
       return AIMEE_MODE_ARCHITECT;
+   if (s && strcasecmp(s, "reviewer-constructive") == 0)
+      return AIMEE_MODE_REVIEWER_CONSTRUCTIVE;
    return AIMEE_MODE_ENGINEER;
 }
 

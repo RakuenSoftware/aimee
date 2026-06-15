@@ -35,13 +35,14 @@ typedef enum
  * paths respect (brief, delegates, compute agents), not a one-off prompt swap. */
 typedef enum
 {
-   AIMEE_MODE_ENGINEER = 0,   /* default: autonomous software engineer */
-   AIMEE_MODE_NOVEL = 1,      /* creative-writing author / worldbuilder */
-   AIMEE_MODE_SONGWRITER = 2, /* songwriter / lyricist */
-   AIMEE_MODE_QA = 3,         /* senior QA / test reviewer */
-   AIMEE_MODE_SECURITY = 4,   /* senior application-security reviewer */
-   AIMEE_MODE_REVIEWER = 5,   /* senior, thorough, contrarian code reviewer */
-   AIMEE_MODE_ARCHITECT = 6,  /* software-architecture reviewer */
+   AIMEE_MODE_ENGINEER = 0,              /* default: autonomous software engineer */
+   AIMEE_MODE_NOVEL = 1,                 /* creative-writing author / worldbuilder */
+   AIMEE_MODE_SONGWRITER = 2,            /* songwriter / lyricist */
+   AIMEE_MODE_QA = 3,                    /* senior QA / test reviewer */
+   AIMEE_MODE_SECURITY = 4,              /* senior application-security reviewer */
+   AIMEE_MODE_REVIEWER = 5,              /* senior, thorough, contrarian code reviewer */
+   AIMEE_MODE_ARCHITECT = 6,             /* software-architecture reviewer */
+   AIMEE_MODE_REVIEWER_CONSTRUCTIVE = 7, /* constructive reviewer: assess as written */
 } aimee_mode_t;
 
 /* Parse a mode name ("engineer", "novel", "songwriter", "qa", "security",
