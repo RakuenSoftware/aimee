@@ -119,6 +119,14 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
              "\"summary\":\"missing authorization check before write\"}],\"overall\":\"block\"}");
       else if (g_parallel_mode == 6 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
          out[i].response = strdup("{\"items\":[],\"overall\":\"ok\"}");
+      else if (g_parallel_mode == 8 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
+         /* review JSON wrapped in a markdown code fence + prose, as a persona'd
+          * panelist actually returns it — the lenient parser must still extract it. */
+         out[i].response =
+             strdup("Here is my review:\n```json\n"
+                    "{\"items\":[{\"severity\":\"blocking\",\"category\":\"correctness\","
+                    "\"location\":\"src/a.c:1\",\"summary\":\"subtracts instead of adding\","
+                    "\"recommendation\":\"use +\"}],\"overall\":\"block\"}\n```\n");
       else if (g_parallel_mode == 7 && tasks[i].role && strcmp(tasks[i].role, "review") == 0)
          out[i].response =
              strdup(i == 0 ? "{\"items\":[{\"severity\":\"blocking\",\"category\":\"correctness\","
@@ -911,6 +919,29 @@ static void test_roundtable_aggregator_fallback_synthesizes(void)
    printf("  test_roundtable_aggregator_fallback_synthesizes: ok\n");
 }
 
+static void test_roundtable_review_parses_fenced_json(void)
+{
+   reset_modes();
+   g_parallel_mode = 8; /* panelists return review JSON wrapped in a ```json fence + prose */
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review fenced", &opts, &result);
+   assert(rc == 0);
+   /* the lenient parser strips the markdown fence/prose, so the review items are
+    * captured instead of being dropped (which left artifact empty + degraded). */
+   assert(result.item_count >= 1);
+   assert(strcmp(result.items[0].severity, "blocking") == 0);
+   assert(strstr(result.items[0].summary, "subtract") != NULL);
+   delegate_roundtable_result_free(&result);
+   printf("  test_roundtable_review_parses_fenced_json: ok\n");
+}
+
 static void test_roundtable_cost_capped_skips_question_pass(void)
 {
    reset_modes();
@@ -1155,6 +1186,7 @@ int main(void)
    test_panel_persona_name_assignment();
    test_roundtable_review_assigns_personas();
    test_roundtable_aggregator_fallback_synthesizes();
+   test_roundtable_review_parses_fenced_json();
    test_roundtable_cost_capped_skips_question_pass();
    test_roundtable_partial_question_answers_report_gaps();
    test_roundtable_draft_brief_questions_not_answered();

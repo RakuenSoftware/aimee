@@ -56,6 +56,34 @@ static int count_successful(const agent_result_t *results, int count)
    return n;
 }
 
+/* Parse JSON from a model response, tolerating a markdown code fence
+ * (```json ... ```) or surrounding prose. Panelists given a persona system
+ * prompt tend to wrap their JSON in a fence, which a strict cJSON_Parse rejects
+ * — leaving the review with zero items and an empty artifact. Try a strict parse
+ * first (bare JSON), then fall back to the substring from the first '{' to the
+ * last '}'. Returns NULL if neither yields valid JSON; caller owns the result. */
+static cJSON *parse_model_json_lenient(const char *text)
+{
+   if (!text || !text[0])
+      return NULL;
+   cJSON *root = cJSON_Parse(text);
+   if (root)
+      return root;
+   const char *open = strchr(text, '{');
+   const char *close = strrchr(text, '}');
+   if (!open || !close || close < open)
+      return NULL;
+   size_t len = (size_t)(close - open) + 1;
+   char *buf = (char *)malloc(len + 1);
+   if (!buf)
+      return NULL;
+   memcpy(buf, open, len);
+   buf[len] = '\0';
+   root = cJSON_Parse(buf);
+   free(buf);
+   return root;
+}
+
 static int best_candidate(const agent_result_t *results, int count)
 {
    int best = -1;
@@ -521,6 +549,7 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
              "\"category\":\"correctness|security|performance|maintainability|style\","
              "\"location\":\"file:line or artifact section\",\"summary\":\"one-sentence issue\","
              "\"recommendation\":\"...\"}],\"overall\":\"...\"}. "
+             "Output raw JSON only — no markdown, no ``` code fences, no prose. "
              "Do not invent stable keys; the engine computes identity keys."
            : "Return the next complete draft. Incorporate useful peer input and do not describe "
              "the process.";
@@ -665,7 +694,7 @@ static int run_convergence_tiebreak(agent_config_t *acfg, const char *task, cons
    {
       if (cost_usd)
          *cost_usd += result_token_cost(acfg, &res, "reason");
-      cJSON *j = cJSON_Parse(res.response);
+      cJSON *j = parse_model_json_lenient(res.response);
       cJSON *c = j ? cJSON_GetObjectItemCaseSensitive(j, "completion") : NULL;
       if (cJSON_IsNumber(c))
          completion = (int)c->valuedouble;
@@ -747,7 +776,7 @@ static int parse_review_issue_keys(const char *text, char keys[][128], int *coun
 {
    if (!text || !count || max <= 0)
       return -1;
-   cJSON *root = cJSON_Parse(text);
+   cJSON *root = parse_model_json_lenient(text);
    if (!root)
       return -1;
    cJSON *issues = cJSON_GetObjectItemCaseSensitive(root, "issues");
@@ -825,7 +854,7 @@ static void capture_review_items_from_text(const char *text, const char *source,
 {
    if (!text || !out)
       return;
-   cJSON *root = cJSON_Parse(text);
+   cJSON *root = parse_model_json_lenient(text);
    if (!root)
       return;
    cJSON *issues = review_items_array(root);
@@ -929,7 +958,7 @@ static void parse_question_answers(const char *text, const roundtable_opts_t *op
     * answer set never silently drops a question (§5). */
    mark_question_gaps(opts, out);
    int n = out->answered_question_count;
-   cJSON *root = text ? cJSON_Parse(text) : NULL;
+   cJSON *root = text ? parse_model_json_lenient(text) : NULL;
    if (!root)
       return; /* keep the gap-seeded result */
    cJSON *answers = cJSON_GetObjectItemCaseSensitive(root, "answered_questions");
