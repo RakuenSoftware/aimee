@@ -17,7 +17,7 @@
 
 /* Only the POSIX /v1 retry loop calls this now (the Windows path has no retry),
  * so mark it maybe-unused to stay clean under the Windows build's -Werror. */
-static void __attribute__((unused)) cli_rpc_sleep_ms(int ms)
+static void __attribute__((unused)) cli_v1_sleep_ms(int ms)
 {
 #if defined(_WIN32) || defined(_WIN64)
    Sleep((DWORD)ms);
@@ -118,7 +118,7 @@ static int rpc_has_flag(const rpc_opts_t *opts, const char *name)
    return rpc_get(opts, name) != NULL;
 }
 
-static int cli_rpc_args_request_json(int argc, char **argv)
+static int cli_v1_args_request_json(int argc, char **argv)
 {
    for (int i = 0; i < argc; i++)
    {
@@ -345,7 +345,7 @@ static const struct
     {NULL, NULL, NULL, NULL, NULL, 0},
 };
 
-int cli_rpc_lookup(const char *cmd, int sub_argc, char **sub_argv, cli_rpc_route_t *route)
+int cli_v1_lookup(const char *cmd, int sub_argc, char **sub_argv, cli_v1_route_t *route)
 {
    if (!cmd)
       return 0;
@@ -1491,7 +1491,7 @@ static void marshal_preload_append_file(char *block, size_t cap, size_t *pos, co
  * unit-test target that compiles it — need no extra link dependency. */
 /* Caller (marshal_preload_append_symbol) is POSIX-only, so this is unused on the
  * Windows build — mark maybe-unused to stay -Werror-clean there. */
-__attribute__((unused)) static char *cli_rpc_shell_quote_inner(const char *raw)
+__attribute__((unused)) static char *cli_v1_shell_quote_inner(const char *raw)
 {
    if (!raw)
       return NULL;
@@ -1529,7 +1529,7 @@ static void marshal_preload_append_symbol(char *block, size_t cap, size_t *pos, 
       return;
    /* shell_escape the symbol: it is interpolated into a popen() command, so a
     * raw single quote would break out of the quotes and inject shell commands. */
-   char *esc_sym = cli_rpc_shell_quote_inner(sym);
+   char *esc_sym = cli_v1_shell_quote_inner(sym);
    if (!esc_sym)
       return;
    char find_cmd[512];
@@ -1818,7 +1818,7 @@ static cJSON *marshal_delegate(int argc, char **argv)
    /* Foreground delegate streams over a long-lived connection and has no /v1
     * route; against a remote aimee-server force background so the call uses the
     * /v1/delegate/run route (returns a job_id to poll via `aimee jobs`). */
-   if (rpc_get(&opts, "background") || cli_rpc_has_remote_endpoint())
+   if (rpc_get(&opts, "background") || cli_v1_has_remote_endpoint())
       cJSON_AddTrueToObject(req, "background");
    /* --tools forces tools on; --no-tools forces them OFF even for a role that
     * enables tools by default (e.g. `review`) — the right mode for an
@@ -6546,15 +6546,15 @@ static int write_delegate_output_file(const char *path, const char *text)
 }
 
 #if !defined(_WIN32) && !defined(_WIN64)
-/* cli_rpc_http_request: minimal HTTP/1.1 request (any verb) over aimee-server's
+/* cli_v1_http_request: minimal HTTP/1.1 request (any verb) over aimee-server's
  * /v1 Unix socket (<aimee_home>/aimee-http.sock). Kept local to the thin client
  * so the api.client_transport cutover adds no new link dependency
  * (http_uds_client.c is not linked into the CLI). Returns the response body
  * (heap; caller frees) and sets *status_out to the HTTP status; NULL on
  * transport failure. Mirrors http_uds_client.c, which serves the same role for
  * the TUI. */
-static char *cli_rpc_http_request(const char *verb, const char *path, const char *body,
-                                  int *status_out)
+static char *cli_v1_http_request(const char *verb, const char *path, const char *body,
+                                 int *status_out)
 {
    if (status_out)
       *status_out = 0;
@@ -6659,19 +6659,19 @@ static char *cli_rpc_http_request(const char *verb, const char *path, const char
 /* The thin client is a strict /v1 consumer: there is no socket/auto transport
  * selection any more (the legacy NDJSON transport was removed). One-shot
  * commands go over the local aimee-http.sock, or a configured remote /v1
- * endpoint (cli_rpc_client_endpoint) — see cli_rpc_forward below. */
+ * endpoint (cli_v1_client_endpoint) — see cli_v1_forward below. */
 #endif /* !_WIN32 — the aimee-http.sock helpers above are POSIX-only */
 
 /* The remote-endpoint resolvers below are portable (env + aimee.yaml, no UDS)
- * and MUST compile on Windows too: cli_rpc_forward calls them unconditionally
+ * and MUST compile on Windows too: cli_v1_forward calls them unconditionally
  * and the Windows thin client always takes the remote /v1 path. */
 
-/* cli_rpc_aimee_yaml_value: scan <aimee_home>/aimee.yaml for the first
+/* cli_v1_aimee_yaml_value: scan <aimee_home>/aimee.yaml for the first
  * (non-comment) line containing <key> and return its malloc'd, unquoted value,
  * or NULL when absent/empty. The full config_t parser is not linked into the
  * thin client, so the api.client_* settings are read with this lightweight
  * scan. Caller frees. */
-static char *cli_rpc_aimee_yaml_value(const char *key)
+static char *cli_v1_aimee_yaml_value(const char *key)
 {
    const char *home = aimee_home();
    if (!home || !home[0])
@@ -6716,7 +6716,7 @@ static char *cli_rpc_aimee_yaml_value(const char *key)
    return result;
 }
 
-/* cli_rpc_client_endpoint: a remote aimee-server /v1 endpoint for the HTTP
+/* cli_v1_client_endpoint: a remote aimee-server /v1 endpoint for the HTTP
  * transport — "tcp:host:port" (or an explicit "unix:/path"). AIMEE_API_ENDPOINT
  * overrides; otherwise aimee.api.client_endpoint in aimee.yaml. NULL means no
  * remote is configured and the caller falls back to the local aimee-http.sock.
@@ -6727,7 +6727,7 @@ static char *cli_rpc_aimee_yaml_value(const char *key)
  * URL becomes "tls:host:port" (native client TLS to the server's #304 TLS
  * listener); http:// becomes "tcp:host:port"; an explicit tcp:/tls:/unix:
  * endpoint passes through unchanged. Caller frees. */
-static char *cli_rpc_normalize_endpoint(const char *ep)
+static char *cli_v1_normalize_endpoint(const char *ep)
 {
    if (!ep || !ep[0])
       return NULL;
@@ -6764,15 +6764,15 @@ static char *cli_rpc_normalize_endpoint(const char *ep)
    return strdup(out);
 }
 
-char *cli_rpc_client_endpoint(void)
+char *cli_v1_client_endpoint(void)
 {
    const char *env = getenv("AIMEE_API_ENDPOINT");
    if (env && env[0])
-      return cli_rpc_normalize_endpoint(env);
-   char *yaml = cli_rpc_aimee_yaml_value("client_endpoint:");
+      return cli_v1_normalize_endpoint(env);
+   char *yaml = cli_v1_aimee_yaml_value("client_endpoint:");
    if (yaml)
    {
-      char *norm = cli_rpc_normalize_endpoint(yaml);
+      char *norm = cli_v1_normalize_endpoint(yaml);
       free(yaml);
       return norm;
    }
@@ -6792,16 +6792,16 @@ char *cli_rpc_client_endpoint(void)
    return NULL;
 }
 
-/* cli_rpc_client_bearer: bearer token sent with the remote HTTP transport.
+/* cli_v1_client_bearer: bearer token sent with the remote HTTP transport.
  * AIMEE_API_BEARER overrides; otherwise the `bearer_token:` key in aimee.yaml
  * (the same value aimee-server reads for aimee.api.bearer_token). NULL means no
  * Authorization header. Caller frees. */
-char *cli_rpc_client_bearer(void)
+char *cli_v1_client_bearer(void)
 {
    const char *env = getenv("AIMEE_API_BEARER");
    if (env && env[0])
       return strdup(env);
-   char *yaml = cli_rpc_aimee_yaml_value("bearer_token:");
+   char *yaml = cli_v1_aimee_yaml_value("bearer_token:");
    if (yaml)
       return yaml;
    /* Token for a synthesized aimee_client endpoint: --server-token /
@@ -6812,19 +6812,19 @@ char *cli_rpc_client_bearer(void)
    return NULL;
 }
 
-/* cli_rpc_has_remote_endpoint: true when the thin client is configured to reach
+/* cli_v1_has_remote_endpoint: true when the thin client is configured to reach
  * a remote aimee-server over /v1 (client_transport != socket AND an endpoint is
  * set). The dispatcher uses this to skip the local-socket preflight, which would
  * otherwise fail with "server unavailable" because there is no aimee.sock to
  * find. Non-static so cli_main.c (a separate TU) can call it; mirrors the
- * linkage of cli_rpc_forward below. */
-int cli_rpc_has_remote_endpoint(void)
+ * linkage of cli_v1_forward below. */
+int cli_v1_has_remote_endpoint(void)
 {
 #if !defined(_WIN32) && !defined(_WIN64)
-   /* cli_rpc_client_endpoint() also synthesizes a tcp: endpoint from a --server /
+   /* cli_v1_client_endpoint() also synthesizes a tcp: endpoint from a --server /
     * AIMEE_SERVER_URL / remote.conf target (aimee_client), so this transparently
     * reports those too and the dispatcher skips the dead local-socket preflight. */
-   char *ep = cli_rpc_client_endpoint();
+   char *ep = cli_v1_client_endpoint();
    if (ep)
    {
       free(ep);
@@ -6835,23 +6835,23 @@ int cli_rpc_has_remote_endpoint(void)
    /* Windows has no UDS path and no AIMEE_API_ENDPOINT/aimee.yaml config: its
     * remote target comes from aimee_client (AIMEE_SERVER_URL or --server). Report
     * that so the dispatcher skips the (always-failing) local-socket preflight and
-    * lets cli_rpc_forward route over the remote /v1 via aimee_client_request. */
+    * lets cli_v1_forward route over the remote /v1 via aimee_client_request. */
    return aimee_client_has_remote();
 #endif
 }
 
-/* cli_rpc_remote_endpoint_is_tcp: like cli_rpc_has_remote_endpoint, but true only
+/* cli_v1_remote_endpoint_is_tcp: like cli_v1_has_remote_endpoint, but true only
  * for a genuinely remote "tcp:host:port" endpoint (not a local "unix:" one).
  * Interactive/co-located commands (chat, launch) use this to refuse a remote
  * server cleanly — the agent + tools + worktree run on this host. Non-static so
  * cli_main.c can call it. */
-int cli_rpc_remote_endpoint_is_tcp(void)
+int cli_v1_remote_endpoint_is_tcp(void)
 {
 #if !defined(_WIN32) && !defined(_WIN64)
    /* A synthesized aimee_client target (--server / AIMEE_SERVER_URL / remote.conf)
     * is always "tcp:host:port" (a network host, never a local unix: path), so
     * chat/launch refuse it here just like an explicit tcp: endpoint. */
-   char *ep = cli_rpc_client_endpoint();
+   char *ep = cli_v1_client_endpoint();
    int is_tcp = ep && strncmp(ep, "tcp:", 4) == 0;
    free(ep);
    return is_tcp;
@@ -7030,10 +7030,10 @@ const char *cli_v1_async_route_for_method(const char *method, const char **verb_
 }
 
 /* cli_v1_send: one /v1 request over the active transport — a remote endpoint
- * (cli_http_request), the co-located local UDS (cli_rpc_http_request), or the
+ * (cli_http_request), the co-located local UDS (cli_v1_http_request), or the
  * Windows remote client (aimee_client_request) — returning the parsed JSON
  * response (caller frees) or NULL on a transport error. Unifies the platform
- * branches so cli_rpc_forward and the async poller share one code path. */
+ * branches so cli_v1_forward and the async poller share one code path. */
 static cJSON *cli_v1_send(const char *remote, const char *bearer, const char *verb,
                           const char *path, const char *body, int timeout_ms, int *status_out)
 {
@@ -7046,7 +7046,7 @@ static cJSON *cli_v1_send(const char *remote, const char *bearer, const char *ve
    }
    else
    {
-      char *r = cli_rpc_http_request(verb, path, body, &status);
+      char *r = cli_v1_http_request(verb, path, body, &status);
       if (r)
       {
          resp = cJSON_Parse(r);
@@ -7110,7 +7110,7 @@ static cJSON *cli_v1_run_and_poll(const char *remote, const char *bearer, const 
       cJSON_Delete(snap);
       if (timeout_ms > 0 && waited >= timeout_ms)
          return NULL;
-      cli_rpc_sleep_ms(step_ms);
+      cli_v1_sleep_ms(step_ms);
       waited += step_ms;
    }
 }
@@ -7308,8 +7308,8 @@ int cli_workspace_add_remote(const char *path)
       return 1;
    }
 
-   char *remote = cli_rpc_client_endpoint();
-   char *bearer = cli_rpc_client_bearer();
+   char *remote = cli_v1_client_endpoint();
+   char *bearer = cli_v1_client_bearer();
 
    /* Register as detached so the server keeps the client path verbatim (no
     * server-side realpath) and skips its own filesystem scan. */
@@ -7363,8 +7363,8 @@ int cli_index_scan_remote(int argc, char **argv)
    }
    const char *root_arg = (npos >= 2) ? pos[1] : (npos == 1 ? pos[0] : NULL);
 
-   char *remote = cli_rpc_client_endpoint();
-   char *bearer = cli_rpc_client_bearer();
+   char *remote = cli_v1_client_endpoint();
+   char *bearer = cli_v1_client_bearer();
    int rc = 0;
 
    if (root_arg)
@@ -7480,7 +7480,7 @@ cJSON *cli_v1_dispatch_local(cJSON *req, int timeout_ms)
 }
 
 /* cli_v1_dispatch: like cli_v1_dispatch_local, but routes to a configured remote
- * /v1 endpoint when one is set (cli_rpc_client_endpoint), falling back to the
+ * /v1 endpoint when one is set (cli_v1_client_endpoint), falling back to the
  * co-located local UDS otherwise. Flows that must run against the SAME server that
  * will STORE the result — e.g. `agent setup` (codex-auth.json + the server vault) —
  * use this, since on a thin-client deployment that server is the remote, not a
@@ -7509,8 +7509,8 @@ cJSON *cli_v1_dispatch(cJSON *req, int timeout_ms)
    char *body = cJSON_PrintUnformatted(req);
    if (!body)
       return NULL;
-   char *remote = cli_rpc_client_endpoint();
-   char *bearer = remote ? cli_rpc_client_bearer() : NULL;
+   char *remote = cli_v1_client_endpoint();
+   char *bearer = remote ? cli_v1_client_bearer() : NULL;
    cJSON *resp = NULL;
    int status = 0;
    if (async_path)
@@ -7525,8 +7525,8 @@ cJSON *cli_v1_dispatch(cJSON *req, int timeout_ms)
 
 /* --- Main RPC forward function --- */
 
-int cli_rpc_forward(const char *socket_path, const cli_rpc_route_t *route, int json_output,
-                    const char *json_fields, const char *response_profile, int argc, char **argv)
+int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int json_output,
+                   const char *json_fields, const char *response_profile, int argc, char **argv)
 {
    (void)json_fields;
    (void)response_profile;
@@ -7543,7 +7543,7 @@ int cli_rpc_forward(const char *socket_path, const cli_rpc_route_t *route, int j
       fwd_argc--;
       fwd_argv++;
    }
-   int effective_json_output = json_output || cli_rpc_args_request_json(fwd_argc, fwd_argv);
+   int effective_json_output = json_output || cli_v1_args_request_json(fwd_argc, fwd_argv);
 
    cJSON *req = marshal_request(route->method, fwd_argc, fwd_argv);
    if (!req)
@@ -7588,8 +7588,8 @@ int cli_rpc_forward(const char *socket_path, const cli_rpc_route_t *route, int j
     * "unix:path", authed by its bearer) reaches an aimee-server on another host;
     * otherwise the co-located server over the local aimee-http.sock. Windows is
     * always remote (resolved from --server / AIMEE_SERVER_URL inside cli_v1_send). */
-   char *remote = cli_rpc_client_endpoint();
-   char *bearer = remote ? cli_rpc_client_bearer() : NULL;
+   char *remote = cli_v1_client_endpoint();
+   char *bearer = remote ? cli_v1_client_bearer() : NULL;
    int http_status = 0; /* last HTTP status from the REST send (0 for the async path) */
 
    if (http_body && async_path)
@@ -7627,7 +7627,7 @@ int cli_rpc_forward(const char *socket_path, const cli_rpc_route_t *route, int j
                break;
          }
          if (attempt < max_retries)
-            cli_rpc_sleep_ms(retry_delays_ms[attempt]);
+            cli_v1_sleep_ms(retry_delays_ms[attempt]);
       }
    }
    else if (http_body)

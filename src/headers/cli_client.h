@@ -198,11 +198,11 @@ typedef struct
    const char *extract;       /* response field to extract (NULL = return object minus "status") */
    int skip_subcmd;           /* number of leading sub-args consumed by route match (0, 1, or 2) */
    int timeout_ms;            /* RPC timeout (0 = CLIENT_DEFAULT_TIMEOUT_MS) */
-} cli_rpc_route_t;
+} cli_v1_route_t;
 
 /* Returns 1 if a matching RPC route was found, 0 otherwise.
  * Tries compound sub-commands first (e.g. "ingest status") before single ones. */
-int cli_rpc_lookup(const char *cmd, int sub_argc, char **sub_argv, cli_rpc_route_t *route);
+int cli_v1_lookup(const char *cmd, int sub_argc, char **sub_argv, cli_v1_route_t *route);
 
 /* Forward a CLI command through the server RPC.
  * Returns 0 on success, >0 on application error, -1 on transport/protocol
@@ -210,24 +210,24 @@ int cli_rpc_lookup(const char *cmd, int sub_argc, char **sub_argv, cli_rpc_route
  * argc/argv are the args AFTER the command name (e.g., for "aimee memory search foo",
  * argv = ["search", "foo"]). The route's skip_subcmd controls whether the first
  * arg is stripped before marshaling. */
-int cli_rpc_forward(const char *socket_path, const cli_rpc_route_t *route, int json_output,
-                    const char *json_fields, const char *response_profile, int argc, char **argv);
+int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int json_output,
+                   const char *json_fields, const char *response_profile, int argc, char **argv);
 
 /* True when the thin client is configured to reach a remote aimee-server /v1
  * endpoint (client_transport != socket AND AIMEE_API_ENDPOINT /
  * aimee.api.client_endpoint set). Callers skip the local-socket preflight. */
-int cli_rpc_has_remote_endpoint(void);
+int cli_v1_has_remote_endpoint(void);
 
 /* True only when the configured endpoint is a remote "tcp:host:port" (not a
  * local "unix:" path). Interactive commands (chat/launch) refuse a remote
  * endpoint because the agent/tools/worktree run on the client host. */
-int cli_rpc_remote_endpoint_is_tcp(void);
+int cli_v1_remote_endpoint_is_tcp(void);
 
 /* Resolve the remote /v1 endpoint ("tcp:host:port" / "unix:path") and bearer for
  * the HTTP transport (env AIMEE_API_ENDPOINT / AIMEE_API_BEARER, else aimee.yaml
  * client_endpoint / bearer_token). Caller frees. NULL when unset. POSIX only. */
-char *cli_rpc_client_endpoint(void);
-char *cli_rpc_client_bearer(void);
+char *cli_v1_client_endpoint(void);
+char *cli_v1_client_bearer(void);
 
 /* Thin-client workspace push: when the configured endpoint is a remote
  * "tcp:host:port" the server cannot see this host's filesystem, so

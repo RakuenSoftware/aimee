@@ -196,10 +196,10 @@ int cmd_workspace_serve(const char *workspace_id)
    const char *sock = NULL;
    char *endpoint = NULL;
    char *bearer = NULL;
-   if (cli_rpc_has_remote_endpoint())
+   if (cli_v1_has_remote_endpoint())
    {
-      endpoint = cli_rpc_client_endpoint();
-      bearer = cli_rpc_client_bearer();
+      endpoint = cli_v1_client_endpoint();
+      bearer = cli_v1_client_bearer();
    }
    if (!endpoint)
    {
@@ -308,15 +308,15 @@ static void *rc_thread_main(void *arg)
 
 int cli_workspace_reverse_channel_start(void)
 {
-   if (g_rc_active || !cli_rpc_has_remote_endpoint())
+   if (g_rc_active || !cli_v1_has_remote_endpoint())
       return 0;
    char cwd[CLI_TUI_PATH_MAX];
    if (!getcwd(cwd, sizeof(cwd)) || !cwd[0])
       return 0;
-   char *endpoint = cli_rpc_client_endpoint();
+   char *endpoint = cli_v1_client_endpoint();
    if (!endpoint)
       return 0;
-   char *bearer = cli_rpc_client_bearer();
+   char *bearer = cli_v1_client_bearer();
    int should_unregister = 0;
 
    /* Register the detached workspace. Treat "already registered" as an

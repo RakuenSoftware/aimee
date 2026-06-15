@@ -106,7 +106,7 @@ static int setup_prompt_line(const char *label, char *buf, size_t n)
 static int setup_ensure_server(const char *method, const char **sock)
 {
    *sock = NULL;
-   if (!cli_rpc_has_remote_endpoint())
+   if (!cli_v1_has_remote_endpoint())
    {
       *sock = cli_ensure_server_for_method(method);
       if (!*sock)
@@ -168,8 +168,8 @@ static int setup_api_provider_cmd(const char *provider, int json_output)
    }
 
    int rc;
-   cli_rpc_route_t route;
-   if (!cli_rpc_lookup("agent", n, sub, &route))
+   cli_v1_route_t route;
+   if (!cli_v1_lookup("agent", n, sub, &route))
    {
       fprintf(stderr, "aimee agent setup: no agent.add route available\n");
       rc = 1;
@@ -182,7 +182,7 @@ static int setup_api_provider_cmd(const char *provider, int json_output)
       rc = 1;
       goto done;
    }
-   rc = cli_rpc_forward(sock, &route, json_output, NULL, NULL, n, sub);
+   rc = cli_v1_forward(sock, &route, json_output, NULL, NULL, n, sub);
    if (rc < 0)
    {
       fprintf(stderr, "aimee agent setup: server request failed\n");

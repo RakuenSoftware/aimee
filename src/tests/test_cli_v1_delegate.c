@@ -1,4 +1,4 @@
-/* test_cli_rpc_delegate.c: thin-client delegate RPC marshaling tests */
+/* test_cli_v1_delegate.c: thin-client delegate RPC marshaling tests */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,7 +15,7 @@
 #define RPC_PROTOCOL_VERSION 1
 
 /* Include the route implementation directly so static marshal helpers are testable. */
-#include "../cli_rpc_routes.inc"
+#include "../cli_v1_routes.inc"
 
 static void test_delegate_max_turns_marshaled(void)
 {
@@ -296,25 +296,25 @@ static void test_delegate_depth_requires_parent_env(void)
 
 static void test_provider_routes_and_marshaling(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
 
    char *list_lookup[] = {"list"};
-   assert(cli_rpc_lookup("provider", 1, list_lookup, &route));
+   assert(cli_v1_lookup("provider", 1, list_lookup, &route));
    assert(strcmp(route.method, "provider.list") == 0);
    assert(route.skip_subcmd == 1);
 
    char *show_lookup[] = {"show", "mistral"};
-   assert(cli_rpc_lookup("provider", 2, show_lookup, &route));
+   assert(cli_v1_lookup("provider", 2, show_lookup, &route));
    assert(strcmp(route.method, "provider.show") == 0);
    assert(route.skip_subcmd == 1);
 
    char *models_lookup[] = {"models", "mistral", "--json"};
-   assert(cli_rpc_lookup("provider", 3, models_lookup, &route));
+   assert(cli_v1_lookup("provider", 3, models_lookup, &route));
    assert(strcmp(route.method, "provider.models") == 0);
    assert(route.skip_subcmd == 1);
 
    char *quota_lookup[] = {"quota", "openrouter"};
-   assert(cli_rpc_lookup("provider", 2, quota_lookup, &route));
+   assert(cli_v1_lookup("provider", 2, quota_lookup, &route));
    assert(strcmp(route.method, "provider.quota") == 0);
    assert(route.skip_subcmd == 1);
 
@@ -346,15 +346,15 @@ static void test_provider_routes_and_marshaling(void)
 
 static void test_model_routes_and_marshaling(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
 
    char *show_lookup[] = {"show", "openrouter:anthropic/claude-opus-4.6"};
-   assert(cli_rpc_lookup("model", 2, show_lookup, &route));
+   assert(cli_v1_lookup("model", 2, show_lookup, &route));
    assert(strcmp(route.method, "model.show") == 0);
    assert(route.skip_subcmd == 1);
 
    char *list_lookup[] = {"list", "--capability", "vision"};
-   assert(cli_rpc_lookup("model", 3, list_lookup, &route));
+   assert(cli_v1_lookup("model", 3, list_lookup, &route));
    assert(strcmp(route.method, "model.list") == 0);
    assert(route.skip_subcmd == 1);
 
@@ -390,9 +390,9 @@ static void test_model_routes_and_marshaling(void)
 
 static void test_memory_show_alias_route(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *show_lookup[] = {"show", "181"};
-   assert(cli_rpc_lookup("memory", 2, show_lookup, &route));
+   assert(cli_v1_lookup("memory", 2, show_lookup, &route));
    assert(strcmp(route.method, "memory.get") == 0);
    assert(route.skip_subcmd == 1);
 
@@ -411,9 +411,9 @@ static void test_memory_stats_route(void)
    /* `aimee memory stats` must resolve to a typed server RPC (memory.stats)
     * rather than falling through to unsupported_client_command. Regression
     * guard for the missing route gap from the CLI HTTP transport cutover. */
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *stats_lookup[] = {"stats"};
-   assert(cli_rpc_lookup("memory", 1, stats_lookup, &route));
+   assert(cli_v1_lookup("memory", 1, stats_lookup, &route));
    assert(strcmp(route.method, "memory.stats") == 0);
 
    cJSON *req = marshal_request("memory.stats", 0, NULL);
@@ -426,24 +426,24 @@ static void test_memory_stats_route(void)
 
 static void test_server_status_route_lookup(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
 
-   assert(cli_rpc_lookup("status", 0, NULL, &route));
+   assert(cli_v1_lookup("status", 0, NULL, &route));
    assert(strcmp(route.method, "server.health") == 0);
    assert(route.skip_subcmd == 0);
 
    char *top_status_json[] = {"--json"};
-   assert(cli_rpc_lookup("status", 1, top_status_json, &route));
+   assert(cli_v1_lookup("status", 1, top_status_json, &route));
    assert(strcmp(route.method, "server.health") == 0);
    assert(route.skip_subcmd == 0);
 
    char *status_lookup[] = {"status"};
-   assert(cli_rpc_lookup("server", 1, status_lookup, &route));
+   assert(cli_v1_lookup("server", 1, status_lookup, &route));
    assert(strcmp(route.method, "server.health") == 0);
    assert(route.skip_subcmd == 1);
 
    char *health_lookup[] = {"health"};
-   assert(cli_rpc_lookup("server", 1, health_lookup, &route));
+   assert(cli_v1_lookup("server", 1, health_lookup, &route));
    assert(strcmp(route.method, "server.health") == 0);
    assert(route.skip_subcmd == 1);
 
@@ -452,9 +452,9 @@ static void test_server_status_route_lookup(void)
 
 static void test_kb_docs_push_route_and_marshal(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *lookup[] = {"docs", "push", "--scope", "project", "a.md", "b.md"};
-   assert(cli_rpc_lookup("kb", 6, lookup, &route));
+   assert(cli_v1_lookup("kb", 6, lookup, &route));
    assert(strcmp(route.method, "kb.docs.push") == 0);
    assert(route.skip_subcmd == 2);
 
@@ -509,15 +509,15 @@ static void test_git_verify_failure_detection(void)
 
 static void test_git_verify_marshaled_with_session_id(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *top_verify_argv[] = {"--async=false"};
-   assert(cli_rpc_lookup("verify", 1, top_verify_argv, &route));
+   assert(cli_v1_lookup("verify", 1, top_verify_argv, &route));
    assert(strcmp(route.method, "git.verify") == 0);
    assert(strcmp(route.server_method, "mcp.call") == 0);
    assert(route.skip_subcmd == 0);
 
    char *git_verify_argv[] = {"verify", "--async=false"};
-   assert(cli_rpc_lookup("git", 2, git_verify_argv, &route));
+   assert(cli_v1_lookup("git", 2, git_verify_argv, &route));
    assert(strcmp(route.method, "git.verify") == 0);
    assert(strcmp(route.server_method, "mcp.call") == 0);
    assert(route.skip_subcmd == 1);
@@ -553,9 +553,9 @@ static void test_git_verify_marshaled_with_session_id(void)
 
 static void test_get_help_route_marshaled(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *topic_lookup[] = {"work", "queue"};
-   assert(cli_rpc_lookup("get_help", 2, topic_lookup, &route));
+   assert(cli_v1_lookup("get_help", 2, topic_lookup, &route));
    assert(strcmp(route.method, "get_help") == 0);
    assert(strcmp(route.server_method, "mcp.call") == 0);
    assert(route.skip_subcmd == 0);
@@ -569,7 +569,7 @@ static void test_get_help_route_marshaled(void)
    assert(strcmp(cJSON_GetObjectItem(args, "topic")->valuestring, "work queue") == 0);
    cJSON_Delete(req);
 
-   assert(cli_rpc_lookup("get-help", 2, topic_lookup, &route));
+   assert(cli_v1_lookup("get-help", 2, topic_lookup, &route));
    assert(strcmp(route.method, "get_help") == 0);
    assert(strcmp(route.server_method, "mcp.call") == 0);
 
@@ -588,27 +588,27 @@ static void test_get_help_route_marshaled(void)
 static void test_subcommand_json_flag_is_output_mode(void)
 {
    char *status_argv[] = {"134", "--json"};
-   assert(cli_rpc_args_request_json(2, status_argv) == 1);
+   assert(cli_v1_args_request_json(2, status_argv) == 1);
 
    char *prefix_argv[] = {"--json", "134"};
-   assert(cli_rpc_args_request_json(2, prefix_argv) == 1);
+   assert(cli_v1_args_request_json(2, prefix_argv) == 1);
 
    char *plain_argv[] = {"134"};
-   assert(cli_rpc_args_request_json(1, plain_argv) == 0);
+   assert(cli_v1_args_request_json(1, plain_argv) == 0);
 
    printf("  PASS: test_subcommand_json_flag_is_output_mode\n");
 }
 
 static void test_trigger_routes_lookup(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *list_argv[] = {"list"};
-   assert(cli_rpc_lookup("trigger", 1, list_argv, &route));
+   assert(cli_v1_lookup("trigger", 1, list_argv, &route));
    assert(strcmp(route.method, "trigger.list") == 0);
    assert(route.skip_subcmd == 1);
 
    char *fire_argv[] = {"fire", "--source", "ci", "--task", "debug failure"};
-   assert(cli_rpc_lookup("trigger", 5, fire_argv, &route));
+   assert(cli_v1_lookup("trigger", 5, fire_argv, &route));
    assert(strcmp(route.method, "trigger.fire") == 0);
    assert(route.skip_subcmd == 1);
    printf("  PASS: test_trigger_routes_lookup\n");
@@ -616,15 +616,15 @@ static void test_trigger_routes_lookup(void)
 
 static void test_dogfood_routes_and_marshaling(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *review_lookup[] = {"review", "--month", "2026-04"};
-   assert(cli_rpc_lookup("dogfood", 3, review_lookup, &route));
+   assert(cli_v1_lookup("dogfood", 3, review_lookup, &route));
    assert(strcmp(route.method, "dogfood.review") == 0);
    assert(route.skip_subcmd == 1);
    assert(route.timeout_ms == 300000);
 
    char *report_lookup[] = {"report", "--month", "2026-04"};
-   assert(cli_rpc_lookup("dogfood", 3, report_lookup, &route));
+   assert(cli_v1_lookup("dogfood", 3, report_lookup, &route));
    assert(strcmp(route.method, "dogfood.report") == 0);
    assert(route.timeout_ms == 300000);
 
@@ -642,15 +642,15 @@ static void test_dogfood_routes_and_marshaling(void)
 
 static void test_eval_routes_and_marshaling(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *run_lookup[] = {"run", "evals/delegate", "--ablation", "all"};
-   assert(cli_rpc_lookup("eval", 4, run_lookup, &route));
+   assert(cli_v1_lookup("eval", 4, run_lookup, &route));
    assert(strcmp(route.method, "eval.run") == 0);
    assert(route.skip_subcmd == 1);
    assert(route.timeout_ms == 900000);
 
    char *results_lookup[] = {"results", "delegate-tool-call-reliability"};
-   assert(cli_rpc_lookup("eval", 2, results_lookup, &route));
+   assert(cli_v1_lookup("eval", 2, results_lookup, &route));
    assert(strcmp(route.method, "eval.results") == 0);
    assert(route.timeout_ms == 0);
 
@@ -696,9 +696,9 @@ static void test_trigger_fire_token_marshaled(void)
 
 static void test_cron_routes_and_marshaling(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *add_lookup[] = {"add"};
-   assert(cli_rpc_lookup("cron", 1, add_lookup, &route));
+   assert(cli_v1_lookup("cron", 1, add_lookup, &route));
    assert(strcmp(route.method, "cron.add") == 0);
    assert(route.skip_subcmd == 1);
 
@@ -741,14 +741,14 @@ static void test_cron_routes_and_marshaling(void)
 
 static void test_work_routes_lookup(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *claim_argv[] = {"claim"};
-   assert(cli_rpc_lookup("work", 1, claim_argv, &route));
+   assert(cli_v1_lookup("work", 1, claim_argv, &route));
    assert(strcmp(route.method, "work.claim") == 0);
    assert(route.skip_subcmd == 1);
 
    char *sync_argv[] = {"sync-proposals"};
-   assert(cli_rpc_lookup("work", 1, sync_argv, &route));
+   assert(cli_v1_lookup("work", 1, sync_argv, &route));
    assert(strcmp(route.method, "work.sync_proposals") == 0);
    assert(route.skip_subcmd == 1);
    printf("  PASS: test_work_routes_lookup\n");
@@ -756,9 +756,9 @@ static void test_work_routes_lookup(void)
 
 static void test_session_brief_route_marshaled(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *lookup[] = {"brief", "--session", "abc123", "--list"};
-   assert(cli_rpc_lookup("session", 4, lookup, &route));
+   assert(cli_v1_lookup("session", 4, lookup, &route));
    assert(strcmp(route.method, "session.brief") == 0);
    assert(route.skip_subcmd == 1);
 
@@ -770,7 +770,7 @@ static void test_session_brief_route_marshaled(void)
    cJSON_Delete(req);
 
    char *pos_lookup[] = {"brief", "def456"};
-   assert(cli_rpc_lookup("session", 2, pos_lookup, &route));
+   assert(cli_v1_lookup("session", 2, pos_lookup, &route));
    req = marshal_request("session.brief", 1, pos_lookup + 1);
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "session_id")->valuestring, "def456") == 0);
@@ -811,29 +811,29 @@ static void test_work_add_batch_marshaled(void)
 
 static void test_jobs_routes_lookup(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *list_argv[] = {"list"};
-   assert(cli_rpc_lookup("jobs", 1, list_argv, &route));
+   assert(cli_v1_lookup("jobs", 1, list_argv, &route));
    assert(strcmp(route.method, "jobs.list") == 0);
    assert(route.skip_subcmd == 1);
 
    char *status_argv[] = {"status", "12"};
-   assert(cli_rpc_lookup("jobs", 2, status_argv, &route));
+   assert(cli_v1_lookup("jobs", 2, status_argv, &route));
    assert(strcmp(route.method, "jobs.status") == 0);
    assert(route.skip_subcmd == 1);
 
    char *show_argv[] = {"show", "12"};
-   assert(cli_rpc_lookup("jobs", 2, show_argv, &route));
+   assert(cli_v1_lookup("jobs", 2, show_argv, &route));
    assert(strcmp(route.method, "jobs.status") == 0);
    assert(route.skip_subcmd == 1);
 
    char *logs_argv[] = {"logs", "12"};
-   assert(cli_rpc_lookup("jobs", 2, logs_argv, &route));
+   assert(cli_v1_lookup("jobs", 2, logs_argv, &route));
    assert(strcmp(route.method, "jobs.logs") == 0);
    assert(route.skip_subcmd == 1);
 
    char *cancel_argv[] = {"cancel", "12"};
-   assert(cli_rpc_lookup("jobs", 2, cancel_argv, &route));
+   assert(cli_v1_lookup("jobs", 2, cancel_argv, &route));
    assert(strcmp(route.method, "jobs.cancel") == 0);
    assert(route.skip_subcmd == 1);
    printf("  PASS: test_jobs_routes_lookup\n");
@@ -874,29 +874,29 @@ static void test_jobs_requests_marshaled(void)
 
 static void test_coord_job_routes_lookup(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *start_argv[] = {"start", "7"};
-   assert(cli_rpc_lookup("job", 2, start_argv, &route));
+   assert(cli_v1_lookup("job", 2, start_argv, &route));
    assert(strcmp(route.method, "job.start") == 0);
    assert(route.skip_subcmd == 1);
 
    char *list_argv[] = {"list"};
-   assert(cli_rpc_lookup("job", 1, list_argv, &route));
+   assert(cli_v1_lookup("job", 1, list_argv, &route));
    assert(strcmp(route.method, "job.list") == 0);
    assert(route.skip_subcmd == 1);
 
    char *status_argv[] = {"status", "12"};
-   assert(cli_rpc_lookup("job", 2, status_argv, &route));
+   assert(cli_v1_lookup("job", 2, status_argv, &route));
    assert(strcmp(route.method, "job.status") == 0);
    assert(route.skip_subcmd == 1);
 
    char *show_argv[] = {"show", "12"};
-   assert(cli_rpc_lookup("job", 2, show_argv, &route));
+   assert(cli_v1_lookup("job", 2, show_argv, &route));
    assert(strcmp(route.method, "job.status") == 0);
    assert(route.skip_subcmd == 1);
 
    char *cancel_argv[] = {"cancel", "12"};
-   assert(cli_rpc_lookup("job", 2, cancel_argv, &route));
+   assert(cli_v1_lookup("job", 2, cancel_argv, &route));
    assert(strcmp(route.method, "job.cancel") == 0);
    assert(route.skip_subcmd == 1);
    printf("  PASS: test_coord_job_routes_lookup\n");
@@ -931,19 +931,19 @@ static void test_coord_job_requests_marshaled(void)
 
 static void test_aux_routes_lookup(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *config_argv[] = {"config"};
-   assert(cli_rpc_lookup("aux", 1, config_argv, &route));
+   assert(cli_v1_lookup("aux", 1, config_argv, &route));
    assert(strcmp(route.method, "aux.config_show") == 0);
    assert(route.skip_subcmd == 1);
 
    char *show_argv[] = {"config", "show"};
-   assert(cli_rpc_lookup("aux", 2, show_argv, &route));
+   assert(cli_v1_lookup("aux", 2, show_argv, &route));
    assert(strcmp(route.method, "aux.config_show") == 0);
    assert(route.skip_subcmd == 2);
 
    char *test_argv[] = {"test", "title", "summarize this"};
-   assert(cli_rpc_lookup("aux", 3, test_argv, &route));
+   assert(cli_v1_lookup("aux", 3, test_argv, &route));
    assert(strcmp(route.method, "aux.test") == 0);
    assert(route.skip_subcmd == 1);
    printf("  PASS: test_aux_routes_lookup\n");
@@ -964,14 +964,14 @@ static void test_aux_test_marshaled(void)
 
 static void test_mcp_routes_lookup(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *audit_argv[] = {"audit"};
-   assert(cli_rpc_lookup("mcp", 1, audit_argv, &route));
+   assert(cli_v1_lookup("mcp", 1, audit_argv, &route));
    assert(strcmp(route.method, "mcp.audit") == 0);
    assert(route.skip_subcmd == 1);
 
    char *recheck_argv[] = {"recheck", "server"};
-   assert(cli_rpc_lookup("mcp", 2, recheck_argv, &route));
+   assert(cli_v1_lookup("mcp", 2, recheck_argv, &route));
    assert(strcmp(route.method, "mcp.recheck") == 0);
    assert(route.skip_subcmd == 1);
 
@@ -985,8 +985,8 @@ static void test_mcp_routes_lookup(void)
 
 static void test_insights_text_output(void)
 {
-   cli_rpc_route_t route;
-   assert(cli_rpc_lookup("insights", 0, NULL, &route));
+   cli_v1_route_t route;
+   assert(cli_v1_lookup("insights", 0, NULL, &route));
    assert(strcmp(route.method, "insights.overview") == 0);
 
    char *argv[] = {"--days", "7"};
@@ -1037,9 +1037,9 @@ static void test_insights_text_output(void)
 
 static void test_skill_lint_route_marshaled(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *all_argv[] = {"lint", "--all"};
-   assert(cli_rpc_lookup("skill", 2, all_argv, &route));
+   assert(cli_v1_lookup("skill", 2, all_argv, &route));
    assert(strcmp(route.method, "skill.lint") == 0);
    cJSON *req = marshal_request(route.method, 1, all_argv + 1);
    assert(req != NULL);
@@ -1048,7 +1048,7 @@ static void test_skill_lint_route_marshaled(void)
    cJSON_Delete(req);
 
    char *one_argv[] = {"lint", "writing-skills"};
-   assert(cli_rpc_lookup("skill", 2, one_argv, &route));
+   assert(cli_v1_lookup("skill", 2, one_argv, &route));
    req = marshal_request(route.method, 1, one_argv + 1);
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "name")->valuestring, "writing-skills") == 0);
@@ -1058,9 +1058,9 @@ static void test_skill_lint_route_marshaled(void)
 
 static void test_skill_eval_route_marshaled(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *argv[] = {"eval", "verification-before-completion", "--json"};
-   assert(cli_rpc_lookup("skill", 3, argv, &route));
+   assert(cli_v1_lookup("skill", 3, argv, &route));
    assert(strcmp(route.method, "skill.eval") == 0);
    cJSON *req = marshal_request(route.method, 2, argv + 1);
    assert(req != NULL);
@@ -1073,9 +1073,9 @@ static void test_skill_eval_route_marshaled(void)
 
 static void test_skill_autostub_route_marshaled(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *argv[] = {"autostub", "--force", "--snapshot", "/tmp/tools.json"};
-   assert(cli_rpc_lookup("skill", 4, argv, &route));
+   assert(cli_v1_lookup("skill", 4, argv, &route));
    assert(strcmp(route.method, "skill.autostub") == 0);
    cJSON *req = marshal_request(route.method, 3, argv + 1);
    assert(req != NULL);
@@ -1088,9 +1088,9 @@ static void test_skill_autostub_route_marshaled(void)
 
 static void test_trajectory_export_route_marshaled(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *argv[] = {"export", "sess-123", "--no-compress", "--max-result-bytes", "64"};
-   assert(cli_rpc_lookup("trajectory", 5, argv, &route));
+   assert(cli_v1_lookup("trajectory", 5, argv, &route));
    assert(strcmp(route.method, "trajectory.export") == 0);
    assert(route.skip_subcmd == 1);
 
@@ -1107,10 +1107,10 @@ static void test_trajectory_export_route_marshaled(void)
 
 static void test_trajectory_batch_route_marshaled(void)
 {
-   cli_rpc_route_t route;
+   cli_v1_route_t route;
    char *argv[] = {"batch", "--tasks", "/tmp/corpus.jsonl", "--toolset-dist",
                    "mixed", "--out",   "/tmp/traj"};
-   assert(cli_rpc_lookup("trajectory", 7, argv, &route));
+   assert(cli_v1_lookup("trajectory", 7, argv, &route));
    assert(strcmp(route.method, "trajectory.batch") == 0);
    assert(route.skip_subcmd == 1);
 
@@ -1125,7 +1125,7 @@ static void test_trajectory_batch_route_marshaled(void)
    printf("  PASS: test_trajectory_batch_route_marshaled\n");
 }
 
-/* cli_rpc_client_endpoint()/cli_rpc_client_bearer() (in cli_rpc_routes.inc) call
+/* cli_v1_client_endpoint()/cli_v1_client_bearer() (in cli_v1_routes.inc) call
  * aimee_home(), defined in posix/cli_client.c — which cannot be co-linked here
  * because it re-includes the same .inc. Stub it: aimee_home() honors the
  * AIMEE_HOME override exactly as the real one does. (The legacy
@@ -1136,10 +1136,10 @@ const char *aimee_home(void)
    return getenv("AIMEE_HOME");
 }
 
-/* cli_rpc_client_endpoint()/cli_rpc_client_bearer() resolve the remote /v1
+/* cli_v1_client_endpoint()/cli_v1_client_bearer() resolve the remote /v1
  * endpoint + bearer (AIMEE_API_ENDPOINT / AIMEE_API_BEARER env, else aimee.yaml
  * client_endpoint / bearer_token). The thin client is now an unconditional /v1
- * consumer, so cli_rpc_has_remote_endpoint() is true exactly when an endpoint is
+ * consumer, so cli_v1_has_remote_endpoint() is true exactly when an endpoint is
  * configured (the legacy client_transport gate was removed). */
 static void test_client_endpoint_selection(void)
 {
@@ -1152,21 +1152,21 @@ static void test_client_endpoint_selection(void)
    unsetenv("AIMEE_PROFILE");
 
    /* Nothing configured -> no endpoint, no bearer, no remote. */
-   assert(cli_rpc_client_endpoint() == NULL);
-   assert(cli_rpc_client_bearer() == NULL);
-   assert(cli_rpc_has_remote_endpoint() == 0);
+   assert(cli_v1_client_endpoint() == NULL);
+   assert(cli_v1_client_bearer() == NULL);
+   assert(cli_v1_has_remote_endpoint() == 0);
 
    /* Env override wins for both endpoint and bearer; a configured endpoint makes
     * has_remote true on its own. */
    setenv("AIMEE_API_ENDPOINT", "tcp:10.0.0.5:8740", 1);
    setenv("AIMEE_API_BEARER", "env-token", 1);
-   char *ep = cli_rpc_client_endpoint();
+   char *ep = cli_v1_client_endpoint();
    assert(ep && strcmp(ep, "tcp:10.0.0.5:8740") == 0);
    free(ep);
-   char *bt = cli_rpc_client_bearer();
+   char *bt = cli_v1_client_bearer();
    assert(bt && strcmp(bt, "env-token") == 0);
    free(bt);
-   assert(cli_rpc_has_remote_endpoint() == 1);
+   assert(cli_v1_has_remote_endpoint() == 1);
 
    unsetenv("AIMEE_API_ENDPOINT");
    unsetenv("AIMEE_API_BEARER");
@@ -1180,15 +1180,15 @@ static void test_client_endpoint_selection(void)
          "    bearer_token: \"yaml-token\"\n",
          fp);
    fclose(fp);
-   ep = cli_rpc_client_endpoint();
+   ep = cli_v1_client_endpoint();
    assert(ep && strcmp(ep, "tcp:host.example:8740") == 0);
    free(ep);
-   bt = cli_rpc_client_bearer();
+   bt = cli_v1_client_bearer();
    assert(bt && strcmp(bt, "yaml-token") == 0);
    free(bt);
 
    /* yaml endpoint -> remote. */
-   assert(cli_rpc_has_remote_endpoint() == 1);
+   assert(cli_v1_has_remote_endpoint() == 1);
 
    unlink(yaml);
    rmdir(home);
@@ -1247,7 +1247,7 @@ static void test_delegate_context_file_folded_into_prompt(void)
 
 int main(void)
 {
-   printf("test_cli_rpc_delegate\n");
+   printf("test_cli_v1_delegate\n");
    test_delegate_context_file_folded_into_prompt();
    test_delegate_max_turns_marshaled();
    test_delegate_tools_named_toolset_marshaled();

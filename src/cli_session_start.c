@@ -77,10 +77,10 @@ static void ss_render_section(struct ss_sbuf *b, const char *title, cJSON *arr)
  * value. Always soft-fails (exit 0) so the host session is never blocked. */
 static int handle_session_start_remote(void)
 {
-   char *endpoint = cli_rpc_client_endpoint();
+   char *endpoint = cli_v1_client_endpoint();
    if (!endpoint)
       return 0;
-   char *bearer = cli_rpc_client_bearer();
+   char *bearer = cli_v1_client_bearer();
 
    cJSON *body = cJSON_CreateObject();
    /* task_hint is required by /v1/memory/recall; session_start widens recall. */
@@ -157,7 +157,7 @@ int handle_user_prompt_submit(void)
        hook_json ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hook_json, "prompt"))
                  : NULL;
 
-   char *endpoint = cli_rpc_client_endpoint();
+   char *endpoint = cli_v1_client_endpoint();
    if (!prompt || !prompt[0] || !endpoint)
    {
       free(endpoint);
@@ -165,7 +165,7 @@ int handle_user_prompt_submit(void)
       free(stdin_data);
       return 0;
    }
-   char *bearer = cli_rpc_client_bearer();
+   char *bearer = cli_v1_client_bearer();
 
    cJSON *body = cJSON_CreateObject();
    cJSON_AddStringToObject(body, "task_hint", prompt);
@@ -232,10 +232,10 @@ int handle_pre_compact(void)
    char *stdin_data = read_stdin();
    free(stdin_data); /* PreCompact payload is informational; recall is broad. */
 
-   char *endpoint = cli_rpc_client_endpoint();
+   char *endpoint = cli_v1_client_endpoint();
    if (!endpoint)
       return 0;
-   char *bearer = cli_rpc_client_bearer();
+   char *bearer = cli_v1_client_bearer();
 
    cJSON *body = cJSON_CreateObject();
    cJSON_AddStringToObject(body, "task_hint", "compaction re-prime");
@@ -313,7 +313,7 @@ int handle_session_start(int json_output)
       /* No co-located server. If a remote /v1 endpoint is configured, the thin
        * client serves session-start itself via the read-only recall route — no
        * local aimee-server needed (see handle_session_start_remote). */
-      if (cli_rpc_has_remote_endpoint())
+      if (cli_v1_has_remote_endpoint())
       {
          int rc = handle_session_start_remote();
          cJSON_Delete(hook_json);
