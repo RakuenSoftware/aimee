@@ -339,6 +339,19 @@ prior round — and returns the best round's artifact. Both run through the dele
 core, so the work stays inside Aimee's session state, cost accounting, and audit
 trail (not the host AI's own sub-agent tools, which are blocked).
 
+> **Use `aimee delegate roundtable --mode review` (or the MCP `delegate.roundtable`
+> tool) for a multi-model review gate — not hand-run per-model `aimee delegate
+> review` jobs.** The roundtable panel runs each model **without file tools** and
+> gives each panelist a **distinct persona** (security, architect, QA, contrarian
+> reviewer, constructive reviewer), so weaker models review the artifact you give
+> them instead of wandering the filesystem, and tool-less models (e.g. codex) can
+> participate. `aimee delegate review --via M` is a *single, exploratory* review
+> that runs tools-on so the reviewer can read the surrounding code — the right
+> tool for "review the auth module", the wrong tool for a panel gate. The panel
+> skips agents that cannot run as a server-side HTTP delegate (e.g. claude-CLI
+> unless `claude_cli_delegate_enabled`) and falls back to another panelist if the
+> aggregator model fails, so one flaky model does not collapse the synthesis.
+
 The panel is configured under `ensemble` in `aimee.yaml`:
 
 | Field | Meaning |
