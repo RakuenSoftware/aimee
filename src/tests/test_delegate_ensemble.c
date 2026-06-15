@@ -962,8 +962,10 @@ static void test_roundtable_single_round_skips_scorer(void)
    roundtable_result_t result;
    int rc = delegate_roundtable_run(&acfg, &cfg, "review once", &opts, &result);
    assert(rc == 0);
-   assert(g_scorer_calls == 0);                   /* the perf fix: no scorer call */
-   assert(result.artifact && result.artifact[0]); /* artifact still produced */
+   assert(g_scorer_calls == 0);     /* no cross-round scorer call */
+   assert(g_aggregator_calls == 0); /* no synthesis LLM call — assembled from items */
+   assert(result.item_count >= 1);
+   assert(result.artifact && strstr(result.artifact, "authorization")); /* built from the items */
    delegate_roundtable_result_free(&result);
 
    /* multi-round still scores to pick the best round (regression guard). */

@@ -14,6 +14,7 @@
 #include "cost_fold.h"
 #include "log.h"
 #include "persona.h"
+#include "dstr.h"
 #include "token_tracker.h"
 
 #include <stdio.h>
@@ -1376,6 +1377,57 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
    return 0;
 }
 
+/* Assemble a consolidated review artifact from the already-deduped panel items,
+ * so a single-round review needs no synthesis LLM call (the panel's structured
+ * findings already ARE the review). Groups by severity; caller owns the result. */
+static char *assemble_review_artifact(const roundtable_result_t *out)
+{
+   dstr_t s;
+   dstr_init(&s);
+   static const char *const sevs[] = {"blocking", "suggestion", "nit"};
+   static const char *const heads[] = {"## Blocking", "## Suggestions", "## Nits"};
+   int emitted = 0;
+   char done[ROUNDTABLE_MAX_REVIEW_ITEMS];
+   memset(done, 0, sizeof(done));
+   for (int g = 0; g < 3; g++)
+   {
+      int group_started = 0;
+      for (int i = 0; i < out->item_count && i < ROUNDTABLE_MAX_REVIEW_ITEMS; i++)
+      {
+         const roundtable_review_item_t *it = &out->items[i];
+         if (strcmp(it->severity, sevs[g]) != 0)
+            continue;
+         done[i] = 1;
+         if (!group_started)
+         {
+            dstr_appendf(&s, "%s%s\n", emitted ? "\n" : "", heads[g]);
+            group_started = 1;
+         }
+         dstr_appendf(&s, "- **%s**", it->category[0] ? it->category : "review");
+         if (it->location[0])
+            dstr_appendf(&s, " (%s)", it->location);
+         dstr_appendf(&s, ": %s", it->summary);
+         if (it->recommendation[0])
+            dstr_appendf(&s, " — %s", it->recommendation);
+         dstr_append_char(&s, '\n');
+         emitted++;
+      }
+   }
+   /* Any item with an unexpected severity still gets reported. */
+   for (int i = 0; i < out->item_count && i < ROUNDTABLE_MAX_REVIEW_ITEMS; i++)
+   {
+      if (done[i])
+         continue;
+      const roundtable_review_item_t *it = &out->items[i];
+      dstr_appendf(&s, "%s- **%s**: %s\n", emitted ? "" : "## Findings\n",
+                   it->category[0] ? it->category : "review", it->summary);
+      emitted++;
+   }
+   if (!emitted)
+      dstr_append_str(&s, "No issues found by the panel.\n");
+   return dstr_steal(&s);
+}
+
 int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const char *task,
                             const roundtable_opts_t *opts, roundtable_result_t *out)
 {
@@ -1582,6 +1634,22 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          for (int i = 0; i < ref_count; i++)
             free(results[i].response);
          continue;
+      }
+
+      /* Single-round review: the deduped panel items already hold the findings
+       * (captured above, no LLM call). Assemble the consolidated artifact from
+       * them and skip the synthesis LLM call entirely — a 1-round review is then
+       * just the parallel panel, no serial aggregator pass. Multi-round reviews
+       * and all draft runs still synthesize (each round feeds the next). */
+      if (local.mode == ROUNDTABLE_REVIEW && local.max_rounds <= 1)
+      {
+         free(best_artifact);
+         best_artifact = assemble_review_artifact(out);
+         out->best_round = round;
+         out->participants_failed = round_failed;
+         for (int i = 0; i < ref_count; i++)
+            free(results[i].response);
+         break;
       }
 
       int order[ENSEMBLE_MAX_REFS];
