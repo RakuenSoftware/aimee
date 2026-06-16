@@ -21,3 +21,20 @@ int handle_evidence_trace(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "knowledge service audit trace failed", NULL);
    return send_and_free(conn, resp);
 }
+
+/* /v1/audit/provenance handler. Like handle_evidence_trace, its op
+ * (evidence.provenance_retrieval_event) is a KB-only action, so the server
+ * forwards it to aimee-kb via kb_client and passes the JSON response through. */
+int handle_evidence_provenance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *turn_id = jo_str(req, "turn_id", "");
+   if (!turn_id[0])
+      return server_send_error(conn, "audit provenance requires turn_id", NULL);
+   char *json = kb_client_evidence_provenance_retrieval_event(turn_id);
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!resp)
+      return server_send_error(conn, "knowledge service audit provenance failed", NULL);
+   return send_and_free(conn, resp);
+}

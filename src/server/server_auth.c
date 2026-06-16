@@ -136,6 +136,7 @@ const method_policy_t method_registry[] = {
     /* Knowledge base: search/status read; build/ingest/update rebuild the store. */
     {"kb.search", CAP_INDEX_READ, "knowledge search"},
     {"evidence.trace_retrieval_event", CAP_INDEX_READ, "audit retrieval-evidence trace"},
+    {"evidence.provenance_retrieval_event", CAP_INDEX_READ, "audit source provenance"},
     {"kb.status", CAP_DASHBOARD_READ, "knowledge base status"},
     {"optimize.export", CAP_DASHBOARD_READ, "bandit optimization export"},
     {"optimize.promote", CAP_INDEX_ADMIN, "promote a bandit arm to default"},

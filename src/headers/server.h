@@ -283,6 +283,7 @@ int handle_graph_sync_code(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_graph_explain(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_evidence_trace(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_evidence_provenance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_curator_implements(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_curator_synthesize(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_curator_contradictions(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

@@ -543,6 +543,10 @@ int handle_evidence_trace(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "evidence.trace_retrieval_event");
 }
+int handle_evidence_provenance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "evidence.provenance_retrieval_event");
+}
 int handle_curator_implements(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "curator.implements");
@@ -1450,6 +1454,16 @@ static void test_routing(void)
    assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring,
                  "evidence.trace_retrieval_event") == 0);
    assert(strcmp(g_last_handler, "evidence.trace_retrieval_event") == 0);
+   cJSON_Delete(json);
+
+   /* Auditable-correctness P2: /v1/audit/provenance's op must likewise resolve to
+    * its server-side KB-forward handler. */
+   json = dispatch_json(
+       ctx, conn, "{\"method\":\"evidence.provenance_retrieval_event\",\"turn_id\":\"t1\"}",
+       strlen("{\"method\":\"evidence.provenance_retrieval_event\",\"turn_id\":\"t1\"}"));
+   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring,
+                 "evidence.provenance_retrieval_event") == 0);
+   assert(strcmp(g_last_handler, "evidence.provenance_retrieval_event") == 0);
    cJSON_Delete(json);
 
    json = dispatch_json(ctx, conn, "{\"method\":\"rules.delete\",\"id\":1}",

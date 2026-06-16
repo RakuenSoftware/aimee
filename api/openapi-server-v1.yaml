@@ -909,6 +909,38 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /audit/provenance:
+    post:
+      summary: Per-turn source provenance (proxied to aimee-kb)
+      description: >-
+        Which sources grounded a turn's answer, at which version: given the
+        caller-visible turn_id, resolve each source id recorded on the turn's
+        retrieval_event to {id, kind, source, version, present}, where version is
+        the source row's updated_at (read live) and present is false when the
+        source no longer exists (deleted/superseded since the turn). provenance_status
+        is one of the exhaustive states ok / not_instrumented / not_evaluated /
+        evidence_unavailable (P2 produces ok and evidence_unavailable). Requires
+        aimee-kb. Gated by kb_evidence_emit_enabled at emit time.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [turn_id]
+              properties:
+                turn_id: { type: string }
+      responses:
+        "200":
+          description: Provenance bundle ({status, provenance_status, turn_id, retrieval_event_id?, sources?})
+          content:
+            application/json:
+              schema: { type: object }
+        "502":
+          description: Knowledge service (aimee-kb) unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /notes:
     get:
       summary: List notes (proxied to aimee-kb)

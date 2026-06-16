@@ -1054,6 +1054,7 @@ static const struct
     {"memory.context_block", kb_handle_memory_context_block},
     {"evidence.emit_retrieval_event", kb_handle_evidence_emit_retrieval_event},
     {"evidence.trace_retrieval_event", kb_handle_evidence_trace_retrieval_event},
+    {"evidence.provenance_retrieval_event", kb_handle_evidence_provenance},
     {"memory.entity_profile", kb_handle_memory_entity_profile},
     {"memory.entity_edges", kb_handle_memory_entity_edges},
     {"memory.search_graph", kb_handle_memory_search_graph},
