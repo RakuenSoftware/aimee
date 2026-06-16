@@ -315,6 +315,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-learning-version \
                $(TESTPREFIX)/unit-test-calibration \
                $(TESTPREFIX)/unit-test-demotion \
+               $(TESTPREFIX)/unit-test-fidelity \
                $(TESTPREFIX)/unit-test-features \
                $(TESTPREFIX)/unit-test-report-enrichments \
                $(TESTPREFIX)/unit-test-reasoning \
@@ -403,6 +404,16 @@ $(TESTPREFIX)/unit-test-schema-subst: $(OBJDIR)/tests/test_schema_subst.o \
 $(TESTPREFIX)/unit-test-code-index-ops: \
                                        $(OBJDIR)/tests/test_code_index_ops.o \
                                        $(OBJDIR)/db2/code_index_ops.o \
+                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
+                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
+
+# auditable-correctness P3 fidelity storage substrate over the sqlite shim.
+$(TESTPREFIX)/unit-test-fidelity: \
+                                       $(OBJDIR)/tests/test_fidelity.o \
+                                       $(OBJDIR)/db2/fidelity.o \
+                                       $(OBJDIR)/db2/artifacts.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
                                        $(OBJDIR)/db2/db_schema.o \
                                        $(TEST_CORE_OBJS)
