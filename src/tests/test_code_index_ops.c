@@ -34,11 +34,16 @@ int main(void)
    assert(sum.failed_ops == 1); /* still failed, but retryable */
    printf("  reset-stuck retries a stuck code embed OK\n");
 
-   /* D7 drift detector: a code embedding whose source file was re-scanned after
-    * the embedding was written is a re-ingest candidate. Crucially this exercises
-    * the timestamp-format normalization: files.scanned_at is now_utc() ('...T..Z')
-    * while code_embeddings.updated_at is space-separated, so a raw compare would
-    * mis-order — the detector must normalize before comparing. */
+   /* D7 drift detector — covers both predicate branches:
+    *  - LEGACY staleness fallback (source_hash=''): src/stale.c (re-scanned after
+    *    embed) flags; src/fresh.c does not. Exercises the timestamp-format
+    *    normalization (files.scanned_at is now_utc() '...T..Z' vs space-separated
+    *    code_embeddings.updated_at — a raw compare would mis-order).
+    *  - PRECISE content hash (source_hash<>''): src/changed.c flags because
+    *    files.hash differs from the stored source_hash EVEN THOUGH it was scanned
+    *    BEFORE the embed (staleness alone would miss it); src/same.c does NOT flag
+    *    because the hashes match EVEN THOUGH it was re-scanned after the embed
+    *    (staleness alone would false-positive). */
    {
       void *conn = db2_conn();
       char e[256] = "";
@@ -67,9 +72,36 @@ int main(void)
                  "INSERT INTO code_embeddings (point_id, project, file_path, node_key,"
                  " updated_at) VALUES (102,'dproj','src/fresh.c','n2','2026-06-02 00:00:00')",
                  e, sizeof e) == 0);
+      /* precise: file hash CHANGED (hNEW) vs stored source_hash (hOLD), but the
+       * file was scanned (06-01) BEFORE the embed (06-02) — staleness alone misses
+       * it; the hash branch flags it. */
+      assert(aimee_pg_exec(conn,
+                           "INSERT INTO files (project_id, path, hash, scanned_at) VALUES"
+                           " ((SELECT id FROM projects WHERE name='dproj'),"
+                           " 'src/changed.c','hNEW','2026-06-01T00:00:00Z')",
+                           e, sizeof e) == 0);
+      assert(aimee_pg_exec(conn,
+                           "INSERT INTO code_embeddings (point_id, project, file_path, node_key,"
+                           " source_hash, updated_at) VALUES"
+                           " (103,'dproj','src/changed.c','n3','hOLD','2026-06-02 00:00:00')",
+                           e, sizeof e) == 0);
+      /* precise no-false-positive: hashes MATCH (hX), but the file was re-scanned
+       * (06-02) AFTER the embed (06-01) — staleness alone would flag it; the hash
+       * branch correctly does not. */
+      assert(aimee_pg_exec(conn,
+                           "INSERT INTO files (project_id, path, hash, scanned_at) VALUES"
+                           " ((SELECT id FROM projects WHERE name='dproj'),"
+                           " 'src/same.c','hX','2026-06-02T00:00:00Z')",
+                           e, sizeof e) == 0);
+      assert(aimee_pg_exec(conn,
+                           "INSERT INTO code_embeddings (point_id, project, file_path, node_key,"
+                           " source_hash, updated_at) VALUES"
+                           " (104,'dproj','src/same.c','n4','hX','2026-06-01 00:00:00')",
+                           e, sizeof e) == 0);
       int64_t drift = db2_code_index_drift_candidates();
-      assert(drift == 1); /* only src/stale.c — format normalization makes the compare correct */
-      printf("  drift detector flags re-scanned-since-embed (got %lld) OK\n", (long long)drift);
+      assert(drift == 2); /* src/stale.c (staleness) + src/changed.c (hash); fresh+same excluded */
+      printf("  drift detector flags staleness + precise hash drift (got %lld) OK\n",
+             (long long)drift);
 
       /* D7 requeue: the one drifted project ('dproj') gets enqueued for re-ingest
        * with force, deduped — a second call enqueues nothing (already pending). */

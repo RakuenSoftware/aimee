@@ -459,8 +459,14 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
          continue;
       }
 
+      /* content_hash and source_hash are intentionally the SAME value here —
+       * rows[i].hash, the source file's hash (files.hash) at embed time. They serve
+       * different roles: content_hash backs the (project,node_key,content_hash)
+       * dedup index, while source_hash is the D7 drift contract (files.hash <>
+       * source_hash ⇒ content drift). Code embeds are file-granular today, so the
+       * two coincide; node-level hashing later would split them. */
       int up = pgvec_kb_service_code_upsert(point_id, vec, dim, project, node_key, rows[i].path, "",
-                                            rows[i].hash, body_hash, payload);
+                                            rows[i].hash, body_hash, rows[i].hash, payload);
       /* Per-chunk replay bookkeeping so a failed embed is retried by
        * `memory repair --reset-stuck`, not orphaned. */
       db2_code_index_op_record(point_id, project, node_key, rows[i].path, up == 0,

@@ -108,28 +108,43 @@ int db2_code_index_ops_summary(int max_attempts, db2_code_index_ops_summary_t *o
    return 0;
 }
 
+/* auditable-correctness D7 drift predicate (shared by the detector and the
+ * requeue so they can never diverge). A code embedding is a re-ingest candidate
+ * when its source file has DRIFTED:
+ *  - PRECISE (preferred): the stored source_hash — the file's hash (files.hash)
+ *    captured at embed time — differs from the file's CURRENT hash. This is real
+ *    content drift, with no false positives from a re-scan that didn't change
+ *    anything.
+ *  - LEGACY FALLBACK: embeddings written before source_hash was captured carry
+ *    source_hash='' ; for those only, fall back to the staleness heuristic (file
+ *    re-scanned after the embedding was written). Timestamp NORMALIZATION:
+ *    files.scanned_at is now_utc() ('YYYY-MM-DDTHH:MM:SSZ') while ce.updated_at is
+ *    to_char(...,'YYYY-MM-DD HH24:MI:SS'); a raw compare mis-orders ('T' > ' '),
+ *    so strip 'T'/'Z' and compare lexically (valid for zero-padded UTC). replace()
+ *    is portable across Postgres and the sqlite shim.
+ * NULL semantics: if f.hash IS NULL the precise compare is UNKNOWN (row NOT
+ * flagged), same as a NULL scanned_at in the legacy branch — consistent, and the
+ * row is picked up once the file gets a hash. The precise branch is the contract;
+ * the legacy branch is best-effort (it only fires once a re-scan bumps scanned_at).
+ * The OR-group is fully parenthesized so callers may AND further conditions after
+ * it (the requeue appends an AND NOT EXISTS). */
+#define D7_DRIFT_FROM_WHERE                                                                        \
+   " FROM code_embeddings ce"                                                                      \
+   " JOIN projects p ON p.name = ce.project"                                                       \
+   " JOIN files f ON f.project_id = p.id AND f.path = ce.file_path"                                \
+   " WHERE ce.file_path <> ''"                                                                     \
+   "   AND ((ce.source_hash <> '' AND f.hash <> ce.source_hash)"                                   \
+   "        OR (ce.source_hash = ''"                                                               \
+   "            AND replace(replace(f.scanned_at, 'T', ' '), 'Z', '') > ce.updated_at))"
+
 int64_t db2_code_index_drift_candidates(void)
 {
    void *conn = db2_conn();
    if (!conn)
       return 0;
-   /* auditable-correctness D7 (staleness heuristic): a code embedding is a
-    * re-ingest candidate when its source file was re-scanned AFTER the embedding
-    * was written — files.scanned_at > code_embeddings.updated_at — i.e. the file
-    * changed but its vectors haven't been refreshed yet. Joined within DB2 on
-    * project name + file path. Read-only; ranks/sizes re-ingest, not a verdict.
-    *
-    * Timestamp NORMALIZATION: files.scanned_at is now_utc() ("YYYY-MM-DDTHH:MM:SSZ")
-    * while code_embeddings.updated_at is to_char(...,'YYYY-MM-DD HH24:MI:SS') — a
-    * raw string compare would mis-order ('T' > ' '). Strip the 'T'/'Z' from
-    * scanned_at so both are "YYYY-MM-DD HH:MM:SS" and compare lexically (valid for
-    * zero-padded UTC). replace() is portable across Postgres and the sqlite shim. */
-   static const char *sql =
-       "SELECT COUNT(*) FROM code_embeddings ce"
-       " JOIN projects p ON p.name = ce.project"
-       " JOIN files f ON f.project_id = p.id AND f.path = ce.file_path"
-       " WHERE ce.file_path <> ''"
-       "   AND replace(replace(f.scanned_at, 'T', ' '), 'Z', '') > ce.updated_at";
+   /* Read-only count of drift candidates (see D7_DRIFT_FROM_WHERE). Ranks/sizes
+    * re-ingest, not a verdict. */
+   static const char *sql = "SELECT COUNT(*)" D7_DRIFT_FROM_WHERE;
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -146,27 +161,20 @@ int db2_code_index_requeue_drifted(void)
    void *conn = db2_conn();
    if (!conn)
       return 0;
-   /* auditable-correctness D7 requeue: enqueue each distinct drifted project for
-    * re-ingest (force) so the ingest drain re-embeds its changed files. A project
-    * is drifted when it has >=1 drift candidate (file re-scanned since embed, with
-    * the SAME timestamp normalization as db2_code_index_drift_candidates: only
-    * f.scanned_at is now_utc() 'T'/'Z' form, while ce.updated_at is already
-    * space-form to_char output) AND has no pending/running queue row yet (dedup).
-    * projects.name is UNIQUE so DISTINCT p.name yields one p.root per project.
-    * RETURNING makes the returned row set EXACTLY the rows inserted, so the count
-    * cannot drift from a separate COUNT query. MUTATING — callers must skip under
-    * dry_run. Returns the number of projects enqueued. */
-   static const char *sql =
-       "INSERT INTO kb_ingest_queue (project, root_path, force, status)"
-       " SELECT DISTINCT p.name, p.root, 1, 'pending'"
-       " FROM code_embeddings ce"
-       " JOIN projects p ON p.name = ce.project"
-       " JOIN files f ON f.project_id = p.id AND f.path = ce.file_path"
-       " WHERE ce.file_path <> ''"
-       "   AND replace(replace(f.scanned_at, 'T', ' '), 'Z', '') > ce.updated_at"
-       "   AND NOT EXISTS (SELECT 1 FROM kb_ingest_queue q"
-       "                   WHERE q.project = p.name AND q.status IN ('pending','running'))"
-       " RETURNING project";
+   /* auditable-correctness D7 requeue: enqueue each distinct drifted project (see
+    * D7_DRIFT_FROM_WHERE) for re-ingest (force) so the ingest drain re-embeds its
+    * changed files, AND it has no pending/running queue row yet (dedup). The OR-
+    * group in the predicate is parenthesized, so the trailing AND NOT EXISTS binds
+    * correctly. projects.name is UNIQUE so DISTINCT p.name yields one p.root per
+    * project. RETURNING makes the returned row set EXACTLY the rows inserted, so
+    * the count cannot drift from a separate COUNT query. MUTATING — callers must
+    * skip under dry_run. Returns the number of projects enqueued. */
+   static const char *sql = "INSERT INTO kb_ingest_queue (project, root_path, force, status)"
+                            " SELECT DISTINCT p.name, p.root, 1, 'pending'" D7_DRIFT_FROM_WHERE
+                            "   AND NOT EXISTS (SELECT 1 FROM kb_ingest_queue q"
+                            "                   WHERE q.project = p.name"
+                            "                     AND q.status IN ('pending','running'))"
+                            " RETURNING project";
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -177,3 +185,5 @@ int db2_code_index_requeue_drifted(void)
    aimee_pg_finalize(st);
    return n;
 }
+
+#undef D7_DRIFT_FROM_WHERE
