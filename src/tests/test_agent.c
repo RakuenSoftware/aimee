@@ -1834,6 +1834,7 @@ int main(void)
    test_tool_grep_excludes_heavy_dirs();
    test_dispatch_tool_call();
    test_source_authority_overlay_tools();
+   test_source_authority_tls_thread_isolation();
    test_parse_openai_tool_calls();
    test_path_traversal_rejected();
    test_sensitive_path_rejected();
