@@ -1,7 +1,6 @@
 /* db2_pool.c: bounded DB2 connection pool. See db2_pool.h. */
 #include "db2_pool.h"
 #include "db_postgres.h"
-#include "log.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -15,6 +14,8 @@
  * logged as stuck (a live thread that missed its lease_end — NOT reclaimed,
  * since the thread may still use it; dead threads are handled by the lease
  * thread-local destructor in db2_init.c). */
+#define POOL_LOG(fmt, ...) fprintf(stderr, "aimee: db2.pool: " fmt "\n", ##__VA_ARGS__)
+
 #define DB2_POOL_REAP_INTERVAL_S 30
 #define DB2_POOL_REOPEN_MIN_MS   5000 /* rate-cap poison reopen per member */
 
@@ -134,9 +135,9 @@ int db2_pool_init(const char *libpq_url, int size, char *errbuf, size_t errbuf_l
    if (pthread_create(&g_reaper_thread, NULL, db2_pool_reaper_main, NULL) == 0)
       g_reaper_running = 1;
    else
-      LOG_WARN("db2.pool", "reaper thread failed to start; leak-reclaim disabled");
+      POOL_LOG("reaper thread failed to start; leak-reclaim disabled");
 
-   LOG_INFO("db2.pool", "initialized: %d connections", size);
+   POOL_LOG("initialized: %d connections", size);
    return 0;
 }
 
@@ -190,7 +191,7 @@ void *db2_pool_lease(int timeout_ms)
       {
          g_timeouts++;
          pthread_mutex_unlock(&g_mtx);
-         LOG_WARN("db2.pool", "lease timeout (%d ms); pool exhausted (size=%d)", timeout_ms, g_size);
+         POOL_LOG("lease timeout (%d ms); pool exhausted (size=%d)", timeout_ms, g_size);
          return NULL;
       }
    }
@@ -237,7 +238,7 @@ void db2_pool_return(void *conn)
       }
       g_poisoned++;
       if (!g_members[i].conn)
-         LOG_WARN("db2.pool", "member %d poisoned; reopen deferred/failed: %s", i, e);
+         POOL_LOG("member %d poisoned; reopen deferred/failed: %s", i, e);
    }
    g_members[i].leased = 0;
    g_members[i].lease_ms = 0;
@@ -265,7 +266,7 @@ int db2_pool_reaper_sweep(void)
       {
          stuck++;
          g_stuck++;
-         LOG_WARN("db2.pool", "member %d leased %lldms (> %lldms ceiling) — missed lease_end?", i,
+         POOL_LOG("member %d leased %lldms (> %lldms ceiling) — missed lease_end?", i,
                   (long long)(now - g_members[i].lease_ms), (long long)g_hold_ceiling_ms);
       }
    }
