@@ -566,9 +566,9 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          exit(1);
       }
    }
-   static const char *bool_flags[] = {"json", "background",   "durable",      "coordination",
-                                      "plan", "dry-run",      "tools",        "keep-worktree",
-                                      "loop", "handoff-json", "prompt-stdin", NULL};
+   static const char *bool_flags[] = {
+       "json",     "background",    "durable", "coordination", "plan",         "dry-run", "tools",
+       "no-tools", "keep-worktree", "loop",    "handoff-json", "prompt-stdin", NULL};
    opt_parsed_t opts;
    opt_parse(argc, argv, bool_flags, &opts);
    const char *role = opt_pos(&opts, 0);
@@ -672,7 +672,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
 
    delegate_prompt_plan_t prompt_plan;
    if (!role || delegate_resolve_prompt_inputs(prompt, file_prompt, &prompt_plan) != 0)
-      fatal("usage: aimee delegate <role> [\"prompt\"] [--tools] [--prompt-file "
+      fatal("usage: aimee delegate <role> [\"prompt\"] [--tools|--no-tools] [--prompt-file "
             "PATH|--prompt-stdin]");
 
    const char *task_prompt = prompt_plan.task_prompt;
@@ -696,6 +696,11 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       force_tools = 1;
       platform_setenv("AIMEE_ACTIVE_TOOLSET", explicit_toolset);
    }
+   /* --no-tools forces tools off even for a tools-on-by-default role (e.g.
+    * `review`): the right mode for an artifact-provided panel review of an inline
+    * diff, which otherwise wanders reading files and returns nothing. */
+   if (opt_has(&opts, "no-tools"))
+      force_tools = 0;
 
    agent_config_t cfg;
    if (agent_load_config(&cfg) != 0 || cfg.agent_count == 0)

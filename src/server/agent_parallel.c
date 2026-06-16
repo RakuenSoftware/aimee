@@ -10,10 +10,23 @@
 #include "agent_config.h" /* agent_request_creds_t: inherit per-turn creds */
 #include "agent_exec.h"
 #include "config.h" /* aimee_resolve_compute_threads */
+#include "log.h"
 
+#include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+/* Completion barrier for the deadline path: workers flip their `done` flag and
+ * bump `done_count` under `mtx`, signalling `cv`, so the caller can
+ * cond-timedwait and abandon stragglers at the deadline. */
+typedef struct
+{
+   pthread_mutex_t mtx;
+   pthread_cond_t cv;
+   int done_count;
+} parallel_sync_t;
 
 typedef struct
 {
@@ -21,6 +34,10 @@ typedef struct
    agent_task_t *task;
    agent_result_t *result;
    const agent_request_creds_t *creds;
+   /* Deadline path only (NULL otherwise): the worker signals completion here so a
+    * straggler can be abandoned without blocking the join. */
+   parallel_sync_t *sync;
+   int *done;
 } parallel_ctx_t;
 
 static void *parallel_worker(void *arg)
@@ -38,6 +55,14 @@ static void *parallel_worker(void *arg)
    else
       agent_run_ex(ctx->cfg, ctx->task->role, ctx->task->system_prompt, ctx->task->user_prompt,
                    ctx->task->max_tokens, temp, ctx->result);
+   if (ctx->sync)
+   {
+      pthread_mutex_lock(&ctx->sync->mtx);
+      *ctx->done = 1;
+      ctx->sync->done_count++;
+      pthread_cond_broadcast(&ctx->sync->cv);
+      pthread_mutex_unlock(&ctx->sync->mtx);
+   }
    return NULL;
 }
 
@@ -55,8 +80,133 @@ static int parallel_worker_ceiling(void)
    return aimee_resolve_compute_threads(0);
 }
 
+/* Deadline-bounded fan-out: spawn all workers, wait on a completion barrier until
+ * every spawned worker finishes OR `deadline_ms` elapses, then collect the ones
+ * that finished and abandon (detach) the rest. Each worker writes into its OWN
+ * heap result cell; finished cells are moved into `out`, and any still-running
+ * worker keeps a private cell + shared state alive (intentionally leaked) so its
+ * eventual write can never touch freed caller memory. */
+static int run_parallel_deadline(agent_config_t *cfg, agent_task_t *tasks, int task_count,
+                                 agent_result_t *out, int deadline_ms)
+{
+   parallel_sync_t *sync = calloc(1, sizeof(*sync));
+   agent_request_creds_t *creds = calloc(1, sizeof(*creds));
+   parallel_ctx_t *ctxs = calloc((size_t)task_count, sizeof(*ctxs));
+   agent_result_t **cells = calloc((size_t)task_count, sizeof(*cells));
+   int *done = calloc((size_t)task_count, sizeof(int));
+   int *spawned = calloc((size_t)task_count, sizeof(int));
+   pthread_t *threads = calloc((size_t)task_count, sizeof(pthread_t));
+   int *final_done = calloc((size_t)task_count, sizeof(int));
+   if (!sync || !creds || !ctxs || !cells || !done || !spawned || !threads || !final_done)
+   {
+      free(sync);
+      free(creds);
+      free(ctxs);
+      free(cells);
+      free(done);
+      free(spawned);
+      free(threads);
+      free(final_done);
+      return 0;
+   }
+   pthread_mutex_init(&sync->mtx, NULL);
+   pthread_cond_init(&sync->cv, NULL);
+   agent_request_creds_snapshot(creds);
+
+   int spawned_count = 0;
+   for (int i = 0; i < task_count; i++)
+   {
+      memset(&out[i], 0, sizeof(out[i]));
+      cells[i] = calloc(1, sizeof(agent_result_t));
+      if (!cells[i])
+         continue; /* slot stays a failed result; never spawned */
+      ctxs[i].cfg = cfg;
+      ctxs[i].task = &tasks[i];
+      ctxs[i].result = cells[i];
+      ctxs[i].creds = creds;
+      ctxs[i].sync = sync;
+      ctxs[i].done = &done[i];
+      if (pthread_create(&threads[i], NULL, parallel_worker, &ctxs[i]) == 0)
+      {
+         spawned[i] = 1;
+         spawned_count++;
+      }
+      else
+      {
+         free(cells[i]);
+         cells[i] = NULL;
+      }
+   }
+
+   struct timespec abs;
+   clock_gettime(CLOCK_REALTIME, &abs);
+   abs.tv_sec += deadline_ms / 1000;
+   abs.tv_nsec += (long)(deadline_ms % 1000) * 1000000L;
+   if (abs.tv_nsec >= 1000000000L)
+   {
+      abs.tv_sec++;
+      abs.tv_nsec -= 1000000000L;
+   }
+
+   pthread_mutex_lock(&sync->mtx);
+   while (sync->done_count < spawned_count)
+   {
+      if (pthread_cond_timedwait(&sync->cv, &sync->mtx, &abs) == ETIMEDOUT)
+         break;
+   }
+   /* Consistent cut: while holding mtx no worker can flip done, so a done==1 cell
+    * has been fully written and is safe to move out. */
+   for (int i = 0; i < task_count; i++)
+      final_done[i] = done[i];
+   pthread_mutex_unlock(&sync->mtx);
+
+   int success = 0, abandoned = 0;
+   for (int i = 0; i < task_count; i++)
+   {
+      if (!spawned[i])
+         continue;
+      if (final_done[i])
+      {
+         out[i] = *cells[i]; /* move the result (incl. the response pointer) to the caller */
+         if (out[i].success)
+            success++;
+         free(cells[i]); /* the struct only; the response is now owned by out[i] */
+         cells[i] = NULL;
+      }
+      else
+      {
+         pthread_detach(threads[i]); /* abandon: it writes its leaked cell, never out[i] */
+         abandoned++;
+      }
+   }
+
+   free(final_done);
+   free(spawned);
+   free(threads); /* pthread_t ids; detached workers don't reference this array */
+   free(cells);   /* the pointer block; abandoned cell STRUCTS stay alive via ctxs[i].result */
+   if (!abandoned)
+   {
+      pthread_mutex_destroy(&sync->mtx);
+      pthread_cond_destroy(&sync->cv);
+      free(sync);
+      free(creds);
+      free(ctxs);
+      free(done);
+   }
+   else
+   {
+      /* Leak sync/creds/ctxs/done + the abandoned cell structs: the still-running
+       * detached workers reference them and must not hit freed memory. Bounded
+       * and rare (a hung model). */
+      aimee_log(LOG_WARN, "agent.parallel",
+                "%d/%d worker(s) abandoned at the %dms deadline (resources leaked)", abandoned,
+                spawned_count, deadline_ms);
+   }
+   return success;
+}
+
 int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
-                       agent_result_t *out)
+                       agent_result_t *out, int deadline_ms)
 {
    if (task_count <= 0)
       return 0;
@@ -72,6 +222,9 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
                            tasks[0].max_tokens, temp, &out[0]);
       return rc == 0 ? 1 : 0;
    }
+
+   if (deadline_ms > 0)
+      return run_parallel_deadline(cfg, tasks, task_count, out, deadline_ms);
 
    parallel_ctx_t *ctxs = calloc((size_t)task_count, sizeof(parallel_ctx_t));
    if (!ctxs)

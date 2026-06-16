@@ -239,6 +239,18 @@ void compute_pool_shutdown(compute_pool_t *pool)
    (void)pool;
 }
 
+/* On-demand delegate execution (server_delegate_ondemand.c) is not linked here;
+ * server.c calls these at init/shutdown. No-op stubs. */
+void delegate_ondemand_set_ceiling(int ceiling)
+{
+   (void)ceiling;
+}
+
+void delegate_ondemand_drain(int timeout_ms)
+{
+   (void)timeout_ms;
+}
+
 int server_session_pool_submit(server_ctx_t *ctx, const char *session_id, void (*fn)(void *),
                                void *arg, int *thread_count_out)
 {
@@ -992,6 +1004,18 @@ int handle_agent_setup(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_agent_setup_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "agent.setup_poll");
+}
+int handle_agent_cli_oauth_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "agent.cli_oauth_start");
+}
+int handle_agent_cli_oauth_code(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "agent.cli_oauth_code");
+}
+int handle_agent_cli_oauth_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "agent.cli_oauth_poll");
 }
 
 int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)

@@ -148,10 +148,10 @@ static cJSON *server_request(cJSON *req, int timeout_ms)
     * cwd is a registered detached workspace marshal back to this client over the
     * workspace reverse-channel (Phase 2b); on a non-served cwd they fail safe
     * server-side (the path does not exist there). */
-   if (cli_rpc_has_remote_endpoint())
+   if (cli_v1_has_remote_endpoint())
    {
-      char *endpoint = cli_rpc_client_endpoint();
-      char *bearer = cli_rpc_client_bearer();
+      char *endpoint = cli_v1_client_endpoint();
+      char *bearer = cli_v1_client_bearer();
       /* Route by the request's ACTUAL method, not a hardcoded "mcp.call": e.g.
        * mcp.tools_list -> GET /v1/mcp/tools_list, mcp.call -> POST /v1/mcp/call.
        * Hardcoding mcp.call sent tools/list to /v1/mcp/call (which needs a `tool`

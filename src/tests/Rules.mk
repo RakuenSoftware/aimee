@@ -123,7 +123,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-client-integrations $(TESTPREFIX)/unit-test-mcp-git \
                $(TESTPREFIX)/unit-test-git-verify-select \
                $(TESTPREFIX)/unit-test-cli-mcp-serve \
-               $(TESTPREFIX)/unit-test-cli-rpc-delegate \
+               $(TESTPREFIX)/unit-test-cli-v1-delegate \
                $(TESTPREFIX)/unit-test-cli-server-compat \
                $(TESTPREFIX)/unit-test-platform-process \
                $(TESTPREFIX)/unit-test-shutdown-forensics \
@@ -239,6 +239,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-agent-runtime-messages \
                $(TESTPREFIX)/unit-test-minimax-tool-call-args \
                $(TESTPREFIX)/unit-test-delegate-liveness \
+               $(TESTPREFIX)/unit-test-agent-parallel \
+               $(TESTPREFIX)/unit-test-server-cli-oauth \
                $(TESTPREFIX)/unit-test-workspace-manifest \
                $(TESTPREFIX)/unit-test-lsp \
                $(TESTPREFIX)/unit-test-memory-retrieval-eval \
@@ -453,11 +455,11 @@ $(TESTPREFIX)/unit-test-context-discover: $(OBJDIR)/tests/test_context_discover.
 $(TESTPREFIX)/unit-test-cli-mcp-serve: $(OBJDIR)/tests/test_cli_mcp_serve.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-# aimee_client.o resolves the remote-target accessors cli_rpc_client_endpoint now
+# aimee_client.o resolves the remote-target accessors cli_v1_client_endpoint now
 # calls (it synthesizes a tcp: endpoint from a --server/AIMEE_SERVER_URL target).
 # --gc-sections drops the rest of the transport, which this marshalling test
 # never calls.
-$(TESTPREFIX)/unit-test-cli-rpc-delegate: $(OBJDIR)/tests/test_cli_rpc_delegate.o \
+$(TESTPREFIX)/unit-test-cli-v1-delegate: $(OBJDIR)/tests/test_cli_v1_delegate.o \
                                   $(OBJDIR)/cJSON.o $(OBJDIR)/posix/util.o $(OBJDIR)/aimee_client.o \
                                   $(OBJDIR)/codex_auth.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
@@ -1917,6 +1919,14 @@ $(TESTPREFIX)/unit-test-delegate-ensemble: $(OBJDIR)/tests/test_delegate_ensembl
 
 $(TESTPREFIX)/unit-test-delegate-liveness: $(OBJDIR)/tests/test_delegate_liveness.o \
                                     $(OBJDIR)/server/liveness.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-agent-parallel: $(OBJDIR)/tests/test_agent_parallel.o \
+                                    $(OBJDIR)/server/agent_parallel.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-server-cli-oauth: $(OBJDIR)/tests/test_server_cli_oauth.o \
+                                    $(OBJDIR)/server/server_cli_oauth.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-agent-runtime-messages: $(OBJDIR)/tests/test_agent_runtime_messages.o \

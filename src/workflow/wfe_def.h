@@ -103,6 +103,10 @@ const wfe_custom_block_t *wfe_custom_at(int i);
  * top-level allow_command: true). */
 int wfe_custom_commands_allowed(void);
 
+/* Wall-clock cap (ms) for a command block, from blocks.yaml command_timeout_ms
+ * (default 120000). A command exceeding it is killed and the step fails. */
+int wfe_custom_command_timeout_ms(void);
+
 /* ---- Parse / free / lookup ---- */
 wfe_def_t *wfe_def_parse(const char *yaml_text, char *err, size_t errlen);
 wfe_def_t *wfe_def_load_file(const char *path, char *err, size_t errlen);

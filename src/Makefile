@@ -350,7 +350,7 @@ CMD_SRCS = prompts.c persona.c hardware_probe.c curator_profile.c server/delegat
 CMD_OBJS = $(CMD_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Pure client (aimee) ---
-CLI_SRCS = cli_main.c cli_session_start.c cli_attention_guard.c cli_code_audit.c cli_tui.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c server/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c acp_server.c cli_workspace_serve.c cli_agent_keys.c cmd_workflow.c
+CLI_SRCS = cli_main.c cli_agent_setup.c cli_session_start.c cli_attention_guard.c cli_code_audit.c cli_tui.c cli_client.c cli_launch.c cli_mcp_serve.c cli_profile.c client_integrations.c server/delegate_plan.c cmd_profile.c cmd_manuscript.c cmd_optimize.c cli_persona.c cli_roles.c manuscript.c http_uds_client.c aimee_client.c cli_remote.c acp_server.c cli_workspace_serve.c cli_agent_keys.c cmd_workflow.c
 ifeq ($(WITH_TLS),1)
 CLI_SRCS += aimee_tls.c
 TLS_OBJS = $(OBJDIR)/aimee_tls.o
@@ -371,7 +371,7 @@ $(CLIENT_COMPILE_OBJS): C_FLAGS := $(CLIENT_C_FLAGS)
 # --- Server ---
 SERVER_SRCS = server/server_main.c server/server.c server/server_http.c server/server_conn_io.c server/server_tls.c server/server_http_reqctx.c server/server_http_identity.c server/request_context.c server/response_dedup.c server/anthropic_shape.c server/anthropic_ingress.c server/anthropic_http.c server/openai_shape.c server/openai_chat.c server/ingress_preinject.c server/openai_responses_store.c server/openai_runs_store.c server/server_api.c server/server_auth.c server/server_session.c server/server_hooks.c server/server_state.c server/server_plugin.c server/server_memory_benchmark.c server/server_work.c server/workspace_provider_detached.c server/workspace_runner_queue.c server/workspace_runner_registry.c server/workspace_turn.c \
               server/server_delegate_monitor.c server/server_coord_dispatcher.c server/server_session_pools.c server/presence.c \
-              server/server_agent.c server/server_compute.c server/server_skill_jobs.c server/server_delegate_status.c server/server_compute_async.c server/server_jobs_aux.c server/server_skill.c server/server_mcp.c server/server_mcp_tools.c server/server_mcp_delegate.c server/server_mcp_process.c server/server_mcp_skill.c server/server_mcp_learning.c server/server_mcp_workflows.c server/server_mcp_gateway.c server/session_search_tool.c server/compute_pool.c cli_client.c \
+              server/server_agent.c server/server_cli_oauth.c server/server_compute.c server/server_delegate_ondemand.c server/server_skill_jobs.c server/server_delegate_status.c server/server_compute_async.c server/server_jobs_aux.c server/server_skill.c server/server_mcp.c server/server_mcp_tools.c server/server_mcp_delegate.c server/server_mcp_process.c server/server_mcp_skill.c server/server_mcp_learning.c server/server_mcp_workflows.c server/server_mcp_gateway.c server/session_search_tool.c server/compute_pool.c cli_client.c \
               server/roundtable_pipeline_eval.c server/roundtable_pipeline_capture.c server/roundtable_pipeline_chunk.c server/server_pipeline.c \
               server/compute_concurrency.c server/provider_catalog.c \
               server/dashboard_server.c hud.c cmd_identity.c prompts.c persona.c working_profile.c \
@@ -770,7 +770,7 @@ $(WEBCHAT): $(WEBCHAT_GO_SRCS)
 # keep this target free of DB2_OBJS and libpq.
 #
 # aimee_client.o resolves the dependency-free remote-target accessors
-# (aimee_client_remote_active / _token) that cli_rpc_client_endpoint now calls to
+# (aimee_client_remote_active / _token) that cli_v1_client_endpoint now calls to
 # synthesize a tcp: endpoint from a --server / AIMEE_SERVER_URL / remote.conf
 # target. --gc-sections drops the rest of aimee_client (the actual TCP/TLS
 # transport), so no extra net/tls/uds objects are needed here.
@@ -792,7 +792,7 @@ $(KB): $(KB_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/oauth_pkce.o $(KB_DA
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_KB)
 
-# aimee_client.o for the same reason as $(SERVER): cli_rpc_client_endpoint calls
+# aimee_client.o for the same reason as $(SERVER): cli_v1_client_endpoint calls
 # the dependency-free remote-target accessors; --gc-sections drops the transport.
 $(GATEWAY): $(GATEWAY_OBJS) $(OBJDIR)/aimee_client.o
 	$(AIMEE_RUNTIME_MUTATION_GUARD)

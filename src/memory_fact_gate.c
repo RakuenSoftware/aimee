@@ -34,6 +34,8 @@ const char *fact_gate_verdict_to_text(fact_gate_verdict_t v)
       return "novel";
    case FACT_GATE_BADARG:
       return "bad_argument";
+   case FACT_GATE_DEFER:
+      return "defer";
    }
    return "unknown";
 }

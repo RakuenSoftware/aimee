@@ -128,9 +128,9 @@ static int chat_v1_endpoint(char *out, size_t out_len)
 {
    if (!out || out_len == 0)
       return -1;
-   if (cli_rpc_has_remote_endpoint())
+   if (cli_v1_has_remote_endpoint())
    {
-      char *ep = cli_rpc_client_endpoint();
+      char *ep = cli_v1_client_endpoint();
       if (ep)
       {
          int n = snprintf(out, out_len, "%s", ep);
@@ -150,7 +150,7 @@ static int chat_v1_endpoint(char *out, size_t out_len)
  * NULL for the local UDS (no auth needed). Caller frees. */
 static char *chat_v1_bearer(void)
 {
-   return cli_rpc_has_remote_endpoint() ? cli_rpc_client_bearer() : NULL;
+   return cli_v1_has_remote_endpoint() ? cli_v1_client_bearer() : NULL;
 }
 
 /* Build "/v1/sessions/<pct-encoded session_id><suffix>" into out. Returns 0 on

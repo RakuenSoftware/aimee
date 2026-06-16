@@ -21,9 +21,13 @@
 #define CONFIG_DEFAULT_MAX_DELEGATION_SPAWNS 50
 
 /* Server execution pool defaults */
-#define CONFIG_DEFAULT_BACKGROUND_THREADS              2
-#define CONFIG_DEFAULT_SESSION_THREADS                 4
-#define CONFIG_DEFAULT_KB_WORKER_THREADS               2
+#define CONFIG_DEFAULT_BACKGROUND_THREADS 2
+#define CONFIG_DEFAULT_SESSION_THREADS    4
+#define CONFIG_DEFAULT_KB_WORKER_THREADS  2
+/* Backstop ceiling on concurrent on-demand (I/O-bound) delegates. Delegates are
+ * gated by the per-model concurrency limiter, not a CPU pool; this only guards
+ * against pathological fan-out exhausting fds/memory. */
+#define CONFIG_DEFAULT_DELEGATE_MAX_INFLIGHT           512
 #define CONFIG_DEFAULT_CONCURRENCY_PREEMPT_REQUEUE_MAX 1
 
 /* Concurrency config: per-model and per-provider overrides */
@@ -76,6 +80,19 @@ static inline int aimee_resolve_session_threads(int configured)
          return (int)value;
    }
    return configured > 0 ? configured : aimee_default_session_threads();
+}
+
+static inline int aimee_resolve_delegate_max_inflight(int configured)
+{
+   const char *env = getenv("AIMEE_DELEGATE_MAX_INFLIGHT");
+   if (env && *env)
+   {
+      char *end = NULL;
+      long value = strtol(env, &end, 10);
+      if (end && *end == '\0' && value > 0)
+         return (int)value;
+   }
+   return configured > 0 ? configured : CONFIG_DEFAULT_DELEGATE_MAX_INFLIGHT;
 }
 
 #define CONFIG_MCP_MAX_CLIENTS          8
@@ -644,6 +661,13 @@ typedef struct config
     * DELEGATES.md). Does not affect API-key/HTTP agents or other CLI agents. */
    int claude_cli_delegate_enabled;
 
+   /* Operator opt-in (default 0) for the server-hosted OAuth CLI agent setup:
+    * `aimee agent add claude-oauth`/`codex-oauth` installs the vendor CLI on the
+    * aimee-server host and drives its OAuth login there. Running vendor CLIs +
+    * holding their OAuth tokens on a shared server is sensitive (and may bump
+    * vendor terms), so the install/login routes refuse unless this is set. */
+   int server_cli_oauth_enabled;
+
    /* Verify scope. When 0 (default), `aimee git verify` and the push/PR verify
     * gate apply only to the session's current project (the repo the session is
     * rooted in). Cross-project repositories are neither auto-configured (no
@@ -681,6 +705,11 @@ typedef struct config
    /* Per-session threadpool size for chat/tool/delegate work tied to an
     * aimee session. 0 = default to 4. */
    int session_threads;
+
+   /* Backstop ceiling on concurrent on-demand (I/O-bound) background delegates.
+    * Real throttling is the per-model concurrency limiter; this only guards
+    * pathological fan-out. 0 = default to 512. Key: delegate_max_inflight. */
+   int delegate_max_inflight;
 
    /* Per-model/provider concurrency limits: prevent rate-limit cascades.
     * concurrency_default = 0 uses CONCURRENCY_DEFAULT_LIMIT (5). */
@@ -1288,12 +1317,16 @@ typedef struct config
     * ensemble_min_successful: min references that must succeed before degrading (default 2).
     * ensemble_max_cost_usd: optional per-run cost cap in USD; 0 (or unset) means
     * no limit, which is the default. Set a positive value to cap a run. */
-   char ensemble_reference_models[8][128];
+   /* First dim = ENSEMBLE_MAX_REFS (delegate_ensemble.h); a _Static_assert in
+    * delegate_ensemble.c enforces they stay in sync. config.h can't include that
+    * header (it would cycle), so the literal is kept here. */
+   char ensemble_reference_models[32][128];
    int ensemble_reference_count;
    /* Optional per-participant review persona, paired by index with
     * ensemble_reference_models. Empty entries fall back to the engine's diverse
-    * default lineup. Width = PERSONA_NAME_MAX (persona.h). */
-   char ensemble_reference_personas[8][64];
+    * default lineup. Width = PERSONA_NAME_MAX (persona.h); first dim =
+    * ENSEMBLE_MAX_REFS. */
+   char ensemble_reference_personas[32][64];
    int ensemble_reference_persona_count;
    char ensemble_aggregator[128];
    int ensemble_min_successful;

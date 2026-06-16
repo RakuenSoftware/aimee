@@ -92,6 +92,26 @@ static void test_apikey_ref_fallback_save(void)
    printf("  PASS: test_apikey_ref_fallback_save\n");
 }
 
+/* Regression (also split out of test_agent.c at the 2000-line limit): a delegate
+ * must never reach the HTTP layer with a non-positive timeout. timeout_ms <= 0
+ * disables the read deadline (conn_open deadline_ns=0) and a stalled provider
+ * hangs the worker forever, leaking its pool thread + concurrency slot until the
+ * whole background-delegate queue wedges. */
+static void test_delegate_effective_timeout(void)
+{
+   /* Explicit request timeout always wins. */
+   assert(delegate_effective_timeout_ms(30000, 180000) == 30000);
+   assert(delegate_effective_timeout_ms(5000, 0) == 5000);
+   /* No request timeout: fall back to the agent's configured timeout. */
+   assert(delegate_effective_timeout_ms(0, 180000) == 180000);
+   assert(delegate_effective_timeout_ms(-1, 120000) == 120000);
+   /* THE BUG: neither request nor agent configures a timeout (agents with no
+    * timeout_ms zero-init to 0). Must resolve to the default ceiling, NEVER 0. */
+   assert(delegate_effective_timeout_ms(0, 0) == AGENT_DEFAULT_TIMEOUT_MS);
+   assert(delegate_effective_timeout_ms(-1, -1) == AGENT_DEFAULT_TIMEOUT_MS);
+   assert(delegate_effective_timeout_ms(0, 0) > 0);
+}
+
 int main(void)
 {
    char tmp_template[] = "/tmp/aimee-agent-apikey-XXXXXX";
@@ -101,6 +121,7 @@ int main(void)
 
    test_apikey_ref_not_serialized();
    test_apikey_ref_fallback_save();
+   test_delegate_effective_timeout();
 
    printf("agent_apikey: all tests passed\n");
    return 0;

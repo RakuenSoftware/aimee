@@ -12,6 +12,8 @@
 #include "log.h"
 #include "vault_service.h"    /* vault_service_set / set_server, VAULT_API_KEY_CRED */
 #include "vault_capability.h" /* vault_capability_server_write_allowed (single server-write gate) */
+#include "server_cli_oauth.h" /* server-hosted OAuth CLI agent setup */
+#include "config.h"           /* server_cli_oauth_enabled gate */
 #include <pthread.h>
 #include <string.h>
 #include <stdlib.h>
@@ -913,121 +915,8 @@ int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
-/* --- agent.setup / agent.setup_poll: codex-oauth device flow --- */
-
-#define SAGENT_CODEX_OAUTH_CLIENT_ID  "app_EMoamEEZ73f0CkXaXp7hrann"
-#define SAGENT_CODEX_USERCODE_URL     "https://auth.openai.com/api/accounts/deviceauth/usercode"
-#define SAGENT_CODEX_DEVICETOKEN_URL  "https://auth.openai.com/api/accounts/deviceauth/token"
-#define SAGENT_CODEX_TOKEN_URL        "https://auth.openai.com/oauth/token"
-#define SAGENT_CODEX_VERIFY_URL       "https://auth.openai.com/codex/device"
-#define SAGENT_CODEX_REDIRECT_URI     "https://auth.openai.com/deviceauth/callback"
-#define SAGENT_CODEX_DEFAULT_INTERVAL 5
-#define SAGENT_CODEX_DEFAULT_EXPIRES  900
-
-static int sagent_b64url_char(char c)
-{
-   if (c >= 'A' && c <= 'Z')
-      return c - 'A';
-   if (c >= 'a' && c <= 'z')
-      return c - 'a' + 26;
-   if (c >= '0' && c <= '9')
-      return c - '0' + 52;
-   if (c == '-')
-      return 62;
-   if (c == '_')
-      return 63;
-   return -1;
-}
-
-static void sagent_jwt_account_id(const char *jwt, char *buf, size_t buf_len)
-{
-   buf[0] = '\0';
-   if (!jwt)
-      return;
-   const char *p1 = strchr(jwt, '.');
-   if (!p1)
-      return;
-   p1++;
-   const char *p2 = strchr(p1, '.');
-   size_t seg_len = p2 ? (size_t)(p2 - p1) : strlen(p1);
-
-   char decoded[4096];
-   size_t o = 0;
-   unsigned int b = 0;
-   int bits = 0;
-   for (size_t i = 0; i < seg_len && o < sizeof(decoded) - 1; i++)
-   {
-      int v = sagent_b64url_char(p1[i]);
-      if (v < 0)
-         continue;
-      b = (b << 6) | (unsigned int)v;
-      bits += 6;
-      if (bits >= 8)
-      {
-         bits -= 8;
-         decoded[o++] = (char)((b >> bits) & 0xFF);
-      }
-   }
-   decoded[o] = '\0';
-
-   cJSON *claims = cJSON_Parse(decoded);
-   if (!claims)
-      return;
-   cJSON *aid = cJSON_GetObjectItem(claims, "chatgpt_account_id");
-   if (!aid || !cJSON_IsString(aid))
-   {
-      cJSON *ns = cJSON_GetObjectItem(claims, "https://api.openai.com/auth");
-      if (ns && cJSON_IsObject(ns))
-         aid = cJSON_GetObjectItem(ns, "chatgpt_account_id");
-   }
-   if (aid && cJSON_IsString(aid))
-      snprintf(buf, buf_len, "%s", aid->valuestring);
-   cJSON_Delete(claims);
-}
-
 static const char *sagent_provider_cli_roles[] = {"code",     "review", "explain",
                                                   "refactor", "draft",  "execute"};
-static const char *sagent_codex_oauth_roles[] = {"code",     "review",  "explain",   "refactor",
-                                                 "draft",    "execute", "summarize", "format",
-                                                 "diagnose", "validate"};
-static const char *sagent_mistral_plan_roles[] = {"code",     "review",  "explain",   "refactor",
-                                                  "draft",    "execute", "summarize", "format",
-                                                  "diagnose", "validate"};
-
-static void sagent_configure_provider_cli_agent_with_roles(agent_t *ag, const char *name,
-                                                           const char *provider,
-                                                           const char *cli_kind,
-                                                           const char *cli_cmd, int cost_tier,
-                                                           const char *const *roles, int role_count)
-{
-   memset(ag, 0, sizeof(*ag));
-   snprintf(ag->name, MAX_AGENT_NAME, "%s", name);
-   snprintf(ag->auth_type, sizeof(ag->auth_type), "bearer");
-   snprintf(ag->provider, sizeof(ag->provider), "%s", provider);
-   snprintf(ag->backend, sizeof(ag->backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
-   snprintf(ag->cli_kind, sizeof(ag->cli_kind), "%s", cli_kind);
-   snprintf(ag->cli_cmd, sizeof(ag->cli_cmd), "%s", cli_cmd);
-   ag->cost_tier = cost_tier;
-   ag->max_tokens = AGENT_DEFAULT_MAX_TOKENS;
-   ag->timeout_ms = 600000;
-   ag->enabled = 1;
-   ag->tools_enabled = 1;
-   ag->max_turns = -1;
-   ag->max_parallel = AGENT_DEFAULT_MAX_PARALLEL;
-
-   ag->role_count = 0;
-   for (int i = 0; i < role_count && ag->role_count < MAX_AGENT_ROLES; i++)
-      snprintf(ag->roles[ag->role_count++], 32, "%s", roles[i]);
-}
-
-static void sagent_configure_provider_cli_agent(agent_t *ag, const char *name, const char *provider,
-                                                const char *cli_kind, const char *cli_cmd,
-                                                int cost_tier)
-{
-   sagent_configure_provider_cli_agent_with_roles(
-       ag, name, provider, cli_kind, cli_cmd, cost_tier, sagent_provider_cli_roles,
-       (int)(sizeof(sagent_provider_cli_roles) / sizeof(sagent_provider_cli_roles[0])));
-}
 
 static void sagent_configure_tmux_cli_agent(agent_t *ag, const char *name, const char *provider,
                                             const char *cli_kind, const char *cli_cmd,
@@ -1057,478 +946,140 @@ static void sagent_configure_tmux_cli_agent(agent_t *ag, const char *name, const
       snprintf(ag->roles[ag->role_count++], 32, "%s", sagent_provider_cli_roles[i]);
 }
 
-static void
-sagent_configure_direct_adapter_agent_with_roles(agent_t *ag, const agent_adapter_t *adapter,
-                                                 const char *name, int cost_tier, int timeout_ms,
-                                                 const char *const *roles, int role_count)
-{
-   memset(ag, 0, sizeof(*ag));
-   snprintf(ag->name, MAX_AGENT_NAME, "%s", name);
-   snprintf(ag->endpoint, MAX_ENDPOINT_LEN, "%s", adapter->default_endpoint);
-   snprintf(ag->model, MAX_MODEL_LEN, "%s", adapter->default_model);
-   snprintf(ag->auth_type, sizeof(ag->auth_type), "%s", adapter->auth_type);
-   snprintf(ag->provider, sizeof(ag->provider), "%s", adapter->provider);
-   ag->cost_tier = cost_tier;
-   ag->max_tokens = AGENT_DEFAULT_MAX_TOKENS;
-   ag->timeout_ms = timeout_ms;
-   ag->enabled = 1;
-   ag->tools_enabled = 1;
-   ag->max_turns = -1;
-   ag->max_parallel = AGENT_DEFAULT_MAX_PARALLEL;
-
-   ag->role_count = 0;
-   for (int i = 0; i < role_count && ag->role_count < MAX_AGENT_ROLES; i++)
-      snprintf(ag->roles[ag->role_count++], 32, "%s", roles[i]);
-}
-
-static int sagent_setup_provider_cli(server_conn_t *conn, const char *provider)
-{
-   agent_config_t cfg;
-   if (agent_load_config(&cfg) != 0)
-      memset(&cfg, 0, sizeof(cfg));
-
-   int is_mistral_plan = strcmp(provider, "mistral-plan") == 0;
-   int is_codex_cli = strcmp(provider, "codex-cli") == 0;
-   int is_claude = strcmp(provider, "claude") == 0;
-   int is_claude_code = strcmp(provider, "claude-code") == 0;
-   int is_claude_tmux = is_claude || is_claude_code;
-   int is_gemini_cli = strcmp(provider, "gemini-cli") == 0;
-   int is_mistral_cli = strcmp(provider, "mistral-cli") == 0;
-   const char *agent_name = is_mistral_plan ? "mistral-plan" : provider;
-   const char *agent_provider = is_mistral_plan  ? "mistral"
-                                : is_codex_cli   ? "codex"
-                                : is_claude_code ? "claude-code"
-                                : is_gemini_cli  ? "gemini"
-                                : is_mistral_cli ? "mistral"
-                                                 : provider;
-   const char *cli_kind = is_mistral_plan  ? "mistral-plan"
-                          : is_codex_cli   ? "codex"
-                          : is_claude_code ? "claude-code"
-                          : is_gemini_cli  ? "gemini"
-                          : is_mistral_cli ? "mistral"
-                                           : provider;
-   const int is_native_provider_cli = is_mistral_plan || is_gemini_cli || is_mistral_cli;
-   const char *cli_cmd = is_native_provider_cli ? ""
-                         : is_codex_cli         ? "codex"
-                         : is_claude_tmux       ? "claude"
-                                                : provider;
-   const char *native_message =
-       is_gemini_cli ? "Uses GEMINI_API_KEY or GOOGLE_API_KEY; no Gemini CLI is launched."
-       : is_mistral_plan
-           ? "Uses MISTRAL_API_KEY or ~/.vibe/.env with a Vibe-compatible Mistral request shape; "
-             "no Vibe CLI is launched."
-           : "Uses MISTRAL_API_KEY or ~/.vibe/.env; no Mistral CLI is launched.";
-   const char *cli_message = "Uses the installed provider CLI; run the provider login if needed.";
-   if (is_codex_cli)
-      cli_message = "Uses the installed `codex` CLI.";
-   else if (is_claude_code)
-      cli_message = "Uses the installed `claude` CLI in a reusable tmux session.";
-   int cost_tier = (is_mistral_plan || is_codex_cli || is_gemini_cli || is_mistral_cli) ? 0 : 1;
-
-   agent_t *ag = agent_find(&cfg, agent_name);
-   int is_new = 0;
-   if (!ag)
-   {
-      if (cfg.agent_count >= MAX_AGENTS)
-         return server_send_error(conn, "maximum number of agents reached", NULL);
-      ag = &cfg.agents[cfg.agent_count];
-      cfg.agent_count++;
-      is_new = 1;
-   }
-
-   if (is_claude_tmux)
-      sagent_configure_tmux_cli_agent(ag, agent_name, agent_provider, cli_kind, cli_cmd, cost_tier);
-   else if (is_mistral_plan)
-      sagent_configure_provider_cli_agent_with_roles(
-          ag, agent_name, agent_provider, cli_kind, cli_cmd, cost_tier, sagent_mistral_plan_roles,
-          (int)(sizeof(sagent_mistral_plan_roles) / sizeof(sagent_mistral_plan_roles[0])));
-   else
-      sagent_configure_provider_cli_agent(ag, agent_name, agent_provider, cli_kind, cli_cmd,
-                                          cost_tier);
-
-   if (cfg.agent_count == 1 || !cfg.default_agent[0])
-      snprintf(cfg.default_agent, MAX_AGENT_NAME, "%s", agent_name);
-
-   if (agent_save_config(&cfg) != 0)
-      return server_send_error(conn, "failed to save agent config", NULL);
-
-   char msg[256];
-   if (is_claude_tmux)
-      snprintf(msg, sizeof(msg),
-               "Agent '%s' %s (tmux CLI). Uses tmux with the installed `claude` CLI.", agent_name,
-               is_new ? "created" : "updated");
-   else if (is_native_provider_cli)
-      snprintf(msg, sizeof(msg), "Agent '%s' %s (native %s adapter). %s", agent_name,
-               is_new ? "created" : "updated", agent_provider, native_message);
-   else
-      snprintf(msg, sizeof(msg), "Agent '%s' %s (provider CLI). %s", agent_name,
-               is_new ? "created" : "updated", cli_message);
-
-   cJSON *out = jo_ok();
-   cJSON_AddBoolToObject(out, "complete", 1);
-   cJSON_AddStringToObject(out, "provider", provider);
-   cJSON_AddStringToObject(out, "agent", agent_name);
-   cJSON_AddStringToObject(out, "message", msg);
-   cJSON_AddBoolToObject(out, "is_new", is_new);
-   return server_send_ok(conn, out);
-}
-
-/* Step 1: request device code from OpenAI, return verify_url + user_code to client */
+/* agent.setup / agent.setup_poll are retired: `aimee agent setup` now supports
+ * only openai/anthropic (created via agent.add) and codex-oauth/claude-oauth
+ * (agent.cli_oauth_*). These stubs reject any remaining caller. */
 int handle_agent_setup(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   cJSON *j_provider = cJSON_GetObjectItemCaseSensitive(req, "provider");
-   const char *provider = cJSON_IsString(j_provider) ? j_provider->valuestring : NULL;
-
-   if (provider && (strcmp(provider, "codex-cli") == 0 || strcmp(provider, "claude") == 0 ||
-                    strcmp(provider, "claude-code") == 0 || strcmp(provider, "gemini-cli") == 0 ||
-                    strcmp(provider, "mistral-cli") == 0 || strcmp(provider, "mistral-plan") == 0))
-      return sagent_setup_provider_cli(conn, provider);
-
-   if (!provider || (strcmp(provider, "codex") != 0 && strcmp(provider, "codex-oauth") != 0))
-      return server_send_error(conn,
-                               "agent.setup: unsupported provider (expected: codex, codex-oauth, "
-                               "codex-cli, claude, claude-code, gemini-cli, mistral-cli, "
-                               "mistral-plan)",
-                               NULL);
-
-   server_agent_http_ensure();
-
-   char post_body[512];
-   snprintf(post_body, sizeof(post_body), "{\"client_id\":\"%s\"}", SAGENT_CODEX_OAUTH_CLIENT_ID);
-
-   char *resp_body = NULL;
-   int status =
-       agent_http_post(SAGENT_CODEX_USERCODE_URL, NULL, post_body, &resp_body, 15000, NULL);
-   if (status < 200 || status >= 300 || !resp_body)
-   {
-      free(resp_body);
-      char errmsg[128];
-      snprintf(errmsg, sizeof(errmsg), "failed to request device code (HTTP %d)", status);
-      return server_send_error(conn, errmsg, NULL);
-   }
-
-   cJSON *dev = cJSON_Parse(resp_body);
-   free(resp_body);
-   if (!dev)
-      return server_send_error(conn, "failed to parse device code response", NULL);
-
-   cJSON *j_device_auth_id = cJSON_GetObjectItem(dev, "device_auth_id");
-   cJSON *j_user_code = cJSON_GetObjectItem(dev, "user_code");
-   cJSON *j_interval = cJSON_GetObjectItem(dev, "interval");
-
-   if (!j_device_auth_id || !cJSON_IsString(j_device_auth_id) || !j_user_code ||
-       !cJSON_IsString(j_user_code))
-   {
-      cJSON_Delete(dev);
-      return server_send_error(conn, "device code response missing required fields", NULL);
-   }
-
-   int interval = (j_interval && cJSON_IsNumber(j_interval)) ? j_interval->valueint
-                                                             : SAGENT_CODEX_DEFAULT_INTERVAL;
-
-   cJSON *out = jo_ok();
-   cJSON_AddStringToObject(out, "provider", provider);
-   cJSON_AddStringToObject(out, "verify_url", SAGENT_CODEX_VERIFY_URL);
-   cJSON_AddStringToObject(out, "user_code", j_user_code->valuestring);
-   cJSON_AddStringToObject(out, "device_auth_id", j_device_auth_id->valuestring);
-   cJSON_AddNumberToObject(out, "interval", interval);
-   cJSON_AddNumberToObject(out, "expires_in", SAGENT_CODEX_DEFAULT_EXPIRES);
-   cJSON_Delete(dev);
-
-   return server_send_ok(conn, out);
+   (void)req;
+   return server_send_error(
+       conn, "agent.setup is retired (use: openai, anthropic, codex-oauth, claude-oauth)", NULL);
 }
 
-/* Step 2: poll until authorized, then exchange tokens and save config */
 int handle_agent_setup_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
+   (void)req;
+   return server_send_error(
+       conn, "agent.setup_poll is retired (use: openai, anthropic, codex-oauth, claude-oauth)",
+       NULL);
+}
 
-   cJSON *j_daid = cJSON_GetObjectItemCaseSensitive(req, "device_auth_id");
-   cJSON *j_ucode = cJSON_GetObjectItemCaseSensitive(req, "user_code");
-   cJSON *j_interval = cJSON_GetObjectItemCaseSensitive(req, "interval");
+/* --- server-hosted OAuth CLI agents: agent.cli_oauth_{start,code,poll} ----- */
 
-   if (!cJSON_IsString(j_daid) || !cJSON_IsString(j_ucode))
-      return server_send_error(conn, "agent.setup_poll: missing device_auth_id or user_code", NULL);
+static int sagent_cli_oauth_gate(server_conn_t *conn, cJSON *req, cli_oauth_vendor_t *v)
+{
+   config_t cfg;
+   config_load(&cfg);
+   if (!cfg.server_cli_oauth_enabled)
+      return server_send_error(conn,
+                               "server-hosted OAuth CLI agents are disabled; set "
+                               "server_cli_oauth_enabled=true to opt in (DELEGATES.md)",
+                               NULL);
+   cJSON *jv = cJSON_GetObjectItemCaseSensitive(req, "vendor");
+   if (!cJSON_IsString(jv) || cli_oauth_vendor_parse(jv->valuestring, v) != 0)
+      return server_send_error(conn, "vendor must be 'claude' or 'codex'", NULL);
+   return 0; /* allowed */
+}
 
-   const char *device_auth_id = j_daid->valuestring;
-   const char *user_code = j_ucode->valuestring;
-   int interval = (cJSON_IsNumber(j_interval) && j_interval->valueint > 0)
-                      ? j_interval->valueint
-                      : SAGENT_CODEX_DEFAULT_INTERVAL;
+int handle_agent_cli_oauth_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cli_oauth_vendor_t v;
+   int gate = sagent_cli_oauth_gate(conn, req, &v);
+   if (gate != 0)
+      return gate; /* already responded */
 
-   server_agent_http_ensure();
+   char err[256] = "";
+   if (cli_oauth_install(v, err, sizeof(err)) != 0)
+      return server_send_error(conn, err[0] ? err : "CLI install failed", NULL);
 
-   char poll_body[1024];
-   snprintf(poll_body, sizeof(poll_body), "{\"device_auth_id\":\"%s\",\"user_code\":\"%s\"}",
-            device_auth_id, user_code);
+   cli_oauth_start_t st;
+   if (cli_oauth_start(v, &st, err, sizeof(err)) != 0)
+      return server_send_error(conn, err[0] ? err : "login start failed", NULL);
 
-   int elapsed = 0, authorized = 0;
-   char auth_code[1024] = {0};
-   char code_verifier[256] = {0};
-   char last_resp_snippet[512] = {0};
-   int last_resp_status = 0;
-
-   while (elapsed < SAGENT_CODEX_DEFAULT_EXPIRES)
-   {
-      sleep((unsigned)interval);
-      elapsed += interval;
-
-      char *poll_resp = NULL;
-      int poll_status =
-          agent_http_post(SAGENT_CODEX_DEVICETOKEN_URL, NULL, poll_body, &poll_resp, 15000, NULL);
-
-      LOG_DEBUG("agent_setup_poll", "poll HTTP %d: %.256s", poll_status,
-                poll_resp ? poll_resp : "(no body)");
-
-      if (poll_status == 200 && poll_resp)
-      {
-         cJSON *pr = cJSON_Parse(poll_resp);
-         if (pr)
-         {
-            cJSON *j_ac = cJSON_GetObjectItem(pr, "authorization_code");
-            cJSON *j_cv = cJSON_GetObjectItem(pr, "code_verifier");
-            if (j_ac && cJSON_IsString(j_ac))
-            {
-               snprintf(auth_code, sizeof(auth_code), "%s", j_ac->valuestring);
-               if (j_cv && cJSON_IsString(j_cv))
-                  snprintf(code_verifier, sizeof(code_verifier), "%s", j_cv->valuestring);
-               authorized = 1;
-            }
-            else
-            {
-               /* 200 OK but no authorization_code — log for diagnosis */
-               LOG_WARN("agent_setup_poll",
-                        "HTTP 200 but no authorization_code in response: %.256s", poll_resp);
-               last_resp_status = poll_status;
-               snprintf(last_resp_snippet, sizeof(last_resp_snippet), "%.511s", poll_resp);
-            }
-            cJSON_Delete(pr);
-         }
-      }
-      if (authorized)
-      {
-         free(poll_resp);
-         break;
-      }
-      /* 400 = authorization_pending or slow_down — keep polling unless terminal error */
-      if (poll_status == 400 && poll_resp)
-      {
-         cJSON *ep = cJSON_Parse(poll_resp);
-         cJSON *je = ep ? cJSON_GetObjectItem(ep, "error") : NULL;
-         const char *ec = (je && cJSON_IsString(je)) ? je->valuestring : "";
-         int terminal = strcmp(ec, "access_denied") == 0 || strcmp(ec, "expired_token") == 0;
-         if (!last_resp_status)
-         {
-            last_resp_status = poll_status;
-            snprintf(last_resp_snippet, sizeof(last_resp_snippet), "%.511s", poll_resp);
-         }
-         cJSON_Delete(ep);
-         free(poll_resp);
-         if (terminal)
-            break;
-         continue;
-      }
-      if (poll_resp)
-      {
-         last_resp_status = poll_status;
-         snprintf(last_resp_snippet, sizeof(last_resp_snippet), "%.511s", poll_resp);
-      }
-      free(poll_resp);
-      /* 403/404/429 = transient — keep polling; anything else is unexpected, stop */
-      if (poll_status != 403 && poll_status != 404 && poll_status != 429 && poll_status != 200)
-         break;
-   }
-
-   if (!authorized || !auth_code[0])
-   {
-      char errmsg[640];
-      if (last_resp_snippet[0])
-         snprintf(errmsg, sizeof(errmsg),
-                  "authorization timed out or was denied (last HTTP %d: %s)", last_resp_status,
-                  last_resp_snippet);
-      else
-         snprintf(errmsg, sizeof(errmsg), "%s", "authorization timed out or was denied");
-      return server_send_error(conn, errmsg, NULL);
-   }
-
-   /* Exchange authorization code for OAuth tokens */
-   char token_body[2048];
-   snprintf(token_body, sizeof(token_body),
-            "grant_type=authorization_code"
-            "&code=%s"
-            "&redirect_uri=%s"
-            "&client_id=%s"
-            "&code_verifier=%s",
-            auth_code, SAGENT_CODEX_REDIRECT_URI, SAGENT_CODEX_OAUTH_CLIENT_ID, code_verifier);
-
-   char *token_resp = NULL;
-   int token_status = agent_http_post_form(SAGENT_CODEX_TOKEN_URL, token_body, &token_resp, 15000);
-   if (token_status != 200 || !token_resp)
-   {
-      free(token_resp);
-      char errmsg[128];
-      snprintf(errmsg, sizeof(errmsg), "token exchange failed (HTTP %d)", token_status);
-      return server_send_error(conn, errmsg, NULL);
-   }
-
-   cJSON *tok = cJSON_Parse(token_resp);
-   free(token_resp);
-   if (!tok)
-      return server_send_error(conn, "failed to parse token response", NULL);
-
-   cJSON *j_id_token = cJSON_GetObjectItem(tok, "id_token");
-   cJSON *j_access_token = cJSON_GetObjectItem(tok, "access_token");
-   cJSON *j_refresh = cJSON_GetObjectItem(tok, "refresh_token");
-   cJSON *j_tok_expires = cJSON_GetObjectItem(tok, "expires_in");
-
-   /* Try to exchange id_token for an API key */
-   const char *final_token = NULL;
-   int tok_expires = 3600;
-   cJSON *exch = NULL;
-
-   if (j_id_token && cJSON_IsString(j_id_token))
-   {
-      char exchange_body[4096];
-      snprintf(exchange_body, sizeof(exchange_body),
-               "grant_type=urn%%3Aietf%%3Aparams%%3Aoauth%%3Agrant-type%%3Atoken-exchange"
-               "&client_id=%s"
-               "&requested_token=openai-api-key"
-               "&subject_token=%s"
-               "&subject_token_type=urn%%3Aietf%%3Aparams%%3Aoauth%%3Atoken-type%%3Aid_token",
-               SAGENT_CODEX_OAUTH_CLIENT_ID, j_id_token->valuestring);
-
-      char *exch_resp = NULL;
-      int exch_status =
-          agent_http_post_form(SAGENT_CODEX_TOKEN_URL, exchange_body, &exch_resp, 15000);
-      if (exch_status == 200 && exch_resp)
-      {
-         exch = cJSON_Parse(exch_resp);
-         if (exch)
-         {
-            cJSON *j_api_key = cJSON_GetObjectItem(exch, "access_token");
-            cJSON *j_api_expires = cJSON_GetObjectItem(exch, "expires_in");
-            if (j_api_key && cJSON_IsString(j_api_key))
-            {
-               final_token = j_api_key->valuestring;
-               if (j_api_expires && cJSON_IsNumber(j_api_expires))
-                  tok_expires = j_api_expires->valueint;
-            }
-         }
-      }
-      free(exch_resp);
-   }
-
-   if (!final_token)
-   {
-      if (!j_access_token || !cJSON_IsString(j_access_token))
-      {
-         cJSON_Delete(exch);
-         cJSON_Delete(tok);
-         return server_send_error(conn, "no usable token obtained from OAuth flow", NULL);
-      }
-      final_token = j_access_token->valuestring;
-      if (j_tok_expires && cJSON_IsNumber(j_tok_expires))
-         tok_expires = j_tok_expires->valueint;
-   }
-
-   char chatgpt_account_id[128] = {0};
-   if (j_id_token && cJSON_IsString(j_id_token))
-      sagent_jwt_account_id(j_id_token->valuestring, chatgpt_account_id,
-                            sizeof(chatgpt_account_id));
-
-   /* Consolidate codex OAuth into the server-owned vault (cred-vault-consolidation
-    * WP-2/D5): the delegate use-path prefers the vaulted token (via the server
-    * principal, which decrypts autonomously and is the only principal a TCP thin
-    * client has). The disk codex-auth.json written below stays as a migration-era
-    * fallback until WP-4 retires it. A vault failure is non-fatal here — the disk
-    * copy still authenticates — but is logged so the gap is observable. */
-   if (final_token && final_token[0])
-   {
-      if (vault_service_set_server("codex", VAULT_CODEX_TOKEN_CRED, final_token) != VAULT_OK)
-         aimee_log(LOG_WARN, "codex.setup",
-                   "vault store failed for codex token; relying on disk codex-auth.json");
-      if (chatgpt_account_id[0])
-         (void)vault_service_set_server("codex", VAULT_CODEX_ACCOUNT_CRED, chatgpt_account_id);
-   }
-
-   /* Write auth JSON to disk */
-   cJSON *auth_json = cJSON_CreateObject();
-   cJSON_AddStringToObject(auth_json, "access_token", final_token);
-   if (j_refresh && cJSON_IsString(j_refresh))
-      cJSON_AddStringToObject(auth_json, "refresh_token", j_refresh->valuestring);
-   if (j_id_token && cJSON_IsString(j_id_token))
-      cJSON_AddStringToObject(auth_json, "id_token", j_id_token->valuestring);
-   cJSON_AddNumberToObject(auth_json, "expires_at", (double)(time(NULL) + tok_expires));
-   cJSON_AddStringToObject(auth_json, "client_id", SAGENT_CODEX_OAUTH_CLIENT_ID);
-
-   char *auth_str = cJSON_Print(auth_json);
-   cJSON_Delete(auth_json);
-   cJSON_Delete(exch);
-   cJSON_Delete(tok);
-
-   if (!auth_str)
-      return server_send_error(conn, "failed to serialize auth tokens", NULL);
-
-   char auth_path[MAX_PATH_LEN];
-   snprintf(auth_path, sizeof(auth_path), "%s/codex-auth.json", config_default_dir());
-   platform_mkdir_p(config_default_dir(), 0700);
-
-   FILE *f = fopen(auth_path, "w");
-   if (!f)
-   {
-      free(auth_str);
-      return server_send_error(conn, "failed to write auth file", NULL);
-   }
-   fputs(auth_str, f);
-   fputc('\n', f);
-   fclose(f);
-   chmod(auth_path, 0600);
-   free(auth_str);
-
-   /* Update agents.json */
-   agent_config_t cfg;
-   if (agent_load_config(&cfg) != 0)
-      memset(&cfg, 0, sizeof(cfg));
-
-   agent_t *ag = agent_find(&cfg, "codex");
-   int is_new = 0;
-   if (!ag)
-   {
-      if (cfg.agent_count >= MAX_AGENTS)
-         return server_send_error(conn, "maximum number of agents reached", NULL);
-      ag = &cfg.agents[cfg.agent_count];
-      memset(ag, 0, sizeof(*ag));
-      cfg.agent_count++;
-      is_new = 1;
-   }
-
-   const agent_adapter_t *adapter = agent_adapter_for_name("codex");
-   if (!adapter)
-      return server_send_error(conn, "codex adapter is not registered", NULL);
-   sagent_configure_direct_adapter_agent_with_roles(
-       ag, adapter, "codex", 0, 600000, sagent_codex_oauth_roles,
-       (int)(sizeof(sagent_codex_oauth_roles) / sizeof(sagent_codex_oauth_roles[0])));
-   if (chatgpt_account_id[0])
-      snprintf(ag->extra_headers, sizeof(ag->extra_headers),
-               "originator: codex_cli_rs\nChatGPT-Account-ID: %s", chatgpt_account_id);
-   else
-      snprintf(ag->extra_headers, sizeof(ag->extra_headers), "originator: codex_cli_rs");
-
-   if (cfg.agent_count == 1 || !cfg.default_agent[0])
-      snprintf(cfg.default_agent, MAX_AGENT_NAME, "codex");
-
-   agent_save_config(&cfg);
-
-   char msg[512];
-   snprintf(msg, sizeof(msg), "Agent 'codex' %s (direct Codex adapter). Tokens saved to: %s.",
-            is_new ? "created" : "updated", auth_path);
+   /* Audit the setup (who/when), never the secret. */
+   aimee_log(LOG_INFO, "agent.cli_oauth", "started %s server-side OAuth setup",
+             cli_oauth_vendor_name(v));
 
    cJSON *out = jo_ok();
-   cJSON_AddStringToObject(out, "agent", "codex");
-   cJSON_AddStringToObject(out, "message", msg);
-   cJSON_AddBoolToObject(out, "is_new", is_new);
-   if (chatgpt_account_id[0])
-      cJSON_AddStringToObject(out, "oauth_account", chatgpt_account_id);
+   cJSON_AddStringToObject(out, "vendor", cli_oauth_vendor_name(v));
+   cJSON_AddStringToObject(out, "url", st.url);
+   if (st.code[0])
+      cJSON_AddStringToObject(out, "code", st.code);
+   cJSON_AddStringToObject(out, "session", st.session);
+   cJSON_AddBoolToObject(out, "needs_code_back", st.needs_code_back ? 1 : 0);
+   return server_send_ok(conn, out);
+}
+
+int handle_agent_cli_oauth_code(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cli_oauth_vendor_t v;
+   int gate = sagent_cli_oauth_gate(conn, req, &v);
+   if (gate != 0)
+      return gate;
+   cJSON *js = cJSON_GetObjectItemCaseSensitive(req, "session");
+   cJSON *jc = cJSON_GetObjectItemCaseSensitive(req, "code");
+   if (!cJSON_IsString(js) || !cJSON_IsString(jc))
+      return server_send_error(conn, "session and code are required", NULL);
+   char err[256] = "";
+   if (cli_oauth_submit_code(v, js->valuestring, jc->valuestring, err, sizeof(err)) != 0)
+      return server_send_error(conn, err[0] ? err : "failed to submit code", NULL);
+   return server_send_ok(conn, jo_ok());
+}
+
+/* Register the now-authenticated vendor CLI as a server-side tmux-CLI agent. */
+static void sagent_cli_oauth_register(cli_oauth_vendor_t v)
+{
+   agent_config_t acfg;
+   if (agent_load_config(&acfg) != 0)
+      memset(&acfg, 0, sizeof(acfg));
+   const char *name = cli_oauth_agent_name(v);
+   agent_t *ag = agent_find(&acfg, name);
+   if (!ag)
+   {
+      if (acfg.agent_count >= MAX_AGENTS)
+         return;
+      ag = &acfg.agents[acfg.agent_count++];
+   }
+   /* cli_kind/cli_cmd run the server-installed CLI over tmux (no HTTP endpoint).
+    * cost_tier 0 for codex (subscription), 1 for claude. */
+   sagent_configure_tmux_cli_agent(ag, name, name, name, name, v == CLI_OAUTH_CODEX ? 0 : 1);
+   ag->is_server_hosted = 1; /* distinct from a client-only claude (panel gate) */
+   agent_save_config(&acfg);
+}
+
+int handle_agent_cli_oauth_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cli_oauth_vendor_t v;
+   int gate = sagent_cli_oauth_gate(conn, req, &v);
+   if (gate != 0)
+      return gate;
+   cJSON *js = cJSON_GetObjectItemCaseSensitive(req, "session");
+   if (!cJSON_IsString(js))
+      return server_send_error(conn, "session is required", NULL);
+   cli_oauth_state_t state = CLI_OAUTH_PENDING;
+   char err[256] = "";
+   if (cli_oauth_poll(v, js->valuestring, &state, err, sizeof(err)) != 0)
+      return server_send_error(conn, err[0] ? err : "poll failed", NULL);
+
+   const char *s = state == CLI_OAUTH_AUTHENTICATED ? "authenticated"
+                   : state == CLI_OAUTH_FAILED      ? "failed"
+                                                    : "pending";
+   if (state == CLI_OAUTH_AUTHENTICATED)
+   {
+      sagent_cli_oauth_register(v);
+      aimee_log(LOG_INFO, "agent.cli_oauth", "%s authenticated and registered server-side",
+                cli_oauth_vendor_name(v));
+   }
+   cJSON *out = jo_ok();
+   cJSON_AddStringToObject(out, "state", s);
+   if (state == CLI_OAUTH_AUTHENTICATED)
+      cJSON_AddStringToObject(out, "agent", cli_oauth_agent_name(v));
+   if (state == CLI_OAUTH_FAILED && err[0])
+      cJSON_AddStringToObject(out, "error", err);
    return server_send_ok(conn, out);
 }

@@ -52,17 +52,17 @@ void cli_workspace_reverse_channel_stop(void)
 
 /* Remote-endpoint accessors used by server_request's remote-routing branch.
  * This test drives the local-socket path (cli_ensure_server returns a socket),
- * so cli_rpc_has_remote_endpoint() returns 0 and the rest are never called;
+ * so cli_v1_has_remote_endpoint() returns 0 and the rest are never called;
  * stub them so cli_mcp_serve.o links standalone. */
-int cli_rpc_has_remote_endpoint(void)
+int cli_v1_has_remote_endpoint(void)
 {
    return 0;
 }
-char *cli_rpc_client_endpoint(void)
+char *cli_v1_client_endpoint(void)
 {
    return NULL;
 }
-char *cli_rpc_client_bearer(void)
+char *cli_v1_client_bearer(void)
 {
    return NULL;
 }

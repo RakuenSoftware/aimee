@@ -999,6 +999,24 @@ int main(void)
       assert(aimee_resolve_session_threads(0) == CONFIG_DEFAULT_SESSION_THREADS);
    }
 
+   /* --- delegate_max_inflight: on-demand delegate backstop ceiling --- */
+   {
+      platform_unsetenv("AIMEE_DELEGATE_MAX_INFLIGHT");
+      /* Unconfigured -> default ceiling; configured -> honored. */
+      assert(aimee_resolve_delegate_max_inflight(0) == CONFIG_DEFAULT_DELEGATE_MAX_INFLIGHT);
+      assert(aimee_resolve_delegate_max_inflight(2048) == 2048);
+      /* Env override wins over both. */
+      assert(platform_setenv("AIMEE_DELEGATE_MAX_INFLIGHT", "777") == 0);
+      assert(aimee_resolve_delegate_max_inflight(0) == 777);
+      assert(aimee_resolve_delegate_max_inflight(2048) == 777);
+      /* Non-positive / garbage env is ignored (falls back to configured/default). */
+      assert(platform_setenv("AIMEE_DELEGATE_MAX_INFLIGHT", "0") == 0);
+      assert(aimee_resolve_delegate_max_inflight(2048) == 2048);
+      assert(platform_setenv("AIMEE_DELEGATE_MAX_INFLIGHT", "abc") == 0);
+      assert(aimee_resolve_delegate_max_inflight(0) == CONFIG_DEFAULT_DELEGATE_MAX_INFLIGHT);
+      platform_unsetenv("AIMEE_DELEGATE_MAX_INFLIGHT");
+   }
+
    /* --- background_threads: accepts legacy compute_threads/worker_threads keys --- */
    {
       char cpath[512];

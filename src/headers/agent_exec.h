@@ -53,8 +53,13 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
                                        const char *system_prompt, const char *user_prompt,
                                        int max_tokens, int enforce_writes, agent_result_t *out);
 
-int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count,
-                       agent_result_t *out);
+/* Fan out `task_count` tasks across worker threads and join.
+ * deadline_ms > 0 bounds the wait: a worker still running at the deadline is
+ * abandoned (detached) and its slot in `out` left as a failed (zeroed) result,
+ * so one hung model can never wedge the whole fan-out. deadline_ms <= 0 keeps the
+ * historical unbounded join. Returns the number of successful results. */
+int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int task_count, agent_result_t *out,
+                       int deadline_ms);
 
 /* Delegate fallback helpers */
 int agent_error_is_retryable(const char *error);

@@ -71,6 +71,25 @@ static inline int agent_loop_per_call_timeout_ms(int agent_timeout_ms, int total
    return agent_timeout_ms < remaining ? agent_timeout_ms : remaining;
 }
 
+/* Effective per-call timeout for a delegate run. A delegate must NEVER run with
+ * a non-positive timeout: a timeout_ms <= 0 reaching the HTTP layer disables the
+ * read deadline (agent_bridge conn_open sets deadline_ns = 0), so conn_read
+ * loops on its per-recv timeout forever and a stalled provider hangs the worker
+ * permanently — leaking its compute-pool thread + provider concurrency slot and
+ * eventually wedging the whole background-delegate queue (jobs stuck "pending").
+ * Resolve to the explicit request timeout if positive, else the agent's
+ * configured timeout if positive, else a hard default ceiling — guaranteeing a
+ * positive value so the run always returns. Pure function — unit-tested in
+ * test_agent.c. */
+static inline int delegate_effective_timeout_ms(int request_timeout_ms, int agent_timeout_ms)
+{
+   if (request_timeout_ms > 0)
+      return request_timeout_ms;
+   if (agent_timeout_ms > 0)
+      return agent_timeout_ms;
+   return AGENT_DEFAULT_TIMEOUT_MS;
+}
+
 typedef struct
 {
    char name[64];
@@ -227,6 +246,11 @@ typedef struct
     * (Vibe-backed Mistral subscription-plan route), and "vibe-plan" (Vibe planning agent).
     * Empty when the backend is not provider-cli. */
    char cli_kind[16];
+   /* 1 if this CLI agent was installed + OAuth'd ON the aimee-server host (via
+    * `aimee agent add <vendor>-oauth`), so it runs as a real server-side delegate
+    * — distinct from a client-only claude. The roundtable panel seats a
+    * server-hosted, authenticated claude; a client-only one stays excluded. */
+   int is_server_hosted;
 } agent_t;
 
 typedef struct

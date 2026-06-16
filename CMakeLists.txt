@@ -743,6 +743,7 @@ endif()
 
 set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_main.c
+    ${AIMEE_SRC_DIR}/cli_agent_setup.c
     ${AIMEE_SRC_DIR}/cli_session_start.c
     ${AIMEE_SRC_DIR}/cli_attention_guard.c
     ${AIMEE_SRC_DIR}/cli_code_audit.c
@@ -792,6 +793,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_coord_dispatcher.c
     ${AIMEE_SRC_DIR}/server/server_agent.c
     ${AIMEE_SRC_DIR}/server/server_compute.c
+    ${AIMEE_SRC_DIR}/server/server_delegate_ondemand.c
     ${AIMEE_SRC_DIR}/server/server_delegate_status.c
     ${AIMEE_SRC_DIR}/server/server_compute_async.c
     ${AIMEE_SRC_DIR}/server/server_jobs_aux.c

@@ -90,6 +90,8 @@ FROM debian:bookworm-slim
 # Union of both runtime closures: libsqlite3 (server DB1), libpq (kb DB2),
 # libssl/libzstd/zlib (both), python3 (kb sidecar clients), curl (healthcheck +
 # entrypoint kb-readiness probe).
+# tmux + nodejs + npm: enablers for server-hosted OAuth CLI agents
+# (`aimee agent add claude-oauth` / `codex-oauth`) — see Dockerfile.server.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
@@ -100,11 +102,18 @@ RUN apt-get update \
         libsqlite3-0 \
         libssl3 \
         libzstd1 \
+        nodejs \
+        npm \
         python3 \
+        tmux \
         zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
 ENV AIMEE_HOME=/var/lib/aimee
+# On-demand OAuth CLI agents global-install on the persistent home volume so the
+# CLI binaries + their tokens (~/.claude, ~/.codex) survive container recreate.
+ENV NPM_CONFIG_PREFIX=/var/lib/aimee/.npm-global
+ENV PATH=/var/lib/aimee/.npm-global/bin:$PATH
 # Server: bind /v1 on 0.0.0.0 (published port) and reach the co-located kb over
 # loopback HTTP via AIMEE_KB_API_URL. The entrypoint owns the kb lifecycle; the
 # server no longer autostarts a kb (that socket transport was retired, #2747).

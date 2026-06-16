@@ -14,6 +14,7 @@
 #include "cost_fold.h"
 #include "log.h"
 #include "persona.h"
+#include "dstr.h"
 #include "token_tracker.h"
 
 #include <stdio.h>
@@ -21,6 +22,18 @@
 #include <string.h>
 #include <time.h>
 #include <ctype.h>
+
+/* The config arrays the engine fans out over must be sized to ENSEMBLE_MAX_REFS.
+ * config.h keeps the dim as a literal (it can't include this header), so catch
+ * any future drift at compile time rather than overrunning the stack arrays. */
+_Static_assert(sizeof(((config_t *)0)->ensemble_reference_models) /
+                       sizeof(((config_t *)0)->ensemble_reference_models[0]) ==
+                   ENSEMBLE_MAX_REFS,
+               "config_t.ensemble_reference_models first dim must equal ENSEMBLE_MAX_REFS");
+_Static_assert(sizeof(((config_t *)0)->ensemble_reference_personas) /
+                       sizeof(((config_t *)0)->ensemble_reference_personas[0]) ==
+                   ENSEMBLE_MAX_REFS,
+               "config_t.ensemble_reference_personas first dim must equal ENSEMBLE_MAX_REFS");
 
 /* Fallback when an ad-hoc model is absent from the capability registry. */
 #define ENSEMBLE_COST_PER_TOKEN 0.000015
@@ -545,7 +558,12 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
    const char *role_hint = mode == ROUNDTABLE_REVIEW ? "review and critique" : "draft and revise";
    const char *mode_task =
        mode == ROUNDTABLE_REVIEW
-           ? "Return only JSON: {\"items\":[{\"severity\":\"blocking|suggestion|nit\","
+           ? "You have NO filesystem, git, shell, or tool access in this review: the SHARED "
+             "ARTIFACT above is the complete and authoritative material under review. Judge it on "
+             "its own contents only. Never claim to have read files, run git, or grepped — and "
+             "never report a finding like \"the change is not applied / not in the tree\" (you "
+             "cannot observe the tree; the artifact is the change). "
+             "Return only JSON: {\"items\":[{\"severity\":\"blocking|suggestion|nit\","
              "\"category\":\"correctness|security|performance|maintainability|style\","
              "\"location\":\"file:line or artifact section\",\"summary\":\"one-sentence issue\","
              "\"recommendation\":\"...\"}],\"overall\":\"...\"}. "
@@ -630,9 +648,19 @@ static char *build_round_synthesis_prompt(const char *task, const char *prior_ar
       }
       pos += (size_t)n;
    }
-   n = snprintf(buf + pos, cap - pos,
-                "TASK: Produce the next shared %s. Do not mention the roundtable process.\n",
-                mode == ROUNDTABLE_REVIEW ? "consolidated review" : "artifact draft");
+   if (mode == ROUNDTABLE_REVIEW)
+      n = snprintf(buf + pos, cap - pos,
+                   "TASK: Produce the consolidated review as a SINGLE JSON object "
+                   "{\"items\":[{\"severity\":...,\"category\":...,\"location\":...,"
+                   "\"summary\":...,\"recommendation\":...}],\"overall\":...}. "
+                   "Output ONLY that JSON object — no analysis, no reasoning, no step-by-step "
+                   "commentary, no markdown fences, no text before or after. Emitting the final "
+                   "JSON directly (not your deliberation) is required so the verdict is never "
+                   "truncated. Do not mention the roundtable process.\n");
+   else
+      n = snprintf(buf + pos, cap - pos,
+                   "TASK: Produce the next shared artifact draft. Do not mention the roundtable "
+                   "process.\n");
    if (n < 0 || (size_t)n >= cap - pos)
    {
       free(buf);
@@ -1137,7 +1165,8 @@ static char *panel_persona_prompt(const config_t *cfg, roundtable_mode_t mode, i
 
 static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const char *task,
                               const char *artifact, const char *peer_notes, roundtable_mode_t mode,
-                              int round, const char *brief, agent_result_t *results)
+                              int round, const char *brief, agent_result_t *results,
+                              int deadline_ms)
 {
    int ref_count = cfg->ensemble_reference_count;
    agent_task_t tasks[ENSEMBLE_MAX_REFS];
@@ -1161,7 +1190,9 @@ static int run_round_parallel(agent_config_t *acfg, const config_t *cfg, const c
       tasks[i].temperature = 0.3 + (0.05 * i);
       tasks[i].max_tokens = 0;
    }
-   agent_run_parallel(acfg, tasks, ref_count, results);
+   /* deadline_ms bounds the panel barrier so one hung panelist can't wedge the
+    * whole round past the roundtable deadline. */
+   agent_run_parallel(acfg, tasks, ref_count, results, deadline_ms);
    /* Account each participant's run onto the originating session, like a delegate. */
    for (int i = 0; i < ref_count; i++)
       ensemble_fold_cost(acfg, &results[i], cfg->ensemble_reference_models[i]);
@@ -1219,6 +1250,23 @@ static int run_round_sequential(agent_config_t *acfg, const config_t *cfg, const
    return 0;
 }
 
+/* Is `ag` allowed to sit on a roundtable/ensemble panel? Enabled + named, and —
+ * for claude-CLI — AUTHORIZED as a delegate (claude_cli_delegate_enabled, the
+ * explicit, ToS-sensitive operator opt-in) AND able to run server-side
+ * (is_server_hosted, via `aimee agent add claude-oauth`). A client-only claude
+ * has no server endpoint and would just burn a slot on a "failed to build request
+ * URL" participant; server-hosting is capability, NOT authorization, so both are
+ * required. So an unauthorized or disabled claude is never seated, even after a
+ * server-side OAuth setup. Other enabled agents are eligible. */
+int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag)
+{
+   if (!ag || !ag->enabled || !ag->name[0])
+      return 0;
+   if (agent_is_claude_cli(ag) && (!cfg->claude_cli_delegate_enabled || !ag->is_server_hosted))
+      return 0;
+   return 1;
+}
+
 void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acfg)
 {
    if (cfg->ensemble_reference_count > 0)
@@ -1226,21 +1274,49 @@ void ensemble_default_panel_from_agents(config_t *cfg, const agent_config_t *acf
    int n = 0;
    for (int i = 0; i < acfg->agent_count && n < ENSEMBLE_MAX_REFS; i++)
    {
-      if (!acfg->agents[i].enabled || !acfg->agents[i].name[0])
-         continue;
-      /* Skip agents that cannot run as a server-side HTTP delegate. claude-CLI
-       * has no HTTP endpoint (it runs on the thin client over the reverse
-       * channel and is primary-only by default), so seating it in the auto-panel
-       * just burns a slot on a "failed to build request URL" participant. Mirror
-       * the manual delegate route's gate: include it only when the operator opts
-       * in via claude_cli_delegate_enabled. */
-      if (agent_is_claude_cli(&acfg->agents[i]) && !cfg->claude_cli_delegate_enabled)
+      if (!ensemble_panelist_eligible(cfg, &acfg->agents[i]))
          continue;
       snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]), "%s",
                acfg->agents[i].name);
       n++;
    }
    cfg->ensemble_reference_count = n;
+   if (!cfg->ensemble_aggregator[0] && n > 0)
+      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
+               cfg->ensemble_reference_models[0]);
+}
+
+void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *acfg)
+{
+   /* Applies the same eligibility rule to an EXPLICITLY configured
+    * ensemble.reference_models list: drop any entry that names a configured agent
+    * which is not panel-eligible (an unauthorized / disabled / client-only
+    * claude). An entry that is not a configured agent (an ad-hoc model id) is
+    * left as-is. Keeps reference_models and the aggregator consistent. */
+   int n = 0;
+   for (int i = 0; i < cfg->ensemble_reference_count; i++)
+   {
+      const char *name = cfg->ensemble_reference_models[i];
+      const agent_t *ag = agent_find((agent_config_t *)acfg, name);
+      if (ag && !ensemble_panelist_eligible(cfg, ag))
+      {
+         aimee_log(LOG_WARN, "delegate.panel",
+                   "dropping unauthorized panelist '%s' from the roundtable panel", name);
+         continue;
+      }
+      if (n != i)
+         snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]),
+                  "%s", name);
+      n++;
+   }
+   cfg->ensemble_reference_count = n;
+   /* If the aggregator named a now-dropped agent, repoint it to the first seat. */
+   if (cfg->ensemble_aggregator[0])
+   {
+      const agent_t *agg = agent_find((agent_config_t *)acfg, cfg->ensemble_aggregator);
+      if (agg && !ensemble_panelist_eligible(cfg, agg))
+         cfg->ensemble_aggregator[0] = '\0';
+   }
    if (!cfg->ensemble_aggregator[0] && n > 0)
       snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
                cfg->ensemble_reference_models[0]);
@@ -1276,7 +1352,7 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
    agent_result_t results[ENSEMBLE_MAX_REFS];
    memset(results, 0, sizeof(results));
 
-   agent_run_parallel(acfg, tasks, ref_count, results);
+   agent_run_parallel(acfg, tasks, ref_count, results, 0 /* MoA aggregate: no deadline */);
    /* Account each participant's run onto the originating session, like a delegate. */
    for (int i = 0; i < ref_count; i++)
       ensemble_fold_cost(acfg, &results[i], cfg->ensemble_reference_models[i]);
@@ -1364,6 +1440,57 @@ int delegate_ensemble_run(agent_config_t *acfg, const config_t *cfg, const char 
    return 0;
 }
 
+/* Assemble a consolidated review artifact from the already-deduped panel items,
+ * so a single-round review needs no synthesis LLM call (the panel's structured
+ * findings already ARE the review). Groups by severity; caller owns the result. */
+static char *assemble_review_artifact(const roundtable_result_t *out)
+{
+   dstr_t s;
+   dstr_init(&s);
+   static const char *const sevs[] = {"blocking", "suggestion", "nit"};
+   static const char *const heads[] = {"## Blocking", "## Suggestions", "## Nits"};
+   int emitted = 0;
+   char done[ROUNDTABLE_MAX_REVIEW_ITEMS];
+   memset(done, 0, sizeof(done));
+   for (int g = 0; g < 3; g++)
+   {
+      int group_started = 0;
+      for (int i = 0; i < out->item_count && i < ROUNDTABLE_MAX_REVIEW_ITEMS; i++)
+      {
+         const roundtable_review_item_t *it = &out->items[i];
+         if (strcmp(it->severity, sevs[g]) != 0)
+            continue;
+         done[i] = 1;
+         if (!group_started)
+         {
+            dstr_appendf(&s, "%s%s\n", emitted ? "\n" : "", heads[g]);
+            group_started = 1;
+         }
+         dstr_appendf(&s, "- **%s**", it->category[0] ? it->category : "review");
+         if (it->location[0])
+            dstr_appendf(&s, " (%s)", it->location);
+         dstr_appendf(&s, ": %s", it->summary);
+         if (it->recommendation[0])
+            dstr_appendf(&s, " — %s", it->recommendation);
+         dstr_append_char(&s, '\n');
+         emitted++;
+      }
+   }
+   /* Any item with an unexpected severity still gets reported. */
+   for (int i = 0; i < out->item_count && i < ROUNDTABLE_MAX_REVIEW_ITEMS; i++)
+   {
+      if (done[i])
+         continue;
+      const roundtable_review_item_t *it = &out->items[i];
+      dstr_appendf(&s, "%s- **%s**: %s\n", emitted ? "" : "## Findings\n",
+                   it->category[0] ? it->category : "review", it->summary);
+      emitted++;
+   }
+   if (!emitted)
+      dstr_append_str(&s, "No issues found by the panel.\n");
+   return dstr_steal(&s);
+}
+
 int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const char *task,
                             const roundtable_opts_t *opts, roundtable_result_t *out)
 {
@@ -1427,6 +1554,12 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          out->deadline_hit = 1;
          break;
       }
+      /* Progress: emit a round-boundary marker so a multi-minute run is observably
+       * advancing (in the server log) rather than a silent block. */
+      aimee_log(LOG_INFO, "roundtable.progress",
+                "round %d/%d: dispatching %d %s panelists (elapsed %lds)", round, local.max_rounds,
+                ref_count, local.mode == ROUNDTABLE_REVIEW ? "review" : "draft",
+                (long)((monotonic_ms() - start_ms) / 1000));
       if (cfg->ensemble_max_cost_usd > 0.0)
       {
          double preflight = estimated_round_cost(acfg, cfg, ref_count, 768);
@@ -1447,11 +1580,21 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
 
       agent_result_t results[ENSEMBLE_MAX_REFS];
       memset(results, 0, sizeof(results));
+      /* Remaining roundtable budget bounds this round's parallel panel so a hung
+       * panelist is abandoned at the deadline instead of wedging the barrier
+       * forever (floor at 5s so a near-exhausted budget still attempts the panel).
+       * 0 when no deadline is configured. */
+      int panel_deadline_ms = 0;
+      if (local.deadline_ms > 0)
+      {
+         long remaining = (long)local.deadline_ms - (monotonic_ms() - start_ms);
+         panel_deadline_ms = remaining > 5000 ? (int)remaining : 5000;
+      }
       int rc = local.turns == ROUNDTABLE_SEQUENTIAL
                    ? run_round_sequential(acfg, cfg, task, artifact, &peer_notes, local.mode, round,
                                           local.brief, results)
                    : run_round_parallel(acfg, cfg, task, artifact, peer_notes, local.mode, round,
-                                        local.brief, results);
+                                        local.brief, results, panel_deadline_ms);
       if (rc != 0)
       {
          for (int i = 0; i < ref_count; i++)
@@ -1463,6 +1606,9 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
        * out->participants_failed wherever this round is adopted as best_round, so
        * the surfaced count matches the returned artifact's provenance. */
       int round_failed = ref_count - count_successful(results, ref_count);
+      aimee_log(LOG_INFO, "roundtable.progress",
+                "round %d/%d: %d/%d panelists responded; synthesizing", round, local.max_rounds,
+                ref_count - round_failed, ref_count);
       if (local.cancel_requested && local.cancel_requested(local.cancel_ctx))
       {
          out->cancelled = 1;
@@ -1554,8 +1700,11 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
                   free(results[i].response);
                break;
             }
-            int score = run_quality_scorer(acfg, task, results[best].response, &out->cost_usd);
-            if (score > best_score)
+            /* Single-round: no cross-round comparison, so skip the scorer call. */
+            int score = local.max_rounds > 1
+                            ? run_quality_scorer(acfg, task, results[best].response, &out->cost_usd)
+                            : 0;
+            if (local.max_rounds <= 1 || score > best_score)
             {
                free(best_artifact);
                best_artifact = xstrdup0(results[best].response);
@@ -1567,6 +1716,22 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          for (int i = 0; i < ref_count; i++)
             free(results[i].response);
          continue;
+      }
+
+      /* Single-round review: the deduped panel items already hold the findings
+       * (captured above, no LLM call). Assemble the consolidated artifact from
+       * them and skip the synthesis LLM call entirely — a 1-round review is then
+       * just the parallel panel, no serial aggregator pass. Multi-round reviews
+       * and all draft runs still synthesize (each round feeds the next). */
+      if (local.mode == ROUNDTABLE_REVIEW && local.max_rounds <= 1)
+      {
+         free(best_artifact);
+         best_artifact = assemble_review_artifact(out);
+         out->best_round = round;
+         out->participants_failed = round_failed;
+         for (int i = 0; i < ref_count; i++)
+            free(results[i].response);
+         break;
       }
 
       int order[ENSEMBLE_MAX_REFS];
@@ -1623,8 +1788,15 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
          free(prev_artifact_for_judge);
          break;
       }
-      int score = run_quality_scorer(acfg, task, agg_result.response, &out->cost_usd);
-      if (score > best_score)
+      /* The quality scorer exists only to compare candidates across rounds and
+       * pick the best. A single-round run has exactly one candidate, so skip the
+       * extra (large, sequential, external-LLM) scorer call and adopt this
+       * round's synthesis unconditionally — this removes a whole serial pass from
+       * the common `rounds:1` review. */
+      int score = local.max_rounds > 1
+                      ? run_quality_scorer(acfg, task, agg_result.response, &out->cost_usd)
+                      : 0;
+      if (local.max_rounds <= 1 || score > best_score)
       {
          free(best_artifact);
          best_artifact = xstrdup0(agg_result.response);

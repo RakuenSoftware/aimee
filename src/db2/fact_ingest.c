@@ -59,7 +59,7 @@ int db2_typed_fact_ingress(const char *query, char *facts_out, size_t facts_cap)
        * safely no-ops (retract only affects facts that exist). */
       char attr[128];
       if (memory_pattern_possessive_attr(query, attr, sizeof(attr)))
-         (void)db2_fact_retract("user", attr, FACT_AUTHORITY_USER);
+         (void)db2_fact_retract("user", attr, NULL, FACT_AUTHORITY_USER);
    }
    else
    {

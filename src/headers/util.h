@@ -277,6 +277,19 @@ int safe_exec_capture(const char *const argv[], char **out_buf, size_t max_out);
 int safe_exec_capture_env(const char *const argv[], char *const envp[], char **out_buf,
                           size_t max_out);
 
+/* Distinct return code when the child exceeded its wall-clock timeout (killed).
+ * Chosen to not collide with a real 0-255 exit status or the -1 fork/pipe error. */
+#define SAFE_EXEC_TIMEOUT (-2)
+
+/* Like safe_exec_capture_env, but also runs the child in `cwd` (NULL = inherit)
+ * and enforces a wall-clock `timeout_ms` (<=0 = no limit). On timeout the child
+ * is SIGKILLed, reaped, and SAFE_EXEC_TIMEOUT is returned. Captured output up to
+ * the kill is still returned in *out_buf. A failed chdir aborts the child (127).
+ * Used by operator command blocks: repo-pinned cwd, sanitized env, bounded run. */
+int safe_exec_capture_cwd_env_timeout(const char *const argv[], const char *cwd,
+                                      char *const envp[], char **out_buf, size_t max_out,
+                                      int timeout_ms);
+
 /* Returns 1 if string contains shell metacharacters (;|&$`(){}><\n\r'"\\). */
 int has_shell_metachar(const char *s);
 

@@ -54,7 +54,7 @@ int main(void)
    char attr[128];
    assert(memory_pattern_is_retraction("please forget my email"));
    assert(memory_pattern_possessive_attr("please forget my email", attr, sizeof(attr)) == 1);
-   assert(db2_fact_retract("user", attr, FACT_AUTHORITY_USER) == 1);
+   assert(db2_fact_retract("user", attr, NULL, FACT_AUTHORITY_USER) == 1);
    assert(db2_fact_current_count("user") == 1); /* only city remains current */
 
    /* Bad args. */

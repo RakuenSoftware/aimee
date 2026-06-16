@@ -68,6 +68,23 @@ int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const cha
                                        const char *prompt, const char *files_json, const char *cwd);
 /* Delegate worker thread entry point — non-static so skill_jobs.c can reference it. */
 void delegate_worker(void *arg);
+
+/* On-demand delegate execution. Delegates are I/O-bound (≈100% provider network
+ * wait), so they must NOT be gated by the small CPU compute pool or the compute
+ * budget — the per-model concurrency limiter is their real throttle. Each
+ * delegate runs on its own detached thread, reaped on completion; a configurable
+ * high ceiling backstops pathological fan-out (fd/memory). Takes ownership of
+ * cctx exactly like compute_pool_submit(delegate_worker, cctx): on success the
+ * worker frees it; on failure (-1) the caller still owns it. Returns 0 on
+ * success, -1 if the thread can't be created or the in-flight ceiling is hit. */
+int delegate_spawn_ondemand(compute_ctx_t *cctx);
+/* Set the max concurrent on-demand delegates (<=0 keeps the current value). */
+void delegate_ondemand_set_ceiling(int ceiling);
+/* Current count of in-flight on-demand delegates (for `aimee workers`). */
+int delegate_ondemand_inflight(void);
+/* Block until in-flight on-demand delegates drain to zero or timeout_ms elapses
+ * (used at shutdown so detached workers don't touch a freed server_ctx). */
+void delegate_ondemand_drain(int timeout_ms);
 /* Fire-and-forget: spawn a skill review delegate for session_id. */
 void server_compute_skill_review_async(server_ctx_t *ctx, const char *session_id);
 /* Fire-and-forget: run the skill curator cycle on the compute pool. */

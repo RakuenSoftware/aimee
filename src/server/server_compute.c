@@ -525,6 +525,7 @@ static void bind_request_session_creds(cJSON *req)
    agent_set_request_codex_creds(NULL, NULL);
 }
 
+/* On-demand delegate execution: server_delegate_ondemand.c. */
 static int delegate_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx)
 {
    if (g_delegate_dispatch_override)
@@ -545,8 +546,9 @@ static int delegate_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx)
       return rc;
    }
 
-   /* Sessionless/background delegates run on the global background pool. */
-   return compute_pool_submit(&ctx->pool, delegate_worker, cctx);
+   /* Sessionless/background delegates run on their own on-demand thread, not the
+    * CPU compute pool (server_delegate_ondemand.c). */
+   return delegate_spawn_ondemand(cctx);
 }
 
 static void delegate_request_parent_context(cJSON *jdepth, cJSON *jparent, int *depth_out,
@@ -808,6 +810,12 @@ void delegate_worker(void *arg)
    int explicit_tools = cJSON_IsTrue(jtools),
        force_tools = delegate_role_auto_tools_for_invocation(role, max_turns, explicit_tools);
    force_tools = force_tools || (toolset_override && toolset_override[0]);
+   /* An explicit `tools:false` (CLI --no-tools) overrides the role's tools-on
+    * default: an artifact-provided panel review of an inline diff must run
+    * tools-off so weaker models don't burn their turns reading files and return
+    * nothing. Honored even for tools-on-by-default roles like `review`. */
+   if (cJSON_IsBool(jtools) && !cJSON_IsTrue(jtools))
+      force_tools = 0;
    /* Generate delegation ID if not provided */
    if (cJSON_IsString(jid) && jid->valuestring[0])
       snprintf(deleg_id, sizeof(deleg_id), "%s", jid->valuestring);
@@ -997,8 +1005,13 @@ void delegate_worker(void *arg)
       compute_ctx_free(cctx);
       return;
    }
-   if (target_agent && timeout_ms > 0)
-      target_agent->timeout_ms = timeout_ms;
+   /* Never let a delegate run with a non-positive timeout: timeout_ms <= 0
+    * disables the HTTP read deadline and a stalled provider hangs the worker
+    * forever, leaking its pool thread + concurrency slot (see
+    * delegate_effective_timeout_ms). Resolve request > agent-config > default. */
+   if (target_agent)
+      target_agent->timeout_ms =
+          delegate_effective_timeout_ms(timeout_ms, target_agent->timeout_ms);
    delegate_apply_max_turns_policy(&acfg, role, max_turns);
    if (cctx->background_job_id > 0 && target_agent)
       db1_agent_job_set_agent(cctx->background_job_id, target_agent->name);
@@ -1835,6 +1848,9 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    if (agent_load_config(&acfg) != 0)
       return server_send_error(conn, "could not load agents.json", NULL);
    ensemble_default_panel_from_agents(&cfg, &acfg);
+   /* Also gate an EXPLICIT reference_models list: never run an unauthorized
+    * claude as a panelist, however it got into the panel. */
+   ensemble_filter_panel_authorization(&cfg, &acfg);
    bind_request_session_creds(req);
 
    delegate_ensemble_result_t result;
@@ -1921,6 +1937,9 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
       return server_send_error(conn, "could not load agents.json", NULL);
    }
    ensemble_default_panel_from_agents(&cfg, &acfg);
+   /* Also gate an EXPLICIT reference_models list: never run an unauthorized
+    * claude as a panelist, however it got into the panel. */
+   ensemble_filter_panel_authorization(&cfg, &acfg);
    bind_request_session_creds(req);
 
    roundtable_result_t result;

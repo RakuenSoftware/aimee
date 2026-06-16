@@ -6,6 +6,7 @@
 #include "cli_agent_keys.h"
 #include "cli_session_start.h"
 #include "cli_attention_guard.h"
+#include "cli_agent_setup.h"
 #include "cli_code_audit.h"
 #include "cli_mcp_serve.h"
 #include "acp_server.h"
@@ -422,8 +423,8 @@ static int client_delegate_plan(int argc, char **argv, int global_json_output)
       char parbuf[32];
       snprintf(parbuf, sizeof(parbuf), "%d", parallel > 0 ? parallel : 3);
       char *launch_argv[] = {"launch", (char *)output_path, "--parallel", parbuf};
-      cli_rpc_route_t route;
-      if (!cli_rpc_lookup("delegate", 4, launch_argv, &route))
+      cli_v1_route_t route;
+      if (!cli_v1_lookup("delegate", 4, launch_argv, &route))
       {
          cJSON_Delete(plan);
          fprintf(stderr, "aimee: delegate launch route unavailable\n");
@@ -439,7 +440,7 @@ static int client_delegate_plan(int argc, char **argv, int global_json_output)
       }
       if (!json_output)
          printf("Launching reviewed packet plan...\n");
-      int rc = cli_rpc_forward(sock, &route, json_output, NULL, NULL, 4, launch_argv);
+      int rc = cli_v1_forward(sock, &route, json_output, NULL, NULL, 4, launch_argv);
       cJSON_Delete(plan);
       return rc >= 0 ? rc : 1;
    }
@@ -518,162 +519,6 @@ char *read_stdin(void)
    }
    buf[len] = '\0';
    return buf;
-}
-
-/* Two-step OAuth device flow for `aimee agent setup <provider>`.
- * Step 1: RPC agent.setup  -> get device code + verify URL, display to user.
- * Step 2: RPC agent.setup_poll -> server polls until authorized, saves config. */
-static int handle_agent_setup_cmd(int argc, char **argv, int json_output)
-{
-   const char *provider = (argc >= 1) ? argv[0] : NULL;
-   if (!provider || provider[0] == '\0')
-   {
-      fprintf(stderr, "aimee agent setup: provider required (e.g. codex, claude, "
-                      "claude-code, gemini-cli, mistral-cli, mistral-plan)\n");
-      return 1;
-   }
-
-   /* `agent setup` must run against the SAME server that will STORE the result
-    * (codex-auth.json + the server vault). On a thin-client deployment that is the
-    * configured remote; only spin up / require a local server when no remote is set
-    * (otherwise the device flow provisions a local server the deployment never uses).
-    * Use has_remote_endpoint (true for ANY configured remote, tcp OR unix) to match
-    * exactly when cli_v1_dispatch routes off-box via cli_rpc_client_endpoint() — an
-    * is_tcp() check would wrongly require a local server for a unix-socket remote. */
-   if (!cli_rpc_has_remote_endpoint())
-   {
-      const char *sock = cli_ensure_server_for_method("agent.setup");
-      if (!sock)
-      {
-         print_server_unavailable();
-         return 1;
-      }
-   }
-
-   /* Step 1: request device code */
-   cJSON *req1 = cJSON_CreateObject();
-   cJSON_AddStringToObject(req1, "method", "agent.setup");
-   cJSON_AddStringToObject(req1, "provider", provider);
-   cJSON *resp1 = cli_v1_dispatch(req1, 15000);
-   cJSON_Delete(req1);
-
-   if (!resp1)
-   {
-      fprintf(stderr, "aimee agent setup: no response from server\n");
-      return 1;
-   }
-
-   cJSON *status1 = cJSON_GetObjectItemCaseSensitive(resp1, "status");
-   if (!cJSON_IsString(status1) || strcmp(status1->valuestring, "ok") != 0)
-   {
-      cJSON *errmsg = cJSON_GetObjectItemCaseSensitive(resp1, "message");
-      fprintf(stderr, "aimee agent setup: %s\n",
-              cJSON_IsString(errmsg) ? errmsg->valuestring : "server error");
-      cJSON_Delete(resp1);
-      return 1;
-   }
-
-   cJSON *verify_url = cJSON_GetObjectItemCaseSensitive(resp1, "verify_url");
-   cJSON *user_code = cJSON_GetObjectItemCaseSensitive(resp1, "user_code");
-   cJSON *device_id = cJSON_GetObjectItemCaseSensitive(resp1, "device_auth_id");
-   cJSON *j_interval = cJSON_GetObjectItemCaseSensitive(resp1, "interval");
-   cJSON *j_expires = cJSON_GetObjectItemCaseSensitive(resp1, "expires_in");
-   cJSON *complete = cJSON_GetObjectItemCaseSensitive(resp1, "complete");
-
-   if (cJSON_IsTrue(complete))
-   {
-      if (json_output)
-      {
-         char *s = cJSON_PrintUnformatted(resp1);
-         if (s)
-         {
-            puts(s);
-            free(s);
-         }
-      }
-      else
-      {
-         cJSON *msg = cJSON_GetObjectItemCaseSensitive(resp1, "message");
-         printf("%s\n", cJSON_IsString(msg) ? msg->valuestring : "Agent setup complete.");
-      }
-      cJSON_Delete(resp1);
-      return 0;
-   }
-
-   const char *url = cJSON_IsString(verify_url) ? verify_url->valuestring : "";
-   const char *code = cJSON_IsString(user_code) ? user_code->valuestring : "";
-   const char *did = cJSON_IsString(device_id) ? device_id->valuestring : "";
-   int interval_s = cJSON_IsNumber(j_interval) ? (int)j_interval->valuedouble : 5;
-   int expires_s = cJSON_IsNumber(j_expires) ? (int)j_expires->valuedouble : 900;
-
-   if (json_output)
-   {
-      cJSON *out = cJSON_CreateObject();
-      cJSON_AddStringToObject(out, "status", "pending");
-      cJSON_AddStringToObject(out, "verify_url", url);
-      cJSON_AddStringToObject(out, "user_code", code);
-      char *s = cJSON_PrintUnformatted(out);
-      if (s)
-      {
-         puts(s);
-         free(s);
-      }
-      cJSON_Delete(out);
-   }
-   else
-   {
-      printf("Open this URL in your browser to authorize:\n\n");
-      printf("  %s\n\n", url);
-      printf("Authorization code: %s\n\n", code);
-      printf("Waiting for authorization (up to %ds)...\n", expires_s);
-      fflush(stdout);
-   }
-
-   cJSON_Delete(resp1);
-
-   /* Step 2: poll until authorized */
-   cJSON *req2 = cJSON_CreateObject();
-   cJSON_AddStringToObject(req2, "method", "agent.setup_poll");
-   cJSON_AddStringToObject(req2, "provider", provider);
-   cJSON_AddStringToObject(req2, "device_auth_id", did);
-   cJSON_AddStringToObject(req2, "user_code", code);
-   cJSON_AddNumberToObject(req2, "interval", interval_s);
-   cJSON_AddNumberToObject(req2, "expires_in", expires_s);
-
-   int poll_timeout_ms = (expires_s + 60) * 1000;
-   cJSON *resp2 = cli_v1_dispatch(req2, poll_timeout_ms);
-   cJSON_Delete(req2);
-
-   if (!resp2)
-   {
-      fprintf(stderr, "aimee agent setup: poll timed out or server disconnected\n");
-      return 1;
-   }
-
-   cJSON *status2 = cJSON_GetObjectItemCaseSensitive(resp2, "status");
-   int ok = cJSON_IsString(status2) && strcmp(status2->valuestring, "ok") == 0;
-
-   if (json_output)
-   {
-      char *s = cJSON_PrintUnformatted(resp2);
-      if (s)
-      {
-         puts(s);
-         free(s);
-      }
-   }
-   else
-   {
-      cJSON *msg2 = cJSON_GetObjectItemCaseSensitive(resp2, "message");
-      if (ok)
-         printf("%s\n", cJSON_IsString(msg2) ? msg2->valuestring : "Authorized.");
-      else
-         fprintf(stderr, "aimee agent setup: %s\n",
-                 cJSON_IsString(msg2) ? msg2->valuestring : "authorization failed");
-   }
-
-   cJSON_Delete(resp2);
-   return ok ? 0 : 1;
 }
 
 static int unsupported_client_command(const char *cmd, int json_output)
@@ -1009,7 +854,7 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
     * client's working tree over the reverse-channel so those tools act here (the
     * client never absorbs the engine or a DB). A co-located server uses the local
     * socket as before. */
-   int remote = cli_rpc_remote_endpoint_is_tcp();
+   int remote = cli_v1_remote_endpoint_is_tcp();
    const char *sock = NULL;
    if (remote)
    {
@@ -1035,8 +880,8 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
    cJSON *resp;
    if (remote)
    {
-      char *endpoint = cli_rpc_client_endpoint();
-      char *bearer = cli_rpc_client_bearer();
+      char *endpoint = cli_v1_client_endpoint();
+      char *bearer = cli_v1_client_bearer();
       char *body = cJSON_PrintUnformatted(req);
       int status = 0;
       resp = (endpoint && body) ? cli_http_request(endpoint, "POST", "/v1/launch/run", body, bearer,
@@ -1542,7 +1387,7 @@ static char *acp_dispatch_prompt(const char *content, const char *session_id)
 {
    /* ACP turns run the agent locally (see launch_session_with_input); a remote
     * /v1 endpoint cannot serve them. */
-   if (cli_rpc_remote_endpoint_is_tcp())
+   if (cli_v1_remote_endpoint_is_tcp())
       return NULL;
    const char *sock = cli_ensure_server_for_method("chat.send_stream");
    if (!sock)
@@ -1608,7 +1453,7 @@ int main(int argc, char **argv)
 {
    /* Ignore SIGPIPE so write() to a dead aimee-server socket returns EPIPE
     * instead of terminating the CLI mid-RPC. cli_client retries via
-    * cli_rpc_forward; mcp-serve's reconnect loop reuses the same path.
+    * cli_v1_forward; mcp-serve's reconnect loop reuses the same path.
     * Without this, a server restart between two CLI calls killed the
     * caller and (for mcp-serve) showed up to Claude as
     * "MCP server disconnected". */
@@ -1934,7 +1779,7 @@ int main(int argc, char **argv)
     * root lives on THIS host, which the server cannot read. Resolve + register +
     * ingest from the client rather than forwarding the raw path (which the
     * server would try to realpath against its own filesystem and reject). */
-   if (cli_rpc_remote_endpoint_is_tcp())
+   if (cli_v1_remote_endpoint_is_tcp())
    {
       if (strcmp(cmd, "workspace") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "add") == 0)
          return cli_workspace_add_remote(sub_argc >= 2 ? sub_argv[1] : NULL);
@@ -1950,15 +1795,15 @@ int main(int argc, char **argv)
 
    /* Route through native server RPCs when possible. */
    {
-      cli_rpc_route_t route;
-      if (cli_rpc_lookup(cmd, sub_argc, sub_argv, &route))
+      cli_v1_route_t route;
+      if (cli_v1_lookup(cmd, sub_argc, sub_argv, &route))
       {
          const char *server_method = route.server_method ? route.server_method : route.method;
-         /* A configured remote /v1 endpoint is served over TCP by cli_rpc_forward;
+         /* A configured remote /v1 endpoint is served over TCP by cli_v1_forward;
           * there is no local socket to discover, so skip the socket preflight
           * (which would print "server unavailable") in that mode. */
          const char *sock = NULL;
-         if (!cli_rpc_has_remote_endpoint())
+         if (!cli_v1_has_remote_endpoint())
          {
             sock = cli_ensure_server_for_method(server_method);
             if (!sock)
@@ -1967,8 +1812,8 @@ int main(int argc, char **argv)
                return 1;
             }
          }
-         int rc = cli_rpc_forward(sock, &route, json_output, json_fields, response_profile,
-                                  sub_argc, sub_argv);
+         int rc = cli_v1_forward(sock, &route, json_output, json_fields, response_profile, sub_argc,
+                                 sub_argv);
          if (rc >= 0)
             return rc;
          fprintf(stderr, "aimee: server RPC request failed for '%s'\n", cmd);

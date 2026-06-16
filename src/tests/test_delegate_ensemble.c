@@ -13,6 +13,7 @@
 static int g_parallel_mode = 0; /* 0=all-succeed, 1=only-first-succeeds */
 static int g_aggregator_mode = 0;
 static int g_reason_mode = 0;
+static int g_scorer_calls = 0; /* counts run_quality_scorer ("reason" + score prompt) invocations */
 static int g_repair_mode = 0;
 static int g_parallel_calls = 0;
 static int g_named_calls = 0;
@@ -74,9 +75,11 @@ int model_capability_get(const char *provider, const char *model_id, model_capab
    return 0;
 }
 
-int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agent_result_t *out)
+int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agent_result_t *out,
+                       int deadline_ms)
 {
    (void)cfg;
+   (void)deadline_ms;
    g_parallel_calls++;
    snprintf(g_last_parallel_prompt, sizeof(g_last_parallel_prompt), "%s",
             count > 0 && tasks[0].user_prompt ? tasks[0].user_prompt : "");
@@ -258,8 +261,14 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
  * stubs above; cost-fold is a no-op in the test (no parent session bound). */
 agent_t *agent_find(agent_config_t *cfg, const char *name)
 {
-   (void)cfg;
-   (void)name;
+   /* Real linear search (matches the production resolver). make_acfg() has zero
+    * agents so existing tests still resolve to NULL (lease path skipped); the
+    * panel-authorization test populates agents to exercise the filter. */
+   if (!cfg || !name)
+      return NULL;
+   for (int i = 0; i < cfg->agent_count; i++)
+      if (strcmp(cfg->agents[i].name, name) == 0)
+         return &cfg->agents[i];
    return NULL;
 }
 /* Stub: treat the agent literally named "claude" as the CLI-only agent. */
@@ -322,6 +331,8 @@ int agent_run_with_tools_write_enforce(agent_config_t *cfg, const char *role,
    memset(out, 0, sizeof(*out));
    if (role && strcmp(role, "reason") == 0)
    {
+      if (strstr(user_prompt ? user_prompt : "", "Score this roundtable artifact"))
+         g_scorer_calls++;
       if (strstr(user_prompt ? user_prompt : "", "Answer the caller's roundtable review questions"))
          out->response = strdup("{\"answered_questions\":[{\"question\":\"does auth hold?\","
                                 "\"answer\":\"yes\",\"evidence\":\"review mentions auth\","
@@ -414,6 +425,7 @@ static void reset_modes(void)
    g_parallel_mode = 0;
    g_aggregator_mode = 0;
    g_reason_mode = 0;
+   g_scorer_calls = 0;
    g_repair_mode = 0;
    g_parallel_calls = 0;
    g_named_calls = 0;
@@ -826,21 +838,87 @@ static void test_default_panel_excludes_claude_cli(void)
    assert(strcmp(cfg.ensemble_reference_models[1], "codex") == 0);
    assert(strcmp(cfg.ensemble_aggregator, "mistral") == 0);
 
-   /* opt-in seats claude too */
+   /* claude needs BOTH authorization (claude_cli_delegate_enabled) AND
+    * server-hosting to be seated; neither alone is enough. */
+
+   /* (a) authorized but client-only (not server-hosted) -> still excluded */
    config_t cfg2;
    memset(&cfg2, 0, sizeof(cfg2));
    cfg2.claude_cli_delegate_enabled = 1;
    ensemble_default_panel_from_agents(&cfg2, &acfg);
-   assert(cfg2.ensemble_reference_count == 3);
+   assert(cfg2.ensemble_reference_count == 2);
 
-   /* a configured panel is left untouched (no-op) */
+   /* (b) server-hosted but NOT authorized -> still excluded (the key invariant:
+    * a server-side OAuth setup is not authorization to act as a panelist) */
+   acfg.agents[1].is_server_hosted = 1;
    config_t cfg3;
    memset(&cfg3, 0, sizeof(cfg3));
-   cfg3.ensemble_reference_count = 1;
-   snprintf(cfg3.ensemble_reference_models[0], 128, "preset");
    ensemble_default_panel_from_agents(&cfg3, &acfg);
-   assert(cfg3.ensemble_reference_count == 1);
+   assert(cfg3.ensemble_reference_count == 2);
+
+   /* (c) authorized AND server-hosted -> seated */
+   config_t cfg4;
+   memset(&cfg4, 0, sizeof(cfg4));
+   cfg4.claude_cli_delegate_enabled = 1;
+   ensemble_default_panel_from_agents(&cfg4, &acfg);
+   assert(cfg4.ensemble_reference_count == 3);
+
+   /* (d) disabled claude is never seated, even authorized + server-hosted */
+   acfg.agents[1].enabled = 0;
+   config_t cfg5;
+   memset(&cfg5, 0, sizeof(cfg5));
+   cfg5.claude_cli_delegate_enabled = 1;
+   ensemble_default_panel_from_agents(&cfg5, &acfg);
+   assert(cfg5.ensemble_reference_count == 2);
+   acfg.agents[1].enabled = 1;
+   acfg.agents[1].is_server_hosted = 0;
+
+   /* a configured panel is left untouched (no-op) */
+   config_t cfg6;
+   memset(&cfg6, 0, sizeof(cfg6));
+   cfg6.ensemble_reference_count = 1;
+   snprintf(cfg6.ensemble_reference_models[0], 128, "preset");
+   ensemble_default_panel_from_agents(&cfg6, &acfg);
+   assert(cfg6.ensemble_reference_count == 1);
    printf("  test_default_panel_excludes_claude_cli: ok\n");
+}
+
+static void test_panel_filter_drops_unauthorized_claude(void)
+{
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof(acfg));
+   acfg.agent_count = 2;
+   acfg.agents[0].enabled = 1;
+   snprintf(acfg.agents[0].name, MAX_AGENT_NAME, "mistral");
+   acfg.agents[1].enabled = 1;
+   snprintf(acfg.agents[1].name, MAX_AGENT_NAME, "claude"); /* claude-CLI per stub */
+
+   /* An EXPLICIT reference_models list naming an unauthorized claude drops it,
+    * keeps an ad-hoc (non-agent) model id, and repoints the aggregator. */
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.ensemble_reference_count = 3;
+   snprintf(cfg.ensemble_reference_models[0], 128, "mistral");
+   snprintf(cfg.ensemble_reference_models[1], 128, "claude");
+   snprintf(cfg.ensemble_reference_models[2], 128, "adhoc-model"); /* not an agent -> kept */
+   snprintf(cfg.ensemble_aggregator, sizeof(cfg.ensemble_aggregator), "claude");
+   ensemble_filter_panel_authorization(&cfg, &acfg);
+   assert(cfg.ensemble_reference_count == 2);
+   assert(strcmp(cfg.ensemble_reference_models[0], "mistral") == 0);
+   assert(strcmp(cfg.ensemble_reference_models[1], "adhoc-model") == 0);
+   assert(strcmp(cfg.ensemble_aggregator, "mistral") == 0); /* repointed off the dropped claude */
+
+   /* Authorized + server-hosted claude survives the explicit-list filter. */
+   acfg.agents[1].is_server_hosted = 1;
+   config_t cfg2;
+   memset(&cfg2, 0, sizeof(cfg2));
+   cfg2.claude_cli_delegate_enabled = 1;
+   cfg2.ensemble_reference_count = 2;
+   snprintf(cfg2.ensemble_reference_models[0], 128, "mistral");
+   snprintf(cfg2.ensemble_reference_models[1], 128, "claude");
+   ensemble_filter_panel_authorization(&cfg2, &acfg);
+   assert(cfg2.ensemble_reference_count == 2);
+   printf("  test_panel_filter_drops_unauthorized_claude: ok\n");
 }
 
 static void test_panel_persona_name_assignment(void)
@@ -940,6 +1018,47 @@ static void test_roundtable_review_parses_fenced_json(void)
    assert(strstr(result.items[0].summary, "subtract") != NULL);
    delegate_roundtable_result_free(&result);
    printf("  test_roundtable_review_parses_fenced_json: ok\n");
+}
+
+static void test_roundtable_single_round_skips_scorer(void)
+{
+   /* The cross-round quality scorer (an extra serial LLM call) is pure overhead
+    * for a rounds:1 run and is skipped; multi-round still uses it. */
+   reset_modes();
+   g_parallel_mode = 5; /* panel returns valid review items */
+   config_t cfg = make_cfg(1, 2, 10.0);
+   agent_config_t acfg = make_acfg();
+   roundtable_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.mode = ROUNDTABLE_REVIEW;
+   opts.turns = ROUNDTABLE_PARALLEL;
+   opts.max_rounds = 1;
+   roundtable_result_t result;
+   int rc = delegate_roundtable_run(&acfg, &cfg, "review once", &opts, &result);
+   assert(rc == 0);
+   assert(g_scorer_calls == 0);     /* no cross-round scorer call */
+   assert(g_aggregator_calls == 0); /* no synthesis LLM call — assembled from items */
+   assert(result.item_count >= 1);
+   assert(result.artifact && strstr(result.artifact, "authorization")); /* built from the items */
+   delegate_roundtable_result_free(&result);
+
+   /* multi-round still scores to pick the best round (regression guard). */
+   reset_modes();
+   g_aggregator_mode = 1;
+   g_reason_mode = 1;
+   config_t cfg2 = make_cfg(1, 2, 10.0);
+   roundtable_opts_t opts2;
+   memset(&opts2, 0, sizeof(opts2));
+   opts2.mode = ROUNDTABLE_DRAFT;
+   opts2.turns = ROUNDTABLE_PARALLEL;
+   opts2.max_rounds = 2;
+   opts2.converge_threshold = 0;
+   roundtable_result_t result2;
+   rc = delegate_roundtable_run(&acfg, &cfg2, "draft twice", &opts2, &result2);
+   assert(rc == 0);
+   assert(g_scorer_calls > 0);
+   delegate_roundtable_result_free(&result2);
+   printf("  test_roundtable_single_round_skips_scorer: ok\n");
 }
 
 static void test_roundtable_cost_capped_skips_question_pass(void)
@@ -1183,10 +1302,12 @@ int main(void)
    test_roundtable_review_saturation_converges();
    test_roundtable_review_brief_and_items_return();
    test_default_panel_excludes_claude_cli();
+   test_panel_filter_drops_unauthorized_claude();
    test_panel_persona_name_assignment();
    test_roundtable_review_assigns_personas();
    test_roundtable_aggregator_fallback_synthesizes();
    test_roundtable_review_parses_fenced_json();
+   test_roundtable_single_round_skips_scorer();
    test_roundtable_cost_capped_skips_question_pass();
    test_roundtable_partial_question_answers_report_gaps();
    test_roundtable_draft_brief_questions_not_answered();

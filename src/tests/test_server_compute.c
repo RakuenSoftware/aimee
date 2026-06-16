@@ -633,6 +633,16 @@ int compute_pool_submit(compute_pool_t *pool, void (*fn)(void *), void *arg)
    return 0;
 }
 
+/* Coord/skill dispatch now runs delegates on-demand (server_delegate_ondemand.c,
+ * not linked here). Capture instead of spawning a real thread, mirroring the
+ * compute_pool_submit stub: the dispatched work is always delegate_worker. */
+int delegate_spawn_ondemand(compute_ctx_t *cctx)
+{
+   g_submitted_fn = delegate_worker;
+   g_submitted_arg = cctx;
+   return 0;
+}
+
 /* The real compute_pool slot-tracking helpers live in compute_pool.c, which
  * we don't link in (the test stubs compute_pool_submit above). delegate_worker
  * and tool_execute_worker call set_job/clear_job to publish their identity to

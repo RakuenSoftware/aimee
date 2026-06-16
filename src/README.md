@@ -763,7 +763,7 @@ unclean-exit forensics (`shutdown_forensics.c`) to DB1.
 ## RPC method catalog
 
 The dispatch table in `src/server/server.c` currently registers 162 typed server
-methods; the thin CLI maps supported commands to them in `cli_rpc_routes.inc`
+methods; the thin CLI maps supported commands to them in `cli_v1_routes.inc`
 (144 routes/aliases at this revision). Commands implemented only in legacy
 `cmd_*` modules are not user-facing until they have a typed route. By family:
 

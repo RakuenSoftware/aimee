@@ -1165,7 +1165,9 @@ void config_parse_ensemble_section(config_t *cfg, cJSON *root)
          cJSON *ref;
          cJSON_ArrayForEach(ref, refs)
          {
-            if (cJSON_IsString(ref) && ref->valuestring && cfg->ensemble_reference_count < 8)
+            /* 32 = ENSEMBLE_MAX_REFS (delegate_ensemble.h); literal to avoid
+             * config -> ensemble-engine header coupling. */
+            if (cJSON_IsString(ref) && ref->valuestring && cfg->ensemble_reference_count < 32)
             {
                snprintf(cfg->ensemble_reference_models[cfg->ensemble_reference_count],
                         sizeof(cfg->ensemble_reference_models[0]), "%s", ref->valuestring);
@@ -1182,7 +1184,7 @@ void config_parse_ensemble_section(config_t *cfg, cJSON *root)
          cJSON *p;
          cJSON_ArrayForEach(p, personas)
          {
-            if (cJSON_IsString(p) && p->valuestring && cfg->ensemble_reference_persona_count < 8)
+            if (cJSON_IsString(p) && p->valuestring && cfg->ensemble_reference_persona_count < 32)
             {
                snprintf(cfg->ensemble_reference_personas[cfg->ensemble_reference_persona_count],
                         sizeof(cfg->ensemble_reference_personas[0]), "%s", p->valuestring);

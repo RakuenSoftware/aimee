@@ -1,6 +1,6 @@
 /* cli_code_audit.c: see cli_code_audit.h. */
 #include "cli_code_audit.h"
-#include "cli_client.h" /* cli_http_request, cli_rpc_client_* */
+#include "cli_client.h" /* cli_http_request, cli_v1_client_* */
 #include "aimee_home.h"
 #include "cJSON.h"
 #include <ctype.h>
@@ -355,14 +355,14 @@ static int stem_in_tests(const audit_acc_t *a, const char *stem)
 
 static cJSON *audit_graph_remote(const char *project, int quiet)
 {
-   char *endpoint = cli_rpc_client_endpoint();
+   char *endpoint = cli_v1_client_endpoint();
    if (!endpoint)
    {
       if (!quiet)
          fprintf(stderr, "code audit --graph: no aimee server configured (set `aimee remote`).\n");
       return NULL;
    }
-   char *bearer = cli_rpc_client_bearer();
+   char *bearer = cli_v1_client_bearer();
    cJSON *body = cJSON_CreateObject();
    if (project && project[0])
       cJSON_AddStringToObject(body, "project", project);

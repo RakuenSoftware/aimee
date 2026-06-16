@@ -499,7 +499,7 @@ int agent_vote(agent_config_t *cfg, const char *role, const char *prompt, int n_
       tasks[i].temperature = 0.3 + (0.1 * i); /* slight variation */
    }
 
-   int successes = agent_run_parallel(cfg, tasks, n_voters, results);
+   int successes = agent_run_parallel(cfg, tasks, n_voters, results, 0 /* no deadline */);
    if (successes == 0)
    {
       snprintf(out->error, sizeof(out->error), "all voters failed");

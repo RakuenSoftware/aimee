@@ -555,7 +555,11 @@ static void config_set_defaults(config_t *cfg)
    cfg->ensemble_max_cost_usd = 0.0; /* 0 = no cost cap (unlimited) by default */
    cfg->roundtable_max_rounds = 3;
    cfg->roundtable_converge_threshold = 10;
-   cfg->roundtable_deadline_ms = 600000;
+   /* Saner default: 6 min (was 10). Long enough for a multi-round reasoning-model
+    * ensemble, short enough that a wedged run fails fast instead of a 10-min
+    * silent block. Overridable via roundtable.deadline_ms. Paired with the
+    * round-boundary progress logging so an in-flight run is observably advancing. */
+   cfg->roundtable_deadline_ms = 360000;
    snprintf(cfg->roundtable_turns, sizeof(cfg->roundtable_turns), "parallel");
    snprintf(cfg->roundtable_pipeline_done_bar, sizeof(cfg->roundtable_pipeline_done_bar),
             "zero_blocking");
@@ -758,6 +762,10 @@ int config_load(config_t *cfg)
    if (cJSON_IsBool(item))
       cfg->claude_cli_delegate_enabled = cJSON_IsTrue(item);
 
+   item = cJSON_GetObjectItemCaseSensitive(root, "server_cli_oauth_enabled");
+   if (cJSON_IsBool(item))
+      cfg->server_cli_oauth_enabled = cJSON_IsTrue(item);
+
    item = cJSON_GetObjectItemCaseSensitive(root, "verify_cross_project");
    if (cJSON_IsBool(item))
       cfg->verify_cross_project = cJSON_IsTrue(item);
@@ -949,6 +957,10 @@ int config_load(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "session_threads");
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
       cfg->session_threads = (int)item->valuedouble;
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "delegate_max_inflight");
+   if (cJSON_IsNumber(item) && item->valuedouble > 0)
+      cfg->delegate_max_inflight = (int)item->valuedouble;
 
    /* Per-model/provider concurrency limits */
    config_parse_concurrency_section(cfg, root);

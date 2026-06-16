@@ -41,12 +41,18 @@ wfe_gate_decision_t wfe_gate_decide(const wfe_verdict_t *verdicts, int n,
    if (reason && rcap)
       reason[0] = '\0';
 
-   /* required coverage: every required persona must have returned a verdict. */
+   /* required coverage: every required persona must have returned a STRUCTURALLY
+    * VALID verdict. A malformed / wrong-schema / hash-mismatched response from a
+    * required persona is an integrity failure, NOT coverage: treating its mere
+    * presence as satisfied would let the gate approve via other panelists' quorum
+    * while a required lens never actually reviewed the artifact. Fail closed to
+    * DEGRADED (panel_degraded_required) exactly as if that persona were absent. */
    for (int r = 0; r < nreq; r++)
    {
       int present = 0;
       for (int i = 0; i < n; i++)
-         if (strcmp(verdicts[i].persona, required[r]) == 0)
+         if (strcmp(verdicts[i].persona, required[r]) == 0 &&
+             structurally_valid(&verdicts[i], artifact_hash))
          {
             present = 1;
             break;
@@ -54,7 +60,8 @@ wfe_gate_decision_t wfe_gate_decide(const wfe_verdict_t *verdicts, int n,
       if (!present)
       {
          if (reason)
-            snprintf(reason, rcap, "required persona '%s' missing", required[r]);
+            snprintf(reason, rcap, "required persona '%s' missing or untrustworthy verdict",
+                     required[r]);
          return WFE_GATE_DEGRADED;
       }
    }

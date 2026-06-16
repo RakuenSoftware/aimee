@@ -735,6 +735,9 @@ int agent_load_config(agent_config_t *cfg)
          v = cJSON_GetObjectItem(a, "cli_kind");
          if (v && cJSON_IsString(v))
             snprintf(ag->cli_kind, sizeof(ag->cli_kind), "%s", v->valuestring);
+         v = cJSON_GetObjectItem(a, "is_server_hosted");
+         if (v && cJSON_IsBool(v))
+            ag->is_server_hosted = cJSON_IsTrue(v);
 
          agent_normalize_legacy_claude_cli(ag);
          agent_normalize_builtin_cost_tier(ag);
@@ -952,6 +955,8 @@ int agent_save_config(const agent_config_t *cfg)
          cJSON_AddBoolToObject(a, "session_reuse", ag->session_reuse);
       if (ag->cli_kind[0])
          JSON_ADD_STR(a, "cli_kind", ag->cli_kind);
+      if (ag->is_server_hosted)
+         cJSON_AddBoolToObject(a, "is_server_hosted", 1);
 
       /* Middleware config: only write if any non-zero field is set */
       {

@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (103)
+## CLI-settable keys (104)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -124,11 +124,14 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `openai_model` | string | OpenAI model name. |
 | `provider` | string | Default model provider. |
 | `reasoning_cap_enabled` | bool | Cap the model's reasoning effort. |
+| `server_cli_oauth_enabled` | bool | — |
 | `typed_facts_enabled` | bool | Enable the typed-fact knowledge layer (master gate; default off). |
 | `verify_cross_project` | bool | Let `aimee git verify` span other projects. |
 | `verify_enabled` | bool | Master gate for `aimee git verify` (default off). |
 | `virtual_context_assembly_budget` | int | Token budget for virtual-context assembly. |
 | `virtual_context_enabled` | bool | Enable virtual-context assembly. |
+
+> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `server_cli_oauth_enabled`
 
 ## Config-file sections (48)
 
@@ -191,7 +194,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 106 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
+The binaries read 107 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
 
 ### Paths & assets
 
@@ -373,6 +376,12 @@ The binaries read 106 `AIMEE_*` environment variables (scanned from `getenv()` i
 |----------|-------------|
 | `AIMEE_ANTIPATTERNS_BYPASS` | Bypass the guardrail antipattern checks. |
 | `AIMEE_LOG_LEVEL` | Log level: `error` | `warn` | `info` | `debug`. |
+
+### Undocumented (add to `ENV_DESC` in gen-reference-docs.py)
+
+> These are read by the code but have no description yet — the generator surfaces them so the reference can't silently fall behind.
+
+`AIMEE_DELEGATE_MAX_INFLIGHT`
 
 ## External & provider environment
 
@@ -566,6 +575,8 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `tunnel` | Tunnel config. |
 | `tunnels` | Tunnel definitions. |
 | `user` | Remote user (ssh backend). |
+
+> **Undocumented agent fields** (add to `AGENT_FIELD_DESC`): `is_server_hosted`
 
 ### Toolsets — `AIMEE_TOOLSETS_CONFIG` (or the config `toolsets` map)
 
