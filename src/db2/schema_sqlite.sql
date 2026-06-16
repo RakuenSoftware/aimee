@@ -331,3 +331,6 @@ CREATE INDEX IF NOT EXISTS idx_css_decl_property ON css_declarations(property);
 CREATE TABLE IF NOT EXISTS css_component_styles (  id INTEGER PRIMARY KEY AUTOINCREMENT,  component_file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,  class_token TEXT NOT NULL DEFAULT '',  rule_id INTEGER NOT NULL DEFAULT -1,  resolved INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS idx_css_comp_file ON css_component_styles(component_file_id);
 CREATE INDEX IF NOT EXISTS idx_css_comp_token ON css_component_styles(class_token);
+-- CSS migration assistant (WP-F): per-unit pipeline state (sqlite shim mirror).
+CREATE TABLE IF NOT EXISTS css_migration_units (  id INTEGER PRIMARY KEY AUTOINCREMENT,  project TEXT NOT NULL DEFAULT '',  unit_path TEXT NOT NULL DEFAULT '',  state TEXT NOT NULL DEFAULT 'pending',  total_tokens INTEGER NOT NULL DEFAULT 0,  resolved_tokens INTEGER NOT NULL DEFAULT 0,  oracle_equivalent INTEGER NOT NULL DEFAULT -1,  note TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT '',  UNIQUE(project, unit_path));
+CREATE INDEX IF NOT EXISTS idx_css_migration_project ON css_migration_units(project, state);
