@@ -316,6 +316,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-calibration \
                $(TESTPREFIX)/unit-test-demotion \
                $(TESTPREFIX)/unit-test-fidelity \
+               $(TESTPREFIX)/unit-test-fidelity-check \
                $(TESTPREFIX)/unit-test-features \
                $(TESTPREFIX)/unit-test-report-enrichments \
                $(TESTPREFIX)/unit-test-reasoning \
@@ -418,6 +419,14 @@ $(TESTPREFIX)/unit-test-fidelity: \
                                        $(OBJDIR)/db2/db_schema.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
+
+# auditable-correctness P3 fidelity-check eligibility (fail-closed gate). The
+# helper only reads config_t fields, so it links standalone.
+$(TESTPREFIX)/unit-test-fidelity-check: \
+                                       $(OBJDIR)/tests/test_fidelity_check.o \
+                                       $(OBJDIR)/server/fidelity_check.o \
+                                       $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # CSS style-graph persistence (WP-B) over the sqlite shim.
 $(TESTPREFIX)/unit-test-css-graph: \
