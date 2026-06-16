@@ -13,6 +13,7 @@
 #include "agent.h"
 #include "agent_config.h"
 #include "agent_tools.h"
+#include "workspace_provider.h"
 #include "agent_adapter.h"
 #include "provider_cli_adapter.h"
 #include "agent_protocol.h"
@@ -856,6 +857,62 @@ static void test_tool_bash(void)
    result = tool_bash("yes x | head -c 65536", 5000);
    assert(result && strstr(result, "\"exit_code\":0") != NULL);
    free(result);
+}
+
+/* A write into a source checkout is redirected into an aimee-managed worktree
+ * by guardrails (pre_tool_check returns 1 with the rewritten path) under the
+ * default (shared) provider. When a `detached` workspace provider is active the
+ * tool marshals to the serving client (file tools + tool_bash -> exec_shell), so
+ * the server-side worktree rewrite must be SKIPPED — otherwise the path/command
+ * would be re-pointed at a checkout that does not exist on the client. This
+ * locks in the guardrails skip that lets detached delegates operate on the
+ * client's live tree. */
+static void test_detached_skips_worktree_rewrite(void)
+{
+   char repo[256];
+   snprintf(repo, sizeof(repo), "/tmp/det_wt_test.XXXXXX");
+   assert(mkdtemp(repo) != NULL);
+   char shellcmd[512];
+   snprintf(shellcmd, sizeof(shellcmd), "git init -q '%s' >/dev/null 2>&1", repo);
+   (void)system(shellcmd);
+
+   session_state_t state;
+   memset(&state, 0, sizeof(state));
+   strcpy(state.guardrail_mode, MODE_APPROVE);
+
+   char input[512];
+   snprintf(input, sizeof(input), "{\"file_path\":\"%s/foo.c\",\"content\":\"int x;\"}", repo);
+   char msg[1024];
+
+   /* Shared (default) provider: the write is redirected into a worktree. */
+   workspace_provider_clear_active();
+   msg[0] = '\0';
+   int rc_shared = pre_tool_check("Write", input, &state, MODE_APPROVE, repo, msg, sizeof(msg));
+   assert(rc_shared == 1);                /* allow-with-rewrite */
+   assert(strstr(msg, ".aimee") != NULL); /* rewritten into an aimee worktree */
+
+   /* Detached provider active: the rewrite is skipped (path left untouched). */
+   workspace_provider_t fake_detached;
+   memset(&fake_detached, 0, sizeof(fake_detached));
+   fake_detached.kind = WS_PROVIDER_DETACHED;
+   workspace_provider_set_active(&fake_detached);
+   msg[0] = '\0';
+   int rc_detached = pre_tool_check("Write", input, &state, MODE_APPROVE, repo, msg, sizeof(msg));
+   workspace_provider_clear_active();
+   assert(rc_detached != 1);              /* allow-with-rewrite did NOT fire */
+   assert(strstr(msg, ".aimee") == NULL); /* no worktree path was injected */
+   /* NB: rc_detached here reflects the orthogonal, config-based write gate
+    * (cwd_is_detached_workspace) which this test's bare temp repo is not
+    * registered for. In production workspace_turn_bind_active and
+    * cwd_is_detached_workspace read the SAME workspace registry, so a real
+    * detached turn lifts both and the write is allowed (rc 0). What this test
+    * pins is the one thing the provider bind controls: the worktree rewrite. */
+
+   snprintf(shellcmd, sizeof(shellcmd), "rm -rf '%s'", repo);
+   (void)system(shellcmd);
+
+   printf("  detached_skips_worktree_rewrite: ok (shared=%d, detached=%d)\n", rc_shared,
+          rc_detached);
 }
 
 static void test_tool_read_file(void)
@@ -1949,6 +2006,7 @@ int main(void)
    test_responses_parser_separates_message_items();
    test_agent_is_exec_role();
    test_tool_bash();
+   test_detached_skips_worktree_rewrite();
    test_tool_read_file();
    test_tool_write_file();
    test_tool_edit_file();
