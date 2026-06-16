@@ -9,9 +9,28 @@
 #include "provider_cli_adapter.h"
 #include "cJSON.h"
 #include "json_fluent.h"
+#include <ctype.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+int agent_name_valid(const char *name)
+{
+   if (!name || !name[0])
+      return 0;
+   size_t len = strlen(name);
+   if (len > 48)
+      return 0;
+   if (!isalnum((unsigned char)name[0]))
+      return 0;
+   for (size_t i = 0; i < len; i++)
+   {
+      char c = name[i];
+      if (!isalnum((unsigned char)c) && c != '.' && c != '_' && c != '-')
+         return 0;
+   }
+   return 1;
+}
 
 /* Per-turn session id, set from the request in the chat/delegate workers (setter
  * below) and carried in the creds snapshot so a fan-out worker inherits the

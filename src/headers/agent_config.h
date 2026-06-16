@@ -7,6 +7,12 @@
 
 int agent_load_config(agent_config_t *cfg);
 int agent_save_config(const agent_config_t *cfg);
+
+/* A valid agent/model slug: 1–48 chars, starting alphanumeric, then alphanumeric
+ * or . _ - . Agent names surface as model ids in /v1/models, so this keeps junk
+ * (over-long or non-identifier) names out of agents.json and the model list.
+ * Returns 1 if valid, 0 otherwise. */
+int agent_name_valid(const char *name);
 const char *agent_config_path(void);
 agent_t *agent_route(agent_config_t *cfg, const char *role);
 agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier);
