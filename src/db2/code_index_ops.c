@@ -187,3 +187,36 @@ int db2_code_index_requeue_drifted(void)
 }
 
 #undef D7_DRIFT_FROM_WHERE
+
+int db2_code_file_hash(const char *project, const char *file_path, char *out, int out_len)
+{
+   if (out && out_len > 0)
+      out[0] = '\0';
+   if (!project || !project[0] || !file_path || !file_path[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   static const char *sql = "SELECT f.hash FROM files f"
+                            " JOIN projects p ON p.id = f.project_id"
+                            " WHERE p.name = ?1 AND f.path = ?2 LIMIT 1";
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", file_path);
+   int rc = aimee_pg_step(st, err, sizeof(err));
+   int found = 0;
+   if (rc == AIMEE_PG_ROW)
+   {
+      found = 1;
+      const char *h = aimee_pg_column_text(st, 0);
+      if (out && out_len > 0)
+         snprintf(out, (size_t)out_len, "%s", h ? h : "");
+   }
+   aimee_pg_finalize(st);
+   if (rc == AIMEE_PG_ERR)
+      return -1;
+   return found;
+}

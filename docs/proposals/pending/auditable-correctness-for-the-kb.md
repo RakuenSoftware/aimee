@@ -58,12 +58,17 @@
   (`db2_demotion_retrieval_event_merge_refs_turn`): merges `{type,ref,v}` code/doc
   refs into the unified `surfaced_refs` (deduped by `type`+`ref`, idempotent; create
   path reuses `write_turn` for a bare turn event; same CAS retry contract — the CAS
-  write is now a shared `cas_update_event_payload` helper). **Remaining P1.5:** an
-  `evidence.merge_retrieval_event` action (server-forward, dispatch-testable) + having
-  `/v1/audit` resolve code refs (testable), then wiring the code-search surface to
-  emit (serving-runtime, needs live-stack verification). Plus the P3 LLM entailment
-  judge *producer* (default-off until validated) and P4 (labelled gold corpus — human,
-  not autonomous).
+  write is now a shared `cas_update_event_payload` helper). **`/v1/audit/provenance`
+  code-ref resolution landed next**: it now resolves the unified `surfaced_refs`
+  code entries into a `code_sources[]` — each `{ref, version, live_hash, present,
+  drifted}` where `drifted` = the live `files.hash` (via the new
+  `db2_code_file_hash` resolver) differs from the version captured on the turn.
+  (`/v1/audit/trace` already returns the raw payload, so it surfaces code refs for
+  free.) **Remaining P1.5:** wiring the code-search KB surface to *emit* its hits'
+  code refs via `merge_refs_turn` (serving-runtime: needs `turn_id` threaded to the
+  `code.search` path + `kb_evidence_emit_enabled`; live-stack verification). Plus
+  the P3 LLM entailment judge *producer* (default-off until validated) and P4
+  (labelled gold corpus — human, not autonomous).
 - **Author:** JBailes
 - **Date:** 2026-06-12
 - **Charter roles:** Recall (provenance + per-turn evidence on the recall /
