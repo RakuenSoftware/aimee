@@ -86,7 +86,7 @@ This proposal sits between three siblings and must not duplicate them:
   in what shape* enter the envelope. This proposal's envelope IR (§1) and
   recovery resolver contract (§3) are designed to **be** that proposal's
   preview/read contract where it has one, not a parallel scheme.
-- `docs/proposals/pending/ingress-cost-accounting-and-optimizations.md` owns
+- `docs/proposals/done/ingress-cost-accounting-and-optimizations.md` owns
   **provider usage extraction, USD pricing, the ledger, `/v1/usage/*`, generic
   cached-token reporting, and the `cache_control` *marking* mechanism**
   (`ingress_cache_marking_enabled` / `ingress_cache_min_chars`). This proposal
