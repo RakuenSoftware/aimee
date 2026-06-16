@@ -2,9 +2,11 @@
 
 - **State:** reviewed — design-ready (2026-06-16). §1–§2 foundations landed
   (#185/#339); the design roundtable's 12 blockers on the remaining §2–§7 work are
-  resolved in §8. Implementation-ready; sole external dependency is real
-  local-delegate price data (operator). (Consolidated after PR #180 review + twelve
-  file-by-file codebase audits; findings integrated below.)
+  resolved in §8. Implementation-ready with **no external dependency**: per-delegate
+  pricing is stored on aimee-server in the DB1 `model_pricing` table (default 0 for
+  subscriptions; operator-configurable; authoritative over the static table /
+  registry — landed). (Consolidated after PR #180 review + twelve file-by-file
+  codebase audits; findings integrated below.)
 - **Implementation status (2026-06-16):** §1–§2 LARGELY LANDED, design-roundtable
   run on the rest. **Merged:** §1 (one pricing authority — `token_estimate_cost`
   + registry-fallback hook, `token_estimate_cost_ex` is_priced free-vs-unknown,
@@ -22,8 +24,9 @@
   capability-gated flag). **Remaining (implementation, now unblocked):** §2
   ingress-writes to the six no-log handlers, §3 cache-aware shaping, §4 dedup, §5
   reasoning-effort cap (still recommend defer), §6 cost-shaped reward, §7
-  `/v1/usage/*`. Sole external dependency: real local-delegate price data (operator
-  input; closed as known-zero in #339).
+  `/v1/usage/*`. **No external dependency:** per-delegate pricing is stored on
+  aimee-server in the DB1 `model_pricing` table (default 0 for subscriptions;
+  operator-configurable; landed), authoritative over the static table / registry.
 - **Author:** JBailes
 - **Date:** 2026-06-11
 - **Charter roles:** Evaluate-Optimize (cost-shaped reward into the existing
@@ -481,6 +484,16 @@ estimates** and **avoided estimated cost**.
   specific shared/multi-machine optimization-analytics need is established; if so,
   the proposal must state the DB1→DB2 relationship explicitly so operators never
   face two competing cost ledgers. Default: DB1 only.
+- **Price-of-record on aimee-server (LANDED).** Per-model/per-delegate prices are
+  stored in a DB1 `model_pricing` table on aimee-server (`model` PK,
+  `cost_in_per_mtok`/`cost_out_per_mtok` default 0, `updated_at`), accessed via
+  `db1_model_price_get`/`_set`. A constructor bridge (`token_tracker_db1.c`) feeds it
+  to `token_estimate_cost` as the **authoritative** source: a stored row overrides
+  the static table and the model_registry (even a stored 0 = explicitly free); an
+  absent row leaves the existing resolution. So aimee's subscription delegates are 0
+  by default, and a metered delegate's rate is set on aimee-server without code or a
+  remote dependency. This keeps the single pricing authority (one resolution
+  function) while making the cost-of-record server-local and operator-configurable.
 - **Double-counting guard:** delegate child spend is already folded back to the
   parent via `db1_token_audit_cost_for_delegation()` and `db1_cost_fold_record()`.
   Ingress accounting must state whether parent summaries include child spend,
@@ -756,9 +769,12 @@ cap ships only after an offline analysis bounds its false-low-complexity rate; a
 avoided-cost binds the unit price to the current pricing authority at lookup time
 (never caches a stale unit price across a pricing refresh).
 
-**Remaining external dependency (not a design blocker):** real per-MTok price data
-for the local delegates (minimax / mistral / mimo) — closed as known-zero in #339,
-but actual paid pricing, if any, must come from the operator.
+**No external dependency — delegate pricing is server-stored + operator-configurable.**
+aimee's delegates are subscription-based, so per-token cost is 0 (the #339 default).
+The price-of-record now lives on aimee-server in the DB1 `model_pricing` table
+(`db1_model_price_get`/`_set`), wired into `token_estimate_cost` as the authoritative
+override (see the §2 "Price-of-record" bullet). A metered delegate's rate is set
+there with no remote data or code change; 0 stays correct for subscriptions.
 
 ## Config (all default-off, flag-rollout-readiness program)
 
