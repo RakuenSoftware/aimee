@@ -70,6 +70,49 @@ int main(void)
       int64_t drift = db2_code_index_drift_candidates();
       assert(drift == 1); /* only src/stale.c — format normalization makes the compare correct */
       printf("  drift detector flags re-scanned-since-embed (got %lld) OK\n", (long long)drift);
+
+      /* D7 requeue: the one drifted project ('dproj') gets enqueued for re-ingest
+       * with force, deduped — a second call enqueues nothing (already pending). */
+      int q1 = db2_code_index_requeue_drifted();
+      assert(q1 == 1);
+      aimee_pg_stmt_t *qs = aimee_pg_prepare(conn,
+                                             "SELECT COUNT(*), MAX(force) FROM kb_ingest_queue"
+                                             " WHERE project='dproj' AND status='pending'",
+                                             e, sizeof e);
+      assert(qs);
+      assert(aimee_pg_step(qs, e, sizeof e) == AIMEE_PG_ROW);
+      assert(aimee_pg_column_int64(qs, 0) == 1); /* exactly one queued row */
+      assert(aimee_pg_column_int64(qs, 1) == 1); /* force=1 so the drain re-embeds */
+      aimee_pg_finalize(qs);
+
+      int q2 = db2_code_index_requeue_drifted();
+      assert(q2 == 0); /* dedup: dproj already pending, not re-enqueued */
+      printf("  drift requeue enqueues drifted project once, dedups (q1=%d q2=%d) OK\n", q1, q2);
+
+      /* two MORE distinct drifted projects → one call enqueues both (exercises the
+       * DISTINCT p.name path with >1 RETURNING row; dproj stays deduped). */
+      for (int k = 2; k <= 3; k++)
+      {
+         char ins[512];
+         snprintf(ins, sizeof ins,
+                  "INSERT INTO projects (name, root, scanned_at) VALUES ('dproj%d','/x%d','x')", k,
+                  k);
+         assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
+         snprintf(ins, sizeof ins,
+                  "INSERT INTO files (project_id, path, hash, scanned_at) VALUES"
+                  " ((SELECT id FROM projects WHERE name='dproj%d'),'src/s.c','h',"
+                  " '2026-06-02T00:00:00Z')",
+                  k);
+         assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
+         snprintf(ins, sizeof ins,
+                  "INSERT INTO code_embeddings (point_id, project, file_path, node_key,"
+                  " updated_at) VALUES (%d,'dproj%d','src/s.c','n','2026-06-01 00:00:00')",
+                  200 + k, k);
+         assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
+      }
+      int q3 = db2_code_index_requeue_drifted();
+      assert(q3 == 2); /* dproj2 + dproj3 new; dproj already pending (deduped) */
+      printf("  drift requeue enqueues multiple distinct drifted projects (q3=%d) OK\n", q3);
    }
 
    db2_test_shim_close();
