@@ -774,6 +774,13 @@ int config_load(config_t *cfg)
    if (cJSON_IsBool(item))
       cfg->ingress_preinject_enabled = cJSON_IsTrue(item);
 
+   /* CSS migration assistant style-graph write path (WP-C). The field +
+    * descriptor + save existed, but the YAML load parse was missing, so the
+    * flag never took effect during indexing. */
+   item = cJSON_GetObjectItemCaseSensitive(root, "css_style_graph_enabled");
+   if (cJSON_IsBool(item))
+      cfg->css_style_graph_enabled = cJSON_IsTrue(item);
+
    item = cJSON_GetObjectItemCaseSensitive(root, "ingress_preinject_assembly_budget");
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
       cfg->ingress_preinject_assembly_budget = (int)item->valuedouble;
