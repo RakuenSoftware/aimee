@@ -11,6 +11,7 @@
 #include "db2/kb_service_backend.h"
 #include "db2/bandit.h"
 #include "db2/demotion.h" /* db2_demotion_retrieval_event_write_turn (auditable-correctness P1) */
+#include "db2/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
 #include "kb_service_memory.h"
@@ -835,6 +836,70 @@ int kb_handle_evidence_trace_retrieval_event(int fd, cJSON *req)
                               rc < 0 ? "lookup error" : "no durable retrieval_event for this turn");
    }
    return kb_reply_or_error(fd, resp, "failed to trace retrieval_event");
+}
+
+/* Auditable-correctness P2: the /v1/audit/provenance read. Look up the turn's
+ * retrieval_event (same four-state status as the trace read) and resolve each
+ * surfaced source id to {id, kind, source, version} — version is the memory row's
+ * updated_at, read live, so a caller can compare it to what trace recorded and a
+ * source no longer present (deleted/superseded since the turn) is flagged
+ * present:false rather than silently dropped. This is a pure read (D8). */
+int kb_handle_evidence_provenance(int fd, cJSON *req)
+{
+   cJSON *turn_j = cJSON_GetObjectItemCaseSensitive(req, "turn_id");
+   if (!cJSON_IsString(turn_j) || !turn_j->valuestring[0])
+      return kb_send_error(fd, "audit.provenance requires turn_id");
+   /* turn_ids are short UUIDs; reject absurd input up front (defense in depth —
+    * downstream binds it as a SQL parameter, not into a fixed buffer). */
+   if (strlen(turn_j->valuestring) > 128)
+      return kb_send_error(fd, "audit.provenance turn_id too long");
+
+   char ev_id[64] = "";
+   char payload[8192] = "";
+   int rc = db2_demotion_retrieval_event_by_turn(turn_j->valuestring, ev_id, sizeof(ev_id), payload,
+                                                 sizeof(payload));
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "turn_id", turn_j->valuestring);
+   if (rc == 1)
+   {
+      cJSON_AddStringToObject(resp, "provenance_status", "ok");
+      cJSON_AddStringToObject(resp, "retrieval_event_id", ev_id);
+      cJSON *sources = cJSON_AddArrayToObject(resp, "sources");
+      cJSON *ev = payload[0] ? cJSON_Parse(payload) : NULL;
+      cJSON *ids = ev ? cJSON_GetObjectItemCaseSensitive(ev, "surfaced_ids") : NULL;
+      int n = cJSON_IsArray(ids) ? cJSON_GetArraySize(ids) : 0;
+      for (int i = 0; sources && i < n; i++)
+      {
+         cJSON *e = cJSON_GetArrayItem(ids, i);
+         if (!cJSON_IsNumber(e) || e->valuedouble <= 0)
+            continue;
+         /* Same cast the emit writer (kb_handle_evidence_emit_retrieval_event)
+          * used to store the id, so the round-trip is lossless for the values
+          * actually persisted. */
+         int64_t id = (int64_t)e->valuedouble;
+         char kind[64] = "", source[128] = "", version[64] = "";
+         int found = db2_memory_provenance_by_id(id, kind, sizeof kind, source, sizeof source,
+                                                 version, sizeof version);
+         cJSON *src = cJSON_CreateObject();
+         cJSON_AddNumberToObject(src, "id", (double)id);
+         cJSON_AddStringToObject(src, "kind", kind);
+         cJSON_AddStringToObject(src, "source", source);
+         cJSON_AddStringToObject(src, "version", version);
+         cJSON_AddBoolToObject(src, "present", found == 1);
+         cJSON_AddItemToArray(sources, src);
+      }
+      if (ev)
+         cJSON_Delete(ev);
+   }
+   else
+   {
+      cJSON_AddStringToObject(resp, "provenance_status", "evidence_unavailable");
+      cJSON_AddStringToObject(resp, "detail",
+                              rc < 0 ? "lookup error" : "no durable retrieval_event for this turn");
+   }
+   return kb_reply_or_error(fd, resp, "failed to read provenance");
 }
 
 int kb_handle_memory_entity_profile(int fd, cJSON *req)

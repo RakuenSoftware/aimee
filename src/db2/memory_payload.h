@@ -39,6 +39,15 @@ extern "C"
    /* Total row count in the memories table. Returns 0 on error. */
    int64_t db2_memory_count(void);
 
+   /* Auditable-correctness P2 (/v1/audit/provenance): resolve a surfaced memory
+    * id to its provenance fields — kind, source (source_session), and version
+    * (the row's updated_at). Any out buffer may be NULL. Returns 1 on hit, 0 when
+    * no such row exists (deleted/superseded since the turn — itself a provenance
+    * signal), -1 on error. */
+   int db2_memory_provenance_by_id(int64_t memory_id, char *kind_out, int kind_len,
+                                   char *source_out, int source_len, char *version_out,
+                                   int version_len);
+
 #ifdef __cplusplus
 }
 #endif

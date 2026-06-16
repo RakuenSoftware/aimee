@@ -307,6 +307,7 @@ static const struct
     {"mcp", "audit", "mcp.audit", NULL, "items", 0},
     {"mcp", "recheck", "mcp.recheck", NULL, "items", 300000},
     {"audit", "trace", "evidence.trace_retrieval_event", NULL, NULL, 0},
+    {"audit", "provenance", "evidence.provenance_retrieval_event", NULL, NULL, 0},
     {"get_help", NULL, "get_help", "mcp.call", NULL, 0},
     {"get-help", NULL, "get_help", "mcp.call", NULL, 0},
     {"verify", NULL, "git.verify", "mcp.call", NULL, 900000},
@@ -979,6 +980,18 @@ static cJSON *marshal_audit_trace(int argc, char **argv)
    rpc_parse(argc, argv, NULL, &opts);
 
    cJSON *req = marshal_no_args("evidence.trace_retrieval_event");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "turn_id", opts.positional[0]);
+   return req;
+}
+
+/* Auditable-correctness P2: `aimee audit provenance <turn_id>` → the turn_id param. */
+static cJSON *marshal_audit_provenance(int argc, char **argv)
+{
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
+
+   cJSON *req = marshal_no_args("evidence.provenance_retrieval_event");
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "turn_id", opts.positional[0]);
    return req;
@@ -3296,6 +3309,8 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_config_get(argc, argv);
    if (strcmp(method, "evidence.trace_retrieval_event") == 0)
       return marshal_audit_trace(argc, argv);
+   if (strcmp(method, "evidence.provenance_retrieval_event") == 0)
+      return marshal_audit_provenance(argc, argv);
    if (strcmp(method, "config.set") == 0)
       return marshal_config_set(argc, argv);
    if (strcmp(method, "aux.test") == 0)
