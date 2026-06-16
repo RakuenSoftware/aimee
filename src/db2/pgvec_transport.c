@@ -1320,7 +1320,8 @@ int pgvec_curator_code_unit_search(const char *which_vec, const char *def_kind, 
 
 int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *project,
                       const char *node_key, const char *file_path, const char *symbol,
-                      const char *content_hash, const char *body_hash, const char *payload_json)
+                      const char *content_hash, const char *body_hash, const char *source_hash,
+                      const char *payload_json)
 {
    if (!vec || dim <= 0)
       return 0;
@@ -1332,14 +1333,17 @@ int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *p
    if (!vec_text)
       return -1;
 
+   /* source_hash = the SOURCE FILE's hash (files.hash) at embed time, captured so
+    * a later scan can detect *content* drift precisely (files.hash <> source_hash)
+    * rather than by re-scan timestamp alone (auditable-correctness D7). */
    static const char *sql =
        "INSERT INTO code_embeddings"
        "  (point_id, embedding, project, node_key, file_path, symbol,"
-       "   content_hash, body_hash, payload_json,"
+       "   content_hash, body_hash, source_hash, payload_json,"
        "   updated_at)"
        " VALUES"
        "  (:point_id, :embedding::halfvec, :project, :node_key, :file_path, :symbol,"
-       "   :content_hash, :body_hash, :payload,"
+       "   :content_hash, :body_hash, :source_hash, :payload,"
        "   to_char(CURRENT_TIMESTAMP,'YYYY-MM-DD HH24:MI:SS'))"
        " ON CONFLICT (point_id) DO UPDATE SET"
        "  embedding = EXCLUDED.embedding,"
@@ -1349,6 +1353,7 @@ int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *p
        "  symbol = EXCLUDED.symbol,"
        "  content_hash = EXCLUDED.content_hash,"
        "  body_hash = EXCLUDED.body_hash,"
+       "  source_hash = EXCLUDED.source_hash,"
        "  payload_json = EXCLUDED.payload_json,"
        "  updated_at = EXCLUDED.updated_at";
 
@@ -1367,6 +1372,7 @@ int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *p
    aimee_pg_bind_text(stmt, "symbol", symbol ? symbol : "");
    aimee_pg_bind_text(stmt, "content_hash", content_hash ? content_hash : "");
    aimee_pg_bind_text(stmt, "body_hash", body_hash ? body_hash : "");
+   aimee_pg_bind_text(stmt, "source_hash", source_hash ? source_hash : "");
    aimee_pg_bind_text(stmt, "payload", payload_json ? payload_json : "");
 
    aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));

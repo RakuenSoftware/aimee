@@ -37,7 +37,7 @@ extern "C"
                                     const char *project, const char *node_key,
                                     const char *file_path, const char *symbol,
                                     const char *content_hash, const char *body_hash,
-                                    const char *payload_json);
+                                    const char *source_hash, const char *payload_json);
    int pgvec_kb_service_code_exists_by_hash(const char *project, const char *node_key,
                                             const char *content_hash, const char *body_hash);
 

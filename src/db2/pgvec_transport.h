@@ -176,7 +176,8 @@ void pgvec_search_latency_snapshot(int64_t *total_us, int64_t *count, int64_t *m
 /* Code vector operations (Phase 5). */
 int pgvec_code_upsert(int64_t point_id, const float *vec, int dim, const char *project,
                       const char *node_key, const char *file_path, const char *symbol,
-                      const char *content_hash, const char *body_hash, const char *payload_json);
+                      const char *content_hash, const char *body_hash, const char *source_hash,
+                      const char *payload_json);
 int pgvec_code_delete(int64_t point_id);
 int pgvec_code_delete_project(const char *project);
 int pgvec_code_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,

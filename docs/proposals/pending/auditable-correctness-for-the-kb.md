@@ -22,11 +22,16 @@
   it (`db2_code_index_requeue_drifted`: the `drift` maintenance mode now enqueues
   each distinct drifted project into `kb_ingest_queue` with `force`, deduped
   against an already pending/running row, skipped under `dry_run`; reported as
-  `drift_requeued` in the maintenance summary). **Remaining:** P1.5 (typed
-  doc/code refs + two-writer merge), populating `code_embeddings.source_hash` so
-  content-hash (not just staleness) drift is detectable, P3 (fidelity_check judge
-  + `fidelity_report`), P4 (labelled gold corpus — needs human curation, not
-  autonomous).
+  `drift_requeued` in the maintenance summary). **Precise content-hash drift
+  landed next**: the code-embed write path now captures `code_embeddings.source_hash`
+  (the source file's `files.hash` at embed time, threaded through
+  `pgvec_code_upsert`/`pgvec_kb_service_code_upsert` from `kb_service_code_embed`),
+  and the D7 detector + requeue use a hybrid predicate — precise `files.hash <>
+  source_hash` for embeddings that have it (no false positives from a re-scan that
+  changed nothing), falling back to the scanned-since-embed staleness heuristic only
+  for legacy rows with `source_hash=''`. **Remaining:** P1.5 (typed doc/code refs +
+  two-writer merge), P3 (fidelity_check judge + `fidelity_report`), P4 (labelled
+  gold corpus — needs human curation, not autonomous).
 - **Author:** JBailes
 - **Date:** 2026-06-12
 - **Charter roles:** Recall (provenance + per-turn evidence on the recall /
