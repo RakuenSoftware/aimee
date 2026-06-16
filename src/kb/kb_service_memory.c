@@ -869,6 +869,10 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
       cJSON *sources = cJSON_AddArrayToObject(resp, "sources");
       cJSON *ev = payload[0] ? cJSON_Parse(payload) : NULL;
       cJSON *ids = ev ? cJSON_GetObjectItemCaseSensitive(ev, "surfaced_ids") : NULL;
+      /* surfaced_items = [{id, v}] carries each source's point-in-time version
+       * (memories.updated_at at emit). Absent on legacy events (pre emit-capture);
+       * then turn_version is "" and drift is simply not reported. */
+      cJSON *items = ev ? cJSON_GetObjectItemCaseSensitive(ev, "surfaced_items") : NULL;
       int n = cJSON_IsArray(ids) ? cJSON_GetArraySize(ids) : 0;
       for (int i = 0; sources && i < n; i++)
       {
@@ -886,13 +890,36 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
          cJSON_AddNumberToObject(src, "id", (double)id);
          cJSON_AddStringToObject(src, "kind", kind);
          cJSON_AddStringToObject(src, "source", source);
-         cJSON_AddStringToObject(src, "version", version);
+         cJSON_AddStringToObject(src, "version", version); /* live/current version */
          cJSON_AddBoolToObject(src, "present", found == 1);
          /* Distinguish a source that is genuinely gone (found==0, deleted/
           * superseded since the turn) from one whose lookup errored (found<0):
           * both leave present:false, but only the latter is an unreliable read. */
          if (found < 0)
             cJSON_AddBoolToObject(src, "error", 1);
+         /* Point-in-time version captured at emit (surfaced_items[].v): report it
+          * and flag drift when the source has since changed (turn_version differs
+          * from the current version of a still-present source). */
+         const char *turn_version = "";
+         if (cJSON_IsArray(items))
+         {
+            int m = cJSON_GetArraySize(items);
+            for (int j = 0; j < m; j++)
+            {
+               cJSON *it = cJSON_GetArrayItem(items, j);
+               cJSON *iid = it ? cJSON_GetObjectItemCaseSensitive(it, "id") : NULL;
+               if (cJSON_IsNumber(iid) && (int64_t)iid->valuedouble == id)
+               {
+                  cJSON *v = cJSON_GetObjectItemCaseSensitive(it, "v");
+                  if (cJSON_IsString(v) && v->valuestring)
+                     turn_version = v->valuestring;
+                  break;
+               }
+            }
+         }
+         cJSON_AddStringToObject(src, "turn_version", turn_version);
+         cJSON_AddBoolToObject(src, "drifted",
+                               turn_version[0] && found == 1 && strcmp(turn_version, version) != 0);
          cJSON_AddItemToArray(sources, src);
       }
       if (ev)

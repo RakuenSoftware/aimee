@@ -5,6 +5,7 @@
 #include "artifacts.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
+#include "memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
 #include "aimee.h"
 
 #include <cJSON.h>
@@ -14,22 +15,6 @@
 #include <string.h>
 #include <time.h>
 
-/* Build surfaced_ids JSON array string into buf. */
-static void build_ids_array(const int64_t *ids, int n, char *buf, size_t len)
-{
-   size_t off = 0;
-   buf[off++] = '[';
-   for (int i = 0; i < n && off < len - 32; i++)
-   {
-      if (i > 0)
-         buf[off++] = ',';
-      off += (size_t)snprintf(buf + off, len - off, "%lld", (long long)ids[i]);
-   }
-   if (off < len - 1)
-      buf[off++] = ']';
-   buf[off] = '\0';
-}
-
 int db2_demotion_retrieval_event_write(const char *query_fingerprint, const char *role,
                                        const int64_t *surfaced_ids, int n_surfaced, char *id_out,
                                        int id_out_len)
@@ -37,16 +22,41 @@ int db2_demotion_retrieval_event_write(const char *query_fingerprint, const char
    char id[64];
    db2_artifact_gen_id(id, sizeof(id));
 
-   char ids_buf[4096];
-   build_ids_array(surfaced_ids ? surfaced_ids : NULL, surfaced_ids ? n_surfaced : 0, ids_buf,
-                   sizeof(ids_buf));
-
-   char payload[8192];
-   snprintf(payload, sizeof(payload),
-            "{\"query_fingerprint\":\"%s\",\"role\":\"%s\",\"surfaced_ids\":%s}",
-            query_fingerprint ? query_fingerprint : "", role ? role : "", ids_buf);
+   /* Build the payload with cJSON (no fixed-buffer overflow risk). Alongside the
+    * back-compat `surfaced_ids` array, record `surfaced_items` = [{id, v}] where
+    * v is each source's version (memories.updated_at) resolved NOW, at emit time.
+    * That is the source's point-in-time version for this turn, so /v1/audit/
+    * provenance can later flag version drift (turn-time v != current). */
+   cJSON *p = cJSON_CreateObject();
+   if (!p)
+      return -1;
+   cJSON_AddStringToObject(p, "query_fingerprint", query_fingerprint ? query_fingerprint : "");
+   cJSON_AddStringToObject(p, "role", role ? role : "");
+   cJSON *ids = cJSON_AddArrayToObject(p, "surfaced_ids");
+   cJSON *items = cJSON_AddArrayToObject(p, "surfaced_items");
+   /* surfaced_ids may be NULL (proactive/no-surface events); guard it so n is
+    * effectively 0, matching the original build_ids_array(NULL,...) contract. */
+   for (int i = 0; surfaced_ids && ids && items && i < n_surfaced; i++)
+   {
+      cJSON_AddItemToArray(ids, cJSON_CreateNumber((double)surfaced_ids[i]));
+      char version[64] = "";
+      int found =
+          db2_memory_provenance_by_id(surfaced_ids[i], NULL, 0, NULL, 0, version, sizeof version);
+      cJSON *it = cJSON_CreateObject();
+      cJSON_AddNumberToObject(it, "id", (double)surfaced_ids[i]);
+      /* Only record a version when the row resolved; an unresolved id just omits
+       * `v` (provenance treats a missing turn-version as "unknown", not drift). */
+      if (found == 1 && version[0])
+         cJSON_AddStringToObject(it, "v", version);
+      cJSON_AddItemToArray(items, it);
+   }
+   char *payload = cJSON_PrintUnformatted(p);
+   cJSON_Delete(p);
+   if (!payload)
+      return -1;
 
    int rc = db2_artifact_write(id, "retrieval_event", "proposed", "system", "", "", 1.0, payload);
+   free(payload);
    if (rc != 0)
       return -1;
 
