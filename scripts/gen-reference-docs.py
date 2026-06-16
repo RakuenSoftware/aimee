@@ -110,6 +110,8 @@ CFG_KEY_DESC = {
     "cost_reward_lambda_pct": "Cost-penalty weight (percent) in the reward.",
     "cost_reward_ref_usd_milli": "Reference cost (USD-milli) normalizing the cost reward.",
     "cross_verify": "Enable cross-model verification of outputs.",
+    "css_style_graph_enabled": "Enable the CSS migration assistant's style-graph write path during indexing.",
+    "css_render_command": "Render backend for the #4-full computed-style oracle: a command reading {html,css} JSON on stdin and writing a computed-style snapshot JSON on stdout (run an isolated headless-browser sidecar).",
     "db2_url": "DB2 connection URL (aimee's vector / knowledge-base store).",
     "dedup_enabled": "Deduplicate near-identical responses.",
     "dedup_window_seconds": "Window (seconds) for response dedup.",

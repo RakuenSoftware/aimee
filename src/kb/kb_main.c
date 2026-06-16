@@ -2,6 +2,7 @@
 #include "agent_exec.h"
 #include "config.h"
 #include "config_database.h"
+#include "css_render_cmd.h"
 #include "db2/code_index.h"
 #include "kb_auth_oidc.h"
 #include "kb_enroll.h"
@@ -633,6 +634,11 @@ int main(int argc, char **argv)
       return 1;
    }
    g_ctx.worker_count = kb_cfg.kb_connection_workers;
+
+   /* #4-full render backend: register the command-driven computed-style render
+    * adapter when css_render_command is configured (no-op otherwise — the oracle
+    * then reports UNAVAILABLE rather than guessing). */
+   css_render_cmd_register();
 
    int http_port = http_port_override >= 0 ? http_port_override : kb_cfg.kb_api_http_port;
    if (http_port <= 0)

@@ -47,6 +47,8 @@ const config_field_t config_fields[] = {
     {"typed_facts_enabled", offsetof(config_t, typed_facts_enabled), sizeof(int), 0, CFG_BOOL},
     {"css_style_graph_enabled", offsetof(config_t, css_style_graph_enabled), sizeof(int), 0,
      CFG_BOOL},
+    {"css_render_command", offsetof(config_t, css_render_command),
+     sizeof(((config_t *)0)->css_render_command), 0, CFG_STRING},
     {"kb_evidence_emit_enabled", offsetof(config_t, kb_evidence_emit_enabled), sizeof(int), 0,
      CFG_BOOL},
     {"fidelity_check_enabled", offsetof(config_t, fidelity_check_enabled), sizeof(int), 0,
