@@ -2,9 +2,11 @@
 
 - **State:** reviewed — design-ready (2026-06-16). §1–§2 foundations landed
   (#185/#339); the design roundtable's 12 blockers on the remaining §2–§7 work are
-  resolved in §8. Implementation-ready; sole external dependency is real
-  local-delegate price data (operator). (Consolidated after PR #180 review + twelve
-  file-by-file codebase audits; findings integrated below.)
+  resolved in §8. Implementation-ready with **no external dependency**: delegates are
+  subscription-priced (per-token cost 0, the #339 default) and a metered delegate's
+  price is operator-configurable on its model via the model_registry
+  `cost_in/out_per_mtok` override (see §8). (Consolidated after PR #180 review +
+  twelve file-by-file codebase audits; findings integrated below.)
 - **Implementation status (2026-06-16):** §1–§2 LARGELY LANDED, design-roundtable
   run on the rest. **Merged:** §1 (one pricing authority — `token_estimate_cost`
   + registry-fallback hook, `token_estimate_cost_ex` is_priced free-vs-unknown,
@@ -22,8 +24,9 @@
   capability-gated flag). **Remaining (implementation, now unblocked):** §2
   ingress-writes to the six no-log handlers, §3 cache-aware shaping, §4 dedup, §5
   reasoning-effort cap (still recommend defer), §6 cost-shaped reward, §7
-  `/v1/usage/*`. Sole external dependency: real local-delegate price data (operator
-  input; closed as known-zero in #339).
+  `/v1/usage/*`. **No external dependency:** delegate pricing is per-delegate
+  configurable on its model via the model_registry `cost_in/out_per_mtok` override,
+  defaulting to 0 for subscription delegates (see §8).
 - **Author:** JBailes
 - **Date:** 2026-06-11
 - **Charter roles:** Evaluate-Optimize (cost-shaped reward into the existing
@@ -756,9 +759,19 @@ cap ships only after an offline analysis bounds its false-low-complexity rate; a
 avoided-cost binds the unit price to the current pricing authority at lookup time
 (never caches a stale unit price across a pricing refresh).
 
-**Remaining external dependency (not a design blocker):** real per-MTok price data
-for the local delegates (minimax / mistral / mimo) — closed as known-zero in #339,
-but actual paid pricing, if any, must come from the operator.
+**Delegate pricing is per-delegate configurable, default 0 (no external data
+dependency).** Aimee's delegates are subscription-based, so their per-token price is
+**0** — which is exactly what the static known-zero rows (#339) encode (priced=1,
+"free", not "unknown", so the delegate economics never flat-rate them). There is no
+missing price data to obtain. If a delegate ever becomes metered, its price is set
+**on that delegate's model** via the single pricing authority — the model_registry
+`cost_in_per_mtok` / `cost_out_per_mtok` fields (operator/models.dev override), which
+`token_estimate_cost` already honours: a nonzero registry price overrides the static
+0 (`token_tracker.c` → `token_tracker_registry.c` bridge → `model_capability_get`).
+So pricing is configurable per delegate without touching code, and there is **no
+second pricing source** (agents.json carries no price; price lives only in the
+registry). This closes the previously-noted "price data" item — it was a framing
+error, not a real dependency.
 
 ## Config (all default-off, flag-rollout-readiness program)
 
