@@ -23,6 +23,15 @@ extern "C"
     * on failure (writes to errbuf/errlen). */
    int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen);
 
+   /* embedder-runtime-fetch-autodim §2: record schema_embedding_dim in kb_meta on
+    * first apply; on a later apply with a different dim, REFUSE (the halfvec
+    * columns are already sized at the recorded dim — serving at another silently
+    * breaks vector search). Returns 0 (recorded/matches), -1 (mismatch/DB error,
+    * errbuf set). aimee_pg_*-based so it runs on Postgres and the sqlite shim.
+    * |conn| is the aimee_pg connection handle. Called by db_apply_schema_postgres
+    * after the schema applies; exposed for direct testing. */
+   int db2_embedding_dim_record_or_check(void *conn, int embed_dim, char *errbuf, size_t errlen);
+
    /* Apply the consolidated SQLite schema for DB2's libpq shim/test
     * compatibility path. Production DB2 remains Postgres-only. */
    int db2_apply_schema_sqlite_shim(struct sqlite3 *db, char *errbuf, size_t errlen);
