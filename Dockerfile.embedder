@@ -4,21 +4,21 @@
 # never bloat the slim kb runtime.
 #
 # Two coherent tiers, embedder paired with a matching-size reranker:
-#   default image (aimee-embedder):     pplx-embed-v1-4b   (2560-dim) + ettin-reranker-1b
-#   light image   (aimee-embedder-0.6b): pplx-embed-v1-0.6b (1024-dim) + ettin-reranker-400m
-# The 4b default is the higher-fidelity tier (embedding throughput is not the
-# bottleneck); the 0.6b image is the low-resource alternate. Override either at
-# build time:
+#   default image (aimee-embedder):   pplx-embed-v1-0.6b (1024-dim) + ettin-reranker-400m
+#   heavy image   (aimee-embedder-4b): pplx-embed-v1-4b   (2560-dim) + ettin-reranker-1b
+# The 0.6b default is the low-latency tier (a 0.6b query embed is ~5x faster than
+# the 4b and the reranker dominates recall cost anyway); the 4b image is the
+# higher-fidelity alternate. Override either at build time:
 #   --build-arg EMBEDDER_MODEL=<hf id>  (must match config embedding_dim + the
-#     schema vector(N) columns — pplx-embed-v1-4b is 2560, 0.6b is 1024)
+#     schema vector(N) columns — pplx-embed-v1-0.6b is 1024, 4b is 2560)
 #   --build-arg RERANKER_MODEL=<hf id>  (the reranker emits a scalar score, so it
 #     has no dim constraint — size it to match the embedder for a coherent tier).
 FROM python:3.11-slim AS embedder
 
-ARG EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-4b
+ARG EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-0.6b
 # Cross-encoder reranker served from the same process (aimee's memory rerank
-# stage). Scores top-K (~50) pairs per query; the 1b pairs with the 4b embedder.
-ARG RERANKER_MODEL=cross-encoder/ettin-reranker-1b-v1
+# stage). Scores top-K (~50) pairs per query; the 400m pairs with the 0.6b embedder.
+ARG RERANKER_MODEL=cross-encoder/ettin-reranker-400m-v1
 ENV PIP_NO_CACHE_DIR=1 \
     HF_HOME=/opt/models \
     EMBEDDER_MODEL=${EMBEDDER_MODEL} \

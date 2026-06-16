@@ -29,8 +29,9 @@ curl -H 'Authorization: Bearer aimee-local-dev' http://localhost:8740/v1/kb/stat
 Set a real bearer for anything past loopback. `aimee-local-dev` is a dev
 convenience.
 
-The default embedder is the 4B (`pplx-embed-v1-4b`, 2560-dim). On a tight host,
-use the lighter 0.6B: `AIMEE_EMBEDDER_IMAGE=ghcr.io/rakuensoftware/aimee-embedder-0.6b:latest AIMEE_EMBEDDING_DIM=1024 docker compose -f compose.combined.yaml up --build -d`.
+The default embedder is the 0.6B (`pplx-embed-v1-0.6b`, 1024-dim), paired with the
+400m reranker — the low-latency tier. For higher fidelity, use the 4B:
+`AIMEE_EMBEDDER_IMAGE=ghcr.io/rakuensoftware/aimee-embedder-4b:latest AIMEE_EMBEDDING_DIM=2560 docker compose -f compose.combined.yaml up --build -d`.
 
 ## 2. Install the client
 
