@@ -882,6 +882,7 @@ $(TESTPREFIX)/unit-test-kb-client-memory: $(OBJDIR)/tests/test_kb_client_memory.
 $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o \
                                $(OBJDIR)/tests/support/delegate_role_policy_stub.o \
                                $(OBJDIR)/tests/support/toolset_stub.o \
+                               $(OBJDIR)/tests/support/agent_source_authority_stub.o \
                                $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/delegations.o $(OBJDIR)/db1/agent_jobs.o $(OBJDIR)/db1/session_paths.o $(OBJDIR)/db1/cost_fold.o $(OBJDIR)/db1/token_audit.o $(OBJDIR)/server/delegate_credentials.o $(OBJDIR)/server/delegate_credential_retry.o $(OBJDIR)/db1/delegate_learning.o $(OBJDIR)/db1/interaction_events.o \
                                $(OBJDIR)/db1/execution_plans.o $(OBJDIR)/db1/coord_jobs.o \
 		                               $(OBJDIR)/server/delegate_launch.o $(OBJDIR)/server/delegate_source_authority.o $(OBJDIR)/server/delegate_economics.o $(OBJDIR)/server/server_coord_dispatcher.o \

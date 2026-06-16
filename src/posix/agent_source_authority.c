@@ -6,19 +6,83 @@
 #include "util.h"
 #include "cJSON.h"
 #include <ctype.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* Per-delegate source-authority context.
+ *
+ * This was previously read from process-global env vars (AIMEE_DELEGATE_*),
+ * which raced once delegates began running concurrently on detached threads
+ * (on-demand execution): a delegate's code_search overlay would resolve its
+ * staleness/freshness checks against ANOTHER concurrently-running delegate's
+ * worktree root, producing wrong annotations that varied with thread timing.
+ *
+ * The authoritative source for an in-process delegate run is now thread-local,
+ * installed by delegate_run_ctx_enter (see server_compute.c). The env vars
+ * remain the fallback for cross-process child clients (cmd_index, the
+ * aimee-client shell-out), which inherit them and have their own single-
+ * threaded environment. tl_sa_active distinguishes "this thread is running a
+ * delegate" (read TLS) from "not in a delegate" (read env / no-op). */
+static __thread int tl_sa_active = 0;
+static __thread int tl_sa_authority = 0;
+static __thread char tl_sa_root[MAX_PATH_LEN] = {0};
+static __thread char *tl_sa_paths = NULL; /* heap, newline-joined; may be NULL */
+
+void agent_source_authority_tls_set(int authority, const char *worktree_root, const char *paths)
+{
+   tl_sa_active = 1;
+   tl_sa_authority = authority ? 1 : 0;
+   snprintf(tl_sa_root, sizeof(tl_sa_root), "%s", worktree_root ? worktree_root : "");
+   free(tl_sa_paths);
+   tl_sa_paths = (paths && paths[0]) ? strdup(paths) : NULL;
+}
+
+void agent_source_authority_tls_capture(agent_source_authority_snapshot_t *snap)
+{
+   if (!snap)
+      return;
+   snap->active = tl_sa_active;
+   snap->authority = tl_sa_authority;
+   snprintf(snap->root, sizeof(snap->root), "%s", tl_sa_root);
+   snap->paths = tl_sa_paths ? strdup(tl_sa_paths) : NULL;
+}
+
+void agent_source_authority_tls_restore(agent_source_authority_snapshot_t *snap)
+{
+   if (!snap)
+      return;
+   tl_sa_active = snap->active;
+   tl_sa_authority = snap->authority;
+   snprintf(tl_sa_root, sizeof(tl_sa_root), "%s", snap->root);
+   free(tl_sa_paths);
+   tl_sa_paths = snap->paths; /* transfer ownership */
+   snap->paths = NULL;
+}
+
 static int source_authority_enabled(void)
 {
+   if (tl_sa_active)
+      return tl_sa_authority;
    const char *enabled = getenv("AIMEE_DELEGATE_SOURCE_AUTHORITY");
    return enabled && enabled[0] && strcmp(enabled, "0") != 0;
 }
 
 static const char *source_authority_root(void)
 {
+   if (tl_sa_active)
+      return tl_sa_root[0] ? tl_sa_root : NULL;
    const char *root = getenv("AIMEE_DELEGATE_WORKTREE_ROOT");
    return root && root[0] ? root : NULL;
+}
+
+/* Newline-joined source paths for the current delegate (TLS), or the env
+ * fallback for cross-process clients. May return NULL. */
+static const char *source_authority_paths(void)
+{
+   if (tl_sa_active)
+      return tl_sa_paths;
+   return getenv("AIMEE_DELEGATE_SOURCE_PATHS");
 }
 
 static void source_authority_resolve_path(const char *path, char *out, size_t out_len)
@@ -61,7 +125,7 @@ static int source_path_matches_hit(const char *source_path, const char *hit_path
 
 static int source_paths_contains(const char *hit_path)
 {
-   const char *paths = getenv("AIMEE_DELEGATE_SOURCE_PATHS");
+   const char *paths = source_authority_paths();
    if (!paths || !paths[0] || !hit_path || !hit_path[0])
       return 0;
 
@@ -188,7 +252,7 @@ int agent_source_append_overlay_code_hits(cJSON *arr, const char *query, const c
    (void)project;
    if (!arr || !source_authority_enabled() || !query || !query[0] || max_results <= 0)
       return 0;
-   const char *paths = getenv("AIMEE_DELEGATE_SOURCE_PATHS");
+   const char *paths = source_authority_paths();
    if (!paths || !paths[0])
       return 0;
 
@@ -258,7 +322,7 @@ char *tool_find_symbol(const char *identifier)
    int overlay_matches = 0;
    if (source_authority_enabled())
    {
-      const char *paths = getenv("AIMEE_DELEGATE_SOURCE_PATHS");
+      const char *paths = source_authority_paths();
       const char *p = paths && paths[0] ? paths : NULL;
       while (p && *p && overlay_matches < 8 && pos < (int)sizeof(buf) - 512)
       {
