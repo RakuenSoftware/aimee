@@ -153,6 +153,179 @@ int db2_demotion_retrieval_event_by_turn(const char *turn_id, char *id_out, int 
    return found;
 }
 
+int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *query_fingerprint,
+                                            const char *role, const int64_t *surfaced_ids,
+                                            int n_surfaced, char *id_out, int id_out_len)
+{
+   if (id_out && id_out_len > 0)
+      id_out[0] = '\0';
+   if (!turn_id || !turn_id[0])
+      return -1;
+
+   /* auditable-correctness P1.5 (D14): the two-writer idempotent merge. A turn's
+    * retrieval_event may be contributed to by more than one surface (the memory
+    * recall AND the code-search surface). The first writer creates the event; any
+    * later writer MERGES its surfaced refs into that same event rather than being
+    * dropped (the plain write_turn dup path only returns the existing id). Dedup by
+    * id makes it idempotent — re-merging the same refs is a no-op.
+    *
+    * Concurrency: a compare-and-swap retry loop (budget of 5 attempts; on exhaustion
+    * returns -1). The UPDATE lands only if the row's payload still equals what we
+    * read; a concurrent merge (or the event being deleted) yields 0 rows-affected,
+    * so we re-read and retry. The CREATE path also loops: after write_turn we
+    * `continue` and re-merge, so even if we lost a create race (write_turn wrote an
+    * un-stamped orphan and returned the winner's id) our refs still land in the
+    * canonical event on the next pass. Portable across Postgres and the sqlite shim
+    * (no FOR UPDATE / jsonb needed). */
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   /* One heap buffer reused across retries (~900 refs); avoids a large per-iteration
+    * stack frame. If a payload ever exceeds it, by_turn truncates → the CAS old-value
+    * can't match → retries exhaust → -1 (fail-safe, never a silent partial write). */
+   enum
+   {
+      MERGE_PAYLOAD_CAP = 65536
+   };
+   char *payload = malloc(MERGE_PAYLOAD_CAP);
+   if (!payload)
+      return -1;
+
+   int result = -1;
+   for (int attempt = 0; attempt < 5; attempt++)
+   {
+      char ev_id[64] = "";
+      payload[0] = '\0';
+      int rc = db2_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
+                                                    MERGE_PAYLOAD_CAP);
+      if (rc < 0)
+      {
+         result = -1;
+         break;
+      }
+      if (rc == 0)
+      {
+         /* No event yet — create it, then loop to re-read + merge (so our refs land
+          * even if a concurrent writer won the create race). */
+         char created[64] = "";
+         if (db2_demotion_retrieval_event_write_turn(turn_id, query_fingerprint, role, surfaced_ids,
+                                                     n_surfaced, created, sizeof(created)) != 0)
+         {
+            result = -1;
+            break;
+         }
+         continue;
+      }
+
+      cJSON *p = payload[0] ? cJSON_Parse(payload) : NULL;
+      if (!p)
+      {
+         result = -1; /* present row, unparseable payload — surface the error */
+         break;
+      }
+      cJSON *ids = cJSON_GetObjectItemCaseSensitive(p, "surfaced_ids");
+      cJSON *items = cJSON_GetObjectItemCaseSensitive(p, "surfaced_items");
+      if (!cJSON_IsArray(ids))
+         ids = cJSON_AddArrayToObject(p, "surfaced_ids");
+      if (!cJSON_IsArray(items))
+         items = cJSON_AddArrayToObject(p, "surfaced_items");
+      if (!ids || !items) /* allocation failure */
+      {
+         cJSON_Delete(p);
+         result = -1;
+         break;
+      }
+
+      int added = 0;
+      for (int i = 0; surfaced_ids && i < n_surfaced; i++)
+      {
+         int64_t id = surfaced_ids[i];
+         if (id <= 0) /* non-positive ids are ignored (documented in the header) */
+            continue;
+         /* dedup: skip ids already recorded on the event (idempotency). ids are
+          * stored as JSON numbers by the writer (cJSON_CreateNumber((double)id)),
+          * so compare the same way — lossless for memory ids (well under 2^53). */
+         int present = 0, m = cJSON_GetArraySize(ids);
+         for (int j = 0; j < m; j++)
+         {
+            cJSON *e = cJSON_GetArrayItem(ids, j);
+            if (cJSON_IsNumber(e) && (int64_t)e->valuedouble == id)
+            {
+               present = 1;
+               break;
+            }
+         }
+         if (present)
+            continue;
+         cJSON_AddItemToArray(ids, cJSON_CreateNumber((double)id));
+         /* Capture this ref's point-in-time version at merge, mirroring the writer's
+          * surfaced_items=[{id,v}] (v omitted when unresolved — provenance treats a
+          * missing turn-version as "unknown", not drift) so the shape is identical. */
+         char version[64] = "";
+         int found = db2_memory_provenance_by_id(id, NULL, 0, NULL, 0, version, sizeof(version));
+         cJSON *it = cJSON_CreateObject();
+         cJSON_AddNumberToObject(it, "id", (double)id);
+         if (found == 1 && version[0])
+            cJSON_AddStringToObject(it, "v", version);
+         cJSON_AddItemToArray(items, it);
+         added++;
+      }
+
+      if (added == 0)
+      {
+         /* All refs already present — idempotent no-op, no write needed. */
+         cJSON_Delete(p);
+         if (id_out && id_out_len > 0)
+            snprintf(id_out, (size_t)id_out_len, "%s", ev_id);
+         result = 0;
+         break;
+      }
+
+      char *newpayload = cJSON_PrintUnformatted(p);
+      cJSON_Delete(p);
+      if (!newpayload)
+      {
+         result = -1;
+         break;
+      }
+
+      /* CAS: land the update only if the payload is still the value we merged from. */
+      char err[256] = "";
+      aimee_pg_stmt_t *st =
+          aimee_pg_prepare(conn, "UPDATE artifacts SET payload = ?1 WHERE id = ?2 AND payload = ?3",
+                           err, sizeof(err));
+      if (!st)
+      {
+         free(newpayload);
+         result = -1;
+         break;
+      }
+      aimee_pg_bind_text(st, "?1", newpayload);
+      aimee_pg_bind_text(st, "?2", ev_id);
+      aimee_pg_bind_text(st, "?3", payload);
+      int step = aimee_pg_step(st, err, sizeof(err));
+      int changes = aimee_pg_stmt_changes(st);
+      aimee_pg_finalize(st);
+      free(newpayload);
+      if (step != AIMEE_PG_DONE)
+      {
+         result = -1;
+         break;
+      }
+      if (changes > 0)
+      {
+         if (id_out && id_out_len > 0)
+            snprintf(id_out, (size_t)id_out_len, "%s", ev_id);
+         result = 0;
+         break;
+      }
+      /* 0 rows: concurrent merge or the event vanished — re-read and retry. */
+   }
+   free(payload);
+   return result;
+}
+
 int db2_demotion_retrieval_attribution_write(const char *retrieval_event_id,
                                              int64_t surfaced_row_id, const char *verdict,
                                              double weight)

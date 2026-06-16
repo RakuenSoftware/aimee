@@ -96,6 +96,46 @@ static void test_retrieval_event_turn(void)
    printf("  retrieval_event_turn: ok\n");
 }
 
+/* ---- 1b. retrieval_event_merge_turn (P1.5 idempotent two-writer merge) ---- */
+static void test_retrieval_event_merge_turn(void)
+{
+   open_db();
+
+   /* First writer on a fresh turn → behaves like write_turn (creates the event). */
+   int64_t a[2] = {11, 22};
+   char ev_id[64];
+   assert(db2_demotion_retrieval_event_merge_turn("turn-m", "fp", "Recall", a, 2, ev_id,
+                                                  sizeof(ev_id)) == 0);
+   char payload[8192];
+   assert(db2_demotion_retrieval_event_by_turn("turn-m", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(strstr(payload, "\"surfaced_ids\":[11,22]") != NULL);
+
+   /* Second writer on the SAME turn → merges new refs into the same event (22 is a
+    * dup and is skipped; 33 is added). Returns the same canonical event id. */
+   int64_t b[2] = {22, 33};
+   char got[64];
+   assert(db2_demotion_retrieval_event_merge_turn("turn-m", "fp2", "Recall", b, 2, got,
+                                                  sizeof(got)) == 0);
+   assert(strcmp(got, ev_id) == 0); /* same event, not a new one */
+   assert(db2_demotion_retrieval_event_by_turn("turn-m", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(strstr(payload, "\"surfaced_ids\":[11,22,33]") != NULL);
+   /* the merged ref also gets a surfaced_items entry (same shape as the writer) */
+   assert(strstr(payload, "\"surfaced_items\":") != NULL);
+   assert(strstr(payload, "{\"id\":33}") != NULL); /* id-only (no v: id 33 unresolved) */
+
+   /* Idempotent: re-merging refs already present changes nothing. */
+   int64_t c[2] = {11, 33};
+   assert(db2_demotion_retrieval_event_merge_turn("turn-m", "fp3", "Recall", c, 2, NULL, 0) == 0);
+   assert(db2_demotion_retrieval_event_by_turn("turn-m", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(strstr(payload, "\"surfaced_ids\":[11,22,33]") != NULL); /* unchanged */
+
+   /* bad arg. */
+   assert(db2_demotion_retrieval_event_merge_turn("", "fp", "Recall", a, 2, NULL, 0) == -1);
+
+   close_db();
+   printf("  retrieval_event_merge_turn: ok\n");
+}
+
 /* ---- 2. retrieval_attribution_write ---- */
 static void test_retrieval_attribution_write(void)
 {
@@ -255,6 +295,7 @@ int main(void)
 
    test_retrieval_event_write();
    test_retrieval_event_turn();
+   test_retrieval_event_merge_turn();
    test_retrieval_attribution_write();
    test_demotion_score_empty();
    test_demotion_score_basic();

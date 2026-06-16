@@ -42,9 +42,15 @@
   server→kb-forward vertical mirroring `/v1/audit/provenance`, returning the
   turn's `fidelity_report` buckets + `attribution_count` with a four-state
   `fidelity_status` (`not_evaluated` when the default-off judge has not run).
-  **Remaining:** P1.5 (typed doc/code refs + two-writer merge), the P3 LLM
-  entailment judge *producer* (default-off until validated), P4 (labelled gold
-  corpus — needs human curation, not autonomous).
+  The **P1.5 two-writer merge core** landed next:
+  `db2_demotion_retrieval_event_merge_turn` (D14) — the first writer creates the
+  turn's `retrieval_event`; a later writer (e.g. the code-search surface) MERGES its
+  surfaced refs into that same event (deduped by id, point-in-time version captured
+  per merged ref) instead of being dropped, and re-merging is idempotent.
+  **Remaining:** the rest of P1.5 (widen the two `/v1` contracts to carry typed
+  doc/code refs + the `..._typed` attribution writer + wire the code-search surface
+  to call the merge), the P3 LLM entailment judge *producer* (default-off until
+  validated), P4 (labelled gold corpus — needs human curation, not autonomous).
 - **Author:** JBailes
 - **Date:** 2026-06-12
 - **Charter roles:** Recall (provenance + per-turn evidence on the recall /

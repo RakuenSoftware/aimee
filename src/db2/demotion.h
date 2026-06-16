@@ -59,6 +59,23 @@ extern "C"
    int db2_demotion_retrieval_event_by_turn(const char *turn_id, char *id_out, int id_out_len,
                                             char *payload_out, int payload_out_len);
 
+   /* auditable-correctness P1.5 (D14): the idempotent two-writer merge. If no event
+    * exists for `turn_id` yet, behaves exactly like ..._write_turn (first writer
+    * creates it). If one exists, MERGES the new `surfaced_ids` into that same event
+    * (deduped by id, with each ref's point-in-time version captured into
+    * surfaced_items) instead of dropping them — so a second surface (e.g. code
+    * search) contributes to the same turn event. Idempotent: re-merging refs already
+    * present is a no-op. Concurrency-safe via a compare-and-swap retry (budget of 5
+    * attempts, then -1; no FOR UPDATE needed; portable to the sqlite shim). The
+    * create path also retries so refs land even if a concurrent writer wins the
+    * initial create. Non-positive ids in `surfaced_ids` are
+    * ignored. `query_fingerprint`/`role` are used ONLY on the first-writer create
+    * path (a later writer contributes refs, not a new fingerprint). Writes the
+    * canonical event id into id_out (may be NULL). Returns 0 / -1. */
+   int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *query_fingerprint,
+                                               const char *role, const int64_t *surfaced_ids,
+                                               int n_surfaced, char *id_out, int id_out_len);
+
    /* Write a retrieval_attribution artifact linking one surfaced row to a verdict.
     * retrieval_event_id: UUID of the originating retrieval_event.
     * surfaced_row_id: memory row id that contributed to the response.
