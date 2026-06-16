@@ -334,6 +334,8 @@ CREATE INDEX IF NOT EXISTS idx_css_comp_token ON css_component_styles(class_toke
 -- CSS migration assistant (WP-F): per-unit pipeline state (sqlite shim mirror).
 CREATE TABLE IF NOT EXISTS css_migration_units (  id INTEGER PRIMARY KEY AUTOINCREMENT,  project TEXT NOT NULL DEFAULT '',  unit_path TEXT NOT NULL DEFAULT '',  state TEXT NOT NULL DEFAULT 'pending',  total_tokens INTEGER NOT NULL DEFAULT 0,  resolved_tokens INTEGER NOT NULL DEFAULT 0,  oracle_equivalent INTEGER NOT NULL DEFAULT -1,  note TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT '',  UNIQUE(project, unit_path));
 CREATE INDEX IF NOT EXISTS idx_css_migration_project ON css_migration_units(project, state);
+CREATE TABLE IF NOT EXISTS css_render_snapshots (  id INTEGER PRIMARY KEY AUTOINCREMENT,  project TEXT NOT NULL DEFAULT '',  unit_path TEXT NOT NULL DEFAULT '',  phase TEXT NOT NULL DEFAULT '',  snapshot TEXT NOT NULL DEFAULT '',  content_hash TEXT NOT NULL DEFAULT '',  captured_at TEXT NOT NULL DEFAULT '',  UNIQUE(project, unit_path, phase));
+CREATE INDEX IF NOT EXISTS idx_css_render_snapshots_unit ON css_render_snapshots(project, unit_path);
 -- Typed-fact knowledge layer (first slice; sqlite shim mirror).
 CREATE TABLE IF NOT EXISTS typed_facts (  id INTEGER PRIMARY KEY AUTOINCREMENT,  subject TEXT NOT NULL DEFAULT '',  subject_kind TEXT NOT NULL DEFAULT '',  relation TEXT NOT NULL DEFAULT '',  object TEXT NOT NULL DEFAULT '',  object_kind TEXT NOT NULL DEFAULT '',  confidence INTEGER NOT NULL DEFAULT 50,  source TEXT NOT NULL DEFAULT '',  asserted_at TEXT NOT NULL DEFAULT '',  active INTEGER NOT NULL DEFAULT 1,  superseded_by INTEGER NOT NULL DEFAULT -1);
 CREATE INDEX IF NOT EXISTS idx_typed_facts_subject ON typed_facts(subject, relation, active);

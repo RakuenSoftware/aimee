@@ -89,7 +89,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-primary-session-adapter \
                $(TESTPREFIX)/unit-test-session-search-tool \
                $(TESTPREFIX)/unit-test-working-memory $(TESTPREFIX)/unit-test-working-memory-mock $(TESTPREFIX)/unit-test-local-resolution $(TESTPREFIX)/unit-test-cognify-jobs $(TESTPREFIX)/unit-test-extractors-extra \
-               $(TESTPREFIX)/unit-test-css-analyze $(TESTPREFIX)/unit-test-typed-facts $(TESTPREFIX)/unit-test-css-graph $(TESTPREFIX)/unit-test-css-oracle $(TESTPREFIX)/unit-test-css-render-oracle $(TESTPREFIX)/unit-test-css-migration \
+               $(TESTPREFIX)/unit-test-css-analyze $(TESTPREFIX)/unit-test-typed-facts $(TESTPREFIX)/unit-test-css-graph $(TESTPREFIX)/unit-test-css-oracle $(TESTPREFIX)/unit-test-css-render-oracle $(TESTPREFIX)/unit-test-css-migration $(TESTPREFIX)/unit-test-css-render \
                $(TESTPREFIX)/unit-test-compute-pool $(TESTPREFIX)/unit-test-db2-pool $(TESTPREFIX)/unit-test-cli-launch \
                $(TESTPREFIX)/unit-test-server-session-pools \
                $(TESTPREFIX)/unit-test-presence \
@@ -458,6 +458,23 @@ $(TESTPREFIX)/unit-test-css-migration: \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
                                        $(OBJDIR)/db2/db_schema.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
+
+# CSS rendered-oracle storage + evaluation (#4-full slice 2): db2/css_render.o
+# + the pure css_render_oracle.o, over the migration-unit + graph spine.
+$(TESTPREFIX)/unit-test-css-render: \
+                                       $(OBJDIR)/tests/test_css_render.o \
+                                       $(OBJDIR)/db2/css_render.o \
+                                       $(OBJDIR)/css_render_oracle.o \
+                                       $(OBJDIR)/db2/css_migration.o \
+                                       $(OBJDIR)/db2/css_graph.o \
+                                       $(OBJDIR)/db2/typed_facts.o \
+                                       $(OBJDIR)/css_analyze.o \
+                                       $(OBJDIR)/db2/code_index.o \
+                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
+                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(OBJDIR)/cJSON.o \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 

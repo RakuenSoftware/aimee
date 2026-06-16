@@ -4,8 +4,10 @@
  * forwards the op via kb_client. Mirrors the other kb_service_* handlers. */
 #include "aimee.h"
 #include "cJSON.h"
+#include "css_render_oracle.h"
 #include "db2/css_graph.h"
 #include "db2/css_migration.h"
+#include "db2/css_render.h"
 #include "db2/typed_facts.h"
 
 #include <string.h>
@@ -155,6 +157,56 @@ int kb_handle_css_signals(int fd, cJSON *req)
          return kb_send_error(fd, "css assert-conventions failed");
       }
       cJSON_AddNumberToObject(resp, "asserted", n);
+      return kb_send_response(fd, resp);
+   }
+   if (strcmp(op, "render-store") == 0)
+   {
+      /* #4-full evidence ingest: a (sandboxed, out-of-process) render backend's
+       * computed-style snapshot JSON for one unit/phase enters here. */
+      cJSON *unit_j = cJSON_GetObjectItemCaseSensitive(req, "unit");
+      cJSON *phase_j = cJSON_GetObjectItemCaseSensitive(req, "phase");
+      cJSON *snap_j = cJSON_GetObjectItemCaseSensitive(req, "snapshot");
+      if (!cJSON_IsString(unit_j) || !cJSON_IsString(phase_j) || !cJSON_IsString(snap_j))
+      {
+         cJSON_Delete(resp);
+         return kb_send_error(fd, "css render-store requires 'unit', 'phase', 'snapshot'");
+      }
+      char now_iso[40];
+      now_utc(now_iso, sizeof(now_iso));
+      int n = db2_css_render_snapshot_store(project, unit_j->valuestring, phase_j->valuestring,
+                                            snap_j->valuestring, now_iso);
+      if (n < 0)
+      {
+         cJSON_Delete(resp);
+         return kb_send_error(fd, "css render-store failed (invalid phase or db error)");
+      }
+      cJSON_AddStringToObject(resp, "unit", unit_j->valuestring);
+      cJSON_AddStringToObject(resp, "phase", phase_j->valuestring);
+      cJSON_AddNumberToObject(resp, "stored", n); /* 1 stored, 0 gated-off */
+      return kb_send_response(fd, resp);
+   }
+   if (strcmp(op, "render-verify") == 0)
+   {
+      cJSON *unit_j = cJSON_GetObjectItemCaseSensitive(req, "unit");
+      if (!cJSON_IsString(unit_j))
+      {
+         cJSON_Delete(resp);
+         return kb_send_error(fd, "css render-verify requires 'unit'");
+      }
+      char now_iso[40];
+      now_utc(now_iso, sizeof(now_iso));
+      css_render_verdict_t v;
+      if (db2_css_render_oracle_evaluate(project, unit_j->valuestring, now_iso, &v) != 0)
+      {
+         cJSON_Delete(resp);
+         return kb_send_error(fd, "css render-verify failed");
+      }
+      cJSON_AddStringToObject(resp, "unit", unit_j->valuestring);
+      cJSON_AddBoolToObject(resp, "available", v.available);
+      cJSON_AddBoolToObject(resp, "equivalent", v.equivalent);
+      cJSON_AddNumberToObject(resp, "diff_count", v.diff_count);
+      cJSON_AddStringToObject(resp, "summary", v.summary);
+      cJSON_AddStringToObject(resp, "limitation", css_render_oracle_limitation_banner());
       return kb_send_response(fd, resp);
    }
    if (strcmp(op, "conventions") == 0)
