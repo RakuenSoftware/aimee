@@ -185,6 +185,38 @@ static void test_strings_and_urls(void)
    css_stylesheet_free(ss);
 }
 
+static int has_tok(char (*toks)[CSS_CLASS_TOKEN_MAX], int n, const char *t)
+{
+   for (int i = 0; i < n; i++)
+      if (strcmp(toks[i], t) == 0)
+         return 1;
+   return 0;
+}
+
+static void test_class_token_extraction(void)
+{
+   char toks[64][CSS_CLASS_TOKEN_MAX];
+   /* className + class, string literals, dedup; dynamic {expr} is skipped */
+   const char *tsx = "<div className=\"btn btn primary\">\n"
+                     "  <span class='label muted'></span>\n"
+                     "  <i className={dynamicOnly}></i>\n"
+                     "  <b className=\"flex\"></b>\n"
+                     "</div>";
+   int n = css_extract_class_tokens(tsx, strlen(tsx), toks, 64);
+   assert(has_tok(toks, n, "btn") && has_tok(toks, n, "primary"));
+   assert(has_tok(toks, n, "label") && has_tok(toks, n, "muted") && has_tok(toks, n, "flex"));
+   assert(!has_tok(toks, n, "dynamicOnly")); /* {expr} not a static class */
+   /* "btn" appears twice but is de-duplicated */
+   int btn = 0;
+   for (int i = 0; i < n; i++)
+      if (strcmp(toks[i], "btn") == 0)
+         btn++;
+   assert(btn == 1);
+   /* a substring like "subclassName" must not be mistaken for the attribute */
+   const char *nope = "const subclassName = \"x\"; let myclass=\"y\";";
+   assert(css_extract_class_tokens(nope, strlen(nope), toks, 64) == 0);
+}
+
 int main(void)
 {
    test_specificity();
@@ -193,6 +225,7 @@ int main(void)
    test_malformed_resilience();
    test_custom_properties_and_important();
    test_strings_and_urls();
+   test_class_token_extraction();
    printf("css_analyze: all tests passed\n");
    return 0;
 }

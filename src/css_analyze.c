@@ -757,3 +757,90 @@ void css_stylesheet_free(css_stylesheet_t *ss)
    free(ss->rules);
    free(ss);
 }
+
+/* ---- component class-token extraction (WP-D) --------------------------- */
+
+static int css_token_seen(char (*out)[CSS_CLASS_TOKEN_MAX], int n, const char *tok)
+{
+   for (int i = 0; i < n; i++)
+      if (strcmp(out[i], tok) == 0)
+         return 1;
+   return 0;
+}
+
+/* Add whitespace-separated class tokens from `s` (a className/class attribute
+ * value) to out, de-duplicated. Returns the new count. */
+static int css_add_class_tokens(const char *s, size_t len, char (*out)[CSS_CLASS_TOKEN_MAX], int n,
+                                int max)
+{
+   size_t i = 0;
+   while (i < len && n < max)
+   {
+      while (i < len && isspace((unsigned char)s[i]))
+         i++;
+      size_t start = i;
+      while (i < len && !isspace((unsigned char)s[i]))
+         i++;
+      size_t tl = i - start;
+      if (tl == 0)
+         continue;
+      if (tl > CSS_CLASS_TOKEN_MAX - 1)
+         tl = CSS_CLASS_TOKEN_MAX - 1;
+      char tok[CSS_CLASS_TOKEN_MAX];
+      memcpy(tok, s + start, tl);
+      tok[tl] = '\0';
+      /* skip template-literal/interpolation fragments — not a static class */
+      if (strchr(tok, '$') || strchr(tok, '{') || strchr(tok, '}') || strchr(tok, '`'))
+         continue;
+      if (!css_token_seen(out, n, tok))
+         snprintf(out[n++], CSS_CLASS_TOKEN_MAX, "%s", tok);
+   }
+   return n;
+}
+
+int css_extract_class_tokens(const char *text, size_t len, char (*out)[CSS_CLASS_TOKEN_MAX],
+                             int max)
+{
+   if (!text || !out || max <= 0)
+      return 0;
+   int n = 0;
+   size_t i = 0;
+   while (i < len && n < max)
+   {
+      /* find an attribute name `class` or `className` at a word boundary */
+      if ((text[i] == 'c' || text[i] == 'C') &&
+          (i == 0 || (!isalnum((unsigned char)text[i - 1]) && text[i - 1] != '_')))
+      {
+         const char *names[] = {"className", "class", NULL};
+         for (int ni = 0; names[ni]; ni++)
+         {
+            size_t nlen = strlen(names[ni]);
+            if (i + nlen <= len && strncmp(text + i, names[ni], nlen) == 0)
+            {
+               size_t j = i + nlen;
+               while (j < len && isspace((unsigned char)text[j]))
+                  j++;
+               if (j < len && text[j] == '=')
+               {
+                  j++;
+                  while (j < len && isspace((unsigned char)text[j]))
+                     j++;
+                  if (j < len && (text[j] == '"' || text[j] == '\''))
+                  {
+                     char q = text[j++];
+                     size_t vstart = j;
+                     while (j < len && text[j] != q)
+                        j++;
+                     n = css_add_class_tokens(text + vstart, j - vstart, out, n, max);
+                  }
+                  /* className={...} (dynamic) is intentionally skipped */
+               }
+               i += nlen;
+               break;
+            }
+         }
+      }
+      i++;
+   }
+   return n;
+}

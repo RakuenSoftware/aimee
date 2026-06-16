@@ -66,6 +66,17 @@ extern "C"
     * subset. Any out-param may be non-NULL; all are written. Exposed for tests. */
    void css_selector_specificity(const char *selector, int *a, int *b, int *c, int *uncertain);
 
+#define CSS_CLASS_TOKEN_MAX 128
+
+   /* Extract the set of static class tokens used by a component's markup
+    * (className="a b" / class="a b" string literals in TSX/JSX/HTML). Dynamic
+    * forms (className={expr}, template literals) are NOT statically resolvable
+    * and are skipped — the caller treats a component with only dynamic classes
+    * as unresolved (WP-D, no silent misses). Returns the number of UNIQUE tokens
+    * written to out (<= max). */
+   int css_extract_class_tokens(const char *text, size_t len, char (*out)[CSS_CLASS_TOKEN_MAX],
+                                int max);
+
 #ifdef __cplusplus
 }
 #endif

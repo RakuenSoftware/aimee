@@ -384,3 +384,169 @@ int db2_css_graph_specificity_conflicts(const char *project_filter, css_spec_con
    aimee_pg_finalize(st);
    return count;
 }
+
+/* ---- component <-> style join (WP-D) ----------------------------------- */
+
+int db2_css_component_resolve(int64_t component_file_id, const char (*tokens)[CSS_CLASS_TOKEN_MAX],
+                              int n)
+{
+   if (component_file_id < 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char err[CSSG_ERRBUF] = "";
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+      return -1;
+   int rc = 0;
+   if (db2_exec_conn_int64(conn, "DELETE FROM css_component_styles WHERE component_file_id = ?1",
+                           component_file_id) != 0)
+      rc = -1;
+
+   for (int i = 0; rc == 0 && i < n && tokens; i++)
+   {
+      if (!tokens[i][0])
+         continue;
+      char sel[CSS_SELECTOR_MAX];
+      snprintf(sel, sizeof(sel), ".%s", tokens[i]);
+
+      /* match a simple class rule of the same selector, anywhere in the index */
+      int64_t rule_id = -1;
+      static const char *q = "SELECT id FROM css_rules WHERE selector = ?1 LIMIT 1";
+      aimee_pg_stmt_t *sq = aimee_pg_prepare(conn, q, err, sizeof(err));
+      if (!sq)
+      {
+         rc = -1;
+         break;
+      }
+      aimee_pg_bind_text(sq, "?1", sel);
+      if (aimee_pg_step(sq, err, sizeof(err)) == AIMEE_PG_ROW)
+         rule_id = aimee_pg_column_int64(sq, 0);
+      aimee_pg_finalize(sq);
+
+      static const char *ins =
+          "INSERT INTO css_component_styles (component_file_id, class_token, rule_id, resolved)"
+          " VALUES (?1, ?2, ?3, ?4)";
+      aimee_pg_stmt_t *si = aimee_pg_prepare(conn, ins, err, sizeof(err));
+      if (!si)
+      {
+         rc = -1;
+         break;
+      }
+      aimee_pg_bind_int64(si, "?1", component_file_id);
+      aimee_pg_bind_text(si, "?2", tokens[i]);
+      aimee_pg_bind_int64(si, "?3", rule_id);
+      aimee_pg_bind_int(si, "?4", rule_id >= 0 ? 1 : 0);
+      if (aimee_pg_step(si, err, sizeof(err)) != AIMEE_PG_DONE)
+         rc = -1;
+      aimee_pg_finalize(si);
+   }
+
+   if (rc == 0)
+      aimee_pg_exec(conn, "COMMIT", err, sizeof(err));
+   else
+      aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+   return rc;
+}
+
+int db2_css_component_unresolved(const char *project_filter, css_unresolved_hit_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   int filt = (project_filter && project_filter[0]) ? 1 : 0;
+   static const char *sql_all = "SELECT DISTINCT p.name, f.path, cs.class_token"
+                                " FROM css_component_styles cs"
+                                " JOIN files f ON f.id = cs.component_file_id"
+                                " JOIN projects p ON p.id = f.project_id"
+                                " WHERE cs.resolved = 0"
+                                " ORDER BY f.path, cs.class_token LIMIT ?1";
+   static const char *sql_filt = "SELECT DISTINCT p.name, f.path, cs.class_token"
+                                 " FROM css_component_styles cs"
+                                 " JOIN files f ON f.id = cs.component_file_id"
+                                 " JOIN projects p ON p.id = f.project_id"
+                                 " WHERE cs.resolved = 0 AND p.name = ?2"
+                                 " ORDER BY f.path, cs.class_token LIMIT ?1";
+   char err[CSSG_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, filt ? sql_filt : sql_all, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int(st, "?1", max);
+   if (filt)
+      aimee_pg_bind_text(st, "?2", project_filter);
+   int count = 0;
+   while (count < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      css_unresolved_hit_t *h = &out[count];
+      memset(h, 0, sizeof(*h));
+      const char *pn = aimee_pg_column_text(st, 0);
+      const char *fp = aimee_pg_column_text(st, 1);
+      const char *tk = aimee_pg_column_text(st, 2);
+      snprintf(h->project, sizeof(h->project), "%s", pn ? pn : "");
+      snprintf(h->file_path, sizeof(h->file_path), "%s", fp ? fp : "");
+      snprintf(h->class_token, sizeof(h->class_token), "%s", tk ? tk : "");
+      count++;
+   }
+   aimee_pg_finalize(st);
+   return count;
+}
+
+/* Portable (LIKE-only, works on Postgres + the sqlite shim) predicate that a
+ * selector is a single simple class (".ident", no combinator/compound/second
+ * class), plus a NOT EXISTS over resolved component references in the project. */
+#define CSS_DEAD_RULE_WHERE                                                                        \
+   " c.selector LIKE '.%' AND c.selector NOT LIKE '% %' AND c.selector NOT LIKE '%>%'"             \
+   " AND c.selector NOT LIKE '%+%' AND c.selector NOT LIKE '%~%' AND c.selector NOT LIKE '%:%'"    \
+   " AND c.selector NOT LIKE '%[%' AND c.selector NOT LIKE '%#%' AND c.selector NOT LIKE '%*%'"    \
+   " AND c.selector NOT LIKE '%,%' AND substr(c.selector, 2) NOT LIKE '%.%'"                       \
+   " AND c.spec_uncertain = 0"                                                                     \
+   " AND NOT EXISTS (SELECT 1 FROM css_component_styles cs JOIN files cf"                          \
+   "   ON cf.id = cs.component_file_id WHERE cf.project_id = f.project_id AND cs.resolved = 1"     \
+   "   AND ('.' || cs.class_token) = c.selector)"
+
+int db2_css_dead_rules(const char *project_filter, css_dead_rule_hit_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   int filt = (project_filter && project_filter[0]) ? 1 : 0;
+   static const char *sql_all = "SELECT p.name, f.path, c.selector, c.line"
+                                " FROM css_rules c"
+                                " JOIN files f ON f.id = c.file_id"
+                                " JOIN projects p ON p.id = f.project_id"
+                                " WHERE" CSS_DEAD_RULE_WHERE " ORDER BY f.path, c.line LIMIT ?1";
+   static const char *sql_filt =
+       "SELECT p.name, f.path, c.selector, c.line"
+       " FROM css_rules c"
+       " JOIN files f ON f.id = c.file_id"
+       " JOIN projects p ON p.id = f.project_id"
+       " WHERE p.name = ?2 AND" CSS_DEAD_RULE_WHERE " ORDER BY f.path, c.line LIMIT ?1";
+   char err[CSSG_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, filt ? sql_filt : sql_all, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int(st, "?1", max);
+   if (filt)
+      aimee_pg_bind_text(st, "?2", project_filter);
+   int count = 0;
+   while (count < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      css_dead_rule_hit_t *h = &out[count];
+      memset(h, 0, sizeof(*h));
+      const char *pn = aimee_pg_column_text(st, 0);
+      const char *fp = aimee_pg_column_text(st, 1);
+      const char *sel = aimee_pg_column_text(st, 2);
+      snprintf(h->project, sizeof(h->project), "%s", pn ? pn : "");
+      snprintf(h->file_path, sizeof(h->file_path), "%s", fp ? fp : "");
+      snprintf(h->selector, sizeof(h->selector), "%s", sel ? sel : "");
+      h->line = aimee_pg_column_int(st, 3);
+      count++;
+   }
+   aimee_pg_finalize(st);
+   return count;
+}

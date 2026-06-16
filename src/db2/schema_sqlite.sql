@@ -327,3 +327,7 @@ CREATE INDEX IF NOT EXISTS idx_css_rules_file ON css_rules(file_id);
 CREATE INDEX IF NOT EXISTS idx_css_rules_selector ON css_rules(selector);
 CREATE INDEX IF NOT EXISTS idx_css_decl_rule ON css_declarations(rule_id);
 CREATE INDEX IF NOT EXISTS idx_css_decl_property ON css_declarations(property);
+-- CSS migration assistant (WP-D): component -> style join (sqlite shim mirror).
+CREATE TABLE IF NOT EXISTS css_component_styles (  id INTEGER PRIMARY KEY AUTOINCREMENT,  component_file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,  class_token TEXT NOT NULL DEFAULT '',  rule_id INTEGER NOT NULL DEFAULT -1,  resolved INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS idx_css_comp_file ON css_component_styles(component_file_id);
+CREATE INDEX IF NOT EXISTS idx_css_comp_token ON css_component_styles(class_token);

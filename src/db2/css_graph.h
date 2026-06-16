@@ -111,6 +111,39 @@ extern "C"
    int db2_css_graph_specificity_conflicts(const char *project_filter, css_spec_conflict_t *out,
                                            int max);
 
+   /* --- component <-> style join (WP-D, #3) -------------------------------- */
+
+   typedef struct
+   {
+      char project[CSS_GRAPH_PROJECT_MAX];
+      char file_path[MAX_PATH_LEN]; /* the component file */
+      char class_token[CSS_CLASS_TOKEN_MAX];
+   } css_unresolved_hit_t;
+
+   typedef struct
+   {
+      char project[CSS_GRAPH_PROJECT_MAX];
+      char file_path[MAX_PATH_LEN]; /* the stylesheet */
+      char selector[CSS_SELECTOR_MAX];
+      int line;
+   } css_dead_rule_hit_t;
+
+   /* Replace a component's class-token -> rule join (delete-then-insert). Each
+    * token is matched against a simple class rule (selector = "." + token);
+    * resolved=1 + rule_id when found, resolved=0 + rule_id=-1 otherwise (dynamic
+    * class / CSS-in-JS / no rule). component_file_id must be an existing files
+    * row. */
+   int db2_css_component_resolve(int64_t component_file_id,
+                                 const char (*tokens)[CSS_CLASS_TOKEN_MAX], int n);
+
+   /* Class tokens a component uses but that resolved to no rule (candidates for
+    * dynamic/CSS-in-JS or a class whose CSS is missing/not-yet-indexed). */
+   int db2_css_component_unresolved(const char *project_filter, css_unresolved_hit_t *out, int max);
+
+   /* Simple class rules (selector "." + ident) that NO component references — the
+    * cross-file dead-rule signal the style graph alone (#1) cannot produce. */
+   int db2_css_dead_rules(const char *project_filter, css_dead_rule_hit_t *out, int max);
+
 #ifdef __cplusplus
 }
 #endif
