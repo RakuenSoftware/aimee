@@ -547,6 +547,10 @@ int handle_evidence_provenance(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
 {
    return stub_handler(conn, "evidence.provenance_retrieval_event");
 }
+int handle_css_signals(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "css.signals");
+}
 int handle_curator_implements(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "curator.implements");

@@ -544,6 +544,10 @@ int handle_blast_radius_preview(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
  * stay under the per-file line cap). */
 #include "server_state_audit.inc"
 
+/* CSS migration assistant /v1/css/signals handler — a thin forward to the KB
+ * (textual include for the line cap). */
+#include "server_css_query.inc"
+
 int handle_kb_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
