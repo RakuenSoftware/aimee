@@ -164,6 +164,92 @@ static void test_retrieval_event_merge_turn(void)
    printf("  retrieval_event_merge_turn: ok\n");
 }
 
+static int count_occurrences(const char *hay, const char *needle)
+{
+   int n = 0;
+   for (const char *q = hay; (q = strstr(q, needle)); q += strlen(needle))
+      n++;
+   return n;
+}
+
+/* ---- 1c. retrieval_event_merge_refs_turn (P1.5 D3 typed two-writer merge) ---- */
+static void test_retrieval_event_merge_refs(void)
+{
+   open_db();
+
+   const char *types[2] = {"code", "code"};
+   const char *refs[2] = {"code:proj:src/a.c", "code:proj:src/b.c"};
+   const char *vers[2] = {"h1", "h2"};
+
+   /* code ref on a fresh turn → a bare event is created, then the typed ref merged. */
+   char ev_id[64];
+   assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", types, refs, vers,
+                                                       1, ev_id, sizeof(ev_id)) == 0);
+   char payload[8192];
+   assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(strstr(payload, "\"type\":\"code\"") != NULL);
+   assert(strstr(payload, "code:proj:src/a.c") != NULL);
+   assert(strstr(payload, "\"v\":\"h1\"") != NULL);
+   /* code refs do NOT populate the memory-only legacy projection */
+   assert(strstr(payload, "\"surfaced_ids\":[]") != NULL);
+
+   /* second call: a.c is a dup (skipped), b.c is added; same canonical event. */
+   char got[64];
+   assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", types, refs, vers,
+                                                       2, got, sizeof(got)) == 0);
+   assert(strcmp(got, ev_id) == 0);
+   assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(strstr(payload, "code:proj:src/b.c") != NULL);
+   assert(count_occurrences(payload, "code:proj:src/a.c") == 1); /* deduped, not duplicated */
+
+   /* idempotent: re-merging both refs changes nothing. */
+   assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", types, refs, vers,
+                                                       2, NULL, 0) == 0);
+   assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(count_occurrences(payload, "code:proj:src/a.c") == 1);
+   assert(count_occurrences(payload, "code:proj:src/b.c") == 1);
+
+   /* COEXISTENCE: a memory ref merged into the same turn lives alongside the code
+    * refs in surfaced_refs; the legacy projection contains only the memory id. */
+   int64_t mids[1] = {55};
+   assert(db2_demotion_retrieval_event_merge_turn("turn-c", "fp", "Recall", mids, 1, NULL, 0) == 0);
+   assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(strstr(payload, "\"type\":\"memory\"") != NULL);
+   assert(strstr(payload, "\"type\":\"code\"") != NULL);
+   assert(strstr(payload, "\"surfaced_ids\":[55]") != NULL);
+
+   /* empty turn_id rejected; empty type/ref entries skipped (no-op success). */
+   assert(db2_demotion_retrieval_event_merge_refs_turn("", "fp", "Recall", types, refs, vers, 1,
+                                                       NULL, 0) == -1);
+   const char *empty_t[1] = {""};
+   const char *empty_r[1] = {""};
+   assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", empty_t, empty_r,
+                                                       NULL, 1, NULL, 0) == 0);
+
+   /* versions==NULL → v omitted; a fresh code ref still merges. */
+   const char *t2[1] = {"code"};
+   const char *r2[1] = {"code:proj:src/c.c"};
+   assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", t2, r2, NULL, 1,
+                                                       NULL, 0) == 0);
+   assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(strstr(payload, "code:proj:src/c.c") != NULL);
+
+   /* n_refs==0 is a valid no-op on an existing turn. */
+   assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", NULL, NULL, NULL,
+                                                       0, NULL, 0) == 0);
+
+   /* a "memory"-typed entry is skipped here (it must use merge_turn). */
+   const char *tm[1] = {"memory"};
+   const char *rm[1] = {"memory:99"};
+   assert(db2_demotion_retrieval_event_merge_refs_turn("turn-c", "fp", "Recall", tm, rm, NULL, 1,
+                                                       NULL, 0) == 0);
+   assert(db2_demotion_retrieval_event_by_turn("turn-c", NULL, 0, payload, sizeof(payload)) == 1);
+   assert(strstr(payload, "memory:99") == NULL); /* not added */
+
+   close_db();
+   printf("  retrieval_event_merge_refs: ok\n");
+}
+
 /* ---- 2. retrieval_attribution_write ---- */
 static void test_retrieval_attribution_write(void)
 {
@@ -324,6 +410,7 @@ int main(void)
    test_retrieval_event_write();
    test_retrieval_event_turn();
    test_retrieval_event_merge_turn();
+   test_retrieval_event_merge_refs();
    test_retrieval_attribution_write();
    test_demotion_score_empty();
    test_demotion_score_basic();
