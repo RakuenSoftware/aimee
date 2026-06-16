@@ -320,3 +320,10 @@ CREATE INDEX IF NOT EXISTS idx_code_embeddings_project ON code_embeddings(projec
 CREATE INDEX IF NOT EXISTS idx_code_embeddings_node ON code_embeddings(project, node_key);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_code_embeddings_hash ON code_embeddings(project, node_key, content_hash);
 CREATE INDEX IF NOT EXISTS idx_code_embeddings_body_hash ON code_embeddings(project, body_hash);
+-- CSS migration assistant (WP-B): style graph (sqlite shim mirror of schema.sql).
+CREATE TABLE IF NOT EXISTS css_rules (  id INTEGER PRIMARY KEY AUTOINCREMENT,  file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,  selector TEXT NOT NULL DEFAULT '',  spec_a INTEGER NOT NULL DEFAULT 0,  spec_b INTEGER NOT NULL DEFAULT 0,  spec_c INTEGER NOT NULL DEFAULT 0,  spec_uncertain INTEGER NOT NULL DEFAULT 0,  at_context TEXT NOT NULL DEFAULT '',  line INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS css_declarations (  id INTEGER PRIMARY KEY AUTOINCREMENT,  rule_id INTEGER NOT NULL REFERENCES css_rules(id) ON DELETE CASCADE,  property TEXT NOT NULL DEFAULT '',  value TEXT NOT NULL DEFAULT '',  important INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS idx_css_rules_file ON css_rules(file_id);
+CREATE INDEX IF NOT EXISTS idx_css_rules_selector ON css_rules(selector);
+CREATE INDEX IF NOT EXISTS idx_css_decl_rule ON css_declarations(rule_id);
+CREATE INDEX IF NOT EXISTS idx_css_decl_property ON css_declarations(property);
