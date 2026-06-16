@@ -81,7 +81,7 @@ typedef struct
    int pooled;
 } db2_thread_lease_t;
 
-static int g_pool_size = 16;          /* set via db2_set_pool_size before db2_init */
+static int g_pool_size = 16; /* set via db2_set_pool_size before db2_init */
 static __thread int g_lease_depth = 0;
 
 void db2_set_pool_size(int size)
@@ -424,8 +424,9 @@ int db2_init(const char *libpq_url)
    {
       char perr[256] = "";
       if (db2_pool_init(libpq_url, g_pool_size, perr, sizeof(perr)) != 0)
-         fprintf(stderr, "aimee: db2_init: connection pool init failed (%s); using per-thread "
-                         "connections\n",
+         fprintf(stderr,
+                 "aimee: db2_init: connection pool init failed (%s); using per-thread "
+                 "connections\n",
                  perr);
    }
    pthread_mutex_unlock(&g_init_lock);

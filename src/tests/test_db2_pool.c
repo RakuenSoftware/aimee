@@ -94,7 +94,7 @@ static void test_lease_return_basic(void)
 
    void *a = db2_pool_lease(1000);
    void *b = db2_pool_lease(1000);
-   assert(a && b && a != b); /* two distinct connections */
+   assert(a && b && a != b);  /* two distinct connections */
    assert(g_open_count == 2); /* opened on demand */
 
    db2_pool_return(a);
@@ -181,12 +181,12 @@ static void test_poison_on_reset_fail(void)
    install_mock();
    char e[128] = "";
    assert(db2_pool_init("mock://x", 1, e, sizeof(e)) == 0);
-   assert(g_open_count == 0);  /* lazy */
+   assert(g_open_count == 0); /* lazy */
    void *a = db2_pool_lease(1000);
    assert(a);
-   assert(g_open_count == 1);  /* opened on demand */
-   g_reset_rc = -1;            /* next reset fails -> poison */
-   db2_pool_return(a);         /* closes + reopens the member */
+   assert(g_open_count == 1); /* opened on demand */
+   g_reset_rc = -1;           /* next reset fails -> poison */
+   db2_pool_return(a);        /* closes + reopens the member */
    g_reset_rc = 0;
    assert(g_close_count == 1); /* poisoned member closed */
    assert(g_open_count == 2);  /* and a fresh one opened */

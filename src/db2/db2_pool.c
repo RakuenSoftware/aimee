@@ -66,8 +66,8 @@ static void *(*g_open)(const char *, char *, size_t) = aimee_pg_open;
 static void (*g_close)(void *) = aimee_pg_close;
 static int (*g_reset)(void *) = member_reset_real;
 
-void db2_pool_set_test_ops(void *(*open_fn)(const char *, char *, size_t),
-                           void (*close_fn)(void *), int (*reset_fn)(void *))
+void db2_pool_set_test_ops(void *(*open_fn)(const char *, char *, size_t), void (*close_fn)(void *),
+                           int (*reset_fn)(void *))
 {
    g_open = open_fn ? open_fn : aimee_pg_open;
    g_close = close_fn ? close_fn : aimee_pg_close;
@@ -332,8 +332,8 @@ void db2_pool_set_test_ceiling_ms(int ceiling_ms)
    pthread_mutex_unlock(&g_mtx);
 }
 
-void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants,
-                    long *lease_timeouts, long *stuck, long *poisoned)
+void db2_pool_stats(int *size, int *in_use, int *waiters, long *lease_grants, long *lease_timeouts,
+                    long *stuck, long *poisoned)
 {
    pthread_mutex_lock(&g_mtx);
    int used = 0;

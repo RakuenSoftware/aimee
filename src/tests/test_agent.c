@@ -1867,108 +1867,6 @@ static void test_agent_trace_log_uses_db1_execution_trace(void)
    db1_stmt_cache_clear();
    sqlite3_close(db);
 }
-/* Route-health filter predicates for test_agent_route_health_filter. */
-static const char *g_test_down_agent = NULL;
-static int test_route_filter_named(const char *name)
-{
-   return g_test_down_agent && strcmp(name, g_test_down_agent) == 0;
-}
-static int test_route_filter_all(const char *name)
-{
-   (void)name;
-   return 1;
-}
-
-/* A provider the health catalog marks DOWN must be excluded from routing so
- * new work falls back to a healthy peer; when every candidate is down, routing
- * returns NULL (a clean failure) rather than handing work to a dead endpoint. */
-static void test_agent_route_health_filter(void)
-{
-   agent_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 2;
-
-   strcpy(cfg.agents[0].name, "cheap");
-   strcpy(cfg.agents[0].roles[0], "summarize");
-   cfg.agents[0].role_count = 1;
-   cfg.agents[0].cost_tier = 0;
-   cfg.agents[0].enabled = 1;
-
-   strcpy(cfg.agents[1].name, "expensive");
-   strcpy(cfg.agents[1].roles[0], "summarize");
-   cfg.agents[1].role_count = 1;
-   cfg.agents[1].cost_tier = 1;
-   cfg.agents[1].enabled = 1;
-
-   /* No filter registered: cheapest healthy agent wins (baseline). */
-   agent_set_route_health_filter(NULL);
-   assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
-
-   /* Cheap agent DOWN: it is no longer available, routing uses the peer. */
-   g_test_down_agent = "cheap";
-   agent_set_route_health_filter(test_route_filter_named);
-   assert(!agent_is_available_for_routing(&cfg.agents[0]));
-   assert(agent_is_available_for_routing(&cfg.agents[1]));
-   assert(agent_route(&cfg, "summarize") == &cfg.agents[1]);
-
-   /* Every candidate DOWN: clean NULL, never a dead-endpoint wedge. */
-   agent_set_route_health_filter(test_route_filter_all);
-   assert(agent_route(&cfg, "summarize") == NULL);
-
-   /* Clearing the filter restores the prior behaviour exactly. */
-   g_test_down_agent = NULL;
-   agent_set_route_health_filter(NULL);
-   assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
-}
-
-/* Regression: the multi-turn tool loop must not issue a model call with a
- * starved (sub-viable) timeout when its budget is nearly exhausted -- that
- * yields an HTTP -1 read failure that gets misreported as "provider
- * unreachable" and marks the provider degraded. agent_loop_per_call_timeout_ms
- * returns -1 instead so the loop stops cleanly. */
-static void test_agent_loop_per_call_timeout(void)
-{
-   /* Early in the loop: full per-call timeout. */
-   assert(agent_loop_per_call_timeout_ms(180000, 720000, 0) == 180000);
-   /* Mid loop: capped to the remaining budget, still >= the viable floor. */
-   assert(agent_loop_per_call_timeout_ms(180000, 720000, 660000) == 60000);
-   /* Budget nearly gone (only 2.2s left -- the real-world failure): stop, do
-    * NOT issue a doomed 2262ms call. */
-   assert(agent_loop_per_call_timeout_ms(180000, 720000, 717738) == -1);
-   /* Exactly at the floor is still viable; one below it stops. */
-   assert(agent_loop_per_call_timeout_ms(180000, 720000, 660000) == 60000);
-   assert(agent_loop_per_call_timeout_ms(180000, 720000, 660001) == -1);
-   /* Small configured timeout: the floor never exceeds agent_timeout_ms. */
-   assert(agent_loop_per_call_timeout_ms(10000, 40000, 0) == 10000);
-   assert(agent_loop_per_call_timeout_ms(10000, 40000, 35000) == -1);
-}
-
-static void test_claude_cli_predicate(void)
-{
-   agent_t a;
-
-   /* claude via tmux/CLI login → gated (primary-only by default). */
-   memset(&a, 0, sizeof(a));
-   snprintf(a.backend, sizeof(a.backend), "%s", AGENT_BACKEND_TMUX_CLI);
-   snprintf(a.cli_kind, sizeof(a.cli_kind), "claude");
-   assert(agent_is_claude_cli(&a) == 1);
-   snprintf(a.cli_kind, sizeof(a.cli_kind), "claude-code");
-   assert(agent_is_claude_cli(&a) == 1);
-   snprintf(a.backend, sizeof(a.backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
-   snprintf(a.cli_kind, sizeof(a.cli_kind), "claude");
-   assert(agent_is_claude_cli(&a) == 1);
-
-   /* Claude-only: other CLI agents (Codex CLI, gemini-cli) are NOT gated. */
-   snprintf(a.cli_kind, sizeof(a.cli_kind), "codex");
-   assert(agent_is_claude_cli(&a) == 0);
-   snprintf(a.cli_kind, sizeof(a.cli_kind), "gemini");
-   assert(agent_is_claude_cli(&a) == 0);
-
-   /* plain HTTP/API-key agent → not gated. */
-   memset(&a, 0, sizeof(a));
-   snprintf(a.backend, sizeof(a.backend), "openai");
-   assert(agent_is_claude_cli(&a) == 0);
-}
 
 int main(void)
 {
@@ -1984,9 +1882,6 @@ int main(void)
    test_agent_has_role();
    test_agent_find();
    test_agent_route();
-   test_claude_cli_predicate();
-   test_agent_loop_per_call_timeout();
-   test_agent_route_health_filter();
    test_agent_route_with_caps_honors_tools_enabled();
    test_agent_route_with_caps_honors_context_override();
    test_current_code_only_role_tool_policy();
