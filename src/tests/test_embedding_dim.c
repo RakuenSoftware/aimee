@@ -36,10 +36,10 @@ int main(void)
    /* A different dim is REFUSED (the columns are sized at the recorded 1024). */
    err[0] = '\0';
    assert(db2_embedding_dim_record_or_check(conn, 2560, err, sizeof err) == -1);
-   assert(err[0] != '\0');                 /* a remediation message is set */
-   assert(strstr(err, "1024") != NULL);    /* names the recorded dim */
-   assert(strstr(err, "2560") != NULL);    /* and the configured dim */
-   assert(strstr(err, "reembed") != NULL); /* and the remediation */
+   assert(err[0] != '\0');                            /* a remediation message is set */
+   assert(strstr(err, "1024") != NULL);               /* names the recorded dim */
+   assert(strstr(err, "2560") != NULL);               /* and the configured dim */
+   assert(strstr(err, "retrieval-stack.md") != NULL); /* and points at the remediation doc */
 
    /* The refusal did not change the recorded dim — 1024 still matches. */
    err[0] = '\0';
