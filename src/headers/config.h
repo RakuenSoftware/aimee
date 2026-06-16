@@ -287,6 +287,10 @@ typedef struct config
    int memory_maintenance_enabled;
    int memory_maintenance_interval_seconds;
    int memory_maintenance_summarize_enabled;
+   /* css_style_graph_enabled: opt-in gate (default 0) for the CSS migration
+    * assistant's style-graph write path during indexing (WP-C). When off, the
+    * indexer keeps only the legacy lexical CSS class-name scan. */
+   int css_style_graph_enabled;
    int memory_salience_enabled;
    double memory_salience_weight;
    int memory_salience_window_size;

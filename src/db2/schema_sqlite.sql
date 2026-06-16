@@ -320,3 +320,17 @@ CREATE INDEX IF NOT EXISTS idx_code_embeddings_project ON code_embeddings(projec
 CREATE INDEX IF NOT EXISTS idx_code_embeddings_node ON code_embeddings(project, node_key);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_code_embeddings_hash ON code_embeddings(project, node_key, content_hash);
 CREATE INDEX IF NOT EXISTS idx_code_embeddings_body_hash ON code_embeddings(project, body_hash);
+-- CSS migration assistant (WP-B): style graph (sqlite shim mirror of schema.sql).
+CREATE TABLE IF NOT EXISTS css_rules (  id INTEGER PRIMARY KEY AUTOINCREMENT,  file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,  selector TEXT NOT NULL DEFAULT '',  spec_a INTEGER NOT NULL DEFAULT 0,  spec_b INTEGER NOT NULL DEFAULT 0,  spec_c INTEGER NOT NULL DEFAULT 0,  spec_uncertain INTEGER NOT NULL DEFAULT 0,  at_context TEXT NOT NULL DEFAULT '',  line INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS css_declarations (  id INTEGER PRIMARY KEY AUTOINCREMENT,  rule_id INTEGER NOT NULL REFERENCES css_rules(id) ON DELETE CASCADE,  property TEXT NOT NULL DEFAULT '',  value TEXT NOT NULL DEFAULT '',  important INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS idx_css_rules_file ON css_rules(file_id);
+CREATE INDEX IF NOT EXISTS idx_css_rules_selector ON css_rules(selector);
+CREATE INDEX IF NOT EXISTS idx_css_decl_rule ON css_declarations(rule_id);
+CREATE INDEX IF NOT EXISTS idx_css_decl_property ON css_declarations(property);
+-- CSS migration assistant (WP-D): component -> style join (sqlite shim mirror).
+CREATE TABLE IF NOT EXISTS css_component_styles (  id INTEGER PRIMARY KEY AUTOINCREMENT,  component_file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,  class_token TEXT NOT NULL DEFAULT '',  rule_id INTEGER NOT NULL DEFAULT -1,  resolved INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS idx_css_comp_file ON css_component_styles(component_file_id);
+CREATE INDEX IF NOT EXISTS idx_css_comp_token ON css_component_styles(class_token);
+-- CSS migration assistant (WP-F): per-unit pipeline state (sqlite shim mirror).
+CREATE TABLE IF NOT EXISTS css_migration_units (  id INTEGER PRIMARY KEY AUTOINCREMENT,  project TEXT NOT NULL DEFAULT '',  unit_path TEXT NOT NULL DEFAULT '',  state TEXT NOT NULL DEFAULT 'pending',  total_tokens INTEGER NOT NULL DEFAULT 0,  resolved_tokens INTEGER NOT NULL DEFAULT 0,  oracle_equivalent INTEGER NOT NULL DEFAULT -1,  note TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT '',  UNIQUE(project, unit_path));
+CREATE INDEX IF NOT EXISTS idx_css_migration_project ON css_migration_units(project, state);

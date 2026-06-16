@@ -45,6 +45,8 @@ const config_field_t config_fields[] = {
      sizeof(int), 0, CFG_INT},
     {"ingress_max_raw_scans", offsetof(config_t, ingress_max_raw_scans), sizeof(int), 0, CFG_INT},
     {"typed_facts_enabled", offsetof(config_t, typed_facts_enabled), sizeof(int), 0, CFG_BOOL},
+    {"css_style_graph_enabled", offsetof(config_t, css_style_graph_enabled), sizeof(int), 0,
+     CFG_BOOL},
     {"kb_evidence_emit_enabled", offsetof(config_t, kb_evidence_emit_enabled), sizeof(int), 0,
      CFG_BOOL},
     {"memory_rerank_command", offsetof(config_t, memory_rerank_command),

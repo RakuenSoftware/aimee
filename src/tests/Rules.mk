@@ -56,7 +56,7 @@ TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(OBJDIR)/rel_types.o $(OBJDIR)/memory_fact_g
                  $(OBJDIR)/memory_core.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/posix/memory.o \
                  $(OBJDIR)/memory_logic.o $(OBJDIR)/memory_effective.o $(OBJDIR)/memory_health.o $(OBJDIR)/memory_conflict.o $(OBJDIR)/memory_context.o $(OBJDIR)/memory_assemble.o $(OBJDIR)/memory_advanced.o $(OBJDIR)/memory_prospective.o $(OBJDIR)/memory_lifecycle.o $(OBJDIR)/memory_directives.o $(OBJDIR)/memory_maintenance.o $(OBJDIR)/memory_graph.o $(OBJDIR)/memory_graph_fusion.o $(OBJDIR)/memory_scan.o $(OBJDIR)/memory_improve.o $(OBJDIR)/memory_episodes.o \
                  $(OBJDIR)/workflow_learn.o \
-                 $(OBJDIR)/index.o $(OBJDIR)/extractors.o $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o \
+                 $(OBJDIR)/index.o $(OBJDIR)/css_analyze.o $(OBJDIR)/db2/css_graph.o $(OBJDIR)/extractors.o $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o \
                  $(OBJDIR)/tasks.o $(OBJDIR)/render.o \
                  $(DB1_OBJS) $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/agent_hints.o $(OBJDIR)/db2/agent_outcomes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/db2/collab_rules.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/decision_log.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_nodes.o $(OBJDIR)/db2/code_projection.o $(OBJDIR)/db2/shadow_delta.o $(OBJDIR)/server/kb_client_code_embed.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/epistemic_directives.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/memory_export.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/prospective_memories.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/tasks.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/trace_mining.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/kb_runtime_state.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/learning.o $(OBJDIR)/db2/code_index.o $(OBJDIR)/db2/sketch.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o $(OBJDIR)/kb/kb.o $(OBJDIR)/kb/kb_fusion.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/kb/kb_conventions.o $(OBJDIR)/sketch.o \
                  $(OBJDIR)/workspace.o \
@@ -89,6 +89,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-primary-session-adapter \
                $(TESTPREFIX)/unit-test-session-search-tool \
                $(TESTPREFIX)/unit-test-working-memory $(TESTPREFIX)/unit-test-working-memory-mock $(TESTPREFIX)/unit-test-local-resolution $(TESTPREFIX)/unit-test-cognify-jobs $(TESTPREFIX)/unit-test-extractors-extra \
+               $(TESTPREFIX)/unit-test-css-analyze $(TESTPREFIX)/unit-test-css-graph $(TESTPREFIX)/unit-test-css-oracle $(TESTPREFIX)/unit-test-css-migration \
                $(TESTPREFIX)/unit-test-compute-pool $(TESTPREFIX)/unit-test-db2-pool $(TESTPREFIX)/unit-test-cli-launch \
                $(TESTPREFIX)/unit-test-server-session-pools \
                $(TESTPREFIX)/unit-test-presence \
@@ -407,6 +408,29 @@ $(TESTPREFIX)/unit-test-code-index-ops: \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
+# CSS style-graph persistence (WP-B) over the sqlite shim.
+$(TESTPREFIX)/unit-test-css-graph: \
+                                       $(OBJDIR)/tests/test_css_graph.o \
+                                       $(OBJDIR)/db2/css_graph.o \
+                                       $(OBJDIR)/css_analyze.o \
+                                       $(OBJDIR)/db2/code_index.o \
+                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
+                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
+
+# CSS migration pipeline driver (WP-F) over the sqlite shim.
+$(TESTPREFIX)/unit-test-css-migration: \
+                                       $(OBJDIR)/tests/test_css_migration.o \
+                                       $(OBJDIR)/db2/css_migration.o \
+                                       $(OBJDIR)/db2/css_graph.o \
+                                       $(OBJDIR)/css_analyze.o \
+                                       $(OBJDIR)/db2/code_index.o \
+                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
+                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
+
 $(TESTPREFIX)/unit-test-curator-version: \
                                        $(OBJDIR)/tests/test_curator_version.o \
                                        $(OBJDIR)/kb/kb_curator_version.o \
@@ -479,7 +503,7 @@ $(TESTPREFIX)/unit-test-cmd-hooks-scope: $(OBJDIR)/tests/test_cmd_hooks_scope.o 
                              $(OBJDIR)/cmd_hooks_scope.o $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-memory: $(OBJDIR)/tests/test_memory.o $(OBJDIR)/kb/kb_bandit.o $(OBJDIR)/kb/kb_bandit_registry.o $(OBJDIR)/db2/bandit.o $(OBJDIR)/memory_core.o \
+$(TESTPREFIX)/unit-test-memory: $(OBJDIR)/tests/test_memory.o $(OBJDIR)/kb/kb_bandit.o $(OBJDIR)/kb/kb_bandit_registry.o $(OBJDIR)/db2/bandit.o $(OBJDIR)/db2/demotion.o $(OBJDIR)/memory_core.o \
                         $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/stopwords.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/epistemic_directives.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/calibration.o $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o \
                         $(OBJDIR)/tests/support/mock_agent_http.o \
                         $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/tests/support/kb_client_test_stub.o \
@@ -492,7 +516,7 @@ $(TESTPREFIX)/unit-test-memory: $(OBJDIR)/tests/test_memory.o $(OBJDIR)/kb/kb_ba
                         $(OBJDIR)/aimee_home.o \
                         $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) \
                         $(OBJDIR)/tests/support/learning_implicit_stub.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o \
-                        $(OBJDIR)/tasks.o $(OBJDIR)/index.o $(OBJDIR)/extractors.o \
+                        $(OBJDIR)/tasks.o $(OBJDIR)/index.o $(OBJDIR)/css_analyze.o $(OBJDIR)/db2/css_graph.o $(OBJDIR)/extractors.o \
                         $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o \
                         $(OBJDIR)/kb/kb.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/kb/kb_conventions.o $(OBJDIR)/kb/kb_mdl.o \
                         $(OBJDIR)/db2/feature_rows.o \
@@ -508,7 +532,7 @@ $(TESTPREFIX)/unit-test-tasks: $(OBJDIR)/tests/test_tasks.o $(OBJDIR)/tasks.o $(
                        $(OBJDIR)/memory_logic.o $(OBJDIR)/memory_health.o $(OBJDIR)/memory_conflict.o $(OBJDIR)/memory_context.o $(OBJDIR)/memory_assemble.o \
                         \
                        $(OBJDIR)/memory_advanced.o $(OBJDIR)/memory_prospective.o $(OBJDIR)/memory_lifecycle.o $(OBJDIR)/memory_directives.o $(OBJDIR)/memory_maintenance.o $(OBJDIR)/memory_graph.o $(OBJDIR)/memory_graph_fusion.o $(OBJDIR)/memory_scan.o $(OBJDIR)/memory_improve.o $(OBJDIR)/memory_episodes.o $(OBJDIR)/tests/support/learning_implicit_stub.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o \
-                       $(OBJDIR)/index.o $(OBJDIR)/extractors.o \
+                       $(OBJDIR)/index.o $(OBJDIR)/css_analyze.o $(OBJDIR)/db2/css_graph.o $(OBJDIR)/extractors.o \
                        $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o \
                        $(OBJDIR)/kb/kb_mdl.o $(OBJDIR)/db2/feature_rows.o \
                        $(OBJDIR)/render.o $(OBJDIR)/cJSON.o $(DB1_OBJS)
@@ -583,7 +607,7 @@ $(TESTPREFIX)/unit-test-cli-acp: $(OBJDIR)/tests/test_cli_acp.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-extractors: $(OBJDIR)/tests/test_extractors.o $(OBJDIR)/extractors.o \
-                           $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/index.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o \
+                           $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/index.o $(OBJDIR)/css_analyze.o $(OBJDIR)/db2/css_graph.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o \
                            $(OBJDIR)/config.o $(OBJDIR)/config_sections.o $(OBJDIR)/config_database.o $(OBJDIR)/config_learning.o $(OBJDIR)/config_memory.o $(OBJDIR)/config_charter.o $(OBJDIR)/config_trigger.o $(OBJDIR)/config_kb_maintenance.o $(OBJDIR)/config_kb_curator.o $(OBJDIR)/config_server_api.o $(OBJDIR)/config_skills.o $(OBJDIR)/config_save.o $(OBJDIR)/config_mode.o $(OBJDIR)/config_fields.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                            $(OBJDIR)/platform_random.o $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) \
                            $(OBJDIR)/memory_core.o $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/stopwords.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/epistemic_directives.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o $(OBJDIR)/tests/support/mock_agent_http.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/tests/support/kb_client_test_stub.o $(OBJDIR)/posix/memory.o \
@@ -596,6 +620,14 @@ $(TESTPREFIX)/unit-test-extractors: $(OBJDIR)/tests/test_extractors.o $(OBJDIR)/
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # --- New tests ---
+
+# CSS analyzer (WP-A) — pure leaf, depends only on css_analyze.o + libc.
+$(TESTPREFIX)/unit-test-css-analyze: $(OBJDIR)/tests/test_css_analyze.o $(OBJDIR)/css_analyze.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# CSS interim static oracle (WP-E) — leaf: css_oracle.o + css_analyze.o + libc.
+$(TESTPREFIX)/unit-test-css-oracle: $(OBJDIR)/tests/test_css_oracle.o $(OBJDIR)/css_oracle.o $(OBJDIR)/css_analyze.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-text: $(OBJDIR)/tests/test_text.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                      $(OBJDIR)/cJSON.o
@@ -2702,6 +2734,7 @@ $(TESTPREFIX)/unit-test-calibration: $(OBJDIR)/tests/test_calibration.o \
 
 $(TESTPREFIX)/unit-test-demotion: $(OBJDIR)/tests/test_demotion.o \
                      $(OBJDIR)/db2/demotion.o \
+                     $(OBJDIR)/db2/memory_payload.o \
                      $(OBJDIR)/db2/artifacts.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \

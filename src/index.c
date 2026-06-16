@@ -1,7 +1,10 @@
 /* index.c: code indexing, project scanning, symbol lookup, blast radius analysis */
 #include "aimee.h"
 #if !defined(AIMEE_DB2_DISABLED)
+#include "config.h"
+#include "css_analyze.h"
 #include "db2/code_index.h"
+#include "db2/css_graph.h"
 #include "db2/entity_edges.h"
 #include <ctype.h>
 #include <dirent.h>
@@ -629,6 +632,12 @@ int index_scan_project(const char *name, const char *root, int force)
    if (project_id < 0)
       return -1;
 
+   /* CSS migration assistant (WP-C): the style-graph write path is opt-in. Read
+    * the flag once per scan; off by default, the indexer keeps only the legacy
+    * lexical CSS class-name scan (file_exports). */
+   config_t css_cfg;
+   int css_graph_on = (config_load(&css_cfg) == 0) && css_cfg.css_style_graph_enabled;
+
    build_exclusion_list_t build_exclusions = {0};
    collect_build_exclusions(abs_root, &build_exclusions);
    index_purge_hidden_paths(project_id);
@@ -711,6 +720,32 @@ int index_scan_project(const char *name, const char *root, int force)
           .call_count = call_count,
       };
       db2_code_index_file_replace(file_id, &data);
+
+      /* WP-C: build the CSS style graph for .css files (plain CSS only; SCSS is
+       * indexed from its compiled output, not source). The lexical class-name
+       * scan above is preserved for backward compatibility. */
+      if (css_graph_on && ext && strcmp(ext, ".css") == 0)
+      {
+         css_stylesheet_t *ss = css_analyze(content, content_len);
+         if (ss)
+         {
+            (void)db2_css_graph_replace(file_id, ss->rules, ss->rule_count);
+            css_stylesheet_free(ss);
+         }
+      }
+      /* WP-D: component -> style join. For markup-bearing files, resolve the
+       * static class tokens against the style graph (dynamic classes are skipped
+       * -> left unresolved, no silent miss). */
+      else if (css_graph_on && ext &&
+               (strcmp(ext, ".tsx") == 0 || strcmp(ext, ".jsx") == 0 || strcmp(ext, ".ts") == 0 ||
+                strcmp(ext, ".js") == 0 || strcmp(ext, ".html") == 0 || strcmp(ext, ".vue") == 0 ||
+                strcmp(ext, ".svelte") == 0))
+      {
+         static char class_tokens[512][CSS_CLASS_TOKEN_MAX];
+         int nt = css_extract_class_tokens(content, content_len, class_tokens, 512);
+         if (nt > 0)
+            (void)db2_css_component_resolve(file_id, class_tokens, nt);
+      }
 
       for (int j = 0; j < exp_count; j++)
          free(exports[j]);
