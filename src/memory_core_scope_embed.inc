@@ -366,6 +366,7 @@ int memory_embed_text(const char *text, const char *command, float *out, int max
       return 0;
    }
 
+   int emitted = cJSON_GetArraySize(arr);
    int dim = 0;
    cJSON *el;
    cJSON_ArrayForEach(el, arr)
@@ -376,6 +377,16 @@ int memory_embed_text(const char *text, const char *command, float *out, int max
          out[dim++] = (float)el->valuedouble;
    }
    cJSON_Delete(arr);
+   /* Guard against silent truncation: if the embedder emits more dimensions
+    * than the buffer holds we keep only the first max_dim, which leaves the
+    * stored/query vectors inconsistent with the model's real output and quietly
+    * degrades recall. Warn loudly so an operator raises EMBED_MAX_DIM (and
+    * re-embeds) rather than chasing phantom recall regressions. */
+   if (emitted > max_dim)
+      aimee_log(LOG_WARN, "memory",
+                "embedding truncated: model emitted %d dims > EMBED_MAX_DIM %d; recall degraded "
+                "-- raise EMBED_MAX_DIM and re-embed",
+                emitted, max_dim);
    return dim;
 }
 
