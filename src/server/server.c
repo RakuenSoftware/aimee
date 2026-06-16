@@ -1045,6 +1045,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     /* KB */
     {"kb.search", handle_kb_search},
     {"evidence.trace_retrieval_event", handle_evidence_trace},
+    {"evidence.provenance_retrieval_event", handle_evidence_provenance},
     {"curator.implements", handle_curator_implements},
     {"curator.synthesize", handle_curator_synthesize},
     {"curator.contradictions", handle_curator_contradictions},

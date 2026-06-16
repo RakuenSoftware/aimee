@@ -19,6 +19,7 @@
 #include "workspace.h"
 #include "../db2/db2_internal.h"
 #include "../db2/entity_edges.h"
+#include "../db2/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
 
 int memory_demote_from_failures(void);
 
@@ -331,6 +332,49 @@ static void test_memory_promote_calibration_ab_slot(void)
    write_calibration_config(0);
 }
 
+/* Auditable-correctness P2: db2_memory_provenance_by_id resolves a surfaced
+ * source id to {kind, source, version} (the /v1/audit/provenance read path), and
+ * reports 0 for an id with no row (a source deleted/superseded since the turn). */
+static void test_audit_provenance_resolver(void)
+{
+   setup();
+
+   const char *ins = "INSERT INTO memories (tier, kind, key, content, confidence, use_count,"
+                     " last_used_at, source_session, created_at, updated_at, sensitivity,"
+                     " evidence_strength, salience, surprise, observation_count)"
+                     " VALUES ('L1', 'fact', 'prov-key-1', 'caroline lives in portland', 0.8, 1,"
+                     " pg_now_text(), 'sess-prov', pg_now_text(), pg_now_text(), 'normal',"
+                     " 0.5, 0.5, 0.5, 1) RETURNING id";
+   char err[128] = "";
+   aimee_pg_stmt_t *s = aimee_pg_prepare(db2_conn(), ins, err, sizeof(err));
+   assert(s);
+   assert(aimee_pg_step(s, err, sizeof(err)) == AIMEE_PG_ROW);
+   int64_t id = aimee_pg_column_int64(s, 0);
+   aimee_pg_finalize(s);
+   assert(id > 0);
+
+   char kind[64] = "x", source[128] = "x", version[64] = "x";
+   int rc = db2_memory_provenance_by_id(id, kind, sizeof kind, source, sizeof source, version,
+                                        sizeof version);
+   assert(rc == 1);
+   assert(strcmp(kind, "fact") == 0);
+   assert(strcmp(source, "sess-prov") == 0);
+   assert(version[0] != '\0'); /* updated_at is the version */
+
+   /* A missing id resolves to 0 (deleted/superseded), out buffers cleared. */
+   kind[0] = source[0] = version[0] = 'x';
+   rc = db2_memory_provenance_by_id(id + 999999, kind, sizeof kind, source, sizeof source, version,
+                                    sizeof version);
+   assert(rc == 0);
+   assert(kind[0] == '\0' && source[0] == '\0' && version[0] == '\0');
+
+   /* A non-positive id is rejected. */
+   assert(db2_memory_provenance_by_id(0, NULL, 0, NULL, 0, NULL, 0) == -1);
+
+   teardown();
+   printf("  audit provenance resolver (kind/source/version + miss) OK\n");
+}
+
 int main(void)
 {
    char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
@@ -351,6 +395,7 @@ int main(void)
    test_promote();
    test_memory_promote_uses_calibration_profile();
    test_memory_promote_calibration_ab_slot();
+   test_audit_provenance_resolver();
    test_expire_l0();
    test_fold_session();
    test_stats();

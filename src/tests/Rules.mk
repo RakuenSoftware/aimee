@@ -43,6 +43,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/workspace.o $(DB1_OBJS) \
                              $(OBJDIR)/server/llama_native_profile.o $(OBJDIR)/server/mistral_profile.o \
                              $(OBJDIR)/server/minimax_profile.o \
                              $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
+                             $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
                              $(PLATFORM_AGENT_OBJS)
 
 TEST_MCP_CLIENT_OBJS = $(OBJDIR)/server/mcp_client.o \
@@ -566,6 +567,7 @@ $(TESTPREFIX)/unit-test-script-runner: $(OBJDIR)/tests/test_script_runner.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-provider-cli-adapter: $(OBJDIR)/tests/test_provider_cli_adapter.o \
+                      $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
                       $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o \
                       $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_gemini.o $(OBJDIR)/server/cli_mistral.o \
                       $(OBJDIR)/server/cli_acp.o $(OBJDIR)/posix/workspace_provider.o \
@@ -573,6 +575,7 @@ $(TESTPREFIX)/unit-test-provider-cli-adapter: $(OBJDIR)/tests/test_provider_cli_
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-cli-acp: $(OBJDIR)/tests/test_cli_acp.o \
+                      $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
                       $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o \
                       $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_gemini.o $(OBJDIR)/server/cli_mistral.o \
                       $(OBJDIR)/server/cli_acp.o $(OBJDIR)/posix/workspace_provider.o \
@@ -811,6 +814,7 @@ $(TESTPREFIX)/unit-test-acp-server: $(OBJDIR)/tests/test_acp_server.o \
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o $(OBJDIR)/server/server.o \
+                      $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
 	                                $(OBJDIR)/server/server_config.o $(OBJDIR)/config_fields.o \
 	                                $(OBJDIR)/server/skill_review.o $(OBJDIR)/tests/support/skill_jobs_stub.o \
 	                                $(OBJDIR)/server/server_hooks.o $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/server/vault_principal.o \
@@ -882,6 +886,7 @@ $(TESTPREFIX)/unit-test-kb-client-memory: $(OBJDIR)/tests/test_kb_client_memory.
 $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o \
                                $(OBJDIR)/tests/support/delegate_role_policy_stub.o \
                                $(OBJDIR)/tests/support/toolset_stub.o \
+                               $(OBJDIR)/tests/support/agent_source_authority_stub.o \
                                $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/delegations.o $(OBJDIR)/db1/agent_jobs.o $(OBJDIR)/db1/session_paths.o $(OBJDIR)/db1/cost_fold.o $(OBJDIR)/db1/token_audit.o $(OBJDIR)/server/delegate_credentials.o $(OBJDIR)/server/delegate_credential_retry.o $(OBJDIR)/db1/delegate_learning.o $(OBJDIR)/db1/interaction_events.o \
                                $(OBJDIR)/db1/execution_plans.o $(OBJDIR)/db1/coord_jobs.o \
 		                               $(OBJDIR)/server/delegate_launch.o $(OBJDIR)/server/delegate_source_authority.o $(OBJDIR)/server/delegate_economics.o $(OBJDIR)/server/server_coord_dispatcher.o \
@@ -2264,6 +2269,7 @@ $(TESTPREFIX)/unit-test-delegate-backend: $(OBJDIR)/tests/test_delegate_backend.
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-delegate-backend-local: $(OBJDIR)/tests/test_delegate_backend_local.o \
+                      $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
                      $(OBJDIR)/server/delegate_backend.o \
                      $(OBJDIR)/server/delegate_backend_local.o \
                      $(PLATFORM_BASIC_OBJS)

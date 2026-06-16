@@ -36,6 +36,8 @@ static void test_code_search_ok(void)
    assert(strstr(buf, "\"file_path\":\"src/search.c\"") != NULL);
    assert(strstr(buf, "\"snippet\":\"int needle") != NULL);
    assert(strstr(buf, "\"rank\":0.75") != NULL);
+   /* P2 Layer-1: the file content hash is surfaced for citation/drift. */
+   assert(strstr(buf, "\"content_hash\":\"deadbeefcafe\"") != NULL);
    assert(strstr(buf, "\"next_cursor\":null") != NULL);
 }
 

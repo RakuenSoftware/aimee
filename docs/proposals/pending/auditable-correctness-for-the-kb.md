@@ -10,10 +10,15 @@
   `kb_evidence_emit_enabled` flag, and the `aimee audit trace` CLI. (The P1
   dependency on PR #185 cost-accounting is satisfied — #185 is merged.) **Verify
   P1 functional completeness end-to-end before moving this proposal to done.**
-  **Remaining:** P1.5 (typed doc/code refs + two-writer merge), P2 (versioned
-  provenance + `aimee audit provenance` + drift-ranked requeue — shippable), P3
-  (fidelity_check judge + `fidelity_report`), P4 (labelled gold corpus — needs
-  human curation, not autonomous).
+  **P2 in progress:** Layer-1 code-search provenance landed in #344
+  (`code_search_hit_t`/`/v1/code/search` carry `content_hash`); the
+  `/v1/audit/provenance` read surface + `aimee audit provenance <turn_id>` landed
+  next (resolves each surfaced source id to `{id, kind, source, version, present}`,
+  version = the row's live `updated_at`). **Remaining:** P1.5 (typed doc/code refs
+  + two-writer merge), P2's emit-time point-in-time version capture (provenance
+  currently reads versions live) + drift-ranked requeue in `memory_maintenance.c`
+  (D7), P3 (fidelity_check judge + `fidelity_report`), P4 (labelled gold corpus —
+  needs human curation, not autonomous).
 - **Author:** JBailes
 - **Date:** 2026-06-12
 - **Charter roles:** Recall (provenance + per-turn evidence on the recall /

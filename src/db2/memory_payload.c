@@ -129,6 +129,45 @@ char *db2_memory_build_memory_payload(int64_t memory_id)
    return payload_json;
 }
 
+int db2_memory_provenance_by_id(int64_t memory_id, char *kind_out, int kind_len, char *source_out,
+                                int source_len, char *version_out, int version_len)
+{
+   if (kind_out && kind_len > 0)
+      kind_out[0] = '\0';
+   if (source_out && source_len > 0)
+      source_out[0] = '\0';
+   if (version_out && version_len > 0)
+      version_out[0] = '\0';
+   if (memory_id <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   static const char *sql = "SELECT kind, source_session, updated_at FROM memories WHERE id = ?1";
+   char err[MP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", memory_id);
+   int step = aimee_pg_step(st, err, sizeof(err));
+   if (step != AIMEE_PG_ROW)
+   {
+      aimee_pg_finalize(st);
+      return step == AIMEE_PG_DONE ? 0 : -1; /* 0 = no such row (deleted/superseded) */
+   }
+   const char *k = aimee_pg_column_text(st, 0);
+   const char *s = aimee_pg_column_text(st, 1);
+   const char *v = aimee_pg_column_text(st, 2);
+   if (kind_out && kind_len > 0)
+      snprintf(kind_out, (size_t)kind_len, "%s", k ? k : "");
+   if (source_out && source_len > 0)
+      snprintf(source_out, (size_t)source_len, "%s", s ? s : "");
+   if (version_out && version_len > 0)
+      snprintf(version_out, (size_t)version_len, "%s", v ? v : "");
+   aimee_pg_finalize(st);
+   return 1;
+}
+
 char *db2_memory_build_unit_payload(int64_t unit_id, int64_t *memory_id_out)
 {
    if (unit_id <= 0)

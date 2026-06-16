@@ -18,6 +18,7 @@
 #include "delegate_credential_retry.h"
 #include "delegate_launch.h"
 #include "delegate_source_authority.h"
+#include "agent_source_authority.h" /* TLS source-authority context (race-free in-process) */
 #include "server_coord_dispatcher.h"
 #include "delegate_credentials.h"
 #include "vault_service.h" /* WP-C.1 vault-first credential resolution */
@@ -470,6 +471,7 @@ typedef struct
    char saved_env_depth[32];
    char saved_env_parent[64];
    delegate_source_env_snapshot_t source_env;
+   agent_source_authority_snapshot_t sa_snap;
 } delegate_run_ctx_t;
 
 static void delegate_run_ctx_enter(delegate_run_ctx_t *c, const char *deleg_id, const char *sid,
@@ -498,12 +500,21 @@ static void delegate_run_ctx_enter(delegate_run_ctx_t *c, const char *deleg_id, 
       snprintf(c->saved_env_parent, sizeof(c->saved_env_parent), "%s", e);
    platform_setenv("AIMEE_PARENT_DELEGATION_ID", deleg_id);
 
+   /* Env (process-global) is kept for cross-process child clients that inherit
+    * it. The in-process source-authority consumer (code_search overlay) instead
+    * reads the thread-local context below, which does NOT race across the
+    * concurrent delegate threads the way the shared env does. clear_for_worktree
+    * disables authority + clears paths, so mirror that: authority=0, paths=NULL,
+    * worktree=source_env_root. */
    delegate_source_env_capture(&c->source_env);
    delegate_source_env_clear_for_worktree(source_env_root);
+   agent_source_authority_tls_capture(&c->sa_snap);
+   agent_source_authority_tls_set(0, source_env_root, NULL);
 }
 
-static void delegate_run_ctx_restore(const delegate_run_ctx_t *c)
+static void delegate_run_ctx_restore(delegate_run_ctx_t *c)
 {
+   agent_source_authority_tls_restore(&c->sa_snap);
    platform_setenv("AIMEE_DELEGATE_DEPTH", c->saved_env_depth[0] ? c->saved_env_depth : "");
    platform_setenv("AIMEE_PARENT_DELEGATION_ID", c->saved_env_parent[0] ? c->saved_env_parent : "");
    delegate_source_env_restore(&c->source_env);
@@ -513,6 +524,27 @@ static void delegate_run_ctx_restore(const delegate_run_ctx_t *c)
    session_id_clear_override();
    tl_mailbox = NULL;
    mailbox_release(c->mb);
+}
+
+/* Export this delegate's context (depth/parent/source-authority) from the
+ * forking thread's TLS into the child's environment. Call ONLY in a freshly
+ * fork()ed child, before exec: the parent-side process-global AIMEE_DELEGATE_*
+ * env races across concurrent delegate threads, so a cross-process sub-client
+ * (a CLI agent that shells out to `aimee delegate`) could inherit a neighbor
+ * delegate's depth/parent. fork() copies the forking thread's TLS into the
+ * (now single-threaded) child, so re-deriving the env here is immune to that
+ * clobber. No-op for primary agents (depth 0, no parent), which keep their
+ * inherited environment. Matches the adjacent post-fork unsetenv() pattern. */
+void delegate_child_export_context_env(void)
+{
+   if (tl_delegation_depth > 0 || tl_parent_delegation_id[0])
+   {
+      char depth_str[32];
+      snprintf(depth_str, sizeof(depth_str), "%d", tl_delegation_depth);
+      platform_setenv("AIMEE_DELEGATE_DEPTH", depth_str);
+      platform_setenv("AIMEE_PARENT_DELEGATION_ID", tl_parent_delegation_id);
+   }
+   agent_source_authority_export_env();
 }
 
 /* Build the delegate result envelope from a finished run. Mirrors the two

@@ -16,6 +16,10 @@
 #include <time.h>
 #include <unistd.h>
 
+/* Defined in server_compute.c; called post-fork to seed the child's delegate
+ * context env from the forking thread's TLS (race-free). */
+void delegate_child_export_context_env(void);
+
 #define PROVIDER_CLI_MAX_ARGS 48
 #define PROVIDER_CLI_POLL_MS  250
 
@@ -396,6 +400,10 @@ int provider_cli_spawn_argv(const provider_cli_cfg_t *cfg, char *const argv[], i
       unsetenv("CLAUDECODE");
       unsetenv("CLAUDE_CODE_SSE_PORT");
       unsetenv("CLAUDE_CODE_ENTRYPOINT");
+      /* Give a cross-process delegate sub-client this delegate's depth/parent/
+       * source context from the forking thread's TLS, immune to the parent-side
+       * concurrent env clobber. */
+      delegate_child_export_context_env();
       execvp(argv[0], argv);
       _exit(127);
    }
