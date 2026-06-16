@@ -47,6 +47,12 @@ extern "C"
     * error / nothing to do). */
    int db2_code_index_requeue_drifted(void);
 
+   /* auditable-correctness P1.5/D8: resolve a code ref's LIVE source hash —
+    * files.hash for (project, file_path). Writes the hash into out (cleared first);
+    * the CALLER compares it to the turn-captured version to flag drift. Returns
+    * 1 (found), 0 (no such file), -1 (bad arg / error). */
+   int db2_code_file_hash(const char *project, const char *file_path, char *out, int out_len);
+
 #ifdef __cplusplus
 }
 #endif

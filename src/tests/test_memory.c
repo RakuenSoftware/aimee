@@ -21,6 +21,7 @@
 #include "../db2/entity_edges.h"
 #include "../db2/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
 #include "../db2/demotion.h"       /* retrieval_event write/read (auditable-correctness P2) */
+#include "../db2/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5) */
 
 int memory_demote_from_failures(void);
 
@@ -376,6 +377,44 @@ static void test_audit_provenance_resolver(void)
    printf("  audit provenance resolver (kind/source/version + miss) OK\n");
 }
 
+/* Auditable-correctness P1.5/D8: db2_code_file_hash resolves a code ref's LIVE
+ * source hash (files.hash for project+path) — the /v1/audit/provenance code-ref
+ * drift check (live hash != the version captured on the turn). */
+static void test_audit_code_file_hash_resolver(void)
+{
+   setup();
+
+   char err[128] = "";
+   assert(aimee_pg_exec(db2_conn(),
+                        "INSERT INTO projects (name, root, scanned_at)"
+                        " VALUES ('provproj','/r','x')",
+                        err, sizeof err) == 0);
+   assert(aimee_pg_exec(db2_conn(),
+                        "INSERT INTO files (project_id, path, hash, scanned_at) VALUES"
+                        " ((SELECT id FROM projects WHERE name='provproj'),"
+                        " 'src/x.c','HASHV1','x')",
+                        err, sizeof err) == 0);
+
+   char hash[80] = "z";
+   int rc = db2_code_file_hash("provproj", "src/x.c", hash, sizeof hash);
+   assert(rc == 1 && strcmp(hash, "HASHV1") == 0);
+
+   /* unknown file → 0, out cleared. */
+   hash[0] = 'z';
+   assert(db2_code_file_hash("provproj", "src/missing.c", hash, sizeof hash) == 0);
+   assert(hash[0] == '\0');
+
+   /* unknown project → 0. */
+   assert(db2_code_file_hash("noproj", "src/x.c", hash, sizeof hash) == 0);
+
+   /* bad args rejected. */
+   assert(db2_code_file_hash("", "src/x.c", hash, sizeof hash) == -1);
+   assert(db2_code_file_hash("provproj", "", hash, sizeof hash) == -1);
+
+   teardown();
+   printf("  audit code-file-hash resolver (live hash + miss) OK\n");
+}
+
 /* Auditable-correctness P2 emit-time version capture: writing a retrieval_event
  * records each surfaced id's point-in-time version (memories.updated_at at emit)
  * in surfaced_items, so /v1/audit/provenance can later detect version drift. */
@@ -441,6 +480,7 @@ int main(void)
    test_memory_promote_uses_calibration_profile();
    test_memory_promote_calibration_ab_slot();
    test_audit_provenance_resolver();
+   test_audit_code_file_hash_resolver();
    test_audit_provenance_emit_captures_version();
    test_expire_l0();
    test_fold_session();
