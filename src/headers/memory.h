@@ -1557,6 +1557,11 @@ void memory_recall_metrics(int64_t *assemblies_total, int64_t *session_start_ass
 #define MEMORY_MAINTENANCE_MODE_COMPACT   (1u << 1)
 #define MEMORY_MAINTENANCE_MODE_PRUNE     (1u << 2)
 #define MEMORY_MAINTENANCE_MODE_SUMMARIZE (1u << 3)
+/* auditable-correctness D7: read-only drift report — count code embeddings whose
+ * source file was re-scanned after the embedding was written (a staleness
+ * heuristic ranking re-ingest order, NOT a correctness verdict). Default-off
+ * (not in MODES_DEFAULT); requested explicitly (e.g. `maintenance --mode drift`). */
+#define MEMORY_MAINTENANCE_MODE_DRIFT     (1u << 4)
 
 #define MEMORY_MAINTENANCE_MODES_DEFAULT                                                           \
    (MEMORY_MAINTENANCE_MODE_REPLAY | MEMORY_MAINTENANCE_MODE_COMPACT |                             \
@@ -1579,6 +1584,7 @@ typedef struct
    int profile_cards_refreshed;
    int merged;
    int summarized;
+   int drift_candidates; /* D7: code embeddings whose file was re-scanned since embed */
    double elapsed_ms;
    int64_t memory_count_before;
    int64_t memory_count_after;

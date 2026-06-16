@@ -34,6 +34,12 @@ extern "C"
    /* Summary counts (stuck_ops uses max_attempts as the >= threshold). */
    int db2_code_index_ops_summary(int max_attempts, db2_code_index_ops_summary_t *out);
 
+   /* auditable-correctness D7: count code embeddings whose source file was
+    * re-scanned after the embedding was written (files.scanned_at >
+    * code_embeddings.updated_at) — a staleness heuristic for ranking re-ingest.
+    * Read-only; returns 0 on error / no candidates. */
+   int64_t db2_code_index_drift_candidates(void);
+
 #ifdef __cplusplus
 }
 #endif

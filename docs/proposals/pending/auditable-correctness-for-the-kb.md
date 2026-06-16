@@ -14,11 +14,16 @@
   (`code_search_hit_t`/`/v1/code/search` carry `content_hash`); the
   `/v1/audit/provenance` read surface + `aimee audit provenance <turn_id>` landed
   next (resolves each surfaced source id to `{id, kind, source, version, present}`,
-  version = the row's live `updated_at`). **Remaining:** P1.5 (typed doc/code refs
-  + two-writer merge), P2's emit-time point-in-time version capture (provenance
-  currently reads versions live) + drift-ranked requeue in `memory_maintenance.c`
-  (D7), P3 (fidelity_check judge + `fidelity_report`), P4 (labelled gold corpus —
-  needs human curation, not autonomous).
+  version = the row's live `updated_at`). Emit-time point-in-time version capture
+  + per-source drift flag landed in #350. The D7 drift *detection* (a default-off
+  `drift` maintenance mode + `db2_code_index_drift_candidates`: count code
+  embeddings whose source file was re-scanned after the embedding, with timestamp-
+  format normalization) landed next. **Remaining:** P1.5 (typed doc/code refs +
+  two-writer merge), D7's actual re-ingest *requeue* (rank/feed `kb_ingest_queue`
+  by the drift candidates — currently detect/report only) + populating
+  `code_embeddings.source_hash` so content-hash (not just staleness) drift is
+  detectable, P3 (fidelity_check judge + `fidelity_report`), P4 (labelled gold
+  corpus — needs human curation, not autonomous).
 - **Author:** JBailes
 - **Date:** 2026-06-12
 - **Charter roles:** Recall (provenance + per-turn evidence on the recall /
