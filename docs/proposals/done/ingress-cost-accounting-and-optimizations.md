@@ -1,32 +1,47 @@
 # Proposal: ingress cost-accounting coverage + request-level cost optimizations
 
-- **State:** reviewed — design-ready (2026-06-16). §1–§2 foundations landed
-  (#185/#339); the design roundtable's 12 blockers on the remaining §2–§7 work are
-  resolved in §8. Implementation-ready with **no external dependency**: per-delegate
-  pricing is stored on aimee-server in the DB1 `model_pricing` table (default 0 for
-  subscriptions; operator-configurable; authoritative over the static table /
-  registry — landed). (Consolidated after PR #180 review + twelve file-by-file
-  codebase audits; findings integrated below.)
-- **Implementation status (2026-06-16):** §1–§2 LARGELY LANDED, design-roundtable
-  run on the rest. **Merged:** §1 (one pricing authority — `token_estimate_cost`
-  + registry-fallback hook, `token_estimate_cost_ex` is_priced free-vs-unknown,
-  `delegate_ensemble` routed through it; static table reconciled with the model
-  registry) and the §2 **schema/foundations** (`usage_kind`
-  realized/estimated/avoided/partial + realized-only filter + spend-breakdown,
-  `requested_model`/`stop_reason`/`agent_log_id`, billable-model resolution,
-  `request_context.h`) shipped in **PR #185**; the §1 local-delegate pricing
-  coverage gap (minimax/mistral/mimo as known-zero) closed in **PR #339**.
-  **Design roundtable (2026-06-16):** ran twice; the second pass enumerated 12
-  blockers on the remaining §2/§3–§7 work — **all now RESOLVED in §8** (the key
-  decision: v1 audit writes are synchronous, dissolving the async-queue + reward-
-  barrier blocker class; dedup fail-closed excludes shared principals; HMAC-bound
-  proxy credential; enumerated dedup-key allowlist; scoped thread-local reset;
-  capability-gated flag). **Remaining (implementation, now unblocked):** §2
-  ingress-writes to the six no-log handlers, §3 cache-aware shaping, §4 dedup, §5
-  reasoning-effort cap (still recommend defer), §6 cost-shaped reward, §7
-  `/v1/usage/*`. **No external dependency:** per-delegate pricing is stored on
-  aimee-server in the DB1 `model_pricing` table (default 0 for subscriptions;
-  operator-configurable; landed), authoritative over the static table / registry.
+- **State:** DONE (2026-06-16). §1–§7 are implemented and merged to `testing`
+  behind default-off rollout flags; the only deferred items are §5 (complexity →
+  reasoning-effort cap — deferred by design, see §5) and a *standalone* `/v1/usage/*`
+  route (deferred in favor of the implemented `insights.overview` extension, §7).
+  Per-delegate pricing is stored on aimee-server in the DB1 `model_pricing` table
+  (default 0 for subscriptions; operator-configurable; authoritative over the
+  static table / registry — landed). (Consolidated after PR #180 review + twelve
+  file-by-file codebase audits; findings integrated below.)
+- **Implementation status (2026-06-16 — COMPLETE except deferred §5 / standalone
+  `/v1/usage`):**
+  - **§1 one pricing authority** — `token_estimate_cost` + registry-fallback hook,
+    `token_estimate_cost_ex` is_priced free-vs-unknown, `delegate_ensemble` routed
+    through it; static table reconciled with the model registry (**PR #185**); the
+    local-delegate known-zero gap (minimax/mistral/mimo) closed in **PR #339**; the
+    DB1 `model_pricing` authoritative price-of-record landed in **PR #391**.
+  - **§2 ingress audit coverage** — schema/foundations (`usage_kind`
+    realized/estimated/avoided/partial + realized-only filter + spend-breakdown,
+    `requested_model`/`stop_reason`/`agent_log_id`, `request_context.h`) in **PR
+    #185**; realized audit writes wired into all six no-log handlers via
+    `agent_record_token_audit` (`openai_chat.c`) plus the native Anthropic relay
+    tap (`relay_capture_usage`, `anthropic_http.c`) and the OpenAI-via-translator
+    streaming usage tap; idempotency is a partial UNIQUE index on
+    `(source, principal, idempotency_key, attempt)` with `INSERT OR IGNORE`
+    (`token_audit.c`); `by_model`/`by_source` relabel empty rows `(unattributed)`
+    rather than dropping them. Master gate `ingress_usage_accounting_enabled`
+    (default off) + `ingress_audit_async` knob.
+  - **§2a billable-model precedence** (provider > served > requested),
+    `token_billable_model` — **PR #273**.
+  - **§3 cache-aware shaping** — `anthropic_shape.c` (structured Anthropic system
+    block with `cache_control: ephemeral`, volatile `<aimee-context>` kept outside
+    the cache boundary); flag `cache_shaping_enabled` (default off).
+  - **§4 short-window dedup** — buffered-only, full behavior-affecting key,
+    `usage_kind=avoided` (default off).
+  - **§6 cost-shaped reward** — `cost_shaped_reward` on the `delegate_routing`
+    close, flag `cost_reward_enabled` + `cost_reward_lambda_pct` /
+    `cost_reward_ref_usd_milli` (default off).
+  - **§7 usage surface** — `insights.overview` reports realized/estimated/avoided/
+    partial separately; `api/openapi-server-v1.yaml` documents the breakdown;
+    webchat usage SSE carries `usage_kind`. A separate `/v1/usage/*` route is
+    intentionally **not** added (would overlap `insights.overview`).
+  - **Deferred:** §5 reasoning-effort cap (proposal recommends defer; not
+    implemented) and any standalone `/v1/usage/*` route.
 - **Author:** JBailes
 - **Date:** 2026-06-11
 - **Charter roles:** Evaluate-Optimize (cost-shaped reward into the existing
