@@ -888,6 +888,11 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
          cJSON_AddStringToObject(src, "source", source);
          cJSON_AddStringToObject(src, "version", version);
          cJSON_AddBoolToObject(src, "present", found == 1);
+         /* Distinguish a source that is genuinely gone (found==0, deleted/
+          * superseded since the turn) from one whose lookup errored (found<0):
+          * both leave present:false, but only the latter is an unreliable read. */
+         if (found < 0)
+            cJSON_AddBoolToObject(src, "error", 1);
          cJSON_AddItemToArray(sources, src);
       }
       if (ev)
