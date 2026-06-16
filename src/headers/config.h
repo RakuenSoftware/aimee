@@ -23,7 +23,12 @@
 /* Server execution pool defaults */
 #define CONFIG_DEFAULT_BACKGROUND_THREADS 2
 #define CONFIG_DEFAULT_SESSION_THREADS    4
-#define CONFIG_DEFAULT_KB_WORKER_THREADS  2
+/* Raised from 2 -> 4 now that DB2 connections are bounded by the connection pool
+ * (db2_connection_pool_size), not 1:1 with worker threads. */
+#define CONFIG_DEFAULT_KB_WORKER_THREADS 4
+/* DB2 connection pool: max reusable Postgres connections leased by worker
+ * threads (lazy-opened on demand). Keep well under Postgres max_connections. */
+#define CONFIG_DEFAULT_DB2_POOL_SIZE 16
 /* Backstop ceiling on concurrent on-demand (I/O-bound) delegates. Delegates are
  * gated by the per-model concurrency limiter, not a CPU pool; this only guards
  * against pathological fan-out exhausting fds/memory. */
@@ -93,6 +98,19 @@ static inline int aimee_resolve_delegate_max_inflight(int configured)
          return (int)value;
    }
    return configured > 0 ? configured : CONFIG_DEFAULT_DELEGATE_MAX_INFLIGHT;
+}
+
+static inline int aimee_resolve_db2_pool_size(int configured)
+{
+   const char *env = getenv("AIMEE_DB2_POOL_SIZE");
+   if (env && *env)
+   {
+      char *end = NULL;
+      long value = strtol(env, &end, 10);
+      if (end && *end == '\0' && value > 0)
+         return (int)value;
+   }
+   return configured > 0 ? configured : CONFIG_DEFAULT_DB2_POOL_SIZE;
 }
 
 #define CONFIG_MCP_MAX_CLIENTS          8
@@ -1138,6 +1156,8 @@ typedef struct config
     * watch on workspace roots (default 1 on Linux, 0 elsewhere). kb_bg_watch_debounce_secs:
     * minimum seconds between watch-triggered queues per project (default 30). */
    int kb_worker_count;
+   /* DB2 connection pool size (db2.connection_pool_size). 0 = default 16. */
+   int db2_connection_pool_size;
    int kb_connection_workers;
    int kb_bg_ingest_enabled;
    int kb_bg_ingest_interval_hours;

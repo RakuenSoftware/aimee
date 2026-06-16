@@ -577,6 +577,9 @@ int db2_pg_stat_summary(int *active_conns, int *max_conns, int *is_replica,
 
 void db2_shutdown(void)
 {
+   /* Drain + close the pool first (its reaper thread + members) before the
+    * owner connection. */
+   db2_pool_shutdown();
    pthread_mutex_lock(&g_init_lock);
    if (g_conn)
    {
