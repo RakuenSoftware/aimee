@@ -24,6 +24,10 @@
  * make_memory_ref / project_memory_refs / ensure_surfaced_refs keep that invariant;
  * the writer and both merges go through them. */
 
+/* Event-payload read buffer for the merges (~900 refs). On overflow by_turn
+ * truncates → the CAS old-value can't match → -1 (fail-safe). */
+#define MERGE_EVENT_PAYLOAD_CAP 65536
+
 /* {type:"memory", id, v} — v captured now (omitted when unresolved, mirroring the
  * legacy contract: a missing version means "unknown", not drift). */
 static cJSON *make_memory_ref(int64_t id)
@@ -125,6 +129,31 @@ static cJSON *ensure_surfaced_refs(cJSON *p)
       cJSON_AddItemToArray(refs, r);
    }
    return refs;
+}
+
+/* Compare-and-swap the event payload: land newpayload only if the row's payload
+ * still equals oldpayload (no concurrent change). Returns 1 if updated, 0 if no row
+ * matched (a concurrent merge changed it, or the event was deleted), -1 on error.
+ * Shared by both merges so the CAS retry contract is identical. */
+static int cas_update_event_payload(void *conn, const char *ev_id, const char *oldpayload,
+                                    const char *newpayload)
+{
+   if (!conn || !ev_id || !oldpayload || !newpayload)
+      return -1;
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "UPDATE artifacts SET payload = ?1 WHERE id = ?2 AND payload = ?3", err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", newpayload);
+   aimee_pg_bind_text(st, "?2", ev_id);
+   aimee_pg_bind_text(st, "?3", oldpayload);
+   int step = aimee_pg_step(st, err, sizeof(err));
+   int changes = aimee_pg_stmt_changes(st);
+   aimee_pg_finalize(st);
+   if (step != AIMEE_PG_DONE)
+      return -1;
+   return changes > 0 ? 1 : 0;
 }
 
 int db2_demotion_retrieval_event_write(const char *query_fingerprint, const char *role,
@@ -284,11 +313,7 @@ int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *que
    /* One heap buffer reused across retries (~900 refs); avoids a large per-iteration
     * stack frame. If a payload ever exceeds it, by_turn truncates → the CAS old-value
     * can't match → retries exhaust → -1 (fail-safe, never a silent partial write). */
-   enum
-   {
-      MERGE_PAYLOAD_CAP = 65536
-   };
-   char *payload = malloc(MERGE_PAYLOAD_CAP);
+   char *payload = malloc(MERGE_EVENT_PAYLOAD_CAP);
    if (!payload)
       return -1;
 
@@ -298,7 +323,7 @@ int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *que
       char ev_id[64] = "";
       payload[0] = '\0';
       int rc = db2_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
-                                                    MERGE_PAYLOAD_CAP);
+                                                    MERGE_EVENT_PAYLOAD_CAP);
       if (rc < 0)
       {
          result = -1;
@@ -306,16 +331,23 @@ int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *que
       }
       if (rc == 0)
       {
-         /* No event yet — create it, then loop to re-read + merge (so our refs land
-          * even if a concurrent writer won the create race). */
-         char created[64] = "";
+         /* No event yet — create it, then re-read IN THIS iteration so the merge
+          * below still runs (even on the last retry) and our refs land even if a
+          * concurrent writer won the create race. */
          if (db2_demotion_retrieval_event_write_turn(turn_id, query_fingerprint, role, surfaced_ids,
-                                                     n_surfaced, created, sizeof(created)) != 0)
+                                                     n_surfaced, NULL, 0) != 0)
          {
             result = -1;
             break;
          }
-         continue;
+         payload[0] = '\0';
+         rc = db2_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
+                                                   MERGE_EVENT_PAYLOAD_CAP);
+         if (rc != 1) /* created but not readable (raced away) — fail this call */
+         {
+            result = -1;
+            break;
+         }
       }
 
       cJSON *p = payload[0] ? cJSON_Parse(payload) : NULL;
@@ -395,29 +427,14 @@ int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *que
       }
 
       /* CAS: land the update only if the payload is still the value we merged from. */
-      char err[256] = "";
-      aimee_pg_stmt_t *st =
-          aimee_pg_prepare(conn, "UPDATE artifacts SET payload = ?1 WHERE id = ?2 AND payload = ?3",
-                           err, sizeof(err));
-      if (!st)
-      {
-         free(newpayload);
-         result = -1;
-         break;
-      }
-      aimee_pg_bind_text(st, "?1", newpayload);
-      aimee_pg_bind_text(st, "?2", ev_id);
-      aimee_pg_bind_text(st, "?3", payload);
-      int step = aimee_pg_step(st, err, sizeof(err));
-      int changes = aimee_pg_stmt_changes(st);
-      aimee_pg_finalize(st);
+      int cas = cas_update_event_payload(conn, ev_id, payload, newpayload);
       free(newpayload);
-      if (step != AIMEE_PG_DONE)
+      if (cas < 0)
       {
          result = -1;
          break;
       }
-      if (changes > 0)
+      if (cas > 0)
       {
          if (id_out && id_out_len > 0)
             snprintf(id_out, (size_t)id_out_len, "%s", ev_id);
@@ -425,6 +442,167 @@ int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *que
          break;
       }
       /* 0 rows: concurrent merge or the event vanished — re-read and retry. */
+   }
+   free(payload);
+   return result;
+}
+
+int db2_demotion_retrieval_event_merge_refs_turn(const char *turn_id, const char *query_fingerprint,
+                                                 const char *role, const char *const *types,
+                                                 const char *const *refs_in,
+                                                 const char *const *versions, int n_refs,
+                                                 char *id_out, int id_out_len)
+{
+   if (id_out && id_out_len > 0)
+      id_out[0] = '\0';
+   if (!turn_id || !turn_id[0])
+      return -1;
+
+   /* auditable-correctness P1.5 (D3/D14): merge TYPED refs ({type, ref, v}, e.g.
+    * code:<project>:<file_path> with v=content_hash) into the turn's unified
+    * surfaced_refs, deduped by (type, ref). Same CAS retry + create-then-merge as
+    * the int64 merge; the create path reuses write_turn to make a bare turn event
+    * (with dup-race handling), after which the typed refs merge on the next pass. */
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char *payload = malloc(MERGE_EVENT_PAYLOAD_CAP);
+   if (!payload)
+      return -1;
+
+   int result = -1;
+   for (int attempt = 0; attempt < 5; attempt++)
+   {
+      char ev_id[64] = "";
+      payload[0] = '\0';
+      int rc = db2_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
+                                                    MERGE_EVENT_PAYLOAD_CAP);
+      if (rc < 0)
+      {
+         result = -1;
+         break;
+      }
+      if (rc == 0)
+      {
+         /* No event yet — create a bare turn event (reusing write_turn's dup-race
+          * handling), then re-read IN THIS iteration so the typed merge below runs
+          * even on the last retry. */
+         if (db2_demotion_retrieval_event_write_turn(turn_id, query_fingerprint, role, NULL, 0,
+                                                     NULL, 0) != 0)
+         {
+            result = -1;
+            break;
+         }
+         payload[0] = '\0';
+         rc = db2_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
+                                                   MERGE_EVENT_PAYLOAD_CAP);
+         if (rc != 1) /* created but not readable (raced away) — fail this call */
+         {
+            result = -1;
+            break;
+         }
+      }
+
+      cJSON *p = payload[0] ? cJSON_Parse(payload) : NULL;
+      if (!p)
+      {
+         result = -1;
+         break;
+      }
+      cJSON *refs = ensure_surfaced_refs(p);
+      if (!refs)
+      {
+         cJSON_Delete(p);
+         result = -1;
+         break;
+      }
+
+      int added = 0, oom = 0;
+      for (int i = 0; i < n_refs; i++)
+      {
+         const char *type = types ? types[i] : NULL;
+         const char *ref = refs_in ? refs_in[i] : NULL;
+         if (!type || !type[0] || !ref || !ref[0]) /* require a typed identity */
+            continue;
+         /* memory refs are id-keyed and belong to merge_turn (this path dedups by
+          * ref string, which a memory entry lacks) — skip them defensively. */
+         if (strcmp(type, "memory") == 0)
+            continue;
+         /* dedup by (type, ref) — a typed ref never collides with a memory entry
+          * (which has no "ref" field). Idempotent. */
+         int present = 0, m = cJSON_GetArraySize(refs);
+         for (int j = 0; j < m; j++)
+         {
+            cJSON *r = cJSON_GetArrayItem(refs, j);
+            cJSON *t = cJSON_GetObjectItemCaseSensitive(r, "type");
+            cJSON *rf = cJSON_GetObjectItemCaseSensitive(r, "ref");
+            if (cJSON_IsString(t) && strcmp(t->valuestring, type) == 0 && cJSON_IsString(rf) &&
+                strcmp(rf->valuestring, ref) == 0)
+            {
+               present = 1;
+               break;
+            }
+         }
+         if (present)
+            continue;
+         cJSON *r = cJSON_CreateObject();
+         if (!r)
+         {
+            oom = 1;
+            break;
+         }
+         cJSON_AddStringToObject(r, "type", type);
+         cJSON_AddStringToObject(r, "ref", ref);
+         const char *v = versions ? versions[i] : NULL;
+         if (v && v[0])
+            cJSON_AddStringToObject(r, "v", v);
+         cJSON_AddItemToArray(refs, r);
+         added++;
+      }
+      if (oom)
+      {
+         cJSON_Delete(p);
+         result = -1;
+         break;
+      }
+
+      /* typed refs don't change the memory-only legacy projections, but a migrated
+       * legacy event still needs them rebuilt so surfaced_ids/items exist. */
+      if (added > 0)
+         project_memory_refs(p);
+
+      if (added == 0)
+      {
+         cJSON_Delete(p);
+         if (id_out && id_out_len > 0)
+            snprintf(id_out, (size_t)id_out_len, "%s", ev_id);
+         result = 0;
+         break;
+      }
+
+      char *newpayload = cJSON_PrintUnformatted(p);
+      cJSON_Delete(p);
+      if (!newpayload)
+      {
+         result = -1;
+         break;
+      }
+      int cas = cas_update_event_payload(conn, ev_id, payload, newpayload);
+      free(newpayload);
+      if (cas < 0)
+      {
+         result = -1;
+         break;
+      }
+      if (cas > 0)
+      {
+         if (id_out && id_out_len > 0)
+            snprintf(id_out, (size_t)id_out_len, "%s", ev_id);
+         result = 0;
+         break;
+      }
+      /* 0 rows: concurrent change — re-read and retry. */
    }
    free(payload);
    return result;
