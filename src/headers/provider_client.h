@@ -72,7 +72,8 @@ extern "C"
 
    /* Parse an OpenAI chat-completions response `body` into `out` (zeroed first).
     * Returns 0 when choices[0].message.content is present, -1 otherwise. Usage,
-    * model and finish_reason are filled when present. */
+    * model and finish_reason are filled when present. `http_status` is left 0
+    * here — provider_client_complete sets it after the transport call. */
    int provider_client_parse_openai(const char *body, provider_completion_t *out);
 
    /* Build + POST (with retry) + parse. Returns 0 on success; on failure returns

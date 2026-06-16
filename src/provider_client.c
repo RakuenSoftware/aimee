@@ -195,17 +195,33 @@ int provider_client_complete(const provider_def_t *def, struct cJSON *messages,
       return -1;
    }
 
-   /* URL = base_url + "/chat/completions" (tolerate a trailing slash). */
+   /* URL = base_url + "/chat/completions" (tolerate a trailing slash). snprintf
+    * is bounded (no overflow), but a truncated URL/Bearer would silently hit the
+    * wrong endpoint or 401 with valid creds, so treat truncation as an error. */
    size_t bl = strlen(def->base_url);
    int has_slash = bl > 0 && def->base_url[bl - 1] == '/';
-   char url[1024];
-   snprintf(url, sizeof(url), "%s%schat/completions", def->base_url, has_slash ? "" : "/");
+   char url[2048];
+   int un = snprintf(url, sizeof(url), "%s%schat/completions", def->base_url, has_slash ? "" : "/");
+   if (un < 0 || (size_t)un >= sizeof(url))
+   {
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen, "base_url too long");
+      free(body);
+      return -1;
+   }
 
-   char auth[1024];
+   char auth[1280];
    const char *auth_header = NULL;
    if (def->api_key && def->api_key[0])
    {
-      snprintf(auth, sizeof(auth), "Authorization: Bearer %s", def->api_key);
+      int an = snprintf(auth, sizeof(auth), "Authorization: Bearer %s", def->api_key);
+      if (an < 0 || (size_t)an >= sizeof(auth))
+      {
+         if (errbuf && errlen)
+            snprintf(errbuf, errlen, "api_key too long");
+         free(body);
+         return -1;
+      }
       auth_header = auth;
    }
 
