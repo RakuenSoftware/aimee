@@ -1,9 +1,11 @@
 /* db2/css_migration.c: CSS migration pipeline driver. See css_migration.h. */
 #include "css_migration.h"
 
+#include "config.h" /* typed_facts_enabled gate */
 #include "db2.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
+#include "typed_facts.h" /* #2-upgrade: convention facts */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -243,4 +245,55 @@ int db2_css_migration_rules_doc(const char *exemplar_project, char *buf, size_t 
    if (n < 0)
       return -1;
    return n;
+}
+
+int db2_css_migration_assert_conventions(const char *project, const char *now_iso)
+{
+   if (!project || !project[0])
+      return -1;
+   /* Gate on the typed-fact master flag; off -> the degraded rules-doc is the
+    * spec and we assert nothing. This is what consumes typed_facts_enabled. */
+   config_t cfg;
+   if (config_load(&cfg) != 0 || !cfg.css_style_graph_enabled || !cfg.typed_facts_enabled)
+      return 0;
+
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   int rules = cssm_count(conn,
+                          "SELECT COUNT(*) FROM css_rules c JOIN files f ON f.id = c.file_id"
+                          " JOIN projects p ON p.id = f.project_id WHERE p.name = ?1",
+                          project);
+   if (rules <= 0)
+      return rules < 0 ? -1 : 0; /* nothing indexed -> nothing to assert */
+   int tokens =
+       cssm_count(conn,
+                  "SELECT COUNT(*) FROM css_declarations d JOIN css_rules c ON c.id = d.rule_id"
+                  " JOIN files f ON f.id = c.file_id JOIN projects p ON p.id = f.project_id"
+                  " WHERE p.name = ?1 AND d.property LIKE '--%'",
+                  project);
+   int bem = cssm_count(conn,
+                        "SELECT COUNT(*) FROM css_rules c JOIN files f ON f.id = c.file_id"
+                        " JOIN projects p ON p.id = f.project_id"
+                        " WHERE p.name = ?1 AND (c.selector LIKE '%\\_\\_%' ESCAPE '\\'"
+                        "   OR c.selector LIKE '%--%')",
+                        project);
+
+   /* Assert the machine-derivable conventions as typed facts. The gate dedups /
+    * supersedes, so a re-run only changes what actually changed. Confidence is
+    * heuristic (model/derivation sourced), never user-authority. */
+   int asserted = 0;
+   int r;
+   r = db2_typed_fact_assert(project, "project", "naming_convention",
+                             bem > 0 ? "BEM" : "flat-utility", "scalar", 75, "exemplar-scan",
+                             now_iso);
+   if (r == TYPED_FACT_OK || r == TYPED_FACT_UNCHANGED)
+      asserted++;
+   r = db2_typed_fact_assert(project, "project", "token_strategy",
+                             tokens > 0 ? "css-custom-properties" : "literal-values", "scalar", 75,
+                             "exemplar-scan", now_iso);
+   if (r == TYPED_FACT_OK || r == TYPED_FACT_UNCHANGED)
+      asserted++;
+   return asserted;
 }

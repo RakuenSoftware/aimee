@@ -71,6 +71,15 @@ extern "C"
     * naming convention). Returns bytes written (excl. NUL), -1 on error. */
    int db2_css_migration_rules_doc(const char *exemplar_project, char *buf, size_t cap);
 
+   /* #2-UPGRADE: promote the machine-derivable conventions (naming scheme, token
+    * strategy) from the exemplar's style graph into TYPED FACTS — assertions
+    * like (project, naming_convention, "BEM") with provenance + contradiction
+    * detection, via the typed-fact layer. Gated by typed_facts_enabled (returns
+    * 0, a no-op, when off — the degraded rules-doc remains the spec). Idempotent:
+    * a re-run supersedes only changed conventions. Returns the number of
+    * conventions asserted (or already-current), -1 on error. */
+   int db2_css_migration_assert_conventions(const char *project, const char *now_iso);
+
 #ifdef __cplusplus
 }
 #endif
