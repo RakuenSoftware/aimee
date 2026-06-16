@@ -102,6 +102,10 @@ set_tests_properties(test_toolset PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 add_executable(test_compute_pool test_compute_pool.c ../server/compute_pool.c support/log_stub.c)
+add_executable(test_db2_pool test_db2_pool.c ../db2/db2_pool.c support/log_stub.c)
+aimee_enable_test_asserts(test_db2_pool)
+target_link_libraries(test_db2_pool PRIVATE Threads::Threads)
+add_test(NAME test_db2_pool COMMAND test_db2_pool)
 target_include_directories(test_compute_pool PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${CMAKE_CURRENT_SOURCE_DIR}/../headers
