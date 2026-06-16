@@ -3,6 +3,17 @@
 - **State:** reviewed — roundtable sign-off (rev. 9). Eight review rounds (R1–R8);
   R4–R8 cleared the bar (no blockers, all six seats endorse), R8 zero-major.
   Ready for implementation per the phasing below.
+- **Implementation status (2026-06-16):** PARTIAL — **P1 appears landed**. The
+  P1 surface is present on `testing`: the dispatch-layer `turn_id` mint +
+  `X-Aimee-Retrieval-Event` header (`server_http.c`, `ingress_preinject.h`), the
+  single-writer `retrieval_event` (schema + `kb_service`/`demotion`), the
+  `kb_evidence_emit_enabled` flag, and the `aimee audit trace` CLI. (The P1
+  dependency on PR #185 cost-accounting is satisfied — #185 is merged.) **Verify
+  P1 functional completeness end-to-end before moving this proposal to done.**
+  **Remaining:** P1.5 (typed doc/code refs + two-writer merge), P2 (versioned
+  provenance + `aimee audit provenance` + drift-ranked requeue — shippable), P3
+  (fidelity_check judge + `fidelity_report`), P4 (labelled gold corpus — needs
+  human curation, not autonomous).
 - **Author:** JBailes
 - **Date:** 2026-06-12
 - **Charter roles:** Recall (provenance + per-turn evidence on the recall /

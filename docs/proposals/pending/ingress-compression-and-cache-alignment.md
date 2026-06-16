@@ -1,6 +1,17 @@
 # Proposal: Envelope compression, cache-prefix alignment, reversible rehydration, and failure-mined corrections
 
 - **State:** draft — pending review
+- **Design roundtable (2026-06-16):** NOT READY — 9 blocking / 12 major. Key
+  blockers: the `X-Aimee-Compress` override uses thread-local state (unsafe in the
+  threaded server); P1b/P2 lossy folds depend on `code_span_get` / `memory_get`
+  MCP tools that don't exist; the in-process rehydration handle store breaks in
+  multi-replica deployments; durable resolvers take model-supplied path/line args
+  (prompt-injection / path-traversal); several validation gates are unfalsifiable
+  ("task class" undefined, no independent rehydration oracle). Panel recommends
+  splitting into three independently-reviewable units: (1) P0+P1a+config behind
+  span-propagation fixes, (2) P2 behind the MCP tools + a deployment-shape
+  decision, (3) P3–P5 behind cost-accounting. **Next step: revise to address the
+  blockers before implementation.**
 - **Author:** JBailes
 - **Date:** 2026-06-11 (consolidated after eight PR-#181 review rounds; all 35
   findings verified in-tree and folded into the body)
