@@ -115,6 +115,41 @@ int main(void)
 
    css_stylesheet_free(s2);
 
+   /* --- WP-D: component -> style join + dead rules (isolated project) --- */
+   int64_t pd = db2_code_index_project_upsert("wpd", "/wpd");
+   assert(pd >= 0);
+   int64_t css_fid = db2_code_index_file_upsert(pd, "styles.css", "2026-01-01T00:00:00Z");
+   const char *wcss = ".btn { color: red; }\n"
+                      ".flex { display: flex; }\n"
+                      ".dead { color: gray; }\n"         /* simple class, no component uses it */
+                      ".btn.active { color: green; }\n"; /* compound, excluded from dead */
+   css_stylesheet_t *w = css_analyze(wcss, strlen(wcss));
+   assert(w && db2_css_graph_replace(css_fid, w->rules, w->rule_count) == 0);
+   css_stylesheet_free(w);
+
+   int64_t comp_fid = db2_code_index_file_upsert(pd, "Button.tsx", "2026-01-01T00:00:00Z");
+   const char *tsx =
+       "export const Button = () => <button className=\"btn flex missing\">x</button>;\n";
+   char toks[64][CSS_CLASS_TOKEN_MAX];
+   int nt = css_extract_class_tokens(tsx, strlen(tsx), toks, 64);
+   assert(nt == 3); /* btn, flex, missing */
+   assert(db2_css_component_resolve(comp_fid, toks, nt) == 0);
+
+   /* "missing" resolves to no rule -> unresolved */
+   css_unresolved_hit_t un[16];
+   int nu = db2_css_component_unresolved("wpd", un, 16);
+   assert(nu == 1 && strcmp(un[0].class_token, "missing") == 0);
+
+   /* dead rules: .dead only (.btn/.flex are referenced; .btn.active is compound) */
+   css_dead_rule_hit_t dr[16];
+   int nd = db2_css_dead_rules("wpd", dr, 16);
+   assert(nd == 1 && strcmp(dr[0].selector, ".dead") == 0);
+
+   /* re-resolve is idempotent (delete-then-insert) */
+   assert(db2_css_component_resolve(comp_fid, toks, nt) == 0);
+   assert(db2_css_component_unresolved("wpd", un, 16) == 1);
+   assert(db2_css_dead_rules("wpd", dr, 16) == 1);
+
    db2_test_shim_close();
    printf("css_graph: all tests passed\n");
    return 0;

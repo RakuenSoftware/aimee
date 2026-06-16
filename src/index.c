@@ -733,6 +733,19 @@ int index_scan_project(const char *name, const char *root, int force)
             css_stylesheet_free(ss);
          }
       }
+      /* WP-D: component -> style join. For markup-bearing files, resolve the
+       * static class tokens against the style graph (dynamic classes are skipped
+       * -> left unresolved, no silent miss). */
+      else if (css_graph_on && ext &&
+               (strcmp(ext, ".tsx") == 0 || strcmp(ext, ".jsx") == 0 || strcmp(ext, ".ts") == 0 ||
+                strcmp(ext, ".js") == 0 || strcmp(ext, ".html") == 0 || strcmp(ext, ".vue") == 0 ||
+                strcmp(ext, ".svelte") == 0))
+      {
+         static char class_tokens[512][CSS_CLASS_TOKEN_MAX];
+         int nt = css_extract_class_tokens(content, content_len, class_tokens, 512);
+         if (nt > 0)
+            (void)db2_css_component_resolve(file_id, class_tokens, nt);
+      }
 
       for (int j = 0; j < exp_count; j++)
          free(exports[j]);
