@@ -24,17 +24,22 @@ int db1_model_price_get(const char *model, double *in_per_mtok, double *out_per_
                           -1, &stmt, NULL) != SQLITE_OK)
       return -1;
    sqlite3_bind_text(stmt, 1, model, -1, SQLITE_STATIC);
-   int found = 0;
-   if (sqlite3_step(stmt) == SQLITE_ROW)
+   int rc = sqlite3_step(stmt);
+   int result;
+   if (rc == SQLITE_ROW)
    {
-      found = 1;
+      result = 1;
       if (in_per_mtok)
          *in_per_mtok = sqlite3_column_double(stmt, 0);
       if (out_per_mtok)
          *out_per_mtok = sqlite3_column_double(stmt, 1);
    }
+   else if (rc == SQLITE_DONE)
+      result = 0; /* no stored row */
+   else
+      result = -1; /* DB error — caller treats as "not authoritative" */
    sqlite3_finalize(stmt);
-   return found;
+   return result;
 }
 
 int db1_model_price_set(const char *model, double in_per_mtok, double out_per_mtok)
@@ -57,6 +62,23 @@ int db1_model_price_set(const char *model, double in_per_mtok, double out_per_mt
    sqlite3_bind_text(stmt, 1, model, -1, SQLITE_STATIC);
    sqlite3_bind_double(stmt, 2, in_per_mtok);
    sqlite3_bind_double(stmt, 3, out_per_mtok);
+   int rc = sqlite3_step(stmt);
+   sqlite3_finalize(stmt);
+   return rc == SQLITE_DONE ? 0 : -1;
+}
+
+int db1_model_price_delete(const char *model)
+{
+   if (!model || !model[0])
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+   sqlite3_stmt *stmt = NULL;
+   if (sqlite3_prepare_v2(db, "DELETE FROM model_pricing WHERE model = ?1", -1, &stmt, NULL) !=
+       SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(stmt, 1, model, -1, SQLITE_STATIC);
    int rc = sqlite3_step(stmt);
    sqlite3_finalize(stmt);
    return rc == SQLITE_DONE ? 0 : -1;

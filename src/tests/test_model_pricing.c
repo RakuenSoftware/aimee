@@ -38,9 +38,19 @@ int main(void)
    /* a different model is still absent. */
    assert(db1_model_price_get("other-model", NULL, NULL) == 0);
 
+   /* delete reverts to absent (returns 0); deleting again is still 0. */
+   assert(db1_model_price_delete("MiniMax-M3") == 0);
+   assert(db1_model_price_get("MiniMax-M3", &in, &out) == 0);
+   assert(db1_model_price_delete("MiniMax-M3") == 0);
+
+   /* the CHECK constraint rejects a negative rate (no row stored). */
+   assert(db1_model_price_set("bad-model", -1.0, 2.0) == -1);
+   assert(db1_model_price_get("bad-model", NULL, NULL) == 0);
+
    /* bad args. */
    assert(db1_model_price_get("", &in, &out) == -1);
    assert(db1_model_price_set(NULL, 1.0, 1.0) == -1);
+   assert(db1_model_price_delete("") == -1);
 
    db1_shutdown();
    printf("model_pricing: all tests passed\n");

@@ -300,6 +300,15 @@ static void test_db1_pricing_authoritative(void)
    double other = token_estimate_cost_ex("mistral-medium-latest", &u, NULL);
    assert(near_equal(other, 0.0));
 
+   /* An absent DB1 row must not perturb a model the static table prices nonzero:
+    * the fall-through leaves the prior (real) resolution intact. */
+   double baseline = token_estimate_cost_ex("anthropic/claude-opus-4", &u, NULL);
+   assert(baseline > 0.0);
+   token_tracker_set_db1_price_fn(fake_db1_price); /* returns 0 for this model */
+   priced = -1;
+   double with_hook = token_estimate_cost_ex("anthropic/claude-opus-4", &u, &priced);
+   assert(priced == 1 && near_equal(with_hook, baseline)); /* unchanged by absent row */
+
    /* A DB1 present-with-0 is authoritative free (known, even for an unknown model). */
    token_tracker_set_db1_price_fn(fake_db1_free);
    priced = -1;

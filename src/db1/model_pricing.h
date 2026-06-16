@@ -25,6 +25,10 @@ extern "C"
    /* Upsert a model's stored price (operator config). Returns 0 / -1. */
    int db1_model_price_set(const char *model, double in_per_mtok, double out_per_mtok);
 
+   /* Remove a model's stored price, reverting it to static-table / model_registry
+    * resolution. Returns 0 (deleted or already absent) / -1 on bad arg / DB error. */
+   int db1_model_price_delete(const char *model);
+
 #ifdef __cplusplus
 }
 #endif
