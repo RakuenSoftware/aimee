@@ -38,6 +38,11 @@ extern "C"
     * process-global connection. */
    void *db2_conn(void);
 
+   /* Bracket a unit of work so the thread's pooled connection is returned to the
+    * pool between units (refcounted; see lifecycle.h). */
+   void db2_lease_begin(void);
+   void db2_lease_end(void);
+
    /* Open a new dedicated DB2 connection for the calling thread and set
     * it as the thread's active connection (returned by db2_conn()).
     * Returns the new connection on success, NULL on failure (errbuf

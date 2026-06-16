@@ -202,12 +202,16 @@ static void *kbiw_worker_thread(void *arg)
       if (stop)
          break;
 
-      /* Drain the queue; each worker claims independently. */
+      /* Drain the queue; each worker claims independently. Bracket the burst in
+       * a DB2 lease so the pooled connection is returned to the pool between
+       * bursts (WP-C) instead of held for the worker thread's life. */
+      db2_lease_begin();
       while (kbiw_claim_and_process() == 1)
       {
          if (ctx->ingest_stop)
             break;
       }
+      db2_lease_end();
    }
    return NULL;
 }

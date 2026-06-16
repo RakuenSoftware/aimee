@@ -373,6 +373,7 @@ set(DB1_SRCS
 
 set(DB2_SRCS
     ${AIMEE_SRC_DIR}/db2/db2_init.c
+    ${AIMEE_SRC_DIR}/db2/db2_pool.c
     ${AIMEE_SRC_DIR}/db2/agent_hints.c
     ${AIMEE_SRC_DIR}/db2/agent_outcomes.c
     ${AIMEE_SRC_DIR}/db2/canonical_index.c
