@@ -781,6 +781,16 @@ int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *rol
                                             const char *query_fingerprint, const int64_t *ids,
                                             int n_ids);
 
+/* Auditable-correctness P1.5: merge typed code/doc refs into the turn's event via
+ * the KB evidence.merge_retrieval_event action (the idempotent two-writer upsert).
+ * `types`/`refs`/`versions` are parallel arrays of length `n` (entries with an
+ * empty type or ref are skipped; `versions` may be NULL). Returns 0 on success,
+ * -1 on bad args or kb error. */
+int kb_client_evidence_merge_retrieval_event(const char *turn_id, const char *role,
+                                             const char *query_fingerprint, const char *const *types,
+                                             const char *const *refs, const char *const *versions,
+                                             int n);
+
 /* Auditable-correctness P1: the /v1/audit/trace read — forward to the KB
  * evidence.trace_retrieval_event action and return its JSON response verbatim
  * (malloc'd, caller frees; NULL on bad arg or kb error). */

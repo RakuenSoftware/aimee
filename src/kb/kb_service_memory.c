@@ -792,6 +792,76 @@ int kb_handle_evidence_emit_retrieval_event(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to write retrieval_event");
 }
 
+/* Auditable-correctness P1.5 (D3/D14): the two-writer code-ref merge. A second
+ * surface (the ingress code search) contributes its typed code refs into the SAME
+ * turn's retrieval_event, idempotently merged with whatever the memory surface
+ * already wrote. The emission decision (kb_evidence_emit_enabled) is made
+ * server-side; this is the dumb writer over db2_demotion_retrieval_event_merge_refs_turn. */
+int kb_handle_evidence_merge_retrieval_event(int fd, cJSON *req)
+{
+   cJSON *turn_j = cJSON_GetObjectItemCaseSensitive(req, "turn_id");
+   cJSON *role_j = cJSON_GetObjectItemCaseSensitive(req, "role");
+   cJSON *fp_j = cJSON_GetObjectItemCaseSensitive(req, "query_fingerprint");
+   cJSON *refs_j = cJSON_GetObjectItemCaseSensitive(req, "surfaced_refs");
+   if (!cJSON_IsString(turn_j) || !turn_j->valuestring[0])
+      return kb_send_error(fd, "evidence.merge_retrieval_event requires turn_id");
+   const char *role =
+       cJSON_IsString(role_j) && role_j->valuestring[0] ? role_j->valuestring : "Recall";
+   const char *fp = cJSON_IsString(fp_j) ? fp_j->valuestring : "";
+
+   int n = cJSON_IsArray(refs_j) ? cJSON_GetArraySize(refs_j) : 0;
+   const char **types = NULL, **refs = NULL, **versions = NULL;
+   int m = 0;
+   if (n > 0)
+   {
+      types = (const char **)calloc((size_t)n, sizeof(char *));
+      refs = (const char **)calloc((size_t)n, sizeof(char *));
+      versions = (const char **)calloc((size_t)n, sizeof(char *));
+      if (!types || !refs || !versions)
+      {
+         free(types);
+         free(refs);
+         free(versions);
+         return kb_send_error(fd, "out of memory");
+      }
+      for (int i = 0; i < n; i++)
+      {
+         cJSON *e = cJSON_GetArrayItem(refs_j, i);
+         if (!e)
+            continue;
+         cJSON *t = cJSON_GetObjectItemCaseSensitive(e, "type");
+         cJSON *r = cJSON_GetObjectItemCaseSensitive(e, "ref");
+         cJSON *v = cJSON_GetObjectItemCaseSensitive(e, "v");
+         /* require a non-empty typed identity (defence-in-depth: the merge skips
+          * empties too, but don't forward junk from an adversarial caller). */
+         if (!cJSON_IsString(t) || !t->valuestring[0] || !cJSON_IsString(r) || !r->valuestring[0])
+            continue;
+         types[m] = t->valuestring;
+         refs[m] = r->valuestring;
+         versions[m] = (cJSON_IsString(v) && v->valuestring) ? v->valuestring : "";
+         m++;
+      }
+   }
+
+   char ev_id[64] = "";
+   /* m==0 (no valid refs) is a no-op: don't call the merge, which would otherwise
+    * create a bare turn event for an empty request. */
+   int rc = (m > 0) ? db2_demotion_retrieval_event_merge_refs_turn(turn_j->valuestring, fp, role,
+                                                                   types, refs, versions, m, ev_id,
+                                                                   sizeof(ev_id))
+                    : 0;
+   free(types);
+   free(refs);
+   free(versions);
+   if (rc != 0)
+      return kb_send_error(fd, "failed to merge retrieval_event refs");
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "retrieval_event_id", ev_id);
+   return kb_reply_or_error(fd, resp, "failed to merge retrieval_event refs");
+}
+
 /* Auditable-correctness P1: the /v1/audit/trace read. Look up the per-turn
  * retrieval_event by its caller-visible turn_id and return a four-state status.
  * Only two states are reachable in P1's single-writer foundation:

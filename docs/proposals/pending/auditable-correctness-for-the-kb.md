@@ -64,11 +64,18 @@
   drifted}` where `drifted` = the live `files.hash` (via the new
   `db2_code_file_hash` resolver) differs from the version captured on the turn.
   (`/v1/audit/trace` already returns the raw payload, so it surfaces code refs for
-  free.) **Remaining P1.5:** wiring the code-search KB surface to *emit* its hits'
-  code refs via `merge_refs_turn` (serving-runtime: needs `turn_id` threaded to the
-  `code.search` path + `kb_evidence_emit_enabled`; live-stack verification). Plus
-  the P3 LLM entailment judge *producer* (default-off until validated) and P4
-  (labelled gold corpus — human, not autonomous).
+  free.) The **code-search emit landed last**: the ingress pre-inject — which
+  already code-searches the turn query and emits the memory `retrieval_event` — now
+  also MERGES its code hits into that same event as typed refs
+  (`code:<project>:<file_path>`, `v`=content_hash) via the new
+  `evidence.merge_retrieval_event` KB action (→ `merge_refs_turn`), gated by the
+  same `kb_evidence_emit_enabled`. **P1.5's code path is now complete** (default-off):
+  the DB/merge core + the audit code-ref resolution are unit-tested; the serving
+  emit (KB action + ingress wiring) is observation-only glue over that tested core,
+  and its end-to-end behaviour is **pending live-stack verification** with the flag
+  enabled (it cannot run in the default-off CI/unit environment). **Remaining:** the
+  P3 LLM entailment judge *producer* (default-off until validated) and P4 (labelled
+  gold corpus — human, not autonomous).
 - **Author:** JBailes
 - **Date:** 2026-06-12
 - **Charter roles:** Recall (provenance + per-turn evidence on the recall /

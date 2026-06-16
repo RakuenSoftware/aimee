@@ -425,7 +425,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * build call) we mint one here so the event is still reconstructible. This is
     * the dedicated single-writer foundation; P1.5 folds the emit into the
     * retrieval handlers with the idempotent two-writer upsert. */
-   if (cfg.kb_evidence_emit_enabled && mem_n > 0)
+   if (cfg.kb_evidence_emit_enabled && (mem_n > 0 || n > 0))
    {
       const char *tid = ingress_preinject_turn_id();
       char minted[40];
@@ -434,19 +434,44 @@ char *ingress_preinject_build(const char *query, int request_disabled)
          ingress_preinject_mint_turn_id(minted, sizeof(minted));
          tid = minted;
       }
-      /* mems[] holds the full set of memory previews surfaced into this turn
-       * (mem_n <= the diagnose cap of 5), so recording all of them is the
-       * complete memory evidence for the turn, not a truncation. */
+      char fp[32];
+      ingress_query_fingerprint(query, fp, sizeof(fp));
+
+      /* Memory surface (single-writer, P1): mems[] holds the full set of memory
+       * previews surfaced into this turn (mem_n <= the diagnose cap of 5), so
+       * recording all of them is the complete memory evidence, not a truncation. */
       int64_t ids[5];
       int n_ids = 0;
       for (int i = 0; i < mem_n && n_ids < (int)(sizeof(ids) / sizeof(ids[0])); i++)
          if (mems[i].memory.id > 0)
             ids[n_ids++] = mems[i].memory.id;
       if (n_ids > 0)
-      {
-         char fp[32];
-         ingress_query_fingerprint(query, fp, sizeof(fp));
          (void)kb_client_evidence_emit_retrieval_event(tid, "Recall", fp, ids, n_ids);
+
+      /* Code surface (P1.5/D3): MERGE the code hits surfaced into this turn into the
+       * turn's event as typed refs (code:<project>:<file_path>, v=content_hash).
+       * Runs after the memory emit: when memory also surfaced it JOINS that event
+       * (idempotent two-writer); on a code-only turn the merge is the first writer
+       * and creates the event itself. */
+      if (n > 0)
+      {
+         char refbuf[6][MAX_PATH_LEN + 160];
+         const char *types[6], *refs[6], *versions[6];
+         int cn = 0;
+         for (int i = 0; i < n && cn < (int)(sizeof(types) / sizeof(types[0])); i++)
+         {
+            if (!hits[i].project[0] || !hits[i].file_path[0])
+               continue;
+            snprintf(refbuf[cn], sizeof(refbuf[cn]), "code:%s:%s", hits[i].project,
+                     hits[i].file_path);
+            types[cn] = "code";
+            refs[cn] = refbuf[cn];
+            versions[cn] = hits[i].content_hash; /* may be "" (no recorded hash) */
+            cn++;
+         }
+         if (cn > 0)
+            (void)kb_client_evidence_merge_retrieval_event(tid, "Recall", fp, types, refs, versions,
+                                                           cn);
       }
    }
 
