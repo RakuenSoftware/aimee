@@ -12,6 +12,7 @@
 #include "db2/bandit.h"
 #include "db2/demotion.h" /* db2_demotion_retrieval_event_write_turn (auditable-correctness P1) */
 #include "db2/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
+#include "db2/fidelity.h"       /* db2_fidelity_report_by_turn (auditable-correctness P3) */
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
 #include "kb_service_memory.h"
@@ -932,6 +933,53 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
                               rc < 0 ? "lookup error" : "no durable retrieval_event for this turn");
    }
    return kb_reply_or_error(fd, resp, "failed to read provenance");
+}
+
+/* Auditable-correctness P3: the /v1/audit/fidelity read. Return the turn's
+ * answer-level fidelity_report (supported/unsupported/abstained buckets) plus the
+ * per-chunk attribution_count. A pure read of the non-scored fidelity artifacts.
+ * When no report exists the status is not_evaluated (the default-off judge has not
+ * run for the turn) — distinct from a lookup error (evidence_unavailable). */
+int kb_handle_evidence_fidelity(int fd, cJSON *req)
+{
+   cJSON *turn_j = cJSON_GetObjectItemCaseSensitive(req, "turn_id");
+   if (!cJSON_IsString(turn_j) || !turn_j->valuestring[0])
+      return kb_send_error(fd, "audit.fidelity requires turn_id");
+   if (strlen(turn_j->valuestring) > 128)
+      return kb_send_error(fd, "audit.fidelity turn_id too long");
+
+   char fstatus[32] = "";
+   int sup = 0, uns = 0, abst = 0;
+   int rc = db2_fidelity_report_by_turn(turn_j->valuestring, fstatus, sizeof(fstatus), &sup, &uns,
+                                        &abst);
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "turn_id", turn_j->valuestring);
+   if (rc == 1)
+   {
+      cJSON_AddStringToObject(resp, "fidelity_status", fstatus[0] ? fstatus : "ok");
+      cJSON *rep = cJSON_AddObjectToObject(resp, "report");
+      cJSON_AddNumberToObject(rep, "supported", sup);
+      cJSON_AddNumberToObject(rep, "unsupported", uns);
+      cJSON_AddNumberToObject(rep, "abstained", abst);
+      /* Emit the count only when it read cleanly; on a count error omit it (rather
+       * than clamp to 0, which would conflate "no attributions" with "count
+       * failed") and flag the error — honesty over a silent zero on an audit read. */
+      int ac = db2_fidelity_attribution_count_by_turn(turn_j->valuestring);
+      if (ac >= 0)
+         cJSON_AddNumberToObject(resp, "attribution_count", ac);
+      else
+         cJSON_AddBoolToObject(resp, "attribution_count_error", 1);
+   }
+   else
+   {
+      cJSON_AddStringToObject(resp, "fidelity_status",
+                              rc < 0 ? "evidence_unavailable" : "not_evaluated");
+      cJSON_AddStringToObject(resp, "detail",
+                              rc < 0 ? "lookup error" : "no fidelity report for this turn");
+   }
+   return kb_reply_or_error(fd, resp, "failed to read fidelity report");
 }
 
 int kb_handle_memory_entity_profile(int fd, cJSON *req)

@@ -1652,6 +1652,17 @@ char *kb_client_evidence_provenance_retrieval_event(const char *turn_id)
    return kb_v1_action_request("evidence.provenance_retrieval_event", req);
 }
 
+char *kb_client_evidence_fidelity_retrieval_event(const char *turn_id)
+{
+   if (!turn_id || !turn_id[0])
+      return NULL;
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "turn_id", turn_id);
+   /* Pass the KB action's response through verbatim (status + fidelity_status +
+    * report + attribution_count). kb_v1_action_request owns req. */
+   return kb_v1_action_request("evidence.fidelity_retrieval_event", req);
+}
+
 char *kb_client_memory_lint_json(void)
 {
    cJSON *req = cJSON_CreateObject();

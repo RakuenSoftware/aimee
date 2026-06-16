@@ -791,6 +791,11 @@ char *kb_client_evidence_trace_retrieval_event(const char *turn_id);
  * verbatim (malloc'd, caller frees; NULL on bad arg or kb error). */
 char *kb_client_evidence_provenance_retrieval_event(const char *turn_id);
 
+/* Auditable-correctness P3: the /v1/audit/fidelity read — forward to the KB
+ * evidence.fidelity_retrieval_event action and return its JSON response verbatim
+ * (malloc'd, caller frees; NULL on bad arg or kb error). */
+char *kb_client_evidence_fidelity_retrieval_event(const char *turn_id);
+
 /* Fetch the entity profile card via aimee-kb.  Returns 0 on success
  * (|out| filled) or -1 if kb is unreachable or the entity is missing.
  * Mirrors memory_get_entity_profile(). */
