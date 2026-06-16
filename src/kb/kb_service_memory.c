@@ -13,6 +13,7 @@
 #include "db2/demotion.h" /* db2_demotion_retrieval_event_write_turn (auditable-correctness P1) */
 #include "db2/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
 #include "db2/fidelity.h"       /* db2_fidelity_report_by_turn (auditable-correctness P3) */
+#include "db2/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5 code provenance) */
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
 #include "kb_service_memory.h"
@@ -922,6 +923,68 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
          cJSON_AddBoolToObject(src, "drifted",
                                turn_version[0] && found == 1 && strcmp(turn_version, version) != 0);
          cJSON_AddItemToArray(sources, src);
+      }
+      /* auditable-correctness P1.5 (D3): resolve typed CODE refs from the unified
+       * surfaced_refs. Each {type:"code", ref:"code:<project>:<file_path>", v} is
+       * reported in a separate code_sources[] with present + drift (live files.hash
+       * != the version captured on the turn). Memory refs already came through
+       * sources[] above (the legacy projection), so only code is resolved here. */
+      /* Always present (possibly empty) for a stable API contract, mirroring how
+       * `sources` is always present — even for a legacy event with no surfaced_refs. */
+      cJSON *code_sources = cJSON_AddArrayToObject(resp, "code_sources");
+      cJSON *refs = ev ? cJSON_GetObjectItemCaseSensitive(ev, "surfaced_refs") : NULL;
+      if (cJSON_IsArray(refs))
+      {
+         int rn = cJSON_GetArraySize(refs);
+         for (int i = 0; i < rn; i++)
+         {
+            cJSON *r = cJSON_GetArrayItem(refs, i);
+            cJSON *t = cJSON_GetObjectItemCaseSensitive(r, "type");
+            cJSON *rfj = cJSON_GetObjectItemCaseSensitive(r, "ref");
+            if (!cJSON_IsString(t) || strcmp(t->valuestring, "code") != 0 || !cJSON_IsString(rfj))
+               continue;
+            const char *ref = rfj->valuestring;
+            if (strncmp(ref, "code:", 5) != 0)
+               continue;
+            /* parse code:<project>:<file_path> — split on the FIRST colon after the
+             * "code:" prefix (project has no colon; file_path keeps any remaining). */
+            const char *rest = ref + 5;
+            const char *colon = strchr(rest, ':');
+            if (!colon || colon == rest || !colon[1])
+               continue;
+            char project[128] = "";
+            size_t plen = (size_t)(colon - rest);
+            if (plen >= sizeof(project))
+               plen = sizeof(project) - 1;
+            memcpy(project, rest, plen);
+            project[plen] = '\0';
+            const char *file_path = colon + 1;
+
+            cJSON *vj = cJSON_GetObjectItemCaseSensitive(r, "v");
+            const char *turn_v = (cJSON_IsString(vj) && vj->valuestring) ? vj->valuestring : "";
+            /* >= content_hash[80] (the source width) with margin, so a live hash is
+             * never truncated into a spurious mismatch. */
+            char live[128] = "";
+            int found = db2_code_file_hash(project, file_path, live, sizeof(live));
+
+            if (!code_sources)
+               continue; /* array alloc failed — skip rather than leak */
+            cJSON *cs = cJSON_CreateObject();
+            if (!cs)
+               continue;
+            cJSON_AddStringToObject(cs, "ref", ref);
+            cJSON_AddStringToObject(cs, "version", turn_v); /* captured on the turn */
+            cJSON_AddStringToObject(cs, "live_hash", live);
+            cJSON_AddBoolToObject(cs, "present", found == 1);
+            if (found < 0) /* lookup error — distinct from a genuinely absent file */
+               cJSON_AddBoolToObject(cs, "error", 1);
+            /* drift only when BOTH versions are known and differ; an empty live or
+             * turn version means "unknown", not drift (matches memory provenance). */
+            cJSON_AddBoolToObject(cs, "drifted",
+                                  found == 1 && turn_v[0] && live[0] && strcmp(turn_v, live) != 0);
+            if (!cJSON_AddItemToArray(code_sources, cs))
+               cJSON_Delete(cs);
+         }
       }
       if (ev)
          cJSON_Delete(ev);
