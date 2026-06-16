@@ -267,6 +267,30 @@ void db2_lease_end(void)
    }
 }
 
+void db2_lease_release_idle(void)
+{
+   /* Release a connection acquired lazily by db2_conn() OUTSIDE any
+    * db2_lease_begin/_end scope (depth 0). Long-lived periodic workers (curator
+    * drain, maintenance timer) otherwise pin a pool connection for their whole
+    * lifetime — the reaper flags it as a stuck lease and it permanently shrinks
+    * the pool. They call this at a job boundary (between cycles) to return the
+    * connection while idle. No-op inside a lease scope or on the init thread. */
+   if (!g_init_thread_set || pthread_equal(pthread_self(), g_init_thread))
+      return;
+   if (g_lease_depth != 0)
+      return; /* inside an explicit begin/end unit — leave it owned */
+   db2_thread_lease_t *L = (db2_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
+   if (L && L->conn)
+   {
+      if (L->pooled)
+         db2_pool_return(L->conn);
+      else
+         aimee_pg_close(L->conn);
+      L->conn = NULL;
+      L->pooled = 0;
+   }
+}
+
 void *db2_thread_conn_open(char *errbuf, size_t errlen)
 {
    pthread_once(&g_thread_conn_key_once, thread_conn_key_init);

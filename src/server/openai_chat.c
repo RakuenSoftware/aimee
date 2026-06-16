@@ -155,7 +155,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
     * provider/model — two requests resolving to a different backend must not
     * collide even with an identical body. Honour the requested model: "aimee"
     * (or empty) means the default agent; any other value selects a configured
-    * agent by name, falling back to the default when it doesn't match one. */
+    * agent by name, and is rejected with model_not_found when it matches none
+    * (never silently falls back to a different model). */
    agent_config_t acfg;
    if (agent_load_config(&acfg) != 0)
    {
@@ -166,7 +167,19 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
    }
    agent_t *ag = NULL;
    if (model[0] && strcmp(model, "aimee") != 0)
+   {
+      /* An explicitly requested model must match a configured agent — never
+       * silently fall back to the default (that would run a different model than
+       * the client asked for and echo the wrong name back). */
       ag = agent_find(&acfg, model);
+      if (!ag)
+      {
+         free(pi_env);
+         free(prompt);
+         openai_format_error(resp, cap, "model_not_found", "the requested model is not available");
+         return 404;
+      }
+   }
    if (!ag)
       ag = agent_find(&acfg, acfg.default_agent);
    if (!ag && acfg.agent_count > 0)
@@ -569,7 +582,16 @@ static int responses_handler(const char *body, char *resp, int cap)
    }
    agent_t *ag = NULL;
    if (model[0] && strcmp(model, "aimee") != 0)
+   {
+      /* Explicit model must match a configured agent — no silent fallback. */
       ag = agent_find(&acfg, model);
+      if (!ag)
+      {
+         free(prompt);
+         openai_format_error(resp, cap, "model_not_found", "the requested model is not available");
+         return 404;
+      }
+   }
    if (!ag)
       ag = agent_find(&acfg, acfg.default_agent);
    if (!ag && acfg.agent_count > 0)
@@ -673,11 +695,12 @@ static agent_t *stream_pick_agent(agent_config_t *acfg, const char *model)
 {
    if (agent_load_config(acfg) != 0)
       return NULL;
-   agent_t *ag = NULL;
+   /* An explicitly requested model must match a configured agent. Returning NULL
+    * (rather than falling back to the default) makes callers refuse instead of
+    * silently streaming a different model than the client asked for. */
    if (model[0] && strcmp(model, "aimee") != 0)
-      ag = agent_find(acfg, model);
-   if (!ag)
-      ag = agent_find(acfg, acfg->default_agent);
+      return agent_find(acfg, model);
+   agent_t *ag = agent_find(acfg, acfg->default_agent);
    if (!ag && acfg->agent_count > 0)
       ag = &acfg->agents[0];
    return ag;

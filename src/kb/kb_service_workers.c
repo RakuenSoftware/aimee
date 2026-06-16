@@ -18,6 +18,7 @@
 #include "kb_reflection.h"
 #include "kb_service.h"
 #include "config.h"
+#include "db2/db2.h"
 #include "db2/kb_service_backend.h"
 #include "db2/kb_maintenance.h"
 #include "db2/kb_runtime_state.h"
@@ -71,6 +72,9 @@ static void *kb_maintenance_timer_thread(void *arg)
    long elapsed = 0;
    while (!g_maintenance_stop)
    {
+      /* Drop any pool connection held from the last maintenance run so this
+       * long-lived timer doesn't pin one while idle (stuck-lease reaper). */
+      db2_lease_release_idle();
       sleep(1);
       elapsed++;
       if (elapsed < interval_secs)

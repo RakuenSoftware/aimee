@@ -1072,6 +1072,14 @@ int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
    return aimee_pg_exec_with_changes(pg_conn, sql, errbuf, errlen, NULL);
 }
 
+int aimee_pg_in_transaction(void *pg_conn)
+{
+   if (!pg_conn)
+      return 0;
+   PGTransactionStatusType t = PQtransactionStatus((PGconn *)pg_conn);
+   return (t == PQTRANS_INTRANS || t == PQTRANS_INERROR) ? 1 : 0;
+}
+
 int aimee_pg_exec_with_changes(void *pg_conn, const char *sql, char *errbuf, size_t errlen,
                                int *affected_out)
 {
