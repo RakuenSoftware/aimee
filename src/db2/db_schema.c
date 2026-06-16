@@ -83,6 +83,92 @@ static char *schema_subst(const char *src, const char *token, const char *repl)
    return out;
 }
 
+/* embedder-runtime-fetch-autodim §2: record the embedding dim the schema was
+ * sized at, and REFUSE a later mismatch. kb_meta.schema_embedding_dim is written
+ * once (the first apply) and is then authoritative: if a subsequent apply is asked
+ * for a different dim, the existing halfvec columns are still at the recorded dim,
+ * so proceeding would silently embed queries at one dim against a corpus at
+ * another (search returns nothing). Refuse instead, with a remediation message.
+ * Returns 0 (recorded or matches), -1 (mismatch / DB error -> errbuf set).
+ * Uses aimee_pg_* so it works against both Postgres and the sqlite test shim. */
+int db2_embedding_dim_record_or_check(void *conn, int embed_dim, char *errbuf, size_t errlen)
+{
+   if (!conn)
+      return -1;
+   /* A non-positive dim must never be recorded as authoritative: once written it
+    * would "match" forever and lock the guard into an unrecoverable state. */
+   if (embed_dim <= 0)
+   {
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen, "invalid embedding dim: %d (must be > 0)", embed_dim);
+      return -1;
+   }
+
+   /* Atomic record-or-read in a single statement — no SELECT/INSERT TOCTOU window.
+    * On a fresh row this inserts embed_dim; on an existing row the DO UPDATE writes
+    * the value back unchanged so RETURNING still yields the authoritative recorded
+    * dim. Two racing bootstraps with different dims therefore both observe the one
+    * committed value: the loser sees a mismatch and is refused (the old DO NOTHING
+    * form silently swallowed the loser's write and returned success). */
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "INSERT INTO kb_meta (key, value) VALUES ('schema_embedding_dim', ?1)"
+                        " ON CONFLICT (key) DO UPDATE SET value = kb_meta.value"
+                        " RETURNING value",
+                        err, sizeof(err));
+   if (!st)
+   {
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen, "kb_meta upsert prepare failed: %s", err);
+      return -1;
+   }
+   char dimtxt[16];
+   snprintf(dimtxt, sizeof(dimtxt), "%d", embed_dim);
+   if (aimee_pg_bind_text(st, "?1", dimtxt) != 0)
+   {
+      aimee_pg_finalize(st);
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen, "kb_meta bind failed");
+      return -1;
+   }
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   if (step != AIMEE_PG_ROW)
+   {
+      /* DONE (no row) or ERR — either way we did not learn the authoritative dim,
+       * so refuse rather than fall through and assume "first apply". */
+      aimee_pg_finalize(st);
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen, "kb_meta upsert failed: %s", err[0] ? err : "no row returned");
+      return -1;
+   }
+   const char *valtxt = aimee_pg_column_text(st, 0);
+   char *endp = NULL;
+   long recorded = (valtxt && *valtxt) ? strtol(valtxt, &endp, 10) : 0;
+   int corrupt = (!valtxt || !*valtxt || (endp && *endp != '\0') || recorded <= 0);
+   aimee_pg_finalize(st);
+
+   if (corrupt)
+   {
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen,
+                  "kb_meta.schema_embedding_dim is corrupt or non-numeric; repair the row "
+                  "manually to the schema's true dimension (expected a positive integer).");
+      return -1;
+   }
+   if (recorded != embed_dim)
+   {
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen,
+                  "embedding dim mismatch: schema sized %ld but configured %d; serving the new "
+                  "dim against the old corpus makes vector search silently return nothing. "
+                  "Restore embedding_dim=%ld or migrate the corpus (see docs/retrieval-stack.md).",
+                  recorded, embed_dim, recorded);
+      return -1;
+   }
+   return 0; /* recorded == embed_dim — fresh insert or matching existing row */
+}
+
 int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen)
 {
    if (!pg_conn)
@@ -107,7 +193,10 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
    }
    int rc = aimee_pg_exec(pg_conn, sql, errbuf, errlen);
    free(sql);
-   return rc;
+   if (rc != 0)
+      return rc;
+   /* §2: record the dim on first apply / refuse a mismatch (kb_meta now exists). */
+   return db2_embedding_dim_record_or_check(pg_conn, embed_dim, errbuf, errlen);
 }
 
 int db2_apply_schema_sqlite_shim(sqlite3 *db, char *errbuf, size_t errlen)

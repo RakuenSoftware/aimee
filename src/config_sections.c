@@ -1265,7 +1265,16 @@ void config_parse_kb_section2(config_t *cfg, cJSON *root)
       if (cJSON_IsNumber(item))
       {
          int wc = (int)item->valuedouble;
-         cfg->kb_worker_count = (wc < 0) ? 0 : (wc > 8) ? 8 : wc;
+         /* Cap lifted 8 -> 32: DB2 connections are now bounded by the pool, not
+          * by the worker count. */
+         cfg->kb_worker_count = (wc < 0) ? 0 : (wc > 32) ? 32 : wc;
+      }
+
+      item = cJSON_GetObjectItemCaseSensitive(kb, "connection_pool_size");
+      if (cJSON_IsNumber(item))
+      {
+         int ps = (int)item->valuedouble;
+         cfg->db2_connection_pool_size = (ps < 1) ? 0 : (ps > 256) ? 256 : ps;
       }
 
       item = cJSON_GetObjectItemCaseSensitive(kb, "connection_workers");

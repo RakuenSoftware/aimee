@@ -1,7 +1,12 @@
 # Proposal: on-demand delegate execution (retire the CPU-pool gate)
 
-- **State:** implemented on `feat/delegate-io-pool`; self-reviewed (roundtable
-  infra was itself wedged by the bug this fixes).
+- **State:** landed — merged to `testing` via PR #333. The server-only on-demand
+  delegate execution (per-thread spawn + `delegate_max_inflight` backstop, all
+  three call sites converted, the CPU-pool gate retired) is in tree
+  (`src/server/server_delegate_ondemand.c`); session-delegate and aimee-kb worker
+  pools remain the noted fast-follows. (Originally implemented on
+  `feat/delegate-io-pool`; self-reviewed — the roundtable infra was itself wedged
+  by the bug this fixes.)
 - **Author:** JBailes
 - **Date:** 2026-06-15
 - **Scope:** server only (this PR). Session-delegate pools and aimee-kb worker

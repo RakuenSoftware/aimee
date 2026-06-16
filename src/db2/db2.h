@@ -23,6 +23,18 @@ extern "C"
     * Returns 0 on success. */
    int db2_init(const char *libpq_url);
 
+   /* Set the connection-pool size used by db2_init (default 16). Call before
+    * db2_init, like db2_set_embedding_dim — keeps the db2 layer config-free. */
+   void db2_set_pool_size(int size);
+
+   /* Bracket a unit of work so the thread's pooled connection is returned
+    * between units (instead of held for the thread's life). Re-entrant
+    * (refcounted): nested begin/end pairs reuse the same lease. db2_conn()
+    * returns the current lease (lazily leasing one if none is held). Outside any
+    * begin/end, a lazily-leased connection is returned when the thread exits. */
+   void db2_lease_begin(void);
+   void db2_lease_end(void);
+
    /* Snapshot the DB2 connection URL for forked child reopen. Returns 1 when
     * a URL is available, else 0. */
    int db2_fork_conn_url(char *out, size_t cap);

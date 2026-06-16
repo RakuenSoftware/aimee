@@ -365,7 +365,9 @@ static void *mining_thread_main(void *arg)
 
    while (!g_mining_stop)
    {
+      db2_lease_begin(); /* WP-C: hold a pool lease only during the cycle */
       (void)kb_mining_run_once();
+      db2_lease_end();
       for (int i = 0; i < min_poll_s && !g_mining_stop; i++)
          mining_sleep_one_second();
    }

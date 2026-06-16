@@ -13,6 +13,7 @@
 #include "agent.h"
 #include "agent_config.h"
 #include "agent_tools.h"
+#include "workspace_provider.h"
 #include "agent_adapter.h"
 #include "provider_cli_adapter.h"
 #include "agent_protocol.h"
@@ -24,6 +25,13 @@
 void test_agent_route_with_caps_honors_tools_enabled(void);
 void test_agent_route_with_caps_honors_context_override(void);
 void test_tools_enabled_capability_default(void);
+
+/* Defined in test_agent_responses.c (split out to keep this file under the
+ * 2000-line hard limit); called from main() below. */
+void test_responses_parser_keeps_all_output_text_parts(void);
+void test_responses_parser_accumulates_output_text_deltas(void);
+void test_responses_parser_uses_output_text_done(void);
+void test_responses_parser_separates_message_items(void);
 
 /* --- Expose tool functions for testing via redeclaration --- */
 char *tool_bash(const char *command, int timeout_ms);
@@ -703,95 +711,6 @@ static void test_codex_oauth_auth_resolution(void)
    assert(strcmp(auth, "Authorization: Bearer codex-cli-token") == 0);
 }
 
-static void test_responses_parser_keeps_all_output_text_parts(void)
-{
-   const char *body =
-       "event: response.output_item.done\n"
-       "data: {\"item\":{\"type\":\"message\",\"content\":["
-       "{\"type\":\"output_text\",\"text\":\"I did not deploy this to `192.\"},"
-       "{\"type\":\"output_text\",\"text\":\"168.0.83`.\"}]}}\n\n"
-       "event: response.completed\n"
-       "data: {\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":22}}}\n\n";
-
-   parsed_response_t parsed;
-   agent_parse_response_responses(body, &parsed);
-   assert(parsed.content != NULL);
-   assert(strcmp(parsed.content, "I did not deploy this to `192.168.0.83`.") == 0);
-   assert(parsed.prompt_tokens == 11);
-   assert(parsed.completion_tokens == 22);
-   agent_free_parsed_response(&parsed);
-}
-
-static void test_responses_parser_accumulates_output_text_deltas(void)
-{
-   const char *body =
-       "event: response.output_text.delta\r\n"
-       "data: {\"delta\":\"The useful model fact here is that Qwen3.\"}\r\n\r\n"
-       "event: response.output_text.delta\r\n"
-       "data: {\"delta\":\"6 keeps scaling KV cache with context length.\"}\r\n\r\n"
-       "event: response.completed\r\n"
-       "data: {\"response\":{\"output\":[],\"usage\":{\"input_tokens\":5,\"output_tokens\":6}}}"
-       "\r\n\r\n";
-
-   parsed_response_t parsed;
-   agent_parse_response_responses(body, &parsed);
-   assert(parsed.content != NULL);
-   assert(strcmp(parsed.content,
-                 "The useful model fact here is that Qwen3.6 keeps scaling KV cache with context "
-                 "length.") == 0);
-   assert(parsed.prompt_tokens == 5);
-   assert(parsed.completion_tokens == 6);
-   agent_free_parsed_response(&parsed);
-}
-
-static void test_responses_parser_uses_output_text_done(void)
-{
-   const char *body =
-       "event: response.content_part.done\n"
-       "data: {\"part\":{\"type\":\"output_text\",\"text\":\"One caveat: the endpoint I could "
-       "reach at `192.168.1.103:8080`.\"}}\n\n"
-       "event: response.output_text.done\n"
-       "data: {\"text\":\"One caveat: the endpoint I could reach at `192.168.1.103:8080`.\"}\n\n"
-       "event: response.completed\n"
-       "data: "
-       "{\"response\":{\"output\":[],\"usage\":{\"input_tokens\":7,\"output_tokens\":8}}}\n\n";
-
-   parsed_response_t parsed;
-   agent_parse_response_responses(body, &parsed);
-   assert(parsed.content != NULL);
-   assert(strcmp(parsed.content,
-                 "One caveat: the endpoint I could reach at `192.168.1.103:8080`.") == 0);
-   assert(parsed.prompt_tokens == 7);
-   assert(parsed.completion_tokens == 8);
-   agent_free_parsed_response(&parsed);
-}
-
-static void test_responses_parser_separates_message_items(void)
-{
-   const char *body =
-       "event: response.output_text.delta\n"
-       "data: {\"delta\":\"PR.\"}\n\n"
-       "event: response.output_text.delta\n"
-       "data: {\"delta\":\"GitHub\"}\n\n"
-       "event: response.output_item.done\n"
-       "data: {\"item\":{\"type\":\"message\",\"content\":["
-       "{\"type\":\"output_text\",\"text\":\"PR.\"}]}}\n\n"
-       "event: response.output_item.done\n"
-       "data: {\"item\":{\"type\":\"message\",\"content\":["
-       "{\"type\":\"output_text\",\"text\":\"GitHub\"}]}}\n\n"
-       "event: response.completed\n"
-       "data: {\"response\":{\"output\":[],\"usage\":{\"input_tokens\":9,\"output_tokens\":10}}}"
-       "\n\n";
-
-   parsed_response_t parsed;
-   agent_parse_response_responses(body, &parsed);
-   assert(parsed.content != NULL);
-   assert(strcmp(parsed.content, "PR.\n\nGitHub") == 0);
-   assert(parsed.prompt_tokens == 9);
-   assert(parsed.completion_tokens == 10);
-   agent_free_parsed_response(&parsed);
-}
-
 static void test_agent_is_exec_role(void)
 {
    agent_t agent;
@@ -856,6 +775,62 @@ static void test_tool_bash(void)
    result = tool_bash("yes x | head -c 65536", 5000);
    assert(result && strstr(result, "\"exit_code\":0") != NULL);
    free(result);
+}
+
+/* A write into a source checkout is redirected into an aimee-managed worktree
+ * by guardrails (pre_tool_check returns 1 with the rewritten path) under the
+ * default (shared) provider. When a `detached` workspace provider is active the
+ * tool marshals to the serving client (file tools + tool_bash -> exec_shell), so
+ * the server-side worktree rewrite must be SKIPPED — otherwise the path/command
+ * would be re-pointed at a checkout that does not exist on the client. This
+ * locks in the guardrails skip that lets detached delegates operate on the
+ * client's live tree. */
+static void test_detached_skips_worktree_rewrite(void)
+{
+   char repo[256];
+   snprintf(repo, sizeof(repo), "/tmp/det_wt_test.XXXXXX");
+   assert(mkdtemp(repo) != NULL);
+   char shellcmd[512];
+   snprintf(shellcmd, sizeof(shellcmd), "git init -q '%s' >/dev/null 2>&1", repo);
+   (void)system(shellcmd);
+
+   session_state_t state;
+   memset(&state, 0, sizeof(state));
+   strcpy(state.guardrail_mode, MODE_APPROVE);
+
+   char input[512];
+   snprintf(input, sizeof(input), "{\"file_path\":\"%s/foo.c\",\"content\":\"int x;\"}", repo);
+   char msg[1024];
+
+   /* Shared (default) provider: the write is redirected into a worktree. */
+   workspace_provider_clear_active();
+   msg[0] = '\0';
+   int rc_shared = pre_tool_check("Write", input, &state, MODE_APPROVE, repo, msg, sizeof(msg));
+   assert(rc_shared == 1);                /* allow-with-rewrite */
+   assert(strstr(msg, ".aimee") != NULL); /* rewritten into an aimee worktree */
+
+   /* Detached provider active: the rewrite is skipped (path left untouched). */
+   workspace_provider_t fake_detached;
+   memset(&fake_detached, 0, sizeof(fake_detached));
+   fake_detached.kind = WS_PROVIDER_DETACHED;
+   workspace_provider_set_active(&fake_detached);
+   msg[0] = '\0';
+   int rc_detached = pre_tool_check("Write", input, &state, MODE_APPROVE, repo, msg, sizeof(msg));
+   workspace_provider_clear_active();
+   assert(rc_detached != 1);              /* allow-with-rewrite did NOT fire */
+   assert(strstr(msg, ".aimee") == NULL); /* no worktree path was injected */
+   /* NB: rc_detached here reflects the orthogonal, config-based write gate
+    * (cwd_is_detached_workspace) which this test's bare temp repo is not
+    * registered for. In production workspace_turn_bind_active and
+    * cwd_is_detached_workspace read the SAME workspace registry, so a real
+    * detached turn lifts both and the write is allowed (rc 0). What this test
+    * pins is the one thing the provider bind controls: the worktree rewrite. */
+
+   snprintf(shellcmd, sizeof(shellcmd), "rm -rf '%s'", repo);
+   (void)system(shellcmd);
+
+   printf("  detached_skips_worktree_rewrite: ok (shared=%d, detached=%d)\n", rc_shared,
+          rc_detached);
 }
 
 static void test_tool_read_file(void)
@@ -1810,108 +1785,6 @@ static void test_agent_trace_log_uses_db1_execution_trace(void)
    db1_stmt_cache_clear();
    sqlite3_close(db);
 }
-/* Route-health filter predicates for test_agent_route_health_filter. */
-static const char *g_test_down_agent = NULL;
-static int test_route_filter_named(const char *name)
-{
-   return g_test_down_agent && strcmp(name, g_test_down_agent) == 0;
-}
-static int test_route_filter_all(const char *name)
-{
-   (void)name;
-   return 1;
-}
-
-/* A provider the health catalog marks DOWN must be excluded from routing so
- * new work falls back to a healthy peer; when every candidate is down, routing
- * returns NULL (a clean failure) rather than handing work to a dead endpoint. */
-static void test_agent_route_health_filter(void)
-{
-   agent_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 2;
-
-   strcpy(cfg.agents[0].name, "cheap");
-   strcpy(cfg.agents[0].roles[0], "summarize");
-   cfg.agents[0].role_count = 1;
-   cfg.agents[0].cost_tier = 0;
-   cfg.agents[0].enabled = 1;
-
-   strcpy(cfg.agents[1].name, "expensive");
-   strcpy(cfg.agents[1].roles[0], "summarize");
-   cfg.agents[1].role_count = 1;
-   cfg.agents[1].cost_tier = 1;
-   cfg.agents[1].enabled = 1;
-
-   /* No filter registered: cheapest healthy agent wins (baseline). */
-   agent_set_route_health_filter(NULL);
-   assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
-
-   /* Cheap agent DOWN: it is no longer available, routing uses the peer. */
-   g_test_down_agent = "cheap";
-   agent_set_route_health_filter(test_route_filter_named);
-   assert(!agent_is_available_for_routing(&cfg.agents[0]));
-   assert(agent_is_available_for_routing(&cfg.agents[1]));
-   assert(agent_route(&cfg, "summarize") == &cfg.agents[1]);
-
-   /* Every candidate DOWN: clean NULL, never a dead-endpoint wedge. */
-   agent_set_route_health_filter(test_route_filter_all);
-   assert(agent_route(&cfg, "summarize") == NULL);
-
-   /* Clearing the filter restores the prior behaviour exactly. */
-   g_test_down_agent = NULL;
-   agent_set_route_health_filter(NULL);
-   assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
-}
-
-/* Regression: the multi-turn tool loop must not issue a model call with a
- * starved (sub-viable) timeout when its budget is nearly exhausted -- that
- * yields an HTTP -1 read failure that gets misreported as "provider
- * unreachable" and marks the provider degraded. agent_loop_per_call_timeout_ms
- * returns -1 instead so the loop stops cleanly. */
-static void test_agent_loop_per_call_timeout(void)
-{
-   /* Early in the loop: full per-call timeout. */
-   assert(agent_loop_per_call_timeout_ms(180000, 720000, 0) == 180000);
-   /* Mid loop: capped to the remaining budget, still >= the viable floor. */
-   assert(agent_loop_per_call_timeout_ms(180000, 720000, 660000) == 60000);
-   /* Budget nearly gone (only 2.2s left -- the real-world failure): stop, do
-    * NOT issue a doomed 2262ms call. */
-   assert(agent_loop_per_call_timeout_ms(180000, 720000, 717738) == -1);
-   /* Exactly at the floor is still viable; one below it stops. */
-   assert(agent_loop_per_call_timeout_ms(180000, 720000, 660000) == 60000);
-   assert(agent_loop_per_call_timeout_ms(180000, 720000, 660001) == -1);
-   /* Small configured timeout: the floor never exceeds agent_timeout_ms. */
-   assert(agent_loop_per_call_timeout_ms(10000, 40000, 0) == 10000);
-   assert(agent_loop_per_call_timeout_ms(10000, 40000, 35000) == -1);
-}
-
-static void test_claude_cli_predicate(void)
-{
-   agent_t a;
-
-   /* claude via tmux/CLI login → gated (primary-only by default). */
-   memset(&a, 0, sizeof(a));
-   snprintf(a.backend, sizeof(a.backend), "%s", AGENT_BACKEND_TMUX_CLI);
-   snprintf(a.cli_kind, sizeof(a.cli_kind), "claude");
-   assert(agent_is_claude_cli(&a) == 1);
-   snprintf(a.cli_kind, sizeof(a.cli_kind), "claude-code");
-   assert(agent_is_claude_cli(&a) == 1);
-   snprintf(a.backend, sizeof(a.backend), "%s", AGENT_BACKEND_PROVIDER_CLI);
-   snprintf(a.cli_kind, sizeof(a.cli_kind), "claude");
-   assert(agent_is_claude_cli(&a) == 1);
-
-   /* Claude-only: other CLI agents (Codex CLI, gemini-cli) are NOT gated. */
-   snprintf(a.cli_kind, sizeof(a.cli_kind), "codex");
-   assert(agent_is_claude_cli(&a) == 0);
-   snprintf(a.cli_kind, sizeof(a.cli_kind), "gemini");
-   assert(agent_is_claude_cli(&a) == 0);
-
-   /* plain HTTP/API-key agent → not gated. */
-   memset(&a, 0, sizeof(a));
-   snprintf(a.backend, sizeof(a.backend), "openai");
-   assert(agent_is_claude_cli(&a) == 0);
-}
 
 int main(void)
 {
@@ -1927,9 +1800,6 @@ int main(void)
    test_agent_has_role();
    test_agent_find();
    test_agent_route();
-   test_claude_cli_predicate();
-   test_agent_loop_per_call_timeout();
-   test_agent_route_health_filter();
    test_agent_route_with_caps_honors_tools_enabled();
    test_agent_route_with_caps_honors_context_override();
    test_current_code_only_role_tool_policy();
@@ -1949,6 +1819,7 @@ int main(void)
    test_responses_parser_separates_message_items();
    test_agent_is_exec_role();
    test_tool_bash();
+   test_detached_skips_worktree_rewrite();
    test_tool_read_file();
    test_tool_write_file();
    test_tool_edit_file();

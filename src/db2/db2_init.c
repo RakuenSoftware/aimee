@@ -10,12 +10,14 @@
 #include "db2.h"
 #include "db2_internal.h"
 
+#include "db2_pool.h"
 #include "db_postgres.h"
 #include "db_schema.h"
 #include "entity_edges.h"
 #include "eval_support.h"
 
 #include <pthread.h>
+#include <stdlib.h>
 #ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
 typedef struct sqlite3 sqlite3;
 #else
@@ -67,13 +69,40 @@ static pthread_once_t g_thread_conn_key_once = PTHREAD_ONCE_INIT;
 static pthread_t g_init_thread;
 static int g_init_thread_set = 0;
 
-/* Close a thread's per-thread libpq connection when the thread exits. Threads
- * that call db2_thread_conn_close() explicitly NULL the slot first, so this
- * only fires for connections opened lazily by db2_conn(). */
-static void thread_conn_destructor(void *conn)
+/* A non-init thread's current connection: a pool lease (pooled=1) or, when the
+ * pool is exhausted/unavailable, a private overflow connection (pooled=0).
+ * Stored in g_thread_conn_key; the destructor returns/closes it on thread exit
+ * (this is the reliable reclaim-on-thread-death the pool reaper deliberately
+ * leaves to us). g_lease_depth refcounts db2_lease_begin/_end so nested units
+ * reuse one lease. */
+typedef struct
 {
-   if (conn)
-      aimee_pg_close(conn);
+   void *conn;
+   int pooled;
+} db2_thread_lease_t;
+
+static int g_pool_size = 16; /* set via db2_set_pool_size before db2_init */
+static __thread int g_lease_depth = 0;
+
+void db2_set_pool_size(int size)
+{
+   if (size > 0)
+      g_pool_size = size;
+}
+
+static void thread_conn_destructor(void *p)
+{
+   db2_thread_lease_t *L = (db2_thread_lease_t *)p;
+   if (!L)
+      return;
+   if (L->conn)
+   {
+      if (L->pooled)
+         db2_pool_return(L->conn);
+      else
+         aimee_pg_close(L->conn);
+   }
+   free(L);
 }
 
 static void thread_conn_key_init(void)
@@ -143,33 +172,99 @@ static int db2_query_flag(const char *sql, const char *param_name, const char *p
    return -1;
 }
 
+/* Acquire this thread's connection: a pool lease, or — if the pool is
+ * unavailable/exhausted — a private overflow connection. Stores it in the
+ * thread key so the destructor returns/closes it on thread exit. Caller holds
+ * no lock. Returns NULL only if everything fails (then db2_conn falls back to
+ * g_conn as a last resort). */
+static void *db2_thread_acquire(void)
+{
+   void *conn = NULL;
+   int pooled = 0;
+   if (db2_pool_active())
+   {
+      conn = db2_pool_lease(0); /* bounded; NULL on exhaustion */
+      pooled = (conn != NULL);
+   }
+   if (!conn)
+   {
+      /* Pool off or exhausted: a private overflow connection keeps the unit of
+       * work alive (libpq forbids sharing one PGconn across threads). The
+       * WP-D startup check leaves headroom under max_connections for these. */
+      char errbuf[256] = "";
+      conn = aimee_pg_open(g_pg_url[0] ? g_pg_url : NULL, errbuf, sizeof(errbuf));
+      if (!conn)
+      {
+         fprintf(stderr, "aimee: db2_conn: connection acquire failed (%s)\n",
+                 errbuf[0] ? errbuf : "unknown");
+         return NULL;
+      }
+   }
+   db2_thread_lease_t *L = (db2_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
+   if (!L)
+   {
+      L = (db2_thread_lease_t *)calloc(1, sizeof(*L));
+      if (!L)
+      {
+         if (pooled)
+            db2_pool_return(conn);
+         else
+            aimee_pg_close(conn);
+         return NULL;
+      }
+      pthread_setspecific(g_thread_conn_key, L);
+   }
+   L->conn = conn;
+   L->pooled = pooled;
+   return conn;
+}
+
 void *db2_conn(void)
 {
    pthread_once(&g_thread_conn_key_once, thread_conn_key_init);
-   void *tconn = pthread_getspecific(g_thread_conn_key);
-   if (tconn)
-      return tconn;
-   /* libpq forbids concurrent use of a single PGconn. The thread that ran
-    * db2_init() owns g_conn; any OTHER thread that touches DB2 (mining,
-    * reflection, maintenance, curator-drain, HTTP listener, ...) must use its
-    * own connection or libpq's internal state corrupts — observed as a
-    * double-free of a PGresult, which glibc surfaces as "realloc(): invalid
-    * next size". Lazily open a per-thread connection on first use; the key
-    * destructor closes it on thread exit. Threads that manage their own
-    * connection explicitly (db2_thread_conn_open/close) hit the fast path
-    * above. */
-   if (g_init_thread_set && !pthread_equal(pthread_self(), g_init_thread))
+   db2_thread_lease_t *L = (db2_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
+   if (L && L->conn)
+      return L->conn; /* the thread's current lease (re-entrant) */
+   /* The db2_init() owner thread uses its dedicated g_conn directly. */
+   if (!g_init_thread_set || pthread_equal(pthread_self(), g_init_thread))
+      return g_conn;
+   /* Every other thread leases from the pool (lazily; returned on thread exit
+    * by the destructor, or sooner via db2_lease_end at a job boundary). */
+   void *c = db2_thread_acquire();
+   return c ? c : g_conn;
+}
+
+void db2_lease_begin(void)
+{
+   pthread_once(&g_thread_conn_key_once, thread_conn_key_init);
+   /* The init thread is never pooled. */
+   if (!g_init_thread_set || pthread_equal(pthread_self(), g_init_thread))
+      return;
+   if (g_lease_depth++ == 0)
    {
-      char errbuf[256] = "";
-      void *conn = db2_thread_conn_open(errbuf, sizeof(errbuf));
-      if (conn)
-         return conn;
-      fprintf(stderr,
-              "aimee: db2_conn: per-thread connection open failed (%s); "
-              "falling back to shared connection\n",
-              errbuf[0] ? errbuf : "unknown");
+      db2_thread_lease_t *L = (db2_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
+      if (!L || !L->conn)
+         (void)db2_thread_acquire(); /* eager lease for the unit of work */
    }
-   return g_conn;
+}
+
+void db2_lease_end(void)
+{
+   if (!g_init_thread_set || pthread_equal(pthread_self(), g_init_thread))
+      return;
+   if (g_lease_depth > 0 && --g_lease_depth == 0)
+   {
+      db2_thread_lease_t *L = (db2_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
+      if (L && L->conn)
+      {
+         if (L->pooled)
+            db2_pool_return(L->conn);
+         else
+            aimee_pg_close(L->conn);
+         L->conn = NULL;
+         L->pooled = 0;
+      }
+   }
 }
 
 void *db2_thread_conn_open(char *errbuf, size_t errlen)
@@ -320,6 +415,20 @@ int db2_init(const char *libpq_url)
    g_init_thread = pthread_self();
    g_init_thread_set = 1;
    snprintf(g_pg_url, sizeof(g_pg_url), "%s", libpq_url);
+   /* Initialize the connection pool that every non-init thread leases from. On
+    * failure, db2_conn falls back to private per-thread connections (degraded
+    * but functional). Skipped under the sqlite test shim (a shared sqlite handle
+    * is registered): pooling Postgres-only reset SQL has no meaning there, and
+    * db2_conn returns the shim's shared connection. */
+   if (!db2_shared_sqlite())
+   {
+      char perr[256] = "";
+      if (db2_pool_init(libpq_url, g_pool_size, perr, sizeof(perr)) != 0)
+         fprintf(stderr,
+                 "aimee: db2_init: connection pool init failed (%s); using per-thread "
+                 "connections\n",
+                 perr);
+   }
    pthread_mutex_unlock(&g_init_lock);
    return 0;
 }
@@ -469,6 +578,9 @@ int db2_pg_stat_summary(int *active_conns, int *max_conns, int *is_replica,
 
 void db2_shutdown(void)
 {
+   /* Drain + close the pool first (its reaper thread + members) before the
+    * owner connection. */
+   db2_pool_shutdown();
    pthread_mutex_lock(&g_init_lock);
    if (g_conn)
    {

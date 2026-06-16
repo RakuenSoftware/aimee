@@ -111,19 +111,107 @@ The code-side embedding buffers are sized by `EMBED_MAX_DIM` (2560 in
 `src/headers/aimee.h`), large enough to hold either model's output; the embed
 helpers store whatever dimension the embedder actually returns.
 
+### The dimension-drift guard
+
+Sizing the columns at one dimension and then *serving* queries at another is the
+worst failure mode: queries embed at the new dimension, the corpus is stored at
+the old one, and vector search silently returns nothing — no error, just empty
+results. To make that impossible, the first schema-apply records the dimension it
+materialized the columns at in a small `kb_meta(key, value)` table
+(`schema_embedding_dim`), and every later apply checks against it.
+
+`db_apply_schema_postgres()`, right after the DDL applies, calls
+`db2_embedding_dim_record_or_check()`. That function first rejects a non-positive
+configured dimension — returning an error *before* it touches `kb_meta`, so an
+invalid dimension can never be written as the authoritative value — and then
+performs a single atomic statement:
+
+```sql
+INSERT INTO kb_meta (key, value) VALUES ('schema_embedding_dim', :dim)
+  ON CONFLICT (key) DO UPDATE SET value = kb_meta.value
+  RETURNING value;
+```
+
+The `DO UPDATE SET value = kb_meta.value` clause deliberately writes the existing
+value back unchanged (not `EXCLUDED.value`), so on a row that already exists the
+recorded dimension is *preserved* and `RETURNING` yields it; on a fresh row the
+just-inserted dimension is returned. The function then compares that returned
+value to the configured dimension:
+
+- **First apply** — no row yet: the configured dimension is inserted and
+  returned, so it matches; the apply succeeds.
+- **Matching apply** — the recorded dimension equals the configured one: no-op,
+  the apply succeeds.
+- **Mismatch** — the recorded dimension differs: the function returns an error,
+  so `db2_init()` fails and the server/kb refuses to start, with a remediation
+  message naming both dimensions and pointing at the migration procedure below
+  ("Switching embedders on an existing database").
+
+Because the record-and-read is one atomic upsert, there is no SELECT-then-INSERT
+window: a deployment is never able to record one dimension while another is
+already stored, so a misconfigured second start reads the committed dimension and
+is refused rather than silently proceeding at the wrong dimension. If the
+`kb_meta` value is ever corrupt or non-numeric (e.g. hand-edited), the function
+returns an error reporting it for manual repair rather than silently treating it
+as "no recorded dimension" and overwriting it. The check is written against the
+`aimee_pg_*` abstraction layer, so the same logic runs on Postgres in production
+and is exercised against the SQLite test shim; see
+`src/tests/test_embedding_dim.c`.
+
 ## Switching embedders on an existing database
 
 `db2_init()` never reshapes an existing column (a routine schema-apply must not
-touch the corpus). If you change `embedding_dim` against a populated database,
-the schema-apply emits a `NOTICE`: the columns are still the old type/dimension
-and vector ops degrade until you migrate. Switching dimension (0.6b 1024 ⇆ 4b
-2560) requires **re-embedding** the corpus at the new dimension. Drop the
-embedding rows (`kb_embeddings`, `memory_embeddings`, the `curator_*_vectors`),
-restart the kb so it recreates the columns at the new `embedding_dim`, then let
-the curator drain re-embed — it backfills any `kb_documents` chunk missing a
-vector. Chunk text and `file_contents` are untouched. A same-dimension
-`vector → halfvec` change only needs an in-place cast
-(`deploy/migrations/2026-embed-halfvec.sql`). Back up DB2 first.
+touch the corpus). Changing `embedding_dim` against a populated database to a
+**different dimension** is now refused at startup by the dimension-drift guard
+above — the server/kb will not come up until the corpus and the config agree,
+precisely because the alternative (booting and serving) silently breaks search.
+Switching dimension (0.6b 1024 ⇆ 4b 2560) therefore requires **re-embedding** the
+corpus at the new dimension. Note that the schema-apply uses
+`CREATE TABLE IF NOT EXISTS`, so it will **not** alter an existing table — simply
+deleting the vector *rows* leaves the `halfvec` columns at their old dimension. To
+move the dimension the dim-sized tables must be **dropped** so the next
+schema-apply recreates them at the new `embedding_dim`. Each one is a derived
+embedding/index table (a `point_id` key plus the `halfvec` vector and denormalized
+lookup columns); their contents are rebuilt by re-embedding from the source rows
+(`kb_documents`, memories, code units, and the curator artifacts), so dropping
+them loses only the derived vectors, not the source corpus.
+
+Back up DB2 first, then, with the kb **stopped** (so nothing reads or rewrites the
+columns mid-migration):
+
+1. Set the new `embedding_dim` (config or `AIMEE_EMBEDDING_DIM`).
+2. In a single transaction, drop every dim-sized table and clear the recorded
+   dimension so the next start re-records it:
+
+   ```sql
+   BEGIN;
+   DROP TABLE IF EXISTS
+       kb_embeddings,
+       memory_embeddings,
+       code_embeddings,
+       curator_entity_vectors,
+       curator_narrative_vectors,
+       curator_claim_vectors,
+       curator_code_unit_vectors,
+       evidence_vectors,
+       exemplar_vectors;
+   DELETE FROM kb_meta WHERE key = 'schema_embedding_dim';
+   COMMIT;
+   ```
+
+   (Drop the tables and clear `schema_embedding_dim` together: leaving the row set
+   makes the next start refuse, while clearing it without dropping the tables would
+   re-record the new dimension against columns still sized at the old one — exactly
+   the drift the guard exists to prevent.)
+3. Start the kb. With the tables gone the schema-apply recreates them at the new
+   `embedding_dim`, and with the `kb_meta` row gone the guard treats this as a
+   first apply and re-records the new dimension. The curator drain then re-embeds,
+   backfilling any source row missing a vector.
+
+Chunk text and `file_contents` are untouched throughout. A same-dimension
+`vector → halfvec` change is different: it only needs an in-place cast
+(`deploy/migrations/2026-embed-halfvec.sql`) and leaves `schema_embedding_dim`
+unchanged, since the dimension has not moved.
 
 ## Reranking
 
