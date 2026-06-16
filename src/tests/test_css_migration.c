@@ -5,11 +5,15 @@
 #include <string.h>
 
 #include "aimee.h"
+#include "config.h"
 #include "css_analyze.h"
 #include "db2_test_shim.h"
+#include "platform_path.h"
+#include "platform_test_util.h"
 #include "../db2/code_index.h"
 #include "../db2/css_graph.h"
 #include "../db2/css_migration.h"
+#include "../db2/typed_facts.h"
 
 static void test_gate(void)
 {
@@ -76,6 +80,41 @@ int main(void)
    assert(strstr(doc, "Convention Rules"));
    assert(strstr(doc, "BEM-like")); /* .card__title triggers the heuristic */
    assert(strstr(doc, "token"));
+
+   /* --- #2-upgrade: typed convention facts (config-gated) --- */
+   /* Off by default (no config) -> no-op, the degraded rules-doc is the spec. */
+   assert(db2_css_migration_assert_conventions("mig", "2026-01-02T00:00:00Z") == 0);
+
+   /* Enable both flags via an isolated config, then assert the conventions. */
+   char home[512];
+   snprintf(home, sizeof(home), "%s/aimee-mig-home-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(home) != NULL);
+   platform_setenv("HOME", home);
+   platform_unsetenv("AIMEE_HOME");
+   platform_setenv("AIMEE_NO_CACHE", "1");
+   char cfgdir[640];
+   snprintf(cfgdir, sizeof(cfgdir), "%s/.config/aimee", home);
+   assert(platform_mkdir_p(cfgdir, 0700) == 0);
+   char cfgpath[768];
+   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", cfgdir);
+   FILE *cf = fopen(cfgpath, "w");
+   assert(cf);
+   fputs("css_style_graph_enabled: true\ntyped_facts_enabled: true\n", cf);
+   fclose(cf);
+
+   /* mig has .card__title (BEM __) + :root --brand (custom property). */
+   assert(db2_css_migration_assert_conventions("mig", "2026-01-02T00:00:00Z") == 2);
+
+   typed_fact_t tf[8];
+   int ntf = db2_typed_fact_recall("mig", "naming_convention", tf, 8);
+   assert(ntf == 1 && strcmp(tf[0].object, "BEM") == 0);
+   assert(strcmp(tf[0].source, "exemplar-scan") == 0);
+   ntf = db2_typed_fact_recall("mig", "token_strategy", tf, 8);
+   assert(ntf == 1 && strcmp(tf[0].object, "css-custom-properties") == 0);
+
+   /* idempotent re-assert: same conventions, still 2 (UNCHANGED counts) */
+   assert(db2_css_migration_assert_conventions("mig", "2026-01-03T00:00:00Z") == 2);
+   assert(db2_typed_fact_recall("mig", "naming_convention", tf, 8) == 1);
 
    db2_test_shim_close();
    printf("css_migration: all tests passed\n");

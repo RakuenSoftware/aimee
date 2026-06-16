@@ -453,6 +453,7 @@ $(TESTPREFIX)/unit-test-css-migration: \
                                        $(OBJDIR)/tests/test_css_migration.o \
                                        $(OBJDIR)/db2/css_migration.o \
                                        $(OBJDIR)/db2/css_graph.o \
+                                       $(OBJDIR)/db2/typed_facts.o \
                                        $(OBJDIR)/css_analyze.o \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
