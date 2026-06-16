@@ -781,6 +781,10 @@ int config_load(config_t *cfg)
    if (cJSON_IsBool(item))
       cfg->css_style_graph_enabled = cJSON_IsTrue(item);
 
+   item = cJSON_GetObjectItemCaseSensitive(root, "css_render_command");
+   if (cJSON_IsString(item) && item->valuestring)
+      snprintf(cfg->css_render_command, sizeof(cfg->css_render_command), "%s", item->valuestring);
+
    item = cJSON_GetObjectItemCaseSensitive(root, "ingress_preinject_assembly_budget");
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
       cfg->ingress_preinject_assembly_budget = (int)item->valuedouble;
