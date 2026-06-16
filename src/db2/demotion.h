@@ -76,6 +76,23 @@ extern "C"
                                                const char *role, const int64_t *surfaced_ids,
                                                int n_surfaced, char *id_out, int id_out_len);
 
+   /* auditable-correctness P1.5 (D3/D14): merge TYPED refs into the turn's unified
+    * surfaced_refs. The three parallel arrays give each ref's `type` (e.g. "code"),
+    * `ref` (the stable identity, e.g. "code:<project>:<file_path>") and `versions`
+    * (e.g. content_hash; `versions` may be NULL, or an entry "" to omit v). Entries
+    * with an empty type or ref are skipped. Deduped by (type, ref) — idempotent, and
+    * a typed ref never collides with a memory entry. Entries with type "memory" are
+    * skipped — memory refs are id-keyed and must use ..._merge_turn. If no event
+    * exists yet a bare turn event is created first (reusing write_turn's dup-race
+    * handling). Same CAS retry/concurrency contract as the int64 merge. `versions`
+    * may be NULL; `n_refs`==0 is a valid no-op. Returns 0 / -1. */
+   int db2_demotion_retrieval_event_merge_refs_turn(const char *turn_id,
+                                                    const char *query_fingerprint, const char *role,
+                                                    const char *const *types,
+                                                    const char *const *refs,
+                                                    const char *const *versions, int n_refs,
+                                                    char *id_out, int id_out_len);
+
    /* Write a retrieval_attribution artifact linking one surfaced row to a verdict.
     * retrieval_event_id: UUID of the originating retrieval_event.
     * surfaced_row_id: memory row id that contributed to the response.

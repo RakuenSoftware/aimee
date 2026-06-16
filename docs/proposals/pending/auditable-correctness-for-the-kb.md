@@ -54,11 +54,16 @@
   with the legacy `surfaced_ids`/`surfaced_items` kept as DERIVED projections of the
   memory-typed entries (every existing reader byte-identical), plus migration-on-read
   that back-fills `surfaced_refs` for pre-existing events.
-  **Remaining P1.5:** the typed `merge_refs_turn` primitive + an
-  `evidence.merge_retrieval_event` action + having `/v1/audit` resolve code refs
-  (all cleanly testable), then wiring the code-search surface to emit (serving-runtime,
-  needs live-stack verification). Plus the P3 LLM entailment judge *producer*
-  (default-off until validated) and P4 (labelled gold corpus — human, not autonomous).
+  The typed **`merge_refs_turn`** primitive landed next
+  (`db2_demotion_retrieval_event_merge_refs_turn`): merges `{type,ref,v}` code/doc
+  refs into the unified `surfaced_refs` (deduped by `type`+`ref`, idempotent; create
+  path reuses `write_turn` for a bare turn event; same CAS retry contract — the CAS
+  write is now a shared `cas_update_event_payload` helper). **Remaining P1.5:** an
+  `evidence.merge_retrieval_event` action (server-forward, dispatch-testable) + having
+  `/v1/audit` resolve code refs (testable), then wiring the code-search surface to
+  emit (serving-runtime, needs live-stack verification). Plus the P3 LLM entailment
+  judge *producer* (default-off until validated) and P4 (labelled gold corpus — human,
+  not autonomous).
 - **Author:** JBailes
 - **Date:** 2026-06-12
 - **Charter roles:** Recall (provenance + per-turn evidence on the recall /

@@ -22,6 +22,7 @@ static const char *const CSS_OPS[] = {"dead-rules",
                                       "assert-conventions",
                                       "conventions",
                                       "render-store",
+                                      "render-capture",
                                       "render-verify",
                                       NULL};
 
@@ -40,6 +41,7 @@ static void css_usage(void)
                    "       duplicate-selectors | unresolved | migrate-enumerate |\n"
                    "       migrate-list | rules-doc | assert-conventions | conventions\n"
                    "  render-store <project> <unit> <before|after> <snapshot.json>\n"
+                   "  render-capture <project> <unit> <before|after> <html-file> <css-file>\n"
                    "  render-verify <project> <unit>\n");
 }
 
@@ -93,7 +95,7 @@ static void css_print_results(const char *op, cJSON *resp)
       printf("asserted %d convention fact(s)\n", cJSON_IsNumber(a) ? a->valueint : 0);
       return;
    }
-   if (strcmp(op, "render-store") == 0)
+   if (strcmp(op, "render-store") == 0 || strcmp(op, "render-capture") == 0)
    {
       cJSON *s = cJSON_GetObjectItemCaseSensitive(resp, "stored");
       int stored = cJSON_IsNumber(s) ? s->valueint : 0;
@@ -206,6 +208,32 @@ int handle_css(int argc, char **argv, int json_output)
       cJSON_AddStringToObject(body, "phase", argv[3]);
       cJSON_AddStringToObject(body, "snapshot", snap);
       free(snap);
+   }
+   else if (strcmp(op, "render-capture") == 0)
+   {
+      if (argc < 6)
+      {
+         fprintf(stderr, "aimee css render-capture needs <project> <unit> <before|after> "
+                         "<html-file> <css-file>\n");
+         cJSON_Delete(body);
+         return 2;
+      }
+      char *html = css_read_file(argv[4]);
+      char *css = css_read_file(argv[5]);
+      if (!html || !css)
+      {
+         fprintf(stderr, "aimee css: cannot read html/css file\n");
+         free(html);
+         free(css);
+         cJSON_Delete(body);
+         return 2;
+      }
+      cJSON_AddStringToObject(body, "unit", argv[2]);
+      cJSON_AddStringToObject(body, "phase", argv[3]);
+      cJSON_AddStringToObject(body, "html", html);
+      cJSON_AddStringToObject(body, "css", css);
+      free(html);
+      free(css);
    }
    else if (strcmp(op, "render-verify") == 0)
    {

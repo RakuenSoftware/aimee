@@ -291,6 +291,13 @@ typedef struct config
     * assistant's style-graph write path during indexing (WP-C). When off, the
     * indexer keeps only the legacy lexical CSS class-name scan. */
    int css_style_graph_enabled;
+   /* css_render_command: the render backend for the #4-full computed-style oracle.
+    * A shell command (like embedding_command) that reads a {"html","css"} JSON
+    * object on stdin and writes a computed-style snapshot JSON on stdout. It runs
+    * a headless browser over UNTRUSTED markup, so it must be an isolated,
+    * out-of-process backend (e.g. `curl` to a sandboxed render sidecar). Empty =
+    * no backend (the oracle reports UNAVAILABLE). */
+   char css_render_command[512];
    int memory_salience_enabled;
    double memory_salience_weight;
    int memory_salience_window_size;

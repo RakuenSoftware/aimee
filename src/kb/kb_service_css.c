@@ -185,6 +185,56 @@ int kb_handle_css_signals(int fd, cJSON *req)
       cJSON_AddNumberToObject(resp, "stored", n); /* 1 stored, 0 gated-off */
       return kb_send_response(fd, resp);
    }
+   if (strcmp(op, "render-capture") == 0)
+   {
+      /* #4-full slice 3: render a unit/phase's html+css via the configured render
+       * backend and store the resulting computed-style snapshot. Closes the loop
+       * render -> store -> (render-verify). */
+      cJSON *unit_j = cJSON_GetObjectItemCaseSensitive(req, "unit");
+      cJSON *phase_j = cJSON_GetObjectItemCaseSensitive(req, "phase");
+      cJSON *html_j = cJSON_GetObjectItemCaseSensitive(req, "html");
+      cJSON *css_j = cJSON_GetObjectItemCaseSensitive(req, "css");
+      if (!cJSON_IsString(unit_j) || !cJSON_IsString(phase_j) || !cJSON_IsString(html_j) ||
+          !cJSON_IsString(css_j))
+      {
+         cJSON_Delete(resp);
+         return kb_send_error(fd, "css render-capture requires 'unit', 'phase', 'html', 'css'");
+      }
+      char *snap = NULL, *rerr = NULL;
+      css_render_status_t st =
+          css_render_oracle_render(html_j->valuestring, css_j->valuestring, &snap, &rerr);
+      if (st == CSS_RENDER_UNAVAILABLE)
+      {
+         cJSON_Delete(resp);
+         free(snap);
+         free(rerr);
+         return kb_send_error(fd, "no render backend configured (set css_render_command)");
+      }
+      if (st != CSS_RENDER_OK || !snap)
+      {
+         char msg[160];
+         snprintf(msg, sizeof(msg), "render failed: %s", rerr ? rerr : "unknown");
+         cJSON_Delete(resp);
+         free(snap);
+         free(rerr);
+         return kb_send_error(fd, msg);
+      }
+      free(rerr);
+      char now_iso[40];
+      now_utc(now_iso, sizeof(now_iso));
+      int n = db2_css_render_snapshot_store(project, unit_j->valuestring, phase_j->valuestring,
+                                            snap, now_iso);
+      free(snap);
+      if (n < 0)
+      {
+         cJSON_Delete(resp);
+         return kb_send_error(fd, "css render-capture: store failed (invalid phase or db error)");
+      }
+      cJSON_AddStringToObject(resp, "unit", unit_j->valuestring);
+      cJSON_AddStringToObject(resp, "phase", phase_j->valuestring);
+      cJSON_AddNumberToObject(resp, "stored", n);
+      return kb_send_response(fd, resp);
+   }
    if (strcmp(op, "render-verify") == 0)
    {
       cJSON *unit_j = cJSON_GetObjectItemCaseSensitive(req, "unit");
