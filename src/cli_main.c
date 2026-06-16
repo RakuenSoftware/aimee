@@ -8,6 +8,7 @@
 #include "cli_attention_guard.h"
 #include "cli_agent_setup.h"
 #include "cli_code_audit.h"
+#include "cli_css.h"
 #include "cli_mcp_serve.h"
 #include "acp_server.h"
 #include "cli_profile.h"
@@ -1677,6 +1678,10 @@ int main(int argc, char **argv)
               "usage: aimee code audit [dir] [--json] [--project NAME] [--graph] [--fix]\n");
       return 2;
    }
+
+   /* CSS migration assistant signals (style graph + component join + pipeline). */
+   if (strcmp(cmd, "css") == 0)
+      return handle_css(sub_argc, sub_argv, json_output);
 
    /* SessionStart hook (settings.json wires it as `aimee session-start`). */
    if (strcmp(cmd, "session-start") == 0)

@@ -54,6 +54,7 @@ static const struct
     {"cron.remove", "POST", "/v1/cron/remove"},
     {"cron.run", "POST", "/v1/cron/run"},
     {"cron.show", "POST", "/v1/cron/show"},
+    {"css.signals", "POST", "/v1/css/signals"},
     {"curator.contradictions", "POST", "/v1/curator/contradictions"},
     {"curator.implements", "POST", "/v1/curator/implements"},
     {"curator.invalidated", "POST", "/v1/curator/invalidated"},

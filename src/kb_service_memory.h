@@ -63,6 +63,7 @@ int kb_handle_evidence_emit_retrieval_event(int fd, cJSON *req);
 int kb_handle_evidence_trace_retrieval_event(int fd, cJSON *req);
 /* Auditable-correctness P2: the /v1/audit/provenance read (sources at version). */
 int kb_handle_evidence_provenance(int fd, cJSON *req);
+int kb_handle_css_signals(int fd, cJSON *req);
 int kb_handle_memory_entity_profile(int fd, cJSON *req);
 int kb_handle_memory_entity_edges(int fd, cJSON *req);
 int kb_handle_memory_search_graph(int fd, cJSON *req);

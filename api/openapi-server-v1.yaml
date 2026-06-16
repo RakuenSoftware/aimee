@@ -944,6 +944,37 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /css/signals:
+    post:
+      summary: CSS migration assistant signals (proxied to aimee-kb)
+      description: >-
+        Query the CSS migration assistant's style graph and pipeline for a
+        project. op is one of dead-rules, conflicts, duplicate-declarations,
+        duplicate-selectors, unresolved, migrate-enumerate, migrate-list,
+        rules-doc. Read ops return {results, count}; migrate-enumerate returns
+        {units}; rules-doc returns {rules_doc}. Requires css_style_graph_enabled
+        and a re-index to populate the graph; proxied to aimee-kb (DB2-side).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [op, project]
+              properties:
+                op: { type: string }
+                project: { type: string }
+      responses:
+        "200":
+          description: CSS signal results ({status, op, project, results?, count?, units?, rules_doc?})
+          content:
+            application/json:
+              schema: { type: object }
+        "502":
+          description: Knowledge service (aimee-kb) unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /notes:
     get:
       summary: List notes (proxied to aimee-kb)
