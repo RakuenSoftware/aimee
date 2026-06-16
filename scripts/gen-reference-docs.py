@@ -125,6 +125,8 @@ CFG_KEY_DESC = {
     "embedding_dim": "Embedding vector dimension.",
     "embedding_endpoint": "Embeddings provider endpoint URL.",
     "embedding_model": "Embeddings model name.",
+    "fidelity_check_enabled": "Run the answer-fidelity judge on terminal-text turns "
+    "(default off; requires kb_evidence_emit_enabled + ingress_preinject_enabled).",
     "guardrail_mode": "Guardrail enforcement mode (off / warn / block).",
     "guardrails_semantic_allow_ml_only_block": "Allow blocking on the ML classifier alone.",
     "guardrails_semantic_block_threshold": "Semantic score threshold to block.",

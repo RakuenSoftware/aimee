@@ -38,3 +38,21 @@ int handle_evidence_provenance(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
       return server_send_error(conn, "knowledge service audit provenance failed", NULL);
    return send_and_free(conn, resp);
 }
+
+/* /v1/audit/fidelity handler. Like the trace/provenance handlers, its op
+ * (evidence.fidelity_retrieval_event) is a KB-only action (the fidelity_report /
+ * fidelity_attribution artifacts live in DB2), so the server forwards it to
+ * aimee-kb via kb_client and passes the JSON response through. */
+int handle_evidence_fidelity(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *turn_id = jo_str(req, "turn_id", "");
+   if (!turn_id[0])
+      return server_send_error(conn, "audit fidelity requires turn_id", NULL);
+   char *json = kb_client_evidence_fidelity_retrieval_event(turn_id);
+   cJSON *resp = json ? cJSON_Parse(json) : NULL;
+   free(json);
+   if (!resp)
+      return server_send_error(conn, "knowledge service audit fidelity failed", NULL);
+   return send_and_free(conn, resp);
+}

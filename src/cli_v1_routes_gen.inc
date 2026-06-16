@@ -80,6 +80,7 @@ static const struct
     {"dogfood.tag", "POST", "/v1/dogfood/tag"},
     {"episode.list", "GET", "/v1/episode/list"},
     {"eval.results", "GET", "/v1/eval/results"},
+    {"evidence.fidelity_retrieval_event", "POST", "/v1/audit/fidelity"},
     {"evidence.provenance_retrieval_event", "POST", "/v1/audit/provenance"},
     {"evidence.trace_retrieval_event", "POST", "/v1/audit/trace"},
     {"graph.explain", "POST", "/v1/graph/explain"},

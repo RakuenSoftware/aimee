@@ -944,6 +944,39 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /audit/fidelity:
+    post:
+      summary: Per-turn answer-fidelity report (proxied to aimee-kb)
+      description: >-
+        How faithful a turn's answer was to its own injected evidence: given the
+        caller-visible turn_id, return the answer-level fidelity_report (supported
+        / unsupported / abstained claim buckets) plus the per-chunk
+        attribution_count. fidelity_status is one of the exhaustive states ok /
+        not_instrumented / not_evaluated / evidence_unavailable. This read produces
+        ok, not_evaluated (the honest default when the default-off fidelity judge
+        has not run for the turn), and evidence_unavailable (lookup error);
+        not_instrumented is reserved for paths that emit no evidence and is set at
+        emit time. Requires aimee-kb. Gated by fidelity_check_enabled at emit time.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [turn_id]
+              properties:
+                turn_id: { type: string }
+      responses:
+        "200":
+          description: Fidelity bundle ({status, fidelity_status, turn_id, report?, attribution_count?})
+          content:
+            application/json:
+              schema: { type: object }
+        "502":
+          description: Knowledge service (aimee-kb) unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /css/signals:
     post:
       summary: CSS migration assistant signals (proxied to aimee-kb)

@@ -29,9 +29,22 @@
   and the D7 detector + requeue use a hybrid predicate — precise `files.hash <>
   source_hash` for embeddings that have it (no false positives from a re-scan that
   changed nothing), falling back to the scanned-since-embed staleness heuristic only
-  for legacy rows with `source_hash=''`. **Remaining:** P1.5 (typed doc/code refs +
-  two-writer merge), P3 (fidelity_check judge + `fidelity_report`), P4 (labelled
-  gold corpus — needs human curation, not autonomous).
+  for legacy rows with `source_hash=''`. **P3 storage substrate landed next**:
+  `src/db2/fidelity.{c,h}` records answer-level `fidelity_report` (supported /
+  unsupported / abstained buckets + four-state status, upserted per turn_id) and
+  per-chunk `fidelity_attribution` (`accepted`/`irrelevant`, `operator_id`
+  `fidelity-judge`) as **non-scored** artifact kinds — structurally invisible to
+  `db2_demotion_score` (which reads only `retrieval_attribution`), so fidelity is
+  demotion-inert by construction. The `fidelity_check_enabled` flag + the
+  fail-closed eligibility gate (`fidelity_check_eligible`, deps on
+  `kb_evidence_emit_enabled` + `ingress_preinject_enabled`) landed next, and then
+  the **`/v1/audit/fidelity` read** (`aimee audit fidelity <turn_id>`) — the full
+  server→kb-forward vertical mirroring `/v1/audit/provenance`, returning the
+  turn's `fidelity_report` buckets + `attribution_count` with a four-state
+  `fidelity_status` (`not_evaluated` when the default-off judge has not run).
+  **Remaining:** P1.5 (typed doc/code refs + two-writer merge), the P3 LLM
+  entailment judge *producer* (default-off until validated), P4 (labelled gold
+  corpus — needs human curation, not autonomous).
 - **Author:** JBailes
 - **Date:** 2026-06-12
 - **Charter roles:** Recall (provenance + per-turn evidence on the recall /

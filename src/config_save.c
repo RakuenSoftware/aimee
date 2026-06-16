@@ -778,6 +778,8 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "css_style_graph_enabled", 1);
    if (cfg->kb_evidence_emit_enabled)
       cJSON_AddBoolToObject(root, "kb_evidence_emit_enabled", 1);
+   if (cfg->fidelity_check_enabled)
+      cJSON_AddBoolToObject(root, "fidelity_check_enabled", 1);
 
    /* Cross-verification */
    if (cfg->cross_verify || cfg->verify_cmd[0] || cfg->verify_role[0])

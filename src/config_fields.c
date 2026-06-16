@@ -49,6 +49,8 @@ const config_field_t config_fields[] = {
      CFG_BOOL},
     {"kb_evidence_emit_enabled", offsetof(config_t, kb_evidence_emit_enabled), sizeof(int), 0,
      CFG_BOOL},
+    {"fidelity_check_enabled", offsetof(config_t, fidelity_check_enabled), sizeof(int), 0,
+     CFG_BOOL},
     {"memory_rerank_command", offsetof(config_t, memory_rerank_command),
      sizeof(((config_t *)0)->memory_rerank_command), 0, CFG_STRING},
     {"memory_rerank_top_k", offsetof(config_t, memory_rerank_top_k), sizeof(int), 0, CFG_INT},

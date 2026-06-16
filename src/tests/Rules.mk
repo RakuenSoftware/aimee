@@ -89,7 +89,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-primary-session-adapter \
                $(TESTPREFIX)/unit-test-session-search-tool \
                $(TESTPREFIX)/unit-test-working-memory $(TESTPREFIX)/unit-test-working-memory-mock $(TESTPREFIX)/unit-test-local-resolution $(TESTPREFIX)/unit-test-cognify-jobs $(TESTPREFIX)/unit-test-extractors-extra \
-               $(TESTPREFIX)/unit-test-css-analyze $(TESTPREFIX)/unit-test-css-graph $(TESTPREFIX)/unit-test-css-oracle $(TESTPREFIX)/unit-test-css-migration \
+               $(TESTPREFIX)/unit-test-css-analyze $(TESTPREFIX)/unit-test-typed-facts $(TESTPREFIX)/unit-test-css-graph $(TESTPREFIX)/unit-test-css-oracle $(TESTPREFIX)/unit-test-css-migration \
                $(TESTPREFIX)/unit-test-compute-pool $(TESTPREFIX)/unit-test-db2-pool $(TESTPREFIX)/unit-test-cli-launch \
                $(TESTPREFIX)/unit-test-server-session-pools \
                $(TESTPREFIX)/unit-test-presence \
@@ -315,6 +315,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-learning-version \
                $(TESTPREFIX)/unit-test-calibration \
                $(TESTPREFIX)/unit-test-demotion \
+               $(TESTPREFIX)/unit-test-fidelity \
+               $(TESTPREFIX)/unit-test-fidelity-check \
                $(TESTPREFIX)/unit-test-features \
                $(TESTPREFIX)/unit-test-report-enrichments \
                $(TESTPREFIX)/unit-test-reasoning \
@@ -408,6 +410,24 @@ $(TESTPREFIX)/unit-test-code-index-ops: \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
+# auditable-correctness P3 fidelity storage substrate over the sqlite shim.
+$(TESTPREFIX)/unit-test-fidelity: \
+                                       $(OBJDIR)/tests/test_fidelity.o \
+                                       $(OBJDIR)/db2/fidelity.o \
+                                       $(OBJDIR)/db2/artifacts.o \
+                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
+                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
+
+# auditable-correctness P3 fidelity-check eligibility (fail-closed gate). The
+# helper only reads config_t fields, so it links standalone.
+$(TESTPREFIX)/unit-test-fidelity-check: \
+                                       $(OBJDIR)/tests/test_fidelity_check.o \
+                                       $(OBJDIR)/server/fidelity_check.o \
+                                       $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 # CSS style-graph persistence (WP-B) over the sqlite shim.
 $(TESTPREFIX)/unit-test-css-graph: \
                                        $(OBJDIR)/tests/test_css_graph.o \
@@ -419,11 +439,21 @@ $(TESTPREFIX)/unit-test-css-graph: \
                                        $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
+# Typed-fact store + write gate over the sqlite shim.
+$(TESTPREFIX)/unit-test-typed-facts: \
+                                       $(OBJDIR)/tests/test_typed_facts.o \
+                                       $(OBJDIR)/db2/typed_facts.o \
+                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
+                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
+
 # CSS migration pipeline driver (WP-F) over the sqlite shim.
 $(TESTPREFIX)/unit-test-css-migration: \
                                        $(OBJDIR)/tests/test_css_migration.o \
                                        $(OBJDIR)/db2/css_migration.o \
                                        $(OBJDIR)/db2/css_graph.o \
+                                       $(OBJDIR)/db2/typed_facts.o \
                                        $(OBJDIR)/css_analyze.o \
                                        $(OBJDIR)/db2/code_index.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \

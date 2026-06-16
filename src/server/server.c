@@ -1046,6 +1046,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"kb.search", handle_kb_search},
     {"evidence.trace_retrieval_event", handle_evidence_trace},
     {"evidence.provenance_retrieval_event", handle_evidence_provenance},
+    {"evidence.fidelity_retrieval_event", handle_evidence_fidelity},
     {"css.signals", handle_css_signals},
     {"curator.implements", handle_curator_implements},
     {"curator.synthesize", handle_curator_synthesize},

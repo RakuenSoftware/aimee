@@ -13,7 +13,8 @@
 
 static const char *const CSS_OPS[] = {"dead-rules",          "conflicts",  "duplicate-declarations",
                                       "duplicate-selectors", "unresolved", "migrate-enumerate",
-                                      "migrate-list",        "rules-doc",  NULL};
+                                      "migrate-list",        "rules-doc",  "assert-conventions",
+                                      "conventions",         NULL};
 
 static int css_op_known(const char *op)
 {
@@ -28,7 +29,7 @@ static void css_usage(void)
    fprintf(stderr, "usage: aimee css <op> <project> [--json]\n"
                    "  ops: dead-rules | conflicts | duplicate-declarations |\n"
                    "       duplicate-selectors | unresolved | migrate-enumerate |\n"
-                   "       migrate-list | rules-doc\n");
+                   "       migrate-list | rules-doc | assert-conventions | conventions\n");
 }
 
 static void css_print_results(const char *op, cJSON *resp)
@@ -44,6 +45,30 @@ static void css_print_results(const char *op, cJSON *resp)
    {
       cJSON *u = cJSON_GetObjectItemCaseSensitive(resp, "units");
       printf("enumerated %d migration unit(s)\n", cJSON_IsNumber(u) ? u->valueint : 0);
+      return;
+   }
+   if (strcmp(op, "assert-conventions") == 0)
+   {
+      cJSON *a = cJSON_GetObjectItemCaseSensitive(resp, "asserted");
+      printf("asserted %d convention fact(s)\n", cJSON_IsNumber(a) ? a->valueint : 0);
+      return;
+   }
+   if (strcmp(op, "conventions") == 0)
+   {
+      cJSON *results = cJSON_GetObjectItemCaseSensitive(resp, "results");
+      printf("conventions: %d fact(s)\n", cJSON_GetArraySize(results));
+      cJSON *row = NULL;
+      cJSON_ArrayForEach(row, results)
+      {
+         const cJSON *rel = cJSON_GetObjectItemCaseSensitive(row, "relation");
+         const cJSON *val = cJSON_GetObjectItemCaseSensitive(row, "value");
+         const cJSON *src = cJSON_GetObjectItemCaseSensitive(row, "source");
+         printf("  %s = %s", cJSON_IsString(rel) ? rel->valuestring : "?",
+                cJSON_IsString(val) ? val->valuestring : "?");
+         if (cJSON_IsString(src))
+            printf("  (%s)", src->valuestring);
+         printf("\n");
+      }
       return;
    }
    cJSON *results = cJSON_GetObjectItemCaseSensitive(resp, "results");
