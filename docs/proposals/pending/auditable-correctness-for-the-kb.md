@@ -18,12 +18,15 @@
   + per-source drift flag landed in #350. The D7 drift *detection* (a default-off
   `drift` maintenance mode + `db2_code_index_drift_candidates`: count code
   embeddings whose source file was re-scanned after the embedding, with timestamp-
-  format normalization) landed next. **Remaining:** P1.5 (typed doc/code refs +
-  two-writer merge), D7's actual re-ingest *requeue* (rank/feed `kb_ingest_queue`
-  by the drift candidates — currently detect/report only) + populating
-  `code_embeddings.source_hash` so content-hash (not just staleness) drift is
-  detectable, P3 (fidelity_check judge + `fidelity_report`), P4 (labelled gold
-  corpus — needs human curation, not autonomous).
+  format normalization) landed next, and the D7 re-ingest *requeue* landed after
+  it (`db2_code_index_requeue_drifted`: the `drift` maintenance mode now enqueues
+  each distinct drifted project into `kb_ingest_queue` with `force`, deduped
+  against an already pending/running row, skipped under `dry_run`; reported as
+  `drift_requeued` in the maintenance summary). **Remaining:** P1.5 (typed
+  doc/code refs + two-writer merge), populating `code_embeddings.source_hash` so
+  content-hash (not just staleness) drift is detectable, P3 (fidelity_check judge
+  + `fidelity_report`), P4 (labelled gold corpus — needs human curation, not
+  autonomous).
 - **Author:** JBailes
 - **Date:** 2026-06-12
 - **Charter roles:** Recall (provenance + per-turn evidence on the recall /

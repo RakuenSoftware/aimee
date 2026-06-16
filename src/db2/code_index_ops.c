@@ -140,3 +140,40 @@ int64_t db2_code_index_drift_candidates(void)
    aimee_pg_finalize(st);
    return n;
 }
+
+int db2_code_index_requeue_drifted(void)
+{
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+   /* auditable-correctness D7 requeue: enqueue each distinct drifted project for
+    * re-ingest (force) so the ingest drain re-embeds its changed files. A project
+    * is drifted when it has >=1 drift candidate (file re-scanned since embed, with
+    * the SAME timestamp normalization as db2_code_index_drift_candidates: only
+    * f.scanned_at is now_utc() 'T'/'Z' form, while ce.updated_at is already
+    * space-form to_char output) AND has no pending/running queue row yet (dedup).
+    * projects.name is UNIQUE so DISTINCT p.name yields one p.root per project.
+    * RETURNING makes the returned row set EXACTLY the rows inserted, so the count
+    * cannot drift from a separate COUNT query. MUTATING — callers must skip under
+    * dry_run. Returns the number of projects enqueued. */
+   static const char *sql =
+       "INSERT INTO kb_ingest_queue (project, root_path, force, status)"
+       " SELECT DISTINCT p.name, p.root, 1, 'pending'"
+       " FROM code_embeddings ce"
+       " JOIN projects p ON p.name = ce.project"
+       " JOIN files f ON f.project_id = p.id AND f.path = ce.file_path"
+       " WHERE ce.file_path <> ''"
+       "   AND replace(replace(f.scanned_at, 'T', ' '), 'Z', '') > ce.updated_at"
+       "   AND NOT EXISTS (SELECT 1 FROM kb_ingest_queue q"
+       "                   WHERE q.project = p.name AND q.status IN ('pending','running'))"
+       " RETURNING project";
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   int n = 0;
+   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      n++;
+   aimee_pg_finalize(st);
+   return n;
+}

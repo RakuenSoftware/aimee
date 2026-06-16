@@ -40,6 +40,13 @@ extern "C"
     * Read-only; returns 0 on error / no candidates. */
    int64_t db2_code_index_drift_candidates(void);
 
+   /* auditable-correctness D7 requeue: enqueue each distinct drifted project (one
+    * with >=1 drift candidate, deduped against an already pending/running queue
+    * row) into kb_ingest_queue with force, so the ingest drain re-embeds it.
+    * MUTATING — do not call under dry_run. Returns the number enqueued (0 on
+    * error / nothing to do). */
+   int db2_code_index_requeue_drifted(void);
+
 #ifdef __cplusplus
 }
 #endif
