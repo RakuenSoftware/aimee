@@ -12,6 +12,8 @@
 
 #include "canonical_index.h"
 #include "code_index.h"
+#include "config.h"
+#include "css_graph.h" /* CSS migration assistant: style graph + component join (WP-C/D) */
 #include "db2.h"
 #include "db2_internal.h"
 
@@ -345,6 +347,42 @@ static void ci_replace_file_data(void *conn, int64_t file_id, const char *ext, c
    {
       LOG_WARN(CI_LOG_TAG, "COMMIT failed: %s", err);
       aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+   }
+}
+
+/* CSS migration assistant (WP-C/D): build the style graph for .css files and the
+ * component->style join for markup files. Called AFTER ci_replace_file_data
+ * (whose transaction has committed) because db2_css_graph_replace /
+ * db2_css_component_resolve run their own transactions — never nest them. Gated
+ * by css_style_graph_enabled (read once per scan). Plain CSS only (.css); SCSS is
+ * indexed from compiled output. Thread-safe (heap token buffer — the KB indexer
+ * runs in worker threads). */
+static void ci_css_index_file(int64_t file_id, const char *ext, const char *content, int css_on)
+{
+   if (!css_on || !ext || !content)
+      return;
+   size_t len = strlen(content);
+   if (strcmp(ext, ".css") == 0)
+   {
+      css_stylesheet_t *ss = css_analyze(content, len);
+      if (ss)
+      {
+         (void)db2_css_graph_replace(file_id, ss->rules, ss->rule_count);
+         css_stylesheet_free(ss);
+      }
+      return;
+   }
+   if (strcmp(ext, ".tsx") == 0 || strcmp(ext, ".jsx") == 0 || strcmp(ext, ".ts") == 0 ||
+       strcmp(ext, ".js") == 0 || strcmp(ext, ".html") == 0 || strcmp(ext, ".vue") == 0 ||
+       strcmp(ext, ".svelte") == 0)
+   {
+      char(*tokens)[CSS_CLASS_TOKEN_MAX] = malloc((size_t)512 * CSS_CLASS_TOKEN_MAX);
+      if (!tokens)
+         return;
+      int nt = css_extract_class_tokens(content, len, tokens, 512);
+      if (nt > 0)
+         (void)db2_css_component_resolve(file_id, tokens, nt);
+      free(tokens);
    }
 }
 
@@ -926,6 +964,10 @@ int canonical_index_scan_project(const char *name, const char *root, int force, 
    if (!conn)
       return -1;
 
+   /* CSS style-graph write path is opt-in; read once per scan (WP-C). */
+   config_t css_cfg;
+   int css_on = (config_load(&css_cfg) == 0) && css_cfg.css_style_graph_enabled;
+
    char abs_root[MAX_PATH_LEN];
    if (realpath(root, abs_root) == NULL)
       snprintf(abs_root, sizeof(abs_root), "%s", root);
@@ -990,7 +1032,9 @@ int canonical_index_scan_project(const char *name, const char *root, int force, 
          continue;
       }
 
-      ci_replace_file_data(conn, file_id, ci_get_extension(full), content);
+      const char *ext = ci_get_extension(full);
+      ci_replace_file_data(conn, file_id, ext, content);
+      ci_css_index_file(file_id, ext, content, css_on);
 
       free(content);
       free(list.paths[i]);
@@ -1010,6 +1054,10 @@ int canonical_index_scan_files(const char *name, const char *root_label,
       *inspected_out = 0;
    if (!name || !name[0] || !files || file_count < 0)
       return -1;
+
+   /* CSS style-graph write path is opt-in; read once per scan (WP-C). */
+   config_t css_cfg;
+   int css_on = (config_load(&css_cfg) == 0) && css_cfg.css_style_graph_enabled;
 
    void *conn = ci_conn();
    if (!conn)
@@ -1037,7 +1085,9 @@ int canonical_index_scan_files(const char *name, const char *root_label,
       if (file_id < 0)
          continue;
 
-      ci_replace_file_data(conn, file_id, ci_get_extension(rel), content);
+      const char *css_ext = ci_get_extension(rel);
+      ci_replace_file_data(conn, file_id, css_ext, content);
+      ci_css_index_file(file_id, css_ext, content, css_on);
       scanned++;
    }
 

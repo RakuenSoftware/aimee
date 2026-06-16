@@ -1585,6 +1585,7 @@ typedef struct
    int merged;
    int summarized;
    int drift_candidates; /* D7: code embeddings whose file was re-scanned since embed */
+   int drift_requeued;   /* D7: drifted projects enqueued for re-ingest (0 under dry_run) */
    double elapsed_ms;
    int64_t memory_count_before;
    int64_t memory_count_after;
