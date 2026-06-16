@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "db2/db_schema.h"
+#include "db2/db_postgres.h"
 
 /* Capture the SQL db_apply_schema_postgres() hands to Postgres. */
 static char *g_captured_sql = NULL;
@@ -25,6 +26,55 @@ int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
    g_captured_sql = strdup(sql ? sql : "");
    assert(g_captured_sql != NULL);
    return 0;
+}
+
+/* After applying the schema, db_apply_schema_postgres() records the embedding
+ * dim in kb_meta via these aimee_pg_* calls (embedder-runtime-fetch-autodim §2):
+ * an INSERT ... ON CONFLICT DO UPDATE ... RETURNING value upsert. This test only
+ * cares about the captured DDL, so the prepared-statement path is stubbed to a
+ * benign success: the upsert echoes back the dim it was handed (RETURNING the
+ * just-written value), so the record-or-check sees recorded == embed_dim and
+ * returns 0, leaving the apply rc==0. The record/refuse logic itself (mismatch,
+ * invalid dim, corrupt row) is covered by test_embedding_dim.c. */
+/* aimee_pg_stmt_t is opaque; a non-NULL sentinel is all the callee needs. */
+static int g_fake_stmt;
+static char g_bound_dim[16] = "0";
+
+aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
+{
+   (void)pg_conn;
+   (void)sql;
+   (void)errbuf;
+   (void)errlen;
+   return (aimee_pg_stmt_t *)&g_fake_stmt;
+}
+
+void aimee_pg_finalize(aimee_pg_stmt_t *stmt)
+{
+   (void)stmt;
+}
+
+aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *stmt, char *errbuf, size_t errlen)
+{
+   (void)stmt;
+   (void)errbuf;
+   (void)errlen;
+   return AIMEE_PG_ROW; /* RETURNING yields one row carrying the recorded dim */
+}
+
+int aimee_pg_bind_text(aimee_pg_stmt_t *stmt, const char *name, const char *value)
+{
+   (void)stmt;
+   (void)name;
+   snprintf(g_bound_dim, sizeof(g_bound_dim), "%s", value ? value : "0");
+   return 0;
+}
+
+const char *aimee_pg_column_text(aimee_pg_stmt_t *stmt, int col)
+{
+   (void)stmt;
+   (void)col;
+   return g_bound_dim; /* echo the just-written value back via RETURNING */
 }
 
 static const char *apply_with_dim(int dim)
