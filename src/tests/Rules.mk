@@ -182,6 +182,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-windows \
                $(TESTPREFIX)/unit-test-token-tracker \
                $(TESTPREFIX)/unit-test-model-pricing \
+               $(TESTPREFIX)/unit-test-provider-client \
                $(TESTPREFIX)/unit-test-reasoning-cap \
                $(TESTPREFIX)/unit-test-request-context \
                $(TESTPREFIX)/unit-test-response-dedup \
@@ -2272,6 +2273,11 @@ $(TESTPREFIX)/unit-test-model-pricing: $(OBJDIR)/tests/test_model_pricing.o \
                                   $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                   $(OBJDIR)/db1/model_pricing.o \
                                   $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-provider-client: $(OBJDIR)/tests/test_provider_client.o \
+                                  $(OBJDIR)/provider_client.o $(OBJDIR)/cJSON.o \
+                                  $(OBJDIR)/tests/support/mock_agent_http.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-collab-rules: $(OBJDIR)/tests/test_collab_rules.o $(TEST_DATA_OBJS_MOCK)
