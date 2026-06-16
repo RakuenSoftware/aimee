@@ -5,6 +5,8 @@
 #   aimee-server     (Dockerfile.server)      ghcr.io/<owner>/aimee-server
 #   aimee-kb         (Dockerfile)             ghcr.io/<owner>/aimee-kb
 #   aimee-server-kb  (Dockerfile.combined)    ghcr.io/<owner>/aimee-server-kb
+#   aimee-embedder   (Dockerfile.embedder)    ghcr.io/<owner>/aimee-embedder (+ -0.6b)
+#   aimee-css-render (deploy/css-render/Dockerfile) ghcr.io/<owner>/aimee-css-render
 #
 # Multi-arch (linux/amd64 + linux/arm64) via the canonical build-by-digest then
 # merge-manifest pattern, on native runners (no QEMU emulation of the C build).
@@ -76,6 +78,10 @@ jobs:
           # baked in. Pair with embedding_dim: 1024 (see docs). Default (above) is
           # the 4b embedder + 1b reranker.
           - { name: aimee-embedder-0.6b, dockerfile: Dockerfile.embedder, embedder_arg: "EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-0.6b", reranker_arg: "RERANKER_MODEL=cross-encoder/ettin-reranker-400m-v1" }
+          # #4-full render backend (headless-Chromium sidecar). Self-contained
+          # under deploy/css-render (its own build context); independent of the C
+          # build, so a failure here never blocks the aimee images (fail-fast off).
+          - { name: aimee-css-render, dockerfile: deploy/css-render/Dockerfile, context: deploy/css-render }
         platform:
           - { arch: amd64, runner: ubuntu-latest }
           - { arch: arm64, runner: ubuntu-24.04-arm }
@@ -102,7 +108,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.image.context || '.' }}
           file: ${{ matrix.image.dockerfile }}
           platforms: linux/${{ matrix.platform.arch }}
           provenance: false
@@ -114,8 +120,8 @@ jobs:
           # C-image caches, defeating the purpose. The embedder's real win is the
           # runtime model fetch (embedder-runtime-fetch-autodim proposal), not the
           # layer cache.
-          cache-from: ${{ matrix.image.name != 'aimee-embedder' && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
-          cache-to: ${{ matrix.image.name != 'aimee-embedder' && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          cache-from: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-css-render') && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          cache-to: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-css-render') && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
           # Published images bundle the optional browser UI (WITH_WEBCHAT=1); the
           # default `docker compose up --build` an end user runs leaves it off so it
           # needs no credentials. The aimee-kb image ignores WITH_WEBCHAT.
@@ -154,7 +160,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [aimee-server, aimee-kb, aimee-server-kb, aimee-embedder, aimee-embedder-0.6b]
+        image: [aimee-server, aimee-kb, aimee-server-kb, aimee-embedder, aimee-embedder-0.6b, aimee-css-render]
     steps:
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
