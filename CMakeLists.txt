@@ -420,6 +420,7 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/db2/learning.c
     ${AIMEE_SRC_DIR}/db2/code_index.c
     ${AIMEE_SRC_DIR}/db2/css_graph.c
+    ${AIMEE_SRC_DIR}/db2/typed_facts.c
     ${AIMEE_SRC_DIR}/db2/css_migration.c
     ${AIMEE_SRC_DIR}/db2/db_schema.c
     ${AIMEE_SRC_DIR}/db2/memory_lint.c
