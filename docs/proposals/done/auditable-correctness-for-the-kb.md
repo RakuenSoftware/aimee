@@ -1,8 +1,18 @@
 # Proposal: auditable correctness for the knowledge base
 
-- **State:** reviewed — roundtable sign-off (rev. 9). Eight review rounds (R1–R8);
-  R4–R8 cleared the bar (no blockers, all six seats endorse), R8 zero-major.
-  Ready for implementation per the phasing below.
+- **State:** DONE (2026-06-16) — implemented across ~24 PRs. **Landed:** P1
+  (turn_id + `X-Aimee-Retrieval-Event` + single-writer `retrieval_event` +
+  `aimee audit trace`); P2 (versioned provenance — `/v1/audit/provenance`,
+  emit-time version capture, code `content_hash`); P3 *substrate* (fidelity_report
+  / fidelity_attribution storage, `fidelity_check_enabled` + fail-closed gate,
+  `/v1/audit/fidelity`); P1.5 (unified `surfaced_refs` model, idempotent
+  two-writer merge, typed code refs, `/v1/audit/provenance` code resolution, and
+  the code-search emit); plus D7 drift detection + re-ingest requeue + precise
+  content-hash drift. **DEFERRED (out of autonomous scope, gated on human input):**
+  the P3 LLM entailment *judge* producer stays default-off until **P4** — the
+  labelled `(claim, chunk, entails?)` gold corpus — is built and the judge's
+  validity floor is met; the fidelity read surface returns `not_evaluated` until
+  then. (Prior review state: roundtable sign-off rev. 9, R1–R8; R8 zero-major.)
 - **Implementation status (2026-06-16):** PARTIAL — **P1 appears landed**. The
   P1 surface is present on `testing`: the dispatch-layer `turn_id` mint +
   `X-Aimee-Retrieval-Event` header (`server_http.c`, `ingress_preinject.h`), the
