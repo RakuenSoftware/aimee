@@ -64,6 +64,53 @@ extern "C"
    /* Find declarations by exact property name across the index. */
    int db2_css_graph_declarations_by_property(const char *property, css_decl_hit_t *out, int max);
 
+   /* --- derived signals (graph-only, intra-file; no component join, #3) --- */
+
+   typedef struct
+   {
+      char project[CSS_GRAPH_PROJECT_MAX];
+      char file_path[MAX_PATH_LEN];
+      char property[CSS_PROPERTY_MAX];
+      char value[CSS_VALUE_MAX];
+      int count; /* how many rules in the file carry this exact property:value */
+   } css_dup_decl_t;
+
+   typedef struct
+   {
+      char project[CSS_GRAPH_PROJECT_MAX];
+      char file_path[MAX_PATH_LEN];
+      char selector[CSS_SELECTOR_MAX];
+      int count; /* occurrences of this exact selector in the file */
+   } css_dup_selector_t;
+
+   /* A later rule that cannot override an earlier, MORE specific rule for the
+    * same property — the classic "I added a rule but it didn't take effect". */
+   typedef struct
+   {
+      char project[CSS_GRAPH_PROJECT_MAX];
+      char file_path[MAX_PATH_LEN];
+      char property[CSS_PROPERTY_MAX];
+      char winner_selector[CSS_SELECTOR_MAX]; /* earlier + higher specificity */
+      int winner_line;
+      char loser_selector[CSS_SELECTOR_MAX]; /* later, lower specificity, ignored */
+      int loser_line;
+   } css_spec_conflict_t;
+
+   /* Identical property:value declared by >1 rule in the same file (redundancy).
+    * project_filter NULL/"" = all projects. */
+   int db2_css_graph_duplicate_declarations(const char *project_filter, css_dup_decl_t *out,
+                                            int max);
+
+   /* The same selector appearing >1 time in the same file (shadowing candidate). */
+   int db2_css_graph_duplicate_selectors(const char *project_filter, css_dup_selector_t *out,
+                                         int max);
+
+   /* Specificity conflicts: a later rule out-prioritised by an earlier, more
+    * specific rule for a shared property. spec_uncertain rules are excluded
+    * (conservative — uncertain specificity must not produce a false conflict). */
+   int db2_css_graph_specificity_conflicts(const char *project_filter, css_spec_conflict_t *out,
+                                           int max);
+
 #ifdef __cplusplus
 }
 #endif
