@@ -34,6 +34,7 @@ extern "C"
     * begin/end, a lazily-leased connection is returned when the thread exits. */
    void db2_lease_begin(void);
    void db2_lease_end(void);
+   void db2_lease_release_idle(void);
 
    /* Snapshot the DB2 connection URL for forked child reopen. Returns 1 when
     * a URL is available, else 0. */

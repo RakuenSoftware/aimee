@@ -51,6 +51,10 @@ int aimee_pg_is_shim(void);
 int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen);
 int aimee_pg_exec_with_changes(void *pg_conn, const char *sql, char *errbuf, size_t errlen,
                                int *affected_out);
+/* 1 if the connection currently has an open (or failed-open) transaction, else 0.
+ * Lets callers skip a no-op ROLLBACK (which makes postgres log "no transaction in
+ * progress" on every clean pool return). */
+int aimee_pg_in_transaction(void *pg_conn);
 int aimee_pg_stmt_changes(aimee_pg_stmt_t *stmt);
 int aimee_pg_ping(void *pg_conn, char *errbuf, size_t errlen);
 

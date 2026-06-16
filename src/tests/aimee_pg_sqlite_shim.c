@@ -578,6 +578,13 @@ int aimee_pg_ping(void *pg_conn, char *errbuf, size_t errlen)
    return 0;
 }
 
+int aimee_pg_in_transaction(void *pg_conn)
+{
+   sqlite3 *db = (sqlite3 *)pg_conn;
+   /* sqlite3_get_autocommit returns 0 while a transaction is open. */
+   return (db && sqlite3_get_autocommit(db) == 0) ? 1 : 0;
+}
+
 int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
 {
    sqlite3 *db = (sqlite3 *)pg_conn;

@@ -51,7 +51,12 @@ static void *db2_pool_reaper_main(void *arg);
 static int member_reset_real(void *conn)
 {
    char e[256];
-   (void)aimee_pg_exec(conn, "ROLLBACK", e, sizeof(e)); /* best-effort */
+   /* Only ROLLBACK when a txn is actually open/aborted: an unconditional ROLLBACK
+    * on an idle connection makes postgres log "no transaction in progress" on
+    * every pool return (noise). DISCARD ALL below still cannot run inside a txn,
+    * so any open one must be cleared first. */
+   if (aimee_pg_in_transaction(conn))
+      (void)aimee_pg_exec(conn, "ROLLBACK", e, sizeof(e));
    if (aimee_pg_exec(conn, "RESET SESSION AUTHORIZATION", e, sizeof(e)) != 0)
       return -1;
    if (aimee_pg_exec(conn, "DISCARD ALL", e, sizeof(e)) != 0)
