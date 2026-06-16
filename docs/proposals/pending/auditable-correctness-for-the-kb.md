@@ -42,9 +42,23 @@
   server→kb-forward vertical mirroring `/v1/audit/provenance`, returning the
   turn's `fidelity_report` buckets + `attribution_count` with a four-state
   `fidelity_status` (`not_evaluated` when the default-off judge has not run).
-  **Remaining:** P1.5 (typed doc/code refs + two-writer merge), the P3 LLM
-  entailment judge *producer* (default-off until validated), P4 (labelled gold
-  corpus — needs human curation, not autonomous).
+  The **P1.5 two-writer merge core** landed next:
+  `db2_demotion_retrieval_event_merge_turn` (D14) — the first writer creates the
+  turn's `retrieval_event`; a later writer (e.g. the code-search surface) MERGES its
+  surfaced refs into that same event (deduped by id, point-in-time version captured
+  per merged ref) instead of being dropped, and re-merging is idempotent.
+  The **D3 unified-ref data model** landed next (author-approved shape: unified
+  list / file-level code refs / KB-handler emit): the `retrieval_event` now carries
+  a canonical `surfaced_refs` list of typed entries — `{type:"memory",id,v}` and
+  (forthcoming) `{type:"code",ref:"code:<project>:<file_path>",v:<content_hash>}` —
+  with the legacy `surfaced_ids`/`surfaced_items` kept as DERIVED projections of the
+  memory-typed entries (every existing reader byte-identical), plus migration-on-read
+  that back-fills `surfaced_refs` for pre-existing events.
+  **Remaining P1.5:** the typed `merge_refs_turn` primitive + an
+  `evidence.merge_retrieval_event` action + having `/v1/audit` resolve code refs
+  (all cleanly testable), then wiring the code-search surface to emit (serving-runtime,
+  needs live-stack verification). Plus the P3 LLM entailment judge *producer*
+  (default-off until validated) and P4 (labelled gold corpus — human, not autonomous).
 - **Author:** JBailes
 - **Date:** 2026-06-12
 - **Charter roles:** Recall (provenance + per-turn evidence on the recall /
