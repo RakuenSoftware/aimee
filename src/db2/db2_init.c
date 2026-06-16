@@ -50,7 +50,7 @@ static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
  * 1024 for pplx-0.6b, 2560 for pplx-4b). Set from the loaded config by the
  * server / aimee-kb startup via db2_set_embedding_dim() before db2_init(), so
  * this layer needs no config dependency. 0 = unset -> db2_embedding_dim()
- * reports the 2560 default (the default embedder is pplx-4b). */
+ * reports the 1024 default (the default embedder is pplx-0.6b). */
 static int g_embed_dim = 0;
 
 void db2_set_embedding_dim(int dim)
@@ -60,7 +60,7 @@ void db2_set_embedding_dim(int dim)
 
 int db2_embedding_dim(void)
 {
-   return g_embed_dim > 0 ? g_embed_dim : 2560;
+   return g_embed_dim > 0 ? g_embed_dim : 1024;
 }
 static pthread_key_t g_thread_conn_key;
 static pthread_once_t g_thread_conn_key_once = PTHREAD_ONCE_INIT;
