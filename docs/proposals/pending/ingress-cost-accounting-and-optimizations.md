@@ -1,7 +1,10 @@
 # Proposal: ingress cost-accounting coverage + request-level cost optimizations
 
-- **State:** draft - pending review (consolidated after PR #180 review + twelve
-  file-by-file codebase audits; findings integrated below)
+- **State:** reviewed — design-ready (2026-06-16). §1–§2 foundations landed
+  (#185/#339); the design roundtable's 12 blockers on the remaining §2–§7 work are
+  resolved in §8. Implementation-ready; sole external dependency is real
+  local-delegate price data (operator). (Consolidated after PR #180 review + twelve
+  file-by-file codebase audits; findings integrated below.)
 - **Implementation status (2026-06-16):** §1–§2 LARGELY LANDED, design-roundtable
   run on the rest. **Merged:** §1 (one pricing authority — `token_estimate_cost`
   + registry-fallback hook, `token_estimate_cost_ex` is_priced free-vs-unknown,
@@ -11,13 +14,16 @@
   `requested_model`/`stop_reason`/`agent_log_id`, billable-model resolution,
   `request_context.h`) shipped in **PR #185**; the §1 local-delegate pricing
   coverage gap (minimax/mistral/mimo as known-zero) closed in **PR #339**.
-  **Design roundtable (2026-06-16):** NOT-READY, 10 blocking / 5 major — §1–§2
-  "sound in direction"; blockers are in the *remaining* §2/§3–§6 work. **Remaining
-  (blocked on design decisions):** §2 ingress-writes to the six no-log handlers
-  (async-write durability/backpressure, tenant-scoped idempotency, partial-row
-  policy), §3 cache-aware shaping, §4 dedup, §5 reasoning-effort cap (recommend
-  defer), §6 cost-shaped reward, §7 `/v1/usage/*`. See the roundtable findings for
-  the per-blocker fixes.
+  **Design roundtable (2026-06-16):** ran twice; the second pass enumerated 12
+  blockers on the remaining §2/§3–§7 work — **all now RESOLVED in §8** (the key
+  decision: v1 audit writes are synchronous, dissolving the async-queue + reward-
+  barrier blocker class; dedup fail-closed excludes shared principals; HMAC-bound
+  proxy credential; enumerated dedup-key allowlist; scoped thread-local reset;
+  capability-gated flag). **Remaining (implementation, now unblocked):** §2
+  ingress-writes to the six no-log handlers, §3 cache-aware shaping, §4 dedup, §5
+  reasoning-effort cap (still recommend defer), §6 cost-shaped reward, §7
+  `/v1/usage/*`. Sole external dependency: real local-delegate price data (operator
+  input; closed as known-zero in #339).
 - **Author:** JBailes
 - **Date:** 2026-06-11
 - **Charter roles:** Evaluate-Optimize (cost-shaped reward into the existing
@@ -632,6 +638,127 @@ webchat usage events must report realized spend separately from estimated,
 avoided, and partial rows. A single SQL helper for spend totals is preferable to
 copy-pasting `WHERE usage_kind = 'realized'` across consumers, and agent-log
 metrics must use the new call key instead of the current agent-name join.
+
+## §8 Design-review resolutions (roundtable 2026-06-16)
+
+The 2026-06-16 design roundtable on the remaining §2–§7 work returned 12 blockers.
+Each is resolved below; the decisions are normative for implementation. The single
+biggest simplification: **v1 audit writes are SYNCHRONOUS** — one `token_audit`
+insert on the handler thread after the provider returns. A local DB1 insert is
+sub-millisecond against a multi-second LLM call, so it does not meaningfully load
+the hot path, and synchronicity dissolves the entire async-queue blocker class
+(B1) and the reward-barrier (B7). The `ingress_audit_async` queue is **deferred to
+a later, separately-gated phase**, and may only ship with the durability spec in
+B1.
+
+**B1 — Async audit queue overflow/backpressure (§2).** v1 has no queue: writes are
+synchronous (above). The deferred async phase, if ever justified by a measured
+hot-path regression, MUST specify: a bounded queue (default 4096 rows); a
+block-up-to-25ms-then-drop policy; a monotonic `ingress_audit_dropped_total` metric
+surfaced to operators; and an explicit durability contract — "best-effort: rows are
+dropped, never duplicated; drops are counted." Synchronous v1 is exactly-once
+(idempotent insert, B4).
+
+**B2 — Dedup confidentiality leak via shared webchat principal (§4).** The dedup
+key MUST include the resolved principal/tenant id, and dedup is **fail-closed
+disabled** for any request whose principal is shared/service (the anonymous
+`webchat` service principal, or any principal flagged `shared`). Two logged-out
+webchat users can therefore never be cross-served. v1 dedup is enabled ONLY for
+requests carrying a non-shared, authenticated per-user identity. Test: a request
+with a shared principal is never served from the dedup cache, even on identical
+body.
+
+**B3 — Backfill-from-`tool_name` misprices history (§2).** Do **not** backfill the
+model from `tool_name` (agent names are not pricing keys, §2a). Legacy empty-model
+rows are relabeled `"(unattributed)"` — safe, no false precision. Backfill an
+actual model only for rows where a recorded served/provider model is independently
+resolvable; otherwise leave unattributed.
+
+**B4 — Idempotency attempt-id generator (§2).** The server-generated attempt id is
+**128-bit random** (`platform_random`), lowercase-hex, namespaced by source. The
+idempotent insert keys on `(source, request_id, attempt)`. Collision probability is
+negligible at any realistic concurrency. On generator failure, fall back to the
+in-process seen-set and skip the UNIQUE constraint for that row (accept a possible
+*drop*, never a duplicate).
+
+**B5 — Trusted-proxy credential reuse of `server.token` (§0/Config).** Do not reuse
+the raw `server.token`. Use a **purpose-bound HMAC tag** —
+`HMAC(server.token, "ingress-proxy-v1")` — so a compromised proxy credential does
+not equal `server.token` compromise, and rotation of one does not silently break
+the other. Document existing `server.token` consumers + the rotation procedure
+before adding the proxy credential.
+
+**B6 — `delegate_ensemble` pricing contradiction (§6).** Resolved as STALE: PR #185
+routed `delegate_ensemble` through `token_estimate_cost` (unified pricing) — the §1
+status is correct and the §6 precondition "`delegate_ensemble` bypasses unified
+pricing" is removed. Cost-shaped reward reads realized delegate cost from
+`token_audit` (populated via `agent_log_call`).
+
+**B7 — Reward shaping vs write timing (§6).** Dissolved by synchronous writes (B1):
+delegate/`agent_log_call` rows are written synchronously, so realized delegate cost
+is available at `kb_client_bandit_close`. Cost-shaped mode additionally requires
+that delegate-call audit rows are never routed through any future async queue (they
+stay synchronous); if that ever changes, a flush barrier before bandit close is
+mandatory. Target fallback (no-realized-cost) rate < 5%; above it, the feature
+stays in side-metadata mode.
+
+**B8 — Cache-shaping circular bootstrap (§3).** Marking is itself the measurement:
+applying `cache_control` to a candidate stable prefix is **safe** — a prefix that
+turns out volatile simply yields no cache hit, never a wrong answer. Bootstrap:
+speculatively mark candidate prefixes (system/persona/history), measure realized
+`cache_read` hit-rate over a rolling window (default 100 turns); **promote** to
+"stable" (keep marking) when hit-rate ≥ 50%, **demote** (stop marking) when it
+falls below 25% over the window. No pre-marking measurement is needed.
+
+**B9 — Dedup key open-ended flag set (§4).** v1 keys on an **enumerated allowlist
+only**: resolved model · provider/endpoint · `model_reasoning_effort` · temperature
+(when set) · stream mode · principal/tenant (B2) · preinject/context hash. Any
+handler-level, behavior-affecting config NOT in this allowlist **disables dedup for
+that request** (fail-closed), rather than keying on a partial set. Test: introducing
+an unlisted behavior flag must disable dedup, not silently collide.
+
+**B10 — `sse_offload` context threading (§2).** Audit: `sse_offload` is used only by
+the event-stream paths (`handle_run_events`, `handle_session_events`,
+`handle_cli_session_stream`) — **none of the six no-log LLM handlers offload**; they
+are synchronous compute-then-chunk on the request thread. So request context flows
+via the scoped thread-local for all six; only the `/v1/runs` detached worker uses
+capture-at-enqueue. A regression test asserts that any handler doing LLM spend on an
+offloaded/detached path captures context at enqueue (fails if a new offload path
+omits it).
+
+**B11 — Thread-local context reset site (§2).** The context is set at **handler
+entry** and cleared at **handler exit on all paths** via a scoped RAII-style helper
+(`request_ctx_scope`), so an early-return or error cannot leak the prior request's
+principal into the next request on a pooled worker thread. Reset is structurally
+enforced by the helper, not by hand at each return. Test: a loop reusing one worker
+thread across requests with distinct principals asserts no cross-request leak.
+
+**B12 — Flag depends on net-new peer-cred capture (§2).** `ingress_usage_accounting_enabled`
+gates on a runtime capability check: until `platform_ipc_peer_cred()` (UDS peer UID)
+and the trusted-proxy mechanism (B5) are present, the flag **auto-degrades to
+`source="unknown"`** rather than writing blank-source rows (or refuses to enable,
+operator's choice). Source/model breakdowns are therefore never silently
+meaningless.
+
+**Design clarifications (the roundtable's non-blocking items), resolved:** partial
+rows store the *observed* tokens with cost computed on those tokens and are excluded
+from realized-spend totals (never pro-rated against an unknown "expected"); dedup
+freezes the memory/context-hash version into the key and refuses to dedup across
+version boundaries (B9 already excludes memory-consuming shapes from v1); reward
+shaping defaults λ=0.3 with min-max `normalized_cost` over a 200-decision window and
+ships only after an offline replay shows arm-selection isn't collapsed onto the
+cheapest arm; the binary `quality_score` is renamed `success_indicator` (a real
+quality signal is future work, not claimed now); `insights.overview` keeps the
+opaque `overview` passthrough and adds typed fields under a new `usage_v2` key
+(no client break); legacy agent-log rows without `call_id` stay on the old
+agent/role join with a documented "historical estimate" caveat; the §5 complexity
+cap ships only after an offline analysis bounds its false-low-complexity rate; and
+avoided-cost binds the unit price to the current pricing authority at lookup time
+(never caches a stale unit price across a pricing refresh).
+
+**Remaining external dependency (not a design blocker):** real per-MTok price data
+for the local delegates (minimax / mistral / mimo) — closed as known-zero in #339,
+but actual paid pricing, if any, must come from the operator.
 
 ## Config (all default-off, flag-rollout-readiness program)
 
