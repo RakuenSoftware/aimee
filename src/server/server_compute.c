@@ -525,10 +525,7 @@ static void bind_request_session_creds(cJSON *req)
    agent_set_request_codex_creds(NULL, NULL);
 }
 
-/* On-demand delegate execution (delegate_spawn_ondemand / _drain /
- * _set_ceiling / _inflight) lives in server_delegate_ondemand.c to keep this
- * file under the line limit; declarations are in server_compute_impl.h. */
-
+/* On-demand delegate execution: server_delegate_ondemand.c. */
 static int delegate_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx)
 {
    if (g_delegate_dispatch_override)
@@ -550,7 +547,7 @@ static int delegate_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx)
    }
 
    /* Sessionless/background delegates run on their own on-demand thread, not the
-    * CPU compute pool — see the on-demand block above. */
+    * CPU compute pool (server_delegate_ondemand.c). */
    return delegate_spawn_ondemand(cctx);
 }
 
