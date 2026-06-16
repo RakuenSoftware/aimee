@@ -224,6 +224,46 @@ static void test_billable_model(void)
    PASS("cost: billable-model precedence (provider > served > requested)");
 }
 
+static int hosted_mistral_price(const char *model, double *in_per_mtok, double *out_per_mtok)
+{
+   /* A deployment that pays a hosted API for one of the otherwise-free families. */
+   if (strcmp(model, "mistral-medium-latest") == 0)
+   {
+      *in_per_mtok = 0.40;
+      *out_per_mtok = 2.00;
+      return 1;
+   }
+   return 0;
+}
+
+static void test_local_delegates_priced_free(void)
+{
+   /* §1 coverage gap: the self-hosted delegates aimee runs (minimax, mistral,
+    * mimo) are free/local — KNOWN (priced=1) at zero cost, so the delegate
+    * economics path stops flat-rating them as unknown spend. The keys match as a
+    * prefix of the provider-stripped served model id. */
+   token_usage_t u = {.input_tokens = 1000, .output_tokens = 1000};
+   const char *models[] = {"MiniMax-M3", "mistral-medium-latest", "mimo-v2.5-pro"};
+   for (size_t i = 0; i < sizeof(models) / sizeof(models[0]); i++)
+   {
+      int priced = -1;
+      double cost = token_estimate_cost_ex(models[i], &u, &priced);
+      assert(priced == 1);           /* known, not "unknown" */
+      assert(near_equal(cost, 0.0)); /* free/local */
+   }
+
+   /* A nonzero registry/models.dev price overrides the static zero, so a hosted
+    * variant of an otherwise-free family is billed at the real price. */
+   token_tracker_set_registry_price_fn(hosted_mistral_price);
+   int priced = -1;
+   double hosted = token_estimate_cost_ex("mistral-medium-latest", &u, &priced);
+   assert(priced == 1);
+   /* 1000 * 0.40/1e6 + 1000 * 2.00/1e6 = 0.0004 + 0.0020 = 0.0024 */
+   assert(near_equal(hosted, 0.0024));
+   token_tracker_set_registry_price_fn(NULL); /* restore for any later tests */
+   PASS("cost: local delegates priced free (known, zero); hosted price overrides");
+}
+
 /* --- Main --- */
 
 int main(void)
@@ -232,6 +272,7 @@ int main(void)
    test_registry_overrides_base_keeps_cache();
    test_cost_shaped_reward();
    test_billable_model();
+   test_local_delegates_priced_free();
 
    test_known_anthropic_model();
    test_cache_tokens_anthropic();
