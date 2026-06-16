@@ -18,9 +18,9 @@ int handle_css_signals(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!project[0])
       return server_send_error(conn, "css requires a 'project'", NULL);
 
-   cJSON *kreq = cJSON_CreateObject();
-   cJSON_AddStringToObject(kreq, "op", op);
-   cJSON_AddStringToObject(kreq, "project", project);
+   /* Forward the whole validated request so op-specific fields (render-store's
+    * unit/phase/snapshot, render-verify's unit, ...) pass through unchanged. */
+   cJSON *kreq = cJSON_Duplicate(req, 1);
    char *json = kb_v1_action_request("css.signals", kreq);
    cJSON *resp = json ? cJSON_Parse(json) : NULL;
    free(json);

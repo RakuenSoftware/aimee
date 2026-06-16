@@ -422,6 +422,7 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/db2/css_graph.c
     ${AIMEE_SRC_DIR}/db2/typed_facts.c
     ${AIMEE_SRC_DIR}/db2/css_migration.c
+    ${AIMEE_SRC_DIR}/db2/css_render.c
     ${AIMEE_SRC_DIR}/db2/db_schema.c
     ${AIMEE_SRC_DIR}/db2/memory_lint.c
     ${AIMEE_SRC_DIR}/db2/sketch.c
@@ -533,6 +534,7 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/index.c
     ${AIMEE_SRC_DIR}/extractors.c
     ${AIMEE_SRC_DIR}/css_analyze.c
+    ${AIMEE_SRC_DIR}/css_render_oracle.c
     ${AIMEE_SRC_DIR}/extractors_extra.c
     ${AIMEE_SRC_DIR}/extractors_new_langs.c
     ${AIMEE_SRC_DIR}/context_discover.c
@@ -924,6 +926,7 @@ set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/index.c
     ${AIMEE_SRC_DIR}/extractors.c
     ${AIMEE_SRC_DIR}/css_analyze.c
+    ${AIMEE_SRC_DIR}/css_render_oracle.c
     ${AIMEE_SRC_DIR}/extractors_extra.c
     ${AIMEE_SRC_DIR}/extractors_new_langs.c
     ${AIMEE_SRC_DIR}/dogfood.c
