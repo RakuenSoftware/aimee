@@ -19,6 +19,7 @@
 #if !defined(AIMEE_DB2_DISABLED)
 #include "db2/curiosity.h"
 #include "db2/memory_payload.h"
+#include "db2/code_index_ops.h" /* db2_code_index_drift_candidates (auditable-correctness D7) */
 #endif
 #include "log.h"
 #include "memory.h"
@@ -144,6 +145,7 @@ cJSON *memory_maintenance_summary_to_json(const memory_maintenance_summary_t *su
    cJSON_AddNumberToObject(j, "profile_cards_refreshed", summary->profile_cards_refreshed);
    cJSON_AddNumberToObject(j, "merged", summary->merged);
    cJSON_AddNumberToObject(j, "summarized", summary->summarized);
+   cJSON_AddNumberToObject(j, "drift_candidates", summary->drift_candidates);
    cJSON_AddNumberToObject(j, "elapsed_ms", summary->elapsed_ms);
    cJSON_AddNumberToObject(j, "memory_count_before", (double)summary->memory_count_before);
    cJSON_AddNumberToObject(j, "memory_count_after", (double)summary->memory_count_after);
@@ -294,6 +296,13 @@ int memory_maintenance_run(const config_t *cfg, unsigned int modes, int force, i
             out->summarized = summarized;
       }
    }
+
+   /* auditable-correctness D7: read-only drift report — how many code embeddings
+    * have a source file re-scanned since they were embedded (re-ingest backlog by
+    * staleness). Default-off; runs only when the DRIFT mode is explicitly set. No
+    * mutation, so it is safe under dry_run and not counted as a change. */
+   if (modes & MEMORY_MAINTENANCE_MODE_DRIFT)
+      out->drift_candidates = (int)db2_code_index_drift_candidates();
 
    out->memory_count_after = db2_memory_count();
    clock_gettime(CLOCK_MONOTONIC, &t1);

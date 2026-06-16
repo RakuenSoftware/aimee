@@ -137,6 +137,7 @@ const method_policy_t method_registry[] = {
     {"kb.search", CAP_INDEX_READ, "knowledge search"},
     {"evidence.trace_retrieval_event", CAP_INDEX_READ, "audit retrieval-evidence trace"},
     {"evidence.provenance_retrieval_event", CAP_INDEX_READ, "audit source provenance"},
+    {"css.signals", CAP_INDEX_READ, "css migration signals (read + enumerate)"},
     {"kb.status", CAP_DASHBOARD_READ, "knowledge base status"},
     {"optimize.export", CAP_DASHBOARD_READ, "bandit optimization export"},
     {"optimize.promote", CAP_INDEX_ADMIN, "promote a bandit arm to default"},

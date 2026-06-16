@@ -107,3 +107,36 @@ int db2_code_index_ops_summary(int max_attempts, db2_code_index_ops_summary_t *o
    aimee_pg_finalize(st);
    return 0;
 }
+
+int64_t db2_code_index_drift_candidates(void)
+{
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+   /* auditable-correctness D7 (staleness heuristic): a code embedding is a
+    * re-ingest candidate when its source file was re-scanned AFTER the embedding
+    * was written — files.scanned_at > code_embeddings.updated_at — i.e. the file
+    * changed but its vectors haven't been refreshed yet. Joined within DB2 on
+    * project name + file path. Read-only; ranks/sizes re-ingest, not a verdict.
+    *
+    * Timestamp NORMALIZATION: files.scanned_at is now_utc() ("YYYY-MM-DDTHH:MM:SSZ")
+    * while code_embeddings.updated_at is to_char(...,'YYYY-MM-DD HH24:MI:SS') — a
+    * raw string compare would mis-order ('T' > ' '). Strip the 'T'/'Z' from
+    * scanned_at so both are "YYYY-MM-DD HH:MM:SS" and compare lexically (valid for
+    * zero-padded UTC). replace() is portable across Postgres and the sqlite shim. */
+   static const char *sql =
+       "SELECT COUNT(*) FROM code_embeddings ce"
+       " JOIN projects p ON p.name = ce.project"
+       " JOIN files f ON f.project_id = p.id AND f.path = ce.file_path"
+       " WHERE ce.file_path <> ''"
+       "   AND replace(replace(f.scanned_at, 'T', ' '), 'Z', '') > ce.updated_at";
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   int64_t n = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      n = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   return n;
+}

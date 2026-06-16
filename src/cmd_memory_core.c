@@ -828,6 +828,8 @@ static unsigned int mem_maintain_parse_modes(const char *csv)
          modes |= MEMORY_MAINTENANCE_MODE_PRUNE;
       else if (len == 9 && strncmp(start, "summarize", 9) == 0)
          modes |= MEMORY_MAINTENANCE_MODE_SUMMARIZE;
+      else if (len == 5 && strncmp(start, "drift", 5) == 0)
+         modes |= MEMORY_MAINTENANCE_MODE_DRIFT;
    }
    return modes;
 }
