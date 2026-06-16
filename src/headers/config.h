@@ -323,6 +323,9 @@ typedef struct config
    int typed_facts_enabled;      /* typed-fact knowledge layer master gate (default off) */
    int kb_evidence_emit_enabled; /* auditable-correctness: emit per-turn retrieval_event (default
                                     off) */
+   int fidelity_check_enabled;   /* auditable-correctness P3: run the fidelity judge on terminal-text
+                                    turns (default off; fail-closed dep on
+                                    kb_evidence_emit_enabled + ingress_preinject_enabled) */
    int memory_pagerank_enabled;
    int memory_pagerank_iterations;
    double memory_pagerank_weight;

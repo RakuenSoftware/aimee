@@ -797,6 +797,10 @@ int config_load(config_t *cfg)
    if (cJSON_IsBool(item))
       cfg->kb_evidence_emit_enabled = cJSON_IsTrue(item);
 
+   item = cJSON_GetObjectItemCaseSensitive(root, "fidelity_check_enabled");
+   if (cJSON_IsBool(item))
+      cfg->fidelity_check_enabled = cJSON_IsTrue(item);
+
    item = cJSON_GetObjectItemCaseSensitive(root, "embedding_command");
    if (cJSON_IsString(item) && item->valuestring[0])
       snprintf(cfg->embedding_command, sizeof(cfg->embedding_command), "%s", item->valuestring);
