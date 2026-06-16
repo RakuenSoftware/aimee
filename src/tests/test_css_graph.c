@@ -78,8 +78,43 @@ int main(void)
 
    /* unknown file → upsert_file fails cleanly */
    assert(db2_css_graph_upsert_file("proj", "src/missing.css", ss->rules, ss->rule_count) == -1);
-
    css_stylesheet_free(ss);
+
+   /* --- derived signals --- */
+   int64_t fid2 = db2_code_index_file_upsert(pid, "src/signals.css", "2026-01-01T00:00:00Z");
+   assert(fid2 >= 0);
+   const char *sig = "#id .btn { color: red; }\n" /* line 1: spec (1,1,0) */
+                     ".btn { color: blue; }\n"    /* line 2: later, less specific → loses color */
+                     ".x { margin: 0; }\n"        /* line 3 */
+                     ".y { margin: 0; }\n"        /* line 4: dup declaration margin:0 */
+                     ".dup { color: red; }\n"     /* line 5: dup color:red value */
+                     ".dup { color: green; }\n";  /* line 6: duplicate selector .dup */
+   css_stylesheet_t *s2 = css_analyze(sig, strlen(sig));
+   assert(s2 && db2_css_graph_replace(fid2, s2->rules, s2->rule_count) == 0);
+
+   /* specificity conflict: later .btn (and .dup) can't override earlier #id .btn for color */
+   css_spec_conflict_t conf[16];
+   int nconf = db2_css_graph_specificity_conflicts("proj", conf, 16);
+   /* #id .btn (winner) out-prioritises the 3 later, less-specific color rules
+    * (.btn line2, .dup line5, .dup line6). */
+   assert(nconf == 3);
+   assert(strcmp(conf[0].winner_selector, "#id .btn") == 0);
+   assert(strcmp(conf[0].loser_selector, ".btn") == 0);
+   assert(strcmp(conf[0].property, "color") == 0);
+   assert(conf[0].winner_line == 1 && conf[0].loser_line == 2);
+
+   /* duplicate declarations: margin:0 (.x/.y) and color:red (#id .btn / .dup) */
+   css_dup_decl_t dups[16];
+   int ndup = db2_css_graph_duplicate_declarations("proj", dups, 16);
+   assert(ndup == 2);
+
+   /* duplicate selector: .dup twice */
+   css_dup_selector_t dsel[16];
+   int nds = db2_css_graph_duplicate_selectors("proj", dsel, 16);
+   assert(nds == 1 && strcmp(dsel[0].selector, ".dup") == 0 && dsel[0].count == 2);
+
+   css_stylesheet_free(s2);
+
    db2_test_shim_close();
    printf("css_graph: all tests passed\n");
    return 0;

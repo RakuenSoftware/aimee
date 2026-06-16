@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (104)
+## CLI-settable keys (105)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -36,6 +36,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `cost_reward_lambda_pct` | int | Cost-penalty weight (percent) in the reward. |
 | `cost_reward_ref_usd_milli` | int | Reference cost (USD-milli) normalizing the cost reward. |
 | `cross_verify` | bool | Enable cross-model verification of outputs. |
+| `css_style_graph_enabled` | bool | — |
 | `db2_url` | string | DB2 connection URL (aimee's vector / knowledge-base store). |
 | `dedup_enabled` | bool | Deduplicate near-identical responses. |
 | `dedup_window_seconds` | int | Window (seconds) for response dedup. |
@@ -131,7 +132,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `virtual_context_assembly_budget` | int | Token budget for virtual-context assembly. |
 | `virtual_context_enabled` | bool | Enable virtual-context assembly. |
 
-> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `server_cli_oauth_enabled`
+> **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `css_style_graph_enabled`, `server_cli_oauth_enabled`
 
 ## Config-file sections (48)
 

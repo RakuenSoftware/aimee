@@ -208,3 +208,179 @@ int db2_css_graph_declarations_by_property(const char *property, css_decl_hit_t 
    aimee_pg_finalize(st);
    return count;
 }
+
+/* Specificity encoded as a single comparable integer for cascade ordering. The
+ * components are tiny in practice; the multipliers keep them lexicographic. */
+#define CSS_SPEC_SQL(pfx) "(" pfx ".spec_a*1000000 + " pfx ".spec_b*1000 + " pfx ".spec_c)"
+
+int db2_css_graph_duplicate_declarations(const char *project_filter, css_dup_decl_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   int filt = (project_filter && project_filter[0]) ? 1 : 0;
+   static const char *sql_all = "SELECT p.name, f.path, d.property, d.value, COUNT(*) AS cnt"
+                                " FROM css_declarations d"
+                                " JOIN css_rules c ON c.id = d.rule_id"
+                                " JOIN files f ON f.id = c.file_id"
+                                " JOIN projects p ON p.id = f.project_id"
+                                " GROUP BY f.id, d.property, d.value"
+                                " HAVING COUNT(*) > 1"
+                                " ORDER BY cnt DESC, f.path"
+                                " LIMIT ?1";
+   static const char *sql_filt = "SELECT p.name, f.path, d.property, d.value, COUNT(*) AS cnt"
+                                 " FROM css_declarations d"
+                                 " JOIN css_rules c ON c.id = d.rule_id"
+                                 " JOIN files f ON f.id = c.file_id"
+                                 " JOIN projects p ON p.id = f.project_id"
+                                 " WHERE p.name = ?2"
+                                 " GROUP BY f.id, d.property, d.value"
+                                 " HAVING COUNT(*) > 1"
+                                 " ORDER BY cnt DESC, f.path"
+                                 " LIMIT ?1";
+   char err[CSSG_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, filt ? sql_filt : sql_all, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int(st, "?1", max);
+   if (filt)
+      aimee_pg_bind_text(st, "?2", project_filter);
+   int count = 0;
+   while (count < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      css_dup_decl_t *h = &out[count];
+      memset(h, 0, sizeof(*h));
+      const char *pn = aimee_pg_column_text(st, 0);
+      const char *fp = aimee_pg_column_text(st, 1);
+      const char *prop = aimee_pg_column_text(st, 2);
+      const char *val = aimee_pg_column_text(st, 3);
+      snprintf(h->project, sizeof(h->project), "%s", pn ? pn : "");
+      snprintf(h->file_path, sizeof(h->file_path), "%s", fp ? fp : "");
+      snprintf(h->property, sizeof(h->property), "%s", prop ? prop : "");
+      snprintf(h->value, sizeof(h->value), "%s", val ? val : "");
+      h->count = aimee_pg_column_int(st, 4);
+      count++;
+   }
+   aimee_pg_finalize(st);
+   return count;
+}
+
+int db2_css_graph_duplicate_selectors(const char *project_filter, css_dup_selector_t *out, int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   int filt = (project_filter && project_filter[0]) ? 1 : 0;
+   static const char *sql_all = "SELECT p.name, f.path, c.selector, COUNT(*) AS cnt"
+                                " FROM css_rules c"
+                                " JOIN files f ON f.id = c.file_id"
+                                " JOIN projects p ON p.id = f.project_id"
+                                " GROUP BY f.id, c.selector"
+                                " HAVING COUNT(*) > 1"
+                                " ORDER BY cnt DESC, f.path"
+                                " LIMIT ?1";
+   static const char *sql_filt = "SELECT p.name, f.path, c.selector, COUNT(*) AS cnt"
+                                 " FROM css_rules c"
+                                 " JOIN files f ON f.id = c.file_id"
+                                 " JOIN projects p ON p.id = f.project_id"
+                                 " WHERE p.name = ?2"
+                                 " GROUP BY f.id, c.selector"
+                                 " HAVING COUNT(*) > 1"
+                                 " ORDER BY cnt DESC, f.path"
+                                 " LIMIT ?1";
+   char err[CSSG_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, filt ? sql_filt : sql_all, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int(st, "?1", max);
+   if (filt)
+      aimee_pg_bind_text(st, "?2", project_filter);
+   int count = 0;
+   while (count < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      css_dup_selector_t *h = &out[count];
+      memset(h, 0, sizeof(*h));
+      const char *pn = aimee_pg_column_text(st, 0);
+      const char *fp = aimee_pg_column_text(st, 1);
+      const char *sel = aimee_pg_column_text(st, 2);
+      snprintf(h->project, sizeof(h->project), "%s", pn ? pn : "");
+      snprintf(h->file_path, sizeof(h->file_path), "%s", fp ? fp : "");
+      snprintf(h->selector, sizeof(h->selector), "%s", sel ? sel : "");
+      h->count = aimee_pg_column_int(st, 3);
+      count++;
+   }
+   aimee_pg_finalize(st);
+   return count;
+}
+
+int db2_css_graph_specificity_conflicts(const char *project_filter, css_spec_conflict_t *out,
+                                        int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   int filt = (project_filter && project_filter[0]) ? 1 : 0;
+   /* c1 = earlier + strictly more specific (the winner); c2 = the later rule the
+    * author likely expected to apply but which is overridden for `property`. */
+   static const char *sql_all =
+       "SELECT p.name, f.path, d1.property, c1.selector, c1.line, c2.selector, c2.line"
+       " FROM css_declarations d1"
+       " JOIN css_rules c1 ON c1.id = d1.rule_id"
+       " JOIN css_declarations d2 ON d2.property = d1.property"
+       " JOIN css_rules c2 ON c2.id = d2.rule_id"
+       " JOIN files f ON f.id = c1.file_id"
+       " JOIN projects p ON p.id = f.project_id"
+       " WHERE c1.file_id = c2.file_id AND c1.id <> c2.id"
+       "   AND c2.line > c1.line"
+       "   AND c1.spec_uncertain = 0 AND c2.spec_uncertain = 0"
+       "   AND c1.selector <> c2.selector"
+       "   AND " CSS_SPEC_SQL("c1") " > " CSS_SPEC_SQL("c2") " ORDER BY f.path, c2.line LIMIT ?1";
+   static const char *sql_filt =
+       "SELECT p.name, f.path, d1.property, c1.selector, c1.line, c2.selector, c2.line"
+       " FROM css_declarations d1"
+       " JOIN css_rules c1 ON c1.id = d1.rule_id"
+       " JOIN css_declarations d2 ON d2.property = d1.property"
+       " JOIN css_rules c2 ON c2.id = d2.rule_id"
+       " JOIN files f ON f.id = c1.file_id"
+       " JOIN projects p ON p.id = f.project_id"
+       " WHERE c1.file_id = c2.file_id AND c1.id <> c2.id"
+       "   AND c2.line > c1.line"
+       "   AND c1.spec_uncertain = 0 AND c2.spec_uncertain = 0"
+       "   AND c1.selector <> c2.selector"
+       "   AND " CSS_SPEC_SQL("c1") " > " CSS_SPEC_SQL("c2") " AND p.name = ?2"
+                                                             " ORDER BY f.path, c2.line LIMIT ?1";
+   char err[CSSG_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, filt ? sql_filt : sql_all, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int(st, "?1", max);
+   if (filt)
+      aimee_pg_bind_text(st, "?2", project_filter);
+   int count = 0;
+   while (count < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      css_spec_conflict_t *h = &out[count];
+      memset(h, 0, sizeof(*h));
+      const char *pn = aimee_pg_column_text(st, 0);
+      const char *fp = aimee_pg_column_text(st, 1);
+      const char *prop = aimee_pg_column_text(st, 2);
+      const char *ws = aimee_pg_column_text(st, 3);
+      const char *ls = aimee_pg_column_text(st, 5);
+      snprintf(h->project, sizeof(h->project), "%s", pn ? pn : "");
+      snprintf(h->file_path, sizeof(h->file_path), "%s", fp ? fp : "");
+      snprintf(h->property, sizeof(h->property), "%s", prop ? prop : "");
+      snprintf(h->winner_selector, sizeof(h->winner_selector), "%s", ws ? ws : "");
+      h->winner_line = aimee_pg_column_int(st, 4);
+      snprintf(h->loser_selector, sizeof(h->loser_selector), "%s", ls ? ls : "");
+      h->loser_line = aimee_pg_column_int(st, 6);
+      count++;
+   }
+   aimee_pg_finalize(st);
+   return count;
+}
