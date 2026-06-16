@@ -741,7 +741,8 @@ int db2_code_index_code_search(const char *query, const char *project, code_sear
    if (shim && filter_project)
       sql = "SELECT p.name, f.path,"
             " snippet(code_fts, 0, '>>>', '<<<', '...', 20),"
-            " rank"
+            " rank,"
+            " f.hash"
             " FROM code_fts"
             " JOIN files f ON f.id = code_fts.rowid"
             " JOIN projects p ON p.id = f.project_id"
@@ -753,7 +754,8 @@ int db2_code_index_code_search(const char *query, const char *project, code_sear
    else if (shim)
       sql = "SELECT p.name, f.path,"
             " snippet(code_fts, 0, '>>>', '<<<', '...', 20),"
-            " rank"
+            " rank,"
+            " f.hash"
             " FROM code_fts"
             " JOIN files f ON f.id = code_fts.rowid"
             " JOIN projects p ON p.id = f.project_id"
@@ -766,7 +768,8 @@ int db2_code_index_code_search(const char *query, const char *project, code_sear
       sql = "SELECT p.name, f.path,"
             " ts_headline('simple', fc.content, plainto_tsquery('simple', ?1),"
             " 'StartSel=>>>, StopSel=<<<, MaxWords=20'),"
-            " ts_rank(fc.code_fts_tsv, plainto_tsquery('simple', ?1))"
+            " ts_rank(fc.code_fts_tsv, plainto_tsquery('simple', ?1)),"
+            " f.hash"
             " FROM file_contents fc"
             " JOIN files f ON f.id = fc.file_id"
             " JOIN projects p ON p.id = f.project_id"
@@ -779,7 +782,8 @@ int db2_code_index_code_search(const char *query, const char *project, code_sear
       sql = "SELECT p.name, f.path,"
             " ts_headline('simple', fc.content, plainto_tsquery('simple', ?1),"
             " 'StartSel=>>>, StopSel=<<<, MaxWords=20'),"
-            " ts_rank(fc.code_fts_tsv, plainto_tsquery('simple', ?1))"
+            " ts_rank(fc.code_fts_tsv, plainto_tsquery('simple', ?1)),"
+            " f.hash"
             " FROM file_contents fc"
             " JOIN files f ON f.id = fc.file_id"
             " JOIN projects p ON p.id = f.project_id"
@@ -811,10 +815,12 @@ int db2_code_index_code_search(const char *query, const char *project, code_sear
       const char *fpath = aimee_pg_column_text(st, 1);
       const char *snip = aimee_pg_column_text(st, 2);
       double rnk = aimee_pg_column_double(st, 3);
+      const char *fhash = aimee_pg_column_text(st, 4); /* files.hash — P2 provenance */
       snprintf(out[count].project, sizeof(out[count].project), "%s", pname ? pname : "");
       snprintf(out[count].file_path, sizeof(out[count].file_path), "%s", fpath ? fpath : "");
       snprintf(out[count].snippet, sizeof(out[count].snippet), "%s", snip ? snip : "");
       out[count].rank = rnk;
+      snprintf(out[count].content_hash, sizeof(out[count].content_hash), "%s", fhash ? fhash : "");
       count++;
    }
    aimee_pg_finalize(st);
