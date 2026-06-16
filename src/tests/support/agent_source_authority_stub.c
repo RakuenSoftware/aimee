@@ -31,3 +31,7 @@ void agent_source_authority_tls_restore(agent_source_authority_snapshot_t *snap)
       snap->paths = NULL;
    }
 }
+
+void agent_source_authority_export_env(void)
+{
+}

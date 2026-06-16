@@ -60,6 +60,20 @@ void agent_source_authority_tls_restore(agent_source_authority_snapshot_t *snap)
    snap->paths = NULL;
 }
 
+/* Mirror this thread's source-authority context into the process env so a
+ * fork()ed child that re-execs (cmd_index, the aimee-client shell-out) inherits
+ * it. Call ONLY in the post-fork/pre-exec child, where the single-threaded child
+ * is immune to the cross-thread env clobber that affects the parent. No-op when
+ * not inside a delegate run (the inherited env is left untouched). */
+void agent_source_authority_export_env(void)
+{
+   if (!tl_sa_active)
+      return;
+   platform_setenv("AIMEE_DELEGATE_SOURCE_AUTHORITY", tl_sa_authority ? "1" : "");
+   platform_setenv("AIMEE_DELEGATE_WORKTREE_ROOT", tl_sa_root);
+   platform_setenv("AIMEE_DELEGATE_SOURCE_PATHS", tl_sa_paths ? tl_sa_paths : "");
+}
+
 static int source_authority_enabled(void)
 {
    if (tl_sa_active)

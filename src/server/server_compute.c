@@ -526,6 +526,27 @@ static void delegate_run_ctx_restore(delegate_run_ctx_t *c)
    mailbox_release(c->mb);
 }
 
+/* Export this delegate's context (depth/parent/source-authority) from the
+ * forking thread's TLS into the child's environment. Call ONLY in a freshly
+ * fork()ed child, before exec: the parent-side process-global AIMEE_DELEGATE_*
+ * env races across concurrent delegate threads, so a cross-process sub-client
+ * (a CLI agent that shells out to `aimee delegate`) could inherit a neighbor
+ * delegate's depth/parent. fork() copies the forking thread's TLS into the
+ * (now single-threaded) child, so re-deriving the env here is immune to that
+ * clobber. No-op for primary agents (depth 0, no parent), which keep their
+ * inherited environment. Matches the adjacent post-fork unsetenv() pattern. */
+void delegate_child_export_context_env(void)
+{
+   if (tl_delegation_depth > 0 || tl_parent_delegation_id[0])
+   {
+      char depth_str[32];
+      snprintf(depth_str, sizeof(depth_str), "%d", tl_delegation_depth);
+      platform_setenv("AIMEE_DELEGATE_DEPTH", depth_str);
+      platform_setenv("AIMEE_PARENT_DELEGATION_ID", tl_parent_delegation_id);
+   }
+   agent_source_authority_export_env();
+}
+
 /* Build the delegate result envelope from a finished run. Mirrors the two
  * branches the worker emitted inline: on success the response + turn/token
  * metrics; on failure the (possibly stop-reason) status + augmented message,
