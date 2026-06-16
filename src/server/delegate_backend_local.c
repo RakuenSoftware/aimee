@@ -10,6 +10,10 @@
 
 #include "aimee.h" /* MAX_PATH_LEN */
 
+/* Defined in server_compute.c; called post-fork to seed the child's delegate
+ * context env from the forking thread's TLS (race-free). */
+void delegate_child_export_context_env(void);
+
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -223,6 +227,10 @@ static int local_exec(delegate_backend_t *self, void *state, const char *command
       close(err_pipe[1]);
       if (st->cwd[0] && chdir(st->cwd) != 0)
          _exit(126);
+      /* Seed the child's delegate context env from the forking thread's TLS so a
+       * sub-`aimee` invocation inside this command sees the correct depth/parent/
+       * source context, not a concurrently-clobbered global. */
+      delegate_child_export_context_env();
       execlp("bash", "bash", "-c", wrapped, (char *)NULL);
       _exit(127);
    }

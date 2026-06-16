@@ -1751,6 +1751,7 @@ static int delegate_current_job(db1_agent_job_t *out_job)
 #include "test_server_compute_delegate_write.inc"
 #include "test_server_compute_liveness.inc"
 #include "test_server_compute_state_invariants.inc"
+#include "test_server_compute_child_env.inc"
 
 /* Pure prompt helpers extracted from delegate_worker (server/delegate_prompt.c). */
 char *delegate_rewrite_prompt_cwd(const char *prompt, const char *cwd, const char *worktree_path,
@@ -1935,6 +1936,7 @@ int main(void)
    test_spawn_record_marks_running();
    test_spawn_limit_descendants_blocks_completed_chain();
    test_depth_context_save_restore();
+   test_child_export_context_env();
    test_delegation_augment_error();
    test_cross_process_depth_propagation();
    test_delegate_provider_route_override();
