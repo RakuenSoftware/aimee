@@ -416,12 +416,15 @@ int canonical_index_project_lang_breakdown(const char *project, char *buf, size_
    return 0;
 }
 
+/* Must mirror code_search_hit_t (index.h) exactly — the handler casts the out
+ * buffer to it; a layout mismatch would corrupt the read. */
 typedef struct
 {
    char project[128];
    char file_path[MAX_PATH_LEN];
    char snippet[512];
    double rank;
+   char content_hash[80];
 } test_code_search_hit_t;
 
 int canonical_index_code_search(const char *query, const char *project, void *out, int max)
@@ -437,6 +440,7 @@ int canonical_index_code_search(const char *query, const char *project, void *ou
    snprintf(hits[0].file_path, sizeof(hits[0].file_path), "src/search.c");
    snprintf(hits[0].snippet, sizeof(hits[0].snippet), "int needle(void) { return 1; }");
    hits[0].rank = 0.75;
+   snprintf(hits[0].content_hash, sizeof(hits[0].content_hash), "deadbeefcafe");
    return 1;
 }
 

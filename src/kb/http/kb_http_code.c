@@ -368,6 +368,8 @@ int handle_get_code_search(const char *query_string, char *out_buf, int out_cap)
       cJSON_AddStringToObject(hit, "file_path", hits[i].file_path);
       cJSON_AddStringToObject(hit, "snippet", hits[i].snippet);
       cJSON_AddNumberToObject(hit, "rank", hits[i].rank);
+      /* P2 Layer-1: file content hash for citation + drift detection. */
+      cJSON_AddStringToObject(hit, "content_hash", hits[i].content_hash);
       cJSON_AddItemToArray(arr, hit);
    }
    cJSON_AddNullToObject(resp, "next_cursor");

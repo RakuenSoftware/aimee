@@ -112,6 +112,11 @@ typedef struct
    char file_path[MAX_PATH_LEN];
    char snippet[512];
    double rank;
+   /* files.hash of the matched file — auditable-correctness P2 Layer-1
+    * (file-level provenance): lets a citation name the exact content version and
+    * lets drift detection flag a hit whose live source no longer matches its
+    * stored hash. Empty when the row has no recorded hash. */
+   char content_hash[80];
 } code_search_hit_t;
 
 /* Lexical search across indexed code. Returns count of results. Ranking and
