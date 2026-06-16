@@ -59,6 +59,8 @@ int kb_handle_memory_briefing(int fd, cJSON *req);
 int kb_handle_memory_context_block(int fd, cJSON *req);
 /* Auditable-correctness P1: record a per-turn retrieval_event keyed by turn_id. */
 int kb_handle_evidence_emit_retrieval_event(int fd, cJSON *req);
+/* Auditable-correctness P1.5: merge typed code/doc refs into the turn's event. */
+int kb_handle_evidence_merge_retrieval_event(int fd, cJSON *req);
 /* Auditable-correctness P1: the /v1/audit/trace read (four-state status). */
 int kb_handle_evidence_trace_retrieval_event(int fd, cJSON *req);
 /* Auditable-correctness P2: the /v1/audit/provenance read (sources at version). */
