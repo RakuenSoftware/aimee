@@ -531,6 +531,7 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/trace_analysis.c
     ${AIMEE_SRC_DIR}/index.c
     ${AIMEE_SRC_DIR}/extractors.c
+    ${AIMEE_SRC_DIR}/css_analyze.c
     ${AIMEE_SRC_DIR}/extractors_extra.c
     ${AIMEE_SRC_DIR}/extractors_new_langs.c
     ${AIMEE_SRC_DIR}/context_discover.c
@@ -921,6 +922,7 @@ set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/memory_episodes.c
     ${AIMEE_SRC_DIR}/index.c
     ${AIMEE_SRC_DIR}/extractors.c
+    ${AIMEE_SRC_DIR}/css_analyze.c
     ${AIMEE_SRC_DIR}/extractors_extra.c
     ${AIMEE_SRC_DIR}/extractors_new_langs.c
     ${AIMEE_SRC_DIR}/dogfood.c
