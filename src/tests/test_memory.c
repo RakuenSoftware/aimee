@@ -20,6 +20,7 @@
 #include "../db2/db2_internal.h"
 #include "../db2/entity_edges.h"
 #include "../db2/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
+#include "../db2/demotion.h"       /* retrieval_event write/read (auditable-correctness P2) */
 
 int memory_demote_from_failures(void);
 
@@ -375,6 +376,50 @@ static void test_audit_provenance_resolver(void)
    printf("  audit provenance resolver (kind/source/version + miss) OK\n");
 }
 
+/* Auditable-correctness P2 emit-time version capture: writing a retrieval_event
+ * records each surfaced id's point-in-time version (memories.updated_at at emit)
+ * in surfaced_items, so /v1/audit/provenance can later detect version drift. */
+static void test_audit_provenance_emit_captures_version(void)
+{
+   setup();
+
+   const char *ins = "INSERT INTO memories (tier, kind, key, content, confidence, use_count,"
+                     " last_used_at, source_session, created_at, updated_at, sensitivity,"
+                     " evidence_strength, salience, surprise, observation_count)"
+                     " VALUES ('L1', 'fact', 'emit-key-1', 'sky is blue', 0.8, 1,"
+                     " pg_now_text(), 'sess-emit', pg_now_text(), pg_now_text(), 'normal',"
+                     " 0.5, 0.5, 0.5, 1) RETURNING id";
+   char err[128] = "";
+   aimee_pg_stmt_t *s = aimee_pg_prepare(db2_conn(), ins, err, sizeof(err));
+   assert(s);
+   assert(aimee_pg_step(s, err, sizeof(err)) == AIMEE_PG_ROW);
+   int64_t id = aimee_pg_column_int64(s, 0);
+   aimee_pg_finalize(s);
+   assert(id > 0);
+
+   /* Emit a turn-keyed retrieval_event surfacing that memory. */
+   int64_t ids[1] = {id};
+   char evid[64] = "";
+   assert(db2_demotion_retrieval_event_write_turn("p2-emit-turn", "fp", "Recall", ids, 1, evid,
+                                                  sizeof evid) == 0);
+
+   /* Read the stored payload back: it carries surfaced_items with the id and a
+    * captured (point-in-time) version string. */
+   char read_id[64] = "", payload[8192] = "";
+   assert(db2_demotion_retrieval_event_by_turn("p2-emit-turn", read_id, sizeof read_id, payload,
+                                               sizeof payload) == 1);
+   assert(strstr(payload, "\"surfaced_items\"") != NULL);
+   char id_needle[48];
+   snprintf(id_needle, sizeof id_needle, "\"id\":%lld", (long long)id);
+   assert(strstr(payload, id_needle) != NULL);
+   assert(strstr(payload, "\"v\":\"") != NULL); /* a point-in-time version was captured */
+   /* back-compat: surfaced_ids is still present. */
+   assert(strstr(payload, "\"surfaced_ids\"") != NULL);
+
+   teardown();
+   printf("  audit provenance emit captures point-in-time version OK\n");
+}
+
 int main(void)
 {
    char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
@@ -396,6 +441,7 @@ int main(void)
    test_memory_promote_uses_calibration_profile();
    test_memory_promote_calibration_ab_slot();
    test_audit_provenance_resolver();
+   test_audit_provenance_emit_captures_version();
    test_expire_l0();
    test_fold_session();
    test_stats();

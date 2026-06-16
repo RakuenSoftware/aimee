@@ -915,10 +915,13 @@ paths:
       description: >-
         Which sources grounded a turn's answer, at which version: given the
         caller-visible turn_id, resolve each source id recorded on the turn's
-        retrieval_event to {id, kind, source, version, present}, where version is
-        the source row's updated_at (read live) and present is false when the
-        source no longer exists (deleted/superseded since the turn). provenance_status
-        is one of the exhaustive states ok / not_instrumented / not_evaluated /
+        retrieval_event to {id, kind, source, version, present, turn_version,
+        drifted}. version is the source row's updated_at read live (current);
+        turn_version is the point-in-time version captured at emit; drifted is true
+        when a still-present source's current version differs from turn_version
+        (version-change drift). present is false when the source no longer exists
+        (deleted/superseded since the turn). provenance_status is one of the
+        exhaustive states ok / not_instrumented / not_evaluated /
         evidence_unavailable (P2 produces ok and evidence_unavailable). Requires
         aimee-kb. Gated by kb_evidence_emit_enabled at emit time.
       requestBody:
