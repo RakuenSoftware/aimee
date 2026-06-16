@@ -2,6 +2,22 @@
 
 - **State:** draft - pending review (consolidated after PR #180 review + twelve
   file-by-file codebase audits; findings integrated below)
+- **Implementation status (2026-06-16):** §1–§2 LARGELY LANDED, design-roundtable
+  run on the rest. **Merged:** §1 (one pricing authority — `token_estimate_cost`
+  + registry-fallback hook, `token_estimate_cost_ex` is_priced free-vs-unknown,
+  `delegate_ensemble` routed through it; static table reconciled with the model
+  registry) and the §2 **schema/foundations** (`usage_kind`
+  realized/estimated/avoided/partial + realized-only filter + spend-breakdown,
+  `requested_model`/`stop_reason`/`agent_log_id`, billable-model resolution,
+  `request_context.h`) shipped in **PR #185**; the §1 local-delegate pricing
+  coverage gap (minimax/mistral/mimo as known-zero) closed in **PR #339**.
+  **Design roundtable (2026-06-16):** NOT-READY, 10 blocking / 5 major — §1–§2
+  "sound in direction"; blockers are in the *remaining* §2/§3–§6 work. **Remaining
+  (blocked on design decisions):** §2 ingress-writes to the six no-log handlers
+  (async-write durability/backpressure, tenant-scoped idempotency, partial-row
+  policy), §3 cache-aware shaping, §4 dedup, §5 reasoning-effort cap (recommend
+  defer), §6 cost-shaped reward, §7 `/v1/usage/*`. See the roundtable findings for
+  the per-blocker fixes.
 - **Author:** JBailes
 - **Date:** 2026-06-11
 - **Charter roles:** Evaluate-Optimize (cost-shaped reward into the existing

@@ -1,6 +1,16 @@
 # Proposal: Embedder runtime model fetch + auto-dimension
 
 - **State:** reviewed — READY (roundtable 2026-06-14: security · architect · QA · contrarian; 4 rounds to convergence)
+- **Implementation status (2026-06-16):** PARTIAL. §1 (thin image / runtime
+  model fetch) is in tree. §2's safety-critical core — the `kb_meta`
+  `schema_embedding_dim` record + dim-drift **refusal** (`db2_embedding_dim_record_or_check`,
+  atomic upsert) — landed in **PR #337**. **Remaining (not done):** §2's
+  pin > recorded > probe precedence wiring (`config_resolve_embedding_dim` is
+  still pin-only), the fresh-DB auto-derive from the embedder `/health` probe
+  under `pg_try_advisory_lock`, and the double-gated auto-reembed
+  (`kb_reembed_on_dim_change` off-by-default + `--confirm` + `/health=maintenance`
+  + count-divergence → degraded). These are runtime/bootstrap work best done with
+  the live embedder+kb stack.
 - **Author:** JBailes
 - **Date:** 2026-06-14
 - **Base:** `origin/main` (v0.2.65). The embedder ships in two **baked** images
