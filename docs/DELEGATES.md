@@ -176,6 +176,15 @@ delegates are abundant compute and the primary supervising agent is the scarce
 resource. A run can be token-negative overall while still being useful if it
 reduces paid supervisor attention, manual integration, or serial review time.
 
+The shared cost authority (`token_estimate_cost`) prices the self-hosted /
+open-weight delegates aimee runs locally — minimax, mistral, and mimo — at a
+**known zero**: free, but explicitly *priced* rather than *unknown*. This matters
+because the delegate-economics path flat-rates only genuinely unknown models; a
+known-zero price keeps these local delegates out of that fallback, so their
+realized cost is reported as the $0 it actually is. A deployment that pays per
+token for a hosted variant still overrides the zero with a real model-registry /
+models.dev price.
+
 The report is intentionally approximate. It separates estimated delegate tokens
 from estimated supervisor prompt tokens, records tier distribution, structured
 handoff validity, focused tests, manual integration markers, reviewer blocking

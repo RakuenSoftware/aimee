@@ -50,6 +50,22 @@ static const model_price_t pricing[] = {
     {"gpt-4-turbo", 10.00, 30.00, 0.0, 0.0},
     {"gpt-4", 30.00, 60.00, 0.0, 0.0},
     {"gpt-3.5-turbo", 0.50, 1.50, 0.0, 0.0},
+
+    /* Self-hosted / open-weight delegates aimee actually runs (ingress
+     * cost-accounting §1 coverage gap). Priced at 0 = free/local: a KNOWN,
+     * intentional zero (so token_estimate_cost_ex reports priced=1), not
+     * "unknown" — this stops the delegate-economics path from flat-rating them as
+     * unknown spend. These keys match as a PREFIX of the provider-stripped served
+     * model id (find_price is longest-prefix, not arbitrary-substring): "minimax"
+     * matches "MiniMax-M3", "mistral" matches "mistral-medium-latest", "mimo"
+     * matches "mimo-v2.5-pro". The prefixes are deliberately family-wide (any
+     * "mistral-*"/"minimax-*"/"mimo-*" variant aimee self-hosts is free); a
+     * deployment that instead pays a hosted API for one of these still gets the
+     * real price, because a NONZERO model-registry / models.dev price overrides
+     * this static zero base (a 0/0 registry entry means "unknown" and does not). */
+    {"minimax", 0.0, 0.0, 0.0, 0.0},
+    {"mistral", 0.0, 0.0, 0.0, 0.0},
+    {"mimo", 0.0, 0.0, 0.0, 0.0},
 };
 
 #define PRICING_COUNT (int)(sizeof(pricing) / sizeof(pricing[0]))
