@@ -294,6 +294,8 @@ static int models_provider(char ids[][SERVER_HTTP_MODEL_ID_MAX], int max)
    {
       if (!acfg.agents[i].name[0] || strcmp(acfg.agents[i].name, "aimee") == 0)
          continue; /* "aimee" is already advertised by the route */
+      if (!agent_name_valid(acfg.agents[i].name))
+         continue; /* never surface junk/over-long names as models (defensive) */
       snprintf(ids[k], SERVER_HTTP_MODEL_ID_MAX, "%s", acfg.agents[i].name);
       k++;
    }
