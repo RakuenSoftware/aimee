@@ -96,6 +96,8 @@ int db2_pool_init(const char *libpq_url, int size, char *errbuf, size_t errbuf_l
       pthread_mutex_unlock(&g_mtx);
       return same ? 0 : -1;
    }
+   (void)errbuf;
+   (void)errbuf_len;
    if (size < 1)
       size = 1;
    if (size > DB2_POOL_MAX_SIZE)
@@ -103,31 +105,17 @@ int db2_pool_init(const char *libpq_url, int size, char *errbuf, size_t errbuf_l
    snprintf(g_url, sizeof(g_url), "%s", libpq_url);
    /* Counters are per-pool-lifetime. */
    g_grants = g_timeouts = g_stuck = g_poisoned = 0;
-
-   int opened = 0;
-   for (; opened < size; opened++)
+   /* Lazy pool: members are opened on first lease, up to `size`. Keeps db2_init
+    * cheap (it opens only its own connection) and avoids holding idle
+    * connections the deployment never needs. */
+   for (int i = 0; i < size; i++)
    {
-      char e[256] = "";
-      void *c = g_open(libpq_url, e, sizeof(e));
-      if (!c)
-      {
-         if (errbuf && errbuf_len)
-            snprintf(errbuf, errbuf_len, "db2_pool: open member %d failed: %s", opened, e);
-         /* roll back the partially-opened pool */
-         for (int j = 0; j < opened; j++)
-         {
-            g_close(g_members[j].conn);
-            g_members[j].conn = NULL;
-         }
-         pthread_mutex_unlock(&g_mtx);
-         return -1;
-      }
-      g_members[opened].conn = c;
-      g_members[opened].leased = 0;
-      g_members[opened].lease_ms = 0;
-      g_members[opened].last_reopen = 0;
+      g_members[i].conn = NULL;
+      g_members[i].leased = 0;
+      g_members[i].lease_ms = 0;
+      g_members[i].last_reopen = 0;
    }
-   g_size = size;
+   g_size = size; /* the cap */
    g_active = 1;
    pthread_mutex_unlock(&g_mtx);
 
@@ -137,7 +125,7 @@ int db2_pool_init(const char *libpq_url, int size, char *errbuf, size_t errbuf_l
    else
       POOL_LOG("reaper thread failed to start; leak-reclaim disabled");
 
-   POOL_LOG("initialized: %d connections", size);
+   POOL_LOG("initialized: up to %d connections (opened on demand)", size);
    return 0;
 }
 
@@ -171,6 +159,7 @@ void *db2_pool_lease(int timeout_ms)
          pthread_mutex_unlock(&g_mtx);
          return NULL;
       }
+      /* 1) hand out an already-open free member. */
       for (int i = 0; i < g_size; i++)
       {
          if (!g_members[i].leased && g_members[i].conn)
@@ -184,6 +173,33 @@ void *db2_pool_lease(int timeout_ms)
             return c;
          }
       }
+      /* 2) grow: open an unused slot on demand (under the lock — warm-up only,
+       * at most `size` times for the pool's life). */
+      int slot = -1;
+      for (int i = 0; i < g_size; i++)
+         if (!g_members[i].conn && !g_members[i].leased)
+         {
+            slot = i;
+            break;
+         }
+      if (slot >= 0)
+      {
+         char e[256] = "";
+         void *c = g_open(g_url, e, sizeof(e));
+         if (c)
+         {
+            g_members[slot].conn = c;
+            g_members[slot].leased = 1;
+            g_members[slot].owner = pthread_self();
+            g_members[slot].lease_ms = mono_ms();
+            g_grants++;
+            pthread_mutex_unlock(&g_mtx);
+            return c;
+         }
+         POOL_LOG("on-demand member open failed: %s", e[0] ? e : "unknown");
+         /* fall through to the bounded wait rather than busy-retrying open */
+      }
+      /* 3) at the cap and all leased -> bounded wait. */
       g_waiters++;
       int rc = pthread_cond_timedwait(&g_cond, &g_mtx, &deadline);
       g_waiters--;
@@ -191,7 +207,7 @@ void *db2_pool_lease(int timeout_ms)
       {
          g_timeouts++;
          pthread_mutex_unlock(&g_mtx);
-         POOL_LOG("lease timeout (%d ms); pool exhausted (size=%d)", timeout_ms, g_size);
+         POOL_LOG("lease timeout (%d ms); pool exhausted (cap=%d)", timeout_ms, g_size);
          return NULL;
       }
    }
