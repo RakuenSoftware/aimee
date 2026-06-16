@@ -17,6 +17,8 @@
 #include <string.h>
 #include "demotion.h"
 #include "db2_test_shim.h"
+#include "db2_internal.h"
+#include "db_postgres.h"
 #include "config.h"
 #include "config_learning.h"
 
@@ -109,6 +111,10 @@ static void test_retrieval_event_merge_turn(void)
    char payload[8192];
    assert(db2_demotion_retrieval_event_by_turn("turn-m", NULL, 0, payload, sizeof(payload)) == 1);
    assert(strstr(payload, "\"surfaced_ids\":[11,22]") != NULL);
+   /* unified model (D3): the canonical surfaced_refs carries typed entries, and the
+    * legacy surfaced_ids is a derived projection of the memory-typed ones. */
+   assert(strstr(payload, "\"surfaced_refs\":") != NULL);
+   assert(strstr(payload, "\"type\":\"memory\"") != NULL);
 
    /* Second writer on the SAME turn → merges new refs into the same event (22 is a
     * dup and is skipped; 33 is added). Returns the same canonical event id. */
@@ -131,6 +137,28 @@ static void test_retrieval_event_merge_turn(void)
 
    /* bad arg. */
    assert(db2_demotion_retrieval_event_merge_turn("", "fp", "Recall", a, 2, NULL, 0) == -1);
+
+   /* LEGACY MIGRATION: an event written before the unified model (surfaced_ids only,
+    * no surfaced_refs) is migrated on the next merge — surfaced_refs is back-filled
+    * and the new ref added, with the projection kept in sync. */
+   {
+      void *conn = db2_conn();
+      char e[256] = "";
+      assert(aimee_pg_exec(conn,
+                           "INSERT INTO artifacts (id, kind, turn_id, payload)"
+                           " VALUES ('leg1','retrieval_event','turn-leg',"
+                           " '{\"surfaced_ids\":[7],\"surfaced_items\":[{\"id\":7,\"v\":\"x\"}]}')",
+                           e, sizeof e) == 0);
+      int64_t d[1] = {8};
+      assert(db2_demotion_retrieval_event_merge_turn("turn-leg", "fp", "Recall", d, 1, NULL, 0) ==
+             0);
+      assert(db2_demotion_retrieval_event_by_turn("turn-leg", NULL, 0, payload, sizeof(payload)) ==
+             1);
+      assert(strstr(payload, "\"surfaced_refs\":") != NULL);     /* back-filled */
+      assert(strstr(payload, "\"surfaced_ids\":[7,8]") != NULL); /* migrated 7 + merged 8 */
+      assert(strstr(payload, "\"v\":\"x\"") != NULL);            /* legacy v preserved */
+      printf("  retrieval_event_merge_turn: legacy migration ok\n");
+   }
 
    close_db();
    printf("  retrieval_event_merge_turn: ok\n");

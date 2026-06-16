@@ -15,6 +15,118 @@
 #include <string.h>
 #include <time.h>
 
+/* auditable-correctness P1.5 (D3): the retrieval_event carries a UNIFIED typed
+ * `surfaced_refs` list — [{type,...,v}] — as the source of truth. Memory rows are
+ * {type:"memory", id:<int64>, v:<updated_at>}; code refs are {type:"code",
+ * ref:"code:<project>:<file_path>", v:<content_hash>}. The legacy `surfaced_ids`
+ * and `surfaced_items` arrays are kept as DERIVED projections of the memory-typed
+ * entries, so every existing reader (trace, provenance, demotion) is byte-identical.
+ * make_memory_ref / project_memory_refs / ensure_surfaced_refs keep that invariant;
+ * the writer and both merges go through them. */
+
+/* {type:"memory", id, v} — v captured now (omitted when unresolved, mirroring the
+ * legacy contract: a missing version means "unknown", not drift). */
+static cJSON *make_memory_ref(int64_t id)
+{
+   cJSON *r = cJSON_CreateObject();
+   if (!r)
+      return NULL;
+   cJSON_AddStringToObject(r, "type", "memory");
+   cJSON_AddNumberToObject(r, "id", (double)id);
+   char version[64] = "";
+   if (db2_memory_provenance_by_id(id, NULL, 0, NULL, 0, version, sizeof(version)) == 1 &&
+       version[0])
+      cJSON_AddStringToObject(r, "v", version);
+   return r;
+}
+
+/* Regenerate surfaced_ids + surfaced_items from the memory-typed entries of
+ * surfaced_refs (the unified source of truth), so the back-compat projections
+ * always match after any mutation. */
+static void project_memory_refs(cJSON *p)
+{
+   cJSON *refs = cJSON_GetObjectItemCaseSensitive(p, "surfaced_refs");
+   if (!cJSON_IsArray(refs))
+      return; /* nothing to project from — leave any existing projections intact */
+   /* Build the replacements as DETACHED arrays first, then swap them in only once
+    * both exist — so an allocation failure never leaves the event with the old
+    * projections deleted and no replacements (no destruction window). */
+   cJSON *ids = cJSON_CreateArray();
+   cJSON *items = cJSON_CreateArray();
+   if (!ids || !items)
+   {
+      cJSON_Delete(ids);
+      cJSON_Delete(items);
+      return;
+   }
+   int n = cJSON_GetArraySize(refs);
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *r = cJSON_GetArrayItem(refs, i);
+      cJSON *t = cJSON_GetObjectItemCaseSensitive(r, "type");
+      cJSON *idj = cJSON_GetObjectItemCaseSensitive(r, "id");
+      if (!cJSON_IsString(t) || strcmp(t->valuestring, "memory") != 0 || !cJSON_IsNumber(idj))
+         continue;
+      cJSON_AddItemToArray(ids, cJSON_CreateNumber(idj->valuedouble));
+      cJSON *it = cJSON_CreateObject();
+      cJSON_AddNumberToObject(it, "id", idj->valuedouble);
+      cJSON *v = cJSON_GetObjectItemCaseSensitive(r, "v");
+      if (cJSON_IsString(v) && v->valuestring)
+         cJSON_AddStringToObject(it, "v", v->valuestring);
+      cJSON_AddItemToArray(items, it);
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(p, "surfaced_ids");
+   cJSON_DeleteItemFromObjectCaseSensitive(p, "surfaced_items");
+   cJSON_AddItemToObject(p, "surfaced_ids", ids);
+   cJSON_AddItemToObject(p, "surfaced_items", items);
+}
+
+/* Return p's surfaced_refs array, back-filling it from the legacy surfaced_ids/
+ * surfaced_items of an event written before the unified model (migration-on-read).
+ * Returns NULL only on allocation failure. */
+static cJSON *ensure_surfaced_refs(cJSON *p)
+{
+   cJSON *refs = cJSON_GetObjectItemCaseSensitive(p, "surfaced_refs");
+   if (cJSON_IsArray(refs))
+      return refs;
+   refs = cJSON_AddArrayToObject(p, "surfaced_refs");
+   if (!refs)
+      return NULL;
+   cJSON *ids = cJSON_GetObjectItemCaseSensitive(p, "surfaced_ids");
+   cJSON *items = cJSON_GetObjectItemCaseSensitive(p, "surfaced_items");
+   int n = cJSON_IsArray(ids) ? cJSON_GetArraySize(ids) : 0;
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *e = cJSON_GetArrayItem(ids, i);
+      if (!cJSON_IsNumber(e))
+         continue;
+      int64_t id = (int64_t)e->valuedouble;
+      cJSON *r = cJSON_CreateObject();
+      if (!r)
+         continue;
+      cJSON_AddStringToObject(r, "type", "memory");
+      cJSON_AddNumberToObject(r, "id", (double)id);
+      if (cJSON_IsArray(items)) /* preserve the legacy point-in-time v */
+      {
+         int m = cJSON_GetArraySize(items);
+         for (int j = 0; j < m; j++)
+         {
+            cJSON *it = cJSON_GetArrayItem(items, j);
+            cJSON *iid = it ? cJSON_GetObjectItemCaseSensitive(it, "id") : NULL;
+            if (cJSON_IsNumber(iid) && (int64_t)iid->valuedouble == id)
+            {
+               cJSON *v = cJSON_GetObjectItemCaseSensitive(it, "v");
+               if (cJSON_IsString(v) && v->valuestring)
+                  cJSON_AddStringToObject(r, "v", v->valuestring);
+               break;
+            }
+         }
+      }
+      cJSON_AddItemToArray(refs, r);
+   }
+   return refs;
+}
+
 int db2_demotion_retrieval_event_write(const char *query_fingerprint, const char *role,
                                        const int64_t *surfaced_ids, int n_surfaced, char *id_out,
                                        int id_out_len)
@@ -22,34 +134,22 @@ int db2_demotion_retrieval_event_write(const char *query_fingerprint, const char
    char id[64];
    db2_artifact_gen_id(id, sizeof(id));
 
-   /* Build the payload with cJSON (no fixed-buffer overflow risk). Alongside the
-    * back-compat `surfaced_ids` array, record `surfaced_items` = [{id, v}] where
-    * v is each source's version (memories.updated_at) resolved NOW, at emit time.
-    * That is the source's point-in-time version for this turn, so /v1/audit/
-    * provenance can later flag version drift (turn-time v != current). */
+   /* Build the unified surfaced_refs (all memory at create), then derive the
+    * back-compat surfaced_ids/surfaced_items projections from it (D3/P1.5). */
    cJSON *p = cJSON_CreateObject();
    if (!p)
       return -1;
    cJSON_AddStringToObject(p, "query_fingerprint", query_fingerprint ? query_fingerprint : "");
    cJSON_AddStringToObject(p, "role", role ? role : "");
-   cJSON *ids = cJSON_AddArrayToObject(p, "surfaced_ids");
-   cJSON *items = cJSON_AddArrayToObject(p, "surfaced_items");
-   /* surfaced_ids may be NULL (proactive/no-surface events); guard it so n is
-    * effectively 0, matching the original build_ids_array(NULL,...) contract. */
-   for (int i = 0; surfaced_ids && ids && items && i < n_surfaced; i++)
+   cJSON *refs = cJSON_AddArrayToObject(p, "surfaced_refs");
+   /* surfaced_ids may be NULL (proactive/no-surface events); guard so n is 0. */
+   for (int i = 0; surfaced_ids && refs && i < n_surfaced; i++)
    {
-      cJSON_AddItemToArray(ids, cJSON_CreateNumber((double)surfaced_ids[i]));
-      char version[64] = "";
-      int found =
-          db2_memory_provenance_by_id(surfaced_ids[i], NULL, 0, NULL, 0, version, sizeof version);
-      cJSON *it = cJSON_CreateObject();
-      cJSON_AddNumberToObject(it, "id", (double)surfaced_ids[i]);
-      /* Only record a version when the row resolved; an unresolved id just omits
-       * `v` (provenance treats a missing turn-version as "unknown", not drift). */
-      if (found == 1 && version[0])
-         cJSON_AddStringToObject(it, "v", version);
-      cJSON_AddItemToArray(items, it);
+      cJSON *r = make_memory_ref(surfaced_ids[i]);
+      if (r)
+         cJSON_AddItemToArray(refs, r);
    }
+   project_memory_refs(p);
    char *payload = cJSON_PrintUnformatted(p);
    cJSON_Delete(p);
    if (!payload)
@@ -224,13 +324,9 @@ int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *que
          result = -1; /* present row, unparseable payload — surface the error */
          break;
       }
-      cJSON *ids = cJSON_GetObjectItemCaseSensitive(p, "surfaced_ids");
-      cJSON *items = cJSON_GetObjectItemCaseSensitive(p, "surfaced_items");
-      if (!cJSON_IsArray(ids))
-         ids = cJSON_AddArrayToObject(p, "surfaced_ids");
-      if (!cJSON_IsArray(items))
-         items = cJSON_AddArrayToObject(p, "surfaced_items");
-      if (!ids || !items) /* allocation failure */
+      /* Merge into the unified surfaced_refs (migrating a legacy event on read). */
+      cJSON *refs = ensure_surfaced_refs(p);
+      if (!refs)
       {
          cJSON_Delete(p);
          result = -1;
@@ -238,19 +334,22 @@ int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *que
       }
 
       int added = 0;
+      int oom = 0;
       for (int i = 0; surfaced_ids && i < n_surfaced; i++)
       {
          int64_t id = surfaced_ids[i];
          if (id <= 0) /* non-positive ids are ignored (documented in the header) */
             continue;
-         /* dedup: skip ids already recorded on the event (idempotency). ids are
-          * stored as JSON numbers by the writer (cJSON_CreateNumber((double)id)),
-          * so compare the same way — lossless for memory ids (well under 2^53). */
-         int present = 0, m = cJSON_GetArraySize(ids);
+         /* dedup: skip memory refs already on the event (idempotency). Only memory-
+          * typed entries are compared, so a code ref never falsely matches. */
+         int present = 0, m = cJSON_GetArraySize(refs);
          for (int j = 0; j < m; j++)
          {
-            cJSON *e = cJSON_GetArrayItem(ids, j);
-            if (cJSON_IsNumber(e) && (int64_t)e->valuedouble == id)
+            cJSON *r = cJSON_GetArrayItem(refs, j);
+            cJSON *t = cJSON_GetObjectItemCaseSensitive(r, "type");
+            cJSON *idj = cJSON_GetObjectItemCaseSensitive(r, "id");
+            if (cJSON_IsString(t) && strcmp(t->valuestring, "memory") == 0 && cJSON_IsNumber(idj) &&
+                (int64_t)idj->valuedouble == id)
             {
                present = 1;
                break;
@@ -258,19 +357,24 @@ int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *que
          }
          if (present)
             continue;
-         cJSON_AddItemToArray(ids, cJSON_CreateNumber((double)id));
-         /* Capture this ref's point-in-time version at merge, mirroring the writer's
-          * surfaced_items=[{id,v}] (v omitted when unresolved — provenance treats a
-          * missing turn-version as "unknown", not drift) so the shape is identical. */
-         char version[64] = "";
-         int found = db2_memory_provenance_by_id(id, NULL, 0, NULL, 0, version, sizeof(version));
-         cJSON *it = cJSON_CreateObject();
-         cJSON_AddNumberToObject(it, "id", (double)id);
-         if (found == 1 && version[0])
-            cJSON_AddStringToObject(it, "v", version);
-         cJSON_AddItemToArray(items, it);
+         cJSON *r = make_memory_ref(id);
+         if (!r) /* allocation failure — abort rather than silently drop a ref */
+         {
+            oom = 1;
+            break;
+         }
+         cJSON_AddItemToArray(refs, r);
          added++;
       }
+      if (oom)
+      {
+         cJSON_Delete(p);
+         result = -1;
+         break;
+      }
+
+      if (added > 0)
+         project_memory_refs(p); /* keep the back-compat projections in sync */
 
       if (added == 0)
       {
