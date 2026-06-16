@@ -419,6 +419,8 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/db2/code_index_ops.c
     ${AIMEE_SRC_DIR}/db2/learning.c
     ${AIMEE_SRC_DIR}/db2/code_index.c
+    ${AIMEE_SRC_DIR}/db2/css_graph.c
+    ${AIMEE_SRC_DIR}/db2/css_migration.c
     ${AIMEE_SRC_DIR}/db2/db_schema.c
     ${AIMEE_SRC_DIR}/db2/memory_lint.c
     ${AIMEE_SRC_DIR}/db2/sketch.c
@@ -748,6 +750,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_session_start.c
     ${AIMEE_SRC_DIR}/cli_attention_guard.c
     ${AIMEE_SRC_DIR}/cli_code_audit.c
+    ${AIMEE_SRC_DIR}/cli_css.c
     ${AIMEE_SRC_DIR}/cli_tui.c
     ${AIMEE_SRC_DIR}/cli_client.c
     ${AIMEE_SRC_DIR}/cli_launch.c
@@ -876,6 +879,7 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_ingest_workers.c
     ${AIMEE_SRC_DIR}/kb/kb_service_kb.c
     ${AIMEE_SRC_DIR}/kb/kb_service_memory.c
+    ${AIMEE_SRC_DIR}/kb/kb_service_css.c
     ${AIMEE_SRC_DIR}/kb/kb_service_agent.c
     ${AIMEE_SRC_DIR}/kb/kb_service_artifacts.c
     ${AIMEE_SRC_DIR}/kb/kb_intel_payload.c
