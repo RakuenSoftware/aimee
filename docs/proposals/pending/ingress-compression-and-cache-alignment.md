@@ -1,17 +1,19 @@
 # Proposal: Envelope compression, cache-prefix alignment, reversible rehydration, and failure-mined corrections
 
-- **State:** draft — pending review
-- **Design roundtable (2026-06-16):** NOT READY — 9 blocking / 12 major. Key
-  blockers: the `X-Aimee-Compress` override uses thread-local state (unsafe in the
-  threaded server); P1b/P2 lossy folds depend on `code_span_get` / `memory_get`
-  MCP tools that don't exist; the in-process rehydration handle store breaks in
-  multi-replica deployments; durable resolvers take model-supplied path/line args
-  (prompt-injection / path-traversal); several validation gates are unfalsifiable
-  ("task class" undefined, no independent rehydration oracle). Panel recommends
-  splitting into three independently-reviewable units: (1) P0+P1a+config behind
-  span-propagation fixes, (2) P2 behind the MCP tools + a deployment-shape
-  decision, (3) P3–P5 behind cost-accounting. **Next step: revise to address the
-  blockers before implementation.**
+- **State:** reviewed — design-ready (2026-06-16). The design-roundtable blockers
+  (below) are resolved in **§6.5 Design-review resolutions**; implementation may
+  proceed per the §7 phasing.
+- **Design roundtable (2026-06-16):** found 9 blocking / 12 major — **all resolved
+  in §6.5.** Key blockers were: the `X-Aimee-Compress` override using thread-local
+  state (unsafe in the threaded server); the lossy-fold transform enum not
+  distinguishing recoverability; rehydrate conflating byte-exact replay with
+  durable re-read; durable resolvers taking model-supplied path/line args
+  (prompt-injection / path-traversal); and unfalsifiable validation gates ("task
+  class" undefined, no independent drift oracle). §6.5 closes each (request-scoped
+  context, lossiness-classed enum, a `recovery_mode` response schema, workspace-root
+  realpath validation, and concrete benchmark/oracle protocols). The panel's
+  three-unit split (P0+P1a → P2 behind the MCP tools+deployment-shape → P3–P5
+  behind cost-accounting) is reflected in §7 phasing.
 - **Author:** JBailes
 - **Date:** 2026-06-11 (consolidated after eight PR-#181 review rounds; all 35
   findings verified in-tree and folded into the body)
@@ -214,8 +216,11 @@ list. Each entry carries, minimally:
   store on the per-turn hot path is explicitly avoided (see the latency risk in §8);
 - `budget` — bytes/tokens this entry is allowed, from recall-economy's bounded
   assembler when present;
-- `transform` — which fold was applied (`none` | `code_fold` | `json_fold`), so
-  the metadata is visible to the model and the test suite.
+- `transform` — which fold was applied, so the metadata is visible to the model and
+  the test suite. **§6.5 B2 normatively expands this enum** to one value per
+  lossiness class: `none` · `code_whitespace_collapse` · `code_comment_strip` ·
+  `code_signature_span` · `json_fold` (the original `code_fold` is split by
+  recoverability).
 - `metrics` — entry id, original/resident byte and token estimates, transform,
   resolver kind, resolver invoked/not invoked, recovered bytes/tokens, provider
   round-trips, and latency. Aggregate provider usage cannot attribute net savings
@@ -292,7 +297,8 @@ section; the proposal does not assume that a prose-only flag exists.
 If a per-call escape is exposed, it requires actual HTTP plumbing:
 
 - parse `X-Aimee-Compress: 0` in `server_http.c` alongside `X-Aimee-Preinject`;
-- carry it as request-scoped/thread-local state into `ingress_preinject_build()`;
+- carry it via the **per-request context struct** into `ingress_preinject_build()`
+  (scoped + reset per request — never an unscoped thread-local; see §6.5 B1);
 - cover buffered chat/completions, buffered Responses, streaming chat/completions,
   and streaming Responses tests;
 - document it in the OpenAPI surface if it is part of the public `/v1` contract,
@@ -742,6 +748,111 @@ this proposal.
   handle storage work to a per-turn hot path that already calls code search and
   memory context. Bench output must include p50/p95 ingress build latency and KB
   request counts.
+
+---
+
+## §6.5 Design-review resolutions (roundtable 2026-06-16)
+
+The 2026-06-16 design roundtable returned 9 blockers (+ 6 majors). Each is resolved
+below; the decisions are normative for implementation.
+
+**B1 — Request override via thread-local is unsafe (§1.4).** The `X-Aimee-Compress`
+override flows through the **per-request context struct**, not a raw thread-local —
+the same scoped, RAII-reset request context introduced by ingress-cost-accounting
+§2 (set at handler entry, cleared on every exit path, structurally enforced). The
+two proposals share that context plumbing; neither may read compression state from
+an unscoped thread-local.
+
+**B2 — code_fold transform enum doesn't distinguish lossy sub-transforms (§1.2/1.3).**
+Expand the per-entry transform enum to one value per **lossiness class**: `none` ·
+`code_whitespace_collapse` (byte-recoverable) · `code_comment_strip` (lossy) ·
+`code_signature_span` (lossy, P1b) · `json_fold`. Each value maps to a distinct
+lossiness class and a required resolver, so per-entry telemetry and the §3.4
+reachability gate can reason about recoverability exactly.
+
+**B3 — Rehydrate conflates byte-exact replay with durable re-read (§3.1/3.4).** Define
+one MCP response schema with an explicit `recovery_mode` enum:
+`byte_exact` (the ephemeral in-memory handle is still live → returns the exact folded
+bytes) · `current_with_drift` (durable re-read → returns CURRENT content + a drift
+flag vs the fold-time version) · `current_no_baseline` (durable re-read, no recorded
+fold-time version → drift unknown). The response carries
+`{recovery_mode, content, source_version_at_fold, source_version_at_read, drifted,
+drift_advisory?}`, and the handle metadata encodes the expected `recovery_mode` so the
+model knows the recovery guarantee before it calls.
+
+**B4 — code_span_get takes model-supplied path/line (§3.1/3.5).** Concrete input
+validation, fail-closed: (1) the path must resolve **within the active workspace
+root via verified realpath** (reject symlink/`..` escapes); (2) line ranges are
+clamped to a configurable max span (`code_span_max_lines`, default 400); (3) reject
+null bytes / control chars in the path; (4) refuse any path resolving outside the
+workspace-provider boundary. Reuses the existing workspace-provider boundary checks;
+no raw model string ever reaches the filesystem unvalidated.
+
+**B5 — Envelope stability premise has no baseline protocol (§2.2).** Protocol: per
+ingress type, sample the candidate prefix bytes across consecutive turns over **≥200
+turns / ≥20 sessions**; stability metric = the fraction of turns whose candidate
+prefix is byte-identical to the prior turn's; **≥90% unchanged → "stable"** (eligible
+for a cache boundary / fold), else "volatile". The classification is recorded and
+re-run whenever prefix construction changes. This makes the empirical resolution
+falsifiable.
+
+**B6 — "task class" undefined in the §6 gates (§6).** Enumerate the classes the gates
+break down by: `code_generation` · `code_review` · `debugging` · `question_answer` ·
+`summarization` · `agent_tool_loop`. Labeling is an automated heuristic from the
+turn's tools/intent (e.g. `agent_tool_loop` = the turn emits a `function_call`;
+`code_*` = code-search/edit tools present), with manual labels for the gold
+validation set only. The net-token-economics and forced-rehydration-accuracy gates
+report per class.
+
+**B7 — Drift-signal test has no independent oracle (§1.1/3.4).** The drift test
+independently computes `sha256` of the source file **before and after** mutation in
+the harness (not via the resolver), then asserts the resolver's drift flag equals
+`pre != post`. The resolver's own hash is never the oracle, so a buggy resolver hash
+fails the test instead of passing trivially.
+
+**B8 — Config hierarchy unchosen (§1.4/3.5/4.5).** Decided: **flat snake_case keys**,
+matching the existing `config_fields.c` convention (`kb_evidence_emit_enabled`,
+`ingress_preinject_enabled`, `fidelity_check_enabled` are all flat top-level). Master
+gates: `ingress_compress_enabled`, `ingress_rehydrate_enabled`; params:
+`ingress_compress_min_chars`, `ingress_rehydrate_ttl_s`, `ingress_rehydrate_max_entries`,
+`code_span_max_lines`. No nested `[ingress.rehydrate]` tree (would diverge from the
+existing flat config and force a migration).
+
+**B9 — Responses inline tool-interception state machine underspecified (§2.6/3.4).**
+Concrete spec for the inline Responses continuation loop:
+(1) **detect** a synthetic resolver `function_call` by its injected tool name;
+(2) **execute** the resolver server-side and **emit** a `function_call_output` with
+the **same `call_id`** the provider issued; (3) on resolver error/timeout, emit a
+`function_call_output` carrying an error payload (the turn continues — never aborts
+mid-stream); (4) **SSE vs buffered parity** — identical logic; the buffered path
+accumulates then emits, the SSE path forwards provider continuation chunks; (5) the
+synthetic `function_call` and its `function_call_output` are consumed server-side and
+**never leaked** into the client stream. Both happy-path (call → output → provider
+continuation) and failure-path (resolver error → error output → provider continuation)
+are covered by tests asserting client-stream cleanliness and `call_id` matching.
+
+**Majors, resolved.** **P0 equivalence (§7):** P0 (typed-IR refactor of
+`ingress_preinject_build`) ships with a **golden-output test** — render envelopes for
+N representative sessions covering every `source_kind` before the refactor, assert
+byte-identical output after. **Responses session id (§2.5):** the continuation/retry
+path carries the session id from the request's bearer/session key (the same identity
+the request context resolves), persisted in the work struct across continuations.
+**Span-enrichment latency (§1.1/§8):** per-request lookup cache, **top-K code_hits
+only** (default K=8), a +50ms p95 added-latency budget, and fallback to path+snippet
+mode if the budget is exceeded. **Multi-replica rehydrate (§3.4):** a replica without
+the ephemeral handle returns a structured error with a `resolver_hint` (e.g. "use
+`code_span_get path=… lines=…`" or "`memory_get id=…`") so the model recovers via a
+durable resolver; a deployment-shape flag makes durable resolvers the default for
+non-single-process deployments. **Inline-tool authorization (§3.5):** injected
+resolver tools carry the same authorization metadata as their MCP equivalents and are
+**re-authorized per call** against the request's bearer/session/workspace.
+**kb_mining integration (§4.4):** commit to the refactor path — `kb_mining.c` emits
+`learning_signals`/proposals (not direct artifacts), dedup key `cluster_key +
+event_type`, existing artifacts grandfathered.
+
+Minors (out-of-scope rationale, handle TTL/LRU defaults `TTL=300s`/`max=128`,
+`learning_replay.py` branch dependency, capability-table sketch) are recorded for the
+implementer and do not gate the first phase.
 
 ---
 

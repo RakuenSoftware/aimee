@@ -3,6 +3,7 @@
 #include "util.h"
 #include "db1.h"
 #include "agent.h"
+#include "agent_config.h"
 #include "agent_tunnel.h"
 #include "commands.h"
 #include "hardware_probe.h"
@@ -716,6 +717,11 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
             "[--ctx N] [--timeout-ms N] [--exec-roles r1,r2,...]\n"
             "  --max-turns: per-agent delegate turn cap; 0 = unlimited "
             "(frontier agents), omitted = inherit the role floor.");
+
+   if (!agent_name_valid(argv[0]))
+      fatal("invalid agent name '%s': use 1–48 chars, starting alphanumeric, then "
+            "alphanumeric or . _ -",
+            argv[0]);
 
    char old_model[MAX_MODEL_LEN] = {0};
    int was_empty = cfg->agent_count == 0;

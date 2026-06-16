@@ -1630,6 +1630,50 @@ int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *rol
    return ok ? 0 : -1;
 }
 
+int kb_client_evidence_merge_retrieval_event(const char *turn_id, const char *role,
+                                             const char *query_fingerprint,
+                                             const char *const *types, const char *const *refs,
+                                             const char *const *versions, int n)
+{
+   if (!turn_id || !turn_id[0])
+      return -1;
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "turn_id", turn_id);
+   if (role && role[0])
+      cJSON_AddStringToObject(req, "role", role);
+   if (query_fingerprint && query_fingerprint[0])
+      cJSON_AddStringToObject(req, "query_fingerprint", query_fingerprint);
+   cJSON *arr = cJSON_AddArrayToObject(req, "surfaced_refs");
+   for (int i = 0; arr && types && refs && i < n; i++)
+   {
+      if (!types[i] || !types[i][0] || !refs[i] || !refs[i][0])
+         continue;
+      cJSON *e = cJSON_CreateObject();
+      if (!e)
+         continue;
+      cJSON_AddStringToObject(e, "type", types[i]);
+      cJSON_AddStringToObject(e, "ref", refs[i]);
+      const char *v = versions ? versions[i] : NULL;
+      if (v && v[0])
+         cJSON_AddStringToObject(e, "v", v);
+      cJSON_AddItemToArray(arr, e);
+   }
+
+   char *json = kb_v1_action_request("evidence.merge_retrieval_event", req);
+   if (!json)
+      return -1;
+
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   if (!resp)
+      return -1;
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   int ok = cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0;
+   cJSON_Delete(resp);
+   return ok ? 0 : -1;
+}
+
 char *kb_client_evidence_trace_retrieval_event(const char *turn_id)
 {
    if (!turn_id || !turn_id[0])

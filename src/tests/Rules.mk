@@ -181,6 +181,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-token-audit-load \
                $(TESTPREFIX)/unit-test-windows \
                $(TESTPREFIX)/unit-test-token-tracker \
+               $(TESTPREFIX)/unit-test-model-pricing \
                $(TESTPREFIX)/unit-test-reasoning-cap \
                $(TESTPREFIX)/unit-test-request-context \
                $(TESTPREFIX)/unit-test-response-dedup \
@@ -2263,6 +2264,13 @@ $(TESTPREFIX)/unit-test-diagnose: $(OBJDIR)/tests/test_diagnose.o \
 
 $(TESTPREFIX)/unit-test-clarify: $(OBJDIR)/tests/test_clarify.o \
                                   $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/clarify.o \
+                                  $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# DB1 server-owned per-model price table (ingress-cost-accounting §2).
+$(TESTPREFIX)/unit-test-model-pricing: $(OBJDIR)/tests/test_model_pricing.o \
+                                  $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                  $(OBJDIR)/db1/model_pricing.o \
                                   $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

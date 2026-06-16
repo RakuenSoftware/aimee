@@ -9,6 +9,7 @@
 #define _GNU_SOURCE
 #endif
 
+#include "db2/db2.h"
 #include "kb_curator_drain.h"
 #include "kb_curator_extract.h"
 #include "kb_curator_resolve_entities.h"
@@ -63,6 +64,9 @@ static void *drain_thread_main(void *arg)
 
    while (!ctx->stop)
    {
+      /* Return any pool connection acquired last cycle before sleeping, so this
+       * long-lived thread doesn't pin one while idle (stuck-lease reaper). */
+      db2_lease_release_idle();
       sleep(DRAIN_POLL_SECS);
       if (ctx->stop)
          break;

@@ -79,6 +79,14 @@ int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
    return 0;
 }
 
+/* member_reset_real (in db2_pool.o, not exercised by these pool tests — they shim
+ * g_reset) references this; provide a stub so the object links. */
+int aimee_pg_in_transaction(void *pg_conn)
+{
+   (void)pg_conn;
+   return 0;
+}
+
 aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
 {
    static aimee_pg_stmt_t schema_stmt = {.kind = STMT_SCHEMA};

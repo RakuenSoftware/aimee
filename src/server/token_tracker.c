@@ -147,6 +147,14 @@ void token_tracker_set_registry_price_fn(token_registry_price_fn fn)
    g_registry_price_fn = fn;
 }
 
+/* DB1 server-owned price hook — the authoritative per-model store on aimee-server. */
+static token_registry_price_fn g_db1_price_fn = NULL;
+
+void token_tracker_set_db1_price_fn(token_registry_price_fn fn)
+{
+   g_db1_price_fn = fn;
+}
+
 /* --- Cost estimation --- */
 
 double token_estimate_cost(const char *model, const token_usage_t *usage)
@@ -188,6 +196,19 @@ double token_estimate_cost_ex(const char *model, const token_usage_t *usage, int
       {
          in_mtok = r_in;
          out_mtok = r_out;
+         known = 1;
+      }
+   }
+   /* DB1 (aimee-server's own price table) is the AUTHORITATIVE source: a stored row
+    * overrides the static table and the registry — even to 0, so an operator can mark
+    * a model explicitly free. An absent row (returns 0) leaves the above in place. */
+   if (model && model[0] && g_db1_price_fn)
+   {
+      double d_in = 0.0, d_out = 0.0;
+      if (g_db1_price_fn(model, &d_in, &d_out) == 1)
+      {
+         in_mtok = d_in;
+         out_mtok = d_out;
          known = 1;
       }
    }

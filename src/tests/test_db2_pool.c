@@ -24,6 +24,11 @@ void aimee_pg_close(void *c)
 {
    (void)c;
 }
+int aimee_pg_in_transaction(void *c)
+{
+   (void)c;
+   return 0; /* member_reset_real is shimmed (g_reset) in these tests */
+}
 int aimee_pg_exec(void *c, const char *s, char *e, size_t n)
 {
    (void)c;
