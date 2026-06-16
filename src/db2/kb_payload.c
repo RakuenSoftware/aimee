@@ -299,10 +299,10 @@ int db2_curator_reenqueue_extract_all(void)
    /* Two cross-backend statements (the sqlite test shim rejects ON CONFLICT DO
     * UPDATE inside INSERT...SELECT): enqueue any document without an extract_doc
     * job, then re-arm every existing extract_doc job back to pending. */
-   kbp_exec(conn,
-            "INSERT INTO kb_async_jobs (kind, document_id, project, status)"
-            " SELECT 'extract_doc', id, project, 'pending' FROM kb_documents"
-            " WHERE id NOT IN (SELECT document_id FROM kb_async_jobs WHERE kind = 'extract_doc')");
+   kbp_exec(conn, "INSERT INTO kb_async_jobs (kind, document_id, project, status)"
+                  " SELECT 'extract_doc', d.id, d.project, 'pending' FROM kb_documents d"
+                  " WHERE NOT EXISTS (SELECT 1 FROM kb_async_jobs j"
+                  "   WHERE j.kind = 'extract_doc' AND j.document_id = d.id)");
    kbp_exec(conn, "UPDATE kb_async_jobs SET status = 'pending'"
                   " WHERE kind = 'extract_doc' AND status <> 'pending'");
 

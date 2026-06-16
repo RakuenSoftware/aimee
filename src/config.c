@@ -418,10 +418,10 @@ static void config_set_defaults(config_t *cfg)
    cfg->memory_fetch_budget_base = 128;
    cfg->memory_fetch_budget_shape_aware = 1;
    cfg->kb_search_max_results = 50;
-   /* Embedding dimension of the default embedder (pplx-embed-v1-4b = 2560).
+   /* Embedding dimension of the default embedder (pplx-embed-v1-0.6b = 1024).
     * Must match the schema vector(N) columns and the embedder model. Set to
-    * 1024 (with the pplx-embed-v1-0.6b embedder image) for the lighter tier. */
-   cfg->embedding_dim = 2560;
+    * 2560 (with the pplx-embed-v1-4b embedder image) for the higher-fidelity tier. */
+   cfg->embedding_dim = 1024;
    /* The cross-encoder rerank stage (Ettin reranker sized to the embedder tier:
     * 1b with the 4b embedder, 400m with the 0.6b; served by the
     * embedder service /rerank, client scripts/rerank-remote.py) is the third
