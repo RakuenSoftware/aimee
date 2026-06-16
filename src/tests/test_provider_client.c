@@ -176,7 +176,11 @@ static int flaky_handler(const char *url, const char *auth_header, const char *b
    (void)extra_headers;
    g_post_calls++;
    if (g_post_calls == 1)
-      return 503; /* retryable; mock leaves *response_buf NULL */
+   {
+      if (response_buf)
+         *response_buf = NULL; /* explicit: no body on a transient error */
+      return 503;              /* retryable */
+   }
    if (response_buf)
       *response_buf = strdup("{\"choices\":[{\"message\":{\"content\":\"ok\"}}]}");
    return 200;
@@ -289,6 +293,40 @@ static void test_complete_non_retryable(void)
    printf("provider_client: complete non-retryable (no retry) ok\n");
 }
 
+static void test_complete_truncation_guards(void)
+{
+   mock_agent_http_reset();
+   mock_agent_http_set_post_handler(ok_handler);
+   cJSON *msgs = two_messages();
+   provider_completion_t out;
+   char err[128];
+
+   /* base_url longer than the URL buffer -> truncation error, no transport call. */
+   char big[4096];
+   memset(big, 'x', sizeof(big) - 1);
+   big[sizeof(big) - 1] = '\0';
+   provider_def_t d1 = {.base_url = big, .wire = PROVIDER_WIRE_OPENAI_CHAT, .temperature = -1.0};
+   g_post_calls = 0;
+   assert(provider_client_complete(&d1, msgs, NULL, &out, err, sizeof(err)) == -1);
+   assert(g_post_calls == 0 && err[0] != '\0');
+
+   /* api_key longer than the auth buffer -> truncation error, no transport call. */
+   char bigkey[2048];
+   memset(bigkey, 'k', sizeof(bigkey) - 1);
+   bigkey[sizeof(bigkey) - 1] = '\0';
+   provider_def_t d2 = {.base_url = "http://h/v1",
+                        .api_key = bigkey,
+                        .wire = PROVIDER_WIRE_OPENAI_CHAT,
+                        .temperature = -1.0};
+   g_post_calls = 0;
+   assert(provider_client_complete(&d2, msgs, NULL, &out, err, sizeof(err)) == -1);
+   assert(g_post_calls == 0 && err[0] != '\0');
+
+   cJSON_Delete(msgs);
+   mock_agent_http_reset();
+   printf("provider_client: complete truncation guards ok\n");
+}
+
 int main(void)
 {
    test_build_basic();
@@ -300,6 +338,7 @@ int main(void)
    test_complete_trailing_slash();
    test_complete_retry_then_ok();
    test_complete_non_retryable();
+   test_complete_truncation_guards();
    printf("provider_client: all tests passed\n");
    return 0;
 }

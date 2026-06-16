@@ -151,9 +151,11 @@ static int wire_backoff_ms(int attempt, int base_ms, int max_ms)
    long d = base_ms;
    for (int i = 0; i < attempt; i++)
    {
-      d *= 2;
-      if (d >= max_ms)
+      /* Check before doubling so `d` never exceeds max_ms (an int) — no overflow
+       * regardless of attempt count or max_ms magnitude. */
+      if (d >= max_ms || d > max_ms / 2)
          return max_ms;
+      d *= 2;
    }
    return d > max_ms ? max_ms : (int)d;
 }
