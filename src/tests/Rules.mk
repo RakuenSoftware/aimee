@@ -89,6 +89,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-primary-session-adapter \
                $(TESTPREFIX)/unit-test-session-search-tool \
                $(TESTPREFIX)/unit-test-working-memory $(TESTPREFIX)/unit-test-working-memory-mock $(TESTPREFIX)/unit-test-local-resolution $(TESTPREFIX)/unit-test-cognify-jobs $(TESTPREFIX)/unit-test-extractors-extra \
+               $(TESTPREFIX)/unit-test-css-analyze \
                $(TESTPREFIX)/unit-test-compute-pool $(TESTPREFIX)/unit-test-db2-pool $(TESTPREFIX)/unit-test-cli-launch \
                $(TESTPREFIX)/unit-test-server-session-pools \
                $(TESTPREFIX)/unit-test-presence \
@@ -596,6 +597,10 @@ $(TESTPREFIX)/unit-test-extractors: $(OBJDIR)/tests/test_extractors.o $(OBJDIR)/
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # --- New tests ---
+
+# CSS analyzer (WP-A) — pure leaf, depends only on css_analyze.o + libc.
+$(TESTPREFIX)/unit-test-css-analyze: $(OBJDIR)/tests/test_css_analyze.o $(OBJDIR)/css_analyze.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-text: $(OBJDIR)/tests/test_text.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                      $(OBJDIR)/cJSON.o
