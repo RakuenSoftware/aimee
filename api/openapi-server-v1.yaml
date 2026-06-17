@@ -815,6 +815,25 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /kb/curator:
+    get:
+      summary: Curator LLM provider + queue status (proxied to aimee-kb)
+      responses:
+        "200":
+          description: Curator observability block (tier_a/tier_b providers + queue depth)
+          content:
+            application/json:
+              schema: { type: object }
+        "502":
+          description: Knowledge backend (aimee-kb) unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Curator status not available on this server
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /memory/recall:
     post:
       summary: Recall relevant memories (proxied to aimee-kb)

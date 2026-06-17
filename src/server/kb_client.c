@@ -116,6 +116,39 @@ int kb_client_is_live(void)
    return kb_client_v1_base_url() != NULL;
 }
 
+char *kb_client_health_json(void)
+{
+   int http_status = -1;
+   char *body = kb_client_v1_get_json("/v1/health", CLIENT_DEFAULT_TIMEOUT_MS, &http_status);
+   if (!body)
+      return NULL;
+   if (http_status < 200 || http_status >= 300)
+   {
+      free(body);
+      return NULL;
+   }
+   return body;
+}
+
+/* The curator observability block from aimee-kb's /v1/health (§4), returned as a
+ * standalone JSON object for the server's GET /v1/kb/curator surface. Never
+ * returns NULL: an unavailable kb / missing block yields a status-error object. */
+char *kb_client_curator_json(void)
+{
+   char *health = kb_client_health_json();
+   if (!health)
+      return kb_status_unavailable_json("knowledge service /v1/health did not respond");
+   cJSON *root = cJSON_Parse(health);
+   free(health);
+   cJSON *cur = root ? cJSON_DetachItemFromObjectCaseSensitive(root, "curator") : NULL;
+   cJSON_Delete(root);
+   if (!cur)
+      return kb_status_unavailable_json("curator status unavailable");
+   char *out = cJSON_PrintUnformatted(cur);
+   cJSON_Delete(cur);
+   return out ? out : kb_status_unavailable_json("curator status serialization failed");
+}
+
 int kb_client_health(kb_health_t *out)
 {
    if (!out)

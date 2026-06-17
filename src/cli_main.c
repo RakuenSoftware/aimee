@@ -526,8 +526,7 @@ static int unsupported_client_command(const char *cmd, int json_output)
 {
    const char *name = (cmd && cmd[0]) ? cmd : "launch";
    char msg[256];
-   snprintf(msg, sizeof(msg), "command '%s' has no typed server RPC route; add a server RPC route",
-            name);
+   snprintf(msg, sizeof(msg), "command '%s' has no /v1 route; add a /v1 route", name);
 
    if (json_output)
    {
@@ -832,14 +831,14 @@ static int handle_hooks(int argc, char **argv, int json_output)
  * subprocess that was spawned by chat_stream_worker.  In that context a
  * failure must not block claude: send "nonblocking": true so the server runs
  * session_start_emit on a background thread and responds immediately, and
- * treat any error (server unavailable, connection failure, RPC timeout) as a
+ * treat any error (server unavailable, connection failure, request timeout) as a
  * soft failure (exit 0) so claude is never aborted by the hook. */
 /* Minimal growing string buffer for assembling the session-start context
  * without depending on open_memstream's feature-test macros. */
 
 /* No-arg `aimee` launch path.
  *
- * Calls the launch.run RPC to mint a fresh session_id, materialize any
+ * Calls the launch.run /v1 call to mint a fresh session_id, materialize any
  * sibling worktrees, and resolve the provider/model/worktree_cwd. The
  * client then writes the session-ppid file (so MCP children spawned by
  * the agent can find their session), chdirs into the worktree, and
@@ -850,7 +849,7 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
    /* Interactive chat/launch runs the agent and its tools on THIS host and
     * chdirs into a server-resolved worktree on the local filesystem, so it needs
     * a co-located aimee-server over the local socket. A remote /v1 endpoint
-    * serves only the data/RPC plane (memory, kb, rules, index, sessions, …). */
+    * serves only the data/control plane (memory, kb, rules, index, sessions, …). */
    /* A remote aimee-server runs the agent + tools on the server; serve THIS
     * client's working tree over the reverse-channel so those tools act here (the
     * client never absorbs the engine or a DB). A co-located server uses the local
@@ -1453,7 +1452,7 @@ static int cli_claude_proxy(int argc, char **argv)
 int main(int argc, char **argv)
 {
    /* Ignore SIGPIPE so write() to a dead aimee-server socket returns EPIPE
-    * instead of terminating the CLI mid-RPC. cli_client retries via
+    * instead of terminating the CLI mid-request. cli_client retries via
     * cli_v1_forward; mcp-serve's reconnect loop reuses the same path.
     * Without this, a server restart between two CLI calls killed the
     * caller and (for mcp-serve) showed up to Claude as
@@ -1776,7 +1775,7 @@ int main(int argc, char **argv)
       return handle_agent_setup_cmd(sub_argc - 1, sub_argv + 1, json_output);
 
    /* workspace serve: a long-running client-side loop (poll -> run -> respond),
-    * not a single forwarded RPC, so it is driven here rather than via a route. */
+    * not a single forwarded /v1 call, so it is driven here rather than via a route. */
    if (strcmp(cmd, "workspace") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "serve") == 0)
       return cmd_workspace_serve(sub_argc >= 2 ? sub_argv[1] : NULL);
 
@@ -1798,7 +1797,7 @@ int main(int argc, char **argv)
        * retired in P4b. */
    }
 
-   /* Route through native server RPCs when possible. */
+   /* Route through the server's native /v1 HTTP endpoints when possible. */
    {
       cli_v1_route_t route;
       if (cli_v1_lookup(cmd, sub_argc, sub_argv, &route))
@@ -1821,7 +1820,7 @@ int main(int argc, char **argv)
                                  sub_argv);
          if (rc >= 0)
             return rc;
-         fprintf(stderr, "aimee: server RPC request failed for '%s'\n", cmd);
+         fprintf(stderr, "aimee: server /v1 request failed for '%s'\n", cmd);
          return 1;
       }
    }

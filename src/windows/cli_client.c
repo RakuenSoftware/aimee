@@ -15,7 +15,7 @@
 #include "platform_path.h"
 #include "platform_process.h"
 #include "cJSON.h"
-#define RPC_PROTOCOL_VERSION 1
+#define V1_PROTOCOL_VERSION 1
 #include <direct.h>
 #include <errno.h>
 #include <stdio.h>
