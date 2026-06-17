@@ -40,6 +40,11 @@ int server_conn_io_has_ssl(int fd)
    return ssl_for(fd) != NULL;
 }
 
+SSL *server_conn_io_get_ssl(int fd)
+{
+   return ssl_for(fd);
+}
+
 int server_conn_io_read(int fd, void *buf, int n)
 {
    SSL *s = ssl_for(fd);

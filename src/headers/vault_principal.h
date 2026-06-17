@@ -31,7 +31,23 @@ typedef enum
    ATTEST_TLS_BEARER,      /* native-TLS conn authorized by bearer: the bearer over a confidential
                               channel is the operator's authority -> server-principal writes allowed
                               (native-TLS provisioning); no per-user principal (uses VAULT_SERVER) */
+   ATTEST_MTLS_CLIENT,     /* mutual-TLS: the peer presented a client cert verified against aimee's
+                              client CA -> a per-client "cert:<CN>" principal (mtls-client-identity) */
 } attested_transport_t;
+
+/* mTLS client-cert identity: the principal is "cert:" + a sanitized CN. The CN is
+ * limited to [A-Za-z0-9._-] so it can never embed a ':' and collide with the
+ * uid:/webuser: namespaces; the "cert:" prefix is added by the server, never by
+ * the cert. */
+#define VAULT_CERT_PRINCIPAL_PREFIX "cert:"
+#define VAULT_CERT_CN_MAX           128
+
+/* Validate + copy a client-cert CN into out (NUL-terminated). Returns 1 iff cn is
+ * a non-empty string of [A-Za-z0-9._-], at most VAULT_CERT_CN_MAX bytes (so the
+ * "cert:<CN>" principal fits VAULT_PRINCIPAL_MAX); 0 otherwise (caller fails
+ * closed). This is what blocks principal-spoofing CNs (e.g. "uid:0", embedded
+ * ':' / newlines / path traversal). */
+int vault_principal_cert_sanitize(const char *cn, char *out, size_t out_len);
 
 /* Max length of a vault principal string ("webuser:" + a 128-byte username, or
  * "uid:" + digits) including the NUL. */
@@ -59,7 +75,7 @@ typedef enum
  * threading hop, or loopback's memset) reads as uid 0, so treating it as a real
  * principal would collapse to acting as root. out must be >= VAULT_PRINCIPAL_MAX. */
 attested_transport_t vault_principal_resolve(int is_tcp, int is_tls, long peer_uid,
-                                             const char *webuser, int webuser_token_ok, char *out,
-                                             size_t out_len);
+                                             const char *webuser, int webuser_token_ok,
+                                             const char *cert_cn, char *out, size_t out_len);
 
 #endif /* DEC_VAULT_PRINCIPAL_H */

@@ -1,0 +1,60 @@
+apiVersion: smoothnas.io/v1
+kind: Plugin
+metadata:
+  name: aimee-server
+  version: 0.2.57
+  description: >-
+    aimee server — the /v1 API (primary model, agent loop, memory, delegates).
+    Uses the aimee-kb plugin for shared/vector features via AIMEE_KB_API_URL.
+    Bundles the aimee-webchat browser UI (HTTPS :8443), a first-class surface
+    that is ON by default; this deploy serves it on :8443 — set a PAM login
+    (AIMEE_WEBCHAT_USER/PASSWORD) so an operator can sign in.
+  vendor: RakuenSoftware
+  homepage: https://github.com/RakuenSoftware/aimee
+profiles:
+  - default-limits
+  - aimee-stack
+services:
+  - name: server
+    artifact:
+      type: oci-image
+      image: ghcr.io/rakuensoftware/aimee-server:latest
+    container:
+      restartPolicy: unless-stopped
+    env:
+      # Reach the aimee-kb plugin's host-exposed :8741 via the runtime bridge
+      # gateway (stable host address from inside any plugin container).
+      AIMEE_KB_API_URL: http://10.100.0.1:8741
+      AIMEE_SERVER_HTTP_BIND: "1"
+      # ---- Browser webchat (aimee-webchat, HTTPS on :8443) --------------------
+      # ON: the UI is a first-class surface and serves on :8443. Provide a PAM
+      # login below so an operator can sign in — set USER + a REAL password via
+      # the plugin's env override at deploy time (do NOT commit a real secret to
+      # this file). Without USER/PASSWORD the login page serves but no one can
+      # sign in. Set AIMEE_WEBCHAT_ENABLED=0 to opt this deploy out entirely.
+      AIMEE_WEBCHAT_ENABLED: "1"
+      # AIMEE_WEBCHAT_USER: aimee
+      # AIMEE_WEBCHAT_PASSWORD: "<set-at-deploy-time-not-in-git>"
+    volumes:
+      - name: home
+        mode: tier-bound
+        slot: HDD
+        bind: /var/lib/aimee
+      - name: workspaces
+        mode: tier-bound
+        slot: HDD
+        bind: /var/lib/aimee-workspaces
+    ports:
+      - name: api
+        port: 8740
+        protocol: tcp
+        expose: false
+        hostExpose: true
+      # webchat UI. The port is declared so the host can reach it once webchat is
+      # enabled; nothing listens on it while AIMEE_WEBCHAT_ENABLED=0 (a connection
+      # to :8443 is simply refused until the UI is turned on).
+      - name: webchat
+        port: 8443
+        protocol: tcp
+        expose: false
+        hostExpose: true

@@ -776,7 +776,9 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "typed_facts_enabled", 1);
    if (!cfg->css_style_graph_enabled) /* default-on: persist only the opt-out */
       cJSON_AddBoolToObject(root, "css_style_graph_enabled", 0);
-   if (cfg->css_render_command[0])
+   /* default-on render backend: persist only a non-default value (a custom command
+    * OR an empty string to disable) so both round-trip; the default isn't written. */
+   if (strcmp(cfg->css_render_command, CONFIG_DEFAULT_CSS_RENDER_COMMAND) != 0)
       cJSON_AddStringToObject(root, "css_render_command", cfg->css_render_command);
    if (cfg->kb_evidence_emit_enabled)
       cJSON_AddBoolToObject(root, "kb_evidence_emit_enabled", 1);
@@ -1016,9 +1018,9 @@ int config_save(const config_t *cfg)
     * listener config so `aimee api enable` persists and a hand-edited block
     * is not silently dropped on the next save. config_server_api.c parses
     * these back from the same nested mapping. */
-   if (cfg->server_api_http_port > 0 || cfg->server_api_tls_port > 0 ||
-       cfg->server_api_bearer_token[0] || cfg->server_api_rate_limit_per_min > 0 ||
-       cfg->server_api_client_transport[0] ||
+   if (cfg->server_api_http_port > 0 || cfg->server_api_tls_port > 0 || cfg->server_api_mtls > 0 ||
+       cfg->server_api_mtls_client_ca[0] || cfg->server_api_bearer_token[0] ||
+       cfg->server_api_rate_limit_per_min > 0 || cfg->server_api_client_transport[0] ||
        cfg->server_api_remote_writes > SERVER_REMOTE_WRITES_OFF ||
        cfg->server_api_max_event_streams > 0 || cfg->server_api_cli_session_forwarding)
    {
@@ -1028,6 +1030,11 @@ int config_save(const config_t *cfg)
          cJSON_AddNumberToObject(api_obj, "http_port", cfg->server_api_http_port);
       if (cfg->server_api_tls_port > 0)
          cJSON_AddNumberToObject(api_obj, "tls_port", cfg->server_api_tls_port);
+      if (cfg->server_api_mtls > 0)
+         cJSON_AddStringToObject(api_obj, "mtls",
+                                 cfg->server_api_mtls >= 2 ? "required" : "optional");
+      if (cfg->server_api_mtls_client_ca[0])
+         cJSON_AddStringToObject(api_obj, "mtls_client_ca", cfg->server_api_mtls_client_ca);
       if (cfg->server_api_bearer_token[0])
          cJSON_AddStringToObject(api_obj, "bearer_token", cfg->server_api_bearer_token);
       if (cfg->server_api_rate_limit_per_min > 0)

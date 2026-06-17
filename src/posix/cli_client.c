@@ -13,7 +13,7 @@
 #ifdef WITH_TLS
 #include "aimee_tls.h" /* native-TLS /v1 transport for a tls: endpoint */
 #endif
-#define RPC_PROTOCOL_VERSION 1
+#define V1_PROTOCOL_VERSION 1
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>

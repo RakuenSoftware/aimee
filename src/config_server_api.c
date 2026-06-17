@@ -30,6 +30,19 @@ void config_parse_server_api(config_t *cfg, const cJSON *root)
          if (cJSON_IsNumber(item))
             cfg->server_api_tls_port = (int)item->valuedouble;
 
+         item = cJSON_GetObjectItemCaseSensitive(api, "mtls");
+         if (cJSON_IsString(item) && item->valuestring)
+            cfg->server_api_mtls = strcmp(item->valuestring, "required") == 0   ? 2
+                                   : strcmp(item->valuestring, "optional") == 0 ? 1
+                                                                                : 0;
+         else if (cJSON_IsNumber(item))
+            cfg->server_api_mtls = (int)item->valuedouble;
+
+         item = cJSON_GetObjectItemCaseSensitive(api, "mtls_client_ca");
+         if (cJSON_IsString(item) && item->valuestring)
+            strncpy(cfg->server_api_mtls_client_ca, item->valuestring,
+                    sizeof(cfg->server_api_mtls_client_ca) - 1);
+
          item = cJSON_GetObjectItemCaseSensitive(api, "bearer_token");
          if (cJSON_IsString(item) && item->valuestring)
             strncpy(cfg->server_api_bearer_token, item->valuestring,

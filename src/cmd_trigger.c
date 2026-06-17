@@ -8,8 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifndef RPC_PROTOCOL_VERSION
-#define RPC_PROTOCOL_VERSION 1
+#ifndef V1_PROTOCOL_VERSION
+#define V1_PROTOCOL_VERSION 1
 #endif
 
 /* ------------------------------------------------------------------ */
@@ -124,7 +124,7 @@ static void trigger_cmd_list(app_ctx_t *ctx, int argc, char **argv)
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "trigger.list");
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
    if (status_filter && status_filter[0])
       cJSON_AddStringToObject(req, "status", status_filter);
 
@@ -187,7 +187,7 @@ static void trigger_cmd_status(app_ctx_t *ctx, int argc, char **argv)
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "trigger.status");
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
    cJSON_AddStringToObject(req, "id", argv[0]);
 
    cli_conn_t conn;
@@ -251,7 +251,7 @@ static void trigger_cmd_cancel(app_ctx_t *ctx, int argc, char **argv)
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "trigger.cancel");
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
    cJSON_AddStringToObject(req, "id", argv[0]);
 
    cli_conn_t conn;
@@ -342,7 +342,7 @@ static void trigger_cmd_fire(app_ctx_t *ctx, int argc, char **argv)
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "trigger.fire");
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
    cJSON_AddStringToObject(req, "source", source);
    cJSON_AddStringToObject(req, "task", task);
    if (event && event[0])

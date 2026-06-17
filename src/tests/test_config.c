@@ -74,6 +74,9 @@ int main(void)
       /* CSS style graph now defaults on so the read-only css signals/report work
        * out of the box (the indexer populates css_rules/css_declarations). */
       assert(cfg.css_style_graph_enabled == 1);
+      /* css_render_command defaults to the conventional sidecar curl (inert until
+       * the sidecar is up), so render-capture works out of the box on-demand. */
+      assert(strcmp(cfg.css_render_command, CONFIG_DEFAULT_CSS_RENDER_COMMAND) == 0);
    }
 
    /* --- config_save + config_load round-trip --- */
@@ -194,6 +197,10 @@ int main(void)
       /* css_style_graph now defaults on; set off to prove the opt-out round-trips
        * (default-on save-guard regression class). */
       cfg.css_style_graph_enabled = 0;
+      /* css_render_command defaults non-empty; set empty to prove the disable
+       * override round-trips (string default-on save-guard: save must emit the
+       * non-default empty, not drop it and silently re-default on reload). */
+      cfg.css_render_command[0] = '\0';
       /* kb.maintenance.* — must survive config_save (same drop class as curator). */
       cfg.kb_maintenance_enabled = 1;
       cfg.kb_maintenance_interval_hours = 12;
@@ -380,7 +387,8 @@ int main(void)
       assert(cfg2.memory_improve_min_cluster == 5);
       assert(fabs(cfg2.memory_improve_max_confidence - 0.42) < 0.0001);
       assert(cfg2.memory_directives_enabled == 0);
-      assert(cfg2.css_style_graph_enabled == 0); /* opt-out survives save/reload */
+      assert(cfg2.css_style_graph_enabled == 0);  /* opt-out survives save/reload */
+      assert(cfg2.css_render_command[0] == '\0'); /* disable (empty) survives save/reload */
       /* regression: kb.maintenance.* used to be parsed but never saved -> dropped on save. */
       assert(cfg2.kb_maintenance_enabled == 1);
       assert(cfg2.kb_maintenance_interval_hours == 12);

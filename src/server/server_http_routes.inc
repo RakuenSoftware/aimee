@@ -102,6 +102,18 @@ static int rh_kb_status(const route_req_t *rq, char *resp, int cap)
    (void)rq;
    return route_json_provider(g_kb_status_provider, resp, cap, "kb status");
 }
+/* Curator observability provider (§4). Kept here rather than in server_http.c
+ * (which is at its line-count limit); routes.inc is part of the same TU. */
+static server_http_json_provider g_kb_curator_provider = NULL;
+void server_http_set_kb_curator_provider(server_http_json_provider fn)
+{
+   g_kb_curator_provider = fn;
+}
+static int rh_kb_curator(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   return route_json_provider(g_kb_curator_provider, resp, cap, "kb curator");
+}
 static int rh_agents(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
@@ -890,6 +902,7 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/dashboard/reminders", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ,
      rh_dashboard_reminders},
     {"GET", "/v1/kb/status", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_kb_status},
+    {"GET", "/v1/kb/curator", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_kb_curator},
     {"GET", "/v1/agents", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_agents},
     {"GET", "/v1/roadmap", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_roadmap},
     {"GET", "/v1/curiosity", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_curiosity},
@@ -1011,6 +1024,9 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/vault/list", NULL, RM_EXACT, "vault.list", 0, rh_dispatch_op},
     {"POST", "/v1/vault/delete", NULL, RM_EXACT, "vault.delete", 0, rh_dispatch_op},
     {"POST", "/v1/vault/lock", NULL, RM_EXACT, "vault.lock", 0, rh_dispatch_op},
+    {"POST", "/v1/cert/issue", NULL, RM_EXACT, "cert.issue", 0, rh_dispatch_op},
+    {"POST", "/v1/cert/list", NULL, RM_EXACT, "cert.list", 0, rh_dispatch_op},
+    {"POST", "/v1/cert/revoke", NULL, RM_EXACT, "cert.revoke", 0, rh_dispatch_op},
     /* Background-only over /v1: the thin client forces `background` (returns a
      * job_id to poll via the /v1/jobs routes); a foreground delegate streams and
      * would tie up a listener thread, so remote callers use background mode. */

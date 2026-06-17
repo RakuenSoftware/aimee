@@ -35,6 +35,13 @@
 #define CONFIG_DEFAULT_DELEGATE_MAX_INFLIGHT           512
 #define CONFIG_DEFAULT_CONCURRENCY_PREEMPT_REQUEUE_MAX 1
 
+/* Default render backend for the #4-full computed-style oracle: curl the
+ * conventional css-render sidecar (deploy/css-render, reachable as
+ * `aimee-css-render:8780` on the shared container network). Inert when the
+ * sidecar is down (oracle = UNAVAILABLE); set css_render_command empty to off. */
+#define CONFIG_DEFAULT_CSS_RENDER_COMMAND                                                          \
+   "curl -s --max-time 30 --data-binary @- http://aimee-css-render:8780/render"
+
 /* Concurrency config: per-model and per-provider overrides */
 #define CONFIG_CONCURRENCY_KEY_LEN     128
 #define CONFIG_CONCURRENCY_MAX_ENTRIES 16
@@ -295,8 +302,11 @@ typedef struct config
     * A shell command (like embedding_command) that reads a {"html","css"} JSON
     * object on stdin and writes a computed-style snapshot JSON on stdout. It runs
     * a headless browser over UNTRUSTED markup, so it must be an isolated,
-    * out-of-process backend (e.g. `curl` to a sandboxed render sidecar). Empty =
-    * no backend (the oracle reports UNAVAILABLE). */
+    * out-of-process backend (e.g. `curl` to a sandboxed render sidecar). Defaults
+    * to the conventional css-render sidecar (CONFIG_DEFAULT_CSS_RENDER_COMMAND) so
+    * render-capture works the moment the sidecar is up (on-demand); inert when it
+    * is down (the oracle reports UNAVAILABLE, never a fake verdict). Set empty to
+    * disable. */
    char css_render_command[512];
    int memory_salience_enabled;
    double memory_salience_weight;
@@ -1033,6 +1043,14 @@ typedef struct config
     * connection is an attested write path for the credential vault (native-TLS
     * provisioning). Streaming (SSE) over TLS is not yet supported (phase 1c). */
    int server_api_tls_port;
+   /* server_api_mtls: mutual-TLS client-identity mode for the native-TLS listener
+    * (mtls-client-identity). 0 = off (default), 1 = optional (request a client
+    * cert; bearer-only still works — a documented downgrade), 2 = required (refuse
+    * a TLS conn without a valid client cert). A verified client cert becomes a
+    * per-client "cert:<CN>" principal. */
+   int server_api_mtls;
+   /* PEM bundle of the CA(s) that signed client certs. Empty => <config>/tls/client-ca.crt. */
+   char server_api_mtls_client_ca[MAX_PATH_LEN];
    char server_api_bearer_token[256];
    int server_api_rate_limit_per_min;
    /* server_api_max_event_streams: cap on concurrent SSE event streams

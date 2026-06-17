@@ -890,6 +890,87 @@ static void kb_cmd_pipeline(app_ctx_t *ctx, int argc, char **argv)
 /* Dispatch table                                                       */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* kb curator status — read the curator block from /v1/health (§4)     */
+/* ------------------------------------------------------------------ */
+
+static void kb_curator_print_tier(const char *label, cJSON *tier)
+{
+   int configured = tier && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(tier, "configured"));
+   if (!configured)
+   {
+      printf("  %-8s idle (no provider configured)\n", label);
+      return;
+   }
+   cJSON *base = cJSON_GetObjectItemCaseSensitive(tier, "base_url");
+   cJSON *model = cJSON_GetObjectItemCaseSensitive(tier, "model");
+   printf("  %-8s %s  (%s)\n", label,
+          cJSON_IsString(model) && model->valuestring[0] ? model->valuestring : "(model unset)",
+          cJSON_IsString(base) ? base->valuestring : "");
+}
+
+static void kb_cmd_curator(app_ctx_t *ctx, int argc, char **argv)
+{
+   const char *verb = (argc > 0 && argv[0][0] != '-') ? argv[0] : "status";
+   if (strcmp(verb, "status") != 0)
+   {
+      fprintf(stderr, "Usage: aimee kb curator status [--json]\n");
+      return;
+   }
+   int json_out = ctx && ctx->json_output;
+   for (int i = 0; i < argc; i++)
+      if (strcmp(argv[i], "--json") == 0)
+         json_out = 1;
+
+   char *body = kb_client_health_json();
+   if (!body)
+   {
+      if (json_out)
+         puts("{\"status\":\"error\",\"message\":\"aimee-kb is not running\"}");
+      else
+         fprintf(stderr, "curator status: aimee-kb is not running\n");
+      exit(1);
+   }
+   cJSON *root = cJSON_Parse(body);
+   free(body);
+   cJSON *cur = root ? cJSON_GetObjectItemCaseSensitive(root, "curator") : NULL;
+   if (!cur)
+   {
+      if (json_out)
+         puts("{\"status\":\"error\",\"message\":\"curator block unavailable\"}");
+      else
+         fprintf(stderr, "curator status: curator block unavailable (older aimee-kb?)\n");
+      cJSON_Delete(root);
+      exit(1);
+   }
+
+   if (json_out)
+   {
+      char *j = cJSON_Print(cur);
+      if (j)
+      {
+         puts(j);
+         free(j);
+      }
+      else
+      {
+         puts("{\"status\":\"error\",\"message\":\"curator status serialization failed\"}");
+      }
+      cJSON_Delete(root);
+      return;
+   }
+
+   printf("Curator\n");
+   kb_curator_print_tier("tier-A:", cJSON_GetObjectItemCaseSensitive(cur, "tier_a"));
+   kb_curator_print_tier("tier-B:", cJSON_GetObjectItemCaseSensitive(cur, "tier_b"));
+   cJSON *q = cJSON_GetObjectItemCaseSensitive(cur, "queue");
+   if (q)
+      printf("  queue:   extract %d pending / %d done; code_unit %d pending / %d done\n",
+             kb_cmd_json_int(q, "extract_pending", 0), kb_cmd_json_int(q, "extract_done", 0),
+             kb_cmd_json_int(q, "code_unit_pending", 0), kb_cmd_json_int(q, "code_unit_done", 0));
+   cJSON_Delete(root);
+}
+
 static void kb_cmd_curator_profile(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)argc;
@@ -945,6 +1026,8 @@ static const subcmd_t kb_subcmds[] = {
      kb_cmd_import},
     {"terms", "List term_mapping artifacts: [--limit N]", kb_cmd_terms},
     {"gaps", "List corpus gap artifacts: [--limit N]", kb_cmd_gaps},
+    {"curator", "Show curator LLM provider + queue status: curator status [--json]",
+     kb_cmd_curator},
     {"curator-profile", "Show hardware-selected curator backend profile [--endpoint URL] [--json]",
      kb_cmd_curator_profile},
     {NULL, NULL, NULL}};

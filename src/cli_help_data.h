@@ -196,6 +196,10 @@
      "  list                         List stored credential names (no secrets)\n"
      "  delete <agent> <name>        Remove a credential\n"
      "  lock                         Lock the vault (evict the cached key)\n"},
+    {"cert", "mTLS client certificate lifecycle (operator)", CLIENT_TIER_ADMIN, 0,
+     "  issue <cn> [--days N]        Issue a client cert (CN identity); key returned once\n"
+     "  list                         List issued certs (serial, CN, validity, revoked)\n"
+     "  revoke <serial>              Revoke a client cert by serial\n"},
     {"kb", "Project knowledge base", CLIENT_TIER_CORE, 1,
      "  search <query>   Search the knowledge base\n"
      "  build            Build the knowledge base for a project\n"

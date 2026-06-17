@@ -9,7 +9,7 @@
     "check": "tsc -b"
   },
   "dependencies": {
-    "@rakuensoftware/smoothgui": "^0.2.0",
+    "@rakuensoftware/smoothgui": "file:vendor/rakuensoftware-smoothgui-0.5.1.tgz",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.5.0"

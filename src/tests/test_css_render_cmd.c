@@ -35,8 +35,12 @@ static void set_config(int css_enabled, const char *render_cmd)
    FILE *f = fopen(path, "w");
    assert(f);
    fprintf(f, "css_style_graph_enabled: %s\n", css_enabled ? "true" : "false");
+   /* NULL = omit the key (the non-empty default command applies); "" = write an
+    * explicit empty value to DISABLE the now-default-on backend; else the command. */
    if (render_cmd && render_cmd[0])
       fprintf(f, "css_render_command: %s\n", render_cmd);
+   else if (render_cmd)
+      fprintf(f, "css_render_command: \"\"\n");
    fclose(f);
 }
 
@@ -65,9 +69,10 @@ int main(void)
    char ok_cmd[700];
    snprintf(ok_cmd, sizeof(ok_cmd), "sh %s", ok_sh);
 
-   /* Gate: flag on but no command -> no adapter. */
+   /* Gate: flag on but command explicitly emptied -> no adapter. (css_render_command
+    * is default-on, so "no backend" means an explicit empty override, not omission.) */
    css_render_oracle_set_adapter(NULL);
-   set_config(1, NULL);
+   set_config(1, "");
    assert(css_render_cmd_register() == 0);
    assert(!css_render_oracle_has_adapter());
 
@@ -75,6 +80,12 @@ int main(void)
    set_config(0, ok_cmd);
    assert(css_render_cmd_register() == 0);
    assert(!css_render_oracle_has_adapter());
+
+   /* Default: flag on, command omitted -> the default sidecar command registers. */
+   css_render_oracle_set_adapter(NULL);
+   set_config(1, NULL);
+   assert(css_render_cmd_register() == 1);
+   assert(css_render_oracle_has_adapter());
 
    /* Both set -> adapter registered, render produces a parseable snapshot. */
    set_config(1, ok_cmd);

@@ -35,6 +35,10 @@ extern "C"
     * the conn's SSL). */
    int server_conn_io_has_ssl(int fd);
 
+   /* The registered SSL for `fd` (or NULL). Used by the identity layer to read a
+    * verified mTLS client cert. */
+   SSL *server_conn_io_get_ssl(int fd);
+
 #ifdef __cplusplus
 }
 #endif

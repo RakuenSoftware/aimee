@@ -189,22 +189,22 @@ int cli_restart_server(void);
  * spawn failure. */
 int cli_start_server(void);
 
-/* RPC thin-client routing.
- * Looks up an RPC route for a CLI command+subcommand combination. */
+/* Thin-client /v1 routing.
+ * Looks up the /v1 HTTP route for a CLI command+subcommand combination. */
 typedef struct
 {
    const char *method;        /* logical route/formatter name */
-   const char *server_method; /* actual server RPC method (NULL = method) */
+   const char *server_method; /* actual server /v1 method (NULL = method) */
    const char *extract;       /* response field to extract (NULL = return object minus "status") */
    int skip_subcmd;           /* number of leading sub-args consumed by route match (0, 1, or 2) */
-   int timeout_ms;            /* RPC timeout (0 = CLIENT_DEFAULT_TIMEOUT_MS) */
+   int timeout_ms;            /* request timeout (0 = CLIENT_DEFAULT_TIMEOUT_MS) */
 } cli_v1_route_t;
 
-/* Returns 1 if a matching RPC route was found, 0 otherwise.
+/* Returns 1 if a matching /v1 route was found, 0 otherwise.
  * Tries compound sub-commands first (e.g. "ingest status") before single ones. */
 int cli_v1_lookup(const char *cmd, int sub_argc, char **sub_argv, cli_v1_route_t *route);
 
-/* Forward a CLI command through the server RPC.
+/* Forward a CLI command to the server over its /v1 HTTP surface.
  * Returns 0 on success, >0 on application error, -1 on transport/protocol
  * error (caller should fall back to in-process execution).
  * argc/argv are the args AFTER the command name (e.g., for "aimee memory search foo",

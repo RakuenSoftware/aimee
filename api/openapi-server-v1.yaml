@@ -815,6 +815,25 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /kb/curator:
+    get:
+      summary: Curator LLM provider + queue status (proxied to aimee-kb)
+      responses:
+        "200":
+          description: Curator observability block (tier_a/tier_b providers + queue depth)
+          content:
+            application/json:
+              schema: { type: object }
+        "502":
+          description: Knowledge backend (aimee-kb) unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Curator status not available on this server
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /memory/recall:
     post:
       summary: Recall relevant memories (proxied to aimee-kb)
@@ -1570,6 +1589,21 @@ paths:
       summary: Lock the vault (evict the cached key)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Locked, content: { application/json: { schema: { type: object } } } } }
+  /cert/issue:
+    post:
+      summary: Issue an mTLS client cert for a CN (operator-gated; returns cert + one-time key)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Issued, content: { application/json: { schema: { type: object } } } } }
+  /cert/list:
+    post:
+      summary: List issued mTLS client certs (serial, cn, expiry, revoked)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Certs, content: { application/json: { schema: { type: object } } } } }
+  /cert/revoke:
+    post:
+      summary: Revoke an mTLS client cert by serial (operator-gated)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Revoked, content: { application/json: { schema: { type: object } } } } }
   /delegate/reply:
     post:
       summary: Reply to a delegate

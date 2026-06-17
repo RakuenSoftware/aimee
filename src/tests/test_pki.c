@@ -1,0 +1,99 @@
+/* test_pki.c: aimee's client-cert CA — CA ensure, issuance (cert chains to the
+ * CA), revocation snapshot, and CN-spoofing refusal (mtls-client-identity slice 2). */
+#include "pki.h"
+#include "vault_principal.h"
+#include "config.h" /* config_default_dir */
+#include "db1.h"    /* db1_init */
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
+static int verify_chains_to_ca(const char *cert_pem, const char *ca_path)
+{
+   BIO *cb = BIO_new_mem_buf(cert_pem, -1);
+   X509 *cert = cb ? PEM_read_bio_X509(cb, NULL, NULL, NULL) : NULL;
+   if (cb)
+      BIO_free(cb);
+   FILE *f = fopen(ca_path, "r");
+   X509 *ca = f ? PEM_read_X509(f, NULL, NULL, NULL) : NULL;
+   if (f)
+      fclose(f);
+   int ok = 0;
+   if (cert && ca)
+   {
+      X509_STORE *store = X509_STORE_new();
+      X509_STORE_CTX *ctx = X509_STORE_CTX_new();
+      if (store && ctx && X509_STORE_add_cert(store, ca) == 1 &&
+          X509_STORE_CTX_init(ctx, store, cert, NULL) == 1)
+         ok = (X509_verify_cert(ctx) == 1);
+      if (ctx)
+         X509_STORE_CTX_free(ctx);
+      if (store)
+         X509_STORE_free(store);
+   }
+   if (cert)
+      X509_free(cert);
+   if (ca)
+      X509_free(ca);
+   return ok;
+}
+
+int main(void)
+{
+   char home[256];
+   snprintf(home, sizeof(home), "/tmp/aimee-pki-test-%d", (int)getpid());
+   char cmd[600];
+   snprintf(cmd, sizeof(cmd), "rm -rf %s && mkdir -p %s", home, home);
+   assert(system(cmd) == 0);
+   setenv("AIMEE_HOME", home, 1);
+   assert(db1_init(":memory:") == 0);
+   pki_reset_for_test();
+
+   /* CA ensure: creates the CA + writes the client-ca.crt the server verifies against. */
+   assert(pki_ca_ensure() == 0);
+   char ca_path[400];
+   snprintf(ca_path, sizeof(ca_path), "%s/tls/client-ca.crt", config_default_dir());
+   assert(access(ca_path, R_OK) == 0);
+
+   /* Issue a client cert; it must be a real PEM with a serial, and chain to the CA. */
+   char cert[8192] = "", key[4096] = "", serial[64] = "";
+   assert(pki_issue("ci-runner-1", 30, cert, sizeof(cert), key, sizeof(key), serial,
+                    sizeof(serial)) == 0);
+   assert(strstr(cert, "BEGIN CERTIFICATE") != NULL);
+   assert(strstr(key, "BEGIN") != NULL && strstr(key, "PRIVATE KEY") != NULL);
+   assert(serial[0] != '\0');
+   assert(verify_chains_to_ca(cert, ca_path) == 1);
+
+   /* Revocation: not revoked, then revoked, reflected in the snapshot. */
+   assert(pki_is_revoked(serial) == 0);
+   assert(pki_revoke(serial) == 0);
+   assert(pki_is_revoked(serial) == 1);
+
+   /* A second cert is independent (distinct serial, still valid). */
+   char cert2[8192] = "", key2[4096] = "", serial2[64] = "";
+   assert(pki_issue("ci-runner-2", 30, cert2, sizeof(cert2), key2, sizeof(key2), serial2,
+                    sizeof(serial2)) == 0);
+   assert(strcmp(serial, serial2) != 0);
+   assert(pki_is_revoked(serial2) == 0);
+
+   /* A spoofing CN (would alias uid:0) is refused at issuance. */
+   char tmp[8192], tkey[4096], tserial[64];
+   assert(pki_issue("uid:0", 30, tmp, sizeof(tmp), tkey, sizeof(tkey), tserial, sizeof(tserial)) ==
+          -1);
+
+   /* Revoke serial2, then drop all caches and reload: the CA survives (sealed key
+    * + cert file) and the revocation snapshot reloads from DB1. */
+   assert(pki_revoke(serial2) == 0);
+   pki_reset_for_test();
+   assert(pki_ca_ensure() == 0);
+   assert(pki_is_revoked(serial2) == 1); /* persisted across reload */
+
+   snprintf(cmd, sizeof(cmd), "rm -rf %s", home);
+   (void)system(cmd);
+   printf("pki: all tests passed\n");
+   return 0;
+}

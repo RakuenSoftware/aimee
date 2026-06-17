@@ -9,7 +9,8 @@
 #include "server_http_identity.h"
 #include "server_http.h"    /* http_header */
 #include "server.h"         /* server_ct_equal, SERVER_TOKEN_FILE */
-#include "server_conn_io.h" /* server_conn_io_has_ssl — native-TLS attestation */
+#include "server_conn_io.h" /* server_conn_io_has_ssl/get_ssl — native-TLS attestation */
+#include "server_tls.h"     /* server_tls_peer_identity — mTLS client cert CN */
 #include "aimee_home.h"     /* aimee_home */
 #include "platform_ipc.h"
 #include "vault_principal.h"
@@ -94,8 +95,17 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
     * bearer-authorized channel — the operator's authority for server-principal
     * vault writes (native-TLS provisioning). */
    int is_tls = server_conn_io_has_ssl(fd);
+   /* mTLS: a verified client cert on this TLS conn yields a per-client cert:<CN>
+    * principal (resolved + sanitized in vault_principal_resolve). */
+   char cert_cn[VAULT_CERT_CN_MAX + 1] = "";
+   if (is_tls)
+   {
+      char serial[80];
+      server_tls_peer_identity(server_conn_io_get_ssl(fd), cert_cn, sizeof(cert_cn), serial,
+                               sizeof(serial));
+   }
    tl_transport = vault_principal_resolve(is_tcp, is_tls, peer_uid, webuser, webuser_token_ok,
-                                          tl_principal, sizeof(tl_principal));
+                                          cert_cn, tl_principal, sizeof(tl_principal));
 }
 
 void server_http_identity_apply(server_conn_t *conn)

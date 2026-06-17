@@ -50,9 +50,26 @@ webchat_bootstrap_user() {
     webchat_log "login user '$_wc_user' ready (group $WEBCHAT_GROUP)"
 }
 
+# Falsy test for the disable toggle: 0/false/no/off (any case) turns the browser
+# UI off. Anything else — including unset/empty — leaves it ON. The webchat is a
+# first-class surface: it ships enabled and must be explicitly disabled.
+webchat_is_enabled() {
+    case "$(printf '%s' "${AIMEE_WEBCHAT_ENABLED:-1}" | tr 'A-Z' 'a-z')" in
+        0 | false | no | off) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
 # Launch aimee-webchat in the background (as root, for PAM). Self-signed TLS on
 # :8443 is auto-generated under AIMEE_HOME and persists on the data volume.
 webchat_start() {
+    # The browser UI ships ENABLED: it is a first-class surface, switched off only
+    # when an operator sets AIMEE_WEBCHAT_ENABLED=0. The server's /v1 API is the
+    # machine contract; webchat is the human one.
+    if ! webchat_is_enabled; then
+        webchat_log "AIMEE_WEBCHAT_ENABLED=0; browser UI disabled by operator"
+        return 0
+    fi
     # webchat is optional: images built with WITH_WEBCHAT=0 ship no aimee-webchat
     # binary. Skip the browser UI rather than fail — the server is the contract.
     if ! command -v aimee-webchat >/dev/null 2>&1; then

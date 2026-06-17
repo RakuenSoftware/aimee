@@ -10,14 +10,12 @@
 #   docker compose -f compose.combined.yaml up --build
 #   # server /v1 on :8740 (bearer "aimee-local-dev"); kb internal on :8741
 #
-# WITH_WEBCHAT=1 additionally bundles the optional browser UI (aimee-webchat). It
-# is OFF by default because the React frontend pulls @rakuensoftware/smoothgui
-# from GitHub Packages, whose npm registry needs a token even for public reads —
-# so the default build needs NO credentials and ships just the server+kb
-# services. To include webchat:
-#   NPM_TOKEN=<github PAT with read:packages> docker compose \
-#     -f compose.combined.yaml build --build-arg WITH_WEBCHAT=1
-ARG WITH_WEBCHAT=0
+# WITH_WEBCHAT bundles the browser UI (aimee-webchat). It is ON by default — the
+# UI is a first-class surface. @rakuensoftware/smoothgui is vendored as a tarball
+# under frontend/vendor/ (a file: dependency), so the frontend builds with NO
+# registry token and NO credentials. Set --build-arg WITH_WEBCHAT=0 to build the
+# server+kb services only (skips the frontend + Go webchat stages entirely).
+ARG WITH_WEBCHAT=1
 FROM debian:bookworm-slim AS build
 
 # Union of the aimee-server and aimee-kb build deps: server links libsqlite3
@@ -45,18 +43,13 @@ RUN make -C src ../aimee-server ../aimee-kb ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE
 # vite-plugin-singlefile inlines all JS/CSS, so the runtime image ships one file.
 FROM node:20-bookworm AS frontend-build
 WORKDIR /frontend
+# @rakuensoftware/smoothgui is vendored under frontend/vendor/ as a tarball and
+# referenced via a file: dependency, so `npm ci` resolves it from the build
+# context (no GitHub Packages token, no .npmrc, no BuildKit secret). The vendored
+# tarball must be present before `npm ci` reads the lockfile.
 COPY frontend/package.json frontend/package-lock.json ./
-# @rakuensoftware/smoothgui is hosted on GitHub Packages, whose npm registry
-# requires an authenticated token even for public reads. The token arrives as a
-# BuildKit secret and is written to a throwaway .npmrc that lives only for this
-# RUN, so it never lands in an image layer:
-#   docker build --secret id=npm_token,env=NPM_TOKEN ...
-#   compose: build.secrets;  CI: npm_token=${{ secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
-RUN --mount=type=secret,id=npm_token \
-    { echo '@rakuensoftware:registry=https://npm.pkg.github.com'; \
-      echo "//npm.pkg.github.com/:_authToken=$(cat /run/secrets/npm_token)"; } > .npmrc \
-    && npm ci \
-    && rm -f .npmrc
+COPY frontend/vendor/ ./vendor/
+RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
@@ -76,8 +69,8 @@ RUN CGO_ENABLED=1 go build -o /out/aimee-webchat .
 
 # Collect webchat artifacts into a uniform /webchat layout. The "1" variant pulls
 # from the frontend + Go builds above (those stages are only in the build graph
-# when WITH_WEBCHAT=1 selects this stage, so a default build never runs npm / the
-# credentialed frontend stage). The "0" variant is empty → no webchat in the image.
+# when WITH_WEBCHAT=1 selects this stage). The "0" variant is empty → no webchat
+# in the image (WITH_WEBCHAT=0 opts the UI out of the build entirely).
 FROM debian:bookworm-slim AS webchat-stage-1
 COPY --from=webchat-build /out/aimee-webchat /webchat/aimee-webchat
 COPY --from=frontend-build /frontend/dist/index.html /webchat/index.html
