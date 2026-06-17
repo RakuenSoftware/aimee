@@ -29,16 +29,16 @@ cd aimee
 docker compose -f compose.combined.yaml up --build -d
 ```
 
-This brings up four services:
+By default this brings up **three** services. The browser webchat is a first-class surface that runs *inside* the combined container (not a separate service), and an optional curator-LLM sidecar can be enabled on top:
 
 | Service | What it is | Port |
 |---------|-----------|------|
-| `aimee-server-kb` | Both aimee binaries (server + kb) in one container | `8740` (server `/v1`), `8741` (kb `/v1`) |
+| `aimee-server-kb` | Both aimee binaries (server + kb) **and** the browser webchat UI, in one container | `8740` (server `/v1`), `8741` (kb `/v1`), `8443` (webchat HTTPS, self-signed) |
 | `postgres` | `pgvector/pgvector:pg16` — DB2 (`aimee_shared`) for knowledge + vectors | internal |
-| `embedder` | CPU embedder sidecar (`all-MiniLM-L6-v2`) | internal |
-| webchat | Browser UI — a first-class surface, on by default | `8443` (HTTPS, self-signed) |
+| `embedder` | CPU embedder sidecar (`perplexity-ai/pplx-embed-v1-0.6b`) | internal |
+| `llm` *(optional)* | Curator LLM sidecar (Gemma 3n E4B via `llama.cpp`) for doc/code extraction. Off unless you add `--profile curator-llm`; otherwise the curator stays idle or you point `LLM_ENDPOINT` at your own OpenAI-compatible endpoint. | internal |
 
-The kb auto-applies its DB2 schema (tables + `pg_trgm`/`vector` extensions) on first boot. First `--build` takes a few minutes (it compiles the binaries and pulls the embedder model); subsequent starts are fast.
+The kb auto-applies its DB2 schema (tables + `pg_trgm`/`vector` extensions) on first boot. First `--build` takes a few minutes (it compiles the binaries and pulls the embedder model); subsequent starts are fast. To also run the bundled curator LLM, add the profile: `docker compose -f compose.combined.yaml --profile curator-llm up --build -d`.
 
 ### 1.2 Verify it's healthy
 
@@ -87,7 +87,7 @@ Durable state lives in named volumes (`*-postgres`, `*-home`, `*-workspaces`, `*
 
 ## Part 2 — Linux client
 
-On Linux you can build and run the whole stack from source, but as a **client against a Docker/remote server** you only need the thin `aimee` binary, which talks to your `aimee-server` over `/v1`. Unlike the Windows and macOS prebuilt binaries, the Linux build links OpenSSL, so it supports `https://` servers out of the box.
+On Linux you can build and run the whole stack from source, but as a **client against a Docker/remote server** you only need the thin `aimee` binary, which talks to your `aimee-server` over `/v1`. The Linux build links OpenSSL, so it supports `https://` servers (verified against the system trust store) out of the box — as do the prebuilt Windows and macOS clients via their native TLS backends (see [TLS support by build](#tls-support-by-build)).
 
 ### 2.1 Install `aimee`
 
@@ -178,7 +178,7 @@ Because `launch`/`chat` are exec/control operations, the server's `aimee.api.rem
 
 On Windows aimee runs as the **thin client only**: a single `aimee.exe` that talks to your remote `aimee-server` over `/v1`. The server and kb run in Docker (Part 1) or on a Linux/macOS host — never on Windows.
 
-> **TLS note:** the Windows client is built **without TLS** and refuses `https://`. Point it at an `http://` address; if your server is HTTPS, terminate TLS at a reverse proxy and use that proxy's `http://` endpoint.
+> **TLS note:** the Windows client now speaks `https://` natively via **Schannel**, verifying the chain and hostname against the **Windows certificate store** — no OpenSSL and no bundled CA bundle, just the single self-contained `aimee.exe`. Both the prebuilt release binary and the `install.ps1` build enable it. Set `AIMEE_TLS_INSECURE=1` for a self-signed dev cert.
 
 ### 3.1 Install `aimee.exe`
 
@@ -211,7 +211,7 @@ aimee remote status     # shows the resolved transport + a /v1/health probe
 aimee status            # server, DB1, and kb health
 ```
 
-Use your real bearer token instead of `aimee-local-dev` if you changed it. Alternatives to `aimee remote set`: set `AIMEE_SERVER_URL` / `AIMEE_SERVER_TOKEN` environment variables, or pass `--server http://YOUR_SERVER:8740 --server-token=...` per command. Precedence is `--server` flag > env > persisted `remote.conf`.
+Use your real bearer token instead of `aimee-local-dev` if you changed it. For an HTTPS server, `https://` works with certificate verification on by default (Schannel against the Windows cert store); set `AIMEE_TLS_INSECURE=1` for a self-signed dev cert. Alternatives to `aimee remote set`: set `AIMEE_SERVER_URL` / `AIMEE_SERVER_TOKEN` environment variables, or pass `--server http://YOUR_SERVER:8740 --server-token=...` per command. Precedence is `--server` flag > env > persisted `remote.conf`.
 
 ### 3.3 Configure your AI coding tool
 
@@ -274,16 +274,16 @@ mv aimee-macos-universal ~/.local/bin/aimee
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The prebuilt macOS binary is a universal (arm64 + x86_64) build and, like Windows, is built **without TLS** — point it at an `http://` server.
+The prebuilt macOS binary is a universal (arm64 + x86_64) build and speaks `https://` natively via **Secure Transport**, evaluating trust against the **Keychain** — no OpenSSL and no bundled CA bundle. Set `AIMEE_TLS_INSECURE=1` for a self-signed dev cert.
 
-**Option B — build the thin client from source** (needs Xcode Command Line Tools + CMake; this build *does* support `https://` via OpenSSL):
+**Option B — build the thin client from source** (needs Xcode Command Line Tools + CMake; TLS uses Secure Transport/Keychain, so no OpenSSL is required):
 
 ```bash
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
 cmake -B build -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON \
-      -DOPENSSL_ROOT_DIR="$(brew --prefix openssl@3)" \
-      -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF
+      -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=ON \
+      -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"   # drop for a host-arch-only build
 cmake --build build --target aimee
 cp build/aimee ~/.local/bin/aimee      # or anywhere on your PATH
 ```
@@ -304,7 +304,7 @@ aimee remote status     # resolved transport + /v1/health probe
 aimee status            # server, DB1, and kb health
 ```
 
-For an HTTPS server with a source-built (OpenSSL) client, `https://` works with cert verification on; set `AIMEE_TLS_INSECURE=1` for a self-signed dev cert. The prebuilt (TLS-off) binary supports `http://` only. As on the other platforms, you can use `AIMEE_SERVER_URL` / `AIMEE_SERVER_TOKEN` or `--server` instead of `aimee remote set`.
+Both the prebuilt universal binary and a source build speak `https://` with certificate verification on by default (Secure Transport against the Keychain); set `AIMEE_TLS_INSECURE=1` for a self-signed dev cert. As on the other platforms, you can use `AIMEE_SERVER_URL` / `AIMEE_SERVER_TOKEN` or `--server` instead of `aimee remote set`.
 
 ### 4.3 Configure your AI coding tool
 
@@ -351,14 +351,15 @@ As on the other platforms, `aimee chat` and `aimee launch` work against a remote
 
 ## TLS support by build
 
-| Client | `https://` support |
-|--------|--------------------|
-| Linux — prebuilt release binary or `make` build | Yes (OpenSSL linked by default) |
-| macOS — source build with OpenSSL | Yes |
-| macOS — prebuilt `aimee-macos-universal` | No — `http://` only |
-| Windows — prebuilt or `install.ps1` build | No — `http://` only (terminate TLS at a proxy) |
+Every supported client now speaks `https://` out of the box, each using its platform's native trust store — no bundled CA bundle. Certificate verification is on by default; set `AIMEE_TLS_INSECURE=1` to skip it for a self-signed dev cert.
 
-For any TLS-off client, terminate TLS at a reverse proxy and point the client at the proxy's `http://` address.
+| Client | `https://` support | TLS backend / trust store |
+|--------|--------------------|---------------------------|
+| Linux — prebuilt release binary or `make` build | Yes | OpenSSL — system trust store |
+| macOS — prebuilt `aimee-macos-universal` or source build | Yes | Secure Transport — Keychain |
+| Windows — prebuilt or `install.ps1` build | Yes | Schannel — Windows certificate store |
+
+For per-client cryptographic identity (not just a shared bearer), the server also supports **mTLS client certificates** — clients present a cert from `<aimee_home>/tls/client.{crt,key}` and the server maps it to a `cert:<CN>` principal. Issue and manage them with the `aimee cert` CLI (`/v1/cert/issue|list|revoke`); see the [Manual](../MANUAL.md) for setup.
 
 ## Next steps
 
