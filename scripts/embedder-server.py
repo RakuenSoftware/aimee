@@ -167,6 +167,18 @@ def embed(text: str):
     return vec.tolist()
 
 
+def embed_batch(texts):
+    """Embed a list of texts in one batched model.encode() call — one HTTP
+    round-trip and one batched inference instead of N separate /embed calls.
+    Returns a list of float vectors aligned 1:1 with `texts`."""
+    if EMBEDDER_STUB:
+        return [_stub_embed(t) for t in texts]
+    if not texts:
+        return []
+    vecs = _model.encode(list(texts), normalize_embeddings=True)
+    return [v.tolist() for v in vecs]
+
+
 def rerank(pairs):
     """pairs: [[query, candidate], ...] -> [score, ...] (one cross-encoder score
     per pair, higher = more relevant). Matches the aimee memory_rerank_command
@@ -219,7 +231,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = self.path.rstrip("/")
-        if path not in ("/embed", "/rerank"):
+        if path not in ("/embed", "/embed_batch", "/rerank"):
             self._send(404, {"error": "not found"})
             return
         # Refuse work until the model is loaded — never serve against a not-yet-
@@ -233,6 +245,16 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 pairs = json.loads(raw.decode("utf-8", errors="replace") or "[]")
                 self._send(200, rerank(pairs))
+            except Exception as exc:  # noqa: BLE001
+                self._send(500, {"error": str(exc)})
+            return
+        if path == "/embed_batch":
+            try:
+                texts = json.loads(raw.decode("utf-8", errors="replace") or "[]")
+                if not isinstance(texts, list):
+                    self._send(400, {"error": "embed_batch expects a JSON array of strings"})
+                    return
+                self._send(200, embed_batch(texts))
             except Exception as exc:  # noqa: BLE001
                 self._send(500, {"error": str(exc)})
             return
