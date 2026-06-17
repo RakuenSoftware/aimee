@@ -102,11 +102,15 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
       free(t);
       return NULL;
    }
-   /* mTLS client-cert presentation (slice 3b, follow-up): to present
-    * <aimee_home>/tls/client.{crt,key} as this client's identity, build a
-    * SecIdentityRef from the PEM (SecPKCS12Import / SecItem) and pass it to
-    * SSLSetCertificate here. Deferred: identity construction must be validated
-    * on real macOS. The OpenSSL backend presents the cert today. */
+   /* mTLS client-cert presentation (deferred — needs a Mac to validate): build a
+    * SecIdentityRef from <aimee_home>/tls/client.p12 and pass it to
+    * SSLSetCertificate here. CAUTION: plain SecPKCS12Import (passphrase only)
+    * imports the identity into the user's DEFAULT (login) keychain on macOS, so
+    * the private key PERSISTS across runs — a silent key leak. A correct impl
+    * must import into a TRANSIENT keychain (SecKeychainCreate + kSecUseKeychain,
+    * then SecKeychainDelete) or otherwise scope/remove the imported items, and
+    * be validated on real macOS. The OpenSSL + Schannel backends present the
+    * cert today; macOS is the only one still deferred. */
    if (SSLSetIOFuncs(t->ctx, st_read, st_write) != noErr ||
        SSLSetConnection(t->ctx, &t->fd) != noErr ||
        SSLSetProtocolVersionMin(t->ctx, kTLSProtocol12) != noErr)

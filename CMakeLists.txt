@@ -1211,9 +1211,14 @@ if(WITH_TLS)
         find_library(COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
         target_link_libraries(aimee PRIVATE ${SECURITY_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK})
     elseif(WIN32)
-        # Windows: Schannel/SSPI (no OpenSSL; Windows certificate store).
+        # Windows: Schannel/SSPI (no OpenSSL; Windows certificate store). ncrypt
+        # supplies CNG (NCryptImportKey) for mTLS client-key import. Pin
+        # _WIN32_WINNT>=0x0A00 at the build level too (the schannel TU also sets
+        # it before any include) so the CNG/CERT_NCRYPT_KEY_SPEC symbols are
+        # exposed regardless of header include order.
         target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/aimee_tls_schannel.c)
-        target_link_libraries(aimee PRIVATE secur32 crypt32)
+        target_compile_definitions(aimee PRIVATE _WIN32_WINNT=0x0A00)
+        target_link_libraries(aimee PRIVATE secur32 crypt32 ncrypt)
     else()
         # Linux/other POSIX: OpenSSL.
         find_package(OpenSSL REQUIRED)

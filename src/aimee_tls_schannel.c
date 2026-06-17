@@ -18,16 +18,25 @@
  * record). Mid-stream SEC_I_RENEGOTIATE is handled by re-running the handshake.
  */
 #define SECURITY_WIN32
+/* Ensure CNG / modern crypt32 symbols (NCrypt*, CERT_NCRYPT_KEY_SPEC) are
+ * exposed before any Windows header is pulled in. */
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0A00
+#endif
 #include "aimee_tls.h"
+#include "aimee_home.h"
 
 #include <windows.h>
 #include <schannel.h>
 #include <security.h>
 #include <sspi.h>
 #include <wincrypt.h>
+#include <ncrypt.h>
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 #ifndef SP_PROT_TLS1_2_CLIENT
 #define SP_PROT_TLS1_2_CLIENT 0x00000800
@@ -35,8 +44,20 @@
 #ifndef SCH_USE_STRONG_CRYPTO
 #define SCH_USE_STRONG_CRYPTO 0x00400000
 #endif
+/* CNG / NCrypt fallbacks for older MinGW headers (same defensive pattern as the
+ * SP_PROT_* defines above). */
+#ifndef NCRYPT_PKCS8_PRIVATE_KEY_BLOB
+#define NCRYPT_PKCS8_PRIVATE_KEY_BLOB L"PKCS8_PRIVATEKEY"
+#endif
+#ifndef MS_KEY_STORAGE_PROVIDER
+#define MS_KEY_STORAGE_PROVIDER L"Microsoft Software Key Storage Provider"
+#endif
+#ifndef CERT_NCRYPT_KEY_SPEC
+#define CERT_NCRYPT_KEY_SPEC 0xFFFFFFFF
+#endif
 
-#define ENC_CAP 32768 /* one TLS record fits comfortably; grown via recv loop */
+#define ENC_CAP           32768 /* one TLS record fits comfortably; grown via recv loop */
+#define AIMEE_KEYNAME_LEN 64
 
 struct aimee_tls
 {
@@ -52,6 +73,12 @@ struct aimee_tls
 
    unsigned char *dec; /* decrypted plaintext not yet delivered */
    size_t dec_off, dec_len, dec_cap;
+
+   /* mTLS client identity (present when <aimee_home>/tls/client.{crt,key} loaded). */
+   PCCERT_CONTEXT client_cert;
+   NCRYPT_PROV_HANDLE client_prov;
+   NCRYPT_KEY_HANDLE client_key;
+   WCHAR client_key_name[AIMEE_KEYNAME_LEN]; /* persisted CNG key container (deleted on free) */
 };
 
 static int tls_insecure(void)
@@ -253,6 +280,163 @@ static int do_handshake(aimee_tls_t *t, int initial)
    }
 }
 
+/* Read a whole file (<= 1 MiB) into a malloc'd buffer; *out_len set on success. */
+static unsigned char *read_small_file(const char *path, DWORD *out_len)
+{
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return NULL;
+   if (fseek(f, 0, SEEK_END) != 0)
+   {
+      fclose(f);
+      return NULL;
+   }
+   long sz = ftell(f);
+   if (sz <= 0 || sz > (1 << 20) || fseek(f, 0, SEEK_SET) != 0)
+   {
+      fclose(f);
+      return NULL;
+   }
+   unsigned char *b = malloc((size_t)sz);
+   if (!b)
+   {
+      fclose(f);
+      return NULL;
+   }
+   size_t rd = fread(b, 1, (size_t)sz, f);
+   fclose(f);
+   if (rd != (size_t)sz)
+   {
+      free(b);
+      return NULL;
+   }
+   *out_len = (DWORD)sz;
+   return b;
+}
+
+/* Decode the first base64 PEM block (-----BEGIN/END-----) to DER. */
+static int pem_to_der(const unsigned char *pem, DWORD pem_len, unsigned char **der, DWORD *der_len)
+{
+   DWORD n = 0;
+   if (!CryptStringToBinaryA((LPCSTR)pem, pem_len, CRYPT_STRING_BASE64HEADER, NULL, &n, NULL, NULL))
+      return -1;
+   unsigned char *d = malloc(n ? n : 1);
+   if (!d)
+      return -1;
+   if (!CryptStringToBinaryA((LPCSTR)pem, pem_len, CRYPT_STRING_BASE64HEADER, d, &n, NULL, NULL))
+   {
+      free(d);
+      return -1;
+   }
+   *der = d;
+   *der_len = n;
+   return 0;
+}
+
+/* Load <aimee_home>/tls/client.{crt,key} (PEM cert + PKCS#8 EC key) as this
+ * client's identity: decode to DER, import the key into an ephemeral CNG store,
+ * and bind it to the cert context. Returns 1 (loaded -> t->client_cert set),
+ * 0 (no material configured), or -1 (present but failed to load). The server's
+ * key is PKCS#8 (OpenSSL PEM_write_bio_PrivateKey), so NCRYPT_PKCS8_PRIVATE_KEY_BLOB
+ * imports it directly. (NTFS ACLs, not POSIX mode bits, govern key secrecy here.) */
+static int schannel_load_client_identity(aimee_tls_t *t)
+{
+   const char *home = aimee_home();
+   if (!home || !*home)
+      return 0;
+   char crt[600], key[600];
+   snprintf(crt, sizeof(crt), "%s/tls/client.crt", home);
+   snprintf(key, sizeof(key), "%s/tls/client.key", home);
+   if (GetFileAttributesA(crt) == INVALID_FILE_ATTRIBUTES ||
+       GetFileAttributesA(key) == INVALID_FILE_ATTRIBUTES)
+      return 0; /* no client-cert material configured */
+
+   int rc = -1;
+   unsigned char *cpem = NULL, *kpem = NULL, *cder = NULL, *kder = NULL;
+   DWORD clen = 0, klen = 0, cdl = 0, kdl = 0;
+   PCCERT_CONTEXT cert = NULL;
+   NCRYPT_PROV_HANDLE prov = 0;
+   NCRYPT_KEY_HANDLE hkey = 0;
+
+   cpem = read_small_file(crt, &clen);
+   kpem = read_small_file(key, &klen);
+   if (!cpem || !kpem)
+      goto done;
+   if (pem_to_der(cpem, clen, &cder, &cdl) != 0 || pem_to_der(kpem, klen, &kder, &kdl) != 0)
+      goto done;
+
+   cert = CertCreateCertificateContext(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, cder, cdl);
+   if (!cert)
+      goto done;
+   {
+      if (NCryptOpenStorageProvider(&prov, MS_KEY_STORAGE_PROVIDER, 0) != ERROR_SUCCESS)
+         goto done;
+      /* Import the key PERSISTED under a unique container name. Schannel signs
+       * the CertificateVerify by opening the key via the cert's PROV_INFO, and
+       * it cannot use an ephemeral (nameless) CNG handle for that — so a named
+       * key + CERT_KEY_PROV_INFO_PROP_ID is required, not CERT_KEY_CONTEXT.
+       * (Runtime-validated on Windows: the ephemeral binding presented no cert.) */
+      static volatile LONG s_ctr;
+      swprintf(t->client_key_name, AIMEE_KEYNAME_LEN, L"aimee-mtls-%lu-%ld",
+               (unsigned long)GetCurrentProcessId(), InterlockedIncrement(&s_ctr));
+      NCryptBuffer nb;
+      nb.BufferType = NCRYPTBUFFER_PKCS_KEY_NAME;
+      nb.cbBuffer = (DWORD)((wcslen(t->client_key_name) + 1) * sizeof(WCHAR));
+      nb.pvBuffer = t->client_key_name;
+      NCryptBufferDesc nbd;
+      nbd.ulVersion = NCRYPTBUFFER_VERSION;
+      nbd.cBuffers = 1;
+      nbd.pBuffers = &nb;
+      if (NCryptImportKey(prov, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, &nbd, &hkey, kder, kdl,
+                          NCRYPT_OVERWRITE_KEY_FLAG | NCRYPT_SILENT_FLAG) != ERROR_SUCCESS)
+      {
+         hkey = 0; /* MSDN: phKey is undefined on failure — don't act on it in done: */
+         t->client_key_name[0] = 0;
+         goto done;
+      }
+   }
+
+   {
+      CRYPT_KEY_PROV_INFO pi;
+      memset(&pi, 0, sizeof(pi));
+      pi.pwszContainerName = t->client_key_name;
+      pi.pwszProvName = (LPWSTR)MS_KEY_STORAGE_PROVIDER;
+      pi.dwProvType = 0; /* 0 + a CNG KSP name => CNG key */
+      pi.dwKeySpec = 0;  /* ignored for CNG */
+      if (!CertSetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, 0, &pi))
+         goto done;
+   }
+
+   t->client_cert = cert;
+   t->client_prov = prov;
+   t->client_key = hkey;
+   cert = NULL; /* ownership transferred to the handle */
+   prov = 0;
+   hkey = 0;
+   rc = 1;
+
+done:
+   if (kder)
+   {
+      SecureZeroMemory(kder, kdl); /* DER holds the private key */
+      free(kder);
+   }
+   if (kpem)
+   {
+      SecureZeroMemory(kpem, klen);
+      free(kpem);
+   }
+   free(cder);
+   free(cpem);
+   if (hkey)
+      NCryptDeleteKey(hkey, NCRYPT_SILENT_FLAG); /* error path: remove the persisted key + free */
+   if (prov)
+      NCryptFreeObject(prov);
+   if (cert)
+      CertFreeCertificateContext(cert);
+   return rc;
+}
+
 aimee_tls_t *aimee_tls_connect(int fd, const char *host)
 {
    aimee_tls_t *t = calloc(1, sizeof(*t));
@@ -272,12 +456,16 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
    /* We validate the chain + hostname ourselves post-handshake, so tell Schannel
     * not to auto-validate (and never use a machine default client cert). */
    sc.dwFlags = SCH_CRED_NO_DEFAULT_CREDS | SCH_CRED_MANUAL_CRED_VALIDATION | SCH_USE_STRONG_CRYPTO;
-   /* mTLS client-cert presentation (slice 3b, follow-up): to present
-    * <aimee_home>/tls/client.{crt,key} as this client's identity, build a
-    * CERT_CONTEXT (PEM -> CertCreateCertificateContext) with an associated CNG
-    * private key and set sc.cCreds/sc.paCred here. Deferred: EC-key import via
-    * CryptoAPI is intricate and must be validated on real Windows (as the
-    * native backend itself was). The OpenSSL backend presents the cert today. */
+   /* mTLS client-cert presentation: if <aimee_home>/tls/client.{crt,key} loads,
+    * hand Schannel the cert (with its CNG key) so the server can identify this
+    * client as a distinct cert:<CN> principal. Absent => plain client TLS. A
+    * load failure (-1) leaves the handshake cert-less; the mTLS server then
+    * rejects it, which is the correct signal for broken client-cert material. */
+   if (schannel_load_client_identity(t) == 1)
+   {
+      sc.cCreds = 1;
+      sc.paCred = &t->client_cert;
+   }
 
    if (AcquireCredentialsHandleA(NULL, (SEC_CHAR *)UNISP_NAME_A, SECPKG_CRED_OUTBOUND, NULL, &sc,
                                  NULL, NULL, &t->cred, NULL) != SEC_E_OK)
@@ -518,6 +706,13 @@ void aimee_tls_free(aimee_tls_t *t)
    }
    if (t->have_cred)
       FreeCredentialsHandle(&t->cred);
+   if (t->client_cert)
+      CertFreeCertificateContext(t->client_cert);
+   if (t->client_key)
+      NCryptDeleteKey(t->client_key,
+                      NCRYPT_SILENT_FLAG); /* delete the persisted key + free handle */
+   if (t->client_prov)
+      NCryptFreeObject(t->client_prov);
    free(t->dec);
    free(t->host);
    free(t);
