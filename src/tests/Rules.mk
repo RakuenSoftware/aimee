@@ -218,6 +218,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-service \
                $(TESTPREFIX)/unit-test-git-forge-vault \
                $(TESTPREFIX)/unit-test-git-cred-inject \
+               $(TESTPREFIX)/unit-test-git-ssh-agent \
                $(TESTPREFIX)/unit-test-webchat-git-leak \
                $(TESTPREFIX)/unit-test-git-project \
                $(TESTPREFIX)/unit-test-git-ops \
@@ -2139,7 +2140,7 @@ $(TESTPREFIX)/unit-test-vault-store: $(OBJDIR)/tests/test_vault_store.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-git-ops: $(OBJDIR)/tests/test_git_ops.o \
-                              $(OBJDIR)/server/git_ops.o $(OBJDIR)/server/git_cred_inject.o \
+                              $(OBJDIR)/server/git_ops.o $(OBJDIR)/server/git_cred_inject.o $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o \
                               $(OBJDIR)/server/git_forge_vault.o $(OBJDIR)/server/workspace_scope.o \
                               $(OBJDIR)/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
@@ -2150,7 +2151,7 @@ $(TESTPREFIX)/unit-test-git-ops: $(OBJDIR)/tests/test_git_ops.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-git-project: $(OBJDIR)/tests/test_git_project.o \
-                              $(OBJDIR)/server/git_project.o $(OBJDIR)/server/git_cred_inject.o \
+                              $(OBJDIR)/server/git_project.o $(OBJDIR)/server/git_cred_inject.o $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o \
                               $(OBJDIR)/server/git_forge_vault.o $(OBJDIR)/server/workspace_scope.o \
                               $(OBJDIR)/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/posix/util.o $(OBJDIR)/util.o \
@@ -2161,7 +2162,7 @@ $(TESTPREFIX)/unit-test-git-project: $(OBJDIR)/tests/test_git_project.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-webchat-git-leak: $(OBJDIR)/tests/test_webchat_git_leak.o \
-                              $(OBJDIR)/server/git_cred_inject.o $(OBJDIR)/server/git_forge_vault.o \
+                              $(OBJDIR)/server/git_cred_inject.o $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o $(OBJDIR)/server/git_forge_vault.o \
                               $(OBJDIR)/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
                               $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
@@ -2169,8 +2170,18 @@ $(TESTPREFIX)/unit-test-webchat-git-leak: $(OBJDIR)/tests/test_webchat_git_leak.
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-git-ssh-agent: $(OBJDIR)/tests/test_git_ssh_agent.o \
+                              $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/git_forge_vault.o \
+                              $(OBJDIR)/server/webuser_runtime.o $(OBJDIR)/server/workspace_scope.o \
+                              $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
+                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
+                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
+                              $(OBJDIR)/server/vault_server_key.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-git-cred-inject: $(OBJDIR)/tests/test_git_cred_inject.o \
-                              $(OBJDIR)/server/git_cred_inject.o $(OBJDIR)/server/git_forge_vault.o \
+                              $(OBJDIR)/server/git_cred_inject.o $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o $(OBJDIR)/server/workspace_scope.o $(OBJDIR)/server/git_forge_vault.o \
                               $(OBJDIR)/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
                               $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
