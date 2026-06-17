@@ -609,6 +609,15 @@ int kb_curator_extract_code_unit_one(const kb_curator_extract_opts_t *opts)
    aimee_log(LOG_INFO, "kb.curator.extract_code", "invoking sidecar for symbol '%s' (job %lld): %s",
              job.symbol, (long long)job.job_id, cmd);
 
+   /* Return our pool connection before the slow sidecar/LLM call — extraction on
+    * a CPU model runs seconds to minutes, and holding a lease across it trips the
+    * pool's stuck-lease ceiling (300s) and permanently shrinks the pool. All
+    * remaining DB work (grounding, artifact write, mark_done) re-acquires lazily
+    * via db2_conn() after the call returns. Safe: we are at lease depth 0 (the
+    * drain uses db2_lease_release_idle, not an explicit begin/end scope), and the
+    * body was already read from DB2 above. */
+   db2_lease_release_idle();
+
    char sidecar_err[512] = "";
    char *resp_str = ccu_invoke_sidecar(cmd, req_str, sidecar_err, sizeof(sidecar_err));
    free(req_str);

@@ -19,6 +19,14 @@ struct cJSON;
 #define MAX_CRED_ENV_VAR_LEN     64
 #define MAX_FALLBACK             8
 #define AGENT_DEFAULT_TIMEOUT_MS 180000
+/* Default per-call timeout for a REASONING model when the operator pins none.
+ * Reasoning models (e.g. MiniMax-M3) emit a large hidden reasoning trace before
+ * the visible answer, so a single completion routinely runs several minutes —
+ * past the 3-minute standard default, which then fails as a spurious
+ * "read_response failed" (HTTP -1) and burns the retry budget. A non-reasoning
+ * model keeps the standard default; an explicit agents.json/--timeout value
+ * always wins over either. */
+#define AGENT_REASONING_TIMEOUT_MS 600000
 /* Floor for the per-call HTTP timeout inside the multi-turn tool loop. Once the
  * remaining loop budget drops below this, the loop stops cleanly instead of
  * issuing a doomed short-timeout call that the provider-health tracker would
