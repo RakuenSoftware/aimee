@@ -193,15 +193,31 @@ static pid_t spawn_code_server(const char *principal, const char *userroot, int 
    snprintf(ext_dir, sizeof(ext_dir), "%s/.aimee-editor/ext", userroot);
    snprintf(home_env, sizeof(home_env), "HOME=%s", userroot);
 
-   /* The editor env is the user's vault-backed git env (GH_TOKEN+GIT_ASKPASS,
-    * SSH_AUTH_SOCK) so the integrated terminal/Git authenticate; fall back to a
-    * plain copy when the user has no vaulted creds yet. We then point HOME at
-    * the per-user workspace so code-server writes no state into the server's
-    * home. envp ownership: built array is freed in the parent after fork. */
-   char **base = git_cred_inject_build_env(principal, environ);
+   /* code-server gives the user an integrated terminal, so the child must NOT
+    * inherit the server's full environment — that could expose secrets like
+    * AIMEE_DB2_URL (DB password), AIMEE_SERVER_TOKEN, or provider keys. Start
+    * from a minimal, curated base (PATH/LANG/TERM only) and layer the user's
+    * vault-backed git env (GH_TOKEN+GIT_ASKPASS, SSH_AUTH_SOCK) on top, so the
+    * editor authenticates to git without ever seeing unrelated server env. */
+   const char *srv_path = getenv("PATH");
+   const char *srv_lang = getenv("LANG");
+   char path_env[MAX_PATH_LEN + 8], lang_env[256];
+   snprintf(path_env, sizeof(path_env), "PATH=%s",
+            (srv_path && srv_path[0]) ? srv_path : "/usr/bin:/bin");
+   snprintf(lang_env, sizeof(lang_env), "LANG=%s",
+            (srv_lang && srv_lang[0]) ? srv_lang : "C.UTF-8");
+   char *mini[] = {path_env, lang_env, (char *)"TERM=xterm-256color", NULL};
+
+   /* git_cred_inject_build_env copies from the given base (dropping any
+    * GH_TOKEN/SSH_AUTH_SOCK) and appends the vaulted git vars; pass the minimal
+    * base, not environ. Returns NULL when the user has no vaulted creds yet, in
+    * which case the minimal base alone is the editor's env (still git-prompt
+    * safe via GIT_TERMINAL_PROMPT default). envp ownership: the built array is
+    * freed in the parent after fork. */
+   char **base = git_cred_inject_build_env(principal, mini);
    int owns_base = (base != NULL);
    if (!base)
-      base = environ;
+      base = mini;
    int bc = 0;
    while (base[bc])
       bc++;
@@ -285,10 +301,33 @@ static pid_t spawn_code_server(const char *principal, const char *userroot, int 
  * g_lock. */
 static void reap_locked(editor_t *e)
 {
-   if (e->pid > 0)
+   pid_t pid = e->pid;
+   if (pid > 0)
    {
-      kill(-e->pid, SIGTERM); /* whole session (setsid) */
-      kill(e->pid, SIGTERM);
+      kill(-pid, SIGTERM); /* whole session (setsid) */
+      kill(pid, SIGTERM);
+      /* Wait for the child here so it is actually reaped — once we zero the slot
+       * below, sweep_dead_locked can no longer find it, so an un-waited child
+       * would leak as a permanent zombie. code-server exits on SIGTERM quickly;
+       * escalate to SIGKILL if it ignores us. This is a rare path
+       * (stop/idle/shutdown), so the bounded wait under the lock is acceptable. */
+      int reaped = 0;
+      for (int i = 0; i < 50; i++) /* up to ~500ms */
+      {
+         if (waitpid(pid, NULL, WNOHANG) == pid)
+         {
+            reaped = 1;
+            break;
+         }
+         struct timespec ts = {0, 10 * 1000 * 1000}; /* 10ms */
+         nanosleep(&ts, NULL);
+      }
+      if (!reaped)
+      {
+         kill(-pid, SIGKILL);
+         kill(pid, SIGKILL);
+         waitpid(pid, NULL, 0); /* SIGKILL is uncatchable → bounded */
+      }
    }
    e->principal[0] = '\0';
    e->pid = 0;
