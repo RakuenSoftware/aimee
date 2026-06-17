@@ -512,6 +512,37 @@ static void test_query_embedding_memo_dedupes_embeds(void)
    printf("test_query_embedding_memo_dedupes_embeds: PASS\n");
 }
 
+/* Embed-batching: memory_query_embed_prewarm embeds N texts in one batched call
+ * and seeds the per-recall memo, so subsequent runtime embeds of those texts are
+ * served from the memo (no further embedder calls). The mock "embedder" reads a
+ * JSON array of texts and returns a JSON array of fixed vectors. */
+static void test_query_embed_prewarm_batches(void)
+{
+   memory_test_ensure_env();
+   const char *cmd = "python3 -c 'import sys,json; a=json.load(sys.stdin); "
+                     "print(json.dumps([[1.5,2.5,3.5,4.5] for _ in a]))'";
+
+   memory_query_embed_cache_reset_test();
+   const char *texts[2] = {"alpha query", "beta query"};
+   memory_query_embed_prewarm_test(texts, 2, cmd);
+
+   int req0 = 0, miss0 = 0;
+   memory_query_embed_cache_stats_test(&req0, &miss0);
+
+   float a[EMBED_MAX_DIM], b[EMBED_MAX_DIM];
+   int da = memory_query_embed_runtime_test("alpha query", cmd, a, EMBED_MAX_DIM);
+   int db = memory_query_embed_runtime_test("beta query", cmd, b, EMBED_MAX_DIM);
+
+   int req1 = 0, miss1 = 0;
+   memory_query_embed_cache_stats_test(&req1, &miss1);
+
+   assert(da == 4 && a[0] == 1.5f && a[3] == 4.5f);
+   assert(db == 4);
+   /* Both were served from the prewarmed batch — no individual embeds happened. */
+   assert(miss1 == miss0);
+   printf("test_query_embed_prewarm_batches: PASS\n");
+}
+
 /* Measurement (not a pass/fail gate): run a real recall and report how many
  * embed requests the lanes/sub-queries made vs how many actually hit the
  * embedder, so the per-recall dedup factor is visible. */
@@ -555,6 +586,7 @@ int main(void)
 
    test_db1_runtime_state_add_int();
    test_query_embedding_memo_dedupes_embeds();
+   test_query_embed_prewarm_batches();
    measure_query_embedding_memo_recall();
    test_insert_memory();
    test_insert_merge();

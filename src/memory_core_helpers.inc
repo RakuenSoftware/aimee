@@ -1787,6 +1787,113 @@ static int memory_embed_text_runtime(const char *text, const char *command, floa
    return dim;
 }
 
+/* Store one (command,text)->vector entry into the per-recall memo (used by the
+ * batch prewarm to seed vectors it embedded in bulk). */
+static void memory_query_embed_cache_put(const char *command, const char *text, const float *vec,
+                                         int dim)
+{
+   if (!command || !text || !vec || dim <= 0 || dim > EMBED_MAX_DIM)
+      return;
+   if (strlen(text) >= MEMORY_QEMBED_TEXT_MAX || strlen(command) >= MEMORY_QEMBED_CMD_MAX)
+      return;
+   for (int i = 0; i < s_qembed_count; i++)
+      if (strcmp(s_qembed[i].command, command) == 0 && strcmp(s_qembed[i].text, text) == 0)
+         return; /* already cached */
+   if (s_qembed_count >= MEMORY_QEMBED_CAP)
+      return;
+   memory_qembed_entry_t *e = &s_qembed[s_qembed_count++];
+   snprintf(e->command, sizeof(e->command), "%s", command);
+   snprintf(e->text, sizeof(e->text), "%s", text);
+   memcpy(e->vec, vec, (size_t)dim * sizeof(float));
+   e->dim = dim;
+}
+
+/* Embed-batching: embed up to `n` query texts in ONE batched embedder call and
+ * seed them into the per-recall memo, so the retrieval lanes hit the memo
+ * instead of making one HTTP round-trip per distinct text. Best-effort: skips
+ * builtin (in-process, nothing to batch) and texts already cached / too long;
+ * any failure (command error, count mismatch) leaves the memo untouched so the
+ * lanes simply embed individually. The embedding command must accept a JSON
+ * array of strings on stdin and return a JSON array of float arrays
+ * (scripts/embed-remote.py batch mode → embedder /embed_batch). */
+static void memory_query_embed_prewarm(const char *const *texts, int n, const char *command)
+{
+   const char *cmd = memory_effective_embedding_cmd(command);
+   if (n <= 0 || !texts || strcmp(cmd, "builtin") == 0)
+      return;
+
+   const char *picked[MEMORY_QEMBED_CAP];
+   int np = 0;
+   cJSON *arr = cJSON_CreateArray();
+   if (!arr)
+      return;
+   for (int i = 0; i < n && np < MEMORY_QEMBED_CAP; i++)
+   {
+      const char *t = texts[i];
+      if (!t || !t[0] || strlen(t) >= MEMORY_QEMBED_TEXT_MAX)
+         continue;
+      int dup = 0;
+      for (int j = 0; j < s_qembed_count && !dup; j++)
+         if (strcmp(s_qembed[j].command, cmd) == 0 && strcmp(s_qembed[j].text, t) == 0)
+            dup = 1;
+      for (int j = 0; j < np && !dup; j++)
+         if (strcmp(picked[j], t) == 0)
+            dup = 1;
+      if (dup)
+         continue;
+      picked[np++] = t;
+      cJSON_AddItemToArray(arr, cJSON_CreateString(t));
+   }
+   if (np < 2) /* one text: a single /embed is no slower than a batch of one */
+   {
+      cJSON_Delete(arr);
+      return;
+   }
+
+   char *input = cJSON_PrintUnformatted(arr);
+   cJSON_Delete(arr);
+   if (!input)
+      return;
+   char *buf = NULL;
+   size_t buf_len = 0;
+   int rc = platform_exec_pipe(cmd, input, strlen(input), &buf, &buf_len);
+   free(input);
+   if (rc != 0 || !buf || buf_len == 0)
+   {
+      free(buf);
+      return; /* lanes fall back to individual embeds */
+   }
+   cJSON *resp = cJSON_Parse(buf);
+   free(buf);
+   if (!cJSON_IsArray(resp) || cJSON_GetArraySize(resp) != np)
+   {
+      cJSON_Delete(resp);
+      return;
+   }
+   int idx = 0;
+   cJSON *vecj;
+   cJSON_ArrayForEach(vecj, resp)
+   {
+      if (cJSON_IsArray(vecj))
+      {
+         float vec[EMBED_MAX_DIM];
+         int dim = 0;
+         cJSON *el;
+         cJSON_ArrayForEach(el, vecj)
+         {
+            if (dim >= EMBED_MAX_DIM)
+               break;
+            if (cJSON_IsNumber(el))
+               vec[dim++] = (float)el->valuedouble;
+         }
+         if (dim > 0)
+            memory_query_embed_cache_put(cmd, picked[idx], vec, dim);
+      }
+      idx++;
+   }
+   cJSON_Delete(resp);
+}
+
 /* Test hooks (declared in memory.h) — expose the static memo to unit tests. */
 int memory_query_embed_runtime_test(const char *text, const char *command, float *out, int max_dim)
 {
@@ -1804,6 +1911,11 @@ void memory_query_embed_cache_stats_test(int *requests, int *misses)
 void memory_query_embed_cache_reset_test(void)
 {
    memory_query_embed_cache_reset();
+}
+
+void memory_query_embed_prewarm_test(const char *const *texts, int n, const char *command)
+{
+   memory_query_embed_prewarm(texts, n, command);
 }
 
 static int memory_semantic_query_unavailable(void)

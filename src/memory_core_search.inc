@@ -4047,6 +4047,41 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    }
 
    memory_query_intent_t intent = memory_query_intent(query, norm_query);
+
+   /* Embed-batching: warm the per-recall memo with the query texts the semantic
+    * lanes will embed — the base query plus its semantic form, for the main query
+    * and any decomposition sub-questions — in ONE batched embedder call. The
+    * lanes then hit the memo instead of one embedder round-trip each. Best-effort:
+    * texts are built with the same helpers the lanes use (so they match and hit);
+    * any that don't match simply fall back to an individual embed. */
+   {
+      config_t pw_cfg;
+      if (config_load(&pw_cfg) == 0 && pw_cfg.embedding_command[0])
+      {
+         const char *bt[3 + 2 * MEMORY_REWRITE_MAX_SUBQUERIES];
+         char sem_main[1024];
+         char sem_sub[MEMORY_REWRITE_MAX_SUBQUERIES][1024];
+         int bn = 0;
+         bt[bn++] = query;
+         memory_build_semantic_query_text(query, memory_query_intent(query, query), sem_main,
+                                          sizeof(sem_main));
+         if (sem_main[0])
+            bt[bn++] = sem_main;
+         if (rewrite.has_hyde && rewrite.hyde_answer[0])
+            bt[bn++] = rewrite.hyde_answer;
+         for (int q = 0; q < rewrite.sub_question_count; q++)
+         {
+            const char *sq = rewrite.sub_questions[q];
+            bt[bn++] = sq;
+            memory_build_semantic_query_text(sq, memory_query_intent(sq, sq), sem_sub[q],
+                                             sizeof(sem_sub[q]));
+            if (sem_sub[q][0])
+               bt[bn++] = sem_sub[q];
+         }
+         memory_query_embed_prewarm(bt, bn, pw_cfg.embedding_command);
+      }
+   }
+
    memory_query_plan_t plan;
    if (memory_query_plan(query, limit, MEMORY_RERANK_BUFFER, &plan) != 0)
       memset(&plan, 0, sizeof(plan));
