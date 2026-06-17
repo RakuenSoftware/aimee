@@ -945,6 +945,7 @@ double cosine_similarity(const float *a, const float *b, int dim);
 int memory_query_embed_runtime_test(const char *text, const char *command, float *out, int max_dim);
 void memory_query_embed_cache_reset_test(void);
 void memory_query_embed_cache_stats_test(int *requests, int *misses);
+void memory_query_embed_prewarm_test(const char *const *texts, int n, const char *command);
 
 /* --- Effectiveness Tracking --- */
 
@@ -1568,7 +1569,7 @@ void memory_recall_metrics(int64_t *assemblies_total, int64_t *session_start_ass
  * source file was re-scanned after the embedding was written (a staleness
  * heuristic ranking re-ingest order, NOT a correctness verdict). Default-off
  * (not in MODES_DEFAULT); requested explicitly (e.g. `maintenance --mode drift`). */
-#define MEMORY_MAINTENANCE_MODE_DRIFT     (1u << 4)
+#define MEMORY_MAINTENANCE_MODE_DRIFT (1u << 4)
 
 #define MEMORY_MAINTENANCE_MODES_DEFAULT                                                           \
    (MEMORY_MAINTENANCE_MODE_REPLAY | MEMORY_MAINTENANCE_MODE_COMPACT |                             \
