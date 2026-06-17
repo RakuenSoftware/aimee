@@ -797,9 +797,9 @@ int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *rol
  * empty type or ref are skipped; `versions` may be NULL). Returns 0 on success,
  * -1 on bad args or kb error. */
 int kb_client_evidence_merge_retrieval_event(const char *turn_id, const char *role,
-                                             const char *query_fingerprint,
-                                             const char *const *types, const char *const *refs,
-                                             const char *const *versions, int n);
+                                             const char *query_fingerprint, const char *const *types,
+                                             const char *const *refs, const char *const *versions,
+                                             int n);
 
 /* Auditable-correctness P1: the /v1/audit/trace read — forward to the KB
  * evidence.trace_retrieval_event action and return its JSON response verbatim

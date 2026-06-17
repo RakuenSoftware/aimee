@@ -952,6 +952,10 @@ static void kb_cmd_curator(app_ctx_t *ctx, int argc, char **argv)
          puts(j);
          free(j);
       }
+      else
+      {
+         puts("{\"status\":\"error\",\"message\":\"curator status serialization failed\"}");
+      }
       cJSON_Delete(root);
       return;
    }

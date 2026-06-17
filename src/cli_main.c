@@ -849,7 +849,7 @@ static int launch_session_with_input(int json_output, int debug, int default_lau
    /* Interactive chat/launch runs the agent and its tools on THIS host and
     * chdirs into a server-resolved worktree on the local filesystem, so it needs
     * a co-located aimee-server over the local socket. A remote /v1 endpoint
-    * serves only the data/control plane (memory, kb, rules, index, sessions, …). */
+    * serves only the /v1 data plane (memory, kb, rules, index, sessions, …). */
    /* A remote aimee-server runs the agent + tools on the server; serve THIS
     * client's working tree over the reverse-channel so those tools act here (the
     * client never absorbs the engine or a DB). A co-located server uses the local
