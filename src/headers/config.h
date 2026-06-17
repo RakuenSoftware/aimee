@@ -711,13 +711,6 @@ typedef struct config
     * DELEGATES.md). Does not affect API-key/HTTP agents or other CLI agents. */
    int claude_cli_delegate_enabled;
 
-   /* Operator opt-in (default 0) for the server-hosted OAuth CLI agent setup:
-    * `aimee agent add claude-oauth`/`codex-oauth` installs the vendor CLI on the
-    * aimee-server host and drives its OAuth login there. Running vendor CLIs +
-    * holding their OAuth tokens on a shared server is sensitive (and may bump
-    * vendor terms), so the install/login routes refuse unless this is set. */
-   int server_cli_oauth_enabled;
-
    /* Verify scope. When 0 (default), `aimee git verify` and the push/PR verify
     * gate apply only to the session's current project (the repo the session is
     * rooted in). Cross-project repositories are neither auto-configured (no

@@ -290,10 +290,7 @@ static void setup_server_oauth_cli(const char *vendor)
    cJSON_Delete(start_body);
    if (!started)
    {
-      fprintf(stderr,
-              "Could not start %s setup (is the server reachable and "
-              "server_cli_oauth_enabled=true?).\n",
-              vendor);
+      fprintf(stderr, "Could not start %s setup (is the server reachable?).\n", vendor);
       return;
    }
    char session[128];

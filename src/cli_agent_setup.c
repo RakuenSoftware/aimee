@@ -248,10 +248,7 @@ static int setup_oauth_cli_cmd(const char *vendor, int json_output)
    cJSON *started = setup_oauth_rpc("agent.cli_oauth_start", vendor, NULL, NULL, 120000);
    if (!started)
    {
-      fprintf(stderr,
-              "Could not start %s setup (is the server reachable and "
-              "server_cli_oauth_enabled=true?).\n",
-              vendor);
+      fprintf(stderr, "Could not start %s setup (is the server reachable?).\n", vendor);
       return 1;
    }
    char session[160] = "";
