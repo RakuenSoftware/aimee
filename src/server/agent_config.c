@@ -603,7 +603,23 @@ int agent_load_config(agent_config_t *cfg)
          ag->max_tokens = (v && cJSON_IsNumber(v)) ? v->valueint : AGENT_DEFAULT_MAX_TOKENS;
 
          v = cJSON_GetObjectItem(a, "timeout_ms");
-         ag->timeout_ms = (v && cJSON_IsNumber(v)) ? v->valueint : AGENT_DEFAULT_TIMEOUT_MS;
+         if (v && cJSON_IsNumber(v))
+         {
+            ag->timeout_ms = v->valueint; /* operator's explicit value wins */
+         }
+         else
+         {
+            /* No operator timeout: give a reasoning-capable model a higher per-call
+             * default so its slow (multi-minute) completions aren't cut off and
+             * retried as spurious read failures. Capability lookup is total +
+             * offline (same guarantees as the tools_enabled derivation below);
+             * an unknown/non-reasoning model keeps the standard default. */
+            model_capability_t tmc;
+            int reasoning = ag->model[0] &&
+                            model_capability_get(ag->provider, ag->model, &tmc) &&
+                            (tmc.flags & MODEL_CAP_REASONING);
+            ag->timeout_ms = reasoning ? AGENT_REASONING_TIMEOUT_MS : AGENT_DEFAULT_TIMEOUT_MS;
+         }
 
          v = cJSON_GetObjectItem(a, "enabled");
          ag->enabled = (!v || !cJSON_IsBool(v)) ? 1 : cJSON_IsTrue(v);
