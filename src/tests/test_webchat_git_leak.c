@@ -9,8 +9,10 @@
 #include "vault_service.h"
 
 #include <assert.h>
+#include <dirent.h>
 #include <ftw.h>
 #include <stdint.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -81,19 +83,46 @@ int main(void)
    assert(vault_service_set(alice, GIT_FORGE_VAULT_AGENT, GIT_FORGE_TOKEN_CRED, CANARY, T0) ==
           VAULT_OK);
 
-   /* Drop the cached KEK so nothing transient holds the plaintext, then sync the
-    * vault file to disk by walking the whole AIMEE_HOME tree. */
+   /* Drop the cached KEK so nothing transient holds the plaintext; sync so the
+    * vault's ciphertext write is durable before we inspect the disk. */
    vault_kek_cache_clear();
+   sync();
+
+   /* POSITIVE proof the vault actually persisted something: the vault writes only
+    * to ${AIMEE_HOME}/.vault (config_default_dir + "/.vault"), so a non-empty
+    * blob there means the credential was stored — not a silent no-op. */
+   char vdir[300];
+   snprintf(vdir, sizeof(vdir), "%s/.vault", home);
+   DIR *vd = opendir(vdir);
+   assert(vd != NULL);
+   int blob_files = 0;
+   struct dirent *ve;
+   while ((ve = readdir(vd)) != NULL)
+   {
+      if (ve->d_name[0] == '.')
+         continue;
+      char vp[600];
+      snprintf(vp, sizeof(vp), "%s/%s", vdir, ve->d_name);
+      struct stat vst;
+      if (stat(vp, &vst) == 0 && S_ISREG(vst.st_mode) && vst.st_size > 0)
+         blob_files++;
+   }
+   closedir(vd);
+   assert(blob_files > 0); /* the vault persisted a non-empty (ciphertext) blob */
 
    /* INVARIANT: the canary's plaintext must appear in NO file under AIMEE_HOME
-    * (the vault stores it AES-wrapped; the .vault blob is ciphertext). */
+    * — including the .vault blob, which holds it AES-wrapped (ciphertext only).
+    * Persisted (above) + no-plaintext (here) + decryptable round-trip (below)
+    * together prove encrypted-at-rest, not a no-op or a plaintext store. */
    g_leaks = 0;
    assert(nftw(home, walk_cb, 16, FTW_PHYS) == 0);
    if (g_leaks)
       fprintf(stderr, "vault leaked the credential to disk in %d file(s)\n", g_leaks);
    assert(g_leaks == 0);
 
-   /* ...yet it is still resolvable in-memory for credential injection. */
+   /* ...yet it round-trips: with the KEK cache cleared (above) and no cache in
+    * git_forge_vault, this read DECRYPTS the on-disk blob under the server KEK —
+    * proving the persisted ciphertext really is the canary (not a no-op). */
    char tok[4096];
    assert(git_forge_vault_token(alice, tok, sizeof(tok)) == 1);
    assert(strcmp(tok, CANARY) == 0);
