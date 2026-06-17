@@ -19,8 +19,12 @@
 
 const char *db1_default_path(void)
 {
-   static char path[MAX_PATH_LEN];
-   static char cached_base[MAX_PATH_LEN];
+   /* Thread-local: returned-pointer scratch. This is the db1_default_path hook
+    * config_default_db1_path() delegates to, reached from config_load() on
+    * several concurrent threads — a process-global static buffer is a data race
+    * (see the matching fix in config.c / aimee_home.c). */
+   static __thread char path[MAX_PATH_LEN];
+   static __thread char cached_base[MAX_PATH_LEN];
    const char *base = aimee_home();
    if (!base)
       base = "/tmp/.config/aimee";

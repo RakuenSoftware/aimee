@@ -159,8 +159,10 @@ const char *config_default_dir(void)
 
 const char *config_default_path(void)
 {
-   static char path[MAX_PATH_LEN];
-   static char cached_dir[MAX_PATH_LEN];
+   /* Thread-local: returned-pointer scratch reachable from config_load() on
+    * several concurrent kb worker threads (TSan data race otherwise). */
+   static __thread char path[MAX_PATH_LEN];
+   static __thread char cached_dir[MAX_PATH_LEN];
    const char *dir = config_default_dir();
 
    if (path[0] && strcmp(cached_dir, dir) == 0)
@@ -173,7 +175,8 @@ const char *config_default_path(void)
 
 const char *config_output_dir(void)
 {
-   static char fallback[MAX_PATH_LEN];
+   /* Thread-local returned-pointer scratch; see config_default_path(). */
+   static __thread char fallback[MAX_PATH_LEN];
    const char *dir = config_default_dir();
 
    if (dir && platform_mkdir_p(dir, 0700) == 0 && access(dir, W_OK) == 0)
@@ -197,7 +200,8 @@ const char *config_default_db1_path(void)
    if (db1_default_path)
       return db1_default_path();
 
-   static char path[MAX_PATH_LEN];
+   /* Thread-local returned-pointer scratch; see config_default_path(). */
+   static __thread char path[MAX_PATH_LEN];
    const char *dir = config_default_dir();
    snprintf(path, sizeof(path), "%s/aimee.db", dir ? dir : "/tmp");
    return path;
