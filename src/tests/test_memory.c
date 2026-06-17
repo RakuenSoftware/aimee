@@ -459,6 +459,87 @@ static void test_audit_provenance_emit_captures_version(void)
    printf("  audit provenance emit captures point-in-time version OK\n");
 }
 
+static long qembed_file_size(const char *path)
+{
+   struct stat st;
+   return stat(path, &st) == 0 ? (long)st.st_size : -1;
+}
+
+/* Per-recall query-embedding memo: an identical (command,text) embeds once and
+ * is served from the thread-local cache on the recall's other lanes/sub-queries;
+ * the memo clears at each recall entry. The "embedder" command records one byte
+ * per real invocation, so the counter file size == number of cache misses. */
+static void test_query_embedding_memo_dedupes_embeds(void)
+{
+   memory_test_ensure_env();
+
+   char counter[512];
+   snprintf(counter, sizeof(counter), "%s/aimee-qembed-counter-XXXXXX", platform_tmpdir());
+   int fd = platform_mkstemp(counter, sizeof(counter), "aim");
+   assert(fd >= 0);
+   close(fd);
+
+   char cmd[1024];
+   snprintf(cmd, sizeof(cmd), "printf x >> '%s'; printf '[1.5, 2.5, 3.5, 4.5]'", counter);
+
+   float a[EMBED_MAX_DIM], b[EMBED_MAX_DIM], c[EMBED_MAX_DIM];
+
+   memory_query_embed_cache_reset_test();
+
+   int da = memory_query_embed_runtime_test("alpha query", cmd, a, EMBED_MAX_DIM);
+   assert(da == 4);
+   assert(a[0] == 1.5f && a[3] == 4.5f);
+   assert(qembed_file_size(counter) == 1); /* one real embed */
+
+   /* Same text → served from cache: no new subprocess, byte-identical vector. */
+   int db = memory_query_embed_runtime_test("alpha query", cmd, b, EMBED_MAX_DIM);
+   assert(db == 4);
+   assert(memcmp(a, b, 4 * sizeof(float)) == 0);
+   assert(qembed_file_size(counter) == 1); /* still one embed */
+
+   /* Different text → cache miss → a second embed. */
+   int dc = memory_query_embed_runtime_test("beta query", cmd, c, EMBED_MAX_DIM);
+   assert(dc == 4);
+   assert(qembed_file_size(counter) == 2);
+
+   /* Reset (new recall window) clears the memo → the first text embeds again. */
+   memory_query_embed_cache_reset_test();
+   int dd = memory_query_embed_runtime_test("alpha query", cmd, a, EMBED_MAX_DIM);
+   assert(dd == 4);
+   assert(qembed_file_size(counter) == 3);
+
+   unlink(counter);
+   printf("test_query_embedding_memo_dedupes_embeds: PASS\n");
+}
+
+/* Measurement (not a pass/fail gate): run a real recall and report how many
+ * embed requests the lanes/sub-queries made vs how many actually hit the
+ * embedder, so the per-recall dedup factor is visible. */
+static void measure_query_embedding_memo_recall(void)
+{
+   setup();
+   memory_t a, b;
+   memory_insert(TIER_L2, KIND_DECISION, "transport decision",
+                 "The team chose server sent events for live frontend updates.", 0.92, "s1", &a);
+   memory_insert(TIER_L2, KIND_FACT, "frontend architecture",
+                 "Frontend network architecture uses an event stream transport layer.", 0.87, "s1",
+                 &b);
+
+   memory_t results[8];
+   (void)memory_find_facts(
+       "did we decide to use sse or websockets for the frontend network architecture last week", 5,
+       results, 8);
+
+   int requests = 0, misses = 0;
+   memory_query_embed_cache_stats_test(&requests, &misses);
+   printf("MEASURE query-embed memo (one recall): requests=%d misses=%d saved=%d (%.0f%% fewer "
+          "embeds)\n",
+          requests, misses, requests - misses,
+          requests > 0 ? 100.0 * (requests - misses) / requests : 0.0);
+   assert(requests >= misses);
+   teardown();
+}
+
 int main(void)
 {
    char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
@@ -473,6 +554,8 @@ int main(void)
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
 
    test_db1_runtime_state_add_int();
+   test_query_embedding_memo_dedupes_embeds();
+   measure_query_embedding_memo_recall();
    test_insert_memory();
    test_insert_merge();
    test_touch_memory();

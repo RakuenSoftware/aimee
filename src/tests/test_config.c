@@ -166,6 +166,14 @@ int main(void)
       snprintf(cfg.kb_curator_judge_command, sizeof(cfg.kb_curator_judge_command), "judge --json");
       snprintf(cfg.kb_curator_synthesize_command, sizeof(cfg.kb_curator_synthesize_command),
                "synth --json");
+      /* kb.curator provider/tier_b (§2) — full provider defs must round-trip. */
+      snprintf(cfg.kb_curator_provider_base_url, sizeof(cfg.kb_curator_provider_base_url),
+               "http://curator:8080/v1");
+      snprintf(cfg.kb_curator_provider_model, sizeof(cfg.kb_curator_provider_model), "gemma-4-e4b");
+      snprintf(cfg.kb_curator_tier_b_base_url, sizeof(cfg.kb_curator_tier_b_base_url),
+               "https://api.big/v1");
+      snprintf(cfg.kb_curator_tier_b_model, sizeof(cfg.kb_curator_tier_b_model), "big-32b");
+      snprintf(cfg.kb_curator_tier_b_api_key, sizeof(cfg.kb_curator_tier_b_api_key), "sk-secret");
       cfg.kb_evidence_embed_enabled = 0;
       /* profile_cards now defaults on; set it off to prove the disabled state
        * round-trips (regression class: a default-on bool whose save guard only
@@ -354,6 +362,11 @@ int main(void)
       assert(cfg2.kb_curator_synthesize_k == 4);
       assert(strcmp(cfg2.kb_curator_judge_command, "judge --json") == 0);
       assert(strcmp(cfg2.kb_curator_synthesize_command, "synth --json") == 0);
+      assert(strcmp(cfg2.kb_curator_provider_base_url, "http://curator:8080/v1") == 0);
+      assert(strcmp(cfg2.kb_curator_provider_model, "gemma-4-e4b") == 0);
+      assert(strcmp(cfg2.kb_curator_tier_b_base_url, "https://api.big/v1") == 0);
+      assert(strcmp(cfg2.kb_curator_tier_b_model, "big-32b") == 0);
+      assert(strcmp(cfg2.kb_curator_tier_b_api_key, "sk-secret") == 0);
       assert(cfg2.kb_evidence_embed_enabled == 0);
       assert(cfg2.memory_profile_cards_enabled == 0);
       assert(cfg2.memory_improve_dedupe_enabled == 0);

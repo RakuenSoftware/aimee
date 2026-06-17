@@ -11,13 +11,25 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char *const CSS_OPS[] = {
-    "dead-rules",          "conflicts",        "duplicate-declarations",
-    "duplicate-selectors", "unresolved",       "migrate-enumerate",
-    "migrate-list",        "rules-doc",        "assert-conventions",
-    "conventions",         "render-store",     "render-capture",
-    "render-verify",       "important-audit",  "high-specificity",
-    "unused-vars",         "token-candidates", NULL};
+static const char *const CSS_OPS[] = {"dead-rules",
+                                      "conflicts",
+                                      "duplicate-declarations",
+                                      "duplicate-selectors",
+                                      "unresolved",
+                                      "migrate-enumerate",
+                                      "migrate-list",
+                                      "rules-doc",
+                                      "assert-conventions",
+                                      "conventions",
+                                      "render-store",
+                                      "render-capture",
+                                      "render-verify",
+                                      "important-audit",
+                                      "high-specificity",
+                                      "unused-vars",
+                                      "token-candidates",
+                                      "report",
+                                      NULL};
 
 static int css_op_known(const char *op)
 {
@@ -33,7 +45,8 @@ static void css_usage(void)
                    "  ops: dead-rules | conflicts | duplicate-declarations |\n"
                    "       duplicate-selectors | unresolved | migrate-enumerate |\n"
                    "       migrate-list | rules-doc | assert-conventions | conventions |\n"
-                   "       important-audit | high-specificity | unused-vars | token-candidates\n"
+                   "       important-audit | high-specificity | unused-vars | token-candidates |\n"
+                   "       report  (one-shot CSS-health overview)\n"
                    "  render-store <project> <unit> <before|after> <snapshot.json>\n"
                    "  render-capture <project> <unit> <before|after> <html-file> <css-file>\n"
                    "  render-verify <project> <unit>\n");
@@ -81,6 +94,58 @@ static void css_print_results(const char *op, cJSON *resp)
    {
       cJSON *u = cJSON_GetObjectItemCaseSensitive(resp, "units");
       printf("enumerated %d migration unit(s)\n", cJSON_IsNumber(u) ? u->valueint : 0);
+      return;
+   }
+   if (strcmp(op, "report") == 0)
+   {
+      const cJSON *s = cJSON_GetObjectItemCaseSensitive(resp, "summary");
+      const cJSON *top = cJSON_GetObjectItemCaseSensitive(resp, "top");
+      const cJSON *proj = cJSON_GetObjectItemCaseSensitive(resp, "project");
+      printf("CSS health — %s\n", cJSON_IsString(proj) ? proj->valuestring : "");
+      static const char *const rows[][2] = {
+          {"dead_rules", "dead rules"},
+          {"specificity_conflicts", "specificity conflicts"},
+          {"duplicate_declarations", "duplicate declarations"},
+          {"duplicate_selectors", "duplicate selectors"},
+          {"unresolved_classes", "unresolved classes"},
+          {"high_specificity_rules", "high-specificity (id) rules"},
+          {"important_declarations", "!important declarations"},
+          {"unused_custom_properties", "unused custom properties"},
+          {"token_candidates", "token candidates"},
+          {NULL, NULL}};
+      for (int i = 0; rows[i][0]; i++)
+      {
+         const cJSON *v = cJSON_GetObjectItemCaseSensitive(s, rows[i][0]);
+         printf("  %-28s %d\n", rows[i][1], cJSON_IsNumber(v) ? v->valueint : 0);
+      }
+      const cJSON *imp = top ? cJSON_GetObjectItemCaseSensitive(top, "important") : NULL;
+      if (imp && cJSON_GetArraySize(imp) > 0)
+      {
+         printf("  top !important:");
+         const cJSON *r = NULL;
+         cJSON_ArrayForEach(r, imp)
+         {
+            const cJSON *p = cJSON_GetObjectItemCaseSensitive(r, "property");
+            const cJSON *c = cJSON_GetObjectItemCaseSensitive(r, "count");
+            printf(" %s(%d)", cJSON_IsString(p) ? p->valuestring : "?",
+                   cJSON_IsNumber(c) ? c->valueint : 0);
+         }
+         printf("\n");
+      }
+      const cJSON *tok = top ? cJSON_GetObjectItemCaseSensitive(top, "token_candidates") : NULL;
+      if (tok && cJSON_GetArraySize(tok) > 0)
+      {
+         printf("  top tokens:    ");
+         const cJSON *r = NULL;
+         cJSON_ArrayForEach(r, tok)
+         {
+            const cJSON *val = cJSON_GetObjectItemCaseSensitive(r, "value");
+            const cJSON *c = cJSON_GetObjectItemCaseSensitive(r, "count");
+            printf(" %s(%d)", cJSON_IsString(val) ? val->valuestring : "?",
+                   cJSON_IsNumber(c) ? c->valueint : 0);
+         }
+         printf("\n");
+      }
       return;
    }
    if (strcmp(op, "assert-conventions") == 0)
