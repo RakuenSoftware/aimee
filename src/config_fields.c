@@ -110,6 +110,8 @@ const config_field_t config_fields[] = {
     {"memory_bm25_weight", offsetof(config_t, memory_bm25_weight), sizeof(double), 0, CFG_FLOAT},
     {"memory_semantic_weight", offsetof(config_t, memory_semantic_weight), sizeof(double), 0,
      CFG_FLOAT},
+    {"memory_semantic_floor_scale", offsetof(config_t, memory_semantic_floor_scale), sizeof(double),
+     0, CFG_FLOAT},
     {"memory_fetch_budget_enabled", offsetof(config_t, memory_fetch_budget_enabled), sizeof(int), 0,
      CFG_BOOL},
     {"memory_fetch_budget_base", offsetof(config_t, memory_fetch_budget_base), sizeof(int), 0,

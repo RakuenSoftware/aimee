@@ -469,10 +469,55 @@ static double memory_unit_semantic_type_boost(const char *unit_type, memory_quer
    return 0.0;
 }
 
+/* Whether the semantic-vector leg can run for a freshly embedded query: it must
+ * have produced a vector AND that vector's dimension must match the dimension
+ * the memory vectors were stored at (db2_embedding_dim()), so pgvector compares
+ * like with like. This generalises the historical `qdim == 384` special-case —
+ * which silently disabled semantic recall for every embedder other than the
+ * retired 384-d builtin — to whatever single embedder the deployment runs. */
+static int memory_semantic_dim_ok(int qdim)
+{
+   return qdim > 0 && qdim == db2_embedding_dim();
+}
+
+/* Cosine-similarity floors below were calibrated for the 384-d builtin embedder.
+ * Different embedders occupy different cosine ranges, so a fixed floor that
+ * keeps the right hits for one rejects them all for another (pplx-0.6b relevant
+ * matches land ~0.35-0.40, well under the 0.62/0.52 builtin-era floors). Scale
+ * the floors to the active embedder. config.memory_semantic_floor_scale > 0
+ * pins the multiplier (live calibration without a rebuild); 0 auto-scales by the
+ * active embedding dimension. Returns a multiplier applied to every floor. */
+static double memory_semantic_floor_scale(void)
+{
+   config_t fs_cfg;
+   if (config_load(&fs_cfg) == 0 && fs_cfg.memory_semantic_floor_scale > 0.0)
+      return fs_cfg.memory_semantic_floor_scale;
+   int dim = db2_embedding_dim();
+   if (dim <= 384)
+      return 1.0; /* 384-d builtin: the floors are calibrated for this range */
+   if (dim <= 1024)
+      return 0.55; /* pplx-0.6b: relevant cosines observed ~0.38 (0.62*0.55=0.34) */
+   if (dim <= 2560)
+      return 0.75; /* pplx-4b: wider than 0.6b but estimated — tune via config */
+   return 0.65;    /* unknown embedder: lean permissive over silently dropping */
+}
+
+/* Test hooks (declared in memory.h): expose the embedder-aware semantic gate +
+ * floor scale so unit tests can pin db2_set_embedding_dim() and assert that the
+ * leg runs and the floor tracks the active embedder dimension. */
+int memory_semantic_dim_ok_test(int qdim)
+{
+   return memory_semantic_dim_ok(qdim);
+}
+double memory_semantic_floor_scale_test(void)
+{
+   return memory_semantic_floor_scale();
+}
+
 /* Visitor state for the ephemeral-mode in-memory cosine scan. The visitor
- * keeps the top hits whose sim >= 0.62, deduplicating by memory_id and
- * resolving the memory row inline. The fixed cap matches the original local
- * array size; once we run out of slots we drop further matches. */
+ * keeps the top hits whose sim >= the embedder-scaled floor, deduplicating by
+ * memory_id and resolving the memory row inline. The fixed cap matches the
+ * original local array size; once we run out of slots we drop further matches. */
 static int memory_collect_semantic_matches(const char *query, const char *command, int limit,
                                            memory_t *out, int count, int max, int64_t *semantic_ids,
                                            double *semantic_scores, int *semantic_hit_count,
@@ -491,8 +536,9 @@ static int memory_collect_semantic_matches(const char *query, const char *comman
    if (qdim <= 0)
       return count;
 
-   if (qdim == 384)
+   if (memory_semantic_dim_ok(qdim))
    {
+      const double floor_scale = memory_semantic_floor_scale();
       int64_t ids[128];
       double scores[128];
       int hit_total = pgvec_memory_vector_search_record_type(
@@ -505,7 +551,7 @@ static int memory_collect_semantic_matches(const char *query, const char *comman
          for (int i = 0; i < hit_total && count < max && appended < limit; i++)
          {
             double sim = scores[i];
-            if (sim < 0.62)
+            if (sim < 0.62 * floor_scale)
                continue;
 
             memory_t candidate;
@@ -549,8 +595,9 @@ static int memory_collect_unit_semantic_matches(const char *query, const char *c
    if (qdim <= 0)
       return count;
 
-   if (qdim == 384)
+   if (memory_semantic_dim_ok(qdim))
    {
+      const double floor_scale = memory_semantic_floor_scale();
       int64_t ids[128];
       double vector_scores[128];
       int q_hits = pgvec_memory_vector_search_record_type(
@@ -592,6 +639,7 @@ static int memory_collect_unit_semantic_matches(const char *query, const char *c
             else if (intent == MEM_QUERY_TEMPORAL &&
                      (strcmp(unit_type, "temporal") == 0 || strcmp(unit_type, "event") == 0))
                threshold = 0.46;
+            threshold *= floor_scale;
             if (sim < threshold)
                continue;
 

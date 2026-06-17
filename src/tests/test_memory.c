@@ -18,6 +18,7 @@
 #include "platform_test_util.h"
 #include "workspace.h"
 #include "../db2/db2_internal.h"
+#include "../db2/lifecycle.h" /* db2_set_embedding_dim (embedder-aware semantic recall) */
 #include "../db2/entity_edges.h"
 #include "../db2/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
 #include "../db2/demotion.h"       /* retrieval_event write/read (auditable-correctness P2) */
@@ -571,6 +572,39 @@ static void measure_query_embedding_memo_recall(void)
    teardown();
 }
 
+/* The semantic-memory legs were gated on `qdim == 384` (the retired builtin) and
+ * used 384-calibrated cosine floors, so semantic recall was silently dead for
+ * pplx-0.6b (1024) / pplx-4b (2560). Verify the gate now tracks the active
+ * embedding dim and the floor scales down for the compressed-range embedders. */
+static void test_semantic_recall_is_embedder_aware(void)
+{
+   setup();
+
+   db2_set_embedding_dim(384);
+   assert(memory_semantic_dim_ok_test(384) == 1);
+   assert(memory_semantic_dim_ok_test(1024) == 0); /* mismatch must not query */
+   assert(memory_semantic_dim_ok_test(0) == 0);    /* embed failure */
+   assert(fabs(memory_semantic_floor_scale_test() - 1.0) < 1e-9);
+
+   db2_set_embedding_dim(1024); /* pplx-0.6b: the leg must now run */
+   assert(memory_semantic_dim_ok_test(1024) == 1);
+   assert(memory_semantic_dim_ok_test(384) == 0);
+   double s1024 = memory_semantic_floor_scale_test();
+   assert(s1024 > 0.0 && s1024 < 1.0); /* floors relaxed vs the 384 baseline */
+   assert(0.62 * s1024 < 0.45);        /* 384-era 0.62 floor now clears ~0.38 hits */
+
+   db2_set_embedding_dim(2560); /* pplx-4b */
+   assert(memory_semantic_dim_ok_test(2560) == 1);
+   double s2560 = memory_semantic_floor_scale_test();
+   assert(s2560 > s1024 && s2560 <= 1.0); /* 4b range wider than 0.6b, <= builtin */
+
+   db2_set_embedding_dim(9999); /* unknown embedder: permissive, never 1:1 */
+   assert(memory_semantic_floor_scale_test() < 1.0);
+
+   db2_set_embedding_dim(1024); /* restore the deployment default */
+   teardown();
+}
+
 int main(void)
 {
    char *old_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
@@ -587,6 +621,7 @@ int main(void)
    test_db1_runtime_state_add_int();
    test_query_embedding_memo_dedupes_embeds();
    test_query_embed_prewarm_batches();
+   test_semantic_recall_is_embedder_aware();
    measure_query_embedding_memo_recall();
    test_insert_memory();
    test_insert_merge();
