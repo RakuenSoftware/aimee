@@ -101,10 +101,14 @@ static long parse_agent_pid(const char *s)
    return p ? strtol(p + strlen("SSH_AGENT_PID="), NULL, 10) : 0;
 }
 
-static void paths(const char *rt, char *sock, size_t sc, char *pidf, size_t pc)
+/* Build the socket + pidfile paths under the (server-controlled, bounded) tmpfs
+ * runtime dir. Returns 0, or -1 on truncation (callers then bail rather than
+ * operate on a malformed path). */
+static int paths(const char *rt, char *sock, size_t sc, char *pidf, size_t pc)
 {
-   snprintf(sock, sc, "%s/ssh-agent.sock", rt);
-   snprintf(pidf, pc, "%s/ssh-agent.pid", rt);
+   int a = snprintf(sock, sc, "%s/ssh-agent.sock", rt);
+   int b = snprintf(pidf, pc, "%s/ssh-agent.pid", rt);
+   return (a > 0 && (size_t)a < sc && b > 0 && (size_t)b < pc) ? 0 : -1;
 }
 
 /* Read a pidfile; return the pid if its process is alive, else 0. */
@@ -138,9 +142,15 @@ int git_ssh_agent_ensure(const char *principal, char *out, size_t cap)
       return -1; /* tmpfs gate failed -> fail closed, never write the key */
    }
    char sock[2200], pidf[2200];
-   paths(rt, sock, sizeof(sock), pidf, sizeof(pidf));
+   if (paths(rt, sock, sizeof(sock), pidf, sizeof(pidf)) != 0)
+   {
+      memset(key, 0, sizeof(key));
+      return -1;
+   }
 
-   /* Reuse a live agent (key already loaded). */
+   /* Reuse a live agent (key already loaded). A benign race exists — the agent
+    * could exit between this check and use — but the only consequence is the git
+    * op failing to connect (retryable), never a credential exposure. */
    if (live_pid(pidf))
    {
       memset(key, 0, sizeof(key));
@@ -169,8 +179,11 @@ int git_ssh_agent_ensure(const char *principal, char *out, size_t cap)
       chmod(pidf, 0600);
    }
 
-   /* Load the key from a memfd — no filesystem path ever holds it. */
-   int mfd = memfd_create("aimee-sshkey", 0); /* NOT cloexec: inherited by ssh-add */
+   /* Load the key from a memfd — no filesystem path ever holds it. MFD_CLOEXEC
+    * so the parent's fd can't leak to an unrelated concurrent fork+exec; the
+    * ssh-add child still gets it because run_child dup2()'s it onto fd 3, which
+    * is created WITHOUT cloexec (and run_child clears it explicitly too). */
+   int mfd = memfd_create("aimee-sshkey", MFD_CLOEXEC);
    int ok = 0;
    if (mfd >= 0)
    {
@@ -210,7 +223,8 @@ void git_ssh_agent_stop(const char *principal)
    if (webuser_runtime_dir(principal, rt, sizeof(rt)) != 0)
       return;
    char sock[2200], pidf[2200];
-   paths(rt, sock, sizeof(sock), pidf, sizeof(pidf));
+   if (paths(rt, sock, sizeof(sock), pidf, sizeof(pidf)) != 0)
+      return;
    long pid = live_pid(pidf);
    if (pid > 0)
       kill((pid_t)pid, SIGTERM);
