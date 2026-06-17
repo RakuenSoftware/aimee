@@ -2,6 +2,7 @@
 
 #include "kb_curator_provider.h"
 
+#include <stdlib.h> /* getenv */
 #include <string.h>
 
 kb_curator_tier_t kb_curator_stage_tier(kb_curator_stage_t stage)
@@ -54,10 +55,25 @@ int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
       api_key = cfg->kb_curator_provider_api_key;
    }
 
-   /* An empty base_url means that tier is unconfigured — the stage stays idle.
-    * Tier-B intentionally does NOT fall back to the Tier-A default. */
+   /* Env bridge: when a tier has no config provider, fall back to the curator's
+    * LLM_ENDPOINT/LLM_MODEL/LLM_API_KEY env (the interface the bundled-Gemma
+    * deployment and the python sidecars already use). A config provider for the
+    * tier takes precedence; the env is a single endpoint that, when set, serves
+    * BOTH tiers (matching the short-term "everything on the bundled model"
+    * behavior) until an operator sets a capable tier_b.* in config. This is a
+    * whole-provider fallback (base+model+key together), not field-level mixing —
+    * the config and env providers are distinct units. */
    if (!base_url[0])
-      return 0;
+   {
+      const char *env_ep = getenv("LLM_ENDPOINT");
+      if (!env_ep || !env_ep[0])
+         return 0; /* neither config nor env — the stage stays idle */
+      const char *env_model = getenv("LLM_MODEL");
+      const char *env_key = getenv("LLM_API_KEY");
+      base_url = env_ep;
+      model = (env_model && env_model[0]) ? env_model : "";
+      api_key = (env_key && env_key[0]) ? env_key : "";
+   }
 
    out->base_url = base_url;
    out->model = model;

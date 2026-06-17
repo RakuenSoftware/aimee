@@ -111,6 +111,11 @@ static void test_idle_when_unconfigured(void)
 
 int main(void)
 {
+   /* The resolver falls back to LLM_ENDPOINT env; clear it so the idle-path test
+    * is deterministic regardless of the ambient/CI environment. */
+   unsetenv("LLM_ENDPOINT");
+   unsetenv("LLM_MODEL");
+   unsetenv("LLM_API_KEY");
    test_provider_path();
    test_provider_error();
    test_idle_when_unconfigured();
