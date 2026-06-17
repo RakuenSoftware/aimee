@@ -358,44 +358,24 @@ static int schannel_load_client_identity(aimee_tls_t *t)
    NCRYPT_PROV_HANDLE prov = 0;
    NCRYPT_KEY_HANDLE hkey = 0;
 
-#define DBG(...)                                                                                   \
-   do                                                                                              \
-   {                                                                                               \
-      if (getenv("AIMEE_TLS_DEBUG"))                                                               \
-         fprintf(stderr, "aimee.tls.schannel: " __VA_ARGS__);                                      \
-   } while (0)
-
    cpem = read_small_file(crt, &clen);
    kpem = read_small_file(key, &klen);
    if (!cpem || !kpem)
-   {
-      DBG("read_small_file failed (cpem=%p kpem=%p)\n", (void *)cpem, (void *)kpem);
       goto done;
-   }
    if (pem_to_der(cpem, clen, &cder, &cdl) != 0 || pem_to_der(kpem, klen, &kder, &kdl) != 0)
-   {
-      DBG("pem_to_der failed (cder=%p kder=%p)\n", (void *)cder, (void *)kder);
       goto done;
-   }
-   DBG("decoded cert=%lu der bytes, key=%lu der bytes\n", (unsigned long)cdl, (unsigned long)kdl);
 
    cert = CertCreateCertificateContext(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, cder, cdl);
    if (!cert)
-   {
-      DBG("CertCreateCertificateContext failed: 0x%lx\n", (unsigned long)GetLastError());
       goto done;
-   }
    {
-      SECURITY_STATUS ss = NCryptOpenStorageProvider(&prov, MS_KEY_STORAGE_PROVIDER, 0);
-      if (ss != ERROR_SUCCESS)
-      {
-         DBG("NCryptOpenStorageProvider failed: 0x%lx\n", (unsigned long)ss);
+      if (NCryptOpenStorageProvider(&prov, MS_KEY_STORAGE_PROVIDER, 0) != ERROR_SUCCESS)
          goto done;
-      }
       /* Import the key PERSISTED under a unique container name. Schannel signs
        * the CertificateVerify by opening the key via the cert's PROV_INFO, and
        * it cannot use an ephemeral (nameless) CNG handle for that — so a named
-       * key + CERT_KEY_PROV_INFO_PROP_ID is required, not CERT_KEY_CONTEXT. */
+       * key + CERT_KEY_PROV_INFO_PROP_ID is required, not CERT_KEY_CONTEXT.
+       * (Runtime-validated on Windows: the ephemeral binding presented no cert.) */
       static volatile LONG s_ctr;
       swprintf(t->client_key_name, AIMEE_KEYNAME_LEN, L"aimee-mtls-%lu-%ld",
                (unsigned long)GetCurrentProcessId(), InterlockedIncrement(&s_ctr));
@@ -407,11 +387,9 @@ static int schannel_load_client_identity(aimee_tls_t *t)
       nbd.ulVersion = NCRYPTBUFFER_VERSION;
       nbd.cBuffers = 1;
       nbd.pBuffers = &nb;
-      ss = NCryptImportKey(prov, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, &nbd, &hkey, kder, kdl,
-                           NCRYPT_OVERWRITE_KEY_FLAG | NCRYPT_SILENT_FLAG);
-      if (ss != ERROR_SUCCESS)
+      if (NCryptImportKey(prov, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, &nbd, &hkey, kder, kdl,
+                          NCRYPT_OVERWRITE_KEY_FLAG | NCRYPT_SILENT_FLAG) != ERROR_SUCCESS)
       {
-         DBG("NCryptImportKey(PKCS8,persisted) failed: 0x%lx\n", (unsigned long)ss);
          t->client_key_name[0] = 0;
          goto done;
       }
@@ -425,13 +403,8 @@ static int schannel_load_client_identity(aimee_tls_t *t)
       pi.dwProvType = 0; /* 0 + a CNG KSP name => CNG key */
       pi.dwKeySpec = 0;  /* ignored for CNG */
       if (!CertSetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, 0, &pi))
-      {
-         DBG("CertSetCertificateContextProperty(PROV_INFO) failed: 0x%lx\n",
-             (unsigned long)GetLastError());
          goto done;
-      }
    }
-   DBG("client identity loaded OK (persisted key '%ls')\n", t->client_key_name);
 
    t->client_cert = cert;
    t->client_prov = prov;
