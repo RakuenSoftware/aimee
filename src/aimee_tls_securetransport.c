@@ -46,6 +46,13 @@ static int tls_insecure(void)
    return v && *v && strcmp(v, "0") != 0;
 }
 
+#define STDBG(...)                                                                                 \
+   do                                                                                              \
+   {                                                                                               \
+      if (getenv("AIMEE_TLS_DEBUG"))                                                               \
+         fprintf(stderr, "aimee.tls.securetransport: " __VA_ARGS__);                               \
+   } while (0)
+
 /* Secure Transport I/O callbacks over the blocking socket. They must fill/drain
  * the full requested length or report a status; *len is updated to what moved. */
 static OSStatus st_read(SSLConnectionRef conn, void *data, size_t *len)
@@ -159,10 +166,10 @@ static CFArrayRef securetransport_load_client_identity(SecKeychainRef *out_kc)
    unlink(kcpath); /* SecKeychainCreate fails if the file already exists */
    static const char kcpw[] = "aimee-transient-mtls";
    SecKeychainRef kc = NULL;
-   if (SecKeychainCreate(kcpath, (UInt32)(sizeof(kcpw) - 1), kcpw, false, NULL, &kc) !=
-           errSecSuccess ||
-       !kc)
+   OSStatus kcst = SecKeychainCreate(kcpath, (UInt32)(sizeof(kcpw) - 1), kcpw, false, NULL, &kc);
+   if (kcst != errSecSuccess || !kc)
    {
+      STDBG("SecKeychainCreate('%s') failed: %d\n", kcpath, (int)kcst);
       CFRelease(data);
       return NULL;
    }
@@ -177,6 +184,8 @@ static CFArrayRef securetransport_load_client_identity(SecKeychainRef *out_kc)
    CFArrayRef items = NULL;
    OSStatus st = opts ? SecPKCS12Import(data, opts, &items) : errSecParam;
    CFArrayRef result = NULL;
+   if (st != errSecSuccess)
+      STDBG("SecPKCS12Import failed: %d\n", (int)st);
    if (st == errSecSuccess && items && CFArrayGetCount(items) > 0)
    {
       CFDictionaryRef item = CFArrayGetValueAtIndex(items, 0);
@@ -185,8 +194,14 @@ static CFArrayRef securetransport_load_client_identity(SecKeychainRef *out_kc)
       {
          const void *certs[] = {ident};
          result = CFArrayCreate(NULL, certs, 1, &kCFTypeArrayCallBacks);
+         STDBG("client identity loaded OK\n");
       }
+      else
+         STDBG("SecPKCS12Import ok but no kSecImportItemIdentity in item\n");
    }
+   else if (st == errSecSuccess)
+      STDBG("SecPKCS12Import ok but items empty (count=%ld)\n",
+            items ? (long)CFArrayGetCount(items) : -1);
    if (items)
       CFRelease(items);
    if (opts)

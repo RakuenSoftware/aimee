@@ -321,6 +321,10 @@ jobs:
             -CAcreateserial -days 1 -out "$H/tls/client.crt"
           openssl pkcs12 -export -inkey "$H/tls/client.key" -in "$H/tls/client.crt" \
             -out "$H/tls/client.p12" -passout pass:
+          echo "::group::diagnostics"
+          openssl version
+          openssl pkcs12 -info -in "$H/tls/client.p12" -passin pass: -noout -nokeys 2>&1 | head -20 || true
+          echo "::endgroup::"
           # s_server REQUIRES a client cert (-Verify) and serves a status page.
           openssl s_server -accept 14443 -cert "$D/srv.crt" -key "$D/srv.key" \
             -CAfile "$D/ca.crt" -Verify 1 -www -naccept 3 > "$D/s_server.log" 2>&1 &
@@ -328,9 +332,12 @@ jobs:
           for i in $(seq 1 50); do nc -z 127.0.0.1 14443 && break; sleep 0.2; done
           # Present the client identity (INSECURE skips server-cert trust; the
           # client cert is still presented). A non-/v1 reply is fine — the TLS
-          # handshake is what we are validating.
-          AIMEE_HOME="$H" AIMEE_TLS_INSECURE=1 \
-            ./build/aimee --server https://127.0.0.1:14443 config show || true
+          # handshake is what we are validating. AIMEE_TLS_DEBUG surfaces which
+          # Secure Transport step fails (to stderr) if the cert is not presented.
+          echo "::group::aimee output"
+          AIMEE_HOME="$H" AIMEE_TLS_INSECURE=1 AIMEE_TLS_DEBUG=1 \
+            ./build/aimee --server https://127.0.0.1:14443 config show 2>&1 || true
+          echo "::endgroup::"
           sleep 1; kill "$SRV" 2>/dev/null || true; wait "$SRV" 2>/dev/null || true
           echo "::group::s_server.log"; cat "$D/s_server.log"; echo "::endgroup::"
           # Proof: the server logged + verified our client cert.
