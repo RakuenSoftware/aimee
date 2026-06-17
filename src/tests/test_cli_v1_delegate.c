@@ -12,7 +12,7 @@
 #include "platform_path.h"
 #include "cJSON.h"
 
-#define RPC_PROTOCOL_VERSION 1
+#define V1_PROTOCOL_VERSION 1
 
 /* Include the route implementation directly so static marshal helpers are testable. */
 #include "../cli_v1_routes.inc"

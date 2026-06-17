@@ -240,6 +240,9 @@ extern "C"
    /* GET /v1/kb/status provider (arg-less kb/vector status JSON). */
    void server_http_set_kb_status_provider(server_http_json_provider fn);
 
+   /* GET /v1/kb/curator provider (arg-less curator observability block). */
+   void server_http_set_kb_curator_provider(server_http_json_provider fn);
+
    /* GET /v1/agents provider (arg-less; configured agents + default, built
     * server-side from agent config rather than proxied to aimee-kb). */
    void server_http_set_agents_provider(server_http_json_provider fn);

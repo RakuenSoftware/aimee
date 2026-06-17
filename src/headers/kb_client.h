@@ -41,6 +41,16 @@ typedef struct
  * if aimee-kb is unreachable (out->process_ok == 0). */
 int kb_client_health(kb_health_t *out);
 
+/* Returns the raw /v1/health JSON document (caller frees), or NULL if aimee-kb
+ * is unreachable or returns non-2xx. Used by `aimee kb curator status` to read
+ * the curator block (richer than the flat kb_health_t snapshot). */
+char *kb_client_health_json(void);
+
+/* Returns the curator observability block (§4) from aimee-kb's /v1/health as a
+ * standalone heap JSON object (caller frees). Backs the server's GET
+ * /v1/kb/curator surface. Never NULL — a status-error object on failure. */
+char *kb_client_curator_json(void);
+
 /* Returns a heap-allocated JSON document describing kb/vector status.
  * Caller must free the returned string. Never returns NULL. */
 char *kb_client_status_json(void);

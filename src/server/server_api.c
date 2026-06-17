@@ -44,6 +44,12 @@ static char *kb_status_provider(void)
    return kb_client_status_json();
 }
 
+/* GET /v1/kb/curator provider: the curator observability block (§4). */
+static char *kb_curator_provider(void)
+{
+   return kb_client_curator_json();
+}
+
 /* GET /v1/roadmap provider: the roadmap list as a heap JSON object. */
 static char *roadmap_provider(void)
 {
@@ -232,6 +238,7 @@ void server_native_register(void)
    server_http_set_dashboard_memory_provider(dashboard_memory_provider);
    server_http_set_dashboard_reminders_provider(dashboard_reminders_provider);
    server_http_set_kb_status_provider(kb_status_provider);
+   server_http_set_kb_curator_provider(kb_curator_provider);
    server_http_set_agents_provider(agents_provider);
    server_http_set_roadmap_provider(roadmap_provider);
    server_http_set_curiosity_provider(curiosity_provider);

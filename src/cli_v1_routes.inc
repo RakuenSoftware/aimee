@@ -1,5 +1,5 @@
 /* ===================================================================
- * RPC thin-client routing: route CLI subcommands through native server RPCs.
+ * /v1 thin-client routing: route CLI subcommands through the server's native /v1 HTTP endpoints.
  * Unported commands fail in cli_main before reaching the server.
  * =================================================================== */
 
@@ -28,18 +28,18 @@ static void __attribute__((unused)) cli_v1_sleep_ms(int ms)
 
 /* --- Minimal arg parser (no util.h dependency) --- */
 
-#define RPC_MAX_POS   16
-#define RPC_MAX_FLAGS 32
+#define V1_MAX_POS   16
+#define V1_MAX_FLAGS 32
 
 typedef struct
 {
-   const char *positional[RPC_MAX_POS];
+   const char *positional[V1_MAX_POS];
    int pos_count;
    struct
    {
       const char *raw; /* flag name from argv (after --), may include =val */
       const char *value;
-   } flags[RPC_MAX_FLAGS];
+   } flags[V1_MAX_FLAGS];
    int flag_count;
 } rpc_opts_t;
 
@@ -64,7 +64,7 @@ static void rpc_parse(int argc, char **argv, const char **bool_flags, rpc_opts_t
          const char *eq = strchr(flag, '=');
          if (eq)
          {
-            if (out->flag_count < RPC_MAX_FLAGS)
+            if (out->flag_count < V1_MAX_FLAGS)
             {
                out->flags[out->flag_count].raw = flag;
                out->flags[out->flag_count].value = eq + 1;
@@ -73,7 +73,7 @@ static void rpc_parse(int argc, char **argv, const char **bool_flags, rpc_opts_t
          }
          else if (rpc_is_bool(flag, bool_flags))
          {
-            if (out->flag_count < RPC_MAX_FLAGS)
+            if (out->flag_count < V1_MAX_FLAGS)
             {
                out->flags[out->flag_count].raw = flag;
                out->flags[out->flag_count].value = "1";
@@ -82,7 +82,7 @@ static void rpc_parse(int argc, char **argv, const char **bool_flags, rpc_opts_t
          }
          else if (i + 1 < argc)
          {
-            if (out->flag_count < RPC_MAX_FLAGS)
+            if (out->flag_count < V1_MAX_FLAGS)
             {
                out->flags[out->flag_count].raw = flag;
                out->flags[out->flag_count].value = argv[i + 1];
@@ -93,7 +93,7 @@ static void rpc_parse(int argc, char **argv, const char **bool_flags, rpc_opts_t
       }
       else
       {
-         if (out->pos_count < RPC_MAX_POS)
+         if (out->pos_count < V1_MAX_POS)
             out->positional[out->pos_count++] = argv[i];
       }
    }
@@ -138,7 +138,7 @@ static int rpc_get_int(const rpc_opts_t *opts, const char *name, int def)
  * (defined below; forward-declared for the session marshalers above it). */
 static const char *resolve_session_env(const rpc_opts_t *opts);
 
-/* --- RPC route table --- */
+/* --- /v1 route table --- */
 
 static const struct
 {
@@ -216,6 +216,8 @@ static const struct
     {"kb", "ingest", "kb.ingest", NULL, NULL, 30000},
     {"kb", "ingest status", "kb.ingest.status", NULL, NULL, 0},
     {"kb", "status", "kb.status", NULL, NULL, 0},
+    {"kb", "curator status", "kb.curator", NULL, NULL, 0},
+    {"kb", "curator", "kb.curator", NULL, NULL, 0},
     {"kb", "calibrate", "calibration.readiness", NULL, NULL, 0},
     {"kb", "demote", "demotion.check", NULL, NULL, 0},
     {"workers", "", "workers", NULL, NULL, 0},
@@ -334,7 +336,7 @@ static const struct
     {"api", "", "api.status", NULL, NULL, 0},
     {"hud", "", "hud.status", NULL, NULL, 0},
     {"dogfood", "tag", "dogfood.tag", NULL, NULL, 0},
-    /* Month-scale dogfood logs can take longer than the default RPC timeout. */
+    /* Month-scale dogfood logs can take longer than the default request timeout. */
     {"dogfood", "review", "dogfood.review", NULL, NULL, 300000},
     {"dogfood", "report", "dogfood.report", NULL, NULL, 300000},
     {"eval", "run", "eval.run", NULL, NULL, 900000},
@@ -464,7 +466,7 @@ static cJSON *marshal_curator_topic(const char *method, int argc, char **argv)
    rpc_parse(argc, argv, NULL, &opts);
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
    if (opts.pos_count > 0)
       cJSON_AddStringToObject(req, "topic", opts.positional[0]);
    return req;
@@ -663,7 +665,7 @@ static cJSON *marshal_index_file_request(const char *method, int argc, char **ar
 {
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
    if (argc > 0)
       cJSON_AddStringToObject(req, "project", argv[0]);
    if (argc > 1)
@@ -711,7 +713,7 @@ static cJSON *marshal_session_id_request(const char *method, int argc, char **ar
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
 
    const char *sid = opts.pos_count > 0 ? opts.positional[0] : rpc_get(&opts, "session");
    if (sid && sid[0])
@@ -877,7 +879,7 @@ static cJSON *marshal_no_args(const char *method)
 {
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
    return req;
 }
 
@@ -1025,7 +1027,7 @@ static cJSON *marshal_config_set(int argc, char **argv)
 
 /* `aimee primary <name>` sets, `--show` (or no arg) reads, `--clear` clears the
  * session's active primary agent. One route ("primary.set") dispatches here and
- * the real RPC method is chosen from the args. */
+ * the real /v1 method is chosen from the args. */
 static cJSON *marshal_primary(int argc, char **argv)
 {
    static const char *bools[] = {"show", "clear", NULL};
@@ -1033,7 +1035,7 @@ static cJSON *marshal_primary(int argc, char **argv)
    rpc_parse(argc, argv, bools, &opts);
 
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
 
    if (rpc_get(&opts, "clear"))
       cJSON_AddStringToObject(req, "method", "primary.clear");
@@ -1255,7 +1257,7 @@ static cJSON *marshal_work_request(const char *method, int argc, char **argv)
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
 
    const char *v;
    if (strcmp(method, "work.add") == 0)
@@ -2002,7 +2004,7 @@ static cJSON *marshal_job_id_request(const char *method, int argc, char **argv)
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
 
    const char *job_id = opts.pos_count > 0 ? opts.positional[0] : rpc_get(&opts, "job-id");
    if (job_id && job_id[0])
@@ -2089,7 +2091,7 @@ static cJSON *marshal_skill_request(const char *method, int argc, char **argv)
 {
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
    char cwd[4096];
    if (getcwd(cwd, sizeof(cwd)))
       cJSON_AddStringToObject(req, "cwd", cwd);
@@ -2254,7 +2256,7 @@ static cJSON *marshal_trigger_id(const char *method, int argc, char **argv)
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
    cJSON_AddStringToObject(req, "id", id);
    return req;
 }
@@ -2304,7 +2306,7 @@ static cJSON *marshal_cron_id(const char *method, int argc, char **argv)
       {
          cJSON *req = cJSON_CreateObject();
          cJSON_AddStringToObject(req, "method", method);
-         cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+         cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
          cJSON_AddBoolToObject(req, "all", 1);
          return req;
       }
@@ -2323,7 +2325,7 @@ static cJSON *marshal_cron_id(const char *method, int argc, char **argv)
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
    cJSON_AddStringToObject(req, "job_id", id);
    if (strcmp(method, "cron.history") == 0)
       cJSON_AddNumberToObject(req, "limit", rpc_get_int(&opts, "limit", 20));
@@ -2395,7 +2397,7 @@ static cJSON *marshal_agent_args(const char *method, int argc, char **argv)
 {
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
    cJSON *args = cJSON_CreateArray();
    for (int i = 0; i < argc; i++)
       cJSON_AddItemToArray(args, cJSON_CreateString(argv[i]));
@@ -2901,7 +2903,7 @@ static cJSON *marshal_api_enable(int argc, char **argv)
 
 /* graph sync-code <project> → graph.sync_code (server runs the code-graph
  * projection off-thread). Without this marshaler the route table entry existed
- * but the thin CLI reported "no typed server RPC route". */
+ * but the thin CLI reported "no /v1 route". */
 static cJSON *marshal_graph_sync_code(int argc, char **argv)
 {
    rpc_opts_t opts;
@@ -2933,7 +2935,7 @@ static cJSON *marshal_pipeline_request(const char *method, int argc, char **argv
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
-   cJSON_AddNumberToObject(req, "protocol_version", RPC_PROTOCOL_VERSION);
+   cJSON_AddNumberToObject(req, "protocol_version", V1_PROTOCOL_VERSION);
    const char *v;
 
    if (strcmp(method, "pipeline.start") == 0)
@@ -6809,7 +6811,7 @@ char *cli_v1_client_endpoint(void)
    /* Fall back to a --server / AIMEE_SERVER_URL / remote.conf target (aimee_client)
     * by synthesizing the transport endpoint cli_http_request expects: "tls:" for
     * an https:// target (native client TLS, #304), else "tcp:". This makes the
-    * README's headline remote flow drive the WHOLE data/RPC plane (status,
+    * README's headline remote flow drive the WHOLE data/control plane (status,
     * memory, kb, …), not just the lower-level AIMEE_API_ENDPOINT form. */
    char hostport[300];
    int is_https = 0;
@@ -6931,6 +6933,7 @@ const char *cli_v1_route_for_method(const char *method, const char **verb_out)
        {"session.list", "GET", "/v1/sessions"},
        {"kb.search", "POST", "/v1/kb/search"},
        {"kb.status", "GET", "/v1/kb/status"},
+       {"kb.curator", "GET", "/v1/kb/curator"},
        {"memory.recall", "POST", "/v1/memory/recall"},
        {"rules.list", "GET", "/v1/rules"},
        {"notes.list", "GET", "/v1/notes"},
@@ -7586,7 +7589,7 @@ cJSON *cli_v1_dispatch(cJSON *req, int timeout_ms)
    return resp;
 }
 
-/* --- Main RPC forward function --- */
+/* --- Main /v1 forward function --- */
 
 int cli_v1_forward(const char *socket_path, const cli_v1_route_t *route, int json_output,
                    const char *json_fields, const char *response_profile, int argc, char **argv)
