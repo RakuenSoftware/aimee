@@ -380,25 +380,6 @@ int db2_init(const char *libpq_url)
       return -1;
    }
 
-   /* The code-graph projection upserts edges with
-    * ON CONFLICT (source, relation, target), which requires a unique index the
-    * base schema.sql deliberately does NOT declare (legacy instances may hold
-    * duplicate triples, which would make a plain CREATE UNIQUE INDEX in the
-    * schema fail on every startup). db2_entity_edge_build_unique_index() had no
-    * caller, so the index never existed and the projection silently produced
-    * zero edges on every instance — graph-code fusion's whole substrate. Build
-    * it best-effort here: on a clean instance it creates the index (projection
-    * works); if a legacy instance still holds duplicate triples it logs and
-    * continues (no startup regression; dedup is a separate migration). The shim
-    * has no real index machinery, so skip it there. */
-   if (!aimee_pg_is_shim())
-   {
-      int ee_idx_existed = 0;
-      if (db2_entity_edge_build_unique_index(&ee_idx_existed) != 0)
-         fprintf(stderr, "aimee: db2_init: entity_edges unique index not built; code-graph "
-                         "projection ON CONFLICT will no-op until duplicate triples are deduped\n");
-   }
-
    /* pg_trgm is required: db2/schema.sql creates a GIN index on
     * memories.memories_code_fts_text using gin_trgm_ops, and the
     * memory_query path issues % / similarity() against memory text.
@@ -439,6 +420,30 @@ int db2_init(const char *libpq_url)
    g_init_thread = pthread_self();
    g_init_thread_set = 1;
    snprintf(g_pg_url, sizeof(g_pg_url), "%s", libpq_url);
+
+   /* The code-graph projection upserts edges with
+    * ON CONFLICT (source, relation, target), which requires a unique index the
+    * base schema.sql deliberately does NOT declare (legacy instances may hold
+    * duplicate triples, which would make a plain CREATE UNIQUE INDEX in the
+    * schema fail on every startup). Build it best-effort here: on a clean
+    * instance it creates the index (projection works); if a legacy instance
+    * still holds duplicate triples it logs and continues (no startup regression;
+    * dedup is a separate migration). The shim has no real index machinery, so
+    * skip it there.
+    *
+    * This MUST run after g_conn/g_init_thread are recorded above: the builder
+    * reaches Postgres through db2_conn(), which returns g_conn only once the init
+    * thread is set. Running it earlier (the original site, before g_conn was
+    * assigned) made db2_conn() return NULL, so the build silently failed and the
+    * index was never created on any instance — graph-code fusion's whole
+    * substrate produced zero edges. */
+   if (!aimee_pg_is_shim())
+   {
+      int ee_idx_existed = 0;
+      if (db2_entity_edge_build_unique_index(&ee_idx_existed) != 0)
+         fprintf(stderr, "aimee: db2_init: entity_edges unique index not built; code-graph "
+                         "projection ON CONFLICT will no-op until duplicate triples are deduped\n");
+   }
    /* Initialize the connection pool that every non-init thread leases from. On
     * failure, db2_conn falls back to private per-thread connections (degraded
     * but functional). Skipped under the sqlite test shim (a shared sqlite handle

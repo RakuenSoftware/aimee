@@ -15,6 +15,7 @@ enum
 {
    STMT_SCHEMA = 1,
    STMT_EXT = 2,
+   STMT_INDEX = 3,
 };
 
 static int g_open_calls = 0;
@@ -91,6 +92,7 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, 
 {
    static aimee_pg_stmt_t schema_stmt = {.kind = STMT_SCHEMA};
    static aimee_pg_stmt_t ext_stmt = {.kind = STMT_EXT};
+   static aimee_pg_stmt_t index_stmt = {.kind = STMT_INDEX};
 
    g_prepare_calls++;
    assert(pg_conn == &g_fake_conn);
@@ -107,6 +109,12 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, 
     * uniformly through STMT_EXT and the g_extension_present knob. */
    if (strstr(sql, "pg_extension") != NULL || strstr(sql, "pg_available_extensions") != NULL)
       return &ext_stmt;
+   /* db2_init builds the entity_edges (source,relation,target) unique index
+    * (needed by the code-graph projection's ON CONFLICT). It first probes
+    * pg_indexes for idx_ee_unique_triple; this mock reports the index already
+    * present so the build short-circuits (no CREATE exec). */
+   if (strstr(sql, "pg_indexes") != NULL)
+      return &index_stmt;
    assert(!"unexpected SQL");
    return NULL;
 }
@@ -134,6 +142,8 @@ aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *stmt, char *errbuf, size_t errlen
       return g_schema_present ? AIMEE_PG_ROW : AIMEE_PG_DONE;
    if (stmt->kind == STMT_EXT)
       return g_extension_present ? AIMEE_PG_ROW : AIMEE_PG_DONE;
+   if (stmt->kind == STMT_INDEX)
+      return AIMEE_PG_ROW; /* idx_ee_unique_triple already present */
    assert(!"unexpected statement kind");
    return AIMEE_PG_ERR;
 }
