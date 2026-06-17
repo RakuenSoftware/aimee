@@ -221,12 +221,16 @@ int db2_css_graph_duplicate_declarations(const char *project_filter, css_dup_dec
    if (!conn)
       return -1;
    int filt = (project_filter && project_filter[0]) ? 1 : 0;
+   /* GROUP BY must include every selected non-aggregate column: p.name comes from
+    * the joined projects table and is NOT functionally dependent on f.id, so real
+    * Postgres rejects grouping by f.id alone (the SQLite test shim tolerated it,
+    * masking the error → the signal silently returned 0 on every live deploy). */
    static const char *sql_all = "SELECT p.name, f.path, d.property, d.value, COUNT(*) AS cnt"
                                 " FROM css_declarations d"
                                 " JOIN css_rules c ON c.id = d.rule_id"
                                 " JOIN files f ON f.id = c.file_id"
                                 " JOIN projects p ON p.id = f.project_id"
-                                " GROUP BY f.id, d.property, d.value"
+                                " GROUP BY f.id, p.name, f.path, d.property, d.value"
                                 " HAVING COUNT(*) > 1"
                                 " ORDER BY cnt DESC, f.path"
                                 " LIMIT ?1";
@@ -236,7 +240,7 @@ int db2_css_graph_duplicate_declarations(const char *project_filter, css_dup_dec
                                  " JOIN files f ON f.id = c.file_id"
                                  " JOIN projects p ON p.id = f.project_id"
                                  " WHERE p.name = ?2"
-                                 " GROUP BY f.id, d.property, d.value"
+                                 " GROUP BY f.id, p.name, f.path, d.property, d.value"
                                  " HAVING COUNT(*) > 1"
                                  " ORDER BY cnt DESC, f.path"
                                  " LIMIT ?1";
@@ -279,7 +283,7 @@ int db2_css_graph_duplicate_selectors(const char *project_filter, css_dup_select
                                 " FROM css_rules c"
                                 " JOIN files f ON f.id = c.file_id"
                                 " JOIN projects p ON p.id = f.project_id"
-                                " GROUP BY f.id, c.selector"
+                                " GROUP BY f.id, p.name, f.path, c.selector"
                                 " HAVING COUNT(*) > 1"
                                 " ORDER BY cnt DESC, f.path"
                                 " LIMIT ?1";
@@ -288,7 +292,7 @@ int db2_css_graph_duplicate_selectors(const char *project_filter, css_dup_select
                                  " JOIN files f ON f.id = c.file_id"
                                  " JOIN projects p ON p.id = f.project_id"
                                  " WHERE p.name = ?2"
-                                 " GROUP BY f.id, c.selector"
+                                 " GROUP BY f.id, p.name, f.path, c.selector"
                                  " HAVING COUNT(*) > 1"
                                  " ORDER BY cnt DESC, f.path"
                                  " LIMIT ?1";
