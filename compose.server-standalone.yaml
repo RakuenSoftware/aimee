@@ -23,10 +23,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.server
-      # Default build needs NO credentials (server ships without the browser UI).
-      # Opt into the optional aimee-webchat with a GitHub Packages token:
-      #   NPM_TOKEN=<github PAT> docker compose -f compose.server-standalone.yaml \
-      #     build --build-arg WITH_WEBCHAT=1 --secret id=npm_token,env=NPM_TOKEN
+      # The browser UI (aimee-webchat) is built and bundled by default. Its npm
+      # dependency (@rakuensoftware/smoothgui) is vendored under frontend/vendor/,
+      # so the build needs NO credentials. Build --build-arg WITH_WEBCHAT=0 to
+      # ship the server-only image.
     # Published image (built + pushed to ghcr on every merge to main): `docker
     # compose pull` fetches it; `up --build` rebuilds locally and tags it the same.
     # Override AIMEE_SERVER_IMAGE to pin a version or use a fork/registry.
