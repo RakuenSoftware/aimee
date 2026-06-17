@@ -839,8 +839,15 @@ static void *session_start_bg_worker(void *arg)
 
 static void session_start_worktree_gc(const char *hook_input)
 {
+   /* Auto-GC is gated on config (worktree_gc.enabled). The AIMEE_WORKTREE_GC
+    * env var, when present, overrides the config flag in either direction. */
+   config_t cfg;
+   config_load(&cfg);
+   int enabled = cfg.worktree_gc_enabled;
    const char *gc_env = getenv("AIMEE_WORKTREE_GC");
-   if (!gc_env || (gc_env[0] != '1' && gc_env[0] != 't' && gc_env[0] != 'T'))
+   if (gc_env && gc_env[0])
+      enabled = (gc_env[0] == '1' || gc_env[0] == 't' || gc_env[0] == 'T');
+   if (!enabled)
       return;
 
    cJSON *hi_json = hook_input && hook_input[0] ? cJSON_Parse(hook_input) : NULL;
@@ -862,6 +869,8 @@ static void session_start_worktree_gc(const char *hook_input)
          {
             worktree_gc_options_t opts;
             worktree_gc_options_init(&opts);
+            if (cfg.worktree_gc_max_age_days > 0)
+               opts.max_age_days = cfg.worktree_gc_max_age_days;
             const char *days_env = getenv("AIMEE_WORKTREE_GC_DAYS");
             if (days_env && days_env[0])
             {
