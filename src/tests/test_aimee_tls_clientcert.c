@@ -92,6 +92,20 @@ static void test_cert_without_key_is_none(void)
    assert(r == 0);
 }
 
+/* Key group-readable (0640) -> -1: pin the exact `& 077` boundary the gate
+ * enforces (not just the 0644 world-readable case). */
+static void test_refuse_group_readable_key(void)
+{
+   char crt[600], key[600], p[700];
+   rm_material();
+   snprintf(p, sizeof(p), "%s/tls/client.crt", g_home);
+   write_file(p, 0600);
+   snprintf(p, sizeof(p), "%s/tls/client.key", g_home);
+   write_file(p, 0640); /* owner rw, group r — still refused */
+   int r = aimee_tls_client_cert_eligible(g_home, crt, sizeof(crt), key, sizeof(key));
+   assert(r == -1);
+}
+
 /* Key is a symlink (even to a 0600 file) -> -1: never follow a symlinked key.
  * Defends against a symlink swapped in for the identity key. */
 static void test_refuse_symlinked_key(void)
@@ -125,6 +139,7 @@ int main(void)
    test_absent_is_none();
    test_present_when_0600();
    test_refuse_loose_key();
+   test_refuse_group_readable_key();
    test_refuse_symlinked_key();
    test_cert_without_key_is_none();
    test_bad_home_is_none();
