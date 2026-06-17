@@ -35,12 +35,28 @@ int aimee_tls_client_cert_eligible(const char *home, char *crt, size_t crt_n, ch
       return 0;
    snprintf(crt, crt_n, "%s/tls/client.crt", home);
    snprintf(key, key_n, "%s/tls/client.key", home);
-   struct stat cs, ks;
-   if (stat(crt, &cs) != 0 || stat(key, &ks) != 0)
+   struct stat cs;
+   if (stat(crt, &cs) != 0)
       return 0; /* no client-cert material configured */
 #ifndef _WIN32
+   /* The key is this client's identity material: lstat it (do NOT follow a
+    * symlink) and require a plain, owner-only regular file. This refuses a
+    * group/world-accessible key and a symlink swapped in for one. (A writer to
+    * your own 0700 tls/ dir is already privileged and can read the key outright,
+    * so this gate targets accidental loose perms + symlink tricks, not an
+    * attacker who already controls the directory — full TOCTOU-atomic loading
+    * is therefore out of scope.) */
+   struct stat ks;
+   if (lstat(key, &ks) != 0)
+      return 0;
+   if (!S_ISREG(ks.st_mode))
+      return -1; /* symlink / special file — refuse */
    if (ks.st_mode & 077)
-      return -1; /* refuse a loose private key */
+      return -1; /* group/world-accessible — refuse */
+#else
+   struct stat ks;
+   if (stat(key, &ks) != 0)
+      return 0;
 #endif
    return 1;
 }

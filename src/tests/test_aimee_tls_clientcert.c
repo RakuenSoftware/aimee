@@ -92,6 +92,25 @@ static void test_cert_without_key_is_none(void)
    assert(r == 0);
 }
 
+/* Key is a symlink (even to a 0600 file) -> -1: never follow a symlinked key.
+ * Defends against a symlink swapped in for the identity key. */
+static void test_refuse_symlinked_key(void)
+{
+   char crt[600], key[600], p[700], tgt[700];
+   rm_material();
+   snprintf(p, sizeof(p), "%s/tls/client.crt", g_home);
+   write_file(p, 0600);
+   snprintf(tgt, sizeof(tgt), "%s/tls/real.key", g_home);
+   write_file(tgt, 0600);
+   snprintf(p, sizeof(p), "%s/tls/client.key", g_home);
+   unlink(p);
+   assert(symlink(tgt, p) == 0);
+   int r = aimee_tls_client_cert_eligible(g_home, crt, sizeof(crt), key, sizeof(key));
+   assert(r == -1);
+   unlink(p);
+   unlink(tgt);
+}
+
 /* Empty/NULL home -> 0 (a broken env must not crash or present anything). */
 static void test_bad_home_is_none(void)
 {
@@ -106,6 +125,7 @@ int main(void)
    test_absent_is_none();
    test_present_when_0600();
    test_refuse_loose_key();
+   test_refuse_symlinked_key();
    test_cert_without_key_is_none();
    test_bad_home_is_none();
    rm_material();
