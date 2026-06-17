@@ -128,7 +128,10 @@ gates each tool call; PostToolUse re-indexes edited files.
 ## 3. Installation
 
 aimee ships four binaries: the **`aimee`** thin client, **`aimee-server`**,
-**`aimee-kb`**, and **`aimee-webchat`**. There are two ways to stand it up:
+**`aimee-kb`**, and **`aimee-webchat`**. For a guided, step-by-step path (combined
+Docker server + per-OS thin-client setup), see the
+[Quickstart](docs/QUICKSTART.md); this chapter is the exhaustive reference. There
+are two ways to stand it up:
 
 - **Docker services + thin client (recommended, [§3.1](#31-run-the-services-in-docker-recommended) to [§3.2](#32-install-the-thin-client)).**
   Run `aimee-server` and `aimee-kb` as containers (one combined container or two
