@@ -3,7 +3,17 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+/* The resolver falls back to LLM_ENDPOINT/LLM_MODEL/LLM_API_KEY env; clear them
+ * so the config-path tests are deterministic regardless of the ambient env. */
+static void clear_llm_env(void)
+{
+   unsetenv("LLM_ENDPOINT");
+   unsetenv("LLM_MODEL");
+   unsetenv("LLM_API_KEY");
+}
 
 static void test_tier_classification(void)
 {
@@ -80,12 +90,50 @@ static void test_tier_b_resolves(void)
    printf("kb_curator_provider: tier-A and tier-B resolve independently ok\n");
 }
 
+/* With no config provider, LLM_ENDPOINT/LLM_MODEL/LLM_API_KEY drive BOTH tiers
+ * (the bundled-deployment interface); a config tier_b still overrides. */
+static void test_env_bridge(void)
+{
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   setenv("LLM_ENDPOINT", "http://bundled:8080/v1", 1);
+   setenv("LLM_MODEL", "gemma-3n-e4b", 1);
+   setenv("LLM_API_KEY", "", 1); /* keyless local */
+
+   provider_def_t a, b;
+   /* Tier-A from env. */
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
+   assert(strcmp(a.base_url, "http://bundled:8080/v1") == 0);
+   assert(strcmp(a.model, "gemma-3n-e4b") == 0);
+   assert(a.api_key == NULL); /* empty env key => keyless */
+   /* Tier-B ALSO from env (single endpoint serves both until tier_b configured). */
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
+   assert(strcmp(b.base_url, "http://bundled:8080/v1") == 0);
+
+   /* A config tier_b overrides the env for Tier-B; Tier-A still uses env. */
+   snprintf(cfg.kb_curator_tier_b_base_url, sizeof(cfg.kb_curator_tier_b_base_url),
+            "https://api.big/v1");
+   snprintf(cfg.kb_curator_tier_b_model, sizeof(cfg.kb_curator_tier_b_model), "big-32b");
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
+   assert(strcmp(b.base_url, "https://api.big/v1") == 0 && strcmp(b.model, "big-32b") == 0);
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
+   assert(strcmp(a.base_url, "http://bundled:8080/v1") == 0); /* env still */
+
+   /* No env, no config => idle. */
+   clear_llm_env();
+   memset(&cfg, 0, sizeof(cfg));
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 0);
+   printf("kb_curator_provider: env bridge (LLM_ENDPOINT both tiers; tier_b override) ok\n");
+}
+
 int main(void)
 {
+   clear_llm_env();
    test_tier_classification();
    test_unconfigured_idle();
    test_tier_a_resolves();
    test_tier_b_resolves();
+   test_env_bridge();
    printf("kb_curator_provider: all tests passed\n");
    return 0;
 }

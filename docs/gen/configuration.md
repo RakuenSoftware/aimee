@@ -442,6 +442,10 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 | `CODEX_SANDBOX` | Codex sandbox mode. |
 | `CODEX_THREAD_ID` | Codex conversation/thread id. |
 
+### Undocumented (add to `EXT_DESC`/`EXT_OS_IGNORE` in gen-reference-docs.py)
+
+`LLM_API_KEY`, `LLM_ENDPOINT`, `LLM_MODEL`
+
 ## Workflow engine
 
 Workflows are block-composed YAML definitions under `$AIMEE_HOME/workflows/<name>.yaml`, authored with the `aimee workflow` CLI or the web visual composer and saved in canonical form. A run is a DB1 work item pinned to a definition version.
