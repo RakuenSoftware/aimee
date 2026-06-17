@@ -302,6 +302,51 @@ jobs:
           # --server must parse and select a remote TCP target on macOS.
           ./build/aimee --server http://127.0.0.1:9 version
 
+      - name: mTLS client-cert presentation (Secure Transport, loopback)
+        run: |
+          set -uo pipefail
+          D="$(mktemp -d)"; H="$D/home"; mkdir -p "$H/tls"
+          # Test PKI: CA, server cert, and an EC P-256 client cert whose key is
+          # PKCS#8 (matching what aimee-server issues), bundled into client.p12.
+          openssl ecparam -name prime256v1 -genkey -noout -out "$D/ca.key"
+          openssl req -x509 -new -key "$D/ca.key" -days 1 -subj "/CN=aimee-ci-ca" -out "$D/ca.crt"
+          openssl ecparam -name prime256v1 -genkey -noout -out "$D/srv.key"
+          openssl req -new -key "$D/srv.key" -subj "/CN=localhost" -out "$D/srv.csr"
+          openssl x509 -req -in "$D/srv.csr" -CA "$D/ca.crt" -CAkey "$D/ca.key" \
+            -CAcreateserial -days 1 -out "$D/srv.crt"
+          openssl ecparam -name prime256v1 -genkey -noout -out "$D/c.sec1"
+          openssl pkcs8 -topk8 -nocrypt -in "$D/c.sec1" -out "$H/tls/client.key"
+          openssl req -new -key "$H/tls/client.key" -subj "/CN=ci-macos-client" -out "$D/c.csr"
+          openssl x509 -req -in "$D/c.csr" -CA "$D/ca.crt" -CAkey "$D/ca.key" \
+            -CAcreateserial -days 1 -out "$H/tls/client.crt"
+          # macOS SecPKCS12Import REQUIRES a non-empty passphrase (an empty one
+          # fails errSecAuthFailed -25293), so the .p12 is passphrase-protected
+          # and aimee reads it from AIMEE_TLS_CLIENT_P12_PASS.
+          P12PASS='aimee-ci-p12'
+          openssl pkcs12 -export -inkey "$H/tls/client.key" -in "$H/tls/client.crt" \
+            -out "$H/tls/client.p12" -passout "pass:$P12PASS"
+          # s_server REQUIRES a client cert (-Verify) and serves a status page.
+          openssl s_server -accept 14443 -cert "$D/srv.crt" -key "$D/srv.key" \
+            -CAfile "$D/ca.crt" -Verify 1 -www -naccept 3 > "$D/s_server.log" 2>&1 &
+          SRV=$!
+          for i in $(seq 1 50); do nc -z 127.0.0.1 14443 && break; sleep 0.2; done
+          # Present the client identity (INSECURE skips server-cert trust; the
+          # client cert is still presented). A non-/v1 reply is fine — the TLS
+          # handshake is what we are validating.
+          AIMEE_HOME="$H" AIMEE_TLS_INSECURE=1 AIMEE_TLS_CLIENT_P12_PASS="$P12PASS" \
+            ./build/aimee --server https://127.0.0.1:14443 config show 2>&1 || true
+          sleep 1; kill "$SRV" 2>/dev/null || true; wait "$SRV" 2>/dev/null || true
+          echo "::group::s_server.log"; cat "$D/s_server.log"; echo "::endgroup::"
+          # Proof: the server logged + verified our client cert. (OpenSSL prints
+          # "CN = x" on 1.1.x and "CN=x" on 3.x, so match both.)
+          grep -qE "CN ?= ?ci-macos-client" "$D/s_server.log" || { echo "FAIL: client cert not presented"; exit 1; }
+          if grep -q "peer did not return a certificate" "$D/s_server.log"; then
+            echo "FAIL: a connection presented no cert"; exit 1; fi
+          # The transient keychain must not be left behind.
+          if ls "${TMPDIR:-/tmp}"/aimee-mtls-*.keychain >/dev/null 2>&1; then
+            echo "FAIL: transient keychain leaked"; exit 1; fi
+          echo "PASS: Secure Transport presented client cert; server verified CN=ci-macos-client; no keychain leak"
+
   memory-retrieval-eval:
     runs-on: ubuntu-latest
     steps:
