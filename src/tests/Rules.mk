@@ -157,6 +157,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-workspace-provider-detached \
                $(TESTPREFIX)/unit-test-workspace-runner-queue \
                $(TESTPREFIX)/unit-test-workspace-scope \
+               $(TESTPREFIX)/unit-test-webuser-runtime \
                $(TESTPREFIX)/unit-test-workspace-runner-registry \
                $(TESTPREFIX)/unit-test-workspace-turn \
                $(TESTPREFIX)/unit-test-notes \
@@ -1443,6 +1444,13 @@ $(TESTPREFIX)/unit-test-workspace-provider-detached: \
                       $(OBJDIR)/tests/test_workspace_provider_detached.o \
                       $(OBJDIR)/server/workspace_provider_detached.o \
                       $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/posix/util.o $(OBJDIR)/util.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-webuser-runtime: \
+                      $(OBJDIR)/tests/test_webuser_runtime.o \
+                      $(OBJDIR)/server/webuser_runtime.o \
+                      $(OBJDIR)/server/workspace_scope.o \
+                      $(OBJDIR)/aimee_home.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-workspace-scope: \
