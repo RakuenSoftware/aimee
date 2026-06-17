@@ -1775,6 +1775,7 @@ $(TESTPREFIX)/unit-test-curator-code-unit: \
 $(TESTPREFIX)/unit-test-curator-resolve-entities: \
                                        $(OBJDIR)/tests/test_curator_resolve_entities.o \
                                        $(OBJDIR)/kb/kb_curator_resolve_entities.o \
+                                       $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/db2/artifacts.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
@@ -1835,6 +1836,7 @@ $(TESTPREFIX)/unit-test-curator-index-code-unit: \
 $(TESTPREFIX)/unit-test-curator-pipeline: \
                                        $(OBJDIR)/tests/test_curator_pipeline.o \
                                        $(OBJDIR)/kb/kb_curator_resolve_entities.o \
+                                       $(OBJDIR)/kb_curator_provider.o \
                                        $(OBJDIR)/kb/kb_curator_index_code_unit.o \
                                        $(OBJDIR)/kb/kb_curator_link_artifacts.o \
                                        $(OBJDIR)/kb/kb_curator_serve.o \
@@ -1874,6 +1876,10 @@ $(TESTPREFIX)/unit-test-curator-judge: \
                                        $(OBJDIR)/tests/test_curator_judge.o \
                                        $(OBJDIR)/kb/kb_curator_judge.o \
                                        $(OBJDIR)/kb/kb_curator_sidecar.o \
+                                       $(OBJDIR)/kb/kb_curator_llm.o \
+                                       $(OBJDIR)/kb_curator_provider.o \
+                                       $(OBJDIR)/provider_client.o \
+                                       $(OBJDIR)/tests/support/mock_agent_http.o \
                                        $(OBJDIR)/cJSON.o \
                                        $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

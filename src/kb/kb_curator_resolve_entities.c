@@ -17,7 +17,8 @@
 
 #include "kb_curator_resolve_entities.h"
 #include "kb_curator_judge.h"
-#include "kb_curator_promote.h" /* kb_curator_broaden_scope (scope lattice) */
+#include "kb_curator_provider.h" /* kb_curator_provider_for_stage (judge availability) */
+#include "kb_curator_promote.h"  /* kb_curator_broaden_scope (scope lattice) */
 #include "aimee.h"
 #include "config.h"
 #include "cJSON.h"
@@ -97,7 +98,13 @@ static int resolve_try_match(const char *scope_kind, const char *scope_id, const
                 name, scope_kind, scope_id, match_scores[0]);
       return 1;
    }
-   if (match_scores[0] >= CURATOR_ENTITY_JUDGE_LOW && cfg->kb_curator_judge_command[0])
+   /* Judge the ambiguous band when there's somewhere to send it: a configured
+    * Tier-B provider (§2) or the legacy judge sidecar command. The score check is
+    * first so the provider lookup runs only for an actual ambiguous-band match. */
+   provider_def_t judge_provider;
+   if (match_scores[0] >= CURATOR_ENTITY_JUDGE_LOW &&
+       (cfg->kb_curator_judge_command[0] ||
+        kb_curator_provider_for_stage(cfg, KB_CURATOR_STAGE_JUDGE, &judge_provider)))
    {
       char cand_name[256];
       if (pgvec_curator_entity_lookup(match_ids[0], NULL, 0, cand_name, sizeof(cand_name)) == 1)
@@ -105,8 +112,8 @@ static int resolve_try_match(const char *scope_kind, const char *scope_id, const
          int same = 0;
          char jerr[256];
          int jrc =
-             kb_curator_judge_same_entity(cfg->kb_curator_judge_command, name, context, cand_name,
-                                          match_scores[0], &same, jerr, sizeof(jerr));
+             kb_curator_judge_same_entity(cfg, cfg->kb_curator_judge_command, name, context,
+                                          cand_name, match_scores[0], &same, jerr, sizeof(jerr));
          if (jrc == 0 && same)
          {
             aimee_log(LOG_INFO, "kb.curator.resolve",
