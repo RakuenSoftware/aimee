@@ -1882,6 +1882,10 @@ $(TESTPREFIX)/unit-test-curator-synthesize: \
                                        $(OBJDIR)/tests/test_curator_synthesize.o \
                                        $(OBJDIR)/kb/kb_curator_synthesize.o \
                                        $(OBJDIR)/kb/kb_curator_sidecar.o \
+                                       $(OBJDIR)/kb/kb_curator_llm.o \
+                                       $(OBJDIR)/kb_curator_provider.o \
+                                       $(OBJDIR)/provider_client.o \
+                                       $(OBJDIR)/tests/support/mock_agent_http.o \
                                        $(OBJDIR)/db2/artifacts.o \
                                        $(OBJDIR)/db2/feature_rows.o \
                                        $(OBJDIR)/kb/kb_mdl.o \
