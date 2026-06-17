@@ -94,6 +94,7 @@ static void test_tier_b_resolves(void)
  * (the bundled-deployment interface); a config tier_b still overrides. */
 static void test_env_bridge(void)
 {
+   clear_llm_env(); /* start from a known-clean env, not just clean up at the end */
    config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    setenv("LLM_ENDPOINT", "http://bundled:8080/v1", 1);
