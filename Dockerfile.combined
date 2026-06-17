@@ -16,6 +16,10 @@
 # registry token and NO credentials. Set --build-arg WITH_WEBCHAT=0 to build the
 # server+kb services only (skips the frontend + Go webchat stages entirely).
 ARG WITH_WEBCHAT=1
+# WITH_VSCODE bundles code-server (in-browser VSCode, Open-VSX only). OFF by
+# default (adds ~100 MB; default + CI builds skip the stage). The deployed
+# aimee-server-kb image is built with --build-arg WITH_VSCODE=1.
+ARG WITH_VSCODE=0
 FROM debian:bookworm-slim AS build
 
 # Union of the aimee-server and aimee-kb build deps: server links libsqlite3
@@ -77,6 +81,23 @@ COPY --from=frontend-build /frontend/dist/index.html /webchat/index.html
 FROM debian:bookworm-slim AS webchat-stage-0
 RUN mkdir -p /webchat
 FROM webchat-stage-${WITH_WEBCHAT} AS webchat-stage
+
+# Optional code-server (in-browser VSCode). "1" fetches the pinned, arch-matched
+# .deb under /opt/codeserver (only built when WITH_VSCODE=1); "0" is an empty
+# /opt/codeserver/usr so the final COPY is a no-op. Bundles its own Node; Open VSX.
+FROM debian:bookworm-slim AS code-server-stage-1
+ARG TARGETARCH
+ARG CODE_SERVER_VERSION=4.96.4
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && curl -fsSL "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server_${CODE_SERVER_VERSION}_${TARGETARCH}.deb" -o /tmp/cs.deb \
+    && mkdir -p /opt/codeserver \
+    && dpkg-deb -x /tmp/cs.deb /opt/codeserver \
+    && rm /tmp/cs.deb \
+    && rm -rf /var/lib/apt/lists/*
+FROM debian:bookworm-slim AS code-server-stage-0
+RUN mkdir -p /opt/codeserver/usr
+FROM code-server-stage-${WITH_VSCODE} AS code-server-stage
 
 FROM debian:bookworm-slim
 
@@ -172,6 +193,9 @@ RUN if [ -f /tmp/webchat-stage/aimee-webchat ]; then \
         echo "aimee: webchat bundled in image"; \
     else echo "aimee: webchat not bundled (built with WITH_WEBCHAT=0)"; fi; \
     rm -rf /tmp/webchat-stage
+# Optional code-server: empty unless WITH_VSCODE=1 (then code-server -> /usr/bin).
+COPY --from=code-server-stage /opt/codeserver/usr/ /usr/
+RUN if command -v code-server >/dev/null 2>&1; then echo "aimee: code-server bundled ($(code-server --version 2>/dev/null | head -1))"; else echo "aimee: code-server not bundled (built with WITH_VSCODE=0)"; fi
 COPY deploy/container/pam-aimee-webchat /etc/pam.d/aimee-webchat
 COPY deploy/container/webchat-lib.sh /usr/local/bin/webchat-lib.sh
 # Process supervisor: starts kb, waits for kb health, starts the server + webchat.
