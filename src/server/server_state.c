@@ -782,7 +782,7 @@ int handle_kb_ingest_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 }
 
 /* Forward decl (server_compute_impl.h drags in unrelated compute internals). */
-int delegate_ondemand_inflight(void);
+void delegate_ondemand_add_workers_stats(cJSON *out);
 
 int handle_workers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -822,10 +822,10 @@ int handle_workers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       }
       cJSON_AddItemToObject(resp, "compute", compute_obj);
 
-      /* Sessionless delegates no longer occupy a fixed pool slot; they run on
-       * on-demand threads gated by the per-model limiter. Surface the live
-       * count so `aimee workers` still shows background-delegate load. */
-      cJSON_AddNumberToObject(resp, "delegates_inflight", delegate_ondemand_inflight());
+      /* Sessionless delegates run on on-demand threads gated by the per-model
+       * limiter, not a fixed pool slot. Surface the live count, its peak, and
+       * the cumulative total (confirms the limiter is the binding throttle). */
+      delegate_ondemand_add_workers_stats(resp);
 
       char *session_json = server_session_pools_json(ctx);
       if (session_json)
