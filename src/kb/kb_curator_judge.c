@@ -7,11 +7,22 @@
 
 #include "kb_curator_judge.h"
 #include "kb_curator_sidecar.h"
+#include "kb_curator_llm.h"
 #include "cJSON.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* System prompt for the judge stage (Tier-B) when routed through a configured
+ * provider (§2b). The legacy python sidecar carried its own prompt; the
+ * in-process provider needs one. The request JSON (mention + candidate + score)
+ * is the user turn; tune against the model. */
+#define CJ_SYSTEM_PROMPT                                                                           \
+   "You are an entity-resolution judge for a knowledge base. Given a candidate "                   \
+   "mention and an existing entity as JSON, decide whether they are the same "                     \
+   "canonical thing. Respond with a single JSON object: {\"same_entity\": "                        \
+   "true|false}. When unsure, answer false."
 
 /* Build the request JSON. Returns a malloc'd string (caller frees) or NULL. */
 static char *cj_build_request(const char *mention_name, const char *mention_context,
@@ -37,18 +48,13 @@ static char *cj_build_request(const char *mention_name, const char *mention_cont
    return json;
 }
 
-int kb_curator_judge_same_entity(const char *judge_cmd, const char *mention_name,
-                                 const char *mention_context, const char *candidate_name,
-                                 double score, int *out_same, char *errbuf, size_t errlen)
+int kb_curator_judge_same_entity(const config_t *cfg, const char *judge_cmd,
+                                 const char *mention_name, const char *mention_context,
+                                 const char *candidate_name, double score, int *out_same,
+                                 char *errbuf, size_t errlen)
 {
    if (errbuf && errlen)
       errbuf[0] = '\0';
-   if (!judge_cmd || !judge_cmd[0])
-   {
-      if (errbuf)
-         snprintf(errbuf, errlen, "no judge command configured");
-      return -1;
-   }
    if (!out_same)
       return -1;
 
@@ -60,8 +66,12 @@ int kb_curator_judge_same_entity(const char *judge_cmd, const char *mention_name
       return -1;
    }
 
+   /* Tier-B dispatch: a configured tier_b.* provider runs in-process, else the
+    * judge_cmd sidecar; "neither configured" surfaces as -1 (caller treats as
+    * not-same / create). */
    char local_err[256];
-   char *response = kb_curator_sidecar_run(judge_cmd, request, 0, local_err, sizeof(local_err));
+   char *response = kb_curator_llm_run(cfg, KB_CURATOR_STAGE_JUDGE, CJ_SYSTEM_PROMPT, request,
+                                       judge_cmd, 0, local_err, sizeof(local_err));
    free(request);
    if (!response)
    {
