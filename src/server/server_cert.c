@@ -33,10 +33,17 @@ int handle_cert_issue(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *jcn = cJSON_GetObjectItemCaseSensitive(req, "cn");
    if (!cJSON_IsString(jcn) || !jcn->valuestring[0])
       return server_send_error(conn, "cert: 'cn' (client name) is required", NULL);
+   /* Default 90d. Bound the range before the double->int cast: an out-of-range
+    * value (e.g. 1e18) is undefined on cast and would mint an absurd-validity
+    * cert, while <1 silently floors to 0. Reject explicitly. */
    int days = 90;
    cJSON *jd = cJSON_GetObjectItemCaseSensitive(req, "days");
-   if (cJSON_IsNumber(jd) && jd->valuedouble > 0)
+   if (jd && cJSON_IsNumber(jd))
+   {
+      if (jd->valuedouble < 1 || jd->valuedouble > 3650)
+         return server_send_error(conn, "cert: 'days' must be between 1 and 3650", NULL);
       days = (int)jd->valuedouble;
+   }
 
    char cert[8192] = "", key[4096] = "", serial[80] = "";
    if (pki_issue(jcn->valuestring, days, cert, sizeof(cert), key, sizeof(key), serial,
@@ -107,7 +114,17 @@ int handle_cert_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "cert: out of memory", NULL);
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON *arr = cJSON_AddArrayToObject(resp, "certs");
-   if (arr)
-      pki_list(cert_list_cb, arr);
+   if (!arr)
+   {
+      cJSON_Delete(resp);
+      return server_send_error(conn, "cert: out of memory", NULL);
+   }
+   /* Surface a DB error distinctly from a legitimately empty list — an empty
+    * {certs:[]} on prepare/step failure would mask DB corruption. */
+   if (pki_list(cert_list_cb, arr) < 0)
+   {
+      cJSON_Delete(resp);
+      return server_send_error(conn, "cert: failed to enumerate certificates", NULL);
+   }
    return server_send_ok(conn, resp);
 }
