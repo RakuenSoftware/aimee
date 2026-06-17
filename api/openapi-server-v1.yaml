@@ -3562,6 +3562,50 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workspace/git:
+    post:
+      summary: Run a git operation on the calling webchat user's project
+      description: >
+        Run `op` on the authenticated `webuser:` principal's `project`. Read ops:
+        status, log, diff, branch. Write/remote ops: fetch, pull, commit, push,
+        checkout. The project + op are scoped + allowlisted; arguments are
+        validated (no shell); remote ops inject the user's vaulted git creds.
+        Capability: tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project, op]
+              properties:
+                project: { type: string }
+                op:
+                  type: string
+                  enum: [status, log, diff, branch, fetch, pull, commit, push, checkout]
+                message: { type: string, description: Commit message (op=commit) }
+                branch: { type: string, description: Target branch (op=checkout) }
+                n: { type: integer, description: Log entry count (op=log) }
+      responses:
+        "200":
+          description: Operation ran
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  output: { type: string }
+        "400":
+          description: Unknown project/op, invalid argument, or git failure
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /runner/poll:
     post:
       summary: Poll for the next detached-workspace op to execute (reverse channel)
