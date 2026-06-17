@@ -96,10 +96,12 @@ int pgvec_curator_entity_lookup(int64_t point_id, char *artifact_id_out, int aid
       name_out[0] = '\0';
    return 0;
 }
-int kb_curator_judge_same_entity(const char *judge_cmd, const char *mention_name,
-                                 const char *mention_context, const char *candidate_name,
-                                 double score, int *out_same, char *errbuf, size_t errlen)
+int kb_curator_judge_same_entity(const config_t *cfg, const char *judge_cmd,
+                                 const char *mention_name, const char *mention_context,
+                                 const char *candidate_name, double score, int *out_same,
+                                 char *errbuf, size_t errlen)
 {
+   (void)cfg;
    (void)judge_cmd;
    (void)mention_name;
    (void)mention_context;

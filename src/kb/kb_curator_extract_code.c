@@ -167,6 +167,74 @@ static void ccu_resolve_path(const char *project, const char *file_path, char *o
       snprintf(out, out_len, "%s", file_path ? file_path : "");
 }
 
+/* Slice CCU_BODY_LINES lines starting at `line` (1-based) out of an in-memory
+ * file `content`. Returns malloc'd string (caller frees) or NULL on OOM. */
+static char *ccu_slice_lines(const char *content, int line)
+{
+   int start = line > 1 ? line - 1 : 0;
+   int end = start + CCU_BODY_LINES;
+   char *body = malloc(strlen(content) + 1); /* a subset never exceeds the whole */
+   if (!body)
+      return NULL;
+   size_t total = 0;
+   int cur = 0;
+   const char *p = content;
+   while (*p)
+   {
+      const char *nl = strchr(p, '\n');
+      size_t n = nl ? (size_t)(nl - p) + 1 : strlen(p);
+      if (cur >= start && cur < end)
+      {
+         memcpy(body + total, p, n);
+         total += n;
+      }
+      cur++;
+      if (!nl || cur >= end)
+         break;
+      p += n;
+   }
+   body[total] = '\0';
+   return body;
+}
+
+/* Read the code-unit body from the file's content stored in DB2 (file_contents),
+ * keyed by project + project-relative path. This is the primary source: the
+ * curator drain runs server-side, where thin-client-ingested files do not exist
+ * on disk (projects.root points at the client's path) — but ingest pushes the
+ * whole file content into file_contents. Returns malloc'd string (caller frees),
+ * or NULL when no stored content exists (caller falls back to an on-disk read for
+ * local deployments). */
+static char *ccu_read_body_db2(const char *project, const char *file_path, int line)
+{
+   void *conn = db2_conn();
+   if (!conn || !project || !project[0] || !file_path || !file_path[0])
+      return NULL;
+   char err[CCU_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "SELECT fc.content FROM file_contents fc"
+                                          " JOIN files f ON f.id = fc.file_id"
+                                          " JOIN projects p ON p.id = f.project_id"
+                                          " WHERE p.name = ?1 AND f.path = ?2 LIMIT 1",
+                                          err, sizeof(err));
+   if (!st)
+      return NULL;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", file_path);
+   char *content = NULL;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *c = aimee_pg_column_text(st, 0);
+      if (c && c[0])
+         content = strdup(c);
+   }
+   aimee_pg_finalize(st);
+   if (!content)
+      return NULL;
+   char *body = ccu_slice_lines(content, line);
+   free(content);
+   return body;
+}
+
 /* Read CCU_BODY_LINES lines starting at line (1-based) from file_path.
  * Returns malloc'd string (caller frees) or NULL on error. */
 static char *ccu_read_body(const char *file_path, int line, char *errbuf, size_t errlen)
@@ -479,11 +547,21 @@ int kb_curator_extract_code_unit_one(const kb_curator_extract_opts_t *opts)
              job.symbol, job.file_path);
 
    char body_err[CCU_ERRBUF] = "";
-   char abs_path[2048];
-   ccu_resolve_path(job.project, job.file_path, abs_path, sizeof(abs_path));
-   char *body = ccu_read_body(abs_path, job.line, body_err, sizeof(body_err));
+   /* Primary: the file content stored in DB2 at ingest (works server-side for
+    * thin-client-ingested files). Fallback: an on-disk read for local
+    * deployments whose file_contents may be empty. */
+   char *body = ccu_read_body_db2(job.project, job.file_path, job.line);
    if (!body)
    {
+      char abs_path[2048];
+      ccu_resolve_path(job.project, job.file_path, abs_path, sizeof(abs_path));
+      body = ccu_read_body(abs_path, job.line, body_err, sizeof(body_err));
+   }
+   if (!body)
+   {
+      if (!body_err[0])
+         snprintf(body_err, sizeof(body_err), "no stored content and cannot open %s",
+                  job.file_path);
       aimee_log(LOG_WARN, "kb.curator.extract_code", "cannot read body for job %lld: %s",
                 (long long)job.job_id, body_err);
       ccu_mark_retry_or_fail(job.job_id, opts->max_attempts, opts->max_attempts, body_err);

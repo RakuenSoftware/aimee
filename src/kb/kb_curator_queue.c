@@ -164,3 +164,46 @@ int kb_curator_queue_code_units_for_project(const char *project, const char *roo
                 enqueued, project);
    return enqueued;
 }
+
+void kb_curator_queue_counts(kb_curator_queue_counts_t *out)
+{
+   if (!out)
+      return;
+   memset(out, 0, sizeof(*out));
+   void *conn = db2_conn();
+   if (!conn)
+      return;
+
+   char err[CQ_ERRBUF] = "";
+   /* extract_doc pending/done from kb_async_jobs (one scan). */
+   static const char *sql_doc = "SELECT"
+                                " COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0),"
+                                " COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END),0)"
+                                " FROM kb_async_jobs WHERE kind='extract_doc'";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql_doc, err, sizeof(err));
+   if (st)
+   {
+      if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      {
+         out->extract_pending = (int)aimee_pg_column_int64(st, 0);
+         out->extract_done = (int)aimee_pg_column_int64(st, 1);
+      }
+      aimee_pg_finalize(st);
+   }
+
+   /* code_unit pending/done from kb_code_unit_jobs. */
+   static const char *sql_code = "SELECT"
+                                 " COALESCE(SUM(CASE WHEN status='pending' THEN 1 ELSE 0 END),0),"
+                                 " COALESCE(SUM(CASE WHEN status='done' THEN 1 ELSE 0 END),0)"
+                                 " FROM kb_code_unit_jobs";
+   st = aimee_pg_prepare(conn, sql_code, err, sizeof(err));
+   if (st)
+   {
+      if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      {
+         out->code_unit_pending = (int)aimee_pg_column_int64(st, 0);
+         out->code_unit_done = (int)aimee_pg_column_int64(st, 1);
+      }
+      aimee_pg_finalize(st);
+   }
+}
