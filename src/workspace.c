@@ -85,8 +85,11 @@ static void discover_recursive(const char *dir, int depth, int max_depth,
       char sub[MAX_PATH_LEN];
       snprintf(sub, sizeof(sub), "%s/%s", dir, ent->d_name);
 
+      /* lstat (not stat): never follow symlinked directories. A self-referential
+       * or parent-pointing symlink (e.g. a repo's "src -> .") otherwise creates a
+       * cycle that re-discovers the same repo once per level up to max_depth. */
       struct stat st;
-      if (stat(sub, &st) != 0 || !S_ISDIR(st.st_mode))
+      if (lstat(sub, &st) != 0 || S_ISLNK(st.st_mode) || !S_ISDIR(st.st_mode))
          continue;
 
       discover_recursive(sub, depth + 1, max_depth, projects, max, count);
