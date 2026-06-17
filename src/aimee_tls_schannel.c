@@ -355,21 +355,47 @@ static int schannel_load_client_identity(aimee_tls_t *t)
    NCRYPT_PROV_HANDLE prov = 0;
    NCRYPT_KEY_HANDLE hkey = 0;
 
+#define DBG(...)                                                                                   \
+   do                                                                                              \
+   {                                                                                               \
+      if (getenv("AIMEE_TLS_DEBUG"))                                                               \
+         fprintf(stderr, "aimee.tls.schannel: " __VA_ARGS__);                                      \
+   } while (0)
+
    cpem = read_small_file(crt, &clen);
    kpem = read_small_file(key, &klen);
    if (!cpem || !kpem)
+   {
+      DBG("read_small_file failed (cpem=%p kpem=%p)\n", (void *)cpem, (void *)kpem);
       goto done;
+   }
    if (pem_to_der(cpem, clen, &cder, &cdl) != 0 || pem_to_der(kpem, klen, &kder, &kdl) != 0)
+   {
+      DBG("pem_to_der failed (cder=%p kder=%p)\n", (void *)cder, (void *)kder);
       goto done;
+   }
+   DBG("decoded cert=%lu der bytes, key=%lu der bytes\n", (unsigned long)cdl, (unsigned long)kdl);
 
    cert = CertCreateCertificateContext(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, cder, cdl);
    if (!cert)
+   {
+      DBG("CertCreateCertificateContext failed: 0x%lx\n", (unsigned long)GetLastError());
       goto done;
-   if (NCryptOpenStorageProvider(&prov, MS_KEY_STORAGE_PROVIDER, 0) != ERROR_SUCCESS)
-      goto done;
-   if (NCryptImportKey(prov, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, NULL, &hkey, kder, kdl, 0) !=
-       ERROR_SUCCESS)
-      goto done;
+   }
+   {
+      SECURITY_STATUS ss = NCryptOpenStorageProvider(&prov, MS_KEY_STORAGE_PROVIDER, 0);
+      if (ss != ERROR_SUCCESS)
+      {
+         DBG("NCryptOpenStorageProvider failed: 0x%lx\n", (unsigned long)ss);
+         goto done;
+      }
+      ss = NCryptImportKey(prov, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, NULL, &hkey, kder, kdl, 0);
+      if (ss != ERROR_SUCCESS)
+      {
+         DBG("NCryptImportKey(PKCS8) failed: 0x%lx\n", (unsigned long)ss);
+         goto done;
+      }
+   }
 
    {
       CERT_KEY_CONTEXT kc;
@@ -378,8 +404,12 @@ static int schannel_load_client_identity(aimee_tls_t *t)
       kc.hNCryptKey = hkey;
       kc.dwKeySpec = CERT_NCRYPT_KEY_SPEC;
       if (!CertSetCertificateContextProperty(cert, CERT_KEY_CONTEXT_PROP_ID, 0, &kc))
+      {
+         DBG("CertSetCertificateContextProperty failed: 0x%lx\n", (unsigned long)GetLastError());
          goto done;
+      }
    }
+   DBG("client identity loaded OK\n");
 
    t->client_cert = cert;
    t->client_prov = prov;

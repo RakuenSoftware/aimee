@@ -18,6 +18,7 @@
  *   - AIMEE_TLS_INSECURE=1 (read at connect time) disables ALL verification.
  *   - the opaque handle owns the TLS state; aimee_tls_free does NOT close the fd.
  */
+#define __STDC_WANT_LIB_EXT1__ 1 /* expose memset_s for a non-elidable key wipe */
 #include "aimee_tls.h"
 #include "aimee_home.h"
 
@@ -141,7 +142,7 @@ static CFArrayRef securetransport_load_client_identity(void)
 
    CFArrayRef result = NULL;
    CFDataRef data = CFDataCreate(NULL, buf, sz);
-   memset(buf, 0, (size_t)sz); /* the PKCS#12 holds the private key */
+   memset_s(buf, (rsize_t)sz, 0, (rsize_t)sz); /* the PKCS#12 holds the private key; non-elidable */
    free(buf);
    if (!data)
       return NULL;
