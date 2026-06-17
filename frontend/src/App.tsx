@@ -7,6 +7,7 @@ import Chat from './pages/Chat';
 import Dashboard from './pages/Dashboard';
 import Workflows from './pages/Workflows';
 import Projects from './pages/Projects';
+import Editor from './pages/Editor';
 
 // A render error in any page used to throw past the root and unmount the whole
 // app, leaving a blank screen (the AppShell, nav, and other pages vanished too).
@@ -60,6 +61,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: 'Dashboard', icon: '📊', route: '/dashboard', section: 'Main' },
   { label: 'Workflows', icon: '🔀', route: '/workflows', section: 'Main' },
   { label: 'Projects', icon: '📁', route: '/projects', section: 'Main' },
+  { label: 'Editor', icon: '🖥️', route: '/editor', section: 'Main' },
 ];
 
 function LogoutButton() {
@@ -133,6 +135,7 @@ export default function App() {
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/workflows" element={<Workflows />} />
             <Route path="/projects" element={<Projects />} />
+            <Route path="/editor" element={<Editor />} />
             <Route path="*" element={<Navigate to="/chat" replace />} />
           </Routes>
         </ErrorBoundary>
