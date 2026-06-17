@@ -195,6 +195,9 @@ database and talks to a server over `/v1`. The intended deployment is to run the
 **services in Docker** (one combined container, or two split containers) and
 install only the **thin client** on each developer machine, pointed at the server.
 
+> **In a hurry?** The [Quickstart](docs/QUICKSTART.md) walks the combined Docker
+> server plus the Linux, Windows, and macOS thin-client setup step by step.
+>
 > Prefer everything on one box from source (no Docker)? See
 > [Single-box source install](#single-box-source-install-no-docker) below.
 
