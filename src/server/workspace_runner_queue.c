@@ -10,6 +10,7 @@ void ws_runner_queue_init(ws_runner_queue_t *q)
 {
    pthread_mutex_init(&q->mu, NULL);
    pthread_cond_init(&q->req_cv, NULL);
+   pthread_cond_init(&q->req_taken_cv, NULL);
    pthread_cond_init(&q->resp_cv, NULL);
    pthread_cond_init(&q->idle_cv, NULL);
    q->req = NULL;
@@ -18,6 +19,7 @@ void ws_runner_queue_init(ws_runner_queue_t *q)
    q->has_req = 0;
    q->busy = 0;
    q->closed = 0;
+   q->pickup_timeout_ms = 0; /* 0 -> WS_RUNNER_PICKUP_TIMEOUT_MS default */
 }
 
 /* Caller holds q->mu (or has exclusive access during destroy). Frees every
@@ -60,6 +62,7 @@ void ws_runner_queue_destroy(ws_runner_queue_t *q)
    resp_fifo_clear(q);
    pthread_mutex_destroy(&q->mu);
    pthread_cond_destroy(&q->req_cv);
+   pthread_cond_destroy(&q->req_taken_cv);
    pthread_cond_destroy(&q->resp_cv);
    pthread_cond_destroy(&q->idle_cv);
 }
@@ -69,6 +72,7 @@ void ws_runner_queue_close(ws_runner_queue_t *q)
    pthread_mutex_lock(&q->mu);
    q->closed = 1;
    pthread_cond_broadcast(&q->req_cv);
+   pthread_cond_broadcast(&q->req_taken_cv);
    pthread_cond_broadcast(&q->resp_cv);
    pthread_cond_broadcast(&q->idle_cv);
    pthread_mutex_unlock(&q->mu);
@@ -87,6 +91,13 @@ static void deadline_from_now(struct timespec *ts, int timeout_ms)
    }
 }
 
+/* Default pickup deadline: how long the transport waits for *some* runner to
+ * claim a posted request before concluding no client is serving the detached
+ * workspace. Generous enough to ride out a client momentarily between long-poll
+ * cycles, short enough that a truly absent client fails fast instead of wedging
+ * the calling turn until the delegate monitor reaps it (~20 min). */
+#define WS_RUNNER_PICKUP_TIMEOUT_MS 45000
+
 /* Caller holds q->mu. Post `request` into the single-flight slot. Assumes the
  * slot is free (busy==0) and the queue is open. */
 static void post_request_locked(ws_runner_queue_t *q, cJSON *request)
@@ -97,6 +108,31 @@ static void post_request_locked(ws_runner_queue_t *q, cJSON *request)
    /* A fresh op must not see a stale response from a prior aborted cycle. */
    resp_fifo_clear(q);
    pthread_cond_signal(&q->req_cv);
+}
+
+/* Caller holds q->mu, a request was just posted. Block until the runner claims
+ * the request (has_req 1->0), a response is already pending, or the queue
+ * closes — bounded by the pickup deadline. Returns 0 if the op is live (claimed
+ * / response pending / closed — the caller's normal response wait handles those)
+ * or -1 if no runner claimed the request before the deadline (no serving
+ * client). Only the unclaimed window is bounded; a claimed op then waits for its
+ * response without a deadline so a legit long client command isn't cut off. */
+static int wait_for_pickup_locked(ws_runner_queue_t *q)
+{
+   int pickup_ms = q->pickup_timeout_ms > 0 ? q->pickup_timeout_ms : WS_RUNNER_PICKUP_TIMEOUT_MS;
+   struct timespec ts;
+   deadline_from_now(&ts, pickup_ms);
+   while (q->has_req && !q->resp_head && !q->closed)
+   {
+      if (pthread_cond_timedwait(&q->req_taken_cv, &q->mu, &ts) != 0)
+      {
+         /* deadline (or spurious wake): if the request is still unclaimed and
+          * nothing else changed, no runner is serving this queue. */
+         if (q->has_req && !q->resp_head && !q->closed)
+            return -1;
+      }
+   }
+   return 0;
 }
 
 int ws_runner_queue_transport(void *ctx, cJSON *request, cJSON **response)
@@ -119,8 +155,15 @@ int ws_runner_queue_transport(void *ctx, cJSON *request, cJSON **response)
 
    post_request_locked(q, request);
 
-   while (!q->resp_head && !q->closed)
-      pthread_cond_wait(&q->resp_cv, &q->mu);
+   /* Bound only the unclaimed window: if no runner picks the op up, fail fast
+    * rather than block forever (no serving client). Once claimed, the response
+    * wait below is unbounded so a legit long client command runs to completion.
+    * A pickup timeout leaves has_req==1, so the reclaim path below frees it. */
+   if (wait_for_pickup_locked(q) == 0)
+   {
+      while (!q->resp_head && !q->closed)
+         pthread_cond_wait(&q->resp_cv, &q->mu);
+   }
 
    int rc;
    cJSON *resp = resp_fifo_pop(q);
@@ -134,7 +177,8 @@ int ws_runner_queue_transport(void *ctx, cJSON *request, cJSON **response)
    }
    else
    {
-      /* closed before a response arrived; reclaim an untaken request */
+      /* closed, or no runner claimed the op before the pickup deadline; reclaim
+       * an untaken request and fail the transport. */
       rc = -1;
       if (q->has_req)
       {
@@ -171,7 +215,10 @@ int ws_runner_queue_transport_stream(void *ctx, cJSON *request, ws_runner_partia
    post_request_locked(q, request);
 
    int rc = -1;
-   for (;;)
+   /* Bound only the unclaimed window (see ws_runner_queue_transport): a stream
+    * with no serving runner fails fast instead of wedging the turn. Once a
+    * runner claims the op, partials are drained without a deadline. */
+   for (; wait_for_pickup_locked(q) == 0;)
    {
       while (!q->resp_head && !q->closed)
          pthread_cond_wait(&q->resp_cv, &q->mu);
@@ -242,6 +289,9 @@ cJSON *ws_runner_queue_poll(ws_runner_queue_t *q, int timeout_ms)
       r = q->req; /* ownership transfers to the runner */
       q->req = NULL;
       q->has_req = 0;
+      /* Wake the transport's bounded pickup wait so it proceeds to the
+       * (unbounded) response wait the instant the op is claimed. */
+      pthread_cond_signal(&q->req_taken_cv);
    }
    pthread_mutex_unlock(&q->mu);
    return r;
