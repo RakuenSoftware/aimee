@@ -330,9 +330,9 @@ typedef struct config
    int typed_facts_enabled;      /* typed-fact knowledge layer master gate (default off) */
    int kb_evidence_emit_enabled; /* auditable-correctness: emit per-turn retrieval_event (default
                                     off) */
-   int fidelity_check_enabled;   /* auditable-correctness P3: run the fidelity judge on terminal-text
-                                    turns (default off; fail-closed dep on
-                                    kb_evidence_emit_enabled + ingress_preinject_enabled) */
+   int fidelity_check_enabled; /* auditable-correctness P3: run the fidelity judge on terminal-text
+                                  turns (default off; fail-closed dep on
+                                  kb_evidence_emit_enabled + ingress_preinject_enabled) */
    int memory_pagerank_enabled;
    int memory_pagerank_iterations;
    double memory_pagerank_weight;
@@ -1265,6 +1265,23 @@ typedef struct config
    char kb_curator_extract_command[512];
    int kb_curator_extract_max_tokens;
    int kb_curator_max_attempts;
+   /* Curator LLM provider (curator-llm-backend §2), operator-owned and kb-level
+    * (the shared kb cannot borrow a per-user server's credentials). Two-tier:
+    *   provider.*  — the default / Tier-A provider (mechanical extract/index
+    *                 stages; a small grammar-constrained model suffices).
+    *   tier_b.*    — the reasoning/judge stages (judge, resolve_entities,
+    *                 detect_contradictions, synthesize, promote_entity). NO weak
+    *                 fallback: these stay idle until tier_b is configured, so a
+    *                 small model never poisons the graph.
+    * An empty base_url means that tier is unconfigured (its stages idle). The
+    * api_key is the operator deployment secret; empty => keyless local endpoint.
+    * wire is OpenAI-compatible /chat/completions (the only wire today). */
+   char kb_curator_provider_base_url[256];
+   char kb_curator_provider_model[128];
+   char kb_curator_provider_api_key[256];
+   char kb_curator_tier_b_base_url[256];
+   char kb_curator_tier_b_model[128];
+   char kb_curator_tier_b_api_key[256];
    /* judge_command: LLM sidecar that adjudicates the resolve_entities
     * [0.70, 0.85) ambiguous band (same_entity? merge : create). Empty = off;
     * with no judge configured, ambiguous mentions fall through to "create". */
