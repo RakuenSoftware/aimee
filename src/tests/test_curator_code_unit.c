@@ -298,6 +298,57 @@ static void test_extract_accepts_pure_function(void)
    printf("  PASS: test_extract_accepts_pure_function\n");
 }
 
+/* The curator drain runs server-side, where thin-client-ingested files do not
+ * exist on disk. The body must come from DB2's file_contents (pushed at ingest),
+ * not an open() of the project-relative path. Seed file_contents but NO disk file
+ * and a non-existent project root: extraction must still succeed, proving the
+ * body was read from DB2. (Regression for ~36k curator jobs failing with
+ * "cannot read body".) */
+static void test_extract_reads_body_from_db2_when_file_absent(void)
+{
+   db2_test_shim_open();
+   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
+   assert(db != NULL);
+
+   const char *src_body = "int target_fn(void) { return 0; }\n";
+   char resp_path[] = "/tmp/aimee_ccu_resp_XXXXXX";
+   int resp_fd = mkstemp(resp_path);
+   assert(resp_fd >= 0);
+   const char *resp =
+       "{\"status\":\"ok\",\"artifacts\":[{\"kind\":\"code_unit\",\"confidence\":0.9,"
+       "\"payload\":{\"intent\":\"t\",\"side_effects\":[],\"invariants\":[],"
+       "\"domain_concepts\":[\"x\"]}}]}";
+   assert(write(resp_fd, resp, strlen(resp)) == (ssize_t)strlen(resp));
+   close(resp_fd);
+
+   /* Project root that does not exist on disk + a project-relative path with no
+    * on-disk file — only DB2 file_contents has the body. */
+   const char *sql =
+       "INSERT INTO projects (id, name, root, scanned_at)"
+       " VALUES (1,'testproj','/nonexistent-root-xyzzy','t');"
+       "INSERT INTO files (id, project_id, path, scanned_at) VALUES (1,1,'src/foo.c','t');"
+       "INSERT INTO file_contents (file_id, content)"
+       " VALUES (1,'int target_fn(void) { return 0; }\n');"
+       "INSERT INTO kb_code_unit_jobs (project, file_path, symbol, kind, line)"
+       " VALUES ('testproj','src/foo.c','target_fn','function',1);";
+   assert(sqlite3_exec(db, sql, NULL, NULL, NULL) == SQLITE_OK);
+   (void)src_body;
+
+   kb_curator_extract_opts_t opts;
+   memset(&opts, 0, sizeof(opts));
+   opts.max_attempts = 3;
+   opts.max_tokens = 256;
+   snprintf(opts.extract_command, sizeof(opts.extract_command), "cat %s", resp_path);
+
+   int rc = kb_curator_extract_code_unit_one(&opts);
+   assert(rc == 1); /* claimed + processed (body came from DB2, not disk) */
+   assert(db2_artifact_count("code_unit", "proposed") == 1);
+
+   db2_test_shim_close();
+   unlink(resp_path);
+   printf("  PASS: test_extract_reads_body_from_db2_when_file_absent\n");
+}
+
 /* ── main ─────────────────────────────────────────────────────────────── */
 
 int main(void)
@@ -318,6 +369,7 @@ int main(void)
    test_extract_rejects_false_no_side_effects();
    test_extract_accepts_honest_claim();
    test_extract_accepts_pure_function();
+   test_extract_reads_body_from_db2_when_file_absent();
 
    printf("ok\n");
    return 0;
