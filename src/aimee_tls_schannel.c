@@ -36,6 +36,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 
 #ifndef SP_PROT_TLS1_2_CLIENT
 #define SP_PROT_TLS1_2_CLIENT 0x00000800
@@ -55,7 +56,8 @@
 #define CERT_NCRYPT_KEY_SPEC 0xFFFFFFFF
 #endif
 
-#define ENC_CAP 32768 /* one TLS record fits comfortably; grown via recv loop */
+#define ENC_CAP           32768 /* one TLS record fits comfortably; grown via recv loop */
+#define AIMEE_KEYNAME_LEN 64
 
 struct aimee_tls
 {
@@ -76,6 +78,7 @@ struct aimee_tls
    PCCERT_CONTEXT client_cert;
    NCRYPT_PROV_HANDLE client_prov;
    NCRYPT_KEY_HANDLE client_key;
+   WCHAR client_key_name[AIMEE_KEYNAME_LEN]; /* persisted CNG key container (deleted on free) */
 };
 
 static int tls_insecure(void)
@@ -389,27 +392,46 @@ static int schannel_load_client_identity(aimee_tls_t *t)
          DBG("NCryptOpenStorageProvider failed: 0x%lx\n", (unsigned long)ss);
          goto done;
       }
-      ss = NCryptImportKey(prov, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, NULL, &hkey, kder, kdl, 0);
+      /* Import the key PERSISTED under a unique container name. Schannel signs
+       * the CertificateVerify by opening the key via the cert's PROV_INFO, and
+       * it cannot use an ephemeral (nameless) CNG handle for that — so a named
+       * key + CERT_KEY_PROV_INFO_PROP_ID is required, not CERT_KEY_CONTEXT. */
+      static volatile LONG s_ctr;
+      swprintf(t->client_key_name, AIMEE_KEYNAME_LEN, L"aimee-mtls-%lu-%ld",
+               (unsigned long)GetCurrentProcessId(), InterlockedIncrement(&s_ctr));
+      NCryptBuffer nb;
+      nb.BufferType = NCRYPTBUFFER_PKCS_KEY_NAME;
+      nb.cbBuffer = (DWORD)((wcslen(t->client_key_name) + 1) * sizeof(WCHAR));
+      nb.pvBuffer = t->client_key_name;
+      NCryptBufferDesc nbd;
+      nbd.ulVersion = NCRYPTBUFFER_VERSION;
+      nbd.cBuffers = 1;
+      nbd.pBuffers = &nb;
+      ss = NCryptImportKey(prov, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, &nbd, &hkey, kder, kdl,
+                           NCRYPT_OVERWRITE_KEY_FLAG | NCRYPT_SILENT_FLAG);
       if (ss != ERROR_SUCCESS)
       {
-         DBG("NCryptImportKey(PKCS8) failed: 0x%lx\n", (unsigned long)ss);
+         DBG("NCryptImportKey(PKCS8,persisted) failed: 0x%lx\n", (unsigned long)ss);
+         t->client_key_name[0] = 0;
          goto done;
       }
    }
 
    {
-      CERT_KEY_CONTEXT kc;
-      memset(&kc, 0, sizeof(kc));
-      kc.cbSize = sizeof(kc);
-      kc.hNCryptKey = hkey;
-      kc.dwKeySpec = CERT_NCRYPT_KEY_SPEC;
-      if (!CertSetCertificateContextProperty(cert, CERT_KEY_CONTEXT_PROP_ID, 0, &kc))
+      CRYPT_KEY_PROV_INFO pi;
+      memset(&pi, 0, sizeof(pi));
+      pi.pwszContainerName = t->client_key_name;
+      pi.pwszProvName = (LPWSTR)MS_KEY_STORAGE_PROVIDER;
+      pi.dwProvType = 0; /* 0 + a CNG KSP name => CNG key */
+      pi.dwKeySpec = 0;  /* ignored for CNG */
+      if (!CertSetCertificateContextProperty(cert, CERT_KEY_PROV_INFO_PROP_ID, 0, &pi))
       {
-         DBG("CertSetCertificateContextProperty failed: 0x%lx\n", (unsigned long)GetLastError());
+         DBG("CertSetCertificateContextProperty(PROV_INFO) failed: 0x%lx\n",
+             (unsigned long)GetLastError());
          goto done;
       }
    }
-   DBG("client identity loaded OK\n");
+   DBG("client identity loaded OK (persisted key '%ls')\n", t->client_key_name);
 
    t->client_cert = cert;
    t->client_prov = prov;
@@ -433,7 +455,7 @@ done:
    free(cder);
    free(cpem);
    if (hkey)
-      NCryptFreeObject(hkey);
+      NCryptDeleteKey(hkey, NCRYPT_SILENT_FLAG); /* error path: remove the persisted key + free */
    if (prov)
       NCryptFreeObject(prov);
    if (cert)
@@ -713,7 +735,8 @@ void aimee_tls_free(aimee_tls_t *t)
    if (t->client_cert)
       CertFreeCertificateContext(t->client_cert);
    if (t->client_key)
-      NCryptFreeObject(t->client_key);
+      NCryptDeleteKey(t->client_key,
+                      NCRYPT_SILENT_FLAG); /* delete the persisted key + free handle */
    if (t->client_prov)
       NCryptFreeObject(t->client_prov);
    free(t->dec);
