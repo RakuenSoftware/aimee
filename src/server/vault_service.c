@@ -53,8 +53,8 @@ static void vault_service_backfill_server_wraps(const char *principal,
  * client unlock / KEK cache. Returns VAULT_OK (plaintext written), VAULT_NO_ENTRY
  * (no such cred, or a legacy user-only entry — caller falls back to the user KEK
  * path), or VAULT_ERR_* (fail closed). */
-static vault_status_t vault_service_get_server_wrap(const char *principal, const char *agent,
-                                                    const char *cred, char *out, size_t out_len)
+vault_status_t vault_service_get_server_wrap(const char *principal, const char *agent,
+                                             const char *cred, char *out, size_t out_len)
 {
    if (out && out_len)
       out[0] = '\0';
