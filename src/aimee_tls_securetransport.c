@@ -18,10 +18,15 @@
  *   - AIMEE_TLS_INSECURE=1 (read at connect time) disables ALL verification.
  *   - the opaque handle owns the TLS state; aimee_tls_free does NOT close the fd.
  */
+#define __STDC_WANT_LIB_EXT1__ 1 /* expose memset_s for a non-elidable key wipe */
 #include "aimee_tls.h"
+#include "aimee_home.h"
 
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/Security.h>
 #include <Security/SecureTransport.h>
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -30,6 +35,9 @@ struct aimee_tls
 {
    SSLContextRef ctx;
    int fd; /* the SSLConnectionRef points here; not closed by this module */
+   /* Transient keychain holding the mTLS client identity (deleted on free) so the
+    * imported private key never lands in the user's login keychain. */
+   SecKeychainRef client_keychain;
 };
 
 static int tls_insecure(void)
@@ -89,6 +97,122 @@ static OSStatus st_write(SSLConnectionRef conn, const void *data, size_t *len)
    return rc;
 }
 
+/* Load the mTLS client identity from <aimee_home>/tls/client.p12 for
+ * SSLSetCertificate. SSLSetCertificate wants a CFArray whose first element is a
+ * SecIdentityRef; the on-disk path to one is SecPKCS12Import. To avoid leaking
+ * the private key into the user's login keychain (plain SecPKCS12Import imports
+ * there and it persists across runs), import into a TRANSIENT keychain that is
+ * deleted on aimee_tls_free. Export the PEM client.{crt,key} the OpenSSL/Schannel
+ * backends use to client.p12 via `openssl pkcs12 -export`. NOTE: macOS
+ * SecPKCS12Import requires a NON-EMPTY passphrase (an empty one fails
+ * errSecAuthFailed), so the .p12 must be passphrase-protected and the passphrase
+ * supplied via AIMEE_TLS_CLIENT_P12_PASS. Returns a retained CFArrayRef
+ * [identity] (caller releases after SSLSetCertificate) and sets *out_kc to the
+ * transient keychain, or NULL/none on absence or import failure. */
+static CFArrayRef securetransport_load_client_identity(SecKeychainRef *out_kc)
+{
+   *out_kc = NULL;
+   const char *home = aimee_home();
+   if (!home || !*home)
+      return NULL;
+   char path[700];
+   snprintf(path, sizeof(path), "%s/tls/client.p12", home);
+
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return NULL; /* no client-cert material configured */
+   if (fseek(f, 0, SEEK_END) != 0)
+   {
+      fclose(f);
+      return NULL;
+   }
+   long sz = ftell(f);
+   if (sz <= 0 || sz > (1 << 20) || fseek(f, 0, SEEK_SET) != 0)
+   {
+      fclose(f);
+      return NULL;
+   }
+   unsigned char *buf = malloc((size_t)sz);
+   if (!buf)
+   {
+      fclose(f);
+      return NULL;
+   }
+   size_t rd = fread(buf, 1, (size_t)sz, f);
+   fclose(f);
+   if (rd != (size_t)sz)
+   {
+      free(buf);
+      return NULL;
+   }
+
+   CFDataRef data = CFDataCreate(NULL, buf, sz);
+   memset_s(buf, (rsize_t)sz, 0, (rsize_t)sz); /* PKCS#12 holds the private key */
+   free(buf);
+   if (!data)
+      return NULL;
+
+   /* Create the transient keychain under the temp dir, unique per connection
+    * (pid + atomic counter) so concurrent connections in one process don't race
+    * on the same path. */
+   static volatile int s_ctr;
+   const char *tmp = getenv("TMPDIR");
+   if (!tmp || !*tmp)
+      tmp = "/tmp";
+   char kcpath[800];
+   snprintf(kcpath, sizeof(kcpath), "%s/aimee-mtls-%d-%d.keychain", tmp, (int)getpid(),
+            __sync_add_and_fetch(&s_ctr, 1));
+   unlink(kcpath); /* SecKeychainCreate fails if the file already exists */
+   static const char kcpw[] = "aimee-transient-mtls";
+   SecKeychainRef kc = NULL;
+   if (SecKeychainCreate(kcpath, (UInt32)(sizeof(kcpw) - 1), kcpw, false, NULL, &kc) !=
+           errSecSuccess ||
+       !kc)
+   {
+      CFRelease(data);
+      return NULL;
+   }
+
+   const char *passenv = getenv("AIMEE_TLS_CLIENT_P12_PASS");
+   CFStringRef pass =
+       CFStringCreateWithCString(NULL, passenv ? passenv : "", kCFStringEncodingUTF8);
+   const void *keys[] = {kSecImportExportPassphrase, kSecImportExportKeychain};
+   const void *vals[] = {pass, kc};
+   CFDictionaryRef opts = CFDictionaryCreate(NULL, keys, vals, 2, &kCFTypeDictionaryKeyCallBacks,
+                                             &kCFTypeDictionaryValueCallBacks);
+   CFArrayRef items = NULL;
+   OSStatus st = opts ? SecPKCS12Import(data, opts, &items) : errSecParam;
+   CFArrayRef result = NULL;
+   if (st == errSecSuccess && items && CFArrayGetCount(items) > 0)
+   {
+      CFDictionaryRef item = CFArrayGetValueAtIndex(items, 0);
+      SecIdentityRef ident = (SecIdentityRef)CFDictionaryGetValue(item, kSecImportItemIdentity);
+      if (ident)
+      {
+         const void *certs[] = {ident};
+         result = CFArrayCreate(NULL, certs, 1, &kCFTypeArrayCallBacks);
+      }
+   }
+   if (items)
+      CFRelease(items);
+   if (opts)
+      CFRelease(opts);
+   if (pass)
+      CFRelease(pass);
+   CFRelease(data);
+
+   if (result)
+   {
+      *out_kc = kc; /* keep alive for the handshake; deleted on aimee_tls_free */
+   }
+   else
+   {
+      SecKeychainDelete(kc);
+      CFRelease(kc);
+   }
+   return result;
+}
+
 aimee_tls_t *aimee_tls_connect(int fd, const char *host)
 {
    aimee_tls_t *t = calloc(1, sizeof(*t));
@@ -102,17 +226,22 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
       free(t);
       return NULL;
    }
-   /* mTLS client-cert presentation (slice 3b, follow-up): to present
-    * <aimee_home>/tls/client.{crt,key} as this client's identity, build a
-    * SecIdentityRef from the PEM (SecPKCS12Import / SecItem) and pass it to
-    * SSLSetCertificate here. Deferred: identity construction must be validated
-    * on real macOS. The OpenSSL backend presents the cert today. */
+   /* mTLS client-cert presentation: if <aimee_home>/tls/client.p12 holds an
+    * identity, present it so the server can identify this client as a distinct
+    * cert:<CN> principal. Absent => plain client TLS. SSLSetCertificate retains
+    * the array contents, so we release our reference immediately after; the
+    * transient keychain backing the identity is held in t and deleted on free. */
+   CFArrayRef client_identity = securetransport_load_client_identity(&t->client_keychain);
+   if (client_identity)
+   {
+      SSLSetCertificate(t->ctx, client_identity);
+      CFRelease(client_identity);
+   }
    if (SSLSetIOFuncs(t->ctx, st_read, st_write) != noErr ||
        SSLSetConnection(t->ctx, &t->fd) != noErr ||
        SSLSetProtocolVersionMin(t->ctx, kTLSProtocol12) != noErr)
    {
-      CFRelease(t->ctx);
-      free(t);
+      aimee_tls_free(t);
       return NULL;
    }
 
@@ -146,9 +275,7 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
 
    if (rc != noErr)
    {
-      SSLClose(t->ctx);
-      CFRelease(t->ctx);
-      free(t);
+      aimee_tls_free(t); /* also sends close-notify + deletes the transient keychain */
       return NULL;
    }
    return t;
@@ -196,6 +323,11 @@ void aimee_tls_free(aimee_tls_t *t)
    {
       SSLClose(t->ctx); /* send close-notify; does not close the fd */
       CFRelease(t->ctx);
+   }
+   if (t->client_keychain)
+   {
+      SecKeychainDelete(t->client_keychain); /* remove the transient .keychain + its key */
+      CFRelease(t->client_keychain);
    }
    free(t);
 }
