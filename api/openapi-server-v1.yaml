@@ -3627,6 +3627,36 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workspace/editor:
+    post:
+      summary: Ensure the calling webchat user's code-server is running
+      description: >
+        Spawn (or reuse) a code-server for the authenticated `webuser:` principal,
+        rooted at their scoped workspace and launched with their vault-backed git
+        environment, and return its loopback port. The port reaches only webchat
+        (the trusted reverse-proxy), never the browser. Disabled by default
+        (AIMEE_WEBCHAT_EDITOR) and unavailable on images without code-server.
+        Capability: tool:execute.
+      responses:
+        "200":
+          description: Editor ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  port: { type: integer }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Editor feature disabled or code-server absent
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /runner/poll:
     post:
       summary: Poll for the next detached-workspace op to execute (reverse channel)

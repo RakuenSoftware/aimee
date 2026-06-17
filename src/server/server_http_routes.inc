@@ -17,8 +17,9 @@
 
 /* Route-handler deps used below but not needed by server_http.c's own body
  * (kept here, not in server_http.c, to respect its 2000-line limit). */
-#include "git_ops.h"     /* git_ops_run for /v1/workspace/git (WP-E) */
-#include "git_project.h" /* git_project_clone for /v1/workspace/clone (WP-D) */
+#include "git_ops.h"        /* git_ops_run for /v1/workspace/git (WP-E) */
+#include "git_project.h"    /* git_project_clone for /v1/workspace/clone (WP-D) */
+#include "webuser_editor.h" /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
 #include "index.h"       /* index_scan_project after a webuser clone (WP-D) */
 
 /* Per-request context handed to a route handler. `id` holds the extracted
@@ -937,6 +938,37 @@ static int rh_workspace_projects(const route_req_t *rq, char *resp, int cap)
    return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
 }
 
+/* POST /v1/workspace/editor — ensure the calling webchat user's code-server is
+ * running and return its loopback port (webchat-git WP-I). Identity is the
+ * attested X-Aimee-Webuser principal, so a user only ever drives their own
+ * editor, rooted at their scoped workspace and launched with their vault-backed
+ * git env. The port reaches only webchat (the trusted reverse-proxy, WP-J),
+ * never the browser. 503 when the feature is disabled / code-server absent. */
+static int rh_workspace_editor(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "the editor requires a webchat user");
+
+   int port = 0;
+   char err[256];
+   int rc = webuser_editor_ensure(principal, &port, err, sizeof(err));
+   if (rc == 0)
+      return err_json(resp, cap, 503, "editor not available");
+   if (rc < 0)
+      return err_json(resp, cap, 500, err[0] ? err : "failed to start editor");
+
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddBoolToObject(out, "ok", 1);
+   cJSON_AddNumberToObject(out, "port", port);
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
 /* ── detached-runner reverse channel over /v1 (workspace-resource-plane §3) ──
  * The filesystem-authority client serving a `detached` workspace polls for the
  * next op the server needs done against its working tree, executes it locally,
@@ -1409,6 +1441,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/workspace/clone", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_clone},
     {"POST", "/v1/workspace/git", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_git},
     {"GET", "/v1/workspace/projects", NULL, RM_EXACT, NULL, CAP_INDEX_READ, rh_workspace_projects},
+    {"POST", "/v1/workspace/editor", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_editor},
     {"POST", "/v1/workspaces/", "/forge-token", RM_PREFIX, NULL, CAP_TOOL_EXECUTE,
      rh_workspace_forge_token},
     {"GET", "/v1/workspaces/", NULL, RM_PREFIX, "workspace.get", 0, rh_workspace_get},

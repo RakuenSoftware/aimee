@@ -196,7 +196,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 110 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
+The binaries read 113 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
 
 ### Paths & assets
 
@@ -246,6 +246,9 @@ The binaries read 110 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_SERVER_STARTUP_FD` | Inherited fd for startup-readiness signalling (service launch). |
 | `AIMEE_SESSION_THREADS` | Per-session worker thread count. |
 | `AIMEE_SOCK` | Sandbox helper socket path. |
+| `AIMEE_WEBCHAT_EDITOR` | Enable the per-webuser in-browser code-server editor (default off; requires a WITH_VSCODE=1 image). |
+| `AIMEE_WEBCHAT_EDITOR_BIN` | Override path to the code-server binary used for the in-browser editor. |
+| `AIMEE_WEBCHAT_EDITOR_UID` | Dedicated service user the per-webuser code-server drops to (defence in depth; only honoured when aimee-server runs as root). |
 | `AIMEE_WORKTREE_GC` | Enable/disable delegate-worktree garbage collection. |
 | `AIMEE_WORKTREE_GC_DAYS` | Age threshold (days) for worktree GC. |
 

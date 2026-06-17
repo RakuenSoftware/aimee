@@ -7,6 +7,7 @@
 #include "git_ops.h"
 #include "git_project.h"
 #include "index.h"
+#include "webuser_editor.h"
 
 #include <stdio.h>
 
@@ -54,4 +55,14 @@ int git_ops_run(const char *principal, const char *project, const char *op, cons
    if (err && errlen)
       snprintf(err, errlen, "stub");
    return -1;
+}
+
+int webuser_editor_ensure(const char *principal, int *out_port, char *err, size_t errlen)
+{
+   (void)principal;
+   if (out_port)
+      *out_port = 0;
+   if (err && errlen)
+      err[0] = '\0';
+   return 0; /* feature unavailable in the stub */
 }
