@@ -103,6 +103,12 @@ static int recv_more(aimee_tls_t *t)
  * Returns 0 on success, -1 on any failure. */
 static int verify_server_cert(aimee_tls_t *t)
 {
+   /* Fail closed if there is no hostname to verify against: a NULL pwszServerName
+    * makes CERT_CHAIN_POLICY_SSL skip the name check, which would accept any
+    * otherwise-valid cert (MITM). aimee_client.c always passes the URL host. */
+   if (!t->host || !t->host[0])
+      return -1;
+
    PCCERT_CONTEXT cert = NULL;
    if (QueryContextAttributes(&t->ctx, SECPKG_ATTR_REMOTE_CERT_CONTEXT, &cert) != SEC_E_OK || !cert)
       return -1;
@@ -115,17 +121,22 @@ static int verify_server_cert(aimee_tls_t *t)
 
    if (CertGetCertificateChain(NULL, cert, NULL, cert->hCertStore, &chain_para, 0, NULL, &chain))
    {
-      /* Widen the hostname for the SSL policy. */
+      /* Widen the hostname for the SSL policy. A DNS hostname is <= 253 chars, so
+       * 256 wide chars suffices; a 0 return means truncation/encoding error -> fail
+       * closed rather than verify against a truncated name. */
       wchar_t whost[256];
-      whost[0] = 0;
-      if (t->host)
-         MultiByteToWideChar(CP_UTF8, 0, t->host, -1, whost, 256);
+      if (MultiByteToWideChar(CP_UTF8, 0, t->host, -1, whost, 256) == 0)
+      {
+         CertFreeCertificateChain(chain);
+         CertFreeCertificateContext(cert);
+         return -1;
+      }
 
       SSL_EXTRA_CERT_CHAIN_POLICY_PARA ssl_para;
       memset(&ssl_para, 0, sizeof(ssl_para));
       ssl_para.cbSize = sizeof(ssl_para);
       ssl_para.dwAuthType = AUTHTYPE_SERVER;
-      ssl_para.pwszServerName = whost[0] ? whost : NULL;
+      ssl_para.pwszServerName = whost;
 
       CERT_CHAIN_POLICY_PARA policy_para;
       memset(&policy_para, 0, sizeof(policy_para));
@@ -295,6 +306,8 @@ int aimee_tls_write_all(aimee_tls_t *t, const void *buf, size_t len)
    const unsigned char *p = buf;
    size_t off = 0;
    unsigned long maxmsg = t->sizes.cbMaximumMessage;
+   if (maxmsg == 0)
+      return -1; /* guard against a zero chunk size -> would never make progress */
    size_t reclen = (size_t)t->sizes.cbHeader + maxmsg + t->sizes.cbTrailer;
    unsigned char *rec = malloc(reclen);
    if (!rec)

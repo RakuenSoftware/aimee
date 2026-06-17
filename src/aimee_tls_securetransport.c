@@ -117,8 +117,17 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
       /* Break on server auth so we can accept the cert WITHOUT evaluating it. */
       SSLSetSessionOption(t->ctx, kSSLSessionOptionBreakOnServerAuth, true);
    }
-   else if (host && *host)
+   else
    {
+      /* Fail closed if there is no hostname: without SSLSetPeerDomainName, Secure
+       * Transport verifies the chain but NOT the name, accepting any otherwise-valid
+       * cert (MITM). aimee_client.c always passes the URL host. */
+      if (!host || !*host)
+      {
+         CFRelease(t->ctx);
+         free(t);
+         return NULL;
+      }
       /* Set the expected name: Secure Transport then verifies chain + hostname
        * (SAN/CN, wildcards) against the Keychain trust during the handshake. */
       SSLSetPeerDomainName(t->ctx, host, strlen(host));
