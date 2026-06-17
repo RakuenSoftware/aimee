@@ -56,6 +56,85 @@ interface RunItem {
   repo: string;
 }
 
+/* ---- personas + delegates (the per-step assignment options) ---- */
+
+interface PersonaInfo {
+  name: string;
+  description?: string;
+  builtin?: boolean;
+}
+// Full persona definition (GET /api/chat/personas/<name>); used by the manager
+// form. Fields mirror persona_to_json / persona_from_json on the server.
+interface PersonaDef {
+  name: string;
+  description?: string;
+  delegates?: string; // "full" | "readonly" | "none"
+  roles?: string[];
+  check_role?: string;
+  check_marker?: string;
+  persona?: string; // "## Persona" body
+  principles?: string; // "## Principles" body
+  brief?: string; // "## Brief" session hints
+  builtin?: boolean;
+}
+// A registered/known delegate (GET /api/agents). Used only to populate the
+// delegate picker's suggestions; the field also accepts free text.
+interface AgentInfo {
+  name: string;
+}
+
+// One step participant: a persona run on a delegate. A gate.roundtable step has
+// several (e.g. 4 lenses); a single-action step (implement/author/…) has one.
+interface Participant {
+  persona: string;
+  delegate: string;
+}
+
+const ROUNDTABLE_BLOCK = "gate.roundtable";
+
+// Read the participants a node currently declares, from whichever param shape it
+// uses: a roundtable's panel (required = delegates, personas = the lenses) or a
+// single-action step's persona/delegate. Returns [] when none are set.
+function readParticipants(node: GNode): Participant[] {
+  const p = (node.params || {}) as Record<string, unknown>;
+  const panel = (p.panel || {}) as Record<string, unknown>;
+  const strs = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  if (Array.isArray(panel.required) || Array.isArray(panel.personas)) {
+    const dels = strs(panel.required);
+    const pers = strs(panel.personas);
+    const n = Math.max(dels.length, pers.length);
+    const out: Participant[] = [];
+    for (let i = 0; i < n; i++)
+      out.push({ persona: pers[i] || "", delegate: dels[i] || "" });
+    return out;
+  }
+  const persona = typeof p.persona === "string" ? p.persona : "";
+  const delegate = typeof p.delegate === "string" ? p.delegate : "";
+  if (persona || delegate) return [{ persona, delegate }];
+  return [];
+}
+
+// The human label for a step: its title param if set, else the node id.
+function nodeTitle(node: GNode): string {
+  const t = (node.params as Record<string, unknown> | undefined)?.title;
+  return typeof t === "string" && t.trim() ? t : node.id;
+}
+
+// A compact "persona@delegate, …" line for the node card, or "" when unset.
+function participantSummary(node: GNode): string {
+  const ps = readParticipants(node).filter((p) => p.persona || p.delegate);
+  if (!ps.length) return "";
+  const parts = ps
+    .slice(0, 2)
+    .map((p) =>
+      p.persona && p.delegate
+        ? `${p.persona}@${p.delegate}`
+        : p.persona || p.delegate,
+    );
+  return parts.join(", ") + (ps.length > 2 ? ` +${ps.length - 2}` : "");
+}
+
 /* ---- block-style YAML emitter (aimee's yaml.c is block-style only: no flow
  *      sequences). The server canonicalizes + validates on save, so this only
  *      needs to round-trip through wfe_def_parse, not match canonical form. ---- */
@@ -199,6 +278,27 @@ async function postJSON<T>(
   });
   return { status: r.status, data: (await r.json()) as T };
 }
+async function sendJSON<T>(
+  method: "PUT" | "DELETE",
+  url: string,
+  body?: unknown,
+): Promise<{ status: number; data: T }> {
+  const r = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": window._csrf || "",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let data = {} as T;
+  try {
+    data = (await r.json()) as T;
+  } catch {
+    /* DELETE/empty bodies are fine */
+  }
+  return { status: r.status, data };
+}
 
 export default function Workflows() {
   const [defs, setDefs] = useState<DefRow[]>([]);
@@ -214,6 +314,9 @@ export default function Workflows() {
   } | null>(null);
   const [runItem, setRunItem] = useState<RunItem | null>(null);
   const [loading, setLoading] = useState(false);
+  const [personas, setPersonas] = useState<PersonaInfo[]>([]);
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [managePersonas, setManagePersonas] = useState(false);
   const drag = useRef<{ id: string; dx: number; dy: number } | null>(null);
 
   const refreshLists = useCallback(() => {
@@ -225,12 +328,26 @@ export default function Workflows() {
       .catch(() => {});
   }, []);
 
+  // The persona list feeds both the per-step persona pickers and the manager;
+  // refreshed after any persona create/edit/delete.
+  const refreshPersonas = useCallback(() => {
+    getJSON<{ personas: PersonaInfo[] }>("/api/chat/personas")
+      .then((d) => setPersonas(d.personas || []))
+      .catch(() => {});
+  }, []);
+
   useEffect(() => {
     getJSON<{ blocks: BlockDef[] }>("/api/workflow/blocks")
       .then((d) => setBlocks(d.blocks || []))
       .catch(() => {});
+    // Delegate suggestions: registered agents. Free text is also accepted, so an
+    // empty list (no agents connected) never blocks assigning a delegate.
+    getJSON<{ agents: AgentInfo[] }>("/api/agents")
+      .then((d) => setAgents(d.agents || []))
+      .catch(() => {});
+    refreshPersonas();
     refreshLists();
-  }, [refreshLists]);
+  }, [refreshLists, refreshPersonas]);
 
   const openDef = useCallback((name: string) => {
     setLoading(true);
@@ -500,6 +617,24 @@ export default function Workflows() {
             </div>
           ))}
         </Panel>
+        <Panel title="Personas" count={personas.length}>
+          <button onClick={() => setManagePersonas(true)} style={btn}>
+            Manage personas
+          </button>
+          <div style={{ marginTop: 6 }}>
+            {personas.map((p) => (
+              <div
+                key={p.name}
+                style={row}
+                title={p.description || p.name}
+                onClick={() => setManagePersonas(true)}
+              >
+                <span>{p.name}</span>
+                {p.builtin && <Badge label="builtin" variant="neutral" />}
+              </div>
+            ))}
+          </div>
+        </Panel>
       </div>
 
       {/* center: canvas */}
@@ -633,14 +768,14 @@ export default function Workflows() {
                     strokeWidth={isSel || isActive ? 2 : 1}
                   />
                   <text x={8} y={20} fontSize={13} fontWeight={600} fill="#222">
-                    {n.id}
+                    {nodeTitle(n)}
                   </text>
                   <text x={8} y={38} fontSize={11} fill="#777">
                     {n.block}
                     {n.custom ? " ⚙" : ""}
                   </text>
                   <text x={8} y={50} fontSize={10} fill="#aaa">
-                    → {n.produces}
+                    {participantSummary(n) || `→ ${n.produces}`}
                   </text>
                   {n.id === graph?.start && (
                     <circle cx={NODE_W - 10} cy={10} r={4} fill="#22a06b" />
@@ -666,6 +801,8 @@ export default function Workflows() {
               graph={graph}
               mutate={mutate}
               onDelete={() => deleteNode(sel.id)}
+              personas={personas}
+              agents={agents}
             />
           )}
         </Panel>
@@ -692,6 +829,14 @@ export default function Workflows() {
           </Panel>
         )}
       </div>
+
+      {managePersonas && (
+        <PersonaManager
+          personas={personas}
+          onClose={() => setManagePersonas(false)}
+          onChanged={refreshPersonas}
+        />
+      )}
     </div>
   );
 }
@@ -717,20 +862,119 @@ function NodeInspector({
   graph,
   mutate,
   onDelete,
+  personas,
+  agents,
 }: {
   node: GNode;
   graph: GraphDef;
   mutate: (fn: (g: GraphDef) => GraphDef) => void;
   onDelete: () => void;
+  personas: PersonaInfo[];
+  agents: AgentInfo[];
 }) {
-  const [paramsText, setParamsText] = useState(
-    node.params ? JSON.stringify(node.params, null, 2) : "",
-  );
+  // A roundtable runs a panel of lenses (several persona+delegate participants);
+  // every other action runs a single persona on a single delegate.
+  const isMulti = node.block === ROUNDTABLE_BLOCK;
+
+  const [title, setTitle] = useState("");
+  const [task, setTask] = useState("");
+  const [parts, setParts] = useState<Participant[]>([]);
+  const [quorum, setQuorum] = useState(0);
+  const [showAdv, setShowAdv] = useState(false);
+  const [paramsText, setParamsText] = useState("");
   const [paramsErr, setParamsErr] = useState("");
+
+  // Re-hydrate the structured fields from the node whenever the selection changes.
   useEffect(() => {
+    const p = (node.params || {}) as Record<string, unknown>;
+    setTitle(typeof p.title === "string" ? p.title : "");
+    setTask(typeof p.task === "string" ? p.task : "");
+    let ps = readParticipants(node);
+    if (isMulti) {
+      while (ps.length < 2) ps = [...ps, { persona: "", delegate: "" }];
+    } else {
+      ps = ps.length ? [ps[0]] : [{ persona: "", delegate: "" }];
+    }
+    setParts(ps);
+    setQuorum(typeof p.quorum === "number" ? p.quorum : 0);
     setParamsText(node.params ? JSON.stringify(node.params, null, 2) : "");
     setParamsErr("");
+    setShowAdv(false);
   }, [node.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Serialize the structured fields back into the node's params, preserving any
+  // params the form doesn't manage (e.g. freeze base_branch, gate.human policy).
+  //   roundtable -> panel.required = delegates (engine-consumed, validator needs
+  //                 >=2), panel.personas = the lenses, quorum
+  //   single     -> persona + delegate (forward params; honored once the
+  //                 author/implement executors read them)
+  const commitStep = (next: {
+    title?: string;
+    task?: string;
+    parts?: Participant[];
+    quorum?: number;
+  }) => {
+    const t = next.title ?? title;
+    const tk = next.task ?? task;
+    const pr = next.parts ?? parts;
+    const q = next.quorum ?? quorum;
+    if (next.title !== undefined) setTitle(next.title);
+    if (next.task !== undefined) setTask(next.task);
+    if (next.parts !== undefined) setParts(next.parts);
+    if (next.quorum !== undefined) setQuorum(next.quorum);
+    mutate((g) => {
+      const n = g.nodes.find((x) => x.id === node.id);
+      if (!n) return g;
+      const params: Record<string, unknown> = { ...(n.params || {}) };
+      if (t.trim()) params.title = t;
+      else delete params.title;
+      if (tk.trim()) params.task = tk;
+      else delete params.task;
+      const cleaned = pr
+        .map((x) => ({ persona: x.persona.trim(), delegate: x.delegate.trim() }))
+        .filter((x) => x.persona || x.delegate);
+      if (isMulti) {
+        delete params.persona;
+        delete params.delegate;
+        delete params.participants;
+        const panel: Record<string, unknown> = {
+          ...((params.panel as Record<string, unknown>) || {}),
+        };
+        const required = cleaned
+          .map((x) => x.delegate || x.persona)
+          .filter(Boolean);
+        const lenses = cleaned.map((x) => x.persona).filter(Boolean);
+        if (required.length) panel.required = required;
+        else delete panel.required;
+        if (lenses.length) panel.personas = lenses;
+        else delete panel.personas;
+        if (Object.keys(panel).length) params.panel = panel;
+        else delete params.panel;
+        if (q > 0) params.quorum = q;
+        else delete params.quorum;
+      } else {
+        delete params.panel;
+        delete params.quorum;
+        delete params.participants;
+        const one = cleaned[0];
+        if (one?.persona) params.persona = one.persona;
+        else delete params.persona;
+        if (one?.delegate) params.delegate = one.delegate;
+        else delete params.delegate;
+      }
+      n.params = Object.keys(params).length ? params : undefined;
+      return g;
+    });
+  };
+
+  const setPart = (i: number, field: keyof Participant, v: string) =>
+    commitStep({
+      parts: parts.map((p, idx) => (idx === i ? { ...p, [field]: v } : p)),
+    });
+  const addPart = () =>
+    commitStep({ parts: [...parts, { persona: "", delegate: "" }] });
+  const delPart = (i: number) =>
+    commitStep({ parts: parts.filter((_, idx) => idx !== i) });
 
   const setEdge = (edge: "next" | "on_pass" | "on_fail", v: string) =>
     mutate((g) => {
@@ -795,6 +1039,81 @@ function NodeInspector({
 
   return (
     <div style={{ fontSize: 13 }}>
+      <label style={lbl}>Step title</label>
+      <input
+        value={title}
+        placeholder={node.id}
+        onChange={(e) => commitStep({ title: e.target.value })}
+        style={{ ...inp, width: "100%" }}
+      />
+
+      <label style={{ ...lbl, marginTop: 8 }}>What this step should do</label>
+      <textarea
+        value={task}
+        placeholder="Describe the task for this step…"
+        onChange={(e) => commitStep({ task: e.target.value })}
+        rows={4}
+        style={{ ...inp, width: "100%" }}
+      />
+
+      <label style={{ ...lbl, marginTop: 8 }}>
+        {isMulti ? "Panel — personas & delegates" : "Persona & delegate"}
+      </label>
+      {parts.map((p, i) => (
+        <div key={i} style={{ display: "flex", gap: 4, marginBottom: 4 }}>
+          <input
+            list="wf-persona-opts"
+            value={p.persona}
+            placeholder="persona"
+            onChange={(e) => setPart(i, "persona", e.target.value)}
+            style={{ ...inp, flex: 1, minWidth: 0 }}
+          />
+          <input
+            list="wf-delegate-opts"
+            value={p.delegate}
+            placeholder="delegate"
+            onChange={(e) => setPart(i, "delegate", e.target.value)}
+            style={{ ...inp, flex: 1, minWidth: 0 }}
+          />
+          {(isMulti || parts.length > 1) && (
+            <button onClick={() => delPart(i)} style={btnSmall} title="remove">
+              ×
+            </button>
+          )}
+        </div>
+      ))}
+      {isMulti && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button onClick={addPart} style={btnSmall}>
+            + participant
+          </button>
+          <label style={{ ...lbl, margin: 0 }}>
+            quorum&nbsp;
+            <input
+              type="number"
+              min={0}
+              value={quorum || ""}
+              placeholder="all"
+              onChange={(e) =>
+                commitStep({ quorum: Number(e.target.value) || 0 })
+              }
+              style={{ ...inp, width: 56 }}
+            />
+          </label>
+        </div>
+      )}
+      <datalist id="wf-persona-opts">
+        {personas.map((p) => (
+          <option key={p.name} value={p.name} />
+        ))}
+      </datalist>
+      <datalist id="wf-delegate-opts">
+        {agents.map((a) => (
+          <option key={a.name} value={a.name} />
+        ))}
+      </datalist>
+
+      <div style={{ borderTop: "1px solid #eee", margin: "10px 0 6px" }} />
       <Field k="block" v={node.block + (node.custom ? " (custom)" : "")} />
       <Field k="produces" v={node.produces} />
       <div style={{ margin: "6px 0" }}>
@@ -854,15 +1173,42 @@ function NodeInspector({
         </div>
       ))}
 
-      <label style={{ ...lbl, marginTop: 8 }}>params (JSON)</label>
-      <textarea
-        value={paramsText}
-        onChange={(e) => commitParams(e.target.value)}
-        rows={6}
-        style={{ ...inp, width: "100%", fontFamily: "monospace", fontSize: 12 }}
-      />
-      {paramsErr && (
-        <div style={{ color: "#c00", fontSize: 12 }}>{paramsErr}</div>
+      <div style={{ marginTop: 10 }}>
+        <button
+          onClick={() => {
+            const nv = !showAdv;
+            setShowAdv(nv);
+            if (nv) {
+              setParamsText(node.params ? JSON.stringify(node.params, null, 2) : "");
+              setParamsErr("");
+            }
+          }}
+          style={btnSmall}
+        >
+          {showAdv ? "▾ Advanced (raw params)" : "▸ Advanced (raw params)"}
+        </button>
+      </div>
+      {showAdv && (
+        <>
+          <label style={{ ...lbl, marginTop: 6 }}>params (JSON)</label>
+          <textarea
+            value={paramsText}
+            onChange={(e) => commitParams(e.target.value)}
+            rows={6}
+            style={{
+              ...inp,
+              width: "100%",
+              fontFamily: "monospace",
+              fontSize: 12,
+            }}
+          />
+          {paramsErr && (
+            <div style={{ color: "#c00", fontSize: 12 }}>{paramsErr}</div>
+          )}
+          <div style={{ color: "#999", fontSize: 11, marginTop: 2 }}>
+            Editing raw params? Reselect the step to refresh the fields above.
+          </div>
+        </>
       )}
 
       <button
@@ -871,6 +1217,290 @@ function NodeInspector({
       >
         Delete node
       </button>
+    </div>
+  );
+}
+
+/* ---- persona manager (list + create/edit/delete over /api/chat/personas) ---- */
+
+const DELEGATE_POLICIES = ["full", "readonly", "none"];
+
+function PersonaManager({
+  personas,
+  onClose,
+  onChanged,
+}: {
+  personas: PersonaInfo[];
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  // sel: null = nothing selected, "" = composing a new persona, else a name.
+  const [sel, setSel] = useState<string | null>(null);
+  const [form, setForm] = useState<PersonaDef | null>(null);
+  const [status, setStatus] = useState<{ kind: "ok" | "err"; msg: string } | null>(
+    null,
+  );
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback((name: string) => {
+    setBusy(true);
+    setStatus(null);
+    getJSON<PersonaDef & { error?: string }>(
+      `/api/chat/personas/${encodeURIComponent(name)}`,
+    )
+      .then((d) => {
+        if (d.error) {
+          setStatus({ kind: "err", msg: d.error });
+          return;
+        }
+        setForm({ ...d, roles: d.roles || [] });
+        setSel(name);
+      })
+      .catch(() => setStatus({ kind: "err", msg: "load failed" }))
+      .finally(() => setBusy(false));
+  }, []);
+
+  const newPersona = () => {
+    setSel("");
+    setStatus(null);
+    setForm({
+      name: "",
+      description: "",
+      delegates: "full",
+      roles: [],
+      check_role: "",
+      check_marker: "",
+      persona: "",
+      principles: "",
+      brief: "",
+    });
+  };
+
+  const upd = (patch: Partial<PersonaDef>) =>
+    setForm((f) => (f ? { ...f, ...patch } : f));
+
+  const save = async () => {
+    if (!form) return;
+    const name = form.name.trim();
+    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name)) {
+      setStatus({ kind: "err", msg: "name must be alphanumeric, - or _" });
+      return;
+    }
+    setBusy(true);
+    // Send every field: the server rebuilds the persona from the body, so omitting
+    // a field would drop it. check_role/check_marker round-trip from the load.
+    const body = {
+      name,
+      description: form.description || "",
+      delegates: form.delegates || "full",
+      roles: form.roles || [],
+      check_role: form.check_role || "",
+      check_marker: form.check_marker || "",
+      persona: form.persona || "",
+      principles: form.principles || "",
+      brief: form.brief || "",
+    };
+    const res = await sendJSON<{ name?: string; error?: string }>(
+      "PUT",
+      `/api/chat/personas/${encodeURIComponent(name)}`,
+      body,
+    );
+    setBusy(false);
+    if (res.status === 200 && res.data.name) {
+      setStatus({ kind: "ok", msg: `saved “${res.data.name}”` });
+      onChanged();
+      setSel(name);
+    } else {
+      setStatus({
+        kind: "err",
+        msg: res.data.error || `save failed (${res.status})`,
+      });
+    }
+  };
+
+  const del = async () => {
+    if (!form || sel === null || sel === "") return;
+    if (!confirm(`Delete persona “${form.name}”? Built-ins reset to default.`))
+      return;
+    setBusy(true);
+    const res = await sendJSON<{ deleted?: boolean; error?: string }>(
+      "DELETE",
+      `/api/chat/personas/${encodeURIComponent(form.name)}`,
+    );
+    setBusy(false);
+    if (res.status === 200) {
+      setStatus({ kind: "ok", msg: `removed “${form.name}”` });
+      onChanged();
+      setForm(null);
+      setSel(null);
+    } else {
+      setStatus({
+        kind: "err",
+        msg: res.data.error || `delete failed (${res.status})`,
+      });
+    }
+  };
+
+  return (
+    <div style={modalBackdrop} onClick={onClose}>
+      <div style={modalCard} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
+          <strong style={{ fontSize: 15 }}>Personas</strong>
+          <button onClick={onClose} style={{ ...btnSmall, marginLeft: "auto" }}>
+            ✕ Close
+          </button>
+        </div>
+        <div style={{ display: "flex", gap: 14, minHeight: 380 }}>
+          <div
+            style={{
+              width: 170,
+              borderRight: "1px solid #eee",
+              paddingRight: 10,
+              overflowY: "auto",
+            }}
+          >
+            <button onClick={newPersona} style={{ ...btn, width: "100%" }}>
+              + New persona
+            </button>
+            <div style={{ marginTop: 6 }}>
+              {personas.map((p) => (
+                <div
+                  key={p.name}
+                  onClick={() => load(p.name)}
+                  style={{ ...row, fontWeight: sel === p.name ? 600 : 400 }}
+                  title={p.description || p.name}
+                >
+                  <span>{p.name}</span>
+                  {p.builtin && <Badge label="builtin" variant="neutral" />}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ flex: 1, overflowY: "auto", paddingRight: 4 }}>
+            {!form && (
+              <div style={{ color: "#888", fontSize: 13 }}>
+                Select a persona to edit, or create a new one.
+              </div>
+            )}
+            {form && (
+              <div style={{ fontSize: 13 }}>
+                <label style={lbl}>name</label>
+                <input
+                  value={form.name}
+                  disabled={sel !== ""}
+                  placeholder="my-persona"
+                  onChange={(e) => upd({ name: e.target.value })}
+                  style={{ ...inp, width: "100%" }}
+                />
+                {form.builtin && (
+                  <div style={{ color: "#a60", fontSize: 11, marginTop: 2 }}>
+                    Built-in — saving writes an override; removing resets to the
+                    default.
+                  </div>
+                )}
+
+                <label style={{ ...lbl, marginTop: 8 }}>description</label>
+                <input
+                  value={form.description || ""}
+                  onChange={(e) => upd({ description: e.target.value })}
+                  style={{ ...inp, width: "100%" }}
+                />
+
+                <label style={{ ...lbl, marginTop: 8 }}>delegate policy</label>
+                <select
+                  value={form.delegates || "full"}
+                  onChange={(e) => upd({ delegates: e.target.value })}
+                  style={{ ...inp, width: "100%" }}
+                >
+                  {DELEGATE_POLICIES.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+
+                <label style={{ ...lbl, marginTop: 8 }}>
+                  roles (comma-separated)
+                </label>
+                <input
+                  value={(form.roles || []).join(", ")}
+                  onChange={(e) =>
+                    upd({
+                      roles: e.target.value
+                        .split(",")
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                    })
+                  }
+                  style={{ ...inp, width: "100%" }}
+                />
+
+                <label style={{ ...lbl, marginTop: 8 }}>
+                  persona (system prompt)
+                </label>
+                <textarea
+                  value={form.persona || ""}
+                  onChange={(e) => upd({ persona: e.target.value })}
+                  rows={6}
+                  style={{ ...inp, width: "100%" }}
+                />
+
+                <label style={{ ...lbl, marginTop: 8 }}>principles</label>
+                <textarea
+                  value={form.principles || ""}
+                  onChange={(e) => upd({ principles: e.target.value })}
+                  rows={4}
+                  style={{ ...inp, width: "100%" }}
+                />
+
+                <label style={{ ...lbl, marginTop: 8 }}>brief (session hints)</label>
+                <textarea
+                  value={form.brief || ""}
+                  onChange={(e) => upd({ brief: e.target.value })}
+                  rows={3}
+                  style={{ ...inp, width: "100%" }}
+                />
+
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    marginTop: 12,
+                    alignItems: "center",
+                  }}
+                >
+                  <button
+                    onClick={save}
+                    disabled={busy}
+                    style={{ ...btn, background: "#2563eb", color: "#fff" }}
+                  >
+                    Save
+                  </button>
+                  {sel !== "" && (
+                    <button
+                      onClick={del}
+                      disabled={busy}
+                      style={{ ...btn, color: "#c00", borderColor: "#e0a0a0" }}
+                    >
+                      {form.builtin ? "Reset to default" : "Delete"}
+                    </button>
+                  )}
+                  {status && (
+                    <span
+                      style={{
+                        fontSize: 12,
+                        color: status.kind === "err" ? "#c00" : "#070",
+                      }}
+                    >
+                      {status.msg}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -908,4 +1538,24 @@ const inp: React.CSSProperties = {
   padding: "3px 5px",
   border: "1px solid #ccc",
   borderRadius: 4,
+};
+const modalBackdrop: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.35)",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  zIndex: 1000,
+};
+const modalCard: React.CSSProperties = {
+  background: "#fff",
+  borderRadius: 8,
+  padding: 18,
+  width: 720,
+  maxWidth: "92vw",
+  maxHeight: "88vh",
+  overflow: "hidden",
+  boxShadow: "0 10px 40px rgba(0,0,0,0.25)",
+  fontFamily: "system-ui",
 };

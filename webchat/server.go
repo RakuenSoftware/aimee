@@ -130,6 +130,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/chat/skills", s.requireAuth(s.handleChatSkills))
 	mux.HandleFunc("/api/chat/skill", s.requireAuth(s.handleChatSkill))
 	mux.HandleFunc("/api/chat/personas", s.requireAuth(s.handleChatPersonas))
+	mux.HandleFunc("/api/chat/personas/", s.requireAuth(s.handleChatPersonaItem))
 	mux.HandleFunc("/api/chat/persona", s.requireAuth(s.handleChatPersona))
 	mux.HandleFunc("/api/chat/attach", s.requireAuth(s.handleChatAttach))
 	mux.HandleFunc("/api/chat/detach", s.requireAuth(s.handleChatDetach))

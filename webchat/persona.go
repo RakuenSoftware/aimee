@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strings"
 )
 
 // aimeeHTTPSockPath returns the path to aimee-server's /v1 HTTP-over-UDS socket,
@@ -66,6 +67,59 @@ func (s *server) handleChatPersonas(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"personas":[]}`)
 		return
 	}
+	w.Write(data)
+}
+
+// handleChatPersonaItem proxies per-persona show/upsert/delete so the Workflows
+// tab can manage personas directly (the engine's persona files are the source of
+// truth). It forwards to aimee-server's admin-gated /v1/personas/<name> routes
+// over the trusted UDS (same path the workflow save uses), returning status +
+// body verbatim:
+//
+//	GET    /api/chat/personas/<name>  -> show (full definition for the edit form)
+//	PUT    /api/chat/personas/<name>  -> create or edit (upsert from JSON body)
+//	DELETE /api/chat/personas/<name>  -> remove (built-ins reset to the default)
+func (s *server) handleChatPersonaItem(w http.ResponseWriter, r *http.Request) {
+	seg := strings.TrimPrefix(r.URL.Path, "/api/chat/personas/")
+	// one safe segment only: no separators, traversal, or percent-encoding (which
+	// could smuggle a '/'). The server's persona_name_valid is the authoritative
+	// guard; this fails fast and clearly.
+	if seg == "" || strings.Contains(seg, "/") || strings.Contains(seg, "..") || strings.Contains(seg, "%") {
+		writeJSONError(w, http.StatusBadRequest, "bad persona name")
+		return
+	}
+	v1path := "/v1/personas/" + seg
+
+	var method string
+	var body []byte
+	switch r.Method {
+	case http.MethodGet:
+		method = http.MethodGet
+	case http.MethodPut:
+		method = http.MethodPut
+		const maxBody = 1 << 20
+		body, _ = io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+		if len(body) > maxBody {
+			writeJSONError(w, http.StatusRequestEntityTooLarge, "request too large")
+			return
+		}
+	case http.MethodDelete:
+		method = http.MethodDelete
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	st, data, err := s.v1Request(ctx, method, v1path, body)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprintf(w, `{"error":"persona service unreachable"}`)
+		return
+	}
+	w.WriteHeader(st)
 	w.Write(data)
 }
 
