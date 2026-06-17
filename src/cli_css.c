@@ -11,20 +11,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char *const CSS_OPS[] = {"dead-rules",
-                                      "conflicts",
-                                      "duplicate-declarations",
-                                      "duplicate-selectors",
-                                      "unresolved",
-                                      "migrate-enumerate",
-                                      "migrate-list",
-                                      "rules-doc",
-                                      "assert-conventions",
-                                      "conventions",
-                                      "render-store",
-                                      "render-capture",
-                                      "render-verify",
-                                      NULL};
+static const char *const CSS_OPS[] = {
+    "dead-rules",          "conflicts",        "duplicate-declarations",
+    "duplicate-selectors", "unresolved",       "migrate-enumerate",
+    "migrate-list",        "rules-doc",        "assert-conventions",
+    "conventions",         "render-store",     "render-capture",
+    "render-verify",       "important-audit",  "high-specificity",
+    "unused-vars",         "token-candidates", NULL};
 
 static int css_op_known(const char *op)
 {
@@ -39,7 +32,8 @@ static void css_usage(void)
    fprintf(stderr, "usage: aimee css <op> <project> [args] [--json]\n"
                    "  ops: dead-rules | conflicts | duplicate-declarations |\n"
                    "       duplicate-selectors | unresolved | migrate-enumerate |\n"
-                   "       migrate-list | rules-doc | assert-conventions | conventions\n"
+                   "       migrate-list | rules-doc | assert-conventions | conventions |\n"
+                   "       important-audit | high-specificity | unused-vars | token-candidates\n"
                    "  render-store <project> <unit> <before|after> <snapshot.json>\n"
                    "  render-capture <project> <unit> <before|after> <html-file> <css-file>\n"
                    "  render-verify <project> <unit>\n");
@@ -129,6 +123,43 @@ static void css_print_results(const char *op, cJSON *resp)
          if (cJSON_IsString(src))
             printf("  (%s)", src->valuestring);
          printf("\n");
+      }
+      return;
+   }
+   if (strcmp(op, "important-audit") == 0 || strcmp(op, "high-specificity") == 0 ||
+       strcmp(op, "unused-vars") == 0 || strcmp(op, "token-candidates") == 0)
+   {
+      cJSON *res = cJSON_GetObjectItemCaseSensitive(resp, "results");
+      printf("%s: %d result(s)\n", op, cJSON_GetArraySize(res));
+      cJSON *row = NULL;
+      cJSON_ArrayForEach(row, res)
+      {
+         const cJSON *prop = cJSON_GetObjectItemCaseSensitive(row, "property");
+         const cJSON *cnt = cJSON_GetObjectItemCaseSensitive(row, "count");
+         const cJSON *sel = cJSON_GetObjectItemCaseSensitive(row, "selector");
+         const cJSON *sa = cJSON_GetObjectItemCaseSensitive(row, "spec_a");
+         const cJSON *name = cJSON_GetObjectItemCaseSensitive(row, "name");
+         const cJSON *val = cJSON_GetObjectItemCaseSensitive(row, "value");
+         const cJSON *kind = cJSON_GetObjectItemCaseSensitive(row, "kind");
+         const cJSON *file = cJSON_GetObjectItemCaseSensitive(row, "file");
+         if (cJSON_IsString(prop) && cJSON_IsNumber(cnt) &&
+             !cJSON_IsString(sel)) /* important-audit */
+            printf("  %-28s !important x%d\n", prop->valuestring, cnt->valueint);
+         else if (cJSON_IsString(sel)) /* high-specificity */
+            printf("  (%d,%d,%d) %s\n", cJSON_IsNumber(sa) ? sa->valueint : 0,
+                   cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(row, "spec_b"))
+                       ? cJSON_GetObjectItemCaseSensitive(row, "spec_b")->valueint
+                       : 0,
+                   cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(row, "spec_c"))
+                       ? cJSON_GetObjectItemCaseSensitive(row, "spec_c")->valueint
+                       : 0,
+                   sel->valuestring);
+         else if (cJSON_IsString(name)) /* unused-vars */
+            printf("  %s  (%s)\n", name->valuestring,
+                   cJSON_IsString(file) ? file->valuestring : "");
+         else if (cJSON_IsString(val)) /* token-candidates */
+            printf("  %-24s x%d  [%s]\n", val->valuestring, cJSON_IsNumber(cnt) ? cnt->valueint : 0,
+                   cJSON_IsString(kind) ? kind->valuestring : "?");
       }
       return;
    }
