@@ -146,19 +146,31 @@ static int port_listening(int port)
    return ok;
 }
 
-/* Optional UID drop: if AIMEE_WEBCHAT_EDITOR_UID names a user and we are root,
- * the editor child runs as that dedicated service UID (defence in depth — its
- * extension host cannot then read the server's master key). No-op otherwise. */
-static void maybe_drop_uid(void)
+/* Optional UID drop target. Resolve AIMEE_WEBCHAT_EDITOR_UID -> uid/gid in the
+ * PARENT (getpwnam is not async-signal-safe, and aimee-server is multithreaded,
+ * so it must never run between fork() and execve()). want_drop is set when a
+ * non-root service user is configured and we are root. Returns 0 on success, -1
+ * if the env is set but invalid (caller fails closed). */
+typedef struct
 {
+   int want_drop;
+   uid_t uid;
+   gid_t gid;
+} drop_ids_t;
+
+static int resolve_drop_uid(drop_ids_t *out)
+{
+   out->want_drop = 0;
    const char *u = getenv("AIMEE_WEBCHAT_EDITOR_UID");
    if (!u || !u[0] || geteuid() != 0)
-      return;
+      return 0; /* not configured / not root -> run in place */
    struct passwd *pw = getpwnam(u);
    if (!pw || pw->pw_uid == 0)
-      _exit(127); /* misconfigured: fail closed rather than run as root */
-   if (setgid(pw->pw_gid) != 0 || setuid(pw->pw_uid) != 0)
-      _exit(127);
+      return -1; /* misconfigured: refuse rather than run the editor as root */
+   out->want_drop = 1;
+   out->uid = pw->pw_uid;
+   out->gid = pw->pw_gid;
+   return 0;
 }
 
 /* Fork+exec code-server bound to 127.0.0.1:<port>, rooted at userroot, hardened.
@@ -167,6 +179,12 @@ static pid_t spawn_code_server(const char *principal, const char *userroot, int 
 {
    const char *bin = editor_binary_path();
    if (!bin)
+      return -1;
+
+   /* Resolve the optional UID-drop target in the parent (getpwnam is not
+    * async-signal-safe; must not run between fork() and execve()). */
+   drop_ids_t drop;
+   if (resolve_drop_uid(&drop) != 0)
       return -1;
 
    char bind_arg[64], data_dir[MAX_PATH_LEN], ext_dir[MAX_PATH_LEN], home_env[MAX_PATH_LEN + 8];
@@ -245,7 +263,12 @@ static pid_t spawn_code_server(const char *principal, const char *userroot, int 
          if (devnull > STDERR_FILENO)
             close(devnull);
       }
-      maybe_drop_uid();
+      if (drop.want_drop)
+      {
+         /* setgid before setuid; bail (never run as root) if either fails. */
+         if (setgid(drop.gid) != 0 || setuid(drop.uid) != 0)
+            _exit(127);
+      }
       if (chdir(userroot) != 0)
          _exit(127);
       execvpe(bin, (char *const *)argv, envp);
