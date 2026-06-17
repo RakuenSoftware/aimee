@@ -615,8 +615,7 @@ int agent_load_config(agent_config_t *cfg)
              * offline (same guarantees as the tools_enabled derivation below);
              * an unknown/non-reasoning model keeps the standard default. */
             model_capability_t tmc;
-            int reasoning = ag->model[0] &&
-                            model_capability_get(ag->provider, ag->model, &tmc) &&
+            int reasoning = ag->model[0] && model_capability_get(ag->provider, ag->model, &tmc) &&
                             (tmc.flags & MODEL_CAP_REASONING);
             ag->timeout_ms = reasoning ? AGENT_REASONING_TIMEOUT_MS : AGENT_DEFAULT_TIMEOUT_MS;
          }
