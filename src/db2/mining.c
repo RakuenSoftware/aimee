@@ -28,7 +28,7 @@ static int exec_job_default(const char *id, int interval_s)
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
                                           "INSERT INTO mining_jobs (id, hwm, interval_s, enabled)"
-                                          " VALUES (?1, 0, ?2, 1)"
+                                          " VALUES (?1, 0, ?2, TRUE)"
                                           " ON CONFLICT (id) DO NOTHING",
                                           err, sizeof(err));
    if (!st)
