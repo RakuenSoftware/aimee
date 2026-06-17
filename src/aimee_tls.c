@@ -1,10 +1,13 @@
 /* aimee_tls.c: OpenSSL TLS client wrapper (WITH_TLS builds only). */
 #include "aimee_tls.h"
+#include "aimee_home.h"
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 struct aimee_tls
 {
@@ -16,6 +19,46 @@ static int tls_insecure(void)
 {
    const char *v = getenv("AIMEE_TLS_INSECURE");
    return v && *v && strcmp(v, "0") != 0;
+}
+
+/* Decide whether client mTLS material under |home| should be presented, and
+ * fill the resolved crt/key paths. Returns:
+ *    1  -> present (both files exist and the key is owner-only)
+ *    0  -> none (no key/cert configured)
+ *   -1  -> refused: the private key is group/world-readable (fail closed — the
+ *          key is this client's identity material, never present a loose one)
+ * Pure (no OpenSSL/network); exposed for unit testing the fail-closed gate. */
+int aimee_tls_client_cert_eligible(const char *home, char *crt, size_t crt_n, char *key,
+                                   size_t key_n)
+{
+   if (!home || !*home || !crt || !key)
+      return 0;
+   snprintf(crt, crt_n, "%s/tls/client.crt", home);
+   snprintf(key, key_n, "%s/tls/client.key", home);
+   struct stat cs, ks;
+   if (stat(crt, &cs) != 0 || stat(key, &ks) != 0)
+      return 0; /* no client-cert material configured */
+#ifndef _WIN32
+   if (ks.st_mode & 077)
+      return -1; /* refuse a loose private key */
+#endif
+   return 1;
+}
+
+/* Present <aimee_home>/tls/client.{crt,key} as this client's certificate for
+ * mutual TLS, when both files exist. Absent => plain client TLS (the server may
+ * not require a client cert). A load failure leaves the ctx cert-less and the
+ * handshake then fails at the mTLS server, which is the correct signal for a
+ * broken/loose client cert. */
+static void aimee_tls_present_client_cert(SSL_CTX *ctx)
+{
+   char crt[600], key[600];
+   if (aimee_tls_client_cert_eligible(aimee_home(), crt, sizeof(crt), key, sizeof(key)) != 1)
+      return;
+   if (SSL_CTX_use_certificate_chain_file(ctx, crt) != 1 ||
+       SSL_CTX_use_PrivateKey_file(ctx, key, SSL_FILETYPE_PEM) != 1 ||
+       SSL_CTX_check_private_key(ctx) != 1)
+      ERR_clear_error();
 }
 
 aimee_tls_t *aimee_tls_connect(int fd, const char *host)
@@ -31,6 +74,8 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
       SSL_CTX_set_default_verify_paths(ctx);
       SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
    }
+
+   aimee_tls_present_client_cert(ctx);
 
    SSL *ssl = SSL_new(ctx);
    if (!ssl)

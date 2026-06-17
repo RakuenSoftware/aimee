@@ -95,13 +95,22 @@ extension of an existing listener, not a new one.
 ### WP-D — Client: present a client certificate
 The thin client loads its identity (`<aimee_home>/tls/client.{crt,key}`) and
 presents it via each `aimee_tls.h` backend:
-- OpenSSL (Linux): `SSL_CTX_use_certificate_file` + `SSL_CTX_use_PrivateKey_file`.
+- OpenSSL (Linux): `SSL_CTX_use_certificate_chain_file` +
+  `SSL_CTX_use_PrivateKey_file`. **DONE (slice 3).** Presented automatically when
+  both files exist; a group/world-readable key is refused (fail closed). Gate is
+  unit-tested (`unit-test-aimee-tls-clientcert`).
 - Schannel (Windows): supply the client cert in `SCHANNEL_CRED.paCred` (imported
-  from a PFX or the user cert store).
+  from a PFX or the user cert store). **Deferred → slice 3b** (EC-key import via
+  CryptoAPI must be validated on real Windows, as the native backend itself was).
 - Secure Transport (macOS): `SSLSetCertificate` with a `SecIdentityRef` from a
-  PKCS#12.
+  PKCS#12. **Deferred → slice 3b** (identity construction validated on real macOS).
+
 This is the piece the native-TLS proposal explicitly deferred (mTLS was out of
-scope there); it is additive, gated on the client actually having a cert.
+scope there); it is additive, gated on the client actually having a cert. The
+Linux leg lands first because it is the testbed for the whole mTLS loop
+(server verify = slice 2, issuance CLI = slice 2b); the Windows/macOS legs ship
+as slice 3b once validated on real hardware. Both native backends carry an
+in-code marker at the exact hook point.
 
 ## Hardening requirements (from roundtable R1: architect + security + QA)
 

@@ -102,6 +102,11 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
       free(t);
       return NULL;
    }
+   /* mTLS client-cert presentation (slice 3b, follow-up): to present
+    * <aimee_home>/tls/client.{crt,key} as this client's identity, build a
+    * SecIdentityRef from the PEM (SecPKCS12Import / SecItem) and pass it to
+    * SSLSetCertificate here. Deferred: identity construction must be validated
+    * on real macOS. The OpenSSL backend presents the cert today. */
    if (SSLSetIOFuncs(t->ctx, st_read, st_write) != noErr ||
        SSLSetConnection(t->ctx, &t->fd) != noErr ||
        SSLSetProtocolVersionMin(t->ctx, kTLSProtocol12) != noErr)
