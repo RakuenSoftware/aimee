@@ -195,6 +195,9 @@ database and talks to a server over `/v1`. The intended deployment is to run the
 **services in Docker** (one combined container, or two split containers) and
 install only the **thin client** on each developer machine, pointed at the server.
 
+> **In a hurry?** The [Quickstart](docs/QUICKSTART.md) walks the combined Docker
+> server plus the Linux, Windows, and macOS thin-client setup step by step.
+>
 > Prefer everything on one box from source (no Docker)? See
 > [Single-box source install](#single-box-source-install-no-docker) below.
 
@@ -402,12 +405,16 @@ Postgres (DB2) and a CPU embedder sidecar (`all-MiniLM-L6-v2`, `Dockerfile.embed
 the kb auto-applies its DB2 schema (tables + `pg_trgm`/`vector` extensions) on first
 boot.
 
-> **`docker compose ... up --build` needs no credentials.** The default build ships
-> the **server + kb** services only. The optional browser UI (`aimee-webchat`) pulls
-> a private-by-default npm package from GitHub Packages, so it is **off by default**;
-> the entrypoint simply skips it. To include it, either `docker pull` the published
-> image (it already bundles webchat) or build with a GitHub token:
-> `NPM_TOKEN=<PAT with read:packages> docker compose -f compose.combined.yaml build --build-arg WITH_WEBCHAT=1 --secret id=npm_token,env=NPM_TOKEN`.
+> **`docker compose ... up --build` needs no credentials.** The browser UI
+> (`aimee-webchat`) is a first-class surface: it is **built into every image and on
+> by default**. Its frontend dependency (`@rakuensoftware/smoothgui`) is vendored
+> in-repo (`frontend/vendor/`), so the build pulls nothing from a private registry
+> and needs no npm token — `docker pull` the published image, or build from source,
+> and the UI is there. Build with `--build-arg WITH_WEBCHAT=0` to ship the
+> **server + kb** services only. At runtime the UI is on unless you set
+> `AIMEE_WEBCHAT_ENABLED=0` (provide `AIMEE_WEBCHAT_USER`/`AIMEE_WEBCHAT_PASSWORD`
+> for a PAM login account). The smoothnas production plugin explicitly opts out.
+> It serves HTTPS on `:8443`.
 
 | File | Brings up | Use when |
 |------|-----------|----------|
@@ -582,6 +589,7 @@ Start here:
 
 | Document | Description |
 |----------|-------------|
+| **[Quickstart](docs/QUICKSTART.md)** | **Zero-to-working in four parts**: run the combined server in Docker, then install and set up the Linux, Windows, or macOS thin client. |
 | **[How aimee learns](docs/KNOWLEDGE.md)** | **The vision and the mechanisms**, the company-wide knowledge base, self-learning pipeline, cross-domain synthesis, and delegation economics. |
 | **[Manual](MANUAL.md)** | **The complete user reference**, installation, configuration, current command contract, and feature guides. |
 | **[Architecture](docs/ARCHITECTURE.md)** | System design, processes, storage/trust boundaries, layering, and request lifecycles. |

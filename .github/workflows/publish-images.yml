@@ -102,20 +102,12 @@ jobs:
           file: ${{ matrix.image.dockerfile }}
           platforms: linux/${{ matrix.platform.arch }}
           provenance: false
-          # Published images bundle the optional browser UI (WITH_WEBCHAT=1); the
-          # default `docker compose up --build` an end user runs leaves it off so it
-          # needs no credentials. The aimee-kb image ignores WITH_WEBCHAT.
+          # Images bundle the browser UI (WITH_WEBCHAT=1, the default). webchat's
+          # frontend dependency (@rakuensoftware/smoothgui) is vendored in-repo, so
+          # the build needs no npm token. The aimee-kb image ignores WITH_WEBCHAT.
           build-args: |
             AIMEE_VERSION=${{ needs.prep.outputs.version }}
             WITH_WEBCHAT=1
-          # webchat's SPA pulls @rakuensoftware/smoothgui from GitHub Packages,
-          # whose npm registry requires an authenticated token (even for public
-          # reads). Prefer a repo/org NPM_TOKEN secret (a PAT with read:packages);
-          # fall back to the built-in GITHUB_TOKEN, which suffices for public
-          # packages. The aimee-kb image ignores it. Passed via BuildKit so the
-          # token never lands in an image layer.
-          secrets: |
-            npm_token=${{ secrets.NPM_TOKEN || secrets.GITHUB_TOKEN }}
           outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest

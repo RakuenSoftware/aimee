@@ -51,12 +51,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.combined
-      # Default build needs NO credentials and ships the server+kb services only.
-      # The optional browser UI (aimee-webchat) pulls a GitHub Packages npm package
-      # that needs a token; opt in by building with the token + arg:
-      #   NPM_TOKEN=<github PAT> docker compose -f compose.combined.yaml build \
-      #     --build-arg WITH_WEBCHAT=1 --secret id=npm_token,env=NPM_TOKEN
-      # (or `docker pull` the published image, which already includes webchat).
+      # The browser UI (aimee-webchat) is built and bundled by default. Its npm
+      # dependency (@rakuensoftware/smoothgui) is vendored under frontend/vendor/,
+      # so the build needs NO credentials. Build --build-arg WITH_WEBCHAT=0 to
+      # ship the server+kb services only.
     image: aimee-server-kb
     # The server's worker threads need a 64 MB stack (the 8 MB container default
     # overflows during startup — matches systemd's LimitSTACK=67108864).
@@ -70,14 +68,20 @@ services:
       AIMEE_SERVER_HTTP_BIND: "1"
       AIMEE_KB_HTTP_BIND: "1"
       AIMEE_KB_API_URL: http://127.0.0.1:8741
-      # Browser webchat (HTTPS on :8443). The entrypoint provisions this single
-      # login account via PAM; change it (and use a real password) for anything
-      # beyond local dev. Leave both unset to serve webchat with no account.
+      # Browser webchat (HTTPS on :8443). ON by default — it is a first-class
+      # surface, built into the image (no credentials needed). Set
+      # AIMEE_WEBCHAT_ENABLED=0 to ship server+kb only. The entrypoint provisions
+      # the single login account below via PAM; change it (and use a real
+      # password) for anything beyond local dev. Leave USER/PASSWORD unset to
+      # serve the UI with no account (login page up, nobody can sign in until
+      # provisioned).
+      AIMEE_WEBCHAT_ENABLED: "1"
       AIMEE_WEBCHAT_USER: aimee
       AIMEE_WEBCHAT_PASSWORD: aimee-local-dev
     ports:
       - "8740:8740"
       - "8741:8741"
+      # webchat UI — on by default; gated off only by AIMEE_WEBCHAT_ENABLED=0 above.
       - "8443:8443"
     depends_on:
       postgres:
