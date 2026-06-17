@@ -1,0 +1,196 @@
+/* git_ops.c — per-project git operations for webchat users. See git_ops.h. */
+#include "git_ops.h"
+#include "git_cred_inject.h" /* git_cred_inject_build_env / _free_env */
+#include "util.h"            /* safe_exec_capture_cwd_env_timeout */
+#include "workspace_scope.h" /* ws_scope_project_path */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+extern char **environ;
+
+#define GO_PATH_MAX    4096
+#define GO_OUT_MAX     (1 << 18) /* 256 KiB of git output */
+#define GO_TIMEOUT_MS  120000    /* a git op (incl. network) may take a while */
+#define GO_LOG_DEFAULT 30
+#define GO_LOG_MAX     200
+
+/* A git ref/branch name safe to pass as an argv token: non-empty, <=200, no
+ * control chars/space, not starting with '-' (flag), no "..", charset limited to
+ * [A-Za-z0-9._/-]. (git imposes more rules; this is a conservative subset.) */
+static int ref_name_valid(const char *s)
+{
+   if (!s || !s[0] || s[0] == '-')
+      return 0;
+   size_t n = strlen(s);
+   if (n > 200)
+      return 0;
+   if (strstr(s, ".."))
+      return 0;
+   for (size_t i = 0; i < n; i++)
+   {
+      unsigned char c = (unsigned char)s[i];
+      int ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+               c == '.' || c == '_' || c == '/' || c == '-';
+      if (!ok)
+         return 0;
+   }
+   return 1;
+}
+
+/* Run argv in `dir` with creds injected when `needs_cred`. Returns the child
+ * exit code (0 = ok), -1 on fork/pipe failure; *out receives the captured
+ * output (caller frees). */
+static int run_git(const char *principal, const char *dir, const char *const argv[], int needs_cred,
+                   char **out)
+{
+   char **envp = needs_cred ? git_cred_inject_build_env(principal, environ) : NULL;
+   int rc = safe_exec_capture_cwd_env_timeout(argv, dir, envp ? envp : environ, out, GO_OUT_MAX,
+                                              GO_TIMEOUT_MS);
+   if (envp)
+      git_cred_inject_free_env(envp);
+   return rc;
+}
+
+int git_ops_run(const char *principal, const char *project, const char *op, const char *text_arg,
+                int num_arg, char **out, char *err, size_t errlen)
+{
+   if (out)
+      *out = NULL;
+   if (err && errlen)
+      err[0] = '\0';
+
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+   {
+      snprintf(err, errlen, "git projects require a webchat user");
+      return -1;
+   }
+   if (!op || !op[0])
+   {
+      snprintf(err, errlen, "missing op");
+      return -1;
+   }
+
+   char dir[GO_PATH_MAX];
+   if (ws_scope_project_path(principal, project ? project : "", 1 /*must_exist*/, dir,
+                             sizeof(dir)) != 0)
+   {
+      snprintf(err, errlen, "no such project");
+      return -1;
+   }
+
+   /* --- commit is two steps (stage all, then commit with the message) --- */
+   if (strcmp(op, "commit") == 0)
+   {
+      if (!text_arg || !text_arg[0] || strlen(text_arg) > 4000)
+      {
+         snprintf(err, errlen, "commit requires a non-empty message");
+         return -1;
+      }
+      const char *add_argv[] = {"git", "add", "-A", NULL};
+      char *add_out = NULL;
+      int arc = run_git(principal, dir, add_argv, 0, &add_out);
+      free(add_out);
+      if (arc != 0)
+      {
+         snprintf(err, errlen, "git add failed (rc=%d)", arc);
+         return -1;
+      }
+      const char *argv[] = {"git", "commit", "-m", text_arg, NULL};
+      int rc = run_git(principal, dir, argv, 0, out);
+      if (rc != 0)
+      {
+         snprintf(err, errlen, "git commit failed (rc=%d)%s%.180s", rc,
+                  (out && *out && (*out)[0]) ? ": " : "", (out && *out) ? *out : "");
+         free(*out);
+         *out = NULL;
+         return -1;
+      }
+      return 0;
+   }
+
+   /* --- single-command ops: build argv + cred requirement --- */
+   const char *argv[8] = {0};
+   int needs_cred = 0;
+   char nbuf[16];
+
+   if (strcmp(op, "status") == 0)
+   {
+      argv[0] = "git";
+      argv[1] = "status";
+      argv[2] = "--porcelain=v1";
+      argv[3] = "-b";
+   }
+   else if (strcmp(op, "log") == 0)
+   {
+      int n = (num_arg > 0) ? num_arg : GO_LOG_DEFAULT;
+      if (n > GO_LOG_MAX)
+         n = GO_LOG_MAX;
+      snprintf(nbuf, sizeof(nbuf), "%d", n);
+      argv[0] = "git";
+      argv[1] = "log";
+      argv[2] = "--oneline";
+      argv[3] = "-n";
+      argv[4] = nbuf;
+   }
+   else if (strcmp(op, "diff") == 0)
+   {
+      argv[0] = "git";
+      argv[1] = "diff";
+   }
+   else if (strcmp(op, "branch") == 0)
+   {
+      argv[0] = "git";
+      argv[1] = "branch";
+      argv[2] = "--list";
+      argv[3] = "--no-color";
+   }
+   else if (strcmp(op, "fetch") == 0)
+   {
+      argv[0] = "git";
+      argv[1] = "fetch";
+      argv[2] = "--prune";
+      needs_cred = 1;
+   }
+   else if (strcmp(op, "pull") == 0)
+   {
+      argv[0] = "git";
+      argv[1] = "pull";
+      argv[2] = "--ff-only";
+      needs_cred = 1;
+   }
+   else if (strcmp(op, "push") == 0)
+   {
+      argv[0] = "git";
+      argv[1] = "push";
+      needs_cred = 1;
+   }
+   else if (strcmp(op, "checkout") == 0)
+   {
+      if (!ref_name_valid(text_arg))
+      {
+         snprintf(err, errlen, "invalid branch name");
+         return -1;
+      }
+      argv[0] = "git";
+      argv[1] = "checkout";
+      argv[2] = text_arg;
+   }
+   else
+   {
+      snprintf(err, errlen, "unsupported op");
+      return -1;
+   }
+
+   int rc = run_git(principal, dir, argv, needs_cred, out);
+   if (rc != 0)
+   {
+      snprintf(err, errlen, "git %s failed (rc=%d)%s%.180s", op, rc,
+               (out && *out && (*out)[0]) ? ": " : "", (out && *out) ? *out : "");
+      free(*out);
+      *out = NULL;
+      return -1;
+   }
+   return 0;
+}

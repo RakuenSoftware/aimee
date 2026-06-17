@@ -4,6 +4,7 @@
  * only HTTP parsing / routing, not the real git-clone or indexer subsystems.
  * Binaries that need the real behavior (unit-test-git-project) link the real
  * objects and must NOT also link this TU. */
+#include "git_ops.h"
 #include "git_project.h"
 #include "index.h"
 
@@ -30,4 +31,19 @@ int index_scan_project(const char *name, const char *root, int force)
    (void)root;
    (void)force;
    return 0;
+}
+
+int git_ops_run(const char *principal, const char *project, const char *op, const char *text_arg,
+                int num_arg, char **out, char *err, size_t errlen)
+{
+   (void)principal;
+   (void)project;
+   (void)op;
+   (void)text_arg;
+   (void)num_arg;
+   if (out)
+      *out = NULL;
+   if (err && errlen)
+      snprintf(err, errlen, "stub");
+   return -1;
 }
