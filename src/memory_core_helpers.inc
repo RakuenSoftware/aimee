@@ -1696,18 +1696,114 @@ static const char *memory_effective_embedding_cmd(const char *command)
    return (command && command[0]) ? command : "builtin";
 }
 
+/* Per-recall query-embedding memo.
+ *
+ * A single memory_find_facts() embeds the *same* query text once per retrieval
+ * lane (unit-semantic, memory-semantic, summary/fact lanes), and the whole
+ * candidate generator re-runs per HyDE pass and per decomposition sub-query.
+ * Every embed forks a subprocess and round-trips to the embedder, so embedding
+ * identical text repeatedly dominates recall latency. This thread-local memo
+ * embeds each distinct (command,text) once for the duration of a recall and
+ * serves the cached vector to the other lanes. Embedding is deterministic for a
+ * given (command,text), so a cache hit is byte-identical to a fresh embed.
+ *
+ * Reset at each top-level recall entry point. Bounded so a pathological query
+ * (many distinct sub-queries) can't grow it without limit; an overflow or an
+ * over-long key simply falls through to a fresh embed (correct, just no reuse). */
+enum
+{
+   MEMORY_QEMBED_CAP = 32,
+   MEMORY_QEMBED_TEXT_MAX = 1024,
+   MEMORY_QEMBED_CMD_MAX = 512
+};
+
+typedef struct
+{
+   char command[MEMORY_QEMBED_CMD_MAX];
+   char text[MEMORY_QEMBED_TEXT_MAX];
+   float vec[EMBED_MAX_DIM];
+   int dim;
+} memory_qembed_entry_t;
+
+static __thread int s_qembed_count = 0;
+static __thread memory_qembed_entry_t s_qembed[MEMORY_QEMBED_CAP];
+
+/* Per-recall counters: total runtime embed requests vs cache misses (= real
+ * embedder invocations). requests-minus-misses is the work the memo saved. */
+static __thread int s_qembed_requests = 0;
+static __thread int s_qembed_misses = 0;
+
+/* Begin a fresh per-recall memo window. Call at every top-level recall entry
+ * point before any lane embeds the query. */
+static void memory_query_embed_cache_reset(void)
+{
+   s_qembed_count = 0;
+   s_qembed_requests = 0;
+   s_qembed_misses = 0;
+}
+
 static int memory_embed_text_runtime(const char *text, const char *command, float *out, int max_dim)
 {
    const char *effective_cmd = memory_effective_embedding_cmd(command);
-   int dim = memory_embed_text(text, effective_cmd, out, max_dim);
-   if (dim > 0)
-      return dim;
-   if (strcmp(effective_cmd, "builtin") == 0)
-      return 0;
+   s_qembed_requests++;
 
-   aimee_log(LOG_WARN, "memory",
-             "query embedding failed for configured command; retrying with builtin embeddings");
-   return memory_embed_text(text, "builtin", out, max_dim);
+   /* Cacheable only when both keys fit their buffers (so a stored key is exact,
+    * never a truncated prefix that could false-match a different query). */
+   int cacheable = text && command && strlen(text) < MEMORY_QEMBED_TEXT_MAX &&
+                   strlen(effective_cmd) < MEMORY_QEMBED_CMD_MAX;
+
+   if (cacheable)
+   {
+      for (int i = 0; i < s_qembed_count; i++)
+      {
+         if (s_qembed[i].dim > 0 && s_qembed[i].dim <= max_dim &&
+             strcmp(s_qembed[i].command, effective_cmd) == 0 && strcmp(s_qembed[i].text, text) == 0)
+         {
+            memcpy(out, s_qembed[i].vec, (size_t)s_qembed[i].dim * sizeof(float));
+            return s_qembed[i].dim;
+         }
+      }
+   }
+
+   s_qembed_misses++;
+   int dim = memory_embed_text(text, effective_cmd, out, max_dim);
+   if (dim <= 0 && strcmp(effective_cmd, "builtin") != 0)
+   {
+      aimee_log(LOG_WARN, "memory",
+                "query embedding failed for configured command; retrying with builtin embeddings");
+      dim = memory_embed_text(text, "builtin", out, max_dim);
+   }
+
+   /* Store on the way out so the other lanes / sub-queries of this same recall
+    * reuse the vector instead of re-spawning the embedder. */
+   if (cacheable && dim > 0 && dim <= EMBED_MAX_DIM && s_qembed_count < MEMORY_QEMBED_CAP)
+   {
+      memory_qembed_entry_t *e = &s_qembed[s_qembed_count++];
+      snprintf(e->command, sizeof(e->command), "%s", effective_cmd);
+      snprintf(e->text, sizeof(e->text), "%s", text);
+      memcpy(e->vec, out, (size_t)dim * sizeof(float));
+      e->dim = dim;
+   }
+   return dim;
+}
+
+/* Test hooks (declared in memory.h) — expose the static memo to unit tests. */
+int memory_query_embed_runtime_test(const char *text, const char *command, float *out, int max_dim)
+{
+   return memory_embed_text_runtime(text, command, out, max_dim);
+}
+
+void memory_query_embed_cache_stats_test(int *requests, int *misses)
+{
+   if (requests)
+      *requests = s_qembed_requests;
+   if (misses)
+      *misses = s_qembed_misses;
+}
+
+void memory_query_embed_cache_reset_test(void)
+{
+   memory_query_embed_cache_reset();
 }
 
 static int memory_semantic_query_unavailable(void)

@@ -3976,6 +3976,11 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    if (!query || !query[0])
       return 0;
 
+   /* Fresh query-embedding memo for this recall: every lane / HyDE pass /
+    * sub-query below embeds via memory_embed_text_runtime, which reuses vectors
+    * cached here instead of re-spawning the embedder for identical text. */
+   memory_query_embed_cache_reset();
+
    /* Aggregation route — detects "coverage" queries ("list all X", "every
     * Y", "what Xs has ENTITY Ved") and dispatches to memory_aggregate()
     * instead of the hybrid vector path. Runs before the vector readiness
@@ -4344,6 +4349,8 @@ int memory_find_facts_visible(const char *query, const char *workspace, const ch
 {
    if (!query || !query[0])
       return 0;
+   /* Fresh query-embedding memo for this recall (see memory_find_facts_scoped). */
+   memory_query_embed_cache_reset();
    if (!memory_vector_ready())
       return memory_find_facts_visible_lexical_fallback(query, workspace, project, limit, out, max);
    if (limit <= 0)

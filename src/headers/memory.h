@@ -939,6 +939,13 @@ int memory_embed(int64_t memory_id, const char *command);
 int memory_embed_text(const char *text, const char *command, float *out, int max_dim);
 double cosine_similarity(const float *a, const float *b, int dim);
 
+/* Test hooks for the per-recall query-embedding memo (memory_core_helpers.inc).
+ * Not used in production paths; exposed so unit tests can drive the memoized
+ * runtime embed and reset the cache between cases. */
+int memory_query_embed_runtime_test(const char *text, const char *command, float *out, int max_dim);
+void memory_query_embed_cache_reset_test(void);
+void memory_query_embed_cache_stats_test(int *requests, int *misses);
+
 /* --- Effectiveness Tracking --- */
 
 typedef struct
