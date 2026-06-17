@@ -46,13 +46,6 @@ static int tls_insecure(void)
    return v && *v && strcmp(v, "0") != 0;
 }
 
-#define STDBG(...)                                                                                 \
-   do                                                                                              \
-   {                                                                                               \
-      if (getenv("AIMEE_TLS_DEBUG"))                                                               \
-         fprintf(stderr, "aimee.tls.securetransport: " __VA_ARGS__);                               \
-   } while (0)
-
 /* Secure Transport I/O callbacks over the blocking socket. They must fill/drain
  * the full requested length or report a status; *len is updated to what moved. */
 static OSStatus st_read(SSLConnectionRef conn, void *data, size_t *len)
@@ -110,8 +103,10 @@ static OSStatus st_write(SSLConnectionRef conn, const void *data, size_t *len)
  * the private key into the user's login keychain (plain SecPKCS12Import imports
  * there and it persists across runs), import into a TRANSIENT keychain that is
  * deleted on aimee_tls_free. Export the PEM client.{crt,key} the OpenSSL/Schannel
- * backends use to client.p12 via `openssl pkcs12 -export`; empty passphrase
- * unless AIMEE_TLS_CLIENT_P12_PASS is set. Returns a retained CFArrayRef
+ * backends use to client.p12 via `openssl pkcs12 -export`. NOTE: macOS
+ * SecPKCS12Import requires a NON-EMPTY passphrase (an empty one fails
+ * errSecAuthFailed), so the .p12 must be passphrase-protected and the passphrase
+ * supplied via AIMEE_TLS_CLIENT_P12_PASS. Returns a retained CFArrayRef
  * [identity] (caller releases after SSLSetCertificate) and sets *out_kc to the
  * transient keychain, or NULL/none on absence or import failure. */
 static CFArrayRef securetransport_load_client_identity(SecKeychainRef *out_kc)
@@ -166,10 +161,10 @@ static CFArrayRef securetransport_load_client_identity(SecKeychainRef *out_kc)
    unlink(kcpath); /* SecKeychainCreate fails if the file already exists */
    static const char kcpw[] = "aimee-transient-mtls";
    SecKeychainRef kc = NULL;
-   OSStatus kcst = SecKeychainCreate(kcpath, (UInt32)(sizeof(kcpw) - 1), kcpw, false, NULL, &kc);
-   if (kcst != errSecSuccess || !kc)
+   if (SecKeychainCreate(kcpath, (UInt32)(sizeof(kcpw) - 1), kcpw, false, NULL, &kc) !=
+           errSecSuccess ||
+       !kc)
    {
-      STDBG("SecKeychainCreate('%s') failed: %d\n", kcpath, (int)kcst);
       CFRelease(data);
       return NULL;
    }
@@ -184,8 +179,6 @@ static CFArrayRef securetransport_load_client_identity(SecKeychainRef *out_kc)
    CFArrayRef items = NULL;
    OSStatus st = opts ? SecPKCS12Import(data, opts, &items) : errSecParam;
    CFArrayRef result = NULL;
-   if (st != errSecSuccess)
-      STDBG("SecPKCS12Import failed: %d\n", (int)st);
    if (st == errSecSuccess && items && CFArrayGetCount(items) > 0)
    {
       CFDictionaryRef item = CFArrayGetValueAtIndex(items, 0);
@@ -194,14 +187,8 @@ static CFArrayRef securetransport_load_client_identity(SecKeychainRef *out_kc)
       {
          const void *certs[] = {ident};
          result = CFArrayCreate(NULL, certs, 1, &kCFTypeArrayCallBacks);
-         STDBG("client identity loaded OK\n");
       }
-      else
-         STDBG("SecPKCS12Import ok but no kSecImportItemIdentity in item\n");
    }
-   else if (st == errSecSuccess)
-      STDBG("SecPKCS12Import ok but items empty (count=%ld)\n",
-            items ? (long)CFArrayGetCount(items) : -1);
    if (items)
       CFRelease(items);
    if (opts)
