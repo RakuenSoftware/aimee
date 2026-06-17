@@ -45,6 +45,15 @@ int ws_scope_contains(const char *principal, const char *abs_path);
  * this fd to avoid TOCTOU. (create=1 ensures the root exists first.) */
 int ws_scope_open_user_root(const char *principal);
 
+/* TOCTOU-safe project open: validate `project` (single component), open the
+ * principal root (O_NOFOLLOW base fd), then openat(base, project,
+ * O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC | extra_flags). Because the base fd is pinned
+ * to the canonical root and O_NOFOLLOW rejects a symlink AT the project leaf,
+ * there is no resolve-vs-use window. Returns the project dir fd (caller closes)
+ * or -1. This is the PREFERRED consumer API; the string-returning
+ * ws_scope_project_path() is for display/logging or pairing with this fd. */
+int ws_scope_open_project(const char *principal, const char *project, int extra_flags);
+
 /* 1 iff `name` is a valid single path component for a principal or project
  * (allowlist [A-Za-z0-9][A-Za-z0-9._-]*, len<=64, not "."/".."), else 0.
  * Exposed for callers validating user input before resolution. Pure. */

@@ -30,6 +30,17 @@ int main(void)
    assert(!ws_scope_name_valid("a/b"));     /* slash */
    assert(!ws_scope_name_valid("a b"));     /* space */
    assert(!ws_scope_name_valid("a\tb"));
+   /* length boundary: 64 ok, 65 rejected */
+   char n64[65], n65[66];
+   memset(n64, 'a', 64); n64[64] = '\0';
+   memset(n65, 'a', 65); n65[65] = '\0';
+   assert(ws_scope_name_valid(n64));
+   assert(!ws_scope_name_valid(n65));
+
+   /* cap==0 / NULL out are rejected, not written */
+   char tiny[1];
+   assert(ws_scope_user_root("webuser:alice", 0, tiny, 0) == -1);
+   assert(ws_scope_user_root("webuser:alice", 0, NULL, 16) == -1);
 
    /* --- user root: only webuser: principals, created 0700 --- */
    char rootA[PATH_MAX], rootB[PATH_MAX];
@@ -76,10 +87,29 @@ int main(void)
    /* and ws_scope_contains on the symlink's resolved (bob) path is false for alice */
    assert(ws_scope_contains("webuser:alice", rootB) == 0);
 
-   /* --- safe openat base fd --- */
+   /* --- prefix false-positive: a sibling dir sharing a name prefix with the
+    * root must NOT count as "within" (/.../alice vs /.../alicex boundary) --- */
+   {
+      char sibling[PATH_MAX];
+      /* rootA ends in "/alice"; craft "/aliceX" sibling */
+      snprintf(sibling, sizeof(sibling), "%sX", rootA);
+      assert(mkdir(sibling, 0700) == 0);
+      assert(ws_scope_contains("webuser:alice", sibling) == 0); /* not within */
+      rmdir(sibling);
+   }
+
+   /* --- safe openat base fd + TOCTOU-free project open --- */
    int fd = ws_scope_open_user_root("webuser:alice");
    assert(fd >= 0);
    close(fd);
+   assert(ws_scope_open_user_root("uid:1000") == -1); /* invalid principal */
+   /* open the real project via the openat API */
+   int pfd = ws_scope_open_project("webuser:alice", "myrepo", 0);
+   assert(pfd >= 0);
+   close(pfd);
+   /* O_NOFOLLOW rejects opening through the planted escape symlink */
+   assert(ws_scope_open_project("webuser:alice", "evil", 0) == -1);
+   assert(ws_scope_open_project("webuser:alice", "..", 0) == -1);
 
    /* cleanup */
    rmdir(real_proj);

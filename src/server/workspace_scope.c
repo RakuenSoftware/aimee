@@ -111,6 +111,8 @@ static int mkdirs_0700(const char *path)
 
 int ws_scope_user_root(const char *principal, int create, char *out, size_t cap)
 {
+   if (!out || cap == 0)
+      return -1;
    char name[WS_NAME_MAX + 1];
    if (principal_name(principal, name, sizeof(name)) != 0)
       return -1;
@@ -144,6 +146,8 @@ static int path_within(const char *root, const char *child)
 int ws_scope_project_path(const char *principal, const char *project, int must_exist, char *out,
                           size_t cap)
 {
+   if (!out || cap == 0)
+      return -1;
    if (!project || !ws_scope_name_valid(project))
       return -1;
    char root[PATH_MAX];
@@ -207,4 +211,21 @@ int ws_scope_open_user_root(const char *principal)
    if (ws_scope_user_root(principal, 1, root, sizeof(root)) != 0)
       return -1;
    return open(root, O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+}
+
+int ws_scope_open_project(const char *principal, const char *project, int extra_flags)
+{
+   if (!project || !ws_scope_name_valid(project))
+      return -1;
+   int base = ws_scope_open_user_root(principal);
+   if (base < 0)
+      return -1;
+   /* base is pinned to the canonical per-principal root; `project` is a single
+    * validated component; O_NOFOLLOW rejects a symlink planted at the leaf — so
+    * this open cannot escape the root and has no resolve-vs-use TOCTOU window. */
+   int fd = openat(base, project, O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC | extra_flags);
+   int e = errno;
+   close(base);
+   errno = e;
+   return fd;
 }
