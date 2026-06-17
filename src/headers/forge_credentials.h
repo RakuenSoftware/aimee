@@ -71,6 +71,13 @@ int forge_cred_count(void);
 char **forge_cred_build_env(const char *workspace_id, long now_epoch, char *const *parent_environ,
                             const char *askpass_shim);
 
+/* As forge_cred_build_env but with the token supplied directly (e.g. resolved
+ * from a `webuser:` vault rather than the in-memory broker — webchat-git WP-C).
+ * Same env shape + free contract. The caller wipes its own `token` copy. Returns
+ * NULL if `token` is empty/NULL. */
+char **forge_cred_build_env_from_token(const char *token, char *const *parent_environ,
+                                       const char *askpass_shim);
+
 /* Free an envp returned by forge_cred_build_env (frees each entry, then the
  * array; zeroes the GH_TOKEN entry first so the secret does not linger). */
 void forge_cred_free_env(char **envp);
