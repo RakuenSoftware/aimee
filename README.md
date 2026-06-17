@@ -401,10 +401,10 @@ ship; pick by topology. They build from three reusable images: **`aimee-server`*
 Postgres (DB2) and a CPU embedder sidecar (`Dockerfile.embedder`); the kb
 auto-applies its DB2 schema (tables + `pg_trgm`/`vector` extensions) on first
 boot. The sidecar ships in two tiers — embedder + reranker baked into one image:
-the default `aimee-embedder` (`pplx-embed-v1-4b`, 2560-dim, + `ettin-reranker-1b`)
-and the lighter `aimee-embedder-0.6b` (`pplx-embed-v1-0.6b`, 1024-dim, +
-`ettin-reranker-400m`) for low-memory hosts. Switch with `AIMEE_EMBEDDER_IMAGE`
-plus `embedding_dim: 1024` (or `AIMEE_EMBEDDING_DIM=1024`). Trade-offs:
+the default `aimee-embedder` (`pplx-embed-v1-0.6b`, 1024-dim, + `ettin-reranker-400m`)
+and the higher-fidelity `aimee-embedder-4b` (`pplx-embed-v1-4b`, 2560-dim, +
+`ettin-reranker-1b`) for hosts with RAM to spare. Switch with `AIMEE_EMBEDDER_IMAGE`
+plus `embedding_dim: 2560` (or `AIMEE_EMBEDDING_DIM=2560`). Trade-offs:
 [retrieval-stack.md](docs/retrieval-stack.md#choosing-a-tier).
 
 > **`docker compose ... up --build` needs no credentials.** The default build ships

@@ -122,14 +122,20 @@ int kb_curator_queue_code_units_for_project(const char *project, const char *roo
    if (!conn)
       return -1;
 
+   /* NOT EXISTS (anti-join), not `(f.path, t.name) NOT IN (subquery)`: the
+    * row-constructor NOT IN can't be planned as a hash anti-join (it degrades to a
+    * per-row subquery scan — observed holding a pooled connection for minutes on a
+    * large `terms` table) and is NULL-unsafe (a single NULL file_path/symbol in
+    * kb_code_unit_jobs makes NOT IN drop ALL rows). NOT EXISTS fixes both. */
    static const char *sql = "SELECT f.path, t.name, t.kind, t.line::int"
                             " FROM terms t"
                             " JOIN files f ON t.file_id = f.id"
                             " JOIN projects p ON f.project_id = p.id"
                             " WHERE p.name = ?1"
-                            " AND (f.path, t.name) NOT IN ("
-                            "   SELECT file_path, symbol FROM kb_code_unit_jobs"
-                            "   WHERE project = ?1 AND status IN ('pending','running','done')"
+                            " AND NOT EXISTS ("
+                            "   SELECT 1 FROM kb_code_unit_jobs j"
+                            "   WHERE j.project = ?1 AND j.status IN ('pending','running','done')"
+                            "     AND j.file_path = f.path AND j.symbol = t.name"
                             " )";
 
    char err[CQ_ERRBUF] = "";

@@ -50,7 +50,7 @@ static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
  * 1024 for pplx-0.6b, 2560 for pplx-4b). Set from the loaded config by the
  * server / aimee-kb startup via db2_set_embedding_dim() before db2_init(), so
  * this layer needs no config dependency. 0 = unset -> db2_embedding_dim()
- * reports the 2560 default (the default embedder is pplx-4b). */
+ * reports the 1024 default (the default embedder is pplx-0.6b). */
 static int g_embed_dim = 0;
 
 void db2_set_embedding_dim(int dim)
@@ -60,7 +60,7 @@ void db2_set_embedding_dim(int dim)
 
 int db2_embedding_dim(void)
 {
-   return g_embed_dim > 0 ? g_embed_dim : 2560;
+   return g_embed_dim > 0 ? g_embed_dim : 1024;
 }
 static pthread_key_t g_thread_conn_key;
 static pthread_once_t g_thread_conn_key_once = PTHREAD_ONCE_INIT;
@@ -264,6 +264,30 @@ void db2_lease_end(void)
          L->conn = NULL;
          L->pooled = 0;
       }
+   }
+}
+
+void db2_lease_release_idle(void)
+{
+   /* Release a connection acquired lazily by db2_conn() OUTSIDE any
+    * db2_lease_begin/_end scope (depth 0). Long-lived periodic workers (curator
+    * drain, maintenance timer) otherwise pin a pool connection for their whole
+    * lifetime — the reaper flags it as a stuck lease and it permanently shrinks
+    * the pool. They call this at a job boundary (between cycles) to return the
+    * connection while idle. No-op inside a lease scope or on the init thread. */
+   if (!g_init_thread_set || pthread_equal(pthread_self(), g_init_thread))
+      return;
+   if (g_lease_depth != 0)
+      return; /* inside an explicit begin/end unit — leave it owned */
+   db2_thread_lease_t *L = (db2_thread_lease_t *)pthread_getspecific(g_thread_conn_key);
+   if (L && L->conn)
+   {
+      if (L->pooled)
+         db2_pool_return(L->conn);
+      else
+         aimee_pg_close(L->conn);
+      L->conn = NULL;
+      L->pooled = 0;
    }
 }
 

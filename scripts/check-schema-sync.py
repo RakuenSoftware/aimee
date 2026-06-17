@@ -81,6 +81,7 @@ DB1_ONLY_TABLES = {
     "memory_runtime_state",
     "mcp_osv_cache",
     "model_catalog",
+    "model_pricing",
     "pipelines",
     "plan_steps",
     "primary_sessions",

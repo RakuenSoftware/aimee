@@ -16,44 +16,46 @@ a dimension constraint.)
 
 | Image | Embedder (`embedding_dim`) | Reranker |
 |-------|----------------------------|----------|
-| `aimee-embedder` (default) | `pplx-embed-v1-4b` (`2560`) | `ettin-reranker-1b` |
-| `aimee-embedder-0.6b` | `pplx-embed-v1-0.6b` (`1024`) | `ettin-reranker-400m` |
+| `aimee-embedder` (default) | `pplx-embed-v1-0.6b` (`1024`) | `ettin-reranker-400m` |
+| `aimee-embedder-4b` | `pplx-embed-v1-4b` (`2560`) | `ettin-reranker-1b` |
 
 ### Choosing a tier
 
-Run one tier per deployment. The 4b/1b image is the default; the 0.6b/400m
-image is for hosts that can't spare the memory.
+Run one tier per deployment. The 0.6b/400m image is the default; the 4b/1b
+image is the higher-fidelity alternate for hosts with RAM to spare.
 
-**4b + 1b (default).** Best retrieval quality and reranking. Pick it when the
-host has the RAM and embedding throughput isn't your bottleneck — most server
+**0.6b + 400m (default).** The low-latency tier, and the right default for most
 deployments.
-- Recall and ranking are noticeably better, especially on large or noisy
-  corpora and on queries that lean on meaning over keywords.
-- Costs: the model weights are several GB (slower image pull and first build),
-  the default image holds ~20 GB resident in fp32 (~16 GB embedder + ~4 GB
-  reranker), and a CPU embed runs ~1–2 s versus the 0.6b's ~0.2 s. None of that
-  is in the request hot path — embedding happens at ingest and on the query, not
-  per token — but it sets a RAM floor and slows a cold re-embed of a large corpus.
-
-**0.6b + 400m (light).** Pick it for laptops, small VMs, CI, or any host short
-on memory.
 - ~2 GB of weights (embedder + reranker), a couple of GB resident, embeds in
-  ~0.2 s. Fits a small host; fast to pull, fast to re-embed.
-- Lower recall and weaker reranking than the 4b/1b — fine for smaller corpora
-  and keyword-ish queries, weaker on large-corpus semantic search.
+  ~0.2 s — roughly 5x faster than the 4b on a CPU host. Fast to pull, fast to
+  re-embed.
+- In practice the cross-encoder reranker dominates recall latency, not the
+  embedder, so the larger embedder buys less end-to-end than its size suggests.
+- Recall is slightly weaker than the 4b on large or noisy corpora and on
+  meaning-heavy queries, but fine for most workloads.
 
-Rule of thumb: default to 4b/1b; drop to 0.6b/400m only when RAM or pull size
-forces it. The retrieval pipeline (hybrid search, reranking, fusion) is
-identical either way — only the model sizes differ.
+**4b + 1b (higher fidelity).** Pick it when the host has the RAM and you want
+the best recall/ranking on large or noisy corpora.
+- Recall and ranking are noticeably better on meaning-over-keyword queries.
+- Costs: the model weights are several GB (slower image pull and first build),
+  the image holds ~20 GB resident in fp32 (~16 GB embedder + ~4 GB reranker),
+  and a CPU embed runs ~1–2 s versus the 0.6b's ~0.2 s. None of that is in the
+  request hot path — embedding happens at ingest and on the query, not per
+  token — but it sets a RAM floor and slows a cold re-embed of a large corpus.
+
+Rule of thumb: default to 0.6b/400m; step up to 4b/1b only when you have the RAM
+and need the extra recall. The retrieval pipeline (hybrid search, reranking,
+fusion) is identical either way — only the model sizes differ.
 
 ### Switching tiers
 
-The default `aimee-embedder` image bakes the 4b + 1b. To run the light tier,
-point at the `aimee-embedder-0.6b` image and set the dimension to match:
+The default `aimee-embedder` image bakes the 0.6b + 400m. To run the
+higher-fidelity tier, point at the `aimee-embedder-4b` image and set the
+dimension to match:
 
 ```bash
-AIMEE_EMBEDDER_IMAGE=ghcr.io/rakuensoftware/aimee-embedder-0.6b:latest
-AIMEE_EMBEDDING_DIM=1024   # or embedding_dim: 1024 in aimee.yaml
+AIMEE_EMBEDDER_IMAGE=ghcr.io/rakuensoftware/aimee-embedder-4b:latest
+AIMEE_EMBEDDING_DIM=2560   # or embedding_dim: 2560 in aimee.yaml
 ```
 
 No rebuild needed — both images are published. On an **empty** database that's
@@ -68,8 +70,8 @@ pairing with `--build-arg EMBEDDER_MODEL=… --build-arg RERANKER_MODEL=…`.
 Two config keys define the embedder:
 
 - `embedding_command` — the command that produces embeddings.
-- `embedding_dim` — the dimension that command emits (1024 for the light image,
-  2560 for the default; any value for a custom-built image). This is the
+- `embedding_dim` — the dimension that command emits (1024 for the default image,
+  2560 for the 4b image; any value for a custom-built image). This is the
   single source of truth for vector-column dimensions.
 
 Keep the two in sync: `embedding_dim` must equal the dimension
@@ -99,8 +101,8 @@ schema, `db_apply_schema_postgres()` substitutes the placeholder with the
 configured dimension — the one place the schema is materialized — so every
 `halfvec` column (`memory_embeddings`, `kb_embeddings`, and the
 `curator_*_vectors` tables) is created at the right size. An unset or
-out-of-range value falls back to the `2560` default (the default embedder is the
-4B) rather than emitting invalid DDL.
+out-of-range value falls back to the `1024` default (the default embedder is the
+0.6B) rather than emitting invalid DDL.
 
 `halfvec` (fp16) is used throughout: it halves index memory versus `vector`
 (fp32) at negligible recall cost, and it lifts the index dimension ceiling from

@@ -89,7 +89,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-primary-session-adapter \
                $(TESTPREFIX)/unit-test-session-search-tool \
                $(TESTPREFIX)/unit-test-working-memory $(TESTPREFIX)/unit-test-working-memory-mock $(TESTPREFIX)/unit-test-local-resolution $(TESTPREFIX)/unit-test-cognify-jobs $(TESTPREFIX)/unit-test-extractors-extra \
-               $(TESTPREFIX)/unit-test-css-analyze $(TESTPREFIX)/unit-test-typed-facts $(TESTPREFIX)/unit-test-css-graph $(TESTPREFIX)/unit-test-css-oracle $(TESTPREFIX)/unit-test-css-render-oracle $(TESTPREFIX)/unit-test-css-migration $(TESTPREFIX)/unit-test-css-render $(TESTPREFIX)/unit-test-css-render-cmd \
+               $(TESTPREFIX)/unit-test-css-analyze $(TESTPREFIX)/unit-test-typed-facts $(TESTPREFIX)/unit-test-css-graph $(TESTPREFIX)/unit-test-css-insights $(TESTPREFIX)/unit-test-css-oracle $(TESTPREFIX)/unit-test-css-render-oracle $(TESTPREFIX)/unit-test-css-migration $(TESTPREFIX)/unit-test-css-render $(TESTPREFIX)/unit-test-css-render-cmd \
                $(TESTPREFIX)/unit-test-compute-pool $(TESTPREFIX)/unit-test-db2-pool $(TESTPREFIX)/unit-test-cli-launch \
                $(TESTPREFIX)/unit-test-server-session-pools \
                $(TESTPREFIX)/unit-test-presence \
@@ -181,6 +181,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-token-audit-load \
                $(TESTPREFIX)/unit-test-windows \
                $(TESTPREFIX)/unit-test-token-tracker \
+               $(TESTPREFIX)/unit-test-model-pricing \
+               $(TESTPREFIX)/unit-test-provider-client \
                $(TESTPREFIX)/unit-test-reasoning-cap \
                $(TESTPREFIX)/unit-test-request-context \
                $(TESTPREFIX)/unit-test-response-dedup \
@@ -431,6 +433,18 @@ $(TESTPREFIX)/unit-test-fidelity-check: \
 # CSS style-graph persistence (WP-B) over the sqlite shim.
 $(TESTPREFIX)/unit-test-css-graph: \
                                        $(OBJDIR)/tests/test_css_graph.o \
+                                       $(OBJDIR)/db2/css_graph.o \
+                                       $(OBJDIR)/css_analyze.o \
+                                       $(OBJDIR)/db2/code_index.o \
+                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
+                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
+
+# CSS analysis signals (!important / specificity / unused vars / token candidates).
+$(TESTPREFIX)/unit-test-css-insights: \
+                                       $(OBJDIR)/tests/test_css_insights.o \
+                                       $(OBJDIR)/db2/css_insights.o \
                                        $(OBJDIR)/db2/css_graph.o \
                                        $(OBJDIR)/css_analyze.o \
                                        $(OBJDIR)/db2/code_index.o \
@@ -2264,6 +2278,18 @@ $(TESTPREFIX)/unit-test-diagnose: $(OBJDIR)/tests/test_diagnose.o \
 $(TESTPREFIX)/unit-test-clarify: $(OBJDIR)/tests/test_clarify.o \
                                   $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/clarify.o \
                                   $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# DB1 server-owned per-model price table (ingress-cost-accounting §2).
+$(TESTPREFIX)/unit-test-model-pricing: $(OBJDIR)/tests/test_model_pricing.o \
+                                  $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                  $(OBJDIR)/db1/model_pricing.o \
+                                  $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-provider-client: $(OBJDIR)/tests/test_provider_client.o \
+                                  $(OBJDIR)/provider_client.o $(OBJDIR)/cJSON.o \
+                                  $(OBJDIR)/tests/support/mock_agent_http.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-collab-rules: $(OBJDIR)/tests/test_collab_rules.o $(TEST_DATA_OBJS_MOCK)

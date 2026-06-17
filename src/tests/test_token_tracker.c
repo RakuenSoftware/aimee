@@ -264,6 +264,61 @@ static void test_local_delegates_priced_free(void)
    PASS("cost: local delegates priced free (known, zero); hosted price overrides");
 }
 
+/* DB1 server-owned store: a stored row is the authoritative price (returns 1 =
+ * present), overriding the static table — and a present 0 is authoritative-free. */
+static int fake_db1_price(const char *model, double *in_per_mtok, double *out_per_mtok)
+{
+   if (model && strcmp(model, "MiniMax-M3") == 0) /* a metered delegate the operator priced */
+   {
+      *in_per_mtok = 5.0;
+      *out_per_mtok = 10.0;
+      return 1; /* present */
+   }
+   return 0; /* no stored row */
+}
+static int fake_db1_free(const char *model, double *in_per_mtok, double *out_per_mtok)
+{
+   (void)model;
+   *in_per_mtok = 0.0;
+   *out_per_mtok = 0.0;
+   return 1; /* present, explicitly free */
+}
+
+static void test_db1_pricing_authoritative(void)
+{
+   token_usage_t u = {.input_tokens = 1000, .output_tokens = 1000};
+
+   /* A DB1-stored price overrides the static known-zero for that delegate. */
+   token_tracker_set_db1_price_fn(fake_db1_price);
+   int priced = -1;
+   double c = token_estimate_cost_ex("MiniMax-M3", &u, &priced);
+   assert(priced == 1);
+   /* 1000*5.0/1e6 + 1000*10.0/1e6 = 0.005 + 0.010 = 0.015 */
+   assert(near_equal(c, 0.015));
+
+   /* A model with no DB1 row falls through to the static table (still free). */
+   double other = token_estimate_cost_ex("mistral-medium-latest", &u, NULL);
+   assert(near_equal(other, 0.0));
+
+   /* An absent DB1 row must not perturb a model the static table prices nonzero:
+    * the fall-through leaves the prior (real) resolution intact. */
+   double baseline = token_estimate_cost_ex("anthropic/claude-opus-4", &u, NULL);
+   assert(baseline > 0.0);
+   token_tracker_set_db1_price_fn(fake_db1_price); /* returns 0 for this model */
+   priced = -1;
+   double with_hook = token_estimate_cost_ex("anthropic/claude-opus-4", &u, &priced);
+   assert(priced == 1 && near_equal(with_hook, baseline)); /* unchanged by absent row */
+
+   /* A DB1 present-with-0 is authoritative free (known, even for an unknown model). */
+   token_tracker_set_db1_price_fn(fake_db1_free);
+   priced = -1;
+   double freed = token_estimate_cost_ex("some-unknown-model", &u, &priced);
+   assert(priced == 1 && near_equal(freed, 0.0));
+
+   token_tracker_set_db1_price_fn(NULL); /* restore */
+   PASS("cost: DB1 stored price is authoritative (overrides static; absent falls through; 0=free)");
+}
+
 /* --- Main --- */
 
 int main(void)
@@ -273,6 +328,7 @@ int main(void)
    test_cost_shaped_reward();
    test_billable_model();
    test_local_delegates_priced_free();
+   test_db1_pricing_authoritative();
 
    test_known_anthropic_model();
    test_cache_tokens_anthropic();

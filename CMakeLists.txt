@@ -423,6 +423,7 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/db2/typed_facts.c
     ${AIMEE_SRC_DIR}/db2/css_migration.c
     ${AIMEE_SRC_DIR}/db2/css_render.c
+    ${AIMEE_SRC_DIR}/db2/css_insights.c
     ${AIMEE_SRC_DIR}/db2/db_schema.c
     ${AIMEE_SRC_DIR}/db2/memory_lint.c
     ${AIMEE_SRC_DIR}/db2/sketch.c

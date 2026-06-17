@@ -37,4 +37,15 @@ int code_collect_files_cb(const char *root, code_collect_file_cb cb, void *ctx);
  * and the tree is known-small. Returns the number of files appended. */
 int code_collect_files(const char *root, cJSON *files_arr);
 
+/* Discover git repositories under `root` for one-project-per-repo ingest: invoke
+ * `cb` once per real checkout (a directory whose `.git` is itself a directory),
+ * with the repo's absolute path. Linked worktrees (`.git` is a regular file) are
+ * skipped — they are duplicate working copies of an already-tracked repo — and
+ * symlinks are never followed (cycle guard). A worktree passed as `root` itself
+ * is honored. Kept here (not workspace.c) so the thin client can use it without
+ * the heavier workspace.o dependency chain. POSIX only; no-op elsewhere. Returns
+ * the number of repos for which `cb` was invoked. */
+typedef void (*code_collect_repo_cb)(const char *repo_abs, void *ctx);
+int code_collect_discover_repos(const char *root, code_collect_repo_cb cb, void *ctx);
+
 #endif /* CODE_COLLECT_H */

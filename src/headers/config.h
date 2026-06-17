@@ -1223,7 +1223,6 @@ typedef struct config
     * kb_curator_extract_code_enabled:  0 = off (default), 1 = queue extract_code_unit jobs.
     * kb_curator_extract_command[512]:  sidecar command (default: scripts/curator-extract.py).
     * kb_curator_extract_max_tokens:    max_tokens per job stdin payload (default 2048).
-    * kb_curator_max_jobs_per_hour:     sliding-window rate cap on drain completions (default 120).
     * kb_curator_max_attempts:          max drain attempts per job before marking failed (default
     * 3).
     */
@@ -1265,7 +1264,6 @@ typedef struct config
    int kb_curator_promote_min_sources;
    char kb_curator_extract_command[512];
    int kb_curator_extract_max_tokens;
-   int kb_curator_max_jobs_per_hour;
    int kb_curator_max_attempts;
    /* judge_command: LLM sidecar that adjudicates the resolve_entities
     * [0.70, 0.85) ambiguous band (same_entity? merge : create). Empty = off;

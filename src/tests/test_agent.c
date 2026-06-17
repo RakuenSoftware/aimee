@@ -1786,6 +1786,25 @@ static void test_agent_trace_log_uses_db1_execution_trace(void)
    sqlite3_close(db);
 }
 
+static void test_agent_name_valid(void)
+{
+   /* legit agent/model slugs accepted */
+   assert(agent_name_valid("minimax"));
+   assert(agent_name_valid("mimo-2.5"));
+   assert(agent_name_valid("my-gpt"));
+   assert(agent_name_valid("a"));
+   assert(agent_name_valid("gpt_4.1-mini"));
+   /* junk rejected: empty, leading non-alnum, spaces, illegal chars, over-long */
+   assert(!agent_name_valid(""));
+   assert(!agent_name_valid(NULL));
+   assert(!agent_name_valid("-leading"));
+   assert(!agent_name_valid(".dot"));
+   assert(!agent_name_valid("has space"));
+   assert(!agent_name_valid("bad/slash"));
+   assert(!agent_name_valid(
+       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")); /* 63 */
+}
+
 int main(void)
 {
    char tmp_home[512];
@@ -1796,6 +1815,7 @@ int main(void)
    assert(config_output_dir()[0] != '\0');
    session_id_set_override("unit-test-agent");
    test_tool_surface_single_source();
+   test_agent_name_valid();
    test_agent_expand_env();
    test_agent_has_role();
    test_agent_find();

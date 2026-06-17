@@ -262,6 +262,61 @@ int main(void)
       assert(strstr(projects[0], "real-proj") != NULL);
    }
 
+   /* --- discovery: skips linked git worktrees, keeps the real checkout --- */
+   {
+      char ws[512];
+      snprintf(ws, sizeof(ws), "%s/wt-ws", tmpdir);
+      mkdir(ws, 0755);
+
+      /* Real checkout: .git is a directory. */
+      char realrepo[512];
+      snprintf(realrepo, sizeof(realrepo), "%s/main", ws);
+      create_git_repo(realrepo);
+
+      /* Linked worktree sibling: .git is a regular file ("gitdir: <path>"),
+       * a duplicate working copy of the same repo — must NOT be discovered. */
+      char wt[512], wtgit[600];
+      snprintf(wt, sizeof(wt), "%s/wt-copy", ws);
+      mkdir(wt, 0755);
+      snprintf(wtgit, sizeof(wtgit), "%s/.git", wt);
+      write_text_file(wtgit, "gitdir: /home/x/main/.git/worktrees/wt-copy\n");
+
+      char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
+      int count =
+          workspace_discover_projects(ws, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);
+      assert(count == 1); /* only the real checkout, not the worktree */
+      char real_abs[MAX_PATH_LEN];
+      assert(realpath(realrepo, real_abs) != NULL);
+      assert(strcmp(projects[0], real_abs) == 0);
+
+      /* A worktree added explicitly (as the scan root) is still honored. */
+      int c2 =
+          workspace_discover_projects(wt, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);
+      assert(c2 == 1);
+      char wt_abs[MAX_PATH_LEN];
+      assert(realpath(wt, wt_abs) != NULL);
+      assert(strcmp(projects[0], wt_abs) == 0);
+   }
+
+   /* --- discovery: a self-referential dir symlink does not cause re-discovery --- */
+   {
+      char ws[512], repo[512], link[600];
+      snprintf(ws, sizeof(ws), "%s/sym-ws", tmpdir);
+      mkdir(ws, 0755);
+      snprintf(repo, sizeof(repo), "%s/router", ws);
+      create_git_repo(repo);
+      /* "src -> ." inside the repo: following it would loop and re-discover the
+       * repo once per depth level (the smoothrouter bug). */
+      snprintf(link, sizeof(link), "%s/src", repo);
+      assert(symlink(".", link) == 0);
+
+      char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
+      int count =
+          workspace_discover_projects(ws, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);
+      assert(count == 1); /* discovered exactly once, not N times */
+      assert(strstr(projects[0], "router") != NULL);
+   }
+
    /* --- style_read: missing file returns NULL --- */
    {
       char *style = style_read("nonexistent-project-xyz");

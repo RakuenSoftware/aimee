@@ -27,8 +27,8 @@ static int code_ext_ok(const char *name)
 
 static int code_dir_skip(const char *name)
 {
-   static const char *const skip[] = {"node_modules", "__pycache__", "vendor", "target",
-                                      "build",        "dist",        "out",    NULL};
+   static const char *const skip[] = {"node_modules", "__pycache__", "vendor", "target", "build",
+                                      "dist",         "out",         "sdks",   NULL};
    if (name[0] == '.') /* .git, .aimee, .cache, .svn, hidden dirs */
       return 1;
    for (int i = 0; skip[i]; i++)
@@ -67,8 +67,11 @@ static int code_collect_walk(const char *root, const char *rel, code_collect_fil
       char full[4096];
       snprintf(full, sizeof(full), "%s/%s", path, ent->d_name);
 
+      /* lstat (not stat): never follow symlinks. A self-referential dir symlink
+       * (e.g. "src -> .") would otherwise loop until the path-length cap, pushing
+       * the same files repeatedly; symlinked files are skipped as likely dups. */
       struct stat st;
-      if (stat(full, &st) != 0)
+      if (lstat(full, &st) != 0 || S_ISLNK(st.st_mode))
          continue;
 
       char rel_child[4096];
@@ -160,6 +163,62 @@ int code_collect_files(const char *root, cJSON *files_arr)
    return code_collect_files_cb(root, code_collect_append_cb, files_arr);
 }
 
+/* .git classification: 0 = not a repo, 1 = real checkout (.git dir),
+ * 2 = linked worktree (.git regular file: "gitdir: <path>"). */
+static int code_git_kind(const char *path)
+{
+   char g[4096];
+   snprintf(g, sizeof(g), "%s/.git", path);
+   struct stat st;
+   if (stat(g, &st) != 0)
+      return 0;
+   return S_ISDIR(st.st_mode) ? 1 : 2;
+}
+
+static void code_discover_walk(const char *dir, int depth, code_collect_repo_cb cb, void *ctx,
+                               int *n)
+{
+   if (depth > 10)
+      return;
+
+   /* Register real checkouts always; honor a linked worktree only when it is the
+    * explicit scan root (depth 0), never as a sibling found during descent. */
+   int gk = code_git_kind(dir);
+   if (gk == 1 || (gk == 2 && depth == 0))
+   {
+      char abs[4096];
+      cb(realpath(dir, abs) ? abs : dir, ctx);
+      (*n)++;
+   }
+
+   DIR *d = opendir(dir);
+   if (!d)
+      return;
+   struct dirent *ent;
+   while ((ent = readdir(d)) != NULL)
+   {
+      if (ent->d_name[0] == '.' || code_dir_skip(ent->d_name))
+         continue;
+      char sub[4096];
+      snprintf(sub, sizeof(sub), "%s/%s", dir, ent->d_name);
+      /* lstat: never follow symlinks (cycle guard, e.g. "src -> ."). */
+      struct stat st;
+      if (lstat(sub, &st) != 0 || S_ISLNK(st.st_mode) || !S_ISDIR(st.st_mode))
+         continue;
+      code_discover_walk(sub, depth + 1, cb, ctx, n);
+   }
+   closedir(d);
+}
+
+int code_collect_discover_repos(const char *root, code_collect_repo_cb cb, void *ctx)
+{
+   if (!root || !root[0] || !cb)
+      return 0;
+   int n = 0;
+   code_discover_walk(root, 0, cb, ctx, &n);
+   return n;
+}
+
 #else /* !AIMEE_POSIX */
 
 int code_collect_files_cb(const char *root, code_collect_file_cb cb, void *ctx)
@@ -174,6 +233,14 @@ int code_collect_files(const char *root, cJSON *files_arr)
 {
    (void)root;
    (void)files_arr;
+   return 0;
+}
+
+int code_collect_discover_repos(const char *root, code_collect_repo_cb cb, void *ctx)
+{
+   (void)root;
+   (void)cb;
+   (void)ctx;
    return 0;
 }
 

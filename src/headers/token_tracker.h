@@ -48,6 +48,13 @@ typedef int (*token_registry_price_fn)(const char *model, double *in_per_mtok,
                                        double *out_per_mtok);
 void token_tracker_set_registry_price_fn(token_registry_price_fn fn);
 
+/* DB1 server-owned price hook (the authoritative store on aimee-server; installed
+ * by the server's db1-pricing bridge, same decoupling rationale as the registry
+ * hook). Returns 1 when the model has a STORED price (rates set, possibly 0 =
+ * explicitly free) — which then overrides the static table and the registry — or 0
+ * when there is no stored row. Same signature as token_registry_price_fn. */
+void token_tracker_set_db1_price_fn(token_registry_price_fn fn);
+
 /* Cost-shaped reward for the delegate-routing bandit. Combines task success with
  * a spend penalty so the bandit prefers cheaper arms when quality is comparable:
  *   reward = clamp01(success - (lambda_pct/100) * min(cost_usd / cost_ref, 1))

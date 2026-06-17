@@ -6,6 +6,7 @@
 #include "cJSON.h"
 #include "css_render_oracle.h"
 #include "db2/css_graph.h"
+#include "db2/css_insights.h"
 #include "db2/css_migration.h"
 #include "db2/css_render.h"
 #include "db2/typed_facts.h"
@@ -101,6 +102,48 @@ static cJSON *css_signal_array(const char *op, const char *project)
          cJSON_AddItemToArray(arr, o);
       }
    }
+   else if (strcmp(op, "important-audit") == 0)
+   {
+      css_important_t h[512];
+      int n = db2_css_important_audit(project, h, 512);
+      for (int i = 0; i < n; i++)
+      {
+         cJSON *o = cJSON_CreateObject();
+         cJSON_AddStringToObject(o, "property", h[i].property);
+         cJSON_AddNumberToObject(o, "count", h[i].count);
+         cJSON_AddStringToObject(o, "sample_file", h[i].sample_file);
+         cJSON_AddItemToArray(arr, o);
+      }
+   }
+   else if (strcmp(op, "high-specificity") == 0)
+   {
+      css_high_spec_t h[512];
+      int n = db2_css_high_specificity(project, h, 512);
+      for (int i = 0; i < n; i++)
+      {
+         cJSON *o = cJSON_CreateObject();
+         cJSON_AddStringToObject(o, "file", h[i].file_path);
+         cJSON_AddStringToObject(o, "selector", h[i].selector);
+         cJSON_AddNumberToObject(o, "spec_a", h[i].spec_a);
+         cJSON_AddNumberToObject(o, "spec_b", h[i].spec_b);
+         cJSON_AddNumberToObject(o, "spec_c", h[i].spec_c);
+         cJSON_AddNumberToObject(o, "line", h[i].line);
+         cJSON_AddItemToArray(arr, o);
+      }
+   }
+   else if (strcmp(op, "unused-vars") == 0)
+   {
+      css_unused_var_t h[1024];
+      int n = db2_css_unused_custom_properties(project, h, 1024);
+      for (int i = 0; i < n; i++)
+      {
+         cJSON *o = cJSON_CreateObject();
+         cJSON_AddStringToObject(o, "name", h[i].name);
+         cJSON_AddStringToObject(o, "file", h[i].file_path);
+         cJSON_AddNumberToObject(o, "line", h[i].line);
+         cJSON_AddItemToArray(arr, o);
+      }
+   }
    return arr;
 }
 
@@ -157,6 +200,27 @@ int kb_handle_css_signals(int fd, cJSON *req)
          return kb_send_error(fd, "css assert-conventions failed");
       }
       cJSON_AddNumberToObject(resp, "asserted", n);
+      return kb_send_response(fd, resp);
+   }
+   if (strcmp(op, "token-candidates") == 0)
+   {
+      /* literal colours/lengths repeated >= min_count (default 3) -> tokenise. */
+      cJSON *mc = cJSON_GetObjectItemCaseSensitive(req, "min_count");
+      int min_count = (cJSON_IsNumber(mc) && mc->valueint > 0) ? mc->valueint : 3;
+      css_token_cand_t h[512];
+      int n = db2_css_token_candidates(project, min_count, h, 512);
+      cJSON *arr = cJSON_CreateArray();
+      for (int i = 0; i < n; i++)
+      {
+         cJSON *o = cJSON_CreateObject();
+         cJSON_AddStringToObject(o, "value", h[i].value);
+         cJSON_AddStringToObject(o, "kind", h[i].kind);
+         cJSON_AddNumberToObject(o, "count", h[i].count);
+         cJSON_AddItemToArray(arr, o);
+      }
+      cJSON_AddItemToObject(resp, "results", arr);
+      cJSON_AddNumberToObject(resp, "count", n);
+      cJSON_AddNumberToObject(resp, "min_count", min_count);
       return kb_send_response(fd, resp);
    }
    if (strcmp(op, "render-store") == 0)
