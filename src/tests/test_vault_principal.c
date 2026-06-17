@@ -12,7 +12,7 @@ static attested_transport_t resolve(int is_tcp, long uid, const char *webuser, i
                                     char *out)
 {
    out[0] = '\xff'; /* poison: prove the resolver writes/clears it */
-   return vault_principal_resolve(is_tcp, 0 /*is_tls*/, uid, webuser, token_ok, out,
+   return vault_principal_resolve(is_tcp, 0 /*is_tls*/, uid, webuser, token_ok, NULL, out,
                                   VAULT_PRINCIPAL_MAX);
 }
 
@@ -23,23 +23,24 @@ static void test_tls_bearer_attested_no_principal(void)
 {
    char p[VAULT_PRINCIPAL_MAX];
    /* TLS over the network, no uid/webuser -> ATTEST_TLS_BEARER, empty principal. */
-   assert(vault_principal_resolve(1, 1, -1, NULL, 0, p, sizeof(p)) == ATTEST_TLS_BEARER);
+   assert(vault_principal_resolve(1, 1, -1, NULL, 0, NULL, p, sizeof(p)) == ATTEST_TLS_BEARER);
    assert(p[0] == '\0');
    /* A spoofed/tokenless webuser over TLS is REFUSED server authority: it is NOT
     * promoted to TLS_BEARER, it falls back to the raw transport (TCP_BEARER), with
     * no vault principal. (A misconfigured webchat forwarding an end-user header
     * must never mint a server credential merely because the socket has TLS.) */
-   assert(vault_principal_resolve(1, 1, -1, "alice", 0, p, sizeof(p)) == ATTEST_TCP_BEARER);
+   assert(vault_principal_resolve(1, 1, -1, "alice", 0, NULL, p, sizeof(p)) == ATTEST_TCP_BEARER);
    assert(p[0] == '\0');
    /* A valid webuser assertion still wins (per-user webchat vault). */
-   assert(vault_principal_resolve(1, 1, -1, "alice", 1, p, sizeof(p)) == ATTEST_WEBCHAT_TRUSTED);
+   assert(vault_principal_resolve(1, 1, -1, "alice", 1, NULL, p, sizeof(p)) ==
+          ATTEST_WEBCHAT_TRUSTED);
    assert(strcmp(p, "webuser:alice") == 0);
    /* Plaintext TCP (no TLS) is NOT attested for server writes. */
-   assert(vault_principal_resolve(1, 0, -1, NULL, 0, p, sizeof(p)) == ATTEST_TCP_BEARER);
+   assert(vault_principal_resolve(1, 0, -1, NULL, 0, NULL, p, sizeof(p)) == ATTEST_TCP_BEARER);
    /* A short output buffer fails closed even over TLS (no TLS_BEARER on a buffer
     * too small to hold a principal). */
    char small[4];
-   assert(vault_principal_resolve(1, 1, -1, NULL, 0, small, sizeof(small)) == ATTEST_NONE);
+   assert(vault_principal_resolve(1, 1, -1, NULL, 0, NULL, small, sizeof(small)) == ATTEST_NONE);
    printf("  PASS: test_tls_bearer_attested_no_principal\n");
 }
 
@@ -125,11 +126,50 @@ static void test_short_buffer_fails_closed(void)
 {
    char small[8];
    small[0] = '\xff';
-   assert(vault_principal_resolve(0, 0, 1000, NULL, 0, small, sizeof(small)) == ATTEST_NONE);
+   assert(vault_principal_resolve(0, 0, 1000, NULL, 0, NULL, small, sizeof(small)) == ATTEST_NONE);
    assert(small[0] == '\0');
    /* NULL out is also safe. */
-   assert(vault_principal_resolve(0, 0, 1000, NULL, 0, NULL, 0) == ATTEST_NONE);
+   assert(vault_principal_resolve(0, 0, 1000, NULL, 0, NULL, NULL, 0) == ATTEST_NONE);
    printf("  PASS: test_short_buffer_fails_closed\n");
+}
+
+/* mTLS: a verified client cert -> cert:<CN>; a spoofing/unsanitizable CN is
+ * refused (fail-closed) but still classified MTLS so required-mode rejects it. */
+static void test_mtls_client_identity(void)
+{
+   char out[VAULT_PRINCIPAL_MAX];
+
+   /* CN sanitization: valid charset accepted; spoofing/garbage refused. */
+   char san[VAULT_PRINCIPAL_MAX];
+   assert(vault_principal_cert_sanitize("ci-runner_1.dev", san, sizeof(san)) == 1);
+   assert(strcmp(san, "ci-runner_1.dev") == 0);
+   assert(vault_principal_cert_sanitize("uid:0", san, sizeof(san)) == 0); /* ':' refused */
+   assert(vault_principal_cert_sanitize("webuser:bob", san, sizeof(san)) == 0);
+   assert(vault_principal_cert_sanitize("a/b", san, sizeof(san)) == 0);       /* path traversal */
+   assert(vault_principal_cert_sanitize("a b", san, sizeof(san)) == 0);       /* whitespace */
+   assert(vault_principal_cert_sanitize("bad\nname", san, sizeof(san)) == 0); /* newline */
+   assert(vault_principal_cert_sanitize("", san, sizeof(san)) == 0);
+   assert(san[0] == '\0');
+
+   /* A verified cert over TLS -> cert:<CN>, wins over a tokenless bearer/webuser. */
+   assert(vault_principal_resolve(1, 1, -1, NULL, 0, "ci-runner-1", out, sizeof(out)) ==
+          ATTEST_MTLS_CLIENT);
+   assert(strcmp(out, "cert:ci-runner-1") == 0);
+   /* Cert identity wins even when a (tokenless) webuser header is also present. */
+   assert(vault_principal_resolve(1, 1, -1, "alice", 0, "ci-runner-1", out, sizeof(out)) ==
+          ATTEST_MTLS_CLIENT);
+   assert(strcmp(out, "cert:ci-runner-1") == 0);
+
+   /* A spoofing CN: classified MTLS but NO principal (required-mode refuses it). */
+   assert(vault_principal_resolve(1, 1, -1, NULL, 0, "uid:0", out, sizeof(out)) ==
+          ATTEST_MTLS_CLIENT);
+   assert(out[0] == '\0');
+
+   /* A cert CN but no TLS (impossible in practice) is ignored -> bearer path. */
+   assert(vault_principal_resolve(1, 0, -1, NULL, 0, "ci-runner-1", out, sizeof(out)) ==
+          ATTEST_TCP_BEARER);
+   assert(out[0] == '\0');
+   printf("  PASS: test_mtls_client_identity\n");
 }
 
 int main(void)
@@ -142,6 +182,7 @@ int main(void)
    test_webuser_without_token_refused();
    test_tls_bearer_attested_no_principal();
    test_short_buffer_fails_closed();
+   test_mtls_client_identity();
    printf("vault_principal: all tests passed\n");
    return 0;
 }

@@ -17,8 +17,21 @@ extern "C"
 #endif
 
    /* Build the process-wide server SSL_CTX from the cert + key PEM files. Returns
-    * 0 on success, -1 on failure (logged). Idempotent (no-op once initialized). */
-   int server_tls_init(const char *cert_path, const char *key_path);
+    * 0 on success, -1 on failure (logged). Idempotent (no-op once initialized).
+    *
+    * mtls_mode: 0 = off (plain server TLS), 1 = optional (request a client cert
+    * but allow none), 2 = required (refuse a handshake without a valid client
+    * cert). When mtls_mode > 0 the SSL_CTX verifies client certs against
+    * client_ca_path (a PEM CA bundle); a load failure disables mTLS (logged). */
+   int server_tls_init(const char *cert_path, const char *key_path, int mtls_mode,
+                       const char *client_ca_path);
+
+   /* Extract the verified mTLS client identity from a handshaked SSL: writes the
+    * peer leaf cert's CN into cn_out (and hex serial into serial_out) and returns
+    * 1 iff the peer presented a cert AND it verified OK against the client CA;
+    * else 0 (cn_out/serial_out emptied). Bearer-only TLS conns return 0. */
+   int server_tls_peer_identity(SSL *ssl, char *cn_out, size_t cn_len, char *serial_out,
+                                size_t serial_len);
 
    /* 1 once server_tls_init has succeeded, else 0. */
    int server_tls_enabled(void);
