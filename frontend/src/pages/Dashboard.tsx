@@ -615,17 +615,35 @@ export default function Dashboard() {
         agents?: Agent[];
         onboard?: OnboardReport;
       };
+      // The server-hosted webchat returns shapes the panels can't all consume:
+      // `onboard` may be an `{error}` stub (truthy, no `steps`) and
+      // `memory_stats` may be an object rather than a flat array. A plain `??`
+      // only guards null/undefined, so a wrong-typed-but-truthy value slips
+      // through and a panel's `.map`/`.steps.map` throws. Coerce every field to
+      // the shape its panel expects so a bad payload renders empty, never blank.
+      const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+      const plugins = all.plugins;
       setData({
-        delegations: all.delegations ?? [],
-        metrics: all.metrics ?? [],
-        traces: all.traces ?? [],
-        memory: all.memory_stats ?? [],
-        plans: all.plans ?? [],
-        logs: all.logs ?? [],
-        plugins: all.plugins ?? { installed: 0, enabled: 0, hooks_total: 0, tools_total: 0, hook_runs_24h: 0, hook_failures_24h: 0, recent_failures: [] },
+        delegations: arr<Delegation>(all.delegations),
+        metrics: arr<Metric>(all.metrics),
+        traces: arr<Trace>(all.traces),
+        memory: arr<MemoryStat>(all.memory_stats),
+        plans: arr<Plan>(all.plans),
+        logs: arr<LogEntry>(all.logs),
+        plugins: {
+          installed: plugins?.installed ?? 0,
+          enabled: plugins?.enabled ?? 0,
+          hooks_total: plugins?.hooks_total ?? 0,
+          tools_total: plugins?.tools_total ?? 0,
+          hook_runs_24h: plugins?.hook_runs_24h ?? 0,
+          hook_failures_24h: plugins?.hook_failures_24h ?? 0,
+          recent_failures: arr<PluginFailure>(plugins?.recent_failures),
+        },
         lsp: all.lsp ?? null,
-        agents: all.agents ?? [],
-        onboard: all.onboard ?? null,
+        agents: arr<Agent>(all.agents),
+        // Only accept a real onboard report (one that has a `steps` array);
+        // the server's `{error: …}` stub must fall back to null.
+        onboard: Array.isArray(all.onboard?.steps) ? (all.onboard as OnboardReport) : null,
       });
     } catch (err) {
       console.error('Dashboard load failed', err);
