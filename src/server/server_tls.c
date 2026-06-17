@@ -1,8 +1,10 @@
-/* server_tls.c: see server_tls.h. Plain server-TLS context + handshake. */
+/* server_tls.c: see server_tls.h. Server-TLS context + handshake, incl. mTLS
+ * client-cert verification + revocation. */
 #include "server_tls.h"
 #include "server_conn_io.h" /* register/clear the per-conn SSL on the I/O shim */
-#include "config.h"         /* config_default_dir */
+#include "config.h"         /* config_default_dir, config_load */
 #include "aimee.h"          /* MAX_PATH_LEN */
+#include "pki.h"            /* pki_ca_ensure, pki_is_revoked */
 #include "log.h"
 
 #include <openssl/bn.h>
@@ -17,6 +19,34 @@
 
 static SSL_CTX *g_ctx = NULL;
 static pthread_mutex_t g_ctx_mu = PTHREAD_MUTEX_INITIALIZER;
+
+/* mTLS verify callback: OpenSSL has already checked the chain/validity
+ * (preverify_ok). Additionally reject a revoked leaf (depth 0) by consulting the
+ * in-memory revocation snapshot — no DB query in the handshake path. */
+static int mtls_verify_cb(int preverify_ok, X509_STORE_CTX *ctx)
+{
+   if (!preverify_ok)
+      return 0; /* chain/time/CA failure -> reject */
+   if (X509_STORE_CTX_get_error_depth(ctx) != 0)
+      return 1; /* only the leaf carries the client serial */
+   X509 *cert = X509_STORE_CTX_get_current_cert(ctx);
+   if (!cert)
+      return 1;
+   ASN1_INTEGER *sn = X509_get_serialNumber(cert);
+   BIGNUM *bn = sn ? ASN1_INTEGER_to_BN(sn, NULL) : NULL;
+   char *hex = bn ? BN_bn2hex(bn) : NULL;
+   int revoked = hex ? pki_is_revoked(hex) : 0;
+   if (hex)
+      OPENSSL_free(hex);
+   if (bn)
+      BN_free(bn);
+   if (revoked)
+   {
+      X509_STORE_CTX_set_error(ctx, X509_V_ERR_CERT_REVOKED);
+      return 0;
+   }
+   return 1;
+}
 
 int server_tls_init(const char *cert_path, const char *key_path, int mtls_mode,
                     const char *client_ca_path)
@@ -83,7 +113,7 @@ int server_tls_init(const char *cert_path, const char *key_path, int mtls_mode,
          int vflags = SSL_VERIFY_PEER;
          if (mtls_mode >= 2)
             vflags |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
-         SSL_CTX_set_verify(ctx, vflags, NULL);
+         SSL_CTX_set_verify(ctx, vflags, mtls_verify_cb);
          aimee_log(LOG_INFO, "server.tls", "mTLS %s (client CA %s)",
                    mtls_mode >= 2 ? "required" : "optional", ca);
       }
@@ -164,6 +194,11 @@ int server_tls_init_default(void)
    snprintf(key, sizeof(key), "%s/tls/server.key", config_default_dir());
    config_t cfg;
    config_load(&cfg);
+   /* When mTLS is on, ensure aimee's client CA exists (create-or-load) and the
+    * revocation snapshot is loaded BEFORE server_tls_init loads the client CA
+    * file and the verify callback starts consulting the snapshot. */
+   if (cfg.server_api_mtls > 0)
+      pki_ca_ensure();
    return server_tls_init(cert, key, cfg.server_api_mtls, cfg.server_api_mtls_client_ca);
 }
 
