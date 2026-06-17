@@ -7,8 +7,9 @@
 #endif
 
 #include "kb_curator_extract.h"
+#include "kb_curator_llm.h"
 #include "aimee.h"
-#include "config.h" /* config_current_mode, aimee_mode_t */
+#include "config.h" /* config_current_mode, aimee_mode_t, config_load */
 #include "cJSON.h"
 #include "log.h"
 #include "db2/artifacts.h"
@@ -26,6 +27,18 @@
 #define CE_ERRBUF 256
 #define CE_DOCBUF 65536
 #define CE_OUTBUF (256 * 1024)
+
+/* System prompt for the extract stage (Tier-A) when routed through a configured
+ * provider (§2b). The legacy python sidecar carried its own prompt; the in-process
+ * provider needs one here. The request JSON's `role`/`prompt_version` select the
+ * extraction shape (engineering doc vs novel story); keep this generic and let the
+ * request drive specifics. Grammar-constrained output is a future enhancement
+ * (kb_curator_llm_run does not yet pass a JSON schema). Tune against the model. */
+#define CE_SYSTEM_PROMPT                                                                           \
+   "You are a knowledge-base extractor. Read the JSON request (a document chunk "                  \
+   "with a `role` and `input.content`) and emit the requested entities, claims, "                  \
+   "and relations grounded only in that content. Respond with a single JSON "                      \
+   "object matching the request's role. Do not invent facts."
 
 typedef struct
 {
@@ -148,73 +161,6 @@ static void ce_mark_retry_or_fail(int64_t job_id, int attempts, int max_attempts
    aimee_pg_bind_int64(st, "?3", job_id);
    (void)aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
-}
-
-/* ── Sidecar invocation ─────────────────────────────────────────────────── */
-
-static char *ce_invoke_sidecar(const char *cmd, const char *json_input, char *errbuf, size_t errlen)
-{
-   /* Write input JSON to a temp file then pipe it into the command. */
-   char tmppath[256];
-   snprintf(tmppath, sizeof(tmppath), "/tmp/aimee_curator_XXXXXX");
-   int fd = mkstemp(tmppath);
-   if (fd < 0)
-   {
-      snprintf(errbuf, errlen, "mkstemp failed");
-      return NULL;
-   }
-
-   size_t inlen = strlen(json_input);
-   if (write(fd, json_input, inlen) != (ssize_t)inlen)
-   {
-      close(fd);
-      unlink(tmppath);
-      snprintf(errbuf, errlen, "write to tmpfile failed");
-      return NULL;
-   }
-   close(fd);
-
-   /* Build command: <cmd> < <tmpfile> */
-   char full_cmd[1024];
-   snprintf(full_cmd, sizeof(full_cmd), "%s < %s", cmd, tmppath);
-
-   FILE *fp = popen(full_cmd, "r");
-   if (!fp)
-   {
-      unlink(tmppath);
-      snprintf(errbuf, errlen, "popen failed for: %s", full_cmd);
-      return NULL;
-   }
-
-   char *out = malloc(CE_OUTBUF);
-   if (!out)
-   {
-      pclose(fp);
-      unlink(tmppath);
-      snprintf(errbuf, errlen, "out of memory");
-      return NULL;
-   }
-
-   size_t total = 0;
-   size_t n;
-   while ((n = fread(out + total, 1, CE_OUTBUF - total - 1, fp)) > 0)
-   {
-      total += n;
-      if (total >= CE_OUTBUF - 1)
-         break;
-   }
-   out[total] = '\0';
-   int rc = pclose(fp);
-   unlink(tmppath);
-
-   if (rc != 0)
-   {
-      snprintf(errbuf, errlen, "sidecar exited %d", rc);
-      free(out);
-      return NULL;
-   }
-
-   return out;
 }
 
 /* Resolve sidecar command: use opts->extract_command if set, else find
@@ -400,11 +346,18 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
    char cmd[768];
    ce_resolve_command(opts, cmd, sizeof(cmd));
 
-   aimee_log(LOG_INFO, "kb.curator.extract", "invoking sidecar for doc %lld: %s",
+   /* Route through the §2 dispatch: a configured Tier-A provider (incl. the
+    * bundled-Gemma LLM_ENDPOINT env) runs in-process via provider_client; else
+    * the resolved sidecar command. extract_docs is Tier-A. */
+   config_t cfg;
+   config_load(&cfg);
+
+   aimee_log(LOG_INFO, "kb.curator.extract", "invoking curator LLM for doc %lld (cmd fallback: %s)",
              (long long)job.document_id, cmd);
 
    char sidecar_err[512] = "";
-   char *resp_str = ce_invoke_sidecar(cmd, req_str, sidecar_err, sizeof(sidecar_err));
+   char *resp_str = kb_curator_llm_run(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, CE_SYSTEM_PROMPT,
+                                       req_str, cmd, CE_OUTBUF, sidecar_err, sizeof(sidecar_err));
    free(req_str);
 
    if (!resp_str)
