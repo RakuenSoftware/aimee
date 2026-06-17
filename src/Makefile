@@ -1003,13 +1003,14 @@ proposal-links-check:
 	@python3 ../scripts/check-proposal-links.py
 
 # Regenerate the day-one client SDKs (api/sdks/<lang>/) from the OpenAPI spec.
-# Self-bootstrapping (portable JRE + openapi-generator); output is committed
-# and regeneration on an unchanged spec is a byte-for-byte no-op.
+# Self-bootstrapping (portable JRE + openapi-generator); output is gitignored and
+# regenerated on demand / in CI (see .github/workflows/sdk-gen.yml), not committed.
 gen-sdks:
 	@../scripts/gen-sdks.sh
 
-# CI gate: every operation in api/openapi-v1.yaml is covered by every committed
-# SDK under api/sdks/. Pure-python; does not require the generator toolchain.
+# Parity gate: every operation in api/openapi-v1.yaml is covered by every generated
+# SDK under api/sdks/. Pure-python; runs in the SDK-gen CI workflow after gen-sdks
+# (the SDKs are no longer committed, so this is not part of the fast `lint` target).
 sdk-parity-check:
 	@python3 ../scripts/check-sdk-parity.py
 	@python3 ../scripts/check-sdk-parity.py --plant-test
@@ -1054,7 +1055,7 @@ clean:
 # you genuinely need a different binary.
 CLANG_FORMAT ?= clang-format-19
 
-lint: line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check kb-intelligence-surfaced-check sdk-parity-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check
+lint: line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check
 
 # Structural guard for the code-vector-graph fusion eval corpus + ablation
 # matrix (>=100 queries, all categories, well-formed; baseline+full_fusion arms).

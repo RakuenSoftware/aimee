@@ -1,0 +1,41 @@
+name: SDK gen
+
+# Client SDKs (api/sdks/<lang>) are generated from api/openapi-v1.yaml and are
+# NOT committed (see docs/PUBLIC_API.md). This workflow regenerates them and runs
+# the parity gate so a spec change that breaks SDK generation/coverage is caught.
+# It only runs when the spec or its generator tooling changes (the generator
+# downloads a JRE + openapi-generator jar, which is too heavy for every PR).
+
+on:
+  pull_request:
+    branches: [main, testing]
+    paths:
+      - api/openapi-v1.yaml
+      - scripts/gen-sdks.sh
+      - scripts/check-sdk-parity.py
+      - .github/workflows/sdk-gen.yml
+  workflow_dispatch:
+
+concurrency:
+  group: sdk-gen-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gen-sdks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Runner diagnostics
+        run: |
+          echo "::group::Runner environment"
+          echo "ref: $GITHUB_REF  sha: $GITHUB_SHA  runner: $RUNNER_OS $RUNNER_ARCH"
+          java -version 2>&1 | head -1 || true
+          df -h / | tail -1
+          echo "::endgroup::"
+      - name: Generate SDKs from the spec
+        # gen-sdks.sh is self-bootstrapping: uses a system java if present,
+        # otherwise downloads a portable Temurin JRE + the pinned generator jar.
+        run: cd src && make gen-sdks
+      - name: SDK parity gate
+        # Every spec operationId must be covered by every generated SDK.
+        run: cd src && make sdk-parity-check

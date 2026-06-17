@@ -100,3 +100,6 @@ Dockerfile.local
 aimee-kb-bin
 src/kb/http/openapi_data.h
 src/server/openapi_server_data.h
+# Generated client SDKs: produced from api/openapi-v1.yaml by scripts/gen-sdks.sh,
+# regenerated on demand / in CI rather than committed (see docs/PUBLIC_API.md).
+/api/sdks/
