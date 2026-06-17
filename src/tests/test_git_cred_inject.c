@@ -3,6 +3,7 @@
  * autonomously from the sealed vault, with any inherited GH_TOKEN dropped. */
 #include "git_cred_inject.h"
 #include "git_forge_vault.h"
+#include "git_ssh_agent.h"
 #include "vault_kek_cache.h"
 #include "vault_service.h"
 
@@ -89,6 +90,43 @@ int main(void)
 
    /* Empty / NULL principal -> NULL (no leak). */
    assert(git_cred_inject_build_env("", parent) == NULL);
+
+   /* SSH integration (WP-C2): a vaulted SSH key adds SSH_AUTH_SOCK to the env
+    * (the in-memory agent). Guarded on openssh tooling. */
+   if (system("command -v ssh-agent >/dev/null 2>&1 && command -v ssh-add >/dev/null 2>&1 && "
+              "command -v ssh-keygen >/dev/null 2>&1") == 0)
+   {
+      char rt[300];
+      snprintf(rt, sizeof(rt), "/dev/shm/aimee-gci-rt-%d", (int)getpid());
+      setenv("AIMEE_RUNTIME_DIR", rt, 1);
+      char kf[400], kgen[700];
+      snprintf(kf, sizeof(kf), "%s/k", home);
+      snprintf(kgen, sizeof(kgen), "ssh-keygen -q -t ed25519 -N '' -f %s && cat %s", kf, kf);
+      FILE *p = popen(kgen, "r");
+      assert(p);
+      char keybuf[16384];
+      size_t kl = fread(keybuf, 1, sizeof(keybuf) - 1, p);
+      keybuf[kl] = '\0';
+      pclose(p);
+      /* re-unlock (the earlier cache clear locked alice's vault) before storing */
+      const uint8_t apw2[] = "alice-pw";
+      assert(vault_service_unlock_password(alice, ATTEST_WEBCHAT_TRUSTED, apw2, sizeof(apw2) - 1,
+                                           T0) == VAULT_OK);
+      assert(vault_service_set(alice, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED, keybuf, T0) ==
+             VAULT_OK);
+      char **se = git_cred_inject_build_env(alice, parent);
+      assert(se != NULL);
+      const char *sock = env_val(se, "SSH_AUTH_SOCK", &n);
+      assert(n == 1 && sock && sock[0] == '/'); /* agent socket present */
+      /* the HTTPS token is still injected alongside */
+      assert(env_val(se, "GH_TOKEN", &n) && n == 1);
+      git_cred_inject_free_env(se);
+      git_ssh_agent_stop(alice);
+      char rmrt[400];
+      snprintf(rmrt, sizeof(rmrt), "rm -rf %s", rt);
+      assert(system(rmrt) == 0);
+      unsetenv("AIMEE_RUNTIME_DIR");
+   }
 
    char clean[320];
    snprintf(clean, sizeof(clean), "rm -rf %s", home);
