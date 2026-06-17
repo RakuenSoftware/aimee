@@ -22,10 +22,12 @@ option(WITH_PAM "Enable PAM authentication support" ON)
 option(WITH_LIBSECRET "Enable libsecret integration" ON)
 option(WITH_UI "Enable embedded dashboard UI" OFF)
 option(WITH_TLS "Enable in-client TLS for https:// remote aimee-servers" ON)
-if(WIN32)
-    # MinGW thin client has no OpenSSL; https:// is refused there.
-    set(WITH_TLS OFF CACHE BOOL "Enable in-client TLS" FORCE)
-endif()
+# TLS backend by platform (all behind the same 4-function aimee_tls.h interface):
+#   Linux   -> OpenSSL    (aimee_tls.c)
+#   macOS   -> Secure Transport (aimee_tls_securetransport.c) — universal-safe, Keychain trust
+#   Windows -> Schannel/SSPI    (aimee_tls_schannel.c)        — no OpenSSL, Windows cert store
+# Each uses the OS trust store, so the single-binary thin client needs no bundled
+# CA bundle and no external TLS library.
 option(AIMEE_LEAN "Lean build profile: size-optimized, no UI" OFF)
 # Thin-client-only profile: configure and build ONLY the `aimee` CLI target,
 # skipping aimee-server / aimee-kb / aimee-gateway / aimee-webchat and the test
@@ -1197,10 +1199,27 @@ if(WIN32)
     set_target_properties(aimee PROPERTIES INTERPROCEDURAL_OPTIMIZATION FALSE)
 endif()
 if(WITH_TLS)
-    find_package(OpenSSL REQUIRED)
-    target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/aimee_tls.c)
     target_compile_definitions(aimee PRIVATE WITH_TLS)
-    target_link_libraries(aimee PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    if(APPLE)
+        # macOS: Secure Transport (system frameworks; universal-binary safe; Keychain
+        # trust). Deprecated since 10.15 -> silence the deprecation warning for THIS
+        # TU only (the build is -Werror); never globally.
+        target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/aimee_tls_securetransport.c)
+        set_source_files_properties(${AIMEE_SRC_DIR}/aimee_tls_securetransport.c
+            PROPERTIES COMPILE_OPTIONS "-Wno-deprecated-declarations")
+        find_library(SECURITY_FRAMEWORK Security REQUIRED)
+        find_library(COREFOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
+        target_link_libraries(aimee PRIVATE ${SECURITY_FRAMEWORK} ${COREFOUNDATION_FRAMEWORK})
+    elseif(WIN32)
+        # Windows: Schannel/SSPI (no OpenSSL; Windows certificate store).
+        target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/aimee_tls_schannel.c)
+        target_link_libraries(aimee PRIVATE secur32 crypt32)
+    else()
+        # Linux/other POSIX: OpenSSL.
+        find_package(OpenSSL REQUIRED)
+        target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/aimee_tls.c)
+        target_link_libraries(aimee PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    endif()
 endif()
 
 # aimee-webchat (Go) and aimee-gateway are full-build-only components; the
