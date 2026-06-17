@@ -1024,6 +1024,9 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/vault/list", NULL, RM_EXACT, "vault.list", 0, rh_dispatch_op},
     {"POST", "/v1/vault/delete", NULL, RM_EXACT, "vault.delete", 0, rh_dispatch_op},
     {"POST", "/v1/vault/lock", NULL, RM_EXACT, "vault.lock", 0, rh_dispatch_op},
+    {"POST", "/v1/cert/issue", NULL, RM_EXACT, "cert.issue", 0, rh_dispatch_op},
+    {"POST", "/v1/cert/list", NULL, RM_EXACT, "cert.list", 0, rh_dispatch_op},
+    {"POST", "/v1/cert/revoke", NULL, RM_EXACT, "cert.revoke", 0, rh_dispatch_op},
     /* Background-only over /v1: the thin client forces `background` (returns a
      * job_id to poll via the /v1/jobs routes); a foreground delegate streams and
      * would tie up a listener thread, so remote callers use background mode. */

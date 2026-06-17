@@ -285,6 +285,9 @@ static const struct
     {"vault", "list", "vault.list", NULL, "credentials", 0},
     {"vault", "delete", "vault.delete", NULL, NULL, 0},
     {"vault", "lock", "vault.lock", NULL, NULL, 0},
+    {"cert", "issue", "cert.issue", NULL, NULL, 0},
+    {"cert", "list", "cert.list", NULL, "certs", 0},
+    {"cert", "revoke", "cert.revoke", NULL, NULL, 0},
     {"episode", "list", "episode.list", NULL, "episodes", 0},
     {"trigger", "list", "trigger.list", NULL, "triggers", 0},
     {"trigger", "status", "trigger.status", NULL, NULL, 0},
@@ -3137,6 +3140,31 @@ static cJSON *marshal_vault_delete(int argc, char **argv)
    return req;
 }
 
+/* `aimee cert issue <cn> [--days N]` */
+static cJSON *marshal_cert_issue(int argc, char **argv)
+{
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("cert.issue");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "cn", opts.positional[0]);
+   const char *days = rpc_get(&opts, "days");
+   if (days && days[0])
+      cJSON_AddNumberToObject(req, "days", atoi(days));
+   return req;
+}
+
+/* `aimee cert revoke <serial>` */
+static cJSON *marshal_cert_revoke(int argc, char **argv)
+{
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("cert.revoke");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "serial", opts.positional[0]);
+   return req;
+}
+
 static cJSON *marshal_request(const char *method, int argc, char **argv)
 {
    if (strcmp(method, "init.run") == 0)
@@ -3168,6 +3196,12 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
    if (strcmp(method, "vault.list") == 0)
       return marshal_no_args(method);
    if (strcmp(method, "vault.lock") == 0)
+      return marshal_no_args(method);
+   if (strcmp(method, "cert.issue") == 0)
+      return marshal_cert_issue(argc, argv);
+   if (strcmp(method, "cert.revoke") == 0)
+      return marshal_cert_revoke(argc, argv);
+   if (strcmp(method, "cert.list") == 0)
       return marshal_no_args(method);
    if (strcmp(method, "delegate.backend_exec") == 0)
       return marshal_delegate_backend_exec(argc, argv);

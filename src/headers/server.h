@@ -397,6 +397,10 @@ int handle_vault_capability(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_vault_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_vault_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_vault_lock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* mTLS client-cert lifecycle (server_cert.c) */
+int handle_cert_issue(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_cert_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_cert_revoke(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_jobs_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_jobs_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_jobs_logs(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

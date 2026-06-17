@@ -467,3 +467,31 @@ int pki_is_revoked(const char *serial)
    pthread_mutex_unlock(&g_mu);
    return revoked;
 }
+
+int pki_list(void (*cb)(void *ctx, const char *serial, const char *cn, long issued_at,
+                        long expires_at, int revoked),
+             void *ctx)
+{
+   if (!cb)
+      return -1;
+   db_ensure_tables();
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(
+           db,
+           "SELECT serial,cn,issued_at,expires_at,revoked FROM pki_certs ORDER BY issued_at DESC",
+           -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   int n = 0;
+   while (sqlite3_step(st) == SQLITE_ROW)
+   {
+      cb(ctx, (const char *)sqlite3_column_text(st, 0), (const char *)sqlite3_column_text(st, 1),
+         (long)sqlite3_column_int64(st, 2), (long)sqlite3_column_int64(st, 3),
+         sqlite3_column_int(st, 4));
+      n++;
+   }
+   sqlite3_finalize(st);
+   return n;
+}
