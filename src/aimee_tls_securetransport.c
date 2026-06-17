@@ -19,9 +19,13 @@
  *   - the opaque handle owns the TLS state; aimee_tls_free does NOT close the fd.
  */
 #include "aimee_tls.h"
+#include "aimee_home.h"
 
+#include <CoreFoundation/CoreFoundation.h>
+#include <Security/SecImportExport.h>
 #include <Security/SecureTransport.h>
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -89,6 +93,88 @@ static OSStatus st_write(SSLConnectionRef conn, const void *data, size_t *len)
    return rc;
 }
 
+/* Load the client identity for mTLS from <aimee_home>/tls/client.p12.
+ *
+ * Secure Transport's SSLSetCertificate wants a CFArray whose first element is a
+ * SecIdentityRef (cert + private key). The keychain-free, version-stable way to
+ * obtain one from on-disk material is SecPKCS12Import — so the macOS backend
+ * reads a PKCS#12 bundle (export the PEM client.{crt,key} the other backends use
+ * via `openssl pkcs12 -export -inkey client.key -in client.crt -out client.p12`).
+ * An empty passphrase is used unless AIMEE_TLS_CLIENT_P12_PASS is set. Returns a
+ * retained CFArrayRef [identity] (caller releases after SSLSetCertificate), or
+ * NULL when no identity is configured / import fails. */
+static CFArrayRef securetransport_load_client_identity(void)
+{
+   const char *home = aimee_home();
+   if (!home || !*home)
+      return NULL;
+   char path[600];
+   snprintf(path, sizeof(path), "%s/tls/client.p12", home);
+
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return NULL; /* no client-cert material configured */
+   if (fseek(f, 0, SEEK_END) != 0)
+   {
+      fclose(f);
+      return NULL;
+   }
+   long sz = ftell(f);
+   if (sz <= 0 || sz > (1 << 20) || fseek(f, 0, SEEK_SET) != 0)
+   {
+      fclose(f);
+      return NULL;
+   }
+   unsigned char *buf = malloc((size_t)sz);
+   if (!buf)
+   {
+      fclose(f);
+      return NULL;
+   }
+   size_t rd = fread(buf, 1, (size_t)sz, f);
+   fclose(f);
+   if (rd != (size_t)sz)
+   {
+      free(buf);
+      return NULL;
+   }
+
+   CFArrayRef result = NULL;
+   CFDataRef data = CFDataCreate(NULL, buf, sz);
+   memset(buf, 0, (size_t)sz); /* the PKCS#12 holds the private key */
+   free(buf);
+   if (!data)
+      return NULL;
+
+   const char *passenv = getenv("AIMEE_TLS_CLIENT_P12_PASS");
+   CFStringRef pass =
+       CFStringCreateWithCString(NULL, passenv ? passenv : "", kCFStringEncodingUTF8);
+   const void *keys[] = {kSecImportExportPassphrase};
+   const void *vals[] = {pass};
+   CFDictionaryRef opts = CFDictionaryCreate(NULL, keys, vals, 1, &kCFTypeDictionaryKeyCallBacks,
+                                             &kCFTypeDictionaryValueCallBacks);
+   CFArrayRef items = NULL;
+   OSStatus st = (opts ? SecPKCS12Import(data, opts, &items) : errSecParam);
+   if (st == errSecSuccess && items && CFArrayGetCount(items) > 0)
+   {
+      CFDictionaryRef item = CFArrayGetValueAtIndex(items, 0);
+      SecIdentityRef ident = (SecIdentityRef)CFDictionaryGetValue(item, kSecImportItemIdentity);
+      if (ident)
+      {
+         const void *certs[] = {ident};
+         result = CFArrayCreate(NULL, certs, 1, &kCFTypeArrayCallBacks);
+      }
+   }
+   if (items)
+      CFRelease(items);
+   if (opts)
+      CFRelease(opts);
+   if (pass)
+      CFRelease(pass);
+   CFRelease(data);
+   return result;
+}
+
 aimee_tls_t *aimee_tls_connect(int fd, const char *host)
 {
    aimee_tls_t *t = calloc(1, sizeof(*t));
@@ -102,11 +188,16 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
       free(t);
       return NULL;
    }
-   /* mTLS client-cert presentation (slice 3b, follow-up): to present
-    * <aimee_home>/tls/client.{crt,key} as this client's identity, build a
-    * SecIdentityRef from the PEM (SecPKCS12Import / SecItem) and pass it to
-    * SSLSetCertificate here. Deferred: identity construction must be validated
-    * on real macOS. The OpenSSL backend presents the cert today. */
+   /* mTLS client-cert presentation: if <aimee_home>/tls/client.p12 holds an
+    * identity, present it so the server can identify this client as a distinct
+    * cert:<CN> principal. Absent => plain client TLS. SSLSetCertificate copies
+    * the array contents, so we release our reference immediately after. */
+   CFArrayRef client_identity = securetransport_load_client_identity();
+   if (client_identity)
+   {
+      SSLSetCertificate(t->ctx, client_identity);
+      CFRelease(client_identity);
+   }
    if (SSLSetIOFuncs(t->ctx, st_read, st_write) != noErr ||
        SSLSetConnection(t->ctx, &t->fd) != noErr ||
        SSLSetProtocolVersionMin(t->ctx, kTLSProtocol12) != noErr)
