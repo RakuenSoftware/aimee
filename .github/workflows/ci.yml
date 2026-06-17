@@ -319,11 +319,15 @@ jobs:
           openssl req -new -key "$H/tls/client.key" -subj "/CN=ci-macos-client" -out "$D/c.csr"
           openssl x509 -req -in "$D/c.csr" -CA "$D/ca.crt" -CAkey "$D/ca.key" \
             -CAcreateserial -days 1 -out "$H/tls/client.crt"
+          # macOS SecPKCS12Import REQUIRES a non-empty passphrase (an empty one
+          # fails errSecAuthFailed -25293), so the .p12 is passphrase-protected
+          # and aimee reads it from AIMEE_TLS_CLIENT_P12_PASS.
+          P12PASS='aimee-ci-p12'
           openssl pkcs12 -export -inkey "$H/tls/client.key" -in "$H/tls/client.crt" \
-            -out "$H/tls/client.p12" -passout pass:
+            -out "$H/tls/client.p12" -passout "pass:$P12PASS"
           echo "::group::diagnostics"
           openssl version
-          openssl pkcs12 -info -in "$H/tls/client.p12" -passin pass: -noout -nokeys 2>&1 | head -20 || true
+          openssl pkcs12 -info -in "$H/tls/client.p12" -passin "pass:$P12PASS" -noout -nokeys 2>&1 | head -20 || true
           echo "::endgroup::"
           # s_server REQUIRES a client cert (-Verify) and serves a status page.
           openssl s_server -accept 14443 -cert "$D/srv.crt" -key "$D/srv.key" \
@@ -335,7 +339,7 @@ jobs:
           # handshake is what we are validating. AIMEE_TLS_DEBUG surfaces which
           # Secure Transport step fails (to stderr) if the cert is not presented.
           echo "::group::aimee output"
-          AIMEE_HOME="$H" AIMEE_TLS_INSECURE=1 AIMEE_TLS_DEBUG=1 \
+          AIMEE_HOME="$H" AIMEE_TLS_INSECURE=1 AIMEE_TLS_DEBUG=1 AIMEE_TLS_CLIENT_P12_PASS="$P12PASS" \
             ./build/aimee --server https://127.0.0.1:14443 config show 2>&1 || true
           echo "::endgroup::"
           sleep 1; kill "$SRV" 2>/dev/null || true; wait "$SRV" 2>/dev/null || true
