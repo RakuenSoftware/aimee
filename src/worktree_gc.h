@@ -50,7 +50,10 @@ int worktree_gc_scan(const char *git_root, const worktree_gc_options_t *opts,
                      worktree_gc_candidate_t *out, int max_out);
 
 /* Remove every eligible candidate via the existing `worktree_cleanup`
- * primitive (which itself refuses on uncommitted / unpushed work).
+ * primitive (which itself refuses on uncommitted / unpushed work). For a
+ * candidate that was fully merged (0 commits ahead of base), its now-orphaned
+ * branch is deleted too, so merged branches don't accumulate; a candidate
+ * removed only under `--force` (commits ahead) keeps its branch.
  * Returns the count actually removed. When `opts->dry_run` is set,
  * returns the count that would be removed without touching anything. */
 int worktree_gc_apply(const char *git_root, const worktree_gc_candidate_t *cands, int n,

@@ -258,11 +258,41 @@ int worktree_gc_scan(const char *git_root, const worktree_gc_options_t *opts,
    return count;
 }
 
+/* After a merged worktree is removed, delete its branch too — leaving merged
+ * branches behind is what lets `git branch` accumulate hundreds of dead refs.
+ * Only called for candidates with 0 commits ahead of base, so `-D` discards
+ * nothing. Refuses the base branch, obvious protected names, a detached-HEAD
+ * sentinel, and any name unsafe to interpolate into a shell command. */
+static void worktree_gc_delete_branch(const char *git_root, const char *branch,
+                                      const char *base_branch)
+{
+   if (!branch || !branch[0])
+      return;
+   if (strcmp(branch, "HEAD") == 0 || strcmp(branch, "main") == 0 ||
+       strcmp(branch, "master") == 0 || strcmp(branch, "trunk") == 0)
+      return;
+   if (base_branch && base_branch[0] && strcmp(branch, base_branch) == 0)
+      return;
+   if (branch[0] == '-' || strchr(branch, '\'') != NULL)
+      return;
+
+   char cmd[MAX_PATH_LEN + 256];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' branch -D '%s' 2>&1", git_root, branch);
+   int rc;
+   char *o = run_cmd(cmd, &rc);
+   if (rc == 0)
+      LOG_INFO("worktree_gc", "deleted merged branch '%s'", branch);
+   free(o);
+}
+
 int worktree_gc_apply(const char *git_root, const worktree_gc_candidate_t *cands, int n,
                       const worktree_gc_options_t *opts)
 {
    if (!git_root || !cands || !opts || n <= 0)
       return 0;
+
+   char base_branch[WORKTREE_GC_BRANCH_LEN];
+   detect_base_branch(git_root, base_branch, sizeof(base_branch));
 
    int removed = 0;
    for (int i = 0; i < n; i++)
@@ -307,7 +337,15 @@ int worktree_gc_apply(const char *git_root, const worktree_gc_candidate_t *cands
        * the directory is gone afterwards. */
       struct stat st;
       if (stat(c->path, &st) != 0)
+      {
          removed++;
+         /* The worktree is gone and merged (0 commits ahead of base, so
+          * nothing is lost) — delete its now-orphaned branch as well. A
+          * candidate removed only because of --force (commits ahead) keeps
+          * its branch. */
+         if (c->commits_ahead == 0)
+            worktree_gc_delete_branch(git_root, c->branch, base_branch);
+      }
    }
    return removed;
 }
