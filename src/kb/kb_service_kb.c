@@ -6,6 +6,7 @@
 #include "cJSON.h"
 #include "config.h"
 #include "kb_curator_queue.h"
+#include "kb_curator_provider.h"
 #include "json_fluent.h"
 #include "db2/canonical_index.h"
 #include "db2/kb_maintenance.h"
@@ -222,6 +223,42 @@ char *kb_service_ingest_status_json(void)
    return json;
 }
 
+/* Add a per-tier provider sub-object {configured, base_url, model} (no api_key). */
+static void kb_health_add_curator_tier(cJSON *curator, const char *key, const config_t *cfg,
+                                       kb_curator_stage_t stage)
+{
+   cJSON *t = cJSON_AddObjectToObject(curator, key);
+   if (!t)
+      return;
+   provider_def_t def;
+   int configured = kb_curator_provider_for_stage(cfg, stage, &def);
+   cJSON_AddBoolToObject(t, "configured", configured);
+   cJSON_AddStringToObject(t, "base_url", configured && def.base_url ? def.base_url : "");
+   cJSON_AddStringToObject(t, "model", configured && def.model ? def.model : "");
+}
+
+/* Curator observability block for /v1/health (§4): which tiers have a provider
+ * (Tier-A extract/index, Tier-B reason/judge) and the curator queue depth. */
+static void kb_health_add_curator(cJSON *resp, const config_t *cfg)
+{
+   cJSON *curator = cJSON_AddObjectToObject(resp, "curator");
+   if (!curator)
+      return;
+   kb_health_add_curator_tier(curator, "tier_a", cfg, KB_CURATOR_STAGE_EXTRACT_DOCS);
+   kb_health_add_curator_tier(curator, "tier_b", cfg, KB_CURATOR_STAGE_JUDGE);
+
+   kb_curator_queue_counts_t qc;
+   kb_curator_queue_counts(&qc);
+   cJSON *q = cJSON_AddObjectToObject(curator, "queue");
+   if (q)
+   {
+      cJSON_AddNumberToObject(q, "extract_pending", qc.extract_pending);
+      cJSON_AddNumberToObject(q, "extract_done", qc.extract_done);
+      cJSON_AddNumberToObject(q, "code_unit_pending", qc.code_unit_pending);
+      cJSON_AddNumberToObject(q, "code_unit_done", qc.code_unit_done);
+   }
+}
+
 static cJSON *kb_service_health_object(void)
 {
    cJSON *resp = cJSON_CreateObject();
@@ -270,6 +307,13 @@ static cJSON *kb_service_health_object(void)
    cJSON_AddBoolToObject(resp, "embed_ok", embed_ok);
    cJSON_AddStringToObject(resp, "embed_command",
                            cfg.embedding_command[0] ? cfg.embedding_command : "builtin");
+
+   /* Curator (§4 observability): per-tier provider config + queue depth. The
+    * live four-state reachability probe (ready/loading/gated/down) is deferred to
+    * a follow-up — it needs a bounded async probe so the health path never blocks,
+    * and the gated state needs a custom curator /health (the bundled official
+    * llama.cpp doesn't expose it). api_key is never surfaced. */
+   kb_health_add_curator(resp, &cfg);
 
    /* Freshness: read last_ingest_at from kb_runtime_state */
    char last_ingest_at[64] = "";
