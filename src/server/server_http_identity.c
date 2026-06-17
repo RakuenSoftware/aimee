@@ -108,6 +108,11 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
                                           cert_cn, tl_principal, sizeof(tl_principal));
 }
 
+const char *server_http_identity_principal(void)
+{
+   return tl_principal;
+}
+
 void server_http_identity_apply(server_conn_t *conn)
 {
    if (!conn)

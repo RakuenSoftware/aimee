@@ -40,6 +40,12 @@
  * — NOT the configured TCP /v1 bearer, which is an independent secret. */
 void server_http_identity_capture(int fd, int is_tcp, const char *buf);
 
+/* The captured vault principal for the in-flight request (empty if un-attested),
+ * for buffered route handlers that need the caller identity without synthesizing
+ * a conn (e.g. the webchat-git /v1/workspace/clone route). Valid only between
+ * capture and clear, i.e. during a route handler on the serving thread. */
+const char *server_http_identity_principal(void);
+
 /* Copy the captured identity onto a (synthesized) connection — loopback_rpc's
  * hop 2. Safe to call with no prior capture: writes the un-attested defaults. */
 void server_http_identity_apply(server_conn_t *conn);

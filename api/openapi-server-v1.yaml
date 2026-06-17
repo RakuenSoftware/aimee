@@ -3521,6 +3521,47 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workspace/clone:
+    post:
+      summary: Clone a git repo as a project under the calling webchat user's workspace
+      description: >
+        Clone `url` as a project under the authenticated `webuser:` principal's
+        isolated workspace (`webusers/<name>/<project>`). The caller identity
+        comes from the server.token-gated `X-Aimee-Webuser` assertion, NOT the
+        body, so a user can only clone into their own tree. Git credentials are
+        injected from the user's sealed vault (GH_TOKEN + a GIT_ASKPASS shim) —
+        never accepted in the body, never on disk. The project is then indexed.
+        Capability: tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, description: Git remote URL (https or ssh) }
+                name: { type: string, description: Project name (default - the repo basename) }
+      responses:
+        "200":
+          description: Cloned and indexed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  name: { type: string }
+        "400":
+          description: Invalid URL/name, or the project already exists
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /runner/poll:
     post:
       summary: Poll for the next detached-workspace op to execute (reverse channel)
