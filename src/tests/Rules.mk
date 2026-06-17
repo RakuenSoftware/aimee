@@ -222,6 +222,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-webchat-git-leak \
                $(TESTPREFIX)/unit-test-git-project \
                $(TESTPREFIX)/unit-test-git-ops \
+               $(TESTPREFIX)/unit-test-webuser-editor \
                $(TESTPREFIX)/unit-test-vault-bootstrap \
                $(TESTPREFIX)/unit-test-pki \
                $(TESTPREFIX)/unit-test-aimee-tls-clientcert \
@@ -2182,6 +2183,17 @@ $(TESTPREFIX)/unit-test-git-ssh-agent: $(OBJDIR)/tests/test_git_ssh_agent.o \
 
 $(TESTPREFIX)/unit-test-git-cred-inject: $(OBJDIR)/tests/test_git_cred_inject.o \
                               $(OBJDIR)/server/git_cred_inject.o $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o $(OBJDIR)/server/workspace_scope.o $(OBJDIR)/server/git_forge_vault.o \
+                              $(OBJDIR)/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
+                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
+                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
+                              $(OBJDIR)/server/vault_server_key.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-webuser-editor: $(OBJDIR)/tests/test_webuser_editor.o \
+                              $(OBJDIR)/server/webuser_editor.o $(OBJDIR)/server/git_cred_inject.o \
+                              $(OBJDIR)/server/git_ssh_agent.o $(OBJDIR)/server/webuser_runtime.o \
+                              $(OBJDIR)/server/workspace_scope.o $(OBJDIR)/server/git_forge_vault.o \
                               $(OBJDIR)/forge_credentials.o $(OBJDIR)/config.o $(OBJDIR)/aimee_home.o \
                               $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
                               $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \

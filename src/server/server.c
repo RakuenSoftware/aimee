@@ -21,7 +21,8 @@
 #include "server_pipeline.h" /* roundtable authoring pipeline (pipeline.*) */
 #include "commands.h"
 #include "agent.h"
-#include "agent_exec.h" /* agent_audit_async_flush — drain audit queue at shutdown */
+#include "agent_exec.h"     /* agent_audit_async_flush — drain audit queue at shutdown */
+#include "webuser_editor.h" /* webuser_editor_shutdown — reap editors at shutdown (WP-I) */
 #include "agent_config.h"
 #include "provider_catalog.h"
 #include "delegate_credentials.h"
@@ -1708,6 +1709,8 @@ void server_shutdown(server_ctx_t *ctx)
    trigger_scheduler_shutdown();
    server_delegate_monitor_shutdown();
    server_coord_dispatcher_shutdown();
+   /* Reap any per-webuser code-server editors so they don't outlive us (WP-I). */
+   webuser_editor_shutdown();
    /* Drain request handlers while compute/async lanes are still available for
     * any RPCs they dispatched. */
    server_request_pool_shutdown(ctx);
