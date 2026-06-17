@@ -74,6 +74,31 @@ int main(void)
    char fpath[320];
    snprintf(fpath, sizeof(fpath), "%s/q.bin", dir);
 
+   /* No serving runner: a detached workspace whose client never shows up must
+    * fail the transport fast (pickup timeout) rather than deadlock the caller.
+    * This is the delegate-wedge regression: a backgrounded delegate bound to a
+    * detached workspace with no client used to block forever here. */
+   {
+      ws_runner_queue_t nq;
+      ws_runner_queue_init(&nq);
+      nq.pickup_timeout_ms = 100; /* short deadline so the test is quick */
+      ws_detached_provider_t ndp;
+      ws_detached_provider_init_ex(&ndp, ws_runner_queue_transport,
+                                   ws_runner_queue_transport_stream, &nq);
+      const workspace_provider_t *nws = &ndp.base;
+      /* Nothing polls nq, so no runner claims the op -> fail fast, no hang. */
+      char *nout = NULL;
+      size_t nlen = 0;
+      assert(nws->read_all(nws, "/nonexistent", &nout, &nlen) == -1);
+      assert(nout == NULL);
+      /* The streaming transport must fail fast with no runner too. */
+      const char *sargv[] = {"echo", "x", NULL};
+      chunk_collector_t cc = {0};
+      assert(nws->exec_stream(nws, sargv, NULL, 0, "/tmp", collect_chunk, &cc) != 0);
+      free(cc.buf);
+      ws_runner_queue_destroy(&nq);
+   }
+
    ws_runner_queue_init(&g_q);
    pthread_t th;
    assert(pthread_create(&th, NULL, runner_thread, NULL) == 0);

@@ -36,6 +36,7 @@ typedef struct
 {
    pthread_mutex_t mu;
    pthread_cond_t req_cv;            /* signalled when a request is posted (for the runner) */
+   pthread_cond_t req_taken_cv;      /* signalled when the runner claims the request (pickup) */
    pthread_cond_t resp_cv;           /* signalled when a response is posted (for the requester) */
    pthread_cond_t idle_cv;           /* signalled when the in-flight slot frees (single-flight) */
    struct cJSON *req;                /* pending request; queue owns until poll takes it */
@@ -44,6 +45,14 @@ typedef struct
    int has_req;
    int busy;   /* a request cycle is in flight */
    int closed; /* close() called — wake everyone, fail pending */
+   /* Max ms to wait for a runner to *claim* a posted request before giving up.
+    * Guards against a detached workspace with no serving client (e.g. a
+    * backgrounded delegate whose client has disconnected): without it the
+    * transport would block forever and wedge the calling turn. <= 0 selects the
+    * built-in default. Only the pickup is bounded — once a runner claims the
+    * op the response wait stays unbounded, so legit long client commands still
+    * run to completion. */
+   int pickup_timeout_ms;
 } ws_runner_queue_t;
 
 /* Streaming partial callback: invoked (NOT under the queue lock) with each
