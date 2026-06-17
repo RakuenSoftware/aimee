@@ -32,8 +32,10 @@ int main(void)
    assert(!ws_scope_name_valid("a\tb"));
    /* length boundary: 64 ok, 65 rejected */
    char n64[65], n65[66];
-   memset(n64, 'a', 64); n64[64] = '\0';
-   memset(n65, 'a', 65); n65[65] = '\0';
+   memset(n64, 'a', 64);
+   n64[64] = '\0';
+   memset(n65, 'a', 65);
+   n65[65] = '\0';
    assert(ws_scope_name_valid(n64));
    assert(!ws_scope_name_valid(n65));
 
