@@ -776,7 +776,9 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "typed_facts_enabled", 1);
    if (!cfg->css_style_graph_enabled) /* default-on: persist only the opt-out */
       cJSON_AddBoolToObject(root, "css_style_graph_enabled", 0);
-   if (cfg->css_render_command[0])
+   /* default-on render backend: persist only a non-default value (a custom command
+    * OR an empty string to disable) so both round-trip; the default isn't written. */
+   if (strcmp(cfg->css_render_command, CONFIG_DEFAULT_CSS_RENDER_COMMAND) != 0)
       cJSON_AddStringToObject(root, "css_render_command", cfg->css_render_command);
    if (cfg->kb_evidence_emit_enabled)
       cJSON_AddBoolToObject(root, "kb_evidence_emit_enabled", 1);
