@@ -99,12 +99,12 @@ static int resolve_try_match(const char *scope_kind, const char *scope_id, const
       return 1;
    }
    /* Judge the ambiguous band when there's somewhere to send it: a configured
-    * Tier-B provider (§2) or the legacy judge sidecar command. */
+    * Tier-B provider (§2) or the legacy judge sidecar command. The score check is
+    * first so the provider lookup runs only for an actual ambiguous-band match. */
    provider_def_t judge_provider;
-   int judge_available =
-       cfg->kb_curator_judge_command[0] ||
-       kb_curator_provider_for_stage(cfg, KB_CURATOR_STAGE_JUDGE, &judge_provider);
-   if (match_scores[0] >= CURATOR_ENTITY_JUDGE_LOW && judge_available)
+   if (match_scores[0] >= CURATOR_ENTITY_JUDGE_LOW &&
+       (cfg->kb_curator_judge_command[0] ||
+        kb_curator_provider_for_stage(cfg, KB_CURATOR_STAGE_JUDGE, &judge_provider)))
    {
       char cand_name[256];
       if (pgvec_curator_entity_lookup(match_ids[0], NULL, 0, cand_name, sizeof(cand_name)) == 1)
