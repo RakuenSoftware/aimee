@@ -1340,8 +1340,10 @@ typedef struct config
     * by design; the GC removes ones with no commits ahead of base branch
     * AND idle for `worktree_gc_max_age_days`.
     *
-    * worktree_gc_enabled:        0 = manual only (default), 1 = auto-run at session-start once/day.
-    * worktree_gc_max_age_days:   threshold for "idle"; default 14.
+    * worktree_gc_enabled:        1 = auto-run at session-start once/day (default), 0 = manual only.
+    *                             The AIMEE_WORKTREE_GC env var overrides this either way.
+    * worktree_gc_max_age_days:   threshold for "idle"; default 14. Overridable via
+    *                             AIMEE_WORKTREE_GC_DAYS.
     */
    int worktree_gc_enabled;
    int worktree_gc_max_age_days;

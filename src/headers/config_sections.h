@@ -19,6 +19,7 @@ void config_parse_memory_recall_lanes_section(config_t *cfg, cJSON *root);
 void config_parse_memory_window_section(config_t *cfg, cJSON *root);
 void config_parse_kb_section(config_t *cfg, cJSON *root);
 void config_parse_memory_maintenance_section(config_t *cfg, cJSON *root);
+void config_parse_worktree_gc_section(config_t *cfg, cJSON *root);
 void config_parse_memory_section(config_t *cfg, cJSON *root);
 void config_parse_cross_verify_section(config_t *cfg, cJSON *root);
 void config_parse_retry_section(config_t *cfg, cJSON *root);

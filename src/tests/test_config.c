@@ -59,6 +59,9 @@ int main(void)
       assert(cfg.skills_capability_autostub == 0);
       assert(cfg.skills_eval_gate_enabled == 0);
       assert(fabs(cfg.skills_eval_threshold - 0.01) < 0.0001);
+      /* worktree auto-GC defaults on (once/day at session-start, 14d idle). */
+      assert(cfg.worktree_gc_enabled == 1);
+      assert(cfg.worktree_gc_max_age_days == 14);
       assert(cfg.ingress_max_raw_scans == 0);
       assert(cfg.concurrency_preempt_requeue_max == CONFIG_DEFAULT_CONCURRENCY_PREEMPT_REQUEUE_MAX);
       /* profile-card refresh ran ungated in maintenance before the enable-gate was
@@ -149,6 +152,11 @@ int main(void)
       cfg.skills_capability_autostub = 1;
       cfg.skills_eval_gate_enabled = 1;
       cfg.skills_eval_threshold = 0.25;
+      /* worktree_gc.* — regression: enabled/max_age_days used to be parse/save
+       * gaps, so the documented auto-GC knob was inert. Prove the off state +
+       * non-default age round-trip (default enabled=1 → flip to 0 to test). */
+      cfg.worktree_gc_enabled = 0;
+      cfg.worktree_gc_max_age_days = 21;
       cfg.concurrency_preempt_enabled = 1;
       cfg.concurrency_preempt_single_slot_only = 0;
       cfg.concurrency_preempt_requeue_max = 2;
@@ -324,6 +332,8 @@ int main(void)
       assert(strcmp(cfg2.workspace_providers[2], "mirror") == 0);
       assert(strcmp(cfg2.workspace_vcs_remote[2], "https://example.com/r.git") == 0);
       assert(strcmp(cfg2.workspace_vcs_head[2], "abc123def456") == 0);
+      assert(cfg2.worktree_gc_enabled == 0);
+      assert(cfg2.worktree_gc_max_age_days == 21);
       assert(cfg2.memory_maintenance_trigger_inserts == 7);
       assert(cfg2.memory_maintenance_trigger_secs == 90);
       assert(cfg2.memory_cognify_async_enabled == 1);

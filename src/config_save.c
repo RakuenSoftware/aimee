@@ -515,6 +515,13 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(eval, "gate_enabled", cfg->skills_eval_gate_enabled ? 1 : 0);
       cJSON_AddNumberToObject(eval, "threshold", cfg->skills_eval_threshold);
    }
+   /* worktree_gc defaults: enabled=1, max_age_days=14. Persist only when changed. */
+   if (!cfg->worktree_gc_enabled || cfg->worktree_gc_max_age_days != 14)
+   {
+      cJSON *wt = cJSON_AddObjectToObject(root, "worktree_gc");
+      cJSON_AddBoolToObject(wt, "enabled", cfg->worktree_gc_enabled ? 1 : 0);
+      cJSON_AddNumberToObject(wt, "max_age_days", cfg->worktree_gc_max_age_days);
+   }
    if (cfg->disposition_count > 0 || cfg->disposition_global_count > 0 ||
        cfg->disposition_workspace_count > 0 || cfg->disposition_project_count > 0 ||
        cfg->memory_salience_enabled || cfg->memory_salience_weight > 0.0 ||

@@ -134,7 +134,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `virtual_context_assembly_budget` | int | Token budget for virtual-context assembly. |
 | `virtual_context_enabled` | bool | Enable virtual-context assembly. |
 
-## Config-file sections (48)
+## Config-file sections (49)
 
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
@@ -186,6 +186,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`trigger`** — _Trigger listener (auth, concurrency)._ Keys: `auth_token`, `max_concurrent`
 - **`trigger_rules`** — _Trigger rule definitions (array of objects)._ Keys: `event`, `pipeline`, `schedule`, `source`
 - **`workspaces`** — _Workspace definitions (array of objects)._ Keys: `head`, `path`, `provider`, `remote`
+- **`worktree_gc`** — `enabled`, `max_age_days`
 
 ## Other top-level config-file keys (5)
 

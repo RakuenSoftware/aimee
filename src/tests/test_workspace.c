@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include "aimee.h"
 #include "workspace.h"
+#include "worktree_gc.h"
 #include "platform_test_util.h"
 
 static void remove_tree(const char *path)
@@ -59,6 +60,14 @@ static void write_text_file(const char *path, const char *text)
    assert(f != NULL);
    fputs(text, f);
    fclose(f);
+}
+
+static int branch_exists(const char *repo, const char *name)
+{
+   char cmd[1024];
+   snprintf(cmd, sizeof(cmd),
+            "git -C '%s' rev-parse --verify --quiet 'refs/heads/%s' >/dev/null 2>&1", repo, name);
+   return system(cmd) == 0;
 }
 
 static int file_contains(const char *path, const char *needle)
@@ -586,6 +595,66 @@ int main(void)
       assert(worktree_delegate_work_name("x", NULL, 32) == -1);
       char tiny[4];
       assert(worktree_delegate_work_name("x", tiny, sizeof(tiny)) == -1);
+   }
+
+   /* --- worktree GC deletes the branch of a merged worktree it removes, but
+    *     preserves the branch when a worktree is removed only under --force
+    *     (commits ahead of base). This is what stops merged branches from
+    *     piling up after their worktrees are GC'd. --- */
+   {
+      char repo[512], cmd[2048], path[640], wt[640];
+      snprintf(repo, sizeof(repo), "%s/gc-repo", tmpdir);
+      init_real_git_repo(repo);
+      snprintf(path, sizeof(path), "%s/base.txt", repo);
+      write_text_file(path, "base\n");
+      snprintf(cmd, sizeof(cmd),
+               "git -C '%s' add -A && git -C '%s' commit -q -m base && git -C '%s' branch -M main",
+               repo, repo, repo);
+      assert(system(cmd) == 0);
+
+      /* Merged session worktree: a branch sitting exactly at main (0 ahead). */
+      snprintf(cmd, sizeof(cmd), "mkdir -p '%s/.aimee/worktrees/sessA'", repo);
+      assert(system(cmd) == 0);
+      snprintf(wt, sizeof(wt), "%s/.aimee/worktrees/sessA/main", repo);
+      snprintf(cmd, sizeof(cmd), "git -C '%s' worktree add -q -b feat/merged '%s' main", repo, wt);
+      assert(system(cmd) == 0);
+      assert(branch_exists(repo, "feat/merged"));
+
+      worktree_gc_options_t opts;
+      worktree_gc_options_init(&opts);
+      opts.max_age_days = 0; /* don't gate on idle time in the test */
+      worktree_gc_candidate_t cands[WORKTREE_GC_MAX_CANDIDATES];
+      int n = worktree_gc_scan(repo, &opts, cands, WORKTREE_GC_MAX_CANDIDATES);
+      assert(n == 1);
+      assert(cands[0].eligible == 1);
+      assert(cands[0].commits_ahead == 0);
+      assert(worktree_gc_apply(repo, cands, n, &opts) == 1);
+      assert(access(wt, F_OK) != 0);               /* worktree removed */
+      assert(!branch_exists(repo, "feat/merged")); /* merged branch deleted too */
+      assert(branch_exists(repo, "main"));         /* base branch untouched */
+
+      /* Ahead session worktree: removed only because of --force; its branch
+       * carries unmerged commits and MUST survive. */
+      snprintf(cmd, sizeof(cmd), "mkdir -p '%s/.aimee/worktrees/sessB'", repo);
+      assert(system(cmd) == 0);
+      snprintf(wt, sizeof(wt), "%s/.aimee/worktrees/sessB/main", repo);
+      snprintf(cmd, sizeof(cmd), "git -C '%s' worktree add -q -b feat/ahead '%s' main", repo, wt);
+      assert(system(cmd) == 0);
+      snprintf(path, sizeof(path), "%s/extra.txt", wt);
+      write_text_file(path, "ahead\n");
+      snprintf(cmd, sizeof(cmd), "git -C '%s' add -A && git -C '%s' commit -q -m ahead", wt, wt);
+      assert(system(cmd) == 0);
+
+      worktree_gc_options_init(&opts);
+      opts.max_age_days = 0;
+      opts.force = 1; /* remove despite commits ahead */
+      n = worktree_gc_scan(repo, &opts, cands, WORKTREE_GC_MAX_CANDIDATES);
+      assert(n == 1);
+      assert(cands[0].eligible == 1);
+      assert(cands[0].commits_ahead == 1);
+      assert(worktree_gc_apply(repo, cands, n, &opts) == 1);
+      assert(access(wt, F_OK) != 0);             /* worktree removed under force */
+      assert(branch_exists(repo, "feat/ahead")); /* unmerged branch preserved */
    }
 
    /* Cleanup */

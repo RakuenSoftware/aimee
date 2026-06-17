@@ -553,7 +553,7 @@ static void config_set_defaults(config_t *cfg)
             CONFIG_DEFAULT_CSS_RENDER_COMMAND); /* default-on render backend (inert
                                                    until the sidecar is up); set empty
                                                    to disable */
-   cfg->worktree_gc_enabled = 0;
+   cfg->worktree_gc_enabled = 1;
    cfg->worktree_gc_max_age_days = 14;
    cfg->model_meta_refresh_minutes = 60;
    cfg->model_meta_capability_routing = 0;
@@ -849,6 +849,8 @@ int config_load(config_t *cfg)
    config_parse_kb_section(cfg, root);
 
    config_parse_memory_maintenance_section(cfg, root);
+
+   config_parse_worktree_gc_section(cfg, root);
 
    config_parse_memory_section(cfg, root);
    config_apply_learning_settings(cfg, root);

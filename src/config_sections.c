@@ -164,6 +164,21 @@ void config_parse_memory_maintenance_section(config_t *cfg, cJSON *root)
          cfg->memory_maintenance_summarize_enabled = cJSON_IsTrue(item) ? 1 : 0;
    }
 }
+void config_parse_worktree_gc_section(config_t *cfg, cJSON *root)
+{
+   cJSON *item = NULL;
+   cJSON *wt = cJSON_GetObjectItemCaseSensitive(root, "worktree_gc");
+   if (cJSON_IsObject(wt))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(wt, "enabled");
+      if (cJSON_IsBool(item))
+         cfg->worktree_gc_enabled = cJSON_IsTrue(item) ? 1 : 0;
+
+      item = cJSON_GetObjectItemCaseSensitive(wt, "max_age_days");
+      if (cJSON_IsNumber(item) && item->valuedouble > 0)
+         cfg->worktree_gc_max_age_days = (int)item->valuedouble;
+   }
+}
 void config_parse_memory_section(config_t *cfg, cJSON *root)
 {
    cJSON *item = NULL;
