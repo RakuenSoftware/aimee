@@ -390,6 +390,7 @@ static int schannel_load_client_identity(aimee_tls_t *t)
       if (NCryptImportKey(prov, 0, NCRYPT_PKCS8_PRIVATE_KEY_BLOB, &nbd, &hkey, kder, kdl,
                           NCRYPT_OVERWRITE_KEY_FLAG | NCRYPT_SILENT_FLAG) != ERROR_SUCCESS)
       {
+         hkey = 0; /* MSDN: phKey is undefined on failure — don't act on it in done: */
          t->client_key_name[0] = 0;
          goto done;
       }
