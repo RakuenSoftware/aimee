@@ -20,4 +20,11 @@
 int git_project_clone(const char *principal, const char *url, const char *name, char *out_path,
                       size_t path_cap, char *out_name, size_t name_cap, char *err, size_t errlen);
 
+/* List `principal`'s project names (the subdirectories of their scoped
+ * workspace) into out[max][GIT_PROJECT_NAME_MAX], sorted is not guaranteed.
+ * Returns the count (>=0), or -1 on a bad principal. A missing scope root is 0
+ * projects, not an error. */
+#define GIT_PROJECT_NAME_MAX 128
+int git_project_list(const char *principal, char out[][GIT_PROJECT_NAME_MAX], int max);
+
 #endif /* GIT_PROJECT_H */

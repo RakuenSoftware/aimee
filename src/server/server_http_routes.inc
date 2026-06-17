@@ -912,6 +912,31 @@ static int rh_workspace_git(const route_req_t *rq, char *resp, int cap)
    return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "git output too large");
 }
 
+/* GET /v1/workspace/projects — list the calling webchat user's projects (the
+ * repos cloned under their scoped workspace). Identity is the attested
+ * X-Aimee-Webuser principal, so a user only ever sees their own. */
+static int rh_workspace_projects(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git projects require a webchat user");
+
+   char names[256][GIT_PROJECT_NAME_MAX];
+   int count = git_project_list(principal, names, 256);
+   if (count < 0)
+      count = 0;
+   cJSON *out = cJSON_CreateObject();
+   cJSON *arr = cJSON_AddArrayToObject(out, "projects");
+   for (int i = 0; i < count; i++)
+      cJSON_AddItemToArray(arr, cJSON_CreateString(names[i]));
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
 /* ── detached-runner reverse channel over /v1 (workspace-resource-plane §3) ──
  * The filesystem-authority client serving a `detached` workspace polls for the
  * next op the server needs done against its working tree, executes it locally,
@@ -1383,6 +1408,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/workspaces", NULL, RM_EXACT, "workspace.add", 0, rh_workspaces_register},
     {"POST", "/v1/workspace/clone", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_clone},
     {"POST", "/v1/workspace/git", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_git},
+    {"GET", "/v1/workspace/projects", NULL, RM_EXACT, NULL, CAP_INDEX_READ, rh_workspace_projects},
     {"POST", "/v1/workspaces/", "/forge-token", RM_PREFIX, NULL, CAP_TOOL_EXECUTE,
      rh_workspace_forge_token},
     {"GET", "/v1/workspaces/", NULL, RM_PREFIX, "workspace.get", 0, rh_workspace_get},

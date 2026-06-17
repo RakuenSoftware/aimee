@@ -4,9 +4,13 @@
 #include "util.h"            /* safe_exec_capture_env */
 #include "workspace_scope.h" /* ws_scope_project_path, ws_scope_name_valid */
 
+#include <dirent.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 extern char **environ;
 
@@ -121,4 +125,38 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
    if (out_name && name_cap)
       snprintf(out_name, name_cap, "%s", pname);
    return 0;
+}
+
+int git_project_list(const char *principal, char out[][GIT_PROJECT_NAME_MAX], int max)
+{
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return -1;
+   /* Open the scope root via the O_NOFOLLOW base fd (TOCTOU-safe); a missing
+    * root just means no projects yet. */
+   int dfd = ws_scope_open_user_root(principal);
+   if (dfd < 0)
+      return 0;
+   DIR *d = fdopendir(dfd);
+   if (!d)
+   {
+      close(dfd);
+      return 0;
+   }
+   int n = 0;
+   struct dirent *e;
+   while (n < max && (e = readdir(d)) != NULL)
+   {
+      if (e->d_name[0] == '.')
+         continue; /* skip . / .. / hidden */
+      if (strlen(e->d_name) >= GIT_PROJECT_NAME_MAX)
+         continue;
+      /* directories only (project dirs); openat avoids re-resolving a path */
+      struct stat st;
+      if (fstatat(dfd, e->d_name, &st, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISDIR(st.st_mode))
+         continue;
+      snprintf(out[n], GIT_PROJECT_NAME_MAX, "%s", e->d_name);
+      n++;
+   }
+   closedir(d); /* closes dfd */
+   return n;
 }
