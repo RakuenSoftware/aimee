@@ -35,6 +35,13 @@
 #define CONFIG_DEFAULT_DELEGATE_MAX_INFLIGHT           512
 #define CONFIG_DEFAULT_CONCURRENCY_PREEMPT_REQUEUE_MAX 1
 
+/* Default render backend for the #4-full computed-style oracle: curl the
+ * conventional css-render sidecar (deploy/css-render, reachable as
+ * `aimee-css-render:8780` on the shared container network). Inert when the
+ * sidecar is down (oracle = UNAVAILABLE); set css_render_command empty to off. */
+#define CONFIG_DEFAULT_CSS_RENDER_COMMAND                                                          \
+   "curl -s --max-time 30 --data-binary @- http://aimee-css-render:8780/render"
+
 /* Concurrency config: per-model and per-provider overrides */
 #define CONFIG_CONCURRENCY_KEY_LEN     128
 #define CONFIG_CONCURRENCY_MAX_ENTRIES 16
@@ -295,8 +302,11 @@ typedef struct config
     * A shell command (like embedding_command) that reads a {"html","css"} JSON
     * object on stdin and writes a computed-style snapshot JSON on stdout. It runs
     * a headless browser over UNTRUSTED markup, so it must be an isolated,
-    * out-of-process backend (e.g. `curl` to a sandboxed render sidecar). Empty =
-    * no backend (the oracle reports UNAVAILABLE). */
+    * out-of-process backend (e.g. `curl` to a sandboxed render sidecar). Defaults
+    * to the conventional css-render sidecar (CONFIG_DEFAULT_CSS_RENDER_COMMAND) so
+    * render-capture works the moment the sidecar is up (on-demand); inert when it
+    * is down (the oracle reports UNAVAILABLE, never a fake verdict). Set empty to
+    * disable. */
    char css_render_command[512];
    int memory_salience_enabled;
    double memory_salience_weight;
