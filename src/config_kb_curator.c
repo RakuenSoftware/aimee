@@ -232,8 +232,9 @@ int config_parse_kb_curator(config_t *cfg, const cJSON *root)
    }
 
    /* max_jobs_per_hour was the curator rate cap; removed (§5 — the drain now runs
-    * to backlog and idles). A leftover key in an existing config is harmless: the
-    * kb.curator section is not schema-validated, so it is silently ignored. */
+    * until the backlog is drained, then idles). A leftover key in an existing
+    * config is harmless: the kb.curator section is not schema-validated, so it is
+    * silently ignored. */
 
    const cJSON *max_attempts = cJSON_GetObjectItemCaseSensitive(curator, "max_attempts");
    if (max_attempts)

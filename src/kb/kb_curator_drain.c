@@ -231,7 +231,12 @@ static void *drain_thread_main(void *arg)
       }
       else
       {
-         aimee_log(LOG_WARN, "kb.curator.drain", "extractor returned error");
+         /* Stage error: back off a poll interval before retrying. With the rate
+          * cap gone this is the only thing keeping a persistently-failing stage
+          * (bad provider, schema always rejected) from spinning the loop hot. */
+         aimee_log(LOG_WARN, "kb.curator.drain", "extractor returned error; backing off");
+         kb_background_clear("curator");
+         sleep(DRAIN_POLL_SECS);
       }
       kb_background_clear("curator");
    }
