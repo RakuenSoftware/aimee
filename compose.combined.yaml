@@ -98,6 +98,13 @@ services:
       AIMEE_EMBEDDER_URL: http://embedder:8080
       # Must match the embedder model's output dim (empty = config default 2560).
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
+      # Curator LLM (doc/code extraction, entity/claim passes). Defaults to the
+      # bundled `llm` sidecar (Gemma 3n E4B); BYO by setting LLM_ENDPOINT to your
+      # own OpenAI-compatible endpoint (and drop the `llm` service below). The
+      # curator runs in the background drain, so the server never blocks on it.
+      LLM_ENDPOINT: ${LLM_ENDPOINT:-http://llm:8080/v1}
+      LLM_MODEL: ${LLM_MODEL:-gemma-3n-e4b}
+      LLM_API_KEY: ${LLM_API_KEY:-}
       AIMEE_SERVER_HTTP_BIND: "1"
       AIMEE_KB_HTTP_BIND: "1"
       AIMEE_KB_API_URL: http://127.0.0.1:8741
@@ -141,14 +148,19 @@ services:
       - aimee-combined-home:/var/lib/aimee
       - aimee-combined-workspaces:/var/lib/aimee-workspaces
 
-  # Optional local LLM for the kb synthesis / curator passes. Enable with
-  #   docker compose -f compose.combined.yaml --profile llm up
+  # Bundled local LLM for the curator's extraction passes (and any LLM_ENDPOINT
+  # consumer). On by default — Gemma 3n E4B (GGUF Q4), fetched once at first boot
+  # into the models volume (the multi-GB download is why start_period is long).
+  # The curator only calls it from the background drain, so a warming model never
+  # blocks ingest. BYO: point LLM_ENDPOINT at your own OpenAI-compatible endpoint
+  # and skip this service — `docker compose up --scale llm=0` (or remove it).
+  # Override LLAMA_ARG_HF_REPO to use a different/smaller GGUF.
   llm:
     restart: unless-stopped
     image: ghcr.io/ggml-org/llama.cpp:server
-    profiles: ["llm"]
+    profiles: ["curator-llm"]
     environment:
-      LLAMA_ARG_HF_REPO: ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M
+      LLAMA_ARG_HF_REPO: ${CURATOR_LLM_HF_REPO:-ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M}
       LLAMA_ARG_HOST: 0.0.0.0
       LLAMA_ARG_PORT: "8080"
       LLAMA_ARG_ENDPOINT_HEALTH: "1"
@@ -159,7 +171,8 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 120s
+      # Long: the cold first boot downloads the multi-GB GGUF before /health is OK.
+      start_period: 1200s
 
 volumes:
   aimee-combined-home:

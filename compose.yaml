@@ -67,11 +67,12 @@ services:
       AIMEE_EMBEDDER_URL: http://embedder:8080
       # Must match the embedder model's output dim (empty = config default 2560).
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
-      # Point at any OpenAI-compatible endpoint to enable the synthesis /
-      # curator passes; the optional `llm` profile below brings up a local
-      # llama.cpp server.
-      LLM_ENDPOINT: http://llm:8080/v1
-      LLM_MODEL: gemma-4-e4b-it
+      # Curator/synthesis LLM. Defaults to the bundled `llm` sidecar (Gemma 3n
+      # E4B, below); BYO by pointing LLM_ENDPOINT at your own OpenAI-compatible
+      # endpoint (and drop the `llm` service: `docker compose up --scale llm=0`).
+      LLM_ENDPOINT: ${LLM_ENDPOINT:-http://llm:8080/v1}
+      LLM_MODEL: ${LLM_MODEL:-gemma-4-e4b-it}
+      LLM_API_KEY: ${LLM_API_KEY:-}
     # aimee-kb serves /v1 over HTTP only; the legacy --socket transport was retired (#2747).
     command: ["--http-port=8741"]
     ports:
@@ -89,17 +90,20 @@ services:
     volumes:
       - aimee-kb-home:/var/lib/aimee
 
-  # Optional local LLM for the synthesis / curator passes — llama.cpp's
-  # llama-server, which serves an OpenAI-compatible API at /v1. Enable with
-  #   docker compose --profile llm up
-  # The model is fetched from HuggingFace on first start (-hf) and cached in the
-  # volume; override LLAMA_ARG_HF_REPO to choose a different GGUF.
+  # Bundled local LLM for the synthesis / curator passes — llama.cpp's
+  # llama-server (OpenAI-compatible API at /v1). On by default; Gemma 3n E4B
+  # (GGUF Q4) is fetched once from HuggingFace at first boot and cached in the
+  # volume (the multi-GB download is why start_period is long). The curator calls
+  # it only from the background drain, so a warming model never blocks ingest.
+  # BYO: point LLM_ENDPOINT at your own endpoint and skip this service
+  # (`docker compose up --scale llm=0`). Override LLAMA_ARG_HF_REPO for a
+  # different/smaller GGUF.
   llm:
     restart: unless-stopped
     image: ghcr.io/ggml-org/llama.cpp:server
-    profiles: ["llm"]
+    profiles: ["curator-llm"]
     environment:
-      LLAMA_ARG_HF_REPO: ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M
+      LLAMA_ARG_HF_REPO: ${CURATOR_LLM_HF_REPO:-ggml-org/gemma-4-E4B-it-GGUF:Q4_K_M}
       LLAMA_ARG_HOST: 0.0.0.0
       LLAMA_ARG_PORT: "8080"
       LLAMA_ARG_ENDPOINT_HEALTH: "1"
@@ -112,7 +116,8 @@ services:
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 120s
+      # Long: the cold first boot downloads the multi-GB GGUF before /health is OK.
+      start_period: 1200s
 
 volumes:
   aimee-kb-home:
