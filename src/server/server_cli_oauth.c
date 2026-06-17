@@ -26,19 +26,26 @@
 
 typedef struct
 {
-   const char *name;       /* canonical vendor name */
-   const char *agent;      /* registered agent name */
-   const char *npm_pkg;    /* pinned `npm i -g` target */
-   const char *npm_ver;    /* exact pinned version */
-   const char *exe;        /* installed executable, resolved from the npm prefix */
-   const char *url_anchor; /* substring that precedes the verification URL */
+   const char *name;        /* canonical vendor name */
+   const char *agent;       /* registered agent name */
+   const char *npm_pkg;     /* pinned `npm i -g` target */
+   const char *npm_ver;     /* exact pinned version */
+   const char *exe;         /* installed executable, resolved from the npm prefix */
+   const char *url_anchor;  /* substring that precedes the verification URL */
+   const char *postinstall; /* package-relative .cjs to run post-install, or NULL */
 } vendor_info_t;
 
 static const vendor_info_t g_vendors[] = {
+    /* claude-code ships its platform-native binary via a `postinstall` script
+     * (`node install.cjs`) that downloads/links it. The global install runs with
+     * --ignore-scripts (no transitive-dep lifecycle scripts run with server
+     * privileges), so we must run this one pinned-vendor script explicitly or the
+     * `claude` launcher aborts with "native binary not installed". */
     [CLI_OAUTH_CLAUDE] = {"claude", "claude", "@anthropic-ai/claude-code", "2.1.177", "claude",
-                          "https://claude.com/"},
+                          "https://claude.com/", "install.cjs"},
+    /* codex ships a plain-JS entrypoint (bin/codex.js) with no postinstall. */
     [CLI_OAUTH_CODEX] = {"codex", "codex", "@openai/codex", "0.139.0", "codex",
-                         "https://auth.openai.com/codex/device"},
+                         "https://auth.openai.com/codex/device", NULL},
 };
 
 int cli_oauth_vendor_parse(const char *s, cli_oauth_vendor_t *out)
@@ -102,6 +109,36 @@ static void exe_path(cli_oauth_vendor_t v, char *out, size_t n)
    snprintf(out, n, "%s/.npm-global/bin/%s", home_dir(), g_vendors[v].exe);
 }
 
+/* Absolute path to the installed package directory in the npm prefix. */
+static void pkg_dir(cli_oauth_vendor_t v, char *out, size_t n)
+{
+   snprintf(out, n, "%s/.npm-global/lib/node_modules/%s", home_dir(), g_vendors[v].npm_pkg);
+}
+
+/* Copy a single-line, control-char-free snippet of process output into `out`
+ * (for diagnostics). `--version`/launcher output carries no secrets, but keep it
+ * short and one-line so it sits cleanly in an error string. */
+static void diag_snippet(const char *src, char *out, size_t n)
+{
+   size_t o = 0;
+   for (const char *p = src ? src : ""; *p && o + 1 < n; p++)
+   {
+      unsigned char c = (unsigned char)*p;
+      if (c == '\n' || c == '\r' || c == '\t')
+      {
+         if (o > 0 && out[o - 1] != ' ')
+            out[o++] = ' ';
+         continue;
+      }
+      if (c < 0x20)
+         continue;
+      out[o++] = (char)c;
+   }
+   while (o > 0 && out[o - 1] == ' ')
+      o--;
+   out[o] = '\0';
+}
+
 /* --- install -------------------------------------------------------------- */
 
 int cli_oauth_install(cli_oauth_vendor_t v, char *err, size_t errn)
@@ -140,15 +177,39 @@ int cli_oauth_install(cli_oauth_vendor_t v, char *err, size_t errn)
       snprintf(err, errn, "npm install of %s failed (exit %d)", g_vendors[v].npm_pkg, rc);
       return -1;
    }
+
+   /* Run the pinned vendor's own postinstall (and only that package's — not the
+    * transitive deps suppressed by --ignore-scripts). claude-code uses it to
+    * fetch/link its platform-native binary; without it the launcher is inert. */
+   if (g_vendors[v].postinstall)
+   {
+      char pkgdir[700];
+      pkg_dir(v, pkgdir, sizeof(pkgdir));
+      const char *post[] = {"node", g_vendors[v].postinstall, NULL};
+      out = NULL;
+      int prc = safe_exec_capture_cwd_env_timeout(post, pkgdir, env, &out, 64 * 1024, 120000);
+      free(out); /* postinstall output may include registry/download noise */
+      if (prc != 0)
+      {
+         snprintf(err, errn, "%s postinstall (%s) failed (exit %d)", g_vendors[v].npm_pkg,
+                  g_vendors[v].postinstall, prc);
+         return -1;
+      }
+   }
+
    /* Confirm it now runs. */
    out = NULL;
    rc = safe_exec_capture_env(probe, env, &out, 256);
-   free(out);
    if (rc != 0)
    {
-      snprintf(err, errn, "%s installed but not runnable", g_vendors[v].exe);
+      char snip[200] = "";
+      diag_snippet(out, snip, sizeof(snip));
+      free(out);
+      snprintf(err, errn, "%s installed but not runnable (exit %d)%s%s", g_vendors[v].exe, rc,
+               snip[0] ? ": " : "", snip);
       return -1;
    }
+   free(out);
    return 0;
 }
 
