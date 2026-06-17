@@ -25,7 +25,8 @@ extern "C"
     *   2. else `fallback_command` (the legacy sidecar) if non-empty;
     *   3. else NULL with "no provider configured" (the stage stays idle).
     * Returns the response body (caller frees) or NULL. out_cap bounds the sidecar
-    * capture only (the provider path is unbounded by it). */
+    * stdout capture ONLY; the provider path returns the full HTTP response body
+    * (its length is governed by the model/max_tokens, not out_cap). */
    char *kb_curator_llm_run(const config_t *cfg, kb_curator_stage_t stage,
                             const char *system_prompt, const char *request_json,
                             const char *fallback_command, int out_cap, char *errbuf, size_t errlen);

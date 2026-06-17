@@ -8,7 +8,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 /* Build [{role:system, content:system_prompt}?, {role:user, content:request_json}]. */
 static cJSON *build_messages(const char *system_prompt, const char *request_json)
@@ -58,7 +57,9 @@ char *kb_curator_llm_run(const config_t *cfg, kb_curator_stage_t stage, const ch
             snprintf(errbuf, errlen, "out of memory building request");
          return NULL;
       }
-      provider_completion_t out;
+      /* provider_client_complete zeroes out on entry, but zero-init here too so
+       * provider_completion_free is unconditionally safe regardless of the callee. */
+      provider_completion_t out = {0};
       int rc = provider_client_complete(&def, msgs, NULL, &out, errbuf, errlen);
       cJSON_Delete(msgs);
       if (rc != 0)
