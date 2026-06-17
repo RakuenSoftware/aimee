@@ -12,6 +12,7 @@
 
 #include "kb_curator_synthesize.h"
 #include "kb_curator_sidecar.h"
+#include "kb_curator_llm.h"
 #include "aimee.h"
 #include "config.h"
 #include "cJSON.h"
@@ -25,6 +26,15 @@
 
 #define CURATOR_SYNTH_OUTBUF    16384
 #define CURATOR_SYNTH_DEFAULT_K 8
+
+/* System prompt for the synthesize stage when routed through a configured
+ * provider (§2b). The legacy sidecar script carried its own prompt; an in-process
+ * provider needs one here. Kept deliberately simple — the request JSON (topic +
+ * top-K sources) is the user turn; tune against the live curator model. */
+#define CURATOR_SYNTH_SYSTEM_PROMPT                                                                \
+   "You are a knowledge-base curator. Given a topic and its source excerpts as "                   \
+   "JSON, write a faithful synthesis grounded only in those sources. Respond with "                \
+   "a single JSON object: {\"synthesis\": \"<text>\"}. Do not invent facts."
 
 int kb_curator_restore_fragment_record(int64_t fragment_doc_id, const char *base_artifact_id,
                                        const char *restored_text, double confidence,
@@ -198,7 +208,13 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
 
    config_t cfg;
    config_load(&cfg);
-   if (!cfg.kb_curator_synthesize_enabled || !cfg.kb_curator_synthesize_command[0])
+   /* Run when enabled AND we have somewhere to send the work: a configured
+    * Tier-B provider (§2) or the legacy sidecar command. */
+   provider_def_t synth_provider;
+   int have_provider =
+       kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &synth_provider);
+   if (!cfg.kb_curator_synthesize_enabled ||
+       (!cfg.kb_curator_synthesize_command[0] && !have_provider))
       return 0;
 
    char ent_id[64] = "", scope_kind[64] = "", scope_id[128] = "";
@@ -234,8 +250,9 @@ int kb_curator_synthesize_one(const kb_curator_extract_opts_t *opts)
    }
 
    char serr[256];
-   char *response = kb_curator_sidecar_run(cfg.kb_curator_synthesize_command, request,
-                                           CURATOR_SYNTH_OUTBUF, serr, sizeof(serr));
+   char *response = kb_curator_llm_run(
+       &cfg, KB_CURATOR_STAGE_SYNTHESIZE, CURATOR_SYNTH_SYSTEM_PROMPT, request,
+       cfg.kb_curator_synthesize_command, CURATOR_SYNTH_OUTBUF, serr, sizeof(serr));
    free(request);
    if (!response)
    {
