@@ -88,6 +88,13 @@ static void snapshot_add(const char *serial)
    g_revoked[g_revoked_n] = strdup(serial);
    if (g_revoked[g_revoked_n])
       g_revoked_n++;
+   else
+      /* Out-of-memory: the revocation IS durable in DB1 and reloads on the next
+       * pki_ca_ensure/snapshot_load; log so an incomplete snapshot isn't silent. */
+      aimee_log(LOG_WARN, "pki",
+                "revocation snapshot insert failed (serial=%s); "
+                "rejection deferred to next snapshot reload",
+                serial);
 }
 
 /* Reload the snapshot from DB1 (caller holds g_mu). */
@@ -187,9 +194,15 @@ static int add_ext(X509 *cert, X509 *issuer, int nid, const char *value)
    return rc == 1 ? 0 : -1;
 }
 
-/* Random 16-byte positive serial; writes the cert's serial and a hex string. */
+/* Set a random 128-bit positive serial on the cert and write its hex form. The
+ * hex is derived by reading the serial BACK off the cert via the exact same
+ * ASN1_INTEGER -> BIGNUM -> BN_bn2hex path the TLS verify callback uses, so the
+ * stored serial and the handshake-time serial are byte-identical (no
+ * leading-zero / sign-byte skew between issuance and the revocation check). */
 static int set_random_serial(X509 *cert, char *hex_out, size_t hex_len)
 {
+   if (hex_len)
+      hex_out[0] = '\0';
    BIGNUM *bn = BN_new();
    if (!bn || !BN_rand(bn, 128, BN_RAND_TOP_ANY, BN_RAND_BOTTOM_ANY))
    {
@@ -197,20 +210,22 @@ static int set_random_serial(X509 *cert, char *hex_out, size_t hex_len)
       return -1;
    }
    ASN1_INTEGER *ai = BN_to_ASN1_INTEGER(bn, NULL);
+   BN_free(bn);
    if (!ai)
-   {
-      BN_free(bn);
       return -1;
-   }
-   X509_set_serialNumber(cert, ai);
+   int set_ok = (X509_set_serialNumber(cert, ai) == 1); /* copies into the cert */
    ASN1_INTEGER_free(ai);
-   char *hex = BN_bn2hex(bn);
+   if (!set_ok)
+      return -1;
+   BIGNUM *back = ASN1_INTEGER_to_BN(X509_get_serialNumber(cert), NULL);
+   char *hex = back ? BN_bn2hex(back) : NULL;
    if (hex)
    {
       snprintf(hex_out, hex_len, "%s", hex);
       OPENSSL_free(hex);
    }
-   BN_free(bn);
+   if (back)
+      BN_free(back);
    return hex_out[0] ? 0 : -1;
 }
 
@@ -320,7 +335,7 @@ static int ca_load(void)
 int pki_ca_ensure(void)
 {
    pthread_mutex_lock(&g_mu);
-   db_ensure_tables();
+   db_ensure_tables(); /* inside the lock: table exists before snapshot_load reads it */
    int rc = 0;
    if (!g_ca_key || !g_ca_cert)
       rc = (ca_load() == 0) ? 0 : ca_generate_and_persist();
@@ -379,8 +394,10 @@ int pki_issue(const char *cn, int validity_days, char *cert_pem, size_t cert_len
          if (db)
          {
             sqlite3_stmt *stm = NULL;
+            /* Plain INSERT (not REPLACE): a (2^-128, impossible) serial collision
+             * must never overwrite/reset an existing cert's revocation row. */
             if (sqlite3_prepare_v2(db,
-                                   "INSERT OR REPLACE INTO pki_certs(serial,cn,issued_at,"
+                                   "INSERT INTO pki_certs(serial,cn,issued_at,"
                                    "expires_at,revoked) VALUES(?,?,?,?,0)",
                                    -1, &stm, NULL) == SQLITE_OK)
             {
