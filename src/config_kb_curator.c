@@ -71,14 +71,36 @@ static void parse_curator_provider(const cJSON *curator, const char *key, char *
       return;
    }
    const cJSON *b = cJSON_GetObjectItemCaseSensitive(p, "base_url");
-   if (b && cJSON_IsString(b) && b->valuestring)
-      snprintf(base_url, bsz, "%s", b->valuestring);
+   if (b)
+   {
+      if (!cJSON_IsString(b) || !b->valuestring)
+         config_issue("\"kb.curator.%s.base_url\" expected string, got %s", key, jo_type_name(b));
+      else
+         snprintf(base_url, bsz, "%s", b->valuestring);
+   }
    const cJSON *m = cJSON_GetObjectItemCaseSensitive(p, "model");
-   if (m && cJSON_IsString(m) && m->valuestring)
-      snprintf(model, msz, "%s", m->valuestring);
+   if (m)
+   {
+      if (!cJSON_IsString(m) || !m->valuestring)
+         config_issue("\"kb.curator.%s.model\" expected string, got %s", key, jo_type_name(m));
+      else
+         snprintf(model, msz, "%s", m->valuestring);
+   }
    const cJSON *k = cJSON_GetObjectItemCaseSensitive(p, "api_key");
-   if (k && cJSON_IsString(k) && k->valuestring)
-      snprintf(api_key, ksz, "%s", k->valuestring);
+   if (k)
+   {
+      if (!cJSON_IsString(k) || !k->valuestring)
+         config_issue("\"kb.curator.%s.api_key\" expected string, got %s", key, jo_type_name(k));
+      else
+         snprintf(api_key, ksz, "%s", k->valuestring);
+   }
+
+   /* A provider is only usable with a base_url + model; warn on a partial object
+    * (e.g. a key/model with no endpoint) so it doesn't silently resolve to idle. */
+   if (base_url[0] && !model[0])
+      config_issue("\"kb.curator.%s\" has base_url but no model (provider unusable)", key);
+   if (!base_url[0] && (model[0] || api_key[0]))
+      config_issue("\"kb.curator.%s\" set without base_url (tier stays idle)", key);
 }
 
 int config_parse_kb_curator(config_t *cfg, const cJSON *root)

@@ -8,15 +8,26 @@ kb_curator_tier_t kb_curator_stage_tier(kb_curator_stage_t stage)
 {
    switch (stage)
    {
+   /* Tier-A: mechanical, grammar-constrained extract/index. */
+   case KB_CURATOR_STAGE_EXTRACT_DOCS:
+   case KB_CURATOR_STAGE_EXTRACT_CODE:
+   case KB_CURATOR_STAGE_INDEX_NARRATIVE:
+   case KB_CURATOR_STAGE_INDEX_CLAIMS:
+   case KB_CURATOR_STAGE_INDEX_CODE_UNIT:
+   case KB_CURATOR_STAGE_LINK_ARTIFACTS:
+      return KB_CURATOR_TIER_A;
+   /* Tier-B: reasoning / judge. */
    case KB_CURATOR_STAGE_JUDGE:
    case KB_CURATOR_STAGE_RESOLVE_ENTITIES:
    case KB_CURATOR_STAGE_DETECT_CONTRADICTIONS:
    case KB_CURATOR_STAGE_SYNTHESIZE:
    case KB_CURATOR_STAGE_PROMOTE_ENTITY:
       return KB_CURATOR_TIER_B;
-   default:
-      return KB_CURATOR_TIER_A;
    }
+   /* Fail safe: an unclassified / future stage routes to the capable tier (which
+    * simply idles when tier_b is unconfigured), NEVER silently to the small
+    * Tier-A model — a weak model on a reasoning stage poisons the graph. */
+   return KB_CURATOR_TIER_B;
 }
 
 int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,

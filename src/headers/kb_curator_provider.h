@@ -44,8 +44,12 @@ extern "C"
    /* Fill *out with the provider def for `stage`: Tier-A stages use the default
     * `provider.*` config, Tier-B stages use `tier_b.*` (never the Tier-A default).
     * Returns 1 when that tier is configured (out filled; base_url non-empty), 0
-    * when it is unconfigured (out zeroed — the stage must stay idle). The const
-    * char* fields in *out point into *cfg, so keep cfg alive while using *out. */
+    * when it is unconfigured (out zeroed — the stage must stay idle).
+    *
+    * Lifetime: out->base_url/model alias strings inside *cfg, so keep cfg alive
+    * (and unmodified) while using *out — the def is a borrowed view, not a copy.
+    * out->api_key is either a pointer into *cfg or NULL when no key is configured
+    * (a keyless local endpoint); provider_client treats NULL as "no bearer". */
    int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
                                      provider_def_t *out);
 
