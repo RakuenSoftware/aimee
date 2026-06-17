@@ -129,6 +129,13 @@ services:
       # beyond local dev. Leave both unset to serve webchat with no account.
       AIMEE_WEBCHAT_USER: aimee
       AIMEE_WEBCHAT_PASSWORD: aimee-local-dev
+      # Delegate-vault auto-provisioning (optional): seal delegate API keys into
+      # the server-principal vault at startup so delegates work with no manual
+      # `aimee vault set`. Env form (agent lowercased) or a mounted JSON file;
+      # non-destructive unless AIMEE_DELEGATE_SECRETS_OVERWRITE=1. See
+      # compose.combined.yaml for the full notes.
+      # AIMEE_DELEGATE_KEY_MISTRAL: ${AIMEE_DELEGATE_KEY_MISTRAL:-}
+      # AIMEE_DELEGATE_SECRETS_FILE: /run/secrets/aimee-delegates.json
     ports:
       - "8740:8740"
       - "8443:8443"

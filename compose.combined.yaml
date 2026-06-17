@@ -106,10 +106,25 @@ services:
       # beyond local dev. Leave both unset to serve webchat with no account.
       AIMEE_WEBCHAT_USER: aimee
       AIMEE_WEBCHAT_PASSWORD: aimee-local-dev
+      # Delegate-vault auto-provisioning (optional). aimee-server seals these
+      # delegate API keys into its server-principal vault at startup, so a fresh
+      # deploy's delegates/roundtables work with no manual `aimee vault set`.
+      # Non-destructive by default (set AIMEE_DELEGATE_SECRETS_OVERWRITE=1 to
+      # replace an existing key); secrets never touch AIMEE_HOME or logs.
+      #   Env form (agent name lowercased):
+      # AIMEE_DELEGATE_KEY_MISTRAL: ${AIMEE_DELEGATE_KEY_MISTRAL:-}
+      #   File form (a JSON object {"<agent>":"<key>", ...}); mount it readable by
+      #   the container's "aimee" user and point at it:
+      # AIMEE_DELEGATE_SECRETS_FILE: /run/secrets/aimee-delegates.json
     ports:
       - "8740:8740"
       - "8741:8741"
       - "8443:8443"
+    # To use the file form above, mount the secrets file read-only, e.g.:
+    # secrets:
+    #   - aimee_delegates
+    # (and a top-level `secrets: { aimee_delegates: { file: ./aimee-delegates.json } }`,
+    #  or a bind mount under volumes:). Keep it out of the image and VCS.
     depends_on:
       postgres:
         condition: service_healthy

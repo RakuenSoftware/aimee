@@ -209,6 +209,18 @@ typedef struct
 /* Lifecycle */
 int server_init(server_ctx_t *ctx, const char *socket_path);
 int server_run(server_ctx_t *ctx);
+/* Boot-time delegate-vault provisioning: seal operator-supplied delegate API
+ * keys ($AIMEE_DELEGATE_SECRETS_FILE / AIMEE_DELEGATE_KEY_<AGENT>) into the
+ * server-principal vault so a fresh server's delegates work with no manual
+ * `vault set`. No-op when no source is set; returns the count provisioned. */
+int server_vault_bootstrap(void);
+/* Resolve a delegate name to its canonical agents.json name: returns 1 and
+ * writes `canon` (NUL-terminated, capped at `cap`) when known, else 0. The
+ * provisioning module calls this through an injected pointer so it carries no
+ * link dependency on the agent-config layer; production wires an agents.json
+ * resolver, unit tests wire a trivial one. */
+typedef int (*aimee_agent_resolver_fn)(const char *name, char *canon, size_t cap);
+void server_vault_bootstrap_set_resolver(aimee_agent_resolver_fn fn);
 void server_shutdown(server_ctx_t *ctx);
 int server_compute_budget_acquire(server_ctx_t *ctx);
 void server_compute_budget_release(server_ctx_t *ctx, int granted);
