@@ -3562,6 +3562,27 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workspace/projects:
+    get:
+      summary: List the calling webchat user's projects
+      description: >
+        The git projects (cloned repos) under the authenticated `webuser:`
+        principal's scoped workspace. A user only ever sees their own.
+        Capability: index:read.
+      responses:
+        "200":
+          description: Project names
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects: { type: array, items: { type: string } }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /workspace/git:
     post:
       summary: Run a git operation on the calling webchat user's project

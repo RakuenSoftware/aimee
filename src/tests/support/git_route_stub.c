@@ -33,6 +33,14 @@ int index_scan_project(const char *name, const char *root, int force)
    return 0;
 }
 
+int git_project_list(const char *principal, char out[][GIT_PROJECT_NAME_MAX], int max)
+{
+   (void)principal;
+   (void)out;
+   (void)max;
+   return 0;
+}
+
 int git_ops_run(const char *principal, const char *project, const char *op, const char *text_arg,
                 int num_arg, char **out, char *err, size_t errlen)
 {

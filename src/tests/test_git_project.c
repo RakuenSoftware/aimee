@@ -89,6 +89,25 @@ int main(void)
    assert(git_project_clone("webuser:alice", url, "../escape", path, sizeof(path), name,
                             sizeof(name), err, sizeof(err)) == -1); /* bad name */
 
+   /* --- list: alice has srcrepo + myproj; bob has shared; isolated per user --- */
+   char names[64][GIT_PROJECT_NAME_MAX];
+   int an = git_project_list("webuser:alice", names, 64);
+   assert(an == 2);
+   int saw_src = 0, saw_my = 0;
+   for (int i = 0; i < an; i++)
+   {
+      if (strcmp(names[i], "srcrepo") == 0)
+         saw_src = 1;
+      if (strcmp(names[i], "myproj") == 0)
+         saw_my = 1;
+   }
+   assert(saw_src && saw_my);
+   int bn = git_project_list("webuser:bob", names, 64);
+   assert(bn == 1 && strcmp(names[0], "shared") == 0); /* bob sees only his */
+   assert(git_project_list("uid:1000", names, 64) == -1);
+   /* a webuser with no clones lists zero, not an error */
+   assert(git_project_list("webuser:carol", names, 64) == 0);
+
    assert(run("rm -rf %s", home) == 0);
    printf("git_project: all tests passed\n");
    return 0;

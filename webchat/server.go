@@ -169,6 +169,12 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/vault/password", s.requireAuth(s.handleVaultPassword))
 	mux.HandleFunc("/api/vault/credentials", s.requireAuth(s.handleVaultCredentials))
 
+	// Git projects (webchat-git WP-F): clone + per-project ops + listing,
+	// forwarded to /v1/workspace/* with the user's webuser: assertion.
+	mux.HandleFunc("/api/git/projects", s.requireAuth(s.handleGitProjects))
+	mux.HandleFunc("/api/git/clone", s.requireAuth(s.handleGitClone))
+	mux.HandleFunc("/api/git/op", s.requireAuth(s.handleGitOp))
+
 	// Live endpoints backed by aimee-server socket
 	mux.HandleFunc("/api/agents", s.requireAuth(s.handleAgents))
 	mux.HandleFunc("/api/rules", s.requireAuth(s.handleCollabRulesList))
