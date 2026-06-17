@@ -290,8 +290,8 @@ int main(void)
       assert(strcmp(projects[0], real_abs) == 0);
 
       /* A worktree added explicitly (as the scan root) is still honored. */
-      int c2 = workspace_discover_projects(wt, MAX_WORKSPACE_DEPTH, projects,
-                                           MAX_DISCOVERED_PROJECTS);
+      int c2 =
+          workspace_discover_projects(wt, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);
       assert(c2 == 1);
       char wt_abs[MAX_PATH_LEN];
       assert(realpath(wt, wt_abs) != NULL);
