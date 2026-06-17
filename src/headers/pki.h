@@ -39,6 +39,12 @@ extern "C"
     * safe to call from the TLS verify callback. */
    int pki_is_revoked(const char *serial);
 
+   /* Enumerate issued certs (newest first), invoking cb per row. Returns the row
+    * count, or -1 on error. Keeps pki.c free of the JSON layer. */
+   int pki_list(void (*cb)(void *ctx, const char *serial, const char *cn, long issued_at,
+                           long expires_at, int revoked),
+                void *ctx);
+
    /* For tests: drop cached CA + snapshot so a fresh AIMEE_HOME is picked up. */
    void pki_reset_for_test(void);
 

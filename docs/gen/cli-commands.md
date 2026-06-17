@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 52
+Total commands: 53
 
 ## Core commands
 
@@ -566,6 +566,18 @@ Subcommands:
 ### `aimee acp-serve`
 
 ACP stdio server (Agent Client Protocol) for editors like Zed.
+
+### `aimee cert`
+
+mTLS client certificate lifecycle (operator).
+
+Subcommands:
+
+```
+  issue <cn> [--days N]        Issue a client cert (CN identity); key returned once
+  list                         List issued certs (serial, CN, validity, revoked)
+  revoke <serial>              Revoke a client cert by serial
+```
 
 ### `aimee clean`
 
