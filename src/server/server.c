@@ -1482,6 +1482,21 @@ static int server_agent_route_is_down(const char *agent_name)
    return provider_catalog_get_health(agent_name) == CATALOG_HEALTH_DOWN;
 }
 
+/* Production agent-name resolver for the vault bootstrap: validate against
+ * agents.json and return the canonical agent name. agent_load_config is cached,
+ * so the per-secret calls are cheap. */
+static int server_bootstrap_resolve_agent(const char *name, char *canon, size_t cap)
+{
+   agent_config_t cfg;
+   if (agent_load_config(&cfg) != 0)
+      return 0;
+   agent_t *a = agent_find(&cfg, name);
+   if (!a)
+      return 0;
+   snprintf(canon, cap, "%s", a->name);
+   return 1;
+}
+
 int server_init(server_ctx_t *ctx, const char *socket_path)
 {
    memset(ctx, 0, sizeof(*ctx));
@@ -1655,6 +1670,11 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    trigger_scheduler_init();
    server_delegate_monitor_init();
    server_coord_dispatcher_init(ctx);
+   /* Provision the delegate vault from operator-supplied secrets before serving,
+    * so a freshly stood-up server's delegates/roundtables work without a manual
+    * `vault set`. No-op unless a secret source is configured. */
+   server_vault_bootstrap_set_resolver(server_bootstrap_resolve_agent);
+   server_vault_bootstrap();
    return 0;
 }
 int server_run(server_ctx_t *ctx)

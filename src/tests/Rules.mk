@@ -212,6 +212,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-vault-kek-cache \
                $(TESTPREFIX)/unit-test-vault-store \
                $(TESTPREFIX)/unit-test-vault-service \
+               $(TESTPREFIX)/unit-test-vault-bootstrap \
                $(TESTPREFIX)/unit-test-vault-server-key \
                $(TESTPREFIX)/unit-test-vault-capability \
                $(TESTPREFIX)/unit-test-prompts \
@@ -2103,6 +2104,14 @@ $(TESTPREFIX)/unit-test-vault-store: $(OBJDIR)/tests/test_vault_store.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-vault-service: $(OBJDIR)/tests/test_vault_service.o \
+                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
+                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
+                              $(OBJDIR)/server/vault_server_key.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-vault-bootstrap: $(OBJDIR)/tests/test_vault_bootstrap.o \
+                              $(OBJDIR)/server/server_vault_bootstrap.o \
                               $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
                               $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
                               $(OBJDIR)/server/vault_server_key.o \
