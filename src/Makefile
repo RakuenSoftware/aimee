@@ -334,7 +334,7 @@ AGENT_SRCS = server/agent_runtime.c server/agent_logging.c server/agent_parallel
              server/delegate_backend.c server/delegate_backend_local.c server/delegate_backend_ssh.c server/delegate_backend_docker.c server/delegate_driver.c server/delegate_openai.c server/delegate_gemini.c server/delegate_xml_fallback.c \
              server/model_provider.c server/model_sampling.c server/openrouter_profile.c server/openai_profile.c server/anthropic_profile.c server/gemini_profile.c server/ollama_profile.c server/llama_native_profile.c server/mistral_profile.c server/minimax_profile.c server/aux_router.c \
              server/otel.c server/oauth_pkce.c server/oauth_tokens.c server/mcp_client.c server/mcp_client_registry.c \
-             server/agent_shell.c server/agent_cli_shell.c server/skill_review.c server/skill_curator.c
+             server/agent_shell.c server/agent_cli_shell.c server/skill_curator.c
 AGENT_OBJS = $(AGENT_SRCS:%.c=$(OBJDIR)/%.o) $(PLATFORM_AGENT_OBJS)
 
 # --- Layer 3: Commands + UI (cmd_*, webchat, dashboard) ---
