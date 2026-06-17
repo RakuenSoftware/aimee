@@ -285,10 +285,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # macOS ships ONE universal (arm64 + x86_64) thin client, matching the
-      # release build. WITH_TLS=OFF means the binary links only Threads, so the
-      # fat build needs no arch-specific brew libraries.
+      # release build. TLS uses Secure Transport (system frameworks, already
+      # universal), so the fat build needs no arch-specific brew libraries.
       - name: Configure with CMake (universal arm64+x86_64)
-        run: cmake -B build -DAIMEE_THIN_CLIENT=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=OFF -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+        run: cmake -B build -DAIMEE_THIN_CLIENT=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=ON -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
       - name: Build the thin client
         run: |
           cmake --build build --parallel 3 --target aimee
