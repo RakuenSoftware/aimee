@@ -15,6 +15,11 @@
  * their rows carry handler == NULL so they still participate in the capability
  * gate and the conformance scan without being dispatched here. */
 
+/* Route-handler deps used below but not needed by server_http.c's own body
+ * (kept here, not in server_http.c, to respect its 2000-line limit). */
+#include "git_project.h" /* git_project_clone for /v1/workspace/clone (WP-D) */
+#include "index.h"       /* index_scan_project after a webuser clone (WP-D) */
+
 /* Per-request context handed to a route handler. `id` holds the extracted
  * dynamic path segment (persona / role-template name, session id, run id) for
  * RM_PREFIX routes, or "" for fixed routes. */
@@ -814,6 +819,48 @@ static int rh_workspace_forge_token(const route_req_t *rq, char *resp, int cap)
    return 200;
 }
 
+/* POST /v1/workspace/clone {url, name?} — clone a repo as a project under the
+ * calling webchat user's scoped workspace (webchat-git WP-D). The caller
+ * principal comes from the attested identity (server.token-gated X-Aimee-Webuser),
+ * NOT the body — a user can only clone into their own tree. Credentials are
+ * injected from the user's sealed vault (WP-C); never accepted in the body. */
+static int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)
+{
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git projects require a webchat user");
+
+   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
+   if (!body || !cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "invalid JSON body");
+   }
+   const cJSON *jurl = cJSON_GetObjectItemCaseSensitive(body, "url");
+   const cJSON *jname = cJSON_GetObjectItemCaseSensitive(body, "name");
+   const char *url = (cJSON_IsString(jurl) && jurl->valuestring) ? jurl->valuestring : NULL;
+   const char *name = (cJSON_IsString(jname) && jname->valuestring) ? jname->valuestring : NULL;
+
+   char dest[MAX_PATH_LEN], pname[128], err[256];
+   int rc = git_project_clone(principal, url, name, dest, sizeof(dest), pname, sizeof(pname), err,
+                              sizeof(err));
+   cJSON_Delete(body);
+   if (rc != 0)
+      return err_json(resp, cap, 400, err);
+
+   /* Best-effort index so the new project is searchable by the agent + listed. */
+   index_scan_project(pname, dest, 0);
+
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddBoolToObject(out, "ok", 1);
+   cJSON_AddStringToObject(out, "name", pname);
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
 /* ── detached-runner reverse channel over /v1 (workspace-resource-plane §3) ──
  * The filesystem-authority client serving a `detached` workspace polls for the
  * next op the server needs done against its working tree, executes it locally,
@@ -1283,6 +1330,7 @@ static const http_route_t g_v1_routes[] = {
      * percent-encoded absolute workspace path. */
     {"GET", "/v1/workspaces", NULL, RM_EXACT, "workspace.list", 0, rh_dispatch_op},
     {"POST", "/v1/workspaces", NULL, RM_EXACT, "workspace.add", 0, rh_workspaces_register},
+    {"POST", "/v1/workspace/clone", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_clone},
     {"POST", "/v1/workspaces/", "/forge-token", RM_PREFIX, NULL, CAP_TOOL_EXECUTE,
      rh_workspace_forge_token},
     {"GET", "/v1/workspaces/", NULL, RM_PREFIX, "workspace.get", 0, rh_workspace_get},
