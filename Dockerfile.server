@@ -10,6 +10,11 @@
 # registry token and NO credentials. Set --build-arg WITH_WEBCHAT=0 to build the
 # server-only image (skips the frontend + Go webchat stages entirely).
 ARG WITH_WEBCHAT=1
+# WITH_VSCODE bundles code-server (full in-browser VSCode, Open-VSX only) for the
+# webchat Projects/editor surface. OFF by default — it adds ~100 MB, so default +
+# CI image builds skip it (the stage is not in the build graph). The aimee-server
+# deployment image is built with --build-arg WITH_VSCODE=1.
+ARG WITH_VSCODE=0
 FROM debian:bookworm-slim AS build
 
 RUN apt-get update \
@@ -68,6 +73,25 @@ COPY --from=frontend-build /frontend/dist/index.html /webchat/index.html
 FROM debian:bookworm-slim AS webchat-stage-0
 RUN mkdir -p /webchat
 FROM webchat-stage-${WITH_WEBCHAT} AS webchat-stage
+
+# Optional code-server (full VSCode in the browser). The "1" variant fetches the
+# pinned, arch-matched .deb and extracts it under /opt/codeserver (only in the
+# build graph when WITH_VSCODE=1). The "0" variant is an empty /opt/codeserver/usr
+# so the final COPY is a no-op — no download, no size, in the default/CI build.
+# code-server bundles its own Node and defaults to the Open VSX registry.
+FROM debian:bookworm-slim AS code-server-stage-1
+ARG TARGETARCH
+ARG CODE_SERVER_VERSION=4.96.4
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && curl -fsSL "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server_${CODE_SERVER_VERSION}_${TARGETARCH}.deb" -o /tmp/cs.deb \
+    && mkdir -p /opt/codeserver \
+    && dpkg-deb -x /tmp/cs.deb /opt/codeserver \
+    && rm /tmp/cs.deb \
+    && rm -rf /var/lib/apt/lists/*
+FROM debian:bookworm-slim AS code-server-stage-0
+RUN mkdir -p /opt/codeserver/usr
+FROM code-server-stage-${WITH_VSCODE} AS code-server-stage
 
 FROM debian:bookworm-slim
 
@@ -150,6 +174,11 @@ RUN if [ -f /tmp/webchat-stage/aimee-webchat ]; then \
         echo "aimee: webchat bundled in image"; \
     else echo "aimee: webchat not bundled (built with WITH_WEBCHAT=0)"; fi; \
     rm -rf /tmp/webchat-stage
+# Optional code-server: /opt/codeserver/usr is empty unless WITH_VSCODE=1, so
+# this COPY is a no-op in the default build. When present it lands code-server at
+# /usr/bin/code-server; the webchat supervisor launches a per-user instance.
+COPY --from=code-server-stage /opt/codeserver/usr/ /usr/
+RUN if command -v code-server >/dev/null 2>&1; then echo "aimee: code-server bundled ($(code-server --version 2>/dev/null | head -1))"; else echo "aimee: code-server not bundled (built with WITH_VSCODE=0)"; fi
 COPY deploy/container/pam-aimee-webchat /etc/pam.d/aimee-webchat
 COPY deploy/container/webchat-lib.sh /usr/local/bin/webchat-lib.sh
 COPY deploy/container/server-entrypoint.sh /usr/local/bin/aimee-server-entrypoint
