@@ -33,9 +33,10 @@ int main(void)
    assert(webuser_runtime_is_tmpfs(a) == 1); /* the per-user dir is on tmpfs */
    assert(strstr(a, "/webusers/alice") != NULL);
 
-   /* non-webuser / malformed principals are refused */
+   /* non-webuser / malformed principals are refused; out is emptied on error */
    char x[512];
-   assert(webuser_runtime_dir("uid:1000", x, sizeof(x)) == -1);
+   strcpy(x, "STALE");
+   assert(webuser_runtime_dir("uid:1000", x, sizeof(x)) == -1 && x[0] == '\0');
    assert(webuser_runtime_dir("webuser:..", x, sizeof(x)) == -1);
    assert(webuser_runtime_dir("webuser:a/b", x, sizeof(x)) == -1);
 
@@ -47,6 +48,27 @@ int main(void)
       fclose(f);
    webuser_runtime_cleanup("webuser:alice");
    assert(stat(a, &st) != 0); /* gone */
+
+   /* --- partial-failure: a too-small out buffer creates NOTHING (not even the
+    * shared /webusers parent) --- */
+   {
+      char freshbase[256];
+      snprintf(freshbase, sizeof(freshbase), "/dev/shm/aimee-wrt-cap-%d", (int)getpid());
+      setenv("AIMEE_RUNTIME_DIR", freshbase, 1);
+      char tiny[8];
+      assert(webuser_runtime_dir("webuser:alice", tiny, sizeof(tiny)) == -1);
+      char parent[300];
+      snprintf(parent, sizeof(parent), "%s/webusers", freshbase);
+      assert(stat(parent, &st) != 0); /* parent must NOT exist */
+      rmdir(freshbase);               /* base itself also not created on early cap failure */
+      assert(stat(freshbase, &st) != 0);
+      setenv("AIMEE_RUNTIME_DIR", base, 1); /* restore */
+   }
+
+   /* cleanup on a malformed/non-webuser principal is a safe no-op */
+   webuser_runtime_cleanup("webuser:..");
+   webuser_runtime_cleanup("uid:1000");
+   webuser_runtime_cleanup("");
 
    /* --- fail-closed: a non-tmpfs base is refused, nothing created --- */
    /* Find a writable non-tmpfs dir to point the base at. The build/cwd is on

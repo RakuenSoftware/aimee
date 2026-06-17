@@ -76,46 +76,69 @@ static int runtime_base(char *out, size_t cap)
    return 0;
 }
 
-int webuser_runtime_dir(const char *principal, char *out, size_t cap)
+/* Build (NO side effects: no mkdir, no tmpfs check) the per-user runtime dir
+ * path into out[cap], and optionally the base into base_out. Returns 0, or -1 on
+ * a malformed principal / buffer overflow (out emptied). Shared by the creating
+ * resolver and cleanup so cleanup never depends on — or triggers — creation. */
+static int resolve_dir(const char *principal, char *out, size_t cap, char *base_out,
+                       size_t base_cap)
 {
    if (!out || cap == 0)
       return -1;
+   out[0] = '\0';
    char name[WR_NAME_MAX + 1];
    if (principal_name(principal, name, sizeof(name)) != 0)
       return -1;
-
    char base[PATH_MAX];
    if (runtime_base(base, sizeof(base)) != 0)
       return -1;
-   /* Create the base, then assert it is tmpfs BEFORE creating anything under it.
-    * Fail-closed: a non-tmpfs base must never host credential sockets. */
-   if (mkdir(base, 0700) != 0 && errno != EEXIST)
-      return -1;
-   int t = webuser_runtime_is_tmpfs(base);
-   if (t != 1)
-      return -1; /* not tmpfs (or unstat-able) -> refuse */
-
-   int n = snprintf(out, cap, "%s/webusers", base);
-   if (n < 0 || (size_t)n >= cap)
-      return -1;
-   if (mkdir(out, 0700) != 0 && errno != EEXIST)
-      return -1;
-
-   n = snprintf(out, cap, "%s/webusers/%s", base, name);
+   int n = snprintf(out, cap, "%s/webusers/%s", base, name);
    if (n < 0 || (size_t)n >= cap)
    {
       out[0] = '\0';
       return -1;
    }
-   if (mkdir(out, 0700) != 0 && errno != EEXIST)
+   if (base_out)
+   {
+      int bn = snprintf(base_out, base_cap, "%s", base);
+      if (bn < 0 || (size_t)bn >= base_cap)
+         return -1;
+   }
+   return 0;
+}
+
+int webuser_runtime_dir(const char *principal, char *out, size_t cap)
+{
+   char base[PATH_MAX];
+   /* Build + cap-validate the FULL path before creating anything, so an error
+    * path creates nothing (not even the shared /webusers parent). */
+   if (resolve_dir(principal, out, cap, base, sizeof(base)) != 0)
       return -1;
+   char parent[PATH_MAX];
+   if (snprintf(parent, sizeof(parent), "%s/webusers", base) >= (int)sizeof(parent))
+   {
+      out[0] = '\0';
+      return -1;
+   }
+
+   /* Create the base, then assert it is tmpfs BEFORE creating anything under it.
+    * Fail-closed: a non-tmpfs base must never host credential sockets. On any
+    * error `out` is emptied (postcondition: valid path iff return 0). */
+   if ((mkdir(base, 0700) != 0 && errno != EEXIST) || webuser_runtime_is_tmpfs(base) != 1 ||
+       (mkdir(parent, 0700) != 0 && errno != EEXIST) || (mkdir(out, 0700) != 0 && errno != EEXIST))
+   {
+      out[0] = '\0';
+      return -1;
+   }
    return 0;
 }
 
 void webuser_runtime_cleanup(const char *principal)
 {
    char dir[PATH_MAX];
-   if (webuser_runtime_dir(principal, dir, sizeof(dir)) != 0)
+   /* Side-effect-free resolve: cleanup must work without re-creating the dir or
+    * depending on the tmpfs gate. */
+   if (resolve_dir(principal, dir, sizeof(dir), NULL, 0) != 0)
       return;
    /* The per-user runtime dir holds only flat sockets/files we created (0700,
     * our UID) — no subdirs — so unlink each entry then rmdir. No system(), no
