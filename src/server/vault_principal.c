@@ -6,14 +6,51 @@
 #include <stdio.h>
 #include <string.h>
 
+int vault_principal_cert_sanitize(const char *cn, char *out, size_t out_len)
+{
+   if (out && out_len)
+      out[0] = '\0';
+   if (!cn || !cn[0] || !out || out_len == 0)
+      return 0;
+   size_t n = strlen(cn);
+   if (n > VAULT_CERT_CN_MAX || n >= out_len)
+      return 0;
+   for (size_t i = 0; i < n; i++)
+   {
+      unsigned char c = (unsigned char)cn[i];
+      int ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+               c == '.' || c == '_' || c == '-';
+      if (!ok)
+         return 0; /* reject ':' (namespace collision), '/', whitespace, control, etc. */
+   }
+   memcpy(out, cn, n);
+   out[n] = '\0';
+   return 1;
+}
+
 attested_transport_t vault_principal_resolve(int is_tcp, int is_tls, long peer_uid,
-                                             const char *webuser, int webuser_token_ok, char *out,
-                                             size_t out_len)
+                                             const char *webuser, int webuser_token_ok,
+                                             const char *cert_cn, char *out, size_t out_len)
 {
    if (out && out_len)
       out[0] = '\0';
    if (!out || out_len < VAULT_PRINCIPAL_MAX)
       return ATTEST_NONE;
+
+   /* A verified mTLS client cert is the strongest network identity and wins over
+    * bearer-only / a tokenless webuser: the cert chain was verified against
+    * aimee's client CA upstream (server_tls), so its CN names a real client.
+    * Sanitize the CN here (fail-closed): a CN that can't sanitize — e.g. "uid:0",
+    * an embedded ':' / newline / path-traversal — yields NO principal, but the
+    * connection is still classified ATTEST_MTLS_CLIENT so `required`-mode gating
+    * refuses it rather than silently downgrading to a bearer identity. */
+   if (cert_cn && cert_cn[0] && is_tcp && is_tls)
+   {
+      char san[VAULT_CERT_CN_MAX + 1];
+      if (vault_principal_cert_sanitize(cert_cn, san, sizeof(san)))
+         snprintf(out, out_len, VAULT_CERT_PRINCIPAL_PREFIX "%s", san);
+      return ATTEST_MTLS_CLIENT;
+   }
 
    int webuser_asserted = webuser && webuser[0];
    /* A bearer-authorized native-TLS conn (confidential channel) is the operator's

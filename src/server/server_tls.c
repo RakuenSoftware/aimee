@@ -5,7 +5,9 @@
 #include "aimee.h"          /* MAX_PATH_LEN */
 #include "log.h"
 
+#include <openssl/bn.h>
 #include <openssl/err.h>
+#include <openssl/x509.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -16,7 +18,8 @@
 static SSL_CTX *g_ctx = NULL;
 static pthread_mutex_t g_ctx_mu = PTHREAD_MUTEX_INITIALIZER;
 
-int server_tls_init(const char *cert_path, const char *key_path)
+int server_tls_init(const char *cert_path, const char *key_path, int mtls_mode,
+                    const char *client_ca_path)
 {
    if (!cert_path || !cert_path[0] || !key_path || !key_path[0])
       return -1;
@@ -55,10 +58,76 @@ int server_tls_init(const char *cert_path, const char *key_path)
       pthread_mutex_unlock(&g_ctx_mu);
       return -1;
    }
+
+   /* mTLS: verify client certs against aimee's client CA. The chain is verified
+    * by OpenSSL (standard callback); the CN -> principal mapping + revocation
+    * happen later in the identity layer. `required` refuses a handshake with no
+    * client cert; `optional` requests one but allows bearer-only. A CA that won't
+    * load disables mTLS (logged) rather than silently accepting unverified certs. */
+   if (mtls_mode > 0)
+   {
+      char ca[MAX_PATH_LEN];
+      if (client_ca_path && client_ca_path[0])
+         snprintf(ca, sizeof(ca), "%s", client_ca_path);
+      else
+         snprintf(ca, sizeof(ca), "%s/tls/client-ca.crt", config_default_dir());
+      if (SSL_CTX_load_verify_locations(ctx, ca, NULL) != 1)
+      {
+         aimee_log(LOG_WARN, "server.tls",
+                   "mtls enabled but client CA %s not loadable: %s — "
+                   "mTLS DISABLED (client certs not verified)",
+                   ca, ERR_error_string(ERR_get_error(), NULL));
+      }
+      else
+      {
+         int vflags = SSL_VERIFY_PEER;
+         if (mtls_mode >= 2)
+            vflags |= SSL_VERIFY_FAIL_IF_NO_PEER_CERT;
+         SSL_CTX_set_verify(ctx, vflags, NULL);
+         aimee_log(LOG_INFO, "server.tls", "mTLS %s (client CA %s)",
+                   mtls_mode >= 2 ? "required" : "optional", ca);
+      }
+   }
+
    g_ctx = ctx;
    pthread_mutex_unlock(&g_ctx_mu);
    aimee_log(LOG_INFO, "server.tls", "native TLS enabled (cert %s)", cert_path);
    return 0;
+}
+
+int server_tls_peer_identity(SSL *ssl, char *cn_out, size_t cn_len, char *serial_out,
+                             size_t serial_len)
+{
+   if (cn_out && cn_len)
+      cn_out[0] = '\0';
+   if (serial_out && serial_len)
+      serial_out[0] = '\0';
+   if (!ssl || SSL_get_verify_result(ssl) != X509_V_OK)
+      return 0;
+   X509 *cert = SSL_get_peer_certificate(ssl);
+   if (!cert)
+      return 0; /* bearer-only TLS conn: no client cert */
+
+   int ok = 0;
+   X509_NAME *subj = X509_get_subject_name(cert);
+   if (subj && cn_out && cn_len &&
+       X509_NAME_get_text_by_NID(subj, NID_commonName, cn_out, (int)cn_len) > 0)
+      ok = 1;
+   if (ok && serial_out && serial_len)
+   {
+      ASN1_INTEGER *sn = X509_get_serialNumber(cert);
+      BIGNUM *bn = sn ? ASN1_INTEGER_to_BN(sn, NULL) : NULL;
+      char *hex = bn ? BN_bn2hex(bn) : NULL;
+      if (hex)
+      {
+         snprintf(serial_out, serial_len, "%s", hex);
+         OPENSSL_free(hex);
+      }
+      if (bn)
+         BN_free(bn);
+   }
+   X509_free(cert);
+   return ok;
 }
 
 int server_tls_enabled(void)
@@ -93,7 +162,9 @@ int server_tls_init_default(void)
    char cert[MAX_PATH_LEN], key[MAX_PATH_LEN];
    snprintf(cert, sizeof(cert), "%s/tls/server.crt", config_default_dir());
    snprintf(key, sizeof(key), "%s/tls/server.key", config_default_dir());
-   return server_tls_init(cert, key);
+   config_t cfg;
+   config_load(&cfg);
+   return server_tls_init(cert, key, cfg.server_api_mtls, cfg.server_api_mtls_client_ca);
 }
 
 SSL *server_tls_begin(int fd)

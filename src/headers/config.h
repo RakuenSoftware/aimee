@@ -1033,6 +1033,14 @@ typedef struct config
     * connection is an attested write path for the credential vault (native-TLS
     * provisioning). Streaming (SSE) over TLS is not yet supported (phase 1c). */
    int server_api_tls_port;
+   /* server_api_mtls: mutual-TLS client-identity mode for the native-TLS listener
+    * (mtls-client-identity). 0 = off (default), 1 = optional (request a client
+    * cert; bearer-only still works — a documented downgrade), 2 = required (refuse
+    * a TLS conn without a valid client cert). A verified client cert becomes a
+    * per-client "cert:<CN>" principal. */
+   int server_api_mtls;
+   /* PEM bundle of the CA(s) that signed client certs. Empty => <config>/tls/client-ca.crt. */
+   char server_api_mtls_client_ca[MAX_PATH_LEN];
    char server_api_bearer_token[256];
    int server_api_rate_limit_per_min;
    /* server_api_max_event_streams: cap on concurrent SSE event streams
