@@ -22,7 +22,7 @@ static int is_skip_dir(const char *name)
    static const char *skip[] = {"node_modules", ".git",   "vendor",     "__pycache__", "build",
                                 "dist",         "target", ".worktrees", ".aimee",      "bin",
                                 "obj",          ".cache", ".venv",      "venv",        ".tox",
-                                "coverage",     NULL};
+                                "coverage",     "sdks",   NULL};
    for (int i = 0; skip[i]; i++)
    {
       if (strcmp(name, skip[i]) == 0)
@@ -31,12 +31,19 @@ static int is_skip_dir(const char *name)
    return 0;
 }
 
-static int is_git_dir(const char *path)
+/* Classify a directory's .git entry: 0 = not a repo, 1 = real checkout (.git is
+ * a directory), 2 = linked worktree (.git is a regular file: "gitdir: <path>").
+ * Linked worktrees are duplicate working copies of an already-tracked repo, so
+ * auto-discovery skips them (see discover_recursive) to avoid indexing the same
+ * codebase once per worktree. */
+static int git_dir_kind(const char *path)
 {
    char git_path[MAX_PATH_LEN];
    struct stat st;
    snprintf(git_path, sizeof(git_path), "%s/.git", path);
-   return (stat(git_path, &st) == 0);
+   if (stat(git_path, &st) != 0)
+      return 0;
+   return S_ISDIR(st.st_mode) ? 1 : 2;
 }
 
 static void discover_recursive(const char *dir, int depth, int max_depth,
@@ -45,8 +52,13 @@ static void discover_recursive(const char *dir, int depth, int max_depth,
    if (depth > max_depth || *count >= max)
       return;
 
-   /* Check if this directory itself is a git repo */
-   if (is_git_dir(dir))
+   /* Register this directory as a project if it's a git repo. A real checkout
+    * (.git dir) always counts. A linked worktree (.git file) is a second working
+    * copy of a repo that's tracked elsewhere — counting each one re-indexes the
+    * same codebase N times — so it's only honored when added explicitly (the
+    * root of the scan, depth 0), never as a sibling found during descent. */
+   int gk = git_dir_kind(dir);
+   if (gk == 1 || (gk == 2 && depth == 0))
    {
       char abs[MAX_PATH_LEN];
       if (realpath(dir, abs))

@@ -369,7 +369,7 @@ static int index_is_skip_dir(const char *name)
    static const char *skip[] = {"node_modules", ".git",   "vendor",     "__pycache__", "build",
                                 "dist",         "target", ".worktrees", ".aimee",      "bin",
                                 "obj",          ".cache", ".venv",      "venv",        ".tox",
-                                "coverage",     NULL};
+                                "coverage",     "sdks",   NULL};
    for (int i = 0; skip[i]; i++)
       if (strcmp(name, skip[i]) == 0)
          return 1;
