@@ -47,8 +47,60 @@ void config_kb_curator_defaults(config_t *cfg)
    cfg->kb_curator_synthesize_k = 8;
    cfg->kb_curator_extract_max_tokens = 2048;
    cfg->kb_curator_max_attempts = 3;
+   cfg->kb_curator_provider_base_url[0] = '\0';
+   cfg->kb_curator_provider_model[0] = '\0';
+   cfg->kb_curator_provider_api_key[0] = '\0';
+   cfg->kb_curator_tier_b_base_url[0] = '\0';
+   cfg->kb_curator_tier_b_model[0] = '\0';
+   cfg->kb_curator_tier_b_api_key[0] = '\0';
    cfg->kb_evidence_embed_enabled = 1;
    cfg->kb_evidence_embed_batch = 32;
+}
+
+/* Parse a curator provider sub-object {base_url, model, api_key} under `curator`
+ * into the given fields. Missing keys leave the field untouched (its default). */
+static void parse_curator_provider(const cJSON *curator, const char *key, char *base_url,
+                                   size_t bsz, char *model, size_t msz, char *api_key, size_t ksz)
+{
+   const cJSON *p = cJSON_GetObjectItemCaseSensitive(curator, key);
+   if (!p)
+      return;
+   if (!cJSON_IsObject(p))
+   {
+      config_issue("\"kb.curator.%s\" expected object, got %s", key, jo_type_name(p));
+      return;
+   }
+   const cJSON *b = cJSON_GetObjectItemCaseSensitive(p, "base_url");
+   if (b)
+   {
+      if (!cJSON_IsString(b) || !b->valuestring)
+         config_issue("\"kb.curator.%s.base_url\" expected string, got %s", key, jo_type_name(b));
+      else
+         snprintf(base_url, bsz, "%s", b->valuestring);
+   }
+   const cJSON *m = cJSON_GetObjectItemCaseSensitive(p, "model");
+   if (m)
+   {
+      if (!cJSON_IsString(m) || !m->valuestring)
+         config_issue("\"kb.curator.%s.model\" expected string, got %s", key, jo_type_name(m));
+      else
+         snprintf(model, msz, "%s", m->valuestring);
+   }
+   const cJSON *k = cJSON_GetObjectItemCaseSensitive(p, "api_key");
+   if (k)
+   {
+      if (!cJSON_IsString(k) || !k->valuestring)
+         config_issue("\"kb.curator.%s.api_key\" expected string, got %s", key, jo_type_name(k));
+      else
+         snprintf(api_key, ksz, "%s", k->valuestring);
+   }
+
+   /* A provider is only usable with a base_url + model; warn on a partial object
+    * (e.g. a key/model with no endpoint) so it doesn't silently resolve to idle. */
+   if (base_url[0] && !model[0])
+      config_issue("\"kb.curator.%s\" has base_url but no model (provider unusable)", key);
+   if (!base_url[0] && (model[0] || api_key[0]))
+      config_issue("\"kb.curator.%s\" set without base_url (tier stays idle)", key);
 }
 
 int config_parse_kb_curator(config_t *cfg, const cJSON *root)
@@ -222,6 +274,17 @@ int config_parse_kb_curator(config_t *cfg, const cJSON *root)
       snprintf(cfg->kb_curator_synthesize_command, sizeof(cfg->kb_curator_synthesize_command), "%s",
                synth_command->valuestring);
 
+   /* Curator LLM providers (§2): default/Tier-A under "provider", reasoning
+    * stages under "tier_b". */
+   parse_curator_provider(curator, "provider", cfg->kb_curator_provider_base_url,
+                          sizeof(cfg->kb_curator_provider_base_url), cfg->kb_curator_provider_model,
+                          sizeof(cfg->kb_curator_provider_model), cfg->kb_curator_provider_api_key,
+                          sizeof(cfg->kb_curator_provider_api_key));
+   parse_curator_provider(curator, "tier_b", cfg->kb_curator_tier_b_base_url,
+                          sizeof(cfg->kb_curator_tier_b_base_url), cfg->kb_curator_tier_b_model,
+                          sizeof(cfg->kb_curator_tier_b_model), cfg->kb_curator_tier_b_api_key,
+                          sizeof(cfg->kb_curator_tier_b_api_key));
+
    const cJSON *max_tokens = cJSON_GetObjectItemCaseSensitive(curator, "extract_max_tokens");
    if (max_tokens)
    {
@@ -284,6 +347,24 @@ static void kb_curator_save_gate(cJSON *cur, const char *name, int enabled)
       cJSON_AddBoolToObject(o, "enabled", 1);
 }
 
+/* Inverse of parse_curator_provider: emit {base_url, model, api_key} under `name`
+ * only when at least one field is set (a clean install writes nothing). */
+static void kb_curator_save_provider(cJSON *cur, const char *name, const char *base_url,
+                                     const char *model, const char *api_key)
+{
+   if (!base_url[0] && !model[0] && !api_key[0])
+      return;
+   cJSON *p = cJSON_AddObjectToObject(cur, name);
+   if (!p)
+      return;
+   if (base_url[0])
+      cJSON_AddStringToObject(p, "base_url", base_url);
+   if (model[0])
+      cJSON_AddStringToObject(p, "model", model);
+   if (api_key[0])
+      cJSON_AddStringToObject(p, "api_key", api_key);
+}
+
 /* Serialize the kb.curator.* and kb.evidence.embed.* config back into `root`,
  * the inverse of config_parse_kb_curator. Only emitted when something differs
  * from the defaults, so a clean install writes nothing. This is what lets the
@@ -299,7 +380,10 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
        cfg->kb_curator_extract_command[0] || cfg->kb_curator_judge_command[0] ||
        cfg->kb_curator_synthesize_command[0] || cfg->kb_curator_extract_max_tokens != 2048 ||
        cfg->kb_curator_max_attempts != 3 || cfg->kb_curator_synthesize_k != 8 ||
-       cfg->kb_curator_promote_min_sources != 3;
+       cfg->kb_curator_promote_min_sources != 3 || cfg->kb_curator_provider_base_url[0] ||
+       cfg->kb_curator_provider_model[0] || cfg->kb_curator_provider_api_key[0] ||
+       cfg->kb_curator_tier_b_base_url[0] || cfg->kb_curator_tier_b_model[0] ||
+       cfg->kb_curator_tier_b_api_key[0];
    int evidence_any = !cfg->kb_evidence_embed_enabled || cfg->kb_evidence_embed_batch != 32;
    if (!curator_any && !evidence_any)
       return;
@@ -355,6 +439,10 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
             cJSON_AddNumberToObject(cur, "extract_max_tokens", cfg->kb_curator_extract_max_tokens);
          if (cfg->kb_curator_max_attempts != 3)
             cJSON_AddNumberToObject(cur, "max_attempts", cfg->kb_curator_max_attempts);
+         kb_curator_save_provider(cur, "provider", cfg->kb_curator_provider_base_url,
+                                  cfg->kb_curator_provider_model, cfg->kb_curator_provider_api_key);
+         kb_curator_save_provider(cur, "tier_b", cfg->kb_curator_tier_b_base_url,
+                                  cfg->kb_curator_tier_b_model, cfg->kb_curator_tier_b_api_key);
       }
    }
 
