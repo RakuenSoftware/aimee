@@ -272,6 +272,12 @@ aimee_tls_t *aimee_tls_connect(int fd, const char *host)
    /* We validate the chain + hostname ourselves post-handshake, so tell Schannel
     * not to auto-validate (and never use a machine default client cert). */
    sc.dwFlags = SCH_CRED_NO_DEFAULT_CREDS | SCH_CRED_MANUAL_CRED_VALIDATION | SCH_USE_STRONG_CRYPTO;
+   /* mTLS client-cert presentation (slice 3b, follow-up): to present
+    * <aimee_home>/tls/client.{crt,key} as this client's identity, build a
+    * CERT_CONTEXT (PEM -> CertCreateCertificateContext) with an associated CNG
+    * private key and set sc.cCreds/sc.paCred here. Deferred: EC-key import via
+    * CryptoAPI is intricate and must be validated on real Windows (as the
+    * native backend itself was). The OpenSSL backend presents the cert today. */
 
    if (AcquireCredentialsHandleA(NULL, (SEC_CHAR *)UNISP_NAME_A, SECPKG_CRED_OUTBOUND, NULL, &sc,
                                  NULL, NULL, &t->cred, NULL) != SEC_E_OK)

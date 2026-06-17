@@ -32,6 +32,15 @@ extern "C"
    /* Shut down and free the handle (does not close the underlying fd). */
    void aimee_tls_free(aimee_tls_t *t);
 
+   /* Decide whether client mTLS material under |home| should be presented as
+    * this client's certificate, filling the resolved <home>/tls/client.{crt,key}
+    * paths. Returns 1 (present: both exist, key is owner-only), 0 (none
+    * configured), or -1 (refused: the key is group/world-readable — fail
+    * closed). Pure; the OpenSSL backend calls it before the handshake. Exposed
+    * for unit testing the fail-closed permission gate. */
+   int aimee_tls_client_cert_eligible(const char *home, char *crt, size_t crt_n, char *key,
+                                      size_t key_n);
+
 #ifdef __cplusplus
 }
 #endif
