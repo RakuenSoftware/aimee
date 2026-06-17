@@ -41,15 +41,20 @@ extern "C"
    /* Which tier a stage belongs to. */
    kb_curator_tier_t kb_curator_stage_tier(kb_curator_stage_t stage);
 
-   /* Fill *out with the provider def for `stage`: Tier-A stages use the default
-    * `provider.*` config, Tier-B stages use `tier_b.*` (never the Tier-A default).
-    * Returns 1 when that tier is configured (out filled; base_url non-empty), 0
-    * when it is unconfigured (out zeroed — the stage must stay idle).
+   /* Fill *out with the provider def for `stage`. Resolution per tier:
+    *   1. tier config — Tier-A uses `provider.*`, Tier-B uses `tier_b.*`
+    *      (never the Tier-A config; no weak fallback between config tiers);
+    *   2. else the curator env — LLM_ENDPOINT/LLM_MODEL/LLM_API_KEY (a single
+    *      endpoint that serves both tiers, matching the bundled-model deployment);
+    *   3. else idle.
+    * Returns 1 when configured (out filled; base_url non-empty), 0 when idle
+    * (out zeroed — the stage must not run).
     *
-    * Lifetime: out->base_url/model alias strings inside *cfg, so keep cfg alive
-    * (and unmodified) while using *out — the def is a borrowed view, not a copy.
-    * out->api_key is either a pointer into *cfg or NULL when no key is configured
-    * (a keyless local endpoint); provider_client treats NULL as "no bearer". */
+    * Lifetime: out->base_url/model/api_key alias strings owned elsewhere — either
+    * inside *cfg (config path) or the process environment (env path). Keep *cfg
+    * alive and don't mutate the environment (setenv/putenv) while using *out; the
+    * def is a borrowed view, not a copy. out->api_key is NULL when no key applies
+    * (keyless local endpoint); provider_client treats NULL as "no bearer". */
    int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
                                      provider_def_t *out);
 
