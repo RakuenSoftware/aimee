@@ -152,12 +152,16 @@ static CFArrayRef securetransport_load_client_identity(SecKeychainRef *out_kc)
    if (!data)
       return NULL;
 
-   /* Create the transient keychain under the temp dir, unique per process. */
+   /* Create the transient keychain under the temp dir, unique per connection
+    * (pid + atomic counter) so concurrent connections in one process don't race
+    * on the same path. */
+   static volatile int s_ctr;
    const char *tmp = getenv("TMPDIR");
    if (!tmp || !*tmp)
       tmp = "/tmp";
    char kcpath[800];
-   snprintf(kcpath, sizeof(kcpath), "%s/aimee-mtls-%d.keychain", tmp, (int)getpid());
+   snprintf(kcpath, sizeof(kcpath), "%s/aimee-mtls-%d-%d.keychain", tmp, (int)getpid(),
+            __sync_add_and_fetch(&s_ctr, 1));
    unlink(kcpath); /* SecKeychainCreate fails if the file already exists */
    static const char kcpw[] = "aimee-transient-mtls";
    SecKeychainRef kc = NULL;
