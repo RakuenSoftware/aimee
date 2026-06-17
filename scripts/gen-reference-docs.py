@@ -195,6 +195,7 @@ CFG_KEY_DESC = {
     "memory_scenes_enabled": "Cluster memories into scenes.",
     "memory_scenes_min_cluster_size": "Min cluster size for a scene.",
     "memory_scenes_top_m": "Top-M scenes to consider.",
+    "memory_semantic_floor_scale": "Multiplier on the semantic-recall cosine floors (0 = auto-scale by the active embedder dimension; >0 pins it).",
     "memory_semantic_weight": "Semantic (vector) weight in hybrid recall.",
     "memory_window_radius": "Neighbour radius for memory-window expansion.",
     "openai_endpoint": "OpenAI-compatible endpoint URL.",
