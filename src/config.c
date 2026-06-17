@@ -770,10 +770,6 @@ int config_load(config_t *cfg)
    if (cJSON_IsBool(item))
       cfg->claude_cli_delegate_enabled = cJSON_IsTrue(item);
 
-   item = cJSON_GetObjectItemCaseSensitive(root, "server_cli_oauth_enabled");
-   if (cJSON_IsBool(item))
-      cfg->server_cli_oauth_enabled = cJSON_IsTrue(item);
-
    item = cJSON_GetObjectItemCaseSensitive(root, "verify_cross_project");
    if (cJSON_IsBool(item))
       cfg->verify_cross_project = cJSON_IsTrue(item);

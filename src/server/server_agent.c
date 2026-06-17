@@ -13,7 +13,7 @@
 #include "vault_service.h"    /* vault_service_set / set_server, VAULT_API_KEY_CRED */
 #include "vault_capability.h" /* vault_capability_server_write_allowed (single server-write gate) */
 #include "server_cli_oauth.h" /* server-hosted OAuth CLI agent setup */
-#include "config.h"           /* server_cli_oauth_enabled gate */
+#include "config.h"           /* config_load / config_t */
 #include <pthread.h>
 #include <string.h>
 #include <stdlib.h>
@@ -970,13 +970,8 @@ int handle_agent_setup_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 static int sagent_cli_oauth_gate(server_conn_t *conn, cJSON *req, cli_oauth_vendor_t *v)
 {
-   config_t cfg;
-   config_load(&cfg);
-   if (!cfg.server_cli_oauth_enabled)
-      return server_send_error(conn,
-                               "server-hosted OAuth CLI agents are disabled; set "
-                               "server_cli_oauth_enabled=true to opt in (DELEGATES.md)",
-                               NULL);
+   /* Server-hosted OAuth CLI agent setup is always available — there is no
+    * opt-in gate. Only the vendor argument is validated here. */
    cJSON *jv = cJSON_GetObjectItemCaseSensitive(req, "vendor");
    if (!cJSON_IsString(jv) || cli_oauth_vendor_parse(jv->valuestring, v) != 0)
       return server_send_error(conn, "vendor must be 'claude' or 'codex'", NULL);
