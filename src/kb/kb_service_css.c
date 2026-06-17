@@ -223,6 +223,84 @@ int kb_handle_css_signals(int fd, cJSON *req)
       cJSON_AddNumberToObject(resp, "min_count", min_count);
       return kb_send_response(fd, resp);
    }
+   if (strcmp(op, "report") == 0)
+   {
+      /* One-shot CSS-health overview: run every signal, return counts + the top
+       * few offenders per category. Read-only. */
+      const int RCAP = 2000;
+      cJSON *summary = cJSON_CreateObject();
+      cJSON *top = cJSON_CreateObject();
+#define CSS_REPORT_COUNT(key, type, fn)                                                            \
+   do                                                                                              \
+   {                                                                                               \
+      type *_h = (type *)malloc((size_t)RCAP * sizeof(type));                                      \
+      int _n = _h ? fn(project, _h, RCAP) : 0;                                                     \
+      cJSON_AddNumberToObject(summary, key, _n < 0 ? 0 : _n);                                      \
+      free(_h);                                                                                    \
+   } while (0)
+      CSS_REPORT_COUNT("dead_rules", css_dead_rule_hit_t, db2_css_dead_rules);
+      CSS_REPORT_COUNT("specificity_conflicts", css_spec_conflict_t,
+                       db2_css_graph_specificity_conflicts);
+      CSS_REPORT_COUNT("duplicate_declarations", css_dup_decl_t,
+                       db2_css_graph_duplicate_declarations);
+      CSS_REPORT_COUNT("duplicate_selectors", css_dup_selector_t,
+                       db2_css_graph_duplicate_selectors);
+      CSS_REPORT_COUNT("unresolved_classes", css_unresolved_hit_t, db2_css_component_unresolved);
+      CSS_REPORT_COUNT("high_specificity_rules", css_high_spec_t, db2_css_high_specificity);
+#undef CSS_REPORT_COUNT
+      /* !important: total declarations + top properties. */
+      {
+         css_important_t *h = (css_important_t *)malloc((size_t)RCAP * sizeof(*h));
+         int n = h ? db2_css_important_audit(project, h, RCAP) : 0;
+         int total = 0;
+         cJSON *arr = cJSON_CreateArray();
+         for (int i = 0; i < n; i++)
+         {
+            total += h[i].count;
+            if (i < 5)
+            {
+               cJSON *o = cJSON_CreateObject();
+               cJSON_AddStringToObject(o, "property", h[i].property);
+               cJSON_AddNumberToObject(o, "count", h[i].count);
+               cJSON_AddItemToArray(arr, o);
+            }
+         }
+         cJSON_AddNumberToObject(summary, "important_declarations", total);
+         cJSON_AddItemToObject(top, "important", arr);
+         free(h);
+      }
+      /* unused custom properties: count + top names. */
+      {
+         css_unused_var_t *h = (css_unused_var_t *)malloc((size_t)RCAP * sizeof(*h));
+         int n = h ? db2_css_unused_custom_properties(project, h, RCAP) : 0;
+         cJSON *arr = cJSON_CreateArray();
+         for (int i = 0; i < n && i < 5; i++)
+            cJSON_AddItemToArray(arr, cJSON_CreateString(h[i].name));
+         cJSON_AddNumberToObject(summary, "unused_custom_properties", n < 0 ? 0 : n);
+         cJSON_AddItemToObject(top, "unused_vars", arr);
+         free(h);
+      }
+      /* token candidates (>= 3 repeats): count + top values. */
+      {
+         css_token_cand_t *h = (css_token_cand_t *)malloc((size_t)RCAP * sizeof(*h));
+         int n = h ? db2_css_token_candidates(project, 3, h, RCAP) : 0;
+         cJSON *arr = cJSON_CreateArray();
+         for (int i = 0; i < n && i < 5; i++)
+         {
+            cJSON *o = cJSON_CreateObject();
+            cJSON_AddStringToObject(o, "value", h[i].value);
+            cJSON_AddStringToObject(o, "kind", h[i].kind);
+            cJSON_AddNumberToObject(o, "count", h[i].count);
+            cJSON_AddItemToArray(arr, o);
+         }
+         cJSON_AddNumberToObject(summary, "token_candidates", n < 0 ? 0 : n);
+         cJSON_AddItemToObject(top, "token_candidates", arr);
+         free(h);
+      }
+      cJSON_AddItemToObject(resp, "summary", summary);
+      cJSON_AddItemToObject(resp, "top", top);
+      return kb_send_response(fd, resp);
+   }
    if (strcmp(op, "render-store") == 0)
    {
       /* #4-full evidence ingest: a (sandboxed, out-of-process) render backend's
