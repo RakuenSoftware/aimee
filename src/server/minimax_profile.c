@@ -8,6 +8,7 @@
 #include <stdio.h>
 
 static const char *minimax_env_vars[] = {"MINIMAX_API_KEY", NULL};
+/* M2.7 is kept as the fallback model behind the M3 default. */
 static const char *minimax_fallback_models[] = {"MiniMax-M2.7", NULL};
 
 static int minimax_fetch_models(model_provider_t *p, char ***models_out, int *n_out)
@@ -73,15 +74,15 @@ static int minimax_fetch_models(model_provider_t *p, char ***models_out, int *n_
 model_provider_t minimax_provider = {
     .name = "minimax",
     .display_name = "MiniMax",
-    .description = "MiniMax API (MiniMax-M2.7)",
+    .description = "MiniMax API (MiniMax-M3)",
     .base_url = "https://api.minimax.io/v1",
     .models_url = "https://api.minimax.io/v1/models",
     .signup_url = "https://platform.minimax.io",
     .auth_type = "api_key",
     .env_vars = minimax_env_vars,
     .api_mode = API_MODE_CHAT_COMPLETIONS,
-    .default_model = "MiniMax-M2.7",
-    .default_aux_model = "MiniMax-M2.7",
+    .default_model = "MiniMax-M3",
+    .default_aux_model = "MiniMax-M3",
     .fallback_models = minimax_fallback_models,
     .fixed_temperature = -1,
     .default_max_tokens = 8192,

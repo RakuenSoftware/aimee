@@ -234,6 +234,41 @@ static void test_claude_cli_predicate(void)
    assert(agent_is_claude_cli(&a) == 0);
 }
 
+/* A reasoning model with no operator timeout gets the higher reasoning default;
+ * a non-reasoning model keeps the standard default; an explicit value always wins. */
+static void test_reasoning_timeout_default(void)
+{
+   const char *cfg_dir = config_default_dir();
+   assert(platform_mkdir_p(cfg_dir, 0700) == 0 || access(cfg_dir, F_OK) == 0);
+   {
+      FILE *f = fopen(agent_config_path(), "w");
+      assert(f != NULL);
+      fputs("{\"agents\":["
+            /* minimax => MODEL_CAP_REASONING; no timeout_ms => reasoning default */
+            "{\"name\":\"rsn\",\"provider\":\"minimax\",\"model\":\"MiniMax-M3\","
+            "\"endpoint\":\"https://api.minimax.io/v1/chat/completions\",\"roles\":[\"review\"]},"
+            /* mistral => not reasoning; no timeout_ms => standard default */
+            "{\"name\":\"plain\",\"provider\":\"mistral\",\"model\":\"mistral-medium-latest\","
+            "\"endpoint\":\"https://api.mistral.ai/v1/chat/completions\",\"roles\":[\"review\"]},"
+            /* explicit timeout always wins, even for a reasoning model */
+            "{\"name\":\"pinned\",\"provider\":\"minimax\",\"model\":\"MiniMax-M3\","
+            "\"endpoint\":\"https://api.minimax.io/v1/chat/completions\",\"timeout_ms\":5000,"
+            "\"roles\":[\"review\"]}]}\n",
+            f);
+      fclose(f);
+   }
+   agent_config_t cfg;
+   assert(agent_load_config(&cfg) == 0);
+   agent_t *rsn = agent_find(&cfg, "rsn");
+   agent_t *plain = agent_find(&cfg, "plain");
+   agent_t *pinned = agent_find(&cfg, "pinned");
+   assert(rsn && plain && pinned);
+   assert(rsn->timeout_ms == AGENT_REASONING_TIMEOUT_MS);
+   assert(plain->timeout_ms == AGENT_DEFAULT_TIMEOUT_MS);
+   assert(pinned->timeout_ms == 5000);
+   printf("  PASS: test_reasoning_timeout_default\n");
+}
+
 int main(void)
 {
    char tmp_template[] = "/tmp/aimee-agent-apikey-XXXXXX";
@@ -247,6 +282,7 @@ int main(void)
 
    test_agent_route_health_filter();
    test_agent_loop_per_call_timeout();
+   test_reasoning_timeout_default();
    test_claude_cli_predicate();
    printf("agent_apikey: all tests passed\n");
    return 0;
