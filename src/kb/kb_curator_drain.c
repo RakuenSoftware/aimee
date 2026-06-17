@@ -1,8 +1,8 @@
 /* kb_curator_drain.c: curator drain thread — polls for pending extract_doc
- * jobs, rate-limits via a sliding-window ring buffer, and calls
- * kb_curator_extract_one() to process each job. The same thread also drains
- * the evidence_index_ops embed queue (kb_evidence_embed_drain), independent of
- * the curator extract gates.
+ * jobs and calls kb_curator_extract_one() to process each, draining the backlog
+ * continuously and then idling (no artificial rate cap; §5 of curator-llm-
+ * backend). The same thread also drains the evidence_index_ops embed queue
+ * (kb_evidence_embed_drain), independent of the curator extract gates.
  * No DB1 access from this file. */
 
 #ifndef _GNU_SOURCE
@@ -48,17 +48,9 @@ static void *drain_thread_main(void *arg)
    config_t cfg;
    config_load(&cfg);
 
-   int max_jobs = cfg.kb_curator_max_jobs_per_hour > 0 ? cfg.kb_curator_max_jobs_per_hour : 120;
-
-   /* Ring buffer of completion timestamps for rate limiting */
-   long *ring = calloc((size_t)max_jobs, sizeof(long));
-   if (!ring)
-   {
-      aimee_log(LOG_WARN, "kb.curator.drain", "out of memory; drain thread exiting");
-      return NULL;
-   }
-   int ring_head = 0;
-   int ring_count = 0;
+   /* No artificial rate cap (§5): the curator drains the backlog continuously and
+    * then idles. The natural throttle is backend throughput; cost control for a
+    * paid provider lives at the provider (endpoint choice / its own limits). */
 
    long last_cfg_reload = (long)time(NULL);
 
@@ -78,20 +70,6 @@ static void *drain_thread_main(void *arg)
       {
          config_load(&cfg);
          last_cfg_reload = now;
-         int new_max =
-             cfg.kb_curator_max_jobs_per_hour > 0 ? cfg.kb_curator_max_jobs_per_hour : 120;
-         if (new_max != max_jobs)
-         {
-            long *new_ring = calloc((size_t)new_max, sizeof(long));
-            if (new_ring)
-            {
-               free(ring);
-               ring = new_ring;
-               ring_head = 0;
-               ring_count = 0;
-               max_jobs = new_max;
-            }
-         }
       }
 
       /* Evidence-vector embed drain — runs every poll, independent of the
@@ -180,25 +158,6 @@ static void *drain_thread_main(void *arg)
          continue;
       }
 
-      /* Rate limiting: check if window is full */
-      if (ring_count >= max_jobs)
-      {
-         int oldest_idx = (ring_head - ring_count + max_jobs) % max_jobs;
-         long oldest_ts = ring[oldest_idx];
-         long age = now - oldest_ts;
-         if (age < 3600)
-         {
-            kb_background_set("curator", "rate-limited window=%d/%d", ring_count, max_jobs);
-            aimee_log(LOG_DEBUG, "kb.curator.drain",
-                      "rate limit: %d/%d jobs in last hour; sleeping %lds", ring_count, max_jobs,
-                      3600 - age);
-            sleep((int)(3600 - age));
-            continue;
-         }
-         /* Oldest entry expired — slide the window */
-         ring_count--;
-      }
-
       kb_curator_extract_opts_t opts;
       memset(&opts, 0, sizeof(opts));
       snprintf(opts.extract_command, sizeof(opts.extract_command), "%s",
@@ -210,64 +169,59 @@ static void *drain_thread_main(void *arg)
       int rc = 0;
       if (cfg.kb_curator_extract_docs_enabled)
       {
-         kb_background_set("curator", "extract docs (window=%d/%d)", ring_count, max_jobs);
+         kb_background_set("curator", "extract docs");
          rc = kb_curator_extract_one(&opts);
       }
       if (rc == 0 && cfg.kb_curator_extract_code_enabled)
       {
-         kb_background_set("curator", "extract code (window=%d/%d)", ring_count, max_jobs);
+         kb_background_set("curator", "extract code");
          rc = kb_curator_extract_code_unit_one(&opts);
       }
       if (rc == 0 && cfg.kb_curator_resolve_entities_enabled)
       {
-         kb_background_set("curator", "resolve entities (window=%d/%d)", ring_count, max_jobs);
+         kb_background_set("curator", "resolve entities");
          rc = kb_curator_resolve_entities_one(&opts);
       }
       if (rc == 0 && cfg.kb_curator_index_narrative_enabled)
       {
-         kb_background_set("curator", "index narrative (window=%d/%d)", ring_count, max_jobs);
+         kb_background_set("curator", "index narrative");
          rc = kb_curator_index_narrative_one(&opts);
       }
       if (rc == 0 && cfg.kb_curator_index_claims_enabled)
       {
-         kb_background_set("curator", "index claims (window=%d/%d)", ring_count, max_jobs);
+         kb_background_set("curator", "index claims");
          rc = kb_curator_index_claims_one(&opts);
       }
       if (rc == 0 && cfg.kb_curator_detect_contradictions_enabled)
       {
-         kb_background_set("curator", "detect contradictions (window=%d/%d)", ring_count, max_jobs);
+         kb_background_set("curator", "detect contradictions");
          rc = kb_curator_detect_contradictions_one(&opts);
       }
       if (rc == 0 && cfg.kb_curator_index_code_unit_enabled)
       {
-         kb_background_set("curator", "index code_unit (window=%d/%d)", ring_count, max_jobs);
+         kb_background_set("curator", "index code_unit");
          rc = kb_curator_index_code_unit_one(&opts);
       }
       if (rc == 0 && cfg.kb_curator_link_artifacts_enabled)
       {
-         kb_background_set("curator", "link artifacts (window=%d/%d)", ring_count, max_jobs);
+         kb_background_set("curator", "link artifacts");
          rc = kb_curator_link_artifacts_one(&opts);
       }
       if (rc == 0 && cfg.kb_curator_synthesize_enabled)
       {
-         kb_background_set("curator", "synthesize topic (window=%d/%d)", ring_count, max_jobs);
+         kb_background_set("curator", "synthesize topic");
          rc = kb_curator_synthesize_one(&opts);
       }
       if (rc == 0 && cfg.kb_curator_promote_entity_enabled)
       {
-         kb_background_set("curator", "promote entity (window=%d/%d)", ring_count, max_jobs);
+         kb_background_set("curator", "promote entity");
          rc = kb_curator_promote_entity_one(&opts);
       }
 
       if (rc == 1)
       {
-         /* Record completion in ring buffer */
-         ring[ring_head % max_jobs] = (long)time(NULL);
-         ring_head = (ring_head + 1) % max_jobs;
-         if (ring_count < max_jobs)
-            ring_count++;
-         aimee_log(LOG_DEBUG, "kb.curator.drain", "job processed (%d/%d in window)", ring_count,
-                   max_jobs);
+         /* Job processed — loop straight back to drain the next one (no cap). */
+         aimee_log(LOG_DEBUG, "kb.curator.drain", "job processed");
       }
       else if (rc == 0)
       {
@@ -277,13 +231,17 @@ static void *drain_thread_main(void *arg)
       }
       else
       {
-         aimee_log(LOG_WARN, "kb.curator.drain", "extractor returned error");
+         /* Stage error: back off a poll interval before retrying. With the rate
+          * cap gone this is the only thing keeping a persistently-failing stage
+          * (bad provider, schema always rejected) from spinning the loop hot. */
+         aimee_log(LOG_WARN, "kb.curator.drain", "extractor returned error; backing off");
+         kb_background_clear("curator");
+         sleep(DRAIN_POLL_SECS);
       }
       kb_background_clear("curator");
    }
 
    kb_background_clear("curator");
-   free(ring);
    return NULL;
 }
 

@@ -5,7 +5,7 @@
 
 #include "util.h"         /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
 #include "aimee_client.h" /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
-#include "code_collect.h" /* code_collect_files: thin-client workspace push */
+#include "code_collect.h" /* code_collect_files + code_collect_discover_repos (thin-client push) */
 #if !defined(_WIN32) && !defined(_WIN64)
 #include "aimee_home.h"
 #include <dirent.h>
@@ -7324,6 +7324,39 @@ static int cli_ws_ingest_root(const char *remote, const char *bearer, const char
    return (s.failed || s.oom) ? 1 : 0;
 }
 
+/* Ingest a workspace tree as ONE PROJECT PER GIT REPO: code_collect_discover_repos
+ * finds each real checkout under abs_root (skipping linked worktrees and symlink
+ * cycles) and we ingest each as its own project (cli_ws_ingest_root names a
+ * project by its basename). Falls back to ingesting abs_root itself when it holds
+ * no nested git repo — e.g. adding a single repo directly, or a plain directory. */
+typedef struct
+{
+   const char *remote;
+   const char *bearer;
+   int rc;
+   int count;
+} ws_tree_ctx_t;
+
+static void ws_tree_ingest_cb(const char *repo_abs, void *ctx)
+{
+   ws_tree_ctx_t *t = (ws_tree_ctx_t *)ctx;
+   const char *base = strrchr(repo_abs, '/');
+   base = (base && base[1]) ? base + 1 : repo_abs;
+   printf("indexing project: %s\n", base);
+   if (cli_ws_ingest_root(t->remote, t->bearer, repo_abs) != 0)
+      t->rc = 1;
+   t->count++;
+}
+
+static int cli_ws_ingest_tree(const char *remote, const char *bearer, const char *abs_root)
+{
+   ws_tree_ctx_t t = {remote, bearer, 0, 0};
+   code_collect_discover_repos(abs_root, ws_tree_ingest_cb, &t);
+   if (t.count == 0)
+      return cli_ws_ingest_root(remote, bearer, abs_root); /* no nested repo: ingest root itself */
+   return t.rc;
+}
+
 int cli_workspace_add_remote(const char *path)
 {
    if (!path || !path[0])
@@ -7370,7 +7403,7 @@ int cli_workspace_add_remote(const char *path)
       cJSON_Delete(rresp);
    printf("workspace registered: %s (detached)\n", abs);
 
-   int rc = cli_ws_ingest_root(remote, bearer, abs);
+   int rc = cli_ws_ingest_tree(remote, bearer, abs);
    free(abs);
    free(remote);
    free(bearer);
@@ -7407,7 +7440,7 @@ int cli_index_scan_remote(int argc, char **argv)
          free(bearer);
          return 1;
       }
-      rc = cli_ws_ingest_root(remote, bearer, abs);
+      rc = cli_ws_ingest_tree(remote, bearer, abs);
       free(abs);
       free(remote);
       free(bearer);
@@ -7435,7 +7468,7 @@ int cli_index_scan_remote(int argc, char **argv)
           p->valuestring && p->valuestring[0])
       {
          any = 1;
-         if (cli_ws_ingest_root(remote, bearer, p->valuestring) != 0)
+         if (cli_ws_ingest_tree(remote, bearer, p->valuestring) != 0)
             rc = 1;
       }
    }

@@ -298,6 +298,25 @@ int main(void)
       assert(strcmp(projects[0], wt_abs) == 0);
    }
 
+   /* --- discovery: a self-referential dir symlink does not cause re-discovery --- */
+   {
+      char ws[512], repo[512], link[600];
+      snprintf(ws, sizeof(ws), "%s/sym-ws", tmpdir);
+      mkdir(ws, 0755);
+      snprintf(repo, sizeof(repo), "%s/router", ws);
+      create_git_repo(repo);
+      /* "src -> ." inside the repo: following it would loop and re-discover the
+       * repo once per depth level (the smoothrouter bug). */
+      snprintf(link, sizeof(link), "%s/src", repo);
+      assert(symlink(".", link) == 0);
+
+      char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
+      int count =
+          workspace_discover_projects(ws, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);
+      assert(count == 1); /* discovered exactly once, not N times */
+      assert(strstr(projects[0], "router") != NULL);
+   }
+
    /* --- style_read: missing file returns NULL --- */
    {
       char *style = style_read("nonexistent-project-xyz");

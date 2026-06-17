@@ -9,7 +9,6 @@
  *       enabled: false
  *     extract_command: ""
  *     extract_max_tokens: 2048
- *     max_jobs_per_hour: 120
  *     max_attempts: 3
  */
 
@@ -23,10 +22,10 @@
 
 void config_kb_curator_defaults(config_t *cfg)
 {
-   /* The deep-curator (larger LLM) pipeline is default-ON: it drains gradually
-    * in the background (rate-limited by kb_curator_max_jobs_per_hour) and refines
-    * what the 0.6B embedder already indexed. Every stage degrades to a no-op when
-    * its prerequisite (a configured curator/judge/synthesize command, or upstream
+   /* The deep-curator (larger LLM) pipeline is default-ON: it drains the backlog
+    * continuously in the background (no artificial rate cap) and refines what the
+    * 0.6B embedder already indexed. Every stage degrades to a no-op when its
+    * prerequisite (a configured curator/judge/synthesize command, or upstream
     * curator rows) is absent, so default-on is safe on a bare deploy. */
    cfg->kb_curator_extract_docs_enabled = 1;
    cfg->kb_curator_extract_prompt_version[0] = '\0';
@@ -47,7 +46,6 @@ void config_kb_curator_defaults(config_t *cfg)
    cfg->kb_curator_synthesize_command[0] = '\0';
    cfg->kb_curator_synthesize_k = 8;
    cfg->kb_curator_extract_max_tokens = 2048;
-   cfg->kb_curator_max_jobs_per_hour = 120;
    cfg->kb_curator_max_attempts = 3;
    cfg->kb_evidence_embed_enabled = 1;
    cfg->kb_evidence_embed_batch = 32;
@@ -233,14 +231,10 @@ int config_parse_kb_curator(config_t *cfg, const cJSON *root)
          cfg->kb_curator_extract_max_tokens = max_tokens->valueint;
    }
 
-   const cJSON *max_jobs = cJSON_GetObjectItemCaseSensitive(curator, "max_jobs_per_hour");
-   if (max_jobs)
-   {
-      if (!cJSON_IsNumber(max_jobs) || max_jobs->valueint <= 0)
-         config_issue("\"kb.curator.max_jobs_per_hour\" must be a positive integer");
-      else
-         cfg->kb_curator_max_jobs_per_hour = max_jobs->valueint;
-   }
+   /* max_jobs_per_hour was the curator rate cap; removed (§5 — the drain now runs
+    * until the backlog is drained, then idles). A leftover key in an existing
+    * config is harmless: the kb.curator section is not schema-validated, so it is
+    * silently ignored. */
 
    const cJSON *max_attempts = cJSON_GetObjectItemCaseSensitive(curator, "max_attempts");
    if (max_attempts)
@@ -304,8 +298,8 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
        cfg->kb_curator_synthesize_enabled || cfg->kb_curator_promote_entity_enabled ||
        cfg->kb_curator_extract_command[0] || cfg->kb_curator_judge_command[0] ||
        cfg->kb_curator_synthesize_command[0] || cfg->kb_curator_extract_max_tokens != 2048 ||
-       cfg->kb_curator_max_jobs_per_hour != 120 || cfg->kb_curator_max_attempts != 3 ||
-       cfg->kb_curator_synthesize_k != 8 || cfg->kb_curator_promote_min_sources != 3;
+       cfg->kb_curator_max_attempts != 3 || cfg->kb_curator_synthesize_k != 8 ||
+       cfg->kb_curator_promote_min_sources != 3;
    int evidence_any = !cfg->kb_evidence_embed_enabled || cfg->kb_evidence_embed_batch != 32;
    if (!curator_any && !evidence_any)
       return;
@@ -359,8 +353,6 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
             cJSON_AddStringToObject(cur, "synthesize_command", cfg->kb_curator_synthesize_command);
          if (cfg->kb_curator_extract_max_tokens != 2048)
             cJSON_AddNumberToObject(cur, "extract_max_tokens", cfg->kb_curator_extract_max_tokens);
-         if (cfg->kb_curator_max_jobs_per_hour != 120)
-            cJSON_AddNumberToObject(cur, "max_jobs_per_hour", cfg->kb_curator_max_jobs_per_hour);
          if (cfg->kb_curator_max_attempts != 3)
             cJSON_AddNumberToObject(cur, "max_attempts", cfg->kb_curator_max_attempts);
       }
