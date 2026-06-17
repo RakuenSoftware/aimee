@@ -545,6 +545,9 @@ static void config_set_defaults(config_t *cfg)
    cfg->skills_capability_autostub = 0;
    cfg->skills_eval_gate_enabled = 0;
    cfg->skills_eval_threshold = 0.01;
+   cfg->css_style_graph_enabled = 1; /* default-on: the indexer builds the CSS style
+                                        graph so the read-only css signals/report work
+                                        out of the box (set false to opt out) */
    cfg->worktree_gc_enabled = 0;
    cfg->worktree_gc_max_age_days = 14;
    cfg->model_meta_refresh_minutes = 60;
