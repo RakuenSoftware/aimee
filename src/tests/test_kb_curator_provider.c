@@ -108,8 +108,11 @@ static void test_env_bridge(void)
    assert(strcmp(a.base_url, "http://bundled:8080/v1") == 0);
    assert(strcmp(a.model, "gemma-3n-e4b") == 0);
    assert(a.api_key == NULL); /* empty env key => keyless */
-   /* Tier-B does NOT take the Tier-A env endpoint — it stays idle. */
+   /* Tier-B does NOT take the Tier-A env endpoint — it stays idle (out zeroed).
+    * Check two distinct Tier-B stages, not just one. */
    assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 0);
+   assert(b.base_url == NULL && b.model == NULL); /* idle => out zeroed */
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_JUDGE, &b) == 0);
 
    /* A config tier_b enables Tier-B (capable model); Tier-A still uses env. */
    snprintf(cfg.kb_curator_tier_b_base_url, sizeof(cfg.kb_curator_tier_b_base_url),
