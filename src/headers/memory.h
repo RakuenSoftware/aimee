@@ -947,6 +947,10 @@ void memory_query_embed_cache_reset_test(void);
 void memory_query_embed_cache_stats_test(int *requests, int *misses);
 void memory_query_embed_prewarm_test(const char *const *texts, int n, const char *command);
 
+/* Test hooks for the embedder-aware semantic-recall gate + floor scale. */
+int memory_semantic_dim_ok_test(int qdim);
+double memory_semantic_floor_scale_test(void);
+
 /* --- Effectiveness Tracking --- */
 
 typedef struct

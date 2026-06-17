@@ -383,6 +383,9 @@ void config_parse_memory_section(config_t *cfg, cJSON *root)
       item = cJSON_GetObjectItemCaseSensitive(memory_cfg, "semantic_weight");
       if (cJSON_IsNumber(item) && item->valuedouble >= 0.0)
          cfg->memory_semantic_weight = item->valuedouble;
+      item = cJSON_GetObjectItemCaseSensitive(memory_cfg, "semantic_floor_scale");
+      if (cJSON_IsNumber(item) && item->valuedouble >= 0.0)
+         cfg->memory_semantic_floor_scale = item->valuedouble;
 
       /* Dynamic fetch budget */
       cJSON *fetch_cfg = cJSON_GetObjectItemCaseSensitive(memory_cfg, "fetch_budget");

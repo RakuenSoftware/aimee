@@ -577,6 +577,14 @@ typedef struct config
    double memory_bm25_weight;
    double memory_semantic_weight;
 
+   /* Cosine-similarity floor scale for the semantic-memory legs. The floors in
+    * memory_collect_*_semantic_matches were calibrated for the retired 384-d
+    * builtin embedder, whose cosine range runs high; modern embedders compress
+    * that range (pplx-0.6b relevant matches ~0.35-0.40, pplx-4b higher), so a
+    * fixed 384-era floor rejects every real hit. 0 = auto-scale by the active
+    * embedding dimension (db2_embedding_dim()); >0 pins the multiplier. */
+   double memory_semantic_floor_scale;
+
    /* Dynamic fetch budget: total candidate pool size, intent-scaled.
     * memory_fetch_budget_enabled: 0 = use fixed pool (default), 1 = scale by specificity.
     * memory_fetch_budget_base: base candidate count; intent multiplier is applied on top

@@ -57,14 +57,16 @@ int kb_curator_provider_for_stage(const config_t *cfg, kb_curator_stage_t stage,
 
    /* Env bridge: when a tier has no config provider, fall back to the curator's
     * LLM_ENDPOINT/LLM_MODEL/LLM_API_KEY env (the interface the bundled-Gemma
-    * deployment and the python sidecars already use). A config provider for the
-    * tier takes precedence; the env is a single endpoint that, when set, serves
-    * BOTH tiers (matching the short-term "everything on the bundled model"
-    * behavior) until an operator sets a capable tier_b.* in config. This is a
-    * whole-provider fallback (base+model+key together), not field-level mixing —
-    * the config and env providers are distinct units. */
+    * deployment and the python sidecars use). This applies to TIER-A ONLY: the
+    * bundled model (Gemma 3n E4B) is a Tier-A model, so letting it serve the
+    * reasoning stages would be exactly the weak-model-poisons-the-graph case §2a
+    * guards against. Tier-B takes a capable provider from tier_b.* config or it
+    * stays idle — no env fallback. A config provider for the tier still takes
+    * precedence. Whole-provider fallback (base+model+key as a unit). */
    if (!base_url[0])
    {
+      if (kb_curator_stage_tier(stage) != KB_CURATOR_TIER_A)
+         return 0; /* Tier-B: capable provider via tier_b.* config, or idle */
       const char *env_ep = getenv("LLM_ENDPOINT");
       if (!env_ep || !env_ep[0])
          return 0; /* neither config nor env — the stage stays idle */

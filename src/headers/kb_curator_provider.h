@@ -44,9 +44,11 @@ extern "C"
    /* Fill *out with the provider def for `stage`. Resolution per tier:
     *   1. tier config — Tier-A uses `provider.*`, Tier-B uses `tier_b.*`
     *      (never the Tier-A config; no weak fallback between config tiers);
-    *   2. else the curator env — LLM_ENDPOINT/LLM_MODEL/LLM_API_KEY (a single
-    *      endpoint that serves both tiers, matching the bundled-model deployment);
-    *   3. else idle.
+    *   2. else, for TIER-A ONLY, the curator env LLM_ENDPOINT/LLM_MODEL/
+    *      LLM_API_KEY (the bundled-model deployment — Gemma 3n E4B is a Tier-A
+    *      model, so it must not serve the reasoning stages);
+    *   3. else idle. Tier-B has NO env fallback: it needs a capable provider via
+    *      tier_b.* config, or it stays idle.
     * Returns 1 when configured (out filled; base_url non-empty), 0 when idle
     * (out zeroed — the stage must not run).
     *

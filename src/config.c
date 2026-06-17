@@ -414,6 +414,7 @@ static void config_set_defaults(config_t *cfg)
    cfg->memory_scenes_global_escape_ratio = 0.2;
    cfg->memory_bm25_weight = 0.0;
    cfg->memory_semantic_weight = 0.0;
+   cfg->memory_semantic_floor_scale = 0.0; /* 0 = auto-scale by embedding dim */
    cfg->memory_fetch_budget_enabled = 0;
    cfg->memory_fetch_budget_base = 128;
    cfg->memory_fetch_budget_shape_aware = 1;

@@ -43,9 +43,9 @@ try {
     Push-Location $repoRoot
     try {
         # Thin-client profile: only aimee.exe (no server/kb/gateway/webchat, so no
-        # libpq / Go / PAM). TLS is off on Windows — terminate TLS at a reverse
-        # proxy and point the client at its http:// address. Matches the CI and
-        # release Windows builds.
+        # libpq / Go / PAM). TLS uses Schannel (Windows cert store), so https://
+        # remote aimee-servers work with no OpenSSL. Matches the CI and release
+        # Windows builds.
         $cfgArgs = @(
             "-B", $buildDir,
             "-DAIMEE_THIN_CLIENT=ON",
@@ -53,7 +53,7 @@ try {
             "-DWITH_PAM=OFF",
             "-DWITH_LIBSECRET=OFF",
             "-DWITH_UI=OFF",
-            "-DWITH_TLS=OFF"
+            "-DWITH_TLS=ON"
         )
         # MinGW gcc needs an explicit Makefiles generator; MSVC uses its default.
         if ($gcc -and -not $cl) {

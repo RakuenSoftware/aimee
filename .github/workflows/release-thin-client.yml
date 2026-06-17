@@ -49,8 +49,8 @@ jobs:
             kind: linux
             asset: aimee-linux-arm64
           # macOS: one universal (arm64 + x86_64) binary, built on macos-latest.
-          # Avoids the scarce/deprecating Intel runner; the thin client links only
-          # Threads (WITH_TLS=OFF, as on Windows), so a fat build needs no
+          # Avoids the scarce/deprecating Intel runner; TLS uses Secure Transport
+          # (system frameworks, already universal), so a fat build still needs no
           # arch-specific brew libraries.
           - os: macos-latest
             kind: macos
@@ -104,7 +104,7 @@ jobs:
       - name: Build (macOS, CMake -- universal arm64+x86_64)
         if: matrix.kind == 'macos'
         run: |
-          cmake -B build -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=OFF -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DAIMEE_VERSION_STR="${{ steps.ver.outputs.version != '' && format('v{0}', steps.ver.outputs.version) || '' }}"
+          cmake -B build -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=ON -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DAIMEE_VERSION_STR="${{ steps.ver.outputs.version != '' && format('v{0}', steps.ver.outputs.version) || '' }}"
           cmake --build build --parallel 3 --target aimee
           # Fail the build unless the artifact is a true fat binary.
           echo "archs: $(lipo -archs build/aimee)"
@@ -156,7 +156,7 @@ jobs:
       - name: Build (Windows, CMake)
         if: matrix.kind == 'windows'
         run: |
-          cmake -B build -G "MinGW Makefiles" -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=OFF -DAIMEE_VERSION_STR="${{ steps.ver.outputs.version != '' && format('v{0}', steps.ver.outputs.version) || '' }}"
+          cmake -B build -G "MinGW Makefiles" -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=ON -DAIMEE_VERSION_STR="${{ steps.ver.outputs.version != '' && format('v{0}', steps.ver.outputs.version) || '' }}"
           cmake --build build --parallel 2 --target aimee
       - name: Stage artifact (Windows)
         if: matrix.kind == 'windows'

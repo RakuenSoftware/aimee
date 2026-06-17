@@ -90,8 +90,9 @@ static void test_tier_b_resolves(void)
    printf("kb_curator_provider: tier-A and tier-B resolve independently ok\n");
 }
 
-/* With no config provider, LLM_ENDPOINT/LLM_MODEL/LLM_API_KEY drive BOTH tiers
- * (the bundled-deployment interface); a config tier_b still overrides. */
+/* LLM_ENDPOINT/LLM_MODEL/LLM_API_KEY drive TIER-A only (the bundled Gemma E4B is
+ * a Tier-A model). Tier-B has no env fallback — it needs tier_b.* config or stays
+ * idle, so a Tier-A model never runs the reasoning stages. */
 static void test_env_bridge(void)
 {
    clear_llm_env(); /* start from a known-clean env, not just clean up at the end */
@@ -107,11 +108,13 @@ static void test_env_bridge(void)
    assert(strcmp(a.base_url, "http://bundled:8080/v1") == 0);
    assert(strcmp(a.model, "gemma-3n-e4b") == 0);
    assert(a.api_key == NULL); /* empty env key => keyless */
-   /* Tier-B ALSO from env (single endpoint serves both until tier_b configured). */
-   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
-   assert(strcmp(b.base_url, "http://bundled:8080/v1") == 0);
+   /* Tier-B does NOT take the Tier-A env endpoint — it stays idle (out zeroed).
+    * Check two distinct Tier-B stages, not just one. */
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 0);
+   assert(b.base_url == NULL && b.model == NULL); /* idle => out zeroed */
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_JUDGE, &b) == 0);
 
-   /* A config tier_b overrides the env for Tier-B; Tier-A still uses env. */
+   /* A config tier_b enables Tier-B (capable model); Tier-A still uses env. */
    snprintf(cfg.kb_curator_tier_b_base_url, sizeof(cfg.kb_curator_tier_b_base_url),
             "https://api.big/v1");
    snprintf(cfg.kb_curator_tier_b_model, sizeof(cfg.kb_curator_tier_b_model), "big-32b");
@@ -124,7 +127,7 @@ static void test_env_bridge(void)
    clear_llm_env();
    memset(&cfg, 0, sizeof(cfg));
    assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 0);
-   printf("kb_curator_provider: env bridge (LLM_ENDPOINT both tiers; tier_b override) ok\n");
+   printf("kb_curator_provider: env bridge (Tier-A only; Tier-B needs config) ok\n");
 }
 
 int main(void)
