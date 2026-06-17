@@ -63,6 +63,13 @@ export EMBEDDER_STUB="${EMBEDDER_STUB:-1}"
 export EMBEDDER_STUB_DIM="${EMBEDDER_STUB_DIM:-2560}"
 export AIMEE_EMBEDDING_DIM="${AIMEE_EMBEDDING_DIM:-2560}"
 
+# Disable the bundled curator LLM in CI: the committed .env enables the
+# `curator-llm` profile by default, but the smoke tests don't exercise the
+# curator and the multi-GB Gemma GGUF would blow the runner's disk/time. An
+# explicit (empty) COMPOSE_PROFILES overrides the .env so the `llm` service is
+# never started here.
+export COMPOSE_PROFILES="${COMPOSE_PROFILES:-}"
+
 bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 selected() { case ",$ONLY," in *",$1,"*) return 0 ;; *) return 1 ;; esac; }
 have_docker() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }

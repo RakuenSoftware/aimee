@@ -287,7 +287,7 @@ typedef struct config
    int memory_maintenance_enabled;
    int memory_maintenance_interval_seconds;
    int memory_maintenance_summarize_enabled;
-   /* css_style_graph_enabled: opt-in gate (default 0) for the CSS migration
+   /* css_style_graph_enabled: gate (default 1, on) for the CSS migration
     * assistant's style-graph write path during indexing (WP-C). When off, the
     * indexer keeps only the legacy lexical CSS class-name scan. */
    int css_style_graph_enabled;
@@ -330,9 +330,9 @@ typedef struct config
    int typed_facts_enabled;      /* typed-fact knowledge layer master gate (default off) */
    int kb_evidence_emit_enabled; /* auditable-correctness: emit per-turn retrieval_event (default
                                     off) */
-   int fidelity_check_enabled;   /* auditable-correctness P3: run the fidelity judge on terminal-text
-                                    turns (default off; fail-closed dep on
-                                    kb_evidence_emit_enabled + ingress_preinject_enabled) */
+   int fidelity_check_enabled; /* auditable-correctness P3: run the fidelity judge on terminal-text
+                                  turns (default off; fail-closed dep on
+                                  kb_evidence_emit_enabled + ingress_preinject_enabled) */
    int memory_pagerank_enabled;
    int memory_pagerank_iterations;
    double memory_pagerank_weight;
