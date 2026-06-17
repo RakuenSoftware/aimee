@@ -32,6 +32,12 @@ int main(void)
    char wsdir[300];
    snprintf(wsdir, sizeof(wsdir), "%s/ws", home);
    setenv("AIMEE_WORKSPACES_DIR", wsdir, 1);
+   /* Hardened CI git refuses the `file://` transport by default (CVE-2022-39253);
+    * allow it for this test's local source repo. GIT_CONFIG_* is inherited by
+    * both the setup git and the clone under test. */
+   setenv("GIT_CONFIG_COUNT", "1", 1);
+   setenv("GIT_CONFIG_KEY_0", "protocol.file.allow", 1);
+   setenv("GIT_CONFIG_VALUE_0", "always", 1);
 
    /* Build a source repo with one commit. */
    char src[300];

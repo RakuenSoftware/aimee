@@ -13,8 +13,6 @@
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
 #include "workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
 #include "forge_credentials.h"         /* forge_cred_install for the /v1 token-install route */
-#include "git_project.h"               /* git_project_clone for /v1/workspace/clone (WP-D) */
-#include "index.h"                     /* index_scan_project after a webuser clone (WP-D) */
 #include <time.h>
 #include "persona.h"
 #include "role_templates.h"

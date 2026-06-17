@@ -15,6 +15,11 @@
  * their rows carry handler == NULL so they still participate in the capability
  * gate and the conformance scan without being dispatched here. */
 
+/* Route-handler deps used below but not needed by server_http.c's own body
+ * (kept here, not in server_http.c, to respect its 2000-line limit). */
+#include "git_project.h" /* git_project_clone for /v1/workspace/clone (WP-D) */
+#include "index.h"       /* index_scan_project after a webuser clone (WP-D) */
+
 /* Per-request context handed to a route handler. `id` holds the extracted
  * dynamic path segment (persona / role-template name, session id, run id) for
  * RM_PREFIX routes, or "" for fixed routes. */
