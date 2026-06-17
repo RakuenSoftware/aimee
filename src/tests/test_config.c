@@ -71,6 +71,9 @@ int main(void)
       /* directives auto-create ran ungated before the toggle was wired; default-on
        * preserves it. */
       assert(cfg.memory_directives_enabled == 1);
+      /* CSS style graph now defaults on so the read-only css signals/report work
+       * out of the box (the indexer populates css_rules/css_declarations). */
+      assert(cfg.css_style_graph_enabled == 1);
    }
 
    /* --- config_save + config_load round-trip --- */
@@ -188,6 +191,9 @@ int main(void)
       /* directives defaults on; set off to prove the disabled state round-trips
        * (same default-on save-guard regression class as profile_cards). */
       cfg.memory_directives_enabled = 0;
+      /* css_style_graph now defaults on; set off to prove the opt-out round-trips
+       * (default-on save-guard regression class). */
+      cfg.css_style_graph_enabled = 0;
       /* kb.maintenance.* — must survive config_save (same drop class as curator). */
       cfg.kb_maintenance_enabled = 1;
       cfg.kb_maintenance_interval_hours = 12;
@@ -374,6 +380,7 @@ int main(void)
       assert(cfg2.memory_improve_min_cluster == 5);
       assert(fabs(cfg2.memory_improve_max_confidence - 0.42) < 0.0001);
       assert(cfg2.memory_directives_enabled == 0);
+      assert(cfg2.css_style_graph_enabled == 0); /* opt-out survives save/reload */
       /* regression: kb.maintenance.* used to be parsed but never saved -> dropped on save. */
       assert(cfg2.kb_maintenance_enabled == 1);
       assert(cfg2.kb_maintenance_interval_hours == 12);
