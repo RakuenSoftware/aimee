@@ -36,7 +36,7 @@ This brings up four services:
 | `aimee-server-kb` | Both aimee binaries (server + kb) in one container | `8740` (server `/v1`), `8741` (kb `/v1`) |
 | `postgres` | `pgvector/pgvector:pg16` — DB2 (`aimee_shared`) for knowledge + vectors | internal |
 | `embedder` | CPU embedder sidecar (`all-MiniLM-L6-v2`) | internal |
-| webchat (optional) | Browser UI, enabled by this compose file | `8443` (HTTPS, self-signed) |
+| webchat | Browser UI — a first-class surface, on by default | `8443` (HTTPS, self-signed) |
 
 The kb auto-applies its DB2 schema (tables + `pg_trgm`/`vector` extensions) on first boot. First `--build` takes a few minutes (it compiles the binaries and pulls the embedder model); subsequent starts are fast.
 
@@ -55,9 +55,11 @@ curl 'http://localhost:8741/v1/health?status=1'
 
 If the server endpoints return `200` and `kb/status` reports the DB and vector store ready, the stack is up.
 
-### 1.3 (Optional) Browser webchat
+### 1.3 Browser webchat
 
-`compose.combined.yaml` enables the browser UI for local dev. Open **https://localhost:8443** (accept the self-signed cert) and log in with the default account `aimee` / `aimee-local-dev`. Change `AIMEE_WEBCHAT_USER` / `AIMEE_WEBCHAT_PASSWORD` (or set `AIMEE_WEBCHAT_ENABLED=0` to disable it) in the compose file for anything beyond local dev.
+The browser UI is a first-class surface and is **on by default**. Open **https://localhost:8443** (accept the self-signed cert) and log in with the default account `aimee` / `aimee-local-dev`. Change `AIMEE_WEBCHAT_USER` / `AIMEE_WEBCHAT_PASSWORD` for anything beyond local dev, or set `AIMEE_WEBCHAT_ENABLED=0` in the compose file to turn it off.
+
+> Webchat is built into the image by default, from both published images and a from-source `docker compose build` — its frontend dependency (`@rakuensoftware/smoothgui`) is vendored in-repo, so the build needs no credentials. Build with `--build-arg WITH_WEBCHAT=0` to ship the server+kb services only.
 
 ### 1.4 Before you expose it on a network
 
@@ -166,7 +168,9 @@ Agent/provider control commands are exec/control operations, so over the network
 
 ### 2.6 Interactive chat
 
-The data/RPC plane (`memory`, `kb`, `index`, `rules`, `sessions`) works fine over the remote transport. **Interactive `aimee chat` / `aimee launch` need a co-located server** — they run the agent and its tools on the local host and chdir into a local worktree, so they don't run against a purely remote endpoint. Drive aimee from your AI coding tool (configured in [2.3](#23-configure-your-ai-coding-tool)), or use the browser webchat at `https://YOUR_SERVER:8443`.
+`aimee chat` and `aimee launch` work against a remote server. When the client is pointed at a remote `/v1` endpoint, it registers your current directory as a **detached workspace** and opens a reverse channel back to it: the agent loop runs on the server, and its file and tool actions reach back into your local working tree over that channel. The client still holds no engine and no database — it renders the session and serves its own tree. Run `aimee chat` from inside the repository you want the agent to work in.
+
+Because `launch`/`chat` are exec/control operations, the server's `aimee.api.remote_writes` must be set to `full` for a remote session (see [1.4](#14-before-you-expose-it-on-a-network)). You can also drive aimee from your AI coding tool (configured in [2.3](#23-configure-your-ai-coding-tool)), or use the browser webchat at `https://YOUR_SERVER:8443`.
 
 ---
 
@@ -246,7 +250,9 @@ Agent/provider control commands are exec/control operations, so over the network
 
 ### 3.6 Interactive chat
 
-The data/RPC plane (`memory`, `kb`, `index`, `rules`, `sessions`) works fine over the remote transport. **Interactive `aimee chat` / `aimee launch` need a co-located server** — they run the agent and its tools on the local host and chdir into a local worktree, so they don't run against a purely remote endpoint. Drive aimee from your AI coding tool (configured in [3.3](#33-configure-your-ai-coding-tool)), or use the browser webchat at `https://YOUR_SERVER:8443`.
+`aimee chat` and `aimee launch` work against a remote server. Pointed at a remote `/v1` endpoint, the client registers your current directory as a **detached workspace** and opens a reverse channel: the agent runs on the server while its file and tool actions reach back into your local working tree (the reverse channel is supported on the Windows client). Run `aimee chat` from inside the repository you want the agent to work in.
+
+Because `launch`/`chat` are exec/control operations, the server's `aimee.api.remote_writes` must be `full` for a remote session (see [1.4](#14-before-you-expose-it-on-a-network)). You can also drive aimee from your AI coding tool (configured in [3.3](#33-configure-your-ai-coding-tool)), or use the browser webchat at `https://YOUR_SERVER:8443`.
 
 ---
 
@@ -331,7 +337,7 @@ Agent/provider control over the network requires the server's `remote_writes` to
 
 ### 4.6 Interactive chat
 
-As on the other platforms, the data plane works over the remote transport, but interactive `aimee chat` / `aimee launch` need a co-located server. Drive aimee from your AI coding tool, or use the browser webchat at `https://YOUR_SERVER:8443`.
+As on the other platforms, `aimee chat` and `aimee launch` work against a remote server: the client registers your current directory as a **detached workspace** and opens a reverse channel, so the agent runs server-side while its file and tool actions act on your local tree. Run `aimee chat` from inside the repository you want the agent to work in, with the server's `aimee.api.remote_writes` set to `full` (see [1.4](#14-before-you-expose-it-on-a-network)). You can also drive aimee from your AI coding tool, or use the browser webchat at `https://YOUR_SERVER:8443`.
 
 ---
 
