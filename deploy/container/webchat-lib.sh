@@ -113,12 +113,23 @@ webchat_start() {
     fi
     webchat_bootstrap_user
     webchat_ensure_server_token
+    # Operator-supplied TLS cert (PEM). A browser-trusted cert is required for the
+    # in-app VSCode editor's webviews (the service worker won't register over an
+    # untrusted cert). Without these, webchat self-signs (now with the host's IP +
+    # hostname in the SAN, so the generated cert can be imported + trusted).
+    _wc_tls=""
+    if [ -n "${AIMEE_WEBCHAT_TLS_CERT:-}" ] && [ -n "${AIMEE_WEBCHAT_TLS_KEY:-}" ]; then
+        _wc_tls="--cert $AIMEE_WEBCHAT_TLS_CERT --key $AIMEE_WEBCHAT_TLS_KEY"
+        webchat_log "using operator TLS cert $AIMEE_WEBCHAT_TLS_CERT"
+    fi
     webchat_log "starting aimee-webchat on :$WEBCHAT_PORT (https), socket=$WEBCHAT_HOME/aimee-server.sock"
+    # shellcheck disable=SC2086
     HOME=/root aimee-webchat \
         --port "$WEBCHAT_PORT" \
         --socket "$WEBCHAT_HOME/aimee-server.sock" \
         --db "$WEBCHAT_HOME/webchat.db" \
-        --spa "$WEBCHAT_SPA" &
+        --spa "$WEBCHAT_SPA" \
+        $_wc_tls &
     webchat_pid=$!
 }
 
