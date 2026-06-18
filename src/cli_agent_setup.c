@@ -25,6 +25,13 @@
 #define OAUTH_POLL_DEADLINE_S 600 /* hard wall-clock cap regardless of progress */
 #define OAUTH_MAX_CONSEC_FAIL 5   /* bail if the server is unreachable this many polls in a row */
 
+/* The start call installs the vendor CLI on the server before it returns, which on
+ * a cold host means a full `npm i -g` + the native-binary postinstall. We must
+ * wait longer than the server's worst-case install (npm 180s + postinstall 120s +
+ * version probes + launch/scrape) or a genuinely-working setup is misreported as a
+ * dead server. A re-run after this still succeeds (the install is then cached). */
+#define OAUTH_START_TIMEOUT_MS 420000
+
 /* Best-effort scrub of a sensitive buffer (not optimized away). */
 static void secure_zero(void *p, size_t n)
 {
@@ -244,11 +251,21 @@ static int setup_oauth_cli_cmd(const char *vendor, int json_output)
 
    fprintf(stderr, "\n=== %s server-hosted OAuth setup ===\n", vendor);
    fprintf(stderr, "Installing the %s CLI on aimee-server and starting its login...\n", vendor);
+   fprintf(stderr, "(first-time install downloads the CLI server-side and can take a few "
+                   "minutes — please wait)\n");
 
-   cJSON *started = setup_oauth_rpc("agent.cli_oauth_start", vendor, NULL, NULL, 120000);
+   cJSON *started =
+       setup_oauth_rpc("agent.cli_oauth_start", vendor, NULL, NULL, OAUTH_START_TIMEOUT_MS);
    if (!started)
    {
-      fprintf(stderr, "Could not start %s setup (is the server reachable?).\n", vendor);
+      /* A NULL here is a transport failure or a timeout — not necessarily an
+       * unreachable server. If the server is mid-install it keeps going, so a
+       * plain re-run usually succeeds (the install is then already cached). */
+      fprintf(stderr,
+              "Could not complete %s setup: the server did not respond in time "
+              "(it may still be installing the CLI). Re-run `aimee agent setup %s-oauth` "
+              "in a minute, or check that aimee-server is reachable.\n",
+              vendor, vendor);
       return 1;
    }
    char session[160] = "";
