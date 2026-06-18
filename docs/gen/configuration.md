@@ -246,7 +246,7 @@ The binaries read 113 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_SERVER_STARTUP_FD` | Inherited fd for startup-readiness signalling (service launch). |
 | `AIMEE_SESSION_THREADS` | Per-session worker thread count. |
 | `AIMEE_SOCK` | Sandbox helper socket path. |
-| `AIMEE_WEBCHAT_EDITOR` | Enable the per-webuser in-browser code-server editor (default off; requires a WITH_VSCODE=1 image). |
+| `AIMEE_WEBCHAT_EDITOR` | Per-webuser in-browser code-server editor (on by default; set to 0 to disable; needs a code-server binary, shipped by WITH_VSCODE images). |
 | `AIMEE_WEBCHAT_EDITOR_BIN` | Override path to the code-server binary used for the in-browser editor. |
 | `AIMEE_WEBCHAT_EDITOR_UID` | Dedicated service user the per-webuser code-server drops to (defence in depth; only honoured when aimee-server runs as root). |
 | `AIMEE_WORKTREE_GC` | Enable/disable delegate-worktree garbage collection. |

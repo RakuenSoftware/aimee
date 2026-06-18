@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 /* 1 iff envp has an entry exactly equal to `want`. */
@@ -100,21 +101,31 @@ int main(void)
    int port = -1;
    char err[256];
 
-   /* Feature OFF by default (AIMEE_WEBCHAT_EDITOR unset). */
+   /* A dummy executable stands in for the code-server binary so the gate logic
+    * can be tested without a real editor. It is resolved + cached on the first
+    * availability check (AIMEE_WEBCHAT_EDITOR_BIN is tried first). */
+   char fakebin[256];
+   snprintf(fakebin, sizeof(fakebin), "/tmp/aimee-fake-code-server-%d", (int)getpid());
+   FILE *fb = fopen(fakebin, "w");
+   assert(fb);
+   fputs("#!/bin/sh\nexit 0\n", fb);
+   fclose(fb);
+   assert(chmod(fakebin, 0755) == 0);
+   setenv("AIMEE_WEBCHAT_EDITOR_BIN", fakebin, 1);
+
+   /* Feature ON by default (AIMEE_WEBCHAT_EDITOR unset) when a binary is present. */
    unsetenv("AIMEE_WEBCHAT_EDITOR");
+   assert(webuser_editor_available() == 1);
+
+   /* AIMEE_WEBCHAT_EDITOR=0 explicitly disables it. */
+   setenv("AIMEE_WEBCHAT_EDITOR", "0", 1);
    assert(webuser_editor_available() == 0);
+   /* Disabled → ensure fails closed (returns 0), never spawns. */
    assert(webuser_editor_ensure("webuser:alice", &port, err, sizeof(err)) == 0);
 
-   /* Enabled but no code-server binary → still unavailable (fail closed). The
-    * override points at a path that cannot be executed. */
-   setenv("AIMEE_WEBCHAT_EDITOR", "1", 1);
-   setenv("AIMEE_WEBCHAT_EDITOR_BIN", "/nonexistent/code-server", 1);
-   assert(webuser_editor_available() == 0);
-   /* (binary path is cached after the first resolve, so ensure() also returns 0) */
-   assert(webuser_editor_ensure("webuser:alice", &port, err, sizeof(err)) == 0);
-
-   /* Identity guard: only webuser: principals may drive an editor. NULL/non
-    * webuser → -1, never a spawn. */
+   /* Identity guard runs before the availability check: only webuser: principals
+    * may drive an editor. NULL / non-webuser / missing out_port → -1, never a
+    * spawn (kept disabled here as belt-and-braces). */
    assert(webuser_editor_ensure("uid:1000", &port, err, sizeof(err)) == -1);
    assert(webuser_editor_ensure(NULL, &port, err, sizeof(err)) == -1);
    assert(webuser_editor_ensure("webuser:bob", NULL, err, sizeof(err)) == -1);

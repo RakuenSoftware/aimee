@@ -11,10 +11,9 @@
 # server-only image (skips the frontend + Go webchat stages entirely).
 ARG WITH_WEBCHAT=1
 # WITH_VSCODE bundles code-server (full in-browser VSCode, Open-VSX only) for the
-# webchat Projects/editor surface. OFF by default — it adds ~100 MB, so default +
-# CI image builds skip it (the stage is not in the build graph). The aimee-server
-# deployment image is built with --build-arg WITH_VSCODE=1.
-ARG WITH_VSCODE=0
+# webchat Projects/editor surface. ON by default — the editor is a first-class
+# feature; build with --build-arg WITH_VSCODE=0 to omit it (saves ~100 MB).
+ARG WITH_VSCODE=1
 FROM debian:bookworm-slim AS build
 
 RUN apt-get update \
