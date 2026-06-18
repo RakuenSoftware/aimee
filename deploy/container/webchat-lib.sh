@@ -60,6 +60,41 @@ webchat_is_enabled() {
     esac
 }
 
+# Provision the webchat<->server shared trust secret. Both aimee-server (which
+# validates a webchat `X-Aimee-Webuser` assertion) and aimee-webchat (which sends
+# it, plus uses it as the legacy socket bearer) read $AIMEE_HOME/server.token.
+# Without it EVERY per-user vault/git/editor call fails closed ("aimee-server
+# unavailable" / "editor unavailable"), because webchat short-circuits before it
+# even reaches the server. Generate a strong random secret once, 0600, owned by
+# the aimee user so the privilege-dropped server can read it. Never clobber an
+# operator-provided token. Idempotent — safe to call on every start.
+webchat_ensure_server_token() {
+    _tok_path="${WEBCHAT_HOME}/server.token"
+    if [ -s "$_tok_path" ]; then
+        return 0
+    fi
+    mkdir -p "$WEBCHAT_HOME"
+    _tok=""
+    if command -v openssl >/dev/null 2>&1; then
+        _tok="$(openssl rand -hex 32 2>/dev/null)"
+    fi
+    if [ -z "$_tok" ] && [ -r /dev/urandom ]; then
+        _tok="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    fi
+    if [ -z "$_tok" ]; then
+        webchat_log "WARNING: could not generate server.token (no openssl/urandom); per-user vault/git/editor will be unavailable"
+        return 0
+    fi
+    _umask_old="$(umask)"
+    umask 077
+    printf '%s\n' "$_tok" > "$_tok_path"
+    umask "$_umask_old"
+    # aimee-server runs as the unprivileged 'aimee' user and reads this file.
+    chown aimee:aimee "$_tok_path" 2>/dev/null || true
+    chmod 600 "$_tok_path" 2>/dev/null || true
+    webchat_log "generated server.token (webchat<->server trust for per-user vault/git/editor)"
+}
+
 # Launch aimee-webchat in the background (as root, for PAM). Self-signed TLS on
 # :8443 is auto-generated under AIMEE_HOME and persists on the data volume.
 webchat_start() {
@@ -77,6 +112,7 @@ webchat_start() {
         return 0
     fi
     webchat_bootstrap_user
+    webchat_ensure_server_token
     webchat_log "starting aimee-webchat on :$WEBCHAT_PORT (https), socket=$WEBCHAT_HOME/aimee-server.sock"
     HOME=/root aimee-webchat \
         --port "$WEBCHAT_PORT" \
