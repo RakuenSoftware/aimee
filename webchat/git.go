@@ -30,12 +30,41 @@ func (s *server) gitRelay(w http.ResponseWriter, st int, data []byte, err error)
 		Name     string   `json:"name"`
 		Output   string   `json:"output"`
 		Projects []string `json:"projects"`
+		Hosts    []string `json:"hosts"`
 	}
 	_ = json.Unmarshal(data, &up)
 	out, _ := json.Marshal(map[string]any{
-		"ok": true, "name": up.Name, "output": up.Output, "projects": up.Projects,
+		"ok": true, "name": up.Name, "output": up.Output, "projects": up.Projects, "hosts": up.Hosts,
 	})
 	w.Write(out)
+}
+
+// /api/git/credentials — manage aimee-server's per-host git access tokens
+// (GET list hosts, POST {host, token} set, DELETE {host} remove). Tokens are
+// write-only: listing returns host names only, never secrets.
+func (s *server) handleGitCredentials(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	user := currentUser(r)
+	switch r.Method {
+	case http.MethodGet:
+		st, data, err := s.v1RequestWebuser(ctx, user, http.MethodGet, "/v1/git/credentials", nil)
+		s.gitRelay(w, st, data, err)
+	case http.MethodPost, http.MethodDelete:
+		var req struct {
+			Host  string `json:"host"`
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Host == "" {
+			writeJSONError(w, http.StatusBadRequest, "host required")
+			return
+		}
+		body, _ := json.Marshal(map[string]string{"host": req.Host, "token": req.Token})
+		st, data, err := s.v1RequestWebuser(ctx, user, r.Method, "/v1/git/credentials", body)
+		s.gitRelay(w, st, data, err)
+	default:
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 // GET /api/git/projects — list the user's cloned projects.

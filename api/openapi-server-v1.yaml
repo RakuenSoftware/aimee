@@ -3665,6 +3665,89 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /git/credentials:
+    get:
+      summary: List the git hosts that have a stored credential
+      description: >
+        The git hosts (github.com, gitea.*, ...) for which aimee-server holds an
+        access token. Single-user server: credentials are keyed by host, not by
+        user, and stored in the server vault. Tokens are NEVER returned — only the
+        host names. Identity is the attested `webuser:` principal. Capability:
+        tool:execute.
+      responses:
+        "200":
+          description: Configured hosts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hosts: { type: array, items: { type: string } }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    post:
+      summary: Store (or replace) the git access token for a host
+      description: >
+        Persist `token` for `host` (a hostname or a full repo URL, reduced to its
+        host) in the server vault. Used by clones/ops on that host. Provider-
+        agnostic. Capability: tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host, token]
+              properties:
+                host: { type: string, description: Hostname (or a repo URL) }
+                token: { type: string, description: Access token (write-only) }
+      responses:
+        "200":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { ok: { type: boolean } }
+        "400":
+          description: Missing host/token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    delete:
+      summary: Remove the stored git access token for a host
+      description: >
+        Delete the token aimee-server holds for `host`. Capability: tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host]
+              properties:
+                host: { type: string }
+      responses:
+        "200":
+          description: Removed (or absent)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { ok: { type: boolean } }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /runner/poll:
     post:
       summary: Poll for the next detached-workspace op to execute (reverse channel)

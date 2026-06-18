@@ -29,6 +29,10 @@ int git_host_cred_for_url(const char *url, char *out, size_t out_len);
 /* Delete the stored token for `host`. Returns 0 (deleted or absent), -1 on error. */
 int git_host_cred_delete(const char *host);
 
+/* List the hosts that have a stored token into out[][GIT_HOST_MAX] (up to max).
+ * Tokens are NEVER returned — only the host names. Returns the count, or -1. */
+int git_host_cred_list(char out[][GIT_HOST_MAX], int max);
+
 /* Extract the lowercased host from any git URL form into `out`. Returns 1 on
  * success, 0 on failure. Exposed for the set-from-URL path + tests. */
 int git_host_from_url(const char *url, char *out, size_t out_len);
