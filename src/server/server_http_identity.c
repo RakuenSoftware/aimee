@@ -128,3 +128,52 @@ void server_http_identity_clear(void)
    tl_transport = ATTEST_NONE;
    tl_principal[0] = '\0';
 }
+
+void http_error_json(char *resp, size_t cap, const char *msg)
+{
+   if (!resp || cap == 0)
+      return;
+   if (!msg)
+      msg = "error";
+   if (cap < 16)
+   {
+      resp[0] = '\0';
+      return;
+   }
+   size_t o = (size_t)snprintf(resp, cap, "{\"error\":\"");
+   /* Leave room for the longest single escape (\uXXXX = 6) + closing "\"}" + NUL. */
+   for (const char *p = msg; *p && o + 9 < cap; p++)
+   {
+      unsigned char c = (unsigned char)*p;
+      switch (c)
+      {
+      case '"':
+         resp[o++] = '\\';
+         resp[o++] = '"';
+         break;
+      case '\\':
+         resp[o++] = '\\';
+         resp[o++] = '\\';
+         break;
+      case '\n':
+         resp[o++] = '\\';
+         resp[o++] = 'n';
+         break;
+      case '\r':
+         resp[o++] = '\\';
+         resp[o++] = 'r';
+         break;
+      case '\t':
+         resp[o++] = '\\';
+         resp[o++] = 't';
+         break;
+      default:
+         if (c < 0x20)
+            o += (size_t)snprintf(resp + o, cap - o, "\\u%04x", c);
+         else
+            resp[o++] = (char)c;
+         break;
+      }
+   }
+   snprintf(resp + o, cap - o, "\"}");
+}
