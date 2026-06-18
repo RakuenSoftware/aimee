@@ -251,18 +251,6 @@ function mergeServerSessions(local: TabData[], server: ServerSession[]): TabData
   return pristineDefault ? restored : [...local, ...restored];
 }
 
-// forgetServerSession removes a closed tab's session from the server so it does
-// not reappear on the next restore. Best-effort.
-function forgetServerSession(aimeeSid: string): void {
-  if (!aimeeSid) return;
-  try {
-    fetch(`/api/chat/session?sid=${encodeURIComponent(aimeeSid)}`, {
-      method: 'DELETE',
-      headers: { 'X-CSRF-Token': window._csrf || '' },
-    }).catch(() => {});
-  } catch { /* ignore */ }
-}
-
 function rulesBannerDismissedKey(root: string): string {
   return root ? `${RULES_BANNER_DISMISSED_KEY}:${root}` : RULES_BANNER_DISMISSED_KEY;
 }
@@ -329,66 +317,6 @@ interface QueuedChatSend {
 
 let msgIdCounter = 0;
 function nextId() { return ++msgIdCounter; }
-
-/* ---- Tab bar ---- */
-
-interface TabBarProps {
-  tabs: TabData[];
-  activeIdx: number;
-  onSwitch: (i: number) => void;
-  onNew: () => void;
-  onClose: (i: number) => void;
-}
-
-function TabBar({ tabs, activeIdx, onSwitch, onNew, onClose }: TabBarProps) {
-  return (
-    <div style={{
-      display: 'flex', background: tokens.borderLight, borderBottom: `1px solid ${tokens.borderMedium}`,
-      padding: '0 8px', alignItems: 'stretch', overflowX: 'auto', flexShrink: 0,
-    }}>
-      {tabs.map((t, i) => (
-        <div
-          key={i}
-          onClick={() => onSwitch(i)}
-          style={{
-            padding: '7px 14px', fontSize: '13px',
-            color: i === activeIdx ? tokens.primary : tokens.textSecondary,
-            cursor: 'pointer',
-            borderBottom: i === activeIdx ? `2px solid ${tokens.primary}` : '2px solid transparent',
-            background: i === activeIdx ? tokens.surface : 'transparent',
-            display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap',
-          }}
-        >
-          <span style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {t.title}
-          </span>
-          {tabs.length > 1 && (
-            <span
-              onClick={e => { e.stopPropagation(); onClose(i); }}
-              style={{ fontSize: '11px', color: tokens.textPale, cursor: 'pointer', padding: '2px 4px', borderRadius: '3px' }}
-              onMouseOver={e => (e.currentTarget.style.color = tokens.danger)}
-              onMouseOut={e => (e.currentTarget.style.color = tokens.textPale)}
-            >
-              ×
-            </span>
-          )}
-        </div>
-      ))}
-      <button
-        onClick={onNew}
-        style={{
-          padding: '7px 12px', fontSize: '16px', color: tokens.textPale, cursor: 'pointer',
-          border: 'none', background: 'transparent', lineHeight: 1,
-        }}
-        onMouseOver={e => (e.currentTarget.style.color = tokens.primary)}
-        onMouseOut={e => (e.currentTarget.style.color = tokens.textPale)}
-        title="New tab"
-      >
-        +
-      </button>
-    </div>
-  );
-}
 
 /* ---- Thread Bar (conversation branching) ---- */
 
@@ -2025,56 +1953,6 @@ export default function Chat() {
     } catch { /* ignore */ }
   }
 
-  /* Tab operations */
-  function switchTab(i: number) {
-    if (i === activeIdx) return;
-    abortActiveSends();
-    saveCurrentTabMessages(streamMsgs);
-    setActiveIdx(i);
-  }
-
-  function newTab() {
-    abortActiveSends();
-    saveCurrentTabMessages(streamMsgs);
-    const newIdx = tabs.length;
-    setTabs(prev => [
-      ...prev,
-      { title: `Chat ${prev.length + 1}`, messages: [], sid: '', aimeeSid: newAimeeSessionId() },
-    ]);
-    setActiveIdx(newIdx);
-    setStreamMsgs([]);
-  }
-
-  // Detach a tab's unified-presence surface (best-effort; keepalive lets it
-  // outlive an unload). The server also tears the presence down on session.close,
-  // so a missed detach is harmless.
-  function detachTabPresence(tab: TabData | undefined) {
-    if (!tab?.attachId || !tab.aimeeSid) return;
-    try {
-      fetch('/api/chat/detach', {
-        method: 'POST',
-        keepalive: true,
-        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
-        body: JSON.stringify({ sid: tab.aimeeSid, attach_id: tab.attachId }),
-      }).catch(() => {});
-    } catch { /* ignore */ }
-  }
-
-  function closeTab(i: number) {
-    if (tabs.length <= 1) return;
-    detachTabPresence(tabs[i]);
-    // Forget the server-side session so the closed tab does not reappear on the
-    // next restore (best-effort).
-    forgetServerSession(tabs[i]?.aimeeSid ?? '');
-    if (i === activeIdx) abortActiveSends();
-    setTabs(prev => {
-      const next = [...prev];
-      next.splice(i, 1);
-      return next;
-    });
-    setActiveIdx(prev => Math.min(prev, tabs.length - 2));
-  }
-
   /* Thread operations */
   async function branchThread() {
     try {
@@ -2564,13 +2442,9 @@ export default function Chat() {
       margin: '-24px', overflow: 'hidden', background: tokens.surface,
     }}>
       {/* Tab bar */}
-      <TabBar
-        tabs={tabs}
-        activeIdx={activeIdx}
-        onSwitch={switchTab}
-        onNew={newTab}
-        onClose={closeTab}
-      />
+      {/* Chat session tabs removed: a single conversation per the top-nav
+          restructure. The tabs[] state is retained (locked to one tab) so the
+          session/presence/thread machinery is unaffected. */}
 
       {/* Thread bar (conversation branching) */}
       <ThreadBar
