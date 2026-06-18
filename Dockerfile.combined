@@ -110,6 +110,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
+        git \
         libpam-modules \
         libpam0g \
         libpq5 \
@@ -118,6 +119,7 @@ RUN apt-get update \
         libzstd1 \
         nodejs \
         npm \
+        openssh-client \
         python3 \
         tmux \
         zlib1g \
