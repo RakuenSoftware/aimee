@@ -1,25 +1,36 @@
-/* In-app VSCode (webchat-git WP-J). Embeds the per-user code-server — served by
- * aimee-server and reverse-proxied at /vscode/ (same origin) — in an iframe so
- * the editor lives inside the webchat shell alongside Chat/Projects. The browser
- * never sees the editor's loopback port or any git credential: webchat ensures
- * the editor and proxies, and the creds stay server-side in the sealed vault.
- *
- * The editor is server-gated (AIMEE_WEBCHAT_EDITOR + a code-server build); when
- * it is off, /vscode/ returns 503 and the iframe shows that page. Same-origin,
- * so framing is allowed and no cross-origin credential exposure is possible. */
+import { useState } from 'react';
+import ProjectPicker from '../components/ProjectPicker';
+import type { ProjectSelection } from '../components/ProjectPicker';
+
+/* In-app VSCode (webchat-git WP-J), bound to this tab's selected project. The
+ * per-user code-server (served by aimee-server, reverse-proxied at /vscode/) is
+ * rooted at the user's workspace; selecting a project opens its folder via
+ * ?folder=<root>/<project>. The browser never sees the editor's loopback port or
+ * any git credential — creds stay server-side in the sealed vault. */
 export default function Editor() {
+  const [sel, setSel] = useState<ProjectSelection | null>(null);
+
+  const folder = sel ? `${sel.root}/${sel.project}` : '';
+  // Re-key the iframe on folder change so code-server reloads at the new folder.
+  const src = folder ? `/vscode/?folder=${encodeURIComponent(folder)}` : '/vscode/';
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <iframe
-        title="VSCode"
-        src="/vscode/"
-        style={{ flex: 1, width: '100%', height: '100%', border: 'none' }}
-        /* code-server needs scripts + same-origin; it is served from our own
-         * origin so this is not a cross-origin grant. Clipboard helps copy/paste
-         * in the editor + terminal. */
-        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
-        allow="clipboard-read; clipboard-write"
-      />
+      <ProjectPicker storageKey="aimee_editor_project" onChange={setSel} />
+      {sel ? (
+        <iframe
+          key={folder}
+          title="VSCode"
+          src={src}
+          style={{ flex: 1, width: '100%', height: '100%', border: 'none' }}
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads"
+          allow="clipboard-read; clipboard-write"
+        />
+      ) : (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#888', fontFamily: 'system-ui' }}>
+          Select or clone a project above to open it in the editor.
+        </div>
+      )}
     </div>
   );
 }

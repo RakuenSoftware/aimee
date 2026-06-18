@@ -22,6 +22,7 @@
 #include "git_ops.h"          /* git_ops_run for /v1/workspace/git (WP-E) */
 #include "git_project.h"      /* git_project_clone for /v1/workspace/clone (WP-D) */
 #include "webuser_editor.h"   /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
+#include "workspace_scope.h"  /* ws_scope_user_root — project workspace root */
 #include "index.h"            /* index_scan_project after a webuser clone (WP-D) */
 
 /* Per-request context handed to a route handler. `id` holds the extracted
@@ -935,6 +936,12 @@ static int rh_workspace_projects(const route_req_t *rq, char *resp, int cap)
    cJSON *arr = cJSON_AddArrayToObject(out, "projects");
    for (int i = 0; i < count; i++)
       cJSON_AddItemToArray(arr, cJSON_CreateString(names[i]));
+   /* The user's scoped workspace root — used by the editor to open a project
+    * folder (root/<project>) and by chat to set its working directory. It is the
+    * caller's own workspace path, returned only to them. */
+   char root[MAX_PATH_LEN];
+   if (ws_scope_user_root(principal, 0, root, sizeof(root)) == 0)
+      cJSON_AddStringToObject(out, "root", root);
    char *s = cJSON_PrintUnformatted(out);
    int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
    free(s);
