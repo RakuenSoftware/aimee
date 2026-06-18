@@ -73,9 +73,16 @@ oom:
 char **git_cred_inject_build_env(const char *principal, char *const *parent_environ)
 {
    char token[GIT_CRED_TOKEN_MAX];
-   /* Autonomous server-wrap read: works for background / code-server git ops
-    * after the user's session KEK has expired. 1 = token, 0 = none. */
+   /* Autonomous server-wrap read of the webuser's OWN vaulted forge token (an
+    * optional personal override). 1 = token, 0 = none. */
    int have_token = (git_forge_vault_token(principal, token, sizeof(token)) == 1);
+
+   /* Default for a personal-agent server: when the user has no personal token,
+    * use aimee-server's OWN configured git identity (a GitHub App installation
+    * token or AIMEE_FORGE_TOKEN). The clone/editor then authenticates with the
+    * server's credential, so a webchat user never has to store a PAT. */
+   if (!have_token)
+      have_token = (forge_cred_server_identity(token, sizeof(token), NULL, 0) == 1);
 
    /* Start (or reuse) the user's in-memory ssh-agent if they have a vaulted SSH
     * key (WP-C2); the key never touches disk. 1 = sock ready. */
