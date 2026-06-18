@@ -10,6 +10,7 @@
 #include "git_project.h"
 #include "index.h"
 #include "webuser_editor.h"
+#include "workspace_scope.h"
 
 #include <stdio.h>
 
@@ -137,4 +138,13 @@ int git_oauth_github_get_client_id(char *out, size_t out_len)
    if (out && out_len)
       out[0] = '\0';
    return 0;
+}
+
+int ws_scope_user_root(const char *principal, int create, char *out, size_t cap)
+{
+   (void)principal;
+   (void)create;
+   if (out && cap)
+      out[0] = '\0';
+   return -1;
 }
