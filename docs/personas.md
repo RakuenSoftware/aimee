@@ -3,7 +3,7 @@
 A **persona** is the primary agent's identity, its system-prompt voice, craft
 principles, session-brief hints, the delegate roles it advertises, and its
 **delegate policy**. Personas are server-owned and user-extensible: aimee ships
-seven built-ins and seeds them as editable files, and you can add your own.
+eight built-ins and seeds them as editable files, and you can add your own.
 
 ## Built-in personas
 
@@ -14,13 +14,17 @@ seven built-ins and seeds them as editable files, and you can add your own.
 | `songwriter` | Songwriter / lyricist | **none**, does all the work itself; no delegates |
 | `qa` | Senior QA / test reviewer | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
 | `security` | Senior application-security reviewer | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
-| `reviewer` | Senior contrarian code reviewer (thorough, comprehensive) | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
+| `reviewer` | Senior **contrarian** code reviewer (thorough, comprehensive) | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
+| `reviewer-constructive` | Senior **constructive** code reviewer (assess as written) | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
 | `architect` | Software-architecture reviewer | **readonly**, reviews and reports; read-only delegates only (review, diagnose, validate, research) |
 
-The four reviewer personas (`qa`, `security`, `reviewer`, `architect`) reframe
-the agent as a read-only senior reviewer: it investigates and surfaces findings
-with evidence, never editing the code. They share a common **Review Principles**
-block and each carry their own review methodology.
+The five reviewer personas (`qa`, `security`, `reviewer`,
+`reviewer-constructive`, `architect`) reframe the agent as a read-only senior
+reviewer: it investigates and surfaces findings with evidence, never editing the
+code. They share a common **Review Principles** block and each carry their own
+review methodology. `reviewer` and `reviewer-constructive` are a deliberate pair
+— the former is adversarial (tries to refute), the latter assesses the work as
+written — so a roundtable panel can blend both stances.
 
 ## Where personas live
 
@@ -28,7 +32,8 @@ Single markdown files, resolved project → user → built-in:
 
 - Project: `<project>/.aimee/personas/<name>.md`
 - User: `~/.config/aimee/personas/<name>.md`
-- Built-in fallback (engineer/novel/songwriter/qa/security/reviewer/architect)
+- Built-in fallback
+  (engineer/novel/songwriter/qa/security/reviewer/reviewer-constructive/architect)
 
 `aimee init` seeds the built-ins as editable files under
 `~/.config/aimee/personas/` (idempotent, it never overwrites an existing file),
@@ -115,6 +120,31 @@ The persona name resolves from the built-ins or a user-level persona file (the
 same set as the rest of the persona surface). The delegate's *role* still
 governs tool access and write capability; the *persona* governs its identity and
 principles, and they compose.
+
+## Personas in roundtables and workflows
+
+A **roundtable** review panel is staffed by personas: each panelist is a persona
+run on a delegate model, and the panel pairs personas to models reproducibly run
+to run (the contrarian `reviewer` and constructive `reviewer-constructive` make a
+natural adversarial/constructive split). The default review panel is
+`security`, `architect`, `qa`, `reviewer`.
+
+In a [workflow](WORKFLOWS.md), a `gate.roundtable` step names its panel by
+persona, and any action step can be assigned a persona/delegate pair:
+
+```yaml
+- id: review
+  block: gate.roundtable
+  params:
+    panel:
+      required: [security, architect, qa, reviewer]
+    quorum: 4
+```
+
+The webchat **Workflows** tab includes a persona manager (create/edit personas)
+and a per-step persona picker, both backed by `/api/chat/personas`. So the same
+eight built-ins — plus any you add — are the vocabulary for chat identity,
+delegate assignment, roundtable panels, and per-step workflow roles alike.
 
 ## V1 HTTP API
 

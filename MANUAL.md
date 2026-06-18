@@ -1118,7 +1118,17 @@ legacy command modules but is not currently routed by the thin CLI.
 `aimee identity show/snapshot/diff` inspects the working profile and tracks how
 it changes over time. **Personas** (see [`docs/personas.md`](docs/personas.md))
 let a session adopt a named voice/behavior profile, settable per session in chat
-and webchat.
+and webchat; the same personas staff roundtable review panels and
+[workflow](docs/WORKFLOWS.md) steps. aimee ships eight built-ins (`engineer`
+default, `novel`, `songwriter`, and the read-only reviewers `qa`, `security`,
+`reviewer`, `reviewer-constructive`, `architect`).
+
+**Workflows** (see [`docs/WORKFLOWS.md`](docs/WORKFLOWS.md)) compose those
+delegates and gates into a declarative dev-lifecycle graph (propose → review →
+plan → implement → PR → merge). The default `build` workflow lives in
+`config/workflows/build.yaml`; author and validate your own with `aimee workflow
+new/validate/show` or the webchat **Workflows** tab. The execution engine is
+implemented but not yet wired to a user-facing run trigger.
 
 ---
 
@@ -1205,6 +1215,25 @@ none is provided), serves the React UI from `frontend/`, streams chat over SSE,
 and proxies dashboard panels, collab-rule review, and a local channel board.
 Treat it as a *semi-trusted*, same-host/trusted-LAN surface, see
 [`docs/SECURITY.md`](docs/SECURITY.md).
+
+The UI is organized as a **top navigation bar**, one tab per tool, and each tab
+selects its own git **project** to operate on:
+
+- **Chat** — the agent conversation (streamed over SSE). The selected project
+  becomes the agent's working directory; webchat scope-validates it to the
+  signed-in user's own workspace.
+- **Dashboard** — memory, reminders, and onboarding panels.
+- **Workflows** — a visual composer for [workflow](docs/WORKFLOWS.md)
+  definitions (blocks rail, graph canvas, per-step persona/delegate assignment,
+  plus a persona manager). Validate/Save persist server-side.
+- **Projects** — connect git repositories. Clone over HTTPS *or* SSH-form URLs
+  (normalized to HTTPS); manage **per-host** credentials in the server vault and
+  sign in to GitHub via OAuth device flow. aimee-server is single-user but talks
+  to many hosts/providers, so credentials are keyed by **host, never per user**.
+- **Editor** — an in-browser **VS Code** (a per-user `code-server`, supervised
+  by the server and reverse-proxied at `/vscode/`) opened on the selected
+  project. Enabled by default (`WITH_VSCODE=1` in the image, `AIMEE_WEBCHAT_
+  EDITOR=1`).
 
 ---
 
