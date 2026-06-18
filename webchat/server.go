@@ -12,9 +12,11 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -277,21 +279,80 @@ func ensureTLSCert(cfg *config) (cert, key string, err error) {
 	return certPath, keyPath, nil
 }
 
+// certSANs builds the Subject Alternative Names for the auto-generated cert so
+// it can actually be trusted for how the browser reaches webchat. A cert with
+// only DNS:localhost cannot validate for https://<LAN-IP>:8443, which (besides
+// the usual warning) makes browsers refuse to register VSCode's service worker
+// ("An SSL certificate error occurred when fetching the script") so the editor's
+// webviews break. We include localhost, every non-loopback interface IP, the
+// hostname, and any operator-supplied AIMEE_WEBCHAT_TLS_SANS (comma-separated
+// IPs/DNS names) so an operator who trusts this cert gets a fully valid context.
+func certSANs() (dnsNames []string, ipAddrs []net.IP) {
+	dnsSeen := map[string]bool{}
+	ipSeen := map[string]bool{}
+	addDNS := func(n string) {
+		n = strings.TrimSpace(n)
+		if n != "" && !dnsSeen[n] {
+			dnsSeen[n] = true
+			dnsNames = append(dnsNames, n)
+		}
+	}
+	addIP := func(ip net.IP) {
+		if ip != nil && !ipSeen[ip.String()] {
+			ipSeen[ip.String()] = true
+			ipAddrs = append(ipAddrs, ip)
+		}
+	}
+
+	addDNS("localhost")
+	addIP(net.ParseIP("127.0.0.1"))
+	addIP(net.ParseIP("::1"))
+	if h, err := os.Hostname(); err == nil {
+		addDNS(h)
+	}
+	if addrs, err := net.InterfaceAddrs(); err == nil {
+		for _, a := range addrs {
+			if ipnet, ok := a.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
+				addIP(ipnet.IP)
+			}
+		}
+	}
+	// Operator override for names/IPs not derivable here (e.g. a reverse-proxy
+	// hostname): AIMEE_WEBCHAT_TLS_SANS="aimee.lan,10.0.0.5".
+	for _, s := range strings.Split(os.Getenv("AIMEE_WEBCHAT_TLS_SANS"), ",") {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		if ip := net.ParseIP(s); ip != nil {
+			addIP(ip)
+		} else {
+			addDNS(s)
+		}
+	}
+	return dnsNames, ipAddrs
+}
+
 func generateSelfSignedCert(certPath, keyPath string) error {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return err
 	}
 
+	dnsNames, ipAddrs := certSANs()
+
 	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	tmpl := &x509.Certificate{
-		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "aimee-webchat"},
-		NotBefore:    time.Now().Add(-time.Minute),
-		NotAfter:     time.Now().Add(10 * 365 * 24 * time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:     []string{"localhost"},
+		SerialNumber:          serial,
+		Subject:               pkix.Name{CommonName: "aimee-webchat"},
+		NotBefore:             time.Now().Add(-time.Minute),
+		NotAfter:              time.Now().Add(10 * 365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+		DNSNames:              dnsNames,
+		IPAddresses:           ipAddrs,
 	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &priv.PublicKey, priv)
