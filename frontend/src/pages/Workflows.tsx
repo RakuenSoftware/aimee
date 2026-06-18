@@ -551,6 +551,7 @@ export default function Workflows() {
       <div
         style={{
           width: 230,
+          flexShrink: 0,
           overflowY: "auto",
           display: "flex",
           flexDirection: "column",
@@ -642,8 +643,11 @@ export default function Workflows() {
         </Panel>
       </div>
 
-      {/* center: canvas */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column" }}>
+      {/* center: canvas. minWidth:0 lets this flex item shrink below the 1600px
+          SVG canvas's intrinsic width (the canvas scrolls inside its overflow
+          box); without it the center refused to shrink and squeezed the side
+          rails to zero width — the page looked like just the canvas + buttons. */}
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
         <div
           style={{
             display: "flex",
@@ -793,7 +797,7 @@ export default function Workflows() {
       </div>
 
       {/* right: inspector */}
-      <div style={{ width: 270, overflowY: "auto" }}>
+      <div style={{ width: 270, flexShrink: 0, overflowY: "auto" }}>
         <Panel title={sel ? `Node · ${sel.id}` : "Inspector"}>
           {!sel && (
             <div style={{ color: "#888", fontSize: 13 }}>
