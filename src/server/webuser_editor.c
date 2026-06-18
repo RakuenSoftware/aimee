@@ -173,6 +173,92 @@ static int resolve_drop_uid(drop_ids_t *out)
    return 0;
 }
 
+void webuser_editor_free_env(char **envp)
+{
+   if (!envp)
+      return;
+   for (int i = 0; envp[i]; i++)
+   {
+      /* Zero a GH_TOKEN entry's secret tail before freeing so it does not linger
+       * in freed heap. */
+      if (strncmp(envp[i], "GH_TOKEN=", 9) == 0)
+      {
+         volatile char *p = (volatile char *)envp[i];
+         for (size_t j = 0; p[j]; j++)
+            p[j] = 0;
+      }
+      free(envp[i]);
+   }
+   free(envp);
+}
+
+char **webuser_editor_build_env(const char *principal, const char *userroot)
+{
+   /* code-server gives the user an integrated terminal AND runs untrusted
+    * extensions, so the child must NEVER inherit the server's full environment —
+    * that would expose secrets like AIMEE_DB2_URL (DB password), AIMEE_SERVER_TOKEN,
+    * or provider keys to anything the user (or an extension) runs. Start from a
+    * minimal curated base (PATH/LANG/TERM), layer the user's vault-backed git env
+    * (GH_TOKEN/GIT_ASKPASS/SSH_AUTH_SOCK) on top, pin HOME at the per-user
+    * workspace, and disable git's on-disk credential cache so the token is never
+    * persisted (vault-only at rest). The result is fully owned (every string
+    * strdup'd) for uniform, secret-zeroing teardown. */
+   const char *srv_path = getenv("PATH");
+   const char *srv_lang = getenv("LANG");
+   char path_env[MAX_PATH_LEN + 8], lang_env[256], home_env[MAX_PATH_LEN + 8];
+   snprintf(path_env, sizeof(path_env), "PATH=%s",
+            (srv_path && srv_path[0]) ? srv_path : "/usr/bin:/bin");
+   snprintf(lang_env, sizeof(lang_env), "LANG=%s",
+            (srv_lang && srv_lang[0]) ? srv_lang : "C.UTF-8");
+   snprintf(home_env, sizeof(home_env), "HOME=%s", userroot ? userroot : "/");
+   char *mini[] = {path_env, lang_env, (char *)"TERM=xterm-256color", NULL};
+
+   /* git_cred_inject_build_env copies from the given base (dropping any inherited
+    * GH_TOKEN/SSH_AUTH_SOCK) and appends the vaulted git vars; pass the minimal
+    * base, never environ. Returns NULL when the user has no vaulted creds yet, in
+    * which case the minimal base alone is the editor's env. */
+   char **inner = git_cred_inject_build_env(principal, mini);
+   char *const *src = inner ? inner : mini;
+   int sc = 0;
+   while (src[sc])
+      sc++;
+
+   /* sc inherited + HOME + 3 (GIT_CONFIG_* credential.helper disable) + NULL. */
+   char **out = calloc((size_t)sc + 5, sizeof(char *));
+   if (!out)
+   {
+      git_cred_inject_free_env(inner);
+      return NULL;
+   }
+   int o = 0;
+   for (int i = 0; i < sc; i++)
+   {
+      if (strncmp(src[i], "HOME=", 5) == 0)
+         continue; /* pinned below */
+      if (!(out[o++] = strdup(src[i])))
+         goto oom;
+   }
+   if (!(out[o++] = strdup(home_env)))
+      goto oom;
+   /* Disable on-disk credential storage: an empty credential.helper at high
+    * precedence clears any helper from the user's gitconfig, so neither the
+    * terminal nor an extension can `git config credential.helper store` the token
+    * to ~/.git-credentials. Auth still flows through GIT_ASKPASS each time. */
+   if (!(out[o++] = strdup("GIT_CONFIG_COUNT=1")))
+      goto oom;
+   if (!(out[o++] = strdup("GIT_CONFIG_KEY_0=credential.helper")))
+      goto oom;
+   if (!(out[o++] = strdup("GIT_CONFIG_VALUE_0=")))
+      goto oom;
+   out[o] = NULL;
+   git_cred_inject_free_env(inner); /* zeroes its GH_TOKEN; we kept our own copy */
+   return out;
+oom:
+   webuser_editor_free_env(out);
+   git_cred_inject_free_env(inner);
+   return NULL;
+}
+
 /* Fork+exec code-server bound to 127.0.0.1:<port>, rooted at userroot, hardened.
  * Returns the child pid, or -1. */
 static pid_t spawn_code_server(const char *principal, const char *userroot, int port)
@@ -187,56 +273,14 @@ static pid_t spawn_code_server(const char *principal, const char *userroot, int 
    if (resolve_drop_uid(&drop) != 0)
       return -1;
 
-   char bind_arg[64], data_dir[MAX_PATH_LEN], ext_dir[MAX_PATH_LEN], home_env[MAX_PATH_LEN + 8];
+   char bind_arg[64], data_dir[MAX_PATH_LEN], ext_dir[MAX_PATH_LEN];
    snprintf(bind_arg, sizeof(bind_arg), "127.0.0.1:%d", port);
    snprintf(data_dir, sizeof(data_dir), "%s/.aimee-editor/data", userroot);
    snprintf(ext_dir, sizeof(ext_dir), "%s/.aimee-editor/ext", userroot);
-   snprintf(home_env, sizeof(home_env), "HOME=%s", userroot);
 
-   /* code-server gives the user an integrated terminal, so the child must NOT
-    * inherit the server's full environment — that could expose secrets like
-    * AIMEE_DB2_URL (DB password), AIMEE_SERVER_TOKEN, or provider keys. Start
-    * from a minimal, curated base (PATH/LANG/TERM only) and layer the user's
-    * vault-backed git env (GH_TOKEN+GIT_ASKPASS, SSH_AUTH_SOCK) on top, so the
-    * editor authenticates to git without ever seeing unrelated server env. */
-   const char *srv_path = getenv("PATH");
-   const char *srv_lang = getenv("LANG");
-   char path_env[MAX_PATH_LEN + 8], lang_env[256];
-   snprintf(path_env, sizeof(path_env), "PATH=%s",
-            (srv_path && srv_path[0]) ? srv_path : "/usr/bin:/bin");
-   snprintf(lang_env, sizeof(lang_env), "LANG=%s",
-            (srv_lang && srv_lang[0]) ? srv_lang : "C.UTF-8");
-   char *mini[] = {path_env, lang_env, (char *)"TERM=xterm-256color", NULL};
-
-   /* git_cred_inject_build_env copies from the given base (dropping any
-    * GH_TOKEN/SSH_AUTH_SOCK) and appends the vaulted git vars; pass the minimal
-    * base, not environ. Returns NULL when the user has no vaulted creds yet, in
-    * which case the minimal base alone is the editor's env (still git-prompt
-    * safe via GIT_TERMINAL_PROMPT default). envp ownership: the built array is
-    * freed in the parent after fork. */
-   char **base = git_cred_inject_build_env(principal, mini);
-   int owns_base = (base != NULL);
-   if (!base)
-      base = mini;
-   int bc = 0;
-   while (base[bc])
-      bc++;
-   char **envp = calloc((size_t)bc + 2, sizeof(char *));
+   char **envp = webuser_editor_build_env(principal, userroot);
    if (!envp)
-   {
-      if (owns_base)
-         git_cred_inject_free_env(base);
       return -1;
-   }
-   int eo = 0;
-   for (int i = 0; i < bc; i++)
-   {
-      if (strncmp(base[i], "HOME=", 5) == 0)
-         continue; /* override below */
-      envp[eo++] = base[i];
-   }
-   envp[eo++] = home_env;
-   envp[eo] = NULL;
 
    const char *argv[] = {bin,
                          "--bind-addr",
@@ -256,9 +300,7 @@ static pid_t spawn_code_server(const char *principal, const char *userroot, int 
    pid_t pid = fork();
    if (pid < 0)
    {
-      free(envp);
-      if (owns_base)
-         git_cred_inject_free_env(base);
+      webuser_editor_free_env(envp);
       return -1;
    }
    if (pid == 0)
@@ -291,9 +333,7 @@ static pid_t spawn_code_server(const char *principal, const char *userroot, int 
       _exit(127);
    }
 
-   free(envp);
-   if (owns_base)
-      git_cred_inject_free_env(base); /* zeroes GH_TOKEN; child kept its own copy */
+   webuser_editor_free_env(envp); /* zeroes GH_TOKEN; child kept its own COW copy */
    return pid;
 }
 
