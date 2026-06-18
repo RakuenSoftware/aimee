@@ -25,8 +25,10 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
 #include "cJSON.h"
 #include "token_tracker.h"
 #include "reasoning_cap.h"
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
 #include <signal.h>
 #ifdef __linux__
 #include <sys/prctl.h>
@@ -303,6 +305,35 @@ static int chat_claude_effort_allowed(const char *effort)
    return effort && (strcmp(effort, "low") == 0 || strcmp(effort, "medium") == 0 ||
                      strcmp(effort, "high") == 0 || strcmp(effort, "xhigh") == 0 ||
                      strcmp(effort, "max") == 0);
+}
+
+/* `claude --resume <sid>` fails the WHOLE turn ("No conversation found with
+ * session ID") when the session transcript is gone — e.g. the client replays a
+ * session id from before a container redeploy that cleared ~/.claude. Guard the
+ * resume: only pass --resume when the transcript actually exists, otherwise fall
+ * back to a fresh session so the user can keep chatting. claude stores each
+ * conversation at ~/.claude/projects/<cwd-as-dashes>/<sid>.jsonl; we glob across
+ * project dirs so the check is independent of claude's exact cwd encoding (a
+ * session id is unique, so it lives in at most one project dir). */
+static int chat_claude_session_exists(const char *sid)
+{
+   if (!sid || !sid[0])
+      return 0;
+   const char *home = getenv("HOME");
+   if (!home || !home[0])
+      return 1; /* can't check — don't block a resume the client asked for */
+   /* A real claude session id is a UUID (alnum + '-'); refuse anything else so
+    * the value can't smuggle glob metacharacters or path traversal. */
+   for (const char *p = sid; *p; p++)
+      if (!(isalnum((unsigned char)*p) || *p == '-' || *p == '_'))
+         return 1;
+   char pattern[2048];
+   snprintf(pattern, sizeof(pattern), "%s/.claude/projects/*/%s.jsonl", home, sid);
+   glob_t g;
+   int rc = glob(pattern, GLOB_NOSORT, NULL, &g);
+   int found = (rc == 0 && g.gl_pathc > 0);
+   globfree(&g);
+   return found;
 }
 
 static int chat_codex_effort_allowed(const char *effort)
@@ -1084,11 +1115,13 @@ void chat_stream_worker(void *arg)
       argv[argc++] = "--effort";
       argv[argc++] = (char *)claude_effort;
    }
-   if (claude_sid[0])
+   if (claude_sid[0] && chat_claude_session_exists(claude_sid))
    {
       argv[argc++] = "--resume";
       argv[argc++] = (char *)claude_sid;
    }
+   /* else: the requested session is gone (e.g. cleared by a redeploy) — start a
+    * fresh session instead of letting --resume fail the entire turn. */
    if (cfg.autonomous)
       argv[argc++] = "--dangerously-skip-permissions";
    argv[argc] = NULL;
