@@ -100,8 +100,11 @@ static const char *editor_binary_path(void)
 
 int webuser_editor_available(void)
 {
+   /* On by default; AIMEE_WEBCHAT_EDITOR=0 explicitly disables. Still fail-closed
+    * when no code-server binary is present (e.g. a WITH_VSCODE=0 / dev build), so
+    * enabling it never breaks an image that doesn't ship the editor. */
    const char *en = getenv("AIMEE_WEBCHAT_EDITOR");
-   if (!en || !en[0] || en[0] == '0')
+   if (en && en[0] == '0' && en[1] == '\0')
       return 0;
    return editor_binary_path() != NULL;
 }

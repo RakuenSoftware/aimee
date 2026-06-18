@@ -14,10 +14,12 @@
  * path to the returned port (WP-J); the loopback port is never sent to the
  * browser.
  *
- * Fail-closed by default: ensure() returns 0 (feature unavailable) unless
- * AIMEE_WEBCHAT_EDITOR is set AND a code-server binary is present (WITH_VSCODE=1
- * images). It binds only to loopback and runs each child hardened (no core dump,
- * no new privs, detached session, stdio to /dev/null). */
+ * On by default, fail-closed: ensure() serves the editor unless
+ * AIMEE_WEBCHAT_EDITOR=0 disables it, and returns 0 (unavailable) when no
+ * code-server binary is present (a WITH_VSCODE=0 / dev build), so enabling it
+ * never breaks an image that does not ship the editor. It binds only to loopback
+ * and runs each child hardened (no core dump, no new privs, detached session,
+ * stdio to /dev/null). */
 
 #define WEBUSER_EDITOR_MAX 64 /* max concurrent per-user editors */
 
@@ -43,7 +45,7 @@ int webuser_editor_reap_idle(long idle_secs);
 /* Stop every running editor (server shutdown). */
 void webuser_editor_shutdown(void);
 
-/* Whether the editor feature is enabled (AIMEE_WEBCHAT_EDITOR set) AND a
+/* Whether the editor feature is enabled (on unless AIMEE_WEBCHAT_EDITOR=0) AND a
  * code-server binary is resolvable. Exposed for the route layer / tests. */
 int webuser_editor_available(void);
 

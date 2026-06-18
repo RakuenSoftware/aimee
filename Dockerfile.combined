@@ -16,10 +16,10 @@
 # registry token and NO credentials. Set --build-arg WITH_WEBCHAT=0 to build the
 # server+kb services only (skips the frontend + Go webchat stages entirely).
 ARG WITH_WEBCHAT=1
-# WITH_VSCODE bundles code-server (in-browser VSCode, Open-VSX only). OFF by
-# default (adds ~100 MB; default + CI builds skip the stage). The deployed
-# aimee-server-kb image is built with --build-arg WITH_VSCODE=1.
-ARG WITH_VSCODE=0
+# WITH_VSCODE bundles code-server (in-browser VSCode, Open-VSX only). ON by
+# default — the editor is a first-class feature; build with --build-arg
+# WITH_VSCODE=0 to omit it (saves ~100 MB).
+ARG WITH_VSCODE=1
 FROM debian:bookworm-slim AS build
 
 # Union of the aimee-server and aimee-kb build deps: server links libsqlite3
