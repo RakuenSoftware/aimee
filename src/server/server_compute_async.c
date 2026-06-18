@@ -501,10 +501,11 @@ static void chat_stream_worker_pooled(void *arg)
    if (locked)
       presence_turn_release(lock_session, lock_turn);
    else if (sid[0])
-      presence_emit_turn_done(sid, turn_id);
-   /* Clear the cancel-registry entry after the worker has reaped its child and
-    * the turn_done event is published (cctx is already freed by the worker, so
-    * use the captured local pointer). */
+      presence_emit_turn_done(sid, turn_id); /* turn_done reaches the ring even on cancel */
+   /* Clear the cancel-registry entry after the worker reaped its child and
+    * turn_done was published. cancel_entry is a LOCAL pointer into the static
+    * turn registry table (NOT into cctx, which the worker already freed), so
+    * this is not a use-after-free. */
    turn_registry_clear(cancel_entry);
 
    async_slot_release(async_slot);

@@ -1410,15 +1410,19 @@ void chat_stream_worker(void *arg)
       close(err_fd);
    free(system_prompt);
 
-   /* Register the child with the per-turn cancel registry (this worker is the
-    * sole reaper) and make the read end non-blocking so the poll-driven loop
-    * below can re-check the cancel flag instead of blocking in read(). */
-   turn_registry_set_child(cctx->turn_entry, pid);
+   /* Make the read end non-blocking BEFORE registering the child, so a cancel
+    * racing in right after registration always meets the poll-driven loop in its
+    * non-blocking state (never a blocking read()). pid is the child here (the
+    * fork-failure path returned above), but guard defensively. */
    {
       int fl = fcntl(out_pipe[0], F_GETFL, 0);
       if (fl >= 0)
          fcntl(out_pipe[0], F_SETFL, fl | O_NONBLOCK);
    }
+   /* Register the child with the per-turn cancel registry (this worker is the
+    * sole reaper of this pid). */
+   if (pid > 0)
+      turn_registry_set_child(cctx->turn_entry, pid);
 
    /* Write message to stdin */
    size_t msg_len = strlen(message);
@@ -1627,6 +1631,7 @@ void chat_stream_worker(void *arg)
          {
             wr = waitpid(pid, &status, 0);
          } while (wr < 0 && errno == EINTR);
+         /* wr < 0 with ECHILD => already reaped elsewhere; treat as reaped. */
       }
       turn_registry_mark_reaped(cctx->turn_entry);
    }
