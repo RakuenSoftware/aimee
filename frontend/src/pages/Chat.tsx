@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Spinner, tokens } from '@rakuensoftware/smoothgui';
 import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
 import { escHtml, renderMd, renderWithMentions } from './chat/markdown';
+import ProjectPicker from '../components/ProjectPicker';
 
 /* ---- Types ---- */
 
@@ -2439,12 +2440,19 @@ export default function Chat() {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', height: '100%',
-      margin: '-24px', overflow: 'hidden', background: tokens.surface,
+      overflow: 'hidden', background: tokens.surface,
     }}>
-      {/* Tab bar */}
-      {/* Chat session tabs removed: a single conversation per the top-nav
-          restructure. The tabs[] state is retained (locked to one tab) so the
-          session/presence/thread machinery is unaffected. */}
+      {/* Chat session tabs removed (single conversation). This tab's project
+          space: select/clone a git project; the agent runs with that project as
+          its working directory (cwd). Per-tab persisted selection. */}
+      <ProjectPicker
+        storageKey="aimee_chat_project"
+        onChange={sel => {
+          const r = sel ? `${sel.root}/${sel.project}` : '';
+          setProjectRoot(r);
+          saveProjectRoot(r);
+        }}
+      />
 
       {/* Thread bar (conversation branching) */}
       <ThreadBar

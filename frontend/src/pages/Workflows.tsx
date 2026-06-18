@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Panel, Badge, Spinner } from "@rakuensoftware/smoothgui";
+import ProjectPicker from "../components/ProjectPicker";
+import type { ProjectSelection } from "../components/ProjectPicker";
 
 /* ---- API types (mirror /v1/workflow/* envelopes) ---- */
 
@@ -317,6 +319,10 @@ export default function Workflows() {
   const [personas, setPersonas] = useState<PersonaInfo[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [managePersonas, setManagePersonas] = useState(false);
+  // This tab's selected project (per-tab project space). Held so the workflow
+  // context can scope to it; execution-in-project flows through a chat session's
+  // cwd today, so this primarily persists the selection + offers clone here.
+  const [, setWfProject] = useState<ProjectSelection | null>(null);
   const drag = useRef<{ id: string; dx: number; dy: number } | null>(null);
 
   const refreshLists = useCallback(() => {
@@ -534,19 +540,19 @@ export default function Workflows() {
   };
 
   return (
-    <div
-      style={{
-        display: "flex",
-        gap: 12,
-        // Fill the AppShell content area (like the Projects page). The old
-        // calc(100vh - 90px) hard-coded an assumed header height; when it was
-        // wrong the flex row collapsed and the left rail + canvas clipped to
-        // nothing while only the toolbar buttons stayed visible.
-        height: "100%",
-        minHeight: 0,
-        fontFamily: "system-ui",
-      }}
-    >
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <ProjectPicker storageKey="aimee_workflows_project" onChange={setWfProject} />
+      <div
+        style={{
+          display: "flex",
+          gap: 12,
+          // Fill the remaining height below the project bar. minWidth:0 on the
+          // center keeps the 1600px canvas from collapsing the side rails.
+          flex: 1,
+          minHeight: 0,
+          fontFamily: "system-ui",
+        }}
+      >
       {/* left rail: defs + palette + run items */}
       <div
         style={{
@@ -846,6 +852,7 @@ export default function Workflows() {
           onChanged={refreshPersonas}
         />
       )}
+      </div>
     </div>
   );
 }
