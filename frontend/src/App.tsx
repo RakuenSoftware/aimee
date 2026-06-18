@@ -8,6 +8,7 @@ import Workflows from './pages/Workflows';
 import Projects from './pages/Projects';
 import Editor from './pages/Editor';
 import { SessionProvider, useSessions } from './SessionContext';
+import SettingsPanel from './components/SettingsPanel';
 
 // A render error in any page used to throw past the root and unmount the whole
 // app, leaving a blank screen (the AppShell, nav, and other pages vanished too).
@@ -196,6 +197,7 @@ export default function App() {
         >
           <span style={{ color: '#8cf', fontWeight: 700, fontSize: 18 }}>aimee</span>
           <SessionTabBar />
+          <SettingsPanel />
           <LogoutButton />
         </header>
         {/* Body: vertical tool nav (left) + content. */}
