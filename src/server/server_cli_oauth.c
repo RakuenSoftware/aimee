@@ -245,7 +245,10 @@ static int tmux_capture(cli_oauth_vendor_t v, const char *sock, const char *sess
    char store[7][512];
    char *env[8];
    build_env(v, store, env);
-   const char *argv[] = {"tmux", "-S", sock, "capture-pane", "-p", "-t", sess, NULL};
+   /* -J joins wrapped lines so a verification URL wider than the pane is captured
+    * as one logical line (paired with the wide pane in cli_oauth_start) — without
+    * it the URL scrape stops at the wrap and yields a truncated, unusable link. */
+   const char *argv[] = {"tmux", "-S", sock, "capture-pane", "-p", "-J", "-t", sess, NULL};
    *out = NULL;
    return safe_exec_capture_cwd_env_timeout(argv, NULL, env, out, 64 * 1024, OAUTH_TMUX_TIMEOUT_MS);
 }
@@ -380,25 +383,35 @@ int cli_oauth_start(cli_oauth_vendor_t v, cli_oauth_start_t *out, char *err, siz
    build_env(v, store, env);
 
    /* Launch the login in a detached tmux session, argv-only. The vendor matrix:
-    * claude -> `claude setup-token` (paste-back code); codex -> `codex login
-    * --device-auth` (device URL+code, polls). Build:
-    *   tmux -S sock new-session -d -s sess <exe> <loginargs...>
-    * tmux runs argv[7..] as the command, so the exe path makes PATH moot. */
+    * claude -> `claude auth login --claudeai` (browser URL + paste-back code; this
+    * establishes the interactive CLI sign-in that the server-hosted tmux `claude`
+    * session uses — NOT `setup-token`, which only mints an SDK/CI token and does
+    * not log the CLI in); codex -> `codex login --device-auth` (device URL+code).
+    *   tmux -S sock new-session -d -x WIDTH -y HEIGHT -s sess <exe> <loginargs...>
+    * The pane is made very wide so the verification URL prints on a single line;
+    * otherwise tmux wraps it and the scrape captures only a truncated link. tmux
+    * runs the trailing argv as the command, so the exe path makes PATH moot. */
    char exe[600];
    exe_path(v, exe, sizeof(exe));
-   const char *argv[16];
+   const char *argv[20];
    int ai = 0;
    argv[ai++] = "tmux";
    argv[ai++] = "-S";
    argv[ai++] = sock;
    argv[ai++] = "new-session";
    argv[ai++] = "-d";
+   argv[ai++] = "-x";
+   argv[ai++] = "1024";
+   argv[ai++] = "-y";
+   argv[ai++] = "50";
    argv[ai++] = "-s";
    argv[ai++] = sess;
    argv[ai++] = exe;
    if (v == CLI_OAUTH_CLAUDE)
    {
-      argv[ai++] = "setup-token";
+      argv[ai++] = "auth";
+      argv[ai++] = "login";
+      argv[ai++] = "--claudeai";
    }
    else
    {
@@ -546,17 +559,15 @@ int cli_oauth_poll(cli_oauth_vendor_t v, const char *session, cli_oauth_state_t 
    }
    else
    {
-      /* claude: the token file appears under ~/.claude once setup-token finishes. */
+      /* claude: `auth login` writes ~/.claude/.credentials.json once sign-in
+       * completes. Check ONLY that file — `.claude.json` is unconditional app
+       * state created on first launch, so treating it as proof of auth was a false
+       * positive that reported success (and tore the session down) before the real
+       * credentials were written, leaving the CLI unauthenticated. */
       char tok[600];
       snprintf(tok, sizeof(tok), "%s/.claude/.credentials.json", home_dir());
       struct stat sb;
       authed = (stat(tok, &sb) == 0 && sb.st_size > 0);
-      if (!authed)
-      {
-         char tok2[600];
-         snprintf(tok2, sizeof(tok2), "%s/.claude.json", home_dir());
-         authed = (stat(tok2, &sb) == 0 && sb.st_size > 0);
-      }
    }
    if (authed)
    {
