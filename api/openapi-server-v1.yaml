@@ -3799,6 +3799,61 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /git/oauth/github/config:
+    get:
+      summary: Read the configured GitHub OAuth App client ID
+      description: >
+        Whether a GitHub OAuth App client ID is configured (set from the UI or the
+        AIMEE_GITHUB_OAUTH_CLIENT_ID env), and the value (public). Capability:
+        tool:execute.
+      responses:
+        "200":
+          description: Config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  configured: { type: boolean }
+                  client_id: { type: string }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    post:
+      summary: Set the GitHub OAuth App client ID
+      description: >
+        Persist the client ID server-side so the "Sign in with GitHub" button
+        works without an env var. The client ID is public (device flow needs no
+        secret). Capability: tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_id]
+              properties:
+                client_id: { type: string }
+      responses:
+        "200":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { ok: { type: boolean } }
+        "400":
+          description: Missing client_id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /runner/poll:
     post:
       summary: Poll for the next detached-workspace op to execute (reverse channel)

@@ -5,6 +5,7 @@
 #include "agent_exec.h" /* agent_http_post_content_type */
 #include "cJSON.h"
 #include "git_host_cred.h" /* git_host_cred_set */
+#include "vault_service.h" /* store the client_id server-side (set from the UI) */
 
 #include <pthread.h>
 #include <stdio.h>
@@ -22,15 +23,50 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static char g_device_code[256];
 static char g_principal[256];
 
-static const char *client_id(void)
+#define GH_CLIENT_ID_AGENT "git"
+#define GH_CLIENT_ID_CRED  "github_oauth_client_id"
+
+/* Resolve the GitHub OAuth App client_id: a value set from the UI (stored in the
+ * server vault) takes precedence, else the AIMEE_GITHUB_OAUTH_CLIENT_ID env. The
+ * client_id is public (device flow needs no secret). Returns 1 + fills buf, or 0. */
+static int get_client_id(char *buf, size_t cap)
 {
-   const char *id = getenv("AIMEE_GITHUB_OAUTH_CLIENT_ID");
-   return (id && id[0]) ? id : NULL;
+   if (buf && cap)
+      buf[0] = '\0';
+   if (!buf || cap == 0)
+      return 0;
+   if (vault_service_get_server_wrap(VAULT_SERVER_PRINCIPAL, GH_CLIENT_ID_AGENT, GH_CLIENT_ID_CRED,
+                                     buf, cap) == VAULT_OK &&
+       buf[0])
+      return 1;
+   const char *env = getenv("AIMEE_GITHUB_OAUTH_CLIENT_ID");
+   if (env && env[0])
+   {
+      snprintf(buf, cap, "%s", env);
+      return 1;
+   }
+   buf[0] = '\0';
+   return 0;
 }
 
 int git_oauth_github_available(void)
 {
-   return client_id() != NULL;
+   char id[256];
+   return get_client_id(id, sizeof(id));
+}
+
+int git_oauth_github_set_client_id(const char *client_id)
+{
+   if (!client_id || !client_id[0])
+      return -1;
+   return vault_service_set_server(GH_CLIENT_ID_AGENT, GH_CLIENT_ID_CRED, client_id) == VAULT_OK
+              ? 0
+              : -1;
+}
+
+int git_oauth_github_get_client_id(char *out, size_t out_len)
+{
+   return get_client_id(out, out_len);
 }
 
 int git_oauth_github_start(const char *principal, char *user_code, size_t uc_len, char *verify_uri,
@@ -40,10 +76,10 @@ int git_oauth_github_start(const char *principal, char *user_code, size_t uc_len
       user_code[0] = '\0';
    if (verify_uri && vu_len)
       verify_uri[0] = '\0';
-   const char *cid = client_id();
-   if (!cid)
+   char cid[256];
+   if (!get_client_id(cid, sizeof(cid)))
    {
-      snprintf(err, errlen, "GitHub sign-in is not configured (set AIMEE_GITHUB_OAUTH_CLIENT_ID)");
+      snprintf(err, errlen, "GitHub sign-in is not configured (set a client ID)");
       return -1;
    }
    char body[512];
@@ -90,8 +126,8 @@ int git_oauth_github_start(const char *principal, char *user_code, size_t uc_len
 
 int git_oauth_github_poll(const char *principal, char *err, size_t errlen)
 {
-   const char *cid = client_id();
-   if (!cid)
+   char cid[256];
+   if (!get_client_id(cid, sizeof(cid)))
    {
       snprintf(err, errlen, "GitHub sign-in is not configured");
       return -1;

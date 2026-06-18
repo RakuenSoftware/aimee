@@ -44,6 +44,29 @@ export default function Projects() {
   const [credToken, setCredToken] = useState('');
   const [ghCode, setGhCode] = useState('');
   const [ghUri, setGhUri] = useState('');
+  const [ghConfigured, setGhConfigured] = useState(false);
+  const [ghClientId, setGhClientId] = useState('');
+
+  const loadGhConfig = useCallback(async () => {
+    try {
+      const r = await api('/api/git/oauth/github/config', { method: 'GET' });
+      const d = await r.json();
+      if (r.ok) { setGhConfigured(!!d.configured); setGhClientId(d.client_id || ''); }
+    } catch { /* leave unconfigured */ }
+  }, []);
+
+  async function saveGhConfig() {
+    if (!ghClientId.trim()) return;
+    setBusy(true); setErr('');
+    try {
+      const r = await api('/api/git/oauth/github/config', {
+        method: 'POST', body: JSON.stringify({ client_id: ghClientId.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) setErr(d.error || 'could not save client ID');
+      else await loadGhConfig();
+    } finally { setBusy(false); }
+  }
 
   const loadHosts = useCallback(async () => {
     try {
@@ -67,7 +90,7 @@ export default function Projects() {
     }
   }, []);
 
-  useEffect(() => { loadProjects(); loadHosts(); }, [loadProjects, loadHosts]);
+  useEffect(() => { loadProjects(); loadHosts(); loadGhConfig(); }, [loadProjects, loadHosts, loadGhConfig]);
 
   // GitHub device-flow: once a user code is shown, poll until the user authorizes.
   useEffect(() => {
@@ -173,8 +196,8 @@ export default function Projects() {
             Access tokens aimee-server uses to reach each git host (one per host, any provider). Tokens are stored server-side and never shown again.
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <button style={{ ...btn, background: '#24292e', color: '#fff', borderColor: '#24292e' }}
-              disabled={busy || !!ghCode} onClick={startGithub}>Sign in with GitHub</button>
+            <button style={{ ...btn, background: ghConfigured ? '#24292e' : '#888', color: '#fff', borderColor: '#24292e' }}
+              disabled={busy || !!ghCode || !ghConfigured} onClick={startGithub}>Sign in with GitHub</button>
             {ghCode && (
               <span style={{ fontSize: '13px', color: '#444' }}>
                 Go to <a href={ghUri} target="_blank" rel="noreferrer">{ghUri}</a> and enter code{' '}
@@ -183,6 +206,21 @@ export default function Projects() {
               </span>
             )}
           </div>
+          <details style={{ fontSize: '12px', color: '#666' }} open={!ghConfigured}>
+            <summary style={{ cursor: 'pointer' }}>
+              GitHub OAuth App {ghConfigured ? '(configured ✓ — click to change)' : '— set this to enable the button'}
+            </summary>
+            <div style={{ marginTop: '6px' }}>
+              <div style={{ marginBottom: '4px' }}>
+                Create a GitHub OAuth App (<a href="https://github.com/settings/developers" target="_blank" rel="noreferrer">github.com/settings/developers</a> → New OAuth App → enable <b>Device flow</b>), then paste its <b>Client ID</b> here:
+              </div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <input style={{ ...input, flex: 1, minWidth: '200px' }} placeholder="GitHub OAuth App Client ID (e.g. Iv1.xxxxxxxx)"
+                  value={ghClientId} onChange={e => setGhClientId(e.target.value)} />
+                <button style={btn} disabled={busy || !ghClientId.trim()} onClick={saveGhConfig}>Save</button>
+              </div>
+            </div>
+          </details>
           {hosts.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               {hosts.map(h => (
