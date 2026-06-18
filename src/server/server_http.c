@@ -232,7 +232,7 @@ static int emit(char *resp, int cap, cJSON *obj)
 
 static int err_json(char *resp, int cap, int status, const char *msg)
 {
-   snprintf(resp, (size_t)cap, "{\"error\":\"%s\"}", msg ? msg : "error");
+   http_error_json(resp, (size_t)cap, msg ? msg : "error"); /* escapes msg → valid JSON */
    return status;
 }
 

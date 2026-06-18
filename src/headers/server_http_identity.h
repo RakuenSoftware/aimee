@@ -53,4 +53,10 @@ void server_http_identity_apply(server_conn_t *conn);
 /* Reset the per-thread captured identity to the un-attested, no-vault defaults. */
 void server_http_identity_clear(void);
 
+/* Write a JSON error body {"error":"<msg>"} into resp (cap bytes), JSON-escaping
+ * msg so dynamic content (e.g. git stderr with newlines/quotes, file paths)
+ * cannot produce an invalid body that a client then fails to parse. Always
+ * NUL-terminates when cap > 0; truncates an over-long message safely. */
+void http_error_json(char *resp, size_t cap, const char *msg);
+
 #endif /* DEC_SERVER_HTTP_IDENTITY_H */
