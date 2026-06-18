@@ -324,7 +324,15 @@ static int lock_acquire(cli_oauth_vendor_t v)
    snprintf(dir, sizeof(dir), "%s/lock", home_dir());
    platform_mkdir_p(dir, 0700);
    snprintf(path, sizeof(path), "%s/cli-oauth-%s.lock", dir, g_vendors[v].name);
-   int fd = open(path, O_CREAT | O_RDWR, 0600);
+   /* O_CLOEXEC is load-bearing: cli_oauth_start holds this fd across the
+    * fork+exec that launches the login in a detached tmux session. tmux
+    * daemonizes (re-parents to init) and would INHERIT a non-CLOEXEC lock fd,
+    * keeping the flock held for the daemon's whole lifetime — long after
+    * cli_oauth_start close()s its own copy. The result was a permanent "a setup
+    * is already in progress" wedge after any abandoned login, clearable only by
+    * killing the tmux server or restarting aimee-server. Closing the fd on exec
+    * means only this process holds the lock, so close() here fully releases it. */
+   int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC, 0600);
    if (fd < 0)
       return -1;
    if (flock(fd, LOCK_EX | LOCK_NB) != 0)
