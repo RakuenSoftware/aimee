@@ -36,6 +36,7 @@ export default function Projects() {
   const [err, setErr] = useState<string>('');
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
+  const [token, setToken] = useState('');
   const [commitMsg, setCommitMsg] = useState('');
   const [branch, setBranch] = useState('');
 
@@ -61,11 +62,11 @@ export default function Projects() {
     try {
       const r = await api('/api/git/clone', {
         method: 'POST',
-        body: JSON.stringify({ url: url.trim(), name: name.trim() || undefined }),
+        body: JSON.stringify({ url: url.trim(), name: name.trim() || undefined, token: token.trim() || undefined }),
       });
       const d = await r.json();
       if (!r.ok) { setErr(d.error || 'clone failed'); }
-      else { setUrl(''); setName(''); await loadProjects(); setSelected(d.name || ''); }
+      else { setUrl(''); setName(''); setToken(''); await loadProjects(); setSelected(d.name || ''); }
     } finally { setBusy(false); }
   }
 
@@ -86,13 +87,18 @@ export default function Projects() {
   return (
     <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', height: '100%', overflow: 'auto' }}>
       <Panel title="Connect a repository">
-        <div style={{ padding: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <input style={{ ...input, flex: 2, minWidth: '260px' }} placeholder="git remote URL (https or ssh)"
-            value={url} onChange={e => setUrl(e.target.value)} />
-          <input style={{ ...input, flex: 1, minWidth: '120px' }} placeholder="name (optional)"
-            value={name} onChange={e => setName(e.target.value)} />
-          <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
-            disabled={busy || !url.trim()} onClick={connect}>Clone</button>
+        <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <input style={{ ...input, flex: 2, minWidth: '260px' }} placeholder="git remote URL (https or ssh)"
+              value={url} onChange={e => setUrl(e.target.value)} />
+            <input style={{ ...input, flex: 1, minWidth: '120px' }} placeholder="name (optional)"
+              value={name} onChange={e => setName(e.target.value)} />
+            <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
+              disabled={busy || !url.trim()} onClick={connect}>Clone</button>
+          </div>
+          <input style={{ ...input, width: '100%' }} type="password" autoComplete="off"
+            placeholder="access token — only for a private repo (GitHub/Gitea/GitLab…); saved server-side per host"
+            value={token} onChange={e => setToken(e.target.value)} />
         </div>
       </Panel>
 

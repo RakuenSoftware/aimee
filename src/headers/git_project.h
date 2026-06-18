@@ -12,13 +12,17 @@
 
 /* Clone `url` as project `name` (derived from the URL basename, minus a trailing
  * ".git", when `name` is NULL/empty) under `principal` (a `webuser:<name>`).
+ * `token` is an optional access token: when non-NULL/non-empty it authenticates
+ * the clone AND is persisted as the host's credential (git_host_cred) for future
+ * ops; when NULL the host's stored token, then the server identity, are used.
  * On success writes the absolute project path to out_path[path_cap] and the
  * resolved project name to out_name[name_cap], and returns 0. On failure returns
  * -1 with a short, non-sensitive message in err[errlen]. Refuses: a non-webuser
  * principal, a name that escapes the scope, an already-existing project, or an
  * empty/flag-like URL. */
-int git_project_clone(const char *principal, const char *url, const char *name, char *out_path,
-                      size_t path_cap, char *out_name, size_t name_cap, char *err, size_t errlen);
+int git_project_clone(const char *principal, const char *url, const char *name, const char *token,
+                      char *out_path, size_t path_cap, char *out_name, size_t name_cap, char *err,
+                      size_t errlen);
 
 /* List `principal`'s project names (the subdirectories of their scoped
  * workspace) into out[max][GIT_PROJECT_NAME_MAX], sorted is not guaranteed.

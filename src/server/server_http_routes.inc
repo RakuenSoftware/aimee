@@ -20,7 +20,7 @@
 #include "git_ops.h"        /* git_ops_run for /v1/workspace/git (WP-E) */
 #include "git_project.h"    /* git_project_clone for /v1/workspace/clone (WP-D) */
 #include "webuser_editor.h" /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
-#include "index.h"       /* index_scan_project after a webuser clone (WP-D) */
+#include "index.h"          /* index_scan_project after a webuser clone (WP-D) */
 
 /* Per-request context handed to a route handler. `id` holds the extracted
  * dynamic path segment (persona / role-template name, session id, run id) for
@@ -840,12 +840,14 @@ static int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)
    }
    const cJSON *jurl = cJSON_GetObjectItemCaseSensitive(body, "url");
    const cJSON *jname = cJSON_GetObjectItemCaseSensitive(body, "name");
+   const cJSON *jtoken = cJSON_GetObjectItemCaseSensitive(body, "token");
    const char *url = (cJSON_IsString(jurl) && jurl->valuestring) ? jurl->valuestring : NULL;
    const char *name = (cJSON_IsString(jname) && jname->valuestring) ? jname->valuestring : NULL;
+   const char *token = (cJSON_IsString(jtoken) && jtoken->valuestring) ? jtoken->valuestring : NULL;
 
    char dest[MAX_PATH_LEN], pname[128], err[256];
-   int rc = git_project_clone(principal, url, name, dest, sizeof(dest), pname, sizeof(pname), err,
-                              sizeof(err));
+   int rc = git_project_clone(principal, url, name, token, dest, sizeof(dest), pname, sizeof(pname),
+                              err, sizeof(err));
    cJSON_Delete(body);
    if (rc != 0)
       return err_json(resp, cap, 400, err);
