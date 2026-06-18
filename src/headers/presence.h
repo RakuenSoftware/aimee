@@ -174,6 +174,11 @@ extern "C"
     * an error object). */
    int presence_session_json(const char *session_id, char *out, size_t out_n);
 
+   /* Write the owner principal of session_id into out[out_n] (NUL-terminated).
+    * Returns 1 if the session exists and has an owner, 0 otherwise (out is set
+    * to ""). Used for cross-principal authorization of turn cancellation. */
+   int presence_session_owner(const char *session_id, char *out, size_t out_n);
+
    /* ====================================================================== */
    /* Turn arbitration                                                       */
    /* ====================================================================== */

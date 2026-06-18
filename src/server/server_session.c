@@ -6,6 +6,7 @@
 #include "cJSON.h"
 #include "json_fluent.h"
 #include "presence.h"
+#include "turn_registry.h"
 #include "git_verify.h"
 #include "kb_client.h"
 #include <ctype.h>
@@ -31,6 +32,11 @@ int handle_session_close(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "failed to close session", NULL);
 
    (void)verify_cancel_session(sid);
+   /* Cancel any in-flight turn for this session before tearing down its
+    * presence: a turn now outlives its client connection, so closing the
+    * session is what stops it (server-owned turn lifecycle). NULL owner = a
+    * trusted internal caller, bypassing the cross-principal check. */
+   (void)turn_registry_cancel(sid, NULL);
    server_session_pool_close(ctx, sid);
    /* Tear down the in-process presence so it doesn't outlive the session, and
     * any open /v1/sessions/<id>/events SSE streams terminate (GONE). */
@@ -38,6 +44,31 @@ int handle_session_close(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "session_id", sid);
+   return server_send_ok(conn, resp);
+}
+
+/* chat.graceful_cancel: stop an in-flight turn by session id without tearing the
+ * session down (server-owned turn lifecycle — also backs the gateway `/stop`,
+ * which was previously a no-op). Authorized against the session's presence owner:
+ * an attested caller (conn->vault_principal set) must match it; a trusted local
+ * peer (un-attested, empty principal over the filesystem-trusted UDS) is allowed,
+ * with the forwarding surface (webchat login / gateway pairing) binding session
+ * id to the caller. */
+int handle_chat_graceful_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "aimee_session_id");
+   if (!cJSON_IsString(jsid))
+      jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
+   const char *sid = (jsid && cJSON_IsString(jsid)) ? jsid->valuestring : NULL;
+   if (!sid || !sid[0])
+      return server_send_error(conn, "missing aimee_session_id", NULL);
+   int rc = turn_registry_cancel(sid, conn->vault_principal);
+   if (rc < 0)
+      return server_send_error(conn, "forbidden: not the session owner", NULL);
+   cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "session_id", sid);
+   cJSON_AddBoolToObject(resp, "cancelled", rc == 1 ? 1 : 0);
    return server_send_ok(conn, resp);
 }
 

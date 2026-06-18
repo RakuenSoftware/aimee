@@ -268,6 +268,7 @@ int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_session_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_session_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_session_close(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_chat_graceful_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_session_brief(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_session_attach(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_session_detach(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

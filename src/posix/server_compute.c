@@ -21,6 +21,7 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
 #include "server_compute_impl.h"
 #include "util.h"
 #include "presence.h"
+#include "turn_registry.h"
 #include "workspace_turn.h"
 #include "cJSON.h"
 #include "token_tracker.h"
@@ -28,6 +29,8 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdatomic.h>
+#include <time.h>
 #ifdef __linux__
 #include <sys/prctl.h>
 #endif
@@ -73,42 +76,166 @@ static const char *resolve_claude_bin(char *buf, size_t buf_len)
    return "claude";
 }
 
+/* Text-delta coalescing bounds for the presence ring (WP-1): flush accumulated
+ * text as one turn_delta on either bound, capping ring-fill rate without
+ * reordering relative to non-text events. */
+#define RING_TEXT_COALESCE_BYTES 2048
+#define RING_TEXT_COALESCE_MS    50
+
+static uint64_t mono_ms(void)
+{
+   struct timespec ts;
+   clock_gettime(CLOCK_MONOTONIC, &ts);
+   return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
+}
+
+/* All ring/coalescing helpers below run with cctx->write_mutex held, so the
+ * whole emit (ring publish + buffer mutation + socket write) is atomic per
+ * cctx — non-text events can never interleave ahead of buffered text. */
+
+static void ring_flush_text_locked(compute_ctx_t *cctx)
+{
+   if (cctx->delta_len == 0)
+      return;
+   cJSON *d = cJSON_CreateObject();
+   cJSON_AddStringToObject(d, "turn_id", cctx->presence_turn_id);
+   cJSON_AddStringToObject(d, "kind", "text");
+   cJSON_AddStringToObject(d, "content", cctx->delta_buf);
+   char *dj = cJSON_PrintUnformatted(d);
+   cJSON_Delete(d);
+   if (dj)
+   {
+      presence_emit_turn_delta(cctx->presence_session, cctx->presence_turn_id, dj);
+      free(dj);
+   }
+   cctx->delta_len = 0;
+   if (cctx->delta_buf)
+      cctx->delta_buf[0] = '\0';
+}
+
+static void ring_text_append_locked(compute_ctx_t *cctx, const char *text)
+{
+   size_t tlen = strlen(text);
+   if (tlen == 0)
+      return;
+   if (cctx->delta_len == 0)
+      cctx->delta_first_ms = mono_ms();
+   size_t need = cctx->delta_len + tlen + 1;
+   if (need > cctx->delta_cap)
+   {
+      size_t ncap = cctx->delta_cap ? cctx->delta_cap : 1024;
+      while (ncap < need)
+         ncap *= 2;
+      char *nb = realloc(cctx->delta_buf, ncap);
+      if (!nb)
+      {
+         /* OOM: flush what we have so we don't drop the stream silently. */
+         ring_flush_text_locked(cctx);
+         return;
+      }
+      cctx->delta_buf = nb;
+      cctx->delta_cap = ncap;
+   }
+   memcpy(cctx->delta_buf + cctx->delta_len, text, tlen);
+   cctx->delta_len += tlen;
+   cctx->delta_buf[cctx->delta_len] = '\0';
+   if (cctx->delta_len >= RING_TEXT_COALESCE_BYTES ||
+       (mono_ms() - cctx->delta_first_ms) >= RING_TEXT_COALESCE_MS)
+      ring_flush_text_locked(cctx);
+}
+
+/* Publish a non-text event to the ring as a turn_delta. Turn boundary events
+ * (turn_start/turn_end/done) are published to the ring by the pooled worker as
+ * turn_started/turn_done, so they are skipped here to avoid duplication. */
+static void ring_publish_event_locked(compute_ctx_t *cctx, const char *event, const char *key,
+                                      const char *value)
+{
+   if (!event || strcmp(event, "turn_start") == 0 || strcmp(event, "turn_end") == 0 ||
+       strcmp(event, "done") == 0)
+      return;
+   cJSON *d = cJSON_CreateObject();
+   cJSON_AddStringToObject(d, "turn_id", cctx->presence_turn_id);
+   cJSON_AddStringToObject(d, "kind", event);
+   if (key && value)
+      cJSON_AddStringToObject(d, key, value);
+   char *dj = cJSON_PrintUnformatted(d);
+   cJSON_Delete(d);
+   if (dj)
+   {
+      presence_emit_turn_delta(cctx->presence_session, cctx->presence_turn_id, dj);
+      free(dj);
+   }
+}
+
+/* Flush any buffered text to the ring (used at turn teardown). Takes the lock. */
+static void stream_flush_text(compute_ctx_t *cctx)
+{
+   pthread_mutex_lock(cctx->write_mutex);
+   ring_flush_text_locked(cctx);
+   pthread_mutex_unlock(cctx->write_mutex);
+}
+
 /* Send a streaming event as newline-delimited JSON.
- * Returns 0 on success, -1 if the connection is dead. */
+ *
+ * The presence-event ring is the UNCONDITIONAL sink (so a turn survives a
+ * dropped connection — server-owned turn lifecycle); the connection socket is a
+ * best-effort, connection-scoped sink gated on conn_alive. Returns 0 while the
+ * connection is alive, -1 once it has dropped (callers that care; most ignore). */
 static int stream_event(compute_ctx_t *cctx, const char *event, const char *key, const char *value)
 {
-   if (!cctx->conn_alive)
-      return -1;
-
-   cJSON *evt = cJSON_CreateObject();
-   cJSON_AddStringToObject(evt, "event", event);
-   if (key && value)
-      cJSON_AddStringToObject(evt, key, value);
-
-   char *json_str = cJSON_PrintUnformatted(evt);
-   cJSON_Delete(evt);
-   if (!json_str)
-      return -1;
-
    pthread_mutex_lock(cctx->write_mutex);
-   int r = write_all(cctx->conn_fd, json_str, strlen(json_str));
-   if (r == 0)
-      r = write_all(cctx->conn_fd, "\n", 1);
-   pthread_mutex_unlock(cctx->write_mutex);
-   free(json_str);
 
-   if (r != 0)
-      cctx->conn_alive = 0;
-
-   /* Mirror text deltas to the presence-event ring as turn_delta so a second
-    * surface attached to this session sees the live token stream. Gated on
-    * presence_emit_deltas (set at turn start only when >1 surface is attached),
-    * so the common single-surface path pays just this int check. */
-   if (cctx->presence_emit_deltas && event && strcmp(event, "text") == 0 && value && value[0])
+   /* 1) Ring publish — unconditional, coalesced, never gated on conn_alive. */
+   if (cctx->presence_emit_deltas && cctx->presence_session[0])
    {
+      if (event && strcmp(event, "text") == 0 && value && value[0])
+         ring_text_append_locked(cctx, value);
+      else
+      {
+         ring_flush_text_locked(cctx); /* preserve order vs. buffered text */
+         ring_publish_event_locked(cctx, event, key, value);
+      }
+   }
+
+   /* 2) Socket write — best effort, only while the connection is alive. */
+   if (cctx->conn_alive)
+   {
+      cJSON *evt = cJSON_CreateObject();
+      cJSON_AddStringToObject(evt, "event", event);
+      if (key && value)
+         cJSON_AddStringToObject(evt, key, value);
+      char *json_str = cJSON_PrintUnformatted(evt);
+      cJSON_Delete(evt);
+      if (json_str)
+      {
+         int r = write_all(cctx->conn_fd, json_str, strlen(json_str));
+         if (r == 0)
+            r = write_all(cctx->conn_fd, "\n", 1);
+         free(json_str);
+         if (r != 0)
+            cctx->conn_alive = 0;
+      }
+   }
+
+   int alive = cctx->conn_alive;
+   pthread_mutex_unlock(cctx->write_mutex);
+   return alive ? 0 : -1;
+}
+
+static int stream_event_usage(compute_ctx_t *cctx, int in_tokens, int out_tokens, double cost)
+{
+   pthread_mutex_lock(cctx->write_mutex);
+
+   /* 1) Ring publish — flush pending text first (ordering), then usage. */
+   if (cctx->presence_emit_deltas && cctx->presence_session[0])
+   {
+      ring_flush_text_locked(cctx);
       cJSON *d = cJSON_CreateObject();
       cJSON_AddStringToObject(d, "turn_id", cctx->presence_turn_id);
-      cJSON_AddStringToObject(d, "content", value);
+      cJSON_AddStringToObject(d, "kind", "usage");
+      cJSON_AddNumberToObject(d, "in", (double)in_tokens);
+      cJSON_AddNumberToObject(d, "out", (double)out_tokens);
+      cJSON_AddNumberToObject(d, "cost", cost);
       char *dj = cJSON_PrintUnformatted(d);
       cJSON_Delete(d);
       if (dj)
@@ -117,35 +244,127 @@ static int stream_event(compute_ctx_t *cctx, const char *event, const char *key,
          free(dj);
       }
    }
-   return r;
+
+   /* 2) Socket write — best effort. */
+   if (cctx->conn_alive)
+   {
+      cJSON *evt = cJSON_CreateObject();
+      cJSON_AddStringToObject(evt, "event", "usage");
+      cJSON_AddNumberToObject(evt, "in", (double)in_tokens);
+      cJSON_AddNumberToObject(evt, "out", (double)out_tokens);
+      cJSON_AddNumberToObject(evt, "cost", cost);
+      char *json_str = cJSON_PrintUnformatted(evt);
+      cJSON_Delete(evt);
+      if (json_str)
+      {
+         int r = write_all(cctx->conn_fd, json_str, strlen(json_str));
+         if (r == 0)
+            r = write_all(cctx->conn_fd, "\n", 1);
+         free(json_str);
+         if (r != 0)
+            cctx->conn_alive = 0;
+      }
+   }
+
+   int alive = cctx->conn_alive;
+   pthread_mutex_unlock(cctx->write_mutex);
+   return alive ? 0 : -1;
 }
 
-static int stream_event_usage(compute_ctx_t *cctx, int in_tokens, int out_tokens, double cost)
+/* Cancellable, non-blocking line reader for the provider subprocess pipe.
+ *
+ * Replaces blocking fgets so the read loop can be interrupted promptly: each
+ * poll tick re-checks the per-turn cancel flag (server-owned turn lifecycle —
+ * a hung provider must not wedge a detached turn). The fd must be O_NONBLOCK.
+ * Returns 1 with a NUL-terminated line (newline stripped) in out; 0 when no
+ * more lines (sets *cancelled on cancel, *eof on provider EOF). A line longer
+ * than the buffer is emitted truncated (caller may log). */
+typedef struct
 {
-   if (!cctx->conn_alive)
-      return -1;
+   char buf[CLAUDE_LINE_MAX];
+   size_t len;
+} cli_linereader_t;
 
-   cJSON *evt = cJSON_CreateObject();
-   cJSON_AddStringToObject(evt, "event", "usage");
-   cJSON_AddNumberToObject(evt, "in", (double)in_tokens);
-   cJSON_AddNumberToObject(evt, "out", (double)out_tokens);
-   cJSON_AddNumberToObject(evt, "cost", cost);
-
-   char *json_str = cJSON_PrintUnformatted(evt);
-   cJSON_Delete(evt);
-   if (!json_str)
-      return -1;
-
-   pthread_mutex_lock(cctx->write_mutex);
-   int r = write_all(cctx->conn_fd, json_str, strlen(json_str));
-   if (r == 0)
-      r = write_all(cctx->conn_fd, "\n", 1);
-   pthread_mutex_unlock(cctx->write_mutex);
-   free(json_str);
-
-   if (r != 0)
-      cctx->conn_alive = 0;
-   return r;
+static int cli_read_line(int fd, cli_linereader_t *lr, struct turn_entry *e, char *out,
+                         size_t outmax, int *cancelled, int *eof)
+{
+   for (;;)
+   {
+      char *nl = memchr(lr->buf, '\n', lr->len);
+      if (nl)
+      {
+         size_t linelen = (size_t)(nl - lr->buf);
+         size_t copy = linelen < outmax - 1 ? linelen : outmax - 1;
+         memcpy(out, lr->buf, copy);
+         out[copy] = '\0';
+         size_t rem = lr->len - (linelen + 1);
+         memmove(lr->buf, nl + 1, rem);
+         lr->len = rem;
+         return 1;
+      }
+      if (lr->len >= sizeof(lr->buf) - 1)
+      {
+         /* Oversized line with no newline: emit truncated and reset. */
+         memcpy(out, lr->buf, outmax - 1);
+         out[outmax - 1] = '\0';
+         lr->len = 0;
+         LOG_WARN("chat", "provider line exceeded %zu bytes; truncated", sizeof(lr->buf));
+         return 1;
+      }
+      if (turn_entry_cancelled(e))
+      {
+         *cancelled = 1;
+         return 0;
+      }
+      struct pollfd pfd = {.fd = fd, .events = POLLIN};
+      int pr = poll(&pfd, 1, 200);
+      if (pr == 0)
+         continue; /* tick: re-check cancel */
+      if (pr < 0)
+      {
+         if (errno == EINTR)
+            continue;
+         *eof = 1;
+         return 0;
+      }
+      if (turn_entry_cancelled(e))
+      {
+         *cancelled = 1;
+         return 0;
+      }
+      if (pfd.revents & (POLLIN | POLLHUP))
+      {
+         ssize_t n = read(fd, lr->buf + lr->len, sizeof(lr->buf) - 1 - lr->len);
+         if (n == 0)
+         {
+            if (lr->len > 0)
+            {
+               /* Final line without a trailing newline: deliver it, then EOF. */
+               size_t copy = lr->len < outmax - 1 ? lr->len : outmax - 1;
+               memcpy(out, lr->buf, copy);
+               out[copy] = '\0';
+               lr->len = 0;
+               *eof = 1;
+               return 1;
+            }
+            *eof = 1;
+            return 0;
+         }
+         if (n < 0)
+         {
+            if (errno == EAGAIN || errno == EINTR)
+               continue;
+            *eof = 1;
+            return 0;
+         }
+         lr->len += (size_t)n;
+      }
+      else if (pfd.revents & (POLLERR | POLLNVAL))
+      {
+         *eof = 1;
+         return 0;
+      }
+   }
 }
 
 static char *read_optional_text_file(const char *path)
@@ -1182,6 +1401,16 @@ void chat_stream_worker(void *arg)
       close(err_fd);
    free(system_prompt);
 
+   /* Register the child with the per-turn cancel registry (this worker is the
+    * sole reaper) and make the read end non-blocking so the poll-driven loop
+    * below can re-check the cancel flag instead of blocking in read(). */
+   turn_registry_set_child(cctx->turn_entry, pid);
+   {
+      int fl = fcntl(out_pipe[0], F_GETFL, 0);
+      if (fl >= 0)
+         fcntl(out_pipe[0], F_SETFL, fl | O_NONBLOCK);
+   }
+
    /* Write message to stdin */
    size_t msg_len = strlen(message);
    size_t written = 0;
@@ -1195,42 +1424,41 @@ void chat_stream_worker(void *arg)
    close(in_pipe[1]);
 
    /* Release the compute budget slot now that the subprocess is running.
-    * The fgets loop below is pure I/O; holding server compute budget here
+    * The read loop below is pure I/O; holding server compute budget here
     * would starve MCP/tool callbacks that the provider makes back into
     * aimee-server while it waits for their results. */
    compute_ctx_release_budget(cctx);
 
-   /* Read stream-json output */
-   FILE *fp = fdopen(out_pipe[0], "r");
-   if (!fp)
+   /* Read stream-json output via a cancellable, non-blocking line reader.
+    * NB: the loop no longer consults conn_alive — a dropped client connection
+    * detaches but does NOT abort the turn (server-owned turn lifecycle); the
+    * turn ends only on provider EOF or an explicit cancel. */
+   char *line = malloc(CLAUDE_LINE_MAX);
+   cli_linereader_t *lr = malloc(sizeof(*lr));
+   if (!line || !lr)
    {
+      free(line);
+      free(lr);
       close(out_pipe[0]);
       kill(pid, SIGKILL);
       waitpid(pid, NULL, 0);
-      compute_error(cctx, "internal error");
-      compute_ctx_free(cctx);
-      return;
-   }
-
-   char *line = malloc(CLAUDE_LINE_MAX);
-   if (!line)
-   {
-      fclose(fp);
-      kill(pid, SIGKILL);
-      waitpid(pid, NULL, 0);
+      turn_registry_mark_reaped(cctx->turn_entry);
       compute_error(cctx, "out of memory");
       compute_ctx_free(cctx);
       return;
    }
+   lr->len = 0;
 
    int had_tool_result = 0;
    int first_message = 1;
    int saw_result = 0;
    int saw_content = 0;
    int saw_delta_text = 0;
+   int cancelled = 0;
+   int eof = 0;
    char provider_error[1024] = "";
 
-   while (cctx->conn_alive && fgets(line, CLAUDE_LINE_MAX, fp))
+   while (cli_read_line(out_pipe[0], lr, cctx->turn_entry, line, CLAUDE_LINE_MAX, &cancelled, &eof))
    {
       cJSON *obj = cJSON_Parse(line);
       if (!obj)
@@ -1348,33 +1576,66 @@ void chat_stream_worker(void *arg)
       cJSON_Delete(obj);
    }
 
+   (void)eof; /* natural EOF is the normal completion path */
    free(line);
-   fclose(fp);
-   if (!cctx->conn_alive)
-   {
-      /* Connection is broken; kill the subprocess quickly so the compute
-       * drain in server_shutdown is not blocked indefinitely waiting for
-       * this chat thread to exit. */
-      kill(pid, SIGTERM);
-      for (int _w = 0; _w < 50; _w++)
-      {
-         int _ws = 0;
-         if (waitpid(pid, &_ws, WNOHANG) > 0)
-            break;
-         usleep(100000); /* 100 ms per try, 5 s total */
-      }
-      kill(pid, SIGKILL);
-      waitpid(pid, NULL, 0);
-      if (err_path[0])
-         unlink(err_path);
-      compute_ctx_free(cctx);
-      return;
-   }
+   free(lr);
+   close(out_pipe[0]);
+
+   /* Single-reap: this worker is the sole reaper of its child (the racing
+    * disconnect-kill is gone). On cancel, SIGTERM then a bounded wait then
+    * SIGKILL; otherwise reap the naturally-exited child. EINTR is retried;
+    * the reaped flag guards against any double-reap. */
    int status = 0;
-   waitpid(pid, &status, 0);
+   if (!cctx->turn_entry || !cctx->turn_entry->reaped)
+   {
+      if (cancelled && pid > 0)
+      {
+         kill(pid, SIGTERM);
+         for (int _w = 0; _w < 50; _w++)
+         {
+            int _ws = 0;
+            int wr = waitpid(pid, &_ws, WNOHANG);
+            if (wr > 0)
+            {
+               status = _ws;
+               pid = -1;
+               break;
+            }
+            if (wr < 0 && errno != EINTR)
+            {
+               pid = -1;
+               break;
+            }
+            usleep(100000); /* 100 ms per try, 5 s total */
+         }
+         if (pid > 0)
+            kill(pid, SIGKILL);
+      }
+      if (pid > 0)
+      {
+         int wr;
+         do
+         {
+            wr = waitpid(pid, &status, 0);
+         } while (wr < 0 && errno == EINTR);
+      }
+      turn_registry_mark_reaped(cctx->turn_entry);
+   }
+
    char *stderr_text = err_path[0] ? read_optional_text_file(err_path) : NULL;
    if (err_path[0])
       unlink(err_path);
+
+   if (cancelled)
+   {
+      /* The turn was cancelled (session close / shutdown / graceful_cancel). */
+      free(stderr_text);
+      stream_event(cctx, "error", "message", "turn cancelled");
+      compute_error(cctx, "turn cancelled");
+      compute_ctx_free(cctx);
+      return;
+   }
+
    if (provider_error[0] || !WIFEXITED(status) || WEXITSTATUS(status) != 0 ||
        (!saw_result && !saw_content))
    {
