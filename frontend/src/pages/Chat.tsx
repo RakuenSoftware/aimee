@@ -3,6 +3,7 @@ import { Spinner, tokens } from '@rakuensoftware/smoothgui';
 import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
 import { escHtml, renderMd, renderWithMentions } from './chat/markdown';
 import ProjectPicker from '../components/ProjectPicker';
+import { useSessions } from '../SessionContext';
 
 /* ---- Types ---- */
 
@@ -1388,6 +1389,16 @@ export default function Chat() {
   const [allTimeMetrics, setAllTimeMetrics] = useState<MetricRow[]>([]);
   const [promptTier, setPromptTier] = useState<'MINIMAL' | 'STANDARD' | 'EXTENDED'>('STANDARD');
   const [projectRoot, setProjectRoot] = useState(loadProjectRoot);
+  // The active top-level session owns the project this chat runs in. Mirror the
+  // session's project into the chat cwd, and start that session's conversation
+  // fresh when the session (or its project) changes.
+  const { active: activeSession, patchSession } = useSessions();
+  const activeSessionId = activeSession?.id ?? '';
+  const sessionProject = activeSession?.projectRoot ?? '';
+  useEffect(() => {
+    changeProjectRoot(sessionProject);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId, sessionProject]);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [availableSkills, setAvailableSkills] = useState<string[]>([]);
   const [activeSkill, setActiveSkill] = useState<string>('');
@@ -1939,6 +1950,21 @@ export default function Chat() {
     });
   }
 
+  /* Clear the current conversation: drop the visible transcript and mint a fresh
+   * provider session (empty claude session id + new aimee session id) so the next
+   * turn starts clean — no resume of a stale/gone session. */
+  function clearChat() {
+    setStreamMsgs([]);
+    setTabs(prev => {
+      const next = [...prev];
+      if (next[activeIdx]) {
+        next[activeIdx] = { ...next[activeIdx], sid: '', aimeeSid: newAimeeSessionId(), attachId: undefined, messages: [] };
+      }
+      return next;
+    });
+    if (activeSession) patchSession(activeSession.id, { claudeSid: '', aimeeSid: '', attachId: '' });
+  }
+
   async function pauseWorkflow() {
     if (!workflowInfo) return;
     try {
@@ -2442,17 +2468,32 @@ export default function Chat() {
       display: 'flex', flexDirection: 'column', height: '100%',
       overflow: 'hidden', background: tokens.surface,
     }}>
-      {/* Chat session tabs removed (single conversation). This tab's project
-          space: select/clone a git project; the agent runs with that project as
-          its working directory (cwd). Per-tab persisted selection. */}
-      <ProjectPicker
-        storageKey="aimee_chat_project"
-        onChange={sel => {
-          const r = sel ? `${sel.root}/${sel.project}` : '';
-          setProjectRoot(r);
-          saveProjectRoot(r);
-        }}
-      />
+      {/* The project belongs to the active SESSION (top tab); picking one here
+          binds it to this session, and the agent runs with it as cwd. A Clear
+          button resets this conversation (fresh provider session). */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <ProjectPicker
+            key={activeSessionId}
+            storageKey={`aimee_session_project_${activeSessionId}`}
+            onChange={sel => {
+              const r = sel ? `${sel.root}/${sel.project}` : '';
+              if (activeSession) patchSession(activeSession.id, { projectRoot: r, projectName: sel?.project ?? '' });
+              else { setProjectRoot(r); saveProjectRoot(r); }
+            }}
+          />
+        </div>
+        <button
+          onClick={clearChat}
+          title="Clear this conversation and start a fresh session"
+          style={{
+            flexShrink: 0, padding: '5px 12px', fontSize: 13, cursor: 'pointer',
+            background: '#fff', color: '#666', border: '1px solid #ddd', borderRadius: 6,
+          }}
+        >
+          Clear
+        </button>
+      </div>
 
       {/* Thread bar (conversation branching) */}
       <ThreadBar
