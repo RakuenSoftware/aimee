@@ -500,9 +500,52 @@ static long cli_conn_read(int fd, void *tlsp, void *buf, size_t len)
    }
 }
 
-/* Send an HTTP request and read the full response (server closes the conn) over
- * an already-connected transport. Returns a malloc'd NUL-terminated buffer
- * (caller frees) or NULL on error. */
+/* Parse a case-insensitive Content-Length value from the `n`-byte header block.
+ * Returns the declared body length, or -1 if absent/unparseable. */
+static long cli_http_content_length(const char *buf, size_t n)
+{
+   static const char key[] = "content-length:";
+   size_t klen = sizeof(key) - 1;
+   for (size_t i = 0; i + klen <= n; i++)
+   {
+      if (i != 0 && buf[i - 1] != '\n') /* header names start a line */
+         continue;
+      size_t j = 0;
+      for (; j < klen; j++)
+      {
+         char c = buf[i + j];
+         if (c >= 'A' && c <= 'Z')
+            c = (char)(c - 'A' + 'a');
+         if (c != key[j])
+            break;
+      }
+      if (j != klen)
+         continue;
+      const char *p = buf + i + klen;
+      const char *end = buf + n;
+      while (p < end && (*p == ' ' || *p == '\t'))
+         p++;
+      long v = 0;
+      int any = 0;
+      while (p < end && *p >= '0' && *p <= '9')
+      {
+         v = v * 10 + (*p - '0');
+         any = 1;
+         if (v > (long)CLIENT_MAX_RESPONSE_SIZE) /* implausible; avoid overflow */
+            return -1;
+         p++;
+      }
+      return any ? v : -1;
+   }
+   return -1;
+}
+
+/* Send an HTTP request and read the full response over an already-connected
+ * transport. Honors Content-Length and stops at the end of the body; only falls
+ * back to read-until-close for responses that omit it. (Some server paths keep
+ * the connection open after a `Connection: close` request, so waiting for EOF
+ * would otherwise hang until the poll timeout.) Returns a malloc'd
+ * NUL-terminated buffer (caller frees) or NULL on error. */
 static char *cli_http_txn(int fd, void *tlsp, const char *method, const char *path,
                           const char *host, const char *bearer, const char *body_json,
                           int timeout_ms)
@@ -524,8 +567,15 @@ static char *cli_http_txn(int fd, void *tlsp, const char *method, const char *pa
    char *buf = malloc(cap);
    if (!buf)
       return NULL;
+   size_t header_end = 0;    /* offset just past "\r\n\r\n", 0 until seen */
+   long content_length = -1; /* declared body length once headers are parsed */
    for (;;)
    {
+      /* With a known Content-Length, stop once the whole body is in hand rather
+       * than waiting for the server to close the connection. */
+      if (header_end && content_length >= 0 && len >= header_end + (size_t)content_length)
+         break;
+
       struct pollfd pfd = {.fd = fd, .events = POLLIN};
       int rc = poll(&pfd, 1, timeout_ms);
       if (rc <= 0)
@@ -557,8 +607,20 @@ static char *cli_http_txn(int fd, void *tlsp, const char *method, const char *pa
          return NULL;
       }
       if (n == 0)
-         break; /* EOF */
+         break; /* EOF: close-delimited response (no usable Content-Length) */
       len += (size_t)n;
+      buf[len] = '\0';
+      /* Learn the body length as soon as the header terminator arrives so we can
+       * stop at the body's end instead of depending on connection close. */
+      if (!header_end)
+      {
+         const char *hb = strstr(buf, "\r\n\r\n");
+         if (hb)
+         {
+            header_end = (size_t)(hb - buf) + 4;
+            content_length = cli_http_content_length(buf, header_end);
+         }
+      }
    }
    buf[len] = '\0';
    return buf;
