@@ -7,20 +7,24 @@ current version and prints it once after an upgrade.
 
 ## Unreleased (testing)
 
-Thin-client hardening — the client machine owns the working tree and the
-secrets; see [THIN_CLIENT.md](THIN_CLIENT.md).
+Thin-client + credential hardening — the client owns the working tree; agent
+credentials live in the server's **sealed vault**; see
+[THIN_CLIENT.md](THIN_CLIENT.md).
 
-- **Client-held agent credentials**: agent/delegate API keys now live on the
-  client (`~/.config/aimee/agent-keys.json`), not on the server. `aimee agent
-  add … --key K` against a remote server keeps `K` local and strips it before
-  forwarding the definition. Keys are pushed once per session to a **RAM-only**
-  keyring on the server (`POST /v1/session/credentials`) and are **never written
-  to disk** — so a compromised server holds no durable secret store. Auth
-  resolution prefers the client-pushed session key over any server-stored key.
-- **Codex OAuth from the thin client**: add a Codex agent with no key
-  (`aimee agent add codex https://chatgpt.com/backend-api/codex gpt-5.5
-  --provider codex`); the client supplies the OAuth token from this machine's
-  `~/.codex/auth.json` per session. Works as a primary provider and a delegate.
+- **Server-sealed credential vault (single store)**: agent/delegate API keys and
+  Codex/OAuth tokens are sealed in the server's vault — encrypted at rest, keyed
+  by agent, and decryptable by the server autonomously (a dual-access wrap, no
+  interactive unlock). `aimee agent add … --key K` seals `K` into the vault;
+  plaintext storage is refused. Every turn resolves the credential from the vault
+  (the turn's attested principal, falling back to the server principal). The
+  legacy **client-held keyring and the RAM per-session push (`POST
+  /v1/session/credentials`) are gone**. Migrate any leftover
+  `~/.config/aimee/agent-keys.json` with `aimee agent key import [--scrub]`.
+- **Codex OAuth in the vault**: `aimee agent setup codex-oauth` runs the
+  server-hosted OAuth flow and seals the token into the vault; a Codex agent then
+  authenticates server-side as a primary provider or delegate, with no
+  per-session push from the client. A legacy plaintext token is migrated and
+  scrubbed on first use.
 - **Workspaces ingested from the client**: `aimee workspace add <path>` resolves
   the path locally, registers it as `detached`, and pushes the files to the
   server (`POST /v1/index/ingest`, chunked under aimee-kb's body cap) — the

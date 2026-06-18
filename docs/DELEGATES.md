@@ -91,13 +91,14 @@ flowchart TD
 
 ### Configuration
 
-> **Thin client (remote server):** API keys are held on the client, not the
-> server. `aimee agent add <name> <endpoint> <model> --key K` against a remote
-> `aimee-server` stores `K` locally (`~/.config/aimee/agent-keys.json`) and
-> strips it before forwarding the definition; the key is pushed once per session
-> to a RAM-only keyring on the server and never persisted. Codex agents take no
-> key (`--provider codex` sources the OAuth token from `~/.codex/auth.json`). You
-> configure agents per machine. See [THIN_CLIENT.md](THIN_CLIENT.md) and
+> **Credential storage:** API keys and Codex/OAuth tokens are sealed in the
+> server's **vault** (encrypted at rest), not held on clients. `aimee agent add
+> <name> <endpoint> <model> --key K` seals `K` into the vault and refuses
+> plaintext storage; the server's `agents.json` keeps the definition only. Codex
+> tokens are vaulted via `aimee agent setup codex-oauth`. Configure agents once
+> on the server — the vault is shared across clients. Migrate any leftover
+> client-held `~/.config/aimee/agent-keys.json` with `aimee agent key import
+> [--scrub]`. See [THIN_CLIENT.md](THIN_CLIENT.md) and
 > [SECURITY.md](SECURITY.md#agent-credential-custody-thin-client).
 
 Use `aimee agent local` for local or LAN OpenAI-compatible runtimes such as
