@@ -22,6 +22,9 @@ interface ThreadInfo {
 }
 
 interface TabData {
+  /* The app-level session this conversation belongs to (top tab). Tabs mirror
+   * the SessionContext 1:1 by this id, so each session keeps its own history. */
+  sessionId?: string;
   title: string;
   messages: TabMessage[];
   sid: string;
@@ -176,6 +179,7 @@ function newAimeeSessionId(): string {
 function normalizeTab(tab: Partial<TabData> | null | undefined, index: number): TabData {
   const messages = Array.isArray(tab?.messages) ? tab.messages : [];
   return {
+    sessionId: typeof tab?.sessionId === 'string' ? tab.sessionId : undefined,
     title: typeof tab?.title === 'string' && tab.title ? tab.title : (index === 0 ? 'Chat' : `Chat ${index + 1}`),
     messages,
     sid: typeof tab?.sid === 'string' ? tab.sid : '',
@@ -208,50 +212,9 @@ function saveTabs(tabs: TabData[]): void {
   try { localStorage.setItem(TABS_KEY, JSON.stringify(tabs)); } catch { /* ignore */ }
 }
 
-/* Server-side session persistence (per logged-in user). The conversation lives
- * on aimee-server keyed by aimeeSid; webchat stores which sessions belong to the
- * user so tabs survive a browser/laptop crash or a move to another device.
- * localStorage remains a fast local cache (and holds per-tab message history);
- * the server is authoritative for *which* tabs exist. */
-
-interface ServerSession {
-  id: string;
-  title?: string;
-  cwd?: string;
-  created_at?: string;
-  last_active?: string;
-}
-
-async function fetchServerSessions(): Promise<ServerSession[]> {
-  try {
-    const r = await fetch('/api/chat/sessions');
-    if (!r.ok) return [];
-    const data = await r.json();
-    return Array.isArray(data) ? (data as ServerSession[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-// mergeServerSessions restores server-persisted sessions the local cache is
-// missing (e.g. after a crash cleared localStorage, or on a fresh device),
-// appending them as message-empty tabs keyed by the stored aimeeSid. Local tabs
-// are never dropped — except a single pristine, unused default tab, which the
-// restored sessions replace so the user does not see a stray empty "Chat".
-function mergeServerSessions(local: TabData[], server: ServerSession[]): TabData[] {
-  const known = new Set(local.map(t => t.aimeeSid).filter(Boolean));
-  const restored: TabData[] = [];
-  for (const s of server) {
-    if (s.id && !known.has(s.id)) {
-      restored.push(normalizeTab({ title: s.title ?? '', messages: [], sid: '', aimeeSid: s.id }, 0));
-      known.add(s.id);
-    }
-  }
-  if (restored.length === 0) return local;
-  const pristineDefault =
-    local.length === 1 && local[0].messages.length === 0 && !local[0].sid;
-  return pristineDefault ? restored : [...local, ...restored];
-}
+/* Conversation/tab persistence is local (localStorage) and mirrors the top
+ * SessionContext, which owns the session/tab list. Each tab's aimeeSid still
+ * ties to its server-side session state for continuity within a session. */
 
 function rulesBannerDismissedKey(root: string): string {
   return root ? `${RULES_BANNER_DISMISSED_KEY}:${root}` : RULES_BANNER_DISMISSED_KEY;
@@ -1389,16 +1352,47 @@ export default function Chat() {
   const [allTimeMetrics, setAllTimeMetrics] = useState<MetricRow[]>([]);
   const [promptTier, setPromptTier] = useState<'MINIMAL' | 'STANDARD' | 'EXTENDED'>('STANDARD');
   const [projectRoot, setProjectRoot] = useState(loadProjectRoot);
-  // The active top-level session owns the project this chat runs in. Mirror the
-  // session's project into the chat cwd, and start that session's conversation
-  // fresh when the session (or its project) changes.
-  const { active: activeSession, patchSession } = useSessions();
+  // The top session tabs are the source of truth. Each conversation tab mirrors
+  // a session 1:1 (by sessionId), so every session keeps its own history; the
+  // active session also drives the project (cwd).
+  const { sessions, active: activeSession, patchSession } = useSessions();
   const activeSessionId = activeSession?.id ?? '';
   const sessionProject = activeSession?.projectRoot ?? '';
+
+  // Keep one conversation tab per session: adopt an existing tab (preserving its
+  // messages/sids), migrate a legacy untagged tab, or create a fresh one.
   useEffect(() => {
-    changeProjectRoot(sessionProject);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeSessionId, sessionProject]);
+    if (!sessions.length) return;
+    setTabs(prev => {
+      const byId = new Map(prev.filter(t => t.sessionId).map(t => [t.sessionId as string, t]));
+      const untagged = prev.filter(t => !t.sessionId);
+      let u = 0;
+      const next = sessions.map((s, i) => {
+        const existing = byId.get(s.id);
+        if (existing) return existing.title === s.name ? existing : { ...existing, title: s.name };
+        const adopt = untagged[u++];
+        if (adopt) return { ...adopt, sessionId: s.id, title: s.name };
+        return normalizeTab({ sessionId: s.id, title: s.name, messages: [], sid: '' }, i);
+      });
+      // No-op if unchanged (avoid a render loop).
+      if (next.length === prev.length && next.every((t, i) => t === prev[i])) return prev;
+      tabsRef.current = next;
+      return next;
+    });
+  }, [sessions]);
+
+  // Switch the visible conversation when the active session changes.
+  useEffect(() => {
+    const idx = tabsRef.current.findIndex(t => t.sessionId === activeSessionId);
+    if (idx >= 0) setActiveIdx(idx);
+  }, [activeSessionId, sessions]);
+
+  // Mirror the active session's project into the chat cwd (no conversation reset
+  // — switching sessions preserves each one's history).
+  useEffect(() => {
+    setProjectRoot(sessionProject);
+    saveProjectRoot(sessionProject);
+  }, [sessionProject]);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [availableSkills, setAvailableSkills] = useState<string[]>([]);
   const [activeSkill, setActiveSkill] = useState<string>('');
@@ -1522,18 +1516,9 @@ export default function Chat() {
     saveTabs(tabs);
   }, [tabs]);
 
-  /* Restore server-persisted sessions on load (per-user, survives a crash or a
-   * move to another device). Runs once; merges in any sessions the local cache
-   * is missing. */
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const server = await fetchServerSessions();
-      if (cancelled || server.length === 0) return;
-      setTabs(prev => mergeServerSessions(prev, server));
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  /* (Server-session-as-tab-list restore was removed: the top SessionContext is
+   * now the source of truth for the session/tab list, mirrored locally. Each
+   * tab's aimeeSid still ties to its server-side session state.) */
 
   useEffect(() => {
     if (activeIdx >= tabs.length) {
