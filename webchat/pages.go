@@ -125,9 +125,16 @@ func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
-// handleSPA serves the React SPA for /chat and /dashboard.
+// handleSPA serves the React SPA. The dist is a single inlined index.html (all
+// JS/CSS embedded), so the browser caches THIS document — and without no-cache it
+// kept serving a stale bundle after a deploy (e.g. a fixed page still looked
+// broken until the cache was manually cleared). Force revalidation so a redeploy
+// is always picked up on the next navigation.
 func (s *server) handleSPA(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 	w.Write(spaHTML)
 }
 
@@ -204,4 +211,3 @@ func splitCookieParts(s string) []string {
 	}
 	return parts
 }
-
