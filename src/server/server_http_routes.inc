@@ -17,11 +17,12 @@
 
 /* Route-handler deps used below but not needed by server_http.c's own body
  * (kept here, not in server_http.c, to respect its 2000-line limit). */
-#include "git_host_cred.h"  /* per-host git credential store for /v1/git/credentials */
-#include "git_ops.h"        /* git_ops_run for /v1/workspace/git (WP-E) */
-#include "git_project.h"    /* git_project_clone for /v1/workspace/clone (WP-D) */
-#include "webuser_editor.h" /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
-#include "index.h"          /* index_scan_project after a webuser clone (WP-D) */
+#include "git_host_cred.h"    /* per-host git credential store for /v1/git/credentials */
+#include "git_oauth_github.h" /* GitHub device-flow sign-in (/v1/git/oauth/github) */
+#include "git_ops.h"          /* git_ops_run for /v1/workspace/git (WP-E) */
+#include "git_project.h"      /* git_project_clone for /v1/workspace/clone (WP-D) */
+#include "webuser_editor.h"   /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
+#include "index.h"            /* index_scan_project after a webuser clone (WP-D) */
 
 /* Per-request context handed to a route handler. `id` holds the extracted
  * dynamic path segment (persona / role-template name, session id, run id) for
@@ -1040,6 +1041,57 @@ static int rh_git_credentials(const route_req_t *rq, char *resp, int cap)
               : err_json(resp, cap, 500, "too large");
 }
 
+/* POST /v1/git/oauth/github/start — begin GitHub device-flow sign-in. Returns
+ * {ok, user_code, verification_uri, interval}; 503 if not configured. */
+static int rh_git_oauth_github_start(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git sign-in requires a webchat user");
+   if (!git_oauth_github_available())
+      return err_json(resp, cap, 503, "GitHub sign-in is not configured");
+
+   char user_code[64], verify_uri[256], err[256];
+   int interval = 5;
+   if (git_oauth_github_start(principal, user_code, sizeof(user_code), verify_uri,
+                              sizeof(verify_uri), &interval, err, sizeof(err)) != 0)
+      return err_json(resp, cap, 502, err[0] ? err : "GitHub sign-in failed to start");
+
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddBoolToObject(out, "ok", 1);
+   cJSON_AddStringToObject(out, "user_code", user_code);
+   cJSON_AddStringToObject(out, "verification_uri", verify_uri);
+   cJSON_AddNumberToObject(out, "interval", interval);
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* POST /v1/git/oauth/github/poll — poll device-flow completion. Returns
+ * {status: "pending"|"done"|"error", error?}. On done the token is stored. */
+static int rh_git_oauth_github_poll(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git sign-in requires a webchat user");
+
+   char err[256] = "";
+   int rc = git_oauth_github_poll(principal, err, sizeof(err));
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddStringToObject(out, "status", rc == 1 ? "done" : rc == 0 ? "pending" : "error");
+   if (rc < 0 && err[0])
+      cJSON_AddStringToObject(out, "error", err);
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
 /* ── detached-runner reverse channel over /v1 (workspace-resource-plane §3) ──
  * The filesystem-authority client serving a `detached` workspace polls for the
  * next op the server needs done against its working tree, executes it locally,
@@ -1516,6 +1568,10 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/git/credentials", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_git_credentials},
     {"POST", "/v1/git/credentials", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_git_credentials},
     {"DELETE", "/v1/git/credentials", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_git_credentials},
+    {"POST", "/v1/git/oauth/github/start", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_git_oauth_github_start},
+    {"POST", "/v1/git/oauth/github/poll", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_git_oauth_github_poll},
     {"POST", "/v1/workspaces/", "/forge-token", RM_PREFIX, NULL, CAP_TOOL_EXECUTE,
      rh_workspace_forge_token},
     {"GET", "/v1/workspaces/", NULL, RM_PREFIX, "workspace.get", 0, rh_workspace_get},

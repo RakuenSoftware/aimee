@@ -3748,6 +3748,57 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /git/oauth/github/start:
+    post:
+      summary: Begin GitHub device-flow sign-in
+      description: >
+        Start the GitHub OAuth device flow to populate the github.com credential
+        without a hand-made PAT. Returns a user code + verification URI to show the
+        user; the opaque device_code is held server-side for the poll endpoint.
+        Requires AIMEE_GITHUB_OAUTH_CLIENT_ID. Capability: tool:execute.
+      responses:
+        "200":
+          description: Device code issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  user_code: { type: string }
+                  verification_uri: { type: string }
+                  interval: { type: integer }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: GitHub sign-in not configured
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /git/oauth/github/poll:
+    post:
+      summary: Poll GitHub device-flow completion
+      description: >
+        Poll for the user completing the device flow. On completion the access
+        token is stored as the github.com credential. Capability: tool:execute.
+      responses:
+        "200":
+          description: Poll result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [pending, done, error] }
+                  error: { type: string }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /runner/poll:
     post:
       summary: Poll for the next detached-workspace op to execute (reverse channel)
