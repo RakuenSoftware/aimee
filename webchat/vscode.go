@@ -81,6 +81,15 @@ func (s *server) handleVSCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Bare /vscode must become /vscode/ at OUR origin — otherwise code-server
+	// would answer the slash-less path with a redirect to /vscode/ built from the
+	// upstream Host, leaking the loopback port and bouncing the browser off our
+	// origin. Redirecting here keeps everything same-origin.
+	if r.URL.Path == "/vscode" {
+		http.Redirect(w, r, "/vscode/", http.StatusMovedPermanently)
+		return
+	}
+
 	// A bounded context just for the ensure RPC (the proxied stream itself uses
 	// the request context, which may be long-lived for WebSocket sessions).
 	ectx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
@@ -99,14 +108,15 @@ func (s *server) handleVSCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.proxyToEditor(w, r, port)
+	s.proxyToEditor(w, r, username, port)
 }
 
 // proxyToEditor forwards the request to 127.0.0.1:<port>. httputil.ReverseProxy
 // transparently handles WebSocket upgrades (the "Connection: Upgrade" tunnel
 // code-server uses for the terminal + editor sync).
-func (s *server) proxyToEditor(w http.ResponseWriter, r *http.Request, port int) {
+func (s *server) proxyToEditor(w http.ResponseWriter, r *http.Request, username string, port int) {
 	target := &url.URL{Scheme: "http", Host: "127.0.0.1:" + strconv.Itoa(port)}
+	origHost := r.Host
 	proxy := &httputil.ReverseProxy{
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
@@ -116,24 +126,43 @@ func (s *server) proxyToEditor(w http.ResponseWriter, r *http.Request, port int)
 		Director: func(req *http.Request) {
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
+			// Preserve the externally-visible host/proto via X-Forwarded-* so
+			// code-server builds correct absolute URLs (asset/WebSocket) for the
+			// proxied sub-path, then point the upstream Host at the loopback peer.
+			req.Header.Set("X-Forwarded-Host", origHost)
+			req.Header.Set("X-Forwarded-Proto", forwardedProto(r))
+			if ip, _, e := net.SplitHostPort(r.RemoteAddr); e == nil {
+				req.Header.Set("X-Forwarded-For", ip)
+			}
 			req.Host = target.Host
 			// code-server runs with --auth none behind our auth gate; it must not
 			// receive webchat's session cookie or bearer.
 			req.Header.Del("Cookie")
 			req.Header.Del("Authorization")
-			req.Header.Set("X-Forwarded-Proto", forwardedProto(r))
 		},
 		ModifyResponse: func(resp *http.Response) error {
 			// The editor is embedded in a same-origin iframe; force SAMEORIGIN so
 			// it frames regardless of what code-server emits, while still blocking
 			// cross-origin clickjacking of the proxy.
 			resp.Header.Set("X-Frame-Options", "SAMEORIGIN")
+			// Belt-and-braces: if code-server emits a redirect to its own loopback
+			// host, strip it to a relative path so the browser stays on our origin
+			// and the port is never exposed.
+			if loc := resp.Header.Get("Location"); loc != "" {
+				if u, e := url.Parse(loc); e == nil && u.Host == target.Host {
+					u.Scheme, u.Host = "", ""
+					resp.Header.Set("Location", u.String())
+				}
+			}
 			return nil
 		},
 		ErrorHandler: func(rw http.ResponseWriter, req *http.Request, e error) {
-			// The cached port may be stale (editor reaped). Drop it so the next
-			// request re-ensures; report a transient error to the browser.
-			editorPorts.Delete(currentUser(req))
+			// The cached port may be stale (editor reaped). Evict ONLY if the cache
+			// still holds the failed port, so we never clobber a fresh port another
+			// goroutine just stored, then report a transient error.
+			if v, ok := editorPorts.Load(username); ok && v.(editorPortEntry).port == port {
+				editorPorts.Delete(username)
+			}
 			rw.WriteHeader(http.StatusBadGateway)
 			_, _ = rw.Write([]byte("editor connection failed"))
 		},
