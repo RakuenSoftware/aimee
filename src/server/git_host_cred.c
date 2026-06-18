@@ -2,7 +2,8 @@
 #include "git_host_cred.h"
 
 #include "util_url.h"      /* util_url_normalize */
-#include "vault_service.h" /* vault_service_set_server / get_server_wrap / delete */
+#include "vault_service.h" /* vault_service_set_server / get_server_wrap / delete / list */
+#include "vault_store.h"   /* vault_store_entry_t */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -116,4 +117,27 @@ int git_host_cred_delete(const char *host)
       return -1;
    vault_status_t st = vault_service_delete(VAULT_SERVER_PRINCIPAL, GIT_HOST_AGENT, key);
    return (st == VAULT_OK || st == VAULT_NO_ENTRY) ? 0 : -1;
+}
+
+int git_host_cred_list(char out[][GIT_HOST_MAX], int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   vault_store_entry_t entries[64];
+   int count = 0;
+   if (vault_service_list(VAULT_SERVER_PRINCIPAL, entries,
+                          (int)(sizeof(entries) / sizeof(entries[0])), &count) != VAULT_OK)
+      return -1;
+   size_t plen = strlen(GIT_HOST_CRED_PREFIX);
+   int n = 0;
+   for (int i = 0; i < count && n < max; i++)
+   {
+      if (strcmp(entries[i].agent, GIT_HOST_AGENT) != 0 ||
+          strncmp(entries[i].cred, GIT_HOST_CRED_PREFIX, plen) != 0)
+         continue;
+      const char *host = entries[i].cred + plen;
+      if (host[0])
+         snprintf(out[n++], GIT_HOST_MAX, "%s", host);
+   }
+   return n;
 }

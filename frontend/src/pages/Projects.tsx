@@ -39,6 +39,17 @@ export default function Projects() {
   const [token, setToken] = useState('');
   const [commitMsg, setCommitMsg] = useState('');
   const [branch, setBranch] = useState('');
+  const [hosts, setHosts] = useState<string[]>([]);
+  const [credHost, setCredHost] = useState('');
+  const [credToken, setCredToken] = useState('');
+
+  const loadHosts = useCallback(async () => {
+    try {
+      const r = await api('/api/git/credentials', { method: 'GET' });
+      const d = await r.json();
+      if (r.ok) setHosts(d.hosts || []);
+    } catch { /* server unavailable — leave list empty */ }
+  }, []);
 
   const loadProjects = useCallback(async () => {
     setErr('');
@@ -54,7 +65,33 @@ export default function Projects() {
     }
   }, []);
 
-  useEffect(() => { loadProjects(); }, [loadProjects]);
+  useEffect(() => { loadProjects(); loadHosts(); }, [loadProjects, loadHosts]);
+
+  async function addCred() {
+    if (!credHost.trim() || !credToken.trim()) return;
+    setBusy(true); setErr('');
+    try {
+      const r = await api('/api/git/credentials', {
+        method: 'POST',
+        body: JSON.stringify({ host: credHost.trim(), token: credToken.trim() }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.error || 'could not save credential'); }
+      else { setCredHost(''); setCredToken(''); await loadHosts(); }
+    } finally { setBusy(false); }
+  }
+
+  async function removeCred(host: string) {
+    setBusy(true); setErr('');
+    try {
+      const r = await api('/api/git/credentials', {
+        method: 'DELETE',
+        body: JSON.stringify({ host }),
+      });
+      if (!r.ok) { const d = await r.json(); setErr(d.error || 'could not remove credential'); }
+      else { await loadHosts(); }
+    } finally { setBusy(false); }
+  }
 
   async function connect() {
     if (!url.trim()) return;
@@ -66,7 +103,7 @@ export default function Projects() {
       });
       const d = await r.json();
       if (!r.ok) { setErr(d.error || 'clone failed'); }
-      else { setUrl(''); setName(''); setToken(''); await loadProjects(); setSelected(d.name || ''); }
+      else { setUrl(''); setName(''); setToken(''); await loadProjects(); await loadHosts(); setSelected(d.name || ''); }
     } finally { setBusy(false); }
   }
 
@@ -99,6 +136,34 @@ export default function Projects() {
           <input style={{ ...input, width: '100%' }} type="password" autoComplete="off"
             placeholder="access token — only for a private repo (GitHub/Gitea/GitLab…); saved server-side per host"
             value={token} onChange={e => setToken(e.target.value)} />
+        </div>
+      </Panel>
+
+      <Panel title="Git accounts" count={hosts.length}>
+        <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ color: '#888', fontSize: '12px' }}>
+            Access tokens aimee-server uses to reach each git host (one per host, any provider). Tokens are stored server-side and never shown again.
+          </div>
+          {hosts.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {hosts.map(h => (
+                <div key={h} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '13px', fontFamily: 'monospace', flex: 1 }}>{h}</span>
+                  <span style={{ fontSize: '11px', color: '#2a7' }}>● token set</span>
+                  <button style={{ ...btn, borderColor: '#d99', color: '#c33' }} disabled={busy}
+                    onClick={() => removeCred(h)}>remove</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <input style={{ ...input, flex: 1, minWidth: '160px' }} placeholder="host (e.g. github.com, gitea.you.com)"
+              value={credHost} onChange={e => setCredHost(e.target.value)} />
+            <input style={{ ...input, flex: 2, minWidth: '200px' }} type="password" autoComplete="off"
+              placeholder="access token" value={credToken} onChange={e => setCredToken(e.target.value)} />
+            <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
+              disabled={busy || !credHost.trim() || !credToken.trim()} onClick={addCred}>Save</button>
+          </div>
         </div>
       </Panel>
 
