@@ -39,6 +39,60 @@ func (s *server) gitRelay(w http.ResponseWriter, st int, data []byte, err error)
 	w.Write(out)
 }
 
+// gitOAuthRelay passes through the GitHub device-flow fields (no secrets — the
+// device_code stays server-side; only the user-facing code/URI + status cross).
+func (s *server) gitOAuthRelay(w http.ResponseWriter, st int, data []byte, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "git: aimee-server unavailable")
+		return
+	}
+	if st != http.StatusOK {
+		writeJSONError(w, st, vaultSafeErrorMessage(data))
+		return
+	}
+	var up struct {
+		OK              bool   `json:"ok"`
+		UserCode        string `json:"user_code"`
+		VerificationURI string `json:"verification_uri"`
+		Interval        int    `json:"interval"`
+		Status          string `json:"status"`
+		Error           string `json:"error"`
+	}
+	_ = json.Unmarshal(data, &up)
+	out, _ := json.Marshal(map[string]any{
+		"ok": true, "user_code": up.UserCode, "verification_uri": up.VerificationURI,
+		"interval": up.Interval, "status": up.Status, "error": up.Error,
+	})
+	w.Write(out)
+}
+
+// POST /api/git/oauth/github/start — begin GitHub device-flow sign-in.
+func (s *server) handleGitOauthGithubStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost,
+		"/v1/git/oauth/github/start", []byte(`{}`))
+	s.gitOAuthRelay(w, st, data, err)
+}
+
+// POST /api/git/oauth/github/poll — poll device-flow completion.
+func (s *server) handleGitOauthGithubPoll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost,
+		"/v1/git/oauth/github/poll", []byte(`{}`))
+	s.gitOAuthRelay(w, st, data, err)
+}
+
 // /api/git/credentials — manage aimee-server's per-host git access tokens
 // (GET list hosts, POST {host, token} set, DELETE {host} remove). Tokens are
 // write-only: listing returns host names only, never secrets.

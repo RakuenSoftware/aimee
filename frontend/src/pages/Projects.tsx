@@ -42,6 +42,8 @@ export default function Projects() {
   const [hosts, setHosts] = useState<string[]>([]);
   const [credHost, setCredHost] = useState('');
   const [credToken, setCredToken] = useState('');
+  const [ghCode, setGhCode] = useState('');
+  const [ghUri, setGhUri] = useState('');
 
   const loadHosts = useCallback(async () => {
     try {
@@ -66,6 +68,32 @@ export default function Projects() {
   }, []);
 
   useEffect(() => { loadProjects(); loadHosts(); }, [loadProjects, loadHosts]);
+
+  // GitHub device-flow: once a user code is shown, poll until the user authorizes.
+  useEffect(() => {
+    if (!ghCode) return;
+    let alive = true;
+    const id = setInterval(async () => {
+      try {
+        const r = await api('/api/git/oauth/github/poll', { method: 'POST' });
+        const d = await r.json();
+        if (!alive) return;
+        if (d.status === 'done') { setGhCode(''); setGhUri(''); await loadHosts(); }
+        else if (d.status === 'error') { setGhCode(''); setGhUri(''); setErr(d.error || 'GitHub sign-in failed'); }
+      } catch { /* transient; keep polling */ }
+    }, 5000);
+    return () => { alive = false; clearInterval(id); };
+  }, [ghCode, loadHosts]);
+
+  async function startGithub() {
+    setErr('');
+    try {
+      const r = await api('/api/git/oauth/github/start', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.error || 'GitHub sign-in unavailable'); return; }
+      setGhCode(d.user_code || ''); setGhUri(d.verification_uri || 'https://github.com/login/device');
+    } catch { setErr('aimee-server unavailable'); }
+  }
 
   async function addCred() {
     if (!credHost.trim() || !credToken.trim()) return;
@@ -143,6 +171,17 @@ export default function Projects() {
         <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div style={{ color: '#888', fontSize: '12px' }}>
             Access tokens aimee-server uses to reach each git host (one per host, any provider). Tokens are stored server-side and never shown again.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+            <button style={{ ...btn, background: '#24292e', color: '#fff', borderColor: '#24292e' }}
+              disabled={busy || !!ghCode} onClick={startGithub}>Sign in with GitHub</button>
+            {ghCode && (
+              <span style={{ fontSize: '13px', color: '#444' }}>
+                Go to <a href={ghUri} target="_blank" rel="noreferrer">{ghUri}</a> and enter code{' '}
+                <code style={{ background: '#eee', padding: '2px 6px', borderRadius: '4px', fontWeight: 600 }}>{ghCode}</code>
+                <span style={{ color: '#888' }}> — waiting…</span>
+              </span>
+            )}
           </div>
           {hosts.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>

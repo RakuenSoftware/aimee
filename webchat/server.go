@@ -187,6 +187,8 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/git/clone", s.requireAuth(s.handleGitClone))
 	mux.HandleFunc("/api/git/op", s.requireAuth(s.handleGitOp))
 	mux.HandleFunc("/api/git/credentials", s.requireAuth(s.handleGitCredentials))
+	mux.HandleFunc("/api/git/oauth/github/start", s.requireAuth(s.handleGitOauthGithubStart))
+	mux.HandleFunc("/api/git/oauth/github/poll", s.requireAuth(s.handleGitOauthGithubPoll))
 
 	// Live endpoints backed by aimee-server socket
 	mux.HandleFunc("/api/agents", s.requireAuth(s.handleAgents))
