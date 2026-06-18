@@ -51,8 +51,8 @@ int main(void)
    char path[PATH_MAX], name[128], err[256];
 
    /* name derived from the URL basename */
-   assert(git_project_clone("webuser:alice", url, NULL, path, sizeof(path), name, sizeof(name), err,
-                            sizeof(err)) == 0);
+   assert(git_project_clone("webuser:alice", url, NULL, NULL, path, sizeof(path), name,
+                            sizeof(name), err, sizeof(err)) == 0);
    assert(strcmp(name, "srcrepo") == 0);
    assert(strstr(path, "/webusers/alice/srcrepo") != NULL);
    struct stat st;
@@ -63,30 +63,30 @@ int main(void)
    assert(stat(check, &st) == 0); /* file came across */
 
    /* re-clone the same name -> project already exists -> refused */
-   assert(git_project_clone("webuser:alice", url, NULL, path, sizeof(path), name, sizeof(name), err,
-                            sizeof(err)) == -1);
+   assert(git_project_clone("webuser:alice", url, NULL, NULL, path, sizeof(path), name,
+                            sizeof(name), err, sizeof(err)) == -1);
 
    /* explicit name + .git stripping on derive */
    char url2[420];
    snprintf(url2, sizeof(url2), "file://%s/.git", src); /* trailing .git path form */
-   assert(git_project_clone("webuser:alice", url, "myproj", path, sizeof(path), name, sizeof(name),
-                            err, sizeof(err)) == 0);
+   assert(git_project_clone("webuser:alice", url, "myproj", NULL, path, sizeof(path), name,
+                            sizeof(name), err, sizeof(err)) == 0);
    assert(strcmp(name, "myproj") == 0 && strstr(path, "/alice/myproj"));
    (void)url2;
 
    /* cross-principal: bob clones into HIS scope, not alice's */
-   assert(git_project_clone("webuser:bob", url, "shared", path, sizeof(path), name, sizeof(name),
-                            err, sizeof(err)) == 0);
+   assert(git_project_clone("webuser:bob", url, "shared", NULL, path, sizeof(path), name,
+                            sizeof(name), err, sizeof(err)) == 0);
    assert(strstr(path, "/webusers/bob/shared") != NULL);
 
    /* refusals */
-   assert(git_project_clone("uid:1000", url, "x", path, sizeof(path), name, sizeof(name), err,
+   assert(git_project_clone("uid:1000", url, "x", NULL, path, sizeof(path), name, sizeof(name), err,
                             sizeof(err)) == -1); /* not a webuser */
-   assert(git_project_clone("webuser:alice", "", "x", path, sizeof(path), name, sizeof(name), err,
-                            sizeof(err)) == -1); /* empty url */
-   assert(git_project_clone("webuser:alice", "--upload-pack=evil", "x", path, sizeof(path), name,
-                            sizeof(name), err, sizeof(err)) == -1); /* flag-like url */
-   assert(git_project_clone("webuser:alice", url, "../escape", path, sizeof(path), name,
+   assert(git_project_clone("webuser:alice", "", "x", NULL, path, sizeof(path), name, sizeof(name),
+                            err, sizeof(err)) == -1); /* empty url */
+   assert(git_project_clone("webuser:alice", "--upload-pack=evil", "x", NULL, path, sizeof(path),
+                            name, sizeof(name), err, sizeof(err)) == -1); /* flag-like url */
+   assert(git_project_clone("webuser:alice", url, "../escape", NULL, path, sizeof(path), name,
                             sizeof(name), err, sizeof(err)) == -1); /* bad name */
 
    /* --- list: alice has srcrepo + myproj; bob has shared; isolated per user --- */

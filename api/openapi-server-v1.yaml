@@ -3528,10 +3528,12 @@ paths:
         Clone `url` as a project under the authenticated `webuser:` principal's
         isolated workspace (`webusers/<name>/<project>`). The caller identity
         comes from the server.token-gated `X-Aimee-Webuser` assertion, NOT the
-        body, so a user can only clone into their own tree. Git credentials are
-        injected from the user's sealed vault (GH_TOKEN + a GIT_ASKPASS shim) —
-        never accepted in the body, never on disk. The project is then indexed.
-        Capability: tool:execute.
+        body, so a user can only clone into their own tree. The git credential is
+        resolved per host (single-user server, many providers): an optional inline
+        `token` (then persisted server-side, keyed by host) > the host's stored
+        token > the server identity (AIMEE_FORGE_TOKEN). It crosses only via a
+        GIT_ASKPASS shim, never on disk in plaintext or on the command line. The
+        project is then indexed. Capability: tool:execute.
       requestBody:
         required: true
         content:
@@ -3542,6 +3544,12 @@ paths:
               properties:
                 url: { type: string, description: Git remote URL (https or ssh) }
                 name: { type: string, description: Project name (default - the repo basename) }
+                token:
+                  type: string
+                  description: >
+                    Optional access token for a private repo (GitHub/Gitea/GitLab/...).
+                    Authenticates the clone and is persisted in the server vault keyed
+                    by the URL's host for future operations. Never echoed back.
       responses:
         "200":
           description: Cloned and indexed

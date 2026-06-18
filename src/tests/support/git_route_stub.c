@@ -11,12 +11,14 @@
 
 #include <stdio.h>
 
-int git_project_clone(const char *principal, const char *url, const char *name, char *out_path,
-                      size_t path_cap, char *out_name, size_t name_cap, char *err, size_t errlen)
+int git_project_clone(const char *principal, const char *url, const char *name, const char *token,
+                      char *out_path, size_t path_cap, char *out_name, size_t name_cap, char *err,
+                      size_t errlen)
 {
    (void)principal;
    (void)url;
    (void)name;
+   (void)token;
    if (out_path && path_cap)
       out_path[0] = '\0';
    if (out_name && name_cap)

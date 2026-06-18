@@ -50,15 +50,18 @@ func (s *server) handleGitProjects(w http.ResponseWriter, r *http.Request) {
 	s.gitRelay(w, st, data, err)
 }
 
-// POST /api/git/clone {url, name?} — clone a repo as a project.
+// POST /api/git/clone {url, name?, token?} — clone a repo as a project. An
+// optional token authenticates a private repo and is persisted server-side
+// (per host); it is never echoed back to the browser.
 func (s *server) handleGitClone(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	var req struct {
-		URL  string `json:"url"`
-		Name string `json:"name"`
+		URL   string `json:"url"`
+		Name  string `json:"name"`
+		Token string `json:"token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
 		writeJSONError(w, http.StatusBadRequest, "url required")
@@ -66,7 +69,7 @@ func (s *server) handleGitClone(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
 	defer cancel()
-	body, _ := json.Marshal(map[string]string{"url": req.URL, "name": req.Name})
+	body, _ := json.Marshal(map[string]string{"url": req.URL, "name": req.Name, "token": req.Token})
 	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, "/v1/workspace/clone", body)
 	s.gitRelay(w, st, data, err)
 }
