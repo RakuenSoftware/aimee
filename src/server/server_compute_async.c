@@ -465,10 +465,7 @@ static void chat_stream_worker_pooled(void *arg)
    {
       cancel_entry = turn_registry_publish(delta_session, delta_turn);
       if (cancel_entry)
-      {
-         cancel_entry->owner = pthread_self();
-         cctx->turn_entry = cancel_entry;
-      }
+         cctx->turn_entry = cancel_entry; /* owner is set inside publish, under the lock */
       else
          LOG_WARN("chat", "turn registry rejected session %s; turn not cancellable", delta_session);
    }

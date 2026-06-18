@@ -217,9 +217,14 @@ static int stream_event(compute_ctx_t *cctx, const char *event, const char *key,
       }
    }
 
+   /* The ring is the unconditional sink, so a dead socket is NOT a turn-ending
+    * condition: report success whenever the event reached the ring, so no caller
+    * aborts the turn on disconnect. Fall back to the connection-liveness signal
+    * only for non-presence turns (ring inactive). */
+   int ring_active = cctx->presence_emit_deltas && cctx->presence_session[0];
    int alive = cctx->conn_alive;
    pthread_mutex_unlock(cctx->write_mutex);
-   return alive ? 0 : -1;
+   return (ring_active || alive) ? 0 : -1;
 }
 
 static int stream_event_usage(compute_ctx_t *cctx, int in_tokens, int out_tokens, double cost)
@@ -266,9 +271,10 @@ static int stream_event_usage(compute_ctx_t *cctx, int in_tokens, int out_tokens
       }
    }
 
+   int ring_active = cctx->presence_emit_deltas && cctx->presence_session[0];
    int alive = cctx->conn_alive;
    pthread_mutex_unlock(cctx->write_mutex);
-   return alive ? 0 : -1;
+   return (ring_active || alive) ? 0 : -1;
 }
 
 /* Cancellable, non-blocking line reader for the provider subprocess pipe.
@@ -332,8 +338,11 @@ static int cli_read_line(int fd, cli_linereader_t *lr, struct turn_entry *e, cha
          *cancelled = 1;
          return 0;
       }
-      if (pfd.revents & (POLLIN | POLLHUP))
+      if (pfd.revents & (POLLIN | POLLHUP | POLLERR))
       {
+         /* Drain whatever is available. On POLLHUP the pipe is closed but may
+          * still hold buffered bytes; read() delivers them before returning 0,
+          * so always attempt the read rather than declaring EOF on POLLHUP. */
          ssize_t n = read(fd, lr->buf + lr->len, sizeof(lr->buf) - 1 - lr->len);
          if (n == 0)
          {
@@ -353,13 +362,13 @@ static int cli_read_line(int fd, cli_linereader_t *lr, struct turn_entry *e, cha
          if (n < 0)
          {
             if (errno == EAGAIN || errno == EINTR)
-               continue;
+               continue; /* not really ready / interrupted: re-poll */
             *eof = 1;
             return 0;
          }
          lr->len += (size_t)n;
       }
-      else if (pfd.revents & (POLLERR | POLLNVAL))
+      else if (pfd.revents & POLLNVAL)
       {
          *eof = 1;
          return 0;

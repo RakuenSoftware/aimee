@@ -63,7 +63,19 @@ int handle_chat_graceful_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
    const char *sid = (jsid && cJSON_IsString(jsid)) ? jsid->valuestring : NULL;
    if (!sid || !sid[0])
       return server_send_error(conn, "missing aimee_session_id", NULL);
-   int rc = turn_registry_cancel(sid, conn->vault_principal);
+   /* A fully-trusted local peer (CAPS_ALL over the filesystem-trusted UDS — the
+    * co-located webchat backend / gateway) bypasses the owner check; that
+    * surface binds session id to its authenticated caller before forwarding.
+    * Any other caller must present an attested principal that matches the
+    * session owner; an un-attested non-local caller is refused outright (an
+    * empty principal must NOT fall through to the trusted-internal bypass). */
+   int rc;
+   if (conn->capabilities == CAPS_ALL)
+      rc = turn_registry_cancel(sid, NULL);
+   else if (conn->vault_principal[0])
+      rc = turn_registry_cancel(sid, conn->vault_principal);
+   else
+      return server_send_error(conn, "forbidden: unattested caller", NULL);
    if (rc < 0)
       return server_send_error(conn, "forbidden: not the session owner", NULL);
    cJSON *resp = jo_ok();
