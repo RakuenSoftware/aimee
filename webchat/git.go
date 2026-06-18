@@ -58,13 +58,42 @@ func (s *server) gitOAuthRelay(w http.ResponseWriter, st int, data []byte, err e
 		Interval        int    `json:"interval"`
 		Status          string `json:"status"`
 		Error           string `json:"error"`
+		Configured      bool   `json:"configured"`
+		ClientID        string `json:"client_id"`
 	}
 	_ = json.Unmarshal(data, &up)
 	out, _ := json.Marshal(map[string]any{
 		"ok": true, "user_code": up.UserCode, "verification_uri": up.VerificationURI,
 		"interval": up.Interval, "status": up.Status, "error": up.Error,
+		"configured": up.Configured, "client_id": up.ClientID,
 	})
 	w.Write(out)
+}
+
+// /api/git/oauth/github/config — read (GET) or set (POST {client_id}) the GitHub
+// OAuth App client ID so "Sign in with GitHub" can be configured from the UI.
+func (s *server) handleGitOauthGithubConfig(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	user := currentUser(r)
+	switch r.Method {
+	case http.MethodGet:
+		st, data, err := s.v1RequestWebuser(ctx, user, http.MethodGet, "/v1/git/oauth/github/config", nil)
+		s.gitOAuthRelay(w, st, data, err)
+	case http.MethodPost:
+		var req struct {
+			ClientID string `json:"client_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ClientID == "" {
+			writeJSONError(w, http.StatusBadRequest, "client_id required")
+			return
+		}
+		body, _ := json.Marshal(map[string]string{"client_id": req.ClientID})
+		st, data, err := s.v1RequestWebuser(ctx, user, http.MethodPost, "/v1/git/oauth/github/config", body)
+		s.gitOAuthRelay(w, st, data, err)
+	default:
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+	}
 }
 
 // POST /api/git/oauth/github/start — begin GitHub device-flow sign-in.

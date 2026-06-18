@@ -125,3 +125,16 @@ int git_oauth_github_poll(const char *principal, char *err, size_t errlen)
       err[0] = '\0';
    return -1;
 }
+
+int git_oauth_github_set_client_id(const char *client_id)
+{
+   (void)client_id;
+   return -1;
+}
+
+int git_oauth_github_get_client_id(char *out, size_t out_len)
+{
+   if (out && out_len)
+      out[0] = '\0';
+   return 0;
+}

@@ -1092,6 +1092,42 @@ static int rh_git_oauth_github_poll(const route_req_t *rq, char *resp, int cap)
    return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
 }
 
+/* GET/POST /v1/git/oauth/github/config — read or set the GitHub OAuth App client
+ * ID from the UI (public; persisted server-side), so the "Sign in with GitHub"
+ * button can be configured without touching env vars. */
+static int rh_git_oauth_github_config(const route_req_t *rq, char *resp, int cap)
+{
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git sign-in requires a webchat user");
+
+   if (strcmp(rq->method, "POST") == 0)
+   {
+      cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
+      const cJSON *jid = body ? cJSON_GetObjectItemCaseSensitive(body, "client_id") : NULL;
+      const char *id = (cJSON_IsString(jid) && jid->valuestring) ? jid->valuestring : NULL;
+      int rc = (id && id[0]) ? git_oauth_github_set_client_id(id) : -1;
+      cJSON_Delete(body);
+      if (rc != 0)
+         return err_json(resp, cap, 400, "client_id required");
+      return snprintf(resp, (size_t)cap, "{\"ok\":true}") < cap
+                 ? 200
+                 : err_json(resp, cap, 500, "too large");
+   }
+
+   /* GET → report whether configured (the client ID is public, so return it). */
+   char id[256];
+   int have = git_oauth_github_get_client_id(id, sizeof(id));
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddBoolToObject(out, "configured", have);
+   cJSON_AddStringToObject(out, "client_id", have ? id : "");
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
 /* ── detached-runner reverse channel over /v1 (workspace-resource-plane §3) ──
  * The filesystem-authority client serving a `detached` workspace polls for the
  * next op the server needs done against its working tree, executes it locally,
@@ -1572,6 +1608,10 @@ static const http_route_t g_v1_routes[] = {
      rh_git_oauth_github_start},
     {"POST", "/v1/git/oauth/github/poll", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
      rh_git_oauth_github_poll},
+    {"GET", "/v1/git/oauth/github/config", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_git_oauth_github_config},
+    {"POST", "/v1/git/oauth/github/config", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
+     rh_git_oauth_github_config},
     {"POST", "/v1/workspaces/", "/forge-token", RM_PREFIX, NULL, CAP_TOOL_EXECUTE,
      rh_workspace_forge_token},
     {"GET", "/v1/workspaces/", NULL, RM_PREFIX, "workspace.get", 0, rh_workspace_get},

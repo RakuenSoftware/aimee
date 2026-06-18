@@ -10,8 +10,16 @@
  * no secret needed for device flow). Other providers (Gitea/GitLab/...) use the
  * token field instead. */
 
-/* 1 iff AIMEE_GITHUB_OAUTH_CLIENT_ID is configured (the flow is usable). */
+/* 1 iff a client ID is configured (stored from the UI, or the env) — flow usable. */
 int git_oauth_github_available(void);
+
+/* Store the GitHub OAuth App client ID (set from the web UI; persisted in the
+ * server vault). Returns 0 on success, -1 on error. The client ID is public. */
+int git_oauth_github_set_client_id(const char *client_id);
+
+/* Read the configured client ID into out (the stored value, else the env).
+ * Returns 1 (found) or 0 (none). */
+int git_oauth_github_get_client_id(char *out, size_t out_len);
 
 /* Begin device flow: request a user code. On success returns 0 and fills
  * user_code (shown to the user) + verify_uri (where they enter it) + *interval
