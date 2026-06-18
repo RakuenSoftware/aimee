@@ -4,6 +4,7 @@
 #include "git_cred_inject.h"   /* git_cred_inject_build_env / _free_env */
 #include "git_host_cred.h"     /* per-host token store (single-user, many hosts) */
 #include "util.h"              /* safe_exec_capture_env */
+#include "util_url.h"          /* util_url_normalize (ssh/scp/git -> https) */
 #include "workspace_scope.h"   /* ws_scope_project_path, ws_scope_name_valid */
 
 #include <dirent.h>
@@ -119,9 +120,17 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
    char **envp =
        forge_built ? forge_cred_build_env_from_token(eff_token, environ, forge_cred_askpass_shim())
                    : git_cred_inject_build_env(principal, environ);
-   const char *argv[] = {"git", "clone", "--", url, dest, NULL};
+   /* Clone over HTTPS, never SSH: our credential model is per-host HTTPS tokens
+    * (+ OAuth), and a non-interactive server has no seeded known_hosts, so an
+    * ssh://, git@host:path, or git:// URL would die on "Host key verification
+    * failed". Normalize any such form to https://host/path; fall back to the raw
+    * URL only for forms util_url_normalize can't parse (e.g. a local file path). */
+   char *clone_url_norm = util_url_normalize(url);
+   const char *clone_url = clone_url_norm ? clone_url_norm : url;
+   const char *argv[] = {"git", "clone", "--", clone_url, dest, NULL};
    char *out = NULL;
    int rc = safe_exec_capture_env(argv, envp ? envp : environ, &out, 1 << 16);
+   free(clone_url_norm);
    if (envp)
    {
       if (forge_built)
