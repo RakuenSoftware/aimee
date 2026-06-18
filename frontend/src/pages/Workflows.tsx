@@ -538,7 +538,12 @@ export default function Workflows() {
       style={{
         display: "flex",
         gap: 12,
-        height: "calc(100vh - 90px)",
+        // Fill the AppShell content area (like the Projects page). The old
+        // calc(100vh - 90px) hard-coded an assumed header height; when it was
+        // wrong the flex row collapsed and the left rail + canvas clipped to
+        // nothing while only the toolbar buttons stayed visible.
+        height: "100%",
+        minHeight: 0,
         fontFamily: "system-ui",
       }}
     >
