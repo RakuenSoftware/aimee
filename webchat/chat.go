@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,6 +12,32 @@ import (
 
 	"github.com/RakuenSoftware/smoothgui/auth"
 )
+
+// pathWithin reports whether child is parent or a descendant of it (both cleaned).
+func pathWithin(child, parent string) bool {
+	child = filepath.Clean(child)
+	parent = filepath.Clean(parent)
+	return child == parent || strings.HasPrefix(child, parent+string(filepath.Separator))
+}
+
+// webuserWorkspaceRoot returns the caller's scoped workspace root (the path the
+// agent's cwd must stay within), via aimee-server's /v1/workspace/projects.
+func (s *server) webuserWorkspaceRoot(ctx context.Context, user string) (string, error) {
+	st, data, err := s.v1RequestWebuser(ctx, user, http.MethodGet, "/v1/workspace/projects", nil)
+	if err != nil {
+		return "", err
+	}
+	if st != http.StatusOK {
+		return "", fmt.Errorf("workspace lookup status %d", st)
+	}
+	var d struct {
+		Root string `json:"root"`
+	}
+	if json.Unmarshal(data, &d) != nil {
+		return "", fmt.Errorf("bad workspace response")
+	}
+	return d.Root, nil
+}
 
 type chatProject struct {
 	Name      string `json:"name"`
@@ -56,6 +83,23 @@ func (s *server) handleChatSend(w http.ResponseWriter, r *http.Request) {
 	cwd, err := resolveProjectRoot(req.Cwd)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+		return
+	}
+	// cwd containment: the agent runs server-side with file/exec tools, and cwd
+	// comes from the browser — so it MUST stay within the caller's own scoped
+	// workspace. aimee-server can't enforce this (the chat stream carries no
+	// webuser identity), so webchat (the trust boundary) does it. Default to the
+	// user's workspace when no project is selected; refuse anything outside it
+	// (fail closed: a selected cwd we can't verify is also refused).
+	if root, rerr := s.webuserWorkspaceRoot(r.Context(), currentUser(r)); rerr == nil && root != "" {
+		if req.Cwd == "" {
+			cwd = root
+		} else if !pathWithin(cwd, root) {
+			http.Error(w, `{"error":"project must be within your workspace"}`, http.StatusForbidden)
+			return
+		}
+	} else if req.Cwd != "" {
+		http.Error(w, `{"error":"could not verify your workspace"}`, http.StatusForbidden)
 		return
 	}
 
