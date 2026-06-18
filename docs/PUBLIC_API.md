@@ -136,8 +136,9 @@ The pure decision logic lives in `src/kb/kb_scope.c` and is unit-tested in
 
 ## SDKs
 
-Day-one SDKs are **generated from the spec**, never hand-written, and committed
-under `api/sdks/<lang>/`:
+Day-one SDKs are **generated from the spec**, never hand-written. They are
+**not committed** — `api/sdks/<lang>/` is gitignored and regenerated on demand
+(locally or in CI, see [`.github/workflows/sdk-gen.yml`](../.github/workflows/sdk-gen.yml)):
 
 ```
 c  cpp  csharp  go  java  python  rust  typescript
@@ -153,14 +154,16 @@ scripts/gen-sdks.sh python go  # a subset
 The script is self-bootstrapping: it uses a system `java` if present, otherwise
 it downloads a portable Temurin JRE and the pinned `openapi-generator-cli` jar
 into `~/.cache/aimee-sdkgen` (no root required). Regenerating from an unchanged
-spec is a **byte-for-byte no-op**, so a stale SDK is caught in review.
+spec is a **byte-for-byte no-op**, so regeneration is deterministic.
 
-Two gates keep SDKs honest (both wired into `make lint`):
+Two gates keep SDKs honest:
 
 - `scripts/check-sdk-parity.py`: every `operationId` in the spec is covered by
-  every committed SDK (`make sdk-parity-check`).
+  every generated SDK (`make sdk-parity-check`). Run after `make gen-sdks` in the
+  SDK-gen CI workflow (the SDKs are no longer committed, so this is not part of
+  the fast `make lint` target).
 - `scripts/check-api-conformance.py`: every spec path is routed by the
-  aimee-kb server (`make api-conformance-check`).
+  aimee-kb server (`make api-conformance-check`, wired into `make lint`).
 
 Running each SDK against a live aimee-kb is automated by `scripts/sdk-smoke.sh`
 (`make v1-sdk-smoke`): it builds a minimal consumer per language that calls the

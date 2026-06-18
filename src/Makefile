@@ -334,7 +334,7 @@ AGENT_SRCS = server/agent_runtime.c server/agent_logging.c server/agent_parallel
              server/delegate_backend.c server/delegate_backend_local.c server/delegate_backend_ssh.c server/delegate_backend_docker.c server/delegate_driver.c server/delegate_openai.c server/delegate_gemini.c server/delegate_xml_fallback.c \
              server/model_provider.c server/model_sampling.c server/openrouter_profile.c server/openai_profile.c server/anthropic_profile.c server/gemini_profile.c server/ollama_profile.c server/llama_native_profile.c server/mistral_profile.c server/minimax_profile.c server/aux_router.c \
              server/otel.c server/oauth_pkce.c server/oauth_tokens.c server/mcp_client.c server/mcp_client_registry.c \
-             server/agent_shell.c server/agent_cli_shell.c server/skill_review.c server/skill_curator.c
+             server/agent_shell.c server/agent_cli_shell.c server/skill_curator.c
 AGENT_OBJS = $(AGENT_SRCS:%.c=$(OBJDIR)/%.o) $(PLATFORM_AGENT_OBJS)
 
 # --- Layer 3: Commands + UI (cmd_*, webchat, dashboard) ---
@@ -1003,13 +1003,14 @@ proposal-links-check:
 	@python3 ../scripts/check-proposal-links.py
 
 # Regenerate the day-one client SDKs (api/sdks/<lang>/) from the OpenAPI spec.
-# Self-bootstrapping (portable JRE + openapi-generator); output is committed
-# and regeneration on an unchanged spec is a byte-for-byte no-op.
+# Self-bootstrapping (portable JRE + openapi-generator); output is gitignored and
+# regenerated on demand / in CI (see .github/workflows/sdk-gen.yml), not committed.
 gen-sdks:
 	@../scripts/gen-sdks.sh
 
-# CI gate: every operation in api/openapi-v1.yaml is covered by every committed
-# SDK under api/sdks/. Pure-python; does not require the generator toolchain.
+# Parity gate: every operation in api/openapi-v1.yaml is covered by every generated
+# SDK under api/sdks/. Pure-python; runs in the SDK-gen CI workflow after gen-sdks
+# (the SDKs are no longer committed, so this is not part of the fast `lint` target).
 sdk-parity-check:
 	@python3 ../scripts/check-sdk-parity.py
 	@python3 ../scripts/check-sdk-parity.py --plant-test
@@ -1054,7 +1055,7 @@ clean:
 # you genuinely need a different binary.
 CLANG_FORMAT ?= clang-format-19
 
-lint: line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check kb-intelligence-surfaced-check sdk-parity-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check
+lint: line-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check sidecar-clients-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check
 
 # Structural guard for the code-vector-graph fusion eval corpus + ablation
 # matrix (>=100 queries, all categories, well-formed; baseline+full_fusion arms).
