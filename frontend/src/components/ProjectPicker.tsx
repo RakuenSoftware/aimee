@@ -1,0 +1,105 @@
+import { useCallback, useEffect, useState } from 'react';
+
+/* ProjectPicker — a compact "select or clone a project" control embedded in each
+ * tool tab. Each tab passes its own storageKey so its selected project persists
+ * independently (per the per-tab project model). onChange fires with the selected
+ * project name and the user's workspace root (so the tab can act on it — the
+ * editor opens root/<project>, chat sets cwd to it, etc.). */
+
+export interface ProjectSelection {
+  project: string;
+  root: string;
+}
+
+async function api(path: string, init?: RequestInit): Promise<Response> {
+  return fetch(path, {
+    ...init,
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '', ...(init?.headers || {}) },
+  });
+}
+
+const input: React.CSSProperties = { padding: '5px 8px', borderRadius: 4, border: '1px solid #ccc', fontSize: 13 };
+const btn: React.CSSProperties = { padding: '5px 10px', borderRadius: 4, border: '1px solid #ccc', background: '#fff', color: '#444', cursor: 'pointer', fontSize: 13 };
+
+export default function ProjectPicker({ storageKey, onChange }: {
+  storageKey: string;
+  onChange: (sel: ProjectSelection | null) => void;
+}) {
+  const [projects, setProjects] = useState<string[]>([]);
+  const [root, setRoot] = useState('');
+  const [selected, setSelected] = useState<string>(() => localStorage.getItem(storageKey) || '');
+  const [cloneOpen, setCloneOpen] = useState(false);
+  const [url, setUrl] = useState('');
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const emit = useCallback((project: string, rootPath: string) => {
+    onChange(project && rootPath ? { project, root: rootPath } : null);
+  }, [onChange]);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await api('/api/git/projects', { method: 'GET' });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.error || 'failed to list projects'); return; }
+      const ps: string[] = d.projects || [];
+      setProjects(ps);
+      setRoot(d.root || '');
+      // keep the persisted selection if still present, else clear
+      setSelected(prev => {
+        const next = prev && ps.includes(prev) ? prev : '';
+        emit(next, d.root || '');
+        return next;
+      });
+    } catch { setErr('aimee-server unavailable'); }
+  }, [emit]);
+
+  useEffect(() => { load(); }, [load]);
+
+  function select(p: string) {
+    setSelected(p);
+    if (p) localStorage.setItem(storageKey, p); else localStorage.removeItem(storageKey);
+    emit(p, root);
+  }
+
+  async function clone() {
+    if (!url.trim()) return;
+    setBusy(true); setErr('');
+    try {
+      const r = await api('/api/git/clone', {
+        method: 'POST',
+        body: JSON.stringify({ url: url.trim(), token: token.trim() || undefined }),
+      });
+      const d = await r.json();
+      if (!r.ok) { setErr(d.error || 'clone failed'); return; }
+      setUrl(''); setToken(''); setCloneOpen(false);
+      await load();
+      if (d.name) select(d.name);
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 12px', background: '#f6f7f9', borderBottom: '1px solid #e3e6ea' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, color: '#666' }}>Project:</span>
+        <select style={{ ...input, minWidth: 180 }} value={selected} onChange={e => select(e.target.value)}>
+          <option value="">— none —</option>
+          {projects.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <button style={btn} onClick={() => setCloneOpen(o => !o)}>{cloneOpen ? 'Cancel' : '+ Clone repo'}</button>
+        {err && <span style={{ color: '#c62828', fontSize: 12 }}>{err}</span>}
+      </div>
+      {cloneOpen && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input style={{ ...input, flex: 2, minWidth: 260 }} placeholder="git remote URL (https or ssh)"
+            value={url} onChange={e => setUrl(e.target.value)} />
+          <input style={{ ...input, flex: 1, minWidth: 160 }} type="password" autoComplete="off"
+            placeholder="access token (private repos)" value={token} onChange={e => setToken(e.target.value)} />
+          <button style={{ ...btn, background: '#234', color: '#8cf', borderColor: '#456' }}
+            disabled={busy || !url.trim()} onClick={clone}>Clone</button>
+        </div>
+      )}
+    </div>
+  );
+}

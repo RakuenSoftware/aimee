@@ -1,8 +1,7 @@
 import { Component, useEffect, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
-import { AppShell, Toast } from '@rakuensoftware/smoothgui';
-import type { NavItem } from '@rakuensoftware/smoothgui';
+import { Routes, Route, Navigate, NavLink, useLocation } from 'react-router-dom';
+import { Toast } from '@rakuensoftware/smoothgui';
 import Chat from './pages/Chat';
 import Dashboard from './pages/Dashboard';
 import Workflows from './pages/Workflows';
@@ -56,12 +55,13 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { label: 'Chat', icon: '💬', route: '/chat', section: 'Main' },
-  { label: 'Dashboard', icon: '📊', route: '/dashboard', section: 'Main' },
-  { label: 'Workflows', icon: '🔀', route: '/workflows', section: 'Main' },
-  { label: 'Projects', icon: '📁', route: '/projects', section: 'Main' },
-  { label: 'Editor', icon: '🖥️', route: '/editor', section: 'Main' },
+type Tab = { label: string; icon: string; route: string };
+const NAV_ITEMS: Tab[] = [
+  { label: 'Chat', icon: '💬', route: '/chat' },
+  { label: 'Dashboard', icon: '📊', route: '/dashboard' },
+  { label: 'Workflows', icon: '🔀', route: '/workflows' },
+  { label: 'Projects', icon: '📁', route: '/projects' },
+  { label: 'Editor', icon: '🖥️', route: '/editor' },
 ];
 
 function LogoutButton() {
@@ -123,23 +123,47 @@ export default function App() {
 
   return (
     <>
-      <AppShell
-        appName="aimee"
-        appNameShort="ai"
-        navItems={NAV_ITEMS}
-        topBarContent={<LogoutButton />}
-      >
-        <ErrorBoundary key={location.pathname}>
-          <Routes>
-            <Route path="/chat" element={<Chat />} />
-            <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/workflows" element={<Workflows />} />
-            <Route path="/projects" element={<Projects />} />
-            <Route path="/editor" element={<Editor />} />
-            <Route path="*" element={<Navigate to="/chat" replace />} />
-          </Routes>
-        </ErrorBoundary>
-      </AppShell>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+        {/* Top navigation: one tab per tool. */}
+        <header
+          style={{
+            display: 'flex', alignItems: 'stretch', height: '48px', flexShrink: 0,
+            background: '#13131f', borderBottom: '1px solid #2a2a3a', padding: '0 14px',
+          }}
+        >
+          <span style={{ color: '#8cf', fontWeight: 700, fontSize: 18, alignSelf: 'center', marginRight: 22 }}>aimee</span>
+          <nav style={{ display: 'flex', gap: 2, flex: 1 }}>
+            {NAV_ITEMS.map(it => (
+              <NavLink
+                key={it.route}
+                to={it.route}
+                style={({ isActive }) => ({
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '0 14px',
+                  fontSize: 14, textDecoration: 'none', borderBottom: '2px solid transparent',
+                  color: isActive ? '#8cf' : '#aab', borderBottomColor: isActive ? '#8cf' : 'transparent',
+                  fontWeight: isActive ? 600 : 400,
+                })}
+              >
+                <span aria-hidden>{it.icon}</span> {it.label}
+              </NavLink>
+            ))}
+          </nav>
+          <div style={{ alignSelf: 'center' }}><LogoutButton /></div>
+        </header>
+        {/* Content area: flex:1 + minHeight:0 so pages using height:100% resolve. */}
+        <main style={{ flex: 1, minHeight: 0, overflow: 'auto', background: '#fff' }}>
+          <ErrorBoundary key={location.pathname}>
+            <Routes>
+              <Route path="/chat" element={<Chat />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/workflows" element={<Workflows />} />
+              <Route path="/projects" element={<Projects />} />
+              <Route path="/editor" element={<Editor />} />
+              <Route path="*" element={<Navigate to="/chat" replace />} />
+            </Routes>
+          </ErrorBoundary>
+        </main>
+      </div>
       <Toast />
     </>
   );

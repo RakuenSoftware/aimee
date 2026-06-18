@@ -31,10 +31,12 @@ func (s *server) gitRelay(w http.ResponseWriter, st int, data []byte, err error)
 		Output   string   `json:"output"`
 		Projects []string `json:"projects"`
 		Hosts    []string `json:"hosts"`
+		Root     string   `json:"root"`
 	}
 	_ = json.Unmarshal(data, &up)
 	out, _ := json.Marshal(map[string]any{
-		"ok": true, "name": up.Name, "output": up.Output, "projects": up.Projects, "hosts": up.Hosts,
+		"ok": true, "name": up.Name, "output": up.Output, "projects": up.Projects,
+		"hosts": up.Hosts, "root": up.Root,
 	})
 	w.Write(out)
 }
