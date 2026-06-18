@@ -119,15 +119,17 @@ int kb_handle_ingest(int fd, cJSON *req)
       int n = workspace_discover_projects(ws_j->valuestring, 3, projects, MAX_DISCOVERED_PROJECTS);
       for (int i = 0; i < n; i++)
       {
-         const char *pname = strrchr(projects[i], '/');
-         pname = pname ? pname + 1 : projects[i];
+         char pname[256];
+         char pws[256];
+         workspace_repo_index_keys(projects[i], ws_j->valuestring, pname, sizeof(pname), pws,
+                                   sizeof(pws));
          if (force)
          {
             db2_kb_service_clear_project(pname);
             pgvec_kb_vector_delete_project(pname);
             db2_kb_file_index_delete_project(pname);
          }
-         db2_kb_ingest_queue_enqueue(pname, projects[i], ws_j->valuestring, force);
+         db2_kb_ingest_queue_enqueue(pname, projects[i], pws, force);
          total_queued++;
       }
    }
@@ -139,15 +141,17 @@ int kb_handle_ingest(int fd, cJSON *req)
              workspace_discover_projects(cfg.workspaces[w], 3, projects, MAX_DISCOVERED_PROJECTS);
          for (int i = 0; i < n; i++)
          {
-            const char *pname = strrchr(projects[i], '/');
-            pname = pname ? pname + 1 : projects[i];
+            char pname[256];
+            char pws[256];
+            workspace_repo_index_keys(projects[i], cfg.workspaces[w], pname, sizeof(pname), pws,
+                                      sizeof(pws));
             if (force)
             {
                db2_kb_service_clear_project(pname);
                pgvec_kb_vector_delete_project(pname);
                db2_kb_file_index_delete_project(pname);
             }
-            db2_kb_ingest_queue_enqueue(pname, projects[i], cfg.workspaces[w], force);
+            db2_kb_ingest_queue_enqueue(pname, projects[i], pws, force);
             total_queued++;
          }
       }

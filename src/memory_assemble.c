@@ -170,6 +170,27 @@ static void memory_scope_labels_for_cwd(const char *workspace_hint, char *worksp
    if (!getcwd(cwd, sizeof(cwd)))
       cwd[0] = '\0';
 
+   /* Prefer a path-independent repository identity (canonical remote URL) so
+    * recall matches across clones/machines instead of keying on the local
+    * checkout path. Falls through to the legacy path/basename labels below when
+    * cwd is not inside a resolvable git repo. An explicit workspace_hint still
+    * wins for the workspace label. */
+   if (cwd[0])
+   {
+      char repo_project[MAX_PATH_LEN];
+      char repo_workspace[MAX_PATH_LEN];
+      if (workspace_repo_identity(cwd, repo_project, sizeof(repo_project), repo_workspace,
+                                  sizeof(repo_workspace)) == 0)
+      {
+         if (workspace_out && workspace_len > 0)
+            snprintf(workspace_out, workspace_len, "%s",
+                     (workspace_hint && workspace_hint[0]) ? workspace_hint : repo_workspace);
+         if (project_out && project_len > 0)
+            snprintf(project_out, project_len, "%s", repo_project);
+         return;
+      }
+   }
+
    if (!workspace || !workspace[0])
    {
       workspace = cwd;
