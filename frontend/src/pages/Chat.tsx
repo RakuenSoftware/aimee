@@ -235,6 +235,9 @@ function saveRulesBannerDismissed(dismissed: boolean, root = ''): void {
 function streamToTabMessages(msgs: StreamMsg[]): TabMessage[] {
   return msgs
     .filter(m => m.type === 'user' || m.type === 'assistant' || m.type === 'narration')
+    // Never persist an empty assistant/narration bubble (it reloads as an empty
+    // box); user turns always carry text.
+    .filter(m => m.type === 'user' || m.text.trim() !== '')
     .map(m => ({ role: m.type as 'user' | 'assistant' | 'narration', text: m.text }));
 }
 
@@ -2264,11 +2267,12 @@ export default function Chat() {
     switch (type) {
       case 'turn_start': {
         setWorking(hasPendingChatWork());
-        const aid = nextId();
-        streamRefs.assistantId = aid;
+        // Defer creating the assistant bubble until real text arrives (the
+        // 'text' case creates it lazily). A turn that emits only tool calls,
+        // only thinking, or nothing at all then leaves no empty message box.
+        streamRefs.assistantId = null;
         streamRefs.thinkId = null;
         streamRefs.toolId = null;
-        setStreamMsgs(prev => [...prev, { id: aid, type: 'assistant', text: '' }]);
         break;
       }
       case 'tool_start': {
@@ -2295,6 +2299,7 @@ export default function Chat() {
       }
       case 'thinking': {
         const content = String(data.content ?? '');
+        if (!content) break; // ignore empty thinking deltas
         if (streamRefs.thinkId === null) {
           const tid = nextId();
           streamRefs.thinkId = tid;
@@ -2319,6 +2324,7 @@ export default function Chat() {
       }
       case 'text': {
         const content = String(data.content ?? '');
+        if (!content) break; // ignore empty deltas — don't spawn an empty bubble
         setStreamMsgs(prev => {
           let aid = streamRefs.assistantId;
           if (aid === null) {
