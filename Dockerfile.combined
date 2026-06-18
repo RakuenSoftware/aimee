@@ -153,6 +153,14 @@ ENV AIMEE_KB_HTTP_BIND=1
 ENV AIMEE_DB2_URL=postgresql://aimee:aimee@postgres:5432/aimee_shared
 ENV AIMEE_EMBEDDER_URL=http://embedder:8080
 ENV LLM_ENDPOINT=http://llm:8080/v1
+# Symmetric with LLM_ENDPOINT: the bundled curator LLM (Gemma E4B) also needs a
+# model name. The curator code-extract stage shells out to curator-extract.py ->
+# llm-chat.py, which hard-requires $LLM_MODEL; a non-configurable plugin instance
+# takes its env from this image (not from compose), so without this the extract
+# stage fails on every job and the curator never drains. llama.cpp serves the
+# loaded GGUF regardless of this value; configurable / BYO deploys override it.
+# Kept in sync with compose.combined.yaml's default.
+ENV LLM_MODEL=gemma-3n-e4b
 # Mirror tier (workspace-resource-plane §3): durable bare mirrors + worktrees on
 # a dedicated volume, matching Dockerfile.server.
 ENV AIMEE_WORKSPACES_DIR=/var/lib/aimee-workspaces
