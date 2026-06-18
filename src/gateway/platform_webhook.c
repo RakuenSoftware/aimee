@@ -114,11 +114,22 @@ static int read_http_request(int fd, char *out_buf, size_t out_cap, size_t *body
             }
             sig_out[i] = '\0';
          }
-         /* Read the body if not yet fully received. */
+         /* Read the body if not yet fully received. Content-Length is
+          * attacker-controlled, so the per-read length MUST be clamped to the
+          * remaining buffer capacity — never to (*body_len - have_body), which a
+          * malicious huge Content-Length would make far larger than out_buf,
+          * letting a single read() overflow the heap allocation (one NUL byte is
+          * reserved at out_buf[total]). */
          size_t have_body = total - *body_start;
          while (have_body < *body_len && total + 1 < out_cap)
          {
-            ssize_t m = read(fd, out_buf + total, *body_len - have_body);
+            size_t want = *body_len - have_body;
+            size_t room = out_cap - total - 1;
+            if (want > room)
+               want = room;
+            if (want == 0)
+               break;
+            ssize_t m = read(fd, out_buf + total, want);
             if (m <= 0)
                break;
             total += (size_t)m;
