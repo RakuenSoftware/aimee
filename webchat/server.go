@@ -120,6 +120,16 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/chat", s.requireAuth(s.handleSPA))
 	mux.HandleFunc("/dashboard", s.requireAuth(s.handleSPA))
 	mux.HandleFunc("/workflows", s.requireAuth(s.handleSPA))
+	mux.HandleFunc("/projects", s.requireAuth(s.handleSPA))
+	// The Editor tab is a SPA page that embeds the in-app VSCode in an iframe, so
+	// the nav shell stays visible. The iframe's src is the /vscode proxy below.
+	mux.HandleFunc("/editor", s.requireAuth(s.handleSPA))
+	// In-app VSCode (code-server) reverse-proxy (WP-J): the iframe document and
+	// all its assets/WebSocket traffic go through /vscode -> aimee-server's
+	// per-user editor port. Not an /api path, so requireAuth redirects to /login
+	// on an expired session (correct for the iframe).
+	mux.HandleFunc("/vscode", s.requireAuth(s.handleVSCode))
+	mux.HandleFunc("/vscode/", s.requireAuth(s.handleVSCode))
 
 	// Chat API (session required)
 	mux.HandleFunc("/api/chat/send", s.requireAuth(s.handleChatSend))
