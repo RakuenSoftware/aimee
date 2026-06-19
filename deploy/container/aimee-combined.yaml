@@ -37,7 +37,12 @@ ensemble:
     - mimo-2.5
 
 # --- kb: real semantic embeddings via the persistent embedder service ---
-embedding_command: "python3 /opt/aimee/scripts/embed-remote.py"
+# No embedding_command here on purpose: when it is unset the server embeds
+# in-process against $AIMEE_EMBEDDER_URL (Dockerfile.combined / compose set it to
+# the embedder service), speaking http:// directly -- no fork, no python. Leaving
+# it out of the seed means a config reseed can never revert embeddings to the old
+# forking script. Set it explicitly only to override (e.g. "builtin" for a
+# no-embedder setup, or a custom command).
 
 learning:
   synthesize:

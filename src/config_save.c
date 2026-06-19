@@ -12,6 +12,7 @@
 #include "yaml.h"
 #include <fcntl.h>
 #include <stdarg.h>
+#include <stdlib.h> /* getenv — AIMEE_EMBEDDER_URL default */
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -1128,6 +1129,15 @@ const char *config_embedding_command(const config_t *cfg, const char *requested)
       return requested;
    if (cfg && cfg->embedding_command[0])
       return cfg->embedding_command;
+   /* No explicit command: if the deployment points us at an embedder service,
+    * embed against it in-process (memory_embed_text speaks http:// directly, no
+    * fork, no python). This makes a configured embedder the default with zero
+    * config and survives a config reseed -- the combined image always exports
+    * AIMEE_EMBEDDER_URL. Only when nothing is configured do we fall back to the
+    * 384-dim builtin (correct for an unconfigured shim/test setup). */
+   const char *env = getenv("AIMEE_EMBEDDER_URL");
+   if (env && env[0])
+      return env;
    return "builtin";
 }
 
