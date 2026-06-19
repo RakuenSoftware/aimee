@@ -1736,6 +1736,9 @@ static __thread int s_qembed_misses = 0;
  * time spent in actual embed spawns (cache misses) and how many ran. */
 static __thread long long s_qembed_ms = 0;
 static __thread int s_qembed_spawns = 0;
+/* Cross-encoder rerank spawn time + count, same per-recall probe. */
+static __thread long long s_rerank_ms = 0;
+static __thread int s_rerank_calls = 0;
 
 /* Begin a fresh per-recall memo window. Call at every top-level recall entry
  * point before any lane embeds the query. */

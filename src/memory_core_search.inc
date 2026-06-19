@@ -2571,7 +2571,10 @@ static int memory_cross_encoder_scores(const char *command, const char *query,
 
    char *buf = NULL;
    size_t buf_len = 0;
+   long long _rr_t0 = util_now_ms();
    int rc = platform_exec_pipe(command, input_json, strlen(input_json), &buf, &buf_len);
+   s_rerank_ms += util_now_ms() - _rr_t0;
+   s_rerank_calls++;
    free(input_json);
    if (rc != 0)
    {
@@ -3949,7 +3952,18 @@ void memory_query_rewrite(const char *query, const config_t *cfg, memory_query_r
 
 int memory_find_facts(const char *query, int limit, memory_t *out, int max)
 {
+   /* Stage timing: separate the embed-spawn and rerank-spawn costs (the suspected
+    * dominant terms in live find_facts latency) from the rest, one line per call.
+    * Counters live in memory_core_helpers.inc (same TU). */
+   long long _ff_t0 = util_now_ms();
+   s_qembed_ms = 0;
+   s_qembed_spawns = 0;
+   s_rerank_ms = 0;
+   s_rerank_calls = 0;
    int n = memory_find_facts_scoped(query, NULL, NULL, limit, out, max);
+   aimee_log(LOG_INFO, "memory.find_facts.timing",
+             "total=%lldms embed=%lldms/%d rerank=%lldms/%d results=%d", util_now_ms() - _ff_t0,
+             s_qembed_ms, s_qembed_spawns, s_rerank_ms, s_rerank_calls, n);
    /* Dogfood record at the non-scoped entry point so MCP/agent callers land
     * here; scoped callers (CLI cmd_memory_find_facts) log themselves. */
    if (n > 0 && out)
