@@ -47,17 +47,6 @@ interface PersonaInfo {
   description?: string;
 }
 
-interface ProjectInfo {
-  name: string;
-  root: string;
-  scanned_at?: string;
-  current?: boolean;
-}
-
-interface ChatProjectsResponse {
-  current_root?: string;
-  projects?: ProjectInfo[];
-}
 
 interface WorkflowSessionInfo {
   id: number;
@@ -142,10 +131,6 @@ function saveActiveChannel(name: string | null): void {
     if (name) localStorage.setItem(CHANNEL_KEY, name);
     else localStorage.removeItem(CHANNEL_KEY);
   } catch { /* ignore */ }
-}
-
-function loadProjectRoot(): string {
-  try { return localStorage.getItem(PROJECT_ROOT_KEY) ?? ''; } catch { return ''; }
 }
 
 function saveProjectRoot(root: string): void {
@@ -1138,11 +1123,6 @@ function applyMention(text: string, mention: MentionQuery, name: string): { next
   return { nextText, nextCursor };
 }
 
-function projectDisplayName(project: ProjectInfo): string {
-  if (project.current) return `${project.name || 'Current'} (current)`;
-  if (project.name) return project.name;
-  return project.root.split(/[\\/]/).filter(Boolean).pop() || project.root;
-}
 
 function ChannelView({ channelName, messages, agents, onSend }: ChannelViewProps) {
   const [text, setText] = useState('');
@@ -1361,7 +1341,9 @@ export default function Chat() {
   const [sessionUsage, setSessionUsage] = useState<{ in: number; out: number; cost: number; kind: string }>({ in: 0, out: 0, cost: 0, kind: 'realized' });
   const [allTimeMetrics, setAllTimeMetrics] = useState<MetricRow[]>([]);
   const [promptTier, setPromptTier] = useState<'MINIMAL' | 'STANDARD' | 'EXTENDED'>('STANDARD');
-  const [projectRoot, setProjectRoot] = useState(loadProjectRoot);
+  // Driven solely by the active session's project (the single ProjectPicker);
+  // never seeded from a stale global value, so we can't send an out-of-workspace cwd.
+  const [projectRoot, setProjectRoot] = useState('');
   // The top session tabs are the source of truth. Each conversation tab mirrors
   // a session 1:1 (by sessionId), so every session keeps its own history; the
   // active session also drives the project (cwd).
@@ -1403,7 +1385,6 @@ export default function Chat() {
     setProjectRoot(sessionProject);
     saveProjectRoot(sessionProject);
   }, [sessionProject]);
-  const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [availableSkills, setAvailableSkills] = useState<string[]>([]);
   const [activeSkill, setActiveSkill] = useState<string>('');
   const [availablePersonas, setAvailablePersonas] = useState<PersonaInfo[]>([]);
@@ -1634,24 +1615,11 @@ export default function Chat() {
       .catch(() => {});
   }, [projectRoot]);
 
-  useEffect(() => {
-    fetch('/api/chat/projects')
-      .then(r => r.json())
-      .then((d: ChatProjectsResponse) => {
-        const nextProjects = d.projects ?? [];
-        setProjects(nextProjects);
-        const saved = loadProjectRoot();
-        const savedExists = saved && nextProjects.some(project => project.root === saved);
-        const currentExists = projectRoot && nextProjects.some(project => project.root === projectRoot);
-        const current = d.current_root ?? nextProjects[0]?.root ?? '';
-        if (!projectRoot || !currentExists) {
-          const nextRoot = savedExists ? saved : current;
-          setProjectRoot(nextRoot);
-          saveProjectRoot(nextRoot);
-        }
-      })
-      .catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  /* The chat cwd is driven SOLELY by the active session's project (set via the
+   * single ProjectPicker). It is never defaulted to the server's own cwd — that
+   * is outside the webuser's workspace and the server rejects it ("project must
+   * be within your workspace"). An unset project sends an empty cwd, which the
+   * webchat resolves to the user's workspace root. */
 
   /* Load initial prompt tier from server */
   useEffect(() => {
@@ -2011,17 +1979,6 @@ export default function Chat() {
     });
   }
 
-  function changeProjectRoot(root: string) {
-    setProjectRoot(root);
-    saveProjectRoot(root);
-    setTabs(prev => {
-      const next = [...prev];
-      if (next[activeIdx]) {
-        next[activeIdx] = { ...next[activeIdx], sid: '', aimeeSid: newAimeeSessionId() };
-      }
-      return next;
-    });
-  }
 
   /* Clear the current conversation: drop the visible transcript and mint a fresh
    * provider session (empty claude session id + new aimee session id) so the next
@@ -2547,10 +2504,6 @@ export default function Chat() {
     e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
   }
 
-  const projectOptions = projectRoot && !projects.some(project => project.root === projectRoot)
-    ? [{ name: projectRoot, root: projectRoot, current: true }, ...projects]
-    : projects;
-
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', height: '100%',
@@ -2745,28 +2698,9 @@ export default function Chat() {
         borderTop: `1px solid ${tokens.borderLight}`,
         display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0,
       }}>
-        <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
-          Project:
-        </span>
-        <select
-          value={projectRoot}
-          onChange={e => changeProjectRoot(e.target.value)}
-          title={projectRoot || 'Project root'}
-          style={{
-            fontSize: '11px', fontFamily: 'system-ui', maxWidth: '240px',
-            background: tokens.surface, color: tokens.textPale,
-            border: `1px solid ${tokens.borderLight}`, borderRadius: '10px',
-            cursor: 'pointer', padding: '2px 6px', outline: 'none',
-          }}
-        >
-          {(!projectRoot || projectOptions.length === 0) && <option value="">Server cwd</option>}
-          {projectOptions.map(project => (
-            <option key={project.root} value={project.root}>
-              {projectDisplayName(project)}
-            </option>
-          ))}
-        </select>
-        <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
+        {/* The project is set in ONE place — the session ProjectPicker at the top
+            of the chat (bound to the active session). No per-prompt project
+            selector here. */}
         <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
           Prompt:
         </span>
