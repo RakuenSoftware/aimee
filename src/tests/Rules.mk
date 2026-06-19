@@ -205,6 +205,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-delegate-ensemble \
                $(TESTPREFIX)/unit-test-rel-types \
                $(TESTPREFIX)/unit-test-memory-fact-gate \
+               $(TESTPREFIX)/unit-test-memory-embed-dim-guard \
                $(TESTPREFIX)/unit-test-rel-types-store \
                $(TESTPREFIX)/unit-test-entity-registry \
                $(TESTPREFIX)/unit-test-fact-lifecycle \
@@ -547,6 +548,14 @@ $(TESTPREFIX)/unit-test-curator-notify: $(OBJDIR)/tests/test_curator_notify.o $(
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
 
 $(TESTPREFIX)/unit-test-pgvec: $(OBJDIR)/tests/test_pgvec.o \
+                    $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o \
+                    $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o \
+                    $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
+                    $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# memory/KB vector upsert dim guard (rejects builtin-384 vs halfvec(1024)/(2560)).
+$(TESTPREFIX)/unit-test-memory-embed-dim-guard: $(OBJDIR)/tests/test_memory_embed_dim_guard.o \
                     $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o \
                     $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o \
                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \

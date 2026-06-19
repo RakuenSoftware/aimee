@@ -1,4 +1,5 @@
 #include "aimee.h"
+#include "config.h" /* config_load — reembed default embedder */
 #include "kb_background.h"
 #include "kb_service.h"
 #include "kb_service_code_embed.h"
@@ -619,8 +620,17 @@ static int kb_handle_memory_reembed_start(int fd, cJSON *req)
    if (!cJSON_IsString(ver_j) || !ver_j->valuestring[0])
       return kb_send_error(fd, "missing version");
    const char *version = ver_j->valuestring;
-   const char *embed_cmd =
-       (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : "builtin";
+   /* Default to the server's CONFIGURED embedder, never "builtin": builtin emits
+    * 384-dim vectors, which can never insert into a real halfvec(1024)/(2560)
+    * column (Postgres rejects "expected N dimensions, not 384") and silently
+    * leaves memory_embeddings empty. Only fall back to builtin if no embedder is
+    * configured at all (e.g. a 384-dim shim/test setup). */
+   config_t reembed_cfg;
+   config_load(&reembed_cfg);
+   const char *embed_cmd = (cJSON_IsString(embed_j) && embed_j->valuestring[0])
+                               ? embed_j->valuestring
+                               : (reembed_cfg.embedding_command[0] ? reembed_cfg.embedding_command
+                                                                   : "builtin");
 
    char ts_now[32];
    now_utc(ts_now, sizeof(ts_now));

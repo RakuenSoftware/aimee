@@ -2,6 +2,7 @@
 
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
+#include "../db2/lifecycle.h" /* db2_embedding_dim */
 #include "cJSON.h"
 #include "log.h"
 
@@ -263,6 +264,20 @@ int pgvec_memory_upsert(int64_t point_id, const float *vec, int dim, const char 
 {
    if (!vec || dim <= 0)
       return 0;
+   /* Dimension guard: the embedding column is halfvec(N) where N is the active
+    * configured dim (db2_embedding_dim). A vector of a different dim (e.g. the
+    * 384-dim builtin fallback against a 1024/2560 column) is rejected by
+    * Postgres with "expected N dimensions, not M" — but that error was being
+    * counted as a successful embed, silently leaving memory_embeddings empty.
+    * Fail loudly here instead of shipping a mismatched vector. */
+   int expect = db2_embedding_dim();
+   if (expect > 0 && dim != expect)
+   {
+      aimee_log(LOG_WARN, "pgvec",
+                "memory embedding dim mismatch: got %d, expected %d (point_id=%lld); refusing upsert",
+                dim, expect, (long long)point_id);
+      return -1;
+   }
    void *pg = db2_conn();
    if (!pg)
       return -1;
@@ -355,6 +370,16 @@ int pgvec_kb_upsert(int64_t point_id, const float *vec, int dim, const char *pay
 {
    if (!vec || dim <= 0)
       return 0;
+   /* Same dim guard as pgvec_memory_upsert: never ship a vector whose dim does
+    * not match the configured halfvec(N) column. */
+   int expect = db2_embedding_dim();
+   if (expect > 0 && dim != expect)
+   {
+      aimee_log(LOG_WARN, "pgvec",
+                "kb embedding dim mismatch: got %d, expected %d (point_id=%lld); refusing upsert", dim,
+                expect, (long long)point_id);
+      return -1;
+   }
    void *pg = db2_conn();
    if (!pg)
       return -1;
