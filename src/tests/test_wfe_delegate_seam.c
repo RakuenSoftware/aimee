@@ -1,0 +1,151 @@
+/* test_wfe_delegate_seam.c -- the delegate dispatch seam (author/implement/
+ * document) and the forge `open` seam (pr.open), exercised through the engine.
+ *
+ * Phase A of full-autonomous-development: producing blocks dispatch real work
+ * through registered hooks; with no provider they fail closed; tests inject
+ * mocks to assert the wiring. */
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+
+#include "db1.h"
+#include "wfe_blocks.h"
+#include "wfe_def.h"
+#include "wfe_engine.h"
+#include "wfe_iface.h"
+
+/* ---- mock delegate provider ---- */
+static int g_deleg_calls;
+static int g_deleg_rc; /* 0 success, -1 failure */
+static char g_deleg_last_role[32];
+static int mock_deleg_run(const char *workdir, const char *role, const char *prompt,
+                          const char *artifact_path, char out_commit_sha[64], char *err, size_t n)
+{
+   (void)workdir;
+   (void)prompt;
+   (void)artifact_path;
+   (void)err;
+   (void)n;
+   g_deleg_calls++;
+   snprintf(g_deleg_last_role, sizeof g_deleg_last_role, "%s", role ? role : "");
+   if (out_commit_sha)
+      snprintf(out_commit_sha, 64, "deadbeef");
+   return g_deleg_rc;
+}
+static const wfe_delegate_provider_t MOCK_DELEG = {mock_deleg_run};
+
+/* ---- mock forge with open ---- */
+static int g_open_calls;
+static int g_open_rc; /* 0 success, -1 failure */
+static char g_open_branch[64];
+static wfe_ci_status_t f_ci(const char *r, const char *p)
+{
+   (void)r;
+   (void)p;
+   return WFE_CI_SUCCESS;
+}
+static int f_mergeable(const char *r, const char *p)
+{
+   (void)r;
+   (void)p;
+   return 1;
+}
+static int f_is_merged(const char *r, const char *p)
+{
+   (void)r;
+   (void)p;
+   return 0;
+}
+static wfe_merge_result_t f_merge(const char *r, const char *p)
+{
+   (void)r;
+   (void)p;
+   return WFE_MERGE_OK;
+}
+static int f_open(const char *repo, const char *branch, const char *title, const char *body,
+                  char out_pr_ref[128])
+{
+   (void)repo;
+   (void)title;
+   (void)body;
+   g_open_calls++;
+   snprintf(g_open_branch, sizeof g_open_branch, "%s", branch ? branch : "");
+   if (out_pr_ref)
+      snprintf(out_pr_ref, 128, "PR-7");
+   return g_open_rc;
+}
+static const wfe_forge_t MOCK_FORGE = {f_ci, f_mergeable, f_is_merged, f_merge, f_open};
+
+/* author.proposal -> pr.open (terminal). No git needed (author hashes its
+ * artifact; pr.open uses the forge `open` seam). */
+static const char *WF = "name: ds\nstart: au\nnodes:\n"
+                        "  - id: au\n    block: author.proposal\n    next: pr\n"
+                        "  - id: pr\n    block: pr.open\n    in:\n      src: au.out\n";
+
+static int run_fresh(const char *suffix)
+{
+   char id[80] = "", err[256] = "";
+   if (wfe_work_item_create("ds", "r", suffix, "interactive", id, err, sizeof err) != 0)
+      return -99;
+   if (wfe_engine_run(id, err, sizeof err) != 0)
+      return -98;
+   return 0;
+}
+
+int main(void)
+{
+   printf("wfe-delegate-seam: ");
+   char home[] = "/tmp/wfe_ds_XXXXXX";
+   assert(mkdtemp(home));
+   char wf[160];
+   snprintf(wf, sizeof wf, "%s/workflows", home);
+   mkdir(wf, 0755);
+   char p[256];
+   snprintf(p, sizeof p, "%s/workflows/ds.yaml", home);
+   FILE *f = fopen(p, "wb");
+   assert(f);
+   fputs(WF, f);
+   fclose(f);
+   setenv("AIMEE_HOME", home, 1);
+   assert(db1_init(":memory:") == 0);
+
+   wfe_reset_block_executors();
+   wfe_register_default_executors();
+
+   /* A: provider + forge.open installed -> both seams fire. */
+   wfe_set_delegate_provider(&MOCK_DELEG);
+   wfe_set_forge_provider(&MOCK_FORGE);
+   g_deleg_calls = 0;
+   g_open_calls = 0;
+   g_deleg_rc = 0;
+   g_open_rc = 0;
+   assert(run_fresh("a") == 0);
+   assert(g_deleg_calls == 1);                          /* author dispatched a delegate */
+   assert(strcmp(g_deleg_last_role, "architect") == 0); /* author uses architect */
+   assert(g_open_calls == 1);                           /* pr.open used the forge open seam */
+
+   /* B: no delegate provider installed -> author still advances (fail-open to the
+    *    legacy behavior); pr.open still uses the forge. */
+   wfe_set_delegate_provider(NULL);
+   g_deleg_calls = 0;
+   g_open_calls = 0;
+   assert(run_fresh("b") == 0);
+   assert(g_deleg_calls == 0); /* not called */
+   assert(g_open_calls == 1);  /* forge open still fired */
+
+   /* C: forge without an `open` method -> pr.open preserves prior advance (no
+    *    crash), and the delegate seam still fires for author. */
+   wfe_set_delegate_provider(&MOCK_DELEG);
+   static const wfe_forge_t NO_OPEN = {f_ci, f_mergeable, f_is_merged, f_merge, NULL};
+   wfe_set_forge_provider(&NO_OPEN);
+   g_deleg_calls = 0;
+   g_open_calls = 0;
+   assert(run_fresh("c") == 0);
+   assert(g_deleg_calls == 1);
+   assert(g_open_calls == 0); /* open is NULL -> not called, no crash */
+
+   printf("ok\n");
+   return 0;
+}

@@ -41,7 +41,10 @@ static wfe_merge_result_t m_merge(const char *r, const char *p)
    (void)p;
    return g_merge;
 }
-static const wfe_forge_t MOCK = {m_ci, m_mergeable, m_is_merged, m_merge};
+/* open is unused by the safety blocks (ci/mergeable/merge); NULL it explicitly so
+ * the positional initializer covers every wfe_forge_t field (-Werror=missing-
+ * field-initializers). */
+static const wfe_forge_t MOCK = {m_ci, m_mergeable, m_is_merged, m_merge, NULL};
 
 /* pp -> pr -> check.mergeable -> gate.ci -> merge; gates loop back to pp. */
 static const char *WF = "name: sf\nstart: pp\nnodes:\n"

@@ -42,9 +42,36 @@ typedef struct
    int (*mergeable)(const char *repo, const char *pr_ref); /* 1 yes, 0 conflict, -1 unknown */
    int (*is_merged)(const char *repo, const char *pr_ref); /* 1 merged, 0 open, -1 unknown */
    wfe_merge_result_t (*merge)(const char *repo, const char *pr_ref);
+   /* Push `branch` and open a PR; write its forge ref (number/url) into out_pr_ref.
+    * Returns 0 on success, -1 on failure. May be NULL on a provider that predates
+    * this field (the default live provider and test mocks) -> pr.open fails closed
+    * and the gate that follows re-loops. */
+   int (*open)(const char *repo, const char *branch, const char *title, const char *body,
+               char out_pr_ref[128]);
 } wfe_forge_t;
 
 /* Install a forge provider (NULL restores the default live/gh provider). */
 void wfe_set_forge_provider(const wfe_forge_t *p);
+
+/* ---- Delegate seam for the producing blocks (author/implement/document).
+ * The wfe library must not depend on server/ delegate internals
+ * (module-boundary-check), so blocks dispatch real delegate work through this
+ * registered hook. The default provider is NULL -> producing blocks fail closed
+ * (the gate that follows re-loops), exactly the pre-seam integration-gated
+ * behavior. The server registers a live provider that runs delegates (decompose
+ * -> fan out -> verify -> re-delegate is owned by the live provider; see the
+ * full-autonomous-development plan). Tests inject a mock. ---- */
+typedef struct
+{
+   /* Run the block's delegate work in `workdir` as `role` with `prompt`. If the
+    * block produces a file artifact, `artifact_path` is its path (else NULL). On
+    * success returns 0 and, if a commit was made, fills out_commit_sha (else "").
+    * Non-zero => the caller emits failed/looped, never a crash. */
+   int (*run)(const char *workdir, const char *role, const char *prompt, const char *artifact_path,
+              char out_commit_sha[64], char *err, size_t errlen);
+} wfe_delegate_provider_t;
+
+/* Install a delegate provider (NULL restores the default fail-closed provider). */
+void wfe_set_delegate_provider(const wfe_delegate_provider_t *p);
 
 #endif /* DEC_WFE_BLOCKS_H */

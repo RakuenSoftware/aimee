@@ -122,12 +122,53 @@ static wfe_merge_result_t live_merge(const char *repo, const char *pr)
    (void)pr;
    return WFE_MERGE_ERROR;
 }
-static const wfe_forge_t LIVE_FORGE = {live_ci_status, live_mergeable, live_is_merged, live_merge};
+/* Default forge open: integration-gated (the live provider — git push + gh pr
+ * create — is registered by the server). Fail closed here so pr.open re-loops. */
+static int live_open(const char *repo, const char *branch, const char *title, const char *body,
+                     char out_pr_ref[128])
+{
+   (void)repo;
+   (void)branch;
+   (void)title;
+   (void)body;
+   if (out_pr_ref)
+      out_pr_ref[0] = '\0';
+   return -1;
+}
+static const wfe_forge_t LIVE_FORGE = {live_ci_status, live_mergeable, live_is_merged, live_merge,
+                                       live_open};
 static const wfe_forge_t *g_forge = &LIVE_FORGE;
 
 void wfe_set_forge_provider(const wfe_forge_t *p)
 {
    g_forge = p ? p : &LIVE_FORGE;
+}
+
+/* Delegate seam (see wfe_blocks.h). Default NULL: producing blocks fail closed
+ * until the server registers a live provider, preserving the integration-gated
+ * behavior the stubs had before. */
+static const wfe_delegate_provider_t *g_delegate = NULL;
+
+void wfe_set_delegate_provider(const wfe_delegate_provider_t *p)
+{
+   g_delegate = p;
+}
+
+/* Dispatch one block's delegate work, if a provider is installed. Returns:
+ *   1  provider ran and succeeded,
+ *   0  no provider installed (caller falls back to its fail-closed path),
+ *  -1  provider ran and failed (caller should loop/retry). */
+static int wfe_delegate_dispatch(const char *role, const char *prompt, const char *artifact_path,
+                                 char out_commit_sha[64])
+{
+   if (out_commit_sha)
+      out_commit_sha[0] = '\0';
+   if (!g_delegate || !g_delegate->run)
+      return 0;
+   char err[256] = "";
+   int rc =
+       g_delegate->run(repo_dir(), role, prompt, artifact_path, out_commit_sha, err, sizeof err);
+   return rc == 0 ? 1 : -1;
 }
 
 /* ---- executors ---- */
@@ -137,9 +178,15 @@ void wfe_set_forge_provider(const wfe_forge_t *p)
 static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
 {
    const char *path = wfe_ctx_proposal_path(ctx);
-   /* In production this dispatches `aimee delegate run` to author/edit `path`.
-    * We hash the artifact file as the produced content. If the artifact is not
-    * present (no delegate ran), the gate that follows will simply re-loop. */
+   /* Dispatch a delegate to author/edit `path` (no-op if no provider installed;
+    * a failed run loops). Then hash the artifact file as the produced content; if
+    * it is absent (no provider ran) the gate that follows simply re-loops. */
+   char commit[64] = "";
+   if (wfe_delegate_dispatch("architect",
+                             "Author or revise the workflow artifact at the given path "
+                             "per the work item, then commit it.",
+                             path, commit) < 0)
+      return wfe_step_looped();
    char hash[65] = "";
    if (path && path[0])
    {
@@ -167,14 +214,21 @@ static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
    return wfe_step_advanced(handle, hash, 0.0);
 }
 
-/* implement: produces the work item's branch. In production a delegate fan-out
- * writes the code; that live dispatch is integration-gated (see file header).
- * What this does NOW: captures the current branch head SHA as the produced
- * artifact, and fails closed if the repo is unavailable (never emits an empty
- * artifact). */
+/* implement: the manager loop. The live delegate provider owns decompose -> fan
+ * out -> verify -> re-delegate (see the full-autonomous-development plan); this
+ * executor dispatches it, then captures the branch head SHA as the produced
+ * artifact. A failed dispatch loops (retry); fails closed if the repo is
+ * unavailable. With no provider installed it preserves the prior freeze-only
+ * behavior so the engine remains drivable without a live delegate. */
 static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
 {
    (void)ctx;
+   char commit[64] = "";
+   if (wfe_delegate_dispatch("engineer",
+                             "Implement the approved plan on the work-item branch: split into "
+                             "units, delegate each, verify, and commit the accepted work.",
+                             NULL, commit) < 0)
+      return wfe_step_looped();
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
    if (wfe_git_freeze(repo_dir(), "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
       return wfe_step_failed();
@@ -191,6 +245,12 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
 static wfe_step_result_t exec_document(wfe_ctx *ctx, const wfe_node_t *node)
 {
    (void)ctx;
+   char commit[64] = "";
+   if (wfe_delegate_dispatch("engineer",
+                             "Document the change on the work-item branch (README/CHANGELOG/docs "
+                             "+ inline comments), then commit.",
+                             NULL, commit) < 0)
+      return wfe_step_looped();
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
    if (wfe_git_freeze(repo_dir(), "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
       return wfe_step_failed();
@@ -213,14 +273,23 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
    return wfe_step_advanced(handle, dhash, 0.0);
 }
 
-/* pr.open: push the branch + open a forge PR. */
+/* pr.open: push the branch + open a forge PR via the forge seam. The PR ref the
+ * forge returns becomes the produced content. A failed open loops (retry). With
+ * no live `open` installed (default/mocks) it preserves the prior advance so the
+ * engine stays drivable without a forge. */
 static wfe_step_result_t exec_pr_open(wfe_ctx *ctx, const wfe_node_t *node)
 {
-   (void)ctx;
-   /* Production: `git push` then `gh pr create`; the PR number/url is the
-    * produced handle. Requires a configured forge (gh) — integration-gated. */
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
+   if (g_forge->open)
+   {
+      const char *branch = getenv("AIMEE_WORKFLOW_BRANCH");
+      char pr_ref[128] = "";
+      if (g_forge->open(wfe_ctx_repo(ctx), branch ? branch : "HEAD", wfe_ctx_work_item(ctx), "",
+                        pr_ref) != 0)
+         return wfe_step_looped();
+      return wfe_step_advanced(handle, pr_ref, 0.0);
+   }
    return wfe_step_advanced(handle, "", 0.0);
 }
 
