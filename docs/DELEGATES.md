@@ -1,7 +1,7 @@
 # Delegate Agents
 
 > **Delegates ship configured.** A default roster (local + subscription-backed
-> tier-0 agents) and the roundtable panel come on, so
+> tier-0 agents) and the roundtable panel ship enabled, so
 > `aimee delegate …` and `aimee delegate roundtable …` work on a fresh install
 > with nothing to set up. This page is for adding your own providers, changing
 > the panel, or understanding the routing.
@@ -331,7 +331,7 @@ During a long coding session, use a `summarize` delegate to fold older context i
 ## Roundtable and ensemble (MoA)
 
 Two commands run a panel of models instead of one delegate and synthesize a
-single answer. Both ship configured, the panel and aggregator come on by
+single answer. Both ship configured; the panel and aggregator are on by
 default.
 
 ```bash
