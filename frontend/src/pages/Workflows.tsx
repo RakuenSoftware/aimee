@@ -320,6 +320,10 @@ export default function Workflows() {
   const [personas, setPersonas] = useState<PersonaInfo[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [managePersonas, setManagePersonas] = useState(false);
+  // Autonomous-development intake (submit a proposal -> a run on the chosen workflow).
+  const [proposalMd, setProposalMd] = useState("");
+  const [submitMsg, setSubmitMsg] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   // This tab's selected project (per-tab project space). Held so the workflow
   // context can scope to it; execution-in-project flows through a chat session's
   // cwd today, so this primarily persists the selection + offers clone here.
@@ -334,6 +338,36 @@ export default function Workflows() {
       .then((d) => setItems(d.items || []))
       .catch(() => {});
   }, []);
+
+  // Submit a proposal for autonomous execution on the open workflow (default
+  // "build"). The run proceeds server-side; refresh the run list to show it.
+  const submitProposal = useCallback(async () => {
+    const md = proposalMd.trim();
+    if (!md) {
+      setSubmitMsg("Proposal is empty.");
+      return;
+    }
+    setSubmitting(true);
+    setSubmitMsg("");
+    try {
+      const wf = graph?.name || "build";
+      const { status, data } = await postJSON<{ work_item_id?: string; error?: string }>(
+        "/api/dev/submit",
+        { proposal_md: md, workflow: wf },
+      );
+      if (status >= 200 && status < 300 && data.work_item_id) {
+        setSubmitMsg(`Submitted ${data.work_item_id} on "${wf}".`);
+        setProposalMd("");
+        refreshLists();
+      } else {
+        setSubmitMsg(data.error || `submit failed (HTTP ${status})`);
+      }
+    } catch {
+      setSubmitMsg("submit failed");
+    } finally {
+      setSubmitting(false);
+    }
+  }, [proposalMd, graph, refreshLists]);
 
   // The persona list feeds both the per-step persona pickers and the manager;
   // refreshed after any persona create/edit/delete.
@@ -610,6 +644,23 @@ export default function Workflows() {
               />
             </div>
           ))}
+        </Panel>
+        <Panel title="Submit proposal">
+          <textarea
+            value={proposalMd}
+            onChange={(e) => setProposalMd(e.target.value)}
+            placeholder="Describe the change (Markdown). aimee runs the workflow end-to-end and parks at human gates."
+            rows={4}
+            style={{ width: "100%", boxSizing: "border-box", fontFamily: "inherit", fontSize: 12 }}
+          />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+            <button onClick={() => void submitProposal()} disabled={submitting} style={btn}>
+              {submitting ? "Submitting…" : `Run on "${graph?.name || "build"}"`}
+            </button>
+            {submitMsg && (
+              <span style={{ fontSize: 11, color: "#667" }}>{submitMsg}</span>
+            )}
+          </div>
         </Panel>
         <Panel title="Runs" count={items.length}>
           {items.map((it) => (
