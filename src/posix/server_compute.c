@@ -171,14 +171,6 @@ static void ring_publish_event_locked(compute_ctx_t *cctx, const char *event, co
    }
 }
 
-/* Flush any buffered text to the ring (used at turn teardown). Takes the lock. */
-static void stream_flush_text(compute_ctx_t *cctx)
-{
-   pthread_mutex_lock(cctx->write_mutex);
-   ring_flush_text_locked(cctx);
-   pthread_mutex_unlock(cctx->write_mutex);
-}
-
 /* Send a streaming event as newline-delimited JSON.
  *
  * The presence-event ring is the UNCONDITIONAL sink (so a turn survives a

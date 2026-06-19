@@ -82,7 +82,6 @@ server-owned lifecycle:
 ## Testing
 
 `test_turn_registry` covers publish/collision/cancel/authz/cancel-all/reaped.
-⚠️ **Not built locally** — this workspace has no C toolchain; CI compiles and
-runs the suite.
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+Built and run locally on integration into current `testing`: `make server`
+links clean; `unit-test-turn-registry` and `unit-test-webchat-claude-sessions`
+pass; frontend `tsc` clean.
