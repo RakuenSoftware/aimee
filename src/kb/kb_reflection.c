@@ -20,6 +20,7 @@
 #include "cJSON.h"
 #include "config.h"
 #include "db2/artifacts.h"
+#include "db2/db2.h" /* db2_lease_release_idle */
 #include "kb_features.h"
 #include "kb_mdl.h"
 #include "kb_service.h"
@@ -269,6 +270,13 @@ static void *reflection_thread_main(void *arg)
 
    while (!ctx->stop)
    {
+      /* Return any pool connection a prior reflection pass acquired lazily
+       * (run_reflection_pass uses db2_conn() at lease depth 0, not an explicit
+       * begin/end scope) before idling, so this long-lived thread does not pin
+       * one pool member for its whole lifetime — the stuck-lease reaper flags it
+       * and it permanently shrinks the bounded pool. Matches the curator drain
+       * (kb_curator_drain.c) and the maintenance timer (kb_service_workers.c). */
+      db2_lease_release_idle();
       sleep(1);
       if (ctx->stop)
          break;
