@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { Panel, Badge, Spinner } from "@rakuensoftware/smoothgui";
 import ProjectPicker from "../components/ProjectPicker";
 import type { ProjectSelection } from "../components/ProjectPicker";
+import { useSessions } from "../SessionContext";
 
 /* ---- API types (mirror /v1/workflow/* envelopes) ---- */
 
@@ -322,7 +323,7 @@ export default function Workflows() {
   // This tab's selected project (per-tab project space). Held so the workflow
   // context can scope to it; execution-in-project flows through a chat session's
   // cwd today, so this primarily persists the selection + offers clone here.
-  const [, setWfProject] = useState<ProjectSelection | null>(null);
+  const { active: wfSession, patchSession: wfPatch } = useSessions();
   const drag = useRef<{ id: string; dx: number; dy: number } | null>(null);
 
   const refreshLists = useCallback(() => {
@@ -541,7 +542,14 @@ export default function Workflows() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <ProjectPicker storageKey="aimee_workflows_project" onChange={setWfProject} />
+      <ProjectPicker
+        key={wfSession?.id}
+        storageKey={`aimee_session_project_${wfSession?.id ?? ""}`}
+        onChange={(sel: ProjectSelection | null) => {
+          const r = sel ? `${sel.root}/${sel.project}` : "";
+          if (wfSession) wfPatch(wfSession.id, { projectRoot: r, projectName: sel?.project ?? "" });
+        }}
+      />
       <div
         style={{
           display: "flex",

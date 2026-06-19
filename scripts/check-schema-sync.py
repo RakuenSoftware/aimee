@@ -131,6 +131,8 @@ DB1_ONLY_TABLES = {
     "lifecycle_work_item",
     "lifecycle_event",
     "lifecycle_stage_attempt",
+    # webchat tab -> Claude --resume id binding (per-user, DB1-owned)
+    "webchat_claude_sessions",
 }
 
 # Sole DB1-owned lexical index. Lives only in db1/schema.sql.

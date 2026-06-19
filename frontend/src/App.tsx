@@ -1,4 +1,4 @@
-import { Component, useEffect, useState } from 'react';
+import { Component, useEffect, useRef, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { Routes, Route, Navigate, NavLink, useLocation } from 'react-router-dom';
 import { Toast } from '@rakuensoftware/smoothgui';
@@ -7,6 +7,8 @@ import Dashboard from './pages/Dashboard';
 import Workflows from './pages/Workflows';
 import Projects from './pages/Projects';
 import Editor from './pages/Editor';
+import { SessionProvider, useSessions } from './SessionContext';
+import SettingsPanel from './components/SettingsPanel';
 
 // A render error in any page used to throw past the root and unmount the whole
 // app, leaving a blank screen (the AppShell, nav, and other pages vanished too).
@@ -63,6 +65,68 @@ const NAV_ITEMS: Tab[] = [
   { label: 'Projects', icon: '📁', route: '/projects' },
   { label: 'Editor', icon: '🖥️', route: '/editor' },
 ];
+
+/* Top bar: one tab per session. A session bundles a chat + the project it runs
+ * in; every tool operates on the active session's project. */
+function SessionTabBar() {
+  const { sessions, activeId, addSession, closeSession, selectSession, renameSession } = useSessions();
+  const [editing, setEditing] = useState<string>('');
+  const editRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => { if (editing) editRef.current?.focus(); }, [editing]);
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, overflowX: 'auto' }}>
+      {sessions.map(s => {
+        const isActive = s.id === activeId;
+        return (
+          <div
+            key={s.id}
+            onClick={() => selectSession(s.id)}
+            onDoubleClick={() => setEditing(s.id)}
+            title={s.projectName ? `${s.name} · ${s.projectName}` : s.name}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6,
+              cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap', maxWidth: 220,
+              background: isActive ? '#23233a' : 'transparent',
+              color: isActive ? '#cde' : '#889', border: '1px solid', borderColor: isActive ? '#3a3a55' : 'transparent',
+            }}
+          >
+            {editing === s.id ? (
+              <input
+                ref={editRef}
+                defaultValue={s.name}
+                onClick={e => e.stopPropagation()}
+                onBlur={e => { renameSession(s.id, e.target.value); setEditing(''); }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { renameSession(s.id, (e.target as HTMLInputElement).value); setEditing(''); }
+                  if (e.key === 'Escape') setEditing('');
+                }}
+                style={{ width: 110, background: '#13131f', color: '#cde', border: '1px solid #3a3a55', borderRadius: 4, fontSize: 13, padding: '1px 4px' }}
+              />
+            ) : (
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {s.name}{s.projectName ? <span style={{ color: '#667', marginLeft: 5 }}>· {s.projectName}</span> : null}
+              </span>
+            )}
+            <span
+              onClick={e => { e.stopPropagation(); closeSession(s.id); }}
+              title="Close session"
+              style={{ color: '#667', fontSize: 14, lineHeight: 1, padding: '0 2px' }}
+              onMouseOver={e => (e.currentTarget.style.color = '#e88')}
+              onMouseOut={e => (e.currentTarget.style.color = '#667')}
+            >×</span>
+          </div>
+        );
+      })}
+      <button
+        onClick={() => addSession()}
+        title="New session"
+        style={{ background: 'transparent', color: '#8cf', border: '1px dashed #3a3a55', borderRadius: 6, cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '3px 9px' }}
+      >+</button>
+    </div>
+  );
+}
 
 function LogoutButton() {
 
@@ -122,49 +186,60 @@ export default function App() {
   }
 
   return (
-    <>
+    <SessionProvider>
       <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-        {/* Top navigation: one tab per tool. */}
+        {/* Top bar: brand + session tabs + logout. */}
         <header
           style={{
-            display: 'flex', alignItems: 'stretch', height: '48px', flexShrink: 0,
+            display: 'flex', alignItems: 'center', height: '46px', flexShrink: 0, gap: 14,
             background: '#13131f', borderBottom: '1px solid #2a2a3a', padding: '0 14px',
           }}
         >
-          <span style={{ color: '#8cf', fontWeight: 700, fontSize: 18, alignSelf: 'center', marginRight: 22 }}>aimee</span>
-          <nav style={{ display: 'flex', gap: 2, flex: 1 }}>
+          <span style={{ color: '#8cf', fontWeight: 700, fontSize: 18 }}>aimee</span>
+          <SessionTabBar />
+          <SettingsPanel />
+          <LogoutButton />
+        </header>
+        {/* Body: vertical tool nav (left) + content. */}
+        <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
+          <nav
+            style={{
+              display: 'flex', flexDirection: 'column', gap: 2, width: 132, flexShrink: 0,
+              background: '#1a1a28', borderRight: '1px solid #2a2a3a', padding: '8px 6px',
+            }}
+          >
             {NAV_ITEMS.map(it => (
               <NavLink
                 key={it.route}
                 to={it.route}
                 style={({ isActive }) => ({
-                  display: 'flex', alignItems: 'center', gap: 6, padding: '0 14px',
-                  fontSize: 14, textDecoration: 'none', borderBottom: '2px solid transparent',
-                  color: isActive ? '#8cf' : '#aab', borderBottomColor: isActive ? '#8cf' : 'transparent',
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6,
+                  fontSize: 14, textDecoration: 'none',
+                  color: isActive ? '#cde' : '#889',
+                  background: isActive ? '#23233a' : 'transparent',
                   fontWeight: isActive ? 600 : 400,
                 })}
               >
-                <span aria-hidden>{it.icon}</span> {it.label}
+                <span aria-hidden style={{ fontSize: 16 }}>{it.icon}</span> {it.label}
               </NavLink>
             ))}
           </nav>
-          <div style={{ alignSelf: 'center' }}><LogoutButton /></div>
-        </header>
-        {/* Content area: flex:1 + minHeight:0 so pages using height:100% resolve. */}
-        <main style={{ flex: 1, minHeight: 0, overflow: 'auto', background: '#fff' }}>
-          <ErrorBoundary key={location.pathname}>
-            <Routes>
-              <Route path="/chat" element={<Chat />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/workflows" element={<Workflows />} />
-              <Route path="/projects" element={<Projects />} />
-              <Route path="/editor" element={<Editor />} />
-              <Route path="*" element={<Navigate to="/chat" replace />} />
-            </Routes>
-          </ErrorBoundary>
-        </main>
+          {/* Content: flex:1 + minHeight:0 so pages using height:100% resolve. */}
+          <main style={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', background: '#fff' }}>
+            <ErrorBoundary key={location.pathname}>
+              <Routes>
+                <Route path="/chat" element={<Chat />} />
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/workflows" element={<Workflows />} />
+                <Route path="/projects" element={<Projects />} />
+                <Route path="/editor" element={<Editor />} />
+                <Route path="*" element={<Navigate to="/chat" replace />} />
+              </Routes>
+            </ErrorBoundary>
+          </main>
+        </div>
       </div>
       <Toast />
-    </>
+    </SessionProvider>
   );
 }

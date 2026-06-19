@@ -3,6 +3,7 @@ import { Spinner, tokens } from '@rakuensoftware/smoothgui';
 import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
 import { escHtml, renderMd, renderWithMentions } from './chat/markdown';
 import ProjectPicker from '../components/ProjectPicker';
+import { useSessions } from '../SessionContext';
 
 /* ---- Types ---- */
 
@@ -21,6 +22,9 @@ interface ThreadInfo {
 }
 
 interface TabData {
+  /* The app-level session this conversation belongs to (top tab). Tabs mirror
+   * the SessionContext 1:1 by this id, so each session keeps its own history. */
+  sessionId?: string;
   title: string;
   messages: TabMessage[];
   sid: string;
@@ -175,6 +179,7 @@ function newAimeeSessionId(): string {
 function normalizeTab(tab: Partial<TabData> | null | undefined, index: number): TabData {
   const messages = Array.isArray(tab?.messages) ? tab.messages : [];
   return {
+    sessionId: typeof tab?.sessionId === 'string' ? tab.sessionId : undefined,
     title: typeof tab?.title === 'string' && tab.title ? tab.title : (index === 0 ? 'Chat' : `Chat ${index + 1}`),
     messages,
     sid: typeof tab?.sid === 'string' ? tab.sid : '',
@@ -207,50 +212,9 @@ function saveTabs(tabs: TabData[]): void {
   try { localStorage.setItem(TABS_KEY, JSON.stringify(tabs)); } catch { /* ignore */ }
 }
 
-/* Server-side session persistence (per logged-in user). The conversation lives
- * on aimee-server keyed by aimeeSid; webchat stores which sessions belong to the
- * user so tabs survive a browser/laptop crash or a move to another device.
- * localStorage remains a fast local cache (and holds per-tab message history);
- * the server is authoritative for *which* tabs exist. */
-
-interface ServerSession {
-  id: string;
-  title?: string;
-  cwd?: string;
-  created_at?: string;
-  last_active?: string;
-}
-
-async function fetchServerSessions(): Promise<ServerSession[]> {
-  try {
-    const r = await fetch('/api/chat/sessions');
-    if (!r.ok) return [];
-    const data = await r.json();
-    return Array.isArray(data) ? (data as ServerSession[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-// mergeServerSessions restores server-persisted sessions the local cache is
-// missing (e.g. after a crash cleared localStorage, or on a fresh device),
-// appending them as message-empty tabs keyed by the stored aimeeSid. Local tabs
-// are never dropped — except a single pristine, unused default tab, which the
-// restored sessions replace so the user does not see a stray empty "Chat".
-function mergeServerSessions(local: TabData[], server: ServerSession[]): TabData[] {
-  const known = new Set(local.map(t => t.aimeeSid).filter(Boolean));
-  const restored: TabData[] = [];
-  for (const s of server) {
-    if (s.id && !known.has(s.id)) {
-      restored.push(normalizeTab({ title: s.title ?? '', messages: [], sid: '', aimeeSid: s.id }, 0));
-      known.add(s.id);
-    }
-  }
-  if (restored.length === 0) return local;
-  const pristineDefault =
-    local.length === 1 && local[0].messages.length === 0 && !local[0].sid;
-  return pristineDefault ? restored : [...local, ...restored];
-}
+/* Conversation/tab persistence is local (localStorage) and mirrors the top
+ * SessionContext, which owns the session/tab list. Each tab's aimeeSid still
+ * ties to its server-side session state for continuity within a session. */
 
 function rulesBannerDismissedKey(root: string): string {
   return root ? `${RULES_BANNER_DISMISSED_KEY}:${root}` : RULES_BANNER_DISMISSED_KEY;
@@ -271,6 +235,9 @@ function saveRulesBannerDismissed(dismissed: boolean, root = ''): void {
 function streamToTabMessages(msgs: StreamMsg[]): TabMessage[] {
   return msgs
     .filter(m => m.type === 'user' || m.type === 'assistant' || m.type === 'narration')
+    // Never persist an empty assistant/narration bubble (it reloads as an empty
+    // box); user turns always carry text.
+    .filter(m => m.type === 'user' || m.text.trim() !== '')
     .map(m => ({ role: m.type as 'user' | 'assistant' | 'narration', text: m.text }));
 }
 
@@ -309,6 +276,13 @@ interface ActiveStreamRefs {
   assistantId: number | null;
   thinkId: number | null;
   toolId: number | null;
+  /* aimeeSid of the tab that owns this stream. Captured at send time so SSE
+   * events (notably the provider `session` id) are applied to the originating
+   * tab — never to whatever tab happens to be active when the event arrives.
+   * Without this, switching tabs mid-stream cross-writes the provider sid onto
+   * the wrong tab, and since claude_session_id outranks aimee_session_id on the
+   * server the two conversations then merge into one. */
+  originSid: string;
 }
 
 interface QueuedChatSend {
@@ -1388,6 +1362,47 @@ export default function Chat() {
   const [allTimeMetrics, setAllTimeMetrics] = useState<MetricRow[]>([]);
   const [promptTier, setPromptTier] = useState<'MINIMAL' | 'STANDARD' | 'EXTENDED'>('STANDARD');
   const [projectRoot, setProjectRoot] = useState(loadProjectRoot);
+  // The top session tabs are the source of truth. Each conversation tab mirrors
+  // a session 1:1 (by sessionId), so every session keeps its own history; the
+  // active session also drives the project (cwd).
+  const { sessions, active: activeSession, patchSession } = useSessions();
+  const activeSessionId = activeSession?.id ?? '';
+  const sessionProject = activeSession?.projectRoot ?? '';
+
+  // Keep one conversation tab per session: adopt an existing tab (preserving its
+  // messages/sids), migrate a legacy untagged tab, or create a fresh one.
+  useEffect(() => {
+    if (!sessions.length) return;
+    setTabs(prev => {
+      const byId = new Map(prev.filter(t => t.sessionId).map(t => [t.sessionId as string, t]));
+      const untagged = prev.filter(t => !t.sessionId);
+      let u = 0;
+      const next = sessions.map((s, i) => {
+        const existing = byId.get(s.id);
+        if (existing) return existing.title === s.name ? existing : { ...existing, title: s.name };
+        const adopt = untagged[u++];
+        if (adopt) return { ...adopt, sessionId: s.id, title: s.name };
+        return normalizeTab({ sessionId: s.id, title: s.name, messages: [], sid: '' }, i);
+      });
+      // No-op if unchanged (avoid a render loop).
+      if (next.length === prev.length && next.every((t, i) => t === prev[i])) return prev;
+      tabsRef.current = next;
+      return next;
+    });
+  }, [sessions]);
+
+  // Switch the visible conversation when the active session changes.
+  useEffect(() => {
+    const idx = tabsRef.current.findIndex(t => t.sessionId === activeSessionId);
+    if (idx >= 0) setActiveIdx(idx);
+  }, [activeSessionId, sessions]);
+
+  // Mirror the active session's project into the chat cwd (no conversation reset
+  // — switching sessions preserves each one's history).
+  useEffect(() => {
+    setProjectRoot(sessionProject);
+    saveProjectRoot(sessionProject);
+  }, [sessionProject]);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [availableSkills, setAvailableSkills] = useState<string[]>([]);
   const [activeSkill, setActiveSkill] = useState<string>('');
@@ -1589,18 +1604,9 @@ export default function Chat() {
     saveTabs(tabs);
   }, [tabs]);
 
-  /* Restore server-persisted sessions on load (per-user, survives a crash or a
-   * move to another device). Runs once; merges in any sessions the local cache
-   * is missing. */
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const server = await fetchServerSessions();
-      if (cancelled || server.length === 0) return;
-      setTabs(prev => mergeServerSessions(prev, server));
-    })();
-    return () => { cancelled = true; };
-  }, []);
+  /* (Server-session-as-tab-list restore was removed: the top SessionContext is
+   * now the source of truth for the session/tab list, mirrored locally. Each
+   * tab's aimeeSid still ties to its server-side session state.) */
 
   useEffect(() => {
     if (activeIdx >= tabs.length) {
@@ -2017,6 +2023,21 @@ export default function Chat() {
     });
   }
 
+  /* Clear the current conversation: drop the visible transcript and mint a fresh
+   * provider session (empty claude session id + new aimee session id) so the next
+   * turn starts clean — no resume of a stale/gone session. */
+  function clearChat() {
+    setStreamMsgs([]);
+    setTabs(prev => {
+      const next = [...prev];
+      if (next[activeIdx]) {
+        next[activeIdx] = { ...next[activeIdx], sid: '', aimeeSid: newAimeeSessionId(), attachId: undefined, messages: [] };
+      }
+      return next;
+    });
+    if (activeSession) patchSession(activeSession.id, { claudeSid: '', aimeeSid: '', attachId: '' });
+  }
+
   async function pauseWorkflow() {
     if (!workflowInfo) return;
     try {
@@ -2191,7 +2212,7 @@ export default function Chat() {
     const text = item.text;
     if (item.version !== sendQueueVersionRef.current) return;
 
-    const streamRefs: ActiveStreamRefs = { assistantId: null, thinkId: null, toolId: null };
+    const streamRefs: ActiveStreamRefs = { assistantId: null, thinkId: null, toolId: null, originSid: '' };
     const controller = new AbortController();
     activeSendAbortRefs.current.add(controller);
     setPendingSends(activeSendAbortRefs.current.size);
@@ -2200,6 +2221,10 @@ export default function Chat() {
     try {
       const activeTab = tabsRef.current[activeIdxRef.current];
       const aimeeSid = activeTab?.aimeeSid ?? '';
+      // Bind this stream to the originating tab so out-of-band SSE events (the
+      // provider `session` id in particular) update THIS tab, not whatever tab
+      // is active when the event lands.
+      streamRefs.originSid = aimeeSid;
       // Unified-presence: attach a "webchat" surface once per tab/session so this
       // turn is arbitrated (a racing surface on the same session is declined with
       // presence_busy) and other surfaces see the live turn on the events stream.
@@ -2331,11 +2356,12 @@ export default function Chat() {
     switch (type) {
       case 'turn_start': {
         setWorking(hasPendingChatWork());
-        const aid = nextId();
-        streamRefs.assistantId = aid;
+        // Defer creating the assistant bubble until real text arrives (the
+        // 'text' case creates it lazily). A turn that emits only tool calls,
+        // only thinking, or nothing at all then leaves no empty message box.
+        streamRefs.assistantId = null;
         streamRefs.thinkId = null;
         streamRefs.toolId = null;
-        setStreamMsgs(prev => [...prev, { id: aid, type: 'assistant', text: '' }]);
         break;
       }
       case 'tool_start': {
@@ -2362,6 +2388,7 @@ export default function Chat() {
       }
       case 'thinking': {
         const content = String(data.content ?? '');
+        if (!content) break; // ignore empty thinking deltas
         if (streamRefs.thinkId === null) {
           const tid = nextId();
           streamRefs.thinkId = tid;
@@ -2386,6 +2413,7 @@ export default function Chat() {
       }
       case 'text': {
         const content = String(data.content ?? '');
+        if (!content) break; // ignore empty deltas — don't spawn an empty bubble
         setStreamMsgs(prev => {
           let aid = streamRefs.assistantId;
           if (aid === null) {
@@ -2425,13 +2453,21 @@ export default function Chat() {
       }
       case 'session': {
         const sid = String(data.id ?? '');
-        setTabs(prev => {
-          const next = [...prev];
-          const idx = activeIdxRef.current;
-          if (next[idx]) next[idx] = { ...next[idx], sid };
-          tabsRef.current = next;
-          return next;
-        });
+        // Apply the provider session id to the tab that OWNS this stream, located
+        // by its stable aimeeSid — not activeIdxRef, which may have moved if the
+        // user switched tabs mid-turn. Cross-writing it merges two conversations
+        // because claude_session_id outranks aimee_session_id server-side.
+        const owner = streamRefs.originSid;
+        if (owner) {
+          setTabs(prev => {
+            const idx = prev.findIndex(t => t.aimeeSid === owner);
+            if (idx < 0) return prev;
+            const next = [...prev];
+            next[idx] = { ...next[idx], sid };
+            tabsRef.current = next;
+            return next;
+          });
+        }
         break;
       }
       case 'iteration': {
@@ -2520,17 +2556,32 @@ export default function Chat() {
       display: 'flex', flexDirection: 'column', height: '100%',
       overflow: 'hidden', background: tokens.surface,
     }}>
-      {/* Chat session tabs removed (single conversation). This tab's project
-          space: select/clone a git project; the agent runs with that project as
-          its working directory (cwd). Per-tab persisted selection. */}
-      <ProjectPicker
-        storageKey="aimee_chat_project"
-        onChange={sel => {
-          const r = sel ? `${sel.root}/${sel.project}` : '';
-          setProjectRoot(r);
-          saveProjectRoot(r);
-        }}
-      />
+      {/* The project belongs to the active SESSION (top tab); picking one here
+          binds it to this session, and the agent runs with it as cwd. A Clear
+          button resets this conversation (fresh provider session). */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <ProjectPicker
+            key={activeSessionId}
+            storageKey={`aimee_session_project_${activeSessionId}`}
+            onChange={sel => {
+              const r = sel ? `${sel.root}/${sel.project}` : '';
+              if (activeSession) patchSession(activeSession.id, { projectRoot: r, projectName: sel?.project ?? '' });
+              else { setProjectRoot(r); saveProjectRoot(r); }
+            }}
+          />
+        </div>
+        <button
+          onClick={clearChat}
+          title="Clear this conversation and start a fresh session"
+          style={{
+            flexShrink: 0, padding: '5px 12px', fontSize: 13, cursor: 'pointer',
+            background: '#fff', color: '#666', border: '1px solid #ddd', borderRadius: 6,
+          }}
+        >
+          Clear
+        </button>
+      </div>
 
       {/* Thread bar (conversation branching) */}
       <ThreadBar

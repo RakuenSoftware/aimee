@@ -6,6 +6,8 @@
 #include "agent_tools.h" /* agent_tools_set_tool_event_cb — stream tool events */
 #include "cli_codex.h"
 #include "config.h"
+#include "db1.h"
+#include "log.h"
 #include "primary_session_adapter.h"
 #include "workspace_provider.h"
 
@@ -26,8 +28,10 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
 #include "cJSON.h"
 #include "token_tracker.h"
 #include "reasoning_cap.h"
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
 #include <signal.h>
 #include <stdatomic.h>
 #include <time.h>
@@ -531,6 +535,71 @@ static int chat_claude_effort_allowed(const char *effort)
    return effort && (strcmp(effort, "low") == 0 || strcmp(effort, "medium") == 0 ||
                      strcmp(effort, "high") == 0 || strcmp(effort, "xhigh") == 0 ||
                      strcmp(effort, "max") == 0);
+}
+
+/* `claude --resume <sid>` fails the WHOLE turn ("No conversation found with
+ * session ID") when the session transcript is gone — e.g. the client replays a
+ * session id from before a container redeploy that cleared ~/.claude. Guard the
+ * resume: only pass --resume when the transcript actually exists, otherwise fall
+ * back to a fresh session so the user can keep chatting. claude stores each
+ * conversation at ~/.claude/projects/<cwd-as-dashes>/<sid>.jsonl; we glob across
+ * project dirs so the check is independent of claude's exact cwd encoding (a
+ * session id is unique, so it lives in at most one project dir). */
+static int chat_claude_session_exists(const char *sid)
+{
+   if (!sid || !sid[0])
+      return 0;
+   const char *home = getenv("HOME");
+   if (!home || !home[0])
+      return 1; /* can't check — don't block a resume the client asked for */
+   /* A real claude session id is a UUID (alnum + '-'); refuse anything else so
+    * the value can't smuggle glob metacharacters or path traversal. */
+   for (const char *p = sid; *p; p++)
+      if (!(isalnum((unsigned char)*p) || *p == '-' || *p == '_'))
+         return 1;
+   char pattern[2048];
+   snprintf(pattern, sizeof(pattern), "%s/.claude/projects/*/%s.jsonl", home, sid);
+   glob_t g;
+   int rc = glob(pattern, GLOB_NOSORT, NULL, &g);
+   int found = (rc == 0 && g.gl_pathc > 0);
+   globfree(&g);
+   return found;
+}
+
+/* Resolve which Claude session this turn may resume, namespaced to the attested
+ * principal + the per-tab aimee_session_id. The client-supplied claude_session_id
+ * is advisory only: it is honored on a tab's first use (and never if it already
+ * belongs to another tab), but once a tab is bound the server-owned binding wins.
+ * This makes a stale or cross-wired client id unable to resume — and thereby
+ * merge into — another tab's conversation, even if the browser sends the wrong
+ * value. With no per-tab identity (empty aimee_sid) it falls back to the legacy
+ * behavior of trusting the client id. */
+static void chat_claude_resolve_resume_sid(const char *principal, const char *aimee_sid,
+                                           const char *client_sid, char *out, size_t out_n)
+{
+   if (out && out_n)
+      out[0] = '\0';
+   if (!out || out_n == 0)
+      return;
+   if (!aimee_sid || !aimee_sid[0])
+   {
+      if (client_sid && client_sid[0])
+         snprintf(out, out_n, "%s", client_sid);
+      return;
+   }
+   char bound[128] = {0};
+   if (db1_webchat_claude_session_get(principal, aimee_sid, bound, sizeof(bound)) == 0 && bound[0])
+   {
+      snprintf(out, out_n, "%s", bound);
+      if (client_sid && client_sid[0] && strcmp(client_sid, bound) != 0)
+         aimee_log(LOG_WARN, "webchat",
+                   "claude session mismatch: tab bound to its own session; ignoring client id");
+      return;
+   }
+   /* No binding yet for this tab: adopt the client's id only if no other tab owns it. */
+   if (client_sid && client_sid[0] &&
+       !db1_webchat_claude_session_owned_by_other(principal, aimee_sid, client_sid))
+      snprintf(out, out_n, "%s", client_sid);
 }
 
 static int chat_codex_effort_allowed(const char *effort)
@@ -1266,7 +1335,13 @@ void chat_stream_worker(void *arg)
       workspace_turn_unbind_active();
    }
 
-   const char *claude_sid = provider_sid;
+   /* The session id to `claude --resume` is server-owned and namespaced to
+    * (principal, aimee_session_id) — not taken blindly from the client — so a
+    * stale/cross-wired browser value cannot resume another tab's conversation. */
+   char claude_sid_buf[128];
+   chat_claude_resolve_resume_sid(cctx->vault_principal, aimee_sid, provider_sid, claude_sid_buf,
+                                  sizeof(claude_sid_buf));
+   const char *claude_sid = claude_sid_buf;
    compute_pool_set_job(POOL_JOB_CHAT, "provider=%s sid=%s", provider,
                         claude_sid && claude_sid[0] ? claude_sid : "new");
 
@@ -1312,11 +1387,13 @@ void chat_stream_worker(void *arg)
       argv[argc++] = "--effort";
       argv[argc++] = (char *)claude_effort;
    }
-   if (claude_sid[0])
+   if (claude_sid[0] && chat_claude_session_exists(claude_sid))
    {
       argv[argc++] = "--resume";
       argv[argc++] = (char *)claude_sid;
    }
+   /* else: the requested session is gone (e.g. cleared by a redeploy) — start a
+    * fresh session instead of letting --resume fail the entire turn. */
    if (cfg.autonomous)
       argv[argc++] = "--dangerously-skip-permissions";
    argv[argc] = NULL;
@@ -1549,8 +1626,15 @@ void chat_stream_worker(void *arg)
       {
          saw_result = 1;
          cJSON *sid = cJSON_GetObjectItem(obj, "session_id");
-         if (sid && cJSON_IsString(sid))
+         if (sid && cJSON_IsString(sid) && sid->valuestring[0])
+         {
             stream_event(cctx, "session", "id", sid->valuestring);
+            /* Bind this Claude session to (principal, tab) so subsequent turns
+             * resume it by server-owned identity, not by client-supplied id. */
+            if (aimee_sid && aimee_sid[0])
+               (void)db1_webchat_claude_session_bind(cctx->vault_principal, aimee_sid,
+                                                     sid->valuestring);
+         }
          cJSON *is_error = cJSON_GetObjectItem(obj, "is_error");
          cJSON *api_status = cJSON_GetObjectItem(obj, "api_error_status");
          if ((cJSON_IsBool(is_error) && cJSON_IsTrue(is_error)) ||
