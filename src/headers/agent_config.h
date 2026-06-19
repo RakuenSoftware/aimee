@@ -4,6 +4,7 @@
 #include "agent_types.h"
 #include "config.h"
 #include "vault_principal.h" /* VAULT_PRINCIPAL_MAX for the per-turn vault principal */
+#include <stdatomic.h>       /* atomic_int for the per-turn cancel flag */
 
 int agent_load_config(agent_config_t *cfg);
 int agent_save_config(const agent_config_t *cfg);
@@ -67,6 +68,14 @@ void agent_set_request_session(const char *session_id);
  * strictly for the agent-loop duration; empty otherwise. NEVER a client value. */
 void agent_set_request_vault_principal(const char *principal);
 const char *agent_get_request_vault_principal(void);
+
+/* Per-turn cancellation (server-owned turn lifecycle). The chat worker binds a
+ * pointer to its turn-registry cancel flag around the in-process agent loop via
+ * agent_set_request_cancel(&entry->cancel) and clears it (NULL) after. The
+ * agent loop polls agent_request_cancelled() at safe points to abort a detached
+ * turn whose session was closed / the server is shutting down. Thread-local. */
+void agent_set_request_cancel(atomic_int *flag);
+int agent_request_cancelled(void);
 
 /* Snapshot of the per-turn, thread-local credential context (session id + Codex
  * creds + WP-C vault principal). agent_set_request_session /

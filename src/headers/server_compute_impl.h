@@ -45,12 +45,25 @@ typedef struct
    int presence_locked;
    char presence_session[128];
    char presence_turn_id[64];
-   /* When >1 surface is attached to the session at turn start, the chat
-    * worker also mirrors each text delta to the presence-event ring as a
-    * turn_delta (so a second attached surface sees the live token stream, not
-    * just the turn boundaries). 0 in the common single-surface case → the
-    * stream_event hot path pays only one int check. */
+   /* Set whenever this turn runs on a presence-tracked session: the chat worker
+    * mirrors the full turn stream (text/thinking/tool/usage + boundaries) to the
+    * presence-event ring so the connection is just one subscriber to a durable
+    * stream — a disconnect detaches without losing the turn (server-owned turn
+    * lifecycle). 0 only for turns with no presence session. */
    int presence_emit_deltas;
+   /* Text-delta coalescing buffer for the ring publish (WP-1). Text deltas are
+    * accumulated and flushed as one turn_delta on a size/time bound or when any
+    * non-text event is emitted (stream_flush_text), bounding ring-fill rate
+    * without reordering. Guarded, like every emit, by *write_mutex. Freed in
+    * compute_ctx_free. */
+   char *delta_buf;
+   size_t delta_len;
+   size_t delta_cap;
+   uint64_t delta_first_ms;
+   /* Per-turn cancel registry entry (turn_registry_t*), cached so the worker can
+    * read the atomic cancel flag without locking. NULL for turns not registered
+    * (e.g. internal/compact paths). Owned by the registry, not freed here. */
+   struct turn_entry *turn_entry;
 } compute_ctx_t;
 
 /* Defined in server_compute.c; used by platform implementations */

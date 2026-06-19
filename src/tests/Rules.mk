@@ -88,6 +88,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-workspace \
                $(TESTPREFIX)/unit-test-primary-session-adapter \
                $(TESTPREFIX)/unit-test-webchat-claude-sessions \
+               $(TESTPREFIX)/unit-test-turn-registry \
                $(TESTPREFIX)/unit-test-session-search-tool \
                $(TESTPREFIX)/unit-test-working-memory $(TESTPREFIX)/unit-test-working-memory-mock $(TESTPREFIX)/unit-test-local-resolution $(TESTPREFIX)/unit-test-cognify-jobs $(TESTPREFIX)/unit-test-extractors-extra \
                $(TESTPREFIX)/unit-test-css-analyze $(TESTPREFIX)/unit-test-typed-facts $(TESTPREFIX)/unit-test-css-graph $(TESTPREFIX)/unit-test-css-insights $(TESTPREFIX)/unit-test-css-oracle $(TESTPREFIX)/unit-test-css-render-oracle $(TESTPREFIX)/unit-test-css-migration $(TESTPREFIX)/unit-test-css-render $(TESTPREFIX)/unit-test-css-render-cmd \
@@ -897,6 +898,10 @@ $(TESTPREFIX)/unit-test-presence: $(OBJDIR)/tests/test_presence.o \
 	                               $(OBJDIR)/server/presence.o $(OBJDIR)/delivery_target.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
+$(TESTPREFIX)/unit-test-turn-registry: $(OBJDIR)/tests/test_turn_registry.o \
+	                               $(OBJDIR)/server/turn_registry.o $(OBJDIR)/tests/support/log_stub.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
 $(TESTPREFIX)/unit-test-cli-launch: $(OBJDIR)/tests/test_cli_launch.o $(OBJDIR)/cli_launch.o \
                             $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1028,7 +1033,7 @@ $(TESTPREFIX)/unit-test-server-compute: $(OBJDIR)/tests/test_server_compute.o $(
                                $(OBJDIR)/config.o $(OBJDIR)/config_sections.o $(OBJDIR)/config_database.o $(OBJDIR)/config_learning.o $(OBJDIR)/config_memory.o $(OBJDIR)/config_charter.o $(OBJDIR)/config_trigger.o $(OBJDIR)/config_kb_maintenance.o $(OBJDIR)/config_kb_curator.o $(OBJDIR)/config_server_api.o $(OBJDIR)/config_skills.o $(OBJDIR)/config_save.o $(OBJDIR)/config_mode.o $(OBJDIR)/config_fields.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                                $(OBJDIR)/aimee_home.o \
                                $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
-                               $(OBJDIR)/platform_random.o $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o $(OBJDIR)/server/presence.o $(OBJDIR)/delivery_target.o \
+                               $(OBJDIR)/platform_random.o $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o $(OBJDIR)/server/presence.o $(OBJDIR)/server/turn_registry.o $(OBJDIR)/tests/support/agent_cancel_stub.o $(OBJDIR)/delivery_target.o \
                                $(OBJDIR)/server/workspace_turn.o $(OBJDIR)/server/workspace_provider_detached.o \
                                $(OBJDIR)/server/workspace_runner_registry.o $(OBJDIR)/server/workspace_runner_queue.o \
                                $(OBJDIR)/workspace_mirror.o $(OBJDIR)/forge_credentials.o \

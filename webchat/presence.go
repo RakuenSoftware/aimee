@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strconv"
 )
 
 // Unified-presence integration for webchat. A browser tab attaches a "webchat"
@@ -97,11 +98,24 @@ func (s *server) handleChatSessionEvents(w http.ResponseWriter, r *http.Request)
 			},
 		},
 	}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet,
-		"http://aimee/v1/sessions/"+sid+"/events", nil)
+	// Forward a resume cursor so the browser resumes after a reconnect/remount
+	// instead of replaying the whole ring from 0. Validated as a uint to keep it
+	// out of the upstream URL if malformed.
+	upstream := "http://aimee/v1/sessions/" + sid + "/events"
+	if cur := r.URL.Query().Get("cursor"); cur != "" {
+		if _, perr := strconv.ParseUint(cur, 10, 64); perr == nil {
+			upstream += "?cursor=" + cur
+		}
+	}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, upstream, nil)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "request build failed")
 		return
+	}
+	// Forward the EventSource auto-reconnect cursor so the upstream resumes from
+	// the last delivered event instead of replaying the ring from 0.
+	if leid := r.Header.Get("Last-Event-ID"); leid != "" {
+		req.Header.Set("Last-Event-ID", leid)
 	}
 	resp, err := client.Do(req)
 	if err != nil {

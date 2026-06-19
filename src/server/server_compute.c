@@ -339,6 +339,7 @@ void compute_ctx_free(compute_ctx_t *cctx)
    }
    if (cctx->req)
       cJSON_Delete(cctx->req);
+   free(cctx->delta_buf); /* presence-ring text-coalescing buffer (WP-1) */
    if (cctx->write_mutex)
    {
       pthread_mutex_destroy(cctx->write_mutex);

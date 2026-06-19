@@ -1260,52 +1260,9 @@ static void handle_run_events(int fd, const char *id, const char *request_id)
  * doubles as a disconnect probe. The stream ends when the presence is torn
  * down (PRESENCE_WAIT_GONE) or the client hangs up (a failed write). 404 when
  * the session has no live presence. */
-static void handle_session_events(int fd, const char *id, const char *request_id)
-{
-   char probe[80];
-   if (presence_session_json(id, probe, sizeof(probe)) == 0)
-   {
-      send_response(fd, 404, "{\"error\":\"no such session\"}", request_id);
-      return;
-   }
-   write_sse_headers(fd, request_id);
-   char *data = (char *)malloc(PRESENCE_EVENT_DATA_MAX + 1);
-   if (!data)
-      return; /* headers already sent; just drop the stream */
-   char ev[PRESENCE_EVENT_NAME_MAX];
-   uint64_t cursor = 0;
-   for (;;)
-   {
-      presence_wait_t w =
-          presence_wait(id, &cursor, 1000, ev, sizeof(ev), data, PRESENCE_EVENT_DATA_MAX + 1);
-      if (w == PRESENCE_WAIT_EVENT)
-      {
-         if (ev[0])
-         {
-            if (write_all_fd(fd, "event: ", 7) < 0)
-               break;
-            if (write_all_fd(fd, ev, (int)strlen(ev)) < 0)
-               break;
-            if (write_all_fd(fd, "\n", 1) < 0)
-               break;
-         }
-         if (write_all_fd(fd, "data: ", 6) < 0)
-            break;
-         if (write_all_fd(fd, data, (int)strlen(data)) < 0)
-            break;
-         if (write_all_fd(fd, "\n\n", 2) < 0)
-            break;
-         continue;
-      }
-      if (w == PRESENCE_WAIT_GONE)
-         break;
-      /* PRESENCE_WAIT_TIMEOUT: heartbeat; a failed write means the client
-       * disconnected, so stop streaming and free the listener. */
-      if (write_all_fd(fd, ": keep-alive\n\n", 13) < 0)
-         break;
-   }
-   free(data);
-}
+/* handle_session_events lives in server_http_sse.inc (textual include) to keep
+ * this file under the 2000-line cap; it shares this TU's static SSE helpers. */
+#include "server_http_sse.inc"
 
 /* SSE event streams (handle_session_events / handle_run_events) are long-lived:
  * running them inline in handle_conn would block the single listener thread for
@@ -1446,10 +1403,15 @@ static void handle_conn(int fd, int is_tcp)
       return;
    }
 
-   /* Strip any query string (unused by persona routes). */
+   /* Strip any query string from `path`, but keep a pointer to it for the few
+    * routes that read query params (e.g. the session-events resume cursor). */
    char *qmark = strchr(path, '?');
+   const char *query = "";
    if (qmark)
+   {
       *qmark = '\0';
+      query = qmark + 1;
+   }
 
    /* Resolve the request id (inbound X-Request-ID, else a generated <pid>-<seq>)
     * for response echo + access logging. */
@@ -1574,10 +1536,46 @@ static void handle_conn(int fd, int is_tcp)
                idlen = sizeof(id) - 1;
             memcpy(id, rest, idlen);
             id[idlen] = '\0';
+            /* A resume position is threaded to handle_session_events through the
+             * id slot ("<sid>?cursor=N") so a client resumes without replaying
+             * the whole ring from 0. Two sources, Last-Event-ID first: an
+             * EventSource auto-reconnect sends the native Last-Event-ID header
+             * (most recent); a fresh remount has no header and instead passes
+             * ?cursor=<persisted> in the query. Absent/0 = replay from oldest. */
+            char idc[160];
+            char leid[40] = "";
+            const char *src = NULL;
+            if (http_header(buf, "Last-Event-ID", leid, sizeof(leid)) && leid[0])
+               src = leid; /* EventSource auto-reconnect (most recent) */
+            else
+            {
+               const char *cur = strstr(query, "cursor=");
+               if (cur)
+                  src = cur + 7; /* explicit ?cursor= on a fresh remount */
+            }
+            /* Validate as a fully-numeric uint64: a bare strtoull would accept
+             * "123abc" as 123. Reject trailing garbage (except '&' ending a query
+             * param) and overflow; on anything malformed fall back to 0 (replay
+             * from oldest). An in-range-but-wrong cursor is already safe —
+             * presence_wait reads ring[cursor % RING] and waits when
+             * cursor >= ev_total — but we still refuse junk input. */
+            unsigned long long n = 0;
+            if (src && *src)
+            {
+               errno = 0;
+               char *end = NULL;
+               unsigned long long v = strtoull(src, &end, 10);
+               if (end != src && errno != ERANGE && (*end == '\0' || *end == '&'))
+                  n = v;
+            }
+            if (n > 0)
+               snprintf(idc, sizeof(idc), "%s?cursor=%llu", id, n);
+            else
+               snprintf(idc, sizeof(idc), "%s", id);
             /* Offload to a detached worker so the long-lived presence SSE stream
              * does not block the listener thread (a subscriber would otherwise
              * freeze the whole /v1 surface); 503 if the live-stream cap is hit. */
-            if (sse_offload(fd, handle_session_events, id, request_id) != 0)
+            if (sse_offload(fd, handle_session_events, idc, request_id) != 0)
                send_response(fd, 503, "{\"error\":\"too many event streams\"}", request_id);
             LOG_INFO("server.http", "GET %s -> presence events req_id=%s", path, request_id);
             return;

@@ -5,6 +5,7 @@
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
 #include "server.h"
+#include "turn_registry.h"
 #include "server_http.h" /* server_http_api_status_report */
 #include "config.h"      /* config_t / config_load for api.status, api.enable */
 #include "delegate_backend_docker.h"
@@ -1028,6 +1029,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"session.list", handle_session_list},
     {"session.get", handle_session_get},
     {"session.close", handle_session_close},
+    {"chat.graceful_cancel", handle_chat_graceful_cancel},
     {"session.brief", handle_session_brief},
     {"session.attach", handle_session_attach},
     {"session.detach", handle_session_detach},
@@ -1714,6 +1716,13 @@ void server_shutdown(server_ctx_t *ctx)
    /* Drain request handlers while compute/async lanes are still available for
     * any RPCs they dispatched. */
    server_request_pool_shutdown(ctx);
+   /* Cancel every in-flight turn BEFORE draining: turns now outlive their client
+    * connections (server-owned turn lifecycle), so a long detached turn would
+    * otherwise block the drain indefinitely. The atomic cancel flags are
+    * observed by the workers within one poll tick; the drain then completes
+    * bounded. Presence is torn down after the drain, so a still-running worker
+    * never emits onto a closed ring. */
+   turn_registry_cancel_all();
    /* Let async chat/tool workers finish while the compute pool is still
     * available to drain any queued server-side jobs they interact with. */
    server_compute_async_drain();

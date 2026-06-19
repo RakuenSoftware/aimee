@@ -448,6 +448,23 @@ int presence_session_json(const char *session_id, char *out, size_t out_n)
    return 1;
 }
 
+int presence_session_owner(const char *session_id, char *out, size_t out_n)
+{
+   if (out && out_n)
+      out[0] = '\0';
+   pthread_mutex_lock(&g_lock);
+   int idx = find_locked(session_id);
+   if (idx < 0 || !g_pres[idx].owner[0])
+   {
+      pthread_mutex_unlock(&g_lock);
+      return 0;
+   }
+   if (out && out_n)
+      snprintf(out, out_n, "%s", g_pres[idx].owner);
+   pthread_mutex_unlock(&g_lock);
+   return 1;
+}
+
 /* ====================================================================== */
 /* Turn arbitration                                                       */
 /* ====================================================================== */

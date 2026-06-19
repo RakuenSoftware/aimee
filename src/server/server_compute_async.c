@@ -7,6 +7,8 @@
 #include "compute_pool.h"
 #include "guardrails.h"
 #include "presence.h"
+#include "turn_registry.h"
+#include "log.h"
 #include "workspace_turn.h"
 #include "cJSON.h"
 #include <ctype.h>
@@ -430,14 +432,16 @@ static void chat_stream_worker_pooled(void *arg)
    snprintf(turn_id, sizeof(turn_id), "turn-%lu",
             (unsigned long)atomic_fetch_add(&g_chat_turn_seq, 1) + 1);
 
-   /* Mirror text deltas to the presence ring only when a second surface is
-    * attached (the originating surface already gets the stream on its own
-    * connection). The worker reads presence_session / presence_turn_id /
-    * presence_emit_deltas from cctx; set them before it runs. On the locked
-    * path they were already set by handle_chat_send_stream (real turn id). */
+   /* Always mirror the full turn stream to the presence ring for any
+    * presence-tracked session (not only when a 2nd surface is attached): the
+    * ring is the durable source of truth so a dropped connection detaches
+    * without losing the turn, and a reconnecting client replays from it. The
+    * worker reads presence_session / presence_turn_id / presence_emit_deltas
+    * from cctx; set them before it runs. On the locked path they were already
+    * set by handle_chat_send_stream (real turn id). */
    const char *delta_session = locked ? lock_session : sid;
    const char *delta_turn = locked ? lock_turn : turn_id;
-   if (delta_session[0] && presence_attachment_count(delta_session) > 1)
+   if (delta_session[0])
    {
       cctx->presence_emit_deltas = 1;
       if (!locked)
@@ -446,6 +450,24 @@ static void chat_stream_worker_pooled(void *arg)
          snprintf(cctx->presence_turn_id, sizeof(cctx->presence_turn_id), "%s", delta_turn);
       }
    }
+
+   /* Register this turn in the per-turn cancel registry BEFORE turn_started /
+    * dispatch, so a cancel arriving in the window right after turn_started is
+    * never dropped. The worker caches cctx->turn_entry (CLI path polls it;
+    * in-process path is driven via agent_set_request_cancel). NULL = collision
+    * (should be impossible under the turn lock) or table full: run the turn
+    * without a registry entry rather than failing it — the turn still has
+    * intrinsic token/deadline bounds; the condition is logged. */
+   turn_entry_t *cancel_entry = NULL;
+   if (delta_session[0])
+   {
+      cancel_entry = turn_registry_publish(delta_session, delta_turn);
+      if (cancel_entry)
+         cctx->turn_entry = cancel_entry; /* owner is set inside publish, under the lock */
+      else
+         LOG_WARN("chat", "turn registry rejected session %s; turn not cancellable", delta_session);
+   }
+   agent_set_request_cancel(cancel_entry ? &cancel_entry->cancel : NULL);
 
    if (!locked && sid[0])
       presence_emit_turn_started(sid, turn_id);
@@ -476,10 +498,16 @@ static void chat_stream_worker_pooled(void *arg)
    agent_set_request_vault_principal(cctx->vault_principal);
    chat_stream_worker(arg);
    agent_set_request_vault_principal(NULL);
+   agent_set_request_cancel(NULL);
    if (locked)
       presence_turn_release(lock_session, lock_turn);
    else if (sid[0])
-      presence_emit_turn_done(sid, turn_id);
+      presence_emit_turn_done(sid, turn_id); /* turn_done reaches the ring even on cancel */
+   /* Clear the cancel-registry entry after the worker reaped its child and
+    * turn_done was published. cancel_entry is a LOCAL pointer into the static
+    * turn registry table (NOT into cctx, which the worker already freed), so
+    * this is not a use-after-free. */
+   turn_registry_clear(cancel_entry);
 
    async_slot_release(async_slot);
    chat_thread_release();

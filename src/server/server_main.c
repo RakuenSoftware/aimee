@@ -13,6 +13,7 @@
 #include "server_http.h"
 #include "cli_session_pty.h"
 #include "presence.h"
+#include "turn_registry.h"
 #include "events.h"
 #include "agent_exec.h"
 #include "log.h"
@@ -218,6 +219,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
    agent_http_init();
    presence_init(); /* unified-presence registry (attachments, turn locks, event ring) */
    presence_set_delivery_fn(presence_deliver_via_notify, NULL); /* outbound: ntfy/local */
+   turn_registry_init(); /* per-turn cancel registry (server-owned turn lifecycle) */
 
    /* Wire the inference-backed OpenAI completion handlers before the listener
     * accepts requests (agent_http_init above must run first). */

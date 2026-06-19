@@ -10,6 +10,7 @@
 #include "cJSON.h"
 #include "json_fluent.h"
 #include <ctype.h>
+#include <stdatomic.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -282,6 +283,22 @@ void agent_set_request_vault_principal(const char *principal)
 const char *agent_get_request_vault_principal(void)
 {
    return g_request_vault_principal;
+}
+
+/* Per-turn cancellation flag (server-owned turn lifecycle). The chat worker
+ * binds a pointer to its turn-registry cancel flag around the in-process agent
+ * loop; the loop polls agent_request_cancelled() at safe points to abort a
+ * detached turn promptly. Thread-local; NULL clears it. */
+static _Thread_local atomic_int *g_request_cancel;
+
+void agent_set_request_cancel(atomic_int *flag)
+{
+   g_request_cancel = flag;
+}
+
+int agent_request_cancelled(void)
+{
+   return g_request_cancel ? atomic_load(g_request_cancel) : 0;
 }
 
 /* Read a credential (codex token/account, etc.) for the in-flight turn from the

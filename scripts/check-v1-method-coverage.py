@@ -67,6 +67,10 @@ EXCLUDED: set = {
     "pipeline.resume",
     "pipeline.advance",
     "pipeline.gate",
+    # Turn control, not a data op: cancels an in-flight chat turn for a session
+    # (owner-authz). Reachable over the NDJSON socket and the gateway /stop path;
+    # no dedicated /v1 op twin, mirroring pipeline.cancel/resume above.
+    "chat.graceful_cancel",
 }
 # NB: the long-running / LLM methods (kb.build/ingest/update, graph.sync_code,
 # index.scan, memory.benchmark, curator.synthesize, rules.generate, eval.run)

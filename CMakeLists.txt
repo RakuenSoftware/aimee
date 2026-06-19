@@ -792,6 +792,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_session.c
     ${AIMEE_SRC_DIR}/server/server_session_pools.c
     ${AIMEE_SRC_DIR}/server/presence.c
+    ${AIMEE_SRC_DIR}/server/turn_registry.c
     ${AIMEE_SRC_DIR}/server/vault_principal.c
     ${AIMEE_SRC_DIR}/server/vault_crypto.c
     ${AIMEE_SRC_DIR}/server/vault_kek_cache.c

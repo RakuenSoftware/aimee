@@ -1439,6 +1439,15 @@ export default function Chat() {
   const tabsRef = useRef<TabData[]>(tabs);
   const activeIdxRef = useRef(activeIdx);
   const projectRootRef = useRef(projectRoot);
+  // Live `working` for the presence-event effect: lets turn_done decide whether
+  // THIS surface originated the turn (skip persist) or is merely observing a
+  // turn that ran/completed while detached (persist it into history).
+  const workingRef = useRef(working);
+  // turn_ids already committed to history from the presence ring this session.
+  // The ring replays turn_started→deltas→turn_done from cursor 0 on EVERY new
+  // subscription (reconnect / tab switch back), so dedup is required to avoid
+  // re-appending the same observed turn. Survives effect re-runs (component ref).
+  const persistedTurnsRef = useRef<Set<string>>(new Set());
   const sending = pendingSends > 0;
   const queueActive = sending || queuedSends > 0;
   const activePersonaSid = tabs[activeIdx]?.aimeeSid ?? '';
@@ -1450,6 +1459,7 @@ export default function Chat() {
 
   useEffect(() => { scrollToBottom(); }, [streamMsgs, working, scrollToBottom]);
   useEffect(() => { tabsRef.current = tabs; }, [tabs]);
+  useEffect(() => { workingRef.current = working; }, [working]);
 
   /* Detach every attached presence surface when the page unloads, so a closed
    * browser doesn't leak attachments until the session is closed. keepalive
@@ -1483,16 +1493,84 @@ export default function Chat() {
     setRemoteTurnText('');
     if (!activeAimeeSid || !activeAttachId) return;
 
-    const es = new EventSource(`/api/chat/session-events?sid=${encodeURIComponent(activeAimeeSid)}`);
-    presenceSseRef.current = es;
-    es.addEventListener('turn_started', () => { setRemoteTurnActive(true); setRemoteTurnText(''); });
-    es.addEventListener('turn_delta', (ev: MessageEvent<string>) => {
+    // Resume from the last cursor this surface persisted for the session so a
+    // fresh mount (hard refresh / nav back) does NOT replay the ring from 0
+    // (which would re-surface already-seen turns). EventSource handles its own
+    // auto-reconnect resume via Last-Event-ID; this covers the remount case.
+    const cursorKey = `aimeeCursor:${activeAimeeSid}`;
+    const savedCursor = (() => { try { return localStorage.getItem(cursorKey) || ''; } catch { return ''; } })();
+    // Persist the cursor MONOTONICALLY: only ever advance it. Two tabs sharing a
+    // session write the same key, so a stale writer must not move it backward
+    // (which would replay already-seen events). Compare as integers.
+    const saveCursor = (ev: MessageEvent<string>) => {
+      if (!ev.lastEventId) return;
       try {
-        const d = JSON.parse(ev.data) as { content?: string };
-        if (d.content) setRemoteTurnText(prev => (prev + d.content).slice(-2000));
+        const next = Number(ev.lastEventId);
+        if (!Number.isFinite(next)) return;
+        const cur = Number(localStorage.getItem(cursorKey) || '0');
+        if (!Number.isFinite(cur) || next > cur) localStorage.setItem(cursorKey, String(next));
+      } catch { /* quota / private browsing → degrade to cold-start replay */ }
+    };
+    const url = `/api/chat/session-events?sid=${encodeURIComponent(activeAimeeSid)}` +
+      (savedCursor ? `&cursor=${encodeURIComponent(savedCursor)}` : '');
+    const es = new EventSource(url);
+    presenceSseRef.current = es;
+    // Full text of the turn observed on the stream this subscription, used to
+    // persist a turn that ran/completed while this tab was detached (the live
+    // ring replays turn_started→deltas→turn_done from the start on reconnect).
+    // Per-turn observation state for this subscription. turn_id drives dedup;
+    // wasWorking is captured ONCE at turn_started (whether THIS surface
+    // originated the turn) and is immutable for the turn, so a new local send
+    // mid-observation can't make us drop a foreign turn.
+    let observed = '';
+    let curTurnId = '';
+    let wasWorking = false;
+    const turnIdOf = (raw: string): string => {
+      try { return (JSON.parse(raw) as { turn_id?: string }).turn_id || ''; } catch { return ''; }
+    };
+    es.addEventListener('turn_started', (ev: MessageEvent<string>) => {
+      saveCursor(ev);
+      curTurnId = turnIdOf(ev.data); observed = ''; wasWorking = workingRef.current;
+      setRemoteTurnActive(true); setRemoteTurnText('');
+    });
+    es.addEventListener('turn_delta', (ev: MessageEvent<string>) => {
+      saveCursor(ev);
+      try {
+        // Phase 1 ring schema: { turn_id, kind, content? }. Only text kinds feed
+        // the visible turn body; thinking/tool_call/usage are not shown here.
+        const d = JSON.parse(ev.data) as { kind?: string; content?: string };
+        if ((d.kind === undefined || d.kind === 'text') && d.content) {
+          observed += d.content;
+          setRemoteTurnText(prev => (prev + d.content).slice(-2000));
+        }
       } catch { /* ignore malformed frame */ }
     });
-    es.addEventListener('turn_done', () => { setRemoteTurnActive(false); setRemoteTurnText(''); });
+    es.addEventListener('turn_done', (ev: MessageEvent<string>) => {
+      saveCursor(ev);
+      const tid = turnIdOf(ev.data) || curTurnId; // turn_started always carries turn_id
+      const text = observed;
+      // Persist a turn observed-while-detached EXACTLY ONCE. Gates:
+      //  - wasWorking: snapshot at turn_started — THIS surface originated the turn
+      //    (its own send path stores the assistant message). This is the sole
+      //    "did I originate it" gate; a NEW local send mid-observation must NOT
+      //    drop a foreign turn, so the live workingRef is deliberately not used.
+      //  - cursor resume (above) means a fresh mount / auto-reconnect does NOT
+      //    replay already-seen turns, so the ring no longer re-emits a completed
+      //    turn. persistedTurnsRef (turn_id dedup) + the content-tail guard remain
+      //    as belt-and-suspenders for the cursor-0 cold-start case. The dedup
+      //    add/has stays OUTSIDE the updater so it stays pure (React strict-mode
+      //    double-invokes updaters; turn_done events are sequential so it is race-free).
+      if (tid && text.trim() && !wasWorking && !persistedTurnsRef.current.has(tid)) {
+        persistedTurnsRef.current.add(tid);
+        setStreamMsgs(prev => {
+          const last = prev[prev.length - 1];
+          if (last && last.type === 'assistant' && last.text === text) return prev;
+          return [...prev, { id: nextId(), type: 'assistant', text }];
+        });
+      }
+      observed = ''; curTurnId = ''; wasWorking = false;
+      setRemoteTurnActive(false); setRemoteTurnText('');
+    });
     es.onerror = () => { setRemoteTurnActive(false); setRemoteTurnText(''); };
     return () => { es.close(); presenceSseRef.current = null; };
   }, [activeAimeeSid, activeAttachId]);

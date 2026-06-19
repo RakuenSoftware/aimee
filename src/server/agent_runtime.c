@@ -1,4 +1,5 @@
 #include "aimee.h"
+#include "agent_config.h" /* agent_request_cancelled — server-owned turn lifecycle */
 #include "db1.h"
 #include "delegate_role.h"
 #include "skill_curator.h"
@@ -326,6 +327,17 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
 {
    memset(out, 0, sizeof(*out));
 
+   /* Cooperative cancellation (server-owned turn lifecycle): abort before a
+    * (potentially long) provider call if the turn was already cancelled
+    * (session close / shutdown / graceful_cancel). Finer-grained mid-call
+    * interruption of the in-process path is a follow-up; the CLI/subprocess
+    * path is interrupted directly via its poll loop. */
+   if (agent_request_cancelled())
+   {
+      snprintf(out->error, sizeof(out->error), "turn cancelled");
+      return -1;
+   }
+
    agent_t *ag = agent_route(cfg, role);
    if (!ag)
    {
@@ -371,6 +383,8 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
 
       for (int fi = 0; fi < cfg->fallback_count && rc != 0; fi++)
       {
+         if (agent_request_cancelled())
+            break; /* stop trying fallbacks once the turn is cancelled */
          agent_t *fb = agent_find(cfg, cfg->fallback_chain[fi]);
          if (!fb || !fb->enabled || fb == ag)
             continue;

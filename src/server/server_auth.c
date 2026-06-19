@@ -120,6 +120,7 @@ const method_policy_t method_registry[] = {
     {"agent.episodes", CAP_DELEGATE, "agent episode history"},
     {"eval.*", CAP_DELEGATE, "eval harness"},
     {"chat.send_stream", CAP_CHAT, "chat stream"},
+    {"chat.graceful_cancel", CAP_CHAT, "cancel an in-flight chat turn (owner-authz)"},
     {"mcp.tools_list", CAP_TOOL_EXECUTE, "MCP tool list"},
     {"mcp.audit", CAP_TOOL_EXECUTE, "MCP OSV audit"},
     {"mcp.recheck", CAP_TOOL_EXECUTE, "MCP OSV recheck"},

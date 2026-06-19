@@ -119,6 +119,20 @@ add_test(NAME test_compute_pool COMMAND test_compute_pool)
 set_tests_properties(test_compute_pool PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Per-turn cancel registry (server-owned turn lifecycle). Built standalone with a
+# stub presence_session_owner so it does not pull aimee-core (which would clash
+# with its own copy of the symbol).
+add_executable(test_turn_registry test_turn_registry.c ../server/turn_registry.c support/log_stub.c)
+target_include_directories(test_turn_registry PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..
+  ${CMAKE_CURRENT_SOURCE_DIR}/../headers
+  ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/headers)
+aimee_enable_test_asserts(test_turn_registry)
+target_link_libraries(test_turn_registry PRIVATE Threads::Threads)
+add_test(NAME test_turn_registry COMMAND test_turn_registry)
+set_tests_properties(test_turn_registry PROPERTIES
+  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 add_executable(test_server_session_pools test_server_session_pools.c ../server/server_session_pools.c
   ../server/compute_pool.c support/log_stub.c)
 target_include_directories(test_server_session_pools PRIVATE
