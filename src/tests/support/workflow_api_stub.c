@@ -45,3 +45,24 @@ int wf_api_item(const char *id, char *resp, int cap)
    (void)id;
    return stub(resp, cap);
 }
+
+/* Autonomous-development intake symbols referenced by rh_dev_submit in
+ * server_http_routes.inc. Stubbed so tests that link server_http.o don't pull the
+ * wfe engine + scheduler + DB1 store; the real path is covered by
+ * unit-test-wfe-scheduler / unit-test-wfe-engine. */
+int wfe_work_item_create(const char *workflow_name, const char *repo, const char *proposal_path,
+                         const char *mode, char out_id[80], char *err, size_t errlen)
+{
+   (void)workflow_name;
+   (void)repo;
+   (void)proposal_path;
+   (void)mode;
+   (void)err;
+   (void)errlen;
+   if (out_id)
+      snprintf(out_id, 80, "stub-wi");
+   return 0;
+}
+void wfe_scheduler_notify(void)
+{
+}
