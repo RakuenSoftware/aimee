@@ -535,6 +535,30 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /dev/submit:
+    post:
+      summary: Submit a proposal for autonomous development (runs server-side via the workflow engine)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [proposal_md]
+              properties:
+                proposal_md: { type: string, description: The proposal to execute autonomously }
+                workflow: { type: string, description: Workflow name (default "build") }
+                repo: { type: string, description: Optional repo identifier }
+      responses:
+        "200":
+          description: "{work_item_id, workflow, state}"
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing proposal_md
+        "500":
+          description: Could not create the work item
   /runs:
     post:
       summary: Create and run an inference run (synchronous); retrievable by id

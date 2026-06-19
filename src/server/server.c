@@ -18,6 +18,7 @@
 #include "skill_review.h"
 #include "trigger_scheduler.h"
 #include "wfe_live_delegate.h"
+#include "wfe_scheduler.h"
 #include "server_trigger.h"
 #include "server_cron.h"
 #include "server_pipeline.h" /* roundtable authoring pipeline (pipeline.*) */
@@ -1691,6 +1692,7 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * end-to-end server-side. Registration runs nothing on its own — a run begins
     * only when intake creates a work item and the autonomy driver advances it. */
    wfe_autonomy_register();
+   wfe_scheduler_init();
    /* Provision the delegate vault from operator-supplied secrets before serving,
     * so a freshly stood-up server's delegates/roundtables work without a manual
     * `vault set`. No-op unless a secret source is configured. */
@@ -1717,6 +1719,7 @@ void server_shutdown(server_ctx_t *ctx)
    trigger_scheduler_shutdown();
    server_delegate_monitor_shutdown();
    server_coord_dispatcher_shutdown();
+   wfe_scheduler_shutdown();
    /* Reap any per-webuser code-server editors so they don't outlive us (WP-I). */
    webuser_editor_shutdown();
    /* Drain request handlers while compute/async lanes are still available for

@@ -109,6 +109,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-wfe-custom \
                $(TESTPREFIX)/unit-test-wfe-safety \
                $(TESTPREFIX)/unit-test-wfe-delegate-seam \
+               $(TESTPREFIX)/unit-test-wfe-scheduler \
                $(TESTPREFIX)/unit-test-wfe-webapi \
                $(TESTPREFIX)/unit-test-cli-profile \
                $(TESTPREFIX)/unit-test-cmd-profile \
@@ -1108,6 +1109,20 @@ $(TESTPREFIX)/unit-test-wfe-delegate-seam: $(OBJDIR)/tests/test_wfe_delegate_sea
                                     $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
                                     $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
                                     $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
+                                    $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
+                                    $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-wfe-scheduler: $(OBJDIR)/tests/test_wfe_scheduler.o \
+                                    $(OBJDIR)/server/wfe_scheduler.o $(OBJDIR)/workflow/wfe_autonomy.o \
+                                    $(OBJDIR)/tests/support/log_stub.o \
+                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \
+                                    $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
+                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
+                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
+                                    $(OBJDIR)/workflow/wfe_roundtable.o $(OBJDIR)/workflow/wfe_approval.o \
+                                    $(OBJDIR)/workflow/wfe_verdict.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

@@ -794,6 +794,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/presence.c
     ${AIMEE_SRC_DIR}/server/turn_registry.c
     ${AIMEE_SRC_DIR}/server/wfe_live_delegate.c
+    ${AIMEE_SRC_DIR}/server/wfe_scheduler.c
     ${AIMEE_SRC_DIR}/server/vault_principal.c
     ${AIMEE_SRC_DIR}/server/vault_crypto.c
     ${AIMEE_SRC_DIR}/server/vault_kek_cache.c

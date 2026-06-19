@@ -24,6 +24,11 @@
 #include "webuser_editor.h"   /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
 #include "workspace_scope.h"  /* ws_scope_user_root — project workspace root */
 #include "index.h"            /* index_scan_project after a webuser clone (WP-D) */
+#include "aimee_home.h"       /* aimee_home — proposal artifact dir for /v1/dev/submit */
+#include "wfe_engine.h"       /* wfe_work_item_create — POST /v1/dev/submit intake */
+#include "wfe_scheduler.h"    /* wfe_scheduler_notify — resume the autonomy driver */
+#include <sys/stat.h>         /* mkdir for the proposal artifact dir */
+#include <time.h>             /* unique proposal artifact filename */
 
 /* Per-request context handed to a route handler. `id` holds the extracted
  * dynamic path segment (persona / role-template name, session id, run id) for
@@ -164,6 +169,71 @@ static int rh_runs_post(const route_req_t *rq, char *resp, int cap)
 {
    return route_native_post(g_runs_handler, rq->body, resp, cap,
                             "runs are not available on this server");
+}
+
+/* POST /v1/dev/submit {proposal_md, workflow?, repo?} — autonomous development
+ * intake. Seeds the proposal as a work-item artifact, creates an AUTONOMOUS wfe
+ * work item on the chosen workflow (default "build"), and notifies the scheduler
+ * to drive it server-side. The run proceeds independent of this connection;
+ * human gates park it for approval. Returns {work_item_id}. This is the ONLY way
+ * an autonomous run begins — aimee never self-initiates. */
+static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
+{
+   cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
+   cJSON *jprop = body ? cJSON_GetObjectItemCaseSensitive(body, "proposal_md") : NULL;
+   if (!jprop || !cJSON_IsString(jprop) || !jprop->valuestring[0])
+   {
+      cJSON_Delete(body);
+      snprintf(resp, cap, "{\"error\":\"proposal_md is required\"}");
+      return 400;
+   }
+   cJSON *jwf = cJSON_GetObjectItemCaseSensitive(body, "workflow");
+   cJSON *jrepo = cJSON_GetObjectItemCaseSensitive(body, "repo");
+   const char *workflow = (jwf && cJSON_IsString(jwf) && jwf->valuestring[0]) ? jwf->valuestring
+                                                                              : "build";
+   const char *repo = (jrepo && cJSON_IsString(jrepo)) ? jrepo->valuestring : "";
+
+   /* Persist the submitted proposal to a unique artifact path. */
+   const char *home = aimee_home();
+   char dir[1024];
+   snprintf(dir, sizeof dir, "%s/workflows/proposals", home ? home : "/tmp");
+   mkdir(dir, 0700); /* best effort; parent created by standup */
+   char ppath[1152];
+   snprintf(ppath, sizeof ppath, "%s/wi-%ld-%d.md", dir, (long)time(NULL), (int)getpid());
+   FILE *pf = fopen(ppath, "wb");
+   if (!pf)
+   {
+      cJSON_Delete(body);
+      snprintf(resp, cap, "{\"error\":\"could not persist proposal\"}");
+      return 500;
+   }
+   fwrite(jprop->valuestring, 1, strlen(jprop->valuestring), pf);
+   fclose(pf);
+
+   char id[80] = "", err[256] = "";
+   int rc = wfe_work_item_create(workflow, repo, ppath, "autonomous", id, err, sizeof err);
+   if (rc != 0 || !id[0])
+   {
+      cJSON *e = cJSON_CreateObject();
+      cJSON_AddStringToObject(e, "error", err[0] ? err : "failed to create work item");
+      char *s = cJSON_PrintUnformatted(e);
+      snprintf(resp, cap, "%s", s ? s : "{\"error\":\"failed to create work item\"}");
+      free(s);
+      cJSON_Delete(e);
+      cJSON_Delete(body);
+      return 500;
+   }
+   cJSON_Delete(body);
+   wfe_scheduler_notify(); /* drive it now; the run continues server-side */
+   cJSON *ok = cJSON_CreateObject();
+   cJSON_AddStringToObject(ok, "work_item_id", id);
+   cJSON_AddStringToObject(ok, "workflow", workflow);
+   cJSON_AddStringToObject(ok, "state", "active");
+   char *s = cJSON_PrintUnformatted(ok);
+   snprintf(resp, cap, "%s", s ? s : "{}");
+   free(s);
+   cJSON_Delete(ok);
+   return 200;
 }
 
 static int rh_chat(const route_req_t *rq, char *resp, int cap)
@@ -1544,6 +1614,10 @@ static const http_route_t g_v1_routes[] = {
     /* Runs: create (compute), cancel (compute), live events (read, streamed by
      * handle_conn), status (read). The /events and /stop rows precede the bare
      * /v1/runs/<id> row; the one-segment <id> rule keeps them unambiguous. */
+    /* Autonomous development intake: submit a proposal for end-to-end execution
+     * (CAP_DELEGATE — it spawns delegate work). The only way an autonomous run
+     * begins; aimee never self-initiates. */
+    {"POST", "/v1/dev/submit", NULL, RM_EXACT, NULL, CAP_DELEGATE, rh_dev_submit},
     {"POST", "/v1/runs", NULL, RM_EXACT, NULL, CAP_CHAT, rh_runs_post},
     {"POST", "/v1/runs/", "/stop", RM_PREFIX, NULL, CAP_CHAT, rh_runs_stop},
     {"GET", "/v1/runs/", "/events", RM_PREFIX, NULL, CAP_SESSION_READ, NULL},
