@@ -728,7 +728,7 @@ and bearer. See [Run in Docker](#run-in-docker) for every topology.
 Each developer installs only the `aimee` CLI and points it at the server. Prebuilt
 binaries for **Linux, macOS, and Windows** are attached to every GitHub release;
 download one, put it on your `PATH`, and skip the build. To build it yourself,
-configure with `-DAIMEE_THIN_CLIENT=ON` (a C compiler is the only dependency — no
+configure with `-DAIMEE_THIN_CLIENT=ON` (a C compiler is the only dependency; no
 Go, libpq, or zstd); see [Build just the thin client](#build-just-the-thin-client).
 
 Point the client at the server per-invocation, via the environment, or persist it:
@@ -784,7 +784,8 @@ cd aimee
 ```
 
 `install-deps.sh` installs the system packages aimee builds against and bootstraps
-the `aimee_shared` PostgreSQL database — the only steps that need root. `install.sh`
+the `aimee_shared` PostgreSQL database. Those are the only steps that need root.
+`install.sh`
 builds from source, installs binaries to `~/.local/bin/`, installs service units
 where supported (systemd user units on Linux, launchd agents on macOS), enables
 `aimee-kb` then `aimee-server`, and configures hooks + MCP for every detected tool.
@@ -914,7 +915,7 @@ graph TB
   live in one database (`aimee_shared`) with the `pg_trgm` and `vector` (pgvector)
   extensions. Scale it like any Postgres: bigger instance, pooling, read replicas.
   For large vector corpora add **`pgvectorscale`** (StreamingDiskANN) on top of
-  pgvector — identical data and queries, so switching is a reindex, not a migration.
+  pgvector, with identical data and queries, so switching is a reindex, not a migration.
   Small and local installs stay on plain pgvector (HNSW).
 
 See the [Manual](../MANUAL.md#275-scaling-and-multi-user-deployment) and

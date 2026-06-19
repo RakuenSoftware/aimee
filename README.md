@@ -11,8 +11,9 @@ C, sub-10ms, with no cloud dependencies.
 
 It starts as persistent memory for your AI coding tool. One install, and every
 session starts knowing what the last one learned. The same substrate scales to a
-company-wide knowledge base that distills what your whole organization knows — code,
-product, sales, support, ops — and routes work to the cheapest capable model. See
+company-wide knowledge base that distills what your whole organization knows across
+code, product, sales, support, and ops, then routes work to the cheapest capable
+model. See
 [How aimee learns](docs/KNOWLEDGE.md).
 
 ## The problem
@@ -61,7 +62,7 @@ information decays. Every session starts already knowing what matters.
 
 A curator pipeline extracts, synthesizes, judges, and promotes that into a typed
 graph, and reflects on idle time to improve it. Point a team at a shared `aimee-kb`
-and it shares everyone's knowledge with everyone, across all domains, not just code.
+and the whole team shares one knowledge base, across every domain.
 See [How aimee learns](docs/KNOWLEDGE.md).
 
 ### Guardrails
