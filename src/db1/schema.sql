@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS agent_cache ( id INTEGER PRIMARY KEY, role TEXT NOT N
 CREATE INDEX IF NOT EXISTS idx_agent_cache_lookup ON agent_cache(role, prompt);
 CREATE TABLE IF NOT EXISTS primary_sessions ( session_id TEXT NOT NULL, agent_name TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT '', messages_json TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (session_id, agent_name, provider));
 CREATE INDEX IF NOT EXISTS idx_primary_sessions_updated ON primary_sessions(updated_at DESC);
+CREATE TABLE IF NOT EXISTS webchat_claude_sessions ( principal TEXT NOT NULL DEFAULT '', aimee_session_id TEXT NOT NULL, claude_session_id TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (principal, aimee_session_id));
+CREATE INDEX IF NOT EXISTS idx_webchat_claude_sessions_csid ON webchat_claude_sessions(claude_session_id);
 CREATE TABLE IF NOT EXISTS env_capabilities ( key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '', detected_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE TABLE IF NOT EXISTS maintenance_state ( key TEXT PRIMARY KEY, last_run_at TEXT NOT NULL DEFAULT '', last_memory_count INTEGER NOT NULL DEFAULT 0, last_changes INTEGER NOT NULL DEFAULT 0, last_elapsed_ms REAL NOT NULL DEFAULT 0, last_summary_json TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS wc_channels ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT (datetime('now')));

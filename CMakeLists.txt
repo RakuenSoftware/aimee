@@ -333,6 +333,7 @@ set(DB1_SRCS
     ${AIMEE_SRC_DIR}/db1/workflow_session.c
     ${AIMEE_SRC_DIR}/db1/caches.c
     ${AIMEE_SRC_DIR}/db1/primary_sessions.c
+    ${AIMEE_SRC_DIR}/db1/webchat_claude_sessions.c
     ${AIMEE_SRC_DIR}/db1/env.c
     ${AIMEE_SRC_DIR}/db1/delegations.c
     ${AIMEE_SRC_DIR}/db1/delegation_checkpoint.c
