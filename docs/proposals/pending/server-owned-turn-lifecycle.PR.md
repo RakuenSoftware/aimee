@@ -44,7 +44,15 @@ Authored and reviewed through aimee's own multi-agent roundtable
 |------|--------|-----------------|
 | Design proposal | 4 | 25 → 7 → 1 → **0 (approved)** |
 | Implementation plan | 2 | 11 → **0 (approved)** |
-| Implementation diff | 3 | 5 → 7 → **0 (approved)** |
+| Implementation diff | 3 | 5 → 7 → 0 (weak panel) |
+| Implementation diff (re-review) | 2 | 5 → **0 (approved)** |
+
+A mid-review reliability bug was caught and fixed: one panelist
+(`mistral-medium`) was returning thin 1–10 s reviews. Upgrading that seat to
+`mistral-large` produced a substantive 3-model panel, which surfaced 5 real
+issues the thin panel had passed (unwired racy `sweep_dead`, `waitpid` ECHILD
+misclassification, a cancel-registration ordering gap, graceful_cancel audit).
+Those were fixed and the diff re-approved with `participants_failed: 0`.
 
 Design + plan: `docs/proposals/pending/server-owned-turn-lifecycle{,.plan}.md`.
 
