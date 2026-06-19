@@ -75,8 +75,9 @@ int handle_chat_graceful_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
     * surface to bind session id -> authenticated caller before forwarding; this
     * log makes that path auditable. NOTE: the webchat/gateway surfaces MUST
     * enforce that binding — tracked as a WP-5 requirement). */
-   aimee_log(LOG_INFO, "graceful_cancel", "cancel request: session=%s trusted_local=%d principal=%s",
-             sid, trusted_local, conn->vault_principal[0] ? conn->vault_principal : "(none)");
+   aimee_log(LOG_INFO, "graceful_cancel",
+             "cancel request: session=%s trusted_local=%d principal=%s", sid, trusted_local,
+             conn->vault_principal[0] ? conn->vault_principal : "(none)");
    if (trusted_local)
       rc = turn_registry_cancel(sid, NULL);
    else if (conn->vault_principal[0])

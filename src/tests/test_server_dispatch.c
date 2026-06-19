@@ -412,6 +412,10 @@ int handle_session_close(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "session.close");
 }
+int handle_chat_graceful_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "chat.graceful_cancel");
+}
 int handle_session_brief(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "session.brief");
