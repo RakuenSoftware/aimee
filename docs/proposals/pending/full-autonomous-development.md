@@ -92,6 +92,36 @@ source-authority TLS context (per [[delegate-concurrency-env-race]]). `implement
 is a bounded delegate fan-out over the plan's units; each unit lands on the
 branch; failures are surfaced as a verdict, not a crash.
 
+### WP-1b — Primary MANAGES; delegates DO; primary verifies (user, 2026-06-19)
+The autonomous **primary agent is a manager, not a worker.** It never authors
+artifacts or code itself and never does the hands-on verification labor — it
+decomposes, dispatches, adjudicates, and loops. All production work and all
+verification labor run in delegates (and automated gates). The `implement` stage
+is a manager-driven loop:
+
+1. **Split.** The primary decomposes the plan into independent, file/module-scoped
+   work units sized for one delegate turn (minimal interdependence).
+2. **Dispatch.** Each unit → an `engineer` delegate that implements it in the
+   work-item worktree and commits (reuse `delegate_patch_coordinator` for parallel
+   patch integration; per-delegate source-authority TLS isolates concurrent units,
+   per [[delegate-concurrency-env-race]]).
+3. **Verify as hard as possible — also via delegates/gates, not the primary's own
+   hands.** In ascending cost: (a) mechanical — build compiles, targeted
+   tests/lint pass (`gate.ci` / custom command blocks); (b) review — a
+   `gate.roundtable` / `reviewer` delegate panel checks the unit against its spec;
+   (c) adversarial — N skeptic verifier delegates prompted to *refute* risky
+   changes; majority-refute → reject. The primary only *adjudicates* the verdicts.
+4. **Re-delegate on reject (user, 2026-06-19).** When verification deems a unit
+   unacceptable, the primary may **send it back to a *different* delegate** for
+   rework (fresh perspective), not necessarily the original author — bounded by a
+   per-unit retry cap (Q2); on exhaustion, park per the failure taxonomy (Q4).
+
+Only verified units advance. This is a first-class engine concern built from the
+existing block catalog (`gate.*`, delegate fan-out) — never an out-of-band action,
+consistent with the all-autonomy-through-wfe invariant. The primary's role maps
+to the engine's autonomy driver + a coordinator delegate; the workers are
+ordinary delegates.
+
 ### WP-2 — Forge blocks
 Wire `pr.open` and `merge` to the existing git/forge layer (`mcp_git_*`,
 `git_forge_vault`, per-host creds) so the autonomous run opens a real PR and (on

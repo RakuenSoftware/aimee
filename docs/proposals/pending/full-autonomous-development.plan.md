@@ -40,9 +40,19 @@ freeze/pr.open git ops act on this worktree, not the server cwd.
   proposal, `engineer`/`architect` for plan) to author/edit the artifact at
   `wfe_ctx_proposal_path` inside the worktree; commit; hash the artifact as the
   produced handle (keep the existing fail-closed-if-absent behavior).
-- `exec_implement`: bounded delegate fan-out over the plan's units (Q2 — single
-  vs fan-out + patch-coordinator); each unit lands a commit on the branch;
-  aggregate failures into a verdict; fail-closed if nothing landed.
+- `exec_implement`: the **manager loop** (WP-1b). The primary (autonomy driver +
+  a coordinator delegate) only *manages* — it never writes code or does hands-on
+  verification:
+  1. split the plan into independent work units;
+  2. fan out each unit to an `engineer` delegate (via `delegate_patch_coordinator`);
+  3. verify each unit via delegates/gates — mechanical (build/test/lint), review
+     (`reviewer` panel), adversarial (skeptic refuters); the primary only
+     *adjudicates* the verdicts;
+  4. on reject, **re-delegate the unit to a *different* delegate** (bounded
+     retries, Q2); on exhaustion, park (Q4).
+  Each accepted unit lands a commit on the branch; fail-closed if nothing landed.
+  Decomposition + verification policy are config-driven (fan-out width, retry
+  caps, which verification tiers are mandatory).
 - `exec_document`: delegate writes docs/comments onto the branch; commit.
 - `exec_pr_open`: `git push` the work-item branch, then `g_forge->open(repo,
   branch, title, body)` (new vtable method) → store the PR ref on the work item
