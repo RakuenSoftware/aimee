@@ -686,7 +686,8 @@ void memory_coref_stats_reset(void)
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
-#include "util.h" /* util_now_ms — memory.search stage timing */
+#include "util.h"       /* util_now_ms — memory.search stage timing */
+#include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
 #include "cJSON.h"
 #include "dogfood.h"
 #include <ctype.h>

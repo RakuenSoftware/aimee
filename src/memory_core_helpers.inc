@@ -1714,8 +1714,49 @@ enum
 {
    MEMORY_QEMBED_CAP = 32,
    MEMORY_QEMBED_TEXT_MAX = 1024,
-   MEMORY_QEMBED_CMD_MAX = 512
+   MEMORY_QEMBED_CMD_MAX = 512,
+   MEMORY_EMBED_HTTP_TIMEOUT_MS = 30000
 };
+
+/* In-process HTTP embedding. When embedding_command is an http(s):// URL we POST
+ * to the embedder directly instead of forking an interpreter, so a query embed is
+ * a ~10ms round-trip rather than a process spawn. Under host CPU load (curator,
+ * indexing) the spawn dominates memory-search latency, so this is the difference
+ * between a fast search and a multi-second one. Non-URL commands keep the exec
+ * path. Endpoints match scripts/embedder-server.py: POST {base}/embed (raw text)
+ * and {base}/embed_batch (JSON array of strings); the server ignores Content-Type
+ * and reads the raw body, so agent_http_post's default header is fine. */
+static int memory_embed_command_is_http(const char *cmd)
+{
+   return cmd && (strncmp(cmd, "http://", 7) == 0 || strncmp(cmd, "https://", 8) == 0);
+}
+
+/* Join an embedder base URL and an endpoint path, dropping a trailing slash on
+ * the base so "http://e:8080/" + "/embed" -> "http://e:8080/embed". */
+static void memory_embed_http_url(const char *base, const char *path, char *out, size_t out_len)
+{
+   size_t n = strlen(base);
+   while (n > 0 && base[n - 1] == '/')
+      n--;
+   snprintf(out, out_len, "%.*s%s", (int)n, base, path);
+}
+
+/* POST body to {base}{path}; on success returns 0 with the response body in
+ * *resp (caller frees). Any transport error or non-2xx leaves *resp NULL. */
+static int memory_embed_http_post(const char *base, const char *path, const char *body, char **resp)
+{
+   char url[1024];
+   memory_embed_http_url(base, path, url, sizeof(url));
+   *resp = NULL;
+   int status = agent_http_post(url, NULL, body, resp, MEMORY_EMBED_HTTP_TIMEOUT_MS, NULL);
+   if (status < 200 || status >= 300 || !*resp)
+   {
+      free(*resp);
+      *resp = NULL;
+      return -1;
+   }
+   return 0;
+}
 
 typedef struct
 {
@@ -1865,10 +1906,20 @@ static void memory_query_embed_prewarm(const char *const *texts, int n, const ch
    if (!input)
       return;
    char *buf = NULL;
-   size_t buf_len = 0;
-   int rc = platform_exec_pipe(cmd, input, strlen(input), &buf, &buf_len);
+   int rc;
+   if (memory_embed_command_is_http(cmd))
+   {
+      rc = memory_embed_http_post(cmd, "/embed_batch", input, &buf);
+   }
+   else
+   {
+      size_t buf_len = 0;
+      rc = platform_exec_pipe(cmd, input, strlen(input), &buf, &buf_len);
+      if (rc == 0 && (!buf || buf_len == 0))
+         rc = -1;
+   }
    free(input);
-   if (rc != 0 || !buf || buf_len == 0)
+   if (rc != 0 || !buf)
    {
       free(buf);
       return; /* lanes fall back to individual embeds */

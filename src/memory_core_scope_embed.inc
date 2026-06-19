@@ -343,12 +343,26 @@ int memory_embed_text(const char *text, const char *command, float *out, int max
 
    char *buf = NULL;
    size_t buf_len = 0;
-   int rc = platform_exec_pipe(command, text, strlen(text), &buf, &buf_len);
-   if (rc != 0)
+   if (memory_embed_command_is_http(command))
    {
-      aimee_log(LOG_WARN, "memory", "embedding command failed (exit %d)", rc);
-      free(buf);
-      return 0;
+      /* In-process HTTP embed: POST raw text to {base}/embed, no fork. */
+      if (memory_embed_http_post(command, "/embed", text, &buf) != 0 || !buf)
+      {
+         aimee_log(LOG_WARN, "memory", "embedding HTTP request failed");
+         free(buf);
+         return 0;
+      }
+      buf_len = strlen(buf);
+   }
+   else
+   {
+      int rc = platform_exec_pipe(command, text, strlen(text), &buf, &buf_len);
+      if (rc != 0)
+      {
+         aimee_log(LOG_WARN, "memory", "embedding command failed (exit %d)", rc);
+         free(buf);
+         return 0;
+      }
    }
    if (!buf || buf_len == 0)
    {
