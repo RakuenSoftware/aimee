@@ -61,8 +61,11 @@ curl -sX POST http://127.0.0.1:8740/v1/dev/submit \
 
 A `401` means the token is missing/invalid; `400` means `proposal_md` was empty.
 On success the run proceeds on the server — you can close the connection and it
-continues. The webchat **Workflows** tab shows live progress and surfaces the
-human gates as actionable approvals.
+continues. The webchat **Workflows** tab lists the run and highlights its current
+stage on the lifecycle diagram. (Submitting a proposal and approving/rejecting
+its human gates are currently done via the API — see
+[Current limitations](#current-limitations); a webchat submit form + in-tab gate
+approvals are in progress.)
 
 Request fields:
 
@@ -129,7 +132,11 @@ Autonomous does not mean unsupervised. The workflow reserves **human gates**
 - **never forges a human approval** — gate-override is a signed, human-only action
   capped at a small number of uses.
 
-Approve or reject a parked gate from the webchat Workflows tab (or the gate API).
+A human approval is non-repudiable: it's HMAC-signed with an operator key
+(`$AIMEE_HOME/.approval-key`, mode 0600) that delegate processes cannot read, so
+a delegate can never forge one. Approvals are recorded as `approve` lifecycle
+events. (Granting an approval is currently an operator/API action; an in-tab
+approve/reject control is in progress.)
 
 ## Server-owned execution
 
@@ -168,9 +175,9 @@ Autonomous development is default-on; the guardrails are structural, not a toggl
 
 ## Observability
 
-- **Webchat Workflows tab** — live progress per work item: current stage, gate
-  verdicts, parked state, and the actionable approve/reject controls for human
-  gates.
+- **Webchat Workflows tab** — lists work items with their run state and
+  highlights the current stage on the lifecycle diagram (read-only run viewer
+  today; submit + in-tab gate approvals are in progress).
 - **Event stream** — a run publishes its full turn stream (text, tool calls,
   usage, boundaries) to the presence event ring; the webchat replays it live and,
   after a disconnect, from a cursor.
@@ -187,7 +194,7 @@ resumes it automatically once the blocker clears:
 
 | pause reason | what it means | how it resumes |
 |--------------|---------------|----------------|
-| `pending_human` | waiting at a human gate (proposal approval / final pass-fail) | approve or reject in the webchat Workflows tab → the scheduler re-drives |
+| `pending_human` | waiting at a human gate (proposal approval / final pass-fail) | record an approval (operator/API today) → the scheduler re-drives |
 | `panel_degraded` / `panel_unreachable` | the roundtable couldn't reach a quorum | retried on the next sweep; a human can approve to proceed |
 | `ci_pending` | the PR's CI hasn't concluded | re-checked on the next sweep |
 | `merge_pending` | the forge merge state is undeterminable | re-checked on the next sweep |
@@ -205,8 +212,12 @@ auto-retried without new input (a CI log or a roundtable verdict).
 Honest scope of the current implementation (the design allows for more):
 
 - **Submit takes `proposal_md`, `workflow`, `repo` only.** Per-run `limits` and
-  gate **preauthorization** are not yet accepted at `/v1/dev/submit`; gates are
-  handled interactively via the webchat, and the cost cap is a work-item field.
+  gate **preauthorization** are not yet accepted at `/v1/dev/submit`, and the
+  cost cap is a work-item field.
+- **Webchat is API-first for now.** The Workflows tab is a read-only run viewer;
+  there is **no submit form and no in-tab gate approve/reject control yet** —
+  submit a proposal and record gate approvals via the API. (Both are in
+  progress.)
 - **No dedicated `resume`/`abort`/`audit` HTTP endpoints yet.** Resume is
   event-driven (gate approval + the scheduler sweep); drive and inspect runs via
   the webchat Workflows tab and the `lifecycle_*` audit tables.
