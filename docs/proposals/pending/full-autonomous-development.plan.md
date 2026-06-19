@@ -99,3 +99,35 @@ commit/PR audited and attributed to the run.
 Q1 scheduler home; Q2 implement granularity + retry bound; Q3 CI feedback
 loop + red-CI retry cap; Q4 failure taxonomy; Q5 multi-run worktree/source-auth
 isolation under load.
+
+## Roundtable resolutions (2026-06-19, 2 mistral lenses — architect + security)
+
+Verdict: **no blocking flaws** in Phase A; invariant (all-autonomy-through-wfe)
+**confirmed sound** by both. Converged decisions:
+
+- **Q1 — scheduler home:** Extend the existing **coord-dispatcher / `turn_registry`**,
+  not a new subsystem. The scheduler is "just another turn type" that resumes
+  `wfe_autonomy_run()`; reuse single-flight, crash recovery, and presence
+  integration from PR #514.
+- **Q2 — implement granularity:** Fan-out over plan units (one delegate per
+  file/module unit) + a **patch-coordinator** merge delegate. Retry bound **2–3
+  per unit**; if >50% of units fail, park. Model the patch-coordinator as a
+  sub-block of `implement` (its own verdict/retry, audited) so it stays inside
+  the wfe catalog (the only invariant gap either lens found).
+- **Q3 — CI loop:** **Webhook** for `gate.ci` (not poll), firing the scheduler's
+  resume hook. Red-CI auto-retry cap **1–2**, looping back to `implement` with
+  the CI failure log as input; then park.
+- **Q4 — failure taxonomy:** transient delegate/CI errors → bounded auto-retry;
+  model refusal / permanent error → terminal-reject; roundtable-degraded,
+  budget-breach, git/forge failure → park (`pending_human`); worktree corruption
+  → terminal. **Invariant: never auto-retry without new input** (CI log /
+  roundtable verdict) — prevents infinite loops.
+- **Q5 — multi-run isolation:** existing per-work-item worktree + source-authority
+  TLS holds; **use `git worktree lock` during delegate runs** so worktree-GC
+  can't prune an active run; load-validate (N≈100) in Phase C.
+
+Additional adopted refinements: verdict aggregation must distinguish
+partial-success from total-failure and log partial commits; patch-coordinator
+actions audited + attributed to the work item.
+
+**Plan status: roundtable-approved.** Ready to implement Phase A.
