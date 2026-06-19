@@ -137,6 +137,12 @@ sqlite3 *db2_shared_sqlite(void)
 
 void db2_set_ephemeral(int ephemeral)
 {
+   /* Ephemeral is a TEST/EVAL-only mode (the in-memory sqlite shim). A real
+    * libpq instance must never enter it: ephemeral suppresses durable vector
+    * writes (db2_vector_index_sync_suppressed), so flipping it on in production
+    * would silently stop memory embeddings from persisting. Refuse, fail-safe. */
+   if (ephemeral && !aimee_pg_is_shim())
+      return;
    pthread_mutex_lock(&g_shared_sqlite_lock);
    g_shared_ephemeral = ephemeral ? 1 : 0;
    pthread_mutex_unlock(&g_shared_sqlite_lock);
@@ -144,6 +150,11 @@ void db2_set_ephemeral(int ephemeral)
 
 int db2_is_ephemeral(void)
 {
+   /* Belt-and-suspenders with db2_set_ephemeral: a real libpq (production)
+    * instance is NEVER ephemeral, regardless of the stored flag. Ephemeral
+    * only has meaning under the sqlite shim used by tests/evals. */
+   if (!aimee_pg_is_shim())
+      return 0;
    pthread_mutex_lock(&g_shared_sqlite_lock);
    int v = g_shared_ephemeral;
    pthread_mutex_unlock(&g_shared_sqlite_lock);
@@ -662,6 +673,9 @@ void db2_eval_close_temp_store(void)
 {
    if (!g_eval_temp_store_handle)
       return;
+   /* Restore non-ephemeral when the eval scratch store goes away, so the flag
+    * can never outlive the eval that set it. */
+   db2_set_ephemeral(0);
 #ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
    db2_maybe_clear_sqlite_cache(g_eval_temp_store_handle);
    db2_register_shared_sqlite(NULL);

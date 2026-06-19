@@ -23,6 +23,15 @@
  * db2-specific contract tests run against actual Postgres.
  */
 
+/* TEST-ONLY enforcement: this shim makes aimee_pg_is_shim() return 1, which the
+ * ephemeral/vector-sync-suppression path keys off. It must NEVER be compiled
+ * into a production build. Production server/kb objects are built with
+ * AIMEE_DISABLE_DB2_SQLITE_SHIM; test objects are not. Fail the build loudly if
+ * this file is ever pulled into a production (shim-disabled) compilation. */
+#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
+#error "aimee_pg_sqlite_shim.c is test-only and must not be compiled into a production build"
+#endif
+
 #include "db_postgres.h"
 #include "../db2/db2.h"
 #include "../db2/db2_internal.h"
