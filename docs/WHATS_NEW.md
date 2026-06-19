@@ -7,26 +7,30 @@ current version and prints it once after an upgrade.
 
 ## Unreleased (testing)
 
-Thin-client hardening, the client machine owns the working tree and the
-secrets; see [THIN_CLIENT.md](THIN_CLIENT.md).
+Thin-client + credential hardening — the client owns the working tree; agent
+credentials live in the server's **sealed vault**; see
+[THIN_CLIENT.md](THIN_CLIENT.md).
 
-- **Client-held agent credentials**: agent/delegate API keys now live on the
-  client (`~/.config/aimee/agent-keys.json`), not on the server. `aimee agent
-  add … --key K` against a remote server keeps `K` local and strips it before
-  forwarding the definition. Keys are pushed once per session to a **RAM-only**
-  keyring on the server (`POST /v1/session/credentials`) and are **never written
-  to disk**, so a compromised server holds no durable secret store. Auth
-  resolution prefers the client-pushed session key over any server-stored key.
-- **Codex OAuth from the thin client**: add a Codex agent with no key
-  (`aimee agent add codex https://chatgpt.com/backend-api/codex gpt-5.5
-  --provider codex`); the client supplies the OAuth token from this machine's
-  `~/.codex/auth.json` per session. Works as a primary provider and a delegate.
+- **Server-sealed credential vault (single store)**: agent/delegate API keys and
+  Codex/OAuth tokens are sealed in the server's vault — encrypted at rest, keyed
+  by agent, and decryptable by the server autonomously (a dual-access wrap, no
+  interactive unlock). `aimee agent add … --key K` seals `K` into the vault;
+  plaintext storage is refused. Every turn resolves the credential from the vault
+  (the turn's attested principal, falling back to the server principal). The
+  legacy **client-held keyring and the RAM per-session push (`POST
+  /v1/session/credentials`) are gone**. Migrate any leftover
+  `~/.config/aimee/agent-keys.json` with `aimee agent key import [--scrub]`.
+- **Codex OAuth in the vault**: `aimee agent setup codex-oauth` runs the
+  server-hosted OAuth flow and seals the token into the vault; a Codex agent then
+  authenticates server-side as a primary provider or delegate, with no
+  per-session push from the client. A legacy plaintext token is migrated and
+  scrubbed on first use.
 - **Workspaces ingested from the client**: `aimee workspace add <path>` resolves
   the path locally, registers it as `detached`, and pushes the files to the
-  server (`POST /v1/index/ingest`, chunked under aimee-kb's body cap), the
+  server (`POST /v1/index/ingest`, chunked under aimee-kb's body cap) — the
   server never reads the client filesystem. `aimee index scan [path]` re-pushes.
 - **Claude runs on the thin client (standard `claude` CLI over tmux)**: a
-  `--provider claude` agent runs the standard `claude` CLI in a tmux session, it
+  `--provider claude` agent runs the standard `claude` CLI in a tmux session — it
   needs the `claude` binary, tmux, its login, and the working tree, none of which
   exist on a remote/containerized `aimee-server`. When the active workspace is
   `detached` (a thin client is serving it), aimee now runs that tmux session **on
@@ -41,7 +45,7 @@ secrets; see [THIN_CLIENT.md](THIN_CLIENT.md).
   you opt in with `aimee config set claude_cli_delegate_enabled true`. Driving a
   personal Claude subscription as an automated delegate may violate Anthropic's
   terms and risk account action; enabling the flag prints that warning once. This
-  gate is Claude-CLI-specific, all other agents (API-key/HTTP, and other CLI
+  gate is Claude-CLI-specific — all other agents (API-key/HTTP, and other CLI
   agents like the Codex CLI) are unaffected.
 - **Attention guard inert by default**: recursive raw scans flow freely unless a
   positive `ingress_max_raw_scans` cap is configured; the destructive-file guard
@@ -54,9 +58,9 @@ secrets; see [THIN_CLIENT.md](THIN_CLIENT.md).
   `aimee agent add … --provider codex` is accepted as an alias for the Codex
   adapter.
 
-Delegation defaults and the roundtable, see [DELEGATES.md](DELEGATES.md).
+Delegation defaults and the roundtable — see [DELEGATES.md](DELEGATES.md).
 
-- **Delegates work**: a default agent roster, the ensemble panel,
+- **Delegates work out of the box**: a default agent roster, the ensemble panel,
   and `remote_writes=full` ship seeded, so `aimee delegate …` and the roundtable
   run on a fresh install with no setup.
 - **Roundtable runs through the delegate core**: `aimee delegate aggregate`
@@ -70,7 +74,7 @@ Delegation defaults and the roundtable, see [DELEGATES.md](DELEGATES.md).
 - **Output limits come from the model**: token caps are derived from the model
   registry instead of a hardcoded 4096, so large-context models use their real
   ceiling.
-- **`ensemble.max_cost_usd` is optional**: a per-run cost cap is now opt-in,
+- **`ensemble.max_cost_usd` is optional**: a per-run cost cap is now opt-in —
   unset (or 0) means no limit, the default. Set a positive value to cap a run.
 
 ---

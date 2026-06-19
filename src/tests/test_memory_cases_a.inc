@@ -858,21 +858,24 @@ static void test_context_budget_prefers_project_scope_over_global_l5(void)
 
    assert(getcwd(cwd, sizeof(cwd)) != NULL);
    {
-      /* Project label resolves from the repo root (workspace_active_root)
-       * rather than raw cwd so tests pass regardless of which subdirectory
-       * they run from.  Matches the convention used by
-       * memory_scope_labels_for_cwd() in production. */
-      char project_root[MAX_PATH_LEN];
-      if (workspace_active_root(NULL, cwd, project_root, sizeof(project_root)) == 0 &&
-          project_root[0])
+      /* Project label keys on the repository identity (canonical remote URL)
+       * so recall matches across clones/machines, with a repo-root basename
+       * fallback for remote-less roots.  Mirrors memory_scope_labels_for_cwd()
+       * in production. */
+      if (workspace_repo_identity(cwd, project, sizeof(project), NULL, 0) != 0 || !project[0])
       {
-         const char *slash = strrchr(project_root, '/');
-         snprintf(project, sizeof(project), "%s", slash ? slash + 1 : project_root);
-      }
-      else
-      {
-         const char *slash = strrchr(cwd, '/');
-         snprintf(project, sizeof(project), "%s", slash ? slash + 1 : cwd);
+         char project_root[MAX_PATH_LEN];
+         if (workspace_active_root(NULL, cwd, project_root, sizeof(project_root)) == 0 &&
+             project_root[0])
+         {
+            const char *slash = strrchr(project_root, '/');
+            snprintf(project, sizeof(project), "%s", slash ? slash + 1 : project_root);
+         }
+         else
+         {
+            const char *slash = strrchr(cwd, '/');
+            snprintf(project, sizeof(project), "%s", slash ? slash + 1 : cwd);
+         }
       }
    }
 

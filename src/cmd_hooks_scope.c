@@ -94,6 +94,13 @@ void hook_scope_labels_for_cwd(const config_t *cfg, const char *cwd, char *works
    if (!cwd || !cwd[0])
       return;
 
+   /* Path-independent repository identity, kept consistent with the recall side
+    * (memory_scope_labels_for_cwd) so scope tags written here match on lookup
+    * across clones/machines. Falls through to the legacy workspace/basename
+    * labels below when cwd is not inside a resolvable git repo. */
+   if (workspace_repo_identity(cwd, project_out, project_len, workspace_out, workspace_len) == 0)
+      return;
+
    if (workspace_out && workspace_len > 0 && cfg)
    {
       for (int i = 0; i < cfg->workspace_count; i++)

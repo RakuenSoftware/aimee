@@ -442,8 +442,20 @@ static void test_ws_context_prefers_project_scope_when_available(void)
    char project_root[MAX_PATH_LEN];
    assert(getcwd(cwd, sizeof(cwd)) != NULL);
    assert(workspace_active_root(NULL, cwd, project_root, sizeof(project_root)) == 0);
-   const char *slash = strrchr(project_root, '/');
-   const char *project_name = slash ? slash + 1 : project_root;
+   /* Project scope keys on the repo identity (canonical remote) with a
+    * basename fallback, matching memory_scope_labels_for_cwd() in production. */
+   char project_buf[MAX_PATH_LEN];
+   const char *project_name;
+   if (workspace_repo_identity(cwd, project_buf, sizeof(project_buf), NULL, 0) == 0 &&
+       project_buf[0])
+   {
+      project_name = project_buf;
+   }
+   else
+   {
+      const char *slash = strrchr(project_root, '/');
+      project_name = slash ? slash + 1 : project_root;
+   }
 
    memory_insert(TIER_L2, KIND_FACT, "scope-order-global", "scope order global", 0.9, "s1",
                  &global_mem);

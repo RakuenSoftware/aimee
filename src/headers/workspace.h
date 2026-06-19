@@ -22,6 +22,30 @@ char *workspace_build_context_from_config(const config_t *cfg);
  * workspace containing cwd, then cwd itself. Returns 0 on success. */
 int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_t out_len);
 
+/* Resolve a path-independent repository identity for memory scoping.
+ *
+ * For a git repo this yields the canonical remote identity rather than the
+ * local checkout path, so two clones of the same repo on different machines
+ * resolve to the same scope (the cross-environment recall bug otherwise):
+ *   project_out   = canonical repo URL  (https://host/owner/repo) or
+ *                   local:<repo-root> for a repo with no usable remote.
+ *   workspace_out = the repo's org/namespace parent (https://host/owner) when
+ *                   it has one, else the repo identity itself.
+ * Either out pointer may be NULL. Returns 0 when a repo identity was resolved,
+ * -1 otherwise (cwd is not inside a resolvable git repo) — callers then keep
+ * their legacy path/basename labels. */
+int workspace_repo_identity(const char *cwd, char *project_out, size_t project_len,
+                            char *workspace_out, size_t workspace_len);
+
+/* Canonical index keys for a discovered repo root: the project name and its
+ * workspace, used to key the shared db2 index (projects.name, kb_documents.project)
+ * and the ingest queue. Prefers the repository identity (workspace_repo_identity)
+ * so a repo indexed from any machine resolves to one project; falls back to the
+ * directory basename and `fallback_workspace` for non-repo roots. Always writes
+ * both outputs (never fails). */
+void workspace_repo_index_keys(const char *root, const char *fallback_workspace, char *name_out,
+                               size_t name_len, char *ws_out, size_t ws_len);
+
 /* Resolve a proposal path: try path as is, then search docs/proposals/ subdirectories.
  * Returns newly allocated absolute path string, or NULL if not found. Caller frees. */
 char *resolve_proposal_path(const char *proposal);

@@ -8,6 +8,8 @@
 #include "headers/config.h"
 #include "headers/platform_path.h"
 #include "headers/util.h"
+#include "report_enrichment.h" /* report_subject_from_project_root — canonical repo identity */
+#include "util_url.h"          /* util_url_workspace_parent — org/namespace parent */
 #include <dirent.h>
 #include <stdint.h>
 #include <errno.h>
@@ -179,6 +181,55 @@ int workspace_active_root(const config_t *cfg, const char *cwd, char *out, size_
    }
 
    return -1;
+}
+
+int workspace_repo_identity(const char *cwd, char *project_out, size_t project_len,
+                            char *workspace_out, size_t workspace_len)
+{
+   if (project_out && project_len > 0)
+      project_out[0] = '\0';
+   if (workspace_out && workspace_len > 0)
+      workspace_out[0] = '\0';
+   if (!cwd || !cwd[0])
+      return -1;
+
+   /* Canonical repo identity: reads `origin` and normalizes any transport/case
+    * to https://host/owner/repo; a repo with no usable remote falls back to a
+    * stable local:<repo-root> subject. */
+   report_subject_t subj;
+   if (report_subject_from_project_root(cwd, &subj) != 0 || !subj.id[0])
+      return -1;
+
+   /* Project scope = the repository itself, not its checkout path, so clones on
+    * different machines share one scope. */
+   if (project_out && project_len > 0)
+      snprintf(project_out, project_len, "%s", subj.id);
+
+   /* Workspace scope = the org/namespace parent (https://host/owner) when the
+    * identity has one; local-only repos have no parent, so scope the workspace
+    * to the repo identity itself rather than reintroducing a machine path. */
+   if (workspace_out && workspace_len > 0)
+   {
+      char *parent = util_url_workspace_parent(subj.id);
+      snprintf(workspace_out, workspace_len, "%s", parent ? parent : subj.id);
+      free(parent);
+   }
+   return 0;
+}
+
+void workspace_repo_index_keys(const char *root, const char *fallback_workspace, char *name_out,
+                               size_t name_len, char *ws_out, size_t ws_len)
+{
+   if (workspace_repo_identity(root, name_out, name_len, ws_out, ws_len) == 0 && name_out &&
+       name_out[0])
+      return;
+
+   /* Non-repo root: legacy basename project key + the configured workspace. */
+   const char *base = root ? strrchr(root, '/') : NULL;
+   if (name_out && name_len > 0)
+      snprintf(name_out, name_len, "%s", base ? base + 1 : (root ? root : ""));
+   if (ws_out && ws_len > 0)
+      snprintf(ws_out, ws_len, "%s", fallback_workspace ? fallback_workspace : "");
 }
 
 /* --- context generation --- */

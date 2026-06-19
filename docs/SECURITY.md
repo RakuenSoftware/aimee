@@ -223,36 +223,43 @@ Security implications:
 
 ## Agent Credential Custody (thin client)
 
-Third-party agent/delegate API keys (and Codex OAuth tokens) are **held on the
-client machine, not on the server**, to avoid making `aimee-server` a central
-secret store worth attacking.
+Third-party agent/delegate API keys (and Codex/OAuth tokens) are sealed in the
+server's **credential vault** — encrypted at rest — and are the server's single,
+permanent credential store. The legacy client-held model (client keyring + a
+RAM-only per-session push) was retired.
 
-- **Storage of record is the client.** Keys live in the user's
-  `~/.config/aimee/agent-keys.json` (mode 0600); Codex OAuth lives in the Codex
-  CLI's `~/.codex/auth.json`. `aimee agent add … --key K` against a remote server
-  writes `K` locally and strips it before forwarding the agent definition, so the
-  key is never transmitted to or persisted by the server. The server's
-  `agents.json` holds definitions (endpoint, model, roles) only.
-- **Server caching is RAM-only and session-scoped.** The client pushes its keys
-  once per session to an in-memory keyring (`POST /v1/session/credentials`),
-  keyed by a `cred_session_id`. The keyring is never written to disk, is evicted
-  on an idle TTL / capacity (LRU), and secrets are zeroed on removal, so a
-  server restart or compromise yields no durable key store. Auth resolution
-  prefers the client-pushed session key over any legacy server-stored key/env.
-- **Trade-off.** A user configures their agents/keys on each machine they use.
-  This is intentional: it keeps the blast radius of a server compromise to
-  whatever sessions are live in RAM at that moment, not the full set of keys.
-- **Transport.** The push travels over the same authenticated `/v1` channel as
-  other requests; on a plaintext-HTTP LAN deployment it is only as confidential
-  as that network (consistent with the `remote_writes: full` trusted-network
-  posture). Use TLS / a trusted network for the server endpoint.
+- **Storage of record is the server vault.** Keys are sealed under the server
+  principal, encrypted at rest; `aimee agent add … --key K` writes `K` into the
+  vault and **refuses plaintext storage**. The server's `agents.json` holds
+  definitions (endpoint, model, roles) only — never the key. Codex/OAuth tokens
+  are vaulted the same way (a legacy plaintext token is migrated and scrubbed on
+  first use).
+- **Autonomous unseal, no interactive unlock.** Each data-encryption key is
+  wrapped twice — once for an interactive principal and once under a server
+  master key (`.vault/.server-master.key`) — so the server can decrypt a
+  credential on its own to run a turn without a human unlocking the vault.
+  Credentials are resolved per turn from the vault (the turn's attested
+  principal, falling back to the server principal).
+- **No client custody, no RAM keyring.** The client-held keyring
+  (`~/.config/aimee/agent-keys.json`) and the per-session push (`POST
+  /v1/session/credentials`) are gone; `aimee agent key import` migrates any
+  leftover client keys into the vault. Agents are configured **once on the
+  server** and shared across every client.
+- **Trade-off.** The server is now a durable secret store, so the protection
+  boundary is the server host and especially `.vault/.server-master.key` (the
+  root of the autonomous-unseal capability) — restrict its file mode and host
+  access and threat-model the server host accordingly.
+- **Transport.** `agent add --key` sends the key over the same authenticated
+  `/v1` channel as other requests; on a plaintext-HTTP LAN deployment it is only
+  as confidential as that network. Use TLS / a trusted network for the server
+  endpoint.
 
 See [THIN_CLIENT.md](THIN_CLIENT.md) for operational details.
 
 ## Local-CLI agent execution stays on the client
 
 A `--provider claude` agent runs the standard `claude` CLI in a tmux session,
-which executes where the binary and login live, the **client**, even when it
+which executes where the binary and login live — the **client** — even when it
 is driven through a remote `aimee-server`. On a detached workspace the tmux
 session driver marshals its tmux commands over the runner reverse channel and the
 client runs them locally, with `claude` authenticating via the client's own login
@@ -261,14 +268,15 @@ client runs them locally, with `claude` authenticating via the client's own logi
 - No Claude credential is transmitted to or stored on the server; the server only
   relays the prompt and reads back the captured session output.
 - The CLI runs against the client's working tree, under the client user's
-  identity, the server gains no new ability to execute binaries it does not have.
+  identity — the server gains no new ability to execute binaries it does not have.
 - This keeps the server from being a place where third-party agent logins
-  accumulate, consistent with the broader thin-client custody posture (agent API
-  keys are client-held; see [DELEGATES.md](DELEGATES.md)). On a plaintext-HTTP
+  accumulate (a `claude` CLI subscription login is not an API key and is not
+  vaulted; it stays on the client; see [DELEGATES.md](DELEGATES.md)). On a
+  plaintext-HTTP
   LAN deployment, the prompt relayed to the server is only as confidential as
-  that network, use TLS / a trusted network for the server endpoint.
+  that network — use TLS / a trusted network for the server endpoint.
 - Claude run via the `claude` CLI login (not an API key) is **primary-only by
-  default**, see [DELEGATES.md](DELEGATES.md#claude-via-the-cli-is-primary-only-by-default)
+  default** — see [DELEGATES.md](DELEGATES.md#claude-via-the-cli-is-primary-only-by-default)
   for the account-risk rationale and the `claude_cli_delegate_enabled` opt-in.
 
 ## Explicit Non-Goals

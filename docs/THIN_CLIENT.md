@@ -1,15 +1,15 @@
-# Thin Client: Workspaces, Agents & Client-Held Credentials
+# Thin Client: Workspaces, Agents & Credentials
 
 This document describes how the `aimee` thin client works against a **remote**
 `aimee-server` (e.g. a shared server reached over `tcp:`), covering three things
-that are deliberately designed so the *client machine*, not the server, holds
-the working tree and the secrets:
+specific to remote operation:
 
 1. **Workspaces** are ingested *from the client* (the server never reads the
-   client's filesystem).
-2. **Agent/delegate API keys live on the client** and are pushed to a
-   **RAM-only, per-session** keyring on the server that is **never persisted to
-   disk**.
+   client's filesystem) — the client still owns the working tree.
+2. **Agent/delegate credentials live in the server's sealed vault**, encrypted
+   at rest and decryptable by the server autonomously. They are **not** held on
+   the client and there is **no** RAM session keyring (the legacy client-held
+   keyring + per-session push were retired; the vault is the single store).
 3. The **attention guard** is inert by default.
 
 It complements [WORKSPACES.md](WORKSPACES.md), [DELEGATES.md](DELEGATES.md), and
@@ -20,9 +20,10 @@ It complements [WORKSPACES.md](WORKSPACES.md), [DELEGATES.md](DELEGATES.md), and
 | Concern | Thin client (your machine) | aimee-server (remote) |
 | --- | --- | --- |
 | Your working tree / files | yes | no (never reads client fs) |
-| Agent API keys / Codex OAuth | stored here | cached in RAM per session, never on disk |
-| Engine, agent loop, DB1/DB2, KB |, | yes |
-| Code index, memory, chat/delegate execution |, | yes |
+| Agent API keys / Codex OAuth | not stored here | **sealed vault**, encrypted at rest |
+| Interactive CLI logins (Claude CLI, Codex CLI) | login lives here | runs against the client's login (see below) |
+| Engine, agent loop, DB1/DB2, KB | — | yes |
+| Code index, memory, chat/delegate execution | — | yes |
 
 Point the client at the server once:
 
@@ -39,10 +40,10 @@ is unchanged.
 
 Mutating `/v1` calls require the server to allow remote writes. Set it in the
 server's `aimee.yaml` (`aimee.api.remote_writes: off|data|full`) **or** via the
-`AIMEE_API_REMOTE_WRITES` environment variable (deploy truth, applied even when
+`AIMEE_API_REMOTE_WRITES` environment variable (deploy truth — applied even when
 the config file is read-only or absent, e.g. a containerized server). `full`
-grants the LAN bearer the capabilities needed for workspace add, ingest, and
-session-credential push; use it only on trusted networks.
+grants the LAN bearer the capabilities needed for workspace add and ingest; use
+it only on trusted networks.
 
 ## Workspaces (client-push ingest)
 
@@ -71,16 +72,21 @@ Notes:
 - VCS/build/hidden directories (`.git`, `node_modules`, `target`, `dist`, …) and
   binary/oversized files are skipped.
 
-## Agents & client-held credentials
+## Agents & credentials (server vault)
 
-API keys for delegates and the primary provider are **held on the client**, not
-stored on the server. The model:
+Credentials for delegates and the primary provider — API keys and Codex/OAuth
+tokens — live in the server's **sealed vault**: encrypted at rest, keyed by
+agent, and decryptable by the server autonomously (a dual-access wrap lets the
+server unseal them without an interactive unlock). They are **not** held on the
+client, and there is **no** per-session RAM keyring or credential push. The
+vault is the single, permanent store. See [SECURITY.md](SECURITY.md).
 
 - `agent add` stores the **definition** (name, endpoint, model, roles, provider)
-  on the server; the **key** stays local.
-- Once per session the client pushes its keys to the server's in-memory keyring;
-  the server uses them for that session's turns and **never writes them to
-  disk** (they evaporate on session end / restart). See [SECURITY.md](SECURITY.md).
+  and, with `--key`, seals the **key into the vault** under the server principal.
+  Plaintext key storage is refused — the key only ever lands encrypted.
+- Every chat/delegate turn resolves the agent's credential from the vault (the
+  in-flight turn's attested principal, falling back to the server principal). No
+  credential is pushed per session and none is cached on the client.
 
 ### Adding an agent
 
@@ -90,49 +96,46 @@ aimee agent add minimax https://api.minimax.io/v1/chat/completions MiniMax-M3 \
       --roles "code,review,explain,refactor,draft,execute,summarize,format,diagnose,validate"
 ```
 
-Against a **remote tcp** server, `--key K`:
-- is written to the local keyring `~/.config/aimee/agent-keys.json` (mode 0600),
-  keyed by the agent name, and
-- is **stripped** from the request before the definition is forwarded, the key
-  never reaches the server.
-
-Set the primary chat provider to any configured agent:
+`--key K` sends `K` to the server once, where it is sealed into the vault; it is
+never stored on the client and never written to disk in plaintext. Set the
+primary chat provider to any configured agent:
 
 ```sh
 aimee config set provider minimax
 ```
 
-### How keys reach the server (per session)
+You configure agents **once on the server** — the vault is shared across every
+client that reaches it, so there is no per-machine key setup.
 
-- A stable per-client **credential-session id** is generated once into
-  `~/.config/aimee/cred-session.id`.
-- The first chat/delegate turn of a session pushes the local keyring (and Codex
-  creds, below) to `POST /v1/session/credentials`, deduplicated (re-pushes at
-  most every ~2 minutes, which also re-syncs after a server restart). Each turn
-  carries a `cred_session_id` so the server resolves the right keyring entry,
-  decoupled from the functional chat session id.
-- Server auth resolution prefers a client-pushed session key (by session + agent
-  name) over any server-stored `api_key` / provider env var.
+### Migrating legacy client-held keys
 
-You set up agents **per machine** you use, that is the intended trade-off for
-not centralizing keys on the server.
+If an older client left keys in `~/.config/aimee/agent-keys.json`, move them into
+the vault:
+
+```sh
+aimee agent key import            # vault each leftover key (preview with --dry-run)
+aimee agent key import --scrub     # …and delete each from agent-keys.json once vaulted
+```
+
+This is the **only** remaining use of `agent-keys.json`; new keys go straight to
+the vault. Run it on the server host over the Unix socket, or from a connection
+holding the `vault:write:server` capability.
 
 ### Codex (ChatGPT OAuth)
 
-The Codex CLI keeps a refreshed OAuth token in `~/.codex/auth.json` on your
-machine. Add a Codex agent with no key, the client reads that file and pushes
-the token (and ChatGPT account id) with the session credentials:
+Codex/OAuth tokens are stored in the vault too, so a Codex agent authenticates
+server-side with no per-session push from the client. Use the server-hosted
+OAuth setup, which installs the CLI and seals the token into the vault:
 
 ```sh
-aimee agent add codex https://chatgpt.com/backend-api/codex gpt-5.5 \
-      --provider codex --roles "code,review,explain,refactor,draft,execute,summarize,format,diagnose,validate"
-aimee config set provider codex     # optional: use Codex as the primary
+aimee agent setup codex-oauth       # server-hosted OAuth → token sealed in the vault
+aimee config set provider codex      # optional: use Codex as the primary
 ```
 
-`--provider codex` is a convenience alias for the Codex adapter (provider
-`chatgpt`, `auth_type` `codex-oauth`, the responses-wire delegate driver). The
-token is sourced live per session, so it stays fresh as the Codex CLI refreshes
-it; it is never stored on the server.
+`provider codex` is the Codex adapter (provider `chatgpt`, `auth_type`
+`codex-oauth`, the responses-wire delegate driver). A legacy plaintext token
+(from an older db1/secrets store) is migrated into the vault and scrubbed on
+first use.
 
 ## Attention guard
 
@@ -154,7 +157,6 @@ the resolved binary.
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
 | POST | `/v1/index/ingest` | Index client-pushed `{rel_path, content}` files for a workspace the server cannot see (relays to aimee-kb). |
-| POST | `/v1/session/credentials` | Receive the once-per-session push of `{session_id, agents{}, codex_oauth_token, codex_account_id}` into the RAM-only keyring. |
 
 Both `/v1/index/scan` and `/v1/index/ingest` run as synchronous handlers under
 the async op-run worker (poll `GET /v1/runs/{id}`).

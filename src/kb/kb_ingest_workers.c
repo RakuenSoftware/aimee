@@ -85,9 +85,11 @@ static void kbiw_enqueue_all(kb_service_ctx_t *ctx)
       int n = workspace_discover_projects(cfg.workspaces[w], 3, projects, MAX_DISCOVERED_PROJECTS);
       for (int i = 0; i < n; i++)
       {
-         const char *pname = strrchr(projects[i], '/');
-         pname = pname ? pname + 1 : projects[i];
-         db2_kb_ingest_queue_enqueue(pname, projects[i], cfg.workspaces[w], 0);
+         char pname[256];
+         char pws[256];
+         workspace_repo_index_keys(projects[i], cfg.workspaces[w], pname, sizeof(pname), pws,
+                                   sizeof(pws));
+         db2_kb_ingest_queue_enqueue(pname, projects[i], pws, 0);
          total++;
       }
    }
@@ -346,9 +348,11 @@ static void *kbiw_watch_thread(void *arg)
                continue;
             if (now - watches[j].last_queued < debounce)
                break;
-            const char *pname = strrchr(watches[j].root, '/');
-            pname = pname ? pname + 1 : watches[j].root;
-            db2_kb_ingest_queue_enqueue(pname, watches[j].root, watches[j].workspace, 0);
+            char pname[256];
+            char pws[256];
+            workspace_repo_index_keys(watches[j].root, watches[j].workspace, pname, sizeof(pname),
+                                      pws, sizeof(pws));
+            db2_kb_ingest_queue_enqueue(pname, watches[j].root, pws, 0);
             watches[j].last_queued = now;
             kb_worker_notify(ctx);
             break;
