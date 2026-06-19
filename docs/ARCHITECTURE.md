@@ -390,7 +390,7 @@ unscoped bearer and `aimee.api.remote_writes: full`.
 
 #### Local-CLI agents run on the client
 
-A `--provider claude` agent runs the **standard `claude` CLI over tmux** — not an
+A `--provider claude` agent runs the **standard `claude` CLI over tmux**, not an
 HTTP call, and **not** `claude -p` print mode: aimee drives an interactive tmux
 session. That session, the `claude` process, its login (`~/.claude`), and the
 working tree all live on the **client**, not on a remote/containerized
@@ -424,7 +424,7 @@ sequenceDiagram
   the same host as the CLI), the tmux session runs locally exactly as before.
 - **Claude via the CLI is primary-only by default.** Claude run via the `claude`
   CLI/tmux login (not an API key) is allowed as the interactive primary but is
-  gated out of delegate routing unless `claude_cli_delegate_enabled` is set —
+  gated out of delegate routing unless `claude_cli_delegate_enabled` is set,
   automating a personal Claude subscription as a delegate risks Anthropic account
   action. The routing above applies to the primary chat turn always, and to a
   Claude-CLI delegate only when that flag is enabled; this gate is

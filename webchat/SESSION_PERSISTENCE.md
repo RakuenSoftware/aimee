@@ -13,7 +13,7 @@ SPA changes described under "Frontend integration" live in that separate repo.
 ## Identity
 
 - A **session** == one tab's conversation, identified by the aimee-server
-  conversation id — the same value the SPA already sends as `aimee_session_id`
+  conversation id, the same value the SPA already sends as `aimee_session_id`
   on `POST /api/chat/send` and that aimee-server echoes back in the `session`
   stream event.
 - All endpoints are gated by the existing login session cookie (`requireAuth`)
@@ -81,7 +81,7 @@ no id.
 ### `DELETE /api/chat/session?sid=<id>`
 
 Forget a session (close a tab). Returns `{"status":"ok","deleted":true}`.
-Scoped to the user — deleting another user's id is a no-op.
+Scoped to the user, deleting another user's id is a no-op.
 
 ## Automatic recording
 
@@ -102,7 +102,7 @@ rename, or pre-registering a tab before its first turn.
    conversation by reusing its `id` as the `aimee_session_id` on subsequent
    `POST /api/chat/send` calls (aimee-server replays history for that id).
 2. **Stop relying on `localStorage`/`sessionStorage`** as the source of truth
-   for the tab list — the server is now authoritative, so the list survives a
+   for the tab list, the server is now authoritative, so the list survives a
    device crash or a switch to another machine. (You may still cache the
    *currently focused* session id client-side for fast reload.)
 3. **Per-tab id**: keep generating a stable per-tab id (e.g. `web-<rand>`) and

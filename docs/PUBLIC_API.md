@@ -137,7 +137,7 @@ The pure decision logic lives in `src/kb/kb_scope.c` and is unit-tested in
 ## SDKs
 
 Day-one SDKs are **generated from the spec**, never hand-written. They are
-**not committed** — `api/sdks/<lang>/` is gitignored and regenerated on demand
+**not committed**, `api/sdks/<lang>/` is gitignored and regenerated on demand
 (locally or in CI, see [`.github/workflows/sdk-gen.yml`](../.github/workflows/sdk-gen.yml)):
 
 ```

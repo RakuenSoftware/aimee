@@ -1,19 +1,19 @@
 # Delegate Agents
 
 > **Delegates ship configured.** A default roster (local + subscription-backed
-> tier-0 agents) and the roundtable panel come on out of the box, so
+> tier-0 agents) and the roundtable panel come on, so
 > `aimee delegate …` and `aimee delegate roundtable …` work on a fresh install
 > with nothing to set up. This page is for adding your own providers, changing
 > the panel, or understanding the routing.
 
 ## Quick Start
 
-Delegation already works on a fresh install (see the note above) — `aimee
+Delegation already works on a fresh install (see the note above), `aimee
 delegate …` routes to the shipped roster. Use these commands only to **add your
 own** local provider on top of the defaults:
 
 ```bash
-# 1) Add a local delegate provider (optional — defaults already work)
+# 1) Add a local delegate provider (optional, defaults already work)
 aimee agent local local http://localhost:8080 --model MODEL --slots 4 --ctx 131072
 
 # 2) Inspect the registered delegates and their routing data
@@ -177,7 +177,7 @@ resource. A run can be token-negative overall while still being useful if it
 reduces paid supervisor attention, manual integration, or serial review time.
 
 The shared cost authority (`token_estimate_cost`) prices the self-hosted /
-open-weight delegates aimee runs locally — minimax, mistral, and mimo — at a
+open-weight delegates aimee runs locally, minimax, mistral, and mimo, at a
 **known zero**: free, but explicitly *priced* rather than *unknown*. This matters
 because the delegate-economics path flat-rates only genuinely unknown models; a
 known-zero price keeps these local delegates out of that fallback, so their
@@ -331,7 +331,7 @@ During a long coding session, use a `summarize` delegate to fold older context i
 ## Roundtable and ensemble (MoA)
 
 Two commands run a panel of models instead of one delegate and synthesize a
-single answer. Both ship configured — the panel and aggregator come on by
+single answer. Both ship configured, the panel and aggregator come on by
 default.
 
 ```bash
@@ -343,19 +343,19 @@ aimee delegate roundtable "Is this migration plan sound?" --mode review
 ```
 
 `aggregate` runs the reference panel in parallel and an aggregator folds their
-answers into one. `roundtable` runs multiple rounds — each round's panel sees the
-prior round — and returns the best round's artifact. Both run through the delegate
+answers into one. `roundtable` runs multiple rounds, each round's panel sees the
+prior round, and returns the best round's artifact. Both run through the delegate
 core, so the work stays inside Aimee's session state, cost accounting, and audit
 trail (not the host AI's own sub-agent tools, which are blocked).
 
 > **Use `aimee delegate roundtable --mode review` (or the MCP `delegate.roundtable`
-> tool) for a multi-model review gate — not hand-run per-model `aimee delegate
+> tool) for a multi-model review gate, not hand-run per-model `aimee delegate
 > review` jobs.** The roundtable panel runs each model **without file tools** and
 > gives each panelist a **distinct persona** (security, architect, QA, contrarian
 > reviewer, constructive reviewer), so weaker models review the artifact you give
 > them instead of wandering the filesystem, and tool-less models (e.g. codex) can
 > participate. `aimee delegate review --via M` is a *single, exploratory* review
-> that runs tools-on so the reviewer can read the surrounding code — the right
+> that runs tools-on so the reviewer can read the surrounding code, the right
 > tool for "review the auth module", the wrong tool for a panel gate. The panel
 > skips agents that cannot run as a server-side HTTP delegate (e.g. claude-CLI
 > unless `claude_cli_delegate_enabled`) and falls back to another panelist if the
@@ -382,13 +382,13 @@ happened in the result rather than silently dropping the failures:
 | Field | Meaning |
 |-------|---------|
 | `participants_total` | Reference models fanned out (the panel size) |
-| `participants_failed` | Participants that returned no usable response (for `roundtable`, the count from the round whose artifact was selected — the `best_round`) |
+| `participants_failed` | Participants that returned no usable response (for `roundtable`, the count from the round whose artifact was selected, the `best_round`) |
 | `degraded` | The run returned the best single candidate instead of a synthesized answer (e.g. fewer than `min_successful` answered) |
 | `cost_capped` | The run stopped early because the observed cost reached `max_cost_usd` |
 | `deadline_hit` *(roundtable)* | The per-run `deadline_ms` elapsed; the best artifact so far is returned |
 
 `participants_failed > 0` with `degraded = 0` means the panel lost some members
-but still had enough to synthesize — the answer is sound but thinner than a full
+but still had enough to synthesize, the answer is sound but thinner than a full
 panel. `degraded = 1` means the result is a single survivor's answer.
 
 ## Configuration Reference
@@ -434,10 +434,10 @@ The supported setup/provider names are:
 tmux**) needs the CLI executable, its login, tmux, and the working tree **on the
 same machine as execution**. On a co-located server that is the server host. On
 a **remote/containerized `aimee-server` driven by a thin client**, none of those
-live on the server — they live on your machine.
+live on the server, they live on your machine.
 
 So when the active workspace is `detached` (a thin client is serving it over the
-reverse channel — see workspace client-push), aimee runs the standard `claude`
+reverse channel, see workspace client-push), aimee runs the standard `claude`
 CLI over tmux **on the client**: the tmux session driver marshals its tmux
 commands (`new-session`/`paste-buffer`/`capture-pane`/…) over the runner reverse
 channel, so the session, the `claude` process, and its `~/.claude` login all live
@@ -446,7 +446,7 @@ or stored on the server. Co-located deployments are unchanged (the tmux session
 runs locally). (`claude -p` print mode is **not** used.)
 
 Practical notes:
-- Configure it with `--provider claude` (which sets the tmux-cli backend — the
+- Configure it with `--provider claude` (which sets the tmux-cli backend, the
   endpoint argument is a placeholder and the model becomes `claude --model <m>`):
 
   ```bash
@@ -454,18 +454,18 @@ Practical notes:
   aimee config set provider claude                          # use it as the primary
   ```
 
-  (`aimee agent setup` is reserved for the four first-class providers — `openai`,
-  `anthropic`, `codex-oauth`, `claude-oauth` — so add a tmux-cli claude with
+  (`aimee agent setup` is reserved for the four first-class providers, `openai`,
+  `anthropic`, `codex-oauth`, `claude-oauth`, so add a tmux-cli claude with
   `agent add --provider claude`.) The thin-client routing is automatic when the
   workspace is `detached`.
 - If no client is currently serving the workspace, the CLI agent cannot run
-  (there is nowhere with the binary) — start the client / open `aimee chat` for
+  (there is nowhere with the binary), start the client / open `aimee chat` for
   that root, or use an HTTP provider.
 
 #### Claude via the CLI is primary-only by default
 
-Claude run via the `claude` CLI / tmux login — authenticated by the **interactive
-Claude subscription login, not an API key** — is **primary-only by default**. It
+Claude run via the `claude` CLI / tmux login, authenticated by the **interactive
+Claude subscription login, not an API key**, is **primary-only by default**. It
 can be your interactive primary (`aimee chat`), but it is **not** eligible as a
 delegate (neither auto-routed nor `aimee delegate … --via claude`). Attempting to
 use it as a delegate fails with a message pointing you here.
@@ -480,7 +480,7 @@ This gate is **Claude-CLI-specific**. It does not affect any other agent: API-ke
 > account**. The terms generally distinguish interactive use of a subscription
 > from programmatic/automation use, which is what delegate fan-out is. For
 > automated or delegated Claude workloads, use an **Anthropic API key** (billed
-> per token) instead — add an `anthropic` agent with `--key`.
+> per token) instead, add an `anthropic` agent with `--key`.
 
 To opt in anyway, at your own risk:
 

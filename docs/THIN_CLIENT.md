@@ -2,7 +2,7 @@
 
 This document describes how the `aimee` thin client works against a **remote**
 `aimee-server` (e.g. a shared server reached over `tcp:`), covering three things
-that are deliberately designed so the *client machine* — not the server — holds
+that are deliberately designed so the *client machine*, not the server, holds
 the working tree and the secrets:
 
 1. **Workspaces** are ingested *from the client* (the server never reads the
@@ -21,8 +21,8 @@ It complements [WORKSPACES.md](WORKSPACES.md), [DELEGATES.md](DELEGATES.md), and
 | --- | --- | --- |
 | Your working tree / files | yes | no (never reads client fs) |
 | Agent API keys / Codex OAuth | stored here | cached in RAM per session, never on disk |
-| Engine, agent loop, DB1/DB2, KB | — | yes |
-| Code index, memory, chat/delegate execution | — | yes |
+| Engine, agent loop, DB1/DB2, KB |, | yes |
+| Code index, memory, chat/delegate execution |, | yes |
 
 Point the client at the server once:
 
@@ -39,7 +39,7 @@ is unchanged.
 
 Mutating `/v1` calls require the server to allow remote writes. Set it in the
 server's `aimee.yaml` (`aimee.api.remote_writes: off|data|full`) **or** via the
-`AIMEE_API_REMOTE_WRITES` environment variable (deploy truth — applied even when
+`AIMEE_API_REMOTE_WRITES` environment variable (deploy truth, applied even when
 the config file is read-only or absent, e.g. a containerized server). `full`
 grants the LAN bearer the capabilities needed for workspace add, ingest, and
 session-credential push; use it only on trusted networks.
@@ -93,7 +93,7 @@ aimee agent add minimax https://api.minimax.io/v1/chat/completions MiniMax-M3 \
 Against a **remote tcp** server, `--key K`:
 - is written to the local keyring `~/.config/aimee/agent-keys.json` (mode 0600),
   keyed by the agent name, and
-- is **stripped** from the request before the definition is forwarded — the key
+- is **stripped** from the request before the definition is forwarded, the key
   never reaches the server.
 
 Set the primary chat provider to any configured agent:
@@ -114,13 +114,13 @@ aimee config set provider minimax
 - Server auth resolution prefers a client-pushed session key (by session + agent
   name) over any server-stored `api_key` / provider env var.
 
-You set up agents **per machine** you use — that is the intended trade-off for
+You set up agents **per machine** you use, that is the intended trade-off for
 not centralizing keys on the server.
 
 ### Codex (ChatGPT OAuth)
 
 The Codex CLI keeps a refreshed OAuth token in `~/.codex/auth.json` on your
-machine. Add a Codex agent with no key — the client reads that file and pushes
+machine. Add a Codex agent with no key, the client reads that file and pushes
 the token (and ChatGPT account id) with the session credentials:
 
 ```sh

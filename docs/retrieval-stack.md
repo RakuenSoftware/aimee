@@ -2,14 +2,14 @@
 
 aimee's semantic memory, KB document/code RAG, and deep-curator vector stores
 all share a **single embedder per deployment**. There is no two-tier (fast +
-deep) arrangement — one model embeds everything, and every vector column is
+deep) arrangement, one model embeds everything, and every vector column is
 sized to that model's output dimension.
 
 ## The embedder
 
 The embedder is any command that reads text on stdin and writes a JSON float
 array on stdout (`scripts/embedder-server.py` provides an HTTP sidecar wrapper
-for the HuggingFace / sentence-transformers stack). It ships in two tiers — one
+for the HuggingFace / sentence-transformers stack). It ships in two tiers, one
 embedder and a cross-encoder reranker sized to the same tier, baked into one
 image. (The reranker emits a scalar score, so its size is a quality choice, not
 a dimension constraint.)
@@ -27,7 +27,7 @@ image is the higher-fidelity alternate for hosts with RAM to spare.
 **0.6b + 400m (default).** The low-latency tier, and the right default for most
 deployments.
 - ~2 GB of weights (embedder + reranker), a couple of GB resident, embeds in
-  ~0.2 s — roughly 5x faster than the 4b on a CPU host. Fast to pull, fast to
+  ~0.2 s, roughly 5x faster than the 4b on a CPU host. Fast to pull, fast to
   re-embed.
 - In practice the cross-encoder reranker dominates recall latency, not the
   embedder, so the larger embedder buys less end-to-end than its size suggests.
@@ -40,12 +40,12 @@ the best recall/ranking on large or noisy corpora.
 - Costs: the model weights are several GB (slower image pull and first build),
   the image holds ~20 GB resident in fp32 (~16 GB embedder + ~4 GB reranker),
   and a CPU embed runs ~1–2 s versus the 0.6b's ~0.2 s. None of that is in the
-  request hot path — embedding happens at ingest and on the query, not per
-  token — but it sets a RAM floor and slows a cold re-embed of a large corpus.
+  request hot path, embedding happens at ingest and on the query, not per
+  token, but it sets a RAM floor and slows a cold re-embed of a large corpus.
 
 Rule of thumb: default to 0.6b/400m; step up to 4b/1b only when you have the RAM
 and need the extra recall. The retrieval pipeline (hybrid search, reranking,
-fusion) is identical either way — only the model sizes differ.
+fusion) is identical either way, only the model sizes differ.
 
 ### Switching tiers
 
@@ -58,10 +58,10 @@ AIMEE_EMBEDDER_IMAGE=ghcr.io/rakuensoftware/aimee-embedder-4b:latest
 AIMEE_EMBEDDING_DIM=2560   # or embedding_dim: 2560 in aimee.yaml
 ```
 
-No rebuild needed — both images are published. On an **empty** database that's
+No rebuild needed, both images are published. On an **empty** database that's
 all it takes. On a **populated** one the dimension change needs a re-embed (the
 `halfvec` columns are sized to `embedding_dim`, so 1024 and 2560 vectors can't
-share a column) — see [Switching embedders on an existing
+share a column), see [Switching embedders on an existing
 database](#switching-embedders-on-an-existing-database) below. Build a custom
 pairing with `--build-arg EMBEDDER_MODEL=… --build-arg RERANKER_MODEL=…`.
 
@@ -69,8 +69,8 @@ pairing with `--build-arg EMBEDDER_MODEL=… --build-arg RERANKER_MODEL=…`.
 
 Two config keys define the embedder:
 
-- `embedding_command` — the command that produces embeddings.
-- `embedding_dim` — the dimension that command emits (1024 for the default image,
+- `embedding_command`, the command that produces embeddings.
+- `embedding_dim`, the dimension that command emits (1024 for the default image,
   2560 for the 4b image; any value for a custom-built image). This is the
   single source of truth for vector-column dimensions.
 
@@ -78,7 +78,7 @@ Keep the two in sync: `embedding_dim` must equal the dimension
 `embedding_command` actually returns, or vector inserts will be rejected by
 Postgres.
 
-`AIMEE_EMBEDDING_DIM` overrides `embedding_dim` from the environment — useful for
+`AIMEE_EMBEDDING_DIM` overrides `embedding_dim` from the environment, useful for
 a containerized deploy with no writable `aimee.yaml` (set it alongside
 `AIMEE_EMBEDDER_IMAGE` when pinning the 0.6b tier: `AIMEE_EMBEDDING_DIM=1024`).
 
@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS memory_embeddings (
 At startup the server / aimee-kb call `db2_set_embedding_dim(cfg.embedding_dim)`
 (from the loaded config) before `db2_init()`. When `db2_init()` applies the
 schema, `db_apply_schema_postgres()` substitutes the placeholder with the
-configured dimension — the one place the schema is materialized — so every
+configured dimension, the one place the schema is materialized, so every
 `halfvec` column (`memory_embeddings`, `kb_embeddings`, and the
 `curator_*_vectors` tables) is created at the right size. An unset or
 out-of-range value falls back to the `1024` default (the default embedder is the
@@ -106,7 +106,7 @@ out-of-range value falls back to the `1024` default (the default embedder is the
 
 `halfvec` (fp16) is used throughout: it halves index memory versus `vector`
 (fp32) at negligible recall cost, and it lifts the index dimension ceiling from
-2000 to 4000 — required for the 4B's 2560 dims. This needs pgvector ≥ 0.7 (the
+2000 to 4000, required for the 4B's 2560 dims. This needs pgvector ≥ 0.7 (the
 bundled `pgvector/pgvector:pg16` image has it); older pgvector caps at 2000.
 
 The code-side embedding buffers are sized by `EMBED_MAX_DIM` (2560 in
@@ -117,15 +117,15 @@ helpers store whatever dimension the embedder actually returns.
 
 Sizing the columns at one dimension and then *serving* queries at another is the
 worst failure mode: queries embed at the new dimension, the corpus is stored at
-the old one, and vector search silently returns nothing — no error, just empty
+the old one, and vector search silently returns nothing, no error, just empty
 results. To make that impossible, the first schema-apply records the dimension it
 materialized the columns at in a small `kb_meta(key, value)` table
 (`schema_embedding_dim`), and every later apply checks against it.
 
 `db_apply_schema_postgres()`, right after the DDL applies, calls
 `db2_embedding_dim_record_or_check()`. That function first rejects a non-positive
-configured dimension — returning an error *before* it touches `kb_meta`, so an
-invalid dimension can never be written as the authoritative value — and then
+configured dimension, returning an error *before* it touches `kb_meta`, so an
+invalid dimension can never be written as the authoritative value, and then
 performs a single atomic statement:
 
 ```sql
@@ -140,11 +140,11 @@ recorded dimension is *preserved* and `RETURNING` yields it; on a fresh row the
 just-inserted dimension is returned. The function then compares that returned
 value to the configured dimension:
 
-- **First apply** — no row yet: the configured dimension is inserted and
+- **First apply**, no row yet: the configured dimension is inserted and
   returned, so it matches; the apply succeeds.
-- **Matching apply** — the recorded dimension equals the configured one: no-op,
+- **Matching apply**, the recorded dimension equals the configured one: no-op,
   the apply succeeds.
-- **Mismatch** — the recorded dimension differs: the function returns an error,
+- **Mismatch**, the recorded dimension differs: the function returns an error,
   so `db2_init()` fails and the server/kb refuses to start, with a remediation
   message naming both dimensions and pointing at the migration procedure below
   ("Switching embedders on an existing database").
@@ -165,11 +165,11 @@ and is exercised against the SQLite test shim; see
 `db2_init()` never reshapes an existing column (a routine schema-apply must not
 touch the corpus). Changing `embedding_dim` against a populated database to a
 **different dimension** is now refused at startup by the dimension-drift guard
-above — the server/kb will not come up until the corpus and the config agree,
+above, the server/kb will not come up until the corpus and the config agree,
 precisely because the alternative (booting and serving) silently breaks search.
 Switching dimension (0.6b 1024 ⇆ 4b 2560) therefore requires **re-embedding** the
 corpus at the new dimension. Note that the schema-apply uses
-`CREATE TABLE IF NOT EXISTS`, so it will **not** alter an existing table — simply
+`CREATE TABLE IF NOT EXISTS`, so it will **not** alter an existing table, simply
 deleting the vector *rows* leaves the `halfvec` columns at their old dimension. To
 move the dimension the dim-sized tables must be **dropped** so the next
 schema-apply recreates them at the new `embedding_dim`. Each one is a derived
@@ -203,7 +203,7 @@ columns mid-migration):
 
    (Drop the tables and clear `schema_embedding_dim` together: leaving the row set
    makes the next start refuse, while clearing it without dropping the tables would
-   re-record the new dimension against columns still sized at the old one — exactly
+   re-record the new dimension against columns still sized at the old one, exactly
    the drift the guard exists to prevent.)
 3. Start the kb. With the tables gone the schema-apply recreates them at the new
    `embedding_dim`, and with the `kb_meta` row gone the guard treats this as a
@@ -227,10 +227,10 @@ override: `--build-arg RERANKER_MODEL=<hf id>`.
 
 It is configured independently of the embedder dimension:
 
-- `memory_rerank_enabled` — master toggle.
-- `memory_rerank_command` — the reranker command (the Ettin cross-encoder served
+- `memory_rerank_enabled`, master toggle.
+- `memory_rerank_command`, the reranker command (the Ettin cross-encoder served
   by the embedder sidecar, via `rerank-remote.py`).
-- `memory_rerank_mode`, `memory_rerank_top_k` — strategy and depth.
+- `memory_rerank_mode`, `memory_rerank_top_k`, strategy and depth.
 
-The reranker is dimension-agnostic — it scores `(query, candidate)` text pairs
+The reranker is dimension-agnostic, it scores `(query, candidate)` text pairs
 directly and is unaffected by the embedder choice above.

@@ -271,7 +271,7 @@ Capability / coordination / research (P3):
 - Mixture-of-Agents Ensemble Delegate Mode:
   opt-in quality-up ensemble (diverse references → aggregator synthesis)
   over the delegate fabric. **Synthesize / Rank-Fuse. Marked Done; the P0 repair
-  (#131) makes it actually work.** _History: the feature shipped unreachable —
+  (#131) makes it actually work.** _History: the feature shipped unreachable,
   `delegate_ensemble_run` had no caller in any shipped binary (its only caller,
   `cmd_agent_delegate.c`, is lint-only), so `aimee delegate aggregate` ran an
   ordinary single-agent delegate, and even the engine fan-out routed every
@@ -279,10 +279,10 @@ Capability / coordination / research (P3):
   `POST /v1/delegate/aggregate` entry point and per-task agent routing (plus the
   temperature/`srand`/clone fixes). The original done-proposal file is absent from
   this tree; the analysis lives in the Agent Roundtable proposal below._
-- [Agent Roundtable — Round-Robin Collaborative Drafting and Review](proposals/done/agent-roundtable-collaborative-drafting.md):
-  first makes the shipped-but-dead ensemble actually work — wires an entry point
+- [Agent Roundtable, Round-Robin Collaborative Drafting and Review](proposals/done/agent-roundtable-collaborative-drafting.md):
+  first makes the shipped-but-dead ensemble actually work, wires an entry point
   (no shipped binary calls it today) and fixes the unrouted-references bug (every
-  "participant" is the same default agent) — then generalizes it into a bounded
+  "participant" is the same default agent), then generalizes it into a bounded
   multi-round roundtable: real participant routing, draft/review modes,
   deterministic convergence, keep-best, preflight cost limits.
   **Draft / Review / Reason. Done.**

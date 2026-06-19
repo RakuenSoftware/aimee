@@ -243,7 +243,7 @@ Go 1.25+ is required only to build `aimee-webchat`. Then `install.sh`, in order:
 2. **Build** (only if sources changed): `cd src && make all server`, producing
    `aimee`, `aimee-server`, and `aimee-kb` at the repo root, plus `aimee-webchat`
    when a Go toolchain is on `PATH` (otherwise `make` notes it was skipped and the
-   C services still build — webchat is optional for a source install).
+   C services still build, webchat is optional for a source install).
 3. **Stop any running server/KB** gracefully to avoid "text file busy".
 4. **Install binaries** to `~/.local/bin/` and remove retired binaries.
 5. **Install bundled skills** to `~/.local/share/aimee/skills/` (idempotent).
@@ -1016,7 +1016,7 @@ delegate for review. Full guide: [`docs/DELEGATES.md`](docs/DELEGATES.md).
 **Roundtable:** `aimee delegate roundtable` reuses `ensemble.enabled`,
 `ensemble.reference_models`, `ensemble.aggregator`, `ensemble.min_successful`,
 and `ensemble.max_cost_usd` (optional; unset or `0` means no cost cap, the
-default — set a positive value to cap a run). The panel and aggregator ship
+default, set a positive value to cap a run). The panel and aggregator ship
 configured, so the roundtable runs with no setup. `roundtable.max_rounds` defaults to `3`,
 `roundtable.converge_threshold` to `10`, `roundtable.deadline_ms` to `600000`,
 and `roundtable.turns` to `parallel`. Draft mode returns a shared artifact;
@@ -1263,8 +1263,8 @@ explicit legacy routes (e.g. `codex-cli`) still use the provider CLI.
 
 aimee-server exposes the Anthropic Messages API at `POST /v1/messages` (with
 streaming and `/v1/messages/count_tokens`). Point Claude Code at it and every
-turn runs on aimee's configured **primary agent** — minimax, mistral, mimo,
-gemini, openai, or anthropic — instead of Anthropic's models. It is a stateless
+turn runs on aimee's configured **primary agent**, minimax, mistral, mimo,
+gemini, openai, or anthropic, instead of Anthropic's models. It is a stateless
 wire-format proxy: Claude Code keeps owning its own system prompt, history, and
 tools (tool execution stays client-side); aimee only translates the wire format
 and swaps the model. Switch models with `aimee primary <agent>`.
@@ -1287,7 +1287,7 @@ one-off session without touching settings, set the env vars inline instead:
 ANTHROPIC_BASE_URL=http://127.0.0.1:8910 ANTHROPIC_AUTH_TOKEN=<bearer> claude
 ```
 
-(The server must be reachable over HTTP — loopback TCP with a bearer, or a
+(The server must be reachable over HTTP, loopback TCP with a bearer, or a
 remote `AIMEE_SERVER_URL`.)
 
 ### Codex on any primary model (Responses ingress)
