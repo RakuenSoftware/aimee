@@ -60,7 +60,7 @@ Delegation saves primary-agent tokens in several ways:
 - **Parallel execution**: multiple delegated tasks can run at the same time. The primary agent receives compact results instead of individually processing each input.
 - **Automatic cheapest-model routing**: the router selects the cheapest enabled delegate that can satisfy the requested role.
 
-For broader token-saving mechanisms beyond delegation, including memory injection, code index usage, project descriptions, and anti-pattern detection, see the [root README](../README.md#how-aimee-saves-tokens).
+For broader token-saving mechanisms beyond delegation, including memory injection, code index usage, project descriptions, and anti-pattern detection, see the [root README](../README.md#what-aimee-does).
 
 ### Routing flow
 
