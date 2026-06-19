@@ -20,8 +20,10 @@
 static int g_deleg_calls;
 static int g_deleg_rc; /* 0 success, -1 failure */
 static char g_deleg_last_role[32];
-static int mock_deleg_run(const char *workdir, const char *role, const char *prompt,
-                          const char *artifact_path, char out_commit_sha[64], char *err, size_t n)
+static char g_deleg_last_delegate[32];
+static int mock_deleg_run(const char *workdir, const char *role, const char *delegate,
+                          const char *prompt, const char *artifact_path, char out_commit_sha[64],
+                          char *err, size_t n)
 {
    (void)workdir;
    (void)prompt;
@@ -30,6 +32,7 @@ static int mock_deleg_run(const char *workdir, const char *role, const char *pro
    (void)n;
    g_deleg_calls++;
    snprintf(g_deleg_last_role, sizeof g_deleg_last_role, "%s", role ? role : "");
+   snprintf(g_deleg_last_delegate, sizeof g_deleg_last_delegate, "%s", delegate ? delegate : "");
    if (out_commit_sha)
       snprintf(out_commit_sha, 64, "deadbeef");
    return g_deleg_rc;

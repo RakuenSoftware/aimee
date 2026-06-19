@@ -63,12 +63,14 @@ void wfe_set_forge_provider(const wfe_forge_t *p);
  * full-autonomous-development plan). Tests inject a mock. ---- */
 typedef struct
 {
-   /* Run the block's delegate work in `workdir` as `role` with `prompt`. If the
-    * block produces a file artifact, `artifact_path` is its path (else NULL). On
-    * success returns 0 and, if a commit was made, fills out_commit_sha (else "").
-    * Non-zero => the caller emits failed/looped, never a crash. */
-   int (*run)(const char *workdir, const char *role, const char *prompt, const char *artifact_path,
-              char out_commit_sha[64], char *err, size_t errlen);
+   /* Run the block's delegate work in `workdir` as `role` with `prompt`.
+    * `delegate` is the step's assigned agent name, the sentinel "$random" (resolve
+    * to a random roster agent), or "" to route by `role`. If the block produces a
+    * file artifact, `artifact_path` is its path (else NULL). On success returns 0
+    * and, if a commit was made, fills out_commit_sha (else ""). Non-zero => the
+    * caller emits failed/looped, never a crash. */
+   int (*run)(const char *workdir, const char *role, const char *delegate, const char *prompt,
+              const char *artifact_path, char out_commit_sha[64], char *err, size_t errlen);
 } wfe_delegate_provider_t;
 
 /* Install a delegate provider (NULL restores the default fail-closed provider). */

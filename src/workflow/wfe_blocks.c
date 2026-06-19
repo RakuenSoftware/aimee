@@ -154,20 +154,31 @@ void wfe_set_delegate_provider(const wfe_delegate_provider_t *p)
    g_delegate = p;
 }
 
-/* Dispatch one block's delegate work, if a provider is installed. Returns:
+/* The step's assigned delegate from node params ("delegate"), or "" for none.
+ * May be the sentinel "$random" — the provider resolves it to a random agent. */
+static const char *node_delegate(const wfe_node_t *node)
+{
+   if (!node || !node->params)
+      return "";
+   const cJSON *d = cJSON_GetObjectItemCaseSensitive(node->params, "delegate");
+   return (d && cJSON_IsString(d) && d->valuestring) ? d->valuestring : "";
+}
+
+/* Dispatch one block's delegate work, if a provider is installed. `delegate` is
+ * the step's assigned agent (or "$random", or "" to route by role). Returns:
  *   1  provider ran and succeeded,
  *   0  no provider installed (caller falls back to its fail-closed path),
  *  -1  provider ran and failed (caller should loop/retry). */
-static int wfe_delegate_dispatch(const char *role, const char *prompt, const char *artifact_path,
-                                 char out_commit_sha[64])
+static int wfe_delegate_dispatch(const char *role, const char *delegate, const char *prompt,
+                                 const char *artifact_path, char out_commit_sha[64])
 {
    if (out_commit_sha)
       out_commit_sha[0] = '\0';
    if (!g_delegate || !g_delegate->run)
       return 0;
    char err[256] = "";
-   int rc =
-       g_delegate->run(repo_dir(), role, prompt, artifact_path, out_commit_sha, err, sizeof err);
+   int rc = g_delegate->run(repo_dir(), role, delegate ? delegate : "", prompt, artifact_path,
+                            out_commit_sha, err, sizeof err);
    return rc == 0 ? 1 : -1;
 }
 
@@ -182,7 +193,7 @@ static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
     * a failed run loops). Then hash the artifact file as the produced content; if
     * it is absent (no provider ran) the gate that follows simply re-loops. */
    char commit[64] = "";
-   if (wfe_delegate_dispatch("architect",
+   if (wfe_delegate_dispatch("architect", node_delegate(node),
                              "Author or revise the workflow artifact at the given path "
                              "per the work item, then commit it.",
                              path, commit) < 0)
@@ -224,7 +235,7 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
 {
    (void)ctx;
    char commit[64] = "";
-   if (wfe_delegate_dispatch("engineer",
+   if (wfe_delegate_dispatch("engineer", node_delegate(node),
                              "Implement the approved plan on the work-item branch: split into "
                              "units, delegate each, verify, and commit the accepted work.",
                              NULL, commit) < 0)
@@ -246,7 +257,7 @@ static wfe_step_result_t exec_document(wfe_ctx *ctx, const wfe_node_t *node)
 {
    (void)ctx;
    char commit[64] = "";
-   if (wfe_delegate_dispatch("engineer",
+   if (wfe_delegate_dispatch("engineer", node_delegate(node),
                              "Document the change on the work-item branch (README/CHANGELOG/docs "
                              "+ inline comments), then commit.",
                              NULL, commit) < 0)

@@ -16,9 +16,10 @@
  * Registered DEFAULT-ON at server_init: autonomous development is core
  * functionality. Registration alone runs nothing — a run only begins when intake
  * creates a work item and the autonomy driver advances it. */
+#include "aimee.h"
+
 #include "wfe_live_delegate.h"
 
-#include "aimee.h"
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "agent_types.h"
@@ -31,6 +32,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static void chomp(char *s)
 {
@@ -58,17 +60,21 @@ static int git_run(const char *workdir, const char *const extra[], int extra_n)
    return rc;
 }
 
+/* wfe_resolve_delegate + the $random selector live in wfe_delegate_resolve.c
+ * (self-contained, unit-tested). */
+
 /* The live delegate run. Contract per wfe_delegate_provider_t. */
-static int wfe_live_delegate_run(const char *workdir, const char *role, const char *prompt,
-                                 const char *artifact_path, char out_commit_sha[64], char *err,
-                                 size_t errlen)
+static int wfe_live_delegate_run(const char *workdir, const char *role, const char *delegate,
+                                 const char *prompt, const char *artifact_path,
+                                 char out_commit_sha[64], char *err, size_t errlen)
 {
    if (out_commit_sha)
       out_commit_sha[0] = '\0';
-   if (!workdir || !workdir[0] || !role || !role[0] || !prompt || !prompt[0])
+   if (!workdir || !workdir[0] || !prompt || !prompt[0] ||
+       ((!role || !role[0]) && (!delegate || !delegate[0])))
    {
       if (err && errlen)
-         snprintf(err, errlen, "wfe live delegate: missing workdir/role/prompt");
+         snprintf(err, errlen, "wfe live delegate: missing workdir/prompt and role+delegate");
       return -1;
    }
 
@@ -81,13 +87,39 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
       return -1;
    }
 
-   /* Run the role's agent WITH TOOLS, pinned to the work-item worktree, so file
-    * edits land there. max_tokens 0 = model-derived cap (never under-cap a
-    * reasoning delegate). */
+   /* Resolve the step's delegate ("$random" -> a random roster agent; "" -> route
+    * by role). Fail fast rather than leak the sentinel downstream. */
+   char agent_name[MAX_AGENT_NAME] = "";
+   if (wfe_resolve_delegate(delegate, &acfg, agent_name, sizeof agent_name) != 0)
+   {
+      if (err && errlen)
+         snprintf(err, errlen, "wfe live delegate: no enabled agent for '$random'");
+      return -1;
+   }
+
+   /* Run WITH TOOLS, pinned to the work-item worktree, so file edits land there.
+    * A specific agent runs by name; otherwise route by role. max_tokens 0 =
+    * model-derived cap (never under-cap a reasoning delegate). */
    run_cmd_set_cwd(workdir);
    agent_result_t res;
    memset(&res, 0, sizeof(res));
-   int rc = agent_run_with_tools(&acfg, role, "", prompt, AGENT_DEFAULT_MAX_TOKENS, &res);
+   int rc;
+   if (agent_name[0])
+   {
+      agent_t *ag = agent_find(&acfg, agent_name);
+      if (!ag)
+      {
+         run_cmd_set_cwd(NULL);
+         if (err && errlen)
+            snprintf(err, errlen, "wfe live delegate: unknown delegate '%s'", agent_name);
+         return -1;
+      }
+      rc = agent_execute_with_tools(ag, NULL, "", prompt, AGENT_DEFAULT_MAX_TOKENS, 0.3, &res);
+   }
+   else
+   {
+      rc = agent_run_with_tools(&acfg, role, "", prompt, AGENT_DEFAULT_MAX_TOKENS, &res);
+   }
    run_cmd_set_cwd(NULL);
 
    if (rc != 0)

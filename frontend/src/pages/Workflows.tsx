@@ -1132,6 +1132,8 @@ function NodeInspector({
         ))}
       </datalist>
       <datalist id="wf-delegate-opts">
+        {/* "$random" picks a random enabled roster agent at run time. */}
+        <option value="$random">Random (pick a delegate at random)</option>
         {agents.map((a) => (
           <option key={a.name} value={a.name} />
         ))}
