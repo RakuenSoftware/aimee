@@ -276,6 +276,13 @@ interface ActiveStreamRefs {
   assistantId: number | null;
   thinkId: number | null;
   toolId: number | null;
+  /* aimeeSid of the tab that owns this stream. Captured at send time so SSE
+   * events (notably the provider `session` id) are applied to the originating
+   * tab — never to whatever tab happens to be active when the event arrives.
+   * Without this, switching tabs mid-stream cross-writes the provider sid onto
+   * the wrong tab, and since claude_session_id outranks aimee_session_id on the
+   * server the two conversations then merge into one. */
+  originSid: string;
 }
 
 interface QueuedChatSend {
@@ -2127,7 +2134,7 @@ export default function Chat() {
     const text = item.text;
     if (item.version !== sendQueueVersionRef.current) return;
 
-    const streamRefs: ActiveStreamRefs = { assistantId: null, thinkId: null, toolId: null };
+    const streamRefs: ActiveStreamRefs = { assistantId: null, thinkId: null, toolId: null, originSid: '' };
     const controller = new AbortController();
     activeSendAbortRefs.current.add(controller);
     setPendingSends(activeSendAbortRefs.current.size);
@@ -2136,6 +2143,10 @@ export default function Chat() {
     try {
       const activeTab = tabsRef.current[activeIdxRef.current];
       const aimeeSid = activeTab?.aimeeSid ?? '';
+      // Bind this stream to the originating tab so out-of-band SSE events (the
+      // provider `session` id in particular) update THIS tab, not whatever tab
+      // is active when the event lands.
+      streamRefs.originSid = aimeeSid;
       // Unified-presence: attach a "webchat" surface once per tab/session so this
       // turn is arbitrated (a racing surface on the same session is declined with
       // presence_busy) and other surfaces see the live turn on the events stream.
@@ -2364,13 +2375,21 @@ export default function Chat() {
       }
       case 'session': {
         const sid = String(data.id ?? '');
-        setTabs(prev => {
-          const next = [...prev];
-          const idx = activeIdxRef.current;
-          if (next[idx]) next[idx] = { ...next[idx], sid };
-          tabsRef.current = next;
-          return next;
-        });
+        // Apply the provider session id to the tab that OWNS this stream, located
+        // by its stable aimeeSid — not activeIdxRef, which may have moved if the
+        // user switched tabs mid-turn. Cross-writing it merges two conversations
+        // because claude_session_id outranks aimee_session_id server-side.
+        const owner = streamRefs.originSid;
+        if (owner) {
+          setTabs(prev => {
+            const idx = prev.findIndex(t => t.aimeeSid === owner);
+            if (idx < 0) return prev;
+            const next = [...prev];
+            next[idx] = { ...next[idx], sid };
+            tabsRef.current = next;
+            return next;
+          });
+        }
         break;
       }
       case 'iteration': {
