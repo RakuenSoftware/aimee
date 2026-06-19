@@ -461,6 +461,34 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workflow/items/{id}/gate:
+    post:
+      summary: Approve or reject the human gate a run is parked at (operator-only)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approve, reject] }
+                gate: { type: string, description: Gate name (defaults to the parked stage) }
+      responses:
+        "200":
+          description: "{work_item_id, gate, decision}"
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Bad decision
+        "404":
+          description: Work item not found
   /kb/search:
     post:
       summary: Search the knowledge base (proxied to aimee-kb)

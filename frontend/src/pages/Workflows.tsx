@@ -324,6 +324,7 @@ export default function Workflows() {
   const [proposalMd, setProposalMd] = useState("");
   const [submitMsg, setSubmitMsg] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [gateMsg, setGateMsg] = useState("");
   // This tab's selected project (per-tab project space). Held so the workflow
   // context can scope to it; execution-in-project flows through a chat session's
   // cwd today, so this primarily persists the selection + offers clone here.
@@ -368,6 +369,30 @@ export default function Workflows() {
       setSubmitting(false);
     }
   }, [proposalMd, graph, refreshLists]);
+
+  // Approve / reject the human gate the selected run is parked at. Operator-only
+  // server-side (CAP_WORKFLOW_ADMIN); the scheduler resumes the run on approve.
+  const decideGate = useCallback(
+    async (decision: "approve" | "reject") => {
+      if (!runItem) return;
+      setGateMsg("");
+      try {
+        const { status, data } = await postJSON<{ error?: string }>(
+          `/api/workflow/items/${encodeURIComponent(runItem.id)}/gate`,
+          { decision },
+        );
+        if (status >= 200 && status < 300) {
+          setGateMsg(decision === "approve" ? "Approved — resuming." : "Rejected.");
+          refreshLists();
+        } else {
+          setGateMsg(data.error || `failed (HTTP ${status})`);
+        }
+      } catch {
+        setGateMsg("failed");
+      }
+    },
+    [runItem, refreshLists],
+  );
 
   // The persona list feeds both the per-step persona pickers and the manager;
   // refreshed after any persona create/edit/delete.
@@ -887,6 +912,20 @@ export default function Workflows() {
             <Field k="state" v={runItem.state} />
             <Field k="pause" v={runItem.pause_reason || "—"} />
             <Field k="version" v={runItem.version.slice(0, 12)} />
+            {runItem.pause_reason === "pending_human" && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                <button onClick={() => void decideGate("approve")} style={btn}>
+                  Approve
+                </button>
+                <button
+                  onClick={() => void decideGate("reject")}
+                  style={{ ...btn, background: "#fbeaea", color: "#a33" }}
+                >
+                  Reject
+                </button>
+                {gateMsg && <span style={{ fontSize: 11, color: "#667" }}>{gateMsg}</span>}
+              </div>
+            )}
             {graph &&
               runItem.workflow === graph.name &&
               runItem.version &&

@@ -61,8 +61,10 @@ curl -sX POST http://127.0.0.1:8740/v1/dev/submit \
 
 A `401` means the token is missing/invalid; `400` means `proposal_md` was empty.
 On success the run proceeds on the server — you can close the connection and it
-continues. The webchat **Workflows** tab shows live progress and surfaces the
-human gates as actionable approvals.
+continues. The webchat **Workflows** tab is the GUI for all of this: a **Submit
+proposal** panel (textarea → runs on the chosen workflow), a live **run list**
+with each run's stage/state, and **Approve / Reject** buttons on a run parked at
+a human gate (operator-only). You can also drive it purely via the API as above.
 
 Request fields:
 
@@ -129,7 +131,12 @@ Autonomous does not mean unsupervised. The workflow reserves **human gates**
 - **never forges a human approval** — gate-override is a signed, human-only action
   capped at a small number of uses.
 
-Approve or reject a parked gate from the webchat Workflows tab (or the gate API).
+Approve or reject a parked gate from the webchat Workflows tab's **Run state**
+panel, or via `POST /v1/workflow/items/<id>/gate {decision}`. The endpoint is
+**operator-gated** (`CAP_WORKFLOW_ADMIN`, outside the ordinary authenticated
+capability set), and approvals are HMAC-signed server-side with the operator key
+(`$AIMEE_HOME/.approval-key`) and content-hash-bound, so a delegate can never
+forge one. `reject` is terminal; `approve` resumes the run.
 
 ## Server-owned execution
 

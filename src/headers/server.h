@@ -73,9 +73,13 @@ typedef struct cJSON cJSON;
 #define CAP_SESSION_READ   (1u << 13)
 #define CAP_SESSION_ADMIN  (1u << 14)
 #define CAP_DASHBOARD_READ (1u << 15)
+/* Operator-level: approve/reject autonomous-workflow human gates. Deliberately
+ * OUTSIDE CAPS_AUTHENTICATED (full-trust / UDS / webchat-admin only), so a mere
+ * authenticated/delegate bearer cannot drive a human gate. */
+#define CAP_WORKFLOW_ADMIN (1u << 16)
 
 /* Composite capability sets */
-#define CAPS_ALL 0xFFFFu
+#define CAPS_ALL 0x1FFFFu
 #define CAPS_READ_ONLY                                                                             \
    (CAP_CHAT | CAP_MEMORY_READ | CAP_RULES_READ | CAP_INDEX_READ | CAP_SESSION_READ |              \
     CAP_DASHBOARD_READ | CAP_DESCRIBE_READ)

@@ -27,6 +27,8 @@
 #include "aimee_home.h"       /* aimee_home — proposal artifact dir for /v1/dev/submit */
 #include "wfe_engine.h"       /* wfe_work_item_create — POST /v1/dev/submit intake */
 #include "wfe_scheduler.h"    /* wfe_scheduler_notify — resume the autonomy driver */
+#include "wfe_approval.h"     /* wfe_approval_record/present — human-gate approval */
+#include "wfe_store.h"        /* db1_work_item_* — gate approve/reject */
 #include <sys/stat.h>         /* mkdir for the proposal artifact dir */
 #include <time.h>             /* unique proposal artifact filename */
 
@@ -189,8 +191,8 @@ static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
    }
    cJSON *jwf = cJSON_GetObjectItemCaseSensitive(body, "workflow");
    cJSON *jrepo = cJSON_GetObjectItemCaseSensitive(body, "repo");
-   const char *workflow = (jwf && cJSON_IsString(jwf) && jwf->valuestring[0]) ? jwf->valuestring
-                                                                              : "build";
+   const char *workflow =
+       (jwf && cJSON_IsString(jwf) && jwf->valuestring[0]) ? jwf->valuestring : "build";
    const char *repo = (jrepo && cJSON_IsString(jrepo)) ? jrepo->valuestring : "";
 
    /* Persist the submitted proposal to a unique artifact path. */
@@ -233,6 +235,70 @@ static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
    snprintf(resp, cap, "%s", s ? s : "{}");
    free(s);
    cJSON_Delete(ok);
+   return 200;
+}
+
+/* POST /v1/workflow/items/<id>/gate {decision:"approve"|"reject", gate?} —
+ * approve or reject the human gate a run is parked at. Operator-level
+ * (CAP_WORKFLOW_ADMIN, outside CAPS_AUTHENTICATED) so a mere delegate/authenticated
+ * bearer cannot drive a gate. Approve records a non-repudiable, content-hash-bound
+ * approval (HMAC-signed server-side with the operator key) and clears the pause;
+ * reject is terminal. The scheduler then resumes the run. */
+static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
+{
+   const char *id = rq->id;
+   if (!id || !id[0])
+   {
+      snprintf(resp, cap, "{\"error\":\"missing work item id\"}");
+      return 400;
+   }
+   db1_work_item_t wi;
+   if (db1_work_item_get(id, &wi) != 1)
+   {
+      snprintf(resp, cap, "{\"error\":\"no such work item\"}");
+      return 404;
+   }
+   cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
+   cJSON *jdec = body ? cJSON_GetObjectItemCaseSensitive(body, "decision") : NULL;
+   cJSON *jgate = body ? cJSON_GetObjectItemCaseSensitive(body, "gate") : NULL;
+   const char *decision = (jdec && cJSON_IsString(jdec)) ? jdec->valuestring : "";
+   /* Default the gate to the stage the run is parked at. */
+   const char *gate = (jgate && cJSON_IsString(jgate) && jgate->valuestring[0]) ? jgate->valuestring
+                                                                                : wi.current_stage;
+   const char *actor = server_http_identity_principal();
+   if (!actor || !actor[0])
+      actor = "operator";
+
+   int rc;
+   if (strcmp(decision, "approve") == 0)
+   {
+      /* Idempotent: a duplicate approve for the same content hash is success. */
+      if (!wfe_approval_present(id, gate, wi.content_hash))
+         rc = wfe_approval_record(id, gate, wi.content_hash, actor);
+      else
+         rc = 0;
+      if (rc == 0)
+         (void)db1_work_item_clear_pause(id);
+   }
+   else if (strcmp(decision, "reject") == 0)
+   {
+      rc = db1_work_item_set_terminal(id, "rejected");
+   }
+   else
+   {
+      cJSON_Delete(body);
+      snprintf(resp, cap, "{\"error\":\"decision must be 'approve' or 'reject'\"}");
+      return 400;
+   }
+   cJSON_Delete(body);
+   if (rc != 0)
+   {
+      snprintf(resp, cap, "{\"error\":\"gate %s failed\"}", decision);
+      return 500;
+   }
+   wfe_scheduler_notify(); /* resume the run server-side */
+   snprintf(resp, cap, "{\"work_item_id\":\"%s\",\"gate\":\"%s\",\"decision\":\"%s\"}", id, gate,
+            decision);
    return 200;
 }
 
@@ -1649,6 +1715,9 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/workflow/validate", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_validate},
     {"POST", "/v1/workflow/save", NULL, RM_EXACT, NULL, CAP_SESSION_ADMIN, rh_wf_save},
     {"GET", "/v1/workflow/items", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_items},
+    /* Operator-only: approve/reject the human gate a run is parked at. The
+     * suffix row precedes the bare /<id> row. */
+    {"POST", "/v1/workflow/items/", "/gate", RM_PREFIX, NULL, CAP_WORKFLOW_ADMIN, rh_workflow_gate},
     {"GET", "/v1/workflow/items/", NULL, RM_PREFIX, NULL, CAP_DASHBOARD_READ, rh_wf_item},
 
     {"GET", "/v1/sessions", NULL, RM_EXACT, NULL, CAP_SESSION_READ, rh_sessions_list},

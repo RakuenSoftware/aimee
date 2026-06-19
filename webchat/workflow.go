@@ -87,5 +87,32 @@ func (s *server) handleWorkflowItems(w http.ResponseWriter, r *http.Request) {
 		s.proxyWorkflow(w, r, http.MethodGet, "/v1/workflow/items", "")
 		return
 	}
+	// POST /api/workflow/items/<id>/gate -> operator approve/reject of a parked
+	// human gate. <id> must be one safe segment.
+	if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/gate") {
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/workflow/items/"), "/gate")
+		if id == "" || strings.ContainsAny(id, "/.%") {
+			http.Error(w, `{"error":"bad path"}`, http.StatusBadRequest)
+			return
+		}
+		const maxBody = 1 << 20
+		body, _ := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+		if len(body) > maxBody {
+			http.Error(w, `{"error":"request too large"}`, http.StatusRequestEntityTooLarge)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+		defer cancel()
+		st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost,
+			"/v1/workflow/items/"+id+"/gate", body)
+		if err != nil {
+			http.Error(w, `{"error":"aimee-server unavailable"}`, http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(st)
+		_, _ = w.Write(data)
+		return
+	}
 	s.proxyWorkflow(w, r, http.MethodGet, "/v1/workflow/items/", "/api/workflow/items/")
 }
