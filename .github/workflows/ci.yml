@@ -10,6 +10,34 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  no-coauthor-trailers:
+    # Standing directive: commits/PRs must never carry AI co-authorship trailers.
+    # Scans only the PR's NEW commits (base..head), so existing history is
+    # grandfathered while any newly introduced trailer fails the PR.
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reject AI co-authorship trailers in new commits
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          range="${BASE_SHA}..${HEAD_SHA}"
+          # Match the actual trailer forms only (anchored), not prose that happens
+          # to mention them: a "co-authored-by:" line, or the markdown-link
+          # "Generated with [Claude Code]"/"[Codex ...]" attribution line.
+          hits=$(git log "$range" --format='%H%n%B' \
+                 | grep -inE '^[[:space:]]*co-authored-by:|generated with \[(claude|codex)' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::New commit(s) in $range carry AI co-authorship trailers; remove them (standing directive)."
+            echo "$hits"
+            exit 1
+          fi
+          echo "no co-authorship trailers in $range — ok"
+
   lint:
     runs-on: ubuntu-latest
     steps:
