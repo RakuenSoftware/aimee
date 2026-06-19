@@ -17,6 +17,7 @@
 #include "server_compute_impl.h"
 #include "skill_review.h"
 #include "trigger_scheduler.h"
+#include "wfe_live_delegate.h"
 #include "server_trigger.h"
 #include "server_cron.h"
 #include "server_pipeline.h" /* roundtable authoring pipeline (pipeline.*) */
@@ -1685,6 +1686,11 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    trigger_scheduler_init();
    server_delegate_monitor_init();
    server_coord_dispatcher_init(ctx);
+   /* Autonomous development is core functionality (default-on): register the
+    * workflow engine's live providers + executors so submitted proposals can run
+    * end-to-end server-side. Registration runs nothing on its own — a run begins
+    * only when intake creates a work item and the autonomy driver advances it. */
+   wfe_autonomy_register();
    /* Provision the delegate vault from operator-supplied secrets before serving,
     * so a freshly stood-up server's delegates/roundtables work without a manual
     * `vault set`. No-op unless a secret source is configured. */
