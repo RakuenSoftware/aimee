@@ -27,6 +27,26 @@ plus a coordinator) decomposes the plan, dispatches each unit to a delegate,
 verifies the result, and — if the work is not acceptable — sends it back to a
 *different* delegate. The primary never writes the code itself.
 
+Throughout this page, a **run** and a **work item** are the same thing: one
+execution of a workflow for one proposal. The **primary agent** is the manager
+(the engine + coordinator); **delegates** are the workers.
+
+## Prerequisites
+
+- A running aimee server (`aimee-server`, or the combined image). The feature is
+  default-on — there is nothing to enable.
+- An API token for the `/v1` surface (`Authorization: Bearer …`). On a remote
+  client this is your configured server token; locally the dev bearer works.
+- The default `build` workflow is **seeded automatically** into
+  `$AIMEE_HOME/workflows` at standup, so a fresh server resolves it out of the
+  box. Custom workflows live in the same directory.
+- Delegates **ship configured** (a default roster + roundtable panel). See
+  [Delegates](DELEGATES.md) only to add your own providers; verify with
+  `aimee --json agent list`.
+- For the final merge step, the server needs forge access (a configured `gh` /
+  git credential) and a `testing` branch; autonomous merges target `testing`
+  only.
+
 ## Quick start
 
 Submit a proposal for autonomous execution:
@@ -39,9 +59,10 @@ curl -sX POST http://127.0.0.1:8740/v1/dev/submit \
 # -> {"work_item_id":"wi-...","workflow":"build","state":"active"}
 ```
 
-The run now proceeds on the server. You can close the connection; it continues.
-The webchat **Workflows** tab shows live progress and surfaces the human gates as
-actionable approvals.
+A `401` means the token is missing/invalid; `400` means `proposal_md` was empty.
+On success the run proceeds on the server — you can close the connection and it
+continues. The webchat **Workflows** tab shows live progress and surfaces the
+human gates as actionable approvals.
 
 Request fields:
 
@@ -64,8 +85,17 @@ implement      → freeze → gate.roundtable → pr.open → gate.human (pass/f
                                                          fail → implement (loop)
 ```
 
+`freeze` captures the cumulative diff at a stable commit before review, so the
+roundtable and the final PR see one coherent change rather than a moving target.
+`gate.roundtable` is a machine gate (a model panel verdict); `gate.human` is a
+human gate; `gate.ci` polls the PR's CI. The `fail → implement` arrow is the
+re-delegate loop.
+
 Workflows are user-editable; clone and change the composition with
 `aimee workflow new`. The engine has no privilege over a user-authored workflow.
+A custom workflow is just another YAML in `$AIMEE_HOME/workflows`; submit against
+it by passing its `workflow` name. For example, inserting a `gate.roundtable`
+with a `security` lens before `pr.open` adds a mandatory security review.
 
 ### The implement stage: manage → delegate → verify → re-delegate
 
@@ -121,8 +151,10 @@ Autonomous development is default-on; the guardrails are structural, not a toggl
 
 - **Human gates** are never auto-satisfied unless preauthorized for that run, and
   gate-override stays human-only and capped.
-- **Per-run budget ceilings** (turns / tokens / wall-clock). On breach the run
-  **parks** for a human — it never silently runs away. Set a cap per submission.
+- **Per-run budget ceiling.** A work item carries a cost cap; on breach the run
+  **parks** (`budget_exceeded`) for a human — it never silently runs away.
+  (Today the cap is a work-item field; setting it *from* `/v1/dev/submit` is not
+  yet exposed — see [Current limitations](#current-limitations).)
 - **Autonomous merges only target `testing`.** Promotion to `main` is always a
   human action.
 - **Every commit and PR is audited** and attributed to the run. Generated commits
@@ -133,6 +165,55 @@ Autonomous development is default-on; the guardrails are structural, not a toggl
 - A delegate's model refusal or a permanent/unrecoverable error terminates the
   unit; transient errors are retried within the cap; degraded panels, budget
   breaches, and forge failures park.
+
+## Observability
+
+- **Webchat Workflows tab** — live progress per work item: current stage, gate
+  verdicts, parked state, and the actionable approve/reject controls for human
+  gates.
+- **Event stream** — a run publishes its full turn stream (text, tool calls,
+  usage, boundaries) to the presence event ring; the webchat replays it live and,
+  after a disconnect, from a cursor.
+- **Durable audit** — every step, verdict, and cost is recorded in the DB1
+  `lifecycle_*` tables (per work item), including the commit hashes produced and
+  the gate decisions. This is the source of truth for "what did the run do".
+- **Attribution** — autonomous commits and PRs are attributed to the run and
+  carry **no** AI co-authorship trailers.
+
+## When a run parks (failure modes & recovery)
+
+The run **parks** instead of failing hard when a human is needed; the scheduler
+resumes it automatically once the blocker clears:
+
+| pause reason | what it means | how it resumes |
+|--------------|---------------|----------------|
+| `pending_human` | waiting at a human gate (proposal approval / final pass-fail) | approve or reject in the webchat Workflows tab → the scheduler re-drives |
+| `panel_degraded` / `panel_unreachable` | the roundtable couldn't reach a quorum | retried on the next sweep; a human can approve to proceed |
+| `ci_pending` | the PR's CI hasn't concluded | re-checked on the next sweep |
+| `merge_pending` | the forge merge state is undeterminable | re-checked on the next sweep |
+| `budget_exceeded` | the run hit its cost cap | a human decides whether to continue |
+
+The autonomy driver **never forges a human approval**. A stuck human gate can be
+cleared by a signed, human-only **gate-override** (capped at a small number of
+uses); after that it forces a terminal `rejected`. Machine failures follow the
+taxonomy in [Safety and limits](#safety-and-limits): transient → retry,
+permanent/refusal → terminal, degraded/budget/forge → park — and a unit is never
+auto-retried without new input (a CI log or a roundtable verdict).
+
+## Current limitations
+
+Honest scope of the current implementation (the design allows for more):
+
+- **Submit takes `proposal_md`, `workflow`, `repo` only.** Per-run `limits` and
+  gate **preauthorization** are not yet accepted at `/v1/dev/submit`; gates are
+  handled interactively via the webchat, and the cost cap is a work-item field.
+- **No dedicated `resume`/`abort`/`audit` HTTP endpoints yet.** Resume is
+  event-driven (gate approval + the scheduler sweep); drive and inspect runs via
+  the webchat Workflows tab and the `lifecycle_*` audit tables.
+- **Scheduler concurrency is 1** (runs are driven sequentially) for now; the
+  design's bounded-concurrency fan-out is a follow-on.
+- **`build.yaml` must be present** in `$AIMEE_HOME/workflows` (seeded at standup);
+  a submission against a missing workflow returns an error.
 
 ## Configuration
 
@@ -150,7 +231,7 @@ Autonomous development is default-on; the guardrails are structural, not a toggl
 | `POST /v1/dev/submit` (`rh_dev_submit`) | intake — the only entry; creates an autonomous work item, seeds the proposal, notifies the scheduler |
 | autonomy scheduler (`wfe_scheduler`) | server-owned thread driving active autonomous work items via `wfe_autonomy_run` |
 | workflow engine (`wfe_*`) | block-composed lifecycle, gates, durable state + audit (`lifecycle_*` tables) |
-| live delegate provider (`wfe_live_delegate`) | runs a block's role as a tool-using delegate in the work-item worktree, then commits |
+| live delegate provider (`wfe_live_delegate`) | the engine→delegate bridge: runs a block's role as a tool-using agent in the work-item worktree, then commits. (It uses the same in-process delegate execution as `aimee delegate`/`/v1/delegate/run`, but is invoked *by the engine* per block rather than by a user.) |
 | autonomy driver (`wfe_autonomy`) | advances machine gates, parks at human gates, never forges approval |
 | turn registry / server-owned turns | a run survives client disconnect (the foundation) |
 
