@@ -686,6 +686,7 @@ void memory_coref_stats_reset(void)
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
+#include "util.h" /* util_now_ms — memory.search stage timing */
 #include "cJSON.h"
 #include "dogfood.h"
 #include <ctype.h>

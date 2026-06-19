@@ -1732,6 +1732,10 @@ static __thread memory_qembed_entry_t s_qembed[MEMORY_QEMBED_CAP];
  * embedder invocations). requests-minus-misses is the work the memo saved. */
 static __thread int s_qembed_requests = 0;
 static __thread int s_qembed_misses = 0;
+/* Per-search stage-timing probe (read+reset by the memory_search wrapper): wall
+ * time spent in actual embed spawns (cache misses) and how many ran. */
+static __thread long long s_qembed_ms = 0;
+static __thread int s_qembed_spawns = 0;
 
 /* Begin a fresh per-recall memo window. Call at every top-level recall entry
  * point before any lane embeds the query. */
@@ -1766,6 +1770,7 @@ static int memory_embed_text_runtime(const char *text, const char *command, floa
    }
 
    s_qembed_misses++;
+   long long _emb_t0 = util_now_ms();
    int dim = memory_embed_text(text, effective_cmd, out, max_dim);
    if (dim <= 0 && strcmp(effective_cmd, "builtin") != 0)
    {
@@ -1773,6 +1778,8 @@ static int memory_embed_text_runtime(const char *text, const char *command, floa
                 "query embedding failed for configured command; retrying with builtin embeddings");
       dim = memory_embed_text(text, "builtin", out, max_dim);
    }
+   s_qembed_ms += util_now_ms() - _emb_t0;
+   s_qembed_spawns++;
 
    /* Store on the way out so the other lanes / sub-queries of this same recall
     * reuse the vector instead of re-spawning the embedder. */

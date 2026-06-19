@@ -24,7 +24,25 @@ static double time_decay(const char *last_used)
    return exp(-0.02 * days);
 }
 
+static int memory_search_impl(char **clusters, int cluster_count, int limit, search_result_t *out,
+                              int max);
+
+/* Public entry: time the whole search and log a one-line stage breakdown so the
+ * embed-spawn cost (the suspected dominant term) is separable from the rest of
+ * retrieval/rerank. Counters live in memory_core_helpers.inc (same TU). */
 int memory_search(char **clusters, int cluster_count, int limit, search_result_t *out, int max)
+{
+   long long _t0 = util_now_ms();
+   s_qembed_ms = 0;
+   s_qembed_spawns = 0;
+   int n = memory_search_impl(clusters, cluster_count, limit, out, max);
+   aimee_log(LOG_INFO, "memory.search.timing", "total=%lldms embed=%lldms spawns=%d results=%d",
+             util_now_ms() - _t0, s_qembed_ms, s_qembed_spawns, n);
+   return n;
+}
+
+static int memory_search_impl(char **clusters, int cluster_count, int limit, search_result_t *out,
+                              int max)
 {
    if (!clusters || cluster_count <= 0)
       return 0;
