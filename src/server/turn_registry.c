@@ -7,12 +7,9 @@
 
 #include "log.h"
 
-#include <errno.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/wait.h>
 
 #define TURN_MAX PRESENCE_MAX
 
@@ -77,10 +74,6 @@ turn_entry_t *turn_registry_publish(const char *session_id, const char *turn_id)
    atomic_store(&slot->cancel, 0);
    slot->child_pid = -1;
    slot->reaped = 0;
-   /* Record the owner here, under the lock, before the entry becomes visible:
-    * publish runs on the worker thread that will reap the child, so a concurrent
-    * cancel / sweep_dead never observes an in_use entry with owner == 0. */
-   slot->owner = pthread_self();
    slot->in_use = 1;
    pthread_mutex_unlock(&g_lock);
    return slot;
@@ -160,38 +153,5 @@ int turn_registry_cancel_all(void)
          n++;
       }
    pthread_mutex_unlock(&g_lock);
-   return n;
-}
-
-int turn_registry_sweep_dead(void)
-{
-   int n = 0;
-   for (int i = 0; i < TURN_MAX; i++)
-   {
-      pid_t to_reap = -1;
-      char sid[PRESENCE_SESSION_ID_MAX] = {0};
-      pthread_mutex_lock(&g_lock);
-      turn_entry_t *e = &g_turns[i];
-      /* owner thread gone? pthread_kill(.,0) returns ESRCH for a dead thread. */
-      if (e->in_use && e->owner != 0 && pthread_kill(e->owner, 0) == ESRCH)
-      {
-         if (!e->reaped && e->child_pid > 0)
-            to_reap = e->child_pid;
-         snprintf(sid, sizeof(sid), "%s", e->session_id);
-         memset(e, 0, sizeof(*e)); /* free the slot now; the pid is captured */
-         n++;
-      }
-      pthread_mutex_unlock(&g_lock);
-      /* Reap OUTSIDE the lock (the registry mutex is a leaf — never block on
-       * waitpid while holding it). The slot is already cleared, so it cannot be
-       * reused for this pid in the interim. */
-      if (to_reap > 0)
-      {
-         kill(to_reap, SIGKILL);
-         waitpid(to_reap, NULL, 0);
-      }
-      if (sid[0])
-         LOG_WARN("turn_registry", "swept dead turn for session %s (owner gone)", sid);
-   }
    return n;
 }

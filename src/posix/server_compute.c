@@ -1631,7 +1631,16 @@ void chat_stream_worker(void *arg)
          {
             wr = waitpid(pid, &status, 0);
          } while (wr < 0 && errno == EINTR);
-         /* wr < 0 with ECHILD => already reaped elsewhere; treat as reaped. */
+         if (wr < 0)
+         {
+            /* No child to reap (ECHILD) or an unexpected error: there is no exit
+             * status to classify, so fall back to status=0 and let the
+             * output-presence check below (saw_result/saw_content) decide
+             * success vs. failure. */
+            if (errno != ECHILD)
+               LOG_WARN("chat", "waitpid(%d) failed: %s", (int)pid, strerror(errno));
+            status = 0;
+         }
       }
       turn_registry_mark_reaped(cctx->turn_entry);
    }

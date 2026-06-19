@@ -36,8 +36,7 @@ extern "C"
 
    /* One in-flight turn. `cancel` is the only field read on the worker hot path
     * (atomic, lock-free). `child_pid`/`reaped` are owned by the worker; the
-    * worker is the sole caller of kill()/waitpid() for its child. `owner` is the
-    * worker thread, used by the crash backstop (turn_registry_sweep_dead). */
+    * worker is the sole caller of kill()/waitpid() for its child. */
    typedef struct turn_entry
    {
       char session_id[PRESENCE_SESSION_ID_MAX];
@@ -46,7 +45,6 @@ extern "C"
       pid_t child_pid;
       int reaped;
       int in_use;
-      pthread_t owner;
    } turn_entry_t;
 
    /* Initialize the global registry. Idempotent; call at server startup. */
@@ -56,8 +54,8 @@ extern "C"
     * so a cancel arriving immediately is never lost. Returns the entry (caller
     * caches the pointer for lock-free cancel reads) or NULL on collision (the
     * session already has an in-flight entry — a bug under the turn-lock
-    * invariant; the caller must NOT dispatch) or when the table is full. The
-    * caller sets entry->owner = pthread_self() after a successful publish. */
+    * invariant) or when the table is full. On NULL the caller runs the turn
+    * without a registry entry (still bounded by token/deadline limits). */
    turn_entry_t *turn_registry_publish(const char *session_id, const char *turn_id);
 
    /* Record the worker's child subprocess pid (CLI path, after fork). */
@@ -90,11 +88,6 @@ extern "C"
    /* Flag every in-flight turn for cancellation (server shutdown). Returns the
     * number flagged. Sets flags only; the owning workers do the reaping. */
    int turn_registry_cancel_all(void);
-
-   /* Crash backstop: reap children of entries whose owner thread is gone and
-    * clear them. Returns the number swept. Called from periodic bookkeeping;
-    * defense-in-depth, not the primary path. */
-   int turn_registry_sweep_dead(void);
 
 #ifdef __cplusplus
 }

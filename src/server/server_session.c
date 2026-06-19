@@ -70,7 +70,14 @@ int handle_chat_graceful_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
     * session owner; an un-attested non-local caller is refused outright (an
     * empty principal must NOT fall through to the trusted-internal bypass). */
    int rc;
-   if (conn->capabilities == CAPS_ALL)
+   int trusted_local = (conn->capabilities == CAPS_ALL);
+   /* Audit every cancel attempt (the CAPS_ALL bypass trusts the co-located
+    * surface to bind session id -> authenticated caller before forwarding; this
+    * log makes that path auditable. NOTE: the webchat/gateway surfaces MUST
+    * enforce that binding — tracked as a WP-5 requirement). */
+   aimee_log(LOG_INFO, "graceful_cancel", "cancel request: session=%s trusted_local=%d principal=%s",
+             sid, trusted_local, conn->vault_principal[0] ? conn->vault_principal : "(none)");
+   if (trusted_local)
       rc = turn_registry_cancel(sid, NULL);
    else if (conn->vault_principal[0])
       rc = turn_registry_cancel(sid, conn->vault_principal);

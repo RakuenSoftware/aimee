@@ -451,15 +451,13 @@ static void chat_stream_worker_pooled(void *arg)
       }
    }
 
-   if (!locked && sid[0])
-      presence_emit_turn_started(sid, turn_id);
-
-   /* Register this turn in the per-turn cancel registry BEFORE dispatch so a
-    * cancel arriving immediately is never lost. The worker caches cctx->turn_entry
-    * (CLI path polls it; in-process path is driven via agent_set_request_cancel).
-    * NULL = collision (should be impossible under the turn lock) or table full:
-    * run the turn without a registry entry rather than failing it — the turn
-    * still has intrinsic token/deadline bounds; the condition is logged. */
+   /* Register this turn in the per-turn cancel registry BEFORE turn_started /
+    * dispatch, so a cancel arriving in the window right after turn_started is
+    * never dropped. The worker caches cctx->turn_entry (CLI path polls it;
+    * in-process path is driven via agent_set_request_cancel). NULL = collision
+    * (should be impossible under the turn lock) or table full: run the turn
+    * without a registry entry rather than failing it — the turn still has
+    * intrinsic token/deadline bounds; the condition is logged. */
    turn_entry_t *cancel_entry = NULL;
    if (delta_session[0])
    {
@@ -470,6 +468,9 @@ static void chat_stream_worker_pooled(void *arg)
          LOG_WARN("chat", "turn registry rejected session %s; turn not cancellable", delta_session);
    }
    agent_set_request_cancel(cancel_entry ? &cancel_entry->cancel : NULL);
+
+   if (!locked && sid[0])
+      presence_emit_turn_started(sid, turn_id);
    /* Per-turn credential context: the credential-session id (for the RAM
     * keyring the client pushed once per session — a dedicated field decoupled
     * from the chat session id) + any per-turn Codex creds (legacy direct push).
