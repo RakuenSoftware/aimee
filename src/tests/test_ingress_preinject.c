@@ -20,6 +20,11 @@ char *kb_client_memory_context_block(const char *query, const char *block_type, 
    (void)limit;
    return NULL;
 }
+char *kb_client_memory_facts(const char *query)
+{
+   (void)query;
+   return NULL;
+}
 int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
 {
    (void)query;

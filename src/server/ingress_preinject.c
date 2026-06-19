@@ -416,6 +416,30 @@ char *ingress_preinject_build(const char *query, int request_disabled)
          score = ms;
    }
 
+   /* Typed-fact layer (§7): current facts about entities named in this turn,
+    * recalled and injected automatically so the agent grounds on them without
+    * having to call the get_context_block tool. Gated kb-side on
+    * typed_facts_enabled (returns NULL when off or none), so this is a no-op
+    * then. User-asserted facts are high-signal, so they lift confidence. */
+   char *facts = kb_client_memory_facts(query);
+   if (facts && facts[0])
+   {
+      if (block.len)
+         dstr_append_str(&block, "\n");
+      dstr_t f;
+      dstr_init(&f);
+      dstr_append_str(&f, "## Known facts\n");
+      dstr_append_str(&f, facts);
+      if (facts[strlen(facts) - 1] != '\n')
+         dstr_append_str(&f, "\n");
+      char *fact_candidate = dstr_steal(&f);
+      append_candidate(&block, fact_candidate, block_budget, &omitted_count);
+      free(fact_candidate);
+      if (score < 0.5)
+         score = 0.5;
+   }
+   free(facts);
+
    /* Auditable-correctness P1: emit a single-writer, turn-keyed retrieval_event
     * recording the memory rows surfaced into this turn's context. Default-off
     * (kb_evidence_emit_enabled). Observation-only — the envelope and the answer

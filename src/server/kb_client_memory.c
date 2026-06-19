@@ -1599,6 +1599,32 @@ char *kb_client_memory_context_block(const char *query, const char *block_type, 
    return out;
 }
 
+char *kb_client_memory_facts(const char *query)
+{
+   if (!query || !query[0])
+      return NULL;
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "query", query);
+   char *json = kb_v1_action_request("memory.facts", req);
+   if (!json)
+      return NULL;
+
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   if (!resp)
+      return NULL;
+
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   cJSON *facts = cJSON_GetObjectItemCaseSensitive(resp, "facts");
+   char *out = NULL;
+   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsString(facts) &&
+       facts->valuestring[0])
+      out = strdup(facts->valuestring);
+   cJSON_Delete(resp);
+   return out;
+}
+
 int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *role,
                                             const char *query_fingerprint, const int64_t *ids,
                                             int n_ids)

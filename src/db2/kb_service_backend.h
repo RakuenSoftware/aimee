@@ -284,6 +284,10 @@ extern "C"
    cJSON *db2_kb_service_memory_briefing_json(int limit_tokens);
    cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *block_type,
                                                    int limit);
+   /* Read-only typed-fact recall for the turn: facts about entities named in the
+    * query, PII-gated. Returns {status, facts} (facts="" when off/none). Lets the
+    * server auto-inject facts without the full context-block assembly. */
+   cJSON *db2_kb_service_memory_facts_json(const char *query);
    cJSON *db2_kb_service_memory_entity_profile_json(const char *entity);
    cJSON *db2_kb_service_memory_entity_edges_json(const char *entity, int limit);
    cJSON *db2_kb_service_memory_search_graph_json(const char *query, int limit);

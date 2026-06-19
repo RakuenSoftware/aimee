@@ -745,6 +745,16 @@ int kb_handle_memory_context_block(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to build context block");
 }
 
+int kb_handle_memory_facts(int fd, cJSON *req)
+{
+   cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
+   if (!cJSON_IsString(query_j))
+      return kb_send_error(fd, "memory.facts requires query");
+
+   cJSON *resp = db2_kb_service_memory_facts_json(query_j->valuestring);
+   return kb_reply_or_error(fd, resp, "failed to recall facts");
+}
+
 /* Auditable-correctness P1: record one per-turn retrieval_event keyed by the
  * caller-visible turn_id, listing the int64 memory rows surfaced into the turn.
  * The emission decision (the kb_evidence_emit_enabled flag) is made server-side

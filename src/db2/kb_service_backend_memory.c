@@ -8,7 +8,9 @@
 #include "aimee.h"
 #include "memory_lint.h"
 #include "config.h"
-#include "fact_ingest.h" /* db2_typed_fact_ingress (typed-fact §4/§6/§7 ingress) */
+#include "fact_ingest.h"     /* db2_typed_fact_ingress (typed-fact §4/§6/§7 ingress) */
+#include "fact_recall.h"     /* db2_fact_recall_in_query (read-only §7 recall) */
+#include "memory_pii_gate.h" /* memory_pii_turn_requests_sensitive */
 #include "decision_log.h"
 #include "memory.h"
 #include "memory_export.h"
@@ -1185,6 +1187,15 @@ cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, 
    }
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddNumberToObject(resp, "id", (double)out.id);
+
+   /* typed-fact write on ingest (§4/§6): extract facts asserted in the stored
+    * content into entity_edges so the fact layer is populated by what we
+    * remember, not only by get_context_block query text. Read side (§7) is
+    * skipped here (facts_out=NULL); gated internally on typed_facts_enabled, so
+    * this is a no-op when the layer is off. Best-effort: a fact-write failure
+    * must not fail the store. */
+   (void)db2_typed_fact_ingress(content ? content : "", NULL, 0);
+
    cJSON *obj = kbs_memory_row_to_json(&out);
    if (obj)
       cJSON_AddItemToObject(resp, "memory", obj);
@@ -1248,6 +1259,31 @@ cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *b
       cJSON_AddStringToObject(resp, "block", block ? block : "");
    }
    free(block);
+   return resp;
+}
+
+cJSON *db2_kb_service_memory_facts_json(const char *query)
+{
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+
+   /* Read-only typed-fact recall (§7) for the turn -- facts about entities named
+    * in the query, PII-gated. No write here (the write happens on memory ingest
+    * and via get_context_block); this is the cheap path the server's
+    * ingress_preinject calls every turn to surface known facts. Gated on
+    * typed_facts_enabled so it's a no-op (facts="") when the layer is off. */
+   char facts[2048] = "";
+   config_t cfg;
+   config_load(&cfg);
+   if (cfg.typed_facts_enabled && query && query[0])
+   {
+      int requests_sensitive = memory_pii_turn_requests_sensitive(query);
+      (void)db2_fact_recall_in_query(query, requests_sensitive, facts, sizeof(facts));
+   }
+
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "facts", facts);
    return resp;
 }
 
