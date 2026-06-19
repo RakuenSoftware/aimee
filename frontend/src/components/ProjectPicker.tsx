@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Picker } from '@rakuensoftware/smoothgui';
 
 /* ProjectPicker — a compact "select or clone a project" control embedded in each
  * tool tab. Each tab passes its own storageKey so its selected project persists
  * independently (per the per-tab project model). onChange fires with the selected
  * project name and the user's workspace root (so the tab can act on it — the
- * editor opens root/<project>, chat sets cwd to it, etc.). */
+ * editor opens root/<project>, chat sets cwd to it, etc.).
+ *
+ * The select is the generic smoothgui <Picker>; this component supplies the
+ * aimee-specific data (/api/git/projects) and the clone-repo action. */
 
 export interface ProjectSelection {
   project: string;
@@ -81,15 +85,19 @@ export default function ProjectPicker({ storageKey, onChange }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '8px 12px', background: '#f6f7f9', borderBottom: '1px solid #e3e6ea' }}>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 13, color: '#666' }}>Project:</span>
-        <select style={{ ...input, minWidth: 180 }} value={selected} onChange={e => select(e.target.value)}>
-          <option value="">— none —</option>
-          {projects.map(p => <option key={p} value={p}>{p}</option>)}
-        </select>
-        <button style={btn} onClick={() => setCloneOpen(o => !o)}>{cloneOpen ? 'Cancel' : '+ Clone repo'}</button>
-        {err && <span style={{ color: '#c62828', fontSize: 12 }}>{err}</span>}
-      </div>
+      <Picker
+        label="Project"
+        emptyLabel="— none —"
+        options={projects.map(p => ({ value: p, label: p }))}
+        value={selected}
+        onChange={select}
+        error={err}
+        actions={
+          <button style={btn} onClick={() => setCloneOpen(o => !o)}>
+            {cloneOpen ? 'Cancel' : '+ Clone repo'}
+          </button>
+        }
+      />
       {cloneOpen && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <input style={{ ...input, flex: 2, minWidth: 260 }} placeholder="git remote URL (https or ssh)"

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Spinner, tokens } from '@rakuensoftware/smoothgui';
+import { Spinner, Tabs, tokens } from '@rakuensoftware/smoothgui';
 import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
 import { escHtml, renderMd, renderWithMentions } from './chat/markdown';
 import ProjectPicker from '../components/ProjectPicker';
@@ -2704,21 +2704,16 @@ export default function Chat() {
         <span style={{ fontSize: '11px', color: tokens.textFaint, fontFamily: 'system-ui' }}>
           Prompt:
         </span>
-        {(['MINIMAL', 'STANDARD', 'EXTENDED'] as const).map(tier => (
-          <button
-            key={tier}
-            onClick={() => changePromptTier(tier)}
-            style={{
-              padding: '2px 8px', fontSize: '11px', fontFamily: 'system-ui',
-              background: promptTier === tier ? tokens.primary : 'transparent',
-              color: promptTier === tier ? tokens.surface : tokens.textFaint,
-              border: `1px solid ${promptTier === tier ? tokens.primary : tokens.borderLight}`,
-              borderRadius: '10px', cursor: 'pointer',
-            }}
-          >
-            {tier.charAt(0) + tier.slice(1).toLowerCase()}
-          </button>
-        ))}
+        <Tabs
+          size="sm"
+          ariaLabel="Prompt tier"
+          value={promptTier}
+          onChange={(v) => changePromptTier(v as 'MINIMAL' | 'STANDARD' | 'EXTENDED')}
+          options={(['MINIMAL', 'STANDARD', 'EXTENDED'] as const).map(tier => ({
+            value: tier,
+            label: tier.charAt(0) + tier.slice(1).toLowerCase(),
+          }))}
+        />
         {availableSkills.length > 0 && (
           <>
             <span style={{ fontSize: '11px', color: tokens.borderLight, fontFamily: 'system-ui', marginLeft: '4px' }}>|</span>
