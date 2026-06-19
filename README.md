@@ -614,6 +614,7 @@ Focused references:
 | [Command Reference](docs/COMMANDS.md) | Client command contract, flags, and options |
 | [Storage Tiers](docs/STORAGE_TIERS.md) | DB1 + DB2 ownership boundaries (pgvector inside DB2) |
 | [Setting Up Delegates](docs/DELEGATES.md) | Configure delegate agents for task offloading |
+| [Autonomous Development](docs/AUTONOMOUS_DEVELOPMENT.md) | Hand aimee a proposal; it builds the change end-to-end via the workflow engine |
 | [Workspace Management](docs/WORKSPACES.md) | Multi-repo workspaces and session isolation |
 | [Security Model](docs/SECURITY.md) | Threat model, trust boundaries, capability system |
 | [Benchmarks](docs/BENCHMARKS.md) | Latency measurements and performance budget |
