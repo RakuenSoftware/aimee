@@ -42,6 +42,16 @@ if [ ! -f "$AIMEE_HOME/agents.json" ] && [ -f /opt/aimee/defaults/agents.json ];
     mkdir -p "$AIMEE_HOME"
     cp /opt/aimee/defaults/agents.json "$AIMEE_HOME/agents.json"
 fi
+# Seed default dev-lifecycle workflows so autonomous development (default-on) can
+# resolve "build" out of the box. Never clobber operator-authored workflows.
+if [ -d /opt/aimee/defaults/workflows ]; then
+    mkdir -p "$AIMEE_HOME/workflows"
+    for wf in /opt/aimee/defaults/workflows/*.yaml; do
+        [ -e "$wf" ] || continue
+        dst="$AIMEE_HOME/workflows/$(basename "$wf")"
+        [ -f "$dst" ] || cp "$wf" "$dst"
+    done
+fi
 # Ensure aimee (uid 1000) owns its home + workspaces so it can write on an empty
 # bind mount. On smoothfs tiers ownership is forced to 1000 regardless; harmless.
 chown aimee:aimee "$AIMEE_HOME" "${AIMEE_WORKSPACES_DIR:-/var/lib/aimee-workspaces}" 2>/dev/null || true
