@@ -589,7 +589,7 @@ int sync_vector_embedding(int64_t doc_id, const float *vec, int dim)
 
 const char *kb_effective_embedding_cmd(const char *embedding_cmd)
 {
-   return (embedding_cmd && embedding_cmd[0]) ? embedding_cmd : "builtin";
+   return config_embedding_command(NULL, embedding_cmd);
 }
 
 /* pgvector owns vector bytes. This hook exists to keep the sync/async call

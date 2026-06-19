@@ -77,7 +77,7 @@ static void *drain_thread_main(void *arg)
        * builder; the builtin embedder needs no external sidecar). */
       if (cfg.kb_evidence_embed_enabled)
       {
-         const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
+         const char *embed_cmd = config_embedding_command(&cfg, NULL);
          int n = kb_evidence_embed_drain(cfg.kb_evidence_embed_batch, embed_cmd);
          if (n > 0)
             aimee_log(LOG_DEBUG, "kb.evidence.embed", "drained %d evidence op(s)", n);
@@ -139,7 +139,7 @@ static void *drain_thread_main(void *arg)
        * scheduler, never on the capture hot path. Off by default. */
       if (cfg.learning_synthesize_enabled && cfg.learning_synthesize_command[0])
       {
-         const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
+         const char *embed_cmd = config_embedding_command(&cfg, NULL);
          /* Bound LLM calls per poll — each op is one sidecar/LLM round-trip. */
          int n =
              kb_learning_synth_drain(SYNTH_DRAIN_BATCH, cfg.learning_synthesize_command, embed_cmd,

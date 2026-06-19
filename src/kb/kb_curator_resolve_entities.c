@@ -194,7 +194,7 @@ int kb_curator_resolve_entities_one(const kb_curator_extract_opts_t *opts)
 
    config_t cfg;
    config_load(&cfg);
-   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&cfg, NULL);
    float vec[CURATOR_ENTITY_DIM];
    int dim = memory_embed_text(embed_text, embed_cmd, vec, CURATOR_ENTITY_DIM);
    if (dim > 0)

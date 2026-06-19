@@ -1122,6 +1122,15 @@ const char *config_guardrail_mode(const config_t *cfg)
    return MODE_APPROVE;
 }
 
+const char *config_embedding_command(const config_t *cfg, const char *requested)
+{
+   if (requested && requested[0])
+      return requested;
+   if (cfg && cfg->embedding_command[0])
+      return cfg->embedding_command;
+   return "builtin";
+}
+
 /* --- Conversation directories --- */
 
 int config_conversation_dirs(const config_t *cfg, char dirs[][MAX_PATH_LEN], int max_dirs)

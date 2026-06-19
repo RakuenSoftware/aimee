@@ -385,7 +385,7 @@ int kb_code_embed_refresh(const char *project, const char *scope, const char **p
     * upsert failed and no code vectors were ever stored. */
    config_t ce_cfg;
    config_load(&ce_cfg);
-   const char *embed_command = ce_cfg.embedding_command[0] ? ce_cfg.embedding_command : "builtin";
+   const char *embed_command = config_embedding_command(&ce_cfg, NULL);
    int embed_dim = db2_embedding_dim();
    if (embed_dim <= 0 || embed_dim > CE_EMBED_MAX_DIM)
       embed_dim = 1024;

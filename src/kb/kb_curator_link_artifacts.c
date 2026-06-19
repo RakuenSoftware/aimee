@@ -163,7 +163,7 @@ int kb_curator_link_artifacts_one(const kb_curator_extract_opts_t *opts)
 
    config_t cfg;
    config_load(&cfg);
-   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&cfg, NULL);
 
    static const char *sql = "SELECT id, payload FROM artifacts"
                             " WHERE kind = 'code_unit' AND state = 'committed'"

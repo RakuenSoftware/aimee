@@ -85,7 +85,7 @@ void mem_repair(app_ctx_t *ctx, int argc, char **argv)
    if (opts.pos_count > 0)
       single_id = atoll(opts.positional[0]);
 
-   const char *embed_cmd = s_mem_cfg.embedding_command[0] ? s_mem_cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&s_mem_cfg, NULL);
    char *resp_json =
        kb_client_memory_repair_json(limit, failed_only, reset_stuck, single_id, embed_cmd);
    cJSON *resp = resp_json ? cJSON_Parse(resp_json) : NULL;
@@ -574,7 +574,7 @@ void mem_verify(app_ctx_t *ctx, int argc, char **argv)
    int do_detail = opt_get_flag(&vopts, "detail");
    int do_timings = opt_get_flag(&vopts, "timings");
 
-   const char *embed_cmd = s_mem_cfg.embedding_command[0] ? s_mem_cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&s_mem_cfg, NULL);
 
    char *verify_json = kb_client_memory_verify_json(do_detail, do_timings, embed_cmd);
    cJSON *resp = verify_json ? cJSON_Parse(verify_json) : NULL;

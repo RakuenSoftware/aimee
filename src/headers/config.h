@@ -1511,6 +1511,15 @@ const char *config_output_dir(void);
 /* Effective guardrail mode (defaults to "approve"). */
 const char *config_guardrail_mode(const config_t *cfg);
 
+/* Resolve the embedding command actually used to embed text. Precedence:
+ * a per-call `requested` command (e.g. from a request payload), then the
+ * configured cfg->embedding_command, then "builtin". Either argument may be
+ * NULL. "builtin" is a 384-dim deterministic hash that real halfvec(1024)/
+ * (2560) columns reject, so it is only correct in a 384-dim shim/test setup;
+ * every production path must carry a real embedder via config or request. This
+ * is the single point of truth -- do not re-inline the ternary at call sites. */
+const char *config_embedding_command(const config_t *cfg, const char *requested);
+
 /* Disposition source labels for config reporting. */
 const char *config_disposition_source_name(config_disposition_source_t source);
 

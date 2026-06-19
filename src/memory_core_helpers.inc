@@ -1693,7 +1693,10 @@ static int memory_fetch_row_by_unit_id(int64_t unit_id, memory_t *out)
 
 static const char *memory_effective_embedding_cmd(const char *command)
 {
-   return (command && command[0]) ? command : "builtin";
+   /* Single policy point: config_embedding_command (config_save.c). The caller
+    * has already resolved config -> command upstream, so pass it as the request
+    * override; this keeps memory_core consistent with the kb-side resolution. */
+   return config_embedding_command(NULL, command);
 }
 
 /* Per-recall query-embedding memo.
@@ -2032,7 +2035,7 @@ static void memory_refresh_unit_embeddings(int64_t memory_id)
       return;
    config_t cfg;
    config_load(&cfg);
-   const char *embed_command = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
+   const char *embed_command = config_embedding_command(&cfg, NULL);
 
    db2_memory_unit_row_t units[64];
    int unit_max = (int)(sizeof(units) / sizeof(units[0]));

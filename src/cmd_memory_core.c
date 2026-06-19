@@ -533,7 +533,7 @@ void mem_drain(app_ctx_t *ctx, int argc, char **argv)
    opt_parsed_t opts;
    opt_parse(argc, argv, NULL, &opts);
    int timeout = opt_get_int(&opts, "timeout", 0);
-   const char *embed_cmd = s_mem_cfg.embedding_command[0] ? s_mem_cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&s_mem_cfg, NULL);
 
    char *resp_json = kb_client_queue_drain_json(embed_cmd, timeout);
    cJSON *resp = resp_json ? cJSON_Parse(resp_json) : NULL;

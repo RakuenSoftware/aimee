@@ -90,7 +90,7 @@ int learning_bundle_build(const char *query, const char *embed_cmd, int k, learn
    if (k > LEARNING_BUNDLE_MAX)
       k = LEARNING_BUNDLE_MAX;
 
-   const char *model = (embed_cmd && embed_cmd[0]) ? embed_cmd : "builtin";
+   const char *model = config_embedding_command(NULL, embed_cmd);
    float qvec[BUNDLE_EMBED_DIM];
    int qdim = memory_embed_text(query, model, qvec, BUNDLE_EMBED_DIM);
    if (qdim <= 0)

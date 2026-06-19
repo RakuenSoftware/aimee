@@ -983,8 +983,7 @@ int mem_eval_load_corpus(const char *corpus_path, mem_eval_case_t *cases, int ma
       {
          config_t embed_cfg;
          config_load(&embed_cfg);
-         const char *embed_cmd =
-             embed_cfg.embedding_command[0] ? embed_cfg.embedding_command : "builtin";
+         const char *embed_cmd = config_embedding_command(&embed_cfg, NULL);
          if (memory_embed(m.id, embed_cmd) != 0)
          {
             fprintf(stderr, "mem_eval_load_corpus: memory_embed failed for fixture %s\n",

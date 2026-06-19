@@ -131,7 +131,7 @@ static int mem_eval_drain_async_queues(mem_eval_async_drain_totals_t *totals)
    if (!cfg.memory_cognify_async_enabled && !cognify_enabled)
       return 0;
 
-   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&cfg, NULL);
    db2_kb_service_async_queue_stats_t queue_stats;
    memory_cognify_queue_stats_t cog_stats;
    memset(&queue_stats, 0, sizeof(queue_stats));

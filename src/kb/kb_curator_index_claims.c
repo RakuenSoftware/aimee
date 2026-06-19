@@ -104,7 +104,7 @@ int kb_curator_index_claims_one(const kb_curator_extract_opts_t *opts)
 
    config_t cfg;
    config_load(&cfg);
-   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&cfg, NULL);
    float subj_vec[CURATOR_CLAIM_DIM];
    float val_vec[CURATOR_CLAIM_DIM];
    int d1 = memory_embed_text(subj_attr[0] ? subj_attr : value_text, embed_cmd, subj_vec,

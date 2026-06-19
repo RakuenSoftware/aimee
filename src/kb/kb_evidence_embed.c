@@ -107,7 +107,7 @@ int kb_evidence_embed_one(const char *embed_cmd)
    if (got == 0)
       return 0;
 
-   const char *model = (embed_cmd && embed_cmd[0]) ? embed_cmd : "builtin";
+   const char *model = config_embedding_command(NULL, embed_cmd);
 
    db2_artifact_row_t row;
    if (db2_artifact_read(pend.artifact_id, &row, NULL, 0, NULL) != 0)

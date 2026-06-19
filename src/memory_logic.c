@@ -418,7 +418,7 @@ void embed_unembedded_l2(void)
 #else
    config_t cfg;
    config_load(&cfg);
-   const char *embed_command = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
+   const char *embed_command = config_embedding_command(&cfg, NULL);
    const char *embed_ver = cfg.embedding_model[0] ? cfg.embedding_model : embed_command;
 
    int64_t ids[50];

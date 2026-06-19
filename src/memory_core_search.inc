@@ -373,7 +373,7 @@ static int memory_collect_chunk_matches(const char *query, int limit, memory_t *
    int cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
    config_t cm_cfg;
    config_load(&cm_cfg);
-   const char *embed_cmd = cm_cfg.embedding_command[0] ? cm_cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&cm_cfg, NULL);
    int got = memory_collect_memory_matches_via_vector(query, embed_cmd, limit, scratch, cap);
    for (int i = 0; i < got && count < max; i++)
       count = memory_append_unique(out, count, max, &scratch[i]);
@@ -401,7 +401,7 @@ static int memory_collect_unit_matches(const char *query, int limit, memory_t *o
    int cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
    config_t mc_cfg;
    config_load(&mc_cfg);
-   const char *embed_cmd = mc_cfg.embedding_command[0] ? mc_cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&mc_cfg, NULL);
    int got = memory_collect_unit_matches_via_vector(query, embed_cmd, limit, scratch, cap);
    for (int i = 0; i < got && count < max; i++)
       count = memory_append_unique(out, count, max, &scratch[i]);
@@ -3034,7 +3034,7 @@ static int memory_collect_code_matches(const char *query, int fetch_limit, memor
    int cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
    config_t code_cfg;
    config_load(&code_cfg);
-   const char *embed_cmd = code_cfg.embedding_command[0] ? code_cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&code_cfg, NULL);
    int got = memory_collect_memory_matches_via_vector(query, embed_cmd, fetch_limit, scratch, cap);
    for (int i = 0; i < got && count < max; i++)
       count = memory_append_unique(out, count, max, &scratch[i]);
@@ -3433,7 +3433,7 @@ static int memory_collect_variant_candidates(const char *raw_query, const char *
 
    if (qe_semantic)
    {
-      const char *embed_cmd = qe_cfg.embedding_command[0] ? qe_cfg.embedding_command : "builtin";
+      const char *embed_cmd = config_embedding_command(&qe_cfg, NULL);
       int k = qe_cfg.memory_query_expansion_k > 0 ? qe_cfg.memory_query_expansion_k : 5;
       if (memory_expand_query_semantic(signal_query[0] ? signal_query : norm_variant, embed_cmd, k,
                                        expanded_signal, sizeof(expanded_signal)) < 0)
@@ -3456,7 +3456,7 @@ static int memory_collect_variant_candidates(const char *raw_query, const char *
    }
    if (qe_semantic)
    {
-      const char *embed_cmd = qe_cfg.embedding_command[0] ? qe_cfg.embedding_command : "builtin";
+      const char *embed_cmd = config_embedding_command(&qe_cfg, NULL);
       int k = qe_cfg.memory_query_expansion_k > 0 ? qe_cfg.memory_query_expansion_k : 5;
       expanded_count =
           memory_expand_query_terms_semantic(signal_query[0] ? signal_query : norm_variant,
@@ -3473,8 +3473,7 @@ static int memory_collect_variant_candidates(const char *raw_query, const char *
    {
       memory_t lexical_scratch[64];
       int lexical_cap = (int)(sizeof(lexical_scratch) / sizeof(lexical_scratch[0]));
-      const char *lexical_embed_cmd =
-          qe_cfg.embedding_command[0] ? qe_cfg.embedding_command : "builtin";
+      const char *lexical_embed_cmd = config_embedding_command(&qe_cfg, NULL);
       config_t lanes_cfg;
       config_load(&lanes_cfg);
       if (lanes_cfg.memory_recall_lanes_enabled)
@@ -3712,7 +3711,7 @@ memory_generate_candidates(const char *query, const char *norm_query, memory_que
 
    config_t embed_cfg;
    config_load(&embed_cfg);
-   const char *embed_cmd = embed_cfg.embedding_command[0] ? embed_cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&embed_cfg, NULL);
    int variant_fetch_limit = fetch_limit;
    int semantic_fetch_limit = fetch_limit;
    if (plan && plan->route == MEM_ROUTE_HYBRID)
@@ -3808,8 +3807,7 @@ memory_generate_candidates(const char *query, const char *norm_query, memory_que
          {
             memory_t scratch[64];
             int cap = (int)(sizeof(scratch) / sizeof(scratch[0]));
-            const char *embed_cmd =
-                neg_cfg.embedding_command[0] ? neg_cfg.embedding_command : "builtin";
+            const char *embed_cmd = config_embedding_command(&neg_cfg, NULL);
             /* Negation tokens aren't in the vector payload yet, so this falls
              * back to memory-level semantic search of the synthetic
              * "not_<token>" query. Future work: add negation_tokens to the
@@ -4620,7 +4618,7 @@ int memory_diagnose_scoped(const char *query, const char *scope_type, const char
 
    config_t embed_cfg;
    config_load(&embed_cfg);
-   const char *embed_cmd = embed_cfg.embedding_command[0] ? embed_cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&embed_cfg, NULL);
    int64_t semantic_ids[128];
    double semantic_scores[128];
    int semantic_hit_count = 0;
@@ -4685,7 +4683,7 @@ int memory_explain_match(const char *query, int64_t memory_id, memory_diagnostic
 
    config_t embed_cfg;
    config_load(&embed_cfg);
-   const char *embed_cmd = embed_cfg.embedding_command[0] ? embed_cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&embed_cfg, NULL);
    int64_t semantic_ids[128];
    double semantic_scores[128];
    int semantic_hit_count = 0;

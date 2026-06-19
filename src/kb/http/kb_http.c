@@ -1200,7 +1200,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       }
       char kb_path[MAX_PATH_LEN] = "";
       char project[128] = "";
-      char embed_cmd[256] = "builtin";
+      char embed_cmd[256] = "";
       if (!json_str(body, "path", kb_path, sizeof(kb_path)) || !kb_path[0])
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing path\"}");
@@ -1213,7 +1213,11 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       }
       (void)json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
-         snprintf(embed_cmd, sizeof(embed_cmd), "builtin");
+      {
+         config_t embed_cfg;
+         config_load(&embed_cfg);
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command(&embed_cfg, NULL));
+      }
       int force = json_bool(body, "force", 0);
 
       if (!db2_is_initialized())
@@ -1257,7 +1261,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       }
       char kb_path[MAX_PATH_LEN] = "";
       char project[128] = "";
-      char embed_cmd[256] = "builtin";
+      char embed_cmd[256] = "";
       if (!json_str(body, "path", kb_path, sizeof(kb_path)) || !kb_path[0])
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing path\"}");
@@ -1270,7 +1274,11 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       }
       (void)json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
-         snprintf(embed_cmd, sizeof(embed_cmd), "builtin");
+      {
+         config_t embed_cfg;
+         config_load(&embed_cfg);
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command(&embed_cfg, NULL));
+      }
 
       if (!db2_is_initialized())
       {
@@ -1495,10 +1503,14 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
          return 405;
       }
-      char embed_cmd[256] = "builtin";
+      char embed_cmd[256] = "";
       (void)json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
-         snprintf(embed_cmd, sizeof(embed_cmd), "builtin");
+      {
+         config_t embed_cfg;
+         config_load(&embed_cfg);
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command(&embed_cfg, NULL));
+      }
       int timeout = json_int(body, "timeout", 0);
       if (timeout < 0)
          timeout = 0;
@@ -1529,7 +1541,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       }
       char kb_path[4096] = "";
       char project[256] = "";
-      char embed_cmd[256] = "builtin";
+      char embed_cmd[256] = "";
       if (!json_str(body, "path", kb_path, sizeof(kb_path)) || !kb_path[0])
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing path\"}");
@@ -1542,7 +1554,11 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       }
       (void)json_str(body, "embedding_command", embed_cmd, sizeof(embed_cmd));
       if (!embed_cmd[0])
-         snprintf(embed_cmd, sizeof(embed_cmd), "builtin");
+      {
+         config_t embed_cfg;
+         config_load(&embed_cfg);
+         snprintf(embed_cmd, sizeof(embed_cmd), "%s", config_embedding_command(&embed_cfg, NULL));
+      }
       if (pgvec_kb_service_ensure_kb_collection(384) != 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"vector store unavailable\"}");

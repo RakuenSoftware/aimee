@@ -41,7 +41,7 @@ static cJSON *mem_rpc_unwrap(char *resp_json, const char *what)
 
 void mem_embed(app_ctx_t *ctx, int argc, char **argv)
 {
-   const char *embed_cmd = s_mem_cfg.embedding_command[0] ? s_mem_cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&s_mem_cfg, NULL);
 
    int all = 0;
    int64_t single_id = 0;
@@ -197,7 +197,7 @@ void mem_reembed(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* --start */
-   const char *embed_cmd = s_mem_cfg.embedding_command[0] ? s_mem_cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&s_mem_cfg, NULL);
    char ver_buf[256];
    if (target_version)
       snprintf(ver_buf, sizeof(ver_buf), "%s", target_version);

@@ -536,3 +536,12 @@ int main(void)
    printf("All tests passed.\n");
    return 0;
 }
+
+const char *config_embedding_command(const config_t *cfg, const char *requested)
+{
+   if (requested && requested[0])
+      return requested;
+   if (cfg && cfg->embedding_command[0])
+      return cfg->embedding_command;
+   return "builtin";
+}

@@ -126,7 +126,7 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
 
    config_t cfg;
    config_load(&cfg);
-   const char *embed_cmd = cfg.embedding_command[0] ? cfg.embedding_command : "builtin";
+   const char *embed_cmd = config_embedding_command(&cfg, NULL);
 
    kb_stats_t stats;
    memset(&stats, 0, sizeof(stats));

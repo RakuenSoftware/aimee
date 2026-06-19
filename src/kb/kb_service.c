@@ -193,8 +193,11 @@ static int kb_handle_memory_repair(int fd, cJSON *req)
    int failed_only = cJSON_IsTrue(failed_only_j) ? 1 : 0;
    int reset_stuck = cJSON_IsTrue(reset_stuck_j) ? 1 : 0;
    int64_t memory_id = cJSON_IsNumber(memory_id_j) ? (int64_t)memory_id_j->valuedouble : 0;
-   const char *embed_cmd =
-       (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : "builtin";
+   config_t repair_cfg;
+   config_load(&repair_cfg);
+   const char *embed_cmd = config_embedding_command(
+       &repair_cfg,
+       (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : NULL);
 
    if (reset_stuck)
    {
@@ -282,8 +285,11 @@ static int kb_handle_memory_verify(int fd, cJSON *req)
    cJSON *embed_j = cJSON_GetObjectItemCaseSensitive(req, "embedding_command");
    int do_detail = cJSON_IsTrue(detail_j) ? 1 : 0;
    int do_timings = cJSON_IsTrue(timings_j) ? 1 : 0;
-   const char *embed_cmd =
-       (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : "builtin";
+   config_t verify_cfg;
+   config_load(&verify_cfg);
+   const char *embed_cmd = config_embedding_command(
+       &verify_cfg,
+       (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : NULL);
 
    pgvec_verify_snapshot_t snap;
    memset(&snap, 0, sizeof(snap));
@@ -468,8 +474,11 @@ static int kb_handle_memory_embed(int fd, cJSON *req)
    int64_t memory_id = cJSON_IsNumber(mem_j) ? (int64_t)mem_j->valuedouble : 0;
    int all = cJSON_IsTrue(all_j) ? 1 : 0;
    const char *version = (cJSON_IsString(ver_j) && ver_j->valuestring[0]) ? ver_j->valuestring : "";
-   const char *embed_cmd =
-       (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : "builtin";
+   config_t embed_cfg;
+   config_load(&embed_cfg);
+   const char *embed_cmd = config_embedding_command(
+       &embed_cfg,
+       (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : NULL);
 
    if (!all && memory_id <= 0)
       return kb_send_error(fd, "memory.embed requires memory_id>0 or all=true");
@@ -620,17 +629,15 @@ static int kb_handle_memory_reembed_start(int fd, cJSON *req)
    if (!cJSON_IsString(ver_j) || !ver_j->valuestring[0])
       return kb_send_error(fd, "missing version");
    const char *version = ver_j->valuestring;
-   /* Default to the server's CONFIGURED embedder, never "builtin": builtin emits
-    * 384-dim vectors, which can never insert into a real halfvec(1024)/(2560)
-    * column (Postgres rejects "expected N dimensions, not 384") and silently
-    * leaves memory_embeddings empty. Only fall back to builtin if no embedder is
-    * configured at all (e.g. a 384-dim shim/test setup). */
+   /* Resolve via the shared policy: request override, then the server's
+    * CONFIGURED embedder, then builtin. Never silently builtin in production:
+    * builtin emits 384-dim vectors that a real halfvec(1024)/(2560) column
+    * rejects, leaving memory_embeddings empty. */
    config_t reembed_cfg;
    config_load(&reembed_cfg);
-   const char *embed_cmd =
-       (cJSON_IsString(embed_j) && embed_j->valuestring[0])
-           ? embed_j->valuestring
-           : (reembed_cfg.embedding_command[0] ? reembed_cfg.embedding_command : "builtin");
+   const char *embed_cmd = config_embedding_command(
+       &reembed_cfg,
+       (cJSON_IsString(embed_j) && embed_j->valuestring[0]) ? embed_j->valuestring : NULL);
 
    char ts_now[32];
    now_utc(ts_now, sizeof(ts_now));

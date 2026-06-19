@@ -309,8 +309,7 @@ static cJSON *kb_service_health_object(void)
    config_load(&cfg);
    int embed_ok = cfg.embedding_command[0] ? 1 : 0;
    cJSON_AddBoolToObject(resp, "embed_ok", embed_ok);
-   cJSON_AddStringToObject(resp, "embed_command",
-                           cfg.embedding_command[0] ? cfg.embedding_command : "builtin");
+   cJSON_AddStringToObject(resp, "embed_command", config_embedding_command(&cfg, NULL));
 
    /* Curator (§4 observability): per-tier provider config + queue depth. The
     * live four-state reachability probe (ready/loading/gated/down) is deferred to

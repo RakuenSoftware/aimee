@@ -1299,9 +1299,8 @@ static char *td_search_docs(cJSON *args, const char *name, const char *dispatch_
       config_t cfg;
       config_load(&cfg);
       int max = (mx && cJSON_IsNumber(mx)) ? mx->valueint : 3;
-      char *envelope = kb_client_search_json(
-          NULL, q->valuestring, cfg.embedding_command[0] ? cfg.embedding_command : "builtin", max,
-          NULL);
+      char *envelope = kb_client_search_json(NULL, q->valuestring,
+                                             config_embedding_command(&cfg, NULL), max, NULL);
       /* The knowledge service returns {"status":"ok","result":"<text>"}; unwrap so the
        * tool sees the same body shape kb_search() used to return. */
       cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
