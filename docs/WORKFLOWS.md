@@ -9,11 +9,13 @@ human approval gates.
 
 > **Status (current):** authoring, validating, and inspecting workflows is fully
 > supported (CLI + the webchat **Workflows** tab). The execution engine —
-> stepping a run through its gates, roundtables, and approvals — is implemented
-> and tested, but **is not yet wired to a user-facing trigger**: there is no
-> `aimee workflow run` command, no Run button in the Workflows tab, and no
-> run-creation API route. Today you compose and validate the graph; running it
-> end-to-end lands in a later slice. See [Limitations](#current-limitations).
+> stepping a run through its gates, roundtables, and approvals — is implemented,
+> tested, and reachable: `POST /v1/dev/submit` seeds a proposal, creates an
+> autonomous work item on the chosen workflow (default `build`), and the
+> scheduler drives it server-side. See
+> [Autonomous Development](AUTONOMOUS_DEVELOPMENT.md). What's still missing is a
+> general per-workflow trigger: no `aimee workflow run` command and no Run button
+> in the Workflows tab for an arbitrary run. See [Limitations](#current-limitations).
 
 ## Mental model
 
@@ -229,11 +231,13 @@ the API):
 
 These are real today and worth knowing before you lean on workflows:
 
-1. **No user-facing run trigger.** `wfe_work_item_create` / `wfe_autonomy_run`
-   exist and are exercised by the test suite, but nothing in the CLI, webchat, or
-   API creates and starts a run. You can author, validate, save, and inspect —
-   not yet kick one off. (Tracked in [ROADMAP](ROADMAP.md); the
-   `cmd_workflow.c` header notes the runner "lands in later slices.")
+1. **Only the autonomous-development trigger is wired.** `POST /v1/dev/submit`
+   creates and starts a run via `wfe_work_item_create` + the scheduler (see
+   [Autonomous Development](AUTONOMOUS_DEVELOPMENT.md)). There is still no general
+   per-workflow trigger — no `aimee workflow run` command and no Run button in the
+   Workflows tab to kick off an arbitrary saved workflow. You can author,
+   validate, save, and inspect any workflow; only `build`-style autonomous runs
+   start today.
 2. **Run-in-a-specific-project isn't wired.** A work-item has a `repo` field, but
    the per-step blocks resolve their working directory from
    `$AIMEE_WORKFLOW_REPO`/cwd rather than the work-item's `repo`, so binding a run
