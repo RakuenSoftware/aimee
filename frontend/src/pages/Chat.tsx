@@ -1429,6 +1429,14 @@ export default function Chat() {
   // subscription (reconnect / tab switch back), so dedup is required to avoid
   // re-appending the same observed turn. Survives effect re-runs (component ref).
   const persistedTurnsRef = useRef<Set<string>>(new Set());
+  /* Stream-token batching: text/thinking deltas arrive far faster than the
+   * screen refreshes. Rather than a setStreamMsgs (→ full re-render) per token,
+   * we accumulate deltas here and flush them in a single state update per
+   * animation frame (~60/s max, and zero while the tab is backgrounded). Message
+   * *creation* stays synchronous so ids/order are assigned immediately; only the
+   * append of further text into an existing bubble is batched. */
+  const pendingAppendsRef = useRef<Array<{ id: number; field: 'text' | 'thinkText'; delta: string }>>([]);
+  const flushRafRef = useRef<number | null>(null);
   const sending = pendingSends > 0;
   const queueActive = sending || queuedSends > 0;
   const activePersonaSid = tabs[activeIdx]?.aimeeSid ?? '';
@@ -1441,6 +1449,8 @@ export default function Chat() {
   useEffect(() => { scrollToBottom(); }, [streamMsgs, working, scrollToBottom]);
   useEffect(() => { tabsRef.current = tabs; }, [tabs]);
   useEffect(() => { workingRef.current = working; }, [working]);
+  // Cancel any pending stream-flush frame on unmount.
+  useEffect(() => () => { if (flushRafRef.current !== null) cancelAnimationFrame(flushRafRef.current); }, []);
 
   /* Detach every attached presence surface when the page unloads, so a closed
    * browser doesn't leak attachments until the session is closed. keepalive
@@ -2285,6 +2295,7 @@ export default function Chat() {
     } catch (e) {
       if (isAbortError(e)) return;
       const errMsg = e instanceof Error ? e.message : 'Unknown error';
+      flushStreamAppends(); // land buffered text before appending the error
       setStreamMsgs(prev => {
         const aid = streamRefs.assistantId;
         if (aid !== null) {
@@ -2295,6 +2306,7 @@ export default function Chat() {
         return [...prev, { id: nextId(), type: 'assistant', text: `**Connection error:** ${errMsg}` }];
       });
     } finally {
+      flushStreamAppends(); // flush any deltas not covered by turn_end
       activeSendAbortRefs.current.delete(controller);
       setPendingSends(activeSendAbortRefs.current.size);
       setWorking(hasPendingChatWork());
@@ -2306,6 +2318,41 @@ export default function Chat() {
       streamRefs.thinkId = null;
       streamRefs.toolId = null;
       textareaRef.current?.focus();
+    }
+  }
+
+  /* Apply all buffered stream deltas in one state update, coalesced per message.
+   * Safe to call manually (e.g. at turn end) or as the rAF callback. */
+  function flushStreamAppends() {
+    if (flushRafRef.current !== null) {
+      cancelAnimationFrame(flushRafRef.current);
+      flushRafRef.current = null;
+    }
+    const ups = pendingAppendsRef.current;
+    if (ups.length === 0) return;
+    pendingAppendsRef.current = [];
+    const byId = new Map<number, { text: string; think: string }>();
+    for (const u of ups) {
+      const e = byId.get(u.id) ?? { text: '', think: '' };
+      if (u.field === 'text') e.text += u.delta;
+      else e.think += u.delta;
+      byId.set(u.id, e);
+    }
+    setStreamMsgs(prev => prev.map(m => {
+      const e = byId.get(m.id);
+      if (!e) return m;
+      const next = { ...m };
+      if (e.text) next.text = m.text + e.text;
+      if (e.think) next.thinkText = (m.thinkText ?? '') + e.think;
+      return next;
+    }));
+  }
+
+  /* Buffer one delta and ensure a flush is scheduled for the next frame. */
+  function queueStreamAppend(id: number, field: 'text' | 'thinkText', delta: string) {
+    pendingAppendsRef.current.push({ id, field, delta });
+    if (flushRafRef.current === null) {
+      flushRafRef.current = requestAnimationFrame(flushStreamAppends);
     }
   }
 
@@ -2361,30 +2408,31 @@ export default function Chat() {
             return [...prev, thinkMsg];
           });
         } else {
-          const tid = streamRefs.thinkId;
-          setStreamMsgs(prev =>
-            prev.map(m => m.id === tid ? { ...m, thinkText: (m.thinkText ?? '') + content } : m)
-          );
+          // continuation delta — batch into the per-frame flush
+          queueStreamAppend(streamRefs.thinkId, 'thinkText', content);
         }
         break;
       }
       case 'text': {
         const content = String(data.content ?? '');
         if (!content) break; // ignore empty deltas — don't spawn an empty bubble
-        setStreamMsgs(prev => {
-          let aid = streamRefs.assistantId;
-          if (aid === null) {
-            setWorking(hasPendingChatWork());
-            aid = nextId();
-            streamRefs.assistantId = aid;
-            return [...prev, { id: aid, type: 'assistant', text: content }];
-          }
-          return prev.map(m => m.id === aid ? { ...m, text: m.text + content } : m);
-        });
+        const aid = streamRefs.assistantId;
+        if (aid === null) {
+          // first token of a segment: create the bubble synchronously so its id
+          // and position are fixed before any batched deltas land in it.
+          const newId = nextId();
+          streamRefs.assistantId = newId;
+          setWorking(hasPendingChatWork());
+          setStreamMsgs(prev => [...prev, { id: newId, type: 'assistant', text: content }]);
+        } else {
+          // continuation delta — batch into the per-frame flush
+          queueStreamAppend(aid, 'text', content);
+        }
         break;
       }
       case 'turn_end': {
         setWorking(hasPendingChatWork());
+        flushStreamAppends(); // ensure the saved transcript has all streamed text
         setStreamMsgs(prev => {
           saveCurrentTabMessages(prev);
           return prev;
@@ -2396,6 +2444,7 @@ export default function Chat() {
       }
       case 'error': {
         setWorking(hasPendingChatWork());
+        flushStreamAppends(); // land buffered text before appending the error
         const msg = String(data.message ?? 'Unknown error');
         setStreamMsgs(prev => {
           const aid = streamRefs.assistantId;
