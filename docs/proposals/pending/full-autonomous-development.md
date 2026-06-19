@@ -11,6 +11,15 @@ task generation, no background "find work to do" loop. WP-4 intake is the only
 way an autonomous run begins, and it always originates from a human-submitted
 proposal.
 
+**Architecture invariant (user, 2026-06-19):** ALL autonomous action flows
+*through the workflow engine* (`wfe`). The engine's block catalog, gates
+(roundtable/human/CI), autonomy driver, persistence and audit are the single
+substrate for autonomy — there is no side-channel that takes an autonomous
+action outside the engine. The scheduler (WP-3) only ever resumes
+`wfe_autonomy_run()`; intake (WP-4) only ever creates a `wfe` work item. This
+guarantees every autonomous step is gate-governed, budget-bounded, persisted and
+auditable by construction.
+
 ## 1. Goal (the user's words)
 
 > "I should be able to hand you a proposal, you implement it in full, going to
