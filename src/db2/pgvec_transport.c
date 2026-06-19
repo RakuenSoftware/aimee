@@ -273,9 +273,10 @@ int pgvec_memory_upsert(int64_t point_id, const float *vec, int dim, const char 
    int expect = db2_embedding_dim();
    if (expect > 0 && dim != expect)
    {
-      aimee_log(LOG_WARN, "pgvec",
-                "memory embedding dim mismatch: got %d, expected %d (point_id=%lld); refusing upsert",
-                dim, expect, (long long)point_id);
+      aimee_log(
+          LOG_WARN, "pgvec",
+          "memory embedding dim mismatch: got %d, expected %d (point_id=%lld); refusing upsert",
+          dim, expect, (long long)point_id);
       return -1;
    }
    void *pg = db2_conn();
@@ -376,8 +377,8 @@ int pgvec_kb_upsert(int64_t point_id, const float *vec, int dim, const char *pay
    if (expect > 0 && dim != expect)
    {
       aimee_log(LOG_WARN, "pgvec",
-                "kb embedding dim mismatch: got %d, expected %d (point_id=%lld); refusing upsert", dim,
-                expect, (long long)point_id);
+                "kb embedding dim mismatch: got %d, expected %d (point_id=%lld); refusing upsert",
+                dim, expect, (long long)point_id);
       return -1;
    }
    void *pg = db2_conn();

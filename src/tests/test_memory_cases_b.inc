@@ -522,6 +522,9 @@ static void test_memory_embed_records_embedder_version(void)
    fclose(fp);
 
    setup();
+   /* This test embeds with the builtin embedder, which emits 384-dim vectors;
+    * align the active dim so the upsert dim guard accepts them. */
+   db2_set_embedding_dim(384);
    memory_t mem;
    assert(memory_insert(TIER_L2, KIND_FACT, "embed-version", "test content", 0.9, "", &mem) == 0);
    assert(memory_embed(mem.id, "builtin") == 0);

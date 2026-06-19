@@ -16,6 +16,7 @@
 #include "aimee.h"
 #include "db2_test_shim.h"
 #include "../db2/db2_internal.h"
+#include "../db2/lifecycle.h" /* db2_set_embedding_dim */
 #include "../db2/pgvec_transport.h"
 #include "../db2/memory_vectors.h"
 #include "../db2/kb_vectors.h"
@@ -305,6 +306,9 @@ static void test_corpus_ensure_index_graceful(void)
 int main(void)
 {
    db2_test_shim_open();
+   /* These tests upsert tiny 4-dim vectors; declare that dim so the upsert
+    * dim guard (pgvec_*_upsert vs db2_embedding_dim) accepts them. */
+   db2_set_embedding_dim(4);
 
    test_collection_names();
    test_schema_version_nonempty();

@@ -65,7 +65,8 @@ int main(void)
    db2_test_shim_open();
 
    check_dim(1024, 384);  /* pplx-0.6b column; the builtin 384-dim vector must be rejected */
-   check_dim(2560, 1024); /* pplx-4b column; a 1024-dim vector must be rejected */
+   check_dim(2560, 1024); /* pplx-4b column; a 1024-dim (0.6b) vector must be rejected */
+   check_dim(2560, 384);  /* pplx-4b column; the builtin 384-dim vector must be rejected too */
 
    printf("test_memory_embed_dim_guard: OK\n");
    return 0;

@@ -627,10 +627,10 @@ static int kb_handle_memory_reembed_start(int fd, cJSON *req)
     * configured at all (e.g. a 384-dim shim/test setup). */
    config_t reembed_cfg;
    config_load(&reembed_cfg);
-   const char *embed_cmd = (cJSON_IsString(embed_j) && embed_j->valuestring[0])
-                               ? embed_j->valuestring
-                               : (reembed_cfg.embedding_command[0] ? reembed_cfg.embedding_command
-                                                                   : "builtin");
+   const char *embed_cmd =
+       (cJSON_IsString(embed_j) && embed_j->valuestring[0])
+           ? embed_j->valuestring
+           : (reembed_cfg.embedding_command[0] ? reembed_cfg.embedding_command : "builtin");
 
    char ts_now[32];
    now_utc(ts_now, sizeof(ts_now));
