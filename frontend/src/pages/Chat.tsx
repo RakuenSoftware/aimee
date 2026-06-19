@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Spinner, Tabs, tokens } from '@rakuensoftware/smoothgui';
 import { BootstrapBanner, DiffBlock, Message, RewindMarker, ThinkingBlock, ToolBlock, TurnSummaryCard } from './chat/ChatPrimitives';
-import { escHtml, renderMd, renderWithMentions } from './chat/markdown';
+import { renderWithMentions } from './chat/markdown';
 import ProjectPicker from '../components/ProjectPicker';
 import { useSessions } from '../SessionContext';
 
@@ -2595,10 +2595,10 @@ export default function Chat() {
       }}>
         {streamMsgs.map(m => {
           if (m.type === 'user') {
-            return <Message key={m.id} role="user" html={escHtml(m.text)} />;
+            return <Message key={m.id} role="user" text={m.text} />;
           }
           if (m.type === 'assistant') {
-            return <Message key={m.id} role="assistant" html={renderMd(m.text)} />;
+            return <Message key={m.id} role="assistant" text={m.text} />;
           }
           if (m.type === 'thinking') {
             return <ThinkingBlock key={m.id} text={m.thinkText ?? ''} />;

@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { tokens } from '@rakuensoftware/smoothgui';
+import { escHtml, renderMd } from './markdown';
 
 interface BootstrapStack {
   name: string;
@@ -33,7 +34,13 @@ export function BootstrapBanner({ onGenerate, onDismiss, stacks }: BannerProps) 
   );
 }
 
-export function Message({ role, html }: { role: 'user' | 'assistant'; html: string }) {
+/* A single chat bubble. Takes the RAW text and renders markdown (assistant) or
+ * escapes (user) INTERNALLY, memoized on the text. Combined with React.memo on
+ * the component, this means a streaming turn only re-parses the one message whose
+ * text is growing — the other (unchanged) messages are skipped entirely, instead
+ * of every message being re-parsed on every token. */
+export const Message = memo(function Message({ role, text }: { role: 'user' | 'assistant'; text: string }) {
+  const html = useMemo(() => (role === 'user' ? escHtml(text) : renderMd(text)), [role, text]);
   const styles: React.CSSProperties = {
     maxWidth: '80%',
     padding: '10px 14px',
@@ -52,18 +59,18 @@ export function Message({ role, html }: { role: 'user' | 'assistant'; html: stri
     borderBottomLeftRadius: role === 'assistant' ? 2 : 10,
   };
   return <div style={styles} dangerouslySetInnerHTML={{ __html: html }} />;
-}
+});
 
-export function ThinkingBlock({ text }: { text: string }) {
+export const ThinkingBlock = memo(function ThinkingBlock({ text }: { text: string }) {
   return (
     <details style={{ margin: '4px 0', padding: '8px 10px', background: tokens.surfaceAlt, borderLeft: `3px solid ${tokens.borderMedium}`, borderRadius: '4px', fontSize: '12px', color: tokens.textFaint, alignSelf: 'flex-start', maxWidth: '80%' }}>
       <summary style={{ cursor: 'pointer', color: tokens.textPale, fontStyle: 'italic' }}>Thinking…</summary>
       <pre style={{ marginTop: '6px', fontSize: '11px', color: tokens.textHint, maxHeight: '200px', overflowY: 'auto', whiteSpace: 'pre-wrap' }}>{text}</pre>
     </details>
   );
-}
+});
 
-export function ToolBlock({ name, args, result }: { name: string; args: string; result?: string }) {
+export const ToolBlock = memo(function ToolBlock({ name, args, result }: { name: string; args: string; result?: string }) {
   const pending = result === undefined;
   return (
     <details style={{ margin: '4px 0', padding: '8px 10px', background: tokens.surfaceAlt, borderLeft: `3px solid ${tokens.primary}`, borderRadius: '4px', fontSize: '12px', color: tokens.textFaint, alignSelf: 'flex-start', maxWidth: '80%' }}>
@@ -79,18 +86,18 @@ export function ToolBlock({ name, args, result }: { name: string; args: string; 
       )}
     </details>
   );
-}
+});
 
-export function TurnSummaryCard({ text }: { text: string }) {
+export const TurnSummaryCard = memo(function TurnSummaryCard({ text }: { text: string }) {
   return (
     <details style={{ margin: '2px 0', padding: '6px 10px', background: tokens.surfaceAlt, borderLeft: `3px solid ${tokens.borderMedium}`, borderRadius: '4px', fontSize: '12px', color: tokens.textFaint, alignSelf: 'flex-start', maxWidth: '80%' }}>
       <summary style={{ cursor: 'pointer', color: tokens.textSecondary, fontStyle: 'italic', userSelect: 'none' }}>Turn summary</summary>
       <div style={{ marginTop: '6px', fontSize: '12px', color: tokens.textPale, lineHeight: 1.5 }}>{text}</div>
     </details>
   );
-}
+});
 
-export function DiffBlock({ path, diff }: { path?: string; diff: string }) {
+export const DiffBlock = memo(function DiffBlock({ path, diff }: { path?: string; diff: string }) {
   const lines = diff.split('\n');
   return (
     <details style={{ margin: '4px 0', padding: '8px 10px', background: '#0d1117', borderLeft: '3px solid #444', borderRadius: '4px', fontSize: '12px', alignSelf: 'flex-start', maxWidth: '90%' }}>
@@ -106,7 +113,7 @@ export function DiffBlock({ path, diff }: { path?: string; diff: string }) {
       </pre>
     </details>
   );
-}
+});
 
 export function RewindMarker({ snapshotId, sid }: { snapshotId: number; sid: string }) {
   const [status, setStatus] = useState<'idle' | 'pending' | 'done' | 'error'>('idle');
