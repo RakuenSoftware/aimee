@@ -46,6 +46,7 @@ Authored and reviewed through aimee's own multi-agent roundtable
 | Implementation plan | 2 | 11 → **0 (approved)** |
 | Implementation diff | 3 | 5 → 7 → 0 (weak panel) |
 | Implementation diff (re-review) | 2 | 5 → **0 (approved)** |
+| WP-5 (webchat + SPA) | 6 | 3 → 2 → 0; then cursor rewrite → **0 (approved)** |
 
 A mid-review reliability bug was caught and fixed: one panelist
 (`mistral-medium`) was returning thin 1–10 s reviews. Upgrading that seat to
@@ -56,11 +57,23 @@ Those were fixed and the diff re-approved with `participants_failed: 0`.
 
 Design + plan: `docs/proposals/pending/server-owned-turn-lifecycle{,.plan}.md`.
 
+## WP-5 — webchat reconnect/replay (included)
+
+Cursor-resumable presence events so the browser experience matches the
+server-owned lifecycle:
+
+- `GET /v1/sessions/{id}/events` resumes from `Last-Event-ID` (EventSource
+  auto-reconnect) or `?cursor=N` (fresh remount, persisted in localStorage), and
+  emits each event with `id: <cursor>`. This eliminates the replay-from-0
+  duplication.
+- The Go proxy forwards the cursor; the SPA persists it monotonically per
+  session and a turn that completed while a tab was detached now persists into
+  the conversation exactly once.
+
 ## Scope / follow-ups
 
-- **Webchat `202 + events` and SPA reconnect/replay (WP-5)** are the documented
-  fast-follow — the plan states the server is correct and testable on its own
-  after the trigger wiring. This PR is the server-side core.
+- Finer-grained mid-call interruption of the in-process agent path (the CLI
+  path — the default — is fully interruptible).
 - Finer-grained mid-call interruption of the in-process agent path (the CLI
   path — the default — is fully interruptible).
 - Wire `turn_registry_sweep_dead` to the periodic compute-thread bookkeeping
