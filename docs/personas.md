@@ -23,8 +23,8 @@ The five reviewer personas (`qa`, `security`, `reviewer`,
 reviewer: it investigates and surfaces findings with evidence, never editing the
 code. They share a common **Review Principles** block and each carry their own
 review methodology. `reviewer` and `reviewer-constructive` are a deliberate pair
-— the former is adversarial (tries to refute), the latter assesses the work as
-written — so a roundtable panel can blend both stances.
+,  the former is adversarial (tries to refute), the latter assesses the work as
+written, so a roundtable panel can blend both stances.
 
 ## Where personas live
 
@@ -143,7 +143,7 @@ persona, and any action step can be assigned a persona/delegate pair:
 
 The webchat **Workflows** tab includes a persona manager (create/edit personas)
 and a per-step persona picker, both backed by `/api/chat/personas`. So the same
-eight built-ins — plus any you add — are the vocabulary for chat identity,
+eight built-ins, plus any you add, are the vocabulary for chat identity,
 delegate assignment, roundtable panels, and per-step workflow roles alike.
 
 ## V1 HTTP API

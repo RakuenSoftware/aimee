@@ -5,7 +5,7 @@ This document describes how the `aimee` thin client works against a **remote**
 specific to remote operation:
 
 1. **Workspaces** are ingested *from the client* (the server never reads the
-   client's filesystem) — the client still owns the working tree.
+   client's filesystem), the client still owns the working tree.
 2. **Agent/delegate credentials live in the server's sealed vault**, encrypted
    at rest and decryptable by the server autonomously. They are **not** held on
    the client and there is **no** RAM session keyring (the legacy client-held
@@ -22,8 +22,8 @@ It complements [WORKSPACES.md](WORKSPACES.md), [DELEGATES.md](DELEGATES.md), and
 | Your working tree / files | yes | no (never reads client fs) |
 | Agent API keys / Codex OAuth | not stored here | **sealed vault**, encrypted at rest |
 | Interactive CLI logins (Claude CLI, Codex CLI) | login lives here | runs against the client's login (see below) |
-| Engine, agent loop, DB1/DB2, KB | — | yes |
-| Code index, memory, chat/delegate execution | — | yes |
+| Engine, agent loop, DB1/DB2, KB |, | yes |
+| Code index, memory, chat/delegate execution |, | yes |
 
 Point the client at the server once:
 
@@ -40,7 +40,7 @@ is unchanged.
 
 Mutating `/v1` calls require the server to allow remote writes. Set it in the
 server's `aimee.yaml` (`aimee.api.remote_writes: off|data|full`) **or** via the
-`AIMEE_API_REMOTE_WRITES` environment variable (deploy truth — applied even when
+`AIMEE_API_REMOTE_WRITES` environment variable (deploy truth, applied even when
 the config file is read-only or absent, e.g. a containerized server). `full`
 grants the LAN bearer the capabilities needed for workspace add and ingest; use
 it only on trusted networks.
@@ -74,8 +74,8 @@ Notes:
 
 ## Agents & credentials (server vault)
 
-Credentials for delegates and the primary provider — API keys and Codex/OAuth
-tokens — live in the server's **sealed vault**: encrypted at rest, keyed by
+Credentials for delegates and the primary provider, API keys and Codex/OAuth
+tokens, live in the server's **sealed vault**: encrypted at rest, keyed by
 agent, and decryptable by the server autonomously (a dual-access wrap lets the
 server unseal them without an interactive unlock). They are **not** held on the
 client, and there is **no** per-session RAM keyring or credential push. The
@@ -83,7 +83,7 @@ vault is the single, permanent store. See [SECURITY.md](SECURITY.md).
 
 - `agent add` stores the **definition** (name, endpoint, model, roles, provider)
   and, with `--key`, seals the **key into the vault** under the server principal.
-  Plaintext key storage is refused — the key only ever lands encrypted.
+  Plaintext key storage is refused, the key only ever lands encrypted.
 - Every chat/delegate turn resolves the agent's credential from the vault (the
   in-flight turn's attested principal, falling back to the server principal). No
   credential is pushed per session and none is cached on the client.
@@ -104,7 +104,7 @@ primary chat provider to any configured agent:
 aimee config set provider minimax
 ```
 
-You configure agents **once on the server** — the vault is shared across every
+You configure agents **once on the server**, the vault is shared across every
 client that reaches it, so there is no per-machine key setup.
 
 ### Migrating legacy client-held keys

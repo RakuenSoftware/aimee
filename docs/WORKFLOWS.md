@@ -1,15 +1,15 @@
 # Workflows
 
-A **workflow** is a declarative graph that encodes a development lifecycle —
-*propose → review → approve → plan → implement → freeze → review → PR → merge* —
+A **workflow** is a declarative graph that encodes a development lifecycle,
+*propose → review → approve → plan → implement → freeze → review → PR → merge*,
 as composable, typed steps. aimee ships one default composition (`build`), and
 you can clone and edit it or author your own. The engine that advances a
 workflow run is the same one that drives delegates, roundtable reviews, and
 human approval gates.
 
 > **Status (current):** authoring, validating, and inspecting workflows is fully
-> supported (CLI + the webchat **Workflows** tab). The execution engine —
-> stepping a run through its gates, roundtables, and approvals — is implemented,
+> supported (CLI + the webchat **Workflows** tab). The execution engine,
+> stepping a run through its gates, roundtables, and approvals, is implemented,
 > tested, and reachable: `POST /v1/dev/submit` seeds a proposal, creates an
 > autonomous work item on the chosen workflow (default `build`), and the
 > scheduler drives it server-side. See
@@ -22,19 +22,19 @@ human approval gates.
 A workflow definition (`wfe_def_t`, [src/workflow/wfe_def.h](../src/workflow/wfe_def.h))
 is a named graph:
 
-- **nodes** — each node is one **step**: an `id`, a **block** (the step's type),
+- **nodes**, each node is one **step**: an `id`, a **block** (the step's type),
   optional `params`, and typed inputs (`in`).
-- **blocks** — a block is the *kind* of work a step does (write a proposal, run a
+- **blocks**, a block is the *kind* of work a step does (write a proposal, run a
   roundtable, open a PR, …). The catalog is fixed in code; you can also define
   **custom blocks**. See [Block catalog](#block-catalog).
-- **control edges** — how the run moves between steps:
-  - `next` — unconditional successor.
-  - `on_pass` / `on_fail` — a **gate**'s two outcomes (a gate produces a verdict
+- **control edges**, how the run moves between steps:
+  - `next`, unconditional successor.
+  - `on_pass` / `on_fail`, a **gate**'s two outcomes (a gate produces a verdict
     or approval; pass takes one edge, fail the other).
-- **data edges** (`in`) — bind a step's typed input slot to an upstream step's
+- **data edges** (`in`), bind a step's typed input slot to an upstream step's
   output (`<producer_id>.<output>`, default output handle `out`). These are
   *type-checked*: e.g. `implement` only accepts a `plan`, `merge` only a `pr`.
-- **start** — the entry node id (defaults to the first node).
+- **start**, the entry node id (defaults to the first node).
 
 Every block declares the **artifact type** it produces and the types it accepts,
 so the validator rejects a graph that wires a proposal into a step expecting a
@@ -54,7 +54,7 @@ From the catalog in [src/workflow/wfe_def.c](../src/workflow/wfe_def.c)
 
 | Block | Produces | Accepts (input) | Kind | What it does |
 |---|---|---|---|---|
-| `author.proposal` | proposal | — (no input) | action | A delegate drafts a proposal. The usual entry point. |
+| `author.proposal` | proposal |, (no input) | action | A delegate drafts a proposal. The usual entry point. |
 | `author.plan` | plan | proposal | action | A delegate turns the proposal into an implementation plan. |
 | `implement` | branch | plan | action | Delegates implement the plan onto a branch (`params.fanout: max` parallelizes). |
 | `document` | branch | branch | action | A delegate writes docs onto the branch. Composes between implement and freeze. |
@@ -62,7 +62,7 @@ From the catalog in [src/workflow/wfe_def.c](../src/workflow/wfe_def.c)
 | `gate.roundtable` | verdict | proposal · plan · frozen_diff | **gate** | Runs a multi-persona review **panel**; pass/fail on quorum. |
 | `gate.human` | approval | proposal · plan · branch · frozen_diff · pr | **gate** | Parks for a human decision (or auto-passes when preauthorized). |
 | `pr.open` | pr | proposal · frozen_diff | action | Opens a pull request. |
-| `merge` | — (terminal) | pr | action | Merges the PR. |
+| `merge` |, (terminal) | pr | action | Merges the PR. |
 | `gate.ci` | verdict | pr | **gate** | Polls the PR's CI; **fail-closed** (no green → fail). |
 | `check.mergeable` | verdict | pr | **gate** | Refuses on a merge conflict. |
 | `custom` | declared | declared | either | A config-defined block (command or delegate), see [Custom blocks](#custom-blocks). |
@@ -73,7 +73,7 @@ single `next`. Everything else takes `next`.
 ## The default `build` workflow
 
 [config/workflows/build.yaml](../config/workflows/build.yaml) is the reference
-composition — the full two-gate development lifecycle. The control flow:
+composition, the full two-gate development lifecycle. The control flow:
 
 ```
 draft (author.proposal, with_user)
@@ -107,7 +107,7 @@ A roundtable node carries its panel in `params`:
   on_fail: draft
 ```
 
-Panel entries are **persona** names — see [Personas](personas.md). Each panelist
+Panel entries are **persona** names, see [Personas](personas.md). Each panelist
 is a persona run on a delegate model; the gate passes when the quorum of
 panelists approve (or fails after `max_rounds`).
 
@@ -176,7 +176,7 @@ The browser **Workflows** tab is a visual composer over the same definitions:
 - Each top-nav tab (including Workflows) selects its own git **project**.
 
 > Note: adding a step from the blocks rail drops it onto the canvas
-> **disconnected** — you wire it into the sequence by selecting it and setting
+> **disconnected**, you wire it into the sequence by selecting it and setting
 > its `next`/`on_pass`/`on_fail` in the inspector. There is no Run button yet.
 
 ### Custom blocks
@@ -212,7 +212,7 @@ The engine advances it one step at a time
   artifact it approved.
 
 A step resolves the working repository from `$AIMEE_WORKFLOW_REPO` (or the
-process cwd) — see [Limitations](#current-limitations) for the
+process cwd), see [Limitations](#current-limitations) for the
 run-in-a-specific-project gap.
 
 ## Inspecting runs
@@ -234,7 +234,7 @@ These are real today and worth knowing before you lean on workflows:
 1. **Only the autonomous-development trigger is wired.** `POST /v1/dev/submit`
    creates and starts a run via `wfe_work_item_create` + the scheduler (see
    [Autonomous Development](AUTONOMOUS_DEVELOPMENT.md)). There is still no general
-   per-workflow trigger — no `aimee workflow run` command and no Run button in the
+   per-workflow trigger, no `aimee workflow run` command and no Run button in the
    Workflows tab to kick off an arbitrary saved workflow. You can author,
    validate, save, and inspect any workflow; only `build`-style autonomous runs
    start today.
@@ -248,6 +248,6 @@ These are real today and worth knowing before you lean on workflows:
 
 ## See also
 
-- [Personas](personas.md) — the identities that staff roundtable panels and steps.
-- [Delegates](DELEGATES.md) — how steps dispatch model work.
-- [Architecture](ARCHITECTURE.md) — where the workflow engine sits.
+- [Personas](personas.md), the identities that staff roundtable panels and steps.
+- [Delegates](DELEGATES.md), how steps dispatch model work.
+- [Architecture](ARCHITECTURE.md), where the workflow engine sits.

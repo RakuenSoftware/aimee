@@ -1219,18 +1219,18 @@ Treat it as a *semi-trusted*, same-host/trusted-LAN surface, see
 The UI is organized as a **top navigation bar**, one tab per tool, and each tab
 selects its own git **project** to operate on:
 
-- **Chat** — the agent conversation (streamed over SSE). The selected project
+- **Chat**, the agent conversation (streamed over SSE). The selected project
   becomes the agent's working directory; webchat scope-validates it to the
   signed-in user's own workspace.
-- **Dashboard** — memory, reminders, and onboarding panels.
-- **Workflows** — a visual composer for [workflow](docs/WORKFLOWS.md)
+- **Dashboard**, memory, reminders, and onboarding panels.
+- **Workflows**, a visual composer for [workflow](docs/WORKFLOWS.md)
   definitions (blocks rail, graph canvas, per-step persona/delegate assignment,
   plus a persona manager). Validate/Save persist server-side.
-- **Projects** — connect git repositories. Clone over HTTPS *or* SSH-form URLs
+- **Projects**, connect git repositories. Clone over HTTPS *or* SSH-form URLs
   (normalized to HTTPS); manage **per-host** credentials in the server vault and
   sign in to GitHub via OAuth device flow. aimee-server is single-user but talks
   to many hosts/providers, so credentials are keyed by **host, never per user**.
-- **Editor** — an in-browser **VS Code** (a per-user `code-server`, supervised
+- **Editor**, an in-browser **VS Code** (a per-user `code-server`, supervised
   by the server and reverse-proxied at `/vscode/`) opened on the selected
   project. Enabled by default (`WITH_VSCODE=1` in the image, `AIMEE_WEBCHAT_
   EDITOR=1`).

@@ -96,7 +96,7 @@ flowchart TD
 > <name> <endpoint> <model> --key K` seals `K` into the vault and refuses
 > plaintext storage; the server's `agents.json` keeps the definition only. Codex
 > tokens are vaulted via `aimee agent setup codex-oauth`. Configure agents once
-> on the server — the vault is shared across clients. Migrate any leftover
+> on the server, the vault is shared across clients. Migrate any leftover
 > client-held `~/.config/aimee/agent-keys.json` with `aimee agent key import
 > [--scrub]`. See [THIN_CLIENT.md](THIN_CLIENT.md) and
 > [SECURITY.md](SECURITY.md#agent-credential-custody-thin-client).
