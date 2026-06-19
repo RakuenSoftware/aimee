@@ -180,11 +180,20 @@ final PR pass/fail) surface as actionable notifications.
 2. Implementation plan — roundtable-reviewed, then a brief human ack.
 3. Final PR(s) — human pass/fail before merge to `testing`.
 
-## 7. Phasing
+## 7. Phasing & default-on (user, 2026-06-19)
 
-- **Phase A:** WP-1 + WP-2 (real blocks) behind a default-off flag; a human still
-  drives advancement in the webchat. Proves the blocks produce real work.
-- **Phase B:** WP-3 + WP-4 (scheduler + intake) — true unattended end-to-end.
+Autonomous development is **core functionality and ships DEFAULT-ON** — not gated
+behind an opt-in flag. "Default-on" means the capability is live: a submitted
+proposal runs autonomously out of the box. Safety is enforced by the *gates*, not
+by a master off-switch: human approval gates are never auto-satisfied unless the
+submitter preauthorized them, per-run budget ceilings park rather than run away,
+and autonomous merges only ever target `testing` (promotion to `main` stays a
+human action). (Phase A's seam was inert only because no live provider was
+registered yet; Phase B registers it on by default.)
+
+- **Phase A (done):** WP-1 + WP-2 real delegate/forge seams.
+- **Phase B:** the live delegate provider (manager loop) + WP-3 scheduler + WP-4
+  intake — true unattended end-to-end, registered on by default.
 - **Phase C:** richer policy (failure taxonomy, budget tuning, multi-run scaling).
 
 Each phase is independently shippable and roundtable-gated.
