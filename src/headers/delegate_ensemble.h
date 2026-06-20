@@ -68,6 +68,29 @@ typedef struct
    const char *parent_session_id;
 } roundtable_opts_t;
 
+/* Replay-verification evidence (Part A of the replayable-verification proposal).
+ * A panelist attaches a STRUCTURED query — never a free-form command — so a fresh
+ * verifier can replay it deterministically over the read-only code index
+ * (index_find / index_find_callers / index_code_search) and re-ground the claim.
+ * Plain (no pointers): memset-zeroing and struct copy stay valid. */
+typedef enum
+{
+   EV_NONE = 0, /* no replayable evidence -> item is interpretive (caps at concern) */
+   EV_SYMBOL,   /* does symbol `target` exist? -> index_find */
+   EV_REFS,     /* how many call sites of `target`? -> index_find_callers (the workhorse) */
+   EV_SEARCH    /* lexical code search for `target` -> index_code_search */
+} ev_kind_t;
+
+typedef struct
+{
+   ev_kind_t kind;
+   char target[256];  /* symbol (EV_SYMBOL/EV_REFS) or search query (EV_SEARCH) */
+   char project[128]; /* index project scope ("" = all indexed projects) */
+   int count;         /* the count the panelist claims (EV_REFS/EV_SEARCH) */
+   char idkey[65];    /* sha256-hex[:64] of sorted "file:line", or "" if unset */
+   int factual;       /* 1 = replayable claim; 0 = interpretive (caps at concern) */
+} review_evidence_t;
+
 typedef struct
 {
    char severity[16];
@@ -78,6 +101,7 @@ typedef struct
    char identity_key[128];
    char sources[256];
    int count;
+   review_evidence_t evidence; /* Part A: structured replay evidence (zeroed = EV_NONE) */
 } roundtable_review_item_t;
 
 typedef struct

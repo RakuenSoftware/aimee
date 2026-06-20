@@ -443,6 +443,10 @@ static void config_set_defaults(config_t *cfg)
     * turn (the auto-inject path is decoupled from ingress_preinject_enabled in
     * ingress_preinject_build, so it surfaces without the code/memory previews). */
    cfg->typed_facts_enabled = 1;
+   /* Replayable-evidence roundtable verification (Part A): default-on. config_t
+    * is memset-0 above, so this explicit assignment is what makes the contract
+    * hold (the config_fields[] row carries is_bool, not a default value). */
+   cfg->roundtable_replay_verify_enabled = 1;
    /* Default-on to preserve behavior: profile-card refresh ran ungated in the
     * maintenance REPLAY pass before the enable-gate was wired. Maintenance is
     * itself default-off, so this is a no-op until maintenance is enabled. */

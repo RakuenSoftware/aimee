@@ -711,6 +711,14 @@ typedef struct config
     * DELEGATES.md). Does not affect API-key/HTTP agents or other CLI agents. */
    int claude_cli_delegate_enabled;
 
+   /* Replayable-evidence roundtable verification (Part A). When 1 (default), a
+    * review-mode roundtable runs each captured item through an independent replay
+    * pass that re-grounds its structured evidence against the read-only code
+    * index before the artifact is assembled (drops unreproducible items, caps
+    * interpretive-only at "concern"). 0 = legacy behavior: no replay, no rejected
+    * appendix — byte-identical to pre-Part-A. */
+   int roundtable_replay_verify_enabled;
+
    /* Verify scope. When 0 (default), `aimee git verify` and the push/PR verify
     * gate apply only to the session's current project (the repo the session is
     * rooted in). Cross-project repositories are neither auto-configured (no
