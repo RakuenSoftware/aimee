@@ -4174,7 +4174,12 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    memset(&rewrite, 0, sizeof(rewrite));
    {
       config_t cfg;
-      if (config_load(&cfg) == 0 && cfg.memory_rewrite_enabled && cfg.memory_rewrite_command[0])
+      /* Fire when enabled and a rewrite mechanism exists: either the legacy
+       * subprocess command, or the in-process curator-LLM seam (KB build). The
+       * in-process path needs no command, so requiring one would silently
+       * disable HyDE on an accelerated backend that only configures a provider. */
+      if (config_load(&cfg) == 0 && cfg.memory_rewrite_enabled &&
+          (cfg.memory_rewrite_command[0] || memory_rewrite_llm_inproc))
          memory_query_rewrite(query, &cfg, &rewrite);
    }
 
