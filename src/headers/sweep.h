@@ -113,6 +113,15 @@ extern "C"
     * (<= max), or -1 on parse failure. Pure (no IO / no model). */
    int sweep_parse_candidates(const char *json_text, sweep_candidate_t *out, int max);
 
+   /* --- filing-path safety (PR-B4) --- */
+
+   /* 1 if `path` is a safe repo-relative path to reference in a filed work item:
+    * non-empty, not absolute, no ".." component, and only [A-Za-z0-9._/-] (so no
+    * shell metacharacters, NUL, whitespace, globs, or quoting). The first line of
+    * the untrusted-candidate -> work-item gate; the filer adds a realpath/under-root
+    * check on top. Pure (lexical, no IO). */
+   int sweep_path_safe(const char *path);
+
 #ifdef __cplusplus
 }
 #endif

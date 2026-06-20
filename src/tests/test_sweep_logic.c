@@ -111,11 +111,38 @@ static void test_edges_from_callers(void)
    assert(e.caller_count == 0 && e.shared_state == 0);
 }
 
+static void test_path_safe(void)
+{
+   assert(sweep_path_safe("src/foo.c") == 1);
+   assert(sweep_path_safe("src/sub_dir/file-2.c") == 1);
+   assert(sweep_path_safe("a.c") == 1);
+   assert(sweep_path_safe("src/a..b.c") == 1); /* dots, not a ".." component */
+
+   /* malicious corpus — all rejected */
+   assert(sweep_path_safe("../../.bashrc") == 0);
+   assert(sweep_path_safe("/etc/passwd") == 0);
+   assert(sweep_path_safe("dir/../../../escape") == 0);
+   assert(sweep_path_safe("..") == 0);
+   assert(sweep_path_safe("src/../x") == 0);
+   assert(sweep_path_safe("a; rm -rf /") == 0);
+   assert(sweep_path_safe("$(touch x)") == 0);
+   assert(sweep_path_safe("`id`") == 0);
+   assert(sweep_path_safe("a|b") == 0);
+   assert(sweep_path_safe("a&b") == 0);
+   assert(sweep_path_safe("src/*.c") == 0);
+   assert(sweep_path_safe("a b.c") == 0);
+   assert(sweep_path_safe("a\tb") == 0);
+   assert(sweep_path_safe("\"q\"") == 0);
+   assert(sweep_path_safe("") == 0);
+   assert(sweep_path_safe(NULL) == 0);
+}
+
 int main(void)
 {
    test_seam_key_and_exclude();
    test_score();
    test_edges_from_callers();
+   test_path_safe();
    printf("sweep_logic: all tests passed\n");
    return 0;
 }
