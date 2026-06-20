@@ -23,6 +23,7 @@
 #include "sweep.h"
 #include "wfe_engine.h" /* wfe_work_item_create */
 
+#include <dirent.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,6 +31,59 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+#define SWEEP_MAX_SETTLED 1024
+
+/* Delta-awareness: scan previously-filed sweep proposals for their seam keys so a
+ * re-run excludes already-filed seams. Returns the count; *out is a malloc'd array
+ * of malloc'd keys the caller frees. (Server-side, repo-non-writing design: the
+ * exclusion set is the sweep's own filing trail under $AIMEE_HOME, not a worktree.) */
+static int sweep_load_settled(char ***out)
+{
+   *out = NULL;
+   const char *home = aimee_home();
+   char dir[1024];
+   if (snprintf(dir, sizeof(dir), "%s/sweeps/proposals", home ? home : "/tmp") >= (int)sizeof(dir))
+      return 0; /* AIMEE_HOME absurdly long -> no delta set (re-files; safe, not wrong) */
+   DIR *d = opendir(dir);
+   if (!d)
+      return 0; /* none filed yet */
+   char **arr = calloc(SWEEP_MAX_SETTLED, sizeof(char *));
+   if (!arr)
+   {
+      closedir(d);
+      return 0;
+   }
+   int n = 0;
+   struct dirent *e;
+   while ((e = readdir(d)) && n < SWEEP_MAX_SETTLED)
+   {
+      size_t l = strlen(e->d_name);
+      if (l < 3 || strcmp(e->d_name + l - 3, ".md") != 0)
+         continue;
+      char p[1200];
+      if (snprintf(p, sizeof(p), "%s/%s", dir, e->d_name) >= (int)sizeof(p))
+         continue;
+      FILE *f = fopen(p, "rb");
+      if (!f)
+         continue;
+      /* large enough for the full "# Deepen seam: <key>" line (key <= SWEEP_KEY_MAX) */
+      char buf[SWEEP_KEY_MAX + 64]; /* header is line 1 */
+      size_t rd = fread(buf, 1, sizeof(buf) - 1, f);
+      fclose(f);
+      buf[rd] = '\0';
+      char key[SWEEP_KEY_MAX];
+      if (sweep_extract_seam_key(buf, key, sizeof(key)))
+      {
+         arr[n] = strdup(key);
+         if (arr[n])
+            n++;
+      }
+   }
+   closedir(d);
+   *out = arr;
+   return n;
+}
 
 #define SWEEP_MAX_FILES    4000
 #define SWEEP_PER_FILE_CAP 4096
@@ -347,10 +401,13 @@ int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (area_count > caps.max_areas)
       area_count = caps.max_areas; /* cap; remaining areas are a later (delta) sweep */
 
-   /* Exclusion set (proposals/work-queue/typed_facts) is wired in PR-B4; v1 has
-    * an empty settled set so nothing is excluded yet. */
-   const char *const *settled = NULL;
-   int settled_n = 0;
+   /* Delta-awareness: exclude seams already filed by a prior sweep (its own filing
+    * trail under $AIMEE_HOME). typed_facts/architecture_settled exclusion needs a
+    * kb_client recall path that does not exist yet (DB2-disabled server) — deferred;
+    * v1 dedupes against prior filings, which is the dominant re-run case. */
+   char **settled_arr = NULL;
+   int settled_n = sweep_load_settled(&settled_arr);
+   const char *const *settled = (const char *const *)settled_arr;
 
    sweep_file_ctx_t fc = {do_file, root, repo, 0, 0};
 
@@ -403,6 +460,9 @@ int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                : "analysis-only (pass {\"file\":true} to file STRONG candidates "
                                  "to manual-review); shared-state conservative (v1)");
 
+   for (int i = 0; i < settled_n; i++)
+      free(settled_arr[i]);
+   free(settled_arr);
    free(area);
    free(cc.paths);
    return server_send_ok(conn, resp);

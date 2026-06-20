@@ -122,6 +122,14 @@ extern "C"
     * check on top. Pure (lexical, no IO). */
    int sweep_path_safe(const char *path);
 
+   /* --- delta-awareness (PR-B5) --- */
+
+   /* Extract a filed proposal's seam key from its markdown header line
+    * "# Deepen seam: <key>" into out[cap]. Returns 1 if found, 0 otherwise. The
+    * sweep scans its own previously-filed proposals to build the exclusion set, so
+    * a re-run does not re-file an already-filed seam ("delta-aware"). Pure. */
+   int sweep_extract_seam_key(const char *proposal_md, char *out, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

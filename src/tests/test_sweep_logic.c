@@ -137,12 +137,30 @@ static void test_path_safe(void)
    assert(sweep_path_safe(NULL) == 0);
 }
 
+static void test_extract_seam_key(void)
+{
+   char k[SWEEP_KEY_MAX];
+   assert(sweep_extract_seam_key("# Deepen seam: src/foo.c:helper_x\n\nbody", k, sizeof(k)) == 1);
+   assert(strcmp(k, "src/foo.c:helper_x") == 0);
+   assert(sweep_extract_seam_key("# Deepen seam: a.c:g\r\n", k, sizeof(k)) == 1); /* CRLF */
+   assert(strcmp(k, "a.c:g") == 0);
+   assert(sweep_extract_seam_key("## Other\n", k, sizeof(k)) == 0);
+   assert(k[0] == '\0');
+   assert(sweep_extract_seam_key(NULL, k, sizeof(k)) == 0);
+
+   /* round-trip: a filed proposal's key excludes that seam on the next run */
+   sweep_extract_seam_key("# Deepen seam: m/n.c:fn\n", k, sizeof(k));
+   const char *settled[] = {k};
+   assert(sweep_excluded("m/n.c:fn", settled, 1) == 1);
+}
+
 int main(void)
 {
    test_seam_key_and_exclude();
    test_score();
    test_edges_from_callers();
    test_path_safe();
+   test_extract_seam_key();
    printf("sweep_logic: all tests passed\n");
    return 0;
 }

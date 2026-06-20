@@ -44,6 +44,29 @@ int sweep_path_safe(const char *path)
    return 1;
 }
 
+int sweep_extract_seam_key(const char *proposal_md, char *out, size_t cap)
+{
+   if (out && cap)
+      out[0] = '\0';
+   if (!proposal_md || !out || cap == 0)
+      return 0;
+   static const char *PREFIX = "# Deepen seam: ";
+   const char *h = strstr(proposal_md, PREFIX);
+   if (!h)
+      return 0;
+   h += strlen(PREFIX);
+   size_t i = 0;
+   while (h[i] && h[i] != '\n' && h[i] != '\r' && i + 1 < cap)
+   {
+      out[i] = h[i];
+      i++;
+   }
+   out[i] = '\0';
+   while (i > 0 && out[i - 1] == ' ') /* defensive trailing-space trim */
+      out[--i] = '\0';
+   return out[0] != '\0';
+}
+
 int sweep_excluded(const char *seam_key, const char *const *settled, int n)
 {
    if (!seam_key || !seam_key[0] || !settled)
