@@ -438,11 +438,16 @@ static void config_set_defaults(config_t *cfg)
    snprintf(cfg->memory_rerank_command, sizeof(cfg->memory_rerank_command), "%s",
             "python3 /opt/aimee/scripts/rerank-remote.py");
    cfg->memory_routing_enabled = 1;
-   /* Typed-fact layer default-on: extract durable (subject,relation,object)
-    * facts on ingest + auto-inject the recalled "## Known facts" block into every
-    * turn (the auto-inject path is decoupled from ingress_preinject_enabled in
-    * ingress_preinject_build, so it surfaces without the code/memory previews). */
-   cfg->typed_facts_enabled = 1;
+   /* The LLM-backed memory features (typed-fact extract/inject + HyDE query
+    * rewrite) default OFF here; config_apply_inference_backend_defaults() below
+    * flips them ON when the active inference model is an accelerated backend
+    * (external model or a larger local model) rather than the CPU-only Gemma
+    * E4B/E2B fallback, which is too slow for per-turn LLM work. An explicit
+    * value in the config always wins. HyDE mode defaults on so the rewrite, once
+    * enabled, generates a hypothetical answer. */
+   cfg->typed_facts_enabled = 0;
+   cfg->memory_rewrite_enabled = 0;
+   cfg->memory_rewrite_hyde = 1;
    /* Replayable-evidence roundtable verification (Part A): default-on. config_t
     * is memset-0 above, so this explicit assignment is what makes the contract
     * hold (the config_fields[] row carries is_bool, not a default value). */
@@ -608,6 +613,32 @@ static void config_set_defaults(config_t *cfg)
    cfg->openai_key_cmd[0] = '\0';
    cfg->workspace_count = 0;
    config_parse_database(cfg, NULL);
+}
+
+/* Default the LLM-backed memory features (typed-fact extract/inject + HyDE query
+ * rewrite) ON or OFF based on the active inference backend. The backend is the
+ * curator provider model (the external model or the llama-llm container the
+ * rewrite/extraction call). The CPU-only fallback runs Gemma E4B/E2B, which is
+ * too slow for per-turn LLM work, so on it (or with no model configured) the
+ * features default OFF; any other model — an external model, or a larger local
+ * model on an accelerated llama-llm — defaults them ON. An explicit value in the
+ * config is never overridden. */
+static int model_is_cpu_only(const char *model)
+{
+   if (!model || !model[0])
+      return 1; /* no inference backend -> can't run the LLM features */
+   return strstr(model, "E4B") || strstr(model, "e4b") || strstr(model, "E2B") ||
+          strstr(model, "e2b");
+}
+
+static void config_apply_inference_backend_defaults(config_t *cfg, const cJSON *root)
+{
+   int accel = !model_is_cpu_only(cfg->kb_curator_provider_model);
+   if (!cJSON_GetObjectItemCaseSensitive((cJSON *)root, "typed_facts_enabled"))
+      cfg->typed_facts_enabled = accel;
+   if (!cJSON_GetObjectItemCaseSensitive((cJSON *)root, "memory_rewrite") &&
+       !cJSON_GetObjectItemCaseSensitive((cJSON *)root, "memory_rewrite_enabled"))
+      cfg->memory_rewrite_enabled = accel;
 }
 
 int config_load(config_t *cfg)
@@ -848,6 +879,8 @@ int config_load(config_t *cfg)
       snprintf(cfg->memory_rerank_mode, sizeof(cfg->memory_rerank_mode), "%s", item->valuestring);
 
    config_parse_memory_rewrite_section(cfg, root);
+
+   config_apply_inference_backend_defaults(cfg, root);
 
    config_parse_memory_negation_section(cfg, root);
 
