@@ -199,6 +199,22 @@ int agent_ingress_accounting_enabled(void)
    return 1;
 }
 
+/* Pre-injection stubs. query_from_messages returns a non-NULL query when a turn
+ * is present so messages_apply_preinject proceeds; build returns the per-test
+ * envelope (default NULL = no-op, so the passthrough/shape tests are unaffected).
+ * The injection-coverage test sets g_stub_preinject_env. */
+static char *g_stub_preinject_env = NULL;
+char *ingress_preinject_query_from_messages(const cJSON *messages)
+{
+   return messages ? strdup("q") : NULL;
+}
+char *ingress_preinject_build(const char *query, int request_disabled)
+{
+   (void)query;
+   (void)request_disabled;
+   return g_stub_preinject_env ? strdup(g_stub_preinject_env) : NULL;
+}
+
 #include "../server/anthropic_http.c"
 
 typedef struct
@@ -630,9 +646,31 @@ static void test_messages_stream_openai_family_translates(void)
    PASS("messages_stream_openai_family_translates");
 }
 
+/* The pre-injection envelope is folded into the request `system` as a trailing
+ * text block (array form), so a cached system prefix stays stable and both the
+ * passthrough and translated paths inherit it. */
+static void test_messages_preinject_appends_system_block(void)
+{
+   g_stub_preinject_env = "<aimee-context>ENV</aimee-context>";
+   cJSON *req = parse("{\"system\":[{\"type\":\"text\",\"text\":\"SYS\"}],"
+                      "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+   messages_apply_preinject(req);
+   char *flat = anthropic_system_to_text(req);
+   assert(flat);
+   const char *sys = strstr(flat, "SYS");
+   const char *env = strstr(flat, "<aimee-context>ENV</aimee-context>");
+   assert(sys && env);
+   assert(sys < env); /* envelope appended AFTER the (cacheable) prefix */
+   free(flat);
+   cJSON_Delete(req);
+   g_stub_preinject_env = NULL;
+   PASS("messages_preinject_appends_system_block");
+}
+
 int main(void)
 {
    test_translate_request_anthropic_passthrough();
+   test_messages_preinject_appends_system_block();
    test_anthropic_relay_round_trip();
    test_anthropic_relay_usage_capture();
    test_relay_append_data_growth();
