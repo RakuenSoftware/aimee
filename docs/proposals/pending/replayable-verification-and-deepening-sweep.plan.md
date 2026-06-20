@@ -6,6 +6,18 @@ exercise its evidence vocabulary on real runs, then plan Part B separately).
 Grounded in `origin/testing`. Default-safe: the replay/verify pass is gated and,
 when off, the roundtable behaves exactly as today.
 
+**Implementation note (grounded during build):** the server is `AIMEE_DB2_DISABLED`
+— it reaches the code index over the kb socket via `kb_client` (`kb_client_index_find`
+/ `_find_callers` / `_code_search`), not direct db2, and `search_graph` is the memory
+graph (wrong for code). So the replay engine takes its index access through a
+**settable backend seam** (`evidence_replay_set_backend`): the engine references no
+index/db2/kb symbol (links into every binary), and the server installs a
+kb_client-backed backend in `handle_delegate_roundtable`. No backend ⇒ DEGRADE. The
+verifier is **pure-code** (replay + rubric), no second "verifier model" call — the
+verdict is mechanical, so a model would only add a jailbreak surface. PR grouping
+landed as PR1 = A1+A2; **PR2 = A3+A4+A5 together** (the verifier is inert/regressive
+without the panelist brief emitting evidence, so they ship as one coherent unit).
+
 **Plan-gate:** roundtabled (engineer + security lenses → both APPROVE-WITH-CHANGES).
 The four security blockers — verifier tolerance (B1), `area_root` provenance (B2),
 model-prose-out-of-artifact (B3), 2000-line-cap factoring (B4) — and the concerns

@@ -135,6 +135,15 @@ typedef struct
    int answered_question_count;
    char coverage_gaps[ROUNDTABLE_MAX_QUESTIONS][512];
    int coverage_gap_count;
+   /* Replay verification (Part A). Items whose structured evidence did not
+    * reproduce against the code index are moved here (not silently dropped), with
+    * a parallel reason code. Fixed arrays (no heap; no change to result_free). */
+   roundtable_review_item_t rejected[ROUNDTABLE_MAX_REVIEW_ITEMS];
+   char rejected_reason[ROUNDTABLE_MAX_REVIEW_ITEMS][24];
+   int rejected_count;
+   int verified_count; /* kept items whose factual evidence reproduced */
+   int degraded_count; /* kept but unverified (index unavailable) */
+   int capped_count;   /* interpretive items capped at suggestion */
 } roundtable_result_t;
 
 int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const char *task,

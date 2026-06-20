@@ -7,36 +7,6 @@
 
 #include "evidence_replay.h"
 
-/* --- stubs for the real backend's referenced symbols (never exercised here:
- *     all logic tests inject a fake backend explicitly) --- */
-int index_find(const char *id, term_hit_t *out, int max)
-{
-   (void)id;
-   (void)out;
-   (void)max;
-   return -1;
-}
-int index_find_callers(const char *project, const char *symbol, caller_hit_t *out, int max)
-{
-   (void)project;
-   (void)symbol;
-   (void)out;
-   (void)max;
-   return -1;
-}
-int index_code_search(const char *query, const char *project, code_search_hit_t *out, int max)
-{
-   (void)query;
-   (void)project;
-   (void)out;
-   (void)max;
-   return -1;
-}
-int db2_code_index_project_count(void)
-{
-   return 0;
-}
-
 /* --- fake backend, scriptable per test --- */
 static int g_pc;         /* project_count return */
 static int g_caller_ret; /* find_callers return (count or -1) */
@@ -295,14 +265,15 @@ static void test_idkey_cap_and_dedup(void)
    assert(strcmp(kbig, kone) == 0); /* dedup: 300 copies == the single token */
 }
 
-static void test_real_backend_degrades(void)
+static void test_no_backend_degrades(void)
 {
-   /* the real backend routes to the stubs above (project_count 0) -> degrade */
+   /* no backend registered (default) -> evidence_replay degrades, never rejects */
    review_evidence_t ev;
    memset(&ev, 0, sizeof(ev));
    ev.kind = EV_SYMBOL;
    snprintf(ev.target, sizeof(ev.target), "x");
    reduced_record_t r;
+   assert(evidence_replay_active_backend() == NULL);
    assert(evidence_replay(&ev, &r) == REPLAY_INDEX_UNAVAILABLE);
 }
 
@@ -325,7 +296,7 @@ int main(void)
    test_symbol_dberror();
    test_claimed_idkey_match_and_mismatch();
    test_idkey_cap_and_dedup();
-   test_real_backend_degrades();
+   test_no_backend_degrades();
    test_status_strings();
    printf("evidence_replay: all tests passed\n");
    return 0;

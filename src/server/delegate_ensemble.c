@@ -15,6 +15,7 @@
 #include "log.h"
 #include "persona.h"
 #include "dstr.h"
+#include "roundtable_verify.h"
 #include "token_tracker.h"
 
 #include <stdio.h>
@@ -566,7 +567,15 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
              "Return only JSON: {\"items\":[{\"severity\":\"blocking|suggestion|nit\","
              "\"category\":\"correctness|security|performance|maintainability|style\","
              "\"location\":\"file:line or artifact section\",\"summary\":\"one-sentence issue\","
-             "\"recommendation\":\"...\"}],\"overall\":\"...\"}. "
+             "\"recommendation\":\"...\","
+             "\"evidence\":{\"kind\":\"refs|symbol|search|none\",\"target\":\"symbol or search "
+             "term\",\"project\":\"\",\"count\":0,\"factual\":true}}],\"overall\":\"...\"}. "
+             "evidence lets the engine VERIFY a factual structural claim against the code index "
+             "(you do NOT run it — just name it): kind=refs target=<fn> count=<claimed call "
+             "sites>; kind=symbol target=<symbol> (does it exist); kind=search target=<term>. Set "
+             "factual=true ONLY for a checkable code fact; for a judgment/opinion use kind=none "
+             "and factual=false (it will be capped below blocking). A blocking severity REQUIRES "
+             "reproducible factual evidence. "
              "Output raw JSON only — no markdown, no ``` code fences, no prose. "
              "Do not invent stable keys; the engine computes identity keys."
            : "Return the next complete draft. Incorporate useful peer input and do not describe "
@@ -589,7 +598,7 @@ static char *build_round_prompt(const char *task, const char *artifact, const ch
    }
 
    size_t needed = strlen(task ? task : "") + strlen(artifact) + strlen(peer_notes) +
-                   strlen(brief_block) + 1200;
+                   strlen(brief_block) + strlen(mode_task) + strlen(role_hint) + 512;
    char *prompt = malloc(needed);
    if (!prompt)
    {
@@ -877,6 +886,41 @@ static cJSON *review_items_array(cJSON *root)
    return cJSON_IsArray(issues) ? issues : NULL;
 }
 
+/* Parse the optional "evidence" object a panelist attaches to an item into a
+ * structured review_evidence_t for the replay verifier. Absent/unknown -> EV_NONE
+ * (interpretive: the verifier caps it below blocking). */
+static void parse_review_evidence(const cJSON *item, review_evidence_t *ev)
+{
+   memset(ev, 0, sizeof(*ev));
+   const cJSON *e = cJSON_GetObjectItemCaseSensitive(item, "evidence");
+   if (!cJSON_IsObject(e))
+      return;
+   const cJSON *kind = cJSON_GetObjectItemCaseSensitive(e, "kind");
+   const char *k = cJSON_IsString(kind) ? kind->valuestring : "";
+   if (strcmp(k, "refs") == 0)
+      ev->kind = EV_REFS;
+   else if (strcmp(k, "symbol") == 0)
+      ev->kind = EV_SYMBOL;
+   else if (strcmp(k, "search") == 0)
+      ev->kind = EV_SEARCH;
+   else
+      return; /* "none"/unknown -> EV_NONE (already zeroed) */
+   const cJSON *target = cJSON_GetObjectItemCaseSensitive(e, "target");
+   const cJSON *project = cJSON_GetObjectItemCaseSensitive(e, "project");
+   const cJSON *count = cJSON_GetObjectItemCaseSensitive(e, "count");
+   const cJSON *factual = cJSON_GetObjectItemCaseSensitive(e, "factual");
+   if (cJSON_IsString(target))
+      snprintf(ev->target, sizeof(ev->target), "%s", target->valuestring);
+   if (cJSON_IsString(project))
+      snprintf(ev->project, sizeof(ev->project), "%s", project->valuestring);
+   if (cJSON_IsNumber(count) && count->valueint > 0)
+      ev->count = count->valueint;
+   /* factual is true only if explicitly set true AND a target was given */
+   ev->factual = cJSON_IsBool(factual) ? cJSON_IsTrue(factual) : 0;
+   if (!ev->target[0])
+      ev->kind = EV_NONE; /* a kind with no target is unusable -> interpretive */
+}
+
 static void capture_review_items_from_text(const char *text, const char *source,
                                            roundtable_result_t *out)
 {
@@ -935,6 +979,7 @@ static void capture_review_items_from_text(const char *text, const char *source,
                   rec);
          snprintf(out->items[idx].identity_key, sizeof(out->items[idx].identity_key), "%s",
                   identity);
+         parse_review_evidence(it, &out->items[idx].evidence);
       }
       review_item_add_source(&out->items[idx], source);
    }
@@ -1726,7 +1771,15 @@ int delegate_roundtable_run(agent_config_t *acfg, const config_t *cfg, const cha
       if (local.mode == ROUNDTABLE_REVIEW && local.max_rounds <= 1)
       {
          free(best_artifact);
+         /* Replay verification (Part A): re-ground each captured item against the
+          * code index and re-derive severity before the artifact is built, so the
+          * artifact reflects only kept items; the rejected appendix is appended
+          * after. Gated; off => identical to prior behavior. */
+         if (cfg->roundtable_replay_verify_enabled)
+            roundtable_verify_items(out);
          best_artifact = assemble_review_artifact(out);
+         if (cfg->roundtable_replay_verify_enabled)
+            roundtable_artifact_append_rejected(&best_artifact, out);
          out->best_round = round;
          out->participants_failed = round_failed;
          for (int i = 0; i < ref_count; i++)

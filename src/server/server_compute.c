@@ -31,6 +31,7 @@
 #include "db1/interaction_events.h"
 #include "delegate_role.h"
 #include "delegate_ensemble.h"
+#include "evidence_replay.h"
 #include "guardrails.h"
 #include "liveness.h"
 #include "log.h"
@@ -1767,9 +1768,30 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    return server_send_ok(conn, resp);
 }
 
+/* Replay-verification backend (Part A): the roundtable runs server-side, where the
+ * code index is reached over the kb socket via kb_client (the server itself is
+ * AIMEE_DB2_DISABLED). Installed lazily so the verifier engine — which references
+ * no index/kb symbol — stays linkable in every binary. */
+static int rt_replay_project_count(void)
+{
+   project_info_t tmp[1];
+   int n = kb_client_index_list(tmp, 1);
+   return n < 0 ? 0 : n; /* >0 = at least one indexed project (enough to ground) */
+}
+
+static const replay_backend_t rt_replay_kb_backend = {
+    .find_symbol = kb_client_index_find,
+    .find_callers = kb_client_index_find_callers,
+    .code_search = kb_client_index_code_search,
+    .project_count = rt_replay_project_count,
+};
+
 int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
+   /* Idempotent: point the replay engine at the kb_client code-index backend. */
+   if (!evidence_replay_active_backend())
+      evidence_replay_set_backend(&rt_replay_kb_backend);
    cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
    const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
    if (!prompt || !prompt[0])

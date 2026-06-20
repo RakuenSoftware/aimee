@@ -2,14 +2,28 @@
  * read-only code index. See headers/evidence_replay.h. */
 #include "evidence_replay.h"
 
-#include "code_index.h" /* db2_code_index_project_count (real prototype) */
-#include "index.h"
+#include "index.h" /* term_hit_t / caller_hit_t / code_search_hit_t types only */
 
 #include <openssl/evp.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define REPLAY_MAX_HITS 256
+
+/* Process-wide backend seam (see header). NULL => no code index here => degrade.
+ * The engine references NO index/db2/kb symbol directly, so it links into every
+ * binary; the server installs a kb_client-backed backend at startup. */
+static const replay_backend_t *g_backend = NULL;
+
+void evidence_replay_set_backend(const replay_backend_t *be)
+{
+   g_backend = be;
+}
+
+const replay_backend_t *evidence_replay_active_backend(void)
+{
+   return g_backend;
+}
 
 const char *replay_status_str(replay_status_t s)
 {
@@ -124,14 +138,6 @@ void evidence_idkey(const char (*files)[MAX_PATH_LEN], const int *lines, int n,
    free(toks);
 }
 
-/* Default backend wraps the real read-only index. */
-static const replay_backend_t g_real_backend = {
-    .find_symbol = index_find,
-    .find_callers = index_find_callers,
-    .code_search = index_code_search,
-    .project_count = db2_code_index_project_count,
-};
-
 static void trim_copy(const char *src, char *dst, size_t cap)
 {
    dst[0] = '\0';
@@ -173,8 +179,10 @@ replay_status_t evidence_replay_with(const replay_backend_t *be, const review_ev
 {
    if (out)
       memset(out, 0, sizeof(*out));
-   if (!be || !ev || !out)
+   if (!ev || !out)
       return REPLAY_VACUOUS;
+   if (!be)
+      return REPLAY_INDEX_UNAVAILABLE; /* no backend installed => can't ground => degrade */
    if (ev->kind == EV_NONE)
       return REPLAY_NO_EVIDENCE;
 
@@ -279,5 +287,5 @@ replay_status_t evidence_replay_with(const replay_backend_t *be, const review_ev
 
 replay_status_t evidence_replay(const review_evidence_t *ev, reduced_record_t *out)
 {
-   return evidence_replay_with(&g_real_backend, ev, out);
+   return evidence_replay_with(g_backend, ev, out);
 }
