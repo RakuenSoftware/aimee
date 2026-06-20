@@ -82,10 +82,9 @@ int main(void)
    assert(strstr(doc, "token"));
 
    /* --- #2-upgrade: typed convention facts (config-gated) --- */
-   /* Off by default (no config) -> no-op, the degraded rules-doc is the spec. */
-   assert(db2_css_migration_assert_conventions("mig", "2026-01-02T00:00:00Z") == 0);
-
-   /* Enable both flags via an isolated config, then assert the conventions. */
+   /* Gate explicitly via an isolated config: typed_facts now defaults on, so
+    * "no config" no longer means off. With typed_facts disabled the call is a
+    * no-op and the degraded rules-doc is the spec. */
    char home[512];
    snprintf(home, sizeof(home), "%s/aimee-mig-home-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(home) != NULL);
@@ -98,6 +97,13 @@ int main(void)
    char cfgpath[768];
    snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", cfgdir);
    FILE *cf = fopen(cfgpath, "w");
+   assert(cf);
+   fputs("css_style_graph_enabled: true\ntyped_facts_enabled: false\n", cf);
+   fclose(cf);
+   assert(db2_css_migration_assert_conventions("mig", "2026-01-02T00:00:00Z") == 0);
+
+   /* Enable both flags, then assert the conventions. */
+   cf = fopen(cfgpath, "w");
    assert(cf);
    fputs("css_style_graph_enabled: true\ntyped_facts_enabled: true\n", cf);
    fclose(cf);
