@@ -91,7 +91,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-turn-registry \
                $(TESTPREFIX)/unit-test-session-search-tool \
                $(TESTPREFIX)/unit-test-working-memory $(TESTPREFIX)/unit-test-working-memory-mock $(TESTPREFIX)/unit-test-local-resolution $(TESTPREFIX)/unit-test-cognify-jobs $(TESTPREFIX)/unit-test-extractors-extra \
-               $(TESTPREFIX)/unit-test-evidence-replay $(TESTPREFIX)/unit-test-roundtable-verify $(TESTPREFIX)/unit-test-sweep-logic $(TESTPREFIX)/unit-test-sweep-scope \
+               $(TESTPREFIX)/unit-test-evidence-replay $(TESTPREFIX)/unit-test-roundtable-verify $(TESTPREFIX)/unit-test-sweep-logic $(TESTPREFIX)/unit-test-sweep-scope $(TESTPREFIX)/unit-test-sweep-parse \
                $(TESTPREFIX)/unit-test-css-analyze $(TESTPREFIX)/unit-test-typed-facts $(TESTPREFIX)/unit-test-css-graph $(TESTPREFIX)/unit-test-css-insights $(TESTPREFIX)/unit-test-css-oracle $(TESTPREFIX)/unit-test-css-render-oracle $(TESTPREFIX)/unit-test-css-migration $(TESTPREFIX)/unit-test-css-render $(TESTPREFIX)/unit-test-css-render-cmd \
                $(TESTPREFIX)/unit-test-compute-pool $(TESTPREFIX)/unit-test-db2-pool $(TESTPREFIX)/unit-test-cli-launch \
                $(TESTPREFIX)/unit-test-server-session-pools \
@@ -2210,6 +2210,10 @@ $(TESTPREFIX)/unit-test-sweep-logic: $(OBJDIR)/tests/test_sweep_logic.o \
 
 $(TESTPREFIX)/unit-test-sweep-scope: $(OBJDIR)/tests/test_sweep_scope.o \
                               $(OBJDIR)/server/sweep_scope.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-sweep-parse: $(OBJDIR)/tests/test_sweep_parse.o \
+                              $(OBJDIR)/server/sweep_parse.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-vault-kek-cache: $(OBJDIR)/tests/test_vault_kek_cache.o \

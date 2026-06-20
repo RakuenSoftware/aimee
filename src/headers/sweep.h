@@ -89,6 +89,23 @@ extern "C"
     * contiguous) so the pass is deterministic and O(n). Returns -1 on bad args. */
    int sweep_partition(const char *const *paths, int n, int max_files_per_area, int *out_area);
 
+   /* --- proposer-candidate parsing (PR-B3) --- */
+
+   typedef struct
+   {
+      char seam_file[MAX_PATH_LEN]; /* the ORIGINAL duplicated seam's file */
+      char seam_symbol[128];        /* the seam's top-level decl name */
+      int claimed_callers;          /* the proposer's claimed call-site count */
+      char rationale[256];          /* one-line why (opaque, for the report only) */
+   } sweep_candidate_t;
+
+   /* Parse a proposer model response (tolerant of ``` fences) into candidates.
+    * Reads the "candidates" array of objects {seam_file, seam_symbol,
+    * claimed_callers, rationale}; an item missing seam_file or seam_symbol is
+    * skipped (the proposer must name a concrete seam). Returns the count written
+    * (<= max), or -1 on parse failure. Pure (no IO / no model). */
+   int sweep_parse_candidates(const char *json_text, sweep_candidate_t *out, int max);
+
 #ifdef __cplusplus
 }
 #endif
