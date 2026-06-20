@@ -7,6 +7,7 @@
  * and DB2 (incl. pgvector) retrieval routing. */
 #include "aimee.h"
 #include "memory_context_internal.h"
+#include "memory_rewrite_llm.h" /* weak in-process rewrite seam (KB build only) */
 
 #if defined(AIMEE_DB2_DISABLED)
 
