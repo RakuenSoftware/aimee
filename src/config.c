@@ -438,6 +438,11 @@ static void config_set_defaults(config_t *cfg)
    snprintf(cfg->memory_rerank_command, sizeof(cfg->memory_rerank_command), "%s",
             "python3 /opt/aimee/scripts/rerank-remote.py");
    cfg->memory_routing_enabled = 1;
+   /* Typed-fact layer default-on: extract durable (subject,relation,object)
+    * facts on ingest + auto-inject the recalled "## Known facts" block into every
+    * turn (the auto-inject path is decoupled from ingress_preinject_enabled in
+    * ingress_preinject_build, so it surfaces without the code/memory previews). */
+   cfg->typed_facts_enabled = 1;
    /* Default-on to preserve behavior: profile-card refresh ran ungated in the
     * maintenance REPLAY pass before the enable-gate was wired. Maintenance is
     * itself default-off, so this is a no-op until maintenance is enabled. */

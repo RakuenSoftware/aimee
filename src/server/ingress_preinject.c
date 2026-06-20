@@ -349,7 +349,13 @@ char *ingress_preinject_build(const char *query, int request_disabled)
 
    config_t cfg;
    config_load(&cfg);
-   if (!cfg.ingress_preinject_enabled)
+   /* The envelope carries two independently-gated layers: the code/memory
+    * preview block (ingress_preinject_enabled, aimed at coding agents) and the
+    * typed-fact block (typed_facts_enabled). Build if EITHER is on, so typed
+    * facts surface in turns without requiring the heavier preview machinery. */
+   int preview_on = cfg.ingress_preinject_enabled;
+   int facts_on = cfg.typed_facts_enabled;
+   if (!preview_on && !facts_on)
       return NULL;
    int configured_budget = cfg.ingress_preinject_assembly_budget > 0
                                ? cfg.ingress_preinject_assembly_budget
@@ -371,7 +377,9 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * many relevant files came back (no [0,1] rank is exposed by the search
     * path, so map the hit count into the tiering primitive). */
    code_search_hit_t hits[6];
-   int n = kb_client_index_code_search(query, NULL, hits, (int)(sizeof(hits) / sizeof(hits[0])));
+   int n = preview_on ? kb_client_index_code_search(query, NULL, hits,
+                                                    (int)(sizeof(hits) / sizeof(hits[0])))
+                      : 0;
    if (n > 0)
    {
       int wrote_header = 0;
@@ -394,7 +402,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * fetch next, not the whole memory body. The full row remains reachable via
     * the advertised memory:<id> handle and the memory_get MCP tool. */
    memory_diagnostic_t mems[5];
-   int mem_n = kb_client_memory_diagnose(query, 5, mems, 5);
+   int mem_n = preview_on ? kb_client_memory_diagnose(query, 5, mems, 5) : 0;
    if (mem_n > 0)
    {
       if (block.len)
@@ -421,7 +429,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * having to call the get_context_block tool. Gated kb-side on
     * typed_facts_enabled (returns NULL when off or none), so this is a no-op
     * then. User-asserted facts are high-signal, so they lift confidence. */
-   char *facts = kb_client_memory_facts(query);
+   char *facts = facts_on ? kb_client_memory_facts(query) : NULL;
    if (facts && facts[0])
    {
       if (block.len)
@@ -499,7 +507,7 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       }
    }
 
-   char *audit = ingress_preinject_read_audit_context();
+   char *audit = preview_on ? ingress_preinject_read_audit_context() : NULL;
    if (audit && audit[0])
    {
       if (block.len)

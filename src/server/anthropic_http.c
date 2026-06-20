@@ -21,6 +21,7 @@
 #include "anthropic_ingress.h"
 #include "cJSON.h"
 #include "delegate_driver.h"
+#include "ingress_preinject.h"
 #include "json_fluent.h"
 #include "server_http.h"
 #include "session_compact.h"
@@ -187,6 +188,58 @@ static char *build_anthropic_provider_body(const cJSON *in, const agent_t *ag, i
    return body;
 }
 
+/* P1 context pre-injection for the Anthropic /v1/messages ingress. Builds the
+ * <aimee-context> envelope from this turn's query and folds it into the request's
+ * `system` so BOTH the Anthropic-native passthrough (which duplicates `req`) and
+ * the translated-provider path (which flattens `req`'s system via
+ * anthropic_system_to_text) carry it. Mutates `req` in place, so it must run
+ * before translate_request / build_*_provider_body. Appended as a trailing system
+ * text block (array form) so a cached system prefix — Claude Code sends
+ * cache_control'd system blocks — stays stable and prompt caching still hits.
+ * No-op when pre-injection is disabled (config or the x-aimee-preinject:0 header,
+ * via the thread-local checked in ingress_preinject_build) or recall is empty. */
+static void messages_apply_preinject(cJSON *req)
+{
+   char *query =
+       ingress_preinject_query_from_messages(cJSON_GetObjectItemCaseSensitive(req, "messages"));
+   if (!query)
+      return;
+   char *env = ingress_preinject_build(query, 0);
+   free(query);
+   if (!env)
+      return;
+
+   cJSON *sys = cJSON_GetObjectItemCaseSensitive(req, "system");
+   if (cJSON_IsArray(sys))
+   {
+      cJSON *blk = cJSON_CreateObject();
+      if (blk)
+      {
+         cJSON_AddStringToObject(blk, "type", "text");
+         cJSON_AddStringToObject(blk, "text", env);
+         cJSON_AddItemToArray(sys, blk);
+      }
+   }
+   else if (cJSON_IsString(sys) && sys->valuestring && sys->valuestring[0])
+   {
+      size_t n = strlen(sys->valuestring) + 2 + strlen(env) + 1;
+      char *joined = malloc(n);
+      if (joined)
+      {
+         snprintf(joined, n, "%s\n\n%s", sys->valuestring, env);
+         cJSON_ReplaceItemInObjectCaseSensitive(req, "system", cJSON_CreateString(joined));
+         free(joined);
+      }
+   }
+   else
+   {
+      /* system absent or empty: the envelope becomes the system prompt. */
+      cJSON_DeleteItemFromObjectCaseSensitive(req, "system");
+      cJSON_AddStringToObject(req, "system", env);
+   }
+   free(env);
+}
+
 /* --- Buffered: POST /v1/messages (stream:false) ------------------------- */
 
 static int messages_buffered(const char *body, char *resp, int cap)
@@ -218,6 +271,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
 
    delegate_drivers_init();
    driver = delegate_driver_get(ag->provider);
+   messages_apply_preinject(req);
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
@@ -490,6 +544,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    delegate_drivers_init();
    driver = delegate_driver_get(ag->provider);
+   messages_apply_preinject(req);
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
