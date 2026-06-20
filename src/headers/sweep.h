@@ -63,6 +63,32 @@ extern "C"
    sweep_rank_t sweep_score(const sweep_edges_t *e, const sweep_score_cfg_t *cfg, char *reason,
                             size_t rcap);
 
+   /* --- scope → areas + caps (PR-B2) --- */
+
+   /* 1 if `path` matches any allowlist glob. Globs are gitignore-style prefixes:
+    * a dir followed by slash-star-star matches any path under that dir; a trailing
+    * star is a prefix match; otherwise an exact match. Never trusts sub-agent
+    * output — the caller passes a configured allowlist. */
+   int sweep_path_allowed(const char *path, const char *const *globs, int nglobs);
+
+   typedef struct
+   {
+      int max_areas;          /* default 40 */
+      int max_files_per_area; /* default 50 */
+      int max_calls_per_area; /* default 2 (proposer + 1 retry; verify is in-process) */
+      int max_items_per_area; /* default 10 */
+      int wall_area_s;        /* default 60 */
+      int wall_sweep_s;       /* default 1800 */
+   } sweep_caps_t;
+
+   void sweep_caps_defaults(sweep_caps_t *caps);
+
+   /* Partition `paths` into areas by directory, chunking any directory larger than
+    * max_files_per_area. Writes an area id (0-based) per path into out_area and
+    * returns the area count. `paths` MUST be sorted (same-directory files
+    * contiguous) so the pass is deterministic and O(n). Returns -1 on bad args. */
+   int sweep_partition(const char *const *paths, int n, int max_files_per_area, int *out_area);
+
 #ifdef __cplusplus
 }
 #endif
