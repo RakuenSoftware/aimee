@@ -1188,13 +1188,8 @@ cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, 
    }
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddNumberToObject(resp, "id", (double)out.id);
-
-   /* typed-fact population on ingest. Two complementary paths, both gated on
-    * typed_facts_enabled and best-effort (a failure must not fail the store):
-    *   - inline (§4/§6): the high-precision deterministic pattern extractor on
-    *     the stored content (possessive/IP/location); read side (§7) skipped.
-    *   - background: queue a "memory_facts" job so the curator drain runs the
-    *     general LLM extractor without adding latency to the store. */
+   /* typed-fact population on ingest (gated, best-effort): inline high-precision
+    * pattern write + a queued "memory_facts" job for the drain's LLM extractor. */
    {
       config_t tf_cfg;
       config_load(&tf_cfg);
@@ -1205,7 +1200,6 @@ cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, 
             (void)db2_kb_async_enqueue("memory_facts", out.id, "memory");
       }
    }
-
    cJSON *obj = kbs_memory_row_to_json(&out);
    if (obj)
       cJSON_AddItemToObject(resp, "memory", obj);
@@ -1237,9 +1231,8 @@ cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *b
    if (!resp)
       return NULL;
 
-   /* typed-fact ingress (§4/§6/§7), KB-side where db2 is live — the server has no
-    * DB2 connection. Default-off via typed_facts_enabled; writes facts="" when off.
-    * Orchestration lives in fact_ingest so this handler stays focused + small. */
+   /* typed-fact ingress (§4/§6/§7), KB-side (db2 is live here). Default-off via
+    * typed_facts_enabled (writes facts="" when off); orchestration in fact_ingest. */
    char facts[2048] = "";
    (void)db2_typed_fact_ingress(query, facts, sizeof(facts));
 
@@ -1272,26 +1265,19 @@ cJSON *db2_kb_service_memory_context_block_json(const char *query, const char *b
    return resp;
 }
 
+/* Read-only typed-fact recall (§7), PII-gated: the cheap path ingress_preinject
+ * calls every turn. No write; no-op (facts="") when the layer is off. */
 cJSON *db2_kb_service_memory_facts_json(const char *query)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
-
-   /* Read-only typed-fact recall (§7) for the turn -- facts about entities named
-    * in the query, PII-gated. No write here (the write happens on memory ingest
-    * and via get_context_block); this is the cheap path the server's
-    * ingress_preinject calls every turn to surface known facts. Gated on
-    * typed_facts_enabled so it's a no-op (facts="") when the layer is off. */
    char facts[2048] = "";
    config_t cfg;
    config_load(&cfg);
    if (cfg.typed_facts_enabled && query && query[0])
-   {
-      int requests_sensitive = memory_pii_turn_requests_sensitive(query);
-      (void)db2_fact_recall_in_query(query, requests_sensitive, facts, sizeof(facts));
-   }
-
+      (void)db2_fact_recall_in_query(query, memory_pii_turn_requests_sensitive(query), facts,
+                                     sizeof(facts));
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "facts", facts);
    return resp;
