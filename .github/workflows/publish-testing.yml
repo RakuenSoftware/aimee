@@ -1,22 +1,19 @@
-# Build deployable app images on every push to `testing` and publish them under
-# a DELIBERATELY non-semver tag (`:testing` + `:testing-<sha>`), so the testing
+# Build the combined image on every push to `testing` and publish it under a
+# DELIBERATELY non-semver tag (`:testing` + `:testing-<sha>`), so the testing
 # branch can be deployed/validated (e.g. on .254) WITHOUT promoting to main.
 #
-# Versioned + `:latest` publishing stays owned by main (auto-release.yml ->
-# publish-images.yml). Keeping testing on a `:testing` tag — never a version
-# number — avoids any confusion between a tested-but-unreleased build and a real
-# release.
-#
-# Scope: the three C app images only (server, kb, combined). The embedder /
-# css-render images are large, rarely change, and are owned by the versioned
-# release pipeline; pull their `:latest` alongside a `:testing` app image.
-# amd64 only (the .254 deploy target); the release pipeline owns multi-arch.
-name: Publish testing images
+# Only the combined image (aimee-server-kb, Dockerfile.combined) is built here —
+# that is the single unit deployed to .254. Versioned + `:latest` publishing of
+# the full image set stays owned by main (auto-release.yml -> publish-images.yml).
+# Keeping testing on a `:testing` tag — never a version number — avoids confusing
+# a tested-but-unreleased build with a real release. amd64 only (the .254 deploy
+# target); the release pipeline owns multi-arch.
+name: Publish testing image
 
 on:
   push:
     branches: [testing]
-    # Only rebuild when something that affects the images changes.
+    # Only rebuild when something that affects the image changes.
     paths:
       - "src/**"
       - "config/**"
@@ -39,13 +36,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        image:
-          - { name: aimee-server,    dockerfile: Dockerfile.server }
-          - { name: aimee-kb,        dockerfile: Dockerfile }
-          - { name: aimee-server-kb, dockerfile: Dockerfile.combined }
     steps:
       - uses: actions/checkout@v4
 
@@ -65,21 +55,21 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push :testing
+      - name: Build and push aimee-server-kb:testing
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ matrix.image.dockerfile }}
+          file: Dockerfile.combined
           platforms: linux/amd64
           push: true
           provenance: false
           # Share the layer cache with the release pipeline (same scope) so testing
           # builds are fast and never start the LTO C build from scratch.
-          cache-from: type=gha,scope=${{ matrix.image.name }}-amd64
-          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-amd64
+          cache-from: type=gha,scope=aimee-server-kb-amd64
+          cache-to: type=gha,mode=max,scope=aimee-server-kb-amd64
           build-args: |
             AIMEE_VERSION=testing-${{ env.SHA7 }}
             WITH_WEBCHAT=1
           tags: |
-            ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing
-            ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing-${{ env.SHA7 }}
+            ghcr.io/${{ env.OWNER }}/aimee-server-kb:testing
+            ghcr.io/${{ env.OWNER }}/aimee-server-kb:testing-${{ env.SHA7 }}
