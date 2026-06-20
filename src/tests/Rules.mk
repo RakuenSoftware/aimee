@@ -483,6 +483,15 @@ $(TESTPREFIX)/unit-test-css-insights: \
 $(TESTPREFIX)/unit-test-typed-facts: \
                                        $(OBJDIR)/tests/test_typed_facts.o \
                                        $(OBJDIR)/db2/typed_facts.o \
+                                       $(OBJDIR)/db2/rel_types_store.o \
+                                       $(OBJDIR)/db2/fact_recall.o \
+                                       $(OBJDIR)/db2/entity_edges.o \
+                                       $(OBJDIR)/db2/entity_registry.o \
+                                       $(OBJDIR)/db2/ontology_evolution.o \
+                                       $(OBJDIR)/db2/fact_lifecycle.o \
+                                       $(OBJDIR)/memory_fact_gate.o \
+                                       $(OBJDIR)/rel_types.o \
+                                       $(OBJDIR)/memory_pii_gate.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
                                        $(OBJDIR)/db2/db_schema.o \
                                        $(TEST_CORE_OBJS)

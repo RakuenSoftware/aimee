@@ -11,6 +11,7 @@
 #include "fact_ingest.h"     /* db2_typed_fact_ingress (typed-fact §4/§6/§7 ingress) */
 #include "fact_recall.h"     /* db2_fact_recall_in_query (read-only §7 recall) */
 #include "memory_pii_gate.h" /* memory_pii_turn_requests_sensitive */
+#include "kb_payload.h"      /* db2_kb_async_enqueue (background memory_facts job) */
 #include "decision_log.h"
 #include "memory.h"
 #include "memory_export.h"
@@ -1188,13 +1189,22 @@ cJSON *db2_kb_service_memory_insert_ex_json(const char *tier, const char *kind, 
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddNumberToObject(resp, "id", (double)out.id);
 
-   /* typed-fact write on ingest (§4/§6): extract facts asserted in the stored
-    * content into entity_edges so the fact layer is populated by what we
-    * remember, not only by get_context_block query text. Read side (§7) is
-    * skipped here (facts_out=NULL); gated internally on typed_facts_enabled, so
-    * this is a no-op when the layer is off. Best-effort: a fact-write failure
-    * must not fail the store. */
-   (void)db2_typed_fact_ingress(content ? content : "", NULL, 0);
+   /* typed-fact population on ingest. Two complementary paths, both gated on
+    * typed_facts_enabled and best-effort (a failure must not fail the store):
+    *   - inline (§4/§6): the high-precision deterministic pattern extractor on
+    *     the stored content (possessive/IP/location); read side (§7) skipped.
+    *   - background: queue a "memory_facts" job so the curator drain runs the
+    *     general LLM extractor without adding latency to the store. */
+   {
+      config_t tf_cfg;
+      config_load(&tf_cfg);
+      if (tf_cfg.typed_facts_enabled)
+      {
+         (void)db2_typed_fact_ingress(content ? content : "", NULL, 0);
+         if (out.id > 0)
+            (void)db2_kb_async_enqueue("memory_facts", out.id, "memory");
+      }
+   }
 
    cJSON *obj = kbs_memory_row_to_json(&out);
    if (obj)

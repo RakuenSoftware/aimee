@@ -21,6 +21,7 @@
 #include "kb_curator_synthesize.h"
 #include "kb_curator_promote.h"
 #include "kb_evidence_embed.h"
+#include "kb_memory_facts.h"
 #include "kb_learning_synth.h"
 #include "kb_service_code_embed.h"
 #include "kb.h"
@@ -81,6 +82,17 @@ static void *drain_thread_main(void *arg)
          int n = kb_evidence_embed_drain(cfg.kb_evidence_embed_batch, embed_cmd);
          if (n > 0)
             aimee_log(LOG_DEBUG, "kb.evidence.embed", "drained %d evidence op(s)", n);
+      }
+
+      /* Typed-fact extraction drain — runs every poll, independent of the
+       * curator extract gates. Pulls "memory_facts" jobs enqueued by memory.store
+       * and runs the general LLM extractor over each memory's content. Gated on
+       * typed_facts_enabled (a no-op when off). */
+      if (cfg.typed_facts_enabled)
+      {
+         int n = kb_memory_facts_drain(&cfg, 8);
+         if (n > 0)
+            aimee_log(LOG_DEBUG, "kb.memory.facts", "drained %d memory_facts job(s)", n);
       }
 
       /* Code-vector embed drain — pipeline stage 2 (the 0.6B embedder), runs
@@ -259,7 +271,8 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
        !cfg.kb_curator_index_claims_enabled && !cfg.kb_curator_detect_contradictions_enabled &&
        !cfg.kb_curator_index_code_unit_enabled && !cfg.kb_curator_link_artifacts_enabled &&
        !cfg.kb_curator_synthesize_enabled && !cfg.kb_curator_promote_entity_enabled &&
-       !cfg.kb_evidence_embed_enabled && !cfg.learning_synthesize_enabled)
+       !cfg.kb_evidence_embed_enabled && !cfg.learning_synthesize_enabled &&
+       !cfg.typed_facts_enabled)
    {
       aimee_log(LOG_DEBUG, "kb.curator.drain",
                 "all gates off (kb_curator_extract_docs_enabled=0,"

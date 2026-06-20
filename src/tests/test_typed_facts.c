@@ -7,6 +7,11 @@
 #include "aimee.h"
 #include "db2_test_shim.h"
 #include "../db2/typed_facts.h"
+#include "../db2/fact_recall.h"     /* db2_fact_recall_block */
+#include "../db2/fact_lifecycle.h"  /* FACT_AUTHORITY_MODEL */
+#include "../db2/rel_types_store.h" /* db2_fact_commit */
+#include "memory_fact_gate.h"       /* FACT_GATE_NOVEL */
+#include "memory_ontology.h"        /* NODE_PERSON, NODE_OTHER */
 
 int main(void)
 {
@@ -60,6 +65,26 @@ int main(void)
                                 T) == TYPED_FACT_OK);
    n = db2_typed_fact_recall("fizzy", NULL, f, 16);
    assert(n == 2); /* naming_convention(utility) + token_strategy */
+
+   /* db2_fact_commit path (entity_edges) — the one the memory-fact extractor and
+    * auto-inject use. Unlike the strict CSS assert above, this gate ACCEPTs a
+    * free-form (NOVEL) relation as a provisional semantic edge, and recall must
+    * surface it. This is the assumption the LLM extractor relies on (it emits
+    * arbitrary snake_case relations). */
+   assert(db2_fact_commit("user", NODE_PERSON, "works_as", "engineer", NODE_OTHER,
+                          FACT_AUTHORITY_MODEL, 1) == FACT_GATE_NOVEL);
+   /* Recall with turn_requests_sensitive=1: the §7 PII gate fail-closes UNKNOWN
+    * relations to sensitive, so a free-form LLM relation like "works_as" only
+    * surfaces when the turn asks for sensitive info. (Implication: for general
+    * LLM facts to auto-inject on ordinary turns, the PII classifier must learn
+    * which relations are benign — a follow-up to broadening extraction.) */
+   char facts[1024] = "";
+   int fn = db2_fact_recall_block("user", 1, facts, sizeof(facts));
+   assert(fn >= 1);
+   assert(strstr(facts, "works_as") != NULL && strstr(facts, "engineer") != NULL);
+   /* And withheld on a non-sensitive turn (fail-closed default). */
+   char facts2[1024] = "";
+   assert(db2_fact_recall_block("user", 0, facts2, sizeof(facts2)) == 0);
 
    db2_test_shim_close();
    printf("typed_facts: all tests passed\n");
