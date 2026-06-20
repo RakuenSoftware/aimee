@@ -1,0 +1,85 @@
+# Build deployable app images on every push to `testing` and publish them under
+# a DELIBERATELY non-semver tag (`:testing` + `:testing-<sha>`), so the testing
+# branch can be deployed/validated (e.g. on .254) WITHOUT promoting to main.
+#
+# Versioned + `:latest` publishing stays owned by main (auto-release.yml ->
+# publish-images.yml). Keeping testing on a `:testing` tag — never a version
+# number — avoids any confusion between a tested-but-unreleased build and a real
+# release.
+#
+# Scope: the three C app images only (server, kb, combined). The embedder /
+# css-render images are large, rarely change, and are owned by the versioned
+# release pipeline; pull their `:latest` alongside a `:testing` app image.
+# amd64 only (the .254 deploy target); the release pipeline owns multi-arch.
+name: Publish testing images
+
+on:
+  push:
+    branches: [testing]
+    # Only rebuild when something that affects the images changes.
+    paths:
+      - "src/**"
+      - "config/**"
+      - "deploy/container/**"
+      - "scripts/**"
+      - "Dockerfile"
+      - "Dockerfile.server"
+      - "Dockerfile.combined"
+      - ".github/workflows/publish-testing.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: publish-testing-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - { name: aimee-server,    dockerfile: Dockerfile.server }
+          - { name: aimee-kb,        dockerfile: Dockerfile }
+          - { name: aimee-server-kb, dockerfile: Dockerfile.combined }
+    steps:
+      - uses: actions/checkout@v4
+
+      # ghcr paths must be lowercase; owners may be mixed-case (e.g. "JBailes").
+      - name: Normalize owner + short sha
+        run: |
+          echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+          echo "SHA7=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push :testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.image.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          # Share the layer cache with the release pipeline (same scope) so testing
+          # builds are fast and never start the LTO C build from scratch.
+          cache-from: type=gha,scope=${{ matrix.image.name }}-amd64
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-amd64
+          build-args: |
+            AIMEE_VERSION=testing-${{ env.SHA7 }}
+            WITH_WEBCHAT=1
+          tags: |
+            ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing
+            ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing-${{ env.SHA7 }}
