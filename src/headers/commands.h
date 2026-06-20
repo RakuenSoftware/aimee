@@ -176,6 +176,9 @@ void cmd_eval(app_ctx_t *ctx, int argc, char **argv);
 
 /* cmd_work.c */
 void cmd_work(app_ctx_t *ctx, int argc, char **argv);
+
+/* cmd_sweep.c — `aimee sweep [project]`: server-side deepening sweep (analysis-only) */
+void cmd_sweep(app_ctx_t *ctx, int argc, char **argv);
 const subcmd_t *get_work_subcmds(void);
 int work_queue_summary(char *buf, size_t cap);
 

@@ -1165,6 +1165,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
      * compatibility with the dispatch-method surface. */
     {"delegate.aggregate", handle_delegate_aggregate},
     {"delegate.roundtable", handle_delegate_roundtable},
+    {"dev.sweep", handle_dev_sweep},
     {"delegate.launch", handle_delegate_launch},
     {"delegate.status", handle_delegate_status},
     {"vault.unlock", handle_vault_unlock},

@@ -587,6 +587,25 @@ paths:
           description: Missing proposal_md
         "500":
           description: Could not create the work item
+  /dev/sweep:
+    post:
+      summary: Deepening sweep (analysis-only) — propose duplication-across-call-sites seams, re-ground each against the live code index, and return a ranked report. Files nothing.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                project: { type: string, description: Indexed project name to scope the walk (default first indexed) }
+      responses:
+        "200":
+          description: "{candidates[], areas_total, areas_run, files, strong, worth_exploring, rejected, excluded, analysis_only}"
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: No indexed project / no source files
   /runs:
     post:
       summary: Create and run an inference run (synchronous); retrievable by id

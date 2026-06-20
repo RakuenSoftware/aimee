@@ -3,6 +3,40 @@
 #include "sweep.h"
 
 #include <stdio.h>
+#include <string.h>
+
+sweep_edges_t sweep_edges_from_callers(const caller_hit_t *callers, int n, int blast_deps)
+{
+   sweep_edges_t e = {0, 0, blast_deps < 0 ? 0 : blast_deps, 0};
+   if (!callers || n <= 0)
+      return e;
+   e.caller_count = n;
+   int distinct_files = 0, distinct_callers = 0, named = 0;
+   for (int i = 0; i < n; i++)
+   {
+      int seen_f = 0, seen_c = 0;
+      for (int j = 0; j < i; j++)
+      {
+         if (strcmp(callers[i].file_path, callers[j].file_path) == 0)
+            seen_f = 1;
+         if (callers[i].caller[0] && strcmp(callers[i].caller, callers[j].caller) == 0)
+            seen_c = 1;
+      }
+      if (!seen_f)
+         distinct_files++;
+      if (callers[i].caller[0])
+      {
+         named++;
+         if (!seen_c)
+            distinct_callers++;
+      }
+   }
+   e.distinct_files = distinct_files;
+   /* a funnel only when EVERY caller is named and they are all the same function;
+    * a mix with file-scope (empty-name) callers is not a funnel. */
+   e.common_caller = (named == n && distinct_callers == 1 && n > 1) ? 1 : 0;
+   return e;
+}
 
 void sweep_score_cfg_defaults(sweep_score_cfg_t *cfg)
 {

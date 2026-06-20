@@ -11,6 +11,7 @@
 #define DEC_SWEEP_H 1
 
 #include "aimee.h" /* MAX_PATH_LEN */
+#include "index.h" /* caller_hit_t */
 
 #include <stddef.h>
 
@@ -54,6 +55,12 @@ extern "C"
 
    /* Fill cfg with the defaults. */
    void sweep_score_cfg_defaults(sweep_score_cfg_t *cfg);
+
+   /* Reduce a reproduced caller set (+ blast-radius dependency count) to the
+    * edges the deletion test scores. distinct_files = distinct caller file paths;
+    * common_caller = 1 when every caller shares one calling function (a funnel);
+    * shared_state = blast_deps. Pure. */
+   sweep_edges_t sweep_edges_from_callers(const caller_hit_t *callers, int n, int blast_deps);
 
    /* The mechanical deletion test. STRONG only when the count clears the threshold
     * AND the callers are distributed (>= min_distinct_files) AND independent

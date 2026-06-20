@@ -916,6 +916,10 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
 {
    return stub_handler(conn, "delegate.roundtable");
 }
+int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "dev.sweep");
+}
 int handle_delegate_launch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "delegate.launch");

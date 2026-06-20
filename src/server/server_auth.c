@@ -85,6 +85,7 @@ const method_policy_t method_registry[] = {
     {"delegate", CAP_DELEGATE, "delegate task"},
     {"delegate.aggregate", CAP_DELEGATE, "Mixture-of-Agents ensemble aggregate"},
     {"delegate.roundtable", CAP_DELEGATE, "multi-round agent roundtable"},
+    {"dev.sweep", CAP_DELEGATE, "deepening sweep (spawns proposer delegates; analysis-only)"},
     {"delegate.status", CAP_DELEGATE, "delegate status"},
     /* Credential vault (WP-C.1): UDS-only in practice — the service layer refuses
      * any non-ATTEST_UDS_PEERCRED principal — but gated here as CAP_DELEGATE so a

@@ -72,10 +72,50 @@ static void test_score(void)
    assert(sweep_score(&strong, NULL, r, sizeof(r)) == SWEEP_STRONG);
 }
 
+static caller_hit_t mkc(const char *file, const char *caller, int line)
+{
+   caller_hit_t h;
+   memset(&h, 0, sizeof(h));
+   snprintf(h.file_path, sizeof(h.file_path), "%s", file);
+   snprintf(h.caller, sizeof(h.caller), "%s", caller);
+   h.line = line;
+   return h;
+}
+
+static void test_edges_from_callers(void)
+{
+   /* 3 callers across 3 files, distinct callers -> clean edges */
+   caller_hit_t a[3] = {mkc("x.c", "f1", 1), mkc("y.c", "f2", 2), mkc("z.c", "f3", 3)};
+   sweep_edges_t e = sweep_edges_from_callers(a, 3, 0);
+   assert(e.caller_count == 3 && e.distinct_files == 3 && e.common_caller == 0);
+
+   /* all callers in one calling function -> funnel (common_caller) + blast deps */
+   caller_hit_t f[3] = {mkc("x.c", "dispatch", 1), mkc("y.c", "dispatch", 2),
+                        mkc("z.c", "dispatch", 3)};
+   e = sweep_edges_from_callers(f, 3, 2);
+   assert(e.common_caller == 1 && e.shared_state == 2);
+
+   /* all callers in one file -> distinct_files 1 */
+   caller_hit_t s[3] = {mkc("x.c", "f1", 1), mkc("x.c", "f2", 2), mkc("x.c", "f3", 3)};
+   e = sweep_edges_from_callers(s, 3, 0);
+   assert(e.distinct_files == 1 && e.common_caller == 0);
+
+   /* callers with empty caller names are counted but excluded from funnel detection
+    * (a single named caller among empties is not a funnel) */
+   caller_hit_t mixed[3] = {mkc("x.c", "", 1), mkc("y.c", "", 2), mkc("z.c", "g", 3)};
+   e = sweep_edges_from_callers(mixed, 3, 0);
+   assert(e.caller_count == 3 && e.distinct_files == 3 && e.common_caller == 0);
+
+   /* empty / negative blast clamps */
+   e = sweep_edges_from_callers(NULL, 0, -5);
+   assert(e.caller_count == 0 && e.shared_state == 0);
+}
+
 int main(void)
 {
    test_seam_key_and_exclude();
    test_score();
+   test_edges_from_callers();
    printf("sweep_logic: all tests passed\n");
    return 0;
 }

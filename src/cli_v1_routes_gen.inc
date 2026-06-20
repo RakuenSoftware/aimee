@@ -208,6 +208,7 @@ static const struct
     {"curator.synthesize", "POST", "/v1/curator/synthesize"},
     {"delegate.aggregate", "POST", "/v1/delegate/aggregate"},
     {"delegate.roundtable", "POST", "/v1/delegate/roundtable"},
+    {"dev.sweep", "POST", "/v1/dev/sweep"},
     {"eval.run", "POST", "/v1/eval/run"},
     {"graph.sync_code", "POST", "/v1/graph/sync_code"},
     {"index.ingest", "POST", "/v1/index/ingest"},

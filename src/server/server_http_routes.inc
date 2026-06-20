@@ -1651,6 +1651,7 @@ static const http_route_t g_v1_routes[] = {
      rh_dispatch_op_async},
     {"POST", "/v1/delegate/roundtable", NULL, RM_EXACT, "delegate.roundtable", 0,
      rh_dispatch_op_async},
+    {"POST", "/v1/dev/sweep", NULL, RM_EXACT, "dev.sweep", 0, rh_dispatch_op_async},
 
     /* Compute / inference — consume model budget; map to the chat twin's cap. */
     {"POST", "/v1/chat/completions", NULL, RM_EXACT, "chat.send_stream", 0, rh_chat},
