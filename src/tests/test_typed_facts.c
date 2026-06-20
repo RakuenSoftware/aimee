@@ -73,18 +73,23 @@ int main(void)
     * arbitrary snake_case relations). */
    assert(db2_fact_commit("user", NODE_PERSON, "works_as", "engineer", NODE_OTHER,
                           FACT_AUTHORITY_MODEL, 1) == FACT_GATE_NOVEL);
-   /* Recall with turn_requests_sensitive=1: the §7 PII gate fail-closes UNKNOWN
-    * relations to sensitive, so a free-form LLM relation like "works_as" only
-    * surfaces when the turn asks for sensitive info. (Implication: for general
-    * LLM facts to auto-inject on ordinary turns, the PII classifier must learn
-    * which relations are benign — a follow-up to broadening extraction.) */
+   /* A free-form (unknown) relation now defaults OPEN, so a benign LLM fact like
+    * works_as surfaces on an ORDINARY turn (turn_requests_sensitive=0). */
    char facts[1024] = "";
-   int fn = db2_fact_recall_block("user", 1, facts, sizeof(facts));
+   int fn = db2_fact_recall_block("user", 0, facts, sizeof(facts));
    assert(fn >= 1);
    assert(strstr(facts, "works_as") != NULL && strstr(facts, "engineer") != NULL);
-   /* And withheld on a non-sensitive turn (fail-closed default). */
-   char facts2[1024] = "";
-   assert(db2_fact_recall_block("user", 0, facts2, sizeof(facts2)) == 0);
+
+   /* But an unknown relation whose NAME plainly denotes PII is still gated:
+    * withheld on an ordinary turn, surfaced only when the turn asks. */
+   assert(db2_fact_commit("user", NODE_PERSON, "home_address", "12 Oak St", NODE_OTHER,
+                          FACT_AUTHORITY_MODEL, 1) == FACT_GATE_NOVEL);
+   char ord[1024] = "";
+   (void)db2_fact_recall_block("user", 0, ord, sizeof(ord));
+   assert(strstr(ord, "home_address") == NULL); /* PII-looking: withheld by default */
+   char sens[1024] = "";
+   (void)db2_fact_recall_block("user", 1, sens, sizeof(sens));
+   assert(strstr(sens, "home_address") != NULL); /* surfaced when asked */
 
    db2_test_shim_close();
    printf("typed_facts: all tests passed\n");

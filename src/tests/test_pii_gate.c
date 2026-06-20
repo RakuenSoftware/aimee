@@ -17,13 +17,21 @@ int main(void)
    assert(memory_pii_turn_requests_sensitive("") == 0);
    assert(memory_pii_turn_requests_sensitive(NULL) == 0);
 
-   /* rel_type -> sensitivity (seed lookup; unknown fails closed to PII). */
+   /* rel_type -> sensitivity. Known: seed lookup. Unknown: default OPEN
+    * (SENS_NORMAL) so free-form extracted relations are not all withheld, except
+    * names that plainly denote a credential or a regulated PII identifier. */
    assert(memory_pii_rel_sensitivity("works_for") == SENS_NORMAL);
    assert(memory_pii_rel_sensitivity("also_known_as") == SENS_NORMAL);
    assert(memory_pii_rel_sensitivity("age") == SENS_PII);
-   assert(memory_pii_rel_sensitivity("totally_unknown_rel") == SENS_PII); /* fail closed */
-   assert(memory_pii_rel_sensitivity("") == SENS_PII);
-   assert(memory_pii_rel_sensitivity(NULL) == SENS_PII);
+   assert(memory_pii_rel_sensitivity("totally_unknown_rel") == SENS_NORMAL); /* unknown -> open */
+   assert(memory_pii_rel_sensitivity("favorite_food") == SENS_NORMAL);
+   assert(memory_pii_rel_sensitivity("") == SENS_NORMAL);
+   assert(memory_pii_rel_sensitivity(NULL) == SENS_NORMAL);
+   /* unknown but obviously sensitive by name: still gated by the heuristic. */
+   assert(memory_pii_rel_sensitivity("home_password") == SENS_SECRET);
+   assert(memory_pii_rel_sensitivity("api_key") == SENS_SECRET);
+   assert(memory_pii_rel_sensitivity("ssn") == SENS_PII);
+   assert(memory_pii_rel_sensitivity("home_address") == SENS_PII);
 
    /* injection decision. */
    /* NORMAL: passes above the floor regardless of request; withheld below it. */

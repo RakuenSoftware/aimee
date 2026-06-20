@@ -28,8 +28,10 @@ extern "C"
     * "credential", "where do i live", ...). NULL/empty -> 0. */
    int memory_pii_turn_requests_sensitive(const char *turn_text);
 
-   /* The sensitivity tier governing a rel_type: from the seed ontology, or
-    * SENS_PII (fail closed) for an unknown / unclassified type. */
+   /* The sensitivity tier governing a rel_type: from the seed ontology when
+    * known; for an unknown type it defaults OPEN (SENS_NORMAL) so free-form
+    * extracted relations are not all withheld, except names that plainly denote
+    * a credential (SENS_SECRET) or a regulated PII identifier (SENS_PII). */
    rel_sensitivity_t memory_pii_rel_sensitivity(const char *rel_type);
 
    /* Recall-path decision: should a fact of `sens` and `confidence` be injected
