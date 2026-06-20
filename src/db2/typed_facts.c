@@ -31,6 +31,10 @@ static const tf_rel_t TF_ONTOLOGY[] = {
     {"file_layout", "project", "SCALAR"},
     {"component_owns_styles", "project", "SCALAR"},
     {"should_match", "component", "convention"},
+    /* deepening sweep (Part B): a settled architecture decision about a code seam.
+     * subject = canonical "<file>:<top-decl>"; object = "extracted@<commit>" or
+     * "rejected:pass-through". The sweep reads active facts to exclude re-proposals. */
+    {"architecture_settled", "code_site", "SCALAR"},
     /* general identity examples (the layer is not CSS-specific) */
     {"located_in", "person", "place"},
     {"has_ip", "device", "SCALAR"},

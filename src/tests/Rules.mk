@@ -91,7 +91,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-turn-registry \
                $(TESTPREFIX)/unit-test-session-search-tool \
                $(TESTPREFIX)/unit-test-working-memory $(TESTPREFIX)/unit-test-working-memory-mock $(TESTPREFIX)/unit-test-local-resolution $(TESTPREFIX)/unit-test-cognify-jobs $(TESTPREFIX)/unit-test-extractors-extra \
-               $(TESTPREFIX)/unit-test-evidence-replay $(TESTPREFIX)/unit-test-roundtable-verify \
+               $(TESTPREFIX)/unit-test-evidence-replay $(TESTPREFIX)/unit-test-roundtable-verify $(TESTPREFIX)/unit-test-sweep-logic \
                $(TESTPREFIX)/unit-test-css-analyze $(TESTPREFIX)/unit-test-typed-facts $(TESTPREFIX)/unit-test-css-graph $(TESTPREFIX)/unit-test-css-insights $(TESTPREFIX)/unit-test-css-oracle $(TESTPREFIX)/unit-test-css-render-oracle $(TESTPREFIX)/unit-test-css-migration $(TESTPREFIX)/unit-test-css-render $(TESTPREFIX)/unit-test-css-render-cmd \
                $(TESTPREFIX)/unit-test-compute-pool $(TESTPREFIX)/unit-test-db2-pool $(TESTPREFIX)/unit-test-cli-launch \
                $(TESTPREFIX)/unit-test-server-session-pools \
@@ -2203,6 +2203,10 @@ $(TESTPREFIX)/unit-test-roundtable-verify: $(OBJDIR)/tests/test_roundtable_verif
                               $(OBJDIR)/server/roundtable_verify.o $(OBJDIR)/server/evidence_replay.o \
                               $(OBJDIR)/dstr.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL) -lcrypto
+
+$(TESTPREFIX)/unit-test-sweep-logic: $(OBJDIR)/tests/test_sweep_logic.o \
+                              $(OBJDIR)/server/sweep_exclude.o $(OBJDIR)/server/sweep_score.o
+	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-vault-kek-cache: $(OBJDIR)/tests/test_vault_kek_cache.o \
                               $(OBJDIR)/server/vault_kek_cache.o
