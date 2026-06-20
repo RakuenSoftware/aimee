@@ -139,7 +139,23 @@ static memory_node_kind_t mf_subject_kind(const char *subject)
  * Returns the number committed (ACCEPT or NOVEL). */
 static int mf_commit_facts(const char *llm_json)
 {
-   cJSON *root = cJSON_Parse(llm_json);
+   if (!llm_json)
+      return 0;
+   /* Models often wrap the JSON in ```json ... ``` fences or add a sentence of
+    * prose despite instructions. Parse the outermost {...} object so a fenced or
+    * prefixed response still yields facts. */
+   const char *start = strchr(llm_json, '{');
+   const char *end = strrchr(llm_json, '}');
+   if (!start || !end || end < start)
+      return 0;
+   size_t span = (size_t)(end - start) + 1;
+   char *obj = malloc(span + 1);
+   if (!obj)
+      return 0;
+   memcpy(obj, start, span);
+   obj[span] = '\0';
+   cJSON *root = cJSON_Parse(obj);
+   free(obj);
    if (!root)
       return 0;
    cJSON *facts = cJSON_GetObjectItemCaseSensitive(root, "facts");
