@@ -211,6 +211,31 @@ int main(void)
       }
    }
 
+   /* --- shipped manual-review.yaml (the sweep's filing target) validates --- */
+   {
+      char err[256];
+      wfe_def_t *d = wfe_def_load_file("../config/workflows/manual-review.yaml", err, sizeof err);
+      if (d)
+      {
+         int rc = wfe_def_validate(d, err, sizeof err);
+         if (rc != 0)
+            printf("\n  manual-review.yaml invalid: %s\n", err);
+         assert(rc == 0);
+         /* security invariant: the sweep's untrusted output must NOT auto-implement —
+          * manual-review contains no implement/merge node, only a human gate. */
+         for (int i = 0; i < d->n_nodes; i++)
+         {
+            assert(d->nodes[i].block != WFE_BLK_IMPLEMENT);
+            assert(d->nodes[i].block != WFE_BLK_MERGE);
+         }
+         wfe_def_free(d);
+      }
+      else
+      {
+         printf("(skip manual-review.yaml: %s) ", err);
+      }
+   }
+
    printf("ok\n");
    return 0;
 }

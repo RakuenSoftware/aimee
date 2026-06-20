@@ -1,0 +1,21 @@
+# manual-review: the deepening sweep files its candidates here, NOT "build".
+# The sweep's output is machine-proposed and untrusted, so it must never auto-
+# implement: this workflow only authors the (sweep-provided) proposal and puts it
+# behind a single human gate, then ends. A human who approves promotes it
+# deliberately (re-submit to "build") — nothing the sweep produces reaches
+# implement/merge without an explicit person. (Enforced by a test that asserts no
+# implement/merge node exists here.)
+name: manual-review
+start: draft
+nodes:
+  - id: draft
+    block: author.proposal
+    params:
+      with_user: false
+    next: review
+  - id: review
+    block: gate.human
+    in:
+      src: draft.out
+    params:
+      policy: pr_review
