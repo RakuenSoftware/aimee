@@ -1522,10 +1522,19 @@ export default function Chat() {
     es.addEventListener('turn_started', (ev: MessageEvent<string>) => {
       saveCursor(ev);
       curTurnId = turnIdOf(ev.data); observed = ''; wasWorking = workingRef.current;
-      setRemoteTurnActive(true); setRemoteTurnText('');
+      // Self-echo suppression: the server now ALWAYS mirrors the full turn to the
+      // presence ring (durable source of truth for detached recovery), so the
+      // surface that ORIGINATED the turn receives an echo of its own stream here.
+      // Driving remoteTurn* from that echo is pure wasted work — the indicator is
+      // hidden while `working` (see render: remoteTurnActive && !working) and the
+      // native POST stream already renders the turn — and one full re-render per
+      // token, on top of the native one, pegs a core during every response. Only
+      // touch the live UI for a turn THIS surface did not originate.
+      if (!wasWorking) { setRemoteTurnActive(true); setRemoteTurnText(''); }
     });
     es.addEventListener('turn_delta', (ev: MessageEvent<string>) => {
       saveCursor(ev);
+      if (wasWorking) return; // own turn echo: don't accumulate or re-render (see turn_started)
       try {
         // Phase 1 ring schema: { turn_id, kind, content? }. Only text kinds feed
         // the visible turn body; thinking/tool_call/usage are not shown here.
