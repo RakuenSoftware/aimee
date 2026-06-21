@@ -48,6 +48,20 @@ umbrella document plus two platform-wide contracts.
 
 ## Pending
 
+### Four-part harness taxonomy
+
+[Name the parts, attribute the failures, delete the
+scaffolding](proposals/pending/four-part-harness-taxonomy.md). Adopts one
+vocabulary for the whole harness — loop, tool interface, context management,
+control — and builds two measurements on it: a failure classifier that attributes
+each bad run to one of the four parts (shipped runnable in
+`scripts/harness/classify_failures.py`, C port into `trace_analysis.c` specced),
+and a delete-pressure metric that ranks the per-tool prompt scaffolding by how much
+it bets against the model (shipped runnable in `scripts/harness/delete_pressure.py`).
+Classifies every major subsystem as a durable bet (memory, KB, guardrails,
+isolation) or a delete-pressure candidate (tool prompts, anti-pattern advisories,
+packing heuristics), so the harness can shrink as models improve.
+
 ### Evidence pipeline: aimee-kb + curator + learning + ingest
 
 These proposals together implement the charter's one data pipeline.
