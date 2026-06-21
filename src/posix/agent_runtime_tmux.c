@@ -22,8 +22,24 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
    (void)max_tokens;
    (void)temperature;
 
+   /* One tmux session per aimee session, keyed purely on the session id and
+    * agent-agnostic: every CLI agent driven through tmux for a given session
+    * shares that session's own tmux session, and DIFFERENT aimee sessions get
+    * DIFFERENT tmux sessions — so concurrent sessions can never paste into or
+    * capture from (or kill, on a recv timeout) each other's pane. The bound
+    * session id is the webchat/turn session via session_id_set_override; embed
+    * it literally (cli_session_make_name sanitizes chars tmux rejects). When a
+    * session id is in play we always reuse so the CLI persists across the
+    * session's turns. */
+   const char *aimee_sid = session_id();
+   int reuse = agent->session_reuse;
    char *sess_name;
-   if (agent->session_reuse)
+   if (aimee_sid && aimee_sid[0])
+   {
+      sess_name = cli_session_make_name(aimee_sid, "cli");
+      reuse = 1;
+   }
+   else if (agent->session_reuse)
       sess_name = cli_session_make_name(agent->name, "shared");
    else
    {
@@ -52,7 +68,7 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
       cwd[0] = '\0';
 
    cli_session_t sess;
-   int rc = cli_session_create(&sess, sess_name, cli_cmd, cwd, agent->session_reuse);
+   int rc = cli_session_create(&sess, sess_name, cli_cmd, cwd, reuse);
    free(sess_name);
    if (rc != 0)
    {
@@ -115,7 +131,7 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
    char *clean = cli_session_strip_ansi(raw);
    free(raw);
 
-   if (!agent->session_reuse)
+   if (!reuse)
       cli_session_destroy(&sess);
 
    if (!clean || !clean[0])
