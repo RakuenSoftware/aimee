@@ -252,8 +252,11 @@ int cli_session_send(cli_session_t *s, const char *message)
    }
    free(buf);
 
-   /* Load temp file as tmux buffer, paste into session, then press Enter */
-   char cmd[512];
+   /* Load temp file as tmux buffer, paste into session, then press Enter. Sized
+    * to hold the longest command (load-buffer with both the per-session buffer
+    * name and the per-session tmpfile, each derived from the session name) with
+    * margin, so a long session name cannot truncate the tmux command. */
+   char cmd[3 * CLI_SESSION_NAME_MAX + 128];
    int rc;
    char *out;
 
