@@ -11,6 +11,7 @@
 #include "model_registry.h"
 #include "log.h"
 #include "posix/agent_tools_internal.h"
+#include "provider_cli_adapter.h"
 #include "cJSON.h"
 
 /* Pull in only the declarations we need. */
@@ -113,6 +114,18 @@ void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
    (void)level;
    (void)module;
    (void)fmt;
+}
+
+/* delegate_routing.c falls back to the CLI adapter's declared window for tmux-CLI
+ * agents; stub the lookup so this test doesn't link the adapter machinery. Only
+ * "codex" resolves (272k) — an unknown cli_kind returns NULL (stays dropped). */
+const provider_cli_adapter_t *provider_cli_adapter_get(const char *cli_kind)
+{
+   static const provider_cli_adapter_t codex = {.cli_kind = "codex",
+                                                .caps = {.max_context_tokens = 272000}};
+   if (cli_kind && strcmp(cli_kind, "codex") == 0)
+      return &codex;
+   return NULL;
 }
 
 void model_capability_flags_string(unsigned flags, char *out, size_t out_len)
@@ -874,6 +887,44 @@ static void test_capability_filter_honors_tools_enabled(void)
    printf("  PASS: test_capability_filter_honors_tools_enabled\n");
 }
 
+/* A tmux-CLI agent (codex) has no `model` and may have context_window=0 (records
+ * registered before the window was persisted). The filter must fall back to the
+ * CLI adapter's declared window so it survives a min-context floor — and still
+ * drop a CLI agent whose adapter is unknown / declares no window. */
+static void test_capability_filter_cli_agent_uses_adapter_context(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 2;
+
+   /* codex: no model, no explicit window — resolves via the codex adapter (272k). */
+   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "codex");
+   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "codex");
+   snprintf(cfg.agents[0].cli_kind, sizeof(cfg.agents[0].cli_kind), "codex");
+   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "review");
+   cfg.agents[0].role_count = 1;
+   cfg.agents[0].enabled = 1;
+   cfg.agents[0].tools_enabled = 1;
+   cfg.agents[0].middleware.context_window = 0;
+
+   /* unknown CLI kind, no model/window — must NOT resolve a window, so dropped. */
+   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "mystery-cli");
+   snprintf(cfg.agents[1].provider, sizeof(cfg.agents[1].provider), "mystery");
+   snprintf(cfg.agents[1].cli_kind, sizeof(cfg.agents[1].cli_kind), "no-such-cli");
+   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "review");
+   cfg.agents[1].role_count = 1;
+   cfg.agents[1].enabled = 1;
+   cfg.agents[1].tools_enabled = 1;
+   cfg.agents[1].middleware.context_window = 0;
+
+   char errbuf[128];
+   assert(delegate_filter_route_capabilities(&cfg, "review", MODEL_CAP_TOOLS, 5131, 0, errbuf,
+                                             sizeof(errbuf)) == 0);
+   assert(cfg.agents[0].enabled == 1); /* codex kept via adapter window */
+   assert(cfg.agents[1].enabled == 0); /* unknown CLI dropped */
+   printf("  PASS: test_capability_filter_cli_agent_uses_adapter_context\n");
+}
+
 /* An inferred modality cap (vision/pdf/audio) that no model satisfies must NOT
  * hard-fail the fleet: it is relaxed to the hard caps (tools + min_context) so
  * the text models stay routable. Guards the fleet-wide false-fail where a text
@@ -1080,6 +1131,7 @@ int main(void)
    test_capability_filter_drops_deprecated_on_auto_route();
    test_capability_filter_enforces_min_context();
    test_capability_filter_honors_tools_enabled();
+   test_capability_filter_cli_agent_uses_adapter_context();
    test_capability_filter_relaxes_unmet_modality();
    test_capability_filter_hard_cap_still_fails();
    test_capability_inference_audio_extension_not_keyword();

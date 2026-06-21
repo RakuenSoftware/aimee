@@ -2,6 +2,7 @@
 #include "cmd_agent_delegate_impl.h"
 #include "util.h"
 #include "model_registry.h"
+#include "provider_cli_adapter.h" /* declared context window for tmux-CLI agents */
 #include "log.h"
 #include <ctype.h>
 #include <string.h>
@@ -77,6 +78,18 @@ static int agent_meets_filter(const agent_t *ag, unsigned required_caps, int min
    {
       int effective_ctx = ag->middleware.context_window > 0 ? ag->middleware.context_window
                                                             : (have_cap ? cap.context_window : 0);
+      /* Still no window: a tmux-CLI agent (codex/claude-oauth) usually carries no
+       * `model` to resolve one from — the vendor CLI picks the model itself — so
+       * fall back to the window its CLI adapter declares. Reached only when the
+       * model produced nothing (effective_ctx<=0), so model-backed agents are
+       * untouched. Covers records written before context_window was persisted
+       * onto the agent (no re-registration needed). */
+      if (effective_ctx <= 0 && ag->cli_kind[0])
+      {
+         const provider_cli_adapter_t *adapter = provider_cli_adapter_get(ag->cli_kind);
+         if (adapter && adapter->caps.max_context_tokens > 0)
+            effective_ctx = adapter->caps.max_context_tokens;
+      }
       if (effective_ctx <= 0 || effective_ctx < min_context)
          return 0;
    }
