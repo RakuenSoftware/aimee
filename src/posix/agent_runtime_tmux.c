@@ -14,6 +14,14 @@
  * client's cwd, not the server's process cwd. */
 extern const char *run_cmd_get_cwd(void);
 
+/* delegation_active_id is provided by server_compute.c at link time (a
+ * thread-local: the id of the delegate running on THIS thread, or NULL for a
+ * primary turn). agent_tools_dispatch.c supplies a weak NULL stub so binaries
+ * that don't link the server (CLI, tests) still resolve it. Read it here — not
+ * the AIMEE_PARENT_DELEGATION_ID env var, which is process-global and races
+ * across concurrent delegate threads. */
+const char *delegation_active_id(void);
+
 int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
                               const char *system_prompt, const char *user_prompt, int max_tokens,
                               double temperature, agent_result_t *out)
@@ -22,22 +30,37 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
    (void)max_tokens;
    (void)temperature;
 
-   /* One tmux session per aimee session, keyed purely on the session id and
-    * agent-agnostic: every CLI agent driven through tmux for a given session
-    * shares that session's own tmux session, and DIFFERENT aimee sessions get
-    * DIFFERENT tmux sessions — so concurrent sessions can never paste into or
-    * capture from (or kill, on a recv timeout) each other's pane. The bound
-    * session id is the webchat/turn session via session_id_set_override; embed
-    * it literally (cli_session_make_name sanitizes chars tmux rejects). When a
-    * session id is in play we always reuse so the CLI persists across the
-    * session's turns. */
+   /* Key the tmux session on the aimee session id so concurrent sessions can
+    * never paste into, capture from, or kill (on a recv timeout) each other's
+    * pane. The bound session id is the webchat/turn session via
+    * session_id_set_override; cli_session_make_name embeds it literally and
+    * sanitizes chars tmux rejects.
+    *
+    * A delegate runs concurrently with its siblings under the SAME session id
+    * (delegate_run_ctx_enter binds the originating session for all of them), so
+    * session id alone would collapse a fan-out back onto one pane. Add the
+    * delegation id: primary turn -> one persistent pane per session
+    * ("<sid>-cli"); each delegate -> its own pane ("<sid>-<deleg>"). The
+    * primary pane reuses (the conversation persists across turns); a delegate
+    * pane is one-shot and torn down on completion (isolation is the unique
+    * name, not reuse) so unique-per-delegation panes don't accumulate — there
+    * is no idle reaper for these sessions. */
    const char *aimee_sid = session_id();
+   const char *deleg_id = delegation_active_id();
    int reuse = agent->session_reuse;
    char *sess_name;
    if (aimee_sid && aimee_sid[0])
    {
-      sess_name = cli_session_make_name(aimee_sid, "cli");
-      reuse = 1;
+      if (deleg_id && deleg_id[0])
+      {
+         sess_name = cli_session_make_name(aimee_sid, deleg_id);
+         reuse = 0;
+      }
+      else
+      {
+         sess_name = cli_session_make_name(aimee_sid, "cli");
+         reuse = 1;
+      }
    }
    else if (agent->session_reuse)
       sess_name = cli_session_make_name(agent->name, "shared");
