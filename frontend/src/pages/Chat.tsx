@@ -1435,8 +1435,19 @@ export default function Chat() {
    * animation frame (~60/s max, and zero while the tab is backgrounded). Message
    * *creation* stays synchronous so ids/order are assigned immediately; only the
    * append of further text into an existing bubble is batched. */
-  const pendingAppendsRef = useRef<Array<{ id: number; field: 'text' | 'thinkText'; delta: string }>>([]);
+  const pendingAppendsRef = useRef<Array<{ owner: string; id: number; field: 'text' | 'thinkText'; delta: string }>>([]);
   const flushRafRef = useRef<number | null>(null);
+  /* Live mirror of `streamMsgs` for synchronous reads (effects/switch logic). */
+  const streamMsgsRef = useRef<StreamMsg[]>(streamMsgs);
+  /* Off-screen live transcript for every NON-active tab keyed by its aimeeSid.
+   * A stream is routed to its OWNING tab's buffer (by streamRefs.originSid), so a
+   * turn that is in flight while the user is on another tab accumulates here
+   * instead of bleeding into — and being saved onto — the active tab. `streamMsgs`
+   * stays strictly the active tab's view; the switch effect swaps buffers in/out. */
+  const bgStreamsRef = useRef<Map<string, StreamMsg[]>>(new Map());
+  /* aimeeSid that `streamMsgs` currently represents (the tab whose buffer is
+   * on-screen). '' until the first load so the initial committed history loads. */
+  const renderedSidRef = useRef<string>('');
   const sending = pendingSends > 0;
   const queueActive = sending || queuedSends > 0;
   const activePersonaSid = tabs[activeIdx]?.aimeeSid ?? '';
@@ -1447,7 +1458,16 @@ export default function Chat() {
   }, []);
 
   useEffect(() => { scrollToBottom(); }, [streamMsgs, working, scrollToBottom]);
+  useEffect(() => { streamMsgsRef.current = streamMsgs; }, [streamMsgs]);
   useEffect(() => { tabsRef.current = tabs; }, [tabs]);
+  /* Drop off-screen stream buffers for tabs that have been closed, so they don't
+   * accumulate across open/close cycles. */
+  useEffect(() => {
+    const live = new Set(tabs.map(t => t.aimeeSid));
+    for (const sid of bgStreamsRef.current.keys()) {
+      if (!live.has(sid)) bgStreamsRef.current.delete(sid);
+    }
+  }, [tabs]);
   useEffect(() => { workingRef.current = working; }, [working]);
   // Cancel any pending stream-flush frame on unmount.
   useEffect(() => () => { if (flushRafRef.current !== null) cancelAnimationFrame(flushRafRef.current); }, []);
@@ -1852,16 +1872,33 @@ export default function Chat() {
     }
   }
 
-  /* Load messages for active tab into stream view */
+  /* Swap the on-screen transcript when the active tab changes. The leaving tab's
+   * live buffer (possibly mid-stream) is stashed off-screen so its stream keeps
+   * accumulating against its OWN history instead of the newly-active tab; the
+   * entering tab is restored from its stashed buffer if one exists (in-flight or
+   * recently streamed, keeping rich tool/thinking blocks), else loaded fresh from
+   * committed history. */
   useEffect(() => {
-    const tab = tabs[activeIdx];
+    const newSid = tabs[activeIdx]?.aimeeSid ?? '';
+    const oldSid = renderedSidRef.current;
+    if (oldSid === newSid) return;
+    if (oldSid) bgStreamsRef.current.set(oldSid, streamMsgsRef.current);
+    renderedSidRef.current = newSid;
     skipNextStreamPersistRef.current = true;
-    if (!tab) { setStreamMsgs([]); return; }
-    const msgs: StreamMsg[] = tab.messages.map(m => ({
-      id: nextId(),
-      type: m.role,
-      text: m.text,
-    }));
+    const buffered = bgStreamsRef.current.get(newSid);
+    if (buffered) {
+      // Take ownership: the buffer is now on-screen (in streamMsgs), so drop the
+      // off-screen copy to avoid a stale duplicate on the next switch-out stash.
+      bgStreamsRef.current.delete(newSid);
+      streamMsgsRef.current = buffered;
+      setStreamMsgs(buffered);
+      return;
+    }
+    const tab = tabs[activeIdx];
+    const msgs: StreamMsg[] = tab
+      ? tab.messages.map(m => ({ id: nextId(), type: m.role, text: m.text }))
+      : [];
+    streamMsgsRef.current = msgs;
     setStreamMsgs(msgs);
   }, [activeIdx]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1878,9 +1915,30 @@ export default function Chat() {
     });
   }, []);
 
-  const saveCurrentTabMessages = useCallback((msgs: StreamMsg[]) => {
-    saveTabMessages(activeIdxRef.current, msgs);
-  }, [saveTabMessages]);
+  /* Route a stream mutation to its owning tab: the active tab's on-screen buffer
+   * (`streamMsgs`) when the owner is active, else the owner's off-screen buffer. */
+  const applyToOwnerStream = useCallback((owner: string, updater: (prev: StreamMsg[]) => StreamMsg[]) => {
+    const activeSid = tabsRef.current[activeIdxRef.current]?.aimeeSid ?? '';
+    if (owner === activeSid) {
+      setStreamMsgs(updater);
+    } else {
+      bgStreamsRef.current.set(owner, updater(bgStreamsRef.current.get(owner) ?? []));
+    }
+  }, []);
+
+  /* Commit a completed stream to ITS owning tab's history — never the active tab,
+   * which may have changed if the user switched tabs mid-turn. */
+  const saveOwnerStream = useCallback((owner: string) => {
+    flushStreamAppends();
+    const ownerIdx = tabsRef.current.findIndex(t => t.aimeeSid === owner);
+    if (ownerIdx < 0) return;
+    const activeSid = tabsRef.current[activeIdxRef.current]?.aimeeSid ?? '';
+    if (owner === activeSid) {
+      setStreamMsgs(prev => { saveTabMessages(ownerIdx, prev); return prev; });
+    } else {
+      saveTabMessages(ownerIdx, bgStreamsRef.current.get(owner) ?? []);
+    }
+  }, [saveTabMessages]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (skipNextStreamPersistRef.current) {
@@ -2305,7 +2363,7 @@ export default function Chat() {
       if (isAbortError(e)) return;
       const errMsg = e instanceof Error ? e.message : 'Unknown error';
       flushStreamAppends(); // land buffered text before appending the error
-      setStreamMsgs(prev => {
+      applyToOwnerStream(streamRefs.originSid, prev => {
         const aid = streamRefs.assistantId;
         if (aid !== null) {
           return prev.map(m =>
@@ -2340,26 +2398,41 @@ export default function Chat() {
     const ups = pendingAppendsRef.current;
     if (ups.length === 0) return;
     pendingAppendsRef.current = [];
-    const byId = new Map<number, { text: string; think: string }>();
+    // Partition deltas by owning tab, then coalesce per message, so a stream's
+    // text lands in ITS tab's buffer even if the user switched tabs since the
+    // delta was queued (the rAF fires asynchronously).
+    const byOwner = new Map<string, Map<number, { text: string; think: string }>>();
     for (const u of ups) {
+      let byId = byOwner.get(u.owner);
+      if (!byId) { byId = new Map(); byOwner.set(u.owner, byId); }
       const e = byId.get(u.id) ?? { text: '', think: '' };
       if (u.field === 'text') e.text += u.delta;
       else e.think += u.delta;
       byId.set(u.id, e);
     }
-    setStreamMsgs(prev => prev.map(m => {
-      const e = byId.get(m.id);
-      if (!e) return m;
-      const next = { ...m };
-      if (e.text) next.text = m.text + e.text;
-      if (e.think) next.thinkText = (m.thinkText ?? '') + e.think;
-      return next;
-    }));
+    const applyDeltas = (msgs: StreamMsg[], byId: Map<number, { text: string; think: string }>): StreamMsg[] =>
+      msgs.map(m => {
+        const e = byId.get(m.id);
+        if (!e) return m;
+        const next = { ...m };
+        if (e.text) next.text = m.text + e.text;
+        if (e.think) next.thinkText = (m.thinkText ?? '') + e.think;
+        return next;
+      });
+    const activeSid = tabsRef.current[activeIdxRef.current]?.aimeeSid ?? '';
+    for (const [owner, byId] of byOwner) {
+      if (owner === activeSid) {
+        setStreamMsgs(prev => applyDeltas(prev, byId));
+      } else {
+        bgStreamsRef.current.set(owner, applyDeltas(bgStreamsRef.current.get(owner) ?? [], byId));
+      }
+    }
   }
 
-  /* Buffer one delta and ensure a flush is scheduled for the next frame. */
-  function queueStreamAppend(id: number, field: 'text' | 'thinkText', delta: string) {
-    pendingAppendsRef.current.push({ id, field, delta });
+  /* Buffer one delta (tagged with its owning tab) and ensure a flush is scheduled
+   * for the next frame. */
+  function queueStreamAppend(owner: string, id: number, field: 'text' | 'thinkText', delta: string) {
+    pendingAppendsRef.current.push({ owner, id, field, delta });
     if (flushRafRef.current === null) {
       flushRafRef.current = requestAnimationFrame(flushStreamAppends);
     }
@@ -2382,7 +2455,7 @@ export default function Chat() {
         const toolArgs = String(data.args ?? '');
         const tid = nextId();
         streamRefs.toolId = tid;
-        setStreamMsgs(prev => [...prev, {
+        applyToOwnerStream(streamRefs.originSid, prev => [...prev, {
           id: tid, type: 'tool', text: '',
           toolName, toolArgs, toolResult: undefined,
         }]);
@@ -2392,7 +2465,7 @@ export default function Chat() {
         const tid = streamRefs.toolId;
         if (tid !== null) {
           const toolResult = String(data.result ?? '');
-          setStreamMsgs(prev => prev.map(m =>
+          applyToOwnerStream(streamRefs.originSid, prev => prev.map(m =>
             m.id === tid ? { ...m, toolResult } : m
           ));
           streamRefs.toolId = null;
@@ -2405,7 +2478,7 @@ export default function Chat() {
         if (streamRefs.thinkId === null) {
           const tid = nextId();
           streamRefs.thinkId = tid;
-          setStreamMsgs(prev => {
+          applyToOwnerStream(streamRefs.originSid, prev => {
             const aid = streamRefs.assistantId;
             const idx = aid !== null ? prev.findIndex(m => m.id === aid) : -1;
             const thinkMsg: StreamMsg = { id: tid, type: 'thinking', text: '', thinkText: content };
@@ -2418,7 +2491,7 @@ export default function Chat() {
           });
         } else {
           // continuation delta — batch into the per-frame flush
-          queueStreamAppend(streamRefs.thinkId, 'thinkText', content);
+          queueStreamAppend(streamRefs.originSid, streamRefs.thinkId, 'thinkText', content);
         }
         break;
       }
@@ -2432,20 +2505,18 @@ export default function Chat() {
           const newId = nextId();
           streamRefs.assistantId = newId;
           setWorking(hasPendingChatWork());
-          setStreamMsgs(prev => [...prev, { id: newId, type: 'assistant', text: content }]);
+          applyToOwnerStream(streamRefs.originSid, prev => [...prev, { id: newId, type: 'assistant', text: content }]);
         } else {
           // continuation delta — batch into the per-frame flush
-          queueStreamAppend(aid, 'text', content);
+          queueStreamAppend(streamRefs.originSid, aid, 'text', content);
         }
         break;
       }
       case 'turn_end': {
         setWorking(hasPendingChatWork());
-        flushStreamAppends(); // ensure the saved transcript has all streamed text
-        setStreamMsgs(prev => {
-          saveCurrentTabMessages(prev);
-          return prev;
-        });
+        // Commit to the stream's OWNING tab (saveOwnerStream flushes first), never
+        // whatever tab is active now if the user switched tabs mid-turn.
+        saveOwnerStream(streamRefs.originSid);
         streamRefs.assistantId = null;
         streamRefs.thinkId = null;
         streamRefs.toolId = null;
@@ -2455,7 +2526,7 @@ export default function Chat() {
         setWorking(hasPendingChatWork());
         flushStreamAppends(); // land buffered text before appending the error
         const msg = String(data.message ?? 'Unknown error');
-        setStreamMsgs(prev => {
+        applyToOwnerStream(streamRefs.originSid, prev => {
           const aid = streamRefs.assistantId;
           if (aid !== null) {
             return prev.map(m =>
@@ -2506,7 +2577,7 @@ export default function Chat() {
       case 'turn_summary': {
         const text = String(data.text ?? '');
         if (text) {
-          setStreamMsgs(prev => [...prev, { id: nextId(), type: 'narration', text }]);
+          applyToOwnerStream(streamRefs.originSid, prev => [...prev, { id: nextId(), type: 'narration', text }]);
         }
         break;
       }
@@ -2514,7 +2585,7 @@ export default function Chat() {
         const path = String(data.path ?? '');
         const diff = String(data.diff ?? '');
         if (diff) {
-          setStreamMsgs(prev => [...prev, {
+          applyToOwnerStream(streamRefs.originSid, prev => [...prev, {
             id: nextId(), type: 'diff', text: '',
             diffPath: path || undefined, diffContent: diff,
           }]);
@@ -2524,17 +2595,14 @@ export default function Chat() {
       case 'checkpoint': {
         const snapshotId = Number(data.snapshot_id ?? 0);
         if (snapshotId > 0) {
-          setStreamMsgs(prev => [...prev, {
+          applyToOwnerStream(streamRefs.originSid, prev => [...prev, {
             id: nextId(), type: 'checkpoint', text: '', snapshotId,
           }]);
         }
         break;
       }
       case 'done': {
-        setStreamMsgs(prev => {
-          saveCurrentTabMessages(prev);
-          return prev;
-        });
+        saveOwnerStream(streamRefs.originSid);
         void refreshWorkflow();
         /* Refresh LSP diagnostic badge after each completed turn */
         fetch('/api/lsp/diagnostics/summary')
