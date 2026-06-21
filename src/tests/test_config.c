@@ -1863,6 +1863,24 @@ int main(void)
       platform_unsetenv("AIMEE_EMBEDDING_DIM");
       assert(config_resolve_embedding_dim(NULL) == 0);
 
+      /* §2a: config_embedding_dim_is_pinned == (config_resolve_embedding_dim > 0).
+       * The env="0"/non-numeric rows are the point — they must NOT count as a pin. */
+      platform_unsetenv("AIMEE_EMBEDDING_DIM");
+      assert(config_embedding_dim_is_pinned(&cfg) == 1); /* cfg->embedding_dim=2560 */
+      platform_setenv("AIMEE_EMBEDDING_DIM", "2560");
+      assert(config_embedding_dim_is_pinned(&cfg) == 1); /* valid env pin */
+      platform_setenv("AIMEE_EMBEDDING_DIM", "0");
+      {
+         config_t unset_cfg;
+         memset(&unset_cfg, 0, sizeof(unset_cfg));                /* embedding_dim = 0 */
+         assert(config_embedding_dim_is_pinned(&unset_cfg) == 0); /* env "0" is not a pin */
+         platform_setenv("AIMEE_EMBEDDING_DIM", "garbage");
+         assert(config_embedding_dim_is_pinned(&unset_cfg) == 0); /* non-numeric is not a pin */
+         platform_unsetenv("AIMEE_EMBEDDING_DIM");
+         assert(config_embedding_dim_is_pinned(&unset_cfg) == 0); /* unset + cfg=0 -> not pinned */
+         assert(config_embedding_dim_is_pinned(&cfg) == 1);       /* unset + cfg=2560 -> pinned */
+      }
+
       if (saved)
       {
          platform_setenv("AIMEE_EMBEDDING_DIM", saved);

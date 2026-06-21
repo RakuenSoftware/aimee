@@ -79,3 +79,13 @@ int config_resolve_embedding_dim(const config_t *cfg)
    }
    return dim;
 }
+
+/* §2a: pinned iff the resolved operator dim is positive. Keeping this defined in
+ * terms of config_resolve_embedding_dim guarantees the pin flag agrees with the
+ * dim that was actually set (env "0"/non-numeric/empty and an unset cfg both
+ * resolve to 0 → not pinned), so the recorded-dim override fires on exactly the
+ * deployments that did not pin. */
+int config_embedding_dim_is_pinned(const config_t *cfg)
+{
+   return config_resolve_embedding_dim(cfg) > 0;
+}

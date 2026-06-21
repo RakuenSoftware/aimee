@@ -13,6 +13,7 @@
 #include "db2_pool.h"
 #include "db_postgres.h"
 #include "db_schema.h"
+#include "../headers/log.h" /* LOG_WARN */
 #include "entity_edges.h"
 #include "eval_support.h"
 
@@ -53,6 +54,11 @@ static pthread_mutex_t g_init_lock = PTHREAD_MUTEX_INITIALIZER;
  * reports the 1024 default (the default embedder is pplx-0.6b). */
 static int g_embed_dim = 0;
 
+/* §2a: whether the operator pinned the dim. When 0 (default) and nothing was
+ * pinned, db2_init prefers a recorded kb_meta.schema_embedding_dim over the
+ * default. Reset in db2_shutdown so a reopen / a later test never inherits it. */
+static int g_embed_dim_pinned = 0;
+
 void db2_set_embedding_dim(int dim)
 {
    g_embed_dim = dim;
@@ -61,6 +67,20 @@ void db2_set_embedding_dim(int dim)
 int db2_embedding_dim(void)
 {
    return g_embed_dim > 0 ? g_embed_dim : 1024;
+}
+
+void db2_set_embedding_dim_pinned(int pinned)
+{
+   g_embed_dim_pinned = pinned ? 1 : 0;
+}
+
+int db2_effective_dim(int pinned, int configured, int recorded)
+{
+   if (pinned)
+      return configured; /* operator pin is authoritative */
+   if (recorded > 0)
+      return recorded; /* recorded wins over the configured default */
+   return configured;  /* fresh DB / nothing recorded: the default */
 }
 static pthread_key_t g_thread_conn_key;
 static pthread_once_t g_thread_conn_key_once = PTHREAD_ONCE_INIT;
@@ -379,8 +399,22 @@ int db2_init(const char *libpq_url)
     * embedding_dim drives the dimension of the DB2 halfvec embedding columns.
     * The dimension is supplied by db2_set_embedding_dim() at startup (the server
     * and aimee-kb, which hold the loaded config) so this low-level layer stays
-    * config-free; it defaults to 2560 when unset. */
-   if (db_apply_schema_postgres(conn, db2_embedding_dim(), errbuf, sizeof(errbuf)) != 0)
+    * config-free; it defaults to 1024 when unset. */
+   int configured_dim = db2_embedding_dim();
+   /* §2a precedence: when the operator did NOT pin a dim, prefer the recorded
+    * kb_meta.schema_embedding_dim (the populated-DB source of truth) over the
+    * default, so an unpinned deploy self-derives its dim instead of refusing the
+    * apply. Pinned and fresh-DB paths keep configured_dim → behavior-identical. */
+   int recorded_dim = g_embed_dim_pinned ? 0 : db2_embedding_dim_get(conn);
+   int effective_dim = db2_effective_dim(g_embed_dim_pinned, configured_dim, recorded_dim);
+   if (effective_dim != configured_dim)
+   {
+      LOG_WARN("db2",
+               "using recorded embedding dim %d (no operator pin; configured default was %d)",
+               effective_dim, configured_dim);
+      db2_set_embedding_dim(effective_dim); /* halfvec columns + all readers agree */
+   }
+   if (db_apply_schema_postgres(conn, effective_dim, errbuf, sizeof(errbuf)) != 0)
    {
       /* Surface the postgres error so callers see WHICH statement failed.
        * Silently returning -1 hid bugs like a stale CREATE INDEX referencing
@@ -628,6 +662,12 @@ void db2_shutdown(void)
       g_conn = NULL;
    }
    g_pg_url[0] = '\0';
+   /* §2a: clear the dim + pinned flag so a reopen / a later unit test starts from
+    * the unpinned default rather than inheriting this run's state. db2_init may
+    * have re-set g_embed_dim to a recorded value, so reset it for symmetry — every
+    * real caller sets it again via db2_set_embedding_dim before the next init. */
+   g_embed_dim = 0;
+   g_embed_dim_pinned = 0;
    pthread_mutex_unlock(&g_init_lock);
 }
 

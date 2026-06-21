@@ -26,4 +26,13 @@ int config_apply_db2_url_env_override(config_t *cfg);
  * so the schema columns match the running embedder. Non-mutating. */
 int config_resolve_embedding_dim(const config_t *cfg);
 
+/* embedder-runtime-fetch-autodim §2a: 1 iff the operator pinned a positive
+ * embedding dim — defined as config_resolve_embedding_dim(cfg) > 0, so "pinned"
+ * is exactly consistent with the value db2_set_embedding_dim receives. A pinned
+ * dim is authoritative; an UNpinned deployment lets the recorded
+ * kb_meta.schema_embedding_dim win over the default. AIMEE_EMBEDDING_DIM="0" /
+ * non-numeric / empty is NOT a pin (config_resolve already maps it to 0), nor is
+ * an unset cfg->embedding_dim. Pass to db2_set_embedding_dim_pinned(). */
+int config_embedding_dim_is_pinned(const config_t *cfg);
+
 #endif

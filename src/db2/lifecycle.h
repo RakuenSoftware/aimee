@@ -22,6 +22,24 @@ extern "C"
    void db2_set_embedding_dim(int dim);
    int db2_embedding_dim(void);
 
+   /* embedder-runtime-fetch-autodim §2a: mark whether the operator pinned the dim
+    * (see config_embedding_dim_is_pinned). Call beside db2_set_embedding_dim,
+    * before db2_init. When UNpinned (0, the default), db2_init prefers a recorded
+    * kb_meta.schema_embedding_dim over the configured default; when pinned (1) the
+    * operator value is authoritative and a recorded mismatch is refused downstream.
+    * Reset by db2_shutdown so a reopen cannot inherit a previous run's state. */
+   void db2_set_embedding_dim_pinned(int pinned);
+
+   /* §2a precedence, pure (no globals, no I/O): the effective dim under
+    * pin > recorded > configured-default. |pinned|: operator pinned a positive
+    * dim. |configured|: the dim already set pre-init (the pin when pinned, else
+    * the default). |recorded|: kb_meta.schema_embedding_dim, or <=0 if absent.
+    * Returns |configured| when pinned or when nothing is recorded; the recorded
+    * dim otherwise. The one place §2a's precedence lives — db2_init and the unit
+    * test both call it. (A future probe rung, §2b, slots between recorded and the
+    * default.) */
+   int db2_effective_dim(int pinned, int configured, int recorded);
+
    /* Connection-pool size used by db2_init (default 16). Like
     * db2_set_embedding_dim, call before db2_init to keep this layer config-free. */
    void db2_set_pool_size(int size);

@@ -169,6 +169,33 @@ int db2_embedding_dim_record_or_check(void *conn, int embed_dim, char *errbuf, s
    return 0; /* recorded == embed_dim — fresh insert or matching existing row */
 }
 
+/* §2a: quiet, read-only companion to record_or_check. Returns the recorded dim
+ * only when it parses cleanly into 1..EMBED_MAX_DIM; any other state (no row,
+ * empty, non-numeric, trailing junk, non-positive, or out of range) returns 0 so
+ * the caller falls through to its configured default. Never sets an error. */
+int db2_embedding_dim_get(void *conn)
+{
+   if (!conn)
+      return 0;
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "SELECT value FROM kb_meta WHERE key = 'schema_embedding_dim'", err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   int dim = 0;
+   if (step == AIMEE_PG_ROW)
+   {
+      const char *valtxt = aimee_pg_column_text(st, 0);
+      char *endp = NULL;
+      long v = (valtxt && *valtxt) ? strtol(valtxt, &endp, 10) : 0;
+      if (valtxt && *valtxt && endp && *endp == '\0' && v >= 1 && v <= EMBED_MAX_DIM)
+         dim = (int)v;
+   }
+   aimee_pg_finalize(st);
+   return dim;
+}
+
 int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen)
 {
    if (!pg_conn)

@@ -542,6 +542,7 @@ int main(int argc, char **argv)
     * overrides the configured value (containerized deploys without a writable
     * aimee.yaml). */
    db2_set_embedding_dim(config_resolve_embedding_dim(&kb_cfg));
+   db2_set_embedding_dim_pinned(config_embedding_dim_is_pinned(&kb_cfg));
    /* Size the DB2 connection pool (leased by worker threads) before db2_init. */
    db2_set_pool_size(aimee_resolve_db2_pool_size(kb_cfg.db2_connection_pool_size));
 

@@ -5,6 +5,8 @@
 #include "db_postgres.h"
 #include "db2.h"
 #include "db2_internal.h"
+#include "../headers/log.h" /* log_level_t for the aimee_log stub below */
+#include <stdarg.h>
 
 struct aimee_pg_stmt
 {
@@ -31,6 +33,11 @@ static int g_fail_prepare = 0;
 static int g_schema_present = 1;
 static int g_extension_present = 1;
 static int g_fake_conn = 0;
+/* §2a: knob for the db2_embedding_dim_get stub (the recorded kb_meta dim db2_init
+ * reads) and a capture of the embed_dim db_apply_schema_postgres actually received
+ * — together they exercise the recorded-dim precedence wiring through db2_init. */
+static int g_recorded_dim = 0;
+static int g_schema_dim = -1;
 
 void *aimee_pg_open(const char *conninfo, char *errbuf, size_t errlen)
 {
@@ -55,7 +62,7 @@ void aimee_pg_close(void *pg_conn)
 int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen)
 {
    g_schema_calls++;
-   (void)embed_dim;
+   g_schema_dim = embed_dim; /* §2a: capture the effective dim db2_init resolved */
    assert(pg_conn == &g_fake_conn);
    if (g_fail_schema)
    {
@@ -64,6 +71,23 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
       return -1;
    }
    return 0;
+}
+
+/* §2a: db2_init now reads the recorded dim (db_schema.o, not linked here — the
+ * real db_apply_schema_postgres is stubbed above) and logs via aimee_log (log.o,
+ * not linked). Stub both so the object links; returning 0 (no recorded dim) keeps
+ * the unpinned path's effective dim == configured, so these tests are unchanged. */
+int db2_embedding_dim_get(void *pg_conn)
+{
+   assert(pg_conn == &g_fake_conn);
+   return g_recorded_dim;
+}
+
+void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
+{
+   (void)level;
+   (void)module;
+   (void)fmt;
 }
 
 int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
@@ -171,7 +195,11 @@ static void reset_mocks(void)
    g_fail_prepare = 0;
    g_schema_present = 1;
    g_extension_present = 1;
+   g_recorded_dim = 0;
+   g_schema_dim = -1;
    db2_shutdown();
+   db2_set_embedding_dim(0);
+   db2_set_embedding_dim_pinned(0);
 }
 
 static void test_init_shutdown_roundtrip(void)
@@ -199,6 +227,48 @@ static void test_init_shutdown_roundtrip(void)
 
    db2_shutdown();
    assert(g_close_calls == 1);
+}
+
+/* §2a: drive the recorded-dim precedence through db2_init end-to-end (the wiring
+ * the shim/unit helpers don't exercise). g_schema_dim captures the effective dim
+ * that reached db_apply_schema_postgres; g_recorded_dim mocks kb_meta. */
+static void test_recorded_dim_precedence(void)
+{
+   /* Unpinned + a recorded dim that differs from the configured default: the
+    * recorded dim wins and the global is updated so later readers agree. */
+   reset_mocks();
+   db2_set_embedding_dim(1024); /* configured default */
+   g_recorded_dim = 2560;       /* populated DB recorded 2560 */
+   assert(db2_init("postgres://db2.test/aimee") == 0);
+   assert(g_schema_dim == 2560);        /* effective dim, not the 1024 default */
+   assert(db2_embedding_dim() == 2560); /* global re-set so halfvec + readers agree */
+
+   /* Pinned: the operator value is authoritative; the recorded dim is ignored. */
+   reset_mocks();
+   db2_set_embedding_dim(1024);
+   db2_set_embedding_dim_pinned(1);
+   g_recorded_dim = 2560;
+   assert(db2_init("postgres://db2.test/aimee") == 0);
+   assert(g_schema_dim == 1024); /* pin wins over recorded */
+   assert(db2_embedding_dim() == 1024);
+
+   /* Unpinned, nothing recorded: the configured default stands (fresh-DB path). */
+   reset_mocks();
+   db2_set_embedding_dim(1024);
+   g_recorded_dim = 0;
+   assert(db2_init("postgres://db2.test/aimee") == 0);
+   assert(g_schema_dim == 1024);
+
+   /* db2_shutdown clears the pinned flag: a pin set before shutdown must NOT leak
+    * into the next init, or an unpinned deploy would wrongly refuse to self-derive. */
+   reset_mocks();
+   db2_set_embedding_dim_pinned(1);
+   db2_shutdown(); /* resets g_embed_dim_pinned (and g_embed_dim) */
+   db2_set_embedding_dim(1024);
+   g_recorded_dim = 2560;
+   assert(db2_init("postgres://db2.test/aimee") == 0);
+   assert(g_schema_dim == 2560); /* pinned state did not survive shutdown */
+   db2_shutdown();
 }
 
 static void test_init_rejects_url_change_without_shutdown(void)
@@ -321,6 +391,7 @@ static void test_health_probe_fails_without_init_or_query_failure(void)
 int main(void)
 {
    test_init_shutdown_roundtrip();
+   test_recorded_dim_precedence();
    test_init_rejects_url_change_without_shutdown();
    test_init_rejects_empty_url();
    test_open_failure_leaves_db2_closed();

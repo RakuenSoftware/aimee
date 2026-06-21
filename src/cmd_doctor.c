@@ -5,6 +5,7 @@
 #include "commands.h"
 #include "db1.h"
 #include "db2/code_index.h"
+#include "config_database.h"
 #include "db2/memory_payload.h"
 #include "db2/memory_query.h"
 #include "hardware_probe.h"
@@ -65,7 +66,14 @@ static doctor_db2_session_t check_database(check_result_t *r, config_t *cfg)
    {
       session.ready = 1;
    }
-   else if ((db2_set_embedding_dim(cfg->embedding_dim), db2_init(cfg->db2_url)) == 0)
+   /* §2a: resolve the dim + pin the same way cmd_core/kb_main do — via
+    * config_resolve_embedding_dim (so doctor now honors AIMEE_EMBEDDING_DIM too,
+    * intentionally uniform) plus the pin flag, so an unpinned doctor run derives
+    * the recorded dim rather than refusing on the 1024 default. A genuine
+    * pin/recorded mismatch still surfaces via #337's record_or_check guard. */
+   else if ((db2_set_embedding_dim(config_resolve_embedding_dim(cfg)),
+             db2_set_embedding_dim_pinned(config_embedding_dim_is_pinned(cfg)),
+             db2_init(cfg->db2_url)) == 0)
    {
       session.ready = 1;
       session.owned = 1;
