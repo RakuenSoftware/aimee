@@ -1318,51 +1318,72 @@ function ChannelView({ channelName, messages, agents, onSend }: ChannelViewProps
   );
 }
 
-/* Renders the committed transcript. Extracted + memoized so re-renders of the
- * big Chat component that are NOT a message change (textarea typing, the remote-
- * turn preview, the workflow poll, working toggles) skip transcript
- * reconciliation entirely. Only re-renders when `messages`, `working`, or
- * `activeSid` actually change. */
+/* Render one transcript block. `streaming` only matters for an assistant bubble
+ * (it then renders raw growing text and skips the markdown parse); every other
+ * block type ignores it. */
+function renderBlock(m: StreamMsg, activeSid: string, streaming: boolean) {
+  switch (m.type) {
+    case 'user':
+      return <Message key={m.id} role="user" text={m.text} />;
+    case 'assistant':
+      return <Message key={m.id} role="assistant" text={m.text} streaming={streaming} />;
+    case 'thinking':
+      return <ThinkingBlock key={m.id} text={m.thinkText ?? ''} />;
+    case 'tool':
+      return <ToolBlock key={m.id} name={m.toolName ?? ''} args={m.toolArgs ?? ''} result={m.toolResult} />;
+    case 'narration':
+      return <TurnSummaryCard key={m.id} text={m.text} />;
+    case 'diff':
+      return <DiffBlock key={m.id} path={m.diffPath} diff={m.diffContent ?? ''} />;
+    case 'checkpoint':
+      return <RewindMarker key={m.id} snapshotId={m.snapshotId!} sid={activeSid} />;
+    default:
+      return null;
+  }
+}
+
+/* The committed (settled) part of the transcript — everything except the live,
+ * still-streaming tail block. Memoized with a REFERENCE-ONLY comparator: a
+ * stream flush rebuilds the `messages` array but keeps every settled message's
+ * object identity (applyDeltas replaces only the one growing message), so this
+ * subtree bails in an O(n) pointer scan instead of re-mapping and reconciling
+ * the whole conversation as React elements. Without it, each of the ~10 flushes/s
+ * costs O(conversation length) of React work, so a long session steadily pegs a
+ * core — the "gets worse the longer I chat" symptom. It re-renders only when a
+ * block is committed (count changes) or a settled block actually mutates (e.g. a
+ * tool_result lands), both of which change an element reference. */
+const CommittedTranscript = memo(function CommittedTranscript({ messages, count, activeSid }: {
+  messages: StreamMsg[]; count: number; activeSid: string;
+}) {
+  const blocks = [];
+  for (let i = 0; i < count; i++) blocks.push(renderBlock(messages[i], activeSid, false));
+  return <>{blocks}</>;
+}, (prev, next) => {
+  if (prev.count !== next.count || prev.activeSid !== next.activeSid) return false;
+  for (let i = 0; i < next.count; i++) {
+    if (prev.messages[i] !== next.messages[i]) return false;
+  }
+  return true;
+});
+
+/* Renders the transcript. Extracted + memoized so re-renders of the big Chat
+ * component that are NOT a message change (textarea typing, the remote-turn
+ * preview, the workflow poll, working toggles) skip it entirely. During a turn
+ * only the live tail block is re-rendered per flush; the committed history is
+ * gated behind CommittedTranscript's reference comparator. */
 const Transcript = memo(function Transcript({ messages, working, activeSid }: {
   messages: StreamMsg[]; working: boolean; activeSid: string;
 }) {
-  // The growing tail assistant bubble streams as raw text (no markdown re-parse);
-  // it stops being "streaming" the moment another block follows it or the turn
-  // ends (working → false), at which point it renders markdown once.
-  const lastId = messages.length > 0 ? messages[messages.length - 1].id : -1;
+  const n = messages.length;
+  // While a turn is in flight the last block is the live tail (an assistant
+  // bubble streams its raw text; it settles — and renders markdown once — when
+  // another block follows it or the turn ends). Everything before it is settled.
+  const liveTail = working && n > 0;
+  const committedCount = liveTail ? n - 1 : n;
   return (
     <>
-      {messages.map(m => {
-        if (m.type === 'user') {
-          return <Message key={m.id} role="user" text={m.text} />;
-        }
-        if (m.type === 'assistant') {
-          return <Message key={m.id} role="assistant" text={m.text} streaming={working && m.id === lastId} />;
-        }
-        if (m.type === 'thinking') {
-          return <ThinkingBlock key={m.id} text={m.thinkText ?? ''} />;
-        }
-        if (m.type === 'tool') {
-          return (
-            <ToolBlock
-              key={m.id}
-              name={m.toolName ?? ''}
-              args={m.toolArgs ?? ''}
-              result={m.toolResult}
-            />
-          );
-        }
-        if (m.type === 'narration') {
-          return <TurnSummaryCard key={m.id} text={m.text} />;
-        }
-        if (m.type === 'diff') {
-          return <DiffBlock key={m.id} path={m.diffPath} diff={m.diffContent ?? ''} />;
-        }
-        if (m.type === 'checkpoint') {
-          return <RewindMarker key={m.id} snapshotId={m.snapshotId!} sid={activeSid} />;
-        }
-        return null;
-      })}
+      <CommittedTranscript messages={messages} count={committedCount} activeSid={activeSid} />
+      {liveTail && renderBlock(messages[n - 1], activeSid, true)}
     </>
   );
 });
