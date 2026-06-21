@@ -13,7 +13,8 @@
 #include "vault_service.h"    /* vault_service_set / set_server, VAULT_API_KEY_CRED */
 #include "vault_capability.h" /* vault_capability_server_write_allowed (single server-write gate) */
 #include "server_cli_oauth.h" /* server-hosted OAuth CLI agent setup */
-#include "config.h"           /* config_load / config_t */
+#include "provider_cli_adapter.h" /* provider_cli_adapter_get: declared CLI caps */
+#include "config.h"               /* config_load / config_t */
 #include <pthread.h>
 #include <string.h>
 #include <stdlib.h>
@@ -937,6 +938,15 @@ static void sagent_configure_tmux_cli_agent(agent_t *ag, const char *name, const
    ag->max_turns = -1;
    ag->max_parallel = AGENT_DEFAULT_MAX_PARALLEL;
    ag->session_reuse = 1;
+
+   /* Advertise the CLI's real context window so capability routing (min_context
+    * floors, e.g. the review role) keeps this agent in the fleet. A tmux-CLI
+    * agent has no `model` to resolve a window from — the vendor CLI picks the
+    * model from its own subscription/config — so without this it resolves to 0
+    * and gets dropped. Sourced from the adapter so there's one source of truth. */
+   const provider_cli_adapter_t *adapter = provider_cli_adapter_get(cli_kind);
+   if (adapter && adapter->caps.max_context_tokens > 0)
+      ag->middleware.context_window = adapter->caps.max_context_tokens;
 
    ag->role_count = 0;
    for (int i = 0;

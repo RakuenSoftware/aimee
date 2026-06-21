@@ -1981,7 +1981,11 @@ static int codex_adapter_execute(const provider_cli_cfg_t *cfg, agent_result_t *
 const provider_cli_adapter_t codex_provider_cli_adapter = {
     .cli_kind = "codex",
     .display_name = "Codex CLI",
-    .caps = {.max_context_tokens = 0,
+    /* Codex CLI runs the gpt-5-codex family (272k context, tool use). Declaring
+     * the real window lets capability routing keep codex as a delegate for roles
+     * with a min-context floor; 0 here previously dropped it from every such
+     * fleet ("no configured model supports required capabilities"). */
+    .caps = {.max_context_tokens = 272000,
              .supports_tool_use = 1,
              .proto_stability = PROVIDER_CLI_PROTO_STABLE,
              .write_confidence = 0.95f},

@@ -67,6 +67,12 @@ static void test_registry_and_caps(void)
 
    assert(strcmp(codex->cli_kind, "codex") == 0);
    assert(codex->execute != NULL);
+   /* Codex must advertise its real context window + tool use so capability
+    * routing keeps it as a delegate for roles with a min-context floor (e.g.
+    * review). A 0 here silently drops codex from every such fleet. */
+   assert(codex->caps.supports_tool_use == 1);
+   /* Exact value (not a floor) so an accidental drift back toward 0 is caught. */
+   assert(codex->caps.max_context_tokens == 272000);
    assert(claude->spawn != NULL);
    assert(claude->parse_line != NULL);
    assert(claude->caps.proto_stability == PROVIDER_CLI_PROTO_STABLE);
