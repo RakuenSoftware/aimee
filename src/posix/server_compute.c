@@ -456,7 +456,8 @@ static int chat_agent_has_provider(const agent_config_t *acfg, const char *provi
  * agent was explicitly configured. `name`==`provider` so it is selectable by
  * either. cli_kind drives the response parser; cli_cmd is the launch command. */
 static void chat_agent_add_builtin_tmux_cli(agent_config_t *acfg, const char *name,
-                                            const char *cli_kind, const char *cli_cmd)
+                                            const char *cli_kind, const char *cli_cmd,
+                                            const char *model)
 {
    if (!acfg || acfg->agent_count >= MAX_AGENTS || agent_find(acfg, name) ||
        chat_agent_has_provider(acfg, name))
@@ -470,6 +471,12 @@ static void chat_agent_add_builtin_tmux_cli(agent_config_t *acfg, const char *na
    snprintf(ag->backend, sizeof(ag->backend), "%s", AGENT_BACKEND_TMUX_CLI);
    snprintf(ag->cli_kind, sizeof(ag->cli_kind), "%s", cli_kind);
    snprintf(ag->cli_cmd, sizeof(ag->cli_cmd), "%s", cli_cmd);
+   /* The configured default model; agent_execute_cli_session appends it as
+    * `--model` (claude/codex both accept it). A per-request model_override
+    * replaces this in chat_stream_worker_agent before the turn runs. Without
+    * this, the CLI launched with its own default, silently ignoring config. */
+   if (model && model[0])
+      snprintf(ag->model, sizeof(ag->model), "%s", model);
    ag->cost_tier = 1;
    ag->max_tokens = AGENT_DEFAULT_MAX_TOKENS;
    ag->timeout_ms = AGENT_DEFAULT_TIMEOUT_MS;
@@ -488,14 +495,16 @@ static void chat_agent_add_builtin_provider(agent_config_t *acfg, const char *pr
 {
    if (!provider)
       return;
+   const char *claude_model = cfg ? cfg->claude_model : "";
+   const char *codex_model = cfg ? cfg->codex_model : "";
    if (strcmp(provider, "openai") == 0)
       chat_agent_add_legacy_openai(acfg, cfg);
    else if (strcmp(provider, "claude-code") == 0)
-      chat_agent_add_builtin_tmux_cli(acfg, "claude-code", "claude-code", "claude");
+      chat_agent_add_builtin_tmux_cli(acfg, "claude-code", "claude-code", "claude", claude_model);
    else if (strcmp(provider, "claude") == 0 || strcmp(provider, "claude-oauth") == 0)
-      chat_agent_add_builtin_tmux_cli(acfg, provider, "claude", "claude");
+      chat_agent_add_builtin_tmux_cli(acfg, provider, "claude", "claude", claude_model);
    else if (strcmp(provider, "codex-oauth") == 0)
-      chat_agent_add_builtin_tmux_cli(acfg, "codex-oauth", "codex", "codex");
+      chat_agent_add_builtin_tmux_cli(acfg, "codex-oauth", "codex", "codex", codex_model);
 }
 
 static int chat_agent_select_provider(agent_config_t *acfg, const char *provider, char *selected,
@@ -642,8 +651,11 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
       stream_event(cctx, "text", "content", drift);
    agent_tools_set_tool_event_cb(chat_tool_event_cb, cctx);
    /* Stream a tmux CLI turn's reply incrementally (no-op for non-tmux agents,
-    * whose runtime never drives a cli_session). */
+    * whose runtime never drives a cli_session). Save/restore any outer cb so a
+    * nested turn on this thread can't leave a dangling context behind. */
    chat_cli_stream_ctx_t sctx = {cctx, 0};
+   void *prev_stream_ud = NULL;
+   cli_session_stream_cb_t prev_stream_cb = cli_session_get_stream_cb(&prev_stream_ud);
    cli_session_set_stream_cb(chat_cli_stream_cb, &sctx);
 
    agent_result_t result;
@@ -651,7 +663,7 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    int rc = agent_run_with_tools(&acfg, "code", system_prompt ? system_prompt : "", message,
                                  AGENT_DEFAULT_MAX_TOKENS, &result);
 
-   cli_session_set_stream_cb(NULL, NULL);
+   cli_session_set_stream_cb(prev_stream_cb, prev_stream_ud);
    agent_tools_set_tool_event_cb(NULL, NULL);
    session_id_clear_override();
    workspace_turn_unbind_active();

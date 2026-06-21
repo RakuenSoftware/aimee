@@ -302,16 +302,50 @@ static void test_extract_claude_multiline(void)
 
 static void test_extract_codex_basic(void)
 {
-   /* codex events also use •; the answer is the LAST • block before composer. */
+   /* codex events also use •; the SessionStart hook fired before the turn, so it
+    * is in the baseline (captured pre-send) and excluded — the answer is the new
+    * bullet. */
+   const char *baseline = "\xe2\x80\xa2 SessionStart hook (completed)\n"
+                          "  hook context noise\n";
    const char *pane = "\xe2\x80\xba Reply with three words\n"
                       "\xe2\x80\xa2 SessionStart hook (completed)\n"
                       "  hook context noise\n"
                       "\xe2\x80\xa2 foxtrot golf hotel\n"
                       "\xe2\x80\xba Find and fix a bug\n"
                       "  gpt-5.5 default\n";
-   char *r = cli_session_extract_response(pane, "codex", NULL);
+   char *r = cli_session_extract_response(pane, "codex", baseline);
    assert(r != NULL);
    assert(strcmp(r, "foxtrot golf hotel") == 0);
+   free(r);
+}
+
+/* Multi-bullet answer: all bullets of the turn are kept, not just the last. */
+static void test_extract_claude_multibullet(void)
+{
+   const char *pane = "\xe2\x9d\xaf q\n"
+                      "\xe2\x97\x8f paragraph one\n"
+                      "\xe2\x97\x8f paragraph two\n"
+                      "\xe2\x9c\xbb Cooked for 1s\n";
+   char *r = cli_session_extract_response(pane, "claude", NULL);
+   assert(r != NULL);
+   assert(strcmp(r, "paragraph one\nparagraph two") == 0);
+   free(r);
+}
+
+/* A short reply that merely appears as a SUBSTRING of a prior line must NOT be
+ * excluded — the baseline match is whole-line, not substring. */
+static void test_extract_baseline_substring_kept(void)
+{
+   const char *baseline = "\xe2\x97\x8f that looks ok to me\n"
+                          "\xe2\x9c\xbb Cooked for 1s\n";
+   const char *pane = "\xe2\x97\x8f that looks ok to me\n"
+                      "\xe2\x9c\xbb Cooked for 1s\n"
+                      "\xe2\x9d\xaf next\n"
+                      "\xe2\x97\x8f ok\n"
+                      "\xe2\x9c\xbb Baked for 1s\n";
+   char *r = cli_session_extract_response(pane, "claude", baseline);
+   assert(r != NULL);
+   assert(strcmp(r, "ok") == 0);
    free(r);
 }
 
@@ -331,6 +365,14 @@ int main(void)
 
    printf("test_extract_codex_basic... ");
    test_extract_codex_basic();
+   printf("OK\n");
+
+   printf("test_extract_claude_multibullet... ");
+   test_extract_claude_multibullet();
+   printf("OK\n");
+
+   printf("test_extract_baseline_substring_kept... ");
+   test_extract_baseline_substring_kept();
    printf("OK\n");
 
    printf("test_make_name_format... ");

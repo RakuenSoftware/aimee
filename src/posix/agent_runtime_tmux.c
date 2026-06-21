@@ -86,7 +86,18 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
       return -1;
    }
 
-   const char *cli_cmd = agent->cli_cmd[0] ? agent->cli_cmd : "claude";
+   /* Honour the agent's model: append `--model <model>` (claude and codex both
+    * accept it) unless the launch command already pins one. The model is the
+    * config default or the per-request override the chat worker wrote onto the
+    * agent — without this the CLI would launch with its own built-in default. */
+   const char *base_cmd = agent->cli_cmd[0] ? agent->cli_cmd : "claude";
+   char cli_cmd_buf[CLI_SESSION_CMD_MAX];
+   const char *cli_cmd = base_cmd;
+   if (agent->model[0] && !strstr(base_cmd, "--model") && !strstr(base_cmd, " -m "))
+   {
+      snprintf(cli_cmd_buf, sizeof(cli_cmd_buf), "%s --model %s", base_cmd, agent->model);
+      cli_cmd = cli_cmd_buf;
+   }
 
    /* Prefer the turn's bound cwd (the client workspace root on a detached
     * thin-client turn, where the tmux session actually runs); fall back to the

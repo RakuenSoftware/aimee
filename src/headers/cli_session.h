@@ -31,6 +31,10 @@ typedef struct
  * produced chunk of clean response text as the turn streams. Set per-thread. */
 typedef void (*cli_session_stream_cb_t)(const char *delta, void *ud);
 void cli_session_set_stream_cb(cli_session_stream_cb_t cb, void *ud);
+/* Read the current thread's stream callback so a caller can save/restore it
+ * around a nested turn (prevents the inner turn's now-dead context leaking to
+ * the outer turn). *ud_out receives the userdata; returns the callback. */
+cli_session_stream_cb_t cli_session_get_stream_cb(void **ud_out);
 
 /* Record the CLI kind so recv can pick the right TUI response parser. */
 void cli_session_set_kind(cli_session_t *s, const char *cli_kind);

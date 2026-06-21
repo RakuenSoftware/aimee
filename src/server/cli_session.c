@@ -70,6 +70,13 @@ void cli_session_set_stream_cb(cli_session_stream_cb_t cb, void *ud)
    g_stream_ud = ud;
 }
 
+cli_session_stream_cb_t cli_session_get_stream_cb(void **ud_out)
+{
+   if (ud_out)
+      *ud_out = g_stream_ud;
+   return g_stream_cb;
+}
+
 void cli_session_set_kind(cli_session_t *s, const char *cli_kind)
 {
    if (!s)
@@ -197,16 +204,16 @@ int cli_session_send(cli_session_t *s, const char *message)
     * the same host as the tmux session: on a detached workspace that is the
     * CLIENT (write via the provider), else the local fs.
     *
-    * Both the tmpfile and the tmux paste buffer are keyed per session: concurrent
-    * turns on different panes would otherwise race a single shared `aimee_msg`
-    * buffer / `/tmp/aimee_msg_<pid>.txt` and paste each other's prompt into the
-    * wrong pane. */
+    * Both the tmpfile and the tmux paste buffer are keyed on the (unique,
+    * tmux-sanitized) session name: concurrent turns on different panes would
+    * otherwise race a single shared `aimee_msg` buffer / `/tmp/aimee_msg_<pid>.txt`
+    * and paste each other's prompt into the wrong pane. Using the full name (not
+    * a 32-bit hash) rules out a collision reintroducing that exact bleed. */
    int detached = sess_detached();
-   unsigned long skey = djb2(s->session_name) & 0xffffffff;
-   char tmpfile[96];
-   snprintf(tmpfile, sizeof(tmpfile), "/tmp/aimee_msg_%d_%08lx.txt", (int)getpid(), skey);
-   char bufname[48];
-   snprintf(bufname, sizeof(bufname), "aimee_msg_%08lx", skey);
+   char tmpfile[64 + CLI_SESSION_NAME_MAX];
+   snprintf(tmpfile, sizeof(tmpfile), "/tmp/aimee_msg_%d_%s.txt", (int)getpid(), s->session_name);
+   char bufname[16 + CLI_SESSION_NAME_MAX];
+   snprintf(bufname, sizeof(bufname), "aimee_msg_%s", s->session_name);
 
    /* Paste the message verbatim — no trailing newline. A newline inside the
     * pasted buffer lands in the CLI's multi-line composer as a literal line
@@ -351,6 +358,45 @@ static int cli_line_is_chrome(const char *t)
    return 0;
 }
 
+/* True if `body` appears as a whole line in `baseline` (after lstrip and an
+ * optional leading assistant marker). A substring test would false-exclude a
+ * short reply ("ok", "yes", a number) that merely occurs inside a longer prior
+ * line — silently dropping the current turn — so the match is line-exact. */
+static int cli_body_in_baseline(const char *baseline, const char *amark, const char *body)
+{
+   if (!baseline || !*baseline || !body || !*body)
+      return 0;
+   size_t blen = strlen(body);
+   for (const char *p = baseline; p && *p;)
+   {
+      const char *eol = strchr(p, '\n');
+      size_t llen = eol ? (size_t)(eol - p) : strlen(p);
+      const char *ls = p;
+      size_t ll = llen;
+      while (ll && (*ls == ' ' || *ls == '\t'))
+      {
+         ls++;
+         ll--;
+      }
+      if (ll >= 3 && strncmp(ls, amark, 3) == 0)
+      {
+         ls += 3;
+         ll -= 3;
+         while (ll && (*ls == ' ' || *ls == '\t'))
+         {
+            ls++;
+            ll--;
+         }
+      }
+      if (ll == blen && strncmp(ls, body, blen) == 0)
+         return 1;
+      if (!eol)
+         break;
+      p = eol + 1;
+   }
+   return 0;
+}
+
 char *cli_session_extract_response(const char *raw, const char *cli_kind, const char *baseline)
 {
    char *text = cli_session_strip_ansi(raw ? raw : "");
@@ -393,11 +439,14 @@ char *cli_session_extract_response(const char *raw, const char *cli_kind, const 
       p = nl + 1;
    }
 
-   /* The answer is the LAST assistant block that is NOT already in the baseline
-    * (pre-send) pane. Anchoring on the assistant marker — not the user prompt —
-    * sidesteps the composer's greyed placeholder, which also carries the user
-    * marker. Excluding baseline lines drops prior turns still on a reused pane
-    * and any startup banner/hook that fired before the turn. */
+   /* The answer is the assistant content of THIS turn: from the FIRST assistant
+    * bullet not already in the baseline (pre-send) pane, through every following
+    * bullet/continuation line, up to the trailing status/composer. Anchoring on
+    * the assistant marker — not the user prompt — sidesteps the composer's greyed
+    * placeholder (which also carries the user marker); excluding baseline bullets
+    * drops prior turns still on a reused pane and any startup banner/hook that
+    * fired before the turn; collecting ALL following bullets (not just the last)
+    * keeps multi-paragraph / multi-bullet answers whole. */
    long block = -1;
    for (size_t i = 0; i < n; i++)
    {
@@ -407,9 +456,10 @@ char *cli_session_extract_response(const char *raw, const char *cli_kind, const 
       const char *body = cli_lstrip(t + 3);
       if (!*body)
          continue;
-      if (baseline && baseline[0] && strstr(baseline, body))
-         continue; /* same bullet text was already on the pane before this turn */
+      if (cli_body_in_baseline(baseline, amark, body))
+         continue; /* this bullet was already on the pane before this turn */
       block = (long)i;
+      break;
    }
 
    char *res = NULL;
@@ -427,10 +477,10 @@ char *cli_session_extract_response(const char *raw, const char *cli_kind, const 
       for (size_t i = (size_t)block; i < n; i++)
       {
          const char *t = cli_lstrip(lines[i]);
-         if (i != (size_t)block && (strncmp(t, amark, 3) == 0 || strncmp(t, umark, 3) == 0))
-            break; /* next bullet or the composer ends the block */
+         if (strncmp(t, umark, 3) == 0)
+            break; /* composer / next user turn ends the answer */
          if (cli_line_is_chrome(t))
-            break;
+            break; /* status (✻) / separator / footer ends the answer */
          const char *content = (strncmp(t, amark, 3) == 0) ? cli_lstrip(t + 3) : t;
          size_t cl = strlen(content);
          if (rlen + cl + 2 > rcap)
