@@ -35,8 +35,10 @@ static int get_client_id(char *buf, size_t cap)
       buf[0] = '\0';
    if (!buf || cap == 0)
       return 0;
-   if (vault_service_get_server_wrap(VAULT_SERVER_PRINCIPAL, GH_CLIENT_ID_AGENT, GH_CLIENT_ID_CRED,
-                                     buf, cap) == VAULT_OK &&
+   /* Stored under the SERVER principal (vault_service_set_server → wrapped_dek);
+    * read it the matching way via get_server_principal, not get_server_wrap. */
+   if (vault_service_get_server_principal(GH_CLIENT_ID_AGENT, GH_CLIENT_ID_CRED, buf, cap) ==
+           VAULT_OK &&
        buf[0])
       return 1;
    const char *env = getenv("AIMEE_GITHUB_OAUTH_CLIENT_ID");

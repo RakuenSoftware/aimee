@@ -1,7 +1,8 @@
 /* git_cred_inject.c — vault-sourced git credential env. See git_cred_inject.h. */
 #include "git_cred_inject.h"
-#include "forge_credentials.h" /* forge_cred_askpass_shim */
+#include "forge_credentials.h" /* forge_cred_askpass_shim / forge_cred_server_identity */
 #include "git_forge_vault.h"   /* git_forge_vault_token */
+#include "git_host_resolve.h"  /* git_host_resolve_token (per-host vault seam) */
 #include "git_ssh_agent.h"     /* git_ssh_agent_ensure */
 
 #include <stdio.h>
@@ -70,19 +71,59 @@ oom:
    return NULL;
 }
 
-char **git_cred_inject_build_env(const char *principal, char *const *parent_environ)
+/* Zero `n` bytes of `p` so the wipe can't be optimised away. */
+static void wipe(void *p, size_t n)
+{
+   volatile unsigned char *v = (volatile unsigned char *)p;
+   while (n--)
+      *v++ = 0;
+}
+
+/* Resolve the effective HTTPS token per the documented precedence into out.
+ * Returns 1 (token written) or 0 (none — caller may still have ssh/ambient).
+ * `out` is always either a full token or empty; never a partial value. */
+static int resolve_token(const char *principal, const char *remote_url, const char *repo_dir,
+                         const char *preferred_token, char *out, size_t cap)
+{
+   if (out && cap)
+      out[0] = '\0';
+   if (!out || cap == 0)
+      return 0;
+
+   /* 1. A live caller-supplied token (inline clone token / workspace broker). */
+   if (preferred_token && preferred_token[0])
+   {
+      if ((size_t)snprintf(out, cap, "%s", preferred_token) < cap)
+         return 1;
+      wipe(out, cap); /* would truncate a secret → wipe the partial, fail closed */
+      return 0;
+   }
+
+   /* 2. Per-host vault token, keyed by the repo's remote host (resolved from the
+    * explicit remote URL, else the checkout's `origin`), via the shared seam. */
+   if (git_host_resolve_token(remote_url, repo_dir, out, cap) == 1 && out[0])
+      return 1;
+   out[0] = '\0';
+
+   /* 3. The principal's own vaulted personal forge token. */
+   if (principal && principal[0] && git_forge_vault_token(principal, out, cap) == 1 && out[0])
+      return 1;
+   out[0] = '\0';
+
+   /* 4. The server's own git identity (App installation token / AIMEE_FORGE_TOKEN). */
+   if (forge_cred_server_identity(out, cap, NULL, 0) == 1 && out[0])
+      return 1;
+   out[0] = '\0';
+   return 0;
+}
+
+char **git_cred_inject_build_env_for_repo(const char *principal, const char *remote_url,
+                                          const char *repo_dir, const char *preferred_token,
+                                          char *const *parent_environ)
 {
    char token[GIT_CRED_TOKEN_MAX];
-   /* Autonomous server-wrap read of the webuser's OWN vaulted forge token (an
-    * optional personal override). 1 = token, 0 = none. */
-   int have_token = (git_forge_vault_token(principal, token, sizeof(token)) == 1);
-
-   /* Default for a personal-agent server: when the user has no personal token,
-    * use aimee-server's OWN configured git identity (a GitHub App installation
-    * token or AIMEE_FORGE_TOKEN). The clone/editor then authenticates with the
-    * server's credential, so a webchat user never has to store a PAT. */
-   if (!have_token)
-      have_token = (forge_cred_server_identity(token, sizeof(token), NULL, 0) == 1);
+   int have_token =
+       resolve_token(principal, remote_url, repo_dir, preferred_token, token, sizeof(token));
 
    /* Start (or reuse) the user's in-memory ssh-agent if they have a vaulted SSH
     * key (WP-C2); the key never touches disk. 1 = sock ready. */
@@ -97,12 +138,13 @@ char **git_cred_inject_build_env(const char *principal, char *const *parent_envi
    /* Wipe our stack copy of the token; the remaining plaintext is only the
     * GH_TOKEN entry in envp, which git_cred_inject_free_env zeroes. */
    if (have_token)
-   {
-      volatile char *p = (volatile char *)token;
-      for (size_t i = 0; i < sizeof(token); i++)
-         p[i] = 0;
-   }
+      wipe(token, sizeof(token));
    return envp;
+}
+
+char **git_cred_inject_build_env(const char *principal, char *const *parent_environ)
+{
+   return git_cred_inject_build_env_for_repo(principal, NULL, NULL, NULL, parent_environ);
 }
 
 void git_cred_inject_free_env(char **envp)

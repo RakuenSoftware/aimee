@@ -5,6 +5,7 @@
 #include "workspace_turn.h"
 #include "config.h"
 #include "forge_credentials.h"
+#include "git_host_resolve.h"
 #include "log.h"
 #include "platform_path.h"
 #include "util.h"
@@ -42,17 +43,27 @@ static int cwd_in_workspace(const char *cwd, const char *ws)
    return strncmp(cwd, ws, len) == 0 && (cwd[len] == '/' || cwd[len] == '\\' || cwd[len] == '\0');
 }
 
+/* The mirror runner needs both the workspace_id (broker key) and the workspace's
+ * remote URL (per-host vault lookup), so ctx carries both. */
+typedef struct
+{
+   const char *wsid;   /* workspace root / broker key, or NULL */
+   const char *remote; /* the workspace's vcs remote URL, or NULL */
+} ws_mirror_runner_ctx_t;
+
 /* Production git runner for the mirror lifecycle: prepend "git" and fork/exec
- * (combined stdout+stderr). `ctx` is the workspace root (a workspace_id); when it
- * has a brokered forge token (§4) — else the server-held identity (§6) — the
- * clone/fetch authenticate under a GH_TOKEN + GIT_ASKPASS-shim env, injected ONLY
- * into the child (never the command line or disk), exactly as mcp_git_run does.
- * No token → the local ops + ambient-cred clone run unchanged via the shared
- * provider's exec seam. The same env is harmlessly present for the local git ops
- * (rev-parse / worktree / apply) too. */
+ * (combined stdout+stderr). Credentials are resolved through the one shared
+ * vault-first policy: the workspace's brokered forge token (§4) wins, else the
+ * per-host vault token for the remote's host, else the server identity (§6),
+ * injected ONLY into the child (never the command line or disk), exactly as
+ * mcp_git_run does. No credential → the local ops + ambient-cred clone run
+ * unchanged via the shared provider's exec seam. The same env is harmlessly
+ * present for the local git ops (rev-parse / worktree / apply) too. */
 static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, size_t out_cap)
 {
-   const char *wsid = (const char *)ctx;
+   const ws_mirror_runner_ctx_t *rctx = (const ws_mirror_runner_ctx_t *)ctx;
+   const char *wsid = rctx ? rctx->wsid : NULL;
+   const char *remote = rctx ? rctx->remote : NULL;
    const char *argv[64];
    int n = 0;
    argv[n++] = "git";
@@ -60,12 +71,21 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
       argv[n++] = args[i];
    argv[n] = NULL;
 
+   /* One credential, GH_TOKEN + the GIT_ASKPASS shim: the workspace's brokered
+    * forge token (§4) wins, else the per-host vault token for the remote's host,
+    * else the server identity (§6); none → ambient via the shared provider. */
+   char tok[4096];
    char **envp = NULL;
-   if (wsid && wsid[0])
+   if (wsid && wsid[0] && forge_cred_get(wsid, (long)time(NULL), tok, sizeof(tok)) == 0 && tok[0])
+      envp = forge_cred_build_env_from_token(tok, environ, forge_cred_askpass_shim());
+   else if (git_host_resolve_token(remote, NULL, tok, sizeof(tok)) == 1)
+      envp = forge_cred_build_env_from_token(tok, environ, forge_cred_askpass_shim());
+   else
+      envp = forge_cred_build_server_env(environ, forge_cred_askpass_shim());
    {
-      envp = forge_cred_build_env(wsid, (long)time(NULL), environ, forge_cred_askpass_shim());
-      if (!envp)
-         envp = forge_cred_build_server_env(environ, forge_cred_askpass_shim());
+      volatile char *p = (volatile char *)tok;
+      for (size_t i = 0; i < sizeof(tok); i++)
+         p[i] = 0;
    }
 
    char *cap = NULL;
@@ -141,9 +161,11 @@ static int mirror_reconstruct_cwd(const char *cwd, const char *root, const char 
          diff_arg = diff_path;
    }
 
-   /* Pass the workspace root as the runner ctx so its git calls authenticate
-    * under any brokered/server forge token for this workspace (§4/§6). */
-   if (workspace_mirror_session_setup(ws_mirror_git_runner, (void *)root, remote, head, mirror_dir,
+   /* Pass the workspace root + remote as the runner ctx so its git calls
+    * authenticate under the brokered token, else the per-host vault token for the
+    * remote's host, else the server forge identity (§4/§6). */
+   ws_mirror_runner_ctx_t rctx = {.wsid = root, .remote = remote};
+   if (workspace_mirror_session_setup(ws_mirror_git_runner, &rctx, remote, head, mirror_dir,
                                       work_dir, diff_arg, already, drift, drift_cap,
                                       verdict_out) != 0)
    {

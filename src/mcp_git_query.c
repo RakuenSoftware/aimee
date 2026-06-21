@@ -10,6 +10,7 @@
 #include "headers/util.h"
 #include "headers/workspace_provider.h"
 #include "headers/forge_credentials.h"
+#include "headers/git_host_resolve.h"
 #include <time.h>
 
 extern char **environ;
@@ -68,27 +69,37 @@ char *mcp_git_run(const char *cmd, int *exit_code)
 {
    const workspace_provider_t *ws = workspace_provider_active();
 
-   /* Forge-credential injection (workspace-resource-plane §4): when the server
-    * runs git LOCALLY (shared provider) for a turn whose workspace has a
-    * brokered forge token, run the command under an execve environment carrying
-    * GH_TOKEN + the GIT_ASKPASS shim, so clone/fetch/push/PR authenticate with
-    * the short-lived token — never on the command line or disk. A `detached`
-    * workspace marshals git to the client, which holds its own creds, so it is
-    * left on the provider path. No token → fall through unchanged. */
+   /* Credential injection: when the server runs git LOCALLY (shared provider) for
+    * a turn whose cwd is inside a registered workspace, run the command under an
+    * execve environment carrying GH_TOKEN + the GIT_ASKPASS shim so
+    * clone/fetch/push/PR authenticate — never on the command line or disk. The
+    * token is resolved through the one shared vault-first policy: a client-handed
+    * per-workspace broker token (§4) wins, else the per-host vault token for the
+    * checkout's `origin`, else the server's own forge identity (§6); no token →
+    * fall through to ambient creds (co-located dev's own gh/SSH). A `detached`
+    * workspace marshals git to the client, which holds its own creds, so it stays
+    * on the provider path. */
    if (ws->kind == WS_PROVIDER_SHARED)
    {
       const char *cwd = run_cmd_get_cwd();
       char wsid[MAX_PATH_LEN];
       if (cwd && forge_workspace_for_cwd(cwd, wsid, sizeof(wsid)) == 0)
       {
-         /* Precedence: a client-handed per-workspace token (§4) wins; else the
-          * server-held forge identity (§6) — used for an instance-held workspace
-          * driven by a filesystem-poor surface that supplies no credential; else
-          * fall through to ambient creds (co-located dev's own gh/SSH). */
-         char **envp =
-             forge_cred_build_env(wsid, (long)time(NULL), environ, forge_cred_askpass_shim());
-         if (!envp)
+         /* One credential, GH_TOKEN + the GIT_ASKPASS shim: a client-handed
+          * per-workspace broker token (§4) wins, else the per-host vault token
+          * for the checkout's `origin`, else the server's own forge identity
+          * (§6); no credential → fall through to ambient (co-located dev's creds). */
+         char tok[4096];
+         char **envp = NULL;
+         if (forge_cred_get(wsid, (long)time(NULL), tok, sizeof(tok)) == 0 && tok[0])
+            envp = forge_cred_build_env_from_token(tok, environ, forge_cred_askpass_shim());
+         else if (git_host_resolve_token(NULL, cwd, tok, sizeof(tok)) == 1)
+            envp = forge_cred_build_env_from_token(tok, environ, forge_cred_askpass_shim());
+         else
             envp = forge_cred_build_server_env(environ, forge_cred_askpass_shim());
+         volatile char *p = (volatile char *)tok;
+         for (size_t i = 0; i < sizeof(tok); i++)
+            p[i] = 0;
          if (envp)
          {
             char *out = run_cmd_env(cmd, envp, exit_code);

@@ -1,11 +1,10 @@
 /* git_project.c — clone a repo into a webuser's scoped workspace. See header. */
 #include "git_project.h"
-#include "forge_credentials.h" /* forge_cred_build_env_from_token / askpass shim */
-#include "git_cred_inject.h"   /* git_cred_inject_build_env / _free_env */
-#include "git_host_cred.h"     /* per-host token store (single-user, many hosts) */
-#include "util.h"              /* safe_exec_capture_env */
-#include "util_url.h"          /* util_url_normalize (ssh/scp/git -> https) */
-#include "workspace_scope.h"   /* ws_scope_project_path, ws_scope_name_valid */
+#include "git_cred_inject.h" /* git_cred_inject_build_env_for_repo / _free_env */
+#include "git_host_cred.h"   /* per-host token store (single-user, many hosts) */
+#include "util.h"            /* safe_exec_capture_env */
+#include "util_url.h"        /* util_url_normalize (ssh/scp/git -> https) */
+#include "workspace_scope.h" /* ws_scope_project_path, ws_scope_name_valid */
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -104,22 +103,13 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
       return -1;
    }
 
-   /* Resolve the git credential for THIS repo's host (single-user server, many
-    * hosts/providers). Precedence: an inline token from the request (then stored
-    * for the host) > the host's already-stored token > the principal/server
-    * identity path (which also adds the SSH agent + the server's own
-    * AIMEE_FORGE_TOKEN). The token crosses only via GIT_ASKPASS, never argv. */
-   char hosttok[4096];
-   const char *eff_token = NULL;
-   if (token && token[0])
-      eff_token = token;
-   else if (git_host_cred_for_url(url, hosttok, sizeof(hosttok)) == 1)
-      eff_token = hosttok;
-
-   int forge_built = (eff_token != NULL);
-   char **envp =
-       forge_built ? forge_cred_build_env_from_token(eff_token, environ, forge_cred_askpass_shim())
-                   : git_cred_inject_build_env(principal, environ);
+   /* Resolve the git credential vault-first for THIS repo's host (single-user
+    * server, many hosts/providers), via the one shared policy. Precedence: an
+    * inline token from the request (then stored for the host) > the host's
+    * already-stored vault token > the principal's own vaulted token > the
+    * server's own identity (App token / AIMEE_FORGE_TOKEN); plus the principal's
+    * vaulted SSH agent. The token crosses only via GIT_ASKPASS, never argv. */
+   char **envp = git_cred_inject_build_env_for_repo(principal, url, NULL, token, environ);
    /* Clone over HTTPS, never SSH: our credential model is per-host HTTPS tokens
     * (+ OAuth), and a non-interactive server has no seeded known_hosts, so an
     * ssh://, git@host:path, or git:// URL would die on "Host key verification
@@ -132,12 +122,7 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
    int rc = safe_exec_capture_env(argv, envp ? envp : environ, &out, 1 << 16);
    free(clone_url_norm);
    if (envp)
-   {
-      if (forge_built)
-         forge_cred_free_env(envp); /* matches forge_cred_build_env_from_token */
-      else
-         git_cred_inject_free_env(envp);
-   }
+      git_cred_inject_free_env(envp);
 
    /* A working inline token is worth keeping: persist it for the host so future
     * pulls/pushes on any repo there reuse it (no re-entry). */

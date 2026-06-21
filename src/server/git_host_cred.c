@@ -87,8 +87,12 @@ int git_host_cred_get(const char *host, char *out, size_t out_len)
    char key[GIT_HOST_MAX];
    if (cred_key(host, key, sizeof(key)) != 0)
       return -1;
-   vault_status_t st =
-       vault_service_get_server_wrap(VAULT_SERVER_PRINCIPAL, GIT_HOST_AGENT, key, out, out_len);
+   /* The token was written under the SERVER principal with the server master KEK
+    * (vault_service_set_server → wrapped_dek). Read it back the matching way:
+    * get_server_principal (reads wrapped_dek), NOT get_server_wrap (which reads a
+    * user entry's dual-wrap field wrapped_dek_server, absent here → NO_ENTRY, so
+    * every stored per-host token read back empty). */
+   vault_status_t st = vault_service_get_server_principal(GIT_HOST_AGENT, key, out, out_len);
    if (st == VAULT_OK && out[0])
       return 1;
    if (st == VAULT_NO_ENTRY || st == VAULT_OK)

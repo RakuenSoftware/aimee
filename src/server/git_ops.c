@@ -45,7 +45,13 @@ static int ref_name_valid(const char *s)
 static int run_git(const char *principal, const char *dir, const char *const argv[], int needs_cred,
                    char **out)
 {
-   char **envp = needs_cred ? git_cred_inject_build_env(principal, environ) : NULL;
+   /* Resolve credentials vault-first for THIS repo: the per-host vault token for
+    * the checkout's `origin` host wins over the principal/server identity, so a
+    * push/fetch to gitlab/gitea authenticates with the right host's stored token
+    * (not the server's GitHub identity). repo_dir = dir → origin is resolved only
+    * when a host token is actually needed (fetch/pull/push). */
+   char **envp =
+       needs_cred ? git_cred_inject_build_env_for_repo(principal, NULL, dir, NULL, environ) : NULL;
    int rc = safe_exec_capture_cwd_env_timeout(argv, dir, envp ? envp : environ, out, GO_OUT_MAX,
                                               GO_TIMEOUT_MS);
    if (envp)

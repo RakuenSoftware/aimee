@@ -3,6 +3,8 @@
  * autonomously from the sealed vault, with any inherited GH_TOKEN dropped. */
 #include "git_cred_inject.h"
 #include "git_forge_vault.h"
+#include "git_host_cred.h"
+#include "git_host_resolve.h"
 #include "git_ssh_agent.h"
 #include "vault_kek_cache.h"
 #include "vault_service.h"
@@ -90,6 +92,46 @@ int main(void)
 
    /* Empty / NULL principal -> NULL (no leak). */
    assert(git_cred_inject_build_env("", parent) == NULL);
+
+   /* --- vault-first precedence for a specific repo (the unified policy) --- */
+   /* Wire the per-host vault seam and stash a token for a host that is NOT
+    * alice's personal token, so we can tell which source won. */
+   git_host_resolve_register(git_host_cred_for_url);
+   assert(git_host_cred_set("gitlab.example.com", "glpat-HOSTSECRET") == 0);
+
+   /* 1) A caller-supplied (inline/broker) token beats every vault source. */
+   vault_kek_cache_clear();
+   char **e1 = git_cred_inject_build_env_for_repo(alice, "https://gitlab.example.com/x/y", NULL,
+                                                  "INLINE-WINS", parent);
+   assert(e1 && (tok = env_val(e1, "GH_TOKEN", &n)) && n == 1 && strcmp(tok, "INLINE-WINS") == 0);
+   git_cred_inject_free_env(e1);
+
+   /* 2) The per-host vault token beats alice's own vaulted personal token. */
+   vault_kek_cache_clear();
+   char **e2 = git_cred_inject_build_env_for_repo(alice, "https://gitlab.example.com/x/y", NULL,
+                                                  NULL, parent);
+   assert(e2 && (tok = env_val(e2, "GH_TOKEN", &n)) && n == 1 &&
+          strcmp(tok, "glpat-HOSTSECRET") == 0);
+   git_cred_inject_free_env(e2);
+
+   /* 3) A host with no stored token falls back to alice's personal vault token. */
+   vault_kek_cache_clear();
+   char **e3 = git_cred_inject_build_env_for_repo(alice, "https://no-token-host.example/x/y", NULL,
+                                                  NULL, parent);
+   assert(e3 && (tok = env_val(e3, "GH_TOKEN", &n)) && n == 1 &&
+          strcmp(tok, "ghp_aliceSECRET") == 0);
+   git_cred_inject_free_env(e3);
+
+   /* 4) Seam dormant (unregistered): the per-host step is skipped entirely, so
+    * even a stored host token is not consulted — falls to the personal token. */
+   git_host_resolve_register(NULL);
+   vault_kek_cache_clear();
+   char **e4 = git_cred_inject_build_env_for_repo(alice, "https://gitlab.example.com/x/y", NULL,
+                                                  NULL, parent);
+   assert(e4 && (tok = env_val(e4, "GH_TOKEN", &n)) && n == 1 &&
+          strcmp(tok, "ghp_aliceSECRET") == 0);
+   git_cred_inject_free_env(e4);
+   git_host_resolve_register(git_host_cred_for_url);
 
    /* SSH integration (WP-C2): a vaulted SSH key adds SSH_AUTH_SOCK to the env
     * (the in-memory agent). Guarded on openssh tooling. */
