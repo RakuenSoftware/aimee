@@ -1,6 +1,14 @@
 # Automatic delegate-vault provisioning at aimee-server standup
 
-- **State:** proposed; awaiting roundtable + user proposal-gate.
+- **State:** **DONE / shipped.** Core (WP-A/B) landed in **PR #410**
+  (`server_vault_bootstrap`, env scrub, audit, idempotence, `test_vault_bootstrap`);
+  WP-C container surface is in tree (`combined-entrypoint.sh` + `server-entrypoint.sh`
+  secrets-env docs, `runuser` env passthrough, the `compose.combined.yaml` /
+  `compose.server.yaml` secret examples, and the SmoothNAS plugin field). Acceptance
+  criteria 1–4 met and unit-verified; criterion 5 (re-provision the live `.254`
+  server) is deployment-time validation. WP-D (remote provisioning over native TLS)
+  is an explicit optional follow-on, tracked by
+  [native-tls-thin-client-backends.md](../pending/native-tls-thin-client-backends.md).
 - **Scope:** deterministic / server bootstrap + credential vault. Not an
   intelligence-surface proposal (no Architecture Charter role).
 - **Author:** JBailes, 2026-06-17.

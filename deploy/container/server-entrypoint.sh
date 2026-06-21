@@ -63,6 +63,17 @@ trap 'shutdown' TERM INT
 # container down; the server is the contract.
 webchat_start
 
+# Delegate-vault auto-provisioning. aimee-server seals operator-supplied delegate
+# API keys into its server-principal vault at startup, so a fresh deploy's
+# delegates/roundtables work with no manual `aimee vault set`. The source comes
+# from the environment, which runuser preserves into the aimee-server child:
+#   - AIMEE_DELEGATE_SECRETS_FILE=/run/secrets/aimee-delegates.json
+#       a JSON object {"<agent>":"<api-key>", ...}. Mount it readable by the
+#       container's "aimee" user (the server reads it after dropping privileges).
+#   - AIMEE_DELEGATE_KEY_<AGENT>=<api-key>   (env-only convenience; agent name
+#       lowercased, e.g. AIMEE_DELEGATE_KEY_MISTRAL).
+# Non-destructive by default; set AIMEE_DELEGATE_SECRETS_OVERWRITE=1 to replace an
+# existing vaulted key. Secrets are never written to AIMEE_HOME or logs.
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 runuser -u aimee -- aimee-server --socket="$SERVER_SOCK" &
 server_pid=$!

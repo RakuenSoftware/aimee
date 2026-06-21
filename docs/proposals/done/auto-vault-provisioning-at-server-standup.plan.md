@@ -63,7 +63,7 @@ authenticate with no further change.
   field so a `.254`-style deploy provisions on standup.
 
 ### WP-D — (Optional, follow-on) remote provisioning over native TLS
-- Once [native-tls-thin-client-backends.md](native-tls-thin-client-backends.md)
+- Once [native-tls-thin-client-backends.md](../pending/native-tls-thin-client-backends.md)
   lands, `ATTEST_TLS_BEARER` already authorizes server-principal writes over a
   confidential bearer channel — so an operator could `aimee vault set --server`
   remotely over `https://` instead of mounting a file. Note as complementary; not
@@ -98,4 +98,4 @@ authenticate with no further change.
   plaintext), so a too-early call degrades to "not provisioned", not a leak.
 - This is the **gating dependency** for live roundtables — landing WP-A..C and
   re-provisioning `.254` unblocks the roundtable flow for every other proposal,
-  including [native-tls-thin-client-backends.md](native-tls-thin-client-backends.md).
+  including [native-tls-thin-client-backends.md](../pending/native-tls-thin-client-backends.md).
