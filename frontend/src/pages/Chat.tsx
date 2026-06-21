@@ -121,6 +121,11 @@ const CHANNEL_KEY = 'aimee_active_channel';
 const PROJECT_ROOT_KEY = 'aimee_chat_project_root';
 const RULES_BANNER_DISMISSED_KEY = 'aimee_rules_banner_dismissed';
 const STREAM_PERSIST_DEBOUNCE_MS = 1000;
+// Cap how often streamed deltas trigger a React re-render. Each flush reconciles
+// the whole message list and re-parses the streaming message's markdown, so a
+// per-token (or per-frame) cadence pegs a CPU core during long/continuous turns.
+// ~100 ms (≈10 fps) is visually smooth for text while cutting render work ~6×.
+const STREAM_FLUSH_THROTTLE_MS = 100;
 
 function loadActiveChannel(): string | null {
   try { return localStorage.getItem(CHANNEL_KEY); } catch { return null; }
@@ -1436,7 +1441,7 @@ export default function Chat() {
    * *creation* stays synchronous so ids/order are assigned immediately; only the
    * append of further text into an existing bubble is batched. */
   const pendingAppendsRef = useRef<Array<{ owner: string; id: number; field: 'text' | 'thinkText'; delta: string }>>([]);
-  const flushRafRef = useRef<number | null>(null);
+  const flushTimerRef = useRef<number | null>(null);
   /* Live mirror of `streamMsgs` for synchronous reads (effects/switch logic). */
   const streamMsgsRef = useRef<StreamMsg[]>(streamMsgs);
   /* Off-screen live transcript for every NON-active tab keyed by its aimeeSid.
@@ -1469,8 +1474,8 @@ export default function Chat() {
     }
   }, [tabs]);
   useEffect(() => { workingRef.current = working; }, [working]);
-  // Cancel any pending stream-flush frame on unmount.
-  useEffect(() => () => { if (flushRafRef.current !== null) cancelAnimationFrame(flushRafRef.current); }, []);
+  // Cancel any pending stream-flush timer on unmount.
+  useEffect(() => () => { if (flushTimerRef.current !== null) window.clearTimeout(flushTimerRef.current); }, []);
 
   /* Detach every attached presence surface when the page unloads, so a closed
    * browser doesn't leak attachments until the session is closed. keepalive
@@ -1536,6 +1541,21 @@ export default function Chat() {
     let observed = '';
     let curTurnId = '';
     let wasWorking = false;
+    // Throttle the live remote-turn preview: deltas accumulate into `observed`
+    // (a cheap string) and the visible text is flushed to React state at most
+    // ~10×/s, not per delta — a per-token setState here forces a whole-Chat
+    // re-render at provider token rate and pegs a core during long remote turns.
+    let remoteFlushTimer: number | null = null;
+    const scheduleRemoteFlush = () => {
+      if (remoteFlushTimer !== null) return;
+      remoteFlushTimer = window.setTimeout(() => {
+        remoteFlushTimer = null;
+        setRemoteTurnText(observed.slice(-2000));
+      }, STREAM_FLUSH_THROTTLE_MS);
+    };
+    const clearRemoteFlush = () => {
+      if (remoteFlushTimer !== null) { window.clearTimeout(remoteFlushTimer); remoteFlushTimer = null; }
+    };
     const turnIdOf = (raw: string): string => {
       try { return (JSON.parse(raw) as { turn_id?: string }).turn_id || ''; } catch { return ''; }
     };
@@ -1550,7 +1570,7 @@ export default function Chat() {
       // native POST stream already renders the turn — and one full re-render per
       // token, on top of the native one, pegs a core during every response. Only
       // touch the live UI for a turn THIS surface did not originate.
-      if (!wasWorking) { setRemoteTurnActive(true); setRemoteTurnText(''); }
+      if (!wasWorking) { clearRemoteFlush(); setRemoteTurnActive(true); setRemoteTurnText(''); }
     });
     es.addEventListener('turn_delta', (ev: MessageEvent<string>) => {
       saveCursor(ev);
@@ -1561,7 +1581,7 @@ export default function Chat() {
         const d = JSON.parse(ev.data) as { kind?: string; content?: string };
         if ((d.kind === undefined || d.kind === 'text') && d.content) {
           observed += d.content;
-          setRemoteTurnText(prev => (prev + d.content).slice(-2000));
+          scheduleRemoteFlush();
         }
       } catch { /* ignore malformed frame */ }
     });
@@ -1589,10 +1609,11 @@ export default function Chat() {
         });
       }
       observed = ''; curTurnId = ''; wasWorking = false;
+      clearRemoteFlush();
       setRemoteTurnActive(false); setRemoteTurnText('');
     });
-    es.onerror = () => { setRemoteTurnActive(false); setRemoteTurnText(''); };
-    return () => { es.close(); presenceSseRef.current = null; };
+    es.onerror = () => { clearRemoteFlush(); setRemoteTurnActive(false); setRemoteTurnText(''); };
+    return () => { clearRemoteFlush(); es.close(); presenceSseRef.current = null; };
   }, [activeAimeeSid, activeAttachId]);
   useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
   useEffect(() => { projectRootRef.current = projectRoot; }, [projectRoot]);
@@ -2389,11 +2410,11 @@ export default function Chat() {
   }
 
   /* Apply all buffered stream deltas in one state update, coalesced per message.
-   * Safe to call manually (e.g. at turn end) or as the rAF callback. */
+   * Safe to call manually (e.g. at turn end) or as the throttled timer callback. */
   function flushStreamAppends() {
-    if (flushRafRef.current !== null) {
-      cancelAnimationFrame(flushRafRef.current);
-      flushRafRef.current = null;
+    if (flushTimerRef.current !== null) {
+      window.clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
     }
     const ups = pendingAppendsRef.current;
     if (ups.length === 0) return;
@@ -2429,12 +2450,14 @@ export default function Chat() {
     }
   }
 
-  /* Buffer one delta (tagged with its owning tab) and ensure a flush is scheduled
-   * for the next frame. */
+  /* Buffer one delta (tagged with its owning tab) and ensure a flush is scheduled.
+   * Throttled (not per-frame): the first delta arms a ~100 ms timer and later
+   * deltas coalesce into it, so the whole-list reconcile + markdown re-parse runs
+   * ≈10×/s, not per token — the per-token cadence pegged a core on long turns. */
   function queueStreamAppend(owner: string, id: number, field: 'text' | 'thinkText', delta: string) {
     pendingAppendsRef.current.push({ owner, id, field, delta });
-    if (flushRafRef.current === null) {
-      flushRafRef.current = requestAnimationFrame(flushStreamAppends);
+    if (flushTimerRef.current === null) {
+      flushTimerRef.current = window.setTimeout(flushStreamAppends, STREAM_FLUSH_THROTTLE_MS);
     }
   }
 
