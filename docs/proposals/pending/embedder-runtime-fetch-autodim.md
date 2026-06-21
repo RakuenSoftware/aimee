@@ -1,16 +1,21 @@
 # Proposal: Embedder runtime model fetch + auto-dimension
 
 - **State:** reviewed — READY (roundtable 2026-06-14: security · architect · QA · contrarian; 4 rounds to convergence)
-- **Implementation status (2026-06-16):** PARTIAL. §1 (thin image / runtime
+- **Implementation status (2026-06-21):** PARTIAL. §1 (thin image / runtime
   model fetch) is in tree. §2's safety-critical core — the `kb_meta`
   `schema_embedding_dim` record + dim-drift **refusal** (`db2_embedding_dim_record_or_check`,
-  atomic upsert) — landed in **PR #337**. **Remaining (not done):** §2's
-  pin > recorded > probe precedence wiring (`config_resolve_embedding_dim` is
-  still pin-only), the fresh-DB auto-derive from the embedder `/health` probe
-  under `pg_try_advisory_lock`, and the double-gated auto-reembed
+  atomic upsert) — landed in **PR #337**. **§2a (recorded-dim precedence)
+  landed in PR #604:** the recorded dim is now a *source*, not just a guard —
+  `db2_embedding_dim_get` + `db2_effective_dim(pinned, configured, recorded)` wire
+  the `operator-pin > recorded > (probe)` precedence at the `db2_init` schema-apply
+  boundary, so an unpinned populated DB self-derives its dim instead of refusing on
+  the default. See [the §2a plan](embedder-runtime-fetch-autodim.plan.md).
+  **Remaining (not done):** §2b — the fresh-DB auto-derive from the embedder
+  `/health` probe under `pg_try_advisory_lock` (the `probed` precedence rung,
+  reserved but always 0 today); §2c — the double-gated auto-reembed
   (`kb_reembed_on_dim_change` off-by-default + `--confirm` + `/health=maintenance`
-  + count-divergence → degraded). These are runtime/bootstrap work best done with
-  the live embedder+kb stack.
+  + count-divergence → degraded). Both are runtime/bootstrap work that needs the
+  live embedder+kb stack to validate.
 - **Author:** JBailes
 - **Date:** 2026-06-14
 - **Base:** `origin/main` (v0.2.65). The embedder ships in two **baked** images
