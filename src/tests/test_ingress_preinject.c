@@ -220,8 +220,100 @@ static void test_budgeted_build_uses_memory_previews(void)
    assert(strstr(env, "context-budget:") != NULL);
    assert(strstr(env, "memory_get") != NULL);
    assert(strstr(env, "Fallback preview from content.") != NULL);
+
+   /* P0 byte-equivalence anchor: the Envelope IR refactor must reproduce the
+    * pre-refactor envelope byte for byte for this fixed stub scenario (code hit
+    * + two memory previews under the 1200-byte budget). Captured from the live
+    * pre-refactor code. */
+   static const char *GOLDEN =
+       "<aimee-context confidence=\"medium\">\n"
+       "recommended (code):\n"
+       "  - src/server/ingress_preinject.c\n"
+       "    > builder emits a bounded context envelope\n"
+       "\n"
+       "recommended (memory previews):\n"
+       "  - memory:101 deploy path [L2/fact score=0.880 headline_missing=false]\n"
+       "    > Use the deploy matrix.\n"
+       "  - memory:102 fallback [L2/policy score=0.440 headline_missing=true]\n"
+       "    > Fallback preview from content.\n"
+       "context-budget: used_bytes=342 budget_bytes=1200 omitted_count=0 headline_missing_count=1\n"
+       "explore-with: find_symbol, lsp_references, ast_grep_search, search_graph, "
+       "get_context_block, "
+       "memory_get\n"
+       "</aimee-context>";
+   assert(strcmp(env, GOLDEN) == 0);
    free(env);
    printf("budgeted_build_uses_memory_previews OK\n");
+}
+
+/* P0 Envelope IR: the renderer reproduces the old inline rendering — group
+ * headers, single blank-line separators between non-empty groups, the
+ * header-rides-the-first-fitting-candidate rule, the budget/omitted gate, the
+ * footer, and the truncation note. Synthetic entries keep the expected bytes
+ * easy to compute. The renderer frees nothing it is given. */
+static void test_render_block(void)
+{
+   /* Two groups + footer, no omission: exact bytes. block_budget = 1000-384. */
+   {
+      ingress_entry_t e[2] = {
+          {ING_SRC_CODE, ING_XF_NONE, "C:\n", strdup("a\n")},
+          {ING_SRC_MEMORY, ING_XF_NONE, "M:\n", strdup("b\n")},
+      };
+      int omitted = -1;
+      char *blk = ingress_render_block(e, 2, 1000, 0, &omitted);
+      assert(blk != NULL);
+      assert(strcmp(blk, "C:\na\n\nM:\nb\ncontext-budget: used_bytes=11 budget_bytes=1000 "
+                         "omitted_count=0 headline_missing_count=0\n") == 0);
+      assert(omitted == 0);
+      free(blk);
+      free(e[0].preview);
+      free(e[1].preview);
+   }
+
+   /* Header rides the first candidate that fits: a too-big first code entry is
+    * omitted, the header appears on the second (fitting) one. block_budget = 10
+    * (envelope_budget 394) is too small for the footer/trunc, so neither lands. */
+   {
+      ingress_entry_t e[2] = {
+          {ING_SRC_CODE, ING_XF_NONE, "C:\n", strdup("AAAAAAAAAA\n")}, /* 3+11 > 10 */
+          {ING_SRC_CODE, ING_XF_NONE, "C:\n", strdup("x\n")},          /* 3+2  <= 10 */
+      };
+      int omitted = -1;
+      char *blk = ingress_render_block(e, 2, 394, 0, &omitted);
+      assert(blk != NULL);
+      assert(strcmp(blk, "C:\nx\n") == 0); /* header on the fitting entry, once */
+      assert(omitted == 1);
+      free(blk);
+      free(e[0].preview);
+      free(e[1].preview);
+   }
+
+   /* Separator suppression: when the first group appends nothing, the next group
+    * gets no leading blank line (matches the old `if (block.len)` guard). */
+   {
+      ingress_entry_t e[2] = {
+          {ING_SRC_CODE, ING_XF_NONE, "C:\n", strdup("AAAAAAAAAA\n")}, /* omitted */
+          {ING_SRC_MEMORY, ING_XF_NONE, "M:\n", strdup("y\n")},        /* fits */
+      };
+      int omitted = -1;
+      char *blk = ingress_render_block(e, 2, 394, 0, &omitted);
+      assert(blk != NULL);
+      assert(strcmp(blk, "M:\ny\n") == 0); /* no leading "\n" */
+      assert(omitted == 1);
+      free(blk);
+      free(e[0].preview);
+      free(e[1].preview);
+   }
+
+   /* Empty list -> nothing rendered (NULL or ""), no footer. */
+   {
+      int omitted = -1;
+      char *blk = ingress_render_block(NULL, 0, 1000, 0, &omitted);
+      assert(blk == NULL || blk[0] == '\0');
+      assert(omitted == 0);
+      free(blk);
+   }
+   printf("render_block OK\n");
 }
 
 /* Auditable-correctness P1: the per-turn retrieval-event id seam. */
@@ -260,6 +352,7 @@ int main(void)
    test_format_code_block();
    test_query_from_messages();
    test_apply();
+   test_render_block();
    test_budgeted_build_uses_memory_previews();
    test_turn_id_mint_and_thread_local();
    printf("all tests passed\n");
