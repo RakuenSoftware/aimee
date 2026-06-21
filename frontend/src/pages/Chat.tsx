@@ -1605,8 +1605,7 @@ export default function Chat() {
    * browser doesn't leak attachments until the session is closed. keepalive
    * lets the POSTs survive the unload; best-effort. */
   useEffect(() => {
-    const onUnload = () => {
-      flushPendingTabs(); // don't drop a coalesced tabs write on close/refresh
+    const detachAll = () => {
       for (const tab of tabsRef.current) {
         if (!tab.attachId || !tab.aimeeSid) continue;
         try {
@@ -1619,8 +1618,25 @@ export default function Chat() {
         } catch { /* ignore */ }
       }
     };
-    window.addEventListener('beforeunload', onUnload);
-    return () => window.removeEventListener('beforeunload', onUnload);
+    // Always flush the coalesced tabs write when the page goes away or is hidden
+    // — NOT just on beforeunload. bfcache navigation (back/forward) and OS
+    // background-kill on mobile don't fire beforeunload, and since the transcript
+    // restores SOLELY from localStorage, a dropped write shows up as a gap on
+    // reload. visibilitychange→hidden catches a backgrounded tab before a kill.
+    // Detach presence only on a GENUINE unload: a tab going to the background — or
+    // entering bfcache (pagehide persisted=true, restored without re-mounting) —
+    // is still an active session and must stay attached.
+    const onBeforeUnload = () => { flushPendingTabs(); detachAll(); };
+    const onPageHide = (e: PageTransitionEvent) => { flushPendingTabs(); if (!e.persisted) detachAll(); };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flushPendingTabs(); };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   /* Subscribe to the active session's unified-presence event stream so the UI
