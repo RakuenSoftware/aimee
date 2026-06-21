@@ -101,6 +101,23 @@ the KB scan succeeds.
 
 ## Verification
 
+### Verification discipline
+
+1. **Red before green.** To claim something's broken, show the failure in the
+   stock, unmodified system first — a red baseline. No red baseline, no saying
+   "broken." A passing test of your fix is not admissible as evidence the original
+   failed; that's treatment, not control.
+2. **The deciding test can't be the one you skipped.** When the true end-to-end is
+   unrunnable (e.g. a live Moonlight session), that's a stop. Downgrade to
+   "hypothesis, unverified" — explicitly, in those words — and do not open a
+   PR-as-fix or write a root cause as fact. The thing you couldn't verify is
+   exactly the thing you're most likely wrong about.
+3. **Code outranks your repro.** When the system's own source contradicts your
+   repro, the repro is guilty until you can explain the gap. Reading `need_context`
+   and overriding it with a worse signal is backwards.
+
+### The `git_verify` tool
+
 The `git_verify` tool is a Swiss Army Knife for project health and Git lifecycle.
 
 ```
