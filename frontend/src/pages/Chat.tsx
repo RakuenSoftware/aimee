@@ -1506,9 +1506,20 @@ export default function Chat() {
   const queueActive = sending || queuedSends > 0;
   const activePersonaSid = tabs[activeIdx]?.aimeeSid ?? '';
 
-  /* Auto-scroll */
+  /* Auto-scroll. Instant, not smooth: this runs ~10×/s during a stream, and a
+   * smooth scrollIntoView restarts an animated scroll on every call — the
+   * animation never settles, so it pins the main thread/compositor for the
+   * whole turn (a sustained CPU burn the re-render throttle can't touch).
+   * Instant scroll is effectively free. We also skip if the user has scrolled
+   * up to read back, so a live stream doesn't yank them to the bottom. */
+  const atBottomRef = useRef(true);
+  const handleMessagesScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }, []);
   const scrollToBottom = useCallback(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (!atBottomRef.current) return;
+    messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
   }, []);
 
   useEffect(() => { scrollToBottom(); }, [streamMsgs, working, scrollToBottom]);
@@ -2286,6 +2297,9 @@ export default function Chat() {
     }
 
     const userMsgId = nextId();
+    // Sending is an explicit intent to follow the conversation: re-stick to the
+    // bottom even if the user had scrolled up to read back.
+    atBottomRef.current = true;
     setStreamMsgs(prev => [...prev, { id: userMsgId, type: 'user', text }]);
 
     sendQueueRef.current.push({ text, version: sendQueueVersionRef.current });
@@ -2787,10 +2801,13 @@ export default function Chat() {
       )}
 
       {/* Messages */}
-      <div style={{
-        flex: 1, overflowY: 'auto', padding: '16px',
-        display: 'flex', flexDirection: 'column', gap: '12px',
-      }}>
+      <div
+        onScroll={handleMessagesScroll}
+        style={{
+          flex: 1, overflowY: 'auto', padding: '16px',
+          display: 'flex', flexDirection: 'column', gap: '12px',
+        }}
+      >
         <Transcript messages={streamMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />
         {working && <WorkingIndicator />}
         {remoteTurnActive && !working && (
