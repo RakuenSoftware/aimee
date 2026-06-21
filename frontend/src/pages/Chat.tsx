@@ -121,6 +121,12 @@ const CHANNEL_KEY = 'aimee_active_channel';
 const PROJECT_ROOT_KEY = 'aimee_chat_project_root';
 const RULES_BANNER_DISMISSED_KEY = 'aimee_rules_banner_dismissed';
 const STREAM_PERSIST_DEBOUNCE_MS = 1000;
+// How many of a tab's most-recent messages the transcript renders by default.
+// Full history is kept in memory (and persisted), but only this window is mounted
+// to the DOM / reconciled per stream flush, so render cost is bounded by the
+// window, not the whole conversation. Scrolling/"show earlier" reveals the rest.
+const TRANSCRIPT_WINDOW = 150;
+const TRANSCRIPT_WINDOW_STEP = 150;
 // Cap how often streamed deltas trigger a React re-render. Each flush reconciles
 // the whole message list and re-parses the streaming message's markdown, so a
 // per-token (or per-frame) cadence pegs a CPU core during long/continuous turns.
@@ -198,8 +204,36 @@ function loadInitialChatState(): { tabs: TabData[]; activeIdx: number } {
   return { tabs, activeIdx };
 }
 
-function saveTabs(tabs: TabData[]): void {
+/* Persist the tab list to localStorage, but (1) bound each tab's stored history
+ * full history (it's the browser-side restore source and must stay recoverable),
+ * coalesce writes onto an idle callback so the synchronous JSON.stringify +
+ * setItem never runs on the React commit path during a streaming burst. Rapid
+ * tabs changes collapse into one write; a trailing timeout guarantees it still
+ * runs if the main thread stays busy. */
+let pendingTabsToPersist: TabData[] | null = null;
+let tabsWriteScheduled = false;
+
+function writePendingTabs(): void {
+  tabsWriteScheduled = false;
+  const tabs = pendingTabsToPersist;
+  pendingTabsToPersist = null;
+  if (!tabs) return;
   try { localStorage.setItem(TABS_KEY, JSON.stringify(tabs)); } catch { /* ignore */ }
+}
+
+function saveTabs(tabs: TabData[]): void {
+  pendingTabsToPersist = tabs;
+  if (tabsWriteScheduled) return;
+  tabsWriteScheduled = true;
+  const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback;
+  if (ric) ric(writePendingTabs, { timeout: 1000 });
+  else window.setTimeout(writePendingTabs, 200);
+}
+
+/* Flush any coalesced tabs write synchronously — call before the page unloads so
+ * a pending in-flight write isn't dropped. */
+function flushPendingTabs(): void {
+  if (pendingTabsToPersist) writePendingTabs();
 }
 
 /* Conversation/tab persistence is local (localStorage) and mirrors the top
@@ -1543,6 +1577,15 @@ export default function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
   }, []);
 
+  // How many trailing messages the transcript currently renders. Full history
+  // stays in streamMsgs (and persisted); we just don't mount/reconcile all of it.
+  // "Show earlier" grows the window; switching conversations resets it so a fresh
+  // tab opens windowed, not expanded from a previous one.
+  const [visibleCount, setVisibleCount] = useState(TRANSCRIPT_WINDOW);
+  useEffect(() => { setVisibleCount(TRANSCRIPT_WINDOW); }, [activePersonaSid]);
+  const hiddenCount = Math.max(0, streamMsgs.length - visibleCount);
+  const windowedMsgs = hiddenCount > 0 ? streamMsgs.slice(hiddenCount) : streamMsgs;
+
   useEffect(() => { scrollToBottom(); }, [streamMsgs, working, scrollToBottom]);
   useEffect(() => { streamMsgsRef.current = streamMsgs; }, [streamMsgs]);
   useEffect(() => { tabsRef.current = tabs; }, [tabs]);
@@ -1563,6 +1606,7 @@ export default function Chat() {
    * lets the POSTs survive the unload; best-effort. */
   useEffect(() => {
     const onUnload = () => {
+      flushPendingTabs(); // don't drop a coalesced tabs write on close/refresh
       for (const tab of tabsRef.current) {
         if (!tab.attachId || !tab.aimeeSid) continue;
         try {
@@ -2829,7 +2873,20 @@ export default function Chat() {
           display: 'flex', flexDirection: 'column', gap: '12px',
         }}
       >
-        <Transcript messages={streamMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />
+        {hiddenCount > 0 && (
+          <button
+            onClick={() => setVisibleCount(c => c + TRANSCRIPT_WINDOW_STEP)}
+            style={{
+              alignSelf: 'center', padding: '4px 12px', margin: '0 0 4px',
+              fontSize: '12px', fontFamily: 'system-ui', cursor: 'pointer',
+              background: tokens.surfaceAlt, color: tokens.textSecondary,
+              border: `1px solid ${tokens.borderMedium}`, borderRadius: '12px',
+            }}
+          >
+            Show earlier messages ({hiddenCount})
+          </button>
+        )}
+        <Transcript messages={windowedMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />
         {working && <WorkingIndicator />}
         {remoteTurnActive && !working && (
           <div style={{
