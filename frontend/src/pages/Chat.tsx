@@ -312,6 +312,21 @@ interface ActiveStreamRefs {
 interface QueuedChatSend {
   text: string;
   version: number;
+  /* aimeeSid of the tab this send was enqueued from. Captured at enqueue time so
+   * the turn — and its busy indicator — stays bound to the originating tab even
+   * if the user switches tabs before the queue drains. */
+  originSid: string;
+}
+
+/* Per-session work state. The chat renders only the active tab's conversation, so
+ * a single component-wide "working" flag lit up the indicator on whatever tab the
+ * user viewed, not the one actually running a turn. Keying work by aimeeSid lets
+ * the render derive busy/iteration state for the active tab alone. */
+interface SidWork {
+  pending: number;  // in-flight send controllers for this sid
+  queued: number;   // queued (not yet dispatched) sends for this sid
+  iterCur: number;  // current agent iteration (0 = none)
+  iterMax: number;
 }
 
 let msgIdCounter = 0;
@@ -1429,7 +1444,14 @@ export default function Chat() {
   const [tabs, setTabs] = useState<TabData[]>(initialChatState.tabs);
   const [activeIdx, setActiveIdx] = useState(initialChatState.activeIdx);
   const [streamMsgs, setStreamMsgs] = useState<StreamMsg[]>([]);
-  const [working, setWorking] = useState(false);
+  // Work (in-flight/queued sends + iteration progress) keyed by the owning tab's
+  // aimeeSid, so the busy indicator reflects the ACTIVE tab alone — sending on one
+  // tab no longer shows "working" on every other tab. Derived values below.
+  const [workBySid, setWorkBySid] = useState<Record<string, SidWork>>({});
+  const activeWork = workBySid[tabs[activeIdx]?.aimeeSid ?? ''];
+  const working = !!activeWork && (activeWork.pending > 0 || activeWork.queued > 0);
+  const iterCur = activeWork?.iterCur ?? 0;
+  const iterMax = activeWork?.iterMax ?? 0;
   // True while a turn is in flight on this tab's session driven by *another*
   // surface (CLI/TUI, another tab). Fed by the presence-event stream; shown only
   // when this tab isn't itself working (see render).
@@ -1437,10 +1459,6 @@ export default function Chat() {
   // Live text of the other surface's in-flight turn, accumulated from
   // turn_delta events (emitted by the server when >1 surface shares a session).
   const [remoteTurnText, setRemoteTurnText] = useState('');
-  const [pendingSends, setPendingSends] = useState(0);
-  const [queuedSends, setQueuedSends] = useState(0);
-  const [iterCur, setIterCur] = useState(0);
-  const [iterMax, setIterMax] = useState(0);
   const [inputText, setInputText] = useState('');
   const [banner, setBanner] = useState<{ stacks: BootstrapStack[] } | null>(null);
   const [rulesOpen, setRulesOpen] = useState(false);
@@ -1522,7 +1540,9 @@ export default function Chat() {
   const workflowUpdatedAtRef = useRef<string | null>(null);
   const skipNextStreamPersistRef = useRef(false);
   const streamPersistTimerRef = useRef<number | null>(null);
-  const activeSendAbortRefs = useRef<Set<AbortController>>(new Set());
+  // Controller → originSid, so a finishing send can decrement work for the tab it
+  // belonged to (not whatever tab is active when it lands).
+  const activeSendAbortRefs = useRef<Map<AbortController, string>>(new Map());
   const sendQueueRef = useRef<QueuedChatSend[]>([]);
   const sendQueueDrainingRef = useRef(false);
   const sendQueueVersionRef = useRef(0);
@@ -1557,8 +1577,7 @@ export default function Chat() {
   /* aimeeSid that `streamMsgs` currently represents (the tab whose buffer is
    * on-screen). '' until the first load so the initial committed history loads. */
   const renderedSidRef = useRef<string>('');
-  const sending = pendingSends > 0;
-  const queueActive = sending || queuedSends > 0;
+  const queueActive = working;
   const activePersonaSid = tabs[activeIdx]?.aimeeSid ?? '';
 
   /* Auto-scroll. Instant, not smooth: this runs ~10×/s during a stream, and a
@@ -1759,20 +1778,44 @@ export default function Chat() {
   useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
   useEffect(() => { projectRootRef.current = projectRoot; }, [projectRoot]);
 
-  function hasPendingChatWork(): boolean {
-    return activeSendAbortRefs.current.size > 0 || sendQueueRef.current.length > 0;
+  /* Rebuild per-sid pending/queued counts from the live send refs. Iteration
+   * progress is cleared for any sid that has no more in-flight or queued work, and
+   * sids with no work at all are dropped so the map only holds active sessions. */
+  function recomputeWorkCounts(): void {
+    const pending = new Map<string, number>();
+    activeSendAbortRefs.current.forEach(sid => pending.set(sid, (pending.get(sid) ?? 0) + 1));
+    const queued = new Map<string, number>();
+    for (const it of sendQueueRef.current) queued.set(it.originSid, (queued.get(it.originSid) ?? 0) + 1);
+    setWorkBySid(prev => {
+      const next: Record<string, SidWork> = {};
+      const sids = new Set<string>([...Object.keys(prev), ...pending.keys(), ...queued.keys()]);
+      for (const sid of sids) {
+        const p = pending.get(sid) ?? 0;
+        const q = queued.get(sid) ?? 0;
+        const active = p > 0 || q > 0;
+        const iterCur = active ? (prev[sid]?.iterCur ?? 0) : 0;
+        const iterMax = active ? (prev[sid]?.iterMax ?? 0) : 0;
+        if (!active && iterCur === 0 && iterMax === 0) continue;
+        next[sid] = { pending: p, queued: q, iterCur, iterMax };
+      }
+      return next;
+    });
+  }
+
+  function setSidIter(sid: string, iterCur: number, iterMax: number): void {
+    if (!sid) return;
+    setWorkBySid(prev => {
+      const cur = prev[sid] ?? { pending: 0, queued: 0, iterCur: 0, iterMax: 0 };
+      return { ...prev, [sid]: { ...cur, iterCur, iterMax } };
+    });
   }
 
   function abortActiveSends(): void {
     sendQueueVersionRef.current++;
     sendQueueRef.current = [];
-    activeSendAbortRefs.current.forEach(controller => controller.abort());
+    activeSendAbortRefs.current.forEach((_sid, controller) => controller.abort());
     activeSendAbortRefs.current.clear();
-    setPendingSends(0);
-    setQueuedSends(0);
-    setWorking(false);
-    setIterCur(0);
-    setIterMax(0);
+    setWorkBySid({});
   }
 
   useEffect(() => {
@@ -2383,9 +2426,9 @@ export default function Chat() {
     atBottomRef.current = true;
     setStreamMsgs(prev => [...prev, { id: userMsgId, type: 'user', text }]);
 
-    sendQueueRef.current.push({ text, version: sendQueueVersionRef.current });
-    setQueuedSends(sendQueueRef.current.length);
-    setWorking(true);
+    const originSid = tabsRef.current[idx]?.aimeeSid ?? '';
+    sendQueueRef.current.push({ text, version: sendQueueVersionRef.current, originSid });
+    recomputeWorkCounts();
     void drainSendQueue();
   }
 
@@ -2395,7 +2438,7 @@ export default function Chat() {
     try {
       while (sendQueueRef.current.length > 0) {
         const item = sendQueueRef.current.shift()!;
-        setQueuedSends(sendQueueRef.current.length);
+        recomputeWorkCounts();
         if (item.version !== sendQueueVersionRef.current) continue;
         await sendQueuedMessage(item);
       }
@@ -2411,26 +2454,25 @@ export default function Chat() {
     const text = item.text;
     if (item.version !== sendQueueVersionRef.current) return;
 
-    const streamRefs: ActiveStreamRefs = { assistantId: null, thinkId: null, toolId: null, originSid: '' };
+    // Bind this turn to the tab it was ENQUEUED from (captured at enqueue), not
+    // whatever tab is active now — the user may have switched tabs while the queue
+    // drained. This keeps the stream, the busy indicator and out-of-band SSE events
+    // (the provider `session` id in particular) on the originating tab.
+    const aimeeSid = item.originSid;
+    const streamRefs: ActiveStreamRefs = { assistantId: null, thinkId: null, toolId: null, originSid: aimeeSid };
     const controller = new AbortController();
-    activeSendAbortRefs.current.add(controller);
-    setPendingSends(activeSendAbortRefs.current.size);
-    setWorking(true);
+    activeSendAbortRefs.current.set(controller, aimeeSid);
+    recomputeWorkCounts();
 
     try {
-      const activeTab = tabsRef.current[activeIdxRef.current];
-      const aimeeSid = activeTab?.aimeeSid ?? '';
-      // Bind this stream to the originating tab so out-of-band SSE events (the
-      // provider `session` id in particular) update THIS tab, not whatever tab
-      // is active when the event lands.
-      streamRefs.originSid = aimeeSid;
+      const tabIdx = tabsRef.current.findIndex(t => t.aimeeSid === aimeeSid);
+      const activeTab = tabIdx >= 0 ? tabsRef.current[tabIdx] : undefined;
       // Unified-presence: attach a "webchat" surface once per tab/session so this
       // turn is arbitrated (a racing surface on the same session is declined with
       // presence_busy) and other surfaces see the live turn on the events stream.
       // Best-effort: on failure the turn just proceeds unarbitrated, as before.
       let attachId = activeTab?.attachId ?? '';
       if (aimeeSid && !attachId) {
-        const tabIdx = activeIdxRef.current;
         try {
           const ar = await fetch('/api/chat/attach', {
             method: 'POST',
@@ -2442,10 +2484,10 @@ export default function Chat() {
             if (ad.attach_id) {
               attachId = ad.attach_id;
               setTabs(prev => {
+                const i = prev.findIndex(t => t.aimeeSid === aimeeSid);
+                if (i < 0) return prev;
                 const next = [...prev];
-                if (next[tabIdx] && next[tabIdx].aimeeSid === aimeeSid) {
-                  next[tabIdx] = { ...next[tabIdx], attachId };
-                }
+                next[i] = { ...next[i], attachId };
                 return next;
               });
             }
@@ -2540,12 +2582,7 @@ export default function Chat() {
     } finally {
       flushStreamAppends(); // flush any deltas not covered by turn_end
       activeSendAbortRefs.current.delete(controller);
-      setPendingSends(activeSendAbortRefs.current.size);
-      setWorking(hasPendingChatWork());
-      if (!hasPendingChatWork()) {
-        setIterCur(0);
-        setIterMax(0);
-      }
+      recomputeWorkCounts(); // clears this sid's busy/iteration once it has no work left
       streamRefs.assistantId = null;
       streamRefs.thinkId = null;
       streamRefs.toolId = null;
@@ -2608,7 +2645,6 @@ export default function Chat() {
   function handleSseEvent(type: string, data: Record<string, unknown>, streamRefs: ActiveStreamRefs) {
     switch (type) {
       case 'turn_start': {
-        setWorking(hasPendingChatWork());
         // Defer creating the assistant bubble until real text arrives (the
         // 'text' case creates it lazily). A turn that emits only tool calls,
         // only thinking, or nothing at all then leaves no empty message box.
@@ -2671,7 +2707,6 @@ export default function Chat() {
           // and position are fixed before any batched deltas land in it.
           const newId = nextId();
           streamRefs.assistantId = newId;
-          setWorking(hasPendingChatWork());
           applyToOwnerStream(streamRefs.originSid, prev => [...prev, { id: newId, type: 'assistant', text: content }]);
         } else {
           // continuation delta — batch into the per-frame flush
@@ -2680,7 +2715,6 @@ export default function Chat() {
         break;
       }
       case 'turn_end': {
-        setWorking(hasPendingChatWork());
         // Commit to the stream's OWNING tab (saveOwnerStream flushes first), never
         // whatever tab is active now if the user switched tabs mid-turn.
         saveOwnerStream(streamRefs.originSid);
@@ -2690,7 +2724,6 @@ export default function Chat() {
         break;
       }
       case 'error': {
-        setWorking(hasPendingChatWork());
         flushStreamAppends(); // land buffered text before appending the error
         const msg = String(data.message ?? 'Unknown error');
         applyToOwnerStream(streamRefs.originSid, prev => {
@@ -2724,8 +2757,7 @@ export default function Chat() {
         break;
       }
       case 'iteration': {
-        setIterCur(Number(data.iteration ?? 0));
-        setIterMax(Number(data.max ?? 0));
+        setSidIter(streamRefs.originSid, Number(data.iteration ?? 0), Number(data.max ?? 0));
         break;
       }
       case 'usage': {
