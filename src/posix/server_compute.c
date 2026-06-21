@@ -5,6 +5,7 @@
 #include "agent_exec.h"
 #include "agent_tools.h" /* agent_tools_set_tool_event_cb — stream tool events */
 #include "cli_codex.h"
+#include "cli_session.h" /* cli_session_set_stream_cb — incremental tmux CLI streaming */
 #include "config.h"
 #include "db1.h"
 #include "log.h"
@@ -49,37 +50,6 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
  *   2. $HOME/.local/bin/claude
  * Falling back to bare "claude" if neither exists (lets PATH work in
  * non-systemd environments). */
-static const char *resolve_claude_bin(char *buf, size_t buf_len)
-{
-   struct stat st;
-
-   /* Probe sibling of the running aimee-server binary */
-   char exe[1024];
-   ssize_t exe_len = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-   if (exe_len > 0)
-   {
-      exe[exe_len] = '\0';
-      char *slash = strrchr(exe, '/');
-      if (slash)
-      {
-         snprintf(buf, buf_len, "%.*s/claude", (int)(slash - exe), exe);
-         if (stat(buf, &st) == 0 && (st.st_mode & S_IXUSR))
-            return buf;
-      }
-   }
-
-   /* Probe $HOME/.local/bin/claude */
-   const char *home = getenv("HOME");
-   if (home && home[0])
-   {
-      snprintf(buf, buf_len, "%s/.local/bin/claude", home);
-      if (stat(buf, &st) == 0 && (st.st_mode & S_IXUSR))
-         return buf;
-   }
-
-   return "claude";
-}
-
 /* Text-delta coalescing bounds for the presence ring (WP-1): flush accumulated
  * text as one turn_delta on either bound, capping ring-fill rate without
  * reordering relative to non-text events. */
@@ -221,155 +191,6 @@ static int stream_event(compute_ctx_t *cctx, const char *event, const char *key,
    int alive = cctx->conn_alive;
    pthread_mutex_unlock(cctx->write_mutex);
    return (ring_active || alive) ? 0 : -1;
-}
-
-static int stream_event_usage(compute_ctx_t *cctx, int in_tokens, int out_tokens, double cost)
-{
-   pthread_mutex_lock(cctx->write_mutex);
-
-   /* 1) Ring publish — flush pending text first (ordering), then usage. */
-   if (cctx->presence_emit_deltas && cctx->presence_session[0])
-   {
-      ring_flush_text_locked(cctx);
-      cJSON *d = cJSON_CreateObject();
-      cJSON_AddStringToObject(d, "turn_id", cctx->presence_turn_id);
-      cJSON_AddStringToObject(d, "kind", "usage");
-      cJSON_AddNumberToObject(d, "in", (double)in_tokens);
-      cJSON_AddNumberToObject(d, "out", (double)out_tokens);
-      cJSON_AddNumberToObject(d, "cost", cost);
-      char *dj = cJSON_PrintUnformatted(d);
-      cJSON_Delete(d);
-      if (dj)
-      {
-         presence_emit_turn_delta(cctx->presence_session, cctx->presence_turn_id, dj);
-         free(dj);
-      }
-   }
-
-   /* 2) Socket write — best effort. */
-   if (cctx->conn_alive)
-   {
-      cJSON *evt = cJSON_CreateObject();
-      cJSON_AddStringToObject(evt, "event", "usage");
-      cJSON_AddNumberToObject(evt, "in", (double)in_tokens);
-      cJSON_AddNumberToObject(evt, "out", (double)out_tokens);
-      cJSON_AddNumberToObject(evt, "cost", cost);
-      char *json_str = cJSON_PrintUnformatted(evt);
-      cJSON_Delete(evt);
-      if (json_str)
-      {
-         int r = write_all(cctx->conn_fd, json_str, strlen(json_str));
-         if (r == 0)
-            r = write_all(cctx->conn_fd, "\n", 1);
-         free(json_str);
-         if (r != 0)
-            cctx->conn_alive = 0;
-      }
-   }
-
-   int ring_active = cctx->presence_emit_deltas && cctx->presence_session[0];
-   int alive = cctx->conn_alive;
-   pthread_mutex_unlock(cctx->write_mutex);
-   return (ring_active || alive) ? 0 : -1;
-}
-
-/* Cancellable, non-blocking line reader for the provider subprocess pipe.
- *
- * Replaces blocking fgets so the read loop can be interrupted promptly: each
- * poll tick re-checks the per-turn cancel flag (server-owned turn lifecycle —
- * a hung provider must not wedge a detached turn). The fd must be O_NONBLOCK.
- * Returns 1 with a NUL-terminated line (newline stripped) in out; 0 when no
- * more lines (sets *cancelled on cancel, *eof on provider EOF). A line longer
- * than the buffer is emitted truncated (caller may log). */
-typedef struct
-{
-   char buf[CLAUDE_LINE_MAX];
-   size_t len;
-} cli_linereader_t;
-
-static int cli_read_line(int fd, cli_linereader_t *lr, struct turn_entry *e, char *out,
-                         size_t outmax, int *cancelled, int *eof)
-{
-   for (;;)
-   {
-      char *nl = memchr(lr->buf, '\n', lr->len);
-      if (nl)
-      {
-         size_t linelen = (size_t)(nl - lr->buf);
-         size_t copy = linelen < outmax - 1 ? linelen : outmax - 1;
-         memcpy(out, lr->buf, copy);
-         out[copy] = '\0';
-         size_t rem = lr->len - (linelen + 1);
-         memmove(lr->buf, nl + 1, rem);
-         lr->len = rem;
-         return 1;
-      }
-      if (lr->len >= sizeof(lr->buf) - 1)
-      {
-         /* Oversized line with no newline: emit truncated and reset. */
-         memcpy(out, lr->buf, outmax - 1);
-         out[outmax - 1] = '\0';
-         lr->len = 0;
-         LOG_WARN("chat", "provider line exceeded %zu bytes; truncated", sizeof(lr->buf));
-         return 1;
-      }
-      if (turn_entry_cancelled(e))
-      {
-         *cancelled = 1;
-         return 0;
-      }
-      struct pollfd pfd = {.fd = fd, .events = POLLIN};
-      int pr = poll(&pfd, 1, 200);
-      if (pr == 0)
-         continue; /* tick: re-check cancel */
-      if (pr < 0)
-      {
-         if (errno == EINTR)
-            continue;
-         *eof = 1;
-         return 0;
-      }
-      if (turn_entry_cancelled(e))
-      {
-         *cancelled = 1;
-         return 0;
-      }
-      if (pfd.revents & (POLLIN | POLLHUP | POLLERR))
-      {
-         /* Drain whatever is available. On POLLHUP the pipe is closed but may
-          * still hold buffered bytes; read() delivers them before returning 0,
-          * so always attempt the read rather than declaring EOF on POLLHUP. */
-         ssize_t n = read(fd, lr->buf + lr->len, sizeof(lr->buf) - 1 - lr->len);
-         if (n == 0)
-         {
-            if (lr->len > 0)
-            {
-               /* Final line without a trailing newline: deliver it, then EOF. */
-               size_t copy = lr->len < outmax - 1 ? lr->len : outmax - 1;
-               memcpy(out, lr->buf, copy);
-               out[copy] = '\0';
-               lr->len = 0;
-               *eof = 1;
-               return 1;
-            }
-            *eof = 1;
-            return 0;
-         }
-         if (n < 0)
-         {
-            if (errno == EAGAIN || errno == EINTR)
-               continue; /* not really ready / interrupted: re-poll */
-            *eof = 1;
-            return 0;
-         }
-         lr->len += (size_t)n;
-      }
-      else if (pfd.revents & POLLNVAL)
-      {
-         *eof = 1;
-         return 0;
-      }
-   }
 }
 
 static char *read_optional_text_file(const char *path)
@@ -522,114 +343,10 @@ static int chat_model_passthrough_allowed(const char *model)
    return model && model[0] && strcmp(model, "aimee") != 0 && strncmp(model, "aimee:", 6) != 0;
 }
 
-static int chat_claude_effort_allowed(const char *effort)
-{
-   return effort && (strcmp(effort, "low") == 0 || strcmp(effort, "medium") == 0 ||
-                     strcmp(effort, "high") == 0 || strcmp(effort, "xhigh") == 0 ||
-                     strcmp(effort, "max") == 0);
-}
-
-/* `claude --resume <sid>` fails the WHOLE turn ("No conversation found with
- * session ID") when the session transcript is gone — e.g. the client replays a
- * session id from before a container redeploy that cleared ~/.claude. Guard the
- * resume: only pass --resume when the transcript actually exists, otherwise fall
- * back to a fresh session so the user can keep chatting. claude stores each
- * conversation at ~/.claude/projects/<cwd-as-dashes>/<sid>.jsonl; we glob across
- * project dirs so the check is independent of claude's exact cwd encoding (a
- * session id is unique, so it lives in at most one project dir). */
-static int chat_claude_session_exists(const char *sid)
-{
-   if (!sid || !sid[0])
-      return 0;
-   const char *home = getenv("HOME");
-   if (!home || !home[0])
-      return 1; /* can't check — don't block a resume the client asked for */
-   /* A real claude session id is a UUID (alnum + '-'); refuse anything else so
-    * the value can't smuggle glob metacharacters or path traversal. */
-   for (const char *p = sid; *p; p++)
-      if (!(isalnum((unsigned char)*p) || *p == '-' || *p == '_'))
-         return 1;
-   char pattern[2048];
-   snprintf(pattern, sizeof(pattern), "%s/.claude/projects/*/%s.jsonl", home, sid);
-   glob_t g;
-   int rc = glob(pattern, GLOB_NOSORT, NULL, &g);
-   int found = (rc == 0 && g.gl_pathc > 0);
-   globfree(&g);
-   return found;
-}
-
-/* Resolve which Claude session this turn may resume, namespaced to the attested
- * principal + the per-tab aimee_session_id. The client-supplied claude_session_id
- * is advisory only: it is honored on a tab's first use (and never if it already
- * belongs to another tab), but once a tab is bound the server-owned binding wins.
- * This makes a stale or cross-wired client id unable to resume — and thereby
- * merge into — another tab's conversation, even if the browser sends the wrong
- * value. With no per-tab identity (empty aimee_sid) it falls back to the legacy
- * behavior of trusting the client id. */
-static void chat_claude_resolve_resume_sid(const char *principal, const char *aimee_sid,
-                                           const char *client_sid, char *out, size_t out_n)
-{
-   if (out && out_n)
-      out[0] = '\0';
-   if (!out || out_n == 0)
-      return;
-   if (!aimee_sid || !aimee_sid[0])
-   {
-      if (client_sid && client_sid[0])
-         snprintf(out, out_n, "%s", client_sid);
-      return;
-   }
-   char bound[128] = {0};
-   if (db1_webchat_claude_session_get(principal, aimee_sid, bound, sizeof(bound)) == 0 && bound[0])
-   {
-      snprintf(out, out_n, "%s", bound);
-      if (client_sid && client_sid[0] && strcmp(client_sid, bound) != 0)
-         aimee_log(LOG_WARN, "webchat",
-                   "claude session mismatch: tab bound to its own session; ignoring client id");
-      return;
-   }
-   /* No binding yet for this tab: adopt the client's id only if no other tab owns it. */
-   if (client_sid && client_sid[0] &&
-       !db1_webchat_claude_session_owned_by_other(principal, aimee_sid, client_sid))
-      snprintf(out, out_n, "%s", client_sid);
-}
-
 static int chat_codex_effort_allowed(const char *effort)
 {
    return effort && (strcmp(effort, "low") == 0 || strcmp(effort, "medium") == 0 ||
                      strcmp(effort, "high") == 0 || strcmp(effort, "xhigh") == 0);
-}
-
-static void chat_claude_stream_content(compute_ctx_t *cctx, cJSON *content, int *saw_content)
-{
-   if (!cJSON_IsArray(content))
-      return;
-   cJSON *block = NULL;
-   cJSON_ArrayForEach(block, content)
-   {
-      cJSON *type = cJSON_GetObjectItem(block, "type");
-      const char *bt = cJSON_IsString(type) ? type->valuestring : "";
-      if (strcmp(bt, "text") == 0)
-      {
-         cJSON *text = cJSON_GetObjectItem(block, "text");
-         if (cJSON_IsString(text) && text->valuestring[0])
-         {
-            if (saw_content)
-               *saw_content = 1;
-            stream_event(cctx, "text", "content", text->valuestring);
-         }
-      }
-      else if (strcmp(bt, "thinking") == 0)
-      {
-         cJSON *text = cJSON_GetObjectItem(block, "thinking");
-         if (cJSON_IsString(text) && text->valuestring[0])
-         {
-            if (saw_content)
-               *saw_content = 1;
-            stream_event(cctx, "thinking", "content", text->valuestring);
-         }
-      }
-   }
 }
 
 static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message,
@@ -734,20 +451,25 @@ static int chat_agent_has_provider(const agent_config_t *acfg, const char *provi
    return 0;
 }
 
-static void chat_agent_add_builtin_claude_code(agent_config_t *acfg)
+/* Register a built-in tmux-CLI agent (claude/codex driven as a persistent TUI
+ * over tmux) for an OAuth/CLI provider so webchat can resolve it even when no
+ * agent was explicitly configured. `name`==`provider` so it is selectable by
+ * either. cli_kind drives the response parser; cli_cmd is the launch command. */
+static void chat_agent_add_builtin_tmux_cli(agent_config_t *acfg, const char *name,
+                                            const char *cli_kind, const char *cli_cmd)
 {
-   if (!acfg || acfg->agent_count >= MAX_AGENTS || agent_find(acfg, "claude-code") ||
-       chat_agent_has_provider(acfg, "claude-code"))
+   if (!acfg || acfg->agent_count >= MAX_AGENTS || agent_find(acfg, name) ||
+       chat_agent_has_provider(acfg, name))
       return;
 
    agent_t *ag = &acfg->agents[acfg->agent_count++];
    memset(ag, 0, sizeof(*ag));
-   snprintf(ag->name, sizeof(ag->name), "claude-code");
+   snprintf(ag->name, sizeof(ag->name), "%s", name);
    snprintf(ag->auth_type, sizeof(ag->auth_type), "bearer");
-   snprintf(ag->provider, sizeof(ag->provider), "claude-code");
+   snprintf(ag->provider, sizeof(ag->provider), "%s", name);
    snprintf(ag->backend, sizeof(ag->backend), "%s", AGENT_BACKEND_TMUX_CLI);
-   snprintf(ag->cli_kind, sizeof(ag->cli_kind), "claude-code");
-   snprintf(ag->cli_cmd, sizeof(ag->cli_cmd), "claude");
+   snprintf(ag->cli_kind, sizeof(ag->cli_kind), "%s", cli_kind);
+   snprintf(ag->cli_cmd, sizeof(ag->cli_cmd), "%s", cli_cmd);
    ag->cost_tier = 1;
    ag->max_tokens = AGENT_DEFAULT_MAX_TOKENS;
    ag->timeout_ms = AGENT_DEFAULT_TIMEOUT_MS;
@@ -758,16 +480,22 @@ static void chat_agent_add_builtin_claude_code(agent_config_t *acfg)
    ag->session_reuse = 1;
    chat_agent_add_default_roles(ag);
    if (!acfg->default_agent[0])
-      snprintf(acfg->default_agent, sizeof(acfg->default_agent), "claude-code");
+      snprintf(acfg->default_agent, sizeof(acfg->default_agent), "%s", name);
 }
 
 static void chat_agent_add_builtin_provider(agent_config_t *acfg, const char *provider,
                                             const config_t *cfg)
 {
-   if (provider && strcmp(provider, "openai") == 0)
+   if (!provider)
+      return;
+   if (strcmp(provider, "openai") == 0)
       chat_agent_add_legacy_openai(acfg, cfg);
-   else if (provider && strcmp(provider, "claude-code") == 0)
-      chat_agent_add_builtin_claude_code(acfg);
+   else if (strcmp(provider, "claude-code") == 0)
+      chat_agent_add_builtin_tmux_cli(acfg, "claude-code", "claude-code", "claude");
+   else if (strcmp(provider, "claude") == 0 || strcmp(provider, "claude-oauth") == 0)
+      chat_agent_add_builtin_tmux_cli(acfg, provider, "claude", "claude");
+   else if (strcmp(provider, "codex-oauth") == 0)
+      chat_agent_add_builtin_tmux_cli(acfg, "codex-oauth", "codex", "codex");
 }
 
 static int chat_agent_select_provider(agent_config_t *acfg, const char *provider, char *selected,
@@ -815,8 +543,6 @@ static int chat_agent_select_provider(agent_config_t *acfg, const char *provider
 
 static const char *chat_provider_lookup_name(const char *provider)
 {
-   if (provider && strcmp(provider, "codex-oauth") == 0)
-      return "codex";
    return provider;
 }
 
@@ -828,6 +554,26 @@ static void chat_tool_event_cb(const char *phase, const char *name, void *ud)
    char ev[48];
    snprintf(ev, sizeof(ev), "tool_call.%s", phase ? phase : "");
    stream_event(cctx, ev, "name", name ? name : "");
+}
+
+/* Incremental stream sink for tmux CLI turns: cli_session_recv calls this with
+ * each newly produced chunk of the clean reply, which we forward as a `text`
+ * SSE event so the webchat streams the answer as it is produced (instead of one
+ * blob at turn end). `emitted` records that streaming delivered the reply, so
+ * the worker skips the trailing full-text emit and avoids duplicating it. */
+typedef struct
+{
+   compute_ctx_t *cctx;
+   int emitted;
+} chat_cli_stream_ctx_t;
+
+static void chat_cli_stream_cb(const char *delta, void *ud)
+{
+   chat_cli_stream_ctx_t *c = (chat_cli_stream_ctx_t *)ud;
+   if (!c || !delta || !delta[0])
+      return;
+   stream_event(c->cctx, "text", "content", delta);
+   c->emitted = 1;
 }
 
 static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, const char *cwd,
@@ -895,12 +641,17 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    if (drift)
       stream_event(cctx, "text", "content", drift);
    agent_tools_set_tool_event_cb(chat_tool_event_cb, cctx);
+   /* Stream a tmux CLI turn's reply incrementally (no-op for non-tmux agents,
+    * whose runtime never drives a cli_session). */
+   chat_cli_stream_ctx_t sctx = {cctx, 0};
+   cli_session_set_stream_cb(chat_cli_stream_cb, &sctx);
 
    agent_result_t result;
    memset(&result, 0, sizeof(result));
    int rc = agent_run_with_tools(&acfg, "code", system_prompt ? system_prompt : "", message,
                                  AGENT_DEFAULT_MAX_TOKENS, &result);
 
+   cli_session_set_stream_cb(NULL, NULL);
    agent_tools_set_tool_event_cb(NULL, NULL);
    session_id_clear_override();
    workspace_turn_unbind_active();
@@ -915,7 +666,8 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
       return;
    }
 
-   if (result.response && result.response[0])
+   /* If the reply already streamed incrementally, don't re-emit it whole. */
+   if (!sctx.emitted && result.response && result.response[0])
       stream_event(cctx, "text", "content", result.response);
    stream_event(cctx, "turn_end", NULL, NULL);
    stream_event(cctx, "done", NULL, NULL);
@@ -1035,9 +787,14 @@ static int chat_provider_uses_codex_cli(const char *provider)
 {
    if (!provider)
       return 0;
+   /* codex-oauth runs the codex CLI as a persistent TUI over tmux (1:1 per aimee
+    * session) via the agent worker — NOT the one-shot app-server stream — so it
+    * must NOT be claimed here. */
+   if (strcmp(provider, "codex-oauth") == 0)
+      return 0;
    if (strcmp(provider, "codex-cli") == 0)
       return 1;
-   if (strcmp(provider, "codex") != 0 && strcmp(provider, "codex-oauth") != 0)
+   if (strcmp(provider, "codex") != 0)
       return 0;
 
    agent_config_t acfg;
@@ -1237,530 +994,28 @@ void chat_stream_worker(void *arg)
                                   &cfg);
       return;
    }
-   if (strcmp(provider, "claude") != 0 && strcmp(provider, "claude-code") != 0)
-   {
-      compute_ctx_release_budget(cctx);
-      if (chat_provider_uses_primary_session(provider, &cfg))
-      {
-         if (compact)
-            chat_stream_worker_primary_session_compact(cctx, provider_sid, aimee_sid, provider,
-                                                       model_override, &cfg);
-         else
-            chat_stream_worker_primary_session(cctx, message, provider_sid, cwd, aimee_sid,
-                                               provider, model_override, &cfg);
-      }
-      else
-      {
-         if (compact)
-         {
-            compute_error(cctx, "conversation compaction is not supported for this provider");
-            compute_ctx_free(cctx);
-         }
-         else
-            chat_stream_worker_agent(cctx, message, cwd, aimee_sid, provider, model_override, &cfg);
-      }
-      return;
-   }
-
-   if (compact)
-   {
-      compute_error(cctx, "conversation compaction is not supported for claude CLI chat");
-      compute_ctx_free(cctx);
-      return;
-   }
-
-   /* Detached (thin-client) workspace: the `claude` CLI, its login, tmux, and the
-    * working tree live on the CLIENT, not this (possibly containerized) server.
-    * Run the STANDARD `claude` CLI over tmux on the client — the cli_session
-    * driver marshals its tmux commands over the reverse channel — rather than
-    * the local `claude -p` path below. Co-located turns fall through to the
-    * local claude path. */
-   {
-      int detached_bound = workspace_turn_bind_active(cwd);
-      const workspace_provider_t *wsp = workspace_provider_active();
-      if (detached_bound && wsp && wsp->kind == WS_PROVIDER_DETACHED && wsp->exec_shell)
-      {
-         if (aimee_path_is_absolute(cwd) && !strstr(cwd, "/.."))
-            run_cmd_set_cwd(cwd);
-         if (aimee_sid && aimee_sid[0])
-            session_id_set_override(aimee_sid);
-
-         char *sys = read_webchat_system_prompt(cctx);
-         agent_t cag;
-         memset(&cag, 0, sizeof(cag));
-         snprintf(cag.name, sizeof(cag.name), "claude");
-         snprintf(cag.backend, sizeof(cag.backend), "%s", AGENT_BACKEND_TMUX_CLI);
-         snprintf(cag.cli_kind, sizeof(cag.cli_kind), "claude");
-         if (cfg.claude_model[0])
-            snprintf(cag.cli_cmd, sizeof(cag.cli_cmd), "claude --model %s", cfg.claude_model);
-         else
-            snprintf(cag.cli_cmd, sizeof(cag.cli_cmd), "claude");
-         cag.session_reuse = 1;
-
-         stream_event(cctx, "turn_start", NULL, NULL);
-         agent_result_t result;
-         memset(&result, 0, sizeof(result));
-         int rc = agent_execute_cli_session(&cag, NULL, sys ? sys : "", message,
-                                            AGENT_DEFAULT_MAX_TOKENS, 0.3, &result);
-
-         session_id_clear_override();
-         workspace_turn_unbind_active();
-         run_cmd_set_cwd(NULL);
-         free(sys);
-
-         if (rc != 0)
-         {
-            compute_error(cctx, result.error[0] ? result.error : "claude tmux session failed");
-            free(result.response);
-            compute_ctx_free(cctx);
-            return;
-         }
-         if (result.response && result.response[0])
-            stream_event(cctx, "text", "content", result.response);
-         stream_event(cctx, "turn_end", NULL, NULL);
-         stream_event(cctx, "done", NULL, NULL);
-         free(result.response);
-         compute_ok(cctx);
-         compute_ctx_free(cctx);
-         return;
-      }
-      workspace_turn_unbind_active();
-   }
-
-   /* The session id to `claude --resume` is server-owned and namespaced to
-    * (principal, aimee_session_id) — not taken blindly from the client — so a
-    * stale/cross-wired browser value cannot resume another tab's conversation. */
-   char claude_sid_buf[128];
-   chat_claude_resolve_resume_sid(cctx->vault_principal, aimee_sid, provider_sid, claude_sid_buf,
-                                  sizeof(claude_sid_buf));
-   const char *claude_sid = claude_sid_buf;
-   compute_pool_set_job(POOL_JOB_CHAT, "provider=%s sid=%s", provider,
-                        claude_sid && claude_sid[0] ? claude_sid : "new");
-
-   char *system_prompt = read_webchat_system_prompt(cctx);
-
-   char *argv[32];
-   int argc = 0;
-   argv[argc++] = "claude";
-   argv[argc++] = "-p";
-   argv[argc++] = "--output-format";
-   argv[argc++] = "stream-json";
-   argv[argc++] = "--verbose";
-   argv[argc++] = "--include-partial-messages";
-   /* Do not whitelist tools — allow all configured tools (including aimee MCP)
-    * so the primary-agent chat has the full aimee toolset available. Only
-    * disallow tools that would deadlock or recurse in an unattended context. */
-   argv[argc++] = "--disallowedTools";
-   argv[argc++] = "AskUserQuestion,Agent,RemoteTrigger";
-   if (system_prompt && system_prompt[0])
-   {
-      argv[argc++] = "--append-system-prompt";
-      argv[argc++] = system_prompt;
-   }
-   const char *claude_model =
-       chat_model_passthrough_allowed(model_override) ? model_override : cfg.claude_model;
-   if (claude_model && claude_model[0])
-   {
-      argv[argc++] = "--model";
-      argv[argc++] = (char *)claude_model;
-   }
-   int claude_effort_explicit = chat_claude_effort_allowed(effort_override);
-   const char *claude_effort =
-       claude_effort_explicit ? effort_override : cfg.model_reasoning_effort;
-   /* §5: cap (only lower) the config-derived effort by turn complexity; leave an
-    * explicit per-request override untouched. */
-   if (cfg.reasoning_cap_enabled && !claude_effort_explicit)
-   {
-      int score = reasoning_complexity_score(1, message ? strlen(message) : 0, 1);
-      claude_effort = reasoning_effort_capped(claude_effort, score);
-   }
-   if (chat_claude_effort_allowed(claude_effort))
-   {
-      argv[argc++] = "--effort";
-      argv[argc++] = (char *)claude_effort;
-   }
-   if (claude_sid[0] && chat_claude_session_exists(claude_sid))
-   {
-      argv[argc++] = "--resume";
-      argv[argc++] = (char *)claude_sid;
-   }
-   /* else: the requested session is gone (e.g. cleared by a redeploy) — start a
-    * fresh session instead of letting --resume fail the entire turn. */
-   if (cfg.autonomous)
-      argv[argc++] = "--dangerously-skip-permissions";
-   argv[argc] = NULL;
-
-   /* Create pipes */
-   int in_pipe[2] = {-1, -1};
-   int out_pipe[2] = {-1, -1};
-   if (pipe(in_pipe) < 0 || pipe(out_pipe) < 0)
-   {
-      free(system_prompt);
-      compute_error(cctx, "pipe failed");
-      compute_ctx_free(cctx);
-      return;
-   }
-
-   char err_path[64] = {0};
-   snprintf(err_path, sizeof(err_path), "/tmp/aimee-claude-%d-XXXXXX", (int)getpid());
-   int err_fd = mkstemp(err_path);
-   if (err_fd < 0)
-      err_path[0] = '\0';
-
-   pid_t pid = fork();
-   if (pid < 0)
-   {
-      close(in_pipe[0]);
-      close(in_pipe[1]);
-      close(out_pipe[0]);
-      close(out_pipe[1]);
-      if (err_fd >= 0)
-      {
-         close(err_fd);
-         unlink(err_path);
-      }
-      free(system_prompt);
-      compute_error(cctx, "fork failed");
-      compute_ctx_free(cctx);
-      return;
-   }
-
-   if (pid == 0)
-   {
-      /* Child */
-#ifdef __linux__
-      /* Die when the daemon dies, so a clean redeploy doesn't leave
-       * orphaned shells running streaming sub-processes. */
-      prctl(PR_SET_PDEATHSIG, SIGTERM, 0, 0, 0);
-      if (getppid() == 1)
-         _exit(0);
-#endif
-      close(in_pipe[1]);
-      close(out_pipe[0]);
-      dup2(in_pipe[0], STDIN_FILENO);
-      dup2(out_pipe[1], STDOUT_FILENO);
-      close(in_pipe[0]);
-      close(out_pipe[1]);
-      if (err_fd >= 0)
-      {
-         dup2(err_fd, STDERR_FILENO);
-         close(err_fd);
-      }
-      else
-      {
-         int devnull = open("/dev/null", O_WRONLY);
-         if (devnull >= 0)
-         {
-            dup2(devnull, STDERR_FILENO);
-            close(devnull);
-         }
-      }
-      if (cwd && cwd[0] && chdir(cwd) != 0)
-      {
-         dprintf(STDERR_FILENO, "aimee: chdir(%s) failed: %s\n", cwd, strerror(errno));
-         _exit(126);
-      }
-      /* Expose the aimee session to the MCP server so it can resolve
-       * session context via AIMEE_SESSION_ID rather than the PPID file
-       * (which would be keyed to aimee-server's PID, not the CLI's). */
-      if (aimee_sid && aimee_sid[0])
-         setenv("AIMEE_SESSION_ID", aimee_sid, 1);
-      char claude_bin_buf[1024];
-      const char *claude_bin = resolve_claude_bin(claude_bin_buf, sizeof(claude_bin_buf));
-      execvp(claude_bin, argv);
-      dprintf(STDERR_FILENO, "aimee: exec(%s) failed: %s\n", claude_bin, strerror(errno));
-      _exit(127);
-   }
-
-   /* Parent */
-   close(in_pipe[0]);
-   close(out_pipe[1]);
-   if (err_fd >= 0)
-      close(err_fd);
-   free(system_prompt);
-
-   /* Make the read end non-blocking BEFORE registering the child, so a cancel
-    * racing in right after registration always meets the poll-driven loop in its
-    * non-blocking state (never a blocking read()). pid is the child here (the
-    * fork-failure path returned above), but guard defensively. */
-   {
-      int fl = fcntl(out_pipe[0], F_GETFL, 0);
-      if (fl >= 0)
-         fcntl(out_pipe[0], F_SETFL, fl | O_NONBLOCK);
-   }
-   /* Register the child with the per-turn cancel registry (this worker is the
-    * sole reaper of this pid). */
-   if (pid > 0)
-      turn_registry_set_child(cctx->turn_entry, pid);
-
-   /* Write message to stdin */
-   size_t msg_len = strlen(message);
-   size_t written = 0;
-   while (written < msg_len)
-   {
-      ssize_t w = write(in_pipe[1], message + written, msg_len - written);
-      if (w <= 0)
-         break;
-      written += (size_t)w;
-   }
-   close(in_pipe[1]);
-
-   /* Release the compute budget slot now that the subprocess is running.
-    * The read loop below is pure I/O; holding server compute budget here
-    * would starve MCP/tool callbacks that the provider makes back into
-    * aimee-server while it waits for their results. */
+   /* Everything else — claude-oauth / codex-oauth / claude / claude-code (the
+    * persistent CLI TUIs, driven over tmux 1:1 per aimee session through the
+    * agent worker -> agent_execute_cli_session) and the in-process HTTP API
+    * providers (primary-session adapters). NEVER `claude -p`: a one-shot print
+    * process cannot multiplex concurrent sessions into isolated persistent
+    * panes, which is the whole point of a per-session tmux CLI session. */
    compute_ctx_release_budget(cctx);
-
-   /* Read stream-json output via a cancellable, non-blocking line reader.
-    * NB: the loop no longer consults conn_alive — a dropped client connection
-    * detaches but does NOT abort the turn (server-owned turn lifecycle); the
-    * turn ends only on provider EOF or an explicit cancel. */
-   char *line = malloc(CLAUDE_LINE_MAX);
-   cli_linereader_t *lr = malloc(sizeof(*lr));
-   if (!line || !lr)
+   if (chat_provider_uses_primary_session(provider, &cfg))
    {
-      free(line);
-      free(lr);
-      close(out_pipe[0]);
-      kill(pid, SIGKILL);
-      waitpid(pid, NULL, 0);
-      turn_registry_mark_reaped(cctx->turn_entry);
-      compute_error(cctx, "out of memory");
-      compute_ctx_free(cctx);
-      return;
-   }
-   lr->len = 0;
-
-   int had_tool_result = 0;
-   int first_message = 1;
-   int saw_result = 0;
-   int saw_content = 0;
-   int saw_delta_text = 0;
-   int cancelled = 0;
-   int eof = 0;
-   char provider_error[1024] = "";
-
-   while (cli_read_line(out_pipe[0], lr, cctx->turn_entry, line, CLAUDE_LINE_MAX, &cancelled, &eof))
-   {
-      cJSON *obj = cJSON_Parse(line);
-      if (!obj)
-         continue;
-
-      cJSON *type_j = cJSON_GetObjectItem(obj, "type");
-      const char *type = (type_j && cJSON_IsString(type_j)) ? type_j->valuestring : "";
-
-      if (strcmp(type, "stream_event") == 0)
-      {
-         cJSON *event = cJSON_GetObjectItem(obj, "event");
-         if (event)
-         {
-            cJSON *etype = cJSON_GetObjectItem(event, "type");
-            const char *et = (etype && cJSON_IsString(etype)) ? etype->valuestring : "";
-
-            if (strcmp(et, "message_start") == 0)
-            {
-               if (first_message || had_tool_result)
-               {
-                  stream_event(cctx, "turn_start", NULL, NULL);
-                  first_message = 0;
-               }
-               had_tool_result = 0;
-               saw_delta_text = 0;
-            }
-            else if (strcmp(et, "content_block_delta") == 0)
-            {
-               cJSON *delta = cJSON_GetObjectItem(event, "delta");
-               cJSON *dt = delta ? cJSON_GetObjectItem(delta, "type") : NULL;
-               const char *dts = (dt && cJSON_IsString(dt)) ? dt->valuestring : "";
-
-               if (strcmp(dts, "text_delta") == 0)
-               {
-                  cJSON *text = cJSON_GetObjectItem(delta, "text");
-                  if (text && cJSON_IsString(text) && text->valuestring[0])
-                  {
-                     saw_content = 1;
-                     saw_delta_text = 1;
-                     stream_event(cctx, "text", "content", text->valuestring);
-                  }
-               }
-               else if (strcmp(dts, "thinking_delta") == 0)
-               {
-                  cJSON *text = cJSON_GetObjectItem(delta, "thinking");
-                  if (text && cJSON_IsString(text) && text->valuestring[0])
-                  {
-                     saw_content = 1;
-                     stream_event(cctx, "thinking", "content", text->valuestring);
-                  }
-               }
-            }
-            else if (strcmp(et, "message_stop") == 0)
-            {
-               stream_event(cctx, "turn_end", NULL, NULL);
-            }
-         }
-      }
-      else if (strcmp(type, "tool_result") == 0 || strcmp(type, "user") == 0)
-      {
-         had_tool_result = 1;
-      }
-      else if (strcmp(type, "assistant") == 0)
-      {
-         cJSON *message = cJSON_GetObjectItem(obj, "message");
-         cJSON *content = message ? cJSON_GetObjectItem(message, "content")
-                                  : cJSON_GetObjectItem(obj, "content");
-         if (!saw_delta_text)
-            chat_claude_stream_content(cctx, content, &saw_content);
-         cJSON *err = cJSON_GetObjectItem(obj, "error");
-         if (cJSON_IsString(err) && err->valuestring[0] && !provider_error[0])
-            snprintf(provider_error, sizeof(provider_error), "%s", err->valuestring);
-      }
-      else if (strcmp(type, "result") == 0)
-      {
-         saw_result = 1;
-         cJSON *sid = cJSON_GetObjectItem(obj, "session_id");
-         if (sid && cJSON_IsString(sid) && sid->valuestring[0])
-         {
-            stream_event(cctx, "session", "id", sid->valuestring);
-            /* Bind this Claude session to (principal, tab) so subsequent turns
-             * resume it by server-owned identity, not by client-supplied id. */
-            if (aimee_sid && aimee_sid[0])
-               (void)db1_webchat_claude_session_bind(cctx->vault_principal, aimee_sid,
-                                                     sid->valuestring);
-         }
-         cJSON *is_error = cJSON_GetObjectItem(obj, "is_error");
-         cJSON *api_status = cJSON_GetObjectItem(obj, "api_error_status");
-         if ((cJSON_IsBool(is_error) && cJSON_IsTrue(is_error)) ||
-             (cJSON_IsNumber(api_status) && api_status->valuedouble > 0))
-         {
-            cJSON *result = cJSON_GetObjectItem(obj, "result");
-            if (cJSON_IsString(result) && result->valuestring[0])
-               snprintf(provider_error, sizeof(provider_error), "%s", result->valuestring);
-            else if (!provider_error[0])
-               snprintf(provider_error, sizeof(provider_error), "claude provider request failed");
-         }
-         cJSON *jusage = cJSON_GetObjectItem(obj, "usage");
-         if (cJSON_IsObject(jusage))
-         {
-            token_usage_t tu;
-            memset(&tu, 0, sizeof(tu));
-            cJSON *jin = cJSON_GetObjectItem(jusage, "input_tokens");
-            cJSON *jout = cJSON_GetObjectItem(jusage, "output_tokens");
-            cJSON *jcw = cJSON_GetObjectItem(jusage, "cache_creation_input_tokens");
-            cJSON *jcr = cJSON_GetObjectItem(jusage, "cache_read_input_tokens");
-            if (cJSON_IsNumber(jin))
-               tu.input_tokens = (int)jin->valuedouble;
-            if (cJSON_IsNumber(jout))
-               tu.output_tokens = (int)jout->valuedouble;
-            if (cJSON_IsNumber(jcw))
-               tu.cache_write_tokens = (int)jcw->valuedouble;
-            if (cJSON_IsNumber(jcr))
-               tu.cache_read_tokens = (int)jcr->valuedouble;
-            double cost = token_estimate_cost(
-                claude_model && claude_model[0] ? claude_model : cfg.claude_model, &tu);
-            int in_total = tu.input_tokens + tu.cache_write_tokens + tu.cache_read_tokens;
-            stream_event_usage(cctx, in_total, tu.output_tokens, cost);
-         }
-      }
-
-      cJSON_Delete(obj);
-   }
-
-   (void)eof; /* natural EOF is the normal completion path */
-   free(line);
-   free(lr);
-   close(out_pipe[0]);
-
-   /* Single-reap: this worker is the sole reaper of its child (the racing
-    * disconnect-kill is gone). On cancel, SIGTERM then a bounded wait then
-    * SIGKILL; otherwise reap the naturally-exited child. EINTR is retried;
-    * the reaped flag guards against any double-reap. */
-   int status = 0;
-   if (!cctx->turn_entry || !cctx->turn_entry->reaped)
-   {
-      if (cancelled && pid > 0)
-      {
-         kill(pid, SIGTERM);
-         for (int _w = 0; _w < 50; _w++)
-         {
-            int _ws = 0;
-            int wr = waitpid(pid, &_ws, WNOHANG);
-            if (wr > 0)
-            {
-               status = _ws;
-               pid = -1;
-               break;
-            }
-            if (wr < 0 && errno != EINTR)
-            {
-               pid = -1;
-               break;
-            }
-            usleep(100000); /* 100 ms per try, 5 s total */
-         }
-         if (pid > 0)
-            kill(pid, SIGKILL);
-      }
-      if (pid > 0)
-      {
-         int wr;
-         do
-         {
-            wr = waitpid(pid, &status, 0);
-         } while (wr < 0 && errno == EINTR);
-         if (wr < 0)
-         {
-            /* No child to reap (ECHILD) or an unexpected error: there is no exit
-             * status to classify, so fall back to status=0 and let the
-             * output-presence check below (saw_result/saw_content) decide
-             * success vs. failure. */
-            if (errno != ECHILD)
-               LOG_WARN("chat", "waitpid(%d) failed: %s", (int)pid, strerror(errno));
-            status = 0;
-         }
-      }
-      turn_registry_mark_reaped(cctx->turn_entry);
-   }
-
-   char *stderr_text = err_path[0] ? read_optional_text_file(err_path) : NULL;
-   if (err_path[0])
-      unlink(err_path);
-
-   if (cancelled)
-   {
-      /* The turn was cancelled (session close / shutdown / graceful_cancel). */
-      free(stderr_text);
-      stream_event(cctx, "error", "message", "turn cancelled");
-      compute_error(cctx, "turn cancelled");
-      compute_ctx_free(cctx);
-      return;
-   }
-
-   if (provider_error[0] || !WIFEXITED(status) || WEXITSTATUS(status) != 0 ||
-       (!saw_result && !saw_content))
-   {
-      char msg[1024];
-      if (provider_error[0])
-         snprintf(msg, sizeof(msg), "%s", provider_error);
-      else if (!WIFEXITED(status))
-         snprintf(msg, sizeof(msg), "claude exited abnormally%s%s",
-                  stderr_text && stderr_text[0] ? ": " : "",
-                  stderr_text && stderr_text[0] ? stderr_text : "");
-      else if (WEXITSTATUS(status) != 0)
-         snprintf(msg, sizeof(msg), "claude exited with status %d%s%s", WEXITSTATUS(status),
-                  stderr_text && stderr_text[0] ? ": " : "",
-                  stderr_text && stderr_text[0] ? stderr_text : "");
+      if (compact)
+         chat_stream_worker_primary_session_compact(cctx, provider_sid, aimee_sid, provider,
+                                                    model_override, &cfg);
       else
-         snprintf(msg, sizeof(msg), "claude exited without producing a result%s%s",
-                  stderr_text && stderr_text[0] ? ": " : "",
-                  stderr_text && stderr_text[0] ? stderr_text : "");
-      stream_event(cctx, "error", "message", msg);
-      free(stderr_text);
-      compute_error(cctx, msg);
-      compute_ctx_free(cctx);
-      return;
+         chat_stream_worker_primary_session(cctx, message, provider_sid, cwd, aimee_sid, provider,
+                                            model_override, &cfg);
    }
-   free(stderr_text);
-   stream_event(cctx, "done", NULL, NULL);
-   compute_ok(cctx);
-   compute_ctx_free(cctx);
+   else if (compact)
+   {
+      compute_error(cctx, "conversation compaction is not supported for this provider");
+      compute_ctx_free(cctx);
+   }
+   else
+      chat_stream_worker_agent(cctx, message, cwd, aimee_sid, provider, model_override, &cfg);
+   return;
 }

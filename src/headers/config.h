@@ -1542,6 +1542,10 @@ const char *session_id(void);
 void session_id_set_override(const char *sid);
 void session_id_clear_override(void);
 
+/* True when session_id_set_override bound a real per-session id on this thread
+ * (vs. the process-wide PPID fallback session_id() returns otherwise). */
+int session_id_override_active(void);
+
 /* Drop the per-thread session_id cache so the next session_id() call re-reads
  * ~/.config/aimee/session-ppid-{ppid}. Long-lived MCP / aimee-server request
  * paths should call this at request entry to pick up rotations performed by

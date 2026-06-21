@@ -145,6 +145,17 @@ void session_id_clear_override(void)
    g_session_override[0] = '\0';
 }
 
+/* True when a real per-session id has been bound on this thread via
+ * session_id_set_override. Callers that key a shared resource on session_id()
+ * (e.g. the tmux CLI session pane) use this to tell a genuine per-session id
+ * apart from the process-wide PPID fallback, which is the SAME value for every
+ * override-less turn in the process and would otherwise collapse them all onto
+ * one pane. */
+int session_id_override_active(void)
+{
+   return g_session_override[0] != '\0';
+}
+
 const char *config_default_dir(void)
 {
    /* Routes through aimee_home() so AIMEE_HOME / AIMEE_PROFILE

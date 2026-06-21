@@ -250,8 +250,89 @@ static void test_delta_non_prefix_falls_back_to_full(void)
    free(out);
 }
 
+/* --- response extraction (TUI scrape) --------------------------------------
+ * Markers: claude assistant ●(\xe2\x97\x8f) user ❯(\xe2\x9d\xaf) status ✻(\xe2\x9c\xbb);
+ * codex assistant •(\xe2\x80\xa2) user ›(\xe2\x80\xba). Captures mirror the real panes. */
+
+static void test_extract_claude_basic(void)
+{
+   const char *pane = "\xe2\x9d\xaf Reply with three words\n"
+                      "\xe2\x97\x8f alpha bravo charlie\n"
+                      "\xe2\x9c\xbb Cooked for 1s\n"
+                      "\n"
+                      "\xe2\x9d\xaf \n"
+                      "  ? for shortcuts\n";
+   char *r = cli_session_extract_response(pane, "claude", NULL);
+   assert(r != NULL);
+   assert(strcmp(r, "alpha bravo charlie") == 0);
+   free(r);
+}
+
+/* Reused pane holding a prior turn: with the prior turn as baseline, only the
+ * NEW turn's reply is returned — the core anti-bleed guarantee. */
+static void test_extract_claude_excludes_prior_turn(void)
+{
+   const char *baseline = "\xe2\x9d\xaf first question\n"
+                          "\xe2\x97\x8f first answer here\n"
+                          "\xe2\x9c\xbb Cooked for 1s\n";
+   const char *pane = "\xe2\x9d\xaf first question\n"
+                      "\xe2\x97\x8f first answer here\n"
+                      "\xe2\x9c\xbb Cooked for 1s\n"
+                      "\xe2\x9d\xaf second question\n"
+                      "\xe2\x97\x8f second answer only\n"
+                      "\xe2\x9c\xbb Baked for 2s\n"
+                      "\xe2\x9d\xaf \n";
+   char *r = cli_session_extract_response(pane, "claude", baseline);
+   assert(r != NULL);
+   assert(strcmp(r, "second answer only") == 0);
+   free(r);
+}
+
+static void test_extract_claude_multiline(void)
+{
+   const char *pane = "\xe2\x9d\xaf q\n"
+                      "\xe2\x97\x8f line one\n"
+                      "  line two\n"
+                      "\xe2\x9c\xbb Cooked for 1s\n";
+   char *r = cli_session_extract_response(pane, "claude", NULL);
+   assert(r != NULL);
+   assert(strcmp(r, "line one\nline two") == 0);
+   free(r);
+}
+
+static void test_extract_codex_basic(void)
+{
+   /* codex events also use •; the answer is the LAST • block before composer. */
+   const char *pane = "\xe2\x80\xba Reply with three words\n"
+                      "\xe2\x80\xa2 SessionStart hook (completed)\n"
+                      "  hook context noise\n"
+                      "\xe2\x80\xa2 foxtrot golf hotel\n"
+                      "\xe2\x80\xba Find and fix a bug\n"
+                      "  gpt-5.5 default\n";
+   char *r = cli_session_extract_response(pane, "codex", NULL);
+   assert(r != NULL);
+   assert(strcmp(r, "foxtrot golf hotel") == 0);
+   free(r);
+}
+
 int main(void)
 {
+   printf("test_extract_claude_basic... ");
+   test_extract_claude_basic();
+   printf("OK\n");
+
+   printf("test_extract_claude_excludes_prior_turn... ");
+   test_extract_claude_excludes_prior_turn();
+   printf("OK\n");
+
+   printf("test_extract_claude_multiline... ");
+   test_extract_claude_multiline();
+   printf("OK\n");
+
+   printf("test_extract_codex_basic... ");
+   test_extract_codex_basic();
+   printf("OK\n");
+
    printf("test_make_name_format... ");
    test_make_name_format();
    printf("OK\n");
