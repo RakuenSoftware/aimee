@@ -858,19 +858,34 @@ implementer and do not gate the first phase.
 
 ## §7 Phasing
 
-- **P0 — Envelope IR (§1.1).** Refactor `ingress_preinject_build()` to assemble a
-  typed entry list and render from it. No behavior change, no flag; pure
-  enablement. Blocks everything else.
-- **P1a — Byte-equivalent code fold (§1.2/§1.3)** behind `ingress_compress_enabled`,
-  with the full config/docs/test surface for that flag and the regenerated OpenAPI
-  embed if `X-Aimee-Compress` is public. Blank-line/whitespace collapse only —
-  provably lossless, **no** resolver/authority/handle dependency. Token/latency +
-  net-economics A/B (recovery rate is zero). **This is the first default-flip
-  candidate** and the proposal's earliest real win.
-- **P1b — Lossy code fold (§1.2/§1.3/§1.4)** — comment-strip + signature/span,
-  every fold carrying a `transform` tag and a reachable resolver. Pulls in the
-  span-enrichment fallback, `X-Aimee-Compress` per-call escape, and the per-entry
-  telemetry (#34). No default flip until P2.
+- **P0 — Envelope IR (§1.1). DONE (PR #585).** `ingress_preinject_build()` now
+  assembles a typed entry list and renders from it; no behaviour change, no flag.
+  Blocks everything else.
+- **P1a — Byte-equivalent code fold (§1.2/§1.3). WITHDRAWN — it is a no-op on the
+  current resident form.** A design roundtable (2026-06-21, 3 lenses, unanimous)
+  found that today's resident code form is already a single collapsed line per
+  hit: every `code_hit` snippet is routed through `append_single_line_escaped()`,
+  which strips newlines/tabs and collapses whitespace runs **before** the entry is
+  built. A "blank-line/whitespace collapse" fold therefore has no input to act on,
+  so shipping it would land `ingress_compress_enabled` guarding dead code for zero
+  byte savings. P1a is removed from the phase list; the `ingress_compress_enabled`
+  flag is **not** introduced until a fold with real input exists (P1b). **Precondition
+  carried forward:** audit what `append_single_line_escaped()` already destroys
+  (heredocs, multi-line strings, indentation-sensitive snippets like YAML/Make) —
+  the resident form is already lossy, so the byte-equivalence framing for code
+  snippets is moot and any future fold must be measured against that baseline.
+- **P1b — Lossy code fold + resident-form enrichment (§1.2/§1.3/§1.4).** This is
+  the next real increment, and it is **P1b-sized, not a small win**: to fold
+  anything meaningful the resident form must first carry a **multi-line** code span
+  (signature + relevant lines), which pulls in span enrichment, a reachable
+  rehydrate resolver, `transform` tags, the `X-Aimee-Compress` per-call escape, the
+  per-entry telemetry (#34), and the forced-rehydration accuracy A/B (§6) before any
+  default flip. The roundtable also surfaced an alternative worth A/B-ing here — a
+  `file:line[:span]` reference resolved through the rehydrate path instead of an
+  inline fold — but it is **not** non-lossy-for-free: it shifts bytes to a runtime
+  resolve (latency), changes the P0 IR's inline shape, and depends on the same
+  resolver/reachability infra, so it lives inside P1b's preconditions, not ahead of
+  them. No default flip until P2.
 - **P2 — Durable-read reachability + accuracy A/B for the lossy fold (P1b).** A
   lossy code fold recovers via a durable code-span/range read, so its
   forced-rehydration accuracy A/B and its default-flip candidacy need a real
