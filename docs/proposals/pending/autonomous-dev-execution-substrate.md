@@ -1,6 +1,7 @@
 # Autonomous Development Execution Substrate: build · verify · push · validate · accept
 
-- **State:** proposed; awaiting roundtable + user proposal-gate.
+- **State:** **APPROVED** (human proposal-gate passed 2026-06-21) — implementing,
+  phased (see the companion `.plan.md`).
 - **Scope:** deterministic / autonomous-dev plumbing. Not an intelligence-surface
   proposal (no Architecture Charter role). It is the execution substrate that
   [full-autonomous-development.md](full-autonomous-development.md) assumes but does
