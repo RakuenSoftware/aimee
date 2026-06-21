@@ -502,6 +502,11 @@ static const char *PROMPT_CODE_PRINCIPLES_TEXT =
     "about.\n"
     "- Code outranks your repro: when the system's own source contradicts your "
     "reproduction, treat the repro as guilty until you can explain the gap.\n"
+    "- Done means verified: a task or proposal is finished only when its stated "
+    "acceptance criteria are actually exercised — build, tests, lint, and the "
+    "change's own checks run and pass. A criterion you cannot run (no toolchain, no "
+    "hardware, a deployment you can't perform) is reported as validation-pending, "
+    "never silently marked done.\n"
     "- Be direct about tradeoffs, assumptions, test results, and anything you could "
     "not verify.\n\n";
 
