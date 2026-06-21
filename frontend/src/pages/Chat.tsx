@@ -121,6 +121,12 @@ const CHANNEL_KEY = 'aimee_active_channel';
 const PROJECT_ROOT_KEY = 'aimee_chat_project_root';
 const RULES_BANNER_DISMISSED_KEY = 'aimee_rules_banner_dismissed';
 const STREAM_PERSIST_DEBOUNCE_MS = 1000;
+// How many of a tab's most-recent messages the transcript renders by default.
+// Full history is kept in memory (and persisted), but only this window is mounted
+// to the DOM / reconciled per stream flush, so render cost is bounded by the
+// window, not the whole conversation. Scrolling/"show earlier" reveals the rest.
+const TRANSCRIPT_WINDOW = 150;
+const TRANSCRIPT_WINDOW_STEP = 150;
 // Cap how often streamed deltas trigger a React re-render. Each flush reconciles
 // the whole message list and re-parses the streaming message's markdown, so a
 // per-token (or per-frame) cadence pegs a CPU core during long/continuous turns.
@@ -198,8 +204,36 @@ function loadInitialChatState(): { tabs: TabData[]; activeIdx: number } {
   return { tabs, activeIdx };
 }
 
-function saveTabs(tabs: TabData[]): void {
+/* Persist the tab list to localStorage, but (1) bound each tab's stored history
+ * full history (it's the browser-side restore source and must stay recoverable),
+ * coalesce writes onto an idle callback so the synchronous JSON.stringify +
+ * setItem never runs on the React commit path during a streaming burst. Rapid
+ * tabs changes collapse into one write; a trailing timeout guarantees it still
+ * runs if the main thread stays busy. */
+let pendingTabsToPersist: TabData[] | null = null;
+let tabsWriteScheduled = false;
+
+function writePendingTabs(): void {
+  tabsWriteScheduled = false;
+  const tabs = pendingTabsToPersist;
+  pendingTabsToPersist = null;
+  if (!tabs) return;
   try { localStorage.setItem(TABS_KEY, JSON.stringify(tabs)); } catch { /* ignore */ }
+}
+
+function saveTabs(tabs: TabData[]): void {
+  pendingTabsToPersist = tabs;
+  if (tabsWriteScheduled) return;
+  tabsWriteScheduled = true;
+  const ric = (globalThis as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback;
+  if (ric) ric(writePendingTabs, { timeout: 1000 });
+  else window.setTimeout(writePendingTabs, 200);
+}
+
+/* Flush any coalesced tabs write synchronously — call before the page unloads so
+ * a pending in-flight write isn't dropped. */
+function flushPendingTabs(): void {
+  if (pendingTabsToPersist) writePendingTabs();
 }
 
 /* Conversation/tab persistence is local (localStorage) and mirrors the top
@@ -1318,51 +1352,72 @@ function ChannelView({ channelName, messages, agents, onSend }: ChannelViewProps
   );
 }
 
-/* Renders the committed transcript. Extracted + memoized so re-renders of the
- * big Chat component that are NOT a message change (textarea typing, the remote-
- * turn preview, the workflow poll, working toggles) skip transcript
- * reconciliation entirely. Only re-renders when `messages`, `working`, or
- * `activeSid` actually change. */
+/* Render one transcript block. `streaming` only matters for an assistant bubble
+ * (it then renders raw growing text and skips the markdown parse); every other
+ * block type ignores it. */
+function renderBlock(m: StreamMsg, activeSid: string, streaming: boolean) {
+  switch (m.type) {
+    case 'user':
+      return <Message key={m.id} role="user" text={m.text} />;
+    case 'assistant':
+      return <Message key={m.id} role="assistant" text={m.text} streaming={streaming} />;
+    case 'thinking':
+      return <ThinkingBlock key={m.id} text={m.thinkText ?? ''} />;
+    case 'tool':
+      return <ToolBlock key={m.id} name={m.toolName ?? ''} args={m.toolArgs ?? ''} result={m.toolResult} />;
+    case 'narration':
+      return <TurnSummaryCard key={m.id} text={m.text} />;
+    case 'diff':
+      return <DiffBlock key={m.id} path={m.diffPath} diff={m.diffContent ?? ''} />;
+    case 'checkpoint':
+      return <RewindMarker key={m.id} snapshotId={m.snapshotId!} sid={activeSid} />;
+    default:
+      return null;
+  }
+}
+
+/* The committed (settled) part of the transcript — everything except the live,
+ * still-streaming tail block. Memoized with a REFERENCE-ONLY comparator: a
+ * stream flush rebuilds the `messages` array but keeps every settled message's
+ * object identity (applyDeltas replaces only the one growing message), so this
+ * subtree bails in an O(n) pointer scan instead of re-mapping and reconciling
+ * the whole conversation as React elements. Without it, each of the ~10 flushes/s
+ * costs O(conversation length) of React work, so a long session steadily pegs a
+ * core — the "gets worse the longer I chat" symptom. It re-renders only when a
+ * block is committed (count changes) or a settled block actually mutates (e.g. a
+ * tool_result lands), both of which change an element reference. */
+const CommittedTranscript = memo(function CommittedTranscript({ messages, count, activeSid }: {
+  messages: StreamMsg[]; count: number; activeSid: string;
+}) {
+  const blocks = [];
+  for (let i = 0; i < count; i++) blocks.push(renderBlock(messages[i], activeSid, false));
+  return <>{blocks}</>;
+}, (prev, next) => {
+  if (prev.count !== next.count || prev.activeSid !== next.activeSid) return false;
+  for (let i = 0; i < next.count; i++) {
+    if (prev.messages[i] !== next.messages[i]) return false;
+  }
+  return true;
+});
+
+/* Renders the transcript. Extracted + memoized so re-renders of the big Chat
+ * component that are NOT a message change (textarea typing, the remote-turn
+ * preview, the workflow poll, working toggles) skip it entirely. During a turn
+ * only the live tail block is re-rendered per flush; the committed history is
+ * gated behind CommittedTranscript's reference comparator. */
 const Transcript = memo(function Transcript({ messages, working, activeSid }: {
   messages: StreamMsg[]; working: boolean; activeSid: string;
 }) {
-  // The growing tail assistant bubble streams as raw text (no markdown re-parse);
-  // it stops being "streaming" the moment another block follows it or the turn
-  // ends (working → false), at which point it renders markdown once.
-  const lastId = messages.length > 0 ? messages[messages.length - 1].id : -1;
+  const n = messages.length;
+  // While a turn is in flight the last block is the live tail (an assistant
+  // bubble streams its raw text; it settles — and renders markdown once — when
+  // another block follows it or the turn ends). Everything before it is settled.
+  const liveTail = working && n > 0;
+  const committedCount = liveTail ? n - 1 : n;
   return (
     <>
-      {messages.map(m => {
-        if (m.type === 'user') {
-          return <Message key={m.id} role="user" text={m.text} />;
-        }
-        if (m.type === 'assistant') {
-          return <Message key={m.id} role="assistant" text={m.text} streaming={working && m.id === lastId} />;
-        }
-        if (m.type === 'thinking') {
-          return <ThinkingBlock key={m.id} text={m.thinkText ?? ''} />;
-        }
-        if (m.type === 'tool') {
-          return (
-            <ToolBlock
-              key={m.id}
-              name={m.toolName ?? ''}
-              args={m.toolArgs ?? ''}
-              result={m.toolResult}
-            />
-          );
-        }
-        if (m.type === 'narration') {
-          return <TurnSummaryCard key={m.id} text={m.text} />;
-        }
-        if (m.type === 'diff') {
-          return <DiffBlock key={m.id} path={m.diffPath} diff={m.diffContent ?? ''} />;
-        }
-        if (m.type === 'checkpoint') {
-          return <RewindMarker key={m.id} snapshotId={m.snapshotId!} sid={activeSid} />;
-        }
-        return null;
-      })}
+      <CommittedTranscript messages={messages} count={committedCount} activeSid={activeSid} />
+      {liveTail && renderBlock(messages[n - 1], activeSid, true)}
     </>
   );
 });
@@ -1522,6 +1577,15 @@ export default function Chat() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
   }, []);
 
+  // How many trailing messages the transcript currently renders. Full history
+  // stays in streamMsgs (and persisted); we just don't mount/reconcile all of it.
+  // "Show earlier" grows the window; switching conversations resets it so a fresh
+  // tab opens windowed, not expanded from a previous one.
+  const [visibleCount, setVisibleCount] = useState(TRANSCRIPT_WINDOW);
+  useEffect(() => { setVisibleCount(TRANSCRIPT_WINDOW); }, [activePersonaSid]);
+  const hiddenCount = Math.max(0, streamMsgs.length - visibleCount);
+  const windowedMsgs = hiddenCount > 0 ? streamMsgs.slice(hiddenCount) : streamMsgs;
+
   useEffect(() => { scrollToBottom(); }, [streamMsgs, working, scrollToBottom]);
   useEffect(() => { streamMsgsRef.current = streamMsgs; }, [streamMsgs]);
   useEffect(() => { tabsRef.current = tabs; }, [tabs]);
@@ -1541,7 +1605,7 @@ export default function Chat() {
    * browser doesn't leak attachments until the session is closed. keepalive
    * lets the POSTs survive the unload; best-effort. */
   useEffect(() => {
-    const onUnload = () => {
+    const detachAll = () => {
       for (const tab of tabsRef.current) {
         if (!tab.attachId || !tab.aimeeSid) continue;
         try {
@@ -1554,8 +1618,25 @@ export default function Chat() {
         } catch { /* ignore */ }
       }
     };
-    window.addEventListener('beforeunload', onUnload);
-    return () => window.removeEventListener('beforeunload', onUnload);
+    // Always flush the coalesced tabs write when the page goes away or is hidden
+    // — NOT just on beforeunload. bfcache navigation (back/forward) and OS
+    // background-kill on mobile don't fire beforeunload, and since the transcript
+    // restores SOLELY from localStorage, a dropped write shows up as a gap on
+    // reload. visibilitychange→hidden catches a backgrounded tab before a kill.
+    // Detach presence only on a GENUINE unload: a tab going to the background — or
+    // entering bfcache (pagehide persisted=true, restored without re-mounting) —
+    // is still an active session and must stay attached.
+    const onBeforeUnload = () => { flushPendingTabs(); detachAll(); };
+    const onPageHide = (e: PageTransitionEvent) => { flushPendingTabs(); if (!e.persisted) detachAll(); };
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flushPendingTabs(); };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    window.addEventListener('pagehide', onPageHide);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      window.removeEventListener('pagehide', onPageHide);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   /* Subscribe to the active session's unified-presence event stream so the UI
@@ -2808,7 +2889,20 @@ export default function Chat() {
           display: 'flex', flexDirection: 'column', gap: '12px',
         }}
       >
-        <Transcript messages={streamMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />
+        {hiddenCount > 0 && (
+          <button
+            onClick={() => setVisibleCount(c => c + TRANSCRIPT_WINDOW_STEP)}
+            style={{
+              alignSelf: 'center', padding: '4px 12px', margin: '0 0 4px',
+              fontSize: '12px', fontFamily: 'system-ui', cursor: 'pointer',
+              background: tokens.surfaceAlt, color: tokens.textSecondary,
+              border: `1px solid ${tokens.borderMedium}`, borderRadius: '12px',
+            }}
+          >
+            Show earlier messages ({hiddenCount})
+          </button>
+        )}
+        <Transcript messages={windowedMsgs} working={working} activeSid={tabs[activeIdx]?.aimeeSid ?? ''} />
         {working && <WorkingIndicator />}
         {remoteTurnActive && !working && (
           <div style={{

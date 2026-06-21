@@ -9,6 +9,7 @@
 #include "kb_client.h"
 #include "dstr.h"
 #include "platform_random.h"
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -189,27 +190,92 @@ static void append_single_line_escaped(dstr_t *d, const char *s, size_t max_char
    }
 }
 
-static int append_candidate(dstr_t *block, const char *candidate, size_t budget, int *omitted_count)
+char *ingress_render_block(const ingress_entry_t *entries, int count, size_t envelope_budget,
+                           int headline_missing_count, int *omitted_count_out)
 {
-   if (!candidate || !candidate[0])
-      return 1;
-   size_t need = strlen(candidate);
-   if (dstr_len(block) + need > budget)
+   /* Reserve the same footer headroom the inline builder did; the per-candidate
+    * budget gate, group headers, separators, footer, and truncation note below
+    * reproduce the old rendering byte for byte. */
+   size_t block_budget = envelope_budget > INGRESS_FOOTER_RESERVE_BYTES
+                             ? envelope_budget - INGRESS_FOOTER_RESERVE_BYTES
+                             : 0;
+   dstr_t block;
+   dstr_init(&block);
+   int omitted = 0;
+   /* have_prev guards prev_kind, so its seed is never read before the first entry
+    * sets it; group_first tracks whether this group's header still needs to land. */
+   bool have_prev = false;
+   ingress_source_kind_t prev_kind = ING_SRC_CODE;
+   bool group_first = true;
+
+   for (int i = 0; i < count; i++)
    {
-      if (omitted_count)
-         (*omitted_count)++;
-      return 0;
+      const ingress_entry_t *e = &entries[i];
+      if (!have_prev || e->kind != prev_kind)
+      {
+         /* A new group: one blank line separates it from a non-empty block,
+          * exactly the old per-group `if (block.len) "\n"`. */
+         if (dstr_len(&block) > 0)
+            dstr_append_str(&block, "\n");
+         group_first = true;
+         prev_kind = e->kind;
+         have_prev = true;
+      }
+
+      dstr_t cand;
+      dstr_init(&cand);
+      if (group_first && e->header)
+         dstr_append_str(&cand, e->header);
+      if (e->preview)
+         dstr_append_str(&cand, e->preview);
+      char *c = dstr_steal(&cand);
+
+      if (c && c[0])
+      {
+         /* The header rides the first candidate that actually fits — the old
+          * `wrote_header`, set only on a successful append. */
+         if (dstr_len(&block) + strlen(c) <= block_budget)
+         {
+            dstr_append_str(&block, c);
+            group_first = false;
+         }
+         else
+         {
+            omitted++;
+         }
+      }
+      free(c);
    }
-   dstr_append_str(block, candidate);
-   return 1;
+
+   if (dstr_len(&block) > 0)
+   {
+      char footer[256];
+      snprintf(footer, sizeof(footer),
+               "context-budget: used_bytes=%zu budget_bytes=%zu omitted_count=%d "
+               "headline_missing_count=%d\n",
+               dstr_len(&block), envelope_budget, omitted, headline_missing_count);
+      if (dstr_len(&block) + strlen(footer) <= block_budget)
+         dstr_append_str(&block, footer);
+      if (omitted > 0)
+      {
+         char trunc[128];
+         snprintf(trunc, sizeof(trunc),
+                  "... (%d more available via get_context_block or memory_get)\n", omitted);
+         if (dstr_len(&block) + strlen(trunc) <= block_budget)
+            dstr_append_str(&block, trunc);
+      }
+   }
+
+   if (omitted_count_out)
+      *omitted_count_out = omitted;
+   return dstr_steal(&block);
 }
 
-static char *format_code_candidate(const code_search_hit_t *hit, int header)
+/* Per-record body for a code hit (no group header — the IR entry carries that). */
+static char *format_code_body(const code_search_hit_t *hit)
 {
    dstr_t d;
    dstr_init(&d);
-   if (header)
-      dstr_append_str(&d, "recommended (code):\n");
    dstr_appendf(&d, "  - %s\n", hit->file_path);
    if (hit->snippet[0])
    {
@@ -220,8 +286,10 @@ static char *format_code_candidate(const code_search_hit_t *hit, int header)
    return dstr_steal(&d);
 }
 
-static char *format_memory_preview_candidate(const memory_diagnostic_t *diag, int header,
-                                             int *headline_missing)
+/* Per-record body for a memory preview (no group header). Returns NULL for an
+ * empty row (id <= 0) — the old NULL candidate, which produced no output and was
+ * not counted. Bumps *headline_missing when the row carries no headline. */
+static char *format_memory_preview_body(const memory_diagnostic_t *diag, int *headline_missing)
 {
    const memory_t *m = &diag->memory;
    if (m->id <= 0)
@@ -234,8 +302,6 @@ static char *format_memory_preview_candidate(const memory_diagnostic_t *diag, in
 
    dstr_t d;
    dstr_init(&d);
-   if (header)
-      dstr_append_str(&d, "recommended (memory previews):\n");
    dstr_appendf(&d, "  - memory:%lld", (long long)m->id);
    if (m->key[0])
    {
@@ -363,12 +429,11 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    size_t envelope_budget = (size_t)configured_budget;
    if (envelope_budget <= INGRESS_FOOTER_RESERVE_BYTES)
       return NULL;
-   size_t block_budget = envelope_budget - INGRESS_FOOTER_RESERVE_BYTES;
-
-   dstr_t block;
-   dstr_init(&block);
+   /* P0 Envelope IR: gather each source into a typed entry, then render the block
+    * from the list. CAP = 6 code + 5 memory + 1 facts + 1 audit. */
+   ingress_entry_t entries[6 + 5 + 1 + 1];
+   int k = 0;
    double score = 0.0;
-   int omitted_count = 0;
    int headline_missing_count = 0;
 
    /* Primary signal: code search over the turn query. The code index is the
@@ -380,19 +445,16 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    int n = preview_on ? kb_client_index_code_search(query, NULL, hits,
                                                     (int)(sizeof(hits) / sizeof(hits[0])))
                       : 0;
+   for (int i = 0; i < n; i++)
+   {
+      entries[k].kind = ING_SRC_CODE;
+      entries[k].transform = ING_XF_NONE;
+      entries[k].header = "recommended (code):\n";
+      entries[k].preview = format_code_body(&hits[i]);
+      k++;
+   }
    if (n > 0)
    {
-      int wrote_header = 0;
-      for (int i = 0; i < n; i++)
-      {
-         char *code = format_code_candidate(&hits[i], !wrote_header);
-         if (code)
-         {
-            if (append_candidate(&block, code, block_budget, &omitted_count))
-               wrote_header = 1;
-            free(code);
-         }
-      }
       double cs = (double)n / 6.0;
       if (cs > score)
          score = cs;
@@ -403,22 +465,19 @@ char *ingress_preinject_build(const char *query, int request_disabled)
     * the advertised memory:<id> handle and the memory_get MCP tool. */
    memory_diagnostic_t mems[5];
    int mem_n = preview_on ? kb_client_memory_diagnose(query, 5, mems, 5) : 0;
+   for (int i = 0; i < mem_n; i++)
+   {
+      char *body = format_memory_preview_body(&mems[i], &headline_missing_count);
+      if (!body)
+         continue; /* empty row (id <= 0): no entry, as the old NULL candidate */
+      entries[k].kind = ING_SRC_MEMORY;
+      entries[k].transform = ING_XF_NONE;
+      entries[k].header = "recommended (memory previews):\n";
+      entries[k].preview = body;
+      k++;
+   }
    if (mem_n > 0)
    {
-      if (block.len)
-         dstr_append_str(&block, "\n");
-      int wrote_header = 0;
-      for (int i = 0; i < mem_n; i++)
-      {
-         char *preview =
-             format_memory_preview_candidate(&mems[i], !wrote_header, &headline_missing_count);
-         if (preview)
-         {
-            if (append_candidate(&block, preview, block_budget, &omitted_count))
-               wrote_header = 1;
-            free(preview);
-         }
-      }
       double ms = mem_n >= 4 ? 0.7 : (mem_n >= 2 ? 0.4 : 0.1);
       if (ms > score)
          score = ms;
@@ -432,17 +491,17 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    char *facts = facts_on ? kb_client_memory_facts(query) : NULL;
    if (facts && facts[0])
    {
-      if (block.len)
-         dstr_append_str(&block, "\n");
       dstr_t f;
       dstr_init(&f);
       dstr_append_str(&f, "## Known facts\n");
       dstr_append_str(&f, facts);
       if (facts[strlen(facts) - 1] != '\n')
          dstr_append_str(&f, "\n");
-      char *fact_candidate = dstr_steal(&f);
-      append_candidate(&block, fact_candidate, block_budget, &omitted_count);
-      free(fact_candidate);
+      entries[k].kind = ING_SRC_FACTS;
+      entries[k].transform = ING_XF_NONE;
+      entries[k].header = "";
+      entries[k].preview = dstr_steal(&f);
+      k++;
       if (score < 0.5)
          score = 0.5;
    }
@@ -510,42 +569,28 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    char *audit = preview_on ? ingress_preinject_read_audit_context() : NULL;
    if (audit && audit[0])
    {
-      if (block.len)
-         dstr_append_str(&block, "\n");
       dstr_t a;
       dstr_init(&a);
       dstr_append_str(&a, "recommended (audit context):\n");
       dstr_append_str(&a, audit);
       if (audit[strlen(audit) - 1] != '\n')
          dstr_append_str(&a, "\n");
-      char *audit_candidate = dstr_steal(&a);
-      append_candidate(&block, audit_candidate, block_budget, &omitted_count);
-      free(audit_candidate);
+      entries[k].kind = ING_SRC_AUDIT;
+      entries[k].transform = ING_XF_NONE;
+      entries[k].header = "";
+      entries[k].preview = dstr_steal(&a);
+      k++;
       if (score < 0.4)
          score = 0.4;
    }
    free(audit);
 
-   if (block.len)
-   {
-      char footer[256];
-      snprintf(footer, sizeof(footer),
-               "context-budget: used_bytes=%zu budget_bytes=%zu omitted_count=%d "
-               "headline_missing_count=%d\n",
-               dstr_len(&block), envelope_budget, omitted_count, headline_missing_count);
-      if (dstr_len(&block) + strlen(footer) <= block_budget)
-         dstr_append_str(&block, footer);
-      if (omitted_count > 0)
-      {
-         char trunc[128];
-         snprintf(trunc, sizeof(trunc),
-                  "... (%d more available via get_context_block or memory_get)\n", omitted_count);
-         if (dstr_len(&block) + strlen(trunc) <= block_budget)
-            dstr_append_str(&block, trunc);
-      }
-   }
+   /* Render the resident block from the typed entry list, then release the
+    * per-entry previews (the renderer copies what it keeps). */
+   char *blk = ingress_render_block(entries, k, envelope_budget, headline_missing_count, NULL);
+   for (int i = 0; i < k; i++)
+      free(entries[i].preview);
 
-   char *blk = dstr_steal(&block);
    if (!blk || !blk[0])
    {
       free(blk);
