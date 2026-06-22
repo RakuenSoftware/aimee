@@ -17,34 +17,74 @@
 static wfe_ci_status_t g_ci;
 static int g_mergeable, g_is_merged;
 static wfe_merge_result_t g_merge;
+/* the pr_ref the downstream gates were called with (last seen), so a test can
+ * assert pr.open's ref reaches gate.ci / check.mergeable / merge. */
+static char g_seen_pr[160];
+static void see_pr(const char *p) { snprintf(g_seen_pr, sizeof g_seen_pr, "%s", p ? p : ""); }
 static wfe_ci_status_t m_ci(const char *r, const char *p)
 {
    (void)r;
-   (void)p;
+   see_pr(p);
    return g_ci;
 }
 static int m_mergeable(const char *r, const char *p)
 {
    (void)r;
-   (void)p;
+   see_pr(p);
    return g_mergeable;
 }
 static int m_is_merged(const char *r, const char *p)
 {
    (void)r;
-   (void)p;
+   see_pr(p);
    return g_is_merged;
 }
 static wfe_merge_result_t m_merge(const char *r, const char *p)
 {
    (void)r;
-   (void)p;
+   see_pr(p);
    return g_merge;
 }
-/* open is unused by the safety blocks (ci/mergeable/merge); NULL it explicitly so
- * the positional initializer covers every wfe_forge_t field (-Werror=missing-
- * field-initializers). */
+/* a PR-opening provider: writes a known forge ref so we can assert it propagates. */
+static int m_open(const char *repo, const char *branch, const char *title, const char *body,
+                  char out_pr_ref[128])
+{
+   (void)repo;
+   (void)branch;
+   (void)title;
+   (void)body;
+   snprintf(out_pr_ref, 128, "PR#42");
+   return 0;
+}
+/* open that signals success but writes a junk (empty) ref -> must be rejected. */
+static int m_open_bad(const char *repo, const char *branch, const char *title, const char *body,
+                      char out_pr_ref[128])
+{
+   (void)repo;
+   (void)branch;
+   (void)title;
+   (void)body;
+   out_pr_ref[0] = '\0';
+   return 0;
+}
+/* open that fails outright. */
+static int m_open_fail(const char *repo, const char *branch, const char *title, const char *body,
+                       char out_pr_ref[128])
+{
+   (void)repo;
+   (void)branch;
+   (void)title;
+   (void)body;
+   (void)out_pr_ref;
+   return -1;
+}
+/* MOCK: no `open` (today's default) -> pr_ref falls back to the work-item id.
+ * MOCK_OPEN: opens "PR#42" -> the gates must resolve that, not the work-item id.
+ * MOCK_OPENBAD / MOCK_OPENFAIL: pr.open must fail closed, never reaching the gates. */
 static const wfe_forge_t MOCK = {m_ci, m_mergeable, m_is_merged, m_merge, NULL};
+static const wfe_forge_t MOCK_OPEN = {m_ci, m_mergeable, m_is_merged, m_merge, m_open};
+static const wfe_forge_t MOCK_OPENBAD = {m_ci, m_mergeable, m_is_merged, m_merge, m_open_bad};
+static const wfe_forge_t MOCK_OPENFAIL = {m_ci, m_mergeable, m_is_merged, m_merge, m_open_fail};
 
 /* pp -> pr -> check.mergeable -> gate.ci -> merge; gates loop back to pp. */
 static const char *WF = "name: sf\nstart: pp\nnodes:\n"
@@ -57,6 +97,7 @@ static const char *WF = "name: sf\nstart: pp\nnodes:\n"
                         "    on_pass: m\n    on_fail: pp\n"
                         "  - id: m\n    block: merge\n    in:\n      pr: pr.out\n";
 
+static char g_last_id[80]; /* the work-item id of the most recent run_fresh */
 static int run_fresh(const char *path_suffix)
 {
    char id[80] = "", err[256] = "";
@@ -64,6 +105,7 @@ static int run_fresh(const char *path_suffix)
    {
       return -99;
    }
+   snprintf(g_last_id, sizeof g_last_id, "%s", id);
    if (wfe_engine_run(id, err, sizeof err) != 0)
    {
       return -98;
@@ -145,6 +187,42 @@ int main(void)
    g_is_merged = -1;       /* cannot confirm not-already-merged */
    g_merge = WFE_MERGE_OK; /* would merge if (wrongly) called */
    assert(run_fresh("g") == 4);
+
+   /* H: fallback (no `open` provider, today's MOCK) -> the gates still receive a
+    *    non-empty ref, namely the work-item id. Locks the no-regression path. */
+   g_mergeable = 1;
+   g_ci = WFE_CI_SUCCESS;
+   g_is_merged = 0;
+   g_merge = WFE_MERGE_OK;
+   g_seen_pr[0] = '\0';
+   assert(run_fresh("h") == 1);
+   assert(strcmp(g_seen_pr, g_last_id) == 0); /* fell back to the work-item id */
+
+   /* I: with a PR-opening provider, pr.open records "PR#42" and the downstream
+    *    gates must resolve THAT ref, not the work-item id. This is the bug fix:
+    *    before it, g_seen_pr would be the work-item id. */
+   wfe_set_forge_provider(&MOCK_OPEN);
+   g_mergeable = 1;
+   g_ci = WFE_CI_SUCCESS;
+   g_is_merged = 0;
+   g_merge = WFE_MERGE_OK;
+   g_seen_pr[0] = '\0';
+   assert(run_fresh("i") == 1);
+   assert(strcmp(g_seen_pr, "PR#42") == 0);    /* the real PR ref propagated */
+   assert(strcmp(g_seen_pr, g_last_id) != 0);  /* and it is NOT the work-item id */
+
+   /* J: open succeeds but yields a junk (empty) ref -> pr.open fails closed; the
+    *    merge gates are never reached, so no wrong-ref query and no merge. */
+   wfe_set_forge_provider(&MOCK_OPENBAD);
+   g_seen_pr[0] = '\0';
+   assert(run_fresh("j") != 1);            /* not merged */
+   assert(g_seen_pr[0] == '\0');           /* gates never ran */
+
+   /* K: open fails outright -> same fail-closed guarantee. */
+   wfe_set_forge_provider(&MOCK_OPENFAIL);
+   g_seen_pr[0] = '\0';
+   assert(run_fresh("k") != 1);
+   assert(g_seen_pr[0] == '\0');
 
    printf("ok\n");
    return 0;

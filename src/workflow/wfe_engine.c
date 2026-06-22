@@ -39,6 +39,12 @@ const char *wfe_ctx_proposal_path(const wfe_ctx *c)
 {
    return (c && c->wi) ? c->wi->proposal_path : NULL;
 }
+const char *wfe_ctx_pr_ref(const wfe_ctx *c)
+{
+   /* "" (not NULL) when unloaded, mirroring how the resolver tolerates an absent
+    * work item; wi is loaded by the engine driver before any executor runs. */
+   return (c && c->wi) ? c->wi->pr_ref : "";
+}
 
 wfe_def_t *wfe_load_workflow(const char *name, char *err, size_t errlen)
 {
@@ -345,6 +351,11 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
             }
          }
          WFE_CKW(db1_work_item_set_stage(work_item_id, next, r.content_hash));
+         /* pr.open carries the opened PR ref in content_hash; persist it durably so
+          * the later gate.ci / check.mergeable / merge blocks resolve the real PR
+          * (full-autonomous-development Phase A). Rides this atomic txn. */
+         if (node->block == WFE_BLK_PR_OPEN && r.status == WFE_STEP_ADVANCED && r.content_hash[0])
+            WFE_CKW(db1_work_item_set_pr_ref(work_item_id, r.content_hash));
          db1_lifecycle_event_add(work_item_id, node->id,
                                  r.status == WFE_STEP_LOOPED ? "loop" : "advance", "engine", next,
                                  r.content_hash, r.cost_usd);

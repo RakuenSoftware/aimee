@@ -39,6 +39,10 @@ static void db1_run_migrations(sqlite3 *db)
        /* Work-queue lane: a partial UNIQUE index in schema.sql depends on this
         * column, so legacy DBs must gain it before the schema SQL runs. */
        "ALTER TABLE work_queue ADD COLUMN lane TEXT DEFAULT ''",
+       /* Autonomous-dev: persist the forge PR ref opened by pr.open so the
+        * downstream gate.ci / check.mergeable / merge blocks resolve the real PR
+        * instead of the work-item id (full-autonomous-development Phase A). */
+       "ALTER TABLE lifecycle_work_item ADD COLUMN pr_ref TEXT NOT NULL DEFAULT ''",
        NULL,
    };
    for (int i = 0; migrations[i]; i++)

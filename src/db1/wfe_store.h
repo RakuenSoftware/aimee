@@ -19,6 +19,11 @@ typedef struct
                              panel_unreachable */
    char paused_state[64];
    char content_hash[72];
+   /* The forge ref returned by g_forge->open (PR number/url), opaque to the
+    * workflow. "" means no PR has been opened yet (pre-open flow, or a forge
+    * provider with no open method). Set when a pr.open block advances; bounded by
+    * the wfe_step_result_t.content_hash transport (validated < 64 chars at open). */
+   char pr_ref[128];
    double cum_cost_usd;
    double work_item_max_cost_usd; /* 0 = no cap */
    int override_count;
@@ -47,6 +52,10 @@ int db1_work_item_get(const char *work_item_id, db1_work_item_t *out);
 
 /* Move to a new stage + update content_hash (state unchanged). */
 int db1_work_item_set_stage(const char *work_item_id, const char *stage, const char *content_hash);
+/* Record the forge PR ref opened for this work item (set when pr.open advances),
+ * so the downstream forge gates (gate.ci / check.mergeable / merge) resolve the
+ * real PR instead of the work-item id. */
+int db1_work_item_set_pr_ref(const char *work_item_id, const char *pr_ref);
 /* Set terminal state (accepted | rejected | abandoned) and clear pause. */
 int db1_work_item_set_terminal(const char *work_item_id, const char *state);
 int db1_work_item_set_pause(const char *work_item_id, const char *reason, const char *paused_state);

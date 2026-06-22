@@ -288,6 +288,21 @@ static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
  * forge returns becomes the produced content. A failed open loops (retry). With
  * no live `open` installed (default/mocks) it preserves the prior advance so the
  * engine stays drivable without a forge. */
+/* A forge PR ref must be non-empty, printable, and fit the wfe_step_result_t
+ * content_hash transport (it rides that field to the engine, which persists it as
+ * the work item's pr_ref). A live provider that signals success with a junk or
+ * over-long ref is rejected so a bogus ref never reaches the merge gates. */
+static int pr_ref_is_sane(const char *ref)
+{
+   size_t n = ref ? strlen(ref) : 0;
+   if (n == 0 || n >= 64) /* < sizeof(((wfe_step_result_t*)0)->content_hash) (65) */
+      return 0;
+   for (size_t i = 0; i < n; i++)
+      if ((unsigned char)ref[i] < 0x20 || (unsigned char)ref[i] > 0x7e)
+         return 0;
+   return 1;
+}
+
 static wfe_step_result_t exec_pr_open(wfe_ctx *ctx, const wfe_node_t *node)
 {
    char handle[80];
@@ -295,20 +310,35 @@ static wfe_step_result_t exec_pr_open(wfe_ctx *ctx, const wfe_node_t *node)
    if (g_forge->open)
    {
       const char *branch = getenv("AIMEE_WORKFLOW_BRANCH");
-      char pr_ref[128] = "";
+      char pr_ref[128] = ""; /* the forge open() contract writes up to 128 bytes */
       if (g_forge->open(wfe_ctx_repo(ctx), branch ? branch : "HEAD", wfe_ctx_work_item(ctx), "",
                         pr_ref) != 0)
          return wfe_step_looped();
+      /* Fail closed on a success-with-bad-ref: advancing with no resolvable PR would
+       * silently push the merge gates onto the wrong target. */
+      if (!pr_ref_is_sane(pr_ref))
+         return wfe_step_looped();
+      /* pr_ref rides content_hash; the engine persists it as the work item's pr_ref
+       * when this pr.open block advances (see wfe_engine.c ADVANCED branch). */
       return wfe_step_advanced(handle, pr_ref, 0.0);
    }
    return wfe_step_advanced(handle, "", 0.0);
 }
 
-/* the PR ref the forge ops act on. Live wiring would resolve a real PR number
- * stored when pr.open ran; for now we pass the work-item id (the mock ignores
- * it; the live provider is gated). */
+/* The PR ref the forge ops (gate.ci / check.mergeable / merge) act on. Resolution:
+ *   1. the real forge ref persisted when pr.open ran -> use it;
+ *   2. else, if a PR-opening provider IS registered, a missing ref is an anomaly
+ *      (a gate ran without a recorded PR) -> return "" so the forge ops fail closed
+ *      (NONE/unknown -> park), rather than masking it with a wrong ref;
+ *   3. else (no `open` provider: the live default + the safety-test mock) fall back
+ *      to the work-item id, preserving today's behavior for the gated/legacy path. */
 static const char *pr_ref(wfe_ctx *ctx)
 {
+   const char *ref = wfe_ctx_pr_ref(ctx);
+   if (ref && ref[0])
+      return ref;
+   if (g_forge->open)
+      return ""; /* open provider present but no ref recorded -> fail closed */
    const char *wi = wfe_ctx_work_item(ctx);
    return wi ? wi : "";
 }
