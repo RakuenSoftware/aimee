@@ -3149,7 +3149,9 @@ export default function Chat() {
           value={inputText}
           onChange={handleInput}
           onKeyDown={handleKeyDown}
-          placeholder="Type a message… (Shift+Enter for newline)"
+          placeholder={(working || remoteTurnActive)
+            ? 'Steer the running turn — Enter interrupts and continues'
+            : 'Type a message… (Shift+Enter for newline)'}
           rows={1}
           style={{
             flex: 1, padding: '10px', backgroundColor: tokens.surface, color: tokens.text,
@@ -3164,6 +3166,9 @@ export default function Chat() {
         <button
           onClick={sendMessage}
           aria-busy={queueActive}
+          title={(working || remoteTurnActive)
+            ? 'Interrupt the running turn and continue with this message'
+            : 'Send'}
           style={{
             padding: '10px 20px', background: tokens.primary,
             color: tokens.surface, border: 'none', borderRadius: '6px',
@@ -3173,9 +3178,9 @@ export default function Chat() {
           {queueActive ? (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
               <Spinner loading text="" />
-              Send
+              {(working || remoteTurnActive) ? 'Steer' : 'Send'}
             </span>
-          ) : 'Send'}
+          ) : ((working || remoteTurnActive) ? 'Steer' : 'Send')}
         </button>
       </div>
 

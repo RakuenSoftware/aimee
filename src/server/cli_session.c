@@ -366,7 +366,10 @@ static int cli_line_is_rule(const char *t)
 }
 
 /* Lines that mark the end of (or are not part of) the assistant's answer:
- * the claude status star, separators, footers, interrupt hints. */
+ * the claude status star, separators, footers, interrupt hints, and the
+ * model/effort status indicator near the composer — which claude renders with
+ * the SAME bullet glyph (●) as a real answer, so it must be recognized as chrome
+ * or it gets mistaken for the reply (observed live: "● high · /effort"). */
 static int cli_line_is_chrome(const char *t)
 {
    if (strncmp(t, "\xe2\x9c\xbb", 3) == 0) /* ✻ claude "Cooked/Baked for Ns" status */
@@ -375,7 +378,8 @@ static int cli_line_is_chrome(const char *t)
       return 1;
    if (strstr(t, "? for shortcuts") || strstr(t, "for agents") || strstr(t, "to interrupt") ||
        strstr(t, "tmux detected") || strstr(t, "Shell cwd was reset") ||
-       strstr(t, "Update available") || strstr(t, "/model to change"))
+       strstr(t, "Update available") || strstr(t, "/model to change") || strstr(t, "/effort") ||
+       strstr(t, "for shortcuts"))
       return 1;
    return 0;
 }
@@ -419,7 +423,13 @@ static int cli_body_in_baseline(const char *baseline, const char *amark, const c
    return 0;
 }
 
-char *cli_session_extract_response(const char *raw, const char *cli_kind, const char *baseline)
+/* allow_fallback: when no assistant bullet is found, whether to fall back to the
+ * baseline-delta of the whole pane. The final extraction wants this (last resort
+ * for an unrecognized TUI); incremental STREAMING does NOT — before the model has
+ * produced an answer there is no bullet yet, and streaming the fallback would
+ * push the startup banner / chrome as if it were the reply. */
+static char *cli_extract_impl(const char *raw, const char *cli_kind, const char *baseline,
+                              int allow_fallback)
 {
    char *text = cli_session_strip_ansi(raw ? raw : "");
    if (!text)
@@ -475,6 +485,8 @@ char *cli_session_extract_response(const char *raw, const char *cli_kind, const 
       const char *t = cli_lstrip(lines[i]);
       if (strncmp(t, amark, 3) != 0)
          continue;
+      if (cli_line_is_chrome(t))
+         continue; /* a status bullet (e.g. claude's "● high · /effort"), not an answer */
       const char *body = cli_lstrip(t + 3);
       if (!*body)
          continue;
@@ -526,9 +538,15 @@ char *cli_session_extract_response(const char *raw, const char *cli_kind, const 
    }
    free(res);
 
-   /* Fallback: no parseable bullet (e.g. a future TUI restyle). Return the
-    * portion not already in the baseline so a reused pane still never replays a
-    * prior turn, even if chrome leaks through. */
+   /* No parseable bullet. Streaming returns empty (the model hasn't produced an
+    * answer yet — don't push the banner/chrome). The final extraction falls back
+    * to the portion not already in the baseline (last resort for an unrecognized
+    * TUI; a reused pane still never replays a prior turn). */
+   if (!allow_fallback)
+   {
+      free(text);
+      return strdup("");
+   }
    if (baseline && baseline[0])
    {
       char *delta = cli_session_delta(baseline, text);
@@ -536,6 +554,11 @@ char *cli_session_extract_response(const char *raw, const char *cli_kind, const 
       return delta ? delta : strdup("");
    }
    return text;
+}
+
+char *cli_session_extract_response(const char *raw, const char *cli_kind, const char *baseline)
+{
+   return cli_extract_impl(raw, cli_kind, baseline, 1);
 }
 
 int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms)
@@ -637,7 +660,9 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
        * response so far and emit only the newly appended suffix. */
       if (g_stream_cb)
       {
-         char *partial = cli_session_extract_response(cap, s->cli_kind, s->baseline);
+         /* allow_fallback=0: stream nothing until there is a real answer bullet,
+          * so the startup banner / chrome is never pushed as the reply. */
+         char *partial = cli_extract_impl(cap, s->cli_kind, s->baseline, 0);
          const char *prev = s->stream_emitted ? s->stream_emitted : "";
          size_t plen = strlen(prev);
          if (partial && strncmp(partial, prev, plen) == 0 && partial[plen])
