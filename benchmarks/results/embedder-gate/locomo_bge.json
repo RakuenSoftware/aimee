@@ -1,0 +1,13 @@
+{
+  "questions": 1982,
+  "conversations": 10,
+  "recall_5": 0.49949545913218973,
+  "recall_10": 0.6104944500504541,
+  "mrr": 0.3681376696048183,
+  "name": "bge-base-en-v1.5",
+  "endpoint": "http://localhost:8900/v1/embeddings",
+  "query_prefix": "Represent this sentence for searching relevant passages: ",
+  "doc_prefix": "",
+  "normalized": true,
+  "wall_seconds": 64.5
+}
