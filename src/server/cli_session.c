@@ -575,14 +575,28 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
          int send_key = 1;
          if (is_codex)
          {
+            /* Probe ONLY the footer band (last few lines) for codex's active-
+             * generation hint, captured immediately before the send to minimize
+             * the window where codex goes idle between probe and C-c. Searching
+             * just the footer (not the whole pane) avoids a false positive from
+             * the literal "Working"/"to interrupt" appearing in scrollback or the
+             * conversation. The hint text is codex-version-dependent (verified
+             * 2026-06: "◦ Working (Ns • esc to interrupt)"); a future relabel
+             * would make this a false negative (skip C-c) — the safe direction
+             * (it won't quit codex; worst case the steer paste lands mid-render). */
             send_key = 0;
-            char *probe = malloc(CLI_SESSION_BUF_MAX);
-            if (probe)
+            /* Holds the whole visible pane (220x50, up to ~4 bytes/glyph) so the
+             * footer at the bottom is never truncated away (cli_session_capture
+             * keeps the START of the capture). The pool thread stack is 32MB. */
+            char probe[49152];
+            if (cli_session_capture(s, probe, sizeof(probe)) == 0)
             {
-               if (cli_session_capture(s, probe, CLI_SESSION_BUF_MAX) == 0 &&
-                   (strstr(probe, "to interrupt") || strstr(probe, "Working")))
+               /* Search only the footer band (last ~800 bytes) so the literal
+                * "Working"/"to interrupt" elsewhere in the pane can't false-match. */
+               size_t plen = strlen(probe);
+               const char *foot = plen > 800 ? probe + (plen - 800) : probe;
+               if (strstr(foot, "to interrupt") || strstr(foot, "Working"))
                   send_key = 1; /* codex is actively generating: C-c interrupts, not quits */
-               free(probe);
             }
          }
          if (send_key)

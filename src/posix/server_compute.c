@@ -706,8 +706,11 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
       {
          /* Mark the partial that already streamed as cut off, so the transcript
           * distinguishes a steered/interrupted reply from a complete one (the
-          * steer continuation follows as the next turn). */
-         stream_event(cctx, "text", "content", "\n\n_(interrupted)_");
+          * steer continuation follows as the next turn). Only when some text was
+          * actually streamed — otherwise a cancel before any output would show a
+          * stray marker with no content. */
+         if (sctx.emitted)
+            stream_event(cctx, "text", "content", "\n\n_(interrupted)_");
          stream_event(cctx, "turn_end", NULL, NULL);
          stream_event(cctx, "done", NULL, NULL);
          free(result.response);
