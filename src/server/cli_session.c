@@ -563,10 +563,21 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
        * and poll so a cancel is honoured promptly. */
       if (g_cancel_cb && g_cancel_cb(g_cancel_ud))
       {
-         char esc[CLI_SESSION_NAME_MAX + 64];
-         snprintf(esc, sizeof(esc), "tmux send-keys -t '%s' Escape 2>/dev/null", s->session_name);
+         /* Per-CLI interrupt key (verified live): claude stops a response on
+          * Escape (harmless when idle); codex ignores Escape and interrupts on
+          * Ctrl-C (a single C-c mid-generation stops it without quitting). The
+          * cancel fires while recv is polling — i.e. during generation — so the
+          * codex C-c lands while it is working. Default to Escape (the safe key:
+          * ignored CLIs just clear their input). */
+         const char *intr = (strstr(s->cli_kind, "codex") != NULL) ? "C-c" : "Escape";
+         char ic[CLI_SESSION_NAME_MAX + 64];
+         snprintf(ic, sizeof(ic), "tmux send-keys -t '%s' %s 2>/dev/null", s->session_name, intr);
          int erc;
-         free(sess_run(esc, &erc));
+         free(sess_run(ic, &erc));
+         /* Let the TUI settle out of its animating state before the turn ends, so
+          * the next (steer) turn captures a clean baseline and pastes into a
+          * stable prompt rather than a half-rendered one. */
+         msleep_ms(300);
          out[0] = '\0';
          return -3;
       }
@@ -641,10 +652,19 @@ char *cli_session_make_name(const char *agent_name, const char *role)
    if (!name)
       return NULL;
    snprintf(name, CLI_SESSION_NAME_MAX, "aimee-%s-%08lx", agent_name, h & 0xffffffff);
-   /* Replace chars invalid in tmux session names */
+   /* Sanitize: the session name is interpolated into single-quoted tmux shell
+    * commands ('%s') throughout this file, so beyond the chars tmux rejects in a
+    * session name we must also neutralize anything that could break out of the
+    * quoting (single quote, backslash, control/shell metacharacters). The name is
+    * derived from the aimee session id, which can be client-influenced, so this
+    * is the single chokepoint that keeps every tmux sink injection-safe. Keep
+    * only [A-Za-z0-9_-]; map everything else to '-'. */
    for (char *p = name; *p; p++)
    {
-      if (*p == ' ' || *p == '.' || *p == ':' || *p == '/')
+      unsigned char c = (unsigned char)*p;
+      int ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+               c == '_' || c == '-';
+      if (!ok)
          *p = '-';
    }
    return name;

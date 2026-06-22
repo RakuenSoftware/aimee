@@ -1556,11 +1556,13 @@ export default function Chat() {
   // Live mirror of remoteTurnActive so sendMessage can synchronously tell whether
   // a server/foreign turn (e.g. a steer auto-continue) is in flight for the tab.
   const remoteTurnActiveRef = useRef(false);
-  // Set when we just sent a steer (chat.interrupt): the next turn_started on the
-  // events stream is the server-initiated continuation — render it even though
-  // this surface may still look "working" while the cancelled turn's stream
-  // closes (otherwise the wasWorking self-echo guard would drop the steered reply).
-  const expectSteerRef = useRef(false);
+  // Holds the aimeeSid we just sent a steer for (chat.interrupt). The next
+  // turn_started on THAT session's events stream is the server-initiated
+  // continuation — render it even though this surface may still look "working"
+  // while the cancelled turn's stream closes (otherwise the wasWorking self-echo
+  // guard would drop the steered reply). Keyed by sid so switching tabs can't
+  // make a different tab's turn consume it. '' = none.
+  const expectSteerRef = useRef<string>('');
   // turn_ids already committed to history from the presence ring this session.
   // The ring replays turn_started→deltas→turn_done from cursor 0 on EVERY new
   // subscription (reconnect / tab switch back), so dedup is required to avoid
@@ -1731,8 +1733,11 @@ export default function Chat() {
       saveCursor(ev);
       curTurnId = turnIdOf(ev.data); observed = ''; wasWorking = workingRef.current;
       // A steer continuation is server-initiated: render it even if this surface
-      // still looks "working" from the just-cancelled turn's closing stream.
-      if (expectSteerRef.current) { wasWorking = false; expectSteerRef.current = false; }
+      // still looks "working" from the just-cancelled turn's closing stream. Only
+      // for the session this events stream is bound to (the one we steered).
+      if (expectSteerRef.current && expectSteerRef.current === activeAimeeSid) {
+        wasWorking = false; expectSteerRef.current = '';
+      }
       // Self-echo suppression: the server now ALWAYS mirrors the full turn to the
       // presence ring (durable source of truth for detached recovery), so the
       // surface that ORIGINATED the turn receives an echo of its own stream here.
@@ -2436,10 +2441,16 @@ export default function Chat() {
   // The server only honours the steer when a turn was actually in flight; on the
   // race where it just finished (interrupted:false), fall back to a normal send.
   async function steerInterrupt(sid: string, text: string) {
-    expectSteerRef.current = true;
+    expectSteerRef.current = sid;
     // Safety net: if the server continuation never starts (dispatch failed), clear
-    // the one-shot so it can't force-render a later own turn as a foreign one.
-    window.setTimeout(() => { expectSteerRef.current = false; }, 12000);
+    // the one-shot so it can't force-render a later turn on this session.
+    window.setTimeout(() => { if (expectSteerRef.current === sid) expectSteerRef.current = ''; }, 12000);
+    const sendNormally = () => {
+      if (expectSteerRef.current === sid) expectSteerRef.current = '';
+      sendQueueRef.current.push({ text, version: sendQueueVersionRef.current, originSid: sid });
+      recomputeWorkCounts();
+      void drainSendQueue();
+    };
     try {
       const resp = await fetch('/api/chat/interrupt', {
         method: 'POST',
@@ -2447,20 +2458,12 @@ export default function Chat() {
         body: JSON.stringify({ aimee_session_id: sid, message: text }),
       });
       if (resp.status === 401) { window.location.href = '/login'; return; }
-      const j = resp.ok ? await resp.json().catch(() => ({})) as { interrupted?: boolean } : {};
-      if (!j.interrupted) {
-        // No turn was in flight server-side: send normally instead.
-        expectSteerRef.current = false;
-        sendQueueRef.current.push({ text, version: sendQueueVersionRef.current, originSid: sid });
-        recomputeWorkCounts();
-        void drainSendQueue();
-      }
+      const j = resp.ok ? (await resp.json().catch(() => ({})) as { interrupted?: boolean }) : {};
+      // No turn was actually in flight (or the steer couldn't be queued): send it
+      // as an ordinary turn instead so the message is never lost.
+      if (!j.interrupted) sendNormally();
     } catch {
-      // Interrupt failed: fall back to a normal send so the message isn't lost.
-      expectSteerRef.current = false;
-      sendQueueRef.current.push({ text, version: sendQueueVersionRef.current, originSid: sid });
-      recomputeWorkCounts();
-      void drainSendQueue();
+      sendNormally();
     }
   }
 

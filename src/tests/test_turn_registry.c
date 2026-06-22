@@ -105,17 +105,20 @@ static void test_steer_set_take(void)
 {
    char *msg = NULL;
    assert(chat_steer_take("sess-S", &msg) == 0 && msg == NULL); /* nothing pending */
-   chat_steer_set("sess-S", "focus on the parser");
+   assert(chat_steer_set("sess-S", "focus on the parser") == 0);
    assert(chat_steer_take("sess-S", &msg) == 1);
    assert(msg && strcmp(msg, "focus on the parser") == 0);
    free(msg);
    msg = NULL;
    assert(chat_steer_take("sess-S", &msg) == 0 && msg == NULL); /* cleared by take */
    /* a newer steer supersedes an untaken one */
-   chat_steer_set("sess-S", "first");
-   chat_steer_set("sess-S", "second");
+   assert(chat_steer_set("sess-S", "first") == 0);
+   assert(chat_steer_set("sess-S", "second") == 0);
    assert(chat_steer_take("sess-S", &msg) == 1 && msg && strcmp(msg, "second") == 0);
    free(msg);
+   /* invalid args fail */
+   assert(chat_steer_set(NULL, "x") == -1);
+   assert(chat_steer_set("sess-S", NULL) == -1);
    /* per-session isolation */
    char *ma = NULL, *mb = NULL;
    chat_steer_set("sess-A", "a");

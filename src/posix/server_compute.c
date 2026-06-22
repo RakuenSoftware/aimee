@@ -696,6 +696,9 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
          stream_event(cctx, "turn_end", NULL, NULL);
          stream_event(cctx, "done", NULL, NULL);
          free(result.response);
+         /* compute_ok is a no-op for a server-initiated turn (compute_respond
+          * early-returns on conn_fd < 0); the pooled wrapper still emits the
+          * presence-ring turn_done that the webchat events stream listens for. */
          compute_ok(cctx);
          compute_ctx_free(cctx);
          return;

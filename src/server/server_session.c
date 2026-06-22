@@ -130,16 +130,33 @@ int handle_chat_interrupt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "forbidden: not the session owner", NULL);
 
    /* A turn was flagged: stash the steer for its worker to auto-continue. Order
-    * matters for security AND correctness: authorize+cancel FIRST, then stash.
-    * Stashing before the authz check would let an unauthorized caller's steer be
-    * picked up by a legitimate turn that happens to end in the race window. The
-    * reverse race (worker takes before this set, losing the steer) cannot happen:
-    * the worker only reaches the take after observing the cancel flag (a >=500ms
-    * recv poll) + interrupting + tearing the turn down, long after this set. */
+    * matters for security: authorize+cancel FIRST, then stash. Stashing before
+    * the authz check would let an unauthorized caller's steer be picked up by a
+    * legitimate turn that happens to end in the race window.
+    *
+    * Two corner cases turn rc=1 back into "not interrupted" so the caller sends
+    * the message as an ordinary turn instead of silently losing it:
+    *  - the steer table is full / OOM (chat_steer_set fails); or
+    *  - the turn finished (its registry entry is already gone) in the narrow
+    *    window between cancel and set, so no worker will pick the steer up. We
+    *    reclaim it; if the worker already took it (it dispatched), leave rc=1. */
    if (rc == 1)
-      chat_steer_set(sid, message);
-   aimee_log(LOG_INFO, "chat_interrupt", "session=%s interrupted=%d (queued steer=%d)", sid,
-             rc == 1, rc == 1);
+   {
+      if (chat_steer_set(sid, message) != 0)
+      {
+         rc = 0;
+      }
+      else if (!turn_registry_find(sid))
+      {
+         char *reclaimed = NULL;
+         if (chat_steer_take(sid, &reclaimed))
+         {
+            free(reclaimed);
+            rc = 0;
+         }
+      }
+   }
+   aimee_log(LOG_INFO, "chat_interrupt", "session=%s interrupted=%d", sid, rc == 1);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "session_id", sid);

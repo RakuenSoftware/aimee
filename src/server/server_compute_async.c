@@ -539,6 +539,9 @@ static void chat_stream_worker_pooled(void *arg)
       /* Carry the session's principal into create_compute_ctx's thread-local
        * fallback (the NULL-conn path reads it for vault identity). */
       agent_set_request_vault_principal(steer_principal);
+      /* create_compute_ctx DUPLICATES req (cJSON_Duplicate) — it does not adopt
+       * steer_tmpl — so steer_tmpl remains ours to free below, and the new ctx
+       * owns its own copy that its worker frees. */
       compute_ctx_t *nctx = create_compute_ctx(steer_ctx, NULL, steer_tmpl);
       agent_set_request_vault_principal(NULL);
       if (nctx && chat_stream_dispatch(steer_ctx, nctx) != 0)

@@ -180,13 +180,13 @@ static steer_slot_t *steer_find_locked(const char *session_id)
    return NULL;
 }
 
-void chat_steer_set(const char *session_id, const char *message)
+int chat_steer_set(const char *session_id, const char *message)
 {
    if (!session_id || !session_id[0] || !message)
-      return;
+      return -1;
    char *copy = strdup(message);
    if (!copy)
-      return;
+      return -1;
    pthread_mutex_lock(&g_lock);
    steer_slot_t *slot = steer_find_locked(session_id);
    if (!slot)
@@ -206,7 +206,8 @@ void chat_steer_set(const char *session_id, const char *message)
       copy = NULL;
    }
    pthread_mutex_unlock(&g_lock);
-   free(copy); /* table full: drop */
+   free(copy);           /* non-NULL only when the table was full */
+   return slot ? 0 : -1; /* -1 => caller must report interrupted=false */
 }
 
 int chat_steer_take(const char *session_id, char **out_message)
