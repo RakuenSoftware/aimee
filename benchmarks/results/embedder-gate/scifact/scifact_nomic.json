@@ -1,0 +1,11 @@
+{
+  "name": "nomic",
+  "endpoint": "http://localhost:8930/v1/embeddings",
+  "queries": 300,
+  "corpus": 1411,
+  "ndcg_10": 0.7993185386393915,
+  "recall_10": 0.8792222222222221,
+  "query_prefix": "search_query: ",
+  "doc_prefix": "search_document: ",
+  "wall_seconds": 19.0
+}

@@ -1,0 +1,11 @@
+{
+  "name": "qwen3-8b",
+  "endpoint": "http://localhost:9002/v1/embeddings",
+  "queries": 300,
+  "corpus": 1411,
+  "ndcg_10": 0.883068318818764,
+  "recall_10": 0.96,
+  "query_prefix": "Instruct: Given a scientific claim, retrieve documents that support or refute the claim\nQuery: ",
+  "doc_prefix": "",
+  "wall_seconds": 447.6
+}

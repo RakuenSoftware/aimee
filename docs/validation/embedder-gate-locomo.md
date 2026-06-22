@@ -1,5 +1,14 @@
 # Embedder retrieval-quality probe (LoCoMo)
 
+> **⚠️ SUPERSEDED / DO NOT USE FOR THE EMBEDDER DECISION (2026-06-22).** This
+> LoCoMo screen ranked nomic above Qwen3 — that ranking is **wrong**. LoCoMo
+> (short conversational-turn retrieval) under-discriminates embedder quality. On
+> the standard SciFact BEIR benchmark with a fixed serving environment,
+> **Qwen3-Embedding beats nomic decisively (even the 0.6B)** — the opposite of
+> this page. See [embedder-gate-scifact](embedder-gate-scifact.md). Kept only as
+> a record of how a weak benchmark + a broken llama.cpp serving config produced a
+> misleading result.
+
 A reproducible, **embedder-isolated** retrieval benchmark — a precursor to the
 full ship-floor gate in
 [unified-llm-container](../proposals/pending/unified-llm-container.md) (the

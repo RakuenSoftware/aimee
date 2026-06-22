@@ -162,29 +162,33 @@ install by detected VRAM (§5).
 
 | Install | Embed (GGUF) | dim |
 |---------|--------------|-----|
-| **all tiers** | **`nomic-ai/nomic-embed-text-v1.5-GGUF`** | **768** |
+| CPU-only / GPU (default) | `Qwen/Qwen3-Embedding-0.6B-GGUF` | 1024 |
+| GPU (high) | `Qwen/Qwen3-Embedding-8B-GGUF` | **4000** (trunc) |
 
-> **Embed ladder collapsed to a single model — nomic-embed-text-v1.5 (768-dim),
-> 2026-06-22** (provisional; see "provisional" note below). The whole multi-tier
-> Qwen3 embed ladder is **withdrawn** on direct empirical evidence —
-> [embedder-gate-locomo](../../validation/embedder-gate-locomo.md). On the LoCoMo
-> direct-retrieval screen (7900XTX/Vulkan, 1982 questions), nomic **beats every
-> Qwen3-Embedding size** on Recall@5/MRR — including the **8B at 4096-dim** — at
-> the **smallest** vector size (768). Qwen3-4B gave **no** lift over 0.6B; Qwen3-8B
-> costs **5.3× the vector dim** (storage / HNSW build / scan) for a *worse* R@5 and
-> only an R@10 tie. Roundtable (architect + engineer) was unanimous: **nomic
-> everywhere; drop the 4B and 8B tiers** — an optional high tier is config surface,
-> a second GGUF slot, and operator confusion for no measurable win. A single
-> embedder also removes the dim-dependent tier-selection logic and the
-> 8B-MRL-truncation machinery entirely (nomic is fixed 768-d, not truncatable).
+> **CORRECTION (2026-06-22): the "nomic-everywhere" change is reverted.** An
+> earlier revision (PR #613) collapsed this to a single nomic-embed-text-v1.5 row
+> on a LoCoMo screen — **that was wrong on two counts** and is withdrawn. (1) LoCoMo
+> (short conversational-turn retrieval) under-discriminates embedder quality. (2)
+> the Qwen3 numbers were also depressed by a broken llama.cpp serving config. On
+> the **standard SciFact BEIR benchmark with the serving fix applied**
+> ([embedder-gate-scifact](../../validation/embedder-gate-scifact.md)),
+> **Qwen3-Embedding wins decisively and scales**: nDCG@10 **0.883 (8B) > 0.820
+> (0.6B) > 0.799 (nomic)** — even the 0.6B beats nomic, matching Qwen3-Embedding's
+> SOTA MTEB standing. So the **default is Qwen3-Embedding-0.6B** (beats nomic at a
+> modest 1024-dim) and the **high tier is Qwen3-Embedding-8B** (best quality).
+> Qwen3-4B is dropped (no measured SciFact gain probed yet; the Qwen3 paper has 4B
+> ≥ 8B on general retrieval, so revisit only if a mid-VRAM tier is wanted).
 >
-> **Provisional — retrieval-only, ship-floor gate pending.** This screen is
-> *embedder-isolated* (no reranker, no fusion, English, one benchmark, 1982 q) and
-> does not yet report tokens/s or VRAM. It is sufficient to set the **proposal**
-> default but is **not** the production cutover: the full-pipeline ship-floor gate
-> (rerank + fusion, nDCG/MRR vs the pplx baseline) is the ship precondition and can
-> still reorder this. If a future multilingual / long-context need appears, revisit
-> the Qwen3 tiers then.
+> **Required serving config** (the proposal's `aimee-llm` must launch the embedder
+> with these, or it crashes/slows on llama.cpp + Vulkan):
+> `--ctx-size 8192 -ub 512 -np 1 --cache-ram 0 --no-cache-idle-slots` — the default
+> prompt cache fragments the embedding KV cache (→ `GGML_ASSERT(task)` crash) and
+> continuous batching across slots hangs the server. Keep `-ub` ≤ 2048 (RADV
+> per-buffer limit). See the SciFact doc's "Serving fix" section.
+>
+> **Still provisional for the full cutover:** this is embedder-isolated retrieval
+> on one BEIR dataset; the full-pipeline ship-floor gate (rerank + fusion vs the
+> pplx baseline) remains the ship precondition.
 
 **Reranker — decoupled, not part of the embed ladder.** The reranker scores
 `(query, candidate)` text pairs, so it is **dimension-agnostic** and need not scale
@@ -214,10 +218,9 @@ larger, ~8 pts, only on *code* retrieval).
 
 #### The 8B truncation — why 4000, and how it must be done
 
-> **SUPERSEDED (2026-06-22):** the embed ladder collapsed to a single 768-dim
-> nomic model (above), so there is no 8B embedder and this truncation machinery is
-> not built. Retained only as design rationale should the Qwen3 tiers ever be
-> revisited (multilingual / long-context).
+> **Re-instated (2026-06-22):** the nomic-everywhere change is reverted (SciFact
+> shows Qwen3-Embedding wins — see the embed-ladder correction above), so the 8B
+> high tier and this truncation machinery are back in scope.
 
 Qwen3-Embedding-8B is **MRL-trained** (loss on first 512/1024/2048 + full 4096),
 so information front-loads into early dims; published guidance shows truncating to
@@ -243,11 +246,10 @@ index allows.**
 
 #### Model-drift guard — embedder `(model_id, dim)`, reranker `(model_id, scoring-contract)`
 
-A dim-only guard is insufficient — two different models can share a dim (e.g.
-`pplx-embed` and `Qwen3-Embedding-0.6B` are both 1024-d), so it would silently mix
-incompatible spaces. (The new default, `nomic-embed-text-v1.5`, is 768-d, so a
-swap *from* pplx's 1024-d **does** also change the dim, but the guard must not rely
-on that.) The guard records and compares **embedder model identity
+A dim-only guard is insufficient — two different models can share a dim:
+`pplx-embed` and the default `Qwen3-Embedding-0.6B` are **both 1024-d**, so a
+dim-only check would silently mix incompatible spaces on that exact swap. The
+guard therefore records and compares **embedder model identity
 (repo@sha) + dim** and refuses startup / rejects writes on mismatch, keying the
 re-embed trigger on **model_id change**. **The reranker gets the same guard** (keyed
 on reranker `model_id` + scoring contract): a reranker swap invalidates cached
@@ -440,11 +442,15 @@ We take the fold but pay down its cost:
   safety net for the cutover release, with the prior tag retained in the registry
   for a defined window.
 
-- **Embed = single model `nomic-embed-text-v1.5` (768-dim)**, provisional on LoCoMo
-  evidence (beats every Qwen3 size incl. 8B at 4096-dim; see embedder-gate-locomo)
-  pending the full-pipeline ship-floor gate. The multi-tier Qwen3 embed ladder
-  (0.6B/4B/8B) is **withdrawn** (roundtable-unanimous); no embed tier-selection and
-  no 8B-MRL-truncation machinery — nomic is fixed 768-d.
+- **Embed = `Qwen3-Embedding-0.6B` default (1024-d) + `Qwen3-Embedding-8B` high
+  tier**, on **SciFact** evidence (nDCG@10 0.883 8B > 0.820 0.6B > 0.799 nomic;
+  even the 0.6B beats nomic) — see embedder-gate-scifact. The earlier
+  "nomic-everywhere" (PR #613, LoCoMo-based) is **reverted**: LoCoMo
+  under-discriminates and the Qwen3 runs were also hit by a llama.cpp serving
+  config bug (`--cache-idle-slots`/`--cache-ram` fragment the embedding KV →
+  `GGML_ASSERT(task)` crash). The embedder must run with
+  `-np 1 --cache-ram 0 --no-cache-idle-slots`. Full-pipeline ship-floor gate still
+  pending.
 - **Curator fold: take it** as an isolated supervised process + RBAC; off-box
   synth via forward/external; sidecar fallback = kernel-compromise response.
 - **Per-user synth via the gateway** with §1a hardening; **escape hatch** is an
