@@ -2437,6 +2437,9 @@ export default function Chat() {
   // race where it just finished (interrupted:false), fall back to a normal send.
   async function steerInterrupt(sid: string, text: string) {
     expectSteerRef.current = true;
+    // Safety net: if the server continuation never starts (dispatch failed), clear
+    // the one-shot so it can't force-render a later own turn as a foreign one.
+    window.setTimeout(() => { expectSteerRef.current = false; }, 12000);
     try {
       const resp = await fetch('/api/chat/interrupt', {
         method: 'POST',

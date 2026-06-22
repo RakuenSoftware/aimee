@@ -129,11 +129,17 @@ int handle_chat_interrupt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (rc < 0)
       return server_send_error(conn, "forbidden: not the session owner", NULL);
 
-   /* A turn was flagged: stash the steer for its worker to auto-continue. The
-    * cancel flag is observed asynchronously (the worker polls it), so the worker
-    * reaches the steer-take well after this set — no race. */
+   /* A turn was flagged: stash the steer for its worker to auto-continue. Order
+    * matters for security AND correctness: authorize+cancel FIRST, then stash.
+    * Stashing before the authz check would let an unauthorized caller's steer be
+    * picked up by a legitimate turn that happens to end in the race window. The
+    * reverse race (worker takes before this set, losing the steer) cannot happen:
+    * the worker only reaches the take after observing the cancel flag (a >=500ms
+    * recv poll) + interrupting + tearing the turn down, long after this set. */
    if (rc == 1)
       chat_steer_set(sid, message);
+   aimee_log(LOG_INFO, "chat_interrupt", "session=%s interrupted=%d (queued steer=%d)", sid,
+             rc == 1, rc == 1);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "session_id", sid);
