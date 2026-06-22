@@ -683,12 +683,21 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    void *prev_cancel_ud = NULL;
    cli_session_cancel_cb_t prev_cancel_cb = cli_session_get_cancel_check(&prev_cancel_ud);
    cli_session_set_cancel_check(chat_cli_cancel_check, NULL);
+   /* Bound a tmux CLI parked in a provider error/retry state so a concurrent-
+    * collision blip surfaces a clear error fast instead of a multi-minute silent
+    * "Working" spinner. Thread-local, like the stream/cancel callbacks above:
+    * agent_run_with_tools dispatches the tmux agent (-> cli_session_recv)
+    * synchronously on THIS worker thread, so the bound is in force for the turn.
+    * Save/restore around any outer turn on this thread. */
+   int prev_error_grace = cli_session_get_error_grace_ms();
+   cli_session_set_error_grace_ms(CLI_SESSION_DEFAULT_ERROR_GRACE_MS);
 
    agent_result_t result;
    memset(&result, 0, sizeof(result));
    int rc = agent_run_with_tools(&acfg, "code", system_prompt ? system_prompt : "", message,
                                  AGENT_DEFAULT_MAX_TOKENS, &result);
 
+   cli_session_set_error_grace_ms(prev_error_grace);
    cli_session_set_cancel_check(prev_cancel_cb, prev_cancel_ud);
    cli_session_set_stream_cb(prev_stream_cb, prev_stream_ud);
    agent_tools_set_tool_event_cb(NULL, NULL);

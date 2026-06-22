@@ -96,6 +96,20 @@ cli_session_cancel_cb_t cli_session_get_cancel_check(void **ud_out)
    return g_cancel_cb;
 }
 
+/* Per-thread provider-error grace (ms); 0 = disabled. Thread-local so concurrent
+ * turns on the pool each carry their own bound. */
+static __thread int g_error_grace_ms = 0;
+
+void cli_session_set_error_grace_ms(int ms)
+{
+   g_error_grace_ms = ms > 0 ? ms : 0;
+}
+
+int cli_session_get_error_grace_ms(void)
+{
+   return g_error_grace_ms;
+}
+
 void cli_session_set_kind(cli_session_t *s, const char *cli_kind)
 {
    if (!s)
@@ -563,6 +577,42 @@ char *cli_session_extract_response(const char *raw, const char *cli_kind, const 
    return cli_extract_impl(raw, cli_kind, baseline, 1);
 }
 
+/* True when the pane shows the CLI parked in a provider error/retry state.
+ * claude renders this on its ✻ status line ("API error · Retrying in Ns ·
+ * attempt K/10"); the normal completion status ("✻ Baked for Ns") and the
+ * active-generation status carry no error/retry token, so they don't match.
+ * Anchored on the ✻ status star (a line's first non-space chars) so the welcome
+ * banner's release-notes prose — which also contains "Retrying in …" but on a
+ * │-prefixed box line — can never false-match. claude-only: codex surfaces
+ * errors differently and is left to the idle-timeout backstop. */
+static int cli_pane_provider_error(const char *stripped, const char *cli_kind)
+{
+   if (!stripped || (cli_kind && strstr(cli_kind, "codex")))
+      return 0;
+   for (const char *p = stripped; p && *p;)
+   {
+      const char *eol = strchr(p, '\n');
+      const char *ls = p;
+      while (*ls == ' ' || *ls == '\t')
+         ls++;
+      if (strncmp(ls, "\xe2\x9c\xbb", 3) == 0) /* ✻ claude status star */
+      {
+         size_t llen = eol ? (size_t)(eol - ls) : strlen(ls);
+         char line[512]; /* status lines are short; sized so "attempt …" is never chopped */
+         size_t n = llen < sizeof(line) - 1 ? llen : sizeof(line) - 1;
+         memcpy(line, ls, n);
+         line[n] = '\0';
+         if (strstr(line, "error") || strstr(line, "Error") || strstr(line, "Retry") ||
+             strstr(line, "retry") || strstr(line, "attempt "))
+            return 1;
+      }
+      if (!eol)
+         break;
+      p = eol + 1;
+   }
+   return 0;
+}
+
 int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms)
 {
    if (!s->active || !out || out_max == 0)
@@ -571,6 +621,8 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
    int stable = 0;
    unsigned long prev_hash = 0;
    long long start = mono_ms();
+   int err_active = 0;      /* 1 once the pane is in a provider-error state */
+   long long err_start = 0; /* mono_ms when that state began (valid iff err_active) */
    free(s->stream_emitted);
    s->stream_emitted = strdup("");
 
@@ -682,6 +734,43 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
          }
          else
             free(partial);
+      }
+
+      /* Provider-error bound: if the CLI parks in an error/retry state for longer
+       * than the grace, stop it and report -4 rather than waiting out the full
+       * idle timeout as a silent "Working" spinner. Opt-in via
+       * cli_session_set_error_grace_ms (0 = disabled). A transient blip claude
+       * recovers from within a few retries leaves the error state before the
+       * grace elapses, so the turn still completes normally. */
+      if (g_error_grace_ms > 0)
+      {
+         char *stripped = cli_session_strip_ansi(cap);
+         int in_err = stripped && cli_pane_provider_error(stripped, s->cli_kind);
+         free(stripped);
+         if (in_err)
+         {
+            if (!err_active)
+            {
+               err_active = 1;
+               err_start = mono_ms();
+            }
+            else if (mono_ms() - err_start >= g_error_grace_ms)
+            {
+               /* Stop the retry loop so the reused pane is left idle for the next
+                * turn (Escape is harmless whether claude is mid-retry or already
+                * parked on the final error), then report the provider error. */
+               char ic[CLI_SESSION_NAME_MAX + 64];
+               snprintf(ic, sizeof(ic), "tmux send-keys -t '%s' Escape 2>/dev/null",
+                        s->session_name);
+               int erc;
+               free(sess_run(ic, &erc));
+               msleep_ms(300);
+               out[0] = '\0';
+               return -4;
+            }
+         }
+         else
+            err_active = 0; /* recovered / moved on: reset the error timer */
       }
 
       unsigned long h = djb2(cap);

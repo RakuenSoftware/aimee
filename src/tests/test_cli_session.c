@@ -43,8 +43,11 @@ static void install_fake_tmux(void)
    FILE *f = fopen(script, "w");
    assert(f != NULL);
    /* capture-pane modes: `changing` never stabilises; `codexgen` returns a codex
-    * generating-footer; anything else returns a static pane. send-keys is logged
-    * so the cancel tests can assert the interrupt key. */
+    * generating-footer; `provider_error` animates claude's ✻ error/retry status
+    * line (never stabilises); `banner_retry` animates a │-prefixed box line whose
+    * prose contains "Retrying in" (mimics the welcome banner — must NOT be read as
+    * a provider error); anything else returns a static pane. send-keys is logged
+    * so the cancel/error tests can assert the interrupt key. */
    fprintf(f,
            "#!/bin/sh\n"
            "case \"$1\" in\n"
@@ -55,11 +58,19 @@ static void install_fake_tmux(void)
            "      echo \"frame $c\";\n"
            "    elif [ \"$FAKE_TMUX_MODE\" = codexgen ]; then\n"
            "      echo 'codex output'; echo 'Working (1s esc to interrupt)';\n"
+           "    elif [ \"$FAKE_TMUX_MODE\" = provider_error ]; then\n"
+           "      c=0; [ -f '%s' ] && c=$(cat '%s'); c=$((c+1)); echo \"$c\" > '%s';\n"
+           "      echo '\xe2\x9c\xbb API error Retrying in 0s attempt '\"$c\"'/10';\n"
+           "    elif [ \"$FAKE_TMUX_MODE\" = banner_retry ]; then\n"
+           "      c=0; [ -f '%s' ] && c=$(cat '%s'); c=$((c+1)); echo \"$c\" > '%s';\n"
+           "      echo '\xe2\x94\x82 stream-stall hint now reads Retrying in seconds frame "
+           "'\"$c\"' end';\n"
            "    else echo 'STATIC OUTPUT'; fi; exit 0 ;;\n"
            "  send-keys) shift; echo \"$*\" >> '%s'; exit 0 ;;\n"
            "  *) exit 0 ;;\n"
            "esac\n",
-           counter, counter, counter, g_sendlog);
+           counter, counter, counter, counter, counter, counter, counter, counter, counter,
+           g_sendlog);
    fclose(f);
    assert(chmod(script, 0700) == 0);
 
@@ -189,6 +200,57 @@ static void test_recv_cancel_codex_idle_skips_ctrlc(void)
    g_test_cancel_flag = 0;
    assert(rc == -3);
    assert(!sendlog_has("C-c"));
+}
+
+/* --- provider-error grace path --- */
+
+/* claude parked in its ✻ error/retry status past the grace: recv returns -4,
+ * stops the retry with Escape, and is bounded by the grace (not the idle
+ * timeout). */
+static void test_recv_provider_error_returns_minus4(void)
+{
+   setenv("FAKE_TMUX_MODE", "provider_error", 1);
+   sendlog_reset();
+   cli_session_set_error_grace_ms(800);
+   cli_session_t s = fake_session();
+   cli_session_set_kind(&s, "claude");
+   char buf[8192];
+   long long t0 = test_mono_ms();
+   int rc = cli_session_recv(&s, buf, sizeof(buf), 30000); /* idle bound high; grace fires first */
+   long long elapsed = test_mono_ms() - t0;
+   cli_session_set_error_grace_ms(0);
+   assert(rc == -4);
+   assert(sendlog_has("Escape")); /* stopped the retry loop */
+   assert(elapsed < 5000);        /* bounded by the 800ms grace, not the 30s timeout */
+}
+
+/* grace = 0 (default/opt-in off): the error pane is just a non-stabilising pane,
+ * so recv falls through to the idle timeout (-2) — legacy behaviour preserved. */
+static void test_recv_provider_error_disabled_times_out(void)
+{
+   setenv("FAKE_TMUX_MODE", "provider_error", 1);
+   cli_session_set_error_grace_ms(0);
+   cli_session_t s = fake_session();
+   cli_session_set_kind(&s, "claude");
+   char buf[8192];
+   int rc = cli_session_recv(&s, buf, sizeof(buf), 1000);
+   assert(rc == -2);
+}
+
+/* The welcome banner's "Retrying in …" prose (│-prefixed box line, no ✻ status
+ * star) must NOT be read as a provider error: with the grace set, recv still
+ * hits the idle timeout (-2), never -4. Guards the anchoring against a false
+ * positive on banner text. */
+static void test_recv_banner_retry_not_provider_error(void)
+{
+   setenv("FAKE_TMUX_MODE", "banner_retry", 1);
+   cli_session_set_error_grace_ms(800);
+   cli_session_t s = fake_session();
+   cli_session_set_kind(&s, "claude");
+   char buf[8192];
+   int rc = cli_session_recv(&s, buf, sizeof(buf), 1500);
+   cli_session_set_error_grace_ms(0);
+   assert(rc == -2);
 }
 
 /* --- cli_session_make_name tests --- */
@@ -590,6 +652,18 @@ int main(void)
 
    printf("test_recv_cancel_codex_idle_skips_ctrlc... ");
    test_recv_cancel_codex_idle_skips_ctrlc();
+   printf("OK\n");
+
+   printf("test_recv_provider_error_returns_minus4... ");
+   test_recv_provider_error_returns_minus4();
+   printf("OK\n");
+
+   printf("test_recv_provider_error_disabled_times_out... ");
+   test_recv_provider_error_disabled_times_out();
+   printf("OK\n");
+
+   printf("test_recv_banner_retry_not_provider_error... ");
+   test_recv_banner_retry_not_provider_error();
    printf("OK\n");
 
    printf("All cli_session tests passed.\n");

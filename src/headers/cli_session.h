@@ -9,6 +9,19 @@
 #define CLI_SESSION_BUF_MAX  (256 * 1024)
 #define CLI_SESSION_POLL_MS  500 /* poll interval for completion detection */
 #define CLI_SESSION_STABLE_N 3   /* consecutive stable polls to declare done */
+/* When the CLI is stuck in a provider error/retry state (claude renders this as
+ * its ✻ status line: "API error · Retrying in Ns · attempt K/10"), the pane
+ * animates the retry counter forever, so the stability heuristic never fires and
+ * only the full idle timeout (often minutes) would break it — a silent "Working"
+ * spinner with no answer. recv bounds that error state separately: after this
+ * many ms continuously in a provider-error state with no answer produced, it
+ * stops the retry and returns -4 with a clear error. claude retries ~10× with
+ * short backoff (well under this default), so a transient blip it recovers from
+ * leaves the error state — and the turn completes normally — before the grace
+ * elapses; the bound only bites on a sustained provider failure.
+ * Opt-in: only applied when the caller sets it via cli_session_set_error_grace_ms
+ * (default 0 = disabled, preserving the legacy timeout-only behaviour). */
+#define CLI_SESSION_DEFAULT_ERROR_GRACE_MS 60000
 
 typedef struct
 {
@@ -45,6 +58,13 @@ typedef int (*cli_session_cancel_cb_t)(void *ud);
 void cli_session_set_cancel_check(cli_session_cancel_cb_t cb, void *ud);
 cli_session_cancel_cb_t cli_session_get_cancel_check(void **ud_out);
 
+/* Provider-error grace (thread-local, ms): how long recv tolerates the CLI
+ * sitting in a provider error/retry state before giving up with -4. 0 disables
+ * the bound (legacy: only the idle timeout applies). Save/restore around a nested
+ * turn like the stream/cancel callbacks. See CLI_SESSION_DEFAULT_ERROR_GRACE_MS. */
+void cli_session_set_error_grace_ms(int ms);
+int cli_session_get_error_grace_ms(void);
+
 /* Record the CLI kind so recv can pick the right TUI response parser. */
 void cli_session_set_kind(cli_session_t *s, const char *cli_kind);
 
@@ -78,8 +98,10 @@ int cli_session_capture(cli_session_t *s, char *out, size_t out_max);
 /* Polls capture-pane until output stabilises (hash-based), the session dies,
  * or timeout_ms elapses. Writes captured text to out (NUL-terminated).
  * Returns 0 on success, -1 if the session exits before output stabilises,
- * -2 if it did not stabilise within timeout_ms, and -3 if the cancel-check
- * fired (the turn was asked to stop). timeout_ms <= 0 disables
+ * -2 if it did not stabilise within timeout_ms, -3 if the cancel-check fired
+ * (the turn was asked to stop), and -4 if the CLI sat in a provider error/retry
+ * state past the error grace (cli_session_set_error_grace_ms). timeout_ms <= 0
+ * disables
  * the wall-clock bound (legacy unbounded behaviour). The bound is the only
  * thing that breaks a CLI wedged in a provider retry loop (e.g. an Anthropic
  * outage), whose pane animates forever without the session dying. recv writes

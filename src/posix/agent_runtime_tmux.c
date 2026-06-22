@@ -165,12 +165,14 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
    if (recv_rc != 0)
    {
       free(raw);
-      if (recv_rc == -3)
+      if (recv_rc == -3 || recv_rc == -4)
       {
-         /* Cancelled (steering/interrupt): recv already sent the interrupt key,
-          * so the CLI stopped generating with the conversation intact. KEEP a
-          * reused pane alive (the steer continuation reuses it); only free this
-          * turn's scratch. A one-shot pane is torn down. */
+         /* -3 cancelled (steering/interrupt); -4 provider error/retry past the
+          * grace. In both, recv already sent the interrupt key, so the CLI stopped
+          * with the conversation intact — KEEP a reused pane alive (a later turn
+          * reuses it); only free this turn's scratch. A one-shot pane is torn
+          * down. -3 ends quietly (the worker sees agent_request_cancelled); -4 is
+          * a real failure → surface a clear provider-error message. */
          if (reuse)
          {
             free(sess.baseline);
@@ -180,7 +182,12 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
          }
          else
             cli_session_destroy(&sess);
-         snprintf(out->error, sizeof(out->error), "turn cancelled");
+         if (recv_rc == -4)
+            snprintf(out->error, sizeof(out->error),
+                     "%s CLI hit a provider error and kept failing on retry (try again)",
+                     agent->name);
+         else
+            snprintf(out->error, sizeof(out->error), "turn cancelled");
          return -1;
       }
       cli_session_destroy(&sess); /* kill the (possibly wedged) session */
