@@ -10,6 +10,7 @@
 #include "db1.h"
 #include "log.h"
 #include "primary_session_adapter.h"
+#include "workspace.h" /* session_isolation_target — per-session worktree redirect */
 #include "workspace_provider.h"
 
 /* Defined in agent_runtime_tmux.c (no shared header; agent_runtime.c forward-
@@ -638,6 +639,16 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
     * client-supplied cwd. Otherwise run in the (validated) client cwd. */
    const char *eff_cwd = workspace_turn_active_cwd();
    const char *use_cwd = eff_cwd ? eff_cwd : cwd;
+   /* Plain local project (no detached/mirror remap): isolate this session in its
+    * OWN sibling worktree on a per-session branch off the repo's default branch,
+    * created on demand. Without this, concurrent sessions on the same project
+    * share one checkout and clobber each other. No-op when cwd is not a git repo
+    * or is already a managed worktree (session_isolation_target guards both). */
+   char session_wt[MAX_PATH_LEN];
+   if (!eff_cwd && !detached_bound && aimee_sid && aimee_sid[0] &&
+       session_isolation_target(use_cwd, aimee_sid, session_wt, sizeof(session_wt),
+                                1 /*create_if_missing*/))
+      use_cwd = session_wt;
    if (aimee_path_is_absolute(use_cwd) && !strstr(use_cwd, "/.."))
       run_cmd_set_cwd(use_cwd);
    if (aimee_sid && aimee_sid[0])
@@ -754,6 +765,15 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
     * worktree; otherwise act in the (validated) client cwd. */
    const char *eff_cwd = workspace_turn_active_cwd();
    const char *use_cwd = eff_cwd ? eff_cwd : cwd;
+   /* Plain local project (no detached/mirror remap): isolate this session in its
+    * OWN sibling worktree on a per-session branch off the repo's default branch,
+    * created on demand — so concurrent sessions on the same project never share a
+    * checkout. No-op when cwd is not a git repo / already a managed worktree. */
+   char session_wt[MAX_PATH_LEN];
+   if (!eff_cwd && !detached_bound && aimee_sid && aimee_sid[0] &&
+       session_isolation_target(use_cwd, aimee_sid, session_wt, sizeof(session_wt),
+                                1 /*create_if_missing*/))
+      use_cwd = session_wt;
 
    stream_event(cctx, "turn_start", NULL, NULL);
 

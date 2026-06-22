@@ -1719,7 +1719,13 @@ int session_isolation_target(const char *cwd, const char *sid, char *target, siz
       if (!create_if_missing)
          return 0;
       if (worktree_create_sibling(gr, sid, NULL) != 0)
+      {
+         /* Could not create the session worktree — the caller falls back to the
+          * shared checkout, so surface it: this is the one path where session
+          * isolation silently does not apply. */
+         LOG_WARN("workspace", "session isolation worktree create failed for %s (sid=%s)", gr, sid);
          return 0;
+      }
       if (stat(wt_path, &wst) != 0)
          return 0;
    }
