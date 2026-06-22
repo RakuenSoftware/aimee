@@ -3,7 +3,8 @@
 - **State:** draft — **rev 7** · **roundtable SIGNED OFF at rev 6** (round 5: 0
   blocking / 0 high / 0 medium, converged). Arc: r1 10 blocking → r2 7 blocking +
   8 high → r3 1 blocking + 1 high + 2 medium → r5 **0 blocking**. rev 7 closes the
-  two open questions (pins the operator's synth models; decouples + shrinks the
+  two open questions (synth models BENCHMARKED — Gemma-4-E4B CPU / Granite-4.0-h-small
+  GPU, Qwen3.6 dropped on JSON-reliability; decouples + shrinks the
   reranker to Ettin ModernBERT — 400m GPU / 68m CPU, both `-fa on`, Qwen3-Reranker
   dropped from the real-time path; E4B-ungated CPU default). See "Decisions
   taken" and "Changelog".
@@ -241,20 +242,38 @@ per `(query, candidate)` pair, **no chat template and no yes/no-logprob transfor
 dropped from the real-time path; it remains usable only **async** (e.g. background
 memory re-ranking) where its quality is worth seconds of latency.
 
-**Synth ladder** (pinned to your specified models; MoE rows have low active params):
+**Synth ladder** (benchmarked on the curator's real extraction task — see below):
 
-| Install | Synth model (GGUF) |
-|---------|--------------------|
-| CPU-only (**default**) | **`ggml-org/gemma-4-E4B-it-GGUF`** (Gemma 4 E4B — the mirror is **ungated**, no `HF_TOKEN`) |
-| GPU-S | `unsloth/gemma-4-12B-it-GGUF` (Gemma 4 12B) |
-| GPU-M | `unsloth/gemma-4-26B-A4B-it-GGUF` (Gemma 4 26B-A4B, MoE ~4B active) |
-| GPU-L | `unsloth/Qwen3.6-35B-A3B-GGUF` (Qwen3.6 35B-A3B, MoE ~3B active) |
+| Install | Synth model (GGUF) | dim/arch |
+|---------|--------------------|----------|
+| CPU-only (**default**) | **`ggml-org/gemma-4-E4B-it-GGUF`** (Gemma 4 E4B — ungated mirror, no `HF_TOKEN`) | ~7B raw |
+| GPU (**default**) | **`unsloth/granite-4.0-h-small-GGUF`** (IBM Granite 4.0 h-small) | 32B-A9B hybrid Mamba/MoE |
 
-> **Pinning.** Names are fixed above; implementation pins each to a specific
-> **commit sha** + quant. The CPU default is **Gemma 4 E4B via the ungated
-> `ggml-org` GGUF mirror** (already pulled unauthenticated in the current compose),
-> so there is **no separate "ungated fallback" model and no first-boot `HF_TOKEN`
-> requirement** — E4B is simply the CPU default.
+> **Basis (2026-06-22, benchmarked).** The curator/synth model does **async
+> structured-JSON extraction** (`scripts/curator-extract.py`: doc/code/story → a
+> schema'd `{"artifacts":[…]}` object over `/v1/chat/completions`, parsing the first
+> JSON object). So the axes are **reliable structured JSON + schema conformance +
+> throughput** (it drains a queue; async, not latency-bound). Seven Q4_K_M models
+> were run on the 7900XTX over the real `curator-extract` prompts (6 doc + 6 code);
+> full table in
+> [`benchmarks/results/synth/RESULTS.md`](../../benchmarks/results/synth/RESULTS.md).
+> Headline: **function-calling-tuned models (Gemma, IBM Granite) produce reliable
+> curator JSON (parse 1.0, schema 0.96–1.0); every Qwen model — including the
+> previously-pinned Qwen3.6-35B-A3B and 27B — slipped structurally** (malformed
+> JSON on code-heavy content → parse 0.33–0.67, despite `response_format=json_object`;
+> the 27B was also the slowest at 33 tok/s). Winners:
+> - **gemma-4-E4B** — perfect (doc 1.0 / code 1.0 / parse 1.0), 98 tok/s → CPU default.
+> - **granite-4.0-h-small** — perfect (1.0 / 1.0 / 1.0), 64 tok/s → GPU default.
+>
+> This **drops the rev-7 Gemma-12B/26B and Qwen3.6 GPU tiers** in favour of a single
+> Granite GPU model. The CPU default stays **Gemma 4 E4B via the ungated `ggml-org`
+> mirror** (no first-boot `HF_TOKEN`). Pin each to a specific **commit sha + quant**.
+>
+> **Fairness note:** the Qwen failures are *JSON-validity*, not necessarily content
+> (when Qwen parsed, schema could be perfect). **Grammar-constrained decoding** (the
+> curator's planned enhancement, `kb_curator_extract.c:35`) would force valid JSON for
+> all models; a grammar-constrained content re-run is the tiebreaker if Qwen3.6 is ever
+> reconsidered.
 
 #### The 8B truncation — why 4000, and how it must be done
 
@@ -508,8 +527,13 @@ We take the fold but pay down its cost:
 - **Auth default = mTLS**; bearer dev-only.
 - **CPU synth default = Gemma 4 E4B** via the ungated `ggml-org` GGUF mirror (no
   `HF_TOKEN`); the separate "ungated fallback" model is dropped.
-- **Synth models pinned** to the operator's spec: Gemma 4 **E4B (CPU)**, Gemma 4
-  12B / 26B-A4B / Qwen3.6 35B-A3B (GPU-S/M/L). **Reranker = Ettin (ModernBERT
+- **Synth models — benchmarked, not pinned-on-spec** (2026-06-22, on the curator's
+  real extraction task): **CPU = Gemma 4 E4B** (perfect schema, 98 tok/s), **GPU =
+  IBM Granite 4.0 h-small** (perfect schema, 64 tok/s). Function-calling-tuned models
+  (Gemma, Granite) produce reliable curator JSON; **every Qwen model — incl. the old
+  Qwen3.6-35B-A3B/27B GPU tiers — slipped on JSON validity and is dropped** (the rev-7
+  Gemma-12B/26B + Qwen3.6 GPU ladder is replaced by single Granite GPU). See
+  `benchmarks/results/synth/RESULTS.md`. **Reranker = Ettin (ModernBERT
   cross-encoder), NOT Qwen3-Reranker**: GPU default `ettin-reranker-400m`, CPU-only
   `ettin-reranker-68m`, both `--flash-attn on`. Real-time on the 7900XTX (ettin-400m
   top-20 0.34s; ettin-68m top-10 0.60s) and correct/fast via native `/v1/rerank` —
@@ -552,9 +576,10 @@ We take the fold but pay down its cost:
 - **rev 7 (2026-06-21):** reduced the open questions to mechanical items
   (commit-sha/quant pins + a reranker-swap-cost confirmation). **Pinned synth
   models** to the
-  operator's spec — Gemma 4 E4B (CPU, **ungated `ggml-org` mirror → no `HF_TOKEN`**,
-  so the rev-5 "ungated fallback" model is dropped and E4B is the plain CPU
-  default), Gemma 4 12B / 26B-A4B / Qwen3.6 35B-A3B (GPU-S/M/L). **Decoupled the
+  benchmark (2026-06-22) — **CPU = Gemma 4 E4B** (ungated `ggml-org` mirror → no
+  `HF_TOKEN`; rev-5 "ungated fallback" dropped, E4B is the plain CPU default),
+  **GPU = IBM Granite 4.0 h-small** (replaces the rev-7 Gemma-12B/26B + Qwen3.6 GPU
+  tiers; Qwen dropped on JSON-reliability). **Decoupled the
   reranker** from the embed ladder (it is dimension-agnostic): **Ettin ModernBERT
   cross-encoder — `ettin-reranker-400m` (GPU) / `ettin-reranker-68m` (CPU), both
   `-fa on`; Qwen3-Reranker dropped from the real-time path** (too slow + native
