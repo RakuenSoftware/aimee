@@ -565,19 +565,38 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
       {
          /* Per-CLI interrupt key (verified live): claude stops a response on
           * Escape (harmless when idle); codex ignores Escape and interrupts on
-          * Ctrl-C (a single C-c mid-generation stops it without quitting). The
-          * cancel fires while recv is polling — i.e. during generation — so the
-          * codex C-c lands while it is working. Default to Escape (the safe key:
-          * ignored CLIs just clear their input). */
-         const char *intr = (strstr(s->cli_kind, "codex") != NULL) ? "C-c" : "Escape";
-         char ic[CLI_SESSION_NAME_MAX + 64];
-         snprintf(ic, sizeof(ic), "tmux send-keys -t '%s' %s 2>/dev/null", s->session_name, intr);
-         int erc;
-         free(sess_run(ic, &erc));
-         /* Let the TUI settle out of its animating state before the turn ends, so
-          * the next (steer) turn captures a clean baseline and pastes into a
-          * stable prompt rather than a half-rendered one. */
-         msleep_ms(300);
+          * Ctrl-C. The catch: codex C-c interrupts an ACTIVE generation but QUITS
+          * codex when it is idle. So for codex, only send C-c while it is still
+          * generating — detected by its working / interrupt-hint footer; if the
+          * response already finished, skip the key (the turn ends and the steer
+          * reuses the live pane). claude's Escape is safe either way; default to
+          * Escape for unknown CLIs (ignored CLIs just clear their input). */
+         int is_codex = (strstr(s->cli_kind, "codex") != NULL);
+         int send_key = 1;
+         if (is_codex)
+         {
+            send_key = 0;
+            char *probe = malloc(CLI_SESSION_BUF_MAX);
+            if (probe)
+            {
+               if (cli_session_capture(s, probe, CLI_SESSION_BUF_MAX) == 0 &&
+                   (strstr(probe, "to interrupt") || strstr(probe, "Working")))
+                  send_key = 1; /* codex is actively generating: C-c interrupts, not quits */
+               free(probe);
+            }
+         }
+         if (send_key)
+         {
+            char ic[CLI_SESSION_NAME_MAX + 64];
+            snprintf(ic, sizeof(ic), "tmux send-keys -t '%s' %s 2>/dev/null", s->session_name,
+                     is_codex ? "C-c" : "Escape");
+            int erc;
+            free(sess_run(ic, &erc));
+            /* Let the TUI settle out of its animating state before the turn ends,
+             * so the next (steer) turn captures a clean baseline and pastes into a
+             * stable prompt rather than a half-rendered one. */
+            msleep_ms(300);
+         }
          out[0] = '\0';
          return -3;
       }
