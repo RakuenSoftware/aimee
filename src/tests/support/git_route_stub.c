@@ -62,6 +62,27 @@ int git_ops_run(const char *principal, const char *project, const char *op, cons
    return -1;
 }
 
+int git_ops_run_session(const char *principal, const char *project, const char *session_id,
+                        const char *op, const char *text_arg, int num_arg, char **out, char *err,
+                        size_t errlen)
+{
+   (void)session_id;
+   return git_ops_run(principal, project, op, text_arg, num_arg, out, err, errlen);
+}
+
+int git_ops_session_dir(const char *principal, const char *project, const char *session_id,
+                        char *out, size_t out_len, char *err, size_t errlen)
+{
+   (void)principal;
+   (void)project;
+   (void)session_id;
+   if (out && out_len)
+      out[0] = '\0';
+   if (err && errlen)
+      snprintf(err, errlen, "stub");
+   return -1;
+}
+
 int webuser_editor_ensure(const char *principal, int *out_port, char *err, size_t errlen)
 {
    (void)principal;

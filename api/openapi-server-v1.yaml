@@ -3686,6 +3686,12 @@ paths:
                 message: { type: string, description: Commit message (op=commit) }
                 branch: { type: string, description: Target branch (op=checkout) }
                 n: { type: integer, description: Log entry count (op=log) }
+                session_id:
+                  type: string
+                  description: >
+                    Optional. Run the op in this session's isolated worktree (the
+                    same tree its agent edits) rather than the shared project
+                    checkout.
       responses:
         "200":
           description: Operation ran
@@ -3698,6 +3704,44 @@ paths:
                   output: { type: string }
         "400":
           description: Unknown project/op, invalid argument, or git failure
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /workspace/session-dir:
+    post:
+      summary: Resolve a session's working directory for a project
+      description: >
+        Return the absolute directory the given session acts in for `project`:
+        that session's isolated sibling worktree (off the default branch, created
+        on demand) when `session_id` is non-empty, else the project checkout. Lets
+        the editor open the same tree the session's agent edits. Identity is the
+        authenticated `webuser:` principal. Capability: index:read.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project]
+              properties:
+                project: { type: string }
+                session_id: { type: string }
+      responses:
+        "200":
+          description: Resolved directory
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dir: { type: string }
+        "400":
+          description: Unknown project or invalid body
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }

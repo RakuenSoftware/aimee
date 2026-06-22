@@ -1025,8 +1025,12 @@ static int rh_workspace_git(const route_req_t *rq, char *resp, int cap)
    const cJSON *jmsg = cJSON_GetObjectItemCaseSensitive(body, "message");
    const cJSON *jbranch = cJSON_GetObjectItemCaseSensitive(body, "branch");
    const cJSON *jn = cJSON_GetObjectItemCaseSensitive(body, "n");
+   const cJSON *jsid = cJSON_GetObjectItemCaseSensitive(body, "session_id");
    const char *project = (cJSON_IsString(jproj) && jproj->valuestring) ? jproj->valuestring : NULL;
    const char *op = (cJSON_IsString(jop) && jop->valuestring) ? jop->valuestring : NULL;
+   /* Optional: run in the calling session's isolated worktree (same tree its
+    * agent edits) rather than the shared project checkout. */
+   const char *session_id = (cJSON_IsString(jsid) && jsid->valuestring) ? jsid->valuestring : NULL;
    /* text_arg is the commit message (commit) or target branch (checkout). */
    const char *text = NULL;
    if (op && strcmp(op, "commit") == 0)
@@ -1036,7 +1040,8 @@ static int rh_workspace_git(const route_req_t *rq, char *resp, int cap)
    int num = (cJSON_IsNumber(jn)) ? (int)jn->valuedouble : 0;
 
    char *git_out = NULL, err[256];
-   int rc = git_ops_run(principal, project, op, text, num, &git_out, err, sizeof(err));
+   int rc = git_ops_run_session(principal, project, session_id, op, text, num, &git_out, err,
+                                sizeof(err));
    cJSON_Delete(body);
    if (rc != 0)
    {
@@ -1078,6 +1083,42 @@ static int rh_workspace_projects(const route_req_t *rq, char *resp, int cap)
    char root[MAX_PATH_LEN];
    if (ws_scope_user_root(principal, 0, root, sizeof(root)) == 0)
       cJSON_AddStringToObject(out, "root", root);
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* POST /v1/workspace/session-dir {project, session_id} — resolve the absolute
+ * directory the given session acts in for `project`: that session's isolated
+ * sibling worktree (off the default branch, created on demand) when session_id is
+ * present, else the project checkout. Lets the editor open the same tree the
+ * session's agent edits. Identity is the attested webuser principal. */
+static int rh_workspace_session_dir(const route_req_t *rq, char *resp, int cap)
+{
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "git projects require a webchat user");
+
+   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
+   if (!body || !cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "invalid JSON body");
+   }
+   const cJSON *jproj = cJSON_GetObjectItemCaseSensitive(body, "project");
+   const cJSON *jsid = cJSON_GetObjectItemCaseSensitive(body, "session_id");
+   const char *project = (cJSON_IsString(jproj) && jproj->valuestring) ? jproj->valuestring : NULL;
+   const char *session_id = (cJSON_IsString(jsid) && jsid->valuestring) ? jsid->valuestring : NULL;
+
+   char dir[MAX_PATH_LEN], err[256];
+   int rc = git_ops_session_dir(principal, project, session_id, dir, sizeof(dir), err, sizeof(err));
+   cJSON_Delete(body);
+   if (rc != 0)
+      return err_json(resp, cap, 400, err);
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddStringToObject(out, "dir", dir);
    char *s = cJSON_PrintUnformatted(out);
    int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
    free(s);
@@ -1750,6 +1791,8 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/workspaces", NULL, RM_EXACT, "workspace.add", 0, rh_workspaces_register},
     {"POST", "/v1/workspace/clone", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_clone},
     {"POST", "/v1/workspace/git", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_git},
+    {"POST", "/v1/workspace/session-dir", NULL, RM_EXACT, NULL, CAP_INDEX_READ,
+     rh_workspace_session_dir},
     {"GET", "/v1/workspace/projects", NULL, RM_EXACT, NULL, CAP_INDEX_READ, rh_workspace_projects},
     {"POST", "/v1/workspace/editor", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_editor},
     {"GET", "/v1/git/credentials", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_git_credentials},

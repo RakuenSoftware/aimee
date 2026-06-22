@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Panel } from '@rakuensoftware/smoothgui';
+import { useSessions } from '../SessionContext';
 
 /* Git projects (webchat-git WP-F2). Lists the user's cloned repos, connects a
  * new one, and runs per-project git ops — all via /api/git/* (the server forwards
@@ -29,6 +30,7 @@ const input: React.CSSProperties = {
 };
 
 export default function Projects() {
+  const { active } = useSessions();
   const [projects, setProjects] = useState<string[]>([]);
   const [selected, setSelected] = useState<string>('');
   const [output, setOutput] = useState<string>('');
@@ -162,9 +164,12 @@ export default function Projects() {
     if (!selected) return;
     setBusy(true); setErr(''); setOutput('');
     try {
+      // When operating on the active session's project, act on that session's
+      // isolated worktree (the same tree its agent edits), not the shared base.
+      const session_id = active && active.projectName === selected ? active.aimeeSid : '';
       const r = await api('/api/git/op', {
         method: 'POST',
-        body: JSON.stringify({ project: selected, op, ...extra }),
+        body: JSON.stringify({ project: selected, op, session_id, ...extra }),
       });
       const d = await r.json();
       if (!r.ok) { setErr(d.error || `${op} failed`); }

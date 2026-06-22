@@ -426,9 +426,10 @@ static void test_worktree_detect_base_branch_active(void)
    snprintf(cmd, sizeof(cmd), "git -C '%s' update-ref refs/remotes/origin/main HEAD 2>/dev/null",
             tmpdir);
    (void)system(cmd);
-   snprintf(cmd, sizeof(cmd),
-            "git -C '%s' symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main 2>/dev/null",
-            tmpdir);
+   snprintf(
+       cmd, sizeof(cmd),
+       "git -C '%s' symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main 2>/dev/null",
+       tmpdir);
    (void)system(cmd);
    /* Check out a distinct feature branch — detection must ignore it. */
    snprintf(cmd, sizeof(cmd), "git -C '%s' checkout -qb 'feat/test-branch' 2>/dev/null", tmpdir);
@@ -545,6 +546,28 @@ static void test_session_isolation_creates_and_returns_worktree(void)
    char git_file[MAX_PATH_LEN];
    snprintf(git_file, sizeof(git_file), "%s/.git", target);
    assert(stat(git_file, &st) == 0);
+
+   session_isolation_cleanup(tmpdir);
+}
+
+static void test_session_isolation_sanitizes_malicious_sid(void)
+{
+   char tmpdir[MAX_PATH_LEN];
+   session_isolation_make_repo(tmpdir, sizeof(tmpdir));
+   char repo[MAX_PATH_LEN];
+   snprintf(repo, sizeof(repo), "%s/aimee", tmpdir);
+
+   /* A traversal-laden session id (now reachable: the webchat git panel/editor
+    * pass session_id in the request) must NOT escape the worktrees dir. */
+   char target[MAX_PATH_LEN];
+   int rc = session_isolation_target(repo, "../../../../etc/x", target, sizeof(target), 1);
+   assert(rc == 1);
+   char prefix[MAX_PATH_LEN];
+   snprintf(prefix, sizeof(prefix), "%s/aimee/.aimee/worktrees/", tmpdir);
+   assert(strncmp(target, prefix, strlen(prefix)) == 0); /* stays under worktrees/ */
+   assert(strstr(target, "..") == NULL);                 /* no traversal component */
+   struct stat st;
+   assert(stat(target, &st) == 0 && S_ISDIR(st.st_mode)); /* a real, contained worktree */
 
    session_isolation_cleanup(tmpdir);
 }

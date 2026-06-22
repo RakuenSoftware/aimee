@@ -132,6 +132,7 @@ int main(void)
    test_worktree_detect_base_branch_local_default();
    test_worktree_detect_base_branch_fallback();
    test_session_isolation_creates_and_returns_worktree();
+   test_session_isolation_sanitizes_malicious_sid();
    test_session_isolation_skips_when_already_in_same_session_worktree();
    test_session_isolation_creates_new_worktree_from_existing_worktree();
    test_session_isolation_skips_when_not_a_git_repo();

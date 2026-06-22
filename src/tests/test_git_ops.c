@@ -25,6 +25,16 @@ static int out_has(const char *out, const char *needle)
    return out && strstr(out, needle) != NULL;
 }
 
+/* Fake per-session worktree resolver: maps <cwd> -> <cwd>/wt-<sid>. */
+static int fake_isolation(const char *cwd, const char *sid, char *out, size_t out_len, int create)
+{
+   (void)create;
+   if (!cwd || !sid || !sid[0])
+      return 0;
+   snprintf(out, out_len, "%s/wt-%s", cwd, sid);
+   return 1;
+}
+
 int main(void)
 {
    char home[256];
@@ -107,6 +117,32 @@ int main(void)
           -1);
    /* bob cannot touch alice's project (no such project in bob's scope) */
    assert(git_ops_run("webuser:bob", "proj", "status", NULL, 0, &out, err, sizeof(err)) == -1);
+
+   /* --- session worktree redirect (git_ops_session_dir wiring) --- */
+   char dir[4096];
+   /* no session id -> the project checkout */
+   assert(git_ops_session_dir("webuser:alice", "proj", NULL, dir, sizeof(dir), err, sizeof(err)) ==
+          0);
+   assert(strcmp(dir, proj) == 0);
+   /* session id but no resolver registered -> still the project checkout */
+   assert(git_ops_session_dir("webuser:alice", "proj", "sid-xyz", dir, sizeof(dir), err,
+                              sizeof(err)) == 0);
+   assert(strcmp(dir, proj) == 0);
+   /* with a resolver: a non-empty session id redirects to its worktree */
+   git_ops_register_session_isolation(fake_isolation);
+   assert(git_ops_session_dir("webuser:alice", "proj", "sid-xyz", dir, sizeof(dir), err,
+                              sizeof(err)) == 0);
+   char expect[4200];
+   snprintf(expect, sizeof(expect), "%s/wt-sid-xyz", proj);
+   assert(strcmp(dir, expect) == 0);
+   /* empty session id -> base even with a resolver registered */
+   assert(git_ops_session_dir("webuser:alice", "proj", "", dir, sizeof(dir), err, sizeof(err)) ==
+          0);
+   assert(strcmp(dir, proj) == 0);
+   /* refusal: a non-webuser principal is rejected before any resolution */
+   assert(git_ops_session_dir("uid:1000", "proj", "sid-xyz", dir, sizeof(dir), err, sizeof(err)) ==
+          -1);
+   git_ops_register_session_isolation(NULL);
 
    assert(run("rm -rf %s", home) == 0);
    printf("git_ops: all tests passed\n");

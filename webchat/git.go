@@ -195,11 +195,12 @@ func (s *server) handleGitOp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Project string `json:"project"`
-		Op      string `json:"op"`
-		Message string `json:"message"`
-		Branch  string `json:"branch"`
-		N       int    `json:"n"`
+		Project   string `json:"project"`
+		Op        string `json:"op"`
+		Message   string `json:"message"`
+		Branch    string `json:"branch"`
+		N         int    `json:"n"`
+		SessionID string `json:"session_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Project == "" || req.Op == "" {
 		writeJSONError(w, http.StatusBadRequest, "project and op required")
@@ -207,9 +208,36 @@ func (s *server) handleGitOp(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
 	defer cancel()
+	// session_id (optional): run the op in the calling session's isolated worktree
+	// — the same tree its agent edits — rather than the shared project checkout.
 	body, _ := json.Marshal(map[string]any{
 		"project": req.Project, "op": req.Op, "message": req.Message, "branch": req.Branch, "n": req.N,
+		"session_id": req.SessionID,
 	})
 	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, "/v1/workspace/git", body)
+	s.gitRelay(w, st, data, err)
+}
+
+// POST /api/git/session-dir {project, session_id} — resolve the absolute working
+// directory a session acts in for a project (its isolated worktree when a
+// session_id is given, else the project checkout). Used by the editor to open the
+// same tree the session's agent edits.
+func (s *server) handleGitSessionDir(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	var req struct {
+		Project   string `json:"project"`
+		SessionID string `json:"session_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Project == "" {
+		writeJSONError(w, http.StatusBadRequest, "project required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	body, _ := json.Marshal(map[string]any{"project": req.Project, "session_id": req.SessionID})
+	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodPost, "/v1/workspace/session-dir", body)
 	s.gitRelay(w, st, data, err)
 }

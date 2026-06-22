@@ -10,6 +10,19 @@
 
 extern char **environ;
 
+/* Per-session worktree resolver (workspace.c:session_isolation_target), wired in
+ * by the server at startup via a registered pointer so this TU carries no link
+ * dependency on the heavyweight workspace.o. Unregistered (thin client / unit
+ * tests) → a session op simply runs in the shared project checkout. */
+static int (*g_session_isolation_target)(const char *cwd, const char *sid, char *out,
+                                         size_t out_len, int create_if_missing);
+
+void git_ops_register_session_isolation(int (*fn)(const char *cwd, const char *sid, char *out,
+                                                  size_t out_len, int create_if_missing))
+{
+   g_session_isolation_target = fn;
+}
+
 #define GO_PATH_MAX    4096
 #define GO_OUT_MAX     (1 << 18) /* 256 KiB of git output */
 #define GO_TIMEOUT_MS  120000    /* a git op (incl. network) may take a while */
@@ -59,8 +72,57 @@ static int run_git(const char *principal, const char *dir, const char *const arg
    return rc;
 }
 
+/* Resolve the working dir for `project`: the project checkout, or — when
+ * `session_id` is non-empty and a session-isolation resolver is registered — that
+ * session's sibling worktree (off the default branch, created on demand) so the
+ * webchat git surfaces act on the SAME tree the session's agent edits. Returns 0
+ * + dir, or -1 with err. */
+static int resolve_session_dir(const char *principal, const char *project, const char *session_id,
+                               char *dir, size_t dir_len, char *err, size_t errlen)
+{
+   if (ws_scope_project_path(principal, project ? project : "", 1 /*must_exist*/, dir, dir_len) !=
+       0)
+   {
+      snprintf(err, errlen, "no such project");
+      return -1;
+   }
+   if (session_id && session_id[0] && g_session_isolation_target)
+   {
+      char wt[GO_PATH_MAX];
+      if (g_session_isolation_target(dir, session_id, wt, sizeof(wt), 1 /*create_if_missing*/) == 1)
+         snprintf(dir, dir_len, "%s", wt);
+   }
+   return 0;
+}
+
+int git_ops_session_dir(const char *principal, const char *project, const char *session_id,
+                        char *out, size_t out_len, char *err, size_t errlen)
+{
+   if (out && out_len)
+      out[0] = '\0';
+   if (err && errlen)
+      err[0] = '\0';
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+   {
+      snprintf(err, errlen, "git projects require a webchat user");
+      return -1;
+   }
+   char dir[GO_PATH_MAX];
+   if (resolve_session_dir(principal, project, session_id, dir, sizeof(dir), err, errlen) != 0)
+      return -1;
+   snprintf(out, out_len, "%s", dir);
+   return 0;
+}
+
 int git_ops_run(const char *principal, const char *project, const char *op, const char *text_arg,
                 int num_arg, char **out, char *err, size_t errlen)
+{
+   return git_ops_run_session(principal, project, NULL, op, text_arg, num_arg, out, err, errlen);
+}
+
+int git_ops_run_session(const char *principal, const char *project, const char *session_id,
+                        const char *op, const char *text_arg, int num_arg, char **out, char *err,
+                        size_t errlen)
 {
    if (out)
       *out = NULL;
@@ -79,12 +141,8 @@ int git_ops_run(const char *principal, const char *project, const char *op, cons
    }
 
    char dir[GO_PATH_MAX];
-   if (ws_scope_project_path(principal, project ? project : "", 1 /*must_exist*/, dir,
-                             sizeof(dir)) != 0)
-   {
-      snprintf(err, errlen, "no such project");
+   if (resolve_session_dir(principal, project, session_id, dir, sizeof(dir), err, errlen) != 0)
       return -1;
-   }
 
    /* --- commit is two steps (stage all, then commit with the message) --- */
    if (strcmp(op, "commit") == 0)

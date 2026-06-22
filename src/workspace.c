@@ -499,7 +499,20 @@ static void worktree_session_key(const char *sid, char *out, size_t cap)
    out[0] = '\0';
    if (!sid)
       return;
-   snprintf(out, cap, "%.*s", (int)WORKTREE_SID_KEY_LEN, sid);
+   /* Sanitize to a path-safe token: the session id can come from an untrusted
+    * request (the webchat git panel / editor pass it in the body), and it is
+    * spliced into the worktree path/branch below — an unsanitized "../.." would
+    * escape the worktrees dir. Keep only [A-Za-z0-9_-]; map anything else to '_'.
+    * Server-minted ids (UUID/hex) are unaffected, so existing keys stay stable. */
+   size_t n = 0;
+   for (size_t i = 0; sid[i] && n < (size_t)WORKTREE_SID_KEY_LEN && n + 1 < cap; i++)
+   {
+      char c = sid[i];
+      int ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+               c == '_' || c == '-';
+      out[n++] = ok ? c : '_';
+   }
+   out[n] = '\0';
 }
 
 /* Compute the expected aimee-managed worktree path for a git repo and session.
