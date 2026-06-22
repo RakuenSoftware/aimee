@@ -1543,9 +1543,23 @@ export default function Chat() {
   // Controller → originSid, so a finishing send can decrement work for the tab it
   // belonged to (not whatever tab is active when it lands).
   const activeSendAbortRefs = useRef<Map<AbortController, string>>(new Map());
-  const sendQueueRef = useRef<QueuedChatSend[]>([]);
-  const sendQueueDrainingRef = useRef(false);
+  /* Per-tab send queues + drainers, keyed by aimeeSid. Each session drains
+   * independently and concurrently, so a turn on one tab never blocks another
+   * tab's turn (the server already multiplexes sessions: per-session pools,
+   * presence locks and tmux panes). Sends stay serial WITHIN a session — a
+   * single conversation pane can only run one turn at a time. */
+  const sendQueuesRef = useRef<Map<string, QueuedChatSend[]>>(new Map());
+  const sendDrainingRef = useRef<Set<string>>(new Set());
   const sendQueueVersionRef = useRef(0);
+  /* Append to a session's queue, creating it on first use. */
+  function pushToSendQueue(sid: string, item: QueuedChatSend): void {
+    let q = sendQueuesRef.current.get(sid);
+    if (!q) {
+      q = [];
+      sendQueuesRef.current.set(sid, q);
+    }
+    q.push(item);
+  }
   const tabsRef = useRef<TabData[]>(tabs);
   const activeIdxRef = useRef(activeIdx);
   const projectRootRef = useRef(projectRoot);
@@ -1802,7 +1816,8 @@ export default function Chat() {
     const pending = new Map<string, number>();
     activeSendAbortRefs.current.forEach(sid => pending.set(sid, (pending.get(sid) ?? 0) + 1));
     const queued = new Map<string, number>();
-    for (const it of sendQueueRef.current) queued.set(it.originSid, (queued.get(it.originSid) ?? 0) + 1);
+    for (const q of sendQueuesRef.current.values())
+      for (const it of q) queued.set(it.originSid, (queued.get(it.originSid) ?? 0) + 1);
     setWorkBySid(prev => {
       const next: Record<string, SidWork> = {};
       const sids = new Set<string>([...Object.keys(prev), ...pending.keys(), ...queued.keys()]);
@@ -1829,7 +1844,13 @@ export default function Chat() {
 
   function abortActiveSends(): void {
     sendQueueVersionRef.current++;
-    sendQueueRef.current = [];
+    sendQueuesRef.current.clear();
+    /* Do NOT clear sendDrainingRef here: a drainer mid-`await sendQueuedMessage`
+     * still owns its sid and will self-remove in its own finally. Clearing it
+     * would let a re-enqueue (same sid, post-abort) start a SECOND drainer while
+     * the first is still unwinding — two concurrent turns on one pane, which the
+     * server rejects with presence_busy. The version bump above + the cleared
+     * queues make the in-flight drainer a no-op as it unwinds. */
     activeSendAbortRefs.current.forEach((_sid, controller) => controller.abort());
     activeSendAbortRefs.current.clear();
     setWorkBySid({});
@@ -2447,9 +2468,9 @@ export default function Chat() {
     window.setTimeout(() => { if (expectSteerRef.current === sid) expectSteerRef.current = ''; }, 12000);
     const sendNormally = () => {
       if (expectSteerRef.current === sid) expectSteerRef.current = '';
-      sendQueueRef.current.push({ text, version: sendQueueVersionRef.current, originSid: sid });
+      pushToSendQueue(sid, { text, version: sendQueueVersionRef.current, originSid: sid });
       recomputeWorkCounts();
-      void drainSendQueue();
+      void drainSendQueue(sid);
     };
     try {
       const resp = await fetch('/api/chat/interrupt', {
@@ -2470,8 +2491,10 @@ export default function Chat() {
   function enqueueChatMessage(text: string) {
     /* Auto-title from first message */
     const idx = activeIdxRef.current;
+    const activeSidForTitle = tabsRef.current[idx]?.aimeeSid ?? '';
     const hasExistingMessages = (tabsRef.current[idx]?.messages.length ?? 0) > 0 ||
-      streamMsgs.length > 0 || activeSendAbortRefs.current.size > 0 || sendQueueRef.current.length > 0;
+      streamMsgs.length > 0 || activeSendAbortRefs.current.size > 0 ||
+      (sendQueuesRef.current.get(activeSidForTitle)?.length ?? 0) > 0;
     if (!hasExistingMessages) {
       const title = text.substring(0, 30) + (text.length > 30 ? '…' : '');
       setTabs(prev => {
@@ -2489,25 +2512,39 @@ export default function Chat() {
     setStreamMsgs(prev => [...prev, { id: userMsgId, type: 'user', text }]);
 
     const originSid = tabsRef.current[idx]?.aimeeSid ?? '';
-    sendQueueRef.current.push({ text, version: sendQueueVersionRef.current, originSid });
+    pushToSendQueue(originSid, { text, version: sendQueueVersionRef.current, originSid });
     recomputeWorkCounts();
-    void drainSendQueue();
+    void drainSendQueue(originSid);
   }
 
-  async function drainSendQueue() {
-    if (sendQueueDrainingRef.current) return;
-    sendQueueDrainingRef.current = true;
+  /* Drain one session's queue. A drainer runs per aimeeSid: at most one per
+   * session (so a session's turns stay ordered), but different sessions drain
+   * concurrently — sending on one tab never waits on another tab's turn. */
+  async function drainSendQueue(sid: string) {
+    /* No `!sid` early-return: an empty key is a valid (degenerate) bucket, and
+     * bailing here would strand a queued item forever (work spinner stuck on).
+     * `aimeeSid` is always assigned (normalizeTab), so '' is not expected — but
+     * if it ever occurs the message still drains rather than wedging. */
+    if (sendDrainingRef.current.has(sid)) return;
+    sendDrainingRef.current.add(sid);
     try {
-      while (sendQueueRef.current.length > 0) {
-        const item = sendQueueRef.current.shift()!;
+      for (;;) {
+        const q = sendQueuesRef.current.get(sid);
+        if (!q || q.length === 0) break;
+        const item = q.shift()!;
         recomputeWorkCounts();
         if (item.version !== sendQueueVersionRef.current) continue;
         await sendQueuedMessage(item);
       }
     } finally {
-      sendQueueDrainingRef.current = false;
-      if (sendQueueRef.current.length > 0) {
-        void drainSendQueue();
+      sendDrainingRef.current.delete(sid);
+      const q = sendQueuesRef.current.get(sid);
+      if (q && q.length > 0) {
+        void drainSendQueue(sid);
+      } else {
+        /* Prune the now-empty queue so the map doesn't accumulate one empty
+         * array per ever-used session across long-lived tab churn. */
+        sendQueuesRef.current.delete(sid);
       }
     }
   }
