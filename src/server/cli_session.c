@@ -77,6 +77,25 @@ cli_session_stream_cb_t cli_session_get_stream_cb(void **ud_out)
    return g_stream_cb;
 }
 
+/* Per-thread cancel-check (set by the chat worker to the turn's cancel flag).
+ * cli_session.c stays decoupled from the turn registry — the worker supplies the
+ * predicate. */
+static __thread cli_session_cancel_cb_t g_cancel_cb = NULL;
+static __thread void *g_cancel_ud = NULL;
+
+void cli_session_set_cancel_check(cli_session_cancel_cb_t cb, void *ud)
+{
+   g_cancel_cb = cb;
+   g_cancel_ud = ud;
+}
+
+cli_session_cancel_cb_t cli_session_get_cancel_check(void **ud_out)
+{
+   if (ud_out)
+      *ud_out = g_cancel_ud;
+   return g_cancel_cb;
+}
+
 void cli_session_set_kind(cli_session_t *s, const char *cli_kind)
 {
    if (!s)
@@ -536,6 +555,20 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
       {
          out[0] = '\0';
          return -1;
+      }
+
+      /* Cancellation (steering/interrupt or session close): stop the CLI mid-
+       * generation with an interrupt key so the pane goes idle with the
+       * conversation intact, then report cancelled. Checked before the wall-clock
+       * and poll so a cancel is honoured promptly. */
+      if (g_cancel_cb && g_cancel_cb(g_cancel_ud))
+      {
+         char esc[CLI_SESSION_NAME_MAX + 64];
+         snprintf(esc, sizeof(esc), "tmux send-keys -t '%s' Escape 2>/dev/null", s->session_name);
+         int erc;
+         free(sess_run(esc, &erc));
+         out[0] = '\0';
+         return -3;
       }
 
       /* Wall-clock backstop. Completion is detected by the pane going static

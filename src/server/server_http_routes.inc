@@ -1666,6 +1666,9 @@ static const http_route_t g_v1_routes[] = {
     /* Streaming chat over HTTP: dispatched by handle_conn; row exists for the
      * capability gate + conformance scan. */
     {"POST", "/v1/chat/stream", NULL, RM_EXACT, "chat.send_stream", 0, NULL},
+    /* Steering: stop the in-flight turn + queue a follow-up the server
+     * auto-continues (streamed to the session's /events). */
+    {"POST", "/v1/chat/interrupt", NULL, RM_EXACT, "chat.interrupt", 0, rh_dispatch_op},
 
     /* Server-hosted Claude PTY session (terminal forwarding). All consume model
      * budget (spawn/drive claude), so they map to the chat capability. The

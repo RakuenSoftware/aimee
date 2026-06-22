@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "turn_registry.h"
@@ -100,6 +101,37 @@ static void test_reaped(void)
    printf("ok: mark_reaped\n");
 }
 
+static void test_steer_set_take(void)
+{
+   char *msg = NULL;
+   assert(chat_steer_take("sess-S", &msg) == 0 && msg == NULL); /* nothing pending */
+   chat_steer_set("sess-S", "focus on the parser");
+   assert(chat_steer_take("sess-S", &msg) == 1);
+   assert(msg && strcmp(msg, "focus on the parser") == 0);
+   free(msg);
+   msg = NULL;
+   assert(chat_steer_take("sess-S", &msg) == 0 && msg == NULL); /* cleared by take */
+   /* a newer steer supersedes an untaken one */
+   chat_steer_set("sess-S", "first");
+   chat_steer_set("sess-S", "second");
+   assert(chat_steer_take("sess-S", &msg) == 1 && msg && strcmp(msg, "second") == 0);
+   free(msg);
+   /* per-session isolation */
+   char *ma = NULL, *mb = NULL;
+   chat_steer_set("sess-A", "a");
+   chat_steer_set("sess-B", "b");
+   assert(chat_steer_take("sess-A", &ma) == 1 && ma && strcmp(ma, "a") == 0);
+   assert(chat_steer_take("sess-B", &mb) == 1 && mb && strcmp(mb, "b") == 0);
+   free(ma);
+   free(mb);
+   /* clear drops an untaken steer */
+   chat_steer_set("sess-C", "c");
+   chat_steer_clear("sess-C");
+   msg = NULL;
+   assert(chat_steer_take("sess-C", &msg) == 0);
+   printf("ok: steer_set_take\n");
+}
+
 int main(void)
 {
    turn_registry_init();
@@ -108,6 +140,7 @@ int main(void)
    test_cancel_authz();
    test_cancel_all();
    test_reaped();
+   test_steer_set_take();
    printf("all turn_registry tests passed\n");
    return 0;
 }

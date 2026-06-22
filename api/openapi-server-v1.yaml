@@ -3004,6 +3004,41 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /chat/interrupt:
+    post:
+      summary: Steer an in-flight chat turn
+      description: >
+        Stop the in-flight turn for a session and queue a follow-up `message`
+        the server auto-continues as the next, server-initiated turn (streamed
+        to the session's /events presence stream). Owner-authorized like
+        chat.graceful_cancel. When no turn is in flight, nothing is queued and
+        `interrupted` is false. Requires CAP_CHAT.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [aimee_session_id, message]
+              properties:
+                aimee_session_id: { type: string }
+                message: { type: string }
+      responses:
+        "200":
+          description: Interrupt accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  session_id: { type: string }
+                  interrupted: { type: boolean }
+        "403":
+          description: Caller lacks CAP_CHAT or is not the session owner
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /completions:
     post:
       summary: Create a text completion

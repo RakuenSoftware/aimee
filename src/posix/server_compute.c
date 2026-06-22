@@ -585,6 +585,16 @@ static void chat_cli_stream_cb(const char *delta, void *ud)
    c->emitted = 1;
 }
 
+/* Cancel predicate for the tmux CLI driver: reflects this turn's registry cancel
+ * flag (set by chat.interrupt / graceful_cancel / session close). Lets
+ * cli_session_recv abort a wedged or steered generation promptly without
+ * coupling cli_session.c to the turn registry. */
+static int chat_cli_cancel_check(void *ud)
+{
+   (void)ud;
+   return agent_request_cancelled();
+}
+
 static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, const char *cwd,
                                      const char *aimee_sid, const char *provider,
                                      const char *model_override, const config_t *cfg)
@@ -657,12 +667,18 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    void *prev_stream_ud = NULL;
    cli_session_stream_cb_t prev_stream_cb = cli_session_get_stream_cb(&prev_stream_ud);
    cli_session_set_stream_cb(chat_cli_stream_cb, &sctx);
+   /* Let the tmux CLI driver observe this turn's cancel flag so a steer/interrupt
+    * stops the running generation promptly. Save/restore around any outer turn. */
+   void *prev_cancel_ud = NULL;
+   cli_session_cancel_cb_t prev_cancel_cb = cli_session_get_cancel_check(&prev_cancel_ud);
+   cli_session_set_cancel_check(chat_cli_cancel_check, NULL);
 
    agent_result_t result;
    memset(&result, 0, sizeof(result));
    int rc = agent_run_with_tools(&acfg, "code", system_prompt ? system_prompt : "", message,
                                  AGENT_DEFAULT_MAX_TOKENS, &result);
 
+   cli_session_set_cancel_check(prev_cancel_cb, prev_cancel_ud);
    cli_session_set_stream_cb(prev_stream_cb, prev_stream_ud);
    agent_tools_set_tool_event_cb(NULL, NULL);
    session_id_clear_override();
@@ -672,6 +688,18 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
 
    if (rc != 0)
    {
+      /* A cancelled turn (steering/interrupt) ends quietly: the running CLI was
+       * stopped with the conversation intact, and the steer continuation streams
+       * as the next turn. Emit a clean turn boundary, not an error event. */
+      if (agent_request_cancelled())
+      {
+         stream_event(cctx, "turn_end", NULL, NULL);
+         stream_event(cctx, "done", NULL, NULL);
+         free(result.response);
+         compute_ok(cctx);
+         compute_ctx_free(cctx);
+         return;
+      }
       compute_error(cctx, result.error[0] ? result.error : "agent provider failed");
       free(result.response);
       compute_ctx_free(cctx);

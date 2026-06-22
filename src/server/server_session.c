@@ -92,6 +92,55 @@ int handle_chat_graceful_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
    return server_send_ok(conn, resp);
 }
 
+/* chat.interrupt: steering. Stop the in-flight turn for a session AND queue a
+ * follow-up `message` that the cancelled turn's worker auto-dispatches as the
+ * next, server-initiated turn (streamed to the session's presence-event stream).
+ * Same owner-authz as chat.graceful_cancel. When no turn is in flight, nothing is
+ * queued and `interrupted` is false — the caller should send the message as an
+ * ordinary turn instead. */
+int handle_chat_interrupt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "aimee_session_id");
+   if (!cJSON_IsString(jsid))
+      jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
+   const char *sid = (jsid && cJSON_IsString(jsid)) ? jsid->valuestring : NULL;
+   if (!sid || !sid[0])
+      return server_send_error(conn, "missing aimee_session_id", NULL);
+   cJSON *jmsg = cJSON_GetObjectItemCaseSensitive(req, "message");
+   const char *message = (jmsg && cJSON_IsString(jmsg)) ? jmsg->valuestring : NULL;
+   if (!message || !message[0])
+      return server_send_error(conn, "missing message", NULL);
+
+   /* Authorize + cancel exactly like graceful_cancel (owner-authz; a trusted
+    * local peer — the co-located webchat backend over the UDS — is allowed and
+    * binds session id to its authenticated caller before forwarding). */
+   int rc;
+   int trusted_local = (conn->capabilities == CAPS_ALL);
+   aimee_log(LOG_INFO, "chat_interrupt",
+             "interrupt request: session=%s trusted_local=%d principal=%s", sid, trusted_local,
+             conn->vault_principal[0] ? conn->vault_principal : "(none)");
+   if (trusted_local)
+      rc = turn_registry_cancel(sid, NULL);
+   else if (conn->vault_principal[0])
+      rc = turn_registry_cancel(sid, conn->vault_principal);
+   else
+      return server_send_error(conn, "forbidden: unattested caller", NULL);
+   if (rc < 0)
+      return server_send_error(conn, "forbidden: not the session owner", NULL);
+
+   /* A turn was flagged: stash the steer for its worker to auto-continue. The
+    * cancel flag is observed asynchronously (the worker polls it), so the worker
+    * reaches the steer-take well after this set — no race. */
+   if (rc == 1)
+      chat_steer_set(sid, message);
+
+   cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "session_id", sid);
+   cJSON_AddBoolToObject(resp, "interrupted", rc == 1 ? 1 : 0);
+   return server_send_ok(conn, resp);
+}
+
 /* session.attach: register a surface as an attachment of a presence (creating
  * the presence on first attach), per the unified-presence model. Mirrors the
  * REST POST /v1/sessions/{id}/attach, for the NDJSON/CLI transport. */

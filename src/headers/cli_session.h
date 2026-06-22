@@ -36,6 +36,15 @@ void cli_session_set_stream_cb(cli_session_stream_cb_t cb, void *ud);
  * the outer turn). *ud_out receives the userdata; returns the callback. */
 cli_session_stream_cb_t cli_session_get_stream_cb(void **ud_out);
 
+/* Cancel-check callback: cli_session_recv polls it each tick; a non-zero return
+ * aborts the wait (the running turn was asked to stop — steering/interrupt or
+ * session close). recv then sends an interrupt key to the pane so the CLI stops
+ * generating (the conversation stays intact for the next turn) and returns the
+ * cancelled status. Thread-local, like the stream callback. */
+typedef int (*cli_session_cancel_cb_t)(void *ud);
+void cli_session_set_cancel_check(cli_session_cancel_cb_t cb, void *ud);
+cli_session_cancel_cb_t cli_session_get_cancel_check(void **ud_out);
+
 /* Record the CLI kind so recv can pick the right TUI response parser. */
 void cli_session_set_kind(cli_session_t *s, const char *cli_kind);
 
@@ -69,7 +78,8 @@ int cli_session_capture(cli_session_t *s, char *out, size_t out_max);
 /* Polls capture-pane until output stabilises (hash-based), the session dies,
  * or timeout_ms elapses. Writes captured text to out (NUL-terminated).
  * Returns 0 on success, -1 if the session exits before output stabilises,
- * and -2 if it did not stabilise within timeout_ms. timeout_ms <= 0 disables
+ * -2 if it did not stabilise within timeout_ms, and -3 if the cancel-check
+ * fired (the turn was asked to stop). timeout_ms <= 0 disables
  * the wall-clock bound (legacy unbounded behaviour). The bound is the only
  * thing that breaks a CLI wedged in a provider retry loop (e.g. an Anthropic
  * outage), whose pane animates forever without the session dying. recv writes

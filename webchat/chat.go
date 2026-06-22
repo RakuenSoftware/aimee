@@ -360,6 +360,42 @@ func (s *server) handleChatClear(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, `{"status":"ok"}`)
 }
 
+// handleChatInterrupt handles POST /api/chat/interrupt: stop the in-flight turn
+// for a session and queue a steering message the server auto-continues as the
+// next turn (streamed to the session's /events). The reply is small JSON
+// ({interrupted:bool}); the steered turn itself arrives on the events stream.
+func (s *server) handleChatInterrupt(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		AimeeSessionID string `json:"aimee_session_id"`
+		Message        string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+	if req.AimeeSessionID == "" || req.Message == "" {
+		http.Error(w, `{"error":"aimee_session_id and message required"}`, http.StatusBadRequest)
+		return
+	}
+	body, _ := json.Marshal(map[string]string{
+		"aimee_session_id": req.AimeeSessionID,
+		"message":          req.Message,
+	})
+	st, data, err := s.v1RequestWebuser(r.Context(), currentUser(r), http.MethodPost,
+		"/v1/chat/interrupt", body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(st)
+	w.Write(data)
+}
+
 // handleChatThreads is a stub for GET /api/chat/threads (in-tab conversation
 // branching — a separate, not-yet-implemented feature). It returns the empty
 // shape the SPA's ThreadBar expects. The per-user persisted tab list lives at

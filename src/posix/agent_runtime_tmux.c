@@ -165,6 +165,24 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
    if (recv_rc != 0)
    {
       free(raw);
+      if (recv_rc == -3)
+      {
+         /* Cancelled (steering/interrupt): recv already sent the interrupt key,
+          * so the CLI stopped generating with the conversation intact. KEEP a
+          * reused pane alive (the steer continuation reuses it); only free this
+          * turn's scratch. A one-shot pane is torn down. */
+         if (reuse)
+         {
+            free(sess.baseline);
+            sess.baseline = NULL;
+            free(sess.stream_emitted);
+            sess.stream_emitted = NULL;
+         }
+         else
+            cli_session_destroy(&sess);
+         snprintf(out->error, sizeof(out->error), "turn cancelled");
+         return -1;
+      }
       cli_session_destroy(&sess); /* kill the (possibly wedged) session */
       if (recv_rc == -2)
          snprintf(out->error, sizeof(out->error),

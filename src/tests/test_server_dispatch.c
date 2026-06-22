@@ -416,6 +416,10 @@ int handle_chat_graceful_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *r
 {
    return stub_handler(conn, "chat.graceful_cancel");
 }
+int handle_chat_interrupt(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "chat.interrupt");
+}
 int handle_session_brief(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "session.brief");

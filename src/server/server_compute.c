@@ -1599,15 +1599,24 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
     * handshake and causing "server dropped connection" errors for other
     * clients.  With dup, close(conn->fd) merely frees the fd-table slot;
     * the underlying socket description stays alive until we close our copy. */
-#ifdef AIMEE_POSIX
+   /* A NULL conn is a server-initiated turn (no client socket): it streams to the
+    * session's presence-event ring only. Used by chat.interrupt's auto-continue,
+    * which dispatches the queued steer with no requesting connection. */
+   if (!conn)
    {
+      cctx->conn_fd = -1;
+      cctx->conn_alive = 0;
+   }
+   else
+   {
+#ifdef AIMEE_POSIX
       int duped = dup(conn->fd);
       cctx->conn_fd = (duped >= 0) ? duped : conn->fd;
-   }
 #else
-   cctx->conn_fd = conn->fd;
+      cctx->conn_fd = conn->fd;
 #endif
-   cctx->conn_alive = 1;
+      cctx->conn_alive = 1;
+   }
    /* Capture the peer's caps for the foreign-cwd trust check (AC #6). A UDS peer
     * is CAPS_ALL (same filesystem); a remote/TCP peer is less, and its cwd must
     * not be opened on the server's own fs. A NULL conn is an in-process caller. */

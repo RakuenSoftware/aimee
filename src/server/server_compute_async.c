@@ -401,10 +401,22 @@ cJSON *server_compute_async_json(server_ctx_t *ctx)
 /* Monotonic per-chat-turn id source for the presence-event stream. */
 static atomic_ulong g_chat_turn_seq;
 
+static int chat_stream_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx);
+static char *chat_sanitize_message_transcript_tail(const char *message);
+
 static void chat_stream_worker_pooled(void *arg)
 {
    compute_ctx_t *cctx = (compute_ctx_t *)arg;
    int async_slot = cctx->async_slot;
+
+   /* Capture what the steer auto-continue needs BEFORE chat_stream_worker frees
+    * cctx: the request template (to clone with the steer message swapped in), the
+    * session's attested principal, and the server ctx. Cheap clone per turn;
+    * freed below unless a steer is dispatched. */
+   cJSON *steer_tmpl = cJSON_Duplicate(cctx->req, 1);
+   char steer_principal[128];
+   snprintf(steer_principal, sizeof(steer_principal), "%s", cctx->vault_principal);
+   server_ctx_t *steer_ctx = cctx->server;
 
    /* Copy what we need before chat_stream_worker runs — its sub-workers free
     * cctx (and its req) on completion.
@@ -508,6 +520,32 @@ static void chat_stream_worker_pooled(void *arg)
     * turn registry table (NOT into cctx, which the worker already freed), so
     * this is not a use-after-free. */
    turn_registry_clear(cancel_entry);
+
+   /* Steering auto-continue: if chat.interrupt queued a follow-up for this
+    * session (it only does so when it cancelled an in-flight turn), dispatch it
+    * now as a server-initiated turn. It reuses the cancelled turn's request
+    * (same session / cwd / provider) with the steer message swapped in, runs with
+    * no client connection (streams to the presence-event ring), and — for a tmux
+    * CLI provider — reuses the same pane, so the conversation continues from where
+    * the interrupt stopped it. */
+   char *steer_msg = NULL;
+   if (sid[0] && steer_tmpl && chat_steer_take(sid, &steer_msg) && steer_msg)
+   {
+      char *clean = chat_sanitize_message_transcript_tail(steer_msg);
+      cJSON *m = cJSON_CreateString(clean ? clean : steer_msg);
+      free(clean);
+      if (m)
+         cJSON_ReplaceItemInObjectCaseSensitive(steer_tmpl, "message", m);
+      /* Carry the session's principal into create_compute_ctx's thread-local
+       * fallback (the NULL-conn path reads it for vault identity). */
+      agent_set_request_vault_principal(steer_principal);
+      compute_ctx_t *nctx = create_compute_ctx(steer_ctx, NULL, steer_tmpl);
+      agent_set_request_vault_principal(NULL);
+      if (nctx && chat_stream_dispatch(steer_ctx, nctx) != 0)
+         compute_ctx_free(nctx);
+      free(steer_msg);
+   }
+   cJSON_Delete(steer_tmpl);
 
    async_slot_release(async_slot);
    chat_thread_release();

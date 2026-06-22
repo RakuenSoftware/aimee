@@ -1553,6 +1553,14 @@ export default function Chat() {
   // THIS surface originated the turn (skip persist) or is merely observing a
   // turn that ran/completed while detached (persist it into history).
   const workingRef = useRef(working);
+  // Live mirror of remoteTurnActive so sendMessage can synchronously tell whether
+  // a server/foreign turn (e.g. a steer auto-continue) is in flight for the tab.
+  const remoteTurnActiveRef = useRef(false);
+  // Set when we just sent a steer (chat.interrupt): the next turn_started on the
+  // events stream is the server-initiated continuation — render it even though
+  // this surface may still look "working" while the cancelled turn's stream
+  // closes (otherwise the wasWorking self-echo guard would drop the steered reply).
+  const expectSteerRef = useRef(false);
   // turn_ids already committed to history from the presence ring this session.
   // The ring replays turn_started→deltas→turn_done from cursor 0 on EVERY new
   // subscription (reconnect / tab switch back), so dedup is required to avoid
@@ -1722,6 +1730,9 @@ export default function Chat() {
     es.addEventListener('turn_started', (ev: MessageEvent<string>) => {
       saveCursor(ev);
       curTurnId = turnIdOf(ev.data); observed = ''; wasWorking = workingRef.current;
+      // A steer continuation is server-initiated: render it even if this surface
+      // still looks "working" from the just-cancelled turn's closing stream.
+      if (expectSteerRef.current) { wasWorking = false; expectSteerRef.current = false; }
       // Self-echo suppression: the server now ALWAYS mirrors the full turn to the
       // presence ring (durable source of truth for detached recovery), so the
       // surface that ORIGINATED the turn receives an echo of its own stream here.
@@ -1730,7 +1741,7 @@ export default function Chat() {
       // native POST stream already renders the turn — and one full re-render per
       // token, on top of the native one, pegs a core during every response. Only
       // touch the live UI for a turn THIS surface did not originate.
-      if (!wasWorking) { clearRemoteFlush(); setRemoteTurnActive(true); setRemoteTurnText(''); }
+      if (!wasWorking) { clearRemoteFlush(); remoteTurnActiveRef.current = true; setRemoteTurnActive(true); setRemoteTurnText(''); }
     });
     es.addEventListener('turn_delta', (ev: MessageEvent<string>) => {
       saveCursor(ev);
@@ -1770,9 +1781,10 @@ export default function Chat() {
       }
       observed = ''; curTurnId = ''; wasWorking = false;
       clearRemoteFlush();
+      remoteTurnActiveRef.current = false;
       setRemoteTurnActive(false); setRemoteTurnText('');
     });
-    es.onerror = () => { clearRemoteFlush(); setRemoteTurnActive(false); setRemoteTurnText(''); };
+    es.onerror = () => { clearRemoteFlush(); remoteTurnActiveRef.current = false; setRemoteTurnActive(false); setRemoteTurnText(''); };
     return () => { clearRemoteFlush(); es.close(); presenceSseRef.current = null; };
   }, [activeAimeeSid, activeAttachId]);
   useEffect(() => { activeIdxRef.current = activeIdx; }, [activeIdx]);
@@ -2402,7 +2414,51 @@ export default function Chat() {
       textareaRef.current.style.height = 'auto';
     }
 
+    // Steering: if a turn is already in flight for the active tab — a local send
+    // (client stream open) or a server/foreign turn (events stream) — sending
+    // INTERRUPTS the running turn and submits this message as the steer, which the
+    // server auto-continues as the next turn (it arrives on the events stream).
+    const sid = tabsRef.current[activeIdxRef.current]?.aimeeSid ?? '';
+    let clientInflight = false;
+    activeSendAbortRefs.current.forEach(s => { if (s === sid) clientInflight = true; });
+    if (sid && (clientInflight || remoteTurnActiveRef.current)) {
+      // Optimistically show the steer in the transcript and re-stick to bottom.
+      atBottomRef.current = true;
+      setStreamMsgs(prev => [...prev, { id: nextId(), type: 'user', text }]);
+      void steerInterrupt(sid, text);
+      return;
+    }
+
     enqueueChatMessage(text);
+  }
+
+  // Stop the in-flight turn for `sid` and queue `text` as the steer continuation.
+  // The server only honours the steer when a turn was actually in flight; on the
+  // race where it just finished (interrupted:false), fall back to a normal send.
+  async function steerInterrupt(sid: string, text: string) {
+    expectSteerRef.current = true;
+    try {
+      const resp = await fetch('/api/chat/interrupt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': window._csrf || '' },
+        body: JSON.stringify({ aimee_session_id: sid, message: text }),
+      });
+      if (resp.status === 401) { window.location.href = '/login'; return; }
+      const j = resp.ok ? await resp.json().catch(() => ({})) as { interrupted?: boolean } : {};
+      if (!j.interrupted) {
+        // No turn was in flight server-side: send normally instead.
+        expectSteerRef.current = false;
+        sendQueueRef.current.push({ text, version: sendQueueVersionRef.current, originSid: sid });
+        recomputeWorkCounts();
+        void drainSendQueue();
+      }
+    } catch {
+      // Interrupt failed: fall back to a normal send so the message isn't lost.
+      expectSteerRef.current = false;
+      sendQueueRef.current.push({ text, version: sendQueueVersionRef.current, originSid: sid });
+      recomputeWorkCounts();
+      void drainSendQueue();
+    }
   }
 
   function enqueueChatMessage(text: string) {

@@ -155,3 +155,82 @@ int turn_registry_cancel_all(void)
    pthread_mutex_unlock(&g_lock);
    return n;
 }
+
+/* --- pending-steer store -------------------------------------------------
+ * One pending steering message per session: chat.interrupt stashes it and
+ * cancels the in-flight turn; the worker that ran the cancelled turn takes it
+ * and dispatches it as the next (server-initiated) turn. Same leaf lock as the
+ * turn table; the message is a malloc'd copy owned by the slot until taken. */
+typedef struct
+{
+   char session_id[PRESENCE_SESSION_ID_MAX];
+   char *message;
+   int in_use;
+} steer_slot_t;
+
+static steer_slot_t g_steers[TURN_MAX];
+
+static steer_slot_t *steer_find_locked(const char *session_id)
+{
+   if (!session_id || !session_id[0])
+      return NULL;
+   for (int i = 0; i < TURN_MAX; i++)
+      if (g_steers[i].in_use && strcmp(g_steers[i].session_id, session_id) == 0)
+         return &g_steers[i];
+   return NULL;
+}
+
+void chat_steer_set(const char *session_id, const char *message)
+{
+   if (!session_id || !session_id[0] || !message)
+      return;
+   char *copy = strdup(message);
+   if (!copy)
+      return;
+   pthread_mutex_lock(&g_lock);
+   steer_slot_t *slot = steer_find_locked(session_id);
+   if (!slot)
+      for (int i = 0; i < TURN_MAX; i++)
+         if (!g_steers[i].in_use)
+         {
+            slot = &g_steers[i];
+            slot->in_use = 1;
+            snprintf(slot->session_id, sizeof(slot->session_id), "%s", session_id);
+            slot->message = NULL;
+            break;
+         }
+   if (slot)
+   {
+      free(slot->message); /* a newer steer supersedes an untaken one */
+      slot->message = copy;
+      copy = NULL;
+   }
+   pthread_mutex_unlock(&g_lock);
+   free(copy); /* table full: drop */
+}
+
+int chat_steer_take(const char *session_id, char **out_message)
+{
+   if (out_message)
+      *out_message = NULL;
+   if (!session_id || !session_id[0] || !out_message)
+      return 0;
+   pthread_mutex_lock(&g_lock);
+   steer_slot_t *slot = steer_find_locked(session_id);
+   int got = 0;
+   if (slot)
+   {
+      *out_message = slot->message; /* transfer ownership to caller */
+      memset(slot, 0, sizeof(*slot));
+      got = *out_message ? 1 : 0;
+   }
+   pthread_mutex_unlock(&g_lock);
+   return got;
+}
+
+void chat_steer_clear(const char *session_id)
+{
+   char *msg = NULL;
+   (void)chat_steer_take(session_id, &msg);
+   free(msg);
+}

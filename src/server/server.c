@@ -1032,6 +1032,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"session.get", handle_session_get},
     {"session.close", handle_session_close},
     {"chat.graceful_cancel", handle_chat_graceful_cancel},
+    {"chat.interrupt", handle_chat_interrupt},
     {"session.brief", handle_session_brief},
     {"session.attach", handle_session_attach},
     {"session.detach", handle_session_detach},
