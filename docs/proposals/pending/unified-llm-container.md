@@ -4,7 +4,8 @@
   blocking / 0 high / 0 medium, converged). Arc: r1 10 blocking → r2 7 blocking +
   8 high → r3 1 blocking + 1 high + 2 medium → r5 **0 blocking**. rev 7 closes the
   two open questions (pins the operator's synth models; decouples + shrinks the
-  reranker to 0.6B-default, 8B dropped; E4B-ungated CPU default). See "Decisions
+  reranker to Ettin ModernBERT — 400m GPU / 68m CPU, both `-fa on`, Qwen3-Reranker
+  dropped from the real-time path; E4B-ungated CPU default). See "Decisions
   taken" and "Changelog".
 - **Author:** JBailes
 - **Date:** 2026-06-21
@@ -192,14 +193,37 @@ install by detected VRAM (§5).
 
 **Reranker — decoupled, not part of the embed ladder.** The reranker scores
 `(query, candidate)` text pairs, so it is **dimension-agnostic** and need not scale
-with the embedder. Per the Qwen3 paper (Table 4), the **4B matches or beats the
-8B** (MTEB-R 69.76 vs 69.02; FollowIR 14.84 vs 8.05), so **8B is dropped
-entirely**, and the 0.6B is within ~3–4 pts of 4B on general retrieval (the gap is
-larger, ~8 pts, only on *code* retrieval).
+with the embedder. It runs **in the retrieval path of a user turn, so it must be
+real-time** (<~1s for the candidate set). That requirement **rules out the
+generative Qwen3-Reranker** — measured on the 7900XTX, its correct (yes/no-logit)
+scoring is ~320 ms/candidate → **top-20 = 4.4s**, and llama.cpp's native
+`/v1/rerank` scores it **incorrectly** (it is a yes/no causal LM, not a
+classifier-head cross-encoder, so the rank-pooling path is invalid — verified: an
+irrelevant doc scored highest).
 
-| Role | Default | Optional upgrade |
-|------|---------|------------------|
-| Reranker (all tiers) | `Qwen/Qwen3-Reranker-0.6B-GGUF` | `Qwen/Qwen3-Reranker-4B-GGUF` — an **embedder-independent** knob, recommended only for **code-heavy** deployments. **No 8B.** |
+The reranker is therefore **Ettin** (2025 ModernBERT cross-encoders — *already the
+pplx/ettin baseline family*; llama.cpp has native ModernBERT support). It is
+**correct *and* fast** via the native `/v1/rerank` endpoint, and is higher
+quality-per-param than both Qwen3-Reranker and bge-reranker-v2-m3 (published
+MTEB(eng, v2) nDCG@10: ettin-150m **0.599 > Qwen3-Reranker-0.6B 0.594**; ettin-32m
+**0.578 > bge-reranker-v2-m3 0.553**; ettin-1b 0.611 = mxbai-rerank-large-v2).
+
+> **Flash Attention is mandatory (`--flash-attn on`).** On this Vulkan build `-fa
+> auto` does **not** engage FA; forcing it on **~2× the GPU throughput** (ettin-400m:
+> 17 vs 36 ms/candidate). Every reranker `llama-server` launches with `-fa on`.
+
+| Tier | Reranker (GGUF) | Latency (measured, 7900XTX, `-fa on`) | quality (nDCG@10) |
+|------|-----------------|----------------------------------------|-------------------|
+| **GPU (default)** | `ettin-reranker-400m` | top-20 **0.34s** (17 ms/cand), top-50 ~0.85s | ~0.605 |
+| **CPU-only** | `ettin-reranker-68m` | top-10 **0.60s** (60 ms/cand); top-20 1.22s | ~0.589 |
+| CPU strict top-20 <1s | `ettin-reranker-32m` | top-20 ~0.76s | ~0.578 |
+| GPU max quality (opt-in) | `ettin-reranker-1b` | slower; = mxbai-large quality | ~0.611 |
+
+Both default tiers run the **native `/v1/rerank`** endpoint — one relevance score
+per `(query, candidate)` pair, **no chat template and no yes/no-logprob transform**
+(that machinery was specific to the rejected Qwen3-Reranker). Qwen3-Reranker is
+dropped from the real-time path; it remains usable only **async** (e.g. background
+memory re-ranking) where its quality is worth seconds of latency.
 
 **Synth ladder** (pinned to your specified models; MoE rows have low active params):
 
@@ -271,10 +295,13 @@ replay source rows through the new embedder (bounded batch) → **gate the kb to
 
 #### Reranker contract + embedding acceptance gates (named, distinct)
 
-The Qwen3-Reranker mapping is **pinned, not deferred**: fixed chat template, fixed
-yes/no target tokens, `temperature=0`, documented logprob→score transform, and a
-query-side instruction prefix (query path only; pooling documented). Two
-**distinct** quality gates (do not conflate):
+The reranker mapping is **pinned, not deferred**: Ettin runs as a ModernBERT
+cross-encoder over the **native `/v1/rerank`** endpoint with **`--flash-attn on`** —
+one relevance score per `(query, candidate)` pair, **no chat template and no
+yes/no-logprob transform** (that machinery was specific to the rejected generative
+Qwen3-Reranker and is removed). The scoring contract the drift guard pins is
+therefore `(model_id, rerank-endpoint=/v1/rerank, fa=on)`. Two **distinct** quality
+gates (do not conflate):
 
 - **Ship-floor gate (≥95%)** — gates *replacing* pplx/ettin, and it is a
   **pre-cutover precondition** evaluated in staging/CI against the real corpus
@@ -461,10 +488,13 @@ We take the fold but pay down its cost:
 - **CPU synth default = Gemma 4 E4B** via the ungated `ggml-org` GGUF mirror (no
   `HF_TOKEN`); the separate "ungated fallback" model is dropped.
 - **Synth models pinned** to the operator's spec: Gemma 4 **E4B (CPU)**, Gemma 4
-  12B / 26B-A4B / Qwen3.6 35B-A3B (GPU-S/M/L). **Reranker decoupled and shrunk:
-  0.6B default everywhere, 4B optional for code-heavy, 8B dropped** (4B ≥ 8B per
-  Qwen3 Table 4); the reranker guard is keyed on `(model_id, scoring-contract)`,
-  not dim.
+  12B / 26B-A4B / Qwen3.6 35B-A3B (GPU-S/M/L). **Reranker = Ettin (ModernBERT
+  cross-encoder), NOT Qwen3-Reranker**: GPU default `ettin-reranker-400m`, CPU-only
+  `ettin-reranker-68m`, both `--flash-attn on`. Real-time on the 7900XTX (ettin-400m
+  top-20 0.34s; ettin-68m top-10 0.60s) and correct/fast via native `/v1/rerank` —
+  Qwen3-Reranker is generative (~320 ms/cand, top-20 4.4s) and llama.cpp's native
+  rerank scores it wrong, so it is dropped from the real-time path. The reranker
+  guard is keyed on `(model_id, scoring-contract)`, not dim.
 - **Streaming disabled** in the first release.
 - **Two named gates:** ship-floor ≥95% (replace pplx/ettin) vs tier-cutoff ≥99%
   (enable 8B truncated tier).
@@ -504,8 +534,10 @@ We take the fold but pay down its cost:
   operator's spec — Gemma 4 E4B (CPU, **ungated `ggml-org` mirror → no `HF_TOKEN`**,
   so the rev-5 "ungated fallback" model is dropped and E4B is the plain CPU
   default), Gemma 4 12B / 26B-A4B / Qwen3.6 35B-A3B (GPU-S/M/L). **Decoupled the
-  reranker** from the embed ladder (it is dimension-agnostic): **0.6B default on all
-  tiers, 4B optional for code-heavy, 8B dropped** (per Qwen3 Table 4 the 4B ≥ 8B).
+  reranker** from the embed ladder (it is dimension-agnostic): **Ettin ModernBERT
+  cross-encoder — `ettin-reranker-400m` (GPU) / `ettin-reranker-68m` (CPU), both
+  `-fa on`; Qwen3-Reranker dropped from the real-time path** (too slow + native
+  rerank scores it wrong).
   Embed GGUF repos named. Updated §2 ladders, §5 (retitled "GPU detection &
   sizing"), "What this removes", Migration, Decisions.
 - **rev 6 (2026-06-21):** roundtable **signed off** (round 5: 0 blocking/high/medium,
