@@ -162,9 +162,29 @@ install by detected VRAM (§5).
 
 | Install | Embed (GGUF) | dim |
 |---------|--------------|-----|
-| CPU-only | `Qwen/Qwen3-Embedding-0.6B-GGUF` | 1024 |
-| GPU (mid) | `Qwen/Qwen3-Embedding-4B-GGUF` | 2560 |
-| GPU (high) | `Qwen/Qwen3-Embedding-8B-GGUF` | **4000** (trunc) |
+| **all tiers** | **`nomic-ai/nomic-embed-text-v1.5-GGUF`** | **768** |
+
+> **Embed ladder collapsed to a single model — nomic-embed-text-v1.5 (768-dim),
+> 2026-06-22** (provisional; see "provisional" note below). The whole multi-tier
+> Qwen3 embed ladder is **withdrawn** on direct empirical evidence —
+> [embedder-gate-locomo](../../validation/embedder-gate-locomo.md). On the LoCoMo
+> direct-retrieval screen (7900XTX/Vulkan, 1982 questions), nomic **beats every
+> Qwen3-Embedding size** on Recall@5/MRR — including the **8B at 4096-dim** — at
+> the **smallest** vector size (768). Qwen3-4B gave **no** lift over 0.6B; Qwen3-8B
+> costs **5.3× the vector dim** (storage / HNSW build / scan) for a *worse* R@5 and
+> only an R@10 tie. Roundtable (architect + engineer) was unanimous: **nomic
+> everywhere; drop the 4B and 8B tiers** — an optional high tier is config surface,
+> a second GGUF slot, and operator confusion for no measurable win. A single
+> embedder also removes the dim-dependent tier-selection logic and the
+> 8B-MRL-truncation machinery entirely (nomic is fixed 768-d, not truncatable).
+>
+> **Provisional — retrieval-only, ship-floor gate pending.** This screen is
+> *embedder-isolated* (no reranker, no fusion, English, one benchmark, 1982 q) and
+> does not yet report tokens/s or VRAM. It is sufficient to set the **proposal**
+> default but is **not** the production cutover: the full-pipeline ship-floor gate
+> (rerank + fusion, nDCG/MRR vs the pplx baseline) is the ship precondition and can
+> still reorder this. If a future multilingual / long-context need appears, revisit
+> the Qwen3 tiers then.
 
 **Reranker — decoupled, not part of the embed ladder.** The reranker scores
 `(query, candidate)` text pairs, so it is **dimension-agnostic** and need not scale
@@ -194,6 +214,11 @@ larger, ~8 pts, only on *code* retrieval).
 
 #### The 8B truncation — why 4000, and how it must be done
 
+> **SUPERSEDED (2026-06-22):** the embed ladder collapsed to a single 768-dim
+> nomic model (above), so there is no 8B embedder and this truncation machinery is
+> not built. Retained only as design rationale should the Qwen3 tiers ever be
+> revisited (multilingual / long-context).
+
 Qwen3-Embedding-8B is **MRL-trained** (loss on first 512/1024/2048 + full 4096),
 so information front-loads into early dims; published guidance shows truncating to
 **1024 retains ~95%**. Trimming only **4096→4000 (last 96 dims, ~2.3%)** costs far
@@ -218,8 +243,11 @@ index allows.**
 
 #### Model-drift guard — embedder `(model_id, dim)`, reranker `(model_id, scoring-contract)`
 
-`pplx-embed` and `Qwen3-Embedding-0.6B` are both 1024-d, so a dim-only guard would
-silently mix spaces. The guard records and compares **embedder model identity
+A dim-only guard is insufficient — two different models can share a dim (e.g.
+`pplx-embed` and `Qwen3-Embedding-0.6B` are both 1024-d), so it would silently mix
+incompatible spaces. (The new default, `nomic-embed-text-v1.5`, is 768-d, so a
+swap *from* pplx's 1024-d **does** also change the dim, but the guard must not rely
+on that.) The guard records and compares **embedder model identity
 (repo@sha) + dim** and refuses startup / rejects writes on mismatch, keying the
 re-embed trigger on **model_id change**. **The reranker gets the same guard** (keyed
 on reranker `model_id` + scoring contract): a reranker swap invalidates cached
@@ -412,8 +440,11 @@ We take the fold but pay down its cost:
   safety net for the cutover release, with the prior tag retained in the registry
   for a defined window.
 
-- **8B truncation: keep 4000**, gated by the **tier-cutoff (≥99%)** gate; proxy
-  truncation + order invariant; `EMBED_MAX_DIM=4000` exact.
+- **Embed = single model `nomic-embed-text-v1.5` (768-dim)**, provisional on LoCoMo
+  evidence (beats every Qwen3 size incl. 8B at 4096-dim; see embedder-gate-locomo)
+  pending the full-pipeline ship-floor gate. The multi-tier Qwen3 embed ladder
+  (0.6B/4B/8B) is **withdrawn** (roundtable-unanimous); no embed tier-selection and
+  no 8B-MRL-truncation machinery — nomic is fixed 768-d.
 - **Curator fold: take it** as an isolated supervised process + RBAC; off-box
   synth via forward/external; sidecar fallback = kernel-compromise response.
 - **Per-user synth via the gateway** with §1a hardening; **escape hatch** is an

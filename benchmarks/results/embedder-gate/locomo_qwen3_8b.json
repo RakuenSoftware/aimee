@@ -1,0 +1,13 @@
+{
+  "questions": 1982,
+  "conversations": 10,
+  "recall_5": 0.5908173562058526,
+  "recall_10": 0.6917255297679112,
+  "mrr": 0.45100092291057853,
+  "name": "qwen3-8b",
+  "endpoint": "http://localhost:8903/v1/embeddings",
+  "query_prefix": "Instruct: Given a question, retrieve the conversation turns that answer it\nQuery: ",
+  "doc_prefix": "",
+  "normalized": true,
+  "wall_seconds": 665.4
+}

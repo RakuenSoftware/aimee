@@ -88,6 +88,25 @@ def embed(endpoint: str, texts: list[str], batch: int = 256, prefix: str = "",
     return vecs
 
 
+try:
+    import numpy as _np
+except ImportError:  # pure-python fallback (slow at high dim, but dependency-free)
+    _np = None
+
+
+def _rank_dia_ids(qv, doc_vecs, dia_ids):
+    """Return doc dia_ids ranked by descending cosine to query vector qv."""
+    if _np is not None:
+        order = _np.asarray(doc_vecs).dot(_np.asarray(qv)).argsort()[::-1]
+        return [dia_ids[i] for i in order]
+    scored = sorted(
+        ((sum(a * b for a, b in zip(qv, dv)), did) for dv, did in zip(doc_vecs, dia_ids)),
+        key=lambda x: x[0],
+        reverse=True,
+    )
+    return [did for _, did in scored]
+
+
 def evaluate(cases, endpoint: str, query_prefix: str = "", doc_prefix: str = "", normalize: bool = True):
     rows = []
     for cid, turns, questions in cases:
@@ -95,12 +114,7 @@ def evaluate(cases, endpoint: str, query_prefix: str = "", doc_prefix: str = "",
         doc_vecs = embed(endpoint, [t for _, t in turns], prefix=doc_prefix, normalize=normalize)
         q_vecs = embed(endpoint, [qt for qt, _ in questions], prefix=query_prefix, normalize=normalize)
         for (_q, evidence), qv in zip(questions, q_vecs):
-            scored = sorted(
-                ((sum(a * b for a, b in zip(qv, dv)), did) for dv, did in zip(doc_vecs, dia_ids)),
-                key=lambda x: x[0],
-                reverse=True,
-            )
-            ranked = [did for _, did in scored]
+            ranked = _rank_dia_ids(qv, doc_vecs, dia_ids)
             rank = next((i + 1 for i, did in enumerate(ranked) if did in evidence), 0)
             rows.append(
                 {

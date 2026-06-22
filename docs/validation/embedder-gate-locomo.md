@@ -55,19 +55,27 @@ questions. Artifacts: [`benchmarks/results/embedder-gate/`](../../benchmarks/res
 
 | model | dim | Recall@5 | Recall@10 | MRR |
 |---|---|---|---|---|
-| **nomic-embed-text-v1.5** | 768 | **0.6060** | **0.6907** | **0.4741** |
+| **nomic-embed-text-v1.5** | 768 | **0.6060** | 0.6907 | **0.4741** |
+| qwen3-embedding-8b | 4096 | 0.5908 | **0.6917** | 0.4510 |
 | qwen3-embedding-0.6b | 1024 | 0.5061 | 0.5974 | 0.3783 |
+| qwen3-embedding-4b | 2560 | 0.5040 | 0.5943 | 0.3888 |
 | bge-base-en-v1.5 | 768 | 0.4995 | 0.6105 | 0.3681 |
 
-**Finding (actionable for the proposal).** On LoCoMo conversational retrieval,
-**`nomic-embed-text-v1.5` clearly beats the proposal's default embedder slot
-(`Qwen3-Embedding-0.6B`)** — +10.0 pts Recall@5, +9.3 pts Recall@10, +9.6 pts MRR
-— at 768-dim vs 1024-dim (smaller vectors, cheaper storage/scan). `Qwen3-0.6B`
-and `bge-base` are roughly tied. This says the default-embedder choice in
-[unified-llm-container](../proposals/pending/unified-llm-container.md) §"model
-registry" should be **re-examined before cutover**: either adopt nomic for the
-default slot, or justify Qwen3 with a stronger config (see caveats) or a larger
-Qwen3 variant.
+**Finding (decisive for the proposal).** On LoCoMo conversational retrieval,
+**`nomic-embed-text-v1.5` (768-dim) beats every Qwen3-Embedding size** — including
+the 8B at 4096-dim — on Recall@5 (0.606 vs 0.591) and MRR (0.474 vs 0.451), and
+ties the 8B on Recall@10. Two more facts sharpen this:
+- **Scaling Qwen3 0.6B→4B buys nothing here** (R@5 0.504 vs 0.506; MRR 0.389 vs
+  0.378) — the 4B is not a meaningful upgrade on this benchmark.
+- Only **Qwen3-8B** closes most of the gap, and it does so at **4096-dim (5.3×
+  nomic's vector size)** — far more storage, scan, and HNSW cost for *worse* R@5.
+
+So nomic wins on **both** axes that matter for the default slot: quality **and**
+dimension. The proposal's all-Qwen3 embed ladder
+([unified-llm-container](../proposals/pending/unified-llm-container.md) §"model
+registry") is dominated by a single 768-dim model on this benchmark; the default
+should be **nomic-embed-text-v1.5**, and the GPU tiers warrant re-examination
+(an 8B at 4096-dim that loses R@5 to a 768-dim model is a poor high tier here).
 
 **Fairness / reproducibility.** Each model uses its own card-recommended prefix,
 recorded in its result JSON (`query_prefix`/`doc_prefix`): Qwen3 the canonical
@@ -79,15 +87,18 @@ are over the **1982 answerable** questions only — a question with empty `evide
 retrieval Recall/MRR are undefined for it; this is answerable-only retrieval by
 construction, not a silent filter.
 
-**Qwen3 prompt-sensitivity check (resolved).** Qwen3-Embedding is prompt
--sensitive, so the gap was re-tested with the canonical `Instruct:\nQuery:`
-newline restored: **identical** (R@5 0.5061 vs 0.5060) — the gap is **not** a
-prompt-format artifact. The 4B/8B Qwen3 variants remain an open probe (they may
-close it), but at the **0.6B default-slot** size nomic is the stronger choice.
+**Qwen3 prompt-sensitivity + size checks (resolved).** Qwen3-Embedding is
+prompt-sensitive, so the gap was re-tested with the canonical `Instruct:\nQuery:`
+newline restored: **identical** (R@5 0.5061 vs 0.5060) — not a prompt-format
+artifact. The "try a bigger Qwen3" hypothesis was also tested directly: 4B gives
+no lift over 0.6B, and 8B (4096-dim) still trails nomic on R@5/MRR. So neither
+prompt format nor model size rescues Qwen3 to nomic's level on this benchmark.
+All Qwen3 runs use the same canonical prefix (recorded in each artifact).
 
 **Caveats (do not over-read).** LoCoMo is one (hard, conversational) benchmark;
 LongMemEval and the full aimee pipeline (rerank + fusion) can reorder these. This
-is an embedder screen, not the production cutover verdict.
+is an embedder screen, not the production cutover verdict — but it is now a
+5-model screen across the whole Qwen3 ladder, which is a strong signal.
 
 ## Scope and honesty notes
 
