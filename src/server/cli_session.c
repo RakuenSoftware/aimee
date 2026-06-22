@@ -378,8 +378,10 @@ static int cli_line_is_chrome(const char *t)
       return 1;
    if (strstr(t, "? for shortcuts") || strstr(t, "for agents") || strstr(t, "to interrupt") ||
        strstr(t, "tmux detected") || strstr(t, "Shell cwd was reset") ||
-       strstr(t, "Update available") || strstr(t, "/model to change") || strstr(t, "/effort") ||
-       strstr(t, "for shortcuts"))
+       strstr(t, "Update available") || strstr(t, "/model to change") ||
+       strstr(t,
+              "\xc2\xb7 /effort")) /* the "· /effort" model/effort status — anchored to the
+                                    * middot separator so prose mentioning /effort isn't matched */
       return 1;
    return 0;
 }

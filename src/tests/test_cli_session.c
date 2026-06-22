@@ -406,6 +406,19 @@ static void test_extract_claude_skips_effort_status(void)
    free(r);
 }
 
+/* The /effort chrome match is anchored to the "· /effort" status format, so a
+ * legitimate answer that merely mentions /effort is NOT skipped. */
+static void test_extract_claude_effort_in_answer_kept(void)
+{
+   const char *pane = "\xe2\x9d\xaf q\n"
+                      "\xe2\x97\x8f Use the /effort command to set the depth.\n"
+                      "\xe2\x9c\xbb Cooked for 1s\n";
+   char *r = cli_session_extract_response(pane, "claude", NULL);
+   assert(r != NULL);
+   assert(strcmp(r, "Use the /effort command to set the depth.") == 0);
+   free(r);
+}
+
 static void test_extract_codex_basic(void)
 {
    /* codex events also use •; the SessionStart hook fired before the turn, so it
@@ -471,6 +484,10 @@ int main(void)
 
    printf("test_extract_claude_skips_effort_status... ");
    test_extract_claude_skips_effort_status();
+   printf("OK\n");
+
+   printf("test_extract_claude_effort_in_answer_kept... ");
+   test_extract_claude_effort_in_answer_kept();
    printf("OK\n");
 
    printf("test_extract_codex_basic... ");

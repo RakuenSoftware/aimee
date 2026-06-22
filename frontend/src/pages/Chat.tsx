@@ -3163,25 +3163,33 @@ export default function Chat() {
           onBlur={e => (e.target.style.borderColor = tokens.borderMedium)}
           autoFocus
         />
-        <button
-          onClick={sendMessage}
-          aria-busy={queueActive}
-          title={(working || remoteTurnActive)
-            ? 'Interrupt the running turn and continue with this message'
-            : 'Send'}
-          style={{
-            padding: '10px 20px', background: tokens.primary,
-            color: tokens.surface, border: 'none', borderRadius: '6px',
-            cursor: 'pointer', fontSize: '14px', whiteSpace: 'nowrap',
-          }}
-        >
-          {queueActive ? (
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-              <Spinner loading text="" />
-              {(working || remoteTurnActive) ? 'Steer' : 'Send'}
-            </span>
-          ) : ((working || remoteTurnActive) ? 'Steer' : 'Send')}
-        </button>
+        {/* A turn in flight for the active tab (local or a server/foreign turn)
+            means sending will interrupt-and-steer; show the spinner + "Steer" and
+            keep aria-busy aligned so the announced and visible state agree. */}
+        {(() => {
+          const steering = working || remoteTurnActive;
+          const busy = queueActive || steering;
+          const label = steering ? 'Steer' : 'Send';
+          return (
+            <button
+              onClick={sendMessage}
+              aria-busy={busy}
+              title={steering ? 'Interrupt the running turn and continue with this message' : 'Send'}
+              style={{
+                padding: '10px 20px', background: tokens.primary,
+                color: tokens.surface, border: 'none', borderRadius: '6px',
+                cursor: 'pointer', fontSize: '14px', whiteSpace: 'nowrap',
+              }}
+            >
+              {busy ? (
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                  <Spinner loading text="" />
+                  {label}
+                </span>
+              ) : label}
+            </button>
+          );
+        })()}
       </div>
 
         </>)}{/* end chat/channel conditional */}
