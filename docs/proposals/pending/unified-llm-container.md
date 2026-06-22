@@ -160,35 +160,51 @@ install by detected VRAM (§5).
 
 **Embed ladder** (the embed row's dim drives every dim-dependent surface):
 
-| Install | Embed (GGUF) | dim |
-|---------|--------------|-----|
-| CPU-only / GPU (default) | `Qwen/Qwen3-Embedding-0.6B-GGUF` | 1024 |
-| GPU (high) | `Qwen/Qwen3-Embedding-8B-GGUF` | **4000** (trunc) |
+| Install | Embed (GGUF) | dim | selection |
+|---------|--------------|-----|-----------|
+| CPU-only (**default**) | `Qwen/Qwen3-Embedding-0.6B-GGUF` | 1024 | auto |
+| GPU (**default**) | `Qwen/Qwen3-Embedding-4B-GGUF` | 2560 | auto (any GPU install) |
+| GPU (**opt-in**) | `Qwen/Qwen3-Embedding-8B-GGUF` | **4000** (trunc 4096→4000) | operator must explicitly configure |
 
-> **CORRECTION (2026-06-22): the "nomic-everywhere" change is reverted.** An
-> earlier revision (PR #613) collapsed this to a single nomic-embed-text-v1.5 row
-> on a LoCoMo screen — **that was wrong on two counts** and is withdrawn. (1) LoCoMo
-> (short conversational-turn retrieval) under-discriminates embedder quality. (2)
-> the Qwen3 numbers were also depressed by a broken llama.cpp serving config. On
-> the **standard SciFact BEIR benchmark with the serving fix applied**
-> ([embedder-gate-scifact](../../validation/embedder-gate-scifact.md)),
-> **Qwen3-Embedding wins decisively and scales**: nDCG@10 **0.883 (8B) > 0.820
-> (0.6B) > 0.799 (nomic)** — even the 0.6B beats nomic, matching Qwen3-Embedding's
-> SOTA MTEB standing. So the **default is Qwen3-Embedding-0.6B** (beats nomic at a
-> modest 1024-dim) and the **high tier is Qwen3-Embedding-8B** (best quality).
-> Qwen3-4B is dropped (no measured SciFact gain probed yet; the Qwen3 paper has 4B
-> ≥ 8B on general retrieval, so revisit only if a mid-VRAM tier is wanted).
+> **Basis (2026-06-22, baseline-gated — supersedes every earlier embed-ladder note,
+> including PR #613's "nomic-everywhere" and #617's capped-SciFact revert).** The
+> embedder was re-validated end-to-end against **published** baselines; full data,
+> the four-model ladder, and the harness are in
+> [embedder-gate-scifact](../../validation/embedder-gate-scifact.md). Headline:
+> - **aimee embeds code** (`kb_curator_index_code_unit.c` body/signature vectors,
+>   `kb_service_code_embed.c` code chunks) through the same configured embedder, so
+>   **code retrieval is the decisive axis**. **nomic-embed is text-only** (never
+>   trained on code): on aimee's *own* 1864-function code set Qwen3-0.6B beats nomic
+>   by **+12.7 nDCG@10 / +10 Recall@10**; on published MTEB code tasks the gap is
+>   **+9 to +63**. **nomic is dropped.**
+> - **Text is a wash-to-win for Qwen3.** Both reproduce their published BEIR numbers
+>   within ~1pt (harness validated): they tie on SciFact (0.703 vs 0.706) and
+>   NFCorpus, and Qwen3 wins the rest (FiQA +9, SCIDOCS +7, ArguAna +19,
+>   TREC-COVID +27). The earlier "0.820 > 0.799 SciFact" was a **capped-corpus
+>   artifact** and is withdrawn.
+> - **Quality scales then plateaus.** aimee-code nDCG@10: 0.6B **0.697** → 4B
+>   **0.759** → 8B **0.761**. The **0.6B→4B step is +6.2; 4B→8B is +0.16 (noise)** —
+>   confirmed f16-vs-f16, and 4B-Q8 == 4B-f16 (quantization lossless here). So **4B
+>   is the GPU default**: it delivers 8B-grade quality at **2560-d vs 4096-d**
+>   (1.6× smaller pgvector index, indexed natively under the 4000-d `halfvec`
+>   ceiling — no truncation), ~1.4× faster embed, ~½ the VRAM.
+> - **8B is an operator opt-in**, not auto-selected by VRAM. It buys only the last
+>   ~0.2 nDCG and costs a 4000-d (truncated) index; a deployment that wants it must
+>   **explicitly configure** the 8B tier (see "The 8B truncation" below). 0.6B and
+>   4B need no truncation.
 >
 > **Required serving config** (the proposal's `aimee-llm` must launch the embedder
 > with these, or it crashes/slows on llama.cpp + Vulkan):
 > `--ctx-size 8192 -ub 512 -np 1 --cache-ram 0 --no-cache-idle-slots` — the default
 > prompt cache fragments the embedding KV cache (→ `GGML_ASSERT(task)` crash) and
 > continuous batching across slots hangs the server. Keep `-ub` ≤ 2048 (RADV
-> per-buffer limit). See the SciFact doc's "Serving fix" section.
+> per-buffer limit). (The HTTP `/v1/embeddings` path returns one vector per input by
+> construction; the `--no-escape` benchmark gotcha is CLI-only and does not affect
+> the server.)
 >
 > **Still provisional for the full cutover:** this is embedder-isolated retrieval
-> on one BEIR dataset; the full-pipeline ship-floor gate (rerank + fusion vs the
-> pplx baseline) remains the ship precondition.
+> (BEIR text + aimee's own code), not yet the full-pipeline ship-floor gate
+> (rerank + fusion vs the pplx baseline), which remains the ship precondition.
 
 **Reranker — decoupled, not part of the embed ladder.** The reranker scores
 `(query, candidate)` text pairs, so it is **dimension-agnostic** and need not scale
@@ -218,9 +234,11 @@ larger, ~8 pts, only on *code* retrieval).
 
 #### The 8B truncation — why 4000, and how it must be done
 
-> **Re-instated (2026-06-22):** the nomic-everywhere change is reverted (SciFact
-> shows Qwen3-Embedding wins — see the embed-ladder correction above), so the 8B
-> high tier and this truncation machinery are back in scope.
+> **Scope (2026-06-22):** the **GPU default is Qwen3-4B at 2560-d, which needs no
+> truncation** (it is under the 4000-d `halfvec` ceiling). This 4096→4000 machinery
+> applies **only when an operator opts into the 8B tier** (see the embed-ladder
+> "Basis" above — 8B buys ~0.2 nDCG over 4B for a 4096-d native vector). It is kept
+> because the 8B opt-in must store an indexable vector.
 
 Qwen3-Embedding-8B is **MRL-trained** (loss on first 512/1024/2048 + full 4096),
 so information front-loads into early dims; published guidance shows truncating to
@@ -442,14 +460,17 @@ We take the fold but pay down its cost:
   safety net for the cutover release, with the prior tag retained in the registry
   for a defined window.
 
-- **Embed = `Qwen3-Embedding-0.6B` default (1024-d) + `Qwen3-Embedding-8B` high
-  tier**, on **SciFact** evidence (nDCG@10 0.883 8B > 0.820 0.6B > 0.799 nomic;
-  even the 0.6B beats nomic) — see embedder-gate-scifact. The earlier
-  "nomic-everywhere" (PR #613, LoCoMo-based) is **reverted**: LoCoMo
-  under-discriminates and the Qwen3 runs were also hit by a llama.cpp serving
-  config bug (`--cache-idle-slots`/`--cache-ram` fragment the embedding KV →
-  `GGML_ASSERT(task)` crash). The embedder must run with
-  `-np 1 --cache-ram 0 --no-cache-idle-slots`. Full-pipeline ship-floor gate still
+- **Embed = `Qwen3-Embedding-0.6B` CPU default (1024-d), `Qwen3-Embedding-4B` GPU
+  default (2560-d), `Qwen3-Embedding-8B` operator opt-in (4000-d trunc).** Baseline-
+  gated against published numbers — see embedder-gate-scifact. Decisive axis is
+  **code** (aimee embeds raw code): nomic is text-only and loses by +9..+63 nDCG on
+  code (and +12.7 on aimee's own code), so **nomic is dropped**. On aimee-code the
+  ladder is 0.6B 0.697 → 4B 0.759 → 8B 0.761, i.e. **4B≈8B (+0.16, noise)** so 4B is
+  the GPU default (8B's 4096-d isn't worth ~0.2 nDCG); 8B is opt-in only. Both the
+  earlier "nomic-everywhere" (#613, LoCoMo) and the capped-SciFact "0.883/0.820/0.799"
+  revert (#617) are **withdrawn** as wrong/artifactual. Serving must run with
+  `-np 1 --cache-ram 0 --no-cache-idle-slots` (else the prompt cache fragments the
+  embedding KV → `GGML_ASSERT(task)` crash). Full-pipeline ship-floor gate still
   pending.
 - **Curator fold: take it** as an isolated supervised process + RBAC; off-box
   synth via forward/external; sidecar fallback = kernel-compromise response.

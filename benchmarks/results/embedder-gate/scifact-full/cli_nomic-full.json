@@ -1,0 +1,12 @@
+{
+  "name": "nomic",
+  "model": "models/nomic-embed-v1.5.Q8_0.gguf",
+  "pooling": "mean",
+  "queries": 300,
+  "corpus": 5183,
+  "ndcg_10": 0.7034462747080099,
+  "recall_10": 0.8462222222222222,
+  "query_prefix": "search_query: ",
+  "doc_prefix": "search_document: ",
+  "wall_seconds": 69.0
+}

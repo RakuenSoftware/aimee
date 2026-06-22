@@ -1,0 +1,12 @@
+{
+  "name": "qwen3-0.6b-f16",
+  "model": "models/qwen3-emb-0.6b-f16.gguf",
+  "pooling": "last",
+  "queries": 300,
+  "corpus": 5183,
+  "ndcg_10": 0.7058511441435118,
+  "recall_10": 0.8398888888888889,
+  "query_prefix": "Instruct: Given a scientific claim, retrieve documents that support or refute the claim Query: ",
+  "doc_prefix": "",
+  "wall_seconds": 744.6
+}

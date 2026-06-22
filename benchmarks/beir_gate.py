@@ -33,23 +33,46 @@ except ImportError:
     np = None
 
 
-def embed(endpoint, texts, prefix="", batch=128, normalize=True):  # batch overridable via --batch
-    out = []
+def _post(endpoint, chunk):
+    body = json.dumps({"input": chunk}).encode()
+    req = urllib.request.Request(endpoint, data=body, headers={"Content-Type": "application/json"})
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(req, timeout=600) as r:
+                data = json.loads(r.read())["data"]
+            return [row["embedding"] for row in sorted(data, key=lambda d: d["index"])]
+        except Exception:
+            if attempt == 3:
+                raise
+            time.sleep(2 * (attempt + 1))
+
+
+_skipped = 0
+
+
+def embed(endpoint, texts, prefix="", batch=128, normalize=True, dim=None, suffix=""):
+    """Robust: on a batch error (e.g. one doc too long for the ubatch, or a
+    transient drop) fall back to one-at-a-time; a single text that still errors is
+    skipped with a zero vector so a few pathological docs cannot kill a long run."""
+    global _skipped
+    out, d = [], dim
     for i in range(0, len(texts), batch):
-        chunk = [prefix + t for t in texts[i : i + batch]]
-        body = json.dumps({"input": chunk}).encode()
-        req = urllib.request.Request(endpoint, data=body, headers={"Content-Type": "application/json"})
-        for attempt in range(4):
-            try:
-                with urllib.request.urlopen(req, timeout=600) as r:
-                    data = json.loads(r.read())["data"]
-                break
-            except Exception:
-                if attempt == 3:
-                    raise
-                time.sleep(2 * (attempt + 1))
-        for row in sorted(data, key=lambda d: d["index"]):
-            v = row["embedding"]
+        chunk = [prefix + t + suffix for t in texts[i : i + batch]]
+        try:
+            vecs = _post(endpoint, chunk)
+        except Exception:
+            vecs = []
+            for t in chunk:
+                try:
+                    vecs.append(_post(endpoint, [t])[0])
+                except Exception:
+                    _skipped += 1
+                    vecs.append(None)
+        for v in vecs:
+            if v is None:
+                out.append([0.0] * (d or 1))
+                continue
+            d = d or len(v)
             if normalize:
                 n = math.sqrt(sum(x * x for x in v)) or 1.0
                 v = [x / n for x in v]
@@ -89,6 +112,7 @@ def main():
     ap.add_argument("--max-docs", type=int, default=0, help="cap corpus (0=all)")
     ap.add_argument("--no-normalize", action="store_true")
     ap.add_argument("--batch", type=int, default=128)
+    ap.add_argument("--suffix", default="", help="appended to every input text (e.g. <|endoftext|> for Qwen3 last-token pooling)")
     ap.add_argument("--max-doc-chars", type=int, default=0, help="truncate each doc to N chars (fair cross-model when models have different max context)")
     args = ap.parse_args()
 
@@ -137,9 +161,9 @@ def main():
 
     cids = list(corpus)
     t0 = time.time()
-    doc_vecs = embed(args.endpoint, [corpus[c] for c in cids], args.doc_prefix, batch=args.batch, normalize=not args.no_normalize)
+    doc_vecs = embed(args.endpoint, [corpus[c] for c in cids], args.doc_prefix, batch=args.batch, normalize=not args.no_normalize, suffix=args.suffix)
     q_ids = list(queries)
-    q_vecs = embed(args.endpoint, [queries[q] for q in q_ids], qprefix, batch=args.batch, normalize=not args.no_normalize)
+    q_vecs = embed(args.endpoint, [queries[q] for q in q_ids], qprefix, batch=args.batch, normalize=not args.no_normalize, suffix=args.suffix)
 
     if np is not None:
         D = np.asarray(doc_vecs, dtype="float32")
@@ -161,15 +185,17 @@ def main():
         "endpoint": args.endpoint,
         "queries": len(ndcgs),
         "corpus": len(cids),
+        "docs_skipped": _skipped,  # docs the server could not embed (e.g. > model context)
         "ndcg_10": sum(ndcgs) / n,
         "recall_10": sum(recalls) / n,
         "query_prefix": qprefix,
         "doc_prefix": args.doc_prefix,
+        "max_doc_chars": args.max_doc_chars,
         "wall_seconds": round(time.time() - t0, 1),
     }
     Path(args.output).write_text(json.dumps(res, indent=2))
     print(f"{args.name}: nDCG@10={res['ndcg_10']:.4f} Recall@10={res['recall_10']:.4f} "
-          f"({res['queries']} q / {res['corpus']} docs, {res['wall_seconds']}s)")
+          f"({res['queries']} q / {res['corpus']} docs, skipped={_skipped}, {res['wall_seconds']}s)")
 
 
 if __name__ == "__main__":

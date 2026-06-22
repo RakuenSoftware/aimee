@@ -1,0 +1,12 @@
+{
+  "name": "aimee_code-qwen4bf16",
+  "model": "models/qwen3-emb-4b-f16.gguf",
+  "pooling": "last",
+  "queries": 1864,
+  "corpus": 1864,
+  "ndcg_10": 0.7591972356836706,
+  "recall_10": 0.8776824034334764,
+  "query_prefix": "Instruct: Given a natural language description of a function, retrieve the source code that implements it Query: ",
+  "doc_prefix": "",
+  "wall_seconds": 332.9
+}

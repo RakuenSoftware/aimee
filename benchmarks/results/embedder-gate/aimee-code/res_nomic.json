@@ -1,0 +1,12 @@
+{
+  "name": "aimee_code-nomic",
+  "model": "models/nomic-embed-v1.5.Q8_0.gguf",
+  "pooling": "mean",
+  "queries": 1864,
+  "corpus": 1864,
+  "ndcg_10": 0.5700112410172118,
+  "recall_10": 0.7167381974248928,
+  "query_prefix": "search_query: ",
+  "doc_prefix": "search_document: ",
+  "wall_seconds": 20.0
+}
