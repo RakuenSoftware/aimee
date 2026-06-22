@@ -1,6 +1,6 @@
 # Four-part harness taxonomy: name the parts, attribute the failures, delete the scaffolding
 
-Status: pending
+Status: done — reference tools shipped (PR #622); C ports + A/B harness are specced follow-ons
 Owner: harness / observability
 Scope: vocabulary + two measurement tools (one shipped runnable, one C port specced)
 

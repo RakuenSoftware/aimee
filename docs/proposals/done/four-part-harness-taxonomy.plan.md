@@ -226,9 +226,9 @@ the subsystem map, and the two verified reference tools. On merge the proposal m
 to `docs/proposals/done/` annotated **"reference tools shipped; C ports + A/B
 harness are specced follow-ons"** — the same "shipped phase + named follow-ons"
 done-state used across the proposal tree — e.g.
-[`optimization-surface.md`](../done/optimization-surface.md) shipped its CLI with
+[`optimization-surface.md`](optimization-surface.md) shipped its CLI with
 the remainder carried in
-[`optimization-surface-residual.md`](../done/optimization-surface-residual.md), and
-[`agent-roundtable-authoring-pipeline.md`](../done/agent-roundtable-authoring-pipeline.md)
+[`optimization-surface-residual.md`](optimization-surface-residual.md), and
+[`agent-roundtable-authoring-pipeline.md`](agent-roundtable-authoring-pipeline.md)
 landed with named deferred follow-ons. The follow-on C work here is tracked by the
 proposal's §6 rollout list.

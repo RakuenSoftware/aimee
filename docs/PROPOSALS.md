@@ -14,7 +14,7 @@ directory listing:
 
 - [`proposals/accepted/`](proposals/accepted/): locked but not yet
   implemented
-- [`proposals/done/`](proposals/done/): shipped (16 proposals)
+- [`proposals/done/`](proposals/done/): shipped (17 proposals)
 - [`proposals/rejected/`](proposals/rejected/): considered and
   declined
 - [`proposals/deferred/`](proposals/deferred/): parked for later
@@ -47,20 +47,6 @@ umbrella document plus two platform-wide contracts.
    shared identically across CLI, MCP, and the aimee-kb `/v1/` API.
 
 ## Pending
-
-### Four-part harness taxonomy
-
-[Name the parts, attribute the failures, delete the
-scaffolding](proposals/pending/four-part-harness-taxonomy.md). Adopts one
-vocabulary for the whole harness — loop, tool interface, context management,
-control — and builds two measurements on it: a failure classifier that attributes
-each bad run to one of the four parts (shipped runnable in
-`scripts/harness/classify_failures.py`, C port into `trace_analysis.c` specced),
-and a delete-pressure metric that ranks the per-tool prompt scaffolding by how much
-it bets against the model (shipped runnable in `scripts/harness/delete_pressure.py`).
-Classifies every major subsystem as a durable bet (memory, KB, guardrails,
-isolation) or a delete-pressure candidate (tool prompts, anti-pattern advisories,
-packing heuristics), so the harness can shrink as models improve.
 
 ### Evidence pipeline: aimee-kb + curator + learning + ingest
 
@@ -376,7 +362,7 @@ two are defense in depth.
   Phase 0/1 shipped, sidecar mechanism, shadow dry_run mode, DB1 `guardrail_events` table, score-band policy mapping, `aimee guardrails review` CLI, and `scripts/guardrails-semantic.py` reference sidecar. Phases 2+ require dogfood.
 ## Done
 
-The [`proposals/done/`](proposals/done/) directory holds 16 shipped
+The [`proposals/done/`](proposals/done/) directory holds 17 shipped
 proposals. Recent highlights by theme:
 
 - **Architecture / platform contracts.** Architecture Charter (umbrella
