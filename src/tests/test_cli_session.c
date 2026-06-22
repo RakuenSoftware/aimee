@@ -1,4 +1,7 @@
 /* test_cli_session.c: unit tests for cli_session pure-C functions */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -6,6 +9,7 @@
 #include <unistd.h>
 #include <time.h>
 #include <sys/stat.h>
+#include "cJSON.h"
 #include "cli_session.h"
 
 /* --- cli_session_recv timeout tests ---
@@ -530,8 +534,106 @@ static void test_extract_baseline_substring_kept(void)
    free(r);
 }
 
+/* --- cli_session_prepare_claude: claude-code first-run gate seeding --- */
+
+static char *slurp(const char *path)
+{
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return NULL;
+   fseek(f, 0, SEEK_END);
+   long n = ftell(f);
+   fseek(f, 0, SEEK_SET);
+   char *b = malloc((size_t)n + 1);
+   size_t rd = fread(b, 1, (size_t)n, f);
+   fclose(f);
+   b[rd] = '\0';
+   return b;
+}
+
+static void test_prepare_claude_seeds_gates(void)
+{
+   char home[] = "/tmp/aimee_clitest_XXXXXX";
+   assert(mkdtemp(home) != NULL);
+   setenv("AIMEE_HOME", home, 1);
+   const char *wt = "/tmp/aimee_clitest_wt/session-abc";
+
+   cli_session_prepare_claude(wt);
+
+   char p[512];
+   snprintf(p, sizeof(p), "%s/.claude.json", home);
+   char *j = slurp(p);
+   assert(j != NULL);
+   cJSON *root = cJSON_Parse(j);
+   free(j);
+   assert(root != NULL);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "hasCompletedOnboarding")));
+   cJSON *projects = cJSON_GetObjectItemCaseSensitive(root, "projects");
+   assert(cJSON_IsObject(projects));
+   cJSON *proj = cJSON_GetObjectItemCaseSensitive(projects, wt);
+   assert(cJSON_IsObject(proj));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(proj, "hasTrustDialogAccepted")));
+   cJSON_Delete(root);
+
+   snprintf(p, sizeof(p), "%s/.claude/settings.json", home);
+   char *s = slurp(p);
+   assert(s != NULL);
+   cJSON *sroot = cJSON_Parse(s);
+   free(s);
+   assert(sroot != NULL);
+   assert(
+       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(sroot, "skipDangerousModePermissionPrompt")));
+   cJSON_Delete(sroot);
+
+   /* Idempotent: a second call leaves the same state (and must not throw). */
+   cli_session_prepare_claude(wt);
+   snprintf(p, sizeof(p), "%s/.claude.json", home);
+   j = slurp(p);
+   root = cJSON_Parse(j);
+   free(j);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "hasCompletedOnboarding")));
+   cJSON_Delete(root);
+}
+
+static void test_prepare_claude_preserves_existing_settings(void)
+{
+   char home[] = "/tmp/aimee_clitest_XXXXXX";
+   assert(mkdtemp(home) != NULL);
+   setenv("AIMEE_HOME", home, 1);
+
+   char dir[512], p[600];
+   snprintf(dir, sizeof(dir), "%s/.claude", home);
+   assert(mkdir(dir, 0700) == 0);
+   snprintf(p, sizeof(p), "%s/settings.json", dir);
+   FILE *f = fopen(p, "wb");
+   assert(f != NULL);
+   fputs("{\"theme\":\"dark\"}", f);
+   fclose(f);
+
+   cli_session_prepare_claude("/tmp/aimee_clitest_wt2");
+
+   char *s = slurp(p);
+   cJSON *sroot = cJSON_Parse(s);
+   free(s);
+   assert(sroot != NULL);
+   /* pre-existing key kept, new acceptance added */
+   cJSON *theme = cJSON_GetObjectItemCaseSensitive(sroot, "theme");
+   assert(cJSON_IsString(theme) && strcmp(theme->valuestring, "dark") == 0);
+   assert(
+       cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(sroot, "skipDangerousModePermissionPrompt")));
+   cJSON_Delete(sroot);
+}
+
 int main(void)
 {
+   printf("test_prepare_claude_seeds_gates... ");
+   test_prepare_claude_seeds_gates();
+   printf("OK\n");
+
+   printf("test_prepare_claude_preserves_existing_settings... ");
+   test_prepare_claude_preserves_existing_settings();
+   printf("OK\n");
+
    printf("test_extract_claude_basic... ");
    test_extract_claude_basic();
    printf("OK\n");

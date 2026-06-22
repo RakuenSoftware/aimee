@@ -79,6 +79,16 @@ void cli_session_mark_baseline(cli_session_t *s);
 int cli_session_create(cli_session_t *s, const char *session_name, const char *cli_cmd,
                        const char *work_dir, int reuse);
 
+/* Pre-seed claude-code's config so its interactive TUI starts straight at the
+ * prompt instead of blocking on first-run gates the headless `claude -p` path
+ * skipped: onboarding, the --dangerously-skip-permissions warning, and the
+ * per-workspace "trust this folder?" dialog. aimee runs each session in its own
+ * (fresh) worktree, so the trust dialog re-appears every session and wedges the
+ * pane; this trusts `work_dir`. Best-effort and idempotent — never fails the
+ * turn (a worst case just re-shows a prompt). Call before creating a claude
+ * session. No-op for non-claude providers (caller gates on cli_kind). */
+void cli_session_prepare_claude(const char *work_dir);
+
 /* Kills the tmux session. No-op if already dead. */
 void cli_session_destroy(cli_session_t *s);
 

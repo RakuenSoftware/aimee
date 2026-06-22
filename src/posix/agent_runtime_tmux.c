@@ -91,11 +91,23 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
     * config default or the per-request override the chat worker wrote onto the
     * agent — without this the CLI would launch with its own built-in default. */
    const char *base_cmd = agent->cli_cmd[0] ? agent->cli_cmd : "claude";
+   const char *kind = agent->cli_kind[0] ? agent->cli_kind : agent->name;
+   int is_claude = strstr(kind, "claude") != NULL;
    char cli_cmd_buf[CLI_SESSION_CMD_MAX];
    const char *cli_cmd = base_cmd;
-   if (agent->model[0] && !strstr(base_cmd, "--model") && !strstr(base_cmd, " -m "))
+   int need_model = agent->model[0] && !strstr(base_cmd, "--model") && !strstr(base_cmd, " -m ");
+   /* claude runs autonomously here (no human to approve tools) inside a
+    * sandboxed container, so bypass its permission prompts — unless the launch
+    * command already selects a permission mode. Mirrors the legacy `claude -p`
+    * path, which always passed this. The matching first-run acceptances are
+    * seeded by cli_session_prepare_claude() below. */
+   int need_skip = is_claude && !strstr(base_cmd, "--dangerously-skip-permissions") &&
+                   !strstr(base_cmd, "--permission-mode");
+   if (need_model || need_skip)
    {
-      snprintf(cli_cmd_buf, sizeof(cli_cmd_buf), "%s --model %s", base_cmd, agent->model);
+      snprintf(cli_cmd_buf, sizeof(cli_cmd_buf), "%s%s%s%s", base_cmd,
+               need_model ? " --model " : "", need_model ? agent->model : "",
+               need_skip ? " --dangerously-skip-permissions" : "");
       cli_cmd = cli_cmd_buf;
    }
 
@@ -108,6 +120,12 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
       snprintf(cwd, sizeof(cwd), "%s", turn_cwd);
    else if (getcwd(cwd, sizeof(cwd)) == NULL)
       cwd[0] = '\0';
+
+   /* Seed claude-code's first-run gates (onboarding / bypass warning / per-
+    * folder trust for this worktree) so its interactive TUI starts at the
+    * prompt instead of wedging the pane. Best-effort; no-op for other CLIs. */
+   if (is_claude)
+      cli_session_prepare_claude(cwd);
 
    cli_session_t sess;
    int rc = cli_session_create(&sess, sess_name, cli_cmd, cwd, reuse);
