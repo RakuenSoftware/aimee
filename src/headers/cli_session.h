@@ -86,8 +86,13 @@ int cli_session_create(cli_session_t *s, const char *session_name, const char *c
  * (fresh) worktree, so the trust dialog re-appears every session and wedges the
  * pane; this trusts `work_dir`. Best-effort and idempotent — never fails the
  * turn (a worst case just re-shows a prompt). Call before creating a claude
- * session. No-op for non-claude providers (caller gates on cli_kind). */
-void cli_session_prepare_claude(const char *work_dir);
+ * session. No-op for non-claude providers (caller gates on cli_kind).
+ *
+ * `autonomous`: when nonzero the launch passes --dangerously-skip-permissions,
+ * so also pre-accept its one-time warning (skipDangerousModePermissionPrompt).
+ * When zero, only onboarding + per-folder trust are seeded (those are required
+ * for the TUI to start at all); the bypass warning is left untouched. */
+void cli_session_prepare_claude(const char *work_dir, int autonomous);
 
 /* Kills the tmux session. No-op if already dead. */
 void cli_session_destroy(cli_session_t *s);

@@ -99,12 +99,18 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
    char cli_cmd_buf[CLI_SESSION_CMD_MAX];
    const char *cli_cmd = base_cmd;
    int need_model = agent->model[0] && !strstr(base_cmd, "--model") && !strstr(base_cmd, " -m ");
-   /* claude runs autonomously here (no human to approve tools) inside a
-    * sandboxed container, so bypass its permission prompts — unless the launch
-    * command already selects a permission mode. Mirrors the legacy `claude -p`
-    * path, which always passed this. The matching first-run acceptances are
-    * seeded by cli_session_prepare_claude() below. */
-   int need_skip = is_claude && !strstr(base_cmd, "--dangerously-skip-permissions") &&
+   /* Autonomous = bypass claude's interactive permission prompts (there is no
+    * human at the detached tmux pane to answer them; aimee's own guardrails are
+    * the safety layer). Driven by the global `autonomous` config — EXCEPT a
+    * primary webchat turn (a real bound session, not a delegate), which is
+    * always autonomous: it is the interactive UI a user is waiting on, and a
+    * non-autonomous claude would wedge forever on its first tool prompt. */
+   int deleg = deleg_id && deleg_id[0];
+   int webchat_primary = have_session && !deleg;
+   int autonomous = agent->autonomous || webchat_primary;
+   /* Pass --dangerously-skip-permissions only when autonomous, and only if the
+    * launch command doesn't already select a permission mode. */
+   int need_skip = is_claude && autonomous && !strstr(base_cmd, "--dangerously-skip-permissions") &&
                    !strstr(base_cmd, "--permission-mode");
    if (need_model || need_skip)
    {
@@ -124,11 +130,12 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
    else if (getcwd(cwd, sizeof(cwd)) == NULL)
       cwd[0] = '\0';
 
-   /* Seed claude-code's first-run gates (onboarding / bypass warning / per-
-    * folder trust for this worktree) so its interactive TUI starts at the
-    * prompt instead of wedging the pane. Best-effort; no-op for other CLIs. */
+   /* Seed claude-code's first-run gates (onboarding / per-folder trust for this
+    * worktree, + the bypass warning when autonomous) so its interactive TUI
+    * starts at the prompt instead of wedging the pane. Best-effort; no-op for
+    * other CLIs. */
    if (is_claude)
-      cli_session_prepare_claude(cwd);
+      cli_session_prepare_claude(cwd, autonomous);
 
    cli_session_t sess;
    int rc = cli_session_create(&sess, sess_name, cli_cmd, cwd, reuse);

@@ -559,7 +559,7 @@ static void test_prepare_claude_seeds_gates(void)
    setenv("AIMEE_HOME", home, 1);
    const char *wt = "/tmp/aimee_clitest_wt/session-abc";
 
-   cli_session_prepare_claude(wt);
+   cli_session_prepare_claude(wt, 1);
 
    char p[512];
    snprintf(p, sizeof(p), "%s/.claude.json", home);
@@ -587,7 +587,7 @@ static void test_prepare_claude_seeds_gates(void)
    cJSON_Delete(sroot);
 
    /* Idempotent: a second call leaves the same state (and must not throw). */
-   cli_session_prepare_claude(wt);
+   cli_session_prepare_claude(wt, 1);
    snprintf(p, sizeof(p), "%s/.claude.json", home);
    j = slurp(p);
    root = cJSON_Parse(j);
@@ -612,7 +612,7 @@ static void test_prepare_claude_preserves_existing_settings(void)
    fputs("{\"theme\":\"dark\"}", f);
    fclose(f);
 
-   cli_session_prepare_claude("/tmp/aimee_clitest_wt2");
+   cli_session_prepare_claude("/tmp/aimee_clitest_wt2", 1);
 
    char *s = slurp(p);
    cJSON *sroot = cJSON_Parse(s);
@@ -645,12 +645,51 @@ static void test_prepare_claude_skips_unparseable_config(void)
    fputs(corrupt, f);
    fclose(f);
 
-   cli_session_prepare_claude("/tmp/aimee_clitest_wt3");
+   cli_session_prepare_claude("/tmp/aimee_clitest_wt3", 1);
 
    char *after = slurp(jp);
    assert(after != NULL);
    assert(strcmp(after, corrupt) == 0); /* untouched, not wiped to {} */
    free(after);
+}
+
+/* Non-autonomous: onboarding + trust ARE seeded (the TUI needs them to start),
+ * but the --dangerously-skip-permissions warning is NOT pre-accepted (the flag
+ * isn't passed, so the operator's dangerous-mode prompt is left untouched). */
+static void test_prepare_claude_nonautonomous_skips_bypass_seed(void)
+{
+   char home[] = "/tmp/aimee_clitest_XXXXXX";
+   assert(mkdtemp(home) != NULL);
+   setenv("HOME", home, 1);
+   setenv("AIMEE_HOME", home, 1);
+   const char *wt = "/tmp/aimee_clitest_wt4";
+
+   cli_session_prepare_claude(wt, 0); /* not autonomous */
+
+   /* onboarding + trust seeded */
+   char p[600];
+   snprintf(p, sizeof(p), "%s/.claude.json", home);
+   char *j = slurp(p);
+   assert(j != NULL);
+   cJSON *root = cJSON_Parse(j);
+   free(j);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "hasCompletedOnboarding")));
+   cJSON *proj =
+       cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(root, "projects"), wt);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(proj, "hasTrustDialogAccepted")));
+   cJSON_Delete(root);
+
+   /* bypass warning NOT pre-accepted: settings.json absent or flag unset */
+   snprintf(p, sizeof(p), "%s/.claude/settings.json", home);
+   char *s = slurp(p);
+   if (s)
+   {
+      cJSON *sroot = cJSON_Parse(s);
+      free(s);
+      assert(sroot == NULL || !cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(
+                                  sroot, "skipDangerousModePermissionPrompt")));
+      cJSON_Delete(sroot);
+   }
 }
 
 int main(void)
@@ -665,6 +704,10 @@ int main(void)
 
    printf("test_prepare_claude_skips_unparseable_config... ");
    test_prepare_claude_skips_unparseable_config();
+   printf("OK\n");
+
+   printf("test_prepare_claude_nonautonomous_skips_bypass_seed... ");
+   test_prepare_claude_nonautonomous_skips_bypass_seed();
    printf("OK\n");
 
    printf("test_extract_claude_basic... ");

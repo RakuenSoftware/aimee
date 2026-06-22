@@ -264,7 +264,7 @@ static cJSON *cli_claude_cfg_load(const char *path, int *skip)
    return root ? root : cJSON_CreateObject();
 }
 
-void cli_session_prepare_claude(const char *work_dir)
+void cli_session_prepare_claude(const char *work_dir, int autonomous)
 {
    const char *home = cli_claude_home();
    char claude_dir[PATH_MAX], lockpath[PATH_MAX], jsonpath[PATH_MAX], setpath[PATH_MAX];
@@ -325,20 +325,26 @@ void cli_session_prepare_claude(const char *work_dir)
    }
 
    /* ~/.claude/settings.json: pre-accept the bypass-permissions warning so a
-    * --dangerously-skip-permissions launch starts straight at the prompt. */
-   cJSON *sroot = cli_claude_cfg_load(setpath, &skip);
-   if (sroot)
+    * --dangerously-skip-permissions launch starts straight at the prompt. Only
+    * when autonomous — without the flag the warning never appears, and we must
+    * not silently pre-accept a dangerous-mode prompt the operator didn't opt
+    * into. */
+   if (autonomous)
    {
-      if (cli_json_set_true(sroot, "skipDangerousModePermissionPrompt"))
+      cJSON *sroot = cli_claude_cfg_load(setpath, &skip);
+      if (sroot)
       {
-         char *out = cJSON_Print(sroot);
-         if (out)
+         if (cli_json_set_true(sroot, "skipDangerousModePermissionPrompt"))
          {
-            cli_write_file_atomic(setpath, out);
-            free(out);
+            char *out = cJSON_Print(sroot);
+            if (out)
+            {
+               cli_write_file_atomic(setpath, out);
+               free(out);
+            }
          }
+         cJSON_Delete(sroot);
       }
-      cJSON_Delete(sroot);
    }
 
    if (lf >= 0)
