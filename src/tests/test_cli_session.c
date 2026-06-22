@@ -555,6 +555,7 @@ static void test_prepare_claude_seeds_gates(void)
 {
    char home[] = "/tmp/aimee_clitest_XXXXXX";
    assert(mkdtemp(home) != NULL);
+   setenv("HOME", home, 1); /* cli_claude_home() resolves HOME first */
    setenv("AIMEE_HOME", home, 1);
    const char *wt = "/tmp/aimee_clitest_wt/session-abc";
 
@@ -599,6 +600,7 @@ static void test_prepare_claude_preserves_existing_settings(void)
 {
    char home[] = "/tmp/aimee_clitest_XXXXXX";
    assert(mkdtemp(home) != NULL);
+   setenv("HOME", home, 1); /* cli_claude_home() resolves HOME first */
    setenv("AIMEE_HOME", home, 1);
 
    char dir[512], p[600];
@@ -624,6 +626,33 @@ static void test_prepare_claude_preserves_existing_settings(void)
    cJSON_Delete(sroot);
 }
 
+/* B1 regression: a config file that EXISTS but won't parse (claude-code writes
+ * ~/.claude.json non-atomically, so a concurrent read can catch it mid-write)
+ * must NOT be clobbered with a fresh {} — that would wipe the oauth account,
+ * trust map, and history. prepare must leave it byte-for-byte untouched. */
+static void test_prepare_claude_skips_unparseable_config(void)
+{
+   char home[] = "/tmp/aimee_clitest_XXXXXX";
+   assert(mkdtemp(home) != NULL);
+   setenv("HOME", home, 1);
+   setenv("AIMEE_HOME", home, 1);
+
+   const char *corrupt = "{\"oauthAccount\":{\"emailAddress\":\"u@x\"},\"projects\":{ truncated";
+   char jp[600];
+   snprintf(jp, sizeof(jp), "%s/.claude.json", home);
+   FILE *f = fopen(jp, "wb");
+   assert(f != NULL);
+   fputs(corrupt, f);
+   fclose(f);
+
+   cli_session_prepare_claude("/tmp/aimee_clitest_wt3");
+
+   char *after = slurp(jp);
+   assert(after != NULL);
+   assert(strcmp(after, corrupt) == 0); /* untouched, not wiped to {} */
+   free(after);
+}
+
 int main(void)
 {
    printf("test_prepare_claude_seeds_gates... ");
@@ -632,6 +661,10 @@ int main(void)
 
    printf("test_prepare_claude_preserves_existing_settings... ");
    test_prepare_claude_preserves_existing_settings();
+   printf("OK\n");
+
+   printf("test_prepare_claude_skips_unparseable_config... ");
+   test_prepare_claude_skips_unparseable_config();
    printf("OK\n");
 
    printf("test_extract_claude_basic... ");

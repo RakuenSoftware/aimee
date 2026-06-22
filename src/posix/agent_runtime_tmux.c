@@ -92,7 +92,10 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
     * agent — without this the CLI would launch with its own built-in default. */
    const char *base_cmd = agent->cli_cmd[0] ? agent->cli_cmd : "claude";
    const char *kind = agent->cli_kind[0] ? agent->cli_kind : agent->name;
-   int is_claude = strstr(kind, "claude") != NULL;
+   /* Exact "claude" or a "claude-*" variant (claude-code / claude-oauth) — NOT a
+    * substring match: this gates --dangerously-skip-permissions and the config
+    * seeding, so it must not fire for an unrelated agent named e.g. "claudette". */
+   int is_claude = strcmp(kind, "claude") == 0 || strncmp(kind, "claude-", 7) == 0;
    char cli_cmd_buf[CLI_SESSION_CMD_MAX];
    const char *cli_cmd = base_cmd;
    int need_model = agent->model[0] && !strstr(base_cmd, "--model") && !strstr(base_cmd, " -m ");
