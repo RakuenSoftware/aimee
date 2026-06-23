@@ -1,6 +1,10 @@
 # Proposal: One unified `aimee-llm` container for all LLM use (local CPU/GPU · forward · external)
 
-- **State:** draft — **rev 7** · **roundtable SIGNED OFF at rev 6** (round 5: 0
+- **State:** ✅ **IMPLEMENTED** — all seven packets (P1–P7) merged to `testing`
+  (2026-06-23). The **live production cutover** (GPU deploy + corpus re-embed) is
+  deliberately **operator-gated** — see
+  [`docs/runbooks/unified-llm-cutover.md`](../../runbooks/unified-llm-cutover.md).
+  — **rev 7** · **roundtable SIGNED OFF at rev 6** (round 5: 0
   blocking / 0 high / 0 medium, converged). Arc: r1 10 blocking → r2 7 blocking +
   8 high → r3 1 blocking + 1 high + 2 medium → r5 **0 blocking**. rev 7 closes the
   two open questions (synth models BENCHMARKED grammar-enforced + judged —
@@ -602,6 +606,15 @@ We take the fold but pay down its cost:
 
 ## Changelog
 
+- **IMPLEMENTED (2026-06-23):** all seven work packets merged to `testing` —
+  P1 dim foundation + `(model_id,dim)` drift guard; P2 `.254` Vulkan serving
+  validation + fixture; P3/P4 role-based gateway + `Dockerfile.aimee-llm`
+  (CPU+GPU Vulkan, baked GGUFs, ettin encoder + gateway Dense head); P5 gateway
+  completion (synth proxy, streaming-400, per-role health, modes); P6 §1a
+  security hardening (bearer auth, bind guard, derived scope, audit, circuit
+  breaker); P7 drift-guard activation + profile-gated `aimee-llm` compose service
+  + operator cutover runbook. The **live cutover** (GPU deploy + corpus re-embed)
+  remains operator-gated per [`docs/runbooks/unified-llm-cutover.md`](../../runbooks/unified-llm-cutover.md).
 - **rev 7 (2026-06-21):** reduced the open questions to mechanical items
   (commit-sha/quant pins + a reranker-swap-cost confirmation). **Pinned synth
   models** to the
