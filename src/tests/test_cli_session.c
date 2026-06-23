@@ -534,6 +534,66 @@ static void test_extract_baseline_substring_kept(void)
    free(r);
 }
 
+/* --- cli_session_extract_status: condensed live-activity line --- */
+
+/* claude's animated spinner footer is returned verbatim with the leading glyph
+ * stripped, so the webchat shows a single human-readable activity line. */
+static void test_status_claude_spinner(void)
+{
+   const char *pane = "\xe2\x9d\xaf write a poem\n"
+                      "\xe2\x9c\xbb Misting\xe2\x80\xa6 (21s \xc2\xb7 \xe2\x86\x91 493 tokens)\n";
+   char *r = cli_session_extract_status(pane, "claude");
+   assert(r != NULL);
+   assert(strcmp(r, "Misting\xe2\x80\xa6 (21s \xc2\xb7 \xe2\x86\x91 493 tokens)") == 0);
+   free(r);
+}
+
+/* When several spinner frames are on the pane (scrollback), the LAST one wins —
+ * that is the current state. */
+static void test_status_picks_last_frame(void)
+{
+   const char *pane =
+       "\xe2\x9c\xbb Misting\xe2\x80\xa6 (21s \xc2\xb7 \xe2\x86\x91 493 tokens)\n"
+       "\xe2\x9c\xbd Misting\xe2\x80\xa6 (58s \xc2\xb7 \xe2\x86\x93 2.0k tokens \xc2\xb7 "
+       "thinking)\n";
+   char *r = cli_session_extract_status(pane, "claude");
+   assert(r != NULL);
+   assert(
+       strcmp(r, "Misting\xe2\x80\xa6 (58s \xc2\xb7 \xe2\x86\x93 2.0k tokens \xc2\xb7 thinking)") ==
+       0);
+   free(r);
+}
+
+/* The "⎿ Tip: …interrupting…" hint must NOT be mistaken for a status line (no
+ * paren, no "… ("), and an idle pane yields an empty string. */
+static void test_status_ignores_tip_and_idle(void)
+{
+   const char *tip = "\xe2\x8e\xbf Tip: Use /btw to ask a side question without interrupting "
+                     "Claude's current work\n";
+   char *r = cli_session_extract_status(tip, "claude");
+   assert(r != NULL);
+   assert(r[0] == '\0');
+   free(r);
+
+   const char *idle = "\xe2\x97\x8f all done\n\xe2\x9c\xbb Baked for 3s\n";
+   char *r2 = cli_session_extract_status(idle, "claude");
+   assert(r2 != NULL);
+   assert(r2[0] == '\0');
+   free(r2);
+}
+
+/* codex's "Working (Ns · esc to interrupt)" footer is matched via the interrupt
+ * hint and the glyph is stripped. */
+static void test_status_codex_working(void)
+{
+   const char *pane = "\xe2\x80\xba do it\n"
+                      "\xe2\x97\xa6 Working (12s \xc2\xb7 esc to interrupt)\n";
+   char *r = cli_session_extract_status(pane, "codex");
+   assert(r != NULL);
+   assert(strcmp(r, "Working (12s \xc2\xb7 esc to interrupt)") == 0);
+   free(r);
+}
+
 /* --- cli_session_prepare_claude: claude-code first-run gate seeding --- */
 
 static char *slurp(const char *path)
@@ -740,6 +800,22 @@ int main(void)
 
    printf("test_extract_baseline_substring_kept... ");
    test_extract_baseline_substring_kept();
+   printf("OK\n");
+
+   printf("test_status_claude_spinner... ");
+   test_status_claude_spinner();
+   printf("OK\n");
+
+   printf("test_status_picks_last_frame... ");
+   test_status_picks_last_frame();
+   printf("OK\n");
+
+   printf("test_status_ignores_tip_and_idle... ");
+   test_status_ignores_tip_and_idle();
+   printf("OK\n");
+
+   printf("test_status_codex_working... ");
+   test_status_codex_working();
    printf("OK\n");
 
    printf("test_make_name_format... ");
