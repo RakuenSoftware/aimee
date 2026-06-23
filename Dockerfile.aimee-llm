@@ -1,0 +1,103 @@
+# The unified aimee-llm container: one llama.cpp (Vulkan) runtime + the aimee-llm
+# gateway, serving embeddings, reranking, and synthesis from BAKED-IN GGUFs.
+# Replaces the torch embedder + the standalone llama.cpp `llm` container.
+#
+# Two published images (operator-directed: models baked in, not runtime-fetched —
+# turnkey, reproducible, no HF dependency at run time):
+#   aimee-llm-cpu  (TIER=cpu, default): Qwen3-Embedding-0.6B + ettin-68m + gemma-4-E4B
+#   aimee-llm-gpu  (TIER=gpu, via build args): Qwen3-Embedding-4B + ettin-400m + gemma-4-12B
+# The llama.cpp binary is the VENDOR-AGNOSTIC Vulkan build (one binary for AMD/
+# Nvidia/Intel); GPU is selected at runtime by AIMEE_LLM_NGL (CPU image defaults 0).
+#
+# The reranker is ettin served as ENCODER + a gateway-side Dense head (the ST score
+# head doesn't survive GGUF conversion — see benchmarks/results/unified-llm/
+# P2-serving-validation.md): convert the ettin encoder to GGUF and keep the head
+# safetensors; the gateway applies the head.
+
+ARG LLAMA_TAG=b9775
+ARG EMBED_REPO=Qwen/Qwen3-Embedding-0.6B-GGUF
+ARG EMBED_FILE=Qwen3-Embedding-0.6B-f16.gguf
+ARG EMBED_POOLING=last
+ARG RERANK_REPO=cross-encoder/ettin-reranker-68m-v1
+ARG SYNTH_REPO=ggml-org/gemma-4-E4B-it-GGUF
+ARG SYNTH_FILE=gemma-4-E4B-it-Q4_K_M.gguf
+
+# ---- stage 1: prepare the baked models (convert ettin encoder + fetch GGUFs) ----
+FROM python:3.12-slim AS modelprep
+ARG LLAMA_TAG
+ARG EMBED_REPO
+ARG EMBED_FILE
+ARG RERANK_REPO
+ARG SYNTH_REPO
+ARG SYNTH_FILE
+ENV PIP_NO_CACHE_DIR=1 HF_HUB_DISABLE_TELEMETRY=1
+RUN apt-get update && apt-get install -y --no-install-recommends git wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install --quiet torch --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --quiet transformers safetensors numpy gguf sentencepiece protobuf huggingface_hub
+# convert script + gguf-py from a recent llama.cpp (ModernBert supported)
+RUN git clone --depth 1 https://github.com/ggml-org/llama.cpp /llama
+WORKDIR /out
+# Ettin reranker: download the sentence-transformers repo, convert the ENCODER to
+# GGUF, and keep the Dense head (2_Dense/3_LayerNorm/4_Dense) for the gateway.
+RUN python - <<'PY'
+import os
+from huggingface_hub import snapshot_download
+p = snapshot_download(os.environ["RERANK_REPO"], local_dir="/tmp/ettin")
+print("ettin ->", p)
+PY
+RUN cd /llama && PYTHONPATH=/llama/gguf-py python convert_hf_to_gguf.py /tmp/ettin \
+        --outfile /out/rerank-encoder.gguf --outtype f16 \
+    && mkdir -p /out/rerank-head
+# Bake the Dense head as a numpy .npz so the slim runtime needs only numpy (no
+# safetensors). Keys match EttinRerankHead.from_npz (W2/W4/b4/gamma/beta).
+RUN python - <<'PY'
+import numpy as np
+from safetensors.numpy import load_file
+e = "/tmp/ettin"
+W2 = load_file(f"{e}/2_Dense/model.safetensors")["linear.weight"]
+d4 = load_file(f"{e}/4_Dense/model.safetensors")
+ln = load_file(f"{e}/3_LayerNorm/model.safetensors")
+np.savez("/out/rerank-head/head.npz", W2=W2, W4=d4["linear.weight"], b4=d4["linear.bias"],
+         gamma=ln["norm.weight"], beta=ln["norm.bias"])
+print("head.npz written")
+PY
+# Embedder + synth GGUFs (direct HF download)
+RUN wget -q -O /out/embed.gguf  "https://huggingface.co/${EMBED_REPO}/resolve/main/${EMBED_FILE}" \
+    && wget -q -O /out/synth.gguf "https://huggingface.co/${SYNTH_REPO}/resolve/main/${SYNTH_FILE}"
+
+# ---- stage 2: runtime — Vulkan llama.cpp + the gateway ----
+FROM debian:bookworm-slim AS runtime
+ARG LLAMA_TAG
+ARG EMBED_POOLING
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl wget libgomp1 libcurl4 libvulkan1 mesa-vulkan-drivers \
+        python3 python3-numpy \
+    && rm -rf /var/lib/apt/lists/*
+# llama.cpp vendor-agnostic Vulkan release (one binary for AMD/Nvidia/Intel)
+RUN wget -q -O /tmp/llama.tgz \
+        "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-ubuntu-vulkan-x64.tar.gz" \
+    && mkdir -p /opt/llama && tar -xzf /tmp/llama.tgz -C /opt/llama --strip-components=1 \
+    && rm /tmp/llama.tgz
+ENV LD_LIBRARY_PATH=/opt/llama/lib:/opt/llama PATH=/opt/llama:/opt/llama/bin:$PATH
+
+COPY scripts/aimee_llm_gateway.py scripts/aimee_llm_rerank_head.py /opt/aimee/
+COPY scripts/aimee-llm-supervisor.sh /opt/aimee/supervisor.sh
+RUN chmod +x /opt/aimee/supervisor.sh
+COPY --from=modelprep /out /models
+
+# Gateway + per-role serving config (the supervisor reads these).
+ENV AIMEE_LLM_PORT=8080 \
+    AIMEE_LLM_EMBED_URL=http://127.0.0.1:8081 \
+    AIMEE_LLM_RERANK_URL=http://127.0.0.1:8082 \
+    AIMEE_LLM_SYNTH_URL=http://127.0.0.1:8083 \
+    AIMEE_LLM_RERANK_HEAD=/models/rerank-head \
+    AIMEE_LLM_EMBED_MODEL=qwen3-embedding \
+    AIMEE_LLM_EMBED_POOLING=${EMBED_POOLING} \
+    AIMEE_LLM_NGL=0 \
+    PYTHONPATH=/opt/aimee
+WORKDIR /opt/aimee
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=5s --start-period=300s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:8080/health >/dev/null || exit 1
+ENTRYPOINT ["/opt/aimee/supervisor.sh"]

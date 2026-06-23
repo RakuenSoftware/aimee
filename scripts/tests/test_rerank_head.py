@@ -152,6 +152,12 @@ class FromDir(unittest.TestCase):
         direct = m.EttinRerankHead(W2, W4, b4, g, b)
         self.assertAlmostEqual(head.score(v), direct.score(v), places=5)
 
+        # npz round-trip (the runtime form baked into the image); from_dir prefers it.
+        npz = os.path.join(d, "head.npz")
+        direct.to_npz(npz)
+        self.assertAlmostEqual(m.EttinRerankHead.from_npz(npz).score(v), direct.score(v), places=5)
+        self.assertAlmostEqual(m.EttinRerankHead.from_dir(d).score(v), direct.score(v), places=5)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -78,6 +78,12 @@ jobs:
           # baked in. Pair with embedding_dim: 2560 (see docs). Default (above) is
           # the 0.6b embedder + 400m reranker.
           - { name: aimee-embedder-4b, dockerfile: Dockerfile.embedder, embedder_arg: "EMBEDDER_MODEL=perplexity-ai/pplx-embed-v1-4b", reranker_arg: "RERANKER_MODEL=cross-encoder/ettin-reranker-1b-v1" }
+          # The unified aimee-llm container (one Vulkan llama.cpp + the gateway, models
+          # baked in). CPU tier = defaults (Qwen3-Emb-0.6B + ettin-68m + gemma-4-E4B,
+          # validated end-to-end on .253). GPU tier overrides to the 4B/400m/12B set;
+          # the same vendor-agnostic Vulkan binary runs CPU or GPU via AIMEE_LLM_NGL.
+          - { name: aimee-llm-cpu, dockerfile: Dockerfile.aimee-llm }
+          - { name: aimee-llm-gpu, dockerfile: Dockerfile.aimee-llm, extra_args: "EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF\nEMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf\nRERANK_REPO=cross-encoder/ettin-reranker-400m-v1\nSYNTH_REPO=unsloth/gemma-4-12b-it-GGUF\nSYNTH_FILE=gemma-4-12b-it-Q4_K_M.gguf" }
           # #4-full render backend (headless-Chromium sidecar). Self-contained
           # under deploy/css-render (its own build context); independent of the C
           # build, so a failure here never blocks the aimee images (fail-fast off).
@@ -130,6 +136,7 @@ jobs:
             WITH_WEBCHAT=1
             ${{ matrix.image.embedder_arg }}
             ${{ matrix.image.reranker_arg }}
+            ${{ matrix.image.extra_args }}
           outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest

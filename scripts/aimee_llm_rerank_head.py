@@ -60,10 +60,35 @@ class EttinRerankHead:
         return self.W2.shape[0]
 
     @classmethod
+    def from_npz(cls, path):
+        """Load the head from a numpy .npz (keys W2/W4/b4/gamma/beta) — the form
+        baked into the runtime image so it needs only numpy, not safetensors."""
+        z = np.load(path)
+        return cls(
+            w2=z["W2"],
+            w4=z["W4"],
+            b4=z["b4"] if "b4" in z else None,
+            gamma=z["gamma"] if "gamma" in z else None,
+            beta=z["beta"] if "beta" in z else None,
+        )
+
+    def to_npz(self, path):
+        """Save the head as a numpy .npz (the runtime form; built in the image's
+        modelprep stage so the slim runtime needs only numpy)."""
+        d = {"W2": self.W2, "W4": self.W4, "b4": np.asarray(self.b4, dtype=np.float32)}
+        if self.gamma is not None and self.beta is not None:
+            d["gamma"] = self.gamma
+            d["beta"] = self.beta
+        np.savez(path, **d)
+
+    @classmethod
     def from_dir(cls, model_dir):
-        """Load the head from a sentence-transformers model dir (2_Dense/3_LayerNorm/
-        4_Dense/*.safetensors). Raises FileNotFoundError if the dense modules are absent
-        (i.e. this isn't an st-reranker dir)."""
+        """Load the head from `model_dir`. Prefers a prebuilt `head.npz` (numpy-only,
+        baked into the image); else the sentence-transformers
+        2_Dense/3_LayerNorm/4_Dense safetensors (needs the safetensors lib)."""
+        npz = os.path.join(model_dir, "head.npz")
+        if os.path.exists(npz):
+            return cls.from_npz(npz)
         from safetensors.numpy import load_file
 
         d2 = load_file(os.path.join(model_dir, "2_Dense", "model.safetensors"))
