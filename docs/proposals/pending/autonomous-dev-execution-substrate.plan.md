@@ -24,16 +24,22 @@ facts pin the sequencing:
 
 ## Packet sequence
 
-| Packet | Component | New infra? | In-env verifiable? |
-|--------|-----------|------------|--------------------|
-| **P1** | §5 reconciler (static core) + §4 acceptance-block schema | none | **fully** |
-| P2 | §2 finish: forge vtable `open`/`merge` vault + audit | none | unit + stub |
-| P3 | §1 build-and-verify runner (ephemeral + managed modes) | runner image/CT | partial (managed mode locally) |
-| P4 | §3 validation tiers + CI-dispatch harness | CI dispatch | partial (dispatch unit-testable) |
-| P5 | §4 full per-tier acceptance evaluation + §5 auto-file shipped-but-unfiled | P3+P4 | integration |
+| Packet | Component | Status |
+|--------|-----------|--------|
+| **P1** | §5 reconciler (static core) + §4 acceptance-block schema | **SHIPPED #639** |
+| **P2** | §2 — route every git op through the one credential policy + guard | **SHIPPED #641** |
+| ~~P3~~ | §1 build-and-verify runner | **mostly pre-existing** — `aimee git verify` (see proposal Implementation-status §1); residual = ephemeral sandboxed runner **image** (Docker) only |
+| P4 | §3 `deployment`/`hardware` CI-matrix **dispatch** + tier router + per-PR audit attribution | OPEN — needs CI/Docker the agent host can't supply |
+| P5 | §4 per-tier acceptance **execution** + §5 **active** auto-file to `done/` + wire into the full-autonomous-development driver | OPEN — depends on P3-image + P4 |
 
-P1 is the only packet detailed here; later packets get their own plan revision once P1's
-reconciler makes the tree's real drift visible (it may re-scope P2–P5).
+**Re-scoped after the P1 reconciler + a hands-on grounding pass (2026-06-23).** The
+reconciler (P1) and three operator corrections surfaced that §1 (`aimee git verify`) and
+§2 (`git_cred_inject`) **already existed** — the proposal's "blockers" were the webchat
+workspace's missing toolchain, not missing code. So P3 collapses to a Docker-only residual
+and the remaining open work (P4/P5) is the **deployment/CI integration** that genuinely
+needs an environment able to dispatch the Actions matrix and stand up sandboxed runners.
+Those packets get their own plan revision in such an environment. See the proposal's
+**Implementation status** block for the per-component grounding.
 
 ---
 

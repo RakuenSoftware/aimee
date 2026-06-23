@@ -2,6 +2,61 @@
 
 - **State:** **APPROVED** (human proposal-gate passed 2026-06-21) — implementing,
   phased (see the companion `.plan.md`).
+- **Implementation status (2026-06-23) — reconciled against the tree.** This
+  proposal was drafted in a webchat workspace that had **no toolchain** and was
+  **unaware of two subsystems that already implement its core**. Grounding it
+  against the real `aimee` checkout (which *does* carry `make`/`gcc`/`clang-format-19`/
+  `psql`) shows most of the substrate already exists; the named blockers were
+  largely **environmental**, not missing code. Per-component status:
+  - **§1 build-and-verify runner — ALREADY IMPLEMENTED.** `aimee git verify`
+    (`git_verify.c` / `git_verify_ops.c`) is the callable verify gate: it
+    **auto-generates** `.aimee/project.yaml` from the project's Makefile on first
+    run (`find_makefile_subdir` detects aimee's `src/Makefile`; it prefers a
+    `verify-local` target — which aimee defines as `lint check-linking` +
+    `unit-tests`), runs the steps **dependency-aware** with
+    per-step pass/fail + timing, gates push/PR via `verify_gate_blocks`
+    (already wired into `mcp_git_write.c` + `guardrails_orchestrator.c`, `enforce`
+    flag, tree-hash freshness so squash/rebase stays verified). When no `verify:`
+    section exists it **degrades to a no-op gate** (`verify_check` returns 1 = no
+    gate; push allowed) — safe for humans, but the proposal's stricter
+    `unavailable` *status* (so the autonomous driver never reads "unconfigured" as a
+    pass, and a structured `{tier,step,status,log_ref}` shape) is **part of the
+    residual**, alongside the **ephemeral sandboxed runner image** (Docker) + the
+    managed/ephemeral *provisioning* abstraction. What exists today: the gate, the
+    Makefile auto-config, dependency-aware step execution, per-step pass/fail. What
+    does not: the structured driver-facing contract + the sandboxed runner.
+    (Blocker 1 "no in-environment build/verify" was the webchat workspace lacking a
+    toolchain, not a missing gate.)
+  - **§2 vault-backed forge push + PR — DONE.** `git_cred_inject_build_env_for_repo`
+    is the single credential policy every git op routes through (vault-first:
+    broker → per-host server vault → webuser vault → server identity; injects
+    `GH_TOKEN` + `GIT_ASKPASS`); push was centralised in #605 and the last two
+    drifted call sites (`mcp_git_run`, `ws_mirror_git_runner`) in **PR #641 (P2,
+    testing `af0418d`)**, now guarded by `scripts/check-git-cred-centralized.py`.
+    Blocker 2's "git_push ignores the vault / manual token decryption" is closed.
+    Residual: **per-PR audit attribution to the work item** — a §2-scope item, but it
+    needs the driver's work-item context, so it lands with the driver packet (P4).
+  - **§4 machine-checkable acceptance — schema gate SHIPPED (PR #639, P1, testing
+    `c412f23`).** `scripts/check-proposal-reconcile.py` parses + validates the
+    `acceptance:` block (`id`/`tier`/`check`, tiers, unique id) in `make lint`.
+    Residual: **executing** each check on its tier + the all-green **auto-file to
+    `done/`** (needs §1's runner + §3 dispatch).
+  - **§5 proposal↔code reconciliation — detection SHIPPED (PR #639, P1, testing
+    `c412f23`).** The same `scripts/check-proposal-reconcile.py` flags state↔folder
+    drift (shipped-but-unfiled) + premise-drift, report-only. Residual: the
+    **active** auto-file/move (P5), gated on machine-acceptance.
+  - **§3 validation tiers + deployment harness — OPEN.** The `mechanical`/
+    `integration` tier is `aimee git verify`; the **`deployment`/`hardware` CI-matrix
+    dispatch** (trigger + gate on the Actions matrix) and the tier router are the
+    real new work, and need CI/Docker the agent host can't supply.
+
+  **Net:** §2 done; §1 core + §4-schema + §5-detection done (this run + #639/#641);
+  the open work is the **integration** — CI-matrix dispatch (§3), per-tier
+  acceptance *execution* + auto-file (§4/§5), the ephemeral sandboxed runner image
+  (§1), and wiring these into the `full-autonomous-development` driver (§5/criterion 5)
+  — all **deployment/CI/Docker-tier**, deferred to an environment that can exercise
+  them. The prose below is the original proposal, kept for context; read it through
+  this status.
 - **Scope:** deterministic / autonomous-dev plumbing. Not an intelligence-surface
   proposal (no Architecture Charter role). It is the execution substrate that
   [full-autonomous-development.md](full-autonomous-development.md) assumes but does
