@@ -123,10 +123,13 @@ static int stream_text_cb(cJSON *event, void *userdata)
    size_t chunk_len = strlen(chunk);
    if (sb->len + chunk_len + 1 > sb->cap)
    {
-      size_t new_cap = (sb->cap + chunk_len + 1) * 2;
+      size_t need = sb->len + chunk_len + 1;
+      if (need < sb->len)
+         return -1;
+      size_t new_cap = (need <= (size_t)-1 / 2) ? need * 2 : need;
       char *newbuf = realloc(sb->buf, new_cap);
       if (!newbuf)
-         return 0;
+         return -1;
       sb->buf = newbuf;
       sb->cap = new_cap;
    }
