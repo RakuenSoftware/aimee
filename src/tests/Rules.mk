@@ -112,6 +112,9 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-wfe-delegate-seam \
                $(TESTPREFIX)/unit-test-wfe-scheduler \
                $(TESTPREFIX)/unit-test-wfe-random-delegate \
+               $(TESTPREFIX)/unit-test-wfe-gate-reject \
+               $(TESTPREFIX)/unit-test-wfe-gate-apply \
+               $(TESTPREFIX)/unit-test-workflow-gate-caps \
                $(TESTPREFIX)/unit-test-wfe-webapi \
                $(TESTPREFIX)/unit-test-cli-profile \
                $(TESTPREFIX)/unit-test-cmd-profile \
@@ -1151,6 +1154,25 @@ $(TESTPREFIX)/unit-test-wfe-scheduler: $(OBJDIR)/tests/test_wfe_scheduler.o \
 
 $(TESTPREFIX)/unit-test-wfe-random-delegate: $(OBJDIR)/tests/test_wfe_random_delegate.o \
                                     $(OBJDIR)/server/wfe_delegate_resolve.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+# Human-gate reject routing (retry_on_reject): pure def-query, no DB.
+$(TESTPREFIX)/unit-test-wfe-gate-reject: $(OBJDIR)/tests/test_wfe_gate_reject.o \
+                                    $(OBJDIR)/workflow/wfe_def.o $(OBJDIR)/workflow/wfe_iface.o \
+                                    $(OBJDIR)/workflow/wfe_validate.o $(OBJDIR)/workflow/wfe_canonical.o \
+                                    $(OBJDIR)/workflow/wfe_custom.o $(OBJDIR)/aimee_home.o \
+                                    $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Atomic guarded human-gate transition (DB1-backed).
+$(TESTPREFIX)/unit-test-wfe-gate-apply: $(OBJDIR)/tests/test_wfe_gate_apply.o \
+                                    $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/aimee_home.o \
+                                    $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# Capability invariant for the gate route (compile-time _Static_assert).
+$(TESTPREFIX)/unit-test-workflow-gate-caps: $(OBJDIR)/tests/test_workflow_gate_caps.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 # Workflow visual composer (W7): /v1/workflow read+author handlers.

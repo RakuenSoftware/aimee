@@ -58,6 +58,22 @@ int db1_work_item_set_stage(const char *work_item_id, const char *stage, const c
 int db1_work_item_set_pr_ref(const char *work_item_id, const char *pr_ref);
 /* Set terminal state (accepted | rejected | abandoned) and clear pause. */
 int db1_work_item_set_terminal(const char *work_item_id, const char *state);
+
+/* Apply an operator human-gate decision ATOMICALLY, guarded against TOCTOU /
+ * double-action. The row must still be parked exactly as the caller observed:
+ * current_stage == expect_stage AND content_hash == expect_hash AND
+ * pause_reason == 'pending_human'. Content is immutable while parked, so
+ * content_hash is an identity / optimistic-concurrency guard (never re-derived).
+ * Exactly one decision per call:
+ *   - new_stage non-empty   -> loop back (current_stage := new_stage, clear pause)
+ *   - terminal_state non-empty -> state := terminal_state, clear pause
+ *   - both NULL/empty       -> approve (clear pause only; stage unchanged)
+ * (new_stage and terminal_state must not both be set.) Single UPDATE, so two
+ * concurrent operators cannot both apply. Returns 1 = applied, 0 = precondition
+ * not met (caller should report 409 conflict), -1 = error. */
+int db1_work_item_gate_apply(const char *work_item_id, const char *expect_stage,
+                             const char *expect_hash, const char *new_stage,
+                             const char *terminal_state);
 int db1_work_item_set_pause(const char *work_item_id, const char *reason, const char *paused_state);
 int db1_work_item_clear_pause(const char *work_item_id);
 int db1_work_item_add_cost(const char *work_item_id, double cost);

@@ -150,6 +150,46 @@ int db1_work_item_set_terminal(const char *wi, const char *state)
    return rc == SQLITE_DONE ? 0 : -1;
 }
 
+int db1_work_item_gate_apply(const char *wi, const char *expect_stage, const char *expect_hash,
+                             const char *new_stage, const char *terminal_state)
+{
+   sqlite3 *db = db1_conn();
+   if (!db || !wi)
+      return -1;
+   int loopback = new_stage && new_stage[0];
+   int terminal = !loopback && terminal_state && terminal_state[0];
+/* The SET clause varies by decision; the WHERE guard is identical in all three
+ * cases (the row must still be parked exactly as the caller observed), so it lives
+ * in one place via compile-time literal concatenation. */
+#define GATE_GUARD                                                                                 \
+   " updated_at=datetime('now') WHERE work_item_id=?2 AND current_stage=?3 AND content_hash=?4 "   \
+   "AND pause_reason='pending_human'"
+   const char *sql;
+   if (loopback)
+      sql = "UPDATE lifecycle_work_item SET current_stage=?1, pause_reason='', "
+            "paused_state=''," GATE_GUARD;
+   else if (terminal)
+      sql = "UPDATE lifecycle_work_item SET state=?1, pause_reason='', paused_state=''," GATE_GUARD;
+   else /* approve: clear pause only, stage unchanged */
+      sql = "UPDATE lifecycle_work_item SET pause_reason='', paused_state=''," GATE_GUARD;
+#undef GATE_GUARD
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   /* ?1 is the variable SET value (stage for loopback, state for terminal, unused
+    * for approve — bound to "" harmlessly since the approve SQL omits ?1). */
+   sqlite3_bind_text(st, 1, loopback ? new_stage : (terminal ? terminal_state : ""), -1,
+                     SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, wi, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 3, expect_stage ? expect_stage : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 4, expect_hash ? expect_hash : "", -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   sqlite3_finalize(st);
+   if (rc != SQLITE_DONE)
+      return -1;
+   return sqlite3_changes(db) == 1 ? 1 : 0; /* 0 rows => precondition not met (409) */
+}
+
 int db1_work_item_set_pause(const char *wi, const char *reason, const char *paused_state)
 {
    sqlite3 *db = db1_conn();

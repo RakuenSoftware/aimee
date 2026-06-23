@@ -238,12 +238,48 @@ static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
    return 200;
 }
 
+/* Loop-back retry cap for operator rejects on a `retry_on_reject` gate: bounds an
+ * operator who keeps rejecting from churning a work item forever (audit-row blowup
+ * / resource exhaustion). Counted from the immutable lifecycle log, so no schema
+ * change; at/above the cap a reject is forced terminal. */
+#define GATE_MAX_REJECT_RETRIES 3
+
+/* Count prior reject_retry loop-backs at THIS gate for this work item (per-gate
+ * budget: the audit row's stage column is the gate). Returns -1 on a DB read error
+ * so the caller fails CLOSED (a lifecycle-table outage must not silently lift the
+ * cap, since gate_apply on the work_item table would still succeed). */
+static int gate_count_reject_retries(const char *id, const char *gate)
+{
+   db1_lifecycle_event_t *ev = NULL;
+   int n = db1_lifecycle_event_list(id, &ev);
+   if (n < 0)
+      return -1; /* fail closed */
+   int c = 0;
+   for (int i = 0; i < n; i++)
+      if (strcmp(ev[i].kind, "reject_retry") == 0 && strcmp(ev[i].stage, gate) == 0)
+         c++;
+   free(ev);
+   return c;
+}
+
 /* POST /v1/workflow/items/<id>/gate {decision:"approve"|"reject", gate?} —
  * approve or reject the human gate a run is parked at. Operator-level
  * (CAP_WORKFLOW_ADMIN, outside CAPS_AUTHENTICATED) so a mere delegate/authenticated
- * bearer cannot drive a gate. Approve records a non-repudiable, content-hash-bound
- * approval (HMAC-signed server-side with the operator key) and clears the pause;
- * reject is terminal. The scheduler then resumes the run. */
+ * bearer cannot drive a gate.
+ *
+ * The state change is applied via db1_work_item_gate_apply — a single guarded
+ * UPDATE (WHERE current_stage + content_hash match AND pause_reason='pending_human')
+ * so a double-action / reject-after-approve / concurrent-operator race cannot
+ * double-apply: a precondition miss returns 409 instead of corrupting state.
+ * Content is immutable while parked, so content_hash is the row's identity guard.
+ *
+ * Approve records a non-repudiable, content-hash-bound approval (HMAC-signed with
+ * the operator key) then clears the pause. Reject is TERMINAL by default; a gate
+ * may opt into loop-back via `retry_on_reject: true` (following its on_fail edge),
+ * bounded by GATE_MAX_REJECT_RETRIES. Every decision appends a lifecycle audit
+ * event (approve | reject | reject_retry); the append-only log is unsigned by
+ * design (matching all other lifecycle events) — approvals carry their own signed
+ * record for non-repudiation. The scheduler then resumes the run. */
 static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
 {
    const char *id = rq->id;
@@ -262,43 +298,135 @@ static int rh_workflow_gate(const route_req_t *rq, char *resp, int cap)
    cJSON *jdec = body ? cJSON_GetObjectItemCaseSensitive(body, "decision") : NULL;
    cJSON *jgate = body ? cJSON_GetObjectItemCaseSensitive(body, "gate") : NULL;
    const char *decision = (jdec && cJSON_IsString(jdec)) ? jdec->valuestring : "";
-   /* Default the gate to the stage the run is parked at. */
-   const char *gate = (jgate && cJSON_IsString(jgate) && jgate->valuestring[0]) ? jgate->valuestring
-                                                                                : wi.current_stage;
    const char *actor = server_http_identity_principal();
    if (!actor || !actor[0])
       actor = "operator";
 
-   int rc;
-   if (strcmp(decision, "approve") == 0)
+   /* The gate is ALWAYS the stage the row is currently parked at (read from the
+    * row, never the request). It is the sole input to the retry decision and the
+    * audit event, closing a confused-deputy where a request could name a different
+    * (terminal-only) gate than the one actually parked. A request naming a
+    * mismatching gate is refused rather than silently retargeted. */
+   const char *gate = wi.current_stage;
+   if (jgate && cJSON_IsString(jgate) && jgate->valuestring[0] &&
+       strcmp(jgate->valuestring, gate) != 0)
    {
-      /* Idempotent: a duplicate approve for the same content hash is success. */
-      if (!wfe_approval_present(id, gate, wi.content_hash))
-         rc = wfe_approval_record(id, gate, wi.content_hash, actor);
-      else
-         rc = 0;
-      if (rc == 0)
-         (void)db1_work_item_clear_pause(id);
+      cJSON_Delete(body);
+      snprintf(resp, cap, "{\"error\":\"run is parked at gate '%s', not '%s'\"}", gate,
+               jgate->valuestring);
+      return 409;
    }
-   else if (strcmp(decision, "reject") == 0)
-   {
-      rc = db1_work_item_set_terminal(id, "rejected");
-   }
-   else
+   if (strcmp(decision, "approve") != 0 && strcmp(decision, "reject") != 0)
    {
       cJSON_Delete(body);
       snprintf(resp, cap, "{\"error\":\"decision must be 'approve' or 'reject'\"}");
       return 400;
    }
-   cJSON_Delete(body);
-   if (rc != 0)
+
+   const char *result_kind = decision; /* audit kind; a reject may become reject_retry */
+   char detail[256] = "";
+
+   if (strcmp(decision, "approve") == 0)
    {
-      snprintf(resp, cap, "{\"error\":\"gate %s failed\"}", decision);
-      return 500;
+      /* Record the non-repudiable approval first (idempotent on a duplicate hash),
+       * THEN atomically clear the pause — so the pause is never cleared without a
+       * preceding signed approval. */
+      int present = wfe_approval_present(id, gate, wi.content_hash);
+      if (!present && wfe_approval_record(id, gate, wi.content_hash, actor) != 0)
+      {
+         cJSON_Delete(body);
+         snprintf(resp, cap, "{\"error\":\"could not record approval\"}");
+         return 500;
+      }
+      int g = db1_work_item_gate_apply(id, wi.current_stage, wi.content_hash, NULL, NULL);
+      if (g < 0)
+      {
+         cJSON_Delete(body);
+         snprintf(resp, cap, "{\"error\":\"gate apply failed\"}");
+         return 500;
+      }
+      if (g == 0)
+      {
+         /* Not in the observed parked state. A prior identical approve having
+          * already resumed it is idempotent success; anything else is a conflict. */
+         cJSON_Delete(body);
+         if (present)
+         {
+            snprintf(resp, cap,
+                     "{\"work_item_id\":\"%s\",\"gate\":\"%s\",\"decision\":\"approve\"}", id,
+                     gate);
+            return 200;
+         }
+         snprintf(resp, cap, "{\"error\":\"run not parked at this gate (state changed)\"}");
+         return 409;
+      }
+      /* No detail: the audit row's gate column already carries the stage. */
    }
+   else /* reject — terminal by default; loop back only on an in-budget opt-in gate */
+   {
+      int retries = gate_count_reject_retries(id, gate); /* per-gate; -1 on DB error */
+      const char *new_stage = NULL, *terminal_state = "rejected";
+      char target[WFE_ID_LEN] = "";
+      /* The atomic gate_apply below serializes rejects per parked state (a
+       * successful loop-back changes current_stage + clears the pause, so any
+       * concurrent reject hits the guard and 409s), so this pre-read retry count
+       * cannot be raced past the cap. A negative count is a DB read error -> fail
+       * closed (terminal), never silently unbounded. */
+      if (retries < 0)
+         LOG_WARN("server.workflow",
+                  "gate reject %s/%s: retry count unavailable; failing closed (terminal)", id,
+                  gate);
+      else if (retries < GATE_MAX_REJECT_RETRIES)
+      {
+         char ferr[256];
+         wfe_def_t *def = wfe_load_workflow(wi.workflow_name, ferr, sizeof ferr);
+         if (def)
+         {
+            if (wfe_gate_reject_target(def, gate, target, sizeof target) == WFE_GATE_REJECT_RETRY)
+            {
+               new_stage = target;
+               terminal_state = NULL;
+               result_kind = "reject_retry";
+            }
+            wfe_def_free(def);
+         }
+         else /* unloadable def degrades to terminal, but loudly so ops can see it */
+            LOG_WARN("server.workflow",
+                     "gate reject %s/%s: workflow '%s' unloadable (%s); terminal", id, gate,
+                     wi.workflow_name, ferr);
+      }
+      int g = db1_work_item_gate_apply(id, wi.current_stage, wi.content_hash, new_stage,
+                                       terminal_state);
+      if (g < 0)
+      {
+         cJSON_Delete(body);
+         snprintf(resp, cap, "{\"error\":\"gate apply failed\"}");
+         return 500;
+      }
+      if (g == 0)
+      {
+         cJSON_Delete(body);
+         snprintf(resp, cap, "{\"error\":\"run not parked at this gate (state changed)\"}");
+         return 409;
+      }
+      if (new_stage)
+         snprintf(detail, sizeof detail, "from=%s to=%s", gate, new_stage);
+      else if (retries < 0)
+         snprintf(detail, sizeof detail, "stage=%s reason=retry_count_unavailable", gate);
+      else if (retries >= GATE_MAX_REJECT_RETRIES)
+         snprintf(detail, sizeof detail, "stage=%s reason=retry_cap_exceeded", gate);
+      else
+         snprintf(detail, sizeof detail, "stage=%s reason=rejected", gate);
+   }
+
+   cJSON_Delete(body);
+   /* Append-only audit event (unsigned by design, like every lifecycle event;
+    * non-repudiation for approvals lives in the signed approval record). The 6th
+    * arg is content_hash (string); the 7th is cost (double). */
+   db1_lifecycle_event_add(id, gate, result_kind, actor, detail, wi.content_hash, 0.0);
    wfe_scheduler_notify(); /* resume the run server-side */
    snprintf(resp, cap, "{\"work_item_id\":\"%s\",\"gate\":\"%s\",\"decision\":\"%s\"}", id, gate,
-            decision);
+            result_kind);
    return 200;
 }
 

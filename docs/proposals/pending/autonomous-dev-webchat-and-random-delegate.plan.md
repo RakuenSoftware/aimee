@@ -3,6 +3,49 @@
 Two user-requested additions on top of the (API-first) autonomous-development
 feature. Scope-honest: the webchat is currently a read-only run viewer.
 
+## Status: SHIPPED (2026-06-23)
+
+All three slices are implemented and unit-tested:
+
+- **C — `$random` delegate.** `wfe_resolve_delegate` / `wfe_resolve_delegate_seed`
+  (`src/server/wfe_delegate_resolve.c`): CSPRNG uniform pick over enabled agents,
+  seedable, fail-fast on an empty roster; wired into the live delegate + block
+  providers; frontend composer option present. Test
+  `unit-test-wfe-random-delegate`.
+- **B1 — submit form.** `POST /v1/dev/submit` + webchat `POST /api/dev/submit`
+  proxy + the Workflows-tab "Submit proposal" panel.
+- **B2 — operator gate approve/reject.** `POST /v1/workflow/items/<id>/gate`
+  (`CAP_WORKFLOW_ADMIN`, outside `CAPS_AUTHENTICATED`) + proxy + Approve/Reject
+  buttons shown on `pause_reason == pending_human`. The decision is applied via a
+  single guarded `db1_work_item_gate_apply` UPDATE (WHERE current_stage +
+  content_hash match AND pause_reason='pending_human') so a stale / double /
+  concurrent decision returns 409 instead of corrupting state. Approve is
+  idempotent (signed approval pre-check); **reject is terminal by default**, with
+  an opt-in `retry_on_reject: true` gate param that loops back along the gate's
+  `on_fail` edge (`wfe_gate_reject_target`), bounded by `GATE_MAX_REJECT_RETRIES`
+  (default 3) and degrading to terminal if the `on_fail` target no longer
+  resolves. Every decision appends an append-only `lifecycle_event`
+  (`approve | reject | reject_retry`). Tests `unit-test-wfe-gate-reject`,
+  `unit-test-wfe-gate-apply`, `unit-test-workflow-gate-caps`.
+
+This plan addressed the roundtable's five blocking review items (reject-side
+TOCTOU/idempotency, the content-hash invariant, audit-event signing semantics,
+unbounded retries, and pause→reject def staleness). Two follow-ups are tracked,
+not silently deferred:
+
+- **F1 — version-pinned def loading** for in-flight work items (engine-wide; the
+  pause→reject window is one instance). Mitigated here by the helper validating
+  the `on_fail` target against the freshly-loaded def.
+- **F2 — UI discoverability of retry eligibility** (badge / "Reject → loops back"
+  label) so an operator knows a `retry_on_reject` gate's Reject loops rather than
+  terminates. Frontend-only.
+- **F3 — idempotent signed approval.** The approve path records the signed approval
+  before the atomic pause-clear; on a concurrent advance the clear returns 0 (409)
+  and the signed approval is orphaned. Bounded and harmless (it is content-hash-keyed
+  to `(work_item, gate, content_hash)`; a later approve sees it present and returns an
+  idempotent 200). Making `wfe_approval_record` treat a duplicate as success would
+  remove the orphan entirely.
+
 ## B — webchat GUI for autonomous development
 
 ### B1. Submit a proposal (form)

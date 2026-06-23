@@ -113,6 +113,27 @@ wfe_def_t *wfe_def_load_file(const char *path, char *err, size_t errlen);
 void wfe_def_free(wfe_def_t *def);
 const wfe_node_t *wfe_def_node(const wfe_def_t *def, const char *id);
 
+/* ---- Human-gate reject routing (see §5 of the lifecycle proposal) ----
+ * Reject is terminal by DEFAULT; a gate opts into loop-back retry via
+ * `retry_on_reject: true` in its params, following its `on_fail` edge. */
+typedef enum
+{
+   WFE_GATE_REJECT_TERMINAL = 0, /* default: reject -> terminal `rejected` */
+   WFE_GATE_REJECT_RETRY = 1,    /* opt-in: reject -> loop back to on_fail target */
+   WFE_GATE_REJECT_ERR = -1      /* bad args (NULL def / NULL gate_id / target truncation) */
+} wfe_gate_reject_t;
+
+/* Decide how a reject at gate `gate_id` should route, purely from the parsed def
+ * (no DB — unit-testable). Returns WFE_GATE_REJECT_RETRY iff the gate node exists,
+ * its params set `retry_on_reject: true`, it has a non-empty `on_fail` edge, AND
+ * that on_fail target resolves to a real node in `def` — then `out_target` is
+ * filled with the target node id. In every other in-bounds case (no opt-in, no
+ * on_fail edge, or a dangling/renamed on_fail target) it returns
+ * WFE_GATE_REJECT_TERMINAL and does NOT write `out_target`. NULL `def`/`gate_id`,
+ * or an `out_target` too small to hold the target id, return WFE_GATE_REJECT_ERR. */
+wfe_gate_reject_t wfe_gate_reject_target(const wfe_def_t *def, const char *gate_id,
+                                         char *out_target, size_t out_n);
+
 /* ---- Validate (wfe_validate.c). Returns 0 on success; nonzero + err set. ---- */
 int wfe_def_validate(const wfe_def_t *def, char *err, size_t errlen);
 

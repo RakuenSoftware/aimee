@@ -312,3 +312,30 @@ const wfe_node_t *wfe_def_node(const wfe_def_t *def, const char *id)
          return &def->nodes[i];
    return NULL;
 }
+
+wfe_gate_reject_t wfe_gate_reject_target(const wfe_def_t *def, const char *gate_id,
+                                         char *out_target, size_t out_n)
+{
+   if (!def || !gate_id || !gate_id[0])
+      return WFE_GATE_REJECT_ERR;
+   const wfe_node_t *node = wfe_def_node(def, gate_id);
+   if (!node)
+      return WFE_GATE_REJECT_TERMINAL; /* unknown gate -> safe default (terminal) */
+   /* Opt-in flag in the gate's params. */
+   const cJSON *rr =
+       node->params ? cJSON_GetObjectItemCaseSensitive(node->params, "retry_on_reject") : NULL;
+   if (!cJSON_IsTrue(rr))
+      return WFE_GATE_REJECT_TERMINAL;
+   /* Must have somewhere to loop back to, and that target must still resolve to a
+    * real node (a removed/renamed on_fail degrades safely to terminal, never a
+    * dangling stage — this also bounds the pause->reject def-staleness window). */
+   if (!node->on_fail[0] || !wfe_def_node(def, node->on_fail))
+      return WFE_GATE_REJECT_TERMINAL;
+   if (out_target && out_n)
+   {
+      if (strlen(node->on_fail) >= out_n)
+         return WFE_GATE_REJECT_ERR; /* would truncate -> refuse rather than mis-route */
+      snprintf(out_target, out_n, "%s", node->on_fail);
+   }
+   return WFE_GATE_REJECT_RETRY;
+}
