@@ -196,6 +196,184 @@ int db2_embedding_dim_get(void *conn)
    return dim;
 }
 
+/* True if compat_csv (a comma-separated list of "old_id->new_id" transitions)
+ * admits the transition old_id -> new_id. Whitespace around tokens is trimmed.
+ * unified-llm-container §2: a compat-list entry only EXISTS once an operator has
+ * validated the upgrade (cosine >= 0.99 on a fixed probe set vs the prior model,
+ * or a same-repo retrain); this function checks membership, the validation is the
+ * admission criterion for adding the entry. */
+static int compat_admits(const char *compat_csv, const char *old_id, const char *new_id)
+{
+   if (!compat_csv || !*compat_csv || !old_id || !new_id)
+      return 0;
+   const char *p = compat_csv;
+   while (*p)
+   {
+      while (*p == ',' || *p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+         p++;
+      const char *entry = p;
+      while (*p && *p != ',' && *p != '\n' && *p != '\r')
+         p++;
+      const char *entry_end = p; /* [entry, entry_end) is one CSV token */
+      const char *arrow = entry;
+      while (arrow + 1 < entry_end && !(arrow[0] == '-' && arrow[1] == '>'))
+         arrow++;
+      if (arrow + 1 < entry_end && arrow[0] == '-' && arrow[1] == '>')
+      {
+         /* trim spaces around each side */
+         const char *ls = entry, *le = arrow;
+         while (ls < le && (*ls == ' ' || *ls == '\t'))
+            ls++;
+         while (le > ls && (le[-1] == ' ' || le[-1] == '\t'))
+            le--;
+         const char *rs = arrow + 2, *re = entry_end;
+         while (rs < re && (*rs == ' ' || *rs == '\t'))
+            rs++;
+         while (re > rs && (re[-1] == ' ' || re[-1] == '\t'))
+            re--;
+         if ((size_t)(le - ls) == strlen(old_id) && strncmp(ls, old_id, (size_t)(le - ls)) == 0 &&
+             (size_t)(re - rs) == strlen(new_id) && strncmp(rs, new_id, (size_t)(re - rs)) == 0)
+            return 1;
+      }
+   }
+   return 0;
+}
+
+/* Read kb_meta[key] into out[outlen] (out[0]='\0' if absent). Returns 0 on
+ * success (incl. absent), -1 on DB/prepare error. */
+static int kb_meta_get(void *conn, const char *key, char *out, size_t outlen)
+{
+   if (out && outlen)
+      out[0] = '\0';
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT value FROM kb_meta WHERE key = ?1", err, sizeof(err));
+   if (!st)
+      return -1;
+   if (aimee_pg_bind_text(st, "?1", key) != 0)
+   {
+      aimee_pg_finalize(st);
+      return -1;
+   }
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *v = aimee_pg_column_text(st, 0);
+      if (v && out && outlen)
+         snprintf(out, outlen, "%s", v);
+   }
+   aimee_pg_finalize(st);
+   return 0;
+}
+
+/* Upsert kb_meta[key] = value (overwriting). Returns 0 / -1. */
+static int kb_meta_set(void *conn, const char *key, const char *value)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "INSERT INTO kb_meta (key, value) VALUES (?1, ?2)"
+                                          " ON CONFLICT (key) DO UPDATE SET value = ?2",
+                                          err, sizeof(err));
+   if (!st)
+      return -1;
+   if (aimee_pg_bind_text(st, "?1", key) != 0 || aimee_pg_bind_text(st, "?2", value) != 0)
+   {
+      aimee_pg_finalize(st);
+      return -1;
+   }
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return (step == AIMEE_PG_DONE || step == AIMEE_PG_ROW) ? 0 : -1;
+}
+
+/* unified-llm-container §2: record/check the EMBEDDER model identity (repo@sha)
+ * alongside the dim, so a same-dim different-model swap (pplx-embed 1024 ↔
+ * Qwen3-0.6B 1024) is refused rather than silently mixing vector spaces.
+ *   - model_id NULL/empty   -> no-op (return 0): a deployment whose embedder
+ *     reports no identity (the legacy torch embedder) is unaffected.
+ *   - kb_meta.schema_embedder_model_id absent or == model_id -> record / match.
+ *   - recorded != model_id, transition admitted by compat_csv -> update + 0.
+ *   - recorded != model_id, not admitted -> refuse (-1, remediation set).
+ * Keyed re-embed triggers on a model_id change (the migration, §Migration). */
+int db2_embedding_model_record_or_check(void *conn, const char *model_id, const char *compat_csv,
+                                        char *errbuf, size_t errlen)
+{
+   if (!conn)
+      return -1;
+   if (!model_id || !*model_id)
+      return 0; /* identity unknown -> guard is a no-op (back-compat) */
+
+   char recorded[160] = "";
+   if (kb_meta_get(conn, "schema_embedder_model_id", recorded, sizeof(recorded)) != 0)
+   {
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen, "kb_meta read failed for schema_embedder_model_id");
+      return -1;
+   }
+   if (!recorded[0])
+   {
+      if (kb_meta_set(conn, "schema_embedder_model_id", model_id) != 0)
+      {
+         if (errbuf && errlen)
+            snprintf(errbuf, errlen, "kb_meta write failed for schema_embedder_model_id");
+         return -1;
+      }
+      return 0;
+   }
+   if (strcmp(recorded, model_id) == 0)
+      return 0; /* match */
+
+   if (compat_admits(compat_csv, recorded, model_id))
+   {
+      if (kb_meta_set(conn, "schema_embedder_model_id", model_id) != 0)
+      {
+         if (errbuf && errlen)
+            snprintf(errbuf, errlen, "kb_meta write failed promoting admitted embedder upgrade");
+         return -1;
+      }
+      return 0; /* admitted same-dim upgrade */
+   }
+
+   /* Kept concise so it survives the caller's conventional 256-byte errbuf after
+    * both ids are substituted (the full remediation lives in retrieval-stack.md). */
+   if (errbuf && errlen)
+      snprintf(
+          errbuf, errlen,
+          "embedder model mismatch: corpus '%s' vs configured '%s' (same dim != same vector "
+          "space). Re-embed the corpus or compat-list the transition (docs/retrieval-stack.md).",
+          recorded, model_id);
+   return -1;
+}
+
+/* unified-llm-container §2: record the RERANKER identity + scoring contract. The
+ * reranker writes no corpus vectors and there is no persisted score cache, so a
+ * swap is safe — this is record-only (drift observability), never a refusal. On a
+ * change it refreshes the recorded value (a future score cache would key its
+ * invalidation off this). model_id NULL/empty -> no-op. Returns 0 / -1 (DB err). */
+int db2_reranker_model_record(void *conn, const char *model_id, const char *contract, char *errbuf,
+                              size_t errlen)
+{
+   if (!conn)
+      return -1;
+   if (!model_id || !*model_id)
+      return 0;
+   const char *want_contract = contract ? contract : "";
+   /* Skip the writes when the recorded identity already matches, so a steady-state
+    * restart incurs no redundant kb_meta writes (mirrors the embedder short-circuit). */
+   char rec_id[160] = "", rec_contract[96] = "";
+   if (kb_meta_get(conn, "schema_reranker_model_id", rec_id, sizeof(rec_id)) == 0 &&
+       kb_meta_get(conn, "schema_reranker_contract", rec_contract, sizeof(rec_contract)) == 0 &&
+       strcmp(rec_id, model_id) == 0 && strcmp(rec_contract, want_contract) == 0)
+      return 0;
+   if (kb_meta_set(conn, "schema_reranker_model_id", model_id) != 0 ||
+       kb_meta_set(conn, "schema_reranker_contract", want_contract) != 0)
+   {
+      if (errbuf && errlen)
+         snprintf(errbuf, errlen, "kb_meta write failed for reranker identity");
+      return -1;
+   }
+   return 0;
+}
+
 int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t errlen)
 {
    if (!pg_conn)
@@ -222,7 +400,10 @@ int db_apply_schema_postgres(void *pg_conn, int embed_dim, char *errbuf, size_t 
    free(sql);
    if (rc != 0)
       return rc;
-   /* §2: record the dim on first apply / refuse a mismatch (kb_meta now exists). */
+   /* §2: record the dim on first apply / refuse a mismatch (kb_meta now exists).
+    * The unified-llm-container §2 model-identity guards (embedder + reranker) run
+    * in db2_init right after this, where the configured identity globals live —
+    * keeping this lower schema layer free of an upward dependency on them. */
    return db2_embedding_dim_record_or_check(pg_conn, embed_dim, errbuf, errlen);
 }
 

@@ -83,6 +83,32 @@ int db2_embedding_dim_get(void *pg_conn)
    return g_recorded_dim;
 }
 
+/* unified-llm-container §2: db2_init now also calls the model-identity guards
+ * (db_schema.o, not linked here). Stub them as no-ops (the real guards likewise
+ * no-op on the empty identity these tests run with), so db2_init's apply path is
+ * unchanged. */
+int db2_embedding_model_record_or_check(void *pg_conn, const char *model_id, const char *compat_csv,
+                                        char *errbuf, size_t errlen)
+{
+   (void)model_id;
+   (void)compat_csv;
+   (void)errbuf;
+   (void)errlen;
+   assert(pg_conn == &g_fake_conn);
+   return 0;
+}
+
+int db2_reranker_model_record(void *pg_conn, const char *model_id, const char *contract,
+                              char *errbuf, size_t errlen)
+{
+   (void)model_id;
+   (void)contract;
+   (void)errbuf;
+   (void)errlen;
+   assert(pg_conn == &g_fake_conn);
+   return 0;
+}
+
 void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
 {
    (void)level;

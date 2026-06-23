@@ -5,6 +5,7 @@
  * directly. */
 
 #include "kb_service_code_embed.h"
+#include "aimee.h" /* EMBED_MAX_DIM */
 #include "db2/code_index_ops.h"
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
@@ -21,9 +22,11 @@
 
 #define CE_ERRBUF   256
 #define CE_TEXT_CAP 4096
-/* Upper bound on the embedding dimension we will buffer: 1024 for the default
- * 0.6B embedder, 2560 for the 4B deep tier. */
-#define CE_EMBED_MAX_DIM        2560
+/* Upper bound on the embedding dimension we will buffer. Tied to the global
+ * EMBED_MAX_DIM (4000 — the pgvector halfvec index ceiling) so the code-embed
+ * buffer + cap track the embed ladder (0.6B=1024 / 4B=2560 / 8B-trunc=4000) and
+ * never silently reject or overflow a larger-dim model. */
+#define CE_EMBED_MAX_DIM        EMBED_MAX_DIM
 #define CE_FALLBACK_MAX_CALLS   5
 #define CE_FALLBACK_MAX_IMPORTS 5
 

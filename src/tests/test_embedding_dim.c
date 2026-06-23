@@ -104,6 +104,94 @@ int main(void)
    /* NULL conn -> 0. */
    assert(db2_embedding_dim_get(NULL) == 0);
 
+   /* ---- EMBED_MAX_DIM bumped to 4000 (unified-llm-container §"8B truncation"):
+    * a 4000-d dim now records cleanly (was rejected when the cap was 2560). ---- */
+   assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedding_dim'", err,
+                        sizeof err) == 0);
+   err[0] = '\0';
+   assert(db2_embedding_dim_record_or_check(conn, 4000, err, sizeof err) == 0);
+   assert(db2_embedding_dim_get(conn) == 4000);
+
+   /* ================= unified-llm-container §2: model-identity drift guard ====== */
+   /* No-op when the embedder reports no identity (the legacy torch embedder). */
+   err[0] = '\0';
+   assert(db2_embedding_model_record_or_check(conn, NULL, NULL, err, sizeof err) == 0);
+   assert(db2_embedding_model_record_or_check(conn, "", NULL, err, sizeof err) == 0);
+
+   /* Fresh record, then a matching check is a no-op. */
+   err[0] = '\0';
+   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@abc", NULL, err,
+                                              sizeof err) == 0);
+   err[0] = '\0';
+   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@abc", NULL, err,
+                                              sizeof err) == 0);
+
+   /* The same-dim DIFFERENT-model swap is REFUSED (the footgun: pplx-embed and
+    * Qwen3-0.6B are both 1024-d, so a dim-only guard would miss this). */
+   err[0] = '\0';
+   assert(db2_embedding_model_record_or_check(conn, "perplexity-ai/pplx-embed-v1-0.6b", NULL, err,
+                                              sizeof err) == -1);
+   assert(err[0] != '\0');
+   assert(strstr(err, "Qwen/Qwen3-Embedding-0.6B@abc") != NULL); /* names recorded */
+   assert(strstr(err, "pplx-embed") != NULL);                    /* and configured */
+   /* The refusal did not change the recorded identity. */
+   err[0] = '\0';
+   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@abc", NULL, err,
+                                              sizeof err) == 0);
+
+   /* A transition on the compat-list is ADMITTED (operator-validated cosine>=0.99)
+    * and updates the recorded identity. Whitespace + multiple entries tolerated. */
+   const char *compat =
+       " other->x , Qwen/Qwen3-Embedding-0.6B@abc -> Qwen/Qwen3-Embedding-0.6B@def ";
+   err[0] = '\0';
+   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@def", compat, err,
+                                              sizeof err) == 0);
+   /* Now the recorded id is @def; the old @abc would itself be a mismatch. */
+   err[0] = '\0';
+   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@abc", NULL, err,
+                                              sizeof err) == -1);
+   /* A compat entry that doesn't match the actual transition does NOT admit. */
+   err[0] = '\0';
+   assert(db2_embedding_model_record_or_check(conn, "totally/different@ghi", "a->b,c->d", err,
+                                              sizeof err) == -1);
+
+   /* compat_admits edge cases (via the public guard; recorded id is @def now).
+    * Malformed entries (no arrow, empty side) are silently skipped (not admitted);
+    * newline-separated entries are tolerated. */
+   err[0] = '\0';
+   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@xyz",
+                                              "no_arrow_here, ->, -> , a-->b", err,
+                                              sizeof err) == -1); /* none admit */
+   err[0] = '\0';
+   assert(db2_embedding_model_record_or_check(
+              conn, "Qwen/Qwen3-Embedding-0.6B@xyz",
+              "junk->junk\nQwen/Qwen3-Embedding-0.6B@def->Qwen/Qwen3-Embedding-0.6B@xyz", err,
+              sizeof err) == 0); /* newline-separated entry admits */
+
+   /* Reranker identity is record-only (no corpus vectors / no score cache): a
+    * swap never refuses, and the recorded value tracks the latest. */
+   err[0] = '\0';
+   assert(db2_reranker_model_record(conn, NULL, NULL, err, sizeof err) == 0); /* no-op */
+   assert(db2_reranker_model_record(conn, "ettin-reranker-400m@v1", "/v1/rerank,fa=on", err,
+                                    sizeof err) == 0);
+   assert(db2_reranker_model_record(conn, "ettin-reranker-68m@v1", "/v1/rerank,fa=on", err,
+                                    sizeof err) == 0); /* swap is fine */
+   {
+      char rr[160];
+      assert(aimee_pg_exec(conn, "SELECT 1", err, sizeof err) == 0); /* conn ok */
+      aimee_pg_stmt_t *st =
+          aimee_pg_prepare(conn, "SELECT value FROM kb_meta WHERE key = 'schema_reranker_model_id'",
+                           err, sizeof err);
+      assert(st && aimee_pg_step(st, err, sizeof err) == AIMEE_PG_ROW);
+      snprintf(rr, sizeof rr, "%s", aimee_pg_column_text(st, 0));
+      aimee_pg_finalize(st);
+      assert(strcmp(rr, "ettin-reranker-68m@v1") == 0);
+   }
+
+   /* NULL conn -> -1 for both guards. */
+   assert(db2_embedding_model_record_or_check(NULL, "x", NULL, err, sizeof err) == -1);
+   assert(db2_reranker_model_record(NULL, "x", "y", err, sizeof err) == -1);
+
    db2_test_shim_close();
    printf("ok\n");
    return 0;

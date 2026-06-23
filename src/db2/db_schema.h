@@ -43,6 +43,25 @@ extern "C"
     * sqlite shim. */
    int db2_embedding_dim_get(void *conn);
 
+   /* unified-llm-container §2: record/check the EMBEDDER model identity
+    * (repo@sha) in kb_meta.schema_embedder_model_id alongside the dim. A dim-only
+    * guard is insufficient (two models can share a dim — pplx-embed and
+    * Qwen3-0.6B are both 1024-d), so a same-dim swap would silently mix vector
+    * spaces. model_id NULL/empty -> no-op (legacy torch embedder reports no
+    * identity). compat_csv is a comma-separated list of admitted "old->new"
+    * transitions (membership only; the cosine>=0.99 validation is the operator's
+    * criterion for adding an entry). Returns 0 (recorded/match/admitted), -1
+    * (unadmitted mismatch / DB error, errbuf set). Called by
+    * db_apply_schema_postgres; exposed for direct testing. */
+   int db2_embedding_model_record_or_check(void *conn, const char *model_id, const char *compat_csv,
+                                           char *errbuf, size_t errlen);
+
+   /* unified-llm-container §2: record the RERANKER identity + scoring contract in
+    * kb_meta. Record-only (no corpus vectors, no persisted score cache to
+    * invalidate) — never refuses. model_id NULL/empty -> no-op. Returns 0 / -1. */
+   int db2_reranker_model_record(void *conn, const char *model_id, const char *contract,
+                                 char *errbuf, size_t errlen);
+
    /* Apply the consolidated SQLite schema for DB2's libpq shim/test
     * compatibility path. Production DB2 remains Postgres-only. */
    int db2_apply_schema_sqlite_shim(struct sqlite3 *db, char *errbuf, size_t errlen);
