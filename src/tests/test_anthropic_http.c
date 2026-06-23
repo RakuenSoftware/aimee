@@ -10,6 +10,7 @@
 #include "../headers/agent_config.h"
 #include "../headers/agent_exec.h"
 #include "../headers/agent_protocol.h"
+#include "../headers/config.h"
 #include "../headers/delegate_driver.h"
 #include "../headers/server_http.h"
 #include "../vendor/headers/cJSON.h"
@@ -18,6 +19,8 @@
 
 static const delegate_driver_t *g_driver;
 static char *g_last_body;
+static char *g_last_extra; /* upstream extra-header block from the last post */
+static int g_stub_parity;  /* config_load stub returns this as claude_proxy_parity */
 static int g_stream_status = 200;
 static const char *g_stream_payload;
 
@@ -25,6 +28,9 @@ static void reset_capture(void)
 {
    free(g_last_body);
    g_last_body = NULL;
+   free(g_last_extra);
+   g_last_extra = NULL;
+   g_stub_parity = 0;
    g_stream_status = 200;
    g_stream_payload = NULL;
 }
@@ -119,10 +125,11 @@ int agent_http_post(const char *url, const char *auth_header, const char *body, 
    (void)url;
    (void)auth_header;
    (void)timeout_ms;
-   (void)extra_headers;
    free(g_last_body);
    g_last_body = strdup(body ? body : "");
    assert(g_last_body != NULL);
+   free(g_last_extra);
+   g_last_extra = strdup(extra_headers ? extra_headers : "");
    *response_buf = strdup("{}");
    return 200;
 }
@@ -213,6 +220,24 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    (void)query;
    (void)request_disabled;
    return g_stub_preinject_env ? strdup(g_stub_preinject_env) : NULL;
+}
+
+/* Config + HTTP-layer stubs for the parity path. config_load zeroes the struct so
+ * claude_proxy_parity defaults off — these whitebox tests cover the default
+ * model-swap/pre-injection behavior, not parity mode. agent_http_last_retry_after
+ * has no upstream socket here, so 0 (no Retry-After) suffices. */
+int config_load(config_t *cfg)
+{
+   if (cfg)
+   {
+      memset(cfg, 0, sizeof(*cfg));
+      cfg->claude_proxy_parity = g_stub_parity;
+   }
+   return 0;
+}
+int agent_http_last_retry_after(void)
+{
+   return 0;
 }
 
 #include "../server/anthropic_http.c"
@@ -482,6 +507,39 @@ static void test_messages_buffered_anthropic_preserves_request_shape(void)
    PASS("messages_buffered_anthropic_preserves_request_shape");
 }
 
+/* claude_proxy_parity on: inbound model honored (not swapped to the primary),
+ * pre-injection skipped, and the client's anthropic-beta forwarded upstream. */
+static void test_messages_buffered_anthropic_parity_passthrough(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   char resp[4096];
+   cJSON *sent;
+
+   reset_capture();
+   g_driver = &anthropic;
+   g_stub_parity = 1;
+   g_stub_preinject_env = "<aimee-context>INJECTED</aimee-context>";
+   anthropic_ingress_set_request_headers("2023-06-01", "test-beta-flag,extended-cache-ttl");
+
+   assert(messages_buffered("{\"model\":\"claude-opus-4-8\",\"max_tokens\":64,"
+                            "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+                            resp, sizeof(resp)) == 200);
+   sent = parse(g_last_body);
+   /* inbound model preserved (default behavior would swap to "configured-claude") */
+   assert(strcmp(obj(sent, "model")->valuestring, "claude-opus-4-8") == 0);
+   /* pre-injection skipped under parity */
+   assert(strstr(g_last_body, "INJECTED") == NULL);
+   /* client beta forwarded upstream */
+   assert(g_last_extra != NULL && strstr(g_last_extra, "anthropic-beta: test-beta-flag") != NULL);
+   assert(strstr(g_last_extra, "anthropic-version: 2023-06-01") != NULL);
+   cJSON_Delete(sent);
+
+   anthropic_ingress_set_request_headers("", "");
+   g_stub_preinject_env = NULL;
+   reset_capture();
+   PASS("messages_buffered_anthropic_parity_passthrough");
+}
+
 static void test_messages_buffered_anthropic_strips_stream_false_path(void)
 {
    const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
@@ -676,6 +734,7 @@ int main(void)
    test_relay_append_data_growth();
    test_relay_transport_error();
    test_messages_buffered_anthropic_preserves_request_shape();
+   test_messages_buffered_anthropic_parity_passthrough();
    test_messages_buffered_anthropic_strips_stream_false_path();
    test_messages_stream_anthropic_preserves_request_shape();
    test_messages_buffered_openai_family_translates();
