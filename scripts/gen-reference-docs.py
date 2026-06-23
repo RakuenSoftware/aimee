@@ -109,7 +109,7 @@ CFG_KEY_DESC = {
     "claude_proxy_parity": "Make the Claude Code `/v1/messages` ingress a transparent "
     "Anthropic passthrough (honor inbound model, skip pre-injection, forward "
     "anthropic-version/anthropic-beta, proxy count_tokens, relay upstream errors). "
-    "Default off.",
+    "Default on.",
     "cost_reward_enabled": "Factor token cost into the reward signal.",
     "cost_reward_lambda_pct": "Cost-penalty weight (percent) in the reward.",
     "cost_reward_ref_usd_milli": "Reference cost (USD-milli) normalizing the cost reward.",

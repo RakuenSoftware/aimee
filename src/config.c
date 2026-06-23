@@ -504,6 +504,11 @@ static void config_set_defaults(config_t *cfg)
    cfg->integrity_dry_run = 1;
    cfg->ingress_preinject_assembly_budget = 6144;
    cfg->ingress_max_raw_scans = 0;
+   /* Default ON: the Claude Code /v1/messages ingress is an exact Anthropic
+    * passthrough (honor inbound model, skip pre-injection, forward
+    * anthropic-version/anthropic-beta, proxy count_tokens, relay upstream
+    * errors + Retry-After). Set false to restore the model-swap proxy. */
+   cfg->claude_proxy_parity = 1;
    /* Default-on as of the virtual-context rollout: the long-session benchmark
     * gate (make virtual-context-eval-check) passes on synthetic and real
     * tool-heavy session fixtures. Rollback: set session.virtual_context.enabled
