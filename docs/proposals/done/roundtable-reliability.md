@@ -1,6 +1,6 @@
 # Proposal: Roundtable reliability — get the review gate to 100%
 
-- **State:** diagnosis + first fix (claude-CLI panel exclusion) shipping; follow-ups listed
+- **State:** done — diagnosis + first fix (claude-CLI panel exclusion) shipped; follow-ups listed
 - **Author:** JBailes (investigation 2026-06-15)
 - **Motivation:** the roundtable is the project's quality gate, but in practice it
   is unreliable/slow. This is a root-cause diagnosis (empirically validated

@@ -1,6 +1,6 @@
 # Replayable-evidence verification + architecture-deepening sweep
 
-- **State:** roundtable-reviewed in two rounds — R1 (3 lenses: architect /
+- **State:** done — roundtable-reviewed in two rounds — R1 (3 lenses: architect /
   security / contrarian → 2 approve-with-changes, 1 rework, all converging),
   R2 (focused consult on the rubric split + the `typed_facts` modeling → both
   sound-with-tweak). Hardened per both rounds; the three formerly-open items are

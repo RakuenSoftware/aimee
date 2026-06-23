@@ -1,6 +1,6 @@
 # Design: config-extensible workflow blocks (+ CI/merge safety blocks)
 
-- **State:** design converged (2 rounds; reviewer READY, architect design-convincing — code-verification items deferred to the implementation roundtable)
+- **State:** done — design converged (2 rounds; reviewer READY, architect design-convincing — code-verification items deferred to the implementation roundtable)
 - **Builds on:** the merged workflow engine (`aimee-dev-lifecycle-workflow.md`, PR #288).
 - **Goal:** let users **define their own composable blocks via config** (no recompile),
   type-checked by the same validator and run by a generic executor; and add three

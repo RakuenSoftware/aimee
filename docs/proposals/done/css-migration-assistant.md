@@ -9,7 +9,7 @@
 
 # Proposal: CSS migration assistant — exemplar-guided structural conversion
 
-- **State:** **APPROVED at human proposal-gate (JBailes, 2026-06-15) on the
+- **State:** done — **APPROVED at human proposal-gate (JBailes, 2026-06-15) on the
   recurring/subsystem path (§9 case 1)** — build #1/#3 as first-class C
   subsystem + #4-interim + #5; #2-upgrade and #4-full remain deferred follow-on
   proposals. Impl plan: `css-migration-assistant.plan.md`. — rev2. Roundtable

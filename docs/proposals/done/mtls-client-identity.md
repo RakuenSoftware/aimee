@@ -1,6 +1,6 @@
 # mTLS client identity: per-client certs as attested principals
 
-- **State:** proposed; awaiting roundtable + user proposal-gate.
+- **State:** done
 - **Scope:** deterministic / server transport + auth + PKI lifecycle. Not an
   intelligence-surface proposal (no Architecture Charter role).
 - **Author:** JBailes, 2026-06-17.

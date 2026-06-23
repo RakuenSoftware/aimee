@@ -1,6 +1,6 @@
 # Native TLS backends for the Windows and macOS thin clients
 
-- **State:** proposed; awaiting roundtable + user proposal-gate.
+- **State:** done
 - **Scope:** deterministic / build + client transport. Not an intelligence-surface
   proposal (no Architecture Charter role).
 - **Author:** JBailes, 2026-06-17.

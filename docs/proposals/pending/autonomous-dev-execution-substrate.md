@@ -182,6 +182,15 @@ A reconciler (`aimee dev reconcile`, also a lint check) that:
    `done/` filing with zero human steps; one with a `deployment`/`hardware` tier
    stops at an explicit, labelled gate with the CI dispatch recorded.
 
+The §4 machine-checkable shadow of the criteria above (P1 ships the schema gate that
+validates this block; later packets execute each `check` on its tier):
+
+```yaml acceptance
+- {id: 1, tier: mechanical,   check: "make -C src proposal-reconcile-check"}
+- {id: 2, tier: mechanical,   check: "python3 -m unittest discover -s scripts/tests -p test_check_proposal_reconcile.py"}
+- {id: 3, tier: mechanical,   check: "make -C src lint"}
+```
+
 ## Risks
 
 - **Arbitrary build execution.** The runner executes repo build scripts — sandbox

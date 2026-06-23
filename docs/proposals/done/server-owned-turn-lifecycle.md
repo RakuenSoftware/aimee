@@ -1,5 +1,7 @@
 # Server-owned turn lifecycle: a turn outlives the connection that started it
 
+Status: done
+
 ## Problem
 
 A chat turn's execution is today bound to the client connection that started

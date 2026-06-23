@@ -1,6 +1,6 @@
 # Proposal: typed-fact knowledge layer for identity & world facts
 
-- **State:** draft - reviewed, converged at R3 (reviewer / architect / security
+- **State:** done — reviewed, converged at R3 (reviewer / architect / security
   lenses across minimax + mistral all returned no major issues)
 - **Author:** JBailes
 - **Date:** 2026-06-12
