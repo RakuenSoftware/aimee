@@ -102,7 +102,7 @@ void anthropic_stream_free(anthropic_stream_xlate_t *st);
  * API behavior (wire version, beta features such as fine-grained tool streaming
  * or 1h cache TTL). The /v1/messages ingress handlers receive only the body, so
  * server_http captures these two headers per request and the anthropic-driver
- * passthrough forwards them upstream when claude_proxy_parity is enabled. Set on
+ * passthrough forwards them upstream when the primary speaks the Anthropic API. Set on
  * every request (pass "" / NULL to clear); the getters return "" when unset. */
 void anthropic_ingress_set_request_headers(const char *anthropic_version,
                                            const char *anthropic_beta);

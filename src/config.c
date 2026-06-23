@@ -833,10 +833,6 @@ int config_load(config_t *cfg)
    if (cJSON_IsBool(item))
       cfg->ingress_preinject_enabled = cJSON_IsTrue(item);
 
-   item = cJSON_GetObjectItemCaseSensitive(root, "claude_proxy_parity");
-   if (cJSON_IsBool(item))
-      cfg->claude_proxy_parity = cJSON_IsTrue(item);
-
    /* CSS migration assistant style-graph write path (WP-C). The field +
     * descriptor + save existed, but the YAML load parse was missing, so the
     * flag never took effect during indexing. */

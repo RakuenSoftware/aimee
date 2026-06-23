@@ -225,7 +225,7 @@ extern "C"
 
    /* Capture the inbound `anthropic-version` / `anthropic-beta` headers off the
     * raw request into per-request thread-locals, for the /v1/messages exact-parity
-    * passthrough (forwarded upstream only when claude_proxy_parity is on). Called
+    * passthrough (forwarded upstream only when the primary speaks the Anthropic API). Called
     * once per request from the HTTP dispatch; `raw_request` is the full request
     * buffer (NULL clears). Defined in server/anthropic_http.c. */
    void anthropic_http_capture_request_headers(const char *raw_request);

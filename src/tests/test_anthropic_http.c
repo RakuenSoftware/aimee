@@ -10,7 +10,6 @@
 #include "../headers/agent_config.h"
 #include "../headers/agent_exec.h"
 #include "../headers/agent_protocol.h"
-#include "../headers/config.h"
 #include "../headers/delegate_driver.h"
 #include "../headers/server_http.h"
 #include "../vendor/headers/cJSON.h"
@@ -20,7 +19,6 @@
 static const delegate_driver_t *g_driver;
 static char *g_last_body;
 static char *g_last_extra; /* upstream extra-header block from the last post */
-static int g_stub_parity;  /* config_load stub returns this as claude_proxy_parity */
 static int g_stream_status = 200;
 static const char *g_stream_payload;
 
@@ -30,7 +28,6 @@ static void reset_capture(void)
    g_last_body = NULL;
    free(g_last_extra);
    g_last_extra = NULL;
-   g_stub_parity = 0;
    g_stream_status = 200;
    g_stream_payload = NULL;
 }
@@ -222,19 +219,8 @@ char *ingress_preinject_build(const char *query, int request_disabled)
    return g_stub_preinject_env ? strdup(g_stub_preinject_env) : NULL;
 }
 
-/* Config + HTTP-layer stubs for the parity path. config_load zeroes the struct so
- * claude_proxy_parity defaults off — these whitebox tests cover the default
- * model-swap/pre-injection behavior, not parity mode. agent_http_last_retry_after
- * has no upstream socket here, so 0 (no Retry-After) suffices. */
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      cfg->claude_proxy_parity = g_stub_parity;
-   }
-   return 0;
-}
+/* HTTP-layer stub: agent_http_last_retry_after has no upstream socket here, so 0
+ * (no Retry-After) suffices. */
 int agent_http_last_retry_after(void)
 {
    return 0;
@@ -492,7 +478,8 @@ static void test_messages_buffered_anthropic_preserves_request_shape(void)
                          resp, sizeof(resp)) == 200);
    assert(g_last_body != NULL);
    sent = parse(g_last_body);
-   assert(strcmp(obj(sent, "model")->valuestring, "configured-claude") == 0);
+   /* Anthropic primary speaks the Anthropic API -> inbound model honored verbatim. */
+   assert(strcmp(obj(sent, "model")->valuestring, "ignored") == 0);
    system = obj(sent, "system");
    assert(cJSON_IsArray(system));
    cc = obj(cJSON_GetArrayItem((cJSON *)system, 0), "cache_control");
@@ -507,8 +494,8 @@ static void test_messages_buffered_anthropic_preserves_request_shape(void)
    PASS("messages_buffered_anthropic_preserves_request_shape");
 }
 
-/* claude_proxy_parity on: inbound model honored (not swapped to the primary),
- * pre-injection skipped, and the client's anthropic-beta forwarded upstream. */
+/* Anthropic primary -> passthrough: inbound model honored, pre-injection skipped,
+ * and the client's anthropic-beta forwarded upstream. */
 static void test_messages_buffered_anthropic_parity_passthrough(void)
 {
    const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
@@ -517,7 +504,6 @@ static void test_messages_buffered_anthropic_parity_passthrough(void)
 
    reset_capture();
    g_driver = &anthropic;
-   g_stub_parity = 1;
    g_stub_preinject_env = "<aimee-context>INJECTED</aimee-context>";
    anthropic_ingress_set_request_headers("2023-06-01", "test-beta-flag,extended-cache-ttl");
 
@@ -525,9 +511,9 @@ static void test_messages_buffered_anthropic_parity_passthrough(void)
                             "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
                             resp, sizeof(resp)) == 200);
    sent = parse(g_last_body);
-   /* inbound model preserved (default behavior would swap to "configured-claude") */
+   /* inbound model honored (an OpenAI primary would translate + swap the model) */
    assert(strcmp(obj(sent, "model")->valuestring, "claude-opus-4-8") == 0);
-   /* pre-injection skipped under parity */
+   /* pre-injection skipped on the passthrough path */
    assert(strstr(g_last_body, "INJECTED") == NULL);
    /* client beta forwarded upstream */
    assert(g_last_extra != NULL && strstr(g_last_extra, "anthropic-beta: test-beta-flag") != NULL);
@@ -578,7 +564,8 @@ static void test_messages_stream_anthropic_preserves_request_shape(void)
                           cap_emit, &cap) == 0);
    assert(g_last_body != NULL);
    sent = parse(g_last_body);
-   assert(strcmp(obj(sent, "model")->valuestring, "configured-claude") == 0);
+   /* Anthropic primary speaks the Anthropic API -> inbound model honored verbatim. */
+   assert(strcmp(obj(sent, "model")->valuestring, "ignored") == 0);
    assert(cJSON_IsArray(obj(sent, "system")));
    assert(cJSON_IsObject(obj(sent, "tool_choice")));
    assert(cJSON_IsObject(obj(sent, "thinking")));

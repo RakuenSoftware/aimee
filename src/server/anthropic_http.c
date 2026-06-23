@@ -20,7 +20,6 @@
 #include "agent_types.h"
 #include "anthropic_ingress.h"
 #include "cJSON.h"
-#include "config.h"
 #include "delegate_driver.h"
 #include "ingress_preinject.h"
 #include "json_fluent.h"
@@ -53,17 +52,14 @@ static void mint_msg_id(char *buf, size_t n)
    snprintf(buf, n, "msg_%ld", (long)time(NULL));
 }
 
-/* Exact-parity mode for the Claude Code ingress (config claude_proxy_parity,
- * default off). When on AND the primary is an Anthropic-profile agent, the
- * ingress is a transparent passthrough: inbound model honored, pre-injection
- * skipped, client anthropic-version/anthropic-beta forwarded, count_tokens
- * proxied upstream, and upstream error status/body relayed unchanged. */
-static int parity_on(void)
-{
-   config_t cfg;
-   config_load(&cfg);
-   return cfg.claude_proxy_parity ? 1 : 0;
-}
+/* Passthrough vs. translate is a property of the serving model, not a setting:
+ * when the primary speaks the Anthropic Messages API natively (the anthropic
+ * driver), the /v1/messages ingress is a transparent passthrough — inbound model
+ * honored, pre-injection skipped, client anthropic-version/anthropic-beta
+ * forwarded, count_tokens proxied upstream, upstream error status/body +
+ * Retry-After relayed unchanged. When the primary speaks OpenAI, the request is
+ * translated (and the model swapped to the configured one). Derived below from
+ * driver_is_anthropic(); there is no config flag. */
 
 /* Retry-After (seconds) the parity passthrough relays on its own response when it
  * forwarded an upstream 429/529 that carried one. Thread-local, reset on every
@@ -341,7 +337,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    delegate_drivers_init();
    driver = delegate_driver_get(ag->provider);
    /* Exact-parity passthrough only applies to the Anthropic-native path. */
-   int parity = parity_on() && driver_is_anthropic(driver);
+   int parity = driver_is_anthropic(driver);
    if (!parity)
       messages_apply_preinject(req);
    translate_request(req, driver, ag, &messages, &tools, &system_text);
@@ -634,7 +630,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    delegate_drivers_init();
    driver = delegate_driver_get(ag->provider);
    /* Exact-parity passthrough only applies to the Anthropic-native path. */
-   int parity = parity_on() && driver_is_anthropic(driver);
+   int parity = driver_is_anthropic(driver);
    if (!parity)
       messages_apply_preinject(req);
    translate_request(req, driver, ag, &messages, &tools, &system_text);
@@ -743,10 +739,10 @@ static int count_tokens(const char *body, char *resp, int cap)
 {
    cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
 
-   /* Exact parity: proxy to Anthropic's real /v1/messages/count_tokens so Claude
-    * Code's context-budget math matches api.anthropic.com, not a local estimate.
-    * Only on the Anthropic-native path; otherwise fall through to the estimate. */
-   if (parity_on())
+   /* Proxy to Anthropic's real /v1/messages/count_tokens so Claude Code's
+    * context-budget math matches api.anthropic.com, not a local estimate — only
+    * when the primary speaks the Anthropic API; otherwise fall through to the
+    * estimate. */
    {
       agent_config_t acfg;
       agent_t *ag = resolve_primary(&acfg);

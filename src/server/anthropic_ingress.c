@@ -17,7 +17,7 @@
  * Not part of the pure translation: a thin per-request echo of the two inbound
  * headers that select Anthropic API behavior. server_http captures them off the
  * raw request (the ingress handlers never see HTTP headers); the anthropic-driver
- * passthrough forwards them upstream when claude_proxy_parity is on. Thread-local
+ * passthrough forwards them upstream when the primary speaks the Anthropic API. Thread-local
  * and reset on every request, so a value never leaks between requests on a reused
  * worker thread. */
 static __thread char g_req_anthropic_version[64] = "";

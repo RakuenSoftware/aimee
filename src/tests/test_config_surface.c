@@ -31,7 +31,7 @@ static const char *FIXTURE_A =
     "db1_path: ZZA_val\nguardrail_mode: ZZA_val\nprovider: ZZA_val\nopenai_endpoint: "
     "ZZA_val\nopenai_model: ZZA_val\nopenai_key_cmd: ZZA_val\nclaude_model: ZZA_val\ncodex_model: "
     "ZZA_val\nautonomous: true\nverify_enabled: true\nverify_cross_project: "
-    "true\ningress_preinject_enabled: true\nclaude_proxy_parity: true\ncss_style_graph_enabled: "
+    "true\ningress_preinject_enabled: true\ncss_style_graph_enabled: "
     "true\n"
     "ingress_preinject_assembly_budget: 1\n"
     "ingress_max_raw_scans: 3\nembedding_command: ZZA_val\nembedding_model: "
@@ -82,7 +82,7 @@ static const char *FIXTURE_B =
     "db1_path: ZZB_val\nguardrail_mode: ZZB_val\nprovider: ZZB_val\nopenai_endpoint: "
     "ZZB_val\nopenai_model: ZZB_val\nopenai_key_cmd: ZZB_val\nclaude_model: ZZB_val\ncodex_model: "
     "ZZB_val\nautonomous: false\nverify_enabled: false\nverify_cross_project: "
-    "false\ningress_preinject_enabled: false\nclaude_proxy_parity: false\ncss_style_graph_enabled: "
+    "false\ningress_preinject_enabled: false\ncss_style_graph_enabled: "
     "false\n"
     "ingress_preinject_assembly_budget: 4096\n"
     "ingress_max_raw_scans: 4096\nembedding_command: ZZB_val\nembedding_model: "
@@ -162,7 +162,6 @@ int main(void)
    assert(cfgA.verify_enabled == 1 && cfgB.verify_enabled == 0);
    assert(cfgA.verify_cross_project == 1 && cfgB.verify_cross_project == 0);
    assert(cfgA.ingress_preinject_enabled == 1 && cfgB.ingress_preinject_enabled == 0);
-   assert(cfgA.claude_proxy_parity == 1 && cfgB.claude_proxy_parity == 0);
    assert(cfgA.css_style_graph_enabled == 1 && cfgB.css_style_graph_enabled == 0);
    assert(cfgA.ingress_preinject_assembly_budget != cfgB.ingress_preinject_assembly_budget);
    assert(cfgA.ingress_max_raw_scans != cfgB.ingress_max_raw_scans);
