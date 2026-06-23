@@ -10,12 +10,20 @@
   the `operator-pin > recorded > (probe)` precedence at the `db2_init` schema-apply
   boundary, so an unpinned populated DB self-derives its dim instead of refusing on
   the default. See [the §2a plan](embedder-runtime-fetch-autodim.plan.md).
-  **Remaining (not done):** §2b — the fresh-DB auto-derive from the embedder
-  `/health` probe under `pg_try_advisory_lock` (the `probed` precedence rung,
-  reserved but always 0 today); §2c — the double-gated auto-reembed
-  (`kb_reembed_on_dim_change` off-by-default + `--confirm` + `/health=maintenance`
-  + count-divergence → degraded). Both are runtime/bootstrap work that needs the
-  live embedder+kb stack to validate.
+  **§2b (fresh-DB probe) landed in PR #NNN:** the `probed` precedence rung is now
+  wired — `db2_init` derives a fresh DB's dim from the embedder `/health` probe
+  under `pg_try_advisory_lock`, fail-fast + never-poison, via a registered probe
+  seam (`db2_set_embedder_probe`, `src/server/embedder_probe.c`, `embed-remote.py
+  --dim`). **Validated live** on a real postgres+embedder+kb stack: fresh DB +
+  embedder dim=768 → records 768 / `halfvec(768)` (vs the 1024-default baseline);
+  operator pin wins; a bad/zero probe dim fails fast and records nothing. The same
+  work fixed a latent defect that had silently disabled BOTH §2a and §2b: the
+  config default `embedding_dim=1024` made `config_embedding_dim_is_pinned` report
+  "pinned" in every deployment — now defaulted to 0 (unset), so "pinned" means the
+  operator explicitly set it. **Remaining (not done):** §2c — the double-gated
+  auto-reembed (`kb_reembed_on_dim_change` off-by-default + `--confirm` +
+  `/health=maintenance` + count-divergence → degraded). Runtime/bootstrap work
+  validated against the live embedder+kb stack.
 - **Author:** JBailes
 - **Date:** 2026-06-14
 - **Base:** `origin/main` (v0.2.65). The embedder ships in two **baked** images

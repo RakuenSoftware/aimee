@@ -43,6 +43,20 @@ extern "C"
     * sqlite shim. */
    int db2_embedding_dim_get(void *conn);
 
+   /* §2b: tri-state read distinguishing a genuinely-absent recorded dim (expected
+    * on a fresh DB) from a DB query ERROR — the §2b probe path must NOT treat a
+    * lost connection / missing table as "absent" and bootstrap over it. *out is
+    * set only on FOUND (an in-range 1..EMBED_MAX_DIM value); a no-row or
+    * garbage/out-of-range row → ABSENT (quiet, as §2a); a prepare/step failure →
+    * ERROR. (db2_embedding_dim_get stays as the value-or-0 wrapper for §2a.) */
+   typedef enum
+   {
+      DB2_DIM_FOUND = 0,
+      DB2_DIM_ABSENT = 1,
+      DB2_DIM_ERROR = -1
+   } db2_dim_read_t;
+   db2_dim_read_t db2_embedding_dim_read(void *conn, int *out);
+
    /* unified-llm-container §2: record/check the EMBEDDER model identity
     * (repo@sha) in kb_meta.schema_embedder_model_id alongside the dim. A dim-only
     * guard is insufficient (two models can share a dim — pplx-embed and

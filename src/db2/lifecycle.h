@@ -40,6 +40,40 @@ extern "C"
     * default.) */
    int db2_effective_dim(int pinned, int configured, int recorded);
 
+   /* embedder-runtime-fetch-autodim §2b: fresh-DB probe rung. On a fresh DB2 (no
+    * operator pin, no recorded schema_embedding_dim) db2_init derives the dim from
+    * the running embedder's /health, under a Postgres advisory lock, instead of the
+    * default. db2 stays config-free via a registered probe seam (mirrors the
+    * wfe_set_delegate_provider / g_forge pattern). */
+#define DB2_PROBE_ERR_LEN 256
+   /* Probe the embedder for its loaded-model output dim. Return 0 and set *out_dim
+    * (>0) ONLY when the embedder reports a loaded model with a STABLE dim within
+    * budget_ms; return -1 otherwise (still loading / unreachable / unstable /
+    * timeout), filling err. Called only from db2_init (single-threaded, under the
+    * init lock); not required to be reentrant. */
+   typedef int (*db2_embedder_probe_fn)(int *out_dim, int budget_ms, char *err, size_t errlen);
+   /* Register/clear the probe. The caller (kb/server) MUST call
+    * db2_set_embedder_probe(NULL) BEFORE db2_shutdown(); db2_shutdown also NULLs it
+    * defensively (mirrors the g_embed_dim_pinned reset discipline). With no probe
+    * registered (cmd_core, tools) the §2b path is skipped — behavior is unchanged. */
+   void db2_set_embedder_probe(db2_embedder_probe_fn fn);
+   /* Total wall-clock budget (ms) for the §2b lock-acquire + probe. Set from config
+    * (kb.embedder.dim_probe_budget_ms; default 120000) before db2_init, beside
+    * db2_set_embedding_dim, so db2 stays config-free. */
+   void db2_set_dim_probe_budget_ms(int ms);
+
+   /* §2b precedence, pure (no globals, no I/O): which source supplies the dim, given
+    * whether the operator pinned, a dim is recorded, and a probe is available.
+    * Encodes pin > recorded > probe > default; unit-tested directly. */
+   typedef enum
+   {
+      DB2_DIM_SRC_PIN = 0,      /* operator pin authoritative */
+      DB2_DIM_SRC_RECORDED = 1, /* recorded kb_meta dim wins over probe/default */
+      DB2_DIM_SRC_PROBE = 2,    /* fresh DB: derived from the embedder /health probe */
+      DB2_DIM_SRC_DEFAULT = 3   /* fresh DB, no probe available: configured default */
+   } db2_dim_source_t;
+   db2_dim_source_t db2_dim_source(int pinned, int recorded_present, int probe_available);
+
    /* Model-identity drift guard (unified-llm-container §2). Set from config
     * before db2_init, beside db2_set_embedding_dim, so this layer stays
     * config-free. ALL default empty -> the guard is a no-op (a deployment whose

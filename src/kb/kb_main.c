@@ -12,6 +12,7 @@
 #include "kb_service.h"
 #include "log.h"
 #include "lifecycle.h"
+#include "embedder_probe.h"
 #include "shutdown_forensics.h"
 #include "util.h"
 #include "cJSON.h"
@@ -546,6 +547,15 @@ int main(int argc, char **argv)
    /* unified-llm-container §2: activate the model-identity drift guard (the kb applies
     * the schema, so this is the load-bearing site). Empty embedding_model => no-op. */
    db2_set_embedder_model_id(kb_cfg.embedding_model);
+   /* §2b: on a FRESH DB with no pin, let db2_init derive the dim from the running
+    * embedder's /health instead of the default — but only when a REAL remote embed
+    * command is configured (the lexical "builtin" has no /health and a fixed dim,
+    * so probing it would never succeed and would stall the retry loop). */
+   {
+      const char *embed_cmd = config_embedding_command(&kb_cfg, NULL);
+      if (embed_cmd && strcmp(embed_cmd, "builtin") != 0)
+         embedder_probe_register(embed_cmd);
+   }
    /* Size the DB2 connection pool (leased by worker threads) before db2_init. */
    db2_set_pool_size(aimee_resolve_db2_pool_size(kb_cfg.db2_connection_pool_size));
 
@@ -712,6 +722,7 @@ int main(int argc, char **argv)
    kb_http_stop();
    kb_service_shutdown(&g_ctx);
    (void)shutdown_forensics_mark_stopped("kb", getpid());
+   embedder_probe_unregister(); /* §2b: deregister the probe before db2_shutdown */
    db2_shutdown();
    agent_http_cleanup();
    return rc == 0 ? 0 : 1;

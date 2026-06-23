@@ -27,6 +27,7 @@ typedef struct sqlite3 sqlite3;
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h> /* §2b: CLOCK_MONOTONIC poll budget + nanosleep between lock polls */
 
 #if !defined(AIMEE_DISABLE_DB2_SQLITE_SHIM) && (defined(__GNUC__) || defined(__clang__))
 #pragma weak sqlite3_close
@@ -72,6 +73,23 @@ int db2_embedding_dim(void)
 void db2_set_embedding_dim_pinned(int pinned)
 {
    g_embed_dim_pinned = pinned ? 1 : 0;
+}
+
+/* §2b: the embedder /health probe seam + its wall-clock budget. NULL/0 by default
+ * (the §2b path is skipped → behavior identical to §2a). Both reset in
+ * db2_shutdown so a reopen / a later test never inherits them. */
+static db2_embedder_probe_fn g_embedder_probe = NULL;
+static int g_dim_probe_budget_ms = 120000;
+
+void db2_set_embedder_probe(db2_embedder_probe_fn fn)
+{
+   g_embedder_probe = fn;
+}
+
+void db2_set_dim_probe_budget_ms(int ms)
+{
+   if (ms > 0)
+      g_dim_probe_budget_ms = ms;
 }
 
 /* Model-identity drift guard (unified-llm-container §2). A dim-only guard is
@@ -136,6 +154,93 @@ int db2_effective_dim(int pinned, int configured, int recorded)
       return recorded; /* recorded wins over the configured default */
    return configured;  /* fresh DB / nothing recorded: the default */
 }
+
+/* §2b precedence (pure): pin > recorded > probe > default. */
+db2_dim_source_t db2_dim_source(int pinned, int recorded_present, int probe_available)
+{
+   if (pinned)
+      return DB2_DIM_SRC_PIN;
+   if (recorded_present)
+      return DB2_DIM_SRC_RECORDED;
+   if (probe_available)
+      return DB2_DIM_SRC_PROBE;
+   return DB2_DIM_SRC_DEFAULT;
+}
+
+/* §2b: a Postgres advisory lock serialises fresh-DB dim bootstrap across racing kb
+ * starts. Keyed by hashtext of this string (the mining.c pattern). Bump the _vN
+ * suffix only on a semantics-changing lock change (added waiters / xact-scoped),
+ * never on a code refactor — the value is a wire contract between concurrent kbs. */
+#define DB2_DIM_LOCK_KEY "aimee_dim_bootstrap_v1"
+
+static long db2_mono_ms(void)
+{
+   struct timespec ts;
+   clock_gettime(CLOCK_MONOTONIC, &ts);
+   return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+/* Acquire the dim-bootstrap advisory lock, polling pg_try_advisory_lock every
+ * ~250ms up to budget_ms. Returns 0 = acquired, 1 = timed out (another session
+ * holds it for the whole budget), -1 = query error. *elapsed_ms (optional) gets
+ * the wall time spent so the caller can subtract it from the probe budget. On the
+ * sqlite test shim there is no advisory lock (single-process tests) → acquired. */
+static int db2_dim_lock_acquire(void *conn, int budget_ms, int *elapsed_ms)
+{
+   long start = db2_mono_ms();
+   if (aimee_pg_is_shim())
+   {
+      if (elapsed_ms)
+         *elapsed_ms = 0;
+      return 0;
+   }
+   for (;;)
+   {
+      char err[256] = "";
+      /* ::int — pg_try_advisory_lock returns BOOLEAN; aimee_pg_column_int does
+       * atoi(PQgetvalue) and atoi("t")==0, so the bool must be cast to 1/0 text or
+       * the lock would never read as acquired. */
+      aimee_pg_stmt_t *st = aimee_pg_prepare(conn, "SELECT pg_try_advisory_lock(hashtext(?1))::int",
+                                             err, sizeof(err));
+      int got = 0, ok = 0;
+      if (st)
+      {
+         aimee_pg_bind_text(st, "?1", DB2_DIM_LOCK_KEY);
+         if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+         {
+            ok = 1;
+            got = aimee_pg_column_int(st, 0) ? 1 : 0;
+         }
+         aimee_pg_finalize(st);
+      }
+      int spent = (int)(db2_mono_ms() - start);
+      if (elapsed_ms)
+         *elapsed_ms = spent;
+      if (!ok)
+         return -1;
+      if (got)
+         return 0;
+      if (spent >= budget_ms)
+         return 1;
+      struct timespec ts = {0, 250L * 1000 * 1000};
+      nanosleep(&ts, NULL);
+   }
+}
+
+static void db2_dim_lock_release(void *conn)
+{
+   if (aimee_pg_is_shim())
+      return;
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT pg_advisory_unlock(hashtext(?1))", err, sizeof(err));
+   if (!st)
+      return;
+   aimee_pg_bind_text(st, "?1", DB2_DIM_LOCK_KEY);
+   (void)aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+}
+
 static pthread_key_t g_thread_conn_key;
 static pthread_once_t g_thread_conn_key_once = PTHREAD_ONCE_INIT;
 /* The thread that ran db2_init() owns g_conn and uses it directly; every other
@@ -455,17 +560,109 @@ int db2_init(const char *libpq_url)
     * and aimee-kb, which hold the loaded config) so this low-level layer stays
     * config-free; it defaults to 1024 when unset. */
    int configured_dim = db2_embedding_dim();
-   /* §2a precedence: when the operator did NOT pin a dim, prefer the recorded
-    * kb_meta.schema_embedding_dim (the populated-DB source of truth) over the
-    * default, so an unpinned deploy self-derives its dim instead of refusing the
-    * apply. Pinned and fresh-DB paths keep configured_dim → behavior-identical. */
-   int recorded_dim = g_embed_dim_pinned ? 0 : db2_embedding_dim_get(conn);
-   int effective_dim = db2_effective_dim(g_embed_dim_pinned, configured_dim, recorded_dim);
+   /* §2a/§2b precedence: pin > recorded > probe > default. When the operator did
+    * NOT pin, prefer the recorded kb_meta.schema_embedding_dim (the populated-DB
+    * source of truth); on a FRESH DB (nothing recorded) §2b derives the dim from
+    * the embedder /health probe under an advisory lock. Pinned + recorded paths
+    * keep §2a behavior. A DB read ERROR fails fast (never guess a default). */
+   int recorded_dim = 0;
+   db2_dim_read_t rd =
+       g_embed_dim_pinned ? DB2_DIM_ABSENT : db2_embedding_dim_read(conn, &recorded_dim);
+   if (rd == DB2_DIM_ERROR)
+   {
+      fprintf(stderr, "aimee: db2_init: reading recorded embedding dim failed\n");
+      aimee_pg_close(conn);
+      pthread_mutex_unlock(&g_init_lock);
+      return -1;
+   }
+   int effective_dim = db2_effective_dim(g_embed_dim_pinned, configured_dim,
+                                         rd == DB2_DIM_FOUND ? recorded_dim : 0);
+
+   /* §2b fresh-DB probe leg: unpinned + nothing recorded + a probe registered. The
+    * advisory lock serialises racing kb starts; FAIL-FAST on any probe/lock/read
+    * failure and record NOTHING (kb_main retries; never poison the recorded dim). */
+   int dim_lock_held = 0, derived_via_probe = 0;
+   if (!g_embed_dim_pinned && rd == DB2_DIM_ABSENT && g_embedder_probe)
+   {
+      /* Wait up to the FULL budget for the lock: a peer mid-bootstrap can take the
+       * whole budget (cold embedder), so the waiter must be at least as patient —
+       * by the time it acquires (or the peer releases) the dim is recorded and the
+       * waiter's double-check below sees it. A genuine budget-long timeout means a
+       * stuck/dead holder → fail fast; kb_main.c's bounded retry (24×5s) is the
+       * outer safety net so a transient stall self-heals without thrash. */
+      int total = g_dim_probe_budget_ms;
+      int elapsed = 0;
+      int lrc = db2_dim_lock_acquire(conn, total, &elapsed);
+      if (lrc != 0)
+      {
+         /* Timed out or a lock query error: another starter may have bootstrapped
+          * in the meantime. Re-read; use a now-recorded dim, else fail fast. */
+         int rec2 = 0;
+         if (db2_embedding_dim_read(conn, &rec2) == DB2_DIM_FOUND)
+            effective_dim = rec2;
+         else
+         {
+            LOG_WARN("db2",
+                     "embedder dim bootstrap: advisory lock not acquired in %dms and no dim "
+                     "recorded; not derived (kb will retry)",
+                     total);
+            aimee_pg_close(conn);
+            pthread_mutex_unlock(&g_init_lock);
+            return -1;
+         }
+      }
+      else
+      {
+         dim_lock_held = 1;
+         int rec2 = 0;
+         db2_dim_read_t rd2 = db2_embedding_dim_read(conn, &rec2); /* double-check under the lock */
+         if (rd2 == DB2_DIM_ERROR)
+         {
+            db2_dim_lock_release(conn);
+            aimee_pg_close(conn);
+            pthread_mutex_unlock(&g_init_lock);
+            return -1;
+         }
+         if (rd2 == DB2_DIM_FOUND)
+         {
+            effective_dim = rec2; /* another starter bootstrapped between our reads */
+         }
+         else
+         {
+            int probed = 0;
+            char perr[DB2_PROBE_ERR_LEN] = "";
+            /* Remaining budget after the lock wait, floored so a late acquirer
+             * (rare: a crashed peer that never recorded) still gets one attempt. */
+            int pbudget = total - elapsed;
+            if (pbudget < 1000)
+               pbudget = 1000;
+            int prc = g_embedder_probe(&probed, pbudget, perr, sizeof(perr));
+            /* Bound to a valid halfvec width: an out-of-range value must NOT fall
+             * through to db_apply's clamp-to-1024 (that would record a wrong dim). */
+            if (prc != 0 || probed <= 0 || probed > EMBED_MAX_DIM)
+            {
+               LOG_WARN("db2", "embedder dim probe failed/out-of-range (got %d, max %d): %s",
+                        probed, EMBED_MAX_DIM, perr[0] ? perr : "(no detail)");
+               db2_dim_lock_release(conn);
+               aimee_pg_close(conn);
+               pthread_mutex_unlock(&g_init_lock);
+               return -1;
+            }
+            effective_dim = probed;
+            derived_via_probe = 1;
+         }
+      }
+   }
+
    if (effective_dim != configured_dim)
    {
-      LOG_WARN("db2",
-               "using recorded embedding dim %d (no operator pin; configured default was %d)",
-               effective_dim, configured_dim);
+      if (derived_via_probe)
+         LOG_WARN("db2", "fresh DB: derived embedding dim %d from the embedder /health probe",
+                  effective_dim);
+      else
+         LOG_WARN("db2",
+                  "using recorded embedding dim %d (no operator pin; configured default was %d)",
+                  effective_dim, configured_dim);
       db2_set_embedding_dim(effective_dim); /* halfvec columns + all readers agree */
    }
    if (db_apply_schema_postgres(conn, effective_dim, errbuf, sizeof(errbuf)) != 0)
@@ -474,10 +671,16 @@ int db2_init(const char *libpq_url)
        * Silently returning -1 hid bugs like a stale CREATE INDEX referencing
        * a table that lives in a different tier's schema. */
       fprintf(stderr, "aimee: db2_init: schema apply failed: %s\n", errbuf);
+      if (dim_lock_held)
+         db2_dim_lock_release(conn);
       aimee_pg_close(conn);
       pthread_mutex_unlock(&g_init_lock);
       return -1;
    }
+   /* Schema (incl. the halfvec columns) is now applied AND the dim recorded last
+    * (record-after-DDL), so the lock can release: a later starter reads the dim. */
+   if (dim_lock_held)
+      db2_dim_lock_release(conn);
 
    /* unified-llm-container §2: model-identity drift guard, applied here (where the
     * configured identity globals live) rather than in the lower db_schema layer.
@@ -740,6 +943,10 @@ void db2_shutdown(void)
     * real caller sets it again via db2_set_embedding_dim before the next init. */
    g_embed_dim = 0;
    g_embed_dim_pinned = 0;
+   /* §2b: defensively clear the probe seam + budget (the caller SHOULD deregister
+    * before db2_shutdown, but back it up here, mirroring g_embed_dim_pinned). */
+   g_embedder_probe = NULL;
+   g_dim_probe_budget_ms = 120000;
    g_embedder_model_id[0] = '\0';
    g_reranker_model_id[0] = '\0';
    g_reranker_contract[0] = '\0';

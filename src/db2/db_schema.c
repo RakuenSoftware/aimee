@@ -196,6 +196,71 @@ int db2_embedding_dim_get(void *conn)
    return dim;
 }
 
+db2_dim_read_t db2_embedding_dim_read(void *conn, int *out)
+{
+   if (out)
+      *out = 0;
+   if (!conn)
+      return DB2_DIM_ERROR;
+   char err[256] = "";
+   /* A FRESH DB has no kb_meta yet — it is created by db_apply_schema_postgres,
+    * which runs AFTER this read. On real Postgres a SELECT against a missing table
+    * errors (at step, not prepare), so a naive read would misreport ERROR and
+    * fail-fast the §2b cold path before the schema is ever applied — deadlocking
+    * the kb_main retry loop. Probe the catalog first with to_regclass (returns NULL
+    * rather than erroring when the table is absent) and report ABSENT, never ERROR.
+    * The sqlite test shim always has kb_meta (it pre-applies the schema) and lacks
+    * to_regclass, so the guard is skipped there. */
+   if (!aimee_pg_is_shim())
+   {
+      aimee_pg_stmt_t *chk = aimee_pg_prepare(
+          conn, "SELECT (to_regclass('kb_meta') IS NOT NULL)::int", err, sizeof(err));
+      if (!chk)
+         return DB2_DIM_ERROR;
+      int exists = 0, ok = 0;
+      if (aimee_pg_step(chk, err, sizeof(err)) == AIMEE_PG_ROW)
+      {
+         ok = 1;
+         exists = aimee_pg_column_int(chk, 0);
+      }
+      aimee_pg_finalize(chk);
+      if (!ok)
+         return DB2_DIM_ERROR; /* a real query/connection error */
+      if (!exists)
+         return DB2_DIM_ABSENT; /* fresh DB: kb_meta not created yet */
+   }
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "SELECT value FROM kb_meta WHERE key = 'schema_embedding_dim'", err, sizeof(err));
+   if (!st)
+      return DB2_DIM_ERROR; /* kb_meta exists (or shim): a prepare failure is real */
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   db2_dim_read_t rc;
+   if (step == AIMEE_PG_ROW)
+   {
+      const char *valtxt = aimee_pg_column_text(st, 0);
+      char *endp = NULL;
+      long v = (valtxt && *valtxt) ? strtol(valtxt, &endp, 10) : 0;
+      if (valtxt && *valtxt && endp && *endp == '\0' && v >= 1 && v <= EMBED_MAX_DIM)
+      {
+         if (out)
+            *out = (int)v;
+         rc = DB2_DIM_FOUND;
+      }
+      else
+         rc = DB2_DIM_ABSENT; /* garbage / out-of-range row: quiet, as §2a */
+   }
+   else if (step == AIMEE_PG_DONE)
+   {
+      rc = DB2_DIM_ABSENT; /* no row: the expected fresh-DB signal */
+   }
+   else
+   {
+      rc = DB2_DIM_ERROR; /* step error (lost conn etc.): do not misread as absent */
+   }
+   aimee_pg_finalize(st);
+   return rc;
+}
+
 /* True if compat_csv (a comma-separated list of "old_id->new_id" transitions)
  * admits the transition old_id -> new_id. Whitespace around tokens is trimmed.
  * unified-llm-container §2: a compat-list entry only EXISTS once an operator has

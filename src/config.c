@@ -434,10 +434,14 @@ static void config_set_defaults(config_t *cfg)
    cfg->memory_fetch_budget_base = 128;
    cfg->memory_fetch_budget_shape_aware = 1;
    cfg->kb_search_max_results = 50;
-   /* Embedding dimension of the default embedder (pplx-embed-v1-0.6b = 1024).
-    * Must match the schema vector(N) columns and the embedder model. Set to
-    * 2560 (with the pplx-embed-v1-4b embedder image) for the higher-fidelity tier. */
-   cfg->embedding_dim = 1024;
+   /* Embedding dimension. 0 = UNSET (the operator did not pin a dim): readers fall
+    * back to 1024 (db2_embedding_dim(), kb_main, kb_ingest_workers), and — crucially
+    * — config_embedding_dim_is_pinned() reports NOT-pinned, so §2a's recorded-dim
+    * preference and §2b's fresh-DB embedder /health probe can derive the real dim.
+    * A non-zero value here means the operator explicitly pinned it (yaml/env), which
+    * is authoritative and refuses a mismatch. (Was defaulted to 1024, which made
+    * every deployment look "pinned" and silently disabled §2a/§2b.) */
+   cfg->embedding_dim = 0;
    /* The cross-encoder rerank stage (Ettin reranker sized to the embedder tier:
     * 1b with the 4b embedder, 400m with the 0.6b; served by the
     * embedder service /rerank, client scripts/rerank-remote.py) is the third

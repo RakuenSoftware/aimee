@@ -5,6 +5,7 @@
 #include "db_postgres.h"
 #include "db2.h"
 #include "db2_internal.h"
+#include "db2/db_schema.h"  /* §2b: db2_dim_read_t / DB2_DIM_* for the dim-read stub */
 #include "../headers/log.h" /* log_level_t for the aimee_log stub below */
 #include <stdarg.h>
 
@@ -81,6 +82,22 @@ int db2_embedding_dim_get(void *pg_conn)
 {
    assert(pg_conn == &g_fake_conn);
    return g_recorded_dim;
+}
+
+/* §2b: db2_init now reads the recorded dim via the tri-state reader. Mirror the
+ * get stub off the same g_recorded_dim knob: >0 → FOUND (recorded wins), else
+ * ABSENT (fresh DB). With no probe registered (the default here) db2_init's §2b
+ * block is skipped, so these tests stay on the §2a path — unchanged. */
+db2_dim_read_t db2_embedding_dim_read(void *pg_conn, int *out)
+{
+   assert(pg_conn == &g_fake_conn);
+   if (g_recorded_dim > 0)
+   {
+      if (out)
+         *out = g_recorded_dim;
+      return DB2_DIM_FOUND;
+   }
+   return DB2_DIM_ABSENT;
 }
 
 /* unified-llm-container §2: db2_init now also calls the model-identity guards
@@ -205,6 +222,42 @@ int aimee_pg_bind_text(aimee_pg_stmt_t *stmt, const char *name, const char *valu
    assert(strcmp(name, "t") == 0);
    assert(strcmp(value, "memories") == 0);
    return 0;
+}
+
+/* §2b: db2_init's advisory-lock + probe path pulls these aimee_pg accessors into
+ * db2_init.o's kept symbol set. They are NEVER called on this test's path (no
+ * embedder probe is registered, so the §2b block is skipped), so trivial stubs
+ * suffice for linking. */
+int aimee_pg_bind_int64(aimee_pg_stmt_t *stmt, const char *name, int64_t value)
+{
+   (void)stmt;
+   (void)name;
+   (void)value;
+   return 0;
+}
+int aimee_pg_column_int(aimee_pg_stmt_t *stmt, int col)
+{
+   (void)stmt;
+   (void)col;
+   return 0;
+}
+int64_t aimee_pg_column_int64(aimee_pg_stmt_t *stmt, int col)
+{
+   (void)stmt;
+   (void)col;
+   return 0;
+}
+double aimee_pg_column_double(aimee_pg_stmt_t *stmt, int col)
+{
+   (void)stmt;
+   (void)col;
+   return 0.0;
+}
+const char *aimee_pg_column_text(aimee_pg_stmt_t *stmt, int col)
+{
+   (void)stmt;
+   (void)col;
+   return "";
 }
 
 static void reset_mocks(void)

@@ -104,6 +104,35 @@ int main(void)
    /* NULL conn -> 0. */
    assert(db2_embedding_dim_get(NULL) == 0);
 
+   /* ---- §2b: db2_dim_source precedence (pure: pin > recorded > probe > default) ---- */
+   assert(db2_dim_source(1, 1, 1) == DB2_DIM_SRC_PIN);      /* pin wins over all */
+   assert(db2_dim_source(1, 0, 0) == DB2_DIM_SRC_PIN);      /* pin even with nothing else */
+   assert(db2_dim_source(0, 1, 1) == DB2_DIM_SRC_RECORDED); /* recorded beats probe */
+   assert(db2_dim_source(0, 0, 1) == DB2_DIM_SRC_PROBE);    /* fresh DB + probe -> probe */
+   assert(db2_dim_source(0, 0, 0) == DB2_DIM_SRC_DEFAULT);  /* fresh DB, no probe -> default */
+
+   /* ---- §2b: db2_embedding_dim_read tri-state (FOUND / ABSENT / ERROR) ---- */
+   assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedding_dim'", err,
+                        sizeof err) == 0);
+   int rdim = -1;
+   assert(db2_embedding_dim_read(conn, &rdim) == DB2_DIM_ABSENT); /* no row -> ABSENT */
+   assert(rdim == 0);                                             /* out untouched on non-FOUND */
+   assert(aimee_pg_exec(conn,
+                        "INSERT INTO kb_meta (key, value) VALUES ('schema_embedding_dim', '768')",
+                        err, sizeof err) == 0);
+   rdim = 0;
+   assert(db2_embedding_dim_read(conn, &rdim) == DB2_DIM_FOUND); /* in-range -> FOUND */
+   assert(rdim == 768);
+   assert(aimee_pg_exec(conn,
+                        "UPDATE kb_meta SET value = 'garbage' WHERE key = 'schema_embedding_dim'",
+                        err, sizeof err) == 0);
+   rdim = 7;
+   assert(db2_embedding_dim_read(conn, &rdim) == DB2_DIM_ABSENT); /* garbage -> ABSENT (quiet) */
+   assert(rdim == 0);
+   assert(db2_embedding_dim_read(NULL, &rdim) == DB2_DIM_ERROR); /* NULL conn -> ERROR */
+   assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedding_dim'", err,
+                        sizeof err) == 0);
+
    /* ---- EMBED_MAX_DIM bumped to 4000 (unified-llm-container §"8B truncation"):
     * a 4000-d dim now records cleanly (was rejected when the cap was 2560). ---- */
    assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedding_dim'", err,

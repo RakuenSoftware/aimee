@@ -36,7 +36,35 @@ def _post(path: str, data: bytes, content_type: str) -> str:
         return resp.read().decode("utf-8")
 
 
+def probe_dim() -> int:
+    """embedder-autodim §2b: GET /health and return the loaded model's output dim.
+    Exit 0 + print the integer dim ONLY when the embedder reports status=ok with a
+    positive integer dim; exit non-zero (caller treats as 'not ready') while the
+    model is still loading, on any HTTP/parse error, or on a missing/non-positive
+    dim. Single GET, no embedding — cheap enough to poll."""
+    try:
+        with urllib.request.urlopen(f"{ENDPOINT}/health", timeout=TIMEOUT) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError) as exc:
+        sys.stderr.write(f"embed-remote --dim: /health at {ENDPOINT} unreachable: {exc}\n")
+        return 1
+    except (json.JSONDecodeError, ValueError) as exc:
+        sys.stderr.write(f"embed-remote --dim: bad /health payload: {exc}\n")
+        return 1
+    if not isinstance(payload, dict) or payload.get("status") != "ok":
+        sys.stderr.write(f"embed-remote --dim: embedder not ready (status={payload.get('status')!r})\n")
+        return 1
+    dim = payload.get("dim")
+    if not isinstance(dim, int) or dim <= 0:
+        sys.stderr.write(f"embed-remote --dim: no positive integer dim (got {dim!r})\n")
+        return 1
+    print(dim)
+    return 0
+
+
 def main() -> None:
+    if "--dim" in sys.argv[1:]:
+        sys.exit(probe_dim())
     raw = sys.stdin.read()
     if not raw.strip():
         sys.stderr.write("embed-remote: empty input\n")
