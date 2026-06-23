@@ -80,9 +80,13 @@ void db2_set_embedding_dim_pinned(int pinned)
  * incompatible vector spaces. These globals carry the configured embedder model
  * identity (repo@sha), the reranker identity + scoring contract, and the
  * compat-list of admitted transitions, set from config before db2_init like the
- * dim above. ALL DEFAULT EMPTY: an empty embedder model_id makes the guard a
- * no-op, so a deployment that has not yet adopted the unified container (the live
- * torch embedder reports no identity) is unaffected. */
+ * dim above. INVARIANT: set at exactly the sites that call db2_set_embedding_dim()
+ * — the serving config-load paths (cmd_core bootstrap_db2, kb_main, cmd_doctor);
+ * the connectivity-probe path (bootstrap_db2_try_url) and tests deliberately set
+ * neither (a probe shuts down before any serving schema applies). ALL DEFAULT
+ * EMPTY: an empty embedder model_id makes the guard a no-op, so a deployment that
+ * has not yet adopted the unified container (the live torch embedder reports no
+ * identity) is unaffected. */
 static char g_embedder_model_id[160] = "";
 static char g_reranker_model_id[160] = "";
 static char g_reranker_contract[96] = "";

@@ -543,6 +543,9 @@ int main(int argc, char **argv)
     * aimee.yaml). */
    db2_set_embedding_dim(config_resolve_embedding_dim(&kb_cfg));
    db2_set_embedding_dim_pinned(config_embedding_dim_is_pinned(&kb_cfg));
+   /* unified-llm-container §2: activate the model-identity drift guard (the kb applies
+    * the schema, so this is the load-bearing site). Empty embedding_model => no-op. */
+   db2_set_embedder_model_id(kb_cfg.embedding_model);
    /* Size the DB2 connection pool (leased by worker threads) before db2_init. */
    db2_set_pool_size(aimee_resolve_db2_pool_size(kb_cfg.db2_connection_pool_size));
 

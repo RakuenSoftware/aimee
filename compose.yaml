@@ -119,6 +119,38 @@ services:
       # Long: the cold first boot downloads the multi-GB GGUF before /health is OK.
       start_period: 1200s
 
+  # Unified llama.cpp+Vulkan container (P7 cutover target) — collapses `embedder`
+  # + `llm` into one image serving embed+rerank+synth from baked-in GGUFs behind
+  # the gateway (preserves the /embed+/embed_batch+/rerank contract on :8080).
+  # Profile-gated so it does not disturb the default topology pre-cutover. To cut
+  # over (see docs/runbooks/unified-llm-cutover.md): bring this up
+  # (`--profile unified-llm`), point the kb at it
+  # (AIMEE_EMBEDDER_URL=http://aimee-llm:8080, LLM_ENDPOINT=http://aimee-llm:8080/v1),
+  # re-embed the corpus, then drop the `embedder` + `llm` services. CPU image by
+  # default; AIMEE_LLM_IMAGE=...-gpu + a GPU device for the offloaded tier.
+  aimee-llm:
+    restart: unless-stopped
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:cpu}
+    build:
+      context: .
+      dockerfile: Dockerfile.aimee-llm
+    profiles: ["unified-llm"]
+    environment:
+      AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
+      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
+    volumes:
+      - aimee-llm-models:/root/.cache/llama.cpp
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      # Models are baked into the image, so the cold boot only loads them into
+      # RAM/VRAM (no download); still generous for the largest GPU tier.
+      start_period: 300s
+
 volumes:
   aimee-kb-home:
   aimee-kb-postgres:

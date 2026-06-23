@@ -73,6 +73,7 @@ static doctor_db2_session_t check_database(check_result_t *r, config_t *cfg)
     * pin/recorded mismatch still surfaces via #337's record_or_check guard. */
    else if ((db2_set_embedding_dim(config_resolve_embedding_dim(cfg)),
              db2_set_embedding_dim_pinned(config_embedding_dim_is_pinned(cfg)),
+             db2_set_embedder_model_id(cfg->embedding_model), /* unified-llm §2 drift guard */
              db2_init(cfg->db2_url)) == 0)
    {
       session.ready = 1;
