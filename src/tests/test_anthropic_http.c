@@ -225,6 +225,14 @@ int agent_http_last_retry_after(void)
 {
    return 0;
 }
+/* Gateway policy is no-op in these whitebox shape tests (its own behavior is
+ * covered by test_gateway_policy); keeps the request shape unaltered. */
+int gateway_policy_apply_request(cJSON *req, int tools_openai_shape)
+{
+   (void)req;
+   (void)tools_openai_shape;
+   return 0;
+}
 
 #include "../server/anthropic_http.c"
 

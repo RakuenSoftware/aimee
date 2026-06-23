@@ -21,6 +21,7 @@
 #include "anthropic_ingress.h"
 #include "cJSON.h"
 #include "delegate_driver.h"
+#include "gateway_policy.h"
 #include "ingress_preinject.h"
 #include "json_fluent.h"
 #include "server_http.h"
@@ -340,6 +341,9 @@ static int messages_buffered(const char *body, char *resp, int cap)
    int parity = driver_is_anthropic(driver);
    if (!parity)
       messages_apply_preinject(req);
+   /* Gateway tool policing (e.g. strip subagent tools) on the inbound Anthropic
+    * request, before translate/build. No-op unless a policy is configured. */
+   gateway_policy_apply_request(req, 0);
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
@@ -633,6 +637,9 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    int parity = driver_is_anthropic(driver);
    if (!parity)
       messages_apply_preinject(req);
+   /* Gateway tool policing (e.g. strip subagent tools) on the inbound Anthropic
+    * request, before translate/build. No-op unless a policy is configured. */
+   gateway_policy_apply_request(req, 0);
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)

@@ -337,6 +337,12 @@ typedef struct config
    int ingress_preinject_enabled;
    int ingress_preinject_assembly_budget;
    int ingress_max_raw_scans;
+
+   /* Gateway tool-policing (P2): when on, the gateway strips subagent-spawning
+    * tools (Task/Agent/spawn_agent/RemoteTrigger) from the inbound `tools` of a
+    * proxied /v1/messages or /v1/chat/completions request, so the served model is
+    * never offered a way to spawn subagents. Default off. */
+   int gateway_prevent_subagents;
    int typed_facts_enabled;      /* typed-fact knowledge layer master gate (default off) */
    int kb_evidence_emit_enabled; /* auditable-correctness: emit per-turn retrieval_event (default
                                     off) */

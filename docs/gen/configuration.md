@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (107)
+## CLI-settable keys (108)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -54,6 +54,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `embedding_endpoint` | string | Embeddings provider endpoint URL. |
 | `embedding_model` | string | Embeddings model name. |
 | `fidelity_check_enabled` | bool | Run the answer-fidelity judge on terminal-text turns (default off; requires kb_evidence_emit_enabled + ingress_preinject_enabled). |
+| `gateway_prevent_subagents` | bool | Gateway strips subagent-spawning tools (Task/Agent/etc.) from proxied requests so the served model cannot spawn subagents. Default off. |
 | `guardrail_mode` | string | Guardrail enforcement mode (off / warn / block). |
 | `guardrails_semantic_allow_ml_only_block` | bool | Allow blocking on the ML classifier alone. |
 | `guardrails_semantic_block_threshold` | float | Semantic score threshold to block. |
