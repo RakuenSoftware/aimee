@@ -1107,6 +1107,54 @@ int openai_format_responses_completed(const char *id, const char *model, const c
    return emit_json(root, resp, cap);
 }
 
+int openai_format_responses_failed(const char *id, const char *model, long created,
+                                   const char *code, const char *message, char *resp, int cap)
+{
+   if (!resp || cap <= 0)
+      return -1;
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+      return -1;
+   cJSON_AddStringToObject(root, "type", "response.failed");
+   /* Base response object (output:[] is fine; Codex reads only response.error). */
+   cJSON *obj = build_response_object(id, model, "", created, 0, 0, "failed", 0, "response");
+   if (!obj)
+   {
+      cJSON_Delete(root);
+      return -1;
+   }
+   cJSON *err = cJSON_AddObjectToObject(obj, "error");
+   if (err)
+   {
+      cJSON_AddStringToObject(err, "code", code ? code : "server_error");
+      cJSON_AddStringToObject(err, "message", message ? message : "");
+   }
+   cJSON_AddItemToObject(root, "response", obj);
+   return emit_json(root, resp, cap);
+}
+
+int openai_format_responses_incomplete(const char *id, const char *model, long created,
+                                       const char *reason, char *resp, int cap)
+{
+   if (!resp || cap <= 0)
+      return -1;
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+      return -1;
+   cJSON_AddStringToObject(root, "type", "response.incomplete");
+   cJSON *obj = build_response_object(id, model, "", created, 0, 0, "incomplete", 0, "response");
+   if (!obj)
+   {
+      cJSON_Delete(root);
+      return -1;
+   }
+   cJSON *det = cJSON_AddObjectToObject(obj, "incomplete_details");
+   if (det)
+      cJSON_AddStringToObject(det, "reason", reason ? reason : "unknown");
+   cJSON_AddItemToObject(root, "response", obj);
+   return emit_json(root, resp, cap);
+}
+
 /* ── Responses API output items (Codex parity) ──────────────────────────────
  *
  * Codex's Responses-API parser requires an *active output item* to exist before

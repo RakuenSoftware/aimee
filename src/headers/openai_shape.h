@@ -82,6 +82,21 @@ extern "C"
                                          long created, int prompt_tokens, int completion_tokens,
                                          char *resp, int cap);
 
+   /* Responses-API terminal error events (Codex parity). Codex treats both as
+    * fatal stream errors:
+    *  failed     → {"type":"response.failed","response":{…status:"failed",
+    *               "error":{"code":…,"message":…}}}. Codex maps `code` to a
+    *               typed ApiError (context_length_exceeded, insufficient_quota,
+    *               cyber_policy, invalid_prompt, server_is_overloaded/slow_down,
+    *               rate_limit_exceeded→retry-after); any other code → Retryable.
+    *  incomplete → {"type":"response.incomplete","response":{…status:"incomplete",
+    *               "incomplete_details":{"reason":…}}} (e.g. reason
+    *               "max_output_tokens" on truncation). Returns bytes written or -1. */
+   int openai_format_responses_failed(const char *id, const char *model, long created,
+                                      const char *code, const char *message, char *resp, int cap);
+   int openai_format_responses_incomplete(const char *id, const char *model, long created,
+                                          const char *reason, char *resp, int cap);
+
    /* Responses-API output items + item/argument streaming events (Codex parity).
     * Codex requires output_item.added before any text/arguments delta, and
     * output_item.done + completed carrying the items. The *_item builders return

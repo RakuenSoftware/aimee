@@ -1010,6 +1010,22 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
    if (openai_format_responses_created(id, model, created, frame, sizeof(frame)) > 0)
       emit(ctx, "response.created", frame);
 
+   if (erc != 0)
+   {
+      /* Provider/transport failure: surface a real terminal error event the way
+       * the OpenAI backend would, so Codex applies its typed-error handling
+       * (retry/backoff) instead of treating a failed turn as an empty success.
+       * Unknown `code` maps to ApiError::Retryable in Codex's parser. */
+      if (openai_format_responses_failed(id, model, created, "server_error",
+                                         "upstream model request failed", frame, sizeof(frame)) > 0)
+         emit(ctx, "response.failed", frame);
+      agent_free_parsed_response(&parsed);
+      free(instructions);
+      cJSON_Delete(messages);
+      cJSON_Delete(tools);
+      return 0;
+   }
+
    if (erc == 0)
    {
       /* Cost accounting: streaming /v1/responses runs the provider call directly.
@@ -1116,12 +1132,23 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
          free(itf);
       }
 
+      /* OpenAI finish_reason "length" (carried into stop_reason) means the model
+       * was truncated at the token cap. The backend reports that as a terminal
+       * response.incomplete{reason:max_output_tokens}, not response.completed;
+       * mirror it so Codex applies its truncation handling. */
+      int truncated = (parsed.stop_reason[0] && strcmp(parsed.stop_reason, "length") == 0);
       size_t ccap = n * 6 + 1024;
       char *cf = malloc(ccap);
       if (cf)
       {
-         if (openai_format_responses_completed(id, model, txt, created, parsed.prompt_tokens,
-                                               parsed.completion_tokens, cf, (int)ccap) > 0)
+         if (truncated)
+         {
+            if (openai_format_responses_incomplete(id, model, created, "max_output_tokens", cf,
+                                                   (int)ccap) > 0)
+               emit(ctx, "response.incomplete", cf);
+         }
+         else if (openai_format_responses_completed(id, model, txt, created, parsed.prompt_tokens,
+                                                    parsed.completion_tokens, cf, (int)ccap) > 0)
             emit(ctx, "response.completed", cf);
          free(cf);
       }

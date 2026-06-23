@@ -401,6 +401,25 @@ int main(void)
       assert(strstr(resp, "\"total_tokens\":7"));
    }
 
+   /* --- Codex parity: terminal error events --- */
+   {
+      int len = openai_format_responses_failed("resp_9", "aimee", 1700000000, "server_error",
+                                               "upstream model request failed", resp, sizeof(resp));
+      assert(len > 0);
+      assert(strstr(resp, "\"type\":\"response.failed\""));
+      assert(strstr(resp, "\"status\":\"failed\""));
+      assert(strstr(resp, "\"error\":{"));
+      assert(strstr(resp, "\"code\":\"server_error\""));
+      assert(strstr(resp, "\"message\":\"upstream model request failed\""));
+
+      len = openai_format_responses_incomplete("resp_9", "aimee", 1700000000, "max_output_tokens",
+                                               resp, sizeof(resp));
+      assert(len > 0);
+      assert(strstr(resp, "\"type\":\"response.incomplete\""));
+      assert(strstr(resp, "\"status\":\"incomplete\""));
+      assert(strstr(resp, "\"incomplete_details\":{\"reason\":\"max_output_tokens\"}"));
+   }
+
    /* --- Codex parity: Responses request -> OpenAI chat conversion --- */
    {
       const char *body =
