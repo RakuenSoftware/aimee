@@ -3,8 +3,9 @@
 - **State:** draft — **rev 7** · **roundtable SIGNED OFF at rev 6** (round 5: 0
   blocking / 0 high / 0 medium, converged). Arc: r1 10 blocking → r2 7 blocking +
   8 high → r3 1 blocking + 1 high + 2 medium → r5 **0 blocking**. rev 7 closes the
-  two open questions (synth models BENCHMARKED — Gemma-4-E4B CPU / Granite-4.0-h-small
-  GPU, Qwen3.6 dropped on JSON-reliability; decouples + shrinks the
+  two open questions (synth models BENCHMARKED grammar-enforced + judged —
+  Gemma-4-E4B CPU / Gemma-4-12B unified-GPU (Gemma-4-26B-A4B dedicated), Qwen3.6
+  dropped on JSON-reliability, dense 31B dominated; decouples + shrinks the
   reranker to Ettin ModernBERT — 400m GPU / 68m CPU, both `-fa on`, Qwen3-Reranker
   dropped from the real-time path; E4B-ungated CPU default). See "Decisions
   taken" and "Changelog".
@@ -242,38 +243,43 @@ per `(query, candidate)` pair, **no chat template and no yes/no-logprob transfor
 dropped from the real-time path; it remains usable only **async** (e.g. background
 memory re-ranking) where its quality is worth seconds of latency.
 
-**Synth ladder** (benchmarked on the curator's real extraction task — see below):
+**Synth ladder** (benchmarked grammar-enforced + judged on the curator's real
+extraction task — see below):
 
-| Install | Synth model (GGUF) | dim/arch |
-|---------|--------------------|----------|
-| CPU-only (**default**) | **`ggml-org/gemma-4-E4B-it-GGUF`** (Gemma 4 E4B — ungated mirror, no `HF_TOKEN`) | ~7B raw |
-| GPU (**default**) | **`unsloth/granite-4.0-h-small-GGUF`** (IBM Granite 4.0 h-small) | 32B-A9B hybrid Mamba/MoE |
+| Install | Synth model (GGUF) | arch |
+|---------|--------------------|------|
+| CPU-only (**default**) | **`ggml-org/gemma-4-E4B-it-GGUF`** (Gemma 4 E4B — ungated mirror, no `HF_TOKEN`) | ~7B raw / E4B effective |
+| GPU — unified (**default**) | **`unsloth/gemma-4-12b-it-GGUF`** (Gemma 4 12B) | 12B dense, ~8 GB |
+| GPU — dedicated synth host | **`unsloth/gemma-4-26B-A4B-it-GGUF`** (Gemma 4 26B-A4B) | 26B MoE / ~4B active, ~17 GB |
 
-> **Basis (2026-06-22, benchmarked).** The curator/synth model does **async
-> structured-JSON extraction** (`scripts/curator-extract.py`: doc/code/story → a
-> schema'd `{"artifacts":[…]}` object over `/v1/chat/completions`, parsing the first
-> JSON object). So the axes are **reliable structured JSON + schema conformance +
-> throughput** (it drains a queue; async, not latency-bound). Seven Q4_K_M models
-> were run on the 7900XTX over the real `curator-extract` prompts (6 doc + 6 code);
-> full table in
+> **Basis (2026-06-23, grammar-enforced + judged).** The curator does **async
+> structured-JSON extraction** (`scripts/curator-extract.py`: doc/code → a schema'd
+> `{"artifacts":[…]}` object). Throughput-bound (drains a queue), not latency-bound.
+> The first pass was **confounded** — it scored `response_format=json_object`, which
+> b9761 silently ignores, so it measured freeform-JSON luck. Redone with a
+> **sampler-level GBNF grammar** (guaranteed valid JSON) over a **60-sample corpus
+> drawn from the real ~/dev + ~/gow workspace** (every aimee-supported language),
+> scored on three uniform layers: a strict de-saturated schema rubric, a corpus-wide
+> valid-JSON rate, and a **blind Claude content judge**. Full data + harness in
 > [`benchmarks/results/synth/RESULTS.md`](../../benchmarks/results/synth/RESULTS.md).
-> Headline: **function-calling-tuned models (Gemma, IBM Granite) produce reliable
-> curator JSON (parse 1.0, schema 0.96–1.0); every Qwen model — including the
-> previously-pinned Qwen3.6-35B-A3B and 27B — slipped structurally** (malformed
-> JSON on code-heavy content → parse 0.33–0.67, despite `response_format=json_object`;
-> the 27B was also the slowest at 33 tok/s). Winners:
-> - **gemma-4-E4B** — perfect (doc 1.0 / code 1.0 / parse 1.0), 98 tok/s → CPU default.
-> - **granite-4.0-h-small** — perfect (1.0 / 1.0 / 1.0), 64 tok/s → GPU default.
 >
-> This **drops the rev-7 Gemma-12B/26B and Qwen3.6 GPU tiers** in favour of a single
-> Granite GPU model. The CPU default stays **Gemma 4 E4B via the ungated `ggml-org`
-> mirror** (no first-boot `HF_TOKEN`). Pin each to a specific **commit sha + quant**.
+> Headline: under grammar enforcement **faithfulness is universal** — no model
+> hallucinates; the differentiators are **structure** and **reliability**. The old
+> "every Qwen slips" / "Granite wins" findings were harness artifacts. Corrected:
+> - **GPU quality ties** across gemma-4 12B/26B-A4B/31B (all perfect schema +
+>   valid-JSON). The pick splits on **deployment VRAM** because this container
+>   co-hosts embed + rerank: **gemma-4-12B** (~8 GB, 53 tok/s) for the *unified* GPU;
+>   **gemma-4-26B-A4B** (MoE, ~4B active → 84 tok/s, ~17 GB) when synth has a GPU to
+>   itself. Dense **gemma-4-31B** is dominated (slower *and* larger).
+> - **Qwen3.6 dropped on reliability** — content is strong but 8–12% of outputs
+>   **truncate** even under grammar (valid-JSON 0.88–0.92) → ~1-in-10 lost extractions.
+> - **CPU stays gemma-4-E4B.** A 2026 ≤4B bake-off (granite-4.0-micro/h-micro,
+>   nemotron-3-nano-4b, phi-4-mini, smollm3-3b, lfm2.5-1.2b/8b-a1b) found **none beats
+>   it** — each trades gemma's one weakness (it flattens `doc_summary`) for a worse one
+>   (placeholder-echoed or malformed code, or sub-0.4 doc). E4B keeps perfect code +
+>   100% valid JSON. `smollm3-3b` is the alternative for doc-heavy / code-light hosts.
 >
-> **Fairness note:** the Qwen failures are *JSON-validity*, not necessarily content
-> (when Qwen parsed, schema could be perfect). **Grammar-constrained decoding** (the
-> curator's planned enhancement, `kb_curator_extract.c:35`) would force valid JSON for
-> all models; a grammar-constrained content re-run is the tiebreaker if Qwen3.6 is ever
-> reconsidered.
+> Pin each to a specific **commit sha + quant**.
 
 #### The 8B truncation — why 4000, and how it must be done
 
@@ -527,13 +533,14 @@ We take the fold but pay down its cost:
 - **Auth default = mTLS**; bearer dev-only.
 - **CPU synth default = Gemma 4 E4B** via the ungated `ggml-org` GGUF mirror (no
   `HF_TOKEN`); the separate "ungated fallback" model is dropped.
-- **Synth models — benchmarked, not pinned-on-spec** (2026-06-22, on the curator's
-  real extraction task): **CPU = Gemma 4 E4B** (perfect schema, 98 tok/s), **GPU =
-  IBM Granite 4.0 h-small** (perfect schema, 64 tok/s). Function-calling-tuned models
-  (Gemma, Granite) produce reliable curator JSON; **every Qwen model — incl. the old
-  Qwen3.6-35B-A3B/27B GPU tiers — slipped on JSON validity and is dropped** (the rev-7
-  Gemma-12B/26B + Qwen3.6 GPU ladder is replaced by single Granite GPU). See
-  `benchmarks/results/synth/RESULTS.md`. **Reranker = Ettin (ModernBERT
+- **Synth models — benchmarked grammar-enforced + judged** (2026-06-23; the
+  2026-06-22 pass was confounded by an ignored `json_object` and is superseded):
+  **CPU = Gemma 4 E4B** (best ≤4B vs the 2026 field), **GPU = Gemma 4 12B** for the
+  unified container (~8 GB, co-resides with embed+rerank) / **Gemma 4 26B-A4B** (MoE)
+  for a dedicated synth host. Under grammar enforcement faithfulness is universal;
+  **Qwen3.6 dropped on reliability** (8–12% truncation), **dense Gemma-4-31B dominated**
+  (slower + larger than the 26B MoE at equal quality). Replaces the rev-7 Gemma-12B/26B
+  + Qwen3.6 ladder. See `benchmarks/results/synth/RESULTS.md`. **Reranker = Ettin (ModernBERT
   cross-encoder), NOT Qwen3-Reranker**: GPU default `ettin-reranker-400m`, CPU-only
   `ettin-reranker-68m`, both `--flash-attn on`. Real-time on the 7900XTX (ettin-400m
   top-20 0.34s; ettin-68m top-10 0.60s) and correct/fast via native `/v1/rerank` —
@@ -576,10 +583,12 @@ We take the fold but pay down its cost:
 - **rev 7 (2026-06-21):** reduced the open questions to mechanical items
   (commit-sha/quant pins + a reranker-swap-cost confirmation). **Pinned synth
   models** to the
-  benchmark (2026-06-22) — **CPU = Gemma 4 E4B** (ungated `ggml-org` mirror → no
-  `HF_TOKEN`; rev-5 "ungated fallback" dropped, E4B is the plain CPU default),
-  **GPU = IBM Granite 4.0 h-small** (replaces the rev-7 Gemma-12B/26B + Qwen3.6 GPU
-  tiers; Qwen dropped on JSON-reliability). **Decoupled the
+  benchmark (re-run grammar-enforced + judged 2026-06-23; the 2026-06-22 pass was
+  confounded by an ignored `json_object`) — **CPU = Gemma 4 E4B** (ungated `ggml-org`
+  mirror → no `HF_TOKEN`; rev-5 "ungated fallback" dropped; best ≤4B vs the 2026 field),
+  **GPU = Gemma 4 12B** (unified) / **Gemma 4 26B-A4B** (dedicated synth host); replaces
+  the rev-7 Gemma-12B/26B + Qwen3.6 ladder (Qwen dropped on JSON-reliability, dense 31B
+  dominated). **Decoupled the
   reranker** from the embed ladder (it is dimension-agnostic): **Ettin ModernBERT
   cross-encoder — `ettin-reranker-400m` (GPU) / `ettin-reranker-68m` (CPU), both
   `-fa on`; Qwen3-Reranker dropped from the real-time path** (too slow + native
