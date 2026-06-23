@@ -8,12 +8,14 @@ on:
     paths:
       - 'scripts/aimee_llm_*.py'
       - 'scripts/tests/test_rerank_head.py'
+      - 'scripts/tests/test_gateway.py'
       - '.github/workflows/gateway-tests.yml'
   push:
     branches: [testing, main]
     paths:
       - 'scripts/aimee_llm_*.py'
       - 'scripts/tests/test_rerank_head.py'
+      - 'scripts/tests/test_gateway.py'
 
 jobs:
   gateway-unit:
@@ -25,5 +27,7 @@ jobs:
           python-version: '3.12'
       - name: Install numpy + safetensors
         run: pip install --quiet numpy safetensors
-      - name: Rerank-head unit tests
-        run: python -m unittest discover -s scripts/tests -p 'test_rerank_head.py' -v
+      - name: Gateway unit tests (rerank head + request logic)
+        run: |
+          python -m unittest discover -s scripts/tests -p 'test_rerank_head.py' -v
+          python -m unittest discover -s scripts/tests -p 'test_gateway.py' -v
