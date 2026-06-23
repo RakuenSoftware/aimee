@@ -337,6 +337,17 @@ typedef struct config
    int ingress_preinject_enabled;
    int ingress_preinject_assembly_budget;
    int ingress_max_raw_scans;
+
+   /* Exact-parity mode for the Claude Code Anthropic ingress (POST /v1/messages).
+    * Default off: the ingress keeps its value-add proxy behavior (serves the
+    * configured primary model, applies context pre-injection). When on AND the
+    * primary is an Anthropic-profile agent, the ingress becomes a transparent
+    * passthrough so Claude Code gets byte-equivalent behavior to talking to
+    * api.anthropic.com directly: the inbound `model` is honored (no primary
+    * swap), pre-injection is skipped, the client's `anthropic-version` /
+    * `anthropic-beta` headers are forwarded upstream, count_tokens is proxied to
+    * the real endpoint, and upstream error status/body pass through unchanged. */
+   int claude_proxy_parity;
    int typed_facts_enabled;      /* typed-fact knowledge layer master gate (default off) */
    int kb_evidence_emit_enabled; /* auditable-correctness: emit per-turn retrieval_event (default
                                     off) */

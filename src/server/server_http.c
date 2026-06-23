@@ -1451,6 +1451,7 @@ static void handle_conn(int fd, int is_tcp)
        * this reused worker thread; the OpenAI-family ingress dispatch mints a
        * fresh one below when evidence emission is on. */
       ingress_preinject_set_turn_id("");
+      anthropic_http_capture_request_headers(buf); /* parity: per-request anthropic-* hdrs */
       int az = server_http_authorize(is_tcp, g_bearer, has_auth ? auth : NULL,
                                      has_api_key ? api_key : NULL, has_skey);
       if (az != 0)

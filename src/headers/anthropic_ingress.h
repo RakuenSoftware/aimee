@@ -96,4 +96,17 @@ void anthropic_stream_get_usage(const anthropic_stream_xlate_t *st, int *input_t
 /* Free translator state (does not emit). */
 void anthropic_stream_free(anthropic_stream_xlate_t *st);
 
+/* --- Per-request passthrough headers (parity mode) ---
+ *
+ * Claude Code sends `anthropic-version` and `anthropic-beta` headers that select
+ * API behavior (wire version, beta features such as fine-grained tool streaming
+ * or 1h cache TTL). The /v1/messages ingress handlers receive only the body, so
+ * server_http captures these two headers per request and the anthropic-driver
+ * passthrough forwards them upstream when claude_proxy_parity is enabled. Set on
+ * every request (pass "" / NULL to clear); the getters return "" when unset. */
+void anthropic_ingress_set_request_headers(const char *anthropic_version,
+                                           const char *anthropic_beta);
+const char *anthropic_ingress_request_version(void);
+const char *anthropic_ingress_request_beta(void);
+
 #endif /* DEC_ANTHROPIC_INGRESS_H */

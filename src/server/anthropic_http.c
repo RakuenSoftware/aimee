@@ -20,6 +20,7 @@
 #include "agent_types.h"
 #include "anthropic_ingress.h"
 #include "cJSON.h"
+#include "config.h"
 #include "delegate_driver.h"
 #include "ingress_preinject.h"
 #include "json_fluent.h"
@@ -50,6 +51,56 @@ static agent_t *resolve_primary(agent_config_t *acfg)
 static void mint_msg_id(char *buf, size_t n)
 {
    snprintf(buf, n, "msg_%ld", (long)time(NULL));
+}
+
+/* Exact-parity mode for the Claude Code ingress (config claude_proxy_parity,
+ * default off). When on AND the primary is an Anthropic-profile agent, the
+ * ingress is a transparent passthrough: inbound model honored, pre-injection
+ * skipped, client anthropic-version/anthropic-beta forwarded, count_tokens
+ * proxied upstream, and upstream error status/body relayed unchanged. */
+static int parity_on(void)
+{
+   config_t cfg;
+   config_load(&cfg);
+   return cfg.claude_proxy_parity ? 1 : 0;
+}
+
+/* Append a header line to `buf`, inserting a '\n' separator (mirrors
+ * agent_config.c's append_header_line; the upstream HTTP layer splits on '\n'). */
+static void hdr_line(char *buf, size_t n, const char *line)
+{
+   size_t used;
+   if (!buf || n == 0 || !line || !line[0])
+      return;
+   used = strlen(buf);
+   if (used > 0 && buf[used - 1] != '\n' && used + 1 < n)
+   {
+      buf[used++] = '\n';
+      buf[used] = '\0';
+   }
+   if (used < n - 1)
+      snprintf(buf + used, n - used, "%s", line);
+}
+
+/* Build the upstream header block for the anthropic parity passthrough: forward
+ * the client's anthropic-version (else the GA default) and its full anthropic-beta
+ * set verbatim, so beta-gated behaviors (fine-grained tool streaming, 1h cache
+ * TTL, interleaved thinking, fast mode, …) reach Anthropic exactly as Claude Code
+ * requested them. */
+static void build_anthropic_parity_headers(char *buf, size_t n)
+{
+   char line[640];
+   const char *cver = anthropic_ingress_request_version();
+   const char *cbeta = anthropic_ingress_request_beta();
+
+   buf[0] = '\0';
+   snprintf(line, sizeof(line), "anthropic-version: %s", (cver && cver[0]) ? cver : "2023-06-01");
+   hdr_line(buf, n, line);
+   if (cbeta && cbeta[0])
+   {
+      snprintf(line, sizeof(line), "anthropic-beta: %s", cbeta);
+      hdr_line(buf, n, line);
+   }
 }
 
 /* Serialize `obj` into resp (bounded by cap). Returns 200 on success, 500 if it
@@ -165,21 +216,32 @@ static char *build_provider_body(const delegate_driver_t *driver, const agent_t 
 
 /* Anthropic-native ingress is a near-passthrough: Claude Code already speaks
  * Anthropic Messages, so preserve request fields such as system cache_control,
- * tool_choice, thinking, stop_sequences, top_p, and top_k. The configured
- * primary model still wins over the inbound model name. */
-static char *build_anthropic_provider_body(const cJSON *in, const agent_t *ag, int stream)
+ * tool_choice, thinking, stop_sequences, top_p, and top_k. By default the
+ * configured primary model wins over the inbound model name; under parity the
+ * inbound model is honored verbatim (falling back to the primary only when the
+ * client omitted it) so Claude Code's per-task model selection survives. */
+static char *build_anthropic_provider_body(const cJSON *in, const agent_t *ag, int stream,
+                                           int parity)
 {
    cJSON *req;
-   cJSON *model;
    char *body;
 
    req = cJSON_Duplicate((cJSON *)in, 1);
    if (!req)
       return NULL;
-   cJSON_DeleteItemFromObjectCaseSensitive(req, "model");
-   model = cJSON_CreateString(ag && ag->model[0] ? ag->model : "claude");
-   if (model)
-      cJSON_AddItemToObject(req, "model", model);
+   if (!parity)
+   {
+      cJSON *model;
+      cJSON_DeleteItemFromObjectCaseSensitive(req, "model");
+      model = cJSON_CreateString(ag && ag->model[0] ? ag->model : "claude");
+      if (model)
+         cJSON_AddItemToObject(req, "model", model);
+   }
+   else if (!cJSON_GetObjectItemCaseSensitive(req, "model") && ag && ag->model[0])
+   {
+      /* Parity, but the client sent no model: give the upstream call one. */
+      cJSON_AddStringToObject(req, "model", ag->model);
+   }
    cJSON_DeleteItemFromObjectCaseSensitive(req, "stream");
    if (stream)
       cJSON_AddBoolToObject(req, "stream", 1);
@@ -271,7 +333,10 @@ static int messages_buffered(const char *body, char *resp, int cap)
 
    delegate_drivers_init();
    driver = delegate_driver_get(ag->provider);
-   messages_apply_preinject(req);
+   /* Exact-parity passthrough only applies to the Anthropic-native path. */
+   int parity = parity_on() && driver_is_anthropic(driver);
+   if (!parity)
+      messages_apply_preinject(req);
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
@@ -279,10 +344,13 @@ static int messages_buffered(const char *body, char *resp, int cap)
       status = write_error(resp, cap, 502, "api_error", "failed to reach the primary provider");
       goto cleanup;
    }
-   agent_build_extra_headers(ag, extra, sizeof(extra));
+   if (parity)
+      build_anthropic_parity_headers(extra, sizeof(extra));
+   else
+      agent_build_extra_headers(ag, extra, sizeof(extra));
 
    if (driver_is_anthropic(driver))
-      prov_body = build_anthropic_provider_body(req, ag, 0);
+      prov_body = build_anthropic_provider_body(req, ag, 0, parity);
    else
       prov_body = build_provider_body(driver, ag, messages, tools, system_text,
                                       agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
@@ -291,8 +359,21 @@ static int messages_buffered(const char *body, char *resp, int cap)
                                  extra[0] ? extra : NULL);
    if (http_status != 200 || !response)
    {
-      status = write_error(resp, cap, 502, "api_error",
-                           response ? response : "primary provider call failed");
+      /* Exact parity: relay the upstream status + Anthropic error body verbatim
+       * so Claude Code sees the real error type (rate_limit_error,
+       * overloaded_error, …) and status code, not a wrapped 502. (Upstream
+       * response headers such as retry-after are not yet plumbed through; the
+       * SDK falls back to exponential backoff on a 429 without it.) */
+      if (parity && response && (int)strlen(response) < cap)
+      {
+         memcpy(resp, response, strlen(response) + 1);
+         status = http_status;
+      }
+      else
+      {
+         status = write_error(resp, cap, 502, "api_error",
+                              response ? response : "primary provider call failed");
+      }
       goto cleanup;
    }
 
@@ -544,15 +625,21 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
 
    delegate_drivers_init();
    driver = delegate_driver_get(ag->provider);
-   messages_apply_preinject(req);
+   /* Exact-parity passthrough only applies to the Anthropic-native path. */
+   int parity = parity_on() && driver_is_anthropic(driver);
+   if (!parity)
+      messages_apply_preinject(req);
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
       goto cleanup;
-   agent_build_extra_headers(ag, extra, sizeof(extra));
+   if (parity)
+      build_anthropic_parity_headers(extra, sizeof(extra));
+   else
+      agent_build_extra_headers(ag, extra, sizeof(extra));
 
    if (driver_is_anthropic(driver))
-      prov_body = build_anthropic_provider_body(req, ag, 1);
+      prov_body = build_anthropic_provider_body(req, ag, 1, parity);
    else
       prov_body = build_provider_body(driver, ag, messages, tools, system_text,
                                       agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
@@ -647,6 +734,46 @@ cleanup:
 static int count_tokens(const char *body, char *resp, int cap)
 {
    cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
+
+   /* Exact parity: proxy to Anthropic's real /v1/messages/count_tokens so Claude
+    * Code's context-budget math matches api.anthropic.com, not a local estimate.
+    * Only on the Anthropic-native path; otherwise fall through to the estimate. */
+   if (parity_on())
+   {
+      agent_config_t acfg;
+      agent_t *ag = resolve_primary(&acfg);
+      const delegate_driver_t *driver;
+      delegate_drivers_init();
+      driver = ag ? delegate_driver_get(ag->provider) : NULL;
+      if (ag && driver_is_anthropic(driver))
+      {
+         char url[MAX_ENDPOINT_LEN + 64];
+         char ct_url[MAX_ENDPOINT_LEN + 96];
+         char auth[MAX_API_KEY_LEN + 32];
+         char extra[640];
+         char *response = NULL;
+         if (delegate_build_url(driver, ag, url, sizeof(url)) == 0 &&
+             agent_resolve_auth(ag, auth, sizeof(auth)) == 0)
+         {
+            int hs;
+            snprintf(ct_url, sizeof(ct_url), "%s/count_tokens", url); /* url ends in /messages */
+            build_anthropic_parity_headers(extra, sizeof(extra));
+            hs = agent_http_post(ct_url, auth, (body && body[0]) ? body : "{}", &response,
+                                 ag->timeout_ms, extra[0] ? extra : NULL);
+            if (response && (int)strlen(response) < cap)
+            {
+               /* Relay upstream status + body verbatim (200 with the real count,
+                * or the real error). */
+               memcpy(resp, response, strlen(response) + 1);
+               free(response);
+               cJSON_Delete(req);
+               return hs;
+            }
+            free(response); /* unreachable/oversized: fall through to the estimate */
+         }
+      }
+   }
+
    char *system_text = req ? anthropic_system_to_text(req) : NULL;
    cJSON *messages = req ? anthropic_messages_to_openai(
                                cJSON_GetObjectItemCaseSensitive(req, "messages"), system_text)
@@ -663,6 +790,23 @@ static int count_tokens(const char *body, char *resp, int cap)
    cJSON_Delete(messages);
    cJSON_Delete(req);
    return status;
+}
+
+/* Capture the inbound anthropic-version / anthropic-beta headers for the parity
+ * passthrough. Lives here (not in the pure anthropic_ingress translation unit, nor
+ * inline in the size-capped server_http.c) because it bridges http_header
+ * (server_http.h) and the thread-local store (anthropic_ingress.h). Set on every
+ * request — empty when a header is absent — so a value never leaks across requests
+ * on a reused worker thread. */
+void anthropic_http_capture_request_headers(const char *raw_request)
+{
+   char a_ver[64] = "", a_beta[512] = "";
+   if (raw_request)
+   {
+      http_header(raw_request, "Anthropic-Version", a_ver, sizeof(a_ver));
+      http_header(raw_request, "Anthropic-Beta", a_beta, sizeof(a_beta));
+   }
+   anthropic_ingress_set_request_headers(a_ver, a_beta);
 }
 
 void anthropic_http_register(void)

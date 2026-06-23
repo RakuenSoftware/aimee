@@ -223,6 +223,13 @@ extern "C"
     * server/anthropic_http.c). Called once during server startup. */
    void anthropic_http_register(void);
 
+   /* Capture the inbound `anthropic-version` / `anthropic-beta` headers off the
+    * raw request into per-request thread-locals, for the /v1/messages exact-parity
+    * passthrough (forwarded upstream only when claude_proxy_parity is on). Called
+    * once per request from the HTTP dispatch; `raw_request` is the full request
+    * buffer (NULL clears). Defined in server/anthropic_http.c. */
+   void anthropic_http_capture_request_headers(const char *raw_request);
+
    /* --- Native /v1 REST resource seam ---
     * Some native resources are backed by subsystems (kb_client, memory, …)
     * whose dependency closure must stay out of the server_http translation

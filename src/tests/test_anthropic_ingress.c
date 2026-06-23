@@ -430,6 +430,44 @@ static void test_stream_text_then_tool(void)
    PASS("stream_text_then_tool");
 }
 
+/* Per-request passthrough headers (parity mode): set/get echo, NULL handling,
+ * per-request reset (no leak across requests), and bounded/NUL-terminated
+ * storage for an oversized beta list. */
+static void test_request_headers_passthrough(void)
+{
+   char big[1200];
+
+   /* default state: empty, never NULL. */
+   anthropic_ingress_set_request_headers("", "");
+   assert(anthropic_ingress_request_version()[0] == '\0');
+   assert(anthropic_ingress_request_beta()[0] == '\0');
+
+   /* echo what was captured. */
+   anthropic_ingress_set_request_headers(
+       "2023-06-01", "fine-grained-tool-streaming-2025-05-14,extended-cache-ttl");
+   assert(strcmp(anthropic_ingress_request_version(), "2023-06-01") == 0);
+   assert(strstr(anthropic_ingress_request_beta(), "fine-grained-tool-streaming") != NULL);
+
+   /* NULL is treated as empty (clears), not a crash. */
+   anthropic_ingress_set_request_headers(NULL, NULL);
+   assert(anthropic_ingress_request_version()[0] == '\0');
+   assert(anthropic_ingress_request_beta()[0] == '\0');
+
+   /* per-request reset: a value from one request must not leak into the next. */
+   anthropic_ingress_set_request_headers("2023-06-01", "beta-a");
+   anthropic_ingress_set_request_headers("", "");
+   assert(anthropic_ingress_request_beta()[0] == '\0');
+
+   /* oversized beta list is stored bounded + NUL-terminated, no overflow. */
+   memset(big, 'x', sizeof(big));
+   big[sizeof(big) - 1] = '\0';
+   anthropic_ingress_set_request_headers("2023-06-01", big);
+   assert(strlen(anthropic_ingress_request_beta()) < 512);
+
+   anthropic_ingress_set_request_headers("", ""); /* leave clean for later tests */
+   PASS("request_headers_passthrough");
+}
+
 int main(void)
 {
    printf("test_anthropic_ingress:\n");
@@ -450,6 +488,7 @@ int main(void)
    test_stream_usage_tap();
    test_stream_tool_call();
    test_stream_text_then_tool();
+   test_request_headers_passthrough();
    printf("all anthropic_ingress tests passed\n");
    return 0;
 }

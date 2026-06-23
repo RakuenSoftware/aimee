@@ -773,6 +773,8 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "claude_cli_delegate_enabled", 1);
    if (cfg->ingress_preinject_enabled)
       cJSON_AddBoolToObject(root, "ingress_preinject_enabled", 1);
+   if (cfg->claude_proxy_parity)
+      cJSON_AddBoolToObject(root, "claude_proxy_parity", 1);
    if (cfg->ingress_preinject_assembly_budget != 6144)
       cJSON_AddNumberToObject(root, "ingress_preinject_assembly_budget",
                               cfg->ingress_preinject_assembly_budget);

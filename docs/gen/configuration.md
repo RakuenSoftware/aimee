@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (107)
+## CLI-settable keys (108)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -32,6 +32,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `cache_shaping_enabled` | bool | Enable prompt cache-shaping. |
 | `claude_cli_delegate_enabled` | bool | Allow delegating to the local Claude CLI agent. |
 | `claude_model` | string | Default Claude model (empty = CLI default). |
+| `claude_proxy_parity` | bool | Make the Claude Code `/v1/messages` ingress a transparent Anthropic passthrough (honor inbound model, skip pre-injection, forward anthropic-version/anthropic-beta, proxy count_tokens, relay upstream errors). Default off. |
 | `cost_reward_enabled` | bool | Factor token cost into the reward signal. |
 | `cost_reward_lambda_pct` | int | Cost-penalty weight (percent) in the reward. |
 | `cost_reward_ref_usd_milli` | int | Reference cost (USD-milli) normalizing the cost reward. |
