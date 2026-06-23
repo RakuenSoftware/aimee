@@ -406,17 +406,40 @@ int cli_session_create(cli_session_t *s, const char *session_name, const char *c
    if (rc != 0)
       return -1;
 
-   /* Wait for CLI to produce output (up to 5s) */
-   for (int i = 0; i < 10; i++)
+   /* Wait for the CLI to render AND settle — not just for the first byte. claude's
+    * fresh-session welcome box renders progressively and rotates its placeholder
+    * tips; pasting the first prompt mid-render races the input handler, so the
+    * keystrokes get eaten and the turn comes back as the (static) welcome banner —
+    * the user has to resend until the session warms up. Waiting for two identical
+    * captures means the baseline snapshot and the first submit both land on a
+    * settled, input-ready composer. Capped (~10s) so a CLI that animates a startup
+    * spinner forever still proceeds. */
+   unsigned long prev_hash = 0;
+   int stable = 0;
+   for (int i = 0; i < 20; i++)
    {
       msleep_ms(500);
       char cap_cmd[256];
       snprintf(cap_cmd, sizeof(cap_cmd), "tmux capture-pane -p -t '%s' 2>/dev/null", session_name);
       char *cap = sess_run(cap_cmd, &rc);
-      int has_output = (cap && strlen(cap) > 2);
+      if (cap && strlen(cap) > 2)
+      {
+         unsigned long h = djb2(cap);
+         if (h == prev_hash)
+         {
+            if (++stable >= 2) /* two consecutive identical captures = settled */
+            {
+               free(cap);
+               break;
+            }
+         }
+         else
+         {
+            stable = 0;
+            prev_hash = h;
+         }
+      }
       free(cap);
-      if (has_output)
-         break;
    }
 
    s->active = 1;
@@ -669,6 +692,55 @@ static int cli_body_in_baseline(const char *baseline, const char *amark, const c
    return 0;
 }
 
+/* Strip TUI noise from a pane, line by line, keeping only plausible answer text:
+ * box-drawing lines (the welcome/dialog boxes ─│╭╮╰╯…), the composer prompt
+ * (❯ / ›), blank lines, and anything cli_line_is_chrome rejects (rules, status,
+ * footers, hints). Used ONLY by the no-bullet fallback so a chrome-only pane —
+ * most often claude's fresh-session welcome box — yields empty instead of the
+ * banner. The box CONTENT lines (│ Welcome… │) carry letters so they aren't
+ * rules; keyed on the leading box glyph they're dropped too. Returns malloc'd
+ * text; caller frees. */
+static char *cli_filter_noise(const char *in)
+{
+   if (!in)
+      return strdup("");
+   size_t len = strlen(in);
+   char *out = malloc(len + 1);
+   if (!out)
+      return strdup("");
+   size_t olen = 0;
+   for (const char *p = in; p && *p;)
+   {
+      const char *eol = strchr(p, '\n');
+      size_t llen = eol ? (size_t)(eol - p) : strlen(p);
+      char line[2048]; /* 220-col pane × ≤4 bytes/glyph fits; longer is truncated
+                        * only for the predicate test, never for kept output */
+      size_t n = llen < sizeof(line) - 1 ? llen : sizeof(line) - 1;
+      memcpy(line, p, n);
+      line[n] = '\0';
+      const char *t = cli_lstrip(line);
+      int noise = !*t || strncmp(t, "\xe2\x94", 2) == 0 || /* ─│ box drawing U+25xx */
+                  strncmp(t, "\xe2\x95", 2) == 0 ||        /* ╭╮╰╯ box drawing */
+                  strncmp(t, "\xe2\x9d\xaf", 3) == 0 ||    /* ❯ claude composer */
+                  strncmp(t, "\xe2\x80\xba", 3) == 0 ||    /* › codex composer */
+                  cli_line_is_chrome(t);
+      if (!noise)
+      {
+         size_t tl = strlen(t);
+         memcpy(out + olen, t, tl);
+         olen += tl;
+         out[olen++] = '\n';
+      }
+      if (!eol)
+         break;
+      p = eol + 1;
+   }
+   while (olen > 0 && (out[olen - 1] == '\n' || out[olen - 1] == ' ' || out[olen - 1] == '\t'))
+      olen--;
+   out[olen] = '\0';
+   return out;
+}
+
 /* allow_fallback: when no assistant bullet is found, whether to fall back to the
  * baseline-delta of the whole pane. The final extraction wants this (last resort
  * for an unrecognized TUI); incremental STREAMING does NOT — before the model has
@@ -787,7 +859,9 @@ static char *cli_extract_impl(const char *raw, const char *cli_kind, const char 
    /* No parseable bullet. Streaming returns empty (the model hasn't produced an
     * answer yet — don't push the banner/chrome). The final extraction falls back
     * to the portion not already in the baseline (last resort for an unrecognized
-    * TUI; a reused pane still never replays a prior turn). */
+    * TUI; a reused pane still never replays a prior turn) — but noise-filtered, so
+    * a chrome-only pane (the fresh-session welcome box, captured before the prompt
+    * was processed) yields empty rather than shipping the banner. */
    if (!allow_fallback)
    {
       free(text);
@@ -797,9 +871,13 @@ static char *cli_extract_impl(const char *raw, const char *cli_kind, const char 
    {
       char *delta = cli_session_delta(baseline, text);
       free(text);
-      return delta ? delta : strdup("");
+      char *filtered = cli_filter_noise(delta ? delta : "");
+      free(delta);
+      return filtered;
    }
-   return text;
+   char *filtered = cli_filter_noise(text);
+   free(text);
+   return filtered;
 }
 
 char *cli_session_extract_response(const char *raw, const char *cli_kind, const char *baseline)

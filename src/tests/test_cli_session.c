@@ -581,6 +581,43 @@ static void test_extract_excludes_interrupt_footer(void)
    free(r);
 }
 
+/* The fresh-session welcome box (box-drawing + composer + footer, no answer
+ * bullet) must NEVER be returned as the reply — the no-bullet fallback
+ * noise-filters it to empty. Reproduces the live "webchat sends the Claude
+ * banner" bug on the first turn before claude has processed the prompt. */
+static void test_extract_welcome_banner_empty(void)
+{
+   const char *pane =
+       "\xe2\x95\xad\xe2\x94\x80\xe2\x94\x80 Claude Code v2.1.186 "
+       "\xe2\x94\x80\xe2\x94\x80\xe2\x95\xae\n"
+       "\xe2\x94\x82 Welcome back Jared!                  \xe2\x94\x82\n"
+       "\xe2\x94\x82 Run /init to create a CLAUDE.md file  \xe2\x94\x82\n"
+       "\xe2\x95\xb0\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x95\xaf\n"
+       "\xe2\x9d\xaf Try \"edit serverhttproutes.inc to...\"\n"
+       "gh auth login \xc2\xb7 \xe2\x86\x90 for agents \xe2\x97\x8f high \xc2\xb7 /effort\n";
+   char *r = cli_session_extract_response(pane, "claude", NULL);
+   assert(r != NULL);
+   assert(r[0] == '\0');
+   free(r);
+}
+
+/* A real answer whose ● bullet has scrolled off the top of the pane still
+ * survives the fallback (its body is plain text, not chrome) — the noise filter
+ * must not over-strip. */
+static void test_extract_scrolled_answer_survives_fallback(void)
+{
+   const char *baseline = "\xe2\x95\xad\xe2\x94\x80 Claude Code \xe2\x94\x80\xe2\x95\xae\n"
+                          "\xe2\x9d\xaf Try something\n";
+   const char *pane = "the second half of a long answer\n"
+                      "that wrapped past the top of the pane\n"
+                      "\xe2\x9c\xbb Baked for 4s\n";
+   char *r = cli_session_extract_response(pane, "claude", baseline);
+   assert(r != NULL);
+   assert(strcmp(r, "the second half of a long answer\n"
+                    "that wrapped past the top of the pane") == 0);
+   free(r);
+}
+
 /* --- cli_session_prepare_claude: claude-code first-run gate seeding --- */
 
 static char *slurp(const char *path)
@@ -799,6 +836,14 @@ int main(void)
 
    printf("test_extract_excludes_interrupt_footer... ");
    test_extract_excludes_interrupt_footer();
+   printf("OK\n");
+
+   printf("test_extract_welcome_banner_empty... ");
+   test_extract_welcome_banner_empty();
+   printf("OK\n");
+
+   printf("test_extract_scrolled_answer_survives_fallback... ");
+   test_extract_scrolled_answer_survives_fallback();
    printf("OK\n");
 
    printf("test_make_name_format... ");
