@@ -534,63 +534,50 @@ static void test_extract_baseline_substring_kept(void)
    free(r);
 }
 
-/* --- cli_session_extract_status: condensed live-activity line --- */
+/* --- spinner/working line is chrome, never answer text --- */
 
-/* claude's animated spinner footer is returned verbatim with the leading glyph
- * stripped, so the webchat shows a single human-readable activity line. */
-static void test_status_claude_spinner(void)
+/* claude cycles the spinner glyph + gerund every frame (✻ ✽ ✢ · …, Misting /
+ * Channeling / …). The footer the capture happens to catch must NOT leak into the
+ * extracted answer — anchoring on the ✻ glyph alone missed the other frames and
+ * spammed the transcript. Here the footer carries the ✽ frame: the answer is
+ * still just the bullet text. */
+static void test_extract_excludes_gerund_spinner(void)
 {
    const char *pane = "\xe2\x9d\xaf write a poem\n"
-                      "\xe2\x9c\xbb Misting\xe2\x80\xa6 (21s \xc2\xb7 \xe2\x86\x91 493 tokens)\n";
-   char *r = cli_session_extract_status(pane, "claude");
+                      "\xe2\x97\x8f Here is the poem\n"
+                      "\xe2\x9c\xbd Channeling\xe2\x80\xa6 (14s \xc2\xb7 \xe2\x86\x91 823 tokens "
+                      "\xc2\xb7 thinking)\n";
+   char *r = cli_session_extract_response(pane, "claude", NULL);
    assert(r != NULL);
-   assert(strcmp(r, "Misting\xe2\x80\xa6 (21s \xc2\xb7 \xe2\x86\x91 493 tokens)") == 0);
+   assert(strcmp(r, "Here is the poem") == 0);
    free(r);
 }
 
-/* When several spinner frames are on the pane (scrollback), the LAST one wins —
- * that is the current state. */
-static void test_status_picks_last_frame(void)
+/* The "·"-glyph frame (U+00B7, no leading star at all) is also a working line and
+ * must be excluded — plus the "⎿ Tip" hint that trails it. */
+static void test_extract_excludes_middot_spinner_and_tip(void)
 {
    const char *pane =
-       "\xe2\x9c\xbb Misting\xe2\x80\xa6 (21s \xc2\xb7 \xe2\x86\x91 493 tokens)\n"
-       "\xe2\x9c\xbd Misting\xe2\x80\xa6 (58s \xc2\xb7 \xe2\x86\x93 2.0k tokens \xc2\xb7 "
-       "thinking)\n";
-   char *r = cli_session_extract_status(pane, "claude");
+       "\xe2\x9d\xaf q\n"
+       "\xe2\x97\x8f real answer\n"
+       "\xc2\xb7 Misting\xe2\x80\xa6 (31s \xc2\xb7 \xe2\x86\x93 2.5k tokens \xc2\xb7 thinking)\n"
+       "\xe2\x8e\xbf Tip: Use /btw to ask a quick side question\n";
+   char *r = cli_session_extract_response(pane, "claude", NULL);
    assert(r != NULL);
-   assert(
-       strcmp(r, "Misting\xe2\x80\xa6 (58s \xc2\xb7 \xe2\x86\x93 2.0k tokens \xc2\xb7 thinking)") ==
-       0);
+   assert(strcmp(r, "real answer") == 0);
    free(r);
 }
 
-/* The "⎿ Tip: …interrupting…" hint must NOT be mistaken for a status line (no
- * paren, no "… ("), and an idle pane yields an empty string. */
-static void test_status_ignores_tip_and_idle(void)
+/* The "esc to interrupt" footer (the first ~30s before the gerund spinner) was
+ * already excluded; keep that covered so the fix doesn't regress it. */
+static void test_extract_excludes_interrupt_footer(void)
 {
-   const char *tip = "\xe2\x8e\xbf Tip: Use /btw to ask a side question without interrupting "
-                     "Claude's current work\n";
-   char *r = cli_session_extract_status(tip, "claude");
+   const char *pane = "\xe2\x9d\xaf q\n"
+                      "\xe2\x97\x8f answer body\n"
+                      "  esc to interrupt\n";
+   char *r = cli_session_extract_response(pane, "claude", NULL);
    assert(r != NULL);
-   assert(r[0] == '\0');
-   free(r);
-
-   const char *idle = "\xe2\x97\x8f all done\n\xe2\x9c\xbb Baked for 3s\n";
-   char *r2 = cli_session_extract_status(idle, "claude");
-   assert(r2 != NULL);
-   assert(r2[0] == '\0');
-   free(r2);
-}
-
-/* codex's "Working (Ns · esc to interrupt)" footer is matched via the interrupt
- * hint and the glyph is stripped. */
-static void test_status_codex_working(void)
-{
-   const char *pane = "\xe2\x80\xba do it\n"
-                      "\xe2\x97\xa6 Working (12s \xc2\xb7 esc to interrupt)\n";
-   char *r = cli_session_extract_status(pane, "codex");
-   assert(r != NULL);
-   assert(strcmp(r, "Working (12s \xc2\xb7 esc to interrupt)") == 0);
+   assert(strcmp(r, "answer body") == 0);
    free(r);
 }
 
@@ -802,20 +789,16 @@ int main(void)
    test_extract_baseline_substring_kept();
    printf("OK\n");
 
-   printf("test_status_claude_spinner... ");
-   test_status_claude_spinner();
+   printf("test_extract_excludes_gerund_spinner... ");
+   test_extract_excludes_gerund_spinner();
    printf("OK\n");
 
-   printf("test_status_picks_last_frame... ");
-   test_status_picks_last_frame();
+   printf("test_extract_excludes_middot_spinner_and_tip... ");
+   test_extract_excludes_middot_spinner_and_tip();
    printf("OK\n");
 
-   printf("test_status_ignores_tip_and_idle... ");
-   test_status_ignores_tip_and_idle();
-   printf("OK\n");
-
-   printf("test_status_codex_working... ");
-   test_status_codex_working();
+   printf("test_extract_excludes_interrupt_footer... ");
+   test_extract_excludes_interrupt_footer();
    printf("OK\n");
 
    printf("test_make_name_format... ");

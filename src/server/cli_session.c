@@ -83,24 +83,6 @@ cli_session_stream_cb_t cli_session_get_stream_cb(void **ud_out)
    return g_stream_cb;
 }
 
-/* Per-thread status sink (set by the chat worker before a turn, cleared after).
- * Thread-local for the same reason as the stream callback. */
-static __thread cli_session_status_cb_t g_status_cb = NULL;
-static __thread void *g_status_ud = NULL;
-
-void cli_session_set_status_cb(cli_session_status_cb_t cb, void *ud)
-{
-   g_status_cb = cb;
-   g_status_ud = ud;
-}
-
-cli_session_status_cb_t cli_session_get_status_cb(void **ud_out)
-{
-   if (ud_out)
-      *ud_out = g_status_ud;
-   return g_status_cb;
-}
-
 /* Per-thread cancel-check (set by the chat worker to the turn's cancel flag).
  * cli_session.c stays decoupled from the turn registry — the worker supplies the
  * predicate. */
@@ -448,8 +430,6 @@ void cli_session_destroy(cli_session_t *s)
    s->baseline = NULL;
    free(s->stream_emitted);
    s->stream_emitted = NULL;
-   free(s->status_emitted);
-   s->status_emitted = NULL;
    if (!s->active)
       return;
    if (!cli_session_is_alive(s))
@@ -616,6 +596,10 @@ static int cli_line_is_rule(const char *t)
    return 1;
 }
 
+/* Defined further down with the status extractor; forward-declared so chrome
+ * detection can reuse it (the animated working line is chrome, not answer). */
+static int cli_line_is_status(const char *t);
+
 /* Lines that mark the end of (or are not part of) the assistant's answer:
  * the claude status star, separators, footers, interrupt hints, and the
  * model/effort status indicator near the composer — which claude renders with
@@ -624,6 +608,15 @@ static int cli_line_is_rule(const char *t)
 static int cli_line_is_chrome(const char *t)
 {
    if (strncmp(t, "\xe2\x9c\xbb", 3) == 0) /* ✻ claude "Cooked/Baked for Ns" status */
+      return 1;
+   /* The animated working line — "<spinner> <Gerund>… (<Ns> · <arrow> <N> tokens
+    * · <state>)". claude CYCLES the spinner glyph (✻ ✽ ✢ · …) and the gerund word
+    * every frame, so anchoring on a single glyph (the ✻ above) misses most frames
+    * and the line leaks into the streamed answer as spam — and, because each
+    * captured frame differs, it poisons the incremental prefix-diff so real answer
+    * growth stops emitting once claude enters its thinking phase. Match it by its
+    * stable shape instead (see cli_line_is_status), which is glyph-independent. */
+   if (cli_line_is_status(t))
       return 1;
    if (cli_line_is_rule(t))
       return 1;
@@ -814,14 +807,16 @@ char *cli_session_extract_response(const char *raw, const char *cli_kind, const 
    return cli_extract_impl(raw, cli_kind, baseline, 1);
 }
 
-/* Recognize the CLI's animated working/status line. claude renders it as
+/* Recognize the CLI's animated working/status line so the answer extractor can
+ * treat it as chrome (see cli_line_is_chrome). claude renders it as
  * "<spinner> <Gerund>… (<elapsed> · <arrow> <tokens> tokens[· <state>])",
- * cycling the spinner glyph (✻ ✢ ✽ · …) and the gerund every frame; codex uses
- * "◦ Working (<elapsed> · esc to interrupt)". Rather than enumerate the volatile
- * spinner glyphs we match the line by its stable shape: an open paren PLUS either
- * an "esc to interrupt" hint or the ellipsis (…) + a token meter. The "to
- * interrupt" phrase and the ellipsis-with-tokens shape both avoid false-matching
- * claude's "⎿ Tip: …interrupting…" hint (no paren, no "… (") and ordinary prose. */
+ * CYCLING the spinner glyph (✻ ✢ ✽ · …) and the gerund word every frame; codex
+ * uses "◦ Working (<elapsed> · esc to interrupt)". Anchoring on a single glyph
+ * misses most frames and lets the line leak into the streamed answer (spam +
+ * poisoned prefix-diff), so match by the stable shape instead: an open paren PLUS
+ * either an "esc to interrupt" hint or the ellipsis (…) + a token meter. Both
+ * avoid false-matching claude's "⎿ Tip: …interrupting…" hint (no paren) and
+ * ordinary prose. */
 static int cli_line_is_status(const char *t)
 {
    if (!strchr(t, '('))
@@ -832,67 +827,6 @@ static int cli_line_is_status(const char *t)
    if (strstr(t, "\xe2\x80\xa6") && strstr(t, "token"))
       return 1;
    return 0;
-}
-
-/* Strip a leading spinner glyph (a whitespace-delimited token with no ASCII
- * letter — "✢", "·", "◦") plus following spaces, leaving the human-readable
- * status ("Misting… (21s · ↑ 493 tokens)"). The body is returned verbatim. */
-static const char *cli_status_body(const char *line)
-{
-   const char *b = cli_lstrip(line);
-   const char *sp = b;
-   while (*sp && *sp != ' ')
-      sp++;
-   int tok_has_letter = 0;
-   for (const char *q = b; q < sp; q++)
-      if ((*q >= 'A' && *q <= 'Z') || (*q >= 'a' && *q <= 'z'))
-      {
-         tok_has_letter = 1;
-         break;
-      }
-   if (!tok_has_letter && *sp == ' ')
-   {
-      b = sp;
-      while (*b == ' ')
-         b++;
-   }
-   return b;
-}
-
-char *cli_session_extract_status(const char *raw, const char *cli_kind)
-{
-   (void)cli_kind; /* the shape match covers claude + codex */
-   /* strip_ansi returns a fresh buffer we own, so split it in place (rewrite '\n'
-    * to '\0'), scanning for the LAST status line (the live footer sits at the
-    * bottom of the pane). */
-   char *work = cli_session_strip_ansi(raw ? raw : "");
-   if (!work)
-      return strdup("");
-
-   char *best = NULL; /* malloc'd copy of the most recent status line's body */
-   for (char *p = work;;)
-   {
-      char *nl = strchr(p, '\n');
-      if (nl)
-         *nl = '\0';
-      const char *ls = cli_lstrip(p);
-      if (cli_line_is_status(ls))
-      {
-         const char *body = cli_status_body(ls);
-         char *dup = strdup(body);
-         if (dup)
-         {
-            free(best);
-            best = dup;
-         }
-      }
-      if (!nl)
-         break;
-      p = nl + 1;
-   }
-
-   free(work);
-   return best ? best : strdup("");
 }
 
 /* True when the pane shows the CLI parked in a provider error/retry state.
@@ -943,8 +877,6 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
    long long err_start = 0; /* mono_ms when that state began (valid iff err_active) */
    free(s->stream_emitted);
    s->stream_emitted = strdup("");
-   free(s->status_emitted);
-   s->status_emitted = strdup("");
 
    for (;;)
    {
@@ -1054,26 +986,6 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
          }
          else
             free(partial);
-      }
-
-      /* Stream a condensed live-activity line while the CLI works. The TUI has no
-       * answer bullet yet during a thinking phase, so the stream callback above
-       * emits nothing and the webchat would look frozen; the status line ("Misting…
-       * (21s · ↑ 493 tokens)") keeps it alive. The TUI re-renders this line ~1×/s
-       * with a fresh counter, so emit only when the text changes — one rolling
-       * status, not one event per frame. */
-      if (g_status_cb)
-      {
-         char *status = cli_session_extract_status(cap, s->cli_kind);
-         const char *prevst = s->status_emitted ? s->status_emitted : "";
-         if (status && status[0] && strcmp(status, prevst) != 0)
-         {
-            g_status_cb(status, g_status_ud);
-            free(s->status_emitted);
-            s->status_emitted = status;
-         }
-         else
-            free(status);
       }
 
       /* Provider-error bound: if the CLI parks in an error/retry state for longer

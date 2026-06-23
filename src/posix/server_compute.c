@@ -157,14 +157,6 @@ static int stream_event(compute_ctx_t *cctx, const char *event, const char *key,
    {
       if (event && strcmp(event, "text") == 0 && value && value[0])
          ring_text_append_locked(cctx, value);
-      else if (event && strcmp(event, "status") == 0)
-      {
-         /* Transient live-activity line: deliver on the live socket only, never
-          * persist it in the ring. It animates ~1×/s, so ring-publishing would
-          * bloat the turn history and replay a stale spinner on reconnect; the
-          * next poll re-emits a current line anyway. Leave any buffered text
-          * intact (status never enters the ring, so there is no reorder to guard). */
-      }
       else
       {
          ring_flush_text_locked(cctx); /* preserve order vs. buffered text */
@@ -594,19 +586,6 @@ static void chat_cli_stream_cb(const char *delta, void *ud)
    c->emitted = 1;
 }
 
-/* Forward the tmux CLI's condensed live-activity line as a transient `status`
- * SSE event so the webchat shows a single rolling indicator ("Misting… (1m 5s ·
- * …)") during long thinking phases. Not the answer — does not set `emitted`, and
- * stream_event keeps `status` out of the presence ring (ephemeral; the next poll
- * re-emits a fresh line, so a reconnect never replays a stale spinner). */
-static void chat_cli_status_cb(const char *status, void *ud)
-{
-   chat_cli_stream_ctx_t *c = (chat_cli_stream_ctx_t *)ud;
-   if (!c || !status || !status[0])
-      return;
-   stream_event(c->cctx, "status", "content", status);
-}
-
 /* Cancel predicate for the tmux CLI driver: reflects this turn's registry cancel
  * flag (set by chat.interrupt / graceful_cancel / session close). Lets
  * cli_session_recv abort a wedged or steered generation promptly without
@@ -699,10 +678,6 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    void *prev_stream_ud = NULL;
    cli_session_stream_cb_t prev_stream_cb = cli_session_get_stream_cb(&prev_stream_ud);
    cli_session_set_stream_cb(chat_cli_stream_cb, &sctx);
-   /* Live-activity status line (condensed spinner) for the same tmux turn. */
-   void *prev_status_ud = NULL;
-   cli_session_status_cb_t prev_status_cb = cli_session_get_status_cb(&prev_status_ud);
-   cli_session_set_status_cb(chat_cli_status_cb, &sctx);
    /* Let the tmux CLI driver observe this turn's cancel flag so a steer/interrupt
     * stops the running generation promptly. Save/restore around any outer turn. */
    void *prev_cancel_ud = NULL;
@@ -724,7 +699,6 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
 
    cli_session_set_error_grace_ms(prev_error_grace);
    cli_session_set_cancel_check(prev_cancel_cb, prev_cancel_ud);
-   cli_session_set_status_cb(prev_status_cb, prev_status_ud);
    cli_session_set_stream_cb(prev_stream_cb, prev_stream_ud);
    agent_tools_set_tool_event_cb(NULL, NULL);
    session_id_clear_override();

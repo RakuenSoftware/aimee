@@ -207,8 +207,6 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
             sess.baseline = NULL;
             free(sess.stream_emitted);
             sess.stream_emitted = NULL;
-            free(sess.status_emitted);
-            sess.status_emitted = NULL;
          }
          else
             cli_session_destroy(&sess);
@@ -246,8 +244,6 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
       sess.baseline = NULL;
       free(sess.stream_emitted);
       sess.stream_emitted = NULL;
-      free(sess.status_emitted);
-      sess.status_emitted = NULL;
    }
 
    if (!clean || !clean[0])

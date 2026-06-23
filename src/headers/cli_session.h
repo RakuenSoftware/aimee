@@ -38,10 +38,6 @@ typedef struct
    /* Clean response text already streamed to the caller this turn (so recv emits
     * only the growth as an incremental delta). malloc'd; freed on destroy. */
    char *stream_emitted;
-   /* Last condensed working/status line emitted via the status callback this turn
-    * (so recv emits a status event only when the line actually changes, not every
-    * poll). malloc'd; freed on destroy. */
-   char *status_emitted;
 } cli_session_t;
 
 /* Incremental stream callback: invoked by cli_session_recv with each newly
@@ -52,19 +48,6 @@ void cli_session_set_stream_cb(cli_session_stream_cb_t cb, void *ud);
  * around a nested turn (prevents the inner turn's now-dead context leaking to
  * the outer turn). *ud_out receives the userdata; returns the callback. */
 cli_session_stream_cb_t cli_session_get_stream_cb(void **ud_out);
-
-/* Status callback: invoked by cli_session_recv with the latest *condensed*
- * working/spinner line (e.g. "Misting… (1m 5s · ↓ 2.6k tokens · still thinking)")
- * while the CLI is producing tokens. The TUI animates this line ~1×/s with a
- * fresh elapsed counter; recv collapses the whole run into a single rolling
- * status — emitting only when the line text changes — so the webchat shows live
- * activity (one updating line) during long thinking phases instead of a frozen
- * pane, without flooding the transcript. Distinct from the stream callback, which
- * carries the assistant's actual answer text. Set per-thread; save/restore around
- * a nested turn like the stream callback. */
-typedef void (*cli_session_status_cb_t)(const char *status, void *ud);
-void cli_session_set_status_cb(cli_session_status_cb_t cb, void *ud);
-cli_session_status_cb_t cli_session_get_status_cb(void **ud_out);
 
 /* Cancel-check callback: cli_session_recv polls it each tick; a non-zero return
  * aborts the wait (the running turn was asked to stop — steering/interrupt or
@@ -147,14 +130,6 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
  * content present in the baseline is excluded so prior turns never leak.
  * Returns newly allocated text; caller frees. Exposed for unit tests. */
 char *cli_session_extract_response(const char *raw, const char *cli_kind, const char *baseline);
-
-/* Extract the latest animated working/status line from a raw pane capture,
- * condensed to a single line with the leading spinner glyph stripped (claude:
- * "✢ Misting… (21s · ↑ 493 tokens)" → "Misting… (21s · ↑ 493 tokens)"; codex:
- * "◦ Working (12s · esc to interrupt)"). Returns newly allocated text — an empty
- * string when the pane shows no active-work line (idle / answer already done).
- * Caller frees. Exposed for unit tests. */
-char *cli_session_extract_status(const char *raw, const char *cli_kind);
 
 /* --- Session name helpers --- */
 /* Build a deterministic session name: "aimee-<agent>-<hash(role)>".
