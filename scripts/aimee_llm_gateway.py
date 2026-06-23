@@ -28,6 +28,7 @@ follow-up; this module is the retrieval gateway + the validated rerank-head path
 """
 import json
 import os
+import urllib.error
 import urllib.request
 
 EMBED_URL = os.environ.get("AIMEE_LLM_EMBED_URL", "http://127.0.0.1:8081").rstrip("/")
@@ -37,6 +38,13 @@ EMBED_MODEL = os.environ.get("AIMEE_LLM_EMBED_MODEL", "Qwen3-Embedding")
 PORT = int(os.environ.get("AIMEE_LLM_PORT", "8080"))
 BATCH_CAP = int(os.environ.get("AIMEE_LLM_BATCH_CAP", "512"))
 RERANK_SEP = "</s>"
+# Synth role: AIMEE_LLM_SYNTH_URL is the upstream OpenAI-compatible base; empty = no
+# synth configured (the role reports `gated`/unconfigured). Mode is informational here
+# (local = a baked llama-server; forward/external = an off-box upstream) — both just
+# proxy /v1/chat/completions to AIMEE_LLM_SYNTH_URL, which is why one code path serves
+# all three. Streaming is disabled in the first release (typed 400).
+SYNTH_URL = os.environ.get("AIMEE_LLM_SYNTH_URL", "").rstrip("/")
+SYNTH_MODE = os.environ.get("AIMEE_LLM_SYNTH_MODE", "local")
 
 
 class GatewayError(Exception):
@@ -136,17 +144,53 @@ def do_rerank(obj):
     return [float(s) for s in (scores if hasattr(scores, "__len__") else [scores])]
 
 
+def do_synth(body):
+    """Proxy a /v1/chat/completions request to the configured synth upstream
+    (AIMEE_LLM_SYNTH_URL — a local baked llama-server, or a forwarded/external base).
+    Streaming is disabled in the first release: `stream:true` -> a typed 400 the client
+    can branch on (rather than an opaque failure)."""
+    if not isinstance(body, dict):
+        raise GatewayError(400, "bad_request", "chat/completions expects a JSON object")
+    if body.get("stream"):
+        raise GatewayError(
+            400, "streaming_unsupported",
+            "streaming is disabled in this release; set stream=false")
+    if not SYNTH_URL:
+        raise GatewayError(503, "synth_unconfigured", "AIMEE_LLM_SYNTH_URL is not set")
+    return _http_post_json(f"{SYNTH_URL}/v1/chat/completions", body, timeout=300)
+
+
+def role_state(base, configured=True):
+    """Four-state readiness for one role (unified-llm §4): `gated` (role not configured
+    / upstream absent), `ready` (child serving), `loading` (child up but model warming,
+    503), `down` (configured but unreachable)."""
+    if not configured or not base:
+        return "gated"
+    try:
+        with urllib.request.urlopen(f"{base}/health", timeout=3) as r:
+            return "ready" if r.status == 200 else "loading"
+    except urllib.error.HTTPError as e:  # 503 while a model loads
+        return "loading" if e.code == 503 else "down"
+    except Exception:  # noqa: BLE001
+        return "down"
+
+
+def role_states():
+    """Per-role state for /health/{embed,rerank,synth}."""
+    return {
+        "embed": role_state(EMBED_URL),
+        "rerank": role_state(RERANK_URL, configured=bool(RERANK_HEAD_DIR)),
+        "synth": role_state(SYNTH_URL, configured=bool(SYNTH_URL)),
+    }
+
+
 def child_health():
-    """Probe the configured llama-server children. Returns role -> bool|None."""
-    out = {"embed": None, "rerank": None}
-    for role, base in (("embed", EMBED_URL), ("rerank", RERANK_URL if RERANK_HEAD_DIR else None)):
-        if not base:
-            continue
-        try:
-            with urllib.request.urlopen(f"{base}/health", timeout=3) as r:
-                out[role] = r.status == 200
-        except Exception:  # noqa: BLE001
-            out[role] = False
+    """Probe the configured llama-server children for the AGGREGATE /health. Returns
+    role -> bool|None (None = not configured, excluded from the aggregate)."""
+    states = role_states()
+    out = {}
+    for role, st in states.items():
+        out[role] = None if st == "gated" else (st == "ready")
     return out
 
 
@@ -166,9 +210,16 @@ def build_server():
             self.wfile.write(body)
 
         def do_GET(self):
-            if self.path.rstrip("/") == "/health":
+            path = self.path.rstrip("/")
+            if path == "/health":
                 st = health_state(child_health())
                 self._send(200 if st == "ok" else 503, {"status": st, "model": EMBED_MODEL})
+            elif path in ("/health/embed", "/health/rerank", "/health/synth"):
+                role = path.rsplit("/", 1)[1]
+                st = role_states()[role]
+                # ready=200 so a probe can gate on a single role (the kb hits
+                # /health/embed so it indexes as soon as embed is ready).
+                self._send(200 if st == "ready" else 503, {"status": st, "role": role})
             else:
                 self._send(404, {"error": "not found"})
 
@@ -186,6 +237,8 @@ def build_server():
                     self._send(200, do_embed_batch(json.loads(raw or b"[]")))
                 elif path == "/rerank":
                     self._send(200, do_rerank(json.loads(raw or b"[]")))
+                elif path == "/v1/chat/completions":
+                    self._send(200, do_synth(json.loads(raw or b"{}")))
                 else:
                     self._send(404, {"error": "not found"})
             except GatewayError as ge:

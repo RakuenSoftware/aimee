@@ -116,5 +116,76 @@ class RerankHandler(unittest.TestCase):
         self.assertEqual(self.gw.do_rerank([]), [])
 
 
+class Synth(unittest.TestCase):
+    def setUp(self):
+        self.gw = _gw()
+
+    def test_streaming_unsupported_400(self):
+        self.gw.SYNTH_URL = "http://x"
+        with self.assertRaises(self.gw.GatewayError) as e:
+            self.gw.do_synth({"messages": [], "stream": True})
+        self.assertEqual(e.exception.status, 400)
+        self.assertEqual(e.exception.body["error"]["code"], "streaming_unsupported")
+
+    def test_unconfigured_503(self):
+        self.gw.SYNTH_URL = ""
+        with self.assertRaises(self.gw.GatewayError) as e:
+            self.gw.do_synth({"messages": []})
+        self.assertEqual(e.exception.status, 503)
+
+    def test_not_a_dict_400(self):
+        with self.assertRaises(self.gw.GatewayError) as e:
+            self.gw.do_synth(["nope"])
+        self.assertEqual(e.exception.status, 400)
+
+    def test_proxies_non_streaming(self):
+        self.gw.SYNTH_URL = "http://synth:8083"
+        captured = {}
+
+        def fake_post(url, payload, timeout=120):
+            captured["url"] = url
+            captured["payload"] = payload
+            return {"choices": [{"message": {"content": "hi"}}]}
+
+        self.gw._http_post_json = fake_post
+        out = self.gw.do_synth({"messages": [{"role": "user", "content": "hi"}], "stream": False})
+        self.assertEqual(captured["url"], "http://synth:8083/v1/chat/completions")
+        self.assertIn("choices", out)
+
+
+class RoleHealth(unittest.TestCase):
+    def setUp(self):
+        self.gw = _gw()
+
+    def test_gated_when_unconfigured(self):
+        self.assertEqual(self.gw.role_state("", configured=False), "gated")
+        self.assertEqual(self.gw.role_state("http://x", configured=False), "gated")
+
+    def test_ready_loading_down(self):
+        import urllib.error
+        from unittest import mock
+
+        class FakeResp:
+            def __init__(self, status):
+                self.status = status
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        cases = [
+            (lambda *a, **k: FakeResp(200), "ready"),
+            (lambda *a, **k: FakeResp(503), "loading"),
+            (mock.Mock(side_effect=urllib.error.HTTPError("u", 503, "loading", {}, None)), "loading"),
+            (mock.Mock(side_effect=urllib.error.HTTPError("u", 500, "err", {}, None)), "down"),
+            (mock.Mock(side_effect=OSError("refused")), "down"),
+        ]
+        for fn, expected in cases:
+            with mock.patch("urllib.request.urlopen", fn):
+                self.assertEqual(self.gw.role_state("http://x"), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
