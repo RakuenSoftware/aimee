@@ -2762,15 +2762,31 @@ export default function Chat() {
       else e.think += u.delta;
       byId.set(u.id, e);
     }
-    const applyDeltas = (msgs: StreamMsg[], byId: Map<number, { text: string; think: string }>): StreamMsg[] =>
-      msgs.map(m => {
-        const e = byId.get(m.id);
-        if (!e) return m;
-        const next = { ...m };
-        if (e.text) next.text = m.text + e.text;
-        if (e.think) next.thinkText = (m.thinkText ?? '') + e.think;
-        return next;
-      });
+    // Only the messages that received a delta change — in practice the 1–2 tail
+    // blocks of the turn (the streaming assistant bubble, maybe a thinking
+    // block). The whole conversation lives in `msgs` (windowing is render-only),
+    // so map()-ing a closure + Map.get over the FULL history every flush is
+    // O(history) of wasted work — and it runs for EVERY streaming tab ~10×/s, so
+    // it scales with running-tab count × session length, pegging a core. Instead
+    // copy the array once (cheap pointer copy) and rewrite only the matching
+    // indices, scanning from the tail and stopping once every delta is placed.
+    const applyDeltas = (msgs: StreamMsg[], byId: Map<number, { text: string; think: string }>): StreamMsg[] => {
+      if (byId.size === 0) return msgs;
+      let next: StreamMsg[] | null = null;
+      let remaining = byId.size;
+      for (let i = msgs.length - 1; i >= 0 && remaining > 0; i--) {
+        const e = byId.get(msgs[i].id);
+        if (!e) continue;
+        if (!next) next = msgs.slice();
+        const m = msgs[i];
+        const nm = { ...m };
+        if (e.text) nm.text = m.text + e.text;
+        if (e.think) nm.thinkText = (m.thinkText ?? '') + e.think;
+        next[i] = nm;
+        remaining--;
+      }
+      return next ?? msgs;
+    };
     const activeSid = tabsRef.current[activeIdxRef.current]?.aimeeSid ?? '';
     for (const [owner, byId] of byOwner) {
       if (owner === activeSid) {
