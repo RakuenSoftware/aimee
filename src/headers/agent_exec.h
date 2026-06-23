@@ -264,6 +264,11 @@ int agent_http_post_content_type(const char *url, const char *auth_header, const
                                  const char *extra_headers);
 int agent_http_delete(const char *url, const char *auth_header, int timeout_ms);
 
+/* Retry-After (seconds) parsed from the most recent buffered HTTP response on
+ * this thread, or 0 if it carried none. Lets the Anthropic ingress relay an
+ * upstream 429/529 Retry-After to the client for exact parity. */
+int agent_http_last_retry_after(void);
+
 /* Streaming callback: called for each data chunk. Return 0 to continue, non-zero to abort. */
 typedef int (*agent_http_stream_cb)(const char *data, size_t len, void *userdata);
 

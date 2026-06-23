@@ -28,6 +28,19 @@ static void retrieval_event_header(char *dst, size_t n)
       dst[0] = '\0';
 }
 
+/* Build the optional `Retry-After: <seconds>\r\n` header line (or "") from the
+ * Anthropic ingress thread-local — non-empty only when the parity passthrough
+ * relayed an upstream 429/529 that carried a Retry-After, so the client's SDK
+ * backs off exactly as it would against api.anthropic.com. */
+static void retry_after_header(char *dst, size_t n)
+{
+   int ra = anthropic_http_response_retry_after();
+   if (ra > 0)
+      snprintf(dst, n, "Retry-After: %d\r\n", ra);
+   else if (n)
+      dst[0] = '\0';
+}
+
 static void send_response(int fd, int status, const char *body, const char *request_id)
 {
    const char *reason = status == 200   ? "OK"
@@ -43,12 +56,14 @@ static void send_response(int fd, int status, const char *body, const char *requ
    request_id_header(rid, sizeof(rid), request_id);
    char reh[80];
    retrieval_event_header(reh, sizeof(reh));
-   char head[400];
+   char rah[48];
+   retry_after_header(rah, sizeof(rah));
+   char head[480];
    int blen = body ? (int)strlen(body) : 0;
    int hlen = snprintf(head, sizeof(head),
                        "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\n"
-                       "Content-Length: %d\r\n%s%sConnection: close\r\n\r\n",
-                       status, reason, blen, rid, reh);
+                       "Content-Length: %d\r\n%s%s%sConnection: close\r\n\r\n",
+                       status, reason, blen, rid, reh, rah);
    write_all_fd(fd, head, hlen);
    if (blen > 0)
       write_all_fd(fd, body, blen);

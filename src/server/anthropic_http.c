@@ -65,6 +65,13 @@ static int parity_on(void)
    return cfg.claude_proxy_parity ? 1 : 0;
 }
 
+/* Retry-After (seconds) the parity passthrough relays on its own response when it
+ * forwarded an upstream 429/529 that carried one. Thread-local, reset on every
+ * request by anthropic_http_capture_request_headers (so it never leaks across
+ * requests or onto a non-ingress route on a reused worker thread); read by
+ * send_response in server_http_response.inc via anthropic_http_response_retry_after. */
+static __thread int g_response_retry_after = 0;
+
 /* Append a header line to `buf`, inserting a '\n' separator (mirrors
  * agent_config.c's append_header_line; the upstream HTTP layer splits on '\n'). */
 static void hdr_line(char *buf, size_t n, const char *line)
@@ -361,13 +368,14 @@ static int messages_buffered(const char *body, char *resp, int cap)
    {
       /* Exact parity: relay the upstream status + Anthropic error body verbatim
        * so Claude Code sees the real error type (rate_limit_error,
-       * overloaded_error, …) and status code, not a wrapped 502. (Upstream
-       * response headers such as retry-after are not yet plumbed through; the
-       * SDK falls back to exponential backoff on a 429 without it.) */
+       * overloaded_error, …) and status code, not a wrapped 502. Also relay the
+       * upstream Retry-After (send_response emits it on our response) so the
+       * SDK's backoff matches api.anthropic.com on a 429/529. */
       if (parity && response && (int)strlen(response) < cap)
       {
          memcpy(resp, response, strlen(response) + 1);
          status = http_status;
+         g_response_retry_after = agent_http_last_retry_after();
       }
       else
       {
@@ -792,12 +800,17 @@ static int count_tokens(const char *body, char *resp, int cap)
    return status;
 }
 
+int anthropic_http_response_retry_after(void)
+{
+   return g_response_retry_after;
+}
+
 /* Capture the inbound anthropic-version / anthropic-beta headers for the parity
- * passthrough. Lives here (not in the pure anthropic_ingress translation unit, nor
- * inline in the size-capped server_http.c) because it bridges http_header
- * (server_http.h) and the thread-local store (anthropic_ingress.h). Set on every
- * request — empty when a header is absent — so a value never leaks across requests
- * on a reused worker thread. */
+ * passthrough, and reset the per-request response Retry-After. Lives here (not in
+ * the pure anthropic_ingress translation unit, nor inline in the size-capped
+ * server_http.c) because it bridges http_header (server_http.h) and the
+ * thread-local stores. Set on every request — empty/0 when absent — so nothing
+ * leaks across requests on a reused worker thread. */
 void anthropic_http_capture_request_headers(const char *raw_request)
 {
    char a_ver[64] = "", a_beta[512] = "";
@@ -807,6 +820,7 @@ void anthropic_http_capture_request_headers(const char *raw_request)
       http_header(raw_request, "Anthropic-Beta", a_beta, sizeof(a_beta));
    }
    anthropic_ingress_set_request_headers(a_ver, a_beta);
+   g_response_retry_after = 0;
 }
 
 void anthropic_http_register(void)

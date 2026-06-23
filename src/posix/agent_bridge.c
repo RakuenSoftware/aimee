@@ -504,12 +504,24 @@ static int send_request(http_conn_t *conn, const char *method, const parsed_url_
 
 /* Parse status line, return HTTP status code. Advances *buf past headers.
  * Sets *chunked=1 if Transfer-Encoding: chunked, else sets *content_length. */
+/* Retry-After (seconds) parsed from the most recent buffered HTTP response on
+ * this thread, or 0 if it carried none. Set on every parse_response_headers call.
+ * Read by the Anthropic ingress to relay an upstream 429/529 Retry-After to the
+ * client for exact parity. */
+static __thread int g_last_retry_after = 0;
+
+int agent_http_last_retry_after(void)
+{
+   return g_last_retry_after;
+}
+
 static int parse_response_headers(char *buf, size_t len, size_t *header_end, int *chunked,
                                   size_t *content_length)
 {
    *chunked = 0;
    *content_length = 0;
    *header_end = 0;
+   g_last_retry_after = 0;
 
    /* Find end of headers */
    char *hdr_end = strstr(buf, "\r\n\r\n");
@@ -550,6 +562,24 @@ static int parse_response_headers(char *buf, size_t len, size_t *header_end, int
       if ((*p == 'C' || *p == 'c') && strncasecmp(p, "Content-Length:", 15) == 0)
       {
          *content_length = (size_t)atoll(p + 15);
+         break;
+      }
+   }
+
+   /* Check for Retry-After (seconds; the provider APIs send a delta, not a date).
+    * Match at a header-line start (line begin or just after a "\r\n") so it does
+    * not false-match a substring inside another header's value. */
+   for (char *p = buf; *p; p++)
+   {
+      if ((p == buf || (p[-1] == '\n')) && (*p == 'R' || *p == 'r') &&
+          strncasecmp(p, "Retry-After:", 12) == 0)
+      {
+         char *val = p + 12;
+         while (*val == ' ' || *val == '\t')
+            val++;
+         g_last_retry_after = atoi(val);
+         if (g_last_retry_after < 0)
+            g_last_retry_after = 0;
          break;
       }
    }
