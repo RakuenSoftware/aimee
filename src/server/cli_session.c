@@ -907,6 +907,39 @@ static int cli_line_is_status(const char *t)
    return 0;
 }
 
+/* True when the pane's FOOTER shows the CLI is still mid-turn: the "esc to
+ * interrupt" hint (shown for the whole active turn, generation AND tool runs) or
+ * an animated spinner/status line. recv uses this to avoid finalizing a turn that
+ * has merely gone momentarily static — a long-running tool ("⎿ Waiting…") or a
+ * thinking pause — which would otherwise ship the half-rendered tool call as the
+ * reply and freeze the webchat. Footer-band only (last ~800 bytes) so the same
+ * words in the answer body or scrollback can't false-match; once claude finishes,
+ * the footer redraws to "✻ Baked for Ns" (no hint, no spinner) and recv finalizes. */
+static int cli_pane_is_working(const char *stripped)
+{
+   if (!stripped)
+      return 0;
+   size_t plen = strlen(stripped);
+   const char *foot = plen > 800 ? stripped + (plen - 800) : stripped;
+   if (strstr(foot, "to interrupt")) /* "esc to interrupt" working footer */
+      return 1;
+   for (const char *p = foot; p && *p;)
+   {
+      const char *eol = strchr(p, '\n');
+      char line[1024];
+      size_t llen = eol ? (size_t)(eol - p) : strlen(p);
+      size_t n = llen < sizeof(line) - 1 ? llen : sizeof(line) - 1;
+      memcpy(line, p, n);
+      line[n] = '\0';
+      if (cli_line_is_status(cli_lstrip(line)))
+         return 1;
+      if (!eol)
+         break;
+      p = eol + 1;
+   }
+   return 0;
+}
+
 /* True when the pane shows the CLI parked in a provider error/retry state.
  * claude renders this on its ✻ status line ("API error · Retrying in Ns ·
  * attempt K/10"); the normal completion status ("✻ Baked for Ns") and the
@@ -1109,11 +1142,29 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
          stable++;
          if (stable >= CLI_SESSION_STABLE_N)
          {
-            char *resp = cli_session_extract_response(cap, s->cli_kind, s->baseline);
-            snprintf(out, out_max, "%s", resp ? resp : "");
-            free(resp);
-            s->last_activity = time(NULL);
-            return 0;
+            /* A static pane is NOT necessarily a finished turn: claude can sit on
+             * a long-running tool ("⎿ Waiting…") or a thinking pause with its
+             * elapsed counter momentarily unchanged. Finalizing then cuts the turn
+             * off and ships the half-rendered tool call as the answer (observed
+             * live: the webchat freezes on a "Bash(…) ⎿ Waiting…" frame, the
+             * Working indicator clears). Only finalize when the footer shows NO
+             * active-work indicator; otherwise keep polling (re-arm) until claude
+             * finishes — footer → "✻ Baked for Ns" — or the wall-clock bound fires. */
+            char *stripped = cli_session_strip_ansi(cap);
+            int busy = stripped && cli_pane_is_working(stripped);
+            free(stripped);
+            if (busy)
+            {
+               stable = 0; /* still working; the wall-clock timeout backstops a wedge */
+            }
+            else
+            {
+               char *resp = cli_session_extract_response(cap, s->cli_kind, s->baseline);
+               snprintf(out, out_max, "%s", resp ? resp : "");
+               free(resp);
+               s->last_activity = time(NULL);
+               return 0;
+            }
          }
       }
       else

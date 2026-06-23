@@ -50,8 +50,10 @@ static void install_fake_tmux(void)
     * generating-footer; `provider_error` animates claude's ✻ error/retry status
     * line (never stabilises); `banner_retry` animates a │-prefixed box line whose
     * prose contains "Retrying in" (mimics the welcome banner — must NOT be read as
-    * a provider error); anything else returns a static pane. send-keys is logged
-    * so the cancel/error tests can assert the interrupt key. */
+    * a provider error); `busy_tool` returns a STATIC pane whose footer still shows
+    * "esc to interrupt" (a long-running tool — recv must NOT finalize it); anything
+    * else returns a static pane. send-keys is logged so the cancel/error tests can
+    * assert the interrupt key. */
    fprintf(f,
            "#!/bin/sh\n"
            "case \"$1\" in\n"
@@ -62,6 +64,9 @@ static void install_fake_tmux(void)
            "      echo \"frame $c\";\n"
            "    elif [ \"$FAKE_TMUX_MODE\" = codexgen ]; then\n"
            "      echo 'codex output'; echo 'Working (1s esc to interrupt)';\n"
+           "    elif [ \"$FAKE_TMUX_MODE\" = busy_tool ]; then\n"
+           "      printf '%%s\\n' '\xe2\x97\x8f Bash(sed -n 1,80p f)' '  \xe2\x8e\xbf Waiting'"
+           " 'esc to interrupt';\n"
            "    elif [ \"$FAKE_TMUX_MODE\" = provider_error ]; then\n"
            "      c=0; [ -f '%s' ] && c=$(cat '%s'); c=$((c+1)); echo \"$c\" > '%s';\n"
            "      echo '\xe2\x9c\xbb API error Retrying in 0s attempt '\"$c\"'/10';\n"
@@ -148,6 +153,23 @@ static void test_recv_dead_session(void)
    char buf[8192];
    int rc = cli_session_recv(&s, buf, sizeof(buf), 10000);
    assert(rc == -1);
+}
+
+/* A pane that is STATIC but whose footer still says "esc to interrupt" is a turn
+ * mid-tool (a long-running Bash), not a finished one: recv must NOT finalize it
+ * (which would ship the half-rendered tool call and freeze the webchat). With no
+ * completion it rides the wall-clock bound to -2 instead of a premature rc 0. */
+static void test_recv_busy_footer_not_finalized(void)
+{
+   setenv("FAKE_TMUX_MODE", "busy_tool", 1);
+   cli_session_t s = fake_session();
+   cli_session_set_kind(&s, "claude");
+   char buf[8192];
+   long long t0 = test_mono_ms();
+   int rc = cli_session_recv(&s, buf, sizeof(buf), 1000);
+   long long elapsed = test_mono_ms() - t0;
+   assert(rc == -2); /* never finalized; hit the wall-clock bound */
+   assert(elapsed < 5000);
 }
 
 /* --- cancel / steering-interrupt path --- */
@@ -922,6 +944,10 @@ int main(void)
 
    printf("test_recv_dead_session... ");
    test_recv_dead_session();
+   printf("OK\n");
+
+   printf("test_recv_busy_footer_not_finalized... ");
+   test_recv_busy_footer_not_finalized();
    printf("OK\n");
 
    printf("test_recv_cancel_claude_escape... ");
