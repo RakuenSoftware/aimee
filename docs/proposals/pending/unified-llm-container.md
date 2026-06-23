@@ -9,6 +9,28 @@
   reranker to Ettin ModernBERT — 400m GPU / 68m CPU, both `-fa on`, Qwen3-Reranker
   dropped from the real-time path; E4B-ungated CPU default). See "Decisions
   taken" and "Changelog".
+- **Implementation update (2026-06-23) — P2 `.254` Vulkan serving validation
+  (see [`benchmarks/results/unified-llm/P2-serving-validation.md`](../../../benchmarks/results/unified-llm/P2-serving-validation.md)).**
+  Two design refinements from empirical validation on the 7900XTX:
+  1. **Reranker is served as ENCODER + a gateway-side Dense head, not native
+     `/v1/rerank`.** `cross-encoder/ettin-reranker-{400m,68m}-v1` are
+     sentence-transformers models whose score head (`2_Dense`→GELU→`3_LayerNorm`→
+     `4_Dense`→1) does **not** survive `convert_hf_to_gguf.py` — a naive GGUF is
+     encoder-only and misranks. The validated path: llama.cpp serves the ettin
+     encoder (`/v1/embeddings --pooling cls` on `query</s>doc`), and the gateway
+     applies the ~4 MB Dense head (pure numpy, no torch). Ettin reranks correctly +
+     confidently this way (400m: relevant 8.9 vs irrelevant 1.1). So §2's "native
+     ModernBERT `/v1/rerank`" is amended to "ettin encoder on llama.cpp + the
+     gateway's reranker handler applies the head."
+  2. **Models are BAKED into two images (`aimee-llm-cpu` / `aimee-llm-gpu`), not
+     runtime-fetched** (operator-directed). This supersedes the
+     embedder-runtime-fetch-once posture for this container: each image ships its
+     tier's GGUFs (CPU: Qwen3-Emb-0.6B + ettin-68m encoder + head + gemma-E4B; GPU:
+     Qwen3-Emb-4B + ettin-400m encoder + head + gemma-12B). Turnkey, reproducible,
+     no HF dependency at runtime. The §5 install-time GPU **detection** still selects
+     which image/tier; the four modes (local/forward/external) are unchanged.
+  Embedder validated: Qwen3-Emb-0.6B→1024, 4B→2560 on Vulkan with the required
+  serving flags (no `GGML_ASSERT` crash). Build pin: llama.cpp **b9761**.
 - **Author:** JBailes
 - **Date:** 2026-06-21
 - **Base:** `testing`. Today there are **two** model containers: a torch /

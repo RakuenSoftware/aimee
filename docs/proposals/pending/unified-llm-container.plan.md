@@ -60,10 +60,10 @@ Every packet states which tier verifies it. Nothing GPU- or cutover-tier is auto
 
 | # | Packet | Verifies on |
 |---|--------|-------------|
-| **P1** | **Dim foundation** — `EMBED_MAX_DIM 2560→4000`; extend the drift guard to `(model_id, dim)` for embedder **and** `(model_id, scoring-contract)` for reranker; the `schema_embedding_dim_compat` admission rule | **in-env** (C + unit) |
-| **P2** | **`.254` serving validation (Vulkan)** — run Qwen3-Embedding-0.6B/4B GGUF + Ettin-400m/68m on `.254` GPU via the **Vulkan** llama.cpp build with the pinned flags; confirm dims, `/v1/rerank` correctness + `-fa on`, the no-prompt-cache flags; record a checked-in fixture (`tests/fixtures/pplx_baseline.json` + serving-config hashes) | **.254** (empirical) |
-| **P3** | **Gateway rework** — decompose `embedder-server.py` → router / per-role handlers / wire-adapters (reuse `provider_client`) / child-supervisor shim / observability; `/embed`,`/embed_batch`(512-cap→413),`/rerank`,`/v1/chat/completions`(`stream=true`→typed 400), four-state `/health/{embed,rerank,synth}` | **in-env** (logic unit) + **.254** (against live llama-servers) |
-| **P4** | **`Dockerfile.aimee-llm` (CPU + Vulkan) + compose collapse** — one image (Vulkan llama.cpp + s6 + gateway); delete `Dockerfile.embedder` + the `embedder`/`llm` services → one `aimee-llm` (per-child mem limits, `/dev/dri` GPU passthrough, mTLS) | **CI** (image build + CPU smoke tests) + **.254** (tierd LXC deploy, Vulkan) |
+| **P1** | **Dim foundation** — `EMBED_MAX_DIM 2560→4000`; `(model_id, dim)` embedder + `(model_id, scoring-contract)` reranker drift guard; compat admission rule | **SHIPPED #644** |
+| **P2** | **`.254` Vulkan serving validation** — Qwen3-Emb-0.6B/4B (→1024/2560, flags OK) + Ettin-400m/68m rerank validated; the **reranker recipe = encoder GGUF + gateway Dense head** (native `/v1/rerank` can't carry the ST head); results in `benchmarks/results/unified-llm/P2-serving-validation.md` | **DONE (.254, b9761)** |
+| **P3** | **Gateway rework** — decompose `embedder-server.py` → router / handlers / wire-adapters (reuse `provider_client`) / child-supervisor / observability; `/embed`,`/embed_batch`(512→413),**`/rerank` = embed(CLS) + the ettin Dense head (numpy)**, `/v1/chat/completions`(`stream`→typed 400), four-state health | **in-env** (logic unit) + **.254** |
+| **P4** | **Two BAKED images `aimee-llm-cpu` / `aimee-llm-gpu`** (Vulkan llama.cpp + s6 + gateway + **tier GGUFs + the ettin head weights baked in**); delete `Dockerfile.embedder` + the `embedder`/`llm` services | **CI** (build + CPU smoke) + **.254** (tierd LXC) |
 | **P5** | **`install.sh` GPU detection + model registry/sizing** — detect a GPU + VRAM (sysfs/`rocm-smi`/`nvidia-smi`/`lspci`) → pick the **single Vulkan build** for any vendor (CPU is the explicit final branch); VRAM→registry-row, startup VRAM validation + `gated` state, sizing table + load-order CI test | in-env (logic) + **.254** (AMD/Vulkan branch) |
 | **P6** | **§1a security hardening** — mTLS default + bind-`0.0.0.0` startup assertion, derived `X-Aimee-Scope` RBAC, per-user cred pass-through (`mlock`+memmove zero, no-swap/no-core), circuit breakers, audit row + escape-hatch lint | in-env (unit) + CI (canary/memory-scrape) |
 | **P7** | **Migration / ship-floor gate / cutover** — controlled drop-and-rebuild re-embed, `maintenance`-gate + parity, ship-floor ≥95% (rerank+fusion vs pplx fixture) **pre-cutover in staging on .254**, deploy-tag-revert net | **.254** (live corpus) — operator-gated |
@@ -145,6 +145,15 @@ De-risks every model decision before the gateway/container is built. On `.254`, 
 (`embed`/`embed_batch`/`rerank`/`synth`) · `wire_adapters` (llama.cpp `/v1/*` ↔ aimee
 `/embed`+`/rerank`; openai/anthropic via `provider_client` semantics) · `child_supervisor`
 (shim over s6; mockable) · `observability` (corr-id, per-role/mode metrics, audit row).
+
+- **Rerank handler = encoder embed + the ettin Dense head (P2 finding).** The `/rerank`
+  handler does NOT proxy a native `/v1/rerank` (the ST head doesn't convert). For each
+  `(query, doc)`: call the local ettin **encoder** llama-server `/v1/embeddings`
+  (`query</s>doc`, CLS pooling, batched over the candidate set), then apply the baked-in
+  head `score = (GELU(v @ W2ᵀ) → LayerNorm(γ,β)) @ W4ᵀ + b4` in numpy (~4 MB weights loaded
+  once at startup from the image). Returns the aimee `/rerank` shape. Unit-tested with a
+  recorded encoder-output fixture (no model) asserting the head reproduces the P2 toy-gate
+  scores; `.254`-validated against the live ettin encoder.
 
 - **Pure-logic unit tests (in-env, no model):** mode table (`local-cpu|local-gpu|forward|
   external`) per role; `/embed_batch` **512-cap → 413**; `stream=true` → typed
