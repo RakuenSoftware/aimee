@@ -1,0 +1,29 @@
+# Unit tests for the aimee-llm gateway's numpy components (the ettin reranker head).
+# Separate from the stdlib-only bench-smoke unittest step because these need numpy +
+# safetensors (present in the aimee-llm container; installed here for CI).
+name: gateway-tests
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/aimee_llm_*.py'
+      - 'scripts/tests/test_rerank_head.py'
+      - '.github/workflows/gateway-tests.yml'
+  push:
+    branches: [testing, main]
+    paths:
+      - 'scripts/aimee_llm_*.py'
+      - 'scripts/tests/test_rerank_head.py'
+
+jobs:
+  gateway-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install numpy + safetensors
+        run: pip install --quiet numpy safetensors
+      - name: Rerank-head unit tests
+        run: python -m unittest discover -s scripts/tests -p 'test_rerank_head.py' -v
