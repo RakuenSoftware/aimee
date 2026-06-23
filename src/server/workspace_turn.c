@@ -5,7 +5,7 @@
 #include "workspace_turn.h"
 #include "config.h"
 #include "forge_credentials.h"
-#include "git_host_resolve.h"
+#include "git_cred_inject.h"
 #include "log.h"
 #include "platform_path.h"
 #include "util.h"
@@ -71,17 +71,17 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
       argv[n++] = args[i];
    argv[n] = NULL;
 
-   /* One credential, GH_TOKEN + the GIT_ASKPASS shim: the workspace's brokered
-    * forge token (§4) wins, else the per-host vault token for the remote's host,
-    * else the server identity (§6); none → ambient via the shared provider. */
-   char tok[4096];
-   char **envp = NULL;
+   /* Resolve the git credential through the ONE policy
+    * (git_cred_inject_build_env_for_repo) so the precedence never drifts from the
+    * other call sites: the workspace's brokered forge token (§4) is passed as
+    * preferred_token and wins, else per-host server vault → server identity →
+    * ambient. The policy injects GH_TOKEN + the GIT_ASKPASS shim and wipes its
+    * own token copy. */
+   char tok[4096] = {0};
+   const char *pref = NULL;
    if (wsid && wsid[0] && forge_cred_get(wsid, (long)time(NULL), tok, sizeof(tok)) == 0 && tok[0])
-      envp = forge_cred_build_env_from_token(tok, environ, forge_cred_askpass_shim());
-   else if (git_host_resolve_token(remote, NULL, tok, sizeof(tok)) == 1)
-      envp = forge_cred_build_env_from_token(tok, environ, forge_cred_askpass_shim());
-   else
-      envp = forge_cred_build_server_env(environ, forge_cred_askpass_shim());
+      pref = tok;
+   char **envp = git_cred_inject_build_env_for_repo(NULL, remote, NULL, pref, environ);
    {
       volatile char *p = (volatile char *)tok;
       for (size_t i = 0; i < sizeof(tok); i++)
@@ -93,7 +93,7 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
    if (envp)
    {
       rc = safe_exec_capture_env(argv, envp, &cap, out_cap ? out_cap : 4096);
-      forge_cred_free_env(envp);
+      git_cred_inject_free_env(envp);
    }
    else
    {

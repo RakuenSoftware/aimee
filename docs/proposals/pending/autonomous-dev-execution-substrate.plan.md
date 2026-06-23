@@ -37,7 +37,94 @@ reconciler makes the tree's real drift visible (it may re-scope P2–P5).
 
 ---
 
-## P1 — reconciler static core + acceptance-block schema (THIS PR)
+## P2 — route every git op through the ONE credential policy (§2) — THIS PR
+
+**The defect (architectural).** Aimee already has a single credential-resolution policy:
+`git_cred_inject_build_env_for_repo(principal, remote_url, repo_dir, preferred_token, env)`
+— documented as *"the ONE credential-resolution policy every git network op routes through,
+so the precedence can never drift between call sites"* (precedence: `preferred_token`
+[inline / workspace broker §4] → per-host **server vault** → `principal` **webuser vault**
+→ server identity [App-token / `AIMEE_FORGE_TOKEN`]; injects `GH_TOKEN` + `GIT_ASKPASS` +
+`GIT_TERMINAL_PROMPT=0`, wipes the token). `git_ops.c`, `git_project.c`, `webuser_editor.c`
+already route through it.
+
+But **two call sites bypass it and hand-roll their own ladder**, re-deriving the precedence
+(and so drifting from it — they omit the webuser-vault rung, and neither is auditable as a
+single point):
+- `mcp_git_run` (`src/mcp_git_query.c`) — the executor for **every `gh pr create/merge`**
+  (and clone/fetch/push) in the shared-provider path.
+- `ws_mirror_git_runner` (`src/server/workspace_turn.c`) — the workspace-mirror git runner.
+
+Both do `forge_cred_get(broker) → git_host_resolve_token(per-host) →
+forge_cred_build_server_env(identity)` by hand. **No downstream caller should resolve a
+token.** (Directive, 2026-06-23: *Aimee handles git creds, no downstream processes. Full
+stop.*) The earlier draft of this packet proposed teaching `forge_cred_server_identity` to
+read the vault — that was the wrong layer (it spreads token knowledge) and is dropped.
+
+**Premise-drift the reconciler would flag:** §2 also describes the push gap as still-open
+and names `vault_service_get_server_wrap` as the accessor. Both are stale — push was
+centralised by #605, and the server's OWN token is read via
+`vault_service_get_server_principal` (get_server_wrap is for a webuser dual-wrap entry; see
+`git_host_cred.c`). No code change needed for those; noted so the proposal can be corrected.
+
+### Change
+
+Route both call sites through the one policy, passing the workspace broker token as
+`preferred_token`. This **deletes** the hand-rolled ladder at each site (the
+`git_host_resolve_token` + `forge_cred_build_server_env` + `forge_cred_build_env_from_token`
+calls) and replaces it with a single `git_cred_inject_build_env_for_repo(...)` call:
+
+```c
+char tok[FORGE_TOKEN_MAX] = {0};
+const char *pref = NULL;
+if (wsid && wsid[0] && forge_cred_get(wsid, (long)time(NULL), tok, sizeof tok) == 0 && tok[0])
+   pref = tok;                       /* broker token must win — it is preferred_token */
+char **envp = git_cred_inject_build_env_for_repo(NULL, remote, repo_dir, pref, environ);
+secure_wipe(tok, sizeof tok);        /* caller still wipes its own copy */
+/* envp ? exec under envp + free_env : ambient */
+```
+
+- `mcp_git_run`: `remote=NULL`, `repo_dir=cwd` (the policy reads `origin` itself, matching
+  today's `git_host_resolve_token(NULL, cwd)`).
+- `ws_mirror_git_runner`: `remote=rctx->remote`, `repo_dir=NULL`.
+- `principal=NULL` keeps behaviour **identical** to today (the webuser-vault rung was never
+  reached at these sites); wiring a real turn principal — to additionally honour a webchat
+  user's own vaulted token — is a deliberate follow-up, not smuggled into a refactor.
+
+Behaviour is preserved exactly (broker → per-host vault → server identity → ambient), but
+now there is **one** resolver, so precedence can never drift again and a single audit/policy
+point exists for the driver packet. Net: ~20 lines of duplicated credential logic removed.
+
+### Tests (fully in-env)
+
+- `src/tests/test_mcp_git.c` (or a focused `test_git_cred_inject_routing.c`): assert
+  `mcp_git_run`/the runner builds the git child env via the one policy — with a registered
+  per-host vault token the child env carries `GH_TOKEN`+`GIT_ASKPASS`; with a broker token
+  installed it wins; with neither, envp is NULL (ambient). Driven through the existing
+  test seams (`git_host_resolve_register`, `forge_cred_install`) + a captured-exec stub, so
+  no live forge is touched.
+- A regression assertion that **no `forge_cred_build_server_env` / `git_host_resolve_token`
+  call remains** in `mcp_git_query.c` / `workspace_turn.c` (grep gate in the test or a
+  module-boundary check) — locks in the centralisation.
+
+### Deferred, explicitly labelled
+
+Audit + work-item attribution and branch-policy enforcement (base-off-`testing`, squash,
+no-coauthor) belong to the **driver packet P4**, where the work-item context lives — and the
+one policy is now the single place to hook them. The **live-forge e2e** (`gh pr create/merge`
+against GitHub with the vaulted token) needs network egress + a populated server vault and is
+a `deployment`-tier `validation-pending` check, never auto-claimed.
+
+### Acceptance block (dogfoods P1's §4 gate)
+
+```yaml acceptance
+- {id: 10, tier: mechanical,  check: "make unit-tests TEST=test_mcp_git"}
+- {id: 12, tier: deployment,  check: "ci:live-forge-pr-roundtrip"}
+```
+
+---
+
+## P1 — reconciler static core + acceptance-block schema (shipped, #639)
 
 A single Python lint gate, `scripts/reconcile-proposals.py`, in the established
 `scripts/check-*.py` + `--plant-test` pattern (mirrors `check-proposal-links.py`,

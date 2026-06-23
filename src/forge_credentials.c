@@ -278,14 +278,6 @@ char **forge_cred_build_env(const char *workspace_id, long now_epoch, char *cons
    return envp;
 }
 
-char **forge_cred_build_env_from_token(const char *token, char *const *parent_environ,
-                                       const char *askpass_shim)
-{
-   if (!token || !token[0])
-      return NULL;
-   return build_env_from_token(token, parent_environ, askpass_shim);
-}
-
 /* Optional App installation-token provider, registered by the server at startup
  * (forge_app_token.c). NULL in the thin client and unit tests, where forge
  * identity isn't used — keeping forge_credentials free of any link dependency on
