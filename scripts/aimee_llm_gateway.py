@@ -26,8 +26,12 @@ Config (env):
 The router/modes (local/forward/external) and synth (/v1/chat/completions) land in a
 follow-up; this module is the retrieval gateway + the validated rerank-head path.
 """
+import hmac
 import json
 import os
+import sys
+import threading
+import time
 import urllib.error
 import urllib.request
 
@@ -46,6 +50,22 @@ RERANK_SEP = "</s>"
 SYNTH_URL = os.environ.get("AIMEE_LLM_SYNTH_URL", "").rstrip("/")
 SYNTH_MODE = os.environ.get("AIMEE_LLM_SYNTH_MODE", "local")
 
+# ---- §1a security: the gateway is privileged (it holds upstream creds + routes) ----
+# Bearer auth (constant-time). mTLS is the documented production posture; bearer-with-the
+# controls below is the in-container default. Empty token = auth disabled (dev only),
+# which the bind guard then refuses to expose on 0.0.0.0.
+AUTH_TOKEN = os.environ.get("AIMEE_LLM_AUTH_TOKEN", "")
+# The container binds 0.0.0.0 (reachable by kb/server on the deployment network, as the
+# embedder does today). With no auth the deployment network is the boundary; STRICT_BIND
+# turns the §1a "no unauthenticated wildcard" into a hard startup refuse for operators who
+# want it enforced rather than warned.
+BIND = os.environ.get("AIMEE_LLM_BIND", "0.0.0.0")
+STRICT_BIND = os.environ.get("AIMEE_LLM_STRICT_BIND", "") not in ("", "0", "false")
+# Scope is DERIVED from the authenticated identity, never trusted from the wire. With a
+# single bearer the gateway runs the operator/curator scope; per-user scope arrives with
+# mTLS cert CN / per-user tokens. A caller-supplied X-Aimee-Scope is always rejected.
+SCOPE_DEFAULT = os.environ.get("AIMEE_LLM_SCOPE", "curator")
+
 
 class GatewayError(Exception):
     """Carries an HTTP status + a typed error body."""
@@ -54,6 +74,115 @@ class GatewayError(Exception):
         super().__init__(message)
         self.status = status
         self.body = {"error": {"code": code, "message": message}}
+
+
+# ---- §1a controls (pure; unit-tested without a model/network) ----
+
+def validate_bind(bind, auth_token, strict=False):
+    """The gateway is privileged. A wildcard bind (0.0.0.0 / ::) with NO auth exposes an
+    unauthenticated surface — fine when the deployment network is the boundary (today's
+    posture), but flagged. Returns "ok" / "warn"; raises RuntimeError under `strict` so an
+    operator can enforce §1a's "no unauthenticated wildcard" as a hard startup failure."""
+    wildcard = bind in ("0.0.0.0", "::", "", "0")  # "0" is also INADDR_ANY on Linux
+    if wildcard and not auth_token:
+        if strict:
+            raise RuntimeError(
+                f"STRICT_BIND: refusing wildcard '{bind}' with no AIMEE_LLM_AUTH_TOKEN — set a "
+                "token (or mTLS); this is the §1a bind-address guard")
+        return "warn"
+    return "ok"
+
+
+def check_auth(auth_header):
+    """Constant-time bearer check. No token configured -> open (dev). Configured ->
+    require `Authorization: Bearer <token>`; mismatch/absent -> 401. Never logs the token."""
+    if not AUTH_TOKEN:
+        return
+    presented = ""
+    if auth_header and auth_header[:7].lower() == "bearer ":  # scheme is case-insensitive
+        presented = auth_header[7:].strip()
+    if not hmac.compare_digest(presented, AUTH_TOKEN):
+        raise GatewayError(401, "unauthorized", "missing or invalid bearer token")
+
+
+def derive_scope(get_header):
+    """Scope is DERIVED from the authenticated identity, never trusted from the wire. A
+    caller-supplied X-Aimee-Scope is rejected (anti-spoof). `get_header(name)` returns the
+    request header or None."""
+    if get_header("X-Aimee-Scope"):
+        raise GatewayError(403, "scope_spoof", "X-Aimee-Scope is set by the gateway, not the caller")
+    return SCOPE_DEFAULT
+
+
+_AUDIT_DENY = ("authorization", "cookie", "token", "secret", "key", "body", "prompt",
+               "content", "message", "input", "password")
+
+
+def audit(event, scope, outcome, **meta):
+    """Metadata-only audit line to the named sink (stderr, 'AIMEE-AUDIT' prefix). NEVER
+    content or credentials — only scope/outcome/byte-counts/request-id. A sanitizer drops
+    any meta key that looks credential/content-bearing so the guarantee holds even if a
+    future caller passes the wrong field. The kb/operator log pipeline ships these;
+    encryption + retention are the sink's concern."""
+    rec = {"audit": event, "scope": scope, "outcome": outcome}
+    for k, v in meta.items():
+        if any(bad in k.lower() for bad in _AUDIT_DENY):
+            continue  # never audit a credential/content-bearing field
+        rec[k] = v
+    sys.stderr.write("AIMEE-AUDIT " + json.dumps(rec, sort_keys=True) + "\n")
+    sys.stderr.flush()
+
+
+class CircuitBreaker:
+    """Per-upstream breaker for forward/external (§4): `threshold` consecutive errors OR
+    >50% error rate over `window`s -> open; after `recovery`s a half-open probe; one
+    success closes it. `allow()` is checked before a call; record the outcome after.
+    Clock injected for testing."""
+
+    def __init__(self, threshold=5, window=30.0, recovery=60.0, clock=time.monotonic):
+        self.threshold = threshold
+        self.window = window
+        self.recovery = recovery
+        self.clock = clock
+        self.state = "closed"
+        self._consec = 0
+        self._events = []  # (t, ok) within the window
+        self._opened_at = 0.0
+        self._lock = threading.Lock()  # the gateway is multi-threaded
+
+    def _prune(self, now):
+        self._events = [(t, ok) for (t, ok) in self._events if now - t <= self.window]
+
+    def allow(self):
+        with self._lock:
+            now = self.clock()
+            if self.state == "open":
+                if now - self._opened_at >= self.recovery:
+                    self.state = "half-open"
+                    return True  # single probe
+                return False
+            return True
+
+    def record(self, ok):
+        with self._lock:
+            now = self.clock()
+            self._events.append((now, ok))
+            self._prune(now)
+            if self.state == "half-open":
+                self.state = "closed" if ok else "open"
+                self._opened_at = now
+                if ok:
+                    self._consec = 0
+                return
+            if ok:
+                self._consec = 0
+                return
+            self._consec += 1
+            n = len(self._events)
+            err_rate = sum(1 for _, o in self._events if not o) / n if n else 0
+            if self._consec >= self.threshold or (n >= 4 and err_rate > 0.5):
+                self.state = "open"
+                self._opened_at = now
 
 
 def _http_post_json(url, payload, timeout=120):
@@ -144,11 +273,14 @@ def do_rerank(obj):
     return [float(s) for s in (scores if hasattr(scores, "__len__") else [scores])]
 
 
+_synth_breaker = CircuitBreaker()
+
+
 def do_synth(body):
     """Proxy a /v1/chat/completions request to the configured synth upstream
     (AIMEE_LLM_SYNTH_URL — a local baked llama-server, or a forwarded/external base).
     Streaming is disabled in the first release: `stream:true` -> a typed 400 the client
-    can branch on (rather than an opaque failure)."""
+    can branch on. A circuit breaker (§4) opens on repeated upstream errors -> typed 503."""
     if not isinstance(body, dict):
         raise GatewayError(400, "bad_request", "chat/completions expects a JSON object")
     if body.get("stream"):
@@ -157,7 +289,15 @@ def do_synth(body):
             "streaming is disabled in this release; set stream=false")
     if not SYNTH_URL:
         raise GatewayError(503, "synth_unconfigured", "AIMEE_LLM_SYNTH_URL is not set")
-    return _http_post_json(f"{SYNTH_URL}/v1/chat/completions", body, timeout=300)
+    if not _synth_breaker.allow():
+        raise GatewayError(503, "provider_unavailable", "synth upstream circuit is open")
+    try:
+        out = _http_post_json(f"{SYNTH_URL}/v1/chat/completions", body, timeout=300)
+    except Exception:
+        _synth_breaker.record(False)
+        raise
+    _synth_breaker.record(True)
+    return out
 
 
 def role_state(base, configured=True):
@@ -228,6 +368,10 @@ def build_server():
             n = int(self.headers.get("content-length", "0") or "0")
             raw = self.rfile.read(n) if n else b""
             try:
+                # §1a: every work request is authenticated; the scope is DERIVED from the
+                # identity (a caller-supplied X-Aimee-Scope is rejected).
+                check_auth(self.headers.get("Authorization"))
+                scope = derive_scope(self.headers.get)
                 if path == "/embed":
                     text = raw.decode("utf-8", errors="replace")
                     if not text.strip():
@@ -238,22 +382,31 @@ def build_server():
                 elif path == "/rerank":
                     self._send(200, do_rerank(json.loads(raw or b"[]")))
                 elif path == "/v1/chat/completions":
-                    self._send(200, do_synth(json.loads(raw or b"{}")))
+                    out = do_synth(json.loads(raw or b"{}"))
+                    # §4 audit: metadata-only (scope/outcome/bytes), never content/creds.
+                    audit("chat", scope, "ok", bytes_in=len(raw),
+                          bytes_out=len(json.dumps(out)))
+                    self._send(200, out)
                 else:
                     self._send(404, {"error": "not found"})
             except GatewayError as ge:
+                if path == "/v1/chat/completions":
+                    audit("chat", SCOPE_DEFAULT, "error", code=ge.body["error"]["code"])
                 self._send(ge.status, ge.body)
             except Exception as exc:  # noqa: BLE001
                 self._send(500, {"error": {"code": "internal", "message": str(exc)}})
 
-    return ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    return ThreadingHTTPServer((BIND, PORT), Handler)
 
 
 def main():  # pragma: no cover
-    import sys
-
+    # §1a bind guard: refuse (strict) or warn on an unauthenticated wildcard bind.
+    if validate_bind(BIND, AUTH_TOKEN, STRICT_BIND) == "warn":
+        audit("startup", SCOPE_DEFAULT, "warn", bind=BIND, auth="off",
+              note="unauthenticated wildcard bind; deployment network is the boundary")
     srv = build_server()
-    sys.stderr.write(f"aimee-llm-gateway: :{PORT} embed={EMBED_URL} rerank={RERANK_URL}\n")
+    sys.stderr.write(f"aimee-llm-gateway: {BIND}:{PORT} embed={EMBED_URL} rerank={RERANK_URL} "
+                     f"auth={'on' if AUTH_TOKEN else 'off'}\n")
     sys.stderr.flush()
     srv.serve_forever()
 
