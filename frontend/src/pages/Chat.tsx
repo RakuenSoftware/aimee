@@ -2192,6 +2192,45 @@ export default function Chat() {
     }
   }, [saveTabMessages]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  /* Replace the owning tab's live assistant bubble with the FULL current answer
+   * text from the db1 webchat_live row (the poll's whole-text replace model — no
+   * client reconciliation). Creates the bubble on first content. */
+  const setLiveText = useCallback((refs: ActiveStreamRefs, text: string) => {
+    if (!text) return;
+    applyToOwnerStream(refs.originSid, prev => {
+      const aid = refs.assistantId;
+      if (aid === null) {
+        const newId = nextId();
+        refs.assistantId = newId;
+        return [...prev, { id: newId, type: 'assistant', text }];
+      }
+      return prev.map(m => (m.id === aid ? { ...m, text } : m));
+    });
+  }, [applyToOwnerStream]);
+
+  /* Tail an in-flight turn by polling /api/chat/live every 500ms (the server
+   * mirrors the tmux scrape into a db1 row). Replaces the live bubble's text when
+   * the row's rev advances; stops on done/error/abort. One fetch + at most one
+   * render per tick — this is what makes the webchat cheap instead of pegging a
+   * core on per-token SSE reconciliation. Returns when the turn is finalized. */
+  const pollLiveTurn = useCallback(async (sid: string, refs: ActiveStreamRefs, signal: AbortSignal) => {
+    let sinceRev = 0;
+    while (!signal.aborted) {
+      await new Promise(r => setTimeout(r, 500));
+      if (signal.aborted) return;
+      try {
+        const r = await fetch(`/api/chat/live?sid=${encodeURIComponent(sid)}&since=${sinceRev}`, { signal });
+        if (!r.ok) continue;
+        const d = await r.json() as { changed?: boolean; rev?: number; text?: string; status?: string };
+        if (d.changed) {
+          sinceRev = d.rev ?? sinceRev;
+          setLiveText(refs, String(d.text ?? ''));
+          if (d.status === 'done' || d.status === 'error') return;
+        }
+      } catch { /* transient: keep polling until the turn ends or we're aborted */ }
+    }
+  }, [setLiveText]);
+
   useEffect(() => {
     if (skipNextStreamPersistRef.current) {
       skipNextStreamPersistRef.current = false;
@@ -2571,6 +2610,9 @@ export default function Chat() {
     const controller = new AbortController();
     activeSendAbortRefs.current.set(controller, aimeeSid);
     recomputeWorkCounts();
+    // The live-turn poll (content source); started in the try once the POST is
+    // accepted, settled in finally. Declared here so finally can await it.
+    let livePromise: Promise<void> | null = null;
 
     try {
       const tabIdx = tabsRef.current.findIndex(t => t.aimeeSid === aimeeSid);
@@ -2632,6 +2674,11 @@ export default function Chat() {
         throw new Error(msg);
       }
 
+      // Tail the live turn from db1 on a fixed timer (the content source). The
+      // POST stream below is drained only for lifecycle events; the answer text
+      // comes from here. Runs concurrently; settled in finally.
+      livePromise = pollLiveTurn(aimeeSid, streamRefs, controller.signal);
+
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buf = '';
@@ -2688,7 +2735,21 @@ export default function Chat() {
         return [...prev, { id: nextId(), type: 'assistant', text: `**Connection error:** ${errMsg}` }];
       });
     } finally {
-      flushStreamAppends(); // flush any deltas not covered by turn_end
+      // Let the live poll settle (returns when it sees status done/error, or once
+      // aborted), then do ONE unsignalled final fetch so the text we COMMIT is the
+      // server's final answer, not a value up to one poll-interval stale.
+      if (livePromise) { try { await livePromise; } catch { /* ignore */ } }
+      if (!controller.signal.aborted) {
+        try {
+          const lr = await fetch(`/api/chat/live?sid=${encodeURIComponent(aimeeSid)}&since=0`);
+          if (lr.ok) {
+            const d = await lr.json() as { changed?: boolean; text?: string };
+            if (d.changed && d.text) setLiveText(streamRefs, String(d.text));
+          }
+        } catch { /* ignore */ }
+        saveOwnerStream(streamRefs.originSid); // commit the final text to history
+      }
+      flushStreamAppends();
       activeSendAbortRefs.current.delete(controller);
       recomputeWorkCounts(); // clears this sid's busy/iteration once it has no work left
       streamRefs.assistantId = null;
@@ -2755,17 +2816,6 @@ export default function Chat() {
     }
   }
 
-  /* Buffer one delta (tagged with its owning tab) and ensure a flush is scheduled.
-   * Throttled (not per-frame): the first delta arms a ~100 ms timer and later
-   * deltas coalesce into it, so the whole-list reconcile + markdown re-parse runs
-   * ≈10×/s, not per token — the per-token cadence pegged a core on long turns. */
-  function queueStreamAppend(owner: string, id: number, field: 'text' | 'thinkText', delta: string) {
-    pendingAppendsRef.current.push({ owner, id, field, delta });
-    if (flushTimerRef.current === null) {
-      flushTimerRef.current = window.setTimeout(flushStreamAppends, STREAM_FLUSH_THROTTLE_MS);
-    }
-  }
-
   function handleSseEvent(type: string, data: Record<string, unknown>, streamRefs: ActiveStreamRefs) {
     switch (type) {
       case 'turn_start': {
@@ -2799,45 +2849,15 @@ export default function Chat() {
         }
         break;
       }
-      case 'thinking': {
-        const content = String(data.content ?? '');
-        if (!content) break; // ignore empty thinking deltas
-        if (streamRefs.thinkId === null) {
-          const tid = nextId();
-          streamRefs.thinkId = tid;
-          applyToOwnerStream(streamRefs.originSid, prev => {
-            const aid = streamRefs.assistantId;
-            const idx = aid !== null ? prev.findIndex(m => m.id === aid) : -1;
-            const thinkMsg: StreamMsg = { id: tid, type: 'thinking', text: '', thinkText: content };
-            if (idx > 0) {
-              const next = [...prev];
-              next.splice(idx, 0, thinkMsg);
-              return next;
-            }
-            return [...prev, thinkMsg];
-          });
-        } else {
-          // continuation delta — batch into the per-frame flush
-          queueStreamAppend(streamRefs.originSid, streamRefs.thinkId, 'thinkText', content);
-        }
+      // text/thinking content is no longer reconciled token-by-token here — the
+      // per-token whole-Chat re-render pegged a core. The answer is mirrored
+      // server-side into the db1 webchat_live row and tailed by pollLiveTurn() on
+      // a fixed 500ms timer (one render per tick). These high-frequency SSE events
+      // are ignored; the POST stream is drained only for the low-frequency
+      // lifecycle events (turn_start/session/turn_end/done/error/usage) below.
+      case 'thinking':
+      case 'text':
         break;
-      }
-      case 'text': {
-        const content = String(data.content ?? '');
-        if (!content) break; // ignore empty deltas — don't spawn an empty bubble
-        const aid = streamRefs.assistantId;
-        if (aid === null) {
-          // first token of a segment: create the bubble synchronously so its id
-          // and position are fixed before any batched deltas land in it.
-          const newId = nextId();
-          streamRefs.assistantId = newId;
-          applyToOwnerStream(streamRefs.originSid, prev => [...prev, { id: newId, type: 'assistant', text: content }]);
-        } else {
-          // continuation delta — batch into the per-frame flush
-          queueStreamAppend(streamRefs.originSid, aid, 'text', content);
-        }
-        break;
-      }
       case 'turn_end': {
         // Commit to the stream's OWNING tab (saveOwnerStream flushes first), never
         // whatever tab is active now if the user switched tabs mid-turn.

@@ -135,6 +135,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 
 	// Chat API (session required)
 	mux.HandleFunc("/api/chat/send", s.requireAuth(s.handleChatSend))
+	mux.HandleFunc("/api/chat/live", s.requireAuth(s.handleChatLive))
 	mux.HandleFunc("/api/chat/interrupt", s.requireAuth(s.handleChatInterrupt))
 	mux.HandleFunc("/api/chat/session", s.requireAuth(s.handleChatSession))
 	mux.HandleFunc("/api/chat/projects", s.requireAuth(s.handleChatProjects))

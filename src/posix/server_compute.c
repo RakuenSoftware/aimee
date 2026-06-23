@@ -8,6 +8,7 @@
 #include "cli_session.h" /* cli_session_set_stream_cb — incremental tmux CLI streaming */
 #include "config.h"
 #include "db1.h"
+#include "webchat_live.h" /* db1_webchat_live_set — mirror the live turn for browser polling */
 #include "log.h"
 #include "primary_session_adapter.h"
 #include "workspace.h" /* session_isolation_target — per-session worktree redirect */
@@ -142,6 +143,65 @@ static void ring_publish_event_locked(compute_ctx_t *cctx, const char *event, co
    }
 }
 
+/* Mirror the live turn to db1 (webchat_live) so the browser tails the answer by
+ * polling a row on a fixed timer instead of reconciling the per-token SSE stream
+ * client-side (which pegged a core). Called under write_mutex. webchat (presence)
+ * turns only. Accumulates the answer text across the turn in cctx->live_text and
+ * upserts the row on text growth (throttled to ~4×/s — the browser polls ~2×/s)
+ * and, unthrottled, at every turn boundary so the final/empty/error state is
+ * always written promptly. db1 is SQLITE_OPEN_FULLMUTEX, so concurrent workers
+ * are safe. Best-effort: a db hiccup never breaks the turn (the SSE path still
+ * runs). */
+static void live_mirror_locked(compute_ctx_t *cctx, const char *event, const char *value)
+{
+   if (!cctx->presence_session[0] || !event)
+      return;
+   if (strcmp(event, "turn_start") == 0)
+   {
+      cctx->live_len = 0;
+      if (cctx->live_text)
+         cctx->live_text[0] = '\0';
+      cctx->live_last_ms = 0;
+      db1_webchat_live_set(cctx->presence_session, cctx->presence_turn_id, "", "active");
+   }
+   else if (strcmp(event, "text") == 0 && value && value[0])
+   {
+      size_t vl = strlen(value);
+      size_t need = cctx->live_len + vl + 1;
+      if (need > cctx->live_cap)
+      {
+         size_t ncap = cctx->live_cap ? cctx->live_cap : 1024;
+         while (ncap < need)
+            ncap *= 2;
+         char *nb = realloc(cctx->live_text, ncap);
+         if (!nb)
+            return;
+         cctx->live_text = nb;
+         cctx->live_cap = ncap;
+      }
+      memcpy(cctx->live_text + cctx->live_len, value, vl);
+      cctx->live_len += vl;
+      cctx->live_text[cctx->live_len] = '\0';
+      uint64_t now = mono_ms();
+      if (now - cctx->live_last_ms >= 250)
+      {
+         cctx->live_last_ms = now;
+         db1_webchat_live_set(cctx->presence_session, cctx->presence_turn_id, cctx->live_text,
+                              "active");
+      }
+   }
+   else if (strcmp(event, "turn_end") == 0)
+   {
+      db1_webchat_live_set(cctx->presence_session, cctx->presence_turn_id,
+                           cctx->live_text ? cctx->live_text : "", "done");
+   }
+   else if (strcmp(event, "error") == 0)
+   {
+      db1_webchat_live_set(cctx->presence_session, cctx->presence_turn_id, value ? value : "error",
+                           "error");
+   }
+}
+
 /* Send a streaming event as newline-delimited JSON.
  *
  * The presence-event ring is the UNCONDITIONAL sink (so a turn survives a
@@ -151,6 +211,9 @@ static void ring_publish_event_locked(compute_ctx_t *cctx, const char *event, co
 static int stream_event(compute_ctx_t *cctx, const char *event, const char *key, const char *value)
 {
    pthread_mutex_lock(cctx->write_mutex);
+
+   /* 0) Live-turn db1 mirror — the browser's polling source of truth. */
+   live_mirror_locked(cctx, event, value);
 
    /* 1) Ring publish — unconditional, coalesced, never gated on conn_alive. */
    if (cctx->presence_emit_deltas && cctx->presence_session[0])

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/RakuenSoftware/smoothgui/auth"
@@ -56,6 +57,35 @@ func sseWrite(w http.ResponseWriter, eventType string, data any) {
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
 	}
+}
+
+// handleChatLive proxies the browser's fixed-timer poll to aimee-server's
+// /v1/chat/live: the live (in-flight) turn is mirrored into a db1 row as the
+// tmux pane is scraped, so the browser tails it by polling here instead of
+// reconciling the per-token SSE stream client-side (which pegged a core).
+// GET /api/chat/live?sid=<aimee_session_id>&since=<rev>.
+func (s *server) handleChatLive(w http.ResponseWriter, r *http.Request) {
+	sid := r.URL.Query().Get("sid")
+	if sid == "" {
+		http.Error(w, `{"error":"sid required"}`, http.StatusBadRequest)
+		return
+	}
+	since := 0
+	if v := r.URL.Query().Get("since"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			since = n
+		}
+	}
+	body, _ := json.Marshal(map[string]any{"session_id": sid, "since_rev": since})
+	st, data, err := s.v1RequestWebuser(r.Context(), currentUser(r), http.MethodPost,
+		"/v1/chat/live", body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(st)
+	w.Write(data)
 }
 
 // handleChatSend streams a chat response from aimee-server as SSE.

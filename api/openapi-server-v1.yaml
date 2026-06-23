@@ -3039,6 +3039,44 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /chat/live:
+    post:
+      summary: Poll the live (in-flight) turn for a session
+      description: >
+        The browser's fixed-timer polling source of truth for an in-flight turn.
+        The server mirrors the tmux pane scrape into a per-session db1 row
+        (webchat_live) as the answer streams; clients tail it on a ~500ms timer
+        instead of reconciling the per-token SSE stream. Returns the row only
+        when its monotonic `rev` advanced past `since_rev` (`changed:false`
+        otherwise, so an unchanged turn costs nothing). Requires CAP_SESSION_READ.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id]
+              properties:
+                session_id: { type: string }
+                since_rev: { type: integer }
+      responses:
+        "200":
+          description: Live turn state (when changed) or changed=false
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  changed: { type: boolean }
+                  rev: { type: integer }
+                  turn_id: { type: string }
+                  text: { type: string }
+                  status: { type: string }
+        "403":
+          description: Caller lacks CAP_SESSION_READ
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /completions:
     post:
       summary: Create a text completion

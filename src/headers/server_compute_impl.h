@@ -60,6 +60,16 @@ typedef struct
    size_t delta_len;
    size_t delta_cap;
    uint64_t delta_first_ms;
+   /* Live-turn mirror to db1 (webchat_live): the FULL answer text accumulated so
+    * far this turn, so the browser tails it by polling a db row on a fixed timer
+    * instead of reconciling the SSE stream. Distinct from delta_buf (the ring's
+    * per-flush coalescing buffer, reset every flush); live_text grows for the whole
+    * turn and is reset only at turn_start. live_last_ms throttles the db write.
+    * Freed in compute_ctx_free. */
+   char *live_text;
+   size_t live_len;
+   size_t live_cap;
+   uint64_t live_last_ms;
    /* Per-turn cancel registry entry (turn_registry_t*), cached so the worker can
     * read the atomic cancel flag without locking. NULL for turns not registered
     * (e.g. internal/compact paths). Owned by the registry, not freed here. */

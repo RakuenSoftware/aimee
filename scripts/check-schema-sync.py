@@ -133,6 +133,8 @@ DB1_ONLY_TABLES = {
     "lifecycle_stage_attempt",
     # webchat tab -> Claude --resume id binding (per-user, DB1-owned)
     "webchat_claude_sessions",
+    # live in-flight webchat turn mirror the browser polls (per-session, DB1-owned)
+    "webchat_live",
 }
 
 # Sole DB1-owned lexical index. Lives only in db1/schema.sql.

@@ -23,6 +23,7 @@
 #include "git_project.h"      /* git_project_clone for /v1/workspace/clone (WP-D) */
 #include "webuser_editor.h"   /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
 #include "workspace_scope.h"  /* ws_scope_user_root — project workspace root */
+#include "webchat_live.h"     /* db1_webchat_live_get — the browser's live-turn poll */
 #include "index.h"            /* index_scan_project after a webuser clone (WP-D) */
 #include "aimee_home.h"       /* aimee_home — proposal artifact dir for /v1/dev/submit */
 #include "wfe_engine.h"       /* wfe_work_item_create — POST /v1/dev/submit intake */
@@ -1090,6 +1091,55 @@ static int rh_workspace_projects(const route_req_t *rq, char *resp, int cap)
    return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
 }
 
+/* POST /v1/chat/live {session_id, since_rev} — the browser's polling source of
+ * truth for an in-flight turn. The server mirrors the tmux pane scrape into the
+ * db1 webchat_live row as the answer streams; the browser tails it on a fixed
+ * ~500ms timer instead of reconciling the per-token SSE stream client-side (which
+ * pegged a core). Returns the row ONLY when its monotonic rev advanced past
+ * since_rev, so an unchanged turn returns changed:false and the browser does no
+ * work. CAP_SESSION_READ (a session read, like /events). */
+static int rh_chat_live(const route_req_t *rq, char *resp, int cap)
+{
+   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
+   if (!body || !cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "invalid JSON body");
+   }
+   const cJSON *jsid = cJSON_GetObjectItemCaseSensitive(body, "session_id");
+   const cJSON *jsince = cJSON_GetObjectItemCaseSensitive(body, "since_rev");
+   const char *sid = (cJSON_IsString(jsid) && jsid->valuestring) ? jsid->valuestring : NULL;
+   long long since = cJSON_IsNumber(jsince) ? (long long)jsince->valuedouble : -1;
+   if (!sid || !sid[0])
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "session_id required");
+   }
+   char *turn_id = NULL, *text = NULL, *status = NULL;
+   long long rev = 0;
+   int found = db1_webchat_live_get(sid, since, &turn_id, &text, &status, &rev);
+   cJSON_Delete(body);
+   cJSON *out = cJSON_CreateObject();
+   cJSON_AddBoolToObject(out, "changed", found == 1);
+   if (found == 1)
+   {
+      cJSON_AddNumberToObject(out, "rev", (double)rev);
+      cJSON_AddStringToObject(out, "turn_id", turn_id ? turn_id : "");
+      cJSON_AddStringToObject(out, "text", text ? text : "");
+      cJSON_AddStringToObject(out, "status", status ? status : "");
+   }
+   else
+      cJSON_AddNumberToObject(out, "rev", (double)since); /* echo the cursor back */
+   free(turn_id);
+   free(text);
+   free(status);
+   char *s = cJSON_PrintUnformatted(out);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(out);
+   return (n > 0 && n < cap) ? 200 : err_json(resp, cap, 500, "live response too large");
+}
+
 /* POST /v1/workspace/session-dir {project, session_id} — resolve the absolute
  * directory the given session acts in for `project`: that session's isolated
  * sibling worktree (off the default branch, created on demand) when session_id is
@@ -1710,6 +1760,9 @@ static const http_route_t g_v1_routes[] = {
     /* Steering: stop the in-flight turn + queue a follow-up the server
      * auto-continues (streamed to the session's /events). */
     {"POST", "/v1/chat/interrupt", NULL, RM_EXACT, "chat.interrupt", 0, rh_dispatch_op},
+    /* The browser's fixed-timer poll for the live turn (db1 webchat_live mirror),
+     * replacing client-side SSE reconciliation. */
+    {"POST", "/v1/chat/live", NULL, RM_EXACT, NULL, CAP_SESSION_READ, rh_chat_live},
 
     /* Server-hosted Claude PTY session (terminal forwarding). All consume model
      * budget (spawn/drive claude), so they map to the chat capability. The
