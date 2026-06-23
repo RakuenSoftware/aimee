@@ -20,7 +20,10 @@ static wfe_merge_result_t g_merge;
 /* the pr_ref the downstream gates were called with (last seen), so a test can
  * assert pr.open's ref reaches gate.ci / check.mergeable / merge. */
 static char g_seen_pr[160];
-static void see_pr(const char *p) { snprintf(g_seen_pr, sizeof g_seen_pr, "%s", p ? p : ""); }
+static void see_pr(const char *p)
+{
+   snprintf(g_seen_pr, sizeof g_seen_pr, "%s", p ? p : "");
+}
 static wfe_ci_status_t m_ci(const char *r, const char *p)
 {
    (void)r;
@@ -208,15 +211,15 @@ int main(void)
    g_merge = WFE_MERGE_OK;
    g_seen_pr[0] = '\0';
    assert(run_fresh("i") == 1);
-   assert(strcmp(g_seen_pr, "PR#42") == 0);    /* the real PR ref propagated */
-   assert(strcmp(g_seen_pr, g_last_id) != 0);  /* and it is NOT the work-item id */
+   assert(strcmp(g_seen_pr, "PR#42") == 0);   /* the real PR ref propagated */
+   assert(strcmp(g_seen_pr, g_last_id) != 0); /* and it is NOT the work-item id */
 
    /* J: open succeeds but yields a junk (empty) ref -> pr.open fails closed; the
     *    merge gates are never reached, so no wrong-ref query and no merge. */
    wfe_set_forge_provider(&MOCK_OPENBAD);
    g_seen_pr[0] = '\0';
-   assert(run_fresh("j") != 1);            /* not merged */
-   assert(g_seen_pr[0] == '\0');           /* gates never ran */
+   assert(run_fresh("j") != 1);  /* not merged */
+   assert(g_seen_pr[0] == '\0'); /* gates never ran */
 
    /* K: open fails outright -> same fail-closed guarantee. */
    wfe_set_forge_provider(&MOCK_OPENFAIL);
