@@ -43,17 +43,12 @@ static const char *tool_choice_name(const cJSON *tc, int openai_shape)
    return jo_cstr(tc, "name");
 }
 
-int gateway_policy_apply_request(cJSON *req, int tools_openai_shape)
+int gateway_policy_strip_tools(cJSON *tools, int tools_openai_shape)
 {
-   cJSON *tools;
    cJSON *t;
    int stripped = 0;
 
-   if (!req || !prevent_subagents_enabled())
-      return 0;
-
-   tools = cJSON_GetObjectItemCaseSensitive(req, "tools");
-   if (!cJSON_IsArray(tools))
+   if (!cJSON_IsArray(tools) || !prevent_subagents_enabled())
       return 0;
 
    for (t = tools->child; t;)
@@ -68,7 +63,19 @@ int gateway_policy_apply_request(cJSON *req, int tools_openai_shape)
       }
       t = next;
    }
+   return stripped;
+}
 
+int gateway_policy_apply_request(cJSON *req, int tools_openai_shape)
+{
+   cJSON *tools;
+   int stripped;
+
+   if (!req)
+      return 0;
+
+   tools = cJSON_GetObjectItemCaseSensitive(req, "tools");
+   stripped = gateway_policy_strip_tools(tools, tools_openai_shape);
    if (!stripped)
       return 0;
 

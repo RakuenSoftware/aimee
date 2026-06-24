@@ -18,4 +18,13 @@ struct cJSON;
  * number of tools stripped (0 = no-op / policy off), for the caller's audit row. */
 int gateway_policy_apply_request(struct cJSON *req, int tools_openai_shape);
 
+/* Strip subagent-spawning tool entries from a bare `tools` array, in place — the
+ * array core of gateway_policy_apply_request, for ingresses that carry `tools` as a
+ * standalone array rather than inside a request object (e.g. the OpenAI /v1/responses
+ * path). Config-gated identically (no-op unless `gateway_prevent_subagents`). Does
+ * NOT touch any enclosing tool_choice or drop the array when emptied — the caller
+ * owns those (a fully-stripped array should be omitted from the provider request).
+ * Returns the number of entries removed (0 = no-op / policy off / not an array). */
+int gateway_policy_strip_tools(struct cJSON *tools, int tools_openai_shape);
+
 #endif /* DEC_GATEWAY_POLICY_H */

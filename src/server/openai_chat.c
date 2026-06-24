@@ -32,7 +32,8 @@
 #include "cJSON.h"
 #include "agent_tools.h" /* agent_tools_set_tool_event_cb — /v1/runs tool events */
 #include "agent_types.h"
-#include "memory.h" /* memory_embed_text */
+#include "gateway_policy.h" /* gateway_policy_strip_tools — OpenAI-ingress tool policing */
+#include "memory.h"         /* memory_embed_text */
 #include "request_context.h"
 #include "response_dedup.h"
 #include "token_tracker.h"
@@ -873,8 +874,19 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    char extra_headers[512];
    agent_build_extra_headers(agent, extra_headers, sizeof(extra_headers));
 
+   /* Gateway tool policing on the inbound OpenAI-ingress (/v1/responses) tools,
+    * before the provider request is built — the OpenAI-side counterpart to the
+    * /v1/messages policing in anthropic_http.c. `tools` is a bare OpenAI-shape
+    * function array. No-op unless a policy is configured. If every tool is
+    * stripped, omit the array entirely (don't forward `tools: []`). The stripped
+    * array stays owned/freed by the caller. */
+   cJSON *eff_tools = tools;
+   gateway_policy_strip_tools(eff_tools, 1);
+   if (eff_tools && cJSON_GetArraySize(eff_tools) == 0)
+      eff_tools = NULL;
+
    int tok = agent_request_max_tokens(agent, max_tokens);
-   cJSON *req = driver->build_request(agent, messages, tools, system_prompt, tok, temperature);
+   cJSON *req = driver->build_request(agent, messages, eff_tools, system_prompt, tok, temperature);
    if (!req)
       return -1;
    char *body = cJSON_PrintUnformatted(req);

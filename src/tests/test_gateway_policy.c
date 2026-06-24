@@ -102,6 +102,48 @@ static void test_policy_off_noop(void)
    PASS("policy_off_noop");
 }
 
+/* Bare-array strip (OpenAI /v1/responses seam): subagent removed in place, count
+ * returned, surviving tools kept, no enclosing req/tool_choice touched. */
+static void test_strip_tools_bare_array(void)
+{
+   g_prevent = 1;
+   cJSON *tools = cJSON_Parse("[{\"type\":\"function\",\"function\":{\"name\":\"Read\"}},"
+                              "{\"type\":\"function\",\"function\":{\"name\":\"Task\"}}]");
+   int n = gateway_policy_strip_tools(tools, 1);
+   assert(n == 1);
+   assert(cJSON_GetArraySize(tools) == 1);
+   assert(strcmp(cJSON_GetObjectItem(cJSON_GetArrayItem(tools, 0), "function")->child->valuestring,
+                 "Read") == 0);
+   cJSON_Delete(tools);
+   PASS("strip_tools_bare_array");
+}
+
+/* Bare-array strip, all removed: returns count, leaves an empty array (the caller
+ * is responsible for omitting it from the provider request). */
+static void test_strip_tools_emptied(void)
+{
+   g_prevent = 1;
+   cJSON *tools = cJSON_Parse("[{\"type\":\"function\",\"function\":{\"name\":\"Agent\"}}]");
+   int n = gateway_policy_strip_tools(tools, 1);
+   assert(n == 1);
+   assert(cJSON_GetArraySize(tools) == 0);
+   cJSON_Delete(tools);
+   PASS("strip_tools_emptied");
+}
+
+/* Bare-array strip, policy off / NULL: no-op. */
+static void test_strip_tools_off_and_null(void)
+{
+   g_prevent = 0;
+   cJSON *tools = cJSON_Parse("[{\"type\":\"function\",\"function\":{\"name\":\"Task\"}}]");
+   assert(gateway_policy_strip_tools(tools, 1) == 0);
+   assert(cJSON_GetArraySize(tools) == 1);
+   cJSON_Delete(tools);
+   g_prevent = 1;
+   assert(gateway_policy_strip_tools(NULL, 1) == 0);
+   PASS("strip_tools_off_and_null");
+}
+
 int main(void)
 {
    printf("test_gateway_policy:\n");
@@ -109,6 +151,9 @@ int main(void)
    test_empty_tools_dropped();
    test_openai_strip();
    test_policy_off_noop();
+   test_strip_tools_bare_array();
+   test_strip_tools_emptied();
+   test_strip_tools_off_and_null();
    printf("all gateway_policy tests passed\n");
    return 0;
 }
