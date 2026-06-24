@@ -722,3 +722,163 @@ void anthropic_stream_free(anthropic_stream_xlate_t *st)
 {
    free(st);
 }
+
+/* --- Buffered response replay as Anthropic SSE (P2c streaming) -------------
+ *
+ * The streaming /v1/messages paths take this route when
+ * `gateway_prevent_subagents` is ON: the upstream reply is buffered to
+ * completion, the police function compacts `parsed.calls[]`, and this
+ * helper replays the policed struct as a well-formed Anthropic SSE
+ * sequence — so the client sees the same wire shape it would have seen
+ * from the per-block translator, just buffered. Mirrors the wire shape
+ * produced by `anthropic_response_from_parsed` (same call_count-derivation
+ * rules, same usage fields). Pure (no I/O). */
+
+static void replay_emit(anthropic_sse_emit_fn emit, void *ctx, const char *event, cJSON *obj)
+{
+   char *json = cJSON_PrintUnformatted(obj);
+   if (json && emit)
+   {
+      emit(ctx, event, json);
+   }
+   free(json);
+   cJSON_Delete(obj);
+}
+
+static cJSON *make_message_start(const char *msg_id, const char *model, const parsed_response_t *p)
+{
+   cJSON *o = cJSON_CreateObject();
+   cJSON *msg;
+   cJSON *usage;
+   cJSON_AddStringToObject(o, "type", "message_start");
+   msg = cJSON_AddObjectToObject(o, "message");
+   cJSON_AddStringToObject(msg, "id", (msg_id && msg_id[0]) ? msg_id : "msg_aimee");
+   cJSON_AddStringToObject(msg, "type", "message");
+   cJSON_AddStringToObject(msg, "role", "assistant");
+   cJSON_AddStringToObject(msg, "model", (model && model[0]) ? model : "aimee-primary");
+   usage = cJSON_AddObjectToObject(msg, "usage");
+   cJSON_AddNumberToObject(usage, "input_tokens", p ? p->prompt_tokens : 0);
+   if (p && p->cache_write_tokens > 0)
+      cJSON_AddNumberToObject(usage, "cache_creation_input_tokens", p->cache_write_tokens);
+   if (p && p->cache_read_tokens > 0)
+      cJSON_AddNumberToObject(usage, "cache_read_input_tokens", p->cache_read_tokens);
+   return o;
+}
+
+static cJSON *make_content_block_start_text(int index)
+{
+   cJSON *o = cJSON_CreateObject();
+   cJSON *cb;
+   cJSON_AddStringToObject(o, "type", "content_block_start");
+   cJSON_AddNumberToObject(o, "index", index);
+   cb = cJSON_AddObjectToObject(o, "content_block");
+   cJSON_AddStringToObject(cb, "type", "text");
+   cJSON_AddStringToObject(cb, "text", "");
+   return o;
+}
+
+static cJSON *make_content_block_delta_text(int index, const char *text)
+{
+   cJSON *o = cJSON_CreateObject();
+   cJSON *d;
+   cJSON_AddStringToObject(o, "type", "content_block_delta");
+   cJSON_AddNumberToObject(o, "index", index);
+   d = cJSON_AddObjectToObject(o, "delta");
+   cJSON_AddStringToObject(d, "type", "text_delta");
+   cJSON_AddStringToObject(d, "text", text ? text : "");
+   return o;
+}
+
+static cJSON *make_content_block_stop(int index)
+{
+   cJSON *o = cJSON_CreateObject();
+   cJSON_AddStringToObject(o, "type", "content_block_stop");
+   cJSON_AddNumberToObject(o, "index", index);
+   return o;
+}
+
+static cJSON *make_content_block_start_tool(int index, const char *id, const char *name)
+{
+   cJSON *o = cJSON_CreateObject();
+   cJSON *cb;
+   cJSON_AddStringToObject(o, "type", "content_block_start");
+   cJSON_AddNumberToObject(o, "index", index);
+   cb = cJSON_AddObjectToObject(o, "content_block");
+   cJSON_AddStringToObject(cb, "type", "tool_use");
+   cJSON_AddStringToObject(cb, "id", id ? id : "toolu_aimee");
+   cJSON_AddStringToObject(cb, "name", name ? name : "");
+   cJSON_AddObjectToObject(cb, "input");
+   return o;
+}
+
+static cJSON *make_content_block_delta_input_json(int index, const char *partial_json)
+{
+   cJSON *o = cJSON_CreateObject();
+   cJSON *d;
+   cJSON_AddStringToObject(o, "type", "content_block_delta");
+   cJSON_AddNumberToObject(o, "index", index);
+   d = cJSON_AddObjectToObject(o, "delta");
+   cJSON_AddStringToObject(d, "type", "input_json_delta");
+   cJSON_AddStringToObject(d, "partial_json", partial_json ? partial_json : "{}");
+   return o;
+}
+
+static cJSON *make_message_delta(const parsed_response_t *p, int n_calls)
+{
+   cJSON *o = cJSON_CreateObject();
+   cJSON *u;
+   const char *stop =
+       (p && p->stop_reason[0]) ? p->stop_reason : (n_calls > 0 ? "tool_use" : "end_turn");
+   cJSON_AddStringToObject(o, "type", "message_delta");
+   cJSON *delta = cJSON_AddObjectToObject(o, "delta");
+   cJSON_AddStringToObject(delta, "stop_reason", stop);
+   cJSON_AddStringToObject(delta, "stop_sequence", "");
+   u = cJSON_AddObjectToObject(o, "usage");
+   cJSON_AddNumberToObject(u, "output_tokens", p ? p->completion_tokens : 0);
+   if (p && p->cache_read_tokens > 0)
+      cJSON_AddNumberToObject(u, "cache_read_input_tokens", p->cache_read_tokens);
+   return o;
+}
+
+void emit_message_as_sse(const parsed_response_t *parsed, const char *msg_id, const char *model,
+                         anthropic_sse_emit_fn emit, void *ctx)
+{
+   int n_calls;
+   int index;
+
+   if (!emit)
+      return;
+   n_calls = parsed ? parsed->call_count : 0;
+
+   replay_emit(emit, ctx, "message_start", make_message_start(msg_id, model, parsed));
+
+   /* Always emit one text content_block_start / (text_delta)? / stop pair —
+    * even when parsed->content is empty, matching the buffered renderer's
+    * empty-text-block fallback. */
+   index = 0;
+   replay_emit(emit, ctx, "content_block_start", make_content_block_start_text(index));
+   if (parsed && parsed->content && parsed->content[0])
+   {
+      replay_emit(emit, ctx, "content_block_delta",
+                  make_content_block_delta_text(index, parsed->content));
+   }
+   replay_emit(emit, ctx, "content_block_stop", make_content_block_stop(index));
+
+   if (parsed)
+   {
+      int i;
+      for (i = 0; i < n_calls; i++)
+      {
+         const parsed_tool_call_t *c = &parsed->calls[i];
+         index++;
+         replay_emit(emit, ctx, "content_block_start",
+                     make_content_block_start_tool(index, c->id, c->name));
+         replay_emit(emit, ctx, "content_block_delta",
+                     make_content_block_delta_input_json(index, c->arguments));
+         replay_emit(emit, ctx, "content_block_stop", make_content_block_stop(index));
+      }
+   }
+
+   replay_emit(emit, ctx, "message_delta", make_message_delta(parsed, n_calls));
+   replay_emit(emit, ctx, "message_stop", cJSON_CreateObject());
+}

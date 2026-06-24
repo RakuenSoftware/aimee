@@ -178,6 +178,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-anthropic-ingress \
                $(TESTPREFIX)/unit-test-anthropic-http \
                $(TESTPREFIX)/unit-test-anthropic-http-p2c \
+               $(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c \
                $(TESTPREFIX)/unit-test-gateway-policy \
                $(TESTPREFIX)/unit-test-gateway-pipeline \
                $(TESTPREFIX)/unit-test-hud \
@@ -1646,6 +1647,14 @@ $(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/tests/test_anthropic_http.o $(
 # don't have to deal with guardrails dependencies; this test exercises the
 # full wiring end-to-end.
 $(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/tests/test_anthropic_http_p2c.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/gateway_pipeline.o $(OBJDIR)/gateway_policy.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+# P2c streaming integration test: linked against the REAL gateway_policy.o
+# so the streaming policy branch in messages_stream runs as in production.
+# Same minimal-link pattern as the buffered P2c test above; the SSE replay
+# helper + police function exercise the buffered-fetch + replay flow when
+# `gateway_prevent_subagents` is ON.
+$(TESTPREFIX)/unit-test-anthropic-http-streaming-p2c: $(OBJDIR)/tests/test_anthropic_http_streaming_p2c.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/gateway_pipeline.o $(OBJDIR)/gateway_policy.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-gateway-policy: $(OBJDIR)/tests/test_gateway_policy.o $(OBJDIR)/gateway_policy.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o

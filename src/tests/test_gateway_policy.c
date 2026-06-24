@@ -416,6 +416,78 @@ static void test_predicate_is_denied_tool(void)
    PASS("predicate_is_denied_tool");
 }
 
+/* Partial drop: upstream's max_tokens truncation signal is preserved verbatim
+ * when at least one tool_use block survives. Pinned to prevent the
+ * "re-derive from call_count and lose the upstream's reason" regression. */
+static void test_police_preserves_upstream_stop_reason_when_calls_remain(void)
+{
+   parsed_response_t p;
+   const char *names[] = {"Task", "web_search"};
+   const char *ids[] = {"t1", "t2"};
+   g_prevent = 1;
+   memset(&p, 0, sizeof(p));
+   p.call_count = 2;
+   p.stop_reason[0] = '\0';
+   snprintf(p.calls[0].id, sizeof(p.calls[0].id), "%s", ids[0]);
+   snprintf(p.calls[0].name, sizeof(p.calls[0].name), "%s", names[0]);
+   p.calls[0].arguments = strdup("{}");
+   snprintf(p.calls[1].id, sizeof(p.calls[1].id), "%s", ids[1]);
+   snprintf(p.calls[1].name, sizeof(p.calls[1].name), "%s", names[1]);
+   p.calls[1].arguments = strdup("{}");
+   int drops = gateway_policy_police_parsed_response(&p);
+   assert(drops == 1);
+   assert(p.call_count == 1);
+   assert(strcmp(p.calls[0].name, "web_search") == 0);
+   /* The upstream didn't set a reason (so the police derives "tool_use"
+    * from the surviving call_count — the standard default). The renderer's
+    * line 435 fallback is now bypassed (parsed->stop_reason[0] != '\0'). */
+   assert(strcmp(p.stop_reason, "tool_use") == 0);
+   /* Now seed an upstream-supplied reason and re-run: must be preserved
+    * verbatim, not re-derived. */
+   free(p.calls[0].arguments);
+   memset(&p, 0, sizeof(p));
+   p.call_count = 2;
+   snprintf(p.stop_reason, sizeof(p.stop_reason), "%s", "max_tokens");
+   snprintf(p.calls[0].id, sizeof(p.calls[0].id), "%s", ids[0]);
+   snprintf(p.calls[0].name, sizeof(p.calls[0].name), "%s", names[0]);
+   p.calls[0].arguments = strdup("{}");
+   snprintf(p.calls[1].id, sizeof(p.calls[1].id), "%s", ids[1]);
+   snprintf(p.calls[1].name, sizeof(p.calls[1].name), "%s", names[1]);
+   p.calls[1].arguments = strdup("{}");
+   drops = gateway_policy_police_parsed_response(&p);
+   assert(drops == 1);
+   assert(p.call_count == 1);
+   assert(strcmp(p.stop_reason, "max_tokens") == 0);
+   free(p.calls[0].arguments);
+   PASS("police_preserves_upstream_stop_reason_when_calls_remain");
+}
+
+/* All-dropped: the police function rewrites to "end_turn" regardless of the
+ * upstream's reason. The wire's tool_use reply became an end_turn reply (the
+ * police removed every block); the client now sees end_turn. The upstream's
+ * `max_tokens` / `stop_sequence` / `refusal` reason is replaced. */
+static void test_police_rewrites_end_turn_when_all_calls_dropped_regardless_of_reason(void)
+{
+   parsed_response_t p;
+   const char *names[] = {"Task"};
+   const char *ids[] = {"t1"};
+   g_prevent = 1;
+   memset(&p, 0, sizeof(p));
+   p.call_count = 1;
+   snprintf(p.stop_reason, sizeof(p.stop_reason), "%s", "max_tokens");
+   snprintf(p.calls[0].id, sizeof(p.calls[0].id), "%s", ids[0]);
+   snprintf(p.calls[0].name, sizeof(p.calls[0].name), "%s", names[0]);
+   p.calls[0].arguments = strdup("{}");
+   int drops = gateway_policy_police_parsed_response(&p);
+   assert(drops == 1);
+   assert(p.call_count == 0);
+   /* All-dropped rewrites to "end_turn" regardless of the upstream's
+    * max_tokens — the client now sees end_turn, not max_tokens, because
+    * the wire is a different shape. */
+   assert(strcmp(p.stop_reason, "end_turn") == 0);
+   PASS("police_rewrites_end_turn_when_all_calls_dropped_regardless_of_reason");
+}
+
 int main(void)
 {
    printf("test_gateway_policy:\n");
@@ -440,6 +512,8 @@ int main(void)
    test_police_keeps_stop_reason_when_calls_remain();
    test_police_policy_off_is_noop();
    test_predicate_is_denied_tool();
+   test_police_preserves_upstream_stop_reason_when_calls_remain();
+   test_police_rewrites_end_turn_when_all_calls_dropped_regardless_of_reason();
    printf("all gateway_policy tests passed\n");
    return 0;
 }

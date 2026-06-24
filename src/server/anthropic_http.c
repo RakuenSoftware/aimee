@@ -756,6 +756,74 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
                                       agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
                                       jo_num(req, "temperature", 1.0), 1);
 
+   /* P2c streaming: when gateway_prevent_subagents is ON, the streaming
+    * path becomes buffered — we fetch the upstream reply to completion,
+    * run the police function on the parsed struct (same logic as the
+    * buffered /v1/messages path), and replay the policed reply as a
+    * well-formed Anthropic SSE sequence via emit_message_as_sse. Off (the
+    * default) falls through to today's incremental relay/translator. */
+   if (gateway_prevent_subagents_enabled())
+   {
+      char *buf_resp = NULL;
+      int buf_status;
+      parsed_response_t parsed;
+      memset(&parsed, 0, sizeof(parsed));
+      buf_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &buf_resp,
+                                   ag->timeout_ms, extra[0] ? extra : NULL);
+      if (buf_status == 200 && buf_resp)
+      {
+         cJSON *provider_resp = cJSON_Parse(buf_resp);
+         if (provider_resp)
+         {
+            if (driver && driver->parse_response)
+               driver->parse_response(provider_resp, buf_resp, &parsed);
+            else
+               agent_parse_response_openai(provider_resp, &parsed);
+            gateway_policy_police_parsed_response(&parsed);
+            emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
+            /* Cost accounting (mirror the buffered path). */
+            if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
+                agent_ingress_accounting_enabled())
+            {
+               agent_result_t ar;
+               memset(&ar, 0, sizeof(ar));
+               snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
+               snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
+               snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
+               snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
+               ar.prompt_tokens = parsed.prompt_tokens;
+               ar.completion_tokens = parsed.completion_tokens;
+               ar.cache_write_tokens = parsed.cache_write_tokens;
+               ar.cache_read_tokens = parsed.cache_read_tokens;
+               agent_record_token_audit(&ar, "", "anthropic-ingress");
+            }
+            agent_free_parsed_response(&parsed);
+         }
+         else
+         {
+            char err[256];
+            snprintf(err, sizeof(err),
+                     "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
+                     "\"message\":\"primary provider returned an unparseable reply\"}}");
+            if (emit)
+               emit(ctx, "error", err);
+         }
+         cJSON_Delete(provider_resp);
+      }
+      else
+      {
+         char err[256];
+         snprintf(err, sizeof(err),
+                  "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
+                  "\"message\":\"primary provider call failed with status %d\"}}",
+                  buf_status);
+         if (emit)
+            emit(ctx, "error", err);
+      }
+      free(buf_resp);
+      goto cleanup;
+   }
+
    if (driver_is_anthropic(driver))
    {
       anthropic_relay_ctx_t relay;

@@ -468,6 +468,229 @@ static void test_request_headers_passthrough(void)
    PASS("request_headers_passthrough");
 }
 
+/* --- emit_message_as_sse (P2c streaming replay) ------------------------ */
+
+/* Captured SSE events, in order. The replay helper emits one entry per
+ * call to the emit callback; tests assert on (event, payload) pairs. */
+#define REPLAY_CAP 32
+typedef struct
+{
+   char events[REPLAY_CAP][32];
+   char data[REPLAY_CAP][1024];
+   int count;
+} replay_capture_t;
+
+static void replay_capture(void *ctx, const char *event, const char *data)
+{
+   replay_capture_t *c = (replay_capture_t *)ctx;
+   assert(c->count < REPLAY_CAP);
+   snprintf(c->events[c->count], sizeof(c->events[c->count]), "%s", event);
+   snprintf(c->data[c->count], sizeof(c->data[c->count]), "%s", data);
+   c->count++;
+}
+
+static parsed_response_t seed_parsed_for_replay(int n_calls, const char *names[], const char *ids[],
+                                                const char *stop_reason, const char *content)
+{
+   parsed_response_t p;
+   int i;
+   memset(&p, 0, sizeof(p));
+   p.call_count = n_calls;
+   if (stop_reason)
+      snprintf(p.stop_reason, sizeof(p.stop_reason), "%s", stop_reason);
+   p.content = content ? strdup(content) : NULL;
+   p.prompt_tokens = 17;
+   p.completion_tokens = 23;
+   p.cache_write_tokens = 0;
+   p.cache_read_tokens = 0;
+   for (i = 0; i < n_calls; i++)
+   {
+      snprintf(p.calls[i].id, sizeof(p.calls[i].id), "%s", ids[i]);
+      snprintf(p.calls[i].name, sizeof(p.calls[i].name), "%s", names[i]);
+      p.calls[i].arguments = strdup("{\"k\":\"v\"}");
+   }
+   return p;
+}
+
+static void free_parsed_for_replay(parsed_response_t *p)
+{
+   int i;
+   free(p->content);
+   for (i = 0; i < p->call_count; i++)
+      free(p->calls[i].arguments);
+}
+
+/* Text-only reply: message_start, one text content_block_start / delta /
+ * stop, message_delta, message_stop. */
+static void test_emit_message_as_sse_replays_text_only(void)
+{
+   replay_capture_t cap;
+   parsed_response_t p = seed_parsed_for_replay(0, NULL, NULL, "end_turn", "hello");
+   memset(&cap, 0, sizeof(cap));
+   emit_message_as_sse(&p, "msg_t1", "claude-test", replay_capture, &cap);
+   assert(cap.count == 6);
+   assert(strcmp(cap.events[0], "message_start") == 0);
+   assert(strcmp(cap.events[1], "content_block_start") == 0);
+   assert(strcmp(cap.events[2], "content_block_delta") == 0);
+   assert(strcmp(cap.events[3], "content_block_stop") == 0);
+   assert(strcmp(cap.events[4], "message_delta") == 0);
+   assert(strcmp(cap.events[5], "message_stop") == 0);
+   /* The text_delta payload carries the content string. */
+   assert(strstr(cap.data[2], "\"text_delta\"") != NULL);
+   assert(strstr(cap.data[2], "\"hello\"") != NULL);
+   /* message_delta carries stop_reason verbatim from parsed (end_turn). */
+   assert(strstr(cap.data[4], "\"stop_reason\":\"end_turn\"") != NULL);
+   /* message_start carries input_tokens = 17, output_tokens not yet (it's
+    * in message_delta). */
+   assert(strstr(cap.data[0], "\"input_tokens\":17") != NULL);
+   free_parsed_for_replay(&p);
+   PASS("emit_message_as_sse_replays_text_only");
+}
+
+/* Empty content (the "no_text" + "calls_0" combo): one empty text block
+ * is emitted, matching the buffered renderer's empty-text-block fallback. */
+static void test_emit_message_as_sse_replays_empty_content_as_single_text_block(void)
+{
+   replay_capture_t cap;
+   parsed_response_t p = seed_parsed_for_replay(0, NULL, NULL, "end_turn", NULL);
+   memset(&cap, 0, sizeof(cap));
+   emit_message_as_sse(&p, "msg_e1", "claude-test", replay_capture, &cap);
+   assert(cap.count == 5); /* start, text_start, text_stop, message_delta, message_stop */
+   assert(strcmp(cap.events[0], "message_start") == 0);
+   assert(strcmp(cap.events[1], "content_block_start") == 0);
+   assert(strcmp(cap.events[2], "content_block_stop") == 0);
+   assert(strcmp(cap.events[3], "message_delta") == 0);
+   assert(strcmp(cap.events[4], "message_stop") == 0);
+   free_parsed_for_replay(&p);
+   PASS("emit_message_as_sse_replays_empty_content_as_single_text_block");
+}
+
+/* Single surviving tool_use (post-police): message_start, empty text
+ * block, tool_use content_block_start + input_json_delta + stop,
+ * message_delta, message_stop. */
+static void test_emit_message_as_sse_replays_surviving_tool_calls(void)
+{
+   replay_capture_t cap;
+   const char *names[] = {"web_search"};
+   const char *ids[] = {"toolu_test_1"};
+   parsed_response_t p = seed_parsed_for_replay(1, names, ids, "tool_use", NULL);
+   memset(&cap, 0, sizeof(cap));
+   emit_message_as_sse(&p, "msg_s1", "claude-test", replay_capture, &cap);
+   /* start, text_start, text_stop, tool_start, input_delta, tool_stop, md, ms = 8 */
+   assert(cap.count == 8);
+   assert(strcmp(cap.events[3], "content_block_start") == 0); /* tool_use */
+   assert(strstr(cap.data[3], "\"type\":\"tool_use\"") != NULL);
+   assert(strstr(cap.data[3], "\"name\":\"web_search\"") != NULL);
+   assert(strstr(cap.data[3], "\"index\":1") != NULL);        /* index 1 (after text) */
+   assert(strcmp(cap.events[4], "content_block_delta") == 0); /* input_json_delta */
+   assert(strstr(cap.data[4], "\"input_json_delta\"") != NULL);
+   free_parsed_for_replay(&p);
+   PASS("emit_message_as_sse_replays_surviving_tool_calls");
+}
+
+/* Text + surviving tool_use in the same reply: text block index 0,
+ * tool_use block index 1. */
+static void test_emit_message_as_sse_replays_text_and_tool_calls(void)
+{
+   replay_capture_t cap;
+   const char *names[] = {"web_search"};
+   const char *ids[] = {"toolu_1"};
+   parsed_response_t p = seed_parsed_for_replay(1, names, ids, "tool_use", "context");
+   memset(&cap, 0, sizeof(cap));
+   emit_message_as_sse(&p, "msg_b1", "claude-test", replay_capture, &cap);
+   /* start, text_start, text_delta, text_stop, tool_start, input_delta,
+    * tool_stop, md, ms = 9 */
+   assert(cap.count == 9);
+   assert(strcmp(cap.events[1], "content_block_start") == 0);
+   assert(strstr(cap.data[1], "\"index\":0") != NULL);
+   assert(strstr(cap.data[1], "\"type\":\"text\"") != NULL);
+   assert(strcmp(cap.events[4], "content_block_start") == 0);
+   assert(strstr(cap.data[4], "\"index\":1") != NULL);
+   assert(strstr(cap.data[4], "\"type\":\"tool_use\"") != NULL);
+   assert(strstr(cap.data[4], "\"name\":\"web_search\"") != NULL);
+   free_parsed_for_replay(&p);
+   PASS("emit_message_as_sse_replays_text_and_tool_calls");
+}
+
+/* Multiple surviving tool_use blocks: police has already compacted to
+ * zero or more; verify per-block indices are correct (0, 1, 2...) and the
+ * original names are preserved. */
+static void test_emit_message_as_sse_replays_multiple_surviving_tool_calls(void)
+{
+   replay_capture_t cap;
+   const char *names[] = {"web_search", "Read"}; /* police already dropped the middle one */
+   const char *ids[] = {"t1", "t3"};
+   parsed_response_t p = seed_parsed_for_replay(2, names, ids, "tool_use", NULL);
+   memset(&cap, 0, sizeof(cap));
+   emit_message_as_sse(&p, "msg_m1", "claude-test", replay_capture, &cap);
+   /* start, text_start, text_stop, [tool_start, input_delta, tool_stop] x2,
+    * md, ms = 1 + 2 + 6 + 1 + 1 = 11 */
+   assert(cap.count == 11);
+   /* Two tool_use content_block_start events at indices 3 and 6 (events 3, 6). */
+   assert(strstr(cap.data[3], "\"index\":1") != NULL); /* first tool, index 1 */
+   assert(strstr(cap.data[3], "\"name\":\"web_search\"") != NULL);
+   assert(strstr(cap.data[6], "\"index\":2") != NULL); /* second tool, index 2 */
+   assert(strstr(cap.data[6], "\"name\":\"Read\"") != NULL);
+   free_parsed_for_replay(&p);
+   PASS("emit_message_as_sse_replays_multiple_surviving_tool_calls");
+}
+
+/* Cache tokens propagate: cache_creation in message_start.usage (input
+ * side) and cache_read in message_delta.usage (output side). Distinct
+ * fields per Anthropic's wire format. */
+static void test_emit_message_as_sse_propagates_usage(void)
+{
+   replay_capture_t cap;
+   parsed_response_t p = seed_parsed_for_replay(0, NULL, NULL, "end_turn", "hi");
+   p.prompt_tokens = 100;
+   p.completion_tokens = 50;
+   p.cache_write_tokens = 25; /* Anthropic: cache_creation_input_tokens */
+   p.cache_read_tokens = 10;
+   memset(&cap, 0, sizeof(cap));
+   emit_message_as_sse(&p, "msg_u1", "claude-test", replay_capture, &cap);
+   /* message_start.usage carries input_tokens + cache_creation + cache_read. */
+   assert(strstr(cap.data[0], "\"input_tokens\":100") != NULL);
+   assert(strstr(cap.data[0], "\"cache_creation_input_tokens\":25") != NULL);
+   assert(strstr(cap.data[0], "\"cache_read_input_tokens\":10") != NULL);
+   /* message_delta.usage carries output_tokens + cache_read. */
+   assert(strstr(cap.data[4], "\"output_tokens\":50") != NULL);
+   assert(strstr(cap.data[4], "\"cache_read_input_tokens\":10") != NULL);
+   free_parsed_for_replay(&p);
+   PASS("emit_message_as_sse_propagates_usage");
+}
+
+/* Pinned B2 fix: upstream `max_tokens` with surviving non-subagent calls
+ * → wire carries "max_tokens" (NOT "end_turn", NOT "tool_use" — the
+ * partial-drop preservation rule). The all-dropped case rewrites to
+ * "end_turn" (covered separately by the police function's own unit
+ * test); this test pins the partial-drop replay shape. */
+static void test_emit_message_as_sse_preserves_max_tokens(void)
+{
+   replay_capture_t cap;
+   const char *names[] = {"Task", "web_search"};
+   const char *ids[] = {"t1", "t2"};
+   parsed_response_t p = seed_parsed_for_replay(2, names, ids, "max_tokens", "");
+   memset(&cap, 0, sizeof(cap));
+   /* After the police function runs (the streaming path runs it before
+    * calling us), only web_search survives; the upstream's max_tokens is
+    * preserved verbatim. We simulate the post-police state directly. */
+   free_parsed_for_replay(&p);
+   const char *names2[] = {"web_search"};
+   const char *ids2[] = {"t2"};
+   p = seed_parsed_for_replay(1, names2, ids2, "max_tokens", "");
+   memset(&cap, 0, sizeof(cap));
+   emit_message_as_sse(&p, "msg_mt", "claude-test", replay_capture, &cap);
+   /* The replay must carry stop_reason="max_tokens" verbatim — NOT
+    * re-derive "tool_use" from call_count > 0. */
+   for (int i = 0; i < cap.count; i++)
+   {
+      if (strcmp(cap.events[i], "message_delta") == 0)
+         assert(strstr(cap.data[i], "\"stop_reason\":\"max_tokens\"") != NULL);
+   }
+   free_parsed_for_replay(&p);
+   PASS("emit_message_as_sse_preserves_max_tokens");
+}
+
 int main(void)
 {
    printf("test_anthropic_ingress:\n");
@@ -489,6 +712,13 @@ int main(void)
    test_stream_tool_call();
    test_stream_text_then_tool();
    test_request_headers_passthrough();
+   test_emit_message_as_sse_replays_text_only();
+   test_emit_message_as_sse_replays_empty_content_as_single_text_block();
+   test_emit_message_as_sse_replays_surviving_tool_calls();
+   test_emit_message_as_sse_replays_text_and_tool_calls();
+   test_emit_message_as_sse_replays_multiple_surviving_tool_calls();
+   test_emit_message_as_sse_propagates_usage();
+   test_emit_message_as_sse_preserves_max_tokens();
    printf("all anthropic_ingress tests passed\n");
    return 0;
 }

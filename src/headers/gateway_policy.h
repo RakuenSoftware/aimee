@@ -52,16 +52,33 @@ int gateway_policy_pin_model(struct cJSON *req, const char *agent_model);
  * / RemoteTrigger, etc., all mapped to "Subagent"). */
 int gateway_policy_is_denied_tool(const char *name);
 
+/* True when the response-side tool-policing policy is enabled. Cheap — one
+ * config_load + one bool read. The streaming /v1/messages path uses this as a
+ * single-branch dispatcher: when ON, the upstream is buffered + policed +
+ * replayed as SSE (via emit_message_as_sse); when OFF (the default), today's
+ * incremental relay/translator runs unchanged. */
+int gateway_prevent_subagents_enabled(void);
+
 /* Mutate `p` in place: memmove-compact denied entries out of `p->calls[]` so the
  * surviving `p->calls[0..p->call_count-1]` is a contiguous prefix of the original
  * (no realloc, no flag-and-skip). `p->call_count` is decremented to match.
- * `p->stop_reason` is rewritten to "tool_use" when `call_count > 0`, "end_turn"
- * when `call_count == 0` — the same mapping `anthropic_response_from_parsed`
- * (src/server/anthropic_ingress.c:435) re-derives from `call_count`, so the
- * post-police struct is wire-consistent with the renderer's mapping. The
- * `stop_reason` write also feeds the pre-existing `agent_record_token_audit` row
- * in `messages_buffered()` (it reads `parsed.stop_reason`), so the audit log
- * matches the wire.
+ * `p->stop_reason` is finalized as follows:
+ *   - All-dropped (call_count == 0) → "end_turn" (the wire's tool_use reply
+ *     became an end_turn reply).
+ *   - Upstream set a reason (stop_reason[0] != '\0', e.g. "max_tokens",
+ *     "stop_sequence", "refusal", "tool_use") AND some calls survive →
+ *     preserve verbatim. Partial drops must not lose the upstream's
+ *     truncation signal by re-deriving from call_count.
+ *   - Upstream didn't set a reason AND some calls survive → "tool_use"
+ *     (derive from call_count, since the upstream's omission means
+ *     "default tool_use").
+ * The renderer's `n_calls > 0 ? "tool_use" : "end_turn"` line 435 of
+ * anthropic_ingress.c is replaced (in this PR's diff) with
+ * `parsed->stop_reason[0] ? parsed->stop_reason : n_calls > 0 ? "tool_use"
+ * : "end_turn"` so the post-police struct's stop_reason is wire-consistent
+ * with the wire shape. The `stop_reason` value also feeds the
+ * pre-existing `agent_record_token_audit` row in `messages_buffered()` (it
+ * reads `parsed.stop_reason`), so the audit log matches the wire.
  *
  * Fields the function does NOT touch (by design): `id`, `name`, `is_tool_call`,
  * `content`, `assistant_message`, `prompt_tokens`, `completion_tokens`,

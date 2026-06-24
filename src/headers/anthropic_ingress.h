@@ -86,6 +86,33 @@ void anthropic_stream_feed_openai(anthropic_stream_xlate_t *st, const char *data
 /* Close any open content block and emit message_delta + message_stop. */
 void anthropic_stream_finish(anthropic_stream_xlate_t *st);
 
+/* Replay a fully-parsed provider reply (`anthropic_response_from_parsed`
+ * equivalent) as a well-formed Anthropic SSE sequence. Used by the streaming
+ * /v1/messages paths when the gateway response-side tool-policing policy
+ * (`gateway_prevent_subagents`) is active: the upstream is buffered to
+ * completion, the police function compacts `parsed.calls[]`, and this helper
+ * replays the policed struct as if the per-block translator had been
+ * streaming. Pure (no I/O); deterministic; unit-testable with a captured
+ * emit. Mirrors `anthropic_response_from_parsed`'s wire shape:
+ *   message_start (with usage: input_tokens, cache_creation_input_tokens,
+ *                  cache_read_input_tokens if non-zero)
+ *   one text content_block_start/.../stop pair — always emitted, even when
+ *                  parsed.content is empty/NULL, matching the buffered
+ *                  renderer's empty-text-block fallback (lines 427-433 of
+ *                  src/server/anthropic_ingress.c). Index 0.
+ *   one tool_use content_block_start + (input_json_delta)* + stop per
+ *                  surviving parsed.calls[0..call_count-1] entry. Indices
+ *                  1, 2, ... in original order.
+ *   message_delta (with parsed.stop_reason verbatim — see the police
+ *                  function's contract in gateway_policy.h — and usage
+ *                  output_tokens + cache_read_input_tokens if non-zero).
+ *   message_stop.
+ * `emit` matches the streaming translator's emit signature
+ * (`anthropic_sse_emit_fn`). `ctx` is the caller's transport context
+ * (passed through to `emit`). */
+void emit_message_as_sse(const parsed_response_t *parsed, const char *msg_id, const char *model,
+                         anthropic_sse_emit_fn emit, void *ctx);
+
 /* Read the usage tapped from the upstream OpenAI stream: the prompt count
  * (upstream-reported if seen, else the begin-time estimate), the completion
  * count, and any cached prompt tokens. Any out pointer may be NULL. Lets the

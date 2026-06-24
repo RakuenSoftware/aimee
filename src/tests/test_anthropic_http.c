@@ -239,6 +239,12 @@ int gateway_policy_pin_model(cJSON *req, const char *agent_model)
    (void)agent_model;
    return 0; /* pin is off in these shape tests; covered by test_gateway_policy */
 }
+/* P2c streaming branch gate: off by default in these whitebox shape tests
+ * (the real predicate is exercised by test_anthropic_http-p2c). */
+int gateway_prevent_subagents_enabled(void)
+{
+   return 0;
+}
 /* P2c (response-side tool policing) is exercised by its own dedicated
  * integration test (unit-test-anthropic-http-p2c) which links the real
  * gateway_policy.o. In these whitebox shape tests we stub it to a no-op

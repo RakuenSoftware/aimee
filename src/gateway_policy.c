@@ -20,7 +20,7 @@ static int is_subagent_tool_name(const char *name)
    return name && name[0] && strcmp(guardrails_canonical_tool_name(name), "Subagent") == 0;
 }
 
-static int prevent_subagents_enabled(void)
+int gateway_prevent_subagents_enabled(void)
 {
    config_t cfg;
    config_load(&cfg);
@@ -57,7 +57,7 @@ int gateway_policy_strip_tools(cJSON *tools, int tools_openai_shape)
    cJSON *t;
    int stripped = 0;
 
-   if (!cJSON_IsArray(tools) || !prevent_subagents_enabled())
+   if (!cJSON_IsArray(tools) || !gateway_prevent_subagents_enabled())
       return 0;
 
    for (t = tools->child; t;)
@@ -132,17 +132,15 @@ int gateway_policy_is_denied_tool(const char *name)
 {
    if (!name || !name[0])
       return 0;
-   if (!prevent_subagents_enabled())
+   if (!gateway_prevent_subagents_enabled())
       return 0;
    return is_subagent_tool_name(name);
 }
 
 /* Response-side tool policing: memmove-compact denied entries out of `p->calls[]`
- * and rewrite `p->stop_reason` to mirror what `anthropic_response_from_parsed`
- * would render from the surviving `call_count` (line 435 of
- * src/server/anthropic_ingress.c: `n_calls > 0 ? "tool_use" : "end_turn"`). See
- * gateway_policy.h for the full set of fields the function does NOT touch and
- * the rationale for the in-place memmove compaction. */
+ * and finalize `p->stop_reason` so it agrees with the wire emitted by
+ * `anthropic_response_from_parsed`. See gateway_policy.h for the stop-reason
+ * rules and the full set of fields the function does NOT touch. */
 int gateway_policy_police_parsed_response(parsed_response_t *p)
 {
    int drops = 0;
@@ -150,7 +148,7 @@ int gateway_policy_police_parsed_response(parsed_response_t *p)
 
    if (!p)
       return 0;
-   if (!prevent_subagents_enabled())
+   if (!gateway_prevent_subagents_enabled())
       return 0;
 
    n = p->call_count;
@@ -178,10 +176,20 @@ int gateway_policy_police_parsed_response(parsed_response_t *p)
       w++;
    }
    p->call_count = w;
-   /* Mirror the renderer's own stop_reason mapping so the audit row at
-    * messages_buffered line 483 (which reads parsed.stop_reason) agrees with
-    * the wire emitted by anthropic_response_from_parsed (which re-derives
-    * from call_count). */
-   snprintf(p->stop_reason, sizeof(p->stop_reason), "%s", w > 0 ? "tool_use" : "end_turn");
+   /* Stop-reason finalization: if the upstream did not set a reason
+    * (stop_reason[0] == '\0'), derive from the surviving call_count so the
+    * audit row and the renderer's fallback (line 435 of anthropic_ingress.c,
+    * `parsed->stop_reason[0] ? parsed->stop_reason : n_calls > 0 ? "tool_use"
+    * : "end_turn"`) agree on a non-empty value. If the upstream DID set a
+    * reason (e.g. "max_tokens" for a truncated reply, or "stop_sequence" /
+    * "refusal"), preserve it verbatim — see the doc comment above for the
+    * partial-drop preservation rationale. The all-dropped case always
+    * rewrites to "end_turn" because the wire's "tool_use" reply became an
+    * "end_turn" reply (the model emitted a tool_use reply; the police
+    * removed every block; the client now sees end_turn). */
+   if (p->stop_reason[0] == '\0' || w == 0)
+   {
+      snprintf(p->stop_reason, sizeof(p->stop_reason), "%s", w > 0 ? "tool_use" : "end_turn");
+   }
    return drops;
 }
