@@ -22,7 +22,36 @@ swap→honor. Live-validated against a mock upstream.
 
 ## P2 — `gateway_pipeline.{c,h}` + tool-policing
 
-New CORE module `src/server/gateway_pipeline.{c,h}`. Canonical request/response IR
+**Split into verifiable slices** (a packet this size is not one safe PR):
+
+- **P2a — request pipeline scaffold (✅ this PR).** New core module
+  `src/gateway_pipeline.{c,h}` (NOT under `src/server/`, alongside the already-core
+  `src/gateway_policy.c`, so the ingresses and `/v1/runs` share one seam). Canonical
+  **request** IR `gw_request_t { cJSON *raw (BORROWED — stages mutate in place, never
+  free); const void *driver, *ag (opaque, so the module never derefs server types —
+  resolves the layering question); gw_api_t serving_api; int parity, stream }`, a
+  typed stage `int(*)(gw_request_t*, void*)` returning an intervention count (≥0) or
+  <0 (short-circuits), and `gw_pipeline_run_request()`. Two phases kept distinct:
+  mutation stages run through the pipeline, then `translate_request` is the **terminal
+  render** (it produces the provider shape rather than mutating `raw`, so stages
+  always see the full untranslated request — lossless for same-API passthrough). The
+  Anthropic ingress's two inline preludes (memory inject + tool policing, both paths)
+  are routed through the pipeline; **zero behavior change** (the existing
+  `test_anthropic_http` passthrough/translate suite still passes). Pure runner tests
+  in `test_gateway_pipeline.c` (order, sum, short-circuit, null-safety). Request-side
+  tool-policing itself (`gateway_policy_apply_request`) was already shipped; P2a only
+  formalizes the seam it plugs into.
+- **P2b — model-pin policy + buffered response policing.** Add the response-side IR
+  + response stages; model-pin policy (pin served model to `ag->model` / allowlist,
+  resolves Finding C); buffered `tool_use` drop/rewrite with an audit row.
+- **P2c — streaming response policing (both SSE shapes).** Anthropic SSE via the
+  block-aware `anthropic_stream_xlate` (buffer a `tool_use` block to
+  `content_block_stop` before emit/drop/rewrite); OpenAI SSE per-`index`
+  `tool_calls` buffering. Per-tool/severity action.
+
+### P2 design reference (carried into P2a/b/c)
+
+New CORE module `src/gateway_pipeline.{c,h}`. Canonical request/response IR
 + a typed stage interface (`apply_request`, `apply_response`, and a streaming
 `on_block` variant). Port the existing translation in behind it; the ingresses call
 the pipeline.

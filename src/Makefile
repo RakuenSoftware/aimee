@@ -317,7 +317,7 @@ DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
 # --- Layer 1: Data & policy (memory, index, rules, guardrails, workspace) ---
 DATA_SRCS = rel_types.c memory_fact_gate.c memory_extract_patterns.c memory_pii_gate.c memory_core.c memory_logic.c memory_effective.c memory_health.c memory_conflict.c memory_context.c memory_assemble.c memory_advanced.c memory_prospective.c memory_lifecycle.c memory_directives.c memory_maintenance.c memory_graph.c memory_graph_fusion.c memory_scan.c memory_improve.c memory_episodes.c \
             index.c extractors.c extractors_extra.c extractors_new_langs.c css_analyze.c css_oracle.c css_render_oracle.c css_render_cmd.c \
-            context_discover.c tasks.c learning_router.c learning_implicit.c dogfood.c working_profile.c guardrails.c guardrails_orchestrator.c guardrails_tdd.c workflow_learn.c session_state.c session_briefing.c file_safety.c branch_ownership.c integrity_gate.c conversation_context.c payload_rewrite.c guardrails_semantic.c gateway_policy.c \
+            context_discover.c tasks.c learning_router.c learning_implicit.c dogfood.c working_profile.c guardrails.c guardrails_orchestrator.c guardrails_tdd.c workflow_learn.c session_state.c session_briefing.c file_safety.c branch_ownership.c integrity_gate.c conversation_context.c payload_rewrite.c guardrails_semantic.c gateway_policy.c gateway_pipeline.c \
             workspace.c worktree_gc.c workspace_manifest.c workspace_handle.c server/agent_config.c cmd_describe.c \
             history.c role_templates.c skill.c skill_rollback.c skill_review.c skill_curator.c conversation.c \
             trajectory_export.c trajectory_batch.c \
