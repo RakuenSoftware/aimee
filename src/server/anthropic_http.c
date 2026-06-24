@@ -467,6 +467,36 @@ static int ingress_write_tmp(const char *path, const char *data)
    return (w == n) ? 0 : -1;
 }
 
+/* Create a fresh, unpredictable, 0600 temp file (mkstemp: O_CREAT|O_EXCL, no
+ * symlink-follow) and write `data`; returns its path in `path_out`. Avoids the
+ * symlink/TOCTOU hazard of a predictable /tmp name on a shared host. Returns 0
+ * on success. */
+static int ingress_mktemp_write(char *path_out, size_t cap, const char *data)
+{
+   char tmpl[] = "/tmp/aimee-cli-sys-XXXXXX";
+   int fd = mkstemp(tmpl);
+   FILE *f;
+   size_t n, w;
+   if (fd < 0)
+      return -1;
+   f = fdopen(fd, "w");
+   if (!f)
+   {
+      close(fd);
+      unlink(tmpl);
+      return -1;
+   }
+   n = data ? strlen(data) : 0;
+   w = n ? fwrite(data, 1, n, f) : 0;
+   if (fclose(f) != 0 || w != n)
+   {
+      unlink(tmpl);
+      return -1;
+   }
+   snprintf(path_out, cap, "%s", tmpl);
+   return 0;
+}
+
 /* --- Warm CLI pane pool (latency, opt-in) --------------------------------
  *
  * Cold-starting a claude TUI per /v1/messages turn costs ~10-30s (process spawn
@@ -595,7 +625,7 @@ static int ingress_pool_checkout(const char *sys, const char *model, const char 
       snprintf(s->agent, sizeof(s->agent), "%s", agent ? agent : "");
       snprintf(s->name, sizeof(s->name), "aimee-pool-%u-%d",
                ingress_pool_key_hash(sys, model, agent), free_idx);
-      snprintf(s->path, sizeof(s->path), "/tmp/aimee-pool-sys-%d.txt", free_idx);
+      /* s->path stays empty: a secure temp file is mkstemp'd lazily on first use. */
       snprintf(name_out, name_cap, "%s", s->name);
       snprintf(path_out, path_cap, "%s", s->path);
       *is_reuse = 0;
@@ -699,15 +729,31 @@ static char *ingress_cli_run(cJSON *req, agent_t *ag, const char *msg_id, char *
    exec_system = sysp ? sysp : "";
    if (sysp && sysp[0] && ingress_agent_is_claude_cli(ag))
    {
-      if (pool_idx < 0) /* one-shot: temp path keyed by request id (pool fills its own) */
-         snprintf(sys_path, sizeof(sys_path), "/tmp/aimee-ingress-sys-%s.txt", msg_id);
-      if (ingress_write_tmp(sys_path, sysp) == 0)
+      int okfile;
+      if (pool_idx >= 0)
+      {
+         /* The slot owns a secure temp file for its lifetime: mkstemp it on first
+          * use, then rewrite content in place on reuse (sticky /tmp + 0600 keep
+          * it ours). Unlinked when the slot is evicted. */
+         if (g_pool[pool_idx].path[0] == '\0')
+            okfile = ingress_mktemp_write(g_pool[pool_idx].path, sizeof(g_pool[pool_idx].path),
+                                          sysp) == 0;
+         else
+            okfile = ingress_write_tmp(g_pool[pool_idx].path, sysp) == 0;
+         if (okfile)
+            snprintf(sys_path, sizeof(sys_path), "%s", g_pool[pool_idx].path);
+      }
+      else
+      {
+         okfile = ingress_mktemp_write(sys_path, sizeof(sys_path), sysp) == 0;
+         have_sys_file = okfile; /* one-shot: unlinked after the turn */
+      }
+      if (okfile)
       {
          const char *base = ag->cli_cmd[0] ? ag->cli_cmd : "claude";
          snprintf(cli_agent.cli_cmd, sizeof(cli_agent.cli_cmd),
                   "%s --append-system-prompt \"$(cat %s)\"", base, sys_path);
          exec_system = ""; /* applied via the flag; do not also concat */
-         have_sys_file = 1;
       }
    }
 
