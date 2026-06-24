@@ -41,13 +41,49 @@ swap→honor. Live-validated against a mock upstream.
   in `test_gateway_pipeline.c` (order, sum, short-circuit, null-safety). Request-side
   tool-policing itself (`gateway_policy_apply_request`) was already shipped; P2a only
   formalizes the seam it plugs into.
-- **P2b — model-pin policy + buffered response policing.** Add the response-side IR
-  + response stages; model-pin policy (pin served model to `ag->model` / allowlist,
-  resolves Finding C); buffered `tool_use` drop/rewrite with an audit row.
-- **P2c — streaming response policing (both SSE shapes).** Anthropic SSE via the
-  block-aware `anthropic_stream_xlate` (buffer a `tool_use` block to
-  `content_block_stop` before emit/drop/rewrite); OpenAI SSE per-`index`
-  `tool_calls` buffering. Per-tool/severity action.
+- **P2b — model-pin policy (✅ shipped #671).** Config-gated `gateway_pin_model`
+  request stage, resolves Finding C. (The "buffered response policing" originally
+  grouped here moves to P2c so response policing ships buffered+streaming together,
+  per the user proposal-gate decision — never buffered-first.)
+- **P2c — response-side tool-policing (buffered + streaming together).**
+  Defense-in-depth backstop: drop/rewrite a disallowed `tool_use` the served model
+  emits despite request-side stripping. Config-gated (`gateway_prevent_subagents`),
+  default off.
+
+  **Approach (roundtable-reviewed 2026-06-24, 0 blocking — chose B over A).**
+  - *Why not the proposal's per-block streaming (A):* the Anthropic-native streaming
+    path is a **raw byte relay** (`anthropic_relay_*`) with **no** SSE block parser,
+    and `anthropic_stream_xlate` consumes only *OpenAI* chunks — so per-block policing
+    of the Anthropic path needs a brand-new incremental Anthropic-SSE parser. High
+    risk for a backstop control.
+  - *Chosen (B) — buffer-when-active:* one policing implementation reused across all
+    three response paths. When the policy is **active**, both streaming paths buffer
+    the full upstream reply, police the assembled result (same logic as buffered),
+    then **replay** it as a well-formed Anthropic SSE sequence. When the policy is
+    **off (default)**, today's incremental relay/translator is unchanged (zero
+    latency cost). Closes the `stream:true` bypass (streaming *is* policed when
+    active); the only cost is loss of incremental delivery **while the backstop is
+    on** — documented; per-block streaming is a follow-up optimization.
+
+  **Implementation units.**
+  1. `gateway_policy_is_denied_tool(name)` — predicate: policy-on ∧ subagent-tool
+     (reuses `guardrails_canonical_tool_name`). Plus a centralized
+     `police_parsed_response(parsed)` that drops denied `tool_call`s from
+     `parsed_response_t.calls[]` and **recomputes `stop_reason`** (`tool_use` →
+     `end_turn` when no calls remain). Audit row per drop.
+  2. Buffered path (`messages_buffered`): police the parsed reply before
+     `anthropic_response_from_parsed`.
+  3. Streaming paths (`messages_stream`): when the policy is active, take the
+     **buffered** upstream flow (non-stream call → parse → police) and emit via a new
+     `emit_message_as_sse(message, emit, ctx)` replay helper that mirrors the
+     `anthropic_stream_xlate` event shapes (message_start; per content block
+     content_block_start/delta/stop; message_delta with recomputed stop_reason +
+     **propagated usage** incl. cache_read; message_stop). Refactor the shared
+     "get policed parsed reply" out of `messages_buffered` so both paths use one
+     implementation.
+  4. Tests: police drops denied calls + recomputes stop_reason; usage propagated;
+     `emit_message_as_sse` produces a valid event sequence (incl. the all-tools-
+     dropped → end_turn case); policy-off is byte-neutral on both paths.
 
 ### P2 design reference (carried into P2a/b/c)
 
