@@ -1004,7 +1004,162 @@ static void kb_cmd_curator_profile(app_ctx_t *ctx, int argc, char **argv)
    }
 }
 
+/* §2c: aimee kb reembed [--confirm] [--force] [--dry-run] [--json]
+ * [--target-dim N] [--clear-maintenance] — the double-gated dim-change reset.
+ * Always shows the plan (a server-side dry run) first; --confirm executes
+ * (interactively requiring the operator to type the target dim unless --force),
+ * resetting the vector store to the configured/derived (or --target-dim) embedding
+ * dim and re-triggering re-embed. --clear-maintenance is a standalone escape hatch
+ * that force-clears a stuck reembed_in_progress marker (re-enables search) without
+ * a reset. Requires kb.reembed_on_dim_change=true (except --clear-maintenance). */
+static void kb_cmd_reembed(app_ctx_t *ctx, int argc, char **argv)
+{
+   static const char *bool_flags[] = {"confirm",           "force", "dry-run", "json",
+                                      "clear-maintenance", NULL};
+   opt_parsed_t opts;
+   opt_parse(argc, argv, bool_flags, &opts);
+   int want_confirm = opt_get_flag(&opts, "confirm");
+   int force = opt_get_flag(&opts, "force");
+   int dry = opt_get_flag(&opts, "dry-run");
+   int json_out = opt_get_flag(&opts, "json") || (ctx && ctx->json_output);
+   int clear_maint = opt_get_flag(&opts, "clear-maintenance");
+   int target_override = opt_get_int(&opts, "target-dim", 0);
+
+   /* --clear-maintenance: escape hatch to clear a stuck reembed_in_progress marker
+    * (re-enables search) without running a reset. The server refuses (409) when the
+    * recorded and running dims disagree unless --force makes that explicit. */
+   if (clear_maint)
+   {
+      int st = -1;
+      char *cj = kb_client_reembed(0, force, 0, 0, 1, &st);
+      if (!cj)
+      {
+         fprintf(stderr, "aimee kb reembed: aimee-kb is not reachable\n");
+         return;
+      }
+      if (json_out)
+         printf("%s\n", cj);
+      else if (st == 409)
+      {
+         cJSON *r = cJSON_Parse(cj);
+         int rec = kb_cmd_json_int(r, "recorded_dim", 0),
+             run = kb_cmd_json_int(r, "running_dim", 0);
+         fprintf(stderr,
+                 "Refused: recorded dim %d != running dim %d; the store is mid-transition. "
+                 "Re-run with --force to clear anyway.\n",
+                 rec, run);
+         cJSON_Delete(r);
+      }
+      else
+      {
+         cJSON *r = cJSON_Parse(cj);
+         cJSON *was = r ? cJSON_GetObjectItemCaseSensitive(r, "was_in_progress") : NULL;
+         printf(st == 200 ? (cJSON_IsTrue(was) ? "Maintenance marker cleared; search resumed.\n"
+                                               : "No maintenance marker was set.\n")
+                          : "Failed to clear the maintenance marker.\n");
+         cJSON_Delete(r);
+      }
+      free(cj);
+      return;
+   }
+
+   /* Learn the plan first via a server-side dry run. */
+   int st = -1;
+   char *pjson = kb_client_reembed(0, force, 1, target_override, 0, &st);
+   if (!pjson)
+   {
+      fprintf(stderr, "aimee kb reembed: aimee-kb is not reachable\n");
+      return;
+   }
+   if (json_out && (dry || !want_confirm))
+   {
+      printf("%s\n", pjson);
+      free(pjson);
+      return;
+   }
+   cJSON *plan = cJSON_Parse(pjson);
+   free(pjson);
+   if (!plan)
+   {
+      fprintf(stderr, "aimee kb reembed: bad response from aimee-kb\n");
+      return;
+   }
+   if (st == 403)
+   {
+      cJSON *e = cJSON_GetObjectItemCaseSensitive(plan, "error");
+      fprintf(stderr, "aimee kb reembed: %s\n",
+              cJSON_IsString(e) ? e->valuestring : "kb.reembed_on_dim_change is disabled");
+      cJSON_Delete(plan);
+      return;
+   }
+   int recorded = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(plan, "recorded_dim"));
+   int target = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(plan, "target_dim"));
+   cJSON *det = cJSON_GetObjectItemCaseSensitive(plan, "detail");
+   int prc = (int)cJSON_GetNumberValue(cJSON_GetObjectItemCaseSensitive(plan, "rc"));
+   printf("%s", cJSON_IsString(det) ? det->valuestring : "");
+   cJSON_Delete(plan);
+
+   if (prc != 0)
+   {
+      if (prc == -2)
+         fprintf(stderr, "refused: an unknown halfvec table exists; not auto-resetting.\n");
+      else if (prc == -3)
+         fprintf(stderr, "an inbound foreign key exists; re-run with --force.\n");
+      return;
+   }
+   if (recorded == target)
+   {
+      printf("No dim change needed (embedding dim already %d).\n", target);
+      return;
+   }
+   if (dry || !want_confirm)
+   {
+      printf("\nDry run only. Re-run with --confirm to execute the reset (destructive: "
+             "drops + re-embeds the vector store).\n");
+      return;
+   }
+   /* Interactive gate: type the target dim, unless --force. */
+   if (!force && isatty(STDIN_FILENO))
+   {
+      printf("\nThis DROPS the vector store and re-embeds it (recorded %d -> %d).\n"
+             "Type the target dimension (%d) to proceed: ",
+             recorded, target, target);
+      fflush(stdout);
+      char line[32] = "";
+      if (!fgets(line, sizeof line, stdin) || atoi(line) != target)
+      {
+         printf("Aborted.\n");
+         return;
+      }
+   }
+   char *rjson = kb_client_reembed(1, force, 0, target_override, 0, &st);
+   if (!rjson)
+   {
+      fprintf(stderr, "aimee kb reembed: reset request failed\n");
+      return;
+   }
+   if (json_out)
+   {
+      printf("%s\n", rjson);
+      free(rjson);
+      return;
+   }
+   cJSON *res = cJSON_Parse(rjson);
+   free(rjson);
+   if (res)
+   {
+      cJSON *rd = cJSON_GetObjectItemCaseSensitive(res, "detail");
+      printf("%s", cJSON_IsString(rd) ? rd->valuestring : "reset submitted.\n");
+      cJSON_Delete(res);
+   }
+}
+
 static const subcmd_t kb_subcmds[] = {
+    {"reembed",
+     "Dim-change reset: re-embed the vector store at the configured dim "
+     "[--confirm] [--force] [--dry-run] [--target-dim N] [--clear-maintenance] "
+     "(needs kb.reembed_on_dim_change)",
+     kb_cmd_reembed},
     {"repair", "Rebuild KB vector state from project docs (--path DIR, --project NAME)",
      kb_cmd_repair},
     {"update", "Incrementally update KB (only re-indexes changed files)", kb_cmd_update},

@@ -65,6 +65,20 @@ void db2_set_embedding_dim(int dim)
    g_embed_dim = dim;
 }
 
+/* §2c: expose the init mutex so the dim-change reset (db2_reembed.c) serializes its
+ * destructive execute + in-memory dim swap against db2_init and any concurrent reset
+ * — the two paths that mutate the schema + recorded/in-memory dim together. The
+ * accessors only touch g_init_lock; db2_set_embedding_dim/db2_embedding_dim take no
+ * lock, so holding it across the swap cannot self-deadlock. */
+void db2_init_lock(void)
+{
+   pthread_mutex_lock(&g_init_lock);
+}
+void db2_init_unlock(void)
+{
+   pthread_mutex_unlock(&g_init_lock);
+}
+
 int db2_embedding_dim(void)
 {
    return g_embed_dim > 0 ? g_embed_dim : 1024;
@@ -90,6 +104,25 @@ void db2_set_dim_probe_budget_ms(int ms)
 {
    if (ms > 0)
       g_dim_probe_budget_ms = ms;
+}
+
+/* §2c: probe the running embedder for its CURRENT output dim via the registered
+ * §2b probe. The dim-change reset needs this as its target (after a model swap the
+ * running db2_embedding_dim() is still the old/recorded value). Returns 0 + *out on
+ * success; -1 if no probe is registered or it fails. */
+int db2_probe_embedder_dim(int budget_ms, int *out)
+{
+   if (out)
+      *out = 0;
+   if (!g_embedder_probe)
+      return -1;
+   int dim = 0;
+   char err[DB2_PROBE_ERR_LEN] = "";
+   if (g_embedder_probe(&dim, budget_ms > 0 ? budget_ms : 8000, err, sizeof(err)) != 0 || dim <= 0)
+      return -1;
+   if (out)
+      *out = dim;
+   return 0;
 }
 
 /* Model-identity drift guard (unified-llm-container §2). A dim-only guard is

@@ -1216,6 +1216,11 @@ typedef struct config
    int kb_bg_ingest_interval_hours;
    int kb_bg_watch_enabled;
    int kb_bg_watch_debounce_secs;
+   /* embedder-runtime-fetch-autodim §2c: when 0 (default) a recorded-vs-configured
+    * embedding-dim mismatch is REFUSED at startup (refuse-and-instruct). When 1, the
+    * attended `aimee kb reembed --confirm` reset path is AVAILABLE (it still never
+    * auto-runs — the destructive reset requires the explicit confirmed command). */
+   int kb_reembed_on_dim_change;
 
    /* KB maintenance (kb.maintenance.*).
     * kb_maintenance_enabled:        0 = off (default), 1 = run background decay/prune.

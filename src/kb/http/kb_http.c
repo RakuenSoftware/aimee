@@ -4,6 +4,8 @@
  * Runs in a background pthread; disabled when port == 0. */
 #include "aimee.h"
 #include "config.h"
+#include "config_database.h" /* §2c: config_resolve_embedding_dim / is_pinned */
+#include "lifecycle.h"       /* §2c: db2_dim_change_reset / db2_probe_embedder_dim */
 #include "kb_curator_queue.h"
 #include "kb_http.h"
 #include "kb_http_code.h"
@@ -871,6 +873,94 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       return 200;
    }
 
+   /* POST /v1/reembed {confirm, force, dry_run} — embedder-autodim §2c double-gated
+    * dim-change reset. Server-gated by kb.reembed_on_dim_change; the destructive run
+    * needs confirm=true (no confirm => a dry-run report). Resets to the
+    * configured/derived dim (db2_embedding_dim()); a no-op when it already matches. */
+   if (strcmp(path, "/v1/reembed") == 0)
+   {
+      if (strcmp(method, "POST") != 0)
+      {
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
+         return 405;
+      }
+      /* Escape hatch: force-clear a stuck reembed_in_progress marker. Non-destructive
+       * (only clears the maintenance flag so search resumes), so it is available even
+       * when kb.reembed_on_dim_change is off — an operator must be able to recover a
+       * store wedged in maintenance regardless of the reset toggle's current state.
+       * Refuses (409) when the recorded schema dim disagrees with the running dim
+       * (clearing would resume search mid-transition) unless force makes it explicit. */
+      if (json_bool(body, "clear_maintenance", 0))
+      {
+         int was = 0, recorded = 0, running = 0;
+         int cforce = json_bool(body, "force", 0);
+         int rc = db2_reembed_clear_maintenance(cforce, &was, &recorded, &running);
+         char msg[160] = "";
+         if (rc == -1)
+            snprintf(msg, sizeof(msg),
+                     "recorded dim %d != running dim %d; store is mid-transition — re-run "
+                     "with force to clear anyway",
+                     recorded, running);
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"cleared\":%s,\"was_in_progress\":%s,\"recorded_dim\":%d,\"running_dim\":%d,"
+                  "\"dim_consistent\":%s,\"message\":\"%s\"}",
+                  rc == 0 ? "true" : "false", was ? "true" : "false", recorded, running,
+                  (recorded <= 0 || recorded == running) ? "true" : "false", msg);
+         /* -1 = dim mismatch needs force (409); -2 = error (500). */
+         return rc == 0 ? 200 : rc == -1 ? 409 : 500;
+      }
+      config_t rcfg;
+      config_load(&rcfg);
+      if (!rcfg.kb_reembed_on_dim_change)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"kb.reembed_on_dim_change is disabled; set it true to enable the "
+                  "attended dim-change reset\"}");
+         return 403;
+      }
+      int confirm = json_bool(body, "confirm", 0);
+      int force = json_bool(body, "force", 0);
+      int dry = json_bool(body, "dry_run", 0) || !confirm; /* no confirm => dry-run */
+      /* Target precedence: explicit operator target_dim (authoritative, bypasses the
+       * probe) > operator pin > the embedder's CURRENT dim via probe (after a model
+       * swap, db2_embedding_dim() still reports the old/recorded value). */
+      int target = json_int(body, "target_dim", 0);
+      if (target <= 0)
+      {
+         if (config_embedding_dim_is_pinned(&rcfg))
+            target = config_resolve_embedding_dim(&rcfg);
+         else if (db2_probe_embedder_dim(8000, &target) != 0 || target <= 0)
+         {
+            snprintf(out_buf, (size_t)out_cap,
+                     "{\"error\":\"could not determine the target dim from the embedder; pass "
+                     "target_dim, pin AIMEE_EMBEDDING_DIM, or ensure the embedder /health is "
+                     "reachable\"}");
+            return 503;
+         }
+      }
+      db2_reembed_plan_t plan;
+      int rc = db2_dim_change_reset(target, force, dry, &plan);
+      cJSON *o = cJSON_CreateObject();
+      if (o)
+      {
+         cJSON_AddNumberToObject(o, "rc", rc);
+         cJSON_AddNumberToObject(o, "recorded_dim", plan.recorded_dim);
+         cJSON_AddNumberToObject(o, "target_dim", plan.target_dim);
+         cJSON_AddBoolToObject(o, "dry_run", dry);
+         cJSON_AddNumberToObject(o, "tables_dropped", plan.n_dropped);
+         cJSON_AddNumberToObject(o, "rows_cleared", (double)plan.rows_cleared);
+         cJSON_AddNumberToObject(o, "curator_requeued", plan.curator_requeued);
+         cJSON_AddNumberToObject(o, "evidence_requeued", plan.evidence_requeued);
+         cJSON_AddStringToObject(o, "detail", plan.detail);
+         char *s = cJSON_PrintUnformatted(o);
+         snprintf(out_buf, (size_t)out_cap, "%s", s ? s : "{}");
+         free(s);
+         cJSON_Delete(o);
+      }
+      /* -2 unknown halfvec table (409), -3 FK needs --force (412), other err 500. */
+      return rc == 0 ? 200 : rc == -2 ? 409 : rc == -3 ? 412 : 500;
+   }
+
    /* POST /v1/contradictions {"limit": N} — committed contradicting claim pairs. */
    if (strcmp(path, "/v1/contradictions") == 0)
    {
@@ -894,6 +984,16 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
          return 405;
+      }
+      /* §2c: while a dim-change re-embed is in flight the vector store is being
+       * rebuilt at the new dim; serving against it would return partial/empty
+       * results. Refuse explicitly (503) rather than mislead. */
+      if (db2_reembed_in_progress_get(NULL, NULL) == 1)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"re-embedding in progress, retry shortly\",\"status\":"
+                  "\"maintenance\"}");
+         return 503;
       }
       char query[512] = "";
       if (!json_str(body, "query", query, sizeof(query)) || !query[0])

@@ -1301,6 +1301,10 @@ void config_parse_kb_section2(config_t *cfg, cJSON *root)
          int cw = (int)item->valuedouble;
          cfg->kb_connection_workers = (cw < 1) ? 1 : (cw > 8) ? 8 : cw;
       }
+      /* §2c: gate that makes the attended dim-change reset path available. */
+      item = cJSON_GetObjectItemCaseSensitive(kb, "reembed_on_dim_change");
+      if (cJSON_IsBool(item))
+         cfg->kb_reembed_on_dim_change = cJSON_IsTrue(item) ? 1 : 0;
 
       cJSON *bg = cJSON_GetObjectItemCaseSensitive(kb, "background_ingest");
       if (cJSON_IsObject(bg))

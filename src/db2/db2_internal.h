@@ -72,6 +72,12 @@ extern "C"
     * calls it. Safe to call with NULL to clear. */
    void db2_register_shared_sqlite(struct sqlite3 *h);
 
+   /* §2c: the db2_init mutex, exposed so the dim-change reset serializes its
+    * destructive execute + in-memory dim swap against db2_init / a concurrent reset.
+    * Non-recursive; do not call while already held on the same thread. */
+   void db2_init_lock(void);
+   void db2_init_unlock(void);
+
    /* Mark the registered handle as ephemeral. Cleared to 0 automatically
     * by db2_register_shared_sqlite. */
    void db2_set_ephemeral(int ephemeral);

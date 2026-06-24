@@ -162,7 +162,8 @@ int db2_embedding_dim_record_or_check(void *conn, int embed_dim, char *errbuf, s
          snprintf(errbuf, errlen,
                   "embedding dim mismatch: schema sized %ld but configured %d; serving the new "
                   "dim against the old corpus makes vector search silently return nothing. "
-                  "Restore embedding_dim=%ld or migrate the corpus (see docs/retrieval-stack.md).",
+                  "Restore embedding_dim=%ld or run `aimee kb reembed --confirm` (see "
+                  "docs/retrieval-stack.md).",
                   recorded, embed_dim, recorded);
       return -1;
    }

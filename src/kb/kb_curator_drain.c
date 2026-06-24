@@ -145,6 +145,16 @@ static void *drain_thread_main(void *arg)
          if (total > 0)
             aimee_log(LOG_DEBUG, "kb.docs.ingest", "ingested %d doc chunk(s) across %d project(s)",
                       total, np);
+         /* §2c: a dim-change re-embed clears its `maintenance` marker once the
+          * doc-embed backfill has caught up — a pass that embedded nothing means
+          * every chunk now has a vector at the new dim (the doc corpus reconciled).
+          * The TTL->degraded fallback (health) covers a backfill that never drains. */
+         if (total == 0 && db2_reembed_in_progress_get(NULL, NULL) == 1)
+         {
+            db2_reembed_in_progress_clear();
+            aimee_log(LOG_INFO, "kb.reembed",
+                      "dim-change re-embed reconciled (doc corpus); cleared maintenance");
+         }
       }
 
       /* Candidate-generation synthesis drain — the heavy LLM pass, on the

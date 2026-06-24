@@ -130,6 +130,27 @@ char *kb_client_health_json(void)
    return body;
 }
 
+/* §2c: POST /v1/reembed {confirm, force, dry_run} — the dim-change reset. Returns
+ * the raw response JSON (caller frees), or NULL on transport failure; *status_out
+ * (optional) gets the HTTP status. A long timeout covers the DROP + schema re-apply. */
+char *kb_client_reembed(int confirm, int force, int dry_run, int target_dim, int clear_maintenance,
+                        int *status_out)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return NULL;
+   if (clear_maintenance)
+      cJSON_AddBoolToObject(req, "clear_maintenance", 1);
+   cJSON_AddBoolToObject(req, "confirm", confirm ? 1 : 0);
+   cJSON_AddBoolToObject(req, "force", force ? 1 : 0);
+   cJSON_AddBoolToObject(req, "dry_run", dry_run ? 1 : 0);
+   if (target_dim > 0)
+      cJSON_AddNumberToObject(req, "target_dim", target_dim);
+   char *resp = kb_client_v1_post_json("/v1/reembed", req, 120000, status_out);
+   cJSON_Delete(req);
+   return resp;
+}
+
 /* The curator observability block from aimee-kb's /v1/health (§4), returned as a
  * standalone JSON object for the server's GET /v1/kb/curator surface. Never
  * returns NULL: an unavailable kb / missing block yields a status-error object. */

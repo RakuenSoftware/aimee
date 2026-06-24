@@ -45,6 +45,12 @@ int kb_client_health(kb_health_t *out);
  * is unreachable or returns non-2xx. Used by `aimee kb curator status` to read
  * the curator block (richer than the flat kb_health_t snapshot). */
 char *kb_client_health_json(void);
+/* §2c: POST /v1/reembed; raw response JSON (caller frees) or NULL on transport
+ * failure; *status_out (optional) gets the HTTP status. target_dim>0 pins the
+ * reset target (bypasses the embedder probe); clear_maintenance!=0 instead just
+ * force-clears a stuck reembed_in_progress marker (ignores confirm/force/dim). */
+char *kb_client_reembed(int confirm, int force, int dry_run, int target_dim, int clear_maintenance,
+                        int *status_out);
 
 /* Returns the curator observability block (§4) from aimee-kb's /v1/health as a
  * standalone heap JSON object (caller frees). Backs the server's GET

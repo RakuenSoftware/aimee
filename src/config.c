@@ -550,6 +550,7 @@ static void config_set_defaults(config_t *cfg)
    cfg->kb_bg_watch_enabled = 0;
 #endif
    cfg->kb_bg_watch_debounce_secs = 30;
+   cfg->kb_reembed_on_dim_change = 0; /* §2c: refuse-and-instruct by default */
    cfg->kb_maintenance_enabled = 0;
    cfg->kb_maintenance_interval_hours = 24;
    cfg->kb_maintenance_lambda = 0.005;

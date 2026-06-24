@@ -77,6 +77,24 @@ char *kb_service_status_json(const char *project)
          cJSON_ReplaceItemInObject(obj, "summary_status", cJSON_CreateString("degraded"));
    }
 
+   /* §2c: a dim-change re-embed in flight -> `maintenance`; past the TTL (re-embed
+    * stuck) -> `degraded`, so a never-clearing reset is observable not silent. */
+   {
+      int rtarget = 0;
+      long rstarted = 0;
+      if (db2_reembed_in_progress_get(&rtarget, &rstarted) == 1)
+      {
+         const long ttl = 24 * 3600;
+         int stuck = (rstarted > 0 && (long)time(NULL) - rstarted > ttl);
+         cJSON_ReplaceItemInObject(obj, "summary_status",
+                                   cJSON_CreateString(stuck ? "degraded" : "maintenance"));
+         cJSON *re = cJSON_AddObjectToObject(obj, "reembed");
+         cJSON_AddNumberToObject(re, "target_dim", rtarget);
+         cJSON_AddNumberToObject(re, "started_at", (double)rstarted);
+         cJSON_AddBoolToObject(re, "stuck", stuck);
+      }
+   }
+
    db2_kb_ingest_queue_stats_t iqstats;
    memset(&iqstats, 0, sizeof(iqstats));
    if (db2_kb_ingest_queue_stats(&iqstats) == 0)

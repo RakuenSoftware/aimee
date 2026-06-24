@@ -61,6 +61,9 @@ extern "C"
     * (kb.embedder.dim_probe_budget_ms; default 120000) before db2_init, beside
     * db2_set_embedding_dim, so db2 stays config-free. */
    void db2_set_dim_probe_budget_ms(int ms);
+   /* §2c: probe the running embedder for its current output dim (the dim-change
+    * reset target). 0 + *out on success; -1 if no probe registered or it fails. */
+   int db2_probe_embedder_dim(int budget_ms, int *out);
 
    /* §2b precedence, pure (no globals, no I/O): which source supplies the dim, given
     * whether the operator pinned, a dim is recorded, and a probe is available.
@@ -73,6 +76,34 @@ extern "C"
       DB2_DIM_SRC_DEFAULT = 3   /* fresh DB, no probe available: configured default */
    } db2_dim_source_t;
    db2_dim_source_t db2_dim_source(int pinned, int recorded_present, int probe_available);
+
+   /* embedder-runtime-fetch-autodim §2c: the double-gated dim-change reset. Reports
+    * what it (would) do; the caller gates execution (config flag + --confirm). */
+   typedef struct
+   {
+      int recorded_dim;    /* current schema_embedding_dim (or 0/absent) */
+      int target_dim;      /* the dim to reset to */
+      int n_tables;        /* halfvec vector tables discovered */
+      char tables[16][64]; /* their names */
+      int n_dropped;       /* tables dropped+recreated this run */
+      long long rows_cleared;
+      int curator_requeued;  /* artifacts re-queued for re-embed */
+      int evidence_requeued; /* evidence ops re-queued */
+      char detail[2048];     /* human-readable plan/result */
+   } db2_reembed_plan_t;
+   /* Plan (dry_run=1: report only, no changes) or EXECUTE a dim-change reset to
+    * target_dim. force=1 allows DROP ... CASCADE when an inbound FK exists. Returns
+    * 0 = ok (incl. a no-op when recorded==target — see plan->recorded_dim/target_dim);
+    * -1 = error; -2 = an UNKNOWN halfvec table exists (refuse, don't guess); -3 = an
+    * inbound FK needs --force. *out (optional) carries the report + counts. */
+   int db2_dim_change_reset(int target_dim, int force, int dry_run, db2_reembed_plan_t *out);
+   /* The reembed_in_progress maintenance marker the kb's health + search consult. */
+   int db2_reembed_in_progress_get(int *target_dim, long *started_epoch);
+   int db2_reembed_in_progress_clear(void);
+   /* §2c operator escape hatch: clear a stuck marker, refusing (-1) when the recorded
+    * schema dim disagrees with the running dim unless force (the dangerous mid-
+    * transition case is then explicit). 0 cleared, -2 error; out params optional. */
+   int db2_reembed_clear_maintenance(int force, int *was_in_progress, int *recorded, int *running);
 
    /* Model-identity drift guard (unified-llm-container §2). Set from config
     * before db2_init, beside db2_set_embedding_dim, so this layer stays
