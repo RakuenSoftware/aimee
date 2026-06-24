@@ -22,6 +22,12 @@ static char *g_last_extra; /* upstream extra-header block from the last post */
 static int g_stream_status = 200;
 static const char *g_stream_payload;
 
+/* CLI-backed ingress (tmux claude-oauth) test controls: g_cli_mode makes
+ * agent_load_config yield a tmux-cli primary; the rest drive/observe the
+ * agent_execute_cli_session stub below. */
+static int g_cli_mode = 0;
+static const char *g_cli_agent_name = "primary";
+
 static void reset_capture(void)
 {
    free(g_last_body);
@@ -41,6 +47,12 @@ int agent_load_config(agent_config_t *cfg)
             g_driver && g_driver->name ? g_driver->name : "anthropic");
    snprintf(cfg->agents[0].model, sizeof(cfg->agents[0].model), "configured-claude");
    cfg->agents[0].timeout_ms = 1;
+   if (g_cli_mode)
+   {
+      snprintf(cfg->agents[0].name, sizeof(cfg->agents[0].name), "%s", g_cli_agent_name);
+      snprintf(cfg->agents[0].backend, sizeof(cfg->agents[0].backend), "%s", AGENT_BACKEND_TMUX_CLI);
+      cfg->agents[0].session_reuse = 0;
+   }
    return 0;
 }
 
@@ -239,6 +251,12 @@ int gateway_policy_pin_model(cJSON *req, const char *agent_model)
    (void)agent_model;
    return 0; /* pin is off in these shape tests; covered by test_gateway_policy */
 }
+/* P2c streaming branch: off by default in these whitebox shape tests
+ * (the real predicate is exercised by test_anthropic_http-p2c). */
+int gateway_prevent_subagents_enabled(void)
+{
+   return 0;
+}
 /* P2c (response-side tool policing) is exercised by its own dedicated
  * integration test (unit-test-anthropic-http-p2c) which links the real
  * gateway_policy.o. In these whitebox shape tests we stub it to a no-op
@@ -247,6 +265,49 @@ int gateway_policy_police_parsed_response(parsed_response_t *p)
 {
    (void)p;
    return 0;
+}
+
+/* --- CLI-backed ingress stubs (tmux claude-oauth path) ------------------- */
+static int g_cli_rc = 0; /* agent_execute_cli_session return code */
+static const char *g_cli_reply = "hello from CLI";
+static char g_cli_seen_system[4096];
+static char g_cli_seen_user[8192];
+static char g_cli_seen_sid[128];
+static int g_override_set;
+static int g_override_clear;
+
+int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
+                              const char *system_prompt, const char *user_prompt, int max_tokens,
+                              double temperature, agent_result_t *out)
+{
+   (void)agent;
+   (void)network;
+   (void)max_tokens;
+   (void)temperature;
+   snprintf(g_cli_seen_system, sizeof(g_cli_seen_system), "%s", system_prompt ? system_prompt : "");
+   snprintf(g_cli_seen_user, sizeof(g_cli_seen_user), "%s", user_prompt ? user_prompt : "");
+   memset(out, 0, sizeof(*out));
+   if (g_cli_rc == 0)
+   {
+      out->response = strdup(g_cli_reply ? g_cli_reply : "");
+      out->success = 1;
+      out->turns = 1;
+   }
+   else
+   {
+      snprintf(out->error, sizeof(out->error), "stub cli error");
+   }
+   return g_cli_rc;
+}
+
+void session_id_set_override(const char *sid)
+{
+   g_override_set++;
+   snprintf(g_cli_seen_sid, sizeof(g_cli_seen_sid), "%s", sid ? sid : "");
+}
+void session_id_clear_override(void)
+{
+   g_override_clear++;
 }
 
 #include "../server/anthropic_http.c"
@@ -735,6 +796,214 @@ static void test_messages_preinject_appends_system_block(void)
    PASS("messages_preinject_appends_system_block");
 }
 
+/* --- CLI-backed ingress (tmux claude-oauth) tests ------------------------ */
+
+static void test_cli_transcript_render(void)
+{
+   cJSON *msgs = parse("[{\"role\":\"user\",\"content\":\"first\"},"
+                       "{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"reply\"}]},"
+                       "{\"role\":\"user\",\"content\":["
+                       "{\"type\":\"tool_result\",\"tool_use_id\":\"t\",\"content\":\"TOOLONLY\"},"
+                       "{\"type\":\"text\",\"text\":\"second\"}]}]");
+   char *t = anthropic_messages_to_transcript(msgs);
+   cJSON *empty = parse("[]");
+
+   assert(t != NULL);
+   assert(strstr(t, "User: first") != NULL);
+   assert(strstr(t, "Assistant: reply") != NULL);
+   assert(strstr(t, "User: second") != NULL);
+   assert(strstr(t, "TOOLONLY") == NULL); /* tool_result text skipped */
+   free(t);
+
+   assert(anthropic_messages_to_transcript(empty) == NULL); /* nothing renderable */
+   cJSON_Delete(empty);
+   cJSON_Delete(msgs);
+   PASS("cli_transcript_render");
+}
+
+static void test_messages_buffered_cli_success(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   char resp[4096];
+   cJSON *out;
+   const cJSON *content, *blk;
+
+   reset_capture();
+   g_driver = &anthropic;
+   g_cli_mode = 1;
+   g_cli_agent_name = "primary"; /* non-claude name -> login gate bypassed */
+   g_cli_rc = 0;
+   g_cli_reply = "hello from CLI";
+   g_override_set = g_override_clear = 0;
+   g_cli_seen_system[0] = g_cli_seen_user[0] = g_cli_seen_sid[0] = '\0';
+
+   assert(messages_buffered("{\"model\":\"claude-x\",\"max_tokens\":64,\"system\":\"SYSTEXT\","
+                            "\"messages\":[{\"role\":\"user\",\"content\":\"hi there\"}]}",
+                            resp, sizeof(resp)) == 200);
+   out = parse(resp);
+   assert(strcmp(obj(out, "type")->valuestring, "message") == 0);
+   assert(strcmp(obj(out, "role")->valuestring, "assistant") == 0);
+   assert(strcmp(obj(out, "model")->valuestring, "claude-x") == 0); /* requested model echoed */
+   assert(strcmp(obj(out, "stop_reason")->valuestring, "end_turn") == 0);
+   content = obj(out, "content");
+   assert(cJSON_IsArray(content) && cJSON_GetArraySize((cJSON *)content) == 1);
+   blk = cJSON_GetArrayItem((cJSON *)content, 0);
+   assert(strcmp(obj(blk, "type")->valuestring, "text") == 0);
+   assert(strcmp(obj(blk, "text")->valuestring, "hello from CLI") == 0);
+   /* prompt rendering: system passed verbatim, transcript carries labeled user text */
+   assert(strcmp(g_cli_seen_system, "SYSTEXT") == 0);
+   assert(strstr(g_cli_seen_user, "User: hi there") != NULL);
+   /* per-request session override set + cleared exactly once, unique id shape */
+   assert(g_override_set == 1 && g_override_clear == 1);
+   assert(strncmp(g_cli_seen_sid, "aimee-ingress-msg_", 18) == 0);
+
+   cJSON_Delete(out);
+   g_cli_mode = 0;
+   reset_capture();
+   PASS("messages_buffered_cli_success");
+}
+
+static void test_messages_buffered_cli_error(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   char resp[4096];
+   cJSON *out;
+
+   reset_capture();
+   g_driver = &anthropic;
+   g_cli_mode = 1;
+   g_cli_agent_name = "primary";
+   g_cli_rc = -2; /* executor timeout */
+   g_override_set = g_override_clear = 0;
+
+   assert(messages_buffered(
+              "{\"model\":\"claude-x\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}", resp,
+              sizeof(resp)) == 502);
+   out = parse(resp);
+   assert(strcmp(obj(out, "type")->valuestring, "error") == 0);
+   assert(g_override_set == 1 && g_override_clear == 1); /* override cleared even on failure */
+
+   cJSON_Delete(out);
+   g_cli_rc = 0;
+   g_cli_mode = 0;
+   reset_capture();
+   PASS("messages_buffered_cli_error");
+}
+
+static void test_messages_buffered_cli_empty_reply(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   char resp[4096];
+
+   reset_capture();
+   g_driver = &anthropic;
+   g_cli_mode = 1;
+   g_cli_agent_name = "primary";
+   g_cli_rc = 0;
+   g_cli_reply = ""; /* success rc but empty text -> treated as failure */
+
+   assert(messages_buffered(
+              "{\"model\":\"claude-x\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}", resp,
+              sizeof(resp)) == 502);
+
+   g_cli_reply = "hello from CLI";
+   g_cli_mode = 0;
+   reset_capture();
+   PASS("messages_buffered_cli_empty_reply");
+}
+
+static void test_messages_buffered_cli_not_logged_in(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   char resp[4096];
+   cJSON *out;
+   const char *home = getenv("HOME");
+   char saved[512];
+
+   saved[0] = '\0';
+   if (home)
+      snprintf(saved, sizeof(saved), "%s", home);
+
+   reset_capture();
+   g_driver = &anthropic;
+   g_cli_mode = 1;
+   g_cli_agent_name = "claude"; /* claude-family -> login pre-flight applies */
+   setenv("HOME", "/nonexistent-aimee-cli-home", 1);
+
+   assert(messages_buffered(
+              "{\"model\":\"claude-x\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}", resp,
+              sizeof(resp)) == 401);
+   out = parse(resp);
+   assert(strcmp(obj(out, "type")->valuestring, "error") == 0);
+   assert(strcmp(obj(obj(out, "error"), "type")->valuestring, "authentication_error") == 0);
+
+   cJSON_Delete(out);
+   if (saved[0])
+      setenv("HOME", saved, 1);
+   else
+      unsetenv("HOME");
+   g_cli_mode = 0;
+   g_cli_agent_name = "primary";
+   reset_capture();
+   PASS("messages_buffered_cli_not_logged_in");
+}
+
+static void test_messages_stream_cli_success(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   emit_capture_t cap;
+
+   reset_capture();
+   memset(&cap, 0, sizeof(cap));
+   g_driver = &anthropic;
+   g_cli_mode = 1;
+   g_cli_agent_name = "primary";
+   g_cli_rc = 0;
+   g_cli_reply = "streamed reply";
+
+   assert(messages_stream(
+              "{\"model\":\"claude-x\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+              cap_emit, &cap) == 0);
+   /* full Anthropic SSE sequence for a single text block */
+   assert(cap.count == 6);
+   assert(strcmp(cap.events[0], "message_start") == 0);
+   assert(strcmp(cap.events[1], "content_block_start") == 0);
+   assert(strcmp(cap.events[2], "content_block_delta") == 0);
+   assert(strstr(cap.data[2], "streamed reply") != NULL);
+   assert(strcmp(cap.events[3], "content_block_stop") == 0);
+   assert(strcmp(cap.events[4], "message_delta") == 0);
+   assert(strstr(cap.data[4], "end_turn") != NULL);
+   assert(strcmp(cap.events[5], "message_stop") == 0);
+
+   g_cli_mode = 0;
+   reset_capture();
+   PASS("messages_stream_cli_success");
+}
+
+static void test_messages_stream_cli_error(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   emit_capture_t cap;
+
+   reset_capture();
+   memset(&cap, 0, sizeof(cap));
+   g_driver = &anthropic;
+   g_cli_mode = 1;
+   g_cli_agent_name = "primary";
+   g_cli_rc = -1; /* executor failure -> single typed error event, stream terminates */
+
+   assert(messages_stream(
+              "{\"model\":\"claude-x\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+              cap_emit, &cap) == 0);
+   assert(cap.count == 1);
+   assert(strcmp(cap.events[0], "error") == 0);
+
+   g_cli_rc = 0;
+   g_cli_mode = 0;
+   reset_capture();
+   PASS("messages_stream_cli_error");
+}
+
 int main(void)
 {
    test_translate_request_anthropic_passthrough();
@@ -751,6 +1020,13 @@ int main(void)
    test_messages_buffered_system_prompt_driver_no_duplicate_system();
    test_messages_buffered_system_prompt_capability_no_duplicate_system();
    test_messages_stream_openai_family_translates();
+   test_cli_transcript_render();
+   test_messages_buffered_cli_success();
+   test_messages_buffered_cli_error();
+   test_messages_buffered_cli_empty_reply();
+   test_messages_buffered_cli_not_logged_in();
+   test_messages_stream_cli_success();
+   test_messages_stream_cli_error();
    printf("anthropic_http: OK\n");
    return 0;
 }

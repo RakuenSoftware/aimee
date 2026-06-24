@@ -66,8 +66,14 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
       }
       else
       {
+         /* Bound session, no delegation: a persistent per-session pane keyed
+          * "<sid>-cli". Honor the agent's session_reuse: a webchat primary turn
+          * (session_reuse=1) keeps the conversation pane alive across turns; a
+          * stateless caller that binds a unique per-request session id with
+          * session_reuse=0 (the /v1/messages CLI ingress) gets a one-shot pane
+          * that is torn down on completion, so unique-id panes don't accumulate. */
          sess_name = cli_session_make_name(aimee_sid, "cli");
-         reuse = 1;
+         reuse = agent->session_reuse;
       }
    }
    else if (agent->session_reuse)

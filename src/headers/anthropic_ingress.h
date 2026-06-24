@@ -37,6 +37,15 @@ char *anthropic_system_to_text(const struct cJSON *req);
  * Returns NULL on malformed input (messages not an array). */
 struct cJSON *anthropic_messages_to_openai(const struct cJSON *messages, const char *system_text);
 
+/* Flatten an Anthropic "messages" array into a single plain-text transcript
+ * suitable for a one-shot CLI turn (the tmux claude-oauth ingress path). Each
+ * turn is rendered as "User: <text>" / "Assistant: <text>", turns joined with
+ * "\n\n". Only {type:"text"} content blocks are included; image / tool_use /
+ * tool_result blocks are skipped (the CLI cannot round-trip the Anthropic tool
+ * protocol). Returns a newly malloc'd string (caller frees), or NULL when there
+ * is no renderable text. */
+char *anthropic_messages_to_transcript(const struct cJSON *messages);
+
 /* Convert an Anthropic "tools" array ([{name,description,input_schema}]) into
  * an OpenAI tools array ([{type:"function",function:{name,description,
  * parameters}}]). Returns a new array (caller owns), or NULL when there are no
@@ -83,8 +92,42 @@ anthropic_stream_xlate_t *anthropic_stream_begin(const char *msg_id, const char 
  * ignored (terminal closure happens in anthropic_stream_finish). */
 void anthropic_stream_feed_openai(anthropic_stream_xlate_t *st, const char *data_json);
 
+/* Emit `text` as a text content block on an in-progress stream: opens a text
+ * block (closing any open tool block first), then emits one text_delta. The
+ * block is left open for anthropic_stream_finish to close. For producers that
+ * already hold the full assembled text (e.g. the CLI-backed ingress path)
+ * rather than OpenAI chunks. No-op on NULL/empty input. */
+void anthropic_stream_emit_text(anthropic_stream_xlate_t *st, const char *text);
+
 /* Close any open content block and emit message_delta + message_stop. */
 void anthropic_stream_finish(anthropic_stream_xlate_t *st);
+
+/* Replay a fully-parsed provider reply (`anthropic_response_from_parsed`
+ * equivalent) as a well-formed Anthropic SSE sequence. Used by the streaming
+ * /v1/messages paths when the gateway response-side tool-policing policy
+ * (`gateway_prevent_subagents`) is active: the upstream is buffered to
+ * completion, the police function compacts `parsed.calls[]`, and this helper
+ * replays the policed struct as if the per-block translator had been
+ * streaming. Pure (no I/O); deterministic; unit-testable with a captured
+ * emit. Mirrors `anthropic_response_from_parsed`'s wire shape:
+ *   message_start (with usage: input_tokens, cache_creation_input_tokens,
+ *                  cache_read_input_tokens if non-zero)
+ *   one text content_block_start/.../stop pair — always emitted, even when
+ *                  parsed.content is empty/NULL, matching the buffered
+ *                  renderer's empty-text-block fallback (lines 427-433 of
+ *                  src/server/anthropic_ingress.c). Index 0.
+ *   one tool_use content_block_start + (input_json_delta)* + stop per
+ *                  surviving parsed.calls[0..call_count-1] entry. Indices
+ *                  1, 2, ... in original order.
+ *   message_delta (with parsed.stop_reason verbatim — see the police
+ *                  function's contract in gateway_policy.h — and usage
+ *                  output_tokens + cache_read_input_tokens if non-zero).
+ *   message_stop.
+ * `emit` matches the streaming translator's emit signature
+ * (`anthropic_sse_emit_fn`). `ctx` is the caller's transport context
+ * (passed through to `emit`). */
+void emit_message_as_sse(const parsed_response_t *parsed, const char *msg_id,
+                         const char *model, anthropic_sse_emit_fn emit, void *ctx);
 
 /* Read the usage tapped from the upstream OpenAI stream: the prompt count
  * (upstream-reported if seen, else the begin-time estimate), the completion

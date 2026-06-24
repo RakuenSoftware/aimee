@@ -187,6 +187,29 @@ static void agent_normalize_legacy_claude_cli(agent_t *ag)
    ag->cli_kind[0] = '\0';
 }
 
+/* A bare `provider: "claude"` / "claude-oauth" / "claude-code" agent with no
+ * explicit backend is the server-hosted Claude Code CLI driven over tmux — there
+ * is no HTTP Anthropic-subscription driver, and its endpoint is empty. Normalize
+ * it to the tmux-cli backend so every consumer (delegate dispatch in
+ * agent_runtime.c, and the /v1/messages ingress in anthropic_http.c) routes it to
+ * agent_execute_cli_session instead of attempting an HTTP call against an empty
+ * endpoint. Mirrors the field defaults of chat_agent_add_builtin_tmux_cli
+ * (server_compute.c). An explicitly configured backend (http/provider-cli/
+ * tmux-cli) always wins. */
+static void agent_normalize_claude_provider_cli(agent_t *ag)
+{
+   if (!ag || ag->backend[0])
+      return;
+   if (strcmp(ag->provider, "claude") != 0 && strcmp(ag->provider, "claude-oauth") != 0 &&
+       strcmp(ag->provider, "claude-code") != 0)
+      return;
+   snprintf(ag->backend, sizeof(ag->backend), "%s", AGENT_BACKEND_TMUX_CLI);
+   if (!ag->cli_cmd[0])
+      snprintf(ag->cli_cmd, sizeof(ag->cli_cmd), "%s", "claude");
+   if (!ag->auth_type[0])
+      snprintf(ag->auth_type, sizeof(ag->auth_type), "%s", "none");
+}
+
 static void agent_normalize_builtin_cost_tier(agent_t *ag)
 {
    if (!ag)
@@ -791,6 +814,7 @@ int agent_load_config(agent_config_t *cfg)
             ag->is_server_hosted = cJSON_IsTrue(v);
 
          agent_normalize_legacy_claude_cli(ag);
+         agent_normalize_claude_provider_cli(ag);
          agent_normalize_builtin_cost_tier(ag);
          cfg->agent_count++;
       }

@@ -20,6 +20,7 @@
 #include "agent_types.h"
 #include "anthropic_ingress.h"
 #include "cJSON.h"
+#include "config.h" /* session_id_set_override / session_id_clear_override */
 #include "delegate_driver.h"
 #include "gateway_policy.h"
 #include "gateway_pipeline.h"
@@ -31,6 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h> /* access() for the claude-login pre-flight */
 
 /* Resolve aimee's primary agent (the configured default, else the first
  * agent). Claude Code's requested model is intentionally ignored — switching
@@ -48,10 +50,15 @@ static agent_t *resolve_primary(agent_config_t *acfg)
    return ag;
 }
 
-/* Mint a "msg_<epoch>" id for the response/stream. */
+/* Mint a unique "msg_<epoch>_<seq>" id for the response/stream. The atomic
+ * sequence disambiguates concurrent requests within the same second — required
+ * for response-id uniqueness and, on the CLI ingress path, to key a distinct
+ * per-request tmux session id (so concurrent turns never share a pane). */
 static void mint_msg_id(char *buf, size_t n)
 {
-   snprintf(buf, n, "msg_%ld", (long)time(NULL));
+   static volatile int s_seq = 0;
+   int seq = __sync_fetch_and_add(&s_seq, 1);
+   snprintf(buf, n, "msg_%ld_%d", (long)time(NULL), seq);
 }
 
 /* Passthrough vs. translate is a property of the serving model, not a setting:
@@ -376,6 +383,199 @@ static void messages_apply_preinject(cJSON *req)
 
 /* --- Buffered: POST /v1/messages (stream:false) ------------------------- */
 
+/* --- CLI-backed ingress (tmux claude-oauth) -------------------------------
+ *
+ * When the resolved primary is a tmux-CLI agent (backend AGENT_BACKEND_TMUX_CLI,
+ * e.g. the server-hosted `claude` logged in via subscription OAuth), the
+ * /v1/messages turn is served by driving that CLI rather than an HTTP provider
+ * call. The request's system + message history are flattened into one prompt
+ * (the CLI is stateless per turn and cannot round-trip the Anthropic tool
+ * protocol), a one-shot tmux turn runs, and the plain-text reply is re-encoded
+ * as an Anthropic buffered response / SSE stream. tools[]/tool_use round-trips
+ * are out of scope; stop_reason is always "end_turn". */
+
+/* True when the agent launches a claude-family CLI — mirrors the is_claude
+ * derivation in agent_execute_cli_session (cli_kind, else the agent name). */
+static int ingress_agent_is_claude_cli(const agent_t *ag)
+{
+   const char *kind = ag->cli_kind[0] ? ag->cli_kind : ag->name;
+   return strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) == 0 &&
+          (strcmp(kind, "claude") == 0 || strncmp(kind, "claude-", 7) == 0);
+}
+
+/* Best-effort: has the server-hosted claude CLI completed its OAuth login (which
+ * writes ~/.claude/.credentials.json)? Returns 1 when logged in OR when we can't
+ * tell (never false-deny a working setup); 0 only when the agent is a claude CLI
+ * and the credential file is definitively absent. */
+static int ingress_claude_logged_in(const agent_t *ag)
+{
+   const char *home;
+   char path[MAX_PATH_LEN];
+   if (!ingress_agent_is_claude_cli(ag))
+      return 1;
+   home = getenv("HOME");
+   if (!home || !home[0])
+      return 1;
+   snprintf(path, sizeof(path), "%s/.claude/.credentials.json", home);
+   return access(path, R_OK) == 0;
+}
+
+/* Record a 0-token ingress audit row for a CLI-served turn (subscription-billed,
+ * no per-token usage), tagged distinctly so dashboards separate CLI from API. */
+static void ingress_cli_record_audit(const agent_t *ag, const char *model)
+{
+   agent_result_t aud;
+   if (!agent_ingress_accounting_enabled())
+      return;
+   memset(&aud, 0, sizeof(aud));
+   snprintf(aud.agent_name, sizeof(aud.agent_name), "%s", ag->name);
+   snprintf(aud.model, sizeof(aud.model), "%s", ag->model);
+   snprintf(aud.requested_model, sizeof(aud.requested_model), "%s", model ? model : "");
+   snprintf(aud.stop_reason, sizeof(aud.stop_reason), "end_turn");
+   agent_record_token_audit(&aud, "", "anthropic-ingress-cli");
+}
+
+/* Render system+messages into one prompt and run a single tmux CLI turn under a
+ * unique per-request session id (so concurrent turns get isolated, one-shot
+ * panes; the agent's session_reuse is 0). On success returns the malloc'd reply
+ * text (caller frees) and sets *rc_out = 0; on failure returns NULL, sets
+ * *rc_out < 0, and fills `err`. */
+static char *ingress_cli_run(cJSON *req, agent_t *ag, const char *msg_id, char *err, size_t errlen,
+                             int *rc_out)
+{
+   agent_result_t ar;
+   char *sysp = anthropic_system_to_text(req);
+   char *transcript =
+       anthropic_messages_to_transcript(cJSON_GetObjectItemCaseSensitive(req, "messages"));
+   char sid[96];
+   int rc;
+
+   err[0] = '\0';
+   if (!transcript)
+   {
+      free(sysp);
+      snprintf(err, errlen, "no renderable text in messages");
+      *rc_out = -1;
+      return NULL;
+   }
+   memset(&ar, 0, sizeof(ar));
+   snprintf(sid, sizeof(sid), "aimee-ingress-%s", msg_id);
+   session_id_set_override(sid);
+   rc = agent_execute_cli_session(ag, NULL, sysp ? sysp : "", transcript,
+                                  agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
+                                  jo_num(req, "temperature", 1.0), &ar);
+   session_id_clear_override();
+   free(sysp);
+   free(transcript);
+
+   if (rc == 0 && ar.response && ar.response[0])
+   {
+      *rc_out = 0;
+      return ar.response; /* caller frees */
+   }
+   snprintf(err, errlen, "%s", ar.error[0] ? ar.error : "claude CLI produced no response");
+   free(ar.response);
+   *rc_out = rc != 0 ? rc : -1; /* an empty reply is a failure */
+   return NULL;
+}
+
+/* Buffered (stream:false) CLI ingress. Does NOT own `req` (caller frees). */
+static int messages_cli_buffered(cJSON *req, agent_t *ag, const char *model, char *resp, int cap)
+{
+   const cJSON *messages = cJSON_GetObjectItemCaseSensitive(req, "messages");
+   char msg_id[48];
+   char err[512];
+   char *reply;
+   int rc, status;
+   parsed_response_t parsed;
+   cJSON *out;
+
+   if (!cJSON_IsArray(messages) || cJSON_GetArraySize(messages) == 0)
+      return write_error(resp, cap, 400, "invalid_request_error", "messages is required");
+   if (!ingress_claude_logged_in(ag))
+      return write_error(resp, cap, 401, "authentication_error",
+                         "the server-hosted claude CLI is not logged in");
+
+   mint_msg_id(msg_id, sizeof(msg_id));
+   reply = ingress_cli_run(req, ag, msg_id, err, sizeof(err), &rc);
+   if (!reply)
+      return write_error(resp, cap, 502, "api_error", err[0] ? err : "claude CLI turn failed");
+
+   ingress_cli_record_audit(ag, model);
+
+   memset(&parsed, 0, sizeof(parsed));
+   parsed.content = reply; /* transfer ownership; freed by agent_free_parsed_response */
+   snprintf(parsed.stop_reason, sizeof(parsed.stop_reason), "end_turn");
+   out = anthropic_response_from_parsed(msg_id, model, &parsed);
+   status = write_json(out, resp, cap);
+   cJSON_Delete(out);
+   agent_free_parsed_response(&parsed);
+   return status;
+}
+
+/* Emit a standalone Anthropic SSE `error` event (mirrors relay_emit_transport_error's
+ * shape) so the client's stream reader sees a typed error rather than hanging. */
+static void cli_stream_emit_error(server_http_sse_event_emit emit, void *ctx, const char *type,
+                                  const char *message)
+{
+   cJSON *o = cJSON_CreateObject();
+   cJSON *e;
+   char *json;
+   cJSON_AddStringToObject(o, "type", "error");
+   e = cJSON_AddObjectToObject(o, "error");
+   cJSON_AddStringToObject(e, "type", type);
+   cJSON_AddStringToObject(e, "message", message);
+   json = cJSON_PrintUnformatted(o);
+   if (json)
+   {
+      emit(ctx, "error", json);
+      free(json);
+   }
+   cJSON_Delete(o);
+}
+
+/* Streaming (stream:true) CLI ingress. Runs the CLI to completion, then emits the
+ * reply as one Anthropic text block. Does NOT own `req` (caller frees). */
+static void messages_cli_stream(cJSON *req, agent_t *ag, const char *model, const char *msg_id,
+                                server_http_sse_event_emit emit, void *ctx)
+{
+   const cJSON *messages = cJSON_GetObjectItemCaseSensitive(req, "messages");
+   char err[512];
+   char *reply;
+   int rc;
+   anthropic_stream_xlate_t *xl;
+
+   if (!cJSON_IsArray(messages) || cJSON_GetArraySize(messages) == 0)
+   {
+      cli_stream_emit_error(emit, ctx, "invalid_request_error", "messages is required");
+      return;
+   }
+   if (!ingress_claude_logged_in(ag))
+   {
+      cli_stream_emit_error(emit, ctx, "authentication_error",
+                            "the server-hosted claude CLI is not logged in");
+      return;
+   }
+
+   reply = ingress_cli_run(req, ag, msg_id, err, sizeof(err), &rc);
+   if (!reply)
+   {
+      cli_stream_emit_error(emit, ctx, "api_error", err[0] ? err : "claude CLI turn failed");
+      return;
+   }
+
+   ingress_cli_record_audit(ag, model);
+
+   xl = anthropic_stream_begin(msg_id, model, 0, emit, ctx);
+   if (xl)
+   {
+      anthropic_stream_emit_text(xl, reply);
+      anthropic_stream_finish(xl);
+      anthropic_stream_free(xl);
+   }
+   free(reply);
+}
+
 static int messages_buffered(const char *body, char *resp, int cap)
 {
    cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
@@ -420,6 +620,14 @@ static int messages_buffered(const char *body, char *resp, int cap)
    /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
     * the pointer cached above (line ~397) could now dangle. */
    model = jo_cstr(req, "model");
+   /* CLI-backed primary (tmux claude-oauth): serve from the CLI, not an HTTP
+    * provider call. The request pipeline (memory pre-injection, tool policing)
+    * has already run over req, so the rendered prompt sees any injected context. */
+   if (strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) == 0)
+   {
+      status = messages_cli_buffered(req, ag, model, resp, cap);
+      goto cleanup;
+   }
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
@@ -740,6 +948,14 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
     * the pointer cached at the top of this function could now dangle. */
    model = jo_cstr(req, "model");
+   /* CLI-backed primary (tmux claude-oauth): serve from the CLI. Always emits a
+    * well-formed Anthropic SSE sequence (or a typed error event) so the client's
+    * stream reader terminates cleanly. */
+   if (strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) == 0)
+   {
+      messages_cli_stream(req, ag, model, msg_id, emit, ctx);
+      goto cleanup;
+   }
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
@@ -755,6 +971,77 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       prov_body = build_provider_body(driver, ag, messages, tools, system_text,
                                       agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
                                       jo_num(req, "temperature", 1.0), 1);
+
+   /* P2c streaming: when gateway_prevent_subagents is ON, the streaming
+    * path becomes buffered — we fetch the upstream reply to completion,
+    * run the police function on the parsed struct (same logic as the
+    * buffered /v1/messages path), and replay the policed reply as a
+    * well-formed Anthropic SSE sequence via emit_message_as_sse. Off (the
+    * default) falls through to today's incremental relay/translator. */
+   if (gateway_prevent_subagents_enabled())
+   {
+      char *buf_resp = NULL;
+      int buf_status;
+      parsed_response_t parsed;
+      memset(&parsed, 0, sizeof(parsed));
+      buf_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &buf_resp,
+                                   ag->timeout_ms, extra[0] ? extra : NULL);
+      if (buf_status == 200 && buf_resp)
+      {
+         cJSON *provider_resp = cJSON_Parse(buf_resp);
+         if (provider_resp)
+         {
+            if (driver && driver->parse_response)
+               driver->parse_response(provider_resp, buf_resp, &parsed);
+            else
+               agent_parse_response_openai(provider_resp, &parsed);
+            gateway_policy_police_parsed_response(&parsed);
+            emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
+            /* Cost accounting (mirror the buffered path). */
+            if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
+                agent_ingress_accounting_enabled())
+            {
+               agent_result_t ar;
+               memset(&ar, 0, sizeof(ar));
+               snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
+               snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
+               snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
+               snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
+               ar.prompt_tokens = parsed.prompt_tokens;
+               ar.completion_tokens = parsed.completion_tokens;
+               ar.cache_write_tokens = parsed.cache_write_tokens;
+               ar.cache_read_tokens = parsed.cache_read_tokens;
+               agent_record_token_audit(&ar, "", "anthropic-ingress");
+            }
+            agent_free_parsed_response(&parsed);
+         }
+         else
+         {
+            /* Parse failure on the buffered reply: emit a clean error event so
+             * the client's SSE reader terminates. */
+            char err[256];
+            snprintf(err, sizeof(err),
+                     "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
+                     "\"message\":\"primary provider returned an unparseable reply\"}}");
+            if (emit)
+               emit(ctx, "error", err);
+         }
+         cJSON_Delete(provider_resp);
+      }
+      else
+      {
+         /* Upstream error: relay a transport-level error event. */
+         char err[256];
+         snprintf(err, sizeof(err),
+                  "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
+                  "\"message\":\"primary provider call failed with status %d\"}}",
+                  buf_status);
+         if (emit)
+            emit(ctx, "error", err);
+      }
+      free(buf_resp);
+      goto cleanup;
+   }
 
    if (driver_is_anthropic(driver))
    {

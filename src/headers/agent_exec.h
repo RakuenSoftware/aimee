@@ -24,6 +24,16 @@ int agent_execute_session_with_tools(const agent_t *agent, const agent_network_t
 int agent_execute(const agent_t *agent, const char *system_prompt, const char *user_prompt,
                   int max_tokens, double temperature, agent_result_t *out);
 
+/* Run one turn against a tmux-hosted CLI agent (backend AGENT_BACKEND_TMUX_CLI):
+ * drives the vendor CLI (e.g. `claude`, logged in via subscription OAuth) over a
+ * tmux pane, scrapes the reply, and returns it as plain text in out->response
+ * (caller frees). Returns 0 on success; <0 on failure (out->error set). The pane
+ * is keyed on the bound session id (session_id_set_override) so concurrent turns
+ * are isolated. Defined in posix/agent_runtime_tmux.c. */
+int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
+                              const char *system_prompt, const char *user_prompt, int max_tokens,
+                              double temperature, agent_result_t *out);
+
 int agent_run(agent_config_t *cfg, const char *role, const char *system_prompt,
               const char *user_prompt, int max_tokens, agent_result_t *out);
 
