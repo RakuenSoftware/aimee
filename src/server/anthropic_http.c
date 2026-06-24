@@ -20,7 +20,8 @@
 #include "agent_types.h"
 #include "anthropic_ingress.h"
 #include "cJSON.h"
-#include "config.h" /* session_id_set_override / session_id_clear_override */
+#include "cli_session.h" /* stream-cb bridge for live CLI-ingress streaming */
+#include "config.h"      /* session_id_set_override / session_id_clear_override */
 #include "delegate_driver.h"
 #include "gateway_policy.h"
 #include "gateway_pipeline.h"
@@ -395,6 +396,14 @@ static void messages_apply_preinject(cJSON *req)
  * as an Anthropic buffered response / SSE stream. tools[]/tool_use round-trips
  * are out of scope; stop_reason is always "end_turn". */
 
+/* One retry on a transient empty/dead CLI turn (rc -1) — a cold pane that ate
+ * the first paste, etc. Bounded so a persistently-failing CLI fails fast. */
+#define INGRESS_MAX_ATTEMPTS 2
+/* Pathological-input guard for the rendered system+transcript bytes. The prompt
+ * is fed via a tmux load-buffer (file-backed, so not ARG_MAX-bound), so this is
+ * generous — it exists to reject absurd payloads, not to clamp real contexts. */
+#define INGRESS_MAX_PROMPT_BYTES (4 * 1024 * 1024)
+
 /* True when the agent launches a claude-family CLI — mirrors the is_claude
  * derivation in agent_execute_cli_session (cli_kind, else the agent name). */
 static int ingress_agent_is_claude_cli(const agent_t *ag)
@@ -480,6 +489,17 @@ static char *ingress_cli_run(cJSON *req, agent_t *ag, const char *msg_id, char *
       return NULL;
    }
 
+   /* Pathological-input guard: reject an absurd rendered prompt rather than risk
+    * wedging the paste / CLI. -100 maps to a 413 (buffered) / error event (stream). */
+   if ((sysp ? strlen(sysp) : 0) + strlen(transcript) > INGRESS_MAX_PROMPT_BYTES)
+   {
+      free(sysp);
+      free(transcript);
+      snprintf(err, errlen, "request too large (limit %d bytes)", INGRESS_MAX_PROMPT_BYTES);
+      *rc_out = -100;
+      return NULL;
+   }
+
    /* System-prompt fidelity for the claude CLI: deliver the client's system
     * prompt as a real --append-system-prompt rather than pasting it into the
     * user text. It is read from a temp file at launch ("$(cat <file>)") so
@@ -529,8 +549,8 @@ static int messages_cli_buffered(cJSON *req, agent_t *ag, const char *model, cha
    const cJSON *messages = cJSON_GetObjectItemCaseSensitive(req, "messages");
    char msg_id[48];
    char err[512];
-   char *reply;
-   int rc, status;
+   char *reply = NULL;
+   int rc = -1, status;
    parsed_response_t parsed;
    cJSON *out;
 
@@ -541,9 +561,19 @@ static int messages_cli_buffered(cJSON *req, agent_t *ag, const char *model, cha
                          "the server-hosted claude CLI is not logged in");
 
    mint_msg_id(msg_id, sizeof(msg_id));
-   reply = ingress_cli_run(req, ag, msg_id, err, sizeof(err), &rc);
+   /* Retry once on a transient empty/dead turn (rc -1); other failures fail fast. */
+   for (int attempt = 0; attempt < INGRESS_MAX_ATTEMPTS; attempt++)
+   {
+      reply = ingress_cli_run(req, ag, msg_id, err, sizeof(err), &rc);
+      if (reply || rc != -1)
+         break;
+   }
    if (!reply)
+   {
+      if (rc == -100)
+         return write_error(resp, cap, 413, "request_too_large", err[0] ? err : "request too large");
       return write_error(resp, cap, 502, "api_error", err[0] ? err : "claude CLI turn failed");
+   }
 
    ingress_cli_record_audit(ag, model);
 
@@ -578,16 +608,51 @@ static void cli_stream_emit_error(server_http_sse_event_emit emit, void *ctx, co
    cJSON_Delete(o);
 }
 
-/* Streaming (stream:true) CLI ingress. Runs the CLI to completion, then emits the
- * reply as one Anthropic text block. Does NOT own `req` (caller frees). */
+/* Live-streaming bridge: the tmux executor invokes the thread-local stream cb
+ * with incremental clean-text deltas during recv; each is forwarded as an
+ * Anthropic text_delta. The Anthropic stream is begun lazily on the first delta,
+ * so a turn that fails before producing any output can still surface a standalone
+ * error event instead of a silent empty success stream. */
+typedef struct
+{
+   anthropic_stream_xlate_t *xl;
+   const char *msg_id;
+   const char *model;
+   server_http_sse_event_emit emit;
+   void *ctx;
+   size_t emitted;
+   int begun;
+} ingress_stream_bridge_t;
+
+static void ingress_stream_cb(const char *delta, void *ud)
+{
+   ingress_stream_bridge_t *b = (ingress_stream_bridge_t *)ud;
+   if (!delta || !delta[0])
+      return;
+   if (!b->begun)
+   {
+      b->xl = anthropic_stream_begin(b->msg_id, b->model, 0, b->emit, b->ctx);
+      b->begun = 1;
+   }
+   if (b->xl)
+   {
+      anthropic_stream_emit_text(b->xl, delta);
+      b->emitted += strlen(delta);
+   }
+}
+
+/* Streaming (stream:true) CLI ingress. Streams the CLI's incremental output live
+ * as Anthropic text deltas (see ingress_stream_bridge_t). Does NOT own `req`. */
 static void messages_cli_stream(cJSON *req, agent_t *ag, const char *model, const char *msg_id,
                                 server_http_sse_event_emit emit, void *ctx)
 {
    const cJSON *messages = cJSON_GetObjectItemCaseSensitive(req, "messages");
    char err[512];
-   char *reply;
-   int rc;
-   anthropic_stream_xlate_t *xl;
+   char *reply = NULL;
+   int rc = -1, attempt;
+   ingress_stream_bridge_t bridge;
+   cli_session_stream_cb_t prev_cb;
+   void *prev_ud;
 
    if (!cJSON_IsArray(messages) || cJSON_GetArraySize(messages) == 0)
    {
@@ -601,23 +666,60 @@ static void messages_cli_stream(cJSON *req, agent_t *ag, const char *model, cons
       return;
    }
 
-   reply = ingress_cli_run(req, ag, msg_id, err, sizeof(err), &rc);
-   if (!reply)
+   memset(&bridge, 0, sizeof(bridge));
+   bridge.msg_id = msg_id;
+   bridge.model = model;
+   bridge.emit = emit;
+   bridge.ctx = ctx;
+
+   /* The stream cb is thread-local, so this only affects this ingress turn; save
+    * and restore any prior cb defensively. */
+   prev_cb = cli_session_get_stream_cb(&prev_ud);
+   cli_session_set_stream_cb(ingress_stream_cb, &bridge);
+   /* Retry a transient empty/dead turn only while nothing has streamed yet, so a
+    * retry can never duplicate already-emitted deltas. */
+   for (attempt = 0; attempt < INGRESS_MAX_ATTEMPTS; attempt++)
    {
-      cli_stream_emit_error(emit, ctx, "api_error", err[0] ? err : "claude CLI turn failed");
-      return;
+      reply = ingress_cli_run(req, ag, msg_id, err, sizeof(err), &rc);
+      if (reply || rc != -1 || bridge.begun)
+         break;
+   }
+   cli_session_set_stream_cb(prev_cb, prev_ud);
+
+   if (reply)
+   {
+      if (!bridge.begun)
+      {
+         /* Output arrived without an intermediate delta (a fast turn whose text
+          * only appeared in the final extract): begin now and emit it. */
+         bridge.xl = anthropic_stream_begin(msg_id, model, 0, emit, ctx);
+         bridge.begun = 1;
+         if (bridge.xl)
+            anthropic_stream_emit_text(bridge.xl, reply);
+      }
+      else if (bridge.xl && strlen(reply) > bridge.emitted)
+      {
+         /* Defensive: emit any tail the live deltas didn't cover by completion. */
+         anthropic_stream_emit_text(bridge.xl, reply + bridge.emitted);
+      }
+      ingress_cli_record_audit(ag, model);
+      free(reply);
    }
 
-   ingress_cli_record_audit(ag, model);
-
-   xl = anthropic_stream_begin(msg_id, model, 0, emit, ctx);
-   if (xl)
+   if (bridge.begun)
    {
-      anthropic_stream_emit_text(xl, reply);
-      anthropic_stream_finish(xl);
-      anthropic_stream_free(xl);
+      if (bridge.xl)
+      {
+         anthropic_stream_finish(bridge.xl);
+         anthropic_stream_free(bridge.xl);
+      }
    }
-   free(reply);
+   else
+   {
+      /* Hard failure, nothing streamed: a typed error, not a silent empty stream. */
+      cli_stream_emit_error(emit, ctx, rc == -100 ? "request_too_large" : "api_error",
+                            err[0] ? err : "claude CLI turn failed");
+   }
 }
 
 static int messages_buffered(const char *body, char *resp, int cap)

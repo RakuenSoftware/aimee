@@ -12,6 +12,7 @@
 #include "../headers/agent_config.h"
 #include "../headers/agent_exec.h"
 #include "../headers/agent_protocol.h"
+#include "../headers/cli_session.h"
 #include "../headers/delegate_driver.h"
 #include "../headers/server_http.h"
 #include "../vendor/headers/cJSON.h"
@@ -278,6 +279,24 @@ static char g_cli_seen_sid[128];
 static char g_cli_seen_cmd[256];
 static int g_override_set;
 static int g_override_clear;
+/* Live-streaming: when nparts>0 the executor stub fires the registered stream cb
+ * with each part (exercising the real-time delta bridge) and returns their concat. */
+static const char *g_cli_stream_parts[4];
+static int g_cli_stream_nparts;
+static cli_session_stream_cb_t g_test_stream_cb;
+static void *g_test_stream_ud;
+
+void cli_session_set_stream_cb(cli_session_stream_cb_t cb, void *ud)
+{
+   g_test_stream_cb = cb;
+   g_test_stream_ud = ud;
+}
+cli_session_stream_cb_t cli_session_get_stream_cb(void **ud_out)
+{
+   if (ud_out)
+      *ud_out = g_test_stream_ud;
+   return g_test_stream_cb;
+}
 
 int agent_execute_cli_session(const agent_t *agent, const agent_network_t *network,
                               const char *system_prompt, const char *user_prompt, int max_tokens,
@@ -313,7 +332,21 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
    memset(out, 0, sizeof(*out));
    if (g_cli_rc == 0)
    {
-      out->response = strdup(g_cli_reply ? g_cli_reply : "");
+      if (g_cli_stream_nparts > 0)
+      {
+         char buf[1024] = "";
+         for (int i = 0; i < g_cli_stream_nparts; i++)
+         {
+            if (g_test_stream_cb)
+               g_test_stream_cb(g_cli_stream_parts[i], g_test_stream_ud);
+            strncat(buf, g_cli_stream_parts[i], sizeof(buf) - strlen(buf) - 1);
+         }
+         out->response = strdup(buf);
+      }
+      else
+      {
+         out->response = strdup(g_cli_reply ? g_cli_reply : "");
+      }
       out->success = 1;
       out->turns = 1;
    }
@@ -1081,6 +1114,79 @@ static void test_messages_buffered_cli_appends_system_prompt(void)
    PASS("messages_buffered_cli_appends_system_prompt");
 }
 
+static void test_messages_stream_cli_live_deltas(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   emit_capture_t cap;
+
+   reset_capture();
+   memset(&cap, 0, sizeof(cap));
+   g_driver = &anthropic;
+   g_cli_mode = 1;
+   g_cli_agent_name = "primary";
+   g_cli_rc = 0;
+   g_cli_stream_parts[0] = "Hello ";
+   g_cli_stream_parts[1] = "world";
+   g_cli_stream_nparts = 2;
+
+   assert(messages_stream(
+              "{\"model\":\"claude-x\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+              cap_emit, &cap) == 0);
+   /* Each CLI delta is forwarded live as its own text_delta (not one block at the
+    * end): start, block_start, delta("Hello "), delta("world"), block_stop, msg_delta, stop. */
+   assert(cap.count == 7);
+   assert(strcmp(cap.events[0], "message_start") == 0);
+   assert(strcmp(cap.events[1], "content_block_start") == 0);
+   assert(strcmp(cap.events[2], "content_block_delta") == 0);
+   assert(strstr(cap.data[2], "Hello ") != NULL);
+   assert(strcmp(cap.events[3], "content_block_delta") == 0);
+   assert(strstr(cap.data[3], "world") != NULL);
+   assert(strcmp(cap.events[4], "content_block_stop") == 0);
+   assert(strcmp(cap.events[5], "message_delta") == 0);
+   assert(strcmp(cap.events[6], "message_stop") == 0);
+
+   g_cli_stream_nparts = 0;
+   g_cli_mode = 0;
+   reset_capture();
+   PASS("messages_stream_cli_live_deltas");
+}
+
+static void test_messages_buffered_cli_too_large(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   char resp[4096];
+   cJSON *out;
+   /* Build a > INGRESS_MAX_PROMPT_BYTES user message. */
+   size_t big = (size_t)INGRESS_MAX_PROMPT_BYTES + 16;
+   char *huge = malloc(big + 1);
+   char *body;
+
+   assert(huge != NULL);
+   memset(huge, 'x', big);
+   huge[big] = '\0';
+   body = malloc(big + 128);
+   assert(body != NULL);
+   snprintf(body, big + 128,
+            "{\"model\":\"claude-x\",\"messages\":[{\"role\":\"user\",\"content\":\"%s\"}]}", huge);
+
+   reset_capture();
+   g_driver = &anthropic;
+   g_cli_mode = 1;
+   g_cli_agent_name = "primary";
+   g_cli_rc = 0;
+
+   assert(messages_buffered(body, resp, sizeof(resp)) == 413);
+   out = parse(resp);
+   assert(strcmp(obj(obj(out, "error"), "type")->valuestring, "request_too_large") == 0);
+   cJSON_Delete(out);
+
+   free(huge);
+   free(body);
+   g_cli_mode = 0;
+   reset_capture();
+   PASS("messages_buffered_cli_too_large");
+}
+
 int main(void)
 {
    test_translate_request_anthropic_passthrough();
@@ -1105,6 +1211,8 @@ int main(void)
    test_messages_buffered_cli_not_logged_in();
    test_messages_stream_cli_success();
    test_messages_stream_cli_error();
+   test_messages_stream_cli_live_deltas();
+   test_messages_buffered_cli_too_large();
    printf("anthropic_http: OK\n");
    return 0;
 }
