@@ -3,13 +3,16 @@
 - **State:** ✅ **SHIPPED / CLOSED (2026-06-24).** The proposal's goal — runtime
   model fetch + a KB that derives `embedding_dim` from the running embedder so the
   two can never drift — is achieved: §1 (thin runtime-fetch image), §2 dim-drift
-  refusal (#337), §2a recorded-dim precedence (#604), and §2b fresh-DB probe (#661)
-  are all merged to `testing`. The lone residual, §2c (opt-in auto-reembed), is
-  **deferred, not a safety gap** — §2's refuse-and-instruct is the safety floor and
-  ships; the re-embed itself is now the operator-gated drop-and-rebuild in
+  refusal (#337), §2a recorded-dim precedence (#604), §2b fresh-DB probe (#661), and
+  §2c the double-gated dim-change re-embed reset (#675) are all merged to `testing`.
+  The 2026-06-24 closeout had **deferred** §2c (treating §2's refuse-and-instruct as
+  sufficient); it was subsequently **built and shipped in #675**, so the in-product
+  re-embed now exists *as well as* the operator-gated drop-and-rebuild in
   [`docs/runbooks/unified-llm-cutover.md`](../../runbooks/unified-llm-cutover.md) §4.
-  Roundtable 2026-06-14 (security · architect · QA · contrarian, 4 rounds to convergence).
-- **Implementation status (2026-06-21):** PARTIAL. §1 (thin image / runtime
+  Roundtable 2026-06-14 (security · architect · QA · contrarian, 4 rounds to convergence);
+  §2c re-reviewed 2026-06-24 (3 rounds to APPROVE).
+- **Implementation status (2026-06-24):** COMPLETE — §1, §2, §2a, §2b, §2c all in
+  tree (§2c shipped in #675). §1 (thin image / runtime
   model fetch) is in tree. §2's safety-critical core — the `kb_meta`
   `schema_embedding_dim` record + dim-drift **refusal** (`db2_embedding_dim_record_or_check`,
   atomic upsert) — landed in **PR #337**. **§2a (recorded-dim precedence)
@@ -28,22 +31,28 @@
   work fixed a latent defect that had silently disabled BOTH §2a and §2b: the
   config default `embedding_dim=1024` made `config_embedding_dim_is_pinned` report
   "pinned" in every deployment — now defaulted to 0 (unset), so "pinned" means the
-  operator explicitly set it. **§2c — DEFERRED (closeout 2026-06-24).** The
-  double-gated auto-reembed (`kb_reembed_on_dim_change` off-by-default + `--confirm`
-  + `/health=maintenance` + count-divergence → degraded) is the one piece never
-  built, and it is **not a safety gap**: §2's refuse-and-instruct (never silently
-  serve a wrong-dim embedder against a mismatched store) is the safety floor and it
-  ships. The *convenience* of an in-product auto-reembed is now served by the
-  operator-gated drop-and-rebuild + parity gate in
-  [`docs/runbooks/unified-llm-cutover.md`](../../runbooks/unified-llm-cutover.md) §4,
-  which the unified-llm-container migration adopted as the chosen re-embed path — so
-  the in-product command is **decided-against**, not missing. *User-facing
-  mitigation (the known-gap statement):* a non-operator who changes `EMBEDDER_MODEL`
-  against a populated DB is never silently broken — they hit §2's **actionable
-  refusal** ("recorded dim N ≠ embedder dim M; this is a guided re-embed") at
-  startup, and recovery is the documented drop-and-rebuild. The only thing §2c would
-  have added is performing that recovery *in-product behind a flag* instead of by the
-  procedure; no scenario is left unrecoverable, only less automated. Forward note: the whole
+  operator explicitly set it. **§2c — SHIPPED in PR #675 (2026-06-24).** Originally
+  deferred at the 2026-06-24 closeout, the double-gated dim-change reset was then
+  built: `db2_dim_change_reset` drops + recreates the *derived* halfvec vector tables
+  at the new dim inside one transaction (under the `db2_init` mutex), re-records the
+  dim, and re-queues the authoritative sources (curator artifacts, evidence ops) — so
+  no source data is lost (`kb_documents`/memory are never dropped). It is doubly gated:
+  `kb_reembed_on_dim_change` (off by default → 403) **and** `--confirm` / type-the-dim
+  (`aimee kb reembed`, or `POST /v1/reembed`). While it runs, the `reembed_in_progress`
+  marker makes `/v1/search` 503 and health report `maintenance` (degraded past a 24h
+  TTL); the curator drain auto-clears it once the backfill reconciles, and
+  `aimee kb reembed --clear-maintenance` is a manual escape hatch (refusing on a
+  recorded≠running dim mismatch unless `--force`). `--target-dim N` pins the target,
+  bypassing the embedder probe. Validated live on the docker pve stack and roundtable-
+  approved (3 rounds). §2's **refuse-and-instruct remains the safety floor** — §2c is
+  the in-product *recovery* behind that floor; the operator-gated drop-and-rebuild in
+  [`docs/runbooks/unified-llm-cutover.md`](../../runbooks/unified-llm-cutover.md) §4
+  remains the documented alternative. *User-facing mitigation (the known-gap
+  statement):* a non-operator who changes `EMBEDDER_MODEL` against a populated DB is
+  never silently broken — they hit §2's **actionable refusal** ("recorded dim N ≠
+  embedder dim M; this is a guided re-embed") at startup, and recovery is now either
+  `aimee kb reembed --confirm` (in-product) or the documented drop-and-rebuild.
+  Forward note: the whole
   torch embedder — and with it this proposal's §1 runtime-fetch surface — is slated
   for retirement by unified-llm-container at the operator cutover (runbook §6); the
   §2/§2a/§2b dim machinery is **retained**, since the unified-llm `(model_id,dim)`
