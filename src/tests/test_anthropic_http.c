@@ -707,7 +707,9 @@ static void test_messages_preinject_appends_system_block(void)
    g_stub_preinject_env = "<aimee-context>ENV</aimee-context>";
    cJSON *req = parse("{\"system\":[{\"type\":\"text\",\"text\":\"SYS\"}],"
                       "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
-   messages_apply_preinject(req);
+   /* The append logic now lives in the gateway memory stage (P3); anthropic_http
+    * delegates to it. Exercise it through the same entry the ingress uses. */
+   gateway_pipeline_memory_apply_messages(req);
    char *flat = anthropic_system_to_text(req);
    assert(flat);
    const char *sys = strstr(flat, "SYS");

@@ -18,6 +18,7 @@
 #include "server_http.h"
 #include "openai_shape.h"
 #include "ingress_preinject.h"
+#include "gateway_pipeline.h"       /* gateway memory stage — context pre-injection */
 #include "dogfood.h"                /* dogfood_autolabel_next_turn_live */
 #include "learning_implicit.h"      /* learning_implicit_detect_turn */
 #include "openai_responses_store.h" /* previous_response_id continuation store */
@@ -150,7 +151,7 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
     * so the §4 dedup key must hash it (a stale reply must not be replayed after
     * the injected memory/context changes). On a cache miss it is reused for the
     * provider call below; on a hit it is freed unused. */
-   char *pi_env = ingress_preinject_build(prompt, 0);
+   char *pi_env = gateway_pipeline_memory_envelope(prompt);
 
    /* Resolve the backend BEFORE dedup so the key carries the resolved
     * provider/model — two requests resolving to a different backend must not
@@ -628,7 +629,7 @@ static int responses_handler(const char *body, char *resp, int cap)
    memset(&result, 0, sizeof(result));
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
-   char *pi_env = ingress_preinject_build(full, 0);
+   char *pi_env = gateway_pipeline_memory_envelope(full);
    int erc = agent_execute(ag, pi_env, full, max_tokens, temperature, &result);
    free(pi_env);
 
@@ -741,7 +742,7 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
    memset(&result, 0, sizeof(result));
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
-   char *pi_env = ingress_preinject_build(prompt, 0);
+   char *pi_env = gateway_pipeline_memory_envelope(prompt);
    int erc = agent_execute(ag, pi_env, prompt, max_tokens, temperature, &result);
    free(pi_env);
    free(prompt);
@@ -811,7 +812,7 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
    memset(&result, 0, sizeof(result));
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
-   char *pi_env = ingress_preinject_build(prompt, 0);
+   char *pi_env = gateway_pipeline_memory_envelope(prompt);
    int erc = agent_execute(ag, pi_env, prompt, max_tokens, temperature, &result);
    free(pi_env);
    free(prompt);
@@ -996,24 +997,10 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
    }
 
    /* P1 context pre-injection (config: ingress_preinject_enabled, default off):
-    * prepend a fusion-recall <aimee-context> envelope to the system prompt so the
+    * prepend a fusion-recall <aimee-context> envelope to the instructions so the
     * external agent reasons over already-loaded context instead of re-exploring
     * the repo. No-op when disabled or when recall yields nothing. */
-   {
-      char *pi_query = ingress_preinject_query_from_messages(messages);
-      char *pi_env = ingress_preinject_build(pi_query, 0);
-      if (pi_env)
-      {
-         char *merged = ingress_preinject_apply(instructions, pi_env);
-         if (merged)
-         {
-            free(instructions);
-            instructions = merged;
-         }
-      }
-      free(pi_query);
-      free(pi_env);
-   }
+   gateway_pipeline_memory_apply_instructions(&instructions, messages);
 
    parsed_response_t parsed;
    int erc =
