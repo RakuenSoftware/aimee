@@ -1,6 +1,44 @@
 # Proposal: Pluggable curator LLM backend (shared provider client + optional curator container)
 
-- **State:** reviewed — READY (roundtable 2026-06-14: security · architect · QA · contrarian; 4 rounds to convergence)
+- **State:** ✅ **SHIPPED / CLOSED (2026-06-24).** The proposal's goal — a
+  pluggable, decoupled, operator-owned curator LLM backend — is achieved and merged
+  to `testing`: the shared LLM-provider client (§1, **#395**), the kb-level provider
+  layer + stage→provider config + dispatch (§2, **#411**), and the curator `/v1/health`
+  observability block (§4) are all in tree with unit tests; the curator stages route
+  through it and the old rate limiter is gone. The one unbuilt scope item — the
+  **dedicated `aimee-curator` container** — is **decided-against**, superseded by the
+  `unified-llm-container` **synth role** (a baked, config-selectable curator/synth
+  LLM); the shared provider client reaches that — or any OpenAI-compatible endpoint —
+  by `kb_curator_provider_*` config, which was always the point. See the
+  **Implementation status** block. Roundtable 2026-06-14 (security · architect · QA ·
+  contrarian, 4 rounds to convergence).
+- **Implementation status (closeout 2026-06-24, grounded against `testing`):**
+  - **§1 shared LLM-provider client — SHIPPED (#395).** `src/provider_client.{c,h}`
+    (`provider_client_complete` / `provider_client_build_openai` /
+    `provider_client_parse_openai`), linked by both `aimee-server` and `aimee-kb`
+    (`src/Makefile`), covered by `src/tests/test_provider_client.c`.
+  - **§2 kb provider layer + stage→provider dispatch — SHIPPED (#411).** Config
+    `kb_curator_provider_*` (`src/headers/config.h:1301`), `kb_curator_provider_for_stage`
+    (`src/kb_curator_provider.c`), and the curator stages
+    (`kb_curator_llm.c:63` → `provider_client_complete`, `kb_curator_resolve_entities.c`,
+    `kb_curator_synthesize.c`) routed through it; the per-stage rate limiter is dropped.
+    Covered by `src/tests/test_kb_curator_provider.c`.
+  - **§4 curator block on `/v1/health` — SHIPPED.** `kb_health_add_curator`
+    (`src/kb/kb_service_kb.c:246`) reports per-tier provider config + queue depth.
+  - **`aimee-curator` container (`Dockerfile.curator` + publish matrix) — NOT BUILT,
+    decided-against.** Superseded by `unified-llm-container`'s synth role; the
+    pluggable backend serves the same need via config, with no second container to
+    publish. (This also resolves the reconciler's `Dockerfile.curator` premise-drift:
+    the reference is decided-against, not pending.) *Contract parity:* the provider
+    client speaks the OpenAI-compatible wire API (`provider_client_build_openai` /
+    `_parse_openai`) that unified-llm's synth role serves, so config parity is just
+    `kb_curator_provider_base_url`/`_model`/`_api_key` pointing at it — the same
+    contract `test_provider_client.c` covers. (A live curator-against-synth e2e is a
+    `deployment`-tier check, not claimed here.)
+  - **Legacy `kb_curator_*_command` sidecar hooks — RETAINED as a deprecated
+    fallback.** The provider client is the **supported** path; the command hooks are
+    kept (not removed) so an operator with a command-style sidecar is not broken, and
+    are the "repurpose" half of the Scope bullet's "retire/repurpose". `config_kb_curator.c`.
 - **Author:** JBailes
 - **Date:** 2026-06-12
 - **Base:** `origin/main` (v0.2.50). The retrieval pipeline is live and default-on:
