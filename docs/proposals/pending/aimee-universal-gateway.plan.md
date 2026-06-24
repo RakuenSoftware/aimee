@@ -6,7 +6,7 @@
 
 ## P1 — derive proxy/translate; delete the flag
 
-**Done (this branch).** Removes `claude_proxy_parity` from the whole config surface
+**✅ SHIPPED (#658, merged to `testing`).** Removes `claude_proxy_parity` from the whole config surface
 (`config.h`, `config.c`, `config_save.c`, `config_fields.c`, `config_schema.inc`,
 generated docs) and gates the `/v1/messages` ingress on `driver_is_anthropic` only:
 Anthropic-API primary → honor inbound model + forward `anthropic-version`/

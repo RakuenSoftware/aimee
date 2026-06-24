@@ -1,6 +1,10 @@
 # Aimee as the universal LLM gateway: dual-API surface, model-derived proxy/translate, and a general inspect/alter pipeline
 
-- **State:** reviewed — roundtable sign-off (R1 surfaced 3 findings; R2: Findings A
+- **State:** reviewed — roundtable sign-off; **implementing.** P1 (derive
+  proxy/translate, delete the `claude_proxy_parity` flag) is complete (#658); the
+  remaining work is the `gateway_pipeline` core module + tool-policing (P2),
+  memory-as-a-stage (P3), and delegate unification (P4). (R1
+  surfaced 3 findings; R2: Findings A
   & B confirmed RESOLVED by security · architect · qa; Finding C resolved via the
   model-pin decision below). User proposal-gate decisions folded in. *Note: the
   delegate transcripts were truncated by aimee's citation-replay verification
@@ -130,13 +134,15 @@ Properties:
 
 ## Phasing
 
-- **P1 — derive, delete the flag.** Remove `claude_proxy_parity`; gate
-  passthrough/translate purely on the serving model's API (`driver_is_anthropic`)
-  in `anthropic_http.c`. Net behavior: an Anthropic call is forwarded untouched to
-  an Anthropic model, translated to an OpenAI model — automatically. *(Already
-  prototyped and validated end-to-end against a live aimee-server + mock upstream:
-  model honored, headers forwarded, count_tokens proxied, 429+Retry-After
-  relayed.)*
+- **P1 — derive, delete the flag. ✅ SHIPPED (#658, merged to `testing`).** Removed
+  `claude_proxy_parity`; gates passthrough/translate purely on the serving model's
+  API (`driver_is_anthropic`) in `anthropic_http.c`. Net behavior: an Anthropic call
+  is forwarded untouched to an Anthropic model, translated to an OpenAI model —
+  automatically. Covered by `src/tests/test_anthropic_http.c`
+  (`messages_buffered_anthropic_parity_passthrough` honors the inbound model,
+  `messages_buffered_openai_family_translates` + the streaming variant translate +
+  swap). The single-model-shim behavior change (client model forwarded verbatim) is
+  documented; the model-pin that bounds it lands in P2.
 - **P2 — gateway pipeline scaffold + first policy.** Introduce the canonical
   request/response IR and a typed stage interface at the ingress seam; port the
   existing translation into it; add the first policy stage: **tool policing**
