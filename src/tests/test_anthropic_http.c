@@ -233,6 +233,12 @@ int gateway_policy_apply_request(cJSON *req, int tools_openai_shape)
    (void)tools_openai_shape;
    return 0;
 }
+int gateway_policy_pin_model(cJSON *req, const char *agent_model)
+{
+   (void)req;
+   (void)agent_model;
+   return 0; /* pin is off in these shape tests; covered by test_gateway_policy */
+}
 
 #include "../server/anthropic_http.c"
 

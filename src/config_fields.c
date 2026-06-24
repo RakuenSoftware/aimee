@@ -43,6 +43,7 @@ const config_field_t config_fields[] = {
      CFG_BOOL},
     {"gateway_prevent_subagents", offsetof(config_t, gateway_prevent_subagents), sizeof(int), 0,
      CFG_BOOL},
+    {"gateway_pin_model", offsetof(config_t, gateway_pin_model), sizeof(int), 0, CFG_BOOL},
     {"ingress_preinject_assembly_budget", offsetof(config_t, ingress_preinject_assembly_budget),
      sizeof(int), 0, CFG_INT},
     {"ingress_max_raw_scans", offsetof(config_t, ingress_max_raw_scans), sizeof(int), 0, CFG_INT},

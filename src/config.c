@@ -841,6 +841,10 @@ int config_load(config_t *cfg)
    if (cJSON_IsBool(item))
       cfg->gateway_prevent_subagents = cJSON_IsTrue(item);
 
+   item = cJSON_GetObjectItemCaseSensitive(root, "gateway_pin_model");
+   if (cJSON_IsBool(item))
+      cfg->gateway_pin_model = cJSON_IsTrue(item);
+
    /* CSS migration assistant style-graph write path (WP-C). The field +
     * descriptor + save existed, but the YAML load parse was missing, so the
     * flag never took effect during indexing. */

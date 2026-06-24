@@ -775,6 +775,8 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "ingress_preinject_enabled", 1);
    if (cfg->gateway_prevent_subagents)
       cJSON_AddBoolToObject(root, "gateway_prevent_subagents", 1);
+   if (cfg->gateway_pin_model)
+      cJSON_AddBoolToObject(root, "gateway_pin_model", 1);
    if (cfg->ingress_preinject_assembly_budget != 6144)
       cJSON_AddNumberToObject(root, "ingress_preinject_assembly_budget",
                               cfg->ingress_preinject_assembly_budget);

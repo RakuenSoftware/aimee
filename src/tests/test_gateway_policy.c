@@ -12,12 +12,14 @@
 #define PASS(name) printf("  PASS: %s\n", (name))
 
 static int g_prevent = 0;
+static int g_pin = 0;
 int config_load(config_t *cfg)
 {
    if (cfg)
    {
       memset(cfg, 0, sizeof(*cfg));
       cfg->gateway_prevent_subagents = g_prevent;
+      cfg->gateway_pin_model = g_pin;
    }
    return 0;
 }
@@ -144,6 +146,45 @@ static void test_strip_tools_off_and_null(void)
    PASS("strip_tools_off_and_null");
 }
 
+/* Model-pin: on -> the served model is forced to the agent's model. */
+static void test_pin_model_on_swaps(void)
+{
+   cJSON *req = cJSON_Parse("{\"model\":\"claude-opus-from-client\",\"max_tokens\":8}");
+   g_pin = 1;
+   int changed = gateway_policy_pin_model(req, "primary-model");
+   assert(changed == 1);
+   assert(strcmp(cJSON_GetObjectItem(req, "model")->valuestring, "primary-model") == 0);
+   g_pin = 0;
+   cJSON_Delete(req);
+   PASS("pin_model_on_swaps");
+}
+
+/* Model-pin off (default) is a byte-neutral no-op: the client model is honored. */
+static void test_pin_model_off_noop(void)
+{
+   cJSON *req = cJSON_Parse("{\"model\":\"client-model\"}");
+   g_pin = 0;
+   int changed = gateway_policy_pin_model(req, "primary-model");
+   assert(changed == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "model")->valuestring, "client-model") == 0);
+   cJSON_Delete(req);
+   PASS("pin_model_off_noop");
+}
+
+/* Pin on but the request already names the pinned model, or no agent model -> no-op. */
+static void test_pin_model_idempotent_and_guarded(void)
+{
+   cJSON *req = cJSON_Parse("{\"model\":\"primary-model\"}");
+   g_pin = 1;
+   assert(gateway_policy_pin_model(req, "primary-model") == 0);  /* already pinned */
+   assert(gateway_policy_pin_model(req, "") == 0);               /* empty agent model */
+   assert(gateway_policy_pin_model(NULL, "primary-model") == 0); /* null req */
+   assert(strcmp(cJSON_GetObjectItem(req, "model")->valuestring, "primary-model") == 0);
+   g_pin = 0;
+   cJSON_Delete(req);
+   PASS("pin_model_idempotent_and_guarded");
+}
+
 int main(void)
 {
    printf("test_gateway_policy:\n");
@@ -154,6 +195,9 @@ int main(void)
    test_strip_tools_bare_array();
    test_strip_tools_emptied();
    test_strip_tools_off_and_null();
+   test_pin_model_on_swaps();
+   test_pin_model_off_noop();
+   test_pin_model_idempotent_and_guarded();
    printf("all gateway_policy tests passed\n");
    return 0;
 }

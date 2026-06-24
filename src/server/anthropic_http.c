@@ -213,9 +213,22 @@ static int gw_stage_tool_policing(gw_request_t *r, void *ud)
    return gateway_policy_apply_request(r->raw, 0 /* Anthropic tool shape */);
 }
 
+/* Model-pin stage (P2b): force the served model to the configured primary's model
+ * when the policy is on (no-op by default). Resolves the P1 single-model-shim
+ * regression — an operator running a fixed-model Anthropic-compatible shim enables
+ * it so an arbitrary client model name is not forwarded and rejected upstream.
+ * Returns 1 if the model was changed. */
+static int gw_stage_model_pin(gw_request_t *r, void *ud)
+{
+   const agent_t *ag = (const agent_t *)r->ag;
+   (void)ud;
+   return gateway_policy_pin_model(r->raw, ag ? ag->model : NULL);
+}
+
 /* Run the request pipeline over an inbound Anthropic /v1/messages request, in
- * place, with the same stages and order as the prior inline prelude
- * (memory → policy). Returns total interventions (≥0) or <0 on a stage error. */
+ * place, with the same stages and order as the prior inline prelude (memory →
+ * policy), plus the model-pin policy. Returns total interventions (≥0) or <0 on a
+ * stage error. */
 static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *driver,
                                          const agent_t *ag, int parity, int stream)
 {
@@ -232,6 +245,7 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
    static const gw_stage_t stages[] = {
        {gw_stage_memory, NULL, "memory"},
        {gw_stage_tool_policing, NULL, "tool_policing"},
+       {gw_stage_model_pin, NULL, "model_pin"},
    };
    return gw_pipeline_run_request(&r, stages, sizeof(stages) / sizeof(stages[0]));
 }
@@ -403,6 +417,9 @@ static int messages_buffered(const char *body, char *resp, int cap)
       status = write_error(resp, cap, 500, "api_error", "gateway request pipeline failed");
       goto cleanup;
    }
+   /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
+    * the pointer cached above (line ~397) could now dangle. */
+   model = jo_cstr(req, "model");
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
@@ -710,6 +727,9 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       }
       goto cleanup;
    }
+   /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
+    * the pointer cached at the top of this function could now dangle. */
+   model = jo_cstr(req, "model");
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)

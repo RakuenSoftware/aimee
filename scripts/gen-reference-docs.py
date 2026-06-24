@@ -107,6 +107,7 @@ CFG_KEY_DESC = {
     "claude_cli_delegate_enabled": "Allow delegating to the local Claude CLI agent.",
     "claude_model": "Default Claude model (empty = CLI default).",
     "gateway_prevent_subagents": "Gateway strips subagent-spawning tools (Task/Agent/etc.) from proxied requests so the served model cannot spawn subagents. Default off.",
+    "gateway_pin_model": "Gateway forces the proxied /v1/messages served model to the configured primary's model, overriding the client-requested model. Default off (the passthrough honors the client model); enable for single-model Anthropic-compatible shims.",
     "cost_reward_enabled": "Factor token cost into the reward signal.",
     "cost_reward_lambda_pct": "Cost-penalty weight (percent) in the reward.",
     "cost_reward_ref_usd_milli": "Reference cost (USD-milli) normalizing the cost reward.",

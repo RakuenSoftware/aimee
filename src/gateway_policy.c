@@ -25,6 +25,13 @@ static int prevent_subagents_enabled(void)
    return cfg.gateway_prevent_subagents ? 1 : 0;
 }
 
+static int pin_model_enabled(void)
+{
+   config_t cfg;
+   config_load(&cfg);
+   return cfg.gateway_pin_model ? 1 : 0;
+}
+
 /* A tool entry's name, regardless of API shape. */
 static const char *tool_entry_name(const cJSON *tool, int openai_shape)
 {
@@ -99,4 +106,18 @@ int gateway_policy_apply_request(cJSON *req, int tools_openai_shape)
    }
 
    return stripped;
+}
+
+int gateway_policy_pin_model(cJSON *req, const char *agent_model)
+{
+   const char *cur;
+
+   if (!req || !agent_model || !agent_model[0] || !pin_model_enabled())
+      return 0;
+   cur = jo_cstr(req, "model");
+   if (cur && strcmp(cur, agent_model) == 0)
+      return 0; /* already the pinned model — nothing to change */
+   cJSON_DeleteItemFromObjectCaseSensitive(req, "model");
+   cJSON_AddStringToObject(req, "model", agent_model);
+   return 1;
 }

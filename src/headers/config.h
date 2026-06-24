@@ -343,6 +343,12 @@ typedef struct config
     * proxied /v1/messages or /v1/chat/completions request, so the served model is
     * never offered a way to spawn subagents. Default off. */
    int gateway_prevent_subagents;
+   /* Gateway model-pin (universal-gateway P2b): when on, the proxied /v1/messages
+    * served model is forced to the configured primary's model, overriding whatever
+    * model the client requested. Default off (the passthrough honors the client
+    * model, P1). Single-model Anthropic-compatible shims (llama.cpp/vLLM) enable
+    * this so an arbitrary client model name is not forwarded and rejected upstream. */
+   int gateway_pin_model;
    int typed_facts_enabled;      /* typed-fact knowledge layer master gate (default off) */
    int kb_evidence_emit_enabled; /* auditable-correctness: emit per-turn retrieval_event (default
                                     off) */

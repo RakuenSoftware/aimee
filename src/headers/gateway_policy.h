@@ -27,4 +27,13 @@ int gateway_policy_apply_request(struct cJSON *req, int tools_openai_shape);
  * Returns the number of entries removed (0 = no-op / policy off / not an array). */
 int gateway_policy_strip_tools(struct cJSON *tools, int tools_openai_shape);
 
+/* Model-pin (universal-gateway P2b): when config `gateway_pin_model` is on, force
+ * `req`'s "model" to `agent_model` (the configured primary), overriding whatever
+ * model the client requested. No-op when the policy is off, `agent_model` is empty,
+ * or `req` already names it — so it is byte-neutral by default (the P1 passthrough
+ * still honors the client model). Single-model Anthropic-compatible shims enable it
+ * so an arbitrary client model name is not forwarded and rejected upstream. Returns
+ * 1 if it changed the model, 0 otherwise (for the caller's audit row). */
+int gateway_policy_pin_model(struct cJSON *req, const char *agent_model);
+
 #endif /* DEC_GATEWAY_POLICY_H */
