@@ -29,10 +29,11 @@
 #include "server_http.h"
 #include "session_compact.h"
 #include "sse_parser.h"
+#include <stdio.h> /* temp-file write for --append-system-prompt */
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <unistd.h> /* access() for the claude-login pre-flight */
+#include <unistd.h> /* access()/unlink() for the claude-login pre-flight + sys-prompt temp */
 
 /* Resolve aimee's primary agent (the configured default, else the first
  * agent). Claude Code's requested model is intentionally ignored — switching
@@ -440,14 +441,34 @@ static void ingress_cli_record_audit(const agent_t *ag, const char *model)
  * panes; the agent's session_reuse is 0). On success returns the malloc'd reply
  * text (caller frees) and sets *rc_out = 0; on failure returns NULL, sets
  * *rc_out < 0, and fills `err`. */
+/* Write `data` to `path` (truncating). Returns 0 on success. Stages the system
+ * prompt for --append-system-prompt so arbitrary content never has to be escaped
+ * onto a command line. */
+static int ingress_write_tmp(const char *path, const char *data)
+{
+   FILE *f = fopen(path, "w");
+   size_t n, w;
+   if (!f)
+      return -1;
+   n = data ? strlen(data) : 0;
+   w = n ? fwrite(data, 1, n, f) : 0;
+   if (fclose(f) != 0)
+      return -1;
+   return (w == n) ? 0 : -1;
+}
+
 static char *ingress_cli_run(cJSON *req, agent_t *ag, const char *msg_id, char *err, size_t errlen,
                              int *rc_out)
 {
    agent_result_t ar;
+   agent_t cli_agent = *ag; /* per-request copy so cli_cmd can be shaped */
    char *sysp = anthropic_system_to_text(req);
    char *transcript =
        anthropic_messages_to_transcript(cJSON_GetObjectItemCaseSensitive(req, "messages"));
+   const char *exec_system;
    char sid[96];
+   char sys_path[MAX_PATH_LEN];
+   int have_sys_file = 0;
    int rc;
 
    err[0] = '\0';
@@ -458,13 +479,36 @@ static char *ingress_cli_run(cJSON *req, agent_t *ag, const char *msg_id, char *
       *rc_out = -1;
       return NULL;
    }
+
+   /* System-prompt fidelity for the claude CLI: deliver the client's system
+    * prompt as a real --append-system-prompt rather than pasting it into the
+    * user text. It is read from a temp file at launch ("$(cat <file>)") so
+    * arbitrary content (newlines, quotes, $) is never re-parsed by the shell and
+    * never hits a command-line length limit. Falls back to concatenation
+    * (exec_system = sysp) for a non-claude CLI or when there is no system prompt. */
+   exec_system = sysp ? sysp : "";
+   if (sysp && sysp[0] && ingress_agent_is_claude_cli(ag))
+   {
+      snprintf(sys_path, sizeof(sys_path), "/tmp/aimee-ingress-sys-%s.txt", msg_id);
+      if (ingress_write_tmp(sys_path, sysp) == 0)
+      {
+         const char *base = ag->cli_cmd[0] ? ag->cli_cmd : "claude";
+         snprintf(cli_agent.cli_cmd, sizeof(cli_agent.cli_cmd),
+                  "%s --append-system-prompt \"$(cat %s)\"", base, sys_path);
+         exec_system = ""; /* applied via the flag; do not also concat */
+         have_sys_file = 1;
+      }
+   }
+
    memset(&ar, 0, sizeof(ar));
    snprintf(sid, sizeof(sid), "aimee-ingress-%s", msg_id);
    session_id_set_override(sid);
-   rc = agent_execute_cli_session(ag, NULL, sysp ? sysp : "", transcript,
+   rc = agent_execute_cli_session(&cli_agent, NULL, exec_system, transcript,
                                   agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
                                   jo_num(req, "temperature", 1.0), &ar);
    session_id_clear_override();
+   if (have_sys_file)
+      unlink(sys_path);
    free(sysp);
    free(transcript);
 

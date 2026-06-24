@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "../headers/aimee.h"
 #include "../headers/agent_config.h"
@@ -273,6 +275,7 @@ static const char *g_cli_reply = "hello from CLI";
 static char g_cli_seen_system[4096];
 static char g_cli_seen_user[8192];
 static char g_cli_seen_sid[128];
+static char g_cli_seen_cmd[256];
 static int g_override_set;
 static int g_override_clear;
 
@@ -280,12 +283,33 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
                               const char *system_prompt, const char *user_prompt, int max_tokens,
                               double temperature, agent_result_t *out)
 {
-   (void)agent;
+   const char *catp;
    (void)network;
    (void)max_tokens;
    (void)temperature;
    snprintf(g_cli_seen_system, sizeof(g_cli_seen_system), "%s", system_prompt ? system_prompt : "");
    snprintf(g_cli_seen_user, sizeof(g_cli_seen_user), "%s", user_prompt ? user_prompt : "");
+   snprintf(g_cli_seen_cmd, sizeof(g_cli_seen_cmd), "%s", agent->cli_cmd);
+   /* When the system prompt was delivered via --append-system-prompt "$(cat P)",
+    * read P back so the test can assert the content actually reached the CLI. */
+   catp = strstr(agent->cli_cmd, "$(cat ");
+   if (catp)
+   {
+      const char *end = strchr(catp + 6, ')');
+      if (end && (size_t)(end - (catp + 6)) < 256)
+      {
+         char path[256];
+         FILE *pf;
+         snprintf(path, sizeof(path), "%.*s", (int)(end - (catp + 6)), catp + 6);
+         pf = fopen(path, "r");
+         if (pf)
+         {
+            size_t got = fread(g_cli_seen_system, 1, sizeof(g_cli_seen_system) - 1, pf);
+            g_cli_seen_system[got] = '\0';
+            fclose(pf);
+         }
+      }
+   }
    memset(out, 0, sizeof(*out));
    if (g_cli_rc == 0)
    {
@@ -1004,6 +1028,59 @@ static void test_messages_stream_cli_error(void)
    PASS("messages_stream_cli_error");
 }
 
+static void test_messages_buffered_cli_appends_system_prompt(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   char resp[4096];
+   const char *home = getenv("HOME");
+   char saved[512];
+   char tmphome[] = "/tmp/aimee-cli-home-XXXXXX";
+   char dir[600];
+   char creds[700];
+   FILE *cf;
+
+   saved[0] = '\0';
+   if (home)
+      snprintf(saved, sizeof(saved), "%s", home);
+   assert(mkdtemp(tmphome) != NULL);
+   snprintf(dir, sizeof(dir), "%s/.claude", tmphome);
+   assert(mkdir(dir, 0700) == 0);
+   snprintf(creds, sizeof(creds), "%s/.claude/.credentials.json", tmphome);
+   cf = fopen(creds, "w");
+   assert(cf != NULL);
+   fputs("{}", cf);
+   fclose(cf);
+   setenv("HOME", tmphome, 1); /* claude-login pre-flight now passes */
+
+   reset_capture();
+   g_driver = &anthropic;
+   g_cli_mode = 1;
+   g_cli_agent_name = "claude"; /* claude-family -> --append-system-prompt path */
+   g_cli_rc = 0;
+   g_cli_reply = "ok";
+   g_cli_seen_system[0] = g_cli_seen_cmd[0] = '\0';
+
+   assert(messages_buffered("{\"model\":\"claude-x\",\"system\":\"MYSYS-12345\","
+                            "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}",
+                            resp, sizeof(resp)) == 200);
+   /* system delivered as a flag (not pasted), and its content reached the CLI */
+   assert(strstr(g_cli_seen_cmd, "--append-system-prompt") != NULL);
+   assert(strstr(g_cli_seen_cmd, "$(cat ") != NULL);
+   assert(strcmp(g_cli_seen_system, "MYSYS-12345") == 0);
+
+   if (saved[0])
+      setenv("HOME", saved, 1);
+   else
+      unsetenv("HOME");
+   unlink(creds);
+   rmdir(dir);
+   rmdir(tmphome);
+   g_cli_mode = 0;
+   g_cli_agent_name = "primary";
+   reset_capture();
+   PASS("messages_buffered_cli_appends_system_prompt");
+}
+
 int main(void)
 {
    test_translate_request_anthropic_passthrough();
@@ -1022,6 +1099,7 @@ int main(void)
    test_messages_stream_openai_family_translates();
    test_cli_transcript_render();
    test_messages_buffered_cli_success();
+   test_messages_buffered_cli_appends_system_prompt();
    test_messages_buffered_cli_error();
    test_messages_buffered_cli_empty_reply();
    test_messages_buffered_cli_not_logged_in();
