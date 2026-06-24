@@ -7,6 +7,8 @@
 #ifndef DEC_GATEWAY_POLICY_H
 #define DEC_GATEWAY_POLICY_H 1
 
+#include "agent_protocol.h" /* parsed_response_t — type of the police function's argument */
+
 struct cJSON;
 
 /* Apply request-side tool policing to a proxied request, in place. `tools` is read
@@ -35,5 +37,48 @@ int gateway_policy_strip_tools(struct cJSON *tools, int tools_openai_shape);
  * so an arbitrary client model name is not forwarded and rejected upstream. Returns
  * 1 if it changed the model, 0 otherwise (for the caller's audit row). */
 int gateway_policy_pin_model(struct cJSON *req, const char *agent_model);
+
+/* Response-side tool policing (universal-gateway P2c). Companion to
+ * gateway_policy_apply_request; the request side strips a denied tool from the
+ * outbound `tools` array, the response side strips a `tool_use` block the served
+ * model emitted anyway. Same canonical mapping (`guardrails_canonical_tool_name`
+ * == "Subagent") and same gate (`config.gateway_prevent_subagents`); the predicate
+ * reads the config so the caller does not need to. */
+
+/* True if `name` would be denied by the active response-side policy. Reads
+ * `config.gateway_prevent_subagents` internally — the caller need not gate. The
+ * canonical-tool-name mapping is shared with the request side, so a denied name
+ * matches the request-side `is_subagent_tool_name` rule (Task / Agent / spawn_agent
+ * / RemoteTrigger, etc., all mapped to "Subagent"). */
+int gateway_policy_is_denied_tool(const char *name);
+
+/* Mutate `p` in place: memmove-compact denied entries out of `p->calls[]` so the
+ * surviving `p->calls[0..p->call_count-1]` is a contiguous prefix of the original
+ * (no realloc, no flag-and-skip). `p->call_count` is decremented to match.
+ * `p->stop_reason` is rewritten to "tool_use" when `call_count > 0`, "end_turn"
+ * when `call_count == 0` — the same mapping `anthropic_response_from_parsed`
+ * (src/server/anthropic_ingress.c:435) re-derives from `call_count`, so the
+ * post-police struct is wire-consistent with the renderer's mapping. The
+ * `stop_reason` write also feeds the pre-existing `agent_record_token_audit` row
+ * in `messages_buffered()` (it reads `parsed.stop_reason`), so the audit log
+ * matches the wire.
+ *
+ * Fields the function does NOT touch (by design): `id`, `name`, `is_tool_call`,
+ * `content`, `assistant_message`, `prompt_tokens`, `completion_tokens`,
+ * `cache_write_tokens`, `cache_read_tokens`, `model`. None of these are
+ * call-indexed. The function DOES write `arguments` on dropped entries —
+ * `free(src->arguments); src->arguments = NULL;` — so the dropped-entry
+ * strings are not leaked. (Without this, `agent_free_parsed_response`'s
+ * 0..call_count-1 sweep would miss them: the survivors overwrite the front
+ * slots, but the tail slots still hold the dropped strings, and the sweep
+ * never reaches the tail.) Bounded by the original `AGENT_MAX_TOOL_CALLS`
+ * ceiling.
+ *
+ * Returns the number of entries dropped (>= 0; never < 0). 0 = policy off / no
+ * denied entries / null `p` — no-op in all three cases. Currently discarded
+ * at the call site (messages_buffered ignores the return value); the future
+ * P2b audit pass will surface the count alongside the request-side
+ * `gateway_policy_apply_request` return value. */
+int gateway_policy_police_parsed_response(parsed_response_t *p);
 
 #endif /* DEC_GATEWAY_POLICY_H */

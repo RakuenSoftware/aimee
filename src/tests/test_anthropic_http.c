@@ -239,6 +239,15 @@ int gateway_policy_pin_model(cJSON *req, const char *agent_model)
    (void)agent_model;
    return 0; /* pin is off in these shape tests; covered by test_gateway_policy */
 }
+/* P2c (response-side tool policing) is exercised by its own dedicated
+ * integration test (unit-test-anthropic-http-p2c) which links the real
+ * gateway_policy.o. In these whitebox shape tests we stub it to a no-op
+ * so the response shape is unaltered. */
+int gateway_policy_police_parsed_response(parsed_response_t *p)
+{
+   (void)p;
+   return 0;
+}
 
 #include "../server/anthropic_http.c"
 

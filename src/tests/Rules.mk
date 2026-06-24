@@ -177,6 +177,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-sse-parser \
                $(TESTPREFIX)/unit-test-anthropic-ingress \
                $(TESTPREFIX)/unit-test-anthropic-http \
+               $(TESTPREFIX)/unit-test-anthropic-http-p2c \
                $(TESTPREFIX)/unit-test-gateway-policy \
                $(TESTPREFIX)/unit-test-gateway-pipeline \
                $(TESTPREFIX)/unit-test-hud \
@@ -1636,6 +1637,15 @@ $(TESTPREFIX)/unit-test-anthropic-ingress: $(OBJDIR)/tests/test_anthropic_ingres
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-anthropic-http: $(OBJDIR)/tests/test_anthropic_http.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/gateway_pipeline.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+# P2c (response-side tool policing) integration test: same source as
+# unit-test-anthropic-http but linked against the REAL gateway_policy.o
+# so the production police function runs against the driver's parsed
+# response. The shape tests stub the request-side policy helpers so they
+# don't have to deal with guardrails dependencies; this test exercises the
+# full wiring end-to-end.
+$(TESTPREFIX)/unit-test-anthropic-http-p2c: $(OBJDIR)/tests/test_anthropic_http_p2c.o $(OBJDIR)/server/anthropic_ingress.o $(OBJDIR)/sse_parser.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o $(OBJDIR)/gateway_pipeline.o $(OBJDIR)/gateway_policy.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-gateway-policy: $(OBJDIR)/tests/test_gateway_policy.o $(OBJDIR)/gateway_policy.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o

@@ -470,6 +470,16 @@ static int messages_buffered(const char *body, char *resp, int cap)
       else
          agent_parse_response_openai(provider_resp, &parsed);
 
+      /* P2c (response-side tool policing, buffered). Drops any `tool_use` block
+       * the model emitted despite the request-side strip, before the audit row
+       * reads parsed.stop_reason (so the audit log matches the wire) and before
+       * anthropic_response_from_parsed renders the reply. Gated internally on
+       * gateway_prevent_subagents (the predicate + the police function are both
+       * no-ops at the default config). Drop count is plumbed through to the
+       * same pipeline-runner total the request-side strip already emits; a
+       * future P2b audit pass surfaces both at once. */
+      gateway_policy_police_parsed_response(&parsed);
+
       /* Cost accounting: the Anthropic /v1/messages ingress is a raw provider
        * proxy (no agent_log_call), so record this turn's spend, billed against
        * the served model and tagged as ingress. */
