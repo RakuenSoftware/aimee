@@ -1,6 +1,14 @@
 # Proposal: Embedder runtime model fetch + auto-dimension
 
-- **State:** reviewed — READY (roundtable 2026-06-14: security · architect · QA · contrarian; 4 rounds to convergence)
+- **State:** ✅ **SHIPPED / CLOSED (2026-06-24).** The proposal's goal — runtime
+  model fetch + a KB that derives `embedding_dim` from the running embedder so the
+  two can never drift — is achieved: §1 (thin runtime-fetch image), §2 dim-drift
+  refusal (#337), §2a recorded-dim precedence (#604), and §2b fresh-DB probe (#661)
+  are all merged to `testing`. The lone residual, §2c (opt-in auto-reembed), is
+  **deferred, not a safety gap** — §2's refuse-and-instruct is the safety floor and
+  ships; the re-embed itself is now the operator-gated drop-and-rebuild in
+  [`docs/runbooks/unified-llm-cutover.md`](../../runbooks/unified-llm-cutover.md) §4.
+  Roundtable 2026-06-14 (security · architect · QA · contrarian, 4 rounds to convergence).
 - **Implementation status (2026-06-21):** PARTIAL. §1 (thin image / runtime
   model fetch) is in tree. §2's safety-critical core — the `kb_meta`
   `schema_embedding_dim` record + dim-drift **refusal** (`db2_embedding_dim_record_or_check`,
@@ -10,7 +18,7 @@
   the `operator-pin > recorded > (probe)` precedence at the `db2_init` schema-apply
   boundary, so an unpinned populated DB self-derives its dim instead of refusing on
   the default. See [the §2a plan](embedder-runtime-fetch-autodim.plan.md).
-  **§2b (fresh-DB probe) landed in PR #NNN:** the `probed` precedence rung is now
+  **§2b (fresh-DB probe) landed in PR #661:** the `probed` precedence rung is now
   wired — `db2_init` derives a fresh DB's dim from the embedder `/health` probe
   under `pg_try_advisory_lock`, fail-fast + never-poison, via a registered probe
   seam (`db2_set_embedder_probe`, `src/server/embedder_probe.c`, `embed-remote.py
@@ -20,10 +28,27 @@
   work fixed a latent defect that had silently disabled BOTH §2a and §2b: the
   config default `embedding_dim=1024` made `config_embedding_dim_is_pinned` report
   "pinned" in every deployment — now defaulted to 0 (unset), so "pinned" means the
-  operator explicitly set it. **Remaining (not done):** §2c — the double-gated
-  auto-reembed (`kb_reembed_on_dim_change` off-by-default + `--confirm` +
-  `/health=maintenance` + count-divergence → degraded). Runtime/bootstrap work
-  validated against the live embedder+kb stack.
+  operator explicitly set it. **§2c — DEFERRED (closeout 2026-06-24).** The
+  double-gated auto-reembed (`kb_reembed_on_dim_change` off-by-default + `--confirm`
+  + `/health=maintenance` + count-divergence → degraded) is the one piece never
+  built, and it is **not a safety gap**: §2's refuse-and-instruct (never silently
+  serve a wrong-dim embedder against a mismatched store) is the safety floor and it
+  ships. The *convenience* of an in-product auto-reembed is now served by the
+  operator-gated drop-and-rebuild + parity gate in
+  [`docs/runbooks/unified-llm-cutover.md`](../../runbooks/unified-llm-cutover.md) §4,
+  which the unified-llm-container migration adopted as the chosen re-embed path — so
+  the in-product command is **decided-against**, not missing. *User-facing
+  mitigation (the known-gap statement):* a non-operator who changes `EMBEDDER_MODEL`
+  against a populated DB is never silently broken — they hit §2's **actionable
+  refusal** ("recorded dim N ≠ embedder dim M; this is a guided re-embed") at
+  startup, and recovery is the documented drop-and-rebuild. The only thing §2c would
+  have added is performing that recovery *in-product behind a flag* instead of by the
+  procedure; no scenario is left unrecoverable, only less automated. Forward note: the whole
+  torch embedder — and with it this proposal's §1 runtime-fetch surface — is slated
+  for retirement by unified-llm-container at the operator cutover (runbook §6); the
+  §2/§2a/§2b dim machinery is **retained**, since the unified-llm `(model_id,dim)`
+  drift guard builds directly on it. Runtime/bootstrap work validated against the
+  live embedder+kb stack.
 - **Author:** JBailes
 - **Date:** 2026-06-14
 - **Base:** `origin/main` (v0.2.65). The embedder ships in two **baked** images
