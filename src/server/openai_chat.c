@@ -18,6 +18,7 @@
 #include "server_http.h"
 #include "openai_shape.h"
 #include "ingress_preinject.h"
+#include "gateway_pipeline.h"       /* gw_request_t + gw_pipeline_run_request — shared seam */
 #include "dogfood.h"                /* dogfood_autolabel_next_turn_live */
 #include "learning_implicit.h"      /* learning_implicit_detect_turn */
 #include "openai_responses_store.h" /* previous_response_id continuation store */
@@ -32,7 +33,7 @@
 #include "cJSON.h"
 #include "agent_tools.h" /* agent_tools_set_tool_event_cb — /v1/runs tool events */
 #include "agent_types.h"
-#include "gateway_policy.h" /* gateway_policy_strip_tools — OpenAI-ingress tool policing */
+#include "gateway_policy.h" /* gateway_policy_apply_request — tool-policing stage */
 #include "memory.h"         /* memory_embed_text */
 #include "request_context.h"
 #include "response_dedup.h"
@@ -843,6 +844,48 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
    return 0;
 }
 
+/* ---- OpenAI-ingress gateway request pipeline (universal-gateway) -------------
+ * The /v1/responses ingress runs the same ordered [memory, tool_policing] stages
+ * over a gw_request_t as the Anthropic ingress (anthropic_http.c), so both APIs
+ * aimee presents share the one audited pipeline seam. The OpenAI request reaches
+ * the provider step DECOMPOSED (an instructions string + a tools array) rather
+ * than as a single inbound cJSON, so `raw` is a small IR object assembled from
+ * those two mutable fields; the stages mutate it and the caller reads the results
+ * back. Behavior is identical to the prior inline memory block + the P2b tool
+ * strip it replaces. */
+
+/* Memory/context pre-injection stage (OpenAI shape). NOT parity-gated: the
+ * /v1/responses proxy always translates, so memory always applies (gated only by
+ * config, inside ingress_preinject_build). `ud` is the chat-shape `messages` the
+ * recall query is derived from — the same source as the prior inline site, so
+ * recall is byte-unchanged. Merges the envelope into raw.instructions. */
+static int gw_stage_openai_memory(gw_request_t *r, void *ud)
+{
+   const cJSON *messages = (const cJSON *)ud;
+   char *query = ingress_preinject_query_from_messages(messages);
+   char *env = ingress_preinject_build(query, 0);
+   free(query);
+   if (!env)
+      return 0;
+   cJSON *cur = cJSON_GetObjectItemCaseSensitive(r->raw, "instructions");
+   char *merged = ingress_preinject_apply(cur ? cur->valuestring : NULL, env);
+   free(env);
+   if (!merged)
+      return 0;
+   cJSON_ReplaceItemInObjectCaseSensitive(r->raw, "instructions", cJSON_CreateString(merged));
+   free(merged);
+   return 1;
+}
+
+/* Tool-policing stage (OpenAI tool shape): strip subagent-spawning tools from
+ * raw.tools. Mirrors the Anthropic ingress's policing stage; same contract as
+ * gateway_policy_apply_request (returns the number of tools stripped). */
+static int gw_stage_openai_tool_policing(gw_request_t *r, void *ud)
+{
+   (void)ud;
+   return gateway_policy_apply_request(r->raw, 1 /* OpenAI tool shape */);
+}
+
 /* Single provider step for the Codex proxy: build the request for `agent`'s
  * provider from a caller-supplied messages array and passthrough `tools`, POST
  * it, and parse the reply into *out. Unlike agent_run_with_tools this does NOT
@@ -874,19 +917,39 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    char extra_headers[512];
    agent_build_extra_headers(agent, extra_headers, sizeof(extra_headers));
 
-   /* Gateway tool policing on the inbound OpenAI-ingress (/v1/responses) tools,
-    * before the provider request is built — the OpenAI-side counterpart to the
-    * /v1/messages policing in anthropic_http.c. `tools` is a bare OpenAI-shape
-    * function array. No-op unless a policy is configured. If every tool is
-    * stripped, omit the array entirely (don't forward `tools: []`). The stripped
-    * array stays owned/freed by the caller. */
-   cJSON *eff_tools = tools;
-   gateway_policy_strip_tools(eff_tools, 1);
-   if (eff_tools && cJSON_GetArraySize(eff_tools) == 0)
-      eff_tools = NULL;
+   /* Gateway request pipeline: run [memory, tool_policing] over an IR assembled
+    * from this /v1/responses request's two mutable fields (the decomposed
+    * instructions string + tools array). `tools` is added by REFERENCE so the
+    * policy stage strips it in place while the caller keeps ownership. The memory
+    * stage derives its query from `messages` (per-call stage ud). After the run:
+    * eff_system is the (maybe envelope-merged) instructions; eff_tools is the
+    * original array unless the policy emptied + dropped it (then omit — never
+    * forward `tools: []`). */
+   cJSON *gw_raw = cJSON_CreateObject();
+   cJSON_AddStringToObject(gw_raw, "instructions", system_prompt ? system_prompt : "");
+   if (cJSON_IsArray(tools))
+      cJSON_AddItemReferenceToObject(gw_raw, "tools", tools);
+   gw_request_t gr = {
+       .raw = gw_raw,
+       .driver = driver,
+       .ag = agent,
+       .serving_api = GW_API_OPENAI,
+       .parity = 1, /* client OpenAI == serving OpenAI; informational for these stages */
+       .stream = 0,
+   };
+   const gw_stage_t stages[] = {
+       {gw_stage_openai_memory, messages, "memory"},
+       {gw_stage_openai_tool_policing, NULL, "tool_policing"},
+   };
+   gw_pipeline_run_request(&gr, stages, sizeof(stages) / sizeof(stages[0]));
+
+   cJSON *rawi = cJSON_GetObjectItemCaseSensitive(gw_raw, "instructions");
+   const char *eff_system = rawi && rawi->valuestring ? rawi->valuestring : system_prompt;
+   cJSON *eff_tools = cJSON_GetObjectItemCaseSensitive(gw_raw, "tools") ? tools : NULL;
 
    int tok = agent_request_max_tokens(agent, max_tokens);
-   cJSON *req = driver->build_request(agent, messages, eff_tools, system_prompt, tok, temperature);
+   cJSON *req = driver->build_request(agent, messages, eff_tools, eff_system, tok, temperature);
+   cJSON_Delete(gw_raw); /* instructions copied into req by build_request; tools was a reference */
    if (!req)
       return -1;
    char *body = cJSON_PrintUnformatted(req);
@@ -995,25 +1058,10 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
       }
    }
 
-   /* P1 context pre-injection (config: ingress_preinject_enabled, default off):
-    * prepend a fusion-recall <aimee-context> envelope to the system prompt so the
-    * external agent reasons over already-loaded context instead of re-exploring
-    * the repo. No-op when disabled or when recall yields nothing. */
-   {
-      char *pi_query = ingress_preinject_query_from_messages(messages);
-      char *pi_env = ingress_preinject_build(pi_query, 0);
-      if (pi_env)
-      {
-         char *merged = ingress_preinject_apply(instructions, pi_env);
-         if (merged)
-         {
-            free(instructions);
-            instructions = merged;
-         }
-      }
-      free(pi_query);
-      free(pi_env);
-   }
+   /* P1 context pre-injection now runs as the `memory` stage of the gateway
+    * request pipeline inside agent_execute_messages (below), alongside tool
+    * policing — so `instructions` is passed through un-merged and the pipeline
+    * folds in the <aimee-context> envelope. */
 
    parsed_response_t parsed;
    int erc =
