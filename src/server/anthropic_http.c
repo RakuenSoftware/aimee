@@ -30,7 +30,8 @@
 #include "server_http.h"
 #include "session_compact.h"
 #include "sse_parser.h"
-#include <stdio.h> /* temp-file write for --append-system-prompt */
+#include <pthread.h> /* warm-pane pool mutex */
+#include <stdio.h>   /* temp-file write for --append-system-prompt */
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -466,6 +467,184 @@ static int ingress_write_tmp(const char *path, const char *data)
    return (w == n) ? 0 : -1;
 }
 
+/* --- Warm CLI pane pool (latency, opt-in) --------------------------------
+ *
+ * Cold-starting a claude TUI per /v1/messages turn costs ~10-30s (process spawn
+ * + welcome-box settle). When AIMEE_INGRESS_CLI_POOL is set, panes are kept warm
+ * and reused across turns sharing the SAME (system prompt, model, agent) — the
+ * system prompt is a launch-time flag (--append-system-prompt), so it MUST be
+ * part of the key. Between reuses the conversation is reset with `/clear` so no
+ * history bleeds between unrelated turns; if that reset is at all uncertain the
+ * pane is discarded (the turn then retries onto a fresh pane). Off by default:
+ * the `/clear` reset is correctness-critical and wants E2E validation against
+ * the real CLI before it is trusted with multi-client data.
+ *
+ * Concurrency: a slot is exclusively held (in_use) between checkout and checkin,
+ * so concurrent turns with the same key take different slots (different tmux
+ * session names) and never share a pane. */
+#define INGRESS_POOL_MAX 8
+#define INGRESS_POOL_REUSE_CAP 50
+#define INGRESS_POOL_IDLE_TTL_SEC 300
+
+typedef struct
+{
+   int in_use;
+   int alive; /* a pane has been (or will be) created for this slot */
+   char *sys; /* full system prompt for exact match (heap); NULL when none */
+   char model[MAX_MODEL_LEN];
+   char agent[MAX_AGENT_NAME];
+   char name[CLI_SESSION_NAME_MAX]; /* stable tmux session id (the override) */
+   char path[MAX_PATH_LEN];         /* temp file backing --append-system-prompt */
+   int turns;                       /* reuse count */
+   long last_used;                  /* time() for idle reaping */
+} ingress_pool_slot_t;
+
+static ingress_pool_slot_t g_pool[INGRESS_POOL_MAX];
+static pthread_mutex_t g_pool_mu = PTHREAD_MUTEX_INITIALIZER;
+
+/* Kill a warm pane. Indirected through a pointer so unit tests can substitute a
+ * no-op and not depend on a live tmux. */
+static void ingress_pool_kill_real(const char *name)
+{
+   char cmd[CLI_SESSION_NAME_MAX + 64];
+   int rc;
+   snprintf(cmd, sizeof(cmd), "tmux kill-session -t '%s' 2>/dev/null", name);
+   rc = system(cmd);
+   (void)rc; /* best-effort */
+}
+static void (*g_pool_kill_fn)(const char *) = ingress_pool_kill_real;
+
+static int ingress_pool_enabled(void)
+{
+   const char *v = getenv("AIMEE_INGRESS_CLI_POOL");
+   return v && v[0] && v[0] != '0';
+}
+
+static int ingress_streq(const char *a, const char *b)
+{
+   return strcmp(a ? a : "", b ? b : "") == 0;
+}
+
+static unsigned ingress_pool_key_hash(const char *sys, const char *model, const char *agent)
+{
+   unsigned h = 5381;
+   const char *p;
+   for (p = sys ? sys : ""; *p; p++)
+      h = ((h << 5) + h) ^ (unsigned char)*p;
+   h = ((h << 5) + h) ^ '|';
+   for (p = model ? model : ""; *p; p++)
+      h = ((h << 5) + h) ^ (unsigned char)*p;
+   h = ((h << 5) + h) ^ '|';
+   for (p = agent ? agent : ""; *p; p++)
+      h = ((h << 5) + h) ^ (unsigned char)*p;
+   return h;
+}
+
+/* Kill the pane, drop the temp file, and clear the slot. Caller holds g_pool_mu. */
+static void ingress_pool_evict_locked(ingress_pool_slot_t *s)
+{
+   if (s->alive && s->name[0])
+      g_pool_kill_fn(s->name);
+   if (s->path[0])
+      unlink(s->path);
+   free(s->sys);
+   memset(s, 0, sizeof(*s));
+}
+
+/* Reserve a warm or fresh slot for (sys, model, agent). Returns the slot index
+ * (fills name/path) or -1 when the pool is full of in-use/non-matching slots
+ * (caller falls back to a one-shot pane). *is_reuse is 1 when the slot already
+ * has a live pane, so the caller must /clear before sending the real prompt. */
+static int ingress_pool_checkout(const char *sys, const char *model, const char *agent,
+                                 char *name_out, size_t name_cap, char *path_out, size_t path_cap,
+                                 int *is_reuse)
+{
+   long now = (long)time(NULL);
+   int i, free_idx = -1;
+
+   pthread_mutex_lock(&g_pool_mu);
+   for (i = 0; i < INGRESS_POOL_MAX; i++)
+      if (g_pool[i].alive && !g_pool[i].in_use &&
+          now - g_pool[i].last_used > INGRESS_POOL_IDLE_TTL_SEC)
+         ingress_pool_evict_locked(&g_pool[i]);
+
+   for (i = 0; i < INGRESS_POOL_MAX; i++)
+   {
+      ingress_pool_slot_t *s = &g_pool[i];
+      if (s->alive && !s->in_use && s->turns < INGRESS_POOL_REUSE_CAP && ingress_streq(s->sys, sys) &&
+          ingress_streq(s->model, model) && ingress_streq(s->agent, agent))
+      {
+         s->in_use = 1;
+         snprintf(name_out, name_cap, "%s", s->name);
+         snprintf(path_out, path_cap, "%s", s->path);
+         *is_reuse = 1;
+         pthread_mutex_unlock(&g_pool_mu);
+         return i;
+      }
+      if (free_idx < 0 && !s->in_use && !s->alive)
+         free_idx = i;
+   }
+   if (free_idx >= 0)
+   {
+      ingress_pool_slot_t *s = &g_pool[free_idx];
+      memset(s, 0, sizeof(*s));
+      s->in_use = 1;
+      s->alive = 1; /* the pane is created lazily by the first turn */
+      s->sys = (sys && sys[0]) ? strdup(sys) : NULL;
+      snprintf(s->model, sizeof(s->model), "%s", model ? model : "");
+      snprintf(s->agent, sizeof(s->agent), "%s", agent ? agent : "");
+      snprintf(s->name, sizeof(s->name), "aimee-pool-%u-%d",
+               ingress_pool_key_hash(sys, model, agent), free_idx);
+      snprintf(s->path, sizeof(s->path), "/tmp/aimee-pool-sys-%d.txt", free_idx);
+      snprintf(name_out, name_cap, "%s", s->name);
+      snprintf(path_out, path_cap, "%s", s->path);
+      *is_reuse = 0;
+      pthread_mutex_unlock(&g_pool_mu);
+      return free_idx;
+   }
+   pthread_mutex_unlock(&g_pool_mu);
+   return -1;
+}
+
+/* Return a slot: ok keeps it warm (turns++), !ok evicts it (pane dead/suspect). */
+static void ingress_pool_checkin(int idx, int ok)
+{
+   if (idx < 0 || idx >= INGRESS_POOL_MAX)
+      return;
+   pthread_mutex_lock(&g_pool_mu);
+   if (ok)
+   {
+      g_pool[idx].in_use = 0;
+      g_pool[idx].turns++;
+      g_pool[idx].last_used = (long)time(NULL);
+   }
+   else
+   {
+      ingress_pool_evict_locked(&g_pool[idx]);
+   }
+   pthread_mutex_unlock(&g_pool_mu);
+}
+
+/* Reset a reused pane's conversation with `/clear` so no history bleeds into the
+ * next turn. Streaming is suppressed for this throwaway turn. Returns the
+ * executor rc; a non-zero rc means the pane is gone/suspect and must NOT be
+ * reused. */
+static int ingress_cli_clear(agent_t *cli_agent)
+{
+   agent_result_t car;
+   cli_session_stream_cb_t pcb;
+   void *pud;
+   int crc;
+
+   memset(&car, 0, sizeof(car));
+   pcb = cli_session_get_stream_cb(&pud);
+   cli_session_set_stream_cb(NULL, NULL);
+   crc = agent_execute_cli_session(cli_agent, NULL, "", "/clear", 0, 0.0, &car);
+   cli_session_set_stream_cb(pcb, pud);
+   free(car.response);
+   return crc;
+}
+
 static char *ingress_cli_run(cJSON *req, agent_t *ag, const char *msg_id, char *err, size_t errlen,
                              int *rc_out)
 {
@@ -475,7 +654,7 @@ static char *ingress_cli_run(cJSON *req, agent_t *ag, const char *msg_id, char *
    char *transcript =
        anthropic_messages_to_transcript(cJSON_GetObjectItemCaseSensitive(req, "messages"));
    const char *exec_system;
-   char sid[96];
+   char sid[CLI_SESSION_NAME_MAX];
    char sys_path[MAX_PATH_LEN];
    int have_sys_file = 0;
    int rc;
@@ -500,6 +679,17 @@ static char *ingress_cli_run(cJSON *req, agent_t *ag, const char *msg_id, char *
       return NULL;
    }
 
+   /* Choose the pane: a warm pool slot (reused across turns sharing the same
+    * system prompt/model/agent) when pooling is enabled, else a unique one-shot
+    * pane torn down after the turn. */
+   int pool_idx = -1, is_reuse = 0;
+   if (ingress_pool_enabled() && ingress_agent_is_claude_cli(ag))
+      pool_idx = ingress_pool_checkout(sysp, ag->model, ag->name, sid, sizeof(sid), sys_path,
+                                       sizeof(sys_path), &is_reuse);
+   if (pool_idx < 0)
+      snprintf(sid, sizeof(sid), "aimee-ingress-%s", msg_id);
+   cli_agent.session_reuse = (pool_idx >= 0) ? 1 : 0;
+
    /* System-prompt fidelity for the claude CLI: deliver the client's system
     * prompt as a real --append-system-prompt rather than pasting it into the
     * user text. It is read from a temp file at launch ("$(cat <file>)") so
@@ -509,7 +699,8 @@ static char *ingress_cli_run(cJSON *req, agent_t *ag, const char *msg_id, char *
    exec_system = sysp ? sysp : "";
    if (sysp && sysp[0] && ingress_agent_is_claude_cli(ag))
    {
-      snprintf(sys_path, sizeof(sys_path), "/tmp/aimee-ingress-sys-%s.txt", msg_id);
+      if (pool_idx < 0) /* one-shot: temp path keyed by request id (pool fills its own) */
+         snprintf(sys_path, sizeof(sys_path), "/tmp/aimee-ingress-sys-%s.txt", msg_id);
       if (ingress_write_tmp(sys_path, sysp) == 0)
       {
          const char *base = ag->cli_cmd[0] ? ag->cli_cmd : "claude";
@@ -520,15 +711,34 @@ static char *ingress_cli_run(cJSON *req, agent_t *ag, const char *msg_id, char *
       }
    }
 
-   memset(&ar, 0, sizeof(ar));
-   snprintf(sid, sizeof(sid), "aimee-ingress-%s", msg_id);
    session_id_set_override(sid);
+
+   /* A reused warm pane carries the prior turn's conversation: reset it first. If
+    * the reset fails the pane is gone/suspect — discard it and fail this turn as
+    * retryable so the retry lands on a fresh pane; never send the real prompt
+    * onto a possibly-dirty pane. */
+   if (is_reuse && ingress_cli_clear(&cli_agent) != 0)
+   {
+      session_id_clear_override();
+      ingress_pool_checkin(pool_idx, 0);
+      free(sysp);
+      free(transcript);
+      snprintf(err, errlen, "warm pane reset failed");
+      *rc_out = -1;
+      return NULL;
+   }
+
+   memset(&ar, 0, sizeof(ar));
    rc = agent_execute_cli_session(&cli_agent, NULL, exec_system, transcript,
                                   agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
                                   jo_num(req, "temperature", 1.0), &ar);
    session_id_clear_override();
-   if (have_sys_file)
+
+   if (pool_idx >= 0)
+      ingress_pool_checkin(pool_idx, rc == 0 && ar.response && ar.response[0]);
+   else if (have_sys_file)
       unlink(sys_path);
+
    free(sysp);
    free(transcript);
 

@@ -279,6 +279,7 @@ static char g_cli_seen_sid[128];
 static char g_cli_seen_cmd[256];
 static int g_override_set;
 static int g_override_clear;
+static int g_cli_clear_seen; /* count of "/clear" reset turns (warm-pool reuse) */
 /* Live-streaming: when nparts>0 the executor stub fires the registered stream cb
  * with each part (exercising the real-time delta bridge) and returns their concat. */
 static const char *g_cli_stream_parts[4];
@@ -306,6 +307,8 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
    (void)network;
    (void)max_tokens;
    (void)temperature;
+   if (user_prompt && strcmp(user_prompt, "/clear") == 0)
+      g_cli_clear_seen++;
    snprintf(g_cli_seen_system, sizeof(g_cli_seen_system), "%s", system_prompt ? system_prompt : "");
    snprintf(g_cli_seen_user, sizeof(g_cli_seen_user), "%s", user_prompt ? user_prompt : "");
    snprintf(g_cli_seen_cmd, sizeof(g_cli_seen_cmd), "%s", agent->cli_cmd);
@@ -1187,6 +1190,99 @@ static void test_messages_buffered_cli_too_large(void)
    PASS("messages_buffered_cli_too_large");
 }
 
+static int g_pool_kill_calls;
+static void test_pool_kill_noop(const char *name)
+{
+   (void)name;
+   g_pool_kill_calls++;
+}
+
+/* Warm pool: a second turn with the same (system, model, agent) key reuses the
+ * first turn's pane (same tmux session name) and resets it with /clear first. */
+static void test_messages_cli_pool_reuse(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   char resp[4096];
+   char first_sid[CLI_SESSION_NAME_MAX];
+   void (*saved_kill)(const char *) = g_pool_kill_fn;
+   const char *home = getenv("HOME");
+   char saved[512];
+   char tmphome[] = "/tmp/aimee-pool-home-XXXXXX";
+   char dir[600];
+   char creds[700];
+   FILE *cf;
+   int i;
+
+   saved[0] = '\0';
+   if (home)
+      snprintf(saved, sizeof(saved), "%s", home);
+   assert(mkdtemp(tmphome) != NULL);
+   snprintf(dir, sizeof(dir), "%s/.claude", tmphome);
+   assert(mkdir(dir, 0700) == 0);
+   snprintf(creds, sizeof(creds), "%s/.claude/.credentials.json", tmphome);
+   cf = fopen(creds, "w");
+   assert(cf != NULL);
+   fputs("{}", cf);
+   fclose(cf);
+   setenv("HOME", tmphome, 1);
+
+   /* The test owns the file-local pool; start clean and avoid real tmux kills. */
+   for (i = 0; i < INGRESS_POOL_MAX; i++)
+   {
+      if (g_pool[i].path[0])
+         unlink(g_pool[i].path);
+      free(g_pool[i].sys);
+   }
+   memset(g_pool, 0, sizeof(g_pool));
+   g_pool_kill_fn = test_pool_kill_noop;
+   setenv("AIMEE_INGRESS_CLI_POOL", "1", 1);
+
+   reset_capture();
+   g_driver = &anthropic;
+   g_cli_mode = 1;
+   g_cli_agent_name = "claude"; /* pool is gated on a claude-family CLI */
+   g_cli_rc = 0;
+   g_cli_reply = "ok";
+   g_cli_clear_seen = 0;
+
+   /* Turn 1: fresh slot, no reset. */
+   assert(messages_buffered("{\"model\":\"claude-x\",\"system\":\"POOLSYS\","
+                            "\"messages\":[{\"role\":\"user\",\"content\":\"one\"}]}",
+                            resp, sizeof(resp)) == 200);
+   assert(strncmp(g_cli_seen_sid, "aimee-pool-", 11) == 0);
+   assert(g_cli_clear_seen == 0);
+   snprintf(first_sid, sizeof(first_sid), "%s", g_cli_seen_sid);
+
+   /* Turn 2: same key -> reuse the same pane, reset it first. */
+   assert(messages_buffered("{\"model\":\"claude-x\",\"system\":\"POOLSYS\","
+                            "\"messages\":[{\"role\":\"user\",\"content\":\"two\"}]}",
+                            resp, sizeof(resp)) == 200);
+   assert(strcmp(g_cli_seen_sid, first_sid) == 0); /* same warm pane */
+   assert(g_cli_clear_seen >= 1);                  /* conversation reset before reuse */
+
+   /* cleanup */
+   unsetenv("AIMEE_INGRESS_CLI_POOL");
+   for (i = 0; i < INGRESS_POOL_MAX; i++)
+   {
+      if (g_pool[i].path[0])
+         unlink(g_pool[i].path);
+      free(g_pool[i].sys);
+   }
+   memset(g_pool, 0, sizeof(g_pool));
+   g_pool_kill_fn = saved_kill;
+   if (saved[0])
+      setenv("HOME", saved, 1);
+   else
+      unsetenv("HOME");
+   unlink(creds);
+   rmdir(dir);
+   rmdir(tmphome);
+   g_cli_mode = 0;
+   g_cli_agent_name = "primary";
+   reset_capture();
+   PASS("messages_cli_pool_reuse");
+}
+
 int main(void)
 {
    test_translate_request_anthropic_passthrough();
@@ -1213,6 +1309,7 @@ int main(void)
    test_messages_stream_cli_error();
    test_messages_stream_cli_live_deltas();
    test_messages_buffered_cli_too_large();
+   test_messages_cli_pool_reuse();
    printf("anthropic_http: OK\n");
    return 0;
 }
