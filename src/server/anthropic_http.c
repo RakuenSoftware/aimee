@@ -20,6 +20,8 @@
 #include "agent_types.h"
 #include "anthropic_ingress.h"
 #include "cJSON.h"
+#include "cli_session.h" /* stream-cb bridge for live CLI-ingress streaming */
+#include "config.h"      /* session_id_set_override / session_id_clear_override */
 #include "delegate_driver.h"
 #include "gateway_policy.h"
 #include "gateway_pipeline.h"
@@ -28,9 +30,12 @@
 #include "server_http.h"
 #include "session_compact.h"
 #include "sse_parser.h"
+#include <pthread.h> /* warm-pane pool mutex */
+#include <stdio.h>   /* temp-file write for --append-system-prompt */
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h> /* access()/unlink() for the claude-login pre-flight + sys-prompt temp */
 
 /* Resolve aimee's primary agent (the configured default, else the first
  * agent). Claude Code's requested model is intentionally ignored — switching
@@ -48,10 +53,15 @@ static agent_t *resolve_primary(agent_config_t *acfg)
    return ag;
 }
 
-/* Mint a "msg_<epoch>" id for the response/stream. */
+/* Mint a unique "msg_<epoch>_<seq>" id for the response/stream. The atomic
+ * sequence disambiguates concurrent requests within the same second — required
+ * for response-id uniqueness and, on the CLI ingress path, to key a distinct
+ * per-request tmux session id (so concurrent turns never share a pane). */
 static void mint_msg_id(char *buf, size_t n)
 {
-   snprintf(buf, n, "msg_%ld", (long)time(NULL));
+   static volatile int s_seq = 0;
+   int seq = __sync_fetch_and_add(&s_seq, 1);
+   snprintf(buf, n, "msg_%ld_%d", (long)time(NULL), seq);
 }
 
 /* Passthrough vs. translate is a property of the serving model, not a setting:
@@ -376,6 +386,598 @@ static void messages_apply_preinject(cJSON *req)
 
 /* --- Buffered: POST /v1/messages (stream:false) ------------------------- */
 
+/* --- CLI-backed ingress (tmux claude-oauth) -------------------------------
+ *
+ * When the resolved primary is a tmux-CLI agent (backend AGENT_BACKEND_TMUX_CLI,
+ * e.g. the server-hosted `claude` logged in via subscription OAuth), the
+ * /v1/messages turn is served by driving that CLI rather than an HTTP provider
+ * call. The request's system + message history are flattened into one prompt
+ * (the CLI is stateless per turn and cannot round-trip the Anthropic tool
+ * protocol), a one-shot tmux turn runs, and the plain-text reply is re-encoded
+ * as an Anthropic buffered response / SSE stream. tools[]/tool_use round-trips
+ * are out of scope; stop_reason is always "end_turn". */
+
+/* One retry on a transient empty/dead CLI turn (rc -1) — a cold pane that ate
+ * the first paste, etc. Bounded so a persistently-failing CLI fails fast. */
+#define INGRESS_MAX_ATTEMPTS 2
+/* Pathological-input guard for the rendered system+transcript bytes. The prompt
+ * is fed via a tmux load-buffer (file-backed, so not ARG_MAX-bound), so this is
+ * generous — it exists to reject absurd payloads, not to clamp real contexts. */
+#define INGRESS_MAX_PROMPT_BYTES (4 * 1024 * 1024)
+
+/* True when the agent launches a claude-family CLI — mirrors the is_claude
+ * derivation in agent_execute_cli_session (cli_kind, else the agent name). */
+static int ingress_agent_is_claude_cli(const agent_t *ag)
+{
+   const char *kind = ag->cli_kind[0] ? ag->cli_kind : ag->name;
+   return strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) == 0 &&
+          (strcmp(kind, "claude") == 0 || strncmp(kind, "claude-", 7) == 0);
+}
+
+/* Best-effort: has the server-hosted claude CLI completed its OAuth login (which
+ * writes ~/.claude/.credentials.json)? Returns 1 when logged in OR when we can't
+ * tell (never false-deny a working setup); 0 only when the agent is a claude CLI
+ * and the credential file is definitively absent. */
+static int ingress_claude_logged_in(const agent_t *ag)
+{
+   const char *home;
+   char path[MAX_PATH_LEN];
+   if (!ingress_agent_is_claude_cli(ag))
+      return 1;
+   home = getenv("HOME");
+   if (!home || !home[0])
+      return 1;
+   snprintf(path, sizeof(path), "%s/.claude/.credentials.json", home);
+   return access(path, R_OK) == 0;
+}
+
+/* Record a 0-token ingress audit row for a CLI-served turn (subscription-billed,
+ * no per-token usage), tagged distinctly so dashboards separate CLI from API. */
+static void ingress_cli_record_audit(const agent_t *ag, const char *model)
+{
+   agent_result_t aud;
+   if (!agent_ingress_accounting_enabled())
+      return;
+   memset(&aud, 0, sizeof(aud));
+   snprintf(aud.agent_name, sizeof(aud.agent_name), "%s", ag->name);
+   snprintf(aud.model, sizeof(aud.model), "%s", ag->model);
+   snprintf(aud.requested_model, sizeof(aud.requested_model), "%s", model ? model : "");
+   snprintf(aud.stop_reason, sizeof(aud.stop_reason), "end_turn");
+   agent_record_token_audit(&aud, "", "anthropic-ingress-cli");
+}
+
+/* Render system+messages into one prompt and run a single tmux CLI turn under a
+ * unique per-request session id (so concurrent turns get isolated, one-shot
+ * panes; the agent's session_reuse is 0). On success returns the malloc'd reply
+ * text (caller frees) and sets *rc_out = 0; on failure returns NULL, sets
+ * *rc_out < 0, and fills `err`. */
+/* Write `data` to `path` (truncating). Returns 0 on success. Stages the system
+ * prompt for --append-system-prompt so arbitrary content never has to be escaped
+ * onto a command line. */
+static int ingress_write_tmp(const char *path, const char *data)
+{
+   FILE *f = fopen(path, "w");
+   size_t n, w;
+   if (!f)
+      return -1;
+   n = data ? strlen(data) : 0;
+   w = n ? fwrite(data, 1, n, f) : 0;
+   if (fclose(f) != 0)
+      return -1;
+   return (w == n) ? 0 : -1;
+}
+
+/* Create a fresh, unpredictable, 0600 temp file (mkstemp: O_CREAT|O_EXCL, no
+ * symlink-follow) and write `data`; returns its path in `path_out`. Avoids the
+ * symlink/TOCTOU hazard of a predictable /tmp name on a shared host. Returns 0
+ * on success. */
+static int ingress_mktemp_write(char *path_out, size_t cap, const char *data)
+{
+   char tmpl[] = "/tmp/aimee-cli-sys-XXXXXX";
+   int fd = mkstemp(tmpl);
+   FILE *f;
+   size_t n, w;
+   if (fd < 0)
+      return -1;
+   f = fdopen(fd, "w");
+   if (!f)
+   {
+      close(fd);
+      unlink(tmpl);
+      return -1;
+   }
+   n = data ? strlen(data) : 0;
+   w = n ? fwrite(data, 1, n, f) : 0;
+   if (fclose(f) != 0 || w != n)
+   {
+      unlink(tmpl);
+      return -1;
+   }
+   snprintf(path_out, cap, "%s", tmpl);
+   return 0;
+}
+
+/* --- Warm CLI pane pool (latency, opt-in) --------------------------------
+ *
+ * Cold-starting a claude TUI per /v1/messages turn costs ~10-30s (process spawn
+ * + welcome-box settle). When AIMEE_INGRESS_CLI_POOL is set, panes are kept warm
+ * and reused across turns sharing the SAME (system prompt, model, agent) — the
+ * system prompt is a launch-time flag (--append-system-prompt), so it MUST be
+ * part of the key. Between reuses the conversation is reset with `/clear` so no
+ * history bleeds between unrelated turns; if that reset is at all uncertain the
+ * pane is discarded (the turn then retries onto a fresh pane). Off by default:
+ * the `/clear` reset is correctness-critical and wants E2E validation against
+ * the real CLI before it is trusted with multi-client data.
+ *
+ * Concurrency: a slot is exclusively held (in_use) between checkout and checkin,
+ * so concurrent turns with the same key take different slots (different tmux
+ * session names) and never share a pane. */
+#define INGRESS_POOL_MAX 8
+#define INGRESS_POOL_REUSE_CAP 50
+#define INGRESS_POOL_IDLE_TTL_SEC 300
+
+typedef struct
+{
+   int in_use;
+   int alive; /* a pane has been (or will be) created for this slot */
+   char *sys; /* full system prompt for exact match (heap); NULL when none */
+   char model[MAX_MODEL_LEN];
+   char agent[MAX_AGENT_NAME];
+   char name[CLI_SESSION_NAME_MAX]; /* stable tmux session id (the override) */
+   char path[MAX_PATH_LEN];         /* temp file backing --append-system-prompt */
+   int turns;                       /* reuse count */
+   long last_used;                  /* time() for idle reaping */
+} ingress_pool_slot_t;
+
+static ingress_pool_slot_t g_pool[INGRESS_POOL_MAX];
+static pthread_mutex_t g_pool_mu = PTHREAD_MUTEX_INITIALIZER;
+
+/* Kill a warm pane. Indirected through a pointer so unit tests can substitute a
+ * no-op and not depend on a live tmux. */
+static void ingress_pool_kill_real(const char *name)
+{
+   char cmd[CLI_SESSION_NAME_MAX + 64];
+   int rc;
+   snprintf(cmd, sizeof(cmd), "tmux kill-session -t '%s' 2>/dev/null", name);
+   rc = system(cmd);
+   (void)rc; /* best-effort */
+}
+static void (*g_pool_kill_fn)(const char *) = ingress_pool_kill_real;
+
+static int ingress_pool_enabled(void)
+{
+   const char *v = getenv("AIMEE_INGRESS_CLI_POOL");
+   return v && v[0] && v[0] != '0';
+}
+
+static int ingress_streq(const char *a, const char *b)
+{
+   return strcmp(a ? a : "", b ? b : "") == 0;
+}
+
+static unsigned ingress_pool_key_hash(const char *sys, const char *model, const char *agent)
+{
+   unsigned h = 5381;
+   const char *p;
+   for (p = sys ? sys : ""; *p; p++)
+      h = ((h << 5) + h) ^ (unsigned char)*p;
+   h = ((h << 5) + h) ^ '|';
+   for (p = model ? model : ""; *p; p++)
+      h = ((h << 5) + h) ^ (unsigned char)*p;
+   h = ((h << 5) + h) ^ '|';
+   for (p = agent ? agent : ""; *p; p++)
+      h = ((h << 5) + h) ^ (unsigned char)*p;
+   return h;
+}
+
+/* Kill the pane, drop the temp file, and clear the slot. Caller holds g_pool_mu. */
+static void ingress_pool_evict_locked(ingress_pool_slot_t *s)
+{
+   if (s->alive && s->name[0])
+      g_pool_kill_fn(s->name);
+   if (s->path[0])
+      unlink(s->path);
+   free(s->sys);
+   memset(s, 0, sizeof(*s));
+}
+
+/* Reserve a warm or fresh slot for (sys, model, agent). Returns the slot index
+ * (fills name/path) or -1 when the pool is full of in-use/non-matching slots
+ * (caller falls back to a one-shot pane). *is_reuse is 1 when the slot already
+ * has a live pane, so the caller must /clear before sending the real prompt. */
+static int ingress_pool_checkout(const char *sys, const char *model, const char *agent,
+                                 char *name_out, size_t name_cap, char *path_out, size_t path_cap,
+                                 int *is_reuse)
+{
+   long now = (long)time(NULL);
+   int i, free_idx = -1;
+
+   pthread_mutex_lock(&g_pool_mu);
+   for (i = 0; i < INGRESS_POOL_MAX; i++)
+      if (g_pool[i].alive && !g_pool[i].in_use &&
+          now - g_pool[i].last_used > INGRESS_POOL_IDLE_TTL_SEC)
+         ingress_pool_evict_locked(&g_pool[i]);
+
+   for (i = 0; i < INGRESS_POOL_MAX; i++)
+   {
+      ingress_pool_slot_t *s = &g_pool[i];
+      if (s->alive && !s->in_use && s->turns < INGRESS_POOL_REUSE_CAP && ingress_streq(s->sys, sys) &&
+          ingress_streq(s->model, model) && ingress_streq(s->agent, agent))
+      {
+         s->in_use = 1;
+         snprintf(name_out, name_cap, "%s", s->name);
+         snprintf(path_out, path_cap, "%s", s->path);
+         *is_reuse = 1;
+         pthread_mutex_unlock(&g_pool_mu);
+         return i;
+      }
+      if (free_idx < 0 && !s->in_use && !s->alive)
+         free_idx = i;
+   }
+   if (free_idx >= 0)
+   {
+      ingress_pool_slot_t *s = &g_pool[free_idx];
+      memset(s, 0, sizeof(*s));
+      s->in_use = 1;
+      s->alive = 1; /* the pane is created lazily by the first turn */
+      s->sys = (sys && sys[0]) ? strdup(sys) : NULL;
+      snprintf(s->model, sizeof(s->model), "%s", model ? model : "");
+      snprintf(s->agent, sizeof(s->agent), "%s", agent ? agent : "");
+      snprintf(s->name, sizeof(s->name), "aimee-pool-%u-%d",
+               ingress_pool_key_hash(sys, model, agent), free_idx);
+      /* s->path stays empty: a secure temp file is mkstemp'd lazily on first use. */
+      snprintf(name_out, name_cap, "%s", s->name);
+      snprintf(path_out, path_cap, "%s", s->path);
+      *is_reuse = 0;
+      pthread_mutex_unlock(&g_pool_mu);
+      return free_idx;
+   }
+   pthread_mutex_unlock(&g_pool_mu);
+   return -1;
+}
+
+/* Return a slot: ok keeps it warm (turns++), !ok evicts it (pane dead/suspect). */
+static void ingress_pool_checkin(int idx, int ok)
+{
+   if (idx < 0 || idx >= INGRESS_POOL_MAX)
+      return;
+   pthread_mutex_lock(&g_pool_mu);
+   if (ok)
+   {
+      g_pool[idx].in_use = 0;
+      g_pool[idx].turns++;
+      g_pool[idx].last_used = (long)time(NULL);
+   }
+   else
+   {
+      ingress_pool_evict_locked(&g_pool[idx]);
+   }
+   pthread_mutex_unlock(&g_pool_mu);
+}
+
+/* Reset a reused pane's conversation with `/clear` so no history bleeds into the
+ * next turn. Streaming is suppressed for this throwaway turn. Returns the
+ * executor rc; a non-zero rc means the pane is gone/suspect and must NOT be
+ * reused. */
+static int ingress_cli_clear(agent_t *cli_agent)
+{
+   agent_result_t car;
+   cli_session_stream_cb_t pcb;
+   void *pud;
+   int crc;
+
+   memset(&car, 0, sizeof(car));
+   pcb = cli_session_get_stream_cb(&pud);
+   cli_session_set_stream_cb(NULL, NULL);
+   crc = agent_execute_cli_session(cli_agent, NULL, "", "/clear", 0, 0.0, &car);
+   cli_session_set_stream_cb(pcb, pud);
+   free(car.response);
+   return crc;
+}
+
+static char *ingress_cli_run(cJSON *req, agent_t *ag, const char *msg_id, char *err, size_t errlen,
+                             int *rc_out)
+{
+   agent_result_t ar;
+   agent_t cli_agent = *ag; /* per-request copy so cli_cmd can be shaped */
+   char *sysp = anthropic_system_to_text(req);
+   char *transcript =
+       anthropic_messages_to_transcript(cJSON_GetObjectItemCaseSensitive(req, "messages"));
+   const char *exec_system;
+   char sid[CLI_SESSION_NAME_MAX];
+   char sys_path[MAX_PATH_LEN];
+   int have_sys_file = 0;
+   int rc;
+
+   err[0] = '\0';
+   if (!transcript)
+   {
+      free(sysp);
+      snprintf(err, errlen, "no renderable text in messages");
+      *rc_out = -1;
+      return NULL;
+   }
+
+   /* Pathological-input guard: reject an absurd rendered prompt rather than risk
+    * wedging the paste / CLI. -100 maps to a 413 (buffered) / error event (stream). */
+   if ((sysp ? strlen(sysp) : 0) + strlen(transcript) > INGRESS_MAX_PROMPT_BYTES)
+   {
+      free(sysp);
+      free(transcript);
+      snprintf(err, errlen, "request too large (limit %d bytes)", INGRESS_MAX_PROMPT_BYTES);
+      *rc_out = -100;
+      return NULL;
+   }
+
+   /* Choose the pane: a warm pool slot (reused across turns sharing the same
+    * system prompt/model/agent) when pooling is enabled, else a unique one-shot
+    * pane torn down after the turn. */
+   int pool_idx = -1, is_reuse = 0;
+   if (ingress_pool_enabled() && ingress_agent_is_claude_cli(ag))
+      pool_idx = ingress_pool_checkout(sysp, ag->model, ag->name, sid, sizeof(sid), sys_path,
+                                       sizeof(sys_path), &is_reuse);
+   if (pool_idx < 0)
+      snprintf(sid, sizeof(sid), "aimee-ingress-%s", msg_id);
+   cli_agent.session_reuse = (pool_idx >= 0) ? 1 : 0;
+
+   /* System-prompt fidelity for the claude CLI: deliver the client's system
+    * prompt as a real --append-system-prompt rather than pasting it into the
+    * user text. It is read from a temp file at launch ("$(cat <file>)") so
+    * arbitrary content (newlines, quotes, $) is never re-parsed by the shell and
+    * never hits a command-line length limit. Falls back to concatenation
+    * (exec_system = sysp) for a non-claude CLI or when there is no system prompt. */
+   exec_system = sysp ? sysp : "";
+   if (sysp && sysp[0] && ingress_agent_is_claude_cli(ag))
+   {
+      int okfile;
+      if (pool_idx >= 0)
+      {
+         /* The slot owns a secure temp file for its lifetime: mkstemp it on first
+          * use, then rewrite content in place on reuse (sticky /tmp + 0600 keep
+          * it ours). Unlinked when the slot is evicted. */
+         if (g_pool[pool_idx].path[0] == '\0')
+            okfile = ingress_mktemp_write(g_pool[pool_idx].path, sizeof(g_pool[pool_idx].path),
+                                          sysp) == 0;
+         else
+            okfile = ingress_write_tmp(g_pool[pool_idx].path, sysp) == 0;
+         if (okfile)
+            snprintf(sys_path, sizeof(sys_path), "%s", g_pool[pool_idx].path);
+      }
+      else
+      {
+         okfile = ingress_mktemp_write(sys_path, sizeof(sys_path), sysp) == 0;
+         have_sys_file = okfile; /* one-shot: unlinked after the turn */
+      }
+      if (okfile)
+      {
+         const char *base = ag->cli_cmd[0] ? ag->cli_cmd : "claude";
+         snprintf(cli_agent.cli_cmd, sizeof(cli_agent.cli_cmd),
+                  "%s --append-system-prompt \"$(cat %s)\"", base, sys_path);
+         exec_system = ""; /* applied via the flag; do not also concat */
+      }
+   }
+
+   session_id_set_override(sid);
+
+   /* A reused warm pane carries the prior turn's conversation: reset it first. If
+    * the reset fails the pane is gone/suspect — discard it and fail this turn as
+    * retryable so the retry lands on a fresh pane; never send the real prompt
+    * onto a possibly-dirty pane. */
+   if (is_reuse && ingress_cli_clear(&cli_agent) != 0)
+   {
+      session_id_clear_override();
+      ingress_pool_checkin(pool_idx, 0);
+      free(sysp);
+      free(transcript);
+      snprintf(err, errlen, "warm pane reset failed");
+      *rc_out = -1;
+      return NULL;
+   }
+
+   memset(&ar, 0, sizeof(ar));
+   rc = agent_execute_cli_session(&cli_agent, NULL, exec_system, transcript,
+                                  agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
+                                  jo_num(req, "temperature", 1.0), &ar);
+   session_id_clear_override();
+
+   if (pool_idx >= 0)
+      ingress_pool_checkin(pool_idx, rc == 0 && ar.response && ar.response[0]);
+   else if (have_sys_file)
+      unlink(sys_path);
+
+   free(sysp);
+   free(transcript);
+
+   if (rc == 0 && ar.response && ar.response[0])
+   {
+      *rc_out = 0;
+      return ar.response; /* caller frees */
+   }
+   snprintf(err, errlen, "%s", ar.error[0] ? ar.error : "claude CLI produced no response");
+   free(ar.response);
+   *rc_out = rc != 0 ? rc : -1; /* an empty reply is a failure */
+   return NULL;
+}
+
+/* Buffered (stream:false) CLI ingress. Does NOT own `req` (caller frees). */
+static int messages_cli_buffered(cJSON *req, agent_t *ag, const char *model, char *resp, int cap)
+{
+   const cJSON *messages = cJSON_GetObjectItemCaseSensitive(req, "messages");
+   char msg_id[48];
+   char err[512];
+   char *reply = NULL;
+   int rc = -1, status;
+   parsed_response_t parsed;
+   cJSON *out;
+
+   if (!cJSON_IsArray(messages) || cJSON_GetArraySize(messages) == 0)
+      return write_error(resp, cap, 400, "invalid_request_error", "messages is required");
+   if (!ingress_claude_logged_in(ag))
+      return write_error(resp, cap, 401, "authentication_error",
+                         "the server-hosted claude CLI is not logged in");
+
+   mint_msg_id(msg_id, sizeof(msg_id));
+   /* Retry once on a transient empty/dead turn (rc -1); other failures fail fast. */
+   for (int attempt = 0; attempt < INGRESS_MAX_ATTEMPTS; attempt++)
+   {
+      reply = ingress_cli_run(req, ag, msg_id, err, sizeof(err), &rc);
+      if (reply || rc != -1)
+         break;
+   }
+   if (!reply)
+   {
+      if (rc == -100)
+         return write_error(resp, cap, 413, "request_too_large", err[0] ? err : "request too large");
+      return write_error(resp, cap, 502, "api_error", err[0] ? err : "claude CLI turn failed");
+   }
+
+   ingress_cli_record_audit(ag, model);
+
+   memset(&parsed, 0, sizeof(parsed));
+   parsed.content = reply; /* transfer ownership; freed by agent_free_parsed_response */
+   snprintf(parsed.stop_reason, sizeof(parsed.stop_reason), "end_turn");
+   out = anthropic_response_from_parsed(msg_id, model, &parsed);
+   status = write_json(out, resp, cap);
+   cJSON_Delete(out);
+   agent_free_parsed_response(&parsed);
+   return status;
+}
+
+/* Emit a standalone Anthropic SSE `error` event (mirrors relay_emit_transport_error's
+ * shape) so the client's stream reader sees a typed error rather than hanging. */
+static void cli_stream_emit_error(server_http_sse_event_emit emit, void *ctx, const char *type,
+                                  const char *message)
+{
+   cJSON *o = cJSON_CreateObject();
+   cJSON *e;
+   char *json;
+   cJSON_AddStringToObject(o, "type", "error");
+   e = cJSON_AddObjectToObject(o, "error");
+   cJSON_AddStringToObject(e, "type", type);
+   cJSON_AddStringToObject(e, "message", message);
+   json = cJSON_PrintUnformatted(o);
+   if (json)
+   {
+      emit(ctx, "error", json);
+      free(json);
+   }
+   cJSON_Delete(o);
+}
+
+/* Live-streaming bridge: the tmux executor invokes the thread-local stream cb
+ * with incremental clean-text deltas during recv; each is forwarded as an
+ * Anthropic text_delta. The Anthropic stream is begun lazily on the first delta,
+ * so a turn that fails before producing any output can still surface a standalone
+ * error event instead of a silent empty success stream. */
+typedef struct
+{
+   anthropic_stream_xlate_t *xl;
+   const char *msg_id;
+   const char *model;
+   server_http_sse_event_emit emit;
+   void *ctx;
+   size_t emitted;
+   int begun;
+} ingress_stream_bridge_t;
+
+static void ingress_stream_cb(const char *delta, void *ud)
+{
+   ingress_stream_bridge_t *b = (ingress_stream_bridge_t *)ud;
+   if (!delta || !delta[0])
+      return;
+   if (!b->begun)
+   {
+      b->xl = anthropic_stream_begin(b->msg_id, b->model, 0, b->emit, b->ctx);
+      b->begun = 1;
+   }
+   if (b->xl)
+   {
+      anthropic_stream_emit_text(b->xl, delta);
+      b->emitted += strlen(delta);
+   }
+}
+
+/* Streaming (stream:true) CLI ingress. Streams the CLI's incremental output live
+ * as Anthropic text deltas (see ingress_stream_bridge_t). Does NOT own `req`. */
+static void messages_cli_stream(cJSON *req, agent_t *ag, const char *model, const char *msg_id,
+                                server_http_sse_event_emit emit, void *ctx)
+{
+   const cJSON *messages = cJSON_GetObjectItemCaseSensitive(req, "messages");
+   char err[512];
+   char *reply = NULL;
+   int rc = -1, attempt;
+   ingress_stream_bridge_t bridge;
+   cli_session_stream_cb_t prev_cb;
+   void *prev_ud;
+
+   if (!cJSON_IsArray(messages) || cJSON_GetArraySize(messages) == 0)
+   {
+      cli_stream_emit_error(emit, ctx, "invalid_request_error", "messages is required");
+      return;
+   }
+   if (!ingress_claude_logged_in(ag))
+   {
+      cli_stream_emit_error(emit, ctx, "authentication_error",
+                            "the server-hosted claude CLI is not logged in");
+      return;
+   }
+
+   memset(&bridge, 0, sizeof(bridge));
+   bridge.msg_id = msg_id;
+   bridge.model = model;
+   bridge.emit = emit;
+   bridge.ctx = ctx;
+
+   /* The stream cb is thread-local, so this only affects this ingress turn; save
+    * and restore any prior cb defensively. */
+   prev_cb = cli_session_get_stream_cb(&prev_ud);
+   cli_session_set_stream_cb(ingress_stream_cb, &bridge);
+   /* Retry a transient empty/dead turn only while nothing has streamed yet, so a
+    * retry can never duplicate already-emitted deltas. */
+   for (attempt = 0; attempt < INGRESS_MAX_ATTEMPTS; attempt++)
+   {
+      reply = ingress_cli_run(req, ag, msg_id, err, sizeof(err), &rc);
+      if (reply || rc != -1 || bridge.begun)
+         break;
+   }
+   cli_session_set_stream_cb(prev_cb, prev_ud);
+
+   if (reply)
+   {
+      if (!bridge.begun)
+      {
+         /* Output arrived without an intermediate delta (a fast turn whose text
+          * only appeared in the final extract): begin now and emit it. */
+         bridge.xl = anthropic_stream_begin(msg_id, model, 0, emit, ctx);
+         bridge.begun = 1;
+         if (bridge.xl)
+            anthropic_stream_emit_text(bridge.xl, reply);
+      }
+      else if (bridge.xl && strlen(reply) > bridge.emitted)
+      {
+         /* Defensive: emit any tail the live deltas didn't cover by completion. */
+         anthropic_stream_emit_text(bridge.xl, reply + bridge.emitted);
+      }
+      ingress_cli_record_audit(ag, model);
+      free(reply);
+   }
+
+   if (bridge.begun)
+   {
+      if (bridge.xl)
+      {
+         anthropic_stream_finish(bridge.xl);
+         anthropic_stream_free(bridge.xl);
+      }
+   }
+   else
+   {
+      /* Hard failure, nothing streamed: a typed error, not a silent empty stream. */
+      cli_stream_emit_error(emit, ctx, rc == -100 ? "request_too_large" : "api_error",
+                            err[0] ? err : "claude CLI turn failed");
+   }
+}
+
 static int messages_buffered(const char *body, char *resp, int cap)
 {
    cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
@@ -420,6 +1022,14 @@ static int messages_buffered(const char *body, char *resp, int cap)
    /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
     * the pointer cached above (line ~397) could now dangle. */
    model = jo_cstr(req, "model");
+   /* CLI-backed primary (tmux claude-oauth): serve from the CLI, not an HTTP
+    * provider call. The request pipeline (memory pre-injection, tool policing)
+    * has already run over req, so the rendered prompt sees any injected context. */
+   if (strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) == 0)
+   {
+      status = messages_cli_buffered(req, ag, model, resp, cap);
+      goto cleanup;
+   }
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
@@ -740,6 +1350,14 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
     * the pointer cached at the top of this function could now dangle. */
    model = jo_cstr(req, "model");
+   /* CLI-backed primary (tmux claude-oauth): serve from the CLI. Always emits a
+    * well-formed Anthropic SSE sequence (or a typed error event) so the client's
+    * stream reader terminates cleanly. */
+   if (strcmp(ag->backend, AGENT_BACKEND_TMUX_CLI) == 0)
+   {
+      messages_cli_stream(req, ag, model, msg_id, emit, ctx);
+      goto cleanup;
+   }
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
@@ -755,6 +1373,77 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       prov_body = build_provider_body(driver, ag, messages, tools, system_text,
                                       agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
                                       jo_num(req, "temperature", 1.0), 1);
+
+   /* P2c streaming: when gateway_prevent_subagents is ON, the streaming
+    * path becomes buffered — we fetch the upstream reply to completion,
+    * run the police function on the parsed struct (same logic as the
+    * buffered /v1/messages path), and replay the policed reply as a
+    * well-formed Anthropic SSE sequence via emit_message_as_sse. Off (the
+    * default) falls through to today's incremental relay/translator. */
+   if (gateway_prevent_subagents_enabled())
+   {
+      char *buf_resp = NULL;
+      int buf_status;
+      parsed_response_t parsed;
+      memset(&parsed, 0, sizeof(parsed));
+      buf_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &buf_resp,
+                                   ag->timeout_ms, extra[0] ? extra : NULL);
+      if (buf_status == 200 && buf_resp)
+      {
+         cJSON *provider_resp = cJSON_Parse(buf_resp);
+         if (provider_resp)
+         {
+            if (driver && driver->parse_response)
+               driver->parse_response(provider_resp, buf_resp, &parsed);
+            else
+               agent_parse_response_openai(provider_resp, &parsed);
+            gateway_policy_police_parsed_response(&parsed);
+            emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
+            /* Cost accounting (mirror the buffered path). */
+            if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
+                agent_ingress_accounting_enabled())
+            {
+               agent_result_t ar;
+               memset(&ar, 0, sizeof(ar));
+               snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
+               snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
+               snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
+               snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
+               ar.prompt_tokens = parsed.prompt_tokens;
+               ar.completion_tokens = parsed.completion_tokens;
+               ar.cache_write_tokens = parsed.cache_write_tokens;
+               ar.cache_read_tokens = parsed.cache_read_tokens;
+               agent_record_token_audit(&ar, "", "anthropic-ingress");
+            }
+            agent_free_parsed_response(&parsed);
+         }
+         else
+         {
+            /* Parse failure on the buffered reply: emit a clean error event so
+             * the client's SSE reader terminates. */
+            char err[256];
+            snprintf(err, sizeof(err),
+                     "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
+                     "\"message\":\"primary provider returned an unparseable reply\"}}");
+            if (emit)
+               emit(ctx, "error", err);
+         }
+         cJSON_Delete(provider_resp);
+      }
+      else
+      {
+         /* Upstream error: relay a transport-level error event. */
+         char err[256];
+         snprintf(err, sizeof(err),
+                  "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
+                  "\"message\":\"primary provider call failed with status %d\"}}",
+                  buf_status);
+         if (emit)
+            emit(ctx, "error", err);
+      }
+      free(buf_resp);
+      goto cleanup;
+   }
 
    if (driver_is_anthropic(driver))
    {
