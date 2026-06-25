@@ -119,6 +119,43 @@ void mcp_add_extended_tools(cJSON *tools)
 
    ext_tool(tools, "work_board",
             "The work queue grouped by status (pending / claimed / done / failed / cancelled).");
+
+   /* ── Structured-PDF evidence: access-gated citation retrieval ─────────────── */
+   t = ext_tool(
+       tools, "pdf_search_chunks",
+       "Search ingested PDF documents and return matching chunks with line-level citations "
+       "(page_no, bbox, quote). The entry point for PDF evidence; escalate a hit with "
+       "pdf_open_page / pdf_open_neighbors / pdf_inspect_structure. Withholds quarantined docs.");
+   ext_prop(t, "query", "string", "Text to search for across PDF chunk content.");
+   ext_prop(t, "project", "string",
+            "Project to search within (required; scopes the search to your access).");
+   ext_prop(t, "max_results", "integer",
+            "Max chunks to return (default 10; the route caps at 10).");
+   ext_require(t, "query");
+   ext_require(t, "project");
+
+   t = ext_tool(tools, "pdf_open_page",
+                "All citations on one page of a PDF document (page_no, bbox, quote per region).");
+   ext_prop(t, "project", "string", "Project the document belongs to.");
+   ext_prop(t, "document_key", "string", "Document key from a pdf_search_chunks hit.");
+   ext_prop(t, "page_no", "integer", "1-based page number to open.");
+   ext_require(t, "project");
+   ext_require(t, "document_key");
+   ext_require(t, "page_no");
+
+   t = ext_tool(tools, "pdf_open_neighbors",
+                "The chunks immediately before/after a PDF chunk, for surrounding context.");
+   ext_prop(t, "project", "string", "Project the chunk belongs to (required; scopes the lookup).");
+   ext_prop(t, "chunk_id", "integer", "chunk_id from a pdf_search_chunks hit.");
+   ext_require(t, "project");
+   ext_require(t, "chunk_id");
+
+   t = ext_tool(tools, "pdf_inspect_structure",
+                "The chunk outline of a PDF document (chunk_index, page range, heading path).");
+   ext_prop(t, "project", "string", "Project the document belongs to.");
+   ext_prop(t, "document_key", "string", "Document key from a pdf_search_chunks hit.");
+   ext_require(t, "project");
+   ext_require(t, "document_key");
 }
 
 /* ── Tool-family multiplexing (P4) ────────────────────────────────────────────

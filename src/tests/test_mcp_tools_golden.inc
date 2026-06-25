@@ -2,7 +2,7 @@
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 43
+#define MCP_TOOLS_GOLDEN_COUNT 47
 #define MCP_TOOLS_GOLDEN \
    "ask_user {choices,question} req:question\n" \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n" \
@@ -34,6 +34,10 @@
    "memory_recall {limit_tokens,session_start,task_hint} req:\n" \
    "note {command,content,limit,query,tag,tags,title} req:command\n" \
    "payload_rewrite_status {} req:\n" \
+   "pdf_inspect_structure {document_key,project} req:document_key,project\n" \
+   "pdf_open_neighbors {chunk_id,project} req:chunk_id,project\n" \
+   "pdf_open_page {document_key,page_no,project} req:document_key,page_no,project\n" \
+   "pdf_search_chunks {max_results,project,query} req:project,query\n" \
    "pipeline {admin,artifact,base_branch,brief,command,done_bar,head_branch,idea,operator_principal,pipeline_id,questions,reason,remote,repo_root,state,verdict,worktree_path} req:command\n" \
    "prospective_memory {action_text,anchor_entity,anchor_file,command,id,limit,recurrence,state,trigger_text,valid_until} req:command\n" \
    "recall {block_type,command,limit,limit_tokens,query,since} req:command\n" \

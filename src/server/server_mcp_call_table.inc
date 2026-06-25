@@ -955,6 +955,112 @@ static cJSON *mcph_work_board(struct mcp_call *c)
    return json_result_content(result);
 }
 
+/* ── Structured-PDF evidence ──────────────────────────────────────────────────
+ * The /v1/pdf/... routes return purpose-built citation JSON (nested page/bbox/
+ * quote geometry) that we forward verbatim — see kb_client_pdf.c for why we do
+ * NOT round-trip it through structs. `json` is the route body (NULL on
+ * non-2xx); `status` is the HTTP status used to craft an actionable error. */
+static cJSON *pdf_passthrough(char *json, int status, const char *tool)
+{
+   if (json)
+   {
+      cJSON *content = text_content(json); /* copies json into the text node */
+      free(json);
+      return content;
+   }
+   char msg[192];
+   if (status == 413)
+      snprintf(msg, sizeof(msg),
+               "error: %s result too large (413) — narrow the query or reduce max_results", tool);
+   else if (status == 403)
+      snprintf(msg, sizeof(msg),
+               "error: %s access denied (403) — your access does not include that project", tool);
+   else if (status == 404)
+      snprintf(msg, sizeof(msg), "error: %s found no matching PDF evidence (404)", tool);
+   else if (status == 400)
+      snprintf(msg, sizeof(msg), "error: %s bad request (400) — check the arguments", tool);
+   else
+      snprintf(msg, sizeof(msg), "error: %s request failed (status %d)", tool, status);
+   return text_content(msg);
+}
+
+/* Read a positive-integer JSON arg `key` into *out, requiring 1 <= value <= max.
+ * Returns 0 when the arg is absent, non-numeric, NaN/inf, fractional-out-of-band,
+ * or out of range. The bounded check also avoids the undefined behaviour of
+ * casting an out-of-range double to an integer type (cJSON stores every number
+ * as a double, so a caller can send 1e30). */
+static int pdf_arg_pos_int(cJSON *args, const char *key, double max, long long *out)
+{
+   cJSON *j = cJSON_GetObjectItemCaseSensitive(args, key);
+   if (!cJSON_IsNumber(j))
+      return 0;
+   double v = j->valuedouble;
+   if (!(v >= 1.0 && v <= max)) /* false for NaN/inf/negative/over-range */
+      return 0;
+   *out = (long long)v;
+   return 1;
+}
+
+static cJSON *mcph_pdf_search_chunks(struct mcp_call *c)
+{
+   cJSON *jq = cJSON_GetObjectItemCaseSensitive(c->jargs, "query");
+   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
+   /* project is REQUIRED: omitting it would leave the request un-scoped, so the
+    * kb_http token-scope gate (which only fires when the request names a scope)
+    * would not run — letting a project-scoped caller read every project's PDF
+    * content. Requiring it upholds the "project-scope all PDF reads" invariant,
+    * mirroring pdf_open_neighbors. */
+   if (!cJSON_IsString(jq) || !jq->valuestring[0] || !cJSON_IsString(jp) || !jp->valuestring[0])
+      return text_content(
+          "error: pdf_search_chunks requires 'query' and 'project' (project scopes the search)");
+   /* max_results is optional; default 10 (the route's cap). An absent, junk, or
+    * out-of-[1,10] value falls back to 10 rather than erroring. */
+   long long mr = 0;
+   int max_results = pdf_arg_pos_int(c->jargs, "max_results", 10.0, &mr) ? (int)mr : 10;
+   int status = -1;
+   char *json = kb_client_pdf_search_chunks(jq->valuestring, jp->valuestring, max_results, &status);
+   return pdf_passthrough(json, status, "pdf_search_chunks");
+}
+
+static cJSON *mcph_pdf_open_page(struct mcp_call *c)
+{
+   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
+   cJSON *jd = cJSON_GetObjectItemCaseSensitive(c->jargs, "document_key");
+   long long page_no = 0;
+   if (!cJSON_IsString(jp) || !jp->valuestring[0] || !cJSON_IsString(jd) || !jd->valuestring[0] ||
+       !pdf_arg_pos_int(c->jargs, "page_no", 2147483647.0, &page_no))
+      return text_content(
+          "error: pdf_open_page requires 'project', 'document_key', and a 'page_no' >= 1");
+   int status = -1;
+   char *json = kb_client_pdf_open_page(jp->valuestring, jd->valuestring, (int)page_no, &status);
+   return pdf_passthrough(json, status, "pdf_open_page");
+}
+
+static cJSON *mcph_pdf_open_neighbors(struct mcp_call *c)
+{
+   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
+   long long chunk_id = 0;
+   /* chunk_ids are DB row ids; bound to 2^53, the largest integer a double
+    * (cJSON's number type) represents exactly. */
+   if (!cJSON_IsString(jp) || !jp->valuestring[0] ||
+       !pdf_arg_pos_int(c->jargs, "chunk_id", 9007199254740992.0, &chunk_id))
+      return text_content("error: pdf_open_neighbors requires 'project' and a 'chunk_id' >= 1");
+   int status = -1;
+   char *json = kb_client_pdf_open_neighbors(jp->valuestring, chunk_id, &status);
+   return pdf_passthrough(json, status, "pdf_open_neighbors");
+}
+
+static cJSON *mcph_pdf_inspect_structure(struct mcp_call *c)
+{
+   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
+   cJSON *jd = cJSON_GetObjectItemCaseSensitive(c->jargs, "document_key");
+   if (!cJSON_IsString(jp) || !jp->valuestring[0] || !cJSON_IsString(jd) || !jd->valuestring[0])
+      return text_content("error: pdf_inspect_structure requires 'project' and 'document_key'");
+   int status = -1;
+   char *json = kb_client_pdf_inspect_structure(jp->valuestring, jd->valuestring, &status);
+   return pdf_passthrough(json, status, "pdf_inspect_structure");
+}
+
 /* ── name → handler table (exact match; order is irrelevant — names unique) ── */
 
 static const struct
@@ -1031,6 +1137,11 @@ static const struct
     /* P3c */
     {"work_list", mcph_work_list},
     {"work_board", mcph_work_board},
+    /* Structured-PDF evidence (access-gated citation retrieval) */
+    {"pdf_search_chunks", mcph_pdf_search_chunks},
+    {"pdf_open_page", mcph_pdf_open_page},
+    {"pdf_open_neighbors", mcph_pdf_open_neighbors},
+    {"pdf_inspect_structure", mcph_pdf_inspect_structure},
 };
 
 static mcp_tool_handler_fn mcp_tool_lookup(const char *tool)

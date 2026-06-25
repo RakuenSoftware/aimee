@@ -1076,6 +1076,22 @@ int kb_client_index_find_callers(const char *project, const char *symbol, caller
 int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
                                 int max);
 
+/* Structured-PDF evidence routes (/v1/pdf/...). Each returns the route's verbatim
+ * citation JSON as a malloc'd string the caller frees, or NULL on a
+ * parameter/transport/non-2xx failure; *status_out (may be NULL) receives the
+ * HTTP status. The access-control invariant (doc_kind='pdf',
+ * quarantine_state<>'pending', project scoping) is enforced route/DB-side.
+ * ALL four require a non-empty project: it scopes the DB query and is what makes
+ * the kb_http token-scope gate fire, so an un-scoped call cannot read across
+ * projects ("project-scope all PDF reads"). */
+char *kb_client_pdf_search_chunks(const char *query, const char *project, int max_results,
+                                  int *status_out);
+char *kb_client_pdf_open_page(const char *project, const char *document_key, int page_no,
+                              int *status_out);
+char *kb_client_pdf_open_neighbors(const char *project, long long chunk_id, int *status_out);
+char *kb_client_pdf_inspect_structure(const char *project, const char *document_key,
+                                      int *status_out);
+
 /* Counts of indexed files / definition-kind terms for one project.
  * Uses /v1 over remote HTTP or local UDS.
  * Returns 0 on success and writes to the out pointers (either may be NULL),
