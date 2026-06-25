@@ -198,11 +198,9 @@ static void translate_request(const cJSON *req, const delegate_driver_t *driver,
 
 /* Tool-policing stage: strip subagent-spawning tools etc. Returns the number of
  * tools stripped (already the contract of gateway_policy_apply_request). */
-void server_refresh_gateway_delegate_policy(void); /* server_compute.c */
 static int gw_stage_tool_policing(gw_request_t *r, void *ud)
 {
    (void)ud;
-   server_refresh_gateway_delegate_policy(); /* enforce-delegate-only: refresh the gate */
    return gateway_policy_apply_request(r->raw, 0 /* Anthropic tool shape */);
 }
 

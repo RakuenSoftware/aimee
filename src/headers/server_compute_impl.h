@@ -85,9 +85,9 @@ compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON 
  * vault principal are captured) or NULL for a server-initiated launch. */
 int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *req, char *err,
                                  size_t errn);
-/* Refresh the CORE gateway sub-agent-prevention policy from the live delegate
- * roster (cached ~30s). Call before gateway request policing. */
-void server_refresh_gateway_delegate_policy(void);
+/* Register the delegate-availability provider with the CORE gateway policy
+ * (enforce-delegate-only). Call once at server startup. */
+void server_install_gateway_delegate_policy(void);
 void compute_respond(compute_ctx_t *cctx, cJSON *resp);
 void compute_error(compute_ctx_t *cctx, const char *message);
 void compute_ok(compute_ctx_t *cctx);

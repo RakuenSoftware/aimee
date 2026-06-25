@@ -20,21 +20,23 @@ static int is_subagent_tool_name(const char *name)
    return name && name[0] && strcmp(guardrails_canonical_tool_name(name), "Subagent") == 0;
 }
 
-/* Enforce-delegate-only: the server pushes "usable delegates exist" here (it owns
- * the agent roster; this CORE module must not read agent state). When set, the
- * gateway strips provider-native sub-agent tools automatically, so a primary
- * proxied through the gateway (Codex, other OpenAI/Anthropic-shape providers)
- * cannot spawn its own sub-agents and must use aimee delegates. */
-static int g_delegates_available;
+/* Enforce-delegate-only: the server registers a provider that reports whether
+ * usable aimee delegates exist (this CORE module must not read agent state, and
+ * is linked into the client + tests without the server, so it can't call agent_*
+ * directly). When the provider reports true, the gateway strips provider-native
+ * sub-agent tools automatically, so a primary proxied through the gateway (Codex,
+ * other OpenAI/Anthropic-shape providers) cannot spawn its own sub-agents. The
+ * provider is expected to cache (it runs on the gateway hot path). */
+static int (*g_delegates_available_provider)(void);
 
-void gateway_policy_set_delegates_available(int avail)
+void gateway_policy_set_delegates_available_provider(int (*provider)(void))
 {
-   g_delegates_available = avail ? 1 : 0;
+   g_delegates_available_provider = provider;
 }
 
 int gateway_prevent_subagents_enabled(void)
 {
-   if (g_delegates_available)
+   if (g_delegates_available_provider && g_delegates_available_provider())
       return 1;
    config_t cfg;
    config_load(&cfg);

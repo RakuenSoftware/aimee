@@ -1749,6 +1749,11 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
 }
 int server_run(server_ctx_t *ctx)
 {
+   /* enforce-delegate-only: register the delegate-availability provider so the
+    * gateway strips provider-native sub-agent tools whenever usable delegates
+    * exist (CORE gateway_policy can't read agent state itself). */
+   server_install_gateway_delegate_policy();
+
    /* The /v1 HTTP listener (server_http.c) runs on its own accept thread with
     * per-connection workers, so the main thread has no NDJSON accept loop to
     * drive any more. Park here until a signal flips ctx->running, then return so

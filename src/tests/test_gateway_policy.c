@@ -488,6 +488,11 @@ static void test_police_rewrites_end_turn_when_all_calls_dropped_regardless_of_r
    PASS("police_rewrites_end_turn_when_all_calls_dropped_regardless_of_reason");
 }
 
+static int test_delegates_available_yes(void)
+{
+   return 1;
+}
+
 int main(void)
 {
    printf("test_gateway_policy:\n");
@@ -515,11 +520,11 @@ int main(void)
    test_police_preserves_upstream_stop_reason_when_calls_remain();
    test_police_rewrites_end_turn_when_all_calls_dropped_regardless_of_reason();
 
-   /* enforce-delegate-only: the server pushing "delegates available" activates
+   /* enforce-delegate-only: a registered delegates-available provider activates
     * sub-agent prevention even when the config flag is off. */
-   gateway_policy_set_delegates_available(1);
+   gateway_policy_set_delegates_available_provider(test_delegates_available_yes);
    assert(gateway_prevent_subagents_enabled() == 1);
-   gateway_policy_set_delegates_available(0);
+   gateway_policy_set_delegates_available_provider(NULL);
 
    printf("all gateway_policy tests passed\n");
    return 0;
