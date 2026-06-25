@@ -1517,6 +1517,96 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
 
 #include "server_mcp_call_table.inc"
 
+/* ── Discovery meta-tools (P2) ────────────────────────────────────────────────
+ * find_tools / describe_tool introspect the FULL served catalog (unfiltered by
+ * the presentation profile) so a lean tools/list loses no reach: the model can
+ * discover any tool's name + schema and then call it by name. Read-only; they
+ * return MCP `content` like any other content-producing tool. */
+static int mcp_ci_contains(const char *haystack, const char *needle)
+{
+   if (!needle || !needle[0])
+      return 1; /* empty query matches everything */
+   if (!haystack)
+      return 0;
+   size_t nlen = strlen(needle);
+   for (const char *h = haystack; *h; h++)
+      if (strncasecmp(h, needle, nlen) == 0)
+         return 1;
+   return 0;
+}
+
+static cJSON *mcp_tool_find_tools(cJSON *args)
+{
+   cJSON *jq = cJSON_GetObjectItemCaseSensitive(args, "query");
+   const char *q = cJSON_IsString(jq) ? jq->valuestring : NULL;
+   int limit = 50;
+   cJSON *jl = cJSON_GetObjectItemCaseSensitive(args, "limit");
+   if (cJSON_IsNumber(jl) && jl->valueint > 0)
+      limit = jl->valueint;
+
+   cJSON *all = mcp_build_full_served_list();
+   cJSON *result = cJSON_CreateObject();
+   cJSON *matches = cJSON_AddArrayToObject(result, "tools");
+   int shown = 0, total = 0;
+   cJSON *t = NULL;
+   cJSON_ArrayForEach(t, all)
+   {
+      cJSON *nm = cJSON_GetObjectItemCaseSensitive(t, "name");
+      cJSON *ds = cJSON_GetObjectItemCaseSensitive(t, "description");
+      const char *name = cJSON_IsString(nm) ? nm->valuestring : "";
+      const char *desc = cJSON_IsString(ds) ? ds->valuestring : "";
+      if (!mcp_ci_contains(name, q) && !mcp_ci_contains(desc, q))
+         continue;
+      total++;
+      if (shown >= limit)
+         continue;
+      cJSON *m = cJSON_CreateObject();
+      cJSON_AddStringToObject(m, "name", name);
+      cJSON_AddStringToObject(m, "description", desc);
+      cJSON_AddItemToArray(matches, m);
+      shown++;
+   }
+   cJSON_AddNumberToObject(result, "count", shown);
+   cJSON_AddNumberToObject(result, "total", total);
+   if (total > shown)
+      cJSON_AddBoolToObject(result, "truncated", 1);
+   cJSON_AddStringToObject(
+       result, "hint",
+       "Call describe_tool(name) for a tool's input schema, then call the tool by name.");
+   cJSON_Delete(all);
+   return json_result_content(result);
+}
+
+static cJSON *mcp_tool_describe_tool(cJSON *args)
+{
+   cJSON *jn = cJSON_GetObjectItemCaseSensitive(args, "name");
+   if (!cJSON_IsString(jn) || !jn->valuestring[0])
+      return text_content("error: describe_tool requires a 'name'");
+   const char *want = jn->valuestring;
+
+   cJSON *all = mcp_build_full_served_list();
+   cJSON *found = NULL;
+   cJSON *t = NULL;
+   cJSON_ArrayForEach(t, all)
+   {
+      cJSON *nm = cJSON_GetObjectItemCaseSensitive(t, "name");
+      if (cJSON_IsString(nm) && strcmp(nm->valuestring, want) == 0)
+      {
+         found = cJSON_Duplicate(t, 1);
+         break;
+      }
+   }
+   cJSON_Delete(all);
+   if (!found)
+   {
+      char msg[160];
+      snprintf(msg, sizeof(msg), "error: unknown tool '%s' (use find_tools to discover names)",
+               want);
+      return text_content(msg);
+   }
+   return json_result_content(found);
+}
+
 int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    cJSON *jtool = cJSON_GetObjectItemCaseSensitive(req, "tool");
@@ -1625,8 +1715,15 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       }
    }
 
+   /* Discovery meta-tools (P2): pure introspection of the full catalog; set
+    * content and fall through to the normal send path. */
+   if (strcmp(tool, "find_tools") == 0)
+      content = mcp_tool_find_tools(jargs);
+   else if (strcmp(tool, "describe_tool") == 0)
+      content = mcp_tool_describe_tool(jargs);
+
    struct mcp_call call = {ctx, conn, jargs, sid, tool, &structured};
-   mcp_tool_handler_fn handler = mcp_tool_lookup(tool);
+   mcp_tool_handler_fn handler = content ? NULL : mcp_tool_lookup(tool);
    if (handler)
    {
       content = handler(&call);

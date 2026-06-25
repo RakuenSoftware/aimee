@@ -489,8 +489,8 @@ static void test_tools_list_surface(void)
    cJSON_Delete(tools);
 }
 
-/* P1 presentation profile: "core"/"lean" shrinks the served tools/list to the
- * Tier-0 set; "full"/unknown/NULL-default fail open (present everything). */
+/* P1/P2 presentation profile: "core"/"lean" (the P2 default) shrinks the served
+ * tools/list to the Tier-0 set; explicit "full"/unknown fail open. */
 static int profile_core_has(const char *n, const char *const *set)
 {
    for (int i = 0; set[i]; i++)
@@ -500,24 +500,34 @@ static int profile_core_has(const char *n, const char *const *set)
 }
 static void test_tool_profile_filter(void)
 {
-   /* Mirror of MCP_CORE_TOOLS in mcp_tools.c — kept in sync intentionally. */
-   static const char *const core[] = {"get_help",         "search_docs",     "search_memory",
-                                      "memory_recall",    "get_identity",    "find_symbol",
-                                      "ast_grep_search",  "git_status",      "git_commit",
-                                      "git_diff_summary", "git_branch",      "git_pr",
-                                      "delegate",         "ensemble_review", "ask_user",
-                                      "send_message",     "create_note",     NULL};
+   /* Mirror of MCP_CORE_TOOLS in mcp_tool_profile.c — kept in sync intentionally.
+    * Includes the P2 discovery meta-tools find_tools/describe_tool. */
+   static const char *const core[] = {
+       "get_help",        "find_tools",       "describe_tool", "search_docs",     "search_memory",
+       "memory_recall",   "get_identity",     "find_symbol",   "ast_grep_search", "git_status",
+       "git_commit",      "git_diff_summary", "git_branch",    "git_pr",          "delegate",
+       "ensemble_review", "ask_user",         "send_message",  "create_note",     NULL};
    int expect = 0;
    for (int i = 0; core[i]; i++)
       expect++;
+   assert(profile_core_has("find_tools", core) && profile_core_has("describe_tool", core));
 
-   /* "full", an unknown profile, and NULL (no env set in the test) are no-ops. */
+   /* Control the env so the default is deterministic across CI runners. */
+   unsetenv("AIMEE_MCP_TOOL_PROFILE");
+
+   /* Explicit "full" and an unknown profile are no-ops (fail open). */
    cJSON *t = mcp_build_tools_list();
    int full = cJSON_GetArraySize(t);
    assert(full > expect);
    assert(mcp_filter_tools_for_profile(t, "full") == 0 && cJSON_GetArraySize(t) == full);
    assert(mcp_filter_tools_for_profile(t, "nonsense") == 0 && cJSON_GetArraySize(t) == full);
-   assert(mcp_filter_tools_for_profile(t, NULL) == 0 && cJSON_GetArraySize(t) == full);
+   cJSON_Delete(t);
+
+   /* P2 default: env unset + NULL profile resolves to "core" and filters. */
+   assert(strcmp(mcp_tool_profile_effective(NULL), "core") == 0);
+   t = mcp_build_tools_list();
+   assert(mcp_filter_tools_for_profile(t, NULL) == full - expect);
+   assert(cJSON_GetArraySize(t) == expect);
    cJSON_Delete(t);
 
    /* "core" keeps exactly the Tier-0 set — and every named core tool exists in

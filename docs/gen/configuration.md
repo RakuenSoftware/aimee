@@ -361,7 +361,7 @@ The binaries read 120 `AIMEE_*` environment variables (scanned from `getenv()` i
 | Variable | Description |
 |----------|-------------|
 | `AIMEE_MCP_CWD` | Working-directory hint for MCP git-root resolution. |
-| `AIMEE_MCP_TOOL_PROFILE` | MCP tools/list presentation profile: 'full' (default, all tools) or 'core'/'lean' (Tier-0 high-frequency tools only, shrinking the initial payload). |
+| `AIMEE_MCP_TOOL_PROFILE` | MCP tools/list presentation profile: 'core'/'lean' (default — Tier-0 high-frequency tools only, with find_tools/describe_tool reaching the rest) or 'full' (present every tool upfront). |
 | `AIMEE_VERIFY_PARALLEL` | Run `aimee git verify` steps in parallel. |
 | `AIMEE_VERIFY_STEP_TIMEOUT_MS` | Per-step timeout (ms) for git verify. |
 

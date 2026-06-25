@@ -275,7 +275,10 @@ static void handle_initialize(cJSON *id)
 
    cJSON *caps = cJSON_CreateObject();
    cJSON *tools_cap = cJSON_CreateObject();
-   cJSON_AddBoolToObject(tools_cap, "listChanged", 0);
+   /* The presented list is dynamic (presentation profile + plugin/remote tools +
+    * runtime config), so advertise listChanged: a client may re-list to pick up
+    * changes. */
+   cJSON_AddBoolToObject(tools_cap, "listChanged", 1);
    cJSON_AddItemToObject(caps, "tools", tools_cap);
    cJSON *res_cap = cJSON_CreateObject();
    cJSON_AddBoolToObject(res_cap, "subscribe", 0);
@@ -291,14 +294,17 @@ static void handle_initialize(cJSON *id)
    cJSON_AddStringToObject(info, "version", MCP_VERSION);
    cJSON_AddItemToObject(result, "serverInfo", info);
 
-   cJSON_AddStringToObject(result, "instructions",
-                           "When you are unsure how aimee works — work queue, "
-                           "delegation, memory, git, build, conventions — call "
-                           "get_help() before trying anything else. It returns "
-                           "the authoritative topic index. Pass a topic name "
-                           "for details (e.g. get_help(\"work queue\")). Do not use "
-                           "provider-native sub-agent tools such as spawn_agent or Agent; "
-                           "use the aimee delegate tool for delegated work.");
+   cJSON_AddStringToObject(
+       result, "instructions",
+       "When you are unsure how aimee works — work queue, delegation, memory, git, "
+       "build, conventions — call get_help() before trying anything else. It "
+       "returns the authoritative topic index. Pass a topic name for details "
+       "(e.g. get_help(\"work queue\")). The tools/list is a curated core set; the "
+       "full catalog is larger — call find_tools(\"<keyword>\") to discover more "
+       "tools and describe_tool(\"<name>\") for a tool's full input schema, then "
+       "call any discovered tool by name (it need not appear in tools/list). Do "
+       "not use provider-native sub-agent tools such as spawn_agent or Agent; use "
+       "the aimee delegate tool for delegated work.");
 
    mcp_respond(id, result);
 }

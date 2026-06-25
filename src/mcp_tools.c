@@ -63,6 +63,7 @@ static void add_session_context_tools(cJSON *tools)
 cJSON *mcp_build_tools_list(void)
 {
    cJSON *tools = cJSON_CreateArray();
+   mcp_add_discovery_tools(tools); /* find_tools / describe_tool (P2) */
    {
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");

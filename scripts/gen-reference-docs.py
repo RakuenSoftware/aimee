@@ -544,7 +544,7 @@ ENV_DESC = {
     "AIMEE_VERIFY_PARALLEL": ("Git verify / MCP", "Run `aimee git verify` steps in parallel."),
     "AIMEE_VERIFY_STEP_TIMEOUT_MS": ("Git verify / MCP", "Per-step timeout (ms) for git verify."),
     "AIMEE_MCP_CWD": ("Git verify / MCP", "Working-directory hint for MCP git-root resolution."),
-    "AIMEE_MCP_TOOL_PROFILE": ("Git verify / MCP", "MCP tools/list presentation profile: 'full' (default, all tools) or 'core'/'lean' (Tier-0 high-frequency tools only, shrinking the initial payload)."),
+    "AIMEE_MCP_TOOL_PROFILE": ("Git verify / MCP", "MCP tools/list presentation profile: 'core'/'lean' (default — Tier-0 high-frequency tools only, with find_tools/describe_tool reaching the rest) or 'full' (present every tool upfront)."),
     # Models
     "AIMEE_MODEL_CAPABILITY_OVERRIDES": ("Models", "Override model capability flags (reasoning/tools/vision/…)."),
     # TLS & networking
