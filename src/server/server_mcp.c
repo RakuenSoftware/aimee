@@ -9,6 +9,7 @@
 #include "index.h"
 #include "db1.h"
 #include "kb_client.h"
+#include "dashboard.h"
 #include "mcp_git.h"
 #include "git_verify.h"
 #include "workspace_turn.h"

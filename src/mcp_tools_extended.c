@@ -78,7 +78,14 @@ void mcp_add_extended_tools(cJSON *tools)
    ext_prop(t, "project", "string", "Project the file belongs to (optional).");
    ext_require(t, "file_path");
 
-   /* ── Memory grounding: explain a retrieval ───────────────────────────────── */
+   t = ext_tool(tools, "index_blast_radius",
+                "Impact analysis for one file: the files that depend on it (dependents) and the "
+                "files it depends on (dependencies), from the code index.");
+   ext_prop(t, "file_path", "string", "File path within the indexed project.");
+   ext_prop(t, "project", "string", "Project the file belongs to (optional).");
+   ext_require(t, "file_path");
+
+   /* ── Memory grounding: explain a retrieval + provenance/history ───────────── */
    t = ext_tool(tools, "memory_explain_match",
                 "Explain WHY a memory matches a query: the per-signal score breakdown "
                 "(lexical / semantic / entity / graph / cross-encoder / …).");
@@ -86,4 +93,19 @@ void mcp_add_extended_tools(cJSON *tools)
    ext_prop(t, "memory_id", "integer", "Id of the memory to explain (e.g. from search_memory).");
    ext_require(t, "query");
    ext_require(t, "memory_id");
+
+   t = ext_tool(tools, "memory_provenance",
+                "Provenance trail of a memory: the recorded actions (create / update / supersede / "
+                "…) with session + timestamp, for citing and trust-ranking.");
+   ext_prop(t, "memory_id", "integer", "Id of the memory (e.g. from search_memory).");
+   ext_require(t, "memory_id");
+
+   t = ext_tool(tools, "memory_fact_history",
+                "Version history of a fact by its key: prior + current entries, newest first.");
+   ext_prop(t, "key", "string", "The fact key to fetch history for.");
+   ext_require(t, "key");
+
+   /* ── Observability ───────────────────────────────────────────────────────── */
+   ext_tool(tools, "dashboard_metrics",
+            "Operational snapshot: server metrics plus the vector-store status, as JSON.");
 }

@@ -2,7 +2,7 @@
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 103
+#define MCP_TOOLS_GOLDEN_COUNT 107
 #define MCP_TOOLS_GOLDEN \
    "ask_user {choices,question} req:question\n" \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n" \
@@ -13,6 +13,7 @@
    "create_epistemic_directive {anchor_entity,anchor_file,cause,priority,question,topic,valid_until} req:question\n" \
    "create_note {content,tags,title} req:content,title\n" \
    "create_prospective_memory {action_text,anchor_entity,anchor_file,recurrence,trigger_text,valid_until} req:action_text,trigger_text\n" \
+   "dashboard_metrics {} req:\n" \
    "delegate {branch,cwd,persona,prompt,role} req:persona,prompt,role\n" \
    "delegate_reply {content,delegation_id} req:content,delegation_id\n" \
    "delegate_status {job_id} req:job_id\n" \
@@ -49,6 +50,7 @@
    "git_status {} req:\n" \
    "git_tag {action,message,name,ref} req:\n" \
    "git_verify {action,async,base,job_id,path} req:\n" \
+   "index_blast_radius {file_path,project} req:file_path\n" \
    "index_find_callers {project,symbol} req:symbol\n" \
    "index_structure {file_path,project} req:file_path\n" \
    "job_start {max_concurrent,plan_id} req:plan_id\n" \
@@ -70,8 +72,10 @@
    "memory_alerts {since} req:\n" \
    "memory_briefing {limit_tokens} req:\n" \
    "memory_explain_match {memory_id,query} req:memory_id,query\n" \
+   "memory_fact_history {key} req:key\n" \
    "memory_get {handle,id} req:\n" \
    "memory_maintain {dry_run,force,modes} req:\n" \
+   "memory_provenance {memory_id} req:memory_id\n" \
    "memory_recall {limit_tokens,session_start,task_hint} req:\n" \
    "mutate {confidence,content,id,key,kind,reason,tier,verb} req:verb\n" \
    "payload_rewrite_status {} req:\n" \

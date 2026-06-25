@@ -776,6 +776,121 @@ static cJSON *mcph_memory_explain_match(struct mcp_call *c)
    return json_result_content(result);
 }
 
+/* ── P3b extended read-only tools: blast radius, memory provenance/history,
+ * dashboard metrics. Same pattern: wrap an existing call, emit JSON. ───────── */
+static cJSON *mcph_index_blast_radius(struct mcp_call *c)
+{
+   cJSON *jf = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_path");
+   if (!cJSON_IsString(jf) || !jf->valuestring[0])
+      return text_content("error: index_blast_radius requires 'file_path'");
+   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
+   const char *project = cJSON_IsString(jp) ? jp->valuestring : NULL;
+   blast_radius_t *br = calloc(1, sizeof(*br));
+   if (!br)
+      return text_content("error: out of memory");
+   if (kb_client_index_blast_radius(project, jf->valuestring, br) < 0)
+   {
+      free(br);
+      return text_content("error: index_blast_radius failed");
+   }
+   cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "file", br->file);
+   cJSON *deps = cJSON_AddArrayToObject(result, "dependents");
+   for (int i = 0; i < br->dependent_count && i < 64; i++)
+      cJSON_AddItemToArray(deps, cJSON_CreateString(br->dependents[i]));
+   cJSON *uses = cJSON_AddArrayToObject(result, "dependencies");
+   for (int i = 0; i < br->dependency_count && i < 64; i++)
+      cJSON_AddItemToArray(uses, cJSON_CreateString(br->dependencies[i]));
+   cJSON_AddNumberToObject(result, "dependent_count", br->dependent_count);
+   cJSON_AddNumberToObject(result, "dependency_count", br->dependency_count);
+   free(br);
+   return json_result_content(result);
+}
+
+static cJSON *mcph_memory_provenance(struct mcp_call *c)
+{
+   cJSON *jid = cJSON_GetObjectItemCaseSensitive(c->jargs, "memory_id");
+   if (!cJSON_IsNumber(jid))
+      return text_content("error: memory_provenance requires 'memory_id'");
+   const int max = 200;
+   provenance_entry_t *ents = calloc((size_t)max, sizeof(*ents));
+   if (!ents)
+      return text_content("error: out of memory");
+   int n = kb_client_memory_get_provenance((int64_t)jid->valuedouble, ents, max);
+   if (n < 0)
+   {
+      free(ents);
+      return text_content("error: memory_provenance failed");
+   }
+   cJSON *result = cJSON_CreateObject();
+   cJSON *arr = cJSON_AddArrayToObject(result, "provenance");
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *e = cJSON_CreateObject();
+      cJSON_AddNumberToObject(e, "id", (double)ents[i].id);
+      cJSON_AddStringToObject(e, "action", ents[i].action);
+      if (ents[i].session_id[0])
+         cJSON_AddStringToObject(e, "session_id", ents[i].session_id);
+      if (ents[i].details[0])
+         cJSON_AddStringToObject(e, "details", ents[i].details);
+      cJSON_AddStringToObject(e, "created_at", ents[i].created_at);
+      cJSON_AddItemToArray(arr, e);
+   }
+   cJSON_AddNumberToObject(result, "count", n);
+   free(ents);
+   return json_result_content(result);
+}
+
+static cJSON *mcph_memory_fact_history(struct mcp_call *c)
+{
+   cJSON *jk = cJSON_GetObjectItemCaseSensitive(c->jargs, "key");
+   if (!cJSON_IsString(jk) || !jk->valuestring[0])
+      return text_content("error: memory_fact_history requires 'key'");
+   const int max = 100;
+   memory_t *mems = calloc((size_t)max, sizeof(*mems));
+   if (!mems)
+      return text_content("error: out of memory");
+   int n = kb_client_memory_fact_history(jk->valuestring, mems, max);
+   if (n < 0)
+   {
+      free(mems);
+      return text_content("error: memory_fact_history failed");
+   }
+   cJSON *result = cJSON_CreateObject();
+   cJSON *arr = cJSON_AddArrayToObject(result, "history");
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *m = cJSON_CreateObject();
+      cJSON_AddNumberToObject(m, "id", (double)mems[i].id);
+      cJSON_AddStringToObject(m, "tier", mems[i].tier);
+      cJSON_AddStringToObject(m, "kind", mems[i].kind);
+      cJSON_AddStringToObject(m, "content", mems[i].content);
+      cJSON_AddNumberToObject(m, "confidence", mems[i].confidence);
+      cJSON_AddStringToObject(m, "updated_at", mems[i].updated_at);
+      cJSON_AddItemToArray(arr, m);
+   }
+   cJSON_AddNumberToObject(result, "count", n);
+   free(mems);
+   return json_result_content(result);
+}
+
+static cJSON *mcph_dashboard_metrics(struct mcp_call *c)
+{
+   (void)c;
+   cJSON *result = cJSON_CreateObject();
+   char *metrics = api_metrics();
+   cJSON *mj = metrics ? cJSON_Parse(metrics) : NULL;
+   free(metrics);
+   if (mj)
+      cJSON_AddItemToObject(result, "metrics", mj);
+   char *vec = api_vector_status();
+   cJSON *vj = vec ? cJSON_Parse(vec) : NULL;
+   free(vec);
+   if (vj)
+      cJSON_AddItemToObject(result, "vector", vj);
+   return json_result_content(result);
+}
+
 /* ── name → handler table (exact match; order is irrelevant — names unique) ── */
 
 static const struct
@@ -844,6 +959,11 @@ static const struct
     {"index_find_callers", mcph_index_find_callers},
     {"index_structure", mcph_index_structure},
     {"memory_explain_match", mcph_memory_explain_match},
+    /* P3b */
+    {"index_blast_radius", mcph_index_blast_radius},
+    {"memory_provenance", mcph_memory_provenance},
+    {"memory_fact_history", mcph_memory_fact_history},
+    {"dashboard_metrics", mcph_dashboard_metrics},
 };
 
 static mcp_tool_handler_fn mcp_tool_lookup(const char *tool)
