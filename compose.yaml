@@ -14,8 +14,14 @@ services:
       timeout: 5s
       retries: 5
 
+  # LEGACY torch embedder. Retired from the default topology by the unified-llm
+  # cutover — the kb now embeds/reranks/synthesizes against the `aimee-llm`
+  # container (below) via AIMEE_LLM_URL. Kept behind a profile for rollback /
+  # comparison: `docker compose --profile legacy-embedder up` (and point the kb
+  # back with AIMEE_EMBEDDER_URL=http://embedder:8080).
   embedder:
     restart: unless-stopped
+    profiles: ["legacy-embedder"]
     # Published image (pushed to ghcr on every merge to main); override
     # AIMEE_EMBEDDER_IMAGE to pin a version or use a fork/registry.
     image: ${AIMEE_EMBEDDER_IMAGE:-ghcr.io/rakuensoftware/aimee-embedder:latest}
@@ -63,16 +69,13 @@ services:
     environment:
       AIMEE_HOME: /var/lib/aimee
       AIMEE_DB2_URL: postgresql://aimee:aimee@postgres:5432/aimee_shared
-      # Real semantic embeddings via the resident embedder service.
-      AIMEE_EMBEDDER_URL: http://embedder:8080
-      # Must match the embedder model's output dim (empty = config default 2560).
+      # One knob: embed (/embed) + rerank (/rerank) + synth (curator Tier-A & B,
+      # at {url}/v1) all via the unified aimee-llm container. The kb runs no model.
+      # Override AIMEE_EMBEDDER_URL / AIMEE_RERANKER_URL to pin a service elsewhere.
+      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8080}
+      # Embedding dim — empty = config default 1024 (CPU tier); set 2560 for the
+      # GPU 4B tier (changing it against a populated kb forces a re-embed).
       AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-}
-      # Curator/synthesis LLM. Defaults to the bundled `llm` sidecar (Gemma 3n
-      # E4B, below); BYO by pointing LLM_ENDPOINT at your own OpenAI-compatible
-      # endpoint (and drop the `llm` service: `docker compose up --scale llm=0`).
-      LLM_ENDPOINT: ${LLM_ENDPOINT:-http://llm:8080/v1}
-      LLM_MODEL: ${LLM_MODEL:-gemma-4-e4b-it}
-      LLM_API_KEY: ${LLM_API_KEY:-}
     # aimee-kb serves /v1 over HTTP only; the legacy --socket transport was retired (#2747).
     command: ["--http-port=8741"]
     ports:
@@ -80,7 +83,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      embedder:
+      aimee-llm:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
@@ -119,36 +122,34 @@ services:
       # Long: the cold first boot downloads the multi-GB GGUF before /health is OK.
       start_period: 1200s
 
-  # Unified llama.cpp+Vulkan container (P7 cutover target) — collapses `embedder`
-  # + `llm` into one image serving embed+rerank+synth from baked-in GGUFs behind
-  # the gateway (preserves the /embed+/embed_batch+/rerank contract on :8080).
-  # Profile-gated so it does not disturb the default topology pre-cutover. To cut
-  # over (see docs/runbooks/unified-llm-cutover.md): bring this up
-  # (`--profile unified-llm`), point the kb at it
-  # (AIMEE_EMBEDDER_URL=http://aimee-llm:8080, LLM_ENDPOINT=http://aimee-llm:8080/v1),
-  # re-embed the corpus, then drop the `embedder` + `llm` services. CPU image by
-  # default; AIMEE_LLM_IMAGE=...-gpu + a GPU device for the offloaded tier.
+  # Unified llama.cpp+Vulkan container: one image serving embed + rerank + synth
+  # from baked-in GGUFs behind the gateway (the /embed,/embed_batch,/rerank,
+  # /v1/chat/completions contract). The kb's single LLM backend (DEFAULT now —
+  # the unified-llm cutover; the legacy embedder/llm services moved behind
+  # profiles). CPU tier by default; GPU = AIMEE_LLM_IMAGE=...-gpu + AIMEE_LLM_NGL=99
+  # + a /dev/dri device (see deploy/compose/aimee.gpu.yaml). Internal only — the
+  # kb reaches it at aimee-llm:8080. Auth-off (the kb sends no bearer).
+  # CI/dev: AIMEE_LLM_DOCKERFILE=Dockerfile.aimee-llm-stub + AIMEE_LLM_STUB=1
+  # builds a tiny python-only stub (no llama.cpp / GGUFs) — see e2e-matrix.sh.
   aimee-llm:
     restart: unless-stopped
     image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:cpu}
     build:
       context: .
-      dockerfile: Dockerfile.aimee-llm
-    profiles: ["unified-llm"]
+      dockerfile: ${AIMEE_LLM_DOCKERFILE:-Dockerfile.aimee-llm}
     environment:
+      AIMEE_LLM_PORT: "8080"
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}
       AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
-    volumes:
-      - aimee-llm-models:/root/.cache/llama.cpp
-    ports:
-      - "8080:8080"
+      # CI/dev stub (off in prod): deterministic embed/rerank/synth, no models.
+      AIMEE_LLM_STUB: ${AIMEE_LLM_STUB:-}
+      AIMEE_LLM_STUB_DIM: ${AIMEE_LLM_STUB_DIM:-}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
-      interval: 30s
+      interval: 10s
       timeout: 5s
       retries: 5
-      # Models are baked into the image, so the cold boot only loads them into
-      # RAM/VRAM (no download); still generous for the largest GPU tier.
+      # Baked GGUFs load into RAM/VRAM (no download); generous for the GPU tier.
       start_period: 300s
 
 volumes:

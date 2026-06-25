@@ -133,22 +133,31 @@ check "POST memory.find_facts (fusion)" '"facts"' -X POST -H 'content-type: appl
                                                -d '{"query":"docker smoke test","limit":3,"graph_code_fusion_state":"on"}' \
                                                "${KB_URL}/v1/actions/memory.find_facts"
 
-bold "==> Embedder round-trip (in-network, via the kb container)"
-if "${DC[@]}" ps --format '{{.Service}}' 2>/dev/null | grep -qx embedder; then
+bold "==> Embed backend round-trip (in-network, via the kb container)"
+# Unified topology: the kb embeds against the aimee-llm container (AIMEE_LLM_URL,
+# /embed). Legacy topology: the torch embedder service (AIMEE_EMBEDDER_URL). Probe
+# whichever backend this compose project runs.
+emb_backend=""
+if "${DC[@]}" ps --format '{{.Service}}' 2>/dev/null | grep -qx aimee-llm; then
+  emb_backend='${AIMEE_LLM_URL:-http://aimee-llm:8080}/embed'
+elif "${DC[@]}" ps --format '{{.Service}}' 2>/dev/null | grep -qx embedder; then
+  emb_backend='${AIMEE_EMBEDDER_URL:-http://embedder:8080}/embed'
+fi
+if [[ -n "$emb_backend" ]]; then
   if emb="$("${DC[@]}" exec -T aimee-kb sh -c \
-        'printf "aimee docker smoke test" | curl -fsS --max-time 30 -X POST \
-           --data-binary @- "${AIMEE_EMBEDDER_URL:-http://embedder:8080}/embed"' 2>/dev/null)" \
+        "printf 'aimee docker smoke test' | curl -fsS --max-time 30 -X POST \
+           --data-binary @- \"$emb_backend\"" 2>/dev/null)" \
      && [[ "$emb" == \[* ]]; then
     dims="$(($(printf '%s' "$emb" | tr -cd ',' | wc -c) + 1))"
-    green "  PASS  embedder /embed returned a ${dims}-dim vector"
+    green "  PASS  /embed returned a ${dims}-dim vector"
     PASS=$((PASS + 1))
   else
-    red   "  FAIL  embedder /embed round-trip"
+    red   "  FAIL  /embed round-trip"
     printf '        got: %s\n' "${emb:-<no response>}"
     FAIL=$((FAIL + 1))
   fi
 else
-  printf '  SKIP  embedder service not in this compose project\n'
+  printf '  SKIP  no embed backend service in this compose project\n'
 fi
 
 echo

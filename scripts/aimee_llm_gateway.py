@@ -389,6 +389,11 @@ def build_server():
         def do_GET(self):
             path = self.path.rstrip("/")
             if path == "/health":
+                if STUB:
+                    # Report the dim so the kb's embedder-autodim sizes the schema
+                    # (the embed-remote.py --dim probe reads payload["dim"]).
+                    self._send(200, {"status": "ok", "model": "aimee-llm-stub", "dim": STUB_DIM})
+                    return
                 st = health_state(child_health())
                 self._send(200 if st == "ok" else 503, {"status": st, "model": EMBED_MODEL})
             elif path in ("/health/embed", "/health/rerank", "/health/synth"):

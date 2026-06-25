@@ -62,6 +62,14 @@ done
 export EMBEDDER_STUB="${EMBEDDER_STUB:-1}"
 export EMBEDDER_STUB_DIM="${EMBEDDER_STUB_DIM:-2560}"
 export AIMEE_EMBEDDING_DIM="${AIMEE_EMBEDDING_DIM:-2560}"
+# Unified-llm topologies (T1 kb-only, T2 server+kb) now embed/rerank/synth against
+# the `aimee-llm` container instead of the torch `embedder`. CI builds the tiny
+# STUB image (no llama.cpp / GGUFs) and runs it in stub mode at the same dim, so
+# the kb -> gateway contract is exercised cheaply. (T4 combined still uses the
+# embedder stub above; T3 standalone has no embedder.) compose reads these via ${...}.
+export AIMEE_LLM_STUB="${AIMEE_LLM_STUB:-1}"
+export AIMEE_LLM_STUB_DIM="${AIMEE_LLM_STUB_DIM:-2560}"
+export AIMEE_LLM_DOCKERFILE="${AIMEE_LLM_DOCKERFILE:-Dockerfile.aimee-llm-stub}"
 
 # Disable the bundled curator LLM in CI: the committed .env enables the
 # `curator-llm` profile by default, but the smoke tests don't exercise the
