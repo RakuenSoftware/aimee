@@ -108,4 +108,13 @@ void mcp_add_extended_tools(cJSON *tools)
    /* ── Observability ───────────────────────────────────────────────────────── */
    ext_tool(tools, "dashboard_metrics",
             "Operational snapshot: server metrics plus the vector-store status, as JSON.");
+
+   /* ── Work queue ──────────────────────────────────────────────────────────── */
+   t = ext_tool(tools, "work_list",
+                "List items in the work queue (id, title, source, status, claim, result).");
+   ext_prop(t, "status_filter", "string",
+            "Filter by status: pending / claimed / done / failed / cancelled. Omit for all.");
+
+   ext_tool(tools, "work_board",
+            "The work queue grouped by status (pending / claimed / done / failed / cancelled).");
 }

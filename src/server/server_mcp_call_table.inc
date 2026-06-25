@@ -891,6 +891,70 @@ static cJSON *mcph_dashboard_metrics(struct mcp_call *c)
    return json_result_content(result);
 }
 
+/* Append a work-queue row's common fields to a cJSON object. */
+static void mcp_work_row_fields(cJSON *o, const db1_work_queue_list_row_t *row)
+{
+   cJSON_AddStringToObject(o, "id", row->id);
+   cJSON_AddStringToObject(o, "title", row->title);
+   if (row->source[0])
+      cJSON_AddStringToObject(o, "source", row->source);
+   cJSON_AddStringToObject(o, "status", row->status);
+   if (row->created_at[0])
+      cJSON_AddStringToObject(o, "created_at", row->created_at);
+   if (row->claimed_by[0])
+      cJSON_AddStringToObject(o, "claimed_by", row->claimed_by);
+   if (row->result[0])
+      cJSON_AddStringToObject(o, "result", row->result);
+}
+
+static cJSON *mcph_work_list(struct mcp_call *c)
+{
+   cJSON *jf = cJSON_GetObjectItemCaseSensitive(c->jargs, "status_filter");
+   const char *filter = cJSON_IsString(jf) ? jf->valuestring : NULL;
+   db1_work_queue_list_row_t *rows = NULL;
+   size_t n = 0;
+   if (db1_work_queue_alloc_list(filter, &rows, &n) != 0)
+      return text_content("error: work_list failed");
+   cJSON *result = cJSON_CreateObject();
+   cJSON *arr = cJSON_AddArrayToObject(result, "items");
+   for (size_t i = 0; i < n; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      mcp_work_row_fields(o, &rows[i]);
+      cJSON_AddItemToArray(arr, o);
+   }
+   cJSON_AddNumberToObject(result, "count", (double)n);
+   free(rows);
+   return json_result_content(result);
+}
+
+static cJSON *mcph_work_board(struct mcp_call *c)
+{
+   (void)c;
+   static const char *const statuses[] = {"pending", "claimed", "done", "failed", "cancelled"};
+   db1_work_queue_list_row_t *rows = NULL;
+   size_t n = 0;
+   if (db1_work_queue_alloc_list("all", &rows, &n) != 0)
+      return text_content("error: work_board failed");
+   cJSON *result = cJSON_CreateObject();
+   cJSON *board = cJSON_AddObjectToObject(result, "board");
+   for (int s = 0; s < 5; s++)
+   {
+      cJSON *arr = cJSON_AddArrayToObject(board, statuses[s]);
+      for (size_t i = 0; i < n; i++)
+      {
+         if (strcmp(rows[i].status, statuses[s]) != 0)
+            continue;
+         cJSON *o = cJSON_CreateObject();
+         mcp_work_row_fields(o, &rows[i]);
+         cJSON_AddItemToArray(arr, o);
+      }
+   }
+   cJSON_AddNumberToObject(result, "total", (double)n);
+   free(rows);
+   return json_result_content(result);
+}
+
 /* ── name → handler table (exact match; order is irrelevant — names unique) ── */
 
 static const struct
@@ -964,6 +1028,9 @@ static const struct
     {"memory_provenance", mcph_memory_provenance},
     {"memory_fact_history", mcph_memory_fact_history},
     {"dashboard_metrics", mcph_dashboard_metrics},
+    /* P3c */
+    {"work_list", mcph_work_list},
+    {"work_board", mcph_work_board},
 };
 
 static mcp_tool_handler_fn mcp_tool_lookup(const char *tool)

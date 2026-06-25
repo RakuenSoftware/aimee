@@ -2,7 +2,7 @@
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 107
+#define MCP_TOOLS_GOLDEN_COUNT 109
 #define MCP_TOOLS_GOLDEN \
    "ask_user {choices,question} req:question\n" \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n" \
@@ -110,4 +110,6 @@
    "session_status {id} req:id\n" \
    "skill_manage {absorbed_into,action,content,cwd,file_path,name,new_string,old_string,replace_all} req:action,name\n" \
    "store_workflow {project,rule,signal_type} req:rule,signal_type\n" \
-   "task_list {limit,session_id,state} req:\n"
+   "task_list {limit,session_id,state} req:\n" \
+   "work_board {} req:\n" \
+   "work_list {status_filter} req:\n"
