@@ -418,7 +418,7 @@ int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    for (int a = 0; a < area_count; a++)
    {
-      char *prompt = build_area_prompt(root, (const char (*)[MAX_PATH_LEN])cc.paths, area, cc.n, a);
+      char *prompt = build_area_prompt(root, (const char(*)[MAX_PATH_LEN])cc.paths, area, cc.n, a);
       if (!prompt)
          continue;
       agent_result_t r;

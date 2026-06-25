@@ -286,9 +286,8 @@ int safe_exec_capture_env(const char *const argv[], char *const envp[], char **o
  * is SIGKILLed, reaped, and SAFE_EXEC_TIMEOUT is returned. Captured output up to
  * the kill is still returned in *out_buf. A failed chdir aborts the child (127).
  * Used by operator command blocks: repo-pinned cwd, sanitized env, bounded run. */
-int safe_exec_capture_cwd_env_timeout(const char *const argv[], const char *cwd,
-                                      char *const envp[], char **out_buf, size_t max_out,
-                                      int timeout_ms);
+int safe_exec_capture_cwd_env_timeout(const char *const argv[], const char *cwd, char *const envp[],
+                                      char **out_buf, size_t max_out, int timeout_ms);
 
 /* Returns 1 if string contains shell metacharacters (;|&$`(){}><\n\r'"\\). */
 int has_shell_metachar(const char *s);
