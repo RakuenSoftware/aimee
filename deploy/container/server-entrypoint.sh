@@ -74,6 +74,16 @@ webchat_start
 #       lowercased, e.g. AIMEE_DELEGATE_KEY_MISTRAL).
 # Non-destructive by default; set AIMEE_DELEGATE_SECRETS_OVERWRITE=1 to replace an
 # existing vaulted key. Secrets are never written to AIMEE_HOME or logs.
+# Pre-warm the server-hosted OAuth CLIs (claude/codex) in the BACKGROUND so the
+# first `aimee agent setup *-oauth` is instant instead of waiting on (or timing
+# out against) a cold `npm i -g` — the failure mode on a freshly-deployed,
+# empty-home container. Idempotent (probe-first) + best-effort: it never blocks
+# or fails the server start, and runs as the same 'aimee' user that owns the
+# install prefix ($AIMEE_HOME/.npm-global). The lazy install on first setup still
+# covers it if this hasn't finished yet.
+log "pre-warming server-hosted OAuth CLIs (background)"
+runuser -u aimee -- aimee-server --prewarm-cli-oauth >/dev/null 2>&1 &
+
 log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 runuser -u aimee -- aimee-server --socket="$SERVER_SOCK" &
 server_pid=$!

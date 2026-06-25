@@ -26,6 +26,7 @@
 #include "shutdown_forensics.h"
 #include "headers/plugin_loader.h"
 #include "headers/context_engine.h"
+#include "headers/server_cli_oauth.h"
 #include <signal.h>
 #include <errno.h>
 #include <stdio.h>
@@ -279,6 +280,29 @@ int main(int argc, char **argv)
    {
       fprintf(stderr, "aimee-server: --run-command is retired; add a typed server RPC instead.\n");
       return 1;
+   }
+
+   /* Pre-warm the server-hosted OAuth CLIs (claude/codex) so the FIRST
+    * `aimee agent setup *-oauth` doesn't wait on (or time out against) a cold
+    * `npm i -g`. The deploy entrypoint runs this once at boot, backgrounded, as
+    * the server's runtime user. It reuses cli_oauth_install (same pinned
+    * versions + probe-first idempotency as the lazy path — no drift) and is
+    * best-effort: a registry/network hiccup must NOT fail boot, and the lazy
+    * install on first setup still covers it. Exits without starting the server. */
+   if (argc >= 2 && strcmp(argv[1], "--prewarm-cli-oauth") == 0)
+   {
+      const cli_oauth_vendor_t vendors[] = {CLI_OAUTH_CLAUDE, CLI_OAUTH_CODEX};
+      for (size_t k = 0; k < sizeof(vendors) / sizeof(vendors[0]); k++)
+      {
+         char err[256] = "";
+         if (cli_oauth_install(vendors[k], err, sizeof(err)) == 0)
+            fprintf(stderr, "aimee-server: prewarm %s CLI ready\n",
+                    cli_oauth_vendor_name(vendors[k]));
+         else
+            fprintf(stderr, "aimee-server: prewarm %s CLI skipped: %s\n",
+                    cli_oauth_vendor_name(vendors[k]), err);
+      }
+      return 0; /* best-effort — never fail the boot that backgrounds this */
    }
 
    const char *socket_path = NULL;
