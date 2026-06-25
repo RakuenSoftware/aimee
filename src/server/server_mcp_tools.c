@@ -6,6 +6,7 @@
 #include "osv_check.h"
 #include "toolset.h"
 #include "cJSON.h"
+#include "log.h"
 
 #include <string.h>
 
@@ -184,6 +185,20 @@ int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
           "run.");
       cJSON_AddItemToObject(t, "inputSchema", s);
       cJSON_AddItemToArray(tools, t);
+   }
+
+   /* Presentation profile: shrink the initial tools/list for external MCP
+    * clients when AIMEE_MCP_TOOL_PROFILE=core|lean. Default "full" is a no-op,
+    * so existing clients are unaffected; the lean set + on-demand discovery
+    * (find_tools/describe_tool) land in P2. Applied here at the served-list
+    * choke point so mcp_build_tools_list() (and its golden test) stays intact. */
+   {
+      const char *profile = mcp_tool_profile_effective(NULL);
+      int total = cJSON_GetArraySize(tools);
+      int removed = mcp_filter_tools_for_profile(tools, NULL);
+      if (removed > 0)
+         LOG_INFO("mcp-tools", "tools/list profile '%s': presenting %d tools (hid %d)", profile,
+                  total - removed, removed);
    }
 
    cJSON_AddStringToObject(resp, "status", "ok");

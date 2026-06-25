@@ -200,7 +200,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 119 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
+The binaries read 120 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
 
 ### Paths & assets
 
@@ -361,6 +361,7 @@ The binaries read 119 `AIMEE_*` environment variables (scanned from `getenv()` i
 | Variable | Description |
 |----------|-------------|
 | `AIMEE_MCP_CWD` | Working-directory hint for MCP git-root resolution. |
+| `AIMEE_MCP_TOOL_PROFILE` | MCP tools/list presentation profile: 'full' (default, all tools) or 'core'/'lean' (Tier-0 high-frequency tools only, shrinking the initial payload). |
 | `AIMEE_VERIFY_PARALLEL` | Run `aimee git verify` steps in parallel. |
 | `AIMEE_VERIFY_STEP_TIMEOUT_MS` | Per-step timeout (ms) for git verify. |
 

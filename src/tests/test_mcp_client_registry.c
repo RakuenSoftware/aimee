@@ -489,10 +489,62 @@ static void test_tools_list_surface(void)
    cJSON_Delete(tools);
 }
 
+/* P1 presentation profile: "core"/"lean" shrinks the served tools/list to the
+ * Tier-0 set; "full"/unknown/NULL-default fail open (present everything). */
+static int profile_core_has(const char *n, const char *const *set)
+{
+   for (int i = 0; set[i]; i++)
+      if (strcmp(n, set[i]) == 0)
+         return 1;
+   return 0;
+}
+static void test_tool_profile_filter(void)
+{
+   /* Mirror of MCP_CORE_TOOLS in mcp_tools.c — kept in sync intentionally. */
+   static const char *const core[] = {
+       "get_help",        "search_docs",    "search_memory",  "memory_recall",
+       "get_identity",    "find_symbol",    "ast_grep_search", "git_status",
+       "git_commit",      "git_diff_summary", "git_branch",   "git_pr",
+       "delegate",        "ensemble_review", "ask_user",      "send_message",
+       "create_note",     NULL};
+   int expect = 0;
+   for (int i = 0; core[i]; i++)
+      expect++;
+
+   /* "full", an unknown profile, and NULL (no env set in the test) are no-ops. */
+   cJSON *t = mcp_build_tools_list();
+   int full = cJSON_GetArraySize(t);
+   assert(full > expect);
+   assert(mcp_filter_tools_for_profile(t, "full") == 0 && cJSON_GetArraySize(t) == full);
+   assert(mcp_filter_tools_for_profile(t, "nonsense") == 0 && cJSON_GetArraySize(t) == full);
+   assert(mcp_filter_tools_for_profile(t, NULL) == 0 && cJSON_GetArraySize(t) == full);
+   cJSON_Delete(t);
+
+   /* "core" keeps exactly the Tier-0 set — and every named core tool exists in
+    * the built list (kept count == expected count proves none was dropped). */
+   t = mcp_build_tools_list();
+   int removed = mcp_filter_tools_for_profile(t, "core");
+   assert(removed == full - expect);
+   assert(cJSON_GetArraySize(t) == expect);
+   cJSON *tool = NULL;
+   cJSON_ArrayForEach(tool, t)
+   {
+      cJSON *nm = cJSON_GetObjectItemCaseSensitive(tool, "name");
+      assert(cJSON_IsString(nm) && profile_core_has(nm->valuestring, core));
+   }
+   cJSON_Delete(t);
+
+   /* "lean" is an alias for "core". */
+   t = mcp_build_tools_list();
+   assert(mcp_filter_tools_for_profile(t, "lean") == full - expect);
+   cJSON_Delete(t);
+}
+
 int main(void)
 {
    printf("test_mcp_client_registry\n");
    test_tools_list_surface();
+   test_tool_profile_filter();
    test_boot_and_lazy_tools();
    test_namespaced_tools_and_dispatch();
    test_failed_client_does_not_abort_boot();
