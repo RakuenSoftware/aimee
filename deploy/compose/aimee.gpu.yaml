@@ -1,0 +1,20 @@
+# GPU override for the aimee split stack. Layer on top of aimee.yaml:
+#
+#   docker compose -f deploy/compose/aimee.yaml -f deploy/compose/aimee.gpu.yaml up -d
+#
+# Runs the unified aimee-llm GPU tier (Qwen3-Embedding-4B / 2560-dim + gemma
+# synth, offloaded via Vulkan/RADV) and re-points the kb's embedding dim to 2560.
+# Passes the host AMD render path (/dev/dri) into the LLM container. Switching a
+# POPULATED kb between the CPU (1024) and GPU (2560) tier is a drop-and-rebuild
+# re-embed (the kb_meta drift guard refuses a stale mismatch).
+services:
+  aimee-llm:
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:gpu}
+    environment:
+      AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-99}
+    devices:
+      - "/dev/dri:/dev/dri"
+
+  aimee-kb:
+    environment:
+      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-2560}
