@@ -514,6 +514,13 @@ int main(void)
    test_predicate_is_denied_tool();
    test_police_preserves_upstream_stop_reason_when_calls_remain();
    test_police_rewrites_end_turn_when_all_calls_dropped_regardless_of_reason();
+
+   /* enforce-delegate-only: the server pushing "delegates available" activates
+    * sub-agent prevention even when the config flag is off. */
+   gateway_policy_set_delegates_available(1);
+   assert(gateway_prevent_subagents_enabled() == 1);
+   gateway_policy_set_delegates_available(0);
+
    printf("all gateway_policy tests passed\n");
    return 0;
 }

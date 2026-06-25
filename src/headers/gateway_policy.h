@@ -59,6 +59,12 @@ int gateway_policy_is_denied_tool(const char *name);
  * incremental relay/translator runs unchanged. */
 int gateway_prevent_subagents_enabled(void);
 
+/* Server pushes whether usable aimee delegates exist (it owns the agent roster;
+ * this CORE module must not read agent state). When true, sub-agent prevention is
+ * active regardless of the config flag — enforce-delegate-only for any provider
+ * proxied through the gateway. */
+void gateway_policy_set_delegates_available(int avail);
+
 /* Mutate `p` in place: memmove-compact denied entries out of `p->calls[]` so the
  * surviving `p->calls[0..p->call_count-1]` is a contiguous prefix of the original
  * (no realloc, no flag-and-skip). `p->call_count` is decremented to match.

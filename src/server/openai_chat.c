@@ -864,9 +864,11 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
 /* Tool-policing stage (OpenAI tool shape): strip subagent-spawning tools from
  * raw.tools. Mirrors the Anthropic ingress's policing stage; same contract as
  * gateway_policy_apply_request (returns the number of tools stripped). */
+void server_refresh_gateway_delegate_policy(void); /* server_compute.c */
 static int gw_stage_openai_tool_policing(gw_request_t *r, void *ud)
 {
    (void)ud;
+   server_refresh_gateway_delegate_policy(); /* enforce-delegate-only: refresh the gate */
    return gateway_policy_apply_request(r->raw, 1 /* OpenAI tool shape */);
 }
 
