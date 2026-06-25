@@ -646,11 +646,22 @@ int pgvec_kb_search(const char *project, const float *vec, int dim, int limit, i
    if (!vec_text)
       return -1;
 
-   static const char *sql = "SELECT point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
-                            "FROM kb_embeddings "
-                            "WHERE project = :project "
-                            "ORDER BY embedding <=> :qvec::halfvec "
-                            "LIMIT :lim";
+   /* A named project scopes the search to it; a NULL/empty project searches the
+    * WHOLE corpus (all projects). The old code always bound `WHERE project =
+    * :project` with "" for the NULL case, which matched no rows (every chunk has
+    * a real project) — so a project-less /v1/kb/search silently returned zero
+    * hits instead of searching everything. Mirrors pgvec_curator_entity_search,
+    * which already exposes its scope filters as optional. */
+   int has_project = (project && project[0]);
+   const char *sql = has_project ? "SELECT point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
+                                   "FROM kb_embeddings "
+                                   "WHERE project = :project "
+                                   "ORDER BY embedding <=> :qvec::halfvec "
+                                   "LIMIT :lim"
+                                 : "SELECT point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
+                                   "FROM kb_embeddings "
+                                   "ORDER BY embedding <=> :qvec::halfvec "
+                                   "LIMIT :lim";
 
    char errbuf[256];
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
@@ -660,7 +671,8 @@ int pgvec_kb_search(const char *project, const float *vec, int dim, int limit, i
       return 0; /* pgvector not available — no vector results */
    }
    aimee_pg_bind_text(stmt, "qvec", vec_text);
-   aimee_pg_bind_text(stmt, "project", project ? project : "");
+   if (has_project)
+      aimee_pg_bind_text(stmt, "project", project);
    aimee_pg_bind_int(stmt, "lim", limit > 0 ? limit : max);
 
    int64_t t0 = monotonic_us();

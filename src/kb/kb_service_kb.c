@@ -322,12 +322,18 @@ static cJSON *kb_service_health_object(void)
    cJSON_AddNumberToObject(resp, "pgvec_vectors", pgvec_vectors);
    cJSON_AddNumberToObject(resp, "pgvec_indexed_vectors", pgvec_indexed);
 
-   /* Embed: check if the configured command is reachable (no actual probe) */
+   /* Embed: report whether an embedder is configured. The command can come from
+    * the config file OR the AIMEE_EMBEDDER_URL env (the combined image always
+    * exports the latter), so resolve it the same way embed_command does instead
+    * of reading the raw config field — otherwise an env-configured embedder is
+    * wrongly reported embed_ok:false while embed_command shows a real URL. The
+    * "builtin" fallback (nothing configured) still reports false, as before. */
    config_t cfg;
    config_load(&cfg);
-   int embed_ok = cfg.embedding_command[0] ? 1 : 0;
+   const char *embed_cmd = config_embedding_command(&cfg, NULL);
+   int embed_ok = (embed_cmd[0] && strcmp(embed_cmd, "builtin") != 0) ? 1 : 0;
    cJSON_AddBoolToObject(resp, "embed_ok", embed_ok);
-   cJSON_AddStringToObject(resp, "embed_command", config_embedding_command(&cfg, NULL));
+   cJSON_AddStringToObject(resp, "embed_command", embed_cmd);
 
    /* Curator (§4 observability): per-tier provider config + queue depth. The
     * live four-state reachability probe (ready/loading/gated/down) is deferred to

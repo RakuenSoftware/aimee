@@ -141,7 +141,12 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
 
    kb_background_set("ingest", "project=%s phase=scan", job->project);
    int inspected = 0;
-   if (canonical_index_scan_project(job->project, job->root_path, job->force, &inspected) != 0)
+   /* canonical_index_scan_project returns the number of files scanned (>= 0) on
+    * success and a negative value on error — only a negative is a failure. The
+    * old `!= 0` check wrongly failed every project that scanned >= 1 file (i.e.
+    * any non-empty project), marking the ingest job "failed" even though the
+    * embeddings landed. Match the contract the HTTP scan route already uses. */
+   if (canonical_index_scan_project(job->project, job->root_path, job->force, &inspected) < 0)
    {
       aimee_log(LOG_WARN, "kb.ingest.worker", "canonical index scan failed for project='%s'",
                 job->project);

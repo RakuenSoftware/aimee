@@ -1341,7 +1341,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       /* Canonical code index scan (symbols/definitions), mirroring the async
        * ingest worker so build and ingest produce the same index. */
       int inspected = 0;
-      if (canonical_index_scan_project(project, kb_path, force, &inspected) != 0)
+      /* >= 0 is the scanned-file count (success); only a negative is an error. */
+      if (canonical_index_scan_project(project, kb_path, force, &inspected) < 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"canonical index scan failed\"}");
          return 500;
@@ -1394,7 +1395,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return 500;
       }
       int inspected = 0;
-      if (canonical_index_scan_project(project, kb_path, 0, &inspected) != 0)
+      /* >= 0 is the scanned-file count (success); only a negative is an error. */
+      if (canonical_index_scan_project(project, kb_path, 0, &inspected) < 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"canonical index scan failed\"}");
          return 500;

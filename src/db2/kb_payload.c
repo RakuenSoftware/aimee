@@ -68,21 +68,29 @@ int db2_kb_document_fetch(int64_t id, const char *project, db2_kb_document_row_t
    if (!out)
       return 0;
    memset(out, 0, sizeof(*out));
-   if (id <= 0 || !project || !project[0])
+   if (id <= 0)
       return 0;
    void *conn = db2_conn();
    if (!conn)
       return 0;
 
-   static const char *sql =
-       "SELECT id, file_path, file_hash, heading_path, line_start, line_end, content"
-       " FROM kb_documents WHERE id = ?1 AND project = ?2";
+   /* id is the kb_documents primary key (globally unique), so an absent project
+    * fetches by id alone — this lets a project-less (whole-corpus) kb/search
+    * resolve the rows pgvec_kb_search returns across all projects. A named
+    * project still scopes the lookup. */
+   int has_project = (project && project[0]);
+   const char *sql =
+       has_project ? "SELECT id, file_path, file_hash, heading_path, line_start, line_end, content"
+                     " FROM kb_documents WHERE id = ?1 AND project = ?2"
+                   : "SELECT id, file_path, file_hash, heading_path, line_start, line_end, content"
+                     " FROM kb_documents WHERE id = ?1";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_int64(st, "?1", id);
-   aimee_pg_bind_text(st, "?2", project);
+   if (has_project)
+      aimee_pg_bind_text(st, "?2", project);
    int hit = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {

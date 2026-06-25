@@ -1540,8 +1540,18 @@ static char *kb_search_gather(const char *project, const char *query, const char
       return safe_strdup("error: db2 not initialized");
    const char *effective_cmd = kb_effective_embedding_cmd(embedding_cmd);
 
+   /* An explicit project scopes the search; omitting it means whole-corpus (all
+    * projects), NOT the server's cwd-basename. kb_resolve_project would default
+    * an empty project to getcwd()'s basename, which inside the kb SERVER is
+    * always its WORKDIR (/var/lib/aimee -> "aimee") and matches no real corpus —
+    * so an API /v1/kb/search that omits `project` silently returned nothing. The
+    * CLI resolves its own cwd project before calling, so it always sends an
+    * explicit name and is unaffected. Empty proj flows to the legs as "all". */
    char proj[256];
-   kb_resolve_project(project, NULL, proj, sizeof(proj));
+   if (project && project[0])
+      kb_resolve_project(project, NULL, proj, sizeof(proj));
+   else
+      proj[0] = '\0';
 
    /* Determine fusion mode: explicit override > bandit sample > config > default.
     * When no override is given and live bandit decisions are enabled, sample the
