@@ -1,13 +1,21 @@
 # Proposal: structured PDF ingestion + coordinate-anchored evidence layer (KB)
 
-- **State:** implementing — human sign-off given 2026-06-25; **Phase 1 complete (#702/#706);
-  Phase 2 complete — search_chunks #712, §6 quarantine admin #715, and the §5 escalation read
-  tools open_page/open_neighbors/inspect_structure #717.** The full access-controlled KB evidence
-  surface is live. Remaining: the server-ingress wiring that names these tools in the agent
-  `<aimee-context>` explore-with set (so an agent auto-escalates to them), optional vector
-  retrieval, and Phases 3–4 (tables/TSR, crops/OCR — both need local sidecar models). R3
-  roundtable sign-off (reviewer / architect / data-model Pass; security Conditional Pass —
-  residual is the explicitly-deferred automated PII detection).
+- **State:** ✅ **DONE — Phases 1–2 + the access-controlled evidence surface + agent reachability
+  shipped; proposal filed.** Phase 1 (#702/#706: extractor + geometry + §6 sensitivity/upload
+  enforcement), Phase 2 (#712 search_chunks; #715 §6 quarantine admin; #717 §5 escalation reads
+  open_page/open_neighbors/inspect_structure), and the **server-ingress wiring** (#720: four
+  agent-callable MCP tools `pdf_search_chunks` / `pdf_open_page` / `pdf_open_neighbors` /
+  `pdf_inspect_structure`, each project-scoped) are all merged to `testing`. The full
+  access-controlled KB evidence layer is live and agent-reachable. R3 roundtable sign-off
+  (reviewer / architect / data-model Pass; security Conditional Pass — residual is the
+  explicitly-deferred automated PII detection).
+  - **Carried forward to a successor proposal:** the remaining **deploy-tier** scope — Phase 3
+    (table-structure recognition → typed facts + `lookup_table`), Phase 4 (figure/table crops +
+    content-addressed blob store + `open_asset`, and OCR for scanned PDFs), plus the optional
+    **vector retrieval** path and the **§5-A answerability signal** — all of which need local
+    sidecar models (ONNX TSR/OCR + the embedder) and a deployed KB to build and validate against.
+    They remain specified below for design history; the live successor is
+    [[structured-pdf-tables-visual-and-ocr]] in `pending/`.
 - **Implementation status (2026-06-25).** **Phase 1 is being delivered in two increments.**
   - **1a (PR #702): the pure extractor pipeline + geometry storage.** New module
     `src/kb/kb_doc_pdf.{c,h}` parses poppler `pdftotext -bbox-layout` XHTML →
