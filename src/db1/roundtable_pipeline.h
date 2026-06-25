@@ -59,13 +59,19 @@ extern "C"
 #define RTP_CAP_CANCELLED "cancelled"
 #define RTP_CAP_FAILED    "failed"
 
-#define RTP_TS_LEN     32
-#define RTP_HASH_LEN   72
-#define RTP_SHORT_LEN  32
-#define RTP_NAME_LEN   128
-#define RTP_PATH_LEN   512
-#define RTP_IDEA_LEN   2048
-#define RTP_BRIEF_LEN  4096
+#define RTP_TS_LEN    32
+#define RTP_HASH_LEN  72
+#define RTP_SHORT_LEN 32
+#define RTP_NAME_LEN  128
+#define RTP_PATH_LEN  512
+#define RTP_IDEA_LEN  2048
+/* Inline brief/seed cap. Sized for a full proposal or diff summary in the
+ * large-context era (a few-KB brief was an anachronism vs 1M-token panels).
+ * Truncation past this is now LOGGED (rtp_set_brief), never silent; genuinely
+ * huge artifacts should still ride proposal_ref + chunk_index_ref instead of the
+ * inline brief. NOTE: rtp_run_t embeds this fixed buffer, so any *array* of runs
+ * must be heap-allocated (see handle_pipeline_list), never stack. */
+#define RTP_BRIEF_LEN  262144
 #define RTP_DIGEST_LEN 4096
 #define RTP_SNAP_LEN   8192
 #define RTP_REASON_LEN 1024

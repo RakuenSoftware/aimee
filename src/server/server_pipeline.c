@@ -185,6 +185,23 @@ static void enter_gate(int id, int gate_no, int pr)
 
 /* ------------------------------------------------------------- handlers ---- */
 
+/* Store a seed brief, logging loudly when it overflows the inline cap so a large
+ * brief never silently loses its tail (the old failure: a 16KB plan cut at 4KB,
+ * making the panel flag phantom "section truncated" items). Truly huge artifacts
+ * should ride proposal_ref + chunk_index_ref rather than the inline brief. */
+static void rtp_set_brief(rtp_run_t *run, const char *src)
+{
+   if (!src)
+      src = "";
+   size_t n = strlen(src);
+   if (n >= sizeof(run->brief))
+      LOG_WARN("pipeline",
+               "brief truncated: kept %zu of %zu bytes (inline cap %d); pass large "
+               "artifacts via proposal_ref + chunk_index_ref",
+               sizeof(run->brief) - 1, n, RTP_BRIEF_LEN);
+   snprintf(run->brief, sizeof(run->brief), "%s", src);
+}
+
 int handle_pipeline_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -275,13 +292,13 @@ int handle_pipeline_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          cJSON_Delete(bo);
          if (bs)
          {
-            snprintf(run.brief, sizeof(run.brief), "%s", bs);
+            rtp_set_brief(&run, bs);
             free(bs);
          }
          run.accepted_question_count = qc;
       }
       else if (seed && seed[0])
-         snprintf(run.brief, sizeof(run.brief), "%s", seed);
+         rtp_set_brief(&run, seed);
       else
          snprintf(run.brief, sizeof(run.brief), "goal: %s", idea);
 
@@ -387,7 +404,11 @@ int handle_pipeline_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *filter = jo_str(req, "state", NULL);
    config_t lcfg;
    int have_cfg = (config_load(&lcfg) == 0);
-   rtp_run_t rows[64];
+   /* Heap, not stack: rtp_run_t embeds a large inline brief[] (RTP_BRIEF_LEN), so
+    * an array of 64 would be megabytes on the stack. */
+   rtp_run_t *rows = calloc(64, sizeof(*rows));
+   if (!rows)
+      return server_send_error(conn, "pipeline: out of memory", NULL);
    int n = rtp_run_list(filter, rows, 64);
    if (n < 0)
       n = 0;
@@ -407,6 +428,7 @@ int handle_pipeline_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON_AddNumberToObject(o, "total_cost_usd", rows[i].total_cost_usd);
       cJSON_AddItemToArray(arr, o);
    }
+   free(rows);
    return server_send_ok(conn, resp);
 }
 

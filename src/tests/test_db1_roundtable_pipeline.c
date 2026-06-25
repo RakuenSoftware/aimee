@@ -112,8 +112,8 @@ static void test_admission(void)
    assert(rtp_run_set_state(a, RTP_STATE_DONE, NULL) == 0);
    assert(rtp_run_count_active() == 0);
 
-   /* list filters */
-   rtp_run_t rows[8];
+   /* list filters. static (off-stack): rtp_run_t embeds a large inline brief[]. */
+   static rtp_run_t rows[8];
    int n = rtp_run_list(NULL, rows, 8); /* non-terminal */
    assert(n == 1);                      /* only parked b is non-terminal */
    n = rtp_run_list(RTP_STATE_DONE, rows, 8);
