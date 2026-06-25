@@ -167,6 +167,13 @@ int ensemble_panelist_eligible(const config_t *cfg, const agent_t *ag);
  * authorization-gated. */
 void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *acfg);
 
+/* Drop currently-UNAVAILABLE panelists (unkeyed HTTP agent, missing CLI/tmux,
+ * health-breaker DOWN) from the panel — runtime gate via
+ * agent_is_available_for_routing, distinct from the authorization gate above.
+ * Run after the seed + authorization filter so a configured-but-broken or
+ * auto-seeded-but-unkeyed model never burns a seat and degrades the round. */
+void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acfg);
+
 /* Persona name for review panelist `model_index`: a configured
  * ensemble.reference_personas[model_index] if set, else a round-robin over the
  * engine's diverse default lineup keyed on the stable model index. Returns NULL

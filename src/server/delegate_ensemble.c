@@ -351,8 +351,8 @@ static int positional_change_0_100(const char *prev, const char *next)
 
 static int token_jaccard_change_0_100(const char *prev, const char *next)
 {
-   char(*a)[64] = calloc(512, sizeof(*a));
-   char(*b)[64] = calloc(512, sizeof(*b));
+   char (*a)[64] = calloc(512, sizeof(*a));
+   char (*b)[64] = calloc(512, sizeof(*b));
    if (!a || !b)
    {
       free(a);
@@ -1360,6 +1360,45 @@ void ensemble_filter_panel_authorization(config_t *cfg, const agent_config_t *ac
    {
       const agent_t *agg = agent_find((agent_config_t *)acfg, cfg->ensemble_aggregator);
       if (agg && !ensemble_panelist_eligible(cfg, agg))
+         cfg->ensemble_aggregator[0] = '\0';
+   }
+   if (!cfg->ensemble_aggregator[0] && n > 0)
+      snprintf(cfg->ensemble_aggregator, sizeof(cfg->ensemble_aggregator), "%s",
+               cfg->ensemble_reference_models[0]);
+}
+
+void ensemble_filter_panel_availability(config_t *cfg, const agent_config_t *acfg)
+{
+   /* Runtime gate (distinct from the authorization gate above): drop any
+    * configured panelist that is not currently USABLE — an HTTP agent with no
+    * resolvable key, a CLI agent whose command/tmux is absent, or one the health
+    * breaker marked DOWN. Otherwise it burns a panel seat on a guaranteed-to-fail
+    * participant and silently degrades the round (the bug that left a roundtable
+    * "2/3 participants failed" with unkeyed models in the list). An ad-hoc model
+    * id that is not a configured agent is left as-is (we cannot check it). Same
+    * predicate single-delegate routing uses: agent_is_available_for_routing. */
+   int n = 0;
+   for (int i = 0; i < cfg->ensemble_reference_count; i++)
+   {
+      const char *name = cfg->ensemble_reference_models[i];
+      const agent_t *ag = agent_find((agent_config_t *)acfg, name);
+      if (ag && !agent_is_available_for_routing(ag))
+      {
+         aimee_log(LOG_WARN, "delegate.panel",
+                   "dropping unavailable panelist '%s' (no key / unhealthy / command missing)",
+                   name);
+         continue;
+      }
+      if (n != i)
+         snprintf(cfg->ensemble_reference_models[n], sizeof(cfg->ensemble_reference_models[n]),
+                  "%s", name);
+      n++;
+   }
+   cfg->ensemble_reference_count = n;
+   if (cfg->ensemble_aggregator[0])
+   {
+      const agent_t *agg = agent_find((agent_config_t *)acfg, cfg->ensemble_aggregator);
+      if (agg && !agent_is_available_for_routing(agg))
          cfg->ensemble_aggregator[0] = '\0';
    }
    if (!cfg->ensemble_aggregator[0] && n > 0)

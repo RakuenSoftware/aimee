@@ -43,8 +43,7 @@ aimee:
 # (no keys are baked in), so the roundtable works once a client has connected.
 ensemble:
   enabled: true
-  reference_models:
-    - minimax
-    - mistral
-    - mimo-2.5
+  # No reference_models pinned: the panel is built DYNAMICALLY from the enabled +
+  # currently-available delegates (auto-seeded, then unkeyed/unhealthy ones are
+  # dropped). Pin a list here (or via a workflow) only to override that default.
 

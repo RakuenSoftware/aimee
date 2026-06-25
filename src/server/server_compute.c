@@ -1810,6 +1810,9 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
    /* Also gate an EXPLICIT reference_models list: never run an unauthorized
     * claude as a panelist, however it got into the panel. */
    ensemble_filter_panel_authorization(&cfg, &acfg);
+   /* Runtime gate: drop unkeyed/unhealthy panelists so the round isn't silently
+    * degraded by a model that is in the list/roster but can't actually run. */
+   ensemble_filter_panel_availability(&cfg, &acfg);
    bind_request_session_creds(req);
 
    delegate_ensemble_result_t result;
@@ -1920,6 +1923,9 @@ int handle_delegate_roundtable(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
    /* Also gate an EXPLICIT reference_models list: never run an unauthorized
     * claude as a panelist, however it got into the panel. */
    ensemble_filter_panel_authorization(&cfg, &acfg);
+   /* Runtime gate: drop unkeyed/unhealthy panelists so the round isn't silently
+    * degraded by a model that is in the list/roster but can't actually run. */
+   ensemble_filter_panel_availability(&cfg, &acfg);
    bind_request_session_creds(req);
 
    roundtable_result_t result;

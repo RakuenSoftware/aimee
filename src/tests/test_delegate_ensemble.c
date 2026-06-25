@@ -276,6 +276,16 @@ int agent_is_claude_cli(const agent_t *agent)
 {
    return agent && strcmp(agent->name, "claude") == 0;
 }
+/* Stub: a bearer HTTP agent with no resolvable credentials is "unkeyed" -> not
+ * available (the case the availability filter must drop); everything else is. */
+int agent_is_available_for_routing(const agent_t *agent)
+{
+   if (!agent || !agent->enabled)
+      return 0;
+   if (strcmp(agent->auth_type, "bearer") == 0 && agent->credential_count == 0)
+      return 0;
+   return 1;
+}
 static int g_cost_fold_calls = 0;
 static double g_cost_fold_total = 0.0;
 int db1_cost_fold_record(const char *parent_sid, const char *child_sid, double cost,
@@ -921,6 +931,31 @@ static void test_panel_filter_drops_unauthorized_claude(void)
    printf("  test_panel_filter_drops_unauthorized_claude: ok\n");
 }
 
+static void test_panel_filter_drops_unavailable(void)
+{
+   /* A configured panelist that is enabled but NOT runtime-usable (a bearer HTTP
+    * agent with no resolvable key) is dropped so it can't degrade the round; an
+    * ad-hoc model id that names no configured agent is left as-is. */
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof(acfg));
+   acfg.agent_count = 1;
+   acfg.agents[0].enabled = 1;
+   snprintf(acfg.agents[0].name, MAX_AGENT_NAME, "unkeyed");
+   snprintf(acfg.agents[0].auth_type, sizeof(acfg.agents[0].auth_type), "bearer"); /* needs a key */
+
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.ensemble_reference_count = 2;
+   snprintf(cfg.ensemble_reference_models[0], 128, "unkeyed");     /* configured + no key -> drop */
+   snprintf(cfg.ensemble_reference_models[1], 128, "adhoc-model"); /* not an agent -> kept */
+   snprintf(cfg.ensemble_aggregator, sizeof(cfg.ensemble_aggregator), "unkeyed");
+   ensemble_filter_panel_availability(&cfg, &acfg);
+   assert(cfg.ensemble_reference_count == 1);
+   assert(strcmp(cfg.ensemble_reference_models[0], "adhoc-model") == 0);
+   assert(strcmp(cfg.ensemble_aggregator, "adhoc-model") == 0); /* repointed off the dropped seat */
+   printf("  test_panel_filter_drops_unavailable: ok\n");
+}
+
 static void test_panel_persona_name_assignment(void)
 {
    config_t cfg;
@@ -1303,6 +1338,7 @@ int main(void)
    test_roundtable_review_brief_and_items_return();
    test_default_panel_excludes_claude_cli();
    test_panel_filter_drops_unauthorized_claude();
+   test_panel_filter_drops_unavailable();
    test_panel_persona_name_assignment();
    test_roundtable_review_assigns_personas();
    test_roundtable_aggregator_fallback_synthesizes();

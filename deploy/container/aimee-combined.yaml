@@ -40,10 +40,9 @@ aimee:
 # roster as the panel; a thin client pushes the per-agent keys per session.
 ensemble:
   enabled: true
-  reference_models:
-    - minimax
-    - mistral
-    - mimo-2.5
+  # No reference_models pinned: the panel is built DYNAMICALLY from the enabled +
+  # currently-available delegates (auto-seeded, then unkeyed/unhealthy ones are
+  # dropped). Pin a list here (or via a workflow) only to override that default.
 
 # --- kb: real semantic embeddings via the persistent embedder service ---
 # No embedding_command here on purpose: when it is unset the server embeds
