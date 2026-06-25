@@ -78,10 +78,17 @@ services:
       AIMEE_DB2_URL: postgresql://aimee:aimee@{{service.postgres.host}}:5432/aimee_shared
       # Embed/rerank against the aimee-llm (llama.cpp / Vulkan GPU) container on
       # the runtime bridge — NOT a bundled torch embedder. 10.100.0.1 is the
-      # bridge gateway; 8742 is the aimee-llm host-published gateway port. The kb
-      # autodetects the embedding dim from the gateway /health (2560 for the GPU
-      # 4B tier). Overridable via the config key below.
+      # bridge gateway; 8742 is the aimee-llm host-published gateway port. The dim
+      # is pinned via AIMEE_EMBEDDING_DIM below (the gateway /health reports no
+      # dim, so autodim can't detect it). Overridable via the config key below.
       AIMEE_EMBEDDER_URL: http://10.100.0.1:8742
+      # Pin the embedding dim to the GPU 4B tier's 2560. REQUIRED here: the
+      # aimee-llm gateway /health does not report a `dim`, so the embedder-autodim
+      # probe (embed-remote.py --dim) cannot detect it, and an unset dim defaults
+      # to 1024 (config_database.c / db2_init.c) — which would build the fresh
+      # pgvector schema at the wrong width and reject/truncate the 2560-dim
+      # vectors. AIMEE_EMBEDDING_DIM pins it (config_resolve_embedding_dim).
+      AIMEE_EMBEDDING_DIM: "2560"
       # Bind /v1 on 0.0.0.0 so the published :8741 is reachable from the
       # aimee-server plugin across the bridge.
       AIMEE_KB_HTTP_BIND: "1"
