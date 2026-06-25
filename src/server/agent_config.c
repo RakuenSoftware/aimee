@@ -7,6 +7,7 @@
 #include "model_registry.h"
 #include "platform_path.h"
 #include "provider_cli_adapter.h"
+#include "oauth_flow.h" /* oauth_token_store/get : vault-backed auto-refreshing codex token */
 #include "cJSON.h"
 #include "json_fluent.h"
 #include <ctype.h>
@@ -1532,6 +1533,170 @@ int agent_is_exec_role(const agent_t *agent, const char *role)
 
 /* --- Auth resolution --- */
 
+/* The codex CLI's public OAuth client + token endpoint, as carried verbatim in
+ * the codex access token's own `client_id`/`iss` claims (stable public values).
+ * Used to auto-refresh the codex bearer through aimee's vault-backed oauth store. */
+#define CODEX_OAUTH_STORE          "codex" /* aimee oauth-store client name (vault key) */
+#define CODEX_OAUTH_CLIENT_ID      "app_EMoamEEZ73f0CkXaXp7hrann"
+#define CODEX_OAUTH_TOKEN_ENDPOINT "https://auth.openai.com/oauth/token"
+
+/* Refresh the codex token this many seconds before its JWT `exp`. Overridable via
+ * AIMEE_CODEX_REFRESH_SKEW (set huge to force a refresh — used to live-verify). */
+static int codex_oauth_refresh_skew(void)
+{
+   const char *e = getenv("AIMEE_CODEX_REFRESH_SKEW");
+   if (e && e[0])
+   {
+      long v = atol(e);
+      if (v >= 0)
+         return (int)v;
+   }
+   return 3600; /* 1h */
+}
+
+/* Decode a JWT's `exp` (Unix seconds); 0 if unparseable. Base64url-decodes the
+ * payload (middle) segment and reads the exp number — no signature check (we only
+ * need expiry to schedule a refresh). */
+static long codex_jwt_exp(const char *jwt)
+{
+   if (!jwt || !jwt[0])
+      return 0;
+   const char *p1 = strchr(jwt, '.');
+   if (!p1)
+      return 0;
+   const char *seg = p1 + 1;
+   const char *p2 = strchr(seg, '.');
+   if (!p2 || p2 == seg)
+      return 0;
+   size_t seglen = (size_t)(p2 - seg);
+   if (seglen > 8192)
+      return 0;
+   /* base64url -> base64 + pad */
+   char b64[8200];
+   size_t j = 0;
+   for (size_t i = 0; i < seglen && j + 1 < sizeof(b64); i++)
+   {
+      char c = seg[i];
+      b64[j++] = (c == '-') ? '+' : (c == '_') ? '/' : c;
+   }
+   while ((j % 4) != 0 && j + 1 < sizeof(b64))
+      b64[j++] = '=';
+   b64[j] = '\0';
+   unsigned char dec[8200];
+   size_t dn = aimee_base64_decode(b64, dec, sizeof(dec) - 1);
+   if (dn == 0)
+      return 0;
+   dec[dn] = '\0';
+   cJSON *root = cJSON_Parse((const char *)dec);
+   long exp = 0;
+   if (root)
+   {
+      cJSON *e = cJSON_GetObjectItemCaseSensitive(root, "exp");
+      if (cJSON_IsNumber(e))
+         exp = (long)e->valuedouble;
+      cJSON_Delete(root);
+   }
+   return exp;
+}
+
+/* Read access_token + refresh_token from a codex auth.json (top-level keys or the
+ * `tokens.{}` object). Returns 0 only when BOTH are present (a refresh_token is
+ * required to manage the token in aimee's store). */
+static int codex_read_oauth_pair(const char *path, char *access, size_t an, char *refresh,
+                                 size_t rn)
+{
+   if (access && an)
+      access[0] = '\0';
+   if (refresh && rn)
+      refresh[0] = '\0';
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return -1;
+   fseek(f, 0, SEEK_END);
+   long sz = ftell(f);
+   if (sz <= 0 || sz > 1024 * 1024)
+   {
+      fclose(f);
+      return -1;
+   }
+   rewind(f);
+   char *data = malloc((size_t)sz + 1);
+   if (!data)
+   {
+      fclose(f);
+      return -1;
+   }
+   size_t nread = fread(data, 1, (size_t)sz, f);
+   fclose(f);
+   data[nread] = '\0';
+   cJSON *root = cJSON_Parse(data);
+   free(data);
+   if (!root)
+      return -1;
+   cJSON *at = cJSON_GetObjectItemCaseSensitive(root, "access_token");
+   cJSON *rt = cJSON_GetObjectItemCaseSensitive(root, "refresh_token");
+   cJSON *tokens = cJSON_GetObjectItemCaseSensitive(root, "tokens");
+   if (cJSON_IsObject(tokens))
+   {
+      if (!cJSON_IsString(at))
+         at = cJSON_GetObjectItemCaseSensitive(tokens, "access_token");
+      if (!cJSON_IsString(rt))
+         rt = cJSON_GetObjectItemCaseSensitive(tokens, "refresh_token");
+   }
+   int ok = 0;
+   if (cJSON_IsString(at) && at->valuestring[0] && cJSON_IsString(rt) && rt->valuestring[0])
+   {
+      snprintf(access, an, "%s", at->valuestring);
+      snprintf(refresh, rn, "%s", rt->valuestring);
+      ok = 1;
+   }
+   cJSON_Delete(root);
+   return ok ? 0 : -1;
+}
+
+/* Vault-backed, auto-refreshing codex bearer. On first use, bootstrap aimee's
+ * oauth store (server-sealed vault) from the codex CLI's auth.json; thereafter
+ * oauth_token_get() returns a token, refreshing via the stored refresh_token
+ * against OpenAI's token endpoint whenever it is within the skew of expiry —
+ * without ever rewriting the CLI's shared auth.json. Returns 0 + a bearer in
+ * |buf|; -1 to fall back to the legacy on-disk read. */
+static int codex_oauth_vault_token(char *buf, size_t len)
+{
+   for (int tries = 0; tries < 2; tries++)
+   {
+      if (oauth_token_get(CODEX_OAUTH_STORE, CODEX_OAUTH_CLIENT_ID, CODEX_OAUTH_TOKEN_ENDPOINT,
+                          codex_oauth_refresh_skew(), buf, len) == 0 &&
+          buf[0])
+         return 0;
+      if (tries > 0)
+         break; /* bootstrapped already and still no token -> give up */
+      /* Bootstrap (or re-bootstrap after a failed refresh) from the on-disk auth. */
+      char path[MAX_PATH_LEN], access[MAX_API_KEY_LEN] = "", refresh[1024] = "";
+      int got = 0;
+      snprintf(path, sizeof(path), "%s/codex-auth.json", config_default_dir());
+      if (codex_read_oauth_pair(path, access, sizeof(access), refresh, sizeof(refresh)) == 0)
+         got = 1;
+      const char *home = getenv("HOME");
+      if (!got && home && home[0])
+      {
+         snprintf(path, sizeof(path), "%s/.codex/auth.json", home);
+         if (codex_read_oauth_pair(path, access, sizeof(access), refresh, sizeof(refresh)) == 0)
+            got = 1;
+      }
+      if (!got)
+         return -1;
+      oauth_token_response_t resp;
+      memset(&resp, 0, sizeof(resp));
+      snprintf(resp.access_token, sizeof(resp.access_token), "%s", access);
+      snprintf(resp.refresh_token, sizeof(resp.refresh_token), "%s", refresh);
+      resp.expires_at = codex_jwt_exp(access); /* 0 = unknown (no proactive refresh) */
+      if (oauth_token_store(CODEX_OAUTH_STORE, &resp) != 0)
+         return -1;
+      /* loop: oauth_token_get now serves the vaulted token (refreshing if stale). */
+   }
+   return -1;
+}
+
 static int agent_read_codex_oauth_token_from_path(const char *path, char *token, size_t token_len)
 {
    if (!path || !path[0] || !token || token_len == 0)
@@ -1628,6 +1793,14 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
       }
       char token[MAX_API_KEY_LEN];
       if (agent_vault_get(agent->name, VAULT_CODEX_TOKEN_CRED, token, sizeof(token)))
+      {
+         snprintf(buf, buf_len, "Authorization: Bearer %s", token);
+         return 0;
+      }
+      /* Vault-backed, auto-refreshing token (bootstrapped from the codex auth.json):
+       * preferred over the raw on-disk read so an expired access token self-heals
+       * via the stored refresh_token instead of 401ing. */
+      if (codex_oauth_vault_token(token, sizeof(token)) == 0)
       {
          snprintf(buf, buf_len, "Authorization: Bearer %s", token);
          return 0;

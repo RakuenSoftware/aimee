@@ -23,8 +23,8 @@
 
 typedef struct
 {
-   char access_token[1024];
-   char refresh_token[512];
+   char access_token[4096]; /* JWT access tokens (e.g. codex ~2KB) exceed 1KB */
+   char refresh_token[1024];
    char token_type[32];
    long expires_in; /* seconds from now; 0 = unknown */
    long expires_at; /* Unix epoch; 0 = unknown */
