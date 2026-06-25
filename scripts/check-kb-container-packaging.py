@@ -42,10 +42,12 @@ REQUIRED_COMPOSE_PATTERNS = {
     "kb-port": r'"?8741:8741"?',
     "postgres-health": r"condition:\s+service_healthy",
     "kb-health": r"(?s)aimee-kb:.*healthcheck:.*http://127\.0\.0\.1:8741/v1/health",
-    # The persistent embedder service backs real semantic embeddings; the kb is
-    # pointed at it by env.
+    # The unified aimee-llm container backs real embeddings/reranking/synthesis;
+    # the kb is pointed at it by AIMEE_LLM_URL (no model runs in the kb). The
+    # legacy torch embedder is retained behind a profile for rollback.
+    "llm-service": r"(?m)^\s{2}aimee-llm:",
     "embedder-service": r"(?m)^\s{2}embedder:",
-    "embedder-url-env": r"AIMEE_EMBEDDER_URL:\s*http://embedder",
+    "llm-url-env": r"AIMEE_LLM_URL:\s*\$\{AIMEE_LLM_URL:-http://aimee-llm",
 }
 
 REQUIRED_DOCKERIGNORE_ENTRIES = {
@@ -156,8 +158,9 @@ def plant_test() -> int:
             "compose.yaml missing kb-port",
             "compose.yaml missing postgres-health",
             "compose.yaml missing kb-health",
+            "compose.yaml missing llm-service",
             "compose.yaml missing embedder-service",
-            "compose.yaml missing embedder-url-env",
+            "compose.yaml missing llm-url-env",
             "missing .dockerignore",
         }
         if not expected.issubset(set(found)):
@@ -201,6 +204,11 @@ def plant_test() -> int:
                     "    build:",
                     "      context: .",
                     "      dockerfile: Dockerfile.embedder",
+                    "    profiles: [\"legacy-embedder\"]",
+                    "  aimee-llm:",
+                    "    build:",
+                    "      context: .",
+                    "      dockerfile: Dockerfile.aimee-llm",
                     "  aimee-kb:",
                     "    build:",
                     "      context: .",
@@ -208,7 +216,7 @@ def plant_test() -> int:
                     "    environment:",
                     "      AIMEE_HOME: /var/lib/aimee",
                     "      AIMEE_DB2_URL: postgresql://aimee:aimee@postgres:5432/aimee_shared",
-                    "      AIMEE_EMBEDDER_URL: http://embedder:8080",
+                    "      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8080}",
                     "    ports:",
                     '      - "8741:8741"',
                     "    depends_on:",
