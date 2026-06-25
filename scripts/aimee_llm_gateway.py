@@ -42,6 +42,27 @@ EMBED_MODEL = os.environ.get("AIMEE_LLM_EMBED_MODEL", "Qwen3-Embedding")
 PORT = int(os.environ.get("AIMEE_LLM_PORT", "8080"))
 BATCH_CAP = int(os.environ.get("AIMEE_LLM_BATCH_CAP", "512"))
 RERANK_SEP = "</s>"
+
+# CI/dev STUB mode: serve deterministic embed/rerank/synth with NO upstream
+# llama-servers. The supervisor skips launching the per-role servers and the
+# image can be built without baking the multi-GB GGUFs (Dockerfile arg), so e2e
+# exercises the real kb -> gateway contract (and the /embed,/rerank,/v1/chat
+# shapes) cheaply. Vectors are deterministic per-input so retrieval is stable.
+STUB = os.environ.get("AIMEE_LLM_STUB", "") not in ("", "0", "false")
+STUB_DIM = int(os.environ.get("AIMEE_LLM_STUB_DIM", os.environ.get("EMBEDDER_STUB_DIM", "1024")))
+
+
+def _stub_vec(text):
+    """Deterministic, L2-normalised STUB_DIM vector seeded from the input text."""
+    import hashlib
+    seed = int.from_bytes(hashlib.sha256((text or "").encode("utf-8")).digest()[:8], "big") or 1
+    x = seed
+    vals = []
+    for _ in range(STUB_DIM):
+        x = (x * 6364136223846793005 + 1442695040888963407) & ((1 << 64) - 1)
+        vals.append((x >> 11) / float(1 << 53) * 2.0 - 1.0)
+    norm = sum(v * v for v in vals) ** 0.5 or 1.0
+    return [v / norm for v in vals]
 # Synth role: AIMEE_LLM_SYNTH_URL is the upstream OpenAI-compatible base; empty = no
 # synth configured (the role reports `gated`/unconfigured). Mode is informational here
 # (local = a baked llama-server; forward/external = an off-box upstream) — both just
@@ -252,11 +273,15 @@ def _rerank_head():
 
 
 def do_embed(text):
+    if STUB:
+        return _stub_vec(text)
     return _embeddings(EMBED_URL, text)
 
 
 def do_embed_batch(texts):
     validate_batch(texts)
+    if STUB:
+        return [_stub_vec(t) for t in texts]
     return _embeddings(EMBED_URL, list(texts)) if texts else []
 
 
@@ -266,6 +291,9 @@ def do_rerank(obj):
     pairs = parse_rerank_pairs(obj)
     if not pairs:
         return []
+    if STUB:
+        # Deterministic per-pair score (stable ordering) without the encoder/head.
+        return [sum(_stub_vec(f"{q}{RERANK_SEP}{c}")[:8]) for q, c in pairs]
     head = _rerank_head()
     texts = [f"{q}{RERANK_SEP}{c}" for q, c in pairs]
     vecs = _embeddings(RERANK_URL, texts)
@@ -287,6 +315,13 @@ def do_synth(body):
         raise GatewayError(
             400, "streaming_unsupported",
             "streaming is disabled in this release; set stream=false")
+    if STUB:
+        return {
+            "id": "stub", "object": "chat.completion", "model": "aimee-llm-stub",
+            "choices": [{"index": 0, "finish_reason": "stop",
+                         "message": {"role": "assistant", "content": "stub synthesis response"}}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 2, "total_tokens": 2},
+        }
     if not SYNTH_URL:
         raise GatewayError(503, "synth_unconfigured", "AIMEE_LLM_SYNTH_URL is not set")
     if not _synth_breaker.allow():
@@ -317,6 +352,8 @@ def role_state(base, configured=True):
 
 def role_states():
     """Per-role state for /health/{embed,rerank,synth}."""
+    if STUB:
+        return {"embed": "ready", "rerank": "ready", "synth": "ready"}
     return {
         "embed": role_state(EMBED_URL),
         "rerank": role_state(RERANK_URL, configured=bool(RERANK_HEAD_DIR)),

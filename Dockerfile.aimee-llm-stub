@@ -1,0 +1,22 @@
+# Lightweight STUB build of the aimee-llm container for CI / dev.
+#
+# The gateway serves DETERMINISTIC embed / rerank / synth (AIMEE_LLM_STUB=1) with
+# NO llama.cpp runtime and NO baked GGUFs — so e2e / local dev exercises the real
+# kb -> gateway contract (the /embed, /embed_batch, /rerank, /v1/chat/completions
+# shapes) cheaply, with no multi-GB model download or GPU. NOT for production
+# (responses are stub vectors/text); use Dockerfile.aimee-llm for the real tiers.
+#
+#   docker build -f Dockerfile.aimee-llm-stub -t aimee-llm:stub .
+FROM python:3.12-slim
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY scripts/aimee_llm_gateway.py scripts/aimee_llm_rerank_head.py /opt/aimee/
+COPY scripts/aimee-llm-supervisor.sh /opt/aimee/supervisor.sh
+RUN chmod +x /opt/aimee/supervisor.sh
+ENV AIMEE_LLM_PORT=8742 \
+    AIMEE_LLM_STUB=1 \
+    AIMEE_LLM_STUB_DIM=1024
+EXPOSE 8742
+HEALTHCHECK --interval=10s --timeout=5s --retries=5 --start-period=10s \
+    CMD curl -fsS http://127.0.0.1:8742/health >/dev/null || exit 1
+ENTRYPOINT ["/opt/aimee/supervisor.sh"]

@@ -17,15 +17,25 @@ start() { # name port extra-args...
   pids+=("$!")
 }
 
-# Embedder: one vector per input, no prompt-cache fragmentation (P2 flags).
-start embed 8081 -m /models/embed.gguf --embeddings --pooling "$POOL" \
-  --ctx-size 8192 -ub 512 -np 1 --cache-ram 0 --no-cache-idle-slots
-# Reranker ENCODER: CLS pooling + flash-attn; the gateway applies the Dense head.
-start rerank 8082 -m /models/rerank-encoder.gguf --embeddings --pooling cls -fa on
-# Synth: OpenAI-compatible /v1/chat/completions (grammar/JSON via --jinja).
-if [ -f /models/synth.gguf ]; then
-  start synth 8083 -m /models/synth.gguf --ctx-size 8192 --jinja
-fi
+# STUB mode (CI/dev): no GGUFs, no llama-servers — the gateway serves
+# deterministic embed/rerank/synth. Lets e2e exercise the kb->gateway contract
+# cheaply (and the image can be built without baking models).
+case "${AIMEE_LLM_STUB:-}" in
+  ""|0|false)
+    # Embedder: one vector per input, no prompt-cache fragmentation (P2 flags).
+    start embed 8081 -m /models/embed.gguf --embeddings --pooling "$POOL" \
+      --ctx-size 8192 -ub 512 -np 1 --cache-ram 0 --no-cache-idle-slots
+    # Reranker ENCODER: CLS pooling + flash-attn; the gateway applies the Dense head.
+    start rerank 8082 -m /models/rerank-encoder.gguf --embeddings --pooling cls -fa on
+    # Synth: OpenAI-compatible /v1/chat/completions (grammar/JSON via --jinja).
+    if [ -f /models/synth.gguf ]; then
+      start synth 8083 -m /models/synth.gguf --ctx-size 8192 --jinja
+    fi
+    ;;
+  *)
+    echo "aimee-llm: STUB mode — skipping llama-servers; gateway serves deterministic responses" >&2
+    ;;
+esac
 
 # Gateway (foreground-ish; backgrounded so we can reap any child exit).
 echo "aimee-llm: starting gateway on :${AIMEE_LLM_PORT:-8080}" >&2
