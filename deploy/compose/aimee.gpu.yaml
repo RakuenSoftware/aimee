@@ -12,6 +12,13 @@ services:
     image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:gpu}
     environment:
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-99}
+      # gemma-4-12b trains to 256K; the supervisor's default cap is a 16GB-safe 32K.
+      # 128K is safe on the .254 card (RADV GFX1100 / 7900 XTX, 24560 MiB confirmed):
+      # ~6.6GB Q4_K_M model + ~1.5GB embed/rerank + KV cache. gemma-4 uses
+      # sliding-window attention (5 local layers windowed to 1024 : 1 global), so the
+      # 128K KV is dominated by the few global layers (~2-3GB), not all-layers-x-128K —
+      # well under 24GB. 256K would still fit with KV-cache quantization if ever needed.
+      AIMEE_LLM_SYNTH_CTX: ${AIMEE_LLM_SYNTH_CTX:-131072}
     devices:
       - "/dev/dri:/dev/dri"
 

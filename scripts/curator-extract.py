@@ -15,6 +15,35 @@ import sys
 import textwrap
 
 
+# Backstop cap on extraction input (a symbol body, doc chunk, or scene) sent to
+# the LLM. The primary fix is the synth server's context window (see
+# aimee-llm-supervisor.sh: AIMEE_LLM_SYNTH_CTX), but a pathological input can still
+# exceed any context — and overrunning it makes the server return HTTP 400 and the
+# WHOLE extraction fail ("sidecar exited 256"), so a large file would index
+# nothing. Cap here so oversized units degrade to a truncated summary instead of
+# failing. A summary needs the shape (signature + entry + exit), not every line,
+# so keep head+tail and elide the middle. Default ~7K tokens (fits the 32K synth
+# default with room for prompt + output); raise via env on big-context deployments.
+MAX_INPUT_CHARS = int(os.environ.get("CURATOR_MAX_INPUT_CHARS", "24000"))
+
+
+def _cap(text: str) -> str:
+    if not text or len(text) <= MAX_INPUT_CHARS:
+        return text
+    dropped = len(text) - MAX_INPUT_CHARS
+    head = (MAX_INPUT_CHARS * 3) // 4
+    tail = MAX_INPUT_CHARS - head
+    # Surface truncation on stderr (stdout carries the JSON artifact) so the kb
+    # logs show when a unit was summarized from a truncated body — i.e. when the
+    # corpus is being silently under-summarized vs. cleanly indexed.
+    sys.stderr.write(
+        f"curator-extract: capped input {len(text)}->{MAX_INPUT_CHARS} chars "
+        f"({dropped} elided); raise CURATOR_MAX_INPUT_CHARS on a big-context deploy\n"
+    )
+    sys.stderr.flush()
+    return f"{text[:head]}\n\n/* ... {dropped} chars elided to fit the model context ... */\n\n{text[-tail:]}"
+
+
 def emit_error(msg: str) -> None:
     json.dump({"version": 1, "status": "error", "error": msg}, sys.stdout)
     sys.stdout.write("\n")
@@ -25,7 +54,7 @@ def emit_error(msg: str) -> None:
 def build_doc_prompt(inp: dict) -> str:
     file_path = inp.get("file_path", "")
     heading   = inp.get("heading_path", "") or "(top level)"
-    content   = inp.get("content", "")
+    content   = _cap(inp.get("content", ""))
     return textwrap.dedent(f"""
         You are a knowledge extraction assistant. Extract structured knowledge from the
         document chunk below and return ONLY a valid JSON object — no markdown fences.
@@ -90,7 +119,7 @@ def build_code_prompt(inp: dict) -> str:
     symbol    = inp.get("symbol", "")
     kind      = inp.get("kind", "function")
     line      = inp.get("line", 0)
-    body      = inp.get("body", "")
+    body      = _cap(inp.get("body", ""))
     return textwrap.dedent(f"""
         You are a code analysis assistant. Analyze the {kind} below and return ONLY
         a valid JSON object — no markdown fences.
@@ -126,7 +155,7 @@ def build_story_prompt(inp: dict) -> str:
     KB entity/edge/fact graph — no new schema, only a domain-specific prompt."""
     file_path = inp.get("file_path", "")
     heading   = inp.get("heading_path", "") or "(top level)"
-    content   = inp.get("content", "")
+    content   = _cap(inp.get("content", ""))
     return textwrap.dedent(f"""
         You are a story-continuity analyst for a work of fiction. Extract the
         story-world state established by the scene below and return ONLY a valid

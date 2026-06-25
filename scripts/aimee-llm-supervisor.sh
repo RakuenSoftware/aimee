@@ -8,6 +8,14 @@ set -u
 LLAMA=/opt/llama/llama-server
 NGL="${AIMEE_LLM_NGL:-0}"
 POOL="${AIMEE_LLM_EMBED_POOLING:-last}"
+# Synth context window. The synth GGUF (gemma-4-12b) trains to 256K, but a
+# hardcoded --ctx-size 8192 wasted that: large code symbols / doc chunks overran
+# 8K and the server returned HTTP 400, failing extraction entirely. Default to a
+# 16GB-VRAM-safe 32K (4x the old cap, covers real source files); raise it on
+# bigger cards via AIMEE_LLM_SYNTH_CTX (e.g. 131072 for 128K). KV cache scales
+# with context, so size it to the card. Embed/rerank inputs are small — they keep
+# the 8K default.
+SYNTH_CTX="${AIMEE_LLM_SYNTH_CTX:-32768}"
 pids=()
 
 start() { # name port extra-args...
@@ -29,7 +37,7 @@ case "${AIMEE_LLM_STUB:-}" in
     start rerank 8082 -m /models/rerank-encoder.gguf --embeddings --pooling cls -fa on
     # Synth: OpenAI-compatible /v1/chat/completions (grammar/JSON via --jinja).
     if [ -f /models/synth.gguf ]; then
-      start synth 8083 -m /models/synth.gguf --ctx-size 8192 --jinja
+      start synth 8083 -m /models/synth.gguf --ctx-size "$SYNTH_CTX" --jinja
     fi
     ;;
   *)
