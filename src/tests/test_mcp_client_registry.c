@@ -501,12 +501,12 @@ static int profile_core_has(const char *n, const char *const *set)
 static void test_tool_profile_filter(void)
 {
    /* Mirror of MCP_CORE_TOOLS in mcp_tools.c — kept in sync intentionally. */
-   static const char *const core[] = {
-       "get_help",        "search_docs",    "search_memory",  "memory_recall",
-       "get_identity",    "find_symbol",    "ast_grep_search", "git_status",
-       "git_commit",      "git_diff_summary", "git_branch",   "git_pr",
-       "delegate",        "ensemble_review", "ask_user",      "send_message",
-       "create_note",     NULL};
+   static const char *const core[] = {"get_help",         "search_docs",     "search_memory",
+                                      "memory_recall",    "get_identity",    "find_symbol",
+                                      "ast_grep_search",  "git_status",      "git_commit",
+                                      "git_diff_summary", "git_branch",      "git_pr",
+                                      "delegate",         "ensemble_review", "ask_user",
+                                      "send_message",     "create_note",     NULL};
    int expect = 0;
    for (int i = 0; core[i]; i++)
       expect++;

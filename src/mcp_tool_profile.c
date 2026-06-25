@@ -16,14 +16,23 @@
  * list short and edit it deliberately; it is the floor of what every lean client
  * sees. test_tool_profile_filter mirrors this list and must be kept in sync. */
 static const char *const MCP_CORE_TOOLS[] = {
-    "get_help",      "search_docs",                                /* orient / discover */
-    "search_memory", "memory_recall",     "get_identity",          /* grounding */
-    "find_symbol",   "ast_grep_search",                            /* code intel */
-    "git_status",    "git_commit",        "git_diff_summary",      /* common git */
-    "git_branch",    "git_pr",
-    "delegate",      "ensemble_review",                            /* multi-agent */
-    "ask_user",      "send_message",                               /* interaction */
-    "create_note",                                                 /* capture */
+    "get_help",
+    "search_docs", /* orient / discover */
+    "search_memory",
+    "memory_recall",
+    "get_identity", /* grounding */
+    "find_symbol",
+    "ast_grep_search", /* code intel */
+    "git_status",
+    "git_commit",
+    "git_diff_summary", /* common git */
+    "git_branch",
+    "git_pr",
+    "delegate",
+    "ensemble_review", /* multi-agent */
+    "ask_user",
+    "send_message", /* interaction */
+    "create_note",  /* capture */
     NULL,
 };
 
