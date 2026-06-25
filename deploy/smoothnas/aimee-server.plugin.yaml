@@ -33,8 +33,8 @@ services:
       # this file). Without USER/PASSWORD the login page serves but no one can
       # sign in. Set AIMEE_WEBCHAT_ENABLED=0 to opt this deploy out entirely.
       AIMEE_WEBCHAT_ENABLED: "1"
-      # AIMEE_WEBCHAT_USER: aimee
-      # AIMEE_WEBCHAT_PASSWORD: "<set-at-deploy-time-not-in-git>"
+      # Webchat PAM login (USER + PASSWORD) is provided at deploy time via the
+      # plugin config block below — never committed here.
     volumes:
       - name: home
         mode: tier-bound
@@ -58,3 +58,30 @@ services:
         protocol: tcp
         expose: false
         hostExpose: true
+    config:
+      # Operator-set at deploy time (kept out of git). The webchat browser UI
+      # authenticates via PAM against this user/password; set BOTH to enable
+      # sign-in. Leave blank to serve the login page with no account.
+      - key: AIMEE_WEBCHAT_USER
+        type: string
+        label: Webchat login user
+        default: ""
+        description: PAM login username for the browser UI (set with a password).
+      - key: AIMEE_WEBCHAT_PASSWORD
+        type: string
+        label: Webchat login password
+        default: ""
+        secret: true
+        description: PAM login password for the browser UI (set alongside the user).
+      # Optional: point the kb synthesis / curator passes at an OpenAI-compatible
+      # endpoint. Blank = disabled.
+      - key: LLM_ENDPOINT
+        type: string
+        label: LLM endpoint (optional)
+        default: ""
+        description: Optional OpenAI-compatible endpoint for kb synthesis/curator.
+      - key: LLM_MODEL
+        type: string
+        label: LLM model (optional)
+        default: ""
+        description: Optional model name to request from the LLM endpoint.
