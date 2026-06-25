@@ -21,4 +21,9 @@ int mcp_filter_tools_for_profile(cJSON *tools, const char *profile);
  * profile), keeping a lean presentation lossless. */
 void mcp_add_discovery_tools(cJSON *tools);
 
+/* Append the P3 extended read-only tools (roadmap/task/index/memory-explain) to
+ * a tools list. Definitions live in mcp_tools_extended.c; the matching content
+ * handlers live in server_mcp_call_table.inc. Called by mcp_build_tools_list. */
+void mcp_add_extended_tools(cJSON *tools);
+
 #endif /* DEC_MCP_TOOLS_H */

@@ -64,6 +64,7 @@ cJSON *mcp_build_tools_list(void)
 {
    cJSON *tools = cJSON_CreateArray();
    mcp_add_discovery_tools(tools); /* find_tools / describe_tool (P2) */
+   mcp_add_extended_tools(tools);  /* roadmap/task/index/memory-explain (P3) */
    {
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");

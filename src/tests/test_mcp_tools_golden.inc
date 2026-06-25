@@ -2,7 +2,7 @@
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 97
+#define MCP_TOOLS_GOLDEN_COUNT 103
 #define MCP_TOOLS_GOLDEN \
    "ask_user {choices,question} req:question\n" \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n" \
@@ -49,6 +49,8 @@
    "git_status {} req:\n" \
    "git_tag {action,message,name,ref} req:\n" \
    "git_verify {action,async,base,job_id,path} req:\n" \
+   "index_find_callers {project,symbol} req:symbol\n" \
+   "index_structure {file_path,project} req:file_path\n" \
    "job_start {max_concurrent,plan_id} req:plan_id\n" \
    "job_status {job_id} req:job_id\n" \
    "kill_background_process {id} req:id\n" \
@@ -67,6 +69,7 @@
    "lsp_references {col,file,line,workspace} req:col,file,line\n" \
    "memory_alerts {since} req:\n" \
    "memory_briefing {limit_tokens} req:\n" \
+   "memory_explain_match {memory_id,query} req:memory_id,query\n" \
    "memory_get {handle,id} req:\n" \
    "memory_maintain {dry_run,force,modes} req:\n" \
    "memory_recall {limit_tokens,session_start,task_hint} req:\n" \
@@ -82,6 +85,8 @@
    "preview_blast_radius {paths,project} req:paths,project\n" \
    "record_attempt {approach,lesson,outcome,task_context} req:approach,outcome\n" \
    "resolve_epistemic_directive {id,note,resolution_memory_id,suppress} req:id\n" \
+   "roadmap_list {} req:\n" \
+   "roadmap_show {roadmap_id} req:roadmap_id\n" \
    "rules_list {} req:\n" \
    "rules_propose {reason,text} req:text\n" \
    "run_background_process {command,cwd} req:command\n" \
@@ -100,4 +105,5 @@
    "session_start {assignments,channel,template} req:assignments,template\n" \
    "session_status {id} req:id\n" \
    "skill_manage {absorbed_into,action,content,cwd,file_path,name,new_string,old_string,replace_all} req:action,name\n" \
-   "store_workflow {project,rule,signal_type} req:rule,signal_type\n"
+   "store_workflow {project,rule,signal_type} req:rule,signal_type\n" \
+   "task_list {limit,session_id,state} req:\n"
