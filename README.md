@@ -187,6 +187,7 @@ aimee status
 |----------|-------------|
 | [Quickstart](docs/QUICKSTART.md) | Run the combined server in Docker, then install the Linux/Windows/macOS thin client. |
 | [How aimee learns](docs/KNOWLEDGE.md) | The knowledge base, self-learning pipeline, cross-domain synthesis, and delegation economics. |
+| [kb LLM backends](docs/KB_LLM_BACKENDS.md) | Pointing aimee-kb at its embedding/reranking/synthesis backend (CPU/GPU `aimee-llm` container or external), the config surface, and tiers/dims. |
 | [Manual](MANUAL.md) | Full user reference: install, config, command contract, feature guides. |
 | [Architecture](docs/ARCHITECTURE.md) | Processes, storage/trust boundaries, layering, request lifecycles. |
 | [Technical Reference](src/README.md) | Code internals, module map, server internals, RPC/HTTP surfaces, build system, and deployment/operations. |

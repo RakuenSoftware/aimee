@@ -11,8 +11,11 @@ Contract (platform_exec_pipe in src/memory_core_scope_embed.inc):
   stdout: JSON float array  [0.123, -0.456, ...]  (384-dim, L2-normalised)
   exit 0 on success; non-zero on error (C caller logs a warning and skips)
 
-Config (env):
-  AIMEE_EMBEDDER_URL  base URL of embedder-server (default http://embedder:8080)
+Config (env), in precedence order:
+  AIMEE_EMBEDDER_URL  base URL of the embedder service (pins the embedder)
+  AIMEE_LLM_URL       base URL of the unified aimee-llm container (one knob for
+                      embed + rerank + synth); used when AIMEE_EMBEDDER_URL is unset
+  (fallback)          http://embedder:8080 (legacy compose embedder service)
 
 Usage:
   embedding_command: "python3 /opt/aimee/scripts/embed-remote.py"
@@ -24,7 +27,11 @@ import sys
 import urllib.error
 import urllib.request
 
-ENDPOINT = os.environ.get("AIMEE_EMBEDDER_URL", "http://embedder:8080").rstrip("/")
+ENDPOINT = (
+    os.environ.get("AIMEE_EMBEDDER_URL")
+    or os.environ.get("AIMEE_LLM_URL")
+    or "http://embedder:8080"
+).rstrip("/")
 TIMEOUT = int(os.environ.get("AIMEE_EMBEDDER_TIMEOUT", "30"))
 
 

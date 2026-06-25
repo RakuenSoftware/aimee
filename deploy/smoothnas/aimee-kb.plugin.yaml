@@ -76,18 +76,18 @@ services:
         condition: service_healthy
     env:
       AIMEE_DB2_URL: postgresql://aimee:aimee@{{service.postgres.host}}:5432/aimee_shared
-      # Embed/rerank against the aimee-llm (llama.cpp / Vulkan GPU) container on
-      # the runtime bridge — NOT a bundled torch embedder. 10.100.0.1 is the
-      # bridge gateway; 8742 is the aimee-llm host-published gateway port. The dim
-      # is pinned via AIMEE_EMBEDDING_DIM below (the gateway /health reports no
-      # dim, so autodim can't detect it). Overridable via the config key below.
-      AIMEE_EMBEDDER_URL: http://10.100.0.1:8742
-      # Pin the embedding dim to the GPU 4B tier's 2560. REQUIRED here: the
-      # aimee-llm gateway /health does not report a `dim`, so the embedder-autodim
-      # probe (embed-remote.py --dim) cannot detect it, and an unset dim defaults
-      # to 1024 (config_database.c / db2_init.c) — which would build the fresh
-      # pgvector schema at the wrong width and reject/truncate the 2560-dim
-      # vectors. AIMEE_EMBEDDING_DIM pins it (config_resolve_embedding_dim).
+      # ONE knob: point the kb at a unified aimee-llm container and it drives
+      # embedding (/embed), reranking (/rerank) AND synthesis (curator Tier-A +
+      # Tier-B, at {url}/v1). The kb runs NO model itself — this is just the URL it
+      # calls. 10.100.0.1:8742 is the GPU aimee-llm on the runtime bridge here.
+      #   - Pin only the embedder or reranker elsewhere with AIMEE_EMBEDDER_URL /
+      #     AIMEE_RERANKER_URL (they take precedence over AIMEE_LLM_URL).
+      #   - The gateway runs auth-off (empty AIMEE_LLM_AUTH_TOKEN) — the kb embed
+      #     path sends no bearer.
+      AIMEE_LLM_URL: http://10.100.0.1:8742
+      # Embedding dim is explicit. Default (unset) = 1024 (the CPU / 0.6B tier).
+      # This deploy uses the GPU 4B tier → set 2560. Changing it against a
+      # populated kb is a drop-and-rebuild re-embed (kb_meta drift guard).
       AIMEE_EMBEDDING_DIM: "2560"
       # Bind /v1 on 0.0.0.0 so the published :8741 is reachable from the
       # aimee-server plugin across the bridge.
@@ -112,12 +112,33 @@ services:
       retries: 3
       startPeriod: 30s
     config:
-      - key: AIMEE_EMBEDDER_URL
+      - key: AIMEE_LLM_URL
         type: string
-        label: Embedder/rerank URL (aimee-llm gateway)
+        label: LLM container URL (embed + rerank + synth)
         default: http://10.100.0.1:8742
         description: >-
-          The aimee-llm (llama.cpp / Vulkan) gateway that serves /embed,
-          /embed_batch and /rerank. Defaults to the GPU container on the runtime
-          bridge. The gateway must run with auth disabled (empty
-          AIMEE_LLM_AUTH_TOKEN) because the kb embed path sends no bearer.
+          One knob. The unified aimee-llm container the kb calls for embedding,
+          reranking and synthesis (Tier-A + Tier-B). CPU tier = Tier-A synth +
+          1024-dim embed; GPU tier = Tier-A+B synth + higher-dim embed (set
+          AIMEE_EMBEDDING_DIM=2560). Must run auth-off (the kb sends no bearer).
+      - key: AIMEE_EMBEDDER_URL
+        type: string
+        label: Embedder URL (override)
+        default: ""
+        description: >-
+          Optional. Pin the embedder (/embed) at a specific endpoint, overriding
+          AIMEE_LLM_URL for embedding only.
+      - key: AIMEE_RERANKER_URL
+        type: string
+        label: Reranker URL (override)
+        default: ""
+        description: >-
+          Optional. Pin the reranker (/rerank) at a specific endpoint, overriding
+          AIMEE_EMBEDDER_URL / AIMEE_LLM_URL for reranking only.
+      - key: AIMEE_EMBEDDING_DIM
+        type: string
+        label: Embedding dimension
+        default: ""
+        description: >-
+          Embedding vector dim. Blank = 1024 (CPU / 0.6B tier). Set 2560 for the
+          GPU / 4B tier. Changing it against a populated kb forces a re-embed.

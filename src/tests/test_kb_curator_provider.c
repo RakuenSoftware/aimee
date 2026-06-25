@@ -13,6 +13,8 @@ static void clear_llm_env(void)
    unsetenv("LLM_ENDPOINT");
    unsetenv("LLM_MODEL");
    unsetenv("LLM_API_KEY");
+   unsetenv("AIMEE_LLM_URL");
+   unsetenv("AIMEE_LLM_MODEL");
 }
 
 static void test_tier_classification(void)
@@ -130,6 +132,53 @@ static void test_env_bridge(void)
    printf("kb_curator_provider: env bridge (Tier-A only; Tier-B needs config) ok\n");
 }
 
+/* AIMEE_LLM_URL — the single "capable container" knob — drives BOTH tiers via
+ * {AIMEE_LLM_URL}/v1, deriving the chat endpoint + a default model (keyless). It
+ * is the only env fallback Tier-B accepts. A config provider still wins. */
+static void test_aimee_llm_url(void)
+{
+   clear_llm_env();
+   config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   setenv("AIMEE_LLM_URL", "http://10.100.0.1:8742", 1);
+
+   provider_def_t a, b;
+   /* Tier-A derives {url}/v1 + default model, keyless. */
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
+   assert(strcmp(a.base_url, "http://10.100.0.1:8742/v1") == 0);
+   assert(strcmp(a.model, "aimee-synth") == 0);
+   assert(a.api_key == NULL); /* keyless container => no bearer */
+   /* Tier-B also resolves to the same capable container (the one env fallback
+    * Tier-B accepts). */
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_SYNTHESIZE, &b) == 1);
+   assert(strcmp(b.base_url, "http://10.100.0.1:8742/v1") == 0);
+   assert(strcmp(b.model, "aimee-synth") == 0);
+
+   /* Trailing slash and an already-/v1 URL both normalize to exactly one /v1. */
+   setenv("AIMEE_LLM_URL", "http://host:8742/", 1);
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_JUDGE, &b) == 1);
+   assert(strcmp(b.base_url, "http://host:8742/v1") == 0);
+   setenv("AIMEE_LLM_URL", "http://host:8742/v1", 1);
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_JUDGE, &b) == 1);
+   assert(strcmp(b.base_url, "http://host:8742/v1") == 0);
+
+   /* AIMEE_LLM_MODEL overrides the default model label. */
+   setenv("AIMEE_LLM_URL", "http://host:8742", 1);
+   setenv("AIMEE_LLM_MODEL", "gemma-4-12b", 1);
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
+   assert(strcmp(a.model, "gemma-4-12b") == 0);
+
+   /* A config provider still wins over AIMEE_LLM_URL. */
+   snprintf(cfg.kb_curator_provider_base_url, sizeof(cfg.kb_curator_provider_base_url),
+            "http://pinned:9000/v1");
+   snprintf(cfg.kb_curator_provider_model, sizeof(cfg.kb_curator_provider_model), "pinned");
+   assert(kb_curator_provider_for_stage(&cfg, KB_CURATOR_STAGE_EXTRACT_DOCS, &a) == 1);
+   assert(strcmp(a.base_url, "http://pinned:9000/v1") == 0);
+
+   clear_llm_env();
+   printf("kb_curator_provider: AIMEE_LLM_URL drives both tiers ok\n");
+}
+
 int main(void)
 {
    clear_llm_env();
@@ -138,6 +187,7 @@ int main(void)
    test_tier_a_resolves();
    test_tier_b_resolves();
    test_env_bridge();
+   test_aimee_llm_url();
    printf("kb_curator_provider: all tests passed\n");
    return 0;
 }

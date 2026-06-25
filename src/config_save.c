@@ -1144,6 +1144,12 @@ const char *config_embedding_command(const config_t *cfg, const char *requested)
    const char *env = getenv("AIMEE_EMBEDDER_URL");
    if (env && env[0])
       return env;
+   /* AIMEE_LLM_URL: the single unified-container knob also drives embedding (the
+    * same aimee-llm container serves /embed). AIMEE_EMBEDDER_URL takes precedence
+    * when an operator pins the embedder somewhere else. */
+   env = getenv("AIMEE_LLM_URL");
+   if (env && env[0])
+      return env;
    return "builtin";
 }
 

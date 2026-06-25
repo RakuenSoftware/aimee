@@ -36,11 +36,17 @@ RUN apt-get update \
 
 ENV AIMEE_HOME=/var/lib/aimee
 ENV AIMEE_DB2_URL=postgresql://aimee:aimee@postgres:5432/aimee_shared
-# Defaults; compose overrides. The embedder service backs embeddings; point
-# LLM_ENDPOINT at an OpenAI-compatible model (e.g. the llama.cpp `llm` service)
-# to enable the synthesis / curator passes.
-ENV AIMEE_EMBEDDER_URL=http://embedder:8080
-ENV LLM_ENDPOINT=http://llm:8080/v1
+# No baked embedder/LLM endpoint defaults. The kb runs NO model runtime; it calls
+# an external aimee-llm container (CPU/GPU) or endpoint. Point it with ONE of:
+#   AIMEE_LLM_URL       unified container -> embed + rerank + synth (one knob)
+#   AIMEE_EMBEDDER_URL  pin the embedder (/embed) independently
+#   AIMEE_RERANKER_URL  pin the reranker (/rerank) independently
+#   LLM_ENDPOINT        Tier-A synth only (small-model interface)
+# Unset, embeddings fall back to the 384-dim builtin (test/shim only). The deploy
+# unit (compose / smoothnas plugin) sets these and brings up a default CPU
+# aimee-llm sibling when nothing is configured. (Old combined leftovers
+# AIMEE_EMBEDDER_URL=embedder:8080 / LLM_ENDPOINT=llm:8080 were removed: on a
+# split deploy they silently pointed at non-existent services.)
 # Bind the /v1 HTTP API on 0.0.0.0 (not the 127.0.0.1 default), so the published
 # port and container-IP access reach it from outside the container.
 ENV AIMEE_KB_HTTP_BIND=1

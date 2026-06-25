@@ -18,8 +18,13 @@ Contract:
   stdout: JSON [score0, score1, ...]   (same length/order)
   exit 0 on success; non-zero on error (C caller logs + falls back).
 
-Config (env):
-  AIMEE_EMBEDDER_URL  base URL of embedder-server (default http://embedder:8080)
+Config (env), in precedence order:
+  AIMEE_RERANKER_URL  base URL of the reranker service (pins rerank independently
+                      of the embedder)
+  AIMEE_EMBEDDER_URL  base URL of the embedder service (rerank shares it by default)
+  AIMEE_LLM_URL       base URL of the unified aimee-llm container (one knob for
+                      embed + rerank + synth)
+  (fallback)          http://embedder:8080 (legacy compose embedder service)
   AIMEE_RERANK_TIMEOUT  request timeout seconds (default 30)
 
 Usage:
@@ -31,7 +36,12 @@ import sys
 import urllib.error
 import urllib.request
 
-ENDPOINT = os.environ.get("AIMEE_EMBEDDER_URL", "http://embedder:8080").rstrip("/")
+ENDPOINT = (
+    os.environ.get("AIMEE_RERANKER_URL")
+    or os.environ.get("AIMEE_EMBEDDER_URL")
+    or os.environ.get("AIMEE_LLM_URL")
+    or "http://embedder:8080"
+).rstrip("/")
 TIMEOUT = int(os.environ.get("AIMEE_RERANK_TIMEOUT", "30"))
 
 
