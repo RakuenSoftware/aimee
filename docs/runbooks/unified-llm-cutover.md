@@ -70,9 +70,14 @@ untouched). Set the kb's `embedding_model` to the new identity (activates the P1
 `embedding_dim` to the tier's dim (2560 for the 4B GPU tier). **Verify the URL actually
 serves the named model before re-embedding** — a misrouted `AIMEE_EMBEDDER_URL` (still
 pointing at the old embedder) would silently embed under the new identity and the guard
-would not catch it (it checks identity-vs-corpus, not URL-vs-identity). `AIMEE_LLM_AUTH_TOKEN`
-comes from the secret store (vault / Docker secret / `.gitignore`d per-host `.env`), **never
-a checked-in plaintext compose value**; document its rotation alongside the deploy.
+would not catch it (it checks identity-vs-corpus, not URL-vs-identity). **Auth on the embed
+path:** the kb embeds/reranks with NO bearer (`memory_embed_http_post` sends a NULL auth
+header), so when this gateway backs `AIMEE_EMBEDDER_URL` it MUST run **auth-off** — leave
+`AIMEE_LLM_AUTH_TOKEN` empty/unset. The gateway treats an empty token as "auth disabled,"
+acceptable here because it is `expose:false` (internal bridge only; deployment network is the
+boundary). Only set `AIMEE_LLM_AUTH_TOKEN` when the gateway serves *only* bearer-capable
+callers (e.g. curator `tier_b` synth); if so it comes from the secret store (vault / Docker
+secret / `.gitignore`d per-host `.env`), **never a checked-in plaintext value**.
 
 ## 4. Corpus re-embed (controlled drop-and-rebuild — the `maintenance` window)
 

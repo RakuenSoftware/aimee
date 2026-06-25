@@ -46,10 +46,22 @@ services:
       # Multi-GPU disambiguation only (single-GPU hosts need none): pin RADV to a
       # specific adapter by PCI/vendor id rather than a fragile device-node path.
       # AIMEE_LLM_VK_DEVICE / MESA_VK_DEVICE_SELECT: "1002:744c"
-      # The gateway requires a bearer token. Provide it via the plugin's env
-      # override at deploy time from the secret store (vault / Docker secret /
-      # .gitignore'd per-host .env) — NEVER a checked-in plaintext value. Document
-      # its rotation alongside the deploy (runbook §3).
+      # Bearer auth. When a token is set the gateway requires `Authorization:
+      # Bearer <token>` on every request (401 otherwise); an EMPTY/unset token
+      # disables auth ("deployment network is the boundary" — fine here because
+      # the gateway is expose:false, reachable only on the internal bridge).
+      #
+      # IMPORTANT for the aimee-kb embed path: the kb embeds/reranks against this
+      # gateway with NO bearer (memory_embed_http_post sends a NULL auth header),
+      # so when this container backs aimee-kb's AIMEE_EMBEDDER_URL it MUST run
+      # auth-off — leave AIMEE_LLM_AUTH_TOKEN unset/empty. Only set a token if the
+      # gateway is used solely by bearer-capable callers (e.g. synth via the
+      # curator tier_b config, which can carry one). If you need both, run two
+      # gateways or add an embedder-bearer to the kb first.
+      #
+      # If you do set one, provide it via the plugin's env override at deploy time
+      # from the secret store (vault / Docker secret / .gitignore'd per-host .env)
+      # — NEVER a checked-in plaintext value. Document its rotation (runbook §3).
       # AIMEE_LLM_AUTH_TOKEN: "<set-at-deploy-time-not-in-git>"
     ports:
       # The embed/rerank/synth gateway. hostExpose so the aimee-kb plugin can reach

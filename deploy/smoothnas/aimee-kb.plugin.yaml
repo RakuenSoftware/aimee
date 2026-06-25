@@ -1,0 +1,116 @@
+# aimee-kb — the shared/vector knowledge base (DB2 + pgvector), standalone.
+#
+# This is the kb half of the split deployment: the aimee-server plugin reaches
+# it over the runtime bridge at AIMEE_KB_API_URL=http://10.100.0.1:8741, and it
+# in turn embeds/reranks against the unified **aimee-llm** (llama.cpp / Vulkan)
+# container — NOT a bundled torch embedder. The kb image already defaults to
+# `--http-port=8741` (Dockerfile CMD) + EXPOSE 8741, so no command override is
+# needed; AIMEE_KB_HTTP_BIND=1 makes it bind 0.0.0.0 so the published port is
+# reachable across the bridge.
+#
+# Embedder wiring (the point of this manifest): AIMEE_EMBEDDER_URL points at the
+# aimee-llm gateway at http://10.100.0.1:8742 (the GPU 7900 XTX tier on .254 —
+# Qwen3-Embedding-4B, 2560-dim). The gateway preserves the /embed + /embed_batch
+# + /rerank contract, so the baked embed-remote.py / in-process http embedder is
+# untouched. The kb sends NO bearer on the embed path (memory_embed_http_post
+# passes a NULL auth header), so the aimee-llm gateway MUST run with auth
+# disabled (AIMEE_LLM_AUTH_TOKEN empty) on the internal-only bridge — which is
+# the gateway's documented "deployment network is the boundary" posture
+# (expose:false, bridge-only).
+#
+# Images:
+#   ghcr.io/rakuensoftware/aimee-kb     (kb /v1 on :8741)
+#   pgvector/pgvector:pg17              (Postgres, public)
+apiVersion: smoothnas.io/v1
+kind: Plugin
+metadata:
+  name: aimee-kb
+  version: 0.2.57
+  description: >-
+    aimee knowledge base — DB2 + pgvector shared/vector memory, served on /v1
+    (:8741). Bundles its own pgvector Postgres; embeds + reranks against the
+    external aimee-llm (llama.cpp / Vulkan GPU) container via AIMEE_EMBEDDER_URL,
+    not a torch embedder. The aimee-server plugin points AIMEE_KB_API_URL here.
+  vendor: RakuenSoftware
+  homepage: https://github.com/RakuenSoftware/aimee
+profiles:
+  - default-limits
+  # aimee-stack = the 64 MB worker-thread stack rlimit. The kb entrypoint also
+  # raises it best-effort (ulimit -s), but keep the profile as belt-and-suspenders
+  # for runtimes that forbid an in-container raise.
+  - aimee-stack
+services:
+  - name: postgres
+    artifact:
+      type: oci-image
+      image: pgvector/pgvector:pg17
+    container:
+      restartPolicy: unless-stopped
+      # Run as uid 1000 to match the smoothfs tier's forced owner (the stock
+      # postgres image otherwise drops to its own user and can't access its
+      # uid-1000-owned data dir). Requires SmoothNAS v0.1.20+ runtime.
+      user: "1000:1000"
+    env:
+      POSTGRES_DB: aimee_shared
+      POSTGRES_USER: aimee
+      POSTGRES_PASSWORD: aimee
+    volumes:
+      - name: pgdata
+        mode: tier-bound
+        slot: HDD
+        bind: /var/lib/postgresql/data
+    health:
+      test: ["CMD-SHELL", "pg_isready -U aimee -d aimee_shared"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  - name: kb
+    artifact:
+      type: oci-image
+      image: ghcr.io/rakuensoftware/aimee-kb:latest
+    container:
+      restartPolicy: unless-stopped
+    dependsOn:
+      postgres:
+        condition: service_healthy
+    env:
+      AIMEE_DB2_URL: postgresql://aimee:aimee@{{service.postgres.host}}:5432/aimee_shared
+      # Embed/rerank against the aimee-llm (llama.cpp / Vulkan GPU) container on
+      # the runtime bridge — NOT a bundled torch embedder. 10.100.0.1 is the
+      # bridge gateway; 8742 is the aimee-llm host-published gateway port. The kb
+      # autodetects the embedding dim from the gateway /health (2560 for the GPU
+      # 4B tier). Overridable via the config key below.
+      AIMEE_EMBEDDER_URL: http://10.100.0.1:8742
+      # Bind /v1 on 0.0.0.0 so the published :8741 is reachable from the
+      # aimee-server plugin across the bridge.
+      AIMEE_KB_HTTP_BIND: "1"
+    volumes:
+      - name: home
+        mode: tier-bound
+        slot: HDD
+        bind: /var/lib/aimee
+    ports:
+      # kb /v1 — reached by the aimee-server plugin at http://10.100.0.1:8741.
+      # Not exposed off-host.
+      - name: api
+        port: 8741
+        protocol: tcp
+        expose: false
+        hostExpose: true
+    health:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      startPeriod: 30s
+    config:
+      - key: AIMEE_EMBEDDER_URL
+        type: string
+        label: Embedder/rerank URL (aimee-llm gateway)
+        default: http://10.100.0.1:8742
+        description: >-
+          The aimee-llm (llama.cpp / Vulkan) gateway that serves /embed,
+          /embed_batch and /rerank. Defaults to the GPU container on the runtime
+          bridge. The gateway must run with auth disabled (empty
+          AIMEE_LLM_AUTH_TOKEN) because the kb embed path sends no bearer.
