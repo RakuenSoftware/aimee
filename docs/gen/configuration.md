@@ -200,7 +200,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 120 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
+The binaries read 121 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests). They override config-store values and are mostly for deployment/runtime wiring. Secrets/tokens should be supplied via the environment or the credential vault, never committed.
 
 ### Paths & assets
 
@@ -395,7 +395,7 @@ The binaries read 120 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet — the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_RUNTIME_DIR`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_WORKFLOW_BRANCH`
+`AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_RUNTIME_DIR`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_WORKFLOW_BRANCH`
 
 ## External & provider environment
 
@@ -594,7 +594,7 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `tunnels` | Tunnel definitions. |
 | `user` | Remote user (ssh backend). |
 
-> **Undocumented agent fields** (add to `AGENT_FIELD_DESC`): `is_server_hosted`
+> **Undocumented agent fields** (add to `AGENT_FIELD_DESC`): `exp`, `is_server_hosted`, `refresh_token`
 
 ### Toolsets — `AIMEE_TOOLSETS_CONFIG` (or the config `toolsets` map)
 
