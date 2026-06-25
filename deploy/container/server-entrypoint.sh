@@ -49,6 +49,21 @@ chown aimee:aimee "$AIMEE_HOME" "${AIMEE_WORKSPACES_DIR:-/var/lib/aimee-workspac
 [ -f "$AIMEE_HOME/aimee.yaml" ] && chown aimee:aimee "$AIMEE_HOME/aimee.yaml" 2>/dev/null || true
 [ -f "$AIMEE_HOME/agents.json" ] && chown aimee:aimee "$AIMEE_HOME/agents.json" 2>/dev/null || true
 
+# The server-hosted OAuth CLIs (claude/codex) and their npm prefix live under the
+# aimee home and MUST be writable by the unprivileged 'aimee' user that runs the
+# login: codex writes auth.json into $CODEX_HOME ($AIMEE_HOME/.codex) and claude
+# into $AIMEE_HOME/.claude on a successful device/browser login. If one of those
+# dirs is root-owned (e.g. left behind by a root `docker exec ... codex login`),
+# the CLI's token write fails and the login process exits WITHOUT persisting,
+# surfacing to the operator only as "<vendor> login session ended without
+# authenticating". Force them (and the npm install prefix) to the aimee user at
+# boot so both `aimee agent setup codex-oauth` and `claude-oauth` can persist.
+# Best-effort + only touches dirs that exist; the auth/config dirs are tiny and
+# the npm prefix is chowned in place (cheap relative to the install it backs).
+for cli_dir in .codex .claude .config .npm-global; do
+    [ -e "$AIMEE_HOME/$cli_dir" ] && chown -R aimee:aimee "$AIMEE_HOME/$cli_dir" 2>/dev/null || true
+done
+
 . /usr/local/bin/webchat-lib.sh
 
 log() { printf '[server-entrypoint] %s\n' "$*"; }
