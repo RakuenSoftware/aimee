@@ -506,7 +506,7 @@ static void test_tool_profile_filter(void)
        "get_help",        "find_tools",    "describe_tool", "search_docs",
        "search_memory",   "memory_recall", "get_identity",  "find_symbol",
        "ast_grep_search", "git",           "delegate",      "ensemble_review",
-       "ask_user",        "send_message",  "create_note",   NULL};
+       "ask_user",        "send_message",  "note",          NULL};
    int expect = 0;
    for (int i = 0; core[i]; i++)
       expect++;

@@ -11,6 +11,7 @@
 #include "kb_client.h"
 #include "dashboard.h"
 #include "work_queue.h"
+#include "mcp_tools.h"
 #include "mcp_git.h"
 #include "git_verify.h"
 #include "workspace_turn.h"
@@ -1635,6 +1636,24 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *tool = jtool->valuestring;
    cJSON *content = NULL;
    cJSON *structured = NULL;
+
+   /* Family multiplex (P4): if `tool` is a collapsed family (pipeline/diagnose/
+    * session/lsp/note/…), rewrite it to the legacy <family>_<command> name so all
+    * downstream routing + capability gating runs unchanged. */
+   char fam_tool[96];
+   {
+      int fd = mcp_family_demux(tool, jargs, fam_tool, sizeof(fam_tool));
+      if (fd < 0)
+      {
+         char emsg[160];
+         snprintf(emsg, sizeof(emsg), "%s requires a valid 'command' (see describe_tool)", tool);
+         if (owns_jargs)
+            cJSON_Delete(jargs);
+         return server_send_error(conn, emsg, NULL);
+      }
+      if (fd == 1)
+         tool = fam_tool;
+   }
 
    if (strcmp(tool, "delegate") == 0)
    {

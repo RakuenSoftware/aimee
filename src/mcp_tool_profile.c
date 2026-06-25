@@ -32,7 +32,7 @@ static const char *const MCP_CORE_TOOLS[] = {
     "ensemble_review", /* multi-agent */
     "ask_user",
     "send_message", /* interaction */
-    "create_note",  /* capture */
+    "note",         /* capture (note family: create/list/search) */
     NULL,
 };
 

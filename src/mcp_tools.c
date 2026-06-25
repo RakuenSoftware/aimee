@@ -1569,6 +1569,11 @@ cJSON *mcp_build_tools_list(void)
 
    add_session_context_tools(tools);
 
+   /* Collapse coherent families into single multiplexed tools (P4). Runs after
+    * every builtin member exists, before plugin/remote tools (which are left as
+    * separate, namespaced entries). */
+   mcp_collapse_families(tools);
+
    /* Plugin tools: load registry + project-local, add enabled tools */
    {
       plugin_t plugins[PLUGIN_MAX_PLUGINS];

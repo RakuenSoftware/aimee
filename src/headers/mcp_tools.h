@@ -2,6 +2,7 @@
 #define DEC_MCP_TOOLS_H 1
 
 #include "cJSON.h"
+#include <stddef.h>
 
 /* Build the complete MCP tools list (core + git tools).
  * Returns a cJSON array suitable for tools/list responses. */
@@ -25,5 +26,15 @@ void mcp_add_discovery_tools(cJSON *tools);
  * a tools list. Definitions live in mcp_tools_extended.c; the matching content
  * handlers live in server_mcp_call_table.inc. Called by mcp_build_tools_list. */
 void mcp_add_extended_tools(cJSON *tools);
+
+/* Collapse coherent tool families (pipeline/diagnose/session/lsp/note/…) IN
+ * PLACE: each family's member tools are merged into one tool with a command/
+ * action discriminator. Called by mcp_build_tools_list after all members exist. */
+void mcp_collapse_families(cJSON *tools);
+
+/* If `tool` is a collapsed family name, resolve args[command|action] to the
+ * legacy member tool name into `out`. Returns 1 (rewritten), 0 (not a family),
+ * or -1 (family but missing/unknown command). */
+int mcp_family_demux(const char *tool, cJSON *args, char *out, size_t n);
 
 #endif /* DEC_MCP_TOOLS_H */
