@@ -899,417 +899,103 @@ cJSON *mcp_build_tools_list(void)
                                              s));
    }
 
-   /* --- Git tools --- */
-
-   /* git_status */
+   /* --- Git (single multiplexed tool; replaces the former git_* family). The
+    * git_* handlers remain callable by name via dispatch_git_tool, but only this
+    * one tool is presented; `command` selects the subcommand. --- */
    {
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");
-      cJSON_AddObjectToObject(s, "properties");
+      cJSON *p = cJSON_AddObjectToObject(s, "properties");
+
+      cJSON *cmd = cJSON_AddObjectToObject(p, "command");
+      cJSON_AddStringToObject(cmd, "type", "string");
+      cJSON_AddStringToObject(cmd, "description", "Git subcommand to run (required).");
+      cJSON *en = cJSON_AddArrayToObject(cmd, "enum");
+      static const char *const git_cmds[] = {"status", "commit", "push",         "pull",  "fetch",
+                                             "branch", "log",    "diff_summary", "pr",    "issue",
+                                             "clone",  "stash",  "tag",          "reset", "restore",
+                                             "verify", NULL};
+      for (int i = 0; git_cmds[i]; i++)
+         cJSON_AddItemToArray(en, cJSON_CreateString(git_cmds[i]));
+
+      /* Parameter union across subcommands; each description says which commands
+       * consume it. dispatch_git_tool reads only the params its command needs. */
+      static const struct
+      {
+         const char *key;
+         const char *type;
+         const char *desc;
+      } git_params[] = {
+          {"action", "string",
+           "Sub-action for: branch (create/switch/list/delete/claim/orphan), pr "
+           "(create/view/list/edit/checks/watch/merge_status/wait), stash "
+           "(push/pop/apply/list/drop), tag (create/list/delete), issue (list), verify "
+           "(run/check/conflicts/env/prepare-pr/status)."},
+          {"message", "string",
+           "commit: commit message; stash: message; tag: annotated-tag message."},
+          {"files", "array", "commit / diff_summary / restore: file paths."},
+          {"name", "string", "branch / tag: name."},
+          {"base", "string", "branch: base ref; pr / verify: base branch (default main)."},
+          {"ref", "string",
+           "log / diff_summary: ref or range; tag: ref to tag; reset: target ref (default "
+           "HEAD~1)."},
+          {"force", "boolean", "push: --force-with-lease; branch delete: -D."},
+          {"mirror", "boolean", "push: --mirror (DESTRUCTIVE — replaces all remote refs)."},
+          {"rebase", "boolean", "pull: use --rebase."},
+          {"prune", "boolean", "fetch: prune stale remote-tracking refs."},
+          {"count", "integer", "log: number of commits (default 10, max 50)."},
+          {"diff_stat", "boolean", "log: include per-commit diffstat."},
+          {"stat_only", "boolean", "diff_summary: file-level stats only (default true)."},
+          {"title", "string", "pr: title (create/edit)."},
+          {"body", "string", "pr: body (create/edit)."},
+          {"number", "integer", "pr: PR number (view/edit/checks/watch/merge_status/wait)."},
+          {"wait", "boolean", "pr checks: poll until checks settle."},
+          {"state", "string", "issue: filter open/closed/all (default open)."},
+          {"url", "string", "clone: repository URL."},
+          {"path", "string", "clone: local path; verify: repo path."},
+          {"branch", "string", "clone: branch to checkout."},
+          {"depth", "integer", "clone: shallow depth."},
+          {"mode", "string", "reset: soft / mixed (default) / hard."},
+          {"staged", "boolean", "restore: unstage (restore --staged)."},
+          {"source", "string", "restore: restore from this ref."},
+          {"async", "boolean", "verify run: run in background (default true)."},
+          {"job_id", "integer", "verify: job id for action=status."},
+          {"index", "integer", "stash: stash index for apply/drop."},
+          {NULL, NULL, NULL},
+      };
+      for (int i = 0; git_params[i].key; i++)
+      {
+         cJSON *pp = cJSON_AddObjectToObject(p, git_params[i].key);
+         cJSON_AddStringToObject(pp, "type", git_params[i].type);
+         cJSON_AddStringToObject(pp, "description", git_params[i].desc);
+         if (strcmp(git_params[i].type, "array") == 0)
+         {
+            cJSON *it = cJSON_AddObjectToObject(pp, "items");
+            cJSON_AddStringToObject(it, "type", "string");
+         }
+      }
+      /* remote: type varies (fetch = string remote name; branch delete = boolean),
+       * so leave it untyped to accept either. */
+      cJSON *rem = cJSON_AddObjectToObject(p, "remote");
+      cJSON_AddStringToObject(rem, "description",
+                              "fetch: remote name (default origin); branch delete: true to also "
+                              "delete the remote branch.");
+
+      cJSON *req = cJSON_CreateArray();
+      cJSON_AddItemToArray(req, cJSON_CreateString("command"));
+      cJSON_AddItemToObject(s, "required", req);
+
       cJSON_AddItemToArray(
           tools,
-          build_tool("git_status",
-                     "Get compact working tree status: branch, staged/modified/untracked counts "
-                     "and file lists. Use instead of running 'git status' via Bash.",
-                     s));
-   }
-
-   /* git_commit */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *m = cJSON_AddObjectToObject(p, "message");
-      cJSON_AddStringToObject(m, "type", "string");
-      cJSON_AddStringToObject(m, "description", "Commit message");
-      cJSON *f = cJSON_AddObjectToObject(p, "files");
-      cJSON_AddStringToObject(f, "type", "array");
-      cJSON *fi = cJSON_CreateObject();
-      cJSON_AddStringToObject(fi, "type", "string");
-      cJSON_AddItemToObject(f, "items", fi);
-      cJSON_AddStringToObject(
-          f, "description",
-          "Files to stage. If omitted, stages all modified tracked files. "
-          "Sensitive files (.env, credentials, keys) are automatically skipped.");
-      cJSON *req = cJSON_CreateArray();
-      cJSON_AddItemToArray(req, cJSON_CreateString("message"));
-      cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(
-          tools, build_tool("git_commit",
-                            "Stage files and commit. Returns commit hash and one-line diffstat. "
-                            "Use instead of running 'git add' + 'git commit' via Bash.",
-                            s));
-   }
-
-   /* git_push */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *f = cJSON_AddObjectToObject(p, "force");
-      cJSON_AddStringToObject(f, "type", "boolean");
-      cJSON_AddStringToObject(f, "description",
-                              "Use --force-with-lease (default false). Never uses --force.");
-      cJSON *m = cJSON_AddObjectToObject(p, "mirror");
-      cJSON_AddStringToObject(m, "type", "boolean");
-      cJSON_AddStringToObject(m, "description",
-                              "Push with --mirror: replaces ALL remote refs with local refs. "
-                              "Deletes remote branches that don't exist locally. "
-                              "DESTRUCTIVE — only use when explicitly requested.");
-      cJSON_AddItemToArray(tools,
-                           build_tool("git_push",
-                                      "Push current branch to origin. Sets upstream on first "
-                                      "push. Use mirror=true to sync all refs (destructive). "
-                                      "Use instead of 'git push' via Bash.",
-                                      s));
-   }
-
-   /* git_verify */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-
-      cJSON *a = cJSON_AddObjectToObject(p, "action");
-      cJSON_AddStringToObject(a, "type", "string");
-      cJSON_AddStringToObject(
-          a, "description",
-          "Action to perform: run (default), check, conflicts, env, prepare-pr, status");
-      cJSON *o = cJSON_AddArrayToObject(a, "enum");
-      cJSON_AddItemToArray(o, cJSON_CreateString("run"));
-      cJSON_AddItemToArray(o, cJSON_CreateString("check"));
-      cJSON_AddItemToArray(o, cJSON_CreateString("conflicts"));
-      cJSON_AddItemToArray(o, cJSON_CreateString("env"));
-      cJSON_AddItemToArray(o, cJSON_CreateString("prepare-pr"));
-      cJSON_AddItemToArray(o, cJSON_CreateString("status"));
-
-      cJSON *as = cJSON_AddObjectToObject(p, "async");
-      cJSON_AddStringToObject(as, "type", "boolean");
-      cJSON_AddStringToObject(as, "description",
-                              "For action=run: defaults to true (async) — verification runs in the "
-                              "background and returns a job_id immediately. Pass false to force "
-                              "synchronous execution. For other actions, defaults to false.");
-
-      cJSON *ji = cJSON_AddObjectToObject(p, "job_id");
-      cJSON_AddStringToObject(ji, "type", "integer");
-      cJSON_AddStringToObject(ji, "description",
-                              "Job ID to check status for (used with action=status)");
-
-      cJSON *ba = cJSON_AddObjectToObject(p, "base");
-      cJSON_AddStringToObject(ba, "type", "string");
-      cJSON_AddStringToObject(ba, "description", "Base branch for prepare-pr (default: main)");
-
-      cJSON *pa = cJSON_AddObjectToObject(p, "path");
-      cJSON_AddStringToObject(pa, "type", "string");
-      cJSON_AddStringToObject(
-          pa, "description",
-          "Absolute path to the repo to verify (e.g. /home/user/dev/SmoothNAS). "
-          "Consumed by the git dispatch layer, which also applies the session's worktree "
-          "mapping — so passing the main repo root redirects to the session's worktree "
-          "automatically. Omit to use the session's current tracked directory.");
-
-      cJSON_AddItemToArray(
-          tools, build_tool("git_verify",
-                            "Project verification and health tool. Supports parallel runs, "
-                            "async jobs, conflict resolution, and environment checks.",
-                            s));
-   }
-
-   /* git_branch */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *a = cJSON_AddObjectToObject(p, "action");
-      cJSON_AddStringToObject(a, "type", "string");
-      cJSON_AddStringToObject(a, "description",
-                              "One of: create, switch, list, delete, claim, orphan. "
-                              "Use 'claim' to take ownership of an unowned branch. "
-                              "Use 'orphan' to create a branch with no history.");
-      cJSON *n = cJSON_AddObjectToObject(p, "name");
-      cJSON_AddStringToObject(n, "type", "string");
-      cJSON_AddStringToObject(n, "description", "Branch name (required for create/switch/delete)");
-      cJSON *b = cJSON_AddObjectToObject(p, "base");
-      cJSON_AddStringToObject(b, "type", "string");
-      cJSON_AddStringToObject(b, "description", "Base ref for create (default: current HEAD)");
-      cJSON *bf = cJSON_AddObjectToObject(p, "force");
-      cJSON_AddStringToObject(bf, "type", "boolean");
-      cJSON_AddStringToObject(bf, "description",
-                              "Force delete with -D instead of -d (default false). "
-                              "Only for delete action.");
-      cJSON *br = cJSON_AddObjectToObject(p, "remote");
-      cJSON_AddStringToObject(br, "type", "boolean");
-      cJSON_AddStringToObject(br, "description",
-                              "Also delete the remote branch (default false). "
-                              "Only for delete action.");
-      cJSON *req = cJSON_CreateArray();
-      cJSON_AddItemToArray(req, cJSON_CreateString("action"));
-      cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(tools,
-                           build_tool("git_branch",
-                                      "Create, switch, list, delete, claim, or orphan branches. "
-                                      "Branches are owned by the creating session. "
-                                      "Use 'claim' to take ownership of an unowned branch. "
-                                      "Use 'orphan' to create a branch with no parent history.",
-                                      s));
-   }
-
-   /* git_log */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *c = cJSON_AddObjectToObject(p, "count");
-      cJSON_AddStringToObject(c, "type", "integer");
-      cJSON_AddStringToObject(c, "description", "Number of commits (default 10, max 50)");
-      cJSON *r = cJSON_AddObjectToObject(p, "ref");
-      cJSON_AddStringToObject(r, "type", "string");
-      cJSON_AddStringToObject(r, "description",
-                              "Ref or range (e.g. 'main..HEAD'). Default: current branch");
-      cJSON *ds = cJSON_AddObjectToObject(p, "diff_stat");
-      cJSON_AddStringToObject(ds, "type", "boolean");
-      cJSON_AddStringToObject(ds, "description", "Include diffstat per commit (default false)");
-      cJSON_AddItemToArray(tools,
-                           build_tool("git_log",
-                                      "Compact commit log with short hash and relative date. "
-                                      "Use instead of 'git log' via Bash.",
-                                      s));
-   }
-
-   /* git_diff_summary */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *r = cJSON_AddObjectToObject(p, "ref");
-      cJSON_AddStringToObject(r, "type", "string");
-      cJSON_AddStringToObject(r, "description",
-                              "Compare against this ref (default: unstaged changes vs HEAD)");
-      cJSON *so = cJSON_AddObjectToObject(p, "stat_only");
-      cJSON_AddStringToObject(so, "type", "boolean");
-      cJSON_AddStringToObject(so, "description",
-                              "Only show file-level stats (default true). "
-                              "Set false for per-file change summaries.");
-      cJSON *f = cJSON_AddObjectToObject(p, "files");
-      cJSON_AddStringToObject(f, "type", "array");
-      cJSON *fi = cJSON_CreateObject();
-      cJSON_AddStringToObject(fi, "type", "string");
-      cJSON_AddItemToObject(f, "items", fi);
-      cJSON_AddStringToObject(f, "description", "Limit diff to these files");
-      cJSON_AddItemToArray(
-          tools, build_tool("git_diff_summary",
-                            "Compact diff summary: file stats or compressed change descriptions. "
-                            "Use instead of 'git diff' via Bash.",
-                            s));
-   }
-
-   /* git_pr */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *a = cJSON_AddObjectToObject(p, "action");
-      cJSON_AddStringToObject(a, "type", "string");
-      cJSON_AddStringToObject(
-          a, "description",
-          "One of: create, view, list, edit, checks, watch, merge_status, wait. "
-          "'wait' polls until all checks settle and returns a pass/fail summary.");
-      cJSON *t = cJSON_AddObjectToObject(p, "title");
-      cJSON_AddStringToObject(t, "type", "string");
-      cJSON_AddStringToObject(t, "description", "PR title (for create/edit)");
-      cJSON *bd = cJSON_AddObjectToObject(p, "body");
-      cJSON_AddStringToObject(bd, "type", "string");
-      cJSON_AddStringToObject(bd, "description", "PR body (for create/edit)");
-      cJSON *n = cJSON_AddObjectToObject(p, "number");
-      cJSON_AddStringToObject(n, "type", "integer");
-      cJSON_AddStringToObject(n, "description",
-                              "PR number (for view/edit/checks/watch/merge_status/wait)");
-      cJSON *b = cJSON_AddObjectToObject(p, "base");
-      cJSON_AddStringToObject(b, "type", "string");
-      cJSON_AddStringToObject(b, "description", "Base branch for create/edit (default: main)");
-      cJSON *wt = cJSON_AddObjectToObject(p, "wait");
-      cJSON_AddStringToObject(wt, "type", "boolean");
-      cJSON_AddStringToObject(wt, "description",
-                              "For checks action: poll until all checks settle and return a "
-                              "pass/fail summary instead of streaming output (default: false)");
-      cJSON *req = cJSON_CreateArray();
-      cJSON_AddItemToArray(req, cJSON_CreateString("action"));
-      cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(
-          tools, build_tool("git_pr",
-                            "Create, view, list, edit, and monitor PRs. "
-                            "Use instead of 'gh pr' via Bash. Essential for checking if a PR "
-                            "is merged before pushing.",
-                            s));
-   }
-
-   /* git_issue */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *a = cJSON_AddObjectToObject(p, "action");
-      cJSON_AddStringToObject(a, "type", "string");
-      cJSON_AddStringToObject(a, "description", "One of: list (default: list)");
-      cJSON *st = cJSON_AddObjectToObject(p, "state");
-      cJSON_AddStringToObject(st, "type", "string");
-      cJSON_AddStringToObject(st, "description",
-                              "Filter by state: open, closed, all (default: open)");
-      cJSON_AddItemToArray(tools, build_tool("git_issue",
-                                             "List GitHub issues. "
-                                             "Use instead of 'gh issue list' via Bash.",
-                                             s));
-   }
-
-   /* git_pull */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *r = cJSON_AddObjectToObject(p, "rebase");
-      cJSON_AddStringToObject(r, "type", "boolean");
-      cJSON_AddStringToObject(r, "description", "Use --rebase instead of merge (default false)");
-      cJSON_AddItemToArray(tools,
-                           build_tool("git_pull",
-                                      "Pull changes from remote. Returns summary of what changed. "
-                                      "Use instead of 'git pull' via Bash.",
-                                      s));
-   }
-
-   /* git_clone */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *u = cJSON_AddObjectToObject(p, "url");
-      cJSON_AddStringToObject(u, "type", "string");
-      cJSON_AddStringToObject(u, "description", "Repository URL to clone");
-      cJSON *pa = cJSON_AddObjectToObject(p, "path");
-      cJSON_AddStringToObject(pa, "type", "string");
-      cJSON_AddStringToObject(pa, "description", "Local path to clone into (optional)");
-      cJSON *b = cJSON_AddObjectToObject(p, "branch");
-      cJSON_AddStringToObject(b, "type", "string");
-      cJSON_AddStringToObject(b, "description", "Branch to checkout (optional)");
-      cJSON *d = cJSON_AddObjectToObject(p, "depth");
-      cJSON_AddStringToObject(d, "type", "integer");
-      cJSON_AddStringToObject(d, "description", "Shallow clone depth (optional)");
-      cJSON *req = cJSON_CreateArray();
-      cJSON_AddItemToArray(req, cJSON_CreateString("url"));
-      cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(
-          tools,
-          build_tool("git_clone", "Clone a repository. Use instead of 'git clone' via Bash.", s));
-   }
-
-   /* git_stash */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *a = cJSON_AddObjectToObject(p, "action");
-      cJSON_AddStringToObject(a, "type", "string");
-      cJSON_AddStringToObject(a, "description",
-                              "One of: push, pop, apply, list, drop (default: push)");
-      cJSON *m = cJSON_AddObjectToObject(p, "message");
-      cJSON_AddStringToObject(m, "type", "string");
-      cJSON_AddStringToObject(m, "description", "Stash message (for push)");
-      cJSON *idx = cJSON_AddObjectToObject(p, "index");
-      cJSON_AddStringToObject(idx, "type", "integer");
-      cJSON_AddStringToObject(idx, "description", "Stash index for apply/drop (default: 0)");
-      cJSON_AddItemToArray(tools, build_tool("git_stash",
-                                             "Stash or restore uncommitted changes. "
-                                             "Use instead of 'git stash' via Bash.",
-                                             s));
-   }
-
-   /* git_tag */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *a = cJSON_AddObjectToObject(p, "action");
-      cJSON_AddStringToObject(a, "type", "string");
-      cJSON_AddStringToObject(a, "description", "One of: create, list, delete (default: list)");
-      cJSON *n = cJSON_AddObjectToObject(p, "name");
-      cJSON_AddStringToObject(n, "type", "string");
-      cJSON_AddStringToObject(n, "description", "Tag name (required for create/delete)");
-      cJSON *m = cJSON_AddObjectToObject(p, "message");
-      cJSON_AddStringToObject(m, "type", "string");
-      cJSON_AddStringToObject(m, "description",
-                              "Tag message for annotated tag (optional, for create)");
-      cJSON *r = cJSON_AddObjectToObject(p, "ref");
-      cJSON_AddStringToObject(r, "type", "string");
-      cJSON_AddStringToObject(r, "description", "Ref to tag (default: HEAD)");
-      cJSON_AddItemToArray(
-          tools, build_tool("git_tag",
-                            "Create, list, or delete tags. Use instead of 'git tag' via Bash.", s));
-   }
-
-   /* git_fetch */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *pr = cJSON_AddObjectToObject(p, "prune");
-      cJSON_AddStringToObject(pr, "type", "boolean");
-      cJSON_AddStringToObject(pr, "description",
-                              "Prune remote-tracking refs that no longer exist (default false)");
-      cJSON *r = cJSON_AddObjectToObject(p, "remote");
-      cJSON_AddStringToObject(r, "type", "string");
-      cJSON_AddStringToObject(r, "description", "Remote name (default: origin)");
-      cJSON_AddItemToArray(
-          tools,
-          build_tool("git_fetch",
-                     "Fetch from remote without merging. Use instead of 'git fetch' via Bash.", s));
-   }
-
-   /* git_reset */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *r = cJSON_AddObjectToObject(p, "ref");
-      cJSON_AddStringToObject(r, "type", "string");
-      cJSON_AddStringToObject(r, "description", "Target ref (default: HEAD~1)");
-      cJSON *m = cJSON_AddObjectToObject(p, "mode");
-      cJSON_AddStringToObject(m, "type", "string");
-      cJSON_AddStringToObject(m, "description",
-                              "Reset mode: soft (keep staged), mixed (unstage, default), "
-                              "or hard (discard all changes)");
-      cJSON_AddItemToArray(tools,
-                           build_tool("git_reset",
-                                      "Reset HEAD to a ref. Use instead of 'git reset' via Bash. "
-                                      "Be cautious with --hard as it discards changes.",
-                                      s));
-   }
-
-   /* git_restore */
-   {
-      cJSON *s = cJSON_CreateObject();
-      cJSON_AddStringToObject(s, "type", "object");
-      cJSON *p = cJSON_AddObjectToObject(s, "properties");
-      cJSON *f = cJSON_AddObjectToObject(p, "files");
-      cJSON_AddStringToObject(f, "type", "array");
-      cJSON *fi = cJSON_CreateObject();
-      cJSON_AddStringToObject(fi, "type", "string");
-      cJSON_AddItemToObject(f, "items", fi);
-      cJSON_AddStringToObject(f, "description", "Files to restore");
-      cJSON *st = cJSON_AddObjectToObject(p, "staged");
-      cJSON_AddStringToObject(st, "type", "boolean");
-      cJSON_AddStringToObject(st, "description",
-                              "Unstage files (restore --staged). Default false.");
-      cJSON *src = cJSON_AddObjectToObject(p, "source");
-      cJSON_AddStringToObject(src, "type", "string");
-      cJSON_AddStringToObject(src, "description",
-                              "Restore from this ref instead of index (e.g. HEAD~1)");
-      cJSON *req = cJSON_CreateArray();
-      cJSON_AddItemToArray(req, cJSON_CreateString("files"));
-      cJSON_AddItemToObject(s, "required", req);
-      cJSON_AddItemToArray(
-          tools, build_tool("git_restore",
-                            "Restore files to a previous state or unstage them. "
-                            "Use instead of 'git restore' / 'git checkout -- file' via Bash.",
-                            s));
+          build_tool(
+              "git",
+              "Git + GitHub operations (use instead of the 'git'/'gh' CLIs via Bash). Set "
+              "'command' to one of: status, commit, push, pull, fetch, branch, log, "
+              "diff_summary, pr, issue, clone, stash, tag, reset, restore, verify. Remaining "
+              "params apply per command (see each description); branch/pr/stash/tag/issue/"
+              "verify also take an 'action' sub-selector. Use command=pr action=view to "
+              "check a PR's merge state before pushing.",
+              s));
    }
 
    /* job_start */

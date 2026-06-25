@@ -1744,6 +1744,22 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       content = dispatch_git_tool(ctx, conn, tool, jargs, sid);
    }
+   else if (strcmp(tool, "git") == 0)
+   {
+      /* Single multiplexed git tool: `command` selects the subcommand, which maps
+       * to the existing git_<command> dispatch (the git_* names stay callable). */
+      cJSON *jc = cJSON_GetObjectItemCaseSensitive(jargs, "command");
+      if (!cJSON_IsString(jc) || !jc->valuestring[0])
+      {
+         if (owns_jargs)
+            cJSON_Delete(jargs);
+         return server_send_error(conn, "git requires a 'command' (status, commit, branch, pr, …)",
+                                  NULL);
+      }
+      char gtool[64];
+      snprintf(gtool, sizeof(gtool), "git_%s", jc->valuestring);
+      content = dispatch_git_tool(ctx, conn, gtool, jargs, sid);
+   }
    if (!content)
       content = mcp_gateway_tool_dispatch(tool, jargs);
    if (!content)

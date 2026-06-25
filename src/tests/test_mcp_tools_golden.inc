@@ -2,7 +2,7 @@
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 109
+#define MCP_TOOLS_GOLDEN_COUNT 94
 #define MCP_TOOLS_GOLDEN \
    "ask_user {choices,question} req:question\n" \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n" \
@@ -34,22 +34,7 @@
    "get_help {topic} req:\n" \
    "get_host {name} req:name\n" \
    "get_identity {} req:\n" \
-   "git_branch {action,base,force,name,remote} req:action\n" \
-   "git_clone {branch,depth,path,url} req:url\n" \
-   "git_commit {files,message} req:message\n" \
-   "git_diff_summary {files,ref,stat_only} req:\n" \
-   "git_fetch {prune,remote} req:\n" \
-   "git_issue {action,state} req:\n" \
-   "git_log {count,diff_stat,ref} req:\n" \
-   "git_pr {action,base,body,number,title,wait} req:action\n" \
-   "git_pull {rebase} req:\n" \
-   "git_push {force,mirror} req:\n" \
-   "git_reset {mode,ref} req:\n" \
-   "git_restore {files,source,staged} req:files\n" \
-   "git_stash {action,index,message} req:\n" \
-   "git_status {} req:\n" \
-   "git_tag {action,message,name,ref} req:\n" \
-   "git_verify {action,async,base,job_id,path} req:\n" \
+   "git {action,async,base,body,branch,command,count,depth,diff_stat,files,force,index,job_id,message,mirror,mode,name,number,path,prune,rebase,ref,remote,source,staged,stat_only,state,title,url,wait} req:command\n" \
    "index_blast_radius {file_path,project} req:file_path\n" \
    "index_find_callers {project,symbol} req:symbol\n" \
    "index_structure {file_path,project} req:file_path\n" \

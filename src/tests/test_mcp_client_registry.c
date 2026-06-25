@@ -503,10 +503,10 @@ static void test_tool_profile_filter(void)
    /* Mirror of MCP_CORE_TOOLS in mcp_tool_profile.c — kept in sync intentionally.
     * Includes the P2 discovery meta-tools find_tools/describe_tool. */
    static const char *const core[] = {
-       "get_help",        "find_tools",       "describe_tool", "search_docs",     "search_memory",
-       "memory_recall",   "get_identity",     "find_symbol",   "ast_grep_search", "git_status",
-       "git_commit",      "git_diff_summary", "git_branch",    "git_pr",          "delegate",
-       "ensemble_review", "ask_user",         "send_message",  "create_note",     NULL};
+       "get_help",        "find_tools",    "describe_tool", "search_docs",
+       "search_memory",   "memory_recall", "get_identity",  "find_symbol",
+       "ast_grep_search", "git",           "delegate",      "ensemble_review",
+       "ask_user",        "send_message",  "create_note",   NULL};
    int expect = 0;
    for (int i = 0; core[i]; i++)
       expect++;

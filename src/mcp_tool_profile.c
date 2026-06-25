@@ -27,11 +27,7 @@ static const char *const MCP_CORE_TOOLS[] = {
     "get_identity", /* grounding */
     "find_symbol",
     "ast_grep_search", /* code intel */
-    "git_status",
-    "git_commit",
-    "git_diff_summary", /* common git */
-    "git_branch",
-    "git_pr",
+    "git",             /* all git/gh ops via one multiplexed tool (command=...) */
     "delegate",
     "ensemble_review", /* multi-agent */
     "ask_user",
