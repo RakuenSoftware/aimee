@@ -22,6 +22,11 @@ agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role, const conf
 agent_t *agent_find(agent_config_t *cfg, const char *name);
 int agent_is_available_for_routing(const agent_t *agent);
 
+/* True if at least one configured agent is enabled AND routable as a delegate
+ * right now (loads agents.json). Gates sub-agent interception — only redirect to
+ * delegates when usable delegates exist. */
+int agent_any_delegate_available(void);
+
 /* Optional route-time health filter. When a predicate is registered, routing
  * (agent_route / agent_route_at_tier / delegate fallback — everything that
  * goes through agent_is_available_for_routing) treats an agent the predicate

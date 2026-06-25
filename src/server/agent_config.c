@@ -1257,6 +1257,17 @@ int agent_is_available_for_routing(const agent_t *agent)
    return agent_command_on_path(cmd);
 }
 
+int agent_any_delegate_available(void)
+{
+   agent_config_t cfg;
+   if (agent_load_config(&cfg) != 0)
+      return 0;
+   for (int i = 0; i < cfg.agent_count; i++)
+      if (cfg.agents[i].enabled && agent_is_available_for_routing(&cfg.agents[i]))
+         return 1;
+   return 0;
+}
+
 agent_t *agent_find(agent_config_t *cfg, const char *name)
 {
    for (int i = 0; i < cfg->agent_count; i++)

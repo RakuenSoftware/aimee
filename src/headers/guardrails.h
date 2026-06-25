@@ -138,7 +138,9 @@ classification_t classify_path(const char *file_path);
 int pre_tool_check(const char *tool_name, const char *input_json, session_state_t *state,
                    const char *guardrail_mode, const char *cwd, char *msg_buf, size_t msg_len);
 
-/* Normalize provider/internal tool names into guardrail-facing categories. */
+/* Normalize provider/internal tool names into guardrail-facing categories.
+ * Provider-native sub-agent spawns (Task/Agent/spawn_agent/RemoteTrigger) map to
+ * "Subagent" — callers test for that to detect a sub-agent call. */
 const char *guardrails_canonical_tool_name(const char *tool_name);
 
 /* Post-tool update: re-index edited files and track TDD writes.

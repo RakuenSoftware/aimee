@@ -80,6 +80,11 @@ typedef struct
 int write_all(int fd, const char *data, size_t len);
 void compute_ctx_begin_budget(compute_ctx_t *cctx);
 compute_ctx_t *create_compute_ctx(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* Conn-free async delegate launch: create + dispatch a pollable delegate job,
+ * returning job_id (>0) or -1 with `err`. Pass the originating conn (its caps +
+ * vault principal are captured) or NULL for a server-initiated launch. */
+int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *req, char *err,
+                                 size_t errn);
 void compute_respond(compute_ctx_t *cctx, cJSON *resp);
 void compute_error(compute_ctx_t *cctx, const char *message);
 void compute_ok(compute_ctx_t *cctx);

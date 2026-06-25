@@ -1665,36 +1665,44 @@ int handle_tool_execute(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return 0; /* Response will be sent by worker thread */
 }
 
-int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+/* Conn-free async delegate launch: create a durable, pollable delegate job and
+ * dispatch it detached, returning the job_id (>0) or -1 with `err`. Pass the
+ * originating `conn` (its caps + vault principal are captured for the foreign-cwd
+ * trust check) or NULL for a server-initiated launch (CAPS_ALL, per-turn vault
+ * TL). Shared by handle_delegate (which then replies on conn) and the sub-agent
+ * interceptor in the hook path. */
+int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *req, char *err,
+                                 size_t errn)
 {
    compute_ctx_t *cctx = create_compute_ctx(ctx, conn, req);
    if (!cctx)
-      return server_send_error(conn, "out of memory", NULL);
+   {
+      if (err)
+         snprintf(err, errn, "out of memory");
+      return -1;
+   }
 
-   /* Async-only (WP-B): every delegate is a durable, pollable job. There is no
-    * synchronous delegate path — the connection is closed at dispatch and the
-    * caller polls delegate.status. The legacy `background` request field is
-    * accepted-and-ignored for one release (older clients may still send it). */
    cJSON *jrole = cJSON_GetObjectItemCaseSensitive(req, "role");
    cJSON *jprompt = cJSON_GetObjectItemCaseSensitive(req, "prompt");
    const char *role =
        delegate_role_canonicalize(cJSON_IsString(jrole) ? jrole->valuestring : "execute");
    const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
 
-   /* Cheap, request-only pre-flight validation, surfaced inline as an error
-    * response before the job is created (the persona check lives in the MCP
-    * layer and the worker). */
+   /* Cheap, request-only pre-flight validation (the persona check lives in the
+    * MCP layer and the worker). */
    if (!prompt[0])
    {
       compute_ctx_free(cctx);
-      return server_send_error(conn, "missing prompt", NULL);
+      if (err)
+         snprintf(err, errn, "missing prompt");
+      return -1;
    }
    if (strlen(prompt) < 20)
    {
-      char errmsg[64];
-      snprintf(errmsg, sizeof(errmsg), "prompt too short (%zu chars)", strlen(prompt));
       compute_ctx_free(cctx);
-      return server_send_error(conn, errmsg, NULL);
+      if (err)
+         snprintf(err, errn, "prompt too short (%zu chars)", strlen(prompt));
+      return -1;
    }
 
    char lease_owner[32];
@@ -1703,7 +1711,9 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (job_id <= 0)
    {
       compute_ctx_free(cctx);
-      return server_send_error(conn, "failed to create delegate job", NULL);
+      if (err)
+         snprintf(err, errn, "failed to create delegate job");
+      return -1;
    }
 
    cctx->background_job_id = job_id;
@@ -1717,8 +1727,23 @@ int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       db1_agent_job_update(job_id, "failed", 0, "compute queue full");
       compute_ctx_free(cctx);
-      return server_send_error(conn, "compute queue full", NULL);
+      if (err)
+         snprintf(err, errn, "compute queue full");
+      return -1;
    }
+   return job_id;
+}
+
+int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   /* Async-only (WP-B): every delegate is a durable, pollable job. There is no
+    * synchronous delegate path — the connection is closed at dispatch and the
+    * caller polls delegate.status. The legacy `background` request field is
+    * accepted-and-ignored for one release (older clients may still send it). */
+   char err[80] = "";
+   int job_id = server_delegate_launch_async(ctx, conn, req, err, sizeof(err));
+   if (job_id <= 0)
+      return server_send_error(conn, err[0] ? err : "failed to launch delegate", NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "job_id", job_id);

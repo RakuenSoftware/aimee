@@ -237,6 +237,15 @@ int main(void)
       platform_unsetenv("AIMEE_BUNDLED_SKILLS_DIR");
    }
    platform_test_rmrf(suite_home);
+
+   /* Provider-native sub-agent spawns canonicalize to "Subagent" (the
+    * redirect-to-delegate trigger in the hook); ordinary tools do not. */
+   assert(strcmp(guardrails_canonical_tool_name("Task"), "Subagent") == 0);
+   assert(strcmp(guardrails_canonical_tool_name("Agent"), "Subagent") == 0);
+   assert(strcmp(guardrails_canonical_tool_name("spawn_agent"), "Subagent") == 0);
+   assert(strcmp(guardrails_canonical_tool_name("Bash"), "Subagent") != 0);
+   assert(strcmp(guardrails_canonical_tool_name("Read"), "Subagent") != 0);
+
    printf("guardrails: all tests passed\n");
    return 0;
 }

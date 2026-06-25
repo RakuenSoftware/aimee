@@ -709,8 +709,6 @@ static int handle_hud_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   (void)ctx;
-
    cJSON *jtn = cJSON_GetObjectItemCaseSensitive(req, "tool_name");
    cJSON *jti = cJSON_GetObjectItemCaseSensitive(req, "tool_input");
    cJSON *jcwd = cJSON_GetObjectItemCaseSensitive(req, "cwd");
@@ -755,6 +753,53 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                            sizeof(msg));
 
    session_state_save(&state, sid);
+
+   /* Sub-agent interception (enforce-delegate-only): the primary agent must not
+    * spawn its OWN sub-agents. pre_tool_check already blocks Task/Agent/spawn_agent
+    * (rc==2); if aimee has usable delegates, auto-launch a delegate from the call
+    * and point the model at the job. The call stays blocked — only the message
+    * changes (a PreToolUse hook cannot return the delegate's result inline). */
+   if (rc == 2 && strcmp(guardrails_canonical_tool_name(tool_name), "Subagent") == 0 &&
+       agent_any_delegate_available())
+   {
+      char prompt[8192] = "";
+      cJSON *ti = cJSON_Parse(tool_input);
+      if (ti)
+      {
+         cJSON *jp = cJSON_GetObjectItemCaseSensitive(ti, "prompt");
+         cJSON *jd = cJSON_GetObjectItemCaseSensitive(ti, "description");
+         const char *p = (cJSON_IsString(jp) && jp->valuestring[0]) ? jp->valuestring : NULL;
+         const char *d = (cJSON_IsString(jd) && jd->valuestring[0]) ? jd->valuestring : NULL;
+         if (p && d)
+            snprintf(prompt, sizeof(prompt), "%s\n\n%s", d, p);
+         else if (p)
+            snprintf(prompt, sizeof(prompt), "%s", p);
+         else if (d)
+            snprintf(prompt, sizeof(prompt), "%s", d);
+         cJSON_Delete(ti);
+      }
+      if (strlen(prompt) >= 20)
+      {
+         cJSON *dreq = cJSON_CreateObject();
+         cJSON_AddStringToObject(dreq, "role", "execute");
+         cJSON_AddStringToObject(dreq, "persona", "engineer");
+         cJSON_AddStringToObject(dreq, "prompt", prompt);
+         if (sid && sid[0])
+            cJSON_AddStringToObject(dreq, "session_id", sid);
+         if (cwd && cwd[0])
+            cJSON_AddStringToObject(dreq, "cwd", cwd);
+         char derr[96] = "";
+         int job_id = server_delegate_launch_async(ctx, NULL, dreq, derr, sizeof(derr));
+         cJSON_Delete(dreq);
+         if (job_id > 0)
+            snprintf(msg, sizeof(msg),
+                     "Sub-agents must run as aimee delegates, not provider-native Task/Agent. "
+                     "Launched delegate job %d on your behalf — call delegate_status(job_id=%d) "
+                     "for the result. For control over role/persona, call the delegate tool "
+                     "directly next time.",
+                     job_id, job_id);
+      }
+   }
 
    /* Skill review nudge: every N tool hooks, fire a background review delegate. */
    if (cfg.skills_review_enabled && rc != 2 &&

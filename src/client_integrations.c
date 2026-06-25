@@ -1049,9 +1049,11 @@ static void ensure_claude_code_hooks(const char *settings_path)
    ensure_aimee_event_hook(hooks, "PreCompact", "pre-compact", NULL, &dirty);
    /* P3 attention guard: PreToolUse hook scoped to read/edit/destructive tools;
     * accrues per-file attention and blocks hard-destructive ops on files the
-    * session has actively touched. */
+    * session has actively touched. Task|Agent are included so the sub-agent
+    * interceptor fires on provider-native spawns (redirect to aimee delegates). */
    ensure_aimee_event_hook(hooks, "PreToolUse", "attention-guard",
-                           "Read|Edit|Write|MultiEdit|NotebookEdit|Bash|Grep|Glob", &dirty);
+                           "Read|Edit|Write|MultiEdit|NotebookEdit|Bash|Grep|Glob|Task|Agent",
+                           &dirty);
 
    if (dirty)
    {
