@@ -1,9 +1,10 @@
 # Proposal: Code-graph intelligence — a living, embedded, reasoning graph over code
 
-- **State:** IN PROGRESS — §0.5/§1/§3/§4/§5/§7 implemented (on the `testing` branch);
-  remainder (§2 tree-sitter, §5 vector leg, §4 surprising-links, §6 live fusion,
-  §8 webchat viz) still open, as build-/integration-/frontend-tier work. See the
-  "Implementation status" section below.
+- **State:** IN PROGRESS — §0.5/§1/§3/§4/§5/§7 implemented (on the `testing` branch),
+  including the §5 vector leg (code+graph+vector hybrid); remainder (§2 tree-sitter,
+  §4 surprising-links, §6 live fusion, §8 webchat viz, §7 graph-informed delegation)
+  still open, as build-/integration-/frontend-tier work. See the "Implementation
+  status" section below.
 - **Thesis:** aimee should treat the codebase as a *living* graph that is (a) fully
   built without a manual step, (b) parsed broadly, (c) ranked by **graph structure
   AND vector similarity AND memory** in one query, and (d) able to *change what the
@@ -273,7 +274,10 @@ agent's hot path.
 - **§5** RRF fusion core (`kb_rrf.c`, `unit-test-kb-rrf`) + the `GET /v1/code/hybrid`
   route fusing `code` + `graph` in file-path space with a typed memory `why`,
   **agent-callable** via `index({command:"hybrid"})`, with **config-tunable per-signal
-  weights** (`kb.code_hybrid.*`).
+  weights** (`kb.code_hybrid.*`), and the **vector leg** — embedding similarity over
+  `code_embeddings` as a third RRF signal (`pgvec_code_search_paths`), gated on a
+  dim-matched embedder and graceful-degrading. So /v1/code/hybrid now fuses
+  code+graph+vector. The SQL was validated against real pgvector/halfvec.
 - **§7** structural blast-radius **advisory** on the guardrail edit path — advisory,
   fail-open, structural-only, opt-in (`guardrails_blast_radius.c`,
   `unit-test-guardrails-blast-radius`); folds in the stale-edge hub note.
@@ -281,7 +285,6 @@ agent's hot path.
 **Deferred — needs the embedder / a build-tier dependency / a deployed corpus / a frontend
 (not completable in the agent host):**
 - **§2 tree-sitter** front-end — large build-tier work (vendor ~30 grammars + ABI).
-- **§5 vector leg** (`pgvec_code_search`) — needs the query embedder (integration/deploy-tier).
 - **§4 surprising-links** — needs embeddings + the percentile/LLM-judge confirmation stage.
 - **§6 live/memory fusion** — post-merge/fetch incremental hook + watch.
 - **§8 webchat visualization** — frontend, read-only `/v1/code/graph` paged projection.
