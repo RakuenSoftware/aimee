@@ -1,0 +1,14 @@
+# Prompt suite for `ingress_token_bench.py --mode compress` — code-heavy,
+# repo-comprehension prompts that surface recommended-code hits in the envelope,
+# so the lossy fold (file:line references) and any code_span_get recovery are
+# exercised. Each line is "[task_class] prompt"; task classes are the §6.5 B6 set
+# (code_generation, code_review, debugging, question_answer, summarization,
+# agent_tool_loop). Keep answers brief; do not edit code. Lines starting with #
+# are ignored.
+[question_answer] Which function builds the <aimee-context> pre-injection envelope, and in which file? One line.
+[question_answer] Where is the code_span_get MCP resolver implemented, and what validation does it perform on the requested path? Two sentences.
+[code_review] Review how db2_code_index_code_search composes its SQL when enrichment is on — is the content column index safe? Two sentences.
+[debugging] A code fold emits "file:line" but the model can't recover the span — name the most likely cause and the config flag involved. One line.
+[summarization] Summarize, in two sentences, how the ingress envelope decides whether to fold a code hit into a reference.
+[code_generation] Sketch the signature of the helper that locates a ts_headline match line within file content, and where it lives. One line.
+[agent_tool_loop] Using the repository's own tools, find the function that parses X-Aimee-Compress and report its file and the struct field it sets. One line.
