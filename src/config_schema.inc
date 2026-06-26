@@ -9,6 +9,7 @@
 {"guardrail_mode", SCHEMA_STRING, 0},
 {"ingress_preinject_enabled", SCHEMA_BOOL, 0},
 {"ingress_compress_enabled", SCHEMA_BOOL, 0},
+{"ingress_compress_min_chars", SCHEMA_INT, 0},
 {"gateway_prevent_subagents", SCHEMA_BOOL, 0},
 {"gateway_pin_model", SCHEMA_BOOL, 0},
 {"css_style_graph_enabled", SCHEMA_BOOL, 0},

@@ -9,6 +9,7 @@
 #include "cJSON.h"
 #include "config.h"
 #include "kb_client.h"
+#include "request_context.h"
 
 /* The kb-backed builder (ingress_preinject_build) is out of scope here; these
  * stubs satisfy the linker so the test links only the pure helpers without
@@ -48,6 +49,9 @@ int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t 
    out[1].parts.total = 0.44;
    return 2;
 }
+/* Drives the compression lever in the build test below (config_load stub). */
+static int g_test_compress = 0;
+
 int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
                                 int max)
 {
@@ -57,7 +61,20 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
       return 0;
    memset(out, 0, sizeof(out[0]) * (size_t)max);
    snprintf(out[0].file_path, sizeof(out[0].file_path), "src/server/ingress_preinject.c");
-   snprintf(out[0].snippet, sizeof(out[0].snippet), "builder emits a bounded context envelope");
+   if (g_test_compress)
+   {
+      /* A snippet over the 80-char fold threshold + a known matched line, so the
+       * fold path is exercised. Only when compressing, so the P0 byte-equivalence
+       * golden below (default-off) stays the original short-snippet fixture. */
+      snprintf(out[0].snippet, sizeof(out[0].snippet),
+               "the builder emits a bounded context envelope from a typed entry list and renders "
+               "the recommended code block before exploring");
+      out[0].line = 42;
+   }
+   else
+   {
+      snprintf(out[0].snippet, sizeof(out[0].snippet), "builder emits a bounded context envelope");
+   }
    return 1;
 }
 int config_load(config_t *cfg)
@@ -67,6 +84,7 @@ int config_load(config_t *cfg)
       memset(cfg, 0, sizeof(*cfg));
       cfg->ingress_preinject_enabled = 1;
       cfg->ingress_preinject_assembly_budget = 1200;
+      cfg->ingress_compress_enabled = g_test_compress;
    }
    return 0;
 }
@@ -344,6 +362,50 @@ static void test_turn_id_mint_and_thread_local(void)
    printf("turn_id_mint_and_thread_local OK\n");
 }
 
+/* P1b lossy code fold: default-off keeps the snippet; compress-on replaces it with
+ * a `file:line` reference under a code_span_get-expandable header; X-Aimee-Compress:0
+ * (request context) overrides back to the snippet. */
+static void test_compress_code_fold(void)
+{
+   request_context_clear();
+
+   /* Compression OFF (default): the code entry keeps its snippet preview and the
+    * plain header — byte-for-byte the pre-compression behaviour. */
+   g_test_compress = 0;
+   char *off = ingress_preinject_build("how does the builder work", 0);
+   assert(off != NULL);
+   assert(strstr(off, "recommended (code):\n") != NULL);
+   assert(strstr(off, "    > ") != NULL);                 /* snippet present */
+   assert(strstr(off, "ingress_preinject.c\n") != NULL);  /* file line, no :line */
+   assert(strstr(off, "ingress_preinject.c:42") == NULL); /* not folded */
+   free(off);
+
+   /* Compression ON: the snippet is folded to a `file:line` reference under the
+    * expandable header, and the raw snippet text is gone. */
+   g_test_compress = 1;
+   char *on = ingress_preinject_build("how does the builder work", 0);
+   assert(on != NULL);
+   assert(strstr(on, "recommended (code — expand via code_span_get):\n") != NULL);
+   assert(strstr(on, "ingress_preinject.c:42") != NULL);       /* folded reference */
+   assert(strstr(on, "typed entry list and renders") == NULL); /* snippet body dropped */
+   free(on);
+
+   /* Per-request X-Aimee-Compress:0 overrides the config flag back to no fold. */
+   request_context_t rc;
+   memset(&rc, 0, sizeof(rc));
+   rc.compress_disabled = 1;
+   request_context_set(&rc);
+   char *ovr = ingress_preinject_build("how does the builder work", 0);
+   assert(ovr != NULL);
+   assert(strstr(ovr, "ingress_preinject.c:42") == NULL); /* override -> not folded */
+   assert(strstr(ovr, "    > ") != NULL);                 /* snippet restored */
+   free(ovr);
+   request_context_clear();
+
+   g_test_compress = 0;
+   printf("compress_code_fold OK\n");
+}
+
 int main(void)
 {
    printf("ingress_preinject: ");
@@ -355,6 +417,7 @@ int main(void)
    test_render_block();
    test_budgeted_build_uses_memory_previews();
    test_turn_id_mint_and_thread_local();
+   test_compress_code_fold();
    printf("all tests passed\n");
    return 0;
 }

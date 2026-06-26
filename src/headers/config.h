@@ -346,6 +346,10 @@ typedef struct config
     * folds code entries into recoverable references; off keeps the search query,
     * cost, and envelope byte-identical. */
    int ingress_compress_enabled;
+   /* ingress-compression P1b: a code snippet is folded to a `file:line` reference
+    * only when its snippet exceeds this many chars (folding a tiny snippet saves
+    * nothing). Default 80. */
+   int ingress_compress_min_chars;
    /* Session-isolation guard (opt-in): when on, the PreToolUse attention-guard
     * fails closed on a mutating tool whose target is NOT inside an aimee-managed
     * worktree (.aimee/worktrees/...), forcing every mutating session into an

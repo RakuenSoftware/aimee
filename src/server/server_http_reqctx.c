@@ -84,6 +84,14 @@ void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
 
    http_header(buf, "Idempotency-Key", ctx.idempotency_key, sizeof(ctx.idempotency_key));
 
+   /* X-Aimee-Compress: 0 opts this request out of ingress envelope compression
+    * (ingress-compression P1b §1.4/B1). Not identity, so it needs no trusted
+    * proxy — any caller may disable it for its own turn; it never forces it on. */
+   char compress_hdr[16] = "";
+   if (http_header(buf, "X-Aimee-Compress", compress_hdr, sizeof(compress_hdr)) &&
+       strcmp(compress_hdr, "0") == 0)
+      ctx.compress_disabled = 1;
+
    /* Server-derived principal from the kernel-verified UDS peer uid. */
    if (ctx.peer_uid >= 0)
       snprintf(ctx.principal, sizeof(ctx.principal), "uid:%ld", ctx.peer_uid);

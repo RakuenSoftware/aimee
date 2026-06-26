@@ -43,6 +43,8 @@ const config_field_t config_fields[] = {
      CFG_BOOL},
     {"ingress_compress_enabled", offsetof(config_t, ingress_compress_enabled), sizeof(int), 0,
      CFG_BOOL},
+    {"ingress_compress_min_chars", offsetof(config_t, ingress_compress_min_chars), sizeof(int), 0,
+     CFG_INT},
     {"gateway_prevent_subagents", offsetof(config_t, gateway_prevent_subagents), sizeof(int), 0,
      CFG_BOOL},
     {"gateway_pin_model", offsetof(config_t, gateway_pin_model), sizeof(int), 0, CFG_BOOL},

@@ -509,6 +509,7 @@ static void config_set_defaults(config_t *cfg)
    cfg->ingress_preinject_assembly_budget = 6144;
    cfg->ingress_max_raw_scans = 0;
    cfg->code_span_max_lines = 400;
+   cfg->ingress_compress_min_chars = 80;
    cfg->require_session_worktree = 0;
    /* Default-on as of the virtual-context rollout: the long-session benchmark
     * gate (make virtual-context-eval-check) passes on synthetic and real
@@ -847,6 +848,10 @@ int config_load(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "ingress_compress_enabled");
    if (cJSON_IsBool(item))
       cfg->ingress_compress_enabled = cJSON_IsTrue(item);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "ingress_compress_min_chars");
+   if (cJSON_IsNumber(item) && item->valuedouble > 0)
+      cfg->ingress_compress_min_chars = (int)item->valuedouble;
 
    item = cJSON_GetObjectItemCaseSensitive(root, "gateway_prevent_subagents");
    if (cJSON_IsBool(item))

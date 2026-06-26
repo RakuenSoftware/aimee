@@ -43,6 +43,9 @@ typedef struct
    req_transport_t transport;
    unsigned int capabilities; /* route capability/scope bits for this connection */
    int trusted;               /* 1 = principal/source headers may be honoured */
+   int compress_disabled;     /* X-Aimee-Compress: 0 — per-request opt-out of ingress
+                               * envelope compression (ingress-compression P1b §1.4/B1).
+                               * 0 = honor config; never forces compression on. */
 } request_context_t;
 
 /* Set the active request context for the current thread (shallow copy). Pass
