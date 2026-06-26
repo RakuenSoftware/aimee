@@ -1,6 +1,7 @@
 /* test_kb_mining.c: KB continuous mining scheduler/jobs. */
 
 #include "artifacts.h"
+#include "db2/learning.h"
 #include "db2_test_shim.h"
 #include "db_postgres.h"
 #include "db2_internal.h"
@@ -9,7 +10,9 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 static void open_db(void)
 {
@@ -138,6 +141,53 @@ static void test_job_interval_is_respected(void)
    printf("  job_interval_is_respected: ok\n");
 }
 
+/* ingress-compression §4: with kb.mining.failure_learning_enabled on, the
+ * recurrence job emits a *pending learning proposal* (sink=artifact) instead of
+ * writing the workflow_pattern artifact directly — the artifact appears only after
+ * review/Gate-Promote commits the proposal. A repeat cluster corroborates the same
+ * pending proposal rather than producing a second one. */
+static void test_recurrence_routes_to_learning_when_enabled(void)
+{
+   /* Enable the flag via an AIMEE_HOME-scoped config the real config_load reads. */
+   char home[] = "/tmp/kbmining_fl_XXXXXX";
+   assert(mkdtemp(home));
+   char yaml[256];
+   snprintf(yaml, sizeof(yaml), "%s/aimee.yaml", home);
+   FILE *f = fopen(yaml, "w");
+   assert(f);
+   fputs("kb:\n  mining:\n    failure_learning_enabled: true\n", f);
+   fclose(f);
+   setenv("AIMEE_HOME", home, 1);
+
+   open_db();
+   for (int i = 1; i <= 5; i++)
+   {
+      char session[32];
+      snprintf(session, sizeof(session), "sess-%d", (i % 3) + 1);
+      seed_event(i, session, "delegate_exit", "code", "stall/no-writes", "");
+   }
+
+   assert(kb_mining_run_once() >= 1);
+   /* Routed through learning: NO direct artifact, but a pending proposal exists. */
+   assert(db2_artifact_count("workflow_pattern", "proposed") == 0);
+   int pid =
+       db2_learning_proposal_find_pending("artifact", "delegate_exit:code:stall/no-writes", 0);
+   assert(pid > 0);
+
+   /* A second tick on the same cluster corroborates the same proposal (no second
+    * proposal, still no artifact). Re-seed a fresh event past the high-watermark. */
+   seed_event(6, "sess-1", "delegate_exit", "code", "stall/no-writes", "");
+   assert(kb_mining_run_once() >= 0);
+   assert(db2_artifact_count("workflow_pattern", "proposed") == 0);
+   int pid2 =
+       db2_learning_proposal_find_pending("artifact", "delegate_exit:code:stall/no-writes", 0);
+   assert(pid2 == pid); /* same pending proposal, corroborated */
+
+   close_db();
+   unsetenv("AIMEE_HOME");
+   printf("  recurrence_routes_to_learning_when_enabled: ok\n");
+}
+
 int main(void)
 {
    test_seed_defaults();
@@ -145,6 +195,7 @@ int main(void)
    test_pattern_cluster_proposes_interaction_pattern();
    test_disabled_job_is_skipped();
    test_job_interval_is_respected();
+   test_recurrence_routes_to_learning_when_enabled();
    printf("kb_mining: all tests passed\n");
    return 0;
 }

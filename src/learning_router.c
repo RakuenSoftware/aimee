@@ -2,6 +2,7 @@
 #include "aimee.h"
 #if !defined(AIMEE_DB2_DISABLED)
 #include "db1.h"
+#include "db2/artifacts.h"
 #include "db2/collab_rules.h"
 #include "db2/learning.h"
 #include "dogfood.h"
@@ -187,6 +188,25 @@ static int learning_apply_sink(const learning_proposal_t *proposal)
                                      session_id()) > 0
                   ? 0
                   : -1;
+   }
+   else if (strcmp(proposal->sink, "artifact") == 0)
+   {
+      /* ingress-compression §4: a failure-mined recurrence proposal commits to the
+       * durable artifact it carried (e.g. workflow_pattern) only after review /
+       * Gate-Promote, instead of kb_mining writing it directly. */
+      cJSON *jid = cJSON_GetObjectItemCaseSensitive(action, "artifact_id");
+      cJSON *jkind = cJSON_GetObjectItemCaseSensitive(action, "artifact_kind");
+      cJSON *jscope = cJSON_GetObjectItemCaseSensitive(action, "scope_kind");
+      cJSON *jpayload = cJSON_GetObjectItemCaseSensitive(action, "payload_json");
+      cJSON *jconf = cJSON_GetObjectItemCaseSensitive(action, "confidence");
+      if (!cJSON_IsString(jid) || !jid->valuestring[0] || !cJSON_IsString(jkind) ||
+          !jkind->valuestring[0] || !cJSON_IsString(jpayload) || !jpayload->valuestring[0])
+         rc = -1;
+      else
+         rc = db2_artifact_write(
+             jid->valuestring, jkind->valuestring, "proposed",
+             cJSON_IsString(jscope) ? jscope->valuestring : "workspace", "", "kb-mining-learning",
+             cJSON_IsNumber(jconf) ? jconf->valuedouble : 0.5, jpayload->valuestring);
    }
 
    cJSON_Delete(action);

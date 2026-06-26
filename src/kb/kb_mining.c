@@ -11,6 +11,8 @@
 #include "cJSON.h"
 #include "config.h"
 #include "db2/artifacts.h"
+#include "db2/learning.h"
+#include "learning.h"
 #include "db2/db2_internal.h"
 #include "db2/db_postgres.h"
 #include "db2/feature_rows.h"
@@ -214,6 +216,17 @@ static int run_pattern_cluster(int64_t hwm, int64_t *new_hwm_out)
    return rc;
 }
 
+/* Format a UTC "YYYY-MM-DD HH:MM:SS" timestamp `days` days from now, for a
+ * learning proposal's expires_at (the §4 failure-learning path). */
+static void recurrence_expiry(int days, char *buf, size_t len)
+{
+   time_t now = time(NULL);
+   time_t future = now + (time_t)days * 24 * 60 * 60;
+   struct tm tmv;
+   gmtime_r(&future, &tmv);
+   strftime(buf, len, "%Y-%m-%d %H:%M:%S", &tmv);
+}
+
 static int propose_recurrence(const char *role, const char *failure_mode, int evidence_count,
                               int session_count, int64_t max_event_id)
 {
@@ -261,6 +274,65 @@ static int propose_recurrence(const char *role, const char *failure_mode, int ev
    cJSON_Delete(payload);
    if (!json)
       return -1;
+
+   /* ingress-compression §4: when failure-learning is enabled, route the cluster
+    * through the learning pipeline (signal -> reviewed/Gate-Promoted proposal ->
+    * artifact) instead of writing the workflow_pattern artifact directly. Dedup on
+    * the event_type:role:failure_mode cluster so the same recurrence corroborates
+    * an existing pending proposal rather than spamming new ones (and never produces
+    * both a direct artifact and a proposal for one cluster). */
+   {
+      config_t lcfg;
+      config_load(&lcfg);
+      if (lcfg.kb_mining_failure_learning_enabled)
+      {
+         char target_key[256];
+         snprintf(target_key, sizeof(target_key), "delegate_exit:%s:%s", role ? role : "",
+                  failure_mode ? failure_mode : "");
+         int existing = db2_learning_proposal_find_pending("artifact", target_key, 0);
+         if (existing > 0)
+         {
+            db2_learning_proposal_bump_corroboration(existing);
+            free(json);
+            return 0;
+         }
+         cJSON *action = cJSON_CreateObject();
+         if (action)
+         {
+            cJSON_AddStringToObject(action, "artifact_id", id);
+            cJSON_AddStringToObject(action, "artifact_kind", "workflow_pattern");
+            cJSON_AddStringToObject(action, "scope_kind", "workspace");
+            cJSON_AddNumberToObject(action, "confidence", confidence);
+            cJSON_AddStringToObject(action, "payload_json", json);
+            char *action_json = cJSON_PrintUnformatted(action);
+            cJSON_Delete(action);
+            if (action_json)
+            {
+               learning_signal_input_t sig;
+               memset(&sig, 0, sizeof(sig));
+               snprintf(sig.signal_type, sizeof(sig.signal_type), "recurrence_failure");
+               snprintf(sig.source, sizeof(sig.source), "kb-mining");
+               snprintf(sig.title, sizeof(sig.title), "%s", title);
+               snprintf(sig.description, sizeof(sig.description),
+                        "Recurring %s in role %s: %d events across %d sessions",
+                        failure_mode && failure_mode[0] ? failure_mode : "delegate failure",
+                        role && role[0] ? role : "unknown", evidence_count, session_count);
+               snprintf(sig.target_key, sizeof(sig.target_key), "%s", target_key);
+               int sigid = db2_learning_signal_insert(&sig, "");
+               if (sigid > 0)
+               {
+                  char expires[32];
+                  recurrence_expiry(30, expires, sizeof(expires));
+                  (void)db2_learning_proposal_insert(sigid, "artifact", target_key, 0, action_json,
+                                                     NULL, expires);
+               }
+               free(action_json);
+            }
+         }
+         free(json);
+         return 0;
+      }
+   }
 
    int rc = db2_artifact_write(id, "workflow_pattern", "proposed", "workspace", "", "kb-mining",
                                confidence, json);

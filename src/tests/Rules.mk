@@ -1677,6 +1677,7 @@ $(TESTPREFIX)/unit-test-kb-mining: $(OBJDIR)/tests/test_kb_mining.o \
                              $(OBJDIR)/db2/mining.o $(OBJDIR)/db2/artifacts.o \
                              $(OBJDIR)/db2/feature_rows.o \
                              $(OBJDIR)/learning_evidence.o $(OBJDIR)/db2/learning_synth_ops.o \
+                             $(OBJDIR)/db2/learning.o \
                              $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
                              $(OBJDIR)/db2/feedback.o \
                              $(TEST_CORE_OBJS)

@@ -1274,6 +1274,11 @@ typedef struct config
     * kb_mining_min_poll_s: minimum seconds between scheduler ticks (default 300). */
    int kb_mining_enabled;
    int kb_mining_min_poll_s;
+   /* kb_mining_failure_learning_enabled (ingress-compression §4, default off):
+    * route the recurrence job's failure clusters through the learning pipeline
+    * (signal -> reviewed proposal -> Gate-Promote -> artifact) instead of writing
+    * a workflow_pattern artifact directly. JSON key kb.mining.failure_learning_enabled. */
+   int kb_mining_failure_learning_enabled;
 
    /* Trigger endpoint (event-triggered-autopilot) */
    char trigger_auth_token[256];

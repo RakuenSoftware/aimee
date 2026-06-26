@@ -1339,6 +1339,9 @@ void config_parse_kb_section2(config_t *cfg, cJSON *root)
          item = cJSON_GetObjectItemCaseSensitive(mining, "min_poll_s");
          if (cJSON_IsNumber(item) && item->valuedouble > 0)
             cfg->kb_mining_min_poll_s = (int)item->valuedouble;
+         item = cJSON_GetObjectItemCaseSensitive(mining, "failure_learning_enabled");
+         if (cJSON_IsBool(item))
+            cfg->kb_mining_failure_learning_enabled = cJSON_IsTrue(item) ? 1 : 0;
       }
 
       /* §5 hybrid retrieval per-signal RRF weights + rank constant. */

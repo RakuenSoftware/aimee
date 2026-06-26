@@ -567,6 +567,7 @@ static void config_set_defaults(config_t *cfg)
    cfg->kb_maintenance_orphan_days = 90;
    cfg->kb_mining_enabled = 1;
    cfg->kb_mining_min_poll_s = 300;
+   cfg->kb_mining_failure_learning_enabled = 0;
    cfg->review_scheduler_enabled = 0;
    cfg->review_idle_trigger_minutes = 30;
    cfg->review_session_cooldown_hours = 24;
