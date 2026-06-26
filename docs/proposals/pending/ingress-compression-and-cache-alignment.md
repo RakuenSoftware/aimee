@@ -1,8 +1,26 @@
 # Proposal: Envelope compression, cache-prefix alignment, reversible rehydration, and failure-mined corrections
 
-- **State:** reviewed — design-ready (2026-06-16). The design-roundtable blockers
-  (below) are resolved in **§6.5 Design-review resolutions**; implementation may
-  proceed per the §7 phasing.
+- **State:** in progress — implementation incomplete (2026-06-26). The per-phase
+  *machinery* for P1b/P2/P3/P4/P5 is in place behind **default-off flags** (PRs #743,
+  #744, #746, #748, #750, #751, #754, atop P0 #585), but the proposal is **not yet
+  complete**: the default-flip **validation gates remain open** and block every flip.
+  Specifically still TODO: the §6 net-token bench on Aimee's real corpora, the
+  forced-rehydration accuracy A/B, and the per-ingress MCP-tool reachability proof —
+  each requires a live Codex/Claude-Code with a registered Aimee MCP server and a
+  GPU/deployment-tier corpus (not yet run). **P2e** (the in-process rehydration
+  handle store) is **not yet built** — held until ephemeral JSON/tool-result folding
+  has a live producer (durable code folds recover via `code_span_get` and never touch
+  the store). Until those gates pass, every lever stays default-off and this proposal
+  remains in `pending/`. The design-roundtable blockers (below) are resolved in
+  **§6.5 Design-review resolutions**.
+
+```yaml acceptance
+- {id: 1, tier: mechanical, check: "make unit-tests"}
+- {id: 2, tier: integration, check: "python3 bench/ingress_token_bench.py --mode compress --prompts bench/ingress_compress_prompts.txt reports net-positive per task class"}
+- {id: 3, tier: integration, check: "forced-rehydration accuracy A/B (learning_replay.py) holds accuracy on tasks where the folded-out detail is required"}
+- {id: 4, tier: deployment, check: "per-ingress MCP-tool reachability proven from the installed Codex/Claude-Code MCP config (memory_get/code_span_get/rehydrate callable)"}
+- {id: 5, tier: hardware, check: "realized provider cache_read/cache_creation tokens, by placement, read from the cost-accounting ledger on a deployed corpus"}
+```
 - **Design roundtable (2026-06-16):** found 9 blocking / 12 major — **all resolved
   in §6.5.** Key blockers were: the `X-Aimee-Compress` override using thread-local
   state (unsafe in the threaded server); the lossy-fold transform enum not
@@ -874,8 +892,14 @@ implementer and do not gate the first phase.
   (heredocs, multi-line strings, indentation-sensitive snippets like YAML/Make) —
   the resident form is already lossy, so the byte-equivalence framing for code
   snippets is moot and any future fold must be measured against that baseline.
-- **P1b — Lossy code fold + resident-form enrichment (§1.2/§1.3/§1.4).** This is
-  the next real increment, and it is **P1b-sized, not a small win**: to fold
+- **P1b — Lossy code fold + resident-form enrichment (§1.2/§1.3/§1.4). DONE
+  default-off (PRs #744 enrichment, #746 fold).** Shipped as a matched-line span on
+  `code_search_hit_t` (computed in the KB search, gated by `ingress_compress_enabled`
+  so the default search query/cost is unchanged — #744), then a fold that replaces
+  the snippet with a compact `file:line` reference under a `code_span_get`-expandable
+  header, with the `X-Aimee-Compress: 0` per-request escape (request context, B1),
+  per-turn telemetry, and `ingress_compress_min_chars` (#746). Below is the original
+  plan; it is **P1b-sized, not a small win**: to fold
   anything meaningful the resident form must first carry a **multi-line** code span
   (signature + relevant lines), which pulls in span enrichment, a reachable
   rehydrate resolver, `transform` tags, the `X-Aimee-Compress` per-call escape, the
@@ -886,7 +910,15 @@ implementer and do not gate the first phase.
   resolve (latency), changes the P0 IR's inline shape, and depends on the same
   resolver/reachability infra, so it lives inside P1b's preconditions, not ahead of
   them. No default flip until P2.
-- **P2 — Durable-read reachability + accuracy A/B for the lossy fold (P1b).** A
+- **P2 — Durable-read reachability + accuracy A/B for the lossy fold (P1b). Resolver
+  DONE (PR #743); accuracy A/B is the open default-flip gate.** Aimee now has a
+  callable `code_span_get` MCP tool — it reads a clamped line range through the
+  active workspace provider with B4 fail-closed path validation (realpath +
+  within-project-root containment + `code_span_max_lines` clamp + control-char
+  reject) and returns a whole-file `source_version` drift hash; the
+  server-dispatch `index.structure` `line_end` drop (#33) is fixed. What remains is
+  the **forced-rehydration accuracy A/B on Aimee's corpora** and proving the
+  resolver is reachable per ingress — both need a live model + registered MCP. A
   lossy code fold recovers via a durable code-span/range read, so its
   forced-rehydration accuracy A/B and its default-flip candidacy need a real
   callable resolver: either add an Aimee MCP `code_span_get`-style tool or prove
@@ -895,26 +927,50 @@ implementer and do not gate the first phase.
   includes `line_end` propagation fixes on server-dispatch `index.structure`.
   `memory_get` is required only before memory handles are emitted. This phase
   does **not** require the new in-process handle store or `rehydrate`.
-- **P2e — Rehydration handle (§3) for ephemeral folds.** When ephemeral folding
-  (JSON/tool-result) enters scope it brings the in-process handle store with the
+- **P2e — Rehydration handle (§3) for ephemeral folds. DEFERRED — no live producer
+  yet.** Durable code folds recover via `code_span_get` and never touch the handle
+  store, and ephemeral JSON/tool-result folding is not yet in the IR, so the store
+  has nothing to mint for. It lands with the first ephemeral fold. When ephemeral
+  folding (JSON/tool-result) enters scope it brings the in-process handle store with
+  the
   full §3.2 safety contract, the `rehydrate` MCP tool + metadata goldens, and the
   injected-tool auth-denial tests. Only ephemeral data needs it; durable folds
   never do.
-- **P3 — Cache-prefix placement (§2)** on every Codex/OpenAI injection path:
-  capability table, no-op default, integration with `payload_rewrite`, placement
-  invariant + body-serialization tests, `agent_execute_messages()` session-scoped
-  prefix tracking, and, if synthetic resolver tools are injected, the full
-  Responses continuation/interception loop. Realized-cache telemetry is consumed
-  from `token_tracker` / the cost-accounting ledger. Does not add a duplicate
-  cache-marking flag; ships after the accounting surface.
-- **P4 — Failure-mined corrections (§4)** emitting learning signals, default-off,
+- **P3 — Cache-prefix placement (§2). Placement invariant DONE default-off (PR
+  #750).** The shared `gw_stage_memory` consolidation (universal-gateway P3) already
+  collapsed the five Codex/OpenAI injection sites into one seam, and the Anthropic
+  arm already split at the `<aimee-context>` marker (`cache_shaping_enabled`); OpenAI
+  caching is automatic longest-prefix, so **placement — not marking — is the only
+  lever there**. PR #750 makes `ingress_preinject_apply` append the volatile envelope
+  *after* the stable instructions prefix when `ingress_cache_placement_enabled` is
+  on, so the prefix cache survives; no duplicate cache-marking flag is added, and the
+  realized `cache_read`/`cache_creation` effect is read from `token_tracker` by the
+  §6 bench (#748). **Deferred follow-up:** the `agent_execute_messages()`
+  `payload_rewrite` session-scoped prefix tracking (§2.5) and chat/completions
+  placement — the bench measures realized cache without the tracker, and the
+  Responses `instructions` arm is the primary Codex seam. The remaining §2 surface:
+- **P4 — Failure-mined corrections (§4). DONE default-off (PR #751).** The
+  `kb_mining.c` recurrence job, when `kb.mining.failure_learning_enabled` is on, now
+  dedups on the `event_type:role:failure_mode` cluster and emits a
+  `db2_learning_signal_insert` + a pending `learning_proposal` (sink `artifact`)
+  instead of writing the `workflow_pattern` artifact directly; a new `artifact` sink
+  in `learning_apply_sink` commits the carried payload only after review /
+  Gate-Promote. One cluster never yields both an artifact and a proposal (§4.4). The
+  original framing: emitting learning signals, default-off,
   promoted through the existing review/Gate-Promote path, preferably by
-  refactoring `kb_mining.c` recurrence rather than creating a parallel miner;
-  use `kb_mining_enabled` plus a narrower job gate or add a fully plumbed
-  `curator_failure_mining_enabled` field.
-- **P5 — Anthropic ingress injection (§2.3)** as a separate opt-in phase behind
-  its own gate, with system-block-array preservation and the Claude-Code MCP
-  tool-call proof.
+  refactoring `kb_mining.c` recurrence rather than creating a parallel miner.
+- **P5 — Anthropic ingress injection (§2.3). DONE default-off (PR #754).** The
+  injector (`messages_apply_preinject`) already appends the envelope as a trailing
+  `system` text block, preserving the Anthropic system-block **array** and any
+  per-block `cache_control` (no `anthropic_system_to_text` flatten). PR #754 adds the
+  opt-in gate `ingress_preinject_anthropic_enabled` (default off, separate from the
+  OpenAI seam) plumbed via a `gw_request_t.allow_anthropic_inject` field set in
+  `anthropic_http.c`, so injection can fire on the Anthropic-native passthrough. The
+  **Claude-Code MCP tool-call proof** (that Claude Code calls the advertised
+  `memory_get`/`code_span_get`/`rehydrate` when the envelope points at them) remains
+  the open reachability gate before any default flip — it needs a live Claude Code
+  with the Aimee MCP server registered. Shipped as a separate opt-in phase behind its
+  own gate, with system-block-array preservation.
 
 ## §8 Risks
 
