@@ -109,11 +109,22 @@ char *ingress_preinject_query_from_messages(const cJSON *messages);
  * confidence tier, and returns a malloc'd <aimee-context> envelope. */
 char *ingress_preinject_build(const char *query, int request_disabled);
 
-/* Prepend `envelope` to `instructions` (the request system prompt), returning a
- * fresh malloc'd string the caller frees. If envelope is NULL/blank, returns a
+/* Merge `envelope` with `instructions` (the request system prompt), returning a
+ * fresh malloc'd string the caller frees. Default: PREPENDS the envelope. When
+ * the cache-prefix placement lever (ingress_cache_placement_enabled, §2) is on,
+ * APPENDS it instead (delegates to ingress_preinject_append) so the stable
+ * instructions prefix stays cacheable. If envelope is NULL/blank, returns a
  * malloc'd copy of instructions (or NULL when instructions is also NULL). Does
- * not free its arguments. Pure. */
+ * not free its arguments. Reads config (the placement flag); not otherwise
+ * stateful. */
 char *ingress_preinject_apply(const char *instructions, const char *envelope);
+
+/* Cache-prefix placement variant (ingress-compression §2): APPEND `envelope`
+ * after `instructions` (stable prefix first, volatile envelope last) so the
+ * provider's automatic prefix cache is not invalidated by the per-turn envelope.
+ * Same contract as ingress_preinject_apply otherwise (malloc'd result; blank
+ * envelope → copy of instructions; pure). */
+char *ingress_preinject_append(const char *instructions, const char *envelope);
 
 /* Per-request override (thread-local): the HTTP layer sets this from the
  * `x-aimee-preinject: 0` request header before dispatching the turn, so a

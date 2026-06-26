@@ -784,6 +784,8 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "ingress_preinject_enabled", 1);
    if (cfg->ingress_compress_enabled)
       cJSON_AddBoolToObject(root, "ingress_compress_enabled", 1);
+   if (cfg->ingress_cache_placement_enabled)
+      cJSON_AddBoolToObject(root, "ingress_cache_placement_enabled", 1);
    if (cfg->ingress_compress_min_chars != 80)
       cJSON_AddNumberToObject(root, "ingress_compress_min_chars", cfg->ingress_compress_min_chars);
    if (cfg->gateway_prevent_subagents)

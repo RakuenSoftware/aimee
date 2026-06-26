@@ -103,6 +103,20 @@ int kb_client_evidence_emit_retrieval_event(const char *turn_id, const char *rol
    (void)n_ids;
    return 0;
 }
+int kb_client_evidence_merge_retrieval_event(const char *turn_id, const char *role,
+                                             const char *query_fingerprint,
+                                             const char *const *types, const char *const *refs,
+                                             const char *const *versions, int n)
+{
+   (void)turn_id;
+   (void)role;
+   (void)query_fingerprint;
+   (void)types;
+   (void)refs;
+   (void)versions;
+   (void)n;
+   return 0;
+}
 /* Stub: deterministic but varying-per-call, so the mint-uniqueness assertion
  * holds without linking the platform layer into this pure unit test. */
 int platform_random_bytes(void *buf, size_t len)
@@ -200,6 +214,30 @@ static void test_apply(void)
    assert(o && strstr(o, "ENV") == o);
    free(o);
    printf("apply OK\n");
+}
+
+/* Cache-prefix placement (§2): append puts the stable instructions first and the
+ * volatile envelope last (mirror of apply). */
+static void test_append(void)
+{
+   /* NULL/blank envelope -> copy of instructions (or NULL). */
+   char *a = ingress_preinject_append("SYS", NULL);
+   assert(a && strcmp(a, "SYS") == 0);
+   free(a);
+   assert(ingress_preinject_append(NULL, NULL) == NULL);
+
+   /* Instructions first, envelope appended, separated by a blank line. */
+   char *m = ingress_preinject_append("SYSTEM PROMPT", "<aimee-context>...</aimee-context>");
+   assert(m != NULL);
+   assert(strstr(m, "SYSTEM PROMPT") == m);                       /* prefix stays at front */
+   assert(strstr(m, "SYSTEM PROMPT\n\n<aimee-context>") != NULL); /* envelope is the suffix */
+   free(m);
+
+   /* NULL instructions -> just the envelope. */
+   char *o = ingress_preinject_append(NULL, "ENV");
+   assert(o && strcmp(o, "ENV") == 0);
+   free(o);
+   printf("append OK\n");
 }
 
 static void test_format_code_block(void)
@@ -414,6 +452,7 @@ int main(void)
    test_format_code_block();
    test_query_from_messages();
    test_apply();
+   test_append();
    test_render_block();
    test_budgeted_build_uses_memory_previews();
    test_turn_id_mint_and_thread_local();

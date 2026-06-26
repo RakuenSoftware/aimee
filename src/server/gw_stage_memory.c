@@ -98,6 +98,11 @@ int gw_stage_memory(gw_request_t *r, void *ud)
       if (!env)
          return 0;
       cJSON *cur = cJSON_GetObjectItemCaseSensitive(r->raw, "instructions");
+      /* ingress_preinject_apply internally honors the cache-prefix placement lever
+       * (§2): default prepend, or append after the stable prefix when
+       * ingress_cache_placement_enabled. Keeping the choice inside the applier
+       * leaves this stage config-free (so every gw_stage_memory consumer links
+       * unchanged). */
       char *merged = ingress_preinject_apply(cur ? cur->valuestring : NULL, env);
       free(env);
       if (!merged)

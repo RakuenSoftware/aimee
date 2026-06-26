@@ -850,6 +850,10 @@ int config_load(config_t *cfg)
    if (cJSON_IsBool(item))
       cfg->ingress_compress_enabled = cJSON_IsTrue(item);
 
+   item = cJSON_GetObjectItemCaseSensitive(root, "ingress_cache_placement_enabled");
+   if (cJSON_IsBool(item))
+      cfg->ingress_cache_placement_enabled = cJSON_IsTrue(item);
+
    item = cJSON_GetObjectItemCaseSensitive(root, "ingress_compress_min_chars");
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
       cfg->ingress_compress_min_chars = (int)item->valuedouble;

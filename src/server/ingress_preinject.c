@@ -648,6 +648,16 @@ char *ingress_preinject_build(const char *query, int request_disabled)
 
 char *ingress_preinject_apply(const char *instructions, const char *envelope)
 {
+   /* Cache-prefix placement (§2): when the lever is on, place the volatile
+    * envelope AFTER the stable instructions prefix (append) instead of before
+    * (prepend), so the provider's automatic prefix cache survives the per-turn
+    * envelope. The choice lives here — not in the caller — so the gateway stage
+    * stays config-free and every consumer links unchanged. Default off => prepend
+    * (byte-identical to before). */
+   config_t cfg;
+   if (config_load(&cfg) == 0 && cfg.ingress_cache_placement_enabled)
+      return ingress_preinject_append(instructions, envelope);
+
    int env_blank = 1;
    if (envelope)
       for (const char *p = envelope; *p; p++)
@@ -666,5 +676,34 @@ char *ingress_preinject_apply(const char *instructions, const char *envelope)
    dstr_append_str(&d, "\n\n");
    if (instructions && instructions[0])
       dstr_append_str(&d, instructions);
+   return dstr_steal(&d);
+}
+
+char *ingress_preinject_append(const char *instructions, const char *envelope)
+{
+   int env_blank = 1;
+   if (envelope)
+      for (const char *p = envelope; *p; p++)
+         if (*p != ' ' && *p != '\t' && *p != '\n' && *p != '\r')
+         {
+            env_blank = 0;
+            break;
+         }
+
+   if (env_blank)
+      return instructions ? strdup(instructions) : NULL;
+
+   /* Cache-prefix placement (§2): the stable instructions prefix stays at the
+    * front and the volatile <aimee-context> envelope lands at the tail, so the
+    * provider's automatic prefix cache (OpenAI/Codex) is not invalidated by the
+    * per-turn envelope. Mirror of ingress_preinject_apply with the order flipped. */
+   dstr_t d;
+   dstr_init(&d);
+   if (instructions && instructions[0])
+   {
+      dstr_append_str(&d, instructions);
+      dstr_append_str(&d, "\n\n");
+   }
+   dstr_append_str(&d, envelope);
    return dstr_steal(&d);
 }

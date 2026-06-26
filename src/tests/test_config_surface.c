@@ -32,7 +32,7 @@ static const char *FIXTURE_A =
     "ZZA_val\nopenai_model: ZZA_val\nopenai_key_cmd: ZZA_val\nclaude_model: ZZA_val\ncodex_model: "
     "ZZA_val\nautonomous: true\nverify_enabled: true\nverify_cross_project: "
     "true\ningress_preinject_enabled: true\ningress_compress_enabled: "
-    "true\ngateway_prevent_subagents: "
+    "true\ningress_cache_placement_enabled: true\ngateway_prevent_subagents: "
     "true\ncss_style_graph_enabled: "
     "true\n"
     "ingress_preinject_assembly_budget: 1\n"
@@ -86,7 +86,7 @@ static const char *FIXTURE_B =
     "ZZB_val\nopenai_model: ZZB_val\nopenai_key_cmd: ZZB_val\nclaude_model: ZZB_val\ncodex_model: "
     "ZZB_val\nautonomous: false\nverify_enabled: false\nverify_cross_project: "
     "false\ningress_preinject_enabled: false\ningress_compress_enabled: "
-    "false\ngateway_prevent_subagents: "
+    "false\ningress_cache_placement_enabled: false\ngateway_prevent_subagents: "
     "false\ncss_style_graph_enabled: "
     "false\n"
     "ingress_preinject_assembly_budget: 4096\n"
@@ -169,6 +169,7 @@ int main(void)
    assert(cfgA.verify_cross_project == 1 && cfgB.verify_cross_project == 0);
    assert(cfgA.ingress_preinject_enabled == 1 && cfgB.ingress_preinject_enabled == 0);
    assert(cfgA.ingress_compress_enabled == 1 && cfgB.ingress_compress_enabled == 0);
+   assert(cfgA.ingress_cache_placement_enabled == 1 && cfgB.ingress_cache_placement_enabled == 0);
    assert(cfgA.gateway_prevent_subagents == 1 && cfgB.gateway_prevent_subagents == 0);
    assert(cfgA.css_style_graph_enabled == 1 && cfgB.css_style_graph_enabled == 0);
    assert(cfgA.ingress_preinject_assembly_budget != cfgB.ingress_preinject_assembly_budget);

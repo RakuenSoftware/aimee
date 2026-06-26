@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (119)
+## CLI-settable keys (120)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -72,6 +72,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `guardrails_semantic_warn_threshold` | float | Semantic score threshold to warn. |
 | `identity_working_profile_injection_enabled` | bool | Inject the working-profile identity into prompts. |
 | `ingress_audit_async` | bool | Audit ingress requests asynchronously. |
+| `ingress_cache_placement_enabled` | bool | Append the <aimee-context> envelope after the stable instructions prefix (not before) so provider prefix caches survive (default off). |
 | `ingress_compress_enabled` | bool | Enable ingress envelope compression: span-enrich code hits and fold code entries into recoverable references (default off). |
 | `ingress_compress_min_chars` | int | Minimum code-snippet length (chars) before it is folded to a file:line reference (default 80). |
 | `ingress_max_raw_scans` | int | Max raw-content scans per ingress request. |

@@ -157,6 +157,8 @@ CFG_KEY_DESC = {
     "fold code entries into recoverable references (default off).",
     "ingress_compress_min_chars": "Minimum code-snippet length (chars) before it is folded to a "
     "file:line reference (default 80).",
+    "ingress_cache_placement_enabled": "Append the <aimee-context> envelope after the stable "
+    "instructions prefix (not before) so provider prefix caches survive (default off).",
     "ingress_trusted_proxy_secret": "Shared secret authenticating a trusted ingress proxy.",
     "ingress_usage_accounting_enabled": "Account token usage on ingress requests.",
     "integrity_dry_run": "Run integrity checks without enforcing.",
