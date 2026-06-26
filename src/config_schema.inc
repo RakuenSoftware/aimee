@@ -8,6 +8,7 @@
 {"kb_client_bearer_token", SCHEMA_STRING, 0},
 {"guardrail_mode", SCHEMA_STRING, 0},
 {"ingress_preinject_enabled", SCHEMA_BOOL, 0},
+{"ingress_preinject_anthropic_enabled", SCHEMA_BOOL, 0},
 {"ingress_compress_enabled", SCHEMA_BOOL, 0},
 {"ingress_cache_placement_enabled", SCHEMA_BOOL, 0},
 {"ingress_compress_min_chars", SCHEMA_INT, 0},

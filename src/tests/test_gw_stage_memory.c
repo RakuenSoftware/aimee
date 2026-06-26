@@ -224,6 +224,29 @@ static void test_anthropic_parity_gate(void)
    printf("anthropic_parity_gate OK\n");
 }
 
+/* P5 (§2.3): the opt-in — with allow_anthropic_inject set, the envelope IS
+ * injected even under parity (the Anthropic-native passthrough), appended as a
+ * trailing system text block so the cached prefix survives. */
+static void test_anthropic_parity_opt_in_inject(void)
+{
+   cJSON *raw = cJSON_Parse(
+       "{\"messages\":[{\"role\":\"user\",\"content\":\"deploy matrix\"}],\"system\":[]}");
+   gw_request_t r = {.raw = raw,
+                     .serving_api = GW_API_ANTHROPIC,
+                     .mem_target = GW_MEM_ANTHROPIC_MESSAGES,
+                     .parity = 1,
+                     .allow_anthropic_inject = 1};
+   assert(gw_stage_memory(&r, NULL) == 0);
+   cJSON *sys = cJSON_GetObjectItemCaseSensitive(raw, "system");
+   assert(cJSON_GetArraySize(sys) == 1); /* injected despite parity */
+   cJSON *blk = cJSON_GetArrayItem(sys, 0);
+   const cJSON *text = cJSON_GetObjectItemCaseSensitive(blk, "text");
+   assert(text && cJSON_IsString(text) && strstr(text->valuestring, "aimee-context") != NULL);
+
+   cJSON_Delete(raw);
+   printf("anthropic_parity_opt_in_inject OK\n");
+}
+
 /* Pre-injection off / recall empty: every target is a byte-identical no-op. */
 static void test_disabled_noop(void)
 {
@@ -292,6 +315,7 @@ int main(void)
    test_instructions_no_prior();
    test_instructions_placement_appends();
    test_anthropic_parity_gate();
+   test_anthropic_parity_opt_in_inject();
    test_disabled_noop();
    printf("all gw_stage_memory tests passed\n");
    return 0;

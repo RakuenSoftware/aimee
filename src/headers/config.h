@@ -335,6 +335,11 @@ typedef struct config
     * system prompt so the external agent stops re-exploring the repo. Default
     * off; a per-request `x-aimee-preinject: 0` header also disables it. */
    int ingress_preinject_enabled;
+   /* ingress-compression P5 (§2.3), default off: inject the <aimee-context>
+    * envelope on the Anthropic-native /v1/messages passthrough (otherwise
+    * parity-skipped to preserve the client's cached prefix). Separate from the
+    * OpenAI/Codex seam's ingress_preinject_enabled. */
+   int ingress_preinject_anthropic_enabled;
    int ingress_preinject_assembly_budget;
    int ingress_max_raw_scans;
    /* ingress-compression P2 (§6.5 B4): max line span the code_span_get recovery

@@ -154,6 +154,8 @@ CFG_KEY_DESC = {
     "(session-isolation guard; default off).",
     "ingress_preinject_assembly_budget": "Token budget for ingress context pre-injection.",
     "ingress_preinject_enabled": "Enable `<aimee-context>` pre-injection on ingress.",
+    "ingress_preinject_anthropic_enabled": "Inject the `<aimee-context>` envelope on the "
+    "Anthropic-native /v1/messages passthrough too (default off).",
     "ingress_compress_enabled": "Enable ingress envelope compression: span-enrich code hits and "
     "fold code entries into recoverable references (default off).",
     "ingress_compress_min_chars": "Minimum code-snippet length (chars) before it is folded to a "

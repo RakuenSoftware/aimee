@@ -784,6 +784,8 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "delegate_graph_context_enabled", 1);
    if (cfg->ingress_preinject_enabled)
       cJSON_AddBoolToObject(root, "ingress_preinject_enabled", 1);
+   if (cfg->ingress_preinject_anthropic_enabled)
+      cJSON_AddBoolToObject(root, "ingress_preinject_anthropic_enabled", 1);
    if (cfg->ingress_compress_enabled)
       cJSON_AddBoolToObject(root, "ingress_compress_enabled", 1);
    if (cfg->ingress_cache_placement_enabled)

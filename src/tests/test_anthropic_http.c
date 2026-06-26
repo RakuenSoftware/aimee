@@ -225,6 +225,14 @@ char *ingress_preinject_apply(const char *instructions, const char *envelope)
    (void)instructions;
    return envelope ? strdup(envelope) : NULL;
 }
+/* messages_run_request_pipeline reads config for the P5 anthropic-inject opt-in;
+ * these whitebox tests run with it off (zeroed). */
+int config_load(config_t *cfg)
+{
+   if (cfg)
+      memset(cfg, 0, sizeof(*cfg));
+   return 0;
+}
 
 /* HTTP-layer stub: agent_http_last_retry_after has no upstream socket here, so 0
  * (no Retry-After) suffices. */

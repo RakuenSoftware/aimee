@@ -223,6 +223,11 @@ static int gw_stage_model_pin(gw_request_t *r, void *ud)
 static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *driver,
                                          const agent_t *ag, int parity, int stream)
 {
+   /* P5 (§2.3): opt-in to inject the envelope on the Anthropic-native passthrough.
+    * Read config here so gw_stage_memory stays config-free. */
+   config_t pcfg;
+   int allow_anthropic_inject =
+       (config_load(&pcfg) == 0 && pcfg.ingress_preinject_anthropic_enabled) ? 1 : 0;
    gw_request_t r = {
        .raw = req,
        .driver = driver,
@@ -233,6 +238,7 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
        .mem_target = GW_MEM_ANTHROPIC_MESSAGES,
        .parity = parity,
        .stream = stream,
+       .allow_anthropic_inject = allow_anthropic_inject,
    };
    static const gw_stage_t stages[] = {
        {gw_stage_memory, NULL, "memory"},

@@ -67,6 +67,11 @@ typedef struct
    gw_mem_target_t mem_target; /* how the memory stage renders the envelope */
    int parity;                 /* serving_api == client_api (no translation needed) */
    int stream;                 /* this call is an SSE stream */
+   int allow_anthropic_inject; /* ingress-compression P5 (§2.3): opt-in to inject the
+                                * <aimee-context> envelope on the Anthropic-native
+                                * passthrough (otherwise parity-skipped). Set by the
+                                * caller from ingress_preinject_anthropic_enabled so
+                                * this stage stays config-free. Default 0. */
 } gw_request_t;
 
 /* A request stage: inspect/alter `r->raw` in place. Returns the number of

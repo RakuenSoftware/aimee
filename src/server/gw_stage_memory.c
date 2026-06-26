@@ -75,11 +75,14 @@ int gw_stage_memory(gw_request_t *r, void *ud)
    switch (r->mem_target)
    {
    case GW_MEM_ANTHROPIC_MESSAGES:
-      /* Parity-gated (ONLY here): the Anthropic-native passthrough must not
-       * perturb the client's cached prefix. messages_apply_preinject derives its
-       * own query from r->raw.messages. Accounting-neutral, like the prior inline
-       * stage (injection is not counted as an intervention here). */
-      if (!r->parity)
+      /* Parity-gated: the Anthropic-native passthrough normally must not perturb
+       * the client's cached prefix, so injection is skipped under parity. P5
+       * (§2.3) adds an explicit opt-in (r->allow_anthropic_inject, set by the
+       * caller from config) to inject on that path too. messages_apply_preinject
+       * derives its own query from r->raw.messages and — via
+       * ingress_preinject_apply on the string-system path — honors the cache-prefix
+       * placement lever. Accounting-neutral (not counted as an intervention). */
+      if (!r->parity || r->allow_anthropic_inject)
          messages_apply_preinject(r->raw);
       return 0;
 

@@ -41,6 +41,8 @@ const config_field_t config_fields[] = {
     {"memory_rerank_enabled", offsetof(config_t, memory_rerank_enabled), sizeof(int), 0, CFG_BOOL},
     {"ingress_preinject_enabled", offsetof(config_t, ingress_preinject_enabled), sizeof(int), 0,
      CFG_BOOL},
+    {"ingress_preinject_anthropic_enabled", offsetof(config_t, ingress_preinject_anthropic_enabled),
+     sizeof(int), 0, CFG_BOOL},
     {"ingress_compress_enabled", offsetof(config_t, ingress_compress_enabled), sizeof(int), 0,
      CFG_BOOL},
     {"ingress_cache_placement_enabled", offsetof(config_t, ingress_cache_placement_enabled),
