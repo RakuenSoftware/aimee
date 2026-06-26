@@ -401,14 +401,11 @@ int handle_index_blast_radius(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
 int handle_index_structure(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-
    const char *project, *file_path;
    if (jo_need_str(req, "project", &project) < 0 || jo_need_str(req, "file_path", &file_path) < 0)
       return server_send_error(conn, "missing project or file_path", NULL);
-
    definition_t defs[256];
    int count = kb_client_index_structure(project, file_path, defs, 256);
-
    cJSON *resp = jo_ok();
    cJSON *arr = cJSON_AddArrayToObject(resp, "definitions");
    for (int i = 0; i < count; i++)
@@ -417,6 +414,9 @@ int handle_index_structure(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       jo_add_str(d, "name", defs[i].name);
       jo_add_str(d, "kind", defs[i].kind);
       cJSON_AddNumberToObject(d, "line", defs[i].line);
+      /* Span-propagation parity (#33): emit line_end like the KB/MCP routes do. */
+      if (defs[i].line_end)
+         cJSON_AddNumberToObject(d, "line_end", defs[i].line_end);
       cJSON_AddItemToArray(arr, d);
    }
    return send_and_free(conn, resp);

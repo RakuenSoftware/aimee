@@ -146,6 +146,8 @@ CFG_KEY_DESC = {
     "identity_working_profile_injection_enabled": "Inject the working-profile identity into prompts.",
     "ingress_audit_async": "Audit ingress requests asynchronously.",
     "ingress_max_raw_scans": "Max raw-content scans per ingress request.",
+    "code_span_max_lines": "Max line span the code_span_get recovery resolver returns per call "
+    "(default 400).",
     "require_session_worktree": "Fail closed on mutating ops outside an aimee-managed worktree "
     "(session-isolation guard; default off).",
     "ingress_preinject_assembly_budget": "Token budget for ingress context pre-injection.",

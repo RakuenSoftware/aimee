@@ -1113,6 +1113,59 @@ static cJSON *mcph_pdf_inspect_structure(struct mcp_call *c)
    return pdf_passthrough(json, status, "pdf_inspect_structure");
 }
 
+/* code_span_get (ingress-compression P2): the recovery resolver for a folded code
+ * reference. Resolves the project's indexed root, then reads a validated, clamped
+ * line range through the active workspace provider (code_span_read does the B4
+ * path-safety + slicing). Bounds the line args via pdf_arg_pos_int so an
+ * out-of-range double can't UB-cast. */
+static cJSON *mcph_code_span_get(struct mcp_call *c)
+{
+   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
+   cJSON *jf = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_path");
+   if (!cJSON_IsString(jp) || !jp->valuestring[0])
+      return text_content("error: code_span_get requires 'project'");
+   if (!cJSON_IsString(jf) || !jf->valuestring[0])
+      return text_content("error: code_span_get requires 'file_path'");
+
+   long long ls = 0, le = 0;
+   int line_start = pdf_arg_pos_int(c->jargs, "line_start", 2000000000.0, &ls) ? (int)ls : 1;
+   int line_end = pdf_arg_pos_int(c->jargs, "line_end", 2000000000.0, &le) ? (int)le : line_start;
+
+   /* Resolve the project's recorded root (the containment anchor). project_info_t
+    * is ~4KB (root[MAX_PATH_LEN]), so heap-allocate the list rather than blow the
+    * server-thread stack. */
+   const int max_projs = 256;
+   project_info_t *projs = calloc((size_t)max_projs, sizeof(*projs));
+   if (!projs)
+      return text_content("error: out of memory");
+   int np = kb_client_index_list(projs, max_projs);
+   if (np < 0)
+   {
+      free(projs);
+      return text_content("error: code index unavailable");
+   }
+   char root[MAX_PATH_LEN] = "";
+   for (int i = 0; i < np; i++)
+      if (strcmp(projs[i].name, jp->valuestring) == 0 && projs[i].root[0])
+      {
+         snprintf(root, sizeof(root), "%s", projs[i].root);
+         break;
+      }
+   free(projs);
+   if (!root[0])
+      return text_content("error: unknown project (no indexed root)");
+
+   config_t cfg;
+   config_load(&cfg);
+   int max_lines = cfg.code_span_max_lines > 0 ? cfg.code_span_max_lines : 400;
+
+   cJSON *result = code_span_read(jp->valuestring, root, jf->valuestring, line_start, line_end,
+                                  max_lines);
+   if (!result)
+      return text_content("error: out of memory");
+   return json_result_content(result);
+}
+
 /* ── name → handler table (exact match; order is irrelevant — names unique) ── */
 
 static const struct
@@ -1180,6 +1233,7 @@ static const struct
     {"task_list", mcph_task_list},
     {"index_find_callers", mcph_index_find_callers},
     {"index_structure", mcph_index_structure},
+    {"code_span_get", mcph_code_span_get},
     {"index_hybrid", mcph_index_hybrid},
     {"index_graph_hubs", mcph_index_graph_hubs},
     {"memory_explain_match", mcph_memory_explain_match},

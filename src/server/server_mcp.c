@@ -7,6 +7,7 @@
 #include "db2/curiosity.h"
 #include "memory.h"
 #include "index.h"
+#include "code_span.h"
 #include "db1.h"
 #include "kb_client.h"
 #include "dashboard.h"

@@ -25,7 +25,7 @@
    "git {action,async,base,body,branch,command,count,depth,diff_stat,files,force,index,job_id,message,mirror,mode,name,number,path,prune,rebase,ref,remote,source,staged,stat_only,state,title,url,wait} req:command\n" \
    "graph {command,entity,episode_key,limit,query} req:command\n" \
    "host {command,name} req:command\n" \
-   "index {command,file_path,max_results,paths,project,query,symbol} req:command\n" \
+   "index {command,file_path,line_end,line_start,max_results,paths,project,query,symbol} req:command\n" \
    "job {command,job_id,max_concurrent,plan_id} req:command\n" \
    "learning {command,correction_text,description,evidence_refs,limit,polarity,signal_type,sink,state,target_key,target_memory_id,title,workflow_project,workflow_signal_type} req:command\n" \
    "list_curiosity_items {limit,state} req:\n" \

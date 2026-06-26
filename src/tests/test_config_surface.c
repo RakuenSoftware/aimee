@@ -35,6 +35,7 @@ static const char *FIXTURE_A =
     "true\ncss_style_graph_enabled: "
     "true\n"
     "ingress_preinject_assembly_budget: 1\n"
+    "code_span_max_lines: 7\n"
     "ingress_max_raw_scans: 3\nembedding_command: ZZA_val\nembedding_model: "
     "ZZA_val\nembedding_endpoint: ZZA_val\nembedding_dim: 1\nmemory_rerank_mode: "
     "ZZA_val\nmemory_rewrite:\n  enabled: true\n  hyde: true\n  decompose: true\n  max_subqueries: "
@@ -87,6 +88,7 @@ static const char *FIXTURE_B =
     "false\ncss_style_graph_enabled: "
     "false\n"
     "ingress_preinject_assembly_budget: 4096\n"
+    "code_span_max_lines: 4096\n"
     "ingress_max_raw_scans: 4096\nembedding_command: ZZB_val\nembedding_model: "
     "ZZB_val\nembedding_endpoint: ZZB_val\nembedding_dim: 4096\nmemory_rerank_mode: "
     "ZZB_val\nmemory_rewrite:\n  enabled: false\n  hyde: false\n  decompose: false\n  "
@@ -167,6 +169,7 @@ int main(void)
    assert(cfgA.gateway_prevent_subagents == 1 && cfgB.gateway_prevent_subagents == 0);
    assert(cfgA.css_style_graph_enabled == 1 && cfgB.css_style_graph_enabled == 0);
    assert(cfgA.ingress_preinject_assembly_budget != cfgB.ingress_preinject_assembly_budget);
+   assert(cfgA.code_span_max_lines != cfgB.code_span_max_lines);
    assert(cfgA.ingress_max_raw_scans != cfgB.ingress_max_raw_scans);
    assert(strcmp(cfgA.embedding_command, cfgB.embedding_command) != 0);
    assert(strcmp(cfgA.embedding_model, cfgB.embedding_model) != 0);

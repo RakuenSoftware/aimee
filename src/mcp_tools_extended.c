@@ -80,6 +80,18 @@ void mcp_add_extended_tools(cJSON *tools)
    ext_prop(t, "project", "string", "Project the file belongs to (optional).");
    ext_require(t, "file_path");
 
+   t = ext_tool(tools, "code_span_get",
+                "Read an exact line range from an indexed source file (the recovery resolver for a "
+                "folded code reference). Returns the span content plus a source_version hash for "
+                "drift detection. The path is validated to stay within the project's workspace.");
+   ext_prop(t, "project", "string", "Project the file belongs to (required for path scoping).");
+   ext_prop(t, "file_path", "string", "File path within the project (relative to its root).");
+   ext_prop(t, "line_start", "integer", "First line to read (1-based; default 1).");
+   ext_prop(t, "line_end", "integer",
+            "Last line to read (1-based, inclusive; default line_start).");
+   ext_require(t, "project");
+   ext_require(t, "file_path");
+
    t = ext_tool(tools, "index_blast_radius",
                 "Impact analysis for one file: the files that depend on it (dependents) and the "
                 "files it depends on (dependencies), from the code index.");
@@ -248,6 +260,7 @@ static const struct fam_def MCP_FAMILIES[] = {
      "Code-index navigation, hybrid retrieval, and graph analytics. Set 'command'.",
      {{"find_callers", "index_find_callers"},
       {"structure", "index_structure"},
+      {"span", "code_span_get"},
       {"blast_radius", "index_blast_radius"},
       {"preview", "preview_blast_radius"},
       {"hybrid", "index_hybrid"},

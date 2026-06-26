@@ -337,6 +337,10 @@ typedef struct config
    int ingress_preinject_enabled;
    int ingress_preinject_assembly_budget;
    int ingress_max_raw_scans;
+   /* ingress-compression P2 (§6.5 B4): max line span the code_span_get recovery
+    * resolver will return in one call. Bounds the per-call recovery cost and a
+    * model-supplied range. */
+   int code_span_max_lines;
    /* Session-isolation guard (opt-in): when on, the PreToolUse attention-guard
     * fails closed on a mutating tool whose target is NOT inside an aimee-managed
     * worktree (.aimee/worktrees/...), forcing every mutating session into an

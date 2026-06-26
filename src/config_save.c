@@ -789,6 +789,8 @@ int config_save(const config_t *cfg)
    if (cfg->ingress_preinject_assembly_budget != 6144)
       cJSON_AddNumberToObject(root, "ingress_preinject_assembly_budget",
                               cfg->ingress_preinject_assembly_budget);
+   if (cfg->code_span_max_lines != 400)
+      cJSON_AddNumberToObject(root, "code_span_max_lines", cfg->code_span_max_lines);
    if (cfg->ingress_max_raw_scans != 0)
       cJSON_AddNumberToObject(root, "ingress_max_raw_scans", cfg->ingress_max_raw_scans);
    if (cfg->require_session_worktree)

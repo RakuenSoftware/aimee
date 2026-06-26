@@ -15,6 +15,7 @@
 {"typed_facts_enabled", SCHEMA_BOOL, 0},
 {"ingress_preinject_assembly_budget", SCHEMA_INT, 0},
 {"ingress_max_raw_scans", SCHEMA_INT, 0},
+{"code_span_max_lines", SCHEMA_INT, 0},
 {"require_session_worktree", SCHEMA_BOOL, 0},
 {"guardrails", SCHEMA_OBJECT, 0},
 {"toolsets", SCHEMA_OBJECT, 0},
