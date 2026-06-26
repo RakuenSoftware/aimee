@@ -872,6 +872,7 @@ int index_code_search(const char *query, const char *project, code_search_hit_t 
    (void)max;
    return -1;
 #else
-   return db2_code_index_code_search(query, project, out, max);
+   /* The direct (non-HTTP) code-search path does not enrich line spans. */
+   return db2_code_index_code_search(query, project, out, max, 0);
 #endif
 }

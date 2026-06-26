@@ -1507,8 +1507,8 @@ int canonical_index_project_lang_breakdown(const char *project, char *buf, size_
 }
 
 int canonical_index_code_search(const char *query, const char *project, code_search_hit_t *out,
-                                int max)
+                                int max, int enrich)
 {
    /* Forward to db2_code_index — same SQL, same connection. */
-   return db2_code_index_code_search(query, project, out, max);
+   return db2_code_index_code_search(query, project, out, max, enrich);
 }

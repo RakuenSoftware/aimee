@@ -117,6 +117,13 @@ typedef struct
     * lets drift detection flag a hit whose live source no longer matches its
     * stored hash. Empty when the row has no recorded hash. */
    char content_hash[80];
+   /* 1-based line of the match within the file (ingress-compression P1b span
+    * enrichment), or 0 when not computed. Approximate: the first verbatim
+    * occurrence of the matched token, which for a common token may precede the
+    * true FTS match — treat as a hint. Populated only when the search is asked to
+    * enrich (the lossy-fold path); 0 on the default search, where the query plan
+    * and result set are unchanged. */
+   int line;
 } code_search_hit_t;
 
 /* Lexical search across indexed code. Returns count of results. Ranking and

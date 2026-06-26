@@ -122,9 +122,11 @@ extern "C"
     * (FTS5 / plainto_tsquery semantics); empty / NULL returns 0. If
     * |project| is non-empty, restricts to that project. Capped at
     * |max|. Returns count (>=0) on success, -1 on DB / connection
-    * error. */
+    * error. When |enrich| is non-zero, also locates each hit's matched line
+    * (out[].line) from file content; 0 leaves line=0 and keeps the query/cost
+    * identical to before (ingress-compression P1b). */
    int db2_code_index_code_search(const char *query, const char *project, code_search_hit_t *out,
-                                  int max);
+                                  int max, int enrich);
 
 #ifdef __cplusplus
 }

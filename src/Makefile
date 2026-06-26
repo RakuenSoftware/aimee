@@ -315,7 +315,7 @@ DB2_SRCS = db2/db2_init.c db2/db2_reembed.c db2/db2_pool.c db2/agent_hints.c db2
 DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Layer 1: Data & policy (memory, index, rules, guardrails, workspace) ---
-DATA_SRCS = rel_types.c memory_fact_gate.c memory_extract_patterns.c memory_pii_gate.c memory_core.c memory_logic.c memory_effective.c memory_health.c memory_conflict.c memory_context.c memory_assemble.c memory_advanced.c memory_prospective.c memory_lifecycle.c memory_directives.c memory_maintenance.c memory_graph.c memory_graph_fusion.c memory_scan.c memory_improve.c memory_episodes.c \
+DATA_SRCS = code_match.c rel_types.c memory_fact_gate.c memory_extract_patterns.c memory_pii_gate.c memory_core.c memory_logic.c memory_effective.c memory_health.c memory_conflict.c memory_context.c memory_assemble.c memory_advanced.c memory_prospective.c memory_lifecycle.c memory_directives.c memory_maintenance.c memory_graph.c memory_graph_fusion.c memory_scan.c memory_improve.c memory_episodes.c \
             index.c extractors.c extractors_extra.c extractors_new_langs.c css_analyze.c css_oracle.c css_render_oracle.c css_render_cmd.c \
             context_discover.c tasks.c learning_router.c learning_implicit.c dogfood.c working_profile.c guardrails.c guardrails_orchestrator.c guardrails_tdd.c workflow_learn.c session_state.c session_briefing.c file_safety.c branch_ownership.c integrity_gate.c conversation_context.c payload_rewrite.c guardrails_semantic.c guardrails_blast_radius.c gateway_policy.c gateway_pipeline.c gateway_delegate.c \
             workspace.c worktree_gc.c workspace_manifest.c workspace_handle.c server/agent_config.c cmd_describe.c \
@@ -410,7 +410,7 @@ KB_CORE_SRCS = $(filter-out db1/%,$(CORE_SRCS))
 KB_CORE_OBJS = $(KB_CORE_SRCS:%.c=$(OBJDIR)/kb/%.o) $(OBJDIR)/cJSON.o
 KB_DB2_PG_OBJS = $(DB2_PG_SRCS:%.c=$(OBJDIR)/kb/%.o)
 KB_DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/kb/%.o)
-KB_DATA_SRCS = rel_types.c memory_fact_gate.c memory_extract_patterns.c memory_pii_gate.c memory_core.c memory_logic.c memory_effective.c memory_health.c memory_conflict.c memory_context.c memory_assemble.c memory_advanced.c memory_prospective.c memory_lifecycle.c memory_directives.c memory_maintenance.c memory_graph.c memory_graph_fusion.c memory_scan.c memory_improve.c memory_episodes.c \
+KB_DATA_SRCS = code_match.c rel_types.c memory_fact_gate.c memory_extract_patterns.c memory_pii_gate.c memory_core.c memory_logic.c memory_effective.c memory_health.c memory_conflict.c memory_context.c memory_assemble.c memory_advanced.c memory_prospective.c memory_lifecycle.c memory_directives.c memory_maintenance.c memory_graph.c memory_graph_fusion.c memory_scan.c memory_improve.c memory_episodes.c \
                index.c extractors.c extractors_extra.c extractors_new_langs.c css_analyze.c css_oracle.c css_render_oracle.c css_render_cmd.c \
                dogfood.c learning_router.c learning_implicit.c integrity_gate.c session_briefing.c workspace.c workspace_manifest.c workspace_handle.c memory_profile_pack.c wiki_render.c kb/kb.c kb/kb_fusion.c kb/kb_neardup.c kb/kb_conventions.c sketch.c learning_evidence.c learning_bundle.c kb/kb_calibrate.c kb/kb_demote.c kb/kb_features.c kb/kb_ranker.c kb/kb_detect.c kb/kb_reasoning.c kb/kb_bandit.c kb/kb_planner.c kb/roadmap.c kb/kb_mdl.c
 KB_DATA_OBJS = $(KB_DATA_SRCS:%.c=$(OBJDIR)/kb/%.o)

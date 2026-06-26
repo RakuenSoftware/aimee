@@ -68,9 +68,11 @@ extern "C"
                                     int max);
 
    /* Full-text code search across file_contents. |project| may be NULL/empty
-    * to search all indexed projects. Returns count of hits, or -1 on error. */
+    * to search all indexed projects. Returns count of hits, or -1 on error.
+    * |enrich| non-zero locates each hit's matched line (ingress-compression P1b);
+    * 0 keeps the query/cost identical to before. */
    int canonical_index_code_search(const char *query, const char *project, code_search_hit_t *out,
-                                   int max);
+                                   int max, int enrich);
 
    /* Count indexed files and definition-kind terms for the project
     * named |project|. Either out pointer may be NULL. Both counts

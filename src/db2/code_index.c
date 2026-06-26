@@ -1,7 +1,8 @@
 /* db2/code_index.c: code-index primitives — Postgres via libpq. */
 
 #include "code_index.h"
-#include "../headers/aimee.h" /* MAX_PATH_LEN, now_utc */
+#include "../headers/aimee.h"      /* MAX_PATH_LEN, now_utc */
+#include "../headers/code_match.h" /* code_match_line (P1b span enrichment) */
 #include "db2.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
@@ -723,7 +724,7 @@ int db2_code_index_file_replace(int64_t file_id, const code_index_file_data_t *d
 }
 
 int db2_code_index_code_search(const char *query, const char *project, code_search_hit_t *out,
-                               int max)
+                               int max, int enrich)
 {
    if (!query || !query[0] || !out || max <= 0)
       return query && !query[0] ? 0 : -1;
@@ -734,64 +735,66 @@ int db2_code_index_code_search(const char *query, const char *project, code_sear
    const int filter_project = (project && project[0]) ? 1 : 0;
    const int shim = aimee_pg_is_shim();
 
+   /* P1b span enrichment: when `enrich`, also fetch the matched file's content as
+    * a 6th column so the matched line can be located server-side (the int line
+    * crosses the wire, not the content). The pg path already JOINs file_contents
+    * (fc.content); the shim path JOINs it in only when enriching. When !enrich the
+    * composed SQL is the same query (same plan, result set, and cost) as the
+    * prior literals — the default-off guarantee. */
+   const char *sel_content = !enrich ? "" : (shim ? ", fcs.content" : ", fc.content");
+   const char *join_content =
+       (enrich && shim) ? " JOIN file_contents fcs ON fcs.file_id = f.id" : "";
+
    /* The DB2 shim path exposes snippet/rank, while the primary DB2 path uses
     * ts_headline/ts_rank. The same JOIN shape works because `code_fts`
     * presents rowid + fts_tsv columns over file_contents. */
-   const char *sql = NULL;
+   char sql[1400];
    if (shim && filter_project)
-      sql = "SELECT p.name, f.path,"
-            " snippet(code_fts, 0, '>>>', '<<<', '...', 20),"
-            " rank,"
-            " f.hash"
-            " FROM code_fts"
-            " JOIN files f ON f.id = code_fts.rowid"
-            " JOIN projects p ON p.id = f.project_id"
-            " WHERE code_fts MATCH ?1 AND p.name = ?2"
-            "   AND f.path NOT LIKE '.%'"
-            "   AND f.path NOT LIKE '%/.%'"
-            "   AND p.root NOT LIKE '%/.%'"
-            " ORDER BY rank LIMIT ?3";
+      snprintf(sql, sizeof(sql),
+               "SELECT p.name, f.path,"
+               " snippet(code_fts, 0, '>>>', '<<<', '...', 20), rank, f.hash%s"
+               " FROM code_fts JOIN files f ON f.id = code_fts.rowid"
+               " JOIN projects p ON p.id = f.project_id%s"
+               " WHERE code_fts MATCH ?1 AND p.name = ?2"
+               "   AND f.path NOT LIKE '.%%' AND f.path NOT LIKE '%%/.%%'"
+               "   AND p.root NOT LIKE '%%/.%%' ORDER BY rank LIMIT ?3",
+               sel_content, join_content);
    else if (shim)
-      sql = "SELECT p.name, f.path,"
-            " snippet(code_fts, 0, '>>>', '<<<', '...', 20),"
-            " rank,"
-            " f.hash"
-            " FROM code_fts"
-            " JOIN files f ON f.id = code_fts.rowid"
-            " JOIN projects p ON p.id = f.project_id"
-            " WHERE code_fts MATCH ?1"
-            "   AND f.path NOT LIKE '.%'"
-            "   AND f.path NOT LIKE '%/.%'"
-            "   AND p.root NOT LIKE '%/.%'"
-            " ORDER BY rank LIMIT ?2";
+      snprintf(sql, sizeof(sql),
+               "SELECT p.name, f.path,"
+               " snippet(code_fts, 0, '>>>', '<<<', '...', 20), rank, f.hash%s"
+               " FROM code_fts JOIN files f ON f.id = code_fts.rowid"
+               " JOIN projects p ON p.id = f.project_id%s"
+               " WHERE code_fts MATCH ?1"
+               "   AND f.path NOT LIKE '.%%' AND f.path NOT LIKE '%%/.%%'"
+               "   AND p.root NOT LIKE '%%/.%%' ORDER BY rank LIMIT ?2",
+               sel_content, join_content);
    else if (filter_project)
-      sql = "SELECT p.name, f.path,"
-            " ts_headline('simple', fc.content, plainto_tsquery('simple', ?1),"
-            " 'StartSel=>>>, StopSel=<<<, MaxWords=20'),"
-            " ts_rank(fc.code_fts_tsv, plainto_tsquery('simple', ?1)),"
-            " f.hash"
-            " FROM file_contents fc"
-            " JOIN files f ON f.id = fc.file_id"
-            " JOIN projects p ON p.id = f.project_id"
-            " WHERE fc.code_fts_tsv @@ plainto_tsquery('simple', ?1) AND p.name = ?2"
-            "   AND f.path NOT LIKE '.%'"
-            "   AND f.path NOT LIKE '%/.%'"
-            "   AND p.root NOT LIKE '%/.%'"
-            " ORDER BY ts_rank(fc.code_fts_tsv, plainto_tsquery('simple', ?1)) DESC LIMIT ?3";
+      snprintf(sql, sizeof(sql),
+               "SELECT p.name, f.path,"
+               " ts_headline('simple', fc.content, plainto_tsquery('simple', ?1),"
+               " 'StartSel=>>>, StopSel=<<<, MaxWords=20'),"
+               " ts_rank(fc.code_fts_tsv, plainto_tsquery('simple', ?1)), f.hash%s"
+               " FROM file_contents fc JOIN files f ON f.id = fc.file_id"
+               " JOIN projects p ON p.id = f.project_id"
+               " WHERE fc.code_fts_tsv @@ plainto_tsquery('simple', ?1) AND p.name = ?2"
+               "   AND f.path NOT LIKE '.%%' AND f.path NOT LIKE '%%/.%%'"
+               "   AND p.root NOT LIKE '%%/.%%'"
+               " ORDER BY ts_rank(fc.code_fts_tsv, plainto_tsquery('simple', ?1)) DESC LIMIT ?3",
+               sel_content);
    else
-      sql = "SELECT p.name, f.path,"
-            " ts_headline('simple', fc.content, plainto_tsquery('simple', ?1),"
-            " 'StartSel=>>>, StopSel=<<<, MaxWords=20'),"
-            " ts_rank(fc.code_fts_tsv, plainto_tsquery('simple', ?1)),"
-            " f.hash"
-            " FROM file_contents fc"
-            " JOIN files f ON f.id = fc.file_id"
-            " JOIN projects p ON p.id = f.project_id"
-            " WHERE fc.code_fts_tsv @@ plainto_tsquery('simple', ?1)"
-            "   AND f.path NOT LIKE '.%'"
-            "   AND f.path NOT LIKE '%/.%'"
-            "   AND p.root NOT LIKE '%/.%'"
-            " ORDER BY ts_rank(fc.code_fts_tsv, plainto_tsquery('simple', ?1)) DESC LIMIT ?2";
+      snprintf(sql, sizeof(sql),
+               "SELECT p.name, f.path,"
+               " ts_headline('simple', fc.content, plainto_tsquery('simple', ?1),"
+               " 'StartSel=>>>, StopSel=<<<, MaxWords=20'),"
+               " ts_rank(fc.code_fts_tsv, plainto_tsquery('simple', ?1)), f.hash%s"
+               " FROM file_contents fc JOIN files f ON f.id = fc.file_id"
+               " JOIN projects p ON p.id = f.project_id"
+               " WHERE fc.code_fts_tsv @@ plainto_tsquery('simple', ?1)"
+               "   AND f.path NOT LIKE '.%%' AND f.path NOT LIKE '%%/.%%'"
+               "   AND p.root NOT LIKE '%%/.%%'"
+               " ORDER BY ts_rank(fc.code_fts_tsv, plainto_tsquery('simple', ?1)) DESC LIMIT ?2",
+               sel_content);
 
    char err[CIDX_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -821,6 +824,15 @@ int db2_code_index_code_search(const char *query, const char *project, code_sear
       snprintf(out[count].snippet, sizeof(out[count].snippet), "%s", snip ? snip : "");
       out[count].rank = rnk;
       snprintf(out[count].content_hash, sizeof(out[count].content_hash), "%s", fhash ? fhash : "");
+      /* P1b: locate the matched line from the file content (column 5), without
+       * copying the content out. 0 when not enriching or not locatable. */
+      out[count].line = 0;
+      if (enrich)
+      {
+         const char *content = aimee_pg_column_text(st, 5);
+         if (content && snip)
+            out[count].line = code_match_line(content, snip);
+      }
       count++;
    }
    aimee_pg_finalize(st);

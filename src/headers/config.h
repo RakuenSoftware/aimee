@@ -341,6 +341,11 @@ typedef struct config
     * resolver will return in one call. Bounds the per-call recovery cost and a
     * model-supplied range. */
    int code_span_max_lines;
+   /* ingress-compression master gate (§6.5 B8), default off. When on, code-search
+    * hits are span-enriched (the matched line is located) and the ingress envelope
+    * folds code entries into recoverable references; off keeps the search query,
+    * cost, and envelope byte-identical. */
+   int ingress_compress_enabled;
    /* Session-isolation guard (opt-in): when on, the PreToolUse attention-guard
     * fails closed on a mutating tool whose target is NOT inside an aimee-managed
     * worktree (.aimee/worktrees/...), forcing every mutating session into an

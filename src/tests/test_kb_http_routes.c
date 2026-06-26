@@ -537,8 +537,10 @@ typedef struct
    char content_hash[80];
 } test_code_search_hit_t;
 
-int canonical_index_code_search(const char *query, const char *project, void *out, int max)
+int canonical_index_code_search(const char *query, const char *project, void *out, int max,
+                                int enrich)
 {
+   (void)enrich;
    assert(query);
    assert(out);
    if (strcmp(query, "needle") != 0 || !project || strcmp(project, "proj-alpha") != 0)

@@ -152,6 +152,8 @@ CFG_KEY_DESC = {
     "(session-isolation guard; default off).",
     "ingress_preinject_assembly_budget": "Token budget for ingress context pre-injection.",
     "ingress_preinject_enabled": "Enable `<aimee-context>` pre-injection on ingress.",
+    "ingress_compress_enabled": "Enable ingress envelope compression: span-enrich code hits and "
+    "fold code entries into recoverable references (default off).",
     "ingress_trusted_proxy_secret": "Shared secret authenticating a trusted ingress proxy.",
     "ingress_usage_accounting_enabled": "Account token usage on ingress requests.",
     "integrity_dry_run": "Run integrity checks without enforcing.",

@@ -91,6 +91,7 @@ static int kb_index_code_search_parse(cJSON *resp, code_search_hit_t *out, int m
          cJSON *f = cJSON_GetObjectItemCaseSensitive(h, "file_path");
          cJSON *s = cJSON_GetObjectItemCaseSensitive(h, "snippet");
          cJSON *r = cJSON_GetObjectItemCaseSensitive(h, "rank");
+         cJSON *ln = cJSON_GetObjectItemCaseSensitive(h, "line");
          if (cJSON_IsString(p))
             snprintf(out[count].project, sizeof(out[count].project), "%s", p->valuestring);
          if (cJSON_IsString(f))
@@ -98,6 +99,9 @@ static int kb_index_code_search_parse(cJSON *resp, code_search_hit_t *out, int m
          if (cJSON_IsString(s))
             snprintf(out[count].snippet, sizeof(out[count].snippet), "%s", s->valuestring);
          out[count].rank = cJSON_IsNumber(r) ? r->valuedouble : 0.0;
+         /* P1b span enrichment: matched line, present only when the search
+          * enriched (absent -> 0). */
+         out[count].line = (cJSON_IsNumber(ln) && ln->valueint > 0) ? ln->valueint : 0;
          count++;
       }
    }

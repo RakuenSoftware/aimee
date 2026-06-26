@@ -348,7 +348,11 @@ int handle_get_code_search(const char *query_string, char *out_buf, int out_cap)
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
       return 500;
    }
-   int n = canonical_index_code_search(query, project[0] ? project : NULL, hits, max_r);
+   /* Enrich matched-line spans only when ingress compression is enabled (the
+    * lossy-fold consumer). Default-off keeps the query and JSON identical. */
+   config_t scfg;
+   int enrich = (config_load(&scfg) == 0 && scfg.ingress_compress_enabled) ? 1 : 0;
+   int n = canonical_index_code_search(query, project[0] ? project : NULL, hits, max_r, enrich);
    if (n < 0)
    {
       free(hits);
@@ -375,6 +379,9 @@ int handle_get_code_search(const char *query_string, char *out_buf, int out_cap)
       cJSON_AddNumberToObject(hit, "rank", hits[i].rank);
       /* P2 Layer-1: file content hash for citation + drift detection. */
       cJSON_AddStringToObject(hit, "content_hash", hits[i].content_hash);
+      /* P1b span enrichment: 1-based matched line, only when computed (>0). */
+      if (hits[i].line > 0)
+         cJSON_AddNumberToObject(hit, "line", hits[i].line);
       cJSON_AddItemToArray(arr, hit);
    }
    cJSON_AddNullToObject(resp, "next_cursor");
@@ -573,8 +580,9 @@ int handle_get_code_hybrid(const char *query_string, char *out_buf, int out_cap)
       return 500;
    }
 
-   /* Signal A — lexical code (key = file_path). */
-   int nc = canonical_index_code_search(query, proj, chits, HYBRID_PER_SIGNAL);
+   /* Signal A — lexical code (key = file_path). No span enrichment here — hybrid
+    * ranking does not surface matched-line spans. */
+   int nc = canonical_index_code_search(query, proj, chits, HYBRID_PER_SIGNAL, 0);
    if (nc < 0)
       nc = 0;
    for (int i = 0; i < nc; i++)

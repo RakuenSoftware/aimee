@@ -782,6 +782,8 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "claude_cli_delegate_enabled", 1);
    if (cfg->ingress_preinject_enabled)
       cJSON_AddBoolToObject(root, "ingress_preinject_enabled", 1);
+   if (cfg->ingress_compress_enabled)
+      cJSON_AddBoolToObject(root, "ingress_compress_enabled", 1);
    if (cfg->gateway_prevent_subagents)
       cJSON_AddBoolToObject(root, "gateway_prevent_subagents", 1);
    if (cfg->gateway_pin_model)

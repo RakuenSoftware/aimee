@@ -844,6 +844,10 @@ int config_load(config_t *cfg)
    if (cJSON_IsBool(item))
       cfg->ingress_preinject_enabled = cJSON_IsTrue(item);
 
+   item = cJSON_GetObjectItemCaseSensitive(root, "ingress_compress_enabled");
+   if (cJSON_IsBool(item))
+      cfg->ingress_compress_enabled = cJSON_IsTrue(item);
+
    item = cJSON_GetObjectItemCaseSensitive(root, "gateway_prevent_subagents");
    if (cJSON_IsBool(item))
       cfg->gateway_prevent_subagents = cJSON_IsTrue(item);
