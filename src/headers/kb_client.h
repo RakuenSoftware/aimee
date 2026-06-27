@@ -1069,6 +1069,13 @@ int kb_client_index_structure(const char *project, const char *file_path, defini
 int kb_client_index_find_callers(const char *project, const char *symbol, caller_hit_t *out,
                                  int max);
 
+/* S6: cross-repo dependency edges for `project` (required). `direction`
+ * (out|in|both), `min_tier` (high|medium|tentative) may be NULL/empty for the kb
+ * defaults; status_ambiguous!=0 requests the AMBIGUOUS review queue instead of
+ * edges. Returns the raw kb JSON body (caller frees) or NULL if kb unreachable. */
+char *kb_client_index_cross_repo_deps_json(const char *project, const char *direction,
+                                           const char *min_tier, int status_ambiguous);
+
 /* Full-text code search across indexed file contents.  `project` may be
  * NULL/empty to search all projects.  Returns count, or 0 if kb is
  * unreachable.  Uses /v1 over remote HTTP or local UDS.

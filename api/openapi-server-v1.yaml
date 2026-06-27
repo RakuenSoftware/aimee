@@ -1241,6 +1241,42 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /index/deps:
+    post:
+      summary: Cross-repo dependency edges for a registered repo
+      description: >-
+        Proxies the kb cross-repo dependency query. Returns confidence-tiered
+        edges with evidence + a version stamp, or the AMBIGUOUS review queue when
+        status=ambiguous. The canonical query is OUT-only today (S4a); direction
+        in/both is rejected with 400 until reverse traversal lands.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project]
+              properties:
+                project: { type: string }
+                direction: { type: string, enum: [out], default: out }
+                min_tier: { type: string, enum: [high, medium, tentative] }
+                status: { type: string, enum: [ambiguous] }
+      responses:
+        "200":
+          description: Cross-repo dependency edges or ambiguous review queue
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing project or invalid body
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "502":
+          description: Index backend (aimee-kb) unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /index/blast_radius:
     post:
       summary: Dependency blast radius for an indexed file

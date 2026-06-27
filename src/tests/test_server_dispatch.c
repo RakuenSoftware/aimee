@@ -531,6 +531,10 @@ int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
 {
    return stub_handler(conn, "index.find_callers");
 }
+int handle_index_deps(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "index.deps");
+}
 int handle_graph_sync_code(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "graph.sync_code");

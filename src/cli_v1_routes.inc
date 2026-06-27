@@ -169,6 +169,7 @@ static const struct
     {"index", "blast-radius", "index.blast_radius", NULL, NULL, 0},
     {"index", "structure", "index.structure", NULL, NULL, 0},
     {"index", "callers", "index.find_callers", NULL, NULL, 0},
+    {"index", "deps", "index.deps", NULL, NULL, 0},
     {"workspace", "add", "workspace.add", NULL, NULL, 300000},
     {"workspace", "list", "workspace.list", NULL, NULL, 0},
     {"workspace", "get", "workspace.get", NULL, NULL, 0},
@@ -693,6 +694,28 @@ static cJSON *marshal_index_find_callers(int argc, char **argv)
       cJSON_AddStringToObject(req, "symbol", argv[0]);
    if (argc > 1)
       cJSON_AddStringToObject(req, "project", argv[1]);
+   return req;
+}
+
+/* Marshal `aimee index deps <project> [--tier T] [--review]` (§B). --tier sets
+ * the minimum emitted tier (high|medium|tentative); --review lists the AMBIGUOUS
+ * queue (status=ambiguous). The kb canonical query is OUT-only today, so
+ * --reverse (direction=in) and --dry-run (per-stage offline inspection) are
+ * deferred to the slices that implement reverse traversal / candidate emission. */
+static cJSON *marshal_index_deps(int argc, char **argv)
+{
+   static const char *bools[] = {"review", NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bools, &opts);
+
+   cJSON *req = marshal_no_args("index.deps");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "project", opts.positional[0]);
+   const char *tier = rpc_get(&opts, "tier");
+   if (tier)
+      cJSON_AddStringToObject(req, "min_tier", tier);
+   if (rpc_get(&opts, "review"))
+      cJSON_AddStringToObject(req, "status", "ambiguous");
    return req;
 }
 
@@ -3235,6 +3258,8 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_index_structure(argc, argv);
    if (strcmp(method, "index.find_callers") == 0)
       return marshal_index_find_callers(argc, argv);
+   if (strcmp(method, "index.deps") == 0)
+      return marshal_index_deps(argc, argv);
    if (strcmp(method, "graph.sync_code") == 0)
       return marshal_graph_sync_code(argc, argv);
    if (strcmp(method, "graph.explain") == 0)
@@ -4851,6 +4876,61 @@ static void print_index_callers(cJSON *resp)
    }
 }
 
+/* S6: `aimee index deps`. Two response shapes: the AMBIGUOUS review queue
+ * (--review / status=ambiguous) carries an `ambiguous` array + `overflow.dropped`;
+ * the default carries a `deps` edge array + `truncated`. */
+static void print_index_deps(cJSON *resp)
+{
+   cJSON *amb = cJSON_GetObjectItemCaseSensitive(resp, "ambiguous");
+   if (cJSON_IsArray(amb))
+   {
+      if (cJSON_GetArraySize(amb) == 0)
+         printf("No ambiguous candidates in the review queue.\n");
+      cJSON *a;
+      cJSON_ArrayForEach(a, amb)
+      {
+         cJSON *score = cJSON_GetObjectItemCaseSensitive(a, "evidence_score");
+         printf("  %s -> %s  [%s, score %.2f]  %s\n", json_str(a, "caller_repo"),
+                json_str(a, "candidate_definer"), json_str(a, "review_class"),
+                cJSON_IsNumber(score) ? score->valuedouble : 0.0, json_str(a, "symbol"));
+      }
+      cJSON *ov = cJSON_GetObjectItemCaseSensitive(resp, "overflow");
+      cJSON *dropped = ov ? cJSON_GetObjectItemCaseSensitive(ov, "dropped") : NULL;
+      if (cJSON_IsNumber(dropped) && dropped->valuedouble > 0)
+         printf("WARNING: %d ambiguous candidate(s) dropped from the review queue (overflow); "
+                "tune distinctiveness or widen review_queue_max.\n",
+                (int)dropped->valuedouble);
+      return;
+   }
+
+   cJSON *deps = cJSON_GetObjectItemCaseSensitive(resp, "deps");
+   if (!cJSON_IsArray(deps) || cJSON_GetArraySize(deps) == 0)
+   {
+      printf("No cross-repo dependencies found.\n");
+      return;
+   }
+   cJSON *d;
+   cJSON_ArrayForEach(d, deps)
+   {
+      cJSON *sc = cJSON_GetObjectItemCaseSensitive(d, "symbol_count");
+      cJSON *cc = cJSON_GetObjectItemCaseSensitive(d, "call_site_count");
+      cJSON *ex = cJSON_GetObjectItemCaseSensitive(d, "example");
+      printf("  %s -> %s  %-7s  (%d symbol(s), %d call site(s))\n", json_str(d, "caller_repo"),
+             json_str(d, "definer_repo"), json_str(d, "tier"),
+             cJSON_IsNumber(sc) ? (int)sc->valuedouble : 0,
+             cJSON_IsNumber(cc) ? (int)cc->valuedouble : 0);
+      if (ex && json_str(ex, "symbol")[0])
+      {
+         cJSON *line = cJSON_GetObjectItemCaseSensitive(ex, "line");
+         printf("      e.g. %s at %s:%d\n", json_str(ex, "symbol"), json_str(ex, "file"),
+                cJSON_IsNumber(line) ? (int)line->valuedouble : 0);
+      }
+   }
+   cJSON *trunc = cJSON_GetObjectItemCaseSensitive(resp, "truncated");
+   if (cJSON_IsBool(trunc) && cJSON_IsTrue(trunc))
+      printf("(results truncated; narrow the query)\n");
+}
+
 static void print_hud_status(cJSON *resp)
 {
    cJSON *mode = cJSON_GetObjectItemCaseSensitive(resp, "mode");
@@ -5441,6 +5521,10 @@ static void pt_print_index_structure(const char *method, cJSON *resp)
 static void pt_print_index_find_callers(const char *method, cJSON *resp)
 {
    print_index_callers(resp);
+}
+static void pt_print_index_deps(const char *method, cJSON *resp)
+{
+   print_index_deps(resp);
 }
 static void pt_print_graph_sync_code(const char *method, cJSON *resp)
 {
@@ -6469,6 +6553,7 @@ static const struct
     {"index.blast_radius", pt_print_index_blast_radius},
     {"index.structure", pt_print_index_structure},
     {"index.find_callers", pt_print_index_find_callers},
+    {"index.deps", pt_print_index_deps},
     {"graph.sync_code", pt_print_graph_sync_code},
     {"workspace.add", pt_print_workspace_add},
     {"workspace.list", pt_print_workspace_list},

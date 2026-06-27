@@ -652,3 +652,51 @@ int kb_client_index_find_callers(const char *project, const char *symbol, caller
    cJSON_Delete(resp);
    return count;
 }
+
+/* S6: cross-repo dependency proxy. The kb response is rich (per-edge evidence +
+ * version stamp, or a separate AMBIGUOUS review-queue shape when status=ambiguous)
+ * so we forward the raw kb body verbatim rather than flatten it into a struct —
+ * same passthrough idiom as kb_client_index_blast_radius_preview_json. Caller frees
+ * the returned string; NULL means the kb was unreachable or returned no body. */
+char *kb_client_index_cross_repo_deps_json(const char *project, const char *direction,
+                                           const char *min_tier, int status_ambiguous)
+{
+   if (!project || !project[0])
+      return NULL;
+
+   char *project_q = kb_client_query_escape(project);
+   char *direction_q = (direction && direction[0]) ? kb_client_query_escape(direction) : NULL;
+   char *min_tier_q = (min_tier && min_tier[0]) ? kb_client_query_escape(min_tier) : NULL;
+   if (!project_q || ((direction && direction[0]) && !direction_q) ||
+       ((min_tier && min_tier[0]) && !min_tier_q))
+   {
+      free(project_q);
+      free(direction_q);
+      free(min_tier_q);
+      return NULL;
+   }
+
+   size_t path_len =
+       strlen("/v1/code/cross-repo-deps?project=&direction=&min_tier=&status=ambiguous") +
+       strlen(project_q) + (direction_q ? strlen(direction_q) : 0) +
+       (min_tier_q ? strlen(min_tier_q) : 0) + 8;
+   char *path = malloc(path_len);
+   if (!path)
+   {
+      free(project_q);
+      free(direction_q);
+      free(min_tier_q);
+      return NULL;
+   }
+   snprintf(path, path_len, "/v1/code/cross-repo-deps?project=%s%s%s%s%s%s", project_q,
+            direction_q ? "&direction=" : "", direction_q ? direction_q : "",
+            min_tier_q ? "&min_tier=" : "", min_tier_q ? min_tier_q : "",
+            status_ambiguous ? "&status=ambiguous" : "");
+   free(project_q);
+   free(direction_q);
+   free(min_tier_q);
+
+   char *json = kb_client_v1_get_json(path, KB_CLIENT_INDEX_READ_TIMEOUT_MS, NULL);
+   free(path);
+   return json;
+}

@@ -1636,6 +1636,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/index/list", NULL, RM_EXACT, "index.list", 0, rh_dispatch_op},
     {"POST", "/v1/index/structure", NULL, RM_EXACT, "index.structure", 0, rh_dispatch_op},
     {"POST", "/v1/index/find_callers", NULL, RM_EXACT, "index.find_callers", 0, rh_dispatch_op},
+    {"POST", "/v1/index/deps", NULL, RM_EXACT, "index.deps", 0, rh_dispatch_op},
     {"POST", "/v1/index/blast_radius", NULL, RM_EXACT, "index.blast_radius", 0, rh_dispatch_op},
 
     /* Skill + work-queue read families (hub-migration P1), same dispatch-backed

@@ -102,6 +102,7 @@ static const struct
     {"identity.show", "GET", "/v1/identity/show"},
     {"identity.snapshot", "POST", "/v1/identity/snapshot"},
     {"index.blast_radius", "POST", "/v1/index/blast_radius"},
+    {"index.deps", "POST", "/v1/index/deps"},
     {"index.find", "POST", "/v1/index/find"},
     {"index.find_callers", "POST", "/v1/index/find_callers"},
     {"index.list", "POST", "/v1/index/list"},

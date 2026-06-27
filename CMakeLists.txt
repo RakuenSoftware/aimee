@@ -826,6 +826,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/vault_capability.c
     ${AIMEE_SRC_DIR}/server/server_vault.c
     ${AIMEE_SRC_DIR}/server/server_state.c
+    ${AIMEE_SRC_DIR}/server/server_state_index.c
     ${AIMEE_SRC_DIR}/server/harness_memory_routes.c
     ${AIMEE_SRC_DIR}/server/server_plugin.c
     ${AIMEE_SRC_DIR}/server/server_work.c
