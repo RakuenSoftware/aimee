@@ -2,6 +2,7 @@
 #include "platform.h" /* AIMEE_POSIX */
 #include "code_collect.h"
 #include "client_constants.h" /* MAX_PATH_LEN */
+#include "util.h"             /* GIT_SAFE_ENV */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -152,13 +153,11 @@ static int code_collect_walk(const char *root, const char *rel, code_collect_fil
  * THIS change touch" — e.g. blast-radius — read the working tree via their own
  * reader and deliberately do NOT route through here.) */
 
-/* Prefix for every git invocation. This runs in an automated indexing path, so a
- * git command must NEVER block on an interactive credential or SSH-passphrase
- * prompt (GIT_TERMINAL_PROMPT=0 makes git fail fast instead), and a network-bound
- * step like `remote set-head -a` must time out rather than hang the drain
- * (BatchMode=yes + a short ConnectTimeout). Local repos never hit the network. */
-#define GIT_SAFE_ENV                                                                               \
-   "GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -o BatchMode=yes -o ConnectTimeout=5' "
+/* Every git invocation here runs in an automated indexing path, so it must never
+ * block on an interactive credential / SSH-passphrase prompt or hang on a
+ * network-bound step like `remote set-head -a`. The shared GIT_SAFE_ENV prefix
+ * (util.h) supplies GIT_TERMINAL_PROMPT=0 + a BatchMode/ConnectTimeout
+ * GIT_SSH_COMMAND. Local repos never hit the network. */
 
 /* Quote one argument for /bin/sh: wrap in single quotes, escaping any embedded
  * single quote as '\''. Returns 0 on success, -1 if it doesn't fit. */

@@ -289,6 +289,38 @@ int safe_exec_capture_env(const char *const argv[], char *const envp[], char **o
 int safe_exec_capture_cwd_env_timeout(const char *const argv[], const char *cwd, char *const envp[],
                                       char **out_buf, size_t max_out, int timeout_ms);
 
+/* --- Internal git network ops (NOT the user-facing `aimee git` CLI) ---
+ *
+ * Automated paths (session start, indexing, verify, branch orchestration) must
+ * never hang on an unreachable remote or block on an interactive credential /
+ * SSH-passphrase prompt. Two reusable forms:
+ *   - GIT_SAFE_ENV:        shell-command prefix for run_cmd()-style call sites.
+ *   - GIT_SAFE_SSH_COMMAND: the bare GIT_SSH_COMMAND / core.sshCommand value,
+ *                           for argv/exec call sites (e.g. git_net_exec()).
+ * GIT_TERMINAL_PROMPT=0 fails fast instead of prompting for HTTP credentials;
+ * BatchMode=yes does the same for SSH auth; ConnectTimeout caps a dead-host
+ * connect. */
+#define GIT_SAFE_SSH_COMMAND "ssh -o BatchMode=yes -o ConnectTimeout=5"
+#define GIT_SAFE_ENV "GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='" GIT_SAFE_SSH_COMMAND "' "
+
+/* Wall-clock cap (ms) for an internal git network op. Generous enough not to
+ * kill a slow-but-working fetch, short enough that a stalled remote can never
+ * freeze a session start. */
+#define GIT_NET_TIMEOUT_MS 30000
+
+/* Run an internal git network command, non-interactively and hang-proof.
+ * `git_argv` is the git subcommand and its args (e.g.
+ * {"fetch","--quiet","origin","main",NULL}); the repo is selected by chdir to
+ * `cwd`, or the thread-local run_cmd CWD when `cwd` is NULL. Runs under a copy of
+ * the parent environment with GIT_SSH_COMMAND (BatchMode/ConnectTimeout) and
+ * GIT_TERMINAL_PROMPT=0 forced, so SSH/HTTP auth fail fast instead of blocking on
+ * a passphrase or credential prompt regardless of what the parent exported, and
+ * hard-capped at GIT_NET_TIMEOUT_MS wall-clock (SIGKILL on overrun) as a backstop
+ * for any other stall. Combined stdout+stderr (truncated to max_out, or a default
+ * when 0) is returned in *out_buf when non-NULL (caller frees). Returns the child
+ * exit code, SAFE_EXEC_TIMEOUT, or -1 on failure. POSIX-only, like run_cmd(). */
+int git_net_exec(const char *cwd, const char *const *git_argv, char **out_buf, size_t max_out);
+
 /* Returns 1 if string contains shell metacharacters (;|&$`(){}><\n\r'"\\). */
 int has_shell_metachar(const char *s);
 

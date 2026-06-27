@@ -59,7 +59,9 @@ static int branch_ref_exists(const char *branch)
 static int branch_fetch_origin_prune(void)
 {
    int ec = 0;
-   char *out = run_cmd("git fetch origin --prune 2>&1", &ec);
+   const char *fetch_argv[] = {"fetch", "origin", "--prune", NULL};
+   char *out = NULL;
+   ec = git_net_exec(NULL, fetch_argv, &out, 4096);
    if (ec != 0)
       printf("WARN: git fetch origin --prune failed: %s\n", out ? out : "unknown error");
    free(out);

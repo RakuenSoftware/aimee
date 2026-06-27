@@ -745,6 +745,73 @@ char *run_cmd_env(const char *cmd, char *const envp[], int *exit_code)
    free(line);
    return buf;
 }
+
+int git_net_exec(const char *cwd, const char *const *git_argv, char **out_buf, size_t max_out)
+{
+   if (out_buf)
+      *out_buf = NULL;
+   if (!git_argv)
+      return -1;
+
+   size_t n = 0;
+   while (git_argv[n])
+      n++;
+
+   /* argv: git <git_argv...> NULL. The repo is selected by chdir (cwd below). */
+   const char **argv = malloc((1 + n + 1) * sizeof(*argv));
+   if (!argv)
+      return -1;
+   size_t a = 0;
+   argv[a++] = "git";
+   for (size_t i = 0; i < n; i++)
+      argv[a++] = git_argv[i];
+   argv[a] = NULL;
+
+   /* Child env: a copy of the parent environment with GIT_SSH_COMMAND and
+    * GIT_TERMINAL_PROMPT FORCED to the safe values (any inherited copies dropped),
+    * so the BatchMode/ConnectTimeout SSH command and no-prompt policy win
+    * regardless of what the parent exported (git resolves the GIT_SSH_COMMAND env
+    * above core.sshCommand config). PATH / HOME / SSH_AUTH_SOCK and vault tokens
+    * are preserved — safe_exec_capture_*_env REPLACES the env, so a partial list
+    * would strip them. Entries are borrowed (parent strings + string literals);
+    * only the array is owned, so we free just the array. */
+   size_t pn = 0;
+   while (environ && environ[pn])
+      pn++;
+   char **envp = malloc((pn + 3) * sizeof(*envp)); /* parent + 2 forced + NULL */
+   if (!envp)
+   {
+      free(argv);
+      return -1;
+   }
+   size_t o = 0;
+   for (size_t i = 0; i < pn; i++)
+   {
+      if (strncmp(environ[i], "GIT_SSH_COMMAND=", 16) == 0 ||
+          strncmp(environ[i], "GIT_TERMINAL_PROMPT=", 20) == 0)
+         continue;
+      envp[o++] = environ[i];
+   }
+   envp[o++] = (char *)"GIT_SSH_COMMAND=" GIT_SAFE_SSH_COMMAND;
+   envp[o++] = (char *)"GIT_TERMINAL_PROMPT=0";
+   envp[o] = NULL;
+
+   /* When no explicit cwd is given, fall back to the thread-local run_cmd CWD so
+    * this is a drop-in for run_cmd("git ...") in server pool threads (which set
+    * the repo dir there rather than passing -C). The wall-clock cap guarantees a
+    * stalled remote can never hang the caller even if the SSH bound is bypassed. */
+   const char *eff_cwd = (cwd && cwd[0]) ? cwd : run_cmd_get_cwd();
+   char *out = NULL;
+   int rc = safe_exec_capture_cwd_env_timeout((const char *const *)argv, eff_cwd, envp, &out,
+                                              max_out ? max_out : 4096, GIT_NET_TIMEOUT_MS);
+   free(envp);
+   free(argv);
+   if (out_buf)
+      *out_buf = out;
+   else
+      free(out);
+   return rc;
+}
 #endif /* !_WIN32 — run_cmd* are POSIX-only (fork/exec/waitpid) */
 
 int has_shell_metachar(const char *s)

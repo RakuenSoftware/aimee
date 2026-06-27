@@ -922,10 +922,11 @@ void worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len
    if (def[0])
    {
       /* Refresh the default branch from origin so the worktree starts from the
-       * latest upstream, not a stale local copy. Best-effort: a remote-less or
-       * offline repo just leaves the existing refs untouched. */
-      snprintf(cmd, sizeof(cmd), "git -C '%s' fetch --quiet origin '%s' 2>/dev/null", git_root, def);
-      free(run_cmd(cmd, &rc));
+       * latest upstream, not a stale local copy. Best-effort and hang-proof
+       * (git_net_exec bounds the wall clock): a remote-less or offline repo just
+       * leaves the existing refs untouched. */
+      const char *fetch_argv[] = {"fetch", "--quiet", "origin", def, NULL};
+      git_net_exec(git_root, fetch_argv, NULL, 0);
 
       /* Prefer the freshly fetched remote-tracking ref; fall back to the local
        * branch when there is no upstream (purely local repo). */

@@ -915,9 +915,9 @@ static void session_checkout_worktrees(const session_state_t *state, const char 
       char base_ref[320] = {0};
       if (project_primary_branch(gr, primary_branch, sizeof(primary_branch)) == 0)
       {
-         const char *fetch_argv[] = {"git", "-C", gr, "fetch", "origin", primary_branch, NULL};
+         const char *fetch_argv[] = {"fetch", "origin", primary_branch, NULL};
          char *fetch_out = NULL;
-         int rc = safe_exec_capture(fetch_argv, &fetch_out, 2048);
+         int rc = git_net_exec(gr, fetch_argv, &fetch_out, 2048);
          if (rc != 0)
             LOG_WARN("session", "failed to fetch primary branch '%s' in %s: %s", primary_branch, gr,
                      fetch_out ? fetch_out : "unknown");

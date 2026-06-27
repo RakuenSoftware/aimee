@@ -274,11 +274,13 @@ char *verify_prepare_pr(const char *project_root, const char *base_branch)
       }
    }
 
-   /* 1. Fetch base */
+   /* 1. Fetch base (bounded + non-interactive so verify can't hang on a remote;
+    * cwd=NULL uses the thread-local run_cmd CWD, like the run_cmd calls below). */
    char cmd[256];
-   snprintf(cmd, sizeof(cmd), "git fetch origin %s 2>&1", base_branch);
    int rc;
-   char *out = run_cmd(cmd, &rc);
+   const char *fetch_argv[] = {"fetch", "origin", base_branch, NULL};
+   char *out = NULL;
+   rc = git_net_exec(NULL, fetch_argv, &out, 4096);
    dstr_appendf(&res, "1. Fetching base branch... %s\n", (rc == 0) ? "PASS" : "FAIL");
    if (rc != 0 && out)
       dstr_append_str(&res, out);
