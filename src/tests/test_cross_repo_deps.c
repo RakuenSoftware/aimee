@@ -4,6 +4,7 @@
  * S2a portion; S2b adds the tier-pipeline tests. See
  * docs/proposals/pending/cross-repo-dependency-graph.md. */
 
+#include "cross_repo_classify.h"
 #include "cross_repo_resolver.h"
 
 #include <assert.h>
@@ -240,6 +241,205 @@ static void test_resolve_edge_cases(void)
    printf("ok\n");
 }
 
+/* ---- S2b: multiplicity (§3.5) -------------------------------------------- */
+
+static void test_multiplicity(void)
+{
+   printf("test_multiplicity... ");
+   xrepo_mult_cfg_t cfg = {.dom_share_pct = 90, .runnerup_share_pct = 5, .runnerup_abs = 2};
+
+   /* Single definer repo. */
+   xrepo_def_t one[] = {{"repo-b", XREPO_LANG_C, "", 2, "int,int"}};
+   int oc[] = {3};
+   int oe[] = {1};
+   xrepo_mult_t m = xrepo_classify_multiplicity(one, oc, oe, 1, &cfg);
+   assert(m.kind == XREPO_MULT_SINGLE && m.dominant_index == 0);
+
+   /* Dominant definer: 95 defs vs 1, runner-up not an exporter -> DOMINANT. */
+   xrepo_def_t dom[] = {{"repo-b", XREPO_LANG_C, "", 1, "int"},
+                        {"repo-c", XREPO_LANG_C, "", 1, "int"}};
+   int dc[] = {95, 1};
+   int de[] = {1, 0};
+   m = xrepo_classify_multiplicity(dom, dc, de, 2, &cfg);
+   assert(m.kind == XREPO_MULT_DOMINANT && m.dominant_index == 0);
+
+   /* Even split across two repos -> name-clash (AMBIGUOUS). */
+   int sc[] = {5, 5};
+   m = xrepo_classify_multiplicity(dom, sc, de, 2, &cfg);
+   assert(m.kind == XREPO_MULT_NAMECLASH);
+
+   /* Dominant by count but the runner-up is a distinctive exporter -> name-clash. */
+   int dc2[] = {95, 1};
+   int de2[] = {1, 1};
+   m = xrepo_classify_multiplicity(dom, dc2, de2, 2, &cfg);
+   assert(m.kind == XREPO_MULT_NAMECLASH);
+
+   /* Provably-unrelated signatures (differing arity) -> name-clash even if a
+    * count majority exists (polymorphic rescue does not apply). */
+   xrepo_def_t unrel[] = {{"repo-b", XREPO_LANG_CPP, "", 1, ""},
+                          {"repo-c", XREPO_LANG_CPP, "", 3, ""}};
+   int uc[] = {95, 1};
+   int ue[] = {1, 0};
+   m = xrepo_classify_multiplicity(unrel, uc, ue, 2, &cfg);
+   assert(m.kind == XREPO_MULT_NAMECLASH);
+
+   /* Unknown/variadic signatures (arity -1, "" params) are NOT provably unrelated,
+    * so a clear count majority still resolves to DOMINANT (overloads not punished). */
+   xrepo_def_t vararg[] = {{"repo-b", XREPO_LANG_CPP, "", -1, ""},
+                           {"repo-c", XREPO_LANG_CPP, "", 2, ""}};
+   m = xrepo_classify_multiplicity(vararg, dc, de, 2, &cfg); /* dc={95,1}, de={1,0} */
+   assert(m.kind == XREPO_MULT_DOMINANT);
+
+   /* Non-positive def_counts are clamped (no negative shares); total 0 -> name-clash. */
+   int zc[] = {0, 0};
+   m = xrepo_classify_multiplicity(dom, zc, de, 2, &cfg);
+   assert(m.kind == XREPO_MULT_NAMECLASH);
+   printf("ok\n");
+}
+
+/* ---- S2b: the deterministic pipeline (§3.10) ----------------------------- */
+
+static xrepo_candidate_t base_candidate(void)
+{
+   xrepo_candidate_t c;
+   memset(&c, 0, sizeof(c));
+   c.lang = XREPO_LANG_C;
+   c.distinctive = 1;
+   c.caller_trusted = 1;
+   c.definer_trusted = 1;
+   c.mult.kind = XREPO_MULT_SINGLE;
+   c.corroboration = XREPO_CORROB_NONE;
+   c.modality = XREPO_IMPORT_STATIC;
+   return c;
+}
+
+static void test_classify_pipeline(void)
+{
+   printf("test_classify_pipeline... ");
+
+   /* Import-corroborated, distinctive, trusted -> HIGH. */
+   xrepo_candidate_t c = base_candidate();
+   c.corroboration = XREPO_CORROB_IMPORT;
+   assert(xrepo_classify(&c).tier == XREPO_TIER_HIGH);
+
+   /* Trusted-export route -> HIGH. */
+   c = base_candidate();
+   c.corroboration = XREPO_CORROB_TRUSTED_EXPORT;
+   assert(xrepo_classify(&c).tier == XREPO_TIER_HIGH);
+
+   /* Dominant definer only -> MEDIUM. */
+   c = base_candidate();
+   c.corroboration = XREPO_CORROB_DOMINANT;
+   c.mult.kind = XREPO_MULT_DOMINANT;
+   assert(xrepo_classify(&c).tier == XREPO_TIER_MEDIUM);
+
+   /* No corroboration -> LOW. */
+   c = base_candidate();
+   assert(xrepo_classify(&c).tier == XREPO_TIER_LOW);
+
+   /* Invariant: S originates in caller -> NONE. */
+   c = base_candidate();
+   c.corroboration = XREPO_CORROB_IMPORT;
+   c.originated_in_caller = 1;
+   assert(xrepo_classify(&c).tier == XREPO_TIER_NONE);
+
+   /* Not distinctive + multi-definer -> AMBIGUOUS (review); single -> NONE. */
+   c = base_candidate();
+   c.distinctive = 0;
+   c.mult.kind = XREPO_MULT_NAMECLASH;
+   xrepo_classification_t r = xrepo_classify(&c);
+   assert(r.tier == XREPO_TIER_AMBIGUOUS && r.routed_to_review == 1);
+   c.mult.kind = XREPO_MULT_SINGLE;
+   assert(xrepo_classify(&c).tier == XREPO_TIER_NONE);
+
+   /* Name-clash without corroboration -> AMBIGUOUS; with import -> resolved HIGH. */
+   c = base_candidate();
+   c.mult.kind = XREPO_MULT_NAMECLASH;
+   assert(xrepo_classify(&c).tier == XREPO_TIER_AMBIGUOUS);
+   c.corroboration = XREPO_CORROB_IMPORT;
+   assert(xrepo_classify(&c).tier == XREPO_TIER_HIGH);
+
+   /* Caller-collision caps one tier: HIGH -> MEDIUM. */
+   c = base_candidate();
+   c.corroboration = XREPO_CORROB_IMPORT;
+   c.caller_collision = 1;
+   r = xrepo_classify(&c);
+   assert(r.tier == XREPO_TIER_MEDIUM && r.caller_collision_applied == 1);
+
+   /* Conditional import caps one tier: HIGH -> MEDIUM. */
+   c = base_candidate();
+   c.corroboration = XREPO_CORROB_IMPORT;
+   c.modality = XREPO_IMPORT_CONDITIONAL;
+   assert(xrepo_classify(&c).tier == XREPO_TIER_MEDIUM);
+
+   /* Dynamic import -> review (AMBIGUOUS). */
+   c = base_candidate();
+   c.corroboration = XREPO_CORROB_IMPORT;
+   c.modality = XREPO_IMPORT_DYNAMIC;
+   r = xrepo_classify(&c);
+   assert(r.tier == XREPO_TIER_AMBIGUOUS && r.routed_to_review == 1);
+
+   /* Untrusted caller caps the import route at MEDIUM (§0). */
+   c = base_candidate();
+   c.corroboration = XREPO_CORROB_IMPORT;
+   c.caller_trusted = 0;
+   r = xrepo_classify(&c);
+   assert(r.tier == XREPO_TIER_MEDIUM && r.trust_cap_applied == 1);
+
+   /* Untrusted DEFINER caps the export route at MEDIUM (§0): an untrusted
+    * definer can never lend HIGH export. Caller trust alone does not save it. */
+   c = base_candidate();
+   c.corroboration = XREPO_CORROB_TRUSTED_EXPORT;
+   c.definer_trusted = 0;
+   r = xrepo_classify(&c);
+   assert(r.tier == XREPO_TIER_MEDIUM && r.trust_cap_applied == 1);
+   /* A trusted caller importing from an untrusted definer is unaffected on the
+    * import route (the export-route cap is route-specific). */
+   c = base_candidate();
+   c.corroboration = XREPO_CORROB_IMPORT;
+   c.definer_trusted = 0;
+   assert(xrepo_classify(&c).tier == XREPO_TIER_HIGH);
+
+   /* Structural invariant (§3.10): caps only lower -- final tier <= base tier. */
+   c = base_candidate();
+   c.corroboration = XREPO_CORROB_IMPORT;
+   c.caller_collision = 1;
+   c.modality = XREPO_IMPORT_CONDITIONAL;
+   r = xrepo_classify(&c);
+   assert(r.tier <= r.base_tier);
+
+   /* Combined caps floor at LOW: import + collision + conditional. */
+   c = base_candidate();
+   c.corroboration = XREPO_CORROB_IMPORT;
+   c.caller_collision = 1;
+   c.modality = XREPO_IMPORT_CONDITIONAL;
+   assert(xrepo_classify(&c).tier == XREPO_TIER_LOW);
+
+   /* Unknown language -> UNIMPLEMENTED. */
+   c = base_candidate();
+   c.lang = XREPO_LANG_UNKNOWN;
+   c.corroboration = XREPO_CORROB_IMPORT;
+   assert(xrepo_classify(&c).tier == XREPO_TIER_UNIMPLEMENTED);
+
+   /* Determinism: the same candidate classifies identically. */
+   c = base_candidate();
+   c.corroboration = XREPO_CORROB_DOMINANT;
+   assert(xrepo_classify(&c).tier == xrepo_classify(&c).tier);
+   printf("ok\n");
+}
+
+static void test_evidence_score(void)
+{
+   printf("test_evidence_score... ");
+   /* More corroboration routes outweigh more call sites (eviction keeps the
+    * better-evidenced rows). */
+   assert(xrepo_evidence_score(0, 2, 1) > xrepo_evidence_score(99, 1, 0));
+   /* Ties broken toward more call sites, then distinctiveness. */
+   assert(xrepo_evidence_score(0, 3, 0) > xrepo_evidence_score(0, 2, 0));
+   assert(xrepo_evidence_score(5, 2, 0) > xrepo_evidence_score(1, 2, 0));
+   printf("ok\n");
+}
+
 int main(void)
 {
    test_lang_from_path();
@@ -248,6 +448,9 @@ int main(void)
    test_resolve_c();
    test_resolve_rust_go_py_ts();
    test_resolve_edge_cases();
+   test_multiplicity();
+   test_classify_pipeline();
+   test_evidence_score();
    printf("cross_repo_deps: all tests passed\n");
    return 0;
 }
