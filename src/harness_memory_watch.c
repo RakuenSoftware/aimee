@@ -17,6 +17,16 @@
 #define PATH_MAX 4096
 #endif
 
+/* Portable canonicalization: POSIX realpath resolves symlinks; on Windows
+ * _fullpath returns an absolute path. Both return non-NULL on success and write
+ * the absolute path to `out`. Mirrors the helper in harness_memory_hydrate.c
+ * (MinGW lacks realpath). */
+#ifdef _WIN32
+#define hm_realpath(p, out) _fullpath((out), (p), PATH_MAX)
+#else
+#define hm_realpath(p, out) realpath((p), (out))
+#endif
+
 /* Bound the watch table so a pathological tree can't exhaust the per-user
  * inotify watch limit (/proc/sys/fs/inotify/max_user_watches, typically
  * 8192+). A memory dir has at most a handful of subdirs, so this is generous. */
@@ -299,7 +309,7 @@ int harness_memory_watch_run(const char *cwd)
       return -1;
 
    char real[PATH_MAX];
-   if (!realpath((cwd && cwd[0]) ? cwd : ".", real))
+   if (!hm_realpath((cwd && cwd[0]) ? cwd : ".", real))
       return -1;
    char slug[PATH_MAX * 2];
    hmem_slug_from_path(real, slug, sizeof(slug));
@@ -313,7 +323,7 @@ int harness_memory_watch_run(const char *cwd)
                         scope->memory_seg) >= sizeof(memdir))
       return -1;
    char memreal[PATH_MAX];
-   if (!realpath(memdir, memreal)) /* nothing to watch yet */
+   if (!hm_realpath(memdir, memreal)) /* nothing to watch yet */
       return -1;
 
    hmem_watch_t *w = hmem_watch_open(memreal);
