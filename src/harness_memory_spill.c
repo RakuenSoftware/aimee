@@ -5,6 +5,7 @@
 #include "aimee_home.h" /* aimee_home() — honors AIMEE_HOME/AIMEE_PROFILE */
 #include "cJSON.h"
 #include "harness_memory_common.h" /* hmem_sha256_hex */
+#include "platform_path.h"         /* platform_mkdir_p (portable mkdir -p) */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,11 +42,11 @@ int hmem_spill_dir(const char *project, char *out, size_t cap)
    char base[PATH_MAX];
    if ((size_t)snprintf(base, sizeof(base), "%s/harness_spill", home) >= sizeof(base))
       return -1;
-   mkdir(home, 0700);
-   mkdir(base, 0700);
+   platform_mkdir_p(home, 0700);
+   platform_mkdir_p(base, 0700);
    if ((size_t)snprintf(out, cap, "%s/%s", base, ph) >= cap)
       return -1;
-   mkdir(out, 0700);
+   platform_mkdir_p(out, 0700);
    return 0;
 }
 
@@ -59,8 +60,10 @@ int hmem_spill_write(const char *project, const char *name, const char *type, co
 
    char ts[32];
    time_t t = time(NULL);
-   struct tm tm_buf;
-   gmtime_r(&t, &tm_buf);
+   struct tm tm_buf = {0};
+   struct tm *gmt = gmtime(&t); /* gmtime_r is POSIX-only; CLI is single-threaded */
+   if (gmt)
+      tm_buf = *gmt;
    strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", &tm_buf);
 
    cJSON *o = cJSON_CreateObject();

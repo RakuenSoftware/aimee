@@ -4,6 +4,7 @@
 
 #include "aimee_home.h" /* aimee_home() — honors AIMEE_HOME/AIMEE_PROFILE */
 #include "cJSON.h"
+#include "platform_path.h" /* platform_mkdir_p (portable mkdir -p) */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,16 +40,18 @@ void hmem_audit(const char *action, const char *project, const char *name, const
    char logdir[PATH_MAX], logpath[PATH_MAX];
    if ((size_t)snprintf(logdir, sizeof(logdir), "%s/logs", home) >= sizeof(logdir))
       return;
-   mkdir(home, 0700);
-   mkdir(logdir, 0700);
+   platform_mkdir_p(home, 0700);
+   platform_mkdir_p(logdir, 0700);
    if ((size_t)snprintf(logpath, sizeof(logpath), "%s/interception.jsonl", logdir) >=
        sizeof(logpath))
       return;
 
    char ts[32];
    time_t t = time(NULL);
-   struct tm tm_buf;
-   gmtime_r(&t, &tm_buf);
+   struct tm tm_buf = {0};
+   struct tm *gmt = gmtime(&t); /* gmtime_r is POSIX-only; CLI is single-threaded */
+   if (gmt)
+      tm_buf = *gmt;
    strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", &tm_buf);
 
    cJSON *o = cJSON_CreateObject();
