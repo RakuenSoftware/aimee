@@ -1,0 +1,612 @@
+/* cross_repo_deps.c: S4a orchestration — generate cross-repo candidate edges and
+ * resolve+classify them via the pure S2a/S2b core using the S3 stats. Emits
+ * repo-level edges with evidence + version stamps. Postgres-backed; portable SQL
+ * so the candidate path also runs on the sqlite shim (empty corpus -> 0 edges).
+ * See cross_repo_deps.h and docs/proposals/pending/cross-repo-dependency-graph.md. */
+
+#include "cross_repo_deps.h"
+
+#include "aimee.h"
+#include "config.h"
+#include "cross_repo_stats.h"
+#include "db2.h"
+#include "db_postgres.h"
+#include "log.h"
+
+#include <ctype.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define CRD_LOG_TAG     "cross_repo"
+#define CRD_ERR         256
+#define CRD_MAX_REPOS   256
+#define CRD_MAX_HEADERS 20000
+#define CRD_MAX_DEFS    64
+
+/* ---- manifest module-id parsing (pure) ----------------------------------- */
+
+static void trim_quotes_ws(char *s)
+{
+   size_t n = strlen(s);
+   while (n && (s[n - 1] == ' ' || s[n - 1] == '\t' || s[n - 1] == '"' || s[n - 1] == '\'' ||
+                s[n - 1] == '\r' || s[n - 1] == ','))
+      s[--n] = '\0';
+   size_t i = 0;
+   while (s[i] == ' ' || s[i] == '\t' || s[i] == '"' || s[i] == '\'')
+      i++;
+   if (i)
+      memmove(s, s + i, strlen(s + i) + 1);
+}
+
+/* Find a `key`-prefixed value on its own line (toml/go.mod style: `key value` or
+ * `key = value`). Returns 1 + fills out, else 0. */
+static int line_value(const char *content, const char *key, char *out, size_t cap)
+{
+   size_t klen = strlen(key);
+   const char *p = content;
+   while (p && *p)
+   {
+      const char *eol = strchr(p, '\n');
+      size_t llen = eol ? (size_t)(eol - p) : strlen(p);
+      const char *q = p;
+      while (*q == ' ' || *q == '\t')
+         q++;
+      if ((size_t)(p + llen - q) > klen && strncmp(q, key, klen) == 0 &&
+          (q[klen] == ' ' || q[klen] == '\t' || q[klen] == '='))
+      {
+         const char *v = q + klen;
+         while (*v == ' ' || *v == '\t' || *v == '=')
+            v++;
+         size_t vlen = (size_t)(p + llen - v);
+         if (vlen >= cap)
+            vlen = cap - 1;
+         memcpy(out, v, vlen);
+         out[vlen] = '\0';
+         trim_quotes_ws(out);
+         return out[0] ? 1 : 0;
+      }
+      if (!eol)
+         break;
+      p = eol + 1;
+   }
+   return 0;
+}
+
+/* Extract a JSON top-level "name": "value" (flat scan; sufficient for package.json). */
+static int json_name(const char *content, char *out, size_t cap)
+{
+   const char *k = strstr(content, "\"name\"");
+   if (!k)
+      return 0;
+   k = strchr(k + 6, ':');
+   if (!k)
+      return 0;
+   k++;
+   while (*k == ' ' || *k == '\t' || *k == '"')
+      k++;
+   size_t i = 0;
+   while (k[i] && k[i] != '"' && i + 1 < cap)
+      i++;
+   if (i >= cap)
+      i = cap - 1;
+   memcpy(out, k, i);
+   out[i] = '\0';
+   return out[0] ? 1 : 0;
+}
+
+int xrepo_parse_module_id(const char *basename, const char *content, char *out, size_t cap)
+{
+   if (!basename || !content || !out || cap == 0)
+      return 0;
+   out[0] = '\0';
+   if (strcmp(basename, "go.mod") == 0)
+      return line_value(content, "module", out, cap);
+   if (strcmp(basename, "package.json") == 0)
+      return json_name(content, out, cap);
+   if (strcmp(basename, "Cargo.toml") == 0 || strcmp(basename, "pyproject.toml") == 0)
+      return line_value(content, "name", out, cap); /* [package]/[project] name = "x" */
+   return 0;
+}
+
+/* ---- repo descriptors ---------------------------------------------------- */
+
+typedef struct
+{
+   xrepo_repo_desc_t *d;
+   size_t n;
+   char *strpool;          /* not used; strings are individually freed */
+   const char **hdr_store; /* flat backing for all headers[] arrays */
+   size_t hdr_n;
+} desc_set_t;
+
+static const char *path_basename(const char *p)
+{
+   const char *s = strrchr(p, '/');
+   return s ? s + 1 : p;
+}
+
+static void free_descs(desc_set_t *s)
+{
+   if (!s || !s->d)
+      return;
+   for (size_t i = 0; i < s->n; i++)
+   {
+      free((char *)s->d[i].name);
+      free((char *)s->d[i].module_id);
+   }
+   for (size_t i = 0; i < s->hdr_n; i++)
+      free((char *)s->hdr_store[i]);
+   free(s->hdr_store);
+   free(s->d);
+   memset(s, 0, sizeof(*s));
+}
+
+/* Build a descriptor per registered repo: name, trust, module_id (from a manifest
+ * in file_contents), and the set of indexed C/C++ header paths. */
+static int load_descs(void *conn, desc_set_t *out)
+{
+   memset(out, 0, sizeof(*out));
+   char err[CRD_ERR] = "";
+
+   out->d = calloc(CRD_MAX_REPOS, sizeof(xrepo_repo_desc_t));
+   out->hdr_store = calloc(CRD_MAX_HEADERS, sizeof(char *));
+   if (!out->d || !out->hdr_store)
+   {
+      free_descs(out);
+      return -1;
+   }
+
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT name, trust FROM projects ORDER BY name", err, sizeof(err));
+   if (!st)
+   {
+      free_descs(out);
+      return -1;
+   }
+   while (out->n < CRD_MAX_REPOS && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *name = aimee_pg_column_text(st, 0);
+      const char *trust = aimee_pg_column_text(st, 1);
+      xrepo_repo_desc_t *D = &out->d[out->n];
+      D->name = strdup(name ? name : "");
+      D->trusted = (trust && strcmp(trust, "trusted") == 0) ? 1 : 0;
+      D->module_id = strdup("");
+      D->headers = NULL;
+      D->header_count = 0;
+      out->n++;
+   }
+   aimee_pg_finalize(st);
+
+   /* module_id: scan each repo's manifest content (best-effort, first match wins). */
+   for (size_t i = 0; i < out->n; i++)
+   {
+      aimee_pg_stmt_t *m = aimee_pg_prepare(
+          conn,
+          "SELECT f.path, fc.content FROM file_contents fc JOIN files f ON f.id = fc.file_id "
+          "JOIN projects p ON p.id = f.project_id WHERE p.name = ?1 AND "
+          "(f.path LIKE '%go.mod' OR f.path LIKE '%Cargo.toml' OR f.path LIKE '%package.json' "
+          "OR f.path LIKE '%pyproject.toml') ORDER BY length(f.path) LIMIT 8",
+          err, sizeof(err));
+      if (!m)
+         continue;
+      aimee_pg_bind_text(m, "?1", out->d[i].name);
+      char id[256] = "";
+      while (aimee_pg_step(m, err, sizeof(err)) == AIMEE_PG_ROW)
+      {
+         const char *path = aimee_pg_column_text(m, 0);
+         const char *content = aimee_pg_column_text(m, 1);
+         if (path && content && xrepo_parse_module_id(path_basename(path), content, id, sizeof(id)))
+            break;
+      }
+      aimee_pg_finalize(m);
+      if (id[0])
+      {
+         free((char *)out->d[i].module_id);
+         out->d[i].module_id = strdup(id);
+      }
+   }
+
+   /* headers: indexed C/C++ header paths per repo, sliced from the flat store. */
+   for (size_t i = 0; i < out->n; i++)
+   {
+      size_t start = out->hdr_n;
+      aimee_pg_stmt_t *h = aimee_pg_prepare(
+          conn,
+          "SELECT f.path FROM files f JOIN projects p ON p.id = f.project_id WHERE p.name = ?1 AND "
+          "(f.path LIKE '%.h' OR f.path LIKE '%.hpp' OR f.path LIKE '%.hh' OR f.path LIKE '%.hxx') "
+          "ORDER BY f.path",
+          err, sizeof(err));
+      if (!h)
+         continue;
+      aimee_pg_bind_text(h, "?1", out->d[i].name);
+      while (out->hdr_n < CRD_MAX_HEADERS && aimee_pg_step(h, err, sizeof(err)) == AIMEE_PG_ROW)
+      {
+         const char *path = aimee_pg_column_text(h, 0);
+         if (path && path[0])
+            out->hdr_store[out->hdr_n++] = strdup(path);
+      }
+      aimee_pg_finalize(h);
+      if (out->hdr_n > start)
+      {
+         out->d[i].headers = &out->hdr_store[start];
+         out->d[i].header_count = out->hdr_n - start;
+      }
+   }
+   return 0;
+}
+
+static int desc_index(const desc_set_t *s, const char *name)
+{
+   for (size_t i = 0; i < s->n; i++)
+      if (strcmp(s->d[i].name, name) == 0)
+         return (int)i;
+   return -1;
+}
+
+/* ---- emitted-edge aggregation -------------------------------------------- */
+
+typedef struct
+{
+   xrepo_dep_edge_t *e;
+   size_t n, cap;
+} edge_acc_t;
+
+static xrepo_dep_edge_t *edge_find_or_add(edge_acc_t *a, const char *caller, const char *definer)
+{
+   for (size_t i = 0; i < a->n; i++)
+      if (strcmp(a->e[i].caller_repo, caller) == 0 && strcmp(a->e[i].definer_repo, definer) == 0)
+         return &a->e[i];
+   if (a->n == a->cap)
+   {
+      size_t nc = a->cap ? a->cap * 2 : 32;
+      xrepo_dep_edge_t *ne = realloc(a->e, nc * sizeof(*ne));
+      if (!ne)
+         return NULL;
+      a->e = ne;
+      a->cap = nc;
+   }
+   xrepo_dep_edge_t *E = &a->e[a->n++];
+   memset(E, 0, sizeof(*E));
+   snprintf(E->caller_repo, sizeof(E->caller_repo), "%s", caller);
+   snprintf(E->definer_repo, sizeof(E->definer_repo), "%s", definer);
+   E->tier = XREPO_TIER_NONE;
+   return E;
+}
+
+/* ---- orchestration ------------------------------------------------------- */
+
+/* Shared, read-only context for the per-symbol flush. */
+typedef struct
+{
+   const desc_set_t *descs;
+   const char *imp_seen; /* CRD_MAX_REPOS flags: repos A imports (import route) */
+   const char *project;
+   int caller_trusted;
+   xrepo_distinct_cfg_t dcfg;
+   xrepo_mult_cfg_t mcfg;
+   int collision_c;
+   xrepo_tier_t min_tier;
+   const char *repo_set_hash;
+   int distinctiveness_v;
+   int64_t bsv;
+   int a_filecount;
+} crd_ctx_t;
+
+/* Classify one accumulated candidate symbol (its definer rows) and, if it clears
+ * the gates/min_tier, fold it into the per-(caller,definer) edge accumulator.
+ * defs[]/dcount[]/dexp[] hold the external definers (A excluded); `defs[i].repo`
+ * strings are freed here. AMBIGUOUS routes to the review queue (S4b), not emitted. */
+static void crd_flush(const crd_ctx_t *ctx, edge_acc_t *acc, const char *sym, int sites, int files,
+                      const char *exfile, int exline, int callee_rc, int caller_files, int blocked,
+                      xrepo_def_t *defs, int *dcount, int *dexp, int ndef, int originated)
+{
+   if (ndef == 0)
+      return; /* no external definer */
+   xrepo_lang_t lang = defs[0].lang;
+
+   /* definer_repo_count over TRUSTED repos (incl. the caller if it is a trusted
+    * definer) — the distinctiveness "defined in >= M repos" signal. */
+   int definer_rc = 0;
+   for (int i = 0; i < ndef; i++)
+   {
+      int di = desc_index(ctx->descs, defs[i].repo);
+      if (di >= 0 && ctx->descs->d[di].trusted)
+         definer_rc++;
+   }
+   if (ctx->caller_trusted && originated)
+      definer_rc++; /* the caller defines it too (A excluded from defs[]) */
+
+   xrepo_distinct_stats_t stats = {
+       .callee_repo_count = callee_rc,
+       .definer_repo_count = definer_rc,
+       .caller_file_pct = ctx->a_filecount > 0 ? (caller_files * 100) / ctx->a_filecount : 0};
+   int distinctive = !blocked && xrepo_name_distinctive(sym, &stats, &ctx->dcfg);
+   xrepo_mult_t mult = xrepo_classify_multiplicity(defs, dcount, dexp, ndef, &ctx->mcfg);
+
+   /* Target definer + corroboration route. Import route (a definer A imports)
+    * wins — repo-level per proposal §3.1a ("import names B AND S resolves to B":
+    * the target is always a definer of S that A imports); else trusted-export on
+    * the dominant definer; else dominant. */
+   int target = -1;
+   xrepo_corrob_t corr = XREPO_CORROB_NONE;
+   for (int i = 0; i < ndef; i++)
+   {
+      int di = desc_index(ctx->descs, defs[i].repo);
+      if (di >= 0 && ctx->imp_seen[di])
+      {
+         target = i;
+         corr = XREPO_CORROB_IMPORT;
+         break;
+      }
+   }
+   if (target < 0 && mult.kind == XREPO_MULT_DOMINANT && mult.dominant_index >= 0)
+   {
+      target = mult.dominant_index;
+      int di = desc_index(ctx->descs, defs[target].repo);
+      int dt = di >= 0 ? ctx->descs->d[di].trusted : 0;
+      corr = (dt && dexp[target] && sites >= 3 && files >= 3) ? XREPO_CORROB_TRUSTED_EXPORT
+                                                              : XREPO_CORROB_DOMINANT;
+   }
+
+   int definer_trusted = 0;
+   if (target >= 0)
+   {
+      int di = desc_index(ctx->descs, defs[target].repo);
+      definer_trusted = di >= 0 ? ctx->descs->d[di].trusted : 0;
+   }
+
+   xrepo_candidate_t c = {0};
+   c.lang = lang;
+   c.originated_in_caller = originated;
+   c.distinctive = distinctive;
+   c.mult = mult;
+   c.caller_collision = files >= ctx->collision_c;
+   c.corroboration = corr;
+   c.caller_trusted = ctx->caller_trusted;
+   c.definer_trusted = definer_trusted;
+   c.modality = XREPO_IMPORT_STATIC;
+   xrepo_classification_t cl = xrepo_classify(&c);
+
+   if (target >= 0 && cl.tier >= ctx->min_tier && cl.tier != XREPO_TIER_AMBIGUOUS &&
+       cl.tier != XREPO_TIER_NONE && cl.tier != XREPO_TIER_UNIMPLEMENTED)
+   {
+      xrepo_dep_edge_t *E = edge_find_or_add(acc, ctx->project, defs[target].repo);
+      if (E)
+      {
+         if (cl.tier > E->tier)
+            E->tier = cl.tier; /* repo edge = best linking-symbol tier */
+         E->symbol_count++;
+         E->call_site_count += sites;
+         if (corr == XREPO_CORROB_IMPORT)
+            E->import_corroborated = 1;
+         if (corr == XREPO_CORROB_TRUSTED_EXPORT)
+            E->export_corroborated = 1;
+         if (!E->example_symbol[0])
+         {
+            snprintf(E->example_symbol, sizeof(E->example_symbol), "%s", sym);
+            snprintf(E->example_file, sizeof(E->example_file), "%s", exfile);
+            E->example_line = exline;
+         }
+         snprintf(E->repo_set_hash, sizeof(E->repo_set_hash), "%s", ctx->repo_set_hash);
+         E->distinctiveness_v = ctx->distinctiveness_v;
+         E->blocked_symbols_version = ctx->bsv;
+         E->resolver_version = XREPO_RESOLVER_VERSION;
+      }
+   }
+   for (int i = 0; i < ndef; i++)
+      free((char *)defs[i].repo);
+}
+
+int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t *opts,
+                                    xrepo_dep_edge_t **out_edges, size_t *out_n, int *truncated)
+{
+   if (out_edges)
+      *out_edges = NULL;
+   if (out_n)
+      *out_n = 0;
+   if (truncated)
+      *truncated = 0;
+   void *conn = db2_conn();
+   if (!conn || !project || !opts || !out_edges || !out_n)
+      return -1;
+
+   config_t cfg;
+   config_load(&cfg);
+   if (!cfg.kb_curator_cross_repo_graph_enabled)
+      return 0; /* feature off: empty result, not an error */
+   /* S4a implements the OUT direction (deps OF `project`). Reverse/both
+    * (dependents) land with the CLI --reverse surface (S6); until then a
+    * non-OUT request returns empty rather than silently OUT-direction results. */
+   if (opts->direction != XREPO_DIR_OUT)
+      return 0;
+
+   xrepo_distinct_cfg_t dcfg = {.k = cfg.kb_curator_cross_repo_k,
+                                .m = cfg.kb_curator_cross_repo_m,
+                                .p_pct = cfg.kb_curator_cross_repo_p_pct,
+                                .len_min = cfg.kb_curator_cross_repo_len_min};
+   xrepo_mult_cfg_t mcfg = {.dom_share_pct = 90, .runnerup_share_pct = 5, .runnerup_abs = 2};
+   int cap =
+       opts->max_candidates > 0 ? opts->max_candidates : cfg.kb_curator_cross_repo_max_candidates;
+   xrepo_tier_t min_tier = opts->min_tier ? opts->min_tier : XREPO_TIER_MEDIUM;
+   int collision_c = cfg.kb_curator_cross_repo_caller_collision_c;
+
+   desc_set_t descs;
+   if (load_descs(conn, &descs) != 0)
+      return -1;
+   int a_idx = desc_index(&descs, project);
+
+   char repo_set_hash[24] = "";
+   db2_cross_repo_repo_set_hash(repo_set_hash, sizeof(repo_set_hash));
+   int64_t bsv = 0;
+   db2_cross_repo_meta_read(NULL, &bsv, NULL, 0);
+
+   /* repos A imports (resolved to a single repo) — the import-route set. */
+   char imp_seen[CRD_MAX_REPOS];
+   memset(imp_seen, 0, sizeof(imp_seen));
+   if (a_idx >= 0)
+   {
+      char err[CRD_ERR] = "";
+      aimee_pg_stmt_t *im = aimee_pg_prepare(
+          conn,
+          "SELECT DISTINCT i.name, f.path FROM file_imports i JOIN files f ON f.id = i.file_id "
+          "JOIN projects p ON p.id = f.project_id WHERE p.name = ?1",
+          err, sizeof(err));
+      if (im)
+      {
+         aimee_pg_bind_text(im, "?1", project);
+         while (aimee_pg_step(im, err, sizeof(err)) == AIMEE_PG_ROW)
+         {
+            const char *raw = aimee_pg_column_text(im, 0);
+            const char *fp = aimee_pg_column_text(im, 1);
+            xrepo_lang_t lang = xrepo_lang_from_path(fp ? fp : "");
+            xrepo_resolve_result_t r = xrepo_resolve_import_to_repo(
+                raw, lang, project, XREPO_IMPORT_STATIC, descs.d, descs.n);
+            if (r.cardinality == XREPO_RESOLVE_ONE && r.repo_index >= 0 &&
+                r.repo_index < (int)descs.n)
+               imp_seen[r.repo_index] = 1;
+         }
+         aimee_pg_finalize(im);
+      }
+   }
+
+   edge_acc_t acc = {0};
+   char err[CRD_ERR] = "";
+
+   /* A's file count (caller_file_pct denominator), fetched once. */
+   int a_filecount = 0;
+   {
+      aimee_pg_stmt_t *fc = aimee_pg_prepare(
+          conn,
+          "SELECT COUNT(*) FROM files f JOIN projects p ON p.id = f.project_id WHERE p.name = ?1",
+          err, sizeof(err));
+      if (fc)
+      {
+         aimee_pg_bind_text(fc, "?1", project);
+         if (aimee_pg_step(fc, err, sizeof(err)) == AIMEE_PG_ROW)
+            a_filecount = aimee_pg_column_int(fc, 0);
+         aimee_pg_finalize(fc);
+      }
+   }
+
+   crd_ctx_t ctx = {.descs = &descs,
+                    .imp_seen = imp_seen,
+                    .project = project,
+                    .caller_trusted = (a_idx >= 0) ? descs.d[a_idx].trusted : 1,
+                    .dcfg = dcfg,
+                    .mcfg = mcfg,
+                    .collision_c = collision_c,
+                    .min_tier = min_tier,
+                    .repo_set_hash = repo_set_hash,
+                    .distinctiveness_v = cfg.kb_curator_cross_repo_distinctiveness_v,
+                    .bsv = bsv,
+                    .a_filecount = a_filecount};
+
+   /* Single working-set query (no per-candidate N+1, per the S3 contract): one row
+    * per (candidate symbol, definer repo) with per-symbol stats as correlated
+    * subqueries, ordered by symbol then definer-count. Rows for the same symbol are
+    * contiguous; we accumulate them and flush per symbol, capping DISTINCT symbols
+    * (cap+1 distinct -> truncated). */
+   aimee_pg_stmt_t *cq = aimee_pg_prepare(
+       conn,
+       "WITH cand AS ("
+       "  SELECT cc.callee AS sym, COUNT(*) AS sites, COUNT(DISTINCT cc.file_id) AS files, "
+       "         MIN(f.path) AS exfile, MIN(cc.line) AS exline "
+       "  FROM code_calls cc JOIN files f ON f.id = cc.file_id "
+       "  JOIN projects p ON p.id = f.project_id WHERE p.name = ?1 GROUP BY cc.callee) "
+       "SELECT c.sym, c.sites, c.files, c.exfile, c.exline, dp.name AS definer, "
+       "       COUNT(*) AS defcount, dp.trust AS dtrust, "
+       "       (SELECT COUNT(*) FROM file_exports e JOIN files fe ON fe.id = e.file_id "
+       "          JOIN projects pe ON pe.id = fe.project_id WHERE pe.name = dp.name "
+       "          AND e.name = c.sym) AS dexp, "
+       "       (SELECT COUNT(DISTINCT p2.id) FROM code_calls cc2 JOIN files f2 ON f2.id = "
+       "cc2.file_id "
+       "          JOIN projects p2 ON p2.id = f2.project_id WHERE cc2.callee = c.sym "
+       "          AND p2.trust = 'trusted') AS callee_rc, "
+       "       (SELECT COUNT(DISTINCT fa.id) FROM code_calls cca JOIN files fa ON fa.id = "
+       "cca.file_id "
+       "          JOIN projects pa ON pa.id = fa.project_id WHERE pa.name = ?1 "
+       "          AND cca.callee = c.sym) AS caller_files, "
+       "       (SELECT COUNT(*) FROM blocked_symbols b WHERE b.word = c.sym AND b.lang = '') AS "
+       "blk "
+       "FROM cand c JOIN terms dt ON dt.name = c.sym AND dt.kind = 'definition' "
+       "JOIN files df ON df.id = dt.file_id JOIN projects dp ON dp.id = df.project_id "
+       "GROUP BY c.sym, c.sites, c.files, c.exfile, c.exline, dp.name, dp.trust "
+       "ORDER BY c.sym, defcount DESC",
+       err, sizeof(err));
+   if (!cq)
+   {
+      free_descs(&descs);
+      return -1;
+   }
+   aimee_pg_bind_text(cq, "?1", project);
+   int seen = 0;
+
+   /* Rows are contiguous per symbol (ORDER BY sym); accumulate a symbol's definer
+    * rows then flush. Cap by DISTINCT symbol (the (cap+1)th distinct -> truncated). */
+   char cur[128] = "";
+   int have = 0, csites = 0, cfiles = 0, cexline = 0, ccallee = 0, ccfiles = 0, cblk = 0, corig = 0;
+   char cexfile[MAX_PATH_LEN] = "";
+   xrepo_def_t defs[CRD_MAX_DEFS];
+   int dcount[CRD_MAX_DEFS], dexp[CRD_MAX_DEFS], ndef = 0;
+
+   while (aimee_pg_step(cq, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *sym = aimee_pg_column_text(cq, 0);
+      if (!sym)
+         sym = "";
+      if (have && strcmp(sym, cur) != 0)
+      {
+         crd_flush(&ctx, &acc, cur, csites, cfiles, cexfile, cexline, ccallee, ccfiles, cblk, defs,
+                   dcount, dexp, ndef, corig);
+         ndef = 0;
+         have = 0;
+      }
+      if (!have)
+      {
+         if (seen >= cap)
+         {
+            if (truncated)
+               *truncated = 1;
+            break; /* don't start a new (capped) symbol */
+         }
+         seen++;
+         have = 1;
+         corig = 0;
+         snprintf(cur, sizeof(cur), "%s", sym);
+         csites = aimee_pg_column_int(cq, 1);
+         cfiles = aimee_pg_column_int(cq, 2);
+         const char *ef = aimee_pg_column_text(cq, 3);
+         snprintf(cexfile, sizeof(cexfile), "%s", ef ? ef : "");
+         cexline = aimee_pg_column_int(cq, 4);
+         ccallee = aimee_pg_column_int(cq, 9);
+         ccfiles = aimee_pg_column_int(cq, 10);
+         cblk = aimee_pg_column_int(cq, 11) > 0 ? 1 : 0;
+      }
+      /* accumulate this definer row (A excluded from defs[]; sets originated). */
+      const char *definer = aimee_pg_column_text(cq, 5);
+      if (definer && strcmp(definer, project) == 0)
+         corig = 1;
+      else if (definer && ndef < CRD_MAX_DEFS)
+      {
+         defs[ndef].repo = strdup(definer);
+         defs[ndef].lang = xrepo_lang_from_path(cexfile);
+         defs[ndef].self_type = "";
+         defs[ndef].arity = -1;
+         defs[ndef].param_types = "";
+         dcount[ndef] = aimee_pg_column_int(cq, 6);
+         dexp[ndef] = aimee_pg_column_int(cq, 8) > 0 ? 1 : 0;
+         ndef++;
+      }
+   }
+   if (have)
+      crd_flush(&ctx, &acc, cur, csites, cfiles, cexfile, cexline, ccallee, ccfiles, cblk, defs,
+                dcount, dexp, ndef, corig);
+   aimee_pg_finalize(cq);
+   free_descs(&descs);
+
+   *out_edges = acc.e;
+   *out_n = acc.n;
+   return 0;
+}
