@@ -14,10 +14,39 @@
 #ifdef _WIN32
 #include <direct.h>
 #define AIMEE_MKDIR(p) _mkdir(p)
+/* _putenv_s(k, "") removes the variable on MSVC. */
+#define AIMEE_UNSETENV(k)  _putenv_s((k), "")
+#define AIMEE_SETENV(k, v) _putenv_s((k), (v))
 #else
 #include <sys/stat.h>
-#define AIMEE_MKDIR(p) mkdir((p), 0700)
+#define AIMEE_MKDIR(p)     mkdir((p), 0700)
+#define AIMEE_UNSETENV(k)  unsetenv(k)
+#define AIMEE_SETENV(k, v) setenv((k), (v), 1)
 #endif
+
+/* Suspend AIMEE_TLS_INSECURE for the duration of trust establishment, returning the
+ * prior value (caller frees via tls_insecure_restore). Trust pinning must verify the
+ * server cert STRICTLY: with the env var set, the trust probe would "succeed"
+ * insecurely and skip pinning, leaving the client dependent on AIMEE_TLS_INSECURE
+ * forever instead of pinning the cert once. Forcing strict verification here makes a
+ * self-signed/private server get pinned (TOFU) regardless of a stray env var, so
+ * normal commands then need no flag. Returns NULL when it was unset/empty. */
+static char *tls_insecure_suspend(void)
+{
+   const char *v = getenv("AIMEE_TLS_INSECURE");
+   char *saved = (v && *v) ? strdup(v) : NULL;
+   AIMEE_UNSETENV("AIMEE_TLS_INSECURE");
+   return saved;
+}
+
+static void tls_insecure_restore(char *saved)
+{
+   if (saved)
+   {
+      AIMEE_SETENV("AIMEE_TLS_INSECURE", saved);
+      free(saved);
+   }
+}
 
 static void remote_conf_path(char *out, size_t out_sz)
 {
@@ -149,11 +178,14 @@ static int remote_set(const char *url, const char *token, int json_output)
 
    /* For an https remote, establish trust now so later commands need no
     * AIMEE_TLS_INSECURE flag. If it already verifies (publicly-trusted CA, or a
-    * previously pinned cert) we leave it alone; otherwise pin its cert (TOFU). */
+    * previously pinned cert) we leave it alone; otherwise pin its cert (TOFU).
+    * Verification is forced strict (env var suspended) so a self-signed/private
+    * server is always pinned even if AIMEE_TLS_INSECURE happens to be set. */
    int is_https = (strncmp(url, "https://", 8) == 0);
    int pinned = 0, verified = 0;
    if (is_https)
    {
+      char *saved_insecure = tls_insecure_suspend();
       aimee_client_set_remote(url, token && *token ? token : NULL);
       /* This first probe is expected to fail for a self-signed server (not pinned
        * yet); silence its diagnostic so a clean set doesn't look like an error. */
@@ -167,6 +199,7 @@ static int remote_set(const char *url, const char *token, int json_output)
          pinned = 1;
          verified = remote_health_ok(); /* re-probe against the pinned cert */
       }
+      tls_insecure_restore(saved_insecure);
    }
 
    if (json_output)
@@ -180,10 +213,10 @@ static int remote_set(const char *url, const char *token, int json_output)
          printf(pinned ? "  TLS: verified against the pinned certificate.\n"
                        : "  TLS: verified against the system trust store.\n");
       else if (is_https)
-         printf("  TLS: could not establish trust (server unreachable, or cert pinning is not "
-                "available on this platform).\n"
-                "       Start the server and re-run, use `aimee remote trust`, or set "
-                "AIMEE_TLS_INSECURE=1 to override.\n");
+         printf(
+             "  TLS: could not establish trust (server unreachable, or cert pinning is not "
+             "available on this platform).\n"
+             "       Start the server and re-run `aimee remote set`, or `aimee remote trust`.\n");
    }
    return 0;
 }
@@ -203,8 +236,10 @@ static int remote_trust(int json_output)
       fprintf(stderr, "aimee: remote %s is not https:// — no certificate to pin\n", url);
       return 1;
    }
+   char *saved_insecure = tls_insecure_suspend(); /* pin + verify strictly, see remote_set */
    if (remote_pin_cert(url, json_output) != 0)
    {
+      tls_insecure_restore(saved_insecure);
       fprintf(stderr,
               "aimee: could not fetch the server certificate (is %s reachable? is pinning "
               "supported on this platform?)\n",
@@ -213,6 +248,7 @@ static int remote_trust(int json_output)
    }
    aimee_client_set_remote(url, token[0] ? token : NULL);
    int verified = remote_health_ok();
+   tls_insecure_restore(saved_insecure);
    if (json_output)
       printf("{\"ok\":true,\"pinned\":true,\"verified\":%s}\n", verified ? "true" : "false");
    else

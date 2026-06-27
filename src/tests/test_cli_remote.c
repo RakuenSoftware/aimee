@@ -86,6 +86,23 @@ static void test_set_creates_missing_home(void)
       setenv("AIMEE_HOME", saved, 1);
 }
 
+static void test_https_set_restores_insecure_env(void)
+{
+   reset_state();
+   /* `remote set` forces strict verification (suspends AIMEE_TLS_INSECURE) so a
+    * self-signed server is always pinned even when the env var is set. It must
+    * RESTORE the caller's env afterward — never permanently clobber it. Use an
+    * unresolvable https host: trust can't be established, but config still
+    * persists and the env var must come back. (Regression for the auto-pin fix.) */
+   setenv("AIMEE_TLS_INSECURE", "1", 1);
+   char *argv[] = {(char *)"set", (char *)"https://made-host.invalid:8799", (char *)"tok"};
+   assert(cli_remote_cmd(3, argv, 1) == 0); /* set always persists config */
+   const char *v = getenv("AIMEE_TLS_INSECURE");
+   assert(v && strcmp(v, "1") == 0); /* restored, not clobbered */
+   PASS("https remote set restores AIMEE_TLS_INSECURE");
+   unsetenv("AIMEE_TLS_INSECURE");
+}
+
 int main(void)
 {
    /* Isolate AIMEE_HOME so we never touch the real config. */
@@ -98,6 +115,7 @@ int main(void)
    test_env_wins_over_file();
    test_clear();
    test_set_creates_missing_home();
+   test_https_set_restores_insecure_env();
    printf("ALL PASS\n");
 
    /* Best-effort cleanup. */

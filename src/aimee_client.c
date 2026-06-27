@@ -265,8 +265,8 @@ static char *tcp_request(const char *url, const char *token, const char *method,
    {
       fprintf(stderr,
               "aimee: refusing to send credentials over plaintext http:// to non-loopback host "
-              "'%s'. Use https:// (the server's TLS port); set AIMEE_TLS_INSECURE=1 if the server "
-              "presents a self-signed certificate.\n",
+              "'%s'. Use https:// (the server's TLS port) — `aimee remote set` pins a self-signed "
+              "certificate automatically.\n",
               host);
       return NULL;
    }
@@ -294,9 +294,9 @@ static char *tcp_request(const char *url, const char *token, const char *method,
       {
          if (!g_suppress_conn_errors)
             fprintf(stderr,
-                    "aimee: TLS handshake with %s failed (untrusted/self-signed cert?). "
-                    "Run `aimee remote trust` to pin this server's certificate, or set "
-                    "AIMEE_TLS_INSECURE=1 to skip verification.\n",
+                    "aimee: TLS handshake with %s failed (untrusted/self-signed cert, or the "
+                    "pinned cert was rotated). Run `aimee remote trust` to (re)pin this server's "
+                    "certificate.\n",
                     host);
          platform_net_close(fd);
          return NULL;

@@ -752,7 +752,9 @@ aimee remote clear    # revert to a local Unix socket
 Precedence is `--server` flag > `AIMEE_SERVER_URL` env > persisted `remote.conf`.
 
 `https://` URLs are supported on Linux/macOS builds (OpenSSL), with certificate
-verification on by default; set `AIMEE_TLS_INSECURE=1` for self-signed/dev servers.
+verification on by default. For a self-signed/private server, `aimee remote set`
+pins its certificate on first use (trust-on-first-use) so verification then passes
+with no further configuration; `aimee remote trust` re-pins after a cert rotation.
 The Windows thin client is built without TLS and refuses `https://`; terminate TLS
 at a reverse proxy and use its `http://` address.
 
@@ -794,7 +796,7 @@ If a dependency is missing, `install.sh` stops and points you back at
 `install-deps.sh`. On **Windows**, aimee runs as the thin client only (server + kb
 run in Docker or on Linux/macOS): run `install.ps1`, point it at your server with
 `aimee remote set https://host:8743 <token>` (the server's `/v1` is TLS-only
-off-loopback with a self-signed cert, so set `AIMEE_TLS_INSECURE=1` or trust it),
+off-loopback with a self-signed cert, which `remote set` pins automatically),
 and run `configure-hooks.ps1`.
 
 The C services (`aimee`, `aimee-server`, `aimee-kb`) need no Go. The browser UI
