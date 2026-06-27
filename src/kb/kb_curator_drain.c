@@ -42,6 +42,12 @@
 #define DRAIN_POLL_SECS 5
 /* Max synthesis ops processed per poll — each is an LLM round-trip. */
 #define SYNTH_DRAIN_BATCH 4
+/* Max curator jobs (extract/synth/…) drained back-to-back per poll. The per-poll
+ * catch-up sweep above (code/doc embed + projection graph, O(projects)) is paid
+ * ONCE per batch instead of before every job, so a large post-ingest backlog can't
+ * starve the synth stages to one job per poll. Bounded so the catch-up + config
+ * reload still get a turn each poll (both progress). */
+#define CURATOR_DRAIN_BATCH 16
 
 static void *drain_thread_main(void *arg)
 {
@@ -218,78 +224,84 @@ static void *drain_thread_main(void *arg)
           cfg.kb_curator_extract_max_tokens > 0 ? cfg.kb_curator_extract_max_tokens : 2048;
       opts.max_attempts = cfg.kb_curator_max_attempts > 0 ? cfg.kb_curator_max_attempts : 3;
 
-      int rc = 0;
-      if (cfg.kb_curator_extract_docs_enabled)
+      /* Drain a batch of curator jobs back-to-back. Each iteration runs ONE job
+       * from the highest-priority non-empty stage (the rc chain below). Draining a
+       * batch per poll — rather than one job then re-running the catch-up sweep +
+       * sleep above — amortizes that sweep across the batch so synth keeps pace
+       * with throughput instead of paying the O(projects) sweep before every job.
+       * The top-of-loop sleep provides the idle/error backoff. */
+      int drained = 0;
+      while (!ctx->stop && drained < CURATOR_DRAIN_BATCH)
       {
-         kb_background_set("curator", "extract docs");
-         rc = kb_curator_extract_one(&opts);
-      }
-      if (rc == 0 && cfg.kb_curator_extract_code_enabled)
-      {
-         kb_background_set("curator", "extract code");
-         rc = kb_curator_extract_code_unit_one(&opts);
-      }
-      if (rc == 0 && cfg.kb_curator_resolve_entities_enabled)
-      {
-         kb_background_set("curator", "resolve entities");
-         rc = kb_curator_resolve_entities_one(&opts);
-      }
-      if (rc == 0 && cfg.kb_curator_index_narrative_enabled)
-      {
-         kb_background_set("curator", "index narrative");
-         rc = kb_curator_index_narrative_one(&opts);
-      }
-      if (rc == 0 && cfg.kb_curator_index_claims_enabled)
-      {
-         kb_background_set("curator", "index claims");
-         rc = kb_curator_index_claims_one(&opts);
-      }
-      if (rc == 0 && cfg.kb_curator_detect_contradictions_enabled)
-      {
-         kb_background_set("curator", "detect contradictions");
-         rc = kb_curator_detect_contradictions_one(&opts);
-      }
-      if (rc == 0 && cfg.kb_curator_index_code_unit_enabled)
-      {
-         kb_background_set("curator", "index code_unit");
-         rc = kb_curator_index_code_unit_one(&opts);
-      }
-      if (rc == 0 && cfg.kb_curator_link_artifacts_enabled)
-      {
-         kb_background_set("curator", "link artifacts");
-         rc = kb_curator_link_artifacts_one(&opts);
-      }
-      if (rc == 0 && cfg.kb_curator_synthesize_enabled)
-      {
-         kb_background_set("curator", "synthesize topic");
-         rc = kb_curator_synthesize_one(&opts);
-      }
-      if (rc == 0 && cfg.kb_curator_promote_entity_enabled)
-      {
-         kb_background_set("curator", "promote entity");
-         rc = kb_curator_promote_entity_one(&opts);
-      }
+         /* Return the thread's pooled connection between jobs so a long batch
+          * doesn't pin one past the stuck-lease ceiling (it's re-acquired lazily
+          * by the next stage); cheap no-op when nothing is held. */
+         db2_lease_release_idle();
+         int rc = 0;
+         if (cfg.kb_curator_extract_docs_enabled)
+         {
+            kb_background_set("curator", "extract docs");
+            rc = kb_curator_extract_one(&opts);
+         }
+         if (rc == 0 && cfg.kb_curator_extract_code_enabled)
+         {
+            kb_background_set("curator", "extract code");
+            rc = kb_curator_extract_code_unit_one(&opts);
+         }
+         if (rc == 0 && cfg.kb_curator_resolve_entities_enabled)
+         {
+            kb_background_set("curator", "resolve entities");
+            rc = kb_curator_resolve_entities_one(&opts);
+         }
+         if (rc == 0 && cfg.kb_curator_index_narrative_enabled)
+         {
+            kb_background_set("curator", "index narrative");
+            rc = kb_curator_index_narrative_one(&opts);
+         }
+         if (rc == 0 && cfg.kb_curator_index_claims_enabled)
+         {
+            kb_background_set("curator", "index claims");
+            rc = kb_curator_index_claims_one(&opts);
+         }
+         if (rc == 0 && cfg.kb_curator_detect_contradictions_enabled)
+         {
+            kb_background_set("curator", "detect contradictions");
+            rc = kb_curator_detect_contradictions_one(&opts);
+         }
+         if (rc == 0 && cfg.kb_curator_index_code_unit_enabled)
+         {
+            kb_background_set("curator", "index code_unit");
+            rc = kb_curator_index_code_unit_one(&opts);
+         }
+         if (rc == 0 && cfg.kb_curator_link_artifacts_enabled)
+         {
+            kb_background_set("curator", "link artifacts");
+            rc = kb_curator_link_artifacts_one(&opts);
+         }
+         if (rc == 0 && cfg.kb_curator_synthesize_enabled)
+         {
+            kb_background_set("curator", "synthesize topic");
+            rc = kb_curator_synthesize_one(&opts);
+         }
+         if (rc == 0 && cfg.kb_curator_promote_entity_enabled)
+         {
+            kb_background_set("curator", "promote entity");
+            rc = kb_curator_promote_entity_one(&opts);
+         }
 
-      if (rc == 1)
-      {
-         /* Job processed — loop straight back to drain the next one (no cap). */
-         aimee_log(LOG_DEBUG, "kb.curator.drain", "job processed");
+         if (rc == 1)
+         {
+            drained++; /* job processed — drain the next one without re-sweeping */
+            continue;
+         }
+         if (rc < 0)
+            /* Stage error: stop the batch; the top-of-loop sleep backs off before
+             * the next poll so a persistently-failing stage can't spin hot. */
+            aimee_log(LOG_WARN, "kb.curator.drain", "extractor returned error; backing off");
+         break; /* rc==0 (all queues empty) or rc<0 (error): end this poll's batch */
       }
-      else if (rc == 0)
-      {
-         /* No jobs pending — wait a full poll interval before next attempt */
-         kb_background_clear("curator");
-         sleep(DRAIN_POLL_SECS);
-      }
-      else
-      {
-         /* Stage error: back off a poll interval before retrying. With the rate
-          * cap gone this is the only thing keeping a persistently-failing stage
-          * (bad provider, schema always rejected) from spinning the loop hot. */
-         aimee_log(LOG_WARN, "kb.curator.drain", "extractor returned error; backing off");
-         kb_background_clear("curator");
-         sleep(DRAIN_POLL_SECS);
-      }
+      if (drained > 0)
+         aimee_log(LOG_DEBUG, "kb.curator.drain", "drained %d job(s) this poll", drained);
       kb_background_clear("curator");
    }
 
