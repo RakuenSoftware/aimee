@@ -765,6 +765,12 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_agent_setup.c
     ${AIMEE_SRC_DIR}/cli_session_start.c
     ${AIMEE_SRC_DIR}/harness_memory_hydrate.c
+    # hydrate calls hmem_resolve_project / hmem_scope_for_client; the standalone
+    # `aimee` CLI does not link aimee-core, so their definers must build into the
+    # CLI directly (the make build links them via L_CLIENT). Without these the
+    # macOS/Windows CMake link fails with undefined hmem_* symbols.
+    ${AIMEE_SRC_DIR}/harness_memory_common.c
+    ${AIMEE_SRC_DIR}/harness_memory_scope.c
     ${AIMEE_SRC_DIR}/cli_attention_guard.c
     ${AIMEE_SRC_DIR}/cli_code_audit.c
     ${AIMEE_SRC_DIR}/cli_css.c
