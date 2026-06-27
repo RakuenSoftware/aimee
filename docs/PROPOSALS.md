@@ -129,6 +129,13 @@ recall.
   score-aware lexical / dense blending shipped as an opt-in fusion mode on
   `POST /v1/search`; benchmark gate did not justify a default flip, so `rrf`
   remains default. **Done, bench-only / no rollout.**
+- [Cross-repo dependency graph](proposals/pending/cross-repo-dependency-graph.md):
+  precise, confidence-tiered inter-repo dependency edges over the multi-repo
+  corpus; corroboration-gated resolver (import/include resolution + export
+  downgrade signal), corpus-derived distinctiveness, signature-aware
+  multiplicity, AMBIGUOUS review queue; query-first (read API + CLI) with
+  numeric precision gates before P3 materialization. Extends code-graph
+  intelligence.
 
 ### Synthesis tie-break (Synthesize / Calibrate)
 
