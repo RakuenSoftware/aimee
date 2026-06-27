@@ -129,25 +129,6 @@ jobs:
     # translation, ON CONFLICT targets, schema apply) instead of skipping
     # when AIMEE_TEST_PG_URL is unset. pg_trgm is required by the
     # memories_code_fts trigram index (see src/schema/postgres.sql).
-    services:
-      postgres:
-        # pgvector/pgvector (debian, not alpine) so the embedding tables exercise
-        # the REAL vector path: it ships pgvector >= 0.7 (halfvec — the unified
-        # embedding column type) and the contrib modules incl. pg_trgm (the
-        # memories_code_fts trigram index). postgres:17-alpine shipped neither, so
-        # schema apply degraded; e2e-docker already runs on this image family.
-        image: pgvector/pgvector:pg18
-        env:
-          POSTGRES_USER: aimee
-          POSTGRES_PASSWORD: aimee
-          POSTGRES_DB: aimee_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
     env:
       AIMEE_TEST_PG_URL: postgres://aimee:aimee@localhost:5432/aimee_test
     steps:
@@ -161,6 +142,25 @@ jobs:
           make --version 2>/dev/null | head -1 || true
           df -h / | tail -1
           echo "::endgroup::"
+      - name: Start Postgres (pgvector) with pull retry
+        # Started manually rather than as a `services:` container: the runner pulls
+        # service images with no retry, so a transient Docker Hub timeout fails the
+        # whole required check (the unit-tests flake). Pull with backoff, then run.
+        # pgvector/pgvector (debian, not alpine) ships pgvector >= 0.7 (halfvec —
+        # the unified embedding column type) and the contrib modules incl. pg_trgm
+        # (the memories_code_fts trigram index); postgres:*-alpine shipped neither.
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-pg \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_test \
+            -p 5432:5432 \
+            --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10 \
+            "$img"
       - name: Install dependencies
         run: |
           sudo apt-get update -q
@@ -169,7 +169,11 @@ jobs:
             libpq-dev postgresql-client
       - name: Wait for Postgres
         run: |
-          until pg_isready -h localhost -p 5432 -U aimee; do sleep 1; done
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -p 5432 -U aimee && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"; docker logs aimee-pg || true; exit 1
       - name: Unit tests
         run: cd src && make -j$(nproc) unit-tests
 
