@@ -87,6 +87,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-memory-ranker-boundary \
                $(TESTPREFIX)/unit-test-memory-lanes \
                $(TESTPREFIX)/unit-test-workspace \
+               $(TESTPREFIX)/unit-test-cross-repo-deps \
                $(TESTPREFIX)/unit-test-primary-session-adapter \
                $(TESTPREFIX)/unit-test-webchat-claude-sessions \
                $(TESTPREFIX)/unit-test-turn-registry \
@@ -1381,6 +1382,14 @@ $(TESTPREFIX)/unit-test-code-treesitter: $(OBJDIR)/tests/test_code_treesitter.o 
                                          $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_CORE)
 endif
+
+# Cross-repo dependency graph S2a: pure resolver core (import resolution +
+# distinctiveness). DB-free, so it links only the resolver object. The
+# TEST_TARGETS membership is declared in the initial := block above (before the
+# unit-tests rule) so the binary is built, not just run.
+$(TESTPREFIX)/unit-test-cross-repo-deps: $(OBJDIR)/tests/test_cross_repo_deps.o \
+                                         $(OBJDIR)/db2/cross_repo_resolver.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-aimee-client: $(OBJDIR)/tests/test_aimee_client.o $(OBJDIR)/aimee_client.o \
                                       $(OBJDIR)/posix/platform_net.o $(OBJDIR)/http_uds_client.o \
