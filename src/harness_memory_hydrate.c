@@ -8,6 +8,7 @@
 #include "harness_memory_common.h"
 #include "harness_memory_scope.h"
 #include "harness_memory_spill.h"
+#include "platform_path.h" /* platform_mkdir_p (portable mkdir -p) */
 
 #include <dirent.h>
 #include <stdio.h>
@@ -19,6 +20,16 @@
 #ifndef _WIN32
 #include <fcntl.h>
 #include <unistd.h>
+#endif
+
+/* Portable canonicalization: POSIX realpath resolves symlinks; on Windows
+ * _fullpath returns an absolute path (no AF_UNIX-style symlink resolution, which
+ * matches Windows' privileged-only symlink model). Both return non-NULL on
+ * success and write the absolute path to `out`. */
+#ifdef _WIN32
+#define hm_realpath(p, out) _fullpath((out), (p), PATH_MAX)
+#else
+#define hm_realpath(p, out) realpath((p), (out))
 #endif
 
 #ifndef PATH_MAX
@@ -53,7 +64,7 @@ static void mkdir_parents(const char *file_path)
       if (*p == '/')
       {
          *p = '\0';
-         mkdir(buf, 0700);
+         platform_mkdir_p(buf, 0700);
          *p = '/';
       }
    }
@@ -79,7 +90,7 @@ static int target_confined(const char *target, const char *memreal)
       return 0;
    snprintf(dir, sizeof(dir), "%.*s", (int)(base - target), target);
    char dreal[PATH_MAX];
-   if (!realpath(dir, dreal))
+   if (!hm_realpath(dir, dreal))
       return 0;
    size_t n = strlen(memreal);
    return strncmp(dreal, memreal, n) == 0 && (dreal[n] == '/' || dreal[n] == '\0');
@@ -201,7 +212,7 @@ static int consume_spills(const char *project, const char *endpoint, const char 
          free(bs);
          if (r && st >= 200 && st < 300)
          {
-            unlink(fp);
+            remove(fp); /* ISO C (portable); unistd unlink isn't declared on Windows */
             hmem_audit("spill-consumed", p, nm, NULL);
             n++;
          }
@@ -223,7 +234,7 @@ int harness_memory_hydrate(const char *cwd)
    if (!scope) /* no registered memory surface for this client */
       return -1;
    char real[PATH_MAX];
-   if (!realpath((cwd && cwd[0]) ? cwd : ".", real))
+   if (!hm_realpath((cwd && cwd[0]) ? cwd : ".", real))
       return -1;
    char slug[PATH_MAX * 2];
    hmem_slug_from_path(real, slug, sizeof(slug));
@@ -269,7 +280,7 @@ int harness_memory_hydrate(const char *cwd)
     * under the *real* directory (a symlinked component can't redirect us out). */
    mkdir_p(memdir);
    char memreal[PATH_MAX];
-   if (!realpath(memdir, memreal))
+   if (!hm_realpath(memdir, memreal))
    {
       cJSON_Delete(resp);
       return -1;
