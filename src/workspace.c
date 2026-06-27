@@ -860,10 +860,16 @@ int worktree_find_branch_registered(const char *branch, char *out_dir, size_t ou
  * A fresh session must start from the repository's DEFAULT branch, not from
  * whatever branch the source checkout happens to be sitting on — otherwise a
  * session forks off a random feature branch and inherits unrelated WIP. Order:
- *   1. origin/HEAD  — the remote default branch (e.g. "origin/main"); used as
- *      the base ref directly so the worktree tracks the latest fetched default.
- *   2. local main / master / trunk — common defaults when no remote HEAD is set.
+ *   1. origin/HEAD  — the remote default branch (e.g. "origin/main"); fetched
+ *      fresh and used as origin/<default> so the worktree tracks the latest
+ *      upstream rather than a stale remote-tracking ref.
+ *   2. local main / master / trunk — common defaults when no remote HEAD is set;
+ *      fetched and resolved to origin/<default> when an upstream exists.
  *   3. current HEAD — last resort (detached/empty repo, or a default-less repo).
+ * Basing a fresh session on a stale local copy of the default produced spurious
+ * merge conflicts at integration time, so we refresh from origin first (cf. the
+ * session-checkout path, which already fetches origin/<primary>). The fetch is
+ * best-effort: offline or remote-less repos fall back to the local default.
  * Callers that want a specific base (delegates inheriting a parent, or the
  * session-checkout path that bases on origin/<primary>) pass base_ref instead
  * and never reach here. */
@@ -876,8 +882,9 @@ void worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len
    char cmd[MAX_PATH_LEN + 128];
    int rc;
 
-   /* 1. Remote default branch via origin/HEAD. symbolic-ref --short yields
-    * e.g. "origin/main"; base directly off that remote-tracking ref. */
+   /* Resolve the default branch NAME (short, e.g. "main"). Prefer origin/HEAD;
+    * symbolic-ref --short yields "origin/main", so strip the remote prefix. */
+   char def[96] = {0};
    snprintf(cmd, sizeof(cmd),
             "git -C '%s' symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null", git_root);
    char *out = run_cmd(cmd, &rc);
@@ -886,31 +893,64 @@ void worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len
       size_t len = strlen(out);
       while (len > 0 && (out[len - 1] == '\n' || out[len - 1] == '\r' || out[len - 1] == ' '))
          out[--len] = '\0';
-      if (len > 0)
-      {
-         snprintf(buf, buf_len, "%s", out);
-         free(out);
-         return;
-      }
+      const char *name = out;
+      if (strncmp(name, "origin/", 7) == 0)
+         name += 7;
+      if (name[0])
+         snprintf(def, sizeof(def), "%s", name);
    }
    free(out);
 
-   /* 2. Common local default branches. */
-   const char *candidates[] = {"main", "master", "trunk"};
-   for (int b = 0; b < 3; b++)
+   /* Fall back to a common local default branch when origin/HEAD is unset. */
+   if (!def[0])
    {
+      const char *candidates[] = {"main", "master", "trunk"};
+      for (int b = 0; b < 3; b++)
+      {
+         snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
+                  git_root, candidates[b]);
+         char *cand_out = run_cmd(cmd, &rc);
+         free(cand_out);
+         if (rc == 0)
+         {
+            snprintf(def, sizeof(def), "%s", candidates[b]);
+            break;
+         }
+      }
+   }
+
+   if (def[0])
+   {
+      /* Refresh the default branch from origin so the worktree starts from the
+       * latest upstream, not a stale local copy. Best-effort: a remote-less or
+       * offline repo just leaves the existing refs untouched. */
+      snprintf(cmd, sizeof(cmd), "git -C '%s' fetch --quiet origin '%s' 2>/dev/null", git_root, def);
+      free(run_cmd(cmd, &rc));
+
+      /* Prefer the freshly fetched remote-tracking ref; fall back to the local
+       * branch when there is no upstream (purely local repo). */
+      char remote_ref[128];
+      snprintf(remote_ref, sizeof(remote_ref), "origin/%s", def);
       snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
-               git_root, candidates[b]);
-      char *cand_out = run_cmd(cmd, &rc);
-      free(cand_out);
+               git_root, remote_ref);
+      free(run_cmd(cmd, &rc));
       if (rc == 0)
       {
-         snprintf(buf, buf_len, "%s", candidates[b]);
+         snprintf(buf, buf_len, "%s", remote_ref);
+         return;
+      }
+
+      snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --verify --quiet '%s' >/dev/null 2>&1",
+               git_root, def);
+      free(run_cmd(cmd, &rc));
+      if (rc == 0)
+      {
+         snprintf(buf, buf_len, "%s", def);
          return;
       }
    }
 
-   /* 3. Last resort: the current branch (may be detached -> stays "HEAD"). */
+   /* Last resort: the current branch (may be detached -> stays "HEAD"). */
    snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse --abbrev-ref HEAD 2>/dev/null", git_root);
    out = run_cmd(cmd, &rc);
    if (rc == 0 && out && out[0])
