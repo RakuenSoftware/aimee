@@ -39,6 +39,12 @@ const char *kb_effective_embedding_cmd(const char *embedding_cmd);
 int accept_generated_embedding(int64_t doc_id, const float *vec, int dim);
 int sync_vector_embedding(int64_t doc_id, const float *vec, int dim);
 void delete_file_chunks(const char *project, const char *file_path);
+/* Read |src_path| whole and upsert it as the kb_file_index body for
+ * (project, file_path) — the whole-file copy served by GET /v1/kb/file, stored
+ * alongside the chunks. Oversize/unreadable files store no body (chunks still
+ * cover retrieval). */
+void kb_file_index_store_from_path(const char *project, const char *file_path, const char *hash,
+                                   const char *src_path);
 void kb_async_make_embed_text(const char *heading_path, const char *content, char *out,
                               size_t out_len);
 #define KB_DEFAULT_MAX_RESULTS 3

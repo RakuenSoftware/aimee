@@ -475,6 +475,40 @@ static int chunk_content(const char *content, size_t len, text_chunk_t *chunks, 
    return n;
 }
 
+/* Upper bound on a whole-file body stored verbatim in kb_file_index.content.
+ * Larger files are still chunked/embedded for search; only the whole-file copy
+ * (served by GET /v1/kb/file) is skipped, to bound DB2 growth. */
+#define KB_FILE_INDEX_MAX_BYTES (4 * 1024 * 1024)
+
+/* Read a whole file into a malloc'd, NUL-terminated buffer (NULL on error/oversize). */
+static char *kb_read_file_all(const char *path)
+{
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return NULL;
+   char *buf = NULL;
+   if (fseek(f, 0, SEEK_END) == 0)
+   {
+      long len = ftell(f);
+      if (len >= 0 && len <= KB_FILE_INDEX_MAX_BYTES && fseek(f, 0, SEEK_SET) == 0 &&
+          (buf = malloc((size_t)len + 1)) != NULL)
+      {
+         size_t got = fread(buf, 1, (size_t)len, f);
+         buf[got] = '\0';
+      }
+   }
+   fclose(f);
+   return buf;
+}
+
+void kb_file_index_store_from_path(const char *project, const char *file_path, const char *hash,
+                                   const char *src_path)
+{
+   char *full = kb_read_file_all(src_path);
+   db2_kb_file_index_upsert(project, file_path, hash, full);
+   free(full);
+}
+
 /* General document-ingest entry point. Chunk one document's text `content` into
  * kb_documents and embed each chunk into the KB vector store under `project`,
  * keyed by `source_path`. Source-agnostic by design: the workspace doc-refresh
