@@ -62,6 +62,20 @@ services:
         expose: false
         hostExpose: true
     config:
+      # The server's self-signed /v1 TLS cert covers the container hostname +
+      # localhost/loopback only. Behind NAT/DNAT (a tierd plugin reached at the
+      # host's LAN IP/hostname), set the reachable address(es) here so the cert
+      # includes them and thin clients verify (pin) it WITHOUT AIMEE_TLS_INSECURE.
+      # Comma-separated; bare IPs/hosts are auto-typed (e.g. "192.168.1.254" or
+      # "192.168.1.254,nas.lan"). No effect when an operator cert is supplied.
+      - key: AIMEE_TLS_EXTRA_SAN
+        type: string
+        label: Extra TLS cert SAN(s)
+        default: ""
+        description: >-
+          Additional Subject Alternative Names for the self-signed server cert —
+          the deployment's reachable IP(s)/hostname(s) (comma-separated). Lets
+          thin clients pin+verify over the LAN with no AIMEE_TLS_INSECURE.
       # Operator-set at deploy time (kept out of git). The webchat browser UI
       # authenticates via PAM against this user/password; set BOTH to enable
       # sign-in. Leave blank to serve the login page with no account.

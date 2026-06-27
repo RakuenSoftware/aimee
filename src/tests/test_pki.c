@@ -92,6 +92,24 @@ int main(void)
    assert(pki_ca_ensure() == 0);
    assert(pki_is_revoked(serial2) == 1); /* persisted across reload */
 
+   /* Server-cert SAN builder: base set always present; AIMEE_TLS_EXTRA_SAN entries
+    * appended with auto-typing (IP vs DNS) and pass-through of pre-typed entries. */
+   char san[1024];
+   pki_build_server_san("myhost", NULL, san, sizeof(san));
+   assert(strstr(san, "DNS:myhost") && strstr(san, "DNS:localhost") &&
+          strstr(san, "IP:127.0.0.1") && !strstr(san, "192")); /* no extras when NULL */
+   pki_build_server_san("h", "192.168.1.254", san, sizeof(san));
+   assert(strstr(san, ",IP:192.168.1.254") && !strstr(san, "IP:IP:")); /* bare IPv4 -> IP: */
+   pki_build_server_san("h", "nas.local", san, sizeof(san));
+   assert(strstr(san, ",DNS:nas.local")); /* bare hostname -> DNS: */
+   pki_build_server_san("h", "IP:10.0.0.5", san, sizeof(san));
+   assert(strstr(san, ",IP:10.0.0.5") && !strstr(san, "IP:IP:")); /* pre-typed kept as-is */
+   pki_build_server_san("h", "192.168.1.254, nas.local", san, sizeof(san));
+   assert(strstr(san, ",IP:192.168.1.254") && strstr(san, ",DNS:nas.local")); /* multi */
+   pki_build_server_san("h", "fd00::1", san, sizeof(san));
+   assert(strstr(san, ",IP:fd00::1")); /* IPv6 -> IP: */
+   printf("pki: SAN builder ok\n");
+
    snprintf(cmd, sizeof(cmd), "rm -rf %s", home);
    (void)system(cmd);
    printf("pki: all tests passed\n");

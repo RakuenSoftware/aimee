@@ -51,6 +51,14 @@ extern "C"
     * is written 0600. Returns 0 if a usable cert is in place, -1 on failure. */
    int pki_ensure_self_signed_server_cert(const char *cert_path, const char *key_path);
 
+   /* Build the self-signed server cert SAN string into |out| (cap bytes): always
+    * the hostname |cn| + localhost + IPv4/IPv6 loopback, plus |extra| (the
+    * AIMEE_TLS_EXTRA_SAN value: comma/space-separated additional names, each
+    * pre-typed "IP:"/"DNS:"/… or a bare host/IP auto-classified). Lets a
+    * NAT/DNAT deployment present a cert that verifies for its reachable address
+    * without an operator-supplied cert. Truncation-safe. Exposed for tests. */
+   void pki_build_server_san(const char *cn, const char *extra, char *out, size_t cap);
+
    /* For tests: drop cached CA + snapshot so a fresh AIMEE_HOME is picked up. */
    void pki_reset_for_test(void);
 

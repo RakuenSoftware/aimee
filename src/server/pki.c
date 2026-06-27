@@ -23,7 +23,8 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
-#include <unistd.h> /* gethostname, close */
+#include <unistd.h>    /* gethostname, close */
+#include <arpa/inet.h> /* inet_pton — classify AIMEE_TLS_EXTRA_SAN entries */
 
 #define PKI_CA_AGENT     "__pki_ca__" /* vault agent name under which the CA key is sealed */
 #define PKI_CA_CN        "aimee-client-CA"
@@ -239,6 +240,49 @@ static int set_random_serial(X509 *cert, char *hex_out, size_t hex_len)
  * regardless of trust; clients pin the cert or pass AIMEE_TLS_INSECURE=1. The key
  * is written 0600; the cert (public) is world-readable. Returns 0 if a usable
  * cert exists (already present or freshly written), -1 on failure (logged). */
+void pki_build_server_san(const char *cn, const char *extra, char *out, size_t cap)
+{
+   if (!out || cap == 0)
+      return;
+   int n = snprintf(out, cap, "DNS:%s,DNS:localhost,IP:127.0.0.1,IP:0:0:0:0:0:0:0:1",
+                    (cn && *cn) ? cn : "localhost");
+   if (n < 0 || (size_t)n >= cap)
+   {
+      out[cap - 1] = '\0';
+      return;
+   }
+   if (!extra || !*extra)
+      return;
+   /* Append operator-configured extra SANs (comma/space-separated). Each entry is
+    * either pre-typed ("IP:.."/"DNS:.."/"email:.."/"URI:..") or a bare host/IP
+    * that we auto-classify: parses as an IP -> "IP:", else "DNS:". An entry that
+    * would overflow |out| is dropped whole (never half-written). */
+   char buf[512];
+   snprintf(buf, sizeof(buf), "%s", extra);
+   char *save = NULL;
+   for (char *tok = strtok_r(buf, ", ", &save); tok; tok = strtok_r(NULL, ", ", &save))
+   {
+      if (!*tok)
+         continue;
+      const char *prefix = "";
+      if (strncmp(tok, "IP:", 3) != 0 && strncmp(tok, "DNS:", 4) != 0 &&
+          strncmp(tok, "email:", 6) != 0 && strncmp(tok, "URI:", 4) != 0)
+      {
+         unsigned char ipbuf[16];
+         prefix = (inet_pton(AF_INET, tok, ipbuf) == 1 || inet_pton(AF_INET6, tok, ipbuf) == 1)
+                      ? "IP:"
+                      : "DNS:";
+      }
+      size_t cur = strlen(out);
+      int w = snprintf(out + cur, cap - cur, ",%s%s", prefix, tok);
+      if (w < 0 || (size_t)w >= cap - cur)
+      {
+         out[cur] = '\0'; /* drop the entry that didn't fit; keep prior SANs */
+         break;
+      }
+   }
+}
+
 int pki_ensure_self_signed_server_cert(const char *cert_path, const char *key_path)
 {
    if (!cert_path || !cert_path[0] || !key_path || !key_path[0])
@@ -262,8 +306,8 @@ int pki_ensure_self_signed_server_cert(const char *cert_path, const char *key_pa
    if (gethostname(cn, sizeof(cn)) != 0 || !cn[0])
       snprintf(cn, sizeof(cn), "aimee-server");
    cn[sizeof(cn) - 1] = '\0';
-   char san[300];
-   snprintf(san, sizeof(san), "DNS:%s,DNS:localhost,IP:127.0.0.1,IP:0:0:0:0:0:0:0:1", cn);
+   char san[1024];
+   pki_build_server_san(cn, getenv("AIMEE_TLS_EXTRA_SAN"), san, sizeof(san));
 
    X509_set_version(cert, 2);
    X509_NAME *name = X509_get_subject_name(cert);
