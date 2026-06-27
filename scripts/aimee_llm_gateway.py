@@ -303,6 +303,86 @@ def do_rerank(obj):
 
 _synth_breaker = CircuitBreaker()
 
+# A lost Vulkan/GPU device is unrecoverable in-process for a llama-server: after an
+# amdgpu ring-reset / ErrorDeviceLost the child's /health still returns 200 but EVERY
+# decode fails (HTTP 500 carrying one of these markers) forever, so the synth breaker
+# latches open and nothing self-heals (the supervisor only restarts on a child EXIT,
+# and a wedged child stays up). We detect the signature and tear the gateway down so
+# the supervisor restarts the container with a fresh GPU context + a reset breaker.
+# Markers are Vulkan-specific signatures that only appear in a llama-server 5xx body —
+# deliberately NOT loose phrases like "device lost" that could occur in echoed input.
+_DEVICE_LOST_MARKERS = ("ErrorDeviceLost", "ERROR_DEVICE_LOST", "vk::Queue::submit")
+# Rate-limit the auto-restart via a timestamp recorded in a state file so a
+# deterministically-bad GPU (e.g. it re-wedges on the first decode after every restart)
+# does not thrash in a reload loop — after the guard trips we leave it for an operator
+# (loud log). The file persists across a `docker restart` (same container), so the
+# window survives the restart it triggers.
+_DEVICE_LOST_STATE = os.environ.get("AIMEE_LLM_DEVICE_LOST_STATE",
+                                    "/tmp/aimee-llm-device-lost.ts")
+_DEVICE_LOST_MIN_INTERVAL = float(
+    os.environ.get("AIMEE_LLM_DEVICE_LOST_RESTART_MIN_INTERVAL", "180"))
+
+
+def _error_text(exc):
+    """Best-effort text of an upstream failure; an HTTPError carries the JSON body with
+    the llama-server error message (where the device-lost signature appears)."""
+    if isinstance(exc, urllib.error.HTTPError):
+        try:
+            return exc.read().decode("utf-8", "replace")
+        except Exception:  # noqa: BLE001
+            return str(exc)
+    return str(exc)
+
+
+def _is_device_lost(text):
+    return any(m in text for m in _DEVICE_LOST_MARKERS)
+
+
+def _is_synth_device_lost(exc):
+    """A GPU device-lost surfaces ONLY as a 5xx from the synth llama-server. Gate on
+    that so a 4xx body that echoes request content can't spoof a marker and force a
+    spurious container restart."""
+    if isinstance(exc, urllib.error.HTTPError) and exc.code >= 500:
+        return _is_device_lost(_error_text(exc))
+    return False
+
+
+def _device_lost_restart_allowed(now):
+    """True iff we have not auto-restarted within the rate-limit window. Records |now|
+    as the last-restart time when it returns True (so a re-wedge inside the window is
+    held off). Best-effort: a missing/unreadable/unwritable state file means 'allowed'."""
+    try:
+        with open(_DEVICE_LOST_STATE) as fh:
+            last = float(fh.read().strip() or 0)
+    except (OSError, ValueError):
+        last = 0.0
+    if now - last < _DEVICE_LOST_MIN_INTERVAL:
+        return False
+    try:
+        with open(_DEVICE_LOST_STATE, "w") as fh:
+            fh.write(str(now))
+    except OSError:
+        pass
+    return True
+
+
+def _handle_device_lost():
+    """A synth decode failed with a GPU device-lost. Schedule a container restart
+    (deferred ~1s so the in-flight request still returns its error first), unless we
+    restarted too recently — then leave it for an operator with a loud log."""
+    sys.stderr.write("aimee-llm-gateway: synth GPU device lost (Vulkan) — the child cannot "
+                     "recover its context in-process\n")
+    if not _device_lost_restart_allowed(time.time()):
+        sys.stderr.write("aimee-llm-gateway: NOT auto-restarting — another device-lost within "
+                         f"{_DEVICE_LOST_MIN_INTERVAL:.0f}s (suspected hard GPU fault / "
+                         "contention; investigate the host)\n")
+        sys.stderr.flush()
+        return
+    sys.stderr.write("aimee-llm-gateway: restarting the container to recover a fresh GPU "
+                     "context\n")
+    sys.stderr.flush()
+    threading.Timer(1.0, lambda: os._exit(75)).start()  # supervisor reaps -> container restart
+
 
 def do_synth(body):
     """Proxy a /v1/chat/completions request to the configured synth upstream
@@ -328,8 +408,10 @@ def do_synth(body):
         raise GatewayError(503, "provider_unavailable", "synth upstream circuit is open")
     try:
         out = _http_post_json(f"{SYNTH_URL}/v1/chat/completions", body, timeout=300)
-    except Exception:
+    except Exception as exc:
         _synth_breaker.record(False)
+        if _is_synth_device_lost(exc):
+            _handle_device_lost()
         raise
     _synth_breaker.record(True)
     return out

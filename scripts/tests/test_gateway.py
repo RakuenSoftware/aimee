@@ -187,5 +187,75 @@ class RoleHealth(unittest.TestCase):
                 self.assertEqual(self.gw.role_state("http://x"), expected)
 
 
+class SynthDeviceLost(unittest.TestCase):
+    def setUp(self):
+        self.gw = _gw()
+
+    def test_detects_marker(self):
+        self.assertTrue(self.gw._is_device_lost(
+            'decode() failed: vk::Queue::submit: ErrorDeviceLost'))
+        self.assertTrue(self.gw._is_device_lost("VK_ERROR_DEVICE_LOST"))
+        self.assertFalse(self.gw._is_device_lost("context shift not supported"))
+        self.assertFalse(self.gw._is_device_lost("the device lost connection"))  # loose phrase
+
+    def test_synth_device_lost_only_on_5xx(self):
+        import io
+        import urllib.error
+
+        def http_err(code):
+            return urllib.error.HTTPError(
+                "u", code, "e", {}, io.BytesIO(b'{"error":{"message":"ErrorDeviceLost"}}'))
+
+        self.assertTrue(self.gw._is_synth_device_lost(http_err(500)))
+        self.assertFalse(self.gw._is_synth_device_lost(http_err(400)))  # 4xx body can't spoof it
+        self.assertFalse(self.gw._is_synth_device_lost(OSError("ErrorDeviceLost")))
+
+    def test_error_text_reads_httperror_body(self):
+        import io
+        import urllib.error
+        exc = urllib.error.HTTPError(
+            "u", 500, "err", {}, io.BytesIO(b'{"error":{"message":"ErrorDeviceLost"}}'))
+        self.assertIn("ErrorDeviceLost", self.gw._error_text(exc))
+        self.assertEqual(self.gw._error_text(RuntimeError("device lost")), "device lost")
+
+    def test_restart_rate_limited(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            self.gw._DEVICE_LOST_STATE = d + "/ts"
+            self.gw._DEVICE_LOST_MIN_INTERVAL = 180.0
+            self.assertTrue(self.gw._device_lost_restart_allowed(1000.0))   # first time: allowed
+            self.assertFalse(self.gw._device_lost_restart_allowed(1100.0))  # within window: held
+            self.assertTrue(self.gw._device_lost_restart_allowed(1200.0))   # past window: allowed
+
+    def test_do_synth_device_lost_triggers_recovery_and_reraises(self):
+        import io
+        import urllib.error
+        self.gw.SYNTH_URL = "http://synth:8083"
+        called = []
+        self.gw._handle_device_lost = lambda: called.append(True)
+
+        def boom(url, payload, timeout=120):
+            raise urllib.error.HTTPError(
+                url, 500, "err", {}, io.BytesIO(b'{"error":{"message":"ErrorDeviceLost"}}'))
+
+        self.gw._http_post_json = boom
+        with self.assertRaises(urllib.error.HTTPError):
+            self.gw.do_synth({"messages": [{"role": "user", "content": "hi"}]})
+        self.assertEqual(called, [True])
+
+    def test_do_synth_other_error_no_recovery(self):
+        self.gw.SYNTH_URL = "http://synth:8083"
+        called = []
+        self.gw._handle_device_lost = lambda: called.append(True)
+
+        def boom(url, payload, timeout=120):
+            raise OSError("connection refused")
+
+        self.gw._http_post_json = boom
+        with self.assertRaises(OSError):
+            self.gw.do_synth({"messages": [{"role": "user", "content": "hi"}]})
+        self.assertEqual(called, [])
+
+
 if __name__ == "__main__":
     unittest.main()
