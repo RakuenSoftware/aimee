@@ -88,6 +88,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-memory-lanes \
                $(TESTPREFIX)/unit-test-workspace \
                $(TESTPREFIX)/unit-test-cross-repo-deps \
+               $(TESTPREFIX)/unit-test-cross-repo-stats \
                $(TESTPREFIX)/unit-test-primary-session-adapter \
                $(TESTPREFIX)/unit-test-webchat-claude-sessions \
                $(TESTPREFIX)/unit-test-turn-registry \
@@ -473,6 +474,16 @@ $(TESTPREFIX)/unit-test-schema-subst: $(OBJDIR)/tests/test_schema_subst.o \
 $(TESTPREFIX)/unit-test-code-index-ops: \
                                        $(OBJDIR)/tests/test_code_index_ops.o \
                                        $(OBJDIR)/db2/code_index_ops.o \
+                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
+                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
+
+# Cross-repo dependency graph S3: DB stats layer over the sqlite shim (portable
+# SQL). Links the db2 init/pool/schema + the shim core like code-index-ops.
+$(TESTPREFIX)/unit-test-cross-repo-stats: \
+                                       $(OBJDIR)/tests/test_cross_repo_stats.o \
+                                       $(OBJDIR)/db2/cross_repo_stats.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
                                        $(OBJDIR)/db2/db_schema.o \
                                        $(TEST_CORE_OBJS)
