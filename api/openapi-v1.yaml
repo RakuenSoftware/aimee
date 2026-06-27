@@ -1633,6 +1633,64 @@ paths:
         "503":
           description: Canonical index unavailable
 
+  /code/cross-repo-deps:
+    get:
+      operationId: getCodeCrossRepoDeps
+      summary: >-
+        Cross-repo dependency edges for a project (confidence-tiered, with
+        evidence + version stamp), or the AMBIGUOUS review queue when
+        status=ambiguous
+      parameters:
+        - name: project
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: direction
+          in: query
+          required: false
+          description: >-
+            Dependency direction. Only "out" is implemented today; "in"/"both"
+            return 501. Ignored when status=ambiguous.
+          schema:
+            type: string
+            enum: [out, in, both]
+            default: out
+        - name: min_tier
+          in: query
+          required: false
+          description: Minimum confidence tier to emit. Ignored when status=ambiguous.
+          schema:
+            type: string
+            enum: [high, medium, tentative]
+            default: medium
+        - name: status
+          in: query
+          required: false
+          description: >-
+            When "ambiguous", returns the AMBIGUOUS review queue for the project
+            instead of edges (direction/min_tier are not applied in that mode).
+          schema:
+            type: string
+            enum: [ambiguous]
+      responses:
+        "200":
+          description: Cross-repo dependency edges (or ambiguous review queue)
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Missing required parameters
+        "401":
+          description: Unauthorized
+        "413":
+          description: Response too large; narrow the query
+        "501":
+          description: Requested direction not yet implemented
+        "503":
+          description: Canonical index unavailable
+
   /code/scan:
     post:
       operationId: postCodeScan

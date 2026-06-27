@@ -437,6 +437,11 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/db2/corpus_jobs.c
     ${AIMEE_SRC_DIR}/db2/curator_terms.c
     ${AIMEE_SRC_DIR}/db2/curator_gaps.c
+    ${AIMEE_SRC_DIR}/db2/cross_repo_resolver.c
+    ${AIMEE_SRC_DIR}/db2/cross_repo_classify.c
+    ${AIMEE_SRC_DIR}/db2/cross_repo_stats.c
+    ${AIMEE_SRC_DIR}/db2/cross_repo_deps.c
+    ${AIMEE_SRC_DIR}/db2/cross_repo_review.c
     ${AIMEE_SRC_DIR}/db2/mining.c
     ${AIMEE_SRC_DIR}/db2/calibration.c
     ${AIMEE_SRC_DIR}/db2/demotion.c

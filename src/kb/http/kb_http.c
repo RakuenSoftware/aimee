@@ -1316,7 +1316,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       return handle_get_code_callers_route(method, query_string, out_buf, out_cap);
    if (strcmp(path, "/v1/code/project-stats") == 0)
       return handle_get_code_project_stats_route(method, query_string, out_buf, out_cap);
-
+   if (strcmp(path, "/v1/code/cross-repo-deps") == 0)
+      return handle_get_code_cross_repo_deps_route(method, query_string, out_buf, out_cap);
    /* POST /v1/code/build */
    if (strcmp(path, "/v1/code/build") == 0)
    {

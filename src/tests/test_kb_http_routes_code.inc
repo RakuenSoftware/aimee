@@ -75,6 +75,46 @@ int canonical_index_find_callers(const char *project, const char *symbol, void *
    return 1;
 }
 
+/* Cross-repo dependency stubs (S5): kb_http.o's route table keeps
+ * handle_get_code_cross_repo_deps live, so the S4a/S4b/S2b entry points it calls
+ * must resolve at link time. The full engine is covered by the dedicated
+ * test_cross_repo_* units; here we only need empty, well-formed results. The
+ * db2/cross_repo headers' types are passed as void pointers and int (same
+ * void-cast pattern as the canonical_index stubs above) so we avoid pulling the
+ * real headers/memory.h + headers/index.h, which conflict with this file's
+ * truncated local typedefs. */
+int canonical_index_cross_repo_deps(const char *project, const void *opts, void *out_edges,
+                                    size_t *out_n, int *truncated)
+{
+   (void)project;
+   (void)opts;
+   if (out_edges)
+      *(void **)out_edges = NULL;
+   if (out_n)
+      *out_n = 0;
+   if (truncated)
+      *truncated = 0;
+   return 0;
+}
+
+int db2_cross_repo_review_list(const char *caller_repo, const char *status, void *out, int max,
+                               int64_t *overflow_dropped)
+{
+   (void)caller_repo;
+   (void)status;
+   (void)out;
+   (void)max;
+   if (overflow_dropped)
+      *overflow_dropped = 0;
+   return 0;
+}
+
+const char *xrepo_tier_name(int t)
+{
+   (void)t;
+   return "none";
+}
+
 /* Vector-leg stubs (§5): the query embedder + pgvec code search. OFF by default
  * (g_vec_enabled=0 -> memory_embed_text returns 0 -> the leg is skipped), so the
  * existing hybrid tests are unaffected; test_code_hybrid_vector_ok flips it on. */
@@ -372,7 +412,7 @@ static void test_code_hybrid_vector_dim_mismatch_skips(void)
                             NULL, 0, buf, sizeof(buf));
    g_vec_enabled = 0;
    assert(s == 200);
-   assert(strstr(buf, "\"file_path\":\"src/search.c\"") != NULL);    /* lexical still works */
+   assert(strstr(buf, "\"file_path\":\"src/search.c\"") != NULL);   /* lexical still works */
    assert(strstr(buf, "\"file_path\":\"src/semantic.c\"") == NULL); /* vector leg skipped */
 }
 
@@ -584,8 +624,8 @@ static void test_code_graph_surprising_hub_excluded(void)
 {
    char buf[2048];
    int s = kb_http_route_ex("GET", "/v1/code/graph/surprising",
-                            "project=proj-hub&percentile=0&d_min=3&max_results=10", NULL, NULL, NULL,
-                            0, buf, sizeof(buf));
+                            "project=proj-hub&percentile=0&d_min=3&max_results=10", NULL, NULL,
+                            NULL, 0, buf, sizeof(buf));
    assert(s == 200);
    assert(strstr(buf, "\"edge_count\":0") != NULL); /* both edges were project-incident */
    assert(strstr(buf, "\"a\":\"file:f1\"") != NULL);
@@ -636,8 +676,8 @@ static void test_code_graph_surprising_self_suppress(void)
    /* precision at/above the floor -> NOT suppressed, links shown. */
    g_sj_confirmed = 50; /* 50% */
    s = kb_http_route_ex("GET", "/v1/code/graph/surprising",
-                        "project=proj-alpha&percentile=0&d_min=2&max_results=10", NULL, NULL, NULL, 0,
-                        buf, sizeof(buf));
+                        "project=proj-alpha&percentile=0&d_min=2&max_results=10", NULL, NULL, NULL,
+                        0, buf, sizeof(buf));
    assert(s == 200);
    assert(strstr(buf, "\"suppressed\":true") == NULL);
    assert(strstr(buf, "\"link_count\":1") != NULL); /* the disconnected pair surfaces */
@@ -861,7 +901,8 @@ static void test_code_scan_installs_hook(void)
    g_hook_project[0] = '\0';
    snprintf(g_branch_sha, sizeof(g_branch_sha), "tree-ccc");
    snprintf(g_stored_sha, sizeof(g_stored_sha), "tree-bbb"); /* moved -> scans */
-   const char *body = "{\"project\":\"proj-alpha\",\"root_path\":\"/tmp/repo\",\"install_hook\":true}";
+   const char *body =
+       "{\"project\":\"proj-alpha\",\"root_path\":\"/tmp/repo\",\"install_hook\":true}";
    int s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, body, (int)strlen(body), buf,
                             sizeof(buf));
    g_branch_sha[0] = '\0';

@@ -4,6 +4,9 @@
 #include "kb_curator_queue.h"
 #include "cJSON.h"
 #include "db2/canonical_index.h"
+#include "db2/cross_repo_classify.h" /* xrepo_tier_name */
+#include "db2/cross_repo_deps.h"     /* canonical_index_cross_repo_deps */
+#include "db2/cross_repo_review.h"   /* db2_cross_repo_review_list */
 #include "db2/lifecycle.h"
 #include "db2/memory_query.h"
 #include "db2/code_projection.h"
@@ -524,6 +527,183 @@ int handle_get_code_project_stats_route(const char *method, const char *query_st
    if (strcmp(method, "GET") != 0)
       return code_method_not_allowed(out_buf, out_cap);
    return handle_get_code_project_stats(query_string, out_buf, out_cap);
+}
+
+/* GET /v1/code/cross-repo-deps?project=X&direction=out|in|both&min_tier=high|medium|tentative
+ *                              [&status=ambiguous]
+ * Cross-repo dependency edges for a project (§3.7/§3.9), or the AMBIGUOUS review
+ * queue when status=ambiguous (§3.8). */
+static xrepo_tier_t crd_parse_min_tier(const char *s)
+{
+   if (s && strcmp(s, "high") == 0)
+      return XREPO_TIER_HIGH;
+   if (s && (strcmp(s, "tentative") == 0 || strcmp(s, "low") == 0))
+      return XREPO_TIER_LOW;
+   return XREPO_TIER_MEDIUM;
+}
+
+/* Serialize `resp` into the fixed out_buf, returning 413 (not a silently
+ * truncated 200) if it would not fit. Always consumes (frees) `resp`. */
+static int crd_emit(cJSON *resp, char *out_buf, int out_cap)
+{
+   if (!resp)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
+      return 500;
+   }
+   char *json = cJSON_PrintUnformatted(resp);
+   cJSON_Delete(resp);
+   if (!json)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
+      return 500;
+   }
+   int rc = 200;
+   if (strlen(json) >= (size_t)out_cap)
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"response too large; narrow the query\",\"code\":413}");
+      rc = 413;
+   }
+   else
+      snprintf(out_buf, (size_t)out_cap, "%s", json);
+   free(json);
+   return rc;
+}
+
+static int handle_get_code_cross_repo_review(const char *project, char *out_buf, int out_cap)
+{
+   enum
+   {
+      MAXR = 200
+   };
+   xrepo_review_row_t *rows = calloc((size_t)MAXR, sizeof(*rows));
+   if (!rows)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
+      return 500;
+   }
+   int64_t dropped = 0;
+   int n = db2_cross_repo_review_list(project, "open", rows, MAXR, &dropped);
+   if (n < 0)
+   {
+      free(rows);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"canonical index unavailable\"}");
+      return 503;
+   }
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+   {
+      free(rows);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
+      return 500;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "project", project);
+   cJSON *arr = cJSON_AddArrayToObject(resp, "ambiguous");
+   for (int i = 0; arr && i < n; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddNumberToObject(o, "id", (double)rows[i].id);
+      cJSON_AddStringToObject(o, "symbol", rows[i].symbol);
+      cJSON_AddStringToObject(o, "caller_repo", rows[i].caller_repo);
+      cJSON_AddStringToObject(o, "candidate_definer", rows[i].candidate_definer);
+      cJSON_AddStringToObject(o, "review_class", rows[i].review_class);
+      cJSON_AddNumberToObject(o, "evidence_score", rows[i].evidence_score);
+      cJSON *ev = cJSON_Parse(rows[i].evidence); /* embed as object, else raw string */
+      if (ev)
+         cJSON_AddItemToObject(o, "evidence", ev);
+      else
+         cJSON_AddStringToObject(o, "evidence", rows[i].evidence);
+      cJSON_AddItemToArray(arr, o);
+   }
+   cJSON *ov = cJSON_AddObjectToObject(resp, "overflow");
+   if (ov)
+      cJSON_AddNumberToObject(ov, "dropped", (double)dropped);
+   free(rows); /* cJSON has copied every field */
+   return crd_emit(resp, out_buf, out_cap);
+}
+
+int handle_get_code_cross_repo_deps(const char *query_string, char *out_buf, int out_cap)
+{
+   char project[256] = "", dir_s[16] = "", tier_s[16] = "", status_s[16] = "";
+   if (!code_qparam(query_string, "project", project, sizeof(project)) || !project[0])
+      return code_scan_write_error(out_buf, out_cap, "missing project");
+   code_qparam(query_string, "direction", dir_s, sizeof(dir_s));
+   code_qparam(query_string, "min_tier", tier_s, sizeof(tier_s));
+   code_qparam(query_string, "status", status_s, sizeof(status_s));
+
+   if (strcmp(status_s, "ambiguous") == 0)
+      return handle_get_code_cross_repo_review(project, out_buf, out_cap);
+
+   /* direction in/both (dependents) is documented in OpenAPI but not yet
+    * implemented (S4a is OUT-only) -> 501, not a misleading empty 200. */
+   if (strcmp(dir_s, "in") == 0 || strcmp(dir_s, "both") == 0)
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"direction '%s' not yet implemented\",\"code\":501}", dir_s);
+      return 501;
+   }
+   xrepo_deps_opts_t opts = {
+       .min_tier = crd_parse_min_tier(tier_s), .direction = XREPO_DIR_OUT, .include_review = 0};
+
+   xrepo_dep_edge_t *edges = NULL;
+   size_t n = 0;
+   int trunc = 0;
+   if (canonical_index_cross_repo_deps(project, &opts, &edges, &n, &trunc) != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"canonical index unavailable\"}");
+      return 503;
+   }
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+   {
+      free(edges);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
+      return 500;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "project", project);
+   cJSON_AddBoolToObject(resp, "truncated", trunc ? 1 : 0);
+   cJSON *arr = cJSON_AddArrayToObject(resp, "deps");
+   for (size_t i = 0; arr && i < n; i++)
+   {
+      cJSON *e = cJSON_CreateObject();
+      cJSON_AddStringToObject(e, "caller_repo", edges[i].caller_repo);
+      cJSON_AddStringToObject(e, "definer_repo", edges[i].definer_repo);
+      cJSON_AddStringToObject(e, "tier", xrepo_tier_name(edges[i].tier));
+      cJSON_AddNumberToObject(e, "symbol_count", edges[i].symbol_count);
+      cJSON_AddNumberToObject(e, "call_site_count", edges[i].call_site_count);
+      cJSON_AddBoolToObject(e, "import_corroborated", edges[i].import_corroborated ? 1 : 0);
+      cJSON_AddBoolToObject(e, "export_corroborated", edges[i].export_corroborated ? 1 : 0);
+      cJSON *ex = cJSON_AddObjectToObject(e, "example");
+      if (ex)
+      {
+         cJSON_AddStringToObject(ex, "symbol", edges[i].example_symbol);
+         cJSON_AddStringToObject(ex, "file", edges[i].example_file);
+         cJSON_AddNumberToObject(ex, "line", edges[i].example_line);
+      }
+      cJSON *v = cJSON_AddObjectToObject(e, "version");
+      if (v)
+      {
+         cJSON_AddStringToObject(v, "repo_set_hash", edges[i].repo_set_hash);
+         cJSON_AddNumberToObject(v, "distinctiveness_v", edges[i].distinctiveness_v);
+         cJSON_AddNumberToObject(v, "blocked_symbols_version",
+                                 (double)edges[i].blocked_symbols_version);
+         cJSON_AddNumberToObject(v, "resolver_version", edges[i].resolver_version);
+      }
+      cJSON_AddItemToArray(arr, e);
+   }
+   free(edges); /* cJSON has copied every field */
+   return crd_emit(resp, out_buf, out_cap);
+}
+
+int handle_get_code_cross_repo_deps_route(const char *method, const char *query_string,
+                                          char *out_buf, int out_cap)
+{
+   if (strcmp(method, "GET") != 0)
+      return code_method_not_allowed(out_buf, out_cap);
+   return handle_get_code_cross_repo_deps(query_string, out_buf, out_cap);
 }
 
 /* GET /v1/code/hybrid?query=<text>&symbol=<sym>&project=<proj>&max_results=N
