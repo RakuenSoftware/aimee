@@ -8,6 +8,7 @@
 #include "aimee.h"
 #include "db2_test_shim.h"
 #include "../db2/cross_repo_deps.h"
+#include "../db2/cross_repo_review.h"
 #include "../db2/db2.h"
 #include "../db2/db_postgres.h"
 
@@ -118,12 +119,54 @@ static void test_end_to_end(void)
    printf("ok\n");
 }
 
+/* A symbol defined in two trusted repos that A imports NEITHER of, called in A:
+ * multi-definer without corroboration -> AMBIGUOUS -> review queue (no edge). */
+static void test_ambiguous_to_review(void)
+{
+   printf("test_ambiguous_to_review... ");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('lib-x','/x','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('lib-y','/y','t','trusted')");
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'x.c','t' FROM projects WHERE "
+     "name='lib-x'");
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'y.c','t' FROM projects WHERE "
+     "name='lib-y'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'AmbiguousThing','definition' FROM files "
+     "WHERE path='x.c'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'AmbiguousThing','definition' FROM files "
+     "WHERE path='y.c'");
+   /* called in 1 of moonlight-qt's 5 files (20% -> distinctive); A imports neither. */
+   X("INSERT INTO code_calls (file_id,callee) SELECT id,'AmbiguousThing' FROM files WHERE "
+     "path='src/a.cpp'");
+
+   xrepo_deps_opts_t opts = {
+       .direction = XREPO_DIR_OUT, .min_tier = XREPO_TIER_MEDIUM, .include_review = 1};
+   xrepo_dep_edge_t *edges = NULL;
+   size_t n = 0;
+   int trunc = 0;
+   assert(canonical_index_cross_repo_deps("moonlight-qt", &opts, &edges, &n, &trunc) == 0);
+   /* still just the moonlight edge; AmbiguousThing did NOT emit an edge. */
+   for (size_t i = 0; i < n; i++)
+      assert(strcmp(edges[i].example_symbol, "AmbiguousThing") != 0);
+   free(edges);
+
+   /* but it WAS surfaced to the review queue. */
+   xrepo_review_row_t rows[16];
+   int rn = db2_cross_repo_review_list("moonlight-qt", "open", rows, 16, NULL);
+   int found = 0;
+   for (int i = 0; i < rn; i++)
+      if (strcmp(rows[i].symbol, "AmbiguousThing") == 0)
+         found = 1;
+   assert(found);
+   printf("ok\n");
+}
+
 int main(void)
 {
    test_parse_module_id();
    db2_test_shim_open();
    test_empty_graceful();
    test_end_to_end();
+   test_ambiguous_to_review();
    printf("cross_repo_deps_orch: all tests passed\n");
    return 0;
 }

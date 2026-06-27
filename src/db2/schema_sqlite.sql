@@ -323,7 +323,7 @@ CREATE INDEX IF NOT EXISTS idx_ee_projection_generation ON entity_edges(projecti
 -- Per-dialect deltas vs schema.sql: evidence is TEXT here (JSONB on Postgres); timestamps use
 -- datetime('now'); ids are AUTOINCREMENT. Table set is kept in parity by schema-sync-check.
 CREATE INDEX IF NOT EXISTS idx_projects_trust ON projects(trust);
-CREATE TABLE IF NOT EXISTS cross_repo_meta (  id INTEGER PRIMARY KEY CHECK (id = 1),  trust_epoch INTEGER NOT NULL DEFAULT 0 CHECK (trust_epoch >= 0),  repo_set_hash TEXT NOT NULL DEFAULT '',  blocked_symbols_version INTEGER NOT NULL DEFAULT 0 CHECK (blocked_symbols_version >= 0),  updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE TABLE IF NOT EXISTS cross_repo_meta (  id INTEGER PRIMARY KEY CHECK (id = 1),  trust_epoch INTEGER NOT NULL DEFAULT 0 CHECK (trust_epoch >= 0),  repo_set_hash TEXT NOT NULL DEFAULT '',  blocked_symbols_version INTEGER NOT NULL DEFAULT 0 CHECK (blocked_symbols_version >= 0),  review_overflow_dropped INTEGER NOT NULL DEFAULT 0,  updated_at TEXT NOT NULL DEFAULT (datetime('now')));
 -- INSERT OR IGNORE only guarantees the singleton row exists; it must not clobber live runtime counters on re-apply (see schema.sql).
 INSERT OR IGNORE INTO cross_repo_meta (id) VALUES (1);
 CREATE TABLE IF NOT EXISTS blocked_symbols (  word TEXT NOT NULL,  lang TEXT NOT NULL DEFAULT '',  reason TEXT NOT NULL DEFAULT '',  version INTEGER NOT NULL DEFAULT 0,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  updated_at TEXT NOT NULL DEFAULT (datetime('now')),  PRIMARY KEY (word, lang));

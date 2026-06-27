@@ -1243,6 +1243,11 @@ CREATE TABLE IF NOT EXISTS cross_repo_meta (
 -- a DO UPDATE that reset them to defaults would destroy monotonicity. All columns are runtime-owned
 -- after creation, so there is nothing seed-owned to refresh.
 INSERT INTO cross_repo_meta (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+-- S4b: cumulative count of AMBIGUOUS review-queue rows evicted on overflow (§3.8),
+-- surfaced as overflow.dropped. ALTER (not in the CREATE) so it lands on the
+-- existing single-row table from S1.
+ALTER TABLE cross_repo_meta
+    ADD COLUMN IF NOT EXISTS review_overflow_dropped BIGINT NOT NULL DEFAULT 0;
 
 -- blocked_symbols (§3.3): corpus-derived non-distinctive set, recomputed over trusted repos only.
 -- Replaces the static blocklist; `version` lets a tier decision replay against the exact frequency

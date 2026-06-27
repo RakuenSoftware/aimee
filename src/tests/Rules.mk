@@ -90,6 +90,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-cross-repo-deps \
                $(TESTPREFIX)/unit-test-cross-repo-stats \
                $(TESTPREFIX)/unit-test-cross-repo-deps-orch \
+               $(TESTPREFIX)/unit-test-cross-repo-review \
                $(TESTPREFIX)/unit-test-primary-session-adapter \
                $(TESTPREFIX)/unit-test-webchat-claude-sessions \
                $(TESTPREFIX)/unit-test-turn-registry \
@@ -497,6 +498,16 @@ $(TESTPREFIX)/unit-test-cross-repo-deps-orch: \
                                        $(OBJDIR)/db2/cross_repo_stats.o \
                                        $(OBJDIR)/db2/cross_repo_resolver.o \
                                        $(OBJDIR)/db2/cross_repo_classify.o \
+                                       $(OBJDIR)/db2/cross_repo_review.o \
+                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
+                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
+
+# S4b review queue + adjudication over the sqlite shim.
+$(TESTPREFIX)/unit-test-cross-repo-review: \
+                                       $(OBJDIR)/tests/test_cross_repo_review.o \
+                                       $(OBJDIR)/db2/cross_repo_review.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
                                        $(OBJDIR)/db2/db_schema.o \
                                        $(TEST_CORE_OBJS)

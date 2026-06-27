@@ -8,6 +8,7 @@
 
 #include "aimee.h"
 #include "config.h"
+#include "cross_repo_review.h"
 #include "cross_repo_stats.h"
 #include "db2.h"
 #include "db_postgres.h"
@@ -24,6 +25,30 @@
 #define CRD_MAX_REPOS   256
 #define CRD_MAX_HEADERS 20000
 #define CRD_MAX_DEFS    64
+
+/* Minimal JSON string escaper for embedding a symbol into the evidence blob:
+ * escapes " \ and control bytes (< 0x20) as \uXXXX; truncates safely to cap. */
+static void crd_json_escape(const char *in, char *out, size_t cap)
+{
+   size_t o = 0;
+   if (cap == 0)
+      return;
+   for (const unsigned char *p = (const unsigned char *)(in ? in : ""); *p && o + 7 < cap; p++)
+   {
+      if (*p == '"' || *p == '\\')
+      {
+         out[o++] = '\\';
+         out[o++] = (char)*p;
+      }
+      else if (*p < 0x20)
+      {
+         o += (size_t)snprintf(out + o, cap - o, "\\u%04x", *p);
+      }
+      else
+         out[o++] = (char)*p;
+   }
+   out[o] = '\0';
+}
 
 /* ---- manifest module-id parsing (pure) ----------------------------------- */
 
@@ -292,6 +317,8 @@ typedef struct
    int distinctiveness_v;
    int64_t bsv;
    int a_filecount;
+   int include_review; /* write AMBIGUOUS candidates to the review queue (S4b) */
+   int queue_max;      /* review-queue overflow cap */
 } crd_ctx_t;
 
 /* Classify one accumulated candidate symbol (its definer rows) and, if it clears
@@ -368,6 +395,29 @@ static void crd_flush(const crd_ctx_t *ctx, edge_acc_t *acc, const char *sym, in
    c.definer_trusted = definer_trusted;
    c.modality = XREPO_IMPORT_STATIC;
    xrepo_classification_t cl = xrepo_classify(&c);
+
+   /* AMBIGUOUS -> review queue (§3.8), surfaced not dropped. */
+   if (cl.tier == XREPO_TIER_AMBIGUOUS && ctx->include_review)
+   {
+      int routes = (c.corroboration != XREPO_CORROB_NONE) ? 1 : 0;
+      double score = xrepo_evidence_score(distinctive ? definer_rc : 0, sites, routes);
+      /* Representative candidate_definer: deterministic across re-resolutions so
+       * the fingerprint is stable (an adjudicated row is not orphaned by a tie
+       * flip) — highest defcount, tie-broken by repo name. */
+      int rep = 0;
+      for (int i = 1; i < ndef; i++)
+         if (dcount[i] > dcount[rep] ||
+             (dcount[i] == dcount[rep] && strcmp(defs[i].repo, defs[rep].repo) < 0))
+            rep = i;
+      char esym[256];
+      crd_json_escape(sym, esym, sizeof(esym));
+      char ev[512];
+      snprintf(ev, sizeof(ev),
+               "{\"symbol\":\"%s\",\"definers\":%d,\"sites\":%d,\"files\":%d,\"reason\":\"%s\"}",
+               esym, ndef, sites, files, cl.reason ? cl.reason : "ambiguous");
+      db2_cross_repo_review_upsert(ctx->repo_set_hash, sym, ctx->project, defs[rep].repo, ev, score,
+                                   "ambiguous", 0, ctx->queue_max);
+   }
 
    if (target >= 0 && cl.tier >= ctx->min_tier && cl.tier != XREPO_TIER_AMBIGUOUS &&
        cl.tier != XREPO_TIER_NONE && cl.tier != XREPO_TIER_UNIMPLEMENTED)
@@ -501,7 +551,9 @@ int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t
                     .repo_set_hash = repo_set_hash,
                     .distinctiveness_v = cfg.kb_curator_cross_repo_distinctiveness_v,
                     .bsv = bsv,
-                    .a_filecount = a_filecount};
+                    .a_filecount = a_filecount,
+                    .include_review = opts->include_review,
+                    .queue_max = cfg.kb_curator_cross_repo_review_queue_max};
 
    /* Single working-set query (no per-candidate N+1, per the S3 contract): one row
     * per (candidate symbol, definer repo) with per-symbol stats as correlated
