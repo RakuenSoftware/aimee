@@ -92,6 +92,11 @@ services:
       # Bind /v1 on 0.0.0.0 so the published :8741 is reachable from the
       # aimee-server plugin across the bridge.
       AIMEE_KB_HTTP_BIND: "1"
+      # The curator synth sidecar (curator-extract.py) reads LLM_ENDPOINT, NOT
+      # AIMEE_LLM_URL — without it the sidecar exits 256 and code-unit synthesis
+      # never drains. Point it at the same aimee-llm gateway (/v1) on the bridge.
+      LLM_ENDPOINT: http://10.100.0.1:8742/v1
+      LLM_MODEL: aimee-synth
     volumes:
       - name: home
         mode: tier-bound
