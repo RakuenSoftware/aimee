@@ -266,6 +266,11 @@ int db2_kb_ingest_queue_recent(db2_kb_ingest_recent_t *rows, int max_rows)
 
 /* ── kb_file_index ───────────────────────────────────────────────────────── */
 
+/* Upsert a file's index row. |content| is the WHOLE original file text (served
+ * back by kb_handle_file_get / GET /v1/kb/file). Pass NULL to update only the
+ * hash/timestamp WITHOUT touching a previously stored body: the skip/dedup paths
+ * call with NULL and must not erase content captured on a prior full index, so the
+ * UPDATE coalesces NULL to the existing value rather than blanking it. */
 int db2_kb_file_index_upsert(const char *project, const char *file_path, const char *file_hash,
                              const char *content)
 {
@@ -283,7 +288,7 @@ int db2_kb_file_index_upsert(const char *project, const char *file_path, const c
                         " VALUES (?1, ?2, ?3, ?4)"
                         " ON CONFLICT (project, file_path) DO UPDATE"
                         " SET file_hash = EXCLUDED.file_hash, ingested_at = pg_now_text(),"
-                        "     content = EXCLUDED.content",
+                        "     content = COALESCE(EXCLUDED.content, kb_file_index.content)",
                         err, sizeof(err));
    if (!s)
       return -1;
@@ -291,7 +296,10 @@ int db2_kb_file_index_upsert(const char *project, const char *file_path, const c
    aimee_pg_bind_text(s, "?1", proj);
    aimee_pg_bind_text(s, "?2", file_path);
    aimee_pg_bind_text(s, "?3", file_hash);
-   aimee_pg_bind_text(s, "?4", content ? content : "");
+   if (content)
+      aimee_pg_bind_text(s, "?4", content);
+   else
+      aimee_pg_bind_null(s, "?4");
    (void)aimee_pg_step(s, err, sizeof(err));
    aimee_pg_finalize(s);
    return 0;

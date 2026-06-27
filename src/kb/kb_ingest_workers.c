@@ -531,7 +531,8 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
       }
    }
    free(chunks);
-   db2_kb_file_index_upsert(project, source_path, hash, NULL);
+   /* Store the whole file body too (served by GET /v1/kb/file), not just chunks. */
+   db2_kb_file_index_upsert(project, source_path, hash, content);
    return embedded;
 }
 

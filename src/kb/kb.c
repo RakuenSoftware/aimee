@@ -284,7 +284,7 @@ static int should_index_file(const char *rel_path, char includes[][KB_GLOB_MAX],
 /* File walking                                                         */
 /* ------------------------------------------------------------------ */
 
-#define MAX_FILES        4096
+#define MAX_FILES               4096
 
 typedef struct
 {
@@ -365,7 +365,7 @@ static int collect_files(const char *root, const char *rel, char includes[][KB_G
 
 /* MAX_CHUNKS_PER_FILE / MAX_HEADING_LEN / CHUNK_BUF_SIZE and text_chunk_t now
  * live in kb.h (shared with kb_ingest_workers.c's document-ingest entry points). */
-#define KB_MINHASH_LIMIT 64
+#define KB_MINHASH_LIMIT        64
 
 /* Detect markdown heading level: returns 1-6 or 0 if not a heading. */
 static int heading_level(const char *line)
@@ -553,6 +553,34 @@ static int chunk_file(const char *path, text_chunk_t *chunks, int max_chunks)
    int n = chunk_stream(f, chunks, max_chunks);
    fclose(f);
    return n;
+}
+
+/* Upper bound on a whole-file body stored verbatim in kb_file_index.content.
+ * Larger files are still chunked/embedded for search; only the whole-file copy
+ * (served by GET /v1/kb/file) is skipped, to bound DB2 growth. */
+#define KB_FILE_INDEX_MAX_BYTES (4 * 1024 * 1024)
+
+/* Read a whole file into a malloc'd, NUL-terminated buffer for kb_file_index
+ * whole-file storage. Returns NULL on error or if it exceeds the cap (the caller
+ * then stores no body for that file — chunks still cover retrieval). */
+static char *read_file_all(const char *path)
+{
+   FILE *f = fopen(path, "rb");
+   if (!f)
+      return NULL;
+   char *buf = NULL;
+   if (fseek(f, 0, SEEK_END) == 0)
+   {
+      long len = ftell(f);
+      if (len >= 0 && len <= KB_FILE_INDEX_MAX_BYTES && fseek(f, 0, SEEK_SET) == 0 &&
+          (buf = malloc((size_t)len + 1)) != NULL)
+      {
+         size_t got = fread(buf, 1, (size_t)len, f);
+         buf[got] = '\0';
+      }
+   }
+   fclose(f);
+   return buf;
 }
 
 /* ------------------------------------------------------------------ */
@@ -939,7 +967,11 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
        0)
       LOG_WARN("kb_build", "project=%s path=%s: minhash signature save failed",
                c->project ? c->project : "?", c->files[fi].rel_path);
-   db2_kb_file_index_upsert(c->project, c->files[fi].rel_path, hash, NULL);
+   /* Store the WHOLE file body (not just chunks) so it can be served back and
+    * re-embedded/re-synthesized later without the source filesystem. */
+   char *full = read_file_all(c->files[fi].path);
+   db2_kb_file_index_upsert(c->project, c->files[fi].rel_path, hash, full);
+   free(full);
    c->stats->files_indexed++;
 }
 
