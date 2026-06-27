@@ -1397,6 +1397,27 @@ typedef struct config
    char kb_curator_synthesize_command[512];
    int kb_curator_synthesize_k;
 
+   /* Cross-repo dependency graph (kb.curator.cross_repo_graph), proposal
+    * docs/proposals/pending/cross-repo-dependency-graph.md. The resolver is
+    * query-time (P1); `enabled` gates the cross-repo pass — when 0, the query
+    * API/CLI return empty (no resolution) and no review-queue writes occur; existing
+    * queue/audit rows are preserved, not pruned. The thresholds are the
+    * versioned distinctiveness/tiering knobs (§3.3/§3.4) — bumping any of them must
+    * bump distinctiveness_v so a tier decision replays exactly. Defaults are the
+    * initial calibration (re-tuned against the S8 fixture corpus). caps/timeout
+    * bound the query path (§4.2); review_queue_max bounds the AMBIGUOUS queue (§3.8). */
+   int kb_curator_cross_repo_graph_enabled;
+   int kb_curator_cross_repo_distinctiveness_v; /* blocked_symbols/threshold model version */
+   int kb_curator_cross_repo_k;       /* K: callee in >= K trusted repos -> not distinctive */
+   int kb_curator_cross_repo_m;       /* M: defined in >= M trusted repos -> not distinctive */
+   int kb_curator_cross_repo_p_pct;   /* P: callee in >= P% of caller A's files -> local method */
+   int kb_curator_cross_repo_len_min; /* L: minimum symbol length (code points) */
+   int kb_curator_cross_repo_caller_collision_c; /* C: callee in >= C files of A -> one-tier
+                                                    downgrade */
+   int kb_curator_cross_repo_max_candidates;     /* candidate cap before truncated:true */
+   int kb_curator_cross_repo_query_timeout_ms;   /* statement_timeout for the query path */
+   int kb_curator_cross_repo_review_queue_max;   /* AMBIGUOUS review-queue cap before eviction */
+
    /* Evidence embedding (kb.evidence.embed).
     * kb_evidence_embed_enabled: 1 = drain evidence_index_ops and fill
     *   evidence_vectors via the configured embedding_command (default 1; the

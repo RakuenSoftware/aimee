@@ -8,7 +8,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS epistemic_directives_fts USING fts5(  questio
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_code_fts USING fts5(key, content, content='memories', content_rowid='id', tokenize='trigram');
 CREATE VIRTUAL TABLE IF NOT EXISTS code_fts USING fts5(content, content='file_contents', content_rowid='file_id', tokenize='unicode61');
 CREATE TABLE IF NOT EXISTS rules (  id INTEGER PRIMARY KEY AUTOINCREMENT,  polarity TEXT NOT NULL,  title TEXT NOT NULL,  description TEXT NOT NULL DEFAULT '',  weight INTEGER NOT NULL DEFAULT 5,  domain TEXT NOT NULL DEFAULT '',  directive_type TEXT NOT NULL DEFAULT 'soft',  expires_at TEXT DEFAULT NULL,  last_reinforced_at TEXT DEFAULT NULL,  created_at TEXT NOT NULL,  updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS projects (  id INTEGER PRIMARY KEY AUTOINCREMENT,  name TEXT NOT NULL UNIQUE,  root TEXT NOT NULL,  workspace TEXT NOT NULL DEFAULT '',  scanned_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS projects (  id INTEGER PRIMARY KEY AUTOINCREMENT,  name TEXT NOT NULL UNIQUE,  root TEXT NOT NULL,  workspace TEXT NOT NULL DEFAULT '',  scanned_at TEXT NOT NULL,  trust TEXT NOT NULL DEFAULT 'trusted' CHECK (trust IN ('trusted', 'untrusted')));
 CREATE TABLE IF NOT EXISTS files (  id INTEGER PRIMARY KEY AUTOINCREMENT,  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,  path TEXT NOT NULL,  purpose TEXT NOT NULL DEFAULT '',  hash TEXT NOT NULL DEFAULT '',  scanned_at TEXT NOT NULL,  UNIQUE(project_id, path));
 CREATE TABLE IF NOT EXISTS file_exports (  id INTEGER PRIMARY KEY AUTOINCREMENT,  file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,  name TEXT NOT NULL,  kind TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS file_imports (  id INTEGER PRIMARY KEY AUTOINCREMENT,  file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,  name TEXT NOT NULL,  kind TEXT NOT NULL DEFAULT '');
@@ -319,6 +319,20 @@ CREATE INDEX IF NOT EXISTS idx_ee_source_relation ON entity_edges(source, relati
 CREATE INDEX IF NOT EXISTS idx_ee_target_relation ON entity_edges(target, relation);
 CREATE INDEX IF NOT EXISTS idx_ee_origin_source ON entity_edges(edge_origin, source);
 CREATE INDEX IF NOT EXISTS idx_ee_projection_generation ON entity_edges(projection_generation_id, source, relation);
+-- Cross-repo dependency graph (sqlite shim mirror of schema.sql; see that file for design notes).
+-- Per-dialect deltas vs schema.sql: evidence is TEXT here (JSONB on Postgres); timestamps use
+-- datetime('now'); ids are AUTOINCREMENT. Table set is kept in parity by schema-sync-check.
+CREATE INDEX IF NOT EXISTS idx_projects_trust ON projects(trust);
+CREATE TABLE IF NOT EXISTS cross_repo_meta (  id INTEGER PRIMARY KEY CHECK (id = 1),  trust_epoch INTEGER NOT NULL DEFAULT 0 CHECK (trust_epoch >= 0),  repo_set_hash TEXT NOT NULL DEFAULT '',  blocked_symbols_version INTEGER NOT NULL DEFAULT 0 CHECK (blocked_symbols_version >= 0),  updated_at TEXT NOT NULL DEFAULT (datetime('now')));
+-- INSERT OR IGNORE only guarantees the singleton row exists; it must not clobber live runtime counters on re-apply (see schema.sql).
+INSERT OR IGNORE INTO cross_repo_meta (id) VALUES (1);
+CREATE TABLE IF NOT EXISTS blocked_symbols (  word TEXT NOT NULL,  lang TEXT NOT NULL DEFAULT '',  reason TEXT NOT NULL DEFAULT '',  version INTEGER NOT NULL DEFAULT 0,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  updated_at TEXT NOT NULL DEFAULT (datetime('now')),  PRIMARY KEY (word, lang));
+CREATE INDEX IF NOT EXISTS idx_blocked_symbols_version ON blocked_symbols(version);
+CREATE TABLE IF NOT EXISTS cross_repo_review_queue (  id INTEGER PRIMARY KEY AUTOINCREMENT,  repo_set_hash TEXT NOT NULL DEFAULT '',  symbol TEXT NOT NULL,  caller_repo TEXT NOT NULL,  candidate_definer TEXT NOT NULL DEFAULT '',  evidence TEXT NOT NULL DEFAULT '{}',  evidence_score REAL NOT NULL DEFAULT 0.0,  arrival_seq INTEGER NOT NULL DEFAULT 0,  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'accepted', 'rejected')),  review_class TEXT NOT NULL DEFAULT 'ambiguous' CHECK (review_class IN ('ambiguous', 'ffi')),  cross_lang INTEGER NOT NULL DEFAULT 0,  created_at TEXT NOT NULL DEFAULT (datetime('now')),  updated_at TEXT NOT NULL DEFAULT (datetime('now')),  UNIQUE (repo_set_hash, symbol, caller_repo, candidate_definer));
+CREATE INDEX IF NOT EXISTS idx_crrq_evict_open ON cross_repo_review_queue(evidence_score, arrival_seq) WHERE status = 'open';
+CREATE INDEX IF NOT EXISTS idx_crrq_caller ON cross_repo_review_queue(caller_repo, status);
+CREATE TABLE IF NOT EXISTS cross_repo_trust_audit (  id INTEGER PRIMARY KEY AUTOINCREMENT,  project TEXT NOT NULL,  actor TEXT NOT NULL DEFAULT '',  prior_trust TEXT NOT NULL DEFAULT '' CHECK (prior_trust IN ('', 'trusted', 'untrusted')),  new_trust TEXT NOT NULL DEFAULT '' CHECK (new_trust IN ('', 'trusted', 'untrusted')),  trust_epoch_before INTEGER NOT NULL DEFAULT 0,  trust_epoch_after INTEGER NOT NULL DEFAULT 0,  repo_set_hash TEXT NOT NULL DEFAULT '',  request_id TEXT NOT NULL DEFAULT '',  created_at TEXT NOT NULL DEFAULT (datetime('now')));
+CREATE INDEX IF NOT EXISTS idx_crta_project ON cross_repo_trust_audit(project, created_at);
 CREATE TABLE IF NOT EXISTS code_embeddings (  point_id INTEGER PRIMARY KEY,  embedding TEXT NOT NULL DEFAULT '[]',  project TEXT NOT NULL DEFAULT '',  node_key TEXT NOT NULL DEFAULT '',  file_path TEXT NOT NULL DEFAULT '',  symbol TEXT NOT NULL DEFAULT '',  record_type TEXT NOT NULL DEFAULT 'code_unit',  content_hash TEXT NOT NULL DEFAULT '',  body_hash TEXT NOT NULL DEFAULT '',  source_hash TEXT NOT NULL DEFAULT '',  payload_json TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE INDEX IF NOT EXISTS idx_code_embeddings_project ON code_embeddings(project);
 CREATE INDEX IF NOT EXISTS idx_code_embeddings_node ON code_embeddings(project, node_key);

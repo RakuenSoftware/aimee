@@ -1208,6 +1208,110 @@ CREATE INDEX IF NOT EXISTS idx_ee_target_relation ON entity_edges(target, relati
 CREATE INDEX IF NOT EXISTS idx_ee_origin_source ON entity_edges(edge_origin, source);
 CREATE INDEX IF NOT EXISTS idx_ee_projection_generation ON entity_edges(projection_generation_id, source, relation);
 
+-- Cross-repo dependency graph (proposal docs/proposals/pending/cross-repo-dependency-graph.md).
+-- S1 foundation: per-repo trust, a global version/epoch store, the corpus-derived blocked-symbol
+-- set, the AMBIGUOUS review queue, and the trust-change audit log. Resolver/stats/orchestration
+-- land in later slices. Dialect parity with src/db2/schema_sqlite.sql is at the table-set level
+-- (schema-sync-check); intentional per-dialect deltas: timestamp exprs (to_char vs datetime('now')),
+-- JSONB (Postgres) vs TEXT (sqlite) for `evidence`, identity vs AUTOINCREMENT primary keys.
+--
+-- Per-repo trust (§0): operator-registered repos default 'trusted'; any future non-operator
+-- ingestion path (community ingest, bulk import, fixture/repair scripts) MUST insert 'untrusted'
+-- explicitly -- the 'trusted' default is fail-open and only application discipline guards it today.
+-- The CHECK keeps the column a closed enum (named for stable, idempotent migration); it is part of
+-- the ADD COLUMN so the whole statement is guarded idempotently by IF NOT EXISTS.
+ALTER TABLE projects
+    ADD COLUMN IF NOT EXISTS trust TEXT NOT NULL DEFAULT 'trusted'
+        CONSTRAINT projects_trust_chk CHECK (trust IN ('trusted', 'untrusted'));
+CREATE INDEX IF NOT EXISTS idx_projects_trust ON projects(trust);
+
+-- cross_repo_meta (§4.1): single-row global version/epoch store backing the input-freshness stamp
+-- (canonical_index_generation [from code_projection_generations], repo_set_hash, trust_epoch).
+-- trust_epoch is the monotonic counter S7 atomically reads + bumps (UPDATE ... SET trust_epoch =
+-- trust_epoch + 1 in one txn) on any projects.trust change; blocked_symbols_version is bumped by S3's
+-- blocked_symbols recompute. The counters are NOT NULL DEFAULT 0 with a >= 0 CHECK so a NULL or
+-- negative value can never silently break the monotonic-bump invariant. CHECK (id = 1) pins one row.
+CREATE TABLE IF NOT EXISTS cross_repo_meta (
+    id                      INTEGER PRIMARY KEY CHECK (id = 1),
+    trust_epoch             BIGINT NOT NULL DEFAULT 0 CHECK (trust_epoch >= 0),
+    repo_set_hash           TEXT NOT NULL DEFAULT '',
+    blocked_symbols_version BIGINT NOT NULL DEFAULT 0 CHECK (blocked_symbols_version >= 0),
+    updated_at              TEXT NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
+);
+-- DO NOTHING is deliberate: it only guarantees the singleton row exists. On schema re-apply it must
+-- NOT clobber the live runtime-mutated counters (trust_epoch/repo_set_hash/blocked_symbols_version);
+-- a DO UPDATE that reset them to defaults would destroy monotonicity. All columns are runtime-owned
+-- after creation, so there is nothing seed-owned to refresh.
+INSERT INTO cross_repo_meta (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+-- blocked_symbols (§3.3): corpus-derived non-distinctive set, recomputed over trusted repos only.
+-- Replaces the static blocklist; `version` lets a tier decision replay against the exact frequency
+-- model (blocked_symbols_version, see cross_repo_meta) that produced it. `lang` '' = all languages
+-- (a per-language entry uses the concrete lang tag). created_at/updated_at support stale cleanup.
+CREATE TABLE IF NOT EXISTS blocked_symbols (
+    word       TEXT NOT NULL,
+    lang       TEXT NOT NULL DEFAULT '',
+    reason     TEXT NOT NULL DEFAULT '',
+    version    BIGINT NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')),
+    updated_at TEXT NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')),
+    PRIMARY KEY (word, lang)
+);
+CREATE INDEX IF NOT EXISTS idx_blocked_symbols_version ON blocked_symbols(version);
+
+-- cross_repo_review_queue (§3.8): AMBIGUOUS candidates surfaced (not dropped). The fingerprint
+-- (repo_set_hash, symbol, caller_repo, candidate_definer) is UNIQUE so re-resolution upserts the
+-- evidence rather than duplicating -- all four are NOT NULL (Postgres treats NULLs as distinct, so
+-- a nullable fingerprint column would silently defeat the constraint). Eviction on overflow is
+-- deterministic by (evidence_score ASC, arrival_seq ASC) over status='open'. review_class is a
+-- closed enum: 'ambiguous' (default) or 'ffi' (the §3.7 cross-language discriminator); cross_lang
+-- is a 0/1 boolean flag (BIGINT for sqlite-dialect parity). evidence is JSONB on Postgres for
+-- insert-time validation + field-level S3/S4 queries (TEXT in the sqlite shim). No FKs to projects:
+-- caller_repo/candidate_definer are repo *names*, not ids, so queue + audit rows survive a repo
+-- deletion (orphans are tolerated and pruned on the next re-resolution of that repo_set_hash).
+CREATE TABLE IF NOT EXISTS cross_repo_review_queue (
+    id                BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
+    repo_set_hash     TEXT NOT NULL DEFAULT '',
+    symbol            TEXT NOT NULL,
+    caller_repo       TEXT NOT NULL,
+    candidate_definer TEXT NOT NULL DEFAULT '',
+    evidence          JSONB NOT NULL DEFAULT '{}'::jsonb,
+    evidence_score    DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    arrival_seq       BIGINT NOT NULL DEFAULT 0,
+    status            TEXT NOT NULL DEFAULT 'open'
+                          CHECK (status IN ('open', 'accepted', 'rejected')),
+    review_class      TEXT NOT NULL DEFAULT 'ambiguous'
+                          CHECK (review_class IN ('ambiguous', 'ffi')),
+    cross_lang        BIGINT NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')),
+    updated_at        TEXT NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS')),
+    UNIQUE (repo_set_hash, symbol, caller_repo, candidate_definer)
+);
+-- Partial index for the queue-worker / eviction scan (WHERE status='open' ORDER BY evidence_score,
+-- arrival_seq); the low-cardinality standalone status index is intentionally omitted. idx_crrq_caller
+-- covers "open entries for a caller" (the --review-by-project path).
+CREATE INDEX IF NOT EXISTS idx_crrq_evict_open ON cross_repo_review_queue(evidence_score, arrival_seq)
+    WHERE status = 'open';
+CREATE INDEX IF NOT EXISTS idx_crrq_caller ON cross_repo_review_queue(caller_repo, status);
+
+-- cross_repo_trust_audit (§0 authz): durable audit of every projects.trust change (admin-gated,
+-- CAP_INDEX_ADMIN). Records actor, prior->new trust, trust_epoch before/after, repo_set_hash,
+-- request id, timestamp for post-incident attribution of this security-relevant state change.
+-- prior_trust allows '' for the first-set case (no prior value); new_trust mirrors the enum.
+CREATE TABLE IF NOT EXISTS cross_repo_trust_audit (
+    id                 BIGINT PRIMARY KEY GENERATED BY DEFAULT AS IDENTITY,
+    project            TEXT NOT NULL,
+    actor              TEXT NOT NULL DEFAULT '',
+    prior_trust        TEXT NOT NULL DEFAULT '' CHECK (prior_trust IN ('', 'trusted', 'untrusted')),
+    new_trust          TEXT NOT NULL DEFAULT '' CHECK (new_trust IN ('', 'trusted', 'untrusted')),
+    trust_epoch_before BIGINT NOT NULL DEFAULT 0,
+    trust_epoch_after  BIGINT NOT NULL DEFAULT 0,
+    repo_set_hash      TEXT NOT NULL DEFAULT '',
+    request_id         TEXT NOT NULL DEFAULT '',
+    created_at         TEXT NOT NULL DEFAULT (to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS'))
+);
+CREATE INDEX IF NOT EXISTS idx_crta_project ON cross_repo_trust_audit(project, created_at);
+
 -- CSS migration assistant (WP-B): the style graph. css_rules holds one row per
 -- selector (comma lists already split by the analyzer) with computed
 -- specificity + at-rule context; css_declarations holds each property/value

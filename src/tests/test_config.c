@@ -88,6 +88,17 @@ int main(void)
       /* css_render_command defaults to the conventional sidecar curl (inert until
        * the sidecar is up), so render-capture works out of the box on-demand. */
       assert(strcmp(cfg.css_render_command, CONFIG_DEFAULT_CSS_RENDER_COMMAND) == 0);
+      /* Cross-repo dependency graph defaults (initial calibration). */
+      assert(cfg.kb_curator_cross_repo_graph_enabled == 1);
+      assert(cfg.kb_curator_cross_repo_distinctiveness_v == 1);
+      assert(cfg.kb_curator_cross_repo_k == 5);
+      assert(cfg.kb_curator_cross_repo_m == 8);
+      assert(cfg.kb_curator_cross_repo_p_pct == 25);
+      assert(cfg.kb_curator_cross_repo_len_min == 4);
+      assert(cfg.kb_curator_cross_repo_caller_collision_c == 5);
+      assert(cfg.kb_curator_cross_repo_max_candidates == 50000);
+      assert(cfg.kb_curator_cross_repo_query_timeout_ms == 5000);
+      assert(cfg.kb_curator_cross_repo_review_queue_max == 5000);
    }
 
    /* --- config_save + config_load round-trip --- */
@@ -197,6 +208,18 @@ int main(void)
       snprintf(cfg.kb_curator_tier_b_model, sizeof(cfg.kb_curator_tier_b_model), "big-32b");
       snprintf(cfg.kb_curator_tier_b_api_key, sizeof(cfg.kb_curator_tier_b_api_key), "sk-secret");
       cfg.kb_evidence_embed_enabled = 0;
+      /* kb.curator.cross_repo_graph.* — non-default values must round-trip; enabled
+       * defaults on so set off to prove the disabled state survives save+reload. */
+      cfg.kb_curator_cross_repo_graph_enabled = 0;
+      cfg.kb_curator_cross_repo_distinctiveness_v = 3;
+      cfg.kb_curator_cross_repo_k = 7;
+      cfg.kb_curator_cross_repo_m = 9;
+      cfg.kb_curator_cross_repo_p_pct = 40;
+      cfg.kb_curator_cross_repo_len_min = 3;
+      cfg.kb_curator_cross_repo_caller_collision_c = 6;
+      cfg.kb_curator_cross_repo_max_candidates = 12345;
+      cfg.kb_curator_cross_repo_query_timeout_ms = 2500;
+      cfg.kb_curator_cross_repo_review_queue_max = 999;
       /* profile_cards now defaults on; set it off to prove the disabled state
        * round-trips (regression class: a default-on bool whose save guard only
        * emitted on a truthy value would silently reset back to on). */
@@ -399,6 +422,16 @@ int main(void)
       assert(strcmp(cfg2.kb_curator_tier_b_model, "big-32b") == 0);
       assert(strcmp(cfg2.kb_curator_tier_b_api_key, "sk-secret") == 0);
       assert(cfg2.kb_evidence_embed_enabled == 0);
+      assert(cfg2.kb_curator_cross_repo_graph_enabled == 0);
+      assert(cfg2.kb_curator_cross_repo_distinctiveness_v == 3);
+      assert(cfg2.kb_curator_cross_repo_k == 7);
+      assert(cfg2.kb_curator_cross_repo_m == 9);
+      assert(cfg2.kb_curator_cross_repo_p_pct == 40);
+      assert(cfg2.kb_curator_cross_repo_len_min == 3);
+      assert(cfg2.kb_curator_cross_repo_caller_collision_c == 6);
+      assert(cfg2.kb_curator_cross_repo_max_candidates == 12345);
+      assert(cfg2.kb_curator_cross_repo_query_timeout_ms == 2500);
+      assert(cfg2.kb_curator_cross_repo_review_queue_max == 999);
       assert(cfg2.memory_profile_cards_enabled == 0);
       assert(cfg2.memory_improve_dedupe_enabled == 0);
       assert(cfg2.memory_improve_summarise_enabled == 1);
@@ -878,6 +911,34 @@ int main(void)
       int rc = config_load(&cfg);
       assert(rc == -1);
       g_config_strict = 0;
+   }
+
+   /* --- kb.curator.cross_repo_graph: strict mode rejects out-of-range knobs --- */
+   {
+      const char *bad[] = {
+          "    p_pct: 101\n", /* > 100 */
+          "    k: 0\n",       /* not positive */
+          "    query_timeout_ms: 0\n",
+          "    max_candidates: -1\n",
+          "    len_min: 99999\n", /* > 1024 ceiling */
+      };
+      for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++)
+      {
+         char cpath[512];
+         snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+         FILE *f = fopen(cpath, "w");
+         assert(f);
+         fprintf(f, "provider: claude\nkb:\n  curator:\n    cross_repo_graph:\n%s", bad[i]);
+         fclose(f);
+
+         static config_t cfg;
+         memset(&cfg, 0, sizeof(cfg));
+         g_config_strict = 1;
+         platform_setenv("AIMEE_NO_CACHE", "1");
+         int rc = config_load(&cfg);
+         assert(rc == -1); /* each pathological value must be rejected in strict mode */
+         g_config_strict = 0;
+      }
    }
 
    /* --- memory.citations: valid nested values parse --- */

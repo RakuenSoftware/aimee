@@ -56,6 +56,17 @@ void config_kb_curator_defaults(config_t *cfg)
    cfg->kb_curator_tier_b_api_key[0] = '\0';
    cfg->kb_evidence_embed_enabled = 1;
    cfg->kb_evidence_embed_batch = 32;
+   /* Cross-repo dependency graph — initial calibration (re-tuned vs S8 fixtures). */
+   cfg->kb_curator_cross_repo_graph_enabled = 1;
+   cfg->kb_curator_cross_repo_distinctiveness_v = 1;
+   cfg->kb_curator_cross_repo_k = 5;
+   cfg->kb_curator_cross_repo_m = 8;
+   cfg->kb_curator_cross_repo_p_pct = 25;
+   cfg->kb_curator_cross_repo_len_min = 4;
+   cfg->kb_curator_cross_repo_caller_collision_c = 5;
+   cfg->kb_curator_cross_repo_max_candidates = 50000;
+   cfg->kb_curator_cross_repo_query_timeout_ms = 5000;
+   cfg->kb_curator_cross_repo_review_queue_max = 5000;
 }
 
 /* Parse a curator provider sub-object {base_url, model, api_key} under `curator`
@@ -215,6 +226,48 @@ int config_parse_kb_curator(config_t *cfg, const cJSON *root)
       const cJSON *enabled = cJSON_GetObjectItemCaseSensitive(projection_graph, "enabled");
       if (enabled && cJSON_IsBool(enabled))
          cfg->kb_curator_projection_graph_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+   }
+
+   const cJSON *cross_repo = cJSON_GetObjectItemCaseSensitive(curator, "cross_repo_graph");
+   if (cross_repo)
+   {
+      if (!cJSON_IsObject(cross_repo))
+         return config_issue("\"kb.curator.cross_repo_graph\" expected object, got %s",
+                             jo_type_name(cross_repo));
+      const cJSON *enabled = cJSON_GetObjectItemCaseSensitive(cross_repo, "enabled");
+      if (enabled && cJSON_IsBool(enabled))
+         cfg->kb_curator_cross_repo_graph_enabled = cJSON_IsTrue(enabled) ? 1 : 0;
+
+      /* Positive-int knobs, each with an explicit upper bound to reject pathological
+       * inputs (K=10M, timeout=1h, max_candidates=INT_MAX). Automatic (non-static)
+       * so the &cfg->field initializers are valid at runtime. */
+      const struct
+      {
+         const char *key;
+         int *field;
+         int max;
+      } ints[] = {
+          {"distinctiveness_v", &cfg->kb_curator_cross_repo_distinctiveness_v, 1000000},
+          {"k", &cfg->kb_curator_cross_repo_k, 100000},
+          {"m", &cfg->kb_curator_cross_repo_m, 100000},
+          {"p_pct", &cfg->kb_curator_cross_repo_p_pct, 100},
+          {"len_min", &cfg->kb_curator_cross_repo_len_min, 1024},
+          {"caller_collision_c", &cfg->kb_curator_cross_repo_caller_collision_c, 100000},
+          {"max_candidates", &cfg->kb_curator_cross_repo_max_candidates, 100000000},
+          {"query_timeout_ms", &cfg->kb_curator_cross_repo_query_timeout_ms, 600000},
+          {"review_queue_max", &cfg->kb_curator_cross_repo_review_queue_max, 100000000},
+      };
+      for (size_t i = 0; i < sizeof(ints) / sizeof(ints[0]); i++)
+      {
+         const cJSON *v = cJSON_GetObjectItemCaseSensitive(cross_repo, ints[i].key);
+         if (!v)
+            continue;
+         if (!cJSON_IsNumber(v) || v->valueint <= 0 || v->valueint > ints[i].max)
+            config_issue("\"kb.curator.cross_repo_graph.%s\" must be an integer in [1, %d]",
+                         ints[i].key, ints[i].max);
+         else
+            *ints[i].field = v->valueint;
+      }
    }
 
    const cJSON *synthesize = cJSON_GetObjectItemCaseSensitive(curator, "synthesize");
@@ -396,6 +449,16 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
        cfg->kb_curator_provider_base_url[0] || cfg->kb_curator_provider_model[0] ||
        cfg->kb_curator_provider_api_key[0] || cfg->kb_curator_tier_b_base_url[0] ||
        cfg->kb_curator_tier_b_model[0] || cfg->kb_curator_tier_b_api_key[0];
+   int cross_repo_nondefault =
+       !cfg->kb_curator_cross_repo_graph_enabled ||
+       cfg->kb_curator_cross_repo_distinctiveness_v != 1 || cfg->kb_curator_cross_repo_k != 5 ||
+       cfg->kb_curator_cross_repo_m != 8 || cfg->kb_curator_cross_repo_p_pct != 25 ||
+       cfg->kb_curator_cross_repo_len_min != 4 ||
+       cfg->kb_curator_cross_repo_caller_collision_c != 5 ||
+       cfg->kb_curator_cross_repo_max_candidates != 50000 ||
+       cfg->kb_curator_cross_repo_query_timeout_ms != 5000 ||
+       cfg->kb_curator_cross_repo_review_queue_max != 5000;
+   curator_any = curator_any || cross_repo_nondefault;
    int evidence_any = !cfg->kb_evidence_embed_enabled || cfg->kb_evidence_embed_batch != 32;
    if (!curator_any && !evidence_any)
       return;
@@ -440,6 +503,38 @@ void config_save_kb_curator(const config_t *cfg, cJSON *root)
                cJSON_AddBoolToObject(o, "enabled", cfg->kb_curator_promote_entity_enabled ? 1 : 0);
                if (cfg->kb_curator_promote_min_sources != 3)
                   cJSON_AddNumberToObject(o, "min_sources", cfg->kb_curator_promote_min_sources);
+            }
+         }
+         if (cross_repo_nondefault)
+         {
+            cJSON *o = cJSON_AddObjectToObject(cur, "cross_repo_graph");
+            if (o)
+            {
+               cJSON_AddBoolToObject(o, "enabled",
+                                     cfg->kb_curator_cross_repo_graph_enabled ? 1 : 0);
+               if (cfg->kb_curator_cross_repo_distinctiveness_v != 1)
+                  cJSON_AddNumberToObject(o, "distinctiveness_v",
+                                          cfg->kb_curator_cross_repo_distinctiveness_v);
+               if (cfg->kb_curator_cross_repo_k != 5)
+                  cJSON_AddNumberToObject(o, "k", cfg->kb_curator_cross_repo_k);
+               if (cfg->kb_curator_cross_repo_m != 8)
+                  cJSON_AddNumberToObject(o, "m", cfg->kb_curator_cross_repo_m);
+               if (cfg->kb_curator_cross_repo_p_pct != 25)
+                  cJSON_AddNumberToObject(o, "p_pct", cfg->kb_curator_cross_repo_p_pct);
+               if (cfg->kb_curator_cross_repo_len_min != 4)
+                  cJSON_AddNumberToObject(o, "len_min", cfg->kb_curator_cross_repo_len_min);
+               if (cfg->kb_curator_cross_repo_caller_collision_c != 5)
+                  cJSON_AddNumberToObject(o, "caller_collision_c",
+                                          cfg->kb_curator_cross_repo_caller_collision_c);
+               if (cfg->kb_curator_cross_repo_max_candidates != 50000)
+                  cJSON_AddNumberToObject(o, "max_candidates",
+                                          cfg->kb_curator_cross_repo_max_candidates);
+               if (cfg->kb_curator_cross_repo_query_timeout_ms != 5000)
+                  cJSON_AddNumberToObject(o, "query_timeout_ms",
+                                          cfg->kb_curator_cross_repo_query_timeout_ms);
+               if (cfg->kb_curator_cross_repo_review_queue_max != 5000)
+                  cJSON_AddNumberToObject(o, "review_queue_max",
+                                          cfg->kb_curator_cross_repo_review_queue_max);
             }
          }
          if (cfg->kb_curator_extract_command[0])
