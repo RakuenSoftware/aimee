@@ -1,20 +1,39 @@
 # aimee
 
-**One UI. Any model. Memory that travels with you.**
+**One front end for every AI coding tool. Memory, code intelligence, and cheaper
+delegates that travel with you. Any model, any provider.**
 
-aimee is one front end for every AI coding tool and model you use. Drive it from
-Claude Code, Codex, OpenCode, or the built-in browser webchat, and run any turn on
-any model from any provider: Claude, GPT, Gemini, Mistral, MiniMax, or a local
-model. Your memory, preferences, and context follow you between models, so
-switching never starts from zero and never locks you to a vendor. Core services are
-C, sub-10ms, with no cloud dependencies.
+aimee can sit in the path between you and your AI, or beside it. Route every turn
+through aimee — point your tool's OpenAI- or Anthropic-compatible API at it, and it
+runs the turn on any model: Claude, GPT, Gemini, Mistral, MiniMax, a local model,
+or any compatible endpoint. Or attach aimee beside your tool over MCP, ACP, or a
+plugin, where your tool keeps its own model and aimee adds memory, delegates, and
+guardrails as tools and hooks. Both work with Claude Code, Codex, OpenCode, Gemini
+CLI, and the built-in webchat. Your memory and context come with you, so switching
+never starts from zero and never locks you to a vendor.
 
-It starts as persistent memory for your AI coding tool. One install, and every
-session starts knowing what the last one learned. The same substrate scales to a
-company-wide knowledge base that distills what your whole organization knows across
-code, product, sales, support, and ops, then routes work to the cheapest capable
-model. See
-[How aimee learns](docs/KNOWLEDGE.md).
+It does far more than remember:
+
+- **Memory that compounds.** Every session starts already knowing what the last one
+  learned. A curator pipeline distills facts into a typed knowledge base that scales
+  from one developer to a whole company. See [How aimee learns](docs/KNOWLEDGE.md).
+- **Code intelligence.** aimee indexes your codebase into a searchable symbol and
+  call graph, so the AI can find callers, trace an edit's blast radius before it
+  writes, and work from your code instead of re-reading it every session. Cross-repo
+  indexing, one dependency graph spanning every repo you work across, lands shortly;
+  see the
+  [cross-repo dependency graph proposal](docs/proposals/pending/cross-repo-dependency-graph.md).
+- **Delegates that cut your bill.** Route summarization, review, and boilerplate to
+  the cheapest capable model. Local (Ollama) and subscription delegates cost nothing
+  extra, and the primary agent gets back a compact result instead of raw content.
+- **Cross-agent orchestration.** Hand aimee a written proposal and it runs the whole
+  job unattended: design, plan, implement, review, PR. The primary agent manages and
+  the delegates do the work.
+- **Guardrails and isolation.** Sensitive files are blocked before the AI touches
+  them, and every session runs in its own git worktree, so parallel work never
+  collides.
+
+Core services are C, sub-10ms, with no cloud dependencies.
 
 ## The problem
 
@@ -28,8 +47,10 @@ clobbering another session's work.
 
 ## What aimee does
 
-aimee sits between you and your AI tool and intercepts actions through hooks and
-MCP. The CLI is `aimee`; browser chat is `aimee-webchat`.
+aimee runs as a local server your tools connect to. In the path it runs your turns
+over the OpenAI- or Anthropic-compatible ingress; beside your tool it intercepts
+actions through hooks, MCP, ACP, and plugins. The CLI is `aimee`; browser chat is
+`aimee-webchat`.
 
 ```mermaid
 graph TB
@@ -121,7 +142,7 @@ same on every front end, because they live in the server and KB, not the tool.
 | Gemini CLI | Full hook support | Provider CLI | `./install.sh` |
 | Mistral Vibe | Provider-CLI primary and subscription-plan delegates | Provider CLI | `aimee agent add <name> <endpoint> <model> --provider mistral` |
 | GitHub Copilot | MCP server | Via the OpenAI-compatible model | `./install.sh` |
-| VS Code | MCP tools in Copilot Chat, or aimee as an OpenAI-compatible model | Yes, via `/v1/chat/completions` | [VS Code guide](docs/VSCODE.md) |
+| VS Code | MCP tools in Copilot Chat, an ACP agent (`aimee acp-serve`), or aimee as an OpenAI-compatible model | Yes, via `/v1/chat/completions` or ACP | [VS Code guide](docs/VSCODE.md) |
 
 Switch tools any time. Your memory and context stay.
 

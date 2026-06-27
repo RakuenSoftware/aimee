@@ -114,7 +114,7 @@ hooks call the thin client, which reaches the configured `aimee-server`.
 | Codex CLI | `~/.codex/` directory or `codex` in PATH | `~/.codex/hooks.json` | `~/.codex/mcp-config.json` | Implemented |
 | GitHub Copilot | `~/.copilot/` directory or `copilot` in PATH | `~/.copilot/config.json` | `~/.copilot/mcp-config.json` | Implemented |
 | Claude Desktop | Config directory exists at OS-specific path | N/A (MCP only) | `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `~/.config/Claude/claude_desktop_config.json` (Linux) | Implemented |
-| VS Code | `code` in PATH or user config dir (`~/.config/Code/User/`, macOS `~/Library/Application Support/Code/User/`); Insiders and VSCodium variants detected | N/A (MCP only) | User-level `mcp.json` (uses the `servers` key, not `mcpServers`) | Implemented (MCP), see [VSCODE.md](VSCODE.md) |
+| VS Code | `code` in PATH or user config dir (`~/.config/Code/User/`, macOS `~/Library/Application Support/Code/User/`); Insiders and VSCodium variants detected | N/A (no hooks) | User-level `mcp.json` (uses the `servers` key, not `mcpServers`) | Implemented (MCP); also an ACP agent (`aimee acp-serve`) and an OpenAI-compatible model, see [VSCODE.md](VSCODE.md) |
 
 ### Hook events registered per client
 
@@ -125,7 +125,7 @@ hooks call the thin client, which reaches the configured `aimee-server`.
 | Codex CLI | `SessionStart` | `PreToolUse` | `PostToolUse` | Pre: `Bash`; Post: `Bash` |
 | GitHub Copilot | `SessionStart` | `PreToolUse` | `PostToolUse` | Pre: `Bash\|Edit\|Write`; Post: `Edit\|Write` |
 | Claude Desktop | n/a | n/a | n/a | MCP only; no hook events |
-| VS Code | n/a | n/a | n/a | MCP only; no hook events |
+| VS Code | n/a | n/a | n/a | MCP / ACP / OpenAI-compatible model; no hook events |
 
 ### Installer output
 

@@ -1,13 +1,14 @@
 # Using aimee with VS Code
 
 aimee integrates with VS Code through surfaces that already ship in the
-binaries, no extra protocol, no plugin build required. There are two ways to
+binaries, no extra protocol, no plugin build required. There are three ways to
 wire it, and they are complementary:
 
 | You want… | Use | What VS Code gets |
 |---|---|---|
 | aimee's **tools** (memory, guardrails, `find_symbol`, `delegate`) inside Copilot Chat | **MCP** (Path A) | aimee tools callable in agent mode |
 | aimee itself **as the chat model** (delegate-routed, memory + guardrails) | **OpenAI `/v1` endpoint** (Path B) | "aimee" as a selectable model |
+| aimee itself **as the chat agent** over stdio, no TCP listener or token | **ACP** (Path C) | "aimee" as an ACP agent |
 
 For the deeper, native-extension experience (aimee in the model picker, an
 `@aimee` chat participant, a docked webchat panel), a dedicated VS Code
@@ -143,11 +144,37 @@ conventions.
 
 ---
 
+## Path C, aimee as an ACP agent (`aimee acp-serve`)
+
+aimee speaks the [Agent Client Protocol](https://agentclientprotocol.com)
+(ACP): newline-delimited JSON-RPC 2.0 over stdio. A VS Code extension that
+speaks ACP launches `aimee acp-serve`, and aimee runs each turn on its primary
+model with memory and guardrails applied, streaming the reply back as
+`session/update` notifications. Like Path B this makes aimee the agent, but over
+stdio instead of the OpenAI endpoint, so it needs no TCP listener and no bearer.
+
+Point your ACP extension at the command:
+
+```jsonc
+{
+  "command": "aimee",
+  "args": ["acp-serve"]
+}
+```
+
+aimee advertises its slash commands (`/help`, `/skill`, `/personality`,
+`/compact`, `/reset`, `/stop`, `/queue`) in the ACP `initialize` handshake.
+ACP turns run the agent against a local `aimee-server`; a network `/v1` remote
+cannot serve them.
+
+---
+
 ## Which path should I use?
 
-- **Both.** Path A gives the model you already use (e.g. Copilot's GPT/Claude)
-  access to aimee's memory and guardrails as tools. Path B makes aimee *itself*
-  the model. They stack: run Path B with aimee as the model **and** Path A so
+- **Stack them.** Path A gives the model you already use (e.g. Copilot's
+  GPT/Claude) access to aimee's memory and guardrails as tools. Path B and
+  Path C both make aimee *itself* the agent (Path B over the OpenAI endpoint,
+  Path C over ACP). Run Path B or C with aimee as the model **and** Path A so
   that model can also reach aimee's tools.
 - For the tightest native experience (aimee in the model picker + `@aimee`
   participant + docked webchat), use the dedicated VS Code extension in
