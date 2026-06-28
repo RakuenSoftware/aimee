@@ -1,5 +1,73 @@
 # Full Autonomous Development
 
+**Status:** APPROVED (human proposal gate passed 2026-06-19) — **implementing,
+PARTIAL.** Stays in `pending/` (not `done/`): the safety floor is begun but not
+complete. See **Closeout status** below.
+
+## Closeout status (2026-06-28)
+
+Reconciled against the tree + a security design-roundtable (the user delegates
+decisions to the roundtable). **What's shipped, what remains, what's deferred, and
+one ratified deviation — recorded here rather than rewriting the approved text.**
+
+**Shipped (pre-existing, do-not-rebuild):** WP-1 delegate seam + live provider
+(default-on); WP-4 intake (`POST /v1/dev/submit`); WP-3 scheduler (sweep + intake /
+human-gate notify hooks); WP-5 partials (human-gate park, override cap, audit,
+per-item USD cap).
+
+**Shipped this closeout:**
+- **WP-5 safety rails (PR #856).** A fail-closed autonomous **merge-target guard**
+  (`wfe_autonomous_base()`, default `testing`; refuses main/master/release* — case-
+  insensitive, anchored) wired into `exec_pr_open`/`exec_merge`, plus per-run **turn
+  + wall-clock caps** that park `budget_exceeded`. The rails land FIRST so nothing
+  downstream can run away or merge to a protected branch.
+
+**Remaining safety floor (the path to done/, roundtable-ratified, NOT yet built):**
+- **F1b** authoritative cost threading (delegate provider → `r.cost_usd` + a
+  server-side estimator) so the per-run USD cap is live, not dead code.
+- **F2** per-work-item `git worktree` isolation (`aimee/wi/<id>`, `worktree lock`)
+  + terminal-state cleanup/orphan-sweep. (A worktree is a path convenience, not a
+  process/network sandbox — see GA gates.)
+- **F3a** the WP-1b manager loop: wire the §1 `git_verify format=json` verdict
+  (shipped in autonomous-dev-execution-substrate) as a BLOCKING gate inside
+  `exec_implement`, with bounded retry/park (`WFE_PAUSE_VERIFY_FAILED`) and a
+  verifier-findings handoff to the next attempt. (The roundtable confirmed the
+  manager loop is essential — single-dispatch `implement` cannot honestly reach
+  done; the N-skeptic adversarial fan-out + patch-coordinator are Phase-C depth.)
+- **F5a** cluster-wide per-work-item single-flight (CAS+TTL on the work item) +
+  per-target merge serialization — a prerequisite for F4.
+- **F4** the live forge `wfe_forge_t` (git push via vaulted creds + PR/CI/merge via
+  gh), **registered default-OFF** behind `wfe_live_forge_enabled`, re-checked at
+  every call site, guarded by the F1a rail. This is the gap
+  [autonomous-dev-execution-substrate.md](done/autonomous-dev-execution-substrate.md)
+  deferred here (its criterion 5).
+- **intake auth** on `POST /v1/dev/submit` (authn + per-principal rate/concurrency
+  cap + submitter→run audit binding) before any live-forge enable.
+
+**Ratified deviation — default-OFF, not default-on.** §7 mandates the live forge
+ship *default-on*. The security roundtable ruled that unsafe (it would let any
+submitted proposal auto-open+merge real PRs before the rails are proven) and
+directed **default-OFF behind `wfe_live_forge_enabled`** with a TTL/break-glass
+promotion. This closeout adopts that: default-on is a deployment-state promotion,
+not a code default. The approved §7 text is left intact; this bullet is the
+ratifiable deviation record.
+
+**Deferred to Phase C / explicit GA (deployment) gates — NOT closeout work:**
+N-skeptic adversarial fan-out + patch-coordinator; CI-webhook resume (vs the 30s
+sweep); richer failure taxonomy; multi-forge; a REAL execution sandbox
+(seccomp/namespace) before live enable; **branch protection on
+RakuenSoftware/aimee**; fine-grained scoped + rotated forge creds; the break-glass
+TTL enable of `wfe_live_forge_enabled`; and a **production live-forge roundtrip**
+(deployment-tier `validation-pending` against a sandbox/fork — never a closeout
+test, never auto-merge to production as acceptance).
+
+```yaml deferred
+- {tier: deployment, reason: "live-forge enable (F4) requires branch protection + scoped/rotated creds + break-glass TTL on RakuenSoftware/aimee; a production roundtrip is a manual deployment gate, never auto-merged as acceptance", deferred_to: full-autonomous-development.md}
+- {tier: hardware,   reason: "real execution sandbox (seccomp/namespace) for delegate code execution is a GA gate before live enable", deferred_to: full-autonomous-development.md}
+```
+
+---
+
 **Status:** APPROVED (human proposal gate passed 2026-06-19) — implementing.
 **Builds on:** server-owned turn lifecycle (Phase 1, PR #514) — a turn/workflow
 runs server-side and survives any client disconnect.
