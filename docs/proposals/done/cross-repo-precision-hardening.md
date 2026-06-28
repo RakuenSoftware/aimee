@@ -1,6 +1,18 @@
 # Proposal: Cross-repo dependency graph — precision hardening (structural edges, IDF distinctiveness, FFI-aware)
 
-- **State:** done — implemented, merged to `testing`, and live-validated on `.254` (2026-06-28).
+- **State:** IMPLEMENTED (13 PRs merged) + precision live-validated, but the FORMAL §9 acceptance is
+  **NOT met** (recall). The formal Wilson-CI measurement (2026-06-28; docs/validation/
+  cross-repo-precision-h4-runbook.md §"FORMAL §9 MEASUREMENT") shows the emitted edge set COLLAPSED to
+  **4 HIGH edges corpus-wide**: §4 precision can't be sampled at the gate's N≥100 (observed 3/4 true),
+  and §5 recall is **~18%** vs the gates (HIGH ≥70% / HIGH+MED ≥85%). The hardening eliminated P1's
+  false-positive flood (good) but over-corrected — FetchContent/vendored deps, build/link-only deps
+  (`target_link_libraries` with no source `#include`, not modelled by H0d), and a sparse repo-identity
+  layer (no CMake identities) mean most real intra-corpus deps emit no edge. A **recall-recovery
+  follow-up** is required before §9 passes (exclude `.aimee/worktrees` from indexing; build-link route
+  extraction; CMake-identity population; FetchContent→canonical mapping — see the runbook). The
+  precision MECHANISMS (§1–§6) are done + validated; the proposal's end goal (a precise AND *useful*
+  graph) is not yet achieved at ~18% recall.
+- **Implementation:** merged to `testing`, precision spot-check live-validated on `.254` (2026-06-28).
   Shipped across 13 PRs: H0a–H0d (#824/#825/#827/#828 metadata: def_kind, language, vendored,
   repo-identity, route index), H1 (#830 structural-edge gate + index-time rebuild), H2 (#831 vendor
   canonical-preference), H3a (#832 §5 kind eligibility + §4 vendored ceiling), H3b (#835 §2 header

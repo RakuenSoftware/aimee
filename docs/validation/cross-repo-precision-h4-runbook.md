@@ -154,3 +154,76 @@ Residual / known limitations (documented, not regressions):
   modelled (H0d builds routes from file_imports); logged as `low-unresolved (no route)`.
 - generated/SDK header long-tail: the system-header + generated-header lists are
   seed lists (the principled fix is §1.6 marker-based generated-output attribution).
+
+---
+
+## FORMAL §9 MEASUREMENT (2026-06-28, .254 vtesting-b35f1f7, full corpus)
+
+Enumerated the COMPLETE emitted edge set (deps query over all 40 projects) +
+built recall ground truth from intra-corpus `GIT_REPOSITORY` build deps.
+
+### Edge set
+**Total emitted edges: 4 (all HIGH, 0 MEDIUM, 0 AMBIGUOUS surfaced).**
+| edge | adjudication |
+|---|---|
+| gst-wayland-display → smithay (167 syms) | TRUE |
+| moonlight-qt → moonlight-common-c (44 syms) | TRUE |
+| wolf → inputtino (13 syms) | TRUE |
+| inputtino → wolf (2 syms, create_touch_screen) | **FALSE** — wrong direction; create_touch_screen is defined in inputtino + used by wolf. Arises from wolf's vendored/duplicate inputtino copies (incl. indexed `.aimee/worktrees/` pollution) |
+
+### §4 precision — NOT MEASURABLE at the required N
+Gate: N≥100 HIGH edges, Wilson-95% lower bound ≥90%, AMBIGUOUS in denominator.
+Only **4** HIGH edges exist corpus-wide — cannot sample 100. Observed precision
+3/4 = 75% (Wilson-95% LB on 3/4 ≈ 30%, but driven entirely by N=4). The gate is
+UNREACHABLE because edge VOLUME collapsed, not because precision is poor.
+
+### §5 recall — FAILS
+Ground truth (intra-corpus declared deps via GIT_REPOSITORY URLs): 11 pairs;
+emitted: 2 → **recall ≈ 18%** (gate: HIGH ≥70%, HIGH+MED ≥85%). Missed real deps
+include wolf→{mdns_cpp, moonlight-common-c, gst-wayland-display, eventbus},
+smoothnas→{inputtino, smoothfs, eventbus, …}, aimee→smoothgui. (Ground truth is a
+lower bound — git-URL scan; submodule/path deps like moonlight-qt→moonlight-common-c
+are additional and ARE emitted.)
+
+### §6 latency / negatives
+Negatives: of 4 edges, 1 FP (inputtino→wolf). End-to-end deps p50≈812ms /
+p95≈1189ms (CLI+TLS+remote round-trip, NOT the resolver-only metric the gate
+specifies; the index-time-precompute resolver itself is not isolated here). The
+`low-unresolved (no route)` instrumentation is LOG_DEBUG, below the kb's INFO level,
+so the no-route demotion volume was not captured.
+
+### VERDICT: §9 deployment gates (#4/#5) NOT met
+The precision-hardening eliminated the false-positive FLOOD (P1's ~10–20% precision
+on a large edge set) but over-corrected: the edge set collapsed to 4, so precision
+can't be measured at N≥100 and recall is ~18% (vs the 70/85% gates). The earlier
+spot-check (FP classes collapsed, key true deps recovered) PASSED, but the formal
+N≥100/recall bar does NOT.
+
+### Root causes of the recall collapse (for the follow-up)
+1. **FetchContent / vendored deps dominate this corpus.** wolf/Sunshine pull
+   mdns_cpp, moonlight-common-c, inputtino, gst-wayland-display via CMake
+   FetchContent into `_deps/` (vendored); the caller's use resolves to the vendored
+   copy, and H2 canonical-preference only routes to the canonical repo when a
+   structural route to it exists — which it usually doesn't (the include points at
+   the FetchContent path, not a basename that matches the canonical repo).
+2. **Build/link-only deps not modelled.** target_link_libraries + find_package +
+   FetchContent declare deps with NO matching source `#include` route; H0d builds
+   routes from file_imports only (documented gap). These are the bulk of the misses.
+3. **Repo-identity layer lacks CMake identities.** cross_repo_identity has only
+   crate/npm/pypi (19 rows); no `project()`/target identities for the C/C++ repos,
+   so import_module routes can't form for them and §5's package→repo recall mapping
+   can't run for CMake deps.
+4. **Indexing pollution.** wolf indexes its own `.aimee/worktrees/` copies (other
+   sessions' worktrees), duplicating symbols and producing the inputtino→wolf FP.
+
+### Recommended follow-up (recall recovery — a new effort)
+- Exclude `.aimee/worktrees/` (and similar) from indexing (cheap; kills the
+  inputtino→wolf FP class).
+- Build-link route extraction: parse CMake FetchContent_Declare GIT_REPOSITORY +
+  target_link_libraries + find_package, and Cargo/go.mod path/git deps, into
+  cross_repo_route as an `import_build` route kind (the §1 build/link route source,
+  deferred in H0d).
+- Populate CMake project()/target identities (the H0c CMake parser appears not to
+  emit them on this corpus) so module/target routes form.
+- Treat a FetchContent'd dep as a route to the canonical repo (map the _deps/ source
+  to its declaring GIT_REPOSITORY → canonical repo).
