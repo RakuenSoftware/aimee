@@ -442,6 +442,7 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/db2/cross_repo_stats.c
     ${AIMEE_SRC_DIR}/db2/cross_repo_deps.c
     ${AIMEE_SRC_DIR}/db2/cross_repo_review.c
+    ${AIMEE_SRC_DIR}/db2/cross_repo_identity.c
     ${AIMEE_SRC_DIR}/db2/mining.c
     ${AIMEE_SRC_DIR}/db2/calibration.c
     ${AIMEE_SRC_DIR}/db2/demotion.c

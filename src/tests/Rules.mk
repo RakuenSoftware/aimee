@@ -91,6 +91,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-cross-repo-stats \
                $(TESTPREFIX)/unit-test-cross-repo-deps-orch \
                $(TESTPREFIX)/unit-test-cross-repo-acceptance \
+               $(TESTPREFIX)/unit-test-cross-repo-identity \
                $(TESTPREFIX)/unit-test-cross-repo-review \
                $(TESTPREFIX)/unit-test-primary-session-adapter \
                $(TESTPREFIX)/unit-test-webchat-claude-sessions \
@@ -501,6 +502,19 @@ $(TESTPREFIX)/unit-test-cross-repo-stats: \
 # S4a orchestration over the sqlite shim (portable candidate-gen + pure core).
 $(TESTPREFIX)/unit-test-cross-repo-deps-orch: \
                                        $(OBJDIR)/tests/test_cross_repo_deps_orch.o \
+                                       $(OBJDIR)/db2/cross_repo_deps.o \
+                                       $(OBJDIR)/db2/cross_repo_stats.o \
+                                       $(OBJDIR)/db2/cross_repo_resolver.o \
+                                       $(OBJDIR)/db2/cross_repo_classify.o \
+                                       $(OBJDIR)/db2/cross_repo_review.o \
+                                       $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
+                                       $(OBJDIR)/db2/db_schema.o \
+                                       $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lzstd
+
+$(TESTPREFIX)/unit-test-cross-repo-identity: \
+                                       $(OBJDIR)/tests/test_cross_repo_identity.o \
+                                       $(OBJDIR)/db2/cross_repo_identity.o \
                                        $(OBJDIR)/db2/cross_repo_deps.o \
                                        $(OBJDIR)/db2/cross_repo_stats.o \
                                        $(OBJDIR)/db2/cross_repo_resolver.o \
