@@ -669,8 +669,11 @@ int db2_code_index_file_replace(int64_t file_id, const code_index_file_data_t *d
 
    if (rc == 0 && data->definition_count > 0 && data->definitions)
    {
-      static const char *ins = "INSERT INTO terms (file_id, name, kind, line, line_end)"
-                               " VALUES (?1, ?2, ?3, ?4, ?5)";
+      /* H0a: coarse kind stays 'definition' (the ~10 kind='definition' consumers,
+       * incl. index_structure/index_find here, are unchanged); the extractor's
+       * granular kind goes to def_kind for the cross-repo resolver (§5). */
+      static const char *ins = "INSERT INTO terms (file_id, name, kind, def_kind, line, line_end)"
+                               " VALUES (?1, ?2, 'definition', ?3, ?4, ?5)";
       for (int i = 0; i < data->definition_count; i++)
       {
          aimee_pg_stmt_t *st = aimee_pg_prepare(conn, ins, err, sizeof(err));

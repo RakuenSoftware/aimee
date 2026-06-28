@@ -301,9 +301,16 @@ static void ci_replace_file_data(void *conn, int64_t file_id, const char *ext, c
    {
       definition_t defs[CI_MAX_DEFS];
       int n = extract_definitions(ext, content, defs, CI_MAX_DEFS);
+      /* H0a: coarse kind stays 'definition' (the ~10 kind='definition' consumers are
+       * unchanged); the extractor's granular kind goes to the new def_kind column,
+       * which the cross-repo resolver reads for §5 kind-eligibility. The extractor
+       * emits a granular kind for C today and 'definition' (treated as unknown ->
+       * eligible) for languages not yet upgraded. */
       aimee_pg_stmt_t *st = aimee_pg_prepare(
-          conn, "INSERT INTO terms (file_id, name, kind, line) VALUES (?1, ?2, ?3, ?4)", err,
-          sizeof(err));
+          conn,
+          "INSERT INTO terms (file_id, name, kind, def_kind, line) VALUES (?1, ?2, "
+          "'definition', ?3, ?4)",
+          err, sizeof(err));
       for (int i = 0; i < n; i++)
       {
          if (st)

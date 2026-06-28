@@ -525,7 +525,8 @@ void c_def_line(const char *line, int lineno, void *ctx)
    {
       char name[256];
       if (extract_ident(p + 8, name, sizeof(name)))
-         dc->count = add_def(dc->out, dc->count, dc->max, name, "definition", lineno);
+         /* H0a: macro (SDK-prone, e.g. DEFINE_GUID) — ineligible HIGH definer (§5). */
+         dc->count = add_def(dc->out, dc->count, dc->max, name, "macro", lineno);
       return;
    }
 
@@ -533,8 +534,9 @@ void c_def_line(const char *line, int lineno, void *ctx)
    if (*p == '#')
       return;
 
-   /* struct/enum/union name */
+   /* struct/enum/union name (H0a: keep the keyword as the granular kind). */
    static const char *type_kw[] = {"struct ", "enum ", "union ", NULL};
+   static const char *type_kind[] = {"struct", "enum", "union", NULL};
    for (int i = 0; type_kw[i]; i++)
    {
       const char *kp = strstr(p, type_kw[i]);
@@ -543,7 +545,7 @@ void c_def_line(const char *line, int lineno, void *ctx)
          const char *np = kp + strlen(type_kw[i]);
          char name[256];
          if (extract_ident(np, name, sizeof(name)) && name[0] != '{')
-            dc->count = add_def(dc->out, dc->count, dc->max, name, "definition", lineno);
+            dc->count = add_def(dc->out, dc->count, dc->max, name, type_kind[i], lineno);
          return;
       }
    }
@@ -566,7 +568,8 @@ void c_def_line(const char *line, int lineno, void *ctx)
             char name[256];
             memcpy(name, start, nlen);
             name[nlen] = '\0';
-            dc->count = add_def(dc->out, dc->count, dc->max, name, "definition", lineno);
+            /* H0a: typedef (SDK-prone, e.g. EGLDisplay) — ineligible HIGH definer (§5). */
+            dc->count = add_def(dc->out, dc->count, dc->max, name, "typedef", lineno);
          }
       }
       return;
@@ -606,7 +609,8 @@ void c_def_line(const char *line, int lineno, void *ctx)
    {
       np += strlen(name);
       if (*np == '(')
-         dc->count = add_def(dc->out, dc->count, dc->max, name, "definition", lineno);
+         /* H0a: function — a real first-party API surface, eligible HIGH definer (§5). */
+         dc->count = add_def(dc->out, dc->count, dc->max, name, "function", lineno);
    }
 }
 

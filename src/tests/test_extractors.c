@@ -175,7 +175,19 @@ static void test_c_env_var_extraction(void)
    c_def_line("int env_using_func(void)", 100, &dc);
    assert(dc.count == 7);
    assert(strcmp(defs[6].name, "env_using_func") == 0);
-   assert(strcmp(defs[6].kind, "definition") == 0);
+   /* H0a: granular def kinds — functions are eligible HIGH cross-repo definers; the
+    * SDK-prone kinds (macro/typedef) are not (§5 of the precision-hardening proposal). */
+   assert(strcmp(defs[6].kind, "function") == 0);
+
+   c_def_line("#define MY_MACRO 1", 110, &dc);
+   assert(dc.count == 8 && strcmp(defs[7].name, "MY_MACRO") == 0 &&
+          strcmp(defs[7].kind, "macro") == 0);
+   c_def_line("typedef int MyInt;", 120, &dc);
+   assert(dc.count == 9 && strcmp(defs[8].name, "MyInt") == 0 &&
+          strcmp(defs[8].kind, "typedef") == 0);
+   c_def_line("struct MyStruct {", 130, &dc);
+   assert(dc.count == 10 && strcmp(defs[9].name, "MyStruct") == 0 &&
+          strcmp(defs[9].kind, "struct") == 0);
 }
 
 /* --- Lua extractor tests --- */
