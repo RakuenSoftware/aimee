@@ -794,7 +794,19 @@ int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t
       /* accumulate this definer row (A excluded from defs[]; sets originated). */
       const char *definer = aimee_pg_column_text(cq, 5);
       if (definer && strcmp(definer, project) == 0)
-         corig = 1;
+      {
+         /* §3 (R3a): A "originates" S only if it has a NON-vendored definition. Col 12
+          * is the per-(symbol, definer) MIN(df.vendored) from the working-set SELECT
+          * (same positional column the defs[] accumulation below reads); over the 0/1
+          * files.vendored flag (NOT NULL DEFAULT 0; the dt JOIN df guarantees >=1 row
+          * so MIN is never NULL), MIN==1 iff EVERY one of A's defs of S is vendored.
+          * In that case A's only copy is a dep fetched into _deps/, a vendor/ tree,
+          * etc. — the DEP's code, not A's own — so it must NOT suppress the cross-repo
+          * edge as originated; the symbol path resolves A's use to the canonical
+          * (non-vendored) definer. MIN==0 (a genuine original def) still originates. */
+         if (aimee_pg_column_int(cq, 12) == 0)
+            corig = 1;
+      }
       else if (definer && ndef < CRD_MAX_DEFS)
       {
          defs[ndef].repo = strdup(definer);

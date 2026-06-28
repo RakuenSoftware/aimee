@@ -761,6 +761,121 @@ static void test_build_declared_merge(void)
    printf("ok\n");
 }
 
+/* R3a §3: a caller whose ONLY definition of S is vendored (a dep fetched into
+ * _deps/) must NOT be treated as originating S — the cross-repo edge to the
+ * canonical (non-vendored) definer is emitted instead of being suppressed. */
+static void test_originated_ignores_vendored(void)
+{
+   printf("test_originated_ignores_vendored... ");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES "
+     "('vorig-app','/va','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES "
+     "('vorig-lib','/vl','t','trusted')");
+   /* A: 5 source files; one calls VorigOpenStream and imports the header. */
+   for (int i = 0; i < 5; i++)
+   {
+      char sql[160];
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/h%d.cpp','t' FROM "
+               "projects WHERE name='vorig-app'",
+               i);
+      X(sql);
+   }
+   /* A ALSO has a VENDORED copy (fetched into _deps/) that DEFINES the symbol. Pre-fix
+    * this set originated_in_caller and suppressed the edge; post-fix it is ignored. */
+   X("INSERT INTO files (project_id,path,scanned_at,vendored) SELECT "
+     "id,'_deps/vorig-lib-src/src/v.c','t',1 FROM projects WHERE name='vorig-app'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'VorigOpenStream','definition' FROM files "
+     "WHERE path='_deps/vorig-lib-src/src/v.c'");
+   /* B: header + non-vendored canonical def/export. */
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'include/Vorig.h','t' FROM projects "
+     "WHERE name='vorig-lib'");
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/vorig.c','t' FROM projects "
+     "WHERE name='vorig-lib'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'VorigOpenStream','definition' FROM files "
+     "WHERE path='src/vorig.c'");
+   X("INSERT INTO file_exports (file_id,name) SELECT id,'VorigOpenStream' FROM files WHERE "
+     "path='src/vorig.c'");
+   X("INSERT INTO file_imports (file_id,name) SELECT id,'Vorig.h' FROM files WHERE "
+     "path='src/h0.cpp'");
+   X("INSERT INTO code_calls (file_id,callee) SELECT id,'VorigOpenStream' FROM files WHERE "
+     "path='src/h0.cpp'");
+   X("INSERT INTO cross_repo_route (caller_project,definer_project,kind,confidence,evidence) "
+     "VALUES ('vorig-app','vorig-lib','import_header','medium','Vorig.h')");
+
+   xrepo_deps_opts_t opts = {.direction = XREPO_DIR_OUT, .min_tier = XREPO_TIER_MEDIUM};
+   xrepo_dep_edge_t *edges = NULL;
+   size_t n = 0;
+   int trunc = 0;
+   assert(canonical_index_cross_repo_deps("vorig-app", &opts, &edges, &n, &trunc) == 0);
+   int hits = 0, self_edge = 0;
+   for (size_t i = 0; i < n; i++)
+   {
+      if (strcmp(edges[i].definer_repo, "vorig-lib") == 0 &&
+          strcmp(edges[i].example_symbol, "VorigOpenStream") == 0 &&
+          strcmp(edges[i].evidence_type, "symbol_resolved") == 0)
+         hits++;
+      if (strcmp(edges[i].definer_repo, "vorig-app") == 0)
+         self_edge = 1; /* A is never a cross-repo definer of its own vendored copy */
+   }
+   assert(hits == 1); /* edge NOT suppressed by the vendored-only caller def */
+   assert(!self_edge);
+   free(edges);
+   printf("ok\n");
+}
+
+/* R3a §3 polarity guard (companion to test_originated_ignores_vendored): a caller
+ * with a GENUINE non-vendored definition of S still originates it -> the edge to a
+ * would-be definer IS suppressed. Catches a flipped/dropped vendored guard. */
+static void test_originated_nonvendored_still_suppresses(void)
+{
+   printf("test_originated_nonvendored_still_suppresses... ");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES "
+     "('vorg2-app','/v2a','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES "
+     "('vorg2-lib','/v2l','t','trusted')");
+   for (int i = 0; i < 5; i++)
+   {
+      char sql[160];
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/k%d.cpp','t' FROM "
+               "projects WHERE name='vorg2-app'",
+               i);
+      X(sql);
+   }
+   /* A has its OWN non-vendored definition of the symbol (genuine origination). */
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/own.c','t' FROM projects WHERE "
+     "name='vorg2-app'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'Vorg2Encode','definition' FROM files WHERE "
+     "path='src/own.c'");
+   /* B also defines+exports it; A imports B's header and calls it. */
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'include/Vorg2.h','t' FROM projects "
+     "WHERE name='vorg2-lib'");
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/vorg2.c','t' FROM projects "
+     "WHERE name='vorg2-lib'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'Vorg2Encode','definition' FROM files WHERE "
+     "path='src/vorg2.c'");
+   X("INSERT INTO file_exports (file_id,name) SELECT id,'Vorg2Encode' FROM files WHERE "
+     "path='src/vorg2.c'");
+   X("INSERT INTO file_imports (file_id,name) SELECT id,'Vorg2.h' FROM files WHERE "
+     "path='src/k0.cpp'");
+   X("INSERT INTO code_calls (file_id,callee) SELECT id,'Vorg2Encode' FROM files WHERE "
+     "path='src/k0.cpp'");
+   X("INSERT INTO cross_repo_route (caller_project,definer_project,kind,confidence,evidence) "
+     "VALUES ('vorg2-app','vorg2-lib','import_header','medium','Vorg2.h')");
+
+   xrepo_deps_opts_t opts = {.direction = XREPO_DIR_OUT, .min_tier = XREPO_TIER_MEDIUM};
+   xrepo_dep_edge_t *edges = NULL;
+   size_t n = 0;
+   int trunc = 0;
+   assert(canonical_index_cross_repo_deps("vorg2-app", &opts, &edges, &n, &trunc) == 0);
+   for (size_t i = 0; i < n; i++)
+      assert(!(strcmp(edges[i].definer_repo, "vorg2-lib") == 0 &&
+               strcmp(edges[i].example_symbol, "Vorg2Encode") == 0));
+   free(edges);
+   printf("ok\n");
+}
+
 int main(void)
 {
    test_parse_module_id();
@@ -774,6 +889,8 @@ int main(void)
    test_vendor_canonical_edge_cases();
    test_kind_eligibility_and_vendored_ceiling();
    test_build_declared_merge();
+   test_originated_ignores_vendored();
+   test_originated_nonvendored_still_suppresses();
    printf("cross_repo_deps_orch: all tests passed\n");
    return 0;
 }
