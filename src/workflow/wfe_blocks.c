@@ -307,6 +307,12 @@ static wfe_step_result_t exec_pr_open(wfe_ctx *ctx, const wfe_node_t *node)
 {
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
+   /* Safety rail: an autonomous PR may only target the configured non-protected
+    * base (default testing). Refuse a misconfiguration to main/master/release* —
+    * fail closed so the run stops rather than opening a PR against a protected
+    * branch. */
+   if (!wfe_autonomous_target_ok())
+      return wfe_step_failed();
    if (g_forge->open)
    {
       const char *branch = getenv("AIMEE_WORKFLOW_BRANCH");
@@ -354,6 +360,10 @@ static const char *pr_ref(wfe_ctx *ctx)
  *                      transient error -> park for a human re-drive). */
 static wfe_step_result_t exec_merge(wfe_ctx *ctx, const wfe_node_t *node)
 {
+   /* Safety rail (mirror pr.open): never merge an autonomous run into a protected
+    * branch. Fail closed on a misconfigured base. */
+   if (!wfe_autonomous_target_ok())
+      return wfe_step_failed();
    const char *repo = wfe_ctx_repo(ctx), *pr = pr_ref(ctx);
    int im = g_forge->is_merged(repo, pr);
    if (im == 1)

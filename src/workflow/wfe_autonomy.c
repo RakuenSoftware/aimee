@@ -2,7 +2,9 @@
 #include "wfe_autonomy.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "cJSON.h"
 #include "wfe_store.h"
@@ -10,6 +12,29 @@
 #include "wfe_def.h"
 #include "wfe_engine.h"
 #include "wfe_iface.h"
+
+/* A positive long from an env var, else the default (a safety rail must never be
+ * silently disabled by a malformed override). */
+static long wfe_env_long(const char *name, long def)
+{
+   const char *v = getenv(name);
+   if (!v || !v[0])
+      return def;
+   char *end = NULL;
+   long n = strtol(v, &end, 10);
+   return (end && *end == '\0' && n > 0) ? n : def;
+}
+
+/* Park an active, not-yet-parked autonomous work item with budget_exceeded and
+ * audit the reason. Safety rail: on breach we park, never silently continue. */
+static void wfe_autonomy_park_budget(const char *work_item_id, const char *why)
+{
+   db1_work_item_t wi;
+   if (db1_work_item_get(work_item_id, &wi) != 1 || wi.pause_reason[0])
+      return;
+   db1_work_item_set_pause(work_item_id, "budget_exceeded", wi.current_stage);
+   db1_lifecycle_event_add(work_item_id, wi.current_stage, "pause", "engine", why, "", 0);
+}
 
 /* Is this paused node a human gate the driver may auto-satisfy in autonomous
  * mode? (policy preauthorized, or optional:true). */
@@ -33,8 +58,29 @@ static int human_gate_auto_ok(const wfe_node_t *node)
 
 int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
 {
+   /* Per-run safety ceilings (WP-5): a cumulative turn cap (counted from the
+    * persisted audit log, so it bounds the WHOLE run across resumes, not just this
+    * one) and a wall-clock cap for this resume. On breach -> park budget_exceeded.
+    * Env-overridable per deployment; a bad override falls back to the default. */
+   long max_turns = wfe_env_long("AIMEE_AUTONOMY_MAX_TURNS", 300);
+   long max_wall = wfe_env_long("AIMEE_AUTONOMY_MAX_WALL_SECS", 1800);
+   time_t run_start = time(NULL);
    for (int i = 0; i < 10000; i++)
    {
+      db1_lifecycle_event_t *evs = NULL;
+      int nev = db1_lifecycle_event_list(work_item_id, &evs);
+      free(evs);
+      if (nev > 0 && (long)nev >= max_turns)
+      {
+         wfe_autonomy_park_budget(work_item_id, "turn cap reached");
+         return 0;
+      }
+      if ((long)(time(NULL) - run_start) >= max_wall)
+      {
+         wfe_autonomy_park_budget(work_item_id, "wall-clock cap reached");
+         return 0;
+      }
+
       wfe_advance_result_t r;
       if (wfe_engine_advance(work_item_id, &r, err, errlen) != 0)
          return -1;

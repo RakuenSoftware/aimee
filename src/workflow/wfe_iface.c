@@ -2,7 +2,32 @@
 #include "wfe_iface.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+/* ---- autonomous merge-target rail (WP-5 safety; see wfe_iface.h) ---- */
+
+const char *wfe_autonomous_base(void)
+{
+   const char *b = getenv("AIMEE_AUTONOMY_BASE");
+   return (b && b[0]) ? b : "testing";
+}
+
+int wfe_base_is_protected(const char *branch)
+{
+   if (!branch || !branch[0])
+      return 1; /* empty -> treat as protected (fail closed) */
+   if (strcmp(branch, "main") == 0 || strcmp(branch, "master") == 0)
+      return 1;
+   if (strncmp(branch, "release", 7) == 0)
+      return 1;
+   return 0;
+}
+
+int wfe_autonomous_target_ok(void)
+{
+   return !wfe_base_is_protected(wfe_autonomous_base());
+}
 
 static wfe_block_exec_fn g_execs[WFE_BLK__COUNT];
 

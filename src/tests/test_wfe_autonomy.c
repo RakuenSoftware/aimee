@@ -9,6 +9,7 @@
 #include "wfe_store.h"
 #include "wfe_approval.h"
 #include "wfe_autonomy.h"
+#include "wfe_blocks.h"
 #include "wfe_engine.h"
 #include "wfe_iface.h"
 #include "wfe_roundtable.h"
@@ -161,6 +162,42 @@ int main(void)
       db1_work_item_t wi;
       assert(db1_work_item_get(id, &wi) == 1);
       assert(strcmp(wi.state, "rejected") == 0);
+   }
+
+   /* A6: autonomous merge-target rail (WP-5) — protected branches are refused;
+    * the configured base must be non-protected for pr.open/merge to proceed. */
+   {
+      assert(wfe_base_is_protected("main"));
+      assert(wfe_base_is_protected("master"));
+      assert(wfe_base_is_protected("release-1.2"));
+      assert(wfe_base_is_protected("")); /* empty -> protected (fail closed) */
+      assert(!wfe_base_is_protected("testing"));
+      assert(!wfe_base_is_protected("aimee/wi/abc"));
+      unsetenv("AIMEE_AUTONOMY_BASE");
+      assert(strcmp(wfe_autonomous_base(), "testing") == 0);
+      assert(wfe_autonomous_target_ok());
+      setenv("AIMEE_AUTONOMY_BASE", "main", 1); /* misconfig -> guard refuses */
+      assert(!wfe_autonomous_target_ok());
+      setenv("AIMEE_AUTONOMY_BASE", "dev", 1);
+      assert(wfe_autonomous_target_ok());
+      unsetenv("AIMEE_AUTONOMY_BASE");
+   }
+
+   /* A7: per-run turn cap (WP-5) — once the cumulative audit-event count reaches
+    * the cap, an autonomous run parks budget_exceeded BEFORE advancing further
+    * (so a runaway loop can't burn unbounded turns). */
+   {
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("auto", "cap1", "cap1", "autonomous", id, err, sizeof err) == 0);
+      for (int k = 0; k < 5; k++)
+         db1_lifecycle_event_add(id, "draft", "test", "t", "pad", "", 0);
+      setenv("AIMEE_AUTONOMY_MAX_TURNS", "3", 1);
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      unsetenv("AIMEE_AUTONOMY_MAX_TURNS");
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.state, "active") == 0);
+      assert(strcmp(wi.pause_reason, "budget_exceeded") == 0);
    }
 
    printf("ok\n");
