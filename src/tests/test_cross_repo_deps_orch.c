@@ -295,6 +295,225 @@ static void test_cold_start_rebuild_to_gate(void)
    printf("ok\n");
 }
 
+/* §4 vendor canonical-preference: (a) when a symbol is defined in BOTH a
+ * non-vendored repo and a vendored copy, the vendored candidate is dropped so the
+ * pair resolves to the canonical repo (not a false AMBIGUOUS); (b) a lone vendored
+ * definer with a route is still emitted (header-only-library exemption). */
+static void test_vendor_canonical_preference(void)
+{
+   printf("test_vendor_canonical_preference... ");
+   /* (a) canonical vs vendored duplicate. */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('vc-app','/va','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES "
+     "('vc-canon','/vc','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('vc-vend','/vv','t','trusted')");
+   for (int i = 0; i < 5; i++)
+   {
+      char sql[256];
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+               "id,'src/%d.c','t','c',0 FROM projects WHERE name='vc-app'",
+               i);
+      X(sql);
+   }
+   X("INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+     "id,'include/Canon.h','t','c',0 FROM projects WHERE name='vc-canon'");
+   X("INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT id,'src/canon.c','t',"
+     "'c',0 FROM projects WHERE name='vc-canon'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'VendorCanonSym','definition' FROM files "
+     "WHERE path='src/canon.c'");
+   X("INSERT INTO file_exports (file_id,name) SELECT id,'VendorCanonSym' FROM files WHERE "
+     "path='src/canon.c'");
+   /* vc-vend defines the SAME symbol but only in a vendored file. */
+   X("INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+     "id,'third_party/dup.c','t','c',1 FROM projects WHERE name='vc-vend'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'VendorCanonSym','definition' FROM files "
+     "WHERE path='third_party/dup.c'");
+   X("INSERT INTO file_imports (file_id,name) SELECT id,'Canon.h' FROM files WHERE path='src/0.c' "
+     "AND project_id=(SELECT id FROM projects WHERE name='vc-app')");
+   X("INSERT INTO code_calls (file_id,callee) SELECT id,'VendorCanonSym' FROM files WHERE "
+     "path='src/0.c' AND project_id=(SELECT id FROM projects WHERE name='vc-app')");
+   X("INSERT INTO cross_repo_route (caller_project,definer_project,kind,confidence,evidence) "
+     "VALUES ('vc-app','vc-canon','import_header','medium','Canon.h')");
+
+   xrepo_deps_opts_t opts = {
+       .direction = XREPO_DIR_OUT, .min_tier = XREPO_TIER_MEDIUM, .include_review = 1};
+   xrepo_dep_edge_t *edges = NULL;
+   size_t n = 0;
+   int trunc = 0;
+   assert(canonical_index_cross_repo_deps("vc-app", &opts, &edges, &n, &trunc) == 0);
+   int canon = 0, vend = 0;
+   for (size_t i = 0; i < n; i++)
+   {
+      if (strcmp(edges[i].definer_repo, "vc-canon") == 0)
+         canon = 1;
+      if (strcmp(edges[i].definer_repo, "vc-vend") == 0)
+         vend = 1;
+   }
+   /* vendored duplicate dropped -> resolves to canonical, NOT AMBIGUOUS, no vend edge. */
+   assert(canon && !vend);
+   free(edges);
+   edges = NULL;
+   /* VendorCanonSym is NOT in the review queue (not ambiguous after canonical pass). */
+   xrepo_review_row_t rows[16];
+   int rn = db2_cross_repo_review_list("vc-app", "open", rows, 16, NULL);
+   for (int i = 0; i < rn; i++)
+      assert(strcmp(rows[i].symbol, "VendorCanonSym") != 0);
+
+   /* (b) lone vendored definer + route -> still emitted (header-only exemption). */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('vo-app','/oa','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('vo-lib','/ol','t','trusted')");
+   for (int i = 0; i < 5; i++)
+   {
+      char sql[256];
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+               "id,'s/%d.c','t','c',0 FROM projects WHERE name='vo-app'",
+               i);
+      X(sql);
+   }
+   X("INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+     "id,'third_party/Vo.h','t','c',1 FROM projects WHERE name='vo-lib'");
+   X("INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+     "id,'third_party/vo.c','t','c',1 FROM projects WHERE name='vo-lib'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'VendoredOnlySym','definition' FROM files "
+     "WHERE path='third_party/vo.c'");
+   X("INSERT INTO file_exports (file_id,name) SELECT id,'VendoredOnlySym' FROM files WHERE "
+     "path='third_party/vo.c'");
+   X("INSERT INTO file_imports (file_id,name) SELECT id,'Vo.h' FROM files WHERE path='s/0.c' "
+     "AND project_id=(SELECT id FROM projects WHERE name='vo-app')");
+   X("INSERT INTO code_calls (file_id,callee) SELECT id,'VendoredOnlySym' FROM files WHERE "
+     "path='s/0.c' AND project_id=(SELECT id FROM projects WHERE name='vo-app')");
+   X("INSERT INTO cross_repo_route (caller_project,definer_project,kind,confidence,evidence) "
+     "VALUES ('vo-app','vo-lib','import_header','medium','Vo.h')");
+   assert(canonical_index_cross_repo_deps("vo-app", &opts, &edges, &n, &trunc) == 0);
+   int found = 0;
+   for (size_t i = 0; i < n; i++)
+      if (strcmp(edges[i].definer_repo, "vo-lib") == 0)
+         found = 1;
+   assert(found); /* lone vendored definer kept (exemption) */
+   free(edges);
+   printf("ok\n");
+}
+
+/* §4 canonical-preference edge cases: (c) a single repo with BOTH a vendored and a
+ * non-vendored def of one symbol is treated as CANONICAL (MIN(vendored)=0), so a
+ * competing pure-vendored repo is dropped; (d) no-route-to-canonical — when the
+ * non-vendored definer is NOT route-reachable but a vendored copy IS, the vendored
+ * candidate is KEPT and emits (the recall fix: don't drop the copy the caller
+ * actually uses). */
+static void test_vendor_canonical_edge_cases(void)
+{
+   printf("test_vendor_canonical_edge_cases... ");
+   /* (c) mixed repo (canonical) vs pure-vendored repo. */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('mr-app','/ma','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('mr-mix','/mm','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('mr-vend','/mv','t','trusted')");
+   for (int i = 0; i < 5; i++)
+   {
+      char sql[256];
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+               "id,'m/%d.c','t','c',0 FROM projects WHERE name='mr-app'",
+               i);
+      X(sql);
+   }
+   X("INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+     "id,'include/Mix.h','t','c',0 FROM projects WHERE name='mr-mix'");
+   /* mr-mix defines MixedSym in BOTH a canonical and a vendored file -> MIN=0. */
+   X("INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+     "id,'src/m.c','t','c',0 "
+     "FROM projects WHERE name='mr-mix'");
+   X("INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+     "id,'third_party/m2.c','t','c',1 FROM projects WHERE name='mr-mix'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'MixedSym','definition' FROM files WHERE "
+     "path='src/m.c'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'MixedSym','definition' FROM files WHERE "
+     "path='third_party/m2.c'");
+   X("INSERT INTO file_exports (file_id,name) SELECT id,'MixedSym' FROM files WHERE "
+     "path='src/m.c'");
+   /* mr-vend is a pure-vendored duplicate. */
+   X("INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+     "id,'third_party/mv.c','t','c',1 FROM projects WHERE name='mr-vend'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'MixedSym','definition' FROM files WHERE "
+     "path='third_party/mv.c'");
+   X("INSERT INTO file_imports (file_id,name) SELECT id,'Mix.h' FROM files WHERE path='m/0.c' AND "
+     "project_id=(SELECT id FROM projects WHERE name='mr-app')");
+   X("INSERT INTO code_calls (file_id,callee) SELECT id,'MixedSym' FROM files WHERE path='m/0.c' "
+     "AND "
+     "project_id=(SELECT id FROM projects WHERE name='mr-app')");
+   X("INSERT INTO cross_repo_route (caller_project,definer_project,kind,confidence,evidence) "
+     "VALUES ('mr-app','mr-mix','import_header','medium','Mix.h')");
+
+   xrepo_deps_opts_t opts = {
+       .direction = XREPO_DIR_OUT, .min_tier = XREPO_TIER_MEDIUM, .include_review = 1};
+   xrepo_dep_edge_t *edges = NULL;
+   size_t n = 0;
+   int trunc = 0;
+   assert(canonical_index_cross_repo_deps("mr-app", &opts, &edges, &n, &trunc) == 0);
+   int mix = 0, mvend = 0;
+   for (size_t i = 0; i < n; i++)
+   {
+      if (strcmp(edges[i].definer_repo, "mr-mix") == 0)
+         mix = 1;
+      if (strcmp(edges[i].definer_repo, "mr-vend") == 0)
+         mvend = 1;
+   }
+   assert(mix && !mvend); /* mixed repo = canonical (survives); pure-vendored dropped */
+   free(edges);
+   edges = NULL;
+
+   /* (d) no-route-to-canonical: canonical unreachable, vendored copy reachable. */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('nr-app','/na','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES "
+     "('nr-canon','/nc','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('nr-vend','/nv','t','trusted')");
+   for (int i = 0; i < 5; i++)
+   {
+      char sql[256];
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+               "id,'n/%d.c','t','c',0 FROM projects WHERE name='nr-app'",
+               i);
+      X(sql);
+   }
+   /* nr-canon: non-vendored def, but NO route from nr-app. */
+   X("INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+     "id,'src/n.c','t','c',0 "
+     "FROM projects WHERE name='nr-canon'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'NoRouteCanonSym','definition' FROM files "
+     "WHERE path='src/n.c'");
+   /* nr-vend: vendored def + header the app imports + a route. */
+   X("INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+     "id,'third_party/Nv.h','t','c',1 FROM projects WHERE name='nr-vend'");
+   X("INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+     "id,'third_party/nv.c','t','c',1 FROM projects WHERE name='nr-vend'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'NoRouteCanonSym','definition' FROM files "
+     "WHERE path='third_party/nv.c'");
+   X("INSERT INTO file_exports (file_id,name) SELECT id,'NoRouteCanonSym' FROM files WHERE "
+     "path='third_party/nv.c'");
+   X("INSERT INTO file_imports (file_id,name) SELECT id,'Nv.h' FROM files WHERE path='n/0.c' AND "
+     "project_id=(SELECT id FROM projects WHERE name='nr-app')");
+   X("INSERT INTO code_calls (file_id,callee) SELECT id,'NoRouteCanonSym' FROM files WHERE "
+     "path='n/0.c' AND project_id=(SELECT id FROM projects WHERE name='nr-app')");
+   X("INSERT INTO cross_repo_route (caller_project,definer_project,kind,confidence,evidence) "
+     "VALUES ('nr-app','nr-vend','import_header','medium','Nv.h')");
+   assert(canonical_index_cross_repo_deps("nr-app", &opts, &edges, &n, &trunc) == 0);
+   int canon = 0, vend = 0;
+   for (size_t i = 0; i < n; i++)
+   {
+      if (strcmp(edges[i].definer_repo, "nr-canon") == 0)
+         canon = 1;
+      if (strcmp(edges[i].definer_repo, "nr-vend") == 0)
+         vend = 1;
+   }
+   /* vendored copy kept + emitted (canonical was unreachable); canonical not emitted
+    * (no route). Without the route-aware drop this edge would be lost (recall bug). */
+   assert(vend && !canon);
+   free(edges);
+   printf("ok\n");
+}
+
 int main(void)
 {
    test_parse_module_id();
@@ -304,6 +523,8 @@ int main(void)
    test_ambiguous_to_review();
    test_structural_edge_gate();
    test_cold_start_rebuild_to_gate();
+   test_vendor_canonical_preference();
+   test_vendor_canonical_edge_cases();
    printf("cross_repo_deps_orch: all tests passed\n");
    return 0;
 }

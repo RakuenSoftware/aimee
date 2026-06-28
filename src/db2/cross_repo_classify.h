@@ -42,6 +42,8 @@ typedef struct
    const char *self_type;   /* qualified receiver/self/trait type; "" if free function */
    int arity;               /* parameter count; -1 if unknown */
    const char *param_types; /* normalized parameter type list; "" if unknown */
+   int vendored;            /* §4: 1 if this repo's defs of the symbol are ALL in vendored
+                               files (no canonical copy); 0 if a non-vendored def exists */
 } xrepo_def_t;
 
 typedef enum

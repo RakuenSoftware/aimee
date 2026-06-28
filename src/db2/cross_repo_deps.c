@@ -350,10 +350,63 @@ static void crd_flush(const crd_ctx_t *ctx, edge_acc_t *acc, const char *sym, in
 {
    if (ndef == 0)
       return; /* no external definer */
+
+   /* §4 vendor canonical-preference (precision-hardening §4a + §4b combined): a
+    * symbol may be legitimately vendored (FetchContent subprojects/, header-only
+    * stb/nlohmann in third_party/), so do NOT blanket-drop vendored definers. Drop
+    * a vendored duplicate ONLY when a non-vendored definer of the SAME symbol is
+    * ALSO structurally route-reachable from the caller — that canonical definer is
+    * the real dependency, so the vendored copy is noise that would otherwise
+    * inflate multiplicity into a false AMBIGUOUS / steal the target. If NO
+    * non-vendored candidate is route-reachable, the vendored copy is KEPT: it may
+    * be the copy the caller actually includes (caller vendors lib V's header), and
+    * dropping it would lose the real caller->V edge (the H1 gate would then emit
+    * nothing). A lone vendored definer is likewise kept (header-only-library
+    * exemption); the H1 route gate still requires a real route to it.
+    *
+    * Runs before multiplicity/target so the canonical pass precedes AMBIGUOUS and
+    * the review-queue upsert (pipeline order §7), so review rows are written over
+    * the canonicalized candidate set (no stale vendored-candidate rows). Two-pass
+    * for auditability: free dropped candidates' only heap field (.repo;
+    * self_type/param_types are "" literals, dcount/dexp are parallel int arrays,
+    * no heap), THEN compact survivors with no frees — the tail free loop covers
+    * exactly the surviving [0,ndef). */
+   int has_canonical_route = 0;
+   for (int i = 0; i < ndef; i++)
+      if (!defs[i].vendored && route_seen_has(ctx, defs[i].repo))
+      {
+         has_canonical_route = 1;
+         break;
+      }
+   if (has_canonical_route)
+   {
+      for (int i = 0; i < ndef; i++)
+         if (defs[i].vendored)
+            free((char *)defs[i].repo);
+      int w = 0;
+      for (int i = 0; i < ndef; i++)
+         if (!defs[i].vendored)
+         {
+            if (w != i)
+            {
+               defs[w] = defs[i];
+               dcount[w] = dcount[i];
+               dexp[w] = dexp[i];
+            }
+            w++;
+         }
+      ndef = w;
+   }
+
    xrepo_lang_t lang = defs[0].lang;
 
    /* definer_repo_count over TRUSTED repos (incl. the caller if it is a trusted
-    * definer) — the distinctiveness "defined in >= M repos" signal. */
+    * definer) — the distinctiveness "defined in >= M repos" signal. Computed over
+    * the CANONICALIZED candidate set (§4 may have dropped route-reachable-canonical
+    * duplicates above), so it deliberately measures distinctiveness over canonical
+    * definers, not raw physical copies — a symbol with one canonical definer plus N
+    * vendored copies counts as 1, which is correct (the copies are the same symbol,
+    * not evidence the name is generic). */
    int definer_rc = 0;
    for (int i = 0; i < ndef; i++)
    {
@@ -667,7 +720,8 @@ int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t
        "          JOIN projects pa ON pa.id = fa.project_id WHERE pa.name = ?1 "
        "          AND cca.callee = c.sym) AS caller_files, "
        "       (SELECT COUNT(*) FROM blocked_symbols b WHERE b.word = c.sym AND b.lang = '') AS "
-       "blk "
+       "blk, "
+       "       MIN(df.vendored) AS dvendored "
        "FROM cand c JOIN terms dt ON dt.name = c.sym AND dt.kind = 'definition' "
        "JOIN files df ON df.id = dt.file_id JOIN projects dp ON dp.id = df.project_id "
        "GROUP BY c.sym, c.sites, c.files, c.exfile, c.exline, dp.name, dp.trust "
@@ -733,6 +787,9 @@ int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t
          defs[ndef].self_type = "";
          defs[ndef].arity = -1;
          defs[ndef].param_types = "";
+         /* §4: MIN(df.vendored) — last SELECT column (index 12). Adding query columns
+          * must APPEND + bump this index; this is the sole consumer of the cursor. */
+         defs[ndef].vendored = aimee_pg_column_int(cq, 12) > 0 ? 1 : 0;
          dcount[ndef] = aimee_pg_column_int(cq, 6);
          dexp[ndef] = aimee_pg_column_int(cq, 8) > 0 ? 1 : 0;
          ndef++;
