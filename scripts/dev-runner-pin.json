@@ -1,0 +1,20 @@
+{
+  "_comment": "Pin manifest for the autonomous-dev §1 verify runner image (docker/dev-runner/Dockerfile). dev-verify-runner.sh probes the running image's toolchain with dpkg-query and refuses to run (verdict unavailable/pin-mismatch) if it drifts from this manifest — so a local pass that CI would fail cannot ship. Regenerate with: scripts/dev-verify-runner.sh --print-pin (rebuild + reprobe) whenever .github/workflows/ci.yml's toolchain or docker/dev-runner/Dockerfile changes.",
+  "image": "aimee-dev-runner:latest",
+  "base": "ubuntu:24.04",
+  "mirrors_ci": ".github/workflows/ci.yml (ubuntu-latest); pkg-config/libzstd-dev/python3/python3-yaml are CI-implicit (preinstalled on ubuntu-latest), pinned explicitly here.",
+  "toolchain": {
+    "gcc": "4:13.2.0-7ubuntu1",
+    "make": "4.3-4.1build2",
+    "pkg-config": "1.8.1-2build1",
+    "clang-format-19": "1:19.1.1-1ubuntu1~24.04.2",
+    "libsqlite3-dev": "3.45.1-1ubuntu2.5",
+    "libcurl4-openssl-dev": "8.5.0-2ubuntu10.9",
+    "libpam0g-dev": "1.5.3-5ubuntu5.5",
+    "libssl-dev": "3.0.13-0ubuntu3.11",
+    "libpq-dev": "16.14-0ubuntu0.24.04.1",
+    "libzstd-dev": "1.5.5+dfsg2-2build1.1",
+    "postgresql-client": "16+257build1.1",
+    "python3": "3.12.3-0ubuntu2.1"
+  }
+}

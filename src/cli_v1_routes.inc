@@ -3512,10 +3512,18 @@ static int git_verify_text_is_failure(const char *text)
    /* format=json structured verdict: a JSON payload whose verdict is not "passed"
     * (i.e. failed or unavailable) is a failure for the CLI exit code, so a scripted
     * `aimee git verify ... format=json` still exits nonzero. The autonomous driver
-    * reads the verdict field directly and does not rely on the exit code. */
-   if (text[0] == '{' && (strstr(text, "\"verdict\":\"failed\"") != NULL ||
-                          strstr(text, "\"verdict\":\"unavailable\"") != NULL))
-      return 1;
+    * reads the verdict field directly and does not rely on the exit code. Only the
+    * leading region is scanned (the top-level verdict is the 2nd key, after
+    * schema_version) so a `"verdict":"failed"` substring inside a step's log tail
+    * cannot spuriously flip the exit code. */
+   if (text[0] == '{')
+   {
+      char head[96];
+      snprintf(head, sizeof head, "%s", text);
+      if (strstr(head, "\"verdict\":\"failed\"") != NULL ||
+          strstr(head, "\"verdict\":\"unavailable\"") != NULL)
+         return 1;
+   }
    return strncmp(text, "FAIL:", 5) == 0 || strncmp(text, "error:", 6) == 0 ||
           strncmp(text, "verify busy:", 12) == 0 || strstr(text, ": FAIL (exit ") != NULL ||
           strstr(text, " step(s) failed -- verified with failures") != NULL;

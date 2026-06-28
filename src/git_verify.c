@@ -1237,9 +1237,14 @@ static void verify_coord_finalize(verify_coord_state_t *state)
          {
             cJSON *v = verify_build_verdict(state->contexts, state->cfg.count, cancelled,
                                             state->has_changes);
-            free(job->verdict_json);
-            job->verdict_json = cJSON_PrintUnformatted(v);
+            char *nv = cJSON_PrintUnformatted(v);
             cJSON_Delete(v);
+            free(job->verdict_json);
+            /* On a serialize OOM keep an explicit verdict rather than silently
+             * downgrading a real result to "no-verdict-recorded". */
+            job->verdict_json = nv ? nv
+                                   : strdup("{\"schema_version\":1,\"verdict\":\"unavailable\","
+                                            "\"reason\":\"serialize-oom\"}");
          }
          for (int i = 0; i < state->cfg.count; i++)
          {
@@ -1514,19 +1519,21 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
           (jcommit && cJSON_IsString(jcommit)) ? jcommit->valuestring : NULL;
 
       char msg[512];
-      int ok = verify_check(verify_root, expected_commit, msg, sizeof(msg));
       if (json_out)
       {
          /* verify_check returns 1 for BOTH "no verify section (no gate)" and
-          * "fresh & valid". The driver must not read the former as a pass, so we
-          * probe the config: no steps => unavailable/no-verify-section, distinct
-          * from a real passed. */
+          * "fresh & valid". The driver must not read the former as a pass, so probe
+          * the config first: no steps => unavailable/no-verify-section, distinct from
+          * a real passed. Probing first also lets us skip verify_check's freshness
+          * I/O entirely when there is no section. verify_load_config is idempotent
+          * (it only (re)generates the same project.yaml), so the probe is safe. */
          verify_config_t cfg;
-         int has_steps = (verify_load_config(verify_root, &cfg) == 0 && cfg.count > 0);
-         if (!has_steps)
+         if (verify_load_config(verify_root, &cfg) != 0 || cfg.count == 0)
             return verify_json_status("unavailable", "no-verify-section", 0);
+         int ok = verify_check(verify_root, expected_commit, msg, sizeof(msg));
          return verify_json_status(ok ? "passed" : "failed", ok ? "ok" : "stale-or-failed", 0);
       }
+      int ok = verify_check(verify_root, expected_commit, msg, sizeof(msg));
       dstr_t res;
       dstr_init(&res);
       dstr_appendf(&res, "%s: %s", ok ? "PASS" : "FAIL", msg);
