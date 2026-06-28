@@ -526,8 +526,11 @@ static int ci_file_list_append(ci_file_list_t *list, const char *path)
 
 static void ci_purge_hidden_paths(int64_t project_id)
 {
-   (void)db2_code_index_purge_files_matching(project_id, ".%");
-   (void)db2_code_index_purge_files_matching(project_id, "%/.%");
+   /* Purge hidden-path files but SPARE a wanted dotfile build manifest
+    * (.gitmodules with all non-hidden ancestors) — recall §2.2. The purge mirrors
+    * the ingest allowlist (ci_path_ingest_excluded), so a re-scan does not delete a
+    * legitimately-ingested submodule declaration back out. */
+   (void)db2_code_index_purge_hidden_except_manifests(project_id);
 }
 
 static void ci_purge_build_exclusions(int64_t project_id, const ci_exclusion_list_t *exclusions)

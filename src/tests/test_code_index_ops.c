@@ -4,9 +4,28 @@
 
 #include "aimee.h"
 #include "db2_test_shim.h"
+#include "../db2/code_index.h"
 #include "../db2/code_index_ops.h"
 #include "../db2/db2_internal.h"
 #include "../db2/db_postgres.h"
+
+/* Count files rows for (project, path) over the shim. -1 on DB/step failure. */
+static int file_count_path(const char *project, const char *path)
+{
+   char e[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT count(*) FROM files f JOIN projects p ON p.id=f.project_id "
+                        "WHERE p.name = ?1 AND f.path = ?2",
+                        e, sizeof e);
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", path);
+   int n = (aimee_pg_step(st, e, sizeof e) == AIMEE_PG_ROW) ? aimee_pg_column_int(st, 0) : -1;
+   aimee_pg_finalize(st);
+   return n;
+}
 
 int main(void)
 {
@@ -145,6 +164,74 @@ int main(void)
       int q3 = db2_code_index_requeue_drifted();
       assert(q3 == 2); /* dproj2 + dproj3 new; dproj already pending (deduped) */
       printf("  drift requeue enqueues multiple distinct drifted projects (q3=%d) OK\n", q3);
+   }
+
+   /* recall §2.2: the hidden-path purges must SPARE a wanted dotfile manifest
+    * (.gitmodules with all non-hidden ancestors) while still deleting other hidden
+    * files, files under hidden dirs, AND a .gitmodules under a hidden ancestor
+    * (ingest never admits that). Covers the per-project purge used by
+    * ci_purge_hidden_paths and the cross-project startup purge_hidden_pollution. */
+   {
+      void *conn = db2_conn();
+      char e[256] = "";
+      const char *spared[] = {".gitmodules", "sub/.gitmodules", "a/b/.gitmodules"};
+      const char *purged[] = {".bashrc", ".git/config", "sub/.hidden.c", ".git/.gitmodules",
+                              "sub/.hidden/.gitmodules"};
+      const char *keep[] = {"src/a.c"};
+      const char *projs[] = {"hp", "hp2"};
+      const char *seed = "INSERT INTO files (project_id, path, hash, scanned_at) VALUES"
+                         " ((SELECT id FROM projects WHERE name='%s'),'%s','h','t')";
+      for (size_t pj = 0; pj < 2; pj++)
+      {
+         char ins[512];
+         snprintf(ins, sizeof ins,
+                  "INSERT INTO projects (name, root, scanned_at) VALUES ('%s','/x','x')",
+                  projs[pj]);
+         assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
+         for (size_t i = 0; i < sizeof(spared) / sizeof(spared[0]); i++)
+         {
+            snprintf(ins, sizeof ins, seed, projs[pj], spared[i]);
+            assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
+         }
+         for (size_t i = 0; i < sizeof(purged) / sizeof(purged[0]); i++)
+         {
+            snprintf(ins, sizeof ins, seed, projs[pj], purged[i]);
+            assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
+         }
+         for (size_t i = 0; i < sizeof(keep) / sizeof(keep[0]); i++)
+         {
+            snprintf(ins, sizeof ins, seed, projs[pj], keep[i]);
+            assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
+         }
+      }
+      int64_t pid = 0;
+      {
+         aimee_pg_stmt_t *st =
+             aimee_pg_prepare(conn, "SELECT id FROM projects WHERE name='hp'", e, sizeof e);
+         assert(st && aimee_pg_step(st, e, sizeof e) == AIMEE_PG_ROW);
+         pid = aimee_pg_column_int64(st, 0);
+         aimee_pg_finalize(st);
+      }
+      /* per-project purge on hp only (hp2 left intact to prove the cross-project purge). */
+      (void)db2_code_index_purge_hidden_except_manifests(pid);
+      for (size_t i = 0; i < sizeof(spared) / sizeof(spared[0]); i++)
+         assert(file_count_path("hp", spared[i]) == 1);
+      assert(file_count_path("hp", "src/a.c") == 1);
+      for (size_t i = 0; i < sizeof(purged) / sizeof(purged[0]); i++)
+         assert(file_count_path("hp", purged[i]) == 0);
+
+      /* cross-project pollution purge: same contract, and hp2 still has hidden rows
+       * to actually delete (proving DELETE, not a no-op). */
+      (void)db2_code_index_purge_hidden_pollution();
+      for (size_t pj = 0; pj < 2; pj++)
+      {
+         for (size_t i = 0; i < sizeof(spared) / sizeof(spared[0]); i++)
+            assert(file_count_path(projs[pj], spared[i]) == 1);
+         assert(file_count_path(projs[pj], "src/a.c") == 1);
+         for (size_t i = 0; i < sizeof(purged) / sizeof(purged[0]); i++)
+            assert(file_count_path(projs[pj], purged[i]) == 0);
+      }
+      printf("  hidden-path purges spare clean .gitmodules, drop the rest (recall §2.2) OK\n");
    }
 
    db2_test_shim_close();

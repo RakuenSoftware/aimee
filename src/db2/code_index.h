@@ -83,6 +83,12 @@ extern "C"
     * error. */
    int db2_code_index_purge_files_matching(int64_t project_id, const char *path_glob);
 
+   /* Purge one project's files whose path has a hidden component, EXCEPT a wanted
+    * dotfile build manifest (.gitmodules with all non-hidden ancestors) — mirrors
+    * the ingest allowlist so a re-scan does not delete legitimately-indexed
+    * submodule declarations (recall §2.2). Returns rows deleted (>=0) or -1. */
+   int db2_code_index_purge_hidden_except_manifests(int64_t project_id);
+
    /* One-shot cleanup of hidden-path pollution across the whole code
     * index. Drops every files row whose project-relative path has any
     * hidden component (dotfile or dot-directory) and every projects row
