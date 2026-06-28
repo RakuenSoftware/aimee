@@ -257,6 +257,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-aimee-tls-clientcert \
                $(TESTPREFIX)/unit-test-vault-server-key \
                $(TESTPREFIX)/unit-test-vault-capability \
+               $(TESTPREFIX)/unit-test-vault-audit \
                $(TESTPREFIX)/unit-test-prompts \
                $(TESTPREFIX)/unit-test-cmd-session \
                $(TESTPREFIX)/unit-test-model-registry \
@@ -2599,6 +2600,14 @@ $(TESTPREFIX)/unit-test-aimee-tls-clientcert: $(OBJDIR)/tests/test_aimee_tls_cli
 
 $(TESTPREFIX)/unit-test-vault-capability: $(OBJDIR)/tests/test_vault_capability.o \
                               $(OBJDIR)/server/vault_capability.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-vault-audit: $(OBJDIR)/tests/test_vault_audit.o \
+                              $(OBJDIR)/server/server_vault.o \
+                              $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
+                              $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
+                              $(OBJDIR)/server/vault_server_key.o $(OBJDIR)/server/vault_capability.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
