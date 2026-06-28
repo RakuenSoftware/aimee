@@ -457,6 +457,54 @@ static int ci_path_has_hidden_component(const char *path)
    return 0;
 }
 
+/* Build manifests whose filename legitimately starts with '.' (currently only
+ * .gitmodules — git submodule declarations). A thin-client push sends these (the
+ * client's code_file_wanted accepts them); the kb must not drop them as "hidden"
+ * the way it drops files inside .git/.aimee/etc. dirs (recall §2.2). */
+static int ci_is_dotfile_manifest(const char *component, size_t len)
+{
+   return len == 11 && strncmp(component, ".gitmodules", 11) == 0;
+}
+
+/* Like ci_path_has_hidden_component, but a hidden FINAL (filename) component is
+ * allowed when it is a wanted dotfile build manifest (ci_is_dotfile_manifest).
+ * For thin-client file ingest: the client already gated the file set, and a
+ * .gitmodules must be ingested; interior hidden DIRECTORY components (.git/,
+ * .github/, ...) are still rejected. The exemption is for the FINAL component at
+ * ANY depth (a/b/.gitmodules), not just repo-root — the client gates which paths
+ * it sends, so the kb need not second-guess depth. (Leading slashes are tolerated
+ * for parity with ci_path_has_hidden_component, though the sole caller already
+ * rejects a leading '/'.) */
+static int ci_path_ingest_excluded(const char *path)
+{
+   const char *p = path;
+   while (*p == '/')
+      p++;
+
+   const char *start = p;
+   for (;;)
+   {
+      if (*p == '/' || *p == '\0')
+      {
+         size_t len = (size_t)(p - start);
+         int is_final = (*p == '\0');
+         if (ci_path_component_is_hidden(start, len) &&
+             !(is_final && ci_is_dotfile_manifest(start, len)))
+            return 1;
+         if (is_final)
+            break;
+         p++;
+         start = p;
+      }
+      else
+      {
+         p++;
+      }
+   }
+
+   return 0;
+}
+
 static int ci_file_list_append(ci_file_list_t *list, const char *path)
 {
    if (list->count >= list->max)
@@ -1099,7 +1147,7 @@ int canonical_index_scan_files(const char *name, const char *root_label,
    {
       const char *rel = files[i].rel_path;
       const char *content = files[i].content;
-      if (!rel || !rel[0] || rel[0] == '/' || ci_path_has_hidden_component(rel) || !content)
+      if (!rel || !rel[0] || rel[0] == '/' || ci_path_ingest_excluded(rel) || !content)
          continue;
 
       inspected++;

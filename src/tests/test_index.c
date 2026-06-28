@@ -232,6 +232,49 @@ static void seed_stale_hidden_project_row(const char *root)
    assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
 }
 
+/* Count of files rows for (project, path). Used to assert ingest of a file
+ * (.gitmodules) that has no extractable symbols, so index_find can't see it.
+ * Returns -1 on a DB/step failure so a schema regression fails loudly rather
+ * than masquerading as "row absent". */
+static int file_row_count(const char *project, const char *path)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT COUNT(*) FROM files f JOIN projects p ON p.id = f.project_id "
+                        "WHERE p.name = ?1 AND f.path = ?2",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", path);
+   int n = (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW) ? aimee_pg_column_int(st, 0) : -1;
+   aimee_pg_finalize(st);
+   return n;
+}
+
+/* The stored content body of (project, path) into out (empty if absent/error). */
+static void file_content(const char *project, const char *path, char *out, size_t cap)
+{
+   out[0] = '\0';
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT fc.content FROM file_contents fc JOIN files f ON f.id = fc.file_id "
+                        "JOIN projects p ON p.id = f.project_id WHERE p.name = ?1 AND f.path = ?2",
+                        err, sizeof(err));
+   if (!st)
+      return;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", path);
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *c = aimee_pg_column_text(st, 0);
+      snprintf(out, cap, "%s", c ? c : "");
+   }
+   aimee_pg_finalize(st);
+}
+
 int main(void)
 {
    printf("index: ");
@@ -446,6 +489,38 @@ int main(void)
       snprintf(cmd, sizeof(cmd), "rm -rf %s", canonical);
       (void)system(cmd);
       free(canonical);
+   }
+
+   /* --- thin-client ingest (scan_files): a repo-root .gitmodules is INGESTED
+    * (recall §2.2), while a hidden non-manifest dotfile and a file inside a hidden
+    * directory are still excluded. --- */
+   {
+      const char *gitmod_body = "[submodule \"dep\"]\n\turl = https://h/o/dep.git\n";
+      canonical_index_file_input_t inputs[] = {
+          {"src/app.c", "void app_entry(void) {}\n"},
+          {".gitmodules", gitmod_body},
+          {".bashrc", "export X=1\n"},                /* hidden non-manifest dotfile */
+          {".github/workflows/ci.yml", "name: ci\n"}, /* file inside a hidden dir */
+          {".gitmodules/payload.txt", "x\n"},         /* .gitmodules as an interior DIR */
+      };
+      int inspected = 0;
+      int scanned = canonical_index_scan_files(
+          "pushproj", "remote", inputs, (int)(sizeof(inputs) / sizeof(inputs[0])), 1, &inspected);
+      /* canonical_index_scan_files upserts the project; of 5 inputs only the 2
+       * non-excluded (src/app.c + .gitmodules) are counted (inspected is post-filter). */
+      assert(inspected == 2);
+      assert(scanned == 2);
+      assert(file_row_count("pushproj", ".gitmodules") == 1); /* dotfile manifest ingested */
+      assert(file_row_count("pushproj", "src/app.c") == 1);
+      assert(file_row_count("pushproj", ".bashrc") == 0); /* hidden non-manifest excluded */
+      assert(file_row_count("pushproj", ".github/workflows/ci.yml") == 0); /* hidden dir excluded */
+      assert(file_row_count("pushproj", ".gitmodules/payload.txt") ==
+             0); /* interior dir excluded */
+      /* the .gitmodules body must survive ingest byte-for-byte (R2b's crb_gitmodules
+       * parses url= lines out of it). */
+      char body[256];
+      file_content("pushproj", ".gitmodules", body, sizeof(body));
+      assert(strcmp(body, gitmod_body) == 0);
    }
 
    /* Cleanup */
