@@ -12,6 +12,7 @@
 #include "db2/db2.h"
 #include "db2/cross_repo_identity.h" /* db2_cross_repo_rebuild_identities (H0c) */
 #include "db2/cross_repo_route.h"    /* db2_cross_repo_rebuild_routes (H0d) */
+#include "db2/cross_repo_build.h"    /* db2_cross_repo_rebuild_build_deps (recall R2) */
 #include "db2/cross_repo_stats.h"    /* db2_cross_repo_recompute_blocked_symbols */
 #include "kb_curator_drain.h"
 #include "kb_curator_extract.h"
@@ -86,12 +87,23 @@ static int kb_cross_repo_meta_rebuild(const config_t *cfg)
                 "route rebuild failed; gate keeps last-known-good routes this cycle");
       return -1;
    }
+   /* Recall R2: build-declared deps (FetchContent/submodule/Cargo) — a separate
+    * evidence class the resolver merges as build_declared. Same fail-to-last-known-
+    * good semantics. */
+   int bdeps = db2_cross_repo_rebuild_build_deps();
+   if (bdeps < 0)
+   {
+      aimee_log(LOG_WARN, "kb.cross_repo.meta",
+                "build-dep rebuild failed; keeps last-known-good build deps this cycle");
+      return -1;
+   }
    int bsym = db2_cross_repo_recompute_blocked_symbols(cfg->kb_curator_cross_repo_k,
                                                        cfg->kb_curator_cross_repo_m,
                                                        cfg->kb_curator_cross_repo_len_min);
-   aimee_log(LOG_INFO, "kb.cross_repo.meta",
-             "rebuilt cross-repo metadata: identities=%d routes=%d blocked_symbols=%d", ids, routes,
-             bsym);
+   aimee_log(
+       LOG_INFO, "kb.cross_repo.meta",
+       "rebuilt cross-repo metadata: identities=%d routes=%d build_deps=%d blocked_symbols=%d", ids,
+       routes, bdeps, bsym);
    return 0;
 }
 
