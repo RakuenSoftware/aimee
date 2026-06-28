@@ -208,8 +208,7 @@ void vault_audit_server_write(const server_conn_t *conn, const char *agent, cons
    /* D2/D2c: server-principal writes go to the dedicated append-only 0600 audit
     * sink (audit_log), NOT the operator-readable general server log — preserving
     * tamper-evidence + access separation. Never logs the key (fingerprint only). */
-   audit_log("VAULT_SERVER_WRITE",
-             "by=%s transport=%s agent=%s cred=%s fp=%s",
+   audit_log("VAULT_SERVER_WRITE", "by=%s transport=%s agent=%s cred=%s fp=%s",
              (conn && conn->vault_principal[0]) ? conn->vault_principal : "(server)", transport,
              agent ? agent : "?", cred ? cred : "?", fp);
 }

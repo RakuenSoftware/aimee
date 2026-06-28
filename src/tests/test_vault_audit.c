@@ -79,7 +79,8 @@ int main(void)
    /* (1) The dedicated sink received the record — fails if routed to aimee_log. */
    size_t len = 0;
    char *body = slurp(path, &len);
-   assert(body && "audit.log not written — server-principal write was not routed to the dedicated sink");
+   assert(body &&
+          "audit.log not written — server-principal write was not routed to the dedicated sink");
    assert(strstr(body, "\"event\":\"VAULT_SERVER_WRITE\"") && "missing VAULT_SERVER_WRITE event");
    assert(strstr(body, "agent=glm") && "missing agent field");
    assert(strstr(body, "transport=uds") && "missing/incorrect attested transport");
