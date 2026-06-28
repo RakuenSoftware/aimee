@@ -4940,10 +4940,15 @@ static void print_index_deps(cJSON *resp)
       cJSON *sc = cJSON_GetObjectItemCaseSensitive(d, "symbol_count");
       cJSON *cc = cJSON_GetObjectItemCaseSensitive(d, "call_site_count");
       cJSON *ex = cJSON_GetObjectItemCaseSensitive(d, "example");
-      printf("  %s -> %s  %-7s  (%d symbol(s), %d call site(s))\n", json_str(d, "caller_repo"),
+      const char *etype = json_str(d, "evidence_type");
+      const char *bkind = json_str(d, "build_kind");
+      char evtag[48] = "";
+      if (etype[0] && strcmp(etype, "symbol_resolved") != 0)
+         snprintf(evtag, sizeof(evtag), "  [%s%s%s]", etype, bkind[0] ? ":" : "", bkind);
+      printf("  %s -> %s  %-7s  (%d symbol(s), %d call site(s))%s\n", json_str(d, "caller_repo"),
              json_str(d, "definer_repo"), json_str(d, "tier"),
              cJSON_IsNumber(sc) ? (int)sc->valuedouble : 0,
-             cJSON_IsNumber(cc) ? (int)cc->valuedouble : 0);
+             cJSON_IsNumber(cc) ? (int)cc->valuedouble : 0, evtag);
       if (ex && json_str(ex, "symbol")[0])
       {
          cJSON *line = cJSON_GetObjectItemCaseSensitive(ex, "line");

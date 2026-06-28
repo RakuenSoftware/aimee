@@ -300,6 +300,15 @@ static xrepo_dep_edge_t *edge_find_or_add(edge_acc_t *a, const char *caller, con
    return E;
 }
 
+/* Find an existing edge without adding (recall R2c merge). NULL if absent. */
+static xrepo_dep_edge_t *edge_find(edge_acc_t *a, const char *caller, const char *definer)
+{
+   for (size_t i = 0; i < a->n; i++)
+      if (strcmp(a->e[i].caller_repo, caller) == 0 && strcmp(a->e[i].definer_repo, definer) == 0)
+         return &a->e[i];
+   return NULL;
+}
+
 /* ---- orchestration ------------------------------------------------------- */
 
 /* Shared, read-only context for the per-symbol flush. */
@@ -808,6 +817,85 @@ int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t
                 dcount, dexp, ndef, corig);
    aimee_pg_finalize(cq);
    free_descs(&descs);
+
+   /* R2c: merge build-DECLARED deps (recall-recovery §2.6) as a SEPARATE evidence
+    * class — read cross_repo_build_dep for this caller (OUT direction) and fold into
+    * the same (caller, definer) output. NOT via the H1 symbol-route gate (a build
+    * declaration is its own evidence). Merge table: symbol+build(same definer) ->
+    * "both", HIGH if the build dep is high-parse; build-only -> MEDIUM (high-parse) /
+    * LOW (low-parse), subject to min_tier. A pair with multiple build declarations
+    * takes the strongest tier. */
+   {
+      char berr[CRD_ERR] = "";
+      aimee_pg_stmt_t *bd = aimee_pg_prepare(
+          conn,
+          "SELECT definer_project, build_kind, parse_confidence FROM cross_repo_build_dep "
+          "WHERE caller_project = ?1 "
+          "ORDER BY definer_project, (parse_confidence = 'high') DESC, build_kind",
+          berr, sizeof(berr));
+      if (bd)
+      {
+         aimee_pg_bind_text(bd, "?1", project);
+         while (aimee_pg_step(bd, berr, sizeof(berr)) == AIMEE_PG_ROW)
+         {
+            const char *def = aimee_pg_column_text(bd, 0);
+            const char *bkind = aimee_pg_column_text(bd, 1);
+            const char *pconf = aimee_pg_column_text(bd, 2);
+            if (!def || !def[0])
+               continue;
+            int high = pconf && strcmp(pconf, "high") == 0;
+            xrepo_tier_t bt = high ? XREPO_TIER_MEDIUM : XREPO_TIER_LOW;
+            xrepo_dep_edge_t *E = edge_find(&acc, project, def);
+            if (E)
+            {
+               /* An edge already exists for this pair. It carries symbol evidence iff
+                * its evidence_type is still pristine (untouched symbol edge) or already
+                * "both"; "build_declared" means a prior build row created it with no
+                * symbol corroboration. Promotion must be ORDER-INDEPENDENT: a high-parse
+                * build row promotes a symbol-bearing pair to HIGH whether it is seen
+                * before or after a low-parse row for the same pair (§2.6). */
+               int has_symbol = (E->evidence_type[0] == 0) || strcmp(E->evidence_type, "both") == 0;
+               if (has_symbol)
+               {
+                  /* symbol + build -> both; high-parse promotes to HIGH. build_kind takes
+                   * the first row in the ORDER BY (high-parse first, then build_kind), i.e.
+                   * the highest-parse declaration's kind — deterministic provenance for the
+                   * representative build edge. */
+                  snprintf(E->evidence_type, sizeof(E->evidence_type), "both");
+                  if (!E->build_kind[0] && bkind)
+                     snprintf(E->build_kind, sizeof(E->build_kind), "%s", bkind);
+                  if (high && E->tier < XREPO_TIER_HIGH)
+                     E->tier = XREPO_TIER_HIGH;
+               }
+               else
+               {
+                  /* another build declaration for an already-build-only edge -> keep the
+                   * strongest tier. */
+                  if (bt > E->tier && bt >= ctx.min_tier)
+                     E->tier = bt;
+               }
+            }
+            else if (bt >= ctx.min_tier)
+            {
+               xrepo_dep_edge_t *N = edge_find_or_add(&acc, project, def);
+               if (N && N->tier == XREPO_TIER_NONE)
+               {
+                  N->tier = bt;
+                  snprintf(N->evidence_type, sizeof(N->evidence_type), "build_declared");
+                  if (bkind)
+                     snprintf(N->build_kind, sizeof(N->build_kind), "%s", bkind);
+                  snprintf(N->repo_set_hash, sizeof(N->repo_set_hash), "%s", repo_set_hash);
+                  N->resolver_version = XREPO_RESOLVER_VERSION;
+               }
+            }
+         }
+         aimee_pg_finalize(bd);
+      }
+   }
+   /* default evidence_type for pure symbol-resolved edges (untouched by the merge). */
+   for (size_t i = 0; i < acc.n; i++)
+      if (!acc.e[i].evidence_type[0])
+         snprintf(acc.e[i].evidence_type, sizeof(acc.e[i].evidence_type), "symbol_resolved");
 
    *out_edges = acc.e;
    *out_n = acc.n;

@@ -625,6 +625,142 @@ static void test_kind_eligibility_and_vendored_ceiling(void)
    printf("ok\n");
 }
 
+/* R2c: build-declared deps merge into the deps output as a separate evidence class.
+ * build-only (no symbol) -> MEDIUM build_declared (high-parse) / dropped at MEDIUM
+ * min_tier (low-parse); build + an existing symbol edge -> both, promoted to HIGH. */
+static void test_build_declared_merge(void)
+{
+   printf("test_build_declared_merge... ");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('bdo-app','/bo','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('bdo-lib','/bl','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('bdo-low','/bw','t','trusted')");
+   /* build-only high-parse -> MEDIUM build_declared; low-parse -> LOW (excluded at MEDIUM). */
+   X("INSERT INTO cross_repo_build_dep (caller_project,definer_project,build_kind,parse_confidence,"
+     "evidence) VALUES ('bdo-app','bdo-lib','fetchcontent','high','https://h/o/bdo-lib.git')");
+   X("INSERT INTO cross_repo_build_dep (caller_project,definer_project,build_kind,parse_confidence,"
+     "evidence) VALUES ('bdo-app','bdo-low','submodule','low','${VAR}/bdo-low.git')");
+
+   xrepo_deps_opts_t opts = {.direction = XREPO_DIR_OUT, .min_tier = XREPO_TIER_MEDIUM};
+   xrepo_dep_edge_t *edges = NULL;
+   size_t n = 0;
+   int trunc = 0;
+   assert(canonical_index_cross_repo_deps("bdo-app", &opts, &edges, &n, &trunc) == 0);
+   int lib = 0, low = 0;
+   for (size_t i = 0; i < n; i++)
+   {
+      if (strcmp(edges[i].definer_repo, "bdo-lib") == 0)
+      {
+         lib = 1;
+         assert(edges[i].tier == XREPO_TIER_MEDIUM);
+         assert(strcmp(edges[i].evidence_type, "build_declared") == 0);
+         assert(strcmp(edges[i].build_kind, "fetchcontent") == 0);
+      }
+      if (strcmp(edges[i].definer_repo, "bdo-low") == 0)
+         low = 1;
+   }
+   assert(lib && !low); /* high-parse emitted MEDIUM; low-parse excluded at min_tier MEDIUM */
+   free(edges);
+
+   /* both: seed a self-contained symbol-resolved edge (bdb-app -> bdb-lib via a
+    * distinctive imported symbol, like seed_moonlight) so the merge has a symbol
+    * edge to fold into; adding a high-parse build dep marks it evidence_type=both
+    * and promotes the tier to HIGH. (Self-contained rather than reusing moonlight,
+    * whose seeded edge does not survive intervening tests' shared-shim state.) */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('bdb-app','/ba','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('bdb-lib','/bb','t','trusted')");
+   for (int i = 0; i < 5; i++)
+   {
+      char sql[160];
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/f%d.cpp','t' FROM "
+               "projects WHERE name='bdb-app'",
+               i);
+      X(sql);
+   }
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'include/Bdb.h','t' FROM projects "
+     "WHERE name='bdb-lib'");
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/bdb.c','t' FROM projects WHERE "
+     "name='bdb-lib'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'BdbConnectSession','definition' FROM files "
+     "WHERE path='src/bdb.c'");
+   X("INSERT INTO file_exports (file_id,name) SELECT id,'BdbConnectSession' FROM files WHERE "
+     "path='src/bdb.c'");
+   X("INSERT INTO file_imports (file_id,name) SELECT id,'Bdb.h' FROM files WHERE "
+     "path='src/f0.cpp'");
+   X("INSERT INTO code_calls (file_id,callee) SELECT id,'BdbConnectSession' FROM files WHERE "
+     "path='src/f0.cpp'");
+   X("INSERT INTO cross_repo_route (caller_project,definer_project,kind,confidence,evidence) "
+     "VALUES ('bdb-app','bdb-lib','import_header','medium','Bdb.h')");
+   X("INSERT INTO cross_repo_build_dep (caller_project,definer_project,build_kind,parse_confidence,"
+     "evidence) VALUES ('bdb-app','bdb-lib','submodule','high','https://h/o/bdb-lib.git')");
+   edges = NULL;
+   assert(canonical_index_cross_repo_deps("bdb-app", &opts, &edges, &n, &trunc) == 0);
+   int found = 0;
+   for (size_t i = 0; i < n; i++)
+      if (strcmp(edges[i].definer_repo, "bdb-lib") == 0)
+      {
+         found = 1;
+         assert(edges[i].tier == XREPO_TIER_HIGH);
+         assert(strcmp(edges[i].evidence_type, "both") == 0);
+         assert(strcmp(edges[i].build_kind, "submodule") == 0);
+      }
+   assert(found);
+   free(edges);
+
+   /* order-independence regression: a symbol-bearing pair (bdo2-app -> bdo2-lib)
+    * with a low-parse build row inserted BEFORE a high-parse one must still reach
+    * HIGH (the high-parse row promotes regardless of merge-iteration order). */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES "
+     "('bdo2-app','/o2a','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES "
+     "('bdo2-lib','/o2b','t','trusted')");
+   for (int i = 0; i < 5; i++)
+   {
+      char sql[160];
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/g%d.cpp','t' FROM "
+               "projects WHERE name='bdo2-app'",
+               i);
+      X(sql);
+   }
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'include/Bdo2.h','t' FROM projects "
+     "WHERE name='bdo2-lib'");
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/bdo2.c','t' FROM projects "
+     "WHERE "
+     "name='bdo2-lib'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'Bdo2OpenChannel','definition' FROM files "
+     "WHERE path='src/bdo2.c'");
+   X("INSERT INTO file_exports (file_id,name) SELECT id,'Bdo2OpenChannel' FROM files WHERE "
+     "path='src/bdo2.c'");
+   X("INSERT INTO file_imports (file_id,name) SELECT id,'Bdo2.h' FROM files WHERE "
+     "path='src/g0.cpp'");
+   X("INSERT INTO code_calls (file_id,callee) SELECT id,'Bdo2OpenChannel' FROM files WHERE "
+     "path='src/g0.cpp'");
+   X("INSERT INTO cross_repo_route (caller_project,definer_project,kind,confidence,evidence) "
+     "VALUES ('bdo2-app','bdo2-lib','import_header','medium','Bdo2.h')");
+   /* low-parse FIRST, high-parse SECOND (distinct build_kind so both rows persist). */
+   X("INSERT INTO cross_repo_build_dep (caller_project,definer_project,build_kind,parse_confidence,"
+     "evidence) VALUES ('bdo2-app','bdo2-lib','fetchcontent','low','${VAR}/bdo2-lib.git')");
+   X("INSERT INTO cross_repo_build_dep (caller_project,definer_project,build_kind,parse_confidence,"
+     "evidence) VALUES ('bdo2-app','bdo2-lib','submodule','high','https://h/o/bdo2-lib.git')");
+   edges = NULL;
+   assert(canonical_index_cross_repo_deps("bdo2-app", &opts, &edges, &n, &trunc) == 0);
+   found = 0;
+   for (size_t i = 0; i < n; i++)
+      if (strcmp(edges[i].definer_repo, "bdo2-lib") == 0)
+      {
+         found = 1;
+         assert(edges[i].tier == XREPO_TIER_HIGH);
+         assert(strcmp(edges[i].evidence_type, "both") == 0);
+         /* ORDER BY parse_confidence DESC -> the high-parse 'submodule' row wins
+          * build_kind over the earlier-inserted low-parse 'fetchcontent' row. */
+         assert(strcmp(edges[i].build_kind, "submodule") == 0);
+      }
+   assert(found);
+   free(edges);
+   printf("ok\n");
+}
+
 int main(void)
 {
    test_parse_module_id();
@@ -637,6 +773,7 @@ int main(void)
    test_vendor_canonical_preference();
    test_vendor_canonical_edge_cases();
    test_kind_eligibility_and_vendored_ceiling();
+   test_build_declared_merge();
    printf("cross_repo_deps_orch: all tests passed\n");
    return 0;
 }

@@ -43,6 +43,12 @@ typedef struct
    char example_symbol[128];
    char example_file[MAX_PATH_LEN];
    int example_line;
+   /* recall R2c: evidence class — "symbol_resolved" (the H1-H7 symbol path),
+    * "build_declared" (a build dep: FetchContent/submodule/Cargo, no symbol
+    * corroboration), or "both". build_kind is the declaration kind for a build
+    * edge (fetchcontent|submodule|manifest), "" for symbol-only. */
+   char evidence_type[16];
+   char build_kind[16];
    /* version stamp (§4.1): identifies the inputs that produced this edge. */
    char repo_set_hash[24];
    int distinctiveness_v;

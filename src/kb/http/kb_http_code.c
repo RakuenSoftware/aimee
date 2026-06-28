@@ -677,6 +677,12 @@ int handle_get_code_cross_repo_deps(const char *query_string, char *out_buf, int
       cJSON_AddNumberToObject(e, "call_site_count", edges[i].call_site_count);
       cJSON_AddBoolToObject(e, "import_corroborated", edges[i].import_corroborated ? 1 : 0);
       cJSON_AddBoolToObject(e, "export_corroborated", edges[i].export_corroborated ? 1 : 0);
+      /* recall R2c: evidence class (symbol_resolved|build_declared|both) + build_kind */
+      cJSON_AddStringToObject(e, "evidence_type",
+                              edges[i].evidence_type[0] ? edges[i].evidence_type
+                                                        : "symbol_resolved");
+      if (edges[i].build_kind[0])
+         cJSON_AddStringToObject(e, "build_kind", edges[i].build_kind);
       cJSON *ex = cJSON_AddObjectToObject(e, "example");
       if (ex)
       {
