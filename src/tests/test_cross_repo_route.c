@@ -133,10 +133,111 @@ static void test_routes(void)
    printf("ok\n");
 }
 
+/* §2 header-basename IDF (H3b): a quoted include whose basename resolves to
+ * non-vendored files in >= 4 distinct repos is too ubiquitous to be a confident
+ * route (produces none); a basename in < 4 repos still routes. */
+static void test_header_idf(void)
+{
+   printf("test_header_idf... ");
+   /* idfapp includes "ubiq.h" and "rare.h". ubiq.h exists in 4 definer repos (>=4
+    * distinct => ubiquitous, no route); rare.h in 1 (routes). */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('idfapp','/ia','t','trusted')");
+   for (int i = 0; i < 4; i++)
+   {
+      char nm[32], sql[400];
+      snprintf(nm, sizeof(nm), "ubiqlib%d", i);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO projects (name, root, scanned_at, trust) VALUES ('%s','/u%d','t',"
+               "'trusted')",
+               nm, i);
+      X(sql);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+               "id,'inc/ubiq.h','t','c',0 FROM projects WHERE name='%s'",
+               nm);
+      X(sql);
+   }
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('rarelib','/rl','t','trusted')");
+   X("INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT id,'inc/rare.h','t',"
+     "'c',0 FROM projects WHERE name='rarelib'");
+   X("INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+     "id,'src/m.c','t','c',0 "
+     "FROM projects WHERE name='idfapp'");
+   X("INSERT INTO file_imports (file_id,name) SELECT f.id,'ubiq.h' FROM files f JOIN projects p ON "
+     "p.id=f.project_id WHERE p.name='idfapp' AND f.path='src/m.c'");
+   X("INSERT INTO file_imports (file_id,name) SELECT f.id,'rare.h' FROM files f JOIN projects p ON "
+     "p.id=f.project_id WHERE p.name='idfapp' AND f.path='src/m.c'");
+
+   /* boundary: "bnd.h" in exactly 3 repos (< 4) MUST still route. */
+   for (int i = 0; i < 3; i++)
+   {
+      char nm[32], sql[400];
+      snprintf(nm, sizeof(nm), "bndlib%d", i);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO projects (name, root, scanned_at, trust) VALUES ('%s','/b%d','t',"
+               "'trusted')",
+               nm, i);
+      X(sql);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+               "id,'inc/bnd.h','t','c',0 FROM projects WHERE name='%s'",
+               nm);
+      X(sql);
+   }
+   X("INSERT INTO file_imports (file_id,name) SELECT f.id,'bnd.h' FROM files f JOIN projects p ON "
+     "p.id=f.project_id WHERE p.name='idfapp' AND f.path='src/m.c'");
+   /* vendored copies must NOT count toward ubiquity: "vd.h" in 1 non-vendored repo +
+    * 5 vendored repos -> count is 1 (< 4) -> routes to the non-vendored one. */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('vdreal','/vr','t','trusted')");
+   X("INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+     "id,'inc/vd.h','t','c',"
+     "0 FROM projects WHERE name='vdreal'");
+   for (int i = 0; i < 5; i++)
+   {
+      char nm[32], sql[400];
+      snprintf(nm, sizeof(nm), "vdvend%d", i);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO projects (name, root, scanned_at, trust) VALUES ('%s','/vv%d','t',"
+               "'trusted')",
+               nm, i);
+      X(sql);
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+               "id,'third_party/vd.h','t','c',1 FROM projects WHERE name='%s'",
+               nm);
+      X(sql);
+   }
+   X("INSERT INTO file_imports (file_id,name) SELECT f.id,'vd.h' FROM files f JOIN projects p ON "
+     "p.id=f.project_id WHERE p.name='idfapp' AND f.path='src/m.c'");
+
+   int rc = db2_cross_repo_rebuild_routes();
+   assert(rc >= 0);
+   /* ubiq.h is in 4 repos => no route to any of them. */
+   for (int i = 0; i < 4; i++)
+   {
+      char nm[32];
+      snprintf(nm, sizeof(nm), "ubiqlib%d", i);
+      assert(route_count("idfapp", nm, "import_header") == 0);
+   }
+   /* rare.h is in 1 repo => routes. */
+   assert(route_count("idfapp", "rarelib", "import_header") == 1);
+   /* bnd.h in exactly 3 repos (< 4) => still routes to all three. */
+   for (int i = 0; i < 3; i++)
+   {
+      char nm[32];
+      snprintf(nm, sizeof(nm), "bndlib%d", i);
+      assert(route_count("idfapp", nm, "import_header") == 1);
+   }
+   /* vd.h: 5 vendored copies don't count; the 1 non-vendored repo routes. */
+   assert(route_count("idfapp", "vdreal", "import_header") == 1);
+   printf("ok\n");
+}
+
 int main(void)
 {
    db2_test_shim_open();
    test_routes();
+   test_header_idf();
    printf("cross_repo_route: all tests passed\n");
    return 0;
 }

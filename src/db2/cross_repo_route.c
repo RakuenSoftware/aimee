@@ -46,12 +46,35 @@ static const char *const SQL_MODULE_ROUTES =
                                     "ON CONFLICT (caller_project, definer_project, kind, evidence) "
                                     "DO NOTHING";
 
+/* §2 header IDF (H3b): a quoted #include that resolves to non-vendored files in
+ * >= 4 distinct repos is non-distinctive — a ubiquitous name (config.h, common.h,
+ * log.h) where the include almost always means the caller's OWN copy, not a
+ * cross-repo dependency. Such includes produce no confident header route (they
+ * would otherwise fan a spurious route to every repo that shares the name).
+ *
+ * Ubiquity is measured on the SAME key the route join uses — the include-specifier
+ * path-suffix (`path = imp.name OR path LIKE '%/'||imp.name`) — NOT a bare
+ * basename, deliberately: keying on the route's own match means the count reflects
+ * the route's actual fan-out. For the common bare `#include "config.h"` this is
+ * exactly basename IDF; for a directory-qualified `#include "foo/config.h"` it is
+ * the (more specific, lower-fan-out) component-suffix, which is the correct, more
+ * recall-preserving measure — counting bare-basename ubiquity there would wrongly
+ * exclude a specific path that routes to only one repo.
+ *
+ * Note: angle-bracket / system <...> includes are ALREADY excluded upstream — the
+ * C extractor (c_import_line) records ONLY quoted #include "..." into file_imports
+ * — so §2's system-include signal needs no work here. The threshold is the literal
+ * `< 4` in SQL_HEADER_ROUTES below (a candidate for config-ization + tuning after
+ * H4's live re-validation). */
+
 /* import_header (MEDIUM): a caller C/C++ #include matched to a definer file whose
  * path equals the include or ends with '/'+include (component boundary). The
  * caller file's language (H0b) restricts this to C/C++ so module specifiers from
  * other languages don't masquerade as headers; the definer file must not be
- * vendored (H0b). The repo-unique HIGH-vs-MEDIUM + system-header reject are
- * applied by H1's resolver, not here (this is the raw candidate adjacency). */
+ * vendored (H0b); and the include must clear the §2 header-IDF threshold above
+ * (ubiquity counted on the same path-suffix key, vendored files excluded from the
+ * count so a vendored copy never inflates ubiquity). The repo-unique HIGH-vs-MEDIUM
+ * is applied by H1's resolver (this is the raw candidate adjacency). */
 static const char *const SQL_HEADER_ROUTES =
     "INSERT INTO cross_repo_route (caller_project, definer_project, kind, confidence, evidence) "
     "SELECT DISTINCT pc.name, pd.name, 'import_header', 'medium', imp.name "
@@ -63,7 +86,12 @@ static const char *const SQL_HEADER_ROUTES =
         "imp.name") " ESCAPE '\\') "
                     "JOIN projects pd ON pd.id = fd.project_id "
                     "WHERE cf.language IN ('c', 'cpp') AND fd.vendored = 0 AND pd.name <> pc.name "
-                    "ON CONFLICT (caller_project, definer_project, kind, evidence) DO NOTHING";
+                    "  AND (SELECT COUNT(DISTINCT fx.project_id) FROM files fx "
+                    "       WHERE (fx.path = imp.name OR fx.path LIKE '%/' || " ESC(
+                        "imp.name") " ESCAPE '\\') "
+                                    "         AND fx.vendored = 0) < 4 "
+                                    "ON CONFLICT (caller_project, definer_project, kind, evidence) "
+                                    "DO NOTHING";
 
 static int crr_count(void *conn)
 {
