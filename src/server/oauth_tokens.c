@@ -314,18 +314,29 @@ int oauth_token_refresh(const char *client_name, const char *client_id, const ch
       return OAUTH_REFRESH_TRANSIENT; /* network/transport — retry later, NOT a re-auth */
    }
 
-   /* A 4xx from the token endpoint means the IdP rejected the refresh — the
-    * refresh token is revoked/expired and the server cannot recover on its own.
-    * Mark REAUTH_REQUIRED so the use-path can surface an explicit, actionable
-    * error and the operator can run `aimee codex reauth` (D6). A 5xx is transient. */
+   /* A 4xx whose body says `invalid_grant` means the IdP rejected the REFRESH
+    * TOKEN itself (revoked/expired) — the server cannot recover, so mark
+    * REAUTH_REQUIRED and surface an actionable error (D6). Latch ONLY on that
+    * precise OAuth error: a bare 4xx (proxy 403, 429 rate-limit, transient 400)
+    * must NOT pin the marker and force a needless re-auth — those are transient. */
    if (http_status >= 400 && http_status < 500)
    {
-      aimee_log(LOG_ERROR, "oauth_flow",
-                "refresh REJECTED for %s (HTTP %d) — re-auth required: run `aimee codex reauth`",
-                client_name, http_status);
-      (void)oauth_secret_store(client_name, OAUTH_VCRED_REAUTH, "1");
+      int is_invalid_grant = (strstr(resp, "invalid_grant") != NULL);
+      if (is_invalid_grant)
+      {
+         aimee_log(LOG_ERROR, "oauth_flow",
+                   "refresh REJECTED for %s (HTTP %d invalid_grant) — re-auth required: run "
+                   "`aimee codex reauth`",
+                   client_name, http_status);
+         (void)oauth_secret_store(client_name, OAUTH_VCRED_REAUTH, "1");
+         free(resp);
+         return OAUTH_REFRESH_REAUTH;
+      }
+      aimee_log(LOG_WARN, "oauth_flow",
+                "token refresh got HTTP %d (no invalid_grant) for %s — treating as transient",
+                http_status, client_name);
       free(resp);
-      return OAUTH_REFRESH_REAUTH;
+      return OAUTH_REFRESH_TRANSIENT;
    }
 
    oauth_token_response_t result;
