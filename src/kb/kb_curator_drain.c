@@ -10,6 +10,9 @@
 #endif
 
 #include "db2/db2.h"
+#include "db2/cross_repo_identity.h" /* db2_cross_repo_rebuild_identities (H0c) */
+#include "db2/cross_repo_route.h"    /* db2_cross_repo_rebuild_routes (H0d) */
+#include "db2/cross_repo_stats.h"    /* db2_cross_repo_recompute_blocked_symbols */
 #include "kb_curator_drain.h"
 #include "kb_curator_extract.h"
 #include "kb_curator_resolve_entities.h"
@@ -49,12 +52,67 @@
  * reload still get a turn each poll (both progress). */
 #define CURATOR_DRAIN_BATCH 16
 
+/* Rebuild the corpus-derived cross-repo precision metadata (precision-hardening
+ * H0/H1): the H0c repo-identity index, the H0d inter-repo structural-route
+ * adjacency, and the distinctiveness blocked-symbols model. In dependency order:
+ * routes are keyed on identities, so a failed identity rebuild must NOT proceed
+ * to routes (it would key them on stale/partial identities). Returns 0 on a
+ * completed rebuild, -1 if the store is not ready / a sub-rebuild failed (caller
+ * retries next poll). Idempotent + set-based DB2; no embedder/LLM.
+ *
+ * Failure semantics — fail-to-last-known-good, NOT fail-open: each sub-rebuild
+ * (rebuild_identities, rebuild_routes) is internally atomic (BEGIN/DELETE/INSERT/
+ * COMMIT, ROLLBACK on error), and cross_repo_route rows store project NAMES (no FK
+ * into the identity table). So on any failure path cross_repo_route remains a
+ * complete, internally-consistent snapshot from the last SUCCESSFUL build — the
+ * resolver's gate keeps using last-known-good routes (bounded staleness, self-
+ * healed by the next successful rebuild), never a torn/partial table and never a
+ * permissive no-route-accepts-all state (no-route demotes to LOW). A persistent
+ * failure is surfaced via WARN so a wedged db2 / schema drift is observable. */
+static int kb_cross_repo_meta_rebuild(const config_t *cfg)
+{
+   int ids = db2_cross_repo_rebuild_identities();
+   if (ids < 0)
+   {
+      aimee_log(
+          LOG_WARN, "kb.cross_repo.meta",
+          "identity rebuild unavailable/failed; gate keeps last-known-good routes this cycle");
+      return -1;
+   }
+   int routes = db2_cross_repo_rebuild_routes();
+   if (routes < 0)
+   {
+      aimee_log(LOG_WARN, "kb.cross_repo.meta",
+                "route rebuild failed; gate keeps last-known-good routes this cycle");
+      return -1;
+   }
+   int bsym = db2_cross_repo_recompute_blocked_symbols(cfg->kb_curator_cross_repo_k,
+                                                       cfg->kb_curator_cross_repo_m,
+                                                       cfg->kb_curator_cross_repo_len_min);
+   aimee_log(LOG_INFO, "kb.cross_repo.meta",
+             "rebuilt cross-repo metadata: identities=%d routes=%d blocked_symbols=%d", ids, routes,
+             bsym);
+   return 0;
+}
+
 static void *drain_thread_main(void *arg)
 {
    kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;
 
    config_t cfg;
    config_load(&cfg);
+
+   /* Cold-start backfill: a quiescent / already-indexed corpus never produces a
+    * built>0 event, so the incremental rebuild below would never fire and
+    * cross_repo_route would stay empty — silently demoting every legitimate
+    * non-LOW cross-repo edge to LOW indefinitely. Run the rebuild once at startup,
+    * independent of corpus change, so routes exist before the resolver is queried.
+    * Retried until it succeeds once (db2 may not be open on the first iteration),
+    * then never again (cleared on the first 0-return); self-heals within one poll
+    * of the store coming up. The retry is naturally rate-limited to one attempt
+    * per DRAIN_POLL_SECS, and each attempt is cheap on a wedged store (db2_conn()
+    * returns NULL fast -> -1). */
+   int cross_repo_cold_start_pending = 1;
 
    /* No artificial rate cap (§5): the curator drains the backlog continuously and
     * then idles. The natural throttle is backend throughput; cost control for a
@@ -79,6 +137,15 @@ static void *drain_thread_main(void *arg)
          config_load(&cfg);
          last_cfg_reload = now;
       }
+
+      /* Cold-start cross-repo metadata backfill (see cross_repo_cold_start_pending
+       * above): once, as soon as the store is ready, so a quiescent corpus's
+       * routes/identities exist before the structural-edge gate queries them.
+       * Cleared only on a successful (0-return) rebuild, so a failed attempt stays
+       * pending and retries — the one-shot guarantee is the flag-clear here. */
+      if (cross_repo_cold_start_pending && cfg.kb_curator_cross_repo_graph_enabled &&
+          kb_cross_repo_meta_rebuild(&cfg) == 0)
+         cross_repo_cold_start_pending = 0;
 
       /* Evidence-vector embed drain — runs every poll, independent of the
        * curator extract gates (it fills evidence_vectors for the neighbourhood
@@ -191,6 +258,18 @@ static void *drain_thread_main(void *arg)
             aimee_log(LOG_INFO, "kb.graph.projection",
                       "published %lld edge(s) across %d changed project(s)", (long long)total,
                       built);
+
+         /* Incremental cross-repo metadata refresh: a project changed this cycle
+          * (the content-addressed `built` signal), so rebuild the H0c identities,
+          * H0d routes, and the distinctiveness model to keep the structural-edge
+          * gate fresh without a manual recompute. Idempotent; on a multi-poll
+          * catch-up the rebuild repeats once per poll-with-changes (set-based, no
+          * LLM — correctness-safe; coalescing to one rebuild at quiescence is a
+          * possible future optimization). The flag here also gates the resolver
+          * (cross_repo_deps.c) and the cold-start backfill above: disabling it
+          * turns off precision gating AND route population together. */
+         if (built > 0 && cfg.kb_curator_cross_repo_graph_enabled)
+            kb_cross_repo_meta_rebuild(&cfg);
       }
 
       /* Candidate-generation synthesis drain — the heavy LLM pass, on the

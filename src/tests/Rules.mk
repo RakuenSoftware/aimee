@@ -508,6 +508,8 @@ $(TESTPREFIX)/unit-test-cross-repo-deps-orch: \
                                        $(OBJDIR)/db2/cross_repo_resolver.o \
                                        $(OBJDIR)/db2/cross_repo_classify.o \
                                        $(OBJDIR)/db2/cross_repo_review.o \
+                                       $(OBJDIR)/db2/cross_repo_identity.o \
+                                       $(OBJDIR)/db2/cross_repo_route.o \
                                        $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_pool.o \
                                        $(OBJDIR)/db2/db_schema.o \
                                        $(TEST_CORE_OBJS)

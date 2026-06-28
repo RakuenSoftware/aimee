@@ -307,6 +307,11 @@ typedef struct
 {
    const desc_set_t *descs;
    const char *imp_seen; /* CRD_MAX_REPOS flags: repos A imports (import route) */
+   /* H1 structural-edge gate: CRD_MAX_REPOS flags, repos A has a precomputed
+    * cross_repo_route to (import_module/import_header, H0d). A non-LOW edge
+    * REQUIRES a route — a bare name match with no structural route is
+    * LOW-unresolved and not emitted (precision-hardening §1). */
+   const char *route_seen;
    const char *project;
    int caller_trusted;
    xrepo_distinct_cfg_t dcfg;
@@ -320,6 +325,20 @@ typedef struct
    int include_review; /* write AMBIGUOUS candidates to the review queue (S4b) */
    int queue_max;      /* review-queue overflow cap */
 } crd_ctx_t;
+
+/* Bounds-safe route_seen lookup by repo name (H1 structural-edge gate). desc_index
+ * returns -1 (unknown name) or an index in [0, descs->n); descs->n is capped at
+ * CRD_MAX_REPOS at load (load_descs), so a valid index is always < route_seen's
+ * size. The explicit `< CRD_MAX_REPOS` bound documents that invariant and stays
+ * safe if the load cap ever diverges from the array size. */
+static int route_seen_has(const crd_ctx_t *ctx, const char *repo)
+{
+   int di = desc_index(ctx->descs, repo);
+   /* Out-of-range / unknown name returns 0 = "no route" = FAIL-CLOSED: the gate
+    * rejects (demotes to LOW), never permissively accepts. So a future load_descs
+    * cap regression degrades recall (safe), never precision. */
+   return (di >= 0 && di < CRD_MAX_REPOS) ? ctx->route_seen[di] : 0;
+}
 
 /* Classify one accumulated candidate symbol (its definer rows) and, if it clears
  * the gates/min_tier, fold it into the per-(caller,definer) edge accumulator.
@@ -378,11 +397,24 @@ static void crd_flush(const crd_ctx_t *ctx, edge_acc_t *acc, const char *sym, in
    }
 
    int definer_trusted = 0;
+   int target_has_route = 0;
    if (target >= 0)
    {
       int di = desc_index(ctx->descs, defs[target].repo);
       definer_trusted = di >= 0 ? ctx->descs->d[di].trusted : 0;
+      target_has_route = route_seen_has(ctx, defs[target].repo);
    }
+
+   /* H1 structural-edge gate, applied uniformly: does the caller have a precomputed
+    * route to ANY of this symbol's definers? defs[0..ndef) IS the full external
+    * definer set the resolver accumulated for this symbol (the same array target
+    * selection and the AMBIGUOUS rep use), so this matches the resolver's definer
+    * coverage exactly. If no route to any definer, the symbol is a bare name
+    * collision with no structural backing — neither emit it (below) NOR surface it
+    * to the review queue, so name-only noise can't leak in via the AMBIGUOUS path. */
+   int any_route = 0;
+   for (int i = 0; i < ndef && !any_route; i++)
+      any_route = route_seen_has(ctx, defs[i].repo);
 
    xrepo_candidate_t c = {0};
    c.lang = lang;
@@ -396,8 +428,11 @@ static void crd_flush(const crd_ctx_t *ctx, edge_acc_t *acc, const char *sym, in
    c.modality = XREPO_IMPORT_STATIC;
    xrepo_classification_t cl = xrepo_classify(&c);
 
-   /* AMBIGUOUS -> review queue (§3.8), surfaced not dropped. */
-   if (cl.tier == XREPO_TIER_AMBIGUOUS && ctx->include_review)
+   /* AMBIGUOUS -> review queue (§3.8), surfaced not dropped — but only when a
+    * structural route exists to at least one definer (H1 invariant: no route =>
+    * not a cross-repo relation at all, so not even review-worthy). The genuine
+    * route-backed multi-definer collisions are H2's canonical pass. */
+   if (cl.tier == XREPO_TIER_AMBIGUOUS && ctx->include_review && any_route)
    {
       int routes = (c.corroboration != XREPO_CORROB_NONE) ? 1 : 0;
       double score = xrepo_evidence_score(distinctive ? definer_rc : 0, sites, routes);
@@ -419,8 +454,25 @@ static void crd_flush(const crd_ctx_t *ctx, edge_acc_t *acc, const char *sym, in
                                    "ambiguous", 0, ctx->queue_max);
    }
 
-   if (target >= 0 && cl.tier >= ctx->min_tier && cl.tier != XREPO_TIER_AMBIGUOUS &&
-       cl.tier != XREPO_TIER_NONE && cl.tier != XREPO_TIER_UNIMPLEMENTED)
+   /* H1 structural-edge gate (precision-hardening §1): a non-LOW edge REQUIRES a
+    * precomputed cross_repo_route caller->definer. A bare distinctive-name match
+    * with no real import/module route is LOW-unresolved and not emitted — this is
+    * what collapses the name-collision false positives (DEFINE_GUID, generic
+    * exports) that have no structural route to the named definer. */
+   /* Instrumentation for H4 recall analysis: a candidate that WOULD have emitted a
+    * non-LOW edge but is held back solely for lack of a structural route. Lets H4
+    * distinguish no-route demotions (this) from route-but-untrusted-definer drops,
+    * so link-only recall loss (build/link routes H0d doesn't model yet) is
+    * measurable before deciding on H0e link-directive extraction. */
+   if (target >= 0 && !target_has_route && cl.tier >= ctx->min_tier &&
+       cl.tier != XREPO_TIER_AMBIGUOUS && cl.tier != XREPO_TIER_NONE &&
+       cl.tier != XREPO_TIER_UNIMPLEMENTED)
+      LOG_DEBUG(CRD_LOG_TAG, "low-unresolved (no route): %s -> %s via %s", ctx->project,
+                defs[target].repo, sym);
+
+   if (target >= 0 && target_has_route && cl.tier >= ctx->min_tier &&
+       cl.tier != XREPO_TIER_AMBIGUOUS && cl.tier != XREPO_TIER_NONE &&
+       cl.tier != XREPO_TIER_UNIMPLEMENTED)
    {
       xrepo_dep_edge_t *E = edge_find_or_add(acc, ctx->project, defs[target].repo);
       if (E)
@@ -540,8 +592,42 @@ int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t
       }
    }
 
+   /* H1 structural-edge gate: repos A has a precomputed cross_repo_route to (H0d).
+    * Read the inter-repo route adjacency once (off the per-candidate path) so the
+    * flush can require a structural route in-memory without an N+1 query.
+    * Concurrency: db2_cross_repo_rebuild_routes rebuilds the table inside a single
+    * BEGIN/DELETE/INSERT/COMMIT txn, so under Postgres MVCC this one SELECT sees a
+    * complete pre- or post-rebuild snapshot — never a half-rebuilt table. A rebuild
+    * committing between this load and the later candidate queries can at worst use
+    * one-call-stale routes (self-healing next call); the rebuild's atomicity rules
+    * out the partial-state precision leak. Keyed by projects.name on BOTH sides
+    * (rebuild_routes writes caller/definer_project from projects.name; desc_index
+    * resolves the same column) so there is no writer/reader name-form drift. */
+   char route_seen[CRD_MAX_REPOS];
+   memset(route_seen, 0, sizeof(route_seen));
+   if (a_idx >= 0)
+   {
+      char rerr[CRD_ERR] = "";
+      aimee_pg_stmt_t *rt = aimee_pg_prepare(
+          conn, "SELECT DISTINCT definer_project FROM cross_repo_route WHERE caller_project = ?1",
+          rerr, sizeof(rerr));
+      if (rt)
+      {
+         aimee_pg_bind_text(rt, "?1", project);
+         while (aimee_pg_step(rt, rerr, sizeof(rerr)) == AIMEE_PG_ROW)
+         {
+            const char *dn = aimee_pg_column_text(rt, 0);
+            int di = dn ? desc_index(&descs, dn) : -1;
+            if (di >= 0 && di < CRD_MAX_REPOS) /* bound: descs.n <= CRD_MAX_REPOS */
+               route_seen[di] = 1;
+         }
+         aimee_pg_finalize(rt);
+      }
+   }
+
    crd_ctx_t ctx = {.descs = &descs,
                     .imp_seen = imp_seen,
+                    .route_seen = route_seen,
                     .project = project,
                     .caller_trusted = (a_idx >= 0) ? descs.d[a_idx].trusted : 1,
                     .dcfg = dcfg,

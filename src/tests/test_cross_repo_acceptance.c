@@ -171,6 +171,17 @@ static void seed_corpus(void)
    mk_export("u.c", "VendoredApiCall");
    mk_import("src/app4.c", "Vendored.h");
    mk_call("src/app4.c", "VendoredApiCall");
+
+   /* H1 structural-edge routes (H0d) for the import-corroborated edges: app->lib-high
+    * and the untrusted-caller ext->lib-high (capped MEDIUM). app->lib-uexp gets a
+    * route too so the test proves the untrusted-DEFINER §0 rule (not the route gate)
+    * is what blocks that edge. lib-med/dup-* have no import, hence no route. */
+   X("INSERT INTO cross_repo_route (caller_project,definer_project,kind,confidence,evidence) "
+     "VALUES ('app','lib-high','import_header','medium','Limelight.h')");
+   X("INSERT INTO cross_repo_route (caller_project,definer_project,kind,confidence,evidence) "
+     "VALUES ('ext','lib-high','import_header','medium','Limelight.h')");
+   X("INSERT INTO cross_repo_route (caller_project,definer_project,kind,confidence,evidence) "
+     "VALUES ('app','lib-uexp','import_header','medium','Vendored.h')");
 }
 
 static void run(const char *caller, xrepo_dep_edge_t **edges, size_t *n)
@@ -234,14 +245,17 @@ static void test_multi_definer_ambiguous(void)
    for (size_t i = 0; i < n; i++)
       assert(strcmp(edges[i].example_symbol, "AmbiguousThing") != 0);
    free(edges);
-   /* ... but is surfaced to the review queue. */
+   /* ... and is NOT surfaced to review either: dup-a/dup-b both define it but `app`
+    * has no structural route to either (no import), so under the H1 invariant it is
+    * bare name noise, not a review-worthy cross-repo ambiguity. (The route-backed
+    * ambiguity-IS-surfaced case is covered in test_cross_repo_deps_orch.) */
    xrepo_review_row_t rows[16];
    int rn = db2_cross_repo_review_list("app", "open", rows, 16, NULL);
    int found = 0;
    for (int i = 0; i < rn; i++)
       if (strcmp(rows[i].symbol, "AmbiguousThing") == 0)
          found = 1;
-   assert(found);
+   assert(!found);
    printf("ok\n");
 }
 
