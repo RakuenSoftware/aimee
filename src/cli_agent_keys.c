@@ -13,8 +13,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h> /* chmod */
+#include <time.h>     /* time() for the backup suffix */
 #ifndef _WIN32
-#include <unistd.h> /* fsync, fileno */
+#include <errno.h>  /* EEXIST (import lock) */
+#include <fcntl.h>  /* open, O_CREAT|O_EXCL (import lock) */
+#include <unistd.h> /* fsync, fileno, write, close */
 #endif
 
 #define AGENT_KEYS_FILE "agent-keys.json"
@@ -136,6 +139,84 @@ int cli_agent_key_set(const char *agent_name, const char *api_key)
    return 0;
 }
 
+/* Copy the keyring file to a 0600 sibling backup before the destructive scrub
+ * (D9 backup-before-scrub). The scrub empties agent-keys.json; if the vault copy
+ * later becomes unreadable (e.g. a lost/corrupt master key — a failure mode the
+ * server's atomic write does NOT cover), this backup is the only recoverable copy
+ * of the plaintext keys. Writes the backup path into `out` (caller reports it so
+ * the operator can verify delegates, then remove it). 0 on success, -1 on error
+ * (incl. no keyring file to back up). */
+static int backup_keyring(char *out, size_t out_len)
+{
+   char src[1024];
+   if (aimee_file_path(AGENT_KEYS_FILE, src, sizeof(src)) != 0)
+      return -1;
+   char *buf = read_text(src);
+   if (!buf)
+      return -1; /* nothing to back up */
+   char dst[1100];
+   /* Unique, portable suffix (the lock already serializes concurrent runs on
+    * POSIX; the timestamp keeps a prior, not-yet-removed backup from being
+    * clobbered). */
+   if ((size_t)snprintf(dst, sizeof(dst), "%s.pre-import.%lld", src, (long long)time(NULL)) >=
+       sizeof(dst))
+   {
+      free(buf);
+      return -1;
+   }
+   FILE *f = fopen(dst, "wb");
+   if (!f)
+   {
+      free(buf);
+      return -1;
+   }
+   size_t len = strlen(buf);
+   int ok = (fwrite(buf, 1, len, f) == len) && (fflush(f) == 0);
+   free(buf);
+#ifndef _WIN32
+   if (ok && fsync(fileno(f)) != 0)
+      ok = 0;
+#endif
+   if (fclose(f) != 0)
+      ok = 0;
+   if (!ok)
+   {
+      remove(dst);
+      return -1;
+   }
+   chmod(dst, 0600);
+   snprintf(out, out_len, "%s", dst);
+   return 0;
+}
+
+#ifndef _WIN32
+/* Advisory exclusive lock so two concurrent `agent key import` runs (or a
+ * concurrent `agent add` write) cannot interleave the read-modify-write of the
+ * keyring (D9 per-run lock). POSIX-only; the import is an operator command run on
+ * the server host. Returns the lock fd (>=0), -1 on a non-contention error, or -2
+ * if the lock is already held. */
+static int acquire_import_lock(char *lockpath, size_t lp_len)
+{
+   if (aimee_file_path(AGENT_KEYS_FILE ".import.lock", lockpath, lp_len) != 0)
+      return -1;
+   int fd = open(lockpath, O_CREAT | O_EXCL | O_WRONLY, 0600);
+   if (fd < 0)
+      return errno == EEXIST ? -2 : -1;
+   char pid[32];
+   int n = snprintf(pid, sizeof(pid), "%d\n", (int)getpid());
+   (void)(write(fd, pid, (size_t)n) >= 0);
+   return fd;
+}
+
+static void release_import_lock(int fd, const char *lockpath)
+{
+   if (fd >= 0)
+      close(fd);
+   if (lockpath && lockpath[0])
+      remove(lockpath);
+}
+#endif
+
 /* `aimee agent key import [--keep] [--dry-run]` (P3): migrate client-held
  * agent-keys.json entries into the server vault under the server principal
  * (vault.set_server). The vault is the single permanent credential store, so the
@@ -159,6 +240,44 @@ int cli_agent_key_import(int argc, char **argv, int json_output)
          scrub = 1; /* accepted no-op (now the default) */
       else if (strcmp(argv[i], "--dry-run") == 0)
          dry = 1;
+   }
+
+   /* Serialize against a concurrent import / `agent add` so two writers cannot
+    * interleave the keyring read-modify-write (D9). A dry-run mutates nothing, so
+    * it needs no lock. POSIX-only; the import is a server-host operator command. */
+#ifndef _WIN32
+   int lock_fd = -1;
+   char lockpath[1100] = "";
+   if (!dry)
+   {
+      lock_fd = acquire_import_lock(lockpath, sizeof(lockpath));
+      if (lock_fd == -2)
+      {
+         printf("agent key import: another import appears to be running (lock %s). Re-run after "
+                "it finishes, or remove a stale lock.\n",
+                lockpath);
+         return 1;
+      }
+      /* lock_fd == -1 (a non-contention error, e.g. read-only home) is non-fatal:
+       * proceed unlocked rather than block a legitimate single-run migration. */
+   }
+#endif
+
+   /* Backup-before-scrub (D9): take ONE recoverable 0600 snapshot of the keyring
+    * before the first destructive scrub. If it can't be written we must not scrub
+    * (keep the plaintext — the safe direction) and say so loudly. */
+   char backup_path[1100] = "";
+   int backup_done = 0;
+   if (scrub && !dry)
+   {
+      if (backup_keyring(backup_path, sizeof(backup_path)) == 0)
+         backup_done = 1;
+      else
+      {
+         scrub = 0;
+         printf("WARNING: could not write a pre-import backup of the keyring — NOT scrubbing "
+                "(plaintext kept). Fix the home directory permissions and re-run to scrub.\n");
+      }
    }
 
    cJSON *keys = cli_agent_keys_load();
@@ -212,10 +331,22 @@ int cli_agent_key_import(int argc, char **argv, int json_output)
 
    if (dry)
    {
+#ifndef _WIN32
+      release_import_lock(lock_fd, lockpath);
+#endif
       printf("agent key import (dry-run): %d entr%s would be sent; nothing changed\n", total,
              total == 1 ? "y" : "ies");
       return 0;
    }
+
+   /* A backup that scrubbed nothing is a redundant extra plaintext copy — drop it.
+    * Otherwise keep it and tell the operator to remove it once delegates verify. */
+   if (backup_done && vaulted == 0)
+   {
+      remove(backup_path);
+      backup_done = 0;
+   }
+
    const char *suffix = "";
    if (vaulted > 0)
       suffix = scrub ? "; vaulted entries scrubbed from the local plaintext keyring"
@@ -223,9 +354,16 @@ int cli_agent_key_import(int argc, char **argv, int json_output)
                        "readable on disk";
    printf("agent key import: %d vaulted, %d refused, %d error (of %d)%s\n", vaulted, refused,
           errors, total, suffix);
+   if (backup_done)
+      printf("pre-import backup written to %s (0600) — verify delegates authenticate from the "
+             "vault, then remove it (it holds the plaintext keys).\n",
+             backup_path);
    if (refused > 0)
       printf("note: server-principal writes need an attested (UDS/webchat) connection holding the "
              "vault:write:server capability — run this on the server host over UDS, or grant the "
              "capability.\n");
+#ifndef _WIN32
+   release_import_lock(lock_fd, lockpath);
+#endif
    return errors > 0 ? 1 : 0;
 }

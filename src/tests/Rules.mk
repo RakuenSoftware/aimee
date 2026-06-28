@@ -258,6 +258,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-aimee-tls-clientcert \
                $(TESTPREFIX)/unit-test-vault-server-key \
                $(TESTPREFIX)/unit-test-vault-capability \
+               $(TESTPREFIX)/unit-test-agent-key-import \
                $(TESTPREFIX)/unit-test-vault-audit \
                $(TESTPREFIX)/unit-test-prompts \
                $(TESTPREFIX)/unit-test-cmd-session \
@@ -2578,6 +2579,11 @@ $(TESTPREFIX)/unit-test-vault-master-rotate: $(OBJDIR)/tests/test_vault_master_r
                               $(OBJDIR)/server/vault_service.o $(OBJDIR)/server/vault_store.o \
                               $(OBJDIR)/server/vault_crypto.o $(OBJDIR)/server/vault_kek_cache.o \
                               $(OBJDIR)/server/vault_server_key.o \
+                              $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-agent-key-import: $(OBJDIR)/tests/test_agent_key_import.o \
+                              $(OBJDIR)/cli_agent_keys.o \
                               $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
