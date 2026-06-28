@@ -31,6 +31,11 @@
 #define OAUTH_VCRED_ACCESS  "oauth_access_token"
 #define OAUTH_VCRED_REFRESH "oauth_refresh_token"
 #define OAUTH_VCRED_EXPIRES "oauth_expires_at"
+/* Set when a refresh is rejected by the IdP (refresh token revoked/expired): the
+ * server cannot recover autonomously, so the operator must re-auth (D6). Cleared
+ * on the next successful token store (a fresh device-flow re-auth). */
+#define OAUTH_VCRED_REAUTH  "oauth_reauth_required"
+#define OAUTH_DB1FMT_REAUTH "oauth.%s.reauth_required"
 
 static int oauth_secret_store(const char *client_name, const char *vcred, const char *value)
 {
@@ -145,7 +150,25 @@ int oauth_token_store(const char *client_name, const oauth_token_response_t *res
          rc = -1;
    }
 
+   /* A usable token is now stored (fresh exchange or an operator re-auth) — clear
+    * any standing "re-auth required" marker (D6). */
+   if (rc == 0)
+      oauth_secret_remove(client_name, OAUTH_VCRED_REAUTH, OAUTH_DB1FMT_REAUTH);
+
    return rc;
+}
+
+/* True if `client_name`'s OAuth credential is marked REAUTH_REQUIRED — a prior
+ * refresh was rejected by the IdP and the operator must re-authenticate (D6). */
+int oauth_token_reauth_required(const char *client_name)
+{
+   if (!client_name)
+      return 0;
+   char v[8] = "";
+   if (oauth_secret_load(client_name, OAUTH_VCRED_REAUTH, OAUTH_DB1FMT_REAUTH, v, sizeof(v)) == 0 &&
+       v[0] == '1')
+      return 1;
+   return 0;
 }
 
 int oauth_token_load(const char *client_name, char *buf, size_t len)
@@ -191,24 +214,49 @@ int oauth_token_remove(const char *client_name)
  * On success, |*resp_out| is a malloc'd JSON string (caller frees).
  */
 static int curl_post_token(const char *token_endpoint, const char *post_data, char **resp_out,
-                           size_t *resp_len_out)
+                           size_t *resp_len_out, int *http_status_out)
 {
    if (!token_endpoint || !post_data || !resp_out)
       return -1;
+   if (http_status_out)
+      *http_status_out = 0;
 
-   /* Build command: curl -s -X POST -H 'Content-Type: application/x-www-form-urlencoded'
-    *   --data-urlencode not needed here because we pre-encode.
-    *   We use -d with the raw body (caller must percent-encode values). */
+   /* NOTE: NOT `-f`. We deliberately capture the response BODY on HTTP errors so
+    * the caller can tell a rejected refresh (4xx `invalid_grant` → re-auth, D6)
+    * from a transient transport/5xx error. `-w '\n%{http_code}'` appends the
+    * status after the body; we split it off below. We pre-encode the body. */
    char cmd[4096];
    snprintf(cmd, sizeof(cmd),
-            "curl -sf -X POST"
+            "curl -s -X POST"
             " -H 'Content-Type: application/x-www-form-urlencoded'"
             " -H 'Accept: application/json'"
             " --data-binary @-"
+            " -w '\\n%%{http_code}'"
             " '%s'",
             token_endpoint);
 
-   return platform_exec_pipe(cmd, post_data, strlen(post_data), resp_out, resp_len_out);
+   char *raw = NULL;
+   size_t raw_len = 0;
+   int rc = platform_exec_pipe(cmd, post_data, strlen(post_data), &raw, &raw_len);
+   if (rc != 0 || !raw)
+   {
+      free(raw);
+      return -1; /* transport failure: no body, no status */
+   }
+
+   /* Split the trailing "\n<http_code>" appended by -w off the body. */
+   char *nl = strrchr(raw, '\n');
+   if (nl)
+   {
+      if (http_status_out)
+         *http_status_out = atoi(nl + 1);
+      *nl = '\0';
+      raw_len = (size_t)(nl - raw);
+   }
+   *resp_out = raw;
+   if (resp_len_out)
+      *resp_len_out = raw_len;
+   return 0;
 }
 
 /* Minimal percent-encoding for OAuth POST body values.
@@ -258,11 +306,26 @@ int oauth_token_refresh(const char *client_name, const char *client_id, const ch
 
    char *resp = NULL;
    size_t resp_len = 0;
-   if (curl_post_token(token_endpoint, body, &resp, &resp_len) != 0 || !resp)
+   int http_status = 0;
+   if (curl_post_token(token_endpoint, body, &resp, &resp_len, &http_status) != 0 || !resp)
    {
       free(resp);
-      aimee_log(LOG_WARN, "oauth_flow", "token refresh failed for %s", client_name);
-      return -1;
+      aimee_log(LOG_WARN, "oauth_flow", "token refresh failed for %s (transport)", client_name);
+      return OAUTH_REFRESH_TRANSIENT; /* network/transport — retry later, NOT a re-auth */
+   }
+
+   /* A 4xx from the token endpoint means the IdP rejected the refresh — the
+    * refresh token is revoked/expired and the server cannot recover on its own.
+    * Mark REAUTH_REQUIRED so the use-path can surface an explicit, actionable
+    * error and the operator can run `aimee codex reauth` (D6). A 5xx is transient. */
+   if (http_status >= 400 && http_status < 500)
+   {
+      aimee_log(LOG_ERROR, "oauth_flow",
+                "refresh REJECTED for %s (HTTP %d) — re-auth required: run `aimee codex reauth`",
+                client_name, http_status);
+      (void)oauth_secret_store(client_name, OAUTH_VCRED_REAUTH, "1");
+      free(resp);
+      return OAUTH_REFRESH_REAUTH;
    }
 
    oauth_token_response_t result;
@@ -270,11 +333,12 @@ int oauth_token_refresh(const char *client_name, const char *client_id, const ch
    free(resp);
    if (rc != 0)
    {
-      aimee_log(LOG_WARN, "oauth_flow", "token refresh returned invalid JSON for %s", client_name);
-      return -1;
+      aimee_log(LOG_WARN, "oauth_flow", "token refresh returned invalid JSON for %s (HTTP %d)",
+                client_name, http_status);
+      return OAUTH_REFRESH_TRANSIENT;
    }
 
-   return oauth_token_store(client_name, &result);
+   return oauth_token_store(client_name, &result) == 0 ? 0 : OAUTH_REFRESH_TRANSIENT;
 }
 
 int oauth_token_get(const char *client_name, const char *client_id, const char *token_endpoint,

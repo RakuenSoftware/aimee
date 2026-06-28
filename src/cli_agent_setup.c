@@ -412,3 +412,21 @@ int handle_agent_setup_cmd(int argc, char **argv, int json_output)
            provider);
    return 1;
 }
+
+/* `aimee codex reauth` (D6): operator-attended re-authentication for codex when
+ * its stored OAuth refresh token has been rejected (REAUTH_REQUIRED). Runs the
+ * same server-hosted device-code flow as `agent setup codex-oauth` against the
+ * configured remote; a successful exchange re-vaults the token and clears the
+ * REAUTH_REQUIRED marker on the server side. */
+int handle_codex_cmd(int argc, char **argv, int json_output)
+{
+   const char *sub = (argc >= 1) ? argv[0] : NULL;
+   if (sub && strcmp(sub, "reauth") == 0)
+   {
+      fprintf(stderr, "Re-authenticating codex (re-runs the codex-oauth device flow on the "
+                      "configured aimee-server)...\n");
+      return setup_oauth_cli_cmd("codex", json_output);
+   }
+   fprintf(stderr, "usage: aimee codex reauth\n");
+   return 1;
+}

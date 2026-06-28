@@ -998,7 +998,10 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
    char auth_header[MAX_API_KEY_LEN + 32];
    if (agent_resolve_auth(agent, auth_header, sizeof(auth_header)) != 0)
    {
-      snprintf(out->error, sizeof(out->error), "auth resolution failed");
+      /* Prefer an explicit, actionable reason (e.g. codex REAUTH_REQUIRED) over the
+       * generic message so the operator knows the remedy (D6). */
+      const char *why = agent_request_auth_error();
+      snprintf(out->error, sizeof(out->error), "%s", why ? why : "auth resolution failed");
       return -1;
    }
    char extra_headers[512];

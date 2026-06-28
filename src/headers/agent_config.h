@@ -42,6 +42,10 @@ int agent_has_role(const agent_t *agent, const char *role);
 int agent_is_exec_role(const agent_t *agent, const char *role);
 void agent_expand_env(const char *src, char *dst, size_t dst_len);
 int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len);
+/* An explicit, actionable reason the LAST agent_resolve_auth call failed (e.g.
+ * codex REAUTH_REQUIRED), or NULL. Lets the delegate/chat error path surface a
+ * remedy instead of a generic provider 401 (D6). Thread-local to the turn. */
+const char *agent_request_auth_error(void);
 int agent_has_resolvable_credentials(const agent_t *agent);
 void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len);
 

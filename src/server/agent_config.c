@@ -260,6 +260,17 @@ int agent_has_resolvable_credentials(const agent_t *agent)
 static _Thread_local char g_request_codex_token[MAX_API_KEY_LEN];
 static _Thread_local char g_request_codex_account_id[128];
 
+/* Explicit, actionable reason the current turn's auth resolution failed — set by
+ * agent_resolve_auth on a known failure (e.g. codex REAUTH_REQUIRED) so the
+ * delegate/chat error path can surface it instead of a generic provider 401 (D6).
+ * Thread-local + cleared at the start of each resolve. */
+static _Thread_local char g_request_auth_error[256];
+
+const char *agent_request_auth_error(void)
+{
+   return g_request_auth_error[0] ? g_request_auth_error : NULL;
+}
+
 void agent_set_request_session(const char *session_id)
 {
    if (session_id && session_id[0])
@@ -1773,6 +1784,7 @@ static int agent_read_codex_oauth_token(char *token, size_t token_len)
 int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
 {
    buf[0] = '\0';
+   g_request_auth_error[0] = '\0'; /* reset the per-turn explicit-error channel (D6) */
    const char *auth_type = agent->auth_type;
    if (strcmp(agent->provider, "anthropic") == 0 &&
        (!auth_type[0] || strcmp(auth_type, "bearer") == 0 || strcmp(auth_type, "api_key") == 0))
@@ -1806,7 +1818,16 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
          return 0;
       }
       if (agent_read_codex_oauth_token(token, sizeof(token)) != 0)
+      {
+         /* No usable codex token. If a prior refresh was rejected by the IdP, the
+          * refresh token is dead and the server cannot recover on its own — give
+          * the operator the exact remedy instead of a generic provider 401 (D6). */
+         if (oauth_token_reauth_required(CODEX_OAUTH_STORE))
+            snprintf(g_request_auth_error, sizeof(g_request_auth_error),
+                     "codex re-auth required: the stored OAuth refresh token was rejected — run "
+                     "`aimee codex reauth` to re-authenticate");
          return -1;
+      }
       snprintf(buf, buf_len, "Authorization: Bearer %s", token);
       return 0;
    }

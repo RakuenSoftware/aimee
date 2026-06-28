@@ -51,10 +51,22 @@ int oauth_token_remove(const char *client_name);
 
 /* ---- Token refresh (refresh_token grant) ---- */
 
-/* Refresh expired tokens stored for |client_name| using the given |token_endpoint|.
- * Updates the stored tokens on success.
- * Returns 0 on success, -1 on failure (caller should re-authenticate). */
+/* oauth_token_refresh outcomes (D6): distinguish a transient failure (retryable,
+ * keep using any still-valid access token) from an IdP rejection of the refresh
+ * token (revoked/expired — the server cannot recover, the operator must re-auth). */
+#define OAUTH_REFRESH_TRANSIENT (-1) /* network/5xx/parse — retry later */
+#define OAUTH_REFRESH_REAUTH    (-2) /* 4xx invalid_grant — REAUTH_REQUIRED set */
+
+/* Refresh stored tokens for |client_name| via |token_endpoint|/|client_id|.
+ * Updates the stored tokens on success. Returns 0 on success, or one of the
+ * OAUTH_REFRESH_* codes above. On OAUTH_REFRESH_REAUTH the credential is marked
+ * REAUTH_REQUIRED (see oauth_token_reauth_required). */
 int oauth_token_refresh(const char *client_name, const char *client_id, const char *token_endpoint);
+
+/* True if |client_name|'s credential is marked REAUTH_REQUIRED — a prior refresh
+ * was rejected and the operator must re-authenticate (D6). Cleared automatically
+ * on the next successful token store. */
+int oauth_token_reauth_required(const char *client_name);
 
 /* ---- High-level accessor ---- */
 

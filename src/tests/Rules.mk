@@ -309,6 +309,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-clarify \
                $(TESTPREFIX)/unit-test-collab-rules \
                $(TESTPREFIX)/unit-test-oauth-pkce \
+               $(TESTPREFIX)/unit-test-oauth-reauth \
                $(TESTPREFIX)/unit-test-mcp-client \
                $(TESTPREFIX)/unit-test-mcp-client-sse \
                $(TESTPREFIX)/unit-test-mcp-client-integration \
@@ -2925,6 +2926,19 @@ $(TESTPREFIX)/unit-test-otel: $(OBJDIR)/tests/test_otel.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-oauth-pkce: $(OBJDIR)/tests/test_oauth_pkce.o \
+                     $(OBJDIR)/server/oauth_pkce.o \
+                     $(OBJDIR)/server/oauth_tokens.o \
+                     $(OBJDIR)/db1/secrets.o \
+                     $(OBJDIR)/server/vault_service.o \
+                     $(OBJDIR)/server/vault_store.o \
+                     $(OBJDIR)/server/vault_crypto.o \
+                     $(OBJDIR)/server/vault_kek_cache.o \
+                     $(OBJDIR)/server/vault_server_key.o \
+                     $(OBJDIR)/platform_random.o \
+                     $(TEST_CORE_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-oauth-reauth: $(OBJDIR)/tests/test_oauth_reauth.o \
                      $(OBJDIR)/server/oauth_pkce.o \
                      $(OBJDIR)/server/oauth_tokens.o \
                      $(OBJDIR)/db1/secrets.o \

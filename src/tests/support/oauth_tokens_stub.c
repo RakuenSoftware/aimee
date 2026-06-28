@@ -24,3 +24,9 @@ int oauth_token_store(const char *client_name, const oauth_token_response_t *res
    (void)resp;
    return 0;
 }
+
+int oauth_token_reauth_required(const char *client_name)
+{
+   (void)client_name;
+   return 0; /* tests don't exercise the REAUTH_REQUIRED marker */
+}

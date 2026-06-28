@@ -1846,6 +1846,10 @@ int main(int argc, char **argv)
    if (strcmp(cmd, "agent") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "setup") == 0)
       return handle_agent_setup_cmd(sub_argc - 1, sub_argv + 1, json_output);
 
+   /* `aimee codex reauth` — re-authenticate codex after a rejected refresh (D6). */
+   if (strcmp(cmd, "codex") == 0)
+      return handle_codex_cmd(sub_argc, sub_argv, json_output);
+
    /* workspace serve: a long-running client-side loop (poll -> run -> respond),
     * not a single forwarded /v1 call, so it is driven here rather than via a route. */
    if (strcmp(cmd, "workspace") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "serve") == 0)
