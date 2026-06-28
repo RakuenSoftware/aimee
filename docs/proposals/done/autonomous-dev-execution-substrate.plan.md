@@ -28,7 +28,27 @@ facts pin the sequencing:
 |--------|-----------|--------|
 | **P1** | §5 reconciler (static core) + §4 acceptance-block schema | **SHIPPED #639** |
 | **P2** | §2 — route every git op through the one credential policy + guard | **SHIPPED #641** |
-| ~~P3~~ | §1 build-and-verify runner | **mostly pre-existing** — `aimee git verify` (see proposal Implementation-status §1); residual = ephemeral sandboxed runner **image** (Docker) only |
+| **P3** | §1 structured verify contract (`format=json`, `unavailable`, per-step `tier:`) | **SHIPPED (#854)** |
+| **P4** | §1 ephemeral runner image + wrapper (`docker/dev-runner`, `dev-verify-runner.sh`, pin manifest) | **SHIPPED (#854)** |
+| **P5** | §3 tier router + §4 acceptance **execution** + §5 **active** auto-file (`scripts/dev-accept.py`) | **SHIPPED (#854)** |
+
+**Closeout (2026-06-28).** Once a docker-capable host (pve) was available, the
+deferred packets shipped. Decisions taken (roundtable design review, then per-PR
+code review): the contract is additive `format=json` (text path untouched, freshness
+cache identical); the runner is ephemeral `docker run` (hardened, toolchain pin-check,
+exit→verdict mapping); `dev-accept.py` splits eval (pure verdict) from `file` (the
+gated move); declared-deferred vs unable-to-execute are distinct (only the latter
+blocks filing). The **driver wiring** (wfe `exec_implement`→verify, a live forge
+`open` provider, `gate.ci`→Actions dispatch, the post-merge accept block) and the
+true zero-human-step **criterion 5** are the conjoint acceptance of
+[full-autonomous-development.md](full-autonomous-development.md). The original packet
+table (pre-closeout) is kept below for history.
+
+### Original packet table (2026-06-23, pre-closeout)
+
+| Packet | Component | Status |
+|--------|-----------|--------|
+| ~~P3~~ | §1 build-and-verify runner | **mostly pre-existing** — `aimee git verify`; residual = ephemeral sandboxed runner **image** (Docker) only |
 | P4 | §3 `deployment`/`hardware` CI-matrix **dispatch** + tier router + per-PR audit attribution | OPEN — needs CI/Docker the agent host can't supply |
 | P5 | §4 per-tier acceptance **execution** + §5 **active** auto-file to `done/` + wire into the full-autonomous-development driver | OPEN — depends on P3-image + P4 |
 
@@ -257,7 +277,7 @@ check-proposal-reconcile.py [--proposals-dir DIR] [--strict] [--json] [--plant-t
 - **edit (cosmetic)** the `done/` proposals carrying a stale `in_flight` State bullet
   (discovery re-run at impl time) → State bullet reads `done`, so Check A's WARN report is
   clean. Called out as bundled-for-demo in the PR body.
-- **edit** `docs/proposals/pending/autonomous-dev-execution-substrate.md` — add the real
+- **edit** `docs/proposals/done/autonomous-dev-execution-substrate.md` — add the real
   `acceptance:` block (above) so Check B has a live input.
 - **new** `scripts/tests/test_check_proposal_reconcile.py` — plain `unittest` over
   synthetic proposal trees in a tmpdir. Cases: Check A FAIL (pending claims done) / WARN

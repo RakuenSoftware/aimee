@@ -1,7 +1,33 @@
 # Autonomous Development Execution Substrate: build · verify · push · validate · accept
 
-- **State:** **APPROVED** (human proposal-gate passed 2026-06-21) — implementing,
-  phased (see the companion `.plan.md`).
+- **State:** **DONE** (shipped to `testing`, filed 2026-06-28). All five components
+  are implemented. The mechanical acceptance block below is green
+  (`scripts/dev-accept.py eval` → `passed`). The deployment/hardware **end-to-end**
+  (criterion 5 — a real zero-human-step run that opens + merges a live PR) is
+  **deferred-conjoint** to [full-autonomous-development.md](full-autonomous-development.md):
+  this proposal ships the execution-plane **primitives**; that proposal wires them into
+  the wfe driver loop. See the `deferred` block under Acceptance. **`done/` ≠ GA:**
+  the live-forge PR-roundtrip stays a `deployment`-tier `validation-pending` check,
+  never auto-claimed.
+- **Closeout (2026-06-28).** The remaining open work named in the 2026-06-23 status
+  was completed once a docker-capable host was available:
+  - **§1 structured contract** — `handle_git_verify` now emits `format=json`
+    `{schema_version, verdict, reason, steps:[{name, tier, status, exit, seconds, log}]}`
+    with `unavailable` kept distinct from `passed` (closes the silent false-pass for the
+    driver); optional per-step `tier:`. Unit-tested (`unit-test-git-verify-contract`).
+  - **§1 ephemeral runner** — `docker/dev-runner/Dockerfile` (pinned CI toolchain,
+    validated: `make -j all server` + `make lint` build clean inside) +
+    `scripts/dev-verify-runner.sh` (ephemeral, `--network=none`, cap-drop, non-root,
+    resource-limited, toolchain pin-check, exit→verdict mapping) +
+    `scripts/dev-runner-pin.json`.
+  - **§3 tier router + §4 acceptance execution + §5 active auto-file** —
+    `scripts/dev-accept.py` runs each acceptance `check` on its tier (mechanical/
+    integration local or in the §1 runner; deployment/hardware dispatched to GH Actions
+    or, if author-declared deferred, skipped-declared and non-blocking), computes a
+    deterministic verdict, and (only on `passed`) git-mv's pending→done with reference
+    fixups. Unit-tested (`make -C src dev-accept-check`).
+  - **§2** was already done (#641). **Criterion 5** is the conjoint acceptance of the
+    pair and closes in full-autonomous-development.md.
 - **Implementation status (2026-06-23) — reconciled against the tree.** This
   proposal was drafted in a webchat workspace that had **no toolchain** and was
   **unaware of two subsystems that already implement its core**. Grounding it
@@ -243,7 +269,19 @@ validates this block; later packets execute each `check` on its tier):
 ```yaml acceptance
 - {id: 1, tier: mechanical,   check: "make -C src proposal-reconcile-check"}
 - {id: 2, tier: mechanical,   check: "python3 -m unittest discover -s scripts/tests -p test_check_proposal_reconcile.py"}
-- {id: 3, tier: mechanical,   check: "make -C src lint"}
+- {id: 3, tier: mechanical,   check: "make -C src dev-accept-check"}
+- {id: 4, tier: mechanical,   check: "make -C src lint"}
+```
+
+The `deployment`/`hardware` criteria (criterion 5: a real zero-human-step PR
+roundtrip + merge) are author-declared **deferred** to the sibling control-plane
+proposal — `dev-accept.py` records them `skipped-declared` (non-blocking) so this
+proposal's mechanical acceptance can file to `done/`, while the live e2e is never
+auto-claimed here:
+
+```yaml deferred
+- {tier: deployment, reason: "live-forge PR roundtrip + merge needs the wfe driver wiring (exec_implement->verify, live forge open provider, gate.ci dispatch)", deferred_to: full-autonomous-development.md}
+- {tier: hardware,   reason: "platform/real-device legs are dispatched + gated by CI, not run in-loop here", deferred_to: full-autonomous-development.md}
 ```
 
 ## Risks
