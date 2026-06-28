@@ -404,10 +404,11 @@ int handle_vault_rekey(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_vault_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_vault_set_server(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 
-/* Emit the single vault.audit log line for a server-principal credential write
- * (agent, cred type, non-secret fingerprint, attested transport, acting
- * principal). Shared by every server-vault write path so each one is logged
- * identically — never logs the secret itself. */
+/* Emit a VAULT_SERVER_WRITE record to the dedicated append-only 0600 audit sink
+ * (audit_log) for a server-principal credential write (agent, cred type,
+ * non-secret fingerprint, attested transport, acting principal). Shared by every
+ * server-vault write path so each one is logged identically — never logs the
+ * secret itself. */
 void vault_audit_server_write(const server_conn_t *conn, const char *agent, const char *cred,
                               const char *secret);
 

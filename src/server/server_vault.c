@@ -6,7 +6,7 @@
 #include "vault_service.h"
 #include "vault_crypto.h"     /* VAULT_ROOT_KEY_LEN */
 #include "vault_capability.h" /* vault:write:server gate (D2c) */
-#include "log.h"              /* aimee_log audit lines (D2c) */
+#include "log.h"              /* audit_log dedicated 0600 audit sink (D2/D2c) */
 #include "cJSON.h"
 #include <openssl/crypto.h>
 #include <openssl/sha.h>
@@ -205,8 +205,11 @@ void vault_audit_server_write(const server_conn_t *conn, const char *agent, cons
       transport = "unknown";
       break;
    }
-   aimee_log(LOG_WARN, "vault.audit",
-             "server-principal write by=%s transport=%s agent=%s cred=%s fp=%s",
+   /* D2/D2c: server-principal writes go to the dedicated append-only 0600 audit
+    * sink (audit_log), NOT the operator-readable general server log — preserving
+    * tamper-evidence + access separation. Never logs the key (fingerprint only). */
+   audit_log("VAULT_SERVER_WRITE",
+             "by=%s transport=%s agent=%s cred=%s fp=%s",
              (conn && conn->vault_principal[0]) ? conn->vault_principal : "(server)", transport,
              agent ? agent : "?", cred ? cred : "?", fp);
 }
@@ -303,7 +306,9 @@ int handle_vault_capability(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON_Delete(resp);
       return server_send_error(conn, "vault: capability update failed", NULL);
    }
-   aimee_log(LOG_WARN, "vault.audit", "capability %s principal=%s by=%s", action, jp->valuestring,
+   /* D2/D2c: capability grant/revoke is an authz change to the server-write
+    * allow-list — record it in the dedicated append-only 0600 audit sink. */
+   audit_log("VAULT_CAPABILITY", "action=%s principal=%s by=%s", action, jp->valuestring,
              conn->vault_principal);
    cJSON_AddStringToObject(resp, "status", "ok");
    return server_send_ok(conn, resp);
