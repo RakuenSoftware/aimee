@@ -43,6 +43,15 @@ while [ $# -gt 0 ]; do
    esac
 done
 
+# Only $STEP is base64-isolated from the remote shell; IMAGE/MEM/PIDS/TIMEOUT/SSH
+# are spliced into the command string ssh re-parses ON THE RUNNER HOST (root), so a
+# metacharacter would be RCE. Reject anything outside a tight allowlist.
+case "$IMAGE" in "" | *[!A-Za-z0-9._:/@-]*) echo "dev-verify-runner: invalid image '$IMAGE'" >&2; exit 2 ;; esac
+case "$MEM" in "" | *[!0-9kmgKMG]*) echo "dev-verify-runner: invalid mem '$MEM'" >&2; exit 2 ;; esac
+case "$PIDS" in "" | *[!0-9]*) echo "dev-verify-runner: invalid pids '$PIDS'" >&2; exit 2 ;; esac
+case "$TIMEOUT" in "" | *[!0-9]*) echo "dev-verify-runner: invalid timeout '$TIMEOUT'" >&2; exit 2 ;; esac
+case "$RUNNER_SSH" in *[!A-Za-z0-9._@-]*) echo "dev-verify-runner: invalid runner ssh '$RUNNER_SSH'" >&2; exit 2 ;; esac
+
 # Run a shell command STRING on the runner host (local or over ssh). The command
 # is one argument, so its own quoting survives a single remote shell parse.
 # run_host closes stdin (-n / /dev/null) — vital under command substitution, where
@@ -99,9 +108,17 @@ run_host "docker version >/dev/null 2>&1" || emit unavailable runner-unreachable
 # mismatch (or missing image) is unavailable/pin-mismatch, never a pass.
 probe="$(probe_versions)"
 [ -n "$probe" ] || emit unavailable image-missing 1
+# A missing/unreadable pin manifest must FAIL CLOSED, not run unpinned (else a
+# coincidental pass would emit verdict=passed with no toolchain check at all). The
+# python prints PIN_CHECK_ERROR on any exception, and we also check its exit code.
+[ -f "$PIN" ] || emit unavailable pin-missing 1
 mismatch="$(PIN="$PIN" PROBE="$probe" python3 <<'PY'
-import json, os
-pin = json.load(open(os.environ["PIN"]))["toolchain"]
+import json, os, sys
+try:
+    pin = json.load(open(os.environ["PIN"]))["toolchain"]
+except Exception as e:
+    print(f"PIN_CHECK_ERROR: cannot read manifest: {e}")
+    sys.exit(0)
 got = {}
 for line in os.environ["PROBE"].splitlines():
     if "\t" in line:
@@ -111,20 +128,35 @@ bad = [f"{pkg}: expected {want}, got {got.get(pkg)}" for pkg, want in pin.items(
 print("\n".join(bad))
 PY
 )"
+rc=$?
+if [ "$rc" -ne 0 ]; then
+   echo "PIN_CHECK_FAIL: pin-check runner failed (rc=$rc)" >&2
+   emit unavailable pin-check-failed 1
+fi
 if [ -n "$mismatch" ]; then
    echo "PIN_CHECK_FAIL:" >&2
    echo "$mismatch" >&2
-   emit unavailable pin-mismatch 1
+   case "$mismatch" in PIN_CHECK_ERROR*) emit unavailable pin-unreadable 1 ;; *) emit unavailable pin-mismatch 1 ;; esac
 fi
 
 # Stage on the runner host: git archive (no .git -> no vault tokens), extract,
 # re-seed a throwaway one-commit repo (so git-dependent gates work), drop the step
 # script in (base64 to dodge all quoting), own it to the container uid.
 STAGE="/tmp/aimee-runner-$$-$RANDOM"
-STEP_B64="$(printf '%s' "$STEP" | base64 -w0)"
+# base64 -w0 is GNU-only; fall back to the portable form so a non-GNU client does
+# not silently produce an empty step file (which would run as a no-op and emit a
+# false pass). Refuse if encoding produced nothing.
+STEP_B64="$(printf '%s' "$STEP" | { base64 -w0 2>/dev/null || base64 | tr -d '\n'; })"
+[ -n "$STEP_B64" ] || emit unavailable base64-failed 1
+# Verify the ACTUAL tree, including uncommitted tracked changes (the work item),
+# not just committed HEAD — else a dirty fix-in-progress would be verified against
+# the wrong content. `git stash create` snapshots the dirty state without touching
+# the worktree; it prints nothing on a clean tree, where HEAD is correct.
+ARCHIVE_REF="$(git -C "$TREE" stash create 2>/dev/null)"
+[ -n "$ARCHIVE_REF" ] || ARCHIVE_REF=HEAD
 cleanup() { run_host "rm -rf $STAGE" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
-if ! git -C "$TREE" archive HEAD 2>/dev/null | run_host_pipe "set -e; rm -rf $STAGE; mkdir -p $STAGE; tar x -C $STAGE; cd $STAGE; git init -q; git -c user.email=r@r -c user.name=r add -A; git -c user.email=r@r -c user.name=r commit -qm snapshot >/dev/null; echo $STEP_B64 | base64 -d > .runner-step.sh; chown -R 1001:1001 $STAGE"; then
+if ! git -C "$TREE" archive "$ARCHIVE_REF" 2>/dev/null | run_host_pipe "set -e; rm -rf $STAGE; mkdir -p $STAGE; tar x -C $STAGE; cd $STAGE; git init -q; git -c user.email=r@r -c user.name=r add -A; git -c user.email=r@r -c user.name=r commit -qm snapshot >/dev/null; echo $STEP_B64 | base64 -d > .runner-step.sh; chown -R 1001:1001 $STAGE"; then
    emit unavailable stage-failed 1
 fi
 
