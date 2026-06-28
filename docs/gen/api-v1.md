@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 47
+Total endpoints: 48
 
 ## Endpoints
 
@@ -173,6 +173,23 @@ Responses:
 - `401` — Unauthorized
 - `405` — Method not allowed
 - `503` — Canonical index unavailable
+
+### `POST /v1/code/repo-trust`
+
+Set a registered repo's cross-repo trust (owner credential only)
+
+Transactionally sets projects.trust, bumps cross_repo_meta.trust_epoch on a real transition, audits the change to cross_repo_trust_audit, and (on a change) recomputes the blocked_symbols frequency model. A scoped token is rejected with 403; the project must already exist.
+
+Request body (`application/json`).
+
+Responses:
+
+- `200` — Trust applied (status, project, prior_trust, new_trust, changed)
+- `400` — Missing project or invalid trust value
+- `403` — Forbidden (requires the owner credential)
+- `404` — No such project
+- `405` — Method not allowed
+- `503` — Knowledge service store unavailable
 
 ### `POST /v1/code/scan`
 

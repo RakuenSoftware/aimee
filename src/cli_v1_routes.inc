@@ -170,6 +170,7 @@ static const struct
     {"index", "structure", "index.structure", NULL, NULL, 0},
     {"index", "callers", "index.find_callers", NULL, NULL, 0},
     {"index", "deps", "index.deps", NULL, NULL, 0},
+    {"repo", "trust", "repo.trust", NULL, NULL, 0},
     {"workspace", "add", "workspace.add", NULL, NULL, 300000},
     {"workspace", "list", "workspace.list", NULL, NULL, 0},
     {"workspace", "get", "workspace.get", NULL, NULL, 0},
@@ -716,6 +717,28 @@ static cJSON *marshal_index_deps(int argc, char **argv)
       cJSON_AddStringToObject(req, "min_tier", tier);
    if (rpc_get(&opts, "review"))
       cJSON_AddStringToObject(req, "status", "ambiguous");
+   return req;
+}
+
+/* Marshal `aimee repo trust <project> <trusted|untrusted> [--actor NAME]` (§0).
+ * actor defaults to $USER so the audit records who ran it (caller-asserted under
+ * the owner credential; single-tenant P1). The server validates the trust enum. */
+static cJSON *marshal_repo_trust(int argc, char **argv)
+{
+   static const char *bools[] = {NULL};
+   rpc_opts_t opts;
+   rpc_parse(argc, argv, bools, &opts);
+
+   cJSON *req = marshal_no_args("repo.trust");
+   if (opts.pos_count > 0)
+      cJSON_AddStringToObject(req, "project", opts.positional[0]);
+   if (opts.pos_count > 1)
+      cJSON_AddStringToObject(req, "trust", opts.positional[1]);
+   const char *actor = rpc_get(&opts, "actor");
+   if (!actor || !actor[0])
+      actor = getenv("USER");
+   if (actor && actor[0])
+      cJSON_AddStringToObject(req, "actor", actor);
    return req;
 }
 
@@ -3260,6 +3283,8 @@ static cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_index_find_callers(argc, argv);
    if (strcmp(method, "index.deps") == 0)
       return marshal_index_deps(argc, argv);
+   if (strcmp(method, "repo.trust") == 0)
+      return marshal_repo_trust(argc, argv);
    if (strcmp(method, "graph.sync_code") == 0)
       return marshal_graph_sync_code(argc, argv);
    if (strcmp(method, "graph.explain") == 0)
@@ -5526,6 +5551,18 @@ static void pt_print_index_deps(const char *method, cJSON *resp)
 {
    print_index_deps(resp);
 }
+static void pt_print_repo_trust(const char *method, cJSON *resp)
+{
+   (void)method;
+   cJSON *changed = cJSON_GetObjectItemCaseSensitive(resp, "changed");
+   const char *prior = json_str(resp, "prior_trust");
+   const char *now = json_str(resp, "new_trust");
+   if (cJSON_IsBool(changed) && !cJSON_IsTrue(changed))
+      printf("repo %s: trust already %s (no change)\n", json_str(resp, "project"), now);
+   else
+      printf("repo %s: trust %s -> %s\n", json_str(resp, "project"), prior[0] ? prior : "(unset)",
+             now);
+}
 static void pt_print_graph_sync_code(const char *method, cJSON *resp)
 {
    printf("graph sync-code: project=%s generation=%s edges=%s\n", json_str(resp, "project"),
@@ -6554,6 +6591,7 @@ static const struct
     {"index.structure", pt_print_index_structure},
     {"index.find_callers", pt_print_index_find_callers},
     {"index.deps", pt_print_index_deps},
+    {"repo.trust", pt_print_repo_trust},
     {"graph.sync_code", pt_print_graph_sync_code},
     {"workspace.add", pt_print_workspace_add},
     {"workspace.list", pt_print_workspace_list},

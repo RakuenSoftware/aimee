@@ -162,6 +162,7 @@ const method_policy_t method_registry[] = {
     {"kb.ingest.status", CAP_INDEX_READ, "knowledge-base ingest status (read)"},
     /* Code index/graph rebuilds (mutating) — distinct from the index.* reads. */
     {"index.scan", CAP_INDEX_ADMIN, "scan / re-index the codebase"},
+    {"repo.trust", CAP_INDEX_ADMIN, "set per-repo cross-repo trust"},
     {"graph.sync_code", CAP_INDEX_ADMIN, "sync the code graph"},
     {"graph.*", CAP_INDEX_READ, "code graph query"},
     /* Curator: queries read; synthesize rebuilds artifacts (LLM). */

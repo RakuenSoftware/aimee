@@ -700,3 +700,29 @@ char *kb_client_index_cross_repo_deps_json(const char *project, const char *dire
    free(path);
    return json;
 }
+
+/* S7: POST the cross-repo trust write to the kb. Returns the raw kb JSON body on
+ * 2xx (caller frees); NULL on any non-2xx or transport failure with *http_status
+ * (optional) set to the kb HTTP status (so the proxy can map 404/403/400 to a
+ * precise client error instead of a blanket 502). */
+char *kb_client_repo_trust_json(const char *project, const char *trust, const char *actor,
+                                const char *request_id, int *http_status)
+{
+   if (http_status)
+      *http_status = -1;
+   if (!project || !project[0] || !trust || !trust[0])
+      return NULL;
+   cJSON *body = cJSON_CreateObject();
+   if (!body)
+      return NULL;
+   cJSON_AddStringToObject(body, "project", project);
+   cJSON_AddStringToObject(body, "trust", trust);
+   if (actor && actor[0])
+      cJSON_AddStringToObject(body, "actor", actor);
+   if (request_id && request_id[0])
+      cJSON_AddStringToObject(body, "request_id", request_id);
+   char *json = kb_client_v1_post_json("/v1/code/repo-trust", body, KB_CLIENT_INDEX_READ_TIMEOUT_MS,
+                                       http_status);
+   cJSON_Delete(body);
+   return json;
+}

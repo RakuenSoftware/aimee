@@ -158,6 +158,61 @@ static void test_no_conn_graceful(void)
    printf("ok\n");
 }
 
+/* count cross_repo_trust_audit rows for a project (direct shim query). */
+static int64_t audit_count(const char *project)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(), "SELECT COUNT(*) FROM cross_repo_trust_audit WHERE project = ?1", err,
+       sizeof(err));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", project);
+   int64_t n = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      n = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   return n;
+}
+
+/* S7: per-repo trust write + audit. Runs last — it flips A's trust permanently. */
+static void test_set_trust(void)
+{
+   int64_t epoch0 = 0;
+   db2_cross_repo_meta_read(&epoch0, NULL, NULL, 0);
+   assert(audit_count("A") == 0);
+
+   /* trusted -> untrusted: applied, changed, epoch bumps, audited */
+   char prior[16] = "";
+   int changed = -1;
+   assert(db2_cross_repo_set_trust("A", "untrusted", "tester", "r1", prior, sizeof(prior),
+                                   &changed) == 0);
+   assert(strcmp(prior, "trusted") == 0 && changed == 1);
+   int64_t epoch1 = 0;
+   db2_cross_repo_meta_read(&epoch1, NULL, NULL, 0);
+   assert(epoch1 == epoch0 + 1);
+   assert(audit_count("A") == 1);
+
+   /* no-op re-assert: persisted (prior now untrusted), NOT changed, epoch stable,
+    * still audited (every call records the actor's action). */
+   changed = -1;
+   assert(db2_cross_repo_set_trust("A", "untrusted", "tester", "r2", prior, sizeof(prior),
+                                   &changed) == 0);
+   assert(strcmp(prior, "untrusted") == 0 && changed == 0);
+   int64_t epoch2 = 0;
+   db2_cross_repo_meta_read(&epoch2, NULL, NULL, 0);
+   assert(epoch2 == epoch1);
+   assert(audit_count("A") == 2);
+
+   /* no such project / bad trust value -> no audit, no epoch change */
+   assert(db2_cross_repo_set_trust("ZZZ", "trusted", "t", "r3", NULL, 0, NULL) == 1);
+   assert(db2_cross_repo_set_trust("A", "bogus", "t", "r4", NULL, 0, NULL) == -1);
+   int64_t epoch3 = 0;
+   db2_cross_repo_meta_read(&epoch3, NULL, NULL, 0);
+   assert(epoch3 == epoch2);
+   assert(audit_count("A") == 2);
+   assert(audit_count("ZZZ") == 0);
+}
+
 int main(void)
 {
    db2_test_shim_open();
@@ -166,6 +221,7 @@ int main(void)
    test_blocked_symbols();
    test_hashes();
    test_no_conn_graceful();
+   test_set_trust();
    printf("cross_repo_stats: all tests passed\n");
    return 0;
 }

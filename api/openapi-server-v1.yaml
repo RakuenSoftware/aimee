@@ -1277,6 +1277,47 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /repo/trust:
+    post:
+      summary: Set a registered repo's cross-repo trust (admin)
+      description: >-
+        Proxies the audited kb trust write (CAP_INDEX_ADMIN; local/owner-only over
+        TCP). Sets projects.trust, bumps trust_epoch on a real transition, audits
+        the change, and recomputes the blocked_symbols frequency model. actor is
+        caller-asserted (single-tenant P1).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project, trust]
+              properties:
+                project: { type: string }
+                trust: { type: string, enum: [trusted, untrusted] }
+                actor: { type: string }
+                request_id: { type: string }
+      responses:
+        "200":
+          description: Trust applied (status, project, prior_trust, new_trust, changed)
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing project or invalid trust value
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: No such project
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "502":
+          description: Index backend (aimee-kb) unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /index/blast_radius:
     post:
       summary: Dependency blast radius for an indexed file

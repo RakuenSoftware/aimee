@@ -583,6 +583,12 @@ static void path_seg(const char *path, int n, char *out, size_t out_cap)
    out[i] = '\0';
 }
 
+/* Shared 403 for owner-credential-only mutations (a scoped token must not reach them). */
+static int kb_http_owner_required(char *out, int cap, const char *what)
+{
+   snprintf(out, (size_t)cap, "{\"error\":\"forbidden: %s requires the owner credential\"}", what);
+   return 403;
+}
 /* ── Phase 5 extended routing ────────────────────────────────────────────── */
 
 int kb_http_route_ex(const char *method, const char *path, const char *query_string,
@@ -684,11 +690,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return 405;
       }
       if (vr.scope_kind[0])
-      {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"forbidden: enrollment minting requires the owner credential\"}");
-         return 403;
-      }
+         return kb_http_owner_required(out_buf, out_cap, "enrollment minting");
       cJSON *req = body ? cJSON_Parse(body) : NULL;
       const cJSON *jhost = req ? cJSON_GetObjectItemCaseSensitive(req, "host") : NULL;
       const cJSON *jport = req ? cJSON_GetObjectItemCaseSensitive(req, "port") : NULL;
@@ -1305,11 +1307,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
    if (strcmp(path, "/v1/pdf/quarantine") == 0)
    {
       if (vr.scope_kind[0])
-      {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"forbidden: quarantine actions require the owner credential\"}");
-         return 403;
-      }
+         return kb_http_owner_required(out_buf, out_cap, "quarantine actions");
       return handle_post_pdf_quarantine_route(method, body, body_len, out_buf, out_cap);
    }
    if (strcmp(path, "/v1/code/callers") == 0)
@@ -1442,6 +1440,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
 
    if (strcmp(path, "/v1/code/scan") == 0)
       return handle_post_code_scan_route(method, body, out_buf, out_cap);
+   if (strcmp(path, "/v1/code/repo-trust") == 0) /* S7: admin; owner gate in handler */
+      return handle_post_code_repo_trust_route(method, body, out_buf, out_cap, !vr.scope_kind[0]);
    /* POST /v1/ingest */
    if (strcmp(path, "/v1/ingest") == 0)
    {

@@ -64,6 +64,20 @@ int db2_cross_repo_repo_set_hash(char *out, size_t cap);
 int db2_cross_repo_meta_read(int64_t *trust_epoch, int64_t *blocked_symbols_version,
                              char *repo_set_hash, size_t cap);
 
+/* §0/S7: apply a per-repo trust change transactionally and audit it. Reads the
+ * prior trust (the project must already exist), UPDATEs projects.trust, and --
+ * only when the value actually changes -- bumps cross_repo_meta.trust_epoch
+ * (which invalidates the cached version stamp; the caller then recomputes
+ * blocked_symbols, since trust changes which repos feed the frequency model).
+ * Every call writes a cross_repo_trust_audit row (epoch before==after on a
+ * no-op). new_trust must be "trusted" or "untrusted". prior_out (optional,
+ * prior_cap bytes) receives the prior trust value; *changed_out (optional) is
+ * set to 1 iff the trust value actually changed. Returns 0 = applied,
+ * 1 = no such project, -1 = DB error / bad argument. */
+int db2_cross_repo_set_trust(const char *project, const char *new_trust, const char *actor,
+                             const char *request_id, char *prior_out, size_t prior_cap,
+                             int *changed_out);
+
 /* NOTE: repo descriptors (manifest module_id parsing for the §3.7 resolver) and
  * the §4.2 candidate-generation query are orchestration-coupled and validated
  * live; they land with S4a (canonical_index_cross_repo_deps), not in this slice. */

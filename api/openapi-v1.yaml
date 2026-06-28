@@ -1713,6 +1713,44 @@ paths:
         "405":
           description: Method not allowed
 
+  /code/repo-trust:
+    post:
+      operationId: postCodeRepoTrust
+      summary: Set a registered repo's cross-repo trust (owner credential only)
+      description: >-
+        Transactionally sets projects.trust, bumps cross_repo_meta.trust_epoch on
+        a real transition, audits the change to cross_repo_trust_audit, and (on a
+        change) recomputes the blocked_symbols frequency model. A scoped token is
+        rejected with 403; the project must already exist.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project, trust]
+              properties:
+                project: { type: string }
+                trust: { type: string, enum: [trusted, untrusted] }
+                actor: { type: string }
+                request_id: { type: string }
+      responses:
+        "200":
+          description: Trust applied (status, project, prior_trust, new_trust, changed)
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing project or invalid trust value
+        "403":
+          description: Forbidden (requires the owner credential)
+        "404":
+          description: No such project
+        "405":
+          description: Method not allowed
+        "503":
+          description: Knowledge service store unavailable
+
   /code/build:
     post:
       operationId: postCodeBuild

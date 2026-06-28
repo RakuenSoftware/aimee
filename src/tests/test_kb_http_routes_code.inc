@@ -115,6 +115,31 @@ const char *xrepo_tier_name(int t)
    return "none";
 }
 
+/* S7: trust-write entry points kb_http_code.o references from the repo-trust
+ * handler (full behavior lives in test_cross_repo_stats). */
+int db2_cross_repo_set_trust(const char *project, const char *new_trust, const char *actor,
+                             const char *request_id, char *prior_out, size_t prior_cap,
+                             int *changed_out)
+{
+   (void)project;
+   (void)new_trust;
+   (void)actor;
+   (void)request_id;
+   if (prior_out && prior_cap)
+      prior_out[0] = '\0';
+   if (changed_out)
+      *changed_out = 0;
+   return 0;
+}
+
+int db2_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
+{
+   (void)k;
+   (void)m;
+   (void)len_min;
+   return 0;
+}
+
 /* Vector-leg stubs (§5): the query embedder + pgvec code search. OFF by default
  * (g_vec_enabled=0 -> memory_embed_text returns 0 -> the leg is skipped), so the
  * existing hybrid tests are unaffected; test_code_hybrid_vector_ok flips it on. */

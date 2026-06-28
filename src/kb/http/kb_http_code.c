@@ -7,6 +7,7 @@
 #include "db2/cross_repo_classify.h" /* xrepo_tier_name */
 #include "db2/cross_repo_deps.h"     /* canonical_index_cross_repo_deps */
 #include "db2/cross_repo_review.h"   /* db2_cross_repo_review_list */
+#include "db2/cross_repo_stats.h"    /* db2_cross_repo_set_trust, recompute_blocked_symbols */
 #include "db2/lifecycle.h"
 #include "db2/memory_query.h"
 #include "db2/code_projection.h"
@@ -1795,4 +1796,116 @@ int handle_post_code_scan_route(const char *method, const char *body, char *out_
    if (strcmp(method, "POST") != 0)
       return code_method_not_allowed(out_buf, out_cap);
    return handle_post_code_scan(body, out_buf, out_cap);
+}
+
+/* S7: POST /v1/code/repo-trust {project, trust:"trusted"|"untrusted", actor?,
+ * request_id?}. `owner` (caller holds the unscoped owner credential) is required:
+ * a scoped token must not be able to flip trust. Applies the audited db2 trust
+ * write and, on a real transition, recomputes the blocked_symbols frequency model
+ * (best-effort — the trust write has already committed and bumped trust_epoch,
+ * which invalidates cached results either way). */
+int handle_post_code_repo_trust(const char *body, char *out_buf, int out_cap, int owner)
+{
+   if (!owner)
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"forbidden: repo trust requires the owner credential\"}");
+      return 403;
+   }
+   cJSON *root = cJSON_Parse(body ? body : "{}");
+   if (!root)
+      return code_scan_write_error(out_buf, out_cap, "invalid json");
+
+   char project[256] = "", trust[16] = "", actor[256] = "", request_id[128] = "";
+   cJSON *j;
+   if ((j = cJSON_GetObjectItemCaseSensitive(root, "project")) && cJSON_IsString(j))
+      snprintf(project, sizeof(project), "%s", j->valuestring);
+   if ((j = cJSON_GetObjectItemCaseSensitive(root, "trust")) && cJSON_IsString(j))
+      snprintf(trust, sizeof(trust), "%s", j->valuestring);
+   if ((j = cJSON_GetObjectItemCaseSensitive(root, "actor")) && cJSON_IsString(j))
+      snprintf(actor, sizeof(actor), "%s", j->valuestring);
+   if ((j = cJSON_GetObjectItemCaseSensitive(root, "request_id")) && cJSON_IsString(j))
+      snprintf(request_id, sizeof(request_id), "%s", j->valuestring);
+   cJSON_Delete(root);
+
+   if (!project[0])
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing project\"}");
+      return 400;
+   }
+   if (strcmp(trust, "trusted") != 0 && strcmp(trust, "untrusted") != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"trust must be 'trusted' or 'untrusted'\"}");
+      return 400;
+   }
+   if (!db2_is_initialized())
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"failed to open knowledge service store\"}");
+      return 503;
+   }
+
+   char prior[16] = "";
+   int changed = 0;
+   int rc =
+       db2_cross_repo_set_trust(project, trust, actor, request_id, prior, sizeof(prior), &changed);
+   if (rc == 1)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"no such project\"}");
+      return 404;
+   }
+   if (rc != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"trust write failed\"}");
+      return 503;
+   }
+
+   int recomputed = -1; /* -1 = not attempted (no change); >=0 rows; -1 on a recompute error too */
+   if (changed)
+   {
+      config_t cfg;
+      if (config_load(&cfg) == 0)
+         recomputed = db2_cross_repo_recompute_blocked_symbols(cfg.kb_curator_cross_repo_k,
+                                                               cfg.kb_curator_cross_repo_m,
+                                                               cfg.kb_curator_cross_repo_len_min);
+   }
+
+   /* Build via cJSON so the (owner-supplied) project name is JSON-escaped rather
+    * than interpolated raw into a template. */
+   cJSON *out = cJSON_CreateObject();
+   if (!out)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"out of memory\"}");
+      return 500;
+   }
+   cJSON_AddStringToObject(out, "status", "ok");
+   cJSON_AddStringToObject(out, "project", project);
+   cJSON_AddStringToObject(out, "prior_trust", prior);
+   cJSON_AddStringToObject(out, "new_trust", trust);
+   cJSON_AddBoolToObject(out, "changed", changed ? 1 : 0);
+   cJSON_AddNumberToObject(out, "blocked_symbols_recomputed", recomputed);
+   char *s = cJSON_PrintUnformatted(out);
+   cJSON_Delete(out);
+   if (!s)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"out of memory\"}");
+      return 500;
+   }
+   int over = ((int)strlen(s) >= out_cap);
+   if (!over)
+      snprintf(out_buf, (size_t)out_cap, "%s", s);
+   free(s);
+   if (over)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"response too large\"}");
+      return 500;
+   }
+   return 200;
+}
+
+int handle_post_code_repo_trust_route(const char *method, const char *body, char *out_buf,
+                                      int out_cap, int owner)
+{
+   if (strcmp(method, "POST") != 0)
+      return code_method_not_allowed(out_buf, out_cap);
+   return handle_post_code_repo_trust(body, out_buf, out_cap, owner);
 }

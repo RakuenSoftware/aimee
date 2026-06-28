@@ -1241,6 +1241,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"index.structure", handle_index_structure},
     {"index.find_callers", handle_index_find_callers},
     {"index.deps", handle_index_deps},
+    {"repo.trust", handle_repo_trust},
     {"graph.sync_code", handle_graph_sync_code},
     {"graph.explain", handle_graph_explain},
     {"blast_radius.preview", handle_blast_radius_preview},

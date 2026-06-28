@@ -337,3 +337,147 @@ int db2_cross_repo_repo_set_hash(char *out, size_t cap)
    }
    return 0;
 }
+
+/* ---- S7: per-repo trust write + audit ------------------------------------ */
+
+int db2_cross_repo_set_trust(const char *project, const char *new_trust, const char *actor,
+                             const char *request_id, char *prior_out, size_t prior_cap,
+                             int *changed_out)
+{
+   if (prior_out && prior_cap)
+      prior_out[0] = '\0';
+   if (changed_out)
+      *changed_out = 0;
+   void *conn = cr_conn();
+   if (!conn || !project || !project[0] || !new_trust ||
+       (strcmp(new_trust, "trusted") != 0 && strcmp(new_trust, "untrusted") != 0))
+      return -1;
+   char err[CR_ERRBUF] = "";
+
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+      return -1;
+
+   int ok = 1, found = 0;
+   char prior[16] = "";
+
+   /* Prior trust + existence check. (Single-tenant admin write: a plain SELECT
+    * then UPDATE is fine; the txn keeps the multi-row write atomic.) */
+   aimee_pg_stmt_t *sel =
+       aimee_pg_prepare(conn, "SELECT trust FROM projects WHERE name = ?1", err, sizeof(err));
+   if (!sel)
+      ok = 0;
+   else
+   {
+      aimee_pg_bind_text(sel, "?1", project);
+      int sr = aimee_pg_step(sel, err, sizeof(err));
+      if (sr == AIMEE_PG_ROW)
+      {
+         const char *t = aimee_pg_column_text(sel, 0);
+         snprintf(prior, sizeof(prior), "%s", t ? t : "");
+         found = 1;
+      }
+      else if (sr < 0)
+         ok = 0;
+      aimee_pg_finalize(sel);
+   }
+
+   if (ok && !found)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return 1; /* no such project */
+   }
+
+   int changed = ok && found && strcmp(prior, new_trust) != 0;
+
+   int64_t epoch_before = 0, epoch_after = 0;
+   if (ok && cr_scalar(conn, "SELECT trust_epoch FROM cross_repo_meta WHERE id = 1", NULL, NULL,
+                       &epoch_before) != 0)
+      ok = 0;
+   epoch_after = epoch_before;
+
+   /* Apply the change + bump trust_epoch only on a real transition, so a no-op
+    * re-assert doesn't needlessly invalidate the frequency model. */
+   if (ok && changed)
+   {
+      aimee_pg_stmt_t *up = aimee_pg_prepare(conn, "UPDATE projects SET trust = ?2 WHERE name = ?1",
+                                             err, sizeof(err));
+      if (!up)
+         ok = 0;
+      else
+      {
+         aimee_pg_bind_text(up, "?1", project);
+         aimee_pg_bind_text(up, "?2", new_trust);
+         if (aimee_pg_step(up, err, sizeof(err)) < 0)
+            ok = 0;
+         aimee_pg_finalize(up);
+      }
+      if (ok && aimee_pg_exec(
+                    conn, "UPDATE cross_repo_meta SET trust_epoch = trust_epoch + 1 WHERE id = 1",
+                    err, sizeof(err)) != 0)
+         ok = 0;
+      if (ok && cr_scalar(conn, "SELECT trust_epoch FROM cross_repo_meta WHERE id = 1", NULL, NULL,
+                          &epoch_after) != 0)
+         ok = 0;
+   }
+
+   /* repo_set_hash stamp at change time (best-effort for the audit row). */
+   char rsh[64] = "";
+   if (ok)
+   {
+      aimee_pg_stmt_t *hs = aimee_pg_prepare(
+          conn, "SELECT repo_set_hash FROM cross_repo_meta WHERE id = 1", err, sizeof(err));
+      if (!hs)
+         ok = 0;
+      else
+      {
+         if (aimee_pg_step(hs, err, sizeof(err)) == AIMEE_PG_ROW)
+         {
+            const char *h = aimee_pg_column_text(hs, 0);
+            snprintf(rsh, sizeof(rsh), "%s", h ? h : "");
+         }
+         aimee_pg_finalize(hs);
+      }
+   }
+
+   /* Audit every call (epoch before==after on a no-op). */
+   if (ok)
+   {
+      aimee_pg_stmt_t *au = aimee_pg_prepare(
+          conn,
+          "INSERT INTO cross_repo_trust_audit (project, actor, prior_trust, new_trust, "
+          "trust_epoch_before, trust_epoch_after, repo_set_hash, request_id) "
+          "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+          err, sizeof(err));
+      if (!au)
+         ok = 0;
+      else
+      {
+         aimee_pg_bind_text(au, "?1", project);
+         aimee_pg_bind_text(au, "?2", actor ? actor : "");
+         aimee_pg_bind_text(au, "?3", prior);
+         aimee_pg_bind_text(au, "?4", new_trust);
+         aimee_pg_bind_int64(au, "?5", epoch_before);
+         aimee_pg_bind_int64(au, "?6", epoch_after);
+         aimee_pg_bind_text(au, "?7", rsh);
+         aimee_pg_bind_text(au, "?8", request_id ? request_id : "");
+         if (aimee_pg_step(au, err, sizeof(err)) < 0)
+            ok = 0;
+         aimee_pg_finalize(au);
+      }
+   }
+
+   if (!ok)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      LOG_ERROR(CR_LOG_TAG, "trust write failed for %s: %s", project, err);
+      return -1;
+   }
+   if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
+      return -1;
+
+   if (prior_out && prior_cap)
+      snprintf(prior_out, prior_cap, "%s", prior);
+   if (changed_out)
+      *changed_out = changed;
+   return 0;
+}

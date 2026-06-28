@@ -1076,6 +1076,12 @@ int kb_client_index_find_callers(const char *project, const char *symbol, caller
 char *kb_client_index_cross_repo_deps_json(const char *project, const char *direction,
                                            const char *min_tier, int status_ambiguous);
 
+/* S7: POST a per-repo trust change to the kb (project + trust required, actor +
+ * request_id optional). Returns the raw kb JSON body on 2xx (caller frees); NULL
+ * otherwise with *http_status (optional) set to the kb HTTP status. */
+char *kb_client_repo_trust_json(const char *project, const char *trust, const char *actor,
+                                const char *request_id, int *http_status);
+
 /* Full-text code search across indexed file contents.  `project` may be
  * NULL/empty to search all projects.  Returns count, or 0 if kb is
  * unreachable.  Uses /v1 over remote HTTP or local UDS.
