@@ -164,12 +164,33 @@ static int backup_keyring(char *out, size_t out_len)
       free(buf);
       return -1;
    }
+   /* Create the backup 0600 ATOMICALLY (open with the mode, not fopen-then-chmod)
+    * so the plaintext keys are never momentarily world-readable, and with
+    * O_EXCL|O_NOFOLLOW so a pre-planted symlink at the predictable path can't trap
+    * the write. On POSIX; the Windows thin client is not the import target. */
+#ifndef _WIN32
+   int fd = open(dst, O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW, 0600);
+   if (fd < 0)
+   {
+      free(buf);
+      return -1;
+   }
+   FILE *f = fdopen(fd, "wb");
+   if (!f)
+   {
+      close(fd);
+      remove(dst);
+      free(buf);
+      return -1;
+   }
+#else
    FILE *f = fopen(dst, "wb");
    if (!f)
    {
       free(buf);
       return -1;
    }
+#endif
    size_t len = strlen(buf);
    int ok = (fwrite(buf, 1, len, f) == len) && (fflush(f) == 0);
    free(buf);
@@ -184,7 +205,9 @@ static int backup_keyring(char *out, size_t out_len)
       remove(dst);
       return -1;
    }
+#ifdef _WIN32
    chmod(dst, 0600);
+#endif
    snprintf(out, out_len, "%s", dst);
    return 0;
 }
@@ -210,10 +233,18 @@ static int acquire_import_lock(char *lockpath, size_t lp_len)
 
 static void release_import_lock(int fd, const char *lockpath)
 {
+   /* Only remove the lock file if it is still OUR lock: if an operator manually
+    * cleared a "stale" lock and another run re-created it, the path now names a
+    * different inode and a blind remove() would delete the live run's lock. */
+   if (fd >= 0 && lockpath && lockpath[0])
+   {
+      struct stat fd_st, path_st;
+      if (fstat(fd, &fd_st) == 0 && stat(lockpath, &path_st) == 0 &&
+          fd_st.st_ino == path_st.st_ino && fd_st.st_dev == path_st.st_dev)
+         remove(lockpath);
+   }
    if (fd >= 0)
       close(fd);
-   if (lockpath && lockpath[0])
-      remove(lockpath);
 }
 #endif
 

@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static char g_home[256];
@@ -108,6 +109,9 @@ int main(void)
 
    char backup[512];
    assert(find_backup(backup, sizeof(backup)) && "no pre-import backup was written");
+   struct stat bst;
+   assert(stat(backup, &bst) == 0 && (bst.st_mode & 0777) == 0600 &&
+          "backup must be 0600 (never momentarily world-readable)");
    FILE *bf = fopen(backup, "rb");
    assert(bf);
    char bbuf[4096];
