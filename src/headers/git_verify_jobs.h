@@ -13,6 +13,7 @@ typedef struct verify_job
    int failed;
    int total;
    char *output;
+   char *verdict_json; /* structured (format=json) verdict, built at finalize; NULL until then */
    char file_hash[32];
    char session_id[SERVER_SESSION_ID_MAX];
    int lock_ready;

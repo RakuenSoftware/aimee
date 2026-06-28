@@ -28,6 +28,10 @@ typedef struct
    char after[MAX_STEP_NAME]; /* empty = no dependency; else wait for named step */
    char paths[256];           /* comma-separated changed-path globs for incremental verify */
    int scope_changed;         /* 1 = expose changed-file env to this step */
+   char tier[MAX_STEP_NAME];  /* validation tier; empty => "mechanical" (default). One of
+                               * mechanical|integration|deployment|hardware. Surfaced in the
+                               * structured (format=json) verdict so the autonomous driver can
+                               * route a step to its tier; ignored by the human/text path. */
 } verify_step_t;
 
 typedef struct

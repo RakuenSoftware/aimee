@@ -572,6 +572,13 @@ int verify_load_config(const char *project_root, verify_config_t *cfg)
                   val++;
                cfg->steps[cfg->count - 1].scope_changed = (strncmp(val, "changed", 7) == 0) ? 1 : 0;
             }
+            else if (strncmp(trimmed, "tier:", 5) == 0 && cfg->count > 0)
+            {
+               char *val = trimmed + 5;
+               while (*val == ' ')
+                  val++;
+               snprintf(cfg->steps[cfg->count - 1].tier, MAX_STEP_NAME, "%s", val);
+            }
          }
       }
       else if (in_env)
@@ -600,308 +607,7 @@ int verify_load_config(const char *project_root, verify_config_t *cfg)
    return (cfg->enforce || cfg->count > 0 || cfg->env_count > 0) ? 0 : -1;
 }
 
-/* --- Commit-hash-based change detection --- */
-
-char *verify_compute_file_hash(const char *project_root)
-{
-   /* Return the tree hash (HEAD^{tree}) rather than the commit hash.
-    * Tree hashes are stable across squash-merges and rebases that don't change
-    * content, so a verified worktree HEAD matches the squash-merge commit that
-    * GitHub creates from the same tree. */
-   char cmd[MAX_PATH_LEN + 64];
-   if (project_root && project_root[0])
-      snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse HEAD^{tree} 2>/dev/null", project_root);
-   else
-      snprintf(cmd, sizeof(cmd), "git rev-parse HEAD^{tree} 2>/dev/null");
-
-   int rc;
-   char *out = run_cmd(cmd, &rc);
-   if (rc != 0 || !out || !out[0])
-   {
-      free(out);
-      return NULL;
-   }
-
-   /* Strip trailing whitespace */
-   for (char *p = out + strlen(out) - 1; p >= out && (*p == '\n' || *p == '\r' || *p == ' '); p--)
-      *p = '\0';
-
-   char *result = strdup(out);
-   free(out);
-   return result;
-}
-
-/* Return the HEAD commit hash (for display only — not used as the verify key).
- * Caller must free the returned string. Returns NULL on failure. */
-static char *verify_compute_commit_hash(const char *project_root)
-{
-   char cmd[MAX_PATH_LEN + 64];
-   if (project_root && project_root[0])
-      snprintf(cmd, sizeof(cmd), "git -C '%s' rev-parse HEAD 2>/dev/null", project_root);
-   else
-      snprintf(cmd, sizeof(cmd), "git rev-parse HEAD 2>/dev/null");
-
-   int rc;
-   char *out = run_cmd(cmd, &rc);
-   if (rc != 0 || !out || !out[0])
-   {
-      free(out);
-      return NULL;
-   }
-   for (char *p = out + strlen(out) - 1; p >= out && (*p == '\n' || *p == '\r' || *p == ' '); p--)
-      *p = '\0';
-   char *result = strdup(out);
-   free(out);
-   return result;
-}
-
-static int verify_worktree_has_changes(const char *project_root)
-{
-   char cmd[MAX_PATH_LEN + 64];
-   int rc;
-   if (project_root && project_root[0])
-      snprintf(cmd, sizeof(cmd), "git -C '%s' status --porcelain 2>/dev/null", project_root);
-   else
-      snprintf(cmd, sizeof(cmd), "git status --porcelain 2>/dev/null");
-   char *status = run_cmd(cmd, &rc);
-   int has_changes = (rc == 0 && status && status[0]);
-   free(status);
-   return has_changes;
-}
-
-/* --- State file management --- */
-
-void verify_state_path(const char *project_root, char *buf, size_t len)
-{
-   /* Always write to the main checkout, not a worktree-specific path.
-    * This lets the pre-push hook (which runs from the main checkout) find
-    * verification state that was recorded in any worktree of the same repo. */
-   char main_root[MAX_PATH_LEN];
-   const char *base = project_root;
-   if (project_root && project_root[0] &&
-       resolve_main_repo_root(project_root, main_root, sizeof(main_root)) == 0 && main_root[0])
-      base = main_root;
-
-   if (base && base[0])
-      snprintf(buf, len, "%s/.aimee/.last-verify", base);
-   else
-      snprintf(buf, len, ".aimee/.last-verify");
-}
-
-/* State file format — one entry per line (multi-branch rolling window):
- *   <unix_timestamp> <commit_hash> failed=N/total=M
- *
- * Up to VERIFY_STATE_MAX entries are kept (oldest pruned on write).
- * Legacy single-entry format (timestamp on line 1, hash on line 2, result
- * on line 3) is parsed on read and silently upgraded on next write.
- */
-#define VERIFY_STATE_MAX 8
-
-typedef struct
-{
-   time_t ts;
-   char hash[64];
-   int failed;
-   int total;
-   char step_results[256]; /* "name:rc,name:rc,..."; empty if not recorded */
-} verify_state_entry_t;
-
-/* Parse the state file into entries[].  Returns the number of entries read
- * (0 if the file doesn't exist or is empty/corrupt). */
-static int read_verify_entries(const char *project_root, verify_state_entry_t *entries, int cap)
-{
-   char path[MAX_PATH_LEN];
-   verify_state_path(project_root, path, sizeof(path));
-
-   FILE *f = fopen(path, "r");
-   if (!f)
-      return 0;
-
-   char line[512];
-   int n = 0;
-
-   /* Peek at the first line to detect legacy format (pure integer = old ts line). */
-   if (!fgets(line, sizeof(line), f))
-   {
-      fclose(f);
-      return 0;
-   }
-
-   /* Strip trailing whitespace */
-   char *ep = line + strlen(line) - 1;
-   while (ep >= line && (*ep == '\n' || *ep == '\r' || *ep == ' '))
-      *ep-- = '\0';
-
-   /* Legacy format: first line is a bare integer (no spaces). */
-   if (!strchr(line, ' '))
-   {
-      if (n < cap)
-      {
-         time_t ts = (time_t)strtoll(line, NULL, 10);
-         char hline[64] = {0};
-         char rline[32] = {0};
-         if (fgets(hline, sizeof(hline), f))
-         {
-            char *p = hline + strlen(hline) - 1;
-            while (p >= hline && (*p == '\n' || *p == '\r' || *p == ' '))
-               *p-- = '\0';
-            (void)fgets(rline, sizeof(rline), f);
-            p = rline + strlen(rline) - 1;
-            while (p >= rline && (*p == '\n' || *p == '\r' || *p == ' '))
-               *p-- = '\0';
-
-            if (hline[0])
-            {
-               entries[n].ts = ts;
-               snprintf(entries[n].hash, sizeof(entries[n].hash), "%s", hline);
-               entries[n].failed = 0;
-               entries[n].total = 0;
-               entries[n].step_results[0] = '\0';
-               if (rline[0])
-                  sscanf(rline, "failed=%d/total=%d", &entries[n].failed, &entries[n].total);
-               n++;
-            }
-         }
-      }
-      fclose(f);
-      return n;
-   }
-
-   /* New format: parse the first line we already read, then the rest. */
-   for (;;)
-   {
-      if (line[0] && n < cap)
-      {
-         long long ts_ll = 0;
-         char h[64] = {0};
-         int fv = 0, tv = 0;
-         if (sscanf(line, "%lld %63s failed=%d/total=%d", &ts_ll, h, &fv, &tv) >= 2 && h[0])
-         {
-            entries[n].ts = (time_t)ts_ll;
-            snprintf(entries[n].hash, sizeof(entries[n].hash), "%s", h);
-            entries[n].failed = fv;
-            entries[n].total = tv;
-            entries[n].step_results[0] = '\0';
-            const char *sp = strstr(line, " steps=");
-            if (sp)
-               snprintf(entries[n].step_results, sizeof(entries[n].step_results), "%s", sp + 7);
-            n++;
-         }
-      }
-      if (!fgets(line, sizeof(line), f))
-         break;
-      ep = line + strlen(line) - 1;
-      while (ep >= line && (*ep == '\n' || *ep == '\r' || *ep == ' '))
-         *ep-- = '\0';
-   }
-   fclose(f);
-   return n;
-}
-
-/* Find the entry in entries[] whose hash matches target_hash (first 40 chars).
- * Returns the index, or -1 if not found. */
-static int find_verify_entry(const verify_state_entry_t *entries, int n, const char *target_hash)
-{
-   for (int i = 0; i < n; i++)
-      if (strncmp(entries[i].hash, target_hash, 40) == 0)
-         return i;
-   return -1;
-}
-
-/* Look up a step's recorded exit code in a "name:rc,name:rc,..." string.
- * Returns 1 and sets *out_rc on success, 0 if name not found. */
-static int step_result_lookup(const char *step_results, const char *name, int *out_rc)
-{
-   if (!step_results || !step_results[0] || !name || !out_rc)
-      return 0;
-   char key[MAX_STEP_NAME + 2];
-   snprintf(key, sizeof(key), "%s:", name);
-   size_t klen = strlen(key);
-   const char *p = step_results;
-   while (p && *p)
-   {
-      if (strncmp(p, key, klen) == 0)
-      {
-         *out_rc = atoi(p + klen);
-         return 1;
-      }
-      p = strchr(p, ',');
-      if (p)
-         p++;
-   }
-   return 0;
-}
-
-static int write_verify_state(const char *project_root, time_t timestamp, const char *hash,
-                              int failed_steps, int total_steps, const char *step_results)
-{
-   char path[MAX_PATH_LEN], tmp_path[MAX_PATH_LEN];
-   verify_state_path(project_root, path, sizeof(path));
-   snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
-
-   char parent[MAX_PATH_LEN];
-   snprintf(parent, sizeof(parent), "%s", path);
-   char *slash = strrchr(parent, '/');
-   if (slash)
-   {
-      *slash = '\0';
-      if (parent[0] && platform_mkdir_p(parent, 0755) != 0 && errno != EEXIST)
-         return -1;
-   }
-
-   verify_state_entry_t old[VERIFY_STATE_MAX];
-   int nold = read_verify_entries(project_root, old, VERIFY_STATE_MAX);
-
-   FILE *f = fopen(tmp_path, "w");
-   if (!f)
-      return -1;
-
-   if (step_results && step_results[0])
-      fprintf(f, "%lld %s failed=%d/total=%d steps=%s\n", (long long)timestamp, hash, failed_steps,
-              total_steps, step_results);
-   else
-      fprintf(f, "%lld %s failed=%d/total=%d\n", (long long)timestamp, hash, failed_steps,
-              total_steps);
-
-   int kept = 1;
-   for (int i = 0; i < nold && kept < VERIFY_STATE_MAX; i++)
-   {
-      if (strncmp(old[i].hash, hash, 40) == 0)
-         continue;
-      if (old[i].step_results[0])
-         fprintf(f, "%lld %s failed=%d/total=%d steps=%s\n", (long long)old[i].ts, old[i].hash,
-                 old[i].failed, old[i].total, old[i].step_results);
-      else
-         fprintf(f, "%lld %s failed=%d/total=%d\n", (long long)old[i].ts, old[i].hash,
-                 old[i].failed, old[i].total);
-      kept++;
-   }
-   fclose(f);
-
-   if (rename(tmp_path, path) != 0)
-   {
-      remove(tmp_path);
-      return -1;
-   }
-   return 0;
-}
-
-/* --- Parallel step execution --- */
-
-static void format_step_results(const verify_thread_ctx_t *ctxs, int n, char *buf, size_t len)
-{
-   size_t pos = 0;
-   for (int i = 0; i < n && pos + 4 < len; i++)
-   {
-      if (i > 0)
-         buf[pos++] = ',';
-      int w = snprintf(buf + pos, len - pos, "%s:%d", ctxs[i].step->name, ctxs[i].rc);
-      if (w < 0 || (size_t)w >= len - pos)
-         break;
-      pos += (size_t)w;
-   }
-   buf[pos] = '\0';
-}
+#include "git_verify_state.inc"
 
 /* Per-step state shared between the dispatcher thread and the worker
  * threads on the compute pool: 0=pending, 1=submitted/running, 2=done. */
@@ -1286,6 +992,8 @@ typedef struct
 /* Forward declarations */
 static void verify_coordinator_fn(void *arg);
 static void verify_coord_finalize(verify_coord_state_t *state);
+/* verify_build_verdict is declared in git_verify_internal.h (exposed for the
+ * structured-contract unit test). */
 
 static int verify_pool_current_thread(compute_pool_t *pool)
 {
@@ -1524,6 +1232,15 @@ static void verify_coord_finalize(verify_coord_state_t *state)
 
          pthread_mutex_lock(&job->lock);
          job->total = state->cfg.count;
+         /* Capture the structured verdict before the loop frees per-step output, so
+          * action=status format=json can return it (the driver's async path). */
+         {
+            cJSON *v = verify_build_verdict(state->contexts, state->cfg.count, cancelled,
+                                            state->has_changes);
+            free(job->verdict_json);
+            job->verdict_json = cJSON_PrintUnformatted(v);
+            cJSON_Delete(v);
+         }
          for (int i = 0; i < state->cfg.count; i++)
          {
             if (state->contexts[i].rc == 0)
@@ -1601,6 +1318,87 @@ static void verify_coord_finalize(verify_coord_state_t *state)
    }
 }
 
+/* --- structured (format=json) verdict --- */
+
+static const char *verify_step_tier(const verify_step_t *s)
+{
+   return (s && s->tier[0]) ? s->tier : "mechanical";
+}
+
+/* Build a structured verdict object from completed step contexts. Caller owns the
+ * returned cJSON. The pass/fail accounting mirrors the human text exactly, but in
+ * a machine-stable shape the autonomous driver consumes. A no-step / no-config /
+ * out-of-scope run never reaches this builder — those map to verdict "unavailable"
+ * at the call site, kept DISTINCT from a real "passed" so an unconfigured repo is
+ * never read as verified (the §1 false-pass this packet closes for the driver). */
+cJSON *verify_build_verdict(const verify_thread_ctx_t *ctxs, int n, int cancelled, int has_changes)
+{
+   int passed = 0, failed = 0;
+   for (int i = 0; i < n; i++)
+   {
+      if (ctxs[i].rc == 0)
+         passed++;
+      else
+         failed++;
+   }
+   cJSON *root = cJSON_CreateObject();
+   cJSON_AddNumberToObject(root, "schema_version", 1);
+   const char *verdict = cancelled ? "unavailable" : (failed ? "failed" : "passed");
+   const char *reason = cancelled ? "cancelled" : (failed ? "steps-failed" : "ok");
+   cJSON_AddStringToObject(root, "verdict", verdict);
+   cJSON_AddStringToObject(root, "reason", reason);
+   cJSON_AddNumberToObject(root, "total", n);
+   cJSON_AddNumberToObject(root, "passed", passed);
+   cJSON_AddNumberToObject(root, "failed", failed);
+   cJSON_AddBoolToObject(root, "has_uncommitted_changes", has_changes ? 1 : 0);
+   cJSON *steps = cJSON_AddArrayToObject(root, "steps");
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *s = cJSON_CreateObject();
+      cJSON_AddStringToObject(s, "name", ctxs[i].step ? ctxs[i].step->name : "");
+      cJSON_AddStringToObject(s, "tier", verify_step_tier(ctxs[i].step));
+      const char *status = (ctxs[i].rc == 0) ? (ctxs[i].skipped ? "skip" : "pass") : "fail";
+      cJSON_AddStringToObject(s, "status", status);
+      cJSON_AddNumberToObject(s, "exit", ctxs[i].rc);
+      cJSON_AddNumberToObject(s, "seconds", ctxs[i].elapsed);
+      if (ctxs[i].skipped && ctxs[i].skip_reason[0])
+         cJSON_AddStringToObject(s, "skip_reason", ctxs[i].skip_reason);
+      if (ctxs[i].rc != 0 && ctxs[i].output && ctxs[i].output[0])
+      {
+         size_t len = strlen(ctxs[i].output);
+         const char *show = (len > 8192) ? ctxs[i].output + len - 8192 : ctxs[i].output;
+         cJSON_AddStringToObject(s, "log", show); /* tail, matching the text path's cap */
+      }
+      cJSON_AddItemToArray(steps, s);
+   }
+   return root;
+}
+
+/* Wrap a structured verdict as the MCP text payload: the CLI/driver reads the
+ * single text item as a JSON document. Consumes obj. */
+static cJSON *verify_json_response(cJSON *obj)
+{
+   char *s = cJSON_PrintUnformatted(obj);
+   cJSON_Delete(obj);
+   cJSON *r =
+       mcp_text(s ? s : "{\"schema_version\":1,\"verdict\":\"unavailable\",\"reason\":\"oom\"}");
+   free(s);
+   return r;
+}
+
+/* A bare {verdict,reason[,job_id]} response for the states with no per-step detail
+ * (unavailable / pending). */
+static cJSON *verify_json_status(const char *verdict, const char *reason, int job_id)
+{
+   cJSON *o = cJSON_CreateObject();
+   cJSON_AddNumberToObject(o, "schema_version", 1);
+   cJSON_AddStringToObject(o, "verdict", verdict);
+   cJSON_AddStringToObject(o, "reason", reason);
+   if (job_id > 0)
+      cJSON_AddNumberToObject(o, "job_id", job_id);
+   return verify_json_response(o);
+}
+
 /* --- MCP tool handler --- */
 
 cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *session_id)
@@ -1611,6 +1409,11 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
    cJSON *jbase = cJSON_GetObjectItemCaseSensitive(args, "base");
 
    const char *action_str = (jaction && cJSON_IsString(jaction)) ? jaction->valuestring : "run";
+   /* format=json: return a machine-stable structured verdict instead of the human
+    * text, for the autonomous driver. The text path is byte-for-byte unchanged when
+    * format!=json, and the freshness cache is written identically either way. */
+   cJSON *jformat = cJSON_GetObjectItemCaseSensitive(args, "format");
+   int json_out = (jformat && cJSON_IsString(jformat) && strcmp(jformat->valuestring, "json") == 0);
    /* action=run defaults to async: a full verify run (build+tests+sanitizers+coverage+fuzz)
     * can take 10+ minutes.  Running synchronously blocks the MCP worker thread for that
     * entire duration, causing the MCP client to time out.  Pass async=false to force
@@ -1639,22 +1442,46 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
     * inspection/setup actions and remain available. */
    int in_scope = verify_project_in_scope(verify_root);
    if (!in_scope && strcmp(action_str, "check") == 0)
+   {
+      if (json_out)
+         return verify_json_status("unavailable", "out-of-scope", 0);
       return mcp_text("PASS: cross-project verify disabled — repository is not the session's "
                       "current project (not gated). Enable with: aimee config set "
                       "verify_cross_project true");
+   }
    if (!in_scope && (strcmp(action_str, "run") == 0 || strcmp(action_str, "env") == 0 ||
                      strcmp(action_str, "prepare-pr") == 0))
+   {
+      if (json_out)
+         return verify_json_status("unavailable", "out-of-scope", 0);
       return mcp_text("skipped: cross-project verify disabled — this repository is not the "
                       "session's current project, so no project.yaml was generated and no steps "
                       "were run. Enable with: aimee config set verify_cross_project true");
+   }
 
    if (strcmp(action_str, "status") == 0)
    {
       if (!cJSON_IsNumber(jjob_id))
-         return mcp_text("error: missing or invalid 'job_id' for action=status");
+         return json_out ? verify_json_status("unavailable", "bad-job-id", 0)
+                         : mcp_text("error: missing or invalid 'job_id' for action=status");
       verify_job_t *job = verify_job_get(jjob_id->valueint);
       if (!job)
-         return mcp_text("error: job not found");
+         return json_out ? verify_json_status("unavailable", "job-not-found", 0)
+                         : mcp_text("error: job not found");
+
+      if (json_out)
+      {
+         pthread_mutex_lock(&job->lock);
+         cJSON *r;
+         if (job->active == 1) /* still running (cancelling counts as running) */
+            r = verify_json_status("pending", "running", job->id);
+         else if (job->verdict_json)
+            r = mcp_text(job->verdict_json);
+         else /* finished without a stored verdict (cancelled / hash failure) */
+            r = verify_json_status("unavailable", "no-verdict-recorded", job->id);
+         pthread_mutex_unlock(&job->lock);
+         return r;
+      }
 
       pthread_mutex_lock(&job->lock);
       dstr_t res;
@@ -1688,6 +1515,18 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
 
       char msg[512];
       int ok = verify_check(verify_root, expected_commit, msg, sizeof(msg));
+      if (json_out)
+      {
+         /* verify_check returns 1 for BOTH "no verify section (no gate)" and
+          * "fresh & valid". The driver must not read the former as a pass, so we
+          * probe the config: no steps => unavailable/no-verify-section, distinct
+          * from a real passed. */
+         verify_config_t cfg;
+         int has_steps = (verify_load_config(verify_root, &cfg) == 0 && cfg.count > 0);
+         if (!has_steps)
+            return verify_json_status("unavailable", "no-verify-section", 0);
+         return verify_json_status(ok ? "passed" : "failed", ok ? "ok" : "stale-or-failed", 0);
+      }
       dstr_t res;
       dstr_init(&res);
       dstr_appendf(&res, "%s: %s", ok ? "PASS" : "FAIL", msg);
@@ -1738,9 +1577,13 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
    /* Default: run verification */
    verify_config_t cfg;
    if (verify_load_config(verify_root, &cfg) != 0)
+   {
+      if (json_out)
+         return verify_json_status("unavailable", "no-verify-config", 0);
       return mcp_text("error: no verify config available — auto-generation failed (no Makefile "
                       "found, or no recognized targets). Create "
                       "~/.config/aimee/projects/<project>/project.yaml manually.");
+   }
 
    if (is_async && server_ctx)
    {
@@ -1854,6 +1697,8 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
          return mcp_text("error: compute queue full — retry in a moment");
       }
 
+      if (json_out)
+         return verify_json_status("pending", "dispatched", job->id);
       char buf[128];
       snprintf(buf, sizeof(buf),
                "Started background verification job #%d. Use git_verify action=status job_id=%d to "
@@ -1900,6 +1745,18 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
    verify_run_waves_on_pool(NULL, &cfg, contexts, has_changes ? NULL : file_hash);
    if (sync_cancel_registered)
       verify_unregister_session_cancel(&sync_cancel_requested);
+
+   /* Build the structured verdict BEFORE the text loop frees per-step output. The
+    * text section still runs unconditionally so the freshness cache is written
+    * identically whether the caller asked for json or text; only the RETURN
+    * differs. */
+   char *verdict_json_str = NULL;
+   if (json_out)
+   {
+      cJSON *v = verify_build_verdict(contexts, cfg.count, sync_cancel_requested, has_changes);
+      verdict_json_str = cJSON_PrintUnformatted(v);
+      cJSON_Delete(v);
+   }
 
    dstr_t result;
    dstr_init(&result);
@@ -1985,6 +1842,16 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
    else
       dstr_append_str(&result, "\nwarning: could not compute file hash");
 
+   if (json_out)
+   {
+      dstr_free(&result);
+      cJSON *r =
+          mcp_text(verdict_json_str
+                       ? verdict_json_str
+                       : "{\"schema_version\":1,\"verdict\":\"unavailable\",\"reason\":\"oom\"}");
+      free(verdict_json_str);
+      return r;
+   }
    cJSON *r = mcp_text(dstr_cstr(&result));
    dstr_free(&result);
    return r;

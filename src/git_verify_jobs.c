@@ -26,6 +26,7 @@ static void verify_job_reset_locked(verify_job_t *job)
    if (!job)
       return;
    free(job->output);
+   free(job->verdict_json);
    job->id = 0;
    job->active = 0;
    job->cancel_requested = 0;
@@ -33,6 +34,7 @@ static void verify_job_reset_locked(verify_job_t *job)
    job->failed = 0;
    job->total = 0;
    job->output = NULL;
+   job->verdict_json = NULL;
    job->file_hash[0] = '\0';
    job->session_id[0] = '\0';
 }

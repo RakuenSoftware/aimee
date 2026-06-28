@@ -147,6 +147,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-cmd-core $(TESTPREFIX)/unit-test-cmd-work \
                $(TESTPREFIX)/unit-test-client-integrations $(TESTPREFIX)/unit-test-mcp-git \
                $(TESTPREFIX)/unit-test-git-verify-select \
+               $(TESTPREFIX)/unit-test-git-verify-contract \
                $(TESTPREFIX)/unit-test-cli-mcp-serve \
                $(TESTPREFIX)/unit-test-cli-v1-delegate \
                $(TESTPREFIX)/unit-test-cli-server-compat \
@@ -1408,6 +1409,13 @@ $(TESTPREFIX)/unit-test-git-verify-select: $(OBJDIR)/tests/test_git_verify_selec
                         $(OBJDIR)/git_verify_select.o $(OBJDIR)/git_verify.o $(OBJDIR)/git_verify_config.o \
                         $(OBJDIR)/git_verify_jobs.o $(OBJDIR)/git_verify_hook.o $(OBJDIR)/git_verify_ops.o \
                         $(OBJDIR)/git_verify_step.o $(OBJDIR)/server/compute_pool.o \
+                        $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-git-verify-contract: $(OBJDIR)/tests/test_git_verify_contract.o \
+                        $(OBJDIR)/git_verify.o $(OBJDIR)/git_verify_config.o \
+                        $(OBJDIR)/git_verify_jobs.o $(OBJDIR)/git_verify_hook.o $(OBJDIR)/git_verify_ops.o \
+                        $(OBJDIR)/git_verify_select.o $(OBJDIR)/git_verify_step.o $(OBJDIR)/server/compute_pool.o \
                         $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

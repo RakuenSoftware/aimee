@@ -29,6 +29,11 @@ typedef struct
  * Server-side callers use verify_run_waves_on_pool directly. */
 void verify_run_waves(verify_config_t *cfg, verify_thread_ctx_t *contexts);
 void verify_run_step(verify_thread_ctx_t *ctx);
+
+/* Build the structured (format=json) verdict object from completed step contexts.
+ * Defined in git_verify.c; exposed for the structured-contract unit test. Caller
+ * owns the returned cJSON. */
+cJSON *verify_build_verdict(const verify_thread_ctx_t *ctxs, int n, int cancelled, int has_changes);
 void verify_config_prefer_verify_local(const char *project_root, verify_config_t *cfg);
 
 /* Resolve dir to the canonical main-repo root (worktrees collapse to the shared
