@@ -435,15 +435,19 @@ int code_default_branch_changed(const char *stored_sha, const char *current_sha)
    return strcmp(stored_sha, current_sha) != 0;
 }
 
-/* Skip a tracked path whose any component is a VCS/build/vendor/hidden dir, so a
- * checked-in node_modules/vendor tree is filtered exactly like the worktree walk
- * filters it (code_dir_skip). */
+/* Skip a tracked path whose any DIRECTORY component is a VCS/build/vendor/hidden
+ * dir, so a checked-in node_modules/vendor tree is filtered exactly like the
+ * worktree walk filters it (code_dir_skip on dirs only). The FINAL component (the
+ * filename) is NOT dir-skipped: its suitability is decided by code_file_wanted.
+ * code_dir_skip rejects any leading-'.' name, so testing it against the filename
+ * would wrongly drop a wanted dotfile manifest (e.g. a repo-root .gitmodules),
+ * diverging from the worktree walk which collects it (recall §2.2). */
 static int code_path_skipped(const char *rel)
 {
    const char *seg = rel;
    for (const char *p = rel;; p++)
    {
-      if (*p == '/' || *p == '\0')
+      if (*p == '/')
       {
          size_t len = (size_t)(p - seg);
          char comp[256];
@@ -454,10 +458,10 @@ static int code_path_skipped(const char *rel)
             if (code_dir_skip(comp))
                return 1;
          }
-         if (*p == '\0')
-            break;
          seg = p + 1;
       }
+      else if (*p == '\0')
+         break; /* trailing segment = filename; gated by code_file_wanted, not dir-skip */
    }
    return 0;
 }

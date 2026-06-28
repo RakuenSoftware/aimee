@@ -265,7 +265,16 @@ static void test_build_manifests_collected_git(void)
    git("config user.name t");
    write_file("CMakeLists.txt", "FetchContent_Declare(dep GIT_REPOSITORY x)");
    write_file("src/a.cpp", "int a(){return 0;}");
+   /* recall §2.2 regression: a repo-root .gitmodules is a wanted manifest whose
+    * filename starts with '.'. The git-tracked path must collect it (the worktree
+    * path already does) — code_path_skipped must not dir-skip the FINAL component. */
+   write_file(".gitmodules", "[submodule \"x\"]\n\turl = https://h/o/dep.git\n");
    write_file("build/CMakeLists.txt", "generated");
+   /* a checked-in vendor/ tree is still dir-skipped on the git path. */
+   write_file("vendor/dep/CMakeLists.txt", "FetchContent_Declare(y GIT_REPOSITORY z)");
+   /* a leading-dot NON-final directory component is still dir-skipped: only the
+    * trailing filename is exempt from code_dir_skip, not interior hidden dirs. */
+   write_file(".config/dep.cmake", "find_package(q)");
    git("add -A -f"); /* -f: build/ may be gitignored in some setups; force-track for the test */
    git("commit -qm c");
 
@@ -273,7 +282,10 @@ static void test_build_manifests_collected_git(void)
    code_collect_files_cb(g_root, rec_cb, NULL);
    assert(has("CMakeLists.txt"));
    assert(has("src/a.cpp"));
-   assert(!has("build/CMakeLists.txt")); /* build-output dir excluded on the git path too */
+   assert(has(".gitmodules"));                /* dotfile manifest collected on the git path */
+   assert(!has("build/CMakeLists.txt"));      /* build-output dir excluded on the git path too */
+   assert(!has("vendor/dep/CMakeLists.txt")); /* vendor dir still dir-skipped */
+   assert(!has(".config/dep.cmake")); /* interior hidden dir still dir-skipped (non-final) */
    printf("  test_build_manifests_collected_git: ok\n");
 }
 
