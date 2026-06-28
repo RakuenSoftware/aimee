@@ -4,6 +4,8 @@
 
 #include "cross_repo_resolver.h"
 
+#include "c_system_headers.h"
+
 #include <stdint.h>
 #include <string.h>
 
@@ -121,42 +123,6 @@ int xrepo_name_distinctive(const char *symbol, const xrepo_distinct_stats_t *sta
 
 /* ---- import resolution (§3.7) -------------------------------------------- */
 
-/* Builtin C/C++ system/framework headers: an include resolving to one of these
- * is rejected (never a cross-repo edge), even if a repo happens to index a file
- * of the same basename. The set is intentionally conservative; the configurable
- * per-workspace blocklist (S3) extends it, and a stale entry degrades to
- * AMBIGUOUS rather than failing open/closed. */
-static const char *const C_SYSTEM_HEADERS[] = {
-    "stdio.h",     "stdlib.h",      "string.h",      "stddef.h", "stdint.h",
-    "stdbool.h",   "stdarg.h",      "ctype.h",       "errno.h",  "math.h",
-    "time.h",      "assert.h",      "limits.h",      "unistd.h", "fcntl.h",
-    "signal.h",    "memory",        "vector",        "string",   "string_view",
-    "cstdio",      "cstdlib",       "cstring",       "cstdint",  "cstddef",
-    "cstdarg",     "cerrno",        "cctype",        "climits",  "map",
-    "set",         "unordered_map", "unordered_set", "list",     "deque",
-    "queue",       "stack",         "algorithm",     "numeric",  "ranges",
-    "utility",     "tuple",         "iostream",      "sstream",  "fstream",
-    "iomanip",     "mutex",         "thread",        "atomic",   "condition_variable",
-    "future",      "chrono",        "filesystem",    "cassert",  "cmath",
-    "stdexcept",   "array",         "functional",    "optional", "variant",
-    "type_traits", "memory.h",      "pthread.h",     "dlfcn.h",
-};
-
-static const char *basename_of(const char *path)
-{
-   const char *slash = strrchr(path, '/');
-   return slash ? slash + 1 : path;
-}
-
-static int is_c_system_header(const char *inc)
-{
-   const char *base = basename_of(inc);
-   for (size_t i = 0; i < sizeof(C_SYSTEM_HEADERS) / sizeof(C_SYSTEM_HEADERS[0]); i++)
-      if (strcmp(base, C_SYSTEM_HEADERS[i]) == 0)
-         return 1;
-   return 0;
-}
-
 /* True if `path` ends with `suffix` on a path-component boundary
  * (path == suffix, or path ends with "/"+suffix). */
 static int path_suffix_match(const char *path, const char *suffix)
@@ -211,7 +177,7 @@ static xrepo_resolve_result_t resolve_c(const char *inc, const char *caller_repo
                                         xrepo_import_modality_t modality,
                                         const xrepo_repo_desc_t *descs, size_t n)
 {
-   if (is_c_system_header(inc))
+   if (aimee_c_system_header_is(inc))
       return result_from_matches(NULL, 0, 1, modality);
 
    int matches[XREPO_MAX_COLLISIONS];

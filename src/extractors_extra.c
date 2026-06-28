@@ -1,6 +1,7 @@
 /* extractors_extra.c: language extractors for C#, Shell, CSS, Dart, C/C++, Lua */
 #include "aimee.h"
 #include "extractors_extra.h"
+#include "c_system_headers.h"
 #include <ctype.h>
 
 /* --- C# --- */
@@ -360,42 +361,6 @@ void dart_def_line(const char *line, int lineno, void *ctx)
 
 /* --- C/C++ --- */
 
-/* C/C++ standard-library + common system headers. A BARE ANGLE include `<name>`
- * exactly in this set is a toolchain header, never a cross-repo dependency, so H6
- * drops it at extraction: keeps file_imports lean (no ~10 stdlib rows per C file),
- * prevents the fixed import buffer from being exhausted by system headers (which
- * would drop the real <lib.h> dep H6 recovers), and removes the bare-stdlib
- * angle-collision FP class up front. Matched on the FULL include string (NOT the
- * basename), deliberately: stdlib headers are always included bare, so a
- * PATH-QUALIFIED `<thirdparty/string.h>` or `<sdk/vector>` is a real lib header
- * and must be KEPT — basename matching would wrongly drop it. Mirrors
- * db2/cross_repo_resolver.c's C_SYSTEM_HEADERS (the extractor can't link the db2
- * layer); both are the stable C/C++ stdlib. Quoted includes are never dropped. */
-static int c_is_system_header(const char *name)
-{
-   static const char *const sys[] = {
-       "stdio.h",     "stdlib.h",      "string.h",      "stddef.h", "stdint.h",
-       "stdbool.h",   "stdarg.h",      "ctype.h",       "errno.h",  "math.h",
-       "time.h",      "assert.h",      "limits.h",      "unistd.h", "fcntl.h",
-       "signal.h",    "memory",        "vector",        "string",   "string_view",
-       "cstdio",      "cstdlib",       "cstring",       "cstdint",  "cstddef",
-       "cstdarg",     "cerrno",        "cctype",        "climits",  "map",
-       "set",         "unordered_map", "unordered_set", "list",     "deque",
-       "queue",       "stack",         "algorithm",     "numeric",  "ranges",
-       "utility",     "tuple",         "iostream",      "sstream",  "fstream",
-       "iomanip",     "mutex",         "thread",        "atomic",   "condition_variable",
-       "future",      "chrono",        "filesystem",    "cassert",  "cmath",
-       "stdexcept",   "array",         "functional",    "optional", "variant",
-       "type_traits", "memory.h",      "pthread.h",     "dlfcn.h",
-   };
-   /* Match the FULL include string: a path-qualified angle include (containing '/')
-    * is a real lib header, never bare stdlib, so it can never match here and is kept. */
-   for (size_t i = 0; i < sizeof(sys) / sizeof(sys[0]); i++)
-      if (strcmp(name, sys[i]) == 0)
-         return 1;
-   return 0;
-}
-
 void c_import_line(const char *line, int lineno, void *ctx)
 {
    import_ctx_t *ic = (import_ctx_t *)ctx;
@@ -434,7 +399,7 @@ void c_import_line(const char *line, int lineno, void *ctx)
       buf[len] = '\0';
       is_sys = 1;
       /* Drop C/C++ stdlib/system angle includes up front (never cross-repo). */
-      if (c_is_system_header(buf))
+      if (aimee_c_system_header_is(buf))
          return;
    }
    else

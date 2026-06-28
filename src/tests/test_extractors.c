@@ -42,6 +42,12 @@ static void test_c_imports(void)
    assert(ic.count == 4);
    c_import_line("#include <vector>", 6, &ic);
    assert(ic.count == 4);
+   /* H7: Windows system headers (angle, _WIN32 paths) are dropped too — closes the
+    * <process.h>-vs-a-repo's-process.h incidental-collision FP found in H4. */
+   c_import_line("#include <process.h>", 7, &ic);
+   assert(ic.count == 4);
+   c_import_line("#include <windows.h>", 8, &ic);
+   assert(ic.count == 4);
 
    /* but a PATH-QUALIFIED angle include with a stdlib-like basename is a real lib
     * header and is KEPT (matched on the full string, not the basename). */

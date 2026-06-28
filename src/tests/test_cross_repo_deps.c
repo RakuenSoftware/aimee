@@ -161,6 +161,14 @@ static void test_resolve_c(void)
    r = xrepo_resolve_import_to_repo("vector", XREPO_LANG_CPP, "moonlight-qt", XREPO_IMPORT_STATIC,
                                     SEED, SEED_N);
    assert(r.cardinality == XREPO_RESOLVE_NONE && r.system_header == 1);
+   /* H7: Windows system headers rejected too (the resolver's shared system-header
+    * list); case-insensitive (<Windows.h> == <windows.h>). */
+   r = xrepo_resolve_import_to_repo("process.h", XREPO_LANG_C, "moonlight-qt", XREPO_IMPORT_STATIC,
+                                    SEED, SEED_N);
+   assert(r.cardinality == XREPO_RESOLVE_NONE && r.system_header == 1);
+   r = xrepo_resolve_import_to_repo("Windows.h", XREPO_LANG_C, "moonlight-qt", XREPO_IMPORT_STATIC,
+                                    SEED, SEED_N);
+   assert(r.cardinality == XREPO_RESOLVE_NONE && r.system_header == 1);
 
    /* Vendored copy in two repos -> AMBIGUOUS (MANY), never guessed; the colliders
     * are enumerated for the review queue. */
