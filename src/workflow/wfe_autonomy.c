@@ -1,6 +1,8 @@
 /* wfe_autonomy.c: the autonomy driver + human-only gate-override. */
 #include "wfe_autonomy.h"
 
+#include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,26 +16,40 @@
 #include "wfe_iface.h"
 
 /* A positive long from an env var, else the default (a safety rail must never be
- * silently disabled by a malformed override). */
+ * silently disabled by a malformed override). Rejects junk, non-positive, AND
+ * strtol overflow (ERANGE -> LONG_MAX would otherwise pass the n>0 test). */
 static long wfe_env_long(const char *name, long def)
 {
    const char *v = getenv(name);
    if (!v || !v[0])
       return def;
+   errno = 0;
    char *end = NULL;
    long n = strtol(v, &end, 10);
-   return (end && *end == '\0' && n > 0) ? n : def;
+   if (errno == ERANGE || !end || *end != '\0' || n <= 0)
+      return def;
+   return n;
 }
 
 /* Park an active, not-yet-parked autonomous work item with budget_exceeded and
- * audit the reason. Safety rail: on breach we park, never silently continue. */
-static void wfe_autonomy_park_budget(const char *work_item_id, const char *why)
+ * audit the reason. Returns 0 on a clean park, 1 if it was already parked (still
+ * audits the breach), -1 if the row could not be read (caller hard-stops — a
+ * safety rail must not silently no-op on a read failure). */
+static int wfe_autonomy_park_budget(const char *work_item_id, const char *why)
 {
    db1_work_item_t wi;
-   if (db1_work_item_get(work_item_id, &wi) != 1 || wi.pause_reason[0])
-      return;
+   if (db1_work_item_get(work_item_id, &wi) != 1)
+      return -1;
+   if (wi.pause_reason[0])
+   {
+      /* already parked (e.g. at a gate): record the breach for audit, don't
+       * overwrite the existing pause reason. */
+      db1_lifecycle_event_add(work_item_id, wi.current_stage, "budget", "engine", why, "", 0);
+      return 1;
+   }
    db1_work_item_set_pause(work_item_id, "budget_exceeded", wi.current_stage);
    db1_lifecycle_event_add(work_item_id, wi.current_stage, "pause", "engine", why, "", 0);
+   return 0;
 }
 
 /* Is this paused node a human gate the driver may auto-satisfy in autonomous
@@ -58,26 +74,41 @@ static int human_gate_auto_ok(const wfe_node_t *node)
 
 int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
 {
-   /* Per-run safety ceilings (WP-5): a cumulative turn cap (counted from the
-    * persisted audit log, so it bounds the WHOLE run across resumes, not just this
-    * one) and a wall-clock cap for this resume. On breach -> park budget_exceeded.
-    * Env-overridable per deployment; a bad override falls back to the default. */
+   /* Per-run safety ceilings (WP-5). max_turns is a CUMULATIVE cap on the persisted
+    * audit-event count: it bounds the WHOLE run across resumes (events persist), and
+    * because one advance emits several events it is a deliberately CONSERVATIVE upper
+    * bound on advances — fine for a runaway backstop. max_wall bounds THIS resume's
+    * wall-clock (a single hung resume); total run time is bounded transitively by the
+    * cumulative turn cap. On breach -> park budget_exceeded (never silently continue).
+    * Env-overridable; a bad override falls back to the default. */
    long max_turns = wfe_env_long("AIMEE_AUTONOMY_MAX_TURNS", 300);
    long max_wall = wfe_env_long("AIMEE_AUTONOMY_MAX_WALL_SECS", 1800);
-   time_t run_start = time(NULL);
+   struct timespec ts0;
+   clock_gettime(CLOCK_MONOTONIC, &ts0); /* monotonic: immune to NTP/clock jumps */
    for (int i = 0; i < 10000; i++)
    {
       db1_lifecycle_event_t *evs = NULL;
       int nev = db1_lifecycle_event_list(work_item_id, &evs);
       free(evs);
-      if (nev > 0 && (long)nev >= max_turns)
+      const char *breach = NULL;
+      if (nev < 0)
+         breach = "turn cap: audit log unreadable"; /* can't evaluate -> fail closed */
+      else if ((long)nev >= max_turns)
+         breach = "turn cap reached";
+      else
       {
-         wfe_autonomy_park_budget(work_item_id, "turn cap reached");
-         return 0;
+         struct timespec ts;
+         clock_gettime(CLOCK_MONOTONIC, &ts);
+         if ((long)(ts.tv_sec - ts0.tv_sec) >= max_wall)
+            breach = "wall-clock cap reached (this resume)";
       }
-      if ((long)(time(NULL) - run_start) >= max_wall)
+      if (breach)
       {
-         wfe_autonomy_park_budget(work_item_id, "wall-clock cap reached");
+         if (wfe_autonomy_park_budget(work_item_id, breach) < 0)
+         {
+            snprintf(err, errlen, "autonomy: budget breach but work item unreadable to park");
+            return -1; /* surface; never leave a breached run un-parked + claim success */
+         }
          return 0;
       }
 

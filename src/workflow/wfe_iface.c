@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h> /* strcasecmp / strncasecmp */
 
 /* ---- autonomous merge-target rail (WP-5 safety; see wfe_iface.h) ---- */
 
@@ -17,9 +18,14 @@ int wfe_base_is_protected(const char *branch)
 {
    if (!branch || !branch[0])
       return 1; /* empty -> treat as protected (fail closed) */
-   if (strcmp(branch, "main") == 0 || strcmp(branch, "master") == 0)
+   /* Case-insensitive: 'Main'/'MASTER' must not slip past. */
+   if (strcasecmp(branch, "main") == 0 || strcasecmp(branch, "master") == 0)
       return 1;
-   if (strncmp(branch, "release", 7) == 0)
+   /* Protect the release-train namespace ("release/..." or "release-<ver>") without
+    * snagging an unrelated branch that merely starts with the word "release"
+    * (e.g. "release-notes-edit"): require a separator + a version-ish char. */
+   if (strncasecmp(branch, "release", 7) == 0 && (branch[7] == '/' || branch[7] == '-') &&
+       (branch[8] == 'v' || (branch[8] >= '0' && branch[8] <= '9')))
       return 1;
    return 0;
 }

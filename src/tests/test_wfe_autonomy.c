@@ -169,10 +169,14 @@ int main(void)
    {
       assert(wfe_base_is_protected("main"));
       assert(wfe_base_is_protected("master"));
+      assert(wfe_base_is_protected("Main"));   /* case-insensitive */
+      assert(wfe_base_is_protected("MASTER")); /* case-insensitive */
       assert(wfe_base_is_protected("release-1.2"));
+      assert(wfe_base_is_protected("release/v2.0"));
       assert(wfe_base_is_protected("")); /* empty -> protected (fail closed) */
       assert(!wfe_base_is_protected("testing"));
       assert(!wfe_base_is_protected("aimee/wi/abc"));
+      assert(!wfe_base_is_protected("release-notes-edit")); /* not the release train */
       unsetenv("AIMEE_AUTONOMY_BASE");
       assert(strcmp(wfe_autonomous_base(), "testing") == 0);
       assert(wfe_autonomous_target_ok());
