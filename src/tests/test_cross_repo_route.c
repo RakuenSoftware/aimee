@@ -330,6 +330,50 @@ static void test_angle_include_recall(void)
    printf("ok\n");
 }
 
+/* recall §3 (precision): a VENDORED caller file (a monorepo's subprojects/ tree,
+ * a fetched _deps/ copy) is the dep's code, not the host repo's — its #includes /
+ * module imports must NOT generate cross-repo routes attributed to the host. This
+ * killed the gstreamer-h265 FP routes (its entire tree is under vendored
+ * subprojects/, sharing generic header basenames like common.h/utils.h with other
+ * corpus repos). A NON-vendored caller still routes. */
+static void test_vendored_caller_excluded(void)
+{
+   printf("test_vendored_caller_excluded... ");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('vcap','/vca','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('vcap2','/vca2','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('vchdr','/vch','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('vcmod','/vcm','t','trusted')");
+   /* definer headers/identity (non-vendored, first-party). */
+   mk_file("vchdr", "include/vcwidget.h", "c", 0);
+   mk_identity("vcmod", "gomod", "example.com/vcmod");
+   /* vcap: a VENDORED file imports both — must produce NO routes from it. */
+   mk_file("vcap", "subprojects/dep/a.c", "c", 1);
+   mk_import("vcap", "subprojects/dep/a.c", "vcwidget.h");
+   mk_file("vcap", "subprojects/dep/b.go", "go", 1);
+   mk_import("vcap", "subprojects/dep/b.go", "example.com/vcmod/sub");
+   /* vcap: NON-vendored files import both — positive controls (header + module). */
+   mk_file("vcap", "src/own.c", "c", 0);
+   mk_import("vcap", "src/own.c", "vcwidget.h");
+   mk_file("vcap", "src/own.go", "go", 0);
+   mk_import("vcap", "src/own.go", "example.com/vcmod/sub");
+   /* vcap2: its ONLY importers are VENDORED — proves the exclusion independent of
+    * route dedup (no non-vendored sibling could mask a leaked vendored route). */
+   mk_file("vcap2", "subprojects/dep/c.c", "c", 1);
+   mk_import("vcap2", "subprojects/dep/c.c", "vcwidget.h");
+   mk_file("vcap2", "subprojects/dep/d.go", "go", 1);
+   mk_import("vcap2", "subprojects/dep/d.go", "example.com/vcmod/sub");
+
+   int rc = db2_cross_repo_rebuild_routes();
+   assert(rc >= 0);
+   /* vcap routes exist via its NON-vendored files (header + module controls). */
+   assert(route_count("vcap", "vchdr", "import_header") == 1);
+   assert(route_count("vcap", "vcmod", "import_module") == 1);
+   /* vcap2 has ONLY vendored importers -> no routes at all. */
+   assert(route_count("vcap2", "vchdr", "import_header") == 0);
+   assert(route_count("vcap2", "vcmod", "import_module") == 0);
+   printf("ok\n");
+}
+
 int main(void)
 {
    db2_test_shim_open();
@@ -337,6 +381,7 @@ int main(void)
    test_header_idf();
    test_prefer_local_and_generated();
    test_angle_include_recall();
+   test_vendored_caller_excluded();
    printf("cross_repo_route: all tests passed\n");
    return 0;
 }

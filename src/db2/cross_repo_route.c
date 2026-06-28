@@ -38,7 +38,9 @@ static const char *const SQL_MODULE_ROUTES =
         "ci.value") " || '/%' ESCAPE '\\' "
                     "  OR imp.name LIKE " ESC(
                         "ci.value") " || '::%' ESCAPE '\\') "
-                                    "WHERE ci.project <> pc.name AND ("
+                                    /* cf.vendored = 0: a vendored caller file is the
+                                     * dep's code, not the host's (recall §3). */
+                                    "WHERE ci.project <> pc.name AND cf.vendored = 0 AND ("
                                     "  (cf.language = 'go' AND ci.kind = 'gomod') "
                                     "  OR (cf.language = 'rust' AND ci.kind = 'crate') "
                                     "  OR (cf.language IN ('js', 'ts') AND ci.kind = 'npm') "
@@ -105,7 +107,12 @@ static const char *const SQL_HEADER_ROUTES =
     "JOIN projects pc ON pc.id = cf.project_id "
     "JOIN files fd ON (fd.path = imp.name OR fd.path LIKE '%/' || " ESC("imp.name") " ESCAPE '\\') "
     "JOIN projects pd ON pd.id = fd.project_id "
-    "WHERE cf.language IN ('c', 'cpp') AND fd.vendored = 0 AND pd.name <> pc.name "
+    /* cf.vendored = 0: a VENDORED caller file (e.g. a monorepo's subprojects/ or a
+     * fetched _deps/ tree) is the dep's code, not the host repo's — its #includes
+     * must not generate routes attributed to the host (recall §3, mirrors the
+     * definer-side fd.vendored = 0 and the originated-vendored exclusion). */
+    "WHERE cf.language IN ('c', 'cpp') AND cf.vendored = 0 AND fd.vendored = 0 "
+    "  AND pd.name <> pc.name "
     /* §2 header IDF: drop ubiquitous (>=4 non-vendored repos) include specifiers. */
     "  AND (SELECT COUNT(DISTINCT fx.project_id) FROM files fx "
     "       WHERE (fx.path = imp.name OR fx.path LIKE '%/' || " ESC("imp.name") " ESCAPE '\\') "
