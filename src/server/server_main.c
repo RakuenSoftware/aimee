@@ -27,6 +27,8 @@
 #include "headers/plugin_loader.h"
 #include "headers/context_engine.h"
 #include "headers/server_cli_oauth.h"
+#include "vault_server_key.h"
+#include "vault_service.h" /* VAULT_SERVER_PRINCIPAL (rotation target) */
 #include <signal.h>
 #include <errno.h>
 #include <stdio.h>
@@ -305,6 +307,34 @@ int main(int argc, char **argv)
       return 0; /* best-effort — never fail the boot that backgrounds this */
    }
 
+   /* Offline master-key rotation (D13). Re-wrap every principal's server wrap
+    * from the old `.server-master.key` to a freshly minted one — a re-wrap, not a
+    * re-encrypt. MUST run with the normal server stopped (the server caches one
+    * process-wide server KEK, so a live rotation would leave autonomous decrypts
+    * failing mid-rotation). Backs up `.vault/` first and restores it on any
+    * failure, then exits without starting the server. */
+   if (argc >= 2 && strcmp(argv[1], "--rotate-master-key") == 0)
+   {
+      int principals = 0, creds = 0;
+      char backup[1280] = "", err[256] = "";
+      if (vault_server_key_rotate(VAULT_SERVER_PRINCIPAL, &principals, &creds, backup,
+                                  sizeof(backup), err, sizeof(err)) != 0)
+      {
+         fprintf(stderr, "aimee-server: master-key rotation FAILED: %s\n",
+                 err[0] ? err : "unknown error");
+         return 1;
+      }
+      if (backup[0])
+         fprintf(stderr,
+                 "aimee-server: master key rotated — re-wrapped %d credential(s) across %d "
+                 "principal(s).\n  Pre-rotation backup: %s\n  Verify delegates authenticate, "
+                 "then remove the backup.\n",
+                 creds, principals, backup);
+      else
+         fprintf(stderr, "aimee-server: no master key present yet — nothing to rotate.\n");
+      return 0;
+   }
+
    const char *socket_path = NULL;
    log_level_t log_level = LOG_INFO;
    int service_mode = 0;
@@ -348,6 +378,8 @@ int main(int argc, char **argv)
              "  --log-level=LEVEL    Log level: error, warn, info, debug (default: info)\n"
              "  --foreground         Run in foreground (default)\n"
              "  --service            Run under the Windows Service Control Manager\n"
+             "  --rotate-master-key  Re-wrap the vault under a fresh .server-master.key and exit\n"
+             "                       (run with the server STOPPED; backs up .vault first)\n"
              "  --version            Print version\n"
              "  --help               Show this help\n");
          return 0;

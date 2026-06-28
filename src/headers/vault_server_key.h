@@ -44,4 +44,32 @@ int vault_server_kek(uint8_t kek[VAULT_KEK_LEN]);
  * Not for production callers. */
 void vault_server_key_reset_for_test(void);
 
+/* Rotate the `.server-master.key` (D13). Mint a fresh master key, derive the new
+ * server KEK, and RE-WRAP every principal's server wrap from the old KEK to the
+ * new one — a re-wrap, not a re-encrypt: no credential plaintext is touched.
+ *
+ * This is an OFFLINE maintenance operation: the server caches one process-wide
+ * server KEK, so a live rotation would leave autonomous decrypts failing for the
+ * window between re-wrapping a credential and swapping the key. Run it with the
+ * server STOPPED (e.g. `aimee-server --rotate-master-key`).
+ *
+ * Crash/error safety: the whole `.vault/` directory is copied to a 0700 backup
+ * BEFORE any mutation; if ANY principal's re-wrap fails, or the new master cannot
+ * be persisted, the vault is restored from that backup and the rotation aborts
+ * with the vault unchanged (fail-closed — never a new-wrapped vault under an old
+ * master, nor the reverse). On success the backup path is reported so the
+ * operator can verify, then remove it.
+ *
+ * `server_principal` is the principal whose PRIMARY wrap ("wrapped_dek") is the
+ * server KEK (i.e. VAULT_SERVER_PRINCIPAL); every other principal carries the
+ * server KEK only in its dual-access "wrapped_dek_server" field. Passed in so the
+ * key module need not depend on the vault_service naming layer.
+ *
+ * On success returns 0 and (if non-NULL) sets *out_principals / *out_creds to the
+ * number of principals scanned and credentials re-wrapped, and writes the backup
+ * directory path into `backup_path`. On failure returns -1 with a human-readable
+ * reason in `errbuf`. A vault with no master key yet returns 0 (nothing to do). */
+int vault_server_key_rotate(const char *server_principal, int *out_principals, int *out_creds,
+                            char *backup_path, size_t backup_path_len, char *errbuf, size_t errlen);
+
 #endif /* DEC_VAULT_SERVER_KEY_H */

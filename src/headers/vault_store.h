@@ -3,7 +3,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include "vault_crypto.h" /* VAULT_KEK_LEN, VAULT_SALT_LEN */
+#include "vault_crypto.h"    /* VAULT_KEK_LEN, VAULT_SALT_LEN */
+#include "vault_principal.h" /* VAULT_PRINCIPAL_MAX */
 
 /* vault_store: the on-disk substrate for the credential vault (WP-C.1). One
  * 0600 JSON file per attested PRINCIPAL under <aimee_home>/.vault/, holding the
@@ -118,5 +119,26 @@ int vault_store_delete(const char *principal, const char *agent, const char *cre
  * returned (fail-closed). 0 on success (incl. an empty vault). */
 int vault_store_rekey(const char *principal, const uint8_t old_kek[VAULT_KEK_LEN],
                       const uint8_t new_kek[VAULT_KEK_LEN]);
+
+/* Re-wrap the named DEK-wrap `field` of every credential under `principal` from
+ * `old_kek` to `new_kek` — the master-key rotation path (D13). `field` is the
+ * wrap that is held under the SERVER KEK: "wrapped_dek" for the server principal
+ * (whose primary wrap IS the server KEK) or "wrapped_dek_server" for a user
+ * principal's dual-access wrap. The DEKs, nonces, ciphertext and tags are
+ * untouched (a re-wrap, not a re-encrypt). A credential lacking `field` is left
+ * as-is. Atomic per principal: if ANY present `field` fails to unwrap under
+ * `old_kek` (wrong key / tamper) nothing is written and -1 is returned
+ * (fail-closed). On success returns the number of credentials re-wrapped (>=0);
+ * a principal whose vault file is absent returns 0. */
+int vault_store_rekey_field(const char *principal, const char *field,
+                            const uint8_t old_kek[VAULT_KEK_LEN],
+                            const uint8_t new_kek[VAULT_KEK_LEN]);
+
+/* Enumerate the principals that currently have a vault file, decoding each
+ * `<b64url(principal)>.json` name back to its principal string. Writes up to
+ * `max` names into `out` (each up to VAULT_PRINCIPAL_MAX). Returns the count
+ * written (>=0), or -1 on error. Used by master-key rotation to re-wrap every
+ * principal that may hold a server wrap, not just the "server" principal. */
+int vault_store_list_principals(char (*out)[VAULT_PRINCIPAL_MAX], int max);
 
 #endif /* DEC_VAULT_STORE_H */

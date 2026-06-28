@@ -9,6 +9,7 @@
 #include "platform_path.h" /* platform_mkdir_p */
 #include "cJSON.h"
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
+#include <dirent.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -643,6 +644,97 @@ int vault_store_add_server_wraps(const char *principal, const uint8_t user_kek[V
    cJSON_Delete(root);
    pthread_mutex_unlock(&g_vault_write_mu);
    return rc;
+}
+
+int vault_store_rekey_field(const char *principal, const char *field,
+                            const uint8_t old_kek[VAULT_KEK_LEN],
+                            const uint8_t new_kek[VAULT_KEK_LEN])
+{
+   if (!principal || !field || !field[0] || !old_kek || !new_kek)
+      return -1;
+   pthread_mutex_lock(&g_vault_write_mu);
+   cJSON *root = load_vault(principal);
+   if (!root)
+   {
+      pthread_mutex_unlock(&g_vault_write_mu);
+      return 0; /* no vault for this principal -> nothing to re-wrap */
+   }
+
+   int rc = 0;
+   int rewrapped_count = 0;
+   cJSON *creds = creds_array(root);
+   cJSON *e = NULL;
+   if (creds)
+   {
+      cJSON_ArrayForEach(e, creds)
+      {
+         cJSON *jw = cJSON_GetObjectItemCaseSensitive(e, field);
+         if (!cJSON_IsString(jw))
+            continue; /* this cred has no such wrap — left untouched */
+         uint8_t wrapped[VAULT_WRAPPED_DEK_LEN], dek[VAULT_DEK_LEN],
+             rewrapped[VAULT_WRAPPED_DEK_LEN];
+         if (b64url_decode(jw->valuestring, wrapped, sizeof(wrapped)) != VAULT_WRAPPED_DEK_LEN ||
+             vault_dek_unwrap(old_kek, wrapped, dek) != 0 ||
+             vault_dek_wrap(new_kek, dek, rewrapped) != 0)
+         {
+            OPENSSL_cleanse(dek, sizeof(dek));
+            rc = -1; /* wrong old KEK / tamper -> abort, write nothing */
+            break;
+         }
+         char *enc = b64url_encode(rewrapped, sizeof(rewrapped));
+         OPENSSL_cleanse(dek, sizeof(dek));
+         if (!enc)
+         {
+            rc = -1;
+            break;
+         }
+         cJSON_SetValuestring(jw, enc); /* overwrite in place */
+         free(enc);
+         rewrapped_count++;
+      }
+   }
+   if (rc == 0 && rewrapped_count > 0)
+      rc = write_vault_file(principal, root);
+   cJSON_Delete(root);
+   pthread_mutex_unlock(&g_vault_write_mu);
+   return rc == 0 ? rewrapped_count : -1;
+}
+
+int vault_store_list_principals(char (*out)[VAULT_PRINCIPAL_MAX], int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   char dir[1024];
+   if (vault_dir(dir, sizeof(dir)) != 0)
+      return -1;
+   DIR *d = opendir(dir);
+   if (!d)
+      return 0; /* no .vault dir yet -> no principals */
+   int count = 0;
+   struct dirent *de;
+   while (count < max && (de = readdir(d)) != NULL)
+   {
+      const char *name = de->d_name;
+      size_t len = strlen(name);
+      /* vault files are "<b64url(principal)>.json"; skip ., .., and the
+       * special master-key / non-JSON entries. */
+      if (len <= 5 || strcmp(name + len - 5, ".json") != 0)
+         continue;
+      char b64[256];
+      if (len - 5 >= sizeof(b64))
+         continue;
+      memcpy(b64, name, len - 5);
+      b64[len - 5] = '\0';
+      uint8_t decoded[VAULT_PRINCIPAL_MAX];
+      int n = b64url_decode(b64, decoded, sizeof(decoded) - 1);
+      if (n <= 0 || (size_t)n >= sizeof(decoded))
+         continue; /* not a principal-named vault file */
+      memcpy(out[count], decoded, (size_t)n);
+      out[count][n] = '\0';
+      count++;
+   }
+   closedir(d);
+   return count;
 }
 
 int vault_store_salt_readonly(const char *principal, uint8_t salt[VAULT_SALT_LEN])
