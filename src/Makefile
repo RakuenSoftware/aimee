@@ -314,7 +314,8 @@ DB2_SRCS = db2/db2_init.c db2/db2_reembed.c db2/db2_pool.c db2/agent_hints.c db2
            db2/pgvec_transport.c db2/memory_vectors.c db2/kb_vectors.c db2/vector_status.c db2/pgvec_verify.c db2/pgvec_kb_service.c \
            db2/curator_terms.c db2/curator_gaps.c \
            db2/cross_repo_resolver.c db2/cross_repo_classify.c db2/cross_repo_stats.c \
-           db2/cross_repo_deps.c db2/cross_repo_review.c db2/cross_repo_identity.c
+           db2/cross_repo_deps.c db2/cross_repo_review.c db2/cross_repo_identity.c \
+           db2/cross_repo_route.c
 DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/%.o)
 
 # --- Layer 1: Data & policy (memory, index, rules, guardrails, workspace) ---

@@ -335,6 +335,9 @@ CREATE TABLE IF NOT EXISTS cross_repo_trust_audit (  id INTEGER PRIMARY KEY AUTO
 CREATE INDEX IF NOT EXISTS idx_crta_project ON cross_repo_trust_audit(project, created_at);
 CREATE TABLE IF NOT EXISTS cross_repo_identity (  id INTEGER PRIMARY KEY AUTOINCREMENT,  project TEXT NOT NULL,  kind TEXT NOT NULL,  value TEXT NOT NULL,  UNIQUE(project, kind, value));
 CREATE INDEX IF NOT EXISTS idx_cri_lookup ON cross_repo_identity(kind, value);
+CREATE TABLE IF NOT EXISTS cross_repo_route (  id INTEGER PRIMARY KEY AUTOINCREMENT,  caller_project TEXT NOT NULL,  definer_project TEXT NOT NULL,  kind TEXT NOT NULL,  confidence TEXT NOT NULL DEFAULT 'medium',  evidence TEXT NOT NULL DEFAULT '',  UNIQUE(caller_project, definer_project, kind, evidence));
+CREATE INDEX IF NOT EXISTS idx_crr_caller ON cross_repo_route(caller_project);
+CREATE INDEX IF NOT EXISTS idx_crr_definer ON cross_repo_route(definer_project);
 CREATE TABLE IF NOT EXISTS code_embeddings (  point_id INTEGER PRIMARY KEY,  embedding TEXT NOT NULL DEFAULT '[]',  project TEXT NOT NULL DEFAULT '',  node_key TEXT NOT NULL DEFAULT '',  file_path TEXT NOT NULL DEFAULT '',  symbol TEXT NOT NULL DEFAULT '',  record_type TEXT NOT NULL DEFAULT 'code_unit',  content_hash TEXT NOT NULL DEFAULT '',  body_hash TEXT NOT NULL DEFAULT '',  source_hash TEXT NOT NULL DEFAULT '',  payload_json TEXT NOT NULL DEFAULT '',  updated_at TEXT NOT NULL DEFAULT (datetime('now')));
 CREATE INDEX IF NOT EXISTS idx_code_embeddings_project ON code_embeddings(project);
 CREATE INDEX IF NOT EXISTS idx_code_embeddings_node ON code_embeddings(project, node_key);
