@@ -32,6 +32,11 @@ xrepo_lang_t xrepo_lang_from_path(const char *path);
 /* Stable lowercase tag ("c","cpp","rust","go","ts","js","python","unknown"). */
 const char *xrepo_lang_name(xrepo_lang_t lang);
 
+/* H0b: 1 if any path SEGMENT is a vendored/third-party dir (vendor, third_party,
+ * extern, deps, subprojects, node_modules, ...). Definitions under such a subtree
+ * are not first-party API (precision-hardening §4). Whole-segment match. */
+int xrepo_path_is_vendored(const char *path);
+
 /* Import modality (§3.7): static imports can reach HIGH; conditional ones
  * downgrade HIGH->MEDIUM; dynamic ones are routed to the review queue and never
  * reach static HIGH. The caller (S3/S4) determines the modality from the

@@ -62,6 +62,34 @@ const char *xrepo_lang_name(xrepo_lang_t lang)
    }
 }
 
+/* ---- vendored / third-party path classification (H0b) -------------------- */
+
+/* A definition under a vendored/third-party subtree is not first-party API of
+ * its repo; §4 of the precision-hardening proposal prefers a non-vendored definer
+ * and routes vendored-only collisions to AMBIGUOUS. Matches a whole path SEGMENT
+ * (so "vendored_thing/x.c" is NOT vendored but "vendor/x.c" is). Returns 1/0. */
+int xrepo_path_is_vendored(const char *path)
+{
+   if (!path || !path[0])
+      return 0;
+   static const char *dirs[] = {
+       "vendor",      "third_party", "third-party",   "extern",
+       "external",    "deps",        ".deps",         "_deps", /* CMake FetchContent cache */
+       "subprojects", "Pods",        "node_modules",  "bower_components",
+       ".venv",       "venv",        "site-packages", NULL};
+   const char *seg = path;
+   while (seg && *seg)
+   {
+      const char *slash = strchr(seg, '/');
+      size_t len = slash ? (size_t)(slash - seg) : strlen(seg);
+      for (int i = 0; dirs[i]; i++)
+         if (strlen(dirs[i]) == len && strncmp(seg, dirs[i], len) == 0)
+            return 1;
+      seg = slash ? slash + 1 : NULL;
+   }
+   return 0;
+}
+
 /* ---- distinctiveness (§3.3) ---------------------------------------------- */
 
 size_t xrepo_utf8_len(const char *s)

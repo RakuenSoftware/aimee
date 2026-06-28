@@ -3,6 +3,7 @@
 #include "code_index.h"
 #include "../headers/aimee.h"      /* MAX_PATH_LEN, now_utc */
 #include "../headers/code_match.h" /* code_match_line (P1b span enrichment) */
+#include "cross_repo_resolver.h"   /* H0b: xrepo_lang_name / xrepo_path_is_vendored */
 #include "db2.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
@@ -451,9 +452,13 @@ int64_t db2_code_index_file_upsert(int64_t project_id, const char *rel_path, con
    if (!conn)
       return -1;
 
-   static const char *sql = "INSERT INTO files (project_id, path, scanned_at)"
-                            " VALUES (?1, ?2, ?3)"
-                            " ON CONFLICT(project_id, path) DO UPDATE SET scanned_at = ?3"
+   /* H0b: per-file language + vendored flag, derived from the path at index time. */
+   const char *language = xrepo_lang_name(xrepo_lang_from_path(rel_path));
+   int vendored = xrepo_path_is_vendored(rel_path);
+   static const char *sql = "INSERT INTO files (project_id, path, scanned_at, language, vendored)"
+                            " VALUES (?1, ?2, ?3, ?4, ?5)"
+                            " ON CONFLICT(project_id, path) DO UPDATE SET scanned_at = ?3,"
+                            " language = ?4, vendored = ?5"
                             " RETURNING id";
    char err[CIDX_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -462,6 +467,8 @@ int64_t db2_code_index_file_upsert(int64_t project_id, const char *rel_path, con
    aimee_pg_bind_int64(st, "?1", project_id);
    aimee_pg_bind_text(st, "?2", rel_path);
    aimee_pg_bind_text(st, "?3", scanned_at);
+   aimee_pg_bind_text(st, "?4", language);
+   aimee_pg_bind_int(st, "?5", vendored);
    int64_t id = -1;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       id = aimee_pg_column_int64(st, 0);

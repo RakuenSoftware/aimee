@@ -36,6 +36,27 @@ static void test_lang_from_path(void)
    printf("ok\n");
 }
 
+static void test_path_is_vendored(void)
+{
+   printf("test_path_is_vendored... ");
+   /* whole-segment match anywhere in the path */
+   assert(xrepo_path_is_vendored("vendor/foo/bar.c") == 1);
+   assert(xrepo_path_is_vendored("src/third_party/x.h") == 1);
+   assert(xrepo_path_is_vendored("app/extern/lib/y.cpp") == 1);
+   assert(xrepo_path_is_vendored("web/node_modules/pkg/index.js") == 1);
+   assert(xrepo_path_is_vendored("build/subprojects/dep/d.c") == 1);
+   assert(xrepo_path_is_vendored("deps/zlib/zlib.h") == 1);
+   assert(xrepo_path_is_vendored("build/_deps/fmt-src/fmt.h") == 1); /* CMake FetchContent */
+   assert(xrepo_path_is_vendored(".venv/lib/site-packages/x.py") == 1);
+   /* first-party paths are NOT vendored; substring-but-not-segment must not match */
+   assert(xrepo_path_is_vendored("src/main.c") == 0);
+   assert(xrepo_path_is_vendored("src/vendored_thing/x.c") == 0); /* "vendored_thing" != "vendor" */
+   assert(xrepo_path_is_vendored("lib/dependency.c") == 0);       /* "dependency" != "deps" */
+   assert(xrepo_path_is_vendored("") == 0);
+   assert(xrepo_path_is_vendored(NULL) == 0);
+   printf("ok\n");
+}
+
 static void test_utf8_len(void)
 {
    printf("test_utf8_len... ");
@@ -443,6 +464,7 @@ static void test_evidence_score(void)
 int main(void)
 {
    test_lang_from_path();
+   test_path_is_vendored();
    test_utf8_len();
    test_distinctiveness();
    test_resolve_c();

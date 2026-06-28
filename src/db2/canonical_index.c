@@ -12,6 +12,7 @@
 
 #include "canonical_index.h"
 #include "code_index.h"
+#include "cross_repo_resolver.h" /* H0b: xrepo_lang_name / xrepo_path_is_vendored */
 #include "config.h"
 #include "css_graph.h" /* CSS migration assistant: style graph + component join (WP-C/D) */
 #include "db2.h"
@@ -127,10 +128,15 @@ static int64_t ci_upsert_file(void *conn, int64_t project_id, const char *rel_pa
                               const char *scanned_at)
 {
    char err[CI_ERRBUF] = "";
+   /* H0b: per-file language + vendored flag, derived from the path at index time. */
+   const char *language = xrepo_lang_name(xrepo_lang_from_path(rel_path));
+   int vendored = xrepo_path_is_vendored(rel_path);
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
-       "INSERT INTO files (project_id, path, scanned_at) VALUES (?1, ?2, ?3) "
-       "ON CONFLICT (project_id, path) DO UPDATE SET scanned_at = EXCLUDED.scanned_at "
+       "INSERT INTO files (project_id, path, scanned_at, language, vendored) "
+       "VALUES (?1, ?2, ?3, ?4, ?5) "
+       "ON CONFLICT (project_id, path) DO UPDATE SET scanned_at = EXCLUDED.scanned_at, "
+       "language = EXCLUDED.language, vendored = EXCLUDED.vendored "
        "RETURNING id",
        err, sizeof(err));
    if (!st)
@@ -138,6 +144,8 @@ static int64_t ci_upsert_file(void *conn, int64_t project_id, const char *rel_pa
    aimee_pg_bind_int64(st, "?1", project_id);
    aimee_pg_bind_text(st, "?2", rel_path);
    aimee_pg_bind_text(st, "?3", scanned_at);
+   aimee_pg_bind_text(st, "?4", language);
+   aimee_pg_bind_int(st, "?5", vendored);
    int64_t id = -1;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       id = aimee_pg_column_int64(st, 0);
