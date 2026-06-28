@@ -30,6 +30,34 @@ static int code_ext_ok(const char *name)
    return 0;
 }
 
+/* Build manifests (R2): not code by extension, but their CONTENT declares cross-repo
+ * dependencies (CMake FetchContent/target_link_libraries, git submodules, …) that the
+ * build-declared-edge pass reads from file_contents. Indexed (content stored) even
+ * though no language extractor runs on them (detect_lang is extension-based, so these
+ * yield only file_contents, no terms/imports — meson.build is NOT sniffed as Python).
+ * Matched on the trailing component so it works for a bare basename (worktree walk) or
+ * a path (git-tracked list). build/_deps/.git/.aimee subtrees are still excluded by the
+ * dir walk (code_dir_skip) / code_path_skipped, so only the repo's OWN manifests are
+ * collected (top-level + subdirs); R2b's extraction restricts attribution to the
+ * top-level per design §2.2 and STRIPS any URL userinfo (https://user:token@…) so
+ * credentials are never persisted into routes. */
+static int code_build_manifest(const char *name)
+{
+   const char *slash = strrchr(name, '/');
+   const char *base = slash ? slash + 1 : name;
+   if (strcmp(base, "CMakeLists.txt") == 0 || strcmp(base, ".gitmodules") == 0 ||
+       strcmp(base, "meson.build") == 0)
+      return 1;
+   const char *dot = strrchr(base, '.');
+   return dot && strcmp(dot, ".cmake") == 0;
+}
+
+/* A file is wanted if it is code by extension OR a build manifest by name. */
+static int code_file_wanted(const char *name)
+{
+   return code_ext_ok(name) || code_build_manifest(name);
+}
+
 /* .git classification (defined below): 0 = not a repo, 1 = real checkout,
  * 2 = linked worktree. */
 static int code_git_kind(const char *path);
@@ -96,7 +124,7 @@ static int code_collect_walk(const char *root, const char *rel, code_collect_fil
       }
       else if (S_ISREG(st.st_mode))
       {
-         if (!code_ext_ok(ent->d_name))
+         if (!code_file_wanted(ent->d_name))
             continue;
          if (st.st_size <= 0 || st.st_size > CODE_COLLECT_MAX_FILE_BYTES)
             continue;
@@ -544,7 +572,7 @@ static int code_collect_from_git(const char *root, const char *ref, code_collect
       const char *oid = sp2 + 1;
       if (strcmp(type, "blob") != 0)
          continue;
-      if (!code_ext_ok(path) || code_path_skipped(path))
+      if (!code_file_wanted(path) || code_path_skipped(path))
          continue;
       if (n == cap)
       {

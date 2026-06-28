@@ -227,6 +227,56 @@ static void test_non_git_uses_worktree(void)
    printf("  test_non_git_uses_worktree: ok\n");
 }
 
+/* R2: build manifests (CMakeLists.txt, *.cmake, .gitmodules, meson.build) are
+ * collected so the build-declared-edge pass can read their content; a non-manifest
+ * .txt is NOT collected. */
+static void test_build_manifests_collected(void)
+{
+   make_root("buildman");
+   write_file("CMakeLists.txt", "FetchContent_Declare(dep GIT_REPOSITORY x)");
+   write_file("cmake/deps.cmake", "find_package(foo)");
+   write_file(".gitmodules", "[submodule \"x\"]");
+   write_file("meson.build", "project('p')");
+   write_file("src/a.cpp", "int a(){return 0;}");
+   write_file("README.txt", "not a manifest");
+   /* a CMakeLists.txt under a build-output dir must NOT be collected (the walk skips
+    * build/ at directory recursion, so FetchContent'd _deps manifests never enter). */
+   write_file("build/_deps/dep-src/CMakeLists.txt", "FetchContent_Declare(other GIT_REPOSITORY y)");
+
+   reset();
+   code_collect_files_cb(g_root, rec_cb, NULL);
+   assert(has("CMakeLists.txt"));
+   assert(has("cmake/deps.cmake"));
+   assert(has(".gitmodules"));
+   assert(has("meson.build"));
+   assert(has("src/a.cpp"));
+   assert(!has("README.txt"));                         /* plain .txt is not a build manifest */
+   assert(!has("build/_deps/dep-src/CMakeLists.txt")); /* build-output subtree skipped */
+   printf("  test_build_manifests_collected: ok\n");
+}
+
+/* R2: build manifests are collected via the GIT-TRACKED path too (the second
+ * collection site), and a build/ manifest stays excluded there as well. */
+static void test_build_manifests_collected_git(void)
+{
+   make_root("buildman_git");
+   git("init -q -b main");
+   git("config user.email t@t");
+   git("config user.name t");
+   write_file("CMakeLists.txt", "FetchContent_Declare(dep GIT_REPOSITORY x)");
+   write_file("src/a.cpp", "int a(){return 0;}");
+   write_file("build/CMakeLists.txt", "generated");
+   git("add -A -f"); /* -f: build/ may be gitignored in some setups; force-track for the test */
+   git("commit -qm c");
+
+   reset();
+   code_collect_files_cb(g_root, rec_cb, NULL);
+   assert(has("CMakeLists.txt"));
+   assert(has("src/a.cpp"));
+   assert(!has("build/CMakeLists.txt")); /* build-output dir excluded on the git path too */
+   printf("  test_build_manifests_collected_git: ok\n");
+}
+
 /* §6 live: the default-branch tree SHA tracks commits, and the pure change-gate
  * decides when a re-index is warranted. */
 static void test_default_branch_sha_tracks_commits(void)
@@ -374,6 +424,8 @@ int main(void)
    test_clone_resolves_origin_head();
    test_no_default_branch_skips();
    test_non_git_uses_worktree();
+   test_build_manifests_collected();
+   test_build_manifests_collected_git();
    test_default_branch_sha_tracks_commits();
    test_default_branch_sha_quote_in_ref();
    test_index_source_is_worktree();
