@@ -315,6 +315,17 @@ int main(int argc, char **argv)
     * failure, then exits without starting the server. */
    if (argc >= 2 && strcmp(argv[1], "--rotate-master-key") == 0)
    {
+      /* Refuse to rotate while the server is up (D13 F2): a live server caching
+       * the OLD KEK could write a NEW credential under the old wrap during the
+       * re-wrap→swap window, permanently orphaning it (the backup cannot recover
+       * a credential that was never in it). */
+      const char *sock = cli_default_socket_path();
+      if (server_is_running(sock))
+      {
+         fprintf(stderr, "aimee-server: --rotate-master-key requires the server to be STOPPED "
+                         "(an instance appears to be running). Stop it and retry.\n");
+         return 1;
+      }
       int principals = 0, creds = 0;
       char backup[1280] = "", err[256] = "";
       if (vault_server_key_rotate(VAULT_SERVER_PRINCIPAL, &principals, &creds, backup,

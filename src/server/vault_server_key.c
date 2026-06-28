@@ -193,7 +193,7 @@ void vault_server_key_reset_for_test(void)
 static int rot_copy_file(const char *src, const char *dst)
 {
    int rc = -1;
-   int in = open(src, O_RDONLY);
+   int in = open(src, O_RDONLY | O_NOFOLLOW); /* never follow a symlink source (F1) */
    if (in < 0)
       return -1;
    int out = open(dst, O_CREAT | O_WRONLY | O_TRUNC, 0600);
@@ -253,9 +253,12 @@ static int rot_copy_dir_flat(const char *src_dir, const char *dst_dir)
          rc = -1;
          break;
       }
+      /* lstat (NOT stat): never follow a symlink planted in .vault/ — a
+       * `<x>.json -> /etc/shadow` would otherwise be read through and copied into
+       * the backup, then written back on restore (F1). Copy only real files. */
       struct stat st;
-      if (stat(sp, &st) != 0 || !S_ISREG(st.st_mode))
-         continue; /* skip non-regular entries (no subdirs expected) */
+      if (lstat(sp, &st) != 0 || !S_ISREG(st.st_mode))
+         continue; /* skip symlinks, dirs, and other non-regular entries */
       if (rot_copy_file(sp, dp) != 0)
       {
          rc = -1;
@@ -330,6 +333,10 @@ int vault_server_key_rotate(const char *server_principal, int *out_principals, i
    if ((size_t)snprintf(bdir, sizeof(bdir), "%s.rotate-bak.%d", vdir, (int)getpid()) >=
        sizeof(bdir))
       ROT_FAIL("backup path too long");
+   struct stat bst;
+   if (lstat(bdir, &bst) == 0)
+      ROT_FAIL("a backup directory from a prior/concurrent rotation already exists — remove it "
+               "first (S3)");
    if (rot_copy_dir_flat(vdir, bdir) != 0)
       ROT_FAIL("could not create the pre-rotation backup");
    restore_on_fail = 1;
@@ -357,15 +364,34 @@ int vault_server_key_rotate(const char *server_principal, int *out_principals, i
       total_creds += c;
    }
 
+   /* F3: prove the new server KEK actually decrypts a server-principal credential
+    * end-to-end BEFORE committing the master. A field-name mismatch (server creds
+    * not in "wrapped_dek") would re-wrap 0 entries and silently orphan every
+    * server cred once the master is swapped — so if the server principal has any
+    * credential, one MUST read back cleanly under the new KEK or we abort. */
+   vault_store_entry_t probe;
+   int sc = vault_store_list(server_principal, &probe, 1);
+   if (sc > 0)
+   {
+      char vbuf[8192];
+      int vrc =
+          vault_store_get(server_principal, new_kek, probe.agent, probe.cred, vbuf, sizeof(vbuf));
+      OPENSSL_cleanse(vbuf, sizeof(vbuf));
+      if (vrc != 0)
+         ROT_FAIL("post-rewrap verify failed: a server-principal credential does not decrypt under "
+                  "the new key (field mismatch?) — refusing to swap master, vault restored");
+   }
+
    /* Commit: swap in the new master key atomically. Only now is the on-disk
     * master consistent with the freshly re-wrapped server wraps. */
    if (master_key_write(path, new_master) != 0)
       ROT_FAIL("re-wrap succeeded but persisting the new master key failed — vault restored");
 
-   /* New master is live; drop the cached KEK so the next use re-derives it. */
+   /* New master is live: mark committed FIRST (so a signal here cannot trigger a
+    * spurious restore), then drop the cached KEK so the next use re-derives it. */
+   restore_on_fail = 0; /* committed — do not restore (F5) */
    OPENSSL_cleanse(g_kek, sizeof(g_kek));
    g_kek_ready = 0;
-   restore_on_fail = 0; /* committed — do not restore */
 
    if (out_principals)
       *out_principals = np;
@@ -378,7 +404,22 @@ int vault_server_key_rotate(const char *server_principal, int *out_principals, i
 
 fail:
    if (restore_on_fail && vdir[0] && bdir[0])
-      (void)rot_copy_dir_flat(bdir, vdir); /* best-effort revert to the pre-rotation state */
+   {
+      /* Revert to the pre-rotation state. The master key was NOT swapped on any
+       * fail path, so the cached g_kek still matches the on-disk (old) master.
+       * If the restore itself fails partway (EIO/ENOSPC), the vault may be left
+       * mixed old/new-wrapped — say so explicitly so the operator restores by
+       * hand from the intact backup rather than trusting a silent revert (F4). */
+      if (rot_copy_dir_flat(bdir, vdir) != 0 && errbuf && errlen)
+      {
+         char base_err[200];
+         snprintf(base_err, sizeof(base_err), "%s", errbuf);
+         snprintf(errbuf, errlen,
+                  "%s; AND automatic restore FAILED — manually copy %s/* back over %s/ before "
+                  "restarting",
+                  base_err, bdir, vdir);
+      }
+   }
 done:
    OPENSSL_cleanse(old_master, sizeof(old_master));
    OPENSSL_cleanse(new_master, sizeof(new_master));

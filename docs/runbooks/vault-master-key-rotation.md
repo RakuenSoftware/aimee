@@ -31,7 +31,17 @@ decrypts failing for the window between re-wrapping a credential and swapping th
 delegate would 401 mid-rotation. So rotation runs with the **server stopped**, against the
 on-disk vault, and exits.
 
-## 2. Procedure
+## 2. Preconditions
+
+- **Server stopped.** `--rotate-master-key` refuses to run if an `aimee-server` instance is
+  live for the default socket (the server caches the old KEK and could write a credential
+  under it during the re-wrap window — see §1). Stop the server first.
+- **`AIMEE_HOME` permissions.** The pre-rotation backup is written under `AIMEE_HOME` as a
+  `0700` directory of `0600` files, but it inherits the *parent* directory's reachability.
+  Ensure `AIMEE_HOME` is writable only by the server's runtime UID — otherwise the backup
+  (which holds old-key ciphertext) sits in a directory others can traverse.
+
+## 3. Procedure
 
 ```sh
 # 1. Stop the server (so nothing reads/writes the vault during rotation).
@@ -55,7 +65,7 @@ shred -u /var/lib/aimee/.vault.rotate-bak.12345/* 2>/dev/null || true
 rm -rf /var/lib/aimee/.vault.rotate-bak.12345
 ```
 
-## 3. Safety / failure handling
+## 4. Safety / failure handling
 
 - **Atomic + reversible.** The entire `.vault/` is copied to `.vault.rotate-bak.<pid>` (0700)
   **before** any mutation. If any principal's re-wrap fails (wrong key / tamper) **or** the
@@ -72,7 +82,7 @@ rm -rf /var/lib/aimee/.vault.rotate-bak.12345
   `--rotate-master-key` reports "nothing to rotate" and exits 0 (the key is minted lazily on
   the first write).
 
-## 4. Verification checklist
+## 5. Verification checklist
 
 - [ ] command exited 0 and reported a non-zero re-wrap count (matching your agent count);
 - [ ] `aimee delegate <agent> …` authenticates from the vault after restart;

@@ -213,6 +213,9 @@ typedef struct
 /* Lifecycle */
 int server_init(server_ctx_t *ctx, const char *socket_path);
 int server_run(server_ctx_t *ctx);
+/* True if an aimee-server instance is already running for `socket_path` (pid-file
+ * + liveness check). Used by the offline --rotate-master-key guard (D13 F2). */
+int server_is_running(const char *socket_path);
 /* Boot-time delegate-vault provisioning: seal operator-supplied delegate API
  * keys ($AIMEE_DELEGATE_SECRETS_FILE / AIMEE_DELEGATE_KEY_<AGENT>) into the
  * server-principal vault so a fresh server's delegates work with no manual

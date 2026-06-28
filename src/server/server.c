@@ -1691,6 +1691,14 @@ static int server_pid_alive(const char *socket_path)
 #endif
 }
 
+/* Public liveness check: is an aimee-server instance running for `socket_path`?
+ * Used by the offline `--rotate-master-key` path to refuse to mutate the vault
+ * while the server is up (D13 F2). The caller resolves the default socket path. */
+int server_is_running(const char *socket_path)
+{
+   return socket_path ? server_pid_alive(socket_path) : 0;
+}
+
 static void server_pid_write(const char *socket_path)
 {
    char pid_path[1024];
