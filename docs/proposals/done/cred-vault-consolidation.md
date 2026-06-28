@@ -1,8 +1,9 @@
 # Proposal: complete credential-vault consolidation
 
-- **State:** rev. 3 (R1+R2 reviewed → revised; fleet can only reliably review a doc this size
-  via one model — see §Review history; recommending USER proposal-approval as gate 1)
-- **Status refreshed:** 2026-06-14
+- **State:** DONE — rev. 3 implemented across P1–P4 + a 2026-06-28 closeout (PRs #833/#834/#836/#837);
+  see §Closeout. (rev. 3 history: R1+R2 reviewed → revised; fleet can only reliably review a doc this
+  size via one model — see §Review history; USER proposal-approval was gate 1.)
+- **Status refreshed:** 2026-06-28
 - **Author:** JBailes
 - **Date:** 2026-06-14
 - **Builds on:** [delegate-refactor-async-and-credential-vault](../done/delegate-refactor-async-and-credential-vault.md)
@@ -45,6 +46,44 @@
 > migration **atomic (verify-then-scrub)**, and keys `oauth_tokens.c` by **(principal, service,
 > cred)** (WP-2). The R2 seats re-flagged the v0.2.58 banner — see §Evidence; stale prior-boot
 > log line, now pinned.
+
+## Closeout (filed to done — 2026-06-28)
+
+rev. 3 was USER-approved (gate 1) and implemented across P1–P4 (PRs #291/#294/#298/#305/#306,
+promoted in #311; codex vault-refresh #724). A 2026-06-28 closeout audit + roundtable review found
+six divergences from the written plan; the must-build set was completed and merged:
+
+- **D2/D2c** — every server-principal credential write **and** `vault:write:server` capability
+  grant/revoke now records to the dedicated append-only **0600 `audit.log`** sink (tamper-evidence +
+  access separation) instead of the operator-readable general server log. **PR #833.**
+- **D13** — the `.server-master.key` rotation shipped as the **offline `aimee-server
+  --rotate-master-key`** (re-wrap not re-encrypt; backup-before-mutate + restore-on-fail;
+  server-stopped guard; symlink-safe copy; post-rewrap read-back verify) plus
+  [`docs/runbooks/vault-master-key-rotation.md`](../../runbooks/vault-master-key-rotation.md).
+  **PR #834.**
+- **D9** — `agent key import` gained **backup-before-scrub** (atomic 0600, `O_EXCL`/`O_NOFOLLOW`) +
+  a per-run lock. The heavier scaffolding (per-agent `NOT_STARTED→…→LEGACY_SCRUBBED` state machine,
+  vault-level decrypt-roundtrip verifier, `vault status` migration-incomplete surfacing) is a
+  **tracked follow-up**: the roundtable agreed the decrypt-roundtrip verifier's rationale — defeating
+  a false-VERIFIED via a still-live `/v1/session/credentials` — is moot now that path is deleted, and
+  backup-before-scrub covers the remaining durability failure mode. **PR #836.**
+- **D6** — codex refresh now distinguishes an IdP **`invalid_grant`** rejection (→ a persistent
+  `REAUTH_REQUIRED` vault marker + an explicit delegate error) from transient errors, with an
+  operator-attended **`aimee codex reauth`** command (no autonomous browser flow). **PR #837.**
+
+**D10 — superseded (operator sign-off recorded).** The `vault_only` rollback flag + per-surface
+`--dry-run` + N-day cutover gate were a coexistence-management lever for the legacy client-push path.
+P4b **deleted that path outright** (D11, stronger than the planned opt-in read-fallback), so the flag
+has nothing left to gate; the intent (vault as the sole live source, provider `$ENV` as the one
+by-design fallback) is met more strongly by removal. **Operational note:** emergency rollback is now a
+code-revert + redeploy, not a runtime switch — a deliberate loss of a runtime blast-radius lever,
+accepted at closeout.
+
+**D12 — intentional carve-out.** The codex CLI owns and writes its own `~/.codex/auth.json`; aimee
+reuses it as the vault-bootstrap source and a last-resort fallback. The vault is the **top** resolution
+tier and the sole **aimee-managed** store, but codex's self-managed auth file is an **intentional
+external source**, not a vault miss. "Vault is the sole source" holds for every aimee-stored
+credential; codex's CLI-owned file is the documented exception.
 
 ## Goal
 
