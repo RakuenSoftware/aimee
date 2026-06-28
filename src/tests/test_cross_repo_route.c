@@ -233,11 +233,67 @@ static void test_header_idf(void)
    printf("ok\n");
 }
 
+/* H5 (H4 live findings): prefer-local header resolution + generated-header reject.
+ * (A) when the CALLER repo has its own file matching the include, no cross-repo
+ * route is formed (the include resolves locally). (B) generated/build headers
+ * (config.h, version.h, ...) never form a cross-repo route even with no local copy. */
+static void test_prefer_local_and_generated(void)
+{
+   printf("test_prefer_local_and_generated... ");
+   /* (A) plapp includes "shared.h" AND has its OWN shared.h; pllib also has shared.h.
+    * Prefer-local => NO route plapp->pllib. plapp2 has NO local shared.h => routes. */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('plapp','/pa','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('plapp2','/pb','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('pllib','/pl','t','trusted')");
+   mk_file("pllib", "include/shared.h", "c", 0);
+   mk_file("plapp", "src/a.c", "c", 0);
+   mk_file("plapp", "include/shared.h", "c", 0); /* caller's OWN copy */
+   mk_import("plapp", "src/a.c", "shared.h");
+   mk_file("plapp2", "src/b.c", "c", 0); /* no local shared.h */
+   mk_import("plapp2", "src/b.c", "shared.h");
+
+   /* (B) genapp includes "config.h"; genlib has config.h; genapp has NO local copy.
+    * Generated-header reject => NO route despite the basename being in < 4 repos. */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('genapp','/ga','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('genlib','/gl','t','trusted')");
+   mk_file("genlib", "include/config.h", "c", 0);
+   mk_file("genapp", "src/c.c", "c", 0);
+   mk_import("genapp", "src/c.c", "config.h");
+
+   /* (B2) path-qualified "sub/config.h" is NOT a bare generated header => routes. */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('genapp2','/g2','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('genlib2','/l2','t','trusted')");
+   mk_file("genlib2", "inc/sub/config.h", "c", 0);
+   mk_file("genapp2", "src/d.c", "c", 0);
+   mk_import("genapp2", "src/d.c", "sub/config.h");
+
+   /* (A-vendored) vcapp includes "vlib.h" and has its OWN copy but VENDORED; vclib
+    * has it non-vendored. fl.vendored=0 => the vendored caller copy is NOT local =>
+    * route to vclib still forms (a caller that vendors a lib still routes to it). */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('vcapp','/vca','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('vclib','/vcl','t','trusted')");
+   mk_file("vclib", "include/vlib.h", "c", 0);
+   mk_file("vcapp", "src/e.c", "c", 0);
+   mk_file("vcapp", "third_party/vlib.h", "c", 1); /* caller's copy is VENDORED */
+   mk_import("vcapp", "src/e.c", "vlib.h");
+
+   int rc = db2_cross_repo_rebuild_routes();
+   assert(rc >= 0);
+   assert(route_count("plapp", "pllib", "import_header") == 0);   /* prefer-local: caller owns it */
+   assert(route_count("plapp2", "pllib", "import_header") == 1);  /* no local copy: routes */
+   assert(route_count("genapp", "genlib", "import_header") == 0); /* bare config.h rejected */
+   assert(route_count("genapp2", "genlib2", "import_header") ==
+          1);                                                   /* path-qualified: NOT rejected */
+   assert(route_count("vcapp", "vclib", "import_header") == 1); /* vendored caller copy != local */
+   printf("ok\n");
+}
+
 int main(void)
 {
    db2_test_shim_open();
    test_routes();
    test_header_idf();
+   test_prefer_local_and_generated();
    printf("cross_repo_route: all tests passed\n");
    return 0;
 }

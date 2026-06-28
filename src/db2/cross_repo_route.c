@@ -67,31 +67,63 @@ static const char *const SQL_MODULE_ROUTES =
  * `< 4` in SQL_HEADER_ROUTES below (a candidate for config-ization + tuning after
  * H4's live re-validation). */
 
+/* H5 generated/build-header reject (H4 live finding): a small seed set of headers
+ * that are per-project BUILD-GENERATED (CMake configure_file etc.), never a
+ * cross-repo API header. They collide by basename across repos (each generates its
+ * own) but the generated copy is often not even indexed, so neither prefer-local
+ * nor the §2 IDF catches them — wolf→Sunshine survived H1–H3b via `config.h`.
+ *
+ * NOTGEN(n) rejects ONLY the BARE include `#include "config.h"` (an exact equality,
+ * no LIKE) — deliberately NOT the path-qualified `foo/config.h`, which is a
+ * namespaced header far more likely to be a real API (a project that genuinely
+ * exports a config header almost always namespaces it). Exact-equality also sidesteps
+ * LIKE-metachar escaping. Tradeoff (accepted, precision-over-recall): a project that
+ * exports a literally-bare `config.h`/`version.h` as cross-repo API is suppressed;
+ * that convention is vanishingly rare, and the principled fix is marker-based
+ * generated-output attribution (§1.6, a later slice) rather than a basename list. */
+#define NOTGEN(n) "imp.name <> '" n "'"
+
 /* import_header (MEDIUM): a caller C/C++ #include matched to a definer file whose
  * path equals the include or ends with '/'+include (component boundary). The
  * caller file's language (H0b) restricts this to C/C++ so module specifiers from
  * other languages don't masquerade as headers; the definer file must not be
- * vendored (H0b); and the include must clear the §2 header-IDF threshold above
- * (ubiquity counted on the same path-suffix key, vendored files excluded from the
- * count so a vendored copy never inflates ubiquity). The repo-unique HIGH-vs-MEDIUM
- * is applied by H1's resolver (this is the raw candidate adjacency). */
+ * vendored (H0b); the include must clear the §2 header-IDF threshold; it must not
+ * be a generated/build header (NOTGEN); and — H5 prefer-local (H4 finding) — the
+ * CALLER repo must NOT have its OWN file matching the include (a `#include "x.h"`
+ * where the caller has its own x.h resolves LOCALLY, not cross-repo: this killed
+ * the moonlight-qt→Sunshine FPs via the caller's own cuda.h/input.h/vaapi.h). The
+ * repo-unique HIGH-vs-MEDIUM is applied by H1's resolver (raw candidate adjacency). */
+/* clang-format off — hand-formatted SQL (the ESC()/NOTGEN() macros embedded in the
+ * string concatenation defeat clang-format's literal reflow, mangling it to one
+ * token per line). */
+/* clang-format off */
 static const char *const SQL_HEADER_ROUTES =
     "INSERT INTO cross_repo_route (caller_project, definer_project, kind, confidence, evidence) "
     "SELECT DISTINCT pc.name, pd.name, 'import_header', 'medium', imp.name "
     "FROM file_imports imp "
     "JOIN files cf ON cf.id = imp.file_id "
     "JOIN projects pc ON pc.id = cf.project_id "
-    "JOIN files fd ON (fd.path = imp.name "
-    "  OR fd.path LIKE '%/' || " ESC(
-        "imp.name") " ESCAPE '\\') "
-                    "JOIN projects pd ON pd.id = fd.project_id "
-                    "WHERE cf.language IN ('c', 'cpp') AND fd.vendored = 0 AND pd.name <> pc.name "
-                    "  AND (SELECT COUNT(DISTINCT fx.project_id) FROM files fx "
-                    "       WHERE (fx.path = imp.name OR fx.path LIKE '%/' || " ESC(
-                        "imp.name") " ESCAPE '\\') "
-                                    "         AND fx.vendored = 0) < 4 "
-                                    "ON CONFLICT (caller_project, definer_project, kind, evidence) "
-                                    "DO NOTHING";
+    "JOIN files fd ON (fd.path = imp.name OR fd.path LIKE '%/' || " ESC("imp.name") " ESCAPE '\\') "
+    "JOIN projects pd ON pd.id = fd.project_id "
+    "WHERE cf.language IN ('c', 'cpp') AND fd.vendored = 0 AND pd.name <> pc.name "
+    /* §2 header IDF: drop ubiquitous (>=4 non-vendored repos) include specifiers. */
+    "  AND (SELECT COUNT(DISTINCT fx.project_id) FROM files fx "
+    "       WHERE (fx.path = imp.name OR fx.path LIKE '%/' || " ESC("imp.name") " ESCAPE '\\') "
+    "         AND fx.vendored = 0) < 4 "
+    /* H5 generated/build-header reject. */
+    "  AND " NOTGEN("config.h") " AND " NOTGEN("config.hpp") " "
+    "  AND " NOTGEN("version.h") " AND " NOTGEN("version.hpp") " "
+    /* H5 prefer-local: skip when the caller repo has its OWN non-vendored file for
+     * the include — a quoted #include resolves to the including file's directory
+     * first (C quote-include locality), so a caller-owned copy means local, not
+     * cross-repo, resolution. fl.vendored = 0 is deliberate: a VENDORED caller copy
+     * is NOT treated as local, so a caller that vendors a lib still gets a route to
+     * the canonical definer (H2 canonical-preference then prefers it). */
+    "  AND NOT EXISTS (SELECT 1 FROM files fl "
+    "       WHERE fl.project_id = cf.project_id AND fl.vendored = 0 "
+    "         AND (fl.path = imp.name OR fl.path LIKE '%/' || " ESC("imp.name") " ESCAPE '\\')) "
+    "ON CONFLICT (caller_project, definer_project, kind, evidence) DO NOTHING";
+/* clang-format on */
 
 static int crr_count(void *conn)
 {
