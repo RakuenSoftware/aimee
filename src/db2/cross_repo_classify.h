@@ -44,6 +44,9 @@ typedef struct
    const char *param_types; /* normalized parameter type list; "" if unknown */
    int vendored;            /* §4: 1 if this repo's defs of the symbol are ALL in vendored
                                files (no canonical copy); 0 if a non-vendored def exists */
+   int high_capable_kind;   /* §5: 1 if this repo has a HIGH-capable def_kind for the symbol
+                               (function/struct/enum/union/plain definition); 0 if ALL its defs
+                               are macro/typedef (SDK-style, HIGH only with export evidence) */
 } xrepo_def_t;
 
 typedef enum
@@ -105,6 +108,12 @@ typedef struct
    int definer_trusted;          /* definer repo trust (§0): untrusted EXPORT route caps at MEDIUM
                                   * (an untrusted definer can never lend HIGH export) */
    xrepo_import_modality_t modality; /* conditional -> one-tier cap; dynamic -> review */
+   int kind_macro_typedef; /* §5: 1 if the target definer's defs are ALL macro/typedef (SDK-style);
+                            * such a symbol reaches HIGH only with export evidence. Default 0
+                            * (function/struct/…) is HIGH-permissive — no cap. */
+   int exported;           /* §6: target definer has file_exports membership for the symbol */
+   int definer_vendored;   /* §4 ceiling: target is a lone vendored definer (no canonical
+                            * candidate survived) -> third-party code caps at MEDIUM */
 } xrepo_candidate_t;
 
 /* Per-stage trace, for the --dry-run evidence + structural-invariant asserts. */
@@ -116,7 +125,9 @@ typedef struct
    int caller_collision_applied; /* a cap lowered the tier */
    int trust_cap_applied;
    int modality_cap_applied;
-   const char *reason; /* short stage label that determined the outcome */
+   int kind_cap_applied;     /* §5 SDK-style macro/typedef (no export) capped at MEDIUM */
+   int vendored_cap_applied; /* §4 lone-vendored definer capped at MEDIUM */
+   const char *reason;       /* short stage label that determined the outcome */
 } xrepo_classification_t;
 
 /* Run the §3.10 pipeline. Deterministic: a fixed candidate always yields the

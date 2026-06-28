@@ -230,9 +230,33 @@ xrepo_classification_t xrepo_classify(const xrepo_candidate_t *c)
       tier = XREPO_TIER_MEDIUM;
       r.trust_cap_applied = 1;
    }
+   /* §5 SDK-style symbol-kind cap: a symbol whose definitions in the target are ALL
+    * macro/typedef is SDK-style (DEFINE_GUID, opaque-handle typedefs) and reaches
+    * HIGH only with export evidence (a project-defined public macro/typedef in
+    * file_exports). Without export membership it caps at MEDIUM — a function/
+    * struct/enum/plain definition is HIGH-capable and unaffected. */
+   if (c->kind_macro_typedef && !c->exported && tier > XREPO_TIER_MEDIUM)
+   {
+      tier = XREPO_TIER_MEDIUM;
+      r.kind_cap_applied = 1;
+   }
+   /* §4 lone-vendored ceiling: when the surviving target is a vendored (third-party)
+    * definer — the header-only-library exemption kept it because no canonical
+    * candidate was reachable — cap at MEDIUM. Vendored code is a real but
+    * lower-trust dependency: a route makes it MEDIUM-eligible, but it should not be
+    * a HIGH first-party dependency without a canonical definer. */
+   if (c->definer_vendored && tier > XREPO_TIER_MEDIUM)
+   {
+      tier = XREPO_TIER_MEDIUM;
+      r.vendored_cap_applied = 1;
+   }
 
-   /* Structural invariant (§3.10): caps only lower, never raise -- the final
-    * ladder tier never exceeds the producer's base tier. */
+   /* Caps run in a fixed order — caller-collision, conditional-modality, trust,
+    * §5 kind, §4 vendored — but the result is order-independent: each only ever
+    * lowers the tier (collision/modality by one step; trust/kind/vendored to
+    * MEDIUM), so the set of applied caps determines the outcome, not their order.
+    * Structural invariant (§3.10): caps only lower, never raise — the final ladder
+    * tier never exceeds the producer's base tier. */
    if (tier > r.base_tier)
       tier = r.base_tier;
 

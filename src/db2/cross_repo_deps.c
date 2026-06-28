@@ -479,6 +479,11 @@ static void crd_flush(const crd_ctx_t *ctx, edge_acc_t *acc, const char *sym, in
    c.caller_trusted = ctx->caller_trusted;
    c.definer_trusted = definer_trusted;
    c.modality = XREPO_IMPORT_STATIC;
+   /* §5/§6/§4-ceiling inputs for the target definer (defaults are HIGH-permissive
+    * when there is no target, so a no-target candidate is unaffected). */
+   c.kind_macro_typedef = target >= 0 ? !defs[target].high_capable_kind : 0;
+   c.exported = target >= 0 ? dexp[target] : 0;
+   c.definer_vendored = target >= 0 ? defs[target].vendored : 0;
    xrepo_classification_t cl = xrepo_classify(&c);
 
    /* AMBIGUOUS -> review queue (§3.8), surfaced not dropped — but only when a
@@ -721,7 +726,8 @@ int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t
        "          AND cca.callee = c.sym) AS caller_files, "
        "       (SELECT COUNT(*) FROM blocked_symbols b WHERE b.word = c.sym AND b.lang = '') AS "
        "blk, "
-       "       MIN(df.vendored) AS dvendored "
+       "       MIN(df.vendored) AS dvendored, "
+       "       MAX(CASE WHEN dt.def_kind IN ('macro','typedef') THEN 0 ELSE 1 END) AS high_capable "
        "FROM cand c JOIN terms dt ON dt.name = c.sym AND dt.kind = 'definition' "
        "JOIN files df ON df.id = dt.file_id JOIN projects dp ON dp.id = df.project_id "
        "GROUP BY c.sym, c.sites, c.files, c.exfile, c.exline, dp.name, dp.trust "
@@ -787,9 +793,11 @@ int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t
          defs[ndef].self_type = "";
          defs[ndef].arity = -1;
          defs[ndef].param_types = "";
-         /* §4: MIN(df.vendored) — last SELECT column (index 12). Adding query columns
-          * must APPEND + bump this index; this is the sole consumer of the cursor. */
+         /* §4 MIN(df.vendored) at column 12, §5 high_capable at column 13 — the last
+          * SELECT columns. Adding query columns must APPEND + bump these indices;
+          * this is the sole consumer of the cursor. */
          defs[ndef].vendored = aimee_pg_column_int(cq, 12) > 0 ? 1 : 0;
+         defs[ndef].high_capable_kind = aimee_pg_column_int(cq, 13) > 0 ? 1 : 0;
          dcount[ndef] = aimee_pg_column_int(cq, 6);
          dexp[ndef] = aimee_pg_column_int(cq, 8) > 0 ? 1 : 0;
          ndef++;

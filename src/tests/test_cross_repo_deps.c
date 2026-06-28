@@ -270,15 +270,15 @@ static void test_multiplicity(void)
    xrepo_mult_cfg_t cfg = {.dom_share_pct = 90, .runnerup_share_pct = 5, .runnerup_abs = 2};
 
    /* Single definer repo. */
-   xrepo_def_t one[] = {{"repo-b", XREPO_LANG_C, "", 2, "int,int", 0}};
+   xrepo_def_t one[] = {{"repo-b", XREPO_LANG_C, "", 2, "int,int", 0, 1}};
    int oc[] = {3};
    int oe[] = {1};
    xrepo_mult_t m = xrepo_classify_multiplicity(one, oc, oe, 1, &cfg);
    assert(m.kind == XREPO_MULT_SINGLE && m.dominant_index == 0);
 
    /* Dominant definer: 95 defs vs 1, runner-up not an exporter -> DOMINANT. */
-   xrepo_def_t dom[] = {{"repo-b", XREPO_LANG_C, "", 1, "int", 0},
-                        {"repo-c", XREPO_LANG_C, "", 1, "int", 0}};
+   xrepo_def_t dom[] = {{"repo-b", XREPO_LANG_C, "", 1, "int", 0, 1},
+                        {"repo-c", XREPO_LANG_C, "", 1, "int", 0, 1}};
    int dc[] = {95, 1};
    int de[] = {1, 0};
    m = xrepo_classify_multiplicity(dom, dc, de, 2, &cfg);
@@ -297,8 +297,8 @@ static void test_multiplicity(void)
 
    /* Provably-unrelated signatures (differing arity) -> name-clash even if a
     * count majority exists (polymorphic rescue does not apply). */
-   xrepo_def_t unrel[] = {{"repo-b", XREPO_LANG_CPP, "", 1, "", 0},
-                          {"repo-c", XREPO_LANG_CPP, "", 3, "", 0}};
+   xrepo_def_t unrel[] = {{"repo-b", XREPO_LANG_CPP, "", 1, "", 0, 1},
+                          {"repo-c", XREPO_LANG_CPP, "", 3, "", 0, 1}};
    int uc[] = {95, 1};
    int ue[] = {1, 0};
    m = xrepo_classify_multiplicity(unrel, uc, ue, 2, &cfg);
@@ -306,8 +306,8 @@ static void test_multiplicity(void)
 
    /* Unknown/variadic signatures (arity -1, "" params) are NOT provably unrelated,
     * so a clear count majority still resolves to DOMINANT (overloads not punished). */
-   xrepo_def_t vararg[] = {{"repo-b", XREPO_LANG_CPP, "", -1, "", 0},
-                           {"repo-c", XREPO_LANG_CPP, "", 2, "", 0}};
+   xrepo_def_t vararg[] = {{"repo-b", XREPO_LANG_CPP, "", -1, "", 0, 1},
+                           {"repo-c", XREPO_LANG_CPP, "", 2, "", 0, 1}};
    m = xrepo_classify_multiplicity(vararg, dc, de, 2, &cfg); /* dc={95,1}, de={1,0} */
    assert(m.kind == XREPO_MULT_DOMINANT);
 

@@ -514,6 +514,117 @@ static void test_vendor_canonical_edge_cases(void)
    printf("ok\n");
 }
 
+/* Seed one definer repo `lib` exporting/defining `sym` (def_kind) reachable from
+ * ke-app via #include of `hdrbase` (in include/ or third_party/ when vendored) +
+ * a route, with the call placed in ke-app's `appfile`. */
+static void mk_ke_def(const char *lib, const char *hdrbase, const char *sym, const char *def_kind,
+                      int exported, int vendored, const char *appfile)
+{
+   char s[640];
+   const char *dir = vendored ? "third_party" : "include";
+   snprintf(s, sizeof(s),
+            "INSERT INTO projects (name, root, scanned_at, trust) VALUES ('%s','/k','t','trusted')",
+            lib);
+   X(s);
+   snprintf(s, sizeof(s),
+            "INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+            "id,'%s/%s','t','c',%d FROM projects WHERE name='%s'",
+            dir, hdrbase, vendored, lib);
+   X(s);
+   snprintf(s, sizeof(s),
+            "INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+            "id,'%s/def.c','t','c',%d FROM projects WHERE name='%s'",
+            dir, vendored, lib);
+   X(s);
+   snprintf(s, sizeof(s),
+            "INSERT INTO terms (file_id,name,kind,def_kind) SELECT id,'%s','definition','%s' FROM "
+            "files WHERE path='%s/def.c' AND project_id=(SELECT id FROM projects WHERE name='%s')",
+            sym, def_kind, dir, lib);
+   X(s);
+   if (exported)
+   {
+      snprintf(s, sizeof(s),
+               "INSERT INTO file_exports (file_id,name) SELECT id,'%s' FROM files WHERE "
+               "path='%s/def.c' AND project_id=(SELECT id FROM projects WHERE name='%s')",
+               sym, dir, lib);
+      X(s);
+   }
+   snprintf(s, sizeof(s),
+            "INSERT INTO file_imports (file_id,name) SELECT id,'%s' FROM files WHERE path='%s' AND "
+            "project_id=(SELECT id FROM projects WHERE name='ke-app')",
+            hdrbase, appfile);
+   X(s);
+   snprintf(s, sizeof(s),
+            "INSERT INTO code_calls (file_id,callee) SELECT id,'%s' FROM files WHERE path='%s' AND "
+            "project_id=(SELECT id FROM projects WHERE name='ke-app')",
+            sym, appfile);
+   X(s);
+   snprintf(
+       s, sizeof(s),
+       "INSERT INTO cross_repo_route (caller_project,definer_project,kind,confidence,evidence) "
+       "VALUES ('ke-app','%s','import_header','medium','%s')",
+       lib, hdrbase);
+   X(s);
+}
+
+/* §5 symbol-kind eligibility + §6 export-booster + §4 lone-vendored ceiling: an
+ * import-corroborated edge is HIGH for a function or an EXPORTED macro, but capped
+ * at MEDIUM for a non-exported macro (SDK-style §5) and for a lone vendored definer
+ * (§4 ceiling) even when exported. */
+static void test_kind_eligibility_and_vendored_ceiling(void)
+{
+   printf("test_kind_eligibility_and_vendored_ceiling... ");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('ke-app','/ka','t','trusted')");
+   for (int i = 0; i < 5; i++)
+   {
+      char s[256];
+      snprintf(s, sizeof(s),
+               "INSERT INTO files (project_id,path,scanned_at,language,vendored) SELECT "
+               "id,'k/%d.c','t','c',0 FROM projects WHERE name='ke-app'",
+               i);
+      X(s);
+   }
+   mk_ke_def("ke-func", "KeFunc.h", "KeFuncSym", "function", 0, 0, "k/0.c");  /* HIGH */
+   mk_ke_def("ke-macro", "KeMacro.h", "KeMacroSym", "macro", 0, 0, "k/1.c");  /* §5 -> MEDIUM */
+   mk_ke_def("ke-emac", "KeEmac.h", "KeExpMacroSym", "macro", 1, 0, "k/2.c"); /* exported -> HIGH */
+   mk_ke_def("ke-vend", "KeVend.h", "KeVendSym", "function", 1, 1,
+             "k/3.c"); /* §4 ceiling -> MEDIUM */
+
+   xrepo_deps_opts_t opts = {.direction = XREPO_DIR_OUT, .min_tier = XREPO_TIER_LOW};
+   xrepo_dep_edge_t *edges = NULL;
+   size_t n = 0;
+   int trunc = 0;
+   assert(canonical_index_cross_repo_deps("ke-app", &opts, &edges, &n, &trunc) == 0);
+   int seen_func = 0, seen_macro = 0, seen_emac = 0, seen_vend = 0;
+   for (size_t i = 0; i < n; i++)
+   {
+      const char *d = edges[i].definer_repo;
+      if (strcmp(d, "ke-func") == 0)
+      {
+         seen_func = 1;
+         assert(edges[i].tier == XREPO_TIER_HIGH); /* function + import -> HIGH */
+      }
+      else if (strcmp(d, "ke-macro") == 0)
+      {
+         seen_macro = 1;
+         assert(edges[i].tier == XREPO_TIER_MEDIUM); /* §5: non-exported macro capped */
+      }
+      else if (strcmp(d, "ke-emac") == 0)
+      {
+         seen_emac = 1;
+         assert(edges[i].tier == XREPO_TIER_HIGH); /* §6: exported macro allowed HIGH */
+      }
+      else if (strcmp(d, "ke-vend") == 0)
+      {
+         seen_vend = 1;
+         assert(edges[i].tier == XREPO_TIER_MEDIUM); /* §4 ceiling: lone vendored capped */
+      }
+   }
+   assert(seen_func && seen_macro && seen_emac && seen_vend);
+   free(edges);
+   printf("ok\n");
+}
+
 int main(void)
 {
    test_parse_module_id();
@@ -525,6 +636,7 @@ int main(void)
    test_cold_start_rebuild_to_gate();
    test_vendor_canonical_preference();
    test_vendor_canonical_edge_cases();
+   test_kind_eligibility_and_vendored_ceiling();
    printf("cross_repo_deps_orch: all tests passed\n");
    return 0;
 }
