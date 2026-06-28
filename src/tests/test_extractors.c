@@ -9,30 +9,53 @@
 static void test_c_imports(void)
 {
    char *imports[16];
+   int sys[16];
    memset(imports, 0, sizeof(imports));
-   import_ctx_t ic = {imports, 0, 16, 0};
+   memset(sys, 0, sizeof(sys));
+   import_ctx_t ic = {imports, 0, 16, 0, sys};
 
    c_import_line("#include \"foo.h\"", 1, &ic);
    assert(ic.count == 1);
    assert(strcmp(imports[0], "foo.h") == 0);
+   assert(sys[0] == 0); /* quoted */
 
    c_import_line("#include \"bar/baz.h\"", 2, &ic);
    assert(ic.count == 2);
    assert(strcmp(imports[1], "bar/baz.h") == 0);
 
-   /* System includes should be skipped */
-   c_import_line("#include <stdio.h>", 3, &ic);
-   assert(ic.count == 2);
+   /* H6: a real external-lib angle include <lib.h> IS captured with is_system=1
+    * (so it can form a cross-repo route; the builder uses is_system to skip
+    * prefer-local for it). Path is preserved verbatim for path-qualified includes. */
+   c_import_line("#include <Limelight.h>", 3, &ic);
+   assert(ic.count == 3);
+   assert(strcmp(imports[2], "Limelight.h") == 0);
+   assert(sys[2] == 1); /* angle */
 
-   c_import_line("#include <stdlib.h>", 4, &ic);
-   assert(ic.count == 2);
+   c_import_line("#include <libavutil/hwcontext.h>", 4, &ic);
+   assert(ic.count == 4);
+   assert(strcmp(imports[3], "libavutil/hwcontext.h") == 0); /* full path, NOT bare */
+   assert(sys[3] == 1);
+
+   /* BARE C/C++ stdlib/system angle includes are dropped at extraction (never
+    * cross-repo) so they don't bloat file_imports or exhaust the import buffer. */
+   c_import_line("#include <stdio.h>", 5, &ic);
+   assert(ic.count == 4);
+   c_import_line("#include <vector>", 6, &ic);
+   assert(ic.count == 4);
+
+   /* but a PATH-QUALIFIED angle include with a stdlib-like basename is a real lib
+    * header and is KEPT (matched on the full string, not the basename). */
+   c_import_line("#include <thirdparty/string.h>", 7, &ic);
+   assert(ic.count == 5);
+   assert(strcmp(imports[4], "thirdparty/string.h") == 0);
+   assert(sys[4] == 1);
 
    /* Non-include lines ignored */
-   c_import_line("int x = 5;", 5, &ic);
-   assert(ic.count == 2);
+   c_import_line("int x = 5;", 8, &ic);
+   assert(ic.count == 5);
 
-   c_import_line("// #include \"commented.h\"", 6, &ic);
-   assert(ic.count == 2);
+   c_import_line("// #include \"commented.h\"", 9, &ic);
+   assert(ic.count == 5);
 
    for (int i = 0; i < ic.count; i++)
       free(imports[i]);
@@ -196,7 +219,7 @@ static void test_lua_imports(void)
 {
    char *imports[16];
    memset(imports, 0, sizeof(imports));
-   import_ctx_t ic = {imports, 0, 16, 0};
+   import_ctx_t ic = {imports, 0, 16, 0, NULL};
 
    /* require with double quotes and parens */
    lua_import_line("require(\"socket\")", 1, &ic);

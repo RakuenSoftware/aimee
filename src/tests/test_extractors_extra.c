@@ -5,12 +5,48 @@
 
 /* Declared in index.h */
 int extract_imports(const char *ext, const char *content, char **out, int max);
+int extract_imports_sys(const char *ext, const char *content, char **out, int *sys, int max);
 int extract_exports(const char *ext, const char *content, char **out, int max);
 int extract_definitions(const char *ext, const char *content, definition_t *out, int max);
 
 int main(void)
 {
    printf("extractors_extra: ");
+
+   /* --- C/C++ includes: H6 captures quoted (is_system=0) + real-lib angle (=1);
+    * stdlib/system angle (<stdio.h>) is dropped at extraction. --- */
+   {
+      const char *c = "#include \"local.h\"\n"
+                      "#include <Limelight.h>\n"
+                      "#include <stdio.h>\n";
+      char *imports[16];
+      int sys[16];
+      int count = extract_imports_sys(".c", c, imports, sys, 16);
+      int q = 0, a = 0, sysdrop = 1;
+      for (int i = 0; i < count; i++)
+      {
+         if (strcmp(imports[i], "local.h") == 0)
+         {
+            q++;
+            assert(sys[i] == 0); /* quoted */
+         }
+         if (strcmp(imports[i], "Limelight.h") == 0)
+         {
+            a++;
+            assert(sys[i] == 1); /* angle, real lib */
+         }
+         if (strcmp(imports[i], "stdio.h") == 0)
+            sysdrop = 0; /* must NOT appear */
+         free(imports[i]);
+      }
+      assert(q == 1 && a == 1 && sysdrop); /* local.h + Limelight.h; stdio.h dropped */
+      /* the non-sys wrapper still works (flags simply not reported) */
+      char *imp2[16];
+      int c2 = extract_imports(".c", c, imp2, 16);
+      assert(c2 == count);
+      for (int i = 0; i < c2; i++)
+         free(imp2[i]);
+   }
 
    /* --- JavaScript imports --- */
    {

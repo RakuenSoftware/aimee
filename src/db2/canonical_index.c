@@ -262,18 +262,25 @@ static void ci_replace_file_data(void *conn, int64_t file_id, const char *ext, c
          aimee_pg_finalize(st);
    }
 
-   /* Imports. */
+   /* Imports. H6: also persist is_system (C/C++ angle `#include <...>`) so the
+    * cross-repo route builder can apply prefer-local to quoted includes only. */
    {
-      char *imports[128];
-      int n = extract_imports(ext, content, imports, 128);
+      /* 256 (was 128): H6 also captures angle <lib.h> includes, so include-heavy
+       * C/C++ files have more imports (system headers are skipped at extraction,
+       * but real ones can still be many) — headroom so a real dep is not truncated. */
+      char *imports[256];
+      int imp_sys[256] = {0}; /* defensive: extract_imports_sys also zeroes it */
+      int n = extract_imports_sys(ext, content, imports, imp_sys, 256);
       aimee_pg_stmt_t *st = aimee_pg_prepare(
-          conn, "INSERT INTO file_imports (file_id, name) VALUES (?1, ?2)", err, sizeof(err));
+          conn, "INSERT INTO file_imports (file_id, name, is_system) VALUES (?1, ?2, ?3)", err,
+          sizeof(err));
       for (int i = 0; i < n; i++)
       {
          if (st)
          {
             aimee_pg_bind_int64(st, "?1", file_id);
             aimee_pg_bind_text(st, "?2", imports[i]);
+            aimee_pg_bind_int64(st, "?3", imp_sys[i]);
             aimee_pg_step(st, err, sizeof(err));
             aimee_pg_reset(st);
          }

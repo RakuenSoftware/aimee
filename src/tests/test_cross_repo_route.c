@@ -64,6 +64,18 @@ static void mk_import(const char *proj, const char *file, const char *name)
    X(sql);
 }
 
+/* mk_import with an explicit is_system flag (H6: angle vs quoted include). */
+static void mk_import_sys(const char *proj, const char *file, const char *name, int is_system)
+{
+   char sql[512];
+   snprintf(
+       sql, sizeof(sql),
+       "INSERT INTO file_imports (file_id, name, is_system) SELECT f.id, '%s', %d FROM files f "
+       "JOIN projects p ON p.id = f.project_id WHERE p.name = '%s' AND f.path = '%s'",
+       name, is_system, proj, file);
+   X(sql);
+}
+
 static void mk_identity(const char *proj, const char *kind, const char *value)
 {
    char sql[512];
@@ -288,12 +300,43 @@ static void test_prefer_local_and_generated(void)
    printf("ok\n");
 }
 
+/* H6: an ANGLE include `<Foo.h>` (is_system=1) is captured and routes to a repo
+ * providing Foo.h EVEN WHEN the caller has its own Foo.h — angle does not resolve
+ * locally, so prefer-local must NOT suppress it (recovers external-lib deps like
+ * moonlight-qt -> moonlight-common-c via <Limelight.h>). A QUOTED same-name include
+ * with a caller-local copy stays suppressed (prefer-local applies to quoted only). */
+static void test_angle_include_recall(void)
+{
+   printf("test_angle_include_recall... ");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('aqapp','/aq','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('aqlib','/al','t','trusted')");
+   mk_file("aqlib", "include/Lime.h", "c", 0);
+   mk_file("aqapp", "src/a.c", "c", 0);
+   mk_file("aqapp", "include/Lime.h", "c", 0); /* caller ALSO has its own Lime.h */
+   /* angle include -> not local -> routes to aqlib despite the caller-local copy. */
+   mk_import_sys("aqapp", "src/a.c", "Lime.h", 1);
+
+   /* control: a QUOTED include of the same name with a caller-local copy is
+    * suppressed by prefer-local (resolves to the caller's own Lime.h). */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('qqapp','/qq','t','trusted')");
+   mk_file("qqapp", "src/b.c", "c", 0);
+   mk_file("qqapp", "include/Lime.h", "c", 0);
+   mk_import_sys("qqapp", "src/b.c", "Lime.h", 0);
+
+   int rc = db2_cross_repo_rebuild_routes();
+   assert(rc >= 0);
+   assert(route_count("aqapp", "aqlib", "import_header") == 1); /* angle: routes despite local */
+   assert(route_count("qqapp", "aqlib", "import_header") == 0); /* quoted+local: suppressed */
+   printf("ok\n");
+}
+
 int main(void)
 {
    db2_test_shim_open();
    test_routes();
    test_header_idf();
    test_prefer_local_and_generated();
+   test_angle_include_recall();
    printf("cross_repo_route: all tests passed\n");
    return 0;
 }

@@ -620,8 +620,16 @@ static lang_t detect_lang(const char *ext)
 
 int extract_imports(const char *ext, const char *content, char **out, int max)
 {
+   return extract_imports_sys(ext, content, out, NULL, max);
+}
+
+int extract_imports_sys(const char *ext, const char *content, char **out, int *sys, int max)
+{
    lang_t lang = detect_lang(ext);
-   import_ctx_t ctx = {out, 0, max, lang == LANG_TS};
+   import_ctx_t ctx = {out, 0, max, lang == LANG_TS, sys};
+   if (sys)
+      for (int i = 0; i < max; i++)
+         sys[i] = 0; /* default: not a system/angle include */
 
    switch (lang)
    {

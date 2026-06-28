@@ -113,15 +113,18 @@ static const char *const SQL_HEADER_ROUTES =
     /* H5 generated/build-header reject. */
     "  AND " NOTGEN("config.h") " AND " NOTGEN("config.hpp") " "
     "  AND " NOTGEN("version.h") " AND " NOTGEN("version.hpp") " "
-    /* H5 prefer-local: skip when the caller repo has its OWN non-vendored file for
-     * the include — a quoted #include resolves to the including file's directory
-     * first (C quote-include locality), so a caller-owned copy means local, not
-     * cross-repo, resolution. fl.vendored = 0 is deliberate: a VENDORED caller copy
-     * is NOT treated as local, so a caller that vendors a lib still gets a route to
-     * the canonical definer (H2 canonical-preference then prefers it). */
-    "  AND NOT EXISTS (SELECT 1 FROM files fl "
+    /* H5 prefer-local — applies ONLY to QUOTED includes (imp.is_system = 0). Skip
+     * when the caller repo has its OWN non-vendored file for the include: a quoted
+     * #include resolves to the including file's directory first (C quote-include
+     * locality), so a caller-owned copy means local, not cross-repo, resolution. An
+     * ANGLE include `<...>` (H6, is_system = 1) does NOT resolve to the caller's own
+     * dir, so prefer-local must NOT suppress it (else a real <lib.h> dep would be
+     * dropped when the caller happens to have a same-named file). fl.vendored = 0 is
+     * deliberate: a VENDORED caller copy is NOT treated as local, so a caller that
+     * vendors a lib still routes to the canonical definer (H2 then prefers it). */
+    "  AND (imp.is_system = 1 OR NOT EXISTS (SELECT 1 FROM files fl "
     "       WHERE fl.project_id = cf.project_id AND fl.vendored = 0 "
-    "         AND (fl.path = imp.name OR fl.path LIKE '%/' || " ESC("imp.name") " ESCAPE '\\')) "
+    "         AND (fl.path = imp.name OR fl.path LIKE '%/' || " ESC("imp.name") " ESCAPE '\\'))) "
     "ON CONFLICT (caller_project, definer_project, kind, evidence) DO NOTHING";
 /* clang-format on */
 

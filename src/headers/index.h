@@ -81,6 +81,11 @@ int index_has_extractor(const char *ext);
 /* Extract imports from file content. Returns count. Caller frees each string. */
 int extract_imports(const char *ext, const char *content, char **out, int max);
 
+/* As extract_imports, but also fills `sys[i]` = 1 when out[i] is a system /
+ * angle-bracket include (C/C++ `#include <...>`), else 0. `sys` may be NULL (then
+ * behaves exactly like extract_imports). `sys` must hold at least `max` ints. */
+int extract_imports_sys(const char *ext, const char *content, char **out, int *sys, int max);
+
 /* Extract exports from file content. Returns count. Caller frees each string. */
 int extract_exports(const char *ext, const char *content, char **out, int max);
 

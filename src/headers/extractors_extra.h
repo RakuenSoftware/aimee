@@ -13,6 +13,11 @@ typedef struct
    int count;
    int max;
    int is_ts;
+   /* H6: optional parallel flags array (NULL if not tracked). sys[i] = 1 when out[i]
+    * is a system / angle-bracket include (C/C++ `#include <...>`); 0 otherwise. Used
+    * so the route builder applies prefer-local only to quoted includes (angle
+    * includes do not resolve to the caller's own directory). */
+   int *sys;
 } import_ctx_t;
 
 typedef struct
