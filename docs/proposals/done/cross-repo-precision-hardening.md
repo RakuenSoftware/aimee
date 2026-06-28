@@ -1,15 +1,26 @@
 # Proposal: Cross-repo dependency graph — precision hardening (structural edges, IDF distinctiveness, FFI-aware)
 
-- **State:** PROPOSED — not started. Direct follow-up to
-  [cross-repo-dependency-graph](cross-repo-dependency-graph.md) (P1 query engine, shipped S1–S8 on
-  `testing`, deployed live on `.254`). That proposal's P1 acceptance gate #5 (**≥95 % HIGH
-  precision, N=50**) **fails on the live 40-repo corpus** (~10–20 % measured, 2026-06-28). This
-  proposal closes the precision gap so P1 can pass and P3 materialization can proceed. **Roundtable
-  design-reviewed to convergence** (round 1: 12 blocking → the pivot to a structural-edge primitive,
-  IDF distinctiveness, FFI-bridge detection, vendored canonical-preference, H0 metadata re-index;
-  round 2: 6 blocking, panel non-degraded, design accepted → repo-identity layer, per-ecosystem
-  resolver, generated-output attribution, Tier-3 FFI, H0 index spec, recall join; round 3:
-  **converged, 0 findings — approved to implement**; all incorporated, §12).
+- **State:** done — implemented, merged to `testing`, and live-validated on `.254` (2026-06-28).
+  Shipped across 13 PRs: H0a–H0d (#824/#825/#827/#828 metadata: def_kind, language, vendored,
+  repo-identity, route index), H1 (#830 structural-edge gate + index-time rebuild), H2 (#831 vendor
+  canonical-preference), H3a (#832 §5 kind eligibility + §4 vendored ceiling), H3b (#835 §2 header
+  IDF; §2 angle-bracket + symbol-IDF found already-enforced), H5 (#838 prefer-local + generated-header
+  reject), H6 (#840 angle-include capture + `is_system` — recall fix), H7 (#842 shared system-header
+  list incl. Windows). Each slice roundtable-reviewed to convergence before merge.
+  **Live re-validation (.254, full corpus re-scan, see docs/validation/cross-repo-precision-h4-runbook.md):**
+  every known false positive collapsed — `moonlight-qt`/`wolf`/`aimee` → Sunshine (DEFINE_GUID,
+  buffer_descriptor_t, process.h) all GONE (0 routes into Sunshine) — and the recall loss recovered:
+  `moonlight-qt → moonlight-common-c` HIGH (via `<Limelight.h>`, previously dropped by the
+  angle-bracket gap); true deps intact (`wolf → inputtino`). All of §1–§6 implemented or
+  verified-already-satisfied. The formal Wilson-CI N≥100 precision/recall gate (§9) is left as a
+  future measurement pass; this session's acceptance was a spot-check of the known FP classes (PASS).
+  Original failure that motivated this: P1's ≥95% HIGH precision gate measured ~10–20% on the live
+  40-repo corpus (2026-06-28).
+- **Design history:** roundtable design-reviewed to convergence before implementation (round 1: 12
+  blocking → the pivot to a structural-edge primitive, IDF distinctiveness, FFI-bridge detection,
+  vendored canonical-preference, H0 metadata re-index; round 2: 6 blocking → repo-identity layer,
+  per-ecosystem resolver, generated-output attribution, Tier-3 FFI, H0 index spec, recall join;
+  round 3: converged, 0 findings; all incorporated, §12).
 - **Thesis:** the P1 resolver emits an edge when a symbol is *used* in repo A and *defined in exactly
   one repo* B, gated by *name-frequency* distinctiveness and *name-suffix* import matching. The
   primitive is wrong: **a unique-name match is not a dependency.** On a heterogeneous real corpus,

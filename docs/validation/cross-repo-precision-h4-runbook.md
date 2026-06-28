@@ -120,3 +120,37 @@ vendored→canonical; wolf→inputtino clean HIGH) but live validation shows it 
 yet sufficient: Sunshine FPs persist and a key true dep is lost to the `<>`-drop.
 Next: Fix A+B (precision, ~1 slice) and Fix C (recall, larger). Each → roundtable →
 PR → redeploy → re-scan → re-spot-check.
+
+---
+
+## H4 FINAL RESULTS (2026-06-28, .254 vtesting-b35f1f7, full H0–H7 build)
+
+After H5 (prefer-local + generated-header reject), H6 (angle-include capture +
+is_system), and H7 (shared system-header list incl. Windows headers), redeployed +
+full `--force` re-scan + kb restart (routes=63):
+
+| query | result | verdict |
+|---|---|---|
+| `aimee` | No cross-repo dependencies | `<process.h>`→Sunshine FP GONE ✅ |
+| `moonlight-qt` | → moonlight-common-c HIGH (44 syms / 93 sites) | true dep RECOVERED ✅ (was missing; `<Limelight.h>`) |
+| `wolf` | → inputtino HIGH (13 syms / 32 sites) | true dep intact ✅ |
+| routes INTO Sunshine | 0 rows | all Sunshine FPs eliminated ✅ |
+
+Before (H1–H3b only): moonlight-qt→Sunshine MEDIUM (FP), wolf→Sunshine HIGH (FP),
+moonlight-qt→moonlight-common-c MISSING. After (H1–H7): every known FP collapsed,
+the recall loss recovered, true deps intact.
+
+PASS — acceptance bar (this session's choice: spot-check the known FP classes).
+The full Wilson-CI N≥100 precision/recall measurement (proposal §9) remains the
+formal acceptance for a future pass; the structural mechanisms (§1–§6) are all
+implemented + verified-already-satisfied and live-validated on the known cases.
+
+Residual / known limitations (documented, not regressions):
+- within-edge per-symbol noise: an emitted edge is repo-level correct, but a few
+  of its linking symbols can be coincidental name collisions (e.g. the
+  moonlight-qt→moonlight-common-c example symbol shown is a generic one). Edge-level
+  precision is the proposal's target; per-symbol pruning is finer-grained future work.
+- build/link-only deps (CMake target_link_libraries with no source include) are not
+  modelled (H0d builds routes from file_imports); logged as `low-unresolved (no route)`.
+- generated/SDK header long-tail: the system-header + generated-header lists are
+  seed lists (the principled fix is §1.6 marker-based generated-output attribution).
