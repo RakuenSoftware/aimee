@@ -21,6 +21,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -78,6 +79,18 @@ func (s *server) handleVSCode(w http.ResponseWriter, r *http.Request) {
 	username := currentUser(r)
 	if username == "" {
 		http.Error(w, "authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	// requireAuth gates this route on the session cookie, but a cookie alone is
+	// CSRF-able: a cross-origin page in the victim's browser can open
+	// ws://<webchat>/vscode/... (or POST to code-server's HTTP API) carrying the
+	// victim's cookie and drive the integrated terminal. Cookie SameSite=Strict
+	// helps but is not an explicit gate, so reject any cross-origin request here.
+	// The editor's own assets/XHR/WebSocket all originate from our same-origin
+	// iframe, so legitimate traffic always matches; only foreign origins are cut.
+	if !sameOriginVSCode(r) {
+		http.Error(w, "cross-origin request rejected", http.StatusForbidden)
 		return
 	}
 
@@ -170,9 +183,88 @@ func (s *server) proxyToEditor(w http.ResponseWriter, r *http.Request, username 
 	proxy.ServeHTTP(w, r)
 }
 
+// forwardedProto is the scheme the browser used to reach webchat. webchat
+// usually terminates TLS itself (r.TLS set), but behind an external TLS
+// terminator the hop to us is plaintext and the terminator sets
+// X-Forwarded-Proto — honor it (first value of a possible comma list) so the
+// same-origin gate and code-server's asset URLs use the real external scheme
+// rather than wrongly seeing "http" and 403'ing/ mis-building every request.
 func forwardedProto(r *http.Request) string {
+	if xf := r.Header.Get("X-Forwarded-Proto"); xf != "" {
+		if i := strings.IndexByte(xf, ','); i >= 0 {
+			xf = xf[:i]
+		}
+		if xf = strings.ToLower(strings.TrimSpace(xf)); xf != "" {
+			return xf
+		}
+	}
 	if r.TLS != nil {
 		return "https"
 	}
 	return "http"
+}
+
+// isWebSocketUpgrade reports whether r is a WebSocket upgrade handshake.
+func isWebSocketUpgrade(r *http.Request) bool {
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return false
+	}
+	for _, tok := range strings.Split(r.Header.Get("Connection"), ",") {
+		if strings.EqualFold(strings.TrimSpace(tok), "upgrade") {
+			return true
+		}
+	}
+	return false
+}
+
+// hostNoDefaultPort lower-cases host and drops the port when it is the default
+// for scheme, so "host:443"/"https" and a bare "host" compare equal (the common
+// :443/:80 deployment, where the browser omits the default port from Origin but
+// the Host header keeps it).
+func hostNoDefaultPort(host, scheme string) string {
+	host = strings.ToLower(host)
+	h, p, err := net.SplitHostPort(host)
+	if err != nil {
+		return host // no explicit port
+	}
+	if (scheme == "https" && p == "443") || (scheme == "http" && p == "80") {
+		return h
+	}
+	return net.JoinHostPort(h, p)
+}
+
+// sameOriginVSCode is the cross-origin gate for the /vscode proxy. The browser
+// reaches webchat at forwardedProto://r.Host; a request whose Origin resolves to
+// a different scheme+host+port is cross-origin and rejected. Scheme and host are
+// compared normalized (case-insensitive, default port stripped) so a same-origin
+// request on :443/:80 — where the browser omits the default port from Origin —
+// is not wrongly refused.
+//
+// A WebSocket upgrade MUST carry an Origin (browsers always send one on an
+// upgrade), so a missing Origin on an upgrade is cross-origin and refused — this
+// closes the cookie-only CSRF path to the editor terminal. A missing Origin on a
+// non-upgrade request is allowed only for safe methods (top-level iframe
+// navigations, asset GETs) or when the browser explicitly marks it same-origin
+// via Sec-Fetch-Site, so a non-safe cross-origin call that omits Origin cannot
+// slip through.
+func sameOriginVSCode(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		if isWebSocketUpgrade(r) {
+			return false
+		}
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			return true
+		}
+		sfs := strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")))
+		return sfs == "same-origin" || sfs == "none"
+	}
+	ou, err := url.Parse(origin)
+	if err != nil || ou.Host == "" {
+		return false
+	}
+	exp := forwardedProto(r)
+	return strings.EqualFold(ou.Scheme, exp) &&
+		hostNoDefaultPort(ou.Host, exp) == hostNoDefaultPort(r.Host, exp)
 }

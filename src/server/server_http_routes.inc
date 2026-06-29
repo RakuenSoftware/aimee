@@ -20,6 +20,7 @@
 #include "git_host_cred.h"    /* per-host git credential store for /v1/git/credentials */
 #include "git_oauth_github.h" /* GitHub device-flow sign-in (/v1/git/oauth/github) */
 #include "git_ops.h"          /* git_ops_run for /v1/workspace/git (WP-E) */
+#include "git_ssh_agent.h"    /* git_ssh_agent_stop — drop live key handles on revoke */
 #include "git_project.h"      /* git_project_clone for /v1/workspace/clone (WP-D) */
 #include "webuser_editor.h"   /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
 #include "workspace_scope.h"  /* ws_scope_user_root — project workspace root */
@@ -1483,7 +1484,25 @@ static int rh_git_credentials(const route_req_t *rq, char *resp, int cap)
 
    int rc;
    if (strcmp(rq->method, "DELETE") == 0)
+   {
       rc = git_host_cred_delete(host);
+      /* Revocation must leave no live credential handle behind (G5): the user's
+       * running code-server baked the now-removed token into its env at spawn,
+       * and the ssh-agent may hold a key loaded from the vault. Drop both AFTER
+       * the vault entry is gone — order matters: deleting first means a /vscode
+       * request that respawns the editor between these two steps re-reads an
+       * already-empty vault, so it cannot pick the token back up. Both stop
+       * functions are void + idempotent (no-op if nothing is running) so a
+       * concurrent double-revoke is safe; webuser_editor_stop reaps the child
+       * synchronously (bounded ~500ms), git_ssh_agent_stop only signals+unlinks.
+       * Recycling is cheap — the editor respawns lazily on the next /vscode
+       * request with a freshly-built (credential-free) env. */
+      if (rc == 0)
+      {
+         webuser_editor_stop(principal);
+         git_ssh_agent_stop(principal);
+      }
+   }
    else /* POST → set */
    {
       if (!token || !token[0])

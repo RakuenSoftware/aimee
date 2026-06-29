@@ -146,6 +146,13 @@ func (s *server) handleGitCredentials(w http.ResponseWriter, r *http.Request) {
 		}
 		body, _ := json.Marshal(map[string]string{"host": req.Host, "token": req.Token})
 		st, data, err := s.v1RequestWebuser(ctx, user, r.Method, "/v1/git/credentials", body)
+		// On revoke, aimee-server recycles the user's editor (its spawn env held
+		// the now-deleted token). Evict our cached loopback port so the next
+		// /vscode request re-ensures a freshly-spawned, credential-free editor
+		// instead of dialing the dead port and self-healing only after a failure.
+		if r.Method == http.MethodDelete && err == nil && st == http.StatusOK {
+			editorPorts.Delete(user)
+		}
 		s.gitRelay(w, st, data, err)
 	default:
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
