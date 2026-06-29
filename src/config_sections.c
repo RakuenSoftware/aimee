@@ -690,6 +690,26 @@ void config_parse_compact_section(config_t *cfg, cJSON *root)
       }
    }
 }
+
+void config_parse_fold_section(config_t *cfg, cJSON *root)
+{
+   cJSON *fold = cJSON_GetObjectItemCaseSensitive(root, "fold");
+   if (!cJSON_IsObject(fold))
+      return;
+   cJSON *item = cJSON_GetObjectItemCaseSensitive(fold, "enabled");
+   if (cJSON_IsBool(item))
+      cfg->fold_enabled = cJSON_IsTrue(item) ? 1 : 0;
+   item = cJSON_GetObjectItemCaseSensitive(fold, "retained_msgs");
+   if (cJSON_IsNumber(item) && item->valuedouble > 0)
+      cfg->fold_retained_msgs = (int)item->valuedouble;
+   item = cJSON_GetObjectItemCaseSensitive(fold, "min_fold_msgs");
+   if (cJSON_IsNumber(item) && item->valuedouble > 0)
+      cfg->fold_min_fold_msgs = (int)item->valuedouble;
+   item = cJSON_GetObjectItemCaseSensitive(fold, "excerpt_bytes");
+   if (cJSON_IsNumber(item) && item->valuedouble > 0)
+      cfg->fold_excerpt_bytes = (int)item->valuedouble;
+}
+
 void config_parse_sessions_section(config_t *cfg, cJSON *root)
 {
    cJSON *item = NULL;

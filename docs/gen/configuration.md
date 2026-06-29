@@ -157,7 +157,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 
 > **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `wfe_live_forge_enabled`
 
-## Config-file sections (49)
+## Config-file sections (50)
 
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
@@ -176,6 +176,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`dedup`** — _Response deduplication._ Keys: `enabled`, `window_seconds`
 - **`dogfood`** — _Session capture for dogfood data._ Keys: `commit_raw`, `enabled`, `inline_tagging`, `log_dir`
 - **`ensemble`** — _Roundtable ensemble panel + aggregator._ Keys: `aggregator`, `max_cost_usd`, `min_successful`, `reference_models`, `reference_personas`
+- **`fold`** — `enabled`, `excerpt_bytes`, `min_fold_msgs`, `retained_msgs`
 - **`guardrails`** — _Semantic guardrail policy._ Keys: `blast_radius`, `semantic`
 - **`identity`** — _Working-profile identity injection._ Keys: `working_profile_injection`
 - **`ingress`** — _Ingress (proxy frontends) behavior._ Keys: `audit_async`, `trusted_proxy_secret`, `usage_accounting_enabled`

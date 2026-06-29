@@ -25,6 +25,7 @@
 #include "liveness.h"
 #include "provider_cli_adapter.h"
 #include "config.h"
+#include "context_fold.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <fcntl.h>
@@ -209,6 +210,32 @@ static void maybe_compact_before_request(const agent_t *agent, cJSON *messages,
       message_history_repair(messages);
       messages_compact_consecutive(messages);
    }
+}
+
+/* Fold §1 (P2b): build a rolling-fold view of the Anthropic message array if the
+ * fold is enabled. Populates *out (zeroed on no-fold). The fold's Coordinate
+ * Closet is rendered during this call, so the config's denylist (a pointer into
+ * the local config_t) only needs to be valid here — out holds owned cJSON that
+ * the caller frees with fold_result_free AFTER the request is serialized.
+ * Returns 1 if a fold view was produced, 0 otherwise. */
+static int build_fold_view(const cJSON *messages, fold_result_t *out)
+{
+   memset(out, 0, sizeof(*out));
+   config_t cfg;
+   if (config_load(&cfg) != 0 || !cfg.fold_enabled)
+      return 0;
+   fold_config_t fc;
+   memset(&fc, 0, sizeof(fc));
+   fc.enabled = 1;
+   fc.retained_msgs = cfg.fold_retained_msgs;
+   fc.min_fold_msgs = cfg.fold_min_fold_msgs;
+   fc.reasoning_excerpt_bytes = cfg.fold_excerpt_bytes;
+   fc.closet.enabled = cfg.coord_closet_enabled;
+   fc.closet.budget_bytes = cfg.coord_closet_budget_bytes;
+   fc.closet.max_ratio_pct = cfg.coord_closet_max_ratio_pct;
+   fc.closet.denylist = cfg.coord_closet_denylist[0] ? cfg.coord_closet_denylist : NULL;
+   context_fold_view(messages, &fc, out);
+   return out->folded;
 }
 
 static void track_anthropic_payload_rewrite(const delegate_driver_t *driver, const agent_t *agent,
@@ -691,12 +718,18 @@ native_provider_http:
 
       /* Build request (use fb_agent which may have fallback model after turn 0) */
       cJSON *req;
+      fold_result_t fold_view; /* §1 rolling fold; freed after req is serialized */
+      memset(&fold_view, 0, sizeof(fold_view));
       if (chatgpt)
          req = agent_build_request_responses(&fb_agent, messages, active_tools, sys);
       else if (anthropic)
       {
-         track_anthropic_payload_rewrite(driver, &fb_agent, messages, sys);
-         req = agent_build_request_anthropic(&fb_agent, messages, active_tools, sys, tok,
+         /* Fold first so payload-rewrite tracking and the request both observe the
+          * actually-sent (possibly folded) message array. */
+         build_fold_view(messages, &fold_view);
+         cJSON *anth_msgs = fold_view.folded ? fold_view.messages : messages;
+         track_anthropic_payload_rewrite(driver, &fb_agent, anth_msgs, sys);
+         req = agent_build_request_anthropic(&fb_agent, anth_msgs, active_tools, sys, tok,
                                              temperature);
       }
       else if (gemini)
@@ -716,11 +749,16 @@ native_provider_http:
       {
          snprintf(out->error, sizeof(out->error), "gateway request pipeline failed");
          cJSON_Delete(req);
+         fold_result_free(&fold_view);
          break;
       }
 
       char *body = cJSON_PrintUnformatted(req);
+      /* Order matters: req may hold a non-owning reference into fold_view.messages
+       * (agent_build_request_anthropic's AddItemReference fallback), so req must be
+       * deleted before the fold view is freed. */
       cJSON_Delete(req);
+      fold_result_free(&fold_view);
       if (!body)
       {
          snprintf(out->error, sizeof(out->error), "failed to build request");
@@ -785,12 +823,16 @@ native_provider_http:
          snprintf(out->served_model, MAX_MODEL_LEN, "%s", fb_agent.model);
 
          cJSON *fb_req;
+         fold_result_t fb_fold_view; /* §1 rolling fold; freed after fb_req serialized */
+         memset(&fb_fold_view, 0, sizeof(fb_fold_view));
          if (chatgpt)
             fb_req = agent_build_request_responses(&fb_agent, messages, active_tools, sys);
          else if (anthropic)
          {
-            track_anthropic_payload_rewrite(driver, &fb_agent, messages, sys);
-            fb_req = agent_build_request_anthropic(&fb_agent, messages, active_tools, sys, tok,
+            build_fold_view(messages, &fb_fold_view);
+            cJSON *fb_anth_msgs = fb_fold_view.folded ? fb_fold_view.messages : messages;
+            track_anthropic_payload_rewrite(driver, &fb_agent, fb_anth_msgs, sys);
+            fb_req = agent_build_request_anthropic(&fb_agent, fb_anth_msgs, active_tools, sys, tok,
                                                    temperature);
          }
          else if (gemini)
@@ -800,7 +842,9 @@ native_provider_http:
             fb_req =
                 agent_build_request_openai(&fb_agent, messages, active_tools, tok, temperature);
          char *fb_body = cJSON_PrintUnformatted(fb_req);
+         /* delete fb_req before freeing the fold view (req may reference it) */
          cJSON_Delete(fb_req);
+         fold_result_free(&fb_fold_view);
          if (fb_body)
          {
             {

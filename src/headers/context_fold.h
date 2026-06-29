@@ -61,10 +61,14 @@ extern "C"
     * fold_result_free() it first (this call does not free a pre-existing
     * out->messages). Deterministic: identical (messages, cfg) -> identical
     * out->messages serialization (relies on coord_closet_render's total-order
-    * rendering for the closet block). */
+    * rendering for the closet block). cfg->closet.denylist (if set) is BORROWED
+    * only for the duration of this call (consumed while rendering the closet); it
+    * is never retained in *out, so the caller may free it once this returns. */
    int context_fold_view(const cJSON *messages, const fold_config_t *cfg, fold_result_t *out);
 
-   /* Free any owned resources in *out (safe on a zeroed/!folded result). */
+   /* Free any owned resources in *out. NULL-safe on a zeroed result and on a
+    * no-fold result (out->messages == NULL), so callers may invoke it
+    * unconditionally after any build path. */
    void fold_result_free(fold_result_t *out);
 
 #ifdef __cplusplus

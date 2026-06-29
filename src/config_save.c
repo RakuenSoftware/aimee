@@ -950,6 +950,20 @@ int config_save(const config_t *cfg)
       }
    }
 
+   /* Rolling context fold (fold §1, only save if non-default) */
+   if (cfg->fold_enabled || cfg->fold_retained_msgs || cfg->fold_min_fold_msgs ||
+       cfg->fold_excerpt_bytes)
+   {
+      cJSON *fold = cJSON_AddObjectToObject(root, "fold");
+      cJSON_AddBoolToObject(fold, "enabled", cfg->fold_enabled);
+      if (cfg->fold_retained_msgs)
+         cJSON_AddNumberToObject(fold, "retained_msgs", cfg->fold_retained_msgs);
+      if (cfg->fold_min_fold_msgs)
+         cJSON_AddNumberToObject(fold, "min_fold_msgs", cfg->fold_min_fold_msgs);
+      if (cfg->fold_excerpt_bytes)
+         cJSON_AddNumberToObject(fold, "excerpt_bytes", cfg->fold_excerpt_bytes);
+   }
+
    /* Session/worktree cleanup policy (only save if non-default) */
    if (cfg->worktree_stale_secs || cfg->max_sessions || cfg->max_worktrees)
    {

@@ -423,6 +423,10 @@ static void config_set_defaults(config_t *cfg)
    cfg->coord_closet_enabled = 0; /* fold §2: default-off */
    cfg->coord_closet_budget_bytes = 0;
    cfg->coord_closet_max_ratio_pct = 0;
+   cfg->fold_enabled = 0; /* fold §1: default-off */
+   cfg->fold_retained_msgs = 0;
+   cfg->fold_min_fold_msgs = 0;
+   cfg->fold_excerpt_bytes = 0;
    snprintf(cfg->memory_citations_mode, sizeof(cfg->memory_citations_mode), "%s", "off");
    snprintf(cfg->memory_coref_mode, sizeof(cfg->memory_coref_mode), "%s", "off");
    cfg->memory_cognify_async_enabled = 0;
@@ -1004,6 +1008,7 @@ int config_load(config_t *cfg)
    config_parse_memory_maintenance_section(cfg, root);
 
    config_parse_worktree_gc_section(cfg, root);
+   config_parse_fold_section(cfg, root);
 
    config_parse_memory_section(cfg, root);
    config_apply_learning_settings(cfg, root);

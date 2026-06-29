@@ -870,6 +870,17 @@ typedef struct config
    int coord_closet_max_ratio_pct;
    char coord_closet_denylist[256];
 
+   /* Rolling context fold (fold §1, P2b). Folds a prefix of old turns into a
+    * skeleton + Coordinate Closet on the delegate request path. Default-off.
+    * The fold's closet reuses the coord_closet_* settings above (one policy).
+    * fold_enabled: 0 = off (default), 1 = on.
+    * fold_retained_msgs / fold_min_fold_msgs / fold_excerpt_bytes: 0 = module
+    *   defaults (see context_fold.h). */
+   int fold_enabled;
+   int fold_retained_msgs;
+   int fold_min_fold_msgs;
+   int fold_excerpt_bytes;
+
    /* Session/worktree cleanup policy.
     * worktree_stale_secs: inactivity threshold before a session is pruned
     *   (0 = use default: 14400 = 4 hours).
