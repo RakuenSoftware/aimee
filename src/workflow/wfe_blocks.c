@@ -216,15 +216,26 @@ static int wfe_delegate_dispatch(const char *role, const char *delegate, const c
    if (!g_delegate || !g_delegate->run)
       return 0;
    char err[256] = "";
-   struct timespec t0, t1;
-   clock_gettime(CLOCK_MONOTONIC, &t0);
+   struct timespec t0 = {0, 0}, t1 = {0, 0};
+   int ok0 = clock_gettime(CLOCK_MONOTONIC, &t0) == 0;
    int rc = g_delegate->run(repo_dir(), role, delegate ? delegate : "", prompt, artifact_path,
                             out_commit_sha, err, sizeof err);
-   clock_gettime(CLOCK_MONOTONIC, &t1);
-   if (out_cost)
-      *out_cost = wfe_autonomy_cost_estimate((double)(t1.tv_sec - t0.tv_sec) +
-                                             (double)(t1.tv_nsec - t0.tv_nsec) / 1e9);
+   int ok1 = clock_gettime(CLOCK_MONOTONIC, &t1) == 0;
+   if (out_cost) /* a failed turn still consumed wall-clock -> still costs */
+      *out_cost = (ok0 && ok1) ? wfe_autonomy_cost_estimate((double)(t1.tv_sec - t0.tv_sec) +
+                                                            (double)(t1.tv_nsec - t0.tv_nsec) / 1e9)
+                               : 0.0;
    return rc == 0 ? 1 : -1;
+}
+
+/* Attach the measured delegate cost to a result, so a turn's wall-clock cost is
+ * charged against the per-run budget on EVERY return path (loop/fail/advance),
+ * not only on advance — else a retry-loop or broken-artifact runaway pays nothing
+ * and the USD cap never bites. */
+static wfe_step_result_t with_cost(wfe_step_result_t r, double cost)
+{
+   r.cost_usd = cost;
+   return r;
 }
 
 /* ---- executors ---- */
@@ -243,7 +254,7 @@ static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
                              "Author or revise the workflow artifact at the given path "
                              "per the work item, then commit it.",
                              path, commit, &cost) < 0)
-      return wfe_step_looped();
+      return with_cost(wfe_step_looped(), cost);
    char hash[65] = "";
    if (path && path[0])
    {
@@ -288,16 +299,16 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
            "VERIFY each with `aimee git verify` and fix any failures, then commit the accepted "
            "work.",
            NULL, commit, &cost) < 0)
-      return wfe_step_looped();
+      return with_cost(wfe_step_looped(), cost);
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
    if (wfe_git_freeze(repo_dir(), "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
-      return wfe_step_failed();
+      return with_cost(wfe_step_failed(), cost);
    /* Mechanical verify gate (WP-1b): a unit only advances if it PASSES. A failed
     * verdict loops back to implement (the engine bounds the retries via
     * stage_attempt and parks max_attempts on exhaustion); a re-dispatched fresh
     * engineer delegate has the verify tool to see + fix the findings. */
    if (!wfe_implement_verify_ok(repo_dir()))
-      return wfe_step_looped();
+      return with_cost(wfe_step_looped(), cost);
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
    return wfe_step_advanced(handle, head, cost);
@@ -317,10 +328,10 @@ static wfe_step_result_t exec_document(wfe_ctx *ctx, const wfe_node_t *node)
                              "Document the change on the work-item branch (README/CHANGELOG/docs "
                              "+ inline comments), then commit.",
                              NULL, commit, &cost) < 0)
-      return wfe_step_looped();
+      return with_cost(wfe_step_looped(), cost);
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
    if (wfe_git_freeze(repo_dir(), "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
-      return wfe_step_failed();
+      return with_cost(wfe_step_failed(), cost);
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
    return wfe_step_advanced(handle, head, cost);

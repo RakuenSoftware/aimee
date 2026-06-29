@@ -1,6 +1,7 @@
 /* wfe_iface.c -- the narrow executor vtable + step-result constructors. */
 #include "wfe_iface.h"
 
+#include <math.h> /* isfinite */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,11 +49,13 @@ double wfe_autonomy_cost_estimate(double elapsed_secs)
    {
       char *end = NULL;
       double r = strtod(v, &end);
-      if (end && *end == '\0' && r >= 0)
+      /* require finite AND strictly positive: inf/NaN or rate==0 would silently
+       * neutralize the budget cap (every turn would cost 0 or inf). Fall back. */
+      if (end && *end == '\0' && isfinite(r) && r > 0)
          rate = r;
    }
-   if (elapsed_secs < 0)
-      elapsed_secs = 0;
+   if (!(elapsed_secs > 0)) /* also rejects NaN */
+      return 0;
    return elapsed_secs * rate;
 }
 
