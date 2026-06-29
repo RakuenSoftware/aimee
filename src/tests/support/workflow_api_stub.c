@@ -63,6 +63,26 @@ int wfe_work_item_create(const char *workflow_name, const char *repo, const char
       snprintf(out_id, 80, "stub-wi");
    return 0;
 }
+int wfe_work_item_resolve(const char *workflow_name, const char *repo, char out_name[64],
+                          char out_ver[65], char out_start[64], char out_repo[512], char out_id[80],
+                          char *err, size_t errlen)
+{
+   (void)workflow_name;
+   (void)repo;
+   (void)err;
+   (void)errlen;
+   if (out_name)
+      snprintf(out_name, 64, "build");
+   if (out_ver)
+      snprintf(out_ver, 65, "v1");
+   if (out_start)
+      snprintf(out_start, 64, "intake");
+   if (out_repo)
+      snprintf(out_repo, 512, "%s", repo ? repo : "");
+   if (out_id)
+      snprintf(out_id, 80, "stub-wi");
+   return 0;
+}
 void wfe_scheduler_notify(void)
 {
 }
