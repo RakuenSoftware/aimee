@@ -894,6 +894,7 @@ typedef struct config
    int fold_retained_msgs;
    int fold_min_fold_msgs;
    int fold_excerpt_bytes;
+   int fold_register_enabled; /* §6: annotate folded assistant lines with their register */
    /* Fold-freeze (§3): pin the fold boundary across turns so the folded prefix
     * stays byte-identical and the provider cache stays warm. Default-off.
     * fold_freeze_tail_cap_msgs: re-epoch (advance the boundary) when the un-folded

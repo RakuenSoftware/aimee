@@ -34,6 +34,7 @@ extern "C"
       int min_fold_msgs; /* fold only if >= this many messages would fold (0 -> default) */
       int reasoning_excerpt_bytes;  /* per-message text excerpt kept in the skeleton (0 -> default)
                                      */
+      int register_enabled;         /* §6: annotate folded assistant lines with their register */
       coord_closet_config_t closet; /* identifier-conservation config (§2) */
    } fold_config_t;
 

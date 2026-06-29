@@ -182,7 +182,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`dedup`** — _Response deduplication._ Keys: `enabled`, `window_seconds`
 - **`dogfood`** — _Session capture for dogfood data._ Keys: `commit_raw`, `enabled`, `inline_tagging`, `log_dir`
 - **`ensemble`** — _Roundtable ensemble panel + aggregator._ Keys: `aggregator`, `max_cost_usd`, `min_successful`, `reference_models`, `reference_personas`
-- **`fold`** — `enabled`, `excerpt_bytes`, `freeze`, `min_fold_msgs`, `retained_msgs`
+- **`fold`** — `enabled`, `excerpt_bytes`, `freeze`, `min_fold_msgs`, `register_enabled`, `retained_msgs`
 - **`guardrails`** — _Semantic guardrail policy._ Keys: `blast_radius`, `semantic`
 - **`identity`** — _Working-profile identity injection._ Keys: `working_profile_injection`
 - **`ingress`** — _Ingress (proxy frontends) behavior._ Keys: `audit_async`, `trusted_proxy_secret`, `usage_accounting_enabled`

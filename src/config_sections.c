@@ -708,6 +708,9 @@ void config_parse_fold_section(config_t *cfg, cJSON *root)
    item = cJSON_GetObjectItemCaseSensitive(fold, "excerpt_bytes");
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
       cfg->fold_excerpt_bytes = (int)item->valuedouble;
+   item = cJSON_GetObjectItemCaseSensitive(fold, "register_enabled");
+   if (cJSON_IsBool(item))
+      cfg->fold_register_enabled = cJSON_IsTrue(item) ? 1 : 0;
    cJSON *freeze = cJSON_GetObjectItemCaseSensitive(fold, "freeze");
    if (cJSON_IsObject(freeze))
    {

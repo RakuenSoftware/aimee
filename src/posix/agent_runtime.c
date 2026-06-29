@@ -232,6 +232,7 @@ static int build_fold_view(const cJSON *messages, fold_freeze_t *freeze, fold_re
    fc.retained_msgs = cfg.fold_retained_msgs;
    fc.min_fold_msgs = cfg.fold_min_fold_msgs;
    fc.reasoning_excerpt_bytes = cfg.fold_excerpt_bytes;
+   fc.register_enabled = cfg.fold_register_enabled;
    fc.closet.enabled = cfg.coord_closet_enabled;
    fc.closet.budget_bytes = cfg.coord_closet_budget_bytes;
    fc.closet.max_ratio_pct = cfg.coord_closet_max_ratio_pct;

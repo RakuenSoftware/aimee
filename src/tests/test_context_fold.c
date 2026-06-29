@@ -342,6 +342,37 @@ static void test_freeze_prefix_mutation_breaks_reuse(void)
    PASS("freeze_prefix_mutation_breaks_reuse");
 }
 
+static void test_register_annotation(void)
+{
+   /* §6: with register_enabled, a folded assistant turn carrying a register tag is
+    * annotated in the skeleton (assistant/verdict:); without it, plain "assistant:". */
+   cJSON *m = cJSON_CreateArray();
+   add_user_text(m, "do the thing");
+   add_assistant_text(m, "[verdict] the fix is correct and tested");
+   for (int i = 0; i < 12; i++)
+      add_round(m, "more", "ok");
+
+   fold_config_t on = {.enabled = 1, .register_enabled = 1, .closet = {.enabled = 1}};
+   fold_result_t r;
+   assert(context_fold_view(m, &on, NULL, &r) == 0 && r.folded);
+   const char *c0 =
+       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(r.messages, 0), "content"));
+   assert(contains(c0, "assistant/verdict:"));
+   fold_result_free(&r);
+
+   fold_config_t off = {.enabled = 1, .register_enabled = 0, .closet = {.enabled = 1}};
+   fold_result_t r2;
+   assert(context_fold_view(m, &off, NULL, &r2) == 0 && r2.folded);
+   const char *c0b =
+       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(r2.messages, 0), "content"));
+   assert(!contains(c0b, "assistant/verdict:"));
+   assert(contains(c0b, "assistant:"));
+   fold_result_free(&r2);
+
+   cJSON_Delete(m);
+   PASS("register_annotation");
+}
+
 int main(void)
 {
    printf("context_fold tests:\n");
@@ -354,6 +385,7 @@ int main(void)
    test_odd_shapes_no_crash();
    test_freeze_boundary_stable();
    test_freeze_prefix_mutation_breaks_reuse();
+   test_register_annotation();
    printf("ALL PASS\n");
    return 0;
 }

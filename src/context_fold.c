@@ -3,6 +3,7 @@
 #include "context_fold.h"
 
 #include "dstr.h"
+#include "fold_register.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -62,7 +63,17 @@ static void append_excerpt(dstr_t *d, const char *s, int max)
 
 /* Emit one skeleton line (or lines) for a folded message; nominate its
  * identifiers into `set` with turn-indexed provenance. */
-static void skeleton_message(dstr_t *d, const cJSON *m, int turn, int excerpt, coord_set_t *set)
+/* Emit the "role: " (or "role/register: ") prefix for a folded text line. */
+static void skeleton_prefix(dstr_t *d, const char *role, const char *txt, int register_on)
+{
+   if (register_on && role && strcmp(role, "assistant") == 0)
+      dstr_appendf(d, "%s/%s: ", role, fold_register_label(fold_register_parse(txt)));
+   else
+      dstr_appendf(d, "%s: ", role ? role : "?");
+}
+
+static void skeleton_message(dstr_t *d, const cJSON *m, int turn, int excerpt, int register_on,
+                             coord_set_t *set)
 {
    const char *role = cJSON_GetStringValue(cJSON_GetObjectItem((cJSON *)m, "role"));
    cJSON *content = cJSON_GetObjectItem((cJSON *)m, "content");
@@ -74,7 +85,7 @@ static void skeleton_message(dstr_t *d, const cJSON *m, int turn, int excerpt, c
       if (txt)
       {
          coord_closet_nominate(txt, strlen(txt), &prov, set);
-         dstr_appendf(d, "%s: ", role ? role : "?");
+         skeleton_prefix(d, role, txt, register_on);
          append_excerpt(d, txt, excerpt);
          dstr_append_char(d, '\n');
       }
@@ -95,7 +106,7 @@ static void skeleton_message(dstr_t *d, const cJSON *m, int turn, int excerpt, c
          if (txt)
          {
             coord_closet_nominate(txt, strlen(txt), &prov, set);
-            dstr_appendf(d, "%s: ", role ? role : "?");
+            skeleton_prefix(d, role, txt, register_on);
             append_excerpt(d, txt, excerpt);
             dstr_append_char(d, '\n');
          }
@@ -253,7 +264,8 @@ int context_fold_view(const cJSON *messages, const fold_config_t *cfg, fold_free
        "the Coordinate Closet, full bodies remain in history]\n\n",
        split);
    for (int i = 0; i < split; i++)
-      skeleton_message(&body, cJSON_GetArrayItem((cJSON *)messages, i), i, excerpt, &set);
+      skeleton_message(&body, cJSON_GetArrayItem((cJSON *)messages, i), i, excerpt,
+                       cfg->register_enabled, &set);
 
    char *closet = coord_closet_render(&set, &cfg->closet, folded_bytes, &out->closet_evict);
    if (closet)
