@@ -29,6 +29,7 @@
 #include "util.h"
 #include "wfe_approval.h"
 #include "wfe_blocks.h"
+#include "wfe_live_forge.h"
 #include "wfe_roundtable.h"
 
 #include <stdio.h>
@@ -227,10 +228,12 @@ void wfe_autonomy_register(void)
    wfe_register_roundtable_gate();
    wfe_register_human_gate();
    /* The live worker + the mechanical verify gate (implement only advances a unit
-    * that passes verification). The forge `open` provider stays the default
-    * fail-closed stub for now (pr.open re-loops until the live forge wiring lands,
-    * which is registered default-OFF), which is safe. */
+    * that passes verification). */
    wfe_set_delegate_provider(&WFE_LIVE_DELEGATE);
    wfe_set_verify_provider(&WFE_LIVE_VERIFY);
+   /* The live forge (F4): registers a real push+PR+merge provider ONLY if the
+    * operator enabled wfe_live_forge_enabled (default OFF). While off, the engine
+    * keeps its fail-closed forge stub, so pr.open re-loops and merge parks. */
+   wfe_live_forge_register();
    aimee_log(LOG_INFO, "wfe", "autonomous development registered (default-on)");
 }

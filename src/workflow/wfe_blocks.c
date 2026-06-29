@@ -546,10 +546,26 @@ static wfe_step_result_t exec_pr_open(wfe_ctx *ctx, const wfe_node_t *node)
       return wfe_step_failed();
    if (g_forge->open)
    {
-      const char *branch = getenv("AIMEE_WORKFLOW_BRANCH");
+      /* The branch the run committed to: the per-work-item branch aimee/wi/<id>
+       * (F2's worktree branch), unless an explicit AIMEE_WORKFLOW_BRANCH overrides.
+       * worktrees share the branch namespace, so the live forge's push resolves it
+       * from any checkout. */
+      const char *env_branch = getenv("AIMEE_WORKFLOW_BRANCH");
+      char branchbuf[200];
+      const char *branch = env_branch;
+      if (!branch || !branch[0])
+      {
+         const char *wi = wfe_ctx_work_item(ctx);
+         if (wi && wi[0])
+         {
+            snprintf(branchbuf, sizeof branchbuf, "aimee/wi/%s", wi);
+            branch = branchbuf;
+         }
+         else
+            branch = "HEAD";
+      }
       char pr_ref[128] = ""; /* the forge open() contract writes up to 128 bytes */
-      if (g_forge->open(wfe_ctx_repo(ctx), branch ? branch : "HEAD", wfe_ctx_work_item(ctx), "",
-                        pr_ref) != 0)
+      if (g_forge->open(wfe_ctx_repo(ctx), branch, wfe_ctx_work_item(ctx), "", pr_ref) != 0)
          return wfe_step_looped();
       /* Fail closed on a success-with-bad-ref: advancing with no resolvable PR would
        * silently push the merge gates onto the wrong target. */

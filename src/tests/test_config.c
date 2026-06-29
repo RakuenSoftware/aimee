@@ -53,6 +53,9 @@ int main(void)
       assert(fabs(cfg.code_hybrid_weight_graph - 1.0) < 1e-9);
       assert(fabs(cfg.code_hybrid_rrf_k - 60.0) < 1e-9);
       assert(cfg.guardrails_blast_radius_advisory_enabled == 0);
+      /* SECURITY: the autonomous live forge (F4) must default OFF — an operator
+       * has to explicitly enable it before any autonomous run can open/merge a PR. */
+      assert(cfg.wfe_live_forge_enabled == 0);
       assert(cfg.db1_path[0] != '\0');
       assert(cfg.guardrails_semantic_advisory_only == 1);
       assert(cfg.skills_review_nudge_interval == 10);

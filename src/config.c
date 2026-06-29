@@ -608,6 +608,9 @@ static void config_set_defaults(config_t *cfg)
    cfg->css_style_graph_enabled = 1; /* default-on: the indexer builds the CSS style
                                         graph so the read-only css signals/report work
                                         out of the box (set false to opt out) */
+   cfg->wfe_live_forge_enabled = 0;  /* default-OFF (security): the autonomous live
+                                        forge stays unregistered until an operator
+                                        explicitly enables it (F4) */
    snprintf(cfg->css_render_command, sizeof(cfg->css_render_command), "%s",
             CONFIG_DEFAULT_CSS_RENDER_COMMAND); /* default-on render backend (inert
                                                    until the sidecar is up); set empty
@@ -897,6 +900,10 @@ int config_load(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "css_style_graph_enabled");
    if (cJSON_IsBool(item))
       cfg->css_style_graph_enabled = cJSON_IsTrue(item);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "wfe_live_forge_enabled");
+   if (cJSON_IsBool(item))
+      cfg->wfe_live_forge_enabled = cJSON_IsTrue(item);
 
    item = cJSON_GetObjectItemCaseSensitive(root, "css_render_command");
    if (cJSON_IsString(item) && item->valuestring)

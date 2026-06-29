@@ -298,6 +298,13 @@ typedef struct config
     * assistant's style-graph write path during indexing (WP-C). When off, the
     * indexer keeps only the legacy lexical CSS class-name scan. */
    int css_style_graph_enabled;
+   /* wfe_live_forge_enabled: gate (default 0, OFF) for the autonomous live forge
+    * (full-autonomous-development F4). When OFF the wfe forge provider is not
+    * registered and every forge op fails closed, so an autonomous run can never
+    * open or merge a real PR. Turning it ON is a deliberate operator deployment
+    * action (branch protection + scoped creds + break-glass) — never a code default,
+    * per the security-roundtable deviation. */
+   int wfe_live_forge_enabled;
    /* css_render_command: the render backend for the #4-full computed-style oracle.
     * A shell command (like embedding_command) that reads a {"html","css"} JSON
     * object on stdin and writes a computed-style snapshot JSON on stdout. It runs
