@@ -43,28 +43,35 @@ per-item USD cap).
   worktree is a path convenience, **not** a sandbox — the real seccomp/namespace
   sandbox stays a GA gate.
 
-**Resolved by design / remaining:**
-- **F5a — single-flight is SATISFIED BY THE SEQUENTIAL SCHEDULER.** `wfe_autonomy_run`
-  runs only on the single `wfe_scheduler` thread (concurrency = 1; `notify` only
-  signals a cond var), so two runs of the same work item can never overlap — a
-  per-item claim primitive would be dead code today. The DB-CAS+TTL claim + per-
-  target merge serialization become load-bearing only when the scheduler is made
-  concurrent (Phase-C scale), and are tracked there.
-- **F4 — the live forge `wfe_forge_t` — FINAL PACKET (design grounded, default-OFF).**
-  A server-side provider behind a new `wfe_live_forge_enabled` config flag
-  (default-OFF), re-checked at every call site and guarded by the F1a merge-target
-  rail, that reuses the existing vaulted handlers — `handle_git_push` (push the
-  work-item branch through `git_cred_inject`) + `handle_git_pr` (create / checks /
-  view / merge via `gh`) — for `open`/`ci_status`/`mergeable`/`is_merged`/`merge`,
-  and is registered in `wfe_autonomy_register` only when the flag is on. This is the
-  highest-blast-radius packet (it opens **and merges real PRs**); per the safety
-  posture it is implemented as a focused, dedicated change with its own roundtable
-  review, and its production enable is an explicit operator deployment gate (branch
-  protection + scoped/rotated creds + break-glass TTL — see GA gates). It closes the
-  criterion-5 gap [autonomous-dev-execution-substrate.md](done/autonomous-dev-execution-substrate.md)
-  deferred here.
-- **intake auth** on `POST /v1/dev/submit` (authn + per-principal rate/concurrency
-  cap + submitter→run audit binding) — required before any live-forge enable.
+- **F5a — single-flight is SATISFIED BY THE SEQUENTIAL SCHEDULER** (resolved by
+  design). `wfe_autonomy_run` runs only on the single `wfe_scheduler` thread
+  (concurrency = 1; `notify` only signals a cond var), so two runs of the same work
+  item can never overlap — a per-item claim primitive would be dead code today. The
+  DB-CAS+TTL claim + per-target merge serialization become load-bearing only when the
+  scheduler is made concurrent (Phase-C scale), and are tracked there.
+- **F4 — live forge `wfe_forge_t` SHIPPED (PR #868, `src/server/wfe_live_forge.c`).**
+  A server-side provider behind the `wfe_live_forge_enabled` config flag
+  (**default-OFF**; `test_config` asserts the default), registered (via
+  `wfe_live_forge_register` in `wfe_autonomy_register`) ONLY when the operator opts in;
+  otherwise the engine keeps its fail-closed stub. Every op re-checks `forge_allowed()`
+  (the flag AND the F1a merge-target rail) — including immediately before each mutating
+  call (TOCTOU-safe) — so a flag flip or protected-base misconfig can never open/merge
+  a real PR. open = `git push` (vaulted via `mcp_git_run`) + `gh pr create --base
+  <autonomous_base>`; ci/mergeable/is_merged/merge map `gh` output to the engine enums,
+  unknown → fail closed. `exec_pr_open` derives the work-item branch `aimee/wi/<id>`.
+  Closes the criterion-5 **code** gap
+  [autonomous-dev-execution-substrate.md](done/autonomous-dev-execution-substrate.md)
+  deferred here. The CODE floor for full-autonomous-development is now complete.
+
+**Remaining = enable-gates only (no further code floor):**
+- **intake-auth hardening** on `POST /v1/dev/submit` (it is already `CAP_DELEGATE`;
+  add per-principal rate/concurrency caps + submitter→run audit binding) — a hardening
+  precondition for the live-forge enable.
+- the **operator deployment gates** to flip `wfe_live_forge_enabled` on: branch
+  protection on RakuenSoftware/aimee, fine-grained scoped + rotated forge creds, the
+  break-glass TTL enable, and a real execution sandbox (see GA gates). A production
+  live-forge roundtrip stays a deployment-tier `validation-pending` check, never a
+  closeout test.
 
 **Ratified deviation — default-OFF, not default-on.** §7 mandates the live forge
 ship *default-on*. The security roundtable ruled that unsafe (it would let any
