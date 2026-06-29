@@ -725,6 +725,15 @@ int kb_pdf_sensitivity_valid(const char *s)
           (strcmp(s, "public") == 0 || strcmp(s, "internal") == 0 || strcmp(s, "restricted") == 0);
 }
 
+/* Remove the per-render private scratch: the input PDF, pdftoppm's output PNG, and the 0700
+ * directory itself. Best-effort + idempotent (a missing file/dir is fine). */
+static void render_dir_cleanup(const char *inpath, const char *outpng, const char *dir)
+{
+   unlink(inpath);
+   unlink(outpng);
+   rmdir(dir);
+}
+
 /* Phase C: render one PDF page to a PNG via pdftoppm, over the SAME hardened-exec harness as
  * pdftotext — pdftoppm is a DIFFERENT untrusted byte-consuming parser (it decodes the page's
  * images), so it gets its own scratch + the same RLIMIT_CPU/AS/FSIZE (RLIMIT_AS bounds in-
@@ -742,11 +751,25 @@ static int kb_pdf_exec_render(const unsigned char *bytes, int n, int page_no,
    if (!bytes || n <= 0 || page_no < 1 || !png_out || !png_len)
       return -1;
 
-   char inpath[] = "/tmp/aimee_pdf_render_in_XXXXXX";
-   int ifd = mkstemp(inpath);
-   if (ifd < 0)
+   /* Render inside a PRIVATE 0700 directory (mkdtemp), not bare /tmp files: pdftoppm creates
+    * <outbase>.png itself, and a 0700 dir we own closes the /tmp symlink/TOCTOU race where an
+    * attacker could pre-create that path to redirect the output or inject bytes. Both the input
+    * and the output live in this dir; render_dir_cleanup() removes them + the dir on EVERY exit
+    * path below. */
+   char scratch[] = "/tmp/aimee_pdf_render_XXXXXX";
+   if (!mkdtemp(scratch))
       return -1;
-   fchmod(ifd, 0600);
+   char inpath[sizeof(scratch) + 8], outbase[sizeof(scratch) + 8], outpng[sizeof(scratch) + 12];
+   snprintf(inpath, sizeof(inpath), "%s/in.pdf", scratch);
+   snprintf(outbase, sizeof(outbase), "%s/page", scratch);
+   snprintf(outpng, sizeof(outpng), "%s/page.png", scratch);
+
+   int ifd = open(inpath, O_WRONLY | O_CREAT | O_EXCL, 0600);
+   if (ifd < 0)
+   {
+      rmdir(scratch);
+      return -1;
+   }
    {
       size_t off = 0;
       int ok = 1;
@@ -765,22 +788,10 @@ static int kb_pdf_exec_render(const unsigned char *bytes, int n, int page_no,
       close(ifd);
       if (!ok)
       {
-         unlink(inpath);
+         render_dir_cleanup(inpath, outpng, scratch);
          return -1;
       }
    }
-   /* pdftoppm -singlefile writes exactly <outbase>.png. */
-   char outbase[] = "/tmp/aimee_pdf_render_out_XXXXXX";
-   int ofd = mkstemp(outbase);
-   if (ofd < 0)
-   {
-      unlink(inpath);
-      return -1;
-   }
-   close(ofd);
-   unlink(outbase); /* pdftoppm creates outbase.png; remove the placeholder mktemp file */
-   char outpng[sizeof(outbase) + 8];
-   snprintf(outpng, sizeof(outpng), "%s.png", outbase);
 
    char page_arg[16];
    snprintf(page_arg, sizeof(page_arg), "%d", page_no);
@@ -788,7 +799,7 @@ static int kb_pdf_exec_render(const unsigned char *bytes, int n, int page_no,
    pid_t pid = fork();
    if (pid < 0)
    {
-      unlink(inpath);
+      render_dir_cleanup(inpath, outpng, scratch);
       return -1;
    }
    if (pid == 0)
@@ -825,7 +836,18 @@ static int kb_pdf_exec_render(const unsigned char *bytes, int n, int page_no,
          break;
       }
       if (w < 0 && errno != EINTR)
+      {
+         /* Unexpected waitpid error (not ECHILD/EINTR): make sure the child cannot linger as a
+          * zombie or a runaway — kill its group and do one best-effort blocking reap. */
+         if (errno != ECHILD)
+         {
+            kill(pid, SIGKILL);
+            kill(-pid, SIGKILL);
+            while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
+               ;
+         }
          break;
+      }
       if (ms_since(&start) > timeout_ms)
       {
          kill(pid, SIGKILL);
@@ -839,7 +861,6 @@ static int kb_pdf_exec_render(const unsigned char *bytes, int n, int page_no,
       struct timespec ts = {0, 5 * 1000 * 1000};
       nanosleep(&ts, NULL);
    }
-   unlink(inpath);
 
    int rc = -1;
    if (!timed_out && reaped && WIFEXITED(status) && WEXITSTATUS(status) == 0)
@@ -893,7 +914,7 @@ static int kb_pdf_exec_render(const unsigned char *bytes, int n, int page_no,
       LOG_WARN("kb_doc_pdf", "pdftoppm timed out rendering page %d", page_no);
    else
       LOG_WARN("kb_doc_pdf", "pdftoppm failed for page %d (exit status %d)", page_no, status);
-   unlink(outpng);
+   render_dir_cleanup(inpath, outpng, scratch);
    return rc;
 }
 

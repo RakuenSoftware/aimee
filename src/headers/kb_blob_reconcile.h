@@ -7,6 +7,11 @@
 #ifndef AIMEE_KB_BLOB_RECONCILE_H
 #define AIMEE_KB_BLOB_RECONCILE_H
 
+/* Default grace window: skip blobs younger than this in the production sweep so a blob written
+ * by an in-flight ingest is never reclaimed before its kb_doc_assets row lands (the put→insert
+ * gap is milliseconds; 10 minutes is comfortably larger). */
+#define KB_BLOB_RECON_GRACE_SECS 600
+
 typedef struct
 {
    long long blobs_scanned;
@@ -17,8 +22,9 @@ typedef struct
 } kb_blob_recon_stats_t;
 
 /* Run one reconciliation sweep. alarm_mb is the orphan-bytes alarm threshold in MiB (<=0
- * disables the alarm). Unlinks every blob with no kb_doc_assets referrer. Returns 0 on success
- * (stats populated), -1 on error. */
-int kb_blob_reconcile_run(int alarm_mb, kb_blob_recon_stats_t *out);
+ * disables the alarm). grace_secs skips blobs younger than that many seconds (closes the
+ * put→insert race; pass 0 to reclaim immediately, e.g. in tests). Unlinks every eligible blob
+ * with no kb_doc_assets referrer. Returns 0 on success (stats populated), -1 on error. */
+int kb_blob_reconcile_run(int alarm_mb, int grace_secs, kb_blob_recon_stats_t *out);
 
 #endif /* AIMEE_KB_BLOB_RECONCILE_H */

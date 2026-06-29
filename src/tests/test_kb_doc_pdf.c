@@ -796,10 +796,11 @@ static void test_blob_store(void)
 }
 
 /* Count visitor for reconciliation tests. */
-static int count_visit(const char *sha, long long bytes, void *ctx)
+static int count_visit(const char *sha, long long bytes, long long mtime, void *ctx)
 {
    (void)sha;
    (void)bytes;
+   (void)mtime;
    (*(int *)ctx)++;
    return 0;
 }
@@ -871,7 +872,7 @@ static void test_pdf_assets_and_recon(void)
    kb_blob_store_foreach(count_visit, &before);
    assert(before == 3); /* vis crop, secret crop, orphan */
    kb_blob_recon_stats_t rst;
-   assert(kb_blob_reconcile_run(0, &rst) == 0);
+   assert(kb_blob_reconcile_run(0, 0, &rst) == 0);
    assert(rst.orphans_unlinked == 1);             /* only the unreferenced orphan */
    assert(kb_blob_store_exists(sha) == 1);        /* referenced survives */
    assert(kb_blob_store_exists(orphan_sha) == 0); /* orphan reclaimed */
@@ -880,7 +881,7 @@ static void test_pdf_assets_and_recon(void)
    assert(kb_doc_pdf_ingest_xhtml("proj", "vis.pdf", "h1b", FIXTURE_2PAGE, "internal", &stats) ==
           2);
    assert(db2_kb_doc_assets_list("proj", "vis.pdf", assets, 8) == 0); /* asset rows gone */
-   assert(kb_blob_reconcile_run(0, &rst) == 0);
+   assert(kb_blob_reconcile_run(0, 0, &rst) == 0);
    assert(kb_blob_store_exists(sha) == 0); /* now-unreferenced crop reclaimed */
 
    /* render_assets degrades safely on non-PDF bytes (no pdftoppm crash, 0 assets). */

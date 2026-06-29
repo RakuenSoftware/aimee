@@ -42,9 +42,30 @@ static int blob_path(const char *root, const char *sha, char *out, size_t cap)
 /* mkdir -p for a single level (root, then root/ab). 0600/0700 like the PKI store. */
 static int ensure_dir(const char *path)
 {
-   if (mkdir(path, 0700) == 0 || errno == EEXIST)
+   if (mkdir(path, 0700) == 0)
       return 0;
+   if (errno == EEXIST)
+   {
+      /* It already exists — verify it is a REAL directory, not a symlink (which a pre-created/
+       * misconfigured kb_pdf_blob_dir could use to redirect blobs out of the store). */
+      struct stat st;
+      if (lstat(path, &st) == 0 && S_ISDIR(st.st_mode))
+         return 0;
+      return -1;
+   }
    return -1;
+}
+
+/* fsync a directory so a prior rename()'s entry is durable (the blob-durable-before-row
+ * guarantee needs the directory entry, not just the file content, on disk). Best-effort. */
+static void fsync_dir(const char *path)
+{
+   int dfd = open(path, O_RDONLY | O_DIRECTORY);
+   if (dfd >= 0)
+   {
+      fsync(dfd);
+      close(dfd);
+   }
 }
 
 int kb_blob_store_put(const void *bytes, size_t n, char *sha_out, size_t sha_cap)
@@ -115,7 +136,23 @@ int kb_blob_store_put(const void *bytes, size_t n, char *sha_out, size_t sha_cap
       unlink(tmp);
       return -1;
    }
+   /* Make the new directory ENTRY durable too, so the blob-durable-before-row guarantee holds
+    * across a crash right after this returns (otherwise the row could outlive a lost entry). */
+   fsync_dir(shard);
    return 0;
+}
+
+/* File size of a blob in bytes, or -1 if absent/error. Lets a caller reject an oversized blob
+ * (open_asset's inline cap) WITHOUT first reading the whole thing into memory. */
+long long kb_blob_store_size(const char *sha)
+{
+   char root[4096], path[4256];
+   if (!kb_blob_store_root(root, sizeof(root)) || blob_path(root, sha, path, sizeof(path)) != 0)
+      return -1;
+   struct stat st;
+   if (stat(path, &st) != 0 || !S_ISREG(st.st_mode))
+      return -1;
+   return (long long)st.st_size;
 }
 
 int kb_blob_store_exists(const char *sha)
@@ -220,9 +257,10 @@ long long kb_blob_store_foreach(kb_blob_visit_fn fn, void *ctx)
          char fp[4256];
          snprintf(fp, sizeof(fp), "%s/%s", shardpath, e->d_name);
          struct stat st;
-         long long bytes = (stat(fp, &st) == 0) ? (long long)st.st_size : 0;
+         if (stat(fp, &st) != 0 || !S_ISREG(st.st_mode))
+            continue; /* only real blob files — never count/reclaim a symlink or device */
          visited++;
-         if (fn(e->d_name, bytes, ctx) != 0)
+         if (fn(e->d_name, (long long)st.st_size, (long long)st.st_mtime, ctx) != 0)
          {
             stop = 1;
             break;

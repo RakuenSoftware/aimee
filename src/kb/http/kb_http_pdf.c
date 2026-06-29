@@ -553,6 +553,18 @@ int handle_get_pdf_open_asset_route(const char *method, const char *query_string
       return 404;
    }
 
+   /* Reject an oversized blob from its size ALONE — before reading it into memory — so a
+    * referenced 256 MiB crop cannot force a huge allocation just to return 413. */
+   long long bsize = kb_blob_store_size(blob_ref);
+   if (bsize > PDF_ASSET_MAX_BYTES)
+   {
+      LOG_INFO("kb.asset.audit", "open_asset asset_id=%lld project=%s verdict=too_large", asset_id,
+               project);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"asset too large for inline transfer\",\"code\":\"asset_too_large\"}");
+      return 413;
+   }
+
    void *bytes = NULL;
    size_t blen = 0;
    if (kb_blob_store_read(blob_ref, &bytes, &blen) != 0)
@@ -562,15 +574,6 @@ int handle_get_pdf_open_asset_route(const char *method, const char *query_string
                asset_id, project);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"asset bytes unavailable\"}");
       return 404;
-   }
-   if (blen > PDF_ASSET_MAX_BYTES)
-   {
-      free(bytes);
-      LOG_INFO("kb.asset.audit", "open_asset asset_id=%lld project=%s verdict=too_large", asset_id,
-               project);
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"error\":\"asset too large for inline transfer\",\"code\":\"asset_too_large\"}");
-      return 413;
    }
 
    size_t b64cap = aimee_base64_encoded_len(blen);

@@ -148,7 +148,8 @@ static void *kb_blob_recon_timer_thread(void *arg)
          continue;
       elapsed = 0;
       kb_blob_recon_stats_t st;
-      if (kb_blob_reconcile_run(cfg.kb_pdf_blob_orphan_alarm_mb, &st) == 0)
+      if (kb_blob_reconcile_run(cfg.kb_pdf_blob_orphan_alarm_mb, KB_BLOB_RECON_GRACE_SECS, &st) ==
+          0)
       {
          db2_kb_runtime_state_set_now("last_blob_recon_at");
          char buf[32];

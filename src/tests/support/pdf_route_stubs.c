@@ -106,3 +106,8 @@ int kb_blob_store_read(const char *sha, void **out, size_t *n_out)
       *n_out = 0;
    return -1;
 }
+long long kb_blob_store_size(const char *sha)
+{
+   (void)sha;
+   return -1;
+}

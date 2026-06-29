@@ -30,13 +30,16 @@ int kb_blob_store_read(const char *sha, void **out, size_t *n_out);
 /* 1 if a blob exists, 0 if not, -1 on bad args. */
 int kb_blob_store_exists(const char *sha);
 
+/* File size of a blob in bytes (regular file only), or -1 if absent/error. */
+long long kb_blob_store_size(const char *sha);
+
 /* Unlink a blob (reconciliation). A missing blob is success (idempotent). Returns 0/-1. */
 int kb_blob_store_unlink(const char *sha);
 
 /* Iterate every stored blob's sha (64-hex) via the callback; used by the orphan
  * reconciliation sweep. Returns the number visited, or -1 on error. The callback returns 0 to
  * continue, non-zero to stop early. `bytes` is that blob file's size. */
-typedef int (*kb_blob_visit_fn)(const char *sha, long long bytes, void *ctx);
+typedef int (*kb_blob_visit_fn)(const char *sha, long long bytes, long long mtime, void *ctx);
 long long kb_blob_store_foreach(kb_blob_visit_fn fn, void *ctx);
 
 #endif /* AIMEE_KB_BLOB_STORE_H */
