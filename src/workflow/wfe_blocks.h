@@ -96,9 +96,9 @@ typedef struct
 /* Install a verify provider (NULL = implement does not gate on verification). */
 void wfe_set_verify_provider(const wfe_verify_provider_t *p);
 
-/* The implement verify gate: 1 = advance (verdict passed, or no provider -> skip),
- * 0 = block (anything that is not an explicit pass -> fail closed). Exposed for the
- * unit test. */
+/* The implement verify gate: 1 = advance ONLY when the top-level verdict is an
+ * explicit "passed"; 0 = block in every other case (no provider, gate-unrunnable,
+ * unparseable, or any non-pass verdict) -> FAIL CLOSED. Exposed for the unit test. */
 int wfe_implement_verify_ok(const char *workdir);
 
 #endif /* DEC_WFE_BLOCKS_H */

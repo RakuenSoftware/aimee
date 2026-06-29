@@ -162,11 +162,11 @@ int main(void)
    assert(g_deleg_calls == 1);
    assert(g_open_calls == 0); /* open is NULL -> not called, no crash */
 
-   /* D: implement verify gate (WP-1b) — a unit advances only on verdict:passed;
-    *    anything else fails closed; no provider => skip. */
+   /* D: implement verify gate (WP-1b) — a unit advances ONLY on a top-level
+    *    verdict:passed; everything else (incl. NO provider) fails closed. */
    {
       wfe_set_verify_provider(NULL);
-      assert(wfe_implement_verify_ok(".") == 1); /* no gate -> skip (advance) */
+      assert(wfe_implement_verify_ok(".") == 0); /* no gate -> FAIL CLOSED */
 
       wfe_set_verify_provider(&MOCK_VERIFY);
       g_verify_rc = 0;
@@ -182,15 +182,14 @@ int main(void)
       g_verify_rc = -1; /* gate could not run */
       assert(wfe_implement_verify_ok(".") == 0);
 
-      /* spoof: a top-level failed verdict whose step log contains the literal
-       * "verdict":"passed" far past the leading region must NOT flip to pass. */
       g_verify_rc = 0;
-      char spoof[2048];
-      int off = snprintf(spoof, sizeof spoof, "{\"verdict\":\"failed\",\"steps\":[{\"log\":\"");
-      for (int k = 0; k < 200 && off < (int)sizeof spoof - 40; k++)
-         off += snprintf(spoof + off, sizeof spoof - off, "x");
-      snprintf(spoof + off, sizeof spoof - off, "\\\"verdict\\\":\\\"passed\\\"\"}]}");
-      snprintf(g_verdict, sizeof g_verdict, "%s", spoof);
+      snprintf(g_verdict, sizeof g_verdict, "not json at all");
+      assert(wfe_implement_verify_ok(".") == 0); /* unparseable -> fail closed */
+
+      /* spoof: a top-level FAILED verdict whose nested step carries verdict:passed
+       * must NOT flip the gate — only the TOP-LEVEL verdict counts. */
+      snprintf(g_verdict, sizeof g_verdict,
+               "{\"verdict\":\"failed\",\"steps\":[{\"name\":\"unit\",\"verdict\":\"passed\"}]}");
       assert(wfe_implement_verify_ok(".") == 0);
 
       wfe_set_verify_provider(NULL);

@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cJSON.h"
 #include "util.h"
 #include "wfe_def.h"
 #include "wfe_engine.h"
@@ -163,25 +164,27 @@ void wfe_set_verify_provider(const wfe_verify_provider_t *p)
    g_verify = p;
 }
 
-/* Run the mechanical verify gate on the implemented worktree. Returns:
- *   1  advance — verdict passed, OR no provider installed (verification skipped);
- *   0  do NOT advance — the gate is installed but the run did not pass (verdict
- *      failed/unavailable, or the gate could not run). Fail closed: anything that
- *      is not an explicit "passed" blocks the unit, so unverified work never
- *      advances. The verdict JSON is the git_verify format=json document; we match
- *      the top-level verdict token in its leading region (a "verdict":"passed"
- *      substring inside a step log can't spoof it). */
+/* Run the mechanical verify gate on the implemented worktree. Returns 1 to ADVANCE
+ * (only when the top-level verdict is an explicit "passed"); 0 to BLOCK in every
+ * other case — FAIL CLOSED. Blocking cases: no provider installed (a missing safety
+ * gate must never let unverified work advance), the gate could not run, an
+ * unparseable verdict, or a verdict other than "passed". We parse the git_verify
+ * format=json document and read its TOP-LEVEL "verdict" field, so a nested or echoed
+ * verdict token cannot spoof the gate. Exposed (non-static) for the unit test. */
 int wfe_implement_verify_ok(const char *workdir)
 {
    if (!g_verify || !g_verify->verify)
-      return 1; /* no gate configured -> skip (drivable without a provider) */
-   char verdict[2048] = "";
+      return 0; /* no gate -> fail closed (unverified work never advances) */
+   char verdict[4096] = "";
    if (g_verify->verify(workdir, verdict, sizeof verdict) != 0)
       return 0; /* gate could not run -> fail closed */
-   verdict[sizeof verdict - 1] = '\0';
-   char head[128];
-   snprintf(head, sizeof head, "%.*s", (int)(sizeof head - 1), verdict);
-   return strstr(head, "\"verdict\":\"passed\"") != NULL ? 1 : 0;
+   cJSON *doc = cJSON_Parse(verdict);
+   if (!doc)
+      return 0; /* unparseable -> fail closed */
+   const cJSON *vd = cJSON_GetObjectItemCaseSensitive(doc, "verdict");
+   int passed = cJSON_IsString(vd) && vd->valuestring && strcmp(vd->valuestring, "passed") == 0;
+   cJSON_Delete(doc);
+   return passed ? 1 : 0;
 }
 
 /* The step's assigned delegate from node params ("delegate"), or "" for none.
