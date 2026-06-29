@@ -25,6 +25,8 @@
 {"kb_pdf_blob_dir", SCHEMA_STRING, 0},
 {"kb_pdf_blob_recon_secs", SCHEMA_INT, 0},
 {"kb_pdf_blob_orphan_alarm_mb", SCHEMA_INT, 0},
+{"kb_pdf_ocr_enabled", SCHEMA_BOOL, 0},
+{"ocr_command", SCHEMA_STRING, 0},
 {"ingress_preinject_assembly_budget", SCHEMA_INT, 0},
 {"ingress_max_raw_scans", SCHEMA_INT, 0},
 {"code_span_max_lines", SCHEMA_INT, 0},

@@ -12,6 +12,7 @@
 #include "db2/kb_docs.h"
 #include "config.h"
 #include "kb_doc_pdf.h"
+#include "kb_ocr_sidecar.h"
 #include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -216,6 +217,31 @@ int handle_post_docs(const char *body, int body_len, char *out_buf, int out_cap)
             snprintf(out_buf, (size_t)out_cap, "{\"error\":\"db error\"}");
             return 503;
          }
+         const char *text_layer = st.regions > 0 ? "native" : "none";
+
+         /* Phase D: a PDF with no extractable text layer (scanned/image-only) yields 0 regions
+          * here. If the OCR sidecar is configured, OCR the rendered pages and ingest the text +
+          * geometry through the SAME path (citations work identically); text_layer='ocr'.
+          * Without OCR the doc stays text-less and is reported asset-only below — NOT silently
+          * accepted as if text-indexed. */
+         if (st.regions == 0 && cfg.kb_pdf_ocr_enabled)
+         {
+            const char *ocr_ep = kb_ocr_endpoint(&cfg);
+            if (ocr_ep[0])
+            {
+               int orc = kb_doc_pdf_ingest_ocr(scope, filename, content_hash, sclass,
+                                               (const unsigned char *)file_content, file_len,
+                                               ocr_ep, &st);
+               if (orc < 0)
+               {
+                  snprintf(out_buf, (size_t)out_cap, "{\"error\":\"db error\"}");
+                  return 503;
+               }
+               if (st.regions > 0)
+                  text_layer = "ocr";
+            }
+         }
+
          /* Phase C: render page crops from the RAW bytes (available only here) into the blob
           * store + kb_doc_assets, when the capability is on. Best-effort + AFTER ingest (the
           * prior assets were dropped by kb_doc_pdf_ingest's re-ingest delete); a missing
@@ -225,11 +251,14 @@ int handle_post_docs(const char *body, int body_len, char *out_buf, int out_cap)
          if (cfg.kb_pdf_assets_enabled)
             assets = kb_doc_pdf_render_assets(scope, filename, sclass,
                                               (const unsigned char *)file_content, file_len);
+         /* Surface an asset-only ingest (scanned PDF, no text recovered) so an operator is never
+          * misled into thinking a scanned contract is searchable (Phase D, RT-sug). */
+         int asset_only = (st.regions == 0 && assets > 0);
          kb_ws_publish_invalidation("doc", "global", NULL);
          snprintf(out_buf, (size_t)out_cap,
                   "{\"doc_kind\":\"pdf\",\"chunks\":%d,\"regions\":%d,\"assets\":%d,"
-                  "\"sensitivity_class\":\"%s\"}",
-                  st.chunks, st.regions, assets, sclass);
+                  "\"text_layer\":\"%s\",\"asset_only\":%s,\"sensitivity_class\":\"%s\"}",
+                  st.chunks, st.regions, assets, text_layer, asset_only ? "true" : "false", sclass);
          return 201;
       }
    }

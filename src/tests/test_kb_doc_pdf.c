@@ -18,6 +18,7 @@
 #include "kb_doc_hash.h"
 #include "kb_doc_pdf.h"
 #include "kb_http_pdf.h"
+#include "kb_ocr_sidecar.h"
 #include "kb_tsr_sidecar.h"
 #include "support/mock_agent_http.h"
 
@@ -895,6 +896,85 @@ static void test_pdf_assets_and_recon(void)
    PASS("pdf_assets_and_recon");
 }
 
+/* ---- Phase D: OCR sidecar client + asset-only/OCR ingest fallback ---- */
+
+static const char *g_ocr_resp = NULL;
+static int g_ocr_status = 200;
+
+static int ocr_mock_post(const char *url, const char *auth_header, const char *body,
+                         char **response_buf, int timeout_ms, const char *extra_headers)
+{
+   (void)url;
+   (void)auth_header;
+   (void)body;
+   (void)timeout_ms;
+   (void)extra_headers;
+   if (response_buf && g_ocr_resp)
+      *response_buf = strdup(g_ocr_resp);
+   return g_ocr_status;
+}
+
+static void test_ocr_sidecar_client(void)
+{
+   kb_ocr_line_t *lines = NULL;
+   int n = 0;
+   const unsigned char png[] = "fake-png";
+
+   /* No endpoint → unavailable, agent_http_post not invoked. */
+   assert(kb_ocr_recognize("", 1, png, (int)sizeof(png), &lines, &n) == -1 && n == 0);
+
+   mock_agent_http_set_post_handler(ocr_mock_post);
+
+   /* Recognised text → lines parsed with geometry. */
+   g_ocr_status = 200;
+   g_ocr_resp = "{\"lines\":[{\"text\":\"Invoice\",\"x0\":0.1,\"y0\":0.1,\"x1\":0.4,\"y1\":0.15},"
+                "{\"text\":\"\",\"x0\":0,\"y0\":0,\"x1\":0,\"y1\":0},"
+                "{\"text\":\"Total 42\",\"x0\":0.1,\"y0\":0.2,\"x1\":0.5,\"y1\":0.25}]}";
+   assert(kb_ocr_recognize("http://ocr.local/x", 1, png, (int)sizeof(png), &lines, &n) == 1);
+   assert(n == 2); /* the empty-text line is skipped */
+   assert(strcmp(lines[0].text, "Invoice") == 0 && lines[0].x0 > 0.09 && lines[0].x0 < 0.11);
+   assert(strcmp(lines[1].text, "Total 42") == 0);
+   kb_ocr_free_lines(lines, n);
+
+   /* No text → 0. */
+   lines = NULL;
+   n = 0;
+   g_ocr_resp = "{\"lines\":[]}";
+   assert(kb_ocr_recognize("http://ocr.local/x", 1, png, (int)sizeof(png), &lines, &n) == 0);
+
+   /* Non-2xx → unavailable. */
+   g_ocr_status = 500;
+   g_ocr_resp = "err";
+   assert(kb_ocr_recognize("http://ocr.local/x", 1, png, (int)sizeof(png), &lines, &n) == -1);
+
+   mock_agent_http_reset();
+   g_ocr_resp = NULL;
+   g_ocr_status = 200;
+   PASS("ocr_sidecar_client");
+}
+
+static void test_ocr_ingest_degradation(void)
+{
+   db2_test_shim_open();
+   kb_pdf_ingest_stats_t st;
+   /* No endpoint → no-op (0). */
+   assert(kb_doc_pdf_ingest_ocr("proj", "scan.pdf", "h1", "internal",
+                                (const unsigned char *)FIXTURE_2PAGE, (int)strlen(FIXTURE_2PAGE),
+                                "", &st) == 0);
+   /* Endpoint set but the bytes are not a renderable PDF (and pdftoppm may be absent) → the
+    * render harness fails on page 1 → 0 pages → 0, no crash, no partial DB state. */
+   mock_agent_http_set_post_handler(ocr_mock_post);
+   g_ocr_status = 200;
+   g_ocr_resp = "{\"lines\":[{\"text\":\"x\",\"x0\":0,\"y0\":0,\"x1\":1,\"y1\":1}]}";
+   assert(kb_doc_pdf_ingest_ocr("proj", "scan.pdf", "h1", "internal",
+                                (const unsigned char *)FIXTURE_2PAGE, (int)strlen(FIXTURE_2PAGE),
+                                "http://ocr.local/x", &st) == 0);
+   mock_agent_http_reset();
+   g_ocr_resp = NULL;
+   db2_test_shim_close();
+   PASS("ocr_ingest_degradation");
+}
+
 int main(void)
 {
    printf("structured-pdf (kb_doc_pdf) tests:\n");
@@ -913,6 +993,8 @@ int main(void)
    test_pdf_tsr_ingest();
    test_blob_store();
    test_pdf_assets_and_recon();
+   test_ocr_sidecar_client();
+   test_ocr_ingest_degradation();
    printf("ALL PASS\n");
    return 0;
 }
