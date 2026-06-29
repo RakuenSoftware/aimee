@@ -11,6 +11,17 @@ Thin-client + credential hardening, the client owns the working tree; agent
 credentials live in the server's **sealed vault**; see
 [THIN_CLIENT.md](THIN_CLIENT.md).
 
+- **Structured-PDF tables, visual crops & OCR** (default-off, opt-in per layer):
+  on top of the coordinate-anchored PDF spine, aimee-kb can now embed PDF chunks
+  into a structurally-isolated vector relation with a per-query answerability
+  signal (`kb_pdf_vector_enabled`), recognise table cells via an optional TSR
+  sidecar (`kb_pdf_tsr_enabled`, surfaced by `pdf_lookup_table`), render
+  figure/table/page crops into a content-addressed blob store served by the
+  access-gated, audited `pdf_open_asset` (`kb_pdf_assets_enabled`), and OCR
+  scanned PDFs through the same citation path with an asset-only fallback
+  (`kb_pdf_ocr_enabled`). Each layer degrades cleanly when its sidecar/binary is
+  absent. See [STRUCTURED_PDF.md](STRUCTURED_PDF.md).
+
 - **Server-sealed credential vault (single store)**: agent/delegate API keys and
   Codex/OAuth tokens are sealed in the server's vault, encrypted at rest, keyed
   by agent, and decryptable by the server autonomously (a dual-access wrap, no

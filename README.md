@@ -221,6 +221,7 @@ Focused references:
 |----------|-------------|
 | [Command Reference](docs/COMMANDS.md) | Client command contract, flags, and options |
 | [Storage Tiers](docs/STORAGE_TIERS.md) | DB1 + DB2 ownership boundaries (pgvector inside DB2) |
+| [Structured PDF](docs/STRUCTURED_PDF.md) | Coordinate-anchored PDF evidence: text+geometry citations, table cells, visual crops, and OCR — the capability flags, retrieval surface, and access model |
 | [Setting Up Delegates](docs/DELEGATES.md) | Configure delegate agents for task offloading |
 | [Autonomous Development](docs/AUTONOMOUS_DEVELOPMENT.md) | Hand aimee a proposal; it builds the change end-to-end via the workflow engine |
 | [Personas](docs/personas.md) | Built-in and custom agent identities, delegate policy, and how personas staff reviews |
