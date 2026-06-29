@@ -1,8 +1,9 @@
 # Proposal: Cross-repo dependency graph — recall recovery (build-declared edges)
 
-- **State:** DONE — implemented R1–R4 slice-by-slice (PRs #846/#847/#849/#851/#852/#853/#855/#857),
-  each roundtable-reviewed to 0-blocking before merge; **§9 recall gate MET** (HIGH+MED 100%, up from
-  ~18%) on the live .254 corpus 2026-06-29. See §8 (implementation) and §9 (final measurement). Design
+- **State:** DONE — implemented R1–R4 slice-by-slice (PRs
+  #846/#847/#849/#851/#852/#853/#855/#857/#861), each roundtable-reviewed to 0-blocking before merge;
+  **§9 gates MET** — HIGH+MED recall 100% (up from ~18%) AND precision 100% (0 FPs) on the live .254
+  corpus 2026-06-29. See §8 (implementation) and §9 (final measurement). Design
   was roundtable design-reviewed to convergence over 5 rounds
   (blocking: 6 → 3 → 3 → 3 → 1, each finer; final round = a scope-honesty fix on §6, incorporated):
   separate evidence-tagged build-edge stream (not in cross_repo_route); canonical host/owner/repo URL
@@ -186,6 +187,14 @@ Slice-by-slice, each roundtable-reviewed before merge:
   R2a fixes it (live: **77** CMake identities). Name-mapped `target_link_libraries` (annotate-only) is
   deferred: it adds no new edges (cannot move the HIGH+MED recall numerator) and the §9 gate is met
   without it.
+- **R3f (#861)** — reverse-of-build symbol-edge suppression: drop a pure `symbol_resolved` edge
+  `A→B` when a confident build dep `B→A` exists (the build graph fixes direction; the reverse symbol
+  edge is a name-collision artifact). Edges with their own forward build evidence (`both`/
+  `build_declared`) are never suppressed, so mutual/cyclic build deps survive; only
+  `parse_confidence<>'low'` build deps drive suppression. Eliminated the last residual FP
+  (`inputtino→wolf`). A first attempt (exclude test-dir route definers) was rejected by a live
+  pre-merge check — `wolf→inputtino`'s only route is via inputtino's `tests/libinput.h`, so test-dir
+  exclusion would have downgraded that TRUE gold edge HIGH→MEDIUM.
 
 ## §9 Measurement (FINAL — live, .254, 2026-06-29)
 Curated gold set built **independently** of the extractor (recursive parse of every corpus repo's own
@@ -193,27 +202,25 @@ manifests for corpus↔corpus references): **7 build-declared edges** — `moonl
 `Sunshine→{inputtino, moonlight-common-c}`, `wolf→{inputtino, eventbus, mdns_cpp}`,
 `gst-wayland-display→smithay`.
 
-Emitted edges (resolver, all projects): 8 total.
+Emitted edges (resolver, all projects): **exactly the 7 gold edges, 0 false positives** (after R3f).
 
 | metric | result | gate | verdict |
 |---|---|---|---|
 | **Recall HIGH+MED** | **7/7 = 100%** | ≥85% | **PASS** |
+| **Precision** | **7/7 = 100%** (point) | no new FP class | **PASS** (0 FPs; Wilson-LB ≥90% is sample-size-unreachable at n=7, reported honestly) |
 | Recall HIGH (`both`) | 3/7 = 43% (`wolf→inputtino`, `moonlight-qt→moonlight-common-c`, `gst-wayland-display→smithay`) | ≥70% | §7-limited (the 4 MEDIUM are build-only submodule/FetchContent deps with no captured symbol corroboration) |
 | Build-declared precision | 7/7 = 100% | — | PASS |
-| Overall point precision | 7/8 = 87.5% | Wilson-LB ≥90% | sample-size-limited (n=8; LB target is unreachable at this edge count regardless of FPs) |
 
-Recall went **~18% → 100% (HIGH+MED)**. The earlier formal measurement's collapse is fully recovered.
+Recall went **~18% → 100% (HIGH+MED)**; precision is **100%** (0 FPs). The earlier formal measurement's
+collapse is fully recovered.
 
-**Residual (1 FP, documented, NOT a recall/build regression):** `inputtino→wolf` — a name collision on
-`create_touch_screen` (defined in `wolf/src/moonlight-server/control/input_handler.cpp`; inputtino's own
-copy is uncaptured/inline), routed via a **system** `<libinput.h>` angle-include that coincidentally
-matches `wolf/tests/platforms/linux/libinput.h` (both files in test dirs). This is a pre-existing H6
-angle-include + §7 symbol-extraction frontier case, not introduced by this proposal; the build-declared
-stream is 100% precise. The 5 gstreamer-h265 symbol FPs the measurement first surfaced were the
-vendored-caller-route class, fixed in R3e.
+**FP cleanup history (all resolved):** the measurement first surfaced 5 `gstreamer-h265→*` symbol FPs
+(vendored-caller routes — fixed R3e) and 1 `inputtino→wolf` FP (a `create_touch_screen` name collision
+routed via a system `<libinput.h>` angle-include matching a test file — fixed R3f via reverse-of-build
+suppression). No false positives remain.
 
-**Acceptance:** the primary, reachable gate (**HIGH+MED recall ≥85%**) is **MET at 100%** with
-build-declared precision 100%. The HIGH-recall and Wilson-LB targets are reported honestly with their
-§7 / sample-size limitations. Remaining precision polish (system-header angle-include denylist;
-test-directory definer exclusion) and name-mapped link-dep annotation are filed as precision-hardening
-follow-ups, separable from recall recovery.
+**Acceptance:** the primary gate (**HIGH+MED recall ≥85%**) is **MET at 100%** with **100% precision**.
+The HIGH-recall and Wilson-LB targets are reported honestly with their §7 / sample-size limitations.
+Name-mapped `target_link_libraries` annotation remains deferred (annotate-only — it adds no edges and
+cannot move any gate). The HIGH-recall gap (C++ class/method symbol extraction, §7) and the Wilson-LB
+sample-size limit are fundamental, not code defects.
