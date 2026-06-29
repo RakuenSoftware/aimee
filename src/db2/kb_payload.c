@@ -12,6 +12,7 @@
 #include "db_postgres.h"
 #include "cJSON.h"
 #include "db2_internal.h"
+#include "../headers/log.h"
 
 #include <ctype.h>
 #include <stddef.h>
@@ -677,6 +678,8 @@ static void build_like_pattern(const char *query, char *dst, size_t cap)
 /* A full-substring lexical hit (the whole query appears in the chunk) is strong
  * evidence; vector hits use their cosine score directly. */
 #define KBP_LEXICAL_MATCH_SCORE 0.8
+/* Upper bound on PDF-vector candidates fetched per search (stack-buffer size). */
+#define KBP_VECTOR_FANIN_MAX 64
 
 static void kbp_answerability_label(double s, char *out, size_t n)
 {
@@ -710,6 +713,8 @@ static double kbp_query_coverage(const char *query, const db2_kb_pdf_chunk_t *ro
 {
    if (!query || n <= 0)
       return 0.0;
+   char seen[32][128]; /* DISTINCT tokens — coverage is a fraction of distinct query terms */
+   int n_seen = 0;
    int total = 0, covered = 0;
    char tok[128];
    const char *p = query;
@@ -718,11 +723,26 @@ static double kbp_query_coverage(const char *query, const db2_kb_pdf_chunk_t *ro
       while (*p && isspace((unsigned char)*p))
          p++;
       int t = 0;
-      while (*p && !isspace((unsigned char)*p) && t < (int)sizeof(tok) - 1)
-         tok[t++] = *p++;
+      while (*p && !isspace((unsigned char)*p))
+      {
+         if (t < (int)sizeof(tok) - 1)
+            tok[t++] = *p;
+         p++; /* always advance so a >127-char token is consumed whole, not re-split */
+      }
       tok[t] = '\0';
       if (t == 0)
          continue;
+      int dup = 0;
+      for (int s = 0; s < n_seen; s++)
+         if (strcmp(seen[s], tok) == 0)
+         {
+            dup = 1;
+            break;
+         }
+      if (dup)
+         continue;
+      if (n_seen < (int)(sizeof(seen) / sizeof(seen[0])))
+         snprintf(seen[n_seen++], sizeof(seen[0]), "%s", tok);
       total++;
       for (int i = 0; i < n; i++)
       {
@@ -772,19 +792,29 @@ static int kbp_find_chunk(const db2_kb_pdf_chunk_t *out, int n, int64_t chunk_id
    return -1;
 }
 
-/* Fetch a single PDF chunk row by id, applying the same withhold filters as the lexical
- * leg (doc_kind='pdf' AND quarantine_state<>'pending'). Returns 1 if written, else 0. */
-static int kbp_fetch_pdf_chunk(void *conn, int64_t id, db2_kb_pdf_chunk_t *row)
+/* Fetch a single PDF chunk row by id, applying the SAME withhold + scope filters as the
+ * lexical leg (doc_kind='pdf' AND quarantine_state<>'pending' AND, when scoped, project).
+ * Re-checking project here means the access scope rides the authoritative kb_documents row,
+ * not the denormalized kb_pdf_embeddings.project — so a stale/mismatched vector project
+ * cannot surface a chunk the lexical leg would not. Returns 1 if written, else 0. */
+static int kbp_fetch_pdf_chunk(void *conn, const char *project, int64_t id, db2_kb_pdf_chunk_t *row)
 {
+   int has_project = (project && project[0]);
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
-       "SELECT id, file_path, content, page_start, page_end, sensitivity_class FROM kb_documents"
-       " WHERE id = ?1 AND doc_kind = 'pdf' AND quarantine_state <> 'pending'",
+       has_project
+           ? "SELECT id, file_path, content, page_start, page_end, sensitivity_class FROM "
+             "kb_documents WHERE id = ?1 AND doc_kind = 'pdf' AND quarantine_state <> 'pending'"
+             " AND project = ?2"
+           : "SELECT id, file_path, content, page_start, page_end, sensitivity_class FROM "
+             "kb_documents WHERE id = ?1 AND doc_kind = 'pdf' AND quarantine_state <> 'pending'",
        err, sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_int64(st, "?1", id);
+   if (has_project)
+      aimee_pg_bind_text(st, "?2", project);
    int got = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
@@ -885,9 +915,15 @@ int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
          int dim = memory_embed_text(query, embed_cmd, qvec, EMBED_MAX_DIM);
          if (dim > 0)
          {
-            int64_t vids[32];
-            double vscores[32];
-            int want = max * 2 > 32 ? 32 : max * 2;
+            /* Request enough candidates to fill the remaining result budget even after
+             * dedup against the lexical hits — 2x headroom for overlap — bounded by a fixed
+             * fan-in cap so the stack buffers stay small. (Sizing off `max` rather than a
+             * hard 32 lets a large-max caller actually reach `max` vector hits.) */
+            int64_t vids[KBP_VECTOR_FANIN_MAX];
+            double vscores[KBP_VECTOR_FANIN_MAX];
+            int want = max * 2;
+            if (want > KBP_VECTOR_FANIN_MAX)
+               want = KBP_VECTOR_FANIN_MAX;
             int vn = pgvec_kbpdf_search(has_project ? project : NULL, qvec, dim, want, vids, vscores,
                                         want);
             for (int i = 0; i < vn && n < max; i++)
@@ -901,7 +937,7 @@ int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
                   out[at].matched_vector = 1;
                   continue;
                }
-               if (kbp_fetch_pdf_chunk(conn, vids[i], &out[n]))
+               if (kbp_fetch_pdf_chunk(conn, has_project ? project : NULL, vids[i], &out[n]))
                {
                   out[n].score = vscores[i];
                   out[n].matched_vector = 1;
@@ -964,6 +1000,8 @@ int db2_kb_pdf_reembed_all(void)
       const char *proj = aimee_pg_column_text(st, 1);
       if (db2_kb_async_enqueue("embed_pdf", id, proj ? proj : "") == 0)
          n++;
+      else
+         LOG_WARN("kb_pdf", "reembed: embed_pdf enqueue failed for chunk %lld", (long long)id);
    }
    aimee_pg_finalize(st);
    return n;
@@ -1062,7 +1100,15 @@ int db2_kb_pdf_quarantine_confirm(const char *project, const char *document_key)
    aimee_pg_bind_text(st, "?1", project);
    aimee_pg_bind_text(st, "?2", document_key);
    while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-      db2_kb_async_enqueue("embed_pdf", aimee_pg_column_int64(st, 0), project);
+   {
+      int64_t id = aimee_pg_column_int64(st, 0);
+      /* Best-effort: a failed enqueue leaves the confirmed chunk lexical-only (still fully
+       * retrievable + cited), recoverable by the dim-reset reembed or a re-confirm. Log it
+       * so a silent vector gap is observable rather than invisible. */
+      if (db2_kb_async_enqueue("embed_pdf", id, project) != 0)
+         LOG_WARN("kb_pdf", "confirm: embed_pdf enqueue failed for chunk %lld (%s)", (long long)id,
+                  document_key);
+   }
    aimee_pg_finalize(st);
    return n;
 }

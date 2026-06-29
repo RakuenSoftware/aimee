@@ -70,7 +70,15 @@ int handle_get_pdf_search_route(const char *method, const char *query_string, ch
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing query parameter\"}");
       return 400;
    }
-   pdf_qparam(query_string, "project", project, sizeof(project));
+   /* Require a project scope — consistent with open_page / open_neighbors /
+    * inspect_structure (which all 400 on an empty project) and the pdf_search_chunks MCP
+    * tool (project is a required arg). This keeps both the lexical and the Phase-A vector
+    * leg scoped to one project rather than searching every project's chunks/vectors. */
+   if (!pdf_qparam(query_string, "project", project, sizeof(project)) || !project[0])
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing project parameter\"}");
+      return 400;
+   }
    int max = PDF_MAX_CHUNKS;
    if (pdf_qparam(query_string, "max_results", maxs, sizeof(maxs)))
    {
@@ -92,7 +100,7 @@ int handle_get_pdf_search_route(const char *method, const char *query_string, ch
    }
 
    db2_kb_answerability_t ans;
-   int n = db2_kb_pdf_search_chunks(project[0] ? project : NULL, query, max, chunks, &ans);
+   int n = db2_kb_pdf_search_chunks(project, query, max, chunks, &ans);
 
    cJSON *root = cJSON_CreateObject();
    cJSON *arr = cJSON_AddArrayToObject(root, "chunks");

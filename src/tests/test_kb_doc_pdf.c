@@ -529,6 +529,10 @@ static void test_pdf_vector_enqueue_and_answerability(void)
    assert(strstr(buf, "\"has_citation\"") != NULL);
    assert(strstr(buf, "\"matched_via\"") != NULL);
 
+   /* search_chunks now requires a project scope (like the other three PDF reads): an empty
+    * project is a 400, never an unscoped all-projects search. */
+   assert(handle_get_pdf_search_route("GET", "query=world", buf, sizeof(buf)) == 400);
+
    db2_test_shim_close();
    unsetenv("AIMEE_NO_CACHE");
    unsetenv("AIMEE_HOME");

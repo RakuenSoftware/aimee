@@ -800,8 +800,9 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
        * races). When the capability is off the chunk stays lexical-only, exactly
        * as Phase 2 behaved, and is invisible to the vector-only /v1/search by
        * construction (PDF vectors never enter kb_embeddings). */
-      if (embed_pdf_vec)
-         db2_kb_async_enqueue("embed_pdf", id, project); /* best-effort; covered by the txn */
+      if (embed_pdf_vec && db2_kb_async_enqueue("embed_pdf", id, project) != 0)
+         LOG_WARN("kb_pdf", "ingest: embed_pdf enqueue failed for chunk %lld (%s)", (long long)id,
+                  file_path); /* best-effort; the chunk stays lexical-only + cited */
       prev_id = id;
    }
 

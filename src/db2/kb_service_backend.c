@@ -512,10 +512,12 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
    db2_copy_text(quarantine, sizeof(quarantine), aimee_pg_column_text(stmt, 3));
    aimee_pg_finalize(stmt);
 
-   /* Defense-in-depth: never write a PDF vector for a non-PDF row or a withheld
-    * (pending) document. The structural isolation (separate relation) is the
-    * primary control; this predicate is the second layer. */
-   if (strcmp(doc_kind, "pdf") != 0 || strcmp(quarantine, "pending") == 0)
+   /* Defense-in-depth: never write a PDF vector for a non-PDF row or for ANY quarantined
+    * document (quarantine_state non-empty), not just 'pending'. Withholding strictly more
+    * can never leak; if a future state (e.g. legal_hold) is added, the embedder stays safe
+    * by default. The structural isolation (separate relation) is the primary control; this
+    * predicate is the second layer. */
+   if (strcmp(doc_kind, "pdf") != 0 || quarantine[0] != '\0')
       return 0;
 
    char embed_text[4096];
