@@ -214,6 +214,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-context-fold \
                $(TESTPREFIX)/unit-test-fold-register \
                $(TESTPREFIX)/unit-test-fold-recall \
+               $(TESTPREFIX)/unit-test-task-rail \
+               $(TESTPREFIX)/unit-test-episode-seal \
                $(TESTPREFIX)/unit-test-token-audit \
                $(TESTPREFIX)/unit-test-token-audit-load \
                $(TESTPREFIX)/unit-test-windows \
@@ -1992,6 +1994,14 @@ $(TESTPREFIX)/unit-test-fold-register: $(OBJDIR)/tests/test_fold_register.o $(OB
 
 $(TESTPREFIX)/unit-test-fold-recall: $(OBJDIR)/tests/test_fold_recall.o $(OBJDIR)/fold_recall.o \
                                   $(OBJDIR)/dstr.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-task-rail: $(OBJDIR)/tests/test_task_rail.o $(OBJDIR)/task_rail.o \
+                                  $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-episode-seal: $(OBJDIR)/tests/test_episode_seal.o $(OBJDIR)/episode_seal.o \
+                                  $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-compact-prune: $(OBJDIR)/tests/test_compact_prune.o \
