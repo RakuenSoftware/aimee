@@ -14,15 +14,19 @@ is in `docs/dev/fold-pipeline-order.md`.
 ## What it does
 
 On aimee's **delegate** request path (`posix/agent_runtime.c`, Anthropic shape),
-once a conversation grows past a retained band, a contiguous prefix of older turns
-is replaced by a single synthetic summary:
+once a conversation grows past `retained_msgs` (default 8) trailing messages and at
+least `min_fold_msgs` (default 4) older turns are eligible, a contiguous prefix of
+older turns is replaced by a single synthetic summary:
 
 - **Rolling fold (§1)** — one skeleton line per turn / tool call (`assistant: …`,
   `  $ tool …`, `    → result (N bytes)`), plus a budgeted reasoning excerpt.
 - **Coordinate Closet (§2)** — the exact identifiers from the folded region (uuids,
   commit shas, paths, digit-bearing `key=value`, issue/PR refs, `handle:`/`memory:`
   tokens) are conserved verbatim in a labelled block so truncation can never
-  amputate them. Secrets are redacted; user-pasted content is quarantined.
+  amputate them. Secrets are redacted; user-pasted content is *quarantined* —
+  conserved in a separate lane, rendered with an `(untrusted)` marker under a
+  divider, and never allowed to mint an agent-trusted label (a prompt-injection
+  guard).
 - **Fold-freeze (§3)** — the fold boundary is *pinned* across turns, so the folded
   prefix stays byte-identical turn-to-turn and the provider cache stays warm; the
   boundary only advances at an "epoch" when the un-folded tail outgrows its cap.
@@ -41,14 +45,27 @@ see [Limitations](#limitations-and-deferred-work)):
 - **Task rail (§8)** — a portable plan FSM serialisable outside the prompt
   (`src/task_rail.{c,h}`).
 
-Everything is **deterministic** (no model, clock, or randomness) — identical input
-yields byte-identical output, which is what makes the freeze and the cache benefit
-possible.
+A seventh piece underpins the rest:
+
+- **Per-model budget resolver (§7)** — `src/fold_budget.{c,h}`, a *pure* function
+  that turns a model id into the fold's token budgets. It has **no user-facing
+  config surface** (the operator knobs below are message-count/byte based); it is
+  listed here only so the §1–§8 map is complete and so operators understand fold
+  output may legitimately differ across model identities.
+
+Everything is **deterministic** — no LLM-summarisation call, no wall-clock input,
+no randomness — so identical input yields byte-identical output, which is what makes
+the freeze and the cache benefit possible. (Model *identity* is an input via §7, so
+switching models is treated as a prefix change — see the freeze invariant.)
 
 ## Enabling it
 
 All knobs live under the `fold` and `compact.coord_closet` config sections
-(`~/.config/aimee/aimee.yaml`). All default to off / zero (module defaults).
+(`~/.config/aimee/aimee.yaml`). **Boolean** `*_enabled` flags default **off**.
+**Numeric** keys use **0 as a sentinel** that resolves to a built-in module default:
+`retained_msgs`→8, `min_fold_msgs`→4, `excerpt_bytes`→160, `budget_bytes`→2048,
+`max_ratio_pct`→100, `tail_cap_msgs`→24, `ttl_turns`→4. The snippet below is an
+**all-on reference** — see the staged rollout after it for the recommended order.
 
 ```yaml
 fold:
@@ -81,9 +98,10 @@ Recommended order to turn on (each is independently safe):
 
 ## How it behaves (invariants)
 
-- **No lost coordinates.** A nominated identifier that cannot fit the closet budget
-  is signalled (`COORD_EVICT_FAIL`) and rendered as a `(partial — … omitted)`
-  marker — never silently dropped.
+- **No silent coordinate loss.** Conserved identifiers are rendered verbatim when
+  they fit; a nominated identifier that cannot fit the closet budget is explicitly
+  signalled (`COORD_EVICT_FAIL`) and rendered as a `(partial — … omitted)` marker —
+  never silently dropped.
 - **Atomic tool pairs.** The fold boundary is always a *clean user turn*, so a
   `tool_use` and its `tool_result` are never split, and the retained tail always
   begins with a user message (valid Anthropic alternation).
@@ -91,9 +109,14 @@ Recommended order to turn on (each is independently safe):
   view used only to build the outbound request.
 - **Cache stays warm.** With freeze on, the folded prefix is re-emitted byte-for-byte
   while it is pinned; a mid-run prefix mutation (e.g. compaction) is detected by a
-  digest and forces a clean epoch rather than a false cache claim.
-- **Secrets never echo.** `ghp_`/`sk-`/`AKIA…`/JWT/PEM/etc. token prefixes,
-  credential-bearing paths, and sensitive label names are redacted before render.
+  digest and forces a clean epoch rather than a false cache claim. A model-identity
+  change (different §7 budget) likewise shifts the prefix, so it is handled the same
+  way — a fresh epoch, not a stale cache-warm claim.
+- **Secrets are redacted before render** by the implemented detectors —
+  `ghp_`/`sk-`/`AKIA…`/JWT/PEM token shapes, credential-bearing paths, and sensitive
+  label names — plus any substrings added via `compact.coord_closet.denylist`. The
+  detector set is extensible, not exhaustive: it is a strong filter, not an absolute
+  guarantee against every possible secret shape.
 
 ## Observability
 

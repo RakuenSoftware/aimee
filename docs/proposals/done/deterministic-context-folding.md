@@ -367,6 +367,11 @@ All sections implemented in slices, each roundtable-reviewed before merge to
 | P4   | §4 | #901 | Fold recall — `src/fold_recall.{c,h}`; page table + whole-token re-touch detection + residency TTL; live recall hints. |
 | P5   | §5, §8 | #903 | Sealed episodes (`src/episode_seal.{c,h}`) + task rail (`src/task_rail.{c,h}`) — pure, tested FSM modules. |
 
+The eight rows above are the feature slices; intervening PR numbers in the
+#886–#903 range belong to other concurrent work (infra/CI/docs/structured-PDF), not
+to this feature. (§7, the pure per-model fold-budget resolver, shipped in P1.5/#887
+and has no user-facing config surface.)
+
 Config surface (all default-off): `fold.{enabled,retained_msgs,min_fold_msgs,
 excerpt_bytes,register_enabled}`, `fold.freeze.{enabled,tail_cap_msgs}`,
 `fold.recall.{enabled,ttl_turns}`, `compact.coord_closet.{enabled,budget_bytes,
