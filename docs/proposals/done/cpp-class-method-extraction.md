@@ -1,8 +1,8 @@
 # Proposal: C++ class/method symbol extraction (recall §7)
 
-- **State:** T0 SHIPPED + the §6 HIGH-recall gate is MET — T1/T2 now OPTIONAL polish (see §8). Design
-  roundtable converged 0-blocking over 5 rounds (9→5→1→1→0). Prerequisites #1 (#867 .hpp collection) +
-  #2 (routes) DONE. **Live §9 on .254 2026-06-29 after T0: recall HIGH+MED 100%, precision 100% (7/7
+- **State:** DONE — T0 shipped (#873); the §6 HIGH-recall gate is MET (86% ≥ 70%). T1/T2 are optional
+  future-work (see §8), not required. Design roundtable converged 0-blocking over 5 rounds (9→5→1→1→0);
+  prerequisites #1 (#867 .hpp collection) + #2 (routes) DONE. **Live §9 on .254 2026-06-29 after T0: recall HIGH+MED 100%, precision 100% (7/7
   gold, 0 FP), HIGH recall 43%→57%(.hpp)→86%(T0) — exceeding the ≥70% target.**
 
 ## §8 RESULT (T0 shipped, PR #873, deployed + measured .254 2026-06-29)
@@ -26,7 +26,7 @@ SIGTERM'd postgres uncleanly, leaving an orphaned relation file that blocked WAL
 (`could not create file base/…: File exists`) — recovered by stopping the plugin, removing the orphan +
 stale `postmaster.pid`, and restarting (data intact). `refresh-containers` restored the host:8741 DNAT
 the server reaches the kb through.
-- **Origin:** deferred §7 of [cross-repo-recall-recovery](../done/cross-repo-recall-recovery.md). HIGH
+- **Origin:** deferred §7 of [cross-repo-recall-recovery](cross-repo-recall-recovery.md). HIGH
   recall was 43%: the C++ class/method-API deps capture no distinctive linking symbol.
 - **User decisions (fixed):** substrate = **ship tree-sitter**; **stage** (qualified-first, measure,
   add member-call inference only if needed); **fix prerequisites first**.
