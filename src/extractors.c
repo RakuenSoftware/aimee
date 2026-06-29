@@ -14,7 +14,8 @@ static const char *cs_exts[] = {".cs", NULL};
 static const char *sh_exts[] = {".sh", ".bash", ".zsh", NULL};
 static const char *css_exts[] = {".css", NULL};
 static const char *dart_exts[] = {".dart", NULL};
-static const char *c_exts[] = {".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".inc", NULL};
+static const char *c_exts[] = {".c",   ".h",  ".cpp", ".cc",  ".cxx",
+                               ".hpp", ".hh", ".hxx", ".inc", NULL};
 static const char *lua_exts[] = {".lua", NULL};
 static const char *java_exts[] = {".java", NULL};
 static const char *rust_exts[] = {".rs", NULL};

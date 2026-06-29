@@ -17,10 +17,18 @@
 
 static int code_ext_ok(const char *name)
 {
-   static const char *const exts[] = {".c",    ".h",   ".cc",    ".cpp",  ".cxx", ".m",    ".py",
-                                      ".go",   ".rs",  ".ts",    ".tsx",  ".js",  ".jsx",  ".md",
-                                      ".yaml", ".yml", ".toml",  ".json", ".sh",  ".bash", ".rb",
-                                      ".java", ".kt",  ".swift", NULL};
+   /* C++ headers (.hpp/.hh/.hxx) were missing — they are the dominant public-API
+    * header extension, so a C++ library's include/ tree (and thus its class/method
+    * symbols and the includes that form cross-repo routes) was never collected. The
+    * kb-side extractor parses them as LANG_C (extractors.c c_exts, which this change
+    * extends in lockstep so the collector never sends an extension the extractor
+    * can't parse). `.inc` is intentionally NOT collected: c_exts lists it, but in
+    * this corpus it is high-volume ambiguous/generated C-include fragments (e.g.
+    * aimee's own *_gen.inc), not a cross-repo API surface. */
+   static const char *const exts[] = {".c",   ".h",    ".cc", ".cpp",  ".cxx", ".hpp",   ".hh",
+                                      ".hxx", ".m",    ".py", ".go",   ".rs",  ".ts",    ".tsx",
+                                      ".js",  ".jsx",  ".md", ".yaml", ".yml", ".toml",  ".json",
+                                      ".sh",  ".bash", ".rb", ".java", ".kt",  ".swift", NULL};
    const char *dot = strrchr(name, '.');
    if (!dot || dot == name)
       return 0;

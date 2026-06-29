@@ -422,6 +422,30 @@ static void test_default_branch_sha_non_git(void)
    printf("  test_default_branch_sha_non_git: ok\n");
 }
 
+/* C++ public headers (.hpp/.hh/.hxx) are collected — they are the dominant C++
+ * public-API extension; dropping them left a library's include/ tree (its class/
+ * method symbols + the includes that form cross-repo routes) unindexed. */
+static void test_cpp_headers_collected(void)
+{
+   make_root("cpphdr");
+   write_file("include/lib/api.hpp", "namespace lib { class Api { void run(); }; }");
+   write_file("src/impl.hh", "struct Impl {};");
+   write_file("src/legacy.hxx", "struct Legacy {};");
+   write_file("src/main.cpp", "int main(){return 0;}");
+   write_file("src/c_api.h", "int c_api(void);");
+   write_file("README.txt", "doc");
+
+   reset();
+   code_collect_files_cb(g_root, rec_cb, NULL);
+   assert(has("include/lib/api.hpp")); /* the regression: .hpp under include/ collected */
+   assert(has("src/impl.hh"));
+   assert(has("src/legacy.hxx"));
+   assert(has("src/main.cpp"));
+   assert(has("src/c_api.h"));
+   assert(!has("README.txt"));
+   printf("  test_cpp_headers_collected: ok\n");
+}
+
 int main(void)
 {
    printf("test_code_collect:\n");
@@ -438,6 +462,7 @@ int main(void)
    test_non_git_uses_worktree();
    test_build_manifests_collected();
    test_build_manifests_collected_git();
+   test_cpp_headers_collected();
    test_default_branch_sha_tracks_commits();
    test_default_branch_sha_quote_in_ref();
    test_index_source_is_worktree();
