@@ -903,7 +903,9 @@ int config_save(const config_t *cfg)
 
    /* Tool result compaction (only save non-default values) */
    if (!cfg->compact_enabled || cfg->compact_threshold || cfg->compact_head_bytes ||
-       cfg->compact_tail_bytes || cfg->compact_per_tool_count)
+       cfg->compact_tail_bytes || cfg->compact_per_tool_count || cfg->coord_closet_enabled ||
+       cfg->coord_closet_budget_bytes || cfg->coord_closet_max_ratio_pct ||
+       cfg->coord_closet_denylist[0])
    {
       cJSON *cmpct = cJSON_AddObjectToObject(root, "compact");
       cJSON_AddBoolToObject(cmpct, "enabled", cfg->compact_enabled);
@@ -924,6 +926,19 @@ int config_save(const config_t *cfg)
             if (sscanf(cfg->compact_per_tool[i], "%63[^=]=%d", tool, &thresh) == 2)
                cJSON_AddNumberToObject(pt, tool, thresh);
          }
+      }
+      /* Coordinate Closet (fold §2), nested under "compact". */
+      if (cfg->coord_closet_enabled || cfg->coord_closet_budget_bytes ||
+          cfg->coord_closet_max_ratio_pct || cfg->coord_closet_denylist[0])
+      {
+         cJSON *closet = cJSON_AddObjectToObject(cmpct, "coord_closet");
+         cJSON_AddBoolToObject(closet, "enabled", cfg->coord_closet_enabled);
+         if (cfg->coord_closet_budget_bytes)
+            cJSON_AddNumberToObject(closet, "budget_bytes", cfg->coord_closet_budget_bytes);
+         if (cfg->coord_closet_max_ratio_pct)
+            cJSON_AddNumberToObject(closet, "max_ratio_pct", cfg->coord_closet_max_ratio_pct);
+         if (cfg->coord_closet_denylist[0])
+            cJSON_AddStringToObject(closet, "denylist", cfg->coord_closet_denylist);
       }
    }
 

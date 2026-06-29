@@ -666,6 +666,28 @@ void config_parse_compact_section(config_t *cfg, cJSON *root)
             cfg->compact_per_tool_count++;
          }
       }
+
+      /* Coordinate Closet (fold §2), nested under "compact". Default-off. */
+      cJSON *closet = cJSON_GetObjectItemCaseSensitive(cmpct, "coord_closet");
+      if (cJSON_IsObject(closet))
+      {
+         item = cJSON_GetObjectItemCaseSensitive(closet, "enabled");
+         if (cJSON_IsBool(item))
+            cfg->coord_closet_enabled = cJSON_IsTrue(item) ? 1 : 0;
+
+         item = cJSON_GetObjectItemCaseSensitive(closet, "budget_bytes");
+         if (cJSON_IsNumber(item) && item->valuedouble > 0)
+            cfg->coord_closet_budget_bytes = (int)item->valuedouble;
+
+         item = cJSON_GetObjectItemCaseSensitive(closet, "max_ratio_pct");
+         if (cJSON_IsNumber(item) && item->valuedouble > 0)
+            cfg->coord_closet_max_ratio_pct = (int)item->valuedouble;
+
+         item = cJSON_GetObjectItemCaseSensitive(closet, "denylist");
+         if (cJSON_IsString(item) && item->valuestring)
+            snprintf(cfg->coord_closet_denylist, sizeof(cfg->coord_closet_denylist), "%s",
+                     item->valuestring);
+      }
    }
 }
 void config_parse_sessions_section(config_t *cfg, cJSON *root)

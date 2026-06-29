@@ -419,7 +419,10 @@ static void config_set_defaults(config_t *cfg)
    snprintf(cfg->db1_path, sizeof(cfg->db1_path), "%s", config_default_db1_path());
    snprintf(cfg->guardrail_mode, sizeof(cfg->guardrail_mode), "%s", MODE_APPROVE);
    snprintf(cfg->provider, sizeof(cfg->provider), "claude");
-   cfg->compact_enabled = 1; /* default on; set before no-config early returns */
+   cfg->compact_enabled = 1;      /* default on; set before no-config early returns */
+   cfg->coord_closet_enabled = 0; /* fold §2: default-off */
+   cfg->coord_closet_budget_bytes = 0;
+   cfg->coord_closet_max_ratio_pct = 0;
    snprintf(cfg->memory_citations_mode, sizeof(cfg->memory_citations_mode), "%s", "off");
    snprintf(cfg->memory_coref_mode, sizeof(cfg->memory_coref_mode), "%s", "off");
    cfg->memory_cognify_async_enabled = 0;

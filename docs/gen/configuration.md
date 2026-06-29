@@ -162,7 +162,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`auxiliary`** — _Auxiliary (cheap/background) model used for side tasks._ Keys: `default_max_tokens`, `default_model`, `default_provider`, `enabled`, `tasks`
 - **`cache_shaping`** — _Prompt-cache shaping._ Keys: `enabled`, `min_chars`
 - **`charter`** — _Operating charter: values, constraints, safety axioms, tone._ Keys: `hard_constraints`, `safety_axioms`, `tone_boundaries`, `values`, `working_profile_drift_limit`
-- **`compact`** — _Transcript compaction thresholds._ Keys: `enabled`, `head_bytes`, `per_tool`, `tail_bytes`, `threshold`
+- **`compact`** — _Transcript compaction thresholds._ Keys: `coord_closet`, `enabled`, `head_bytes`, `per_tool`, `tail_bytes`, `threshold`
 - **`computer_use`** — _Computer-use (browser) tool settings._ Keys: `allowed_domains`, `default_navigation`, `enabled`, `redact_sensitive_screenshots`
 - **`concurrency`** — _Per-model / per-provider concurrency limits._ Keys: `default`, `per_model`, `per_provider`, `preempt`
 - **`context`** — _Context-engine selection._ Keys: `engine`

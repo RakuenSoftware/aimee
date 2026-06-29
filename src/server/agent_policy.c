@@ -13,6 +13,7 @@
 #include "headers/memory.h"
 #include "headers/agent_exec.h"
 #include "compact.h"
+#include "coord_closet.h"
 #include "computer_use.h"
 #include "config.h"
 #include "headers/mcp_client_registry.h"
@@ -1090,7 +1091,8 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
    /* Load application config and convert to compact_config_t */
    config_t app_cfg;
    compact_config_t cfg;
-   if (config_load(&app_cfg) == 0)
+   int loaded = (config_load(&app_cfg) == 0);
+   if (loaded)
       compact_cfg_from_app_config(&app_cfg, &cfg);
    else
       memset(&cfg, 0, sizeof(cfg)); /* use defaults on load failure */
@@ -1100,17 +1102,80 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
       return strdup("");
 
    size_t out_len = strlen(out);
+   int compacted = (out_len < raw_len);
 
    /* Log compaction events for diagnostics */
-   if (out_len < raw_len)
+   if (compacted)
       aimee_log(LOG_DEBUG, "compact", "tool=%s in=%llu out=%llu", tool_name ? tool_name : "(none)",
                 (unsigned long long)raw_len, (unsigned long long)out_len);
 
-   /* Hard cap: ensure the result never exceeds AGENT_TOOL_OUTPUT_MAX regardless
-    * of what the compaction summary produced. */
-   if (out_len <= AGENT_TOOL_OUTPUT_MAX)
-      return out;
+   /* Fold §2 — Coordinate Closet: when the result was compacted, conserve the
+    * verbatim identifiers from the pre-truncation raw so they survive. Render the
+    * closet first (it is byte-bounded), then reserve room for it under the hard
+    * cap so the combined result still never exceeds AGENT_TOOL_OUTPUT_MAX.
+    * Default-off; return-only wiring (no cross-turn persistence in P1). */
+   char *closet = NULL;
+   size_t closet_len = 0;
+   if (loaded && app_cfg.coord_closet_enabled && compacted)
+   {
+      coord_set_t set;
+      coord_set_init(&set);
+      /* P1 return-only wiring: the closet conserves identifiers from THIS tool
+       * result (the compacted body may drop them, which is exactly what the closet
+       * guards against). The conserved values originate from the same tool result
+       * as the body — same trust level — so stamping them lane AGENT elevates no
+       * trust. Per-source lane assignment (user-pasted vs tool-origin) arrives with
+       * the transcript fold in P2, where coord_provenance_t already carries it. */
+      coord_provenance_t prov = {COORD_LANE_AGENT, -1, -1, -1};
+      coord_closet_nominate(raw, raw_len, &prov, &set);
+      /* Bound the closet budget so body + closet can never exceed the hard cap:
+       * closet <= AGENT_TOOL_OUTPUT_MAX - min-body, leaving room for the body. */
+      int hard_room = AGENT_TOOL_OUTPUT_MAX - 256;
+      int cb = app_cfg.coord_closet_budget_bytes;
+      if (cb > hard_room)
+         cb = hard_room;
+      coord_closet_config_t ccfg = {
+          .enabled = 1,
+          .budget_bytes = cb,
+          .max_ratio_pct = app_cfg.coord_closet_max_ratio_pct,
+          .denylist = app_cfg.coord_closet_denylist[0] ? app_cfg.coord_closet_denylist : NULL,
+      };
+      coord_evict_t why = COORD_EVICT_NONE;
+      closet = coord_closet_render(&set, &ccfg, raw_len, &why);
+      if (closet)
+         closet_len = strlen(closet);
+      /* Eviction is surfaced in the rendered text ("(partial — ... omitted)") and
+       * logged at WARNING so the loss is never silent. */
+      if (why == COORD_EVICT_FAIL)
+         aimee_log(LOG_WARN, "compact", "coord_closet partial (budget) tool=%s",
+                   tool_name ? tool_name : "(none)");
+      coord_set_free(&set);
+   }
 
-   out[AGENT_TOOL_OUTPUT_MAX] = '\0';
+   /* Hard cap: ensure the result never exceeds AGENT_TOOL_OUTPUT_MAX regardless
+    * of what the compaction summary produced. Reserve closet bytes inside the cap. */
+   size_t body_cap = AGENT_TOOL_OUTPUT_MAX;
+   if (closet_len > 0 && closet_len + 1 < AGENT_TOOL_OUTPUT_MAX)
+      body_cap = AGENT_TOOL_OUTPUT_MAX - closet_len - 1;
+   if (out_len > body_cap)
+   {
+      out[body_cap] = '\0';
+      out_len = body_cap;
+   }
+
+   if (closet_len > 0)
+   {
+      char *combined = malloc(out_len + 1 + closet_len + 1);
+      if (combined)
+      {
+         memcpy(combined, out, out_len);
+         combined[out_len] = '\n';
+         memcpy(combined + out_len + 1, closet, closet_len);
+         combined[out_len + 1 + closet_len] = '\0';
+         free(out);
+         out = combined;
+      }
+   }
+   free(closet);
    return out;
 }

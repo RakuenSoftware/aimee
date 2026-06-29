@@ -851,6 +851,17 @@ typedef struct config
    char compact_per_tool[CONFIG_COMPACT_MAX_PER_TOOL][128]; /* "tool_name=threshold" */
    int compact_per_tool_count;
 
+   /* Coordinate Closet (fold §2): conserve verbatim identifiers from compacted
+    * tool results. Nested under the "compact" config section. Default-off.
+    * coord_closet_enabled: 0 = off (default), 1 = on.
+    * coord_closet_budget_bytes: hard byte cap for the conserved block (0 = default).
+    * coord_closet_max_ratio_pct: closet <= raw_len * pct/100 (0 = default 100).
+    * coord_closet_denylist: extra secret patterns (comma/space separated). */
+   int coord_closet_enabled;
+   int coord_closet_budget_bytes;
+   int coord_closet_max_ratio_pct;
+   char coord_closet_denylist[256];
+
    /* Session/worktree cleanup policy.
     * worktree_stale_secs: inactivity threshold before a session is pruned
     *   (0 = use default: 14400 = 4 hours).

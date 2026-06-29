@@ -17,7 +17,7 @@ TEST_RUN_JOBS ?= $(shell getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/n
 TEST_CORE_OBJS = $(OBJDIR)/db1/db.o $(OBJDIR)/db1/db_schema.o $(OBJDIR)/db1/maintenance.o $(OBJDIR)/tests/aimee_pg_sqlite_shim.o $(OBJDIR)/db2/db2_test_shim.o $(OBJDIR)/config.o $(OBJDIR)/config_sections.o $(OBJDIR)/config_database.o $(OBJDIR)/config_learning.o $(OBJDIR)/config_memory.o $(OBJDIR)/config_charter.o $(OBJDIR)/config_trigger.o $(OBJDIR)/config_kb_maintenance.o $(OBJDIR)/config_kb_curator.o $(OBJDIR)/config_server_api.o $(OBJDIR)/config_skills.o $(OBJDIR)/config_save.o $(OBJDIR)/config_mode.o $(OBJDIR)/config_fields.o $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                  $(OBJDIR)/platform_random.o $(PLATFORM_BASIC_OBJS) \
                  $(OBJDIR)/aimee_home.o $(OBJDIR)/shared/kb_paths.o \
-                 $(OBJDIR)/log.o $(OBJDIR)/shutdown_forensics.o $(OBJDIR)/cJSON.o $(OBJDIR)/util_url.o $(OBJDIR)/report_enrichment.o $(OBJDIR)/compact.o $(OBJDIR)/slop_detect.o $(OBJDIR)/proxy_bootstrap.o \
+                 $(OBJDIR)/log.o $(OBJDIR)/shutdown_forensics.o $(OBJDIR)/cJSON.o $(OBJDIR)/util_url.o $(OBJDIR)/report_enrichment.o $(OBJDIR)/compact.o $(OBJDIR)/coord_closet.o $(OBJDIR)/slop_detect.o $(OBJDIR)/proxy_bootstrap.o \
                  $(OBJDIR)/json_fluent.o $(OBJDIR)/markdown.o
 # Extended set for tests that need workspace/worktree/guardrails functions (pulls in agents).
 TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/workspace.o $(DB1_OBJS) \
@@ -209,6 +209,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-web-search \
                $(TESTPREFIX)/unit-test-tdd \
                $(TESTPREFIX)/unit-test-compact \
+               $(TESTPREFIX)/unit-test-coord-closet \
                $(TESTPREFIX)/unit-test-token-audit \
                $(TESTPREFIX)/unit-test-token-audit-load \
                $(TESTPREFIX)/unit-test-windows \
@@ -1965,6 +1966,10 @@ $(TESTPREFIX)/unit-test-tdd: $(OBJDIR)/tests/test_tdd.o \
 
 $(TESTPREFIX)/unit-test-compact: $(OBJDIR)/tests/test_compact.o $(OBJDIR)/compact.o \
                                   $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-coord-closet: $(OBJDIR)/tests/test_coord_closet.o $(OBJDIR)/coord_closet.o \
+                                  $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-compact-prune: $(OBJDIR)/tests/test_compact_prune.o \
