@@ -7,10 +7,14 @@
  * suite (the engine test overrides them with mocks via the vtable). */
 #include "wfe_blocks.h"
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
+#include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "aimee_home.h"
 #include "cJSON.h"
@@ -116,27 +120,69 @@ int wfe_git_freeze(const char *repo_dir_in, const char *base_branch, char out_ba
  * failure — the caller then falls back to the shared repo dir, so a worktree
  * problem degrades to today's shared-checkout behaviour rather than crashing.
  * `git worktree lock` keeps worktree-GC from pruning an active run (Q5). */
+/* True if a directory exists at `p`. */
+static int is_dir(const char *p)
+{
+   struct stat st;
+   return p && p[0] && stat(p, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+/* snprintf that returns -1 on truncation (a corrupt path must never reach git). */
+static int sn(char *buf, size_t cap, const char *fmt, const char *a)
+{
+   int r = snprintf(buf, cap, fmt, a);
+   return (r >= 0 && (size_t)r < cap) ? 0 : -1;
+}
+
+/* Best-effort teardown of a partial/unrecorded worktree + its branch (ignore rc). */
+static void wt_scrub(const char *rl, const char *path, const char *branch)
+{
+   char *o = NULL;
+   const char *rm[] = {"git", "-C", rl, "worktree", "remove", "--force", path, NULL};
+   safe_exec_capture(rm, &o, 1 << 14);
+   free(o);
+   o = NULL;
+   const char *rmd[] = {"rm", "-rf", path, NULL};
+   safe_exec_capture(rmd, &o, 1 << 14);
+   free(o);
+   o = NULL;
+   const char *bd[] = {"git", "-C", rl, "branch", "-D", branch, NULL};
+   safe_exec_capture(bd, &o, 1 << 14);
+   free(o);
+}
+
 int wfe_worktree_ensure(const char *work_item_id, const char *existing, const char *repo_local,
                         const char *base, char *out_path, size_t n)
 {
    if (!out_path || n == 0)
       return -1;
    out_path[0] = '\0';
-   if (existing && existing[0])
-   {
-      snprintf(out_path, n, "%s", existing);
-      return 0;
-   }
    if (!work_item_id || !work_item_id[0])
       return -1;
+   const char *rl = (repo_local && repo_local[0]) ? repo_local : ".";
+
+   /* Reuse a recorded worktree ONLY if it still exists on disk; a pruned / failed-
+    * cleanup path is dropped so we recreate rather than hand a delegate a vanished
+    * CWD. */
+   if (existing && existing[0])
+   {
+      if (is_dir(existing))
+      {
+         snprintf(out_path, n, "%s", existing);
+         return 0;
+      }
+      db1_work_item_set_worktree(work_item_id, ""); /* stale -> clear, recreate below */
+   }
+
    const char *home = aimee_home();
    if (!home || !home[0])
       return -1;
-   char parent[768], path[896], branch[200];
-   snprintf(parent, sizeof parent, "%s/wfe-worktrees", home);
-   snprintf(path, sizeof path, "%s/%s", parent, work_item_id);
-   snprintf(branch, sizeof branch, "aimee/wi/%s", work_item_id);
-   const char *rl = (repo_local && repo_local[0]) ? repo_local : ".";
+   char parent[768], path[1000], branch[200], lockf[1024];
+   if (sn(parent, sizeof parent, "%s/wfe-worktrees", home) != 0 ||
+       snprintf(path, sizeof path, "%s/%s", parent, work_item_id) >= (int)sizeof path ||
+       sn(branch, sizeof branch, "aimee/wi/%s", work_item_id) != 0 ||
+       snprintf(lockf, sizeof lockf, "%s/%s.lock", parent, work_item_id) >= (int)sizeof lockf)
+      return -1;
    const char *b = (base && base[0]) ? base : "HEAD";
 
    char *o = NULL;
@@ -147,15 +193,46 @@ int wfe_worktree_ensure(const char *work_item_id, const char *existing, const ch
       return -1;
    }
    free(o);
+
+   /* Per-work-item serialization: an flock so two concurrent producers for the
+    * same item can't both `git worktree add -b aimee/wi/<id>` (branch collision). */
+   int lfd = open(lockf, O_CREAT | O_RDWR, 0600);
+   if (lfd >= 0)
+      (void)flock(lfd, LOCK_EX);
+   int rc_final = -1;
+
+   /* Re-check under the lock: another producer may have created it meanwhile. */
+   db1_work_item_t wi;
+   if (db1_work_item_get(work_item_id, &wi) == 1 && wi.worktree[0] && is_dir(wi.worktree))
+   {
+      snprintf(out_path, n, "%s", wi.worktree);
+      rc_final = 0;
+      goto unlock;
+   }
+
    o = NULL;
    const char *add[] = {"git", "-C", rl, "worktree", "add", "--lock", "-b", branch, path, b, NULL};
    int rc = safe_exec_capture(add, &o, 1 << 16);
    free(o);
    if (rc != 0)
-      return -1;
-   db1_work_item_set_worktree(work_item_id, path);
+   {
+      wt_scrub(rl, path, branch); /* git may leave a partial worktree/branch */
+      goto unlock;
+   }
+   if (db1_work_item_set_worktree(work_item_id, path) != 0)
+   {
+      wt_scrub(rl, path, branch); /* don't leave an UNRECORDED worktree+branch */
+      goto unlock;
+   }
    snprintf(out_path, n, "%s", path);
-   return 0;
+   rc_final = 0;
+unlock:
+   if (lfd >= 0)
+   {
+      flock(lfd, LOCK_UN);
+      close(lfd);
+   }
+   return rc_final;
 }
 
 /* Tear down a per-work-item worktree (terminal cleanup): unlock then force-remove.

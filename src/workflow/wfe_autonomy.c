@@ -11,9 +11,23 @@
 #include "cJSON.h"
 #include "wfe_store.h"
 #include "wfe_approval.h"
+#include "wfe_blocks.h"
 #include "wfe_def.h"
 #include "wfe_engine.h"
 #include "wfe_iface.h"
+
+/* On a terminal run, tear down the per-work-item worktree (F2) + clear its column,
+ * so finished runs don't leak worktrees/branches. A non-autonomous terminal path
+ * (e.g. an API gate reject) is caught by the orphan-sweep (GA). */
+static void wfe_autonomy_cleanup_worktree(const char *work_item_id)
+{
+   db1_work_item_t wi;
+   if (db1_work_item_get(work_item_id, &wi) != 1 || !wi.worktree[0])
+      return;
+   const char *rl = getenv("AIMEE_WORKFLOW_REPO");
+   if (wfe_worktree_cleanup(wi.worktree, (rl && rl[0]) ? rl : ".") == 0)
+      db1_work_item_set_worktree(work_item_id, "");
+}
 
 /* A positive long from an env var, else the default (a safety rail must never be
  * silently disabled by a malformed override). Rejects junk, non-positive, AND
@@ -116,9 +130,15 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
       if (wfe_engine_advance(work_item_id, &r, err, errlen) != 0)
          return -1;
       if (r.terminal)
+      {
+         wfe_autonomy_cleanup_worktree(work_item_id);
          return 0;
+      }
       if (r.last_status == WFE_STEP_FAILED)
+      {
+         wfe_autonomy_cleanup_worktree(work_item_id);
          return 0;
+      }
       if (r.last_status != WFE_STEP_PENDING)
          continue; /* ADVANCED / LOOPED: keep going */
 

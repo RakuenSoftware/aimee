@@ -66,6 +66,16 @@ static const char *RT = "name: rta\n"
                         "    in:\n"
                         "      pr: pr.out\n";
 
+/* This stub-executor test does not link wfe_blocks.o (it uses register_stub); the
+ * autonomy driver's terminal cleanup calls wfe_worktree_cleanup, so provide a no-op
+ * (the real helper is exercised in test_wfe_delegate_seam over a git fixture). */
+int wfe_worktree_cleanup(const char *worktree, const char *repo_local)
+{
+   (void)worktree;
+   (void)repo_local;
+   return 0;
+}
+
 static void write_wf(const char *dir, const char *name, const char *body)
 {
    char p[256];
