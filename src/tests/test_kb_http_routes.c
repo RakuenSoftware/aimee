@@ -299,8 +299,7 @@ int db2_reembed_in_progress_get(int *target_dim, long *started_epoch)
 }
 /* structured-PDF search_chunks db2 stubs — exercised against real SQL in
  * test_kb_doc_pdf.c; here they only resolve the link (void* args avoid kb_payload.h). */
-int db2_kb_pdf_search_chunks(const char *project, const char *query, int max, void *out,
-                             void *ans_out)
+int db2_kb_pdf_search_chunks(const char *project, const char *query, int max, void *out, void *a)
 {
    return 0;
 }

@@ -671,10 +671,10 @@ static void build_like_pattern(const char *query, char *dst, size_t cap)
  * reference test). The score is a deterministic function of three query-scoped inputs
  * (top relevance, query-term coverage, hit saturation) plus a corpus-scoped table-fact
  * count (§B; weighted 0 until that phase lands). */
-#define KBP_ANS_W_TOP 0.5
-#define KBP_ANS_W_COVERAGE 0.3
+#define KBP_ANS_W_TOP        0.5
+#define KBP_ANS_W_COVERAGE   0.3
 #define KBP_ANS_W_SATURATION 0.2
-#define KBP_ANS_TARGET_K 5
+#define KBP_ANS_TARGET_K     5
 /* A full-substring lexical hit (the whole query appears in the chunk) is strong
  * evidence; vector hits use their cosine score directly. */
 #define KBP_LEXICAL_MATCH_SCORE 0.8
@@ -769,8 +769,8 @@ static void kbp_compute_answerability(const char *query, const db2_kb_pdf_chunk_
    double saturation = (double)n / (double)KBP_ANS_TARGET_K;
    if (saturation > 1.0)
       saturation = 1.0;
-   double score = KBP_ANS_W_TOP * top + KBP_ANS_W_COVERAGE * coverage +
-                  KBP_ANS_W_SATURATION * saturation;
+   double score =
+       KBP_ANS_W_TOP * top + KBP_ANS_W_COVERAGE * coverage + KBP_ANS_W_SATURATION * saturation;
    if (score < 0.0)
       score = 0.0;
    if (score > 1.0)
@@ -924,8 +924,8 @@ int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
             int want = max * 2;
             if (want > KBP_VECTOR_FANIN_MAX)
                want = KBP_VECTOR_FANIN_MAX;
-            int vn = pgvec_kbpdf_search(has_project ? project : NULL, qvec, dim, want, vids, vscores,
-                                        want);
+            int vn = pgvec_kbpdf_search(has_project ? project : NULL, qvec, dim, want, vids,
+                                        vscores, want);
             for (int i = 0; i < vn && n < max; i++)
             {
                int at = kbp_find_chunk(out, n, vids[i]);
@@ -961,8 +961,8 @@ int db2_kb_async_count_kind(const char *kind)
    if (!conn)
       return -1;
    char err[KBP_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn, "SELECT COUNT(*) FROM kb_async_jobs WHERE kind = ?1", err, sizeof(err));
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "SELECT COUNT(*) FROM kb_async_jobs WHERE kind = ?1", err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", kind);
@@ -1090,11 +1090,11 @@ int db2_kb_pdf_quarantine_confirm(const char *project, const char *document_key)
    if (!conn)
       return n;
    char err[KBP_ERRBUF] = "";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(
-       conn,
-       "SELECT id FROM kb_documents WHERE project = ?1 AND file_path = ?2"
-       "   AND doc_kind = 'pdf' AND quarantine_state = ''",
-       err, sizeof(err));
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT id FROM kb_documents WHERE project = ?1 AND file_path = ?2"
+                        "   AND doc_kind = 'pdf' AND quarantine_state = ''",
+                        err, sizeof(err));
    if (!st)
       return n;
    aimee_pg_bind_text(st, "?1", project);

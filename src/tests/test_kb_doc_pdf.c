@@ -492,8 +492,8 @@ static void test_pdf_vector_enqueue_and_answerability(void)
 
    /* Restricted (quarantine_state='pending') doc → NO embed_pdf jobs: a withheld document
     * is never vector-embedded (the access-control-relevant A1 invariant). */
-   assert(kb_doc_pdf_ingest_xhtml("proj", "secret.pdf", "h2", FIXTURE_2PAGE, "restricted", &stats) ==
-          2);
+   assert(kb_doc_pdf_ingest_xhtml("proj", "secret.pdf", "h2", FIXTURE_2PAGE, "restricted",
+                                  &stats) == 2);
    assert(db2_kb_async_count_kind("embed_pdf") == 2); /* unchanged — pending not enqueued */
 
    /* Confirming the restricted doc clears quarantine AND enqueues its embed_pdf jobs, so a
