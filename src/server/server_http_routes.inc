@@ -1152,14 +1152,27 @@ static int rh_workspace_remove(const route_req_t *rq, char *resp, int cap)
    return ws_dispatch_args("workspace.remove", path, NULL, 0, resp, cap);
 }
 
-/* POST /v1/workspaces/{id}/forge-token — install a short-lived brokered forge
- * token for the workspace (workspace-resource-plane §4). Body:
- * {token, scope?, ttl_seconds?}. The token is held in memory only and injected
- * into the server's git/gh exec env; it is never written to disk or logged, and
- * is revoked when the workspace closes. tool:execute (write); reachable over TCP
- * so a filesystem-rich client hands its token to a detached/co-located hub. */
+/* AIMEE_WEBCHAT_GIT=0 disables the whole webchat git surface — forge-token,
+ * clone, ops, per-host credentials, ssh-key, projects, session-dir, OAuth —
+ * without affecting the editor (which has its own AIMEE_WEBCHAT_EDITOR gate;
+ * session-dir is git-panel-only and not on the editor path, so gating it here is
+ * safe). On by default; only the exact value "0" disables it, so a blank/other
+ * value leaves git enabled. Read per call (immediate single-byte compare, like
+ * webuser_editor's AIMEE_WEBCHAT_EDITOR gate) — aimee never setenv()s at request
+ * time, so there is no concurrent-mutation window. Each git route checks this
+ * first and returns 503 when off — ahead of the 403 webuser check, which is
+ * intentional: the disabled state is not a secret, and an operator can ship the
+ * image with the editor but no git intake. */
+static int git_surface_enabled(void)
+{
+   const char *v = getenv("AIMEE_WEBCHAT_GIT");
+   return !(v && v[0] == '0' && v[1] == '\0');
+}
+
 static int rh_workspace_forge_token(const route_req_t *rq, char *resp, int cap)
 {
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
    char path[MAX_PATH_LEN];
    ws_pct_decode(rq->id, path, sizeof(path));
    if (!path[0])
@@ -1197,6 +1210,8 @@ static int rh_workspace_forge_token(const route_req_t *rq, char *resp, int cap)
  * injected from the user's sealed vault (WP-C); never accepted in the body. */
 static int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)
 {
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
    const char *principal = server_http_identity_principal();
    if (!principal || strncmp(principal, "webuser:", 8) != 0)
       return err_json(resp, cap, 403, "git projects require a webchat user");
@@ -1240,6 +1255,8 @@ static int rh_workspace_clone(const route_req_t *rq, char *resp, int cap)
  * allowlisted by git_ops, and remote ops use the user's vaulted creds. */
 static int rh_workspace_git(const route_req_t *rq, char *resp, int cap)
 {
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
    const char *principal = server_http_identity_principal();
    if (!principal || strncmp(principal, "webuser:", 8) != 0)
       return err_json(resp, cap, 403, "git projects require a webchat user");
@@ -1295,6 +1312,8 @@ static int rh_workspace_git(const route_req_t *rq, char *resp, int cap)
 static int rh_workspace_projects(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
    const char *principal = server_http_identity_principal();
    if (!principal || strncmp(principal, "webuser:", 8) != 0)
       return err_json(resp, cap, 403, "git projects require a webchat user");
@@ -1376,6 +1395,8 @@ static int rh_chat_live(const route_req_t *rq, char *resp, int cap)
  * session's agent edits. Identity is the attested webuser principal. */
 static int rh_workspace_session_dir(const route_req_t *rq, char *resp, int cap)
 {
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
    const char *principal = server_http_identity_principal();
    if (!principal || strncmp(principal, "webuser:", 8) != 0)
       return err_json(resp, cap, 403, "git projects require a webchat user");
@@ -1442,6 +1463,8 @@ static int rh_workspace_editor(const route_req_t *rq, char *resp, int cap)
  * tokens. Identity is the attested X-Aimee-Webuser principal. */
 static int rh_git_credentials(const route_req_t *rq, char *resp, int cap)
 {
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
    const char *principal = server_http_identity_principal();
    if (!principal || strncmp(principal, "webuser:", 8) != 0)
       return err_json(resp, cap, 403, "git credentials require a webchat user");
@@ -1531,6 +1554,8 @@ static int rh_git_credentials(const route_req_t *rq, char *resp, int cap)
  * can prompt an unlock. The secret is never logged. */
 static int rh_git_sshkey(const route_req_t *rq, char *resp, int cap)
 {
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
    const char *principal = server_http_identity_principal();
    if (!principal || strncmp(principal, "webuser:", 8) != 0)
       return err_json(resp, cap, 403, "ssh keys require a webchat user");
@@ -1610,6 +1635,8 @@ static int rh_git_sshkey(const route_req_t *rq, char *resp, int cap)
 static int rh_git_oauth_github_start(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
    const char *principal = server_http_identity_principal();
    if (!principal || strncmp(principal, "webuser:", 8) != 0)
       return err_json(resp, cap, 403, "git sign-in requires a webchat user");
@@ -1639,6 +1666,8 @@ static int rh_git_oauth_github_start(const route_req_t *rq, char *resp, int cap)
 static int rh_git_oauth_github_poll(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
    const char *principal = server_http_identity_principal();
    if (!principal || strncmp(principal, "webuser:", 8) != 0)
       return err_json(resp, cap, 403, "git sign-in requires a webchat user");
@@ -1661,6 +1690,8 @@ static int rh_git_oauth_github_poll(const route_req_t *rq, char *resp, int cap)
  * button can be configured without touching env vars. */
 static int rh_git_oauth_github_config(const route_req_t *rq, char *resp, int cap)
 {
+   if (!git_surface_enabled())
+      return err_json(resp, cap, 503, "the git surface is disabled on this server");
    const char *principal = server_http_identity_principal();
    if (!principal || strncmp(principal, "webuser:", 8) != 0)
       return err_json(resp, cap, 403, "git sign-in requires a webchat user");

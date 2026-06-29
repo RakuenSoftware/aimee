@@ -1091,6 +1091,48 @@ int main(void)
       assert(server_http_resolve_bind_addr(1 /*want_ext*/, 1 /*tls*/) == INADDR_ANY);
    }
 
+   /* --- AIMEE_WEBCHAT_GIT=0 disables the whole git surface (503 first) --- */
+   {
+      char resp[2048];
+      /* Every git-surface route; the gate runs before any other work, so a
+       * disabled surface returns 503 for all of them (no server-ctx access). */
+      static const struct
+      {
+         const char *m, *p, *body;
+      } git_routes[] = {
+          {"POST", "/v1/workspaces/ws1/forge-token", "{}"},
+          {"POST", "/v1/workspace/clone", "{}"},
+          {"POST", "/v1/workspace/git", "{}"},
+          {"GET", "/v1/workspace/projects", NULL},
+          {"POST", "/v1/workspace/session-dir", "{}"},
+          {"GET", "/v1/git/credentials", NULL},
+          {"POST", "/v1/git/sshkey", "{}"},
+          {"POST", "/v1/git/oauth/github/start", "{}"},
+          {"POST", "/v1/git/oauth/github/poll", "{}"},
+          {"GET", "/v1/git/oauth/github/config", NULL},
+      };
+      const int gn = (int)(sizeof(git_routes) / sizeof(git_routes[0]));
+      setenv("AIMEE_WEBCHAT_GIT", "0", 1);
+      for (int i = 0; i < gn; i++)
+      {
+         int blen = git_routes[i].body ? (int)strlen(git_routes[i].body) : 0;
+         int st = server_http_route(git_routes[i].m, git_routes[i].p, git_routes[i].body, blen,
+                                    resp, sizeof(resp));
+         assert(st == 503);
+      }
+      /* Enabled (default + any non-"0"): the gate no longer fires. The two
+       * context-free routes fall through to their own 403 webuser check (no
+       * attested webuser in this harness) — crucially NOT 503. */
+      unsetenv("AIMEE_WEBCHAT_GIT");
+      assert(server_http_route("GET", "/v1/workspace/projects", NULL, 0, resp, sizeof(resp)) ==
+             403);
+      assert(server_http_route("GET", "/v1/git/credentials", NULL, 0, resp, sizeof(resp)) == 403);
+      setenv("AIMEE_WEBCHAT_GIT", "1", 1);
+      assert(server_http_route("GET", "/v1/workspace/projects", NULL, 0, resp, sizeof(resp)) ==
+             403);
+      unsetenv("AIMEE_WEBCHAT_GIT");
+   }
+
    platform_test_rmrf(home);
    printf("OK\n");
    return 0;
