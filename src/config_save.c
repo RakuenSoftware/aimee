@@ -959,9 +959,9 @@ int config_save(const config_t *cfg)
       }
    }
 
-   /* Rolling context fold (fold §1, only save if non-default) */
+   /* Rolling context fold (fold §1/§3, only save if non-default) */
    if (cfg->fold_enabled || cfg->fold_retained_msgs || cfg->fold_min_fold_msgs ||
-       cfg->fold_excerpt_bytes)
+       cfg->fold_excerpt_bytes || cfg->fold_freeze_enabled || cfg->fold_freeze_tail_cap_msgs)
    {
       cJSON *fold = cJSON_AddObjectToObject(root, "fold");
       cJSON_AddBoolToObject(fold, "enabled", cfg->fold_enabled);
@@ -971,6 +971,13 @@ int config_save(const config_t *cfg)
          cJSON_AddNumberToObject(fold, "min_fold_msgs", cfg->fold_min_fold_msgs);
       if (cfg->fold_excerpt_bytes)
          cJSON_AddNumberToObject(fold, "excerpt_bytes", cfg->fold_excerpt_bytes);
+      if (cfg->fold_freeze_enabled || cfg->fold_freeze_tail_cap_msgs)
+      {
+         cJSON *freeze = cJSON_AddObjectToObject(fold, "freeze");
+         cJSON_AddBoolToObject(freeze, "enabled", cfg->fold_freeze_enabled);
+         if (cfg->fold_freeze_tail_cap_msgs)
+            cJSON_AddNumberToObject(freeze, "tail_cap_msgs", cfg->fold_freeze_tail_cap_msgs);
+      }
    }
 
    /* Session/worktree cleanup policy (only save if non-default) */

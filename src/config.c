@@ -427,6 +427,8 @@ static void config_set_defaults(config_t *cfg)
    cfg->fold_retained_msgs = 0;
    cfg->fold_min_fold_msgs = 0;
    cfg->fold_excerpt_bytes = 0;
+   cfg->fold_freeze_enabled = 0; /* fold §3: default-off */
+   cfg->fold_freeze_tail_cap_msgs = 0;
    snprintf(cfg->memory_citations_mode, sizeof(cfg->memory_citations_mode), "%s", "off");
    snprintf(cfg->memory_coref_mode, sizeof(cfg->memory_coref_mode), "%s", "off");
    cfg->memory_cognify_async_enabled = 0;

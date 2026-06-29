@@ -40,13 +40,34 @@ extern "C"
 #define CONTEXT_FOLD_DEFAULT_RETAINED_MSGS 8
 #define CONTEXT_FOLD_DEFAULT_MIN_FOLD_MSGS 4
 #define CONTEXT_FOLD_DEFAULT_EXCERPT_BYTES 160
+#define CONTEXT_FOLD_DEFAULT_TAIL_CAP_MSGS 24
+
+   /* Fold-freeze state (§3), owned by the caller and persisted ACROSS turns within
+    * a run (e.g. a stack local spanning the agent turn-loop). It pins the fold
+    * boundary so the folded prefix stays byte-identical turn-to-turn — the fold is
+    * already deterministic, so a stable boundary over an unchanged prefix yields
+    * identical bytes and the provider prompt cache stays warm. The boundary only
+    * advances ("epoch") when the un-folded tail grows past tail_cap_msgs. Zero-init
+    * before first use; passing NULL disables freeze (every turn re-derives the
+    * boundary, the P2a behavior). */
+   typedef struct
+   {
+      int active;        /* 1 once a boundary has been frozen */
+      int frozen_split;  /* original-message index of the frozen fold boundary */
+      int tail_cap_msgs; /* re-epoch when (count - frozen_split) exceeds this (0 -> default) */
+      int epochs;        /* count of boundary advances (diagnostic) */
+      unsigned long long prefix_digest; /* digest of the folded prefix bytes at freeze time;
+                                         * reuse requires the current prefix to still match, so a
+                                         * mid-run mutation (e.g. compaction) forces an epoch */
+   } fold_freeze_t;
 
    typedef struct
    {
-      cJSON *messages;   /* NEW array the caller owns (cJSON_Delete); NULL if no fold */
-      int folded;        /* 1 if a fold happened */
-      int folded_msgs;   /* number of original messages folded away */
-      int retained_msgs; /* number of trailing messages kept whole */
+      cJSON *messages;     /* NEW array the caller owns (cJSON_Delete); NULL if no fold */
+      int folded;          /* 1 if a fold happened */
+      int folded_msgs;     /* number of original messages folded away */
+      int retained_msgs;   /* number of trailing messages kept whole */
+      int reused_boundary; /* 1 if this fold reused a frozen boundary (cache-warm) */
       coord_evict_t closet_evict;
    } fold_result_t;
 
@@ -64,7 +85,8 @@ extern "C"
     * rendering for the closet block). cfg->closet.denylist (if set) is BORROWED
     * only for the duration of this call (consumed while rendering the closet); it
     * is never retained in *out, so the caller may free it once this returns. */
-   int context_fold_view(const cJSON *messages, const fold_config_t *cfg, fold_result_t *out);
+   int context_fold_view(const cJSON *messages, const fold_config_t *cfg, fold_freeze_t *freeze,
+                         fold_result_t *out);
 
    /* Free any owned resources in *out. NULL-safe on a zeroed result and on a
     * no-fold result (out->messages == NULL), so callers may invoke it

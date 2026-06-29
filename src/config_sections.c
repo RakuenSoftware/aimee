@@ -708,6 +708,16 @@ void config_parse_fold_section(config_t *cfg, cJSON *root)
    item = cJSON_GetObjectItemCaseSensitive(fold, "excerpt_bytes");
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
       cfg->fold_excerpt_bytes = (int)item->valuedouble;
+   cJSON *freeze = cJSON_GetObjectItemCaseSensitive(fold, "freeze");
+   if (cJSON_IsObject(freeze))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(freeze, "enabled");
+      if (cJSON_IsBool(item))
+         cfg->fold_freeze_enabled = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(freeze, "tail_cap_msgs");
+      if (cJSON_IsNumber(item) && item->valuedouble > 0)
+         cfg->fold_freeze_tail_cap_msgs = (int)item->valuedouble;
+   }
 }
 
 void config_parse_sessions_section(config_t *cfg, cJSON *root)

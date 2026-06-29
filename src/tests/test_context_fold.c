@@ -101,7 +101,7 @@ static void test_basic_fold(void)
    int orig_count = cJSON_GetArraySize(msgs);
    fold_config_t cfg = {.enabled = 1, .closet = {.enabled = 1}};
    fold_result_t r;
-   assert(context_fold_view(msgs, &cfg, &r) == 0);
+   assert(context_fold_view(msgs, &cfg, NULL, &r) == 0);
    assert(r.folded == 1);
    assert(r.messages != NULL);
 
@@ -146,8 +146,8 @@ static void test_nondestructive_and_deterministic(void)
    cJSON *b = build_convo();
    fold_config_t cfg = {.enabled = 1, .closet = {.enabled = 1}};
    fold_result_t ra, rb;
-   assert(context_fold_view(a, &cfg, &ra) == 0 && ra.folded);
-   assert(context_fold_view(b, &cfg, &rb) == 0 && rb.folded);
+   assert(context_fold_view(a, &cfg, NULL, &ra) == 0 && ra.folded);
+   assert(context_fold_view(b, &cfg, NULL, &rb) == 0 && rb.folded);
    char *sa = cJSON_PrintUnformatted(ra.messages);
    char *sb = cJSON_PrintUnformatted(rb.messages);
    assert(sa && sb && strcmp(sa, sb) == 0); /* identical input -> identical fold */
@@ -167,7 +167,7 @@ static void test_too_short_no_fold(void)
    add_assistant_text(m, "hi");
    fold_config_t cfg = {.enabled = 1, .closet = {.enabled = 1}};
    fold_result_t r;
-   assert(context_fold_view(m, &cfg, &r) == 0);
+   assert(context_fold_view(m, &cfg, NULL, &r) == 0);
    assert(r.folded == 0 && r.messages == NULL);
    fold_result_free(&r);
    cJSON_Delete(m);
@@ -179,7 +179,7 @@ static void test_disabled_no_fold(void)
    cJSON *m = build_convo();
    fold_config_t off = {.enabled = 0};
    fold_result_t r;
-   assert(context_fold_view(m, &off, &r) == 0);
+   assert(context_fold_view(m, &off, NULL, &r) == 0);
    assert(r.folded == 0 && r.messages == NULL);
    fold_result_free(&r);
    cJSON_Delete(m);
@@ -193,7 +193,7 @@ static void test_small_retained_band(void)
    fold_config_t cfg = {
        .enabled = 1, .retained_msgs = 2, .min_fold_msgs = 4, .closet = {.enabled = 1}};
    fold_result_t r;
-   assert(context_fold_view(m, &cfg, &r) == 0);
+   assert(context_fold_view(m, &cfg, NULL, &r) == 0);
    assert(r.folded == 1);
    /* retained tail still begins with a clean user turn */
    assert(msg_is_clean_user(cJSON_GetArrayItem(r.messages, 2)));
@@ -207,7 +207,7 @@ static void test_retained_ge_count(void)
    cJSON *m = build_convo(); /* 14 messages */
    fold_config_t cfg = {.enabled = 1, .retained_msgs = 100, .closet = {.enabled = 1}};
    fold_result_t r;
-   assert(context_fold_view(m, &cfg, &r) == 0);
+   assert(context_fold_view(m, &cfg, NULL, &r) == 0);
    assert(r.folded == 0 && r.messages == NULL); /* nothing to fold below the band */
    fold_result_free(&r);
    cJSON_Delete(m);
@@ -248,7 +248,7 @@ static void test_odd_shapes_no_crash(void)
    fold_config_t cfg = {
        .enabled = 1, .retained_msgs = 4, .min_fold_msgs = 4, .closet = {.enabled = 1}};
    fold_result_t r;
-   assert(context_fold_view(m, &cfg, &r) == 0);
+   assert(context_fold_view(m, &cfg, NULL, &r) == 0);
    assert(r.folded == 1 && r.messages != NULL);
    const char *c0 =
        cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(r.messages, 0), "content"));
@@ -257,6 +257,89 @@ static void test_odd_shapes_no_crash(void)
    fold_result_free(&r);
    cJSON_Delete(m);
    PASS("odd_shapes_no_crash");
+}
+
+/* Append a user-text + assistant-text round to simulate a new turn. */
+static void add_round(cJSON *m, const char *u, const char *a)
+{
+   add_user_text(m, u);
+   add_assistant_text(m, a);
+}
+
+static void test_freeze_boundary_stable(void)
+{
+   cJSON *m = build_convo(); /* 14 msgs */
+   fold_config_t cfg = {.enabled = 1, .closet = {.enabled = 1}};
+   fold_freeze_t fz;
+   memset(&fz, 0, sizeof(fz));
+   fz.tail_cap_msgs = 12;
+
+   /* turn 1: first fold pins the boundary */
+   fold_result_t r1;
+   assert(context_fold_view(m, &cfg, &fz, &r1) == 0 && r1.folded);
+   assert(fz.active && r1.reused_boundary == 0);
+   int pinned = fz.frozen_split;
+   char *prefix1 =
+       cJSON_PrintUnformatted(cJSON_GetArrayItem(r1.messages, 0)); /* synthetic fold msg */
+
+   /* turn 2: append a round; prefix unchanged + tail within cap -> reuse boundary,
+    * byte-identical synthetic prefix (warm cache) */
+   add_round(m, "another request", "another answer");
+   fold_result_t r2;
+   assert(context_fold_view(m, &cfg, &fz, &r2) == 0 && r2.folded);
+   assert(r2.reused_boundary == 1);
+   assert(fz.frozen_split == pinned);
+   char *prefix2 = cJSON_PrintUnformatted(cJSON_GetArrayItem(r2.messages, 0));
+   assert(strcmp(prefix1, prefix2) == 0); /* byte-identical folded prefix */
+
+   /* keep appending until the tail exceeds the cap -> epoch advance */
+   int epochs_before = fz.epochs;
+   for (int i = 0; i < 12; i++)
+      add_round(m, "more", "ok");
+   fold_result_t r3;
+   assert(context_fold_view(m, &cfg, &fz, &r3) == 0 && r3.folded);
+   assert(r3.reused_boundary == 0);        /* re-epoched */
+   assert(fz.epochs == epochs_before + 1); /* advanced once */
+   assert(fz.frozen_split > pinned);       /* boundary moved forward */
+
+   free(prefix1);
+   free(prefix2);
+   fold_result_free(&r1);
+   fold_result_free(&r2);
+   fold_result_free(&r3);
+   cJSON_Delete(m);
+   PASS("freeze_boundary_stable");
+}
+
+static void test_freeze_prefix_mutation_breaks_reuse(void)
+{
+   /* If the folded prefix is mutated mid-run (as compaction could), the digest
+    * check must force an epoch instead of a false byte-identical "reuse". */
+   cJSON *m = build_convo();
+   fold_config_t cfg = {.enabled = 1, .closet = {.enabled = 1}};
+   fold_freeze_t fz;
+   memset(&fz, 0, sizeof(fz));
+   fz.tail_cap_msgs = 12;
+
+   fold_result_t r1;
+   assert(context_fold_view(m, &cfg, &fz, &r1) == 0 && r1.folded);
+   int epochs_before = fz.epochs;
+
+   /* mutate a message inside the folded prefix (index 0) */
+   cJSON *folded0 = cJSON_GetArrayItem(m, 0);
+   cJSON_ReplaceItemInObjectCaseSensitive(folded0, "content",
+                                          cJSON_CreateString("MUTATED prefix content"));
+   add_round(m, "carry on", "sure");
+
+   fold_result_t r2;
+   assert(context_fold_view(m, &cfg, &fz, &r2) == 0 && r2.folded);
+   assert(r2.reused_boundary == 0);        /* mutation forced an epoch, not a reuse */
+   assert(fz.epochs == epochs_before + 1); /* genuine advance */
+
+   fold_result_free(&r1);
+   fold_result_free(&r2);
+   cJSON_Delete(m);
+   PASS("freeze_prefix_mutation_breaks_reuse");
 }
 
 int main(void)
@@ -269,6 +352,8 @@ int main(void)
    test_small_retained_band();
    test_retained_ge_count();
    test_odd_shapes_no_crash();
+   test_freeze_boundary_stable();
+   test_freeze_prefix_mutation_breaks_reuse();
    printf("ALL PASS\n");
    return 0;
 }

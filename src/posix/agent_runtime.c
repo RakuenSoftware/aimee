@@ -212,13 +212,15 @@ static void maybe_compact_before_request(const agent_t *agent, cJSON *messages,
    }
 }
 
-/* Fold §1 (P2b): build a rolling-fold view of the Anthropic message array if the
- * fold is enabled. Populates *out (zeroed on no-fold). The fold's Coordinate
- * Closet is rendered during this call, so the config's denylist (a pointer into
- * the local config_t) only needs to be valid here — out holds owned cJSON that
- * the caller frees with fold_result_free AFTER the request is serialized.
+/* Fold §1/§3 (P2b/P2c): build a rolling-fold view of the Anthropic message array
+ * if the fold is enabled. Populates *out (zeroed on no-fold). The fold's
+ * Coordinate Closet is rendered during this call, so the config's denylist (a
+ * pointer into the local config_t) only needs to be valid here — out holds owned
+ * cJSON that the caller frees with fold_result_free AFTER the request is
+ * serialized. `freeze` (may be NULL) is the per-run fold-freeze state that pins
+ * the boundary across turns; it is honored only when fold_freeze_enabled.
  * Returns 1 if a fold view was produced, 0 otherwise. */
-static int build_fold_view(const cJSON *messages, fold_result_t *out)
+static int build_fold_view(const cJSON *messages, fold_freeze_t *freeze, fold_result_t *out)
 {
    memset(out, 0, sizeof(*out));
    config_t cfg;
@@ -234,7 +236,17 @@ static int build_fold_view(const cJSON *messages, fold_result_t *out)
    fc.closet.budget_bytes = cfg.coord_closet_budget_bytes;
    fc.closet.max_ratio_pct = cfg.coord_closet_max_ratio_pct;
    fc.closet.denylist = cfg.coord_closet_denylist[0] ? cfg.coord_closet_denylist : NULL;
-   context_fold_view(messages, &fc, out);
+   fold_freeze_t *fz = NULL;
+   if (cfg.fold_freeze_enabled && freeze)
+   {
+      if (freeze->tail_cap_msgs == 0 && cfg.fold_freeze_tail_cap_msgs > 0)
+         freeze->tail_cap_msgs = cfg.fold_freeze_tail_cap_msgs;
+      fz = freeze;
+   }
+   context_fold_view(messages, &fc, fz, out);
+   if (out->folded)
+      aimee_log(LOG_DEBUG, "fold", "folded=%d retained=%d reused_boundary=%d epochs=%d",
+                out->folded_msgs, out->retained_msgs, out->reused_boundary, fz ? fz->epochs : 0);
    return out->folded;
 }
 
@@ -561,6 +573,11 @@ native_provider_http:
 
    int turn = 0;
    int total_calls = 0;
+   /* §3 fold-freeze: per-run boundary state, persisted across turns so the folded
+    * prefix stays byte-identical (warm provider cache). Honored only when
+    * fold_freeze_enabled; ignored otherwise. */
+   fold_freeze_t agent_fold_freeze;
+   memset(&agent_fold_freeze, 0, sizeof(agent_fold_freeze));
    int api_call_count = 0;    /* cumulative provider API calls; published via heartbeat */
    int write_calls_total = 0; /* cumulative write/edit tool calls; used by write_enforce */
    int final_instruction_added = 0;
@@ -726,7 +743,7 @@ native_provider_http:
       {
          /* Fold first so payload-rewrite tracking and the request both observe the
           * actually-sent (possibly folded) message array. */
-         build_fold_view(messages, &fold_view);
+         build_fold_view(messages, &agent_fold_freeze, &fold_view);
          cJSON *anth_msgs = fold_view.folded ? fold_view.messages : messages;
          track_anthropic_payload_rewrite(driver, &fb_agent, anth_msgs, sys);
          req = agent_build_request_anthropic(&fb_agent, anth_msgs, active_tools, sys, tok,
@@ -829,7 +846,7 @@ native_provider_http:
             fb_req = agent_build_request_responses(&fb_agent, messages, active_tools, sys);
          else if (anthropic)
          {
-            build_fold_view(messages, &fb_fold_view);
+            build_fold_view(messages, &agent_fold_freeze, &fb_fold_view);
             cJSON *fb_anth_msgs = fb_fold_view.folded ? fb_fold_view.messages : messages;
             track_anthropic_payload_rewrite(driver, &fb_agent, fb_anth_msgs, sys);
             fb_req = agent_build_request_anthropic(&fb_agent, fb_anth_msgs, active_tools, sys, tok,

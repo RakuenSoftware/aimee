@@ -384,28 +384,28 @@ typedef struct config
     * model, P1). Single-model Anthropic-compatible shims (llama.cpp/vLLM) enable
     * this so an arbitrary client model name is not forwarded and rejected upstream. */
    int gateway_pin_model;
-   int typed_facts_enabled;      /* typed-fact knowledge layer master gate (default off) */
-   int kb_pdf_ingest_enabled;    /* structured-pdf: route PDF uploads through the geometry
-                                    extractor (kb_doc_pdf) instead of plain pdftotext (default off) */
-   int kb_pdf_vector_enabled;    /* structured-pdf Phase A: embed PDF chunks into the isolated
-                                    kb_pdf_embeddings relation + add the vector leg to
-                                    search_chunks (default off; degrades to lexical when absent) */
-   int kb_pdf_tsr_enabled;       /* structured-pdf Phase B: run the TSR sidecar at ingest to turn
-                                    table regions into kb_table_cells (default off; degrades to
-                                    text-only + tsr_status='unavailable' when the sidecar absent) */
-   char tsr_command[1024];       /* structured-pdf Phase B: TSR sidecar endpoint/command
-                                    (resolves like embedding_command; AIMEE_TSR_URL env fallback) */
-   int kb_pdf_assets_enabled;    /* structured-pdf Phase C: render figure/table crops to the
-                                    content-addressed blob store + kb_doc_assets at ingest, served
-                                    via open_asset (default off; needs pdftoppm) */
-   char kb_pdf_blob_dir[1024];   /* structured-pdf Phase C: blob store root override (default
-                                    <kb_default_config_dir()>/kb-blobs) */
-   int kb_pdf_blob_recon_secs;   /* structured-pdf Phase C: orphan-blob reconciliation interval
-                                    seconds (default 3600; <=0 disables the sweep) */
+   int typed_facts_enabled;         /* typed-fact knowledge layer master gate (default off) */
+   int kb_pdf_ingest_enabled;       /* structured-pdf: route PDF uploads through the geometry
+                                       extractor (kb_doc_pdf) instead of plain pdftotext (default off) */
+   int kb_pdf_vector_enabled;       /* structured-pdf Phase A: embed PDF chunks into the isolated
+                                       kb_pdf_embeddings relation + add the vector leg to
+                                       search_chunks (default off; degrades to lexical when absent) */
+   int kb_pdf_tsr_enabled;          /* structured-pdf Phase B: run the TSR sidecar at ingest to turn
+                                       table regions into kb_table_cells (default off; degrades to
+                                       text-only + tsr_status='unavailable' when the sidecar absent) */
+   char tsr_command[1024];          /* structured-pdf Phase B: TSR sidecar endpoint/command
+                                       (resolves like embedding_command; AIMEE_TSR_URL env fallback) */
+   int kb_pdf_assets_enabled;       /* structured-pdf Phase C: render figure/table crops to the
+                                       content-addressed blob store + kb_doc_assets at ingest, served
+                                       via open_asset (default off; needs pdftoppm) */
+   char kb_pdf_blob_dir[1024];      /* structured-pdf Phase C: blob store root override (default
+                                       <kb_default_config_dir()>/kb-blobs) */
+   int kb_pdf_blob_recon_secs;      /* structured-pdf Phase C: orphan-blob reconciliation interval
+                                       seconds (default 3600; <=0 disables the sweep) */
    int kb_pdf_blob_orphan_alarm_mb; /* structured-pdf Phase C: warn when reclaimable orphan bytes
                                        exceed this many MB (default 1024; <=0 disables the alarm) */
-   int kb_evidence_emit_enabled; /* auditable-correctness: emit per-turn retrieval_event (default
-                                    off) */
+   int kb_evidence_emit_enabled;    /* auditable-correctness: emit per-turn retrieval_event (default
+                                       off) */
    int fidelity_check_enabled; /* auditable-correctness P3: run the fidelity judge on terminal-text
                                   turns (default off; fail-closed dep on
                                   kb_evidence_emit_enabled + ingress_preinject_enabled) */
@@ -889,6 +889,12 @@ typedef struct config
    int fold_retained_msgs;
    int fold_min_fold_msgs;
    int fold_excerpt_bytes;
+   /* Fold-freeze (§3): pin the fold boundary across turns so the folded prefix
+    * stays byte-identical and the provider cache stays warm. Default-off.
+    * fold_freeze_tail_cap_msgs: re-epoch (advance the boundary) when the un-folded
+    * tail exceeds this many messages (0 = module default). */
+   int fold_freeze_enabled;
+   int fold_freeze_tail_cap_msgs;
 
    /* Session/worktree cleanup policy.
     * worktree_stale_secs: inactivity threshold before a session is pruned

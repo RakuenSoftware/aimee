@@ -146,7 +146,36 @@ void fold_result_free(fold_result_t *out)
    out->folded = 0;
 }
 
-int context_fold_view(const cJSON *messages, const fold_config_t *cfg, fold_result_t *out)
+/* FNV-1a over the serialized bytes of messages[0..n); also returns the total
+ * serialized size via *bytes. Detects prefix mutation for freeze reuse and bounds
+ * the closet ratio cap in one pass. */
+static unsigned long long prefix_digest(const cJSON *messages, int n, size_t *bytes)
+{
+   unsigned long long h = 14695981039346656037ULL;
+   size_t total = 0;
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *it = cJSON_GetArrayItem((cJSON *)messages, i);
+      if (!it)
+         continue;
+      char *s = cJSON_PrintUnformatted(it);
+      if (!s)
+         continue;
+      for (const unsigned char *p = (const unsigned char *)s; *p; p++)
+      {
+         h ^= (unsigned long long)*p;
+         h *= 1099511628211ULL;
+      }
+      total += strlen(s);
+      free(s);
+   }
+   if (bytes)
+      *bytes = total;
+   return h;
+}
+
+int context_fold_view(const cJSON *messages, const fold_config_t *cfg, fold_freeze_t *freeze,
+                      fold_result_t *out)
 {
    if (!out)
       return -1;
@@ -166,32 +195,52 @@ int context_fold_view(const cJSON *messages, const fold_config_t *cfg, fold_resu
    if (count <= 0 || retained >= count || count - retained < min_fold)
       return 0; /* too short to fold cleanly */
 
-   int desired = count - retained;
+   int tail_cap = CONTEXT_FOLD_DEFAULT_TAIL_CAP_MSGS;
+   if (freeze && freeze->tail_cap_msgs > 0)
+      tail_cap = freeze->tail_cap_msgs;
+   if (tail_cap < retained)
+      tail_cap = retained; /* a cap below the retained band would re-epoch every turn */
+
    int split = -1;
-   for (int s = desired; s >= min_fold; s--)
+   int reused = 0;
+   size_t folded_bytes = 0;    /* serialized size of the folded region */
+   unsigned long long dig = 0; /* digest of the folded region */
+
+   /* §3 fold-freeze: reuse the pinned boundary only when it is still a clean
+    * boundary, the tail is within cap, AND the folded prefix is byte-for-byte
+    * unchanged. A mid-run compaction can mutate messages[0..frozen_split) while
+    * preserving indices — the digest check turns that into an epoch (re-fold)
+    * instead of a false "reuse" that would claim a warm cache it does not have. */
+   if (freeze && freeze->active)
    {
-      if (is_clean_user_turn(cJSON_GetArrayItem((cJSON *)messages, s)))
+      int fs = freeze->frozen_split;
+      if (fs >= min_fold && fs < count && (count - fs) <= tail_cap &&
+          is_clean_user_turn(cJSON_GetArrayItem((cJSON *)messages, fs)))
       {
-         split = s;
-         break;
+         dig = prefix_digest(messages, fs, &folded_bytes);
+         if (dig == freeze->prefix_digest)
+         {
+            split = fs;
+            reused = 1;
+         }
       }
    }
-   if (split < min_fold)
-      return 0; /* no clean boundary leaves enough folded */
 
-   /* size of the folded region (bounds the closet ratio cap) */
-   size_t folded_bytes = 0;
-   for (int i = 0; i < split; i++)
+   if (!reused)
    {
-      cJSON *it = cJSON_GetArrayItem((cJSON *)messages, i);
-      if (!it)
-         continue;
-      char *s = cJSON_PrintUnformatted(it);
-      if (s)
+      /* fresh boundary: first fold, freeze disabled, or an epoch advance */
+      int desired = count - retained;
+      for (int s = desired; s >= min_fold; s--)
       {
-         folded_bytes += strlen(s);
-         free(s);
+         if (is_clean_user_turn(cJSON_GetArrayItem((cJSON *)messages, s)))
+         {
+            split = s;
+            break;
+         }
       }
+      if (split < min_fold)
+         return 0; /* no clean boundary leaves enough folded */
+      dig = prefix_digest(messages, split, &folded_bytes);
    }
 
    coord_set_t set;
@@ -251,9 +300,24 @@ int context_fold_view(const cJSON *messages, const fold_config_t *cfg, fold_resu
       cJSON_AddItemToArray(arr, dup);
    }
 
+   /* Commit the freeze state only after a successful build (an OOM return above
+    * leaves the prior frozen boundary intact). epochs++ counts genuine boundary
+    * advances, not no-op re-commits of the same boundary. */
+   if (freeze)
+   {
+      int advanced = !reused && (!freeze->active || freeze->frozen_split != split ||
+                                 freeze->prefix_digest != dig);
+      freeze->active = 1;
+      freeze->frozen_split = split;
+      freeze->prefix_digest = dig;
+      if (advanced)
+         freeze->epochs++;
+   }
+
    out->messages = arr;
    out->folded = 1;
    out->folded_msgs = split;
    out->retained_msgs = count - split;
+   out->reused_boundary = reused;
    return 0;
 }
