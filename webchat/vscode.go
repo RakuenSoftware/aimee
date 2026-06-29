@@ -180,6 +180,33 @@ func (s *server) proxyToEditor(w http.ResponseWriter, r *http.Request, username 
 			_, _ = rw.Write([]byte("editor connection failed"))
 		},
 	}
+
+	// code-server holds a single long-lived WebSocket open for the editor/terminal
+	// and makes no further /vscode HTTP requests during a session, so the
+	// server-side idle timer (refreshed only by ensureEditorPort) would otherwise
+	// expire and reap an actively-open editor mid-use. While this upgrade is being
+	// proxied, periodically force an ensure to keep that timer warm; the ticker
+	// stops as soon as the connection ends (tab closed), letting a truly idle
+	// editor reap normally.
+	if isWebSocketUpgrade(r) {
+		stop := make(chan struct{})
+		defer close(stop)
+		go func() {
+			t := time.NewTicker(editorPortTTL)
+			defer t.Stop()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-t.C:
+					kctx, cancel := context.WithTimeout(context.Background(), socketCallTimeout)
+					_, _, _ = s.ensureEditorPort(kctx, username, true)
+					cancel()
+				}
+			}
+		}()
+	}
+
 	proxy.ServeHTTP(w, r)
 }
 

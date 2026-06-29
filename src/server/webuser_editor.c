@@ -340,38 +340,37 @@ static pid_t spawn_code_server(const char *principal, const char *userroot, int 
    return pid;
 }
 
+/* Kill a code-server's whole session (setsid) and reap it so it can't leak as a
+ * zombie. Bounded (~500ms): SIGTERM then poll, escalate to SIGKILL. Holds no
+ * lock, so it is safe to call after the editor's slot has already been cleared —
+ * bulk reaping clears slots under g_lock and then calls this with the lock
+ * dropped, so a tick that reaps many idle editors never freezes concurrent
+ * webuser_editor_ensure for N×500ms. */
+static void reap_pid(pid_t pid)
+{
+   if (pid <= 0)
+      return;
+   kill(-pid, SIGTERM); /* whole session (setsid) */
+   kill(pid, SIGTERM);
+   for (int i = 0; i < 50; i++) /* up to ~500ms */
+   {
+      if (waitpid(pid, NULL, WNOHANG) == pid)
+         return;
+      struct timespec ts = {0, 10 * 1000 * 1000}; /* 10ms */
+      nanosleep(&ts, NULL);
+   }
+   kill(-pid, SIGKILL);
+   kill(pid, SIGKILL);
+   waitpid(pid, NULL, 0); /* SIGKILL is uncatchable → bounded */
+}
+
 /* Reap one editor entry (kill its process group, clear the slot). Caller holds
- * g_lock. */
+ * g_lock; the bounded kill/wait runs under the lock, so this is only for
+ * single-editor paths (ensure respawn, stop). Bulk idle-reaping uses the
+ * slot-clear-then-reap_pid-outside-lock pattern instead (webuser_editor_reap_idle). */
 static void reap_locked(editor_t *e)
 {
-   pid_t pid = e->pid;
-   if (pid > 0)
-   {
-      kill(-pid, SIGTERM); /* whole session (setsid) */
-      kill(pid, SIGTERM);
-      /* Wait for the child here so it is actually reaped — once we zero the slot
-       * below, sweep_dead_locked can no longer find it, so an un-waited child
-       * would leak as a permanent zombie. code-server exits on SIGTERM quickly;
-       * escalate to SIGKILL if it ignores us. This is a rare path
-       * (stop/idle/shutdown), so the bounded wait under the lock is acceptable. */
-      int reaped = 0;
-      for (int i = 0; i < 50; i++) /* up to ~500ms */
-      {
-         if (waitpid(pid, NULL, WNOHANG) == pid)
-         {
-            reaped = 1;
-            break;
-         }
-         struct timespec ts = {0, 10 * 1000 * 1000}; /* 10ms */
-         nanosleep(&ts, NULL);
-      }
-      if (!reaped)
-      {
-         kill(-pid, SIGKILL);
-         kill(pid, SIGKILL);
-         waitpid(pid, NULL, 0); /* SIGKILL is uncatchable → bounded */
-      }
-   }
+   reap_pid(e->pid);
    e->principal[0] = '\0';
    e->pid = 0;
    e->port = 0;
@@ -537,19 +536,74 @@ int webuser_editor_reap_idle(long idle_secs)
    if (idle_secs <= 0)
       return 0;
    long now = (long)time(NULL);
-   int reaped = 0;
+   /* Two phases so the bounded kill/wait never runs under g_lock: phase 1 (under
+    * the lock) finds idle editors, copies their pids, and clears their slots;
+    * phase 2 (lock dropped) reaps each pid. Holding the lock across N×~500ms
+    * waits would freeze every concurrent webuser_editor_ensure and stall the
+    * park loop. A racing ensure for a just-cleared principal simply spawns a
+    * fresh editor (the user became active again) — its pid differs from the one
+    * we reap, so there is no double-reap. */
+   pid_t dead[WEBUSER_EDITOR_MAX];
+   int n = 0;
    pthread_mutex_lock(&g_lock);
    sweep_dead_locked();
    for (int i = 0; i < WEBUSER_EDITOR_MAX; i++)
    {
-      if (g_editors[i].pid > 0 && now - g_editors[i].last_active > idle_secs)
+      editor_t *e = &g_editors[i];
+      if (e->pid > 0 && now - e->last_active > idle_secs)
       {
-         reap_locked(&g_editors[i]);
-         reaped++;
+         dead[n++] = e->pid;
+         e->principal[0] = '\0';
+         e->pid = 0;
+         e->port = 0;
+         e->last_active = 0;
       }
    }
    pthread_mutex_unlock(&g_lock);
-   return reaped;
+   for (int i = 0; i < n; i++)
+      reap_pid(dead[i]);
+   return n;
+}
+
+void webuser_editor_reap_tick(void)
+{
+   /* Called once per ~1s server park-loop tick; reaps idle editors on a coarse
+    * ~30s cadence (single-threaded caller, so the static counter needs no lock).
+    * The idle bound is read once and cached. A live editor's idle timer is kept
+    * warm by webchat's periodic ensure / WebSocket keepalive, so only genuinely
+    * idle editors are reaped. */
+   static long idle = -1;
+   static int tick = 0;
+   if (idle < 0)
+      idle = webuser_editor_idle_secs();
+   if (idle > 0 && ++tick >= 30)
+   {
+      tick = 0;
+      webuser_editor_reap_idle(idle);
+   }
+}
+
+long webuser_editor_idle_secs(void)
+{
+   /* The editor's idle timer is kept warm by webchat's WebSocket keepalive,
+    * which re-ensures roughly every editorPortTTL (~30s); the idle window must
+    * comfortably exceed that cadence or a live session could be reaped between
+    * keepalives. So clamp any positive value to a 60s floor (2× the keepalive
+    * cadence) and a 7-day ceiling (so a fat-fingered "18000000" can't silently
+    * disable reaping). 0 explicitly disables; empty/malformed/negative/overflow
+    * → the 30-min default. */
+   const long FLOOR = 60, CEIL = 7L * 24 * 3600, DEF = 1800;
+   const char *v = getenv("AIMEE_WEBCHAT_EDITOR_IDLE_SECS");
+   if (!v || !v[0])
+      return DEF;
+   errno = 0;
+   char *end = NULL;
+   long n = strtol(v, &end, 10);
+   if (end == v || *end != '\0' || errno == ERANGE || n < 0)
+      return DEF;
+   if (n == 0)
+      return 0; /* explicitly disabled */
+   return n < FLOOR ? FLOOR : (n > CEIL ? CEIL : n);
 }
 
 void webuser_editor_shutdown(void)

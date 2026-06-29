@@ -137,6 +137,30 @@ int main(void)
    webuser_editor_stop(NULL);
    assert(webuser_editor_reap_idle(0) == 0);  /* idle_secs<=0 reaps nothing */
    assert(webuser_editor_reap_idle(60) == 0); /* empty registry */
+
+   /* Idle-timeout config: AIMEE_WEBCHAT_EDITOR_IDLE_SECS, default 1800; 0
+    * disables; positive values clamped to [60, 7d]; malformed/negative/overflow
+    * → default. */
+   unsetenv("AIMEE_WEBCHAT_EDITOR_IDLE_SECS");
+   assert(webuser_editor_idle_secs() == 1800);
+   setenv("AIMEE_WEBCHAT_EDITOR_IDLE_SECS", "300", 1);
+   assert(webuser_editor_idle_secs() == 300);
+   setenv("AIMEE_WEBCHAT_EDITOR_IDLE_SECS", "0", 1); /* valid → disables reaping */
+   assert(webuser_editor_idle_secs() == 0);
+   setenv("AIMEE_WEBCHAT_EDITOR_IDLE_SECS", "10", 1); /* below floor → 60 */
+   assert(webuser_editor_idle_secs() == 60);
+   setenv("AIMEE_WEBCHAT_EDITOR_IDLE_SECS", "700000", 1); /* above 7d ceiling → 604800 */
+   assert(webuser_editor_idle_secs() == 7L * 24 * 3600);
+   setenv("AIMEE_WEBCHAT_EDITOR_IDLE_SECS", "-5", 1); /* negative → default */
+   assert(webuser_editor_idle_secs() == 1800);
+   setenv("AIMEE_WEBCHAT_EDITOR_IDLE_SECS", "abc", 1); /* malformed → default */
+   assert(webuser_editor_idle_secs() == 1800);
+   setenv("AIMEE_WEBCHAT_EDITOR_IDLE_SECS", "60x", 1); /* trailing junk → default */
+   assert(webuser_editor_idle_secs() == 1800);
+   setenv("AIMEE_WEBCHAT_EDITOR_IDLE_SECS", "99999999999999999999", 1); /* overflow → default */
+   assert(webuser_editor_idle_secs() == 1800);
+   unsetenv("AIMEE_WEBCHAT_EDITOR_IDLE_SECS");
+
    webuser_editor_shutdown();
 
    test_editor_env_leak();

@@ -1937,11 +1937,13 @@ int server_run(server_ctx_t *ctx)
    /* The /v1 HTTP listener (server_http.c) runs on its own accept thread with
     * per-connection workers, so the main thread has no NDJSON accept loop to
     * drive any more. Park here until a signal flips ctx->running, then return so
-    * run_server() can tear everything down. */
+    * run_server() can tear everything down. The 1s tick also drives idle-reaping
+    * of per-webuser code-server editors (WP-I lifecycle) via reap_tick. */
    while (ctx->running)
    {
       struct timespec ts = {.tv_sec = 1, .tv_nsec = 0};
       nanosleep(&ts, NULL);
+      webuser_editor_reap_tick();
    }
    return 0;
 }

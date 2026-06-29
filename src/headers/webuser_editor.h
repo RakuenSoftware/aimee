@@ -42,6 +42,18 @@ void webuser_editor_stop(const char *principal);
  * idle_secs <= 0 reaps none. Safe to call frequently. */
 int webuser_editor_reap_idle(long idle_secs);
 
+/* Drive idle-reaping from the server's 1s park-loop tick: call once per tick;
+ * it reaps idle editors on a coarse ~30s cadence (no-op between cadences and
+ * when reaping is disabled). Single-threaded caller. */
+void webuser_editor_reap_tick(void);
+
+/* Configured idle-reap timeout in seconds, from AIMEE_WEBCHAT_EDITOR_IDLE_SECS
+ * (default 1800 = 30 min; 0 disables idle reaping; malformed → default). The
+ * server's park loop calls webuser_editor_reap_idle(webuser_editor_idle_secs())
+ * on a coarse cadence; a live editor's timer is kept warm by webchat's periodic
+ * ensure / WebSocket keepalive, so only genuinely idle editors are reaped. */
+long webuser_editor_idle_secs(void);
+
 /* Stop every running editor (server shutdown). */
 void webuser_editor_shutdown(void);
 
