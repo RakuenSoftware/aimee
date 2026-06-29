@@ -8,7 +8,8 @@
  * exist, no cross-tenant escape), the op is checked against a fixed allowlist,
  * arguments are validated (no shell — argv only), and remote ops get the user's
  * vaulted git credentials injected (WP-C). Read ops: status, log, diff, branch.
- * Write/remote ops: fetch, pull, commit, push, checkout. */
+ * Write/remote ops: fetch, pull, commit, push, checkout. Forge ops: pr (open a
+ * pull request for the current branch via gh; GitHub remotes). */
 
 /* Run `op` on `principal`'s `project`. `text_arg` carries the commit message
  * (op="commit") or target branch (op="checkout"); `num_arg` the log entry count

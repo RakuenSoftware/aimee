@@ -40,6 +40,7 @@ export default function Projects() {
   const [name, setName] = useState('');
   const [token, setToken] = useState('');
   const [commitMsg, setCommitMsg] = useState('');
+  const [prTitle, setPrTitle] = useState('');
   const [branch, setBranch] = useState('');
   const [hosts, setHosts] = useState<string[]>([]);
   const [credHost, setCredHost] = useState('');
@@ -188,8 +189,8 @@ export default function Projects() {
     } finally { setBusy(false); }
   }
 
-  async function runOp(op: string, extra?: Record<string, unknown>) {
-    if (!selected) return;
+  async function runOp(op: string, extra?: Record<string, unknown>): Promise<boolean> {
+    if (!selected) return false;
     setBusy(true); setErr(''); setOutput('');
     try {
       // When operating on the active session's project, act on that session's
@@ -200,9 +201,10 @@ export default function Projects() {
         body: JSON.stringify({ project: selected, op, session_id, ...extra }),
       });
       const d = await r.json();
-      if (!r.ok) { setErr(d.error || `${op} failed`); }
-      else { setOutput(d.output || `(${op}: ok)`); }
-    } finally { setBusy(false); }
+      if (!r.ok) { setErr(d.error || `${op} failed`); return false; }
+      setOutput(d.output || `(${op}: ok)`);
+      return true;
+    } catch { return false; } finally { setBusy(false); }
   }
 
   return (
@@ -330,6 +332,14 @@ export default function Projects() {
                   value={branch} onChange={e => setBranch(e.target.value)} />
                 <button style={btn} disabled={busy || !branch.trim()}
                   onClick={() => runOp('checkout', { branch })}>checkout</button>
+              </div>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <input style={{ ...input, flex: 1, minWidth: '180px' }}
+                  placeholder="PR title (optional — empty fills from commits)"
+                  value={prTitle} onChange={e => setPrTitle(e.target.value)} />
+                <button style={{ ...btn, borderColor: '#7a7' }} disabled={busy}
+                  title="Open a GitHub pull request for the pushed branch"
+                  onClick={async () => { if (await runOp('pr', { message: prTitle })) setPrTitle(''); }}>open PR</button>
               </div>
             </div>
           )}

@@ -1278,9 +1278,10 @@ static int rh_workspace_git(const route_req_t *rq, char *resp, int cap)
    /* Optional: run in the calling session's isolated worktree (same tree its
     * agent edits) rather than the shared project checkout. */
    const char *session_id = (cJSON_IsString(jsid) && jsid->valuestring) ? jsid->valuestring : NULL;
-   /* text_arg is the commit message (commit) or target branch (checkout). */
+   /* text_arg is the commit message (commit), target branch (checkout), or the
+    * PR title (pr; optional — empty → gh --fill from the branch's commits). */
    const char *text = NULL;
-   if (op && strcmp(op, "commit") == 0)
+   if (op && (strcmp(op, "commit") == 0 || strcmp(op, "pr") == 0))
       text = (cJSON_IsString(jmsg) && jmsg->valuestring) ? jmsg->valuestring : NULL;
    else if (op && strcmp(op, "checkout") == 0)
       text = (cJSON_IsString(jbranch) && jbranch->valuestring) ? jbranch->valuestring : NULL;

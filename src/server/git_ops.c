@@ -241,6 +241,47 @@ int git_ops_run_session(const char *principal, const char *project, const char *
       argv[1] = "checkout";
       argv[2] = text_arg;
    }
+   else if (strcmp(op, "pr") == 0)
+   {
+      /* Open a PR for the current branch via gh (GitHub remotes). With a title
+       * (text_arg) create it explicitly with an empty body the user edits on the
+       * forge; without one, --fill the title+body from the branch's commits. gh
+       * authenticates with the injected GH_TOKEN; base defaults to the repo's
+       * default branch, head to the current branch. The title is passed as a
+       * single argv token (no shell, no flag injection) but must be one line.
+       * Unlike the agent's handle_git_pr, there is no branch-ownership/verify
+       * gate: this is the webuser acting on their OWN connected repo, already
+       * confined by the principal-scoped project resolution (ws_scope, above),
+       * the route caps, and AIMEE_WEBCHAT_GIT. A non-GitHub origin surfaces gh's
+       * own error (stderr is captured) rather than a pre-flight host check. */
+      argv[0] = "gh";
+      argv[1] = "pr";
+      argv[2] = "create";
+      if (text_arg && text_arg[0])
+      {
+         size_t tn = strlen(text_arg);
+         if (tn > 256)
+         {
+            snprintf(err, errlen, "pr title too long");
+            return -1;
+         }
+         for (size_t i = 0; i < tn; i++)
+            if ((unsigned char)text_arg[i] < 0x20)
+            {
+               snprintf(err, errlen, "invalid pr title");
+               return -1;
+            }
+         argv[3] = "--title";
+         argv[4] = text_arg;
+         argv[5] = "--body";
+         argv[6] = "";
+      }
+      else
+      {
+         argv[3] = "--fill";
+      }
+      needs_cred = 1;
+   }
    else
    {
       snprintf(err, errlen, "unsupported op");
