@@ -109,9 +109,11 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
     * already-stored vault token > the principal's own vaulted token > the
     * server's own identity (App token / AIMEE_FORGE_TOKEN); plus the principal's
     * vaulted SSH agent. The token crosses only via GIT_ASKPASS, never argv. */
-   /* TODO(#3A.2): migrate clone to the memfd fd-mode (out_token_fd) so the token
-    * is not in the clone child's environment; env mode (GH_TOKEN) for now. */
-   char **envp = git_cred_inject_build_env_for_repo(principal, url, NULL, token, environ, NULL);
+   /* FD mode (#3A.2): the HTTPS token rides an inherited memfd (token_fd), so the
+    * clone child's /proc/<pid>/environ never carries it (parity with run_git). */
+   int token_fd = -1;
+   char **envp =
+       git_cred_inject_build_env_for_repo(principal, url, NULL, token, environ, &token_fd);
    /* Clone over HTTPS, never SSH: our credential model is per-host HTTPS tokens
     * (+ OAuth), and a non-interactive server has no seeded known_hosts, so an
     * ssh://, git@host:path, or git:// URL would die on "Host key verification
@@ -121,7 +123,11 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
    const char *clone_url = clone_url_norm ? clone_url_norm : url;
    const char *argv[] = {"git", "clone", "--", clone_url, dest, NULL};
    char *out = NULL;
-   int rc = safe_exec_capture_env(argv, envp ? envp : environ, &out, 1 << 16);
+   int rc = safe_exec_capture_cwd_env_fd_timeout(argv, NULL, envp ? envp : environ, &out, 1 << 16,
+                                                 300000, token_fd,
+                                                 token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
+   if (token_fd >= 0)
+      close(token_fd);
    free(clone_url_norm);
    if (envp)
       git_cred_inject_free_env(envp);

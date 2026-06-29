@@ -134,8 +134,24 @@ int main(void)
    for (int i = 0; env[i]; i++)
       if (strncmp(env[i], "GH_TOKEN=", 9) == 0 && strcmp(env[i] + 9, CANARY) == 0)
          has = 1;
-   assert(has); /* the env carries it (in memory only) */
+   assert(has); /* legacy env mode (editor path): the env carries it (in memory only) */
    git_cred_inject_free_env(env);
+
+   /* FD mode (the API git ops + clone): the token must NOT be in the env at all —
+    * it rides an inherited memfd, so the canary appears in NO env string and the
+    * env advertises only the fd number. This is the binding "not in
+    * /proc/<pid>/environ" invariant at the assembly layer (the exec-time proof is
+    * in test_git_cred_inject's safe_exec fd test). */
+   int tfd = -1;
+   char **fenv = git_cred_inject_build_env_for_repo(alice, NULL, NULL, NULL, parent, &tfd);
+   assert(fenv != NULL && tfd >= 0);
+   for (int i = 0; fenv[i]; i++)
+   {
+      assert(strncmp(fenv[i], "GH_TOKEN=", 9) != 0); /* no GH_TOKEN in fd mode */
+      assert(strstr(fenv[i], CANARY) == NULL);       /* canary nowhere in the env */
+   }
+   assert(close(tfd) == 0); /* the memfd is a real, open fd we own + release */
+   git_cred_inject_free_env(fenv);
 
    /* Cross-principal denial: bob has no token and cannot read alice's. */
    char btok[64];
