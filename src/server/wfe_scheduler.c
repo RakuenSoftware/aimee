@@ -9,6 +9,7 @@
 
 #include "log.h"
 #include "wfe_autonomy.h"
+#include "wfe_blocks.h" /* wfe_worktree_cleanup — orphan-sweep of terminal worktrees */
 #include "wfe_store.h"
 
 #include <pthread.h>
@@ -37,7 +38,18 @@ void wfe_scheduler_run_once(void)
    for (int i = 0; i < n; i++)
    {
       if (strcmp(items[i].state, "active") != 0)
+      {
+         /* Orphan-sweep (F2): a terminal item may still hold a worktree that the
+          * autonomy terminal path didn't clean — e.g. a reject applied via the API
+          * gate, or an override-cap rejection. Tear it down + clear the column. */
+         if (items[i].worktree[0])
+         {
+            const char *rl = getenv("AIMEE_WORKFLOW_REPO");
+            if (wfe_worktree_cleanup(items[i].worktree, (rl && rl[0]) ? rl : ".") == 0)
+               db1_work_item_set_worktree(items[i].work_item_id, "");
+         }
          continue;
+      }
       if (strcmp(items[i].mode, "autonomous") != 0)
          continue; /* interactive items are human-driven in the webchat */
       char err[256] = "";
