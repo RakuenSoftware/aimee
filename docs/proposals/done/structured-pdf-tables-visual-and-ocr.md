@@ -1,14 +1,21 @@
 # Proposal: structured-PDF Phase 3–4 — tables → typed facts, visual evidence, OCR, and retrieval-quality (vector + answerability)
 
-- **State:** proposed — successor to the now-filed structured-PDF evidence
-  proposal ([[structured-pdf-ingestion-and-evidence-layer]], in `done/`), which
-  delivered Phases 1–2: text+geometry ingest, the access-controlled citation
-  retrieval surface (`search_chunks` / `open_page` / `open_neighbors` /
-  `inspect_structure`), §6 sensitivity + quarantine, and the four agent-callable
-  MCP tools (#702/#706/#712/#715/#717/#720). This proposal carries the remaining
-  scope the parent explicitly deferred as **deploy-tier**: table-structure
-  recognition, visual crops + blob store, OCR fallback, and the retrieval-quality
-  work (vector candidates + the §5-A answerability signal). Not yet implemented.
+- **State:** ✅ **DONE — Phases §A–§D shipped to `testing`** as four
+  independently-shippable, default-off PRs (§A #883, §B #885, §C #888, §D #890),
+  each roundtable-reviewed on the actual diff before merge. The remaining work is
+  the deploy-tier GA gates enumerated in the **Close-out** section at the end
+  (sidecar/binary deploys, the corpus-scale row-count measure, the engine-level
+  RLS/least-priv role, live retrieval-quality validation, the durable/WORM audit
+  store) — none of which can be exercised in a code-only environment. Successor to
+  the now-filed structured-PDF evidence proposal
+  ([[structured-pdf-ingestion-and-evidence-layer]], in `done/`), which delivered
+  Phases 1–2: text+geometry ingest, the access-controlled citation retrieval
+  surface (`search_chunks` / `open_page` / `open_neighbors` / `inspect_structure`),
+  §6 sensitivity + quarantine, and the four agent-callable MCP tools
+  (#702/#706/#712/#715/#717/#720). This proposal carried the remaining scope the
+  parent explicitly deferred as **deploy-tier**: table-structure recognition,
+  visual crops + blob store, OCR fallback, and the retrieval-quality work (vector
+  candidates + the §5-A answerability signal).
 - **Why a separate proposal.** Every remaining item depends on infrastructure the
   parent's first two phases did not: **local ONNX sidecars** (table-structure
   recognition, OCR) deployed the way the embedder/reranker already are, a **new
@@ -500,3 +507,52 @@ implementation, not proposal blockers. With the four engine-level/operability
 hardenings above folded, the design has **converged**: the security posture is
 both-layers (structural + engine-level), every degradation path has an explicit
 contract, and the residual is the parent's documented PII boundary.
+
+## Close-out — Phases A–D shipped (filed to done/)
+
+Implemented and merged to `testing` as four independently-shippable, **default-off** PRs, each
+roundtable-reviewed (aimee roundtable + code-review finders) on the actual diff before merge:
+
+- **§A retrieval quality** — PR #883. Isolated `kb_pdf_embeddings` relation the general
+  `/v1/search` never reads (`pgvec_kbpdf_*`), `embed_pdf` async job + drainer (withholds
+  quarantined docs), two-stage `search_chunks` (lexical + vector, `has_citation`/`matched_via`),
+  per-query `answerability` (distinct from the server confidence tier). Gate `kb_pdf_vector_enabled`.
+- **§B tables** — PR #885. Optional TSR sidecar (`kb_tsr_sidecar`), `kb_table_cells` (cells stored
+  ONLY here, NOT shared `typed_facts` — closes the pending-doc leak + cascade-orphan + UNIQUE
+  blockers), `lookup_table` + `pdf_lookup_table` MCP, `tsr_status` marker, restricted→confirm
+  visibility. Gate `kb_pdf_tsr_enabled`.
+- **§C visual** — PR #888. Content-addressed blob store (fsync-durable-before-row, path-safe,
+  sha256 never exposed), `kb_doc_assets` + `open_asset` (opaque row-id, authoritative-`kb_documents`
+  ACL + audit log), crop rendering via the hardened `pdftoppm` harness, orphan reconciliation
+  (refcount-by-scan + grace window + alarm). Gates `kb_pdf_assets_enabled` (+ blob dir/recon/alarm).
+- **§D OCR** — PR #890. Optional OCR sidecar (`kb_ocr_sidecar`) feeding the same ingest path for
+  scanned/no-text-layer PDFs, asset-only fallback with a surfaced `text_layer`/`asset_only` status
+  (never silently "searchable"). Gate `kb_pdf_ocr_enabled`.
+
+**Design decisions (design-roundtable fork rulings, folded in).** Fork-1 engine privilege
+boundary → STRUCTURAL isolation now + the RLS/least-priv-role as a named deploy/GA gate (an RLS
+policy with no second role on the single-owner libpq connection is security theatre). Fork-2 cell
+storage → the adjunct taken to its safe conclusion (cells live ONLY in `kb_table_cells`), which
+dissolves the leak/orphan/supersede blockers. Fork-3 → four internally-complete default-off PRs
+(no partial-exposure commit).
+
+**Deploy / GA gates carried (cannot be validated in a code-only environment).**
+1. **Sidecar + binary deploys**: TSR + OCR ONNX-class models, and `pdftoppm` (poppler) on the KB
+   image — each phase degrades to text-only / asset-only when absent (tested), but live
+   recognition/render quality is validated on the deploy target.
+2. **Corpus-scale row-count gate**: the per-line `kb_doc_regions` volume (and now `kb_table_cells`)
+   must be measured on the target corpus and a partition/archive decision taken **before
+   default-on** (carried from the parent; hard promotion criterion).
+3. **Engine-level privilege boundary**: provision the second least-privilege DB role and/or a
+   row-security policy on `kb_pdf_embeddings` + `kb_doc_assets` (both-layers posture; the in-code
+   structural isolation + adversarial tests are present, the engine grant/RLS is deploy-provisioned).
+4. **Live retrieval-quality + answerability validation** on a deployed KB with a real corpus
+   (needs the embedder + an LLM testbed).
+5. **Durable/WORM/hash-chained audit store + caller-identity threading** for `open_asset` (v1 emits
+   a structured append-only audit log line); and a **binary-streaming `open_asset`** for crops
+   larger than the inline base64 cap.
+6. **Postgres-only CI lane** for the adversarial vector-unreachability + RLS-enforcement tests (the
+   sqlite shim cannot exercise pgvector/RLS).
+
+PII posture is unchanged from the parent: access control + uploader-declared sensitivity is the v1
+control; automated PII detection remains documented future work.
