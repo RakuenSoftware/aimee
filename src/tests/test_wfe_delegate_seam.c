@@ -83,6 +83,19 @@ static const wfe_forge_t MOCK_FORGE = {f_ci, f_mergeable, f_is_merged, f_merge, 
 
 /* author.proposal -> pr.open (terminal). No git needed (author hashes its
  * artifact; pr.open uses the forge `open` seam). */
+/* ---- mock verify provider (WP-1b implement gate) ---- */
+static int g_verify_rc;      /* 0 = produced a verdict, -1 = could not run */
+static char g_verdict[2048]; /* the structured verdict the gate will see */
+static int mock_verify(const char *workdir, char *out, size_t n)
+{
+   (void)workdir;
+   if (g_verify_rc != 0)
+      return -1;
+   snprintf(out, n, "%s", g_verdict);
+   return 0;
+}
+static const wfe_verify_provider_t MOCK_VERIFY = {mock_verify};
+
 static const char *WF = "name: ds\nstart: au\nnodes:\n"
                         "  - id: au\n    block: author.proposal\n    next: pr\n"
                         "  - id: pr\n    block: pr.open\n    in:\n      src: au.out\n";
@@ -148,6 +161,40 @@ int main(void)
    assert(run_fresh("c") == 0);
    assert(g_deleg_calls == 1);
    assert(g_open_calls == 0); /* open is NULL -> not called, no crash */
+
+   /* D: implement verify gate (WP-1b) — a unit advances only on verdict:passed;
+    *    anything else fails closed; no provider => skip. */
+   {
+      wfe_set_verify_provider(NULL);
+      assert(wfe_implement_verify_ok(".") == 1); /* no gate -> skip (advance) */
+
+      wfe_set_verify_provider(&MOCK_VERIFY);
+      g_verify_rc = 0;
+      snprintf(g_verdict, sizeof g_verdict, "{\"schema_version\":1,\"verdict\":\"passed\"}");
+      assert(wfe_implement_verify_ok(".") == 1); /* passed -> advance */
+
+      snprintf(g_verdict, sizeof g_verdict, "{\"schema_version\":1,\"verdict\":\"failed\"}");
+      assert(wfe_implement_verify_ok(".") == 0); /* failed -> block */
+
+      snprintf(g_verdict, sizeof g_verdict, "{\"verdict\":\"unavailable\"}");
+      assert(wfe_implement_verify_ok(".") == 0); /* unavailable -> fail closed */
+
+      g_verify_rc = -1; /* gate could not run */
+      assert(wfe_implement_verify_ok(".") == 0);
+
+      /* spoof: a top-level failed verdict whose step log contains the literal
+       * "verdict":"passed" far past the leading region must NOT flip to pass. */
+      g_verify_rc = 0;
+      char spoof[2048];
+      int off = snprintf(spoof, sizeof spoof, "{\"verdict\":\"failed\",\"steps\":[{\"log\":\"");
+      for (int k = 0; k < 200 && off < (int)sizeof spoof - 40; k++)
+         off += snprintf(spoof + off, sizeof spoof - off, "x");
+      snprintf(spoof + off, sizeof spoof - off, "\\\"verdict\\\":\\\"passed\\\"\"}]}");
+      snprintf(g_verdict, sizeof g_verdict, "%s", spoof);
+      assert(wfe_implement_verify_ok(".") == 0);
+
+      wfe_set_verify_provider(NULL);
+   }
 
    printf("ok\n");
    return 0;

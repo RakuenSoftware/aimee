@@ -23,6 +23,8 @@
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "agent_types.h"
+#include "cJSON.h"
+#include "headers/git_verify.h"
 #include "log.h"
 #include "util.h"
 #include "wfe_approval.h"
@@ -183,15 +185,52 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
 
 static const wfe_delegate_provider_t WFE_LIVE_DELEGATE = {wfe_live_delegate_run};
 
+/* Live verify provider (WP-1b): run the mechanical verify gate synchronously on
+ * `workdir` and return the structured format=json verdict. The implement block
+ * gates a unit's advance on verdict:passed. Returns 0 + fills out_verdict, or -1
+ * if no verdict text came back (the block treats that as a non-pass, fail closed). */
+static int wfe_live_verify_run(const char *workdir, char *out_verdict, size_t n)
+{
+   if (out_verdict && n)
+      out_verdict[0] = '\0';
+   cJSON *args = cJSON_CreateObject();
+   if (!args)
+      return -1;
+   cJSON_AddStringToObject(args, "action", "run");
+   cJSON_AddBoolToObject(args, "async", 0); /* synchronous: we need the verdict now */
+   cJSON_AddStringToObject(args, "format", "json");
+   if (workdir && workdir[0])
+      cJSON_AddStringToObject(args, "path", workdir);
+   cJSON *resp = handle_git_verify(NULL, args, NULL);
+   cJSON_Delete(args);
+   int rc = -1;
+   if (resp)
+   {
+      const cJSON *item = cJSON_GetArrayItem(resp, 0);
+      const cJSON *text = item ? cJSON_GetObjectItemCaseSensitive(item, "text") : NULL;
+      if (cJSON_IsString(text) && text->valuestring)
+      {
+         snprintf(out_verdict, n, "%s", text->valuestring);
+         rc = 0;
+      }
+      cJSON_Delete(resp);
+   }
+   return rc;
+}
+
+static const wfe_verify_provider_t WFE_LIVE_VERIFY = {wfe_live_verify_run};
+
 void wfe_autonomy_register(void)
 {
    /* Full engine executor set so a work item can run end-to-end server-side. */
    wfe_register_default_executors();
    wfe_register_roundtable_gate();
    wfe_register_human_gate();
-   /* The live worker. The forge `open` provider stays the default fail-closed
-    * stub for now (pr.open re-loops until real git push + PR wiring lands), which
-    * is safe. */
+   /* The live worker + the mechanical verify gate (implement only advances a unit
+    * that passes verification). The forge `open` provider stays the default
+    * fail-closed stub for now (pr.open re-loops until the live forge wiring lands,
+    * which is registered default-OFF), which is safe. */
    wfe_set_delegate_provider(&WFE_LIVE_DELEGATE);
+   wfe_set_verify_provider(&WFE_LIVE_VERIFY);
    aimee_log(LOG_INFO, "wfe", "autonomous development registered (default-on)");
 }

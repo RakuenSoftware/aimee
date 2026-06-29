@@ -76,4 +76,29 @@ typedef struct
 /* Install a delegate provider (NULL restores the default fail-closed provider). */
 void wfe_set_delegate_provider(const wfe_delegate_provider_t *p);
 
+/* ---- Mechanical verify seam for the implement manager loop (WP-1b).
+ * implement only advances a unit that PASSES the mechanical gate. The wfe library
+ * must not call the server's git_verify directly (module-boundary-check), so it
+ * runs verification through this registered hook, which returns the structured
+ * (git_verify format=json) verdict. The server registers a live provider that
+ * calls handle_git_verify; tests inject a mock. Default NULL -> implement skips
+ * verification (the pre-WP-1b behavior), so the engine stays drivable without a
+ * provider. ---- */
+typedef struct
+{
+   /* Run the mechanical verify gate on `workdir`, writing the structured verdict
+    * JSON (the git_verify format=json document) into out_verdict. Returns 0 if a
+    * verdict was produced, -1 if the gate could not run at all (treated as a
+    * non-pass — fail closed). */
+   int (*verify)(const char *workdir, char *out_verdict, size_t n);
+} wfe_verify_provider_t;
+
+/* Install a verify provider (NULL = implement does not gate on verification). */
+void wfe_set_verify_provider(const wfe_verify_provider_t *p);
+
+/* The implement verify gate: 1 = advance (verdict passed, or no provider -> skip),
+ * 0 = block (anything that is not an explicit pass -> fail closed). Exposed for the
+ * unit test. */
+int wfe_implement_verify_ok(const char *workdir);
+
 #endif /* DEC_WFE_BLOCKS_H */
