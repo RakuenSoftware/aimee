@@ -394,9 +394,36 @@ max_ratio_pct,denylist}`. Operator guide: `docs/features/context-fold.md`.
 - **Recall body fetch** — recall is hint-only (points at `code_span_get`/
   `memory_get`); automatic inline page-in is deferred.
 
-### Default-on
+### Default-on — integration test + candidacy assessment (2026-06-29)
 
-Gated on the integration-test results (token reduction, provider cache-read share,
-and 0-lost-coordinate fidelity on a captured long session) per aimee's off-reasons
-discipline. Folding trades tokens for an agentic-recovery cost, so default-on is a
-deliberate operator decision, not an automatic flip.
+Run on a throwaway pve CT (debian-13, `testing` + all 8 slices, then destroyed), as
+a clean-environment integration test:
+
+- **Clean-env build:** `make -j server` (both `aimee-server` + `aimee-kb`) — rc=0.
+- **Clean-env fold gates:** all 7 fold unit suites pass (coord_closet, fold_budget,
+  context_fold, fold_register, fold_recall, task_rail, episode_seal).
+- **Measurement harness** (181-message synthetic delegate transcript, fold enabled,
+  `retained_msgs=8`):
+  - **Token reduction** (provider-bytes/4 estimate): **21.7%** with ~300 B tool
+    outputs; **84.5%** (≈57k tokens saved on one fold) with realistic multi-KB tool
+    outputs. The win scales with how bloated the folded bodies are — i.e. it is
+    largest exactly on the long, tool-heavy sessions the fold targets.
+  - **Coordinate fidelity:** **100% (84/84)** identifiers from the folded region
+    conserved — **0 lost coordinates**, the hard P1 gate, met end-to-end.
+  - **Fold-freeze:** the synthetic prefix is **byte-identical** across an appended
+    turn (`reused_boundary=1`) — the cache-warm mechanism works in practice.
+
+**Not measured here:** real **provider-side cache-read share** and **net** token
+cost including agentic-recovery re-fetches (a folded body the agent later needs must
+be paged back in). Both require a live LLM endpoint with prompt-cache telemetry —
+the same LLM-testbed gate the `ingress-compression` work deferred.
+
+**Verdict: strong candidate, but keep default-OFF for now.** Folding delivers large
+token savings with zero fidelity loss and a proven byte-identical (cache-warm)
+prefix, and the whole feature builds and passes in a clean environment — so it is a
+**genuine default-on candidate**. The remaining gate is a **live net-token + cache-
+read measurement** on an LLM testbed (net of recovery re-fetch cost); until that is
+green, default-on stays a deliberate operator opt-in, consistent with aimee's
+off-reasons discipline. The lowest-risk first flip is **`compact.coord_closet`**
+(pure conservation, no recovery cost), then the transcript fold + freeze together
+once the live net-token gate is met.
