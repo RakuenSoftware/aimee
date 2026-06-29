@@ -876,6 +876,159 @@ static void test_originated_nonvendored_still_suppresses(void)
    printf("ok\n");
 }
 
+/* Reverse-of-build suppression: a pure symbol-resolved edge A->B is dropped when B
+ * BUILD-DECLARES A (build dep B->A exists) — the build graph fixes direction, so the
+ * reverse symbol edge is a name-collision artifact. A forward edge that itself has
+ * build evidence (both/build_declared) is never suppressed. */
+static void test_reverse_of_build_suppressed(void)
+{
+   printf("test_reverse_of_build_suppressed... ");
+   /* rblib is a library; rbapp build-declares it (rbapp -> rblib). Seed a symbol
+    * edge in BOTH directions via a shared symbol + routes, then assert the reverse
+    * (rblib -> rbapp) is suppressed while the forward (rbapp -> rblib) survives. */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('rbapp','/rba','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('rblib','/rbl','t','trusted')");
+   /* the real (forward) dep: rbapp uses RbDoWork defined+exported by rblib (HIGH). */
+   for (int i = 0; i < 5; i++)
+   {
+      char sql[160];
+      snprintf(sql, sizeof(sql),
+               "INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/a%d.cpp','t' FROM "
+               "projects WHERE name='rbapp'",
+               i);
+      X(sql);
+   }
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'include/Rb.h','t' FROM projects "
+     "WHERE name='rblib'");
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/rb.c','t' FROM projects WHERE "
+     "name='rblib'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'RbDoWork','definition' FROM files WHERE "
+     "path='src/rb.c'");
+   X("INSERT INTO file_exports (file_id,name) SELECT id,'RbDoWork' FROM files WHERE "
+     "path='src/rb.c'");
+   X("INSERT INTO file_imports (file_id,name) SELECT id,'Rb.h' FROM files WHERE path='src/a0.cpp'");
+   X("INSERT INTO code_calls (file_id,callee) SELECT id,'RbDoWork' FROM files WHERE "
+     "path='src/a0.cpp'");
+   X("INSERT INTO cross_repo_route (caller_project,definer_project,kind,confidence,evidence) "
+     "VALUES ('rbapp','rblib','import_header','medium','Rb.h')");
+   /* the REVERSE collision: rblib calls RbRev, which is (only) defined in rbapp; a
+    * route rblib->rbapp exists. This is the reverse-symbol-edge collision shape. */
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'include/Rev.h','t' FROM projects "
+     "WHERE name='rbapp'");
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/rev.c','t' FROM projects WHERE "
+     "name='rbapp'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'RbRev','definition' FROM files WHERE "
+     "path='src/rev.c'");
+   X("INSERT INTO file_exports (file_id,name) SELECT id,'RbRev' FROM files WHERE path='src/rev.c'");
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/x0.cpp','t' FROM projects "
+     "WHERE "
+     "name='rblib'");
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/x1.cpp','t' FROM projects "
+     "WHERE "
+     "name='rblib'");
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/x2.cpp','t' FROM projects "
+     "WHERE "
+     "name='rblib'");
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/x3.cpp','t' FROM projects "
+     "WHERE "
+     "name='rblib'");
+   X("INSERT INTO file_imports (file_id,name) SELECT id,'Rev.h' FROM files WHERE "
+     "path='src/x0.cpp'");
+   X("INSERT INTO code_calls (file_id,callee) SELECT id,'RbRev' FROM files WHERE "
+     "path='src/x0.cpp'");
+   X("INSERT INTO cross_repo_route (caller_project,definer_project,kind,confidence,evidence) "
+     "VALUES ('rblib','rbapp','import_header','medium','Rev.h')");
+   /* the build dep that fixes direction: rbapp -> rblib. */
+   X("INSERT INTO cross_repo_build_dep (caller_project,definer_project,build_kind,parse_confidence,"
+     "evidence) VALUES ('rbapp','rblib','submodule','high','https://h/o/rblib.git')");
+   /* rbtop build-declares rbapp, so rbapp's reverse-set is NON-empty -> the
+    * suppression loop actually runs for project='rbapp' (otherwise the forward
+    * assertion would be vacuous). rbapp->rblib is "both" so it must still survive. */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('rbtop','/rbt','t','trusted')");
+   X("INSERT INTO cross_repo_build_dep (caller_project,definer_project,build_kind,parse_confidence,"
+     "evidence) VALUES ('rbtop','rbapp','submodule','high','https://h/o/rbapp.git')");
+   /* a LOW-parse reverse build claim must NOT drive suppression: rblow build-declares
+    * rblib at parse_confidence=low, AND rblib has a real symbol edge -> rblow. Because
+    * the reverse-set query filters parse_confidence<>'low', rblow is NOT in rev(rblib),
+    * so rblib->rblow must SURVIVE. */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('rblow','/rlo','t','trusted')");
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'include/Low.h','t' FROM projects "
+     "WHERE name='rblow'");
+   X("INSERT INTO files (project_id,path,scanned_at) SELECT id,'src/low.c','t' FROM projects WHERE "
+     "name='rblow'");
+   X("INSERT INTO terms (file_id,name,kind) SELECT id,'RbLowApi','definition' FROM files WHERE "
+     "path='src/low.c'");
+   X("INSERT INTO file_exports (file_id,name) SELECT id,'RbLowApi' FROM files WHERE "
+     "path='src/low.c'");
+   X("INSERT INTO file_imports (file_id,name) SELECT id,'Low.h' FROM files WHERE "
+     "path='src/x1.cpp'");
+   X("INSERT INTO code_calls (file_id,callee) SELECT id,'RbLowApi' FROM files WHERE "
+     "path='src/x1.cpp'");
+   X("INSERT INTO cross_repo_route (caller_project,definer_project,kind,confidence,evidence) "
+     "VALUES ('rblib','rblow','import_header','medium','Low.h')");
+   X("INSERT INTO cross_repo_build_dep (caller_project,definer_project,build_kind,parse_confidence,"
+     "evidence) VALUES ('rblow','rblib','fetchcontent','low','${VAR}/rblib.git')");
+
+   xrepo_deps_opts_t opts = {.direction = XREPO_DIR_OUT, .min_tier = XREPO_TIER_MEDIUM};
+   xrepo_dep_edge_t *edges = NULL;
+   size_t n = 0;
+   int trunc = 0;
+   /* forward (rbapp -> rblib): symbol + build -> survives as "both" EVEN THOUGH
+    * rbapp's reverse-set is non-empty (rbtop). */
+   assert(canonical_index_cross_repo_deps("rbapp", &opts, &edges, &n, &trunc) == 0);
+   int fwd = 0;
+   for (size_t i = 0; i < n; i++)
+      if (strcmp(edges[i].definer_repo, "rblib") == 0)
+      {
+         fwd = 1;
+         assert(strcmp(edges[i].evidence_type, "both") == 0);
+      }
+   assert(fwd); /* the real forward dep is kept (a "both" edge is never suppressed) */
+   free(edges);
+   /* reverse (rblib -> rbapp): pure symbol edge, but rbapp build-declares rblib ->
+    * suppressed. */
+   edges = NULL;
+   assert(canonical_index_cross_repo_deps("rblib", &opts, &edges, &n, &trunc) == 0);
+   int rev = 0, lowsurv = 0;
+   for (size_t i = 0; i < n; i++)
+   {
+      if (strcmp(edges[i].definer_repo, "rbapp") == 0)
+         rev = 1;
+      if (strcmp(edges[i].definer_repo, "rblow") == 0)
+         lowsurv = 1;
+   }
+   assert(!rev);    /* reverse-of-build symbol edge dropped (rbapp build-declares rblib, high) */
+   assert(lowsurv); /* rblow's LOW-parse build claim does NOT suppress rblib->rblow */
+   free(edges);
+
+   /* mutual build cycle: rbm1 and rbm2 each build-declare the other. BOTH edges are
+    * build_declared (not symbol_resolved), so neither is suppressed — a genuine cyclic
+    * build dependency is preserved. */
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('rbm1','/m1','t','trusted')");
+   X("INSERT INTO projects (name, root, scanned_at, trust) VALUES ('rbm2','/m2','t','trusted')");
+   X("INSERT INTO cross_repo_build_dep (caller_project,definer_project,build_kind,parse_confidence,"
+     "evidence) VALUES ('rbm1','rbm2','submodule','high','https://h/o/rbm2.git')");
+   X("INSERT INTO cross_repo_build_dep (caller_project,definer_project,build_kind,parse_confidence,"
+     "evidence) VALUES ('rbm2','rbm1','submodule','high','https://h/o/rbm1.git')");
+   edges = NULL;
+   assert(canonical_index_cross_repo_deps("rbm1", &opts, &edges, &n, &trunc) == 0);
+   int m12 = 0;
+   for (size_t i = 0; i < n; i++)
+      if (strcmp(edges[i].definer_repo, "rbm2") == 0)
+         m12 = 1;
+   assert(m12); /* rbm1->rbm2 build edge survives despite rbm2 build-declaring rbm1 */
+   free(edges);
+   edges = NULL;
+   assert(canonical_index_cross_repo_deps("rbm2", &opts, &edges, &n, &trunc) == 0);
+   int m21 = 0;
+   for (size_t i = 0; i < n; i++)
+      if (strcmp(edges[i].definer_repo, "rbm1") == 0)
+         m21 = 1;
+   assert(m21); /* rbm2->rbm1 build edge survives too */
+   free(edges);
+   printf("ok\n");
+}
+
 int main(void)
 {
    test_parse_module_id();
@@ -891,6 +1044,7 @@ int main(void)
    test_build_declared_merge();
    test_originated_ignores_vendored();
    test_originated_nonvendored_still_suppresses();
+   test_reverse_of_build_suppressed();
    printf("cross_repo_deps_orch: all tests passed\n");
    return 0;
 }

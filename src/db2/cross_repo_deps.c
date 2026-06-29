@@ -909,6 +909,67 @@ int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t
       if (!acc.e[i].evidence_type[0])
          snprintf(acc.e[i].evidence_type, sizeof(acc.e[i].evidence_type), "symbol_resolved");
 
+   /* Reverse-of-build suppression (precision): drop a PURE symbol-resolved edge
+    * project->D when D BUILD-DECLARES project (a build dep D->project exists). The
+    * build graph is authoritative for dependency DIRECTION — a symbol edge in the
+    * reverse direction is a name-collision artifact (e.g. inputtino->wolf via a
+    * `create_touch_screen` collision when wolf->inputtino is the real FetchContent
+    * dep). Edges carrying their OWN forward build evidence (evidence_type "both" or
+    * "build_declared") are never suppressed, so a genuine mutual/cyclic build
+    * dependency is preserved. */
+   {
+      char rerr[CRD_ERR] = "";
+      /* parse_confidence <> 'low': only a CONFIDENT build declaration is authoritative
+       * for direction — a low-parse (guessed ${VAR}/conditional) build claim must not
+       * suppress a real symbol edge. */
+      aimee_pg_stmt_t *rb =
+          aimee_pg_prepare(conn,
+                           "SELECT DISTINCT caller_project FROM cross_repo_build_dep "
+                           "WHERE definer_project = ?1 AND parse_confidence <> 'low'",
+                           rerr, sizeof(rerr));
+      if (!rb)
+         LOG_WARN(CRD_LOG_TAG, "reverse-of-build suppression prepare failed: %s", rerr);
+      if (rb)
+      {
+         aimee_pg_bind_text(rb, "?1", project);
+         char rev[CRD_MAX_DEFS][128];
+         int nrev = 0;
+         while (aimee_pg_step(rb, rerr, sizeof(rerr)) == AIMEE_PG_ROW)
+         {
+            const char *c = aimee_pg_column_text(rb, 0);
+            if (!c || !c[0])
+               continue;
+            if (nrev >= CRD_MAX_DEFS)
+            {
+               LOG_WARN(CRD_LOG_TAG,
+                        "reverse-of-build set for '%s' exceeds %d; suppression partial", project,
+                        CRD_MAX_DEFS);
+               break;
+            }
+            snprintf(rev[nrev++], sizeof(rev[0]), "%s", c);
+         }
+         aimee_pg_finalize(rb);
+         if (nrev > 0)
+         {
+            size_t w = 0;
+            for (size_t i = 0; i < acc.n; i++)
+            {
+               int drop = 0;
+               if (strcmp(acc.e[i].evidence_type, "symbol_resolved") == 0)
+                  for (int j = 0; j < nrev; j++)
+                     if (strcmp(acc.e[i].definer_repo, rev[j]) == 0)
+                     {
+                        drop = 1;
+                        break;
+                     }
+               if (!drop)
+                  acc.e[w++] = acc.e[i];
+            }
+            acc.n = w;
+         }
+      }
+   }
+
    *out_edges = acc.e;
    *out_n = acc.n;
    return 0;
