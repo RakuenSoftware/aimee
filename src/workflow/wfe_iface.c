@@ -35,6 +35,27 @@ int wfe_autonomous_target_ok(void)
    return !wfe_base_is_protected(wfe_autonomous_base());
 }
 
+/* Server-side authoritative cost estimate (WP-5): a delegate turn's USD cost as
+ * wall-clock seconds * a configured rate. Provider-agnostic (never trusts a
+ * provider-reported figure) so the per-run USD budget cap actually bites. Rate is
+ * AIMEE_AUTONOMY_USD_PER_SEC (default 0.0005 ~= $1.80/hr of delegate wall-clock); a
+ * malformed/negative override falls back to the default. Negative elapsed -> 0. */
+double wfe_autonomy_cost_estimate(double elapsed_secs)
+{
+   double rate = 0.0005;
+   const char *v = getenv("AIMEE_AUTONOMY_USD_PER_SEC");
+   if (v && v[0])
+   {
+      char *end = NULL;
+      double r = strtod(v, &end);
+      if (end && *end == '\0' && r >= 0)
+         rate = r;
+   }
+   if (elapsed_secs < 0)
+      elapsed_secs = 0;
+   return elapsed_secs * rate;
+}
+
 static wfe_block_exec_fn g_execs[WFE_BLK__COUNT];
 
 void wfe_register_block_executor(wfe_block_type_t type, wfe_block_exec_fn fn)

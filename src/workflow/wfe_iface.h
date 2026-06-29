@@ -110,4 +110,10 @@ const char *wfe_autonomous_base(void);
 int wfe_base_is_protected(const char *branch); /* 1 if main/master/release* (refused) */
 int wfe_autonomous_target_ok(void);            /* 1 if the configured base is mergeable */
 
+/* Authoritative server-side USD cost for a delegate turn of `elapsed_secs`
+ * wall-clock (rate AIMEE_AUTONOMY_USD_PER_SEC, default 0.0005). Provider-agnostic,
+ * so the per-run budget cap is enforced on a figure the provider can't understate.
+ * Negative elapsed -> 0. */
+double wfe_autonomy_cost_estimate(double elapsed_secs);
+
 #endif /* DEC_WFE_IFACE_H */

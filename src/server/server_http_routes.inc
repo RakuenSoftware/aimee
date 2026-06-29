@@ -227,6 +227,24 @@ static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
       return 500;
    }
    cJSON_Delete(body);
+   /* WP-5: a per-run USD budget ceiling so a runaway autonomous run parks
+    * (budget_exceeded) instead of burning unbounded delegate cost. Default $5.00;
+    * AIMEE_AUTONOMY_MAX_USD overrides (set it to 0 to disable the cap). The engine
+    * checks cum_cost_usd against this each advance; cost is the server-side
+    * wall-clock estimate threaded from the delegate dispatch. */
+   {
+      double cap_usd = 5.0;
+      const char *v = getenv("AIMEE_AUTONOMY_MAX_USD");
+      if (v && v[0])
+      {
+         char *e = NULL;
+         double d = strtod(v, &e);
+         if (e && *e == '\0' && d >= 0)
+            cap_usd = d;
+      }
+      if (cap_usd > 0)
+         db1_work_item_set_cost_cap(id, cap_usd);
+   }
    wfe_scheduler_notify(); /* drive it now; the run continues server-side */
    cJSON *ok = cJSON_CreateObject();
    cJSON_AddStringToObject(ok, "work_item_id", id);

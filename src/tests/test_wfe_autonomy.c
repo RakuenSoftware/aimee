@@ -204,6 +204,23 @@ int main(void)
       assert(strcmp(wi.pause_reason, "budget_exceeded") == 0);
    }
 
+   /* A8: server-side cost estimate (WP-5) — wall-clock seconds * rate; negative
+    * elapsed clamps to 0; the rate is env-overridable. */
+   {
+      unsetenv("AIMEE_AUTONOMY_USD_PER_SEC");
+      assert(wfe_autonomy_cost_estimate(0.0) == 0.0);
+      assert(wfe_autonomy_cost_estimate(-5.0) == 0.0); /* clamp */
+      double c = wfe_autonomy_cost_estimate(10.0);     /* 10s * 0.0005 = 0.005 */
+      assert(c > 0.0049 && c < 0.0051);
+      setenv("AIMEE_AUTONOMY_USD_PER_SEC", "0.01", 1);
+      c = wfe_autonomy_cost_estimate(10.0); /* 10s * 0.01 = 0.1 */
+      assert(c > 0.099 && c < 0.101);
+      setenv("AIMEE_AUTONOMY_USD_PER_SEC", "junk", 1); /* malformed -> default */
+      c = wfe_autonomy_cost_estimate(10.0);
+      assert(c > 0.0049 && c < 0.0051);
+      unsetenv("AIMEE_AUTONOMY_USD_PER_SEC");
+   }
+
    printf("ok\n");
    return 0;
 }

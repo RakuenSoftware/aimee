@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "cJSON.h"
 #include "util.h"
@@ -198,20 +199,31 @@ static const char *node_delegate(const wfe_node_t *node)
 }
 
 /* Dispatch one block's delegate work, if a provider is installed. `delegate` is
- * the step's assigned agent (or "$random", or "" to route by role). Returns:
+ * the step's assigned agent (or "$random", or "" to route by role). out_cost (may
+ * be NULL) receives the server-side wall-clock USD estimate for the turn (WP-5
+ * budget). Returns:
  *   1  provider ran and succeeded,
  *   0  no provider installed (caller falls back to its fail-closed path),
  *  -1  provider ran and failed (caller should loop/retry). */
 static int wfe_delegate_dispatch(const char *role, const char *delegate, const char *prompt,
-                                 const char *artifact_path, char out_commit_sha[64])
+                                 const char *artifact_path, char out_commit_sha[64],
+                                 double *out_cost)
 {
    if (out_commit_sha)
       out_commit_sha[0] = '\0';
+   if (out_cost)
+      *out_cost = 0.0;
    if (!g_delegate || !g_delegate->run)
       return 0;
    char err[256] = "";
+   struct timespec t0, t1;
+   clock_gettime(CLOCK_MONOTONIC, &t0);
    int rc = g_delegate->run(repo_dir(), role, delegate ? delegate : "", prompt, artifact_path,
                             out_commit_sha, err, sizeof err);
+   clock_gettime(CLOCK_MONOTONIC, &t1);
+   if (out_cost)
+      *out_cost = wfe_autonomy_cost_estimate((double)(t1.tv_sec - t0.tv_sec) +
+                                             (double)(t1.tv_nsec - t0.tv_nsec) / 1e9);
    return rc == 0 ? 1 : -1;
 }
 
@@ -226,10 +238,11 @@ static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
     * a failed run loops). Then hash the artifact file as the produced content; if
     * it is absent (no provider ran) the gate that follows simply re-loops. */
    char commit[64] = "";
+   double cost = 0.0;
    if (wfe_delegate_dispatch("architect", node_delegate(node),
                              "Author or revise the workflow artifact at the given path "
                              "per the work item, then commit it.",
-                             path, commit) < 0)
+                             path, commit, &cost) < 0)
       return wfe_step_looped();
    char hash[65] = "";
    if (path && path[0])
@@ -255,7 +268,7 @@ static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
    }
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
-   return wfe_step_advanced(handle, hash, 0.0);
+   return wfe_step_advanced(handle, hash, cost);
 }
 
 /* implement: the manager loop. The live delegate provider owns decompose -> fan
@@ -268,12 +281,13 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
 {
    (void)ctx;
    char commit[64] = "";
+   double cost = 0.0;
    if (wfe_delegate_dispatch(
            "engineer", node_delegate(node),
            "Implement the approved plan on the work-item branch: split into units, delegate each, "
            "VERIFY each with `aimee git verify` and fix any failures, then commit the accepted "
            "work.",
-           NULL, commit) < 0)
+           NULL, commit, &cost) < 0)
       return wfe_step_looped();
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
    if (wfe_git_freeze(repo_dir(), "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
@@ -286,7 +300,7 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
       return wfe_step_looped();
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
-   return wfe_step_advanced(handle, head, 0.0);
+   return wfe_step_advanced(handle, head, cost);
 }
 
 /* document: produces the (documented) branch. In production a delegate writes
@@ -298,17 +312,18 @@ static wfe_step_result_t exec_document(wfe_ctx *ctx, const wfe_node_t *node)
 {
    (void)ctx;
    char commit[64] = "";
+   double cost = 0.0;
    if (wfe_delegate_dispatch("engineer", node_delegate(node),
                              "Document the change on the work-item branch (README/CHANGELOG/docs "
                              "+ inline comments), then commit.",
-                             NULL, commit) < 0)
+                             NULL, commit, &cost) < 0)
       return wfe_step_looped();
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
    if (wfe_git_freeze(repo_dir(), "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
       return wfe_step_failed();
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
-   return wfe_step_advanced(handle, head, 0.0);
+   return wfe_step_advanced(handle, head, cost);
 }
 
 /* freeze: capture the cumulative diff at a stable freeze commit. */
