@@ -16,24 +16,29 @@ human-gate notify hooks); WP-5 partials (human-gate park, override cap, audit,
 per-item USD cap).
 
 **Shipped this closeout:**
-- **WP-5 safety rails (PR #856).** A fail-closed autonomous **merge-target guard**
-  (`wfe_autonomous_base()`, default `testing`; refuses main/master/release* — case-
-  insensitive, anchored) wired into `exec_pr_open`/`exec_merge`, plus per-run **turn
-  + wall-clock caps** that park `budget_exceeded`. The rails land FIRST so nothing
-  downstream can run away or merge to a protected branch.
+- **F1a — WP-5 safety rails (PR #856).** A fail-closed autonomous **merge-target
+  guard** (`wfe_autonomous_base()`, default `testing`; refuses main/master/release*
+  — case-insensitive, anchored) wired into `exec_pr_open`/`exec_merge`, plus per-run
+  **turn + wall-clock caps** that park `budget_exceeded`. The rails land FIRST so
+  nothing downstream can run away or merge to a protected branch.
+- **F3a — WP-1b mechanical verify gate (PR #860).** `exec_implement` now only
+  advances a unit that PASSES the §1 `git_verify format=json` gate (shipped in
+  autonomous-dev-execution-substrate). New `wfe_verify_provider_t` seam + live
+  provider; the top-level verdict is parsed with cJSON and a missing provider /
+  non-pass / unparseable verdict FAILS CLOSED; failures loop (engine bounds via
+  `stage_attempt` → parks `max_attempts`). The roundtable's "essential" manager-loop
+  backbone; the N-skeptic adversarial fan-out + patch-coordinator are Phase-C depth.
+- **F1b — functional USD budget cap (PR #862).** A server-side wall-clock cost
+  estimate (`wfe_autonomy_cost_estimate`, AIMEE_AUTONOMY_USD_PER_SEC) is threaded
+  into every step's `cost_usd` (charged on loop/fail/advance alike), and intake sets
+  a default per-run cap, so the engine's per-run USD cap now actually trips
+  `budget_exceeded` (it was dead — steps reported 0.0). Completes the WP-5 budget
+  story (turns + wall-clock + USD).
 
 **Remaining safety floor (the path to done/, roundtable-ratified, NOT yet built):**
-- **F1b** authoritative cost threading (delegate provider → `r.cost_usd` + a
-  server-side estimator) so the per-run USD cap is live, not dead code.
 - **F2** per-work-item `git worktree` isolation (`aimee/wi/<id>`, `worktree lock`)
   + terminal-state cleanup/orphan-sweep. (A worktree is a path convenience, not a
   process/network sandbox — see GA gates.)
-- **F3a** the WP-1b manager loop: wire the §1 `git_verify format=json` verdict
-  (shipped in autonomous-dev-execution-substrate) as a BLOCKING gate inside
-  `exec_implement`, with bounded retry/park (`WFE_PAUSE_VERIFY_FAILED`) and a
-  verifier-findings handoff to the next attempt. (The roundtable confirmed the
-  manager loop is essential — single-dispatch `implement` cannot honestly reach
-  done; the N-skeptic adversarial fan-out + patch-coordinator are Phase-C depth.)
 - **F5a** cluster-wide per-work-item single-flight (CAS+TTL on the work item) +
   per-target merge serialization — a prerequisite for F4.
 - **F4** the live forge `wfe_forge_t` (git push via vaulted creds + PR/CI/merge via
