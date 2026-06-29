@@ -1,10 +1,16 @@
 # Implementation plan — Webchat git projects + in-browser VSCode
 
-- **Source:** `docs/proposals/pending/webchat-git-projects-and-vscode.md` (USER-APPROVED).
-- **State:** draft plan; awaiting plan-roundtable, then implementation.
+- **Source:** `docs/proposals/done/webchat-git-projects-and-vscode.md` (USER-APPROVED).
+- **State:** IMPLEMENTED + CLOSED OUT (2026-06-29). WP-0..WP-K shipped across
+  merged PRs (WP-A #451, WP-F #461, WP-J #467, credential panels #486–#489,
+  nav #496, session-worktree #611) plus the close-out hardening PRs #877
+  (cross-origin WS gate + revoke recycle) and #878 (idle-reaping). See the
+  proposal's **Status at close-out** section for the acceptance-criteria audit
+  and the deferred follow-ups.
 - **Shippable milestone:** Phase 1 (Git) — WP-0..WP-G. Phase 2 (VSCode) —
   WP-H..WP-K — rides on the Phase-1 workspace/credential model.
-- **Default-off** behind a config flag until validated.
+- **Default-off** behind a config flag until validated. *(Shipped as default-ON
+  per an operator decision; see the proposal's close-out DEVIATION note.)*
 
 Each WP is a bounded, delegate-sized unit. WP-0 is a hard gate (verify the
 assumptions the rest of the plan rests on). The auto-planner produced no

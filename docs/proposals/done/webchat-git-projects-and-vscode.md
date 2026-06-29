@@ -1,6 +1,10 @@
 # Webchat git projects + in-browser VSCode
 
-- **State:** proposed; awaiting roundtable + user proposal-gate.
+- **State:** IMPLEMENTED + CLOSED OUT (2026-06-29). Both phases shipped across a
+  series of merged PRs; this proposal is filed to `done/`. See **Status at
+  close-out** at the foot of this file for the shipped surface, the
+  acceptance-criteria audit, and the follow-ups carried as future work
+  (done ≠ GA).
 - **Scope:** deterministic / webchat (Go) + server workspace plane + a new
   per-user code-server sidecar. Not an intelligence-surface proposal (no
   Architecture Charter role).
@@ -210,7 +214,11 @@ webchat session** (`requireAuth`) so code-server is never directly reachable and
 inherits webchat's PAM identity. The proxy resolves `{session cookie →
 principal → that principal's port}` **per request** (never a client-supplied
 port/path), and the **WebSocket upgrade traverses the same `requireAuth` gate**
-(no unauthenticated upgrade path). Webchat session cookies are **stripped**
+(no unauthenticated upgrade path). Because the editor terminal is a powerful
+sink reachable over a same-cookie WebSocket, the upgrade path **also enforces a
+same-origin `Origin` allow-list** (webchat's own host): a cross-origin or
+missing-`Origin` upgrade is rejected, closing the cross-origin WS-CSRF surface
+that `requireAuth` alone (cookie-based) does not. Webchat session cookies are **stripped**
 before forwarding upstream so code-server never receives webchat session
 material. code-server's own auth is disabled (webchat is the sole gate); it binds
 loopback only.
@@ -251,14 +259,31 @@ visible to `code_search`/ingest and vice versa.
   every git/workspace/proxy route rejects cross-principal roots/ports. A bug
   here is a cross-tenant file/edit leak. (Mirror `reject_foreign_cwd`; add
   tests.)
-- **Credential durability vs. exposure.** Persisting credentials (vs. the
-  current in-memory-only forge broker) widens their lifetime. Mitigation is the
-  **vault-only invariant**: encryption-at-rest, per-principal keys, transient
-  exec-time materialization (SSH key → `0600` temp, wiped after the git exec),
-  never-return-to-browser, never-logged, and short-TTL refresh where the
-  provider supports it. This upholds the standing "all creds → server vault"
-  directive; a build-integrity-style check should assert no credential leaks to
-  disk outside the vault.
+- **Credential durability vs. exposure.** Moving credentials into a *persistent*
+  vault (vs. the pre-existing in-memory-only `forge_credentials` broker this
+  design builds on) widens their lifetime, so the mitigation is the **vault-only
+  invariant**: encryption-at-rest, per-principal keys, never-return-to-browser,
+  never-logged, and exec-time materialization that — *as the target* — never
+  reaches the filesystem or a child's environment.
+  **Status by credential type at close-out:**
+  - *SSH keys — invariant MET.* Loaded into the per-user in-memory ssh-agent over
+    a non-filesystem channel (`memfd`/agent-protocol, decrypt buffer zeroed after
+    load, `RLIMIT_CORE=0`), never written as a named path (G1b).
+  - *HTTPS tokens — PARTIAL.* Reach git via the `GIT_ASKPASS` shim **and** as
+    `GH_TOKEN` in the git child's environment, so the token is visible in that
+    short-lived child's `/proc/<pid>/{cmdline,environ}` (cmdline is argv-only and
+    clean; environ is not). Moving HTTPS auth to the broker-fed askpass channel
+    the G1b design describes — so `GH_TOKEN` never enters a child env — is
+    **deferred item 3**.
+
+  The **binding acceptance check** (a build-integrity / leak test) is the *target*
+  gate: no credential material outside the sealed vault — not a file (incl.
+  `/tmp`, `~/.ssh`, `--user-data-dir`), not a log, not `/proc/<pid>/{environ,fd,
+  maps}` — surviving a mid-exec `SIGKILL` with no orphaned key file. The shipped
+  `test_webchat_git_leak.c` covers the no-file-under-`$AIMEE_HOME` + vault
+  round-trip + cross-principal slice; extending it to the full `/proc` + push +
+  SIGKILL assertions (and closing the HTTPS-environ gap it would then catch) is
+  **deferred item 6**.
 - **Resource cost.** N concurrent users = N code-server processes. Mitigate with
   idle timeout + a configurable max-concurrent cap (log when capped, per the
   no-silent-truncation rule).
@@ -322,4 +347,95 @@ gets its own roundtable), not the proposal:
 1. **Phase 1 (Git):** §0 per-user workspaces + G1–G4. Independently shippable
    and useful without the editor.
 2. **Phase 2 (VSCode):** V1–V5 on top of the Phase-1 workspace model.
+
+## Status at close-out (2026-06-29)
+
+**IMPLEMENTED + CLOSED OUT.** Both phases shipped across a series of merged PRs;
+the design above is what was built. This section records the shipped surface, the
+acceptance-criteria audit, and the follow-ups carried as future work
+(**done ≠ GA**). A final roundtable review of the *shipped code* (not just the
+design) drove the last two hardening PRs (#877, #878) before close-out.
+
+### Shipped
+
+- **§0 per-user workspaces** — WP-A (#451): `workspace_scope.{c,h}` resolves
+  `(principal, project) → root` from the *attested* `webuser:` principal (never a
+  client-supplied path), with `realpath` + `O_NOFOLLOW`/`openat` containment.
+  Every `/v1` workspace/git route resolves through it; cross-principal denial is
+  tested (`test_workspace_scope`, `test_webchat_git_leak`).
+- **G1 credential intake + vault** — per-host token store + GitHub OAuth
+  device-flow sign-in (#486–#489), keyed by the `webuser:` principal, write-only
+  (host list returns names, never secrets; tokens never returned to the browser).
+- **G1b injection** — `GIT_ASKPASS` shim + a per-user in-memory `ssh-agent`
+  (`memfd_create`, `RLIMIT_CORE=0`, `PR_SET_DUMPABLE=0`, key buffer zeroed after
+  `ssh-add`); git's on-disk `credential.helper` disabled; per-principal runtime
+  dir is **tmpfs-mandatory, fail-closed** (`webuser_runtime.c`).
+- **G2/G3 clone + git ops** — `/v1/workspace/clone` (clone → `register_and_index`)
+  and `/v1/workspace/git` (status/log/diff/branch/fetch/pull/commit/push/checkout),
+  argv-only (no shell), with per-session worktree isolation (#611).
+- **G4 UI** — Projects panel (`Projects.tsx`); **G5 revoke** — vault delete +
+  editor/ssh-agent recycle so no live handle survives revocation (#877).
+- **V code-server** — per-webuser supervisor WP-I (`webuser_editor.c`) + reverse
+  proxy WP-J (#467); `/vscode` tab; loopback-only bind; `requireAuth` **plus** a
+  same-origin gate on the WS upgrade (#877); idle-reaping wired (#878);
+  `WITH_VSCODE` image flag. The editor process env is curated of the server's own
+  secrets (`AIMEE_DB2_URL`, `AIMEE_SERVER_TOKEN`, provider keys) and hardened
+  with `no_new_privs`/`DUMPABLE=0` — but `GIT_ASKPASS`/`SSH_AUTH_SOCK` are still
+  inherited by the untrusted extension host (deferred item 4), and the process
+  runs as the server UID with the server `PATH` (deferred item 5).
+
+### Acceptance-criteria audit
+
+- **MET:** cross-principal isolation at the `/v1` route level (WP-A `realpath` +
+  `openat`/`O_NOFOLLOW` containment, + denial test), tmpfs fail-closed, the
+  loopback-only editor being reachable only through the authed proxy *at the
+  route boundary*, shared-FS agent⇄editor coherence, clone ≥2 repos as projects,
+  read/write git ops from the UI, and the SSH-key leak invariant *for the
+  implemented + tested agent-load path* (agent-only, never on disk).
+- **PARTIAL:** the **HTTPS token** is injected as `GH_TOKEN` in the git child's
+  environment, so it is present in that short-lived child's `/proc/<pid>/environ`
+  (deferred item 3). **Browser-facing SSH-key intake** is unreachable (only PAT/
+  token + OAuth have intake), so the agent path above can't yet be driven from
+  the UI (deferred item 1). The **editor process** runs as the server UID with
+  the server `PATH` and an extension host that inherits the git-cred env, so the
+  loopback/proxy boundary above is the *route-level* guarantee, not yet an
+  OS-jail one (deferred items 4, 5). **Open-PR** from the UI is not wired
+  (deferred item 2).
+- **DEVIATION (deliberate):** *default-off behind a flag* — the feature ships
+  **default-ON**, an operator decision (branch `feat/webchat-git-editor-default-on`).
+  The two surfaces are asymmetric and an operator should know it:
+  - the **editor** is toggleable (`AIMEE_WEBCHAT_EDITOR=0` disables it);
+  - the **git surface** (`/v1/git/*`, `/v1/workspace/{clone,git}`) ships
+    **always-on with no operator opt-out**.
+  Because two of the default-ON decision's risk-mitigating prerequisites —
+  extension-host credential containment (item 4) and editor OS-jail hardening
+  (item 5) — are themselves deferred, the default-ON posture carries a residual
+  risk window; re-evaluating it is **deferred item 7**.
+
+### Deferred follow-ups (future work; not blocking close-out)
+
+1. **SSH private-key web intake.** The ssh-agent load path is fully built +
+   tested but unreachable from the browser (only PAT/token + OAuth have intake).
+   Add `POST/DELETE /v1/git/credential {type:"ssh_key"}` writing the SSH-key cred
+   under the `webuser:` principal + a UI key field — completes G1's SSH option.
+2. **Open-PR op.** `/v1/workspace/git` has no `pr` op end-to-end; provider-specific
+   (`gh`/`glab`), needs a real forge to validate.
+3. **HTTPS token out of `/proc/<pid>/environ`.** Move the askpass to a
+   socket-fed channel (the design's "fetches the live token from the in-memory
+   broker over a per-process authenticated channel") so `GH_TOKEN` never enters a
+   child env.
+4. **Extension-host credential containment (WP-K).** `GIT_ASKPASS`/`SSH_AUTH_SOCK`
+   are inherited by code-server's extension host; sanitize them out of the
+   extension-host env (keep them only for the integrated terminal + SCM).
+5. **Editor OS-jail hardening.** `PATH` sanitization (drop `sudo`/`docker`/
+   `nsenter`), a `bwrap`/`unshare` namespace jail, `seccomp`, cgroup CPU/mem
+   limits, and per-user UID drop by default (today the editor runs as the server
+   UID with the server `PATH`; `no_new_privs` + `DUMPABLE=0` + a secret-free
+   curated env are already applied).
+6. **Leak-test depth.** Extend `test_webchat_git_leak.c` to a real `git push` and
+   assert clean `/proc/<pid>/{environ,fd}`, `~/.ssh`, `--user-data-dir`, and
+   `SIGKILL` survival (the binding acceptance check above).
+7. **Re-evaluate the default-ON posture** once the extension-host containment (4)
+   and editor OS-jail hardening (5) land, and add an operator opt-out for the
+   git surface (it ships always-on today) — see the DEVIATION note.
 </content>
