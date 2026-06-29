@@ -5,6 +5,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "aimee.h"
 #include "db2.h"
@@ -257,7 +259,7 @@ static void test_search_chunks_shim(void)
 
    db2_kb_pdf_chunk_t chunks[16];
    /* "world" appears on page 1 of both docs, but the restricted one is withheld. */
-   int n = db2_kb_pdf_search_chunks("proj", "world", 16, chunks);
+   int n = db2_kb_pdf_search_chunks("proj", "world", 16, chunks, NULL);
    assert(n == 1);
    assert(strcmp(chunks[0].document_key, "report.pdf") == 0);
    assert(strcmp(chunks[0].sensitivity_class, "internal") == 0);
@@ -273,19 +275,19 @@ static void test_search_chunks_shim(void)
    assert(regs[0].x0 >= 0 && regs[0].x0 <= 1); /* normalized bbox */
 
    /* Case-insensitive match. */
-   assert(db2_kb_pdf_search_chunks("proj", "HELLO", 16, chunks) == 1);
+   assert(db2_kb_pdf_search_chunks("proj", "HELLO", 16, chunks, NULL) == 1);
    /* A term only on page 2 matches the page-2 chunk, not page 1. */
-   n = db2_kb_pdf_search_chunks("proj", "Second page", 16, chunks);
+   n = db2_kb_pdf_search_chunks("proj", "Second page", 16, chunks, NULL);
    assert(n == 1 && chunks[0].page_start == 2);
    /* No match → no results. */
-   assert(db2_kb_pdf_search_chunks("proj", "nonexistent-zzz", 16, chunks) == 0);
+   assert(db2_kb_pdf_search_chunks("proj", "nonexistent-zzz", 16, chunks, NULL) == 0);
    /* LIKE metacharacters in the query are literal, not wildcards. */
-   assert(db2_kb_pdf_search_chunks("proj", "%", 16, chunks) == 0);
+   assert(db2_kb_pdf_search_chunks("proj", "%", 16, chunks, NULL) == 0);
 
    /* The general document fetch now reports doc_kind='pdf' — the value kb_fetch_doc_row
     * uses to exclude PDF chunks from plain /v1/search. */
    db2_kb_pdf_chunk_t one[4];
-   assert(db2_kb_pdf_search_chunks("proj", "world", 4, one) == 1);
+   assert(db2_kb_pdf_search_chunks("proj", "world", 4, one, NULL) == 1);
    db2_kb_document_row_t row;
    assert(db2_kb_document_fetch(one[0].chunk_id, "proj", &row) == 1);
    assert(strcmp(row.doc_kind, "pdf") == 0);
@@ -337,7 +339,7 @@ static void test_pdf_quarantine_admin(void)
    /* Restricted -> pending -> withheld from search_chunks. */
    assert(kb_doc_pdf_ingest_xhtml("proj", "secret.pdf", "h1", FIXTURE_2PAGE, "restricted",
                                   &stats) == 2);
-   assert(db2_kb_pdf_search_chunks("proj", "world", 8, chunks) == 0);
+   assert(db2_kb_pdf_search_chunks("proj", "world", 8, chunks, NULL) == 0);
 
    /* confirm -> 200; the doc becomes retrievable. */
    const char *cbody =
@@ -345,7 +347,7 @@ static void test_pdf_quarantine_admin(void)
    int st = handle_post_pdf_quarantine_route("POST", cbody, (int)strlen(cbody), buf, sizeof(buf));
    assert(st == 200);
    assert(strstr(buf, "\"chunks\":2") != NULL);
-   assert(db2_kb_pdf_search_chunks("proj", "world", 8, chunks) == 1);
+   assert(db2_kb_pdf_search_chunks("proj", "world", 8, chunks, NULL) == 1);
    assert(strcmp(chunks[0].document_key, "secret.pdf") == 0);
    /* confirm again -> 404 (no longer pending). */
    assert(handle_post_pdf_quarantine_route("POST", cbody, (int)strlen(cbody), buf, sizeof(buf)) ==
@@ -412,7 +414,7 @@ static void test_pdf_evidence_tools(void)
 
    /* open_neighbors: the page-1 chunk's next is the page-2 chunk. */
    db2_kb_pdf_chunk_t ch[4];
-   assert(db2_kb_pdf_search_chunks("proj", "Hello", 4, ch) == 1);
+   assert(db2_kb_pdf_search_chunks("proj", "Hello", 4, ch, NULL) == 1);
    char nq[80];
    snprintf(nq, sizeof(nq), "project=proj&chunk_id=%lld", (long long)ch[0].chunk_id);
    assert(handle_get_pdf_neighbors_route("GET", nq, buf, sizeof(buf)) == 200);
@@ -456,6 +458,83 @@ static void test_pdf_evidence_tools(void)
    PASS("pdf_evidence_tools");
 }
 
+/* Phase A: embed_pdf enqueue gating (the access-control core — pending docs are NOT
+ * vector-embedded) + the per-query answerability judgment. Hermetic config via a temp
+ * AIMEE_HOME/aimee.yaml that flips kb_pdf_vector_enabled on; the sqlite shim has no
+ * halfvec so the vector leg yields no rows (search degrades to lexical) — exactly the
+ * embedder-absent degradation path. */
+static void write_vector_config(const char *home)
+{
+   mkdir(home, 0700);
+   char path[512];
+   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
+   FILE *fp = fopen(path, "w");
+   assert(fp);
+   fputs("kb_pdf_vector_enabled: true\n", fp);
+   fclose(fp);
+}
+
+static void test_pdf_vector_enqueue_and_answerability(void)
+{
+   char home[] = "/tmp/aimee_pdf_vec_test_XXXXXX";
+   assert(mkdtemp(home));
+   setenv("AIMEE_HOME", home, 1);
+   setenv("AIMEE_NO_CACHE", "1", 1); /* bypass the config mtime cache so the yaml is re-read */
+   write_vector_config(home);
+
+   db2_test_shim_open();
+
+   kb_pdf_ingest_stats_t stats;
+   /* Internal (non-pending) doc → both chunks enqueue an embed_pdf job. */
+   assert(kb_doc_pdf_ingest_xhtml("proj", "report.pdf", "h1", FIXTURE_2PAGE, "internal", &stats) ==
+          2);
+   assert(db2_kb_async_count_kind("embed_pdf") == 2);
+
+   /* Restricted (quarantine_state='pending') doc → NO embed_pdf jobs: a withheld document
+    * is never vector-embedded (the access-control-relevant A1 invariant). */
+   assert(kb_doc_pdf_ingest_xhtml("proj", "secret.pdf", "h2", FIXTURE_2PAGE, "restricted", &stats) ==
+          2);
+   assert(db2_kb_async_count_kind("embed_pdf") == 2); /* unchanged — pending not enqueued */
+
+   /* Confirming the restricted doc clears quarantine AND enqueues its embed_pdf jobs, so a
+    * confirmed doc becomes vector-retrievable. */
+   assert(db2_kb_pdf_quarantine_confirm("proj", "secret.pdf") == 2);
+   assert(db2_kb_async_count_kind("embed_pdf") == 4);
+
+   /* Answerability (A3): a strong full-coverage query scores HIGH (the reference pin:
+    * score >= 0.7); a no-match query scores NONE. Vector leg is inert under the shim, so
+    * these assert the deterministic lexical+coverage combiner. */
+   db2_kb_pdf_chunk_t chunks[16];
+   db2_kb_answerability_t ans;
+   /* secret.pdf is confirmed now, so "Hello world" matches BOTH docs' page-1 chunks. */
+   int n = db2_kb_pdf_search_chunks("proj", "Hello world", 16, chunks, &ans);
+   assert(n == 2);
+   assert(ans.score >= 0.7);
+   assert(strcmp(ans.label, "HIGH") == 0);
+   assert(ans.coverage > 0.99); /* both query terms present */
+
+   db2_kb_pdf_chunk_t none_chunks[4];
+   db2_kb_answerability_t ans_none;
+   assert(db2_kb_pdf_search_chunks("proj", "nonexistent-zzz", 4, none_chunks, &ans_none) == 0);
+   assert(ans_none.score < 0.15);
+   assert(strcmp(ans_none.label, "NONE") == 0);
+
+   /* The route surfaces the answerability object as a field DISTINCT from any confidence
+    * tier, plus per-chunk has_citation / score. */
+   char buf[16384];
+   int st = handle_get_pdf_search_route("GET", "query=Hello+world&project=proj", buf, sizeof(buf));
+   assert(st == 200);
+   assert(strstr(buf, "\"answerability\"") != NULL);
+   assert(strstr(buf, "\"label\":\"HIGH\"") != NULL);
+   assert(strstr(buf, "\"has_citation\"") != NULL);
+   assert(strstr(buf, "\"matched_via\"") != NULL);
+
+   db2_test_shim_close();
+   unsetenv("AIMEE_NO_CACHE");
+   unsetenv("AIMEE_HOME");
+   PASS("pdf_vector_enqueue_and_answerability");
+}
+
 int main(void)
 {
    printf("structured-pdf (kb_doc_pdf) tests:\n");
@@ -468,6 +547,7 @@ int main(void)
    test_search_chunks_shim();
    test_pdf_quarantine_admin();
    test_pdf_evidence_tools();
+   test_pdf_vector_enqueue_and_answerability();
    printf("ALL PASS\n");
    return 0;
 }

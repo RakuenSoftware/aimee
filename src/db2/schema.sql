@@ -715,6 +715,31 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         )
     $T$;
 
+    -- kb_pdf_embeddings: PDF chunk vectors live in a DEDICATED relation that the
+    -- general /v1/search transport NEVER reads (structured-PDF Phase A1). This is
+    -- *structural* isolation, not a runtime WHERE doc_kind='pdf' filter on the
+    -- shared kb_embeddings table: a query-time predicate is a data-classification
+    -- filter, not an access boundary, and a future code path that forgets it would
+    -- leak withheld PDF content into general vector search. By giving PDF vectors
+    -- their own relation, the isolation is enforced by the schema/module boundary.
+    -- point_id = the kb_documents.id of the PDF chunk (same identity space as
+    -- kb_embeddings, but a disjoint table). The quarantine_state<>'pending'
+    -- predicate rides INSIDE the PDF search surface (kb_payload.c) as
+    -- defense-in-depth. ENGINE-LEVEL BACKSTOP (RT2-S1, deploy-gate): in a hardened
+    -- deploy the general-search DB role should hold no grant on this relation (and/
+    -- or a row-security policy enforces tenancy) so the boundary survives a
+    -- mis-written JOIN even if the app layer fails. aimee-kb today connects as a
+    -- single owner role, so that GRANT/RLS split is provisioned at deploy, not here;
+    -- the structural separation above is the in-code, test-covered control.
+    EXECUTE $T$
+        CREATE TABLE IF NOT EXISTS kb_pdf_embeddings (
+            point_id     BIGINT PRIMARY KEY,
+            embedding    halfvec(__EMBED_DIM__),
+            project      TEXT NOT NULL DEFAULT '',
+            payload_json TEXT NOT NULL DEFAULT ''
+        )
+    $T$;
+
     -- curator_entity_vectors: pgvector embeddings for deep-curator entity
     -- resolution (resolve_entities pass). Mirrors kb_embeddings with the
     -- additional scope_kind / scope_id / canonical_name columns the curator
@@ -837,6 +862,10 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
             ON kb_embeddings (project)
     $T$;
     EXECUTE $T$
+        CREATE INDEX IF NOT EXISTS idx_kb_pdf_embeddings_project
+            ON kb_pdf_embeddings (project)
+    $T$;
+    EXECUTE $T$
         CREATE INDEX IF NOT EXISTS idx_curator_entity_vectors_scope
             ON curator_entity_vectors (scope_kind, scope_id)
     $T$;
@@ -868,6 +897,14 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; BEGIN
         $T$;
     EXCEPTION WHEN OTHERS THEN
         RAISE NOTICE 'kb_embeddings HNSW index skipped (%)', SQLERRM;
+    END;
+    BEGIN
+        EXECUTE $T$
+            CREATE INDEX IF NOT EXISTS idx_kb_pdf_embeddings_hnsw
+                ON kb_pdf_embeddings USING hnsw (embedding halfvec_cosine_ops)
+        $T$;
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'kb_pdf_embeddings HNSW index skipped (%)', SQLERRM;
     END;
     BEGIN
         EXECUTE $T$

@@ -4,6 +4,7 @@
  * upload-route wiring are the next increment); this is exercised by its unit tests only. */
 #include "kb_doc_pdf.h"
 
+#include "config.h"
 #include "db2/kb_payload.h"
 #include "log.h"
 
@@ -732,6 +733,14 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
       return -1;
    const char *quarantine = strcmp(sensitivity_class, "restricted") == 0 ? "pending" : "";
 
+   /* Phase A1: when the PDF-vector capability is on, enqueue an embed_pdf job per
+    * chunk so it lands in the isolated kb_pdf_embeddings relation. We do NOT embed
+    * quarantined-pending (restricted) docs — they are withheld until an owner
+    * confirms, at which point the confirm path enqueues their embed_pdf jobs. */
+   config_t pdf_cfg;
+   int vector_enabled = (config_load(&pdf_cfg) == 0 && pdf_cfg.kb_pdf_vector_enabled);
+   int embed_pdf_vec = vector_enabled && quarantine[0] == '\0';
+
    kb_pdf_chunk_t *chunks = NULL;
    int n_chunks = 0;
    if (kb_pdf_chunk(doc, &chunks, &n_chunks) < 0)
@@ -783,11 +792,16 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
          n_regions++;
       }
 
-      /* PDF chunks are NOT embedded: Phase 2 retrieval (search_chunks) is lexical over the
-       * chunk content, and leaving PDFs out of the vector index keeps them out of the
-       * vector-only /v1/search by construction. (Vector retrieval for PDFs is a follow-up;
-       * when it lands, the kb_fetch_doc_row doc_kind exclusion already keeps embedded PDFs
-       * out of general search.) */
+      /* Phase A1: enqueue the embed into the ISOLATED kb_pdf_embeddings relation
+       * (kind='embed_pdf'), inside this same ingest transaction. Because the job
+       * row only becomes visible to the drainer at commit — by which point this
+       * chunk's kb_doc_regions are committed too — a vector-retrievable PDF chunk
+       * always has its citations (the §A2 LEFT JOIN is the backstop if that ever
+       * races). When the capability is off the chunk stays lexical-only, exactly
+       * as Phase 2 behaved, and is invisible to the vector-only /v1/search by
+       * construction (PDF vectors never enter kb_embeddings). */
+      if (embed_pdf_vec)
+         db2_kb_async_enqueue("embed_pdf", id, project); /* best-effort; covered by the txn */
       prev_id = id;
    }
 

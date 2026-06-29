@@ -157,7 +157,7 @@ extern "C"
    int db2_kb_txn_commit(void);
    void db2_kb_txn_rollback(void);
 
-   /* structured-pdf Phase 2 retrieval. A PDF chunk matched by search_chunks. */
+   /* structured-pdf Phase 2/A retrieval. A PDF chunk matched by search_chunks. */
    typedef struct
    {
       int64_t chunk_id;
@@ -166,14 +166,36 @@ extern "C"
       int page_start;
       int page_end;
       char sensitivity_class[16];
+      double score;       /* Phase A2: relevance — vector cosine for a vector hit, else a fixed
+                           * strong-lexical constant for a substring hit. */
+      int matched_vector; /* Phase A2: 1 if this candidate came from the PDF-vector leg. */
+      int has_citation;   /* Phase A2: 1 if the chunk has >=1 kb_doc_regions citation. */
    } db2_kb_pdf_chunk_t;
 
-   /* Lexical (case-insensitive content match) search over structured-PDF chunks, scoped to
-    * (optional) project. ALWAYS excludes doc_kind != 'pdf' and quarantine_state='pending'
-    * (restricted/pending documents are withheld). `query` is matched as a literal substring
-    * (LIKE metacharacters are escaped). Returns the number of chunks written (<= max). */
+   /* Phase A3: per-query-over-corpus answerability — "given THIS query, how well can
+    * the KB answer it." A KB-side SHARED judgment, deliberately kept distinct from the
+    * server's per-user confidence tier. Combiner is a documented deterministic function
+    * of query-scoped (top_score, coverage, saturation) and corpus-scoped (table_facts)
+    * inputs; see db2_kb_pdf_search_chunks for the weights. */
+   typedef struct
+   {
+      double score;     /* [0,1] */
+      char label[8];    /* "NONE" | "LOW" | "MEDIUM" | "HIGH" */
+      double top_score;  /* query-scoped: best candidate relevance among the top-k hits */
+      double coverage;   /* query-scoped: fraction of query terms present across matched chunks */
+      double saturation; /* query-scoped: hit-count saturation = min(1, n_hits / target_k) */
+      int table_facts;   /* corpus-scoped: table-cell facts for query entities (§B; 0 until built) */
+   } db2_kb_answerability_t;
+
+   /* Phase A2 two-stage retrieval: lexical (case-insensitive substring) AND — when the
+    * kb_pdf_vector capability is on and an embedder is available — a vector candidate leg
+    * over the ISOLATED kb_pdf_embeddings relation, merged + deduped by chunk_id. ALWAYS
+    * excludes doc_kind != 'pdf' and quarantine_state='pending' (restricted/pending docs are
+    * withheld) on BOTH legs. Degrades to lexical-only when the embedder/capability is
+    * absent. `ans_out` (may be NULL) receives the Phase A3 answerability judgment for the
+    * query. Returns the number of chunks written (<= max). */
    int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
-                                db2_kb_pdf_chunk_t *out);
+                                db2_kb_pdf_chunk_t *out, db2_kb_answerability_t *ans_out);
 
    /* One coordinate region (a PDF line) for a citation. */
    typedef struct
@@ -196,6 +218,16 @@ extern "C"
     * -1 on error. */
    int db2_kb_pdf_quarantine_confirm(const char *project, const char *document_key);
    int db2_kb_pdf_quarantine_reject(const char *project, const char *document_key);
+
+   /* Phase A1: re-enqueue an embed_pdf job for every retrievable (non-pending) PDF
+    * chunk so the isolated kb_pdf_embeddings relation is re-derived (used by the
+    * dim-change reset, which truncates it). No-op when kb_pdf_vector_enabled is
+    * off. Returns the number of jobs enqueued. */
+   int db2_kb_pdf_reembed_all(void);
+
+   /* Count rows in kb_async_jobs for a given kind (e.g. "embed_pdf"). Test/observability
+    * helper. Returns the count (>=0) or -1 on error. */
+   int db2_kb_async_count_kind(const char *kind);
 
    /* §5 evidence escalation reads. All withhold quarantine_state='pending' (restricted)
     * documents. Return the number written (<= max). */

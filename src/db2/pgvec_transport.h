@@ -9,6 +9,7 @@
 /* Table name constants. */
 #define PGVEC_MEMORY_TABLE            "memory_embeddings"
 #define PGVEC_KB_TABLE                "kb_embeddings"
+#define PGVEC_KBPDF_TABLE             "kb_pdf_embeddings"
 #define PGVEC_CODE_TABLE              "code_embeddings"
 #define PGVEC_CURATOR_ENTITY_TABLE    "curator_entity_vectors"
 #define PGVEC_CURATOR_NARRATIVE_TABLE "curator_narrative_vectors"
@@ -61,6 +62,15 @@ int pgvec_kb_delete(int64_t point_id);
 
 /* Delete all kb embedding rows for a given project. */
 int pgvec_kb_delete_project(const char *project);
+
+/* KB PDF vectors (structured-PDF Phase A1): a DEDICATED relation that the general
+ * /v1/search transport never reads. Mirrors pgvec_kb_* but targets
+ * kb_pdf_embeddings; point_id is the kb_documents.id of the PDF chunk. */
+int pgvec_kbpdf_upsert(int64_t point_id, const float *vec, int dim, const char *payload_json);
+int pgvec_kbpdf_delete(int64_t point_id);
+int pgvec_kbpdf_delete_project(const char *project);
+int pgvec_kbpdf_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
+                       double *scores, int max);
 
 /* Paginate point_ids from an embedding table in ascending point_id order.
  * Set offset=-1 to start from the beginning.

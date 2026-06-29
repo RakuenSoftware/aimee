@@ -13,6 +13,7 @@
 #include "lifecycle.h"
 #include "artifacts.h"        /* db2_curator_reembed_all */
 #include "evidence_vectors.h" /* db2_evidence_reembed_all */
+#include "kb_payload.h"       /* db2_kb_pdf_reembed_all */
 #include "../headers/log.h"
 
 #include <stdarg.h>
@@ -25,11 +26,12 @@
  * recreating + re-deriving loses no source data. Any halfvec table NOT on this list
  * is unknown -> the reset REFUSES rather than risk destroying source it doesn't
  * understand. Keep in sync with schema.sql's halfvec(__EMBED_DIM__) tables. */
-static const char *DERIVED_VECTOR_TABLES[] = {"kb_embeddings",          "memory_embeddings",
-                                              "curator_entity_vectors", "curator_narrative_vectors",
-                                              "curator_claim_vectors",  "curator_code_unit_vectors",
-                                              "exemplar_vectors",       "evidence_vectors",
-                                              "code_embeddings",        NULL};
+static const char *DERIVED_VECTOR_TABLES[] = {"kb_embeddings",          "kb_pdf_embeddings",
+                                              "memory_embeddings",      "curator_entity_vectors",
+                                              "curator_narrative_vectors", "curator_claim_vectors",
+                                              "curator_code_unit_vectors", "exemplar_vectors",
+                                              "evidence_vectors",       "code_embeddings",
+                                              NULL};
 
 static int is_known_vector_table(const char *t)
 {
@@ -339,6 +341,7 @@ int db2_dim_change_reset(int target_dim, int force, int dry_run, db2_reembed_pla
     * path (`aimee memory reembed`); surfaced in the command's guidance. */
    p->curator_requeued = db2_curator_reembed_all();
    p->evidence_requeued = db2_evidence_reembed_all();
+   (void)db2_kb_pdf_reembed_all(); /* PDF vectors re-derive from embed_pdf jobs (no auto-backfill) */
    rpt(p,
        "reset done: dropped %d table(s), recorded dim=%d, requeued curator=%d evidence=%d; "
        "doc-embed backfill re-embeds kb chunks; run `aimee memory reembed --start` for memory\n",

@@ -694,6 +694,163 @@ int pgvec_kb_search(const char *project, const float *vec, int dim, int limit, i
    return (rc == AIMEE_PG_ERR) ? -1 : n;
 }
 
+/* -------------------------------------------------------------------------
+ * KB PDF vectors (structured-PDF Phase A1)
+ *
+ * A disjoint relation from kb_embeddings: the general /v1/search transport
+ * (pgvec_kb_search) only ever names kb_embeddings, so PDF vectors are
+ * structurally unreachable from general vector search. These mirror the
+ * pgvec_kb_* helpers but target kb_pdf_embeddings, so the only caller that can
+ * read PDF vectors is the access-controlled PDF search surface.
+ * ---------------------------------------------------------------------- */
+
+int pgvec_kbpdf_upsert(int64_t point_id, const float *vec, int dim, const char *payload_json)
+{
+   if (!vec || dim <= 0)
+      return 0;
+   int expect = db2_embedding_dim();
+   if (expect > 0 && dim != expect)
+   {
+      aimee_log(LOG_WARN, "pgvec",
+                "kb_pdf embedding dim mismatch: got %d, expected %d (point_id=%lld); refusing "
+                "upsert",
+                dim, expect, (long long)point_id);
+      return -1;
+   }
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+
+   char project[256] = "";
+   if (payload_json && payload_json[0])
+   {
+      cJSON *obj = cJSON_Parse(payload_json);
+      if (obj)
+      {
+         json_str(obj, "project", project, sizeof(project));
+         cJSON_Delete(obj);
+      }
+   }
+
+   char *vec_text = build_vec_text(vec, dim);
+   if (!vec_text)
+      return -1;
+
+   static const char *sql = "INSERT INTO kb_pdf_embeddings "
+                            "  (point_id, embedding, project, payload_json) "
+                            "VALUES "
+                            "  (:point_id, :embedding::halfvec, :project, :payload) "
+                            "ON CONFLICT (point_id) DO UPDATE SET "
+                            "  embedding = EXCLUDED.embedding, "
+                            "  project = EXCLUDED.project, "
+                            "  payload_json = EXCLUDED.payload_json";
+
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+   {
+      free(vec_text);
+      return -1;
+   }
+   aimee_pg_bind_int64(stmt, "point_id", point_id);
+   aimee_pg_bind_text(stmt, "embedding", vec_text);
+   aimee_pg_bind_text(stmt, "project", project);
+   aimee_pg_bind_text(stmt, "payload", payload_json ? payload_json : "");
+
+   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
+   aimee_pg_finalize(stmt);
+   free(vec_text);
+   return (rc == AIMEE_PG_DONE) ? 0 : -1;
+}
+
+int pgvec_kbpdf_delete(int64_t point_id)
+{
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   static const char *sql = "DELETE FROM kb_pdf_embeddings WHERE point_id = :point_id";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+      return -1;
+   aimee_pg_bind_int64(stmt, "point_id", point_id);
+   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
+   aimee_pg_finalize(stmt);
+   return (rc == AIMEE_PG_DONE) ? 0 : -1;
+}
+
+int pgvec_kbpdf_delete_project(const char *project)
+{
+   if (!project || !project[0])
+      return -1;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+   static const char *sql = "DELETE FROM kb_pdf_embeddings WHERE project = :project";
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+      return -1;
+   aimee_pg_bind_text(stmt, "project", project);
+   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
+   aimee_pg_finalize(stmt);
+   return (rc == AIMEE_PG_DONE) ? 0 : -1;
+}
+
+/* Vector search over PDF chunk embeddings ONLY. There is deliberately no
+ * "search both kb_embeddings and kb_pdf_embeddings" helper: keeping the relations
+ * disjoint at the transport layer is the structural isolation A1 requires. */
+int pgvec_kbpdf_search(const char *project, const float *vec, int dim, int limit, int64_t *ids,
+                       double *scores, int max)
+{
+   if (!vec || dim <= 0 || !ids || !scores || max <= 0)
+      return -1;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+
+   char *vec_text = build_vec_text(vec, dim);
+   if (!vec_text)
+      return -1;
+
+   int has_project = (project && project[0]);
+   const char *sql = has_project ? "SELECT point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
+                                   "FROM kb_pdf_embeddings "
+                                   "WHERE project = :project "
+                                   "ORDER BY embedding <=> :qvec::halfvec "
+                                   "LIMIT :lim"
+                                 : "SELECT point_id, 1.0 - (embedding <=> :qvec::halfvec) AS score "
+                                   "FROM kb_pdf_embeddings "
+                                   "ORDER BY embedding <=> :qvec::halfvec "
+                                   "LIMIT :lim";
+
+   char errbuf[256];
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
+   if (!stmt)
+   {
+      free(vec_text);
+      return 0; /* pgvector not available — no vector results */
+   }
+   aimee_pg_bind_text(stmt, "qvec", vec_text);
+   if (has_project)
+      aimee_pg_bind_text(stmt, "project", project);
+   aimee_pg_bind_int(stmt, "lim", limit > 0 ? limit : max);
+
+   int n = 0;
+   aimee_pg_step_t rc;
+   while ((rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf))) == AIMEE_PG_ROW)
+   {
+      if (n >= max)
+         break;
+      ids[n] = aimee_pg_column_int64(stmt, 0);
+      scores[n] = aimee_pg_column_double(stmt, 1);
+      n++;
+   }
+   aimee_pg_finalize(stmt);
+   free(vec_text);
+   return (rc == AIMEE_PG_ERR) ? -1 : n;
+}
+
 int pgvec_curator_entity_upsert(int64_t point_id, const float *vec, int dim, const char *scope_kind,
                                 const char *scope_id, const char *canonical_name,
                                 const char *artifact_id, const char *payload_json)

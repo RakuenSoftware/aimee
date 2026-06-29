@@ -10,6 +10,7 @@
 #include "db2_internal.h"
 #include "kb_payload.h"
 #include "kb_runtime_state.h"
+#include "pgvec_transport.h"
 #include "vector_index_ops.h"
 #include "code_index_ops.h"
 #include "db_postgres.h"
@@ -465,6 +466,90 @@ static int db2_kb_service_async_process_embed_raw(int64_t document_id, const cha
    return 0;
 }
 
+/* embed_pdf: structured-PDF Phase A1. Embeds a PDF chunk into the DEDICATED
+ * kb_pdf_embeddings relation (pgvec_kbpdf_upsert), never kb_embeddings — so PDF
+ * vectors stay structurally unreachable from general vector search. Two
+ * defense-in-depth guards before any vector is written: the row must still be a
+ * PDF chunk (doc_kind='pdf') and must NOT be quarantined-pending. A pending row is
+ * skipped (marked done, no vector); when it is later confirmed, the confirm path
+ * re-enqueues an embed_pdf job. Returns 0 on success or benign skip, -1 on error
+ * (which fails the job so kb_async_jobs retries the embed). */
+static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const char *embedding_cmd,
+                                                  char *errbuf, size_t errbuf_size)
+{
+   void *conn = db2_conn();
+   if (!conn)
+   {
+      snprintf(errbuf, errbuf_size, "no db2 conn");
+      return -1;
+   }
+
+   char err[KBS_ERRBUF] = "";
+   aimee_pg_stmt_t *stmt = aimee_pg_prepare(
+       conn,
+       "SELECT heading_path, content, doc_kind, quarantine_state FROM kb_documents WHERE id = ?1",
+       err, sizeof(err));
+   if (!stmt)
+   {
+      snprintf(errbuf, errbuf_size, "prepare failed");
+      return -1;
+   }
+   aimee_pg_bind_int64(stmt, "?1", document_id);
+   if (aimee_pg_step(stmt, err, sizeof(err)) != AIMEE_PG_ROW)
+   {
+      aimee_pg_finalize(stmt);
+      /* The chunk was deleted/re-ingested before this job ran — nothing to embed.
+       * Treat as a benign skip so the job does not spin on a missing row. */
+      return 0;
+   }
+   char heading_buf[1024];
+   char content_buf[3072];
+   char doc_kind[32];
+   char quarantine[32];
+   db2_copy_text(heading_buf, sizeof(heading_buf), aimee_pg_column_text(stmt, 0));
+   db2_copy_text(content_buf, sizeof(content_buf), aimee_pg_column_text(stmt, 1));
+   db2_copy_text(doc_kind, sizeof(doc_kind), aimee_pg_column_text(stmt, 2));
+   db2_copy_text(quarantine, sizeof(quarantine), aimee_pg_column_text(stmt, 3));
+   aimee_pg_finalize(stmt);
+
+   /* Defense-in-depth: never write a PDF vector for a non-PDF row or a withheld
+    * (pending) document. The structural isolation (separate relation) is the
+    * primary control; this predicate is the second layer. */
+   if (strcmp(doc_kind, "pdf") != 0 || strcmp(quarantine, "pending") == 0)
+      return 0;
+
+   char embed_text[4096];
+   if (heading_buf[0])
+      snprintf(embed_text, sizeof(embed_text), "%s\n%s", heading_buf, content_buf);
+   else
+      snprintf(embed_text, sizeof(embed_text), "%s", content_buf);
+
+   float vec[EMBED_MAX_DIM];
+   int dim = memory_embed_text(embed_text, embedding_cmd, vec, EMBED_MAX_DIM);
+   if (dim <= 0)
+   {
+      snprintf(errbuf, errbuf_size, "embedding generation failed");
+      return -1;
+   }
+   char *payload_json = db2_kb_build_document_payload(document_id);
+   if (!payload_json)
+   {
+      db2_vector_index_op_record(document_id, PGVEC_KBPDF_TABLE, 0, 0, "payload build failed");
+      snprintf(errbuf, errbuf_size, "payload build failed");
+      return -1;
+   }
+   int upsert_rc = pgvec_kbpdf_upsert(document_id, vec, dim, payload_json);
+   free(payload_json);
+   db2_vector_index_op_record(document_id, PGVEC_KBPDF_TABLE, 0, upsert_rc == 0,
+                              upsert_rc ? "pdf upsert failed" : NULL);
+   if (upsert_rc != 0)
+   {
+      snprintf(errbuf, errbuf_size, "pdf vector upsert failed");
+      return -1;
+   }
+   return 0;
+}
+
 int db2_kb_service_async_queue_drain(const char *embedding_cmd, int timeout_secs,
                                      const char *vector_collection,
                                      db2_kb_service_vector_upsert_fn vector_upsert,
@@ -504,6 +589,9 @@ int db2_kb_service_async_queue_drain(const char *embedding_cmd, int timeout_secs
       if (strcmp(kind, "embed_raw") == 0)
          rc = db2_kb_service_async_process_embed_raw(document_id, effective_cmd, vector_collection,
                                                      vector_upsert, vector_upsert_ctx, errbuf,
+                                                     sizeof(errbuf));
+      else if (strcmp(kind, "embed_pdf") == 0)
+         rc = db2_kb_service_async_process_embed_pdf(document_id, effective_cmd, errbuf,
                                                      sizeof(errbuf));
       else
          snprintf(errbuf, sizeof(errbuf), "unknown job kind: %s", kind);

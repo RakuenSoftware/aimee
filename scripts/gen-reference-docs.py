@@ -177,6 +177,9 @@ CFG_KEY_DESC = {
     "kb_evidence_emit_enabled": "Emit evidence records from KB ingest.",
     "kb_pdf_ingest_enabled": "Route PDF uploads through the structured geometry extractor "
     "(kb_doc_pdf) instead of plain pdftotext (default off).",
+    "kb_pdf_vector_enabled": "Embed structured-PDF chunks into the isolated kb_pdf_embeddings "
+    "relation and add the vector candidate leg to search_chunks (default off; degrades to "
+    "lexical-only when the embedder is absent).",
     "kb_mining_enabled": "Enable background KB mining.",
     "kb_mining_min_poll_s": "Minimum interval (s) between KB mining polls.",
     "kb_search_max_results": "Default max results for KB search.",

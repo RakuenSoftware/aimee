@@ -91,7 +91,8 @@ int handle_get_pdf_search_route(const char *method, const char *query_string, ch
       return 500;
    }
 
-   int n = db2_kb_pdf_search_chunks(project[0] ? project : NULL, query, max, chunks);
+   db2_kb_answerability_t ans;
+   int n = db2_kb_pdf_search_chunks(project[0] ? project : NULL, query, max, chunks, &ans);
 
    cJSON *root = cJSON_CreateObject();
    cJSON *arr = cJSON_AddArrayToObject(root, "chunks");
@@ -104,9 +105,16 @@ int handle_get_pdf_search_route(const char *method, const char *query_string, ch
       cJSON_AddNumberToObject(c, "page_end", chunks[i].page_end);
       cJSON_AddStringToObject(c, "content", chunks[i].content);
       cJSON_AddStringToObject(c, "sensitivity_class", chunks[i].sensitivity_class);
+      /* Phase A2: relevance + which leg matched. */
+      cJSON_AddNumberToObject(c, "score", chunks[i].score);
+      cJSON_AddStringToObject(c, "matched_via", chunks[i].matched_vector ? "vector" : "lexical");
 
       cJSON *cits = cJSON_AddArrayToObject(c, "citations");
       int rn = db2_kb_doc_regions_for_chunk(chunks[i].chunk_id, regs, PDF_MAX_REGIONS);
+      /* Phase A2: has_citation is the candidate→region LEFT-JOIN flag — a candidate whose
+       * regions are not (yet) present degrades to has_citation=false with an empty
+       * citations array instead of being silently dropped. */
+      cJSON_AddBoolToObject(c, "has_citation", rn > 0 ? 1 : 0);
       for (int j = 0; j < rn; j++)
       {
          cJSON *cit = cJSON_CreateObject();
@@ -124,6 +132,18 @@ int handle_get_pdf_search_route(const char *method, const char *query_string, ch
       cJSON_AddItemToArray(arr, c);
    }
    cJSON_AddNumberToObject(root, "total", n);
+
+   /* Phase A3: the per-query-over-corpus answerability judgment. This is a KB-side SHARED
+    * signal and is deliberately a DISTINCT field from any server-side per-user confidence
+    * tier — clients must not conflate the two. */
+   cJSON *aobj = cJSON_AddObjectToObject(root, "answerability");
+   cJSON_AddNumberToObject(aobj, "score", ans.score);
+   cJSON_AddStringToObject(aobj, "label", ans.label);
+   cJSON *ains = cJSON_AddObjectToObject(aobj, "inputs");
+   cJSON_AddNumberToObject(ains, "top_score", ans.top_score);
+   cJSON_AddNumberToObject(ains, "coverage", ans.coverage);
+   cJSON_AddNumberToObject(ains, "saturation", ans.saturation);
+   cJSON_AddNumberToObject(ains, "table_facts", ans.table_facts);
 
    char *s = cJSON_PrintUnformatted(root);
    int status = 200;

@@ -3,7 +3,11 @@
  * the pgvector upsert helpers. */
 
 #include "kb_payload.h"
+#include "aimee.h"
 #include "artifacts.h"
+#include "config.h"
+#include "memory.h"
+#include "pgvec_transport.h"
 
 #include "db_postgres.h"
 #include "cJSON.h"
@@ -662,9 +666,149 @@ static void build_like_pattern(const char *query, char *dst, size_t cap)
    dst[o] = '\0';
 }
 
-int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
-                             db2_kb_pdf_chunk_t *out)
+/* Phase A3 answerability combiner — documented, fixed default weights (pinned by a
+ * reference test). The score is a deterministic function of three query-scoped inputs
+ * (top relevance, query-term coverage, hit saturation) plus a corpus-scoped table-fact
+ * count (§B; weighted 0 until that phase lands). */
+#define KBP_ANS_W_TOP 0.5
+#define KBP_ANS_W_COVERAGE 0.3
+#define KBP_ANS_W_SATURATION 0.2
+#define KBP_ANS_TARGET_K 5
+/* A full-substring lexical hit (the whole query appears in the chunk) is strong
+ * evidence; vector hits use their cosine score directly. */
+#define KBP_LEXICAL_MATCH_SCORE 0.8
+
+static void kbp_answerability_label(double s, char *out, size_t n)
 {
+   const char *l = s < 0.15 ? "NONE" : s < 0.40 ? "LOW" : s < 0.66 ? "MEDIUM" : "HIGH";
+   snprintf(out, n, "%s", l);
+}
+
+/* Case-insensitive substring test (portable; strcasestr is non-portable / not on the
+ * Windows build). Returns 1 if `needle` occurs in `hay` ignoring ASCII case. */
+static int kbp_ci_contains(const char *hay, const char *needle)
+{
+   if (!hay || !needle || !needle[0])
+      return 0;
+   size_t nl = strlen(needle);
+   for (const char *p = hay; *p; p++)
+   {
+      size_t i = 0;
+      while (i < nl && p[i] && tolower((unsigned char)p[i]) == tolower((unsigned char)needle[i]))
+         i++;
+      if (i == nl)
+         return 1;
+   }
+   return 0;
+}
+
+/* Query-term coverage: fraction of distinct whitespace-delimited query tokens that
+ * appear (case-insensitively) in the concatenation of matched chunk contents. A pure
+ * function of (query, matched rows), so the same (query, corpus state) always yields the
+ * same value. */
+static double kbp_query_coverage(const char *query, const db2_kb_pdf_chunk_t *rows, int n)
+{
+   if (!query || n <= 0)
+      return 0.0;
+   int total = 0, covered = 0;
+   char tok[128];
+   const char *p = query;
+   while (*p)
+   {
+      while (*p && isspace((unsigned char)*p))
+         p++;
+      int t = 0;
+      while (*p && !isspace((unsigned char)*p) && t < (int)sizeof(tok) - 1)
+         tok[t++] = *p++;
+      tok[t] = '\0';
+      if (t == 0)
+         continue;
+      total++;
+      for (int i = 0; i < n; i++)
+      {
+         if (kbp_ci_contains(rows[i].content, tok))
+         {
+            covered++;
+            break;
+         }
+      }
+   }
+   return total > 0 ? (double)covered / (double)total : 0.0;
+}
+
+/* Compute the Phase A3 answerability judgment from the merged candidate set. */
+static void kbp_compute_answerability(const char *query, const db2_kb_pdf_chunk_t *rows, int n,
+                                      db2_kb_answerability_t *ans)
+{
+   memset(ans, 0, sizeof(*ans));
+   double top = 0.0;
+   for (int i = 0; i < n; i++)
+      if (rows[i].score > top)
+         top = rows[i].score;
+   double coverage = kbp_query_coverage(query, rows, n);
+   double saturation = (double)n / (double)KBP_ANS_TARGET_K;
+   if (saturation > 1.0)
+      saturation = 1.0;
+   double score = KBP_ANS_W_TOP * top + KBP_ANS_W_COVERAGE * coverage +
+                  KBP_ANS_W_SATURATION * saturation;
+   if (score < 0.0)
+      score = 0.0;
+   if (score > 1.0)
+      score = 1.0;
+   ans->score = score;
+   ans->top_score = top;
+   ans->coverage = coverage;
+   ans->saturation = saturation;
+   ans->table_facts = 0; /* §B: folds in table-cell facts for query entities once built. */
+   kbp_answerability_label(score, ans->label, sizeof(ans->label));
+}
+
+/* Find the index of chunk_id in out[0..n), or -1. */
+static int kbp_find_chunk(const db2_kb_pdf_chunk_t *out, int n, int64_t chunk_id)
+{
+   for (int i = 0; i < n; i++)
+      if (out[i].chunk_id == chunk_id)
+         return i;
+   return -1;
+}
+
+/* Fetch a single PDF chunk row by id, applying the same withhold filters as the lexical
+ * leg (doc_kind='pdf' AND quarantine_state<>'pending'). Returns 1 if written, else 0. */
+static int kbp_fetch_pdf_chunk(void *conn, int64_t id, db2_kb_pdf_chunk_t *row)
+{
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "SELECT id, file_path, content, page_start, page_end, sensitivity_class FROM kb_documents"
+       " WHERE id = ?1 AND doc_kind = 'pdf' AND quarantine_state <> 'pending'",
+       err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_int64(st, "?1", id);
+   int got = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      memset(row, 0, sizeof(*row));
+      row->chunk_id = aimee_pg_column_int64(st, 0);
+      const char *fp = aimee_pg_column_text(st, 1);
+      const char *ct = aimee_pg_column_text(st, 2);
+      const char *sc = aimee_pg_column_text(st, 5);
+      snprintf(row->document_key, sizeof(row->document_key), "%s", fp ? fp : "");
+      snprintf(row->content, sizeof(row->content), "%s", ct ? ct : "");
+      row->page_start = aimee_pg_column_int(st, 3);
+      row->page_end = aimee_pg_column_int(st, 4);
+      snprintf(row->sensitivity_class, sizeof(row->sensitivity_class), "%s", sc ? sc : "");
+      got = 1;
+   }
+   aimee_pg_finalize(st);
+   return got;
+}
+
+int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
+                             db2_kb_pdf_chunk_t *out, db2_kb_answerability_t *ans_out)
+{
+   if (ans_out)
+      memset(ans_out, 0, sizeof(*ans_out));
    if (!out || max <= 0 || !query)
       return 0;
    void *conn = db2_conn();
@@ -672,6 +816,8 @@ int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
       return 0;
 
    int has_project = (project && project[0]);
+
+   /* ---- Stage 1a: lexical candidates (the always-on, embedder-independent leg). ---- */
    const char *sql =
        has_project ? "SELECT id, file_path, content, page_start, page_end, sensitivity_class"
                      " FROM kb_documents"
@@ -715,7 +861,109 @@ int db2_kb_pdf_search_chunks(const char *project, const char *query, int max,
       out[n].page_start = aimee_pg_column_int(st, 3);
       out[n].page_end = aimee_pg_column_int(st, 4);
       snprintf(out[n].sensitivity_class, sizeof(out[n].sensitivity_class), "%s", sc ? sc : "");
+      out[n].score = KBP_LEXICAL_MATCH_SCORE;
+      out[n].matched_vector = 0;
       n++;
+   }
+   aimee_pg_finalize(st);
+
+   /* ---- Stage 1b: vector candidates over the ISOLATED kb_pdf_embeddings relation. ----
+    * Only when the capability is on AND an embedder is configured; otherwise the search
+    * degrades to lexical-only (the Phase-2 behaviour). The vector leg reads ONLY
+    * kb_pdf_embeddings (pgvec_kbpdf_search), so it can never surface a general-corpus or a
+    * withheld document; kbp_fetch_pdf_chunk re-applies the withhold filters as the
+    * candidate→row resolution (defense in depth). Vector candidates whose chunk row is
+    * gone are simply skipped — never dropped from a join that would also drop lexical
+    * hits. */
+   config_t cfg;
+   if (n < max && config_load(&cfg) == 0 && cfg.kb_pdf_vector_enabled)
+   {
+      const char *embed_cmd = config_embedding_command(&cfg, NULL);
+      if (embed_cmd && embed_cmd[0])
+      {
+         float qvec[EMBED_MAX_DIM];
+         int dim = memory_embed_text(query, embed_cmd, qvec, EMBED_MAX_DIM);
+         if (dim > 0)
+         {
+            int64_t vids[32];
+            double vscores[32];
+            int want = max * 2 > 32 ? 32 : max * 2;
+            int vn = pgvec_kbpdf_search(has_project ? project : NULL, qvec, dim, want, vids, vscores,
+                                        want);
+            for (int i = 0; i < vn && n < max; i++)
+            {
+               int at = kbp_find_chunk(out, n, vids[i]);
+               if (at >= 0)
+               {
+                  /* Already a lexical hit: keep the stronger relevance, flag vector. */
+                  if (vscores[i] > out[at].score)
+                     out[at].score = vscores[i];
+                  out[at].matched_vector = 1;
+                  continue;
+               }
+               if (kbp_fetch_pdf_chunk(conn, vids[i], &out[n]))
+               {
+                  out[n].score = vscores[i];
+                  out[n].matched_vector = 1;
+                  n++;
+               }
+            }
+         }
+      }
+   }
+
+   if (ans_out)
+      kbp_compute_answerability(query, out, n, ans_out);
+   return n;
+}
+
+int db2_kb_async_count_kind(const char *kind)
+{
+   if (!kind || !*kind)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT COUNT(*) FROM kb_async_jobs WHERE kind = ?1", err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", kind);
+   int n = -1;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      n = aimee_pg_column_int(st, 0);
+   aimee_pg_finalize(st);
+   return n;
+}
+
+int db2_kb_pdf_reembed_all(void)
+{
+   /* Re-enqueue an embed_pdf job for every retrievable (non-pending) PDF chunk.
+    * Used by the dim-change reset, which truncates kb_pdf_embeddings: unlike
+    * kb_embeddings (auto-backfilled by the doc-embed drain), PDF vectors are only
+    * (re)derived from these jobs. No-op when the PDF-vector capability is off, so a
+    * reset never leaves embed_pdf jobs draining with nowhere to land. */
+   config_t cfg;
+   if (config_load(&cfg) != 0 || !cfg.kb_pdf_vector_enabled)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "SELECT id, project FROM kb_documents WHERE doc_kind = 'pdf' AND quarantine_state = ''", err,
+       sizeof(err));
+   if (!st)
+      return 0;
+   int n = 0;
+   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      int64_t id = aimee_pg_column_int64(st, 0);
+      const char *proj = aimee_pg_column_text(st, 1);
+      if (db2_kb_async_enqueue("embed_pdf", id, proj ? proj : "") == 0)
+         n++;
    }
    aimee_pg_finalize(st);
    return n;
@@ -788,7 +1036,35 @@ int db2_kb_pdf_quarantine_confirm(const char *project, const char *document_key)
                             " WHERE project = ?1 AND file_path = ?2 AND doc_kind = 'pdf'"
                             "   AND quarantine_state = 'pending'"
                             " RETURNING id";
-   return kb_pdf_quarantine_apply(sql, project, document_key);
+   int n = kb_pdf_quarantine_apply(sql, project, document_key);
+   if (n <= 0)
+      return n;
+
+   /* Phase A1: a confirmed (formerly restricted) doc must become vector-retrievable.
+    * Re-select its now-unpending chunk ids (a document_key carries one sensitivity
+    * class, so quarantine_state='' after confirm is exactly the just-confirmed
+    * chunks) and enqueue an idempotent embed_pdf job per chunk when the capability
+    * is on. Row-by-row so an arbitrarily large doc is fully covered. */
+   config_t cfg;
+   if (config_load(&cfg) != 0 || !cfg.kb_pdf_vector_enabled)
+      return n;
+   void *conn = db2_conn();
+   if (!conn)
+      return n;
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "SELECT id FROM kb_documents WHERE project = ?1 AND file_path = ?2"
+       "   AND doc_kind = 'pdf' AND quarantine_state = ''",
+       err, sizeof(err));
+   if (!st)
+      return n;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", document_key);
+   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      db2_kb_async_enqueue("embed_pdf", aimee_pg_column_int64(st, 0), project);
+   aimee_pg_finalize(st);
+   return n;
 }
 
 int db2_kb_pdf_quarantine_reject(const char *project, const char *document_key)

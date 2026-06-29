@@ -387,6 +387,9 @@ typedef struct config
    int typed_facts_enabled;      /* typed-fact knowledge layer master gate (default off) */
    int kb_pdf_ingest_enabled;    /* structured-pdf: route PDF uploads through the geometry
                                     extractor (kb_doc_pdf) instead of plain pdftotext (default off) */
+   int kb_pdf_vector_enabled;    /* structured-pdf Phase A: embed PDF chunks into the isolated
+                                    kb_pdf_embeddings relation + add the vector leg to
+                                    search_chunks (default off; degrades to lexical when absent) */
    int kb_evidence_emit_enabled; /* auditable-correctness: emit per-turn retrieval_event (default
                                     off) */
    int fidelity_check_enabled; /* auditable-correctness P3: run the fidelity judge on terminal-text

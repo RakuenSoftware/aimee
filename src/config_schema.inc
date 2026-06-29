@@ -17,6 +17,8 @@
 {"css_style_graph_enabled", SCHEMA_BOOL, 0},
 {"css_render_command", SCHEMA_STRING, 0},
 {"typed_facts_enabled", SCHEMA_BOOL, 0},
+{"kb_pdf_ingest_enabled", SCHEMA_BOOL, 0},
+{"kb_pdf_vector_enabled", SCHEMA_BOOL, 0},
 {"ingress_preinject_assembly_budget", SCHEMA_INT, 0},
 {"ingress_max_raw_scans", SCHEMA_INT, 0},
 {"code_span_max_lines", SCHEMA_INT, 0},

@@ -929,6 +929,18 @@ int config_load(config_t *cfg)
    if (cJSON_IsBool(item))
       cfg->typed_facts_enabled = cJSON_IsTrue(item);
 
+   /* structured-PDF gates. These have config_fields[] rows (CLI/server-settable) but
+    * historically lacked a file parse, so a value set in aimee.yaml never loaded back on a
+    * fresh process. Parse them here as top-level bools so both the Phase-1/2 ingest gate
+    * and the Phase-A vector gate are durably configurable. */
+   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_ingest_enabled");
+   if (cJSON_IsBool(item))
+      cfg->kb_pdf_ingest_enabled = cJSON_IsTrue(item);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_vector_enabled");
+   if (cJSON_IsBool(item))
+      cfg->kb_pdf_vector_enabled = cJSON_IsTrue(item);
+
    item = cJSON_GetObjectItemCaseSensitive(root, "kb_evidence_emit_enabled");
    if (cJSON_IsBool(item))
       cfg->kb_evidence_emit_enabled = cJSON_IsTrue(item);
