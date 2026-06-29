@@ -1104,6 +1104,10 @@ char *kb_client_pdf_open_page(const char *project, const char *document_key, int
 char *kb_client_pdf_open_neighbors(const char *project, long long chunk_id, int *status_out);
 char *kb_client_pdf_inspect_structure(const char *project, const char *document_key,
                                       int *status_out);
+/* Phase B: GET /v1/pdf/lookup_table — structured table cells for a document (page_no < 0 =
+ * all pages). Returns the route JSON body verbatim. */
+char *kb_client_pdf_lookup_table(const char *project, const char *document_key, int page_no,
+                                 int *status_out);
 
 /* Code-graph retrieval + analytics routes (see kb_client_code_graph.c). Forward
  * the route's JSON body verbatim (nested fused/ranked shapes the agent consumes

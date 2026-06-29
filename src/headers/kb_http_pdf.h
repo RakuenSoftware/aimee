@@ -30,4 +30,14 @@ int handle_get_pdf_neighbors_route(const char *method, const char *query_string,
 int handle_get_pdf_structure_route(const char *method, const char *query_string, char *out_buf,
                                    int out_cap);
 
+/* GET /v1/pdf/lookup_table?project=&document_key=[&page_no=] — structured-PDF Phase B.
+ * Returns the TSR-recognised table cells for a document (optionally one page), each with
+ * {page_no, row, col, text, tsr_confidence}, plus a tsr_status marker
+ * (ran | not_a_table | unavailable) so a caller can tell "no cells" from "TSR never ran".
+ * Gated by the full PDF ACL (doc_kind='pdf' + quarantine + project) via a join to the
+ * authoritative kb_documents row; a guessed/foreign/withheld document_key returns empty.
+ * The caller's token scope is enforced by kb_http_route_ex before this runs. */
+int handle_get_pdf_lookup_table_route(const char *method, const char *query_string, char *out_buf,
+                                      int out_cap);
+
 #endif /* DEC_KB_HTTP_PDF_H */

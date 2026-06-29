@@ -1142,6 +1142,20 @@ static cJSON *mcph_pdf_inspect_structure(struct mcp_call *c)
    return pdf_passthrough(json, status, "pdf_inspect_structure");
 }
 
+static cJSON *mcph_pdf_lookup_table(struct mcp_call *c)
+{
+   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
+   cJSON *jd = cJSON_GetObjectItemCaseSensitive(c->jargs, "document_key");
+   if (!cJSON_IsString(jp) || !jp->valuestring[0] || !cJSON_IsString(jd) || !jd->valuestring[0])
+      return text_content("error: pdf_lookup_table requires 'project' and 'document_key'");
+   /* page_no is optional; an absent or < 1 value means all pages (-1). */
+   long long page_no = 0;
+   int page = pdf_arg_pos_int(c->jargs, "page_no", 1000000.0, &page_no) ? (int)page_no : -1;
+   int status = -1;
+   char *json = kb_client_pdf_lookup_table(jp->valuestring, jd->valuestring, page, &status);
+   return pdf_passthrough(json, status, "pdf_lookup_table");
+}
+
 /* code_span_get (ingress-compression P2): the recovery resolver for a folded code
  * reference. Resolves the project's indexed root, then reads a validated, clamped
  * line range through the active workspace provider (code_span_read does the B4
@@ -1281,6 +1295,7 @@ static const struct
     {"pdf_open_page", mcph_pdf_open_page},
     {"pdf_open_neighbors", mcph_pdf_open_neighbors},
     {"pdf_inspect_structure", mcph_pdf_inspect_structure},
+    {"pdf_lookup_table", mcph_pdf_lookup_table},
 };
 
 static mcp_tool_handler_fn mcp_tool_lookup(const char *tool)

@@ -811,6 +811,10 @@ int config_save(const config_t *cfg)
       cJSON_AddBoolToObject(root, "kb_pdf_ingest_enabled", 1);
    if (cfg->kb_pdf_vector_enabled) /* default-off: persist only when enabled */
       cJSON_AddBoolToObject(root, "kb_pdf_vector_enabled", 1);
+   if (cfg->kb_pdf_tsr_enabled) /* default-off: persist only when enabled */
+      cJSON_AddBoolToObject(root, "kb_pdf_tsr_enabled", 1);
+   if (cfg->tsr_command[0])
+      cJSON_AddStringToObject(root, "tsr_command", cfg->tsr_command);
    if (!cfg->css_style_graph_enabled) /* default-on: persist only the opt-out */
       cJSON_AddBoolToObject(root, "css_style_graph_enabled", 0);
    if (cfg->wfe_live_forge_enabled) /* default-off: persist only the opt-in (enable) */

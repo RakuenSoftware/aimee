@@ -229,6 +229,46 @@ extern "C"
     * helper. Returns the count (>=0) or -1 on error. */
    int db2_kb_async_count_kind(const char *kind);
 
+   /* structured-pdf Phase B: a recognised table cell. Stored ONLY in kb_table_cells (never
+    * in the shared typed_facts table — see schema.sql). */
+   typedef struct
+   {
+      int64_t id;
+      int64_t region_id;
+      int page_no;
+      int cell_row;
+      int cell_col;
+      char cell_text[2048];
+      char subject[256];
+      char relation[128];
+      char object[512];
+      int tsr_confidence; /* 0-100 */
+      char sensitivity_class[16];
+   } db2_kb_table_cell_t;
+
+   /* Insert one table cell linked to its source kb_doc_regions row. The denormalised
+    * document_key/sensitivity_class come from the region (the live ACL is still the
+    * authority at read time). Returns the new id (>0) or -1. */
+   int db2_kb_table_cell_insert(int64_t region_id, const char *document_key, int page_no,
+                                int cell_row, int cell_col, const char *cell_text,
+                                const char *subject, const char *relation, const char *object,
+                                int tsr_confidence, const char *sensitivity_class);
+
+   /* lookup_table: structured cells for a (project, document_key[, page_no]) gated by the FULL
+    * PDF ACL — doc_kind='pdf' AND quarantine_state<>'pending' AND project — applied via a join
+    * to the authoritative kb_documents row (a guessed/foreign document_key returns empty).
+    * page_no < 0 returns all pages. Returns the number written (<= max). */
+   int db2_kb_table_cells_lookup(const char *project, const char *document_key, int page_no,
+                                 db2_kb_table_cell_t *out, int max);
+
+   /* Set/get the per-document TSR outcome (drives lookup_table's tsr_status marker).
+    * set: scoped to the (project, file_path) PDF chunks. get: returns the state for a
+    * READABLE doc (same ACL as lookup), writing "" + returning 0 if the doc is absent/
+    * withheld/unreadable, 1 on a hit. */
+   void db2_kb_documents_set_tsr_state(const char *project, const char *file_path,
+                                       const char *state);
+   int db2_kb_pdf_tsr_state(const char *project, const char *document_key, char *out, size_t out_len);
+
    /* §5 evidence escalation reads. All withhold quarantine_state='pending' (restricted)
     * documents. Return the number written (<= max). */
 

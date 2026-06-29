@@ -160,3 +160,42 @@ char *kb_client_pdf_inspect_structure(const char *project, const char *document_
    free(path);
    return json;
 }
+
+char *kb_client_pdf_lookup_table(const char *project, const char *document_key, int page_no,
+                                 int *status_out)
+{
+   if (status_out)
+      *status_out = -1;
+   if (!project || !project[0] || !document_key || !document_key[0])
+      return NULL;
+
+   char *project_q = kb_client_query_escape(project);
+   char *dk_q = kb_client_query_escape(document_key);
+   if (!project_q || !dk_q)
+   {
+      free(project_q);
+      free(dk_q);
+      return NULL;
+   }
+
+   size_t cap = strlen("/v1/pdf/lookup_table?project=&document_key=&page_no=") + strlen(project_q) +
+                strlen(dk_q) + 32;
+   char *path = malloc(cap);
+   if (!path)
+   {
+      free(project_q);
+      free(dk_q);
+      return NULL;
+   }
+   if (page_no >= 0)
+      snprintf(path, cap, "/v1/pdf/lookup_table?project=%s&document_key=%s&page_no=%d", project_q,
+               dk_q, page_no);
+   else
+      snprintf(path, cap, "/v1/pdf/lookup_table?project=%s&document_key=%s", project_q, dk_q);
+   free(project_q);
+   free(dk_q);
+
+   char *json = kb_client_v1_get_json(path, KB_CLIENT_PDF_READ_TIMEOUT_MS, status_out);
+   free(path);
+   return json;
+}

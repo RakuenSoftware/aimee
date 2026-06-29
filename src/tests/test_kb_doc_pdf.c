@@ -15,6 +15,8 @@
 #include "../db2/kb_payload.h"
 #include "kb_doc_pdf.h"
 #include "kb_http_pdf.h"
+#include "kb_tsr_sidecar.h"
+#include "support/mock_agent_http.h"
 
 #define PASS(name) printf("  PASS: %s\n", (name))
 
@@ -539,6 +541,152 @@ static void test_pdf_vector_enqueue_and_answerability(void)
    PASS("pdf_vector_enqueue_and_answerability");
 }
 
+/* ---- Phase B: TSR sidecar client + lookup_table ---- */
+
+static const char *g_tsr_resp = NULL;
+static int g_tsr_status = 200;
+
+static int tsr_mock_post(const char *url, const char *auth_header, const char *body,
+                         char **response_buf, int timeout_ms, const char *extra_headers)
+{
+   (void)url;
+   (void)auth_header;
+   (void)body;
+   (void)timeout_ms;
+   (void)extra_headers;
+   if (response_buf && g_tsr_resp)
+      *response_buf = strdup(g_tsr_resp);
+   return g_tsr_status;
+}
+
+static void test_tsr_sidecar_client(void)
+{
+   kb_tsr_cell_t *cells = NULL;
+   int n = 0;
+
+   /* No endpoint configured → unavailable, agent_http_post is never invoked. */
+   assert(kb_tsr_recognize("", 1, "[]", &cells, &n) == -1 && cells == NULL && n == 0);
+
+   mock_agent_http_set_post_handler(tsr_mock_post);
+
+   /* Recognised table → cells parsed (row/col/text/confidence/line_index). */
+   g_tsr_status = 200;
+   g_tsr_resp = "{\"is_table\":true,\"cells\":["
+                "{\"row\":0,\"col\":0,\"text\":\"Q1\",\"confidence\":91,\"line_index\":0},"
+                "{\"row\":0,\"col\":1,\"text\":\"42\",\"confidence\":88,\"line_index\":1}]}";
+   assert(kb_tsr_recognize("http://tsr.local/recognize", 2, "[]", &cells, &n) == 1);
+   assert(n == 2);
+   assert(cells[0].row == 0 && cells[0].col == 0 && strcmp(cells[0].text, "Q1") == 0);
+   assert(cells[0].confidence == 91 && cells[0].line_index == 0);
+   assert(cells[1].col == 1 && strcmp(cells[1].text, "42") == 0);
+   kb_tsr_free_cells(cells, n);
+
+   /* Sidecar ran but found no table → 0, no cells. */
+   cells = NULL;
+   n = 0;
+   g_tsr_resp = "{\"is_table\":false}";
+   assert(kb_tsr_recognize("http://tsr.local/recognize", 1, "[]", &cells, &n) == 0 && n == 0);
+
+   /* Non-2xx → unavailable. */
+   g_tsr_status = 503;
+   g_tsr_resp = "upstream down";
+   assert(kb_tsr_recognize("http://tsr.local/recognize", 1, "[]", &cells, &n) == -1);
+
+   mock_agent_http_reset();
+   g_tsr_resp = NULL;
+   g_tsr_status = 200;
+   PASS("tsr_sidecar_client");
+}
+
+/* First region id for a document_key (cells link to a real region). */
+static int64_t first_region_id(const char *document_key)
+{
+   char sql[256];
+   snprintf(sql, sizeof(sql),
+            "SELECT id FROM kb_doc_regions WHERE document_key='%s' ORDER BY id LIMIT 1",
+            document_key);
+   return count_rows(sql);
+}
+
+static void test_pdf_table_cells(void)
+{
+   db2_test_shim_open();
+
+   kb_pdf_ingest_stats_t stats;
+   assert(kb_doc_pdf_ingest_xhtml("proj", "report.pdf", "h1", FIXTURE_2PAGE, "internal", &stats) ==
+          2);
+   int64_t rid = first_region_id("report.pdf");
+   assert(rid > 0);
+
+   /* Simulate a TSR run: insert cells linked to a real region + mark tsr_state='ran'. */
+   assert(db2_kb_table_cell_insert(rid, "report.pdf", 1, 0, 0, "Metric", "", "", "", 90,
+                                   "internal") > 0);
+   assert(db2_kb_table_cell_insert(rid, "report.pdf", 1, 0, 1, "Value", "", "", "", 90,
+                                   "internal") > 0);
+   assert(db2_kb_table_cell_insert(rid, "report.pdf", 1, 1, 0, "Revenue", "", "", "", 85,
+                                   "internal") > 0);
+   db2_kb_documents_set_tsr_state("proj", "report.pdf", "ran");
+
+   db2_kb_table_cell_t cells[16];
+   int n = db2_kb_table_cells_lookup("proj", "report.pdf", -1, cells, 16);
+   assert(n == 3);
+   /* Ordered by page, row, col. */
+   assert(cells[0].cell_row == 0 && cells[0].cell_col == 0 &&
+          strcmp(cells[0].cell_text, "Metric") == 0);
+   assert(cells[2].cell_row == 1 && strcmp(cells[2].cell_text, "Revenue") == 0);
+
+   char state[32] = "";
+   assert(db2_kb_pdf_tsr_state("proj", "report.pdf", state, sizeof(state)) == 1);
+   assert(strcmp(state, "ran") == 0);
+
+   /* Page scope. */
+   assert(db2_kb_table_cells_lookup("proj", "report.pdf", 1, cells, 16) == 3);
+   assert(db2_kb_table_cells_lookup("proj", "report.pdf", 2, cells, 16) == 0);
+
+   /* ACL: a guessed/foreign document_key returns empty + no readable state. */
+   assert(db2_kb_table_cells_lookup("proj", "ghost.pdf", -1, cells, 16) == 0);
+   state[0] = '\0';
+   assert(db2_kb_pdf_tsr_state("proj", "ghost.pdf", state, sizeof(state)) == 0 && state[0] == '\0');
+
+   /* ACL: a RESTRICTED (pending) doc's cells are withheld even though they exist. */
+   assert(kb_doc_pdf_ingest_xhtml("proj", "secret.pdf", "h2", FIXTURE_2PAGE, "restricted",
+                                  &stats) == 2);
+   int64_t srid = first_region_id("secret.pdf");
+   assert(srid > 0);
+   assert(db2_kb_table_cell_insert(srid, "secret.pdf", 1, 0, 0, "TopSecret", "", "", "", 90,
+                                   "restricted") > 0);
+   db2_kb_documents_set_tsr_state("proj", "secret.pdf", "ran");
+   assert(db2_kb_table_cells_lookup("proj", "secret.pdf", -1, cells, 16) == 0); /* withheld */
+   state[0] = '\0';
+   assert(db2_kb_pdf_tsr_state("proj", "secret.pdf", state, sizeof(state)) == 0); /* withheld */
+
+   /* tsr_status='not_a_table' when TSR ran but produced no cells. */
+   assert(kb_doc_pdf_ingest_xhtml("proj", "plain.pdf", "h3", FIXTURE_2PAGE, "internal", &stats) ==
+          2);
+   db2_kb_documents_set_tsr_state("proj", "plain.pdf", "no_table");
+
+   /* Route round-trip: cells + tsr_status surfaced; missing params 400; pending withheld. */
+   char buf[16384];
+   assert(handle_get_pdf_lookup_table_route("GET", "project=proj&document_key=report.pdf", buf,
+                                            sizeof(buf)) == 200);
+   assert(strstr(buf, "\"tsr_status\":\"ran\"") != NULL);
+   assert(strstr(buf, "\"text\":\"Revenue\"") != NULL);
+   assert(handle_get_pdf_lookup_table_route("GET", "project=proj&document_key=plain.pdf", buf,
+                                            sizeof(buf)) == 200);
+   assert(strstr(buf, "\"tsr_status\":\"not_a_table\"") != NULL);
+   assert(handle_get_pdf_lookup_table_route("GET", "project=proj&document_key=secret.pdf", buf,
+                                            sizeof(buf)) == 200);
+   assert(strstr(buf, "\"tsr_status\":\"unavailable\"") != NULL); /* withheld → no state */
+   assert(strstr(buf, "TopSecret") == NULL);
+   assert(handle_get_pdf_lookup_table_route("GET", "document_key=report.pdf", buf, sizeof(buf)) ==
+          400); /* missing project */
+   assert(handle_get_pdf_lookup_table_route("GET", "project=proj", buf, sizeof(buf)) ==
+          400); /* missing document_key */
+
+   db2_test_shim_close();
+   PASS("pdf_table_cells");
+}
+
 int main(void)
 {
    printf("structured-pdf (kb_doc_pdf) tests:\n");
@@ -552,6 +700,8 @@ int main(void)
    test_pdf_quarantine_admin();
    test_pdf_evidence_tools();
    test_pdf_vector_enqueue_and_answerability();
+   test_tsr_sidecar_client();
+   test_pdf_table_cells();
    printf("ALL PASS\n");
    return 0;
 }

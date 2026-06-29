@@ -396,3 +396,69 @@ int handle_get_pdf_structure_route(const char *method, const char *query_string,
    free(ol);
    return pdf_emit_json(root, out_buf, out_cap);
 }
+
+/* GET /v1/pdf/lookup_table — structured-PDF Phase B table cells (see kb_http_pdf.h). */
+#define PDF_MAX_CELLS 512
+int handle_get_pdf_lookup_table_route(const char *method, const char *query_string, char *out_buf,
+                                      int out_cap)
+{
+   if (!method || strcmp(method, "GET") != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
+      return 405;
+   }
+   char project[128] = "", document_key[1024] = "", pages[16] = "";
+   if (!pdf_qparam(query_string, "project", project, sizeof(project)) || !project[0])
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing project parameter\"}");
+      return 400;
+   }
+   if (!pdf_qparam(query_string, "document_key", document_key, sizeof(document_key)) ||
+       !document_key[0])
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing document_key parameter\"}");
+      return 400;
+   }
+   int page_no = -1; /* default: all pages */
+   if (pdf_qparam(query_string, "page_no", pages, sizeof(pages)))
+      page_no = atoi(pages);
+
+   db2_kb_table_cell_t *cells = malloc((size_t)PDF_MAX_CELLS * sizeof(*cells));
+   if (!cells)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
+      return 500;
+   }
+   int n = db2_kb_table_cells_lookup(project, document_key, page_no, cells, PDF_MAX_CELLS);
+
+   /* tsr_status: derive from the per-document TSR outcome, gated by the same ACL. A
+    * guessed/foreign/withheld document_key yields no readable state -> 'unavailable'. */
+   char state[32] = "";
+   db2_kb_pdf_tsr_state(project, document_key, state, sizeof(state));
+   const char *tsr_status = strcmp(state, "ran") == 0        ? "ran"
+                            : strcmp(state, "no_table") == 0 ? "not_a_table"
+                                                             : "unavailable";
+
+   cJSON *root = cJSON_CreateObject();
+   cJSON_AddStringToObject(root, "tsr_status", tsr_status);
+   cJSON *arr = cJSON_AddArrayToObject(root, "cells");
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *c = cJSON_CreateObject();
+      cJSON_AddNumberToObject(c, "page_no", cells[i].page_no);
+      cJSON_AddNumberToObject(c, "row", cells[i].cell_row);
+      cJSON_AddNumberToObject(c, "col", cells[i].cell_col);
+      cJSON_AddStringToObject(c, "text", cells[i].cell_text);
+      cJSON_AddNumberToObject(c, "tsr_confidence", cells[i].tsr_confidence);
+      if (cells[i].subject[0] || cells[i].relation[0] || cells[i].object[0])
+      {
+         cJSON_AddStringToObject(c, "subject", cells[i].subject);
+         cJSON_AddStringToObject(c, "relation", cells[i].relation);
+         cJSON_AddStringToObject(c, "object", cells[i].object);
+      }
+      cJSON_AddItemToArray(arr, c);
+   }
+   cJSON_AddNumberToObject(root, "total", n);
+   free(cells);
+   return pdf_emit_json(root, out_buf, out_cap);
+}

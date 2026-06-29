@@ -941,6 +941,14 @@ int config_load(config_t *cfg)
    if (cJSON_IsBool(item))
       cfg->kb_pdf_vector_enabled = cJSON_IsTrue(item);
 
+   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_tsr_enabled");
+   if (cJSON_IsBool(item))
+      cfg->kb_pdf_tsr_enabled = cJSON_IsTrue(item);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "tsr_command");
+   if (cJSON_IsString(item) && item->valuestring)
+      snprintf(cfg->tsr_command, sizeof(cfg->tsr_command), "%s", item->valuestring);
+
    item = cJSON_GetObjectItemCaseSensitive(root, "kb_evidence_emit_enabled");
    if (cJSON_IsBool(item))
       cfg->kb_evidence_emit_enabled = cJSON_IsTrue(item);

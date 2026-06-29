@@ -643,13 +643,11 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       return 200;
    }
 
-   /* Auth + scope authorization, routed through the pluggable Verifier seam
-    * (kb_verifier.h). The built-in kb-token verifier validates the configured
-    * bearer (which may be self-describing "scope:<kind>:<id>:<secret>") and
-    * yields the verified scope. Per verify-then-trust, the scope used for the
-    * cross-scope check comes from that verified result, never from the caller.
-    * `vr` is function-scoped so owner-only routes (e.g. /v1/enroll) can tell an
-    * unscoped owner credential (empty scope_kind) from a scoped one. */
+   /* Auth + scope authorization via the pluggable Verifier seam (kb_verifier.h): the built-in
+    * kb-token verifier validates the configured bearer (which may be self-describing
+    * "scope:<kind>:<id>:<secret>") and yields the verified scope. Per verify-then-trust, the
+    * cross-scope check uses that verified scope, never the caller's. `vr` is function-scoped so
+    * owner-only routes (e.g. /v1/enroll) tell an unscoped owner credential from a scoped one. */
    kb_verify_result_t vr;
    memset(&vr, 0, sizeof(vr));
    if (bearer_token && bearer_token[0])
@@ -1303,6 +1301,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       return handle_get_pdf_neighbors_route(method, query_string, out_buf, out_cap);
    if (strcmp(path, "/v1/pdf/structure") == 0)
       return handle_get_pdf_structure_route(method, query_string, out_buf, out_cap);
+   if (strcmp(path, "/v1/pdf/lookup_table") == 0)
+      return handle_get_pdf_lookup_table_route(method, query_string, out_buf, out_cap);
    /* POST /v1/pdf/quarantine: owner-only release/purge; auth checked here (scope vr lives here). */
    if (strcmp(path, "/v1/pdf/quarantine") == 0)
    {

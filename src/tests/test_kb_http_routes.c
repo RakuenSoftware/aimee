@@ -297,37 +297,8 @@ int db2_reembed_in_progress_get(int *target_dim, long *started_epoch)
    (void)started_epoch;
    return 0; /* not in progress -> search path proceeds */
 }
-/* structured-PDF search_chunks db2 stubs — exercised against real SQL in
- * test_kb_doc_pdf.c; here they only resolve the link (void* args avoid kb_payload.h). */
-int db2_kb_pdf_search_chunks(const char *project, const char *query, int max, void *out, void *a)
-{
-   return 0;
-}
-int db2_kb_doc_regions_for_chunk(int64_t chunk_id, void *out, int max)
-{
-   return 0;
-}
-int db2_kb_pdf_quarantine_confirm(const char *project, const char *document_key)
-{
-   return 0;
-}
-int db2_kb_pdf_quarantine_reject(const char *project, const char *document_key)
-{
-   return 0;
-}
-int db2_kb_pdf_open_page(const char *project, const char *document_key, int page_no, void *out,
-                         int max)
-{
-   return 0;
-}
-int db2_kb_pdf_open_neighbors(const char *project, int64_t chunk_id, void *out, int max)
-{
-   return 0;
-}
-int db2_kb_pdf_inspect_structure(const char *project, const char *document_key, void *out, int max)
-{
-   return 0;
-}
+/* structured-PDF db2 stubs live in tests/support/pdf_route_stubs.c (link-only; the real
+ * SQL is exercised against the sqlite shim in test_kb_doc_pdf.c). */
 int db2_dim_change_reset(int target_dim, int force, int dry_run, db2_reembed_plan_t *out)
 {
    (void)force;

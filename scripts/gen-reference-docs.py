@@ -180,6 +180,11 @@ CFG_KEY_DESC = {
     "kb_pdf_vector_enabled": "Embed structured-PDF chunks into the isolated kb_pdf_embeddings "
     "relation and add the vector candidate leg to search_chunks (default off; degrades to "
     "lexical-only when the embedder is absent).",
+    "kb_pdf_tsr_enabled": "Run the table-structure-recognition (TSR) sidecar at PDF ingest to turn "
+    "table regions into structured kb_table_cells, surfaced via lookup_table (default off; "
+    "degrades to text-only when the sidecar is absent).",
+    "tsr_command": "TSR sidecar endpoint/command for structured-PDF table recognition (resolves "
+    "like embedding_command; AIMEE_TSR_URL env fallback).",
     "kb_mining_enabled": "Enable background KB mining.",
     "kb_mining_min_poll_s": "Minimum interval (s) between KB mining polls.",
     "kb_search_max_results": "Default max results for KB search.",

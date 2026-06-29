@@ -4,8 +4,10 @@
  * upload-route wiring are the next increment); this is exercised by its unit tests only. */
 #include "kb_doc_pdf.h"
 
+#include "cJSON.h"
 #include "config.h"
 #include "db2/kb_payload.h"
+#include "kb_tsr_sidecar.h"
 #include "log.h"
 
 #include <ctype.h>
@@ -719,6 +721,62 @@ int kb_pdf_sensitivity_valid(const char *s)
           (strcmp(s, "public") == 0 || strcmp(s, "internal") == 0 || strcmp(s, "restricted") == 0);
 }
 
+/* Phase B: run the TSR sidecar over one chunk's (page's) regions and persist any recognised
+ * cells, linking each cell to its source kb_doc_regions row via line_index (falling back to
+ * the page's first region so every cell carries provenance). Best-effort: a sidecar failure
+ * returns 0 and never aborts the ingest — the page stays text-only. Returns 1 if a table was
+ * recognised + cells stored, else 0. */
+static int kb_pdf_tsr_chunk(const char *file_path, const kb_pdf_chunk_t *c,
+                            const int64_t *region_ids, int n_region_ids, const char *endpoint,
+                            const char *sensitivity_class)
+{
+   if (!endpoint || !endpoint[0] || c->n_lines <= 0 || n_region_ids <= 0)
+      return 0;
+   int page_no = c->lines[0] ? c->lines[0]->page_no : c->page_start;
+
+   cJSON *regions = cJSON_CreateArray();
+   if (!regions)
+      return 0;
+   for (int j = 0; j < c->n_lines; j++)
+   {
+      const kb_pdf_line_t *ln = c->lines[j];
+      cJSON *r = cJSON_CreateObject();
+      cJSON_AddStringToObject(r, "text", ln->text ? ln->text : "");
+      cJSON_AddNumberToObject(r, "x0", ln->x0);
+      cJSON_AddNumberToObject(r, "y0", ln->y0);
+      cJSON_AddNumberToObject(r, "x1", ln->x1);
+      cJSON_AddNumberToObject(r, "y1", ln->y1);
+      cJSON_AddNumberToObject(r, "line_index", j);
+      cJSON_AddItemToArray(regions, r);
+   }
+   char *page_json = cJSON_PrintUnformatted(regions);
+   cJSON_Delete(regions);
+   if (!page_json)
+      return 0;
+
+   kb_tsr_cell_t *cells = NULL;
+   int n_cells = 0;
+   int rc = kb_tsr_recognize(endpoint, page_no, page_json, &cells, &n_cells);
+   free(page_json);
+   if (rc <= 0)
+   {
+      kb_tsr_free_cells(cells, n_cells);
+      return 0;
+   }
+   for (int k = 0; k < n_cells; k++)
+   {
+      int li = cells[k].line_index;
+      int64_t rid = (li >= 0 && li < n_region_ids) ? region_ids[li] : region_ids[0];
+      if (rid <= 0)
+         continue;
+      db2_kb_table_cell_insert(rid, file_path, page_no, cells[k].row, cells[k].col, cells[k].text,
+                               cells[k].subject, cells[k].relation, cells[k].object,
+                               cells[k].confidence, sensitivity_class);
+   }
+   kb_tsr_free_cells(cells, n_cells);
+   return 1;
+}
+
 int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *file_hash,
                       const kb_pdf_doc_t *doc, const char *sensitivity_class,
                       kb_pdf_ingest_stats_t *stats)
@@ -738,8 +796,17 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
     * quarantined-pending (restricted) docs — they are withheld until an owner
     * confirms, at which point the confirm path enqueues their embed_pdf jobs. */
    config_t pdf_cfg;
-   int vector_enabled = (config_load(&pdf_cfg) == 0 && pdf_cfg.kb_pdf_vector_enabled);
+   int cfg_ok = (config_load(&pdf_cfg) == 0);
+   int vector_enabled = cfg_ok && pdf_cfg.kb_pdf_vector_enabled;
    int embed_pdf_vec = vector_enabled && quarantine[0] == '\0';
+
+   /* Phase B: resolve the TSR sidecar endpoint when the capability is on. We do NOT run TSR
+    * for a withheld (pending) doc — its cells would be ACL-gated anyway, and a confirmed
+    * doc is re-ingested (origin-artifact rule) to populate them. tsr_attempted drives the
+    * per-document tsr_state marker (ran | no_table | '' when off/absent). */
+   const char *tsr_ep = (cfg_ok && pdf_cfg.kb_pdf_tsr_enabled) ? kb_tsr_endpoint(&pdf_cfg) : "";
+   int tsr_attempted = tsr_ep[0] && quarantine[0] == '\0';
+   int tsr_found_table = 0;
 
    kb_pdf_chunk_t *chunks = NULL;
    int n_chunks = 0;
@@ -783,14 +850,26 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
          goto fail;
       db2_kb_documents_link_neighbours(id, prev_id); /* void; covered by the txn */
 
+      int64_t region_ids[KB_PDF_MAX_CHUNK_LINES];
+      int n_region_ids = 0;
       for (int j = 0; j < c->n_lines; j++)
       {
          const kb_pdf_line_t *ln = c->lines[j];
-         if (db2_kb_doc_regions_insert(id, file_path, ln->page_no, ln->x0, ln->y0, ln->x1, ln->y1,
-                                       ln->text ? ln->text : "", j, "text", sensitivity_class) <= 0)
+         int64_t rid =
+             db2_kb_doc_regions_insert(id, file_path, ln->page_no, ln->x0, ln->y0, ln->x1, ln->y1,
+                                       ln->text ? ln->text : "", j, "text", sensitivity_class);
+         if (rid <= 0)
             goto fail;
+         if (j < KB_PDF_MAX_CHUNK_LINES)
+            region_ids[n_region_ids++] = rid;
          n_regions++;
       }
+
+      /* Phase B: best-effort TSR over this page's regions (covered by the txn — a sidecar
+       * failure does not abort ingest; the page just stays text-only). */
+      if (tsr_attempted &&
+          kb_pdf_tsr_chunk(file_path, c, region_ids, n_region_ids, tsr_ep, sensitivity_class))
+         tsr_found_table = 1;
 
       /* Phase A1: enqueue the embed into the ISOLATED kb_pdf_embeddings relation
        * (kind='embed_pdf'), inside this same ingest transaction. Because the job
@@ -805,6 +884,11 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
                   file_path); /* best-effort; the chunk stays lexical-only + cited */
       prev_id = id;
    }
+
+   /* Phase B: record the per-document TSR outcome so lookup_table can report tsr_status
+    * (ran | no_table); left '' when the capability is off/absent → 'unavailable'. */
+   if (tsr_attempted)
+      db2_kb_documents_set_tsr_state(project, file_path, tsr_found_table ? "ran" : "no_table");
 
    if (db2_kb_txn_commit() != 0)
       goto fail;

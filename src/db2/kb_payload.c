@@ -1007,6 +1007,157 @@ int db2_kb_pdf_reembed_all(void)
    return n;
 }
 
+int db2_kb_table_cell_insert(int64_t region_id, const char *document_key, int page_no, int cell_row,
+                             int cell_col, const char *cell_text, const char *subject,
+                             const char *relation, const char *object, int tsr_confidence,
+                             const char *sensitivity_class)
+{
+   if (region_id <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   static const char *sql =
+       "INSERT INTO kb_table_cells (region_id, document_key, page_no, cell_row, cell_col,"
+       " cell_text, subject, relation, object, tsr_confidence, source_type, sensitivity_class)"
+       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'table_cell', ?11) RETURNING id";
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", region_id);
+   aimee_pg_bind_text(st, "?2", document_key ? document_key : "");
+   aimee_pg_bind_int(st, "?3", page_no);
+   aimee_pg_bind_int(st, "?4", cell_row);
+   aimee_pg_bind_int(st, "?5", cell_col);
+   aimee_pg_bind_text(st, "?6", cell_text ? cell_text : "");
+   aimee_pg_bind_text(st, "?7", subject ? subject : "");
+   aimee_pg_bind_text(st, "?8", relation ? relation : "");
+   aimee_pg_bind_text(st, "?9", object ? object : "");
+   aimee_pg_bind_int(st, "?10", tsr_confidence);
+   aimee_pg_bind_text(st, "?11", sensitivity_class ? sensitivity_class : "");
+   int64_t id = -1;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      id = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   return id > 0 ? (int)id : -1;
+}
+
+int db2_kb_table_cells_lookup(const char *project, const char *document_key, int page_no,
+                              db2_kb_table_cell_t *out, int max)
+{
+   if (!out || max <= 0 || !project || !*project || !document_key || !*document_key)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+   /* Gate via a join to the AUTHORITATIVE kb_documents row: doc_kind='pdf' AND
+    * quarantine_state<>'pending' AND project — so a guessed/foreign/withheld document_key
+    * returns empty regardless of the denormalised columns on kb_table_cells. */
+   int all_pages = (page_no < 0);
+   const char *sql =
+       all_pages
+           ? "SELECT c.id, c.region_id, c.page_no, c.cell_row, c.cell_col, c.cell_text,"
+             " c.subject, c.relation, c.object, c.tsr_confidence, c.sensitivity_class"
+             " FROM kb_table_cells c JOIN kb_doc_regions r ON r.id = c.region_id"
+             " JOIN kb_documents d ON d.id = r.chunk_id"
+             " WHERE d.project = ?1 AND d.doc_kind = 'pdf' AND d.quarantine_state <> 'pending'"
+             "   AND c.document_key = ?2"
+             " ORDER BY c.page_no, c.cell_row, c.cell_col LIMIT ?3"
+           : "SELECT c.id, c.region_id, c.page_no, c.cell_row, c.cell_col, c.cell_text,"
+             " c.subject, c.relation, c.object, c.tsr_confidence, c.sensitivity_class"
+             " FROM kb_table_cells c JOIN kb_doc_regions r ON r.id = c.region_id"
+             " JOIN kb_documents d ON d.id = r.chunk_id"
+             " WHERE d.project = ?1 AND d.doc_kind = 'pdf' AND d.quarantine_state <> 'pending'"
+             "   AND c.document_key = ?2 AND c.page_no = ?3"
+             " ORDER BY c.cell_row, c.cell_col LIMIT ?4";
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", document_key);
+   if (all_pages)
+      aimee_pg_bind_int(st, "?3", max);
+   else
+   {
+      aimee_pg_bind_int(st, "?3", page_no);
+      aimee_pg_bind_int(st, "?4", max);
+   }
+   int n = 0;
+   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      memset(&out[n], 0, sizeof(out[n]));
+      out[n].id = aimee_pg_column_int64(st, 0);
+      out[n].region_id = aimee_pg_column_int64(st, 1);
+      out[n].page_no = aimee_pg_column_int(st, 2);
+      out[n].cell_row = aimee_pg_column_int(st, 3);
+      out[n].cell_col = aimee_pg_column_int(st, 4);
+      const char *ctext = aimee_pg_column_text(st, 5);
+      const char *subj = aimee_pg_column_text(st, 6);
+      const char *rel = aimee_pg_column_text(st, 7);
+      const char *obj = aimee_pg_column_text(st, 8);
+      const char *sens = aimee_pg_column_text(st, 10);
+      snprintf(out[n].cell_text, sizeof(out[n].cell_text), "%s", ctext ? ctext : "");
+      snprintf(out[n].subject, sizeof(out[n].subject), "%s", subj ? subj : "");
+      snprintf(out[n].relation, sizeof(out[n].relation), "%s", rel ? rel : "");
+      snprintf(out[n].object, sizeof(out[n].object), "%s", obj ? obj : "");
+      out[n].tsr_confidence = aimee_pg_column_int(st, 9);
+      snprintf(out[n].sensitivity_class, sizeof(out[n].sensitivity_class), "%s", sens ? sens : "");
+      n++;
+   }
+   aimee_pg_finalize(st);
+   return n;
+}
+
+void db2_kb_documents_set_tsr_state(const char *project, const char *file_path, const char *state)
+{
+   void *conn = db2_conn();
+   if (!conn || !project || !*project || !file_path || !*file_path)
+      return;
+   static const char *sql = "UPDATE kb_documents SET tsr_state = ?3"
+                            " WHERE project = ?1 AND file_path = ?2 AND doc_kind = 'pdf'";
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", file_path);
+   aimee_pg_bind_text(st, "?3", state ? state : "");
+   (void)aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+}
+
+int db2_kb_pdf_tsr_state(const char *project, const char *document_key, char *out, size_t out_len)
+{
+   if (out && out_len)
+      out[0] = '\0';
+   if (!out || !out_len || !project || !*project || !document_key || !*document_key)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+   /* Same ACL as lookup: only a readable (non-withheld) PDF doc yields a state. */
+   static const char *sql = "SELECT tsr_state FROM kb_documents"
+                            " WHERE project = ?1 AND file_path = ?2 AND doc_kind = 'pdf'"
+                            "   AND quarantine_state <> 'pending' LIMIT 1";
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", document_key);
+   int hit = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *s = aimee_pg_column_text(st, 0);
+      snprintf(out, out_len, "%s", s ? s : "");
+      hit = 1;
+   }
+   aimee_pg_finalize(st);
+   return hit;
+}
+
 int db2_kb_doc_regions_for_chunk(int64_t chunk_id, db2_kb_pdf_region_t *out, int max)
 {
    if (!out || max <= 0 || chunk_id <= 0)

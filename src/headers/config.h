@@ -390,6 +390,11 @@ typedef struct config
    int kb_pdf_vector_enabled;    /* structured-pdf Phase A: embed PDF chunks into the isolated
                                     kb_pdf_embeddings relation + add the vector leg to
                                     search_chunks (default off; degrades to lexical when absent) */
+   int kb_pdf_tsr_enabled;       /* structured-pdf Phase B: run the TSR sidecar at ingest to turn
+                                    table regions into kb_table_cells (default off; degrades to
+                                    text-only + tsr_status='unavailable' when the sidecar absent) */
+   char tsr_command[1024];       /* structured-pdf Phase B: TSR sidecar endpoint/command
+                                    (resolves like embedding_command; AIMEE_TSR_URL env fallback) */
    int kb_evidence_emit_enabled; /* auditable-correctness: emit per-turn retrieval_event (default
                                     off) */
    int fidelity_check_enabled; /* auditable-correctness P3: run the fidelity judge on terminal-text
