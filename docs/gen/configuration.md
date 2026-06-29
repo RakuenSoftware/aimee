@@ -270,7 +270,9 @@ The binaries read 133 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_SOCK` | Sandbox helper socket path. |
 | `AIMEE_WEBCHAT_EDITOR` | Per-webuser in-browser code-server editor (on by default; set to 0 to disable; needs a code-server binary, shipped by WITH_VSCODE images). |
 | `AIMEE_WEBCHAT_EDITOR_BIN` | Override path to the code-server binary used for the in-browser editor. |
+| `AIMEE_WEBCHAT_EDITOR_IDLE_SECS` | Idle timeout in seconds before a per-webuser code-server editor is reaped. Default 1800 (30 min); positive values are clamped to [60, 604800]; 0 disables idle reaping; malformed/negative/overflow values fall back to the default. An actively-open editor is kept alive by the proxy keepalive, so it is not reaped mid-session. |
 | `AIMEE_WEBCHAT_EDITOR_UID` | Dedicated service user the per-webuser code-server drops to (defence in depth; only honoured when aimee-server runs as root). |
+| `AIMEE_WEBCHAT_GIT` | Per-webuser webchat git surface — repo connect/clone, git ops (pull/commit/push/branch), per-host token + SSH-key credential intake, the workspace forge-token broker, project listing + session-dir resolution, and "Sign in with GitHub" (on by default; set to the literal value 0 to disable the entire surface — all of those routes then return 503, e.g. for a chat/editor-only deployment; any other value leaves it on). Independent of AIMEE_WEBCHAT_EDITOR. |
 | `AIMEE_WORKTREE_GC` | Enable/disable delegate-worktree garbage collection. |
 | `AIMEE_WORKTREE_GC_DAYS` | Age threshold (days) for worktree GC. |
 
@@ -412,7 +414,7 @@ The binaries read 133 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet — the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_WEBCHAT_EDITOR_IDLE_SECS`, `AIMEE_WEBCHAT_GIT`, `AIMEE_WORKFLOW_BRANCH`
+`AIMEE_AUTONOMY_BASE`, `AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL`, `AIMEE_AUTONOMY_MAX_USD`, `AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN`, `AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS`, `AIMEE_AUTONOMY_USD_PER_SEC`, `AIMEE_CODEX_REFRESH_SKEW`, `AIMEE_CODE_INDEX_SOURCE`, `AIMEE_DB2_POOL_SIZE`, `AIMEE_DELEGATE_MAX_INFLIGHT`, `AIMEE_DIM_PROBE_BUDGET_MS`, `AIMEE_PROJECT_ID`, `AIMEE_RUNTIME_DIR`, `AIMEE_TLS_CLIENT_P12_PASS`, `AIMEE_TLS_EXTRA_SAN`, `AIMEE_WORKFLOW_BRANCH`
 
 ## External & provider environment
 
