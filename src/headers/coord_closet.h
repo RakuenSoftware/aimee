@@ -97,7 +97,9 @@ extern "C"
    /* Scan `raw` (length `len`) for verbatim coordinates, appending them to `set`
     * with the given provenance. Duplicate values keep their earliest occurrence.
     * Deterministic. `prov` may be NULL (treated as AGENT lane, all ids -1).
-    * Returns the number of distinct coordinates added. */
+    * Copies the nominated bytes into the set; does NOT retain the caller's `raw`
+    * pointer (safe to free `raw` after the call). Returns the number of distinct
+    * coordinates added. */
    size_t coord_closet_nominate(const char *raw, size_t len, const coord_provenance_t *prov,
                                 coord_set_t *set);
 

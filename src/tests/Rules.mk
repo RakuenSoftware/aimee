@@ -211,6 +211,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-compact \
                $(TESTPREFIX)/unit-test-coord-closet \
                $(TESTPREFIX)/unit-test-fold-budget \
+               $(TESTPREFIX)/unit-test-context-fold \
                $(TESTPREFIX)/unit-test-token-audit \
                $(TESTPREFIX)/unit-test-token-audit-load \
                $(TESTPREFIX)/unit-test-windows \
@@ -1976,6 +1977,11 @@ $(TESTPREFIX)/unit-test-coord-closet: $(OBJDIR)/tests/test_coord_closet.o $(OBJD
 $(TESTPREFIX)/unit-test-fold-budget: $(OBJDIR)/tests/test_fold_budget.o $(OBJDIR)/fold_budget.o \
                                   $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o \
                                   $(OBJDIR)/models_dev_cache.o $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-context-fold: $(OBJDIR)/tests/test_context_fold.o $(OBJDIR)/context_fold.o \
+                                  $(OBJDIR)/coord_closet.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o \
+                                  $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-compact-prune: $(OBJDIR)/tests/test_compact_prune.o \
