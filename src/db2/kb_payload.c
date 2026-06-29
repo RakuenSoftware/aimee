@@ -1052,8 +1052,11 @@ int db2_kb_table_cells_lookup(const char *project, const char *document_key, int
    if (!conn)
       return 0;
    /* Gate via a join to the AUTHORITATIVE kb_documents row: doc_kind='pdf' AND
-    * quarantine_state<>'pending' AND project — so a guessed/foreign/withheld document_key
-    * returns empty regardless of the denormalised columns on kb_table_cells. */
+    * quarantine_state<>'pending' AND project. The requested document_key is bound to the
+    * authoritative d.file_path (NOT the denormalised c.document_key), so even if a cell's
+    * cached document_key ever drifts from its source doc, the cell is reachable only under
+    * the file_path of the readable kb_documents row it actually descends from — a
+    * guessed/foreign/withheld key returns empty. */
    int all_pages = (page_no < 0);
    const char *sql =
        all_pages
@@ -1062,14 +1065,14 @@ int db2_kb_table_cells_lookup(const char *project, const char *document_key, int
              " FROM kb_table_cells c JOIN kb_doc_regions r ON r.id = c.region_id"
              " JOIN kb_documents d ON d.id = r.chunk_id"
              " WHERE d.project = ?1 AND d.doc_kind = 'pdf' AND d.quarantine_state <> 'pending'"
-             "   AND c.document_key = ?2"
+             "   AND d.file_path = ?2"
              " ORDER BY c.page_no, c.cell_row, c.cell_col LIMIT ?3"
            : "SELECT c.id, c.region_id, c.page_no, c.cell_row, c.cell_col, c.cell_text,"
              " c.subject, c.relation, c.object, c.tsr_confidence, c.sensitivity_class"
              " FROM kb_table_cells c JOIN kb_doc_regions r ON r.id = c.region_id"
              " JOIN kb_documents d ON d.id = r.chunk_id"
              " WHERE d.project = ?1 AND d.doc_kind = 'pdf' AND d.quarantine_state <> 'pending'"
-             "   AND c.document_key = ?2 AND c.page_no = ?3"
+             "   AND d.file_path = ?2 AND c.page_no = ?3"
              " ORDER BY c.cell_row, c.cell_col LIMIT ?4";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));

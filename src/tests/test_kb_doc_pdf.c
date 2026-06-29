@@ -687,6 +687,75 @@ static void test_pdf_table_cells(void)
    PASS("pdf_table_cells");
 }
 
+/* Mock TSR handler: every page is a 1-cell table at line_index 0. */
+static int tsr_ingest_mock(const char *url, const char *auth_header, const char *body,
+                           char **response_buf, int timeout_ms, const char *extra_headers)
+{
+   (void)url;
+   (void)auth_header;
+   (void)body;
+   (void)timeout_ms;
+   (void)extra_headers;
+   if (response_buf)
+      *response_buf = strdup(
+          "{\"is_table\":true,\"cells\":[{\"row\":0,\"col\":0,\"text\":\"Cell\",\"confidence\":80,"
+          "\"line_index\":0}]}");
+   return 200;
+}
+
+static void write_tsr_config(const char *home)
+{
+   mkdir(home, 0700);
+   char path[512];
+   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
+   FILE *fp = fopen(path, "w");
+   assert(fp);
+   fputs("kb_pdf_tsr_enabled: true\ntsr_command: \"http://tsr.local/recognize\"\n", fp);
+   fclose(fp);
+}
+
+/* End-to-end: ingest with TSR enabled runs the sidecar AFTER commit, persists cells, and
+ * a restricted doc's cells are stored-but-withheld until confirm (no re-ingest needed). */
+static void test_pdf_tsr_ingest(void)
+{
+   char home[] = "/tmp/aimee_pdf_tsr_test_XXXXXX";
+   assert(mkdtemp(home));
+   setenv("AIMEE_HOME", home, 1);
+   setenv("AIMEE_NO_CACHE", "1", 1);
+   write_tsr_config(home);
+   mock_agent_http_set_post_handler(tsr_ingest_mock);
+
+   db2_test_shim_open();
+
+   kb_pdf_ingest_stats_t stats;
+   /* 2-page fixture → TSR called per page; each page yields 1 cell at line_index 0. */
+   assert(kb_doc_pdf_ingest_xhtml("proj", "rep.pdf", "h1", FIXTURE_2PAGE, "internal", &stats) == 2);
+   db2_kb_table_cell_t cells[16];
+   int n = db2_kb_table_cells_lookup("proj", "rep.pdf", -1, cells, 16);
+   assert(n == 2); /* one cell per page */
+   assert(strcmp(cells[0].cell_text, "Cell") == 0 && cells[0].tsr_confidence == 80);
+   char state[32] = "";
+   assert(db2_kb_pdf_tsr_state("proj", "rep.pdf", state, sizeof(state)) == 1 &&
+          strcmp(state, "ran") == 0);
+
+   /* Restricted doc: TSR still runs at ingest (cells stored), but they are WITHHELD until an
+    * owner confirms — no re-ingest required (the fix for the post-confirm tsr_status gap). */
+   assert(kb_doc_pdf_ingest_xhtml("proj", "sec.pdf", "h2", FIXTURE_2PAGE, "restricted", &stats) ==
+          2);
+   assert(db2_kb_table_cells_lookup("proj", "sec.pdf", -1, cells, 16) == 0); /* withheld */
+   assert(db2_kb_pdf_quarantine_confirm("proj", "sec.pdf") == 2);
+   assert(db2_kb_table_cells_lookup("proj", "sec.pdf", -1, cells, 16) == 2); /* now visible */
+   state[0] = '\0';
+   assert(db2_kb_pdf_tsr_state("proj", "sec.pdf", state, sizeof(state)) == 1 &&
+          strcmp(state, "ran") == 0);
+
+   db2_test_shim_close();
+   mock_agent_http_reset();
+   unsetenv("AIMEE_NO_CACHE");
+   unsetenv("AIMEE_HOME");
+   PASS("pdf_tsr_ingest");
+}
+
 int main(void)
 {
    printf("structured-pdf (kb_doc_pdf) tests:\n");
@@ -702,6 +771,7 @@ int main(void)
    test_pdf_vector_enqueue_and_answerability();
    test_tsr_sidecar_client();
    test_pdf_table_cells();
+   test_pdf_tsr_ingest();
    printf("ALL PASS\n");
    return 0;
 }

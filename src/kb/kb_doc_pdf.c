@@ -766,12 +766,21 @@ static int kb_pdf_tsr_chunk(const char *file_path, const kb_pdf_chunk_t *c,
    for (int k = 0; k < n_cells; k++)
    {
       int li = cells[k].line_index;
-      int64_t rid = (li >= 0 && li < n_region_ids) ? region_ids[li] : region_ids[0];
+      int64_t rid;
+      if (li < 0)
+         rid = region_ids[0]; /* sidecar gave no source line → honest page-level provenance */
+      else if (li < n_region_ids)
+         rid = region_ids[li]; /* mapped to the exact source line */
+      else
+         continue; /* out-of-range line_index from an untrusted sidecar → skip, not false-attribute
+                    */
       if (rid <= 0)
          continue;
-      db2_kb_table_cell_insert(rid, file_path, page_no, cells[k].row, cells[k].col, cells[k].text,
-                               cells[k].subject, cells[k].relation, cells[k].object,
-                               cells[k].confidence, sensitivity_class);
+      if (db2_kb_table_cell_insert(rid, file_path, page_no, cells[k].row, cells[k].col,
+                                   cells[k].text, cells[k].subject, cells[k].relation,
+                                   cells[k].object, cells[k].confidence, sensitivity_class) < 0)
+         LOG_WARN("kb_tsr", "table cell insert failed (%s p%d r%d c%d)", file_path, page_no,
+                  cells[k].row, cells[k].col);
    }
    kb_tsr_free_cells(cells, n_cells);
    return 1;
@@ -800,12 +809,16 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
    int vector_enabled = cfg_ok && pdf_cfg.kb_pdf_vector_enabled;
    int embed_pdf_vec = vector_enabled && quarantine[0] == '\0';
 
-   /* Phase B: resolve the TSR sidecar endpoint when the capability is on. We do NOT run TSR
-    * for a withheld (pending) doc — its cells would be ACL-gated anyway, and a confirmed
-    * doc is re-ingested (origin-artifact rule) to populate them. tsr_attempted drives the
-    * per-document tsr_state marker (ran | no_table | '' when off/absent). */
+   /* Phase B: resolve the TSR sidecar endpoint when the capability is on. Unlike embed_pdf,
+    * TSR runs even for a withheld (pending/restricted) doc: its cells are gated at READ time
+    * by lookup_table's join to kb_documents.quarantine_state, so they stay invisible until an
+    * owner confirms — at which point they (and tsr_status='ran') become visible with no
+    * re-ingest needed. The TSR HTTP call + cell inserts run AFTER the ingest txn commits, so
+    * a slow/failing sidecar never holds the txn open or poisons it (best-effort, the page
+    * stays text-only on failure). tsr_attempted drives the per-document tsr_state marker
+    * (ran | no_table | '' when off/absent). */
    const char *tsr_ep = (cfg_ok && pdf_cfg.kb_pdf_tsr_enabled) ? kb_tsr_endpoint(&pdf_cfg) : "";
-   int tsr_attempted = tsr_ep[0] && quarantine[0] == '\0';
+   int tsr_attempted = (tsr_ep[0] != '\0');
    int tsr_found_table = 0;
 
    kb_pdf_chunk_t *chunks = NULL;
@@ -820,6 +833,24 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
    {
       kb_pdf_free_chunks(chunks, n_chunks);
       return 0;
+   }
+
+   /* Per-chunk source-region ids, retained across commit so the post-commit TSR pass can link
+    * cells back to their kb_doc_regions rows without re-querying. */
+   int64_t **chunk_rids = NULL;
+   int *chunk_nrids = NULL;
+   if (tsr_attempted)
+   {
+      chunk_rids = calloc((size_t)n_chunks, sizeof(*chunk_rids));
+      chunk_nrids = calloc((size_t)n_chunks, sizeof(*chunk_nrids));
+      if (!chunk_rids || !chunk_nrids)
+      {
+         free(chunk_rids);
+         free(chunk_nrids);
+         chunk_rids = NULL;
+         chunk_nrids = NULL;
+         tsr_attempted = 0; /* OOM on the retention arrays → degrade to text-only */
+      }
    }
 
    /* The whole re-ingest is one transaction: the delete (regions cascade via the
@@ -865,11 +896,17 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
          n_regions++;
       }
 
-      /* Phase B: best-effort TSR over this page's regions (covered by the txn — a sidecar
-       * failure does not abort ingest; the page just stays text-only). */
-      if (tsr_attempted &&
-          kb_pdf_tsr_chunk(file_path, c, region_ids, n_region_ids, tsr_ep, sensitivity_class))
-         tsr_found_table = 1;
+      /* Phase B: retain this page's region ids for the post-commit TSR pass (the TSR HTTP call
+       * is deliberately NOT made inside this transaction). */
+      if (tsr_attempted && chunk_rids)
+      {
+         chunk_rids[i] = malloc((size_t)n_region_ids * sizeof(int64_t));
+         if (chunk_rids[i])
+         {
+            memcpy(chunk_rids[i], region_ids, (size_t)n_region_ids * sizeof(int64_t));
+            chunk_nrids[i] = n_region_ids;
+         }
+      }
 
       /* Phase A1: enqueue the embed into the ISOLATED kb_pdf_embeddings relation
        * (kind='embed_pdf'), inside this same ingest transaction. Because the job
@@ -885,13 +922,31 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
       prev_id = id;
    }
 
-   /* Phase B: record the per-document TSR outcome so lookup_table can report tsr_status
-    * (ran | no_table); left '' when the capability is off/absent → 'unavailable'. */
-   if (tsr_attempted)
-      db2_kb_documents_set_tsr_state(project, file_path, tsr_found_table ? "ran" : "no_table");
-
    if (db2_kb_txn_commit() != 0)
       goto fail;
+
+   /* Phase B: TSR runs HERE — after the text/regions are durably committed — so the sidecar
+    * HTTP call never holds the ingest txn open, and a per-cell insert failure cannot roll back
+    * the document's text (cells are best-effort derived data; a crash before this leaves the
+    * doc text-indexed and re-ingest re-derives the cells). Each cell insert is its own
+    * autocommit statement, so a sidecar/SQL error here never poisons a transaction. */
+   if (tsr_attempted && chunk_rids)
+   {
+      for (int i = 0; i < n_chunks; i++)
+      {
+         if (chunk_rids[i] && kb_pdf_tsr_chunk(file_path, &chunks[i], chunk_rids[i], chunk_nrids[i],
+                                               tsr_ep, sensitivity_class))
+            tsr_found_table = 1;
+      }
+      /* Record the per-document TSR outcome so lookup_table can report tsr_status
+       * (ran | no_table); left '' when the capability is off/absent → 'unavailable'. */
+      db2_kb_documents_set_tsr_state(project, file_path, tsr_found_table ? "ran" : "no_table");
+   }
+   if (chunk_rids)
+      for (int i = 0; i < n_chunks; i++)
+         free(chunk_rids[i]);
+   free(chunk_rids);
+   free(chunk_nrids);
 
    if (stats)
    {
@@ -903,6 +958,11 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
 
 fail:
    db2_kb_txn_rollback();
+   if (chunk_rids)
+      for (int i = 0; i < n_chunks; i++)
+         free(chunk_rids[i]);
+   free(chunk_rids);
+   free(chunk_nrids);
    kb_pdf_free_chunks(chunks, n_chunks);
    return -1;
 }

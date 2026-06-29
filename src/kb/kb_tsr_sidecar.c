@@ -16,6 +16,9 @@
 
 #define KB_TSR_TIMEOUT_MS 30000
 #define KB_TSR_MAX_CELLS  4096
+/* Cap the sidecar response before parsing so a misconfigured/hostile sidecar inside the KB
+ * perimeter cannot OOM the ingest with an unbounded JSON body. */
+#define KB_TSR_MAX_RESP_BYTES (8 * 1024 * 1024)
 
 const char *kb_tsr_endpoint(const config_t *cfg)
 {
@@ -75,6 +78,12 @@ int kb_tsr_recognize(const char *endpoint, int page_no, const char *page_json,
    {
       free(resp);
       LOG_WARN("kb_tsr", "TSR sidecar call failed (status=%d)", status);
+      return -1;
+   }
+   if (strlen(resp) > KB_TSR_MAX_RESP_BYTES)
+   {
+      LOG_WARN("kb_tsr", "TSR sidecar response too large (%zu bytes); rejecting", strlen(resp));
+      free(resp);
       return -1;
    }
 
