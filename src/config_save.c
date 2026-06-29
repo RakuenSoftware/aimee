@@ -824,6 +824,10 @@ int config_save(const config_t *cfg)
    if (cfg->kb_pdf_blob_orphan_alarm_mb != 1024)
       cJSON_AddNumberToObject(root, "kb_pdf_blob_orphan_alarm_mb",
                               cfg->kb_pdf_blob_orphan_alarm_mb);
+   if (cfg->kb_pdf_ocr_enabled) /* default-off: persist only when enabled */
+      cJSON_AddBoolToObject(root, "kb_pdf_ocr_enabled", 1);
+   if (cfg->ocr_command[0])
+      cJSON_AddStringToObject(root, "ocr_command", cfg->ocr_command);
    if (!cfg->css_style_graph_enabled) /* default-on: persist only the opt-out */
       cJSON_AddBoolToObject(root, "css_style_graph_enabled", 0);
    if (cfg->wfe_live_forge_enabled) /* default-off: persist only the opt-in (enable) */

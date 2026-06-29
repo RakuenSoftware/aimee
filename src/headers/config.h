@@ -404,8 +404,13 @@ typedef struct config
                                        seconds (default 3600; <=0 disables the sweep) */
    int kb_pdf_blob_orphan_alarm_mb; /* structured-pdf Phase C: warn when reclaimable orphan bytes
                                        exceed this many MB (default 1024; <=0 disables the alarm) */
-   int kb_evidence_emit_enabled;    /* auditable-correctness: emit per-turn retrieval_event (default
-                                       off) */
+   int kb_pdf_ocr_enabled;       /* structured-pdf Phase D: OCR a scanned/no-text-layer PDF via the
+                                    OCR sidecar at ingest (default off; without it a scanned PDF is
+                                    asset-only) */
+   char ocr_command[1024];       /* structured-pdf Phase D: OCR sidecar endpoint/command (resolves
+                                    like embedding_command; AIMEE_OCR_URL env fallback) */
+   int kb_evidence_emit_enabled; /* auditable-correctness: emit per-turn retrieval_event (default
+                                    off) */
    int fidelity_check_enabled; /* auditable-correctness P3: run the fidelity judge on terminal-text
                                   turns (default off; fail-closed dep on
                                   kb_evidence_emit_enabled + ingress_preinject_enabled) */

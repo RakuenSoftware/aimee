@@ -9,6 +9,7 @@
 #include "db2/kb_payload.h"
 #include "kb_blob_store.h"
 #include "kb_doc_hash.h"
+#include "kb_ocr_sidecar.h"
 #include "kb_tsr_sidecar.h"
 #include "log.h"
 
@@ -954,6 +955,91 @@ int kb_doc_pdf_render_assets(const char *project, const char *file_path,
    if (created)
       LOG_INFO("kb_doc_pdf", "rendered %d page asset(s) for %s", created, file_path);
    return created;
+}
+
+/* Phase D: OCR a scanned PDF (no extractable text layer). Renders each page to a PNG (the same
+ * hardened pdftoppm harness), sends it to the OCR sidecar, and builds a kb_pdf_doc_t from the
+ * returned text + per-line geometry — already normalized to [0,1] — so it flows through the
+ * EXACT same kb_doc_pdf_ingest path as native text (citations work identically). Returns the
+ * ingested chunk count (>0), 0 if no text was recognised on any page (caller falls back to
+ * asset-only), or -1 on a DB error. */
+int kb_doc_pdf_ingest_ocr(const char *project, const char *file_path, const char *file_hash,
+                          const char *sensitivity_class, const unsigned char *pdf_bytes, int n,
+                          const char *ocr_endpoint, kb_pdf_ingest_stats_t *stats)
+{
+   if (stats)
+      memset(stats, 0, sizeof(*stats));
+   if (!project || !*project || !file_path || !*file_path || !pdf_bytes || n <= 0 ||
+       !ocr_endpoint || !ocr_endpoint[0])
+      return 0;
+
+   kb_pdf_doc_t doc;
+   memset(&doc, 0, sizeof(doc));
+   doc.normalized = 1; /* OCR geometry is already [0,1] — do NOT re-normalize. */
+
+   for (int page = 1; page <= KB_PDF_RENDER_MAX_PAGES; page++)
+   {
+      unsigned char *png = NULL;
+      int png_len = 0;
+      int rc = kb_pdf_exec_render(pdf_bytes, n, page, &png, &png_len, 30000);
+      if (rc == 1)
+      {
+         free(png);
+         break; /* no more pages */
+      }
+      if (rc != 0 || !png)
+      {
+         free(png);
+         if (page == 1)
+            break; /* pdftoppm absent / unrenderable → nothing to OCR */
+         continue;
+      }
+      kb_ocr_line_t *lines = NULL;
+      int nlines = 0;
+      int orc = kb_ocr_recognize(ocr_endpoint, page, png, png_len, &lines, &nlines);
+      free(png);
+      if (orc <= 0 || nlines == 0)
+      {
+         kb_ocr_free_lines(lines, nlines); /* no text on this page (or sidecar gone) */
+         continue;
+      }
+      /* One doc-page per OCR'd page; each line carries the real page_no so citations + the
+       * page-boundary chunker resolve to the correct page. */
+      if (doc.n_pages >= doc.cap_pages)
+      {
+         int ncap = doc.cap_pages ? doc.cap_pages * 2 : 8;
+         kb_pdf_page_t *np = realloc(doc.pages, (size_t)ncap * sizeof(*np));
+         if (!np)
+         {
+            kb_ocr_free_lines(lines, nlines);
+            kb_pdf_free_doc(&doc);
+            return -1;
+         }
+         doc.pages = np;
+         doc.cap_pages = ncap;
+      }
+      kb_pdf_page_t *pg = &doc.pages[doc.n_pages++];
+      memset(pg, 0, sizeof(*pg));
+      pg->width = 1.0;
+      pg->height = 1.0;
+      for (int i = 0; i < nlines; i++)
+      {
+         char *txt = strdup(lines[i].text);
+         if (!txt)
+            continue;
+         if (page_add_line(pg, page, lines[i].x0, lines[i].y0, lines[i].x1, lines[i].y1, txt) != 0)
+            free(txt); /* OOM growing the page's line array — drop this line, keep going */
+      }
+      kb_ocr_free_lines(lines, nlines);
+   }
+
+   int rc = 0;
+   if (doc.n_pages > 0)
+      rc = kb_doc_pdf_ingest(project, file_path, file_hash, &doc, sensitivity_class, stats);
+   if (rc > 0)
+      LOG_INFO("kb_doc_pdf", "OCR ingested %d page(s) for %s", doc.n_pages, file_path);
+   kb_pdf_free_doc(&doc);
+   return rc;
 }
 
 /* Phase B: run the TSR sidecar over one chunk's (page's) regions and persist any recognised

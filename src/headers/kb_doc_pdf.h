@@ -130,6 +130,14 @@ extern "C"
                                 const char *sensitivity_class, const unsigned char *pdf_bytes,
                                 int n);
 
+   /* Phase D: OCR a scanned/no-text-layer PDF via the OCR sidecar and ingest the recognised
+    * text + per-line geometry through the normal kb_doc_pdf_ingest path (citations work
+    * identically). Returns the ingested chunk count (>0), 0 if no text was recognised on any
+    * page (caller falls back to asset-only), or -1 on a DB error. */
+   int kb_doc_pdf_ingest_ocr(const char *project, const char *file_path, const char *file_hash,
+                             const char *sensitivity_class, const unsigned char *pdf_bytes, int n,
+                             const char *ocr_endpoint, kb_pdf_ingest_stats_t *stats);
+
 /* The page-boundary chunk line cap (exposed for tests). */
 #define KB_PDF_MAX_CHUNK_LINES 100
 

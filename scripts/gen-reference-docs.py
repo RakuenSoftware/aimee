@@ -193,6 +193,11 @@ CFG_KEY_DESC = {
     "(default 3600; <=0 disables it).",
     "kb_pdf_blob_orphan_alarm_mb": "Warn when reclaimable orphan blob bytes exceed this many MB "
     "(default 1024; <=0 disables the alarm).",
+    "kb_pdf_ocr_enabled": "OCR a scanned / no-text-layer PDF via the OCR sidecar at ingest so its "
+    "text + geometry feed the normal citation path (default off; without it a scanned PDF is "
+    "ingested asset-only).",
+    "ocr_command": "OCR sidecar endpoint/command for structured-PDF scanned-page recognition "
+    "(resolves like embedding_command; AIMEE_OCR_URL env fallback).",
     "kb_mining_enabled": "Enable background KB mining.",
     "kb_mining_min_poll_s": "Minimum interval (s) between KB mining polls.",
     "kb_search_max_results": "Default max results for KB search.",
