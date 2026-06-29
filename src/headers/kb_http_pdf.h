@@ -40,4 +40,14 @@ int handle_get_pdf_structure_route(const char *method, const char *query_string,
 int handle_get_pdf_lookup_table_route(const char *method, const char *query_string, char *out_buf,
                                       int out_cap);
 
+/* structured-PDF Phase C visual evidence:
+ *   GET /v1/pdf/assets?project=&document_key=   - list a doc's crop assets (opaque id + meta)
+ *   GET /v1/pdf/open_asset?project=&asset_id=   - stream one crop's bytes (base64) for an opaque
+ *                                                 id; the sole access-gated + audited blob read,
+ *                                                 never exposing the sha256/blob_ref. */
+int handle_get_pdf_assets_route(const char *method, const char *query_string, char *out_buf,
+                                int out_cap);
+int handle_get_pdf_open_asset_route(const char *method, const char *query_string, char *out_buf,
+                                    int out_cap);
+
 #endif /* DEC_KB_HTTP_PDF_H */

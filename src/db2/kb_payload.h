@@ -269,6 +269,50 @@ extern "C"
                                        const char *state);
    int db2_kb_pdf_tsr_state(const char *project, const char *document_key, char *out, size_t out_len);
 
+   /* structured-pdf Phase C: a visual asset (crop) row. blob_ref (the sha256) is DELIBERATELY
+    * absent from this struct — it is KB-internal and never surfaced to a client; the agent-
+    * facing list returns only the opaque id + metadata. */
+   typedef struct
+   {
+      int64_t id;
+      int page_no;
+      double x0, y0, x1, y1;
+      char kind[32];
+      char caption[512];
+      char content_type[48];
+      char sensitivity_class[16];
+   } db2_kb_doc_asset_t;
+
+   /* Insert a crop asset row. blob_ref is the content-addressed sha256 (KB-internal). The
+    * denormalised document_key/sensitivity_class come from the source doc (the live ACL is the
+    * authority at read time). Returns the new opaque id (>0) or -1. */
+   int db2_kb_doc_asset_insert(const char *document_key, int page_no, double x0, double y0,
+                               double x1, double y1, const char *kind, const char *caption,
+                               const char *content_type, const char *blob_ref,
+                               const char *sensitivity_class);
+
+   /* open_asset resolve: given the OPAQUE row id, return its blob_ref + content_type IFF the
+    * caller may read the asset's document — gated by a join to the AUTHORITATIVE kb_documents
+    * row (doc_kind='pdf' AND quarantine_state<>'pending' AND project). A guessed/foreign/
+    * withheld id returns 0 (and empty out). Returns 1 on a readable hit. The sha256 stays
+    * inside this call — the route streams bytes from the blob store and never echoes it. */
+   int db2_kb_doc_asset_open(const char *project, int64_t asset_id, char *blob_ref_out,
+                             size_t ref_cap, char *content_type_out, size_t ct_cap);
+
+   /* List a document's assets (metadata + opaque id, NO blob_ref) gated by the full PDF ACL —
+    * so an agent can discover ids to open_asset. Bound to the authoritative kb_documents
+    * file_path. Returns the number written (<= max). */
+   int db2_kb_doc_assets_list(const char *project, const char *document_key,
+                              db2_kb_doc_asset_t *out, int max);
+
+   /* Delete all asset rows for a document (re-ingest / purge). The blobs are reclaimed
+    * separately by the reconciliation sweep (refcount-by-scan). Returns rows deleted, -1 err. */
+   int db2_kb_doc_assets_delete_for_doc(const char *project, const char *document_key);
+
+   /* Reconciliation refcount: 1 if ANY kb_doc_assets row references blob_ref, else 0 (-1 err).
+    * A blob with no referrer is an orphan and may be unlinked. */
+   int db2_kb_blob_ref_referenced(const char *blob_ref);
+
    /* §5 evidence escalation reads. All withhold quarantine_state='pending' (restricted)
     * documents. Return the number written (<= max). */
 

@@ -121,6 +121,15 @@ extern "C"
                                const char *xhtml, const char *sensitivity_class,
                                kb_pdf_ingest_stats_t *stats);
 
+   /* Phase C: render each page of a PDF (raw bytes) to a PNG crop via the hardened pdftoppm
+    * harness, store it in the content-addressed blob store, and insert a kb_doc_assets row
+    * (kind='page'). Best-effort: a missing pdftoppm or unrenderable page yields fewer/no
+    * assets, never an error. Returns the number of asset rows created. Caller gates on
+    * kb_pdf_assets_enabled + the doc's sensitivity. */
+   int kb_doc_pdf_render_assets(const char *project, const char *file_path,
+                                const char *sensitivity_class, const unsigned char *pdf_bytes,
+                                int n);
+
 /* The page-boundary chunk line cap (exposed for tests). */
 #define KB_PDF_MAX_CHUNK_LINES 100
 

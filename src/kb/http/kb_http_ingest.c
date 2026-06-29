@@ -216,11 +216,20 @@ int handle_post_docs(const char *body, int body_len, char *out_buf, int out_cap)
             snprintf(out_buf, (size_t)out_cap, "{\"error\":\"db error\"}");
             return 503;
          }
+         /* Phase C: render page crops from the RAW bytes (available only here) into the blob
+          * store + kb_doc_assets, when the capability is on. Best-effort + AFTER ingest (the
+          * prior assets were dropped by kb_doc_pdf_ingest's re-ingest delete); a missing
+          * pdftoppm just yields no assets. Crops are read-time ACL-gated like regions, so even
+          * a restricted (pending) doc's crops are safe to render now (withheld until confirm). */
+         int assets = 0;
+         if (cfg.kb_pdf_assets_enabled)
+            assets = kb_doc_pdf_render_assets(scope, filename, sclass,
+                                              (const unsigned char *)file_content, file_len);
          kb_ws_publish_invalidation("doc", "global", NULL);
-         snprintf(
-             out_buf, (size_t)out_cap,
-             "{\"doc_kind\":\"pdf\",\"chunks\":%d,\"regions\":%d,\"sensitivity_class\":\"%s\"}",
-             st.chunks, st.regions, sclass);
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"doc_kind\":\"pdf\",\"chunks\":%d,\"regions\":%d,\"assets\":%d,"
+                  "\"sensitivity_class\":\"%s\"}",
+                  st.chunks, st.regions, assets, sclass);
          return 201;
       }
    }

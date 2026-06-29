@@ -7,6 +7,8 @@
 #include "cJSON.h"
 #include "config.h"
 #include "db2/kb_payload.h"
+#include "kb_blob_store.h"
+#include "kb_doc_hash.h"
 #include "kb_tsr_sidecar.h"
 #include "log.h"
 
@@ -28,6 +30,8 @@
  * hit (partial extraction, logged) rather than erroring. */
 #define KB_PDF_MAX_PAGES 20000
 #define KB_PDF_MAX_LINES 500000
+/* Phase C: cap page crops per document (a runaway page count cannot fill the blob store). */
+#define KB_PDF_RENDER_MAX_PAGES 200
 
 /* ---- small XML scanning helpers (poppler's bbox output is regular, not arbitrary XML) ---- */
 
@@ -721,6 +725,216 @@ int kb_pdf_sensitivity_valid(const char *s)
           (strcmp(s, "public") == 0 || strcmp(s, "internal") == 0 || strcmp(s, "restricted") == 0);
 }
 
+/* Phase C: render one PDF page to a PNG via pdftoppm, over the SAME hardened-exec harness as
+ * pdftotext — pdftoppm is a DIFFERENT untrusted byte-consuming parser (it decodes the page's
+ * images), so it gets its own scratch + the same RLIMIT_CPU/AS/FSIZE (RLIMIT_AS bounds in-
+ * memory image decompression before output is written), wall-clock deadline, setsid +
+ * process-group kill, and 0600 mkstemp scratch unlinked on every exit. On success *png_out/
+ * *png_len receive a heap buffer (caller frees). Returns 0 on success, -1 on error/absent
+ * binary/timeout, 1 if the page does not exist (pdftoppm produced no file). */
+static int kb_pdf_exec_render(const unsigned char *bytes, int n, int page_no,
+                              unsigned char **png_out, int *png_len, int timeout_ms)
+{
+   if (png_out)
+      *png_out = NULL;
+   if (png_len)
+      *png_len = 0;
+   if (!bytes || n <= 0 || page_no < 1 || !png_out || !png_len)
+      return -1;
+
+   char inpath[] = "/tmp/aimee_pdf_render_in_XXXXXX";
+   int ifd = mkstemp(inpath);
+   if (ifd < 0)
+      return -1;
+   fchmod(ifd, 0600);
+   {
+      size_t off = 0;
+      int ok = 1;
+      while (off < (size_t)n)
+      {
+         ssize_t w = write(ifd, bytes + off, (size_t)n - off);
+         if (w < 0)
+         {
+            if (errno == EINTR)
+               continue;
+            ok = 0;
+            break;
+         }
+         off += (size_t)w;
+      }
+      close(ifd);
+      if (!ok)
+      {
+         unlink(inpath);
+         return -1;
+      }
+   }
+   /* pdftoppm -singlefile writes exactly <outbase>.png. */
+   char outbase[] = "/tmp/aimee_pdf_render_out_XXXXXX";
+   int ofd = mkstemp(outbase);
+   if (ofd < 0)
+   {
+      unlink(inpath);
+      return -1;
+   }
+   close(ofd);
+   unlink(outbase); /* pdftoppm creates outbase.png; remove the placeholder mktemp file */
+   char outpng[sizeof(outbase) + 8];
+   snprintf(outpng, sizeof(outpng), "%s.png", outbase);
+
+   char page_arg[16];
+   snprintf(page_arg, sizeof(page_arg), "%d", page_no);
+
+   pid_t pid = fork();
+   if (pid < 0)
+   {
+      unlink(inpath);
+      return -1;
+   }
+   if (pid == 0)
+   {
+      setsid();
+      int devnull = open("/dev/null", O_WRONLY);
+      if (devnull >= 0)
+      {
+         dup2(devnull, STDOUT_FILENO);
+         dup2(devnull, STDERR_FILENO);
+         close(devnull);
+      }
+      struct rlimit rl;
+      rl.rlim_cur = rl.rlim_max = KB_PDF_CHILD_CPU_SECS;
+      setrlimit(RLIMIT_CPU, &rl);
+      rl.rlim_cur = rl.rlim_max = KB_PDF_CHILD_AS_BYTES;
+      setrlimit(RLIMIT_AS, &rl);
+      rl.rlim_cur = rl.rlim_max = KB_PDF_CHILD_FSIZE_BYTES;
+      setrlimit(RLIMIT_FSIZE, &rl);
+      execlp("pdftoppm", "pdftoppm", "-png", "-r", "100", "-f", page_arg, "-l", page_arg,
+             "-singlefile", inpath, outbase, (char *)NULL);
+      _exit(127);
+   }
+
+   struct timespec start;
+   clock_gettime(CLOCK_MONOTONIC, &start);
+   int status = 0, timed_out = 0, reaped = 0;
+   for (;;)
+   {
+      pid_t w = waitpid(pid, &status, WNOHANG);
+      if (w == pid)
+      {
+         reaped = 1;
+         break;
+      }
+      if (w < 0 && errno != EINTR)
+         break;
+      if (ms_since(&start) > timeout_ms)
+      {
+         kill(pid, SIGKILL);
+         kill(-pid, SIGKILL);
+         timed_out = 1;
+         /* blocking reap to avoid a zombie */
+         while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
+            ;
+         break;
+      }
+      struct timespec ts = {0, 5 * 1000 * 1000};
+      nanosleep(&ts, NULL);
+   }
+   unlink(inpath);
+
+   int rc = -1;
+   if (!timed_out && reaped && WIFEXITED(status) && WEXITSTATUS(status) == 0)
+   {
+      int rfd = open(outpng, O_RDONLY);
+      if (rfd < 0)
+      {
+         /* exit 0 but no file → the page does not exist (past the last page). */
+         rc = 1;
+      }
+      else
+      {
+         struct stat stt;
+         if (fstat(rfd, &stt) == 0 && stt.st_size > 0 &&
+             (unsigned long)stt.st_size <= KB_PDF_CHILD_FSIZE_BYTES)
+         {
+            size_t sz = (size_t)stt.st_size;
+            unsigned char *buf = malloc(sz);
+            if (buf)
+            {
+               size_t off = 0;
+               int ok = 1;
+               while (off < sz)
+               {
+                  ssize_t r = read(rfd, buf + off, sz - off);
+                  if (r < 0)
+                  {
+                     if (errno == EINTR)
+                        continue;
+                     ok = 0;
+                     break;
+                  }
+                  if (r == 0)
+                     break;
+                  off += (size_t)r;
+               }
+               if (ok && off == sz)
+               {
+                  *png_out = buf;
+                  *png_len = (int)sz;
+                  rc = 0;
+               }
+               else
+                  free(buf);
+            }
+         }
+         close(rfd);
+      }
+   }
+   else if (timed_out)
+      LOG_WARN("kb_doc_pdf", "pdftoppm timed out rendering page %d", page_no);
+   else
+      LOG_WARN("kb_doc_pdf", "pdftoppm failed for page %d (exit status %d)", page_no, status);
+   unlink(outpng);
+   return rc;
+}
+
+int kb_doc_pdf_render_assets(const char *project, const char *file_path,
+                             const char *sensitivity_class, const unsigned char *pdf_bytes, int n)
+{
+   if (!project || !*project || !file_path || !*file_path || !pdf_bytes || n <= 0)
+      return 0;
+   int created = 0;
+   for (int page = 1; page <= KB_PDF_RENDER_MAX_PAGES; page++)
+   {
+      unsigned char *png = NULL;
+      int png_len = 0;
+      int rc = kb_pdf_exec_render(pdf_bytes, n, page, &png, &png_len, 30000);
+      if (rc == 1)
+         break; /* no more pages */
+      if (rc != 0 || !png)
+      {
+         /* render error for this page (pdftoppm absent / decode failure): best-effort, skip. */
+         free(png);
+         if (page == 1)
+            break; /* binary absent or doc unrenderable → no assets at all */
+         continue;
+      }
+      /* Blob is written + fsync-durable BEFORE the row is inserted, so a crash can only leave a
+       * harmless orphan blob (reclaimed by reconciliation), never a row pointing at no blob. */
+      char sha[KB_DOC_HASH_HEX_LEN + 1] = "";
+      if (kb_blob_store_put(png, (size_t)png_len, sha, sizeof(sha)) == 0)
+      {
+         /* Full-page crop: bbox is the whole page [0,1]. kind='page'. */
+         if (db2_kb_doc_asset_insert(file_path, page, 0.0, 0.0, 1.0, 1.0, "page", "", "image/png",
+                                     sha, sensitivity_class) > 0)
+            created++;
+      }
+      free(png);
+   }
+   if (created)
+      LOG_INFO("kb_doc_pdf", "rendered %d page asset(s) for %s", created, file_path);
+   return created;
+}
+
 /* Phase B: run the TSR sidecar over one chunk's (page's) regions and persist any recognised
  * cells, linking each cell to its source kb_doc_regions row via line_index (falling back to
  * the page's first region so every cell carries provenance). Best-effort: a sidecar failure
@@ -865,6 +1079,13 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
       return -1;
    }
 
+   /* Phase C: a re-ingest drops this document's prior visual asset rows too (they are NOT a
+    * relational cascade off kb_documents — document_key is logical). Done BEFORE the
+    * kb_documents delete because the asset-scope check joins on the still-present kb_documents
+    * file_path. The now-unreferenced blobs are reclaimed by the periodic reconciliation sweep,
+    * so a shared/deduped blob survives until its last referrer is gone. New crops are rendered +
+    * inserted by the upload route after this. */
+   (void)db2_kb_doc_assets_delete_for_doc(project, file_path);
    db2_kb_documents_delete_for_file(project, file_path); /* void; covered by the txn */
 
    int n_regions = 0;

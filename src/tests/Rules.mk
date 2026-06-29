@@ -2067,6 +2067,9 @@ $(TESTPREFIX)/unit-test-fact-ingest: $(OBJDIR)/tests/test_fact_ingest.o \
 $(TESTPREFIX)/unit-test-kb-doc-pdf: $(OBJDIR)/tests/test_kb_doc_pdf.o \
                                $(OBJDIR)/kb/kb_doc_pdf.o \
                                $(OBJDIR)/kb/kb_tsr_sidecar.o \
+                               $(OBJDIR)/kb/kb_blob_store.o \
+                               $(OBJDIR)/kb/kb_blob_reconcile.o \
+                               $(OBJDIR)/kb/kb_doc_hash.o \
                                $(OBJDIR)/kb/http/kb_http_pdf.o \
                                $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)

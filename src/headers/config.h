@@ -395,6 +395,15 @@ typedef struct config
                                     text-only + tsr_status='unavailable' when the sidecar absent) */
    char tsr_command[1024];       /* structured-pdf Phase B: TSR sidecar endpoint/command
                                     (resolves like embedding_command; AIMEE_TSR_URL env fallback) */
+   int kb_pdf_assets_enabled;    /* structured-pdf Phase C: render figure/table crops to the
+                                    content-addressed blob store + kb_doc_assets at ingest, served
+                                    via open_asset (default off; needs pdftoppm) */
+   char kb_pdf_blob_dir[1024];   /* structured-pdf Phase C: blob store root override (default
+                                    <kb_default_config_dir()>/kb-blobs) */
+   int kb_pdf_blob_recon_secs;   /* structured-pdf Phase C: orphan-blob reconciliation interval
+                                    seconds (default 3600; <=0 disables the sweep) */
+   int kb_pdf_blob_orphan_alarm_mb; /* structured-pdf Phase C: warn when reclaimable orphan bytes
+                                       exceed this many MB (default 1024; <=0 disables the alarm) */
    int kb_evidence_emit_enabled; /* auditable-correctness: emit per-turn retrieval_event (default
                                     off) */
    int fidelity_check_enabled; /* auditable-correctness P3: run the fidelity judge on terminal-text

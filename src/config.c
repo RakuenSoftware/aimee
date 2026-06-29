@@ -437,6 +437,11 @@ static void config_set_defaults(config_t *cfg)
    cfg->memory_fetch_budget_base = 128;
    cfg->memory_fetch_budget_shape_aware = 1;
    cfg->kb_search_max_results = 50;
+   /* structured-pdf Phase C blob reconciliation: default hourly sweep, alarm at 1 GiB of
+    * reclaimable orphan bytes (config_t is memset-0 above, so these explicit values are the
+    * defaults). The sweep is still a no-op until kb_pdf_assets_enabled is on. */
+   cfg->kb_pdf_blob_recon_secs = 3600;
+   cfg->kb_pdf_blob_orphan_alarm_mb = 1024;
    /* Embedding dimension. 0 = UNSET (the operator did not pin a dim): readers fall
     * back to 1024 (db2_embedding_dim(), kb_main, kb_ingest_workers), and — crucially
     * — config_embedding_dim_is_pinned() reports NOT-pinned, so §2a's recorded-dim
@@ -951,6 +956,19 @@ int config_load(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "tsr_command");
    if (cJSON_IsString(item) && item->valuestring)
       snprintf(cfg->tsr_command, sizeof(cfg->tsr_command), "%s", item->valuestring);
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_assets_enabled");
+   if (cJSON_IsBool(item))
+      cfg->kb_pdf_assets_enabled = cJSON_IsTrue(item);
+   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_blob_dir");
+   if (cJSON_IsString(item) && item->valuestring)
+      snprintf(cfg->kb_pdf_blob_dir, sizeof(cfg->kb_pdf_blob_dir), "%s", item->valuestring);
+   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_blob_recon_secs");
+   if (cJSON_IsNumber(item))
+      cfg->kb_pdf_blob_recon_secs = (int)item->valuedouble;
+   item = cJSON_GetObjectItemCaseSensitive(root, "kb_pdf_blob_orphan_alarm_mb");
+   if (cJSON_IsNumber(item))
+      cfg->kb_pdf_blob_orphan_alarm_mb = (int)item->valuedouble;
 
    item = cJSON_GetObjectItemCaseSensitive(root, "kb_evidence_emit_enabled");
    if (cJSON_IsBool(item))

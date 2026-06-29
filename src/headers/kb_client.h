@@ -1108,6 +1108,10 @@ char *kb_client_pdf_inspect_structure(const char *project, const char *document_
  * all pages). Returns the route JSON body verbatim. */
 char *kb_client_pdf_lookup_table(const char *project, const char *document_key, int page_no,
                                  int *status_out);
+/* Phase C: GET /v1/pdf/assets (list a doc's crop assets) + GET /v1/pdf/open_asset (stream one
+ * crop's bytes, base64, for an opaque asset id). Route JSON body verbatim. */
+char *kb_client_pdf_list_assets(const char *project, const char *document_key, int *status_out);
+char *kb_client_pdf_open_asset(const char *project, long long asset_id, int *status_out);
 
 /* Code-graph retrieval + analytics routes (see kb_client_code_graph.c). Forward
  * the route's JSON body verbatim (nested fused/ranked shapes the agent consumes

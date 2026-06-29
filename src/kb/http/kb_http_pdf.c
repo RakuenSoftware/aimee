@@ -7,6 +7,10 @@
 
 #include "cJSON.h"
 #include "db2/kb_payload.h"
+#include "kb_blob_store.h"
+#include "kb_doc_hash.h"
+#include "log.h"
+#include "util.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -460,5 +464,133 @@ int handle_get_pdf_lookup_table_route(const char *method, const char *query_stri
    }
    cJSON_AddNumberToObject(root, "total", n);
    free(cells);
+   return pdf_emit_json(root, out_buf, out_cap);
+}
+
+/* GET /v1/pdf/assets — list a document's visual assets (metadata + opaque id, NO blob_ref).
+ * Discovery surface for open_asset. Full PDF ACL via the db2 join. */
+#define PDF_MAX_ASSETS 256
+int handle_get_pdf_assets_route(const char *method, const char *query_string, char *out_buf,
+                                int out_cap)
+{
+   if (!method || strcmp(method, "GET") != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
+      return 405;
+   }
+   char project[128] = "", document_key[1024] = "";
+   if (!pdf_qparam(query_string, "project", project, sizeof(project)) || !project[0] ||
+       !pdf_qparam(query_string, "document_key", document_key, sizeof(document_key)) ||
+       !document_key[0])
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing project or document_key\"}");
+      return 400;
+   }
+   db2_kb_doc_asset_t *assets = malloc((size_t)PDF_MAX_ASSETS * sizeof(*assets));
+   if (!assets)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
+      return 500;
+   }
+   int n = db2_kb_doc_assets_list(project, document_key, assets, PDF_MAX_ASSETS);
+   cJSON *root = cJSON_CreateObject();
+   cJSON *arr = cJSON_AddArrayToObject(root, "assets");
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *a = cJSON_CreateObject();
+      cJSON_AddNumberToObject(a, "asset_id",
+                              (double)assets[i].id); /* OPAQUE handle for open_asset */
+      cJSON_AddNumberToObject(a, "page_no", assets[i].page_no);
+      cJSON_AddStringToObject(a, "kind", assets[i].kind);
+      cJSON_AddStringToObject(a, "caption", assets[i].caption);
+      cJSON_AddStringToObject(a, "content_type", assets[i].content_type);
+      cJSON *bbox = cJSON_AddArrayToObject(a, "bbox");
+      cJSON_AddItemToArray(bbox, cJSON_CreateNumber(assets[i].x0));
+      cJSON_AddItemToArray(bbox, cJSON_CreateNumber(assets[i].y0));
+      cJSON_AddItemToArray(bbox, cJSON_CreateNumber(assets[i].x1));
+      cJSON_AddItemToArray(bbox, cJSON_CreateNumber(assets[i].y1));
+      cJSON_AddItemToArray(arr, a);
+   }
+   cJSON_AddNumberToObject(root, "total", n);
+   free(assets);
+   return pdf_emit_json(root, out_buf, out_cap);
+}
+
+/* GET /v1/pdf/open_asset?project=&asset_id= — stream a crop's bytes (base64 in JSON) for an
+ * OPAQUE asset id. The sole gated read path for the blob store: applies the document_key ACL
+ * (via db2_kb_doc_asset_open), writes an append-only access audit line (allowed/denied), and
+ * NEVER echoes the sha256/blob_ref. A guessed/foreign/withheld id is an empty 404. */
+/* Cap the raw crop so the base64 envelope fits the 1 MiB response buffer with headroom; larger
+ * assets are a 413 (a binary-streaming endpoint is the GA path for big crops). */
+#define PDF_ASSET_MAX_BYTES (600 * 1024)
+int handle_get_pdf_open_asset_route(const char *method, const char *query_string, char *out_buf,
+                                    int out_cap)
+{
+   if (!method || strcmp(method, "GET") != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
+      return 405;
+   }
+   char project[128] = "", ids[32] = "";
+   if (!pdf_qparam(query_string, "project", project, sizeof(project)) || !project[0] ||
+       !pdf_qparam(query_string, "asset_id", ids, sizeof(ids)) || !ids[0])
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"missing project or asset_id\"}");
+      return 400;
+   }
+   long long asset_id = atoll(ids);
+
+   char blob_ref[KB_DOC_HASH_HEX_LEN + 1] = "", content_type[48] = "";
+   int readable = db2_kb_doc_asset_open(project, (int64_t)asset_id, blob_ref, sizeof(blob_ref),
+                                        content_type, sizeof(content_type));
+   if (!readable)
+   {
+      /* Audit the denial (caller-identity threading is a GA item; project + id + verdict here).
+       * Note: blob_ref/sha256 is NEVER logged. */
+      LOG_INFO("kb.asset.audit", "open_asset asset_id=%lld project=%s verdict=denied", asset_id,
+               project);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"asset not found\"}");
+      return 404;
+   }
+
+   void *bytes = NULL;
+   size_t blen = 0;
+   if (kb_blob_store_read(blob_ref, &bytes, &blen) != 0)
+   {
+      /* Row resolved but the blob is missing (e.g. mid-reconciliation race) — treat as gone. */
+      LOG_WARN("kb.asset.audit", "open_asset asset_id=%lld project=%s verdict=blob_missing",
+               asset_id, project);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"asset bytes unavailable\"}");
+      return 404;
+   }
+   if (blen > PDF_ASSET_MAX_BYTES)
+   {
+      free(bytes);
+      LOG_INFO("kb.asset.audit", "open_asset asset_id=%lld project=%s verdict=too_large", asset_id,
+               project);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"asset too large for inline transfer\",\"code\":\"asset_too_large\"}");
+      return 413;
+   }
+
+   size_t b64cap = aimee_base64_encoded_len(blen);
+   char *b64 = malloc(b64cap);
+   if (!b64)
+   {
+      free(bytes);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
+      return 500;
+   }
+   aimee_base64_encode((const unsigned char *)bytes, blen, b64, b64cap);
+   free(bytes);
+
+   cJSON *root = cJSON_CreateObject();
+   cJSON_AddNumberToObject(root, "asset_id", (double)asset_id);
+   cJSON_AddStringToObject(root, "content_type", content_type[0] ? content_type : "image/png");
+   cJSON_AddNumberToObject(root, "bytes", (double)blen);
+   cJSON_AddStringToObject(root, "bytes_base64", b64);
+   free(b64);
+   LOG_INFO("kb.asset.audit", "open_asset asset_id=%lld project=%s verdict=allowed bytes=%zu",
+            asset_id, project, blen);
    return pdf_emit_json(root, out_buf, out_cap);
 }

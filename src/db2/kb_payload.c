@@ -1161,6 +1161,168 @@ int db2_kb_pdf_tsr_state(const char *project, const char *document_key, char *ou
    return hit;
 }
 
+int db2_kb_doc_asset_insert(const char *document_key, int page_no, double x0, double y0, double x1,
+                            double y1, const char *kind, const char *caption,
+                            const char *content_type, const char *blob_ref,
+                            const char *sensitivity_class)
+{
+   void *conn = db2_conn();
+   if (!conn || !document_key || !*document_key || !blob_ref || !*blob_ref)
+      return -1;
+   static const char *sql =
+       "INSERT INTO kb_doc_assets (document_key, page_no, x0, y0, x1, y1, kind, caption,"
+       " content_type, blob_ref, sensitivity_class)"
+       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) RETURNING id";
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", document_key);
+   aimee_pg_bind_int(st, "?2", page_no);
+   aimee_pg_bind_double(st, "?3", x0);
+   aimee_pg_bind_double(st, "?4", y0);
+   aimee_pg_bind_double(st, "?5", x1);
+   aimee_pg_bind_double(st, "?6", y1);
+   aimee_pg_bind_text(st, "?7", kind ? kind : "");
+   aimee_pg_bind_text(st, "?8", caption ? caption : "");
+   aimee_pg_bind_text(st, "?9", content_type ? content_type : "image/png");
+   aimee_pg_bind_text(st, "?10", blob_ref);
+   aimee_pg_bind_text(st, "?11", sensitivity_class ? sensitivity_class : "");
+   int64_t id = -1;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      id = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   return id > 0 ? (int)id : -1;
+}
+
+int db2_kb_doc_asset_open(const char *project, int64_t asset_id, char *blob_ref_out, size_t ref_cap,
+                          char *content_type_out, size_t ct_cap)
+{
+   if (blob_ref_out && ref_cap)
+      blob_ref_out[0] = '\0';
+   if (content_type_out && ct_cap)
+      content_type_out[0] = '\0';
+   if (!project || !*project || asset_id <= 0 || !blob_ref_out || !ref_cap)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+   /* Resolve id → blob_ref ONLY when the asset's document is a readable PDF in this project.
+    * The join binds a.document_key to the AUTHORITATIVE kb_documents.file_path + the live
+    * quarantine_state, so a guessed/foreign/withheld id yields no row. */
+   static const char *sql = "SELECT a.blob_ref, a.content_type FROM kb_doc_assets a"
+                            " JOIN kb_documents d ON d.file_path = a.document_key"
+                            " WHERE a.id = ?2 AND d.project = ?1 AND d.doc_kind = 'pdf'"
+                            "   AND d.quarantine_state <> 'pending' LIMIT 1";
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_int64(st, "?2", asset_id);
+   int hit = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *br = aimee_pg_column_text(st, 0);
+      const char *ct = aimee_pg_column_text(st, 1);
+      snprintf(blob_ref_out, ref_cap, "%s", br ? br : "");
+      if (content_type_out && ct_cap)
+         snprintf(content_type_out, ct_cap, "%s", ct ? ct : "image/png");
+      hit = (br && br[0]) ? 1 : 0;
+   }
+   aimee_pg_finalize(st);
+   return hit;
+}
+
+int db2_kb_doc_assets_list(const char *project, const char *document_key, db2_kb_doc_asset_t *out,
+                           int max)
+{
+   if (!out || max <= 0 || !project || !*project || !document_key || !*document_key)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+   /* Gate via the authoritative kb_documents row (bound on file_path); never returns blob_ref. */
+   static const char *sql =
+       "SELECT DISTINCT a.id, a.page_no, a.x0, a.y0, a.x1, a.y1, a.kind, a.caption, a.content_type,"
+       " a.sensitivity_class FROM kb_doc_assets a"
+       " JOIN kb_documents d ON d.file_path = a.document_key"
+       " WHERE d.project = ?1 AND d.doc_kind = 'pdf' AND d.quarantine_state <> 'pending'"
+       "   AND d.file_path = ?2"
+       " ORDER BY a.page_no, a.id LIMIT ?3";
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", document_key);
+   aimee_pg_bind_int(st, "?3", max);
+   int n = 0;
+   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      memset(&out[n], 0, sizeof(out[n]));
+      out[n].id = aimee_pg_column_int64(st, 0);
+      out[n].page_no = aimee_pg_column_int(st, 1);
+      out[n].x0 = aimee_pg_column_double(st, 2);
+      out[n].y0 = aimee_pg_column_double(st, 3);
+      out[n].x1 = aimee_pg_column_double(st, 4);
+      out[n].y1 = aimee_pg_column_double(st, 5);
+      const char *kind = aimee_pg_column_text(st, 6);
+      const char *cap = aimee_pg_column_text(st, 7);
+      const char *ct = aimee_pg_column_text(st, 8);
+      const char *sc = aimee_pg_column_text(st, 9);
+      snprintf(out[n].kind, sizeof(out[n].kind), "%s", kind ? kind : "");
+      snprintf(out[n].caption, sizeof(out[n].caption), "%s", cap ? cap : "");
+      snprintf(out[n].content_type, sizeof(out[n].content_type), "%s", ct ? ct : "");
+      snprintf(out[n].sensitivity_class, sizeof(out[n].sensitivity_class), "%s", sc ? sc : "");
+      n++;
+   }
+   aimee_pg_finalize(st);
+   return n;
+}
+
+int db2_kb_doc_assets_delete_for_doc(const char *project, const char *document_key)
+{
+   void *conn = db2_conn();
+   if (!conn || !project || !*project || !document_key || !*document_key)
+      return -1;
+   /* Scoped to this document's assets. Rows go now; the blobs are reclaimed by the
+    * reconciliation sweep once no row references them (refcount-by-scan), so a shared/deduped
+    * blob survives until its last referrer is gone. */
+   static const char *sql = "DELETE FROM kb_doc_assets WHERE document_key = ?2 AND document_key IN"
+                            " (SELECT file_path FROM kb_documents WHERE project = ?1"
+                            "    AND doc_kind = 'pdf') RETURNING id";
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", project);
+   aimee_pg_bind_text(st, "?2", document_key);
+   int n = 0, rc;
+   while ((rc = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW)
+      n++;
+   aimee_pg_finalize(st);
+   return rc == AIMEE_PG_DONE ? n : -1;
+}
+
+int db2_kb_blob_ref_referenced(const char *blob_ref)
+{
+   if (!blob_ref || !*blob_ref)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   static const char *sql = "SELECT 1 FROM kb_doc_assets WHERE blob_ref = ?1 LIMIT 1";
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", blob_ref);
+   int referenced = (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW) ? 1 : 0;
+   aimee_pg_finalize(st);
+   return referenced;
+}
+
 int db2_kb_doc_regions_for_chunk(int64_t chunk_id, db2_kb_pdf_region_t *out, int max)
 {
    if (!out || max <= 0 || chunk_id <= 0)

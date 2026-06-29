@@ -13,6 +13,9 @@
 #include "db2_test_shim.h"
 #include "../db2/db_postgres.h"
 #include "../db2/kb_payload.h"
+#include "kb_blob_reconcile.h"
+#include "kb_blob_store.h"
+#include "kb_doc_hash.h"
 #include "kb_doc_pdf.h"
 #include "kb_http_pdf.h"
 #include "kb_tsr_sidecar.h"
@@ -756,6 +759,141 @@ static void test_pdf_tsr_ingest(void)
    PASS("pdf_tsr_ingest");
 }
 
+/* ---- Phase C: blob store + kb_doc_assets + open_asset + reconciliation ---- */
+
+static void test_blob_store(void)
+{
+   char home[] = "/tmp/aimee_blob_test_XXXXXX";
+   assert(mkdtemp(home));
+   setenv("AIMEE_HOME", home, 1);
+   setenv("AIMEE_NO_CACHE", "1", 1);
+
+   const char *data = "PNGDATA-crop-bytes";
+   char sha[KB_DOC_HASH_HEX_LEN + 1] = "", sha2[KB_DOC_HASH_HEX_LEN + 1] = "";
+   assert(kb_blob_store_put(data, strlen(data), sha, sizeof(sha)) == 0);
+   assert(strlen(sha) == KB_DOC_HASH_HEX_LEN);
+   assert(kb_blob_store_exists(sha) == 1);
+
+   /* Dedup: putting the same bytes yields the same sha and one stored blob. */
+   assert(kb_blob_store_put(data, strlen(data), sha2, sizeof(sha2)) == 0);
+   assert(strcmp(sha, sha2) == 0);
+
+   void *out = NULL;
+   size_t n = 0;
+   assert(kb_blob_store_read(sha, &out, &n) == 0);
+   assert(n == strlen(data) && memcmp(out, data, n) == 0);
+   free(out);
+
+   /* foreach visits exactly the one blob; a path-traversal sha is rejected. */
+   assert(kb_blob_store_exists("../../etc/passwd") == -1);
+   assert(kb_blob_store_unlink(sha) == 0);
+   assert(kb_blob_store_exists(sha) == 0);
+   assert(kb_blob_store_unlink(sha) == 0); /* idempotent */
+
+   unsetenv("AIMEE_NO_CACHE");
+   unsetenv("AIMEE_HOME");
+   PASS("blob_store");
+}
+
+/* Count visitor for reconciliation tests. */
+static int count_visit(const char *sha, long long bytes, void *ctx)
+{
+   (void)sha;
+   (void)bytes;
+   (*(int *)ctx)++;
+   return 0;
+}
+
+static void test_pdf_assets_and_recon(void)
+{
+   char home[] = "/tmp/aimee_assets_test_XXXXXX";
+   assert(mkdtemp(home));
+   setenv("AIMEE_HOME", home, 1);
+   setenv("AIMEE_NO_CACHE", "1", 1);
+
+   db2_test_shim_open();
+   kb_pdf_ingest_stats_t stats;
+   assert(kb_doc_pdf_ingest_xhtml("proj", "vis.pdf", "h1", FIXTURE_2PAGE, "internal", &stats) == 2);
+
+   /* Store a crop blob + an asset row pointing at it (simulating a render). */
+   const char *crop = "fake-png-bytes-AAAA";
+   char sha[KB_DOC_HASH_HEX_LEN + 1] = "";
+   assert(kb_blob_store_put(crop, strlen(crop), sha, sizeof(sha)) == 0);
+   int aid = db2_kb_doc_asset_insert("vis.pdf", 1, 0, 0, 1, 1, "page", "Figure 1", "image/png", sha,
+                                     "internal");
+   assert(aid > 0);
+
+   /* open resolves id → blob_ref under the live ACL; foreign project denied. */
+   char br[KB_DOC_HASH_HEX_LEN + 1] = "", ct[48] = "";
+   assert(db2_kb_doc_asset_open("proj", aid, br, sizeof(br), ct, sizeof(ct)) == 1);
+   assert(strcmp(br, sha) == 0 && strcmp(ct, "image/png") == 0);
+   assert(db2_kb_doc_asset_open("other", aid, br, sizeof(br), ct, sizeof(ct)) == 0); /* foreign */
+   br[0] = '\0';
+   assert(db2_kb_doc_asset_open("proj", aid + 999, br, sizeof(br), ct, sizeof(ct)) ==
+          0); /* guess */
+
+   /* list returns metadata + opaque id, never the blob_ref. */
+   db2_kb_doc_asset_t assets[8];
+   int an = db2_kb_doc_assets_list("proj", "vis.pdf", assets, 8);
+   assert(an == 1 && assets[0].id == aid && strcmp(assets[0].kind, "page") == 0);
+   assert(db2_kb_doc_assets_list("proj", "ghost.pdf", assets, 8) == 0); /* foreign doc */
+
+   /* Withheld: a restricted doc's assets are gated off. */
+   assert(kb_doc_pdf_ingest_xhtml("proj", "sec.pdf", "h2", FIXTURE_2PAGE, "restricted", &stats) ==
+          2);
+   char sha2[KB_DOC_HASH_HEX_LEN + 1] = "";
+   assert(kb_blob_store_put("secret-crop", 11, sha2, sizeof(sha2)) == 0);
+   int said = db2_kb_doc_asset_insert("sec.pdf", 1, 0, 0, 1, 1, "page", "", "image/png", sha2,
+                                      "restricted");
+   assert(said > 0);
+   assert(db2_kb_doc_asset_open("proj", said, br, sizeof(br), ct, sizeof(ct)) == 0); /* withheld */
+   assert(db2_kb_doc_assets_list("proj", "sec.pdf", assets, 8) == 0);
+
+   /* open_asset route: 200 + base64 for a readable id; 404 for a foreign/guessed id; the
+    * blob's sha NEVER appears in the response. */
+   char buf[262144];
+   char qs[64];
+   snprintf(qs, sizeof(qs), "project=proj&asset_id=%d", aid);
+   assert(handle_get_pdf_open_asset_route("GET", qs, buf, sizeof(buf)) == 200);
+   assert(strstr(buf, "\"bytes_base64\"") != NULL);
+   assert(strstr(buf, sha) == NULL); /* the blob hash must never cross the boundary */
+   snprintf(qs, sizeof(qs), "project=proj&asset_id=%d", aid + 999);
+   assert(handle_get_pdf_open_asset_route("GET", qs, buf, sizeof(buf)) == 404);
+   snprintf(qs, sizeof(qs), "project=proj&asset_id=%d", said);
+   assert(handle_get_pdf_open_asset_route("GET", qs, buf, sizeof(buf)) == 404); /* withheld */
+   assert(handle_get_pdf_open_asset_route("GET", "asset_id=1", buf, sizeof(buf)) ==
+          400); /* no proj */
+
+   /* Reconciliation: the referenced blob survives; an orphan (no asset row) is unlinked. */
+   char orphan_sha[KB_DOC_HASH_HEX_LEN + 1] = "";
+   assert(kb_blob_store_put("orphan-bytes", 12, orphan_sha, sizeof(orphan_sha)) == 0);
+   int before = 0;
+   kb_blob_store_foreach(count_visit, &before);
+   assert(before == 3); /* vis crop, secret crop, orphan */
+   kb_blob_recon_stats_t rst;
+   assert(kb_blob_reconcile_run(0, &rst) == 0);
+   assert(rst.orphans_unlinked == 1);             /* only the unreferenced orphan */
+   assert(kb_blob_store_exists(sha) == 1);        /* referenced survives */
+   assert(kb_blob_store_exists(orphan_sha) == 0); /* orphan reclaimed */
+
+   /* Re-ingest drops the doc's asset rows (blobs reclaimed by the next sweep). */
+   assert(kb_doc_pdf_ingest_xhtml("proj", "vis.pdf", "h1b", FIXTURE_2PAGE, "internal", &stats) ==
+          2);
+   assert(db2_kb_doc_assets_list("proj", "vis.pdf", assets, 8) == 0); /* asset rows gone */
+   assert(kb_blob_reconcile_run(0, &rst) == 0);
+   assert(kb_blob_store_exists(sha) == 0); /* now-unreferenced crop reclaimed */
+
+   /* render_assets degrades safely on non-PDF bytes (no pdftoppm crash, 0 assets). */
+   assert(kb_doc_pdf_render_assets("proj", "vis.pdf", "internal",
+                                   (const unsigned char *)FIXTURE_2PAGE,
+                                   (int)strlen(FIXTURE_2PAGE)) == 0);
+
+   db2_test_shim_close();
+   unsetenv("AIMEE_NO_CACHE");
+   unsetenv("AIMEE_HOME");
+   PASS("pdf_assets_and_recon");
+}
+
 int main(void)
 {
    printf("structured-pdf (kb_doc_pdf) tests:\n");
@@ -772,6 +910,8 @@ int main(void)
    test_tsr_sidecar_client();
    test_pdf_table_cells();
    test_pdf_tsr_ingest();
+   test_blob_store();
+   test_pdf_assets_and_recon();
    printf("ALL PASS\n");
    return 0;
 }

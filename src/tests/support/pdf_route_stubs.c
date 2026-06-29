@@ -77,3 +77,32 @@ int db2_kb_pdf_inspect_structure(const char *project, const char *document_key, 
    (void)max;
    return 0;
 }
+/* Phase C: kb_doc_assets / blob-store db2 + blob stubs (real SQL/IO in test_kb_doc_pdf.c). */
+int db2_kb_doc_asset_open(const char *project, int64_t asset_id, char *blob_ref_out, size_t ref_cap,
+                          char *content_type_out, size_t ct_cap)
+{
+   (void)project;
+   (void)asset_id;
+   if (blob_ref_out && ref_cap)
+      blob_ref_out[0] = '\0';
+   if (content_type_out && ct_cap)
+      content_type_out[0] = '\0';
+   return 0;
+}
+int db2_kb_doc_assets_list(const char *project, const char *document_key, void *out, int max)
+{
+   (void)project;
+   (void)document_key;
+   (void)out;
+   (void)max;
+   return 0;
+}
+int kb_blob_store_read(const char *sha, void **out, size_t *n_out)
+{
+   (void)sha;
+   if (out)
+      *out = (void *)0;
+   if (n_out)
+      *n_out = 0;
+   return -1;
+}

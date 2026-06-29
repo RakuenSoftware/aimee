@@ -21,6 +21,7 @@
 #include "db2/db2.h"
 #include "db2/kb_service_backend.h"
 #include "db2/kb_maintenance.h"
+#include "kb_blob_reconcile.h"
 #include "db2/kb_runtime_state.h"
 #include "log.h"
 #include "cJSON.h"
@@ -116,6 +117,44 @@ static void *kb_maintenance_timer_thread(void *arg)
       }
 
       kb_background_clear("maintenance");
+   }
+   return NULL;
+}
+
+/* structured-PDF Phase C: orphan-blob reconciliation timer (its own cadence, independent of
+ * the maintenance sweep — default hourly). A no-op until kb_pdf_assets_enabled is on. */
+static volatile int g_blob_recon_stop = 0;
+static pthread_t g_blob_recon_thread;
+static int g_blob_recon_active = 0;
+
+static void *kb_blob_recon_timer_thread(void *arg)
+{
+   (void)arg;
+   config_t cfg;
+   long elapsed = 0;
+   while (!g_blob_recon_stop)
+   {
+      db2_lease_release_idle();
+      sleep(1);
+      elapsed++;
+      config_load(&cfg);
+      int interval = cfg.kb_pdf_blob_recon_secs;
+      if (!cfg.kb_pdf_assets_enabled || interval <= 0)
+      {
+         elapsed = 0;
+         continue;
+      }
+      if (elapsed < interval)
+         continue;
+      elapsed = 0;
+      kb_blob_recon_stats_t st;
+      if (kb_blob_reconcile_run(cfg.kb_pdf_blob_orphan_alarm_mb, &st) == 0)
+      {
+         db2_kb_runtime_state_set_now("last_blob_recon_at");
+         char buf[32];
+         snprintf(buf, sizeof(buf), "%lld", st.orphans_unlinked);
+         db2_kb_runtime_state_set("last_blob_recon_unlinked", buf);
+      }
    }
    return NULL;
 }
@@ -230,6 +269,12 @@ int kb_service_init(kb_service_ctx_t *ctx)
    else
       aimee_log(LOG_WARN, "kb.service", "failed to start maintenance timer thread");
 
+   g_blob_recon_stop = 0;
+   if (pthread_create(&g_blob_recon_thread, NULL, kb_blob_recon_timer_thread, NULL) == 0)
+      g_blob_recon_active = 1;
+   else
+      aimee_log(LOG_WARN, "kb.service", "failed to start blob reconciliation timer thread");
+
    kb_reflection_init(&g_reflection_ctx);
    kb_curator_drain_init(&g_curator_drain_ctx);
    kb_reasoning_seed_ruleset();
@@ -268,5 +313,11 @@ void kb_service_shutdown(kb_service_ctx_t *ctx)
       g_maintenance_stop = 1;
       pthread_join(ctx->bg_timer_thread, NULL);
       ctx->bg_timer_active = 0;
+   }
+   if (g_blob_recon_active)
+   {
+      g_blob_recon_stop = 1;
+      pthread_join(g_blob_recon_thread, NULL);
+      g_blob_recon_active = 0;
    }
 }

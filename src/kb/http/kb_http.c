@@ -324,12 +324,10 @@ static int json_escape(const char *src, char *buf, int pos, int cap)
    return pos;
 }
 
-/* printf-append into buf at pos, returning the new pos clamped to [0, cap].
- * snprintf returns the would-be length, so the raw `pos += snprintf(...)` idiom
- * can run pos PAST cap; a later (cap - pos) then wraps to a huge size_t and the
- * next write lands out of bounds. The per-record headroom guards in the JSON
- * builders below (pos + 64 < cap) are far smaller than a max escaped record, so
- * every builder routes its appends through this clamp. */
+/* printf-append into buf at pos, returning the new pos clamped to [0, cap]. snprintf returns
+ * the would-be length, so the raw `pos += snprintf(...)` idiom can run pos PAST cap; a later
+ * (cap - pos) then wraps to a huge size_t and the next write lands out of bounds. The JSON
+ * builders' per-record headroom guards (pos + 64 < cap) route every append through this clamp. */
 static int js_appendf(char *buf, int pos, int cap, const char *fmt, ...)
 {
    if (pos < 0)
@@ -885,12 +883,9 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
          return 405;
       }
-      /* Escape hatch: force-clear a stuck reembed_in_progress marker. Non-destructive
-       * (only clears the maintenance flag so search resumes), so it is available even
-       * when kb.reembed_on_dim_change is off — an operator must be able to recover a
-       * store wedged in maintenance regardless of the reset toggle's current state.
-       * Refuses (409) when the recorded schema dim disagrees with the running dim
-       * (clearing would resume search mid-transition) unless force makes it explicit. */
+      /* Escape hatch: force-clear a stuck reembed_in_progress marker (non-destructive, resumes
+       * search; available even when reembed_on_dim_change is off). 409 on dim mismatch unless
+       * force. */
       if (json_bool(body, "clear_maintenance", 0))
       {
          int was = 0, recorded = 0, running = 0;
@@ -1303,6 +1298,10 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       return handle_get_pdf_structure_route(method, query_string, out_buf, out_cap);
    if (strcmp(path, "/v1/pdf/lookup_table") == 0)
       return handle_get_pdf_lookup_table_route(method, query_string, out_buf, out_cap);
+   if (strcmp(path, "/v1/pdf/assets") == 0)
+      return handle_get_pdf_assets_route(method, query_string, out_buf, out_cap);
+   if (strcmp(path, "/v1/pdf/open_asset") == 0)
+      return handle_get_pdf_open_asset_route(method, query_string, out_buf, out_cap);
    /* POST /v1/pdf/quarantine: owner-only release/purge; auth checked here (scope vr lives here). */
    if (strcmp(path, "/v1/pdf/quarantine") == 0)
    {

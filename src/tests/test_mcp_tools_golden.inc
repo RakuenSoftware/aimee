@@ -2,7 +2,7 @@
  * built-in tool surface (name + sorted schema property keys + required), captured
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
-#define MCP_TOOLS_GOLDEN_COUNT 48
+#define MCP_TOOLS_GOLDEN_COUNT 50
 #define MCP_TOOLS_GOLDEN \
    "ask_user {choices,question} req:question\n" \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n" \
@@ -35,7 +35,9 @@
    "note {command,content,limit,query,tag,tags,title} req:command\n" \
    "payload_rewrite_status {} req:\n" \
    "pdf_inspect_structure {document_key,project} req:document_key,project\n" \
+   "pdf_list_assets {document_key,project} req:document_key,project\n" \
    "pdf_lookup_table {document_key,page_no,project} req:document_key,project\n" \
+   "pdf_open_asset {asset_id,project} req:asset_id,project\n" \
    "pdf_open_neighbors {chunk_id,project} req:chunk_id,project\n" \
    "pdf_open_page {document_key,page_no,project} req:document_key,page_no,project\n" \
    "pdf_search_chunks {max_results,project,query} req:project,query\n" \

@@ -199,3 +199,57 @@ char *kb_client_pdf_lookup_table(const char *project, const char *document_key, 
    free(path);
    return json;
 }
+
+char *kb_client_pdf_list_assets(const char *project, const char *document_key, int *status_out)
+{
+   if (status_out)
+      *status_out = -1;
+   if (!project || !project[0] || !document_key || !document_key[0])
+      return NULL;
+   char *project_q = kb_client_query_escape(project);
+   char *dk_q = kb_client_query_escape(document_key);
+   if (!project_q || !dk_q)
+   {
+      free(project_q);
+      free(dk_q);
+      return NULL;
+   }
+   size_t cap =
+       strlen("/v1/pdf/assets?project=&document_key=") + strlen(project_q) + strlen(dk_q) + 8;
+   char *path = malloc(cap);
+   if (!path)
+   {
+      free(project_q);
+      free(dk_q);
+      return NULL;
+   }
+   snprintf(path, cap, "/v1/pdf/assets?project=%s&document_key=%s", project_q, dk_q);
+   free(project_q);
+   free(dk_q);
+   char *json = kb_client_v1_get_json(path, KB_CLIENT_PDF_READ_TIMEOUT_MS, status_out);
+   free(path);
+   return json;
+}
+
+char *kb_client_pdf_open_asset(const char *project, long long asset_id, int *status_out)
+{
+   if (status_out)
+      *status_out = -1;
+   if (!project || !project[0] || asset_id <= 0)
+      return NULL;
+   char *project_q = kb_client_query_escape(project);
+   if (!project_q)
+      return NULL;
+   size_t cap = strlen("/v1/pdf/open_asset?project=&asset_id=") + strlen(project_q) + 32;
+   char *path = malloc(cap);
+   if (!path)
+   {
+      free(project_q);
+      return NULL;
+   }
+   snprintf(path, cap, "/v1/pdf/open_asset?project=%s&asset_id=%lld", project_q, asset_id);
+   free(project_q);
+   char *json = kb_client_v1_get_json(path, KB_CLIENT_PDF_READ_TIMEOUT_MS, status_out);
+   free(path);
+   return json;
+}

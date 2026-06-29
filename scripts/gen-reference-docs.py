@@ -185,6 +185,14 @@ CFG_KEY_DESC = {
     "degrades to text-only when the sidecar is absent).",
     "tsr_command": "TSR sidecar endpoint/command for structured-PDF table recognition (resolves "
     "like embedding_command; AIMEE_TSR_URL env fallback).",
+    "kb_pdf_assets_enabled": "Render structured-PDF figure/table crops to the content-addressed "
+    "blob store + kb_doc_assets at ingest, served via open_asset (default off; needs pdftoppm).",
+    "kb_pdf_blob_dir": "Override the structured-PDF blob store root (default "
+    "<kb-config-dir>/kb-blobs).",
+    "kb_pdf_blob_recon_secs": "Interval (seconds) for the orphan-blob reconciliation sweep "
+    "(default 3600; <=0 disables it).",
+    "kb_pdf_blob_orphan_alarm_mb": "Warn when reclaimable orphan blob bytes exceed this many MB "
+    "(default 1024; <=0 disables the alarm).",
     "kb_mining_enabled": "Enable background KB mining.",
     "kb_mining_min_poll_s": "Minimum interval (s) between KB mining polls.",
     "kb_search_max_results": "Default max results for KB search.",

@@ -1156,6 +1156,29 @@ static cJSON *mcph_pdf_lookup_table(struct mcp_call *c)
    return pdf_passthrough(json, status, "pdf_lookup_table");
 }
 
+static cJSON *mcph_pdf_list_assets(struct mcp_call *c)
+{
+   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
+   cJSON *jd = cJSON_GetObjectItemCaseSensitive(c->jargs, "document_key");
+   if (!cJSON_IsString(jp) || !jp->valuestring[0] || !cJSON_IsString(jd) || !jd->valuestring[0])
+      return text_content("error: pdf_list_assets requires 'project' and 'document_key'");
+   int status = -1;
+   char *json = kb_client_pdf_list_assets(jp->valuestring, jd->valuestring, &status);
+   return pdf_passthrough(json, status, "pdf_list_assets");
+}
+
+static cJSON *mcph_pdf_open_asset(struct mcp_call *c)
+{
+   cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
+   long long asset_id = 0;
+   if (!cJSON_IsString(jp) || !jp->valuestring[0] ||
+       !pdf_arg_pos_int(c->jargs, "asset_id", 9007199254740992.0, &asset_id))
+      return text_content("error: pdf_open_asset requires 'project' and an 'asset_id' >= 1");
+   int status = -1;
+   char *json = kb_client_pdf_open_asset(jp->valuestring, asset_id, &status);
+   return pdf_passthrough(json, status, "pdf_open_asset");
+}
+
 /* code_span_get (ingress-compression P2): the recovery resolver for a folded code
  * reference. Resolves the project's indexed root, then reads a validated, clamped
  * line range through the active workspace provider (code_span_read does the B4
@@ -1296,6 +1319,8 @@ static const struct
     {"pdf_open_neighbors", mcph_pdf_open_neighbors},
     {"pdf_inspect_structure", mcph_pdf_inspect_structure},
     {"pdf_lookup_table", mcph_pdf_lookup_table},
+    {"pdf_list_assets", mcph_pdf_list_assets},
+    {"pdf_open_asset", mcph_pdf_open_asset},
 };
 
 static mcp_tool_handler_fn mcp_tool_lookup(const char *tool)

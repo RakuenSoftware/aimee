@@ -220,6 +220,23 @@ void mcp_add_extended_tools(cJSON *tools)
    ext_prop(t, "page_no", "integer", "Optional 1-based page to scope to; omit for all pages.");
    ext_require(t, "project");
    ext_require(t, "document_key");
+
+   t = ext_tool(tools, "pdf_list_assets",
+                "List the visual crop assets (figures/tables/pages) of a PDF document — each an "
+                "opaque asset_id + page/bbox/kind/caption — for use with pdf_open_asset.");
+   ext_prop(t, "project", "string", "Project the document belongs to.");
+   ext_prop(t, "document_key", "string", "Document key from a pdf_search_chunks hit.");
+   ext_require(t, "project");
+   ext_require(t, "document_key");
+
+   t = ext_tool(tools, "pdf_open_asset",
+                "Fetch one PDF visual crop's image bytes (base64) by its opaque asset_id from "
+                "pdf_list_assets. Access-gated + audited; the underlying blob hash is never "
+                "exposed.");
+   ext_prop(t, "project", "string", "Project the document belongs to.");
+   ext_prop(t, "asset_id", "integer", "Opaque asset_id from a pdf_list_assets entry.");
+   ext_require(t, "project");
+   ext_require(t, "asset_id");
 }
 
 /* ── Tool-family multiplexing (P4) ────────────────────────────────────────────
