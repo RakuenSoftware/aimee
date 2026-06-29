@@ -8,6 +8,7 @@
 #include "git_oauth_github.h"
 #include "git_ops.h"
 #include "git_project.h"
+#include "git_ssh_agent.h"
 #include "index.h"
 #include "webuser_editor.h"
 #include "workspace_scope.h"
@@ -168,4 +169,11 @@ int ws_scope_user_root(const char *principal, int create, char *out, size_t cap)
    if (out && cap)
       out[0] = '\0';
    return -1;
+}
+
+/* The git credential/ssh-key routes drop any live ssh-agent handle on
+ * revoke/replace; a no-op suffices for HTTP-routing tests. */
+void git_ssh_agent_stop(const char *principal)
+{
+   (void)principal;
 }

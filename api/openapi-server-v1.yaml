@@ -4037,6 +4037,73 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /git/sshkey:
+    post:
+      summary: Store (or replace) the caller's SSH private key for git over SSH
+      description: >
+        Persist an unencrypted OpenSSH/PEM private key in the CALLER's own
+        encrypted vault under (`webuser:<name>`, `git`, `ssh_key`), dual-wrapped so
+        the server can load it into the user's in-memory ssh-agent autonomously
+        (it never touches disk and is never returned to the browser). Storing
+        requires the caller's vault to be unlocked; a locked vault returns 423.
+        Capability: tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ssh_key]
+              properties:
+                ssh_key:
+                  type: string
+                  description: Unencrypted OpenSSH/PEM private key (write-only)
+      responses:
+        "200":
+          description: Stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { ok: { type: boolean } }
+        "400":
+          description: Missing or passphrase-encrypted key
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "413":
+          description: Key too large (> 64 KiB)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "423":
+          description: Vault is locked — unlock it, then retry
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+    delete:
+      summary: Remove the caller's stored SSH private key
+      description: >
+        Delete the SSH key from the caller's vault and drop any live ssh-agent
+        handle holding it. Idempotent. Capability: tool:execute.
+      responses:
+        "200":
+          description: Removed (or absent)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { ok: { type: boolean } }
+        "403":
+          description: Not a webchat user
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /git/oauth/github/start:
     post:
       summary: Begin GitHub device-flow sign-in

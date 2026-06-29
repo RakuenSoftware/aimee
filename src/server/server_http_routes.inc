@@ -17,10 +17,12 @@
 
 /* Route-handler deps used below but not needed by server_http.c's own body
  * (kept here, not in server_http.c, to respect its 2000-line limit). */
+#include "git_forge_vault.h"  /* GIT_FORGE_VAULT_AGENT/SSHKEY_CRED — per-webuser ssh-key vault */
 #include "git_host_cred.h"    /* per-host git credential store for /v1/git/credentials */
 #include "git_oauth_github.h" /* GitHub device-flow sign-in (/v1/git/oauth/github) */
 #include "git_ops.h"          /* git_ops_run for /v1/workspace/git (WP-E) */
 #include "git_ssh_agent.h"    /* git_ssh_agent_stop — drop live key handles on revoke */
+#include "vault_service.h"    /* vault_service_set/delete for the per-webuser ssh-key route */
 #include "git_project.h"      /* git_project_clone for /v1/workspace/clone (WP-D) */
 #include "webuser_editor.h"   /* webuser_editor_ensure for /v1/workspace/editor (WP-I) */
 #include "workspace_scope.h"  /* ws_scope_user_root — project workspace root */
@@ -1520,6 +1522,89 @@ static int rh_git_credentials(const route_req_t *rq, char *resp, int cap)
               : err_json(resp, cap, 500, "too large");
 }
 
+/* Per-webuser SSH private key for git over SSH. Stored in the caller's OWN
+ * encrypted vault under (webuser:<name>, "git", "ssh_key") — dual-wrapped so the
+ * server can load it into the user's in-memory ssh-agent autonomously
+ * (git_ssh_agent_ensure → git_forge_vault_sshkey), while the key never reaches
+ * the browser (write-only) and never lands on disk. Storing needs the caller's
+ * vault unlocked (the per-principal KEK); a locked vault returns 423 so the UI
+ * can prompt an unlock. The secret is never logged. */
+static int rh_git_sshkey(const route_req_t *rq, char *resp, int cap)
+{
+   const char *principal = server_http_identity_principal();
+   if (!principal || strncmp(principal, "webuser:", 8) != 0)
+      return err_json(resp, cap, 403, "ssh keys require a webchat user");
+
+   if (strcmp(rq->method, "DELETE") == 0)
+   {
+      /* Remove the stored key and drop any live agent handle (mirrors revoke). A
+       * missing entry is success — DELETE is idempotent. git_ssh_agent_stop runs
+       * only on a clean delete: on a real vault error the persisted key still
+       * exists, so tearing the agent down would just force a reload — leaving it
+       * is the less-inconsistent state. */
+      vault_status_t st =
+          vault_service_delete(principal, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED);
+      if (st != VAULT_OK && st != VAULT_NO_ENTRY)
+         return err_json(resp, cap, 500, "vault delete failed");
+      git_ssh_agent_stop(principal);
+      return snprintf(resp, (size_t)cap, "{\"ok\":true}") < cap
+                 ? 200
+                 : err_json(resp, cap, 500, "too large");
+   }
+   if (strcmp(rq->method, "POST") != 0)
+      return err_json(resp, cap, 405, "method not allowed");
+
+   /* Bound the body before parsing: a private key is a few KB, so anything past
+    * 64 KiB is abuse — fail fast rather than parse + re-wrap a huge blob. */
+   if (rq->body_len > 65536)
+      return err_json(resp, cap, 413, "ssh key too large");
+
+   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
+   if (!body || !cJSON_IsObject(body))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "invalid JSON body");
+   }
+   const cJSON *jkey = cJSON_GetObjectItemCaseSensitive(body, "ssh_key");
+   const char *key = (cJSON_IsString(jkey) && jkey->valuestring) ? jkey->valuestring : NULL;
+   /* Cheap shape check so an obviously-wrong paste fails fast with a clear
+    * message; ssh-add is still the authority at load time. Anchor on the PEM/
+    * OpenSSH armor ("-----BEGIN … PRIVATE KEY-----") rather than a loose
+    * substring so arbitrary text containing the words can't slip through. We do
+    * NOT accept a passphrase-encrypted key — the agent loads non-interactively. */
+   if (!key || strncmp(key, "-----BEGIN", 10) != 0 || !strstr(key, "PRIVATE KEY-----"))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400, "an unencrypted OpenSSH/PEM private key is required");
+   }
+   if (strstr(key, "ENCRYPTED") || strstr(key, "Proc-Type:"))
+   {
+      cJSON_Delete(body);
+      return err_json(resp, cap, 400,
+                      "passphrase-encrypted keys are not supported; provide an unencrypted key");
+   }
+
+   vault_status_t st = vault_service_set(principal, GIT_FORGE_VAULT_AGENT, GIT_FORGE_SSHKEY_CRED,
+                                         key, (long)time(NULL));
+   /* Zero our parsed copy of the secret before freeing the JSON tree. */
+   if (jkey && jkey->valuestring)
+   {
+      volatile char *p = (volatile char *)jkey->valuestring;
+      for (size_t i = 0; p[i]; i++)
+         p[i] = 0;
+   }
+   cJSON_Delete(body);
+   if (st == VAULT_ERR_LOCKED)
+      return err_json(resp, cap, 423, "vault is locked — unlock it, then add the key");
+   if (st != VAULT_OK)
+      return err_json(resp, cap, 500, "vault store failed");
+   /* A freshly stored key supersedes any agent already running with the old one. */
+   git_ssh_agent_stop(principal);
+   return snprintf(resp, (size_t)cap, "{\"ok\":true}") < cap
+              ? 200
+              : err_json(resp, cap, 500, "too large");
+}
+
 /* POST /v1/git/oauth/github/start — begin GitHub device-flow sign-in. Returns
  * {ok, user_code, verification_uri, interval}; 503 if not configured. */
 static int rh_git_oauth_github_start(const route_req_t *rq, char *resp, int cap)
@@ -2111,6 +2196,8 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/git/credentials", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_git_credentials},
     {"POST", "/v1/git/credentials", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_git_credentials},
     {"DELETE", "/v1/git/credentials", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_git_credentials},
+    {"POST", "/v1/git/sshkey", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_git_sshkey},
+    {"DELETE", "/v1/git/sshkey", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_git_sshkey},
     {"POST", "/v1/git/oauth/github/start", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
      rh_git_oauth_github_start},
     {"POST", "/v1/git/oauth/github/poll", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,

@@ -42,3 +42,24 @@ vault_status_t vault_service_get_server_principal(const char *agent, const char 
       out[0] = '\0';
    return VAULT_NO_ENTRY;
 }
+
+/* The git ssh-key route (rh_git_sshkey) stores/removes a per-webuser key; tests
+ * that link server_http.o but not the real vault get a clean success here. */
+vault_status_t vault_service_set(const char *principal, const char *agent, const char *cred,
+                                 const char *secret, long now_epoch)
+{
+   (void)principal;
+   (void)agent;
+   (void)cred;
+   (void)secret;
+   (void)now_epoch;
+   return VAULT_OK;
+}
+
+vault_status_t vault_service_delete(const char *principal, const char *agent, const char *cred)
+{
+   (void)principal;
+   (void)agent;
+   (void)cred;
+   return VAULT_OK;
+}
