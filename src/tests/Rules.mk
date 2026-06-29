@@ -123,6 +123,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-wfe-random-delegate \
                $(TESTPREFIX)/unit-test-wfe-gate-reject \
                $(TESTPREFIX)/unit-test-wfe-gate-apply \
+               $(TESTPREFIX)/unit-test-wfe-submitter \
                $(TESTPREFIX)/unit-test-workflow-gate-caps \
                $(TESTPREFIX)/unit-test-wfe-webapi \
                $(TESTPREFIX)/unit-test-cli-profile \
@@ -1317,6 +1318,13 @@ $(TESTPREFIX)/unit-test-wfe-gate-reject: $(OBJDIR)/tests/test_wfe_gate_reject.o 
 
 # Atomic guarded human-gate transition (DB1-backed).
 $(TESTPREFIX)/unit-test-wfe-gate-apply: $(OBJDIR)/tests/test_wfe_gate_apply.o \
+                                    $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/aimee_home.o \
+                                    $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# intake-auth: per-principal submitter binding + concurrency/rate count helpers.
+$(TESTPREFIX)/unit-test-wfe-submitter: $(OBJDIR)/tests/test_wfe_submitter.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                     $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/aimee_home.o \
                                     $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o

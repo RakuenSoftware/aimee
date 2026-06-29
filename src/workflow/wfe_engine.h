@@ -29,6 +29,14 @@ wfe_def_t *wfe_load_workflow(const char *name, char *err, size_t errlen);
 int wfe_work_item_create(const char *workflow_name, const char *repo, const char *proposal_path,
                          const char *mode, char out_id[80], char *err, size_t errlen);
 
+/* Resolve a workflow for a work item WITHOUT writing any row: load + validate the
+ * def, compute its version, normalize the repo, and mint the id. Lets a caller
+ * (e.g. the capped intake path) do the insert itself inside its own transaction.
+ * Fills out_name(64)/out_ver(65)/out_start(64)/out_repo(512)/out_id(80). 0 on ok. */
+int wfe_work_item_resolve(const char *workflow_name, const char *repo, char out_name[64],
+                          char out_ver[65], char out_start[64], char out_repo[512], char out_id[80],
+                          char *err, size_t errlen);
+
 typedef struct
 {
    wfe_step_status_t last_status;

@@ -6,6 +6,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* General work-item insert (interactive + internal callers, e.g. the sweep path).
+ * The PUBLIC autonomous intake (POST /v1/dev/submit) must NOT use this directly —
+ * it goes through db1_work_item_submit_capped, which binds a submitter atomically
+ * so every externally-submitted autonomous run is capped + attributed. (A DB CHECK
+ * is intentionally avoided: engine tests legitimately create autonomous rows here
+ * without a submitter.) */
 int db1_work_item_create(const char *work_item_id, const char *repo, const char *proposal_path,
                          const char *workflow_name, const char *workflow_version,
                          const char *start_stage, const char *mode)
@@ -53,14 +59,15 @@ static void fill_wi(db1_work_item_t *o, sqlite3_stmt *st)
    o->override_count = sqlite3_column_int(st, 13);
    db1_copy_col_text(o->pr_ref, sizeof o->pr_ref, st, 14);
    db1_copy_col_text(o->worktree, sizeof o->worktree, st, 15);
+   db1_copy_col_text(o->submitter, sizeof o->submitter, st, 16);
 }
 
-/* pr_ref/worktree are appended last so the existing column indices (0-13) are
- * unchanged. */
+/* pr_ref/worktree/submitter are appended last so the existing column indices (0-13)
+ * are unchanged. */
 #define WI_COLS                                                                                    \
    "work_item_id, repo, proposal_path, workflow_name, workflow_version, current_stage, "           \
    "state, mode, pause_reason, paused_state, content_hash, cum_cost_usd, "                         \
-   "work_item_max_cost_usd, override_count, pr_ref, worktree"
+   "work_item_max_cost_usd, override_count, pr_ref, worktree, submitter"
 
 int db1_work_item_get(const char *work_item_id, db1_work_item_t *out)
 {
@@ -149,6 +156,137 @@ int db1_work_item_set_worktree(const char *wi, const char *worktree)
    int rc = sqlite3_step(st);
    sqlite3_finalize(st);
    return rc == SQLITE_DONE ? 0 : -1;
+}
+
+int db1_work_item_set_submitter(const char *wi, const char *submitter)
+{
+   sqlite3 *db = db1_conn();
+   if (!db || !wi)
+      return -1;
+   static const char *sql = "UPDATE lifecycle_work_item SET submitter=?, "
+                            "updated_at=datetime('now') WHERE work_item_id=?";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, submitter ? submitter : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, wi, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   sqlite3_finalize(st);
+   /* Fail closed: a step that "succeeds" but matched no row (unknown work item)
+    * would silently lose the audit binding, so require exactly one changed row. */
+   if (rc != SQLITE_DONE || sqlite3_changes(db) != 1)
+      return -1;
+   return 0;
+}
+
+int db1_work_item_count_active_by_submitter(const char *submitter)
+{
+   sqlite3 *db = db1_conn();
+   if (!db || !submitter)
+      return -1;
+   /* Count NON-TERMINAL autonomous runs (active or human-parked) — keyed off
+    * terminal-ness, not the literal state='active' label, so a pause/resume
+    * transition can't free a concurrency slot while the run still holds its
+    * worktree + budget. Mirror the scheduler's terminal whitelist. */
+   static const char *sql =
+       "SELECT COUNT(*) FROM lifecycle_work_item WHERE submitter=? "
+       "AND state NOT IN ('accepted','rejected','abandoned') AND mode='autonomous'";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, submitter, -1, SQLITE_TRANSIENT);
+   int count = (sqlite3_step(st) == SQLITE_ROW) ? sqlite3_column_int(st, 0) : -1;
+   sqlite3_finalize(st);
+   return count;
+}
+
+int db1_work_item_count_recent_by_submitter(const char *submitter, int secs)
+{
+   sqlite3 *db = db1_conn();
+   if (!db || !submitter || secs <= 0)
+      return -1;
+   /* mode='autonomous' kept symmetric with the active-count helper: both caps
+    * mean the same "this autonomous principal", never an interactive row. */
+   static const char *sql = "SELECT COUNT(*) FROM lifecycle_work_item WHERE submitter=? "
+                            "AND mode='autonomous' AND created_at > datetime('now', ?)";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   char win[32];
+   snprintf(win, sizeof win, "-%d seconds", secs);
+   sqlite3_bind_text(st, 1, submitter, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, win, -1, SQLITE_TRANSIENT);
+   int count = (sqlite3_step(st) == SQLITE_ROW) ? sqlite3_column_int(st, 0) : -1;
+   sqlite3_finalize(st);
+   return count;
+}
+
+int db1_work_item_submit_capped(const char *work_item_id, const char *repo,
+                                const char *proposal_path, const char *workflow_name,
+                                const char *workflow_version, const char *start_stage,
+                                const char *submitter, int max_active, int rate_max, int rate_secs)
+{
+   if (!work_item_id || !work_item_id[0] || !submitter || !submitter[0])
+      return -1;
+   /* One BEGIN IMMEDIATE around cap-check + create + submitter-bind + audit so
+    * concurrent submits from one principal serialize (the second blocks on the
+    * write lock, then its COUNT sees the first's row) — the cap can't be exceeded
+    * by the request-burst factor. Every step is fail-CLOSED: a -1 from a count
+    * (DB fault) or any failed write rolls back, so a partial/uncapped/unattributed
+    * run never escapes. Returns 0=created, 1=concurrency cap, 2=rate cap, -1=error. */
+   if (db1_lifecycle_txn_begin() != 0)
+      return -1;
+   int active = db1_work_item_count_active_by_submitter(submitter);
+   if (active < 0)
+   {
+      db1_lifecycle_txn_rollback();
+      return -1;
+   }
+   if (max_active > 0 && active >= max_active)
+   {
+      db1_lifecycle_txn_rollback();
+      return 1;
+   }
+   if (rate_max > 0 && rate_secs > 0)
+   {
+      int recent = db1_work_item_count_recent_by_submitter(submitter, rate_secs);
+      if (recent < 0)
+      {
+         db1_lifecycle_txn_rollback();
+         return -1;
+      }
+      if (recent >= rate_max)
+      {
+         db1_lifecycle_txn_rollback();
+         return 2;
+      }
+   }
+   const char *start = start_stage ? start_stage : "intake";
+   if (db1_work_item_create(work_item_id, repo, proposal_path, workflow_name, workflow_version,
+                            start, "autonomous") != 0 ||
+       db1_work_item_set_submitter(work_item_id, submitter) != 0)
+   {
+      db1_lifecycle_txn_rollback();
+      return -1;
+   }
+   /* Parity "create" event (matches the interactive wfe_work_item_create path) plus
+    * the attributed, self-locating "submit" audit row (repo + proposal + id). */
+   char detail[512];
+   snprintf(detail, sizeof detail, "submit repo=%s proposal=%s id=%s", repo ? repo : "",
+            proposal_path ? proposal_path : "", work_item_id);
+   if (db1_lifecycle_event_add(work_item_id, start, "create", submitter,
+                               workflow_name ? workflow_name : "", workflow_version, 0) != 0 ||
+       db1_lifecycle_event_add(work_item_id, start, "submit", submitter, detail, "", 0) != 0)
+   {
+      db1_lifecycle_txn_rollback();
+      return -1;
+   }
+   if (db1_lifecycle_txn_commit() != 0)
+   {
+      db1_lifecycle_txn_rollback();
+      return -1;
+   }
+   return 0;
 }
 
 int db1_work_item_set_terminal(const char *wi, const char *state)

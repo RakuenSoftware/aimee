@@ -25,6 +25,7 @@ typedef struct
     * the wfe_step_result_t.content_hash transport (validated < 64 chars at open). */
    char pr_ref[128];
    char worktree[1024]; /* per-work-item git worktree (aimee/wi/<id>); "" until created */
+   char submitter[128]; /* attested principal that submitted the run (intake-auth) */
    double cum_cost_usd;
    double work_item_max_cost_usd; /* 0 = no cap */
    int override_count;
@@ -59,6 +60,25 @@ int db1_work_item_set_stage(const char *work_item_id, const char *stage, const c
 int db1_work_item_set_pr_ref(const char *work_item_id, const char *pr_ref);
 /* Record the per-work-item git worktree path (set when it is first created). */
 int db1_work_item_set_worktree(const char *work_item_id, const char *worktree);
+/* Record the attested submitter principal (intake-auth audit binding). */
+int db1_work_item_set_submitter(const char *work_item_id, const char *submitter);
+/* Count this submitter's ACTIVE autonomous work items (per-principal concurrency
+ * cap). Returns the count, or -1 on error. */
+int db1_work_item_count_active_by_submitter(const char *submitter);
+/* Count this submitter's work items created within the last `secs` seconds
+ * (per-principal rate window). Returns the count, or -1 on error. */
+int db1_work_item_count_recent_by_submitter(const char *submitter, int secs);
+/* Atomic intake-auth submit (POST /v1/dev/submit): enforce the per-principal
+ * concurrency (max_active) + rate (rate_max within rate_secs) caps and, if both
+ * pass, create the autonomous work item, bind the submitter, and write the
+ * attributed "submit" audit event — all under one BEGIN IMMEDIATE so concurrent
+ * submits from one principal serialize (TOCTOU-free) and a DB fault or partial
+ * write fails closed (rollback). A cap value <= 0 disables that cap. Returns
+ * 0 = created, 1 = concurrency cap hit, 2 = rate cap hit, -1 = error. */
+int db1_work_item_submit_capped(const char *work_item_id, const char *repo,
+                                const char *proposal_path, const char *workflow_name,
+                                const char *workflow_version, const char *start_stage,
+                                const char *submitter, int max_active, int rate_max, int rate_secs);
 /* Set terminal state (accepted | rejected | abandoned) and clear pause. */
 int db1_work_item_set_terminal(const char *work_item_id, const char *state);
 

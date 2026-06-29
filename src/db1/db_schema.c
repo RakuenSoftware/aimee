@@ -47,6 +47,9 @@ static void db1_run_migrations(sqlite3 *db)
         * (aimee/wi/<id>) the autonomous run's delegates + freeze act in, so
         * concurrent runs don't share one checkout. */
        "ALTER TABLE lifecycle_work_item ADD COLUMN worktree TEXT NOT NULL DEFAULT ''",
+       /* intake-auth: the attested principal that submitted this autonomous run, for
+        * audit binding + per-principal concurrency/rate caps on POST /v1/dev/submit. */
+       "ALTER TABLE lifecycle_work_item ADD COLUMN submitter TEXT NOT NULL DEFAULT ''",
        NULL,
    };
    for (int i = 0; migrations[i]; i++)

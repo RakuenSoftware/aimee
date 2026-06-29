@@ -106,8 +106,9 @@ static void normalize_repo(const char *in, char *out, size_t cap)
       out[n - 4] = '\0';
 }
 
-int wfe_work_item_create(const char *workflow_name, const char *repo, const char *proposal_path,
-                         const char *mode, char out_id[80], char *err, size_t errlen)
+int wfe_work_item_resolve(const char *workflow_name, const char *repo, char out_name[64],
+                          char out_ver[65], char out_start[64], char out_repo[512], char out_id[80],
+                          char *err, size_t errlen)
 {
    char ferr[256];
    wfe_def_t *def = wfe_load_workflow(workflow_name, ferr, sizeof ferr);
@@ -122,26 +123,40 @@ int wfe_work_item_create(const char *workflow_name, const char *repo, const char
       wfe_def_free(def);
       return -1;
    }
-   char ver[65] = "";
-   wfe_def_compute_version(def, ver);
-   char norm[512];
-   normalize_repo(repo, norm, sizeof norm);
-
+   /* Reject (don't silently truncate) a name/start that won't fit the DB columns —
+    * the row's workflow_name/current_stage must round-trip exactly. */
+   if (strlen(def->name) >= 64 || strlen(def->start) >= 64)
+   {
+      snprintf(err, errlen, "workflow name/start stage too long");
+      wfe_def_free(def);
+      return -1;
+   }
+   out_ver[0] = '\0';
+   wfe_def_compute_version(def, out_ver);
+   snprintf(out_name, 64, "%s", def->name);
+   snprintf(out_start, 64, "%s", def->start);
+   normalize_repo(repo, out_repo, 512);
+   wfe_def_free(def);
    if (mint_work_item_id(out_id) != 0)
    {
       snprintf(err, errlen, "could not mint work-item id");
-      wfe_def_free(def);
       return -1;
    }
-   int rc = db1_work_item_create(out_id, norm, proposal_path, def->name, ver, def->start, mode);
-   if (rc != 0)
+   return 0;
+}
+
+int wfe_work_item_create(const char *workflow_name, const char *repo, const char *proposal_path,
+                         const char *mode, char out_id[80], char *err, size_t errlen)
+{
+   char name[64], ver[65], start[64], norm[512];
+   if (wfe_work_item_resolve(workflow_name, repo, name, ver, start, norm, out_id, err, errlen) != 0)
+      return -1;
+   if (db1_work_item_create(out_id, norm, proposal_path, name, ver, start, mode) != 0)
    {
       snprintf(err, errlen, "create work item failed (duplicate repo+path?)");
-      wfe_def_free(def);
       return -1;
    }
-   db1_lifecycle_event_add(out_id, def->start, "create", "user", workflow_name, ver, 0);
-   wfe_def_free(def);
+   db1_lifecycle_event_add(out_id, start, "create", "user", workflow_name, ver, 0);
    return 0;
 }
 

@@ -27,6 +27,7 @@
 #include "index.h"            /* index_scan_project after a webuser clone (WP-D) */
 #include "aimee_home.h"       /* aimee_home — proposal artifact dir for /v1/dev/submit */
 #include <math.h>             /* isfinite — validate the /v1/dev/submit budget cap */
+#include <errno.h>            /* strtol overflow detection for /v1/dev/submit caps */
 #include "wfe_engine.h"       /* wfe_work_item_create — POST /v1/dev/submit intake */
 #include "wfe_scheduler.h"    /* wfe_scheduler_notify — resume the autonomy driver */
 #include "wfe_approval.h"     /* wfe_approval_record/present — human-gate approval */
@@ -181,6 +182,24 @@ static int rh_runs_post(const route_req_t *rq, char *resp, int cap)
  * to drive it server-side. The run proceeds independent of this connection;
  * human gates park it for approval. Returns {work_item_id}. This is the ONLY way
  * an autonomous run begins — aimee never self-initiates. */
+/* Parse a positive-integer env cap value. Returns `defval` for unset/empty/
+ * non-numeric/trailing-garbage/overflow/out-of-[1,1000000] — so a malformed
+ * AIMEE_AUTONOMY_* (incl. "0" or a negative) can never silently DISABLE the cap,
+ * only fall back to the safe default. The whole string must be consumed. The
+ * caller fetches the value via a getenv string literal so the var stays
+ * discoverable by the docs-gen scanner. */
+static int dev_env_cap(const char *v, int defval)
+{
+   if (!v || !v[0])
+      return defval;
+   errno = 0;
+   char *end = NULL;
+   long n = strtol(v, &end, 10);
+   if (errno != 0 || !end || *end != '\0' || n < 1 || n > 1000000)
+      return defval;
+   return (int)n;
+}
+
 static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
 {
    cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
@@ -197,37 +216,97 @@ static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
        (jwf && cJSON_IsString(jwf) && jwf->valuestring[0]) ? jwf->valuestring : "build";
    const char *repo = (jrepo && cJSON_IsString(jrepo)) ? jrepo->valuestring : "";
 
-   /* Persist the submitted proposal to a unique artifact path. */
+   /* Intake-auth (WP-4/WP-5): require an attested submitter, and cap per-principal
+    * concurrency + submit rate so one principal can't fan out unbounded autonomous
+    * runs (each spends budget and, once the live forge is enabled, opens PRs). The
+    * endpoint is already CAP_DELEGATE; this binds the run to the principal for audit
+    * and bounds resource abuse. Both caps are DB-backed (survive restart). */
+   const char *submitter = server_http_identity_principal();
+   if (!submitter || !submitter[0])
+   {
+      cJSON_Delete(body);
+      snprintf(resp, cap, "{\"error\":\"unauthenticated: no attested principal\"}");
+      return 401;
+   }
+   /* The submitter is the cap/audit key and is stored in submitter[128]; a longer
+    * principal would truncate and collide with another's quota bucket, so reject it
+    * rather than silently mis-bucket. */
+   if (strlen(submitter) >= 128)
+   {
+      cJSON_Delete(body);
+      snprintf(resp, cap, "{\"error\":\"principal too long\"}");
+      return 400;
+   }
+   int max_active = dev_env_cap(getenv("AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL"), 5);
+   int rate_max = dev_env_cap(getenv("AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN"), 10);
+   int rate_secs = dev_env_cap(getenv("AIMEE_AUTONOMY_SUBMIT_WINDOW_SECS"), 60);
+
+   /* Compute the unique artifact path now, but DON'T write the file until the
+    * submit is admitted below — a capped/rate-limited/faulted principal must not be
+    * able to land an unbounded proposal file on disk on every rejected request. */
    const char *home = aimee_home();
    char dir[1024];
    snprintf(dir, sizeof dir, "%s/workflows/proposals", home ? home : "/tmp");
-   mkdir(dir, 0700); /* best effort; parent created by standup */
    char ppath[1152];
    snprintf(ppath, sizeof ppath, "%s/wi-%ld-%d.md", dir, (long)time(NULL), (int)getpid());
-   FILE *pf = fopen(ppath, "wb");
-   if (!pf)
-   {
-      cJSON_Delete(body);
-      snprintf(resp, cap, "{\"error\":\"could not persist proposal\"}");
-      return 500;
-   }
-   fwrite(jprop->valuestring, 1, strlen(jprop->valuestring), pf);
-   fclose(pf);
 
+   /* Resolve the workflow (no DB write), then create + cap-check + submitter-bind +
+    * audit ATOMICALLY under one BEGIN IMMEDIATE so concurrent submits from one
+    * principal serialize (TOCTOU-free) and any DB fault fails closed. */
    char id[80] = "", err[256] = "";
-   int rc = wfe_work_item_create(workflow, repo, ppath, "autonomous", id, err, sizeof err);
-   if (rc != 0 || !id[0])
+   char wf_name[64], wf_ver[65], wf_start[64], wf_repo[512];
+   if (wfe_work_item_resolve(workflow, repo, wf_name, wf_ver, wf_start, wf_repo, id, err,
+                             sizeof err) != 0 ||
+       !id[0])
    {
       cJSON *e = cJSON_CreateObject();
-      cJSON_AddStringToObject(e, "error", err[0] ? err : "failed to create work item");
+      cJSON_AddStringToObject(e, "error", err[0] ? err : "failed to resolve workflow");
       char *s = cJSON_PrintUnformatted(e);
-      snprintf(resp, cap, "%s", s ? s : "{\"error\":\"failed to create work item\"}");
+      snprintf(resp, cap, "%s", s ? s : "{\"error\":\"failed to resolve workflow\"}");
       free(s);
       cJSON_Delete(e);
       cJSON_Delete(body);
       return 500;
    }
+   int sr = db1_work_item_submit_capped(id, wf_repo, ppath, wf_name, wf_ver, wf_start, submitter,
+                                        max_active, rate_max, rate_secs);
+   if (sr == 1)
+   {
+      cJSON_Delete(body);
+      snprintf(resp, cap, "{\"error\":\"too many active autonomous runs for this principal\"}");
+      return 429;
+   }
+   if (sr == 2)
+   {
+      cJSON_Delete(body);
+      snprintf(resp, cap, "{\"error\":\"submit rate exceeded for this principal\"}");
+      return 429;
+   }
+   if (sr != 0)
+   {
+      /* Fail CLOSED: a DB/txn fault on the cap path returns 503, never an
+       * uncapped/unattributed run. */
+      cJSON_Delete(body);
+      snprintf(resp, cap, "{\"error\":\"could not record submission\"}");
+      return 503;
+   }
+   /* Admitted: now (and only now) write the proposal artifact the row references.
+    * If the write fails, abandon the just-created run so it can't drive a missing
+    * proposal forward. */
+   mkdir(dir, 0700); /* best effort; parent created by standup */
+   FILE *pf = fopen(ppath, "wb");
+   if (pf)
+   {
+      fwrite(jprop->valuestring, 1, strlen(jprop->valuestring), pf);
+      fclose(pf);
+   }
    cJSON_Delete(body);
+   if (!pf)
+   {
+      db1_work_item_set_terminal(id, "abandoned");
+      snprintf(resp, cap, "{\"error\":\"could not persist proposal\"}");
+      return 500;
+   }
    /* WP-5: a per-run USD budget ceiling so a runaway autonomous run parks
     * (budget_exceeded) instead of burning unbounded delegate cost. Default $5.00;
     * AIMEE_AUTONOMY_MAX_USD overrides (set it to 0 to disable the cap). The engine
