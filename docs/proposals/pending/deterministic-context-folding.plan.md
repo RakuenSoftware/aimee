@@ -79,30 +79,43 @@ gates regenerated where touched.
 
 - **New:** `src/coord_closet.c` + `src/headers/coord_closet.h`.
 - **API (deterministic, no model/clock/rand):**
-  - `coord_closet_nominate(const char *raw, size_t len, coord_lane_t lane, coord_set_t *out)`
+  - `coord_closet_nominate(const char *raw, size_t len, const coord_provenance_t *prov, coord_set_t *out)`
     — extract uuids, ≥7-hex shas, abs/repo paths, digit-bearing `key=value`,
-    issue/PR refs, `handle:`/`memory:` tokens.
+    issue/PR refs, `handle:`/`memory:` tokens. **`coord_provenance_t` carries
+    `{lane, turn_id, tool_call_id, result_index}`** and is stamped onto every
+    nominated coordinate (B1) for determinism + auditability.
   - `coord_closet_render(const coord_set_t *set, size_t budget, dstr *out, coord_evict_t *why)`
     — emit `Coordinate Closet (conserved from folded turns): …`; canonical NFC +
     JSON-canonicalization; total order `(lane, label, first-occurrence offset)`,
     tie-broken by `(turn_id, tool_call_id, result_index)`.
-  - No-silent-loss: if a nominated coordinate would not fit, return
-    `COORD_EVICT_FAIL` so the caller sizes-up / spills (P4) / refuses to fold —
-    never drops silently.
-- **Provenance/injection guard:** `COORD_LANE_USER` entries render untrusted, never
-  mint an agent-trusted label nor auto-promote; secret/PII filter hook before
-  persist/recall.
-- **Wiring (minimal in P1):** call `coord_closet_nominate` inside
-  `compact_tool_result` *before* strategy selection (≈`compact.c:239`) so identifiers
-  are captured before truncation; surface the conserved block through the existing
-  compaction return. No transcript surgery yet.
+  - **No-silent-loss + hard cap (B4):** the conserved set is capped at
+    `coord_closet_max_ratio` × raw size (default 1×). If a nominated coordinate
+    would exceed the cap or budget, render returns `COORD_EVICT_FAIL` and the caller
+    must enlarge / defer / spill (P4) / fail the tool — **never** drop silently.
+    `COORD_EVICT_FAIL` propagation is enforced end-to-end.
+- **Provenance / injection guard (B2):** tool results that echo user-pasted content
+  are assigned `COORD_LANE_USER`; user-lane entries render untrusted, never mint an
+  agent-trusted label nor auto-promote. A red-team negative test covers the
+  `3002 ⟦llm_port⟧` impersonation vector.
+- **PII/secret filter BEFORE render (B3):** the filter runs at render time, not just
+  before persist/recall, so secrets never reach the conserved block. Ship a default
+  deny-list (`ghp_`, `sk-`, `AKIA…` token regexes; secret-path patterns) extensible
+  via config. Render-time unit test included.
+- **Wiring (minimal in P1, return-only per F.2):** call `coord_closet_nominate`
+  inside `compact_tool_result` *before* strategy selection (≈`compact.c:239`) so
+  identifiers are captured before truncation; surface the conserved block through the
+  existing compaction return only. No transcript surgery, no cross-turn persistence
+  yet — that arrives in P2 when the fold consumes and re-emits it.
 - **Config:** `coord_closet_enabled` (bool, default off), `coord_closet_budget_tokens`
-  (int). Wired across the 5 config files (§D).
-- **Tests:** `src/tests/test_coord_closet.c` — nomination coverage, byte-identical
-  render under shuffled input + repeated runs (determinism gate), eviction→FAIL,
-  user-lane quarantine. Register in `src/tests/Rules.mk`.
-- **Accept:** 0 lost coordinates on a fixture corpus; deterministic bytes; lint +
-  unit-tests green.
+  (int), `coord_closet_max_ratio` (int/float, default 1×), `coord_closet_denylist`
+  (string, extends the built-in secret deny-list). Wired across the 5 config files
+  (§D).
+- **Tests:** `src/tests/test_coord_closet.c` — nomination coverage; byte-identical
+  render under shuffled input + repeated runs (determinism gate); overflow→
+  `COORD_EVICT_FAIL` (no silent drop); user-lane quarantine + the `3002 ⟦llm_port⟧`
+  red-team case; render-time PII/secret redaction. Register in `src/tests/Rules.mk`.
+- **Accept:** 0 lost coordinates on a fixture corpus; deterministic bytes; no secret
+  leaks render-side; lint + unit-tests green.
 
 ### P1.5 — Pipeline-order spike + per-model budget resolver (§7) — *prereq for P2*
 
@@ -134,15 +147,22 @@ gates regenerated where touched.
 - **Seam:** insert between `maybe_compact_before_request()` (`agent_runtime.c:677`)
   and `track_anthropic_payload_rewrite()` (`:698`) — sees assembled history, runs
   before the cache hash, before request build (per §B-1).
-- **Freeze + single owner:** refactor `fnv1a_update` to public; add a span registry
-  to `payload_rewrite.c` (`payload_rewrite_register_span(name, ptr, len)`); the fold
-  registers its frozen span and the prefix is hashed **once** by `payload_rewrite`.
-  No second writer. Config: `fold_freeze_enabled`, `fold_freeze_ttl_ms`,
-  `fold_tail_cap_tokens`.
-- **Tests + golden:** `test_context_fold.c` (skeletonization, atomic-pair invariant,
-  byte-identical freeze across turns, provider-shape rendering for Anthropic/OpenAI/
-  Gemini). Regenerate `test_mcp_tools_golden.inc` if the envelope shape shifts
-  (`DUMP_TOOLS=1`, §D).
+- **Freeze + single owner (B5/B6/B7/B8):** add an **internal** span registry to
+  `payload_rewrite.c` — `payload_rewrite_register_span(...)` (generic primitive,
+  substrate-owned), declared in `payload_rewrite_internal.h` or enum-keyed from a
+  closed set so it cannot be misused. `fnv1a_update` stays private; the registry
+  collects spans and `payload_rewrite` hashes **once**. The span captures the
+  **post-stage-3 (provider-shape-normalized) serialized bytes**, with an explicit
+  `(ptr, len)` lifetime contract (no use-after-free/double-free). A **CI scan**
+  fails any new caller of `fnv1a_update` / `payload_rewrite_state_t` mutators outside
+  `src/payload_rewrite.c` (single-owner enforcement). Config: `fold_freeze_enabled`,
+  `fold_freeze_ttl_ms`, `fold_tail_cap_tokens`.
+- **Tests + golden:** `test_context_fold.c` — skeletonization; **atomic-pair negative
+  tests** (orphaned `tool_use`, orphaned `tool_result`, partial parallel calls →
+  fail-loud, no orphan emission, B9); byte-identical freeze across turns;
+  cross-renderer determinism for Anthropic/OpenAI/Gemini; span `(ptr,len)` lifetime.
+  Plus an allow-list caller test for the span helper (B8). Regenerate
+  `test_mcp_tools_golden.inc` if the envelope shape shifts (`DUMP_TOOLS=1`, §D).
 - **Accept:** measured provider cache-read share ↑ on a captured long session
   (validated on the pve testbed, §E); end-to-end token cost ≤ truncation baseline;
   determinism + provider-validity gates green.
@@ -168,10 +188,12 @@ gates regenerated where touched.
 ### P5 — Sealed episodes (§5) + task rail (§8)
 
 - **Episodes:** add `KIND_EPISODE_SEAL "episode_seal"` (`aimee.h`, bump
-  `KIND_COUNT`); DB2 helper mirroring `db2_memory_unit_episode_card_insert` (+
-  `is_episode_seal` flag or distinct `unit_type`); file-inventory index; auto-recall
-  on file re-touch. Schema change ⇒ update **both** `db2/schema.sql` and
-  `schema_sqlite.sql` and pass `make schema-sync-check`.
+  `KIND_COUNT`); store as a **distinct `unit_type` value on the existing
+  `memory_units` row** (F.3 — avoids a new column/migration on the hot table); DB2
+  helper mirroring `db2_memory_unit_episode_card_insert`; file-inventory index;
+  auto-recall on file re-touch. Any schema touch ships an **idempotent migration**
+  under `db2/migrations/` with an apply-twice round-trip test (B10), updates **both**
+  `db2/schema.sql` and `schema_sqlite.sql`, and passes `make schema-sync-check`.
 - **Task rail:** serialize plan FSM to DB1 `checkpoints.snapshot` (or reuse
   `execution_plans`/`plan_steps`); `serialize`/`restore`; hard-epoch wake seed
   derived from rail+closet+seals. Config: `fold_episodes_enabled`,
@@ -218,3 +240,36 @@ and need no server.
    two; who owns the span registry.
 5. **Default-off → default-on** criteria per phase (off-reasons discipline), and
    which phases ever flip on by default.
+
+## §G Roundtable ruling (plan approval, 2026-06-29)
+
+6-panelist plan review (`--mode review --rounds 2`, 0 participants failed). **Verdict:
+APPROVED to start P1**, with the refinements below folded in above. The approach was
+not contested; every blocking item tightens it.
+
+**§B pipeline ruling — B-1 ratified:** the transcript fold targets the **delegate
+path** (`posix/agent_runtime.c:677→:698`, which already owns `payload_rewrite`)
+first; ingress-proxy-path integration is an explicit later slice (no second
+prefix-state owner is introduced).
+
+**§F open items — resolved:**
+- **F.1** pipeline → B-1 (above).
+- **F.2** P1 closet wiring → **return-only**; cross-turn persistence deferred to P2
+  where the fold consumes and re-emits it.
+- **F.3** episode-seal storage → **distinct `unit_type`** on `memory_units` (no new
+  column), paired with an idempotent migration.
+- **F.4** convergence with `ingress-compression-and-cache-alignment` → **serialize**:
+  one shared span-registry API PR (P2-owned) lands first, then independent fold /
+  ingress feature PRs — never parallel writers to `payload_rewrite.c`.
+- **F.5** default-off→on → per-phase gate table with a ≥1-release-cycle cooling-off
+  after each green-light (off-reasons discipline).
+
+**Blocking refinements (folded into the phase specs):**
+- P1: provenance `{lane,turn_id,tool_call_id,result_index}` on every coordinate
+  (B1); user-content-echo → `COORD_LANE_USER` + `3002 ⟦llm_port⟧` red-team test
+  (B2); PII/secret filter **before render** + default deny-list (B3); closet hard
+  cap `coord_closet_max_ratio` with `COORD_EVICT_FAIL` (B4).
+- P2: generic internal-only `payload_rewrite_register_span` (B5/B8); post-stage-3
+  byte capture + `(ptr,len)` lifetime (B6); CI single-owner scan on `fnv1a_update` /
+  state mutators (B7); atomic-pair negative tests (B9); serialized convergence (B11).
+- P5: idempotent `db2/migrations/` script + apply-twice round-trip test (B10).
