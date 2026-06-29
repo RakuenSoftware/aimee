@@ -5,6 +5,7 @@ RUN apt-get update \
         build-essential \
         ca-certificates \
         clang \
+        git \
         libpq-dev \
         libssl-dev \
         libzstd-dev \
@@ -16,7 +17,12 @@ RUN apt-get update \
 WORKDIR /src
 COPY . .
 ARG AIMEE_VERSION=""
-RUN make -C src ../aimee-kb ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
+# Ship the tree-sitter extraction front-end: fetch + sha256-verify the pinned
+# grammars (scripts/fetch-treesitter.sh; git + network needed only in this trusted
+# build stage), then build the kb with AIMEE_TREESITTER=1 (real-AST C/C++ class/
+# method extraction). See docs/proposals/pending/cpp-class-method-extraction.md.
+RUN sh scripts/fetch-treesitter.sh \
+    && make -C src ../aimee-kb AIMEE_TREESITTER=1 ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
 FROM debian:bookworm-slim
 

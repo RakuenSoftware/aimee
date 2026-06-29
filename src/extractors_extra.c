@@ -524,6 +524,36 @@ static void c_scan_env_vars(const char *line, int lineno, c_def_ctx_t *dc)
    }
 }
 
+/* Macro-only scan (see header): preserve `#define NAME` macros when tree-sitter
+ * handles a C/C++ file. Comment-aware so a #define inside a block/line comment is
+ * not captured — mirrors c_def_line's comment handling exactly. */
+void c_macro_def_line(const char *line, int lineno, void *ctx)
+{
+   c_def_ctx_t *dc = (c_def_ctx_t *)ctx;
+   const char *p = skip_ws(line);
+
+   if (dc->in_block_comment)
+   {
+      if (strstr(line, "*/"))
+         dc->in_block_comment = 0;
+      return;
+   }
+   if (strstr(p, "/*") && !strstr(p, "*/"))
+   {
+      dc->in_block_comment = 1;
+      return;
+   }
+   if (p[0] == '/' && p[1] == '/')
+      return;
+
+   if (strncmp(p, "#define ", 8) == 0)
+   {
+      char name[256];
+      if (extract_ident(p + 8, name, sizeof(name)))
+         dc->count = add_def(dc->out, dc->count, dc->max, name, "macro", lineno);
+   }
+}
+
 void c_def_line(const char *line, int lineno, void *ctx)
 {
    c_def_ctx_t *dc = (c_def_ctx_t *)ctx;

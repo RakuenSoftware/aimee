@@ -5,6 +5,7 @@
 
 build
 src/build
+src/vendor/tree-sitter*
 frontend/node_modules
 coverage.info
 coverage-report

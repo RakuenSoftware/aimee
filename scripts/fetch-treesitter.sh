@@ -18,7 +18,10 @@ fetch() {
     fi
     echo "fetch-treesitter: $name @ $sha"
     rm -rf "$dest"
-    git clone -q "$url" "$dest"
+    # Never block on an interactive credential prompt in an automated build; the
+    # exact commit SHA is checked out (content-addressed) and re-verified by sha256
+    # at the end, so a moved ref cannot ship a changed parser.
+    GIT_TERMINAL_PROMPT=0 git clone -q "$url" "$dest"
     git -C "$dest" checkout -q "$sha"
     rm -rf "$dest/.git"
     touch "$dest/.fetched"
@@ -49,3 +52,20 @@ fetch tree-sitter-dart       https://github.com/UserNobody14/tree-sitter-dart   
 fetch tree-sitter-css        https://github.com/tree-sitter/tree-sitter-css        dda5cfc5722c429eaba1c910ca32c2c0c5bb1a3f
 
 echo "fetch-treesitter: done -> $VENDOR/tree-sitter*"
+
+# Integrity: verify the fetched, compiled grammar/runtime sources against the
+# recorded sha256 manifest. The pinned commit SHAs above already fix the content
+# (git checkout is content-addressed); this is defense-in-depth against a moved
+# ref / upstream history rewrite / a SHA edited in this script without updating the
+# hashes — any mismatch fails the build instead of silently shipping a changed
+# parser. Regenerate after an intentional grammar bump (resolve the manifest path
+# BEFORE the cd, and write via a temp file so the input is not truncated mid-read):
+#   M=scripts/treesitter-sha256.txt; A="$PWD/$M"
+#   (cd src/vendor && sha256sum $(awk '{print $2}' "$A")) > "$M.tmp" && mv "$M.tmp" "$M"
+MANIFEST="$(cd "$(dirname "$0")" && pwd)/treesitter-sha256.txt"
+echo "fetch-treesitter: verifying sha256 ($MANIFEST)"
+if ! (cd "$VENDOR" && sha256sum --quiet -c "$MANIFEST"); then
+    echo "fetch-treesitter: SHA256 VERIFICATION FAILED — refusing to build" >&2
+    exit 1
+fi
+echo "fetch-treesitter: sha256 OK"

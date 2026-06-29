@@ -1500,6 +1500,9 @@ $(OBJDIR)/code_treesitter.o: C_FLAGS += -DAIMEE_TREESITTER -Ivendor/tree-sitter/
 $(OBJDIR)/code_treesitter.o: | vendor/tree-sitter/lib/src/lib.c
 $(TESTPREFIX)/unit-test-code-treesitter: $(OBJDIR)/tests/test_code_treesitter.o \
                                          $(OBJDIR)/code_treesitter.o \
+                                         $(OBJDIR)/extractors.o \
+                                         $(OBJDIR)/extractors_extra.o \
+                                         $(OBJDIR)/extractors_new_langs.o \
                                          $(TS_VENDOR_OBJS) \
                                          $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_CORE)

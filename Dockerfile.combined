@@ -39,6 +39,7 @@ RUN apt-get update \
         build-essential \
         ca-certificates \
         clang \
+        git \
         libpq-dev \
         libsqlite3-dev \
         libssl-dev \
@@ -51,7 +52,10 @@ RUN apt-get update \
 WORKDIR /src
 COPY . .
 ARG AIMEE_VERSION=""
-RUN make -C src ../aimee-server ../aimee-kb ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
+# Ship the tree-sitter extraction front-end (fetch + sha256-verify pinned grammars,
+# then build with AIMEE_TREESITTER=1) — see docs/proposals/pending/cpp-class-method-extraction.md.
+RUN sh scripts/fetch-treesitter.sh \
+    && make -C src ../aimee-server ../aimee-kb AIMEE_TREESITTER=1 ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
 # --- webchat frontend: build the React SPA into a single index.html ---
 # vite-plugin-singlefile inlines all JS/CSS, so the runtime image ships one file.

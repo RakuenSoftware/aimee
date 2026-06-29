@@ -288,6 +288,41 @@ int main(void)
 
    printf("  all supported languages extracted (C/C++/C#/Python/Go/JS/TS/Rust/Java/"
           "Ruby/PHP/Lua/Bash/Swift/Kotlin/Dart/CSS)\n");
+
+   /* End-to-end macro preservation through extract_definitions on the REAL
+    * tree-sitter path (this binary is built AIMEE_TREESITTER=1). Tree-sitter emits
+    * the class + method but NOT the #define; extract_definitions must append the
+    * macro pass so a C++ file with a macro + class yields BOTH. A comment-wrapped
+    * #define (incl. a multi-line block comment) must not be captured.
+    * (cpp-class-method-extraction §3.) */
+   {
+      const char *src = "#define FOO 1\n"
+                        "/*\n"
+                        "#define INBLOCK 9\n"
+                        "*/\n"
+                        "// #define INLINECMT 8\n"
+                        "class C { public: void m() {} };\n";
+      definition_t defs[64];
+      int n = extract_definitions(".cpp", src, defs, 64);
+      int macro = 0, type = 0, method = 0, incmt = 0;
+      for (int i = 0; i < n; i++)
+      {
+         if (!strcmp(defs[i].name, "FOO") && !strcmp(defs[i].kind, "macro"))
+            macro = 1;
+         if (!strcmp(defs[i].name, "C"))
+            type = 1;
+         if (!strcmp(defs[i].name, "m"))
+            method = 1;
+         if (!strcmp(defs[i].name, "INBLOCK") || !strcmp(defs[i].name, "INLINECMT"))
+            incmt = 1;
+      }
+      assert(macro);  /* #define preserved via the appended macro pass */
+      assert(type);   /* tree-sitter still emits the class */
+      assert(method); /* and the bodied method */
+      assert(!incmt); /* commented-out #defines (block + line) not captured */
+      printf("  extract_definitions merges tree-sitter defs + macros (comment-aware): ok\n");
+   }
+
    printf("ALL PASS\n");
    return 0;
 }

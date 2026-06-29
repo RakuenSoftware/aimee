@@ -872,7 +872,31 @@ int extract_definitions(const char *ext, const char *content, definition_t *out,
    {
       int n = code_treesitter_definitions(ext, content, out, max);
       if (n >= 0)
+      {
+         /* Tree-sitter's C/C++ grammar does NOT emit preprocessor macros, but the
+          * hand-rolled C path does (def_kind='macro'). Preserve them on the
+          * tree-sitter path by appending a macro-only scan, so the extractor swap
+          * is not a macro regression (cpp-class-method-extraction §3). Macro names
+          * carry a distinct def_kind, so they never collide with the tree-sitter
+          * function/type defs already in out[0..n). detect_lang maps every C/C++
+          * extension (.c/.h/.cpp/.cc/.cxx/.hpp/.hh/.hxx/.inc) to LANG_C — there is no
+          * separate LANG_CPP — so this gate covers all C++ headers/sources. (Edge: if
+          * tree-sitter already filled out[] to `max`, the macro pass is skipped; the
+          * defs array is sized generously by callers, so this is not hit in practice.) */
+         int n_orig = n;
+         if (n < max && detect_lang(ext) == LANG_C)
+         {
+            c_def_ctx_t mctx = {out, n, max, 0};
+            for_each_line(content, c_macro_def_line, &mctx);
+            n = mctx.count;
+         }
+         /* Fill body-end lines for ONLY the appended macro defs (tree-sitter already
+          * set line_end for its own defs; never overwrite them). */
+         for (int i = n_orig; i < n; i++)
+            if (out[i].line >= 1 && out[i].line_end <= 0)
+               out[i].line_end = code_def_end_line(content, out[i].line, ext);
          return n;
+      }
    }
    lang_t lang = detect_lang(ext);
    def_ctx_t ctx = {out, 0, max, lang == LANG_TS};
