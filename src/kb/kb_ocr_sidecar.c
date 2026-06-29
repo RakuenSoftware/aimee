@@ -66,8 +66,16 @@ int kb_ocr_recognize(const char *endpoint, int page_no, const unsigned char *png
    }
    cJSON_AddNumberToObject(req, "page_no", page_no);
    cJSON_AddStringToObject(req, "content_type", "image/png");
-   cJSON_AddStringToObject(req, "image_base64", b64);
+   /* Guard the load-bearing field: under allocation pressure cJSON_Add could fail, and a
+    * request missing the image would have the sidecar "succeed" with no text — silently
+    * misclassifying an OOM as a benign no-OCR result. Fail explicitly instead. */
+   int img_ok = cJSON_AddStringToObject(req, "image_base64", b64) != NULL;
    free(b64);
+   if (!img_ok)
+   {
+      cJSON_Delete(req);
+      return -1;
+   }
    char *body = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
    if (!body)
