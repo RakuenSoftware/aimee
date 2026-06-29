@@ -1,6 +1,8 @@
 #ifndef GIT_CRED_INJECT_H
 #define GIT_CRED_INJECT_H 1
 
+#include <stddef.h> /* size_t */
+
 /* git_cred_inject — assemble the execve() environment for a webchat user's git
  * operation, injecting their HTTPS forge token from the sealed vault (webchat-git
  * WP-C). The token is read autonomously (server wrap) from the `webuser:`
@@ -59,6 +61,17 @@ char **git_cred_inject_build_env_for_repo(const char *principal, const char *rem
  * vault → server identity → ssh-agent (no per-host token). Equivalent to
  * git_cred_inject_build_env_for_repo(principal, NULL, NULL, NULL, parent). */
 char **git_cred_inject_build_env(const char *principal, char *const *parent_environ);
+
+/* Resolve just the HTTPS token (no env assembly) under the SAME precedence as
+ * the env builders above: preferred → per-host vault → principal vault → server
+ * identity. For the one caller that needs the raw token rather than an exec env
+ * — the in-process GitHub REST open-PR, which puts it in an Authorization header
+ * (git_pr_api.c). Writes the token to `out` and returns 1, or 0 (no token, out
+ * empty). Centralizing here keeps the precedence from drifting and keeps the
+ * credential ladder out of downstream callers. */
+int git_cred_inject_resolve_token(const char *principal, const char *remote_url,
+                                  const char *repo_dir, const char *preferred_token, char *out,
+                                  size_t cap);
 
 /* Free an envp from git_cred_inject_build_env (zeroes the GH_TOKEN entry first). */
 void git_cred_inject_free_env(char **envp);

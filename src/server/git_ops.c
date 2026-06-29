@@ -1,6 +1,7 @@
 /* git_ops.c — per-project git operations for webchat users. See git_ops.h. */
 #include "git_ops.h"
 #include "git_cred_inject.h" /* git_cred_inject_build_env / _free_env */
+#include "git_pr_api.h"      /* git_pr_create_via_api — in-process REST open-PR */
 #include "util.h"            /* safe_exec_capture_cwd_env_timeout */
 #include "workspace_scope.h" /* ws_scope_project_path */
 
@@ -184,6 +185,28 @@ int git_ops_run_session(const char *principal, const char *project, const char *
       return 0;
    }
 
+   /* --- open-PR is an in-process GitHub REST call (git_pr_api), NOT a child
+    * exec: the forge token rides the Authorization header in aimee-server memory
+    * and never reaches a child's environ/argv (gh would put it in GH_TOKEN). The
+    * title (text_arg) is optional — empty defaults to the last commit subject.
+    * Like every git_ops op this is the webuser acting on their OWN connected repo
+    * (no agent branch-ownership/verify gate), confined by the principal-scoped
+    * project resolution + route caps + AIMEE_WEBCHAT_GIT. GitHub origins only. */
+   if (strcmp(op, "pr") == 0)
+   {
+      if (text_arg && strlen(text_arg) > 256)
+      {
+         snprintf(err, errlen, "pr title too long");
+         return -1;
+      }
+      char url[1024];
+      if (git_pr_create_via_api(principal, dir, text_arg, NULL, url, sizeof(url), err, errlen) != 0)
+         return -1;
+      if (out)
+         *out = strdup(url);
+      return 0;
+   }
+
    /* --- single-command ops: build argv + cred requirement --- */
    const char *argv[8] = {0};
    int needs_cred = 0;
@@ -250,47 +273,6 @@ int git_ops_run_session(const char *principal, const char *project, const char *
       argv[0] = "git";
       argv[1] = "checkout";
       argv[2] = text_arg;
-   }
-   else if (strcmp(op, "pr") == 0)
-   {
-      /* Open a PR for the current branch via gh (GitHub remotes). With a title
-       * (text_arg) create it explicitly with an empty body the user edits on the
-       * forge; without one, --fill the title+body from the branch's commits. gh
-       * authenticates with the injected GH_TOKEN; base defaults to the repo's
-       * default branch, head to the current branch. The title is passed as a
-       * single argv token (no shell, no flag injection) but must be one line.
-       * Unlike the agent's handle_git_pr, there is no branch-ownership/verify
-       * gate: this is the webuser acting on their OWN connected repo, already
-       * confined by the principal-scoped project resolution (ws_scope, above),
-       * the route caps, and AIMEE_WEBCHAT_GIT. A non-GitHub origin surfaces gh's
-       * own error (stderr is captured) rather than a pre-flight host check. */
-      argv[0] = "gh";
-      argv[1] = "pr";
-      argv[2] = "create";
-      if (text_arg && text_arg[0])
-      {
-         size_t tn = strlen(text_arg);
-         if (tn > 256)
-         {
-            snprintf(err, errlen, "pr title too long");
-            return -1;
-         }
-         for (size_t i = 0; i < tn; i++)
-            if ((unsigned char)text_arg[i] < 0x20)
-            {
-               snprintf(err, errlen, "invalid pr title");
-               return -1;
-            }
-         argv[3] = "--title";
-         argv[4] = text_arg;
-         argv[5] = "--body";
-         argv[6] = "";
-      }
-      else
-      {
-         argv[3] = "--fill";
-      }
-      needs_cred = 1;
    }
    else
    {

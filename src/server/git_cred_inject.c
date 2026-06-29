@@ -191,6 +191,13 @@ char **git_cred_inject_build_env(const char *principal, char *const *parent_envi
    return git_cred_inject_build_env_for_repo(principal, NULL, NULL, NULL, parent_environ, NULL);
 }
 
+int git_cred_inject_resolve_token(const char *principal, const char *remote_url,
+                                  const char *repo_dir, const char *preferred_token, char *out,
+                                  size_t cap)
+{
+   return resolve_token(principal, remote_url, repo_dir, preferred_token, out, cap);
+}
+
 void git_cred_inject_free_env(char **envp)
 {
    if (!envp)
