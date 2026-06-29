@@ -7,11 +7,12 @@
  *
  * SECURITY: registered ONLY when the operator has set wfe_live_forge_enabled=true
  * (default OFF — see config.h). Even once registered, EVERY op re-checks the flag
- * and the merge-target rail and fails closed if either is off, so a config flip
- * mid-run can't leave a half-open path, and an autonomous run can never open or
- * merge a PR against a protected branch. Turning the flag on is a deliberate
- * operator deployment action gated on branch protection + scoped creds (the
- * security-roundtable deviation from §7's default-on). */
+ * AND the merge-target rail via forge_allowed() and fails closed if either is off —
+ * including immediately before each mutating git/gh call, so a config flip or a
+ * base misconfig mid-op can't slip a push/PR/merge through (TOCTOU-safe). An
+ * autonomous run can never open or merge a PR against a protected branch. Turning
+ * the flag on is a deliberate operator deployment action gated on branch protection
+ * + scoped creds (the security-roundtable deviation from §7's default-on). */
 #include "aimee.h"
 
 #include "wfe_live_forge.h"
@@ -26,7 +27,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* The master switch: the live forge does nothing unless the operator enabled it. */
+/* The master switch: the live forge does nothing unless the operator enabled it.
+ * A config_load failure reads as DISABLED (fail closed). */
 static int forge_on(void)
 {
    config_t cfg;
@@ -34,58 +36,69 @@ static int forge_on(void)
 }
 
 /* A live forge op may proceed only if BOTH the operator switch is on AND the
- * autonomous merge-target rail allows it (never a protected branch). Fail closed. */
+ * autonomous merge-target rail allows it (never a protected branch). Fail closed.
+ * Used by EVERY op (read and write) for a single, uniform safety predicate. */
 static int forge_allowed(void)
 {
    return forge_on() && wfe_autonomous_target_ok();
 }
 
-/* Append `s` to dst (cap n) with single quotes escaped for a shell '...' literal. */
-static void shq(char *dst, size_t n, const char *s)
+/* Single-quote-escape `s` into a shell '...' literal in `dst` (cap n). Returns 0 on
+ * success, -1 if it would TRUNCATE — the caller must abort on -1, never run a
+ * half-built command. */
+static int shq(char *dst, size_t n, const char *s)
 {
+   if (!dst || n == 0)
+      return -1;
    size_t d = 0;
-   for (size_t i = 0; s && s[i] && d + 5 < n; i++)
+   for (size_t i = 0; s && s[i]; i++)
    {
       if (s[i] == '\'')
       {
-         /* close ' , escaped ' , reopen ' */
-         d += (size_t)snprintf(dst + d, n - d, "'\\''");
+         if (d + 4 >= n)
+         {
+            dst[n - 1] = '\0';
+            return -1;
+         }
+         memcpy(dst + d, "'\\''", 4);
+         d += 4;
       }
       else
       {
+         if (d + 1 >= n)
+         {
+            dst[n - 1] = '\0';
+            return -1;
+         }
          dst[d++] = s[i];
       }
    }
-   dst[d < n ? d : n - 1] = '\0';
+   dst[d] = '\0';
+   return 0;
 }
 
-/* Parse a PR number from `gh pr create` output (a trailing .../pull/<N> URL): the
- * last run of digits in the text. Returns 0 if none. */
+/* Parse the PR number from the canonical .../pull/<N> URL `gh pr create` prints.
+ * Anchored on "/pull/" + a contiguous integer, so a later digit-bearing diagnostic
+ * can't overwrite it. Returns 0 if not found / invalid. */
 static int parse_pr_number(const char *text)
 {
-   int best = 0;
    if (!text)
       return 0;
-   for (const char *p = text; *p; p++)
-   {
-      if (*p >= '0' && *p <= '9')
-      {
-         int v = atoi(p);
-         best = v; /* keep the last numeric run */
-         while (*p >= '0' && *p <= '9')
-            p++;
-         if (!*p)
-            break;
-      }
-   }
-   return best;
+   const char *m = strstr(text, "/pull/");
+   if (!m)
+      return 0;
+   m += 6;
+   if (*m < '0' || *m > '9')
+      return 0;
+   long v = strtol(m, NULL, 10);
+   return (v > 0 && v <= 2147483647L) ? (int)v : 0;
 }
 
 static wfe_ci_status_t live_ci_status(const char *repo, const char *pr)
 {
    (void)repo;
-   if (!forge_on())
-      return WFE_CI_NONE; /* disabled -> unknown -> park (never advance) */
+   if (!forge_allowed())
+      return WFE_CI_NONE; /* disabled / protected -> unknown -> park (never advance) */
    int num = pr ? atoi(pr) : 0;
    if (num <= 0)
       return WFE_CI_NONE;
@@ -110,7 +123,7 @@ static wfe_ci_status_t live_ci_status(const char *repo, const char *pr)
 static int live_mergeable(const char *repo, const char *pr)
 {
    (void)repo;
-   if (!forge_on())
+   if (!forge_allowed())
       return -1;
    int num = pr ? atoi(pr) : 0;
    if (num <= 0)
@@ -134,7 +147,7 @@ static int live_mergeable(const char *repo, const char *pr)
 static int live_is_merged(const char *repo, const char *pr)
 {
    (void)repo;
-   if (!forge_on())
+   if (!forge_allowed())
       return -1;
    int num = pr ? atoi(pr) : 0;
    if (num <= 0)
@@ -160,6 +173,10 @@ static wfe_merge_result_t live_merge(const char *repo, const char *pr)
       return WFE_MERGE_ERROR;
    char cmd[256];
    snprintf(cmd, sizeof cmd, "gh pr merge %d --squash 2>&1", num);
+   /* Re-check immediately before the mutating call: close the TOCTOU window where
+    * the flag is flipped off / the base becomes protected after the entry check. */
+   if (!forge_allowed())
+      return WFE_MERGE_ERROR;
    int rc;
    char *out = mcp_git_run(cmd, &rc);
    wfe_merge_result_t res;
@@ -183,17 +200,28 @@ static int live_open(const char *repo, const char *branch, const char *title, co
       out_pr_ref[0] = '\0';
    if (!forge_allowed() || !branch || !branch[0])
       return -1;
+   const char *base = wfe_autonomous_base();
+   if (!base || !base[0]) /* a missing/empty base must never reach push/create */
+      return -1;
+
+   /* Escape every interpolated value; ABORT on any truncation (never run a
+    * half-built shell command). */
+   char ebranch[256], etitle[512], ebody[1024], ebase[128];
+   if (shq(ebranch, sizeof ebranch, branch) != 0 ||
+       shq(etitle, sizeof etitle, title ? title : "") != 0 ||
+       shq(ebody, sizeof ebody, body ? body : "") != 0 || shq(ebase, sizeof ebase, base) != 0)
+   {
+      aimee_log(LOG_WARN, "wfe-forge", "live_open: arg too long for %s", branch);
+      return -1;
+   }
+
    /* Push the work-item branch through the vaulted runner. Worktrees share the
     * branch namespace, so the push resolves the branch the run committed to. */
-   char cmd[1024];
-   char ebranch[256], etitle[512], ebody[512], ebase[128];
-   shq(ebranch, sizeof ebranch, branch);
-   shq(etitle, sizeof etitle, title ? title : "");
-   shq(ebody, sizeof ebody, body ? body : "");
-   shq(ebase, sizeof ebase, wfe_autonomous_base());
-
-   snprintf(cmd, sizeof cmd, "git push -u origin '%s' 2>&1", ebranch);
+   char cmd[2048];
    int rc;
+   if (!forge_allowed()) /* re-check just before the mutating push (TOCTOU) */
+      return -1;
+   snprintf(cmd, sizeof cmd, "git push -u origin '%s' 2>&1", ebranch);
    char *out = mcp_git_run(cmd, &rc);
    if (rc != 0)
    {
@@ -203,6 +231,8 @@ static int live_open(const char *repo, const char *branch, const char *title, co
    }
    free(out);
 
+   if (!forge_allowed()) /* re-check just before the mutating PR create (TOCTOU) */
+      return -1;
    snprintf(cmd, sizeof cmd, "gh pr create --head '%s' --base '%s' --title '%s' --body '%s' 2>&1",
             ebranch, ebase, etitle, ebody);
    out = mcp_git_run(cmd, &rc);
@@ -217,8 +247,7 @@ static int live_open(const char *repo, const char *branch, const char *title, co
    if (num <= 0)
       return -1;
    snprintf(out_pr_ref, 128, "%d", num);
-   aimee_log(LOG_INFO, "wfe-forge", "opened PR #%d for %s -> %s", num, branch,
-             wfe_autonomous_base());
+   aimee_log(LOG_INFO, "wfe-forge", "opened PR #%d for %s -> %s", num, branch, base);
    return 0;
 }
 
