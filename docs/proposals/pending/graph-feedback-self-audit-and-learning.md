@@ -1,7 +1,7 @@
 # Proposal: Graph feedback and coverage expansion — self-audit, snapshot diffing, retrieval that learns, and broader language coverage
 
-- **State:** PENDING — net-new design. Builds on the shipped code-graph
-  substrate (`code_projection_edges`, `entity_nodes/edges`, `code_embeddings`,
+- **State:** PENDING — net-new design, not yet started. Builds on the existing
+  code-graph substrate (`code_projection_edges`, `entity_nodes/edges`, `code_embeddings`,
   the memory graph in DB2, the MCP `index` family, `/v1/code/graph/*`) and the
   central agent-memory interception layer. Does **not** re-propose anything in
   `code-graph-intelligence.md` (§3 provenance, §4 communities/hubs/surprising
