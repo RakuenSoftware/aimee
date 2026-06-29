@@ -1,13 +1,16 @@
 # Proposal: Cross-repo dependency graph — recall recovery (build-declared edges)
 
-- **State:** APPROVED — to implement (R1–R4). Roundtable design-reviewed to convergence over 5 rounds
+- **State:** DONE — implemented R1–R4 slice-by-slice (PRs #846/#847/#849/#851/#852/#853/#855/#857),
+  each roundtable-reviewed to 0-blocking before merge; **§9 recall gate MET** (HIGH+MED 100%, up from
+  ~18%) on the live .254 corpus 2026-06-29. See §8 (implementation) and §9 (final measurement). Design
+  was roundtable design-reviewed to convergence over 5 rounds
   (blocking: 6 → 3 → 3 → 3 → 1, each finer; final round = a scope-honesty fix on §6, incorporated):
   separate evidence-tagged build-edge stream (not in cross_repo_route); canonical host/owner/repo URL
   mapping; evidence-tiered (URL/submodule MEDIUM-no-symbol, name-mapped annotate-only); enumerated
   gate applicability; precise `vendored`; explicit §2.6 merge table + §3.5 AMBIGUOUS routing; honest
   §6 split (build edges reach HIGH+MED ≥85%; HIGH ≥70% needs symbol corroboration, §7-limited).
   Follow-up to
-  [cross-repo-precision-hardening](../done/cross-repo-precision-hardening.md), whose formal §9
+  [cross-repo-precision-hardening](cross-repo-precision-hardening.md), whose formal §9
   measurement (2026-06-28) passed precision (FP flood eliminated) but **collapsed recall to ~18%**
   (4 HIGH edges corpus-wide vs §5 gates HIGH ≥70% / HIGH+MED ≥85%).
 - **Charter roles:** implementer (this agent) + roundtable reviewers (skeptic/correctness/perf).
@@ -156,3 +159,61 @@ reported separately for exact-URL/submodule vs name-mapped.
 ## §7 Out of scope
 C++ class/method-level symbol extraction (mdns_cpp) — build-declared edges cover those deps at the
 repo-pair level without it.
+
+## §8 Implementation (COMPLETE)
+Slice-by-slice, each roundtable-reviewed before merge:
+- **R1 (indexing hygiene)** — already enforced by `code_dir_skip`/`code_path_skipped`
+  (`.aimee/`, `.git/`, `build/`, `_deps/`, `vendor/` excluded); confirmed live (inputtino→wolf is NOT
+  the R1 build-dir FP — see §9).
+- **R2a (#846)** — collect build manifests (`CMakeLists.txt`/`*.cmake`/`.gitmodules`/`Cargo.toml`) in
+  `code_collect.c`.
+- **R2b (#847)** — `cross_repo_build_dep` table + `db2_cross_repo_rebuild_build_deps()`:
+  FetchContent/submodule/Cargo extraction, URL-basename→`projects.name` mapping, curator-drain rebuild.
+- **R2c (#849)** — resolver merge: `canonical_index_cross_repo_deps()` folds build deps into the
+  OUT-direction output as `evidence_type ∈ {symbol_resolved, build_declared, both}` per the §2.6 table
+  (build-only → MEDIUM/LOW; symbol+high-parse-build → HIGH `both`); `evidence_type`/`build_kind`
+  surfaced in the kb JSON + CLI.
+- **R3a (#851)** — `originated_in_caller` ignores vendored-only caller definitions (§3): a dep vendored
+  into the caller no longer suppresses the canonical cross-repo edge.
+- **R3b (#852) / R3c (#853) / R3d (#855)** — the three hidden-path twins that made `.gitmodules`
+  (the dominant corpus↔corpus submodule signal) actually survive: client collection, kb ingest, and
+  the startup/per-project purges all now spare a wanted dotfile manifest while still excluding hidden
+  dirs and hidden-ancestor copies.
+- **R3e (#857)** — exclude **vendored caller files** from cross-repo route generation
+  (`cf.vendored = 0`), mirroring the definer-side filter + R3a. Eliminated the gstreamer-h265 FP class
+  (a monorepo whose entire tree under `subprojects/` is vendored and shares generic header basenames).
+- **R3 §4 (CMake identities)** — root cause of "0 CMake identities" was simply pre-R2a non-collection;
+  R2a fixes it (live: **77** CMake identities). Name-mapped `target_link_libraries` (annotate-only) is
+  deferred: it adds no new edges (cannot move the HIGH+MED recall numerator) and the §9 gate is met
+  without it.
+
+## §9 Measurement (FINAL — live, .254, 2026-06-29)
+Curated gold set built **independently** of the extractor (recursive parse of every corpus repo's own
+manifests for corpus↔corpus references): **7 build-declared edges** — `moonlight-qt→moonlight-common-c`,
+`Sunshine→{inputtino, moonlight-common-c}`, `wolf→{inputtino, eventbus, mdns_cpp}`,
+`gst-wayland-display→smithay`.
+
+Emitted edges (resolver, all projects): 8 total.
+
+| metric | result | gate | verdict |
+|---|---|---|---|
+| **Recall HIGH+MED** | **7/7 = 100%** | ≥85% | **PASS** |
+| Recall HIGH (`both`) | 3/7 = 43% (`wolf→inputtino`, `moonlight-qt→moonlight-common-c`, `gst-wayland-display→smithay`) | ≥70% | §7-limited (the 4 MEDIUM are build-only submodule/FetchContent deps with no captured symbol corroboration) |
+| Build-declared precision | 7/7 = 100% | — | PASS |
+| Overall point precision | 7/8 = 87.5% | Wilson-LB ≥90% | sample-size-limited (n=8; LB target is unreachable at this edge count regardless of FPs) |
+
+Recall went **~18% → 100% (HIGH+MED)**. The earlier formal measurement's collapse is fully recovered.
+
+**Residual (1 FP, documented, NOT a recall/build regression):** `inputtino→wolf` — a name collision on
+`create_touch_screen` (defined in `wolf/src/moonlight-server/control/input_handler.cpp`; inputtino's own
+copy is uncaptured/inline), routed via a **system** `<libinput.h>` angle-include that coincidentally
+matches `wolf/tests/platforms/linux/libinput.h` (both files in test dirs). This is a pre-existing H6
+angle-include + §7 symbol-extraction frontier case, not introduced by this proposal; the build-declared
+stream is 100% precise. The 5 gstreamer-h265 symbol FPs the measurement first surfaced were the
+vendored-caller-route class, fixed in R3e.
+
+**Acceptance:** the primary, reachable gate (**HIGH+MED recall ≥85%**) is **MET at 100%** with
+build-declared precision 100%. The HIGH-recall and Wilson-LB targets are reported honestly with their
+§7 / sample-size limitations. Remaining precision polish (system-header angle-include denylist;
+test-directory definer exclusion) and name-mapped link-dep annotation are filed as precision-hardening
+follow-ups, separable from recall recovery.
