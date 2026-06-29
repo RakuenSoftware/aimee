@@ -1,10 +1,22 @@
 # Full Autonomous Development
 
-**Status:** APPROVED (human proposal gate passed 2026-06-19) — **implementing,
-PARTIAL.** Stays in `pending/` (not `done/`): the safety floor is begun but not
-complete. See **Closeout status** below.
+- **State:** **DONE (code floor only) — NOT production-enabled; live forge
+  default-OFF.** `done/` here tracks the *code* lifecycle, not GA: the capability is
+  deliberately inert until the operator gates below are satisfied. Shipped to
+  `testing`, filed 2026-06-29.
+  The entire roundtable-ratified safety floor is implemented and merged —
+  F1a/F3a/F1b/F2/F5a/F4 (default-OFF) plus the **intake-auth** caps + audit binding
+  (PR #872), the last code item previously listed under "Remaining" in the 2026-06-28
+  closeout. What is left is **operator deployment / GA gates** (no further *safety-floor*
+  code): branch protection, scoped + rotated forge creds, the break-glass TTL flip of
+  `wfe_live_forge_enabled`, and a real execution sandbox — which is **not pure infra**:
+  a production-grade seccomp/namespace/cgroup sandbox for delegate code execution will
+  itself require code-level isolation work, tracked as a `hardware`-tier GA gate, not as
+  part of the shipped floor. **`done/` ≠ GA:** the live forge stays **default-OFF** and a
+  production live-forge PR-roundtrip stays a `deployment`-tier `validation-pending`
+  check, never auto-claimed as acceptance. See **Closeout status** below.
 
-## Closeout status (2026-06-28)
+## Closeout status (2026-06-28; intake-auth landed 2026-06-29)
 
 Reconciled against the tree + a security design-roundtable (the user delegates
 decisions to the roundtable). **What's shipped, what remains, what's deferred, and
@@ -63,15 +75,25 @@ per-item USD cap).
   [autonomous-dev-execution-substrate.md](done/autonomous-dev-execution-substrate.md)
   deferred here. The CODE floor for full-autonomous-development is now complete.
 
-**Remaining = enable-gates only (no further code floor):**
-- **intake-auth hardening** on `POST /v1/dev/submit` (it is already `CAP_DELEGATE`;
-  add per-principal rate/concurrency caps + submitter→run audit binding) — a hardening
-  precondition for the live-forge enable.
+- **intake-auth hardening on `POST /v1/dev/submit` (PR #872).** The public intake
+  endpoint now requires an attested principal (else 401) and enforces per-principal
+  **concurrency + submit-rate caps** (env-tunable, fail-CLOSED) plus a **submitter→run
+  audit binding**, all under one `BEGIN IMMEDIATE` so concurrent submits serialize
+  (TOCTOU-free) and any DB fault rolls back rather than admitting an uncapped/
+  unattributed run. Two roundtable review rounds (5 blocking + 1 DoS finding, all
+  fixed; one DB-CHECK intentionally declined with rationale). This was the last code
+  item previously listed under "Remaining" in the 2026-06-28 closeout — the live-forge
+  enable's hardening precondition.
+
+**Remaining = GA / operator enable-gates (no further *safety-floor* code):**
 - the **operator deployment gates** to flip `wfe_live_forge_enabled` on: branch
   protection on RakuenSoftware/aimee, fine-grained scoped + rotated forge creds, the
   break-glass TTL enable, and a real execution sandbox (see GA gates). A production
   live-forge roundtrip stays a deployment-tier `validation-pending` check, never a
-  closeout test.
+  closeout test. NB: the sandbox is **not pure infra** — a production seccomp/
+  namespace/cgroup profile for delegate code execution will require code-level
+  isolation work; it is a `hardware`-tier GA gate, deliberately outside the shipped
+  safety floor, not a claim that zero code remains before live enable.
 
 **Ratified deviation — default-OFF, not default-on.** §7 mandates the live forge
 ship *default-on*. The security roundtable ruled that unsafe (it would let any
