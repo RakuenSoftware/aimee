@@ -45,6 +45,12 @@ const char *wfe_ctx_pr_ref(const wfe_ctx *c)
     * work item; wi is loaded by the engine driver before any executor runs. */
    return (c && c->wi) ? c->wi->pr_ref : "";
 }
+const char *wfe_ctx_worktree(const wfe_ctx *c)
+{
+   /* "" until the per-work-item worktree has been created (F2); executors fall
+    * back to the shared repo dir while empty. */
+   return (c && c->wi) ? c->wi->worktree : "";
+}
 
 wfe_def_t *wfe_load_workflow(const char *name, char *err, size_t errlen)
 {

@@ -12,17 +12,29 @@
 #include <string.h>
 #include <time.h>
 
+#include "aimee_home.h"
 #include "cJSON.h"
 #include "util.h"
 #include "wfe_def.h"
 #include "wfe_engine.h"
 #include "wfe_iface.h"
+#include "wfe_store.h" /* db1_work_item_set_worktree — persist the per-item worktree */
 
 /* Resolve the local working repo for a work item: $AIMEE_WORKFLOW_REPO or cwd. */
 static const char *repo_dir(void)
 {
    const char *d = getenv("AIMEE_WORKFLOW_REPO");
    return (d && d[0]) ? d : ".";
+}
+
+/* The directory a producing block acts in: the per-work-item worktree (F2),
+ * created on first use, or the shared repo dir if isolation is unavailable. Filled
+ * into `buf`; never empty. */
+static void resolve_workdir(wfe_ctx *ctx, char *buf, size_t n)
+{
+   if (wfe_worktree_ensure(wfe_ctx_work_item(ctx), wfe_ctx_worktree(ctx), repo_dir(),
+                           wfe_autonomous_base(), buf, n) != 0)
+      snprintf(buf, n, "%s", repo_dir()); /* fall back to the shared checkout */
 }
 
 static int git_capture(const char *const argv[], char **out)
@@ -93,6 +105,75 @@ int wfe_git_freeze(const char *repo_dir_in, const char *base_branch, char out_ba
       free(o);
    }
    return 0;
+}
+
+/* ---- per-work-item git worktree isolation (F2) ---- */
+
+/* Ensure a per-work-item git worktree exists; fill out_path with it. If `existing`
+ * is already set (created on an earlier step) it is returned as-is. Otherwise a
+ * locked worktree aimee/wi/<id> is created off `base` in `repo_local` and the path
+ * is persisted on the work item. Returns 0 on success (out_path filled), -1 on any
+ * failure — the caller then falls back to the shared repo dir, so a worktree
+ * problem degrades to today's shared-checkout behaviour rather than crashing.
+ * `git worktree lock` keeps worktree-GC from pruning an active run (Q5). */
+int wfe_worktree_ensure(const char *work_item_id, const char *existing, const char *repo_local,
+                        const char *base, char *out_path, size_t n)
+{
+   if (!out_path || n == 0)
+      return -1;
+   out_path[0] = '\0';
+   if (existing && existing[0])
+   {
+      snprintf(out_path, n, "%s", existing);
+      return 0;
+   }
+   if (!work_item_id || !work_item_id[0])
+      return -1;
+   const char *home = aimee_home();
+   if (!home || !home[0])
+      return -1;
+   char parent[768], path[896], branch[200];
+   snprintf(parent, sizeof parent, "%s/wfe-worktrees", home);
+   snprintf(path, sizeof path, "%s/%s", parent, work_item_id);
+   snprintf(branch, sizeof branch, "aimee/wi/%s", work_item_id);
+   const char *rl = (repo_local && repo_local[0]) ? repo_local : ".";
+   const char *b = (base && base[0]) ? base : "HEAD";
+
+   char *o = NULL;
+   const char *mk[] = {"mkdir", "-p", parent, NULL};
+   if (safe_exec_capture(mk, &o, 1 << 14) != 0)
+   {
+      free(o);
+      return -1;
+   }
+   free(o);
+   o = NULL;
+   const char *add[] = {"git", "-C", rl, "worktree", "add", "--lock", "-b", branch, path, b, NULL};
+   int rc = safe_exec_capture(add, &o, 1 << 16);
+   free(o);
+   if (rc != 0)
+      return -1;
+   db1_work_item_set_worktree(work_item_id, path);
+   snprintf(out_path, n, "%s", path);
+   return 0;
+}
+
+/* Tear down a per-work-item worktree (terminal cleanup): unlock then force-remove.
+ * Best-effort; a missing/already-removed worktree is fine. */
+int wfe_worktree_cleanup(const char *worktree, const char *repo_local)
+{
+   if (!worktree || !worktree[0])
+      return 0;
+   const char *rl = (repo_local && repo_local[0]) ? repo_local : ".";
+   char *o = NULL;
+   const char *unlock[] = {"git", "-C", rl, "worktree", "unlock", worktree, NULL};
+   safe_exec_capture(unlock, &o, 1 << 14);
+   free(o);
+   o = NULL;
+   const char *rm[] = {"git", "-C", rl, "worktree", "remove", "--force", worktree, NULL};
+   int rc = safe_exec_capture(rm, &o, 1 << 14);
+   free(o);
+   return rc == 0 ? 0 : -1;
 }
 
 /* ---- forge seam (gate.ci / check.mergeable / merge) ---- */
@@ -205,9 +286,9 @@ static const char *node_delegate(const wfe_node_t *node)
  *   1  provider ran and succeeded,
  *   0  no provider installed (caller falls back to its fail-closed path),
  *  -1  provider ran and failed (caller should loop/retry). */
-static int wfe_delegate_dispatch(const char *role, const char *delegate, const char *prompt,
-                                 const char *artifact_path, char out_commit_sha[64],
-                                 double *out_cost)
+static int wfe_delegate_dispatch(const char *workdir, const char *role, const char *delegate,
+                                 const char *prompt, const char *artifact_path,
+                                 char out_commit_sha[64], double *out_cost)
 {
    if (out_commit_sha)
       out_commit_sha[0] = '\0';
@@ -215,10 +296,11 @@ static int wfe_delegate_dispatch(const char *role, const char *delegate, const c
       *out_cost = 0.0;
    if (!g_delegate || !g_delegate->run)
       return 0;
+   const char *wd = (workdir && workdir[0]) ? workdir : repo_dir();
    char err[256] = "";
    struct timespec t0 = {0, 0}, t1 = {0, 0};
    int ok0 = clock_gettime(CLOCK_MONOTONIC, &t0) == 0;
-   int rc = g_delegate->run(repo_dir(), role, delegate ? delegate : "", prompt, artifact_path,
+   int rc = g_delegate->run(wd, role, delegate ? delegate : "", prompt, artifact_path,
                             out_commit_sha, err, sizeof err);
    int ok1 = clock_gettime(CLOCK_MONOTONIC, &t1) == 0;
    if (out_cost) /* a failed turn still consumed wall-clock -> still costs */
@@ -248,9 +330,11 @@ static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
    /* Dispatch a delegate to author/edit `path` (no-op if no provider installed;
     * a failed run loops). Then hash the artifact file as the produced content; if
     * it is absent (no provider ran) the gate that follows simply re-loops. */
+   char wd[1024];
+   resolve_workdir(ctx, wd, sizeof wd);
    char commit[64] = "";
    double cost = 0.0;
-   if (wfe_delegate_dispatch("architect", node_delegate(node),
+   if (wfe_delegate_dispatch(wd, "architect", node_delegate(node),
                              "Author or revise the workflow artifact at the given path "
                              "per the work item, then commit it.",
                              path, commit, &cost) < 0)
@@ -290,24 +374,25 @@ static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
  * behavior so the engine remains drivable without a live delegate. */
 static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
 {
-   (void)ctx;
+   char wd[1024];
+   resolve_workdir(ctx, wd, sizeof wd);
    char commit[64] = "";
    double cost = 0.0;
    if (wfe_delegate_dispatch(
-           "engineer", node_delegate(node),
+           wd, "engineer", node_delegate(node),
            "Implement the approved plan on the work-item branch: split into units, delegate each, "
            "VERIFY each with `aimee git verify` and fix any failures, then commit the accepted "
            "work.",
            NULL, commit, &cost) < 0)
       return with_cost(wfe_step_looped(), cost);
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
-   if (wfe_git_freeze(repo_dir(), "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
+   if (wfe_git_freeze(wd, "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
       return with_cost(wfe_step_failed(), cost);
    /* Mechanical verify gate (WP-1b): a unit only advances if it PASSES. A failed
     * verdict loops back to implement (the engine bounds the retries via
     * stage_attempt and parks max_attempts on exhaustion); a re-dispatched fresh
     * engineer delegate has the verify tool to see + fix the findings. */
-   if (!wfe_implement_verify_ok(repo_dir()))
+   if (!wfe_implement_verify_ok(wd))
       return with_cost(wfe_step_looped(), cost);
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
@@ -321,16 +406,17 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
  * repo is unavailable. */
 static wfe_step_result_t exec_document(wfe_ctx *ctx, const wfe_node_t *node)
 {
-   (void)ctx;
+   char wd[1024];
+   resolve_workdir(ctx, wd, sizeof wd);
    char commit[64] = "";
    double cost = 0.0;
-   if (wfe_delegate_dispatch("engineer", node_delegate(node),
+   if (wfe_delegate_dispatch(wd, "engineer", node_delegate(node),
                              "Document the change on the work-item branch (README/CHANGELOG/docs "
                              "+ inline comments), then commit.",
                              NULL, commit, &cost) < 0)
       return with_cost(wfe_step_looped(), cost);
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
-   if (wfe_git_freeze(repo_dir(), "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
+   if (wfe_git_freeze(wd, "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
       return with_cost(wfe_step_failed(), cost);
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
@@ -340,11 +426,12 @@ static wfe_step_result_t exec_document(wfe_ctx *ctx, const wfe_node_t *node)
 /* freeze: capture the cumulative diff at a stable freeze commit. */
 static wfe_step_result_t exec_freeze(wfe_ctx *ctx, const wfe_node_t *node)
 {
-   (void)ctx;
+   char wd[1024];
+   resolve_workdir(ctx, wd, sizeof wd);
    const char *base_branch = getenv("AIMEE_WORKFLOW_BASE");
    char base[64] = "", head[64] = "", dhash[65] = "", err[128];
-   if (wfe_git_freeze(repo_dir(), base_branch ? base_branch : "HEAD", base, head, dhash, err,
-                      sizeof err) != 0)
+   if (wfe_git_freeze(wd, base_branch ? base_branch : "HEAD", base, head, dhash, err, sizeof err) !=
+       0)
       return wfe_step_failed();
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);

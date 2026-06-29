@@ -52,13 +52,15 @@ static void fill_wi(db1_work_item_t *o, sqlite3_stmt *st)
    o->work_item_max_cost_usd = sqlite3_column_double(st, 12);
    o->override_count = sqlite3_column_int(st, 13);
    db1_copy_col_text(o->pr_ref, sizeof o->pr_ref, st, 14);
+   db1_copy_col_text(o->worktree, sizeof o->worktree, st, 15);
 }
 
-/* pr_ref is appended last so the existing column indices (0-13) are unchanged. */
+/* pr_ref/worktree are appended last so the existing column indices (0-13) are
+ * unchanged. */
 #define WI_COLS                                                                                    \
    "work_item_id, repo, proposal_path, workflow_name, workflow_version, current_stage, "           \
    "state, mode, pause_reason, paused_state, content_hash, cum_cost_usd, "                         \
-   "work_item_max_cost_usd, override_count, pr_ref"
+   "work_item_max_cost_usd, override_count, pr_ref, worktree"
 
 int db1_work_item_get(const char *work_item_id, db1_work_item_t *out)
 {
@@ -126,6 +128,23 @@ int db1_work_item_set_pr_ref(const char *wi, const char *pr_ref)
    if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
       return -1;
    sqlite3_bind_text(st, 1, pr_ref ? pr_ref : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, wi, -1, SQLITE_TRANSIENT);
+   int rc = sqlite3_step(st);
+   sqlite3_finalize(st);
+   return rc == SQLITE_DONE ? 0 : -1;
+}
+
+int db1_work_item_set_worktree(const char *wi, const char *worktree)
+{
+   sqlite3 *db = db1_conn();
+   if (!db || !wi)
+      return -1;
+   static const char *sql = "UPDATE lifecycle_work_item SET worktree=?, "
+                            "updated_at=datetime('now') WHERE work_item_id=?";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, worktree ? worktree : "", -1, SQLITE_TRANSIENT);
    sqlite3_bind_text(st, 2, wi, -1, SQLITE_TRANSIENT);
    int rc = sqlite3_step(st);
    sqlite3_finalize(st);

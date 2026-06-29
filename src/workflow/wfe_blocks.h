@@ -101,4 +101,13 @@ void wfe_set_verify_provider(const wfe_verify_provider_t *p);
  * unparseable, or any non-pass verdict) -> FAIL CLOSED. Exposed for the unit test. */
 int wfe_implement_verify_ok(const char *workdir);
 
+/* ---- per-work-item git worktree isolation (F2) ----
+ * Create/return a locked per-work-item worktree (aimee/wi/<id>) so concurrent
+ * autonomous runs don't share one checkout; tear it down on terminal. Exposed for
+ * the unit test. ensure() returns 0 + out_path on success, -1 on any failure (the
+ * caller falls back to the shared repo dir). */
+int wfe_worktree_ensure(const char *work_item_id, const char *existing, const char *repo_local,
+                        const char *base, char *out_path, size_t n);
+int wfe_worktree_cleanup(const char *worktree, const char *repo_local);
+
 #endif /* DEC_WFE_BLOCKS_H */

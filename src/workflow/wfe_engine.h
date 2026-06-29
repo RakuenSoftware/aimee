@@ -18,6 +18,7 @@ const wfe_node_t *wfe_ctx_node(const wfe_ctx *c);
 const char *wfe_ctx_repo(const wfe_ctx *c);          /* normalized repo url */
 const char *wfe_ctx_proposal_path(const wfe_ctx *c); /* proposal artifact path */
 const char *wfe_ctx_pr_ref(const wfe_ctx *c);        /* forge PR ref from pr.open, or "" */
+const char *wfe_ctx_worktree(const wfe_ctx *c);      /* per-work-item git worktree, or "" */
 
 /* Load a workflow definition by name from $AIMEE_HOME/workflows/<name>.yaml.
  * Caller frees with wfe_def_free. */

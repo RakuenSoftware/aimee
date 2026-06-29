@@ -15,6 +15,7 @@
 #include "wfe_def.h"
 #include "wfe_engine.h"
 #include "wfe_iface.h"
+#include "wfe_store.h"
 
 /* ---- mock delegate provider ---- */
 static int g_deleg_calls;
@@ -193,6 +194,43 @@ int main(void)
       assert(wfe_implement_verify_ok(".") == 0);
 
       wfe_set_verify_provider(NULL);
+   }
+
+   /* E: per-work-item git worktree (F2) — ensure creates + persists + is
+    *    idempotent; cleanup removes it. */
+   {
+      char repo[] = "/tmp/wfe_f2_repo_XXXXXX";
+      assert(mkdtemp(repo));
+      char cmd[640];
+      snprintf(cmd, sizeof cmd,
+               "cd %s && git init -q && git -c user.email=t@t -c user.name=t "
+               "commit -q --allow-empty -m base",
+               repo);
+      assert(system(cmd) == 0);
+
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("ds", "f2repo", "f2prop", "autonomous", id, err, sizeof err) ==
+             0);
+
+      char wt[1024] = "";
+      assert(wfe_worktree_ensure(id, "", repo, "HEAD", wt, sizeof wt) == 0);
+      assert(wt[0]);
+      struct stat stt;
+      assert(stat(wt, &stt) == 0); /* the worktree exists */
+
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.worktree, wt) == 0); /* persisted on the work item */
+
+      char wt2[1024] = ""; /* idempotent: an existing worktree is returned as-is */
+      assert(wfe_worktree_ensure(id, wt, repo, "HEAD", wt2, sizeof wt2) == 0);
+      assert(strcmp(wt2, wt) == 0);
+
+      assert(wfe_worktree_cleanup(wt, repo) == 0);
+      assert(stat(wt, &stt) != 0); /* removed */
+
+      snprintf(cmd, sizeof cmd, "rm -rf %s", repo);
+      (void)system(cmd);
    }
 
    printf("ok\n");

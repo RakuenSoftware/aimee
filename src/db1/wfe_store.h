@@ -24,6 +24,7 @@ typedef struct
     * provider with no open method). Set when a pr.open block advances; bounded by
     * the wfe_step_result_t.content_hash transport (validated < 64 chars at open). */
    char pr_ref[128];
+   char worktree[1024]; /* per-work-item git worktree (aimee/wi/<id>); "" until created */
    double cum_cost_usd;
    double work_item_max_cost_usd; /* 0 = no cap */
    int override_count;
@@ -56,6 +57,8 @@ int db1_work_item_set_stage(const char *work_item_id, const char *stage, const c
  * so the downstream forge gates (gate.ci / check.mergeable / merge) resolve the
  * real PR instead of the work-item id. */
 int db1_work_item_set_pr_ref(const char *work_item_id, const char *pr_ref);
+/* Record the per-work-item git worktree path (set when it is first created). */
+int db1_work_item_set_worktree(const char *work_item_id, const char *worktree);
 /* Set terminal state (accepted | rejected | abandoned) and clear pause. */
 int db1_work_item_set_terminal(const char *work_item_id, const char *state);
 
