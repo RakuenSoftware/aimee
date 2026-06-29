@@ -721,6 +721,16 @@ void config_parse_fold_section(config_t *cfg, cJSON *root)
       if (cJSON_IsNumber(item) && item->valuedouble > 0)
          cfg->fold_freeze_tail_cap_msgs = (int)item->valuedouble;
    }
+   cJSON *recall = cJSON_GetObjectItemCaseSensitive(fold, "recall");
+   if (cJSON_IsObject(recall))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(recall, "enabled");
+      if (cJSON_IsBool(item))
+         cfg->fold_recall_enabled = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(recall, "ttl_turns");
+      if (cJSON_IsNumber(item) && item->valuedouble > 0)
+         cfg->fold_recall_ttl_turns = (int)item->valuedouble;
+   }
 }
 
 void config_parse_sessions_section(config_t *cfg, cJSON *root)

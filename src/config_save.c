@@ -963,10 +963,10 @@ int config_save(const config_t *cfg)
       }
    }
 
-   /* Rolling context fold (fold §1/§3/§6, only save if non-default) */
+   /* Rolling context fold (fold §1/§3/§4/§6, only save if non-default) */
    if (cfg->fold_enabled || cfg->fold_retained_msgs || cfg->fold_min_fold_msgs ||
        cfg->fold_excerpt_bytes || cfg->fold_register_enabled || cfg->fold_freeze_enabled ||
-       cfg->fold_freeze_tail_cap_msgs)
+       cfg->fold_freeze_tail_cap_msgs || cfg->fold_recall_enabled || cfg->fold_recall_ttl_turns)
    {
       cJSON *fold = cJSON_AddObjectToObject(root, "fold");
       cJSON_AddBoolToObject(fold, "enabled", cfg->fold_enabled);
@@ -984,6 +984,13 @@ int config_save(const config_t *cfg)
          cJSON_AddBoolToObject(freeze, "enabled", cfg->fold_freeze_enabled);
          if (cfg->fold_freeze_tail_cap_msgs)
             cJSON_AddNumberToObject(freeze, "tail_cap_msgs", cfg->fold_freeze_tail_cap_msgs);
+      }
+      if (cfg->fold_recall_enabled || cfg->fold_recall_ttl_turns)
+      {
+         cJSON *recall = cJSON_AddObjectToObject(fold, "recall");
+         cJSON_AddBoolToObject(recall, "enabled", cfg->fold_recall_enabled);
+         if (cfg->fold_recall_ttl_turns)
+            cJSON_AddNumberToObject(recall, "ttl_turns", cfg->fold_recall_ttl_turns);
       }
    }
 

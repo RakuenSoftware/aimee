@@ -901,6 +901,11 @@ typedef struct config
     * tail exceeds this many messages (0 = module default). */
    int fold_freeze_enabled;
    int fold_freeze_tail_cap_msgs;
+   /* Fold recall (§4): when the agent re-touches a folded-away path/handle, emit a
+    * recall hint so the body can be paged back in on demand. Default-off.
+    * fold_recall_ttl_turns: don't re-surface the same key within this many turns. */
+   int fold_recall_enabled;
+   int fold_recall_ttl_turns;
 
    /* Session/worktree cleanup policy.
     * worktree_stale_secs: inactivity threshold before a session is pruned
