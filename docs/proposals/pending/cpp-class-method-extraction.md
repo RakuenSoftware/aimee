@@ -1,8 +1,31 @@
 # Proposal: C++ class/method symbol extraction (recall §7)
 
-- **State:** APPROVED (design roundtable converged 0-blocking over 5 rounds: 9→5→1→1→0) — implementing
-  slice-by-slice (T0 first). Prerequisites #1 (#867 .hpp collection) + #2 (routes) already DONE; that
-  fix alone lifted live HIGH recall 43%→57% with 0 precision regression (§0).
+- **State:** T0 SHIPPED + the §6 HIGH-recall gate is MET — T1/T2 now OPTIONAL polish (see §8). Design
+  roundtable converged 0-blocking over 5 rounds (9→5→1→1→0). Prerequisites #1 (#867 .hpp collection) +
+  #2 (routes) DONE. **Live §9 on .254 2026-06-29 after T0: recall HIGH+MED 100%, precision 100% (7/7
+  gold, 0 FP), HIGH recall 43%→57%(.hpp)→86%(T0) — exceeding the ≥70% target.**
+
+## §8 RESULT (T0 shipped, PR #873, deployed + measured .254 2026-06-29)
+Shipping tree-sitter ALONE — extracting C++ class/method symbols (bare names) that the hand-rolled path
+captured nothing of — was sufficient to meet the HIGH gate, because the corpus's C++ method names
+(`fire_event`, `setLoggerSink`, inputtino's API) are distinctive enough to corroborate through the
+EXISTING route + distinctiveness gates WITHOUT qualified names. Two previously-MEDIUM edges flipped to
+HIGH `both`: **wolf→eventbus** (via `fire_event`) and **wolf→mdns_cpp** (via `setLoggerSink`). The 7
+emitted edges are exactly the 7 gold edges (0 FP → precision held 100%); only Sunshine→moonlight-common-c
+stays MEDIUM (a C library — no C++ methods). Corpus-diff acceptance: routes 69→69, build_deps 7→7,
+identities 97→97 (no cross-repo loss); terms 110k→180k with functions 20.6k→113k (C++ methods now
+captured); macros preserved (−2%, capacity-edge on huge files); code_calls −12% (tree-sitter is more
+precise on call sites). No new FP class.
+
+So **T1** (qualified `Class::method` names) and **T2** (member-call receiver-type inference) are NOT
+required to meet the gate on this corpus; they remain valuable for corpora where bare method names
+collide (generic `get`/`run`/`start`) and are carried as optional future work, not blockers.
+
+Operational note (deploy): the tree-sitter re-ingest is heavier; a kb `restart` mid-heavy-write
+SIGTERM'd postgres uncleanly, leaving an orphaned relation file that blocked WAL redo
+(`could not create file base/…: File exists`) — recovered by stopping the plugin, removing the orphan +
+stale `postmaster.pid`, and restarting (data intact). `refresh-containers` restored the host:8741 DNAT
+the server reaches the kb through.
 - **Origin:** deferred §7 of [cross-repo-recall-recovery](../done/cross-repo-recall-recovery.md). HIGH
   recall was 43%: the C++ class/method-API deps capture no distinctive linking symbol.
 - **User decisions (fixed):** substrate = **ship tree-sitter**; **stage** (qualified-first, measure,
