@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h> /* close — release the token memfd after the git exec */
 
 extern char **environ;
 
@@ -63,10 +64,19 @@ static int run_git(const char *principal, const char *dir, const char *const arg
     * push/fetch to gitlab/gitea authenticates with the right host's stored token
     * (not the server's GitHub identity). repo_dir = dir → origin is resolved only
     * when a host token is actually needed (fetch/pull/push). */
-   char **envp =
-       needs_cred ? git_cred_inject_build_env_for_repo(principal, NULL, dir, NULL, environ) : NULL;
-   int rc = safe_exec_capture_cwd_env_timeout(argv, dir, envp ? envp : environ, out, GO_OUT_MAX,
-                                              GO_TIMEOUT_MS);
+   int token_fd = -1;
+   char **envp = needs_cred ? git_cred_inject_build_env_for_repo(principal, NULL, dir, NULL,
+                                                                 environ, &token_fd)
+                            : NULL;
+   /* FD mode: the HTTPS token rides an inherited memfd (token_fd), placed at
+    * GIT_CRED_TOKEN_TARGET_FD in the git child where the askpass reads it — so it
+    * never lands in the child's /proc/<pid>/environ. The fd is CLOEXEC here, so a
+    * concurrent exec on another thread can't inherit it. */
+   int rc = safe_exec_capture_cwd_env_fd_timeout(argv, dir, envp ? envp : environ, out, GO_OUT_MAX,
+                                                 GO_TIMEOUT_MS, token_fd,
+                                                 token_fd >= 0 ? GIT_CRED_TOKEN_TARGET_FD : -1);
+   if (token_fd >= 0)
+      close(token_fd);
    if (envp)
       git_cred_inject_free_env(envp);
    return rc;

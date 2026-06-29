@@ -95,7 +95,7 @@ char *mcp_git_run(const char *cmd, int *exit_code)
          const char *pref = NULL;
          if (forge_cred_get(wsid, (long)time(NULL), tok, sizeof(tok)) == 0 && tok[0])
             pref = tok;
-         char **envp = git_cred_inject_build_env_for_repo(NULL, NULL, cwd, pref, environ);
+         char **envp = git_cred_inject_build_env_for_repo(NULL, NULL, cwd, pref, environ, NULL);
          volatile char *p = (volatile char *)tok;
          for (size_t i = 0; i < sizeof(tok); i++)
             p[i] = 0;

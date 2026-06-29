@@ -37,10 +37,23 @@
  * consulted only when a host token is needed and `remote_url` is NULL — a single
  * local `git config --get remote.origin.url` (no network, no creds). Returns a
  * malloc'd array (free with git_cred_inject_free_env), or NULL when no credential
- * of any kind is available (caller falls back to ambient creds) or on error. */
+ * of any kind is available (caller falls back to ambient creds) or on error.
+ *
+ * `out_token_fd` selects how an HTTPS token reaches git:
+ *   - non-NULL  → FD MODE. The token is written to a CLOEXEC memfd (anonymous,
+ *     never a named path) whose fd is returned in *out_token_fd, and the env
+ *     carries AIMEE_GIT_TOKEN_FD=GIT_CRED_TOKEN_TARGET_FD (a number, not the
+ *     secret) instead of GH_TOKEN. The caller must run git with
+ *     safe_exec_capture_cwd_env_fd_timeout(inherit_fd=*out_token_fd,
+ *     target_fd=GIT_CRED_TOKEN_TARGET_FD) and close *out_token_fd afterwards. The
+ *     token then never appears in the child's /proc/<pid>/environ. *out_token_fd
+ *     is set to -1 when there is no HTTPS token (ssh-only / no creds).
+ *   - NULL      → LEGACY ENV MODE. The token is injected as GH_TOKEN in the env
+ *     (used by the long-lived editor path until it migrates). */
+#define GIT_CRED_TOKEN_TARGET_FD 21 /* fd number the askpass reads in the git child */
 char **git_cred_inject_build_env_for_repo(const char *principal, const char *remote_url,
                                           const char *repo_dir, const char *preferred_token,
-                                          char *const *parent_environ);
+                                          char *const *parent_environ, int *out_token_fd);
 
 /* Back-compat shim: build the env for `principal` with no repo context — webuser
  * vault → server identity → ssh-agent (no per-host token). Equivalent to

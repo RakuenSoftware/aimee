@@ -81,7 +81,7 @@ static int ws_mirror_git_runner(void *ctx, const char *const args[], char *out, 
    const char *pref = NULL;
    if (wsid && wsid[0] && forge_cred_get(wsid, (long)time(NULL), tok, sizeof(tok)) == 0 && tok[0])
       pref = tok;
-   char **envp = git_cred_inject_build_env_for_repo(NULL, remote, NULL, pref, environ);
+   char **envp = git_cred_inject_build_env_for_repo(NULL, remote, NULL, pref, environ, NULL);
    {
       volatile char *p = (volatile char *)tok;
       for (size_t i = 0; i < sizeof(tok); i++)

@@ -1,4 +1,5 @@
 /* git_cred_inject.c — vault-sourced git credential env. See git_cred_inject.h. */
+#define _GNU_SOURCE 1
 #include "git_cred_inject.h"
 #include "forge_credentials.h" /* forge_cred_askpass_shim / forge_cred_server_identity */
 #include "git_forge_vault.h"   /* git_forge_vault_token */
@@ -8,6 +9,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h> /* memfd_create — anonymous in-memory token fd (fd mode) */
+#include <unistd.h>   /* write, close */
 
 #define GIT_CRED_TOKEN_MAX 4096
 
@@ -21,13 +24,18 @@ static int is_key(const char *entry, const char *key)
 /* Build the git child env: a copy of `parent` with the credential-carrying keys
  * we manage dropped, plus GH_TOKEN/GIT_ASKPASS/GIT_TERMINAL_PROMPT (when a token
  * is given) and SSH_AUTH_SOCK (when a sock is given). Returns NULL on OOM. */
-static char **build_env(char *const *parent, const char *token, const char *shim, const char *sock)
+/* token_fd_target >= 0 selects FD MODE: advertise AIMEE_GIT_TOKEN_FD=<target>
+ * (the askpass reads the token from that inherited fd) and do NOT put the secret
+ * in the env. token_fd_target < 0 is LEGACY ENV MODE: GH_TOKEN=<token>. In both
+ * modes `token` non-empty means "a token exists" (so the askpass is wired). */
+static char **build_env(char *const *parent, const char *token, const char *shim, const char *sock,
+                        int token_fd_target)
 {
    size_t pc = 0;
    if (parent)
       while (parent[pc])
          pc++;
-   char **out = calloc(pc + 5, sizeof(char *)); /* +GH_TOKEN,ASKPASS,PROMPT,SSH_AUTH_SOCK,NULL */
+   char **out = calloc(pc + 5, sizeof(char *)); /* +token-key,ASKPASS,PROMPT,SSH_AUTH_SOCK,NULL */
    if (!out)
       return NULL;
    size_t o = 0;
@@ -35,7 +43,7 @@ static char **build_env(char *const *parent, const char *token, const char *shim
    {
       if (is_key(parent[i], "GH_TOKEN") || is_key(parent[i], "GITHUB_TOKEN") ||
           is_key(parent[i], "GIT_ASKPASS") || is_key(parent[i], "GIT_TERMINAL_PROMPT") ||
-          is_key(parent[i], "SSH_AUTH_SOCK"))
+          is_key(parent[i], "SSH_AUTH_SOCK") || is_key(parent[i], "AIMEE_GIT_TOKEN_FD"))
          continue;
       out[o] = strdup(parent[i]);
       if (!out[o++])
@@ -44,7 +52,10 @@ static char **build_env(char *const *parent, const char *token, const char *shim
    if (token && token[0])
    {
       char buf[GIT_CRED_TOKEN_MAX + 16];
-      snprintf(buf, sizeof(buf), "GH_TOKEN=%s", token);
+      if (token_fd_target >= 0)
+         snprintf(buf, sizeof(buf), "AIMEE_GIT_TOKEN_FD=%d", token_fd_target);
+      else
+         snprintf(buf, sizeof(buf), "GH_TOKEN=%s", token);
       if (!(out[o++] = strdup(buf)))
          goto oom;
       if (shim && shim[0])
@@ -119,11 +130,34 @@ static int resolve_token(const char *principal, const char *remote_url, const ch
 
 char **git_cred_inject_build_env_for_repo(const char *principal, const char *remote_url,
                                           const char *repo_dir, const char *preferred_token,
-                                          char *const *parent_environ)
+                                          char *const *parent_environ, int *out_token_fd)
 {
-   char token[GIT_CRED_TOKEN_MAX];
+   if (out_token_fd)
+      *out_token_fd = -1;
+   const int fd_mode = (out_token_fd != NULL);
+
+   char token[GIT_CRED_TOKEN_MAX] = {0};
    int have_token =
        resolve_token(principal, remote_url, repo_dir, preferred_token, token, sizeof(token));
+
+   /* FD MODE: stage the token in an anonymous CLOEXEC memfd (never a named path,
+    * never in the env). The askpass reads it via /proc/self/fd/<target>; the
+    * caller inherits this fd into git and closes it after. memfd failure fails
+    * closed (drop the token) rather than silently leaking it to the env. */
+   int token_fd = -1;
+   if (have_token && fd_mode)
+   {
+      int mfd = memfd_create("c", MFD_CLOEXEC); /* opaque name: don't advertise a cred in fdinfo */
+      size_t tn = strlen(token);
+      if (mfd >= 0 && write(mfd, token, tn) == (ssize_t)tn && write(mfd, "\n", 1) == 1)
+         token_fd = mfd;
+      else
+      {
+         if (mfd >= 0)
+            close(mfd);
+         have_token = 0; /* fail closed */
+      }
+   }
 
    /* Start (or reuse) the user's in-memory ssh-agent if they have a vaulted SSH
     * key (WP-C2); the key never touches disk. 1 = sock ready. */
@@ -133,18 +167,28 @@ char **git_cred_inject_build_env_for_repo(const char *principal, const char *rem
    char **envp = NULL;
    if (have_token || have_sock)
       envp = build_env(parent_environ, have_token ? token : NULL, forge_cred_askpass_shim(),
-                       have_sock ? sock : NULL);
+                       have_sock ? sock : NULL,
+                       (fd_mode && have_token) ? GIT_CRED_TOKEN_TARGET_FD : -1);
 
-   /* Wipe our stack copy of the token; the remaining plaintext is only the
-    * GH_TOKEN entry in envp, which git_cred_inject_free_env zeroes. */
-   if (have_token)
-      wipe(token, sizeof(token));
+   if (!envp && token_fd >= 0) /* build failed → don't leak the memfd */
+   {
+      close(token_fd);
+      token_fd = -1;
+   }
+
+   /* Wipe our stack copy of the token unconditionally (the buffer is zero-inited,
+    * so this is always safe). In fd mode the only remaining plaintext is inside
+    * the memfd (kernel memory, closed by the caller after exec); in env mode it
+    * is the GH_TOKEN entry git_cred_inject_free_env zeroes. */
+   wipe(token, sizeof(token));
+   if (out_token_fd)
+      *out_token_fd = token_fd;
    return envp;
 }
 
 char **git_cred_inject_build_env(const char *principal, char *const *parent_environ)
 {
-   return git_cred_inject_build_env_for_repo(principal, NULL, NULL, NULL, parent_environ);
+   return git_cred_inject_build_env_for_repo(principal, NULL, NULL, NULL, parent_environ, NULL);
 }
 
 void git_cred_inject_free_env(char **envp)

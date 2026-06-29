@@ -6,8 +6,12 @@
 #include "git_host_cred.h"
 #include "git_host_resolve.h"
 #include "git_ssh_agent.h"
+#include "util.h" /* safe_exec_capture_cwd_env_fd_timeout — fd-mode invariant test */
 #include "vault_kek_cache.h"
 #include "vault_service.h"
+
+#define STR2(x) #x
+#define STR(x)  STR2(x)
 
 #include <assert.h>
 #include <stdint.h>
@@ -102,14 +106,14 @@ int main(void)
    /* 1) A caller-supplied (inline/broker) token beats every vault source. */
    vault_kek_cache_clear();
    char **e1 = git_cred_inject_build_env_for_repo(alice, "https://gitlab.example.com/x/y", NULL,
-                                                  "INLINE-WINS", parent);
+                                                  "INLINE-WINS", parent, NULL);
    assert(e1 && (tok = env_val(e1, "GH_TOKEN", &n)) && n == 1 && strcmp(tok, "INLINE-WINS") == 0);
    git_cred_inject_free_env(e1);
 
    /* 2) The per-host vault token beats alice's own vaulted personal token. */
    vault_kek_cache_clear();
    char **e2 = git_cred_inject_build_env_for_repo(alice, "https://gitlab.example.com/x/y", NULL,
-                                                  NULL, parent);
+                                                  NULL, parent, NULL);
    assert(e2 && (tok = env_val(e2, "GH_TOKEN", &n)) && n == 1 &&
           strcmp(tok, "glpat-HOSTSECRET") == 0);
    git_cred_inject_free_env(e2);
@@ -117,7 +121,7 @@ int main(void)
    /* 3) A host with no stored token falls back to alice's personal vault token. */
    vault_kek_cache_clear();
    char **e3 = git_cred_inject_build_env_for_repo(alice, "https://no-token-host.example/x/y", NULL,
-                                                  NULL, parent);
+                                                  NULL, parent, NULL);
    assert(e3 && (tok = env_val(e3, "GH_TOKEN", &n)) && n == 1 &&
           strcmp(tok, "ghp_aliceSECRET") == 0);
    git_cred_inject_free_env(e3);
@@ -127,11 +131,52 @@ int main(void)
    git_host_resolve_register(NULL);
    vault_kek_cache_clear();
    char **e4 = git_cred_inject_build_env_for_repo(alice, "https://gitlab.example.com/x/y", NULL,
-                                                  NULL, parent);
+                                                  NULL, parent, NULL);
    assert(e4 && (tok = env_val(e4, "GH_TOKEN", &n)) && n == 1 &&
           strcmp(tok, "ghp_aliceSECRET") == 0);
    git_cred_inject_free_env(e4);
    git_host_resolve_register(git_host_cred_for_url);
+
+   /* --- FD MODE (#3A): the HTTPS token rides an inherited memfd, never the env,
+    * so it cannot appear in the git child's /proc/<pid>/environ. --- */
+   {
+      int tfd = -1;
+      char **fe = git_cred_inject_build_env_for_repo(alice, "https://github.com/o/r", NULL,
+                                                     "FD-MODE-SECRET", parent, &tfd);
+      assert(fe && tfd >= 0);
+      /* No GH_TOKEN; the fd number is advertised instead (a number, not a secret). */
+      assert(env_val(fe, "GH_TOKEN", &n) == NULL && n == 0);
+      const char *fdv = env_val(fe, "AIMEE_GIT_TOKEN_FD", &n);
+      assert(n == 1 && fdv && atoi(fdv) == GIT_CRED_TOKEN_TARGET_FD);
+      assert(env_val(fe, "GIT_ASKPASS", &n) && n == 1);
+      assert(env_val(fe, "GIT_TERMINAL_PROMPT", &n) && n == 1);
+      /* The secret must not appear ANYWHERE in the env strings. */
+      for (int i = 0; fe[i]; i++)
+         assert(strstr(fe[i], "FD-MODE-SECRET") == NULL);
+
+      /* The binding invariant: a child exec'd with this env + the inherited fd can
+       * read the token via /proc/self/fd/<target> (what the askpass does), but the
+       * token is NOT in its /proc/self/environ. */
+      const char *argv[] = {
+          "/bin/sh", "-c",
+          "cat /proc/self/fd/" STR(
+              GIT_CRED_TOKEN_TARGET_FD) "; printf '\\n--ENVIRON--\\n'; tr '\\0' '\\n' < "
+                                        "/proc/self/environ",
+          NULL};
+      char *out = NULL;
+      int rc = safe_exec_capture_cwd_env_fd_timeout(argv, NULL, fe, &out, 1 << 16, 10000, tfd,
+                                                    GIT_CRED_TOKEN_TARGET_FD);
+      assert(rc == 0 && out);
+      char *envmark = strstr(out, "--ENVIRON--");
+      assert(envmark);
+      *envmark = '\0'; /* split the capture into [fd read] | [environ dump] */
+      assert(strstr(out, "FD-MODE-SECRET") != NULL);              /* fd carried the token */
+      assert(strstr(envmark + 1, "FD-MODE-SECRET") == NULL);      /* NOT in environ */
+      assert(strstr(envmark + 1, "AIMEE_GIT_TOKEN_FD=") != NULL); /* only the fd number is */
+      free(out);
+      close(tfd);
+      git_cred_inject_free_env(fe);
+   }
 
    /* SSH integration (WP-C2): a vaulted SSH key adds SSH_AUTH_SOCK to the env
     * (the in-memory agent). Guarded on openssh tooling. */

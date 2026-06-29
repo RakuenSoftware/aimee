@@ -289,6 +289,17 @@ int safe_exec_capture_env(const char *const argv[], char *const envp[], char **o
 int safe_exec_capture_cwd_env_timeout(const char *const argv[], const char *cwd, char *const envp[],
                                       char **out_buf, size_t max_out, int timeout_ms);
 
+/* Like safe_exec_capture_cwd_env_timeout, but additionally hands the child one
+ * caller fd: inherit_fd is duplicated onto target_fd in the forked child with
+ * CLOEXEC cleared, so the exec'd command (and its own children) inherit exactly
+ * that fd at a known number — used to deliver a credential (a memfd the askpass
+ * reads via /proc/self/fd/<target_fd>) without putting it in the environment.
+ * inherit_fd/target_fd < 0 → no fd is passed (identical to the plain variant).
+ * inherit_fd must be CLOEXEC in the parent so concurrent execs can't leak it. */
+int safe_exec_capture_cwd_env_fd_timeout(const char *const argv[], const char *cwd,
+                                         char *const envp[], char **out_buf, size_t max_out,
+                                         int timeout_ms, int inherit_fd, int target_fd);
+
 /* --- Internal git network ops (NOT the user-facing `aimee git` CLI) ---
  *
  * Automated paths (session start, indexing, verify, branch orchestration) must
@@ -301,7 +312,7 @@ int safe_exec_capture_cwd_env_timeout(const char *const argv[], const char *cwd,
  * BatchMode=yes does the same for SSH auth; ConnectTimeout caps a dead-host
  * connect. */
 #define GIT_SAFE_SSH_COMMAND "ssh -o BatchMode=yes -o ConnectTimeout=5"
-#define GIT_SAFE_ENV "GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='" GIT_SAFE_SSH_COMMAND "' "
+#define GIT_SAFE_ENV         "GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='" GIT_SAFE_SSH_COMMAND "' "
 
 /* Wall-clock cap (ms) for an internal git network op. Generous enough not to
  * kill a slow-but-working fetch, short enough that a stalled remote can never

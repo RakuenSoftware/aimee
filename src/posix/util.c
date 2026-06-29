@@ -1,6 +1,7 @@
 /* util.c: POSIX-specific utilities (process exec, regex, pclose status) */
 #include "aimee.h"
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <poll.h>
 #include <regex.h>
@@ -36,8 +37,9 @@ static int reap_bounded(pid_t pid, int budget_ms)
    }
 }
 
-int safe_exec_capture_cwd_env_timeout(const char *const argv[], const char *cwd, char *const envp[],
-                                      char **out_buf, size_t max_out, int timeout_ms)
+int safe_exec_capture_cwd_env_fd_timeout(const char *const argv[], const char *cwd,
+                                         char *const envp[], char **out_buf, size_t max_out,
+                                         int timeout_ms, int inherit_fd, int target_fd)
 {
    *out_buf = NULL;
    if (!argv || !argv[0])
@@ -67,6 +69,23 @@ int safe_exec_capture_cwd_env_timeout(const char *const argv[], const char *cwd,
       dup2(pipefd[1], STDOUT_FILENO);
       dup2(pipefd[1], STDERR_FILENO);
       close(pipefd[1]);
+      /* Inherit one specific fd (e.g. a memfd holding a credential the askpass
+       * reads) at a fixed number for the exec'd command, cleared of CLOEXEC. The
+       * source fd is CLOEXEC in the parent, so a concurrent exec in another
+       * thread can never leak it — only this child receives it, and only at
+       * target_fd. */
+      if (inherit_fd >= 0 && target_fd >= 0)
+      {
+         if (inherit_fd != target_fd)
+         {
+            if (dup2(inherit_fd, target_fd) < 0) /* dup2 clears CLOEXEC on target_fd */
+               _exit(127);
+         }
+         else if (fcntl(target_fd, F_SETFD, 0) < 0)
+         {
+            _exit(127);
+         }
+      }
       /* Pin the working directory before exec so the command runs in the caller's
        * chosen dir (e.g. the work-item repo), not the engine's inherited cwd. A
        * failed chdir must NOT silently fall back to the parent cwd. */
@@ -189,6 +208,13 @@ int safe_exec_capture_cwd_env_timeout(const char *const argv[], const char *cwd,
       waitpid(pid, &status, 0);
    }
    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
+int safe_exec_capture_cwd_env_timeout(const char *const argv[], const char *cwd, char *const envp[],
+                                      char **out_buf, size_t max_out, int timeout_ms)
+{
+   return safe_exec_capture_cwd_env_fd_timeout(argv, cwd, envp, out_buf, max_out, timeout_ms, -1,
+                                               -1);
 }
 
 int safe_exec_capture_env(const char *const argv[], char *const envp[], char **out_buf,

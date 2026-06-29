@@ -12,13 +12,15 @@
 
 char **git_cred_inject_build_env_for_repo(const char *principal, const char *remote_url,
                                           const char *repo_dir, const char *preferred_token,
-                                          char *const *parent_environ)
+                                          char *const *parent_environ, int *out_token_fd)
 {
    (void)principal;
    (void)remote_url;
    (void)repo_dir;
    (void)preferred_token;
    (void)parent_environ;
+   if (out_token_fd)
+      *out_token_fd = -1;
    return NULL;
 }
 

@@ -109,7 +109,9 @@ int git_project_clone(const char *principal, const char *url, const char *name, 
     * already-stored vault token > the principal's own vaulted token > the
     * server's own identity (App token / AIMEE_FORGE_TOKEN); plus the principal's
     * vaulted SSH agent. The token crosses only via GIT_ASKPASS, never argv. */
-   char **envp = git_cred_inject_build_env_for_repo(principal, url, NULL, token, environ);
+   /* TODO(#3A.2): migrate clone to the memfd fd-mode (out_token_fd) so the token
+    * is not in the clone child's environment; env mode (GH_TOKEN) for now. */
+   char **envp = git_cred_inject_build_env_for_repo(principal, url, NULL, token, environ, NULL);
    /* Clone over HTTPS, never SSH: our credential model is per-host HTTPS tokens
     * (+ OAuth), and a non-interactive server has no seeded known_hosts, so an
     * ssh://, git@host:path, or git:// URL would die on "Host key verification
