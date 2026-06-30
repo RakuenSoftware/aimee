@@ -789,6 +789,9 @@ int main(void)
       g_config_strict = 1;
       int rc = config_load(&cfg);
       assert(rc == 0); /* fold is a known key -> no validation issues even in strict mode */
+      /* Also assert the section actually parsed (not merely allowlisted): a parser
+       * regression that silently dropped fold would still pass rc==0 otherwise. */
+      assert(cfg.fold_enabled == 1);
       g_config_strict = 0;
    }
 
