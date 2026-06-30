@@ -1077,7 +1077,11 @@ static void compact_cfg_from_app_config(const config_t *app, compact_config_t *o
    }
 }
 
-/* Wrapper around compact_tool_result() using application config.
+/* Eager tool-result seam: shrink via the shared compact_body() core using
+ * application config, conserve identifiers in the Coordinate Closet, and bound
+ * the result to the per-result cap. This is the ONLY writer of compacted bodies
+ * into history; the economizer's lazy lever (context_compress_view) shares the
+ * same compact_body() core but operates on deep copies at request assembly.
  * Falls back to the resolved per-result cap (agent_tool_output_cap_clamp;
  * default AGENT_TOOL_OUTPUT_MAX) so oversized results are always bounded even
  * if compaction produces a larger-than-expected summary (e.g. malformed JSON
@@ -1102,11 +1106,15 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
     * Resolved ONCE here so the closet budget and the hard cap below agree. */
    size_t cap = agent_tool_output_cap_clamp(loaded ? app_cfg.tool_output_max_bytes : 0);
 
-   char *out = compact_tool_result(raw, raw_len, &cfg, tool_name, 0, 0);
+   /* Shrink via the single shared core. Size the buffer for the one strategy that
+    * can exceed raw_len (a JSON structural summary of a tiny body); every other
+    * path is <= raw_len, so this never truncates the shrink. The hard cap below is
+    * applied by THIS caller (per-seam policy), not the core. */
+   size_t out_cap = raw_len + COMPACT_JSON_SUMMARY_MAX + 1;
+   char *out = malloc(out_cap);
    if (!out)
       return strdup("");
-
-   size_t out_len = strlen(out);
+   size_t out_len = compact_body(raw, raw_len, tool_name, &cfg, out, out_cap);
    int compacted = (out_len < raw_len);
 
    /* Log compaction events for diagnostics */

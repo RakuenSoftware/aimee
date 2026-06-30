@@ -137,6 +137,8 @@ int context_reduce(cJSON *messages, const char *system_prompt, const char *model
       cc.enabled = 1;
       cc.retained_msgs = cfg->fold.retained_msgs;
       cc.reasoning_excerpt_bytes = cfg->fold.reasoning_excerpt_bytes;
+      cc.compact_head_bytes = cfg->fold.compact_head_bytes; /* compact.* governs both seams */
+      cc.compact_tail_bytes = cfg->fold.compact_tail_bytes;
       cc.closet = cfg->fold.closet; /* zero -> module defaults; denylist borrowed for this call */
 
       fold_result_t cr;

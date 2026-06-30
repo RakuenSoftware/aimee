@@ -506,15 +506,20 @@ static void test_responses_shape_fold(void)
 /* ---- Boundary-free tool-result body compression (economizer Slice 4) ----
  * Reuses add_openai_assistant_tool_call / add_openai_tool_result defined above. */
 
-/* Build a deterministic body well past the 160-byte excerpt threshold, with a
- * unique path placed at the END so it is amputated from the head excerpt and must
- * be recovered from the Coordinate Closet. Filler carries no identifiers. */
-static void make_big_body(char *buf, size_t bufsz, const char *path_tail)
+/* Build a deterministic body well past the compaction threshold, with a unique
+ * path placed in the MIDDLE so the shared head+tail compaction amputates it from
+ * BOTH ends and it must be recovered from the Coordinate Closet. Filler carries no
+ * identifiers. (The body must be large enough that head+tail genuinely shrinks it,
+ * since the merged seam uses compact.c's default 512-byte head.) */
+static void make_big_body(char *buf, size_t bufsz, const char *path_mid)
 {
+   size_t half = bufsz / 2;
    size_t pos = 0;
-   while (pos + 48 < bufsz - 96)
+   while (pos + 48 < half)
       pos += (size_t)snprintf(buf + pos, bufsz - pos, "filler padding output text here and more; ");
-   snprintf(buf + pos, bufsz - pos, "trailing details recorded at %s end", path_tail);
+   pos += (size_t)snprintf(buf + pos, bufsz - pos, " unique reference at %s here; ", path_mid);
+   while (pos + 48 < bufsz - 1)
+      pos += (size_t)snprintf(buf + pos, bufsz - pos, "more filler padding output text and on; ");
 }
 
 /* (a) Single-user-turn OpenAI tool-loop: old tool-result bodies compress, the
@@ -525,7 +530,7 @@ static void test_compress_openai_tool_loop(void)
 {
    cJSON *msgs = cJSON_CreateArray();
    add_user_text(msgs, "Do the autonomous task."); /* the ONLY user turn */
-   char body[700];
+   char body[4096];
    char id[32], path[64], args[48];
    const int pairs = 12;
    for (int k = 0; k < pairs; k++)
@@ -572,7 +577,7 @@ static void test_compress_openai_tool_loop(void)
       const char *id_s = cJSON_GetStringValue(cJSON_GetObjectItem(it, "tool_call_id"));
       const char *c = cJSON_GetStringValue(cJSON_GetObjectItem(it, "content"));
       assert(id_s && c);
-      if (contains(c, "bytes elided"))
+      if (contains(c, "omitted"))
          compressed_seen++;
       else if (strlen(c) > 200)
          full_seen++;
@@ -616,7 +621,7 @@ static void test_compress_anthropic_shape(void)
 {
    cJSON *msgs = cJSON_CreateArray();
    add_user_text(msgs, "start");
-   char body[700];
+   char body[4096];
    char id[32];
    for (int k = 0; k < 10; k++)
    {
@@ -649,7 +654,7 @@ static void test_compress_anthropic_shape(void)
             const char *c = cJSON_GetStringValue(cJSON_GetObjectItem(b, "content"));
             /* tool_use_id preserved on the block */
             assert(cJSON_GetObjectItem(b, "tool_use_id") != NULL);
-            if (c && contains(c, "bytes elided"))
+            if (c && contains(c, "omitted"))
                compressed++;
          }
       }
@@ -668,7 +673,7 @@ static void test_compress_deterministic(void)
 {
    cJSON *msgs = cJSON_CreateArray();
    add_user_text(msgs, "go");
-   char body[700], id[32], path[64];
+   char body[4096], id[32], path[64];
    for (int k = 0; k < 12; k++)
    {
       snprintf(id, sizeof(id), "call_%02d", k);

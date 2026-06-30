@@ -299,6 +299,9 @@ static void test_compress_engages_where_fold_cannot(void)
       cfg.delegate_seam = 1;
       cfg.compress = 1;
       cfg.fold.closet.enabled = 1;
+      /* small head so the merged head+tail core net-shrinks these modest (~0.6 KB)
+       * tool bodies; also exercises the compact.* knob threading into the lever. */
+      cfg.fold.compact_head_bytes = 40;
       reduce_state_t st = {0};
       reduce_result_t out;
       int rc = context_reduce(m, "sys", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, &st, &out);

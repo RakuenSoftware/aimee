@@ -36,6 +36,13 @@ extern "C"
                                      */
       int register_enabled;         /* §6: annotate folded assistant lines with their register */
       coord_closet_config_t closet; /* identifier-conservation config (§2) */
+      /* Tool-result body shrink (context_compress_view) shares the eager seam's
+       * compact_body() core; these mirror the compact.* knobs so ONE shrink policy
+       * governs both seams. 0 -> compact.c built-in defaults. The effective tail is
+       * min(compact_tail_bytes, reasoning_excerpt_bytes/2) so a small excerpt budget
+       * keeps the tail proportional rather than inheriting a large default. */
+      int compact_head_bytes;
+      int compact_tail_bytes;
    } fold_config_t;
 
 #define CONTEXT_FOLD_DEFAULT_RETAINED_MSGS 8
@@ -103,8 +110,10 @@ extern "C"
     * (.content string|obj), OpenAI role=="tool" (.content string), Responses
     * type=="function_call_output" (.output) — and, for each body whose serialized
     * length exceeds cfg->reasoning_excerpt_bytes (0 -> CONTEXT_FOLD_DEFAULT_EXCERPT_BYTES)
-    * AND that would actually shrink, replaces it with a head excerpt + an elision
-    * marker. The exact identifiers in the full body are first nominated into a
+    * AND that would actually shrink, replaces it via the shared compact_body() core
+    * (JSON structural summary for JSON bodies, else head+tail truncation — the same
+    * algorithm the eager seam uses). The exact identifiers in the full body are first
+    * nominated into a
     * Coordinate Closet, which (when cfg->closet.enabled) is prepended as a synthetic
     * user+assistant note pair (matching context_fold_view's closet emission) so
     * conserved identifiers ride along. EVERYTHING else — role/type, ids, message

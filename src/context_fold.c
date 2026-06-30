@@ -2,6 +2,7 @@
  * See context_fold.h for the contract. Pure: cJSON + dstr + coord_closet only. */
 #include "context_fold.h"
 
+#include "compact.h" /* compact_body — the shared tool-result shrink core */
 #include "dstr.h"
 #include "fold_register.h"
 #include <stdlib.h>
@@ -229,13 +230,14 @@ void fold_result_free(fold_result_t *out)
 /* ---- Boundary-free tool-result body compression (economizer Slice 4) ---- */
 
 /* Compress one tool-result body living at `parent[key]` (a string, or any node we
- * serialize). `keep` is the head-excerpt size (also the threshold). Returns 1 if
- * the body was replaced (and accumulates its ORIGINAL byte length into *raw for the
- * closet ratio cap), 0 if it was below threshold, would not net-shrink, or on OOM.
- * Identifiers in the FULL body are nominated to `set` ONLY when we commit, so a
- * body left full never pollutes the closet. Deterministic. */
-static int compress_body_field(cJSON *parent, const char *key, int keep, int turn, coord_set_t *set,
-                               size_t *raw)
+ * serialize). `cc` carries the resolved shrink policy (threshold/head/tail) for the
+ * shared compact_body() core. Returns 1 if the body was replaced (and accumulates
+ * its ORIGINAL byte length into *raw for the closet ratio cap), 0 if it was below
+ * threshold, would not net-shrink, or on OOM. Identifiers in the FULL body are
+ * nominated to `set` ONLY when we commit, so a body left full never pollutes the
+ * closet. Deterministic. */
+static int compress_body_field(cJSON *parent, const char *key, const compact_config_t *cc, int turn,
+                               coord_set_t *set, size_t *raw)
 {
    cJSON *node = cJSON_GetObjectItem(parent, key);
    char *owned = NULL;
@@ -253,28 +255,32 @@ static int compress_body_field(cJSON *parent, const char *key, int keep, int tur
       return 0;
    }
    size_t blen = strlen(body);
-   if ((int)blen <= keep) /* below threshold -> keep verbatim */
+   if (cc->threshold > 0 && blen <= (size_t)cc->threshold) /* below threshold -> keep verbatim */
    {
       free(owned);
       return 0;
    }
 
-   /* Build the candidate (head excerpt + elision marker) and only commit when it
-    * is a genuine net shrink, so an over-threshold-but-tiny body never EXPANDS. */
-   dstr_t d;
-   dstr_init(&d);
-   append_excerpt(&d, body, keep);
-   dstr_appendf(&d, " (%zu bytes elided; identifiers conserved in Coordinate Closet)",
-                blen - (size_t)keep);
-   if (dstr_len(&d) >= blen)
+   /* Shrink via the shared core (JSON summary or head+tail), then commit only on a
+    * genuine net shrink so an over-threshold-but-tiny body never EXPANDS. The buffer
+    * is sized per the compact_body contract so no strategy is truncated. */
+   size_t cap = blen + COMPACT_JSON_SUMMARY_MAX + 1;
+   char *buf = malloc(cap);
+   if (!buf)
    {
-      dstr_free(&d);
+      free(owned);
+      return 0;
+   }
+   size_t n = compact_body(body, blen, NULL, cc, buf, cap);
+   if (n == 0 || n >= blen)
+   {
+      free(buf);
       free(owned);
       return 0;
    }
 
-   cJSON *repl = cJSON_CreateString(dstr_cstr(&d));
-   dstr_free(&d);
+   cJSON *repl = cJSON_CreateString(buf);
+   free(buf);
    if (!repl)
    {
       free(owned);
@@ -298,7 +304,8 @@ static int compress_body_field(cJSON *parent, const char *key, int keep, int tur
  * The shapes are mutually exclusive per message (an OpenAI tool result is a string
  * `content`; an Anthropic tool_result is a block inside an ARRAY `content`; a
  * Responses output is a top-level `output`), so no body is double-counted. */
-static int compress_message_bodies(cJSON *m, int keep, int turn, coord_set_t *set, size_t *raw)
+static int compress_message_bodies(cJSON *m, const compact_config_t *cc, int turn, coord_set_t *set,
+                                   size_t *raw)
 {
    int n = 0;
    const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(m, "role"));
@@ -306,7 +313,7 @@ static int compress_message_bodies(cJSON *m, int keep, int turn, coord_set_t *se
 
    /* (A) OpenAI / Gemini-as-openai tool result: role=="tool" with string content. */
    if (role && strcmp(role, "tool") == 0)
-      n += compress_body_field(m, "content", keep, turn, set, raw);
+      n += compress_body_field(m, "content", cc, turn, set, raw);
 
    /* (B) Anthropic tool_result content-block(s) inside a content ARRAY. (A role
     * "tool" message has a STRING content, so this branch never re-touches it.) */
@@ -318,13 +325,13 @@ static int compress_message_bodies(cJSON *m, int keep, int turn, coord_set_t *se
       {
          const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(b, "type"));
          if (t && strcmp(t, "tool_result") == 0)
-            n += compress_body_field(b, "content", keep, turn, set, raw);
+            n += compress_body_field(b, "content", cc, turn, set, raw);
       }
    }
 
    /* (C) Responses (chatgpt) top-level function_call_output item: an `output` body. */
    if (itype && strcmp(itype, "function_call_output") == 0)
-      n += compress_body_field(m, "output", keep, turn, set, raw);
+      n += compress_body_field(m, "output", cc, turn, set, raw);
 
    return n;
 }
@@ -346,6 +353,21 @@ int context_compress_view(const cJSON *messages, const fold_config_t *cfg, fold_
       return 0;                  /* nothing ahead of the retained tail */
    int limit = count - retained; /* messages [0, limit) are compression-eligible */
 
+   /* Resolve the shared shrink policy ONCE. `compact.*` knobs (mirrored into the
+    * fold config) are the single source of truth for head/tail, so this seam and the
+    * eager seam shrink identically. `keep` (the excerpt budget) is the compression
+    * threshold; the tail is capped to keep/2 so a small excerpt budget keeps the
+    * tail proportional instead of inheriting a large compact default (§2.4). */
+   compact_config_t cc;
+   memset(&cc, 0, sizeof(cc));
+   cc.enabled = 1;
+   cc.threshold = keep;
+   cc.head_bytes = cfg->compact_head_bytes; /* 0 -> compact.c default */
+   int tail_default =
+       cfg->compact_tail_bytes > 0 ? cfg->compact_tail_bytes : COMPACT_DEFAULT_TAIL_BYTES;
+   int tail_cap = keep / 2;
+   cc.tail_bytes = tail_cap > 0 && tail_cap < tail_default ? tail_cap : tail_default;
+
    /* Deep-copy the whole transcript, then shrink only oversized tool-result BODIES
     * in the eligible prefix in place. Every message slot, role/type, tool_use_id /
     * tool_call_id, and the ordering survive untouched, so the call/result pairing
@@ -362,7 +384,7 @@ int context_compress_view(const cJSON *messages, const fold_config_t *cfg, fold_
    {
       cJSON *m = cJSON_GetArrayItem(arr, i);
       if (m)
-         compressed += compress_message_bodies(m, keep, i, &set, &compressed_raw);
+         compressed += compress_message_bodies(m, &cc, i, &set, &compressed_raw);
    }
 
    if (compressed == 0)

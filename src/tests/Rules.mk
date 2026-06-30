@@ -1990,7 +1990,7 @@ $(TESTPREFIX)/unit-test-fold-budget: $(OBJDIR)/tests/test_fold_budget.o $(OBJDIR
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-context-fold: $(OBJDIR)/tests/test_context_fold.o $(OBJDIR)/context_fold.o $(OBJDIR)/fold_register.o \
-                                  $(OBJDIR)/coord_closet.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o \
+                                  $(OBJDIR)/coord_closet.o $(OBJDIR)/compact.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o \
                                   $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 

@@ -865,6 +865,8 @@ native_provider_http:
             rcfg.fold.retained_msgs = ecfg.fold_retained_msgs;
             rcfg.fold.min_fold_msgs = ecfg.fold_min_fold_msgs;
             rcfg.fold.reasoning_excerpt_bytes = ecfg.fold_excerpt_bytes;
+            rcfg.fold.compact_head_bytes = ecfg.compact_head_bytes; /* compact.* drives the */
+            rcfg.fold.compact_tail_bytes = ecfg.compact_tail_bytes; /* shared shrink core    */
             rcfg.fold.register_enabled = ecfg.fold_register_enabled;
             rcfg.fold.closet.enabled = ecfg.coord_closet_enabled;
             rcfg.fold.closet.budget_bytes = ecfg.coord_closet_budget_bytes;
