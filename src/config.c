@@ -435,6 +435,7 @@ static void config_set_defaults(config_t *cfg)
    cfg->reduce_measure_enabled = 0; /* context economizer: all default-off */
    cfg->reduce_delegate_seam = 0;
    cfg->reduce_history_fold = 0;
+   cfg->reduce_gateway_seam = 0;
    snprintf(cfg->memory_citations_mode, sizeof(cfg->memory_citations_mode), "%s", "off");
    snprintf(cfg->memory_coref_mode, sizeof(cfg->memory_coref_mode), "%s", "off");
    cfg->memory_cognify_async_enabled = 0;

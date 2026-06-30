@@ -4,6 +4,7 @@
 #include "context_reduce.h"
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define PASS(name) printf("  %s: ok\n", name)
@@ -72,6 +73,68 @@ static void test_measure_only_no_mutation(void)
    context_reduce_result_free(&out);
    cJSON_Delete(m);
    PASS("measure-only: baseline + foldable opportunity, no mutation");
+}
+
+/* Slice 3: the GATEWAY seam in shadow-mode (gateway_seam=1, measure_only=1, st=NULL)
+ * — the exact config the inbound /v1 gateway wiring uses. Asserts the baseline is
+ * computed, nothing is mutated, and the original array is byte-stable, so the live
+ * client request is safe to forward unchanged. */
+static void test_gateway_seam_measure_only(void)
+{
+   cJSON *m = make_messages(20); /* 40 messages */
+   int n_before = cJSON_GetArraySize(m);
+   char *before = cJSON_PrintUnformatted(m);
+   reduce_config_t cfg = {0};
+   cfg.gateway_seam = 1;
+   cfg.measure_only = 1; /* shadow mode: never mutate the live request */
+   cfg.fold.retained_msgs = 0;
+   reduce_result_t out;
+   int rc = context_reduce(m, "system prompt here", "claude-sonnet-4-5", "s1", REDUCE_SEAM_GATEWAY,
+                           &cfg, NULL /* st */, &out);
+   assert(rc == 0);
+   assert(out.reason == REDUCE_REASON_MEASURED);
+   assert(out.baseline_tokens > 0);
+   assert(out.reduced_tokens == out.baseline_tokens); /* nothing removed */
+   assert(out.removed_tokens == 0);
+   assert(out.mutated == 0 && out.messages == NULL); /* request untouched */
+   assert(out.foldable_tokens > 0);                  /* opportunity still measured */
+   /* original array is byte-identical -> the gateway forwards it unchanged */
+   char *after = cJSON_PrintUnformatted(m);
+   assert(cJSON_GetArraySize(m) == n_before);
+   assert(before && after && strcmp(before, after) == 0);
+   free(before);
+   free(after);
+   context_reduce_result_free(&out);
+   cJSON_Delete(m);
+   PASS("gateway seam measure-only: baseline computed, request byte-identical");
+}
+
+static void test_gateway_seam_null_system_and_model(void)
+{
+   /* Live-gateway edge (roundtable): anthropic_system_to_text can return NULL and
+    * a request may carry no model — both reach context_reduce as NULL. It must not
+    * crash, must still measure (messages-only baseline, no $ forecast), and must
+    * leave the request byte-identical. */
+   cJSON *m = make_messages(20);
+   char *before = cJSON_PrintUnformatted(m);
+   reduce_config_t cfg = {0};
+   cfg.gateway_seam = 1;
+   cfg.measure_only = 1;
+   reduce_result_t out;
+   int rc = context_reduce(m, NULL /* system */, NULL /* model */, NULL, REDUCE_SEAM_GATEWAY, &cfg,
+                           NULL, &out);
+   assert(rc == 0);
+   assert(out.reason == REDUCE_REASON_MEASURED);
+   assert(out.baseline_tokens > 0);         /* messages-only baseline */
+   assert(out.est_saved_cost_floor == 0.0); /* NULL model -> no $ forecast */
+   assert(out.mutated == 0 && out.messages == NULL);
+   char *after = cJSON_PrintUnformatted(m);
+   assert(before && after && strcmp(before, after) == 0);
+   free(before);
+   free(after);
+   context_reduce_result_free(&out);
+   cJSON_Delete(m);
+   PASS("gateway seam tolerates NULL system + NULL model, request byte-identical");
 }
 
 static void test_short_history_no_foldable(void)
@@ -174,6 +237,8 @@ int main(void)
    test_hard_bypass_null_out();
    test_null_messages();
    test_measure_only_no_mutation();
+   test_gateway_seam_measure_only();
+   test_gateway_seam_null_system_and_model();
    test_short_history_no_foldable();
    test_provenance_already_reduced();
    test_unpriced_model_no_cost();

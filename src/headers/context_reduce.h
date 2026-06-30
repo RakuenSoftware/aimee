@@ -138,7 +138,7 @@ extern "C"
     *
     *   messages       provider-native (delegate seam) or client-wire (gateway seam)
     *                  cJSON array; NEVER mutated in place.
-    *   system_prompt  immutable prefix zone (never reduced).
+    *   system_prompt  immutable prefix zone (never reduced); may be NULL.
     *   model          billable model id, for the cost forecast (may be NULL).
     *   session_id     conversation scope for state/ledger (may be NULL).
     *   seam           which choke point is calling.

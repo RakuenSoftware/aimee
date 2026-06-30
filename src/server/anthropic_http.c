@@ -16,6 +16,7 @@
 #include "aimee.h" /* size macros for agent_types.h */
 #include "agent_config.h"
 #include "agent_exec.h"
+#include "context_reduce.h"
 #include "agent_protocol.h"
 #include "agent_types.h"
 #include "anthropic_ingress.h"
@@ -226,8 +227,42 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
    /* P5 (§2.3): opt-in to inject the envelope on the Anthropic-native passthrough.
     * Read config here so gw_stage_memory stays config-free. */
    config_t pcfg;
-   int allow_anthropic_inject =
-       (config_load(&pcfg) == 0 && pcfg.ingress_preinject_anthropic_enabled) ? 1 : 0;
+   int cfg_ok = (config_load(&pcfg) == 0);
+   int allow_anthropic_inject = (cfg_ok && pcfg.ingress_preinject_anthropic_enabled) ? 1 : 0;
+
+   /* Context economizer (gateway seam, SHADOW-MODE ONLY): when reduce.gateway_seam
+    * is on, measure this inbound /v1/messages request's baseline + foldable
+    * opportunity and record a forecast ledger row. measure_only is forced on here so
+    * the request is NEVER mutated — the client transcript is read for the baseline
+    * and the live `req` is forwarded byte-identical (we ignore res.messages, NULL in
+    * measure-only). Done BEFORE the request pipeline so the baseline reflects the
+    * pristine client request, not the memory-injected one. Fully guarded
+    * (config-load, array, free) and context_reduce hard-bypasses on any internal
+    * error, so this can never perturb the client response. Reuses the loaded pcfg;
+    * cheap mtime-cached load keeps it dark by default. */
+   if (cfg_ok && pcfg.reduce_gateway_seam)
+   {
+      cJSON *cmsgs = cJSON_GetObjectItemCaseSensitive(req, "messages");
+      if (cJSON_IsArray(cmsgs))
+      {
+         char *sys_text = anthropic_system_to_text(req); /* flatten string|array system */
+         const cJSON *cmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
+         const char *model = (cmodel && cJSON_IsString(cmodel)) ? cmodel->valuestring : NULL;
+         reduce_config_t rcfg;
+         memset(&rcfg, 0, sizeof(rcfg));
+         rcfg.gateway_seam = 1;
+         rcfg.measure_only = 1; /* shadow mode: this slice never mutates the request */
+         rcfg.fold.retained_msgs = pcfg.fold_retained_msgs;
+         reduce_result_t gw_res;
+         memset(&gw_res, 0, sizeof(gw_res));
+         if (context_reduce(cmsgs, sys_text, model, NULL, REDUCE_SEAM_GATEWAY, &rcfg, NULL,
+                            &gw_res) == 0)
+            agent_record_reduce_ledger(&gw_res, model, "gateway", NULL);
+         context_reduce_result_free(&gw_res);
+         free(sys_text);
+      }
+   }
+
    gw_request_t r = {
        .raw = req,
        .driver = driver,

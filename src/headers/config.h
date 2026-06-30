@@ -916,10 +916,15 @@ typedef struct config
     * reduce_delegate_seam: enable the economizer at the delegate turn loop.
     * reduce_history_fold: actually fold old history (rolling skeleton + Coordinate
     *   Closet) at the delegate seam — the first real reduction lever (default-off).
-    * (Other per-lever gates, the gateway seam, and min_gain land in later slices.) */
+    * reduce_gateway_seam: enable the economizer at the inbound /v1 gateway seam.
+    *   Shadow-mode only in this slice (measure_only is forced on at the gateway, so
+    *   it NEVER mutates the live client request) — collects baselines on live
+    *   ingress traffic with zero behavior change.
+    * (Other per-lever gates and min_gain land in later slices.) */
    int reduce_measure_enabled;
    int reduce_delegate_seam;
    int reduce_history_fold;
+   int reduce_gateway_seam;
 
    /* Session/worktree cleanup policy.
     * worktree_stale_secs: inactivity threshold before a session is pruned
