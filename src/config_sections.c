@@ -4,6 +4,7 @@
 #include "json_fluent.h"
 #include "config_internal.h"
 #include "config_sections.h"
+#include "context_reduce.h" /* FREEZE_GUARD_MAX_HORIZON — clamp freeze_guard_horizon at parse */
 #include "sandbox.h"
 #include "toolset.h"
 #include "cJSON.h"
@@ -757,6 +758,17 @@ void config_parse_reduce_section(config_t *cfg, cJSON *root)
    item = cJSON_GetObjectItemCaseSensitive(reduce, "gateway_seam");
    if (cJSON_IsBool(item))
       cfg->reduce_gateway_seam = cJSON_IsTrue(item) ? 1 : 0;
+   item = cJSON_GetObjectItemCaseSensitive(reduce, "freeze_guard");
+   if (cJSON_IsBool(item))
+      cfg->reduce_freeze_guard_enabled = cJSON_IsTrue(item) ? 1 : 0;
+   item = cJSON_GetObjectItemCaseSensitive(reduce, "freeze_guard_horizon");
+   if (cJSON_IsNumber(item) && item->valuedouble > 0)
+   {
+      int h = (int)item->valuedouble;
+      if (h > FREEZE_GUARD_MAX_HORIZON)
+         h = FREEZE_GUARD_MAX_HORIZON; /* clamp at parse so on-disk == runtime */
+      cfg->reduce_freeze_guard_horizon = h;
+   }
 }
 
 void config_parse_sessions_section(config_t *cfg, cJSON *root)

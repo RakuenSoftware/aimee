@@ -437,6 +437,8 @@ static void config_set_defaults(config_t *cfg)
    cfg->reduce_history_fold = 0;
    cfg->reduce_compress = 0;
    cfg->reduce_gateway_seam = 0;
+   cfg->reduce_freeze_guard_enabled = 1; /* safety: on wherever the (default-off) freeze runs */
+   cfg->reduce_freeze_guard_horizon = 1; /* conservative break-even: one reuse pays the write */
    snprintf(cfg->memory_citations_mode, sizeof(cfg->memory_citations_mode), "%s", "off");
    snprintf(cfg->memory_coref_mode, sizeof(cfg->memory_coref_mode), "%s", "off");
    cfg->memory_cognify_async_enabled = 0;

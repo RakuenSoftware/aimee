@@ -29,6 +29,64 @@ static int node_token_estimate(cJSON *node)
    return t;
 }
 
+int reduce_freeze_favorable_rates(double input_cost, double write_cost, double read_cost,
+                                  int horizon)
+{
+   if (horizon <= 0)
+      horizon = 1; /* one future reuse is enough to justify one write */
+   if (horizon > FREEZE_GUARD_MAX_HORIZON)
+      horizon = FREEZE_GUARD_MAX_HORIZON;
+
+   /* Per-reuse saving = paying the cache-READ rate instead of the FRESH input rate.
+    * Checked FIRST: with no read discount (read >= input) caching can never pay,
+    * so skip the freeze REGARDLESS of write cost (a free write that yields no read
+    * benefit is still not worth pinning a boundary for). */
+   double per_reuse_saving = input_cost - read_cost;
+   if (per_reuse_saving <= 0)
+      return 0;
+
+   /* The MARGINAL cost of caching is the write PREMIUM over just sending the prefix
+    * fresh once (you pay the input rate on the first turn regardless) — NOT the full
+    * write cost. Providers with free cache creation (OpenAI: cache_write==0) have a
+    * premium <= 0, so freezing is pure upside -> always enable. */
+   double write_premium = write_cost - input_cost;
+   if (write_premium <= 0)
+      return 1;
+
+   return (double)horizon * per_reuse_saving >= write_premium ? 1 : 0;
+}
+
+int reduce_freeze_cost_favorable(const char *model, int prefix_tokens, int horizon)
+{
+   if (prefix_tokens <= 0)
+      return 1; /* nothing to cache -> no churn possible */
+   if (!model || !model[0])
+      return 1; /* fail-open: no model -> keep prior always-on freeze behavior */
+
+   /* Price each cache tier separately. token_estimate_cost_ex SUMS all populated
+    * token_usage_t buckets, so each struct sets EXACTLY ONE bucket to isolate that
+    * tier's cost. The decision is scale-INVARIANT in prefix_tokens (all three costs
+    * scale linearly with it, so it cancels in the rate comparison) — prefix_tokens
+    * therefore only gates the >0 "is there anything to cache" case above; any
+    * positive value yields the same verdict, so the exact cached-prefix size need
+    * not be known here. */
+   int priced = 0;
+   token_usage_t w = {0};
+   w.cache_write_tokens = prefix_tokens;
+   double write_cost = token_estimate_cost_ex(model, &w, &priced);
+   if (!priced)
+      return 1; /* fail-open: unpriced model -> do not regress onto it */
+
+   token_usage_t in = {0};
+   in.input_tokens = prefix_tokens;
+   double input_cost = token_estimate_cost_ex(model, &in, NULL);
+   token_usage_t rd = {0};
+   rd.cache_read_tokens = prefix_tokens;
+   double read_cost = token_estimate_cost_ex(model, &rd, NULL);
+
+   return reduce_freeze_favorable_rates(input_cost, write_cost, read_cost, horizon);
+}
+
 void context_reduce_result_free(reduce_result_t *out)
 {
    if (!out)
@@ -198,9 +256,21 @@ int context_reduce(cJSON *messages, const char *system_prompt, const char *model
          fc.register_enabled = cfg->fold.register_enabled;
          fc.closet = cfg->fold.closet; /* zero -> defaults; denylist borrowed for this call */
 
+         /* Freeze cost guardrail: pin the boundary only when the cache-read savings
+          * cover the cache-write churn (forecast via the prefix-region token estimate);
+          * otherwise pass NULL so this turn re-derives without pinning. Disabled or
+          * cost-favorable -> freeze as before. NULL state -> freeze already off. */
+         fold_freeze_t *freeze_arg = st ? &st->freeze : NULL;
+         if (freeze_arg && cfg->freeze_guard_enabled &&
+             !reduce_freeze_cost_favorable(model, out->foldable_tokens, cfg->freeze_guard_horizon))
+         {
+            freeze_arg = NULL;
+            out->freeze_guarded = 1;
+         }
+
          fold_result_t fr;
          memset(&fr, 0, sizeof(fr));
-         if (context_fold_view(work, &fc, st ? &st->freeze : NULL, &fr) != 0)
+         if (context_fold_view(work, &fc, freeze_arg, &fr) != 0)
          {
             /* hard bypass: an internal fold error -> caller forwards the original. */
             fold_result_free(&fr);

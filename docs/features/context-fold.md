@@ -144,6 +144,50 @@ close-out):
 - **Recall is hint-only.** Re-touch surfaces a hint pointing at the on-demand
   recovery tools; automatic inline body fetch is deferred.
 
+## Freeze cost guardrail and cross-provider cache placement
+
+The freeze pins the fold boundary so the reduced prefix stays byte-identical
+turn-to-turn, which keeps the provider prompt cache warm. But establishing a cache
+entry costs a one-time **cache-write**, and a boundary that keeps advancing can pay
+that write repeatedly — which, on a provider that bills cache writes at a premium,
+can make freezing cost *more* than it saves.
+
+The **freeze cost guardrail** (`reduce.freeze_guard`, default **on**; only acts when
+the economizer freeze is itself enabled, which is default-off) prices the decision
+before pinning a boundary. It compares the *marginal* cost of caching against the
+savings from reuse, using the same `token_tracker` rates as the rest of the cost
+story:
+
+- **Marginal write cost = the write _premium_**, `cache_write_rate − input_rate` —
+  not the full write rate. You pay the input rate to send the prefix on the first
+  turn regardless; caching only adds the difference. Providers with free cache
+  creation (OpenAI/Responses: `cache_write = 0`) have a premium ≤ 0, so freezing is
+  pure upside and is always kept on.
+- **Per-reuse saving = `input_rate − cache_read_rate`**, accrued over
+  `reduce.freeze_guard_horizon` expected reuses (default **1**, clamped to
+  `FREEZE_GUARD_MAX_HORIZON`).
+- Freeze is pinned when `horizon × per_reuse_saving ≥ write_premium`; otherwise the
+  turn re-derives the boundary without pinning (`reduce_result.freeze_guarded`).
+
+For every model aimee currently prices this keeps freeze **on** even at horizon 1
+(Anthropic has a small positive write premium that a single reuse's read discount
+already covers; OpenAI has no premium). The exact break-even is re-derived from the
+live pricing table by `test_freeze_guard`, so a future price change that would flip
+the verdict fails that test rather than silently drifting from this prose. The
+guardrail therefore changes no current behavior — its job is to encode
+the correct economics as a tested invariant and to disable freeze automatically only
+under *adverse* pricing (a write premium that outweighs the reuse savings), or when
+caching offers no read discount at all (`cache_read ≥ input`). Missing pricing
+**fails open** (freeze stays on, preserving prior behavior).
+
+### Per-provider cache placement
+
+| Provider | Mechanism | Status |
+|----------|-----------|--------|
+| Anthropic | `cache_control:{ephemeral}` on the stable system-prompt prefix | Existing (`cache_shaping_enabled`); a frozen-history breakpoint is possible future work but low value while reduction keeps the frozen prefix small |
+| OpenAI / Responses | Automatic prefix caching — no explicit marker exists or is needed; the freeze's byte-identical ordering already satisfies the cache-hit criteria, and cache writes are free | No code; advisory only |
+| Gemini | `cachedContent` resource, created once per run for the system prompt | Existing; extending it to per-epoch message history is deferred (single per-request resource; recreating it per epoch is expensive for the small post-reduction prefix) |
+
 ## Default-on candidacy
 
 Folding is a token/cost optimisation with an agentic-recovery cost (a folded body

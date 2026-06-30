@@ -282,6 +282,17 @@ static const char *config_save_default_db1_path(void)
    return path;
 }
 
+/* Does the unified context economizer hold any non-default value worth persisting?
+ * Centralized so each new reduce.* key is accounted for in exactly one place (the
+ * save gate + this predicate stay in sync). freeze_guard defaults ON and horizon
+ * defaults 1, so those count as non-default only when changed away from that. */
+static int reduce_has_non_default(const config_t *cfg)
+{
+   return cfg->reduce_measure_enabled || cfg->reduce_delegate_seam || cfg->reduce_history_fold ||
+          cfg->reduce_compress || cfg->reduce_gateway_seam || !cfg->reduce_freeze_guard_enabled ||
+          (cfg->reduce_freeze_guard_horizon > 0 && cfg->reduce_freeze_guard_horizon != 1);
+}
+
 int config_save(const config_t *cfg)
 {
    ensure_config_dir();
@@ -996,9 +1007,9 @@ int config_save(const config_t *cfg)
       }
    }
 
-   /* Unified context economizer (only save if non-default) */
-   if (cfg->reduce_measure_enabled || cfg->reduce_delegate_seam || cfg->reduce_history_fold ||
-       cfg->reduce_compress || cfg->reduce_gateway_seam)
+   /* Unified context economizer (only save if non-default). freeze_guard defaults ON
+    * and horizon defaults 1, so they are emitted only when an operator changed them. */
+   if (reduce_has_non_default(cfg))
    {
       cJSON *reduce = cJSON_AddObjectToObject(root, "reduce");
       if (cfg->reduce_measure_enabled)
@@ -1011,6 +1022,10 @@ int config_save(const config_t *cfg)
          cJSON_AddBoolToObject(reduce, "compress", cfg->reduce_compress);
       if (cfg->reduce_gateway_seam)
          cJSON_AddBoolToObject(reduce, "gateway_seam", cfg->reduce_gateway_seam);
+      if (!cfg->reduce_freeze_guard_enabled) /* default-on -> persist only when disabled */
+         cJSON_AddBoolToObject(reduce, "freeze_guard", 0);
+      if (cfg->reduce_freeze_guard_horizon > 0 && cfg->reduce_freeze_guard_horizon != 1)
+         cJSON_AddNumberToObject(reduce, "freeze_guard_horizon", cfg->reduce_freeze_guard_horizon);
    }
 
    /* Session/worktree cleanup policy (only save if non-default) */

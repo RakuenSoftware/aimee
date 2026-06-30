@@ -862,6 +862,8 @@ native_provider_http:
             rcfg.compress = ecfg.reduce_compress;
             rcfg.measure_only =
                 !(rcfg.history_fold || rcfg.compress); /* a lever on -> mutate; else shadow */
+            rcfg.freeze_guard_enabled = ecfg.reduce_freeze_guard_enabled; /* Slice 5 guardrail */
+            rcfg.freeze_guard_horizon = ecfg.reduce_freeze_guard_horizon;
             rcfg.fold.retained_msgs = ecfg.fold_retained_msgs;
             rcfg.fold.min_fold_msgs = ecfg.fold_min_fold_msgs;
             rcfg.fold.reasoning_excerpt_bytes = ecfg.fold_excerpt_bytes;

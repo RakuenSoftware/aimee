@@ -2,6 +2,7 @@
  * (Slice 1 — measure-only: baseline + foldable opportunity + cost forecast, no
  * mutation, hard-bypass contract). */
 #include "context_reduce.h"
+#include "token_tracker.h" /* token_usage_t, token_estimate_cost_ex — table-tethered guard test */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -341,9 +342,76 @@ static void test_compress_measure_only_no_mutation(void)
    PASS("compress measure_only: shadow, no mutation");
 }
 
+/* Slice 5 freeze cost guardrail. The guard prices ONE cache-write PREMIUM (over
+ * sending the prefix fresh once) against `horizon` reuses at the cache-read rate.
+ * Key regression: it must NOT disable freeze for real providers — both OpenAI (free
+ * cache writes) and Anthropic (small write premium, large read discount) pay off,
+ * even at the conservative default horizon of 1. The disable branch fires only under
+ * adverse pricing (write premium > horizon x per-reuse saving) that no model aimee
+ * currently prices satisfies. */
+static void test_freeze_guard(void)
+{
+   /* zero prefix -> no churn possible -> always favorable */
+   assert(reduce_freeze_cost_favorable("claude-3-5-sonnet", 0, 1) == 1);
+   /* NULL / empty / unpriced model -> fail-open (preserve prior always-on freeze) */
+   assert(reduce_freeze_cost_favorable(NULL, 100000, 1) == 1);
+   assert(reduce_freeze_cost_favorable("", 100000, 1) == 1);
+   assert(reduce_freeze_cost_favorable("totally-unknown-model-xyz", 100000, 1) == 1);
+   /* OpenAI: cache_write == 0 -> non-positive write premium -> always freeze */
+   assert(reduce_freeze_cost_favorable("gpt-4o", 100000, 1) == 1);
+   /* Anthropic at the default horizon=1: premium 0.75x vs per-reuse saving 2.70x ->
+    * favorable. This is the regression guard against the naive full-write-cost
+    * formula, which would wrongly disable Anthropic freeze here. */
+   assert(reduce_freeze_cost_favorable("claude-3-5-sonnet", 100000, 1) == 1);
+   assert(reduce_freeze_cost_favorable("claude-3-opus", 100000, 1) == 1);
+   /* horizon monotonic + clamp: more reuse never makes a favorable case unfavorable,
+    * and an out-of-range horizon is clamped (no crash, still favorable). */
+   assert(reduce_freeze_cost_favorable("claude-3-5-sonnet", 100000, 9999) == 1);
+   assert(reduce_freeze_cost_favorable("claude-3-5-sonnet", 100000, -5) == 1);
+
+   /* Table-tethered invariant: recompute the Anthropic premium/saving from the LIVE
+    * pricing table (not prose) so a future price change that flips the verdict fails
+    * HERE, not silently. write premium must be positive and a single reuse must cover
+    * it (this is exactly what the naive full-write-cost formula got wrong). */
+   {
+      const char *m = "claude-3-5-sonnet";
+      int n = 100000;
+      token_usage_t w = {0}, in = {0}, rd = {0};
+      w.cache_write_tokens = n;
+      in.input_tokens = n;
+      rd.cache_read_tokens = n;
+      double write_cost = token_estimate_cost_ex(m, &w, NULL);
+      double input_cost = token_estimate_cost_ex(m, &in, NULL);
+      double read_cost = token_estimate_cost_ex(m, &rd, NULL);
+      assert(write_cost > input_cost); /* a real write premium exists */
+      assert((input_cost - read_cost) >= (write_cost - input_cost)); /* 1 reuse covers it */
+   }
+
+   /* Disable branch — unreachable with currently-priced models, exercised here via
+    * the scale-invariant arithmetic core with SYNTHETIC per-tier costs. */
+   /* favorable (Anthropic-like: input 3, write 3.75, read 0.30) at H=1 */
+   assert(reduce_freeze_favorable_rates(3.0, 3.75, 0.30, 1) == 1);
+   /* free write but NO read discount (read == input) -> skip regardless of write
+    * (pins B1: per-reuse saving is checked BEFORE the write premium) */
+   assert(reduce_freeze_favorable_rates(1.0, 0.0, 1.0, 1) == 0);
+   /* free write WITH a read discount -> always favorable */
+   assert(reduce_freeze_favorable_rates(1.0, 0.0, 0.10, 1) == 1);
+   /* adverse: write premium (9) far exceeds per-reuse saving (0.9) at H=1 -> disable */
+   assert(reduce_freeze_favorable_rates(1.0, 10.0, 0.10, 1) == 0);
+   /* same adverse rates, but the horizon clamp (max 5) still cannot cover it -> disable
+    * (break-even needs H=10) */
+   assert(reduce_freeze_favorable_rates(1.0, 10.0, 0.10, 9999) == 0);
+   /* a milder premium that one reuse misses but several cover: premium 2.0, saving
+    * 0.9 -> H=1 disable, H=3 (2.7 >= 2.0) enable */
+   assert(reduce_freeze_favorable_rates(1.0, 3.0, 0.10, 1) == 0);
+   assert(reduce_freeze_favorable_rates(1.0, 3.0, 0.10, 3) == 1);
+   PASS("freeze cost guardrail: fail-open, real providers freeze, synthetic disable branch");
+}
+
 int main(void)
 {
    printf("context_reduce: unit tests\n");
+   test_freeze_guard();
    test_hard_bypass_null_out();
    test_null_messages();
    test_measure_only_no_mutation();

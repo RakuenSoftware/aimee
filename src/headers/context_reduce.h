@@ -29,7 +29,10 @@
  *     inject-compress -> freeze-verify.
  *  5. Net-gain pre-check + freeze cost guardrail. Skip fold when foldable tokens
  *     are below the round-trip recovery threshold (ledger reason="skip_no_gain");
- *     disable freeze when estimated cache-write churn cost > saved cache-read.
+ *     disable freeze when the estimated cache-write PREMIUM is not recovered by the
+ *     cache-read savings over the reuse horizon (Slice 5 —
+ *     reduce_freeze_cost_favorable; freeze_guard config, default-on but inert until
+ *     the default-off freeze is enabled).
  *  6. Live-traffic safety. Per-lever + per-seam gates, a measure-only shadow mode,
  *     and a caller-side hard bypass: on ANY internal error context_reduce returns
  *     non-zero with out->messages == NULL so the caller forwards the ORIGINAL
@@ -77,8 +80,22 @@ extern "C"
        * the existing compact.c/tool-output caps are accounted for. */
       int min_gain_tokens;
 
+      /* Freeze cost guardrail (Slice 5). The freeze pins the fold boundary so the
+       * reduced prefix stays byte-identical (cache-warm) turn-to-turn — but a
+       * boundary that keeps advancing forces provider cache-WRITES (1.25-2x input
+       * rate) that can flip reduction net-negative. When enabled, freeze is pinned
+       * only when the estimated cache-read savings over `horizon` reuses cover the
+       * one-time cache-write cost; otherwise the turn re-derives without pinning.
+       * Default-on, but only acts when the (default-off) economizer freeze is live. */
+      int freeze_guard_enabled;
+      int freeze_guard_horizon; /* expected reuse turns for break-even (0 -> 1) */
+
       fold_config_t fold; /* history-fold sub-config (reused verbatim) */
    } reduce_config_t;
+
+/* Hard cap on the configured freeze-guard horizon, so a misconfigured long horizon
+ * cannot justify an unbounded cache-write bet on a single run. */
+#define FREEZE_GUARD_MAX_HORIZON 5
 
    /* Per-CONVERSATION reducer state, owned by the caller and persisted across
     * turns within one conversation (e.g. a stack local spanning the turn loop).
@@ -133,6 +150,7 @@ extern "C"
       int retained_msgs;
       int reused_boundary; /* 1 = freeze reused (cache-warm) */
       int epochs;
+      int freeze_guarded; /* 1 = the cost guardrail disabled freeze this turn */
    } reduce_result_t;
 
    /* Run the economizer for one request at one seam.
@@ -153,6 +171,32 @@ extern "C"
    int context_reduce(cJSON *messages, const char *system_prompt, const char *model,
                       const char *session_id, reduce_seam_t seam, const reduce_config_t *cfg,
                       reduce_state_t *st, reduce_result_t *out);
+
+   /* Freeze cost guardrail (Slice 5), exposed for unit testing. Returns 1 when
+    * pinning the freeze boundary is cost-favorable — i.e. the estimated cache-read
+    * savings over `horizon` reuses cover the one-time cache-WRITE PREMIUM. The guard
+    * gates the freeze pointer context_reduce hands context_fold_view: when it returns
+    * 0, context_reduce passes NULL, so the fold RE-DERIVES the boundary this turn
+    * WITHOUT persisting it (context_fold_view only reads/commits freeze state when the
+    * pointer is non-NULL). The persisted st->freeze is left as-is; a later non-guarded
+    * turn that reuses it is still protected by the prefix-digest check inside
+    * context_fold_view (a stale boundary fails the digest and re-epochs), so toggling
+    * the guard per-turn can never serve an obsolete cache-warm prefix.
+    *
+    * Conservative + fail-OPEN: returns 1 (freeze on) when prefix_tokens <= 0 (no
+    * churn), when model is NULL/unpriced (preserves prior always-on behavior). Returns
+    * 0 only when pricing is known AND either there is no read discount (cache_read >=
+    * input) OR the read savings provably do not cover the write premium. Pure: prices
+    * via token_estimate_cost_ex, no state. */
+   int reduce_freeze_cost_favorable(const char *model, int prefix_tokens, int horizon);
+
+   /* The scale-invariant arithmetic core of the guardrail, exposed so the disable
+    * branch (unreachable with currently-priced models) can be unit-tested with
+    * synthetic per-tier costs. horizon is clamped to [1, FREEZE_GUARD_MAX_HORIZON].
+    * No read discount (read >= input) -> 0; write premium (write - input) <= 0 -> 1;
+    * else 1 iff horizon * (input - read) >= (write - input). */
+   int reduce_freeze_favorable_rates(double input_cost, double write_cost, double read_cost,
+                                     int horizon);
 
    /* Free a NEW messages array produced by context_reduce. Safe on a zeroed/no-op
     * result (messages==NULL). Must run AFTER the request is serialized (the result

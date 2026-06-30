@@ -932,12 +932,21 @@ typedef struct config
     *   Shadow-mode only in this slice (measure_only is forced on at the gateway, so
     *   it NEVER mutates the live client request) — collects baselines on live
     *   ingress traffic with zero behavior change.
+    * reduce_freeze_guard_enabled: freeze cost guardrail (Slice 5). Pin the fold
+    *   boundary (cache-warm reduced prefix) only when the estimated cache-read
+    *   savings over reduce_freeze_guard_horizon reuses cover the one-time cache-write
+    *   churn; otherwise re-derive without pinning. Default-ON, but only acts when the
+    *   (default-off) economizer freeze is live, so no default-path behavior change.
+    * reduce_freeze_guard_horizon: expected reuse turns for the break-even estimate
+    *   (0 -> 1; clamped to FREEZE_GUARD_MAX_HORIZON).
     * (Other per-lever gates and min_gain land in later slices.) */
    int reduce_measure_enabled;
    int reduce_delegate_seam;
    int reduce_history_fold;
    int reduce_compress;
    int reduce_gateway_seam;
+   int reduce_freeze_guard_enabled;
+   int reduce_freeze_guard_horizon;
 
    /* Session/worktree cleanup policy.
     * worktree_stale_secs: inactivity threshold before a session is pruned
