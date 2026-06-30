@@ -733,6 +733,23 @@ void config_parse_fold_section(config_t *cfg, cJSON *root)
    }
 }
 
+/* Unified context economizer (src/context_reduce.c). Orchestration gates for the
+ * single reduction subsystem. Only knobs the current code honors are parsed here;
+ * each lever / the gateway seam / min_gain is added by the slice that implements
+ * it, so an exposed flag is never silently inert. All default-off. */
+void config_parse_reduce_section(config_t *cfg, cJSON *root)
+{
+   cJSON *reduce = cJSON_GetObjectItemCaseSensitive(root, "reduce");
+   if (!cJSON_IsObject(reduce))
+      return;
+   cJSON *item = cJSON_GetObjectItemCaseSensitive(reduce, "measure");
+   if (cJSON_IsBool(item))
+      cfg->reduce_measure_enabled = cJSON_IsTrue(item) ? 1 : 0;
+   item = cJSON_GetObjectItemCaseSensitive(reduce, "delegate_seam");
+   if (cJSON_IsBool(item))
+      cfg->reduce_delegate_seam = cJSON_IsTrue(item) ? 1 : 0;
+}
+
 void config_parse_sessions_section(config_t *cfg, cJSON *root)
 {
    cJSON *item = NULL;

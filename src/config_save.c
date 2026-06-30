@@ -994,6 +994,16 @@ int config_save(const config_t *cfg)
       }
    }
 
+   /* Unified context economizer (only save if non-default) */
+   if (cfg->reduce_measure_enabled || cfg->reduce_delegate_seam)
+   {
+      cJSON *reduce = cJSON_AddObjectToObject(root, "reduce");
+      if (cfg->reduce_measure_enabled)
+         cJSON_AddBoolToObject(reduce, "measure", cfg->reduce_measure_enabled);
+      if (cfg->reduce_delegate_seam)
+         cJSON_AddBoolToObject(reduce, "delegate_seam", cfg->reduce_delegate_seam);
+   }
+
    /* Session/worktree cleanup policy (only save if non-default) */
    if (cfg->worktree_stale_secs || cfg->max_sessions || cfg->max_worktrees)
    {

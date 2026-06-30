@@ -163,7 +163,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 
 > **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `wfe_live_forge_enabled`
 
-## Config-file sections (50)
+## Config-file sections (51)
 
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
@@ -204,6 +204,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`model_meta`** — _Model metadata + capability routing._ Keys: `capability_routing`, `refresh_minutes`
 - **`otel`** — _OpenTelemetry export._ Keys: `endpoint`, `service_name`
 - **`reasoning_cap`** — _Reasoning-effort cap._ Keys: `enabled`
+- **`reduce`** — `delegate_seam`, `measure`
 - **`retry`** — _Provider retry / backoff._ Keys: `base_ms`, `max_attempts`, `max_ms`
 - **`rewind`** — _Auto-snapshot / rewind._ Keys: `auto_snapshot`
 - **`roundtable`** — _Roundtable pipeline thresholds, caps, gates, and turns._ Keys: `converge_threshold`, `deadline_ms`, `max_rounds`, `pipeline_done_bar`, `pipeline_gate_ttl_h`, `pipeline_max_attempts_per_pass`, `pipeline_max_cost_usd`, `pipeline_max_passes`, `pipeline_max_total_cost_usd`, `pipeline_parked_releases_slot`, `pipeline_unknown_context_tokens`, `turns`

@@ -10,6 +10,7 @@
 #include "db1.h"    /* token_audit + agent_log inserts */
 #include "token_tracker.h"
 #include "request_context.h" /* per-request id / principal / idempotency */
+#include "context_reduce.h"  /* reduce_result_t for the economizer ledger */
 
 #include <pthread.h>
 #include <stdio.h>
@@ -314,6 +315,83 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
     * inline insert when async is off or the ring is full. */
    if (!async || audit_async_enqueue(&row) != 0)
       (void)db1_token_audit_insert(&row);
+}
+
+/* Record a context-economizer ledger row as usage_kind="avoided" (excluded from
+ * realized spend). FORECAST-only: estimated_cost_usd carries the MODELED saving
+ * (cache-read floor) and is non-zero ONLY when a lever actually reduced the
+ * request; measure-only rows record 0 avoided-$ and keep the opportunity in
+ * metadata. The invoice-quality saving is the realized on/off spend delta,
+ * computed separately from the realized rows. Keyless row (empty idempotency_key)
+ * so the partial idem index never dedups per-turn rows. */
+void agent_record_reduce_ledger(const reduce_result_t *r, const char *model, const char *agent_name,
+                                const char *role)
+{
+   if (!r || r->reason == REDUCE_REASON_NONE)
+      return;
+
+   const request_context_t *rctx = request_context_get();
+   const char *eff_session = (rctx && rctx->session_key[0]) ? rctx->session_key : session_id();
+   const char *deleg_id = delegation_active_id();
+
+   const char *reason;
+   switch (r->reason)
+   {
+   case REDUCE_REASON_REDUCED:
+      reason = "reduced";
+      break;
+   case REDUCE_REASON_MEASURED:
+      reason = "measured";
+      break;
+   case REDUCE_REASON_SKIP_NO_GAIN:
+      reason = "skip_no_gain";
+      break;
+   case REDUCE_REASON_ALREADY:
+      reason = "already";
+      break;
+   default:
+      reason = "none";
+      break;
+   }
+
+   char meta[512];
+   snprintf(meta, sizeof(meta),
+            "{\"kind\":\"economizer_forecast\",\"reason\":\"%s\",\"baseline\":%d,\"reduced\":%d,"
+            "\"removed\":%d,\"foldable\":%d,\"floor\":%.6f,\"ceiling\":%.6f,\"folded_msgs\":%d,"
+            "\"reused_boundary\":%d}",
+            reason, r->baseline_tokens, r->reduced_tokens, r->removed_tokens, r->foldable_tokens,
+            r->est_saved_cost_floor, r->est_saved_cost_ceiling, r->folded_msgs, r->reused_boundary);
+
+   /* avoided-$ counts only an actual reduction's modeled saving (REASON_REDUCED);
+    * measure-only / skipped / already-reduced rows contribute 0 avoided-$. */
+   double avoided_cost = (r->reason == REDUCE_REASON_REDUCED) ? r->est_saved_cost_floor : 0.0;
+
+   db1_token_audit_row_t row = {
+       .session_id = eff_session,
+       .delegation_id = deleg_id ? deleg_id : "",
+       .project_name = "",
+       .tool_name = agent_name ? agent_name : "",
+       .role = role ? role : "",
+       .model = model ? model : "",
+       .source = "economizer",
+       .requested_model = "",
+       .stop_reason = "",
+       .usage_kind = "avoided",
+       .agent_log_id = g_agent_log_id,
+       .request_id = rctx ? rctx->request_id : "",
+       .idempotency_key = "",
+       .attempt = 0,
+       .principal = rctx ? rctx->principal : "",
+       .served_model = model ? model : "",
+       .duration_ms = 0,
+       .metadata = meta,
+       .prompt_tokens = r->removed_tokens,
+       .completion_tokens = 0,
+       .cache_write_tokens = 0,
+       .cache_read_tokens = 0,
+       .estimated_cost_usd = avoided_cost,
+   };
+   (void)db1_token_audit_insert(&row);
 }
 
 void agent_log_call(const agent_result_t *result, const char *role)

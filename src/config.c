@@ -432,6 +432,8 @@ static void config_set_defaults(config_t *cfg)
    cfg->fold_freeze_tail_cap_msgs = 0;
    cfg->fold_recall_enabled = 0; /* fold §4: default-off */
    cfg->fold_recall_ttl_turns = 0;
+   cfg->reduce_measure_enabled = 0; /* context economizer: all default-off */
+   cfg->reduce_delegate_seam = 0;
    snprintf(cfg->memory_citations_mode, sizeof(cfg->memory_citations_mode), "%s", "off");
    snprintf(cfg->memory_coref_mode, sizeof(cfg->memory_coref_mode), "%s", "off");
    cfg->memory_cognify_async_enabled = 0;
@@ -1039,6 +1041,7 @@ int config_load(config_t *cfg)
 
    config_parse_worktree_gc_section(cfg, root);
    config_parse_fold_section(cfg, root);
+   config_parse_reduce_section(cfg, root);
 
    config_parse_memory_section(cfg, root);
    config_apply_learning_settings(cfg, root);

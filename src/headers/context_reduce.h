@@ -101,7 +101,7 @@ extern "C"
       REDUCE_REASON_ALREADY,      /* provenance: a prior seam already reduced */
    } reduce_reason_t;
 
-   typedef struct
+   typedef struct reduce_result_s
    {
       /* Reduced view. When messages were mutated, `messages` is a NEW array the
        * caller frees via context_reduce_result_free (mutated==1). When nothing

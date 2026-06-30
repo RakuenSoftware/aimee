@@ -907,6 +907,17 @@ typedef struct config
    int fold_recall_enabled;
    int fold_recall_ttl_turns;
 
+   /* Unified context economizer (src/context_reduce.c). The single reduction
+    * subsystem invoked at every request-assembly seam. All default-off. Knobs are
+    * added here as each slice implements them, so an exposed flag is always
+    * honored. Currently the measurement engine (delegate seam, measure-only):
+    * reduce_measure_enabled: collect baseline/opportunity ledger rows (no
+    *   mutation) — the shadow mode that powers the cost numbers.
+    * reduce_delegate_seam: enable the economizer at the delegate turn loop.
+    * (Per-lever gates, the gateway seam, and min_gain land in later slices.) */
+   int reduce_measure_enabled;
+   int reduce_delegate_seam;
+
    /* Session/worktree cleanup policy.
     * worktree_stale_secs: inactivity threshold before a session is pruned
     *   (0 = use default: 14400 = 4 hours).

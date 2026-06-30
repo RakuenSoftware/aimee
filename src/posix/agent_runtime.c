@@ -26,6 +26,7 @@
 #include "provider_cli_adapter.h"
 #include "config.h"
 #include "context_fold.h"
+#include "context_reduce.h"
 #include "fold_recall.h"
 #include "dstr.h"
 #include "cJSON.h"
@@ -824,6 +825,31 @@ native_provider_http:
          final_instruction_added = 1;
       }
       cJSON *active_tools = final_text_only_turn ? NULL : tools;
+
+      /* Context economizer (delegate seam, measure-only): record a baseline +
+       * foldable-opportunity ledger row when reduce.measure is enabled. Cheap
+       * (mtime-cached) config load keeps this dark by default. Measures the
+       * canonical pre-reduction `messages` so the baseline is provider-agnostic. */
+      {
+         config_t ecfg;
+         if (config_load(&ecfg) == 0 && ecfg.reduce_measure_enabled && ecfg.reduce_delegate_seam)
+         {
+            reduce_config_t rcfg;
+            memset(&rcfg, 0, sizeof(rcfg));
+            rcfg.delegate_seam = 1;
+            rcfg.measure_only = 1;
+            rcfg.fold.retained_msgs = ecfg.fold_retained_msgs;
+            reduce_result_t rres;
+            /* session_id param unused by the transform; the ledger writer resolves
+             * the session itself (a local `session_id[]` array shadows the fn here). */
+            if (context_reduce(messages, sys, fb_agent.model, NULL, REDUCE_SEAM_DELEGATE, &rcfg,
+                               NULL, &rres) == 0)
+            {
+               agent_record_reduce_ledger(&rres, fb_agent.model, agent->name, role);
+               context_reduce_result_free(&rres);
+            }
+         }
+      }
 
       /* Build request (use fb_agent which may have fallback model after turn 0) */
       cJSON *req;

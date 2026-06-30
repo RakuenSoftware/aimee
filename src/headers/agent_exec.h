@@ -90,6 +90,12 @@ void agent_record_token_audit(const agent_result_t *result, const char *role, co
  * dropping them when the provider stream errors mid-flight. */
 void agent_record_token_audit_kind(const agent_result_t *result, const char *role,
                                    const char *source, const char *usage_kind);
+/* Record a context-economizer ledger row (usage_kind="avoided", FORECAST-only —
+ * see context_reduce.h). Forward-declared struct so this broad header need not
+ * pull in context_reduce.h; the caller includes it for the full type. */
+struct reduce_result_s;
+void agent_record_reduce_ledger(const struct reduce_result_s *r, const char *model,
+                                const char *agent_name, const char *role);
 /* Master gate (proposal §2/§7 rollout knob): returns 1 when
  * ingress_usage_accounting_enabled is set. The stateless ingress handlers call
  * this before writing their cost rows so ingress accounting can be flipped on
