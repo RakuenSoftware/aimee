@@ -772,6 +772,26 @@ int main(void)
       g_config_strict = 0;
    }
 
+   /* --- schema validation: top-level "fold" object is a recognized key --- */
+   {
+      /* Regression: the top-level `fold:` section must be registered in the
+       * config-key allowlist so it does not emit an "unknown key" warning and
+       * does not hard-fail under strict mode. */
+      char cpath[512];
+      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
+      FILE *f = fopen(cpath, "w");
+      assert(f);
+      fprintf(f, "provider: claude\nfold:\n  enabled: true\n");
+      fclose(f);
+
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      g_config_strict = 1;
+      int rc = config_load(&cfg);
+      assert(rc == 0); /* fold is a known key -> no validation issues even in strict mode */
+      g_config_strict = 0;
+   }
+
    /* --- memory.dispositions: valid nested values parse --- */
    {
       char cpath[512];
