@@ -228,6 +228,7 @@ Focused references:
 | [Workflows](docs/WORKFLOWS.md) | The composable dev-lifecycle workflow engine, block catalog, and authoring |
 | [Workspace Management](docs/WORKSPACES.md) | Multi-repo workspaces and session isolation |
 | [Security Model](docs/SECURITY.md) | Threat model, trust boundaries, capability system |
+| [Webchat git security](docs/WEBCHAT_GIT_SECURITY.md) | How webchat handles a webuser's git forge token — at rest, in transit to git, and in the in-browser editor; where exposure is and isn't closed |
 | [Benchmarks](docs/BENCHMARKS.md) | Latency measurements and performance budget |
 | [Compatibility](docs/COMPATIBILITY.md) | Supported OS, shell, and provider matrix |
 | [VS Code Integration](docs/VSCODE.md) | Wire aimee into VS Code via MCP tools or as an OpenAI-compatible model |
