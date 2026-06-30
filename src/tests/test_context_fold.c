@@ -503,6 +503,216 @@ static void test_responses_shape_fold(void)
    PASS("responses_shape_fold");
 }
 
+/* ---- Boundary-free tool-result body compression (economizer Slice 4) ----
+ * Reuses add_openai_assistant_tool_call / add_openai_tool_result defined above. */
+
+/* Build a deterministic body well past the 160-byte excerpt threshold, with a
+ * unique path placed at the END so it is amputated from the head excerpt and must
+ * be recovered from the Coordinate Closet. Filler carries no identifiers. */
+static void make_big_body(char *buf, size_t bufsz, const char *path_tail)
+{
+   size_t pos = 0;
+   while (pos + 48 < bufsz - 96)
+      pos += (size_t)snprintf(buf + pos, bufsz - pos, "filler padding output text here and more; ");
+   snprintf(buf + pos, bufsz - pos, "trailing details recorded at %s end", path_tail);
+}
+
+/* (a) Single-user-turn OpenAI tool-loop: old tool-result bodies compress, the
+ *     latest `retained` stay full, every tool_call_id survives, and a path buried
+ *     past the excerpt window is conserved (Coordinate Closet). This is the proof
+ *     that compress engages where fold cannot (no user-turn boundary mid-loop). */
+static void test_compress_openai_tool_loop(void)
+{
+   cJSON *msgs = cJSON_CreateArray();
+   add_user_text(msgs, "Do the autonomous task."); /* the ONLY user turn */
+   char body[700];
+   char id[32], path[64], args[48];
+   const int pairs = 12;
+   for (int k = 0; k < pairs; k++)
+   {
+      snprintf(id, sizeof(id), "call_%02d", k);
+      snprintf(args, sizeof(args), "{\"n\":%d}", k);
+      add_openai_assistant_tool_call(msgs, id, "read_file", args);
+      snprintf(path, sizeof(path), "/work/src/module_%d.c", k);
+      make_big_body(body, sizeof(body), path);
+      add_openai_tool_result(msgs, id, body);
+   }
+   int orig_count = cJSON_GetArraySize(msgs); /* 1 + 24 = 25 */
+
+   fold_config_t cfg = {.enabled = 1, .retained_msgs = 8, .closet = {.enabled = 1}};
+   fold_result_t r;
+   assert(context_compress_view(msgs, &cfg, &r) == 0);
+   assert(r.folded == 1 && r.messages != NULL);
+   assert(r.folded_msgs > 0);
+
+   /* input untouched: the last tool result is still its full big body */
+   cJSON *last_in = cJSON_GetArrayItem(msgs, orig_count - 1);
+   assert(strlen(cJSON_GetStringValue(cJSON_GetObjectItem(last_in, "content"))) > 200);
+
+   /* output: a synthetic closet note pair was prepended, then every original
+    * message survives in order — no message dropped, every tool_call_id kept. */
+   int out_count = cJSON_GetArraySize(r.messages);
+   assert(out_count == orig_count + 2);
+   int in_tool = 0, out_tool = 0;
+   cJSON *it;
+   cJSON_ArrayForEach(it, msgs)
+   {
+      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(it, "role"));
+      if (role && strcmp(role, "tool") == 0)
+         in_tool++;
+   }
+   /* an early result (in the eligible prefix) is compressed; the latest is full */
+   int compressed_seen = 0, full_seen = 0;
+   cJSON_ArrayForEach(it, r.messages)
+   {
+      const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(it, "role"));
+      if (!role || strcmp(role, "tool") != 0)
+         continue;
+      out_tool++;
+      const char *id_s = cJSON_GetStringValue(cJSON_GetObjectItem(it, "tool_call_id"));
+      const char *c = cJSON_GetStringValue(cJSON_GetObjectItem(it, "content"));
+      assert(id_s && c);
+      if (contains(c, "bytes elided"))
+         compressed_seen++;
+      else if (strlen(c) > 200)
+         full_seen++;
+   }
+   assert(in_tool == pairs && out_tool == pairs); /* none dropped */
+   assert(compressed_seen >= 1);                  /* old bodies shrank */
+   assert(full_seen >= 1);                        /* the retained tail stayed full */
+   assert(compressed_seen == r.folded_msgs);
+
+   /* every original tool_call_id still present in the output */
+   for (int k = 0; k < pairs; k++)
+   {
+      snprintf(id, sizeof(id), "call_%02d", k);
+      int found = 0;
+      cJSON_ArrayForEach(it, r.messages)
+      {
+         const char *id_s = cJSON_GetStringValue(cJSON_GetObjectItem(it, "tool_call_id"));
+         if (id_s && strcmp(id_s, id) == 0)
+            found = 1;
+      }
+      assert(found);
+   }
+
+   /* a path buried past the excerpt window in a COMPRESSED body survives via the
+    * Coordinate Closet note (it is NOT in the shrunk body's head excerpt). */
+   char *flat = cJSON_PrintUnformatted(r.messages);
+   assert(contains(flat, "/work/src/module_2.c"));
+   /* and the conserving note rode along */
+   const char *note0 =
+       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(r.messages, 0), "content"));
+   assert(contains(note0, "Coordinate Closet"));
+   free(flat);
+
+   fold_result_free(&r);
+   cJSON_Delete(msgs);
+   PASS("compress_openai_tool_loop");
+}
+
+/* (b) Anthropic tool_result content-block shape compresses in place. */
+static void test_compress_anthropic_shape(void)
+{
+   cJSON *msgs = cJSON_CreateArray();
+   add_user_text(msgs, "start");
+   char body[700];
+   char id[32];
+   for (int k = 0; k < 10; k++)
+   {
+      snprintf(id, sizeof(id), "toolu_%02d", k);
+      add_assistant_tool_use(msgs, id, "grep", "pat");
+      char path[64];
+      snprintf(path, sizeof(path), "/repo/pkg/file_%d.go", k);
+      make_big_body(body, sizeof(body), path);
+      add_user_tool_result(msgs, id, body); /* Anthropic block: content string */
+   }
+   fold_config_t cfg = {.enabled = 1, .retained_msgs = 6, .closet = {.enabled = 1}};
+   fold_result_t r;
+   assert(context_compress_view(msgs, &cfg, &r) == 0);
+   assert(r.folded == 1 && r.messages != NULL && r.folded_msgs >= 1);
+
+   /* find a compressed tool_result block in the output */
+   int compressed = 0;
+   cJSON *it;
+   cJSON_ArrayForEach(it, r.messages)
+   {
+      cJSON *content = cJSON_GetObjectItem(it, "content");
+      if (!cJSON_IsArray(content))
+         continue;
+      cJSON *b;
+      cJSON_ArrayForEach(b, content)
+      {
+         const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(b, "type"));
+         if (t && strcmp(t, "tool_result") == 0)
+         {
+            const char *c = cJSON_GetStringValue(cJSON_GetObjectItem(b, "content"));
+            /* tool_use_id preserved on the block */
+            assert(cJSON_GetObjectItem(b, "tool_use_id") != NULL);
+            if (c && contains(c, "bytes elided"))
+               compressed++;
+         }
+      }
+   }
+   assert(compressed >= 1);
+   char *flat = cJSON_PrintUnformatted(r.messages);
+   assert(contains(flat, "/repo/pkg/file_1.go")); /* conserved in closet */
+   free(flat);
+   fold_result_free(&r);
+   cJSON_Delete(msgs);
+   PASS("compress_anthropic_shape");
+}
+
+/* (c) Determinism: identical input -> byte-identical output. */
+static void test_compress_deterministic(void)
+{
+   cJSON *msgs = cJSON_CreateArray();
+   add_user_text(msgs, "go");
+   char body[700], id[32], path[64];
+   for (int k = 0; k < 12; k++)
+   {
+      snprintf(id, sizeof(id), "call_%02d", k);
+      add_openai_assistant_tool_call(msgs, id, "ls", "{}");
+      snprintf(path, sizeof(path), "/srv/data/blob_%d.bin", k);
+      make_big_body(body, sizeof(body), path);
+      add_openai_tool_result(msgs, id, body);
+   }
+   fold_config_t cfg = {.enabled = 1, .retained_msgs = 8, .closet = {.enabled = 1}};
+   fold_result_t r1, r2;
+   assert(context_compress_view(msgs, &cfg, &r1) == 0 && r1.folded == 1);
+   assert(context_compress_view(msgs, &cfg, &r2) == 0 && r2.folded == 1);
+   char *s1 = cJSON_PrintUnformatted(r1.messages);
+   char *s2 = cJSON_PrintUnformatted(r2.messages);
+   assert(s1 && s2 && strcmp(s1, s2) == 0);
+   free(s1);
+   free(s2);
+   fold_result_free(&r1);
+   fold_result_free(&r2);
+   cJSON_Delete(msgs);
+   PASS("compress_deterministic");
+}
+
+/* (d) No-op when every tool-result body is below the threshold. */
+static void test_compress_below_threshold_noop(void)
+{
+   cJSON *msgs = cJSON_CreateArray();
+   add_user_text(msgs, "go");
+   char id[32];
+   for (int k = 0; k < 12; k++)
+   {
+      snprintf(id, sizeof(id), "call_%02d", k);
+      add_openai_assistant_tool_call(msgs, id, "ls", "{}");
+      add_openai_tool_result(msgs, id, "ok"); /* tiny body, far below 160 bytes */
+   }
+   fold_config_t cfg = {.enabled = 1, .retained_msgs = 8, .closet = {.enabled = 1}};
+   fold_result_t r;
+   assert(context_compress_view(msgs, &cfg, &r) == 0);
+   assert(r.folded == 0 && r.messages == NULL); /* caller uses the original */
+   fold_result_free(&r);
+   cJSON_Delete(msgs);
+   PASS("compress_below_threshold_noop");
+}
+
 int main(void)
 {
    printf("context_fold tests:\n");
@@ -518,6 +728,10 @@ int main(void)
    test_register_annotation();
    test_openai_shape_fold();
    test_responses_shape_fold();
+   test_compress_openai_tool_loop();
+   test_compress_anthropic_shape();
+   test_compress_deterministic();
+   test_compress_below_threshold_noop();
    printf("ALL PASS\n");
    return 0;
 }

@@ -226,6 +226,199 @@ void fold_result_free(fold_result_t *out)
    out->folded = 0;
 }
 
+/* ---- Boundary-free tool-result body compression (economizer Slice 4) ---- */
+
+/* Compress one tool-result body living at `parent[key]` (a string, or any node we
+ * serialize). `keep` is the head-excerpt size (also the threshold). Returns 1 if
+ * the body was replaced (and accumulates its ORIGINAL byte length into *raw for the
+ * closet ratio cap), 0 if it was below threshold, would not net-shrink, or on OOM.
+ * Identifiers in the FULL body are nominated to `set` ONLY when we commit, so a
+ * body left full never pollutes the closet. Deterministic. */
+static int compress_body_field(cJSON *parent, const char *key, int keep, int turn, coord_set_t *set,
+                               size_t *raw)
+{
+   cJSON *node = cJSON_GetObjectItem(parent, key);
+   char *owned = NULL;
+   const char *body = NULL;
+   if (cJSON_IsString(node))
+      body = node->valuestring;
+   else if (node)
+   {
+      owned = cJSON_PrintUnformatted(node);
+      body = owned;
+   }
+   if (!body)
+   {
+      free(owned);
+      return 0;
+   }
+   size_t blen = strlen(body);
+   if ((int)blen <= keep) /* below threshold -> keep verbatim */
+   {
+      free(owned);
+      return 0;
+   }
+
+   /* Build the candidate (head excerpt + elision marker) and only commit when it
+    * is a genuine net shrink, so an over-threshold-but-tiny body never EXPANDS. */
+   dstr_t d;
+   dstr_init(&d);
+   append_excerpt(&d, body, keep);
+   dstr_appendf(&d, " (%zu bytes elided; identifiers conserved in Coordinate Closet)",
+                blen - (size_t)keep);
+   if (dstr_len(&d) >= blen)
+   {
+      dstr_free(&d);
+      free(owned);
+      return 0;
+   }
+
+   cJSON *repl = cJSON_CreateString(dstr_cstr(&d));
+   dstr_free(&d);
+   if (!repl)
+   {
+      free(owned);
+      return 0;
+   }
+   coord_provenance_t prov = {COORD_LANE_AGENT, turn, -1, -1};
+   coord_closet_nominate(body, blen, &prov, set);
+   if (!cJSON_ReplaceItemInObjectCaseSensitive(parent, key, repl))
+   {
+      cJSON_Delete(repl);
+      free(owned);
+      return 0;
+   }
+   *raw += blen;
+   free(owned);
+   return 1;
+}
+
+/* Compress every oversized tool-result body carried by one message, across all
+ * three provider shapes. Returns the number of bodies compressed in this message.
+ * The shapes are mutually exclusive per message (an OpenAI tool result is a string
+ * `content`; an Anthropic tool_result is a block inside an ARRAY `content`; a
+ * Responses output is a top-level `output`), so no body is double-counted. */
+static int compress_message_bodies(cJSON *m, int keep, int turn, coord_set_t *set, size_t *raw)
+{
+   int n = 0;
+   const char *role = cJSON_GetStringValue(cJSON_GetObjectItem(m, "role"));
+   const char *itype = cJSON_GetStringValue(cJSON_GetObjectItem(m, "type"));
+
+   /* (A) OpenAI / Gemini-as-openai tool result: role=="tool" with string content. */
+   if (role && strcmp(role, "tool") == 0)
+      n += compress_body_field(m, "content", keep, turn, set, raw);
+
+   /* (B) Anthropic tool_result content-block(s) inside a content ARRAY. (A role
+    * "tool" message has a STRING content, so this branch never re-touches it.) */
+   cJSON *content = cJSON_GetObjectItem(m, "content");
+   if (cJSON_IsArray(content))
+   {
+      cJSON *b;
+      cJSON_ArrayForEach(b, content)
+      {
+         const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(b, "type"));
+         if (t && strcmp(t, "tool_result") == 0)
+            n += compress_body_field(b, "content", keep, turn, set, raw);
+      }
+   }
+
+   /* (C) Responses (chatgpt) top-level function_call_output item: an `output` body. */
+   if (itype && strcmp(itype, "function_call_output") == 0)
+      n += compress_body_field(m, "output", keep, turn, set, raw);
+
+   return n;
+}
+
+int context_compress_view(const cJSON *messages, const fold_config_t *cfg, fold_result_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   out->closet_evict = COORD_EVICT_NONE;
+   if (!messages || !cJSON_IsArray((cJSON *)messages) || !cfg || !cfg->enabled)
+      return 0;
+
+   int count = cJSON_GetArraySize((cJSON *)messages);
+   int retained = cfg->retained_msgs > 0 ? cfg->retained_msgs : CONTEXT_FOLD_DEFAULT_RETAINED_MSGS;
+   int keep = cfg->reasoning_excerpt_bytes > 0 ? cfg->reasoning_excerpt_bytes
+                                               : CONTEXT_FOLD_DEFAULT_EXCERPT_BYTES;
+   if (count <= 0 || retained >= count)
+      return 0;                  /* nothing ahead of the retained tail */
+   int limit = count - retained; /* messages [0, limit) are compression-eligible */
+
+   /* Deep-copy the whole transcript, then shrink only oversized tool-result BODIES
+    * in the eligible prefix in place. Every message slot, role/type, tool_use_id /
+    * tool_call_id, and the ordering survive untouched, so the call/result pairing
+    * is byte-for-byte intact (zero orphans for message_history_repair). */
+   cJSON *arr = cJSON_Duplicate((cJSON *)messages, 1);
+   if (!arr)
+      return 0; /* OOM: caller uses the original transcript */
+
+   coord_set_t set;
+   coord_set_init(&set);
+   size_t compressed_raw = 0; /* total ORIGINAL bytes of compressed bodies (ratio-cap basis) */
+   int compressed = 0;
+   for (int i = 0; i < limit; i++)
+   {
+      cJSON *m = cJSON_GetArrayItem(arr, i);
+      if (m)
+         compressed += compress_message_bodies(m, keep, i, &set, &compressed_raw);
+   }
+
+   if (compressed == 0)
+   {
+      coord_set_free(&set); /* no body exceeded the threshold -> caller uses original */
+      cJSON_Delete(arr);
+      return 0;
+   }
+
+   /* Conserve any amputated identifiers in a Coordinate Closet, prepended as a
+    * synthetic user+assistant note pair (matching context_fold_view): a plain-text
+    * turn is valid input for every provider builder, and the PAIR keeps Anthropic
+    * role-alternation intact ahead of the (unchanged) original first turn. When the
+    * closet is disabled or empty, render returns NULL and we emit no note — the head
+    * excerpts still carry the leading bytes of each body. */
+   char *closet = coord_closet_render(&set, &cfg->closet, compressed_raw, &out->closet_evict);
+   coord_set_free(&set);
+   if (closet)
+   {
+      cJSON *note = cJSON_CreateObject();
+      cJSON *ack = cJSON_CreateObject();
+      if (note && ack)
+      {
+         dstr_t body;
+         dstr_init(&body);
+         dstr_appendf(&body,
+                      "[compressed %d oversized tool-result body(ies) above; full bodies remain "
+                      "in history — exact identifiers are conserved in the Coordinate Closet]\n\n",
+                      compressed);
+         dstr_append_str(&body, closet);
+         cJSON_AddStringToObject(note, "role", "user");
+         cJSON_AddStringToObject(note, "content", dstr_cstr(&body));
+         cJSON_AddStringToObject(ack, "role", "assistant");
+         cJSON_AddStringToObject(
+             ack, "content",
+             "Understood — identifiers from the compressed tool results are conserved above.");
+         dstr_free(&body);
+         /* insert ack first, then note before it, yielding [note, ack, ...original] */
+         cJSON_InsertItemInArray(arr, 0, ack);
+         cJSON_InsertItemInArray(arr, 0, note);
+      }
+      else
+      {
+         cJSON_Delete(note);
+         cJSON_Delete(ack);
+      }
+      free(closet);
+   }
+
+   out->messages = arr;
+   out->folded = 1; /* flag reused to mean "compressed" */
+   out->folded_msgs = compressed;
+   out->retained_msgs = retained;
+   return 0;
+}
+
 /* FNV-1a over the serialized bytes of messages[0..n); also returns the total
  * serialized size via *bytes. Detects prefix mutation for freeze reuse and bounds
  * the closet ratio cap in one pass. */

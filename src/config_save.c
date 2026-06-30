@@ -996,7 +996,7 @@ int config_save(const config_t *cfg)
 
    /* Unified context economizer (only save if non-default) */
    if (cfg->reduce_measure_enabled || cfg->reduce_delegate_seam || cfg->reduce_history_fold ||
-       cfg->reduce_gateway_seam)
+       cfg->reduce_compress || cfg->reduce_gateway_seam)
    {
       cJSON *reduce = cJSON_AddObjectToObject(root, "reduce");
       if (cfg->reduce_measure_enabled)
@@ -1005,6 +1005,8 @@ int config_save(const config_t *cfg)
          cJSON_AddBoolToObject(reduce, "delegate_seam", cfg->reduce_delegate_seam);
       if (cfg->reduce_history_fold)
          cJSON_AddBoolToObject(reduce, "history_fold", cfg->reduce_history_fold);
+      if (cfg->reduce_compress)
+         cJSON_AddBoolToObject(reduce, "compress", cfg->reduce_compress);
       if (cfg->reduce_gateway_seam)
          cJSON_AddBoolToObject(reduce, "gateway_seam", cfg->reduce_gateway_seam);
    }

@@ -844,7 +844,7 @@ native_provider_http:
       {
          config_t ecfg;
          if (config_load(&ecfg) == 0 && ecfg.reduce_delegate_seam &&
-             (ecfg.reduce_measure_enabled || ecfg.reduce_history_fold))
+             (ecfg.reduce_measure_enabled || ecfg.reduce_history_fold || ecfg.reduce_compress))
          {
             reduce_config_t rcfg;
             memset(&rcfg, 0, sizeof(rcfg));
@@ -856,7 +856,12 @@ native_provider_http:
              * Keep the Responses path measure-only here; fold it in a later slice
              * once verified live. */
             rcfg.history_fold = ecfg.reduce_history_fold && !chatgpt;
-            rcfg.measure_only = !rcfg.history_fold; /* fold on -> mutate; else shadow */
+            /* Compress only shrinks tool-result BODIES in place — the message
+             * shape (role/type, ids, typed items) is preserved — so its output is
+             * valid for ALL builders INCLUDING chatgpt/Responses. Not gated off. */
+            rcfg.compress = ecfg.reduce_compress;
+            rcfg.measure_only =
+                !(rcfg.history_fold || rcfg.compress); /* a lever on -> mutate; else shadow */
             rcfg.fold.retained_msgs = ecfg.fold_retained_msgs;
             rcfg.fold.min_fold_msgs = ecfg.fold_min_fold_msgs;
             rcfg.fold.reasoning_excerpt_bytes = ecfg.fold_excerpt_bytes;

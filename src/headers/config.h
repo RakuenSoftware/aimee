@@ -916,6 +916,11 @@ typedef struct config
     * reduce_delegate_seam: enable the economizer at the delegate turn loop.
     * reduce_history_fold: actually fold old history (rolling skeleton + Coordinate
     *   Closet) at the delegate seam — the first real reduction lever (default-off).
+    * reduce_compress: boundary-free tool-result BODY compression at the delegate
+    *   seam (Slice 4). Shrinks oversized tool-result bodies in place (identifiers
+    *   conserved in the Coordinate Closet) WITHOUT needing a clean-user-turn
+    *   boundary, so it engages on autonomous tool-loops where history_fold can't.
+    *   Provider-native output (valid for all builders incl. chatgpt). Default-off.
     * reduce_gateway_seam: enable the economizer at the inbound /v1 gateway seam.
     *   Shadow-mode only in this slice (measure_only is forced on at the gateway, so
     *   it NEVER mutates the live client request) — collects baselines on live
@@ -924,6 +929,7 @@ typedef struct config
    int reduce_measure_enabled;
    int reduce_delegate_seam;
    int reduce_history_fold;
+   int reduce_compress;
    int reduce_gateway_seam;
 
    /* Session/worktree cleanup policy.

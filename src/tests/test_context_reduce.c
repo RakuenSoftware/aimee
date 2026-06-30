@@ -231,6 +231,113 @@ static void test_history_fold_skip_no_gain(void)
    PASS("history_fold skip_no_gain: below min_gain, no mutation");
 }
 
+/* Build a single-user-turn OpenAI tool-loop: 1 user msg, then `pairs` of
+ * (assistant tool_calls + role:"tool" result with a big body). There is NO user
+ * turn mid-loop, so context_fold_view can never find a clean boundary — the proof
+ * surface for the boundary-free compress lever. */
+static cJSON *make_tool_loop(int pairs)
+{
+   cJSON *arr = cJSON_CreateArray();
+   cJSON *u = cJSON_CreateObject();
+   cJSON_AddStringToObject(u, "role", "user");
+   cJSON_AddStringToObject(u, "content", "Do the autonomous task.");
+   cJSON_AddItemToArray(arr, u);
+   for (int k = 0; k < pairs; k++)
+   {
+      char id[32];
+      snprintf(id, sizeof(id), "call_%02d", k);
+      cJSON *a = cJSON_CreateObject();
+      cJSON_AddStringToObject(a, "role", "assistant");
+      cJSON *tcs = cJSON_AddArrayToObject(a, "tool_calls");
+      cJSON *tc = cJSON_CreateObject();
+      cJSON_AddStringToObject(tc, "id", id);
+      cJSON_AddStringToObject(tc, "type", "function");
+      cJSON *fn = cJSON_AddObjectToObject(tc, "function");
+      cJSON_AddStringToObject(fn, "name", "read_file");
+      cJSON_AddStringToObject(fn, "arguments", "{}");
+      cJSON_AddItemToArray(tcs, tc);
+      cJSON_AddItemToArray(arr, a);
+
+      cJSON *t = cJSON_CreateObject();
+      cJSON_AddStringToObject(t, "role", "tool");
+      cJSON_AddStringToObject(t, "tool_call_id", id);
+      char body[700];
+      size_t pos = 0;
+      while (pos + 48 < sizeof(body) - 96)
+         pos +=
+             (size_t)snprintf(body + pos, sizeof(body) - pos, "filler output bytes here and on; ");
+      snprintf(body + pos, sizeof(body) - pos, "tail at /work/src/module_%d.c done", k);
+      cJSON_AddStringToObject(t, "content", body);
+      cJSON_AddItemToArray(arr, t);
+   }
+   return arr;
+}
+
+/* Compress engages on a tool-loop where fold cannot: fold-only no-ops (no clean
+ * boundary), but compress mutates and shrinks the old tool-result bodies. */
+static void test_compress_engages_where_fold_cannot(void)
+{
+   /* fold-only: must NOT mutate (no clean user-turn boundary in the loop) */
+   {
+      cJSON *m = make_tool_loop(12);
+      reduce_config_t cfg = {0};
+      cfg.delegate_seam = 1;
+      cfg.history_fold = 1;
+      cfg.fold.closet.enabled = 1;
+      reduce_result_t out;
+      int rc = context_reduce(m, "sys", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, NULL, &out);
+      assert(rc == 0);
+      assert(out.mutated == 0 && out.messages == NULL); /* fold found no boundary */
+      context_reduce_result_free(&out);
+      cJSON_Delete(m);
+   }
+   /* compress-only: mutates, shrinks, preserves every message + tool_call_id */
+   {
+      cJSON *m = make_tool_loop(12);
+      int orig_count = cJSON_GetArraySize(m);
+      reduce_config_t cfg = {0};
+      cfg.delegate_seam = 1;
+      cfg.compress = 1;
+      cfg.fold.closet.enabled = 1;
+      reduce_state_t st = {0};
+      reduce_result_t out;
+      int rc = context_reduce(m, "sys", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, &st, &out);
+      assert(rc == 0);
+      assert(out.reason == REDUCE_REASON_REDUCED);
+      assert(out.mutated == 1 && out.messages != NULL && out.messages != m);
+      assert(out.folded_msgs > 0);
+      assert(out.reduced_tokens < out.baseline_tokens); /* genuinely smaller */
+      assert(out.removed_tokens == out.baseline_tokens - out.reduced_tokens);
+      assert(st.reduced == 1);
+      assert(cJSON_GetArraySize(m) == orig_count); /* original untouched */
+      /* a buried path is conserved (Coordinate Closet rode along) */
+      char *flat = cJSON_PrintUnformatted(out.messages);
+      assert(flat && strstr(flat, "/work/src/module_2.c"));
+      free(flat);
+      context_reduce_result_free(&out);
+      cJSON_Delete(m);
+   }
+}
+
+/* measure_only must suppress the compress mutation (shadow mode). */
+static void test_compress_measure_only_no_mutation(void)
+{
+   cJSON *m = make_tool_loop(12);
+   reduce_config_t cfg = {0};
+   cfg.delegate_seam = 1;
+   cfg.compress = 1;
+   cfg.measure_only = 1; /* shadow */
+   cfg.fold.closet.enabled = 1;
+   reduce_result_t out;
+   int rc = context_reduce(m, "sys", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, NULL, &out);
+   assert(rc == 0);
+   assert(out.reason == REDUCE_REASON_MEASURED);
+   assert(out.mutated == 0 && out.messages == NULL);
+   context_reduce_result_free(&out);
+   cJSON_Delete(m);
+   PASS("compress measure_only: shadow, no mutation");
+}
+
 int main(void)
 {
    printf("context_reduce: unit tests\n");
@@ -244,6 +351,8 @@ int main(void)
    test_unpriced_model_no_cost();
    test_history_fold_reduces();
    test_history_fold_skip_no_gain();
+   test_compress_engages_where_fold_cannot();
+   test_compress_measure_only_no_mutation();
    printf("All context_reduce tests passed.\n");
    return 0;
 }

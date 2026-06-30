@@ -60,6 +60,7 @@ extern "C"
       /* Per-lever gates (all default-off). */
       int inject_compress; /* KB/code envelope + code->file:line compression */
       int history_fold;    /* rolling history skeleton + Coordinate Closet */
+      int compress;        /* boundary-free tool-result BODY compression (Slice 4) */
       int dedup;           /* merge consecutive same-role string turns */
       int freeze;          /* byte-identical reduced prefix across turns */
 

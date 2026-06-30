@@ -89,6 +89,39 @@ extern "C"
    int context_fold_view(const cJSON *messages, const fold_config_t *cfg, fold_freeze_t *freeze,
                          fold_result_t *out);
 
+   /* Boundary-free TOOL-RESULT body compression (§ economizer Slice 4).
+    *
+    * Unlike context_fold_view, this needs NO clean-user-turn boundary: it shrinks
+    * oversized tool-result BODIES IN PLACE while keeping the carrying message, its
+    * role/type, and its tool_use_id / tool_call_id — so a tool_use and its result
+    * are NEVER split and message_history_repair finds zero orphans. This is why it
+    * engages on autonomous tool-loops (one user turn, then assistant tool_calls +
+    * results forever) where the fold's boundary never appears.
+    *
+    * For every message at index < (count - retained_msgs) it walks all three
+    * provider tool-result shapes — Anthropic content-block type=="tool_result"
+    * (.content string|obj), OpenAI role=="tool" (.content string), Responses
+    * type=="function_call_output" (.output) — and, for each body whose serialized
+    * length exceeds cfg->reasoning_excerpt_bytes (0 -> CONTEXT_FOLD_DEFAULT_EXCERPT_BYTES)
+    * AND that would actually shrink, replaces it with a head excerpt + an elision
+    * marker. The exact identifiers in the full body are first nominated into a
+    * Coordinate Closet, which (when cfg->closet.enabled) is prepended as a synthetic
+    * user+assistant note pair (matching context_fold_view's closet emission) so
+    * conserved identifiers ride along. EVERYTHING else — role/type, ids, message
+    * ordering, all non-tool-result content — is byte-for-byte preserved.
+    *
+    * The input `messages` array is NEVER mutated: out->messages is a fresh
+    * deep-copied array the caller owns (fold_result_free). On success with at least
+    * one body compressed, out->folded = 1 (the flag is reused to mean "compressed")
+    * and out->folded_msgs = the count of bodies compressed. If nothing exceeded the
+    * threshold (or on OOM / disabled / too-short), out->folded = 0 and
+    * out->messages = NULL (the caller uses the original). Returns 0 on success
+    * (incl. no-op), -1 on bad args. Deterministic: identical (messages, cfg) ->
+    * byte-identical out->messages serialization (for freeze/cache warmth). Output
+    * is provider-native (only bodies shortened + a plain-text note pair), so it is
+    * valid input for ALL provider builders, including chatgpt/Responses. */
+   int context_compress_view(const cJSON *messages, const fold_config_t *cfg, fold_result_t *out);
+
    /* Free any owned resources in *out. NULL-safe on a zeroed result and on a
     * no-fold result (out->messages == NULL), so callers may invoke it
     * unconditionally after any build path. */

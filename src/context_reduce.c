@@ -118,63 +118,136 @@ int context_reduce(cJSON *messages, const char *system_prompt, const char *model
    int foldable_msgs = (n > retained) ? n - retained : 0;
    out->foldable_tokens = prefix_token_estimate(messages, foldable_msgs);
 
-   /* Reduction lever (Slice 2b): when history-fold is enabled and this is neither a
-    * measure-only nor an already-reduced pass, actually fold the prefix via the
-    * provider-agnostic context_fold_view. The fold NEVER mutates `messages` and
-    * NEVER touches `system_prompt` (the immutable prefix zone) — it returns a NEW
-    * array we transfer ownership of into out->messages. */
-   if (cfg->history_fold && !cfg->measure_only)
+   /* `work` is the current working view fed to each lever; it starts as the caller's
+    * (never-mutated) `messages` and becomes a lever-owned NEW array once a lever
+    * mutates. `compressed_owned` is the compress lever's array we own and must free
+    * unless it is published as out->messages or consumed as fold's input copy. */
+   cJSON *work = messages;
+   cJSON *compressed_owned = NULL;
+
+   /* Reduction lever (Slice 4): boundary-free tool-result BODY compression. Runs
+    * FIRST (ahead of fold) so the fold — when also enabled — sees the already-shrunk
+    * bodies. Unlike fold it needs no clean-user-turn boundary, so it engages on
+    * autonomous tool-loops where fold never can. Never mutates `messages`; returns a
+    * NEW array. */
+   if (cfg->compress && !cfg->measure_only)
    {
-      /* Net-gain pre-check: skip when the foldable opportunity is below the
-       * operator's round-trip recovery threshold (no mutation; ledger-auditable). */
-      if (cfg->min_gain_tokens > 0 && out->foldable_tokens < cfg->min_gain_tokens)
-      {
-         out->reason = REDUCE_REASON_SKIP_NO_GAIN;
-         out->mutated = 0;
-         out->messages = NULL;
-         return 0;
-      }
+      fold_config_t cc;
+      memset(&cc, 0, sizeof(cc));
+      cc.enabled = 1;
+      cc.retained_msgs = cfg->fold.retained_msgs;
+      cc.reasoning_excerpt_bytes = cfg->fold.reasoning_excerpt_bytes;
+      cc.closet = cfg->fold.closet; /* zero -> module defaults; denylist borrowed for this call */
 
-      fold_config_t fc;
-      memset(&fc, 0, sizeof(fc));
-      fc.enabled = 1;
-      fc.retained_msgs = cfg->fold.retained_msgs;
-      fc.min_fold_msgs = cfg->fold.min_fold_msgs;
-      fc.reasoning_excerpt_bytes = cfg->fold.reasoning_excerpt_bytes;
-      fc.register_enabled = cfg->fold.register_enabled;
-      fc.closet = cfg->fold.closet; /* zero -> module defaults; denylist borrowed for this call */
-
-      fold_result_t fr;
-      memset(&fr, 0, sizeof(fr));
-      if (context_fold_view(messages, &fc, st ? &st->freeze : NULL, &fr) != 0)
+      fold_result_t cr;
+      memset(&cr, 0, sizeof(cr));
+      if (context_compress_view(work, &cc, &cr) != 0)
       {
-         /* hard bypass: an internal fold error -> caller forwards the original. */
-         fold_result_free(&fr);
+         /* hard bypass: an internal compress error -> caller forwards the original. */
+         fold_result_free(&cr);
          out->messages = NULL;
          out->mutated = 0;
          return 1;
       }
-      if (fr.folded)
+      if (cr.folded)
       {
-         out->messages = fr.messages; /* transfer ownership */
-         fr.messages = NULL;          /* so fold_result_free does not delete it */
+         compressed_owned = cr.messages; /* transfer ownership; we may publish or free it */
+         cr.messages = NULL;             /* so fold_result_free does not delete it */
+         work = compressed_owned;        /* fold (below) compresses-then-folds this view */
          out->mutated = 1;
          out->reason = REDUCE_REASON_REDUCED;
-         out->folded_msgs = fr.folded_msgs;
-         out->retained_msgs = fr.retained_msgs;
-         out->reused_boundary = fr.reused_boundary;
-         out->epochs = st ? st->freeze.epochs : 0;
-
-         int reduced = node_token_estimate(out->messages);
-         if (system_prompt && system_prompt[0])
-            reduced += (int)(strlen(system_prompt) / CHARS_PER_TOKEN_EST) + 1;
-         out->reduced_tokens = reduced;
-         out->removed_tokens = baseline > reduced ? baseline - reduced : 0;
-
+         out->folded_msgs = cr.folded_msgs; /* bodies compressed (may be overwritten by fold) */
          if (st)
             st->reduced = 1; /* provenance: a later seam re-measures, does not re-reduce */
       }
-      fold_result_free(&fr); /* fr.messages is NULL when transferred; no-op otherwise */
+      fold_result_free(&cr); /* cr.messages is NULL when transferred; no-op otherwise */
+   }
+
+   /* Reduction lever (Slice 2b): when history-fold is enabled and this is neither a
+    * measure-only nor an already-reduced pass, actually fold the prefix via the
+    * provider-agnostic context_fold_view. The fold NEVER mutates its input and
+    * NEVER touches `system_prompt` (the immutable prefix zone) — it returns a NEW
+    * array we transfer ownership of into out->messages. It folds `work` (the
+    * possibly-compressed view), chaining the two levers. */
+   if (cfg->history_fold && !cfg->measure_only)
+   {
+      /* Net-gain pre-check: skip when the foldable opportunity is below the
+       * operator's round-trip recovery threshold (no mutation; ledger-auditable).
+       * When compress already mutated, we fall through to publish that result. */
+      if (cfg->min_gain_tokens > 0 && out->foldable_tokens < cfg->min_gain_tokens)
+      {
+         if (!compressed_owned)
+         {
+            out->reason = REDUCE_REASON_SKIP_NO_GAIN;
+            out->mutated = 0;
+            out->messages = NULL;
+            return 0;
+         }
+         /* compress mutated -> publish below; do not run fold */
+      }
+      else
+      {
+         fold_config_t fc;
+         memset(&fc, 0, sizeof(fc));
+         fc.enabled = 1;
+         fc.retained_msgs = cfg->fold.retained_msgs;
+         fc.min_fold_msgs = cfg->fold.min_fold_msgs;
+         fc.reasoning_excerpt_bytes = cfg->fold.reasoning_excerpt_bytes;
+         fc.register_enabled = cfg->fold.register_enabled;
+         fc.closet = cfg->fold.closet; /* zero -> defaults; denylist borrowed for this call */
+
+         fold_result_t fr;
+         memset(&fr, 0, sizeof(fr));
+         if (context_fold_view(work, &fc, st ? &st->freeze : NULL, &fr) != 0)
+         {
+            /* hard bypass: an internal fold error -> caller forwards the original. */
+            fold_result_free(&fr);
+            if (compressed_owned)
+               cJSON_Delete(compressed_owned);
+            out->messages = NULL;
+            out->mutated = 0;
+            return 1;
+         }
+         if (fr.folded)
+         {
+            out->messages = fr.messages; /* transfer ownership */
+            fr.messages = NULL;          /* so fold_result_free does not delete it */
+            out->mutated = 1;
+            out->reason = REDUCE_REASON_REDUCED;
+            out->folded_msgs = fr.folded_msgs;
+            out->retained_msgs = fr.retained_msgs;
+            out->reused_boundary = fr.reused_boundary;
+            out->epochs = st ? st->freeze.epochs : 0;
+            if (st)
+               st->reduced = 1;   /* provenance: a later seam re-measures, does not re-reduce */
+            if (compressed_owned) /* fold built its own array from the compressed copy */
+            {
+               cJSON_Delete(compressed_owned);
+               compressed_owned = NULL;
+            }
+         }
+         fold_result_free(&fr); /* fr.messages is NULL when transferred; no-op otherwise */
+      }
+   }
+
+   /* Publish the compress-only result when fold was disabled or no-opped (fold sets
+    * out->messages itself and frees compressed_owned when it folds). */
+   if (compressed_owned && !out->messages)
+   {
+      out->messages = compressed_owned;
+      compressed_owned = NULL;
+   }
+
+   /* Recompute the reduced/removed token forecast once, over whatever reduced view
+    * a lever produced (compress and/or fold). The system prompt is the immutable
+    * prefix zone — counted, never reduced (mirrors the baseline). */
+   if (out->mutated && out->messages)
+   {
+      int reduced = node_token_estimate(out->messages);
+      if (system_prompt && system_prompt[0])
+         reduced += (int)(strlen(system_prompt) / CHARS_PER_TOKEN_EST) + 1;
+      out->reduced_tokens = reduced;
+      out->removed_tokens = baseline > reduced ? baseline - reduced : 0;
    }
 
    /* Cost forecast bracket. Basis = the realized saving (removed_tokens) once a
