@@ -43,6 +43,31 @@ static void test_cache_tokens_anthropic(void)
    PASS("cost: cache tokens");
 }
 
+static void test_openai_cache_pricing(void)
+{
+   /* gpt-4o + o-series support automatic prompt caching: cached input bills at
+    * ~0.5x the input rate and cache creation is free (no write premium). This is
+    * the cost-story floor for OpenAI in the unified context economizer. */
+   token_usage_t r = {.cache_read_tokens = 1000000};
+   /* all six cache-eligible families = 0.5x their input rate */
+   assert(near_equal(token_estimate_cost("gpt-4o-2024-11-20", &r), 1.25)); /* 0.5 x 2.50 */
+   assert(near_equal(token_estimate_cost("gpt-4o-mini", &r), 0.075));      /* 0.5 x 0.15 */
+   assert(near_equal(token_estimate_cost("o1", &r), 7.50));                /* 0.5 x 15.00 */
+   assert(near_equal(token_estimate_cost("o1-mini", &r), 0.55));           /* 0.5 x 1.10 */
+   assert(near_equal(token_estimate_cost("o3", &r), 5.00));                /* 0.5 x 10.00 */
+   assert(near_equal(token_estimate_cost("o3-mini", &r), 0.55));           /* 0.5 x 1.10 */
+
+   /* OpenAI cache writes are free (automatic) -> cache_write priced at 0. */
+   token_usage_t w = {.cache_write_tokens = 1000000};
+   assert(near_equal(token_estimate_cost("gpt-4o", &w), 0.0));
+
+   /* The model is PRICED (cost authority owns the cached-token $), not unknown. */
+   int priced = -1;
+   double c = token_estimate_cost_ex("gpt-4o", &r, &priced);
+   assert(priced == 1 && c > 0.0);
+   PASS("cost: openai prompt-cache read priced (0.5x input), writes free");
+}
+
 static void test_openai_model(void)
 {
    /* gpt-4o: $2.50 input, $10.00 output per million */
@@ -332,6 +357,7 @@ int main(void)
 
    test_known_anthropic_model();
    test_cache_tokens_anthropic();
+   test_openai_cache_pricing();
    test_openai_model();
    test_unknown_model();
    test_priced_disambiguation();
