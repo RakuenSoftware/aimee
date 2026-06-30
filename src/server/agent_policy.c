@@ -1078,9 +1078,10 @@ static void compact_cfg_from_app_config(const config_t *app, compact_config_t *o
 }
 
 /* Wrapper around compact_tool_result() using application config.
- * Falls back to the AGENT_TOOL_OUTPUT_MAX hard cap so oversized results
- * are always bounded even if compaction produces a larger-than-expected
- * summary (e.g. malformed JSON that fails parsing).
+ * Falls back to the resolved per-result cap (agent_tool_output_cap_clamp;
+ * default AGENT_TOOL_OUTPUT_MAX) so oversized results are always bounded even
+ * if compaction produces a larger-than-expected summary (e.g. malformed JSON
+ * that fails parsing).
  *
  * tool_name may be NULL to skip per-tool overrides. */
 char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *tool_name)
@@ -1097,6 +1098,10 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
    else
       memset(&cfg, 0, sizeof(cfg)); /* use defaults on load failure */
 
+   /* Per-result model-visible cap (operator-configurable, default 32768).
+    * Resolved ONCE here so the closet budget and the hard cap below agree. */
+   size_t cap = agent_tool_output_cap_clamp(loaded ? app_cfg.tool_output_max_bytes : 0);
+
    char *out = compact_tool_result(raw, raw_len, &cfg, tool_name, 0, 0);
    if (!out)
       return strdup("");
@@ -1112,7 +1117,7 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
    /* Fold §2 — Coordinate Closet: when the result was compacted, conserve the
     * verbatim identifiers from the pre-truncation raw so they survive. Render the
     * closet first (it is byte-bounded), then reserve room for it under the hard
-    * cap so the combined result still never exceeds AGENT_TOOL_OUTPUT_MAX.
+    * cap so the combined result still never exceeds the resolved per-result cap.
     * Default-off; return-only wiring (no cross-turn persistence in P1). */
    char *closet = NULL;
    size_t closet_len = 0;
@@ -1129,8 +1134,10 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
       coord_provenance_t prov = {COORD_LANE_AGENT, -1, -1, -1};
       coord_closet_nominate(raw, raw_len, &prov, &set);
       /* Bound the closet budget so body + closet can never exceed the hard cap:
-       * closet <= AGENT_TOOL_OUTPUT_MAX - min-body, leaving room for the body. */
-      int hard_room = AGENT_TOOL_OUTPUT_MAX - 256;
+       * closet <= cap - min-body, leaving room for the body. */
+      int hard_room = (int)cap - 256;
+      if (hard_room < 0)
+         hard_room = 0; /* tiny operator cap: no room for a closet */
       int cb = app_cfg.coord_closet_budget_bytes;
       if (cb > hard_room)
          cb = hard_room;
@@ -1152,11 +1159,12 @@ char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *to
       coord_set_free(&set);
    }
 
-   /* Hard cap: ensure the result never exceeds AGENT_TOOL_OUTPUT_MAX regardless
-    * of what the compaction summary produced. Reserve closet bytes inside the cap. */
-   size_t body_cap = AGENT_TOOL_OUTPUT_MAX;
-   if (closet_len > 0 && closet_len + 1 < AGENT_TOOL_OUTPUT_MAX)
-      body_cap = AGENT_TOOL_OUTPUT_MAX - closet_len - 1;
+   /* Hard cap: ensure the result never exceeds the resolved per-result cap
+    * regardless of what the compaction summary produced. Reserve closet bytes
+    * inside the cap. */
+   size_t body_cap = cap;
+   if (closet_len > 0 && closet_len + 1 < cap)
+      body_cap = cap - closet_len - 1;
    if (out_len > body_cap)
    {
       out[body_cap] = '\0';

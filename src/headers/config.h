@@ -353,6 +353,13 @@ typedef struct config
     * resolver will return in one call. Bounds the per-call recovery cost and a
     * model-supplied range. */
    int code_span_max_lines;
+   /* Operator cap (bytes) on the per-result MODEL-VISIBLE tool output (read_file,
+    * bash, grep, glob, git_* results). 0 = use the built-in default
+    * AGENT_TOOL_OUTPUT_MAX (32768). Any positive value is clamped to
+    * (0, AGENT_TOOL_OUTPUT_RAW_MAX=32768]; set it LOWER to bound the bytes a
+    * single tool result contributes to the prompt + history. Resolved by
+    * agent_tool_output_cap(); never exceeds the 32 KB raw capture buffer. */
+   int tool_output_max_bytes;
    /* ingress-compression master gate (§6.5 B8), default off. When on, code-search
     * hits are span-enriched (the matched line is located) and the ingress envelope
     * folds code entries into recoverable references; off keeps the search query,

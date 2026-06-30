@@ -545,6 +545,9 @@ static void config_set_defaults(config_t *cfg)
    cfg->ingress_preinject_assembly_budget = 6144;
    cfg->ingress_max_raw_scans = 0;
    cfg->code_span_max_lines = 400;
+   /* 0 = use the built-in default AGENT_TOOL_OUTPUT_MAX (32768) for the
+    * per-result model-visible tool-output cap (see agent_tool_output_cap()). */
+   cfg->tool_output_max_bytes = 0;
    cfg->ingress_compress_min_chars = 80;
    cfg->require_session_worktree = 0;
    /* Default-on as of the virtual-context rollout: the long-session benchmark
@@ -942,6 +945,10 @@ int config_load(config_t *cfg)
    item = cJSON_GetObjectItemCaseSensitive(root, "code_span_max_lines");
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
       cfg->code_span_max_lines = (int)item->valuedouble;
+
+   item = cJSON_GetObjectItemCaseSensitive(root, "tool_output_max_bytes");
+   if (cJSON_IsNumber(item) && item->valuedouble >= 0)
+      cfg->tool_output_max_bytes = (int)item->valuedouble;
 
    item = cJSON_GetObjectItemCaseSensitive(root, "require_session_worktree");
    if (cJSON_IsBool(item))

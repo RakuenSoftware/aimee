@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (134)
+## CLI-settable keys (135)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -153,6 +153,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `provider` | string | Default model provider. |
 | `reasoning_cap_enabled` | bool | Cap the model's reasoning effort. |
 | `require_session_worktree` | bool | Fail closed on mutating ops outside an aimee-managed worktree (session-isolation guard; default off). |
+| `tool_output_max_bytes` | int | Per-result cap (bytes) on the model-visible tool output (read_file/bash/grep/glob/git_* results). 0 = built-in default (32768); any positive value is clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the prompt + history; the (default-off) context-economizer compresses older results to keep history bounded. |
 | `tsr_command` | string | TSR sidecar endpoint/command for structured-PDF table recognition (resolves like embedding_command; AIMEE_TSR_URL env fallback). |
 | `typed_facts_enabled` | bool | Enable the typed-fact knowledge layer (master gate; default off). |
 | `verify_cross_project` | bool | Let `aimee git verify` span other projects. |
