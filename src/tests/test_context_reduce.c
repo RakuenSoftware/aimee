@@ -121,6 +121,53 @@ static void test_unpriced_model_no_cost(void)
    PASS("unpriced model: token opportunity without a $ forecast");
 }
 
+/* Slice 2b: history_fold on (not measure_only) actually folds the prefix. */
+static void test_history_fold_reduces(void)
+{
+   cJSON *m = make_messages(20); /* 40 messages */
+   reduce_config_t cfg = {0};
+   cfg.delegate_seam = 1;
+   cfg.history_fold = 1; /* measure_only stays 0 -> real reduction */
+   cfg.fold.closet.enabled = 1;
+   reduce_state_t st = {0};
+   reduce_result_t out;
+   int rc = context_reduce(m, "system prompt here", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, &st,
+                           &out);
+   assert(rc == 0);
+   assert(out.reason == REDUCE_REASON_REDUCED);
+   assert(out.mutated == 1 && out.messages != NULL); /* a NEW folded array */
+   assert(out.messages != m);                        /* not the original */
+   assert(out.folded_msgs > 0 && out.retained_msgs > 0);
+   assert(out.reduced_tokens < out.baseline_tokens); /* genuinely smaller */
+   assert(out.removed_tokens == out.baseline_tokens - out.reduced_tokens);
+   assert(st.reduced == 1); /* provenance stamped */
+   /* cost bracket priced on the realized saving (removed_tokens) */
+   assert(out.est_saved_cost_ceiling >= out.est_saved_cost_floor);
+   /* original array untouched (immutable prefix zone honored) */
+   assert(cJSON_GetArraySize(m) == 40);
+   context_reduce_result_free(&out); /* frees the new array */
+   cJSON_Delete(m);
+   PASS("history_fold reduces: new folded array, original untouched");
+}
+
+/* Net-gain pre-check: foldable below min_gain_tokens -> skip, no mutation. */
+static void test_history_fold_skip_no_gain(void)
+{
+   cJSON *m = make_messages(20);
+   reduce_config_t cfg = {0};
+   cfg.delegate_seam = 1;
+   cfg.history_fold = 1;
+   cfg.min_gain_tokens = 1000000; /* unreachable -> always skip */
+   reduce_result_t out;
+   int rc = context_reduce(m, "sys", "gpt-4o", "s1", REDUCE_SEAM_DELEGATE, &cfg, NULL, &out);
+   assert(rc == 0);
+   assert(out.reason == REDUCE_REASON_SKIP_NO_GAIN);
+   assert(out.mutated == 0 && out.messages == NULL); /* original forwarded */
+   context_reduce_result_free(&out);
+   cJSON_Delete(m);
+   PASS("history_fold skip_no_gain: below min_gain, no mutation");
+}
+
 int main(void)
 {
    printf("context_reduce: unit tests\n");
@@ -130,6 +177,8 @@ int main(void)
    test_short_history_no_foldable();
    test_provenance_already_reduced();
    test_unpriced_model_no_cost();
+   test_history_fold_reduces();
+   test_history_fold_skip_no_gain();
    printf("All context_reduce tests passed.\n");
    return 0;
 }

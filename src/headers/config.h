@@ -914,9 +914,12 @@ typedef struct config
     * reduce_measure_enabled: collect baseline/opportunity ledger rows (no
     *   mutation) — the shadow mode that powers the cost numbers.
     * reduce_delegate_seam: enable the economizer at the delegate turn loop.
-    * (Per-lever gates, the gateway seam, and min_gain land in later slices.) */
+    * reduce_history_fold: actually fold old history (rolling skeleton + Coordinate
+    *   Closet) at the delegate seam — the first real reduction lever (default-off).
+    * (Other per-lever gates, the gateway seam, and min_gain land in later slices.) */
    int reduce_measure_enabled;
    int reduce_delegate_seam;
+   int reduce_history_fold;
 
    /* Session/worktree cleanup policy.
     * worktree_stale_secs: inactivity threshold before a session is pruned

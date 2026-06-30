@@ -995,13 +995,15 @@ int config_save(const config_t *cfg)
    }
 
    /* Unified context economizer (only save if non-default) */
-   if (cfg->reduce_measure_enabled || cfg->reduce_delegate_seam)
+   if (cfg->reduce_measure_enabled || cfg->reduce_delegate_seam || cfg->reduce_history_fold)
    {
       cJSON *reduce = cJSON_AddObjectToObject(root, "reduce");
       if (cfg->reduce_measure_enabled)
          cJSON_AddBoolToObject(reduce, "measure", cfg->reduce_measure_enabled);
       if (cfg->reduce_delegate_seam)
          cJSON_AddBoolToObject(reduce, "delegate_seam", cfg->reduce_delegate_seam);
+      if (cfg->reduce_history_fold)
+         cJSON_AddBoolToObject(reduce, "history_fold", cfg->reduce_history_fold);
    }
 
    /* Session/worktree cleanup policy (only save if non-default) */

@@ -748,6 +748,9 @@ void config_parse_reduce_section(config_t *cfg, cJSON *root)
    item = cJSON_GetObjectItemCaseSensitive(reduce, "delegate_seam");
    if (cJSON_IsBool(item))
       cfg->reduce_delegate_seam = cJSON_IsTrue(item) ? 1 : 0;
+   item = cJSON_GetObjectItemCaseSensitive(reduce, "history_fold");
+   if (cJSON_IsBool(item))
+      cfg->reduce_history_fold = cJSON_IsTrue(item) ? 1 : 0;
 }
 
 void config_parse_sessions_section(config_t *cfg, cJSON *root)

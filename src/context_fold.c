@@ -9,7 +9,15 @@
 
 /* A "clean user turn": role=user and NOT a tool_result message. Folding only at
  * such a boundary guarantees a tool_use and its tool_result never split, and the
- * retained tail begins with a user message (valid alternation). */
+ * retained tail begins with a user message (valid alternation).
+ *
+ * Cross-provider safe: this only admits a boundary at role=="user" (and rejects an
+ * Anthropic tool_result-carrying user msg). In OpenAI/Gemini a tool result is a
+ * separate role=="tool" message and a role=="user" never interrupts an assistant
+ * tool_calls -> tool result pair; in Responses the function_call/function_call_output
+ * items are not role=="user" either. So folding at a user boundary never splits a
+ * call/result pair in ANY provider shape — the boundary logic needs no per-format
+ * branch. */
 static int is_clean_user_turn(const cJSON *m)
 {
    const char *role = cJSON_GetStringValue(cJSON_GetObjectItem((cJSON *)m, "role"));
@@ -72,6 +80,11 @@ static void skeleton_prefix(dstr_t *d, const char *role, const char *txt, int re
       dstr_appendf(d, "%s: ", role ? role : "?");
 }
 
+/* Format-aware skeleton emitter. A single message can carry MULTIPLE shapes
+ * depending on provider — e.g. an OpenAI assistant turn has BOTH a string
+ * `content` AND a separate top-level `tool_calls` array — so the extractors run
+ * additively (no early return) and the Coordinate Closet captures identifiers from
+ * EVERY provider's tool calls/results, not just Anthropic's. */
 static void skeleton_message(dstr_t *d, const cJSON *m, int turn, int excerpt, int register_on,
                              coord_set_t *set)
 {
@@ -79,6 +92,8 @@ static void skeleton_message(dstr_t *d, const cJSON *m, int turn, int excerpt, i
    cJSON *content = cJSON_GetObjectItem((cJSON *)m, "content");
    coord_provenance_t prov = {COORD_LANE_AGENT, turn, -1, -1};
 
+   /* (1) String content (OpenAI/Gemini text, or any plain turn). Emit it but DO
+    * NOT return: an OpenAI assistant turn also carries a top-level tool_calls. */
    if (cJSON_IsString(content))
    {
       const char *txt = content->valuestring;
@@ -89,61 +104,115 @@ static void skeleton_message(dstr_t *d, const cJSON *m, int turn, int excerpt, i
          append_excerpt(d, txt, excerpt);
          dstr_append_char(d, '\n');
       }
-      return;
    }
-   if (!cJSON_IsArray(content))
-      return;
-
-   cJSON *b;
-   cJSON_ArrayForEach(b, content)
+   /* (2) Anthropic content-block array (text / tool_use / tool_result). */
+   else if (cJSON_IsArray(content))
    {
-      const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(b, "type"));
-      if (!t)
-         continue;
-      if (strcmp(t, "text") == 0)
+      cJSON *b;
+      cJSON_ArrayForEach(b, content)
       {
-         const char *txt = cJSON_GetStringValue(cJSON_GetObjectItem(b, "text"));
-         if (txt)
+         const char *t = cJSON_GetStringValue(cJSON_GetObjectItem(b, "type"));
+         if (!t)
+            continue;
+         if (strcmp(t, "text") == 0)
          {
-            coord_closet_nominate(txt, strlen(txt), &prov, set);
-            skeleton_prefix(d, role, txt, register_on);
-            append_excerpt(d, txt, excerpt);
+            const char *txt = cJSON_GetStringValue(cJSON_GetObjectItem(b, "text"));
+            if (txt)
+            {
+               coord_closet_nominate(txt, strlen(txt), &prov, set);
+               skeleton_prefix(d, role, txt, register_on);
+               append_excerpt(d, txt, excerpt);
+               dstr_append_char(d, '\n');
+            }
+         }
+         else if (strcmp(t, "tool_use") == 0)
+         {
+            const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(b, "name"));
+            cJSON *input = cJSON_GetObjectItem(b, "input");
+            char *inp = input ? cJSON_PrintUnformatted(input) : NULL;
+            if (inp)
+               coord_closet_nominate(inp, strlen(inp), &prov, set);
+            dstr_appendf(d, "  $ %s ", name ? name : "tool");
+            append_excerpt(d, inp ? inp : "", excerpt);
             dstr_append_char(d, '\n');
+            free(inp);
+         }
+         else if (strcmp(t, "tool_result") == 0)
+         {
+            cJSON *c = cJSON_GetObjectItem(b, "content");
+            char *owned = NULL;
+            const char *cv = NULL;
+            if (cJSON_IsString(c))
+               cv = c->valuestring;
+            else if (c)
+            {
+               owned = cJSON_PrintUnformatted(c);
+               cv = owned;
+            }
+            if (cv)
+            {
+               coord_closet_nominate(cv, strlen(cv), &prov, set);
+               dstr_append_str(d, "    \xE2\x86\x92 "); /* arrow */
+               append_excerpt(d, cv, excerpt);
+               dstr_appendf(d, " (%zu bytes)\n", strlen(cv));
+            }
+            free(owned);
          }
       }
-      else if (strcmp(t, "tool_use") == 0)
+   }
+
+   /* (3) OpenAI / Gemini-as-openai assistant tool calls: a top-level `tool_calls`
+    * array. Each element's function.arguments is a JSON STRING. */
+   cJSON *tool_calls = cJSON_GetObjectItem((cJSON *)m, "tool_calls");
+   if (cJSON_IsArray(tool_calls))
+   {
+      cJSON *tc;
+      cJSON_ArrayForEach(tc, tool_calls)
       {
-         const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(b, "name"));
-         cJSON *input = cJSON_GetObjectItem(b, "input");
-         char *inp = input ? cJSON_PrintUnformatted(input) : NULL;
-         if (inp)
-            coord_closet_nominate(inp, strlen(inp), &prov, set);
+         cJSON *fn = cJSON_GetObjectItem(tc, "function");
+         const char *name = cJSON_GetStringValue(cJSON_GetObjectItem(fn, "name"));
+         const char *args = cJSON_GetStringValue(cJSON_GetObjectItem(fn, "arguments"));
+         if (args)
+            coord_closet_nominate(args, strlen(args), &prov, set);
          dstr_appendf(d, "  $ %s ", name ? name : "tool");
-         append_excerpt(d, inp ? inp : "", excerpt);
+         append_excerpt(d, args ? args : "", excerpt);
          dstr_append_char(d, '\n');
-         free(inp);
       }
-      else if (strcmp(t, "tool_result") == 0)
+   }
+
+   /* (4) Responses (chatgpt) top-level items: a function_call or its
+    * function_call_output (mirror the tool_use / tool_result branches). */
+   const char *itype = cJSON_GetStringValue(cJSON_GetObjectItem((cJSON *)m, "type"));
+   if (itype && strcmp(itype, "function_call") == 0)
+   {
+      const char *name = cJSON_GetStringValue(cJSON_GetObjectItem((cJSON *)m, "name"));
+      const char *args = cJSON_GetStringValue(cJSON_GetObjectItem((cJSON *)m, "arguments"));
+      if (args)
+         coord_closet_nominate(args, strlen(args), &prov, set);
+      dstr_appendf(d, "  $ %s ", name ? name : "tool");
+      append_excerpt(d, args ? args : "", excerpt);
+      dstr_append_char(d, '\n');
+   }
+   else if (itype && strcmp(itype, "function_call_output") == 0)
+   {
+      cJSON *o = cJSON_GetObjectItem((cJSON *)m, "output");
+      char *owned = NULL;
+      const char *ov = NULL;
+      if (cJSON_IsString(o))
+         ov = o->valuestring;
+      else if (o)
       {
-         cJSON *c = cJSON_GetObjectItem(b, "content");
-         char *owned = NULL;
-         const char *cv = NULL;
-         if (cJSON_IsString(c))
-            cv = c->valuestring;
-         else if (c)
-         {
-            owned = cJSON_PrintUnformatted(c);
-            cv = owned;
-         }
-         if (cv)
-         {
-            coord_closet_nominate(cv, strlen(cv), &prov, set);
-            dstr_append_str(d, "    \xE2\x86\x92 "); /* arrow */
-            append_excerpt(d, cv, excerpt);
-            dstr_appendf(d, " (%zu bytes)\n", strlen(cv));
-         }
-         free(owned);
+         owned = cJSON_PrintUnformatted(o);
+         ov = owned;
       }
+      if (ov)
+      {
+         coord_closet_nominate(ov, strlen(ov), &prov, set);
+         dstr_append_str(d, "    \xE2\x86\x92 "); /* arrow */
+         append_excerpt(d, ov, excerpt);
+         dstr_appendf(d, " (%zu bytes)\n", strlen(ov));
+      }
+      free(owned);
    }
 }
 

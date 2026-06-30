@@ -373,6 +373,136 @@ static void test_register_annotation(void)
    PASS("register_annotation");
 }
 
+/* --- Cross-provider skeleton/no-split conformance (Slice 2b) --- */
+
+/* OpenAI assistant turn: a string `content` AND a separate top-level `tool_calls`
+ * array whose function.arguments is a JSON STRING. */
+static void add_openai_assistant_tool_call(cJSON *msgs, const char *call_id, const char *name,
+                                           const char *arguments_json)
+{
+   cJSON *m = cJSON_CreateObject();
+   cJSON_AddStringToObject(m, "role", "assistant");
+   cJSON_AddStringToObject(m, "content", "calling a tool now");
+   cJSON *tcs = cJSON_AddArrayToObject(m, "tool_calls");
+   cJSON *tc = cJSON_CreateObject();
+   cJSON_AddStringToObject(tc, "id", call_id);
+   cJSON_AddStringToObject(tc, "type", "function");
+   cJSON *fn = cJSON_AddObjectToObject(tc, "function");
+   cJSON_AddStringToObject(fn, "name", name);
+   cJSON_AddStringToObject(fn, "arguments", arguments_json); /* a STRING in OpenAI */
+   cJSON_AddItemToArray(tcs, tc);
+   cJSON_AddItemToArray(msgs, m);
+}
+
+/* OpenAI tool result: a separate role:"tool" message (never a role:"user"). */
+static void add_openai_tool_result(cJSON *msgs, const char *call_id, const char *result)
+{
+   cJSON *m = cJSON_CreateObject();
+   cJSON_AddStringToObject(m, "role", "tool");
+   cJSON_AddStringToObject(m, "tool_call_id", call_id);
+   cJSON_AddStringToObject(m, "content", result);
+   cJSON_AddItemToArray(msgs, m);
+}
+
+static void test_openai_shape_fold(void)
+{
+   cJSON *m = cJSON_CreateArray();
+   for (int i = 0; i < 7; i++) /* 7 rounds * 3 msgs = 21 messages */
+   {
+      char u[64], cid[32], args[64], res[64];
+      snprintf(u, sizeof(u), "round %d: please process the next file", i);
+      snprintf(cid, sizeof(cid), "call_%03d", i);
+      snprintf(args, sizeof(args), "{\"path\":\"/work/x/file_%03d.c\"}", i);
+      snprintf(res, sizeof(res), "processed file_%03d ok", i);
+      add_user_text(m, u);
+      add_openai_assistant_tool_call(m, cid, "read", args);
+      add_openai_tool_result(m, cid, res);
+   }
+   /* 21 msgs, retained default 8 -> desired split 13 (an assistant) -> backs down to
+    * the clean user turn at index 12; folds rounds 0..3 (file_000..file_003). */
+   fold_config_t cfg = {.enabled = 1, .closet = {.enabled = 1}};
+   fold_result_t r;
+   assert(context_fold_view(m, &cfg, NULL, &r) == 0);
+   assert(r.folded == 1 && r.messages != NULL);
+
+   /* No-split invariant: the retained tail's first real item is a role:"user"
+    * message — no dangling role:"tool" was left at the boundary (an assistant
+    * tool_calls and its role:"tool" result were never separated). */
+   cJSON *tail0 = cJSON_GetArrayItem(r.messages, 2);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(tail0, "role")), "user") == 0);
+
+   const char *c0 =
+       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(r.messages, 0), "content"));
+   /* a path embedded in a folded tool_calls `arguments` is captured by the closet */
+   assert(contains(c0, "/work/x/file_002.c"));
+   /* the openai tool call appears in the skeleton */
+   assert(contains(c0, "$") && contains(c0, "read"));
+
+   /* original array untouched */
+   assert(cJSON_GetArraySize(m) == 21);
+   fold_result_free(&r);
+   cJSON_Delete(m);
+   PASS("openai_shape_fold");
+}
+
+/* Responses (chatgpt) top-level function_call item; arguments is a STRING. */
+static void add_responses_function_call(cJSON *msgs, const char *call_id, const char *name,
+                                        const char *arguments_json)
+{
+   cJSON *m = cJSON_CreateObject();
+   cJSON_AddStringToObject(m, "type", "function_call");
+   cJSON_AddStringToObject(m, "call_id", call_id);
+   cJSON_AddStringToObject(m, "name", name);
+   cJSON_AddStringToObject(m, "arguments", arguments_json);
+   cJSON_AddItemToArray(msgs, m);
+}
+
+/* Responses top-level function_call_output item (mirror of a tool_result). */
+static void add_responses_function_call_output(cJSON *msgs, const char *call_id, const char *output)
+{
+   cJSON *m = cJSON_CreateObject();
+   cJSON_AddStringToObject(m, "type", "function_call_output");
+   cJSON_AddStringToObject(m, "call_id", call_id);
+   cJSON_AddStringToObject(m, "output", output);
+   cJSON_AddItemToArray(msgs, m);
+}
+
+static void test_responses_shape_fold(void)
+{
+   cJSON *m = cJSON_CreateArray();
+   for (int i = 0; i < 7; i++) /* 21 items */
+   {
+      char u[64], cid[32], args[64], out[64];
+      snprintf(u, sizeof(u), "round %d: handle the next item", i);
+      snprintf(cid, sizeof(cid), "fc_%03d", i);
+      snprintf(args, sizeof(args), "{\"path\":\"/resp/file_%03d.c\"}", i);
+      snprintf(out, sizeof(out), "wrote /resp/out/file_%03d.log", i);
+      add_user_text(m, u);
+      add_responses_function_call(m, cid, "read", args);
+      add_responses_function_call_output(m, cid, out);
+   }
+   fold_config_t cfg = {.enabled = 1, .closet = {.enabled = 1}};
+   fold_result_t r;
+   assert(context_fold_view(m, &cfg, NULL, &r) == 0);
+   assert(r.folded == 1 && r.messages != NULL);
+
+   /* retained tail begins with a clean user turn (function_call /
+    * function_call_output items are not role:"user", so none was straddled). */
+   cJSON *tail0 = cJSON_GetArrayItem(r.messages, 2);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(tail0, "role")), "user") == 0);
+
+   const char *c0 =
+       cJSON_GetStringValue(cJSON_GetObjectItem(cJSON_GetArrayItem(r.messages, 0), "content"));
+   assert(contains(c0, "/resp/file_002.c"));       /* from a folded function_call arguments */
+   assert(contains(c0, "/resp/out/file_002.log")); /* from a folded function_call_output output */
+   assert(contains(c0, "$") && contains(c0, "read"));
+
+   assert(cJSON_GetArraySize(m) == 21);
+   fold_result_free(&r);
+   cJSON_Delete(m);
+   PASS("responses_shape_fold");
+}
+
 int main(void)
 {
    printf("context_fold tests:\n");
@@ -386,6 +516,8 @@ int main(void)
    test_freeze_boundary_stable();
    test_freeze_prefix_mutation_breaks_reuse();
    test_register_annotation();
+   test_openai_shape_fold();
+   test_responses_shape_fold();
    printf("ALL PASS\n");
    return 0;
 }
