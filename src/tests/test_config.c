@@ -57,6 +57,16 @@ int main(void)
        * has to explicitly enable it before any autonomous run can open/merge a PR. */
       assert(cfg.wfe_live_forge_enabled == 0);
       assert(cfg.db1_path[0] != '\0');
+      /* context economizer is DEFAULT-ON on the delegate seam (measure + delegate_seam
+       * + history_fold + compress + closet), with the gateway seam off pending its
+       * mutation build. A regression that silently flips these off is caught here. */
+      assert(cfg.reduce_measure_enabled == 1);
+      assert(cfg.reduce_delegate_seam == 1);
+      assert(cfg.reduce_history_fold == 1);
+      assert(cfg.reduce_compress == 1);
+      assert(cfg.coord_closet_enabled == 1);
+      assert(cfg.reduce_gateway_seam == 0);
+      assert(cfg.reduce_freeze_guard_enabled == 1);
       assert(cfg.guardrails_semantic_advisory_only == 1);
       assert(cfg.skills_review_nudge_interval == 10);
       assert(cfg.skills_curator_interval_hours == 168);
@@ -340,6 +350,13 @@ int main(void)
        * class: a default-on save-guard that emits only the non-default state). */
       cfg.reduce_freeze_guard_enabled = 0;
       cfg.reduce_freeze_guard_horizon = 3;
+      /* the four default-ON economizer levers + the closet must round-trip their
+       * non-default OFF state (config_save persists only the opt-out). */
+      cfg.reduce_measure_enabled = 0;
+      cfg.reduce_delegate_seam = 0;
+      cfg.reduce_history_fold = 0;
+      cfg.reduce_compress = 0;
+      cfg.coord_closet_enabled = 0;
       config_save(&cfg);
 
       static config_t cfg2;
@@ -358,6 +375,11 @@ int main(void)
       assert(strcmp(cfg2.server_api_client_transport, "http") == 0);
       assert(cfg2.reduce_freeze_guard_enabled == 0); /* default-on bool persisted off */
       assert(cfg2.reduce_freeze_guard_horizon == 3); /* non-default horizon persisted */
+      assert(cfg2.reduce_measure_enabled == 0);      /* default-on levers persist their */
+      assert(cfg2.reduce_delegate_seam == 0);        /* non-default OFF opt-out */
+      assert(cfg2.reduce_history_fold == 0);
+      assert(cfg2.reduce_compress == 0);
+      assert(cfg2.coord_closet_enabled == 0); /* default-on closet persists OFF */
       /* regression: remote_writes used to be parsed but never written by config_save,
        * so any save silently reset it to off. */
       assert(cfg2.server_api_remote_writes == SERVER_REMOTE_WRITES_FULL);
@@ -516,6 +538,41 @@ int main(void)
              strcmp(cfg2.lsp_servers[0].args[0], "--background-index") == 0);
       assert(cfg2.lsp_servers[0].extension_count == 1 &&
              strcmp(cfg2.lsp_servers[0].extensions[0], "c") == 0);
+   }
+
+   /* --- economizer: PARTIAL opt-out + closet tuning round-trip ---
+    * The bulk round-trip above flips every default-on lever OFF at once. This pins
+    * the trickier per-field cases: (a) a single lever off with siblings at default
+    * ON must persist exactly that one OFF; (b) the closet stays ON (default) while
+    * its numeric tunables round-trip byte-equal under the budget_bytes:0=default
+    * convention. */
+   {
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      config_load(&cfg);
+      /* config_load reads whatever the prior block persisted, so pin the siblings ON
+       * deterministically. Only fold opts out; the closet stays on but tuned. */
+      cfg.reduce_measure_enabled = 1;
+      cfg.reduce_delegate_seam = 1;
+      cfg.reduce_history_fold = 0; /* opt out of ONLY fold */
+      cfg.reduce_compress = 1;
+      cfg.coord_closet_enabled = 1;
+      cfg.coord_closet_budget_bytes = 4096; /* tune the closet (still enabled) */
+      cfg.coord_closet_max_ratio_pct = 15;
+      snprintf(cfg.coord_closet_denylist, sizeof(cfg.coord_closet_denylist), "secretword");
+      config_save(&cfg);
+
+      static config_t cfg2;
+      memset(&cfg2, 0, sizeof(cfg2));
+      config_load(&cfg2);
+      assert(cfg2.reduce_history_fold == 0);    /* the single opt-out survived */
+      assert(cfg2.reduce_measure_enabled == 1); /* siblings stayed default-on */
+      assert(cfg2.reduce_delegate_seam == 1);
+      assert(cfg2.reduce_compress == 1);
+      assert(cfg2.coord_closet_enabled == 1); /* closet still on while tuned */
+      assert(cfg2.coord_closet_budget_bytes == 4096);
+      assert(cfg2.coord_closet_max_ratio_pct == 15);
+      assert(strcmp(cfg2.coord_closet_denylist, "secretword") == 0);
    }
 
    /* --- install.sh persists provider/openai/kb_client_* as plain top-level

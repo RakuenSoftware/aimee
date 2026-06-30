@@ -419,8 +419,10 @@ static void config_set_defaults(config_t *cfg)
    snprintf(cfg->db1_path, sizeof(cfg->db1_path), "%s", config_default_db1_path());
    snprintf(cfg->guardrail_mode, sizeof(cfg->guardrail_mode), "%s", MODE_APPROVE);
    snprintf(cfg->provider, sizeof(cfg->provider), "claude");
-   cfg->compact_enabled = 1;      /* default on; set before no-config early returns */
-   cfg->coord_closet_enabled = 0; /* fold §2: default-off */
+   cfg->compact_enabled = 1; /* default on; set before no-config early returns */
+   cfg->coord_closet_enabled =
+       1; /* fold §2: default-ON — conserves identifiers elided by the
+           * default-on compress/fold so lossy reduction stays recoverable */
    cfg->coord_closet_budget_bytes = 0;
    cfg->coord_closet_max_ratio_pct = 0;
    cfg->fold_enabled = 0; /* fold §1: default-off */
@@ -432,12 +434,23 @@ static void config_set_defaults(config_t *cfg)
    cfg->fold_freeze_tail_cap_msgs = 0;
    cfg->fold_recall_enabled = 0; /* fold §4: default-off */
    cfg->fold_recall_ttl_turns = 0;
-   cfg->reduce_measure_enabled = 0; /* context economizer: all default-off */
-   cfg->reduce_delegate_seam = 0;
-   cfg->reduce_history_fold = 0;
-   cfg->reduce_compress = 0;
+   /* Context economizer: DEFAULT-ON on the delegate seam (the implemented, tested
+    * reduction path). measure + delegate_seam + history_fold + compress all on.
+    * Lossy reduction stays recoverable: both levers only touch messages BEFORE the
+    * retained tail (the most recent retained_msgs stay full), and the Coordinate
+    * Closet (also default-on) conserves the exact identifiers so the agent can
+    * re-issue a tool call to recover an elided body. history_fold is converted to a
+    * live fold ONLY at agent_runtime.c (rcfg.history_fold = reduce_history_fold &&
+    * !chatgpt) — it reaches the Responses builder on ZERO paths; compress is
+    * shape-preserving and runs for all providers. */
+   cfg->reduce_measure_enabled = 1;
+   cfg->reduce_delegate_seam = 1;
+   cfg->reduce_history_fold = 1;
+   cfg->reduce_compress = 1;
+   /* GATEWAY seam (primary-agent /v1 path) stays off: shadow-only until its
+    * request-mutation + 400-retry-from-pristine circuit breaker are built. */
    cfg->reduce_gateway_seam = 0;
-   cfg->reduce_freeze_guard_enabled = 1; /* safety: on wherever the (default-off) freeze runs */
+   cfg->reduce_freeze_guard_enabled = 1; /* safety: on for the default-on economizer freeze */
    cfg->reduce_freeze_guard_horizon = 1; /* conservative break-even: one reuse pays the write */
    snprintf(cfg->memory_citations_mode, sizeof(cfg->memory_citations_mode), "%s", "off");
    snprintf(cfg->memory_coref_mode, sizeof(cfg->memory_coref_mode), "%s", "off");

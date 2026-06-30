@@ -288,8 +288,8 @@ static const char *config_save_default_db1_path(void)
  * defaults 1, so those count as non-default only when changed away from that. */
 static int reduce_has_non_default(const config_t *cfg)
 {
-   return cfg->reduce_measure_enabled || cfg->reduce_delegate_seam || cfg->reduce_history_fold ||
-          cfg->reduce_compress || cfg->reduce_gateway_seam || !cfg->reduce_freeze_guard_enabled ||
+   return !cfg->reduce_measure_enabled || !cfg->reduce_delegate_seam || !cfg->reduce_history_fold ||
+          !cfg->reduce_compress || cfg->reduce_gateway_seam || !cfg->reduce_freeze_guard_enabled ||
           (cfg->reduce_freeze_guard_horizon > 0 && cfg->reduce_freeze_guard_horizon != 1);
 }
 
@@ -937,7 +937,7 @@ int config_save(const config_t *cfg)
 
    /* Tool result compaction (only save non-default values) */
    if (!cfg->compact_enabled || cfg->compact_threshold || cfg->compact_head_bytes ||
-       cfg->compact_tail_bytes || cfg->compact_per_tool_count || cfg->coord_closet_enabled ||
+       cfg->compact_tail_bytes || cfg->compact_per_tool_count || !cfg->coord_closet_enabled ||
        cfg->coord_closet_budget_bytes || cfg->coord_closet_max_ratio_pct ||
        cfg->coord_closet_denylist[0])
    {
@@ -961,8 +961,9 @@ int config_save(const config_t *cfg)
                cJSON_AddNumberToObject(pt, tool, thresh);
          }
       }
-      /* Coordinate Closet (fold §2), nested under "compact". */
-      if (cfg->coord_closet_enabled || cfg->coord_closet_budget_bytes ||
+      /* Coordinate Closet (fold §2), nested under "compact". Default-ON now, so the
+       * block is emitted only to record a non-default (disabled, or tuned budget). */
+      if (!cfg->coord_closet_enabled || cfg->coord_closet_budget_bytes ||
           cfg->coord_closet_max_ratio_pct || cfg->coord_closet_denylist[0])
       {
          cJSON *closet = cJSON_AddObjectToObject(cmpct, "coord_closet");
@@ -1012,14 +1013,17 @@ int config_save(const config_t *cfg)
    if (reduce_has_non_default(cfg))
    {
       cJSON *reduce = cJSON_AddObjectToObject(root, "reduce");
-      if (cfg->reduce_measure_enabled)
-         cJSON_AddBoolToObject(reduce, "measure", cfg->reduce_measure_enabled);
-      if (cfg->reduce_delegate_seam)
-         cJSON_AddBoolToObject(reduce, "delegate_seam", cfg->reduce_delegate_seam);
-      if (cfg->reduce_history_fold)
-         cJSON_AddBoolToObject(reduce, "history_fold", cfg->reduce_history_fold);
-      if (cfg->reduce_compress)
-         cJSON_AddBoolToObject(reduce, "compress", cfg->reduce_compress);
+      /* measure/delegate_seam/history_fold/compress default ON -> persist only the
+       * non-default OFF state so an operator opt-out round-trips. gateway_seam stays
+       * default-OFF -> persist only when enabled. */
+      if (!cfg->reduce_measure_enabled)
+         cJSON_AddBoolToObject(reduce, "measure", 0);
+      if (!cfg->reduce_delegate_seam)
+         cJSON_AddBoolToObject(reduce, "delegate_seam", 0);
+      if (!cfg->reduce_history_fold)
+         cJSON_AddBoolToObject(reduce, "history_fold", 0);
+      if (!cfg->reduce_compress)
+         cJSON_AddBoolToObject(reduce, "compress", 0);
       if (cfg->reduce_gateway_seam)
          cJSON_AddBoolToObject(reduce, "gateway_seam", cfg->reduce_gateway_seam);
       if (!cfg->reduce_freeze_guard_enabled) /* default-on -> persist only when disabled */

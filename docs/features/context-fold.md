@@ -188,10 +188,55 @@ caching offers no read discount at all (`cache_read ≥ input`). Missing pricing
 | OpenAI / Responses | Automatic prefix caching — no explicit marker exists or is needed; the freeze's byte-identical ordering already satisfies the cache-hit criteria, and cache writes are free | No code; advisory only |
 | Gemini | `cachedContent` resource, created once per run for the system prompt | Existing; extending it to per-epoch message history is deferred (single per-request resource; recreating it per epoch is expensive for the small post-reduction prefix) |
 
-## Default-on candidacy
+## Default state
 
-Folding is a token/cost optimisation with an agentic-recovery cost (a folded body
-must be re-fetched if needed). Per aimee's off-reasons discipline, default-on is
-gated on the integration-test results (token reduction, cache-read share, and
-0-lost-coordinate fidelity on a captured long session). See the proposal close-out
-for the assessment.
+The unified **context economizer** (`reduce.*`) is **default-ON at the delegate
+seam**: `reduce.measure`, `reduce.delegate_seam`, `reduce.history_fold`,
+`reduce.compress`, and `compact.coord_closet` all default true, and the freeze cost
+guardrail (`reduce.freeze_guard`) is on. Concretely, every sub-agent (delegate) turn
+now folds old history and compresses oversized tool-result bodies, with the
+Coordinate Closet conserving the exact identifiers so the lossy reduction stays
+recoverable. `history_fold` auto-excludes the Responses/chatgpt builder at the call
+site (its synthetic-turn shape is unverified there); `compress` runs for every
+provider.
+
+**Recovery model (what "recoverable" means here).** This is a *lossy* reduction with
+**agentic recovery**, not lossless caching — be precise about the guarantee:
+- **Recent context is never touched.** Both levers only reduce messages *before* the
+  retained tail; the most recent `retained_msgs` (default 8) are byte-for-byte intact,
+  so the agent's working set is always full. `retained_msgs` follows the numeric-0 =
+  built-in-default convention (0 → 8), so the working-set floor is always ≥ 1 — it can
+  never be configured to zero; an explicit small value (e.g. 1) just narrows it.
+- **Identifiers are conserved, not bodies.** When an old tool-result body is elided,
+  the Coordinate Closet preserves the exact paths/ids/hashes it contained (plus the
+  body's head+tail excerpt), so references survive. The *omitted middle* of an old
+  body is not retained.
+- **Recovery is the agent re-issuing a tool call** (e.g. re-reading a conserved path)
+  — there is **no automatic inline re-fetch**. If a re-fetch fails, the agent handles
+  it as an ordinary tool error. This refetch is the accepted cost of default-on.
+- Coordinate fidelity (0 lost identifiers) was validated on a captured long session in
+  the deterministic-fold close-out.
+
+Operators who want the prior behavior opt out per lever, e.g.:
+
+```yaml
+reduce:
+  history_fold: false   # keep full history (no rolling skeleton)
+  compress: false       # keep full tool-result bodies
+  # delegate_seam: false  # disable the economizer on the delegate path entirely
+```
+
+**Config persistence convention.** A fresh default config writes **no** `reduce` or
+`compact.coord_closet` block at all — the defaults live in `config_set_defaults`
+(`src/config.c`). On save, *default-on* keys (`measure`, `delegate_seam`,
+`history_fold`, `compress`, `freeze_guard`, `coord_closet.enabled`) persist only their
+non-default **OFF** state; *default-off* keys (`gateway_seam`) persist only their
+non-default **ON** state. So an operator opt-out round-trips, and an unmodified config
+stays empty. Note `coord_closet.budget_bytes: 0` means **"use the built-in default"**,
+not "force a zero-byte closet" — to disable the closet, set `enabled: false`.
+
+**Not yet default-on:** the **gateway seam** (`reduce.gateway_seam`, the inbound /v1
+path that serves the primary agent) remains off — it is shadow-measure-only until its
+request-mutation path and 400-retry-from-pristine circuit breaker are built. The
+legacy standalone `fold.*` path also stays opt-in; the economizer supersedes it (when
+the economizer produces a reduced view, the legacy `build_fold_view` is skipped).
