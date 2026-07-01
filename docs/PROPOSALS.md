@@ -129,13 +129,14 @@ recall.
   score-aware lexical / dense blending shipped as an opt-in fusion mode on
   `POST /v1/search`; benchmark gate did not justify a default flip, so `rrf`
   remains default. **Done, bench-only / no rollout.**
-- [Cross-repo dependency graph](proposals/pending/cross-repo-dependency-graph.md):
+- Cross-repo dependency graph:
   precise, confidence-tiered inter-repo dependency edges over the multi-repo
   corpus; corroboration-gated resolver (import/include resolution + export
   downgrade signal), corpus-derived distinctiveness, signature-aware
-  multiplicity, AMBIGUOUS review queue; query-first (read API + CLI) with
-  numeric precision gates before P3 materialization. Extends code-graph
-  intelligence.
+  multiplicity, AMBIGUOUS review queue; query-first (read API + CLI). Engine
+  (S1–S9) shipped; precision + recall hardened via two follow-up proposals;
+  `--reverse`/`--dry-run` built; §9 gates reconciled. **Done** (see
+  `done/cross-repo-dependency-graph.md`). Extends code-graph intelligence.
 
 ### Synthesis tie-break (Synthesize / Calibrate)
 
