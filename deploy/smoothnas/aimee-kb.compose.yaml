@@ -1,0 +1,52 @@
+# aimee-kb — SmoothNAS compose-native plugin (split topology): the shared/vector
+# KB (DB2 + pgvector) with its own Postgres, standalone. postgres<->kb talk over
+# the compose network by name; the LLM is EXTERNAL — set AIMEE_LLM_URL to the host
+# running the aimee-llm plugin (its published :8742). (A compose plugin has its own
+# project network, so cross-plugin comms use host-published ports, not the runtime
+# bridge the manifest used.) Migrated from aimee-kb.plugin.yaml.
+name: aimee-kb
+services:
+  postgres:
+    restart: unless-stopped
+    image: pgvector/pgvector:pg17
+    user: "1000:1000"
+    environment:
+      POSTGRES_DB: aimee_shared
+      POSTGRES_USER: aimee
+      POSTGRES_PASSWORD: aimee
+    volumes:
+      - aimee-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aimee -d aimee_shared"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  aimee-kb:
+    restart: unless-stopped
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
+    ulimits:
+      stack: 67108864
+    environment:
+      AIMEE_HOME: /var/lib/aimee
+      AIMEE_DB2_URL: postgresql://aimee:aimee@postgres:5432/aimee_shared
+      # EXTERNAL aimee-llm plugin — set to the host running it, e.g. http://192.168.0.254:8742
+      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://127.0.0.1:8742}
+      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-2560}
+      AIMEE_KB_HTTP_BIND: "1"
+    command: ["--http-port=8741"]
+    ports:
+      - "8741:8741"
+    depends_on:
+      postgres: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - aimee-kb-home:/var/lib/aimee
+volumes:
+  aimee-postgres:
+    x-smoothnas: { tier: aimee-data }
+  aimee-kb-home:
+    x-smoothnas: { tier: aimee-data }

@@ -1,0 +1,37 @@
+# aimee-server — SmoothNAS compose-native plugin (split topology): the /v1 API +
+# webchat, standalone. The KB is EXTERNAL — set AIMEE_KB_API_URL to the host
+# running the aimee-kb plugin (its published :8741). Tiered home + workspaces.
+# Migrated from aimee-server.plugin.yaml (default-limits + aimee-stack profiles).
+name: aimee-server
+services:
+  aimee-server:
+    restart: unless-stopped
+    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:latest}
+    ulimits:
+      stack: 67108864
+    environment:
+      AIMEE_HOME: /var/lib/aimee
+      AIMEE_DB1_URL: sqlite:///var/lib/aimee/aimee.db
+      # EXTERNAL aimee-kb plugin — set to the host running it, e.g. http://192.168.0.254:8741
+      AIMEE_KB_API_URL: ${AIMEE_KB_API_URL:-http://127.0.0.1:8741}
+      AIMEE_SERVER_HTTP_BIND: "1"
+      AIMEE_WEBCHAT_ENABLED: "1"
+      AIMEE_WEBCHAT_USER: ${AIMEE_WEBCHAT_USER:-aimee}
+      AIMEE_WEBCHAT_PASSWORD: ${AIMEE_WEBCHAT_PASSWORD:-aimee-local-dev}
+    ports:
+      - "8743:8743"
+      - "8443:8443"
+    healthcheck:
+      test: ["CMD-SHELL",
+             "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8740/v1/health | grep -qE '^(200|401)$$'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - aimee-server-home:/var/lib/aimee
+      - aimee-server-workspaces:/var/lib/aimee-workspaces
+volumes:
+  aimee-server-home:
+    x-smoothnas: { tier: aimee-data }
+  aimee-server-workspaces:
+    x-smoothnas: { tier: aimee-data }
