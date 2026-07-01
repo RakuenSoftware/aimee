@@ -36,7 +36,11 @@ case "${AIMEE_LLM_STUB:-}" in
     # Reranker ENCODER: CLS pooling + flash-attn; the gateway applies the Dense head.
     start rerank 8082 -m /models/rerank-encoder.gguf --embeddings --pooling cls -fa on
     # Synth: OpenAI-compatible /v1/chat/completions (grammar/JSON via --jinja).
-    if [ -f /models/synth.gguf ]; then
+    # In the SPLIT topology (2026-07-01 roundtable) the big synth/delegate runs in a
+    # separate `aimee-delegate` container and AIMEE_LLM_SYNTH_URL points at it; set
+    # AIMEE_LLM_SYNTH_LOCAL=0 so this (kb) container does NOT also load a local synth
+    # and waste VRAM. Default 1 keeps the legacy unified behaviour.
+    if [ "${AIMEE_LLM_SYNTH_LOCAL:-1}" != "0" ] && [ -f /models/synth.gguf ]; then
       start synth 8083 -m /models/synth.gguf --ctx-size "$SYNTH_CTX" --jinja
     fi
     ;;

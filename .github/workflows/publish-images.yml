@@ -86,6 +86,12 @@ jobs:
           # the same vendor-agnostic Vulkan binary runs CPU or GPU via AIMEE_LLM_NGL.
           - { name: aimee-llm-cpu, dockerfile: Dockerfile.aimee-llm }
           - { name: aimee-llm-gpu, dockerfile: Dockerfile.aimee-llm, extra_args: "EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF\nEMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf\nRERANK_REPO=cross-encoder/ettin-reranker-400m-v1\nSYNTH_REPO=unsloth/gemma-4-12b-it-GGUF\nSYNTH_FILE=gemma-4-12b-it-Q4_K_M.gguf" }
+          # SPLIT delegate tiers (2026-07-01 roundtable): synth/delegate models in their
+          # OWN image, isolated from embed+rerank. Each GGUF pinned by HF revision +
+          # sha256 (build fails on mismatch). small=Gemma4-12B (Dockerfile defaults);
+          # mid=Qwen3.6-35B-A3B (MoE overrides). Same x64 Vulkan binary; GPU-only at run.
+          - { name: aimee-delegate-small, dockerfile: Dockerfile.aimee-delegate }
+          - { name: aimee-delegate-mid, dockerfile: Dockerfile.aimee-delegate, extra_args: "SYNTH_REPO=unsloth/Qwen3.6-35B-A3B-GGUF\nSYNTH_FILE=Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf\nSYNTH_REVISION=56b9b6695c1d341398ea990cf2172ba4311647d8\nSYNTH_SHA256=707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450\nDELEGATE_CTX=262144\nDELEGATE_SLOTS=2\nDELEGATE_MOE=1\nDELEGATE_N_CPU_MOE=24\nDELEGATE_MODEL_ID=qwen3.6-35b-a3b" }
           # #4-full render backend (headless-Chromium sidecar). Self-contained
           # under deploy/css-render (its own build context); independent of the C
           # build, so a failure here never blocks the aimee images (fail-fast off).
@@ -162,8 +168,8 @@ jobs:
           # layer cache. Same exclusion for aimee-llm-cpu/-gpu: they BAKE multi-GB
           # GGUFs (Qwen3-Embedding + gemma) into the image, so caching those layers
           # would likewise blow the 10 GB GHA budget and evict the C-image caches.
-          cache-from: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-llm-cpu' && matrix.image.name != 'aimee-llm-gpu' && matrix.image.name != 'aimee-css-render') && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
-          cache-to: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-llm-cpu' && matrix.image.name != 'aimee-llm-gpu' && matrix.image.name != 'aimee-css-render') && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          cache-from: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-llm-cpu' && matrix.image.name != 'aimee-llm-gpu' && matrix.image.name != 'aimee-delegate-small' && matrix.image.name != 'aimee-delegate-mid' && matrix.image.name != 'aimee-css-render') && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          cache-to: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-llm-cpu' && matrix.image.name != 'aimee-llm-gpu' && matrix.image.name != 'aimee-delegate-small' && matrix.image.name != 'aimee-delegate-mid' && matrix.image.name != 'aimee-css-render') && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
           # Images bundle the browser UI (WITH_WEBCHAT=1, the default). webchat's
           # frontend dependency (@rakuensoftware/smoothgui) is vendored in-repo, so
           # the build needs no npm token. The aimee-kb image ignores WITH_WEBCHAT.
@@ -207,7 +213,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [aimee-server, aimee-kb, aimee-server-kb, aimee-embedder, aimee-embedder-4b, aimee-llm-cpu, aimee-llm-gpu, aimee-css-render]
+        image: [aimee-server, aimee-kb, aimee-server-kb, aimee-embedder, aimee-embedder-4b, aimee-llm-cpu, aimee-llm-gpu, aimee-delegate-small, aimee-delegate-mid, aimee-css-render]
     steps:
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"

@@ -1,0 +1,59 @@
+# SPLIT delegate overlay (2026-07-01 design roundtable): run the big synth/delegate
+# model in its OWN container, isolated from the embed+rerank+gateway (`aimee-llm`).
+# Layer this ON TOP of the base + GPU overlay:
+#
+#   docker compose -f deploy/compose/aimee.yaml \
+#                  -f deploy/compose/aimee.gpu.yaml \
+#                  -f deploy/compose/aimee.delegate.yaml up -d
+#
+# Wiring: aimee-llm's gateway proxies /v1/chat/completions to AIMEE_LLM_SYNTH_URL, so
+# we point that at aimee-delegate and tell aimee-llm NOT to load a local synth
+# (AIMEE_LLM_SYNTH_LOCAL=0). The kb's curator (LLM_ENDPOINT -> aimee-llm:8742/v1) then
+# flows kb -> aimee-llm gateway -> aimee-delegate transparently. To also expose the
+# delegate to the SERVER's roundtable/delegate router, register it once:
+#   ./aimee agent local delegate-mid http://aimee-delegate:8083/v1 \
+#       --model aimee-synth --roles code,reason,execute --cost-tier 0
+#
+# IMAGE SELECT: default is the mid tier (Qwen 3.6 35B-A3B). For a 16GB card use the
+# small tier (Gemma 4 12B) -- set AIMEE_DELEGATE_IMAGE=ghcr.io/rakuensoftware/aimee-delegate:small
+# and the small-tier ENV baked in the image applies (96K/1-slot/dense); drop the MoE
+# vars below.
+#
+# CO-RESIDENCY: on a SINGLE GPU shared with aimee-llm's embed+rerank (~5.5GB), the
+# static AIMEE_DELEGATE_N_CPU_MOE below must leave room for that stack + KV. On a
+# DEDICATED delegate card, lower it (more experts resident = faster). This is set
+# STATICALLY per deployment by design (no runtime auto-sizer) -- calibrate once with
+# `docs/AIMEE_DELEGATE_TUNING.md`.
+services:
+  aimee-llm:
+    environment:
+      # embed+rerank stay local on the GPU; synth is delegated out.
+      AIMEE_LLM_SYNTH_LOCAL: "0"
+      AIMEE_LLM_SYNTH_URL: ${AIMEE_LLM_SYNTH_URL:-http://aimee-delegate:8083}
+
+  aimee-delegate:
+    restart: unless-stopped
+    image: ${AIMEE_DELEGATE_IMAGE:-ghcr.io/rakuensoftware/aimee-delegate:mid}
+    environment:
+      # mid tier (Qwen 3.6 35B-A3B, MoE). These match the image's baked defaults and
+      # are restated here so an operator sees/tunes them at the deploy site.
+      AIMEE_DELEGATE_PORT: "8083"
+      AIMEE_DELEGATE_CTX: ${AIMEE_DELEGATE_CTX:-262144}      # 256K
+      AIMEE_DELEGATE_SLOTS: ${AIMEE_DELEGATE_SLOTS:-2}       # 2x128K
+      AIMEE_DELEGATE_MOE: "1"
+      AIMEE_DELEGATE_MOE_LAYERS: "40"
+      # STATIC expert-offload. Default sized for a 24GB card SHARED with embed+rerank;
+      # lower toward 0 on a 32GB / dedicated card. Calibrate per docs.
+      AIMEE_DELEGATE_N_CPU_MOE: ${AIMEE_DELEGATE_N_CPU_MOE:-24}
+      AIMEE_DELEGATE_KV_K: q8_0
+      AIMEE_DELEGATE_KV_V: ${AIMEE_DELEGATE_KV_V:-q4_0}      # K8V4; flip to q8_0 if the FA probe warns
+      AIMEE_DELEGATE_MODEL_ID: aimee-synth
+      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
+    devices:
+      - "/dev/dri:/dev/dri"
+    healthcheck:
+      test: ["CMD", "/opt/aimee/health.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 600s   # 22GB cold-load; must not race restarts (panel [13])

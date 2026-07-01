@@ -1,0 +1,97 @@
+# aimee-delegate: a single-model OpenAI-compatible synth/delegate server on the
+# VENDOR-AGNOSTIC Vulkan llama.cpp build. Split OUT of the unified aimee-llm
+# (embed+rerank+gateway) per the 2026-07-01 design roundtable so the big delegate
+# model is isolated from the retrieval stack (crash + security + config isolation)
+# and the KB stays byte-portable on the `kb` image.
+#
+# Two published tiers (built via build-args; models baked in, pinned by HF revision
+# + sha256 so a compromised/MITM'd upload fails the BUILD, not production):
+#   aimee-delegate-small (16GB): Gemma 4 12B  qat-UD-Q4_K_XL (dense; 96K, 1 slot)
+#   aimee-delegate-mid   (24-32GB): Qwen 3.6 35B-A3B UD-Q4_K_XL (MoE; 256K=2x128K,
+#                                    static --n-cpu-moe expert-offload)
+#
+# The kb image (aimee-llm) points AIMEE_LLM_SYNTH_URL at this container's :PORT; the
+# gateway already proxies /v1/chat/completions to that upstream, so no gateway change.
+
+ARG LLAMA_TAG=b9775
+
+# Model + supply-chain pins (overridden per tier in CI). Defaults = the small tier.
+ARG SYNTH_REPO=unsloth/gemma-4-12B-it-qat-GGUF
+ARG SYNTH_FILE=gemma-4-12B-it-qat-UD-Q4_K_XL.gguf
+ARG SYNTH_REVISION=9586f3257bc62bd179767241c7ec0f66bc2a314a
+ARG SYNTH_SHA256=cc9ff072e0a8203429ed854e6662c17a6c2bc1e5dca5b475dd4736caaacbc165
+
+# ---- stage 1: fetch + integrity-verify the baked GGUF (fail build on mismatch) ---
+FROM debian:bookworm-slim AS modelprep
+ARG SYNTH_REPO
+ARG SYNTH_FILE
+ARG SYNTH_REVISION
+ARG SYNTH_SHA256
+RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /out
+# Pin by REVISION OID (not just :main) so the bytes can't shift under us, then verify
+# the recorded sha256 -- a compromised HF upload or MITM mirror fails here (panel [9]).
+# --tries/--timeout so a transient HF blip during the 22GB mid-tier pull doesn't
+# deterministically kill the build (panel code-review [6]); -c resumes a partial file.
+RUN wget -q -c --tries=5 --timeout=30 --waitretry=10 -O /out/synth.gguf \
+        "https://huggingface.co/${SYNTH_REPO}/resolve/${SYNTH_REVISION}/${SYNTH_FILE}" \
+    && echo "${SYNTH_SHA256}  /out/synth.gguf" | sha256sum -c - \
+    && echo "${SYNTH_SHA256}  synth.gguf" > /out/synth.sha256
+
+# ---- stage 2: runtime — Vulkan llama.cpp + the delegate entrypoint ---------------
+FROM debian:bookworm-slim AS runtime
+ARG LLAMA_TAG
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl wget libgomp1 libcurl4 libvulkan1 mesa-vulkan-drivers \
+    && rm -rf /var/lib/apt/lists/*
+RUN wget -q --tries=5 --timeout=30 --waitretry=10 -O /tmp/llama.tgz \
+        "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-ubuntu-vulkan-x64.tar.gz" \
+    && mkdir -p /opt/llama && tar -xzf /tmp/llama.tgz -C /opt/llama --strip-components=1 \
+    && rm /tmp/llama.tgz
+ENV LD_LIBRARY_PATH=/opt/llama/lib:/opt/llama PATH=/opt/llama:/opt/llama/bin:$PATH
+
+COPY scripts/aimee-delegate-entrypoint.sh /opt/aimee/entrypoint.sh
+COPY scripts/aimee-delegate-health.sh /opt/aimee/health.sh
+RUN chmod +x /opt/aimee/entrypoint.sh /opt/aimee/health.sh
+COPY --from=modelprep /out /models
+
+# Re-declare the pins in the runtime stage so they can be surfaced as image LABELs
+# (operator audit: what's actually baked) and echoed by the entrypoint / health.
+ARG SYNTH_REPO
+ARG SYNTH_FILE
+ARG SYNTH_REVISION
+ARG SYNTH_SHA256
+LABEL org.aimee.delegate.model="${SYNTH_REPO}/${SYNTH_FILE}" \
+      org.aimee.delegate.revision="${SYNTH_REVISION}" \
+      org.aimee.delegate.sha256="${SYNTH_SHA256}"
+
+# ---- tier runtime profile: baked per image via build-args (defaults = small/Gemma;
+#      CI passes mid/Qwen overrides) so each image runs correctly WITHOUT relying on
+#      compose to set MoE/ctx/slots (panel: don't let deploy config carry correctness).
+ARG DELEGATE_CTX=98304
+ARG DELEGATE_SLOTS=1
+ARG DELEGATE_MOE=0
+ARG DELEGATE_MOE_LAYERS=40
+ARG DELEGATE_N_CPU_MOE=0
+ARG DELEGATE_KV_V=q4_0
+ARG DELEGATE_MODEL_ID=aimee-synth
+ENV AIMEE_DELEGATE_PORT=8083 \
+    AIMEE_DELEGATE_CTX=${DELEGATE_CTX} \
+    AIMEE_DELEGATE_SLOTS=${DELEGATE_SLOTS} \
+    AIMEE_DELEGATE_NGL=999 \
+    AIMEE_DELEGATE_KV_K=q8_0 \
+    AIMEE_DELEGATE_KV_V=${DELEGATE_KV_V} \
+    AIMEE_DELEGATE_MOE=${DELEGATE_MOE} \
+    AIMEE_DELEGATE_MOE_LAYERS=${DELEGATE_MOE_LAYERS} \
+    AIMEE_DELEGATE_N_CPU_MOE=${DELEGATE_N_CPU_MOE} \
+    AIMEE_DELEGATE_MODEL_ID=${DELEGATE_MODEL_ID} \
+    AIMEE_DELEGATE_MIN_VRAM_MB=12000
+
+WORKDIR /opt/aimee
+EXPOSE 8083
+# Long start-period: the mid tier cold-loads a 22GB GGUF; a short gate would race the
+# load and cause restart storms that re-read 22GB each time (panel [13]).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=3 \
+    CMD /opt/aimee/health.sh || exit 1
+ENTRYPOINT ["/opt/aimee/entrypoint.sh"]
