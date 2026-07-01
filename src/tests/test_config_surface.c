@@ -38,6 +38,7 @@ static const char *FIXTURE_A =
     "true\n"
     "ingress_preinject_assembly_budget: 1\n"
     "code_span_max_lines: 7\n"
+    "tool_output_max_bytes: 4096\n"
     "ingress_max_raw_scans: 3\nembedding_command: ZZA_val\nembedding_model: "
     "ZZA_val\nembedding_endpoint: ZZA_val\nembedding_dim: 1\nmemory_rerank_mode: "
     "ZZA_val\nmemory_rewrite:\n  enabled: true\n  hyde: true\n  decompose: true\n  max_subqueries: "
@@ -93,6 +94,7 @@ static const char *FIXTURE_B =
     "false\n"
     "ingress_preinject_assembly_budget: 4096\n"
     "code_span_max_lines: 4096\n"
+    "tool_output_max_bytes: 8192\n"
     "ingress_max_raw_scans: 4096\nembedding_command: ZZB_val\nembedding_model: "
     "ZZB_val\nembedding_endpoint: ZZB_val\nembedding_dim: 4096\nmemory_rerank_mode: "
     "ZZB_val\nmemory_rewrite:\n  enabled: false\n  hyde: false\n  decompose: false\n  "
@@ -178,6 +180,7 @@ int main(void)
    assert(cfgA.css_style_graph_enabled == 1 && cfgB.css_style_graph_enabled == 0);
    assert(cfgA.ingress_preinject_assembly_budget != cfgB.ingress_preinject_assembly_budget);
    assert(cfgA.code_span_max_lines != cfgB.code_span_max_lines);
+   assert(cfgA.tool_output_max_bytes != cfgB.tool_output_max_bytes);
    assert(cfgA.ingress_max_raw_scans != cfgB.ingress_max_raw_scans);
    assert(strcmp(cfgA.embedding_command, cfgB.embedding_command) != 0);
    assert(strcmp(cfgA.embedding_model, cfgB.embedding_model) != 0);
@@ -328,6 +331,6 @@ int main(void)
    assert(cfgA.ensemble_min_successful != cfgB.ensemble_min_successful);
    assert(cfgA.ensemble_max_cost_usd != cfgB.ensemble_max_cost_usd);
 
-   printf("all tests passed (145 parsed fields)\n");
+   printf("all tests passed (146 parsed fields)\n");
    return 0;
 }

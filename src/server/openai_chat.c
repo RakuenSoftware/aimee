@@ -28,6 +28,7 @@
 #include "config.h"                 /* config_t, config_load */
 #include "agent_config.h"
 #include "agent_exec.h"
+#include "context_reduce.h"
 #include "agent_protocol.h"  /* parsed_response_t, message_history_repair */
 #include "delegate_driver.h" /* single provider step for the Codex proxy */
 #include "http_retry.h"
@@ -885,6 +886,33 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    memset(out, 0, sizeof(*out));
    if (!agent || !messages)
       return -1;
+
+   /* Context economizer (gateway seam, SHADOW-MODE ONLY): when reduce.gateway_seam
+    * is on, measure this inbound /v1/responses request's baseline + foldable
+    * opportunity and record a forecast ledger row. measure_only is forced on, so the
+    * client request — the `messages` (input) array + `system_prompt` (instructions)
+    * — is NEVER mutated (we ignore res.messages, NULL in measure-only) and is
+    * forwarded byte-identical. Done at ingress, before the gateway pipeline, so the
+    * baseline reflects the pristine client request. Fully guarded; context_reduce
+    * hard-bypasses on any internal error, so this can never perturb the response.
+    * Cheap mtime-cached config load keeps it dark by default. */
+   {
+      config_t ecfg;
+      if (config_load(&ecfg) == 0 && ecfg.reduce_gateway_seam && cJSON_IsArray(messages))
+      {
+         reduce_config_t rcfg;
+         memset(&rcfg, 0, sizeof(rcfg));
+         rcfg.gateway_seam = 1;
+         rcfg.measure_only = 1; /* shadow mode: this slice never mutates the request */
+         rcfg.fold.retained_msgs = ecfg.fold_retained_msgs;
+         reduce_result_t gw_res;
+         memset(&gw_res, 0, sizeof(gw_res));
+         if (context_reduce(messages, system_prompt, agent->model, NULL, REDUCE_SEAM_GATEWAY, &rcfg,
+                            NULL, &gw_res) == 0)
+            agent_record_reduce_ledger(&gw_res, agent->model, "gateway", NULL);
+         context_reduce_result_free(&gw_res);
+      }
+   }
 
    delegate_drivers_init();
    const delegate_driver_t *driver = delegate_driver_get(agent->provider);

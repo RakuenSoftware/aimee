@@ -22,7 +22,7 @@ aimee config set <key> <value>    # set one value
 
 Structured options (arrays, nested objects — e.g. `ensemble.reference_models`) are not CLI-settable; they are written into the config file under the sections listed at the end.
 
-## CLI-settable keys (134)
+## CLI-settable keys (135)
 
 | Key | Type | Description |
 |-----|------|-------------|
@@ -153,6 +153,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 | `provider` | string | Default model provider. |
 | `reasoning_cap_enabled` | bool | Cap the model's reasoning effort. |
 | `require_session_worktree` | bool | Fail closed on mutating ops outside an aimee-managed worktree (session-isolation guard; default off). |
+| `tool_output_max_bytes` | int | Per-result cap (bytes) on the model-visible tool output (read_file/bash/grep/glob/git_* results). 0 = built-in default (32768); any positive value is clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the prompt + history; the (default-off) context-economizer compresses older results to keep history bounded. |
 | `tsr_command` | string | TSR sidecar endpoint/command for structured-PDF table recognition (resolves like embedding_command; AIMEE_TSR_URL env fallback). |
 | `typed_facts_enabled` | bool | Enable the typed-fact knowledge layer (master gate; default off). |
 | `verify_cross_project` | bool | Let `aimee git verify` span other projects. |
@@ -163,7 +164,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 
 > **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `wfe_live_forge_enabled`
 
-## Config-file sections (50)
+## Config-file sections (51)
 
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
@@ -204,6 +205,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`model_meta`** — _Model metadata + capability routing._ Keys: `capability_routing`, `refresh_minutes`
 - **`otel`** — _OpenTelemetry export._ Keys: `endpoint`, `service_name`
 - **`reasoning_cap`** — _Reasoning-effort cap._ Keys: `enabled`
+- **`reduce`** — `compress`, `delegate_seam`, `freeze_guard`, `freeze_guard_horizon`, `gateway_seam`, `history_fold`, `measure`
 - **`retry`** — _Provider retry / backoff._ Keys: `base_ms`, `max_attempts`, `max_ms`
 - **`rewind`** — _Auto-snapshot / rewind._ Keys: `auto_snapshot`
 - **`roundtable`** — _Roundtable pipeline thresholds, caps, gates, and turns._ Keys: `converge_threshold`, `deadline_ms`, `max_rounds`, `pipeline_done_bar`, `pipeline_gate_ttl_h`, `pipeline_max_attempts_per_pass`, `pipeline_max_cost_usd`, `pipeline_max_passes`, `pipeline_max_total_cost_usd`, `pipeline_parked_releases_slot`, `pipeline_unknown_context_tokens`, `turns`

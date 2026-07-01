@@ -1,17 +1,18 @@
-# Build the unified aimee-llm container on `testing` and publish it under the
+# Build the unified aimee-kb container on `testing` and publish it under the
 # DELIBERATELY non-semver `:testing` tag (+ `:testing-<sha>`), mirroring how
 # publish-testing.yml ships aimee-server-kb. This lets .254 (the GPU deploy
-# target) pull a tested-but-unreleased aimee-llm WITHOUT promoting to main;
+# target) pull a tested-but-unreleased aimee-kb image WITHOUT promoting to main;
 # versioned + `:latest` publishing stays owned by main (auto-release.yml ->
 # publish-images.yml).
 #
-# Kept SEPARATE from publish-testing.yml on purpose: aimee-llm bakes multi-GB
+# Kept SEPARATE from publish-testing.yml on purpose: aimee-kb bakes multi-GB
 # GGUFs (no layer cache — see publish-images.yml) and rebuilding it on every
-# server-code push would be wasteful. So it triggers ONLY on the aimee-llm
+# server-code push would be wasteful. So it triggers ONLY on the aimee-kb
 # sources (the Dockerfile + the gateway/supervisor scripts).
 #
-# Both tiers are built (operator chose cpu+gpu for testing): aimee-llm-cpu and
-# aimee-llm-gpu. amd64 only (the .254 deploy target); the release pipeline owns
+# Tiers built every push: aimee-kb-cpu + aimee-kb-gpu-small (Gemma). The Qwen
+# aimee-kb-gpu-mid (22GB) is dispatch-only. amd64 only (the .254 deploy target); the
+# release pipeline owns
 # multi-arch.
 name: Publish testing aimee-llm
 
@@ -25,6 +26,11 @@ on:
       - "scripts/aimee-llm-supervisor.sh"
       - ".github/workflows/publish-llm-testing.yml"
   workflow_dispatch:
+    inputs:
+      build_kb_gpu_mid:
+        description: "Also build the 22GB aimee-kb-gpu-mid (Qwen 3.6 35B-A3B synth)"
+        type: boolean
+        default: false
 
 concurrency:
   group: publish-llm-testing-${{ github.ref }}
@@ -40,12 +46,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # CPU tier = Dockerfile defaults (Qwen3-Emb-0.6B + ettin-68m + gemma-4-E4B).
-        # GPU tier overrides to the 4B/400m/12B set; the same vendor-agnostic
-        # Vulkan binary runs CPU or GPU at deploy time via AIMEE_LLM_NGL.
+        # cpu tier = Dockerfile defaults (0.6B emb + ettin-68m + gemma-4-E4B).
+        # gpu-small overrides to the 4B/400m + Gemma-4-12B qat-UD synth (FA+K8V4).
+        # gpu-mid (Qwen 22GB synth) is the dispatch-only job below — a 22GB uncached
+        # build every push is near-zero-signal (model + llama.cpp rarely change).
         tier:
-          - { name: aimee-llm-cpu, extra_args: "" }
-          - { name: aimee-llm-gpu, extra_args: "EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF\nEMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf\nRERANK_REPO=cross-encoder/ettin-reranker-400m-v1\nSYNTH_REPO=unsloth/gemma-4-12b-it-GGUF\nSYNTH_FILE=gemma-4-12b-it-Q4_K_M.gguf" }
+          - { name: aimee-kb-cpu, dockerfile: Dockerfile.aimee-llm, extra_args: "" }
+          - { name: aimee-kb-gpu-small, dockerfile: Dockerfile.aimee-llm, extra_args: "EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF\nEMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf\nRERANK_REPO=cross-encoder/ettin-reranker-400m-v1\nSYNTH_REPO=unsloth/gemma-4-12B-it-qat-GGUF\nSYNTH_FILE=gemma-4-12B-it-qat-UD-Q4_K_XL.gguf\nSYNTH_REVISION=9586f3257bc62bd179767241c7ec0f66bc2a314a\nSYNTH_SHA256=cc9ff072e0a8203429ed854e6662c17a6c2bc1e5dca5b475dd4736caaacbc165\nSYNTH_FA=on" }
     steps:
       - uses: actions/checkout@v4
 
@@ -79,7 +86,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.aimee-llm
+          file: ${{ matrix.tier.dockerfile }}
           platforms: linux/amd64
           push: true
           provenance: false
@@ -91,3 +98,79 @@ jobs:
           tags: |
             ghcr.io/${{ env.OWNER }}/${{ matrix.tier.name }}:testing
             ghcr.io/${{ env.OWNER }}/${{ matrix.tier.name }}:testing-${{ env.SHA7 }}
+
+  # aimee-kb-gpu-mid (Qwen 3.6 35B-A3B synth, 22.4GB MoE): NOT built on every push —
+  # the model + llama.cpp rarely change, so a ~22GB uncached download+build per push is
+  # near-zero-signal (option (d), 2026-07-01 follow-up roundtable). Runs ONLY on a
+  # manual workflow_dispatch with build_kb_gpu_mid=true. Needs the docker data-root on
+  # /mnt (~65GB) — the ~22GB image's transient build footprint overruns / — plus a df
+  # pre-flight that fails fast rather than dying mid-build with 'no space left'.
+  build-kb-gpu-mid:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_kb_gpu_mid
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Normalize owner + short sha
+        run: |
+          echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+          echo "SHA7=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Reclaim toolchains AND relocate docker's data-root to the larger /mnt disk
+      # BEFORE buildx is created, so buildkit writes the 22GB model layers there
+      # (mirrors publish-images.yml's aimee-kb-leg fix, commit f26cf76).
+      - name: Free disk + move docker storage to /mnt
+        run: |
+          echo "before:"; df -h / /mnt
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup /usr/local/share/boost
+          sudo docker image prune --all --force || true
+          sudo systemctl stop docker docker.socket || true
+          sudo mkdir -p /mnt/docker
+          printf '{ "data-root": "/mnt/docker" }\n' | sudo tee /etc/docker/daemon.json
+          sudo systemctl start docker || true
+          echo "after:"; df -h / /mnt
+
+      # Fail fast if /mnt can't hold the 22GB image's transient footprint (~50-70GB)
+      # instead of dying mid-build with ENOSPC after a 22GB download.
+      - name: Pre-flight disk check
+        run: |
+          avail=$(df --output=avail -BG /mnt | tail -1 | tr -dc '0-9')
+          echo "/mnt available: ${avail}GB"
+          if [ "${avail:-0}" -lt 80 ]; then
+            echo "::error::/mnt has only ${avail}GB free; need >=80GB for the 22GB kb-gpu-mid build"; exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push aimee-kb-gpu-mid:testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.aimee-llm
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          build-args: |
+            EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF
+            EMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf
+            RERANK_REPO=cross-encoder/ettin-reranker-400m-v1
+            SYNTH_REPO=unsloth/Qwen3.6-35B-A3B-GGUF
+            SYNTH_FILE=Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+            SYNTH_REVISION=56b9b6695c1d341398ea990cf2172ba4311647d8
+            SYNTH_SHA256=707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450
+            SYNTH_FA=on
+            SYNTH_MOE=1
+            SYNTH_N_CPU_MOE=20
+            SYNTH_SLOTS=1
+          tags: |
+            ghcr.io/${{ env.OWNER }}/aimee-kb-gpu-mid:testing
+            ghcr.io/${{ env.OWNER }}/aimee-kb-gpu-mid:testing-${{ env.SHA7 }}

@@ -43,6 +43,10 @@ struct cJSON *anthropic_messages_to_openai(const struct cJSON *messages, const c
  * usable tools. */
 struct cJSON *anthropic_tools_to_openai(const struct cJSON *anthropic_tools);
 
+/* Convert Anthropic tools to the OpenAI Responses API's flat function-tool
+ * shape: [{type:"function",name,description,parameters}]. */
+struct cJSON *anthropic_tools_to_responses(const struct cJSON *anthropic_tools);
+
 /* Build a non-streaming Anthropic Messages API response object from a parsed
  * provider reply. resp_id is the "msg_..." id; model echoes the request's
  * model string. Produces:

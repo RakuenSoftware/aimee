@@ -90,6 +90,12 @@ void agent_record_token_audit(const agent_result_t *result, const char *role, co
  * dropping them when the provider stream errors mid-flight. */
 void agent_record_token_audit_kind(const agent_result_t *result, const char *role,
                                    const char *source, const char *usage_kind);
+/* Record a context-economizer ledger row (usage_kind="avoided", FORECAST-only —
+ * see context_reduce.h). Forward-declared struct so this broad header need not
+ * pull in context_reduce.h; the caller includes it for the full type. */
+struct reduce_result_s;
+void agent_record_reduce_ledger(const struct reduce_result_s *r, const char *model,
+                                const char *agent_name, const char *role);
 /* Master gate (proposal §2/§7 rollout knob): returns 1 when
  * ingress_usage_accounting_enabled is set. The stateless ingress handlers call
  * this before writing their cost rows so ingress accounting can be flipped on
@@ -155,6 +161,26 @@ char *agent_load_project_contract(const char *project_root);
  * tool_name may be NULL to skip per-tool overrides. Returns a heap-allocated
  * string bounded by AGENT_TOOL_OUTPUT_MAX; caller must free(). */
 char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *tool_name);
+
+/* Pure clamp half of agent_tool_output_cap(): map a configured
+ * tool_output_max_bytes value to an effective per-result cap. 0/negative ->
+ * AGENT_TOOL_OUTPUT_MAX (built-in default); any positive value is clamped to
+ * (0, AGENT_TOOL_OUTPUT_RAW_MAX]. Header-inline so it is the single source of
+ * truth for both the config-reading resolver and unit tests (zero linkage). */
+static inline size_t agent_tool_output_cap_clamp(int configured)
+{
+   if (configured <= 0)
+      return (size_t)AGENT_TOOL_OUTPUT_MAX;
+   if ((size_t)configured > (size_t)AGENT_TOOL_OUTPUT_RAW_MAX)
+      return (size_t)AGENT_TOOL_OUTPUT_RAW_MAX;
+   return (size_t)configured;
+}
+
+/* Resolve the per-result MODEL-VISIBLE tool-output cap (bytes). Reads
+ * tool_output_max_bytes from config (mtime-cached) and clamps via
+ * agent_tool_output_cap_clamp(). Single source of truth for every
+ * model-visible tool-result truncation site. */
+size_t agent_tool_output_cap(void);
 
 /* Self-correcting delegate loop
  *

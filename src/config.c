@@ -419,8 +419,10 @@ static void config_set_defaults(config_t *cfg)
    snprintf(cfg->db1_path, sizeof(cfg->db1_path), "%s", config_default_db1_path());
    snprintf(cfg->guardrail_mode, sizeof(cfg->guardrail_mode), "%s", MODE_APPROVE);
    snprintf(cfg->provider, sizeof(cfg->provider), "claude");
-   cfg->compact_enabled = 1;      /* default on; set before no-config early returns */
-   cfg->coord_closet_enabled = 0; /* fold §2: default-off */
+   cfg->compact_enabled = 1; /* default on; set before no-config early returns */
+   cfg->coord_closet_enabled =
+       1; /* fold §2: default-ON — conserves identifiers elided by the
+           * default-on compress/fold so lossy reduction stays recoverable */
    cfg->coord_closet_budget_bytes = 0;
    cfg->coord_closet_max_ratio_pct = 0;
    cfg->fold_enabled = 0; /* fold §1: default-off */
@@ -432,6 +434,24 @@ static void config_set_defaults(config_t *cfg)
    cfg->fold_freeze_tail_cap_msgs = 0;
    cfg->fold_recall_enabled = 0; /* fold §4: default-off */
    cfg->fold_recall_ttl_turns = 0;
+   /* Context economizer: DEFAULT-ON on the delegate seam (the implemented, tested
+    * reduction path). measure + delegate_seam + history_fold + compress all on.
+    * Lossy reduction stays recoverable: both levers only touch messages BEFORE the
+    * retained tail (the most recent retained_msgs stay full), and the Coordinate
+    * Closet (also default-on) conserves the exact identifiers so the agent can
+    * re-issue a tool call to recover an elided body. history_fold is converted to a
+    * live fold ONLY at agent_runtime.c (rcfg.history_fold = reduce_history_fold &&
+    * !chatgpt) — it reaches the Responses builder on ZERO paths; compress is
+    * shape-preserving and runs for all providers. */
+   cfg->reduce_measure_enabled = 1;
+   cfg->reduce_delegate_seam = 1;
+   cfg->reduce_history_fold = 1;
+   cfg->reduce_compress = 1;
+   /* GATEWAY seam (primary-agent /v1 path) stays off: shadow-only until its
+    * request-mutation + 400-retry-from-pristine circuit breaker are built. */
+   cfg->reduce_gateway_seam = 0;
+   cfg->reduce_freeze_guard_enabled = 1; /* safety: on for the default-on economizer freeze */
+   cfg->reduce_freeze_guard_horizon = 1; /* conservative break-even: one reuse pays the write */
    snprintf(cfg->memory_citations_mode, sizeof(cfg->memory_citations_mode), "%s", "off");
    snprintf(cfg->memory_coref_mode, sizeof(cfg->memory_coref_mode), "%s", "off");
    cfg->memory_cognify_async_enabled = 0;
@@ -540,6 +560,9 @@ static void config_set_defaults(config_t *cfg)
    cfg->ingress_preinject_assembly_budget = 6144;
    cfg->ingress_max_raw_scans = 0;
    cfg->code_span_max_lines = 400;
+   /* 0 = use the built-in default AGENT_TOOL_OUTPUT_MAX (32768) for the
+    * per-result model-visible tool-output cap (see agent_tool_output_cap()). */
+   cfg->tool_output_max_bytes = 0;
    cfg->ingress_compress_min_chars = 80;
    cfg->require_session_worktree = 0;
    /* Default-on as of the virtual-context rollout: the long-session benchmark
@@ -938,6 +961,10 @@ int config_load(config_t *cfg)
    if (cJSON_IsNumber(item) && item->valuedouble > 0)
       cfg->code_span_max_lines = (int)item->valuedouble;
 
+   item = cJSON_GetObjectItemCaseSensitive(root, "tool_output_max_bytes");
+   if (cJSON_IsNumber(item) && item->valuedouble >= 0)
+      cfg->tool_output_max_bytes = (int)item->valuedouble;
+
    item = cJSON_GetObjectItemCaseSensitive(root, "require_session_worktree");
    if (cJSON_IsBool(item))
       cfg->require_session_worktree = cJSON_IsTrue(item);
@@ -1039,6 +1066,7 @@ int config_load(config_t *cfg)
 
    config_parse_worktree_gc_section(cfg, root);
    config_parse_fold_section(cfg, root);
+   config_parse_reduce_section(cfg, root);
 
    config_parse_memory_section(cfg, root);
    config_apply_learning_settings(cfg, root);

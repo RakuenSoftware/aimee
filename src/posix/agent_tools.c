@@ -44,6 +44,19 @@ static int bash_delegate_cancel_requested(void)
    return (job_id > 0 && db1_agent_job_is_cancelled && db1_agent_job_is_cancelled(job_id)) ||
           (agent_delegation_stop_requested && agent_delegation_stop_requested(NULL, 0));
 }
+/* Single source of truth for the per-result MODEL-VISIBLE tool-output cap.
+ * Reads tool_output_max_bytes from config (mtime-cached) and clamps it via the
+ * header-inline agent_tool_output_cap_clamp(): 0/unset -> the built-in
+ * AGENT_TOOL_OUTPUT_MAX default (32768); any positive value clamps to
+ * (0, AGENT_TOOL_OUTPUT_RAW_MAX]. Callers resolve ONCE per call into a local so
+ * the cap can't change mid-loop. */
+size_t agent_tool_output_cap(void)
+{
+   config_t cfg;
+   if (config_load(&cfg) != 0)
+      return (size_t)AGENT_TOOL_OUTPUT_MAX;
+   return agent_tool_output_cap_clamp(cfg.tool_output_max_bytes);
+}
 static void bash_kill_child_tree(pid_t pid)
 {
    if (pid <= 0)
@@ -1105,7 +1118,8 @@ char *tool_read_file(const char *path, int offset, int limit)
       free(file_data);
       return safe_strdup(err_msg);
    }
-   char *buf = malloc(AGENT_TOOL_OUTPUT_MAX + 1);
+   size_t cap = agent_tool_output_cap();
+   char *buf = malloc(cap + 1);
    if (!buf)
    {
       fclose(f);
@@ -1124,12 +1138,12 @@ char *tool_read_file(const char *path, int offset, int limit)
       if (offset > 0 && line_num <= offset)
          continue;
       size_t len = strlen(line);
-      if (total + len >= AGENT_TOOL_OUTPUT_MAX)
+      if (total + len >= cap)
       {
-         size_t avail = AGENT_TOOL_OUTPUT_MAX - total;
+         size_t avail = cap - total;
          if (avail > 0)
             memcpy(buf + total, line, avail);
-         total = AGENT_TOOL_OUTPUT_MAX;
+         total = cap;
          break;
       }
       memcpy(buf + total, line, len);
@@ -1285,7 +1299,7 @@ char *tool_list_files(const char *path, const char *pattern)
          return safe_strdup("error: glob failed");
    }
 
-   size_t buf_size = AGENT_TOOL_OUTPUT_MAX;
+   size_t buf_size = agent_tool_output_cap();
    char *buf = malloc(buf_size + 1);
    if (!buf)
    {
@@ -1580,7 +1594,7 @@ char *tool_verify(const char *check_type, const char *target, const char *expect
                argv[j] = tokens[j];
             argv[tc] = NULL;
             char *output = NULL;
-            int rc = safe_exec_capture(argv, &output, AGENT_TOOL_OUTPUT_MAX);
+            int rc = safe_exec_capture(argv, &output, agent_tool_output_cap());
             int pass = (rc == 0);
             cJSON_AddBoolToObject(result, "pass", pass);
             cJSON_AddNumberToObject(result, "exit_code", rc);
@@ -1629,7 +1643,7 @@ char *tool_grep(const char *path, const char *pattern, int max_results)
    const char *argv[] = {"grep", "--binary-files=without-match", "-rn", "--exclude-dir=.git", "--exclude-dir=.aimee", "--exclude-dir=build", "--exclude-dir=dist", "--exclude-dir=node_modules", "-m", max_str, "--", pattern, actual_path, NULL};
    // clang-format on
    char *output = NULL;
-   int rc = safe_exec_capture(argv, &output, AGENT_TOOL_OUTPUT_MAX);
+   int rc = safe_exec_capture(argv, &output, agent_tool_output_cap());
 
    if (rc != 0 && rc != 1 && (!output || !output[0]))
    {
@@ -1663,7 +1677,7 @@ char *tool_git_diff(const char *repo_path, const char *ref)
 
    const workspace_provider_t *ws = workspace_provider_active();
    char *output = NULL;
-   int rc = ws->exec(ws, argv, &output, AGENT_TOOL_OUTPUT_MAX);
+   int rc = ws->exec(ws, argv, &output, agent_tool_output_cap());
    if (rc != 0 && (!output || !output[0]))
    {
       free(output);
@@ -1688,7 +1702,7 @@ char *tool_git_status(const char *repo_path)
    const char *argv[] = {"git", "-C", actual_path, "status", "--porcelain", NULL};
    const workspace_provider_t *ws = workspace_provider_active();
    char *output = NULL;
-   int rc = ws->exec(ws, argv, &output, AGENT_TOOL_OUTPUT_MAX);
+   int rc = ws->exec(ws, argv, &output, agent_tool_output_cap());
    if (rc != 0 && (!output || !output[0]))
    {
       free(output);
@@ -1797,7 +1811,7 @@ char *tool_git_log(const char *repo_path, int count)
 
    const char *argv[] = {"git", "-C", actual_path, "log", "--oneline", "-n", count_str, NULL};
    char *output = NULL;
-   int rc = safe_exec_capture(argv, &output, AGENT_TOOL_OUTPUT_MAX);
+   int rc = safe_exec_capture(argv, &output, agent_tool_output_cap());
 
    if (rc != 0 && (!output || !output[0]))
    {

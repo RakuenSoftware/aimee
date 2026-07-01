@@ -152,6 +152,11 @@ CFG_KEY_DESC = {
     "ingress_max_raw_scans": "Max raw-content scans per ingress request.",
     "code_span_max_lines": "Max line span the code_span_get recovery resolver returns per call "
     "(default 400).",
+    "tool_output_max_bytes": "Per-result cap (bytes) on the model-visible tool output "
+    "(read_file/bash/grep/glob/git_* results). 0 = built-in default (32768); any positive value is "
+    "clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the "
+    "prompt + history; the (default-off) context-economizer compresses older results to keep "
+    "history bounded.",
     "require_session_worktree": "Fail closed on mutating ops outside an aimee-managed worktree "
     "(session-isolation guard; default off).",
     "ingress_preinject_assembly_budget": "Token budget for ingress context pre-injection.",

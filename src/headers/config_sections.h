@@ -21,6 +21,7 @@ void config_parse_kb_section(config_t *cfg, cJSON *root);
 void config_parse_memory_maintenance_section(config_t *cfg, cJSON *root);
 void config_parse_worktree_gc_section(config_t *cfg, cJSON *root);
 void config_parse_fold_section(config_t *cfg, cJSON *root);
+void config_parse_reduce_section(config_t *cfg, cJSON *root);
 void config_parse_memory_section(config_t *cfg, cJSON *root);
 void config_parse_cross_verify_section(config_t *cfg, cJSON *root);
 void config_parse_retry_section(config_t *cfg, cJSON *root);

@@ -21,6 +21,8 @@ static char *g_last_body;
 static char *g_last_extra; /* upstream extra-header block from the last post */
 static int g_stream_status = 200;
 static const char *g_stream_payload;
+static const char *g_response_body = NULL;
+static int g_response_status = 200;
 
 static void reset_capture(void)
 {
@@ -30,6 +32,8 @@ static void reset_capture(void)
    g_last_extra = NULL;
    g_stream_status = 200;
    g_stream_payload = NULL;
+   g_response_body = NULL;
+   g_response_status = 200;
 }
 
 int agent_load_config(agent_config_t *cfg)
@@ -77,7 +81,10 @@ int delegate_build_url(const delegate_driver_t *driver, const agent_t *agent, ch
 {
    (void)driver;
    (void)agent;
-   snprintf(url, url_len, "https://example.invalid/v1/messages");
+   if (g_driver && g_driver->name && strcmp(g_driver->name, "chatgpt") == 0)
+      snprintf(url, url_len, "https://example.invalid/v1/responses");
+   else
+      snprintf(url, url_len, "https://example.invalid/v1/messages");
    return 0;
 }
 
@@ -127,8 +134,8 @@ int agent_http_post(const char *url, const char *auth_header, const char *body, 
    assert(g_last_body != NULL);
    free(g_last_extra);
    g_last_extra = strdup(extra_headers ? extra_headers : "");
-   *response_buf = strdup("{}");
-   return 200;
+   *response_buf = strdup(g_response_body ? g_response_body : "{}");
+   return g_response_status;
 }
 
 int agent_http_post_stream(const char *url, const char *auth_header, const char *body,
@@ -151,6 +158,52 @@ void agent_parse_response_openai(cJSON *root, parsed_response_t *out)
 {
    (void)root;
    memset(out, 0, sizeof(*out));
+}
+
+static void parsed_responses(cJSON *root, const char *body, parsed_response_t *out)
+{
+   const char *p;
+   char text[512];
+
+   (void)root;
+   memset(out, 0, sizeof(*out));
+   if (!body)
+      return;
+
+   p = strstr(body, "event: response.output_text.delta");
+   if (p)
+   {
+      p = strstr(p, "\"delta\":\"");
+      if (p)
+      {
+         const char *start = p + strlen("\"delta\":\"");
+         const char *end = strchr(start, '"');
+         size_t n = end && end > start ? (size_t)(end - start) : 0;
+         if (n >= sizeof(text))
+            n = sizeof(text) - 1;
+         if (n > 0)
+         {
+            memcpy(text, start, n);
+            text[n] = '\0';
+            out->content = strdup(text);
+         }
+      }
+   }
+
+   p = strstr(body, "event: response.completed");
+   if (p)
+   {
+      const char *usage = strstr(p, "\"usage\":{");
+      if (usage)
+      {
+         const char *it = strstr(usage, "\"input_tokens\":");
+         const char *ot = strstr(usage, "\"output_tokens\":");
+         if (it)
+            out->prompt_tokens = atoi(it + strlen("\"input_tokens\":"));
+         if (ot)
+            out->completion_tokens = atoi(ot + strlen("\"output_tokens\":"));
+      }
+   }
 }
 
 void agent_free_parsed_response(parsed_response_t *p)
@@ -735,6 +788,44 @@ static void test_messages_stream_openai_family_translates(void)
    PASS("messages_stream_openai_family_translates");
 }
 
+static void test_messages_stream_chatgpt_buffered_replays_responses(void)
+{
+   const delegate_driver_t chatgpt = {.name = "chatgpt",
+                                      .build_request = system_prompt_driver_build,
+                                      .parse_response = parsed_responses,
+                                      .get_caps = system_prompt_driver_caps};
+   emit_capture_t cap;
+   cJSON *sent;
+
+   reset_capture();
+   memset(&cap, 0, sizeof(cap));
+   g_driver = &chatgpt;
+   g_response_body =
+       "event: response.output_text.delta\n"
+       "data: {\"delta\":\"hello from codex\"}\n\n"
+       "event: response.completed\n"
+       "data: {\"response\":{\"usage\":{\"input_tokens\":12,\"output_tokens\":34}}}\n\n";
+   g_response_status = 200;
+
+   assert(messages_stream("{\"model\":\"ignored\",\"system\":\"SYS\","
+                          "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],"
+                          "\"stream\":true}",
+                          cap_emit, &cap) == 0);
+   sent = parse(g_last_body);
+   assert(strcmp(obj(sent, "driver")->valuestring, "chatgpt") == 0);
+   assert(strcmp(obj(sent, "instructions")->valuestring, "SYS") == 0);
+   assert(cJSON_IsTrue(obj(sent, "stream")));
+   assert(cap.count >= 4);
+   assert(strcmp(cap.events[0], "message_start") == 0);
+   assert(strcmp(cap.events[1], "content_block_start") == 0);
+   assert(strcmp(cap.events[2], "content_block_delta") == 0);
+   assert(strcmp(cap.events[3], "content_block_stop") == 0);
+   assert(strstr(cap.data[2], "hello from codex") != NULL);
+   cJSON_Delete(sent);
+   reset_capture();
+   PASS("messages_stream_chatgpt_buffered_replays_responses");
+}
+
 /* The pre-injection envelope is folded into the request `system` as a trailing
  * text block (array form), so a cached system prefix stays stable and both the
  * passthrough and translated paths inherit it. */
@@ -772,6 +863,7 @@ int main(void)
    test_messages_buffered_system_prompt_driver_no_duplicate_system();
    test_messages_buffered_system_prompt_capability_no_duplicate_system();
    test_messages_stream_openai_family_translates();
+   test_messages_stream_chatgpt_buffered_replays_responses();
    printf("anthropic_http: OK\n");
    return 0;
 }

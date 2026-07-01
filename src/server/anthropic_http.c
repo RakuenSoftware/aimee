@@ -16,6 +16,7 @@
 #include "aimee.h" /* size macros for agent_types.h */
 #include "agent_config.h"
 #include "agent_exec.h"
+#include "context_reduce.h"
 #include "agent_protocol.h"
 #include "agent_types.h"
 #include "anthropic_ingress.h"
@@ -181,7 +182,9 @@ static void translate_request(const cJSON *req, const delegate_driver_t *driver,
    *out_messages =
        anthropic_messages_to_openai(cJSON_GetObjectItemCaseSensitive(req, "messages"),
                                     driver_consumes_system_prompt(driver, ag) ? NULL : *out_system);
-   *out_tools = anthropic_tools_to_openai(cJSON_GetObjectItemCaseSensitive(req, "tools"));
+   *out_tools = driver && strcmp(driver->name, "chatgpt") == 0
+                    ? anthropic_tools_to_responses(cJSON_GetObjectItemCaseSensitive(req, "tools"))
+                    : anthropic_tools_to_openai(cJSON_GetObjectItemCaseSensitive(req, "tools"));
 }
 
 /* ---- Gateway request pipeline (universal-gateway P2a) -------------------------
@@ -226,8 +229,42 @@ static int messages_run_request_pipeline(cJSON *req, const delegate_driver_t *dr
    /* P5 (§2.3): opt-in to inject the envelope on the Anthropic-native passthrough.
     * Read config here so gw_stage_memory stays config-free. */
    config_t pcfg;
-   int allow_anthropic_inject =
-       (config_load(&pcfg) == 0 && pcfg.ingress_preinject_anthropic_enabled) ? 1 : 0;
+   int cfg_ok = (config_load(&pcfg) == 0);
+   int allow_anthropic_inject = (cfg_ok && pcfg.ingress_preinject_anthropic_enabled) ? 1 : 0;
+
+   /* Context economizer (gateway seam, SHADOW-MODE ONLY): when reduce.gateway_seam
+    * is on, measure this inbound /v1/messages request's baseline + foldable
+    * opportunity and record a forecast ledger row. measure_only is forced on here so
+    * the request is NEVER mutated — the client transcript is read for the baseline
+    * and the live `req` is forwarded byte-identical (we ignore res.messages, NULL in
+    * measure-only). Done BEFORE the request pipeline so the baseline reflects the
+    * pristine client request, not the memory-injected one. Fully guarded
+    * (config-load, array, free) and context_reduce hard-bypasses on any internal
+    * error, so this can never perturb the client response. Reuses the loaded pcfg;
+    * cheap mtime-cached load keeps it dark by default. */
+   if (cfg_ok && pcfg.reduce_gateway_seam)
+   {
+      cJSON *cmsgs = cJSON_GetObjectItemCaseSensitive(req, "messages");
+      if (cJSON_IsArray(cmsgs))
+      {
+         char *sys_text = anthropic_system_to_text(req); /* flatten string|array system */
+         const cJSON *cmodel = cJSON_GetObjectItemCaseSensitive(req, "model");
+         const char *model = (cmodel && cJSON_IsString(cmodel)) ? cmodel->valuestring : NULL;
+         reduce_config_t rcfg;
+         memset(&rcfg, 0, sizeof(rcfg));
+         rcfg.gateway_seam = 1;
+         rcfg.measure_only = 1; /* shadow mode: this slice never mutates the request */
+         rcfg.fold.retained_msgs = pcfg.fold_retained_msgs;
+         reduce_result_t gw_res;
+         memset(&gw_res, 0, sizeof(gw_res));
+         if (context_reduce(cmsgs, sys_text, model, NULL, REDUCE_SEAM_GATEWAY, &rcfg, NULL,
+                            &gw_res) == 0)
+            agent_record_reduce_ledger(&gw_res, model, "gateway", NULL);
+         context_reduce_result_free(&gw_res);
+         free(sys_text);
+      }
+   }
+
    gw_request_t r = {
        .raw = req,
        .driver = driver,
@@ -646,6 +683,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    anthropic_stream_xlate_t *xl;
    prov_stream_ctx_t pc;
    int input_est;
+   int responses_wire = 0;
 
    mint_msg_id(msg_id, sizeof(msg_id));
 
@@ -690,6 +728,10 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
       goto cleanup;
+   /* The Responses replay path is keyed off the actual upstream shape, not the
+    * provider label, so Codex aliases that still resolve to /responses stay in
+    * the buffered replay path too. */
+   responses_wire = strstr(url, "/responses") != NULL;
    if (parity)
       build_anthropic_parity_headers(extra, sizeof(extra));
    else
@@ -702,29 +744,42 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
                                       agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
                                       jo_num(req, "temperature", 1.0), 1);
 
-   /* P2c streaming: when gateway_prevent_subagents is ON, the streaming
+   /* P2c streaming: when gateway_prevent_subagents is ON, or the primary
+    * speaks the OpenAI Responses API (`chatgpt` / Codex), the streaming
     * path becomes buffered — we fetch the upstream reply to completion,
     * run the police function on the parsed struct (same logic as the
     * buffered /v1/messages path), and replay the policed reply as a
-    * well-formed Anthropic SSE sequence via emit_message_as_sse. Off (the
+    * well-formed Anthropic SSE sequence via emit_message_as_sse. The
+    * chatgpt special-case is necessary because its stream format is
+    * response.output_* / response.completed, not the OpenAI chat chunk
+    * shape that today's incremental translator understands. Off (the
     * default) falls through to today's incremental relay/translator. */
-   if (gateway_prevent_subagents_enabled())
+   if (gateway_prevent_subagents_enabled() || responses_wire)
    {
       char *buf_resp = NULL;
       int buf_status;
       parsed_response_t parsed;
+      int raw_responses = responses_wire;
       memset(&parsed, 0, sizeof(parsed));
       buf_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &buf_resp,
                                    ag->timeout_ms, extra[0] ? extra : NULL);
       if (buf_status == 200 && buf_resp)
       {
-         cJSON *provider_resp = cJSON_Parse(buf_resp);
-         if (provider_resp)
+         if (raw_responses)
          {
             if (driver && driver->parse_response)
-               driver->parse_response(provider_resp, buf_resp, &parsed);
+               driver->parse_response(NULL, buf_resp, &parsed);
             else
-               agent_parse_response_openai(provider_resp, &parsed);
+            {
+               char err[256];
+               snprintf(err, sizeof(err),
+                        "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
+                        "\"message\":\"primary provider parser unavailable\"}}");
+               if (emit)
+                  emit(ctx, "error", err);
+               free(buf_resp);
+               goto cleanup;
+            }
             gateway_policy_police_parsed_response(&parsed);
             emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
             /* Cost accounting (mirror the buffered path). */
@@ -747,14 +802,45 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
          }
          else
          {
-            char err[256];
-            snprintf(err, sizeof(err),
-                     "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
-                     "\"message\":\"primary provider returned an unparseable reply\"}}");
-            if (emit)
-               emit(ctx, "error", err);
+            cJSON *provider_resp = cJSON_Parse(buf_resp);
+            if (provider_resp)
+            {
+               if (driver && driver->parse_response)
+                  driver->parse_response(provider_resp, buf_resp, &parsed);
+               else
+                  agent_parse_response_openai(provider_resp, &parsed);
+               gateway_policy_police_parsed_response(&parsed);
+               emit_message_as_sse(&parsed, msg_id, model, emit, ctx);
+               /* Cost accounting (mirror the buffered path). */
+               if ((parsed.prompt_tokens > 0 || parsed.completion_tokens > 0) &&
+                   agent_ingress_accounting_enabled())
+               {
+                  agent_result_t ar;
+                  memset(&ar, 0, sizeof(ar));
+                  snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
+                  snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
+                  snprintf(ar.requested_model, sizeof(ar.requested_model), "%s",
+                           model ? model : "");
+                  snprintf(ar.stop_reason, sizeof(ar.stop_reason), "%s", parsed.stop_reason);
+                  ar.prompt_tokens = parsed.prompt_tokens;
+                  ar.completion_tokens = parsed.completion_tokens;
+                  ar.cache_write_tokens = parsed.cache_write_tokens;
+                  ar.cache_read_tokens = parsed.cache_read_tokens;
+                  agent_record_token_audit(&ar, "", "anthropic-ingress");
+               }
+               agent_free_parsed_response(&parsed);
+            }
+            else
+            {
+               char err[256];
+               snprintf(err, sizeof(err),
+                        "{\"type\":\"error\",\"error\":{\"type\":\"api_error\","
+                        "\"message\":\"primary provider returned an unparseable reply\"}}");
+               if (emit)
+                  emit(ctx, "error", err);
+            }
+            cJSON_Delete(provider_resp);
          }
-         cJSON_Delete(provider_resp);
       }
       else
       {

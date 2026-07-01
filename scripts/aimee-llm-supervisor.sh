@@ -35,9 +35,34 @@ case "${AIMEE_LLM_STUB:-}" in
       --ctx-size 8192 -ub 512 -np 1 --cache-ram 0 --no-cache-idle-slots
     # Reranker ENCODER: CLS pooling + flash-attn; the gateway applies the Dense head.
     start rerank 8082 -m /models/rerank-encoder.gguf --embeddings --pooling cls -fa on
-    # Synth: OpenAI-compatible /v1/chat/completions (grammar/JSON via --jinja).
-    if [ -f /models/synth.gguf ]; then
-      start synth 8083 -m /models/synth.gguf --ctx-size "$SYNTH_CTX" --jinja
+    # Synth: OpenAI-compatible /v1/chat/completions (grammar/JSON via --jinja). The
+    # synth MODEL + its runtime profile is baked per TIER (build-args -> ENV):
+    #   aimee-kb-cpu       gemma-4-E4B     (dense, CPU)
+    #   aimee-kb-gpu-small gemma-4-12B     (dense, GPU, FA+K8V4)
+    #   aimee-kb-gpu-mid   Qwen3.6-35B-A3B (MoE, GPU, FA+K8V4 + static --n-cpu-moe
+    #                      expert-offload so the 22GB synth co-fits embed+rerank on 24GB)
+    # The gemma tiers leave FA/MoE unset -> identical to prior behaviour. AIMEE_LLM_
+    # SYNTH_LOCAL=0 still lets an operator disable the local synth and forward via
+    # AIMEE_LLM_SYNTH_URL instead.
+    if [ "${AIMEE_LLM_SYNTH_LOCAL:-1}" != "0" ] && [ -f /models/synth.gguf ]; then
+      synth_args=(-m /models/synth.gguf --ctx-size "$SYNTH_CTX" --jinja \
+                  --parallel "${AIMEE_LLM_SYNTH_SLOTS:-1}")
+      # Flash-attention + quantized KV (K8V4 by default). NOTE: quantized V-cache
+      # REQUIRES fa (llama.cpp refuses otherwise), so a healthy start proves fa on.
+      if [ "${AIMEE_LLM_SYNTH_FA:-off}" = "on" ]; then
+        synth_args+=(-fa on \
+          --cache-type-k "${AIMEE_LLM_SYNTH_KV_K:-q8_0}" \
+          --cache-type-v "${AIMEE_LLM_SYNTH_KV_V:-q4_0}")
+      fi
+      # MoE static expert-offload to system RAM (mid tier). Clamp to [0, layers].
+      if [ "${AIMEE_LLM_SYNTH_MOE:-0}" = "1" ]; then
+        ncm="${AIMEE_LLM_SYNTH_N_CPU_MOE:-0}"; mlayers="${AIMEE_LLM_SYNTH_MOE_LAYERS:-40}"
+        case "$ncm" in ''|*[!0-9]*) ncm=0;; esac
+        [ "$ncm" -gt "$mlayers" ] && ncm=$mlayers
+        synth_args+=(--n-cpu-moe "$ncm")
+        echo "aimee-llm: synth MoE expert-offload --n-cpu-moe $ncm of $mlayers" >&2
+      fi
+      start synth 8083 "${synth_args[@]}"
     fi
     ;;
   *)

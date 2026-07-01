@@ -385,6 +385,41 @@ cJSON *anthropic_tools_to_openai(const cJSON *anthropic_tools)
    return out;
 }
 
+cJSON *anthropic_tools_to_responses(const cJSON *anthropic_tools)
+{
+   cJSON *chat_tools = anthropic_tools_to_openai(anthropic_tools);
+   cJSON *out, *tool;
+   if (!chat_tools)
+      return NULL;
+   out = cJSON_CreateArray();
+   cJSON_ArrayForEach(tool, chat_tools)
+   {
+      cJSON *fn = cJSON_GetObjectItemCaseSensitive(tool, "function");
+      cJSON *flat;
+      if (!cJSON_IsObject(fn))
+         continue;
+      flat = cJSON_CreateObject();
+      cJSON_AddStringToObject(flat, "type", "function");
+      cJSON *name = cJSON_GetObjectItemCaseSensitive(fn, "name");
+      cJSON *desc = cJSON_GetObjectItemCaseSensitive(fn, "description");
+      cJSON *params = cJSON_GetObjectItemCaseSensitive(fn, "parameters");
+      if (cJSON_IsString(name))
+         cJSON_AddStringToObject(flat, "name", name->valuestring);
+      if (cJSON_IsString(desc))
+         cJSON_AddStringToObject(flat, "description", desc->valuestring);
+      if (params)
+         cJSON_AddItemToObject(flat, "parameters", cJSON_Duplicate(params, 1));
+      cJSON_AddItemToArray(out, flat);
+   }
+   cJSON_Delete(chat_tools);
+   if (cJSON_GetArraySize(out) == 0)
+   {
+      cJSON_Delete(out);
+      return NULL;
+   }
+   return out;
+}
+
 cJSON *anthropic_response_from_parsed(const char *resp_id, const char *model,
                                       const parsed_response_t *parsed)
 {

@@ -353,6 +353,13 @@ typedef struct config
     * resolver will return in one call. Bounds the per-call recovery cost and a
     * model-supplied range. */
    int code_span_max_lines;
+   /* Operator cap (bytes) on the per-result MODEL-VISIBLE tool output (read_file,
+    * bash, grep, glob, git_* results). 0 = use the built-in default
+    * AGENT_TOOL_OUTPUT_MAX (32768). Any positive value is clamped to
+    * (0, AGENT_TOOL_OUTPUT_RAW_MAX=32768]; set it LOWER to bound the bytes a
+    * single tool result contributes to the prompt + history. Resolved by
+    * agent_tool_output_cap(); never exceeds the 32 KB raw capture buffer. */
+   int tool_output_max_bytes;
    /* ingress-compression master gate (§6.5 B8), default off. When on, code-search
     * hits are span-enriched (the matched line is located) and the ingress envelope
     * folds code entries into recoverable references; off keeps the search query,
@@ -906,6 +913,40 @@ typedef struct config
     * fold_recall_ttl_turns: don't re-surface the same key within this many turns. */
    int fold_recall_enabled;
    int fold_recall_ttl_turns;
+
+   /* Unified context economizer (src/context_reduce.c). The single reduction
+    * subsystem invoked at every request-assembly seam. All default-off. Knobs are
+    * added here as each slice implements them, so an exposed flag is always
+    * honored. Currently the measurement engine (delegate seam, measure-only):
+    * reduce_measure_enabled: collect baseline/opportunity ledger rows (no
+    *   mutation) — the shadow mode that powers the cost numbers.
+    * reduce_delegate_seam: enable the economizer at the delegate turn loop.
+    * reduce_history_fold: actually fold old history (rolling skeleton + Coordinate
+    *   Closet) at the delegate seam — the first real reduction lever (default-off).
+    * reduce_compress: boundary-free tool-result BODY compression at the delegate
+    *   seam (Slice 4). Shrinks oversized tool-result bodies in place (identifiers
+    *   conserved in the Coordinate Closet) WITHOUT needing a clean-user-turn
+    *   boundary, so it engages on autonomous tool-loops where history_fold can't.
+    *   Provider-native output (valid for all builders incl. chatgpt). Default-off.
+    * reduce_gateway_seam: enable the economizer at the inbound /v1 gateway seam.
+    *   Shadow-mode only in this slice (measure_only is forced on at the gateway, so
+    *   it NEVER mutates the live client request) — collects baselines on live
+    *   ingress traffic with zero behavior change.
+    * reduce_freeze_guard_enabled: freeze cost guardrail (Slice 5). Pin the fold
+    *   boundary (cache-warm reduced prefix) only when the estimated cache-read
+    *   savings over reduce_freeze_guard_horizon reuses cover the one-time cache-write
+    *   churn; otherwise re-derive without pinning. Default-ON, but only acts when the
+    *   (default-off) economizer freeze is live, so no default-path behavior change.
+    * reduce_freeze_guard_horizon: expected reuse turns for the break-even estimate
+    *   (0 -> 1; clamped to FREEZE_GUARD_MAX_HORIZON).
+    * (Other per-lever gates and min_gain land in later slices.) */
+   int reduce_measure_enabled;
+   int reduce_delegate_seam;
+   int reduce_history_fold;
+   int reduce_compress;
+   int reduce_gateway_seam;
+   int reduce_freeze_guard_enabled;
+   int reduce_freeze_guard_horizon;
 
    /* Session/worktree cleanup policy.
     * worktree_stale_secs: inactivity threshold before a session is pruned

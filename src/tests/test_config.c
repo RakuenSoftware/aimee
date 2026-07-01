@@ -335,6 +335,11 @@ int main(void)
                "--background-index");
       cfg.lsp_servers[0].extension_count = 1;
       snprintf(cfg.lsp_servers[0].extensions[0], sizeof(cfg.lsp_servers[0].extensions[0]), "c");
+      /* economizer freeze guardrail: default-on bool + default-1 horizon. Flip the
+       * bool OFF and the horizon to a non-default so both must round-trip (regression
+       * class: a default-on save-guard that emits only the non-default state). */
+      cfg.reduce_freeze_guard_enabled = 0;
+      cfg.reduce_freeze_guard_horizon = 3;
       config_save(&cfg);
 
       static config_t cfg2;
@@ -351,6 +356,8 @@ int main(void)
       assert(cfg2.server_api_rate_limit_per_min == 60);
       assert(cfg2.server_api_max_event_streams == 512);
       assert(strcmp(cfg2.server_api_client_transport, "http") == 0);
+      assert(cfg2.reduce_freeze_guard_enabled == 0); /* default-on bool persisted off */
+      assert(cfg2.reduce_freeze_guard_horizon == 3); /* non-default horizon persisted */
       /* regression: remote_writes used to be parsed but never written by config_save,
        * so any save silently reset it to off. */
       assert(cfg2.server_api_remote_writes == SERVER_REMOTE_WRITES_FULL);
@@ -754,44 +761,24 @@ int main(void)
       g_config_strict = 0;
    }
 
-   /* --- schema validation: valid config passes strict mode --- */
+   /* schema validation: valid config passes strict mode. Also this PR's fold-key
+    * regression: top-level `fold:` is a registered key (loads clean, no "unknown
+    * key") AND actually parses (fold_enabled set, not merely allowlisted). */
    {
       char cpath[512];
       snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
       FILE *f = fopen(cpath, "w");
       assert(f);
-      fprintf(f, "provider: claude\nuse_builtin_cli: true\n");
+      fprintf(f, "provider: claude\nuse_builtin_cli: true\nfold:\n  enabled: true\n");
       fclose(f);
 
       static config_t cfg;
       memset(&cfg, 0, sizeof(cfg));
       g_config_strict = 1;
       int rc = config_load(&cfg);
-      assert(rc == 0); /* all keys valid */
+      assert(rc == 0); /* all keys valid, incl. the registered top-level fold */
       assert(strcmp(cfg.provider, "claude") == 0);
-      g_config_strict = 0;
-   }
-
-   /* --- schema validation: top-level "fold" object is a recognized key --- */
-   {
-      /* Regression: the top-level `fold:` section must be registered in the
-       * config-key allowlist so it does not emit an "unknown key" warning and
-       * does not hard-fail under strict mode. */
-      char cpath[512];
-      snprintf(cpath, sizeof(cpath), "%s/.config/aimee/aimee.yaml", tmpdir);
-      FILE *f = fopen(cpath, "w");
-      assert(f);
-      fprintf(f, "provider: claude\nfold:\n  enabled: true\n");
-      fclose(f);
-
-      static config_t cfg;
-      memset(&cfg, 0, sizeof(cfg));
-      g_config_strict = 1;
-      int rc = config_load(&cfg);
-      assert(rc == 0); /* fold is a known key -> no validation issues even in strict mode */
-      /* Also assert the section actually parsed (not merely allowlisted): a parser
-       * regression that silently dropped fold would still pass rc==0 otherwise. */
-      assert(cfg.fold_enabled == 1);
+      assert(cfg.fold_enabled == 1); /* fold section parsed, not merely allowlisted */
       g_config_strict = 0;
    }
 

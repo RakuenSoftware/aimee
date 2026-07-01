@@ -72,6 +72,7 @@
 {"search", SCHEMA_OBJECT, 0},
 {"compact", SCHEMA_OBJECT, 0},
 {"fold", SCHEMA_OBJECT, 0},
+{"reduce", SCHEMA_OBJECT, 0},
 {"sessions", SCHEMA_OBJECT, 0},
 {"sandbox", SCHEMA_OBJECT, 0},
 {"ecomode", SCHEMA_BOOL, 0},

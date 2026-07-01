@@ -177,10 +177,15 @@ static char *compact_plaintext(const char *raw, size_t raw_len, int head_bytes, 
    return out;
 }
 
-/* ------------------------------------------------------------------ public API */
+/* ------------------------------------------------------------------ shrink core */
 
-char *compact_tool_result(const char *raw, size_t raw_len, const compact_config_t *cfg,
-                          const char *tool_name, int context_used, int context_budget)
+/* Apply the three-strategy shrink and return a freshly heap-allocated result
+ * (caller frees). This is the byte-for-byte logic the public API used to expose
+ * directly; compact_body() wraps it into a caller-owned buffer. Kept as a static
+ * allocator so the well-tested strategy code (pass-through / JSON summary /
+ * head+tail) is unchanged — only the public ownership model moved. */
+static char *compact_shrink_alloc(const char *raw, size_t raw_len, const char *tool_name,
+                                  const compact_config_t *cfg)
 {
    if (!raw)
       return strdup("");
@@ -220,16 +225,6 @@ char *compact_tool_result(const char *raw, size_t raw_len, const compact_config_
    if (!enabled)
       return strdup(raw);
 
-   /* Dynamic budget adjustment: shrink threshold as context fills */
-   if (context_budget > 0 && context_used > 0)
-   {
-      int used_pct = (int)((long long)context_used * 100 / context_budget);
-      if (used_pct >= 80)
-         threshold = threshold / 2;
-      else if (used_pct >= 60)
-         threshold = threshold * 3 / 4;
-   }
-
    if (threshold < 64)
       threshold = 64; /* floor: never compact below 64 bytes */
 
@@ -246,4 +241,42 @@ char *compact_tool_result(const char *raw, size_t raw_len, const compact_config_
 
    /* Strategy 2: plain-text head + tail */
    return compact_plaintext(raw, raw_len, head_bytes, tail_bytes);
+}
+
+/* ------------------------------------------------------------------ public API */
+
+size_t compact_body(const char *raw, size_t raw_len, const char *tool_name,
+                    const compact_config_t *cfg, char *out, size_t out_cap)
+{
+   if (!out || out_cap == 0)
+      return 0;
+   if (!raw || raw_len == 0)
+   {
+      out[0] = '\0';
+      return 0;
+   }
+
+   char *s = compact_shrink_alloc(raw, raw_len, tool_name, cfg);
+   if (!s)
+   {
+      /* Allocation failure inside the shrink. Degrade to a bounded copy of the raw
+       * body rather than emitting an empty string — a non-empty body must never be
+       * silently dropped to "" (the caller's `compacted = out_len < raw_len` would
+       * otherwise treat OOM as a successful compaction). The caller still bounds the
+       * result (eager hard-cap; lazy net-shrink guard). */
+      size_t n = raw_len;
+      if (n > out_cap - 1)
+         n = out_cap - 1;
+      memcpy(out, raw, n);
+      out[n] = '\0';
+      return n;
+   }
+
+   size_t n = strlen(s);
+   if (n > out_cap - 1)
+      n = out_cap - 1; /* defensive: a correctly-sized buffer never truncates */
+   memcpy(out, s, n);
+   out[n] = '\0';
+   free(s);
+   return n;
 }

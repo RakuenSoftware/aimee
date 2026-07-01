@@ -26,6 +26,7 @@
 #include "provider_cli_adapter.h"
 #include "config.h"
 #include "context_fold.h"
+#include "context_reduce.h"
 #include "fold_recall.h"
 #include "dstr.h"
 #include "cJSON.h"
@@ -666,6 +667,11 @@ native_provider_http:
     * fold_freeze_enabled; ignored otherwise. */
    fold_freeze_t agent_fold_freeze;
    memset(&agent_fold_freeze, 0, sizeof(agent_fold_freeze));
+   /* Context economizer (delegate seam): per-run reducer state persisted across
+    * turns so the §3 fold-freeze boundary stays byte-identical (warm provider
+    * cache). Honored only when reduce.delegate_seam is enabled. */
+   reduce_state_t agent_reduce_state;
+   memset(&agent_reduce_state, 0, sizeof(agent_reduce_state));
    /* §4 fold recall: per-run page table of folded-away coordinates, for re-touch
     * hints across turns. Honored only when fold_recall_enabled. */
    fold_recall_index_t agent_fold_recall;
@@ -825,27 +831,104 @@ native_provider_http:
       }
       cJSON *active_tools = final_text_only_turn ? NULL : tools;
 
+      /* Context economizer (delegate seam): record a baseline + foldable-opportunity
+       * ledger row, and — when reduce.history_fold is on — ACTUALLY fold the prefix
+       * (provider-agnostic rolling skeleton + Coordinate Closet). The reduced view,
+       * when produced, replaces `messages` for the request build of every provider
+       * branch below and is freed after the request is serialized. Cheap
+       * (mtime-cached) config load keeps this dark by default; default-off is
+       * byte-identical to the prior behavior. */
+      reduce_result_t agent_reduce_result;
+      memset(&agent_reduce_result, 0, sizeof(agent_reduce_result));
+      int reduce_active = 0; /* 1 once a real reduction replaced the message array */
+      {
+         config_t ecfg;
+         if (config_load(&ecfg) == 0 && ecfg.reduce_delegate_seam &&
+             (ecfg.reduce_measure_enabled || ecfg.reduce_history_fold || ecfg.reduce_compress))
+         {
+            reduce_config_t rcfg;
+            memset(&rcfg, 0, sizeof(rcfg));
+            rcfg.delegate_seam = 1;
+            /* The synthetic fold turns are {role,content:string} — valid input for
+             * anthropic / openai / gemini builders, but the chatgpt Responses
+             * builder passes the array through unconverted and its API expects
+             * top-level typed items, so feeding it folded turns is unverified.
+             * Keep the Responses path measure-only here; fold it in a later slice
+             * once verified live. */
+            rcfg.history_fold = ecfg.reduce_history_fold && !chatgpt;
+            /* Compress only shrinks tool-result BODIES in place — the message
+             * shape (role/type, ids, typed items) is preserved — so its output is
+             * valid for ALL builders INCLUDING chatgpt/Responses. Not gated off. */
+            rcfg.compress = ecfg.reduce_compress;
+            rcfg.measure_only =
+                !(rcfg.history_fold || rcfg.compress); /* a lever on -> mutate; else shadow */
+            rcfg.freeze_guard_enabled = ecfg.reduce_freeze_guard_enabled; /* Slice 5 guardrail */
+            rcfg.freeze_guard_horizon = ecfg.reduce_freeze_guard_horizon;
+            rcfg.fold.retained_msgs = ecfg.fold_retained_msgs;
+            rcfg.fold.min_fold_msgs = ecfg.fold_min_fold_msgs;
+            rcfg.fold.reasoning_excerpt_bytes = ecfg.fold_excerpt_bytes;
+            rcfg.fold.compact_head_bytes = ecfg.compact_head_bytes; /* compact.* drives the */
+            rcfg.fold.compact_tail_bytes = ecfg.compact_tail_bytes; /* shared shrink core    */
+            rcfg.fold.register_enabled = ecfg.fold_register_enabled;
+            rcfg.fold.closet.enabled = ecfg.coord_closet_enabled;
+            rcfg.fold.closet.budget_bytes = ecfg.coord_closet_budget_bytes;
+            rcfg.fold.closet.max_ratio_pct = ecfg.coord_closet_max_ratio_pct;
+            rcfg.fold.closet.denylist =
+                ecfg.coord_closet_denylist[0] ? ecfg.coord_closet_denylist : NULL;
+            /* Per-turn provenance: each loop turn is a distinct request at the single
+             * delegate seam, so clear the cross-seam `reduced` flag while preserving
+             * the across-turn freeze boundary in agent_reduce_state.freeze. */
+            agent_reduce_state.reduced = 0;
+            agent_reduce_state.turn = turn;
+            /* session_id param unused by the transform; the ledger writer resolves
+             * the session itself (a local `session_id[]` array shadows the fn here). */
+            if (context_reduce(messages, sys, fb_agent.model, NULL, REDUCE_SEAM_DELEGATE, &rcfg,
+                               &agent_reduce_state, &agent_reduce_result) == 0)
+            {
+               agent_record_reduce_ledger(&agent_reduce_result, fb_agent.model, agent->name, role);
+               if (agent_reduce_result.mutated && agent_reduce_result.messages)
+                  reduce_active = 1;
+            }
+            else
+            {
+               /* hard bypass: internal failure -> forward the original transcript */
+               context_reduce_result_free(&agent_reduce_result);
+               memset(&agent_reduce_result, 0, sizeof(agent_reduce_result));
+            }
+         }
+      }
+      /* When the economizer produced a reduced view, every provider branch builds
+       * its request from it (and the Anthropic-only build_fold_view path is skipped
+       * to avoid double-folding). */
+      cJSON *eff_messages = reduce_active ? agent_reduce_result.messages : messages;
+
       /* Build request (use fb_agent which may have fallback model after turn 0) */
       cJSON *req;
       fold_result_t fold_view; /* §1 rolling fold; freed after req is serialized */
       memset(&fold_view, 0, sizeof(fold_view));
       if (chatgpt)
-         req = agent_build_request_responses(&fb_agent, messages, active_tools, sys);
+         req = agent_build_request_responses(&fb_agent, eff_messages, active_tools, sys);
       else if (anthropic)
       {
          /* Fold first so payload-rewrite tracking and the request both observe the
-          * actually-sent (possibly folded) message array. */
-         build_fold_view(messages, &agent_fold_freeze, &agent_fold_recall, turn, &fold_view);
-         cJSON *anth_msgs = fold_view.folded ? fold_view.messages : messages;
+          * actually-sent (possibly folded) message array. The economizer's reduced
+          * view takes precedence; otherwise fall back to the Anthropic build_fold_view. */
+         cJSON *anth_msgs = eff_messages;
+         if (!reduce_active)
+         {
+            build_fold_view(messages, &agent_fold_freeze, &agent_fold_recall, turn, &fold_view);
+            if (fold_view.folded)
+               anth_msgs = fold_view.messages;
+         }
          track_anthropic_payload_rewrite(driver, &fb_agent, anth_msgs, sys);
          req = agent_build_request_anthropic(&fb_agent, anth_msgs, active_tools, sys, tok,
                                              temperature);
       }
       else if (gemini)
-         req = agent_build_request_gemini(&fb_agent, messages, active_tools, sys, tok, temperature,
-                                          gemini_cache_name);
+         req = agent_build_request_gemini(&fb_agent, eff_messages, active_tools, sys, tok,
+                                          temperature, gemini_cache_name);
       else
-         req = agent_build_request_openai(&fb_agent, messages, active_tools, tok, temperature);
+         req = agent_build_request_openai(&fb_agent, eff_messages, active_tools, tok, temperature);
 
       /* Universal-gateway P4: run aimee's own outbound call through the same request
        * pipeline the proxy ingresses use, so a config-enabled tool-policing policy
@@ -859,15 +942,17 @@ native_provider_http:
          snprintf(out->error, sizeof(out->error), "gateway request pipeline failed");
          cJSON_Delete(req);
          fold_result_free(&fold_view);
+         context_reduce_result_free(&agent_reduce_result);
          break;
       }
 
       char *body = cJSON_PrintUnformatted(req);
       /* Order matters: req may hold a non-owning reference into fold_view.messages
-       * (agent_build_request_anthropic's AddItemReference fallback), so req must be
-       * deleted before the fold view is freed. */
+       * OR agent_reduce_result.messages (agent_build_request_anthropic's
+       * AddItemReference fallback), so req must be deleted before either is freed. */
       cJSON_Delete(req);
       fold_result_free(&fold_view);
+      context_reduce_result_free(&agent_reduce_result);
       if (!body)
       {
          snprintf(out->error, sizeof(out->error), "failed to build request");

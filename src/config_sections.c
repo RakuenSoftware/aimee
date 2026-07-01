@@ -4,6 +4,7 @@
 #include "json_fluent.h"
 #include "config_internal.h"
 #include "config_sections.h"
+#include "context_reduce.h" /* FREEZE_GUARD_MAX_HORIZON — clamp freeze_guard_horizon at parse */
 #include "sandbox.h"
 #include "toolset.h"
 #include "cJSON.h"
@@ -730,6 +731,43 @@ void config_parse_fold_section(config_t *cfg, cJSON *root)
       item = cJSON_GetObjectItemCaseSensitive(recall, "ttl_turns");
       if (cJSON_IsNumber(item) && item->valuedouble > 0)
          cfg->fold_recall_ttl_turns = (int)item->valuedouble;
+   }
+}
+
+/* Unified context economizer (src/context_reduce.c). Orchestration gates for the
+ * single reduction subsystem. Only knobs the current code honors are parsed here;
+ * each lever / the gateway seam / min_gain is added by the slice that implements
+ * it, so an exposed flag is never silently inert. All default-off. */
+void config_parse_reduce_section(config_t *cfg, cJSON *root)
+{
+   cJSON *reduce = cJSON_GetObjectItemCaseSensitive(root, "reduce");
+   if (!cJSON_IsObject(reduce))
+      return;
+   cJSON *item = cJSON_GetObjectItemCaseSensitive(reduce, "measure");
+   if (cJSON_IsBool(item))
+      cfg->reduce_measure_enabled = cJSON_IsTrue(item) ? 1 : 0;
+   item = cJSON_GetObjectItemCaseSensitive(reduce, "delegate_seam");
+   if (cJSON_IsBool(item))
+      cfg->reduce_delegate_seam = cJSON_IsTrue(item) ? 1 : 0;
+   item = cJSON_GetObjectItemCaseSensitive(reduce, "history_fold");
+   if (cJSON_IsBool(item))
+      cfg->reduce_history_fold = cJSON_IsTrue(item) ? 1 : 0;
+   item = cJSON_GetObjectItemCaseSensitive(reduce, "compress");
+   if (cJSON_IsBool(item))
+      cfg->reduce_compress = cJSON_IsTrue(item) ? 1 : 0;
+   item = cJSON_GetObjectItemCaseSensitive(reduce, "gateway_seam");
+   if (cJSON_IsBool(item))
+      cfg->reduce_gateway_seam = cJSON_IsTrue(item) ? 1 : 0;
+   item = cJSON_GetObjectItemCaseSensitive(reduce, "freeze_guard");
+   if (cJSON_IsBool(item))
+      cfg->reduce_freeze_guard_enabled = cJSON_IsTrue(item) ? 1 : 0;
+   item = cJSON_GetObjectItemCaseSensitive(reduce, "freeze_guard_horizon");
+   if (cJSON_IsNumber(item) && item->valuedouble > 0)
+   {
+      int h = (int)item->valuedouble;
+      if (h > FREEZE_GUARD_MAX_HORIZON)
+         h = FREEZE_GUARD_MAX_HORIZON; /* clamp at parse so on-disk == runtime */
+      cfg->reduce_freeze_guard_horizon = h;
    }
 }
 

@@ -45,20 +45,29 @@ struct cJSON;
 #define AGENT_BACKEND_CLI_STDIO    "cli-stdio" /* legacy config alias */
 #define CLI_CMD_MAX                256
 #define AGENT_DEFAULT_MAX_PARALLEL 3
-#define AGENT_TOOL_OUTPUT_MAX      (4 * 1024)
-#define AGENT_TOOL_OUTPUT_RAW_MAX  (32 * 1024)
-#define AGENT_MAX_LIST_FILES       500
-#define AGENT_MAX_TOOL_CALLS       16
-#define AGENT_MAX_NET_HOSTS        64
-#define AGENT_MAX_NETWORKS         8
-#define AGENT_MAX_TUNNELS          8
-#define AGENT_CONTEXT_BUDGET       16000
-#define AGENT_CACHE_TTL_SECONDS    300
-#define AGENT_MAX_PLAN_STEPS       32
-#define AGENT_MAX_PLAN_DEPS        8
-#define AGENT_MAX_CHECKPOINTS      32
-#define AGENT_MAX_EVAL_TASKS       64
-#define AGENT_MAX_COORD_AGENTS     4
+/* Default per-result cap (bytes) on the MODEL-VISIBLE tool output. Raised to
+ * 32 KB (== AGENT_TOOL_OUTPUT_RAW_MAX) so full tool output flows to the model by
+ * default; the (default-off) context-economizer losslessly compresses OLD
+ * results to keep history bounded. Operators can LOWER the per-result cap via
+ * the `tool_output_max_bytes` config key (resolved by agent_tool_output_cap()).
+ * This constant is the resolver's fallback when the key is unset/0. */
+#define AGENT_TOOL_OUTPUT_MAX (32 * 1024)
+/* Raw capture safety buffer (bytes): the hard ceiling on bytes captured from a
+ * child process before any model-visible truncation. NOT operator-configurable
+ * and never exceeded by the resolved per-result cap. */
+#define AGENT_TOOL_OUTPUT_RAW_MAX (32 * 1024)
+#define AGENT_MAX_LIST_FILES      500
+#define AGENT_MAX_TOOL_CALLS      16
+#define AGENT_MAX_NET_HOSTS       64
+#define AGENT_MAX_NETWORKS        8
+#define AGENT_MAX_TUNNELS         8
+#define AGENT_CONTEXT_BUDGET      16000
+#define AGENT_CACHE_TTL_SECONDS   300
+#define AGENT_MAX_PLAN_STEPS      32
+#define AGENT_MAX_PLAN_DEPS       8
+#define AGENT_MAX_CHECKPOINTS     32
+#define AGENT_MAX_EVAL_TASKS      64
+#define AGENT_MAX_COORD_AGENTS    4
 
 /* Per-call HTTP timeout for one turn of the multi-turn tool loop.
  *   agent_timeout_ms  configured per-call timeout (also the per-call cap)

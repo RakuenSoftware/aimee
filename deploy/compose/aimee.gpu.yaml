@@ -9,7 +9,7 @@
 # re-embed (the kb_meta drift guard refuses a stale mismatch).
 services:
   aimee-llm:
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:gpu}
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-gpu-small:latest}
     environment:
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-99}
       # gemma-4-12b trains to 256K; the supervisor's default cap is a 16GB-safe 32K.

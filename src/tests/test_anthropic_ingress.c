@@ -195,9 +195,27 @@ static void test_tools_empty(void)
 {
    cJSON *t = parse("[]");
    assert(anthropic_tools_to_openai(t) == NULL);
+   assert(anthropic_tools_to_responses(t) == NULL);
    cJSON_Delete(t);
    assert(anthropic_tools_to_openai(NULL) == NULL);
+   assert(anthropic_tools_to_responses(NULL) == NULL);
    PASS("tools_empty");
+}
+
+static void test_tools_responses_mapping(void)
+{
+   cJSON *t = parse("[{\"name\":\"Read\",\"description\":\"Read a file\","
+                    "\"input_schema\":{\"type\":\"object\",\"properties\":{}}}]");
+   cJSON *out = anthropic_tools_to_responses(t);
+   cJSON *tool = cJSON_GetArrayItem(out, 0);
+   assert(strcmp(ostr(tool, "type"), "function") == 0);
+   assert(strcmp(ostr(tool, "name"), "Read") == 0);
+   assert(strcmp(ostr(tool, "description"), "Read a file") == 0);
+   assert(cJSON_IsObject(cJSON_GetObjectItemCaseSensitive(tool, "parameters")));
+   assert(cJSON_GetObjectItemCaseSensitive(tool, "function") == NULL);
+   cJSON_Delete(out);
+   cJSON_Delete(t);
+   PASS("tools_responses_mapping");
 }
 
 /* --------------------------------------------------------------- responses */
@@ -704,6 +722,7 @@ int main(void)
    test_messages_image();
    test_tools_mapping();
    test_tools_empty();
+   test_tools_responses_mapping();
    test_response_text();
    test_response_tool_use();
    test_response_empty_gets_text_block();

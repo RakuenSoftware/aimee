@@ -1,4 +1,4 @@
-/* test_compact.c: unit tests for tool-result compaction */
+/* test_compact.c: unit tests for tool-result compaction (the shared compact_body core) */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,12 +18,25 @@ static char *make_str(char c, size_t len)
    return s;
 }
 
+/* Drive the shared core into a heap string so these golden assertions read the
+ * same way the removed compact_tool_result() did. Sized per the compact_body
+ * contract (raw_len + COMPACT_JSON_SUMMARY_MAX) so no strategy is ever truncated. */
+static char *compact_str(const char *raw, size_t raw_len, const compact_config_t *cfg,
+                         const char *tool)
+{
+   size_t cap = raw_len + COMPACT_JSON_SUMMARY_MAX + 1;
+   char *buf = malloc(cap);
+   assert(buf);
+   compact_body(raw, raw_len, tool, cfg, buf, cap);
+   return buf;
+}
+
 /* ------------------------------------------------------------------ pass-through */
 
 static void test_small_passthrough(void)
 {
    const char *input = "hello world";
-   char *out = compact_tool_result(input, strlen(input), NULL, NULL, 0, 0);
+   char *out = compact_str(input, strlen(input), NULL, NULL);
    assert(out);
    assert(strcmp(out, input) == 0);
    free(out);
@@ -34,7 +47,7 @@ static void test_exactly_threshold_passthrough(void)
 {
    /* A string exactly at the default threshold (4096) should pass through */
    char *input = make_str('x', COMPACT_DEFAULT_THRESHOLD);
-   char *out = compact_tool_result(input, COMPACT_DEFAULT_THRESHOLD, NULL, NULL, 0, 0);
+   char *out = compact_str(input, COMPACT_DEFAULT_THRESHOLD, NULL, NULL);
    assert(out);
    assert(strlen(out) == COMPACT_DEFAULT_THRESHOLD);
    assert(memcmp(out, input, COMPACT_DEFAULT_THRESHOLD) == 0);
@@ -53,7 +66,7 @@ static void test_disabled_passthrough(void)
 
    char *big = make_str('z', COMPACT_DEFAULT_THRESHOLD * 2);
    size_t len = (size_t)(COMPACT_DEFAULT_THRESHOLD * 2);
-   char *out = compact_tool_result(big, len, &cfg, NULL, 0, 0);
+   char *out = compact_str(big, len, &cfg, NULL);
    assert(out);
    assert(strlen(out) == len);
    free(out);
@@ -74,7 +87,7 @@ static void test_per_tool_disabled(void)
 
    char *big = make_str('b', COMPACT_DEFAULT_THRESHOLD * 2);
    size_t len = (size_t)(COMPACT_DEFAULT_THRESHOLD * 2);
-   char *out = compact_tool_result(big, len, &cfg, "bash", 0, 0);
+   char *out = compact_str(big, len, &cfg, "bash");
    assert(out);
    assert(strlen(out) == len); /* not compacted */
    free(out);
@@ -95,7 +108,7 @@ static void test_per_tool_threshold_lower(void)
 
    /* 2 KB input: bigger than the 512-byte per-tool threshold */
    char *big = make_str('r', 2048);
-   char *out = compact_tool_result(big, 2048, &cfg, "read_file", 0, 0);
+   char *out = compact_str(big, 2048, &cfg, "read_file");
    assert(out);
    assert(strlen(out) < 2048); /* should have been compacted */
    free(out);
@@ -117,7 +130,7 @@ static void test_plaintext_contains_head_and_tail(void)
    memset(input + total - COMPACT_DEFAULT_TAIL_BYTES, 'T', COMPACT_DEFAULT_TAIL_BYTES);
    input[total] = '\0';
 
-   char *out = compact_tool_result(input, total, NULL, NULL, 0, 0);
+   char *out = compact_str(input, total, NULL, NULL);
    assert(out);
 
    /* Output should start with 'H' and end with 'T' */
@@ -150,7 +163,7 @@ static void test_custom_head_tail(void)
    memset(input + 180, 'Z', 20);
    input[200] = '\0';
 
-   char *out = compact_tool_result(input, 200, &cfg, NULL, 0, 0);
+   char *out = compact_str(input, 200, &cfg, NULL);
    assert(out);
    assert(out[0] == 'A');
    size_t out_len = strlen(out);
@@ -185,7 +198,7 @@ static void test_json_object_summary(void)
    json[prefix_len + pad + 2] = '\0';
    json_len = prefix_len + pad + 2;
 
-   char *out = compact_tool_result(json, json_len, NULL, NULL, 0, 0);
+   char *out = compact_str(json, json_len, NULL, NULL);
    assert(out);
    /* Should contain the compacted JSON summary marker */
    assert(strstr(out, "compacted JSON summary") != NULL || strstr(out, "status") != NULL ||
@@ -212,7 +225,7 @@ static void test_json_array_summary(void)
    json[prefix_len + pad] = ']';
    json[prefix_len + pad + 1] = '\0';
 
-   char *out = compact_tool_result(json, prefix_len + pad + 1, NULL, NULL, 0, 0);
+   char *out = compact_str(json, prefix_len + pad + 1, NULL, NULL);
    assert(out);
    assert(strlen(out) < prefix_len + pad + 1);
 
@@ -221,68 +234,71 @@ static void test_json_array_summary(void)
    PASS("json_array_summary");
 }
 
-/* ------------------------------------------------------------------ dynamic budget */
-
-static void test_dynamic_budget_tightens_threshold(void)
+/* The JSON structural summary is internally bounded to compact_json_summary's fixed
+ * summary[2048] buffer, so it stays < COMPACT_JSON_SUMMARY_MAX. This pins that
+ * invariant (the buffer-sizing formula out_cap = raw_len + COMPACT_JSON_SUMMARY_MAX
+ * + 1 relies on it) against a future compact.c refactor: a JSON object with thousands
+ * of keys would overflow any naive summary, yet must come back bounded and intact. */
+static void test_json_summary_bounded(void)
 {
-   /* With 80% context used, threshold halves.
-    * Create a string that is between the halved threshold and the full threshold. */
-   int base_threshold = COMPACT_DEFAULT_THRESHOLD; /* 4096 */
-   int halved = base_threshold / 2;                /* 2048 */
+   size_t cap_in = 200000;
+   char *json = malloc(cap_in);
+   assert(json);
+   size_t p = 0;
+   p += (size_t)snprintf(json + p, cap_in - p, "{");
+   for (int i = 0; i < 4000 && p < cap_in - 64; i++)
+      p += (size_t)snprintf(json + p, cap_in - p, "%s\"key_%d\":%d", i ? "," : "", i, i);
+   p += (size_t)snprintf(json + p, cap_in - p, "}");
+   size_t jl = p;
 
-   /* Input between halved and full threshold */
-   size_t input_len = (size_t)(halved + 100);
-   char *input = make_str('d', input_len);
-
-   /* With default threshold, this should pass through (input < 4096) */
-   char *out_no_pressure = compact_tool_result(input, input_len, NULL, NULL, 0, 0);
-   assert(out_no_pressure);
-   assert(strlen(out_no_pressure) == input_len); /* pass-through */
-   free(out_no_pressure);
-
-   /* With 80% context usage, threshold halves to 2048 — should now compact */
-   char *out_high_pressure = compact_tool_result(input, input_len, NULL, NULL, 80, 100);
-   assert(out_high_pressure);
-   assert(strlen(out_high_pressure) < input_len); /* compacted */
-   free(out_high_pressure);
-
-   free(input);
-   PASS("dynamic_budget_tightens_threshold");
+   size_t cap = jl + COMPACT_JSON_SUMMARY_MAX + 1; /* the formula both seams use */
+   char *buf = malloc(cap);
+   assert(buf);
+   size_t n = compact_body(json, jl, NULL, NULL, buf, cap);
+   assert(n > 0);
+   assert(n < COMPACT_JSON_SUMMARY_MAX); /* summary never exceeds the documented bound */
+   assert(buf[n] == '\0');               /* NUL-terminated, not truncated mid-write */
+   assert(strstr(buf, "compacted JSON summary") != NULL); /* JSON-summary path taken */
+   free(buf);
+   free(json);
+   PASS("json_summary_bounded");
 }
 
-static void test_dynamic_budget_moderate(void)
+/* ------------------------------------------------------------------ buffer contract */
+
+/* compact_body writes into a caller buffer and never exceeds out_cap-1. A tight
+ * buffer must still leave a valid NUL-terminated (truncated) result, never a
+ * write past the end. */
+static void test_buffer_cap_respected(void)
 {
-   /* With 60% context, threshold drops to 3/4 of 4096 = 3072 */
-   int base = COMPACT_DEFAULT_THRESHOLD; /* 4096 */
-   int reduced = base * 3 / 4;           /* 3072 */
-
-   /* Input between reduced and full threshold */
-   size_t input_len = (size_t)(reduced + 100); /* 3172 */
-   char *input = make_str('e', input_len);
-
-   char *out_no_pressure = compact_tool_result(input, input_len, NULL, NULL, 0, 0);
-   assert(out_no_pressure);
-   assert(strlen(out_no_pressure) == input_len); /* pass-through below 4096 */
-   free(out_no_pressure);
-
-   char *out_60pct = compact_tool_result(input, input_len, NULL, NULL, 60, 100);
-   assert(out_60pct);
-   assert(strlen(out_60pct) < input_len); /* compacted */
-   free(out_60pct);
-
+   char *input = make_str('q', COMPACT_DEFAULT_THRESHOLD + 1000);
+   size_t len = (size_t)(COMPACT_DEFAULT_THRESHOLD + 1000);
+   char small[64];
+   size_t n = compact_body(input, len, NULL, NULL, small, sizeof(small));
+   assert(n <= sizeof(small) - 1);
+   assert(small[n] == '\0');
    free(input);
-   PASS("dynamic_budget_moderate");
+   PASS("buffer_cap_respected");
 }
 
-/* ------------------------------------------------------------------ null input */
+/* ------------------------------------------------------------------ null / empty input */
 
 static void test_null_input(void)
 {
-   char *out = compact_tool_result(NULL, 0, NULL, NULL, 0, 0);
-   assert(out);
-   assert(strcmp(out, "") == 0);
-   free(out);
+   char buf[8] = {'x', 'x', 'x', 'x', 'x', 'x', 'x', 'x'};
+   size_t n = compact_body(NULL, 0, NULL, NULL, buf, sizeof(buf));
+   assert(n == 0);
+   assert(buf[0] == '\0');
    PASS("null_input");
+}
+
+static void test_empty_body(void)
+{
+   char buf[8] = {'y'};
+   size_t n = compact_body("", 0, NULL, NULL, buf, sizeof(buf));
+   assert(n == 0);
+   assert(buf[0] == '\0');
+   PASS("empty_body");
 }
 
 /* ------------------------------------------------------------------ main */
@@ -292,6 +308,7 @@ int main(void)
    printf("compact:\n");
 
    test_null_input();
+   test_empty_body();
    test_small_passthrough();
    test_exactly_threshold_passthrough();
    test_disabled_passthrough();
@@ -301,8 +318,8 @@ int main(void)
    test_custom_head_tail();
    test_json_object_summary();
    test_json_array_summary();
-   test_dynamic_budget_tightens_threshold();
-   test_dynamic_budget_moderate();
+   test_json_summary_bounded();
+   test_buffer_cap_respected();
 
    printf("all compact tests passed\n");
    return 0;

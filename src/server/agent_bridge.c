@@ -500,7 +500,6 @@ static void parse_responses_output_item(cJSON *item, parsed_response_t *out)
    cJSON *type = cJSON_GetObjectItem(item, "type");
    if (!type || !cJSON_IsString(type))
       return;
-
    if (strcmp(type->valuestring, "function_call") == 0)
    {
       out->is_tool_call = 1;
@@ -628,17 +627,26 @@ static const char *responses_sse_field_value(const char *line, size_t line_len, 
    *value_len = line_len - off;
    return line + off;
 }
+static const char *responses_text_value(cJSON *value)
+{
+   if (cJSON_IsString(value))
+      return value->valuestring;
+   if (!cJSON_IsObject(value))
+      return NULL;
+   cJSON *nested = cJSON_GetObjectItem(value, "text");
+   if (!cJSON_IsString(nested))
+      nested = cJSON_GetObjectItem(value, "value");
+   return cJSON_IsString(nested) ? nested->valuestring : NULL;
+}
 static void responses_handle_sse_event(const char *event, const char *data, parsed_response_t *out,
                                        cJSON *collected_output, char **delta_text, char **done_text,
                                        char **part_text, cJSON **completed_response)
 {
    if (!event || !event[0] || !data || !data[0])
       return;
-
    cJSON *ev = cJSON_Parse(data);
    if (!ev)
       return;
-
    if (strcmp(event, "response.output_item.done") == 0)
    {
       cJSON *item = cJSON_GetObjectItem(ev, "item");
@@ -652,15 +660,15 @@ static void responses_handle_sse_event(const char *event, const char *data, pars
    }
    else if (strcmp(event, "response.output_text.delta") == 0)
    {
-      cJSON *delta = cJSON_GetObjectItem(ev, "delta");
-      if (cJSON_IsString(delta))
-         (void)append_text(delta_text, delta->valuestring);
+      const char *text = responses_text_value(cJSON_GetObjectItem(ev, "delta"));
+      if (text)
+         (void)append_text(delta_text, text);
    }
    else if (strcmp(event, "response.output_text.done") == 0)
    {
-      cJSON *text = cJSON_GetObjectItem(ev, "text");
-      if (cJSON_IsString(text))
-         (void)append_text(done_text, text->valuestring);
+      const char *text = responses_text_value(cJSON_GetObjectItem(ev, "text"));
+      if (text)
+         (void)append_text(done_text, text);
    }
    else if (strcmp(event, "response.content_part.done") == 0)
    {
@@ -705,7 +713,6 @@ static void responses_parse_sse_events(const char *body, parsed_response_t *out,
       {
          p = line + line_len;
       }
-
       if (line_len == 0)
       {
          responses_handle_sse_event(event, data, out, collected_output, delta_text, done_text,
@@ -716,7 +723,6 @@ static void responses_parse_sse_events(const char *body, parsed_response_t *out,
             data[0] = '\0';
          continue;
       }
-
       size_t value_len = 0;
       const char *value = responses_sse_field_value(line, line_len, "event", 5, &value_len);
       if (value)
@@ -738,16 +744,13 @@ static void responses_parse_sse_events(const char *body, parsed_response_t *out,
 void agent_parse_response_responses(const char *body, parsed_response_t *out)
 {
    memset(out, 0, sizeof(*out));
-
    if (!body)
       return;
-
    cJSON *collected_output = cJSON_CreateArray();
    char *delta_text = NULL;
    char *done_text = NULL;
    char *part_text = NULL;
    cJSON *completed_resp = NULL;
-
    responses_parse_sse_events(body, out, collected_output, &delta_text, &done_text, &part_text,
                               &completed_resp);
    responses_take_longer_content(out, &part_text);
@@ -762,7 +765,6 @@ void agent_parse_response_responses(const char *body, parsed_response_t *out)
          resp = cJSON_Duplicate(completed_resp, 1);
       else
          resp = cJSON_Parse(body);
-
       if (resp)
       {
          cJSON *output = cJSON_GetObjectItem(resp, "output");
@@ -775,7 +777,6 @@ void agent_parse_response_responses(const char *body, parsed_response_t *out)
          cJSON_Delete(resp);
       }
    }
-
    /* Collect usage from response.completed */
    if (completed_resp)
    {
@@ -797,7 +798,6 @@ void agent_parse_response_responses(const char *body, parsed_response_t *out)
       }
    }
    cJSON_Delete(completed_resp);
-
    /* For multi-turn tool use, store collected output items as assistant_message */
    if (out->is_tool_call)
       out->assistant_message = collected_output;

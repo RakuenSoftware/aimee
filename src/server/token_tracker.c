@@ -36,15 +36,23 @@ static const model_price_t pricing[] = {
     {"claude-3-sonnet", 3.00, 15.00, 3.75, 0.30},
     {"claude-3-haiku", 0.25, 1.25, 0.30, 0.03},
 
+    /* OpenAI GPT-4o + o-series support automatic prompt caching: cached input
+     * bills at ~0.5x the input rate and cache CREATION is free (no write
+     * premium), so cache_write stays 0 and cache_read = 0.5 x input. 0.5x is the
+     * documented baseline discount; some newer models cache cheaper (0.25x), so
+     * this conservatively UNDER-states the saving. Operator overrides
+     * (models.dev / g_registry_price_fn) refine per-model. gpt-4 classic /
+     * gpt-3.5 do not support prompt caching -> cache tiers stay 0 (they never
+     * report cache_read tokens, so 0 x anything = 0). */
     /* OpenAI GPT-4o family */
-    {"gpt-4o-mini", 0.15, 0.60, 0.0, 0.0},
-    {"gpt-4o", 2.50, 10.00, 0.0, 0.0},
+    {"gpt-4o-mini", 0.15, 0.60, 0.0, 0.075},
+    {"gpt-4o", 2.50, 10.00, 0.0, 1.25},
 
     /* OpenAI o-series */
-    {"o3-mini", 1.10, 4.40, 0.0, 0.0},
-    {"o3", 10.00, 40.00, 0.0, 0.0},
-    {"o1-mini", 1.10, 4.40, 0.0, 0.0},
-    {"o1", 15.00, 60.00, 0.0, 0.0},
+    {"o3-mini", 1.10, 4.40, 0.0, 0.55},
+    {"o3", 10.00, 40.00, 0.0, 5.00},
+    {"o1-mini", 1.10, 4.40, 0.0, 0.55},
+    {"o1", 15.00, 60.00, 0.0, 7.50},
 
     /* OpenAI GPT-4 classic */
     {"gpt-4-turbo", 10.00, 30.00, 0.0, 0.0},
