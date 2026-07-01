@@ -1,0 +1,125 @@
+# aimee — SmoothNAS compose-native plugin (plugins-11).
+#
+# This is the whole aimee split stack (postgres + aimee-llm + aimee-kb +
+# aimee-server) as a single docker-compose project, installable directly by
+# tierd's compose backend (no smoothnas.io/v1 Plugin manifest needed). It is the
+# GPU tier: the unified aimee-llm runs Vulkan/RADV on the host /dev/dri (7900 XTX
+# on .254), 2560-dim embeddings. Drop `devices:` + set AIMEE_LLM_IMAGE=...:cpu +
+# AIMEE_EMBEDDING_DIM=1024 for the CPU tier.
+#
+# Migrated from deploy/compose/aimee.yaml (+ aimee.gpu.yaml). Two things change
+# vs the split *manifest* plugins (aimee-kb/-server/-llm .plugin.yaml):
+#   1. Services talk over the compose network by name (postgres, aimee-llm,
+#      aimee-kb) — the manifest's bridge-IP wiring (10.100.0.1) is gone.
+#   2. Persistent state is placed on smoothfs tiers via `x-smoothnas` on the
+#      named volumes (mechanism B: tierd rewrites these to host binds).
+#
+# GPU: `devices: [/dev/dri:/dev/dri]` is honored by LXC2Docker (bind + auto
+# lxc.cgroup2.devices.allow per node) — no profile / x-smoothnas GPU block needed.
+# See docs/compose-plugins.md.
+#
+# NOTE (portability): x-smoothnas.tier below names a smoothfs POOL. tierd parses
+# it from the raw YAML (before compose ${} substitution), so it must be a literal
+# — set `tier:` to a pool that exists on your box before install. A compose plugin
+# has no install-time --tier override yet (the manifest plugins did); giving
+# compose plugins an install-time tier map is a tracked follow-up.
+name: aimee
+services:
+  postgres:
+    restart: unless-stopped
+    image: pgvector/pgvector:pg17
+    # uid 1000 matches the smoothfs tier's forced owner (stock postgres otherwise
+    # drops to its own user and can't read the uid-1000-owned data dir).
+    user: "1000:1000"
+    environment:
+      POSTGRES_DB: aimee_shared
+      POSTGRES_USER: aimee
+      POSTGRES_PASSWORD: aimee
+    volumes:
+      - aimee-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aimee -d aimee_shared"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  aimee-llm:
+    restart: unless-stopped
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:gpu}
+    environment:
+      AIMEE_LLM_PORT: "8742"
+      AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-99}
+      AIMEE_LLM_SYNTH_CTX: ${AIMEE_LLM_SYNTH_CTX:-131072}
+      AIMEE_LLM_AUTH_TOKEN: ${AIMEE_LLM_AUTH_TOKEN:-}
+    devices:
+      - "/dev/dri:/dev/dri" # AMD render path; LXC2Docker adds the cgroup allow
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8742/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 600s # cold boot loads the baked GGUFs into RAM first
+
+  aimee-kb:
+    restart: unless-stopped
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
+    ulimits:
+      stack: 67108864 # 64 MB worker-thread stack (was the aimee-stack profile)
+    environment:
+      AIMEE_HOME: /var/lib/aimee
+      AIMEE_DB2_URL: postgresql://aimee:aimee@postgres:5432/aimee_shared
+      AIMEE_LLM_URL: ${AIMEE_LLM_URL:-http://aimee-llm:8742}
+      AIMEE_EMBEDDING_DIM: ${AIMEE_EMBEDDING_DIM:-2560}
+      AIMEE_KB_HTTP_BIND: "1"
+    command: ["--http-port=8741"]
+    ports:
+      - "8741:8741"
+    depends_on:
+      postgres: { condition: service_healthy }
+      aimee-llm: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - aimee-kb-home:/var/lib/aimee
+
+  aimee-server:
+    restart: unless-stopped
+    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:latest}
+    ulimits:
+      stack: 67108864
+    environment:
+      AIMEE_HOME: /var/lib/aimee
+      AIMEE_DB1_URL: sqlite:///var/lib/aimee/aimee.db
+      AIMEE_KB_API_URL: http://aimee-kb:8741
+      AIMEE_SERVER_HTTP_BIND: "1"
+      AIMEE_WEBCHAT_ENABLED: "1"
+      AIMEE_WEBCHAT_USER: ${AIMEE_WEBCHAT_USER:-aimee}
+      AIMEE_WEBCHAT_PASSWORD: ${AIMEE_WEBCHAT_PASSWORD:-aimee-local-dev}
+    ports:
+      - "8743:8743" # TLS /v1 (thin clients); 8740 plaintext stays loopback-only
+      - "8443:8443" # webchat UI
+    depends_on:
+      aimee-kb: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD-SHELL",
+             "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8740/v1/health | grep -qE '^(200|401)$$'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - aimee-server-home:/var/lib/aimee
+      - aimee-server-workspaces:/var/lib/aimee-workspaces
+
+# Persistent state on smoothfs tiers. Set `tier:` to a pool on your box.
+volumes:
+  aimee-postgres:
+    x-smoothnas: { tier: aimee-data }
+  aimee-kb-home:
+    x-smoothnas: { tier: aimee-data }
+  aimee-server-home:
+    x-smoothnas: { tier: aimee-data }
+  aimee-server-workspaces:
+    x-smoothnas: { tier: aimee-data }
