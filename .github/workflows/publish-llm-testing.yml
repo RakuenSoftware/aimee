@@ -20,11 +20,19 @@ on:
     branches: [testing]
     paths:
       - "Dockerfile.aimee-llm"
+      - "Dockerfile.aimee-delegate"
       - "scripts/aimee_llm_gateway.py"
       - "scripts/aimee_llm_rerank_head.py"
       - "scripts/aimee-llm-supervisor.sh"
+      - "scripts/aimee-delegate-entrypoint.sh"
+      - "scripts/aimee-delegate-health.sh"
       - ".github/workflows/publish-llm-testing.yml"
   workflow_dispatch:
+    inputs:
+      build_delegate_mid:
+        description: "Also build the 22GB aimee-delegate-mid (Qwen 3.6 35B-A3B)"
+        type: boolean
+        default: false
 
 concurrency:
   group: publish-llm-testing-${{ github.ref }}
@@ -44,8 +52,13 @@ jobs:
         # GPU tier overrides to the 4B/400m/12B set; the same vendor-agnostic
         # Vulkan binary runs CPU or GPU at deploy time via AIMEE_LLM_NGL.
         tier:
-          - { name: aimee-llm-cpu, extra_args: "" }
-          - { name: aimee-llm-gpu, extra_args: "EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF\nEMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf\nRERANK_REPO=cross-encoder/ettin-reranker-400m-v1\nSYNTH_REPO=unsloth/gemma-4-12b-it-GGUF\nSYNTH_FILE=gemma-4-12b-it-Q4_K_M.gguf" }
+          - { name: aimee-llm-cpu, dockerfile: Dockerfile.aimee-llm, extra_args: "" }
+          - { name: aimee-llm-gpu, dockerfile: Dockerfile.aimee-llm, extra_args: "EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF\nEMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf\nRERANK_REPO=cross-encoder/ettin-reranker-400m-v1\nSYNTH_REPO=unsloth/gemma-4-12b-it-GGUF\nSYNTH_FILE=gemma-4-12b-it-Q4_K_M.gguf" }
+          # SPLIT delegate SMALL tier (Gemma4-12B, 6.72GB dense). Cheap enough (< the
+          # 11GB gpu tier that already builds here) to build on every push for real
+          # gating value. The MID tier (Qwen 22GB) is a dispatch-only job below
+          # (option (d), 2026-07-01 follow-up roundtable).
+          - { name: aimee-delegate-small, dockerfile: Dockerfile.aimee-delegate, extra_args: "" }
     steps:
       - uses: actions/checkout@v4
 
@@ -79,7 +92,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.aimee-llm
+          file: ${{ matrix.tier.dockerfile }}
           platforms: linux/amd64
           push: true
           provenance: false
@@ -91,3 +104,77 @@ jobs:
           tags: |
             ghcr.io/${{ env.OWNER }}/${{ matrix.tier.name }}:testing
             ghcr.io/${{ env.OWNER }}/${{ matrix.tier.name }}:testing-${{ env.SHA7 }}
+
+  # delegate-mid (Qwen 3.6 35B-A3B, 22.4GB MoE): NOT built on every push — the model
+  # and llama.cpp rarely change, so a ~22GB uncached download+build per push is
+  # near-zero-signal (option (d), 2026-07-01 follow-up roundtable). Runs ONLY on a
+  # manual workflow_dispatch with build_delegate_mid=true. Needs the docker data-root
+  # on /mnt (~65GB) — the ~22GB image's transient build footprint overruns / — plus a
+  # df pre-flight that fails fast rather than dying mid-build with 'no space left'.
+  build-delegate-mid:
+    if: github.event_name == 'workflow_dispatch' && inputs.build_delegate_mid
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Normalize owner + short sha
+        run: |
+          echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+          echo "SHA7=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Reclaim toolchains AND relocate docker's data-root to the larger /mnt disk
+      # BEFORE buildx is created, so buildkit writes the 22GB model layers there
+      # (mirrors publish-images.yml's aimee-llm-leg fix, commit f26cf76).
+      - name: Free disk + move docker storage to /mnt
+        run: |
+          echo "before:"; df -h / /mnt
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup /usr/local/share/boost
+          sudo docker image prune --all --force || true
+          sudo systemctl stop docker docker.socket || true
+          sudo mkdir -p /mnt/docker
+          printf '{ "data-root": "/mnt/docker" }\n' | sudo tee /etc/docker/daemon.json
+          sudo systemctl start docker || true
+          echo "after:"; df -h / /mnt
+
+      # Fail fast if /mnt can't hold the 22GB image's transient footprint (~50-70GB)
+      # instead of dying mid-build with ENOSPC after a 22GB download.
+      - name: Pre-flight disk check
+        run: |
+          avail=$(df --output=avail -BG /mnt | tail -1 | tr -dc '0-9')
+          echo "/mnt available: ${avail}GB"
+          if [ "${avail:-0}" -lt 80 ]; then
+            echo "::error::/mnt has only ${avail}GB free; need >=80GB for the 22GB delegate-mid build"; exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push aimee-delegate-mid:testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.aimee-delegate
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          build-args: |
+            SYNTH_REPO=unsloth/Qwen3.6-35B-A3B-GGUF
+            SYNTH_FILE=Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+            SYNTH_REVISION=56b9b6695c1d341398ea990cf2172ba4311647d8
+            SYNTH_SHA256=707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450
+            DELEGATE_CTX=262144
+            DELEGATE_SLOTS=2
+            DELEGATE_MOE=1
+            DELEGATE_N_CPU_MOE=24
+            DELEGATE_MODEL_ID=qwen3.6-35b-a3b
+          tags: |
+            ghcr.io/${{ env.OWNER }}/aimee-delegate-mid:testing
+            ghcr.io/${{ env.OWNER }}/aimee-delegate-mid:testing-${{ env.SHA7 }}
