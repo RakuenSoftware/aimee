@@ -46,8 +46,11 @@ int handle_index_deps(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
        strcmp(min_tier, "tentative") != 0)
       return server_send_error(conn, "min_tier must be high, medium, or tentative", NULL);
 
-   char *json =
-       kb_client_index_cross_repo_deps_json(project, direction, min_tier, status_ambiguous);
+   cJSON *dr = cJSON_GetObjectItemCaseSensitive(req, "dry_run");
+   int dry_run = cJSON_IsTrue(dr);
+
+   char *json = kb_client_index_cross_repo_deps_json(project, direction, min_tier, status_ambiguous,
+                                                     dry_run);
    cJSON *resp = json ? cJSON_Parse(json) : NULL;
    free(json);
    if (!resp)

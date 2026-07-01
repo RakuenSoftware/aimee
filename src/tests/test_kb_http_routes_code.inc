@@ -97,6 +97,25 @@ int canonical_index_cross_repo_deps(const char *project, const void *opts, void 
    return 0;
 }
 
+int canonical_index_cross_repo_deps_ex(const char *project, const void *opts, void *out_edges,
+                                       size_t *out_n, int *truncated, void *out_amb,
+                                       size_t *out_amb_n)
+{
+   (void)project;
+   (void)opts;
+   if (out_edges)
+      *(void **)out_edges = NULL;
+   if (out_n)
+      *out_n = 0;
+   if (truncated)
+      *truncated = 0;
+   if (out_amb)
+      *(void **)out_amb = NULL;
+   if (out_amb_n)
+      *out_amb_n = 0;
+   return 0;
+}
+
 int db2_cross_repo_review_list(const char *caller_repo, const char *status, void *out, int max,
                                int64_t *overflow_dropped)
 {

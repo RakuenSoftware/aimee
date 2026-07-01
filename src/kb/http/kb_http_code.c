@@ -627,12 +627,14 @@ static int handle_get_code_cross_repo_review(const char *project, char *out_buf,
 
 int handle_get_code_cross_repo_deps(const char *query_string, char *out_buf, int out_cap)
 {
-   char project[256] = "", dir_s[16] = "", tier_s[16] = "", status_s[16] = "";
+   char project[256] = "", dir_s[16] = "", tier_s[16] = "", status_s[16] = "", dry_s[8] = "";
    if (!code_qparam(query_string, "project", project, sizeof(project)) || !project[0])
       return code_scan_write_error(out_buf, out_cap, "missing project");
    code_qparam(query_string, "direction", dir_s, sizeof(dir_s));
    code_qparam(query_string, "min_tier", tier_s, sizeof(tier_s));
    code_qparam(query_string, "status", status_s, sizeof(status_s));
+   code_qparam(query_string, "dry_run", dry_s, sizeof(dry_s));
+   int dry_run = (strcmp(dry_s, "1") == 0 || strcmp(dry_s, "true") == 0);
 
    if (strcmp(status_s, "ambiguous") == 0)
       return handle_get_code_cross_repo_review(project, out_buf, out_cap);
@@ -655,13 +657,18 @@ int handle_get_code_cross_repo_deps(const char *query_string, char *out_buf, int
          return 400;
       }
    }
-   xrepo_deps_opts_t opts = {
-       .min_tier = crd_parse_min_tier(tier_s), .direction = dir, .include_review = 0};
+   xrepo_deps_opts_t opts = {.min_tier = crd_parse_min_tier(tier_s),
+                             .direction = dir,
+                             .include_review = 0,
+                             .dry_run = dry_run};
 
    xrepo_dep_edge_t *edges = NULL;
    size_t n = 0;
    int trunc = 0;
-   if (canonical_index_cross_repo_deps(project, &opts, &edges, &n, &trunc) != 0)
+   xrepo_amb_cand_t *amb = NULL;
+   size_t amb_n = 0;
+   if (canonical_index_cross_repo_deps_ex(project, &opts, &edges, &n, &trunc,
+                                          dry_run ? &amb : NULL, dry_run ? &amb_n : NULL) != 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"canonical index unavailable\"}");
       return 503;
@@ -669,6 +676,7 @@ int handle_get_code_cross_repo_deps(const char *query_string, char *out_buf, int
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
    {
+      free(amb);
       free(edges);
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"oom\"}");
       return 500;
@@ -676,6 +684,8 @@ int handle_get_code_cross_repo_deps(const char *query_string, char *out_buf, int
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddStringToObject(resp, "project", project);
    cJSON_AddBoolToObject(resp, "truncated", trunc ? 1 : 0);
+   if (dry_run)
+      cJSON_AddBoolToObject(resp, "dry_run", 1);
    cJSON *arr = cJSON_AddArrayToObject(resp, "deps");
    for (size_t i = 0; arr && i < n; i++)
    {
@@ -712,6 +722,29 @@ int handle_get_code_cross_repo_deps(const char *query_string, char *out_buf, int
       cJSON_AddItemToArray(arr, e);
    }
    free(edges); /* cJSON has copied every field */
+
+   /* --dry-run: surface the AMBIGUOUS candidates the pipeline held back (would
+    * normally go to the review queue) so offline inspection sees every band. */
+   if (dry_run)
+   {
+      cJSON *aarr = cJSON_AddArrayToObject(resp, "ambiguous");
+      for (size_t i = 0; aarr && i < amb_n; i++)
+      {
+         cJSON *a = cJSON_CreateObject();
+         cJSON_AddStringToObject(a, "symbol", amb[i].symbol);
+         cJSON_AddStringToObject(a, "caller_repo", amb[i].caller_repo);
+         cJSON_AddStringToObject(a, "candidate_definer", amb[i].candidate_definer);
+         cJSON_AddStringToObject(a, "review_class", "ambiguous");
+         cJSON_AddNumberToObject(a, "evidence_score", amb[i].evidence_score);
+         cJSON *ev = cJSON_Parse(amb[i].evidence); /* embed as object, else raw string */
+         if (ev)
+            cJSON_AddItemToObject(a, "evidence", ev);
+         else
+            cJSON_AddStringToObject(a, "evidence", amb[i].evidence);
+         cJSON_AddItemToArray(aarr, a);
+      }
+   }
+   free(amb); /* cJSON has copied every field */
    return crd_emit(resp, out_buf, out_cap);
 }
 

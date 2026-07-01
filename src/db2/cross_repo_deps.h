@@ -63,7 +63,25 @@ typedef struct
    xrepo_tier_t min_tier; /* emit edges at >= this tier (default MEDIUM) */
    int max_candidates;    /* candidate cap (§4.2); <=0 uses the config default */
    int include_review;    /* 1 = also write AMBIGUOUS candidates to the review queue (S4b) */
+   /* --dry-run (§B, acceptance #4): offline candidate inspection. Emits ALL
+    * confidence bands down to LOW (not just >= min_tier) and captures the
+    * AMBIGUOUS candidates in-memory (via the _ex out params) instead of writing
+    * the review queue — so LOW/AMBIGUOUS surface only here, never in default
+    * output, and nothing is materialized. Forces include_review off. */
+   int dry_run;
 } xrepo_deps_opts_t;
+
+/* One candidate the resolver classified AMBIGUOUS (multiple corroboration-worthy
+ * definers, no dominant): surfaced inline only under --dry-run; in normal
+ * operation these route to the review queue (S4b) rather than being emitted. */
+typedef struct
+{
+   char symbol[128];
+   char caller_repo[128];
+   char candidate_definer[128]; /* deterministic representative definer */
+   double evidence_score;
+   char evidence[512]; /* JSON: {symbol, definers, sites, files, reason} */
+} xrepo_amb_cand_t;
 
 /* Parse a module/package id from a manifest file's content (pure; used to build
  * repo descriptors, and unit-tested directly). `basename` selects the format:
@@ -78,5 +96,14 @@ int xrepo_parse_module_id(const char *basename, const char *content, char *out, 
  * Returns 0 on success, -1 on error (out_edges set to NULL, out_n to 0). */
 int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t *opts,
                                     xrepo_dep_edge_t **out_edges, size_t *out_n, int *truncated);
+
+/* Extended form used by --dry-run: additionally returns the AMBIGUOUS candidates
+ * captured in-memory (heap array into *out_amb, count into *out_amb_n; caller frees
+ * with free()). Pass out_amb/out_amb_n as NULL to ignore (the plain
+ * canonical_index_cross_repo_deps forwards NULL). Ambiguous capture applies to the
+ * forward (OUT) computation; under direction=in it is not populated. */
+int canonical_index_cross_repo_deps_ex(const char *project, const xrepo_deps_opts_t *opts,
+                                       xrepo_dep_edge_t **out_edges, size_t *out_n, int *truncated,
+                                       xrepo_amb_cand_t **out_amb, size_t *out_amb_n);
 
 #endif /* AIMEE_CROSS_REPO_DEPS_H */

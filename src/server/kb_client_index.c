@@ -659,7 +659,7 @@ int kb_client_index_find_callers(const char *project, const char *symbol, caller
  * same passthrough idiom as kb_client_index_blast_radius_preview_json. Caller frees
  * the returned string; NULL means the kb was unreachable or returned no body. */
 char *kb_client_index_cross_repo_deps_json(const char *project, const char *direction,
-                                           const char *min_tier, int status_ambiguous)
+                                           const char *min_tier, int status_ambiguous, int dry_run)
 {
    if (!project || !project[0])
       return NULL;
@@ -677,7 +677,7 @@ char *kb_client_index_cross_repo_deps_json(const char *project, const char *dire
    }
 
    size_t path_len =
-       strlen("/v1/code/cross-repo-deps?project=&direction=&min_tier=&status=ambiguous") +
+       strlen("/v1/code/cross-repo-deps?project=&direction=&min_tier=&status=ambiguous&dry_run=1") +
        strlen(project_q) + (direction_q ? strlen(direction_q) : 0) +
        (min_tier_q ? strlen(min_tier_q) : 0) + 8;
    char *path = malloc(path_len);
@@ -688,10 +688,10 @@ char *kb_client_index_cross_repo_deps_json(const char *project, const char *dire
       free(min_tier_q);
       return NULL;
    }
-   snprintf(path, path_len, "/v1/code/cross-repo-deps?project=%s%s%s%s%s%s", project_q,
+   snprintf(path, path_len, "/v1/code/cross-repo-deps?project=%s%s%s%s%s%s%s", project_q,
             direction_q ? "&direction=" : "", direction_q ? direction_q : "",
             min_tier_q ? "&min_tier=" : "", min_tier_q ? min_tier_q : "",
-            status_ambiguous ? "&status=ambiguous" : "");
+            status_ambiguous ? "&status=ambiguous" : "", dry_run ? "&dry_run=1" : "");
    free(project_q);
    free(direction_q);
    free(min_tier_q);

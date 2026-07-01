@@ -1674,6 +1674,17 @@ paths:
           schema:
             type: string
             enum: [ambiguous]
+        - name: dry_run
+          in: query
+          required: false
+          description: >-
+            Offline candidate inspection: emit every confidence band (down to LOW,
+            overriding min_tier) plus the AMBIGUOUS candidates inline, and write
+            nothing (no review-queue rows). The response carries dry_run:true and an
+            additional `ambiguous` array alongside `deps`.
+          schema:
+            type: string
+            enum: ["1", "true"]
       responses:
         "200":
           description: Cross-repo dependency edges (or ambiguous review queue)

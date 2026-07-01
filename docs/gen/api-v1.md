@@ -118,6 +118,7 @@ Cross-repo dependency edges for a project (confidence-tiered, with evidence + ve
 | `direction` | query | no | string (out, in, both) | Dependency direction: "out" = deps OF the project (default), "in" = repos that depend ON the project (reverse), "both" = union. Ignored when status=ambiguous. |
 | `min_tier` | query | no | string (high, medium, tentative) | Minimum confidence tier to emit. Ignored when status=ambiguous. |
 | `status` | query | no | string (ambiguous) | When "ambiguous", returns the AMBIGUOUS review queue for the project instead of edges (direction/min_tier are not applied in that mode). |
+| `dry_run` | query | no | string (1, true) | Offline candidate inspection: emit every confidence band (down to LOW, overriding min_tier) plus the AMBIGUOUS candidates inline, and write nothing (no review-queue rows). The response carries dry_run:true and an additional `ambiguous` array alongside `deps`. |
 
 Responses:
 

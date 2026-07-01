@@ -1261,6 +1261,11 @@ paths:
                 direction: { type: string, enum: [out, in, both], default: out }
                 min_tier: { type: string, enum: [high, medium, tentative] }
                 status: { type: string, enum: [ambiguous] }
+                dry_run:
+                  type: boolean
+                  description: >-
+                    Offline candidate inspection — emit every band down to LOW plus
+                    inline AMBIGUOUS candidates, writing nothing (acceptance #4).
       responses:
         "200":
           description: Cross-repo dependency edges or ambiguous review queue

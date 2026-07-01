@@ -211,6 +211,43 @@ static void test_ambiguous_to_review(void)
    printf("ok\n");
 }
 
+/* --dry-run (acceptance #4): the AMBIGUOUS candidate the pipeline holds back
+ * (AmbiguousThing, route-backed multi-definer, seeded by test_ambiguous_to_review)
+ * is captured in-memory via the _ex out params rather than written — offline
+ * inspection sees it inline while normal output never does. */
+static void test_dry_run_candidates(void)
+{
+   printf("test_dry_run_candidates... ");
+   xrepo_deps_opts_t opts = {
+       .direction = XREPO_DIR_OUT, .min_tier = XREPO_TIER_MEDIUM, .dry_run = 1};
+   xrepo_dep_edge_t *edges = NULL;
+   size_t n = 0;
+   int trunc = 0;
+   xrepo_amb_cand_t *amb = NULL;
+   size_t amb_n = 0;
+   assert(canonical_index_cross_repo_deps_ex("moonlight-qt", &opts, &edges, &n, &trunc, &amb,
+                                             &amb_n) == 0);
+   /* the ambiguous candidate is surfaced in-memory (not as an emitted edge). */
+   int found = 0;
+   for (size_t i = 0; i < amb_n; i++)
+      if (strcmp(amb[i].symbol, "AmbiguousThing") == 0 &&
+          strcmp(amb[i].caller_repo, "moonlight-qt") == 0)
+         found = 1;
+   assert(found);
+   /* AmbiguousThing is never an emitted edge, dry-run or not. */
+   for (size_t i = 0; i < n; i++)
+      assert(strcmp(edges[i].example_symbol, "AmbiguousThing") != 0);
+   free(edges);
+   free(amb);
+
+   /* the plain API ignores ambiguous candidates and never captures them. */
+   edges = NULL;
+   n = 0;
+   assert(canonical_index_cross_repo_deps("moonlight-qt", &opts, &edges, &n, &trunc) == 0);
+   free(edges);
+   printf("ok\n");
+}
+
 /* H1 structural-edge gate in isolation: an otherwise-HIGH candidate (distinctive,
  * single trusted definer, import + call) is NOT emitted while no cross_repo_route
  * exists; inserting the route flips it to an edge. The route is the ONLY variable. */
@@ -1074,6 +1111,7 @@ int main(void)
    test_end_to_end();
    test_reverse_direction();
    test_ambiguous_to_review();
+   test_dry_run_candidates();
    test_structural_edge_gate();
    test_cold_start_rebuild_to_gate();
    test_vendor_canonical_preference();

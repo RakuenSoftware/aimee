@@ -698,14 +698,15 @@ static cJSON *marshal_index_find_callers(int argc, char **argv)
    return req;
 }
 
-/* Marshal `aimee index deps <project> [--tier T] [--review] [--reverse]` (§B).
- * --tier sets the minimum emitted tier (high|medium|tentative); --review lists the
- * AMBIGUOUS queue (status=ambiguous); --reverse inverts direction to list repos
- * that depend ON <project> (direction=in). --dry-run (per-stage offline
- * inspection) is deferred to the candidate-emission slice. */
+/* Marshal `aimee index deps <project> [--tier T] [--review] [--reverse] [--dry-run]`
+ * (§B). --tier sets the minimum emitted tier (high|medium|tentative); --review
+ * lists the AMBIGUOUS queue (status=ambiguous); --reverse inverts direction to list
+ * repos that depend ON <project> (direction=in); --dry-run emits every confidence
+ * band (down to LOW) plus the AMBIGUOUS candidates inline for offline inspection,
+ * writing nothing (acceptance #4). */
 static cJSON *marshal_index_deps(int argc, char **argv)
 {
-   static const char *bools[] = {"review", "reverse", NULL};
+   static const char *bools[] = {"review", "reverse", "dry-run", NULL};
    rpc_opts_t opts;
    rpc_parse(argc, argv, bools, &opts);
 
@@ -719,6 +720,8 @@ static cJSON *marshal_index_deps(int argc, char **argv)
       cJSON_AddStringToObject(req, "status", "ambiguous");
    if (rpc_get(&opts, "reverse"))
       cJSON_AddStringToObject(req, "direction", "in");
+   if (rpc_get(&opts, "dry-run"))
+      cJSON_AddBoolToObject(req, "dry_run", 1);
    return req;
 }
 
@@ -4918,24 +4921,34 @@ static void print_index_callers(cJSON *resp)
    }
 }
 
-/* S6: `aimee index deps`. Two response shapes: the AMBIGUOUS review queue
+/* Print the AMBIGUOUS candidate rows shared by the --review view and the --dry-run
+ * inline section. */
+static void print_index_deps_ambiguous(cJSON *amb)
+{
+   cJSON *a;
+   cJSON_ArrayForEach(a, amb)
+   {
+      cJSON *score = cJSON_GetObjectItemCaseSensitive(a, "evidence_score");
+      printf("  %s -> %s  [%s, score %.2f]  %s\n", json_str(a, "caller_repo"),
+             json_str(a, "candidate_definer"), json_str(a, "review_class"),
+             cJSON_IsNumber(score) ? score->valuedouble : 0.0, json_str(a, "symbol"));
+   }
+}
+
+/* S6: `aimee index deps`. Three response shapes: the AMBIGUOUS review queue
  * (--review / status=ambiguous) carries an `ambiguous` array + `overflow.dropped`;
- * the default carries a `deps` edge array + `truncated`. */
+ * --dry-run carries BOTH a `deps` array (down to LOW) and an inline `ambiguous`
+ * array with `dry_run:true`; the default carries a `deps` edge array + `truncated`. */
 static void print_index_deps(cJSON *resp)
 {
+   int dry_run = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(resp, "dry_run"));
    cJSON *amb = cJSON_GetObjectItemCaseSensitive(resp, "ambiguous");
-   if (cJSON_IsArray(amb))
+   /* --review view: an `ambiguous` array with no `deps` (dry-run has both). */
+   if (cJSON_IsArray(amb) && !dry_run)
    {
       if (cJSON_GetArraySize(amb) == 0)
          printf("No ambiguous candidates in the review queue.\n");
-      cJSON *a;
-      cJSON_ArrayForEach(a, amb)
-      {
-         cJSON *score = cJSON_GetObjectItemCaseSensitive(a, "evidence_score");
-         printf("  %s -> %s  [%s, score %.2f]  %s\n", json_str(a, "caller_repo"),
-                json_str(a, "candidate_definer"), json_str(a, "review_class"),
-                cJSON_IsNumber(score) ? score->valuedouble : 0.0, json_str(a, "symbol"));
-      }
+      print_index_deps_ambiguous(amb);
       cJSON *ov = cJSON_GetObjectItemCaseSensitive(resp, "overflow");
       cJSON *dropped = ov ? cJSON_GetObjectItemCaseSensitive(ov, "dropped") : NULL;
       if (cJSON_IsNumber(dropped) && dropped->valuedouble > 0)
@@ -4945,11 +4958,15 @@ static void print_index_deps(cJSON *resp)
       return;
    }
 
+   if (dry_run)
+      printf("[dry-run: candidate inspection — every band incl. LOW/AMBIGUOUS; nothing written]\n");
+
    cJSON *deps = cJSON_GetObjectItemCaseSensitive(resp, "deps");
    if (!cJSON_IsArray(deps) || cJSON_GetArraySize(deps) == 0)
    {
       printf("No cross-repo dependencies found.\n");
-      return;
+      if (!dry_run)
+         return;
    }
    cJSON *d;
    cJSON_ArrayForEach(d, deps)
@@ -4976,6 +4993,16 @@ static void print_index_deps(cJSON *resp)
    cJSON *trunc = cJSON_GetObjectItemCaseSensitive(resp, "truncated");
    if (cJSON_IsBool(trunc) && cJSON_IsTrue(trunc))
       printf("(results truncated; narrow the query)\n");
+
+   /* --dry-run: also print the AMBIGUOUS candidates the pipeline held back. */
+   if (dry_run && cJSON_IsArray(amb))
+   {
+      int na = cJSON_GetArraySize(amb);
+      printf("ambiguous candidates (%d):\n", na);
+      if (na == 0)
+         printf("  (none)\n");
+      print_index_deps_ambiguous(amb);
+   }
 }
 
 static void print_hud_status(cJSON *resp)

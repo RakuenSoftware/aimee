@@ -300,6 +300,36 @@ static xrepo_dep_edge_t *edge_find_or_add(edge_acc_t *a, const char *caller, con
    return E;
 }
 
+/* In-memory sink for AMBIGUOUS candidates under --dry-run (parallels edge_acc_t).
+ * NULL cap means "not capturing" (normal operation routes to the review queue). */
+typedef struct
+{
+   xrepo_amb_cand_t *c;
+   size_t n, cap;
+} amb_acc_t;
+
+static int amb_push(amb_acc_t *a, const char *sym, const char *caller, const char *definer,
+                    const char *ev, double score)
+{
+   if (a->n == a->cap)
+   {
+      size_t nc = a->cap ? a->cap * 2 : 16;
+      xrepo_amb_cand_t *nn = realloc(a->c, nc * sizeof(*nn));
+      if (!nn)
+         return 0;
+      a->c = nn;
+      a->cap = nc;
+   }
+   xrepo_amb_cand_t *C = &a->c[a->n++];
+   memset(C, 0, sizeof(*C));
+   snprintf(C->symbol, sizeof(C->symbol), "%s", sym ? sym : "");
+   snprintf(C->caller_repo, sizeof(C->caller_repo), "%s", caller ? caller : "");
+   snprintf(C->candidate_definer, sizeof(C->candidate_definer), "%s", definer ? definer : "");
+   snprintf(C->evidence, sizeof(C->evidence), "%s", ev ? ev : "");
+   C->evidence_score = score;
+   return 1;
+}
+
 /* Find an existing edge without adding (recall R2c merge). NULL if absent. */
 static xrepo_dep_edge_t *edge_find(edge_acc_t *a, const char *caller, const char *definer)
 {
@@ -333,6 +363,8 @@ typedef struct
    int a_filecount;
    int include_review; /* write AMBIGUOUS candidates to the review queue (S4b) */
    int queue_max;      /* review-queue overflow cap */
+   int dry_run;        /* --dry-run: capture AMBIGUOUS in `amb`, write nothing */
+   amb_acc_t *amb;     /* in-memory AMBIGUOUS sink when dry_run (else NULL) */
 } crd_ctx_t;
 
 /* Bounds-safe route_seen lookup by repo name (H1 structural-edge gate). desc_index
@@ -499,7 +531,7 @@ static void crd_flush(const crd_ctx_t *ctx, edge_acc_t *acc, const char *sym, in
     * structural route exists to at least one definer (H1 invariant: no route =>
     * not a cross-repo relation at all, so not even review-worthy). The genuine
     * route-backed multi-definer collisions are H2's canonical pass. */
-   if (cl.tier == XREPO_TIER_AMBIGUOUS && ctx->include_review && any_route)
+   if (cl.tier == XREPO_TIER_AMBIGUOUS && any_route && (ctx->include_review || ctx->dry_run))
    {
       int routes = (c.corroboration != XREPO_CORROB_NONE) ? 1 : 0;
       double score = xrepo_evidence_score(distinctive ? definer_rc : 0, sites, routes);
@@ -517,8 +549,16 @@ static void crd_flush(const crd_ctx_t *ctx, edge_acc_t *acc, const char *sym, in
       snprintf(ev, sizeof(ev),
                "{\"symbol\":\"%s\",\"definers\":%d,\"sites\":%d,\"files\":%d,\"reason\":\"%s\"}",
                esym, ndef, sites, files, cl.reason ? cl.reason : "ambiguous");
-      db2_cross_repo_review_upsert(ctx->repo_set_hash, sym, ctx->project, defs[rep].repo, ev, score,
-                                   "ambiguous", 0, ctx->queue_max);
+      /* --dry-run captures the candidate in-memory for offline inspection and
+       * writes NOTHING; normal operation persists it to the review queue. */
+      if (ctx->dry_run)
+      {
+         if (ctx->amb)
+            amb_push(ctx->amb, sym, ctx->project, defs[rep].repo, ev, score);
+      }
+      else
+         db2_cross_repo_review_upsert(ctx->repo_set_hash, sym, ctx->project, defs[rep].repo, ev,
+                                      score, "ambiguous", 0, ctx->queue_max);
    }
 
    /* H1 structural-edge gate (precision-hardening §1): a non-LOW edge REQUIRES a
@@ -573,7 +613,8 @@ static void crd_flush(const crd_ctx_t *ctx, edge_acc_t *acc, const char *sym, in
  * public canonical_index_cross_repo_deps dispatcher, which reuses this per caller.
  * opts->direction is IGNORED here (always computes OUT for the given project). */
 static int crd_compute_out(const char *project, const xrepo_deps_opts_t *opts,
-                           xrepo_dep_edge_t **out_edges, size_t *out_n, int *truncated)
+                           xrepo_dep_edge_t **out_edges, size_t *out_n, int *truncated,
+                           amb_acc_t *amb)
 {
    if (out_edges)
       *out_edges = NULL;
@@ -597,7 +638,10 @@ static int crd_compute_out(const char *project, const xrepo_deps_opts_t *opts,
    xrepo_mult_cfg_t mcfg = {.dom_share_pct = 90, .runnerup_share_pct = 5, .runnerup_abs = 2};
    int cap =
        opts->max_candidates > 0 ? opts->max_candidates : cfg.kb_curator_cross_repo_max_candidates;
-   xrepo_tier_t min_tier = opts->min_tier ? opts->min_tier : XREPO_TIER_MEDIUM;
+   /* --dry-run emits every confidence band (down to LOW) for offline inspection;
+    * otherwise honor the requested min_tier (default MEDIUM). */
+   xrepo_tier_t min_tier =
+       opts->dry_run ? XREPO_TIER_LOW : (opts->min_tier ? opts->min_tier : XREPO_TIER_MEDIUM);
    int collision_c = cfg.kb_curator_cross_repo_caller_collision_c;
 
    desc_set_t descs;
@@ -704,8 +748,10 @@ static int crd_compute_out(const char *project, const xrepo_deps_opts_t *opts,
                     .distinctiveness_v = cfg.kb_curator_cross_repo_distinctiveness_v,
                     .bsv = bsv,
                     .a_filecount = a_filecount,
-                    .include_review = opts->include_review,
-                    .queue_max = cfg.kb_curator_cross_repo_review_queue_max};
+                    .include_review = opts->dry_run ? 0 : opts->include_review,
+                    .queue_max = cfg.kb_curator_cross_repo_review_queue_max,
+                    .dry_run = opts->dry_run,
+                    .amb = opts->dry_run ? amb : NULL};
 
    /* Single working-set query (no per-candidate N+1, per the S3 contract): one row
     * per (candidate symbol, definer repo) with per-symbol stats as correlated
@@ -1058,7 +1104,7 @@ static int crd_compute_in(const char *target, const xrepo_deps_opts_t *opts, edg
       xrepo_dep_edge_t *e = NULL;
       size_t n = 0;
       int t = 0;
-      if (crd_compute_out(callers[i], &sub, &e, &n, &t) != 0)
+      if (crd_compute_out(callers[i], &sub, &e, &n, &t, NULL) != 0)
       {
          /* A per-caller failure (transient DB/OOM) must not be silently swallowed:
           * flag the result partial (§4.2) so a reverse read cannot masquerade as a
@@ -1088,11 +1134,14 @@ static int crd_compute_in(const char *target, const xrepo_deps_opts_t *opts, edg
    return 0;
 }
 
-/* Public entry: dispatch on direction. OUT delegates to the core engine; IN and
- * BOTH layer the reverse traversal (crd_compute_in) on top, reusing OUT per caller
- * for symmetric consistency (§B --reverse, §4 direction=in|both). */
-int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t *opts,
-                                    xrepo_dep_edge_t **out_edges, size_t *out_n, int *truncated)
+/* Public entry (extended): dispatch on direction and, under --dry-run, also return
+ * the AMBIGUOUS candidates captured in-memory. OUT delegates to the core engine; IN
+ * and BOTH layer the reverse traversal (crd_compute_in) on top, reusing OUT per
+ * caller for symmetric consistency (§B --reverse, §4 direction=in|both). Ambiguous
+ * capture applies to the forward (OUT) computation only. */
+int canonical_index_cross_repo_deps_ex(const char *project, const xrepo_deps_opts_t *opts,
+                                       xrepo_dep_edge_t **out_edges, size_t *out_n, int *truncated,
+                                       xrepo_amb_cand_t **out_amb, size_t *out_amb_n)
 {
    if (out_edges)
       *out_edges = NULL;
@@ -1100,41 +1149,82 @@ int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t
       *out_n = 0;
    if (truncated)
       *truncated = 0;
+   if (out_amb)
+      *out_amb = NULL;
+   if (out_amb_n)
+      *out_amb_n = 0;
    if (!project || !opts || !out_edges || !out_n)
       return -1;
 
-   if (opts->direction == XREPO_DIR_OUT)
-      return crd_compute_out(project, opts, out_edges, out_n, truncated);
+   /* Capture AMBIGUOUS candidates in-memory only when the caller wants them and
+    * we are in dry-run (forward computation). */
+   amb_acc_t amb = {0};
+   amb_acc_t *ambp = (out_amb && opts->dry_run) ? &amb : NULL;
 
-   /* IN or BOTH: build a fresh accumulator. For BOTH, seed it with the forward
-    * (OUT) edges, then append the reverse (IN) edges. */
-   edge_acc_t agg = {0};
-   int trunc = 0;
-   if (opts->direction == XREPO_DIR_BOTH)
+   int rc;
+   if (opts->direction == XREPO_DIR_OUT)
    {
-      xrepo_dep_edge_t *oe = NULL;
-      size_t on = 0;
-      int ot = 0;
-      if (crd_compute_out(project, opts, &oe, &on, &ot) != 0)
-         return -1;
-      trunc |= ot;
-      for (size_t i = 0; i < on; i++)
-         if (!agg_push(&agg, &oe[i]))
+      rc = crd_compute_out(project, opts, out_edges, out_n, truncated, ambp);
+   }
+   else
+   {
+      /* IN or BOTH: build a fresh accumulator. For BOTH, seed it with the forward
+       * (OUT) edges (capturing ambiguous), then append the reverse (IN) edges. */
+      edge_acc_t agg = {0};
+      int trunc = 0;
+      rc = 0;
+      if (opts->direction == XREPO_DIR_BOTH)
+      {
+         xrepo_dep_edge_t *oe = NULL;
+         size_t on = 0;
+         int ot = 0;
+         if (crd_compute_out(project, opts, &oe, &on, &ot, ambp) != 0)
          {
-            free(oe);
-            free(agg.e);
+            free(amb.c);
             return -1;
          }
-      free(oe);
+         trunc |= ot;
+         for (size_t i = 0; i < on; i++)
+            if (!agg_push(&agg, &oe[i]))
+            {
+               free(oe);
+               free(agg.e);
+               free(amb.c);
+               return -1;
+            }
+         free(oe);
+      }
+      if (crd_compute_in(project, opts, &agg, &trunc) != 0)
+      {
+         free(agg.e);
+         free(amb.c);
+         return -1;
+      }
+      *out_edges = agg.e;
+      *out_n = agg.n;
+      if (truncated)
+         *truncated = trunc;
    }
-   if (crd_compute_in(project, opts, &agg, &trunc) != 0)
+
+   if (rc != 0)
    {
-      free(agg.e);
-      return -1;
+      free(amb.c);
+      return rc;
    }
-   *out_edges = agg.e;
-   *out_n = agg.n;
-   if (truncated)
-      *truncated = trunc;
+   if (out_amb)
+   {
+      *out_amb = amb.c;
+      if (out_amb_n)
+         *out_amb_n = amb.n;
+   }
+   else
+      free(amb.c);
    return 0;
+}
+
+/* Public entry: edges only (ambiguous candidates ignored). */
+int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t *opts,
+                                    xrepo_dep_edge_t **out_edges, size_t *out_n, int *truncated)
+{
+   return canonical_index_cross_repo_deps_ex(project, opts, out_edges, out_n, truncated, NULL, NULL);
 }

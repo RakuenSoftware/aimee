@@ -1072,9 +1072,12 @@ int kb_client_index_find_callers(const char *project, const char *symbol, caller
 /* S6: cross-repo dependency edges for `project` (required). `direction`
  * (out|in|both), `min_tier` (high|medium|tentative) may be NULL/empty for the kb
  * defaults; status_ambiguous!=0 requests the AMBIGUOUS review queue instead of
- * edges. Returns the raw kb JSON body (caller frees) or NULL if kb unreachable. */
+ * edges; dry_run!=0 requests offline candidate inspection (all bands + inline
+ * ambiguous, no writes). Returns the raw kb JSON body (caller frees) or NULL if kb
+ * unreachable. */
 char *kb_client_index_cross_repo_deps_json(const char *project, const char *direction,
-                                           const char *min_tier, int status_ambiguous);
+                                           const char *min_tier, int status_ambiguous,
+                                           int dry_run);
 
 /* S7: POST a per-repo trust change to the kb (project + trust required, actor +
  * request_id optional). Returns the raw kb JSON body on 2xx (caller frees); NULL
