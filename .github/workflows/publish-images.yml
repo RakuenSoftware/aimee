@@ -127,7 +127,7 @@ jobs:
         # The combined (aimee-server-kb) image now bundles the aimee-llm CPU
         # runtime + ~5.5 GB of baked GGUFs (COPYd from aimee-llm-cpu), so it needs
         # the same disk headroom as the llm legs.
-        if: startsWith(matrix.image.name, 'aimee-llm') || matrix.image.name == 'aimee-server-kb'
+        if: startsWith(matrix.image.name, 'aimee-llm') || startsWith(matrix.image.name, 'aimee-delegate') || matrix.image.name == 'aimee-server-kb'
         run: |
           echo "before:"; df -h / /mnt
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
@@ -138,7 +138,7 @@ jobs:
           echo "after:"; df -h /
 
       - name: Move docker storage to /mnt (aimee-llm + combined legs)
-        if: startsWith(matrix.image.name, 'aimee-llm') || matrix.image.name == 'aimee-server-kb'
+        if: startsWith(matrix.image.name, 'aimee-llm') || startsWith(matrix.image.name, 'aimee-delegate') || matrix.image.name == 'aimee-server-kb'
         run: |
           sudo systemctl stop docker docker.socket || true
           sudo mkdir -p /mnt/docker
@@ -152,6 +152,11 @@ jobs:
 
       - name: Build and push by digest
         id: build
+        # aimee-delegate is amd64-only: the baked llama.cpp runtime is the x64 Vulkan
+        # binary (an arm64 image would embed a non-runnable binary), and the 22GB mid
+        # tier would double release cost + disk for a leg nobody can run. Skip it on
+        # arm64 -> the merge job produces a single-arch (amd64) manifest for these.
+        if: ${{ !(startsWith(matrix.image.name, 'aimee-delegate') && matrix.platform.arch == 'arm64') }}
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.image.context || '.' }}
@@ -194,11 +199,13 @@ jobs:
           outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
+        if: ${{ !(startsWith(matrix.image.name, 'aimee-delegate') && matrix.platform.arch == 'arm64') }}
         run: |
           mkdir -p /tmp/digests
           echo "${{ steps.build.outputs.digest }}" > "/tmp/digests/${{ matrix.image.name }}-${{ matrix.platform.arch }}"
 
       - name: Upload digest
+        if: ${{ !(startsWith(matrix.image.name, 'aimee-delegate') && matrix.platform.arch == 'arm64') }}
         uses: actions/upload-artifact@v4
         with:
           name: digest-${{ matrix.image.name }}-${{ matrix.platform.arch }}
