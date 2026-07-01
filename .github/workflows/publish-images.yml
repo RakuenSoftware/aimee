@@ -126,7 +126,7 @@ jobs:
       # are scoped to the llm legs — the C images build fine without paying this cost.
       - name: Free disk space (aimee-llm + combined legs)
         # The combined (aimee-server-kb) image now bundles the aimee-llm CPU
-        # runtime + ~5.5 GB of baked GGUFs (COPYd from aimee-kb-cpu), so it needs
+        # runtime + ~5.5 GB of baked GGUFs (COPYd from aimee-llm-cpu), so it needs
         # the same disk headroom as the llm legs.
         if: startsWith(matrix.image.name, 'aimee-kb-') || matrix.image.name == 'aimee-server-kb'
         run: |
@@ -181,11 +181,11 @@ jobs:
           # Bundled aimee-llm in the combined image is AMD64-ONLY: the llama.cpp
           # runtime baked into aimee-kb-cpu is the x64 Vulkan binary, so the arm64
           # combined leg builds lean (WITH_LLM=0) and points at an external llm.
-          # CAVEAT (ordering): the amd64 combined leg COPYs from aimee-kb-cpu:latest
+          # CAVEAT (ordering): the amd64 combined leg COPYs from aimee-llm-cpu:latest (the existing image; the
           # — i.e. the PREVIOUS release's llm image, since this run's llm tags aren't
           # manifest-merged until after the build matrix. The gateway/model contract
           # is stable across releases, but for a release that materially changes the
-          # llm image, publish/promote aimee-kb-cpu first (or re-run this leg).
+          # llm image, combined->aimee-kb-cpu migration is a follow-up once it publishes). Re-run the leg or promote first (or re-run this leg).
           # Digest-pinned ordering (combined `needs` the llm digest) is the follow-up.
           build-args: |
             AIMEE_VERSION=${{ needs.prep.outputs.version }}
@@ -194,7 +194,7 @@ jobs:
             ${{ matrix.image.reranker_arg }}
             ${{ matrix.image.extra_args }}
             ${{ (matrix.image.name == 'aimee-server-kb' && matrix.platform.arch == 'amd64') && 'WITH_LLM=1' || '' }}
-            ${{ (matrix.image.name == 'aimee-server-kb' && matrix.platform.arch == 'amd64') && format('AIMEE_LLM_CPU_IMAGE=ghcr.io/{0}/aimee-kb-cpu:latest', env.OWNER) || '' }}
+            ${{ (matrix.image.name == 'aimee-server-kb' && matrix.platform.arch == 'amd64') && format('AIMEE_LLM_CPU_IMAGE=ghcr.io/{0}/aimee-llm-cpu:latest', env.OWNER) || '' }}
             ${{ (matrix.image.name == 'aimee-server-kb' && matrix.platform.arch == 'arm64') && 'WITH_LLM=0' || '' }}
           outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
 

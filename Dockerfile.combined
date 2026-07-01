@@ -25,11 +25,11 @@ ARG WITH_VSCODE=1
 # the combined container is self-contained — no external embedder/llm service.
 # ON by default; build with --build-arg WITH_LLM=0 for the lean server+kb image
 # that points at an external AIMEE_LLM_URL (saves ~5.5 GB of baked models). The
-# runtime is COPYd from the prebuilt aimee-kb-cpu image (AIMEE_LLM_CPU_IMAGE),
+# runtime is COPYd from the prebuilt aimee-llm-cpu image (AIMEE_LLM_CPU_IMAGE),
 # so this build does NOT re-download or re-convert models; that image must exist
-# (CI: aimee-kb-cpu:testing / release: :latest, published by publish-llm-*.yml).
+# (CI: aimee-llm-cpu:testing / release: :latest, published by publish-llm-*.yml).
 ARG WITH_LLM=1
-ARG AIMEE_LLM_CPU_IMAGE=ghcr.io/rakuensoftware/aimee-kb-cpu:latest
+ARG AIMEE_LLM_CPU_IMAGE=ghcr.io/rakuensoftware/aimee-llm-cpu:latest
 FROM debian:bookworm-slim AS build
 
 # Union of the aimee-server and aimee-kb build deps: server links libsqlite3
@@ -113,7 +113,7 @@ FROM debian:bookworm-slim AS code-server-stage-0
 RUN mkdir -p /opt/codeserver/usr
 FROM code-server-stage-${WITH_VSCODE} AS code-server-stage
 
-# Optional bundled aimee-llm (CPU). "1" pulls the prebuilt aimee-kb-cpu image
+# Optional bundled aimee-llm (CPU). "1" pulls the prebuilt aimee-llm-cpu image
 # (llama.cpp/Vulkan runtime at /opt/llama, the gateway + supervisor under
 # /opt/aimee, and the baked GGUFs under /models) — BuildKit only materializes the
 # stage the final selector references, so WITH_LLM=0 never pulls this multi-GB
