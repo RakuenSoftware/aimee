@@ -1076,8 +1076,7 @@ int kb_client_index_find_callers(const char *project, const char *symbol, caller
  * ambiguous, no writes). Returns the raw kb JSON body (caller frees) or NULL if kb
  * unreachable. */
 char *kb_client_index_cross_repo_deps_json(const char *project, const char *direction,
-                                           const char *min_tier, int status_ambiguous,
-                                           int dry_run);
+                                           const char *min_tier, int status_ambiguous, int dry_run);
 
 /* S7: POST a per-repo trust change to the kb (project + trust required, actor +
  * request_id optional). Returns the raw kb JSON body on 2xx (caller frees); NULL

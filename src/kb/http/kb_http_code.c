@@ -667,8 +667,8 @@ int handle_get_code_cross_repo_deps(const char *query_string, char *out_buf, int
    int trunc = 0;
    xrepo_amb_cand_t *amb = NULL;
    size_t amb_n = 0;
-   if (canonical_index_cross_repo_deps_ex(project, &opts, &edges, &n, &trunc,
-                                          dry_run ? &amb : NULL, dry_run ? &amb_n : NULL) != 0)
+   if (canonical_index_cross_repo_deps_ex(project, &opts, &edges, &n, &trunc, dry_run ? &amb : NULL,
+                                          dry_run ? &amb_n : NULL) != 0)
    {
       snprintf(out_buf, (size_t)out_cap, "{\"error\":\"canonical index unavailable\"}");
       return 503;

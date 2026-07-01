@@ -1226,5 +1226,6 @@ int canonical_index_cross_repo_deps_ex(const char *project, const xrepo_deps_opt
 int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t *opts,
                                     xrepo_dep_edge_t **out_edges, size_t *out_n, int *truncated)
 {
-   return canonical_index_cross_repo_deps_ex(project, opts, out_edges, out_n, truncated, NULL, NULL);
+   return canonical_index_cross_repo_deps_ex(project, opts, out_edges, out_n, truncated, NULL,
+                                             NULL);
 }
