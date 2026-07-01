@@ -568,8 +568,12 @@ static void crd_flush(const crd_ctx_t *ctx, edge_acc_t *acc, const char *sym, in
       free((char *)defs[i].repo);
 }
 
-int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t *opts,
-                                    xrepo_dep_edge_t **out_edges, size_t *out_n, int *truncated)
+/* OUT-direction resolver: emit the cross-repo edges `project` -> D (deps OF
+ * `project`). This is the core engine; direction=IN/BOTH is layered on top by the
+ * public canonical_index_cross_repo_deps dispatcher, which reuses this per caller.
+ * opts->direction is IGNORED here (always computes OUT for the given project). */
+static int crd_compute_out(const char *project, const xrepo_deps_opts_t *opts,
+                           xrepo_dep_edge_t **out_edges, size_t *out_n, int *truncated)
 {
    if (out_edges)
       *out_edges = NULL;
@@ -585,11 +589,6 @@ int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t
    config_load(&cfg);
    if (!cfg.kb_curator_cross_repo_graph_enabled)
       return 0; /* feature off: empty result, not an error */
-   /* S4a implements the OUT direction (deps OF `project`). Reverse/both
-    * (dependents) land with the CLI --reverse surface (S6); until then a
-    * non-OUT request returns empty rather than silently OUT-direction results. */
-   if (opts->direction != XREPO_DIR_OUT)
-      return 0;
 
    xrepo_distinct_cfg_t dcfg = {.k = cfg.kb_curator_cross_repo_k,
                                 .m = cfg.kb_curator_cross_repo_m,
@@ -972,5 +971,164 @@ int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t
 
    *out_edges = acc.e;
    *out_n = acc.n;
+   return 0;
+}
+
+/* Append a full copy of one edge to an accumulator (used by the IN/BOTH merge;
+ * unlike edge_find_or_add it never merges — each reverse caller yields at most one
+ * edge to the target so duplicates cannot arise). Returns 0 on OOM. */
+static int agg_push(edge_acc_t *a, const xrepo_dep_edge_t *src)
+{
+   if (a->n == a->cap)
+   {
+      size_t nc = a->cap ? a->cap * 2 : 32;
+      xrepo_dep_edge_t *ne = realloc(a->e, nc * sizeof(*ne));
+      if (!ne)
+         return 0;
+      a->e = ne;
+      a->cap = nc;
+   }
+   a->e[a->n++] = *src;
+   return 1;
+}
+
+/* IN-direction resolver: emit the cross-repo edges A -> `target` (repos that
+ * depend ON `target`). Reuses crd_compute_out per candidate caller so a reverse
+ * edge is BYTE-IDENTICAL to the forward edge the OUT query would emit (symmetric
+ * consistency), inheriting every precision/recall/suppression rule. Candidate
+ * callers = the union of repos with a precomputed structural route into `target`
+ * (cross_repo_route) and repos that build-declare `target` (cross_repo_build_dep);
+ * this is a superset of the emitters, kept small so the per-caller fan-out stays
+ * bounded (§4.2). Edges are collected up to the candidate cap (then *trunc=1). */
+static int crd_compute_in(const char *target, const xrepo_deps_opts_t *opts, edge_acc_t *agg,
+                          int *trunc)
+{
+   void *conn = db2_conn();
+   if (!conn || !target || !opts)
+      return -1;
+
+   char callers[CRD_MAX_REPOS][128];
+   int nc = 0;
+   static const char *const caller_sql[2] = {
+       "SELECT DISTINCT caller_project FROM cross_repo_route WHERE definer_project = ?1",
+       "SELECT DISTINCT caller_project FROM cross_repo_build_dep WHERE definer_project = ?1"};
+   for (int q = 0; q < 2 && nc < CRD_MAX_REPOS; q++)
+   {
+      char err[CRD_ERR] = "";
+      aimee_pg_stmt_t *st = aimee_pg_prepare(conn, caller_sql[q], err, sizeof(err));
+      if (!st)
+         continue;
+      aimee_pg_bind_text(st, "?1", target);
+      while (nc < CRD_MAX_REPOS && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      {
+         const char *c = aimee_pg_column_text(st, 0);
+         if (!c || !c[0] || strcmp(c, target) == 0) /* a repo is never its own dependent */
+            continue;
+         int dup = 0;
+         for (int i = 0; i < nc; i++)
+            if (strcmp(callers[i], c) == 0)
+            {
+               dup = 1;
+               break;
+            }
+         if (!dup)
+            snprintf(callers[nc++], sizeof(callers[0]), "%s", c);
+      }
+      aimee_pg_finalize(st);
+   }
+
+   config_t cfg;
+   config_load(&cfg);
+   int cap =
+       opts->max_candidates > 0 ? opts->max_candidates : cfg.kb_curator_cross_repo_max_candidates;
+
+   /* Per-caller OUT, keeping only edges whose definer IS the target. Force the OUT
+    * direction and suppress review-queue writes: a reverse query is a read, and its
+    * per-caller fan-out must not enqueue AMBIGUOUS candidates for other repos. */
+   xrepo_deps_opts_t sub = *opts;
+   sub.direction = XREPO_DIR_OUT;
+   sub.include_review = 0;
+   for (int i = 0; i < nc; i++)
+   {
+      if (cap > 0 && (int)agg->n >= cap)
+      {
+         *trunc = 1;
+         break; /* candidate cap reached — stop the per-caller fan-out early. */
+      }
+      xrepo_dep_edge_t *e = NULL;
+      size_t n = 0;
+      int t = 0;
+      if (crd_compute_out(callers[i], &sub, &e, &n, &t) != 0)
+         continue;
+      if (t)
+         *trunc = 1;
+      for (size_t j = 0; j < n; j++)
+      {
+         if (strcmp(e[j].definer_repo, target) != 0)
+            continue;
+         if (cap > 0 && (int)agg->n >= cap)
+         {
+            *trunc = 1;
+            break;
+         }
+         if (!agg_push(agg, &e[j]))
+         {
+            free(e);
+            return -1;
+         }
+      }
+      free(e);
+   }
+   return 0;
+}
+
+/* Public entry: dispatch on direction. OUT delegates to the core engine; IN and
+ * BOTH layer the reverse traversal (crd_compute_in) on top, reusing OUT per caller
+ * for symmetric consistency (§B --reverse, §4 direction=in|both). */
+int canonical_index_cross_repo_deps(const char *project, const xrepo_deps_opts_t *opts,
+                                    xrepo_dep_edge_t **out_edges, size_t *out_n, int *truncated)
+{
+   if (out_edges)
+      *out_edges = NULL;
+   if (out_n)
+      *out_n = 0;
+   if (truncated)
+      *truncated = 0;
+   if (!project || !opts || !out_edges || !out_n)
+      return -1;
+
+   if (opts->direction == XREPO_DIR_OUT)
+      return crd_compute_out(project, opts, out_edges, out_n, truncated);
+
+   /* IN or BOTH: build a fresh accumulator. For BOTH, seed it with the forward
+    * (OUT) edges, then append the reverse (IN) edges. */
+   edge_acc_t agg = {0};
+   int trunc = 0;
+   if (opts->direction == XREPO_DIR_BOTH)
+   {
+      xrepo_dep_edge_t *oe = NULL;
+      size_t on = 0;
+      int ot = 0;
+      if (crd_compute_out(project, opts, &oe, &on, &ot) != 0)
+         return -1;
+      trunc |= ot;
+      for (size_t i = 0; i < on; i++)
+         if (!agg_push(&agg, &oe[i]))
+         {
+            free(oe);
+            free(agg.e);
+            return -1;
+         }
+      free(oe);
+   }
+   if (crd_compute_in(project, opts, &agg, &trunc) != 0)
+   {
+      free(agg.e);
+      return -1;
+   }
+   *out_edges = agg.e;
+   *out_n = agg.n;
+   if (truncated)
+      *truncated = trunc;
    return 0;
 }

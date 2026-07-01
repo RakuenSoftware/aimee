@@ -20,10 +20,9 @@ static int send_and_free(server_conn_t *conn, cJSON *resp)
  * rich (per-edge evidence + version stamp, or the AMBIGUOUS review queue when
  * status=ambiguous) so we forward it verbatim, same passthrough idiom as
  * handle_graph_explain. Inputs are validated at this public boundary so a direct
- * API client gets an actionable error rather than an opaque 502: the kb's
- * canonical query is OUT-only today (S4a), so direction=in/both is rejected here
- * instead of letting the kb 501 collapse into a bad-gateway. Validation runs
- * before any allocation, so the error paths cannot leak. */
+ * API client gets an actionable error rather than an opaque 502: direction must be
+ * out (default), in (dependents, --reverse), or both. Validation runs before any
+ * allocation, so the error paths cannot leak. */
 int handle_index_deps(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -33,9 +32,9 @@ int handle_index_deps(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "missing project", NULL);
 
    const char *direction = jo_str(req, "direction", NULL);
-   if (direction && strcmp(direction, "out") != 0)
-      return server_send_error(
-          conn, "direction not supported (only 'out'); reverse traversal is a later slice", NULL);
+   if (direction && strcmp(direction, "out") != 0 && strcmp(direction, "in") != 0 &&
+       strcmp(direction, "both") != 0)
+      return server_send_error(conn, "direction must be 'out', 'in', or 'both'", NULL);
 
    const char *status = jo_str(req, "status", NULL);
    if (status && strcmp(status, "ambiguous") != 0)

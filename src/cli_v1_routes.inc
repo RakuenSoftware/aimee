@@ -698,14 +698,14 @@ static cJSON *marshal_index_find_callers(int argc, char **argv)
    return req;
 }
 
-/* Marshal `aimee index deps <project> [--tier T] [--review]` (§B). --tier sets
- * the minimum emitted tier (high|medium|tentative); --review lists the AMBIGUOUS
- * queue (status=ambiguous). The kb canonical query is OUT-only today, so
- * --reverse (direction=in) and --dry-run (per-stage offline inspection) are
- * deferred to the slices that implement reverse traversal / candidate emission. */
+/* Marshal `aimee index deps <project> [--tier T] [--review] [--reverse]` (§B).
+ * --tier sets the minimum emitted tier (high|medium|tentative); --review lists the
+ * AMBIGUOUS queue (status=ambiguous); --reverse inverts direction to list repos
+ * that depend ON <project> (direction=in). --dry-run (per-stage offline
+ * inspection) is deferred to the candidate-emission slice. */
 static cJSON *marshal_index_deps(int argc, char **argv)
 {
-   static const char *bools[] = {"review", NULL};
+   static const char *bools[] = {"review", "reverse", NULL};
    rpc_opts_t opts;
    rpc_parse(argc, argv, bools, &opts);
 
@@ -717,6 +717,8 @@ static cJSON *marshal_index_deps(int argc, char **argv)
       cJSON_AddStringToObject(req, "min_tier", tier);
    if (rpc_get(&opts, "review"))
       cJSON_AddStringToObject(req, "status", "ambiguous");
+   if (rpc_get(&opts, "reverse"))
+      cJSON_AddStringToObject(req, "direction", "in");
    return req;
 }
 

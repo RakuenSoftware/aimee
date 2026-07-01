@@ -1650,8 +1650,9 @@ paths:
           in: query
           required: false
           description: >-
-            Dependency direction. Only "out" is implemented today; "in"/"both"
-            return 501. Ignored when status=ambiguous.
+            Dependency direction: "out" = deps OF the project (default), "in" =
+            repos that depend ON the project (reverse), "both" = union. Ignored
+            when status=ambiguous.
           schema:
             type: string
             enum: [out, in, both]
@@ -1686,8 +1687,6 @@ paths:
           description: Unauthorized
         "413":
           description: Response too large; narrow the query
-        "501":
-          description: Requested direction not yet implemented
         "503":
           description: Canonical index unavailable
 

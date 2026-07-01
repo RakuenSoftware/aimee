@@ -126,6 +126,43 @@ static void test_end_to_end(void)
    printf("ok\n");
 }
 
+/* Reverse traversal (§B --reverse / direction=in): querying the DEFINER lists the
+ * repos that depend ON it, and each reverse edge is byte-identical to the forward
+ * edge the OUT query emits. Runs immediately after test_end_to_end so the only
+ * seeded data is moonlight-qt -> moonlight-common-c (HIGH, import-corroborated). */
+static void test_reverse_direction(void)
+{
+   printf("test_reverse_direction... ");
+   xrepo_dep_edge_t *edges = NULL;
+   size_t n = 0;
+   int trunc = 0;
+
+   /* IN on the definer: exactly one dependent, moonlight-qt, same tier/evidence as OUT. */
+   xrepo_deps_opts_t in = {.direction = XREPO_DIR_IN, .min_tier = XREPO_TIER_MEDIUM};
+   int rc = canonical_index_cross_repo_deps("moonlight-common-c", &in, &edges, &n, &trunc);
+   assert(rc == 0 && n == 1);
+   assert(strcmp(edges[0].caller_repo, "moonlight-qt") == 0);
+   assert(strcmp(edges[0].definer_repo, "moonlight-common-c") == 0);
+   assert(edges[0].tier == XREPO_TIER_HIGH);
+   assert(edges[0].import_corroborated == 1);
+   assert(strcmp(edges[0].example_symbol, "LiStartConnection") == 0);
+   free(edges);
+
+   /* IN on the caller: nothing depends on moonlight-qt. */
+   rc = canonical_index_cross_repo_deps("moonlight-qt", &in, &edges, &n, &trunc);
+   assert(rc == 0 && n == 0);
+   free(edges);
+
+   /* BOTH on the caller: the forward OUT edge, no reverse edge -> exactly one. */
+   xrepo_deps_opts_t both = {.direction = XREPO_DIR_BOTH, .min_tier = XREPO_TIER_MEDIUM};
+   rc = canonical_index_cross_repo_deps("moonlight-qt", &both, &edges, &n, &trunc);
+   assert(rc == 0 && n == 1);
+   assert(strcmp(edges[0].caller_repo, "moonlight-qt") == 0);
+   assert(strcmp(edges[0].definer_repo, "moonlight-common-c") == 0);
+   free(edges);
+   printf("ok\n");
+}
+
 /* A symbol defined in two trusted repos that A imports NEITHER of, called in A:
  * multi-definer without corroboration -> AMBIGUOUS -> review queue (no edge). */
 static void test_ambiguous_to_review(void)
@@ -1035,6 +1072,7 @@ int main(void)
    db2_test_shim_open();
    test_empty_graceful();
    test_end_to_end();
+   test_reverse_direction();
    test_ambiguous_to_review();
    test_structural_edge_gate();
    test_cold_start_rebuild_to_gate();

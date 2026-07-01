@@ -1247,8 +1247,8 @@ paths:
       description: >-
         Proxies the kb cross-repo dependency query. Returns confidence-tiered
         edges with evidence + a version stamp, or the AMBIGUOUS review queue when
-        status=ambiguous. The canonical query is OUT-only today (S4a); direction
-        in/both is rejected with 400 until reverse traversal lands.
+        status=ambiguous. direction: out = deps OF the project (default), in =
+        repos that depend ON the project (--reverse), both = union.
       requestBody:
         required: true
         content:
@@ -1258,7 +1258,7 @@ paths:
               required: [project]
               properties:
                 project: { type: string }
-                direction: { type: string, enum: [out], default: out }
+                direction: { type: string, enum: [out, in, both], default: out }
                 min_tier: { type: string, enum: [high, medium, tentative] }
                 status: { type: string, enum: [ambiguous] }
       responses:

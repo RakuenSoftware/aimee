@@ -637,16 +637,26 @@ int handle_get_code_cross_repo_deps(const char *query_string, char *out_buf, int
    if (strcmp(status_s, "ambiguous") == 0)
       return handle_get_code_cross_repo_review(project, out_buf, out_cap);
 
-   /* direction in/both (dependents) is documented in OpenAPI but not yet
-    * implemented (S4a is OUT-only) -> 501, not a misleading empty 200. */
-   if (strcmp(dir_s, "in") == 0 || strcmp(dir_s, "both") == 0)
+   /* direction: out (deps OF project, default), in (dependents, §B --reverse), or
+    * both. An unrecognized non-empty value is a client error, not a silent OUT. */
+   xrepo_direction_t dir = XREPO_DIR_OUT;
+   if (dir_s[0])
    {
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"error\":\"direction '%s' not yet implemented\",\"code\":501}", dir_s);
-      return 501;
+      if (strcmp(dir_s, "out") == 0)
+         dir = XREPO_DIR_OUT;
+      else if (strcmp(dir_s, "in") == 0)
+         dir = XREPO_DIR_IN;
+      else if (strcmp(dir_s, "both") == 0)
+         dir = XREPO_DIR_BOTH;
+      else
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"direction must be out, in, or both\",\"code\":400}");
+         return 400;
+      }
    }
    xrepo_deps_opts_t opts = {
-       .min_tier = crd_parse_min_tier(tier_s), .direction = XREPO_DIR_OUT, .include_review = 0};
+       .min_tier = crd_parse_min_tier(tier_s), .direction = dir, .include_review = 0};
 
    xrepo_dep_edge_t *edges = NULL;
    size_t n = 0;

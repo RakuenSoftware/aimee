@@ -115,7 +115,7 @@ Cross-repo dependency edges for a project (confidence-tiered, with evidence + ve
 | Name | In | Required | Type | Description |
 |------|----|----------|------|-------------|
 | `project` | query | yes | string |  |
-| `direction` | query | no | string (out, in, both) | Dependency direction. Only "out" is implemented today; "in"/"both" return 501. Ignored when status=ambiguous. |
+| `direction` | query | no | string (out, in, both) | Dependency direction: "out" = deps OF the project (default), "in" = repos that depend ON the project (reverse), "both" = union. Ignored when status=ambiguous. |
 | `min_tier` | query | no | string (high, medium, tentative) | Minimum confidence tier to emit. Ignored when status=ambiguous. |
 | `status` | query | no | string (ambiguous) | When "ambiguous", returns the AMBIGUOUS review queue for the project instead of edges (direction/min_tier are not applied in that mode). |
 
@@ -125,7 +125,6 @@ Responses:
 - `400` — Missing required parameters
 - `401` — Unauthorized
 - `413` — Response too large; narrow the query
-- `501` — Requested direction not yet implemented
 - `503` — Canonical index unavailable
 
 ### `GET /v1/code/find`
