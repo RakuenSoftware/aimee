@@ -37,18 +37,27 @@ surfaces as a failing container rather than silent slow throughput.
 Free system RAM needed ≈ `N/40 × 22 GB` for the offloaded experts (e.g. `N=24` →
 ~13 GB). Make sure the host has it free alongside other LXC/containers.
 
+**Measured baseline (7900 XTX, RADV, b9775).** Smoke-tested standalone on `.254` with
+`N_CPU_MOE=40` (all experts on CPU — the *worst case*) + 16K ctx: ~**12 tok/s** generation,
+~25 tok/s prompt, +2.6 GB GPU footprint. That's the floor; the shipped `N_CPU_MOE=24`
+keeps ~16 expert layers resident and is meaningfully faster. Use this as the low-water
+mark when sizing.
+
 ## Flash-attention / KV cache: `AIMEE_DELEGATE_KV_V`
 
-K8V4 (`KV_K=q8_0`, `KV_V=q4_0`) is the default. Quantized **V**-cache requires working
-flash-attention on the Vulkan backend. The entrypoint parses the server startup log
-and, if FA did **not** engage, logs:
+K8V4 (`KV_K=q8_0`, `KV_V=q4_0`) is the default and is **verified working on RADV/gfx1100**
+(7900 XTX, llama.cpp b9775) — the delegate loads and serves with it.
 
-```
-CRITICAL: flash-attention did NOT engage ... Set AIMEE_DELEGATE_KV_V=q8_0 (K8V8) and redeploy.
-```
+FA is enforced **structurally, not by log-scraping**: llama.cpp refuses to create a
+context with a quantized V-cache unless flash-attention is active (`-fa off` +
+`--cache-type-v q4_0` dies with *"V cache quantization requires flash_attn"*). The
+entrypoint always passes `-fa on`, so **a healthy container already proves FA engaged** —
+if a backend can't do FA, `llama-server` never starts and the container never goes
+healthy (fail-loud). There is nothing to grep.
 
-and trips the healthcheck. If you hit that on your RADV/driver combo, set
-`AIMEE_DELEGATE_KV_V=q8_0` (K8V8 — larger KV, no FA dependency) and redeploy.
+If you ever run on a backend that genuinely can't do FA, note that **K8V8 (`q8_0` V) does
+NOT help — *any* quantized V-cache requires FA.** The only FA-free fallback is an
+**unquantized V-cache**: set `AIMEE_DELEGATE_KV_V=f16` (larger KV, no FA dependency).
 
 ## Wiring into aimee
 

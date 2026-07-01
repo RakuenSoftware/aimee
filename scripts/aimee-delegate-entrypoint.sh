@@ -117,16 +117,19 @@ log "llama-server ready on :$PORT"
 
 verify_startup() {
   local bad=0                                     # 0 = healthy (shell success); 1 = degraded
-  # (a) flash-attention engaged?  llama.cpp logs "flash_attn = 1" (or "enabled").
-  if grep -qiE 'flash[_ ]?att.*(= *1|enabled|: *1|on)' "$LOG"; then
-    log "verified: flash-attention ENGAGED"
-  elif grep -qiE 'flash[_ ]?att.*(= *0|disabled|not supported)' "$LOG"; then
-    log "CRITICAL: flash-attention did NOT engage on this backend, but KV V-cache=$KV_V was requested"
-    log "CRITICAL:   -> quantized V-cache without FA hits a slow dequant path. Set AIMEE_DELEGATE_KV_V=q8_0 (K8V8) and redeploy."
-    bad=1
-  else
-    log "WARN: could not determine flash-attention state from server log (continuing)"
-  fi
+  # (a) Flash-attention. VERIFIED LIVE on RADV/gfx1100 (b9775): the Vulkan build logs
+  #     NO flash_attn state (neither the server log nor /props expose it), so grepping
+  #     for it is futile. Instead FA is guaranteed STRUCTURALLY: llama.cpp refuses to
+  #     create a context with a quantized V-cache unless FA is active -- confirmed
+  #     empirically: `-fa off --cache-type-v q4_0` dies with
+  #     "V cache quantization requires flash_attn". We always pass `-fa on`, so a server
+  #     that reached /health with a quantized V-cache has FA engaged by construction; if
+  #     a backend can't do FA, llama-server never starts (loud) and this container never
+  #     becomes healthy. Nothing to grep, nothing to assert.
+  case "$KV_V" in
+    f16|f32|"") log "note: V-cache=${KV_V:-default} is unquantized; FA still requested via -fa on" ;;
+    *)          log "flash-attention ENGAGED (server reached /health with quantized V-cache=$KV_V, which llama.cpp refuses without FA)" ;;
+  esac
   # (b) MoE residency. NOTE: llama.cpp does NOT reliably emit an 'out of memory' string
   #     for SILENT expert CPU-fallback under VRAM pressure (panel code-review [1]) --
   #     it just prints per-device buffer sizes. So we (1) still fail on an EXPLICIT
