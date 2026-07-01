@@ -1004,7 +1004,7 @@ static int crd_compute_in(const char *target, const xrepo_deps_opts_t *opts, edg
                           int *trunc)
 {
    void *conn = db2_conn();
-   if (!conn || !target || !opts)
+   if (!conn || !target || !opts || !agg || !trunc)
       return -1;
 
    char callers[CRD_MAX_REPOS][128];
@@ -1059,7 +1059,13 @@ static int crd_compute_in(const char *target, const xrepo_deps_opts_t *opts, edg
       size_t n = 0;
       int t = 0;
       if (crd_compute_out(callers[i], &sub, &e, &n, &t) != 0)
+      {
+         /* A per-caller failure (transient DB/OOM) must not be silently swallowed:
+          * flag the result partial (§4.2) so a reverse read cannot masquerade as a
+          * complete "no dependents" answer when a caller was actually skipped. */
+         *trunc = 1;
          continue;
+      }
       if (t)
          *trunc = 1;
       for (size_t j = 0; j < n; j++)
