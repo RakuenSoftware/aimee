@@ -32,7 +32,7 @@ services:
   # bearer, so it runs auth-off (AIMEE_LLM_AUTH_TOKEN empty) on the internal net.
   aimee-llm:
     restart: unless-stopped
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:cpu}
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-cpu:latest}
     environment:
       AIMEE_LLM_PORT: "8742"
       AIMEE_LLM_NGL: ${AIMEE_LLM_NGL:-0}

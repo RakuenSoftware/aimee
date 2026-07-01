@@ -30,13 +30,24 @@ services:
       # Versioned + :latest publishing is owned by main (auto-release.yml ->
       # publish-images.yml). On `testing`, pin to :testing instead to validate a
       # tested-but-unreleased build (publish-llm-testing.yml).
-      image: ghcr.io/rakuensoftware/aimee-llm-gpu:latest
+      #
+      # SYNTH TIER = which image you reference (embed+rerank identical on the GPU
+      # tiers, so switching is an image swap, no KB re-embed):
+      #   aimee-kb-gpu-small  Gemma-4-12B synth (dense; fits 16GB+)
+      #   aimee-kb-gpu-mid    Qwen 3.6 35B-A3B synth (MoE; 24GB+, experts offload to
+      #                       RAM via the baked AIMEE_LLM_SYNTH_N_CPU_MOE, default 20)
+      # aimee-kb-cpu is the CPU tier (1024-dim; NGL=0). See docs/AIMEE_KB_SYNTH_TIERS.md.
+      image: ghcr.io/rakuensoftware/aimee-kb-gpu-mid:latest
     container:
       restartPolicy: unless-stopped
     env:
-      # Offload all layers to the GPU (the 7900 XTX has the VRAM for the 4B embed
-      # + 12B synth tier). The CPU image defaults this to 0.
+      # Offload all layers to the GPU (the 7900 XTX has the VRAM for the 4B embed +
+      # the synth tier). The CPU image defaults this to 0. On gpu-mid (Qwen) the synth
+      # additionally spills MoE experts to RAM per the baked AIMEE_LLM_SYNTH_N_CPU_MOE;
+      # lower it toward 0 on a 32GB card for more speed, or raise it if VRAM is tight.
       AIMEE_LLM_NGL: "99"
+      # Qwen serves a bigger context than the 32K default; raise it here.
+      AIMEE_LLM_SYNTH_CTX: "131072"
       # Gateway port. 8742 (aimee's 874x range: server 8740, kb 8741) — NOT 8080,
       # which Wolf's WolfLeash UI host-publishes. A hostExpose port is published on
       # the HOST, so two plugins on the same port silently collide (the runtime

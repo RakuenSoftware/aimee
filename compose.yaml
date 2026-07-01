@@ -133,7 +133,7 @@ services:
   # builds a tiny python-only stub (no llama.cpp / GGUFs) — see e2e-matrix.sh.
   aimee-llm:
     restart: unless-stopped
-    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-llm:cpu}
+    image: ${AIMEE_LLM_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-cpu:latest}
     build:
       context: .
       dockerfile: ${AIMEE_LLM_DOCKERFILE:-Dockerfile.aimee-llm}

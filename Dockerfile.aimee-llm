@@ -4,8 +4,8 @@
 #
 # Two published images (operator-directed: models baked in, not runtime-fetched —
 # turnkey, reproducible, no HF dependency at run time):
-#   aimee-llm-cpu  (TIER=cpu, default): Qwen3-Embedding-0.6B + ettin-68m + gemma-4-E4B
-#   aimee-llm-gpu  (TIER=gpu, via build args): Qwen3-Embedding-4B + ettin-400m + gemma-4-12B
+#   aimee-kb-cpu       (defaults): Qwen3-Embedding-0.6B + ettin-68m + gemma-4-E4B
+#   aimee-kb-gpu-small/mid (build args): 4B + ettin-400m + gemma-12B OR Qwen3.6-35B-A3B
 # The llama.cpp binary is the VENDOR-AGNOSTIC Vulkan build (one binary for AMD/
 # Nvidia/Intel); GPU is selected at runtime by AIMEE_LLM_NGL (CPU image defaults 0).
 #
@@ -21,6 +21,20 @@ ARG EMBED_POOLING=last
 ARG RERANK_REPO=cross-encoder/ettin-reranker-68m-v1
 ARG SYNTH_REPO=ggml-org/gemma-4-E4B-it-GGUF
 ARG SYNTH_FILE=gemma-4-E4B-it-Q4_K_M.gguf
+# Supply-chain pins for the synth GGUF (optional; set per tier in CI). When
+# SYNTH_SHA256 is set the build verifies the download and FAILS on mismatch — a
+# compromised/MITM'd HF upload can't ship. SYNTH_REVISION pins the HF commit.
+ARG SYNTH_REVISION=main
+ARG SYNTH_SHA256=
+# Per-tier synth runtime profile (baked -> ENV; the supervisor reads these). Defaults
+# = the CPU/gemma tier (dense, no FA/MoE). The gpu-mid (Qwen MoE) tier overrides them.
+ARG SYNTH_FA=off
+ARG SYNTH_KV_K=q8_0
+ARG SYNTH_KV_V=q4_0
+ARG SYNTH_MOE=0
+ARG SYNTH_MOE_LAYERS=40
+ARG SYNTH_N_CPU_MOE=0
+ARG SYNTH_SLOTS=1
 
 # ---- stage 1: prepare the baked models (convert ettin encoder + fetch GGUFs) ----
 FROM python:3.12-slim AS modelprep
@@ -30,6 +44,8 @@ ARG EMBED_FILE
 ARG RERANK_REPO
 ARG SYNTH_REPO
 ARG SYNTH_FILE
+ARG SYNTH_REVISION
+ARG SYNTH_SHA256
 ENV PIP_NO_CACHE_DIR=1 HF_HUB_DISABLE_TELEMETRY=1
 RUN apt-get update && apt-get install -y --no-install-recommends git wget ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -62,9 +78,16 @@ np.savez("/out/rerank-head/head.npz", W2=W2, W4=d4["linear.weight"], b4=d4["line
          gamma=ln["norm.weight"], beta=ln["norm.bias"])
 print("head.npz written")
 PY
-# Embedder + synth GGUFs (direct HF download)
+# Embedder + synth GGUFs. Synth is pinned by revision (default main) with retries so
+# a transient blip on the 22GB mid-tier pull doesn't kill the build, then sha256-
+# verified when SYNTH_SHA256 is set (build fails on a compromised/MITM'd upload).
 RUN wget -q -O /out/embed.gguf  "https://huggingface.co/${EMBED_REPO}/resolve/main/${EMBED_FILE}" \
-    && wget -q -O /out/synth.gguf "https://huggingface.co/${SYNTH_REPO}/resolve/main/${SYNTH_FILE}"
+    && wget -q -c --tries=5 --timeout=30 --waitretry=10 -O /out/synth.gguf \
+        "https://huggingface.co/${SYNTH_REPO}/resolve/${SYNTH_REVISION}/${SYNTH_FILE}" \
+    && if [ -n "${SYNTH_SHA256}" ]; then \
+         echo "${SYNTH_SHA256}  /out/synth.gguf" | sha256sum -c - \
+         && echo "${SYNTH_SHA256}  synth.gguf" > /out/synth.sha256 ; \
+       fi
 
 # ---- stage 2: runtime — Vulkan llama.cpp + the gateway ----
 FROM debian:bookworm-slim AS runtime
@@ -85,6 +108,27 @@ COPY scripts/aimee_llm_gateway.py scripts/aimee_llm_rerank_head.py /opt/aimee/
 COPY scripts/aimee-llm-supervisor.sh /opt/aimee/supervisor.sh
 RUN chmod +x /opt/aimee/supervisor.sh
 COPY --from=modelprep /out /models
+
+# Per-tier synth runtime profile baked from build-args (the supervisor reads these).
+ARG SYNTH_FA
+ARG SYNTH_KV_K
+ARG SYNTH_KV_V
+ARG SYNTH_MOE
+ARG SYNTH_MOE_LAYERS
+ARG SYNTH_N_CPU_MOE
+ARG SYNTH_SLOTS
+ARG SYNTH_REPO
+ARG SYNTH_FILE
+ARG SYNTH_SHA256
+LABEL org.aimee.kb.synth.model="${SYNTH_REPO}/${SYNTH_FILE}" \
+      org.aimee.kb.synth.sha256="${SYNTH_SHA256}"
+ENV AIMEE_LLM_SYNTH_FA=${SYNTH_FA} \
+    AIMEE_LLM_SYNTH_KV_K=${SYNTH_KV_K} \
+    AIMEE_LLM_SYNTH_KV_V=${SYNTH_KV_V} \
+    AIMEE_LLM_SYNTH_MOE=${SYNTH_MOE} \
+    AIMEE_LLM_SYNTH_MOE_LAYERS=${SYNTH_MOE_LAYERS} \
+    AIMEE_LLM_SYNTH_N_CPU_MOE=${SYNTH_N_CPU_MOE} \
+    AIMEE_LLM_SYNTH_SLOTS=${SYNTH_SLOTS}
 
 # Gateway + per-role serving config (the supervisor reads these).
 ENV AIMEE_LLM_PORT=8080 \
