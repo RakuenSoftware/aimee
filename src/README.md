@@ -699,7 +699,7 @@ must be fast.
 #### 1. Run the server (Docker)
 
 The combined image co-locates both binaries in one container. Postgres (pgvector)
-and the embedder come up alongside it:
+comes up alongside it, and the CPU inference gateway is bundled in the image:
 
 ```bash
 git clone https://github.com/RakuenSoftware/aimee.git
