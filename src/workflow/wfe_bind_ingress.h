@@ -1,29 +1,21 @@
 /* wfe_bind_ingress.h -- S2 binding-creation seam (the live unblock).
  *
  * The dispatch guard + advance_request driver (sub-slices 3/4) key on the aimee
- * session id, but the live primary's chat turn reaches the /v1/messages gateway
- * with NO session id (gw_request_t carries none). This module closes that gap: the
- * client encodes the session id in the primary provider's auth token
- * ("aimee-sess-<sid>"), the server extracts it at HTTP ingress, and on a routed
- * ENFORCED turn creates + binds a work-item so enforcement can fire.
+ * session id, but nothing created a session->work-item binding, so enforcement was
+ * dormant. This module closes that gap: on a routed ENFORCED primary turn it
+ * creates + binds a work-item, so the guard + driver can fire.
  *
- * PURE where it can be: the token parser has no deps; the bind path composes the
- * existing router + work-item + binding APIs behind the enforcement dial.
- * Default-OFF: with the dial unset nothing binds. */
+ * The session id reaches the gateway router via the per-turn thread-local
+ * ingress_preinject_session_id(), which the AUTHORITATIVE in-process primary turn
+ * publishes beside its existing session_id override (server_compute /
+ * primary_session_adapter). An additional client-stamped auth-token channel for the
+ * external-CLI /v1/messages proxy path is deliberately deferred: it needs an
+ * AUTHENTICATED per-session identity (an unauthenticated "aimee-sess-<sid>" token
+ * would let any caller bind an arbitrary session), so it is a separate follow-on.
+ *
+ * Default-OFF: with the enforcement dial unset nothing binds. */
 #ifndef DEC_WFE_BIND_INGRESS_H
 #define DEC_WFE_BIND_INGRESS_H 1
-
-#include <stddef.h>
-
-/* The auth-token identity prefix the client stamps on the primary provider so the
- * gateway can recover the aimee session id from an otherwise-opaque request. */
-#define WFE_SESSION_TOKEN_PREFIX "aimee-sess-"
-
-/* Extract the aimee session id from a client auth value of the form
- * "aimee-sess-<sid>" (a leading "Bearer " is tolerated). The recovered sid must be
- * id-charset ([A-Za-z0-9_-], the mint format). Returns 1 and fills `out` on a
- * match, 0 otherwise (not an aimee-session token / bad charset / overflow). Pure. */
-int wfe_session_id_from_auth(const char *auth_value, char *out, size_t n);
 
 /* On an interactive primary turn, ensure `session_id` is bound to a work-item for
  * the workflow the router picks for `message` -- but ONLY if the routed workflow is

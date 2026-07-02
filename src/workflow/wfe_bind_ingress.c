@@ -5,45 +5,25 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "cJSON.h"
 #include "wfe_binding.h" /* db1_wfe_bind, db1_wfe_binding_get */
 #include "wfe_enforce.h" /* the dial */
 #include "wfe_engine.h"  /* wfe_work_item_create */
 #include "wfe_router.h"  /* catalog + decide + find */
 #include "wfe_store.h"   /* db1_lifecycle_event_add */
 
-/* id-charset guard: [A-Za-z0-9_-], 1..cap-1 chars (the session-id mint format). */
-static int id_ok(const char *s, size_t cap)
+static void audit_bind(const char *wi, const char *workflow, const char *stage)
 {
-   if (!s || !s[0])
-      return 0;
-   size_t l = 0;
-   for (const char *p = s; *p; p++, l++)
-   {
-      char c = *p;
-      if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-            c == '_' || c == '-'))
-         return 0;
-   }
-   return l < cap;
-}
-
-int wfe_session_id_from_auth(const char *auth_value, char *out, size_t n)
-{
-   if (out && n)
-      out[0] = '\0';
-   if (!auth_value || !out || !n)
-      return 0;
-   const char *v = auth_value;
-   if (strncmp(v, "Bearer ", 7) == 0)
-      v += 7;
-   size_t pfx = sizeof(WFE_SESSION_TOKEN_PREFIX) - 1;
-   if (strncmp(v, WFE_SESSION_TOKEN_PREFIX, pfx) != 0)
-      return 0;
-   const char *sid = v + pfx;
-   if (!id_ok(sid, n))
-      return 0;
-   snprintf(out, n, "%s", sid);
-   return 1;
+   cJSON *d = cJSON_CreateObject();
+   if (!d)
+      return;
+   cJSON_AddStringToObject(d, "workflow", workflow ? workflow : "");
+   cJSON_AddStringToObject(d, "stage", stage ? stage : "");
+   char *s = cJSON_PrintUnformatted(d);
+   cJSON_Delete(d);
+   if (s)
+      db1_lifecycle_event_add(wi, "", "bind", "bind-s2", s, "", 0);
+   free(s);
 }
 
 int wfe_bind_interactive(const char *session_id, const char *message, const char *repo)
@@ -90,9 +70,6 @@ int wfe_bind_interactive(const char *session_id, const char *message, const char
    if (db1_wfe_bind(session_id, id, wfe_enforce_stage_name(stage)) != 0)
       return 0;
 
-   char detail[128];
-   snprintf(detail, sizeof detail, "{\"workflow\":\"%s\",\"stage\":\"%s\"}", w->id,
-            wfe_enforce_stage_name(stage));
-   db1_lifecycle_event_add(id, "", "bind", "bind-s2", detail, "", 0);
+   audit_bind(id, w->id, wfe_enforce_stage_name(stage));
    return 1;
 }

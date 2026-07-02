@@ -1,7 +1,7 @@
-/* test_wfe_bind_ingress.c -- S2 binding seam: the auth-token->sid parser (pure)
- * + the idempotent interactive bind (real DB1 + router + engine, stub executors).
- * Asserts: only enforced-routed turns bind, dial-off is inert, binding is
- * idempotent per session, and a bind lifecycle event is recorded. */
+/* test_wfe_bind_ingress.c -- S2 binding seam: the idempotent interactive bind
+ * (real DB1 + router + engine, stub executors). Asserts: only enforced-routed
+ * turns bind, dial-off is inert, binding is idempotent per session, and a bind
+ * lifecycle event is recorded. */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -82,23 +82,6 @@ static void setup_home(void)
    setenv("AIMEE_WORKFLOW_REPO", repo, 1);
 }
 
-static void test_parse(void)
-{
-   char sid[64];
-   assert(wfe_session_id_from_auth("aimee-sess-1a2b3c4d", sid, sizeof sid) == 1);
-   assert(strcmp(sid, "1a2b3c4d") == 0);
-   assert(wfe_session_id_from_auth("Bearer aimee-sess-deadbeef", sid, sizeof sid) == 1);
-   assert(strcmp(sid, "deadbeef") == 0);
-   /* not an aimee-session token */
-   assert(wfe_session_id_from_auth("sk-ant-whatever", sid, sizeof sid) == 0);
-   assert(wfe_session_id_from_auth("aimee-local", sid, sizeof sid) == 0);
-   assert(wfe_session_id_from_auth("", sid, sizeof sid) == 0);
-   assert(wfe_session_id_from_auth(NULL, sid, sizeof sid) == 0);
-   /* bad charset in the sid (injection guard) */
-   assert(wfe_session_id_from_auth("aimee-sess-a/b", sid, sizeof sid) == 0);
-   assert(wfe_session_id_from_auth("aimee-sess-", sid, sizeof sid) == 0);
-}
-
 static int binding_wi(const char *sid, char *out, size_t n)
 {
    return db1_wfe_binding_get(sid, out, n, NULL, 0);
@@ -107,7 +90,6 @@ static int binding_wi(const char *sid, char *out, size_t n)
 int main(void)
 {
    printf("wfe-bind-ingress: ");
-   test_parse();
 
    setup_home();
    assert(db1_init(":memory:") == 0);
