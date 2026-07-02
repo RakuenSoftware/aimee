@@ -64,7 +64,7 @@ recall.
   design onto the charter spine + shipped work; sets the CPU-first
   curator profile and the size-adaptive vector-index strategy.
   Introduces the four siblings below. **Done.**
-- [aimee-kb Service and Public `/v1/` API](proposa../done/aimee-kb-service-and-public-api.md):
+- aimee-kb Service and Public `/v1/` API:
   service topology; install-today profile picker; OpenAPI v1; SDKs;
   auth; corpus staging and release gating; reflection HTTP surface.
   Phase 1 shipped, `/v1/health`, `/v1/version`, `/v1/capabilities`; bearer-token
@@ -357,7 +357,7 @@ two are defense in depth.
   behind the stdio JSON protocol), provenance fields in `result_schema.py`, judge-profile / dataset-hash
   refusal check in `verify_scores.py`, and `benchmarks/suite/` dispatch scripts.
   PR2 (pinned open-weights judge) and PR3+ require dogfood and calibration study.
-- [aimee-kb Service and Public `/v1/` API](proposa../done/aimee-kb-service-and-public-api.md):
+- aimee-kb Service and Public `/v1/` API:
   Phase 1 shipped, `/v1/health`, `/v1/version`, `/v1/capabilities` HTTP endpoints;
   bearer-token auth middleware; `kb.api.http_port` / `kb_api_bearer_token` config; `--http-port=N`
   CLI arg; OpenAPI 3.1 spec at `api/openapi-v1.yaml`. Phases 2+ require dogfood.

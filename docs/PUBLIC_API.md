@@ -224,7 +224,3 @@ and [`config/aimee-kb.yaml.example`](../config/aimee-kb.yaml.example).
 
 - [`api/openapi-v1.yaml`](../api/openapi-v1.yaml): the contract.
 - [`docs/gen/api-v1.md`](gen/api-v1.md): generated reference.
-- [`docs/proposa../done/aimee-kb-service-and-public-api.md`](proposa../done/aimee-kb-service-and-public-api.md)
-  is the owning proposal.
-- [`docs/proposals/done/memory-public-contract.md`](proposals/done/memory-public-contract.md)
-  is the caller-facing contract reused across CLI / MCP / `/v1`.

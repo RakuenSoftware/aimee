@@ -1,7 +1,6 @@
 # `/v1` op-parity buildout: route→method map and wave plan
 
-> Working tracker for **P1 / WP1.x / WP1.fin** of the
-> [aimee `/v1` hub-migration plan](proposals/accepted/aimee-v1-hub-migration-plan.md).
+> Working tracker for **P1 / WP1.x / WP1.fin** of the aimee `/v1` hub-migration plan.
 > Goal: **every NDJSON RPC method gets a first-class `/v1` HTTP route** (or a
 > documented, deliberate exclusion). The generic `POST /v1/rpc` passthrough is
 > retired; this buildout gave each method a dedicated, self-documenting,
