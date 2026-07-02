@@ -933,14 +933,16 @@ Containers are the recommended deployment (developers then install only the
 [thin client](#2-install-the-thin-client)). Four compose files ship; pick by
 topology. They build from three images: **`aimee-server`** (`Dockerfile.server`),
 **`aimee-kb`** (`Dockerfile`), and **`aimee-server+kb`** (`Dockerfile.combined`).
-Every stack also brings up a `pgvector/pgvector:pg16` Postgres (DB2) and a CPU
-embedder sidecar (`Dockerfile.embedder`); the kb auto-applies its DB2 schema on
-first boot. The sidecar ships in two tiers (embedder + reranker baked into one
-image): the default `aimee-embedder` (`pplx-embed-v1-0.6b`, 1024-dim, +
-`ettin-reranker-400m`) and the higher-fidelity `aimee-embedder-4b`
-(`pplx-embed-v1-4b`, 2560-dim, + `ettin-reranker-1b`). Switch with
-`AIMEE_EMBEDDER_IMAGE` plus `embedding_dim: 2560` (or `AIMEE_EMBEDDING_DIM=2560`).
-Trade-offs: [retrieval-stack.md](../docs/retrieval-stack.md#choosing-a-tier).
+Every stack also brings up a `pgvector/pgvector:pg16` Postgres (DB2), and the kb
+auto-applies its DB2 schema on first boot. The combined image bundles a CPU
+inference gateway (embeddings, reranking, and synthesis) from the `aimee-kb` image
+family, so embedding and reranking work with nothing external. The CPU tier serves
+Qwen3-Embedding-0.6B at 1024 dims; the GPU tiers (`aimee-kb-gpu-small`,
+`aimee-kb-gpu-mid`) serve Qwen3-Embedding-4B at 2560 dims and add a GPU synth. To
+run a standalone embedder or curator LLM instead of the bundled gateway, use the
+`external-llm` compose profile. Backends and tiers:
+[KB_LLM_BACKENDS.md](../docs/KB_LLM_BACKENDS.md) and
+[AIMEE_KB_SYNTH_TIERS.md](../docs/AIMEE_KB_SYNTH_TIERS.md).
 
 > **`docker compose ... up --build` needs no credentials.** The browser UI
 > (`aimee-webchat`) is built into every image and on by default. Its frontend
