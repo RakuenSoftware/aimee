@@ -482,6 +482,7 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/config_save.c
     ${AIMEE_SRC_DIR}/util.c
     ${AIMEE_SRC_DIR}/util_url.c
+    ${AIMEE_SRC_DIR}/audit_action.c
     ${AIMEE_SRC_DIR}/report_enrichment.c
     ${AIMEE_SRC_DIR}/delivery_target.c
     ${AIMEE_SRC_DIR}/text.c

@@ -80,6 +80,7 @@ add_test(NAME test_context_engine COMMAND test_context_engine)
 set_tests_properties(test_context_engine PROPERTIES
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 aimee_add_test(test_util test_util.c)
+aimee_add_test(test_audit_action test_audit_action.c)
 aimee_add_test(test_db test_db.c)
 aimee_add_test(test_config test_config.c)
 aimee_add_test(test_cron_config test_cron_config.c ../config_trigger.c)
