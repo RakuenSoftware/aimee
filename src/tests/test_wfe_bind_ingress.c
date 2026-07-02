@@ -216,21 +216,30 @@ int main(void)
    /* empty session id -> never binds */
    assert(wfe_bind_interactive("", "use mc x", NULL) == 0);
 
-   /* bind-health detector: enforced routes with zero binds -> WARN once; but if any
-    * bind has happened, no warn (avoids false positives on a working path). */
+   /* bind-health detector: enforced routes with no INTERVENING bind -> WARN. */
    wfe_bind_health_reset();
    wfe_bind_health_note_enforced_route();
    wfe_bind_health_note_enforced_route();
    assert(wfe_bind_health_warned() == 0); /* below threshold */
-   wfe_bind_health_note_enforced_route(); /* 3rd, still 0 binds */
+   wfe_bind_health_note_enforced_route(); /* 3rd since last bind */
    assert(wfe_bind_health_warned() == 1); /* inert path detected */
 
+   /* a working path (each route followed by a bind) never accumulates -> no warn */
    wfe_bind_health_reset();
-   wfe_bind_health_note_bind(); /* a bind happened */
+   for (int i = 0; i < 5; i++)
+   {
+      wfe_bind_health_note_enforced_route();
+      wfe_bind_health_note_bind();
+   }
+   assert(wfe_bind_health_warned() == 0);
+
+   /* REGRESSION after working: a bind re-arms, then routes without binds warn AGAIN */
+   wfe_bind_health_note_bind(); /* rearm */
+   assert(wfe_bind_health_warned() == 0);
    wfe_bind_health_note_enforced_route();
    wfe_bind_health_note_enforced_route();
    wfe_bind_health_note_enforced_route();
-   assert(wfe_bind_health_warned() == 0); /* binds>0 -> never warns */
+   assert(wfe_bind_health_warned() == 1); /* regression re-detected */
 
    printf("ok\n");
    return 0;

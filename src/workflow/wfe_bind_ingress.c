@@ -15,40 +15,43 @@
 
 /* Runtime bind-health detector (pre-hard-flip hardening / consult overnight [9][30]):
  * catch a SILENTLY-INERT enforce path -- the dial is on and enforced-routed turns
- * are arriving, but nothing ever binds (a wiring regression). We track two atomic
- * counters and WARN ONCE when enforced routes are clearly happening yet zero binds
- * have occurred. Only enforced routes are counted, so an IDLE server (0 turns) never
- * false-warns; the threshold avoids warning on a single transient failure. */
-static atomic_int g_enforced_routes = 0;
-static atomic_int g_binds = 0;
+ * are arriving, but nothing ever binds. We track enforced-routes-SINCE-THE-LAST-BIND
+ * (a single counter, reset to 0 on every bind) and WARN when it crosses a threshold.
+ * This catches BOTH a never-worked path AND a REGRESSION after it once worked (a
+ * lifetime "0 binds ever" counter would go blind after the first bind -- consult
+ * #981 [1]); the warn re-arms on each bind so a later regression warns again. Only
+ * enforced routes are counted, so an IDLE server (0 turns) never false-warns. */
+static atomic_int g_routes_since_bind = 0;
 static atomic_int g_health_warned = 0;
 
 #define BIND_HEALTH_WARN_AFTER 3
 
 void wfe_bind_health_note_enforced_route(void)
 {
-   int seen = atomic_fetch_add(&g_enforced_routes, 1) + 1;
-   if (seen >= BIND_HEALTH_WARN_AFTER && atomic_load(&g_binds) == 0)
+   int since = atomic_fetch_add(&g_routes_since_bind, 1) + 1;
+   if (since >= BIND_HEALTH_WARN_AFTER)
    {
       int expected = 0;
       if (atomic_compare_exchange_strong(&g_health_warned, &expected, 1))
          aimee_log(LOG_WARN, "primary-cli-ingestor",
-                   "%d enforced-routed turns but 0 bindings -- the tmux primary enforce path "
-                   "appears INERT (S2 not firing). Check the ingestor wiring and the dial.",
-                   seen);
+                   "%d enforced-routed turns since the last bind -- the tmux primary enforce "
+                   "path appears INERT (S2 not firing). Check the ingestor wiring and the dial.",
+                   since);
    }
 }
 
 void wfe_bind_health_note_bind(void)
 {
-   atomic_fetch_add(&g_binds, 1);
+   /* A bind proves the path works -> reset the window and re-arm the warn so a
+    * future regression is detected afresh. */
+   atomic_store(&g_routes_since_bind, 0);
+   atomic_store(&g_health_warned, 0);
 }
 
 /* test hooks */
 void wfe_bind_health_reset(void)
 {
-   atomic_store(&g_enforced_routes, 0);
-   atomic_store(&g_binds, 0);
+   atomic_store(&g_routes_since_bind, 0);
    atomic_store(&g_health_warned, 0);
 }
 int wfe_bind_health_warned(void)
