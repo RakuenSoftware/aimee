@@ -125,23 +125,38 @@ static void emit_pretool_rewrite_unsupported_json(int rewrite_rc, const char *re
  * (the warn-soak that measures false positives before a hard flip). Fail-CLOSED on
  * the externalizing surface: if the binding is unreadable under a hard global dial,
  * deny. Best-effort RISK-REDUCTION, not a hermetic seal (see wfe_native_gate.h).
- * Requires the aimee session id (AIMEE_SESSION_ID env, stamped into the tmux CLI). */
+ *
+ * FAIL POLICY (consult #984 [6][14][23]): a DB fault (binding UNREADABLE) fails
+ * CLOSED under a hard dial -- we cannot tell if a binding exists, so deny. A cleanly
+ * ABSENT binding (bg==0) is ALLOWED -- that session genuinely has no enforced
+ * work-item to gate. Distinct cases: "unknown" != "none". The gate therefore depends
+ * on the aimee session id reaching the hook (AIMEE_SESSION_ID env, stamped into the
+ * tmux CLI): a session spawned OUTSIDE that stamp resolves no binding and is allowed
+ * -- an inherent limitation of a hook that trusts its environment (same class as the
+ * classifier's documented bypasses; the full seal is a sandbox). On DENY the hook
+ * emits the deny JSON and exit(0)s -- the Claude Code PreToolUse protocol for a
+ * blocked tool (same channel as the memory-interception deny). */
 static void s2_native_gate_pretool(const char *sid, const char *tool_name, const char *tool_input)
 {
    if (!sid || !sid[0] || !tool_name || !tool_name[0])
       return;
 
-   /* Pull the shell command (Bash etc.) out of tool_input for inspection. */
+   /* Pull the shell command (Bash etc.) out of tool_input for inspection. Prefer the
+    * parsed {"command":...} member, but FALL BACK to the raw tool_input string when
+    * it is not a JSON object, has no command member, or parsing/alloc fails -- the
+    * command text is still present there and the classifier's substring match catches
+    * it. This closes a bypass where tool_input is a raw string, not an object
+    * (consult #984 [16][25][31]), and is robust to malformed JSON / OOM ([5][9][26]). */
    char *cmd_heap = NULL;
-   const char *command = "";
+   const char *command = tool_input ? tool_input : "";
    if (wfe_is_shell_tool(tool_name) && tool_input && tool_input[0])
    {
       cJSON *ti = cJSON_Parse(tool_input);
       if (ti)
       {
          cJSON *c = cJSON_GetObjectItemCaseSensitive(ti, "command");
-         if (cJSON_IsString(c) && c->valuestring)
-            command = cmd_heap = strdup(c->valuestring);
+         if (cJSON_IsString(c) && c->valuestring && (cmd_heap = strdup(c->valuestring)))
+            command = cmd_heap;
          cJSON_Delete(ti);
       }
    }
@@ -158,7 +173,8 @@ static void s2_native_gate_pretool(const char *sid, const char *tool_name, const
        * under a hard GLOBAL dial -- a security gate that fails open is not a gate. */
       if (wfe_enforce_stage_parse(getenv("AIMEE_WORKFLOW_ENFORCE_STAGE")) == WFE_ENFORCE_HARD)
       {
-         audit_log("s2-native-gate", "DENY-failclosed tool=%s (binding unreadable)", tool_name);
+         audit_log("s2-native-gate", "DENY-failclosed sid=%s tool=%s (binding unreadable)", sid,
+                   tool_name);
          emit_pretool_deny_json("aimee S2: enforcement state is temporarily unavailable; this "
                                 "externalizing action is blocked (fail-closed).");
          exit(0);
@@ -180,17 +196,16 @@ static void s2_native_gate_pretool(const char *sid, const char *tool_name, const
    switch (wfe_native_gate_decision(externalizes, bound, delivered, stage_hard))
    {
    case WFE_NATIVE_DENY:
-      audit_log("s2-native-gate", "DENY tool=%s wi=%s stage=hard", tool_name, wi);
+      audit_log("s2-native-gate", "DENY sid=%s tool=%s wi=%s stage=hard", sid, tool_name, wi);
       emit_pretool_deny_json(
           "aimee S2: this session is bound to an enforced work-item that has not passed "
           "gate.deliver -- externalizing actions (push / PR / publish / network egress) are "
           "blocked until the change is reviewed and delivered.");
       exit(0);
-      break;
    case WFE_NATIVE_WARN:
       /* advisory/soft = warn-soak: record the would-deny (measures false positives)
        * but do NOT block -- this calibrates the gate before a hard flip. */
-      audit_log("s2-native-gate", "WOULD-DENY tool=%s wi=%s stage=%s", tool_name, wi,
+      audit_log("s2-native-gate", "WOULD-DENY sid=%s tool=%s wi=%s stage=%s", sid, tool_name, wi,
                 stage[0] ? stage : "?");
       LOG_WARN("s2-native-gate",
                "would deny externalizing tool '%s' pre-gate.deliver (stage=%s, wi=%s)", tool_name,

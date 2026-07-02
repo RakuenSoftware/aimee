@@ -3,6 +3,8 @@
 #include "aimee.h"
 #include "agent.h"
 #include "cli_session.h"
+#include "log.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -137,25 +139,37 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
    if (is_claude)
       cli_session_prepare_claude(cwd, autonomous);
 
-   /* Stamp the aimee session id into the tmux CLI's per-session environment so the
-    * PreToolUse hook (`aimee hooks pre`) can resolve this session's S2 binding and
-    * gate native-tool externalization (tracks 2+3). The id is aimee-minted; validate
-    * its charset before splicing it (unquoted) into the shell command run by
-    * `/bin/sh -c`. Runs for the primary tmux CLI (a bound interactive session). */
+   /* Prefix the launched CLI command with a per-session AIMEE_SESSION_ID assignment
+    * (`AIMEE_SESSION_ID=<sid> <cli_cmd>` run by `/bin/sh -c`) so the PreToolUse hook
+    * (`aimee hooks pre`) can resolve this session's S2 binding and gate native-tool
+    * externalization (tracks 2+3). ONLY the primary interactive session is stamped:
+    * a delegate gets its own tmux session but is NOT primary-managed, and stamping it
+    * with the current session id would mis-attribute delegate tool calls to the
+    * primary's binding (consult #984 [3][24]). The id is aimee-minted; validate its
+    * charset before splicing it (unquoted) into the shell command. */
    char cli_cmd_env[CLI_SESSION_CMD_MAX];
    const char *asid = session_id();
-   if (asid && asid[0])
+   if (!deleg && asid && asid[0])
    {
       int safe = 1;
       for (const char *p = asid; *p; p++)
-         if (!(isalnum((unsigned char)*p) || *p == '-' || *p == '_'))
+         if (!(isalnum((unsigned char)*p) || *p == '-' || *p == '_' || *p == '.'))
          {
             safe = 0;
             break;
          }
-      if (safe && snprintf(cli_cmd_env, sizeof(cli_cmd_env), "AIMEE_SESSION_ID=%s %s", asid,
-                           cli_cmd) < (int)sizeof(cli_cmd_env))
+      int n =
+          safe ? snprintf(cli_cmd_env, sizeof(cli_cmd_env), "AIMEE_SESSION_ID=%s %s", asid, cli_cmd)
+               : -1;
+      if (safe && n < (int)sizeof(cli_cmd_env))
          cli_cmd = cli_cmd_env;
+      else if (safe)
+         /* Truncated: the S2 native gate cannot resolve this session -> it fails
+          * OPEN. Surface it rather than silently dropping enforcement (#984 [17][32]). */
+         LOG_WARN("s2-native-gate",
+                  "AIMEE_SESSION_ID stamp dropped (command too long) -- native-tool gate "
+                  "will not fire for session %s",
+                  asid);
    }
 
    cli_session_t sess;
