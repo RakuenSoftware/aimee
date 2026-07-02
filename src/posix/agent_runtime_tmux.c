@@ -137,6 +137,27 @@ int agent_execute_cli_session(const agent_t *agent, const agent_network_t *netwo
    if (is_claude)
       cli_session_prepare_claude(cwd, autonomous);
 
+   /* Stamp the aimee session id into the tmux CLI's per-session environment so the
+    * PreToolUse hook (`aimee hooks pre`) can resolve this session's S2 binding and
+    * gate native-tool externalization (tracks 2+3). The id is aimee-minted; validate
+    * its charset before splicing it (unquoted) into the shell command run by
+    * `/bin/sh -c`. Runs for the primary tmux CLI (a bound interactive session). */
+   char cli_cmd_env[CLI_SESSION_CMD_MAX];
+   const char *asid = session_id();
+   if (asid && asid[0])
+   {
+      int safe = 1;
+      for (const char *p = asid; *p; p++)
+         if (!(isalnum((unsigned char)*p) || *p == '-' || *p == '_'))
+         {
+            safe = 0;
+            break;
+         }
+      if (safe && snprintf(cli_cmd_env, sizeof(cli_cmd_env), "AIMEE_SESSION_ID=%s %s", asid,
+                           cli_cmd) < (int)sizeof(cli_cmd_env))
+         cli_cmd = cli_cmd_env;
+   }
+
    cli_session_t sess;
    int rc = cli_session_create(&sess, sess_name, cli_cmd, cwd, reuse);
    free(sess_name);
