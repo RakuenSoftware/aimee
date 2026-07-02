@@ -82,6 +82,7 @@ set_tests_properties(test_context_engine PROPERTIES
 aimee_add_test(test_util test_util.c)
 aimee_add_test(test_audit_action test_audit_action.c)
 aimee_add_test(test_audit_action_log test_audit_action_log.c)
+aimee_add_test(test_audit_ledger test_audit_ledger.c)
 aimee_add_test(test_db test_db.c)
 aimee_add_test(test_config test_config.c)
 aimee_add_test(test_cron_config test_cron_config.c ../config_trigger.c)

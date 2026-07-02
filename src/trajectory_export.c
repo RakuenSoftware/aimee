@@ -1,4 +1,5 @@
 /* trajectory_export.c: DB1 interaction events -> replayable trajectory JSON. */
+#include "audit_ledger.h"
 #include "trajectory.h"
 
 #include "cJSON.h"
@@ -261,6 +262,16 @@ int trajectory_export(const char *selector, const trajectory_opts_t *opts, char 
    cJSON_AddNumberToObject(meta, "event_count", n);
    cJSON_AddStringToObject(meta, "started_at", rows[0].created_at);
    cJSON_AddStringToObject(meta, "ended_at", rows[n - 1].created_at);
+
+   /* Attach governed-action audit rows (S3) that fall within this trajectory's
+    * time window. audit.log ts and interaction_events.created_at share the same
+    * ISO-8601 UTC format, so the window bound is a lexicographic compare. NOTE:
+    * the audit ledger is not session-keyed, so a window that overlaps concurrent
+    * sessions may include their actions — a time-scoped overlay, not a strict
+    * per-session filter. Empty/absent when the writer (S7) is disabled. */
+   cJSON *governed = audit_ledger_read(rows[0].created_at, rows[n - 1].created_at);
+   if (governed)
+      cJSON_AddItemToObject(root, "governed_actions", governed);
 
    if (!opts || opts->redact)
    {

@@ -1647,16 +1647,17 @@ $(TESTPREFIX)/unit-test-interaction-events: $(OBJDIR)/tests/test_interaction_eve
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-trajectory: $(OBJDIR)/tests/test_trajectory.o \
-                               $(OBJDIR)/trajectory_export.o \
+                               $(OBJDIR)/trajectory_export.o $(OBJDIR)/audit_ledger.o \
                                $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                $(OBJDIR)/db1/maintenance.o $(OBJDIR)/db1/interaction_events.o \
                                $(OBJDIR)/posix/memory.o \
+                               $(OBJDIR)/config.o $(OBJDIR)/config_sections.o $(OBJDIR)/config_database.o $(OBJDIR)/config_learning.o $(OBJDIR)/config_memory.o $(OBJDIR)/config_charter.o $(OBJDIR)/config_trigger.o $(OBJDIR)/config_kb_maintenance.o $(OBJDIR)/config_kb_curator.o $(OBJDIR)/config_server_api.o $(OBJDIR)/config_skills.o $(OBJDIR)/config_save.o $(OBJDIR)/aimee_home.o \
                                $(OBJDIR)/log.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/cJSON.o \
                                $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-trajectory-batch: $(OBJDIR)/tests/test_trajectory_batch.o \
-                               $(OBJDIR)/trajectory_batch.o $(OBJDIR)/trajectory_export.o \
+                               $(OBJDIR)/trajectory_batch.o $(OBJDIR)/trajectory_export.o $(OBJDIR)/audit_ledger.o \
                                $(OBJDIR)/config.o $(OBJDIR)/config_sections.o $(OBJDIR)/config_database.o $(OBJDIR)/config_learning.o $(OBJDIR)/config_memory.o $(OBJDIR)/config_charter.o $(OBJDIR)/config_trigger.o $(OBJDIR)/config_kb_maintenance.o $(OBJDIR)/config_kb_curator.o $(OBJDIR)/config_server_api.o $(OBJDIR)/config_skills.o $(OBJDIR)/config_save.o \
                                $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                $(OBJDIR)/db1/maintenance.o $(OBJDIR)/db1/interaction_events.o \
