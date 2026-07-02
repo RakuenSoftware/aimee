@@ -153,12 +153,13 @@ cd aimee
 docker compose -f compose.combined.yaml up --build -d
 ```
 
-The server fronts the `/v1` API on `:8740` (default bearer `aimee-local-dev`) and
+The server fronts the `/v1` API over native TLS on `:8743` (default bearer
+`aimee-local-dev`; plaintext `:8740` is loopback-only and not published) and
 reaches the in-container kb on `:8741`:
 
 ```bash
-curl -H 'Authorization: Bearer aimee-local-dev' http://localhost:8740/v1/health
-curl -H 'Authorization: Bearer aimee-local-dev' http://localhost:8740/v1/kb/status
+curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/health
+curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/kb/status
 ```
 
 Split the two binaries into separate containers with `compose.server.yaml` when
@@ -186,13 +187,13 @@ add `-G "MinGW Makefiles" -DWITH_TLS=OFF` (no TLS; terminate TLS at a proxy).
 Point the client at the server per-invocation, via the environment, or persist it:
 
 ```bash
-aimee --server http://my-host:8740 --server-token=aimee-local-dev status
+aimee --server https://my-host:8743 --server-token=aimee-local-dev status
 
-export AIMEE_SERVER_URL=http://my-host:8740
+export AIMEE_SERVER_URL=https://my-host:8743
 export AIMEE_SERVER_TOKEN=aimee-local-dev
 aimee status
 
-aimee remote set http://my-host:8740 aimee-local-dev   # persists to <aimee_home>/remote.conf
+aimee remote set https://my-host:8743 aimee-local-dev   # persists to <aimee_home>/remote.conf
 aimee remote status                                    # resolved transport + /v1/health probe
 aimee remote clear                                     # revert to a local Unix socket
 ```
@@ -1420,7 +1421,7 @@ the `external-llm` compose profile. Backends and tiers:
 
 | Compose file | Brings up | Use when |
 |--------------|-----------|----------|
-| `compose.combined.yaml` | **`aimee-server+kb`** (one container, inference bundled) + Postgres | **Recommended default.** Both binaries co-located; server `/v1` on `:8740`, kb `:8741`. |
+| `compose.combined.yaml` | **`aimee-server+kb`** (one container, inference bundled) + Postgres | **Recommended default.** Both binaries co-located; server `/v1` over TLS on `:8743`, kb `:8741`. |
 | `compose.server.yaml` | `aimee-server` + `aimee-kb` + Postgres + the `aimee-llm` inference gateway | Split stack: scale/update/place server and kb independently. |
 | `compose.yaml` | `aimee-kb` + Postgres + the `aimee-llm` inference gateway | The knowledge service alone: building block for a shared/scaled kb. |
 | `compose.server-standalone.yaml` | `aimee-server` only (SQLite DB1, no kb) | DB1-backed `/v1` with no shared knowledge. |
@@ -1429,13 +1430,13 @@ the `external-llm` compose profile. Backends and tiers:
 
 ```bash
 docker compose -f compose.combined.yaml up --build -d
-curl -H 'Authorization: Bearer aimee-local-dev' http://localhost:8740/v1/health
-curl -H 'Authorization: Bearer aimee-local-dev' http://localhost:8740/v1/kb/status
+curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/health
+curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/kb/status
 ```
 
 The combined container runs **both** aimee binaries: the kb on loopback `:8741`
-inside the container, the server fronting `:8740` with
-`AIMEE_KB_API_URL=http://127.0.0.1:8741`. The split stack
+inside the container, the server fronting `/v1` over TLS on `:8743` (plaintext
+`:8740` is loopback-only) with `AIMEE_KB_API_URL=http://127.0.0.1:8741`. The split stack
 (`compose.server.yaml`) instead runs `aimee-kb` as its own container the server
 reaches at `http://aimee-kb:8741`. The combined image already bundles the synthesis
 and curator gateway; to run a standalone llama.cpp curator LLM instead, add
