@@ -9,6 +9,7 @@
 #include "harness_memory_scope.h"  /* hmem_scope_for_client */
 #include "json_fluent.h"           /* jo_ok */
 #include "memory_redirect.h"       /* memory_redirect_classify / _bash_targets / _rematerialize */
+#include "primary_cli_ingestor.h"
 #include "server.h"
 #include "turn_registry.h"
 #include "server_http.h" /* server_http_api_status_report */
@@ -1921,6 +1922,9 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * end-to-end server-side. Registration runs nothing on its own — a run begins
     * only when intake creates a work item and the autonomy driver advances it. */
    wfe_autonomy_register();
+   /* Boot-time enforcement-posture signal for the primary-CLI-ingestor: makes an
+    * "enabled but silently inert" misconfig (flag on, dial off) visible at startup. */
+   primary_cli_ingestor_log_posture();
    wfe_scheduler_init();
    /* Provision the delegate vault from operator-supplied secrets before serving,
     * so a freshly stood-up server's delegates/roundtables work without a manual

@@ -131,6 +131,16 @@ int main(void)
    assert(primary_cli_ingestor_enforce_preturn(SID2, "hello there", NULL) == 0);
    assert(!bound(SID2));
 
+   /* posture log: safe (no crash) across all three branches -- off (no-op),
+    * on+dial-off (the inert-trap WARN), on+dial-on (active INFO). */
+   setenv("AIMEE_PRIMARY_CLI_INGESTOR", "0", 1);
+   primary_cli_ingestor_log_posture();
+   setenv("AIMEE_PRIMARY_CLI_INGESTOR", "1", 1);
+   unsetenv("AIMEE_WORKFLOW_ENFORCE_STAGE");
+   primary_cli_ingestor_log_posture();
+   setenv("AIMEE_WORKFLOW_ENFORCE_STAGE", "advisory", 1);
+   primary_cli_ingestor_log_posture();
+
    printf("ok\n");
    return 0;
 }

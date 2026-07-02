@@ -1361,7 +1361,7 @@ $(TESTPREFIX)/unit-test-wfe-bind-ingress: $(OBJDIR)/tests/test_wfe_bind_ingress.
 # closure as unit-test-wfe-bind-ingress (it calls wfe_bind_interactive) + the
 # ingestor object.
 $(TESTPREFIX)/unit-test-primary-cli-ingestor: $(OBJDIR)/tests/test_primary_cli_ingestor.o \
-                                    $(OBJDIR)/server/primary_cli_ingestor.o \
+                                    $(OBJDIR)/server/primary_cli_ingestor.o $(OBJDIR)/log.o \
                                     $(OBJDIR)/workflow/wfe_bind_ingress.o $(OBJDIR)/workflow/wfe_enforce.o \
                                     $(OBJDIR)/workflow/wfe_externalization.o $(OBJDIR)/db1/wfe_binding.o \
                                     $(OBJDIR)/workflow/wfe_router.o $(OBJDIR)/workflow/wfe_router_catalog.o \

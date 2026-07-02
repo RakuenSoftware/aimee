@@ -33,4 +33,12 @@ int primary_cli_ingestor_enabled(void);
 int primary_cli_ingestor_enforce_preturn(const char *session_id, const char *message,
                                          const char *repo);
 
+/* Log the enforcement posture ONCE at server startup (observability, consult
+ * strategic-roundtable [51]: enforcement can ship "as enabled" while silently
+ * INERT, with no boot-time signal). When the ingestor flag is off this is a no-op
+ * (default, quiet). When on, it logs INFO with the dial stage if enforcement will
+ * actually fire, or WARN if the flag is on but the dial is off -- the exact
+ * silent-inert trap (flag set, dial forgotten -> the tmux primary never binds). */
+void primary_cli_ingestor_log_posture(void);
+
 #endif /* PRIMARY_CLI_INGESTOR_H */
