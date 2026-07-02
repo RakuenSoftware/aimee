@@ -26,8 +26,9 @@ extern "C"
       char outcome[32];
       char created_at[32];
       /* Governance decision-record fields (per-action governance audit, P1).
-       * Populated by the decision write path (S5); default/empty on legacy rows. */
-      char status[16];          /* active | superseded | revisit_due */
+       * Populated by the decision write path (S5). On legacy/existing rows the
+       * ALTER DEFAULTs apply: status='active', the rest empty/0. */
+      char status[24];          /* active | superseded | revisit_due (headroom) */
       char revisit_when[32];    /* ISO-8601 date/condition to re-review, or empty */
       int64_t supersedes_id;    /* decision_log.id this replaces, or 0 */
       char subject[256];        /* scope key: what this decision is about */
