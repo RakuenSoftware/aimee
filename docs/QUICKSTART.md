@@ -18,7 +18,7 @@ The **combined** image co-locates both aimee binaries in one container: the know
 ### Prerequisites
 
 - Docker Engine + the Docker Compose plugin (`docker compose`, v2).
-- ~4 GB free RAM and a few GB of disk for Postgres, the embedder model, and build layers.
+- ~4 GB free RAM and a few GB of disk for Postgres, the bundled models, and build layers.
 - No credentials or API keys are required for the default build.
 
 ### 1.1 Clone and start the stack
@@ -29,16 +29,15 @@ cd aimee
 docker compose -f compose.combined.yaml up --build -d
 ```
 
-By default this brings up **three** services. The browser webchat is a first-class surface that runs *inside* the combined container (not a separate service), and an optional curator-LLM sidecar can be enabled on top:
+By default this brings up **two** services. The browser webchat runs *inside* the combined container, not as a separate service, and the combined image bundles a CPU inference gateway (embeddings, reranking, and synthesis), so nothing external is needed to start.
 
 | Service | What it is | Port |
 |---------|-----------|------|
-| `aimee-server-kb` | Both aimee binaries (server + kb) **and** the browser webchat UI, in one container | `8743` (server `/v1`, native TLS self-signed; plaintext `8740` loopback-only), `8741` (kb `/v1`), `8443` (webchat HTTPS, self-signed) |
-| `postgres` | `pgvector/pgvector:pg16`, DB2 (`aimee_shared`) for knowledge + vectors | internal |
-| `embedder` | CPU embedder sidecar (`perplexity-ai/pplx-embed-v1-0.6b`) | internal |
-| `llm` *(optional)* | Curator LLM sidecar (Gemma 3n E4B via `llama.cpp`) for doc/code extraction. Off unless you add `--profile curator-llm`; otherwise the curator stays idle or you point `LLM_ENDPOINT` at your own OpenAI-compatible endpoint. | internal |
+| `aimee-server-kb` | Both aimee binaries (server and kb), the browser webchat UI, and a bundled CPU inference gateway (embed, rerank, synth) in one container | `8743` (server `/v1`, native TLS self signed; plaintext `8740` loopback only), `8741` (kb `/v1`), `8443` (webchat HTTPS, self signed) |
+| `postgres` | `pgvector/pgvector:pg16`, DB2 (`aimee_shared`) for knowledge and vectors | internal |
+| `embedder`, `llm` *(optional)* | Standalone embedder and curator LLM sidecars. Off by default, since the combined image already bundles both. Split them out as separate services with `--profile external-llm`. | internal |
 
-The kb auto-applies its DB2 schema (tables + `pg_trgm`/`vector` extensions) on first boot. First `--build` takes a few minutes (it compiles the binaries and pulls the embedder model); subsequent starts are fast. To also run the bundled curator LLM, add the profile: `docker compose -f compose.combined.yaml --profile curator-llm up --build -d`.
+The kb auto-applies its DB2 schema (tables plus the `pg_trgm` and `vector` extensions) on first boot. The first `--build` takes a few minutes to compile the binaries and bake the CPU models into the image. Later starts are fast. To split the embedder and curator LLM into their own containers instead of the bundled gateway, add the profile: `docker compose -f compose.combined.yaml --profile external-llm up --build -d`.
 
 ### 1.2 Verify it's healthy
 

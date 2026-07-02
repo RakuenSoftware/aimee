@@ -387,7 +387,7 @@ corresponding `config_*.c` module.
 | `embedding_command` | string | External command that produces embeddings (sidecar). |
 | `embedding_model` | string | Embedding model name. |
 | `embedding_endpoint` | string | Embedding service URL. |
-| `embedding_dim` | int | Embedding dimensionality; must match the embedder model. Default `2560` (pplx-embed-v1-4b); set `1024` for the pplx-embed-v1-0.6b tier. |
+| `embedding_dim` | int | Embedding dimensionality; must match the embedder model. `1024` for the CPU tier (Qwen3-Embedding-0.6B), `2560` for the GPU tiers (Qwen3-Embedding-4B). |
 
 **Memory & retrieval**
 
@@ -1407,14 +1407,16 @@ install only the thin client ([§3.2](#32-install-the-thin-client)) and point it
 the server. Four compose files ship, built from three images: `aimee-server`
 (`Dockerfile.server`), `aimee-kb` (`Dockerfile`), and the co-located
 `aimee-server+kb` (`Dockerfile.combined`). Every stack also brings up a
-`pgvector/pgvector:pg16` Postgres and a CPU embedder sidecar
-(`Dockerfile.embedder`); the kb auto-applies its DB2 schema (`pg_trgm`/`vector`
-extensions + tables) on first boot. The sidecar ships in two tiers (embedder +
-reranker in one image): the default `aimee-embedder` (`pplx-embed-v1-4b`/2560 +
-`ettin-reranker-1b`) and the lighter `aimee-embedder-0.6b` (`pplx-embed-v1-0.6b`/
-1024 + `ettin-reranker-400m`) via `AIMEE_EMBEDDER_IMAGE` + `embedding_dim: 1024`
-(or `AIMEE_EMBEDDING_DIM=1024`). Trade-offs:
-[retrieval-stack.md](docs/retrieval-stack.md#choosing-a-tier).
+`pgvector/pgvector:pg16` Postgres, and the kb auto-applies its DB2 schema
+(`pg_trgm` and `vector` extensions plus tables) on first boot. The combined image
+bundles a CPU inference gateway (embeddings, reranking, and synthesis) from the
+`aimee-kb` image family, so embedding and reranking work with nothing external.
+The CPU tier serves Qwen3-Embedding-0.6B at 1024 dims; the GPU tiers
+(`aimee-kb-gpu-small`, `aimee-kb-gpu-mid`) serve Qwen3-Embedding-4B at 2560 dims.
+To run a standalone embedder or curator LLM instead of the bundled gateway, use
+the `external-llm` compose profile. Backends and tiers:
+[KB_LLM_BACKENDS.md](docs/KB_LLM_BACKENDS.md) and
+[AIMEE_KB_SYNTH_TIERS.md](docs/AIMEE_KB_SYNTH_TIERS.md).
 
 | Compose file | Brings up | Use when |
 |--------------|-----------|----------|
