@@ -53,6 +53,7 @@
 #include "git_verify.h"
 #include "toolset.h"
 #include "cJSON.h"
+#include "s2_native_gate_hook.h" /* S2 native-tool gate (server-side, tracks 2+3) */
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -849,6 +850,11 @@ static int server_memory_intercept(const char *tool, const char *tool_input, con
    return 2;
 }
 
+/* S2 pre-delivery native-tool externalization gate (server side; tracks 2+3). This
+ * is the REAL enforcement point -- `aimee hooks pre` forwards to hooks.pre, so the
+ * gate must run here (the CLI cmd_hooks copy is only a server-unreachable fallback).
+ * Returns 2 to DENY (fills msg) or 0 to allow. Mirrors handle_hooks_pre's memory-
+ * interception deny. Honest scope + fail policy: see wfe_native_gate.h / cmd_hooks.c. */
 static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    cJSON *jtn = cJSON_GetObjectItemCaseSensitive(req, "tool_name");
@@ -880,36 +886,30 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
                                request_id);
 
-   /* Load config */
    config_t cfg;
    config_load(&cfg);
 
-   /* Load session state from DB1 using provided session_id */
    session_state_t state;
    session_state_load(&state, sid);
    hooks_ensure_cwd_worktree(&state, sid, cwd);
 
    /* Memory interception: redirect an agent's local memory-file write into the
-    * central store BEFORE the generic guardrails see it (a memory write must not
-    * be tripped by e.g. the worktree guardrail). rc==2 with a message is rendered
-    * by the client as a PreToolUse deny. */
+    * central store BEFORE the generic guardrails see it (rc==2 -> client deny). */
    {
       char mr_msg[1024] = "";
       if (server_memory_intercept(tool_name, tool_input, cwd, req, mr_msg, sizeof(mr_msg)) == 2)
       {
-         cJSON *mresp = cJSON_CreateObject();
-         cJSON_AddStringToObject(mresp, "status", "blocked");
-         cJSON_AddNumberToObject(mresp, "exit_code", 2);
-         if (mr_msg[0])
-            cJSON_AddStringToObject(mresp, "message", mr_msg);
-         if (request_id)
-            cJSON_AddStringToObject(mresp, "request_id", request_id);
-         int mrc = server_send_response(conn, mresp);
-         cJSON_Delete(mresp);
-         if (ti_heap)
-            free(ti_heap);
-         return mrc;
+         free(ti_heap);
+         return hook_send_blocked(conn, mr_msg, request_id);
       }
+   }
+
+   /* S2 native-tool externalization gate (tracks 2+3): sends the block on deny. */
+   int s2rc = s2_native_gate_hook_pre(conn, sid, tool_name, tool_input, request_id);
+   if (s2rc >= 0)
+   {
+      free(ti_heap);
+      return s2rc;
    }
 
    /* Run guardrail check */

@@ -826,6 +826,7 @@ set(CLI_SRCS
 set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
     ${AIMEE_SRC_DIR}/server/server.c
+    ${AIMEE_SRC_DIR}/server/s2_native_gate_hook.c
     ${AIMEE_SRC_DIR}/server/server_auth.c
     ${AIMEE_SRC_DIR}/server/server_hooks.c
     ${AIMEE_SRC_DIR}/server/server_session.c
