@@ -30,10 +30,10 @@
 
 /* Bounds. Truncation markers and length prefixes are folded INTO the hash input
  * so the digest stays stable and verifiable when a limit is hit. */
-#define AUDIT_ARGS_MAX_INPUT (256 * 1024) /* skip parsing beyond this */
-#define AUDIT_VALUE_MAX_BYTES 8192        /* per allowlisted value */
-#define AUDIT_CANON_ALLOC (64 * 1024)     /* canon buffer allocation */
-#define AUDIT_CANON_LIMIT (AUDIT_CANON_ALLOC - 32) /* logical fill limit (marker reserve) */
+#define AUDIT_ARGS_MAX_INPUT  (256 * 1024)             /* skip parsing beyond this */
+#define AUDIT_VALUE_MAX_BYTES 8192                     /* per allowlisted value */
+#define AUDIT_CANON_ALLOC     (64 * 1024)              /* canon buffer allocation */
+#define AUDIT_CANON_LIMIT     (AUDIT_CANON_ALLOC - 32) /* logical fill limit (marker reserve) */
 
 /* Component separator. NOTE: canonical components are LENGTH-PREFIXED (see
  * canon_add), so injectivity does NOT depend on this byte being absent from a

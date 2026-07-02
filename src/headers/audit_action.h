@@ -42,28 +42,28 @@ extern "C"
 /* "v1-" (3) + 64 hex + NUL. */
 #define AUDIT_ARGS_HASH_LEN 68
 
-/* Compute the args hash for (tool_name, args_json) into `out` (capacity
- * >= AUDIT_ARGS_HASH_LEN). `args_json` may be NULL/empty (hashes the tool name
- * only). Returns 0 on success.
- *
- * Best-effort: on any failure (key unavailable, allocation) it writes the stable
- * sentinel "v1-" followed by 64 '0' and returns -1. Callers audit best-effort
- * and MUST NOT block a tool on a non-zero return. */
-int audit_args_hash(const char *tool_name, const char *args_json, char *out, size_t out_sz);
+   /* Compute the args hash for (tool_name, args_json) into `out` (capacity
+    * >= AUDIT_ARGS_HASH_LEN). `args_json` may be NULL/empty (hashes the tool name
+    * only). Returns 0 on success.
+    *
+    * Best-effort: on any failure (key unavailable, allocation) it writes the stable
+    * sentinel "v1-" followed by 64 '0' and returns -1. Callers audit best-effort
+    * and MUST NOT block a tool on a non-zero return. */
+   int audit_args_hash(const char *tool_name, const char *args_json, char *out, size_t out_sz);
 
-/* Ensure the dedicated audit HMAC key exists at $AIMEE_HOME/.audit-key (0600, 32
- * random bytes), provisioning it atomically if absent (mirrors
- * wfe_approval_ensure_key). Call once at server startup so hash time always has
- * a real key. Returns 0 if the key exists or was created, -1 otherwise. */
-int audit_ensure_key(void);
+   /* Ensure the dedicated audit HMAC key exists at $AIMEE_HOME/.audit-key (0600, 32
+    * random bytes), provisioning it atomically if absent (mirrors
+    * wfe_approval_ensure_key). Call once at server startup so hash time always has
+    * a real key. Returns 0 if the key exists or was created, -1 otherwise. */
+   int audit_ensure_key(void);
 
-/* Test-only seam: the internal HMAC-SHA256 used by audit_args_hash, exposed so
- * unit tests can pin it against RFC 4231 known-answer vectors (validates the
- * ipad/opad construction, 64-byte block, and key>64 pre-hash path). Not part of
- * the public API — do not use in product code. Returns 0 on success, -1 on
- * failure (allocation / length overflow). */
-int audit_hmac_sha256_testonly(const unsigned char *key, size_t keylen, const unsigned char *msg,
-                               size_t mlen, unsigned char mac[32]);
+   /* Test-only seam: the internal HMAC-SHA256 used by audit_args_hash, exposed so
+    * unit tests can pin it against RFC 4231 known-answer vectors (validates the
+    * ipad/opad construction, 64-byte block, and key>64 pre-hash path). Not part of
+    * the public API — do not use in product code. Returns 0 on success, -1 on
+    * failure (allocation / length overflow). */
+   int audit_hmac_sha256_testonly(const unsigned char *key, size_t keylen, const unsigned char *msg,
+                                  size_t mlen, unsigned char mac[32]);
 
 #ifdef __cplusplus
 }

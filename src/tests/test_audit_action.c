@@ -75,7 +75,8 @@ static void test_allowlist_drops_extra_fields(void)
    char base[AUDIT_ARGS_HASH_LEN], with_secret[AUDIT_ARGS_HASH_LEN];
    hash_of("Write", "{\"file_path\":\"/x\",\"content\":\"c\"}", base);
    /* a non-allowlisted field (a token/PII) must NOT change the hash */
-   hash_of("Write", "{\"file_path\":\"/x\",\"content\":\"c\",\"authorization\":\"Bearer sk-secret\"}",
+   hash_of("Write",
+           "{\"file_path\":\"/x\",\"content\":\"c\",\"authorization\":\"Bearer sk-secret\"}",
            with_secret);
    assert(strcmp(base, with_secret) == 0);
 }
