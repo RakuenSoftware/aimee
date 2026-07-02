@@ -62,6 +62,21 @@ static const agent_shell_driver_t STUB_DRIVER = {.name = "stubcli",
                                                  .recv = stub_recv,
                                                  .close = stub_close};
 
+/* a driver whose recv fails WITHOUT emitting SHELL_EVENT_ERROR (contract check). */
+static int stub_recv_fail(void *h, agent_shell_cb_t cb, void *user, volatile int *interrupted)
+{
+   (void)h;
+   (void)cb;
+   (void)user;
+   (void)interrupted;
+   return -1;
+}
+static const agent_shell_driver_t FAIL_DRIVER = {.name = "failcli",
+                                                 .open = stub_open,
+                                                 .send = stub_send,
+                                                 .recv = stub_recv_fail,
+                                                 .close = stub_close};
+
 /* Link shims: agent_shell.o's agent_shell_drivers_init() references these built-in
  * drivers (defined in the heavy per-CLI driver objects). This test never calls
  * drivers_init -- it registers only STUB_DRIVER -- so zero-initialized stand-ins
@@ -222,6 +237,13 @@ int main(void)
    assert(primary_cli_ingestor_turn(SID3, "hi", NULL, "no-such-driver", NULL, &r3, NULL) == -1);
    assert(r3.error[0] && !r3.text && !r3.session);
    primary_cli_turn_result_free(&r3);
+
+   /* contract: recv failing WITHOUT an error event still yields -1 + a message */
+   agent_shell_driver_register(&FAIL_DRIVER);
+   primary_cli_turn_result_t r4;
+   assert(primary_cli_ingestor_turn(SID3, "hi", NULL, "failcli", NULL, &r4, NULL) == -1);
+   assert(r4.error[0]); /* fallback message set even though the driver emitted none */
+   primary_cli_turn_result_free(&r4);
 
    printf("ok\n");
    return 0;

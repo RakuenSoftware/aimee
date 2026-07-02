@@ -58,10 +58,17 @@ static void pci_ingest_cb(agent_shell_event_t event, const char *data, void *use
          dstr_append_str(&c->text, data);
       break;
    case SHELL_EVENT_SESSION_ID:
-      if (data && data[0])
+      /* A backend session id is short; ignore absurd values (bound the copy) and
+       * only replace the last-known id on a SUCCESSFUL dup -- never drop a valid id
+       * because a replacement alloc failed. */
+      if (data && data[0] && strlen(data) < 128)
       {
-         free(c->session);
-         c->session = strdup(data);
+         char *dup = strdup(data);
+         if (dup)
+         {
+            free(c->session);
+            c->session = dup;
+         }
       }
       break;
    case SHELL_EVENT_TOOL_START:
@@ -122,7 +129,7 @@ int primary_cli_ingestor_turn(const char *session_id, const char *message, const
    memset(&ctx, 0, sizeof ctx);
    dstr_init(&ctx.text);
 
-   int rc;
+   int rc = -1;
    if (driver->send(handle, message ? message : "") != 0)
    {
       snprintf(out->error, sizeof out->error, "CLI backend send failed");
@@ -134,8 +141,13 @@ int primary_cli_ingestor_turn(const char *session_id, const char *message, const
    }
    driver->close(handle);
 
+   /* Honor the header contract: a -1 return always carries a message. Prefer the
+    * driver's own error event; else a generic fallback (recv can fail without
+    * emitting SHELL_EVENT_ERROR). */
    if (ctx.error[0] && !out->error[0])
       snprintf(out->error, sizeof out->error, "%s", ctx.error);
+   if (rc != 0 && !out->error[0])
+      snprintf(out->error, sizeof out->error, "CLI backend turn failed (rc=%d)", rc);
    out->text = (ctx.text.len && ctx.text.data) ? strdup(ctx.text.data) : NULL;
    out->session = ctx.session; /* transfer ownership (already strdup'd) */
    out->tool_calls = ctx.tool_calls;
