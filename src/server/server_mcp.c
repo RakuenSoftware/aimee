@@ -1672,12 +1672,11 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       {
          if (owns_jargs)
             cJSON_Delete(jargs);
-         return server_send_error(
-             conn,
-             deny_msg[0]
-                 ? deny_msg
-                 : "refused: this action externalizes work before the review/delivery gate has passed",
-             NULL);
+         return server_send_error(conn,
+                                  deny_msg[0] ? deny_msg
+                                              : "refused: this action externalizes work before the "
+                                                "review/delivery gate has passed",
+                                  NULL);
       }
    }
 
