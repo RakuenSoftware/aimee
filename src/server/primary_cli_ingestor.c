@@ -39,12 +39,13 @@ void primary_cli_ingestor_log_posture(void)
    if (!primary_cli_ingestor_enabled())
       return; /* default-off: stay quiet; the hot path is untouched */
 
+   /* Same source of truth as the enforce gate: wfe_bind_interactive parses this
+    * identical env var with the same parser (unset is treated as off). */
    wfe_enforce_stage_t stage = wfe_enforce_stage_parse(getenv("AIMEE_WORKFLOW_ENFORCE_STAGE"));
    if (stage == WFE_ENFORCE_OFF)
       aimee_log(LOG_WARN, "primary-cli-ingestor",
-                "AIMEE_PRIMARY_CLI_INGESTOR is on but AIMEE_WORKFLOW_ENFORCE_STAGE=off -> "
-                "enforcement is INERT: the tmux CLI primary will NOT bind. Set the dial to "
-                "advisory/soft/hard to activate.");
+                "AIMEE_PRIMARY_CLI_INGESTOR is on but AIMEE_WORKFLOW_ENFORCE_STAGE is off or unset "
+                "-> the tmux CLI primary will NOT bind. Set the dial to advisory/soft/hard.");
    else
       aimee_log(LOG_INFO, "primary-cli-ingestor",
                 "enforce-before-send ACTIVE for the tmux CLI primary (dial=%s)",
