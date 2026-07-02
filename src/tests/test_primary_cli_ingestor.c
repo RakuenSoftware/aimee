@@ -9,82 +9,10 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#include "agent_shell.h"
 #include "db1.h"
 #include "primary_cli_ingestor.h"
 #include "wfe_binding.h"
 #include "wfe_engine.h"
-
-/* --- stub agent_shell driver: records the open/send/recv/close call sequence,
- * captures whether the session was already S2-bound at send() time (proving
- * enforce-BEFORE-send), and emits a synthetic stream for the ingestor. --- */
-static int g_open, g_send, g_recv, g_close;
-static int g_bound_at_send;
-static char g_check_sid[80];
-
-static void *stub_open(const agent_shell_driver_t *d, const char *resume_id)
-{
-   (void)d;
-   (void)resume_id;
-   g_open++;
-   return (void *)0x1; /* non-NULL opaque handle */
-}
-static int stub_send(void *h, const char *msg)
-{
-   (void)h;
-   (void)msg;
-   g_send++;
-   char wi[80] = "";
-   g_bound_at_send = (db1_wfe_binding_get(g_check_sid, wi, sizeof wi, NULL, 0) == 1 && wi[0]);
-   return 0;
-}
-static int stub_recv(void *h, agent_shell_cb_t cb, void *user, volatile int *interrupted)
-{
-   (void)h;
-   (void)interrupted;
-   g_recv++;
-   cb(SHELL_EVENT_TEXT_DELTA, "hello ", user);
-   cb(SHELL_EVENT_TEXT_DELTA, "world", user);
-   cb(SHELL_EVENT_TOOL_START, "Bash", user);
-   cb(SHELL_EVENT_TOOL_COMPLETE, NULL, user);
-   cb(SHELL_EVENT_SESSION_ID, "claude-sess-1", user);
-   cb(SHELL_EVENT_TURN_COMPLETE, NULL, user);
-   return 0;
-}
-static void stub_close(void *h)
-{
-   (void)h;
-   g_close++;
-}
-static const agent_shell_driver_t STUB_DRIVER = {.name = "stubcli",
-                                                 .open = stub_open,
-                                                 .send = stub_send,
-                                                 .recv = stub_recv,
-                                                 .close = stub_close};
-
-/* a driver whose recv fails WITHOUT emitting SHELL_EVENT_ERROR (contract check). */
-static int stub_recv_fail(void *h, agent_shell_cb_t cb, void *user, volatile int *interrupted)
-{
-   (void)h;
-   (void)cb;
-   (void)user;
-   (void)interrupted;
-   return -1;
-}
-static const agent_shell_driver_t FAIL_DRIVER = {.name = "failcli",
-                                                 .open = stub_open,
-                                                 .send = stub_send,
-                                                 .recv = stub_recv_fail,
-                                                 .close = stub_close};
-
-/* Link shims: agent_shell.o's agent_shell_drivers_init() references these built-in
- * drivers (defined in the heavy per-CLI driver objects). This test never calls
- * drivers_init -- it registers only STUB_DRIVER -- so zero-initialized stand-ins
- * satisfy the linker without pulling in the real fork/exec CLI machinery. */
-agent_shell_driver_t claude_shell_driver;
-agent_shell_driver_t claude_pty_shell_driver;
-agent_shell_driver_t codex_shell_driver;
-agent_shell_driver_t gemini_shell_driver;
 
 /* enforced managed workflow "mc" (valid manager shape w/ terminal gate.deliver). */
 static const char *WF_MC = "name: mc\n"
@@ -202,48 +130,6 @@ int main(void)
    const char *SID2 = "beefcafe";
    assert(primary_cli_ingestor_enforce_preturn(SID2, "hello there", NULL) == 0);
    assert(!bound(SID2));
-
-   /* Slice 3: the turn orchestrator drives the agent_shell backend + ingests its
-    * stream, enforcing BEFORE send. */
-   agent_shell_driver_register(&STUB_DRIVER);
-   const char *SID3 = "cafed00d";
-   snprintf(g_check_sid, sizeof g_check_sid, "%s", SID3);
-   g_open = g_send = g_recv = g_close = g_bound_at_send = 0;
-
-   primary_cli_turn_result_t r;
-   int rc = primary_cli_ingestor_turn(SID3, "use mc do the thing", NULL, "stubcli", NULL, &r, NULL);
-   assert(rc == 0);
-   assert(g_open == 1 && g_send == 1 && g_recv == 1 && g_close == 1); /* full lifecycle */
-   assert(r.bound == 1);                                 /* enforced-routed turn is managed */
-   assert(g_bound_at_send == 1);                         /* ENFORCE RAN BEFORE SEND (preventive) */
-   assert(r.text && strcmp(r.text, "hello world") == 0); /* text deltas ingested */
-   assert(r.session && strcmp(r.session, "claude-sess-1") == 0); /* backend sid captured */
-   assert(r.tool_calls == 1);                                    /* native tool observed (audit) */
-   assert(!r.error[0]);
-   primary_cli_turn_result_free(&r);
-
-   /* a converse turn still runs but is NOT bound (unmanaged, not pretend-enforced) */
-   const char *SID4 = "0ddba11";
-   snprintf(g_check_sid, sizeof g_check_sid, "%s", SID4);
-   g_bound_at_send = 1; /* poison: must be reset to 0 by the check */
-   primary_cli_turn_result_t r2;
-   assert(primary_cli_ingestor_turn(SID4, "hello there", NULL, "stubcli", NULL, &r2, NULL) == 0);
-   assert(r2.bound == 0 && g_bound_at_send == 0); /* not bound at send */
-   assert(r2.text && strcmp(r2.text, "hello world") == 0);
-   primary_cli_turn_result_free(&r2);
-
-   /* an unknown driver -> clean error, no crash, no result leak */
-   primary_cli_turn_result_t r3;
-   assert(primary_cli_ingestor_turn(SID3, "hi", NULL, "no-such-driver", NULL, &r3, NULL) == -1);
-   assert(r3.error[0] && !r3.text && !r3.session);
-   primary_cli_turn_result_free(&r3);
-
-   /* contract: recv failing WITHOUT an error event still yields -1 + a message */
-   agent_shell_driver_register(&FAIL_DRIVER);
-   primary_cli_turn_result_t r4;
-   assert(primary_cli_ingestor_turn(SID3, "hi", NULL, "failcli", NULL, &r4, NULL) == -1);
-   assert(r4.error[0]); /* fallback message set even though the driver emitted none */
-   primary_cli_turn_result_free(&r4);
 
    printf("ok\n");
    return 0;

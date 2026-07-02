@@ -1,7 +1,8 @@
 /* server_compute.c: POSIX chat.send_stream worker for primary-agent streaming. */
 #include "aimee.h"
 #include "agent_adapter.h"
-#include "ingress_preinject.h" /* S2 binding: publish primary session id per turn */
+#include "ingress_preinject.h"    /* S2 binding: publish primary session id per turn */
+#include "primary_cli_ingestor.h" /* S2 binding: enforce-before-send on the tmux CLI TUI turn */
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "agent_tools.h"   /* agent_tools_set_tool_event_cb — stream tool events */
@@ -760,6 +761,17 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
     * Save/restore around any outer turn on this thread. */
    int prev_error_grace = cli_session_get_error_grace_ms();
    cli_session_set_error_grace_ms(CLI_SESSION_DEFAULT_ERROR_GRACE_MS);
+
+   /* Primary-as-manager S2 (primary-CLI-ingestor): the Claude primary runs as a
+    * per-session tmux CLI TUI whose model call reaches the gateway OUT-OF-BAND, so
+    * the router never binds it. Enforce HERE -- on the worker thread, where the
+    * aimee session id is in scope and agent_run_with_tools dispatches the tmux turn
+    * synchronously -- BEFORE the turn is sent to the pane, so S1 route + S2
+    * bind/guard are preventive for the turn. Behind the ingestor opt-in flag AND
+    * the enforce dial (both default-off), so the hot path is untouched by default.
+    * A missing sid is a no-op (never a silent pretend-enforced). */
+   if (primary_cli_ingestor_enabled() && aimee_sid && aimee_sid[0])
+      primary_cli_ingestor_enforce_preturn(aimee_sid, message, use_cwd);
 
    agent_result_t result;
    memset(&result, 0, sizeof(result));
