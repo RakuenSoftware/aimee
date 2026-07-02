@@ -65,6 +65,29 @@ static void test_distinct_scopes_coexist(void)
    printf("  PASS: test_distinct_scopes_coexist\n");
 }
 
+/* Superseding a decision in a DIFFERENT scope (or a stale/nonexistent id) is
+ * rejected — the record fails and the unrelated decision is untouched. */
+static void test_supersede_wrong_scope_rejected(void)
+{
+   db2_decision_log_row_t a, a_after;
+   assert(db2_decision_log_record("alpha", "a", "a", "r", "op", 0, "", 0, &a) == 0);
+   /* try to supersede alpha's decision from a record in scope 'beta' */
+   int rc = db2_decision_log_record("beta", "b", "b", "r", "op", 0, "", a.id, NULL);
+   assert(rc != 0); /* wrong scope: UPDATE matches 0 rows -> rejected */
+   assert(db2_decision_log_get(a.id, &a_after) == 0);
+   assert(strcmp(a_after.status, "active") == 0); /* alpha untouched */
+   /* a stale/nonexistent supersedes_id is likewise rejected */
+   assert(db2_decision_log_record("gamma", "g", "g", "r", "op", 0, "", 999999, NULL) != 0);
+   printf("  PASS: test_supersede_wrong_scope_rejected\n");
+}
+
+/* An empty subject is rejected (would otherwise be a single global active slot). */
+static void test_empty_subject_rejected(void)
+{
+   assert(db2_decision_log_record("", "a", "a", "r", "op", 0, "", 0, NULL) != 0);
+   printf("  PASS: test_empty_subject_rejected\n");
+}
+
 int main(void)
 {
    db2_test_shim_open();
@@ -72,6 +95,8 @@ int main(void)
    test_supersede_flips_prior();
    test_one_active_per_scope();
    test_distinct_scopes_coexist();
+   test_supersede_wrong_scope_rejected();
+   test_empty_subject_rejected();
    db2_test_shim_close();
    printf("decision_log: all tests passed\n");
    return 0;
