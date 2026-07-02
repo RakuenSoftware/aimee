@@ -25,6 +25,7 @@
 #include "gateway_pipeline.h"  /* gw_request_t — the shared gateway seam */
 #include "ingress_preinject.h" /* query-from-messages + per-turn id */
 #include "interaction_events.h"
+#include "wfe_bind_ingress.h"
 #include "wfe_enforce.h"
 #include "wfe_router.h"
 
@@ -163,6 +164,15 @@ int gw_stage_router(gw_request_t *r, void *ud)
       return 0;
    const char *tid = ingress_preinject_turn_id();
    router_advise_log((tid && tid[0]) ? tid : "ingress", query);
+
+   /* S2 binding seam: if this turn carries an aimee session id (recovered at HTTP
+    * ingress from the primary provider's "aimee-sess-<sid>" auth token) and the
+    * router picks an enforced workflow, create + bind a work-item so the dispatch
+    * guard + advance driver can fire. Idempotent per session; default-OFF via the
+    * dial. Non-primary turns (delegates) carry no aimee-session token -> no-op. */
+   const char *bsid = ingress_preinject_session_id();
+   if (bsid && bsid[0])
+      wfe_bind_interactive(bsid, query, NULL);
    free(query);
    return 0;
 }

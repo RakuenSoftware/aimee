@@ -69,6 +69,21 @@ const char *ingress_preinject_turn_id(void)
    return g_turn_id;
 }
 
+static __thread char g_session_id[64] = "";
+
+void ingress_preinject_set_session_id(const char *session_id)
+{
+   if (session_id && session_id[0])
+      snprintf(g_session_id, sizeof(g_session_id), "%s", session_id);
+   else
+      g_session_id[0] = '\0';
+}
+
+const char *ingress_preinject_session_id(void)
+{
+   return g_session_id;
+}
+
 /* A stable, non-reversible fingerprint of the turn query (FNV-1a 64-bit, hex).
  * Recorded on the retrieval_event instead of the raw prompt so the audit row
  * correlates turns (same query → same fingerprint) without persisting user

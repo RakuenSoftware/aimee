@@ -149,4 +149,12 @@ void ingress_preinject_mint_turn_id(char *buf, size_t len);
 void ingress_preinject_set_turn_id(const char *turn_id);
 const char *ingress_preinject_turn_id(void);
 
+/* Per-turn aimee session id, recovered at HTTP ingress from the primary provider's
+ * "aimee-sess-<sid>" auth token (S2 binding seam). Like the turn id it is a
+ * per-request thread-local the HTTP layer sets (or "" to clear) on every request,
+ * so a reused worker thread never leaks one turn's session onto the next. "" when
+ * the request carries no aimee-session token (a non-primary / unidentified turn). */
+void ingress_preinject_set_session_id(const char *session_id);
+const char *ingress_preinject_session_id(void);
+
 #endif /* DEC_INGRESS_PREINJECT_H */

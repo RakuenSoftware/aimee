@@ -1,5 +1,6 @@
 /* primary_session_adapter.c: direct primary-agent conversation sessions. */
 #include "primary_session_adapter.h"
+#include "ingress_preinject.h" /* S2 binding: publish primary session id per turn */
 
 #include "agent_adapter.h"
 #include "agent_exec.h"
@@ -256,6 +257,10 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
       run_cmd_set_cwd(req->cwd);
    if (effective_aimee_session_id[0])
       session_id_set_override(effective_aimee_session_id);
+   /* S2 binding seam: publish the primary session id so the gateway router can bind
+    * an enforced work-item for this turn (agent_execute below runs the provider on
+    * THIS thread). Cleared alongside the override after the turn. */
+   ingress_preinject_set_session_id(effective_aimee_session_id);
 
    cJSON *updated_messages = NULL;
    int max_tokens = req->max_tokens > 0 ? req->max_tokens : AGENT_DEFAULT_MAX_TOKENS;
@@ -265,6 +270,7 @@ int primary_session_adapter_turn(const primary_session_request_t *req, agent_res
                                              initial_messages, &updated_messages, out);
 
    session_id_clear_override();
+   ingress_preinject_set_session_id(""); /* don't leak this turn's session id */
    run_cmd_set_cwd(NULL);
    cJSON_Delete(initial_messages);
 

@@ -25,6 +25,7 @@
 #include "aimee_version.h"
 #include "openai_shape.h"
 #include "ingress_preinject.h"
+#include "wfe_bind_ingress.h" /* aimee-sess-<sid> auth-token -> session id (S2 binding) */
 #include "openapi_server_data.h" /* AIMEE_OPENAPI_SERVER_YAML_STR (generated from api/openapi-server-v1.yaml) */
 #include "openai_runs_store.h"
 #include "roundtable_pipeline_capture.h" /* pipeline op-run capture seam (#18/#20) */
@@ -1451,6 +1452,19 @@ static void handle_conn(int fd, int is_tcp)
        * this reused worker thread; the OpenAI-family ingress dispatch mints a
        * fresh one below when evidence emission is on. */
       ingress_preinject_set_turn_id("");
+      /* S2 binding seam: recover the aimee session id from the primary provider's
+       * "aimee-sess-<sid>" auth token (Authorization or x-api-key). Identity, not
+       * auth (UDS still authorizes by filesystem); set every request so a reused
+       * worker thread never leaks one turn's session onto the next. "" when the
+       * request carries no aimee-session token. */
+      {
+         char bsid[64] = "";
+         if ((has_auth && wfe_session_id_from_auth(auth, bsid, sizeof bsid)) ||
+             (has_api_key && wfe_session_id_from_auth(api_key, bsid, sizeof bsid)))
+            ingress_preinject_set_session_id(bsid);
+         else
+            ingress_preinject_set_session_id("");
+      }
       anthropic_http_capture_request_headers(buf); /* parity: per-request anthropic-* hdrs */
       int az = server_http_authorize(is_tcp, g_bearer, has_auth ? auth : NULL,
                                      has_api_key ? api_key : NULL, has_skey);

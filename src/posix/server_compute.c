@@ -1,6 +1,7 @@
 /* server_compute.c: POSIX chat.send_stream worker for primary-agent streaming. */
 #include "aimee.h"
 #include "agent_adapter.h"
+#include "ingress_preinject.h" /* S2 binding: publish primary session id per turn */
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "agent_tools.h"   /* agent_tools_set_tool_event_cb — stream tool events */
@@ -727,6 +728,10 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
       run_cmd_set_cwd(use_cwd);
    if (aimee_sid && aimee_sid[0])
       session_id_set_override(aimee_sid);
+   /* S2 binding seam: publish the primary session id for this turn so the gateway
+    * router (gw_stage_router, invoked synchronously on THIS thread by the agent
+    * below) can create + bind an enforced work-item. Cleared with the override. */
+   ingress_preinject_set_session_id(aimee_sid && aimee_sid[0] ? aimee_sid : "");
 
    stream_event(cctx, "turn_start", NULL, NULL);
    /* Surface mirror drift (client head vs server mirror) before the turn acts —
@@ -766,6 +771,7 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
    cli_session_set_stream_cb(prev_stream_cb, prev_stream_ud);
    agent_tools_set_tool_event_cb(NULL, NULL);
    session_id_clear_override();
+   ingress_preinject_set_session_id(""); /* don't leak this turn's session id */
    workspace_turn_unbind_active();
    run_cmd_set_cwd(NULL);
    free(system_prompt);
