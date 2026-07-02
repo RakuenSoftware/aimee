@@ -1,20 +1,21 @@
 # aimee
 
-**Your AI forgets everything between sessions, relearns your codebase on your dime, and can
-still overwrite your `.env`. aimee ends all three, and does a lot more.**
+**Your AI has no memory, no map of your code, and no brakes. Every session it starts blind,
+bills you to relearn your repo, and can still overwrite your `.env`.**
 
-**One memory across every tool you use. Your whole codebase as a live graph. Any model on any
-provider, not just your tool's default. Cheap delegates for the grunt work. Guardrails the AI
-cannot write past. Hand it a written proposal and it ships the change itself: design, build,
-review, open the PR. Your context follows you between tools, and nothing locks you to a
-vendor.**
+**aimee fixes all of it, and goes further.** One memory across every tool. Your whole
+codebase as a live graph. Any model, any provider. Cheap delegates for the grunt work.
+Guardrails it cannot write past. Hand it a proposal and it ships the change itself: design,
+build, review, PR. Your context follows you anywhere. Nothing locks you in.
 
-Point any tool's OpenAI or Anthropic compatible API at aimee and it runs the turn on
-whatever model you choose: Claude, GPT, Gemini, Mistral, MiniMax, or a model on your own GPU.
-Or run aimee beside your tool over MCP, ACP, or a plugin, where the tool keeps its own model
-and aimee adds the memory, delegates, and guardrails as tools and hooks. It works with Claude
-Code, Codex, OpenCode, Gemini CLI, and the built in webchat. Switch tools whenever you like.
-Your memory and context come with you.
+Point any tool's OpenAI or Anthropic compatible API at aimee and it runs the turn on any
+model reachable over that wire: Claude, GPT, Gemini, Mistral, MiniMax, a model on your own
+GPU, or any other OpenAI or Anthropic compatible provider. Or run aimee beside your tool over
+MCP, ACP, or a plugin, where the tool keeps its own model and aimee adds the memory,
+delegates, and guardrails as tools and hooks. If it speaks the Anthropic or OpenAI API, MCP,
+or ACP, it works: Claude Code, Codex, OpenCode, Gemini CLI, aimee's own webchat, and anything
+else on those protocols. Switch tools whenever you like. Your memory and context come with
+you.
 
 Core services are C, hot paths run in single digit milliseconds, and nothing phones home.
 
@@ -179,7 +180,8 @@ every front end, because they live in the server and kb, not the tool.
 | GitHub Copilot | MCP server | Via the OpenAI compatible model | `./install.sh` |
 | VS Code | MCP tools in Copilot Chat, an ACP agent (`aimee acp-serve`), or aimee as an OpenAI compatible model | Yes, via `/v1/chat/completions` or ACP | [VS Code guide](docs/VSCODE.md) |
 
-Switch tools any time. Your memory and context stay.
+These are the common ones. Anything that speaks the Anthropic or OpenAI API, MCP, or ACP
+works the same way. Switch tools any time. Your memory and context stay.
 
 ## Why use aimee
 
