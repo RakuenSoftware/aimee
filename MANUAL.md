@@ -1437,8 +1437,10 @@ The combined container runs **both** aimee binaries: the kb on loopback `:8741`
 inside the container, the server fronting `:8740` with
 `AIMEE_KB_API_URL=http://127.0.0.1:8741`. The split stack
 (`compose.server.yaml`) instead runs `aimee-kb` as its own container the server
-reaches at `http://aimee-kb:8741`. Add `--profile llm` to any stack to bring up a
-local llama.cpp server for the synthesis/curator passes. Each container runs as a
+reaches at `http://aimee-kb:8741`. The combined image already bundles the synthesis
+and curator gateway; to run a standalone llama.cpp curator LLM instead, add
+`--profile curator-llm` on the split stacks (`compose.server.yaml`, `compose.yaml`)
+or `--profile external-llm` on the combined stack. Each container runs as a
 non-root user; the kb uses Python sidecars (`scripts/embed-remote.py`,
 `llm-chat.py`, `curator-extract.py`, `learning-synthesize.py`) for embeddings,
 synthesis, and curation, with container defaults from `deploy/container/aimee.yaml`.

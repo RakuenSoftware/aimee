@@ -103,8 +103,8 @@ thin `aimee` and `aimee-webchat` targets do not link database,
 | `db2/memory_entity_graph.c` | Entity-relationship graph queries behind DB2 |
 | `memory_advanced.c` | Anti-patterns, style learning, compaction |
 | `cmd_index.c` | Code indexing CLI through aimee-kb |
-| `extractors.c` | Source parsing, definition extraction (JS/TS/Python/Go) |
-| `extractors_extra.c` | Language extractors (C#/Shell/CSS/Dart/C/C++/Lua) |
+| `extractors.c`, `extractors_extra.c` | Tree-sitter symbol and reference extraction across C, C++, C#, Python, Go, JavaScript, TypeScript, Rust, Java, Ruby, PHP, Kotlin, Swift, Dart, Lua, Bash, and CSS |
+| `db2/cross_repo_resolver.c`, `db2/cross_repo_deps.c` | Cross-repo dependency resolution for the code graph |
 | `db2/rules.c` | Rule storage and tier classification behind DB2 |
 | `db2/feedback.c` | Feedback recording and reinforcement behind DB2 |
 | `guardrails.c` | Path classification, pre-tool safety checks, worktree enforcement |
@@ -121,6 +121,8 @@ thin `aimee` and `aimee-webchat` targets do not link database,
 | `server/agent_policy.c` | Tool validation, policy, trace, metrics, env, manifest, contract |
 | `server/delegate_prompt.c`, `server/delegate_routing.c` | Delegate prompt/context shaping and route selection |
 | `server/agent_config.c` | Delegate config loading, routing, auth resolution |
+| `server/vault_service.c` | Server-sealed credential vault (agent and delegate keys, Codex OAuth) |
+| `context_fold.c`, `gateway_delegate.c` | Context economizer: deterministic context folding and ingress compression on the delegate and gateway path |
 | `server/agent_tools.c` | Tool execution (bash, read, write), checkpoints |
 | `server/delegate_plan.c` | Delegate packet planning |
 | `agent_eval.c` | Eval harness, task suites |
