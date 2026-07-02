@@ -130,6 +130,7 @@ int wfe_advance_request_run(const char *session_id, const char *args_json, char 
    const char *actual_stage = "";
    const char *actual_state = "";
    char last_nonce[WFE_ADVANCE_NONCE_LEN] = "";
+   int wi_found = 0;
    if (b == 1 && bound_wi[0])
    {
       int g = db1_work_item_get(bound_wi, &wi);
@@ -140,6 +141,7 @@ int wfe_advance_request_run(const char *session_id, const char *args_json, char 
       }
       if (g == 1)
       {
+         wi_found = 1;
          actual_stage = wi.current_stage;
          actual_state = wi.state;
          last_advance_nonce(bound_wi, last_nonce, sizeof last_nonce);
@@ -153,8 +155,9 @@ int wfe_advance_request_run(const char *session_id, const char *args_json, char 
 
    if (oc != WFE_ADV_OK)
    {
-      /* Audit the refusal when we have a work-item to attribute it to. */
-      if (b == 1 && bound_wi[0])
+      /* Audit the refusal only when the work-item actually exists, so a binding
+       * that references a vanished work-item does not leave an orphan audit row. */
+      if (wi_found)
          audit(bound_wi, actual_stage, wfe_advance_outcome_name(oc), &a, "");
       cJSON *r = result_obj(wfe_advance_outcome_name(oc), a.work_item_id);
       if (r && actual_stage[0])
@@ -164,7 +167,18 @@ int wfe_advance_request_run(const char *session_id, const char *args_json, char 
    }
 
    /* OK: advance exactly one engine step under the engine's own invariants. The
-    * driver never writes run-state / gate.deliver directly. */
+    * driver never writes run-state / gate.deliver directly.
+    *
+    * Concurrency contract: decide()'s CAS + this advance are not one atomic txn, so
+    * two TRULY concurrent advances of the same work-item that both observed the same
+    * stage could double-execute a node (wfe_engine_advance reads current_stage before
+    * its own txn -- the same property the autonomous single-runner scheduler relies
+    * on). That is prevented here by the single-writer session<->work-item binding plus
+    * the per-turn snapshot (one advance decision per turn, serial per session). A
+    * SEQUENTIAL retry is handled precisely: the applied nonce is audited before the
+    * retry arrives, so decide() returns REPLAY. The structural per-work-item lease
+    * that would make even concurrent advances atomic is the Q4 single-writer lease,
+    * owned by sub-slice 6. */
    wfe_advance_result_t res;
    memset(&res, 0, sizeof res);
    char err[256] = "";
