@@ -39,44 +39,61 @@ static cJSON *result_obj(const char *status, const char *work_item_id)
    return r;
 }
 
-/* Nonce of the most recent driver-applied advance for this work-item ("" if none),
- * so a retried turn carrying the same nonce is recognized as an idempotent replay
- * rather than re-applied. */
+/* Nonce of the most recent driver-APPLIED (cas=ok) advance for this work-item ("" if
+ * none), so a retried turn carrying the same nonce is recognized as an idempotent
+ * replay rather than re-applied. Refusals (stale/unbound/...) are audited under the
+ * same kind and carry the attempted nonce, so they MUST be skipped here -- otherwise
+ * a refusal's nonce would pollute the read-back and a legitimate retry of an applied
+ * advance could be mis-decided. Events are ORDER BY id ASC, so scanning from the tail
+ * finds the most recent applied advance first. */
 static void last_advance_nonce(const char *wi, char *out, size_t n)
 {
    if (out && n)
       out[0] = '\0';
    db1_lifecycle_event_t *ev = NULL;
-   int ne = db1_lifecycle_event_list(wi, &ev); /* oldest first */
+   int ne = db1_lifecycle_event_list(wi, &ev); /* oldest first (ORDER BY id ASC) */
    for (int i = ne - 1; i >= 0; i--)
    {
       if (strcmp(ev[i].kind, ADV_KIND) != 0 || strcmp(ev[i].actor, ADV_ACTOR) != 0)
          continue;
       cJSON *d = cJSON_Parse(ev[i].detail);
-      const cJSON *nc = d ? cJSON_GetObjectItemCaseSensitive(d, "nonce") : NULL;
-      if (nc && cJSON_IsString(nc) && nc->valuestring && out && n)
-         snprintf(out, n, "%s", nc->valuestring);
+      const cJSON *cas = d ? cJSON_GetObjectItemCaseSensitive(d, "cas") : NULL;
+      int applied =
+          cas && cJSON_IsString(cas) && cas->valuestring && strcmp(cas->valuestring, "ok") == 0;
+      if (applied)
+      {
+         const cJSON *nc = cJSON_GetObjectItemCaseSensitive(d, "nonce");
+         if (nc && cJSON_IsString(nc) && nc->valuestring && out && n)
+            snprintf(out, n, "%s", nc->valuestring);
+      }
       cJSON_Delete(d);
-      break;
+      if (applied)
+         break; /* most recent APPLIED advance found; refusals in between skipped */
    }
    free(ev);
 }
 
 /* Audit a driver decision on a bound work-item. detail carries the CAS outcome and
- * (on a clean advance) the nonce + from/to stages -- id-charset values only, never
- * the primary's prose. */
+ * (on a clean advance) the nonce + from/to stages. Built via cJSON so any value is
+ * properly escaped -- stage ids are validator-constrained today, but the audit trail
+ * must not depend on that invariant to stay parseable (defense-in-depth; the primary's
+ * prose is never included). */
 static void audit(const char *wi, const char *stage, const char *outcome,
                   const wfe_advance_args_t *a, const char *to_stage)
 {
-   char detail[400];
+   cJSON *d = cJSON_CreateObject();
+   if (!d)
+      return;
+   cJSON_AddStringToObject(d, "cas", outcome);
+   cJSON_AddStringToObject(d, "from", stage ? stage : "");
+   cJSON_AddStringToObject(d, "to", to_stage ? to_stage : "");
    if (a->have_nonce)
-      snprintf(detail, sizeof detail,
-               "{\"cas\":\"%s\",\"from\":\"%s\",\"to\":\"%s\",\"nonce\":\"%s\"}", outcome,
-               stage ? stage : "", to_stage ? to_stage : "", a->nonce);
-   else
-      snprintf(detail, sizeof detail, "{\"cas\":\"%s\",\"from\":\"%s\",\"to\":\"%s\"}", outcome,
-               stage ? stage : "", to_stage ? to_stage : "");
-   db1_lifecycle_event_add(wi, stage ? stage : "", ADV_KIND, ADV_ACTOR, detail, "", 0);
+      cJSON_AddStringToObject(d, "nonce", a->nonce);
+   char *s = cJSON_PrintUnformatted(d);
+   cJSON_Delete(d);
+   if (s)
+      db1_lifecycle_event_add(wi, stage ? stage : "", ADV_KIND, ADV_ACTOR, s, "", 0);
+   free(s);
 }
 
 int wfe_advance_request_run(const char *session_id, const char *args_json, char *out, size_t out_n)

@@ -142,6 +142,31 @@ int main(void)
    assert(strcmp(st, "replay") == 0);
    assert(strcmp(stage_now(id), "c") == 0);
 
+   /* Refusal rows must NOT pollute the replay nonce read-back. Reach a fresh
+    * work-item at "a" via nonce "nA" (applied), record an intervening STALE refusal
+    * that carries a DIFFERENT nonce "nZ", then retry the applied advance: it must
+    * read as REPLAY (matching the last APPLIED nonce nA), not stale (which would
+    * happen if the refusal's nonce nZ were mistaken for the last advance). */
+   char id2[80] = "";
+   assert(wfe_work_item_create("t", "git@github.com:x/z.git", "docs/q.md", "interactive", id2, err,
+                               sizeof err) == 0);
+   assert(db1_wfe_bind("sess-C", id2, "advisory") == 0);
+   char applied[256], stale_z[256];
+   snprintf(applied, sizeof applied,
+            "{\"work_item_id\":\"%s\",\"observed_stage\":\"a\",\"nonce\":\"nA\"}", id2);
+   snprintf(stale_z, sizeof stale_z,
+            "{\"work_item_id\":\"%s\",\"observed_stage\":\"a\",\"nonce\":\"nZ\"}", id2);
+   assert(wfe_advance_request_run("sess-C", applied, out, sizeof out) == 0); /* a->b, cas=ok nA */
+   status_of(out, st, sizeof st);
+   assert(strcmp(st, "ok") == 0);
+   assert(wfe_advance_request_run("sess-C", stale_z, out, sizeof out) == 0); /* stale, nonce nZ */
+   status_of(out, st, sizeof st);
+   assert(strcmp(st, "stale") == 0);
+   assert(wfe_advance_request_run("sess-C", applied, out, sizeof out) ==
+          0); /* retry of the applied */
+   status_of(out, st, sizeof st);
+   assert(strcmp(st, "replay") == 0); /* nA still the last APPLIED nonce, not nZ */
+
    /* the driver audited its decisions (advance_req / advance-s2 events exist) */
    db1_lifecycle_event_t *ev = NULL;
    int ne = db1_lifecycle_event_list(id, &ev);
