@@ -1344,7 +1344,7 @@ $(TESTPREFIX)/unit-test-wfe-advance: $(OBJDIR)/tests/test_wfe_advance.o \
 
 # S2 binding seam: auth-token->sid parser + idempotent interactive bind.
 $(TESTPREFIX)/unit-test-wfe-bind-ingress: $(OBJDIR)/tests/test_wfe_bind_ingress.o \
-                                    $(OBJDIR)/workflow/wfe_bind_ingress.o $(OBJDIR)/workflow/wfe_enforce.o \
+                                    $(OBJDIR)/workflow/wfe_bind_ingress.o $(OBJDIR)/log.o $(OBJDIR)/workflow/wfe_enforce.o \
                                     $(OBJDIR)/workflow/wfe_externalization.o $(OBJDIR)/db1/wfe_binding.o \
                                     $(OBJDIR)/workflow/wfe_router.o $(OBJDIR)/workflow/wfe_router_catalog.o \
                                     $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \

@@ -1,16 +1,61 @@
 /* wfe_bind_ingress.c -- see wfe_bind_ingress.h. */
 #include "wfe_bind_ingress.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "cJSON.h"
+#include "log.h"         /* bind-health WARN */
 #include "wfe_binding.h" /* db1_wfe_bind, db1_wfe_binding_get */
 #include "wfe_enforce.h" /* the dial */
 #include "wfe_engine.h"  /* wfe_work_item_create */
 #include "wfe_router.h"  /* catalog + decide + find */
-#include "wfe_store.h"   /* db1_lifecycle_event_add */
+
+/* Runtime bind-health detector (pre-hard-flip hardening / consult overnight [9][30]):
+ * catch a SILENTLY-INERT enforce path -- the dial is on and enforced-routed turns
+ * are arriving, but nothing ever binds (a wiring regression). We track two atomic
+ * counters and WARN ONCE when enforced routes are clearly happening yet zero binds
+ * have occurred. Only enforced routes are counted, so an IDLE server (0 turns) never
+ * false-warns; the threshold avoids warning on a single transient failure. */
+static atomic_int g_enforced_routes = 0;
+static atomic_int g_binds = 0;
+static atomic_int g_health_warned = 0;
+
+#define BIND_HEALTH_WARN_AFTER 3
+
+void wfe_bind_health_note_enforced_route(void)
+{
+   int seen = atomic_fetch_add(&g_enforced_routes, 1) + 1;
+   if (seen >= BIND_HEALTH_WARN_AFTER && atomic_load(&g_binds) == 0)
+   {
+      int expected = 0;
+      if (atomic_compare_exchange_strong(&g_health_warned, &expected, 1))
+         aimee_log(LOG_WARN, "primary-cli-ingestor",
+                   "%d enforced-routed turns but 0 bindings -- the tmux primary enforce path "
+                   "appears INERT (S2 not firing). Check the ingestor wiring and the dial.",
+                   seen);
+   }
+}
+
+void wfe_bind_health_note_bind(void)
+{
+   atomic_fetch_add(&g_binds, 1);
+}
+
+/* test hooks */
+void wfe_bind_health_reset(void)
+{
+   atomic_store(&g_enforced_routes, 0);
+   atomic_store(&g_binds, 0);
+   atomic_store(&g_health_warned, 0);
+}
+int wfe_bind_health_warned(void)
+{
+   return atomic_load(&g_health_warned);
+}
+#include "wfe_store.h" /* db1_lifecycle_event_add */
 
 static void audit_bind(const char *wi, const char *workflow, const char *stage, int resumed)
 {
@@ -108,6 +153,9 @@ int wfe_bind_interactive(const char *session_id, const char *message, const char
    const wfe_router_wf_t *w = wfe_router_find(&cat, d.workflow_id);
    if (!w || !w->enforced)
       return 0;
+   /* An enforced route was seen -> from here a bind SHOULD happen; the detector
+    * warns if this keeps happening without any bind (inert enforce path). */
+   wfe_bind_health_note_enforced_route();
 
    /* Deterministic per-session proposal path so UNIQUE(repo, proposal_path) is a
     * stable backstop against a duplicate create. Refuse on truncation: a truncated
@@ -139,5 +187,6 @@ int wfe_bind_interactive(const char *session_id, const char *message, const char
    /* Start the sliding lease (step 6 watchdog); renewed on each applied advance. */
    db1_wfe_lease_renew(session_id, wfe_lease_ttl_secs());
    audit_bind(id, w->id, wfe_enforce_stage_name(stage), resumed);
+   wfe_bind_health_note_bind();
    return 1;
 }
