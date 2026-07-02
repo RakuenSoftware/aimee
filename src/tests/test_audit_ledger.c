@@ -18,6 +18,15 @@ static void set_home(void)
    snprintf(g_home, sizeof g_home, "/tmp/aimee-ledger-test-%d", (int)getpid());
    mkdir(g_home, 0700);
    setenv("AIMEE_HOME", g_home, 1);
+   /* Clear any audit.log* left by a prior test so cases stay isolated. */
+   char p[600];
+   snprintf(p, sizeof p, "%s/audit.log", g_home);
+   unlink(p);
+   for (int i = 0; i <= 8; i++)
+   {
+      snprintf(p, sizeof p, "%s/audit.log.%d", g_home, i);
+      unlink(p);
+   }
 }
 
 static void write_file(const char *name, const char *content)
@@ -109,12 +118,28 @@ static void test_missing_log_is_empty_not_null(void)
    cJSON_Delete(arr);
 }
 
+/* A line with a valid JSON prefix but trailing garbage must be rejected by the
+ * strict parse, not accepted as a row. */
+static void test_strict_parse_rejects_trailing_garbage(void)
+{
+   set_home();
+   write_file(
+       "audit.log",
+       "{\"ts\":\"2026-07-02T10:00:01Z\",\"kind\":\"tool_action\",\"tool\":\"A\"} trailing junk\n"
+       "{\"ts\":\"2026-07-02T10:00:02Z\",\"kind\":\"tool_action\",\"tool\":\"B\"}\n");
+   cJSON *arr = audit_ledger_read(NULL, NULL);
+   assert(cJSON_GetArraySize(arr) == 1); /* only the clean B row */
+   assert(strcmp(row_tool(arr, 0), "B") == 0);
+   cJSON_Delete(arr);
+}
+
 int main(void)
 {
    test_extract_order_and_skip();
    test_window_filter();
    test_rotated_chronology();
    test_missing_log_is_empty_not_null();
+   test_strict_parse_rejects_trailing_garbage();
    printf("test_audit_ledger: all passed\n");
    return 0;
 }
