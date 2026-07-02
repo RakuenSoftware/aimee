@@ -146,6 +146,13 @@ CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id);
 CREATE INDEX IF NOT EXISTS idx_te_source ON task_edges(source_id);
 CREATE INDEX IF NOT EXISTS idx_te_target ON task_edges(target_id);
 CREATE INDEX IF NOT EXISTS idx_dl_task ON decision_log(task_id);
+-- Governance decision-record columns (idempotent; applied to new + existing DBs).
+ALTER TABLE decision_log ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE decision_log ADD COLUMN IF NOT EXISTS revisit_when TEXT NOT NULL DEFAULT '';
+ALTER TABLE decision_log ADD COLUMN IF NOT EXISTS supersedes_id BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE decision_log ADD COLUMN IF NOT EXISTS subject TEXT NOT NULL DEFAULT '';
+ALTER TABLE decision_log ADD COLUMN IF NOT EXISTS author TEXT NOT NULL DEFAULT '';
+ALTER TABLE decision_log ADD COLUMN IF NOT EXISTS linked_policy_id BIGINT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_agent_hints_lookup ON agent_hints(role, consumed);
 CREATE INDEX IF NOT EXISTS idx_memory_workspaces_workspace ON memory_workspaces(workspace);
 CREATE INDEX IF NOT EXISTS idx_memory_aliases_memory ON memory_aliases(memory_id);

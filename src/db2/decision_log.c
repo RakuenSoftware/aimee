@@ -28,6 +28,16 @@ static void row_from_stmt(aimee_pg_stmt_t *st, db2_decision_log_row_t *row)
    snprintf(row->outcome, sizeof(row->outcome), "%s", col ? col : "");
    col = aimee_pg_column_text(st, 7);
    snprintf(row->created_at, sizeof(row->created_at), "%s", col ? col : "");
+   col = aimee_pg_column_text(st, 8);
+   snprintf(row->status, sizeof(row->status), "%s", col ? col : "");
+   col = aimee_pg_column_text(st, 9);
+   snprintf(row->revisit_when, sizeof(row->revisit_when), "%s", col ? col : "");
+   row->supersedes_id = aimee_pg_column_int64(st, 10);
+   col = aimee_pg_column_text(st, 11);
+   snprintf(row->subject, sizeof(row->subject), "%s", col ? col : "");
+   col = aimee_pg_column_text(st, 12);
+   snprintf(row->author, sizeof(row->author), "%s", col ? col : "");
+   row->linked_policy_id = aimee_pg_column_int64(st, 13);
 }
 
 int db2_decision_log_insert(int64_t task_id, const char *options, const char *chosen,
@@ -81,7 +91,8 @@ int db2_decision_log_get(int64_t id, db2_decision_log_row_t *out)
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
-       "SELECT id, task_id, options, chosen, rationale, assumptions, outcome, created_at"
+       "SELECT id, task_id, options, chosen, rationale, assumptions, outcome, created_at,"
+       " status, revisit_when, supersedes_id, subject, author, linked_policy_id"
        " FROM decision_log WHERE id = ?1",
        err, sizeof(err));
    if (!st)
@@ -124,10 +135,11 @@ int db2_decision_log_list(const char *outcome, int limit, db2_decision_log_row_t
    if (!conn || !out || max <= 0)
       return 0;
 
-   char sql[256];
+   char sql[512];
    int pos =
        snprintf(sql, sizeof(sql),
-                "SELECT id, task_id, options, chosen, rationale, assumptions, outcome, created_at"
+                "SELECT id, task_id, options, chosen, rationale, assumptions, outcome, created_at,"
+                " status, revisit_when, supersedes_id, subject, author, linked_policy_id"
                 " FROM decision_log WHERE 1=1");
    int bind_outcome = 0;
    if (outcome && outcome[0])

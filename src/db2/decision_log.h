@@ -25,6 +25,14 @@ extern "C"
       char assumptions[512];
       char outcome[32];
       char created_at[32];
+      /* Governance decision-record fields (per-action governance audit, P1).
+       * Populated by the decision write path (S5); default/empty on legacy rows. */
+      char status[16];          /* active | superseded | revisit_due */
+      char revisit_when[32];    /* ISO-8601 date/condition to re-review, or empty */
+      int64_t supersedes_id;    /* decision_log.id this replaces, or 0 */
+      char subject[256];        /* scope key: what this decision is about */
+      char author[128];         /* who decided */
+      int64_t linked_policy_id; /* bound policy id, or 0 */
    } db2_decision_log_row_t;
 
    /* Insert a task decision_log row. `created_at` may be NULL to default

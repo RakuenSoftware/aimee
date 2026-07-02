@@ -81,6 +81,15 @@ static void test_enum_text(void)
    printf("  PASS: test_enum_text\n");
 }
 
+static void test_governance_rel_types(void)
+{
+   /* The P1 decision-record relations are registered in the seed. */
+   assert(rel_types_seed_lookup("supersedes") != NULL);
+   assert(rel_types_seed_lookup("linked_policy") != NULL);
+   assert(rel_types_seed_lookup("decided_by") != NULL);
+   printf("  PASS: test_governance_rel_types\n");
+}
+
 int main(void)
 {
    test_seed_self_validates();
@@ -88,6 +97,7 @@ int main(void)
    test_seed_lookup_case_insensitive();
    test_kind_allowed();
    test_enum_text();
+   test_governance_rel_types();
    printf("rel_types: all tests passed\n");
    return 0;
 }
