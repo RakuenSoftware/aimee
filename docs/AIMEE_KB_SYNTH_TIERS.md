@@ -19,10 +19,31 @@ plugin **image swap**, no re-embed.
 ## Deploy: one plugin image swap
 
 The synth tier is chosen by which image the SmoothNAS `aimee-llm` plugin references —
-e.g. `ghcr.io/rakuensoftware/aimee-kb-gpu-mid:latest` for Gemma 4 26B-A4B. No separate delegate
-container, no `SYNTH_LOCAL` juggling: the tier *is* the synth. The gateway's
-`/v1/chat/completions` is what the server/curator use, so the delegate wiring is
-automatic once the image is deployed.
+e.g. `ghcr.io/rakuensoftware/aimee-kb-gpu-mid:latest` for Gemma 4 26B-A4B. No separate synth
+container, no `SYNTH_LOCAL` juggling: the tier *is* the synth.
+
+### Two consumers of the gateway synth (`/v1/chat/completions`)
+
+The gateway (`http://<runtime-gw>:8742/v1`, model alias `aimee-synth`) is used by two
+independent callers — one automatic, one an explicit operator step:
+
+1. **KB curator synthesis — automatic.** The `aimee-kb` plugin points `LLM_ENDPOINT` /
+   `LLM_MODEL` at the gateway, so the curator's `tier_a`/`tier_b` use the synth tier the
+   moment the image is deployed. Swapping tiers needs no KB change.
+
+2. **aimee-server delegate — an explicit runtime registration (NOT automatic).** To make
+   the local synth usable as an `aimee` delegate (roundtable / fallback), register it once
+   against the server (endpoint is model-neutral, so the registration survives synth-tier
+   swaps):
+
+   ```sh
+   aimee agent local local-synth http://<runtime-gw>:8742/v1 \
+       --model aimee-synth --provider openai --slots <SYNTH_SLOTS>
+   ```
+
+   The gateway runs auth-off on the internal bridge, so the agent uses `auth_type: none`.
+   This lives in the server's `agents.json` (runtime/per-deployment state, not baked into
+   the image). On `.254` this is registered as `local-synth` and sits in `fallback_chain`.
 
 ## Synth runtime knobs (baked per tier; overridable via plugin env)
 
