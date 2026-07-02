@@ -77,6 +77,12 @@ int wfe_enforce_stage_restricts(wfe_enforce_stage_t s);
 /* 1 if a denied action must be REFUSED (hard only); soft/advisory/off allow it. */
 int wfe_enforce_stage_refuses(wfe_enforce_stage_t s);
 
+/* The sliding-lease TTL in seconds (S2 step 6 watchdog): a bound work-item is
+ * "stale" once this long has elapsed since its last MEANINGFUL advance. Read from
+ * AIMEE_WORKFLOW_LEASE_TTL_SECS (a positive integer); defaults to 3600. A value of
+ * 0 disables the lease (never stale). */
+int wfe_lease_ttl_secs(void);
+
 /* Compare-and-swap guard for an interactive advance_request (consult Q1). The
  * primary's advance carries the stage it OBSERVED; the engine advances only if
  * that still matches the work-item's ACTUAL current stage. Prevents a duplicate

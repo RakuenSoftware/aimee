@@ -107,6 +107,83 @@ int db1_wfe_binding_get(const char *session_id, char *wi_out, size_t wi_n, char 
    return found;
 }
 
+int db1_wfe_lease_renew(const char *session_id, int ttl_secs)
+{
+   if (!session_id || !session_id[0])
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+   sqlite3_stmt *stmt = NULL;
+   /* ttl==0 -> clear the lease (store '', never stale); else lease_expiry :=
+    * now + ttl_secs. A negative ttl sets a PAST expiry (immediately stale) -- used
+    * to force expiry (tests / an explicit orphan). Modifier built in C so the value
+    * is a bound param, not string-concatenated SQL. */
+   char mod[32];
+   snprintf(mod, sizeof mod, "%+d seconds", ttl_secs);
+   static const char *sql = "UPDATE workflow_binding SET lease_expiry="
+                            "CASE WHEN ?2 = 0 THEN '' ELSE datetime('now', ?3) END "
+                            "WHERE aimee_session_id=?1";
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(stmt, 1, session_id, -1, SQLITE_TRANSIENT);
+   sqlite3_bind_int(stmt, 2, ttl_secs);
+   sqlite3_bind_text(stmt, 3, mod, -1, SQLITE_TRANSIENT);
+   int rc = (sqlite3_step(stmt) == SQLITE_DONE) ? 0 : -1;
+   sqlite3_finalize(stmt);
+   return rc;
+}
+
+int db1_wfe_lease_expiry_get(const char *session_id, char *out, size_t n)
+{
+   if (out && n)
+      out[0] = '\0';
+   if (!session_id || !session_id[0])
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+   sqlite3_stmt *stmt = NULL;
+   static const char *sql = "SELECT lease_expiry FROM workflow_binding WHERE aimee_session_id=?1";
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(stmt, 1, session_id, -1, SQLITE_TRANSIENT);
+   int found = 0;
+   if (sqlite3_step(stmt) == SQLITE_ROW)
+   {
+      found = 1;
+      const char *e = (const char *)sqlite3_column_text(stmt, 0);
+      if (out && n)
+         snprintf(out, n, "%s", e ? e : "");
+   }
+   sqlite3_finalize(stmt);
+   return found;
+}
+
+int db1_wfe_lease_stale_work_items(char (*out)[80], int max)
+{
+   if (!out || max <= 0)
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+   sqlite3_stmt *stmt = NULL;
+   static const char *sql =
+       "SELECT work_item_id FROM workflow_binding "
+       "WHERE lease_expiry != '' AND lease_expiry < datetime('now') ORDER BY lease_expiry ASC";
+   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK)
+      return -1;
+   int n = 0;
+   while (n < max && sqlite3_step(stmt) == SQLITE_ROW)
+   {
+      const char *wi = (const char *)sqlite3_column_text(stmt, 0);
+      snprintf(out[n], 80, "%s", wi ? wi : "");
+      n++;
+   }
+   sqlite3_finalize(stmt);
+   return n;
+}
+
 int db1_wfe_unbind(const char *session_id)
 {
    if (!session_id || !session_id[0])

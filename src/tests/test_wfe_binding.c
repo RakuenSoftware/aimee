@@ -40,6 +40,33 @@ int main(void)
    assert(db1_wfe_binding_get("sess1", wi, sizeof wi, st, sizeof st) == 0);
    assert(db1_wfe_bind("sess3", "wi_A", "soft") == 0); /* wi_A free -> reclaim ok */
 
+   /* ---- sliding lease (step 6 watchdog) ---- */
+   char exp[32] = "";
+   /* a fresh bind carries no lease until renewed */
+   assert(db1_wfe_lease_expiry_get("sess3", exp, sizeof exp) == 1);
+   assert(exp[0] == '\0');
+   assert(db1_wfe_lease_expiry_get("nobody", exp, sizeof exp) == 0); /* unbound */
+
+   char stale[4][80];
+   /* renew forward -> has an expiry, not stale */
+   assert(db1_wfe_lease_renew("sess3", 3600) == 0);
+   assert(db1_wfe_lease_expiry_get("sess3", exp, sizeof exp) == 1 && exp[0]);
+   assert(db1_wfe_lease_stale_work_items(stale, 4) == 0);
+
+   /* force a PAST expiry -> stale; the sweep query surfaces the work-item */
+   assert(db1_wfe_lease_renew("sess3", -60) == 0);
+   assert(db1_wfe_lease_stale_work_items(stale, 4) == 1);
+   assert(strcmp(stale[0], "wi_A") == 0);
+
+   /* renew forward again -> no longer stale */
+   assert(db1_wfe_lease_renew("sess3", 3600) == 0);
+   assert(db1_wfe_lease_stale_work_items(stale, 4) == 0);
+
+   /* clearing the lease (ttl 0) -> never stale even while bound */
+   assert(db1_wfe_lease_renew("sess3", 0) == 0);
+   assert(db1_wfe_lease_expiry_get("sess3", exp, sizeof exp) == 1 && exp[0] == '\0');
+   assert(db1_wfe_lease_stale_work_items(stale, 4) == 0);
+
    printf("ok\n");
    return 0;
 }

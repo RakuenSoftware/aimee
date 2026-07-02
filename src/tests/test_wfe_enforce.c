@@ -2,6 +2,7 @@
  * per-block tool surface, surface allow-check (with the delivery gate), and the
  * rollout fail-class split. */
 #include <assert.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -94,6 +95,19 @@ int main(void)
    assert(wfe_advance_cas_ok("implement", "implement") == 1);  /* match -> advance */
    assert(wfe_advance_cas_ok("understand", "implement") == 0); /* stale -> reject */
    assert(wfe_advance_cas_ok(NULL, "implement") == -1 && wfe_advance_cas_ok("implement", "") == -1);
+
+   /* --- sliding-lease TTL (step 6) --- */
+   unsetenv("AIMEE_WORKFLOW_LEASE_TTL_SECS");
+   assert(wfe_lease_ttl_secs() == 3600); /* default */
+   setenv("AIMEE_WORKFLOW_LEASE_TTL_SECS", "120", 1);
+   assert(wfe_lease_ttl_secs() == 120);
+   setenv("AIMEE_WORKFLOW_LEASE_TTL_SECS", "0", 1);
+   assert(wfe_lease_ttl_secs() == 0); /* disable */
+   setenv("AIMEE_WORKFLOW_LEASE_TTL_SECS", "garbage", 1);
+   assert(wfe_lease_ttl_secs() == 3600); /* bad value -> default */
+   setenv("AIMEE_WORKFLOW_LEASE_TTL_SECS", "99999999", 1);
+   assert(wfe_lease_ttl_secs() == 3600); /* out of range -> default */
+   unsetenv("AIMEE_WORKFLOW_LEASE_TTL_SECS");
 
    printf("ok\n");
    return 0;

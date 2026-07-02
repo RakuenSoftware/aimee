@@ -3,6 +3,7 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "wfe_externalization.h" /* wfe_is_deliver_primitive */
@@ -193,4 +194,17 @@ void wfe_enforce_user_message(wfe_enforce_stage_t stage, const char *gate, const
                verb, g, work_item_id);
    else
       snprintf(buf, n, "This change %s: it must pass %s before it can be delivered.", verb, g);
+}
+
+int wfe_lease_ttl_secs(void)
+{
+   const char *v = getenv("AIMEE_WORKFLOW_LEASE_TTL_SECS");
+   if (v && v[0])
+   {
+      char *end = NULL;
+      long n = strtol(v, &end, 10);
+      if (end && *end == '\0' && n >= 0 && n <= 604800) /* clamp to <= 7 days */
+         return (int)n;
+   }
+   return 3600; /* default: 1h idle-to-stale */
 }

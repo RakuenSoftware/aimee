@@ -189,6 +189,9 @@ int wfe_advance_request_run(const char *session_id, const char *args_json, char 
       return 0;
    }
 
+   /* Meaningful advance -> renew the sliding lease (step 6). Renewing ONLY here (not
+    * on refusals/replays) is deliberate: trivial turns must not hold the lease. */
+   db1_wfe_lease_renew(session_id, wfe_lease_ttl_secs());
    audit(bound_wi, actual_stage, "ok", &a, res.next_stage);
 
    cJSON *r = result_obj("ok", bound_wi);

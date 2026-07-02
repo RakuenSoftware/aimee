@@ -70,6 +70,8 @@ int wfe_bind_interactive(const char *session_id, const char *message, const char
    if (db1_wfe_bind(session_id, id, wfe_enforce_stage_name(stage)) != 0)
       return 0;
 
+   /* Start the sliding lease (step 6 watchdog); renewed on each applied advance. */
+   db1_wfe_lease_renew(session_id, wfe_lease_ttl_secs());
    audit_bind(id, w->id, wfe_enforce_stage_name(stage));
    return 1;
 }
