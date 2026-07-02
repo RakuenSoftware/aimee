@@ -75,6 +75,17 @@ static void setup_home(void)
    assert(f);
    fputs(WF_MC, f);
    fclose(f);
+   /* a SECOND enforced workflow so a bound-session turn can route elsewhere
+    * (scope-add). Same shape as mc, distinct name. */
+   snprintf(path, sizeof path, "%s/mc2.yaml", wf);
+   f = fopen(path, "wb");
+   assert(f);
+   {
+      const char *p = strstr(WF_MC, "\n");
+      fputs("name: mc2", f);  /* replace the "name: mc" line */
+      fputs(p ? p : "\n", f); /* + the rest of the workflow verbatim */
+   }
+   fclose(f);
    setenv("AIMEE_HOME", dir, 1);
    char repo[600];
    snprintf(repo, sizeof repo, "%s/repo", dir);
@@ -136,6 +147,30 @@ int main(void)
    int n_items = db1_work_item_list(&items);
    free(items);
    assert(n_items == 1);
+
+   /* reject-scope-add surfacing (inc 3a): a bound session whose turn routes to a
+    * DIFFERENT enforced workflow ("use mc2 ...") stays bound to mc (scope-add
+    * rejected) and a scope_add_held event is recorded; a same-workflow turn does
+    * NOT surface one. */
+   assert(wfe_bind_interactive(SID, "use mc2 also fix X", NULL) == 1); /* still bound to mc */
+   assert(binding_wi(SID, wi, sizeof wi) == 1 && strcmp(wi, first_wi) == 0);
+   ev = NULL;
+   ne = db1_lifecycle_event_list(first_wi, &ev);
+   int held = 0;
+   for (int i = 0; i < ne; i++)
+      if (strcmp(ev[i].kind, "scope_add_held") == 0 && strcmp(ev[i].actor, "bind-s2") == 0)
+         held++;
+   free(ev);
+   assert(held == 1);
+   assert(wfe_bind_interactive(SID, "use mc keep going", NULL) == 1); /* same workflow */
+   ev = NULL;
+   ne = db1_lifecycle_event_list(first_wi, &ev);
+   int held2 = 0;
+   for (int i = 0; i < ne; i++)
+      if (strcmp(ev[i].kind, "scope_add_held") == 0)
+         held2++;
+   free(ev);
+   assert(held2 == 1); /* unchanged: same-workflow turn surfaces nothing */
 
    /* resume-after-reclaim (step 6 inc 2): make the lease stale, reclaim it (unbinds
     * SID; the work-item persists), then a fresh enforced turn RESUMES the same

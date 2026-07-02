@@ -27,6 +27,34 @@ static void audit_bind(const char *wi, const char *workflow, const char *stage, 
    free(s);
 }
 
+/* Reject-scope-add surfacing (consult #30): a session already bound to one work-item
+ * cannot silently expand scope. If THIS turn routes to a DIFFERENT enforced workflow
+ * ("also fix X"), the safe-S2 rule HOLDS the new intent -- the session must finish /
+ * deliver its current work-item first. Record a templated "scope_add_held" event
+ * (workflow ids only, no prose) so the rejection is observable; the binding is left
+ * unchanged. Same-workflow / non-enforced turns are normal work and surface nothing. */
+static void wfe_scope_add_surface(const char *wi, const char *message)
+{
+   if (!wi || !wi[0] || !message || !message[0])
+      return;
+   db1_work_item_t item;
+   if (db1_work_item_get(wi, &item) != 1)
+      return;
+   wfe_router_catalog_t cat;
+   char err[256];
+   if (wfe_router_catalog_load(&cat, err, sizeof err) != 0)
+      return;
+   wfe_route_decision_t d;
+   wfe_router_decide(message, &cat, NULL, &d);
+   const wfe_router_wf_t *w = wfe_router_find(&cat, d.workflow_id);
+   if (!w || !w->enforced || strcmp(d.workflow_id, item.workflow_name) == 0)
+      return; /* not a scope-add: same workflow, or a non-enforced turn */
+   char detail[192];
+   snprintf(detail, sizeof detail, "{\"held\":\"%s\",\"current\":\"%s\"}", d.workflow_id,
+            item.workflow_name);
+   db1_lifecycle_event_add(wi, "", "scope_add_held", "bind-s2", detail, "", 0);
+}
+
 int wfe_bind_interactive(const char *session_id, const char *message, const char *repo)
 {
    if (!session_id || !session_id[0])
@@ -48,7 +76,12 @@ int wfe_bind_interactive(const char *session_id, const char *message, const char
     * turn after the first, so the create path runs at most once per session. */
    char wi[80] = "";
    if (db1_wfe_binding_get(session_id, wi, sizeof wi, NULL, 0) == 1 && wi[0])
+   {
+      /* Bound already: reuse (create nothing). Surface a scope-add attempt so the
+       * safe-S2 rejection is observable; the binding stays put. */
+      wfe_scope_add_surface(wi, message);
       return 1;
+   }
 
    if (!message || !message[0])
       return 0;
