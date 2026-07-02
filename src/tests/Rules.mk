@@ -30,7 +30,7 @@ TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/workspace.o $(DB1_OBJS) \
                              $(OBJDIR)/server/mcp_client.o $(OBJDIR)/server/mcp_client_registry.o \
                              $(OBJDIR)/server/http_retry.o $(OBJDIR)/server/failover.o \
                              $(OBJDIR)/posix/cli_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/posix/cli_main.o \
-	                             $(OBJDIR)/guardrails.o $(OBJDIR)/guardrails_orchestrator.o $(OBJDIR)/guardrails_action_audit.o $(OBJDIR)/guardrails_tdd.o $(OBJDIR)/guardrails_semantic.o $(OBJDIR)/guardrails_blast_radius.o $(OBJDIR)/skill.o $(OBJDIR)/session_state.o $(OBJDIR)/file_safety.o $(OBJDIR)/git_verify.o $(OBJDIR)/git_verify_config.o $(OBJDIR)/git_verify_jobs.o $(OBJDIR)/git_verify_hook.o $(OBJDIR)/git_verify_ops.o $(OBJDIR)/git_verify_select.o $(OBJDIR)/git_verify_step.o \
+	                             $(OBJDIR)/guardrails.o $(OBJDIR)/guardrails_orchestrator.o $(OBJDIR)/guardrails_action_audit.o $(OBJDIR)/audit_action.o $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/guardrails_tdd.o $(OBJDIR)/guardrails_semantic.o $(OBJDIR)/guardrails_blast_radius.o $(OBJDIR)/skill.o $(OBJDIR)/session_state.o $(OBJDIR)/file_safety.o $(OBJDIR)/git_verify.o $(OBJDIR)/git_verify_config.o $(OBJDIR)/git_verify_jobs.o $(OBJDIR)/git_verify_hook.o $(OBJDIR)/git_verify_ops.o $(OBJDIR)/git_verify_select.o $(OBJDIR)/git_verify_step.o \
                              $(OBJDIR)/branch_ownership.o \
                              $(OBJDIR)/dstr.o $(OBJDIR)/diff.o \
                              $(OBJDIR)/server/web_search.o \
