@@ -11,6 +11,16 @@ Thin-client + credential hardening, the client owns the working tree; agent
 credentials live in the server's **sealed vault**; see
 [THIN_CLIENT.md](THIN_CLIENT.md).
 
+- **Self-hosted GPU inference tiers**: the `aimee-kb` inference image ships three tiers you
+  swap with one plugin image. `aimee-kb-cpu` runs retrieval on any host, `aimee-kb-gpu-small`
+  bakes a Gemma 4 12B synth, and `aimee-kb-gpu-mid` bakes a Gemma 4 26B-A4B synth that fits a
+  24 GB card fully resident. The GPU tiers build on a Mesa 25 base so RADV uses the RDNA3
+  matrix cores. The local synth also registers as a free delegate. See
+  [AIMEE_KB_SYNTH_TIERS.md](AIMEE_KB_SYNTH_TIERS.md).
+- **Cross-repo code graph**: the symbol and call graph resolves dependency edges across the
+  repositories in your workspace, so blast radius and caller lookups cross repo boundaries.
+  Ask in three directions: what a project depends on, what depends on it, or both. See
+  [CODE_INTELLIGENCE.md](CODE_INTELLIGENCE.md).
 - **Structured-PDF tables, visual crops & OCR** (default-off, opt-in per layer):
   on top of the coordinate-anchored PDF spine, aimee-kb can now embed PDF chunks
   into a structurally-isolated vector relation with a per-query answerability
