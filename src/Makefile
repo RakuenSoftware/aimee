@@ -294,7 +294,7 @@ CORE_SRCS = db1/db.c db1/db_schema.c config.c config_sections.c config_database.
             client_integrations.c mcp_tools.c mcp_tool_profile.c mcp_tools_extended.c mcp_skill_tools.c mcp_tools_gateway.c events.c \
             model_registry.c models_dev.c models_dev_cache.c lsp_client.c lsp_manager.c plugin.c \
             plugin_ctx.c plugin_loader.c memory_provider.c plugin_c_hook.c config_plugin.c code_collect.c codex_auth.c \
-            workflow/wfe_iface.c workflow/wfe_def.c workflow/wfe_validate.c workflow/wfe_canonical.c workflow/wfe_custom.c workflow/wfe_manager_artifacts.c workflow/wfe_externalization.c workflow/wfe_enforce.c workflow/wfe_deliver.c workflow/wfe_advance.c workflow/wfe_advance_exec.c workflow/wfe_router.c workflow/wfe_router_catalog.c \
+            workflow/wfe_iface.c workflow/wfe_def.c workflow/wfe_validate.c workflow/wfe_canonical.c workflow/wfe_custom.c workflow/wfe_manager_artifacts.c workflow/wfe_externalization.c workflow/wfe_enforce.c workflow/wfe_deliver.c workflow/wfe_advance.c workflow/wfe_advance_exec.c workflow/wfe_block_resolve.c workflow/wfe_router.c workflow/wfe_router_catalog.c \
             harness_memory_common.c harness_memory_scope.c harness_memory_audit.c harness_memory_spill.c
 CORE_OBJS = $(CORE_SRCS:%.c=$(OBJDIR)/%.o) $(OBJDIR)/cJSON.o
 

@@ -29,7 +29,8 @@
 #include "server_mcp_skill.h"
 #include "server_mcp_delegate.h"
 #include "server_mcp_workflows.h"
-#include "wfe_advance_exec.h" /* advance_request interactive-driver executor (S2) */
+#include "wfe_advance_exec.h"  /* advance_request interactive-driver executor (S2) */
+#include "wfe_block_resolve.h" /* per-block externalization guard (S2 sub-slice 4) */
 #include "server_mcp_gateway.h"
 #include "server_http.h"
 #include "server_pipeline.h" /* handle_pipeline_* for the pipeline.* MCP tools */
@@ -1655,6 +1656,23 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       }
       if (fd == 1)
          tool = fam_tool;
+   }
+
+   /* S2 sub-slice 4: pre-delivery externalization guard at the tool-DISPATCH seam.
+    * A bound enforced run whose gate.deliver has not passed may not call an
+    * externalization primitive (pr.open/merge, push, egress, ...) regardless of tool
+    * visibility -- this is the narrow run-state invariant behind the ingress surface
+    * strip ("tool visibility alone is not a security boundary"). Default-OFF (dial
+    * unset -> ALLOW); soft warns + allows; hard refuses. The decision is audited
+    * inside the guard. Runs before every dispatch branch so it also covers the
+    * workflow-tool and git_ externalization paths. */
+   if (wfe_mcp_toolcall_action(sid, tool) == WFE_TC_DENY)
+   {
+      if (owns_jargs)
+         cJSON_Delete(jargs);
+      return server_send_error(
+          conn, "refused: this action externalizes work before the review/delivery gate has passed",
+          NULL);
    }
 
    if (strcmp(tool, "delegate") == 0)

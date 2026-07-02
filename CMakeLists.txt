@@ -908,6 +908,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_session_start_stubs.c
     ${AIMEE_SRC_DIR}/workflow/wfe_engine.c
     ${AIMEE_SRC_DIR}/workflow/wfe_advance_exec.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_block_resolve.c
     ${AIMEE_SRC_DIR}/workflow/wfe_blocks.c
     ${AIMEE_SRC_DIR}/workflow/wfe_approval.c
     ${AIMEE_SRC_DIR}/workflow/wfe_verdict.c
