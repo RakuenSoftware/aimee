@@ -1,18 +1,20 @@
 # aimee
 
-**Every AI coding session starts from zero. Your tool forgets your stack, your decisions,
-and the bug it fixed an hour ago, then burns your tokens relearning all of it. Nothing
-stops it from overwriting your `.env` or clobbering another session's work.**
+**aimee is the layer between you and your AI coding tools. It gives them a memory that
+compounds, a live map of your codebase, any model on any provider, delegates that hand the
+cheap work to cheaper models, and guardrails that keep them out of the files they should not
+touch. Hand it a written proposal and it runs the whole job on its own: design, build,
+review, open the PR. Your context travels between tools, and nothing locks you to a vendor.**
 
-**aimee ends that.** It sits between you and your AI tools and gives them one memory, a live
-map of your codebase, and the cheapest model that can do each job. Any provider, every tool,
-on your own hardware if you want it. You stop paying to teach it the same things twice, and
-you never get locked to a vendor.
+Without it, every session starts from zero. Your tool forgets your stack, your decisions,
+and the bug it fixed an hour ago, then burns your tokens relearning all of it, and nothing
+stops it from overwriting your `.env` or clobbering another session's work. aimee closes all
+of that, then keeps going.
 
 Point any tool's OpenAI or Anthropic compatible API at aimee and it runs the turn on
 whatever model you choose: Claude, GPT, Gemini, Mistral, MiniMax, or a model on your own GPU.
 Or run aimee beside your tool over MCP, ACP, or a plugin, where the tool keeps its own model
-and aimee adds memory, delegates, and guardrails as tools and hooks. It works with Claude
+and aimee adds the memory, delegates, and guardrails as tools and hooks. It works with Claude
 Code, Codex, OpenCode, Gemini CLI, and the built in webchat. Switch tools whenever you like.
 Your memory and context come with you.
 
