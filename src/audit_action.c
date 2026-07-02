@@ -13,7 +13,18 @@
 #include "aimee_home.h"
 #include "cJSON.h"
 #include "platform_path.h"
-#include "wfe_def.h" /* wfe_sha256_raw */
+#include "platform_random.h" /* platform_random_bytes (portable CSPRNG) */
+#include "wfe_def.h"         /* wfe_sha256_raw */
+
+/* O_NOFOLLOW / O_CLOEXEC are POSIX hardening flags absent on some toolchains
+ * (e.g. MinGW). Degrade to no-ops there — the audit key is server-side (POSIX);
+ * on Windows this build path is the client, where the flags do not apply. */
+#ifndef O_NOFOLLOW
+#define O_NOFOLLOW 0
+#endif
+#ifndef O_CLOEXEC
+#define O_CLOEXEC 0
+#endif
 
 #define AUDIT_KEY_LEN 32
 
@@ -96,17 +107,8 @@ int audit_ensure_key(void)
       /* Someone else created it concurrently — accept iff it now loads. */
       return audit_load_key(key) == 0 ? 0 : -1;
    }
-   FILE *r = fopen("/dev/urandom", "rb");
-   if (!r)
-   {
-      close(fd);
-      unlink(path);
-      return -1;
-   }
-   size_t got = fread(key, 1, AUDIT_KEY_LEN, r);
-   fclose(r);
    int ok = 0;
-   if (got == AUDIT_KEY_LEN)
+   if (platform_random_bytes(key, AUDIT_KEY_LEN) == 0)
    {
       ssize_t w = write(fd, key, AUDIT_KEY_LEN);
       ok = (w == (ssize_t)AUDIT_KEY_LEN);
