@@ -55,6 +55,7 @@ int wfe_block_resolve(const char *session_id, wfe_block_ctx_t *out)
    if (node)
    {
       out->bound = 1;
+      out->enforced = def->enforced;
       snprintf(out->work_item_id, sizeof out->work_item_id, "%s", wi);
       snprintf(out->stage, sizeof out->stage, "%s", item.current_stage);
       out->surface = wfe_block_default_surface(node->block);
@@ -90,22 +91,42 @@ wfe_toolcall_action_t wfe_mcp_toolcall_action(const char *session_id, const char
       return WFE_TC_ALLOW;
 
    wfe_block_ctx_t ctx;
-   if (!wfe_block_resolve(session_id, &ctx))
-      return WFE_TC_ALLOW; /* unbound -> generic; binding failure is isolated */
-
-   int policy_blocks = !wfe_externalization_tool_permitted(tool_name, ctx.delivered);
-   wfe_toolcall_action_t act = wfe_toolcall_decide(stage, policy_blocks);
-
-   /* Audit the enforcement decision. Templated constant values only (action + dial
-    * stage names) -- never the raw tool name or args (echo/injection vector). */
-   if (act != WFE_TC_ALLOW)
+   if (wfe_block_resolve(session_id, &ctx))
    {
-      char detail[128];
-      snprintf(detail, sizeof detail,
-               "{\"guard\":\"externalization\",\"action\":\"%s\",\"stage\":\"%s\"}",
-               act == WFE_TC_DENY ? "deny" : "warn", wfe_enforce_stage_name(stage));
-      db1_lifecycle_event_add(ctx.work_item_id, ctx.stage, "toolcall_guard", "enforce-s2", detail,
-                              "", 0);
+      /* Only ENFORCED runs are externalization-guarded: for them I2 guarantees the
+       * terminal is gate.deliver, so delivered==accepted is a sound "gate passed"
+       * proxy. A non-enforced bound run is not gated (it made no such promise). */
+      if (!ctx.enforced)
+         return WFE_TC_ALLOW;
+      int policy_blocks = !wfe_externalization_tool_permitted(tool_name, ctx.delivered);
+      wfe_toolcall_action_t act = wfe_toolcall_decide(stage, policy_blocks);
+      /* Audit the enforcement decision. Templated constant values only (action + dial
+       * stage names) -- never the raw tool name or args (echo/injection vector). */
+      if (act != WFE_TC_ALLOW)
+      {
+         char detail[128];
+         snprintf(detail, sizeof detail,
+                  "{\"guard\":\"externalization\",\"action\":\"%s\",\"stage\":\"%s\"}",
+                  act == WFE_TC_DENY ? "deny" : "warn", wfe_enforce_stage_name(stage));
+         db1_lifecycle_event_add(ctx.work_item_id, ctx.stage, "toolcall_guard", "enforce-s2",
+                                 detail, "", 0);
+      }
+      return act;
    }
-   return act;
+
+   /* Resolve FAILED. Distinguish a truly UNBOUND session (no binding row -> a generic
+    * session, allow) from a BOUND session we could not resolve (vanished work-item /
+    * unloadable workflow). Per the Q5 rollout split, an INSTRUMENTATION failure on a
+    * KNOWN-bound session must NOT fail open for an externalization primitive under
+    * HARD -- it fails CLOSED (a bound session is potentially enforced; we refuse
+    * rather than let externalization slip through on a lookup error). */
+   char wi[80] = "";
+   if (db1_wfe_binding_get(session_id, wi, sizeof wi, NULL, 0) != 1 || !wi[0])
+      return WFE_TC_ALLOW; /* truly unbound */
+   if (!wfe_enforce_stage_refuses(stage))
+      return WFE_TC_ALLOW; /* soft / advisory: observe only */
+   db1_lifecycle_event_add(
+       wi, "", "toolcall_guard", "enforce-s2",
+       "{\"guard\":\"externalization\",\"action\":\"deny\",\"reason\":\"unresolved\"}", "", 0);
+   return WFE_TC_DENY;
 }

@@ -22,6 +22,8 @@
 typedef struct
 {
    int bound;                  /* 1 if the session is bound to a resolvable work-item */
+   int enforced;               /* 1 if the pinned workflow is enforced (I2 => terminal
+                                  is gate.deliver, so delivered==accepted is sound) */
    wfe_tool_surface_t surface; /* tool surface of the current block */
    int delivered;              /* 1 if gate.deliver has passed for this run */
    int advanceable;            /* 1 if the current block advances via advance_request

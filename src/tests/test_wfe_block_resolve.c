@@ -14,22 +14,71 @@
 #include "wfe_engine.h"
 #include "wfe_store.h"
 
-/* understand(READONLY) -> split(DELEGATE) -> implement(DELEGATE); stub executors. */
-static const char *WF = "name: t\n"
-                        "start: a\n"
-                        "nodes:\n"
-                        "  - id: a\n"
-                        "    block: understand\n"
-                        "    next: b\n"
-                        "  - id: b\n"
-                        "    block: split\n"
-                        "    in:\n"
-                        "      intent: a.out\n"
-                        "    next: c\n"
-                        "  - id: c\n"
-                        "    block: implement\n"
-                        "    in:\n"
-                        "      plan: a.out\n";
+/* ENFORCED workflow (terminal gate.deliver per I2), valid manager shape:
+ * understand(READONLY) -> split -> implement -> freeze -> review -> gate.roundtable
+ * -> gate.deliver(verdict). Stub executors. */
+static const char *WF_ENF = "name: t\n"
+                            "enforced: true\n"
+                            "start: understand\n"
+                            "nodes:\n"
+                            "  - id: understand\n"
+                            "    block: understand\n"
+                            "    next: split\n"
+                            "  - id: split\n"
+                            "    block: split\n"
+                            "    in:\n"
+                            "      intent: understand.out\n"
+                            "    next: implement\n"
+                            "  - id: implement\n"
+                            "    block: implement\n"
+                            "    in:\n"
+                            "      plan: split.out\n"
+                            "    next: freeze\n"
+                            "  - id: freeze\n"
+                            "    block: freeze\n"
+                            "    in:\n"
+                            "      branch: implement.out\n"
+                            "    next: review\n"
+                            "  - id: review\n"
+                            "    block: review\n"
+                            "    in:\n"
+                            "      src: freeze.out\n"
+                            "    params:\n"
+                            "      reviewer: contrarian\n"
+                            "    on_pass: rt\n"
+                            "    on_fail: split\n"
+                            "  - id: rt\n"
+                            "    block: gate.roundtable\n"
+                            "    in:\n"
+                            "      src: freeze.out\n"
+                            "    params:\n"
+                            "      panel:\n"
+                            "        required:\n"
+                            "          - security\n"
+                            "          - architect\n"
+                            "    on_pass: deliver\n"
+                            "    on_fail: split\n"
+                            "  - id: deliver\n"
+                            "    block: gate.deliver\n"
+                            "    in:\n"
+                            "      verdict: rt.out\n";
+
+/* NON-enforced workflow: the externalization guard must NOT apply. */
+static const char *WF_PLAIN = "name: u\n"
+                              "start: a\n"
+                              "nodes:\n"
+                              "  - id: a\n"
+                              "    block: understand\n";
+
+static void write_wf(const char *dir, const char *name, const char *body)
+{
+   char path[700];
+   snprintf(path, sizeof path, "%s/workflows/%s.yaml", dir, name);
+   FILE *f = fopen(path, "wb");
+   assert(f);
+   fputs(body, f);
+   fclose(f);
+}
 
 static void setup_home(void)
 {
@@ -39,12 +88,8 @@ static void setup_home(void)
    char wf[512];
    snprintf(wf, sizeof wf, "%s/workflows", dir);
    mkdir(wf, 0755);
-   char path[600];
-   snprintf(path, sizeof path, "%s/t.yaml", wf);
-   FILE *f = fopen(path, "wb");
-   assert(f);
-   fputs(WF, f);
-   fclose(f);
+   write_wf(dir, "t", WF_ENF);
+   write_wf(dir, "u", WF_PLAIN);
    setenv("AIMEE_HOME", dir, 1);
    char repo[600];
    snprintf(repo, sizeof repo, "%s/repo", dir);
@@ -98,13 +143,14 @@ int main(void)
 
    assert(db1_wfe_bind(SID, id, "advisory") == 0);
 
-   /* bound at understand: READONLY surface, not delivered, advanceable, stage a */
+   /* bound at understand: enforced, READONLY, not delivered, advanceable, stage a */
    assert(wfe_block_resolve(SID, &ctx) == 1);
    assert(ctx.bound == 1);
+   assert(ctx.enforced == 1);
    assert(ctx.surface == WFE_SURFACE_READONLY);
    assert(ctx.delivered == 0);
    assert(ctx.advanceable == 1);
-   assert(strcmp(ctx.stage, "a") == 0);
+   assert(strcmp(ctx.stage, "understand") == 0);
 
    /* --- the guard --- */
    unsetenv("AIMEE_WORKFLOW_ENFORCE_STAGE");
@@ -112,7 +158,7 @@ int main(void)
 
    setenv("AIMEE_WORKFLOW_ENFORCE_STAGE", "hard", 1);
    assert(wfe_mcp_toolcall_action(SID, "read_file") == WFE_TC_ALLOW);    /* not externalization */
-   assert(wfe_mcp_toolcall_action("nobody", "pr.open") == WFE_TC_ALLOW); /* unbound */
+   assert(wfe_mcp_toolcall_action("nobody", "pr.open") == WFE_TC_ALLOW); /* truly unbound */
    assert(wfe_mcp_toolcall_action(SID, "pr.open") == WFE_TC_DENY); /* pre-delivery externalize */
    assert(wfe_mcp_toolcall_action(SID, "git_push") == WFE_TC_DENY);
    assert(audit_count(id) == 2); /* the two denials were audited */
@@ -128,6 +174,26 @@ int main(void)
    assert(wfe_block_resolve(SID, &ctx) == 1 && ctx.delivered == 1);
    assert(wfe_mcp_toolcall_action(SID, "pr.open") == WFE_TC_ALLOW);
    assert(audit_count(id) == 3); /* no new denial */
+
+   /* a NON-enforced bound run is not externalization-guarded (delivered==accepted
+    * would not be a sound gate proxy there, and it made no enforcement promise) */
+   char id_u[80] = "";
+   assert(wfe_work_item_create("u", "git@github.com:x/u.git", "docs/u.md", "interactive", id_u, err,
+                               sizeof err) == 0);
+   assert(db1_wfe_bind("sess-U", id_u, "advisory") == 0);
+   assert(wfe_block_resolve("sess-U", &ctx) == 1 && ctx.enforced == 0);
+   assert(wfe_mcp_toolcall_action("sess-U", "pr.open") ==
+          WFE_TC_ALLOW); /* hard, but not enforced */
+
+   /* BOUND-but-unresolvable (binding references a vanished work-item): an
+    * instrumentation failure on a known-bound session must fail CLOSED under hard,
+    * NOT fail open. */
+   assert(db1_wfe_bind("sess-G", "wi_ghost0000", "advisory") == 0);
+   assert(wfe_block_resolve("sess-G", &ctx) == 0); /* cannot resolve */
+   setenv("AIMEE_WORKFLOW_ENFORCE_STAGE", "hard", 1);
+   assert(wfe_mcp_toolcall_action("sess-G", "pr.open") == WFE_TC_DENY); /* fail closed */
+   setenv("AIMEE_WORKFLOW_ENFORCE_STAGE", "soft", 1);
+   assert(wfe_mcp_toolcall_action("sess-G", "pr.open") == WFE_TC_ALLOW); /* soft: observe */
 
    printf("ok\n");
    return 0;
