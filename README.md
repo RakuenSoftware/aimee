@@ -1,15 +1,13 @@
 # aimee
 
-**aimee is the layer between you and your AI coding tools. It gives them a memory that
-compounds, a live map of your codebase, any model on any provider, delegates that hand the
-cheap work to cheaper models, and guardrails that keep them out of the files they should not
-touch. Hand it a written proposal and it runs the whole job on its own: design, build,
-review, open the PR. Your context travels between tools, and nothing locks you to a vendor.**
+**Your AI forgets everything between sessions, relearns your codebase on your dime, and can
+still overwrite your `.env`. aimee ends all three, and does a lot more.**
 
-Without it, every session starts from zero. Your tool forgets your stack, your decisions,
-and the bug it fixed an hour ago, then burns your tokens relearning all of it, and nothing
-stops it from overwriting your `.env` or clobbering another session's work. aimee closes all
-of that, then keeps going.
+**One memory across every tool you use. Your whole codebase as a live graph. Any model on any
+provider, not just your tool's default. Cheap delegates for the grunt work. Guardrails the AI
+cannot write past. Hand it a written proposal and it ships the change itself: design, build,
+review, open the PR. Your context follows you between tools, and nothing locks you to a
+vendor.**
 
 Point any tool's OpenAI or Anthropic compatible API at aimee and it runs the turn on
 whatever model you choose: Claude, GPT, Gemini, Mistral, MiniMax, or a model on your own GPU.
