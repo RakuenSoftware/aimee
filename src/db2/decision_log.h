@@ -60,10 +60,19 @@ extern "C"
    int db2_decision_log_get(int64_t id, db2_decision_log_row_t *out);
 
    /* Flip active decisions whose revisit_when has elapsed to 'revisit_due' so
-    * they resurface for review (P1). Idempotent: only active rows with a due,
-    * non-empty revisit_when are touched, compared lexicographically against the
-    * current time (ISO-8601). Returns the number flipped this call, or -1 on
-    * error. Reuses the existing curator drain poll — no new scheduler. */
+    * they resurface for review (P1). Idempotent: only active rows are touched, so
+    * a row flips at most once (revisit_due is terminal for the sweep).
+    *
+    * CONTRACT: revisit_when MUST be an ISO-8601 UTC string (the writer's caller
+    * owns this). The comparison is a lexicographic <= against the current UTC
+    * time, which is a correct time compare for ISO-8601. A date-only value
+    * (YYYY-MM-DD) therefore surfaces at 00:00 UTC of that day (day granularity);
+    * store a full timestamp for finer control. A non-ISO/whitespace value sorts
+    * below any real time and flips once on the next sweep — malformed input, not
+    * a loop.
+    *
+    * Returns the number flipped this call, or -1 on error. Reuses the existing
+    * curator drain poll — no new scheduler. */
    int db2_decision_log_mark_revisit_due(void);
 
    /* Update the outcome for a task decision_log row. */

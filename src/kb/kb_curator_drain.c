@@ -179,6 +179,9 @@ static void *drain_thread_main(void *arg)
          if (due > 0)
             aimee_log(LOG_DEBUG, "kb.decision.revisit", "flipped %d decision(s) to revisit_due",
                       due);
+         else if (due < 0)
+            aimee_log(LOG_WARN, "kb.decision.revisit",
+                      "revisit sweep failed this cycle (db2 unavailable?)");
       }
 
       /* Typed-fact extraction drain — runs every poll, independent of the
