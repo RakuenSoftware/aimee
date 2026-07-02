@@ -80,8 +80,16 @@ wfe_toolcall_action_t wfe_toolcall_decide(wfe_enforce_stage_t stage, int policy_
    return WFE_TC_ALLOW; /* advisory / off: observe only */
 }
 
-wfe_toolcall_action_t wfe_mcp_toolcall_action(const char *session_id, const char *tool_name)
+/* The externalization gate the guard surfaces (templated; a stable label, never a
+ * client-supplied value) -- delivery is what the run must earn before externalizing. */
+#define WFE_GUARD_GATE "gate.deliver"
+
+wfe_toolcall_action_t wfe_mcp_toolcall_action(const char *session_id, const char *tool_name,
+                                              char *msg, size_t msg_n)
 {
+   if (msg && msg_n)
+      msg[0] = '\0';
+
    wfe_enforce_stage_t stage = wfe_enforce_stage_parse(getenv("AIMEE_WORKFLOW_ENFORCE_STAGE"));
    if (stage == WFE_ENFORCE_OFF || !tool_name || !tool_name[0])
       return WFE_TC_ALLOW;
@@ -110,6 +118,8 @@ wfe_toolcall_action_t wfe_mcp_toolcall_action(const char *session_id, const char
                   act == WFE_TC_DENY ? "deny" : "warn", wfe_enforce_stage_name(stage));
          db1_lifecycle_event_add(ctx.work_item_id, ctx.stage, "toolcall_guard", "enforce-s2",
                                  detail, "", 0);
+         /* Step 5: templated surfacing -- gate + work-item id only, no tool/arg echo. */
+         wfe_enforce_user_message(stage, WFE_GUARD_GATE, ctx.work_item_id, msg, msg_n);
       }
       return act;
    }
@@ -128,5 +138,6 @@ wfe_toolcall_action_t wfe_mcp_toolcall_action(const char *session_id, const char
    db1_lifecycle_event_add(
        wi, "", "toolcall_guard", "enforce-s2",
        "{\"guard\":\"externalization\",\"action\":\"deny\",\"reason\":\"unresolved\"}", "", 0);
+   wfe_enforce_user_message(stage, WFE_GUARD_GATE, wi, msg, msg_n);
    return WFE_TC_DENY;
 }

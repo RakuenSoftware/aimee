@@ -55,7 +55,13 @@ wfe_toolcall_action_t wfe_toolcall_decide(wfe_enforce_stage_t stage, int policy_
 /* The dispatch-time guard, composed: resolve `session_id`, and if the enforcement
  * dial is on and `tool_name` is an externalization primitive that this run has not
  * yet earned (gate.deliver not passed), return WARN/DENY per the dial; otherwise
- * ALLOW. Reads the dial from AIMEE_WORKFLOW_ENFORCE_STAGE (default OFF -> ALLOW). */
-wfe_toolcall_action_t wfe_mcp_toolcall_action(const char *session_id, const char *tool_name);
+ * ALLOW. Reads the dial from AIMEE_WORKFLOW_ENFORCE_STAGE (default OFF -> ALLOW).
+ *
+ * On a non-ALLOW decision, fills `msg`/`msg_n` (when non-NULL) with a TEMPLATED
+ * user/primary-facing refusal (step 5): the gate name + work-item id only, NEVER
+ * the attempted tool name or args (echo/injection vector, consult Q3). `msg` is set
+ * to "" on ALLOW. */
+wfe_toolcall_action_t wfe_mcp_toolcall_action(const char *session_id, const char *tool_name,
+                                              char *msg, size_t msg_n);
 
 #endif /* DEC_WFE_BLOCK_RESOLVE_H */

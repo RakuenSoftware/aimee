@@ -1666,13 +1666,19 @@ int handle_mcp_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * unset -> ALLOW); soft warns + allows; hard refuses. The decision is audited
     * inside the guard. Runs before every dispatch branch so it also covers the
     * workflow-tool and git_ externalization paths. */
-   if (wfe_mcp_toolcall_action(sid, tool) == WFE_TC_DENY)
    {
-      if (owns_jargs)
-         cJSON_Delete(jargs);
-      return server_send_error(
-          conn, "refused: this action externalizes work before the review/delivery gate has passed",
-          NULL);
+      char deny_msg[256] = "";
+      if (wfe_mcp_toolcall_action(sid, tool, deny_msg, sizeof deny_msg) == WFE_TC_DENY)
+      {
+         if (owns_jargs)
+            cJSON_Delete(jargs);
+         return server_send_error(
+             conn,
+             deny_msg[0]
+                 ? deny_msg
+                 : "refused: this action externalizes work before the review/delivery gate has passed",
+             NULL);
+      }
    }
 
    if (strcmp(tool, "delegate") == 0)

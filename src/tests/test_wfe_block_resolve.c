@@ -154,26 +154,46 @@ int main(void)
 
    /* --- the guard --- */
    unsetenv("AIMEE_WORKFLOW_ENFORCE_STAGE");
-   assert(wfe_mcp_toolcall_action(SID, "pr.open") == WFE_TC_ALLOW); /* dial off */
+   assert(wfe_mcp_toolcall_action(SID, "pr.open", NULL, 0) == WFE_TC_ALLOW); /* dial off */
 
    setenv("AIMEE_WORKFLOW_ENFORCE_STAGE", "hard", 1);
-   assert(wfe_mcp_toolcall_action(SID, "read_file") == WFE_TC_ALLOW);    /* not externalization */
-   assert(wfe_mcp_toolcall_action("nobody", "pr.open") == WFE_TC_ALLOW); /* truly unbound */
-   assert(wfe_mcp_toolcall_action(SID, "pr.open") == WFE_TC_DENY); /* pre-delivery externalize */
-   assert(wfe_mcp_toolcall_action(SID, "git_push") == WFE_TC_DENY);
+   assert(wfe_mcp_toolcall_action(SID, "read_file", NULL, 0) ==
+          WFE_TC_ALLOW); /* not externalization */
+   assert(wfe_mcp_toolcall_action("nobody", "pr.open", NULL, 0) ==
+          WFE_TC_ALLOW); /* truly unbound */
+   assert(wfe_mcp_toolcall_action(SID, "pr.open", NULL, 0) ==
+          WFE_TC_DENY); /* pre-delivery externalize */
+   assert(wfe_mcp_toolcall_action(SID, "git_push", NULL, 0) == WFE_TC_DENY);
    assert(audit_count(id) == 2); /* the two denials were audited */
+
+   /* step 5: a DENY fills a TEMPLATED user message -- names the gate + work-item id,
+    * never echoes the attempted tool name (pr.open). */
+   {
+      char msg[256] = "";
+      assert(wfe_mcp_toolcall_action(SID, "pr.open", msg, sizeof msg) == WFE_TC_DENY);
+      assert(msg[0]);
+      assert(strstr(msg, "gate.deliver") != NULL);
+      assert(strstr(msg, id) != NULL);        /* the work-item id is surfaced */
+      assert(strstr(msg, "pr.open") == NULL); /* the attempted tool is NOT echoed */
+      /* ALLOW clears the buffer */
+      msg[0] = 'x';
+      msg[1] = '\0';
+      assert(wfe_mcp_toolcall_action(SID, "read_file", msg, sizeof msg) == WFE_TC_ALLOW);
+      assert(msg[0] == '\0');
+   }
+   assert(audit_count(id) == 3); /* the message-check DENY added one more audit row */
 
    /* soft dial: warn + allow (still audited) */
    setenv("AIMEE_WORKFLOW_ENFORCE_STAGE", "soft", 1);
-   assert(wfe_mcp_toolcall_action(SID, "pr.open") == WFE_TC_WARN);
-   assert(audit_count(id) == 3);
+   assert(wfe_mcp_toolcall_action(SID, "pr.open", NULL, 0) == WFE_TC_WARN);
+   assert(audit_count(id) == 4);
 
    /* once delivered (gate.deliver -> accepted), the guard lifts */
    setenv("AIMEE_WORKFLOW_ENFORCE_STAGE", "hard", 1);
    assert(db1_work_item_set_terminal(id, "accepted") == 0);
    assert(wfe_block_resolve(SID, &ctx) == 1 && ctx.delivered == 1);
-   assert(wfe_mcp_toolcall_action(SID, "pr.open") == WFE_TC_ALLOW);
-   assert(audit_count(id) == 3); /* no new denial */
+   assert(wfe_mcp_toolcall_action(SID, "pr.open", NULL, 0) == WFE_TC_ALLOW);
+   assert(audit_count(id) == 4); /* no new denial */
 
    /* a NON-enforced bound run is not externalization-guarded (delivered==accepted
     * would not be a sound gate proxy there, and it made no enforcement promise) */
@@ -182,7 +202,7 @@ int main(void)
                                sizeof err) == 0);
    assert(db1_wfe_bind("sess-U", id_u, "advisory") == 0);
    assert(wfe_block_resolve("sess-U", &ctx) == 1 && ctx.enforced == 0);
-   assert(wfe_mcp_toolcall_action("sess-U", "pr.open") ==
+   assert(wfe_mcp_toolcall_action("sess-U", "pr.open", NULL, 0) ==
           WFE_TC_ALLOW); /* hard, but not enforced */
 
    /* BOUND-but-unresolvable (binding references a vanished work-item): an
@@ -191,9 +211,10 @@ int main(void)
    assert(db1_wfe_bind("sess-G", "wi_ghost0000", "advisory") == 0);
    assert(wfe_block_resolve("sess-G", &ctx) == 0); /* cannot resolve */
    setenv("AIMEE_WORKFLOW_ENFORCE_STAGE", "hard", 1);
-   assert(wfe_mcp_toolcall_action("sess-G", "pr.open") == WFE_TC_DENY); /* fail closed */
+   assert(wfe_mcp_toolcall_action("sess-G", "pr.open", NULL, 0) == WFE_TC_DENY); /* fail closed */
    setenv("AIMEE_WORKFLOW_ENFORCE_STAGE", "soft", 1);
-   assert(wfe_mcp_toolcall_action("sess-G", "pr.open") == WFE_TC_ALLOW); /* soft: observe */
+   assert(wfe_mcp_toolcall_action("sess-G", "pr.open", NULL, 0) ==
+          WFE_TC_ALLOW); /* soft: observe */
 
    printf("ok\n");
    return 0;
