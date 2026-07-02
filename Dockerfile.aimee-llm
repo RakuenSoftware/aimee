@@ -5,7 +5,7 @@
 # Two published images (operator-directed: models baked in, not runtime-fetched —
 # turnkey, reproducible, no HF dependency at run time):
 #   aimee-kb-cpu       (defaults): Qwen3-Embedding-0.6B + ettin-68m + gemma-4-E4B
-#   aimee-kb-gpu-small/mid (build args): 4B + ettin-400m + gemma-12B OR Qwen3.6-35B-A3B
+#   aimee-kb-gpu-small/mid (build args): 4B + ettin-400m + gemma-4-12B OR gemma-4-26B-A4B
 # The llama.cpp binary is the VENDOR-AGNOSTIC Vulkan build (one binary for AMD/
 # Nvidia/Intel); GPU is selected at runtime by AIMEE_LLM_NGL (CPU image defaults 0).
 #
@@ -27,7 +27,7 @@ ARG SYNTH_FILE=gemma-4-E4B-it-Q4_K_M.gguf
 ARG SYNTH_REVISION=main
 ARG SYNTH_SHA256=
 # Per-tier synth runtime profile (baked -> ENV; the supervisor reads these). Defaults
-# = the CPU/gemma tier (dense, no FA/MoE). The gpu-mid (Qwen MoE) tier overrides them.
+# = the CPU/gemma tier (dense, no FA/MoE). The gpu-mid (gemma-4-26B-A4B MoE) tier overrides.
 ARG SYNTH_FA=off
 ARG SYNTH_KV_K=q8_0
 ARG SYNTH_KV_V=q4_0
@@ -79,7 +79,7 @@ np.savez("/out/rerank-head/head.npz", W2=W2, W4=d4["linear.weight"], b4=d4["line
 print("head.npz written")
 PY
 # Embedder + synth GGUFs. Synth is pinned by revision (default main) with retries so
-# a transient blip on the 22GB mid-tier pull doesn't kill the build, then sha256-
+# a transient blip on the large mid-tier pull doesn't kill the build, then sha256-
 # verified when SYNTH_SHA256 is set (build fails on a compromised/MITM'd upload).
 RUN wget -q -O /out/embed.gguf  "https://huggingface.co/${EMBED_REPO}/resolve/main/${EMBED_FILE}" \
     && wget -q -c --tries=5 --timeout=30 --waitretry=10 -O /out/synth.gguf \

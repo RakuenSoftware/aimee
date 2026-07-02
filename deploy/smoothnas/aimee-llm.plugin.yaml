@@ -10,7 +10,7 @@ metadata:
     GGUFs. Replaces the torch aimee-embedder + the standalone llama.cpp `llm`
     container. The aimee-kb plugin points AIMEE_EMBEDDER_URL at this service.
     GPU tier (.254): Qwen3-Embedding-4B (2560-dim) + ettin-reranker-400m +
-    gemma-4-12B, offloaded to the AMD 7900 XTX via Vulkan/RADV (AIMEE_LLM_NGL=99).
+    gemma-4-26B-A4B, offloaded to the AMD 7900 XTX via Vulkan/RADV (AIMEE_LLM_NGL=99).
   vendor: RakuenSoftware
   homepage: https://github.com/RakuenSoftware/aimee
 profiles:
@@ -34,20 +34,20 @@ services:
       # SYNTH TIER = which image you reference (embed+rerank identical on the GPU
       # tiers, so switching is an image swap, no KB re-embed):
       #   aimee-kb-gpu-small  Gemma-4-12B synth (dense; fits 16GB+)
-      #   aimee-kb-gpu-mid    Qwen 3.6 35B-A3B synth (MoE; 24GB+, experts offload to
-      #                       RAM via the baked AIMEE_LLM_SYNTH_N_CPU_MOE, default 20)
+      #   aimee-kb-gpu-mid    Gemma-4-26B-A4B synth (MoE, 4B active; ~14GB fits a 24GB
+      #                       card fully GPU-resident, baked AIMEE_LLM_SYNTH_N_CPU_MOE=0)
       # aimee-kb-cpu is the CPU tier (1024-dim; NGL=0). See docs/AIMEE_KB_SYNTH_TIERS.md.
       image: ghcr.io/rakuensoftware/aimee-kb-gpu-mid:latest
     container:
       restartPolicy: unless-stopped
     env:
       # Offload all layers to the GPU (the 7900 XTX has the VRAM for the 4B embed +
-      # the synth tier). The CPU image defaults this to 0. On gpu-mid (Qwen) the synth
-      # additionally spills MoE experts to RAM per the baked AIMEE_LLM_SYNTH_N_CPU_MOE;
-      # lower it toward 0 on a 32GB card for more speed, or raise it if VRAM is tight.
+      # the ~14GB gemma-4-26B-A4B synth, fully resident). The CPU image defaults NGL to 0.
       AIMEE_LLM_NGL: "99"
-      # Qwen serves a bigger context than the 32K default; raise it here.
-      AIMEE_LLM_SYNTH_CTX: "131072"
+      # gpu-mid bakes SYNTH_SLOTS=2, so ctx-size is split 2 × 128K. Gemma's sliding-window
+      # KV is cheap; 262144 (256K total) fits alongside the resident synth on 24GB. Lower
+      # this (or raise the baked N_CPU_MOE) only if the container logs a VRAM alloc failure.
+      AIMEE_LLM_SYNTH_CTX: "262144"
       # Gateway port. 8742 (aimee's 874x range: server 8740, kb 8741) — NOT 8080,
       # which Wolf's WolfLeash UI host-publishes. A hostExpose port is published on
       # the HOST, so two plugins on the same port silently collide (the runtime

@@ -10,9 +10,9 @@
 # server-code push would be wasteful. So it triggers ONLY on the aimee-kb
 # sources (the Dockerfile + the gateway/supervisor scripts).
 #
-# Tiers built every push: aimee-kb-cpu + aimee-kb-gpu-small (Gemma). The Qwen
-# aimee-kb-gpu-mid (22GB) is dispatch-only. amd64 only (the .254 deploy target); the
-# release pipeline owns
+# Tiers built every push: aimee-kb-cpu + aimee-kb-gpu-small (Gemma). The
+# aimee-kb-gpu-mid (Gemma-4-26B-A4B, ~14GB) is dispatch-only. amd64 only (the .254
+# deploy target); the release pipeline owns
 # multi-arch.
 name: Publish testing aimee-llm
 
@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       build_kb_gpu_mid:
-        description: "Also build the 22GB aimee-kb-gpu-mid (Qwen 3.6 35B-A3B synth)"
+        description: "Also build the aimee-kb-gpu-mid (Gemma-4-26B-A4B synth, ~14GB)"
         type: boolean
         default: false
 
@@ -48,8 +48,8 @@ jobs:
       matrix:
         # cpu tier = Dockerfile defaults (0.6B emb + ettin-68m + gemma-4-E4B).
         # gpu-small overrides to the 4B/400m + Gemma-4-12B qat-UD synth (FA+K8V4).
-        # gpu-mid (Qwen 22GB synth) is the dispatch-only job below — a 22GB uncached
-        # build every push is near-zero-signal (model + llama.cpp rarely change).
+        # gpu-mid (Gemma-4-26B-A4B synth, ~14GB) is the dispatch-only job below — an
+        # uncached build every push is near-zero-signal (model + llama.cpp rarely change).
         tier:
           - { name: aimee-kb-cpu, dockerfile: Dockerfile.aimee-llm, extra_args: "" }
           - { name: aimee-kb-gpu-small, dockerfile: Dockerfile.aimee-llm, extra_args: "EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF\nEMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf\nRERANK_REPO=cross-encoder/ettin-reranker-400m-v1\nSYNTH_REPO=unsloth/gemma-4-12B-it-qat-GGUF\nSYNTH_FILE=gemma-4-12B-it-qat-UD-Q4_K_XL.gguf\nSYNTH_REVISION=9586f3257bc62bd179767241c7ec0f66bc2a314a\nSYNTH_SHA256=cc9ff072e0a8203429ed854e6662c17a6c2bc1e5dca5b475dd4736caaacbc165\nSYNTH_FA=on" }
@@ -99,12 +99,12 @@ jobs:
             ghcr.io/${{ env.OWNER }}/${{ matrix.tier.name }}:testing
             ghcr.io/${{ env.OWNER }}/${{ matrix.tier.name }}:testing-${{ env.SHA7 }}
 
-  # aimee-kb-gpu-mid (Qwen 3.6 35B-A3B synth, 22.4GB MoE): NOT built on every push —
-  # the model + llama.cpp rarely change, so a ~22GB uncached download+build per push is
+  # aimee-kb-gpu-mid (Gemma-4-26B-A4B synth, ~14GB MoE): NOT built on every push —
+  # the model + llama.cpp rarely change, so an uncached download+build per push is
   # near-zero-signal (option (d), 2026-07-01 follow-up roundtable). Runs ONLY on a
-  # manual workflow_dispatch with build_kb_gpu_mid=true. Needs the docker data-root on
-  # /mnt (~65GB) — the ~22GB image's transient build footprint overruns / — plus a df
-  # pre-flight that fails fast rather than dying mid-build with 'no space left'.
+  # manual workflow_dispatch with build_kb_gpu_mid=true. Keeps the docker data-root on
+  # /mnt — the image's transient build footprint overruns / — plus a df pre-flight
+  # that fails fast rather than dying mid-build with 'no space left'.
   build-kb-gpu-mid:
     if: github.event_name == 'workflow_dispatch' && inputs.build_kb_gpu_mid
     runs-on: ubuntu-latest
@@ -124,7 +124,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       # Reclaim toolchains AND relocate docker's data-root to the larger /mnt disk
-      # BEFORE buildx is created, so buildkit writes the 22GB model layers there
+      # BEFORE buildx is created, so buildkit writes the ~14GB model layers there
       # (mirrors publish-images.yml's aimee-kb-leg fix, commit f26cf76).
       - name: Free disk + move docker storage to /mnt
         run: |
@@ -138,14 +138,15 @@ jobs:
           sudo systemctl start docker || true
           echo "after:"; df -h / /mnt
 
-      # Fail fast if /mnt can't hold the 22GB image's transient footprint (~50-70GB)
-      # instead of dying mid-build with ENOSPC after a 22GB download.
+      # Fail fast if /mnt can't hold the image's transient footprint instead of dying
+      # mid-build with ENOSPC after the model download. (Threshold left at 80GB for
+      # ample headroom; the ~14GB Gemma synth needs less than the prior 22GB Qwen.)
       - name: Pre-flight disk check
         run: |
           avail=$(df --output=avail -BG /mnt | tail -1 | tr -dc '0-9')
           echo "/mnt available: ${avail}GB"
           if [ "${avail:-0}" -lt 80 ]; then
-            echo "::error::/mnt has only ${avail}GB free; need >=80GB for the 22GB kb-gpu-mid build"; exit 1
+            echo "::error::/mnt has only ${avail}GB free; need >=80GB for the kb-gpu-mid build"; exit 1
           fi
 
       - name: Set up Docker Buildx
@@ -163,14 +164,14 @@ jobs:
             EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF
             EMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf
             RERANK_REPO=cross-encoder/ettin-reranker-400m-v1
-            SYNTH_REPO=unsloth/Qwen3.6-35B-A3B-GGUF
-            SYNTH_FILE=Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
-            SYNTH_REVISION=56b9b6695c1d341398ea990cf2172ba4311647d8
-            SYNTH_SHA256=707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450
+            SYNTH_REPO=unsloth/gemma-4-26B-A4B-it-qat-GGUF
+            SYNTH_FILE=gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+            SYNTH_REVISION=02749a7b272109255a4c559a80894d3d9777574c
+            SYNTH_SHA256=dcf179a91153e3a7ece792e48ef872180d9d6ef9b7677f0a0bd3e83cfe624d5e
             SYNTH_FA=on
             SYNTH_MOE=1
-            SYNTH_N_CPU_MOE=20
-            SYNTH_SLOTS=1
+            SYNTH_N_CPU_MOE=0
+            SYNTH_SLOTS=2
           tags: |
             ghcr.io/${{ env.OWNER }}/aimee-kb-gpu-mid:testing
             ghcr.io/${{ env.OWNER }}/aimee-kb-gpu-mid:testing-${{ env.SHA7 }}

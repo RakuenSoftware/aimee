@@ -86,13 +86,14 @@ jobs:
           # model + its runtime profile (embed/rerank identical within a class):
           #   aimee-kb-cpu       defaults: 0.6B emb + ettin-68m + gemma-4-E4B (CPU)
           #   aimee-kb-gpu-small 4B/400m + Gemma-4-12B qat-UD-Q4_K_XL (dense, FA+K8V4)
-          #   aimee-kb-gpu-mid   4B/400m + Qwen3.6-35B-A3B UD-Q4_K_XL (MoE, FA+K8V4 +
-          #                      static --n-cpu-moe; GGUF pinned by HF rev+sha256)
+          #   aimee-kb-gpu-mid   4B/400m + Gemma-4-26B-A4B qat-UD-Q4_K_XL (MoE, 4B active,
+          #                      FA+K8V4; ~14GB fits 24GB fully-resident → N_CPU_MOE=0;
+          #                      GGUF pinned by HF rev+sha256)
           # gpu-small/gpu-mid share the 2560-dim embedder so a KB is portable across the
           # synth swap. amd64 GPU host runs the x64 Vulkan binary; NGL set at deploy.
           - { name: aimee-kb-cpu, dockerfile: Dockerfile.aimee-llm }
           - { name: aimee-kb-gpu-small, dockerfile: Dockerfile.aimee-llm, extra_args: "EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF\nEMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf\nRERANK_REPO=cross-encoder/ettin-reranker-400m-v1\nSYNTH_REPO=unsloth/gemma-4-12B-it-qat-GGUF\nSYNTH_FILE=gemma-4-12B-it-qat-UD-Q4_K_XL.gguf\nSYNTH_REVISION=9586f3257bc62bd179767241c7ec0f66bc2a314a\nSYNTH_SHA256=cc9ff072e0a8203429ed854e6662c17a6c2bc1e5dca5b475dd4736caaacbc165\nSYNTH_FA=on" }
-          - { name: aimee-kb-gpu-mid, dockerfile: Dockerfile.aimee-llm, extra_args: "EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF\nEMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf\nRERANK_REPO=cross-encoder/ettin-reranker-400m-v1\nSYNTH_REPO=unsloth/Qwen3.6-35B-A3B-GGUF\nSYNTH_FILE=Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf\nSYNTH_REVISION=56b9b6695c1d341398ea990cf2172ba4311647d8\nSYNTH_SHA256=707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450\nSYNTH_FA=on\nSYNTH_MOE=1\nSYNTH_N_CPU_MOE=20\nSYNTH_SLOTS=1" }
+          - { name: aimee-kb-gpu-mid, dockerfile: Dockerfile.aimee-llm, extra_args: "EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF\nEMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf\nRERANK_REPO=cross-encoder/ettin-reranker-400m-v1\nSYNTH_REPO=unsloth/gemma-4-26B-A4B-it-qat-GGUF\nSYNTH_FILE=gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf\nSYNTH_REVISION=02749a7b272109255a4c559a80894d3d9777574c\nSYNTH_SHA256=dcf179a91153e3a7ece792e48ef872180d9d6ef9b7677f0a0bd3e83cfe624d5e\nSYNTH_FA=on\nSYNTH_MOE=1\nSYNTH_N_CPU_MOE=0\nSYNTH_SLOTS=2" }
           # #4-full render backend (headless-Chromium sidecar). Self-contained
           # under deploy/css-render (its own build context); independent of the C
           # build, so a failure here never blocks the aimee images (fail-fast off).
@@ -153,9 +154,9 @@ jobs:
 
       - name: Build and push by digest
         id: build
-        # aimee-kb-gpu-mid (Qwen, 22GB) is amd64-only: arm64 would bake a non-runnable
-        # x64 Vulkan binary and double the 22GB build/disk cost. Skip it on arm64 -> the
-        # merge job emits a single-arch amd64 manifest (it tolerates count>=1).
+        # aimee-kb-gpu-mid (Gemma-4-26B-A4B, ~14GB) is amd64-only: arm64 would bake a
+        # non-runnable x64 Vulkan binary and double the build/disk cost. Skip it on arm64
+        # -> the merge job emits a single-arch amd64 manifest (it tolerates count>=1).
         if: ${{ !(matrix.image.name == 'aimee-kb-gpu-mid' && matrix.platform.arch == 'arm64') }}
         uses: docker/build-push-action@v6
         with:
