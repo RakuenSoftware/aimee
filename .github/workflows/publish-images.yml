@@ -9,6 +9,7 @@
 #   aimee-kb-cpu        (Dockerfile.aimee-llm)   ghcr.io/<owner>/aimee-kb-cpu
 #   aimee-kb-gpu-small  (Dockerfile.aimee-llm)   ghcr.io/<owner>/aimee-kb-gpu-small
 #   aimee-kb-gpu-mid    (Dockerfile.aimee-llm)   ghcr.io/<owner>/aimee-kb-gpu-mid
+#   aimee-qwen-delegate (Dockerfile.aimee-qwen-delegate) ghcr.io/<owner>/aimee-qwen-delegate
 #   aimee-css-render (deploy/css-render/Dockerfile) ghcr.io/<owner>/aimee-css-render
 #
 # Multi-arch (linux/amd64 + linux/arm64) via the canonical build-by-digest then
@@ -93,6 +94,11 @@ jobs:
           - { name: aimee-kb-cpu, dockerfile: Dockerfile.aimee-llm }
           - { name: aimee-kb-gpu-small, dockerfile: Dockerfile.aimee-llm, extra_args: "EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF\nEMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf\nRERANK_REPO=cross-encoder/ettin-reranker-400m-v1\nSYNTH_REPO=unsloth/gemma-4-12B-it-qat-GGUF\nSYNTH_FILE=gemma-4-12B-it-qat-UD-Q4_K_XL.gguf\nSYNTH_REVISION=9586f3257bc62bd179767241c7ec0f66bc2a314a\nSYNTH_SHA256=cc9ff072e0a8203429ed854e6662c17a6c2bc1e5dca5b475dd4736caaacbc165\nSYNTH_FA=on" }
           - { name: aimee-kb-gpu-mid, dockerfile: Dockerfile.aimee-llm, extra_args: "EMBED_REPO=Qwen/Qwen3-Embedding-4B-GGUF\nEMBED_FILE=Qwen3-Embedding-4B-Q8_0.gguf\nRERANK_REPO=cross-encoder/ettin-reranker-400m-v1\nSYNTH_REPO=unsloth/Qwen3.6-35B-A3B-GGUF\nSYNTH_FILE=Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf\nSYNTH_REVISION=56b9b6695c1d341398ea990cf2172ba4311647d8\nSYNTH_SHA256=707a55a8a4397ecde44de0c499d3e68c1ad1d240d1da65826b4949d1043f4450\nSYNTH_FA=on\nSYNTH_MOE=1\nSYNTH_N_CPU_MOE=20\nSYNTH_SLOTS=1" }
+          # CPU-only single-model coding delegate: Qwen 3.6 27B UD-Q6_K_XL baked in
+          # (pinned by HF rev+sha256; the profile defaults live in the Dockerfile, so
+          # no extra_args). amd64-only (x64 llama.cpp binary); ~24GB image, so it needs
+          # the /mnt data-root move and skips the layer cache like the baked kb tiers.
+          - { name: aimee-qwen-delegate, dockerfile: Dockerfile.aimee-qwen-delegate }
           # #4-full render backend (headless-Chromium sidecar). Self-contained
           # under deploy/css-render (its own build context); independent of the C
           # build, so a failure here never blocks the aimee images (fail-fast off).
@@ -128,7 +134,7 @@ jobs:
         # The combined (aimee-server-kb) image now bundles the aimee-llm CPU
         # runtime + ~5.5 GB of baked GGUFs (COPYd from aimee-llm-cpu), so it needs
         # the same disk headroom as the llm legs.
-        if: startsWith(matrix.image.name, 'aimee-kb-') || matrix.image.name == 'aimee-server-kb'
+        if: startsWith(matrix.image.name, 'aimee-kb-') || matrix.image.name == 'aimee-server-kb' || matrix.image.name == 'aimee-qwen-delegate'
         run: |
           echo "before:"; df -h / /mnt
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
@@ -139,7 +145,7 @@ jobs:
           echo "after:"; df -h /
 
       - name: Move docker storage to /mnt (aimee-llm + combined legs)
-        if: startsWith(matrix.image.name, 'aimee-kb-') || matrix.image.name == 'aimee-server-kb'
+        if: startsWith(matrix.image.name, 'aimee-kb-') || matrix.image.name == 'aimee-server-kb' || matrix.image.name == 'aimee-qwen-delegate'
         run: |
           sudo systemctl stop docker docker.socket || true
           sudo mkdir -p /mnt/docker
@@ -153,10 +159,11 @@ jobs:
 
       - name: Build and push by digest
         id: build
-        # aimee-kb-gpu-mid (Qwen, 22GB) is amd64-only: arm64 would bake a non-runnable
-        # x64 Vulkan binary and double the 22GB build/disk cost. Skip it on arm64 -> the
-        # merge job emits a single-arch amd64 manifest (it tolerates count>=1).
-        if: ${{ !(matrix.image.name == 'aimee-kb-gpu-mid' && matrix.platform.arch == 'arm64') }}
+        # aimee-kb-gpu-mid (Qwen, 22GB) and aimee-qwen-delegate (Qwen 27B, ~24GB) are
+        # amd64-only: arm64 would bake a non-runnable x64 llama.cpp binary and double
+        # the build/disk cost. Skip them on arm64 -> the merge job emits a single-arch
+        # amd64 manifest (it tolerates count>=1).
+        if: ${{ !((matrix.image.name == 'aimee-kb-gpu-mid' || matrix.image.name == 'aimee-qwen-delegate') && matrix.platform.arch == 'arm64') }}
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.image.context || '.' }}
@@ -173,8 +180,8 @@ jobs:
           # layer cache. Same exclusion for the aimee-kb-* tiers: they BAKE multi-GB
           # GGUFs (Qwen3-Embedding + gemma) into the image, so caching those layers
           # would likewise blow the 10 GB GHA budget and evict the C-image caches.
-          cache-from: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-kb-cpu' && matrix.image.name != 'aimee-kb-gpu-small' && matrix.image.name != 'aimee-kb-gpu-mid' && matrix.image.name != 'aimee-css-render') && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
-          cache-to: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-kb-cpu' && matrix.image.name != 'aimee-kb-gpu-small' && matrix.image.name != 'aimee-kb-gpu-mid' && matrix.image.name != 'aimee-css-render') && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          cache-from: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-kb-cpu' && matrix.image.name != 'aimee-kb-gpu-small' && matrix.image.name != 'aimee-kb-gpu-mid' && matrix.image.name != 'aimee-qwen-delegate' && matrix.image.name != 'aimee-css-render') && format('type=gha,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
+          cache-to: ${{ (matrix.image.name != 'aimee-embedder' && matrix.image.name != 'aimee-embedder-4b' && matrix.image.name != 'aimee-kb-cpu' && matrix.image.name != 'aimee-kb-gpu-small' && matrix.image.name != 'aimee-kb-gpu-mid' && matrix.image.name != 'aimee-qwen-delegate' && matrix.image.name != 'aimee-css-render') && format('type=gha,mode=max,scope={0}-{1}', matrix.image.name, matrix.platform.arch) || '' }}
           # Images bundle the browser UI (WITH_WEBCHAT=1, the default). webchat's
           # frontend dependency (@rakuensoftware/smoothgui) is vendored in-repo, so
           # the build needs no npm token. The aimee-kb image ignores WITH_WEBCHAT.
@@ -199,13 +206,13 @@ jobs:
           outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
-        if: ${{ !(matrix.image.name == 'aimee-kb-gpu-mid' && matrix.platform.arch == 'arm64') }}
+        if: ${{ !((matrix.image.name == 'aimee-kb-gpu-mid' || matrix.image.name == 'aimee-qwen-delegate') && matrix.platform.arch == 'arm64') }}
         run: |
           mkdir -p /tmp/digests
           echo "${{ steps.build.outputs.digest }}" > "/tmp/digests/${{ matrix.image.name }}-${{ matrix.platform.arch }}"
 
       - name: Upload digest
-        if: ${{ !(matrix.image.name == 'aimee-kb-gpu-mid' && matrix.platform.arch == 'arm64') }}
+        if: ${{ !((matrix.image.name == 'aimee-kb-gpu-mid' || matrix.image.name == 'aimee-qwen-delegate') && matrix.platform.arch == 'arm64') }}
         uses: actions/upload-artifact@v4
         with:
           name: digest-${{ matrix.image.name }}-${{ matrix.platform.arch }}
@@ -220,7 +227,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [aimee-server, aimee-kb, aimee-server-kb, aimee-embedder, aimee-embedder-4b, aimee-kb-cpu, aimee-kb-gpu-small, aimee-kb-gpu-mid, aimee-css-render]
+        image: [aimee-server, aimee-kb, aimee-server-kb, aimee-embedder, aimee-embedder-4b, aimee-kb-cpu, aimee-kb-gpu-small, aimee-kb-gpu-mid, aimee-qwen-delegate, aimee-css-render]
     steps:
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"

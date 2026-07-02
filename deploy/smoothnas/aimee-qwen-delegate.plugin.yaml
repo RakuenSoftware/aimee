@@ -1,0 +1,72 @@
+apiVersion: smoothnas.io/v1
+kind: Plugin
+metadata:
+  name: aimee-qwen-delegate
+  version: 0.1.0
+  description: >-
+    aimee-qwen-delegate — a CPU-only, single-model OpenAI-compatible coding
+    delegate: one llama.cpp `llama-server` serving a baked Qwen 3.6 27B GGUF
+    (UD-Q6_K_XL), defaulting to 4 slots x 128K = 512K aggregate context with
+    q8_0 KV + flash-attention. Register it against aimee-server as a local
+    delegate (`aimee agent local qwen3.6-27b http://10.100.0.1:8744/v1 --model
+    qwen3.6-27b --provider openai --slots 4 --ctx 131072`). CPU-only: no GPU
+    profile, never touches the 7900 XTX used by the aimee-llm/Wolf stack.
+  vendor: RakuenSoftware
+  homepage: https://github.com/RakuenSoftware/aimee
+profiles:
+  # CPU-only: default-limits ONLY. Deliberately NO `gpu-amd` profile — this
+  # delegate runs entirely on the EPYC cores (AIMEE_DELEGATE_NGL=0) and must not
+  # claim the GPU that aimee-llm (embed/rerank/synth) and Wolf share.
+  - default-limits
+services:
+  - name: delegate
+    artifact:
+      type: oci-image
+      # The checked-in default is the stable released tag (owned by main /
+      # auto-release.yml -> publish-images.yml). To validate a tested-but-unreleased
+      # build, DON'T edit this file — pin the :testing image at deploy time via the
+      # tierd image override (`PUT /api/plugins/aimee-qwen-delegate/image
+      # {"image":"ghcr.io/rakuensoftware/aimee-qwen-delegate:testing"}`), which
+      # persists across manifest updates. Mirrors deploy/smoothnas/aimee-llm.plugin.yaml.
+      image: ghcr.io/rakuensoftware/aimee-qwen-delegate:latest
+    container:
+      restartPolicy: unless-stopped
+    env:
+      # --- runtime profile (baked defaults in the image; override here to retune
+      #     WITHOUT a rebuild) --------------------------------------------------
+      # 4 slots x 128K = 512K aggregate. CTX is the aggregate; each slot gets
+      # CTX/SLOTS (131072). Each slot stays below the 262K native ctx -> no RoPE
+      # scaling. Only the 16 Gated-Attention layers keep a KV cache.
+      AIMEE_DELEGATE_CTX: "524288"
+      AIMEE_DELEGATE_SLOTS: "4"
+      # Physical cores on the EPYC 7302P (16c/32t). Leave headroom for the GPU stack.
+      AIMEE_DELEGATE_THREADS: "16"
+      # CPU-only.
+      AIMEE_DELEGATE_NGL: "0"
+      # q8_0 KV + flash-attention keeps 512K of KV affordable in RAM. If CPU FA
+      # misbehaves on this llama.cpp build, flip to FA=off + f16 KV (higher RAM,
+      # guaranteed to run) and re-materialise — no image rebuild needed:
+      #   AIMEE_DELEGATE_FA: "off"
+      #   AIMEE_DELEGATE_KV_K: "f16"
+      #   AIMEE_DELEGATE_KV_V: "f16"
+      AIMEE_DELEGATE_FA: "on"
+      AIMEE_DELEGATE_KV_K: "q8_0"
+      AIMEE_DELEGATE_KV_V: "q8_0"
+      AIMEE_DELEGATE_MODEL_ID: "qwen3.6-27b"
+      AIMEE_DELEGATE_PORT: "8744"
+      # Bearer auth for /v1. Leave EMPTY/unset = auth-off ("deployment network is
+      # the boundary" — the port is hostExpose-only, reachable on the internal
+      # bridge, and aimee delegates register with auth_type:none). If you set one,
+      # provide it at deploy time from the secret store, never checked-in plaintext.
+      # AIMEE_LLM_AUTH_TOKEN: "<set-at-deploy-time-not-in-git>"
+    ports:
+      # OpenAI-compatible /v1 endpoint. hostExpose so aimee-server can reach it
+      # across the runtime bridge gateway at http://10.100.0.1:8744. 8744 avoids
+      # every other installed plugin's host port (8740 server / 8741 kb / 8742 llm
+      # / 8443 webchat / 8743 TLS / 8080 wolf) — a collision silently DNATs one
+      # winner and leaves the other unreachable though "running". Not exposed off-host.
+      - name: v1
+        port: 8744
+        protocol: tcp
+        expose: false
+        hostExpose: true

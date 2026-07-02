@@ -1,0 +1,98 @@
+# aimee-qwen-delegate: a single-model, OpenAI-compatible coding delegate served on
+# the CPU llama.cpp build. One baked GGUF (Qwen 3.6 27B), one `llama-server`, no GPU.
+#
+# Qwen 3.6 27B is a DENSE model with a Gated-DeltaNet HYBRID attention stack (64
+# layers = 16 blocks x [3 Gated-DeltaNet + 1 Gated-Attention]); only the 16 attention
+# layers keep a KV cache (the linear DeltaNet layers do not), so a large aggregate
+# context (this image defaults to 4 slots x 128K = 512K) stays affordable on system
+# RAM. Native context is 262K, so each 128K slot sits below native -> no RoPE/YaRN
+# scaling. It runs on the SAME llama.cpp release (b9775) that already serves its MoE
+# sibling (Qwen 3.6 35B-A3B) in aimee, so the architecture is supported.
+#
+# Model is baked in and pinned by HF revision OID + sha256 so a compromised/MITM'd
+# upload fails the BUILD, not production (matches the aimee-kb synth tiers). Register
+# the running container as an aimee delegate: `aimee agent local qwen3.6-27b
+# http://<host>:8744/v1 --model qwen3.6-27b --provider openai --slots 4 --ctx 131072`.
+
+ARG LLAMA_TAG=b9775
+
+# Model + supply-chain pins.
+ARG SYNTH_REPO=unsloth/Qwen3.6-27B-GGUF
+ARG SYNTH_FILE=Qwen3.6-27B-UD-Q6_K_XL.gguf
+ARG SYNTH_REVISION=82d411acf4a06cfb8d9b073a5211bf410bfc29bf
+ARG SYNTH_SHA256=8746881d40f280b1b6b858c656a347c754ed3d9cc8d2e1ad46b3635b87f611f8
+
+# ---- stage 1: fetch + integrity-verify the baked GGUF (fail build on mismatch) ---
+FROM debian:bookworm-slim AS modelprep
+ARG SYNTH_REPO
+ARG SYNTH_FILE
+ARG SYNTH_REVISION
+ARG SYNTH_SHA256
+RUN apt-get update && apt-get install -y --no-install-recommends wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /out
+# Pin by REVISION OID (not just :main) so the bytes can't shift under us, then verify
+# the recorded sha256 -- a compromised HF upload or MITM mirror fails here.
+# --tries/--timeout so a transient HF blip during the ~24GB pull doesn't
+# deterministically kill the build; -c resumes a partial file.
+RUN wget -q -c --tries=5 --timeout=30 --waitretry=10 -O /out/synth.gguf \
+        "https://huggingface.co/${SYNTH_REPO}/resolve/${SYNTH_REVISION}/${SYNTH_FILE}" \
+    && echo "${SYNTH_SHA256}  /out/synth.gguf" | sha256sum -c - \
+    && echo "${SYNTH_SHA256}  synth.gguf" > /out/synth.sha256
+
+# ---- stage 2: runtime — CPU llama.cpp + the delegate entrypoint ------------------
+FROM debian:bookworm-slim AS runtime
+ARG LLAMA_TAG
+# CPU-only runtime: no libvulkan1/mesa (this image never touches a GPU). libgomp1 is
+# OpenMP for the CPU backend; libcurl4 for llama-server's optional HTTP bits.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl wget libgomp1 libcurl4 \
+    && rm -rf /var/lib/apt/lists/*
+# CPU llama.cpp release (ubuntu-x64, NOT the -vulkan- build). amd64-only binary.
+RUN wget -q --tries=5 --timeout=30 --waitretry=10 -O /tmp/llama.tgz \
+        "https://github.com/ggml-org/llama.cpp/releases/download/${LLAMA_TAG}/llama-${LLAMA_TAG}-bin-ubuntu-x64.tar.gz" \
+    && mkdir -p /opt/llama && tar -xzf /tmp/llama.tgz -C /opt/llama --strip-components=1 \
+    && rm /tmp/llama.tgz
+ENV LD_LIBRARY_PATH=/opt/llama/lib:/opt/llama PATH=/opt/llama:/opt/llama/bin:$PATH
+
+COPY scripts/aimee-qwen-delegate-entrypoint.sh /opt/aimee/entrypoint.sh
+COPY scripts/aimee-qwen-delegate-health.sh /opt/aimee/health.sh
+RUN chmod +x /opt/aimee/entrypoint.sh /opt/aimee/health.sh
+COPY --from=modelprep /out /models
+
+# Re-declare the pins in the runtime stage so they can be surfaced as image LABELs
+# (operator audit: what's actually baked).
+ARG SYNTH_REPO
+ARG SYNTH_FILE
+ARG SYNTH_REVISION
+ARG SYNTH_SHA256
+LABEL org.aimee.delegate.model="${SYNTH_REPO}/${SYNTH_FILE}" \
+      org.aimee.delegate.revision="${SYNTH_REVISION}" \
+      org.aimee.delegate.sha256="${SYNTH_SHA256}"
+
+# ---- runtime profile: baked as ENV, overridable at deploy (plugin config) ---------
+# Defaults implement the operator request: CPU-only, 4 slots x 128K = 512K aggregate,
+# q8_0 KV + flash-attention to keep the 512K KV affordable in system RAM. Flip to
+# AIMEE_DELEGATE_FA=off + AIMEE_DELEGATE_KV_K/V=f16 (no rebuild) if CPU FA misbehaves.
+ARG DELEGATE_CTX=524288
+ARG DELEGATE_SLOTS=4
+ARG DELEGATE_THREADS=16
+ARG DELEGATE_MODEL_ID=qwen3.6-27b
+ENV AIMEE_DELEGATE_PORT=8744 \
+    AIMEE_DELEGATE_CTX=${DELEGATE_CTX} \
+    AIMEE_DELEGATE_SLOTS=${DELEGATE_SLOTS} \
+    AIMEE_DELEGATE_THREADS=${DELEGATE_THREADS} \
+    AIMEE_DELEGATE_NGL=0 \
+    AIMEE_DELEGATE_FA=on \
+    AIMEE_DELEGATE_KV_K=q8_0 \
+    AIMEE_DELEGATE_KV_V=q8_0 \
+    AIMEE_DELEGATE_JINJA=1 \
+    AIMEE_DELEGATE_MODEL_ID=${DELEGATE_MODEL_ID}
+
+WORKDIR /opt/aimee
+EXPOSE 8744
+# Long start-period: cold-loading a ~24GB GGUF into RAM on CPU takes minutes; a short
+# gate would race the load and cause restart storms that re-read the file each time.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=600s --retries=3 \
+    CMD /opt/aimee/health.sh || exit 1
+ENTRYPOINT ["/opt/aimee/entrypoint.sh"]
