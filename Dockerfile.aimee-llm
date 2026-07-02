@@ -90,11 +90,17 @@ RUN wget -q -O /out/embed.gguf  "https://huggingface.co/${EMBED_REPO}/resolve/ma
        fi
 
 # ---- stage 2: runtime — Vulkan llama.cpp + the gateway ----
-FROM debian:bookworm-slim AS runtime
+# Base is Debian TRIXIE (Mesa 25.x): its RADV exposes VK_KHR_cooperative_matrix on
+# RDNA3 (gfx1100), so the prebuilt llama.cpp Vulkan binary uses the 7900 XTX WMMA
+# matrix cores. Bookworm's Mesa 22.3.6 predates RADV coopmat (added in Mesa 24.1) →
+# llama.cpp fell back to scalar shaders (compute-bound, ~5% mem-bus use, ~14-60 t/s).
+# Verified on the card: Mesa 25.0.7 → cooperativeMatrix=true on RADV NAVI31.
+# NOTE: trixie's 64-bit time_t transition renames libcurl4 -> libcurl4t64.
+FROM debian:trixie-slim AS runtime
 ARG LLAMA_TAG
 ARG EMBED_POOLING
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl wget libgomp1 libcurl4 libvulkan1 mesa-vulkan-drivers \
+        ca-certificates curl wget libgomp1 libcurl4t64 libvulkan1 mesa-vulkan-drivers \
         python3 python3-numpy \
     && rm -rf /var/lib/apt/lists/*
 # llama.cpp vendor-agnostic Vulkan release (one binary for AMD/Nvidia/Intel)
