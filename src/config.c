@@ -651,8 +651,9 @@ static void config_set_defaults(config_t *cfg)
    cfg->wfe_live_forge_enabled = 0;  /* default-OFF (security): the autonomous live
                                         forge stays unregistered until an operator
                                         explicitly enables it (F4) */
-   cfg->audit_action_enabled = 0;    /* default-OFF: per-action audit row is enabled
-                                        only after the trajectory_export reader ships */
+   cfg->audit_action_enabled = 1;    /* default-ON: the trajectory_export reader (S3)
+                                        shipped, so the passive per-action audit row
+                                        is on by default; set false to opt out */
    snprintf(cfg->css_render_command, sizeof(cfg->css_render_command), "%s",
             CONFIG_DEFAULT_CSS_RENDER_COMMAND); /* default-on render backend (inert
                                                    until the sidecar is up); set empty

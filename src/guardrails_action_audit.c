@@ -18,7 +18,7 @@
 /* Cached audit_action_enabled. Read once on first use; a config_load failure
  * leaves the memset-zeroed flag at 0 (audit OFF), so the gate is fail-safe and
  * the hot path costs one branch instead of a per-call config parse. Toggling the
- * knob takes effect on restart — acceptable for a passive, default-off audit. */
+ * knob takes effect on restart — acceptable for a passive, default-on audit. */
 static int g_audit_action_enabled = -1;
 static int audit_action_is_enabled(void)
 {
