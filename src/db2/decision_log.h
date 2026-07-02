@@ -42,6 +42,19 @@ extern "C"
                                const char *rationale, const char *assumptions,
                                const char *created_at, db2_decision_log_row_t *out);
 
+   /* Record a governance decision (P1). Writes an `active` decision for `subject`
+    * (scope key) with the given rationale/author/policy/revisit, and — atomically
+    * in one transaction — flips the decision `supersedes_id` (if >0) to
+    * `superseded`. The one-active-per-scope invariant is enforced by the DB
+    * (idx_dl_active_scope): a second active decision for the same
+    * (subject, linked_policy_id) is rejected. Returns 0 on success (row in `out`
+    * if non-NULL), -1 on any failure (including the invariant rejection), with
+    * the transaction rolled back so no partial write survives. */
+   int db2_decision_log_record(const char *subject, const char *options, const char *chosen,
+                               const char *rationale, const char *author, int64_t linked_policy_id,
+                               const char *revisit_when, int64_t supersedes_id,
+                               db2_decision_log_row_t *out);
+
    /* Load a task decision_log row by id. Returns 0 on success, -1 if the
     * row does not exist or DB2 is unavailable. */
    int db2_decision_log_get(int64_t id, db2_decision_log_row_t *out);

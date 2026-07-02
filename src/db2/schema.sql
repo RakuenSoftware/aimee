@@ -153,6 +153,11 @@ ALTER TABLE decision_log ADD COLUMN IF NOT EXISTS supersedes_id BIGINT NOT NULL 
 ALTER TABLE decision_log ADD COLUMN IF NOT EXISTS subject TEXT NOT NULL DEFAULT '';
 ALTER TABLE decision_log ADD COLUMN IF NOT EXISTS author TEXT NOT NULL DEFAULT '';
 ALTER TABLE decision_log ADD COLUMN IF NOT EXISTS linked_policy_id BIGINT NOT NULL DEFAULT 0;
+-- One-active-per-scope invariant: at most one active decision per (subject,
+-- linked_policy_id). linked_policy_id is NOT NULL DEFAULT 0 so no COALESCE is
+-- needed. Enforced at the DB layer (not just a check-then-insert race).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dl_active_scope ON decision_log(subject, linked_policy_id) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_dl_revisit ON decision_log(revisit_when) WHERE status = 'active' AND revisit_when != '';
 CREATE INDEX IF NOT EXISTS idx_agent_hints_lookup ON agent_hints(role, consumed);
 CREATE INDEX IF NOT EXISTS idx_memory_workspaces_workspace ON memory_workspaces(workspace);
 CREATE INDEX IF NOT EXISTS idx_memory_aliases_memory ON memory_aliases(memory_id);

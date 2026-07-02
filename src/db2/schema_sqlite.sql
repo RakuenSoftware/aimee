@@ -135,6 +135,8 @@ CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id);
 CREATE INDEX IF NOT EXISTS idx_te_source ON task_edges(source_id);
 CREATE INDEX IF NOT EXISTS idx_te_target ON task_edges(target_id);
 CREATE INDEX IF NOT EXISTS idx_dl_task ON decision_log(task_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dl_active_scope ON decision_log(subject, linked_policy_id) WHERE status = 'active';
+CREATE INDEX IF NOT EXISTS idx_dl_revisit ON decision_log(revisit_when) WHERE status = 'active' AND revisit_when != '';
 CREATE INDEX IF NOT EXISTS idx_agent_hints_lookup ON agent_hints(role, consumed);
 CREATE INDEX IF NOT EXISTS idx_memory_workspaces_workspace ON memory_workspaces(workspace);
 CREATE INDEX IF NOT EXISTS idx_memory_aliases_memory ON memory_aliases(memory_id);

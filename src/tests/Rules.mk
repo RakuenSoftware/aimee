@@ -265,7 +265,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-embedding-dim \
                $(TESTPREFIX)/unit-test-ontology-evolution \
                $(TESTPREFIX)/unit-test-extract-patterns \
-               $(TESTPREFIX)/unit-test-fact-ingest \
+               $(TESTPREFIX)/unit-test-fact-ingest $(TESTPREFIX)/unit-test-decision-log \
                $(TESTPREFIX)/unit-test-fact-recall \
                $(TESTPREFIX)/unit-test-pii-gate \
                $(TESTPREFIX)/unit-test-sandbox \
@@ -2304,6 +2304,10 @@ $(TESTPREFIX)/unit-test-extract-patterns: $(OBJDIR)/tests/test_extract_patterns.
 
 # typed-fact P5: pattern-first ingest pipeline (§6 -> §1), shim.
 $(TESTPREFIX)/unit-test-fact-ingest: $(OBJDIR)/tests/test_fact_ingest.o \
+                               $(TEST_DATA_OBJS_MOCK)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-decision-log: $(OBJDIR)/tests/test_decision_log.o \
                                $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
