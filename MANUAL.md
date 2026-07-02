@@ -1420,9 +1420,9 @@ the `external-llm` compose profile. Backends and tiers:
 
 | Compose file | Brings up | Use when |
 |--------------|-----------|----------|
-| `compose.combined.yaml` | **`aimee-server+kb`** (one container) + Postgres + embedder | **Recommended default.** Both binaries co-located; server `/v1` on `:8740`, kb `:8741`. |
-| `compose.server.yaml` | `aimee-server` + `aimee-kb` + Postgres + embedder | Split stack: scale/update/place server and kb independently. |
-| `compose.yaml` | `aimee-kb` + Postgres + embedder | The knowledge service alone: building block for a shared/scaled kb. |
+| `compose.combined.yaml` | **`aimee-server+kb`** (one container, inference bundled) + Postgres | **Recommended default.** Both binaries co-located; server `/v1` on `:8740`, kb `:8741`. |
+| `compose.server.yaml` | `aimee-server` + `aimee-kb` + Postgres + the `aimee-llm` inference gateway | Split stack: scale/update/place server and kb independently. |
+| `compose.yaml` | `aimee-kb` + Postgres + the `aimee-llm` inference gateway | The knowledge service alone: building block for a shared/scaled kb. |
 | `compose.server-standalone.yaml` | `aimee-server` only (SQLite DB1, no kb) | DB1-backed `/v1` with no shared knowledge. |
 
 **Bring up the recommended (combined) stack:**
@@ -1599,7 +1599,7 @@ Vector search rides inside the same Postgres and scales with it:
 
 | Topology | Shape | When |
 |----------|-------|------|
-| **Containerized server + KB (default)** | `aimee-server` + `aimee-kb` as containers (combined or split) + Postgres + embedder ([§27.1](#271-containerized-deployment)); developers run only the thin client. | The recommended deployment for one user or a team. |
+| **Containerized server + KB (default)** | `aimee-server` + `aimee-kb` as containers (combined or split) + Postgres + a bundled inference gateway ([§27.1](#271-containerized-deployment)); developers run only the thin client. | The recommended deployment for one user or a team. |
 | **Single developer, source build** | One `aimee-server` + one local `aimee-kb` + local Postgres, all on one host via service units. | The `install.sh` no-Docker setup. |
 | **Shared KB** | Many users' `aimee-server` instances point at one `aimee-kb`/Postgres over HTTP. DB1 stays per-user/per-machine; only KB-scoped knowledge crosses the boundary. | A team or a single user across several machines wanting shared knowledge. |
 | **Scaled KB** | Several `aimee-kb` replicas behind a load balancer (`:8741`) over one Postgres (with pooling and, if needed, read replicas + pgvectorscale). | Many users and/or a large corpus where one KB instance or plain HNSW is the bottleneck. |
@@ -1662,7 +1662,7 @@ platform support in [`docs/COMPATIBILITY.md`](docs/COMPATIBILITY.md).
 | `AIMEE_KB_API_URL` / `AIMEE_KB_API_BEARER_TOKEN` | KB `/v1` HTTP endpoint and bearer token. Required for kb-backed (shared/vector) features; the server no longer autostarts `aimee-kb`. |
 | `AIMEE_KB_NO_AUTOSTART` | Deprecated no-op (the kb socket autostart was retired in #2747; the server only reaches kb via `AIMEE_KB_API_URL`). |
 | `AIMEE_DB1_URL` / `AIMEE_DB2_URL` | Storage URLs used by containerized/explicit deploys: DB1 `sqlite:///…` (server) and DB2 `postgresql://…/aimee_shared` (kb). |
-| `AIMEE_EMBEDDER_URL` | Embedding service endpoint for the kb (e.g. the embedder sidecar `http://embedder:8080`). |
+| `AIMEE_EMBEDDER_URL` | Embedding service endpoint for the kb (e.g. the `aimee-llm` gateway `http://aimee-llm:8742`). |
 | `AIMEE_SERVER_HTTP_BIND` / `AIMEE_KB_HTTP_BIND` | Bind the server/kb `/v1` listener on `0.0.0.0` (set `1` in containers so the published port is reachable). |
 | `AIMEE_WORKSPACES_DIR` | Mirror-tier workspace root (bare mirrors + reconstructed worktrees); containers mount a volume here (`/var/lib/aimee-workspaces`). |
 | `AIMEE_KB_MODE` | Install-time selector (`local`/`remote`) consumed by `install-deps.sh`/`install.sh`. |

@@ -957,9 +957,9 @@ run a standalone embedder or curator LLM instead of the bundled gateway, use the
 
 | File | Brings up | Use when |
 |------|-----------|----------|
-| `compose.combined.yaml` | **`aimee-server+kb`** (one container) + Postgres + embedder | **Recommended default**: both binaries co-located; server `/v1` over TLS on `:8743` (plaintext `:8740` loopback-only), kb `:8741` |
-| `compose.server.yaml` | `aimee-server` + `aimee-kb` + Postgres + embedder | Split stack: scale/update/place server and kb independently; server `/v1` over TLS on `:8743` (plaintext `:8740` loopback-only), kb `:8741` |
-| `compose.yaml` | `aimee-kb` + Postgres (pgvector) + embedder | The knowledge service (DB2 + vectors) on its own: building block for a shared/scaled kb |
+| `compose.combined.yaml` | **`aimee-server+kb`** (one container, inference bundled) + Postgres | **Recommended default**: both binaries co-located; server `/v1` over TLS on `:8743` (plaintext `:8740` loopback-only), kb `:8741` |
+| `compose.server.yaml` | `aimee-server` + `aimee-kb` + Postgres + the `aimee-llm` inference gateway | Split stack: scale/update/place server and kb independently; server `/v1` over TLS on `:8743` (plaintext `:8740` loopback-only), kb `:8741` |
+| `compose.yaml` | `aimee-kb` + Postgres (pgvector) + the `aimee-llm` inference gateway | The knowledge service (DB2 + vectors) on its own: building block for a shared/scaled kb |
 | `compose.server-standalone.yaml` | `aimee-server` only (SQLite DB1, no kb) | DB1-backed `/v1` endpoints with no shared knowledge |
 
 #### Combined server + kb (recommended)
@@ -971,8 +971,9 @@ docker compose -f compose.combined.yaml up --build -d
 One `aimee-server+kb` container runs **both** binaries: the kb on loopback `:8741`
 inside the container and the server fronting `/v1` over native TLS on `:8743`
 (plaintext `:8740` is loopback-only) with `AIMEE_KB_API_URL=http://127.0.0.1:8741`.
-Postgres + the embedder stay external. The TLS server and kb ports are published for
-direct inspection (`-k` accepts the self-signed cert):
+Postgres stays external; the CPU inference gateway is bundled inside the image. The
+TLS server and kb ports are published for direct inspection (`-k` accepts the
+self-signed cert):
 
 ```bash
 curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/health
@@ -989,7 +990,8 @@ docker compose -f compose.server.yaml up --build -d
 `aimee-server` and `aimee-kb` run as separate containers (many servers → one shared
 kb). The server fronts `/v1` over native TLS on `:8743` (plaintext `:8740` is
 loopback-only) and reaches the kb over HTTP
-(`AIMEE_KB_API_URL=http://aimee-kb:8741`); the kb owns Postgres + the embedder:
+(`AIMEE_KB_API_URL=http://aimee-kb:8741`); the kb owns Postgres and reaches the
+`aimee-llm` inference gateway:
 
 ```bash
 curl -k -H 'Authorization: Bearer aimee-local-dev' https://localhost:8743/v1/health
@@ -1008,7 +1010,7 @@ survive container recreation; the image declares it a `VOLUME`, so even a plain
 docker compose -f compose.yaml up --build -d
 ```
 
-Brings up just `aimee-kb` + Postgres + embedder, serving `/v1` on `:8741`: the
+Brings up just `aimee-kb` + Postgres + the `aimee-llm` gateway, serving `/v1` on `:8741`: the
 building block behind a shared or horizontally-scaled kb that many servers point at:
 
 ```bash
