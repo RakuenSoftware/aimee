@@ -172,6 +172,28 @@ int db2_decision_log_record(const char *subject, const char *options, const char
    return 0;
 }
 
+int db2_decision_log_mark_revisit_due(void)
+{
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[256] = "";
+   /* idx_dl_revisit backs this predicate. revisit_when and pg_now_text() are both
+    * ISO-8601, so the lexicographic <= is a correct time comparison; a date-only
+    * revisit_when is a prefix of the datetime (same-day sorts as due). */
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "UPDATE decision_log SET status = 'revisit_due'"
+                                          " WHERE status = 'active' AND revisit_when != ''"
+                                          " AND revisit_when <= pg_now_text()",
+                                          err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
+   int changes = aimee_pg_stmt_changes(st);
+   aimee_pg_finalize(st);
+   return rc == AIMEE_PG_DONE ? changes : -1;
+}
+
 int db2_decision_log_get(int64_t id, db2_decision_log_row_t *out)
 {
    void *conn = db2_conn();

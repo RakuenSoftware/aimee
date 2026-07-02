@@ -59,6 +59,13 @@ extern "C"
     * row does not exist or DB2 is unavailable. */
    int db2_decision_log_get(int64_t id, db2_decision_log_row_t *out);
 
+   /* Flip active decisions whose revisit_when has elapsed to 'revisit_due' so
+    * they resurface for review (P1). Idempotent: only active rows with a due,
+    * non-empty revisit_when are touched, compared lexicographically against the
+    * current time (ISO-8601). Returns the number flipped this call, or -1 on
+    * error. Reuses the existing curator drain poll — no new scheduler. */
+   int db2_decision_log_mark_revisit_due(void);
+
    /* Update the outcome for a task decision_log row. */
    int db2_decision_log_set_outcome(int64_t id, const char *outcome);
 

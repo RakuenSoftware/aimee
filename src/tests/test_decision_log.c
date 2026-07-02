@@ -88,6 +88,31 @@ static void test_empty_subject_rejected(void)
    printf("  PASS: test_empty_subject_rejected\n");
 }
 
+/* A decision past its revisit_when flips to 'revisit_due'; not-yet-due and
+ * no-revisit decisions stay active; the sweep is idempotent. */
+static void test_revisit_sweep(void)
+{
+   db2_decision_log_row_t due, future, none, after;
+   assert(db2_decision_log_record("rv-due", "a", "a", "r", "op", 0, "2000-01-01", 0, &due) == 0);
+   assert(db2_decision_log_record("rv-future", "a", "a", "r", "op", 0, "2999-01-01", 0, &future) ==
+          0);
+   assert(db2_decision_log_record("rv-none", "a", "a", "r", "op", 0, "", 0, &none) == 0);
+
+   int flipped = db2_decision_log_mark_revisit_due();
+   assert(flipped == 1); /* only the past-due one */
+
+   assert(db2_decision_log_get(due.id, &after) == 0);
+   assert(strcmp(after.status, "revisit_due") == 0);
+   assert(db2_decision_log_get(future.id, &after) == 0);
+   assert(strcmp(after.status, "active") == 0);
+   assert(db2_decision_log_get(none.id, &after) == 0);
+   assert(strcmp(after.status, "active") == 0);
+
+   /* Idempotent: a second sweep flips nothing new. */
+   assert(db2_decision_log_mark_revisit_due() == 0);
+   printf("  PASS: test_revisit_sweep\n");
+}
+
 int main(void)
 {
    db2_test_shim_open();
@@ -97,6 +122,7 @@ int main(void)
    test_distinct_scopes_coexist();
    test_supersede_wrong_scope_rejected();
    test_empty_subject_rejected();
+   test_revisit_sweep();
    db2_test_shim_close();
    printf("decision_log: all tests passed\n");
    return 0;

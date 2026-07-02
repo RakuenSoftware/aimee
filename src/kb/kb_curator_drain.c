@@ -10,6 +10,7 @@
 #endif
 
 #include "db2/db2.h"
+#include "db2/decision_log.h"        /* db2_decision_log_mark_revisit_due (P1) */
 #include "db2/cross_repo_identity.h" /* db2_cross_repo_rebuild_identities (H0c) */
 #include "db2/cross_repo_route.h"    /* db2_cross_repo_rebuild_routes (H0d) */
 #include "db2/cross_repo_build.h"    /* db2_cross_repo_rebuild_build_deps (recall R2) */
@@ -168,6 +169,16 @@ static void *drain_thread_main(void *arg)
          int n = kb_evidence_embed_drain(cfg.kb_evidence_embed_batch, embed_cmd);
          if (n > 0)
             aimee_log(LOG_DEBUG, "kb.evidence.embed", "drained %d evidence op(s)", n);
+      }
+
+      /* Governance decision revisit sweep — runs every poll (P1). Flips active
+       * decisions past their revisit_when to 'revisit_due' so they resurface.
+       * Reuses this existing drain — no new scheduler. */
+      {
+         int due = db2_decision_log_mark_revisit_due();
+         if (due > 0)
+            aimee_log(LOG_DEBUG, "kb.decision.revisit", "flipped %d decision(s) to revisit_due",
+                      due);
       }
 
       /* Typed-fact extraction drain — runs every poll, independent of the
