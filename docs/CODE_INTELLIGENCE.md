@@ -58,5 +58,8 @@ A thin client needs a configured remote and an indexed project for this. Plain
 The graph is a tool surface for the primary agent and its delegates, not just a CLI. Before
 an edit the AI looks up callers and blast radius, and it fetches exact code spans by symbol
 instead of loading whole files into context. That is what lets it work from your code, keep
-its context small, and stop rediscovering the codebase on every session. See
-[How aimee learns](KNOWLEDGE.md) for how this sits alongside memory and the curator.
+its context small, and stop rediscovering the codebase on every session. Code search is a
+hybrid vector-graph like memory: the call graph, vector similarity, and the cross-session
+knowledge graph are ranked together (`/v1/code/hybrid`, tuned by `code_hybrid_weight_graph`
+and `code_hybrid_weight_memory`), so a lookup follows structure and meaning, not just text.
+See [How aimee learns](KNOWLEDGE.md) for how this sits alongside memory and the curator.

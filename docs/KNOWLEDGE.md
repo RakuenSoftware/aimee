@@ -92,9 +92,12 @@ time to consolidate what it has seen, without you asking.
 
 ## 4. Pattern recognition across all domains
 
-Everything aimee ingests lands in one typed knowledge graph. That is what lets it
-draw conclusions no single document states, by connecting entities, edges, and
-evidence that originated in different teams, formats, and domains.
+Everything aimee ingests lands in one typed knowledge graph. Recall is a **hybrid
+vector-graph**, not plain vector search: the embeddings, the graph's entities and relations,
+and a lexical signal are ranked together by reciprocal-rank fusion, so a query resolves
+through meaning, structure, and keywords at once. That is what lets it draw conclusions no
+single document states, by connecting entities, edges, and evidence that originated in
+different teams, formats, and domains.
 
 This is the core of the company-wide design. A product spec, the code that
 implements it, the support tickets about it, and the contract that governs it all

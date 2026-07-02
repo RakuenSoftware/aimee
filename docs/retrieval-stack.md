@@ -5,6 +5,13 @@ all share a **single embedder per deployment**. There is no two-tier (fast +
 deep) arrangement, one model embeds everything, and every vector column is
 sized to that model's output dimension.
 
+Retrieval is a **hybrid vector-graph**, not a vector store. Vector recall is fused with a
+typed knowledge graph (entities, relations, PageRank) and, for code, the call graph, plus a
+lexical BM25 signal, and the signals are combined by reciprocal-rank fusion (`memory_bm25_weight`,
+`semantic_weight`, and the `code_hybrid_weight_*` knobs). The embedder below feeds the vector
+half; the graph and lexical halves run beside it. That fusion is what lets recall cross a
+keyword gap or a repo boundary that plain vector search would miss.
+
 ## The embedder
 
 Embedding and reranking are baked into the `aimee-kb-*` tier images — Qwen3-Embedding + an
