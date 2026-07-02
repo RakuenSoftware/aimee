@@ -6,6 +6,7 @@
 
 #include "db1.h"
 #include "wfe_binding.h"
+#include "wfe_store.h" /* lifecycle_event list — assert the reclaim audit */
 
 int main(void)
 {
@@ -67,6 +68,22 @@ int main(void)
    assert(db1_wfe_lease_renew("sess3", 0) == 0);
    assert(db1_wfe_lease_expiry_get("sess3", exp, sizeof exp) == 1 && exp[0] == '\0');
    assert(db1_wfe_lease_stale_work_items(stale, 4) == 0);
+
+   /* ---- reclaim (step 6 inc 2): a stale lease is unbound + audited, work-item
+    * freed. sess3 is bound to wi_A; sess2 (wi_B) never leased -> not reclaimed. */
+   assert(db1_wfe_lease_renew("sess3", -60) == 0); /* make sess3 stale */
+   assert(db1_wfe_lease_reclaim_stale() == 1);
+   assert(db1_wfe_binding_get("sess3", wi, sizeof wi, st, sizeof st) == 0); /* unbound */
+   assert(db1_wfe_binding_get("sess2", wi, sizeof wi, st, sizeof st) == 1); /* untouched */
+   db1_lifecycle_event_t *ev = NULL;
+   int ne = db1_lifecycle_event_list("wi_A", &ev);
+   int reclaimed_events = 0;
+   for (int i = 0; i < ne; i++)
+      if (strcmp(ev[i].kind, "lease_reclaimed") == 0 && strcmp(ev[i].actor, "watchdog-s2") == 0)
+         reclaimed_events++;
+   free(ev);
+   assert(reclaimed_events == 1);
+   assert(db1_wfe_lease_reclaim_stale() == 0); /* nothing stale now */
 
    printf("ok\n");
    return 0;

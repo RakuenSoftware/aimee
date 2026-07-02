@@ -12,7 +12,7 @@
 #include "wfe_router.h"  /* catalog + decide + find */
 #include "wfe_store.h"   /* db1_lifecycle_event_add */
 
-static void audit_bind(const char *wi, const char *workflow, const char *stage)
+static void audit_bind(const char *wi, const char *workflow, const char *stage, int resumed)
 {
    cJSON *d = cJSON_CreateObject();
    if (!d)
@@ -21,8 +21,9 @@ static void audit_bind(const char *wi, const char *workflow, const char *stage)
    cJSON_AddStringToObject(d, "stage", stage ? stage : "");
    char *s = cJSON_PrintUnformatted(d);
    cJSON_Delete(d);
+   /* "resume" when re-binding to an existing work-item after a lease reclaim. */
    if (s)
-      db1_lifecycle_event_add(wi, "", "bind", "bind-s2", s, "", 0);
+      db1_lifecycle_event_add(wi, "", resumed ? "resume" : "bind", "bind-s2", s, "", 0);
    free(s);
 }
 
@@ -35,6 +36,13 @@ int wfe_bind_interactive(const char *session_id, const char *message, const char
    wfe_enforce_stage_t stage = wfe_enforce_stage_parse(getenv("AIMEE_WORKFLOW_ENFORCE_STAGE"));
    if (stage == WFE_ENFORCE_OFF)
       return 0;
+
+   /* Opportunistic watchdog (step 6 inc 2): reclaim any idle-expired leases on each
+    * enforced turn -- self-healing, no separate scheduler. The lease slides only on
+    * a MEANINGFUL advance (not trivial turn traffic), so a session squatting a
+    * work-item without progress eventually lapses and is reclaimed here (consult
+    * #12). Cheap when nothing is stale (a bounded query returning no rows). */
+   db1_wfe_lease_reclaim_stale();
 
    /* Idempotent: already bound -> reuse, create nothing. This short-circuits every
     * turn after the first, so the create path runs at most once per session. */
@@ -62,9 +70,18 @@ int wfe_bind_interactive(const char *session_id, const char *message, const char
    char proposal[128];
    snprintf(proposal, sizeof proposal, "interactive/%s", session_id);
    char id[80] = "";
+   int resumed = 0;
    if (wfe_work_item_create(d.workflow_id, repo ? repo : "", proposal, "interactive", id, err,
                             sizeof err) != 0)
-      return 0; /* create failed (incl. a rare UNIQUE collision after an unbind) */
+   {
+      /* Create failed. The expected case is a UNIQUE(repo, proposal_path) collision
+       * after the session's lease was reclaimed (step 6) -- the work-item still
+       * exists, so RESUME it by binding to the existing id rather than losing the
+       * work. Any other failure (bad workflow, DB fault) leaves id empty -> refuse. */
+      if (db1_work_item_id_by_proposal(repo ? repo : "", proposal, id, sizeof id) != 1 || !id[0])
+         return 0;
+      resumed = 1;
+   }
 
    /* Bind the session, stamping the dial stage (monotonic per session row). */
    if (db1_wfe_bind(session_id, id, wfe_enforce_stage_name(stage)) != 0)
@@ -72,6 +89,6 @@ int wfe_bind_interactive(const char *session_id, const char *message, const char
 
    /* Start the sliding lease (step 6 watchdog); renewed on each applied advance. */
    db1_wfe_lease_renew(session_id, wfe_lease_ttl_secs());
-   audit_bind(id, w->id, wfe_enforce_stage_name(stage));
+   audit_bind(id, w->id, wfe_enforce_stage_name(stage), resumed);
    return 1;
 }

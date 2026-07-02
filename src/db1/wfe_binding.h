@@ -47,6 +47,13 @@ extern "C"
     * on error. Detection only -- the caller decides what to do (warn/reclaim). */
    int db1_wfe_lease_stale_work_items(char (*out)[80], int max);
 
+   /* Reclaim (unbind) bindings whose lease has lapsed: delete the binding row and
+    * record a "lease_reclaimed" lifecycle_event on the work-item, freeing it for a
+    * fresh bind / resume. The work-item itself is NOT deleted, so the owner (or a
+    * same-principal session) resumes it on its next turn. Processes up to 64 per
+    * call (re-run to drain). Returns the number reclaimed, or -1 on error. */
+   int db1_wfe_lease_reclaim_stale(void);
+
 #ifdef __cplusplus
 }
 #endif

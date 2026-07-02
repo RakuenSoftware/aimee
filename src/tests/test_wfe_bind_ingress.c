@@ -137,6 +137,29 @@ int main(void)
    free(items);
    assert(n_items == 1);
 
+   /* resume-after-reclaim (step 6 inc 2): make the lease stale, reclaim it (unbinds
+    * SID; the work-item persists), then a fresh enforced turn RESUMES the same
+    * work-item (create collides on interactive/<sid> -> by-proposal lookup) rather
+    * than losing the work or refusing. */
+   assert(db1_wfe_lease_renew(SID, -60) == 0);                    /* force stale */
+   assert(db1_wfe_lease_reclaim_stale() == 1);                    /* reclaim -> SID unbound */
+   assert(binding_wi(SID, wi, sizeof wi) == 0);                   /* unbound */
+   assert(wfe_bind_interactive(SID, "use mc resume", NULL) == 1); /* resumes */
+   assert(binding_wi(SID, wi, sizeof wi) == 1);
+   assert(strcmp(wi, first_wi) == 0); /* SAME work-item */
+   db1_work_item_t *items2 = NULL;
+   assert(db1_work_item_list(&items2) == 1); /* no duplicate created */
+   free(items2);
+   /* the resume was audited as "resume" (not a fresh "bind") */
+   ev = NULL;
+   ne = db1_lifecycle_event_list(first_wi, &ev);
+   int resumes = 0;
+   for (int i = 0; i < ne; i++)
+      if (strcmp(ev[i].actor, "bind-s2") == 0 && strcmp(ev[i].kind, "resume") == 0)
+         resumes++;
+   free(ev);
+   assert(resumes == 1);
+
    /* empty session id -> never binds */
    assert(wfe_bind_interactive("", "use mc x", NULL) == 0);
 

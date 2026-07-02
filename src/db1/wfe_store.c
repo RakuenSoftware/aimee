@@ -92,6 +92,33 @@ int db1_work_item_get(const char *work_item_id, db1_work_item_t *out)
    return found;
 }
 
+int db1_work_item_id_by_proposal(const char *repo, const char *proposal_path, char *out, size_t n)
+{
+   if (out && n)
+      out[0] = '\0';
+   if (!proposal_path || !out || !n)
+      return -1;
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+   static const char *sql =
+       "SELECT work_item_id FROM lifecycle_work_item WHERE repo = ? AND proposal_path = ?";
+   sqlite3_stmt *st = NULL;
+   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK)
+      return -1;
+   sqlite3_bind_text(st, 1, repo ? repo : "", -1, SQLITE_TRANSIENT);
+   sqlite3_bind_text(st, 2, proposal_path, -1, SQLITE_TRANSIENT);
+   int found = 0;
+   if (sqlite3_step(st) == SQLITE_ROW)
+   {
+      const char *id = (const char *)sqlite3_column_text(st, 0);
+      snprintf(out, n, "%s", id ? id : "");
+      found = 1;
+   }
+   sqlite3_finalize(st);
+   return found;
+}
+
 static int exec_bind1_update(const char *sql, const char *wi)
 {
    sqlite3 *db = db1_conn();

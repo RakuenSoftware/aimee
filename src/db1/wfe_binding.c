@@ -2,6 +2,7 @@
 #include "wfe_binding.h"
 
 #include "db1_internal.h"
+#include "wfe_store.h" /* db1_lifecycle_event_add — audit a reclaim */
 
 #include <sqlite3.h>
 #include <stdio.h>
@@ -161,6 +162,49 @@ int db1_wfe_lease_expiry_get(const char *session_id, char *out, size_t n)
    }
    sqlite3_finalize(stmt);
    return found;
+}
+
+int db1_wfe_lease_reclaim_stale(void)
+{
+   sqlite3 *db = db1_conn();
+   if (!db)
+      return -1;
+   /* Collect the stale bindings first (bounded per sweep), THEN act -- so we never
+    * mutate the table while stepping the SELECT. A caller re-runs until 0 to drain. */
+   char sids[64][128];
+   char wis[64][80];
+   int n = 0;
+   {
+      sqlite3_stmt *q = NULL;
+      static const char *sel =
+          "SELECT aimee_session_id, work_item_id FROM workflow_binding "
+          "WHERE lease_expiry != '' AND lease_expiry < datetime('now') LIMIT 64";
+      if (sqlite3_prepare_v2(db, sel, -1, &q, NULL) != SQLITE_OK)
+         return -1;
+      while (n < 64 && sqlite3_step(q) == SQLITE_ROW)
+      {
+         const char *sid = (const char *)sqlite3_column_text(q, 0);
+         const char *wi = (const char *)sqlite3_column_text(q, 1);
+         snprintf(sids[n], sizeof sids[n], "%s", sid ? sid : "");
+         snprintf(wis[n], sizeof wis[n], "%s", wi ? wi : "");
+         n++;
+      }
+      sqlite3_finalize(q);
+   }
+   int reclaimed = 0;
+   for (int i = 0; i < n; i++)
+   {
+      /* Reclaim = release the lease (the work-item persists, so the owner or a
+       * same-principal session can RESUME it on its next turn). Audit on the
+       * work-item. */
+      if (db1_wfe_unbind(sids[i]) == 0)
+      {
+         db1_lifecycle_event_add(wis[i], "", "lease_reclaimed", "watchdog-s2",
+                                 "{\"reason\":\"idle_lease_expired\"}", "", 0);
+         reclaimed++;
+      }
+   }
+   return reclaimed;
 }
 
 int db1_wfe_lease_stale_work_items(char (*out)[80], int max)

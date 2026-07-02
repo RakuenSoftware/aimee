@@ -52,6 +52,12 @@ int db1_work_item_create(const char *work_item_id, const char *repo, const char 
 /* Fetch a work item by id. Returns 1 if found, 0 if not, -1 on error. */
 int db1_work_item_get(const char *work_item_id, db1_work_item_t *out);
 
+/* Resolve a work-item id by its unique (repo, proposal_path). Fills `out` (id-sized,
+ * >= 80). Returns 1 if found, 0 if not, -1 on error. Lets a caller that hit the
+ * UNIQUE(repo, proposal_path) create-collision recover + reuse the existing id
+ * (e.g. resume an interactive work-item after its lease was reclaimed). */
+int db1_work_item_id_by_proposal(const char *repo, const char *proposal_path, char *out, size_t n);
+
 /* Move to a new stage + update content_hash (state unchanged). */
 int db1_work_item_set_stage(const char *work_item_id, const char *stage, const char *content_hash);
 /* Record the forge PR ref opened for this work item (set when pr.open advances),

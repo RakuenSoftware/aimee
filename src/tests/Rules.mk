@@ -1387,7 +1387,8 @@ $(TESTPREFIX)/unit-test-wfe-advance-exec: $(OBJDIR)/tests/test_wfe_advance_exec.
 
 # S2 session<->work-item binding (DB1-backed).
 $(TESTPREFIX)/unit-test-wfe-binding: $(OBJDIR)/tests/test_wfe_binding.o \
-                                    $(OBJDIR)/db1/wfe_binding.o $(OBJDIR)/db1/db1_init.o \
+                                    $(OBJDIR)/db1/wfe_binding.o $(OBJDIR)/db1/wfe_store.o \
+                                    $(OBJDIR)/db1/db1_init.o \
                                     $(OBJDIR)/db1/db1_write.o $(OBJDIR)/db1/db1_trigger.o \
                                     $(OBJDIR)/db1/db1_cron_jobs.o $(OBJDIR)/db1/model_catalog.o \
                                     $(OBJDIR)/db1/eval.o $(OBJDIR)/db2/db_schema.o $(TEST_CORE_OBJS)
