@@ -7,15 +7,17 @@ you can clone and edit it or author your own. The engine that advances a
 workflow run is the same one that drives delegates, roundtable reviews, and
 human approval gates.
 
-> **Status (current):** authoring, validating, and inspecting workflows is fully
-> supported (CLI + the webchat **Workflows** tab). The execution engine,
+> **Status (current):** authoring and validating workflows is fully supported
+> (CLI + the webchat **Edit Workflows** tab); starting a run and watching its
+> status/history live on the **Workflow Actions** tab
+> ([`WORKFLOW_ACTIONS.md`](WORKFLOW_ACTIONS.md)). The execution engine,
 > stepping a run through its gates, roundtables, and approvals, is implemented,
 > tested, and reachable: `POST /v1/dev/submit` seeds a proposal, creates an
 > autonomous work item on the chosen workflow (default `build`), and the
 > scheduler drives it server-side. See
 > [Autonomous Development](AUTONOMOUS_DEVELOPMENT.md). What's still missing is a
 > general per-workflow trigger: no `aimee workflow run` command and no Run button
-> in the Workflows tab for an arbitrary run. See [Limitations](#current-limitations).
+> for an arbitrary (non-`build`) run. See [Limitations](#current-limitations).
 
 ## Mental model
 
@@ -161,9 +163,12 @@ Workflow files live under `$AIMEE_HOME/workflows/`. `validate` runs the same
 type-checker the engine uses: it catches dangling edges, a step fed the wrong
 artifact type, or a missing required input.
 
-### Webchat Workflows tab
+### Webchat: Edit Workflows tab
 
-The browser **Workflows** tab is a visual composer over the same definitions:
+The browser **Edit Workflows** tab (route `/edit-workflows`) is a visual composer
+over the same definitions. Authoring a run, watching its status/history, and
+deciding human gates live on the separate **Workflow Actions** tab
+(`/workflow-actions`, see [`WORKFLOW_ACTIONS.md`](WORKFLOW_ACTIONS.md)):
 
 - A **blocks rail** to add steps, a **canvas** that lays the graph out
   left-to-right by depth with colored edges (solid = `next`, green = `on pass`,
@@ -173,11 +178,11 @@ The browser **Workflows** tab is a visual composer over the same definitions:
 - **Personas** can be created and edited from the same tab (it proxies
   `/api/chat/personas`).
 - **Validate** and **Save** persist the def server-side via `/api/workflow/*`.
-- Each top-nav tab (including Workflows) selects its own git **project**.
+- Each top-nav tab (including Edit Workflows) selects its own git **project**.
 
 > Note: adding a step from the blocks rail drops it onto the canvas
 > **disconnected**, you wire it into the sequence by selecting it and setting
-> its `next`/`on_pass`/`on_fail` in the inspector. There is no Run button yet.
+> its `next`/`on_pass`/`on_fail` in the inspector. To start and watch a run, use the Workflow Actions tab.
 
 ### Custom blocks
 
@@ -217,7 +222,7 @@ run-in-a-specific-project gap.
 
 ## Inspecting runs
 
-When work-items exist, they are readable (the Workflows tab "Run state" panel and
+When work-items exist, they are readable (the Workflow Actions tab (see [`WORKFLOW_ACTIONS.md`](WORKFLOW_ACTIONS.md)) and
 the API):
 
 - CLI: `aimee cancel <work-item-id>` cancels a run.
@@ -234,14 +239,14 @@ These are real today and worth knowing before you lean on workflows:
 1. **Only the autonomous-development trigger is wired.** `POST /v1/dev/submit`
    creates and starts a run via `wfe_work_item_create` + the scheduler (see
    [Autonomous Development](AUTONOMOUS_DEVELOPMENT.md)). There is still no general
-   per-workflow trigger, no `aimee workflow run` command and no Run button in the
-   Workflows tab to kick off an arbitrary saved workflow. You can author,
-   validate, save, and inspect any workflow; only `build`-style autonomous runs
-   start today.
+   per-workflow trigger, no `aimee workflow run` command and no Run button to kick
+   off an arbitrary saved workflow from the UI. You can author, validate, save, and
+   inspect any workflow; only `build`-style autonomous runs (submitted from the
+   Workflow Actions tab) start today.
 2. **Run-in-a-specific-project isn't wired.** A work-item has a `repo` field, but
    the per-step blocks resolve their working directory from
    `$AIMEE_WORKFLOW_REPO`/cwd rather than the work-item's `repo`, so binding a run
-   to the Workflows tab's selected project is incomplete.
+   to a UI-selected project is incomplete.
 3. **Composer ergonomics.** New steps are added disconnected; you wire order in
    the inspector. There is no run/visualize-progress view because runs can't be
    started from the UI yet.

@@ -1223,7 +1223,7 @@ selects its own git **project** to operate on:
   becomes the agent's working directory; webchat scope-validates it to the
   signed-in user's own workspace.
 - **Dashboard**, memory, reminders, and onboarding panels.
-- **Workflows**, a visual composer for [workflow](docs/WORKFLOWS.md)
+- **Edit Workflows**, a visual composer for [workflow](docs/WORKFLOWS.md)
   definitions (blocks rail, graph canvas, per-step persona/delegate assignment,
   plus a persona manager). Validate/Save persist server-side.
 - **Projects**, connect git repositories. Clone over HTTPS *or* SSH-form URLs

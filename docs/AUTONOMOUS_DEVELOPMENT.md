@@ -131,7 +131,7 @@ Autonomous does not mean unsupervised. The workflow reserves **human gates**
 - **never forges a human approval**, gate-override is a signed, human-only action
   capped at a small number of uses.
 
-Approve or reject a parked gate from the webchat Workflows tab's **Run state**
+Approve or reject a parked gate from the webchat **Workflow Actions** page's detail view
 panel, or via `POST /v1/workflow/items/<id>/gate {decision}`. The endpoint is
 **operator-gated** (`CAP_WORKFLOW_ADMIN`, outside the ordinary authenticated
 capability set), and approvals are HMAC-signed server-side with the operator key
@@ -175,7 +175,7 @@ Autonomous development is default-on; the guardrails are structural, not a toggl
 
 ## Observability
 
-- **Webchat Workflows tab**, live progress per work item: current stage, gate
+- **Webchat Workflow Actions page**, live progress per work item: current stage, gate
   verdicts, parked state, and the actionable approve/reject controls for human
   gates.
 - **Event stream**, a run publishes its full turn stream (text, tool calls,
@@ -194,7 +194,7 @@ resumes it automatically once the blocker clears:
 
 | pause reason | what it means | how it resumes |
 |--------------|---------------|----------------|
-| `pending_human` | waiting at a human gate (proposal approval / final pass-fail) | approve or reject in the webchat Workflows tab → the scheduler re-drives |
+| `pending_human` | waiting at a human gate (proposal approval / final pass-fail) | approve or reject in the webchat Workflow Actions page → the scheduler re-drives |
 | `panel_degraded` / `panel_unreachable` | the roundtable couldn't reach a quorum | retried on the next sweep; a human can approve to proceed |
 | `ci_pending` | the PR's CI hasn't concluded | re-checked on the next sweep |
 | `merge_pending` | the forge merge state is undeterminable | re-checked on the next sweep |
@@ -216,7 +216,7 @@ Honest scope of the current implementation (the design allows for more):
   handled interactively via the webchat, and the cost cap is a work-item field.
 - **No dedicated `resume`/`abort`/`audit` HTTP endpoints yet.** Resume is
   event-driven (gate approval + the scheduler sweep); drive and inspect runs via
-  the webchat Workflows tab and the `lifecycle_*` audit tables.
+  the webchat Workflow Actions page and the `lifecycle_*` audit tables.
 - **Scheduler concurrency is 1** (runs are driven sequentially) for now; the
   design's bounded-concurrency fan-out is a follow-on.
 - **`build.yaml` must be present** in `$AIMEE_HOME/workflows` (seeded at standup);

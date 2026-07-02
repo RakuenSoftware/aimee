@@ -32,7 +32,7 @@ feature-tracking reference rather than a complete roadmap.
 | Standalone Go webchat | Done | `aimee-webchat` serves the browser UI, handles auth/session storage, and proxies live work to `aimee-server`. | webchat/, server.c |
 | Network inventory | Done | Loads configured network host inventory for delegate routing. | cmd_agent.c, agents.json |
 | Personas (8 built-in + custom) | Done | Named identity/voice + delegate policy, settable per session and used to staff roundtable panels and workflow steps. See [personas.md](personas.md). | persona.c, prompts.c |
-| Webchat top-nav + per-tab projects | Done | One tab per tool (Chat/Dashboard/Workflows/Projects/Editor); each tab selects its own git project. | frontend/src/App.tsx, frontend/src/components/ProjectPicker.tsx |
+| Webchat top-nav + per-tab projects | Done | One tab per tool (Chat/Dashboard/Edit Workflows/Workflow Actions/Delegates/Projects/Graph/Editor); each tab selects its own git project. | frontend/src/App.tsx, frontend/src/components/ProjectPicker.tsx |
 | Webchat git projects + per-host credentials | Done | Clone repos (HTTPS or SSH-form URLs normalized to HTTPS); per-host tokens + GitHub OAuth device flow stored in the server vault. | git_project.c, git_host_cred.c, git_oauth_github.c |
 | In-app VS Code editor | Done | Per-user `code-server` supervised by the server, reverse-proxied at `/vscode/`, opened on the selected project. Default-on. | webuser_editor.c, webchat/vscode.go |
 | Workflow engine (authoring + execution) | Partial | Block catalog, typed-graph validation, canonical versioning, advance/gates/roundtable/human-approval, and the webchat composer are done; **no user-facing run trigger yet**. See [WORKFLOWS.md](WORKFLOWS.md). | src/workflow/wfe_*.c |
