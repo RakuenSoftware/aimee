@@ -1,6 +1,36 @@
 # Proposal: Governance surface — decision records + per-action policy-verdict audit
 
-**Status:** DRAFT (roundtable-reviewed 2026-07-02, findings incorporated — see Disposition).
+- **State:** done
+- **Completed:** 2026-07-02
+- **Moved from:** `docs/proposals/pending/governance-decision-records-and-action-audit.md`
+- **Summary:** **all 7 slices shipped to `testing`**, each roundtable-reviewed and merged
+  on green CI. **P2 (per-action audit):** S1 `args_hash` — keyed HMAC over a per-tool
+  allowlist, RFC-4231-vectored, injective length-prefixed canonicalization (PR #947, fmt
+  #951); S2 `audit_action_log()` (kind=`tool_action` → the same 0600 `audit.log`) emitted
+  exactly-once from a thin `pre_tool_check` wrapper over `pre_tool_check_inner` (new
+  `guardrails_action_audit.c`), fail-open/off the enforcement path, reason_code from the
+  block sites' existing `audit_log` keys (PR #952, testing-repair #958); S3
+  `audit_ledger_read()` reader + a time-windowed `governed_actions` overlay on
+  `trajectory_export` (reader-before-writer, PR #962). **P1 (decision records):** S4
+  extended the **existing** `decision_log` table (status/revisit_when/supersedes_id/subject/
+  author/linked_policy_id) + seeded `supersedes`/`linked_policy`/`decided_by` rel_types (PR
+  #964); S5 `db2_decision_log_record()` with a transactional supersede + a **DB-enforced
+  one-active-per-scope** partial unique index (PR #968); S6 idempotent
+  `db2_decision_log_mark_revisit_due()` wired into the existing curator drain — no new
+  scheduler (PR #971); S7 flipped `audit_action_enabled` default **on** now the reader
+  shipped (PR #973). Every slice built on existing structures — no new subsystem, table,
+  ontology, or scheduler.
+- **done ≠ GA — carried:** the **live end-to-end verification** (hook → server →
+  `pre_tool_check` → `audit.log` `tool_action` rows → `trajectory_export` `governed_actions`)
+  was NOT run on a live server; every component is unit/DB-shim tested green, but the
+  full-plumbing e2e is a deploy-tier gate (steps in the impl plan / build-state memory).
+  The **S7 default-on flip is an operator-facing behavior change** (every governed tool
+  call writes a passive, rotated, fail-open audit row) — opt out via
+  `audit_action_enabled=false`; trivially reverted. The `governed_actions` overlay is
+  **time-window** correlated, not session-keyed (concurrent sessions in the window can
+  appear) — documented; a session-keyed audit row is possible future work.
+
+**Status:** DONE — shipped to `testing`; live e2e verification carried as a deploy-tier gate.
 **Owner:** memory / guardrails
 
 > **Framing.** This came out of surveying a governance-layer product
