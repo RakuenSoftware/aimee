@@ -29,6 +29,7 @@
 #include "server_mcp_skill.h"
 #include "server_mcp_delegate.h"
 #include "server_mcp_workflows.h"
+#include "wfe_advance_exec.h" /* advance_request interactive-driver executor (S2) */
 #include "server_mcp_gateway.h"
 #include "server_http.h"
 #include "server_pipeline.h" /* handle_pipeline_* for the pipeline.* MCP tools */

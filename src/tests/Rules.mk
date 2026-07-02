@@ -132,6 +132,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-wfe-router \
                $(TESTPREFIX)/unit-test-wfe-router-catalog \
                $(TESTPREFIX)/unit-test-wfe-enforce \
+               $(TESTPREFIX)/unit-test-wfe-advance \
+               $(TESTPREFIX)/unit-test-wfe-advance-exec \
                $(TESTPREFIX)/unit-test-wfe-binding \
                $(TESTPREFIX)/unit-test-aimee-ir \
                $(TESTPREFIX)/unit-test-aimee-ir-metrics \
@@ -1327,6 +1329,26 @@ $(TESTPREFIX)/unit-test-wfe-router: $(OBJDIR)/tests/test_wfe_router.o \
 # S2 enforcement pure cores (no engine/DB deps).
 $(TESTPREFIX)/unit-test-wfe-enforce: $(OBJDIR)/tests/test_wfe_enforce.o \
                                     $(OBJDIR)/workflow/wfe_enforce.o $(OBJDIR)/workflow/wfe_externalization.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# S2 sub-slice 3: advance_request pure core (parser + CAS/replay decision; cJSON only).
+$(TESTPREFIX)/unit-test-wfe-advance: $(OBJDIR)/tests/test_wfe_advance.o \
+                                    $(OBJDIR)/workflow/wfe_advance.o $(OBJDIR)/cJSON.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# S2 sub-slice 3: interactive-driver executor (binding + engine + audit).
+$(TESTPREFIX)/unit-test-wfe-advance-exec: $(OBJDIR)/tests/test_wfe_advance_exec.o \
+                                    $(OBJDIR)/workflow/wfe_advance_exec.o $(OBJDIR)/workflow/wfe_advance.o \
+                                    $(OBJDIR)/workflow/wfe_enforce.o $(OBJDIR)/workflow/wfe_externalization.o \
+                                    $(OBJDIR)/db1/wfe_binding.o \
+                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \
+                                    $(OBJDIR)/workflow/wfe_manager_artifacts.o $(OBJDIR)/workflow/wfe_deliver.o \
+                                    $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
+                                    $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
+                                    $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
+                                    $(OBJDIR)/workflow/wfe_canonical.o $(OBJDIR)/workflow/wfe_custom.o \
+                                    $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
+                                    $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S2 session<->work-item binding (DB1-backed).

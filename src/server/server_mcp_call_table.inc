@@ -1232,6 +1232,20 @@ static cJSON *mcph_code_span_get(struct mcp_call *c)
    return json_result_content(result);
 }
 
+/* Primary-as-manager S2: the server-authoritative interactive-driver advance. The
+ * primary calls this to move its bound work-item forward one block; the outcome
+ * (ok/replay/stale/unbound/terminal/disabled) is decided from authoritative DB
+ * state and audited, never inferred from prose. Dormant until sub-slice 4 injects
+ * the tool per bound block; inert while the enforcement dial is off. */
+static cJSON *mcph_advance_request(struct mcp_call *c)
+{
+   char *args = c->jargs ? cJSON_PrintUnformatted(c->jargs) : NULL;
+   char outbuf[1024];
+   wfe_advance_request_run(c->sid, args, outbuf, sizeof outbuf);
+   free(args);
+   return text_content(outbuf);
+}
+
 /* ── name → handler table (exact match; order is irrelevant — names unique) ── */
 
 static const struct
@@ -1321,6 +1335,8 @@ static const struct
     {"pdf_lookup_table", mcph_pdf_lookup_table},
     {"pdf_list_assets", mcph_pdf_list_assets},
     {"pdf_open_asset", mcph_pdf_open_asset},
+    /* Primary-as-manager S2 interactive driver */
+    {"advance_request", mcph_advance_request},
 };
 
 static mcp_tool_handler_fn mcp_tool_lookup(const char *tool)

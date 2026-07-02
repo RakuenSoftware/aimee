@@ -533,6 +533,8 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/workflow/wfe_externalization.c
     ${AIMEE_SRC_DIR}/workflow/wfe_enforce.c
     ${AIMEE_SRC_DIR}/workflow/wfe_deliver.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_advance.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_advance_exec.c
     ${AIMEE_SRC_DIR}/workflow/wfe_router.c
     ${AIMEE_SRC_DIR}/workflow/wfe_router_catalog.c
     ${AIMEE_SRC_DIR}/vendor/cJSON.c
@@ -1223,6 +1225,8 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/workflow/wfe_externalization.c
     ${AIMEE_SRC_DIR}/workflow/wfe_enforce.c
     ${AIMEE_SRC_DIR}/workflow/wfe_deliver.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_advance.c
+    ${AIMEE_SRC_DIR}/workflow/wfe_advance_exec.c
     ${AIMEE_SRC_DIR}/workflow/wfe_router.c
     ${AIMEE_SRC_DIR}/workflow/wfe_router_catalog.c
 )
