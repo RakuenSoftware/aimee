@@ -201,7 +201,7 @@ It is configured independently of the embedder dimension:
 
 - `memory_rerank_enabled`, master toggle.
 - `memory_rerank_command`, the reranker command (the Ettin cross-encoder served
-  by the embedder sidecar, via `rerank-remote.py`).
+  by the inference gateway, via `rerank-remote.py`).
 - `memory_rerank_mode`, `memory_rerank_top_k`, strategy and depth.
 
 The reranker is dimension-agnostic, it scores `(query, candidate)` text pairs

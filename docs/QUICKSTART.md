@@ -2,7 +2,7 @@
 
 This guide takes you from nothing to a working aimee install in four parts:
 
-1. **[Run the server](#part-1--run-the-server-aimee-combined-in-docker)**, stand up the full stack (server + knowledge base + Postgres + embedder) with the combined Docker image.
+1. **[Run the server](#part-1--run-the-server-aimee-combined-in-docker)**, stand up the full stack (server + knowledge base + Postgres, with a bundled CPU inference gateway) with the combined Docker image.
 2. **[Install the Linux client](#part-2--linux-client)**, install the thin `aimee` binary, point it at your server, and set up workspaces and agents.
 3. **[Install the Windows client](#part-3--windows-client)**, same, for Windows.
 4. **[Install the macOS client](#part-4--macos-client)**, same, for macOS.
@@ -13,7 +13,7 @@ The model is the same on every developer machine: **the services run in Docker (
 
 ## Part 1, Run the server (aimee-combined in Docker)
 
-The **combined** image co-locates both aimee binaries in one container: the knowledge base (`aimee-kb`) on loopback `:8741` inside the container, and the server (`aimee-server`) fronting `/v1` over native TLS on `:8743` (self-signed cert; plaintext `:8740` is loopback-only and not published). Postgres (DB2 + pgvector) and a CPU embedder come up alongside it as separate services.
+The **combined** image co-locates both aimee binaries in one container: the knowledge base (`aimee-kb`) on loopback `:8741` inside the container, and the server (`aimee-server`) fronting `/v1` over native TLS on `:8743` (self-signed cert; plaintext `:8740` is loopback-only and not published). Postgres (DB2 + pgvector) comes up alongside it as a separate service; the CPU inference gateway (embeddings, reranking, synthesis) is bundled in the image.
 
 ### Prerequisites
 
