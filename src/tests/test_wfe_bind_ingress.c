@@ -162,6 +162,16 @@ int main(void)
          held++;
    free(ev);
    assert(held == 1);
+   /* dedup: re-pivoting to the SAME held workflow does NOT add another event */
+   assert(wfe_bind_interactive(SID, "use mc2 and again", NULL) == 1);
+   ev = NULL;
+   ne = db1_lifecycle_event_list(first_wi, &ev);
+   int held_dup = 0;
+   for (int i = 0; i < ne; i++)
+      if (strcmp(ev[i].kind, "scope_add_held") == 0)
+         held_dup++;
+   free(ev);
+   assert(held_dup == 1);                                             /* still one, not two */
    assert(wfe_bind_interactive(SID, "use mc keep going", NULL) == 1); /* same workflow */
    ev = NULL;
    ne = db1_lifecycle_event_list(first_wi, &ev);

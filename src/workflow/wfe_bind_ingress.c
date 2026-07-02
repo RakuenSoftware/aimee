@@ -49,10 +49,21 @@ static void wfe_scope_add_surface(const char *wi, const char *message)
    const wfe_router_wf_t *w = wfe_router_find(&cat, d.workflow_id);
    if (!w || !w->enforced || strcmp(d.workflow_id, item.workflow_name) == 0)
       return; /* not a scope-add: same workflow, or a non-enforced turn */
+
    char detail[192];
    snprintf(detail, sizeof detail, "{\"held\":\"%s\",\"current\":\"%s\"}", d.workflow_id,
             item.workflow_name);
-   db1_lifecycle_event_add(wi, "", "scope_add_held", "bind-s2", detail, "", 0);
+   /* Dedup: surface once per DISTINCT held workflow, not once per turn -- a client
+    * re-pivoting every turn must not grow the audit log unbounded. */
+   db1_lifecycle_event_t *ev = NULL;
+   int ne = db1_lifecycle_event_list(wi, &ev);
+   int already = 0;
+   for (int i = 0; i < ne && !already; i++)
+      if (strcmp(ev[i].kind, "scope_add_held") == 0 && strcmp(ev[i].detail, detail) == 0)
+         already = 1;
+   free(ev);
+   if (!already)
+      db1_lifecycle_event_add(wi, "", "scope_add_held", "bind-s2", detail, "", 0);
 }
 
 int wfe_bind_interactive(const char *session_id, const char *message, const char *repo)
