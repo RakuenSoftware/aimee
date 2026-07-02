@@ -66,9 +66,14 @@ int wfe_bind_interactive(const char *session_id, const char *message, const char
       return 0;
 
    /* Deterministic per-session proposal path so UNIQUE(repo, proposal_path) is a
-    * stable backstop against a duplicate create. */
+    * stable backstop against a duplicate create. Refuse on truncation: a truncated
+    * path could alias two long same-prefix session ids onto ONE work-item, letting
+    * one session resume/bind another's (aimee ids are short, but this must not
+    * depend on that). */
    char proposal[128];
-   snprintf(proposal, sizeof proposal, "interactive/%s", session_id);
+   int pr = snprintf(proposal, sizeof proposal, "interactive/%s", session_id);
+   if (pr < 0 || (size_t)pr >= sizeof proposal)
+      return 0;
    char id[80] = "";
    int resumed = 0;
    if (wfe_work_item_create(d.workflow_id, repo ? repo : "", proposal, "interactive", id, err,

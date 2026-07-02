@@ -160,6 +160,14 @@ int main(void)
    free(ev);
    assert(resumes == 1);
 
+   /* a session id long enough to truncate the proposal path is REFUSED (so it can
+    * never alias onto -- and hijack -- another session's work-item) */
+   char longsid[200];
+   memset(longsid, 'a', sizeof longsid - 1);
+   longsid[sizeof longsid - 1] = '\0';
+   assert(wfe_bind_interactive(longsid, "use mc long", NULL) == 0);
+   assert(binding_wi(longsid, wi, sizeof wi) == 0);
+
    /* empty session id -> never binds */
    assert(wfe_bind_interactive("", "use mc x", NULL) == 0);
 
