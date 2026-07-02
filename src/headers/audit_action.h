@@ -57,6 +57,14 @@ int audit_args_hash(const char *tool_name, const char *args_json, char *out, siz
  * a real key. Returns 0 if the key exists or was created, -1 otherwise. */
 int audit_ensure_key(void);
 
+/* Test-only seam: the internal HMAC-SHA256 used by audit_args_hash, exposed so
+ * unit tests can pin it against RFC 4231 known-answer vectors (validates the
+ * ipad/opad construction, 64-byte block, and key>64 pre-hash path). Not part of
+ * the public API — do not use in product code. Returns 0 on success, -1 on
+ * failure (allocation / length overflow). */
+int audit_hmac_sha256_testonly(const unsigned char *key, size_t keylen, const unsigned char *msg,
+                               size_t mlen, unsigned char mac[32]);
+
 #ifdef __cplusplus
 }
 #endif
