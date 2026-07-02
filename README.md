@@ -109,7 +109,7 @@ aimee builds a searchable symbol and call graph of your code, so the AI can find
 caller of a function, trace what an edit will touch before it writes, and answer from the
 graph instead of reading the files over again. The graph is cross repo: one dependency map spans every
 repository you work across, so a change in a shared library shows its blast radius in the
-services that consume it.
+services that consume it. See [Code intelligence](docs/CODE_INTELLIGENCE.md).
 
 ### Guardrails
 
@@ -261,6 +261,7 @@ Focused references:
 | [Command Reference](docs/COMMANDS.md) | Client command contract, flags, and options |
 | [Storage Tiers](docs/STORAGE_TIERS.md) | DB1 and DB2 ownership boundaries (pgvector inside DB2) |
 | [Structured PDF](docs/STRUCTURED_PDF.md) | Coordinate anchored PDF evidence: text and geometry citations, table cells, visual crops, and OCR. The capability flags, retrieval surface, and access model. |
+| [Code intelligence](docs/CODE_INTELLIGENCE.md) | The symbol and call graph, cross-repo dependencies, blast radius, graph audits, and how the AI queries it |
 | [Setting Up Delegates](docs/DELEGATES.md) | Configure delegate agents for task offloading |
 | [Autonomous Development](docs/AUTONOMOUS_DEVELOPMENT.md) | Hand aimee a proposal and it builds the change end to end via the workflow engine |
 | [Personas](docs/personas.md) | Built in and custom agent identities, delegate policy, and how personas staff reviews |
