@@ -44,7 +44,7 @@ context. aimee also compresses what each turn sends upstream, so even your main 
 drops. It tracks cost and success per delegate and routes better over time.
 
 **Run the models yourself.** aimee ships a self hosted inference stack: embeddings,
-reranking, and synthesis baked into one GPU container. The knowledge base curates entirely
+reranking, and synthesis baked into one CPU or GPU container. The knowledge base curates entirely
 on your hardware with no outside API calls, and the same local model doubles as a free
 delegate. Swap the model tier with a single image, or run the CPU build for retrieval on any
 box. See [kb LLM backends](docs/KB_LLM_BACKENDS.md).
