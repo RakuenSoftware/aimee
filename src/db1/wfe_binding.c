@@ -131,6 +131,9 @@ int db1_wfe_lease_renew(const char *session_id, int ttl_secs)
    sqlite3_bind_text(stmt, 3, mod, -1, SQLITE_TRANSIENT);
    int rc = (sqlite3_step(stmt) == SQLITE_DONE) ? 0 : -1;
    sqlite3_finalize(stmt);
+   /* No matching binding -> -1 per the contract (the UPDATE succeeds with 0 rows). */
+   if (rc == 0 && sqlite3_changes(db) == 0)
+      rc = -1;
    return rc;
 }
 
@@ -168,6 +171,8 @@ int db1_wfe_lease_stale_work_items(char (*out)[80], int max)
    if (!db)
       return -1;
    sqlite3_stmt *stmt = NULL;
+   /* lease_expiry is NOT NULL DEFAULT '' (schema.sql), so '' reliably means
+    * "never leased" (not stale) and the != '' filter needs no NULL handling. */
    static const char *sql =
        "SELECT work_item_id FROM workflow_binding "
        "WHERE lease_expiry != '' AND lease_expiry < datetime('now') ORDER BY lease_expiry ASC";

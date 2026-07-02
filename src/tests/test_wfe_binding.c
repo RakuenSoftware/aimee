@@ -46,6 +46,7 @@ int main(void)
    assert(db1_wfe_lease_expiry_get("sess3", exp, sizeof exp) == 1);
    assert(exp[0] == '\0');
    assert(db1_wfe_lease_expiry_get("nobody", exp, sizeof exp) == 0); /* unbound */
+   assert(db1_wfe_lease_renew("nobody", 3600) == -1); /* no binding -> -1 per contract */
 
    char stale[4][80];
    /* renew forward -> has an expiry, not stale */
