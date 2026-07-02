@@ -31,4 +31,34 @@ int primary_cli_ingestor_enabled(void);
 int primary_cli_ingestor_enforce_preturn(const char *session_id, const char *message,
                                          const char *repo);
 
+/* Result of one ingested primary turn. All heap fields are caller-owned; free via
+ * primary_cli_turn_result_free. */
+typedef struct
+{
+   char *text;      /* accumulated assistant text (owned; NULL if none) */
+   char *session;   /* backend session id to resume the NEXT turn (owned; NULL if none) */
+   char error[256]; /* first error seen (empty if none) */
+   int bound;       /* 1 if this turn is under S2 management (enforced+routed) */
+   int tool_calls;  /* count of native CLI tool_start events observed (audit) */
+} primary_cli_turn_result_t;
+
+void primary_cli_turn_result_free(primary_cli_turn_result_t *r);
+
+/* Drive ONE primary turn through the agent_shell CLI backend (Slice 3), ingesting
+ * its stream events into `out`. Enforcement (S1 route + S2 bind/guard) runs BEFORE
+ * the turn is sent to the CLI, so it is preventive for the turn (out->bound reports
+ * whether the session is now managed). Native CLI tool events are observed for
+ * audit only (detective, not preventive -- the shell-tool bypass is a separate
+ * track).
+ *   session_id: aimee session id in scope on the turn worker thread (empty => the
+ *               enforce step is a no-op, but the turn still runs unmanaged)
+ *   driver_name: agent_shell driver ("claude" when NULL/empty)
+ *   resume_id:  backend session id to resume (NULL for a fresh backend session)
+ *   interrupted: optional cooperative-cancel flag (may be NULL)
+ * Returns 0 on clean completion, -1 on error (out->error carries the message).
+ * `out` must be non-NULL; it is fully overwritten and owned by the caller. */
+int primary_cli_ingestor_turn(const char *session_id, const char *message, const char *repo,
+                              const char *driver_name, const char *resume_id,
+                              primary_cli_turn_result_t *out, volatile int *interrupted);
+
 #endif /* PRIMARY_CLI_INGESTOR_H */
