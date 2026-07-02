@@ -1,0 +1,33 @@
+/* primary_cli_ingestor.c -- see primary_cli_ingestor.h. */
+#include "primary_cli_ingestor.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+#include "wfe_bind_ingress.h"
+
+int primary_cli_ingestor_enabled(void)
+{
+   const char *v = getenv("AIMEE_PRIMARY_CLI_INGESTOR");
+   if (!v || !v[0])
+      return 0;
+   return strcmp(v, "1") == 0 || strcmp(v, "on") == 0 || strcmp(v, "true") == 0;
+}
+
+int primary_cli_ingestor_enforce_preturn(const char *session_id, const char *message,
+                                         const char *repo)
+{
+   /* Trust boundary: with no resolvable aimee session id the seam CANNOT enforce.
+    * Return 0 (unbound) rather than pretend -- a caller that lost the session id
+    * must degrade to a generic turn, never a silent "enforced" that binds nothing
+    * and leaves the guard unanchored. */
+   if (!session_id || !session_id[0])
+      return 0;
+
+   /* wfe_bind_interactive is itself dial-gated (default-off) and only binds an
+    * enforced-routed turn (converse/research stay unbound). Calling it HERE --
+    * before the turn is dispatched to the CLI -- is what makes S2 preventive for
+    * the external-CLI primary, whose out-of-band model call the gateway router
+    * never sees with a session id attached. */
+   return wfe_bind_interactive(session_id, message, repo);
+}

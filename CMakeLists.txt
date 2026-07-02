@@ -634,6 +634,7 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/server/model_sampling.c
     ${AIMEE_SRC_DIR}/server/agent_adapter.c
     ${AIMEE_SRC_DIR}/server/primary_session_adapter.c
+    ${AIMEE_SRC_DIR}/server/primary_cli_ingestor.c
     ${AIMEE_SRC_DIR}/server/agent_policy.c
     ${AIMEE_SRC_DIR}/server/agent_policy_intercept.c
     ${AIMEE_SRC_DIR}/server/agent_tasks.c
