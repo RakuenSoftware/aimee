@@ -133,7 +133,7 @@ function prHref(pr: string): string | null {
   return null;
 }
 
-export default function Proposals() {
+export default function WorkflowActions() {
   const [items, setItems] = useState<Item[]>([]);
   const [showAll, setShowAll] = useState(false);
   const [selId, setSelId] = useState<string | null>(null);
@@ -338,7 +338,7 @@ export default function Proposals() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-          <strong style={{ fontSize: 16 }}>Proposals</strong>
+          <strong style={{ fontSize: 16 }}>Workflow Actions</strong>
           <Badge label={`${items.length}`} variant="neutral" />
           <button onClick={refreshList} style={btn}>
             Refresh

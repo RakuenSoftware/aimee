@@ -292,7 +292,7 @@ async function sendJSON<T>(
   return { status: r.status, data };
 }
 
-export default function Workflows() {
+export default function EditWorkflows() {
   const [defs, setDefs] = useState<DefRow[]>([]);
   const [blocks, setBlocks] = useState<BlockDef[]>([]);
   const [graph, setGraph] = useState<GraphDef | null>(null);

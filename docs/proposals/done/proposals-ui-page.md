@@ -3,7 +3,12 @@
 - **State:** done
 - **Completed:** 2026-07-02
 - **Moved from:** `docs/proposals/pending/proposals-ui-page.md`
-- **Feature doc:** [`docs/PROPOSALS_PAGE.md`](../../PROPOSALS_PAGE.md)
+- **Feature doc:** [`docs/WORKFLOW_ACTIONS.md`](../../WORKFLOW_ACTIONS.md)
+- **Renamed after ship (2026-07-02):** this design refers to the page as "Proposals"
+  and the def editor as "Workflows"; the shipped UI names them **"Workflow Actions"**
+  and **"Edit Workflows"** respectively (routes `/workflow-actions`, `/edit-workflows`).
+  The design text below keeps the original names as a historical record; the feature
+  doc above is authoritative for the current names.
 
 ## Goal
 
@@ -331,7 +336,7 @@ admin list) rather than a per-request caps accessor.
 
 **No new tables or columns.** A proposal remains markdown + a `lifecycle_work_item`.
 
-**Feature documentation:** [`docs/PROPOSALS_PAGE.md`](../../PROPOSALS_PAGE.md)
+**Feature documentation:** [`docs/WORKFLOW_ACTIONS.md`](../../WORKFLOW_ACTIONS.md)
 (roundtable-approved).
 
 **Carried as future work / known limits:** headless browser click-through of the live

@@ -1,6 +1,6 @@
-# Proposals web page
+# Workflow Actions (web page)
 
-The **Proposals** page (aimee web UI, left nav → 📝 Proposals) carries a change from
+The **Workflow Actions** page (aimee web UI, left nav → 📝 Workflow Actions) carries a change from
 an empty editor to a merged PR: **author** a proposal (from scratch or
 delegate-drafted), hand it to the **autonomous-development** engine to implement, and
 **watch** it — a scrollable status/history you can scroll back through to see
@@ -11,11 +11,11 @@ autonomy engine (see [`AUTONOMOUS_DEVELOPMENT.md`](AUTONOMOUS_DEVELOPMENT.md)). 
 proposal is still just *markdown + a `lifecycle_work_item`*; its history *is* the
 `lifecycle_event` log. **No new database tables or columns were added.**
 
-- **Nav / route:** `/proposals` (`frontend/src/App.tsx`), page
-  `frontend/src/pages/Proposals.tsx`.
-- **Separation of concerns:** the **Workflows** page (`/workflows`) is now the
+- **Nav / route:** `/workflow-actions` (`frontend/src/App.tsx`), page
+  `frontend/src/pages/WorkflowActions.tsx`.
+- **Separation of concerns:** the **Edit Workflows** page (`/edit-workflows`) is now the
   workflow-*definition* editor only (author/validate/save graphs, assign personas).
-  All run/submit/status concerns live on **Proposals**.
+  All run/submit/status concerns live on **Workflow Actions**.
 
 ---
 
@@ -53,7 +53,7 @@ browser ──/api/*──▶ webchat (Go)  ──/v1/*, UDS──▶ aimee-serv
   the C server resolves the caller's `webuser:<subject>` principal — which the
   read endpoints use for ownership scoping (below).
 - The C server owns all state. Submitting writes the proposal markdown to
-  `$AIMEE_HOME/workflows/proposals/wi-*.md` and a `lifecycle_work_item` row; the wfe
+  `$AIMEE_HOME/edit-workflows/workflow-actions/wi-*.md` and a `lifecycle_work_item` row; the wfe
   scheduler drives that item through its workflow, appending a `lifecycle_event` per
   transition.
 
@@ -78,7 +78,7 @@ All C routes are in `src/server/server_http_routes.inc`; handlers in
 - **Enriched item** (`item_to_json`): the existing keys (`id, workflow, version,
   stage, state, mode, pause_reason, repo`) plus additive `proposal_name`, `pr_ref`,
   `submitter`, `cum_cost_usd`, `work_item_max_cost_usd`, `override_count`. Additive
-  only, so the Workflows page (which reads the same endpoint) is unaffected.
+  only, so the Edit Workflows page (which reads the same endpoint) is unaffected.
 - **Timeline** — `{events:[{id, stage, kind, actor, detail, cost_usd, created_at}],
   next_after}`, oldest-first, paginated by `?after=<event id>&limit=<n≤200>`
   (default 200). `next_after` is the id of the **last returned** event, so the page
@@ -180,7 +180,7 @@ basenames are opened.
 
 ---
 
-## Frontend behavior (`Proposals.tsx`)
+## Frontend behavior (`WorkflowActions.tsx`)
 
 - **Timeline polling.** Keyed on the selected id alone; each tick appends only events
   past the cursor (idempotent: it filters `id > lastId`), and the interval self-stops
@@ -226,10 +226,10 @@ Built slice-by-slice, each design-and-code roundtable-reviewed before merge:
   endpoints + owner scoping. Behavioral unit tests in `test_wfe_webapi.c`
   (ownership allow+deny, pagination cursor, proposal read-back, symlink→403,
   `/all` enrichment).
-- **Slice 1 — Proposals page + Workflows de-scope** (PR #956): the list + status/
-  history detail; removes the Runs/Run-state/gate panels from Workflows.
+- **Slice 1 — Workflow Actions page + Edit Workflows de-scope** (PR #956): the list + status/
+  history detail; removes the Runs/Run-state/gate panels from Edit Workflows.
 - **Slice 2 — author-from-scratch composer** (PR #959): the composer + client-side
-  draft; removes the Submit-proposal panel from Workflows. (This PR also repaired
+  draft; removes the Submit-proposal panel from Edit Workflows. (This PR also repaired
   pre-existing `testing` breakage from an unrelated merge — a clang-format violation
   and an `audit_args_hash`/`wfe_sha256_raw` test-link `undefined reference`.)
 - **Slice 3 — delegate-assisted drafting** (PR #963): `agent_generate` + `/v1/agent/draft`
@@ -239,7 +239,7 @@ PRs (github.com/RakuenSoftware/aimee): [#954](https://github.com/RakuenSoftware/
 [#956](https://github.com/RakuenSoftware/aimee/pull/956),
 [#959](https://github.com/RakuenSoftware/aimee/pull/959),
 [#963](https://github.com/RakuenSoftware/aimee/pull/963). The design proposal and
-implementation plan are under [`docs/proposals/`](proposals/) (`proposals-ui-page.md`,
+implementation plan are under [`docs/workflow-actions/`](proposals/) (`proposals-ui-page.md`,
 `proposals-ui-page.plan.md`).
 
 ---
@@ -259,7 +259,7 @@ The page is read/UI only; the behavior it drives is governed by existing config:
   intake-auth per-principal rate/concurrency limits); the user-supplied `repo` is
   handled by the same `/v1/dev/submit` intake that the CLI uses — its validation and
   authorization are the intake's concern, unchanged by this feature.
-- **To exercise it end to end** on a running instance: open `/proposals`, **+ New
+- **To exercise it end to end** on a running instance: open `/workflow-actions`, **+ New
   proposal**, optionally **Draft with a delegate**, **Submit**, then watch the timeline
   advance and (with live forge off) park at the first human gate, where **Approve**
   resumes it.

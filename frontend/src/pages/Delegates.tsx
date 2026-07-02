@@ -519,7 +519,7 @@ function fmt(n: number): string {
   return String(n);
 }
 
-/* ---- inline styles (match the Workflows page) ---- */
+/* ---- inline styles (match the Edit Workflows page) ---- */
 const btn: React.CSSProperties = {
   fontSize: 13,
   padding: "4px 10px",

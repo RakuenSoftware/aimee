@@ -121,7 +121,11 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/", s.requireAuth(s.handleRoot))
 	mux.HandleFunc("/chat", s.requireAuth(s.handleSPA))
 	mux.HandleFunc("/dashboard", s.requireAuth(s.handleSPA))
-	mux.HandleFunc("/workflows", s.requireAuth(s.handleSPA))
+	// Workflow surfaces: "Edit Workflows" (the def/graph editor) and "Workflow
+	// Actions" (author → autonomous-run → status/history). Both are SPA routes so a
+	// hard refresh / direct link serves index.html and React Router takes over.
+	mux.HandleFunc("/edit-workflows", s.requireAuth(s.handleSPA))
+	mux.HandleFunc("/workflow-actions", s.requireAuth(s.handleSPA))
 	mux.HandleFunc("/projects", s.requireAuth(s.handleSPA))
 	// Code-graph visualization (§8): a read-only SPA page backed by the /api/graph/*
 	// proxies (which forward aimee-server's index_graph_* MCP tools).
