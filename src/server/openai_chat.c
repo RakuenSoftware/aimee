@@ -1049,6 +1049,9 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
                                                agent->provider, agent->model, NULL);
          free(rbody);
       }
+      /* If the resend body could not be rebuilt (rare OOM), fall through with the
+       * original reduction 4xx already in response_body -> the caller sees the failure
+       * (fail-safe: the session is already disabled for subsequent turns). */
    }
 
    cJSON_Delete(mbox); /* frees the reduced/restored array + the reference wrapper, NOT messages */
