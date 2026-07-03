@@ -88,6 +88,12 @@ extern "C"
     * disabling, so the breaker is not false-tripped). NULL/garbage-safe. */
    int gw_stream_anthropic_error_is_invalid_request(const char *data);
 
+   /* Whether an upstream HTTP status is the invalid-request class a bad reduced
+    * payload can produce (400/413/422). Used by the buffered-replay streaming path to
+    * disable ONLY on a payload-class 4xx — never on 401/403/404/429 (auth/rate-limit,
+    * which the streaming contract forwards without disabling). */
+   int gw_status_is_invalid_request(int http_status);
+
 #ifdef __cplusplus
 }
 #endif

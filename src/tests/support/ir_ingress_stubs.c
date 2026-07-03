@@ -61,6 +61,11 @@ __attribute__((weak)) int gw_stream_anthropic_error_is_invalid_request(const cha
    (void)data;
    return 0;
 }
+__attribute__((weak)) int gw_status_is_invalid_request(int http_status)
+{
+   (void)http_status;
+   return 0;
+}
 __attribute__((weak)) const char *server_http_identity_session_hdr(void)
 {
    return "";

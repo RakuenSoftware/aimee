@@ -181,12 +181,22 @@ int gw_stream_anthropic_error_is_invalid_request(const char *data)
    if (cJSON_IsString(type) && type->valuestring)
    {
       const char *t = type->valuestring;
-      /* Anthropic invalid-request class: invalid_request_error + request_too_large
-       * (the 413-equivalent a bad reduced serialization can produce). rate_limit /
-       * overloaded / api_error / authentication are NOT reduction bugs. */
-      if (strstr(t, "invalid_request") || strstr(t, "request_too_large"))
+      /* Anthropic invalid-request class (error taxonomy as of 2024-2026):
+       * invalid_request_error + request_too_large (the 413-equivalent a bad reduced
+       * serialization can produce). EXACT match — not substring — so a future type
+       * that merely contains these words does not false-trip. rate_limit_error /
+       * overloaded_error / api_error / authentication_error are NOT reduction bugs. */
+      if (strcmp(t, "invalid_request_error") == 0 || strcmp(t, "request_too_large") == 0)
          invalid = 1;
    }
    cJSON_Delete(root);
    return invalid;
+}
+
+int gw_status_is_invalid_request(int http_status)
+{
+   /* The 4xx codes a bad reduced serialization can produce: 400 invalid_request,
+    * 413 request_too_large, 422 unprocessable. 401/403/404/429 are auth / rate-limit
+    * / not-found — NOT reduction bugs, so a streaming path must not disable on them. */
+   return http_status == 400 || http_status == 413 || http_status == 422;
 }

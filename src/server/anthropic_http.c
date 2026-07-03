@@ -960,11 +960,15 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
                   buf_status);
          if (emit)
             emit(ctx, "error", err);
-         /* Buffered-replay streaming: a non-200 upstream on a mutated request
-          * circuit-breaks subsequent turns (4xx = the reduced payload, 5xx =
-          * fail-safe). No restore/resend — the 200 is already committed. */
-         gw_stream_disable(&gwmc, buf_status / 100 == 4 ? "stream_invalid_request"
-                                                        : "stream_decoder_error");
+         /* Buffered-replay streaming: circuit-break subsequent turns only when the
+          * non-200 indicates a bad reduced payload — an invalid-request-class 4xx
+          * (400/413/422) or, fail-safe, a 5xx. Auth / rate-limit / not-found
+          * (401/403/404/429) are NOT reduction bugs and are forwarded WITHOUT
+          * disabling. No restore/resend — the 200 is already committed. */
+         if (gw_status_is_invalid_request(buf_status))
+            gw_stream_disable(&gwmc, "stream_invalid_request");
+         else if (buf_status / 100 == 5)
+            gw_stream_disable(&gwmc, "stream_decoder_error");
       }
       free(buf_resp);
       goto cleanup;

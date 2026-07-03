@@ -183,10 +183,30 @@ static void test_stream_error_classify(void)
               "{\"error\":{\"type\":\"rate_limit_error\"}}") == 0);
    assert(gw_stream_anthropic_error_is_invalid_request("{\"error\":{\"type\":\"api_error\"}}") ==
           0);
+   /* auth outages are NOT invalid-request (no breaker) */
+   assert(gw_stream_anthropic_error_is_invalid_request(
+              "{\"error\":{\"type\":\"authentication_error\"}}") == 0);
+   /* EXACT match: a type that merely contains the words does not false-trip */
+   assert(gw_stream_anthropic_error_is_invalid_request(
+              "{\"error\":{\"type\":\"not_invalid_request_error\"}}") == 0);
+   assert(gw_stream_anthropic_error_is_invalid_request(
+              "{\"error\":{\"type\":\"request_too_large_retry\"}}") == 0);
    /* garbage-safe */
    assert(gw_stream_anthropic_error_is_invalid_request(NULL) == 0);
    assert(gw_stream_anthropic_error_is_invalid_request("not json") == 0);
    assert(gw_stream_anthropic_error_is_invalid_request("") == 0);
+
+   /* status classifier: only 400/413/422 are the payload class; auth/rate-limit/5xx
+    * are not (the buffered-replay path must not disable on them) */
+   assert(gw_status_is_invalid_request(400) == 1);
+   assert(gw_status_is_invalid_request(413) == 1);
+   assert(gw_status_is_invalid_request(422) == 1);
+   assert(gw_status_is_invalid_request(401) == 0);
+   assert(gw_status_is_invalid_request(403) == 0);
+   assert(gw_status_is_invalid_request(404) == 0);
+   assert(gw_status_is_invalid_request(429) == 0);
+   assert(gw_status_is_invalid_request(503) == 0);
+   assert(gw_status_is_invalid_request(200) == 0);
 }
 
 int main(void)
