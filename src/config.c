@@ -562,6 +562,11 @@ static void config_set_defaults(config_t *cfg)
    cfg->reduce_gateway_seam = 0;
    cfg->reduce_freeze_guard_enabled = 1; /* safety: on for the default-on economizer freeze */
    cfg->reduce_freeze_guard_horizon = 1; /* conservative break-even: one reuse pays the write */
+   /* Gateway MUTATION (primary-agent reduction) is the whole feature default-OFF; the
+    * session-disable TTL is a live-path breaker window (1h) that must stay > 0. */
+   cfg->reduce_gateway_mutate = 0;
+   cfg->reduce_gateway_session_disable_ttl_ms = 3600000;
+   cfg->reduce_gateway_seam_explicit = 0;
    snprintf(cfg->memory_citations_mode, sizeof(cfg->memory_citations_mode), "%s", "off");
    snprintf(cfg->memory_coref_mode, sizeof(cfg->memory_coref_mode), "%s", "off");
    cfg->memory_cognify_async_enabled = 0;
@@ -1184,6 +1189,7 @@ int config_load(config_t *cfg)
    config_parse_worktree_gc_section(cfg, root);
    config_parse_fold_section(cfg, root);
    config_parse_reduce_section(cfg, root);
+   config_apply_reduce_consistency(cfg); /* mutate=1 -> auto-enable shadow seam in memory + WARN */
 
    config_parse_memory_section(cfg, root);
    config_apply_learning_settings(cfg, root);

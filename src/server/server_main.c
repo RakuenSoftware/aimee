@@ -164,6 +164,19 @@ static int run_server(const char *socket_path, log_level_t log_level)
    config_t cfg;
    config_load(&cfg);
 
+   /* Startup-fatal validation for the live gateway-mutation path: an invalid
+    * session-disable TTL (<=0) must refuse to bring up the /v1 server rather than
+    * pin/disable the breaker on live client traffic. Scoped to server startup so
+    * unrelated CLI callers of config_load are unaffected. */
+   {
+      char cfg_err[256];
+      if (config_reduce_validate(&cfg, cfg_err, sizeof(cfg_err)) != 0)
+      {
+         fprintf(stderr, "aimee: fatal config error: %s\n", cfg_err);
+         return 1;
+      }
+   }
+
    /* Remote aimee-kb: when a kb_client_url is configured (this host uses a
     * remote kb rather than a local sidecar), export it into our own env so the
     * env-based kb_client transport (kb_client_v1_base_url / auth_header)

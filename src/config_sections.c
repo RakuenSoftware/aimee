@@ -757,7 +757,16 @@ void config_parse_reduce_section(config_t *cfg, cJSON *root)
       cfg->reduce_compress = cJSON_IsTrue(item) ? 1 : 0;
    item = cJSON_GetObjectItemCaseSensitive(reduce, "gateway_seam");
    if (cJSON_IsBool(item))
+   {
       cfg->reduce_gateway_seam = cJSON_IsTrue(item) ? 1 : 0;
+      cfg->reduce_gateway_seam_explicit = 1; /* operator set it -> config_save may persist it */
+   }
+   item = cJSON_GetObjectItemCaseSensitive(reduce, "gateway_mutate");
+   if (cJSON_IsBool(item))
+      cfg->reduce_gateway_mutate = cJSON_IsTrue(item) ? 1 : 0;
+   item = cJSON_GetObjectItemCaseSensitive(reduce, "gateway_session_disable_ttl_ms");
+   if (cJSON_IsNumber(item))
+      cfg->reduce_gateway_session_disable_ttl_ms = (int)item->valuedouble;
    item = cJSON_GetObjectItemCaseSensitive(reduce, "freeze_guard");
    if (cJSON_IsBool(item))
       cfg->reduce_freeze_guard_enabled = cJSON_IsTrue(item) ? 1 : 0;
@@ -769,6 +778,42 @@ void config_parse_reduce_section(config_t *cfg, cJSON *root)
          h = FREEZE_GUARD_MAX_HORIZON; /* clamp at parse so on-disk == runtime */
       cfg->reduce_freeze_guard_horizon = h;
    }
+}
+
+/* Normalize economizer gateway-mutation invariants IN MEMORY after parse. mutate=1
+ * requires the shadow seam so the validation gates always have a same-payload
+ * baseline: auto-enable reduce_gateway_seam in memory (never rewriting the file)
+ * and WARN once per (uncached) load. A config left at seam=0,mutate=1 repeats the
+ * WARN each start until corrected. Does NOT touch reduce_gateway_seam_explicit, so
+ * config_save still omits the synthesized seam. */
+void config_apply_reduce_consistency(config_t *cfg)
+{
+   if (cfg->reduce_gateway_mutate && !cfg->reduce_gateway_seam)
+   {
+      cfg->reduce_gateway_seam = 1;
+      fprintf(stderr,
+              "aimee: config warning: reduce.gateway_mutate=1 requires reduce.gateway_seam; "
+              "auto-enabling the shadow seam in memory (set reduce.gateway_seam: true to "
+              "silence this)\n");
+   }
+}
+
+/* Startup-fatal validation for the live gateway-mutation path (see config.h). The
+ * disable-window TTL must be > 0; 0/negative would make a circuit-broken session a
+ * permanent pin (or, negative, an immediately-expired no-op breaker) on live client
+ * traffic, which the design rejects rather than silently clamps. */
+int config_reduce_validate(const config_t *cfg, char *err, size_t errlen)
+{
+   if (cfg->reduce_gateway_session_disable_ttl_ms <= 0)
+   {
+      if (err && errlen)
+         snprintf(err, errlen,
+                  "reduce.gateway_session_disable_ttl_ms must be > 0 (got %d); 0/negative is a "
+                  "permanent-pin/disabled breaker on the live /v1 path",
+                  cfg->reduce_gateway_session_disable_ttl_ms);
+      return 1;
+   }
+   return 0;
 }
 
 void config_parse_sessions_section(config_t *cfg, cJSON *root)

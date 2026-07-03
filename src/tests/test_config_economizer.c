@@ -99,6 +99,98 @@ int main(void)
       assert(strcmp(cfg2.coord_closet_denylist, "secretword") == 0);
    }
 
+   /* --- gateway mutation: defaults --- */
+   {
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      config_load(&cfg);
+      assert(cfg.reduce_gateway_mutate == 0);
+      assert(cfg.reduce_gateway_session_disable_ttl_ms == 3600000);
+      assert(cfg.reduce_gateway_seam_explicit == 0);
+   }
+
+   /* --- mutate=1 auto-enables the shadow seam IN MEMORY + does NOT persist the
+    * synthesized gateway_seam: save {mutate:1} (no seam), reload, and confirm seam
+    * was re-synthesized (==1) while seam_explicit stayed 0 (proving the key was not
+    * written to disk — a persisted key would set explicit on parse). --- */
+   {
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      config_load(&cfg);
+      cfg.reduce_gateway_mutate = 1;
+      cfg.reduce_gateway_seam = 0;
+      cfg.reduce_gateway_seam_explicit = 0;
+      assert(config_save(&cfg) == 0);
+
+      static config_t cfg2;
+      memset(&cfg2, 0, sizeof(cfg2));
+      config_load(&cfg2);
+      assert(cfg2.reduce_gateway_mutate == 1);        /* mutate persisted */
+      assert(cfg2.reduce_gateway_seam == 1);          /* auto-enabled in memory */
+      assert(cfg2.reduce_gateway_seam_explicit == 0); /* synthesized, NOT persisted */
+   }
+
+   /* --- an explicitly-set gateway_seam DOES persist (and carries explicit=1) --- */
+   {
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      config_load(&cfg);
+      cfg.reduce_gateway_mutate = 0;
+      cfg.reduce_gateway_seam = 1;
+      cfg.reduce_gateway_seam_explicit = 1;
+      assert(config_save(&cfg) == 0);
+
+      static config_t cfg2;
+      memset(&cfg2, 0, sizeof(cfg2));
+      config_load(&cfg2);
+      assert(cfg2.reduce_gateway_seam == 1);
+      assert(cfg2.reduce_gateway_seam_explicit == 1);
+   }
+
+   /* --- non-default disable TTL round-trips; default (1h) is not persisted --- */
+   {
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      config_load(&cfg);
+      cfg.reduce_gateway_session_disable_ttl_ms = 7200000; /* 2h override */
+      assert(config_save(&cfg) == 0);
+      static config_t cfg2;
+      memset(&cfg2, 0, sizeof(cfg2));
+      config_load(&cfg2);
+      assert(cfg2.reduce_gateway_session_disable_ttl_ms == 7200000);
+   }
+
+   /* --- consistency hook is a pure in-memory normalization --- */
+   {
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      cfg.reduce_gateway_mutate = 1;
+      cfg.reduce_gateway_seam = 0;
+      cfg.reduce_gateway_seam_explicit = 0;
+      config_apply_reduce_consistency(&cfg);
+      assert(cfg.reduce_gateway_seam == 1);
+      assert(cfg.reduce_gateway_seam_explicit == 0);
+      /* idempotent + no downgrade when mutate is off */
+      memset(&cfg, 0, sizeof(cfg));
+      cfg.reduce_gateway_mutate = 0;
+      cfg.reduce_gateway_seam = 0;
+      config_apply_reduce_consistency(&cfg);
+      assert(cfg.reduce_gateway_seam == 0);
+   }
+
+   /* --- startup-fatal TTL validation: <=0 rejected, >0 accepted --- */
+   {
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      char err[256];
+      cfg.reduce_gateway_session_disable_ttl_ms = 3600000;
+      assert(config_reduce_validate(&cfg, err, sizeof(err)) == 0);
+      cfg.reduce_gateway_session_disable_ttl_ms = 0;
+      assert(config_reduce_validate(&cfg, err, sizeof(err)) != 0);
+      cfg.reduce_gateway_session_disable_ttl_ms = -5;
+      assert(config_reduce_validate(&cfg, err, sizeof(err)) != 0);
+   }
+
    /* restore env */
    if (old_home)
    {

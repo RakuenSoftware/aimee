@@ -945,6 +945,17 @@ typedef struct config
     *   (default-off) economizer freeze is live, so no default-path behavior change.
     * reduce_freeze_guard_horizon: expected reuse turns for the break-even estimate
     *   (0 -> 1; clamped to FREEZE_GUARD_MAX_HORIZON).
+    * reduce_gateway_mutate: APPLY the reduction to the live inbound /v1 request (the
+    *   primary-agent path) instead of only measuring it — compress-only, behind a
+    *   per-session circuit breaker (msg_session_disable), buffered 4xx-restore-resend +
+    *   streaming disable-subsequent-turns. Default-OFF (the whole gateway-mutation
+    *   feature). mutate=1 implies gateway_seam=1: config_load auto-enables the shadow
+    *   seam IN MEMORY (never rewriting the file) + logs one WARN, so the shadow baseline
+    *   the validation gates compare against always exists.
+    * reduce_gateway_session_disable_ttl_ms: how long a circuit-broken session stays
+    *   disabled (default 3600000 = 1h). MUST be > 0 — 0/negative is a startup-fatal
+    *   config error (a permanent-pin/breaker-off knob on a live path is disproportionate
+    *   runtime risk); validated by config_reduce_validate() at server startup.
     * (Other per-lever gates and min_gain land in later slices.) */
    int reduce_measure_enabled;
    int reduce_delegate_seam;
@@ -953,6 +964,12 @@ typedef struct config
    int reduce_gateway_seam;
    int reduce_freeze_guard_enabled;
    int reduce_freeze_guard_horizon;
+   int reduce_gateway_mutate;
+   int reduce_gateway_session_disable_ttl_ms;
+   /* Runtime-only (NOT parsed as a key, NOT persisted): 1 iff the operator set the
+    * reduce.gateway_seam key explicitly. Lets config_save persist gateway_seam only
+    * when the user chose it, never when config_load synthesized it from mutate=1. */
+   int reduce_gateway_seam_explicit;
 
    /* Session/worktree cleanup policy.
     * worktree_stale_secs: inactivity threshold before a session is pruned
@@ -1699,6 +1716,15 @@ static inline int config_issue(const char *fmt, ...)
 /* Load config from default path. Returns defaults if missing.
  * In strict mode, returns -1 on validation errors. */
 int config_load(config_t *cfg);
+
+/* Validate the economizer gateway-mutation invariants that are STARTUP-FATAL (as
+ * opposed to the in-memory normalizations config_load already applied). Currently:
+ * reduce_gateway_session_disable_ttl_ms must be > 0. Returns 0 if valid, non-zero
+ * if the live gateway-mutation path must not start; on failure writes a human
+ * message into err (when err != NULL). Called at server startup so a bad value
+ * refuses to bring up the live /v1 path, without breaking unrelated CLI callers
+ * of config_load. Pure (reads cfg only). */
+int config_reduce_validate(const config_t *cfg, char *err, size_t errlen);
 
 /* Resolve the effective operating mode (engineer/novel) for the running
  * process. Precedence: the AIMEE_MODE environment variable (the propagation
