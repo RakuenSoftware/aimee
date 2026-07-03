@@ -339,3 +339,62 @@ def render_markdown(report: dict[str, Any], reddit_baseline: dict[str, Any] | No
             f"{report.get('speed', {}).get('C_over_A_walltime_ratio', '?')}× wall-time vs solo.\n"
         )
     return "\n".join(lines) + "\n"
+
+
+# ============================================================================
+# Live supervised-run summary (arm A vs arm C, primary-token focus).
+# Consumes the result dict produced by bench_swebench_supervised.py.
+# ============================================================================
+def _arm_stats(arm: dict[str, Any], ptok: dict[str, Any] | None) -> dict[str, Any]:
+    recs = arm.get("records", {})
+    graded = [r for r in recs.values() if r.get("resolved") is not None]
+    resolved = sum(1 for r in graded if r.get("resolved"))
+    diffs = sum(1 for r in recs.values() if r.get("diff"))
+    return {
+        "instances": len(recs),
+        "diffs": diffs,
+        "graded": len(graded),
+        "resolved": resolved,
+        "resolve_rate": round(resolved / len(graded), 4) if graded else None,
+        "wall_total_s": arm.get("wall_total"),
+        "primary_tokens": (ptok or {}).get("total"),
+        "primary_input": (ptok or {}).get("input"),
+        "primary_output": (ptok or {}).get("output"),
+    }
+
+
+def summarize_arms(result: dict[str, Any]) -> dict[str, Any]:
+    arms = result.get("arms", {})
+    ptok = result.get("primary_tokens", {})
+    out: dict[str, Any] = {"arms": {a: _arm_stats(arms[a], ptok.get(a)) for a in arms}}
+    a = out["arms"].get("A", {})
+    c = out["arms"].get("C", {})
+    if a.get("primary_tokens") and c.get("primary_tokens") is not None:
+        out["primary_token_reduction_pct"] = pct_reduction(a["primary_tokens"], c["primary_tokens"])
+    if a.get("wall_total_s") and c.get("wall_total_s"):
+        out["walltime_ratio_C_over_A"] = round(c["wall_total_s"] / a["wall_total_s"], 3)
+    return out
+
+
+def render_supervised(result: dict[str, Any]) -> str:
+    s = summarize_arms(result)
+    L = ["## Supervised SWE-bench — primary(manager) tokens vs solo\n",
+         f"instances: {len(result.get('instances', []))}  primary: {result.get('primary')}  "
+         f"n(best-of): {result.get('n')}  pool: {', '.join(result.get('pool', []))}\n",
+         "| Arm | primary tokens | wall (s) | resolved / graded | diffs |",
+         "|---|---|---|---|---|"]
+    labels = {"A": "A primary_alone", "C": "C supervised (best-of-N)"}
+    for a in ("A", "C"):
+        st = s["arms"].get(a)
+        if not st:
+            continue
+        pt = st["primary_tokens"]
+        L.append(f"| {labels.get(a, a)} | {pt if pt is not None else 'n/a'} | "
+                 f"{st['wall_total_s']} | {st['resolved']}/{st['graded']} | {st['diffs']}/{st['instances']} |")
+    if s.get("primary_token_reduction_pct") is not None:
+        L.append(f"\n**Primary-agent token reduction (A -> C): "
+                 f"{s['primary_token_reduction_pct']:+.1f}%**")
+    if s.get("walltime_ratio_C_over_A") is not None:
+        r = s["walltime_ratio_C_over_A"]
+        L.append(f"Wall-clock C/A: **{r}x** " + ("(faster)" if r < 1 else "(slower)"))
+    return "\n".join(L) + "\n"

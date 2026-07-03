@@ -145,15 +145,35 @@ class TestFakeHarnessShape(unittest.TestCase):
         from benchmarks.coding import bench_swebench_supervised as B
 
         reload(B)
-        a = B._fake_record("x", "A", True, 0)
-        c = B._fake_record("x", "C", True, 0)
-        # Arm A pays full supervisor cost, no workers; arm C offloads to workers.
-        self.assertEqual(a["worker_input_tokens"], 0)
-        self.assertGreater(c["worker_input_tokens"], 0)
-        self.assertLess(c["supervisor_input_tokens"], a["supervisor_input_tokens"])
-        # Arm C runs faster than arm B (parallel vs serial).
-        b = B._fake_record("x", "B", True, 0)
-        self.assertLess(c["wall_s"], b["wall_s"])
+        a = B._fake_record("x", "A", 0)
+        c = B._fake_record("x", "C", 0)
+        # Both arms produce a patch and are graded resolved in fake mode.
+        self.assertTrue(a["diff"] and c["diff"])
+        self.assertTrue(a["resolved"] and c["resolved"])
+        # Arm C is the supervised best-of-N arm: it carries candidate count and
+        # finishes faster than the solo primary (parallel fleet vs serial solve).
+        self.assertEqual(c["n_candidates"], 3)
+        self.assertLess(c["wall"], a["wall"])
+
+
+class TestSupervisedSummary(unittest.TestCase):
+    def test_summary_computes_primary_reduction_and_walltime_ratio(self):
+        result = {
+            "instances": ["i1", "i2"], "primary": "codex", "pool": ["w1", "w2"], "n": 3,
+            "arms": {
+                "A": {"wall_total": 400.0, "records": {
+                    "i1": {"diff": "d", "resolved": True}, "i2": {"diff": "d", "resolved": True}}},
+                "C": {"wall_total": 40.0, "records": {
+                    "i1": {"diff": "d", "resolved": True}, "i2": {"diff": "d", "resolved": False}}},
+            },
+            "primary_tokens": {"A": {"total": 100000}, "C": {"total": 20000}},
+        }
+        s = R.summarize_arms(result)
+        self.assertEqual(s["primary_token_reduction_pct"], 80.0)
+        self.assertEqual(s["walltime_ratio_C_over_A"], 0.1)
+        self.assertEqual(s["arms"]["A"]["resolved"], 2)
+        self.assertEqual(s["arms"]["C"]["resolved"], 1)
+        self.assertIn("Primary-agent token reduction", R.render_supervised(result))
 
 
 if __name__ == "__main__":
