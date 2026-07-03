@@ -17,6 +17,17 @@ int wf_api_blocks(char *resp, int cap)
 {
    return stub(resp, cap);
 }
+int wf_api_block_put(const char *name, const char *body, char *resp, int cap)
+{
+   (void)name;
+   (void)body;
+   return stub(resp, cap);
+}
+int wf_api_block_delete(const char *name, char *resp, int cap)
+{
+   (void)name;
+   return stub(resp, cap);
+}
 int wf_api_list(char *resp, int cap)
 {
    return stub(resp, cap);

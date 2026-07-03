@@ -21,6 +21,7 @@
 #include "cJSON.h"
 #include "server_http_identity.h" /* server_http_identity_principal — ownership scoping */
 #include "wfe_def.h"
+#include "yaml.h" /* yaml_emit — write blocks.yaml */
 #include "wfe_iface.h"
 #include "wfe_store.h"
 
@@ -184,9 +185,17 @@ int wf_api_blocks(char *resp, int cap)
       cJSON *b = cJSON_CreateObject();
       cJSON_AddStringToObject(b, "name", c->name);
       cJSON_AddStringToObject(b, "produces", wfe_artifact_name(c->produces));
+      cJSON_AddStringToObject(b, "consumes", wfe_artifact_name(c->consumes));
       cJSON_AddBoolToObject(b, "custom", 1);
       cJSON_AddStringToObject(b, "executor",
                               c->executor == WFE_EXEC_COMMAND ? "command" : "delegate");
+      /* delegate blocks carry the editable persona + prompt (the UI edits these);
+       * command blocks stay operator-only, so their argv is not surfaced. */
+      if (c->executor == WFE_EXEC_DELEGATE)
+      {
+         cJSON_AddStringToObject(b, "persona", c->persona);
+         cJSON_AddStringToObject(b, "prompt", c->prompt ? c->prompt : "");
+      }
       cJSON_AddBoolToObject(b, "requires_input", c->consumes != WFE_ART_NONE);
       cJSON *acc = cJSON_AddArrayToObject(b, "accepts");
       if (c->consumes != WFE_ART_NONE)
@@ -194,6 +203,194 @@ int wf_api_blocks(char *resp, int cap)
       cJSON_AddItemToArray(arr, b);
    }
    return emit(o, resp, cap);
+}
+
+/* ---- custom block editor (delegate-executor blocks only) ----------------------
+ * The web UI can create/edit reusable DELEGATE custom blocks (a persona + prompt
+ * step) the same way it edits personas/roles. It NEVER writes command-executor
+ * blocks: those run arbitrary argv and stay operator-only via the blocks.yaml
+ * file, so the editor cannot become a remote-code-execution surface. Existing
+ * command blocks are preserved verbatim on every write. */
+
+static int valid_artifact_name(const char *s)
+{
+   for (wfe_artifact_type_t a = WFE_ART_NONE; a < WFE_ART__COUNT; a++)
+      if (strcmp(wfe_artifact_name(a), s) == 0)
+         return 1;
+   return 0;
+}
+
+/* Serialize the current custom-block registry to a cJSON blocks array, preserving
+ * every block (including command blocks) so a write round-trips them untouched. */
+static cJSON *registry_blocks_json(void)
+{
+   char e[256] = "";
+   wfe_custom_registry_ensure(e, sizeof e);
+   cJSON *arr = cJSON_CreateArray();
+   for (int i = 0; i < wfe_custom_count(); i++)
+   {
+      const wfe_custom_block_t *c = wfe_custom_at(i);
+      if (!c)
+         continue;
+      cJSON *b = cJSON_CreateObject();
+      cJSON_AddStringToObject(b, "name", c->name);
+      cJSON_AddStringToObject(b, "consumes", wfe_artifact_name(c->consumes));
+      cJSON_AddStringToObject(b, "produces", wfe_artifact_name(c->produces));
+      if (c->executor == WFE_EXEC_COMMAND)
+      {
+         cJSON_AddStringToObject(b, "executor", "command");
+         cJSON *cmd = cJSON_AddArrayToObject(b, "command");
+         for (int j = 0; c->argv[j]; j++)
+            cJSON_AddItemToArray(cmd, cJSON_CreateString(c->argv[j]));
+      }
+      else
+      {
+         cJSON_AddStringToObject(b, "executor", "delegate");
+         cJSON_AddStringToObject(b, "persona", c->persona);
+         cJSON_AddStringToObject(b, "prompt", c->prompt ? c->prompt : "");
+      }
+      cJSON_AddItemToArray(arr, b);
+   }
+   return arr;
+}
+
+/* Emit {blocks: arr} to $AIMEE_HOME/workflows/blocks.yaml atomically (temp +
+ * rename, operator-owned 0600) and reload the registry. Returns 0 or -1+err. */
+static int write_blocks_and_reload(cJSON *arr, char *err_buf, size_t errlen)
+{
+   cJSON *root = cJSON_CreateObject();
+   /* Preserve the operator's top-level settings so a UI delegate-block write can't
+    * disable existing command blocks by dropping their gate. */
+   if (wfe_custom_commands_allowed())
+      cJSON_AddBoolToObject(root, "allow_command", 1);
+   cJSON_AddNumberToObject(root, "command_timeout_ms", wfe_custom_command_timeout_ms());
+   cJSON_AddItemToObject(root, "blocks", arr); /* takes ownership of arr */
+   char *yaml = yaml_emit(root);
+   cJSON_Delete(root);
+   if (!yaml)
+   {
+      snprintf(err_buf, errlen, "yaml emit failed");
+      return -1;
+   }
+   char dir[1024], path[1100], tmp[1160];
+   snprintf(dir, sizeof dir, "%s/workflows", aimee_home());
+   mkdir(dir, 0700);
+   snprintf(path, sizeof path, "%s/blocks.yaml", dir);
+   snprintf(tmp, sizeof tmp, "%s.tmp", path);
+   int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
+   if (fd < 0)
+   {
+      free(yaml);
+      snprintf(err_buf, errlen, "cannot open blocks.yaml for write");
+      return -1;
+   }
+   size_t len = strlen(yaml);
+   ssize_t wr = write(fd, yaml, len);
+   close(fd);
+   free(yaml);
+   if (wr < 0 || (size_t)wr != len)
+   {
+      unlink(tmp);
+      snprintf(err_buf, errlen, "blocks.yaml write failed");
+      return -1;
+   }
+   if (rename(tmp, path) != 0)
+   {
+      unlink(tmp);
+      snprintf(err_buf, errlen, "blocks.yaml rename failed");
+      return -1;
+   }
+   return wfe_custom_registry_load(path, err_buf, errlen);
+}
+
+int wf_api_block_put(const char *name, const char *body, char *resp, int cap)
+{
+   if (!name || !name[0] || !safe_name(name))
+      return err(resp, cap, 400, "invalid block name");
+   if (wfe_block_from_name(name) != WFE_BLK_UNKNOWN)
+      return err(resp, cap, 409, "name shadows a built-in block");
+
+   cJSON *req = body ? cJSON_Parse(body) : NULL;
+   if (!req)
+      return err(resp, cap, 400, "invalid JSON body");
+   const cJSON *jc = cJSON_GetObjectItemCaseSensitive(req, "consumes");
+   const cJSON *jp = cJSON_GetObjectItemCaseSensitive(req, "produces");
+   const cJSON *jper = cJSON_GetObjectItemCaseSensitive(req, "persona");
+   const cJSON *jpr = cJSON_GetObjectItemCaseSensitive(req, "prompt");
+   const char *consumes = cJSON_IsString(jc) && jc->valuestring[0] ? jc->valuestring : "none";
+   const char *produces = cJSON_IsString(jp) && jp->valuestring[0] ? jp->valuestring : "none";
+   const char *persona = cJSON_IsString(jper) ? jper->valuestring : "";
+   const char *prompt = cJSON_IsString(jpr) ? jpr->valuestring : "";
+
+   int bad = 0;
+   const char *why = "";
+   if (strcmp(produces, "branch") != 0 && strcmp(produces, "none") != 0)
+   {
+      bad = 1;
+      why = "produces must be 'branch' or 'none'";
+   }
+   else if (!valid_artifact_name(consumes))
+   {
+      bad = 1;
+      why = "unknown consumes type";
+   }
+   else if (!persona[0] || !prompt[0])
+   {
+      bad = 1;
+      why = "delegate block needs a persona and a prompt";
+   }
+   if (bad)
+   {
+      cJSON_Delete(req);
+      return err(resp, cap, 400, why);
+   }
+
+   cJSON *arr = registry_blocks_json();
+   for (int i = cJSON_GetArraySize(arr) - 1; i >= 0; i--)
+   {
+      cJSON *b = cJSON_GetArrayItem(arr, i);
+      const cJSON *n = cJSON_GetObjectItemCaseSensitive(b, "name");
+      if (cJSON_IsString(n) && strcmp(n->valuestring, name) == 0)
+         cJSON_DeleteItemFromArray(arr, i);
+   }
+   cJSON *nb = cJSON_CreateObject();
+   cJSON_AddStringToObject(nb, "name", name);
+   cJSON_AddStringToObject(nb, "consumes", consumes);
+   cJSON_AddStringToObject(nb, "produces", produces);
+   cJSON_AddStringToObject(nb, "executor", "delegate");
+   cJSON_AddStringToObject(nb, "persona", persona);
+   cJSON_AddStringToObject(nb, "prompt", prompt);
+   cJSON_AddItemToArray(arr, nb);
+   cJSON_Delete(req);
+
+   char e[256] = "";
+   if (write_blocks_and_reload(arr, e, sizeof e) != 0)
+      return err(resp, cap, 500, e[0] ? e : "could not save block");
+   return wf_api_blocks(resp, cap);
+}
+
+int wf_api_block_delete(const char *name, char *resp, int cap)
+{
+   if (!name || !name[0] || !safe_name(name))
+      return err(resp, cap, 400, "invalid block name");
+   const wfe_custom_block_t *ex = wfe_custom_lookup(name);
+   if (!ex)
+      return err(resp, cap, 404, "custom block not found");
+   if (ex->executor == WFE_EXEC_COMMAND)
+      return err(resp, cap, 403, "command blocks are operator-managed (edit blocks.yaml)");
+
+   cJSON *arr = registry_blocks_json();
+   for (int i = cJSON_GetArraySize(arr) - 1; i >= 0; i--)
+   {
+      cJSON *b = cJSON_GetArrayItem(arr, i);
+      const cJSON *n = cJSON_GetObjectItemCaseSensitive(b, "name");
+      if (cJSON_IsString(n) && strcmp(n->valuestring, name) == 0)
+         cJSON_DeleteItemFromArray(arr, i);
+   }
+   char e[256] = "";
+   if (write_blocks_and_reload(arr, e, sizeof e) != 0)
+      return err(resp, cap, 500, e[0] ? e : "could not delete block");
+   return wf_api_blocks(resp, cap);
 }
 
 int wf_api_list(char *resp, int cap)

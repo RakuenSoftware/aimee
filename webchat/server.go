@@ -182,6 +182,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 
 	// Workflow visual composer (W7): proxy to aimee-server /v1/workflow/*.
 	mux.HandleFunc("/api/workflow/blocks", s.requireAuth(s.handleWorkflowBlocks))
+	mux.HandleFunc("/api/workflow/blocks/", s.requireAuth(s.handleWorkflowBlockItem))
 	mux.HandleFunc("/api/workflow/defs", s.requireAuth(s.handleWorkflowDefs))
 	mux.HandleFunc("/api/workflow/defs/", s.requireAuth(s.handleWorkflowDefs))
 	mux.HandleFunc("/api/workflow/validate", s.requireAuth(s.handleWorkflowValidate))

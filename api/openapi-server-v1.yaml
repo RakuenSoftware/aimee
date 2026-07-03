@@ -347,6 +347,14 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /workflow/blocks/{name}:
+    put:
+      summary: Create or edit a delegate custom block (blocks.yaml; command executors refused)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Updated block catalog, content: { application/json: { schema: { type: object } } } } }
+    delete:
+      summary: Delete a custom delegate block (command blocks are operator-only)
+      responses: { "200": { description: Updated block catalog, content: { application/json: { schema: { type: object } } } } }
   /workflow/defs:
     get:
       summary: List saved workflow definitions

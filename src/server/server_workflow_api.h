@@ -10,6 +10,12 @@
  * config-defined custom registry) with each block's typed I/O for the palette. */
 int wf_api_blocks(char *resp, int cap);
 
+/* Create/edit a delegate custom block (blocks.yaml). body is JSON
+ * {consumes, produces, persona, prompt}; command executors are refused. */
+int wf_api_block_put(const char *name, const char *body, char *resp, int cap);
+/* Delete a custom delegate block (command blocks are operator-only). */
+int wf_api_block_delete(const char *name, char *resp, int cap);
+
 /* GET /v1/workflow/defs -- list saved workflow definitions under
  * $AIMEE_HOME/workflows (name + valid + version). */
 int wf_api_list(char *resp, int cap);

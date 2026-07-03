@@ -369,6 +369,60 @@ int main(void)
       g_test_principal = "";
    }
 
+   /* --- custom delegate-block CRUD: write blocks.yaml + reload round-trip, and
+    * preserve an existing operator command block untouched --- */
+   {
+      char p[256];
+      snprintf(p, sizeof p, "%s/blocks.yaml", wfdir);
+      FILE *f = fopen(p, "wb");
+      assert(f);
+      fputs("allow_command: true\nblocks:\n  - name: lintcmd\n    consumes: branch\n"
+            "    produces: branch\n    executor: command\n    command:\n      - /bin/true\n",
+            f);
+      fclose(f);
+      chmod(p, 0600);
+      wfe_custom_registry_reset();
+
+      const char *body = "{\"consumes\":\"proposal\",\"produces\":\"branch\","
+                         "\"persona\":\"architect\",\"prompt\":\"Refine the proposal.\"}";
+      assert(wf_api_block_put("refine", body, buf, CAP) == 200);
+      assert(wf_api_blocks(buf, CAP) == 200);
+      {
+         cJSON *o = parse_resp(buf);
+         cJSON *blocks = cJSON_GetObjectItemCaseSensitive(o, "blocks");
+         cJSON *b = NULL, *found = NULL;
+         cJSON_ArrayForEach(b, blocks)
+         {
+            cJSON *n = cJSON_GetObjectItemCaseSensitive(b, "name");
+            if (cJSON_IsString(n) && strcmp(n->valuestring, "refine") == 0)
+               found = b;
+         }
+         assert(found);
+         assert(strcmp(cJSON_GetObjectItemCaseSensitive(found, "executor")->valuestring,
+                       "delegate") == 0);
+         assert(strcmp(cJSON_GetObjectItemCaseSensitive(found, "persona")->valuestring,
+                       "architect") == 0);
+         /* the operator's command block survived the write */
+         assert(has_block(blocks, "lintcmd", NULL));
+         cJSON_Delete(o);
+      }
+      /* validation: shadow a built-in → 409, missing persona/prompt → 400, bad name → 400 */
+      assert(wf_api_block_put("merge", body, buf, CAP) == 409);
+      assert(wf_api_block_put("bad", "{\"consumes\":\"none\"}", buf, CAP) == 400);
+      assert(wf_api_block_put("a/b", body, buf, CAP) == 400);
+      /* a UI delete of the command block is refused (operator-managed) */
+      assert(wf_api_block_delete("lintcmd", buf, CAP) == 403);
+      /* delete the delegate block */
+      assert(wf_api_block_delete("refine", buf, CAP) == 200);
+      assert(wf_api_blocks(buf, CAP) == 200);
+      {
+         cJSON *o = parse_resp(buf);
+         assert(!has_block(cJSON_GetObjectItemCaseSensitive(o, "blocks"), "refine", NULL));
+         assert(has_block(cJSON_GetObjectItemCaseSensitive(o, "blocks"), "lintcmd", NULL));
+         cJSON_Delete(o);
+      }
+   }
+
    free(buf);
    printf("ok\n");
    return 0;

@@ -60,6 +60,46 @@ func (s *server) handleWorkflowBlocks(w http.ResponseWriter, r *http.Request) {
 	s.proxyWorkflow(w, r, http.MethodGet, "/v1/workflow/blocks", "")
 }
 
+// PUT/DELETE /api/workflow/blocks/<name> — create/edit or delete a custom
+// delegate block. proxyWorkflow forwards a body only for POST, so this item
+// handler forwards PUT bodies itself; seg-validated + body-capped, then handed
+// to the admin-gated /v1 route (which refuses command executors).
+func (s *server) handleWorkflowBlockItem(w http.ResponseWriter, r *http.Request) {
+	seg := strings.TrimPrefix(r.URL.Path, "/api/workflow/blocks/")
+	if seg == "" || strings.Contains(seg, "/") || strings.Contains(seg, "..") || strings.Contains(seg, "%") {
+		writeJSONError(w, http.StatusBadRequest, "bad block name")
+		return
+	}
+	var method string
+	var body []byte
+	switch r.Method {
+	case http.MethodPut:
+		method = http.MethodPut
+		const maxBody = 1 << 20
+		body, _ = io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+		if len(body) > maxBody {
+			writeJSONError(w, http.StatusRequestEntityTooLarge, "request too large")
+			return
+		}
+	case http.MethodDelete:
+		method = http.MethodDelete
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	st, data, err := s.v1Request(ctx, method, "/v1/workflow/blocks/"+seg, body)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprintf(w, `{"error":"workflow service unreachable"}`)
+		return
+	}
+	w.WriteHeader(st)
+	w.Write(data)
+}
+
 // GET /api/workflow/defs        — list definitions
 // GET /api/workflow/defs/<name> — one definition (canonical + version + graph)
 func (s *server) handleWorkflowDefs(w http.ResponseWriter, r *http.Request) {

@@ -776,6 +776,14 @@ static int rh_wf_blocks(const route_req_t *rq, char *resp, int cap)
    (void)rq;
    return wf_api_blocks(resp, cap);
 }
+static int rh_wf_block_put(const route_req_t *rq, char *resp, int cap)
+{
+   return wf_api_block_put(rq->id, rq->body, resp, cap);
+}
+static int rh_wf_block_delete(const route_req_t *rq, char *resp, int cap)
+{
+   return wf_api_block_delete(rq->id, resp, cap);
+}
 static int rh_wf_list(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
@@ -2255,6 +2263,9 @@ static const http_route_t g_v1_routes[] = {
      * read work-item run-state. Reads (incl. validate, which never mutates) are
      * dashboard-read; save is session-admin (authoring write). */
     {"GET", "/v1/workflow/blocks", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_blocks},
+    {"PUT", "/v1/workflow/blocks/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN, rh_wf_block_put},
+    {"DELETE", "/v1/workflow/blocks/", NULL, RM_PREFIX, NULL, CAP_SESSION_ADMIN,
+     rh_wf_block_delete},
     {"GET", "/v1/workflow/defs", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_list},
     {"GET", "/v1/workflow/defs/", NULL, RM_PREFIX, NULL, CAP_DASHBOARD_READ, rh_wf_get},
     {"POST", "/v1/workflow/validate", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_wf_validate},

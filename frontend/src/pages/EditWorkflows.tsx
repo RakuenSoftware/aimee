@@ -13,7 +13,24 @@ interface BlockDef {
   custom: boolean;
   requires_input: boolean;
   executor?: string;
+  // custom delegate blocks carry these (editable in the block editor):
+  consumes?: string;
+  persona?: string;
+  prompt?: string;
 }
+
+// Artifact types a custom block may consume/produce (mirrors ARTIFACT_NAMES).
+const ARTIFACT_TYPES = [
+  "none",
+  "proposal",
+  "plan",
+  "branch",
+  "frozen_diff",
+  "pr",
+  "verdict",
+  "approval",
+  "intent",
+];
 interface DefRow {
   name: string;
   valid: boolean;
@@ -256,6 +273,34 @@ async function postJSON<T>(
   });
   return { status: r.status, data: (await r.json()) as T };
 }
+async function sendJSON<T>(
+  method: "PUT" | "DELETE",
+  url: string,
+  body?: unknown,
+): Promise<{ status: number; data: T }> {
+  const r = await fetch(url, {
+    method,
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": window._csrf || "" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  let data = {} as T;
+  try {
+    data = (await r.json()) as T;
+  } catch {
+    /* empty bodies are fine */
+  }
+  return { status: r.status, data };
+}
+
+// A custom delegate block being created/edited in the block editor.
+interface BlockForm {
+  name: string;
+  consumes: string;
+  produces: string;
+  persona: string;
+  prompt: string;
+  isNew: boolean;
+}
 
 export default function EditWorkflows() {
   const [defs, setDefs] = useState<DefRow[]>([]);
@@ -270,6 +315,8 @@ export default function EditWorkflows() {
   } | null>(null);
   const [loading, setLoading] = useState(false);
   const [personas, setPersonas] = useState<PersonaInfo[]>([]);
+  const [editBlock, setEditBlock] = useState<BlockForm | null>(null);
+  const [blockStatus, setBlockStatus] = useState<string>("");
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   // This tab's selected project (per-tab project space). Held so the workflow
   // context can scope to it; execution-in-project flows through a chat session's
@@ -372,6 +419,79 @@ export default function EditWorkflows() {
     },
     [graph, mutate],
   );
+
+  // ---- custom block editor (delegate blocks; same CRUD pattern as personas) ----
+  const newBlock = useCallback(() => {
+    setBlockStatus("");
+    setEditBlock({
+      name: "",
+      consumes: "none",
+      produces: "branch",
+      persona: "",
+      prompt: "",
+      isNew: true,
+    });
+  }, []);
+
+  const editExistingBlock = useCallback((b: BlockDef) => {
+    setBlockStatus("");
+    setEditBlock({
+      name: b.name,
+      consumes: b.consumes || "none",
+      produces: b.produces || "branch",
+      persona: b.persona || "",
+      prompt: b.prompt || "",
+      isNew: false,
+    });
+  }, []);
+
+  const saveBlock = useCallback(async () => {
+    if (!editBlock) return;
+    const name = editBlock.name.trim();
+    if (!/^[a-z0-9][a-z0-9_.-]*$/i.test(name)) {
+      setBlockStatus("name must be alphanumeric, - _ or .");
+      return;
+    }
+    if (!editBlock.persona.trim() || !editBlock.prompt.trim()) {
+      setBlockStatus("a persona and a prompt are required");
+      return;
+    }
+    const { status: st } = await sendJSON(
+      "PUT",
+      `/api/workflow/blocks/${encodeURIComponent(name)}`,
+      {
+        consumes: editBlock.consumes,
+        produces: editBlock.produces,
+        persona: editBlock.persona,
+        prompt: editBlock.prompt,
+      },
+    );
+    if (st >= 200 && st < 300) {
+      setBlockStatus("");
+      setEditBlock(null);
+      refreshLists();
+    } else {
+      setBlockStatus(`save failed (${st})`);
+    }
+  }, [editBlock, refreshLists]);
+
+  const deleteBlock = useCallback(async () => {
+    if (!editBlock || editBlock.isNew) {
+      setEditBlock(null);
+      return;
+    }
+    if (!window.confirm(`Delete custom block “${editBlock.name}”?`)) return;
+    const { status: st } = await sendJSON(
+      "DELETE",
+      `/api/workflow/blocks/${encodeURIComponent(editBlock.name)}`,
+    );
+    if (st >= 200 && st < 300) {
+      setEditBlock(null);
+      refreshLists();
+    } else {
+      setBlockStatus(`delete failed (${st})`);
+    }
+  }, [editBlock, refreshLists]);
 
   const deleteNode = useCallback(
     (id: string) => {
@@ -545,21 +665,106 @@ export default function EditWorkflows() {
           </div>
         </Panel>
         <Panel title="Blocks" count={blocks.length}>
-          {blocks.map((b) => (
-            <div
-              key={b.name}
-              onClick={() => addNode(b)}
-              title={`produces ${b.produces}`}
-              style={row}
-            >
-              <span>{b.name}</span>
-              <Badge
-                label={b.custom ? "custom" : b.produces}
-                variant={b.custom ? "info" : "neutral"}
-              />
-            </div>
-          ))}
+          <button onClick={newBlock} style={btn}>
+            + New
+          </button>
+          <div style={{ marginTop: 6 }}>
+            {blocks.map((b) => (
+              <div
+                key={b.name}
+                onClick={() => addNode(b)}
+                title={`produces ${b.produces} — click to add to the canvas`}
+                style={row}
+              >
+                <span>{b.name}</span>
+                <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                  {b.custom && b.executor === "delegate" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        editExistingBlock(b);
+                      }}
+                      style={{ ...btnSmall, padding: "0 6px" }}
+                      title="edit this custom block"
+                    >
+                      ✎
+                    </button>
+                  )}
+                  <Badge
+                    label={b.custom ? "custom" : b.produces}
+                    variant={b.custom ? "info" : "neutral"}
+                  />
+                </span>
+              </div>
+            ))}
+          </div>
         </Panel>
+        {editBlock && (
+          <Panel title={editBlock.isNew ? "New custom block" : `Edit block: ${editBlock.name}`}>
+            <div style={{ display: "grid", gap: 6 }}>
+              <label style={lbl}>
+                name
+                <input
+                  style={{ ...inp, width: "100%" }}
+                  value={editBlock.name}
+                  disabled={!editBlock.isNew}
+                  onChange={(e) => setEditBlock({ ...editBlock, name: e.target.value })}
+                />
+              </label>
+              <label style={lbl}>
+                consumes
+                <select
+                  style={{ ...inp, width: "100%" }}
+                  value={editBlock.consumes}
+                  onChange={(e) => setEditBlock({ ...editBlock, consumes: e.target.value })}
+                >
+                  {ARTIFACT_TYPES.map((a) => (
+                    <option key={a} value={a}>
+                      {a}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={lbl}>
+                produces
+                <select
+                  style={{ ...inp, width: "100%" }}
+                  value={editBlock.produces}
+                  onChange={(e) => setEditBlock({ ...editBlock, produces: e.target.value })}
+                >
+                  <option value="branch">branch</option>
+                  <option value="none">none</option>
+                </select>
+              </label>
+              <label style={lbl}>
+                persona
+                <input
+                  style={{ ...inp, width: "100%" }}
+                  list="wf-persona-opts"
+                  value={editBlock.persona}
+                  onChange={(e) => setEditBlock({ ...editBlock, persona: e.target.value })}
+                />
+              </label>
+              <label style={lbl}>
+                prompt
+                <textarea
+                  style={{ ...inp, width: "100%", minHeight: 80, fontFamily: "ui-monospace, monospace" }}
+                  value={editBlock.prompt}
+                  onChange={(e) => setEditBlock({ ...editBlock, prompt: e.target.value })}
+                />
+              </label>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <button onClick={saveBlock} style={btn}>
+                  Save
+                </button>
+                <button onClick={deleteBlock} style={{ ...btn, color: "#b00" }}>
+                  {editBlock.isNew ? "Cancel" : "Delete"}
+                </button>
+                {blockStatus && <span style={{ fontSize: 12, color: "#b00" }}>{blockStatus}</span>}
+              </div>
+            </div>
+          </Panel>
+        )}
       </div>
 
       {/* center: canvas. minWidth:0 lets this flex item shrink below the 1600px
