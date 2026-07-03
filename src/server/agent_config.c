@@ -751,6 +751,23 @@ int agent_load_config(agent_config_t *cfg)
             }
          }
 
+         /* Personas this agent may be dispatched AS (delegate identities). An
+          * absent/empty list means "all" (agent_supports_persona), so existing
+          * agents.json without this key keep serving every persona. */
+         cJSON *personas = cJSON_GetObjectItem(a, "personas");
+         if (personas && cJSON_IsArray(personas))
+         {
+            int pn = cJSON_GetArraySize(personas);
+            if (pn > MAX_AGENT_PERSONAS)
+               pn = MAX_AGENT_PERSONAS;
+            for (int j = 0; j < pn; j++)
+            {
+               cJSON *p = cJSON_GetArrayItem(personas, j);
+               if (cJSON_IsString(p))
+                  snprintf(ag->personas[ag->persona_count++], 32, "%s", p->valuestring);
+            }
+         }
+
          /* Middleware configuration (optional per-agent overrides) */
          cJSON *mw = cJSON_GetObjectItem(a, "middleware");
          if (mw && cJSON_IsObject(mw))
@@ -978,6 +995,15 @@ int agent_save_config(const agent_config_t *cfg)
          cJSON_AddItemToArray(roles, cJSON_CreateString(ag->roles[j]));
       cJSON_AddItemToObject(a, "roles", roles);
 
+      /* Only serialize personas when explicitly set (empty = "all" implicitly). */
+      if (ag->persona_count > 0)
+      {
+         cJSON *personas = cJSON_CreateArray();
+         for (int j = 0; j < ag->persona_count; j++)
+            cJSON_AddItemToArray(personas, cJSON_CreateString(ag->personas[j]));
+         cJSON_AddItemToObject(a, "personas", personas);
+      }
+
       cJSON_AddNumberToObject(a, "cost_tier", ag->cost_tier);
       cJSON_AddNumberToObject(a, "max_tokens", ag->max_tokens);
       cJSON_AddNumberToObject(a, "timeout_ms", ag->timeout_ms);
@@ -1160,6 +1186,24 @@ int agent_has_role(const agent_t *agent, const char *role)
    for (int i = 0; i < agent->role_count; i++)
    {
       if (strcmp(agent->roles[i], role) == 0)
+         return 1;
+   }
+   return 0;
+}
+
+/* 1 if the agent may be dispatched AS `persona`. An agent with no personas list
+ * (backward-compatible default) or one containing the "all" wildcard serves any
+ * persona; otherwise the persona must be listed. A NULL/empty persona is treated
+ * as unconstrained (routing then depends on role alone). */
+int agent_supports_persona(const agent_t *agent, const char *persona)
+{
+   if (!agent)
+      return 0;
+   if (!persona || !persona[0] || agent->persona_count == 0)
+      return 1;
+   for (int i = 0; i < agent->persona_count; i++)
+   {
+      if (strcmp(agent->personas[i], "all") == 0 || strcmp(agent->personas[i], persona) == 0)
          return 1;
    }
    return 0;

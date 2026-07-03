@@ -123,6 +123,34 @@ static void test_agent_has_role(void)
    assert(agent_has_role(&agent, "summarize") == 0);
 }
 
+static void test_agent_supports_persona(void)
+{
+   agent_t agent;
+   memset(&agent, 0, sizeof(agent));
+
+   /* No personas listed -> supports every persona (backward compatible). */
+   assert(agent_supports_persona(&agent, "architect") == 1);
+   assert(agent_supports_persona(&agent, "engineer") == 1);
+
+   /* Explicit list gates by name. */
+   strcpy(agent.personas[0], "engineer");
+   agent.persona_count = 1;
+   assert(agent_supports_persona(&agent, "engineer") == 1);
+   assert(agent_supports_persona(&agent, "architect") == 0);
+
+   /* The "all" wildcard serves any persona. */
+   strcpy(agent.personas[0], "all");
+   agent.persona_count = 1;
+   assert(agent_supports_persona(&agent, "engineer") == 1);
+   assert(agent_supports_persona(&agent, "architect") == 1);
+   assert(agent_supports_persona(&agent, "anything") == 1);
+
+   /* NULL agent -> not supported; NULL/empty persona -> unconstrained. */
+   assert(agent_supports_persona(NULL, "engineer") == 0);
+   assert(agent_supports_persona(&agent, NULL) == 1);
+   assert(agent_supports_persona(&agent, "") == 1);
+}
+
 static void test_agent_find(void)
 {
    agent_config_t cfg;
@@ -2160,6 +2188,7 @@ int main(void)
    test_agent_name_valid();
    test_agent_expand_env();
    test_agent_has_role();
+   test_agent_supports_persona();
    test_agent_find();
    test_agent_route();
    test_agent_route_with_caps_honors_tools_enabled();

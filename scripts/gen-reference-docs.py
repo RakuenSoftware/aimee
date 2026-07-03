@@ -907,6 +907,7 @@ AGENT_FIELD_DESC = {
     "context_warn_pct": "Context % at which to warn.",
     "stall_threshold": "Stall-detection threshold.",
     "roles": "Roles this agent serves (review, plan, …).",
+    "personas": "Personas this agent may be dispatched AS (engineer, architect, …); `\"all\"` or omitted = every persona.",
     "exec_roles": "Roles this agent may execute with tools.",
     "exec_system_prompt": "System prompt for exec/tool runs.",
     "tools_enabled": "Allow tool use for this agent.",

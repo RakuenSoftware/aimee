@@ -9,6 +9,7 @@ struct cJSON;
 
 #define MAX_AGENTS               16
 #define MAX_AGENT_ROLES          16
+#define MAX_AGENT_PERSONAS       16
 #define MAX_AGENT_NAME           64
 #define MAX_ENDPOINT_LEN         512
 #define MAX_MODEL_LEN            128
@@ -229,6 +230,11 @@ typedef struct
    char provider[16];
    char roles[MAX_AGENT_ROLES][32];
    int role_count;
+   /* Personas this agent may be dispatched AS (delegate identities: engineer,
+    * architect, reviewer, ...). The wildcard "all" (or an empty/absent list, for
+    * backward compatibility) means the agent may serve every persona. */
+   char personas[MAX_AGENT_PERSONAS][32];
+   int persona_count;
    int cost_tier;
    int max_tokens;
    int timeout_ms;

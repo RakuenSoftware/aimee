@@ -610,6 +610,7 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `name` | Agent identifier. |
 | `network` | Network mode (backend sandbox). |
 | `networks` | Allowed networks. |
+| `personas` | Personas this agent may be dispatched AS (engineer, architect, …); `"all"` or omitted = every persona. |
 | `port` | Target port (relay / tunnel). |
 | `provider` | Provider name. |
 | `recommended_sampling` | Provider-recommended sampling parameters. |

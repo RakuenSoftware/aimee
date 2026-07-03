@@ -207,6 +207,12 @@ static void setup_api_provider(agent_config_t *cfg, const char *provider, const 
          snprintf(ag->roles[ag->role_count++], 32, "%s", defaults[i]);
    }
 
+   /* Personas the agent may be dispatched AS. Default to the "all" wildcard so a
+    * fresh agent can serve every delegate persona (engineer/architect/...); an
+    * operator can narrow this in agents.json. */
+   ag->persona_count = 0;
+   snprintf(ag->personas[ag->persona_count++], 32, "all");
+
    if (cfg->agent_count == 1 || !cfg->default_agent[0])
       snprintf(cfg->default_agent, MAX_AGENT_NAME, "%s", name_buf);
 

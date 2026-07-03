@@ -39,6 +39,7 @@ int agent_any_delegate_available(void);
 void agent_set_route_health_filter(int (*fn)(const char *agent_name));
 
 int agent_has_role(const agent_t *agent, const char *role);
+int agent_supports_persona(const agent_t *agent, const char *persona);
 int agent_is_exec_role(const agent_t *agent, const char *role);
 void agent_expand_env(const char *src, char *dst, size_t dst_len);
 int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len);

@@ -24,6 +24,8 @@
 #include "agent_exec.h"
 #include "agent_types.h"
 #include "cJSON.h"
+#include "delegate_role.h"
+#include "persona.h"
 #include "headers/git_verify.h"
 #include "log.h"
 #include "util.h"
@@ -100,9 +102,20 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
       return -1;
    }
 
+   /* The producing blocks pass a PERSONA (engineer / architect / ...) — the
+    * delegate's IDENTITY — in this slot, NOT an agent routing role. (It was
+    * historically misused as a role, so no agent matched — author/implement
+    * looped forever.) Compose the persona's identity + principles as the system
+    * prompt, and route by a ROLE the persona is allowed to use that an eligible
+    * agent can serve. */
+   const char *persona = (role && role[0]) ? role : "engineer";
+   char *sys_prompt = persona_compose_delegate_prompt(persona, workdir, "");
+   persona_t pinfo;
+   memset(&pinfo, 0, sizeof pinfo);
+   persona_load(NULL, persona, &pinfo);
+
    /* Run WITH TOOLS, pinned to the work-item worktree, so file edits land there.
-    * A specific agent runs by name; otherwise route by role. max_tokens 0 =
-    * model-derived cap (never under-cap a reasoning delegate). */
+    * A specific agent runs by name; otherwise route by persona. */
    run_cmd_set_cwd(workdir);
    agent_result_t res;
    memset(&res, 0, sizeof(res));
@@ -113,17 +126,49 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
       if (!ag)
       {
          run_cmd_set_cwd(NULL);
+         free(sys_prompt);
+         persona_free(&pinfo);
          if (err && errlen)
             snprintf(err, errlen, "wfe live delegate: unknown delegate '%s'", agent_name);
          return -1;
       }
-      rc = agent_execute_with_tools(ag, NULL, "", prompt, AGENT_DEFAULT_MAX_TOKENS, 0.3, &res);
+      rc = agent_execute_with_tools(ag, &acfg.network, sys_prompt ? sys_prompt : "", prompt,
+                                    AGENT_DEFAULT_MAX_TOKENS, 0.3, &res);
    }
    else
    {
-      rc = agent_run_with_tools(&acfg, role, "", prompt, AGENT_DEFAULT_MAX_TOKENS, &res);
+      /* Route by the persona's allowed roles: pick the first role a healthy,
+       * persona-eligible agent can serve (agent_route already applies health +
+       * cost-tier), then run that agent AS the persona. */
+      agent_t *chosen = NULL;
+      const char *chosen_role = NULL;
+      for (int ri = 0; ri < pinfo.roles_count && !chosen; ri++)
+      {
+         const char *r = delegate_role_canonicalize(pinfo.roles[ri]);
+         agent_t *ag = agent_route(&acfg, r);
+         if (ag && agent_supports_persona(ag, persona))
+         {
+            chosen = ag;
+            chosen_role = r;
+         }
+      }
+      if (!chosen)
+      {
+         run_cmd_set_cwd(NULL);
+         free(sys_prompt);
+         persona_free(&pinfo);
+         if (err && errlen)
+            snprintf(err, errlen, "wfe live delegate: no enabled agent eligible for persona '%s'",
+                     persona);
+         return -1;
+      }
+      rc = agent_execute_with_tools_for_role(chosen, &acfg.network, chosen_role,
+                                             sys_prompt ? sys_prompt : "", prompt,
+                                             AGENT_DEFAULT_MAX_TOKENS, 0.3, &res);
    }
    run_cmd_set_cwd(NULL);
+   free(sys_prompt);
+   persona_free(&pinfo);
 
    if (rc != 0)
    {
