@@ -17,6 +17,8 @@
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "context_reduce.h"
+#include "gateway_mutate_wire.h"
+#include "server_http_identity.h"
 #include "agent_protocol.h"
 #include "agent_types.h"
 #include "anthropic_ingress.h"
@@ -363,6 +365,32 @@ static char *build_anthropic_provider_body(const cJSON *in, const agent_t *ag, i
 
 /* --- Buffered: POST /v1/messages (stream:false) ------------------------- */
 
+/* Build the upstream provider body from the current `req` (Anthropic parity path
+ * duplicates req directly; otherwise via the IR path or the legacy translator over
+ * the extracted messages/tools/system). Re-callable so the gateway-mutation 4xx
+ * restore path can rebuild the body from the restored (pristine) req. Returns a
+ * malloc'd JSON string (caller frees) or NULL. */
+static char *anthropic_build_prov_body(cJSON *req, const delegate_driver_t *driver,
+                                       const agent_t *ag, int parity, cJSON *messages, cJSON *tools,
+                                       const char *system_text)
+{
+   char *prov_body = NULL;
+   if (driver_is_anthropic(driver))
+      prov_body = build_anthropic_provider_body(req, ag, 0, parity);
+   else
+   {
+      if (aimee_ir_path_enabled())
+         prov_body = aimee_ir_build_provider_body(
+             req, driver->name, ag->model,
+             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)));
+      if (!prov_body)
+         prov_body = build_provider_body(driver, ag, messages, tools, system_text,
+                                         agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
+                                         jo_num(req, "temperature", 1.0), 0);
+   }
+   return prov_body;
+}
+
 static int messages_buffered(const char *body, char *resp, int cap)
 {
    cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
@@ -378,6 +406,8 @@ static int messages_buffered(const char *body, char *resp, int cap)
    parsed_response_t parsed;
    int status, http_status, rc;
    const char *model;
+   gw_mutate_ctx_t gwmc;
+   gw_mutate_ctx_init(&gwmc);
 
    if (!req)
       return write_error(resp, cap, 400, "invalid_request_error", "invalid JSON body");
@@ -411,6 +441,19 @@ static int messages_buffered(const char *body, char *resp, int cap)
    /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
     * the pointer cached above (line ~397) could now dangle. */
    model = jo_cstr(req, "model");
+
+   /* Economizer gateway MUTATION (primary-agent reduction). Default-OFF. Reduces
+    * req["messages"] in place (compress-only) BEFORE translate/build so the provider
+    * body is assembled from the reduced array; on a bad reduction the upstream 4xx is
+    * caught below (restore-resend), the session is circuit-broken, and provenance is
+    * cleared. A dark no-op when reduce_gateway_mutate is off. */
+   {
+      char *mut_sys = anthropic_system_to_text(req);
+      gw_buffered_mutate(req, "messages", model, mut_sys, server_http_identity_session_hdr(),
+                         server_http_identity_bearer(), server_http_identity_principal(), &gwmc);
+      free(mut_sys);
+   }
+
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
@@ -423,25 +466,30 @@ static int messages_buffered(const char *body, char *resp, int cap)
    else
       agent_build_extra_headers(ag, extra, sizeof(extra));
 
-   if (driver_is_anthropic(driver))
-      prov_body = build_anthropic_provider_body(req, ag, 0, parity);
-   else
-   {
-      /* Slice 5: build the provider request VIA THE IR (parse -> IR ->
-       * backend.build; NO direct anthropic->openai translation) when the IR-path
-       * flag is on. Falls back to the legacy translator on any failure or when the
-       * flag is off, so behavior is unchanged by default. */
-      if (aimee_ir_path_enabled())
-         prov_body = aimee_ir_build_provider_body(
-             req, driver->name, ag->model,
-             agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)));
-      if (!prov_body)
-         prov_body = build_provider_body(driver, ag, messages, tools, system_text,
-                                         agent_request_max_tokens(ag, jo_int(req, "max_tokens", 0)),
-                                         jo_num(req, "temperature", 1.0), 0);
-   }
+   prov_body = anthropic_build_prov_body(req, driver, ag, parity, messages, tools, system_text);
    http_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &response, ag->timeout_ms,
                                  extra[0] ? extra : NULL);
+
+   /* Gateway mutation post-send: on ANY 4xx of a mutated request, restore the
+    * pristine original, repair, disable the session, and resend ONCE from pristine;
+    * on 5xx, disable the session without resending. No-op unless we mutated. */
+   if (gw_buffered_after_status(req, "messages", http_status, &gwmc) == GW_POST_RESEND)
+   {
+      cJSON_Delete(messages);
+      messages = NULL;
+      cJSON_Delete(tools);
+      tools = NULL;
+      free(system_text);
+      system_text = NULL;
+      translate_request(req, driver, ag, &messages, &tools, &system_text);
+      free(prov_body);
+      prov_body = anthropic_build_prov_body(req, driver, ag, parity, messages, tools, system_text);
+      free(response);
+      response = NULL;
+      http_status = agent_http_post(url, auth, prov_body ? prov_body : "{}", &response,
+                                    ag->timeout_ms, extra[0] ? extra : NULL);
+   }
+
    if (http_status != 200 || !response)
    {
       /* Exact parity: relay the upstream status + Anthropic error body verbatim
@@ -509,6 +557,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    agent_free_parsed_response(&parsed);
 
 cleanup:
+   gw_mutate_ctx_free(&gwmc);
    cJSON_Delete(out);
    cJSON_Delete(provider_resp);
    free(response);

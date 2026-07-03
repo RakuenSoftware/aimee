@@ -46,6 +46,13 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf);
  * capture and clear, i.e. during a route handler on the serving thread. */
 const char *server_http_identity_principal(void);
 
+/* The in-flight request's inbound `aimee-session-id` header value and bearer token
+ * (both "" when absent), for the economizer gateway-mutation session-key resolver.
+ * Valid only during a route handler on the serving thread (same lifetime as the
+ * principal); the bearer buffer is zeroed on clear. */
+const char *server_http_identity_session_hdr(void);
+const char *server_http_identity_bearer(void);
+
 /* The in-flight request's query string ("k=v&…", no '?'), or "" if none. Set by
  * server_http_identity_set_query around the route call, cleared by _clear. Valid
  * only during a route handler on the serving thread; points into the request
