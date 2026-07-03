@@ -766,7 +766,11 @@ void config_parse_reduce_section(config_t *cfg, cJSON *root)
       cfg->reduce_gateway_mutate = cJSON_IsTrue(item) ? 1 : 0;
    item = cJSON_GetObjectItemCaseSensitive(reduce, "gateway_session_disable_ttl_ms");
    if (cJSON_IsNumber(item))
-      cfg->reduce_gateway_session_disable_ttl_ms = (int)item->valuedouble;
+      /* Use cJSON's pre-narrowed valueint (clamped to INT_MIN..INT_MAX at parse) —
+       * casting an out-of-range valuedouble to int is UB, and a fractional value
+       * truncates. A resulting <=0 (incl. a truncated 0.x) is caught startup-fatal
+       * by config_reduce_validate(). */
+      cfg->reduce_gateway_session_disable_ttl_ms = item->valueint;
    item = cJSON_GetObjectItemCaseSensitive(reduce, "freeze_guard");
    if (cJSON_IsBool(item))
       cfg->reduce_freeze_guard_enabled = cJSON_IsTrue(item) ? 1 : 0;
@@ -783,14 +787,18 @@ void config_parse_reduce_section(config_t *cfg, cJSON *root)
 /* Normalize economizer gateway-mutation invariants IN MEMORY after parse. mutate=1
  * requires the shadow seam so the validation gates always have a same-payload
  * baseline: auto-enable reduce_gateway_seam in memory (never rewriting the file)
- * and WARN once per (uncached) load. A config left at seam=0,mutate=1 repeats the
- * WARN each start until corrected. Does NOT touch reduce_gateway_seam_explicit, so
- * config_save still omits the synthesized seam. */
+ * and WARN. config_load is mtime-cached, so this runs (and warns) once per uncached
+ * load; a config left at seam=0,mutate=1 repeats the WARN each fresh start until
+ * corrected. Synthesizing the seam also FORCES reduce_gateway_seam_explicit=0 so
+ * config_save never persists the synthesized value — even when the file explicitly
+ * set gateway_seam:false alongside mutate:true (mutate wins in memory, but the
+ * operator's on-disk false is not silently rewritten to true). */
 void config_apply_reduce_consistency(config_t *cfg)
 {
    if (cfg->reduce_gateway_mutate && !cfg->reduce_gateway_seam)
    {
       cfg->reduce_gateway_seam = 1;
+      cfg->reduce_gateway_seam_explicit = 0; /* synthesized -> not persistable */
       fprintf(stderr,
               "aimee: config warning: reduce.gateway_mutate=1 requires reduce.gateway_seam; "
               "auto-enabling the shadow seam in memory (set reduce.gateway_seam: true to "

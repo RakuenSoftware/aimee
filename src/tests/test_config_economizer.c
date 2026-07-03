@@ -176,6 +176,15 @@ int main(void)
       cfg.reduce_gateway_seam = 0;
       config_apply_reduce_consistency(&cfg);
       assert(cfg.reduce_gateway_seam == 0);
+      /* seam:false + mutate:true — synthesis must CLEAR explicit so config_save
+       * never rewrites the operator's on-disk false to true. */
+      memset(&cfg, 0, sizeof(cfg));
+      cfg.reduce_gateway_mutate = 1;
+      cfg.reduce_gateway_seam = 0;
+      cfg.reduce_gateway_seam_explicit = 1; /* operator wrote gateway_seam: false */
+      config_apply_reduce_consistency(&cfg);
+      assert(cfg.reduce_gateway_seam == 1);          /* mutate wins in memory */
+      assert(cfg.reduce_gateway_seam_explicit == 0); /* but not persistable */
    }
 
    /* --- startup-fatal TTL validation: <=0 rejected, >0 accepted --- */
