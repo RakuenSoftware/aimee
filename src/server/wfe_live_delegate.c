@@ -26,6 +26,7 @@
 #include "cJSON.h"
 #include "delegate_role.h"
 #include "persona.h"
+#include "provider_catalog.h"
 #include "headers/git_verify.h"
 #include "log.h"
 #include "util.h"
@@ -137,19 +138,31 @@ static int wfe_live_delegate_run(const char *workdir, const char *role, const ch
    }
    else
    {
-      /* Route by the persona's allowed roles: pick the first role a healthy,
-       * persona-eligible agent can serve (agent_route already applies health +
-       * cost-tier), then run that agent AS the persona. */
+      /* Route by the persona's allowed roles (ordered by preference): for the
+       * first role that ANY healthy, persona-eligible agent serves, pick the
+       * lowest-cost-tier such agent. Scanning every agent per role (not just
+       * agent_route's single best) means a persona-ineligible best-tier agent
+       * can't shadow an eligible one that serves the same role. */
       agent_t *chosen = NULL;
       const char *chosen_role = NULL;
+      int best_tier = 0;
       for (int ri = 0; ri < pinfo.roles_count && !chosen; ri++)
       {
          const char *r = delegate_role_canonicalize(pinfo.roles[ri]);
-         agent_t *ag = agent_route(&acfg, r);
-         if (ag && agent_supports_persona(ag, persona))
+         for (int ai = 0; ai < acfg.agent_count; ai++)
          {
-            chosen = ag;
-            chosen_role = r;
+            agent_t *ag = &acfg.agents[ai];
+            if (!ag->enabled || !agent_has_role(ag, r) || !agent_supports_persona(ag, persona) ||
+                !agent_is_available_for_routing(ag))
+               continue;
+            if (provider_catalog_get_health(ag->name) == CATALOG_HEALTH_DOWN)
+               continue;
+            if (!chosen || ag->cost_tier < best_tier)
+            {
+               chosen = ag;
+               chosen_role = r;
+               best_tier = ag->cost_tier;
+            }
          }
       }
       if (!chosen)
