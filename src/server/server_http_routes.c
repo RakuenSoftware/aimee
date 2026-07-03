@@ -64,11 +64,11 @@
 #include <errno.h>            /* strtol overflow detection for /v1/dev/submit caps */
 #include "wfe_engine.h"       /* wfe_work_item_create — POST /v1/dev/submit intake */
 #include "router_advise.h"    /* S4: router_autonomous_pick/_audit for dev-submit parity */
-#include "wfe_scheduler.h"        /* wfe_scheduler_notify — resume the autonomy driver */
-#include "wfe_approval.h"         /* wfe_approval_record/present — human-gate approval */
-#include "wfe_store.h"            /* db1_work_item_* — gate approve/reject */
-#include <sys/stat.h>             /* mkdir for the proposal artifact dir */
-#include <time.h>                 /* unique proposal artifact filename */
+#include "wfe_scheduler.h"    /* wfe_scheduler_notify — resume the autonomy driver */
+#include "wfe_approval.h"     /* wfe_approval_record/present — human-gate approval */
+#include "wfe_store.h"        /* db1_work_item_* — gate approve/reject */
+#include <sys/stat.h>         /* mkdir for the proposal artifact dir */
+#include <time.h>             /* unique proposal artifact filename */
 
 /* Per-request context handed to a route handler. `id` holds the extracted
  * dynamic path segment (persona / role-template name, session id, run id) for
