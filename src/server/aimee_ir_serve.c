@@ -22,6 +22,20 @@ int aimee_ir_path_enabled(void)
    return 1;
 }
 
+int aimee_ir_stream_relay_enabled(void)
+{
+   /* DEFAULT-OFF, gated SEPARATELY from AIMEE_IR_PATH (roundtable Q6: gate
+    * buffered-IR / streaming-IR / passthrough independently). When on, the
+    * incremental OpenAI-chat -> Anthropic SSE relay is driven by the neutral
+    * IR-delta model (openai_chunk_to_deltas -> anthropic_delta_emit) instead of
+    * the legacy anthropic_stream_feed_openai translator -- eliminating the last
+    * live direct-translation site. Ships dark; enablement is a rollout decision
+    * gated on live cross-protocol parity, exactly like the legacy-deletion step.
+    * (The user's codex config uses the buffered-replay path, not this relay.) */
+   const char *v = getenv("AIMEE_IR_STREAM_RELAY");
+   return v && (strcmp(v, "1") == 0 || strcmp(v, "on") == 0 || strcmp(v, "true") == 0);
+}
+
 char *aimee_ir_build_provider_body(const cJSON *req, const char *driver_name,
                                    const char *agent_model, int max_tokens_override)
 {

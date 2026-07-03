@@ -22,6 +22,12 @@ char *aimee_ir_build_provider_body(const struct cJSON *req, const char *driver_n
 /* 1 if the IR live-path flag is enabled (config-only: AIMEE_IR_PATH env). */
 int aimee_ir_path_enabled(void);
 
+/* 1 if the IR-delta streaming relay is enabled (config-only: AIMEE_IR_STREAM_RELAY
+ * env; DEFAULT-OFF, gated separately from AIMEE_IR_PATH). When on, the incremental
+ * OpenAI-chat -> Anthropic SSE relay uses the neutral IR-delta model instead of the
+ * legacy anthropic_stream_feed_openai translator. */
+int aimee_ir_stream_relay_enabled(void);
+
 /* Drop-in for openai_parse_responses_to_chat that routes the /v1/responses CLIENT
  * parse THROUGH THE IR (responses_frontend_parse -> IR -> chat components), instead
  * of a direct Responses->chat translation. Same out-param contract: `model` buffer,

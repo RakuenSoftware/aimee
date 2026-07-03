@@ -30,6 +30,7 @@
 #include "router_advise.h"   /* gw_stage_router — the request->workflow seam */
 #include "aimee_ir_shadow.h" /* Slice 3: IR shadow-mode observer */
 #include "aimee_ir_serve.h"  /* Slice 5: IR live request-build */
+#include "aimee_ir_stream.h" /* Slice 5-wire: IR-delta incremental relay */
 #include "ingress_preinject.h"
 #include "json_fluent.h"
 #include "server_http.h"
@@ -577,7 +578,18 @@ cleanup:
 typedef struct
 {
    sse_parser_t parser;
-   anthropic_stream_xlate_t *xl;
+   anthropic_stream_xlate_t *xl; /* legacy incremental translator */
+   /* Slice 5-wire: neutral IR-delta relay (used instead of `xl` when the
+    * AIMEE_IR_STREAM_RELAY flag is on). Provider OpenAI-chat SSE chunks ->
+    * openai_chunk_to_deltas -> anthropic_delta_emit -> `emit`. */
+   int ir_relay;
+   openai_stream_state_t ir_ost;
+   anthropic_stream_state_t ir_ast;
+   server_http_sse_event_emit emit;
+   void *emit_ctx;
+   const char *msg_id;
+   const char *model;
+   long ir_usage_out; /* tapped from the TURN_STOP delta for the cost row */
 } prov_stream_ctx_t;
 
 typedef struct
@@ -611,7 +623,36 @@ static int prov_line_cb(const char *line, size_t len, void *ud)
       const char *p = line + 5;
       while (*p == ' ')
          p++;
-      anthropic_stream_feed_openai(c->xl, p); /* line is NUL-terminated by the parser */
+      if (c->ir_relay)
+      {
+         /* OpenAI-chat providers close the stream with a literal `data: [DONE]`
+          * sentinel that is not JSON; the finish_reason chunk already produced the
+          * IR TURN_STOP, so just skip it. */
+         if (strcmp(p, "[DONE]") == 0)
+            return 0;
+         cJSON *chunk = cJSON_Parse(p);
+         if (chunk)
+         {
+            /* A finish chunk closes EVERY open block (text + up to
+             * AIMEE_STREAM_MAX_TOOLS tool blocks) then TURN_STOP in one call, and
+             * a chunk carrying many tool_calls opens as many; size the buffer to
+             * hold the worst case so the terminal TURN_STOP is never truncated
+             * (which would hang the client's SSE reader). */
+            aimee_delta_t deltas[2 * AIMEE_STREAM_MAX_TOOLS + 4];
+            int n = openai_chunk_to_deltas(chunk, &c->ir_ost, deltas,
+                                           (int)(sizeof deltas / sizeof deltas[0]));
+            for (int i = 0; i < n; i++)
+            {
+               if (deltas[i].type == AIMEE_DELTA_TURN_STOP)
+                  c->ir_usage_out = deltas[i].usage_out;
+               anthropic_delta_emit(&deltas[i], &c->ir_ast, c->msg_id, c->model, c->emit,
+                                    c->emit_ctx);
+            }
+            cJSON_Delete(chunk);
+         }
+      }
+      else
+         anthropic_stream_feed_openai(c->xl, p); /* line is NUL-terminated by the parser */
    }
    return 0;
 }
@@ -1018,6 +1059,67 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    }
 
    input_est = messages ? session_compact_estimate_tokens(messages) : 0;
+
+   if (aimee_ir_stream_relay_enabled())
+   {
+      /* Slice 5-wire (default-off): drive the incremental OpenAI-chat -> Anthropic
+       * SSE relay through the neutral IR-delta model instead of the legacy
+       * anthropic_stream_feed_openai translator -- the last live direct-translation
+       * site. */
+      memset(&pc, 0, sizeof pc);
+      sse_parser_init(&pc.parser);
+      pc.ir_relay = 1;
+      openai_stream_state_init(&pc.ir_ost);
+      pc.emit = emit;
+      pc.emit_ctx = ctx;
+      pc.msg_id = msg_id;
+      pc.model = model;
+      int ir_status = agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", prov_chunk_cb,
+                                             &pc, ag->timeout_ms, extra[0] ? extra : NULL);
+      sse_parser_free(&pc.parser);
+      /* Finish-safety: if the upstream cut off before a finish_reason chunk (no IR
+       * TURN_STOP was produced), synthesize the closing sequence so the client's
+       * SSE reader terminates cleanly, mirroring anthropic_stream_finish. Close any
+       * still-open content blocks, then emit TURN_STOP. */
+      if (pc.ir_ast.started && !pc.ir_ost.stopped)
+      {
+         aimee_delta_t bs = {0};
+         bs.type = AIMEE_DELTA_BLOCK_STOP;
+         if (pc.ir_ost.text_block >= 0)
+         {
+            bs.block_id = pc.ir_ost.text_block;
+            anthropic_delta_emit(&bs, &pc.ir_ast, msg_id, model, emit, ctx);
+         }
+         for (int i = 0; i < AIMEE_STREAM_MAX_TOOLS; i++)
+            if (pc.ir_ost.tool_block[i] >= 0)
+            {
+               bs.block_id = pc.ir_ost.tool_block[i];
+               anthropic_delta_emit(&bs, &pc.ir_ast, msg_id, model, emit, ctx);
+            }
+         aimee_delta_t ts = {0};
+         ts.type = AIMEE_DELTA_TURN_STOP;
+         ts.stop_reason = AIMEE_STOP_END_TURN;
+         ts.usage_out = pc.ir_usage_out;
+         anthropic_delta_emit(&ts, &pc.ir_ast, msg_id, model, emit, ctx);
+      }
+      /* Cost row: input from the local estimate (message_start reports 0, same as
+       * the legacy translator's estimate basis), output tapped from the IR
+       * TURN_STOP delta. */
+      if ((input_est > 0 || pc.ir_usage_out > 0) && agent_ingress_accounting_enabled())
+      {
+         agent_result_t ar;
+         memset(&ar, 0, sizeof(ar));
+         snprintf(ar.agent_name, sizeof(ar.agent_name), "%s", ag->name);
+         snprintf(ar.model, sizeof(ar.model), "%s", ag->model);
+         snprintf(ar.requested_model, sizeof(ar.requested_model), "%s", model ? model : "");
+         ar.prompt_tokens = input_est;
+         ar.completion_tokens = (int)pc.ir_usage_out;
+         agent_record_token_audit_kind(&ar, "", "anthropic-ingress",
+                                       ir_status == 200 ? "realized" : "partial");
+      }
+      goto cleanup;
+   }
+
    xl = anthropic_stream_begin(msg_id, model, input_est, emit, ctx);
    if (!xl)
       goto cleanup;

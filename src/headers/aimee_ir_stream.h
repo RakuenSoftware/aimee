@@ -43,4 +43,18 @@ typedef struct
 char *anthropic_delta_render(const aimee_delta_t *d, anthropic_stream_state_t *st,
                              const char *msg_id, const char *model);
 
+/* Split (ctx, event, data_json) SSE sink -- signature-compatible with the
+ * server's server_http_sse_event_emit, so the live relay's emit is passed
+ * directly. */
+typedef void (*aimee_sse_emit_fn)(void *ctx, const char *event, const char *data_json);
+
+/* Like anthropic_delta_render, but emits each Anthropic SSE event via `emit`
+ * (event name + data JSON, unframed) instead of returning a framed string --
+ * matches the live SSE relay's split emit sink. TURN_STOP emits two events
+ * (message_delta + message_stop). Returns the number of events emitted. This is
+ * the replacement for the legacy incremental translator (anthropic_stream_feed_
+ * openai) on the live relay path. */
+int anthropic_delta_emit(const aimee_delta_t *d, anthropic_stream_state_t *st, const char *msg_id,
+                         const char *model, aimee_sse_emit_fn emit, void *ctx);
+
 #endif /* DEC_AIMEE_IR_STREAM_H */

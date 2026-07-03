@@ -185,11 +185,17 @@ static char *sse_frame(const char *ev, cJSON *data)
    return buf;
 }
 
-char *anthropic_delta_render(const aimee_delta_t *d, anthropic_stream_state_t *st,
-                             const char *msg_id, const char *model)
+/* Build the Anthropic SSE event object(s) for one IR delta into ev[]/js[] (up to
+ * 2 -- TURN_STOP is message_delta + message_stop). Returns the count (0 = no
+ * output). The caller owns the returned cJSON (frees / serializes them). st is
+ * updated (TURN_START sets st->started). Shared by anthropic_delta_render (frames)
+ * and anthropic_delta_emit (callback) so the two never drift. */
+static int delta_build_events(const aimee_delta_t *d, anthropic_stream_state_t *st,
+                              const char *msg_id, const char *model, const char *ev[2],
+                              cJSON *js[2])
 {
    if (!d)
-      return NULL;
+      return 0;
    switch (d->type)
    {
    case AIMEE_DELTA_TURN_START:
@@ -206,7 +212,9 @@ char *anthropic_delta_render(const aimee_delta_t *d, anthropic_stream_state_t *s
       cJSON_AddNumberToObject(u, "input_tokens", 0);
       if (st)
          st->started = 1;
-      return sse_frame("message_start", o);
+      ev[0] = "message_start";
+      js[0] = o;
+      return 1;
    }
    case AIMEE_DELTA_BLOCK_START:
    {
@@ -226,7 +234,9 @@ char *anthropic_delta_render(const aimee_delta_t *d, anthropic_stream_state_t *s
          cJSON_AddStringToObject(cb, "type", "text");
          cJSON_AddStringToObject(cb, "text", "");
       }
-      return sse_frame("content_block_start", o);
+      ev[0] = "content_block_start";
+      js[0] = o;
+      return 1;
    }
    case AIMEE_DELTA_BLOCK_DELTA:
    {
@@ -244,18 +254,21 @@ char *anthropic_delta_render(const aimee_delta_t *d, anthropic_stream_state_t *s
          cJSON_AddStringToObject(dl, "type", "text_delta");
          cJSON_AddStringToObject(dl, "text", d->text_delta ? d->text_delta : "");
       }
-      return sse_frame("content_block_delta", o);
+      ev[0] = "content_block_delta";
+      js[0] = o;
+      return 1;
    }
    case AIMEE_DELTA_BLOCK_STOP:
    {
       cJSON *o = cJSON_CreateObject();
       cJSON_AddStringToObject(o, "type", "content_block_stop");
       cJSON_AddNumberToObject(o, "index", d->block_id);
-      return sse_frame("content_block_stop", o);
+      ev[0] = "content_block_stop";
+      js[0] = o;
+      return 1;
    }
    case AIMEE_DELTA_TURN_STOP:
    {
-      /* message_delta (stop_reason + usage) THEN message_stop, in one frame */
       cJSON *o = cJSON_CreateObject();
       cJSON_AddStringToObject(o, "type", "message_delta");
       cJSON *dl = cJSON_AddObjectToObject(o, "delta");
@@ -263,23 +276,13 @@ char *anthropic_delta_render(const aimee_delta_t *d, anthropic_stream_state_t *s
       cJSON_AddNullToObject(dl, "stop_sequence");
       cJSON *u = cJSON_AddObjectToObject(o, "usage");
       cJSON_AddNumberToObject(u, "output_tokens", (double)d->usage_out);
-      char *a = sse_frame("message_delta", o);
+      ev[0] = "message_delta";
+      js[0] = o;
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "message_stop");
-      char *stop = sse_frame("message_stop", s);
-      if (!a || !stop)
-      {
-         free(a);
-         free(stop);
-         return NULL;
-      }
-      size_t need = strlen(a) + strlen(stop) + 1;
-      char *both = malloc(need);
-      if (both)
-         snprintf(both, need, "%s%s", a, stop);
-      free(a);
-      free(stop);
-      return both;
+      ev[1] = "message_stop";
+      js[1] = s;
+      return 2;
    }
    case AIMEE_DELTA_ERROR:
    {
@@ -288,9 +291,55 @@ char *anthropic_delta_render(const aimee_delta_t *d, anthropic_stream_state_t *s
       cJSON *e = cJSON_AddObjectToObject(o, "error");
       cJSON_AddStringToObject(e, "type", "api_error");
       cJSON_AddStringToObject(e, "message", d->error_message ? d->error_message : "stream error");
-      return sse_frame("error", o);
+      ev[0] = "error";
+      js[0] = o;
+      return 1;
    }
    default:
+      return 0;
+   }
+}
+
+char *anthropic_delta_render(const aimee_delta_t *d, anthropic_stream_state_t *st,
+                             const char *msg_id, const char *model)
+{
+   const char *ev[2] = {NULL, NULL};
+   cJSON *js[2] = {NULL, NULL};
+   int n = delta_build_events(d, st, msg_id, model, ev, js);
+   if (n == 0)
+      return NULL;
+   char *first = sse_frame(ev[0], js[0]); /* sse_frame takes ownership of js[i] */
+   if (n == 1)
+      return first;
+   char *second = sse_frame(ev[1], js[1]);
+   if (!first || !second)
+   {
+      free(first);
+      free(second);
       return NULL;
    }
+   size_t need = strlen(first) + strlen(second) + 1;
+   char *both = malloc(need);
+   if (both)
+      snprintf(both, need, "%s%s", first, second);
+   free(first);
+   free(second);
+   return both;
+}
+
+int anthropic_delta_emit(const aimee_delta_t *d, anthropic_stream_state_t *st, const char *msg_id,
+                         const char *model, aimee_sse_emit_fn emit, void *ctx)
+{
+   const char *ev[2] = {NULL, NULL};
+   cJSON *js[2] = {NULL, NULL};
+   int n = delta_build_events(d, st, msg_id, model, ev, js);
+   for (int i = 0; i < n; i++)
+   {
+      char *json = cJSON_PrintUnformatted(js[i]);
+      cJSON_Delete(js[i]);
+      if (json && emit)
+         emit(ctx, ev[i], json);
+      free(json);
+   }
+   return n;
 }
