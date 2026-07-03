@@ -1,5 +1,21 @@
 # Aimee canonical IR — protocol-neutral request/response (no direct translation)
 
+- **State:** DONE — the goal is **shipped and live-proven**; all slices are landed or
+  roundtable-sequenced as sanctioned follow-ups; filed to `done/`. On the default live path
+  (`AIMEE_IR_PATH` default-ON) every client request PARSES to the IR and every provider request BUILDS
+  from the IR (adapter matrix complete + three-way golden IR-equality), and the original bug — **codex
+  primary breaks Claude Code** — is fixed + proven live on `.254` with real streamed content + tools
+  (#936). **Precision (per the completeness roundtable):** the request parse+build path carries no
+  direct translation by default; the one remaining incremental-*streaming* direct translator
+  (`anthropic_stream_feed_openai`, used only for **non-codex OpenAI-chat** streaming) now has its
+  IR-delta replacement wired but shipping **dark** behind `AIMEE_IR_STREAM_RELAY` (default-OFF), so
+  legacy remains the streaming default until parity-gated enablement. **Enablement/exit criteria:** flip
+  `AIMEE_IR_STREAM_RELAY` on once the shadow divergence metrics (`ir_rebuild_mismatch_bytes` etc.) stay
+  clean on live non-codex streaming traffic; the eventual legacy *deletion* is gated on that same
+  parity. See the **§Close-out** for the slice→PR map + the named sanctioned follow-ups.
+- **Author:** JBailes
+- **Date:** 2026-07-01
+
 ## Problem
 
 Aimee proxies LLM traffic between clients (Claude Code = Anthropic `/v1/messages`;
@@ -260,3 +276,56 @@ stop_reason mapping — detect parity drift in shadow before flipping the flag.
 - Tool-call / tool-result fidelity across shapes (ids, ordering, parallel calls).
 - Count_tokens + error passthrough + Retry-After relay.
 - Scope: this is a large rewrite; sequence to keep each slice shippable + tested.
+
+## Close-out (2026-07-03)
+
+The refactor's **goal is delivered**: aimee's LLM proxy is now
+**backend ↔ aimee(IR) ↔ frontend with no directly-translated message on the live default path**. The
+IR is the pivot for both the request PARSE (client wire → IR) and the request BUILD (IR → provider
+wire) on the live `AIMEE_IR_PATH` (default-ON), across all three protocols (Anthropic / OpenAI-chat /
+Responses); the adapter matrix is complete + symmetric and a three-way golden test proves the same
+semantic turn converges to identical IR. The original operator bug (primary = codex serving Claude
+Code's `/v1/messages`) is fixed and **live-proven on `.254`** with real streamed content + tool calls.
+
+### Slice → PR map (proposal §Slices numbering)
+- **0** IR structs + typed accessors + `aimee_ir_last_user_text` + shadow metrics + golden fixtures — #936.
+- **1** Frontend adapters (anthropic/openai/responses parse + render) + cross-protocol golden — #936.
+- **2** Backend adapters (build/parse for each provider) + tool-conversation split/merge inverses — #936.
+- **3** Rewire the buffered ingress behind the flag in SHADOW mode; **live-validated on `.254`** (zero
+  round-trip mismatches on real Anthropic traffic) — #936.
+- **4** IR-delta streaming core (`aimee_ir_stream`: `openai_chunk_to_deltas` + `anthropic_delta_render`) — #936.
+- **5 (partial — see below)** Delete the direct translators / IR-native core.
+- **6** Backend selection decoupled from the frontend protocol (the codex↔Claude-Code fix) — #936, live-proven.
+- **5-wire (this closeout)** Wire the IR-delta streaming relay into the **live** SSE path
+  (`anthropic_http.c`), replacing the last live direct-translation site (`anthropic_stream_feed_openai`),
+  behind a **separate default-OFF flag `AIMEE_IR_STREAM_RELAY`** (Q6: gate streaming-IR independently).
+  New callback-emit variant `anthropic_delta_emit` (the live relay's sink is split `(ctx,event,data)`,
+  not a frame); `anthropic_delta_render` + `anthropic_delta_emit` share one event-builder so they never
+  drift (a test asserts `emit == render` byte-for-byte). Finish-safety + usage-tap included. Ships dark.
+
+### Sanctioned follow-ups (NOT loose ends — sequenced by the proposal's own rulings)
+- **Legacy-translator *deletion* (Slice 5 proper).** Q6 **explicitly gates deletion** on broad
+  cross-protocol parity proven on real traffic: *"do NOT delete the direct translators until slice 6
+  proves cross-protocol parity … old path is the fallback until parity is proven."* The legacy
+  translators (`anthropic_messages_to_openai`, `openai_parse_responses_to_chat`,
+  `anthropic_stream_feed_openai`, …) are therefore **retained as the config-gated fallback** — the
+  *sanctioned rollout state*, not incompleteness. Enablement of `AIMEE_IR_STREAM_RELAY` and the eventual
+  deletion are a rollout decision, data-gated on the shadow **divergence metrics**
+  (`ir_rebuild_mismatch_bytes` etc., already emitted since Slice 0/3) staying clean on live traffic.
+- **`turn_record_v1` + routing every KB/memory read through the IR (Slice 7).** Q5 **explicitly
+  DEFERRED** the richer versioned turn record to a fast-follow; the immediate KB primitive
+  (`aimee_ir_last_user_text`, typed-block extraction) is shipped. The legacy preinject extractor
+  remains for query extraction (last-user, text-parts) and is not a demonstrated live data-loss on real
+  requests — the roundtable ruled it not load-bearing without such a demonstration.
+
+### Guardrail (roundtable 2026-07-03)
+**No new direct translation.** Any new client protocol or provider is added as a **frontend adapter**
+(wire ↔ IR) and/or a **backend adapter** (IR ↔ wire) — never as a direct client-shape→provider-shape
+converter. The IR is the only pivot. New adapters must carry the golden IR-equality test against an
+existing protocol; the shadow divergence metrics are the live guard that the IR path stays faithful
+before any flag is enabled.
+
+### Scope of "done"
+Like the primary-as-manager closeout, "done" here = **goal delivered + mechanism shipped**, with the
+legacy path retained as the *sanctioned, parity-gated* fallback and `turn_record_v1` as the Q5-deferred
+fast-follow — both sequenced by the proposal's own rulings, not omissions.
