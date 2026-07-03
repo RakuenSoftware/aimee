@@ -93,7 +93,9 @@ gw_bypass_reason_t gw_should_apply(int reduce_rc, const reduce_result_t *res)
       return GW_BYPASS_SNAPSHOT_OOM; /* cannot verify -> never send un-verifiable */
    int repairs = message_history_repair(probe);
    cJSON_Delete(probe);
-   if (repairs > 0)
+   /* != 0 (not > 0): any non-zero result — a repair count OR a hypothetical negative
+    * error code — means the reduced view was not structurally clean, so bypass. */
+   if (repairs != 0)
       return GW_BYPASS_STRUCTURAL_VIOLATION;
 
    return GW_BYPASS_NONE;
@@ -103,9 +105,12 @@ int gw_replace_messages(cJSON *container, const char *key, cJSON *reduced)
 {
    if (!container || !key || !reduced)
       return 1;
-   /* Replace item under key; cJSON_ReplaceItemInObjectCaseSensitive detaches+frees
-    * the old array and installs `reduced` (taking ownership) on success. If the key
-    * is absent, add it. */
+   /* Replace item under key; cJSON_ReplaceItemInObjectCaseSensitive frees the old
+    * array and installs `reduced` (taking ownership) ONLY on success. Its false
+    * return (verified against the vendored cJSON: parent/child/item/replacement NULL)
+    * does NOT delete the old item and does NOT install `reduced` — so on failure the
+    * container is byte-intact and `reduced` stays caller-owned. If the key is absent,
+    * add it (AddItemToObject likewise installs nothing on its OOM failure). */
    if (cJSON_GetObjectItemCaseSensitive(container, key))
    {
       if (!cJSON_ReplaceItemInObjectCaseSensitive(container, key, reduced))

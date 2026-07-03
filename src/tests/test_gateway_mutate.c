@@ -168,8 +168,20 @@ static void test_replace(void)
    assert(cJSON_GetObjectItemCaseSensitive(c2, "messages") == r2);
    cJSON_Delete(c2);
 
-   /* guards */
+   /* guards fire independently, and a rejected replace leaves the container intact
+    * and the reduced array caller-owned (we free it ourselves here). */
    assert(gw_replace_messages(NULL, "messages", NULL) != 0);
+   cJSON *c3 = cJSON_CreateObject();
+   cJSON_AddItemToObject(c3, "messages", clean_messages());
+   cJSON *r3 = cJSON_CreateArray();
+   assert(gw_replace_messages(c3, "messages", NULL) != 0); /* NULL reduced rejected */
+   assert(gw_replace_messages(NULL, "messages", r3) != 0); /* NULL container rejected */
+   assert(gw_replace_messages(c3, NULL, r3) != 0);         /* NULL key rejected */
+   /* container still holds its original 1-message array; r3 was never installed */
+   cJSON *still = cJSON_GetObjectItemCaseSensitive(c3, "messages");
+   assert(still && cJSON_GetArraySize(still) == 1);
+   cJSON_Delete(r3); /* caller still owns it after the rejected calls */
+   cJSON_Delete(c3);
 }
 
 static void test_provenance(void)
