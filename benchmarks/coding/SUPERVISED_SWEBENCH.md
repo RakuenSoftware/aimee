@@ -1,87 +1,103 @@
-# Supervised SWE-bench benchmark
+# Supervised SWE-bench benchmark (single-shot)
 
 Measures how much of the **expensive primary's** token spend aimee offloads onto a
-cheap/free/local delegate fleet, and whether it does so **without a wall-clock
-penalty**, at comparable resolution — the same axes as the Reddit result (GPT-5.5
-supervising one local worker: −75.5% supervisor tokens but 3.75× slower).
+cheap/free/local delegate fleet, plus wall-clock and official SWE-bench resolution.
 
-aimee's edge is that the primary supervises **many diverse workers in parallel**, and
-that **aimee itself does the coordination and decomposition** (deterministic, no LLM
-tokens), so the expensive model only spends tokens on judgment: what to delegate,
-reviewing candidates, and selecting the best.
+## Scope and honesty
+
+This is a **single-shot diff-generation** benchmark: both arms run `--no-tools`, one
+prompt → one unified diff. It is **not** the tool-using agentic workflow that the
+[Reddit experiment](https://www.reddit.com/r/LocalLLaMA/) measured (GPT-class model
+supervising one local worker: reported ~−75.5% supervisor tokens but ~3.75× slower), so
+it is **not a like-for-like reproduction** of that result. Treat the Reddit numbers as
+**motivation**, not a head-to-head baseline.
+
+What this benchmark *does* show, rigorously: given the same code region, delegating the
+diff to a cheap fleet and having the primary only **select the best of N** costs the
+primary far fewer of its own tokens than solving each task itself, and the fleet runs
+concurrently. What it does **not** show is that aimee's coordination beats an agentic
+supervisor — that requires the agentic version below.
+
+> **Follow-up (the real Reddit-parity claim):** a tool-using agentic version — workers
+> explore/edit/test the repo, the primary supervises across turns — is tracked
+> separately. Only that version should be posted as an apples-to-apples Reddit comparison.
 
 ## Arms
 
 | Arm | What runs | Primary tokens |
 |---|---|---|
-| **A `primary_alone`** | the expensive primary solves each task itself | full |
-| **C `supervised`** | N diverse cheap/local workers attempt each task **concurrently**, then the primary reviews the short candidate diffs and selects/synthesizes the best (best-of-N) | tiny — it never reads the code, only candidate diffs |
+| **A `primary_alone`** | the primary produces the diff itself | full |
+| **C `supervised`** | N **distinct** cheap/local workers attempt each task **concurrently**, then the primary reviews the candidate diffs and selects/synthesizes the best (best-of-N) | the primary reads candidate diffs, not the code region |
 
 Worker tokens are free (`token_estimate_cost` prices the fleet at $0) and reported
 separately; they are **not** counted against the primary reduction.
 
+## Measurement rigor (what the roundtable required)
+
+- **Primary tokens are scoped to the exact primary job ids this run dispatched.** A
+  delegate turn's `token_audit.delegation_id` is `deleg-<n>-<ts>-<job_id>`; the meter sums
+  only rows ending in `-<job_id>` for the run's primary jobs. No time-window or
+  cross-agent/cross-session contamination.
+- **Wall-clock brackets the whole arm** (dispatch → grade); dispatch and polling are
+  thread-parallel, so the number is fleet concurrency, not driver serialism.
+- **Two resolution denominators.** `resolved/submitted` (skill, given a patch was
+  produced) and `resolved/instances` (end-to-end, incl. worker failures — the honest
+  public number). Worker failures cannot silently flatter the reduction.
+- **Candidate-set health.** Instances with `< ceil(N/2)` candidates are flagged; a flaky
+  fleet returning fewer candidates shrinks the selection prompt and would otherwise inflate
+  the reduction.
+- Only `done` delegate jobs count; `failed`/`error`/`partial` are discarded. Trailing prose
+  is stripped from diffs so it is never submitted as a patch.
+
 ## Pipeline
 
 ```bash
-# 1. Prepare instances (fetch dataset, clone repos, extract the code region).
-#    Instance sets:  reddit10 | lite:N (wide sample across all 4 repos) | all (300)
+# 1. Prepare instances (fetch dataset, blobless-clone repos, extract the code region).
+#    Instance sets:  reddit10 | lite:N (wide sample across all 4 repos) | all
 python3 benchmarks/coding/swebench_supervised_prep.py --instances lite:50 \
     --out benchmarks/results/swebench_supervised/regions
 
 # 2. Run the arms against the live aimee (dispatches via the `aimee` CLI).
-#    --pool is the cheap/local worker fleet; --primary is the expensive manager.
-#    --token-db points at DB1 on the aimee host to read primary tokens.
 python3 benchmarks/coding/bench_swebench_supervised.py \
     --regions benchmarks/results/swebench_supervised/regions \
-    --arms A,C --primary codex --primary-model gpt-5.5 --n 3 \
-    --pool gpu-gemma4,glm-5.2,mimo-2.5,mistral,mimo-2.5-pro,minimax,local-synth \
+    --arms A,C --primary codex --primary-model <ledger-model-name> --n 3 \
+    --pool glm-5.2,mimo-2.5,mistral,mimo-2.5-pro,minimax,local-synth \
     --token-db "$AIMEE_HOME/aimee.db" \
     --output benchmarks/results/swebench_supervised/run.json
 ```
 
-Grading uses the **official SWE-bench Docker harness** (`bench_swebench._grade_with_harness`)
-as the sole `resolved` source for both arms; needs Docker + the `swebench` pip package
-on the grading host.
-
-The report (primary-token reduction, wall-clock ratio C/A, resolution per arm) prints at
-the end of the run and is also derivable from `run.json` via
-`supervised_report.render_supervised`.
+`--primary` must **not** appear in `--pool`. `--primary-model` is the `token_audit` model
+name of the primary (required to read its tokens). Grading uses the **official SWE-bench
+Docker harness** (needs Docker + the `swebench` pip package on the grading host).
 
 ## Fleet setup
 
-Register the workers first (see `docs/DELEGATES.md`). Concurrency observed: mimo ≥4,
-minimax 3–4, mistral 4, glm 4+, codex 2–4. A fast **local GPU worker** matters most for
-wall-clock; register one with `aimee agent local <name> <url>/v1 --model <m> --ctx <n>`.
-
-### Local GPU worker (Gemma-4-26B, best-of-N anchor)
-
-On a 16 GB card the winning config is QAT weights + MTP speculative decoding + an 8-bit/4-bit
-KV cache so a usable 64k context fits with minimal MoE offload:
+Register the workers first (`docs/DELEGATES.md`). A fast **local GPU worker** matters most
+for wall-clock. Reference config for a Gemma-4-26B worker on a 16 GB card (QAT weights +
+MTP + 8-bit/4-bit KV so a 64k context fits with minimal offload):
 
 ```bash
 llama-server -m gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf -ngl 999 -fa on \
   -c 65536 -ctk q8_0 -ctv q4_0 \
   --spec-type draft-mtp -md mtp-gemma-4-26B-A4B-it.gguf --spec-draft-n-max 4 --n-cpu-moe 4
-# ~128 tok/s, correct, 64k ctx, ~14 GB VRAM.
 ```
 
 Notes: QAT (14.2 GB) fits 16 GB, standard UD-Q4_K_XL (17 GB) OOMs. MTP needs VRAM headroom
 for the draft (garbage below `--n-cpu-moe 4`); the KV quant provides it. `--spec-draft-n-max 4`
-is required. On one GPU a single large-context slot beats multiple slots (parallel-slot MTP +
-offload contend). Scale to more GPUs for more concurrent large-context workers.
+is required. Scale to more GPUs for more concurrent large-context workers.
 
-## Reference results (2026-07, reddit10, primary = gpt-5.5 via codex)
+## Reference results
 
-| Arm | primary tokens | wall (10 tasks) | resolution |
-|---|---|---|---|
-| A primary_alone | 104,834 | 434 s serial / 56 s parallel | 8/10 |
-| C pure delegation (single attempt, full fleet) | 14,467 (**−86%**) | **36.2 s** | 4–6/10 |
-| C best-of-3 + primary selection | 19,700 (**−81%**) | parallel | 5/6 graded |
+Run the pipeline against your own fleet and record `run.json` here with the model names and
+run date filled in — do **not** post hand-copied numbers. On the reddit10 set with a strong
+primary this repo has observed primary-token reductions in the **~80%** range with the fleet
+running concurrently and best-of-N recovering resolution toward the solo primary; fill this
+table from a real `run.json`:
 
-Headline: the **primary spends 81–86% fewer tokens** (beats Reddit's −75.5%) and the fleet
-runs **concurrently** (36 s vs the primary's 434 s serial), i.e. no 3.75× slowdown. Best-of-N +
-primary selection recovers resolution toward the solo primary; the current limiter is worker
-reliability on long prompts, not the selection mechanism.
+| Arm | primary tokens | wall (s) | resolved/submitted | resolved/instances |
+|---|---|---|---|---|
+| A primary_alone | _fill from run.json_ | | | |
+| C supervised (best-of-N) | _fill from run.json_ | | | |
 
 ## CI / fast check (no live aimee, no Docker)
 

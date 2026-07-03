@@ -145,35 +145,59 @@ class TestFakeHarnessShape(unittest.TestCase):
         from benchmarks.coding import bench_swebench_supervised as B
 
         reload(B)
-        a = B._fake_record("x", "A", 0)
-        c = B._fake_record("x", "C", 0)
+        a = B._fake_record("x", "A", 0, n=3)
+        c = B._fake_record("x", "C", 0, n=4)
         # Both arms produce a patch and are graded resolved in fake mode.
         self.assertTrue(a["diff"] and c["diff"])
         self.assertTrue(a["resolved"] and c["resolved"])
-        # Arm C is the supervised best-of-N arm: it carries candidate count and
-        # finishes faster than the solo primary (parallel fleet vs serial solve).
-        self.assertEqual(c["n_candidates"], 3)
-        self.assertLess(c["wall"], a["wall"])
+        # Arm C is the supervised best-of-N arm: candidate count tracks --n (m2).
+        self.assertEqual(c["n_candidates"], 4)
+        self.assertNotIn("n_candidates", a)
 
 
 class TestSupervisedSummary(unittest.TestCase):
-    def test_summary_computes_primary_reduction_and_walltime_ratio(self):
-        result = {
+    def _result(self, c_records):
+        return {
             "instances": ["i1", "i2"], "primary": "codex", "pool": ["w1", "w2"], "n": 3,
             "arms": {
                 "A": {"wall_total": 400.0, "records": {
                     "i1": {"diff": "d", "resolved": True}, "i2": {"diff": "d", "resolved": True}}},
-                "C": {"wall_total": 40.0, "records": {
-                    "i1": {"diff": "d", "resolved": True}, "i2": {"diff": "d", "resolved": False}}},
+                "C": {"wall_total": 40.0, "records": c_records},
             },
             "primary_tokens": {"A": {"total": 100000}, "C": {"total": 20000}},
         }
+
+    def test_summary_computes_primary_reduction_and_walltime_ratio(self):
+        result = self._result({
+            "i1": {"diff": "d", "n_candidates": 3, "resolved": True},
+            "i2": {"diff": "d", "n_candidates": 3, "resolved": False}})
         s = R.summarize_arms(result)
         self.assertEqual(s["primary_token_reduction_pct"], 80.0)
         self.assertEqual(s["walltime_ratio_C_over_A"], 0.1)
-        self.assertEqual(s["arms"]["A"]["resolved"], 2)
         self.assertEqual(s["arms"]["C"]["resolved"], 1)
         self.assertIn("Primary-agent token reduction", R.render_supervised(result))
+
+    def test_two_resolution_denominators_split_worker_failures(self):
+        # i2's workers all failed -> no diff. It must count against resolved/instances
+        # (end-to-end) but NOT against resolved/submitted (skill given a patch).
+        result = self._result({
+            "i1": {"diff": "d", "n_candidates": 3, "resolved": True},
+            "i2": {"diff": "", "n_candidates": 0, "resolved": None}})
+        st = R.summarize_arms(result)["arms"]["C"]
+        self.assertEqual(st["submitted"], 1)
+        self.assertEqual(st["resolve_rate_submitted"], 1.0)      # 1/1 of produced patches
+        self.assertEqual(st["resolve_rate_instances"], 0.5)      # 1/2 end-to-end
+        self.assertEqual(st["instances"], 2)
+
+    def test_underpopulated_candidate_sets_are_flagged(self):
+        # n=3 -> need >=2 candidates; i2 has 1 -> warning surfaces (C5).
+        result = self._result({
+            "i1": {"diff": "d", "n_candidates": 3, "resolved": True},
+            "i2": {"diff": "d", "n_candidates": 1, "resolved": True}})
+        s = R.summarize_arms(result)
+        self.assertEqual(s["arms"]["C"]["candidates_underpopulated"], 1)
+        self.assertIn("warning", s)
+        self.assertIn("⚠", R.render_supervised(result))
 
 
 if __name__ == "__main__":

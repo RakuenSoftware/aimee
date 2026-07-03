@@ -37,6 +37,7 @@ Record schema (one dict per instance/arm/compaction cell):
 
 from __future__ import annotations
 
+import math
 import random
 import statistics
 from typing import Any, Iterable
@@ -344,44 +345,68 @@ def render_markdown(report: dict[str, Any], reddit_baseline: dict[str, Any] | No
 # ============================================================================
 # Live supervised-run summary (arm A vs arm C, primary-token focus).
 # Consumes the result dict produced by bench_swebench_supervised.py.
+#
+# resolved semantics per record: None = not graded (no patch produced, or grader
+# unavailable); False = a patch was submitted but did not resolve; True = resolved.
+# We report resolution against TWO denominators so worker failures cannot silently
+# flatter the result (C5/M8):
+#   resolved / submitted  - resolution given a patch was produced (skill)
+#   resolved / instances  - end-to-end incl. worker failures (the honest public number)
 # ============================================================================
-def _arm_stats(arm: dict[str, Any], ptok: dict[str, Any] | None) -> dict[str, Any]:
+
+
+def _arm_stats(arm: dict[str, Any], ptok: dict[str, Any] | None, n: int) -> dict[str, Any]:
     recs = arm.get("records", {})
-    graded = [r for r in recs.values() if r.get("resolved") is not None]
+    submitted = [r for r in recs.values() if r.get("diff")]
+    graded = [r for r in submitted if r.get("resolved") is not None]
     resolved = sum(1 for r in graded if r.get("resolved"))
-    diffs = sum(1 for r in recs.values() if r.get("diff"))
+    cand = [r.get("n_candidates") for r in recs.values() if "n_candidates" in r]
+    need = math.ceil(n / 2) if n else 0
+    under = [c for c in cand if c is not None and c < need]
     return {
         "instances": len(recs),
-        "diffs": diffs,
+        "submitted": len(submitted),
         "graded": len(graded),
         "resolved": resolved,
-        "resolve_rate": round(resolved / len(graded), 4) if graded else None,
+        "resolve_rate_submitted": round(resolved / len(graded), 4) if graded else None,
+        "resolve_rate_instances": round(resolved / len(recs), 4) if recs else None,
         "wall_total_s": arm.get("wall_total"),
         "primary_tokens": (ptok or {}).get("total"),
         "primary_input": (ptok or {}).get("input"),
         "primary_output": (ptok or {}).get("output"),
+        # Candidate-set health for arm C: a flaky fleet that returns <ceil(N/2)
+        # candidates shrinks the selection prompt and would otherwise inflate the
+        # reduction; surface it so it can't hide.
+        "candidates_total": len(cand),
+        "candidates_underpopulated": len(under),
+        "candidates_min_required": need,
     }
 
 
 def summarize_arms(result: dict[str, Any]) -> dict[str, Any]:
     arms = result.get("arms", {})
     ptok = result.get("primary_tokens", {})
-    out: dict[str, Any] = {"arms": {a: _arm_stats(arms[a], ptok.get(a)) for a in arms}}
+    n = result.get("n", 0)
+    out: dict[str, Any] = {"arms": {a: _arm_stats(arms[a], ptok.get(a), n) for a in arms}}
     a = out["arms"].get("A", {})
     c = out["arms"].get("C", {})
     if a.get("primary_tokens") and c.get("primary_tokens") is not None:
         out["primary_token_reduction_pct"] = pct_reduction(a["primary_tokens"], c["primary_tokens"])
     if a.get("wall_total_s") and c.get("wall_total_s"):
         out["walltime_ratio_C_over_A"] = round(c["wall_total_s"] / a["wall_total_s"], 3)
+    if c.get("candidates_underpopulated"):
+        out["warning"] = (f"{c['candidates_underpopulated']}/{c['candidates_total']} arm-C instances had "
+                          f"< {c['candidates_min_required']} candidates; primary-token reduction is "
+                          f"optimistic for those (fewer candidates -> shorter selection prompt).")
     return out
 
 
 def render_supervised(result: dict[str, Any]) -> str:
     s = summarize_arms(result)
-    L = ["## Supervised SWE-bench — primary(manager) tokens vs solo\n",
+    L = ["## Supervised SWE-bench (single-shot) — primary(manager) tokens vs solo\n",
          f"instances: {len(result.get('instances', []))}  primary: {result.get('primary')}  "
          f"n(best-of): {result.get('n')}  pool: {', '.join(result.get('pool', []))}\n",
-         "| Arm | primary tokens | wall (s) | resolved / graded | diffs |",
+         "| Arm | primary tokens | wall (s) | resolved/submitted | resolved/instances |",
          "|---|---|---|---|---|"]
     labels = {"A": "A primary_alone", "C": "C supervised (best-of-N)"}
     for a in ("A", "C"):
@@ -389,12 +414,14 @@ def render_supervised(result: dict[str, Any]) -> str:
         if not st:
             continue
         pt = st["primary_tokens"]
-        L.append(f"| {labels.get(a, a)} | {pt if pt is not None else 'n/a'} | "
-                 f"{st['wall_total_s']} | {st['resolved']}/{st['graded']} | {st['diffs']}/{st['instances']} |")
+        L.append(f"| {labels.get(a, a)} | {pt if pt is not None else 'n/a'} | {st['wall_total_s']} | "
+                 f"{st['resolved']}/{st['submitted']} | {st['resolved']}/{st['instances']} |")
     if s.get("primary_token_reduction_pct") is not None:
         L.append(f"\n**Primary-agent token reduction (A -> C): "
                  f"{s['primary_token_reduction_pct']:+.1f}%**")
     if s.get("walltime_ratio_C_over_A") is not None:
         r = s["walltime_ratio_C_over_A"]
         L.append(f"Wall-clock C/A: **{r}x** " + ("(faster)" if r < 1 else "(slower)"))
+    if s.get("warning"):
+        L.append(f"\n> ⚠ {s['warning']}")
     return "\n".join(L) + "\n"

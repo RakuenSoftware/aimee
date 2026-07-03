@@ -29,9 +29,11 @@ REDDIT10 = [
 
 
 def _fetch_lite() -> dict[str, dict]:
-    """Fetch the full SWE-bench Lite test split (300) via the HF rows API."""
+    """Fetch the full SWE-bench Lite test split via the HF rows API, paginating until
+    a short/empty page (no hardcoded 300, so it survives dataset size changes; m5)."""
     rows: dict[str, dict] = {}
-    for off in range(0, 300, 100):
+    off = 0
+    while True:
         for attempt in range(3):
             try:
                 with urllib.request.urlopen(f"{HF}&offset={off}&length=100", timeout=45) as r:
@@ -40,8 +42,12 @@ def _fetch_lite() -> dict[str, dict]:
             except Exception:
                 if attempt == 2:
                     raise
-        for item in d.get("rows", []):
+        page = d.get("rows", [])
+        for item in page:
             rows[item["row"]["instance_id"]] = item["row"]
+        if len(page) < 100:
+            break
+        off += 100
     return rows
 
 
@@ -89,7 +95,10 @@ def prepare(instances: list[dict], out_dir: Path, repos_dir: Path, region_lines:
         dst = repos_dir / repo.replace("/", "__")
         if not dst.exists():
             print(f"cloning {repo}", file=sys.stderr)
-            subprocess.run(["git", "clone", "--quiet", f"https://github.com/{repo}", str(dst)], check=True)
+            # Blobless partial clone: keeps full history (so ANY base_commit checks
+            # out, unlike --depth 1) but fetches blobs on demand -> small (m4).
+            subprocess.run(["git", "clone", "--quiet", "--filter=blob:none",
+                            f"https://github.com/{repo}", str(dst)], check=True)
     n = 0
     for r in instances:
         dst = repos_dir / r["repo"].replace("/", "__")
