@@ -367,3 +367,4 @@ For per-client cryptographic identity (not just a shared bearer), the server als
 - **[Setting Up Delegates](DELEGATES.md)**, configure delegate agents and routing.
 - **[Architecture](ARCHITECTURE.md)**, processes, storage boundaries, and deployment topologies.
 - **Run on any model**, point Claude Code (`aimee claude-proxy enable`), Codex, or any OpenAI-compatible tool at aimee and run every turn on your chosen primary model; see the [README](../README.md#any-model-behind-your-front-end).
+- **Get help**, join the official aimee Discord at <https://discord.gg/FjGjvcgAqz> for questions and discussion.

@@ -280,6 +280,11 @@ Focused references:
 | [VS Code Integration](docs/VSCODE.md) | Wire aimee into VS Code via MCP tools or as an OpenAI compatible model |
 | [Feature Status](docs/STATUS.md) | Implementation status of all features |
 
+## Community
+
+Questions, help, and discussion happen on the **official aimee Discord**:
+<https://discord.gg/FjGjvcgAqz>.
+
 ## License
 
 aimee is Copyright (C) 2026 The aimee authors and is licensed under the **GNU Affero General
