@@ -14,6 +14,11 @@ nodes:
     params:
       with_user: true
     next: proposal_gate
+    # author.proposal LOOPS when its delegate can't produce the artifact; a
+    # loopable node needs an on_fail edge or the engine hard-errors ("looped with
+    # no on_fail edge") and the run wedges. Self-loop so a failed author retries,
+    # bounded by the engine's max-attempts backstop, then parks (surfaced).
+    on_fail: draft
   - id: proposal_gate
     block: gate.roundtable
     in:
@@ -48,6 +53,7 @@ nodes:
     in:
       proposal: draft.out
     next: plan_gate
+    on_fail: plan # author.plan loops on delegate failure; self-loop (see draft)
   - id: plan_gate
     block: gate.roundtable
     in:

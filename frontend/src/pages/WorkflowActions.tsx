@@ -106,7 +106,14 @@ function statusOf(it: Item): { label: string; variant: BadgeVariant } {
       return { label: "parked · failed", variant: "error" };
     case "max_attempts":
       return { label: "parked · max attempts", variant: "error" };
+    case "stuck":
+      // The engine can't advance this stage (unresolvable stage / no executor);
+      // it needs a human to fix + resume or abandon. Never shown as "running".
+      return { label: `stuck at ${it.stage}`, variant: "error" };
     default:
+      // Any other non-empty pause_reason still means parked — never render a
+      // paused item as "running". Only a truly un-paused active item is running.
+      if (it.pause_reason) return { label: `parked · ${it.pause_reason}`, variant: "warning" };
       return { label: `running · ${it.stage}`, variant: "running" };
   }
 }

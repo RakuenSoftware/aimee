@@ -13,6 +13,9 @@ nodes:
     params:
       with_user: false
     next: review
+    # Self-loop: author.proposal loops on delegate failure and needs an on_fail
+    # edge, else the engine hard-errors and the run wedges (see build.yaml draft).
+    on_fail: draft
   - id: review
     block: gate.human
     in:

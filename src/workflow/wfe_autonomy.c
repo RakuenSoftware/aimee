@@ -66,6 +66,28 @@ static int wfe_autonomy_park_budget(const char *work_item_id, const char *why)
    return 0;
 }
 
+/* Park an active autonomous work item 'stuck' after an UNRECOVERABLE advance
+ * failure — its current_stage is not a node in the workflow (an orphaned stage
+ * after a rename), the stage's block has no executor, or a looped node has no
+ * on_fail edge to retry into. Such a failure never self-resolves, so without
+ * parking the scheduler retry-fails the item on every backstop sweep while the
+ * UI still shows it "running" (the symptom that surfaced this). Mirrors
+ * wfe_autonomy_park_budget: audits the reason once and never overwrites an
+ * existing pause. Returns 0 on a clean park, 1 if already parked (no re-audit, so
+ * a re-sweep can't spam the event log), -1 if the row could not be read. */
+static int wfe_autonomy_park_stuck(const char *work_item_id, const char *why)
+{
+   db1_work_item_t wi;
+   if (db1_work_item_get(work_item_id, &wi) != 1)
+      return -1;
+   if (wi.pause_reason[0])
+      return 1; /* already parked (incl. a prior 'stuck'): leave it, don't spam */
+   db1_work_item_set_pause(work_item_id, "stuck", wi.current_stage);
+   db1_lifecycle_event_add(work_item_id, wi.current_stage, "pause", "engine",
+                           (why && why[0]) ? why : "unrecoverable advance failure", "", 0);
+   return 0;
+}
+
 /* Is this paused node a human gate the driver may auto-satisfy in autonomous
  * mode? (policy preauthorized, or optional:true). */
 static int human_gate_auto_ok(const wfe_node_t *node)
@@ -99,6 +121,17 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
    long max_wall = wfe_env_long("AIMEE_AUTONOMY_MAX_WALL_SECS", 1800);
    struct timespec ts0;
    clock_gettime(CLOCK_MONOTONIC, &ts0); /* monotonic: immune to NTP/clock jumps */
+
+   /* An item already parked 'stuck' cannot advance without human intervention
+    * (its stage is unresolvable / has no executor). Skip it so the backstop
+    * sweep doesn't re-attempt the doomed advance every cycle; a human resume
+    * clears the pause and lets the next sweep retry. */
+   {
+      db1_work_item_t wi0;
+      if (db1_work_item_get(work_item_id, &wi0) == 1 && strcmp(wi0.pause_reason, "stuck") == 0)
+         return 0;
+   }
+
    for (int i = 0; i < 10000; i++)
    {
       db1_lifecycle_event_t *evs = NULL;
@@ -128,7 +161,16 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
 
       wfe_advance_result_t r;
       if (wfe_engine_advance(work_item_id, &r, err, errlen) != 0)
-         return -1;
+      {
+         /* A structural advance failure (current_stage not a workflow node, the
+          * block has no executor, or a looped node with no on_fail edge) will
+          * never self-resolve. Park it 'stuck' so it surfaces in the UI and the
+          * scheduler stops retry-failing it every sweep; the error is preserved
+          * in the audit event. */
+         if (wfe_autonomy_park_stuck(work_item_id, err) < 0)
+            return -1; /* row unreadable — surface the original advance error */
+         return 0;
+      }
       if (r.terminal)
       {
          wfe_autonomy_cleanup_worktree(work_item_id);

@@ -231,6 +231,35 @@ int main(void)
       unsetenv("AIMEE_AUTONOMY_USD_PER_SEC");
    }
 
+   /* A9: an UNRECOVERABLE advance failure (current_stage is not a node in the
+    * workflow — e.g. an orphaned stage after a rename, or the same class as a
+    * looped node with no on_fail edge) parks the item 'stuck' instead of the
+    * scheduler retry-failing it forever while the UI shows "running". A re-sweep
+    * is a no-op: still stuck, no new lifecycle event (no spam). */
+   {
+      char id[80] = "", err[256] = "";
+      assert(wfe_work_item_create("auto", "stuck1", "stuck1", "autonomous", id, err, sizeof err) ==
+             0);
+      /* orphan the stage: "ghoststage" is not a node in the "auto" workflow. */
+      assert(db1_work_item_set_stage(id, "ghoststage", "") == 0);
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0);
+      db1_work_item_t wi;
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.state, "active") == 0);
+      assert(strcmp(wi.pause_reason, "stuck") == 0);
+
+      db1_lifecycle_event_t *evs = NULL;
+      int before = db1_lifecycle_event_list(id, &evs);
+      free(evs);
+      assert(wfe_autonomy_run(id, err, sizeof err) == 0); /* re-sweep: early-out */
+      evs = NULL;
+      int after = db1_lifecycle_event_list(id, &evs);
+      free(evs);
+      assert(after == before); /* no re-park spam */
+      assert(db1_work_item_get(id, &wi) == 1);
+      assert(strcmp(wi.pause_reason, "stuck") == 0);
+   }
+
    printf("ok\n");
    return 0;
 }
