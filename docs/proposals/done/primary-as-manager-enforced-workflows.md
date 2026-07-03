@@ -1,17 +1,28 @@
 # Proposal: Primary-as-manager — request→workflow routing with aimee-enforced review + roundtable
 
-- **State:** IN PROGRESS (partial) — reviewed (4 design rounds, §9); S0 + S1-advisory + the S2 cores
-  are in testing (#936); S2 integration + S3 + S4 remain.
-- **Progress:** **S0** (interactive workflow catalog + engine invariants I1/I2/I3) and **S1** (the
-  request→workflow router at the gateway seam — live but strictly *advisory*: logs a decision, binds
-  and mutates nothing) both landed via #936, as did the **S2 cores** (`wfe_enforce`/`wfe_binding`/
-  `wfe_router` decision logic + the `workflow_binding` table + an env-gated advisory log). **Remaining:**
-  the S2 integration layers (live binding + the `advance_request` interactive driver + per-block
-  tool-strip + externalization guard are not yet wired to live ingress), S3 staged enforcement (flip
-  `gate.deliver` to blocking, dialed via `AIMEE_WORKFLOW_ENFORCE_STAGE`, default OFF), and S4 autonomous
-  parity (`/v1/dev/submit` + sweep through the same router). The S3 hard-flip is an operator decision
-  gated on live `.254` router-cost numbers + S4 parity. Ships default-OFF; default-ON is a later,
-  separate proposal.
+- **State:** DONE — all slices **S0–S4 landed / shipped default-OFF** and filed to `done/` (reviewed
+  across 4 design rounds + per-slice code roundtables, §9). **Scope of "done" (§8 reconciliation,
+  per the completeness roundtable 2026-07-03):** this proposal delivers the §8 guarantee as a *shipped
+  engine mechanism* — the review→roundtable→`gate.deliver` spine is structural in code and audited — but
+  the guarantee is **ACTIVE only under the operator `hard`-flip**; it is dormant behind the staged dial
+  by default. Filing to `done/` here means **code/mechanism floor complete, rollout pending**, matching
+  the established aimee default-off house pattern where a merged-dark feature is filed and its
+  operator/GA enable is a separate gate (cf. the central-agent-memory + governance-audit closeouts:
+  *done ≠ GA*). The `hard`-flip and default-ON are explicitly a later, separate proposal — not this
+  one's scope. See the **§10 close-out** for the slice→PR map, the live-verification record, and the
+  named out-of-scope / deferred-by-design items.
+- **Progress:** **S0** (interactive workflow catalog + engine invariants I1/I2/I3) and **S1** (advisory
+  request→workflow router at the gateway seam) landed via #936/#940. **S2** (binding + `advance_request`
+  interactive driver + per-block tool-strip + dispatch-time externalization guard + templated surfacing
+  + sliding-lease watchdog + reject-scope-add) landed via #941/#944/#948/#953/#957/#966/#970, and was
+  made to actually *bite* for the mandatory external tmux Claude primary via the CLI-ingestor thread
+  (#975/#979/#980) + pre-hard-flip hardening (bind-health #981, preventive native-tool gate #984);
+  **live-verified on `.253`**. **S3**'s staged dial (`AIMEE_WORKFLOW_ENFORCE_STAGE` off→advisory→soft→
+  hard) is wired into both the MCP dispatch guard and the native-tool gate (default OFF); the `hard`-flip
+  itself is STEP 7, an operator decision gated on S4 parity + live cost numbers. **S4** (autonomous
+  parity — `/v1/dev/submit` routed through the same router, clamped to the full-spine set with floor
+  `managed-change`; sweep pinned to the human-gate floor) lands via #1016, **live-verified on a fresh
+  LXC CT**. Ships default-OFF; default-ON is a later, separate proposal.
 - **Author:** JBailes
 - **Date:** 2026-07-01
 - **Charter roles:** Orchestrate / Delegate-Manage / Review-Roundtable / Evaluate-Optimize
@@ -636,3 +647,86 @@ Each slice roundtable-reviewed (code + design) before its PR, per house rule.
     healthy provider (mistral vault key was 401 / codex quota-exhausted / mimo
     endpoint-400); rotating a valid mistral key restored a 3-provider pool. See
     the roundtable-invocation memory for the full panel-health diagnosis.*
+
+## §10 Close-out (2026-07-03)
+
+All five slices (§6) shipped **default-off**. The primary-as-manager loop —
+communicate → split → delegate → **review** → **roundtable** → deliver — is now
+an *engine invariant* (not a prompt convention) on both surfaces, dark behind the
+staged dial until an operator flips it.
+
+### Slice → PR map
+- **S0** — catalog + engine invariants I1/I2/I3 + `gate.deliver`/`review`/
+  `understand`/`split` blocks + policy cores: **#936**.
+- **S1** — advisory request→workflow router at the unified gateway seam (prefilter
+  + sampled async LLM classifier, catalog-driven, mandatory read-only default):
+  **#936, #940**.
+- **S2** — binding + `advance_request` interactive driver + per-block tool-strip
+  resolver + dispatch-time externalization guard + templated surfacing +
+  sliding-lease watchdog + reject-scope-add surfacing: **#941, #944, #948, #953,
+  #957, #966, #970**. Made to bite for the mandatory external **tmux Claude
+  primary** (the S2 binding was inert for it) via the CLI-ingestor thread —
+  seam+enforce-before-send **#975**, tmux-path wiring **#979** (the #978
+  orchestrator was reverted as wrong-transport), boot posture log **#980** — plus
+  pre-hard-flip hardening: bind-health detector **#981** and the preventive
+  native-tool gate that closes the shell-tool bypass **#984**. **Live-verified on
+  `.253`** (a `bind-s2` lifecycle event on a real enforced tmux turn).
+- **S3** — staged enforcement dial `AIMEE_WORKFLOW_ENFORCE_STAGE`
+  (off→advisory→soft→hard), wired into the MCP dispatch guard
+  (`wfe_mcp_toolcall_action`) and the native-tool gate (`s2_native_gate_hook`).
+  The dial is complete and default-off; **STEP 7 — the `hard`-flip — is an
+  operator decision**, gated on live cost numbers + S4 parity (or an explicit
+  recorded residual-risk signoff), and default-ON is a separate later proposal.
+- **S4** — autonomous parity: **#1016**. `/v1/dev/submit` (omitted `workflow`)
+  routed through the same router, clamped to the full-spine autonomous set (floor
+  `managed-change`, `build` explicit-name-only); sweep pinned to the human-gate
+  floor (`manual-review`) for unvetted candidates. Default-off
+  (`AIMEE_WORKFLOW_AUTONOMOUS_ROUTER`); explicit `workflow` always wins.
+  **Live-verified on a fresh LXC CT** (flag-on omitted → `managed-change` with a
+  typed `route-s4` audit event; flag-on explicit `build` → `build`; flag-off →
+  `build` legacy).
+  *On "explicit `workflow` always wins" vs the clamp (roundtable 2026-07-03):* the
+  clamp applies **only to the router's auto-selection** for an *omitted* workflow;
+  an explicitly-named workflow is **not** clamped — it is authoritative
+  (backwards-compat §7) and is an **attested-submitter, audited** action
+  (`/v1/dev/submit` already requires an attested principal + per-principal caps).
+  This is the same capability as today (a caller could always name `build`); S4
+  does not widen it. Per RT-Rev2 #4, an `enforced:false` workflow is reachable
+  *only* by such an explicit name, never as a router default.
+
+### Deferred-by-design — NOT loose ends (roundtable-confirmed non-load-bearing)
+- **`gate.deliver` terminal-executor surface event.** Extra observability only.
+  §8's *evidence* is the append-only lifecycle chain the engine already writes:
+  `gate.deliver` cannot be crossed until its upstream `review` + `gate.roundtable`
+  nodes have recorded fail-closed passing advance events (I2 makes this a load-time
+  *and* run-time invariant — the engine refuses externalization primitives until
+  `gate.deliver` has advanced). So the recorded review-passed + roundtable-passed
+  advance events, and the deliver-advance itself, are the authoritative audit
+  chain; a *separate* surface event on the terminal executor would only duplicate
+  that. Not required for §8.
+- **INC 3b — cross-session resume-with-auth.** §4 states: *"Primary disconnect /
+  crash mid-workflow: the work-item is orphaned, not lost — resumable by rebinding
+  (state is already durable in DB1)."* That property is delivered by the shipped
+  same-session rebind (proposal_path=`interactive/<sid>` + resume-on-collision +
+  lease-reclaim). Resuming under a *different* re-attested principal is a
+  strictly-stronger enhancement **beyond the §4 text**; the auth-principal source
+  exists (SO_PEERCRED / attested `submitter`) but is not plumbed to the bind seam.
+  A future hardening, not a §4 gap.
+
+### Blocked-by-design — external dependency, cannot close here
+- **Ingest the tmux primary turn → canonical IR.** Blocked: Claude Code exposes
+  no *local structured side-channel* for an *isolated* interactive session
+  (`--remote-control` = cloud; `-p stream-json` can't isolate). Tracked under the
+  `aimee-canonical-ir` proposal; the S2 enforcement is independent of it and
+  ships regardless.
+
+### Operator / separate-proposal (not code)
+- The S3 `hard`-flip (`AIMEE_WORKFLOW_ENFORCE_STAGE=hard`) and default-ON across
+  the dials are an operator rollout decision + a later, separate proposal, per the
+  house default-off pattern.
+
+**"autonomous" (SSOT):** in this proposal, the *autonomous surface* = a work-item
+submitted (via `/v1/dev/submit` or sweep) with **no concurrent interactive driver
+session bound to it** — driven server-side by the scheduler/coordinator — as
+opposed to the *interactive surface* (a live `/v1/sessions` chat bound to the
+work-item, with the primary as live driver).
