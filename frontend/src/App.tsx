@@ -8,6 +8,7 @@ import EditWorkflows from './pages/EditWorkflows';
 import WorkflowActions from './pages/WorkflowActions';
 import Agents from './pages/Agents';
 import Personas from './pages/Personas';
+import Settings from './pages/Settings';
 import Projects from './pages/Projects';
 import Graph from './pages/Graph';
 import Editor from './pages/Editor';
@@ -72,6 +73,7 @@ const NAV_ITEMS: Tab[] = [
   { label: 'Projects', icon: '📁', route: '/projects' },
   { label: 'Graph', icon: '🕸️', route: '/graph' },
   { label: 'Editor', icon: '🖥️', route: '/editor' },
+  { label: 'Settings', icon: '⚙️', route: '/settings' },
 ];
 
 /* Top bar: one tab per session. A session bundles a chat + the project it runs
@@ -247,6 +249,7 @@ export default function App() {
                 <Route path="/projects" element={<Projects />} />
                 <Route path="/graph" element={<Graph />} />
                 <Route path="/editor" element={<Editor />} />
+                <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/chat" replace />} />
               </Routes>
             </ErrorBoundary>
