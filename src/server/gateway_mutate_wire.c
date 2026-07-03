@@ -27,6 +27,14 @@ void gw_mutate_ctx_free(gw_mutate_ctx_t *ctx)
    }
 }
 
+int gw_mutate_is_enabled(void)
+{
+   config_t cfg;
+   if (config_load(&cfg) != 0)
+      return 0;
+   return cfg.reduce_gateway_mutate ? 1 : 0;
+}
+
 void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
                         const char *system_prompt, const char *session_hdr, const char *bearer,
                         const char *auth_identity, gw_mutate_ctx_t *ctx)

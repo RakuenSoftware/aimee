@@ -35,6 +35,11 @@ extern "C"
    void gw_mutate_ctx_init(gw_mutate_ctx_t *ctx);
    void gw_mutate_ctx_free(gw_mutate_ctx_t *ctx);
 
+   /* Cheap (mtime-cached config_load) check of reduce_gateway_mutate, so a caller can
+    * skip the system-prompt flattening + the mutate attempt entirely on the default-
+    * OFF hot path. gw_buffered_mutate re-checks internally (defense in depth). */
+   int gw_mutate_is_enabled(void);
+
    /* Pre-send: under reduce_gateway_mutate, resolve the session key from the thread-
     * local request identity; if the session is not disabled, snapshot container[key],
     * run the compress-only economizer, and — when gw_should_apply passes — replace

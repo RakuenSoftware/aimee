@@ -403,7 +403,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
    char extra[512];
    char msg_id[48];
    const delegate_driver_t *driver;
-   parsed_response_t parsed;
+   parsed_response_t parsed = {0}; /* freed only on the success path, but init defensively */
    int status, http_status, rc;
    const char *model;
    gw_mutate_ctx_t gwmc;
@@ -447,6 +447,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
     * body is assembled from the reduced array; on a bad reduction the upstream 4xx is
     * caught below (restore-resend), the session is circuit-broken, and provenance is
     * cleared. A dark no-op when reduce_gateway_mutate is off. */
+   if (gw_mutate_is_enabled())
    {
       char *mut_sys = anthropic_system_to_text(req);
       gw_buffered_mutate(req, "messages", model, mut_sys, server_http_identity_session_hdr(),

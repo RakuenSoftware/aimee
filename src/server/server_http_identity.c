@@ -17,6 +17,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h> /* strncasecmp */
 
 /* Per-thread captured identity for the request currently being routed. Thread-
  * local for the same reason as the front-end's g_rpc_conn_caps: each connection
@@ -36,7 +37,11 @@ static _Thread_local const char *tl_query = "";
  * and cleared (bearer zeroed) with the rest — valid only during the route handler
  * on the serving thread. Empty when absent. */
 static _Thread_local char tl_session_hdr[80] = "";
-static _Thread_local char tl_bearer[512] = "";
+/* Bearer buffer sized for long tokens (JWT/OIDC bearers can exceed 512B). Truncation
+ * beyond this is deterministic (same input -> same truncated string -> same session
+ * key), so it only risks two >2KB bearers that share a 2KB prefix sharing a disable
+ * bucket — a benign availability edge, not a security boundary. */
+static _Thread_local char tl_bearer[2048] = "";
 
 /* The shared secret that authenticates a webchat `webuser:` assertion is the
  * server.token file (0600, in AIMEE_HOME — the secret only the webchat backend
@@ -125,9 +130,10 @@ void server_http_identity_capture(int fd, int is_tcp, const char *buf)
    if (buf)
    {
       http_header(buf, "aimee-session-id", tl_session_hdr, sizeof(tl_session_hdr));
-      char authz[512] = "";
+      char authz[2048] = "";
+      /* Bearer scheme token is case-insensitive (RFC 7235 §2.1). */
       if (http_header(buf, "Authorization", authz, sizeof(authz)) &&
-          strncmp(authz, "Bearer ", 7) == 0)
+          strncasecmp(authz, "Bearer ", 7) == 0)
          snprintf(tl_bearer, sizeof(tl_bearer), "%s", authz + 7);
    }
 }
