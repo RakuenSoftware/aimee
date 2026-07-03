@@ -119,6 +119,21 @@ extern "C"
       REDUCE_REASON_ALREADY,      /* provenance: a prior seam already reduced */
    } reduce_reason_t;
 
+   /* Internal-error classification for a hard-bypass return (rc != 0). Default NONE
+    * on the success paths. The reducer currently distinguishes only what its sub-
+    * transforms report — an unsupported message shape is handled as a no-op (rc==0),
+    * and a compress/fold sub-transform failure is reported as INTERNAL_ASSERTION;
+    * ALLOC_FAILED / PARSE_FAILED are reserved for finer future classification. The
+    * gateway maps this 1:1 to gateway_hard_bypass{reason} (§2.2). */
+   typedef enum
+   {
+      REDUCE_ERR_NONE = 0,
+      REDUCE_ERR_ALLOC_FAILED,
+      REDUCE_ERR_PARSE_FAILED,
+      REDUCE_ERR_INTERNAL_ASSERTION,
+      REDUCE_ERR_FORMAT_UNSUPPORTED,
+   } reduce_error_t;
+
    typedef struct reduce_result_s
    {
       /* Reduced view. When messages were mutated, `messages` is a NEW array the
@@ -128,6 +143,7 @@ extern "C"
       int mutated;
 
       reduce_reason_t reason;
+      reduce_error_t error; /* internal-error class on a hard-bypass (rc != 0); else NONE */
 
       /* Measurement (token COUNTS are caching-independent; chars/4 estimate, so
        * forecast only — the invoice-quality number is realized on/off spend). */

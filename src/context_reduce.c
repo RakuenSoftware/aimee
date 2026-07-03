@@ -207,6 +207,7 @@ int context_reduce(cJSON *messages, const char *system_prompt, const char *model
          fold_result_free(&cr);
          out->messages = NULL;
          out->mutated = 0;
+         out->error = REDUCE_ERR_INTERNAL_ASSERTION;
          return 1;
       }
       if (cr.folded)
@@ -278,6 +279,7 @@ int context_reduce(cJSON *messages, const char *system_prompt, const char *model
                cJSON_Delete(compressed_owned);
             out->messages = NULL;
             out->mutated = 0;
+            out->error = REDUCE_ERR_INTERNAL_ASSERTION;
             return 1;
          }
          if (fr.folded)
