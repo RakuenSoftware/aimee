@@ -26,7 +26,8 @@ static int delegate_agent_supports_role(const agent_t *agent, const char *role)
       return 0;
    for (int i = 0; i < agent->role_count; i++)
    {
-      if (strcmp(agent->roles[i], role) == 0)
+      /* "all" is a wildcard: the agent serves every role. */
+      if (strcmp(agent->roles[i], "all") == 0 || strcmp(agent->roles[i], role) == 0)
          return 1;
    }
    for (int i = 0; i < agent->exec_role_count; i++)

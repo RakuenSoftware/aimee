@@ -906,7 +906,7 @@ AGENT_FIELD_DESC = {
     "auto_compact_pct": "Context % at which to auto-compact.",
     "context_warn_pct": "Context % at which to warn.",
     "stall_threshold": "Stall-detection threshold.",
-    "roles": "Roles this agent serves (review, plan, …).",
+    "roles": "Roles this agent serves (review, plan, …); `\"all\"` = every role.",
     "personas": "Personas this agent may be dispatched AS (engineer, architect, …); `\"all\"` or omitted = every persona.",
     "exec_roles": "Roles this agent may execute with tools.",
     "exec_system_prompt": "System prompt for exec/tool runs.",

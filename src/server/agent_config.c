@@ -1185,7 +1185,9 @@ int agent_has_role(const agent_t *agent, const char *role)
 {
    for (int i = 0; i < agent->role_count; i++)
    {
-      if (strcmp(agent->roles[i], role) == 0)
+      /* "all" is a wildcard: the agent serves every role (routing only — tool
+       * use is still governed by exec_roles / tools_enabled). */
+      if (strcmp(agent->roles[i], "all") == 0 || strcmp(agent->roles[i], role) == 0)
          return 1;
    }
    return 0;

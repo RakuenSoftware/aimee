@@ -121,6 +121,13 @@ static void test_agent_has_role(void)
    assert(agent_has_role(&agent, "translate") == 0);
    agent.role_count = 0;
    assert(agent_has_role(&agent, "summarize") == 0);
+
+   /* The "all" wildcard role serves every role. */
+   strcpy(agent.roles[0], "all");
+   agent.role_count = 1;
+   assert(agent_has_role(&agent, "summarize") == 1);
+   assert(agent_has_role(&agent, "code") == 1);
+   assert(agent_has_role(&agent, "anything") == 1);
 }
 
 static void test_agent_supports_persona(void)
