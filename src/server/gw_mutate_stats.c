@@ -114,9 +114,25 @@ void gw_stat_dump(FILE *out)
    }
    pthread_mutex_lock(&g_reason_lock);
    for (int i = 0; i < g_reason_n; i++)
-      if (g_reasons[i].count)
-         fprintf(out, "gateway_%s{reason=\"%s\"} %llu\n", g_reasons[i].group, g_reasons[i].reason,
-                 (unsigned long long)g_reasons[i].count);
+   {
+      if (!g_reasons[i].count)
+         continue;
+      /* All reasons are static literals today, but escape the label value so a
+       * future dynamic caller cannot break the Prometheus line format (quotes,
+       * backslashes, control chars). */
+      char esc[GW_STAT_REASON_LEN * 2 + 1];
+      size_t o = 0;
+      for (const char *p = g_reasons[i].reason; *p && o + 2 < sizeof(esc); p++)
+      {
+         unsigned char c = (unsigned char)*p;
+         if (c == '"' || c == '\\')
+            esc[o++] = '\\';
+         esc[o++] = (c < 0x20) ? '_' : (char)c;
+      }
+      esc[o] = '\0';
+      fprintf(out, "gateway_%s{reason=\"%s\"} %llu\n", g_reasons[i].group, esc,
+              (unsigned long long)g_reasons[i].count);
+   }
    pthread_mutex_unlock(&g_reason_lock);
 }
 

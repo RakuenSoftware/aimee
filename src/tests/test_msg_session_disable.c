@@ -52,6 +52,10 @@ static void test_resolve(void)
    sha16("bearerA", expect);
    assert(strcmp(key, expect) == 0);
 
+   /* empty (non-NULL) auth_identity is treated like NULL -> header ignored, bearer used */
+   assert(msg_session_key_resolve(hdr, "bearerA", "", key) == MSG_SESSION_KEY_RESOLVED);
+   assert(strcmp(key, expect) == 0);
+
    /* malformed header (wrong length / non-hex / uppercase) -> treated absent, bearer used,
     * status flags the anomaly */
    assert(msg_session_key_resolve("short", "bearerA", "identityX", key) ==

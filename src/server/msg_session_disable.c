@@ -9,11 +9,17 @@
 
 #include <ctype.h>
 #include <pthread.h>
+#include <stdio.h> /* snprintf — do not rely on a transitive include */
 #include <string.h>
 
 #include "gw_mutate_stats.h"
 #include "harness_memory_common.h" /* hmem_sha256_hex — vendored SHA-256, no OpenSSL */
 #include "util.h"                  /* util_now_ms (monotonic) */
+
+/* The session key is the first 16 hex of a SHA-256 digest; bind that assumption to
+ * the vendored helper's output width so a silent migration to a different digest
+ * can't slip a truncated wrong-hash key through. */
+_Static_assert(HMEM_HASH_HEX_LEN >= 17, "session key needs >= 16 hex chars + NUL");
 
 #define MSG_SESSION_SLOTS             16384 /* power of two > cap, load factor ~0.61 at cap */
 #define MSG_SESSION_CAP               10000
@@ -139,7 +145,10 @@ int msg_session_is_disabled(const char *key)
 
 void msg_session_disable(const char *key, int ttl_ms, const char *reason)
 {
-   if (!key || !key[0] || ttl_ms <= 0)
+   /* Keys are always the 16-hex output of msg_session_key_resolve; reject anything
+    * else at this cold (failure-path) call site so a mis-sized key can't be silently
+    * truncated by the insert snprintf into a form that lookups then never match. */
+   if (!key || strnlen(key, MSG_SESSION_KEY_LEN) != 16 || ttl_ms <= 0)
       return;
    long long now = util_now_ms();
    pthread_mutex_lock(&g_lock);
@@ -235,10 +244,12 @@ static int is_16_lower_hex(const char *s)
    for (int i = 0; i < 16; i++)
    {
       char c = s[i];
+      if (c == '\0') /* shorter than 16 — stop before reading past the NUL */
+         return 0;
       if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
          return 0;
    }
-   return s[16] == '\0'; /* exactly 16 chars */
+   return s[16] == '\0'; /* exactly 16 chars, no trailing garbage */
 }
 
 msg_session_key_status_t msg_session_key_resolve(const char *hdr_session_id, const char *bearer,

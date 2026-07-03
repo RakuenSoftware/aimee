@@ -38,7 +38,14 @@ extern "C"
     * written). On any resolved status `key` is filled (NUL-terminated, len 16). An
     * attacker holding a valid bearer cannot forge another identity's key: a header
     * that does not match SHA-256(auth_identity) is rejected and the key falls back to
-    * the attacker's OWN bearer hash. */
+    * the attacker's OWN bearer hash.
+    *
+    * NOTE: `aimee-session-id` is a credential-DERIVED binding token, not an
+    * independent secret. There is exactly ONE valid value for a given identity
+    * (SHA-256(auth_identity)[0..16)), so a client cannot rotate the header to evade
+    * its own disable state or reach a different bucket — any other value is rejected
+    * and falls back to the bearer hash. Its only purpose is to group one identity's
+    * sessions under a stable key across bearer rotation. */
    msg_session_key_status_t msg_session_key_resolve(const char *hdr_session_id, const char *bearer,
                                                     const char *auth_identity,
                                                     char key[MSG_SESSION_KEY_LEN]);
