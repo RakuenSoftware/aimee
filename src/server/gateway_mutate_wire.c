@@ -157,3 +157,36 @@ gw_post_action_t gw_buffered_after_status(cJSON *container, const char *key, int
    }
    return GW_POST_NONE;
 }
+
+void gw_stream_disable(gw_mutate_ctx_t *ctx, const char *reason)
+{
+   if (!ctx || !ctx->mutated || !ctx->have_key)
+      return;
+   msg_session_disable(ctx->skey, ctx->ttl_ms, reason ? reason : "stream");
+   gw_provenance_clear(&ctx->st);
+   gw_stat_inc(GW_STAT_STREAM_ERROR_DISABLE);
+   ctx->mutated = 0; /* one disable per turn; a later frame no-ops */
+}
+
+int gw_stream_anthropic_error_is_invalid_request(const char *data)
+{
+   if (!data || !data[0])
+      return 0;
+   cJSON *root = cJSON_Parse(data);
+   if (!root)
+      return 0;
+   int invalid = 0;
+   cJSON *err = cJSON_GetObjectItemCaseSensitive(root, "error");
+   cJSON *type = err ? cJSON_GetObjectItemCaseSensitive(err, "type") : NULL;
+   if (cJSON_IsString(type) && type->valuestring)
+   {
+      const char *t = type->valuestring;
+      /* Anthropic invalid-request class: invalid_request_error + request_too_large
+       * (the 413-equivalent a bad reduced serialization can produce). rate_limit /
+       * overloaded / api_error / authentication are NOT reduction bugs. */
+      if (strstr(t, "invalid_request") || strstr(t, "request_too_large"))
+         invalid = 1;
+   }
+   cJSON_Delete(root);
+   return invalid;
+}

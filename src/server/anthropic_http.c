@@ -597,6 +597,10 @@ typedef struct
    int output_tokens;
    int cache_write_tokens;
    int cache_read_tokens;
+   /* Gateway-mutation streaming breaker: when this stream carried a reduced payload
+    * (gwmc->mutated), an invalid-request error frame disables the session for
+    * subsequent turns (§2.5 streaming). NULL when the request was not mutated. */
+   gw_mutate_ctx_t *gwmc;
 } anthropic_relay_ctx_t;
 
 static int prov_line_cb(const char *line, size_t len, void *ud)
@@ -685,6 +689,13 @@ static void relay_flush(anthropic_relay_ctx_t *c)
       relay_capture_usage(c, event, c->data);
       c->emit(c->emit_ctx, event, c->data);
       c->emitted++;
+      /* Inspect-as-forward (§2.5 streaming): the frame is already forwarded above;
+       * if this MUTATED stream carried an invalid-request-class error frame, the
+       * reduced payload is the likely cause -> disable subsequent turns. Transient
+       * frames (rate-limit/overloaded) are forwarded WITHOUT disabling. */
+      if (c->gwmc && c->gwmc->mutated && strcmp(event, "error") == 0 &&
+          gw_stream_anthropic_error_is_invalid_request(c->data))
+         gw_stream_disable(c->gwmc, "stream_invalid_request");
    }
    c->event[0] = '\0';
    c->data_len = 0;
@@ -754,6 +765,8 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    prov_stream_ctx_t pc;
    int input_est;
    int responses_wire = 0;
+   gw_mutate_ctx_t gwmc;
+   gw_mutate_ctx_init(&gwmc);
 
    mint_msg_id(msg_id, sizeof(msg_id));
 
@@ -794,6 +807,20 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    /* Re-read `model`: the model-pin stage may have replaced req's "model" node, so
     * the pointer cached at the top of this function could now dangle. */
    model = jo_cstr(req, "model");
+
+   /* Economizer gateway MUTATION (streaming). Reduces req["messages"] in place before
+    * translate/build. Streaming CANNOT restore-resend (the 200 is committed on the
+    * first byte), so on a bad reduction only SUBSEQUENT turns are circuit-broken —
+    * via the SSE error-frame inspect-as-forward in relay_flush + the post-stream
+    * fail-safe below. Default-OFF dark no-op. */
+   if (gw_mutate_is_enabled())
+   {
+      char *mut_sys = anthropic_system_to_text(req);
+      gw_buffered_mutate(req, "messages", model, mut_sys, server_http_identity_session_hdr(),
+                         server_http_identity_bearer(), server_http_identity_principal(), &gwmc);
+      free(mut_sys);
+   }
+
    translate_request(req, driver, ag, &messages, &tools, &system_text);
    if (delegate_build_url(driver, ag, url, sizeof(url)) != 0 ||
        agent_resolve_auth(ag, auth, sizeof(auth)) != 0)
@@ -933,6 +960,11 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
                   buf_status);
          if (emit)
             emit(ctx, "error", err);
+         /* Buffered-replay streaming: a non-200 upstream on a mutated request
+          * circuit-breaks subsequent turns (4xx = the reduced payload, 5xx =
+          * fail-safe). No restore/resend — the 200 is already committed. */
+         gw_stream_disable(&gwmc, buf_status / 100 == 4 ? "stream_invalid_request"
+                                                        : "stream_decoder_error");
       }
       free(buf_resp);
       goto cleanup;
@@ -946,12 +978,18 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
       sse_parser_init(&relay.parser);
       relay.emit = emit;
       relay.emit_ctx = ctx;
+      relay.gwmc = &gwmc; /* enable the streaming breaker for a mutated stream */
       stream_status =
           agent_http_post_stream(url, auth, prov_body ? prov_body : "{}", anthropic_relay_chunk_cb,
                                  &relay, ag->timeout_ms, extra[0] ? extra : NULL);
       relay_flush(&relay);
       if (stream_status != 200)
+      {
          relay_emit_transport_error(&relay, stream_status);
+         /* Fail-safe (§2.5): a non-SSE post-200 upstream failure on a mutated stream
+          * disables subsequent turns (the current turn is already lost). */
+         gw_stream_disable(&gwmc, "stream_decoder_error");
+      }
       /* Cost accounting for the native Anthropic streaming ingress, from the
        * usage tapped off the relayed SSE. A clean 200 is realized spend; an
        * aborted stream that still observed usage is recorded as partial so the
@@ -986,6 +1024,12 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
                                              &pc, ag->timeout_ms, extra[0] ? extra : NULL);
    sse_parser_free(&pc.parser);
 
+   /* OpenAI-via-translator streaming: this path lacks per-frame Anthropic error
+    * classification, so a non-200 upstream on a mutated request is a fail-safe
+    * disable of subsequent turns. */
+   if (xlate_status != 200)
+      gw_stream_disable(&gwmc, "stream_decoder_error");
+
    anthropic_stream_finish(xl);
 
    /* Cost accounting for the OpenAI-via-translator streaming ingress: tap the
@@ -1014,6 +1058,7 @@ static int messages_stream(const char *body, server_http_sse_event_emit emit, vo
    anthropic_stream_free(xl);
 
 cleanup:
+   gw_mutate_ctx_free(&gwmc);
    free(prov_body);
    free(system_text);
    cJSON_Delete(messages);

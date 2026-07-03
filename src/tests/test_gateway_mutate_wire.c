@@ -140,6 +140,55 @@ static void test_dark_default_and_identityless(void)
    cJSON_Delete(c);
 }
 
+static void test_stream_disable(void)
+{
+   msg_session_reset();
+   gw_stat_reset();
+   cJSON *c;
+   gw_mutate_ctx_t ctx;
+   const char *skey = "aabbccddeeff0011";
+   make_mutated(&c, &ctx, skey);
+   cJSON_Delete(c); /* streaming holds no restore need */
+
+   /* an invalid-request frame disables; a second call is idempotent (mutated flips off) */
+   gw_stream_disable(&ctx, "stream_invalid_request");
+   assert(msg_session_is_disabled(skey) == 1);
+   assert(ctx.st.reduced == 0);
+   assert(ctx.mutated == 0);
+   assert(gw_stat_get(GW_STAT_STREAM_ERROR_DISABLE) == 1);
+   gw_stream_disable(&ctx, "stream_invalid_request"); /* no-op now */
+   assert(gw_stat_get(GW_STAT_STREAM_ERROR_DISABLE) == 1);
+   gw_mutate_ctx_free(&ctx);
+
+   /* a non-mutated ctx never disables */
+   gw_mutate_ctx_t idle;
+   gw_mutate_ctx_init(&idle);
+   gw_stream_disable(&idle, "stream_invalid_request");
+   assert(gw_stat_get(GW_STAT_STREAM_ERROR_DISABLE) == 1);
+   gw_mutate_ctx_free(&idle);
+}
+
+static void test_stream_error_classify(void)
+{
+   /* invalid-request class -> disable */
+   assert(gw_stream_anthropic_error_is_invalid_request(
+              "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"x\"}"
+              "}") == 1);
+   assert(gw_stream_anthropic_error_is_invalid_request(
+              "{\"error\":{\"type\":\"request_too_large\"}}") == 1);
+   /* transient / unrelated -> do NOT disable */
+   assert(gw_stream_anthropic_error_is_invalid_request(
+              "{\"error\":{\"type\":\"overloaded_error\"}}") == 0);
+   assert(gw_stream_anthropic_error_is_invalid_request(
+              "{\"error\":{\"type\":\"rate_limit_error\"}}") == 0);
+   assert(gw_stream_anthropic_error_is_invalid_request("{\"error\":{\"type\":\"api_error\"}}") ==
+          0);
+   /* garbage-safe */
+   assert(gw_stream_anthropic_error_is_invalid_request(NULL) == 0);
+   assert(gw_stream_anthropic_error_is_invalid_request("not json") == 0);
+   assert(gw_stream_anthropic_error_is_invalid_request("") == 0);
+}
+
 int main(void)
 {
    printf("gateway_mutate_wire: ");
@@ -156,6 +205,8 @@ int main(void)
    test_5xx_disable_no_resend();
    test_2xx_and_nonmutated_noop();
    test_dark_default_and_identityless();
+   test_stream_disable();
+   test_stream_error_classify();
    printf("ok\n");
    return 0;
 }
