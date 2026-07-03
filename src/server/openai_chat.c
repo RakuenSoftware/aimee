@@ -29,6 +29,8 @@
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "context_reduce.h"
+#include "gateway_mutate_wire.h"
+#include "server_http_identity.h"
 #include "agent_protocol.h"  /* parsed_response_t, message_history_repair */
 #include "delegate_driver.h" /* single provider step for the Codex proxy */
 #include "http_retry.h"
@@ -879,6 +881,27 @@ static int gw_stage_openai_tool_policing(gw_request_t *r, void *ud)
  * execute tool calls — out->calls[] surfaces them so the handler can relay them
  * to Codex. Returns 0 on success, -1 on transport/parse failure. *out is zeroed
  * here; the caller frees it with agent_free_parsed_response(). */
+/* Build the provider request body from the effective messages/tools/system (IR path
+ * when enabled, else the legacy driver builder). Re-callable so the gateway-mutation
+ * 4xx restore path can rebuild the body from the restored (pristine) messages.
+ * Returns a malloc'd JSON string (caller frees) or NULL. */
+static char *openai_build_body(const agent_t *agent, const delegate_driver_t *driver,
+                               cJSON *eff_messages, cJSON *eff_tools, const char *eff_system,
+                               int tok, double temperature)
+{
+   cJSON *req = NULL;
+   if (aimee_ir_path_enabled())
+      req =
+          aimee_ir_build_from_chat(agent->model, eff_messages, eff_tools, eff_system, driver->name);
+   if (!req)
+      req = driver->build_request(agent, eff_messages, eff_tools, eff_system, tok, temperature);
+   if (!req)
+      return NULL;
+   char *body = cJSON_PrintUnformatted(req);
+   cJSON_Delete(req);
+   return body;
+}
+
 static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *tools,
                                   const char *system_prompt, int max_tokens, double temperature,
                                   parsed_response_t *out)
@@ -964,20 +987,37 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    cJSON *eff_tools = cJSON_GetObjectItemCaseSensitive(gw_raw, "tools") ? tools : NULL;
 
    int tok = agent_request_max_tokens(agent, max_tokens);
-   /* Build the provider request VIA THE IR (no direct chat->provider translation)
-    * when the flag is on; legacy driver->build_request fallback otherwise. */
-   cJSON *req = NULL;
-   if (aimee_ir_path_enabled())
-      req = aimee_ir_build_from_chat(agent->model, messages, eff_tools, eff_system, driver->name);
-   if (!req)
-      req = driver->build_request(agent, messages, eff_tools, eff_system, tok, temperature);
-   cJSON_Delete(gw_raw); /* instructions copied into req by build_request; tools was a reference */
-   if (!req)
-      return -1;
-   char *body = cJSON_PrintUnformatted(req);
-   cJSON_Delete(req);
+
+   /* Economizer gateway MUTATION (primary-agent reduction, /v1/responses buffered).
+    * Default-OFF. Box the `input` messages by REFERENCE so the pristine array is never
+    * mutated/freed, run the shared buffered orchestration, and build the body from the
+    * effective (reduced or pristine) array. On a bad reduction the upstream 4xx is
+    * caught below (restore-resend from pristine); 5xx disables the session. */
+   gw_mutate_ctx_t gwmc;
+   gw_mutate_ctx_init(&gwmc);
+   cJSON *mbox = NULL;
+   cJSON *eff_messages = messages;
+   if (gw_mutate_is_enabled())
+   {
+      mbox = cJSON_CreateObject();
+      cJSON_AddItemReferenceToObject(mbox, "input", messages); /* reference: messages stays owned */
+      gw_buffered_mutate(mbox, "input", agent->model, eff_system,
+                         server_http_identity_session_hdr(), server_http_identity_bearer(),
+                         server_http_identity_principal(), &gwmc);
+      cJSON *bi = cJSON_GetObjectItemCaseSensitive(mbox, "input");
+      if (bi)
+         eff_messages = bi;
+   }
+
+   char *body =
+       openai_build_body(agent, driver, eff_messages, eff_tools, eff_system, tok, temperature);
    if (!body)
+   {
+      cJSON_Delete(mbox);
+      cJSON_Delete(gw_raw);
+      gw_mutate_ctx_free(&gwmc);
       return -1;
+   }
 
    char *response_body = NULL;
    config_t retry_cfg;
@@ -986,10 +1026,34 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
        retry_cfg.retry_max_attempts > 0 ? retry_cfg.retry_max_attempts : HTTP_RETRY_MAX_ATTEMPTS;
    int rb = retry_cfg.retry_base_ms > 0 ? retry_cfg.retry_base_ms : HTTP_RETRY_BASE_MS;
    int rm = retry_cfg.retry_max_ms > 0 ? retry_cfg.retry_max_ms : HTTP_RETRY_MAX_MS;
+   /* This IS the "gateway_retry_post_with_reduction" path: it wraps
+    * http_retry_post_context (whose no-4xx-retry contract is unchanged) with a SINGLE
+    * restore-from-pristine resend on a reduction 4xx. */
    int http_status =
        http_retry_post_context(url, auth_header, body, &response_body, agent->timeout_ms,
                                extra_headers, ra, rb, rm, agent->provider, agent->model, NULL);
    free(body);
+
+   if (gw_buffered_after_status(mbox, "input", http_status, &gwmc) == GW_POST_RESEND)
+   {
+      /* Restored pristine into mbox["input"]; rebuild the body from it and resend once. */
+      cJSON *bi = cJSON_GetObjectItemCaseSensitive(mbox, "input");
+      char *rbody = openai_build_body(agent, driver, bi ? bi : messages, eff_tools, eff_system, tok,
+                                      temperature);
+      if (rbody)
+      {
+         free(response_body);
+         response_body = NULL;
+         http_status = http_retry_post_context(url, auth_header, rbody, &response_body,
+                                               agent->timeout_ms, extra_headers, ra, rb, rm,
+                                               agent->provider, agent->model, NULL);
+         free(rbody);
+      }
+   }
+
+   cJSON_Delete(mbox); /* frees the reduced/restored array + the reference wrapper, NOT messages */
+   cJSON_Delete(gw_raw); /* kept alive so eff_system survived a resend */
+   gw_mutate_ctx_free(&gwmc);
 
    if (http_status != 200 || !response_body)
    {
