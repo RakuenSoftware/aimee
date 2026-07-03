@@ -451,6 +451,7 @@ int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

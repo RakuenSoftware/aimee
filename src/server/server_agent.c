@@ -67,6 +67,23 @@ static void server_agent_set_roles_csv(agent_t *ag, const char *csv)
    }
 }
 
+static void server_agent_set_personas_csv(agent_t *ag, const char *csv)
+{
+   ag->persona_count = 0;
+   if (!csv || !csv[0])
+      return;
+   char buf[512];
+   snprintf(buf, sizeof(buf), "%s", csv);
+   char *tok = strtok(buf, ",");
+   while (tok && ag->persona_count < MAX_AGENT_PERSONAS)
+   {
+      char *p = server_agent_trim(tok);
+      if (p[0])
+         snprintf(ag->personas[ag->persona_count++], sizeof(ag->personas[0]), "%s", p);
+      tok = strtok(NULL, ",");
+   }
+}
+
 static void server_agent_set_exec_roles_csv(agent_t *ag, const char *csv)
 {
    ag->exec_role_count = 0;
@@ -402,6 +419,10 @@ static cJSON *server_agent_to_json(const agent_t *ag)
    for (int j = 0; j < ag->role_count; j++)
       cJSON_AddItemToArray(roles, cJSON_CreateString(ag->roles[j]));
    cJSON_AddItemToObject(obj, "roles", roles);
+   cJSON *personas = cJSON_CreateArray();
+   for (int j = 0; j < ag->persona_count; j++)
+      cJSON_AddItemToArray(personas, cJSON_CreateString(ag->personas[j]));
+   cJSON_AddItemToObject(obj, "personas", personas);
    return obj;
 }
 
@@ -964,6 +985,38 @@ int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    else
       server_agent_set_roles_csv(
           ag, "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+
+   if (agent_save_config(&cfg) != 0)
+      return server_send_error(conn, "could not save agents.json", NULL);
+
+   cJSON *resp = server_agent_to_json(ag);
+   cJSON_AddStringToObject(resp, "status", "ok");
+   return server_send_ok(conn, resp);
+}
+
+/* Surgically update ONLY an agent's personas (the delegate identities it may be
+ * dispatched AS), preserving everything else. argv[0]=name, optional argv[1]=
+ * comma-separated personas ("all" = every persona); omitting resets to ["all"].
+ * Mirrors handle_agent_roles. */
+int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   char *argv[SERVER_AGENT_MAX_ARGS];
+   int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
+   if (argc < 1 || !argv[0][0])
+      return server_send_error(conn, "agent.personas requires name", NULL);
+
+   agent_config_t cfg;
+   if (agent_load_config(&cfg) != 0)
+      return server_send_error(conn, "agents.json not found or invalid", NULL);
+   agent_t *ag = agent_find(&cfg, argv[0]);
+   if (!ag)
+      return server_send_error(conn, "agent not found", NULL);
+
+   if (argc >= 2 && argv[1][0])
+      server_agent_set_personas_csv(ag, argv[1]);
+   else
+      server_agent_set_personas_csv(ag, "all");
 
    if (agent_save_config(&cfg) != 0)
       return server_send_error(conn, "could not save agents.json", NULL);

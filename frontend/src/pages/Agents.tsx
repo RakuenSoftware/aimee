@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Panel, Badge, Spinner } from "@rakuensoftware/smoothgui";
 
 /* ---- API types ---- */
@@ -17,6 +17,7 @@ interface AgentCfg {
   max_parallel?: number;
   context_window?: number;
   roles?: string[];
+  personas?: string[];
 }
 
 // GET /api/agents/stats -> per-delegate run stats (agent_log JOIN token_audit).
@@ -76,7 +77,7 @@ const PROVIDERS = [
   "mistral",
 ];
 
-export default function Delegates() {
+export default function Agents() {
   const [agents, setAgents] = useState<AgentCfg[]>([]);
   const [stats, setStats] = useState<Record<string, AgentStats>>({});
   const [probes, setProbes] = useState<Record<string, ProbeState>>({});
@@ -85,9 +86,19 @@ export default function Delegates() {
     null,
   );
   const [showAdd, setShowAdd] = useState(false);
+  // The known role + persona vocabularies, offered (with "all") when assigning
+  // an agent's roles/personas so they match what personas declare.
+  const [knownRoles, setKnownRoles] = useState<string[]>([]);
+  const [knownPersonas, setKnownPersonas] = useState<string[]>([]);
 
   const refresh = useCallback(() => {
     setLoading(true);
+    getJSON<{ role_templates?: string[] }>("/api/roles")
+      .then((d) => setKnownRoles((d.role_templates || []).slice().sort()))
+      .catch(() => setKnownRoles([]));
+    getJSON<{ personas?: { name: string }[] }>("/api/chat/personas")
+      .then((d) => setKnownPersonas((d.personas || []).map((p) => p.name)))
+      .catch(() => setKnownPersonas([]));
     Promise.all([
       getJSON<{ agents: AgentCfg[] }>("/api/agents")
         .then((d) => setAgents(d.agents || []))
@@ -101,6 +112,26 @@ export default function Delegates() {
         .catch(() => setStats({})),
     ]).finally(() => setLoading(false));
   }, []);
+
+  // Persist an agent's roles / personas via the surgical ops; refresh on success.
+  const saveAgentField = useCallback(
+    async (name: string, field: "roles" | "personas", values: string[]) => {
+      try {
+        const res = await postArgs<{ error?: string }>(`/api/agents/${field}`, [
+          name,
+          values.join(","),
+        ]);
+        if (res.error) setStatus({ kind: "err", msg: res.error });
+        else {
+          setStatus({ kind: "ok", msg: `${name} ${field} saved` });
+          refresh();
+        }
+      } catch {
+        setStatus({ kind: "err", msg: `failed to save ${field}` });
+      }
+    },
+    [refresh],
+  );
 
   useEffect(() => {
     refresh();
@@ -171,7 +202,7 @@ export default function Delegates() {
   return (
     <div style={{ padding: 16, fontFamily: "system-ui", height: "100%", overflow: "auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-        <strong style={{ fontSize: 18 }}>Delegates</strong>
+        <strong style={{ fontSize: 18 }}>Agents</strong>
         <Badge label={`${agents.length}`} variant="neutral" />
         <button onClick={refresh} style={btn}>
           Refresh
@@ -217,7 +248,7 @@ export default function Delegates() {
           </div>
         )}
         {agents.map((a) => (
-          <DelegateCard
+          <AgentCard
             key={a.name}
             agent={a}
             stats={stats[a.name]}
@@ -225,6 +256,10 @@ export default function Delegates() {
             onProbe={() => probe(a.name)}
             onToggle={() => setEnabled(a.name, !a.enabled)}
             onRemove={() => remove(a.name)}
+            knownRoles={knownRoles}
+            knownPersonas={knownPersonas}
+            onSaveRoles={(v) => saveAgentField(a.name, "roles", v)}
+            onSavePersonas={(v) => saveAgentField(a.name, "personas", v)}
           />
         ))}
       </div>
@@ -234,13 +269,17 @@ export default function Delegates() {
 
 /* ---- one delegate: config + availability + stats ---- */
 
-function DelegateCard({
+function AgentCard({
   agent,
   stats,
   probe,
   onProbe,
   onToggle,
   onRemove,
+  knownRoles,
+  knownPersonas,
+  onSaveRoles,
+  onSavePersonas,
 }: {
   agent: AgentCfg;
   stats?: AgentStats;
@@ -248,6 +287,10 @@ function DelegateCard({
   onProbe: () => void;
   onToggle: () => void;
   onRemove: () => void;
+  knownRoles: string[];
+  knownPersonas: string[];
+  onSaveRoles: (v: string[]) => void;
+  onSavePersonas: (v: string[]) => void;
 }) {
   const pstate = probe?.status || "idle";
   const dot =
@@ -291,13 +334,19 @@ function DelegateCard({
           {agent.context_window ? (
             <Field k="context" v={`${agent.context_window.toLocaleString()} tok`} />
           ) : null}
-          {agent.roles && agent.roles.length > 0 && (
-            <div style={{ margin: "4px 0", display: "flex", flexWrap: "wrap", gap: 4 }}>
-              {agent.roles.map((r) => (
-                <Badge key={r} label={r} variant="info" />
-              ))}
-            </div>
-          )}
+          <ChipEditor
+            label="roles"
+            selected={agent.roles || []}
+            options={knownRoles}
+            onSave={onSaveRoles}
+          />
+          <ChipEditor
+            label="personas"
+            selected={agent.personas || []}
+            options={knownPersonas}
+            emptyHint="(none set = all)"
+            onSave={onSavePersonas}
+          />
         </div>
 
         {/* middle: availability */}
@@ -486,6 +535,68 @@ function AddDelegate({ onDone }: { onDone: (msg: string, ok: boolean) => void })
 }
 
 /* ---- small presentational helpers ---- */
+
+// Editable multi-select of tokens (roles or personas) as toggleable chips. The
+// "all" wildcard is always offered; free selection from the known vocabulary
+// keeps agents matched to what personas declare. Save appears only when dirty.
+function ChipEditor({
+  label,
+  selected,
+  options,
+  emptyHint,
+  onSave,
+}: {
+  label: string;
+  selected: string[];
+  options: string[];
+  emptyHint?: string;
+  onSave: (v: string[]) => void;
+}) {
+  const [sel, setSel] = useState<string[]>(selected);
+  useEffect(() => setSel(selected), [selected.join(",")]); // resync after a save/refresh
+  const all = useMemo(() => {
+    const s = new Set<string>(["all", ...options, ...selected]);
+    return Array.from(s);
+  }, [options.join(","), selected.join(",")]);
+  const dirty = sel.slice().sort().join(",") !== selected.slice().sort().join(",");
+  const toggle = (r: string) =>
+    setSel((cur) => (cur.includes(r) ? cur.filter((x) => x !== r) : [...cur, r]));
+  return (
+    <div style={{ margin: "6px 0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ color: "#888", fontSize: 12 }}>{label}</span>
+        {dirty && (
+          <button onClick={() => onSave(sel)} style={{ ...btnSmall, padding: "1px 8px" }}>
+            save
+          </button>
+        )}
+        {sel.length === 0 && emptyHint && (
+          <span style={{ color: "#aaa", fontSize: 11 }}>{emptyHint}</span>
+        )}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3 }}>
+        {all.map((r) => {
+          const on = sel.includes(r);
+          return (
+            <button
+              key={r}
+              onClick={() => toggle(r)}
+              style={{
+                ...btnSmall,
+                padding: "1px 7px",
+                background: on ? (r === "all" ? "#a15" : "#1f7a3d") : "#fff",
+                color: on ? "#fff" : "#555",
+                fontWeight: r === "all" ? 600 : 400,
+              }}
+            >
+              {r}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function Field({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   return (

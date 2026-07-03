@@ -55,20 +55,6 @@ interface PersonaInfo {
   description?: string;
   builtin?: boolean;
 }
-// Full persona definition (GET /api/chat/personas/<name>); used by the manager
-// form. Fields mirror persona_to_json / persona_from_json on the server.
-interface PersonaDef {
-  name: string;
-  description?: string;
-  delegates?: string; // "full" | "readonly" | "none"
-  roles?: string[];
-  check_role?: string;
-  check_marker?: string;
-  persona?: string; // "## Persona" body
-  principles?: string; // "## Principles" body
-  brief?: string; // "## Brief" session hints
-  builtin?: boolean;
-}
 // A registered/known delegate (GET /api/agents). Used only to populate the
 // delegate picker's suggestions; the field also accepts free text.
 interface AgentInfo {
@@ -270,27 +256,6 @@ async function postJSON<T>(
   });
   return { status: r.status, data: (await r.json()) as T };
 }
-async function sendJSON<T>(
-  method: "PUT" | "DELETE",
-  url: string,
-  body?: unknown,
-): Promise<{ status: number; data: T }> {
-  const r = await fetch(url, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      "X-CSRF-Token": window._csrf || "",
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  let data = {} as T;
-  try {
-    data = (await r.json()) as T;
-  } catch {
-    /* DELETE/empty bodies are fine */
-  }
-  return { status: r.status, data };
-}
 
 export default function EditWorkflows() {
   const [defs, setDefs] = useState<DefRow[]>([]);
@@ -306,7 +271,6 @@ export default function EditWorkflows() {
   const [loading, setLoading] = useState(false);
   const [personas, setPersonas] = useState<PersonaInfo[]>([]);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [managePersonas, setManagePersonas] = useState(false);
   // This tab's selected project (per-tab project space). Held so the workflow
   // context can scope to it; execution-in-project flows through a chat session's
   // cwd today, so this primarily persists the selection + offers clone here.
@@ -596,24 +560,6 @@ export default function EditWorkflows() {
             </div>
           ))}
         </Panel>
-        <Panel title="Personas" count={personas.length}>
-          <button onClick={() => setManagePersonas(true)} style={btn}>
-            Manage personas
-          </button>
-          <div style={{ marginTop: 6 }}>
-            {personas.map((p) => (
-              <div
-                key={p.name}
-                style={row}
-                title={p.description || p.name}
-                onClick={() => setManagePersonas(true)}
-              >
-                <span>{p.name}</span>
-                {p.builtin && <Badge label="builtin" variant="neutral" />}
-              </div>
-            ))}
-          </div>
-        </Panel>
       </div>
 
       {/* center: canvas. minWidth:0 lets this flex item shrink below the 1600px
@@ -789,13 +735,6 @@ export default function EditWorkflows() {
         </Panel>
       </div>
 
-      {managePersonas && (
-        <PersonaManager
-          personas={personas}
-          onClose={() => setManagePersonas(false)}
-          onChanged={refreshPersonas}
-        />
-      )}
       </div>
     </div>
   );
@@ -1183,290 +1122,6 @@ function NodeInspector({
   );
 }
 
-/* ---- persona manager (list + create/edit/delete over /api/chat/personas) ---- */
-
-const DELEGATE_POLICIES = ["full", "readonly", "none"];
-
-function PersonaManager({
-  personas,
-  onClose,
-  onChanged,
-}: {
-  personas: PersonaInfo[];
-  onClose: () => void;
-  onChanged: () => void;
-}) {
-  // sel: null = nothing selected, "" = composing a new persona, else a name.
-  const [sel, setSel] = useState<string | null>(null);
-  const [form, setForm] = useState<PersonaDef | null>(null);
-  const [status, setStatus] = useState<{ kind: "ok" | "err"; msg: string } | null>(
-    null,
-  );
-  const [busy, setBusy] = useState(false);
-
-  const load = useCallback((name: string) => {
-    setBusy(true);
-    setStatus(null);
-    getJSON<PersonaDef & { error?: string }>(
-      `/api/chat/personas/${encodeURIComponent(name)}`,
-    )
-      .then((d) => {
-        if (d.error) {
-          setStatus({ kind: "err", msg: d.error });
-          return;
-        }
-        setForm({ ...d, roles: d.roles || [] });
-        setSel(name);
-      })
-      .catch(() => setStatus({ kind: "err", msg: "load failed" }))
-      .finally(() => setBusy(false));
-  }, []);
-
-  const newPersona = () => {
-    setSel("");
-    setStatus(null);
-    setForm({
-      name: "",
-      description: "",
-      delegates: "full",
-      roles: [],
-      check_role: "",
-      check_marker: "",
-      persona: "",
-      principles: "",
-      brief: "",
-    });
-  };
-
-  const upd = (patch: Partial<PersonaDef>) =>
-    setForm((f) => (f ? { ...f, ...patch } : f));
-
-  const save = async () => {
-    if (!form) return;
-    const name = form.name.trim();
-    if (!/^[a-z0-9][a-z0-9_-]*$/i.test(name)) {
-      setStatus({ kind: "err", msg: "name must be alphanumeric, - or _" });
-      return;
-    }
-    setBusy(true);
-    // Send every field: the server rebuilds the persona from the body, so omitting
-    // a field would drop it. check_role/check_marker round-trip from the load.
-    const body = {
-      name,
-      description: form.description || "",
-      delegates: form.delegates || "full",
-      roles: form.roles || [],
-      check_role: form.check_role || "",
-      check_marker: form.check_marker || "",
-      persona: form.persona || "",
-      principles: form.principles || "",
-      brief: form.brief || "",
-    };
-    const res = await sendJSON<{ name?: string; error?: string }>(
-      "PUT",
-      `/api/chat/personas/${encodeURIComponent(name)}`,
-      body,
-    );
-    setBusy(false);
-    if (res.status === 200 && res.data.name) {
-      setStatus({ kind: "ok", msg: `saved “${res.data.name}”` });
-      onChanged();
-      setSel(name);
-    } else {
-      setStatus({
-        kind: "err",
-        msg: res.data.error || `save failed (${res.status})`,
-      });
-    }
-  };
-
-  const del = async () => {
-    if (!form || sel === null || sel === "") return;
-    if (!confirm(`Delete persona “${form.name}”? Built-ins reset to default.`))
-      return;
-    setBusy(true);
-    const res = await sendJSON<{ deleted?: boolean; error?: string }>(
-      "DELETE",
-      `/api/chat/personas/${encodeURIComponent(form.name)}`,
-    );
-    setBusy(false);
-    if (res.status === 200) {
-      setStatus({ kind: "ok", msg: `removed “${form.name}”` });
-      onChanged();
-      setForm(null);
-      setSel(null);
-    } else {
-      setStatus({
-        kind: "err",
-        msg: res.data.error || `delete failed (${res.status})`,
-      });
-    }
-  };
-
-  return (
-    <div style={modalBackdrop} onClick={onClose}>
-      <div style={modalCard} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 10 }}>
-          <strong style={{ fontSize: 15 }}>Personas</strong>
-          <button onClick={onClose} style={{ ...btnSmall, marginLeft: "auto" }}>
-            ✕ Close
-          </button>
-        </div>
-        <div style={{ display: "flex", gap: 14, minHeight: 380 }}>
-          <div
-            style={{
-              width: 170,
-              borderRight: "1px solid #eee",
-              paddingRight: 10,
-              overflowY: "auto",
-            }}
-          >
-            <button onClick={newPersona} style={{ ...btn, width: "100%" }}>
-              + New persona
-            </button>
-            <div style={{ marginTop: 6 }}>
-              {personas.map((p) => (
-                <div
-                  key={p.name}
-                  onClick={() => load(p.name)}
-                  style={{ ...row, fontWeight: sel === p.name ? 600 : 400 }}
-                  title={p.description || p.name}
-                >
-                  <span>{p.name}</span>
-                  {p.builtin && <Badge label="builtin" variant="neutral" />}
-                </div>
-              ))}
-            </div>
-          </div>
-          <div style={{ flex: 1, overflowY: "auto", paddingRight: 4 }}>
-            {!form && (
-              <div style={{ color: "#888", fontSize: 13 }}>
-                Select a persona to edit, or create a new one.
-              </div>
-            )}
-            {form && (
-              <div style={{ fontSize: 13 }}>
-                <label style={lbl}>name</label>
-                <input
-                  value={form.name}
-                  disabled={sel !== ""}
-                  placeholder="my-persona"
-                  onChange={(e) => upd({ name: e.target.value })}
-                  style={{ ...inp, width: "100%" }}
-                />
-                {form.builtin && (
-                  <div style={{ color: "#a60", fontSize: 11, marginTop: 2 }}>
-                    Built-in — saving writes an override; removing resets to the
-                    default.
-                  </div>
-                )}
-
-                <label style={{ ...lbl, marginTop: 8 }}>description</label>
-                <input
-                  value={form.description || ""}
-                  onChange={(e) => upd({ description: e.target.value })}
-                  style={{ ...inp, width: "100%" }}
-                />
-
-                <label style={{ ...lbl, marginTop: 8 }}>delegate policy</label>
-                <select
-                  value={form.delegates || "full"}
-                  onChange={(e) => upd({ delegates: e.target.value })}
-                  style={{ ...inp, width: "100%" }}
-                >
-                  {DELEGATE_POLICIES.map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                </select>
-
-                <label style={{ ...lbl, marginTop: 8 }}>
-                  roles (comma-separated)
-                </label>
-                <input
-                  value={(form.roles || []).join(", ")}
-                  onChange={(e) =>
-                    upd({
-                      roles: e.target.value
-                        .split(",")
-                        .map((s) => s.trim())
-                        .filter(Boolean),
-                    })
-                  }
-                  style={{ ...inp, width: "100%" }}
-                />
-
-                <label style={{ ...lbl, marginTop: 8 }}>
-                  persona (system prompt)
-                </label>
-                <textarea
-                  value={form.persona || ""}
-                  onChange={(e) => upd({ persona: e.target.value })}
-                  rows={6}
-                  style={{ ...inp, width: "100%" }}
-                />
-
-                <label style={{ ...lbl, marginTop: 8 }}>principles</label>
-                <textarea
-                  value={form.principles || ""}
-                  onChange={(e) => upd({ principles: e.target.value })}
-                  rows={4}
-                  style={{ ...inp, width: "100%" }}
-                />
-
-                <label style={{ ...lbl, marginTop: 8 }}>brief (session hints)</label>
-                <textarea
-                  value={form.brief || ""}
-                  onChange={(e) => upd({ brief: e.target.value })}
-                  rows={3}
-                  style={{ ...inp, width: "100%" }}
-                />
-
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    marginTop: 12,
-                    alignItems: "center",
-                  }}
-                >
-                  <button
-                    onClick={save}
-                    disabled={busy}
-                    style={{ ...btn, background: "#2563eb", color: "#fff" }}
-                  >
-                    Save
-                  </button>
-                  {sel !== "" && (
-                    <button
-                      onClick={del}
-                      disabled={busy}
-                      style={{ ...btn, color: "#c00", borderColor: "#e0a0a0" }}
-                    >
-                      {form.builtin ? "Reset to default" : "Delete"}
-                    </button>
-                  )}
-                  {status && (
-                    <span
-                      style={{
-                        fontSize: 12,
-                        color: status.kind === "err" ? "#c00" : "#070",
-                      }}
-                    >
-                      {status.msg}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /* ---- inline styles ---- */
 const btn: React.CSSProperties = {
   fontSize: 13,
@@ -1500,24 +1155,4 @@ const inp: React.CSSProperties = {
   padding: "3px 5px",
   border: "1px solid #ccc",
   borderRadius: 4,
-};
-const modalBackdrop: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.35)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 1000,
-};
-const modalCard: React.CSSProperties = {
-  background: "#fff",
-  borderRadius: 8,
-  padding: 18,
-  width: 720,
-  maxWidth: "92vw",
-  maxHeight: "88vh",
-  overflow: "hidden",
-  boxShadow: "0 10px 40px rgba(0,0,0,0.25)",
-  fontFamily: "system-ui",
 };

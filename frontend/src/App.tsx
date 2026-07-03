@@ -6,7 +6,8 @@ import Chat from './pages/Chat';
 import Dashboard from './pages/Dashboard';
 import EditWorkflows from './pages/EditWorkflows';
 import WorkflowActions from './pages/WorkflowActions';
-import Delegates from './pages/Delegates';
+import Agents from './pages/Agents';
+import Personas from './pages/Personas';
 import Projects from './pages/Projects';
 import Graph from './pages/Graph';
 import Editor from './pages/Editor';
@@ -66,7 +67,8 @@ const NAV_ITEMS: Tab[] = [
   { label: 'Dashboard', icon: '📊', route: '/dashboard' },
   { label: 'Edit Workflows', icon: '🔀', route: '/edit-workflows' },
   { label: 'Workflow Actions', icon: '📝', route: '/workflow-actions' },
-  { label: 'Delegates', icon: '🤝', route: '/delegates' },
+  { label: 'Agents', icon: '🤝', route: '/agents' },
+  { label: 'Personas', icon: '🎭', route: '/personas' },
   { label: 'Projects', icon: '📁', route: '/projects' },
   { label: 'Graph', icon: '🕸️', route: '/graph' },
   { label: 'Editor', icon: '🖥️', route: '/editor' },
@@ -239,7 +241,9 @@ export default function App() {
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/edit-workflows" element={<EditWorkflows />} />
                 <Route path="/workflow-actions" element={<WorkflowActions />} />
-                <Route path="/delegates" element={<Delegates />} />
+                <Route path="/agents" element={<Agents />} />
+                <Route path="/delegates" element={<Navigate to="/agents" replace />} />
+                <Route path="/personas" element={<Personas />} />
                 <Route path="/projects" element={<Projects />} />
                 <Route path="/graph" element={<Graph />} />
                 <Route path="/editor" element={<Editor />} />

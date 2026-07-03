@@ -1929,6 +1929,11 @@ paths:
       summary: Set an agent's roles
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Agent roles updated, content: { application/json: { schema: { type: object } } } } }
+  /agent/personas:
+    post:
+      summary: Set the personas an agent may be dispatched as ("all" = every persona)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Agent personas updated, content: { application/json: { schema: { type: object } } } } }
   /agent/probe:
     post:
       summary: Probe an agent/provider

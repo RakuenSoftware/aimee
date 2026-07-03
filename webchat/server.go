@@ -218,6 +218,11 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agents/enable", s.requireAuth(s.agentOpHandler("agent.enable")))
 	mux.HandleFunc("POST /api/agents/disable", s.requireAuth(s.agentOpHandler("agent.disable")))
 	mux.HandleFunc("POST /api/agents/probe", s.requireAuth(s.agentOpHandler("agent.probe")))
+	mux.HandleFunc("POST /api/agents/roles", s.requireAuth(s.agentOpHandler("agent.roles")))
+	mux.HandleFunc("POST /api/agents/personas", s.requireAuth(s.agentOpHandler("agent.personas")))
+	// Role registry (the shared vocabulary matched between personas and agents).
+	mux.HandleFunc("/api/roles", s.requireAuth(s.handleRoles))
+	mux.HandleFunc("/api/roles/", s.requireAuth(s.handleRoleItem))
 	mux.HandleFunc("/api/rules", s.requireAuth(s.handleCollabRulesList))
 	mux.HandleFunc("/api/rules/active", s.requireAuth(s.handleCollabRulesActive))
 	mux.HandleFunc("POST /api/rules/{id}/{action}", s.requireAuth(s.handleCollabRuleAction))
