@@ -63,11 +63,12 @@
 #include <math.h>             /* isfinite — validate the /v1/dev/submit budget cap */
 #include <errno.h>            /* strtol overflow detection for /v1/dev/submit caps */
 #include "wfe_engine.h"       /* wfe_work_item_create — POST /v1/dev/submit intake */
-#include "wfe_scheduler.h"    /* wfe_scheduler_notify — resume the autonomy driver */
-#include "wfe_approval.h"     /* wfe_approval_record/present — human-gate approval */
-#include "wfe_store.h"        /* db1_work_item_* — gate approve/reject */
-#include <sys/stat.h>         /* mkdir for the proposal artifact dir */
-#include <time.h>             /* unique proposal artifact filename */
+#include "router_advise.h"    /* S4: router_autonomous_pick/_audit for dev-submit parity */
+#include "wfe_scheduler.h"        /* wfe_scheduler_notify — resume the autonomy driver */
+#include "wfe_approval.h"         /* wfe_approval_record/present — human-gate approval */
+#include "wfe_store.h"            /* db1_work_item_* — gate approve/reject */
+#include <sys/stat.h>             /* mkdir for the proposal artifact dir */
+#include <time.h>                 /* unique proposal artifact filename */
 
 /* Per-request context handed to a route handler. `id` holds the extracted
  * dynamic path segment (persona / role-template name, session id, run id) for
@@ -234,6 +235,15 @@ static int dev_env_cap(const char *v, int defval)
    return (int)n;
 }
 
+/* AIMEE_WORKFLOW_AUTONOMOUS_ROUTER (S4): default-OFF. On -> an omitted `workflow`
+ * on /v1/dev/submit is routed (clamped to the full-spine set) instead of
+ * defaulting to "build". Same truthy set as the other aimee boolean flags. */
+static int dev_autonomous_router_on(void)
+{
+   const char *v = getenv("AIMEE_WORKFLOW_AUTONOMOUS_ROUTER");
+   return v && (strcmp(v, "1") == 0 || strcmp(v, "on") == 0 || strcmp(v, "true") == 0);
+}
+
 static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
 {
    cJSON *body = rq->body ? cJSON_Parse(rq->body) : NULL;
@@ -246,9 +256,32 @@ static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
    }
    cJSON *jwf = cJSON_GetObjectItemCaseSensitive(body, "workflow");
    cJSON *jrepo = cJSON_GetObjectItemCaseSensitive(body, "repo");
-   const char *workflow =
-       (jwf && cJSON_IsString(jwf) && jwf->valuestring[0]) ? jwf->valuestring : "build";
    const char *repo = (jrepo && cJSON_IsString(jrepo)) ? jrepo->valuestring : "";
+
+   /* Workflow selection. Explicit `workflow` ALWAYS wins (backwards-compat). When
+    * omitted, S4 autonomous parity (default-OFF via AIMEE_WORKFLOW_AUTONOMOUS_ROUTER)
+    * routes the proposal through the router (clamped to the full-spine set, floor
+    * managed-change) instead of silently defaulting to "build". The chosen name is
+    * copied into a stack buffer so it survives `body` being freed below. */
+   char wf_choice[64];
+   int autoroute = 0, autoroute_clamped = 0;
+   char autoroute_src[16] = "", autoroute_raw[64] = "", autoroute_tag[9] = "";
+   if (jwf && cJSON_IsString(jwf) && jwf->valuestring[0])
+   {
+      snprintf(wf_choice, sizeof wf_choice, "%s", jwf->valuestring); /* explicit: authoritative */
+   }
+   else if (dev_autonomous_router_on())
+   {
+      autoroute = 1; /* pick fills wf_choice + audit fields (FNV tag while body alive) */
+      router_autonomous_pick(jprop->valuestring, wf_choice, sizeof wf_choice, autoroute_src,
+                             sizeof autoroute_src, autoroute_raw, sizeof autoroute_raw,
+                             autoroute_tag, sizeof autoroute_tag, &autoroute_clamped);
+   }
+   else
+   {
+      snprintf(wf_choice, sizeof wf_choice, "build"); /* legacy default */
+   }
+   const char *workflow = wf_choice;
 
    /* Intake-auth (WP-4/WP-5): require an attested submitter, and cap per-principal
     * concurrency + submit rate so one principal can't fan out unbounded autonomous
@@ -341,6 +374,9 @@ static int rh_dev_submit(const route_req_t *rq, char *resp, int cap)
       snprintf(resp, cap, "{\"error\":\"could not persist proposal\"}");
       return 500;
    }
+   if (autoroute) /* S4: audit the routing decision (typed fields; no proposal content) */
+      router_autonomous_audit(id, workflow, autoroute_src, autoroute_raw, autoroute_clamped,
+                              autoroute_tag);
    /* WP-5: a per-run USD budget ceiling so a runaway autonomous run parks
     * (budget_exceeded) instead of burning unbounded delegate cost. Default $5.00;
     * AIMEE_AUTONOMY_MAX_USD overrides (set it to 0 to disable the cap). The engine

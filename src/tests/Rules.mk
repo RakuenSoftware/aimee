@@ -131,6 +131,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-wfe-manager-flow \
                $(TESTPREFIX)/unit-test-wfe-router \
                $(TESTPREFIX)/unit-test-wfe-router-catalog \
+               $(TESTPREFIX)/unit-test-wfe-autonomous-route \
                $(TESTPREFIX)/unit-test-wfe-native-gate \
                $(TESTPREFIX)/unit-test-wfe-enforce \
                $(TESTPREFIX)/unit-test-wfe-advance \
@@ -1334,6 +1335,11 @@ $(TESTPREFIX)/unit-test-wfe-deliver: $(OBJDIR)/tests/test_wfe_deliver.o \
 # S1 router pure core (no engine/DB/LLM deps).
 $(TESTPREFIX)/unit-test-wfe-router: $(OBJDIR)/tests/test_wfe_router.o \
                                     $(OBJDIR)/workflow/wfe_router.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+# S4 autonomous-parity routing policy (pure; no engine/DB deps).
+$(TESTPREFIX)/unit-test-wfe-autonomous-route: $(OBJDIR)/tests/test_wfe_autonomous_route.o \
+                                    $(OBJDIR)/workflow/wfe_autonomous_route.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # S2 enforcement pure cores (no engine/DB deps).
@@ -2988,7 +2994,7 @@ $(TESTPREFIX)/unit-test-persona: $(OBJDIR)/tests/test_persona.o \
 
 $(TESTPREFIX)/unit-test-server-http: $(OBJDIR)/tests/test_server_http.o \
                       $(OBJDIR)/model_registry.o $(OBJDIR)/models_dev.o $(OBJDIR)/models_dev_cache.o \
-                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/server/vault_principal.o $(OBJDIR)/server/presence.o \
+                           $(OBJDIR)/server/server_http.o $(OBJDIR)/server/server_http_routes.o $(OBJDIR)/server/server_http_config_routes.o $(OBJDIR)/server/server_http_conn_worker.o $(OBJDIR)/server/server_http_response.o $(OBJDIR)/server/server_http_sse.o $(OBJDIR)/server/server_http_reqctx.o $(OBJDIR)/server/server_http_identity.o $(OBJDIR)/tests/support/git_route_stub.o $(OBJDIR)/tests/support/workflow_api_stub.o $(OBJDIR)/tests/support/router_advise_stub.o $(OBJDIR)/server/vault_principal.o $(OBJDIR)/server/presence.o \
                            $(OBJDIR)/server/cli_session_pty.o $(OBJDIR)/server/cli_session.o $(OBJDIR)/posix/workspace_provider.o \
                            $(OBJDIR)/server/workspace_runner_registry.o $(OBJDIR)/server/workspace_runner_queue.o \
                            $(OBJDIR)/forge_credentials.o \
@@ -3370,6 +3376,9 @@ $(OBJDIR)/tests/support/mock_agent_http.o: tests/support/mock_agent_http.c tests
 	@mkdir -p $(dir $@) && $(CC) $(TEST_C_FLAGS) -o $@ -c $<
 
 $(OBJDIR)/tests/support/ir_ingress_stubs.o: tests/support/ir_ingress_stubs.c
+	@mkdir -p $(dir $@) && $(CC) $(TEST_C_FLAGS) -o $@ -c $<
+
+$(OBJDIR)/tests/support/router_advise_stub.o: tests/support/router_advise_stub.c
 	@mkdir -p $(dir $@) && $(CC) $(TEST_C_FLAGS) -o $@ -c $<
 
 $(OBJDIR)/tests/test_mcp_client_integration.o: C_FLAGS += -DMCP_MOCK_SERVER_PATH=\"$(TESTPREFIX)/mock-mcp-server\"

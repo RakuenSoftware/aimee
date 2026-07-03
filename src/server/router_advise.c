@@ -25,9 +25,11 @@
 #include "gateway_pipeline.h"  /* gw_request_t — the shared gateway seam */
 #include "ingress_preinject.h" /* query-from-messages + per-turn id */
 #include "interaction_events.h"
+#include "wfe_autonomous_route.h" /* S4: clamp/floor policy */
 #include "wfe_bind_ingress.h"
 #include "wfe_enforce.h"
 #include "wfe_router.h"
+#include "wfe_store.h" /* db1_lifecycle_event_add -- S4 route audit */
 
 /* ~1 in N DEFER turns get the LLM classifier telemetry call. */
 #define ROUTER_SAMPLE_ONE_IN_N 5
@@ -202,4 +204,69 @@ void router_advise_turn(const char *session_id, const char *message)
          }
       }
    }
+}
+
+/* 8-hex FNV-1a of `s`: an audit-replay correlation tag (NOT a security digest). */
+static void s4_proposal_tag(const char *s, char *out, size_t n)
+{
+   unsigned int h = 2166136261u;
+   for (; s && *s; s++)
+      h = (h ^ (unsigned char)*s) * 16777619u;
+   snprintf(out, n, "%08x", h);
+}
+
+void router_autonomous_pick(const char *text, char *out_wf, size_t wf_n, char *out_src,
+                            size_t src_n, char *out_raw, size_t raw_n, char *out_tag, size_t tag_n,
+                            int *out_clamped)
+{
+   if (out_raw && raw_n)
+      out_raw[0] = '\0';
+   if (out_tag && tag_n)
+      s4_proposal_tag(text, out_tag, tag_n);
+   if (out_clamped)
+      *out_clamped = 1;
+
+   wfe_router_catalog_t cat;
+   char cerr[256];
+   if (wfe_router_catalog_load(&cat, cerr, sizeof cerr) != 0)
+   {
+      /* Catalog invalid/unavailable -> fail to the safe full-spine floor, never
+       * to the weaker "build". */
+      snprintf(out_wf, wf_n, "%s", WFE_AUTONOMOUS_FLOOR);
+      if (out_src && src_n)
+         snprintf(out_src, src_n, "cat-error");
+      return;
+   }
+   /* classifier NULL: deterministic + low-latency intake, and `text` is untrusted
+    * (no LLM prompt-injection surface). Every selectable lane carries the review
+    * spine, so a shaped proposal can at worst pick among spine lanes. */
+   wfe_route_decision_t d;
+   wfe_router_decide(text, &cat, NULL, &d);
+   const wfe_router_wf_t *wf = wfe_router_find(&cat, d.workflow_id);
+   const char *chosen = wfe_autonomous_clamp(d.workflow_id, wf ? wf->enforced : 0, out_clamped);
+   snprintf(out_wf, wf_n, "%s", chosen);
+   if (out_raw && raw_n)
+      snprintf(out_raw, raw_n, "%s", d.workflow_id);
+   if (out_src && src_n)
+      snprintf(out_src, src_n, "%s",
+               d.source == WFE_ROUTE_SRC_PREFILTER
+                   ? "prefilter"
+                   : (d.source == WFE_ROUTE_SRC_CLASSIFIER ? "classifier" : "default"));
+}
+
+void router_autonomous_audit(const char *work_item_id, const char *chosen, const char *src,
+                             const char *raw, int clamped, const char *tag)
+{
+   cJSON *det = cJSON_CreateObject();
+   if (!det)
+      return;
+   cJSON_AddStringToObject(det, "chosen", chosen ? chosen : "");
+   cJSON_AddStringToObject(det, "router_raw", raw ? raw : "");
+   cJSON_AddStringToObject(det, "source", src ? src : "");
+   cJSON_AddBoolToObject(det, "clamped_to_floor", clamped ? 1 : 0);
+   char *dj = cJSON_PrintUnformatted(det);
+   db1_lifecycle_event_add(work_item_id, "route-s4", "autoroute", "dev-submit", dj ? dj : "{}",
+                           tag ? tag : "", 0.0);
+   free(dj);
+   cJSON_Delete(det);
 }

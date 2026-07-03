@@ -17,6 +17,7 @@
 #include "config.h"
 #include "delegate_ensemble.h" /* ensemble_default_panel_from_agents */
 #include "dstr.h"
+#include "wfe_autonomous_route.h" /* wfe_sweep_workflow_floor -- S4 human-gate floor */
 #include "aimee_home.h"
 #include "kb_client.h"
 #include "log.h"
@@ -256,9 +257,14 @@ static void file_candidate(sweep_file_ctx_t *fc, const char *key, const sweep_ca
    dstr_free(&md);
 
    char id[80] = "", err[256] = "";
-   /* workflow="manual-review": a human gate, NOT auto-build (see manual-review.yaml). */
-   int rc = wfe_work_item_create("manual-review", fc->repo ? fc->repo : "", ppath, "sweep", id, err,
-                                 sizeof(err));
+   /* S4 autonomous parity (roundtable 2026-07-03, Q3 option a): sweep candidates
+    * are UNVETTED heuristic finds, so they always file onto the human-gate floor
+    * (`manual-review`), NEVER an auto-executing lane. This is a fixed floor, not a
+    * content router -- routing unvetted input could only misroute toward
+    * auto-execute for zero safety benefit. wfe_sweep_workflow_floor() is the
+    * named, test-locked invariant (see wfe_autonomous_route.h). */
+   int rc = wfe_work_item_create(wfe_sweep_workflow_floor(), fc->repo ? fc->repo : "", ppath,
+                                 "sweep", id, err, sizeof(err));
    if (rc != 0 || !id[0])
    {
       fc->file_rejected++;
