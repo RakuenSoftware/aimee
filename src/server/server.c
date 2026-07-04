@@ -1194,6 +1194,41 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
    return rc;
 }
 
+/* session.brief_assemble: workspace-independent SessionStart brief for the
+ * remote thin-client path (Proposal 1 Phase 1). Runs only session_brief_emit
+ * (build_session_context) — no worktree/state/reindex side-effects, no
+ * client_cwd filesystem access. Returns a minimal versioned envelope
+ * {schema_version, output} so the thin client has a stable contract that Phase 2
+ * can extend. Auth: session.* -> CAP_SESSION_READ. */
+static int handle_session_brief_assemble(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+
+   cJSON *jrid = cJSON_GetObjectItemCaseSensitive(req, "request_id");
+   const char *request_id = cJSON_IsString(jrid) ? jrid->valuestring : NULL;
+
+   char *captured = NULL;
+   size_t captured_len = 0;
+   FILE *mem = open_memstream(&captured, &captured_len);
+   if (!mem)
+      return server_send_error(conn, "open_memstream failed", request_id);
+
+   session_brief_emit(mem);
+   fflush(mem);
+   fclose(mem);
+
+   cJSON *resp = jo_ok();
+   cJSON_AddNumberToObject(resp, "schema_version", 1);
+   cJSON_AddStringToObject(resp, "output", captured ? captured : "");
+   if (request_id)
+      cJSON_AddStringToObject(resp, "request_id", request_id);
+
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   free(captured);
+   return rc;
+}
+
 static const server_method_dispatch_t server_dispatch_table[] = {
     /* Server */
     {"server.info", handle_server_info},
@@ -1242,6 +1277,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"hooks.pre", handle_hooks_pre},
     {"hooks.post", handle_hooks_post},
     {"hooks.session_start", handle_hooks_session_start},
+    {"session.brief_assemble", handle_session_brief_assemble},
     {"session.create", handle_session_create},
     {"session.list", handle_session_list},
     {"session.get", handle_session_get},

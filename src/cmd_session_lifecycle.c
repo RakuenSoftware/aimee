@@ -1259,6 +1259,35 @@ void session_start_emit(app_ctx_t *ctx, const char *hook_input, FILE *out)
                                         cl.index_count);
 }
 
+/* session_brief_emit: the workspace-INDEPENDENT session brief for the remote
+ * thin-client SessionStart path (Proposal 1 Phase 1 / session.brief_assemble).
+ *
+ * Runs only build_session_context — persona principles + learned Rules + key
+ * facts — and deliberately NONE of session_start_emit's workspace side-effects
+ * (no worktree checkout, no session_state persistence, no background reindex).
+ * client_cwd is intentionally NOT passed: on a remote server the client's tree
+ * is absent, and resolving paths from a client-supplied cwd would let a thin
+ * client probe the server filesystem. The workspace-dependent half (local
+ * .aimee-rules/AGENTS.md discovery) is assembled client-side in Phase 2.
+ *
+ * Endpoint-level never-empty floor: build_session_context already falls back to
+ * persona/mode principles, but if a wholly-unconfigured server yields nothing,
+ * emit a minimal neutral pointer block rather than an empty brief. */
+void session_brief_emit(FILE *out)
+{
+   if (!out)
+      out = stdout;
+   char *brief = build_session_context(NULL);
+   if (brief && brief[0])
+      fputs(brief, out);
+   else
+      fputs("# Aimee Context\n"
+            "- Use `aimee memory search <terms>` for prior project context.\n"
+            "- Use `aimee index find <symbol>` for indexed code lookup.\n",
+            out);
+   free(brief);
+}
+
 /* CLI dispatch wrapper: read the hook payload from stdin and emit the brief
  * to stdout. Server callers reach session_start_emit() directly so they can
  * supply the payload they received over the wire and capture the output. */

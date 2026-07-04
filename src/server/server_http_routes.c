@@ -2008,6 +2008,10 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/hooks/pre", NULL, RM_EXACT, "hooks.pre", 0, rh_dispatch_op},
     {"POST", "/v1/hooks/post", NULL, RM_EXACT, "hooks.post", 0, rh_dispatch_op},
     {"POST", "/v1/hooks/session_start", NULL, RM_EXACT, "hooks.session_start", 0, rh_dispatch_op},
+    /* Workspace-independent SessionStart brief for the remote thin client
+     * (Proposal 1 Phase 1): side-effect-free build_session_context assembly,
+     * distinct from /v1/sessions/brief (which reads a persisted brief). */
+    {"POST", "/v1/session/brief", NULL, RM_EXACT, "session.brief_assemble", 0, rh_dispatch_op},
     {"POST", "/v1/tools/execute", NULL, RM_EXACT, "tool.execute", 0, rh_dispatch_op},
     {"GET", "/v1/collab_rules", NULL, RM_EXACT, "collab_rules.list", 0, rh_dispatch_op},
     {"GET", "/v1/collab_rules/active", NULL, RM_EXACT, "collab_rules.list_active", 0,
