@@ -1003,8 +1003,8 @@ char *tool_bash(const char *command, int timeout_ms)
       config_t tccfg;
       if (config_load(&tccfg) == 0 && tool_condense_enabled(&tccfg))
       {
-         char spill_dir[600];
-         const char *home = aimee_home();
+         char spill_dir[3072];
+         const char *home = aimee_home(); /* captured once; not called again before use */
          if (home && home[0] &&
              snprintf(spill_dir, sizeof spill_dir, "%s/tool-spills", home) < (int)sizeof spill_dir)
          {
