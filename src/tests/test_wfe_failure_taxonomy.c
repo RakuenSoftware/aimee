@@ -19,6 +19,9 @@ static void test_disposition(void)
    assert(wfe_failure_disposition(WFE_FAIL_PERMANENT, 0) == WFE_FDISP_TERMINAL);
    assert(wfe_failure_disposition(WFE_FAIL_CORRUPTION, 0) == WFE_FDISP_TERMINAL);
    assert(wfe_failure_disposition(WFE_FAIL_NONE, 0) == WFE_FDISP_TERMINAL); /* unclassified stops */
+   assert(wfe_failure_disposition(WFE_FAIL_NONE, 1) ==
+          WFE_FDISP_TERMINAL); /* has_new_input ignored */
+   assert(wfe_failure_disposition(WFE_FAIL_PERMANENT, 1) == WFE_FDISP_TERMINAL);
 
    /* park-for-human classes */
    assert(wfe_failure_disposition(WFE_FAIL_DEGRADED, 0) == WFE_FDISP_PARK_HUMAN);

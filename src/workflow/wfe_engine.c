@@ -331,23 +331,37 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
    }
    else if (r.status == WFE_STEP_FAILED)
    {
-      /* Phase-C failure taxonomy: derive the pause reason from the failure class so
-       * the run loop + UI can distinguish a terminal reject from a park-for-human
-       * from a stuck (transient without new input). Park with a NON-empty reason so
-       * the next advance treats it as parked (empty reads as "not parked"). */
-      wfe_failure_disposition_t disp =
-          wfe_failure_disposition(r.failure_class, r.failure_has_new_input);
-      const char *reason = "failed"; /* terminal-reject (refusal/permanent/corruption) */
-      const char *detail = "terminal";
-      if (disp == WFE_FDISP_PARK_HUMAN)
+      /* Phase-C failure taxonomy: derive the pause reason from the failure class,
+       * REUSING the existing reason strings (budget_exceeded / panel_degraded /
+       * stuck / pending_human / failed) so the scheduler + UI need no new vocabulary
+       * (the run loop already skips a 'stuck' item; park_budget already uses
+       * 'budget_exceeded'). The lifecycle-event detail stays EMPTY for the legacy
+       * terminal case (byte-inert for any consumer of the old wfe_step_failed()
+       * events); only the new dispositions carry a tag. A retryable failure must be
+       * returned as LOOPED, never FAILED — a FAILED that claims retry can't loop from
+       * here, so it parks 'stuck' (visible, no silent terminal-stop). */
+      const char *reason = "failed"; /* REFUSAL / PERMANENT / CORRUPTION / NONE -> terminal */
+      const char *detail = "";       /* legacy-inert for terminal */
+      switch (r.failure_class)
       {
-         reason = "pending_human"; /* degraded / budget / forge -> human resumes */
-         detail = "park_human";
-      }
-      else if (disp == WFE_FDISP_PARK_STUCK)
-      {
-         reason = "stuck"; /* transient without new input -> no spin (stuck-skip guard) */
-         detail = "park_stuck";
+      case WFE_FAIL_BUDGET:
+         reason = "budget_exceeded";
+         detail = "budget";
+         break;
+      case WFE_FAIL_DEGRADED:
+         reason = "panel_degraded";
+         detail = "degraded";
+         break;
+      case WFE_FAIL_FORGE:
+         reason = "pending_human";
+         detail = "forge";
+         break;
+      case WFE_FAIL_TRANSIENT:
+         reason = "stuck";
+         detail = r.failure_has_new_input ? "retry_expected_looped" : "park_stuck";
+         break;
+      default:
+         break; /* terminal-reject: reason "failed", detail "" (inert) */
       }
       WFE_CKW(db1_work_item_set_pause(work_item_id, reason, node->id));
       db1_lifecycle_event_add(work_item_id, node->id, "failed", "engine", detail, "", r.cost_usd);
