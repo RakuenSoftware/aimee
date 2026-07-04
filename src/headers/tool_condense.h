@@ -97,11 +97,18 @@ typedef struct
    long long applied_final; /* total output bytes over APPLIED condensations */
    long long family_test;   /* applied condensations tagged "test" */
    long long family_diag;   /* applied condensations tagged "diag" */
-   /* recovery-cost telemetry (P4): the page-back side of the ledger. */
+   /* recovery-cost telemetry (P4): the page-back side of the ledger. Best-effort monotonic
+    * counters (relaxed atomics); the snapshot is NOT a transactional point-in-time view, so
+    * the two DERIVED fields can be transiently inconsistent under concurrency — fine for an
+    * observability gate, do not drive a hard automated decision off a single live read.
+    * recovered_bytes is the on-disk spill byte count (== the re-injected string length for
+    * the text tool-output this lever handles). */
    long long recovered;       /* successful tool_output_get recalls (page-backs) */
    long long recovered_bytes; /* total bytes re-injected by those recalls */
    long long saved_bytes;     /* derived: applied_raw - applied_final (gross condense saving) */
-   long long net_saved_bytes; /* derived: saved_bytes - recovered_bytes (the gate metric) */
+   /* derived: saved_bytes - recovered_bytes. MEANINGFULLY negative when recovery exceeds the
+    * condensation saving — i.e. the lever is net-LOSS on this workload (do not clamp at 0). */
+   long long net_saved_bytes;
 } tool_condense_totals_t;
 
 /* Snapshot the counters. Each field is read atomically, but the six are NOT a single
