@@ -785,6 +785,18 @@ void config_parse_reduce_section(config_t *cfg, cJSON *root)
          h = FREEZE_GUARD_MAX_HORIZON; /* clamp at parse so on-disk == runtime */
       cfg->reduce_freeze_guard_horizon = h;
    }
+
+   /* Two-tier economizer switches (P3), colocated `economizer:` block. */
+   cJSON *econ = cJSON_GetObjectItemCaseSensitive(root, "economizer");
+   if (cJSON_IsObject(econ))
+   {
+      item = cJSON_GetObjectItemCaseSensitive(econ, "enabled");
+      if (cJSON_IsBool(item))
+         cfg->economizer_enabled = cJSON_IsTrue(item) ? 1 : 0;
+      item = cJSON_GetObjectItemCaseSensitive(econ, "aggressive");
+      if (cJSON_IsBool(item))
+         cfg->economizer_aggressive = cJSON_IsTrue(item) ? 1 : 0;
+   }
 }
 
 /* Clamp an integer to [lo, hi]. */

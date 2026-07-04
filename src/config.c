@@ -343,6 +343,7 @@ static const config_schema_entry_t config_schema[] = {
     {"compact", SCHEMA_OBJECT, 0},
     {"fold", SCHEMA_OBJECT, 0},
     {"reduce", SCHEMA_OBJECT, 0},
+    {"economizer", SCHEMA_OBJECT, 0},
     {"sessions", SCHEMA_OBJECT, 0},
     {"sandbox", SCHEMA_OBJECT, 0},
     {"ecomode", SCHEMA_BOOL, 0},
@@ -567,6 +568,10 @@ static void config_set_defaults(config_t *cfg)
    cfg->reduce_gateway_mutate = 0;
    cfg->reduce_gateway_session_disable_ttl_ms = 3600000;
    cfg->reduce_gateway_seam_explicit = 0;
+   /* Two-tier economizer switches (P3): master ON (measure exempt), aggressive tier OFF. With
+    * these defaults every effective lever equals its pre-P3 value (back-compat). */
+   cfg->economizer_enabled = 1;
+   cfg->economizer_aggressive = 0;
    /* command-aware tool-output condensation: DEFAULT-ON (P1c). Safe-tier lever — it passes
     * the deterministic gate: lossless-on-demand (full output spilled), fail-open (any
     * miss/decline -> raw), and a no-over-reduction audit (failures/diagnostics + their
@@ -854,6 +859,20 @@ static void config_apply_inference_backend_defaults(config_t *cfg, const cJSON *
    if (!cJSON_GetObjectItemCaseSensitive((cJSON *)root, "memory_rewrite") &&
        !cJSON_GetObjectItemCaseSensitive((cJSON *)root, "memory_rewrite_enabled"))
       cfg->memory_rewrite_enabled = accel;
+}
+
+int econ_reduction_master_on(const config_t *cfg)
+{
+   return cfg && cfg->economizer_enabled ? 1 : 0;
+}
+
+int econ_gateway_mutate_on(const config_t *cfg)
+{
+   /* the live-primary mutator needs the master ON, the aggressive tier opted IN, AND the
+    * lever itself set — the aggressive flag alone never activates a live-traffic mutator. */
+   return cfg && cfg->economizer_enabled && cfg->economizer_aggressive && cfg->reduce_gateway_mutate
+              ? 1
+              : 0;
 }
 
 int config_load(config_t *cfg)

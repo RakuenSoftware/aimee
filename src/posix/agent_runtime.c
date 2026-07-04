@@ -855,11 +855,15 @@ native_provider_http:
              * top-level typed items, so feeding it folded turns is unverified.
              * Keep the Responses path measure-only here; fold it in a later slice
              * once verified live. */
-            rcfg.history_fold = ecfg.reduce_history_fold && !chatgpt;
+            /* P3 master-kill: economizer.enabled=false forces the MUTATING levers off but
+             * leaves the block reachable, so measure_only shadow accounting keeps running
+             * (reports zero reductions — proof the kill works, per the two-tier contract). */
+            int econ_master = econ_reduction_master_on(&ecfg);
+            rcfg.history_fold = econ_master && ecfg.reduce_history_fold && !chatgpt;
             /* Compress only shrinks tool-result BODIES in place — the message
              * shape (role/type, ids, typed items) is preserved — so its output is
              * valid for ALL builders INCLUDING chatgpt/Responses. Not gated off. */
-            rcfg.compress = ecfg.reduce_compress;
+            rcfg.compress = econ_master && ecfg.reduce_compress;
             rcfg.measure_only =
                 !(rcfg.history_fold || rcfg.compress); /* a lever on -> mutate; else shadow */
             rcfg.freeze_guard_enabled = ecfg.reduce_freeze_guard_enabled; /* Slice 5 guardrail */

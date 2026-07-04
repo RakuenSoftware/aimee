@@ -183,6 +183,18 @@ static int run_server(const char *socket_path, log_level_t log_level)
       }
    }
 
+   /* P3: surface suppressed intent — an explicit lever the two-tier switches override, so an
+    * operator is never silently ignored (per the two-tier design's startup-WARN ruling). */
+   if (!cfg.economizer_enabled &&
+       (cfg.reduce_history_fold || cfg.reduce_compress || cfg.reduce_command_filter))
+      aimee_log(LOG_WARN, "economizer",
+                "economizer.enabled=false MASTER-KILL: all reduction is off (measure still "
+                "runs); individual reduce.* levers are suppressed");
+   if (cfg.reduce_gateway_mutate && !econ_gateway_mutate_on(&cfg))
+      aimee_log(LOG_WARN, "economizer",
+                "reduce.gateway_mutate=true is SUPPRESSED: the live-primary mutator needs "
+                "economizer.enabled && economizer.aggressive (both) to activate");
+
    /* Remote aimee-kb: when a kb_client_url is configured (this host uses a
     * remote kb rather than a local sidecar), export it into our own env so the
     * env-based kb_client transport (kb_client_v1_base_url / auth_header)

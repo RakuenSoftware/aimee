@@ -27,7 +27,11 @@ int main(void)
       memset(&cfg, 0, sizeof cfg);
       assert(tool_condense_enabled(&cfg) == 0);
       cfg.reduce_command_filter = 1;
-      assert(tool_condense_enabled(&cfg) == 1);
+      assert(tool_condense_enabled(&cfg) == 0); /* P3 master (economizer.enabled) still off */
+      cfg.economizer_enabled = 1;
+      assert(tool_condense_enabled(&cfg) == 1); /* master + lever both on */
+      cfg.economizer_enabled = 0;               /* master-kill overrides the lever */
+      assert(tool_condense_enabled(&cfg) == 0);
       assert(tool_condense_enabled(NULL) == 0);
    }
 
@@ -266,6 +270,7 @@ int main(void)
       assert(tool_condense_apply(&cfg, "pytest -q", 0, big, "/tmp", NULL) == NULL);
 
       cfg.reduce_command_filter = 1;
+      cfg.economizer_enabled = 1; /* P3 master gate */
       /* unrecognized command -> passthrough */
       assert(tool_condense_apply(&cfg, "frobnicate", 0, big, "/tmp", NULL) == NULL);
       /* recognized but no spill dir -> passthrough (lossless: never condense without spill) */
@@ -343,6 +348,7 @@ int main(void)
       config_t cfg;
       memset(&cfg, 0, sizeof cfg);
       cfg.reduce_command_filter = 1;
+      cfg.economizer_enabled = 1; /* P3 master gate */
       char big[8192];
       size_t off = 0;
       for (int k = 0; k < 80; k++)
@@ -369,6 +375,7 @@ int main(void)
       config_t cfg;
       memset(&cfg, 0, sizeof cfg);
       cfg.reduce_command_filter = 1;
+      cfg.economizer_enabled = 1; /* P3 master gate */
       char big[8192];
       size_t off = 0;
       off += (size_t)snprintf(big + off, sizeof big - off, "==== session ====\n");

@@ -33,13 +33,16 @@ request), unless noted otherwise below.
 
 ## Option groups added recently
 
-### Context economizer — `reduce.*`
+### Context economizer — two-tier switches (`economizer.*`) + levers (`reduce.*`)
 
-The unified context economizer's levers are now toggles on the Settings page. All are
-booleans except the two numeric tuning knobs. Defaults in parentheses.
+The economizer has two **tier switches** that gate the individual `reduce.*` levers, plus the
+levers themselves. All are booleans except the two numeric tuning knobs. Defaults in
+parentheses.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
+| **`economizer.enabled`** | **on** | **Master switch.** Off = one kill-switch: every reducer is forced off (measurement keeps running and reports zero, proving the kill). The safe tier stays on under it by the levers' own defaults. |
+| `economizer.aggressive` | off | **Opt-in ceiling for the aggressive tier** (live **primary** `/v1` mutation). `reduce.gateway_mutate` activates only with **`economizer.enabled` AND `economizer.aggressive` AND** the lever itself — the aggressive flag alone never turns on a live-traffic mutator. |
 | **`reduce.command_filter`** | **on** | **Tool-output condensation** — deterministically condense recognized command output (test-runner failures kept, passes elided; compiler diagnostics kept, progress dropped) with the full output spilled for recovery. See [Tool-output condensation](features/tool-output-condensation.md). |
 | `reduce.gateway_mutate` | off | Apply the economizer to the live inbound `/v1` request so the **primary** agent's tokens are reduced too. See [Economizer gateway mutation](features/economizer-gateway-mutation.md). |
 | `reduce.compress` | on | Size-based compression of oversized tool-result bodies. |

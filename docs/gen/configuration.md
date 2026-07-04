@@ -166,7 +166,7 @@ Structured options (arrays, nested objects — e.g. `ensemble.reference_models`)
 
 > **Undocumented** (add to `CFG_KEY_DESC` in gen-reference-docs.py): `audit_action_enabled`, `code_trust_actuation_enabled`, `wfe_live_forge_enabled`
 
-## Config-file sections (52)
+## Config-file sections (53)
 
 Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from the section parsers in `src/config*.c`; a key shown as a bare name that is itself a nested object is noted in the section description (see *Coverage & limitations*).
 
@@ -185,6 +185,7 @@ Set in the config JSON as `{"<section>": {"<key>": ...}}`. Keys are derived from
 - **`db2`** — _DB2 / vector store settings._ Keys: `vector`
 - **`dedup`** — _Response deduplication._ Keys: `enabled`, `window_seconds`
 - **`dogfood`** — _Session capture for dogfood data._ Keys: `commit_raw`, `enabled`, `inline_tagging`, `log_dir`
+- **`economizer`** — `aggressive`, `enabled`
 - **`ensemble`** — _Roundtable ensemble panel + aggregator._ Keys: `aggregator`, `max_cost_usd`, `min_successful`, `reference_models`, `reference_personas`
 - **`fold`** — `enabled`, `excerpt_bytes`, `freeze`, `min_fold_msgs`, `recall`, `register_enabled`, `retained_msgs`
 - **`guardrails`** — _Semantic guardrail policy._ Keys: `blast_radius`, `semantic`

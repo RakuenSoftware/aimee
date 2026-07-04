@@ -978,6 +978,20 @@ typedef struct config
     * when the user chose it, never when config_load synthesized it from mutate=1. */
    int reduce_gateway_seam_explicit;
 
+   /* Unified-economizer TWO-TIER switches (P3). These GATE the individual reduce.* levers
+    * without mutating them (resolved by the econ_* accessors, never surprising config_save):
+    *   economizer.enabled   — MASTER for all reduction ACTIONS. DEFAULT-ON. false = one
+    *                          off-switch: every reducer is forced off, but measure/telemetry
+    *                          keeps running (reports zero — proving the kill works). The safe
+    *                          tier (delegate-seam: command_filter/history_fold/compress) is on
+    *                          under it by their own defaults.
+    *   economizer.aggressive — opt-in ceiling for the AGGRESSIVE tier (live PRIMARY /v1
+    *                          mutation: gateway_mutate). DEFAULT-OFF. gateway_mutate requires
+    *                          enabled && aggressive && reduce.gateway_mutate (all three) — the
+    *                          aggressive flag alone never activates a live-traffic mutator. */
+   int economizer_enabled;
+   int economizer_aggressive;
+
    /* Autonomous-development pipeline knobs (Phase-C). These were env-var-only
     * (AIMEE_AUTONOMY_*); the config values are bridged to those env vars at startup
     * (autonomy_config_to_env) so the wfe library — which reads them via getenv across a
@@ -1740,6 +1754,12 @@ static inline int config_issue(const char *fmt, ...)
 /* Load config from default path. Returns defaults if missing.
  * In strict mode, returns -1 on validation errors. */
 int config_load(config_t *cfg);
+
+/* Two-tier economizer resolution (P3) — compute EFFECTIVE lever states without mutating
+ * config_t (so config_save always round-trips the raw user values). Precedence:
+ * master-kill (economizer.enabled) > aggressive-tier ceiling > individual reduce.* default. */
+int econ_reduction_master_on(const config_t *cfg); /* economizer.enabled (measure is exempt) */
+int econ_gateway_mutate_on(const config_t *cfg);   /* enabled && aggressive && gateway_mutate */
 
 /* Validate the economizer gateway-mutation invariants that are STARTUP-FATAL (as
  * opposed to the in-memory normalizations config_load already applied). Currently:

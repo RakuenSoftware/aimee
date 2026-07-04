@@ -11,9 +11,59 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 
+/* Effective safe-tier lever (command_filter): master && individual. Mirrors
+ * tool_condense_enabled without pulling the CORE object into this test's link set. */
+static int cf_effective(const config_t *c)
+{
+   return c->economizer_enabled && c->reduce_command_filter;
+}
+
+/* P3 two-tier resolution: master-kill, aggressive ceiling, and BACK-COMPAT (default
+ * switches must reproduce pre-P3 effective values). Pure — no file I/O. */
+static void test_two_tier_resolution(void)
+{
+   config_t c;
+   memset(&c, 0, sizeof c);
+
+   /* back-compat: defaults (enabled=1, aggressive=0) => effective == raw individual */
+   c.economizer_enabled = 1;
+   c.economizer_aggressive = 0;
+   c.reduce_command_filter = 1;
+   c.reduce_history_fold = 1;
+   c.reduce_compress = 1;
+   c.reduce_gateway_mutate = 0;
+   assert(econ_reduction_master_on(&c) == 1);
+   assert(cf_effective(&c) == 1);           /* command_filter on, as pre-P3 */
+   assert(econ_gateway_mutate_on(&c) == 0); /* off, as pre-P3 */
+
+   /* master-kill: enabled=0 forces reduction off even with every lever set... */
+   c.economizer_enabled = 0;
+   c.reduce_gateway_mutate = 1;
+   c.economizer_aggressive = 1;
+   assert(econ_reduction_master_on(&c) == 0);
+   assert(cf_effective(&c) == 0);           /* command_filter suppressed */
+   assert(econ_gateway_mutate_on(&c) == 0); /* mutate suppressed by master */
+
+   /* aggressive ceiling: gateway_mutate needs ALL THREE (enabled && aggressive && lever) */
+   c.economizer_enabled = 1;
+   c.economizer_aggressive = 1;
+   c.reduce_gateway_mutate = 1;
+   assert(econ_gateway_mutate_on(&c) == 1);
+   c.economizer_aggressive = 0; /* aggressive off -> suppressed even though lever set */
+   assert(econ_gateway_mutate_on(&c) == 0);
+   c.economizer_aggressive = 1;
+   c.reduce_gateway_mutate = 0; /* aggressive on but lever off -> still off (no auto-enable) */
+   assert(econ_gateway_mutate_on(&c) == 0);
+
+   /* NULL-safe */
+   assert(econ_reduction_master_on(NULL) == 0);
+   assert(econ_gateway_mutate_on(NULL) == 0);
+}
+
 int main(void)
 {
    printf("config_economizer: ");
+   test_two_tier_resolution();
 
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-econ-cfg-XXXXXX", platform_tmpdir());
@@ -198,6 +248,24 @@ int main(void)
       assert(config_reduce_validate(&cfg, err, sizeof(err)) != 0);
       cfg.reduce_gateway_session_disable_ttl_ms = -5;
       assert(config_reduce_validate(&cfg, err, sizeof(err)) != 0);
+   }
+
+   /* --- two-tier switches (P3): defaults + save/load round-trip --- */
+   {
+      static config_t cfg;
+      memset(&cfg, 0, sizeof(cfg));
+      config_load(&cfg);
+      assert(cfg.economizer_enabled == 1);    /* master default ON */
+      assert(cfg.economizer_aggressive == 0); /* aggressive tier default OFF */
+      cfg.economizer_enabled = 0;             /* opt-out the master */
+      cfg.economizer_aggressive = 1;          /* opt-in the aggressive tier */
+      assert(config_save(&cfg) == 0);
+
+      static config_t cfg2;
+      memset(&cfg2, 0, sizeof(cfg2));
+      config_load(&cfg2);
+      assert(cfg2.economizer_enabled == 0);    /* opt-out persisted */
+      assert(cfg2.economizer_aggressive == 1); /* opt-in persisted */
    }
 
    /* restore env */
