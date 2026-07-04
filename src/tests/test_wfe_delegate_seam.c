@@ -247,6 +247,18 @@ int main(void)
       g_judge_call = 0;
       g_judge_refutes[0] = 1;
       assert(wfe_implement_adversarial_ok(".") == 0);
+      /* even-K tie REJECTS: K=2, reviewer accept + 1/2 skeptics refute -> reject */
+      setenv("AIMEE_AUTONOMY_SKEPTICS", "2", 1);
+      g_judge_call = 0;
+      g_judge_refutes[0] = 0; /* reviewer */
+      g_judge_refutes[1] = 1; /* skeptic 1 refutes */
+      g_judge_refutes[2] = 0; /* skeptic 2 accepts -> 1 of 2 = tie -> REJECT */
+      assert(wfe_implement_adversarial_ok(".") == 0);
+      /* K=2, 0/2 refute -> accept */
+      g_judge_call = 0;
+      g_judge_refutes[0] = g_judge_refutes[1] = g_judge_refutes[2] = 0;
+      assert(wfe_implement_adversarial_ok(".") == 1);
+      setenv("AIMEE_AUTONOMY_SKEPTICS", "3", 1);
       /* judge cannot run -> fail closed */
       g_judge_rc = -1;
       g_judge_call = 0;

@@ -118,9 +118,10 @@ void wfe_set_judge_provider(const wfe_judge_provider_t *p);
 
 /* The implement ADVERSARIAL gate (PC3): with AIMEE_AUTONOMY_SKEPTICS=K>0, run a
  * reviewer + K skeptic judgments; accept (1) only if the reviewer did not refute AND
- * fewer than a majority of skeptics refuted. K==0 -> 1 (tier off, unchanged behavior).
- * K>0 with no judge provider / an unrunnable judge -> 0 (fail closed). Exposed for the
- * unit test. */
+ * FEWER THAN HALF the skeptics refuted (an exact tie for even K REJECTS — safety bias;
+ * i.e. accept iff refutes*2 < K). K==0 (a valid decimal >= 0, else a WARN + off) -> 1
+ * (tier off, unchanged behavior). K>0 with no judge provider / an unrunnable /
+ * unparseable / non-boolean verdict -> 0 (fail closed). Exposed for the unit test. */
 int wfe_implement_adversarial_ok(const char *workdir);
 
 /* The implement verify gate: 1 = advance ONLY when the top-level verdict is an

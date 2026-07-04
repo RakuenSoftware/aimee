@@ -347,8 +347,10 @@ static int wfe_judge_refuted(const char *workdir, const char *lens)
    if (!doc)
       return 1; /* unparseable -> refuted */
    const cJSON *rf = cJSON_GetObjectItemCaseSensitive(doc, "refuted");
-   /* Default to REFUTED unless the verdict explicitly says refuted:false. */
-   int refuted = !(rf && (cJSON_IsFalse(rf) || (cJSON_IsNumber(rf) && rf->valuedouble == 0)));
+   /* Default to REFUTED unless the verdict carries an explicit JSON BOOLEAN false.
+    * A missing field, a numeric 0, a string, or any non-boolean is a schema-invalid
+    * verdict -> fail closed (refuted). */
+   int refuted = !(rf && cJSON_IsFalse(rf));
    cJSON_Delete(doc);
    return refuted;
 }
@@ -363,6 +365,13 @@ int wfe_implement_adversarial_ok(const char *workdir)
       long v = strtol(sv, &e, 10);
       if (e && *e == '\0' && v >= 0)
          k = v;
+      else
+         /* A set-but-invalid value on a SAFETY knob silently disables the tier
+          * (fail-open) if we default to 0 quietly — warn so the operator sees it. */
+         fprintf(stderr,
+                 "wfe: invalid AIMEE_AUTONOMY_SKEPTICS '%s' — adversarial tier "
+                 "stays OFF\n",
+                 sv);
    }
    if (k <= 0)
       return 1; /* tier OFF (default) -> unchanged behavior */
@@ -371,14 +380,14 @@ int wfe_implement_adversarial_ok(const char *workdir)
    /* Review lens: a refute blocks. */
    if (wfe_judge_refuted(workdir, "reviewer"))
       return 0;
-   /* N skeptics (each prompted to refute); accept only if fewer than a majority
-    * refute (a tie of an even K is a REJECT — bias toward safety). */
+   /* N skeptics (each prompted to refute); accept only when FEWER THAN HALF refute —
+    * an exact tie (even K) REJECTS (bias toward safety). refutes*2 >= k <=> refutes >=
+    * ceil(K/2) with the tie counted as a reject. */
    int refutes = 0;
    for (long i = 0; i < k; i++)
       if (wfe_judge_refuted(workdir, "skeptic"))
          refutes++;
-   long majority = k / 2 + 1;
-   return (refutes >= majority) ? 0 : 1;
+   return ((long)refutes * 2 >= k) ? 0 : 1;
 }
 
 /* Run the mechanical verify gate on the implemented worktree. Returns 1 to ADVANCE
