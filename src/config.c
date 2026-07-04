@@ -878,7 +878,6 @@ int econ_gateway_mutate_on(const config_t *cfg)
               : 0;
 }
 
-static int config_load_file(config_t *cfg);
 static int config_snapshot_live(void);
 
 /* Public config read. In the SERVER (once config_snapshot_init has seeded the live snapshot)
@@ -893,7 +892,7 @@ int config_load(config_t *cfg)
    return config_load_file(cfg);
 }
 
-static int config_load_file(config_t *cfg)
+int config_load_file(config_t *cfg)
 {
    config_set_defaults(cfg);
 
@@ -1500,15 +1499,14 @@ static config_t g_snap[2];
 static _Atomic unsigned g_snap_seq = 0;    /* seqlock: even = stable, odd = writing */
 static _Atomic unsigned g_snap_active = 0; /* index (0/1) of the live slot */
 static uint64_t g_snap_token = 0;          /* content-hash of the active snapshot */
-static int g_snap_inited = 0;
+static _Atomic int g_snap_inited = 0;      /* atomic so the config_load wrapper's read is visible */
 static pthread_mutex_t g_snap_wlock = PTHREAD_MUTEX_INITIALIZER;
 
 /* 1 once config_snapshot_init has seeded the live snapshot (server context). Read by the
- * config_load wrapper to decide snapshot-vs-file. Set under g_snap_wlock; the plain read is
- * a benign race (0 -> file read, 1 -> snapshot; both valid, and it only transitions 0->1). */
+ * config_load wrapper to decide snapshot-vs-file; only ever transitions 0 -> 1. */
 static int config_snapshot_live(void)
 {
-   return g_snap_inited;
+   return atomic_load_explicit(&g_snap_inited, memory_order_acquire);
 }
 
 /* FNV-1a over the POD bytes. config_t is memset to 0 before every load (below) so padding
@@ -1535,7 +1533,7 @@ static void config_snapshot_publish(const config_t *cfg)
    atomic_store_explicit(&g_snap_active, nxt, memory_order_release);
    g_snap_token = config_snapshot_token(cfg);
    atomic_store_explicit(&g_snap_seq, s + 2, memory_order_release); /* -> even (stable) */
-   g_snap_inited = 1;
+   atomic_store_explicit(&g_snap_inited, 1, memory_order_release);
 }
 
 void config_snapshot_init(const config_t *cfg)
@@ -1550,7 +1548,7 @@ void config_snapshot_init(const config_t *cfg)
 
 int config_snapshot_get(config_t *out)
 {
-   if (!out || !g_snap_inited)
+   if (!out || !atomic_load_explicit(&g_snap_inited, memory_order_acquire))
       return -1;
    for (;;)
    {
@@ -1588,7 +1586,7 @@ int config_reload(void)
       return -1; /* invalid -> keep the running snapshot (validate-or-keep) */
    }
    uint64_t tok = config_snapshot_token(&fresh);
-   if (g_snap_inited && tok == g_snap_token)
+   if (atomic_load_explicit(&g_snap_inited, memory_order_acquire) && tok == g_snap_token)
    {
       pthread_mutex_unlock(&g_snap_wlock);
       return 0; /* self-reload no-op guard: nothing logically changed */

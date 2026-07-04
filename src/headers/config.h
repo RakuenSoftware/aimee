@@ -1766,6 +1766,10 @@ int config_load(config_t *cfg);
 void config_snapshot_init(const config_t *cfg);
 int config_snapshot_get(config_t *out);
 int config_reload(void);
+/* Force a read from DISK, bypassing the live snapshot. Use for a read-modify-save that must
+ * reflect the current on-disk file (e.g. config.set) so it never clobbers an external edit,
+ * and internally by config_reload. Ordinary readers should use config_load. */
+int config_load_file(config_t *cfg);
 
 /* Two-tier economizer resolution (P3) — compute EFFECTIVE lever states without mutating
  * config_t (so config_save always round-trips the raw user values). Precedence:
