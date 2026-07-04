@@ -18,9 +18,13 @@ typedef enum
    CFG_FLOAT
 } config_field_type_t;
 
-/* When a config.set / Settings change takes effect (live-config-reload P2). Default 0 = HOT
- * so a field left unannotated is treated as live — correct for the common case (read
- * per-request via config_load, which now returns the pushed snapshot). */
+/* When a config.set / Settings change takes effect (live-config-reload P2). Default 0 = HOT.
+ * HOT-default is justified, not fail-open: with P1b, config_load returns the pushed snapshot,
+ * so every field READ PER-REQUEST is live immediately — and the audited majority (provider/
+ * model/endpoint, and the reduce/economizer/memory/ingress feature flags) are read per
+ * request (e.g. openai_endpoint/embedding_endpoint are read on each call). The STARTUP-BOUND
+ * minority is explicitly RELOAD_RESTART: db2_url (postgres pool), kb_api_* (kb client init),
+ * autonomy.* (env bridge). As P3 adds re-appliers, those move RESTART -> REAPPLIABLE (live). */
 typedef enum
 {
    RELOAD_HOT = 0,     /* read per-request -> live immediately after config.set pushes a reload */
