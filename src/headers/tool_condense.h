@@ -87,9 +87,12 @@ typedef struct
    long long family_diag;   /* applied condensations tagged "diag" */
 } tool_condense_totals_t;
 
-/* Snapshot the counters (thread-safe). */
+/* Snapshot the counters. Each field is read atomically, but the six are NOT a single
+ * transactional point-in-time view (a concurrent condensation may land between reads) —
+ * fine for monotonic metrics; don't assert cross-counter invariants on a live snapshot. */
 void tool_condense_stats_snapshot(tool_condense_totals_t *out);
-/* Reset the counters (tests). */
+/* Reset the counters. TEST-ONLY: it races lost-updates with live traffic, so call it only
+ * when no condensation is in flight (the unit test does). */
 void tool_condense_stats_reset(void);
 
 /* Strip content-free noise, line-wise:
