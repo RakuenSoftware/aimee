@@ -11,6 +11,15 @@ Thin-client + credential hardening, the client owns the working tree; agent
 credentials live in the server's **sealed vault**; see
 [THIN_CLIENT.md](THIN_CLIENT.md).
 
+- **Dashboard overhaul + Logs tab**: the web UI **Dashboard** is now a customizable
+  grid of **server-incurred** metric panels — delegations, per-role metrics, token/cost,
+  guardrail actions, agents, active sessions, readiness, plus opt-in panels (success by
+  agent, latency percentiles, top tools, cache efficiency, failures, provider mix,
+  confidence). Toggle/reorder panels via **⚙ Customize** (persisted per-browser); latency
+  and token counts are human-formatted; the grid fills the pane with no scrollbars. The
+  audit/log view moved to its own **Logs** tab backed by the server's tool-action audit
+  ledger (`aimee-kb` keeps its own dashboard for KB-internal events). See
+  [DASHBOARD.md](DASHBOARD.md).
 - **Web Settings page for the full typed config**: the web UI **⚙️ Settings** page
   (`/settings`) edits every allowlisted runtime config field — grouped, filterable, with
   per-field save/reset — over the same `config.show`/`config.set` surface as the CLI. Newly

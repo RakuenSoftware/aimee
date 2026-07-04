@@ -1223,7 +1223,15 @@ selects its own git **project** to operate on:
 - **Chat**, the agent conversation (streamed over SSE). The selected project
   becomes the agent's working directory; webchat scope-validates it to the
   signed-in user's own workspace.
-- **Dashboard**, memory, reminders, and onboarding panels.
+- **Dashboard**, a customizable grid of **server-incurred** metric panels
+  (delegations, metrics, token/cost, guardrail actions, agents, sessions,
+  readiness, and more). Toggle/reorder panels via **⚙ Customize**
+  (persisted per-browser). See [`docs/DASHBOARD.md`](docs/DASHBOARD.md).
+- **Logs**, the server's tool-action audit ledger — one row per tool call with
+  its guardrail verdict (`allow`/`block`/`rewrite`/`approval_required`),
+  filterable by verdict/actor/tool. (`aimee-kb` keeps its own dashboard for
+  KB-internal events.)
+- **Workflow Actions**, author and track [workflow](docs/WORKFLOWS.md) runs.
 - **Edit Workflows**, a visual composer for [workflow](docs/WORKFLOWS.md)
   definitions (blocks rail, graph canvas, per-step persona/delegate assignment,
   plus a persona manager). Validate/Save persist server-side.
