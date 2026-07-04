@@ -40,6 +40,7 @@
 #include "model_provider.h"
 #include "model_registry.h"
 #include "db1.h"
+#include "db1/user_memory.h"
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"
@@ -1229,6 +1230,40 @@ static int handle_session_brief_assemble(server_ctx_t *ctx, server_conn_t *conn,
    return rc;
 }
 
+/* memory.user_capture: upsert a per-user memory into db1 (Proposal 2 Phase 1
+ * S2 — the write path behind `aimee memory identity/prefer`). db1 is per-user
+ * by construction (aimee-server is 1:1 per user); this is how a thin client
+ * populates the identity/preferences the session brief recalls. Params:
+ * {kind, key, content, tier?}. CAP_MEMORY_WRITE. */
+static int handle_memory_user_capture(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   cJSON *jrid = cJSON_GetObjectItemCaseSensitive(req, "request_id");
+   const char *request_id = cJSON_IsString(jrid) ? jrid->valuestring : NULL;
+   const char *kind = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "kind"));
+   const char *key = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "key"));
+   const char *content = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "content"));
+   const char *tier = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "tier"));
+   const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "session_id"));
+   if (!kind || !kind[0] || !key || !key[0])
+      return server_send_error(conn, "kind and key are required", request_id);
+   if (!content || !content[0])
+      return server_send_error(conn, "content is required", request_id);
+
+   if (db1_user_memory_upsert(kind, tier, key, content, 1.0, sid) != 0)
+      return server_send_error(conn, "failed to store user memory", request_id);
+
+   cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "kind", kind);
+   cJSON_AddStringToObject(resp, "key", key);
+   cJSON_AddStringToObject(resp, "scope", "user");
+   if (request_id)
+      cJSON_AddStringToObject(resp, "request_id", request_id);
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   return rc;
+}
+
 static const server_method_dispatch_t server_dispatch_table[] = {
     /* Server */
     {"server.info", handle_server_info},
@@ -1278,6 +1313,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"hooks.post", handle_hooks_post},
     {"hooks.session_start", handle_hooks_session_start},
     {"session.brief_assemble", handle_session_brief_assemble},
+    {"memory.user_capture", handle_memory_user_capture},
     {"session.create", handle_session_create},
     {"session.list", handle_session_list},
     {"session.get", handle_session_get},

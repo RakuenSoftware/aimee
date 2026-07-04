@@ -678,6 +678,7 @@ static const struct
     {"memory.search", "POST", "/v1/memory/search"},
     {"memory.stats", "GET", "/v1/memory/stats"},
     {"memory.store", "POST", "/v1/memory/store"},
+    {"memory.user_capture", "POST", "/v1/memory/user_capture"},
     {"model.list", "GET", "/v1/model/list"},
     {"model.refresh", "POST", "/v1/model/refresh"},
     {"model.show", "GET", "/v1/model/show"},

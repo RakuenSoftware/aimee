@@ -406,6 +406,19 @@ void session_brief_emit(FILE *out)
    if (out)
       fputs("STUB_BRIEF_CONTENT", out);
 }
+/* memory.user_capture invokes db1_user_memory_upsert (db1/user_memory.c), not
+ * linked here. Stub it so the dispatch table builds. */
+int db1_user_memory_upsert(const char *kind, const char *tier, const char *key, const char *content,
+                           double confidence, const char *source_session)
+{
+   (void)kind;
+   (void)tier;
+   (void)key;
+   (void)content;
+   (void)confidence;
+   (void)source_session;
+   return 0;
+}
 void session_id_set_override(const char *sid)
 {
    (void)sid;

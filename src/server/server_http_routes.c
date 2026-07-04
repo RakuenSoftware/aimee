@@ -2013,6 +2013,7 @@ static const http_route_t g_v1_routes[] = {
      * distinct from /v1/sessions/brief (which reads a persisted brief). */
     {"POST", "/v1/session/brief_assemble", NULL, RM_EXACT, "session.brief_assemble", 0,
      rh_dispatch_op},
+    {"POST", "/v1/memory/user_capture", NULL, RM_EXACT, "memory.user_capture", 0, rh_dispatch_op},
     {"POST", "/v1/tools/execute", NULL, RM_EXACT, "tool.execute", 0, rh_dispatch_op},
     {"GET", "/v1/collab_rules", NULL, RM_EXACT, "collab_rules.list", 0, rh_dispatch_op},
     {"GET", "/v1/collab_rules/active", NULL, RM_EXACT, "collab_rules.list_active", 0,

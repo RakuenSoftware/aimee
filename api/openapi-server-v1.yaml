@@ -2750,6 +2750,31 @@ paths:
                 properties:
                   schema_version: { type: integer }
                   output: { type: string }
+  /memory/user_capture:
+    post:
+      summary: Capture a per-user memory into db1
+      description: >-
+        Upsert a per-user memory (identity fact or preference) into db1
+        (per-user by construction). The write path behind
+        `aimee memory identity/prefer`. CAP_MEMORY_WRITE.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, key, content]
+              properties:
+                kind: { type: string }
+                key: { type: string }
+                content: { type: string }
+                tier: { type: string }
+      responses:
+        "200":
+          description: Capture result envelope { kind, key, scope }
+          content:
+            application/json:
+              schema: { type: object }
   /tools/execute:
     post:
       summary: Execute a tool via the workspace plane (privileged)
