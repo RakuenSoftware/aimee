@@ -272,6 +272,7 @@ Focused references:
 | [Personas](docs/personas.md) | Built in and custom agent identities, delegate policy, and how personas staff reviews |
 | [Workflows](docs/WORKFLOWS.md) | The composable dev lifecycle workflow engine, block catalog, and authoring |
 | [Workflow Actions](docs/WORKFLOW_ACTIONS.md) | The web page to author a proposal, run it autonomously, and watch its status/history |
+| [Settings](docs/SETTINGS.md) | The web page for the server's typed runtime config — economizer levers, autonomous-dev knobs, tool-output condensation, and how each maps to `aimee.yaml` |
 | [Workspace Management](docs/WORKSPACES.md) | Multi repo workspaces and session isolation |
 | [Security Model](docs/SECURITY.md) | Threat model, trust boundaries, capability system |
 | [Webchat git security](docs/WEBCHAT_GIT_SECURITY.md) | How webchat handles a webuser's git forge token at rest, in transit to git, and in the in browser editor, and where exposure is and is not closed |

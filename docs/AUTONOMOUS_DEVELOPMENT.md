@@ -173,6 +173,20 @@ Autonomous development is default-on; the guardrails are structural, not a toggl
   unit; transient errors are retried within the cap; degraded panels, budget
   breaches, and forge failures park.
 
+### Tuning (web Settings → `autonomy.*`)
+
+The pipeline knobs are typed config fields, editable in the web **⚙️ Settings** page
+(under `autonomy.`) or `aimee.yaml`; a change applies on the next server start (an
+exported `AIMEE_AUTONOMY_*` env var still overrides). See [SETTINGS.md](SETTINGS.md).
+
+| Knob | Default | Effect |
+| --- | --- | --- |
+| `autonomy.skeptics` | 0 (off) | N adversarial skeptics on the implement gate. |
+| `autonomy.fanout` | off | Engine-level fan-out manager loop vs a single implement dispatch. |
+| `autonomy.unit_retry` | 2 | Per-unit retry-different-delegate cap under fan-out. |
+| `autonomy.unit_max` | 16 | Max fan-out units (a larger decomposition parks). |
+| `autonomy.ci_retry_max` | 2 | Per-work-item red-CI retry cap before parking. |
+
 ## Observability
 
 - **Webchat Workflow Actions page**, live progress per work item: current stage, gate

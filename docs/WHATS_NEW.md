@@ -11,6 +11,19 @@ Thin-client + credential hardening, the client owns the working tree; agent
 credentials live in the server's **sealed vault**; see
 [THIN_CLIENT.md](THIN_CLIENT.md).
 
+- **Web Settings page for the full typed config**: the web UI **⚙️ Settings** page
+  (`/settings`) edits every allowlisted runtime config field — grouped, filterable, with
+  per-field save/reset — over the same `config.show`/`config.set` surface as the CLI. Newly
+  exposed groups: the context-economizer levers (`reduce.*`) and the autonomous-development
+  pipeline knobs (`autonomy.*`, previously environment-only; a change applies on the next
+  server start, and an exported `AIMEE_AUTONOMY_*` still overrides). Secrets and endpoints
+  are deliberately not in the allowlist. See [SETTINGS.md](SETTINGS.md).
+- **Tool-output condensation** (default-off, `reduce.command_filter`): a deterministic,
+  command-aware context-economizer lever that condenses recognized command output at the
+  delegate tool seam — test-runner failures and compiler diagnostics kept, passing
+  transcripts and build progress dropped — with the full output spilled for lossless
+  recovery. Fail-open and byte-identical when off. Toggle it in the web Settings page. See
+  [features/tool-output-condensation.md](features/tool-output-condensation.md).
 - **Self-hosted GPU inference tiers**: the `aimee-kb` inference image ships three tiers you
   swap with one plugin image. `aimee-kb-cpu` runs retrieval on any host, `aimee-kb-gpu-small`
   bakes a Gemma 4 12B synth, and `aimee-kb-gpu-mid` bakes a Gemma 4 26B-A4B synth that fits a
