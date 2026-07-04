@@ -39,6 +39,35 @@ typedef struct
  * Deterministic + allocation-free (fixed output buffers). */
 tc_reco_result_t tc_recognize(const char *cmdline);
 
+/* ---- family filters + the top-level apply (Slice 3) ---- */
+
+/* Test-runner family filter: keep the summary + every failure verbatim, drop passing-case
+ * transcripts. `exit_code` biases safety — a non-zero exit with NO recognizable failure
+ * lines returns NULL (verbatim passthrough, never hide the cause). Returns a NEW string
+ * (caller frees), or NULL to pass the raw output through unchanged. */
+char *tc_family_test_runner(int exit_code, const char *in);
+
+/* Per-condensation accounting for the economizer ledger. */
+typedef struct
+{
+   long raw_bytes;   /* input size */
+   long final_bytes; /* condensed size (== raw_bytes when passed through) */
+   int recognized;   /* the command was RECOGNIZED */
+   int spilled;      /* a full-output spill file was written */
+   char family[24];  /* "test", "" (none), … */
+   char spill_ref[40];
+} tc_stats_t;
+
+/* Top-level condensation entry (no seam wired yet — S4 calls this at the tool seam).
+ * Recognizes `cmdline`; if a family rule materially shrinks `raw`, writes the FULL raw
+ * output to a spill file under `spill_dir` and returns the condensed text with a trailing
+ * "… full output: <ref>" pointer (caller frees). Returns NULL to pass `raw` through
+ * unchanged (unrecognized / no gain / a filter or spill failure -> fail-open). `stats`
+ * (optional) is filled for the ledger. `spill_dir` NULL disables spilling (then a
+ * successful condense that would need a spill instead passes through — never lossy). */
+char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_code, const char *raw,
+                          const char *spill_dir, tc_stats_t *stats);
+
 /* Strip content-free noise, line-wise:
  *  - remove ANSI CSI escape sequences (ESC '[' … final-byte);
  *  - resolve carriage-return progress redraws (keep only the text after the last '\r'

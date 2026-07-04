@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "config.h"
 #include "tool_condense.h"
@@ -175,6 +176,81 @@ int main(void)
       assert(r.outcome == TC_UNRECOGNIZED);
       r = RECO(NULL);
       assert(r.outcome == TC_UNRECOGNIZED);
+   }
+
+   /* ---- tc_family_test_runner (S3) ---- */
+   {
+      /* build 30 passing lines + a failure + summary */
+      char big[4096];
+      size_t off = 0;
+      off += (size_t)snprintf(big + off, sizeof big - off, "running 32 tests\n");
+      for (int k = 0; k < 30; k++)
+         off += (size_t)snprintf(big + off, sizeof big - off, "test suite::case_%02d ... ok\n", k);
+      off += (size_t)snprintf(big + off, sizeof big - off, "test suite::case_bad ... FAILED\n");
+      snprintf(big + off, sizeof big - off,
+               "failures:\n    suite::case_bad\ntest result: FAILED. 31 passed; 1 failed\n");
+
+      char *r = tc_family_test_runner(1, big);
+      assert(r);
+      assert(strstr(r, "FAILED"));          /* failure kept */
+      assert(strstr(r, "test result"));     /* summary kept */
+      assert(strstr(r, "lines elided"));    /* passes elided */
+      assert(strlen(r) < strlen(big));      /* shrank */
+      assert(!strstr(r, "case_05 ... ok")); /* a middle passing line dropped */
+      free(r);
+
+      /* non-zero exit with NO failure signal -> passthrough (NULL) */
+      char *r2 = tc_family_test_runner(1, "building...\nlinking...\nnothing useful here\n");
+      assert(r2 == NULL);
+   }
+
+   /* ---- tool_condense_apply (S3) ---- */
+   {
+      config_t cfg;
+      memset(&cfg, 0, sizeof cfg);
+
+      /* a big passing pytest run (exit 0) */
+      char big[8192];
+      size_t off = 0;
+      off +=
+          (size_t)snprintf(big + off, sizeof big - off, "============ test session starts ====\n");
+      for (int k = 0; k < 120; k++)
+         off += (size_t)snprintf(big + off, sizeof big - off,
+                                 "tests/test_mod.py::test_%03d PASSED\n", k);
+      snprintf(big + off, sizeof big - off, "==== 120 passed in 3.14s ====\n");
+
+      /* disabled -> passthrough */
+      assert(tool_condense_apply(&cfg, "pytest -q", 0, big, "/tmp", NULL) == NULL);
+
+      cfg.reduce_command_filter = 1;
+      /* unrecognized command -> passthrough */
+      assert(tool_condense_apply(&cfg, "frobnicate", 0, big, "/tmp", NULL) == NULL);
+      /* recognized but no spill dir -> passthrough (lossless: never condense without spill) */
+      assert(tool_condense_apply(&cfg, "pytest -q", 0, big, NULL, NULL) == NULL);
+
+      /* recognized test runner + a real spill dir -> condensed + spill written */
+      char dir[] = "/tmp/tc_test_XXXXXX";
+      assert(mkdtemp(dir));
+      tc_stats_t st;
+      char *r = tool_condense_apply(&cfg, "pytest -q", 0, big, dir, &st);
+      assert(r);
+      assert(st.recognized && st.spilled && !strcmp(st.family, "test"));
+      assert(st.final_bytes < st.raw_bytes);
+      assert(strstr(r, "tool_output_get")); /* retrieval pointer present */
+      assert(strstr(r, st.spill_ref));
+      /* the spill file exists + holds the FULL raw */
+      char spath[512];
+      snprintf(spath, sizeof spath, "%s/%s.out", dir, st.spill_ref);
+      FILE *sf = fopen(spath, "rb");
+      assert(sf);
+      fseek(sf, 0, SEEK_END);
+      long sz = ftell(sf);
+      fclose(sf);
+      assert(sz == st.raw_bytes);
+      /* cleanup */
+      unlink(spath);
+      rmdir(dir);
+      free(r);
    }
 
    printf("ok\n");

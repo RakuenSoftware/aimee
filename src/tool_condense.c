@@ -3,7 +3,8 @@
  * enable gate. CORE layer: depends only on config.h + libc. */
 #include "tool_condense.h"
 
-#include <stdio.h> /* snprintf */
+#include <stdint.h>
+#include <stdio.h> /* snprintf, fopen */
 #include <stdlib.h>
 #include <string.h>
 
@@ -587,4 +588,262 @@ char *tc_truncate_with_signal(const char *in, int head, int tail, const char *si
    free(lp);
    free(ll);
    return sb_finish(&s);
+}
+
+/* ---- test-runner family (Slice 3) ---- */
+
+/* case-insensitive substring test. */
+static int ci_contains(const char *hay, size_t haylen, const char *needle)
+{
+   size_t nl = strlen(needle);
+   if (nl == 0 || nl > haylen)
+      return 0;
+   for (size_t i = 0; i + nl <= haylen; i++)
+   {
+      size_t j = 0;
+      for (; j < nl; j++)
+      {
+         char a = hay[i + j], b = needle[j];
+         if (a >= 'A' && a <= 'Z')
+            a = (char)(a - 'A' + 'a');
+         if (b >= 'A' && b <= 'Z')
+            b = (char)(b - 'A' + 'a');
+         if (a != b)
+            break;
+      }
+      if (j == nl)
+         return 1;
+   }
+   return 0;
+}
+
+static int line_has_any(const char *line, size_t n, const char *const *sigs)
+{
+   for (int i = 0; sigs[i]; i++)
+      if (ci_contains(line, n, sigs[i]))
+         return 1;
+   return 0;
+}
+
+/* signals that mark a FAILURE (never elide these); used for the exit-code safety rule. */
+static const char *const TC_FAIL_SIGS[] = {
+    "fail", "error", "panic", "assert", "traceback", "exception", "not ok", "✗", "✖", "✘", NULL};
+/* additional signals worth keeping (the summary / counts / warnings). */
+static const char *const TC_KEEP_SIGS[] = {"test result", "result:", "====",     "collected",
+                                           "summary",     "warning", "warnings", NULL};
+
+char *tc_family_test_runner(int exit_code, const char *in)
+{
+   if (!in)
+      return NULL;
+   /* index lines */
+   size_t nlines = 0;
+   for (const char *p = in;;)
+   {
+      size_t n;
+      int has_nl;
+      const char *np = next_line(p, &n, &has_nl);
+      nlines++;
+      if (!has_nl)
+         break;
+      p = np;
+   }
+   const char **lp = calloc(nlines, sizeof(*lp));
+   size_t *ll = calloc(nlines, sizeof(*ll));
+   if (!lp || !ll)
+   {
+      free(lp);
+      free(ll);
+      return NULL;
+   }
+   size_t idx = 0;
+   int any_fail = 0;
+   for (const char *p = in;;)
+   {
+      size_t n;
+      int has_nl;
+      const char *np = next_line(p, &n, &has_nl);
+      lp[idx] = p;
+      ll[idx] = n;
+      if (line_has_any(p, n, TC_FAIL_SIGS))
+         any_fail = 1;
+      idx++;
+      if (!has_nl)
+         break;
+      p = np;
+   }
+   /* Safety: a non-zero exit with no recognizable failure line -> passthrough (never
+    * risk hiding the cause behind a passing-transcript filter). */
+   if (exit_code != 0 && !any_fail)
+   {
+      free(lp);
+      free(ll);
+      return NULL;
+   }
+
+   const size_t HEAD = 2, TAIL = 6;
+   sb_t s = {0};
+   int first = 1;
+   size_t elided = 0;
+   for (size_t i = 0; i < nlines; i++)
+   {
+      int keep = (i < HEAD) || (i + TAIL >= nlines) || line_has_any(lp[i], ll[i], TC_FAIL_SIGS) ||
+                 line_has_any(lp[i], ll[i], TC_KEEP_SIGS);
+      if (keep)
+      {
+         if (elided)
+         {
+            char mark[48];
+            snprintf(mark, sizeof mark, "... %zu lines elided ...", elided);
+            if (!first)
+               sb_addc(&s, '\n');
+            first = 0;
+            sb_adds(&s, mark);
+            elided = 0;
+         }
+         if (!first)
+            sb_addc(&s, '\n');
+         first = 0;
+         sb_add(&s, lp[i], ll[i]);
+      }
+      else
+      {
+         elided++;
+      }
+   }
+   if (elided && !s.oom)
+   {
+      char mark[48];
+      snprintf(mark, sizeof mark, "... %zu lines elided ...", elided);
+      if (!first)
+         sb_addc(&s, '\n');
+      sb_adds(&s, mark);
+   }
+   free(lp);
+   free(ll);
+   return sb_finish(&s);
+}
+
+/* ---- spill store + top-level apply (Slice 3) ---- */
+
+/* An opaque, deterministic spill ref = FNV-1a-64(cmdline || '\0' || raw), hex. Not a
+ * monotonic counter (not enumerable); deterministic so identical output dedups. */
+static void tc_hash_ref(const char *seed, const char *content, char out[40])
+{
+   uint64_t h = 1469598103934665603ULL;
+   for (const char *p = seed; p && *p; p++)
+   {
+      h ^= (unsigned char)*p;
+      h *= 1099511628211ULL;
+   }
+   h ^= 0;
+   h *= 1099511628211ULL;
+   for (const char *p = content; p && *p; p++)
+   {
+      h ^= (unsigned char)*p;
+      h *= 1099511628211ULL;
+   }
+   snprintf(out, 40, "tc-%016llx", (unsigned long long)h);
+}
+
+/* Write the full raw output to <dir>/<ref>.out. Returns 0 on a fully-durable write,
+ * -1 otherwise (the caller then passes through — never a condense without a backstop). */
+static int tc_spill_write(const char *dir, const char *ref, const char *content)
+{
+   char path[1400];
+   if (snprintf(path, sizeof path, "%s/%s.out", dir, ref) >= (int)sizeof path)
+      return -1;
+   FILE *f = fopen(path, "wb");
+   if (!f)
+      return -1;
+   size_t n = strlen(content);
+   size_t w = fwrite(content, 1, n, f);
+   /* fflush+fclose success + full write == durable enough for the backstop. */
+   return (fclose(f) == 0 && w == n) ? 0 : -1;
+}
+
+/* Does the recognized command denote a TEST-RUNNER invocation (the only S3 family)? */
+static int tc_is_test_invocation(const tc_reco_result_t *r)
+{
+   static const char *const runners[] = {"pytest", "jest", "vitest", "mocha", "ctest", NULL};
+   for (int i = 0; runners[i]; i++)
+      if (strcmp(r->cmd, runners[i]) == 0)
+         return 1;
+   static const char *const sub_runners[] = {"cargo", "go",     "npm",    "yarn", "pnpm",
+                                             "mvn",   "gradle", "dotnet", NULL};
+   for (int i = 0; sub_runners[i]; i++)
+      if (strcmp(r->cmd, sub_runners[i]) == 0 && strcmp(r->sub, "test") == 0)
+         return 1;
+   return 0;
+}
+
+char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_code, const char *raw,
+                          const char *spill_dir, tc_stats_t *stats)
+{
+   if (stats)
+   {
+      memset(stats, 0, sizeof *stats);
+      stats->raw_bytes = raw ? (long)strlen(raw) : 0;
+      stats->final_bytes = stats->raw_bytes;
+   }
+   if (!tool_condense_enabled(cfg) || !raw || !raw[0])
+      return NULL;
+   long rawlen = (long)strlen(raw);
+   if (rawlen > (1 << 20))
+      return NULL; /* over the input cap -> hand back to the size-based fallback */
+
+   tc_reco_result_t reco = tc_recognize(cmdline);
+   if (stats)
+      stats->recognized = (reco.outcome == TC_RECOGNIZED);
+   if (reco.outcome != TC_RECOGNIZED)
+      return NULL; /* OPAQUE / UNRECOGNIZED -> passthrough (S3 acts only on a family) */
+
+   char *cond = NULL;
+   const char *family = "";
+   if (tc_is_test_invocation(&reco))
+   {
+      cond = tc_family_test_runner(exit_code, raw);
+      family = "test";
+   }
+   if (!cond)
+      return NULL; /* no family match or the filter declined -> passthrough */
+
+   long condlen = (long)strlen(cond);
+   /* material-gain gate: require a real shrink, else it's not worth a spill round-trip. */
+   if (rawlen - condlen < 200 || condlen * 100 > rawlen * 85)
+   {
+      free(cond);
+      return NULL;
+   }
+   /* Lossless-on-demand: the condensed body only ships if the FULL raw is spilled. No
+    * spill dir, or a failed spill -> pass through (never a condensed body with no
+    * recoverable backstop). */
+   if (!spill_dir || !spill_dir[0])
+   {
+      free(cond);
+      return NULL;
+   }
+   char ref[40];
+   tc_hash_ref(cmdline ? cmdline : "", raw, ref);
+   if (tc_spill_write(spill_dir, ref, raw) != 0)
+   {
+      free(cond);
+      return NULL;
+   }
+
+   sb_t out = {0};
+   sb_adds(&out, cond);
+   char ptr[96];
+   snprintf(ptr, sizeof ptr, "\n... full output (%ld bytes): tool_output_get %s", rawlen, ref);
+   sb_adds(&out, ptr);
+   free(cond);
+   char *final = sb_finish(&out);
+   if (stats && final)
+   {
+      stats->final_bytes = (long)strlen(final);
+      stats->spilled = 1;
+      snprintf(stats->family, sizeof stats->family, "%s", family);
+      snprintf(stats->spill_ref, sizeof stats->spill_ref, "%s", ref);
+   }
+   return final;
 }
