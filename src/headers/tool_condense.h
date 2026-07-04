@@ -78,6 +78,13 @@ typedef struct
 char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_code, const char *raw,
                           const char *spill_dir, tc_stats_t *stats);
 
+/* Recovery contract (P2): resolve a spill `ref` (as emitted in a condensed pointer) to its
+ * full content. Validates the ref (`tc-`+16 hex — never a path) and reads it from
+ * `spill_dir` bounded to TOOL_CONDENSE_CEILING. Returns a NEW string (caller frees), or NULL
+ * with an error in `err` ("invalid ref" / "spill expired") — the single first-class handle
+ * that makes lossless-on-demand real. */
+char *tool_condense_recall(const char *spill_dir, const char *ref, char *err, size_t errn);
+
 /* ---- realized-savings observability (Slice 6) ---- */
 
 /* Cumulative process-wide counters, updated at the seam so an operator can measure the

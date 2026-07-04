@@ -280,18 +280,22 @@ int main(void)
       assert(st.recognized && st.spilled && !strcmp(st.family, "test"));
       assert(st.final_bytes < st.raw_bytes);
       assert(strstr(r, "condensed by aimee")); /* recovery pointer present */
-      assert(strstr(r, st.spill_ref));         /* references the spill file */
-      assert(strstr(r, dir));                  /* the catable full path */
-      /* the spill file exists + holds the FULL raw */
+      assert(strstr(r, st.spill_ref));         /* references the spill ref */
+      assert(strstr(r, "tool_output_get"));    /* the first-class retrieval handle (P2) */
+      /* RECOVERY CONTRACT (P2): tool_condense_recall resolves the ref to the FULL raw. */
+      char rerr[64];
+      char *full = tool_condense_recall(dir, st.spill_ref, rerr, sizeof rerr);
+      assert(full);
+      assert((long)strlen(full) == st.raw_bytes); /* lossless-on-demand */
+      free(full);
+      /* path-traversal + malformed refs are rejected (never escape the spill dir). */
+      assert(tool_condense_recall(dir, "../../etc/passwd", rerr, sizeof rerr) == NULL);
+      assert(tool_condense_recall(dir, "tc-XYZ", rerr, sizeof rerr) == NULL);
+      assert(tool_condense_recall(dir, "tc-0000000000000000", rerr, sizeof rerr) ==
+             NULL); /* expired */
+      /* cleanup */
       char spath[512];
       snprintf(spath, sizeof spath, "%s/%s.out", dir, st.spill_ref);
-      FILE *sf = fopen(spath, "rb");
-      assert(sf);
-      fseek(sf, 0, SEEK_END);
-      long sz = ftell(sf);
-      fclose(sf);
-      assert(sz == st.raw_bytes);
-      /* cleanup */
       unlink(spath);
       rmdir(dir);
       free(r);
