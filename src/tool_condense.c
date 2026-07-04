@@ -739,15 +739,34 @@ char *tc_family_test_runner(int exit_code, const char *in)
  * diagnostic, drop the progress chatter ("Compiling …", "Downloading …", "Checking …").
  * Warnings on a zero exit are still condensed (require_fail_nonzero = 0); a non-zero exit's
  * error lines are always kept by the fail-signals, so a build failure is never hidden. */
-static const char *const TC_DIAG_FAIL_SIGS[] = {"error",    "undefined", "cannot",  "expected",
-                                                "fatal",    "panicked",  "no such", "not found",
-                                                "conflict", NULL};
+static const char *const TC_DIAG_FAIL_SIGS[] = {"error",
+                                                "undefined",
+                                                "cannot",
+                                                "expected",
+                                                "fatal",
+                                                "panicked",
+                                                "no such",
+                                                "not found",
+                                                "not a type",
+                                                "not a package",
+                                                "imported and",
+                                                "declared but not used",
+                                                "multiple definition",
+                                                "relocation",
+                                                "unresolved",
+                                                "syntaxerror",
+                                                "typeerror",
+                                                NULL};
 static const char *const TC_DIAG_KEEP_SIGS[] = {"warning", "warn:",   "note:",     "help:", "-->",
                                                 "error[",  "::error", "::warning", "====",  NULL};
 
+/* require_fail_nonzero = 1: a non-zero exit whose error format is NOT in the fail-signal
+ * set above falls back to verbatim passthrough, so an unrecognized build failure is never
+ * hidden (the same safeguard the test-runner family uses). A clean (exit 0) build with
+ * warnings is still condensed. */
 char *tc_family_diagnostics(int exit_code, const char *in)
 {
-   return tc_signal_filter(exit_code, in, TC_DIAG_FAIL_SIGS, TC_DIAG_KEEP_SIGS, 0, 2, 4);
+   return tc_signal_filter(exit_code, in, TC_DIAG_FAIL_SIGS, TC_DIAG_KEEP_SIGS, 1, 2, 4);
 }
 
 /* ---- spill store + top-level apply (Slice 3) ---- */

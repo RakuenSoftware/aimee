@@ -284,6 +284,11 @@ int main(void)
       char *r2 = tc_family_diagnostics(0, warns);
       assert(r2 && strstr(r2, "unused variable") && strstr(r2, "lines elided"));
       free(r2);
+
+      /* SAFETY: a non-zero exit whose failure is in NO recognized format -> passthrough
+       * (never hide an unrecognized build failure). */
+      char *r3 = tc_family_diagnostics(1, "step one\nstep two\nsomething went sideways\n");
+      assert(r3 == NULL);
    }
 
    /* ---- diagnostics routing through tool_condense_apply (S5) ---- */
