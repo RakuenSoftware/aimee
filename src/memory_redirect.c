@@ -327,6 +327,54 @@ int memory_redirect_check(const char *tool, cJSON *root, const char *cwd, const 
       return 0; /* can't identify the project — fail open */
    }
 
+   /* .md retirement (default-off; AIMEE_MEMORY_MD_RETIRE): push the intercepted
+    * write into aimee's db1 memory as a private, non-recallable archive row and
+    * do NOT re-materialize the .md — the file never exists, content lives only
+    * in aimee. The agent retrieves via `aimee memory search` and is steered to
+    * `aimee memory` by the session brief. Fail-open (spill) on store outage. */
+   {
+      const char *mr = getenv("AIMEE_MEMORY_MD_RETIRE");
+      int md_retire = mr && (mr[0] == '1' || mr[0] == 't' || mr[0] == 'T' || mr[0] == 'y');
+      if (md_retire)
+      {
+         char key[HMEM_PROJECT_KEY_MAX + 16];
+         snprintf(key, sizeof(key), "archive:%s", name);
+         cJSON *ub = cJSON_CreateObject();
+         cJSON_AddStringToObject(ub, "kind", "archive");
+         cJSON_AddStringToObject(ub, "tier", "L1");
+         cJSON_AddStringToObject(ub, "key", key);
+         cJSON_AddStringToObject(ub, "content", content);
+         char *ub_s = cJSON_PrintUnformatted(ub);
+         cJSON_Delete(ub);
+         char *ep = cli_v1_client_endpoint();
+         char *br = cli_v1_client_bearer();
+         int st = 0;
+         cJSON *r = (ep && ub_s) ? cli_http_request(ep, "POST", "/v1/memory/user_capture", ub_s, br,
+                                                    5000, &st)
+                                 : NULL;
+         free(ub_s);
+         free(ep);
+         free(br);
+         if (!r || st < 200 || st >= 300)
+         {
+            if (r)
+               cJSON_Delete(r);
+            int sp = hmem_spill_write(project, name, "archive", content);
+            hmem_audit(sp == 0 ? "spill" : "spill-failed", project, name, "db1 store unreachable");
+            fprintf(stderr, "aimee: memory store unavailable (status %d); %s\n", st,
+                    sp == 0 ? "spilled for reconcile" : "spill FAILED — allowing local write");
+            return 0; /* fail-open: allow the local write this once */
+         }
+         cJSON_Delete(r);
+         hmem_audit("redirect-db1", project, name, NULL);
+         /* No re-materialize: the .md is retired and never created. */
+         snprintf(msg, msg_len,
+                  "Saved to aimee memory. Memory files are retired — retrieve with "
+                  "`aimee memory search` and use `aimee memory store` going forward.");
+         return 2;
+      }
+   }
+
    cJSON *body = cJSON_CreateObject();
    cJSON_AddStringToObject(body, "project", project);
    cJSON_AddStringToObject(body, "name", name);

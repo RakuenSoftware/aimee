@@ -224,6 +224,20 @@ static char *build_session_context(const char *client_cwd)
           "work.\n"
           "- Use `aimee session brief` to inspect the full startup brief.\n\n");
 
+   /* Enforce aimee's memory system as the single memory of record. Memory an
+    * agent writes to its OWN store (e.g. Claude Code's .md memory files) is
+    * intercepted and captured into aimee (memory_redirect), so the agent must
+    * use aimee memory directly rather than a native mechanism. */
+   pos += (size_t)snprintf(
+       buf + pos, cap - pos,
+       "# Memory (use aimee, not your own store)\n"
+       "- aimee is the single memory of record. Store durable memory with "
+       "`aimee memory store <key> <content>`; set who-you-are / preferences with "
+       "`aimee memory identity <key> <value>` and `aimee memory prefer <key> <value>`.\n"
+       "- Retrieve prior context with `aimee memory search <terms>` or `aimee memory recall`.\n"
+       "- Do NOT keep memory in your own files (e.g. `.md` notes): such writes are intercepted "
+       "and redirected into aimee's memory.\n\n");
+
    {
       char cwd[MAX_PATH_LEN];
       config_t skill_cfg;

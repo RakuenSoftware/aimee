@@ -824,6 +824,31 @@ static int server_memory_intercept(const char *tool, const char *tool_input, con
       return 0;
    }
 
+   /* .md retirement (AIMEE_MEMORY_MD_RETIRE, default-off): store the intercepted
+    * write into db1 as a private, non-recallable archive row (kind='archive',
+    * tier L1 — outside the recall selectors) and do NOT re-materialize the .md —
+    * the file never exists; content lives only in aimee. The agent is steered to
+    * `aimee memory` by the session brief. Server owns db1, so write directly. */
+   {
+      const char *mr = getenv("AIMEE_MEMORY_MD_RETIRE");
+      if (mr && (mr[0] == '1' || mr[0] == 't' || mr[0] == 'T' || mr[0] == 'y'))
+      {
+         char akey[HMEM_PROJECT_KEY_MAX + 16];
+         snprintf(akey, sizeof(akey), "archive:%s", name);
+         if (db1_user_memory_upsert("archive", "L1", akey, content, 1.0, client) != 0)
+         {
+            cJSON_Delete(ti); /* store failed — fail open rather than block the agent */
+            return 0;
+         }
+         hmem_audit("redirect-db1", project, name, NULL);
+         snprintf(msg, msg_len,
+                  "Saved to aimee memory. Memory files are retired — retrieve with "
+                  "`aimee memory search` and use `aimee memory store` going forward.");
+         cJSON_Delete(ti);
+         return 2;
+      }
+   }
+
    hmem_row_t row;
    memset(&row, 0, sizeof(row));
    snprintf(row.project, sizeof(row.project), "%s", project);

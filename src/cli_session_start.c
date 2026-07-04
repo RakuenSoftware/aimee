@@ -364,10 +364,15 @@ int handle_session_start(int json_output)
    int nonblocking = (getenv("AIMEE_SESSION_ID") != NULL);
 
    /* P4: surface this project's central memory into the local memory dir so a
-    * fresh session/agent sees it (best-effort; never blocks session-start). */
+    * fresh session/agent sees it (best-effort; never blocks session-start).
+    * Skipped under the .md retirement (AIMEE_MEMORY_MD_RETIRE): memory is not
+    * re-materialized as .md files — the agent uses aimee memory recall/search
+    * (the session brief steers it there) instead. */
    {
+      const char *mr = getenv("AIMEE_MEMORY_MD_RETIRE");
+      int md_retire = mr && (mr[0] == '1' || mr[0] == 't' || mr[0] == 'T' || mr[0] == 'y');
       char hcwd[4096];
-      if (getcwd(hcwd, sizeof(hcwd)))
+      if (!md_retire && getcwd(hcwd, sizeof(hcwd)))
          harness_memory_hydrate(hcwd);
    }
 
