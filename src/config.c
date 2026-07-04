@@ -1544,15 +1544,27 @@ int config_snapshot_get(config_t *out)
 
 int config_reload(void)
 {
+   /* Hold the writer lock across the WHOLE reload (load + validate + token + publish) so two
+    * concurrent config_reload callers cannot race each other's config_load on the shared
+    * g_config_cache. NOTE: config_load's g_config_cache is a pre-existing benign racy cache
+    * shared with per-request config_load callers that are NOT under this lock; P1b removes
+    * that exposure by moving the server's hot readers to config_snapshot_get (this seqlock
+    * snapshot), after which config_load is only reached here (serialized) + by CLI one-shots. */
+   pthread_mutex_lock(&g_snap_wlock);
    config_t fresh;
    memset(&fresh, 0, sizeof fresh); /* zero padding so the token is stable */
    if (config_load(&fresh) != 0)
+   {
+      pthread_mutex_unlock(&g_snap_wlock);
       return -1; /* parse failure -> keep the running snapshot */
+   }
    char err[256];
    if (config_reduce_validate(&fresh, err, sizeof err) != 0)
+   {
+      pthread_mutex_unlock(&g_snap_wlock);
       return -1; /* invalid -> keep the running snapshot (validate-or-keep) */
+   }
    uint64_t tok = config_snapshot_token(&fresh);
-   pthread_mutex_lock(&g_snap_wlock);
    if (g_snap_inited && tok == g_snap_token)
    {
       pthread_mutex_unlock(&g_snap_wlock);
