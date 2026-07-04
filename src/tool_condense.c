@@ -14,9 +14,9 @@
 #include <time.h>
 #include <unistd.h>
 
-/* ---- realized-savings observability (Slice 6) ---- */
+/* ---- realized-savings observability (Slice 6) + recovery-cost telemetry (P4) ---- */
 static atomic_llong g_tc_recognized, g_tc_applied, g_tc_applied_raw, g_tc_applied_final,
-    g_tc_family_test, g_tc_family_diag;
+    g_tc_family_test, g_tc_family_diag, g_tc_recovered, g_tc_recovered_bytes;
 
 void tool_condense_stats_snapshot(tool_condense_totals_t *out)
 {
@@ -28,6 +28,13 @@ void tool_condense_stats_snapshot(tool_condense_totals_t *out)
    out->applied_final = atomic_load_explicit(&g_tc_applied_final, memory_order_relaxed);
    out->family_test = atomic_load_explicit(&g_tc_family_test, memory_order_relaxed);
    out->family_diag = atomic_load_explicit(&g_tc_family_diag, memory_order_relaxed);
+   out->recovered = atomic_load_explicit(&g_tc_recovered, memory_order_relaxed);
+   out->recovered_bytes = atomic_load_explicit(&g_tc_recovered_bytes, memory_order_relaxed);
+   /* net-of-recovery saving: bytes dropped by condensation MINUS bytes paged back via
+    * tool_output_get. This is the recovery-cost gate metric — if recovered approaches
+    * (raw-final), the lever is not net-saving on this workload. */
+   out->saved_bytes = out->applied_raw - out->applied_final;
+   out->net_saved_bytes = out->saved_bytes - out->recovered_bytes;
 }
 
 void tool_condense_stats_reset(void)
@@ -36,6 +43,8 @@ void tool_condense_stats_reset(void)
    atomic_store_explicit(&g_tc_applied, 0, memory_order_relaxed);
    atomic_store_explicit(&g_tc_applied_raw, 0, memory_order_relaxed);
    atomic_store_explicit(&g_tc_applied_final, 0, memory_order_relaxed);
+   atomic_store_explicit(&g_tc_recovered, 0, memory_order_relaxed);
+   atomic_store_explicit(&g_tc_recovered_bytes, 0, memory_order_relaxed);
    atomic_store_explicit(&g_tc_family_test, 0, memory_order_relaxed);
    atomic_store_explicit(&g_tc_family_diag, 0, memory_order_relaxed);
 }
@@ -1020,6 +1029,10 @@ char *tool_condense_recall(const char *spill_dir, const char *ref, char *err, si
       len += (size_t)r;
    close(fd);
    buf[len] = '\0';
+   /* recovery-cost telemetry (P4): a successful recall is a page-back — count it + the bytes
+    * re-injected, so net-of-recovery saving is observable (the promotion-gate metric). */
+   atomic_fetch_add_explicit(&g_tc_recovered, 1, memory_order_relaxed);
+   atomic_fetch_add_explicit(&g_tc_recovered_bytes, (long long)len, memory_order_relaxed);
    return buf;
 }
 

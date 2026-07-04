@@ -66,12 +66,25 @@ before the size-based compression:
   spill. Spill files are per-user (`0700` directory) and excluded from log/trace exports by
   default.
 
-## Observability
+## Observability + recovery cost (P4)
 
-Process-wide counters accumulate realized savings on live traffic
+Process-wide counters accumulate realized savings **and recovery cost** on live traffic
 ([`tool_condense_stats_snapshot`](../../src/tool_condense.c)): `recognized`, `applied`,
-`applied_raw` vs `applied_final` bytes, and per-family (`test`, `diag`) counts. Each
-condensation also logs its `raw→final` delta under the `tool_condense` module.
+`applied_raw` vs `applied_final` bytes, per-family (`test`, `diag`) counts, and the
+**recovery-cost** side — `recovered` (successful `tool_output_get` page-backs) and
+`recovered_bytes` (bytes re-injected). Two derived fields make the promotion-gate metric
+explicit:
+
+- `saved_bytes` = `applied_raw − applied_final` (gross condensation saving);
+- **`net_saved_bytes`** = `saved_bytes − recovered_bytes` (**net of recovery**).
+
+`net_saved_bytes` is the honest measure: if the agent keeps paging spilled output back in,
+`recovered_bytes` rises toward `saved_bytes` and the net collapses — the signal that the
+lever is not net-saving on that workload. Each condensation logs its `raw→final` delta and
+each recall logs `tool_output_get recovered N bytes` under the `tool_condense` module, so the
+two sides are greppable together. (This precise per-call channel exists because
+`tool_output_get` is the single first-class recovery handle from P2; `history_fold`/`compress`
+recovery via fold-recall remains best-effort, not byte-exact.)
 
 ## Scope & rollout
 

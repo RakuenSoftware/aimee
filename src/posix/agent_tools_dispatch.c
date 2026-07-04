@@ -5,6 +5,7 @@
 #include "agent_tools.h"
 #include "agent_tools_internal.h"
 #include "aimee_home.h"
+#include "log.h"
 #include "tool_condense.h"
 #include "tool_args_coerce.h"
 #include "workspace_provider.h"
@@ -399,6 +400,11 @@ static char *td_tool_output_get(cJSON *args, const char *name, const char *dispa
       snprintf(msg, sizeof msg, "error: %s", err[0] ? err : "not found");
       return safe_strdup(msg);
    }
+   /* recovery-cost telemetry (P4): each recall is a page-back — the counter is bumped inside
+    * tool_condense_recall; log the bytes so the net-of-recovery is greppable next to the
+    * "condensed X->Y" lines. */
+   aimee_log(LOG_INFO, "tool_condense", "tool_output_get recovered %zu bytes (%s)", strlen(full),
+             r->valuestring);
    return full;
 }
 

@@ -397,6 +397,20 @@ int main(void)
       assert(t.family_test == 1 && t.family_diag == 0);
       assert(t.applied_raw > t.applied_final); /* realized savings */
       assert(t.applied_raw == st.raw_bytes);
+      /* recovery-cost telemetry (P4): before any recall, net saving == gross saving */
+      assert(t.saved_bytes == t.applied_raw - t.applied_final);
+      assert(t.recovered == 0 && t.recovered_bytes == 0);
+      assert(t.net_saved_bytes == t.saved_bytes);
+
+      /* recall the spill -> a page-back is counted + the net saving drops by the bytes back */
+      char rerr[64];
+      char *back = tool_condense_recall(dir, st.spill_ref, rerr, sizeof rerr);
+      assert(back);
+      tool_condense_stats_snapshot(&t);
+      assert(t.recovered == 1);
+      assert(t.recovered_bytes == (long long)strlen(back));
+      assert(t.net_saved_bytes == t.saved_bytes - t.recovered_bytes); /* recovery erodes the net */
+      free(back);
 
       char spath[512];
       snprintf(spath, sizeof spath, "%s/%s.out", dir, st.spill_ref);

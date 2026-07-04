@@ -97,6 +97,11 @@ typedef struct
    long long applied_final; /* total output bytes over APPLIED condensations */
    long long family_test;   /* applied condensations tagged "test" */
    long long family_diag;   /* applied condensations tagged "diag" */
+   /* recovery-cost telemetry (P4): the page-back side of the ledger. */
+   long long recovered;       /* successful tool_output_get recalls (page-backs) */
+   long long recovered_bytes; /* total bytes re-injected by those recalls */
+   long long saved_bytes;     /* derived: applied_raw - applied_final (gross condense saving) */
+   long long net_saved_bytes; /* derived: saved_bytes - recovered_bytes (the gate metric) */
 } tool_condense_totals_t;
 
 /* Snapshot the counters. Each field is read atomically, but the six are NOT a single
