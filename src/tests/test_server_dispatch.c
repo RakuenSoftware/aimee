@@ -398,6 +398,14 @@ void session_start_emit(app_ctx_t *ctx, const char *hook_input, FILE *out)
    (void)hook_input;
    (void)out;
 }
+/* session.brief_assemble invokes session_brief_emit (cmd_session_lifecycle.c),
+ * also not linked here. Stub it with a marker so the op handler test can assert
+ * the emitted brief flows into the response envelope. */
+void session_brief_emit(FILE *out)
+{
+   if (out)
+      fputs("STUB_BRIEF_CONTENT", out);
+}
 void session_id_set_override(const char *sid)
 {
    (void)sid;
@@ -1804,9 +1812,31 @@ static void test_conn_update_events_null_evloop(void)
    printf("test_conn_update_events_null_evloop: PASS\n");
 }
 
+/* session.brief_assemble (Proposal 1 Phase 1): the remote thin-client
+ * SessionStart brief op. Asserts the response is the minimal versioned envelope
+ * {schema_version:1, output} and that the assembled brief (here the stub's
+ * marker) flows into output — the contract the thin client depends on. */
+static void test_session_brief_assemble(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   const char *msg = "{\"method\":\"session.brief_assemble\"}";
+   cJSON *json = dispatch_json(ctx, conn, msg, strlen(msg));
+   cJSON *sv = cJSON_GetObjectItem(json, "schema_version");
+   cJSON *out = cJSON_GetObjectItem(json, "output");
+   assert(cJSON_IsNumber(sv) && sv->valueint == 1);
+   assert(cJSON_IsString(out) && strstr(out->valuestring, "STUB_BRIEF_CONTENT") != NULL);
+   cJSON_Delete(json);
+   free(conn);
+   free(ctx);
+   printf("test_session_brief_assemble: PASS\n");
+}
+
 int main(void)
 {
    test_invalid_json();
+   test_session_brief_assemble();
    test_conn_update_events_null_evloop();
    test_missing_method();
    test_oversized_payload();
