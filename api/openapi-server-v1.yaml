@@ -657,6 +657,38 @@ paths:
           description: Missing proposal_md
         "500":
           description: Could not create the work item
+  /dev/ci-event:
+    post:
+      summary: CI outcome webhook — record a PR's CI result for its autonomous run and resume the scheduler (HMAC-signed; no capability, fail-closed if the secret is unset)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pr_ref, head_sha, status, signature]
+              properties:
+                pr_ref: { type: string, description: The PR ref the run opened }
+                head_sha: { type: string, description: The commit CI ran on }
+                status: { type: string, enum: [passed, failed, error, pending] }
+                log_url: { type: string, description: Optional CI log URL }
+                signature: { type: string, description: HMAC-SHA256 hex over "pr_ref|head_sha|status" keyed by AIMEE_CI_WEBHOOK_SECRET }
+      responses:
+        "200":
+          description: "{ok, work_item, duplicate}"
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing/invalid fields or unknown status
+        "401":
+          description: Invalid signature
+        "404":
+          description: No work item for pr_ref
+        "413":
+          description: Body too large
+        "503":
+          description: Webhook disabled (AIMEE_CI_WEBHOOK_SECRET unset)
   /dev/sweep:
     post:
       summary: Deepening sweep (analysis-only) — propose duplication-across-call-sites seams, re-ground each against the live code index, and return a ranked report. Files nothing.
