@@ -968,6 +968,35 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /console/overview:
+    get:
+      operationId: getConsoleOverview
+      summary: Web-console dashboard overview
+      description: |
+        Aggregated kb health/throughput for the aimee-kb web console dashboard.
+        Requires a console-admin credential (see the kb-web-console proposal).
+        S0 returns the envelope with an empty components list; S1 fills it with
+        an in-process telemetry fan-in.
+      responses:
+        "200":
+          description: Overview envelope
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Forbidden (credential not permitted for this route)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /intelligence/calibration/readiness:
     get:
       operationId: getIntelligenceCalibrationReadiness

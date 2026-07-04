@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 48
+Total endpoints: 49
 
 ## Endpoints
 
@@ -249,6 +249,21 @@ Responses:
 - `400` — Missing required parameters
 - `401` — Unauthorized
 - `503` — Knowledge store unavailable
+
+### `GET /v1/console/overview`
+
+Web-console dashboard overview
+
+Aggregated kb health/throughput for the aimee-kb web console dashboard.
+Requires a console-admin credential (see the kb-web-console proposal).
+S0 returns the envelope with an empty components list; S1 fills it with
+an in-process telemetry fan-in.
+
+Responses:
+
+- `200` — Overview envelope
+- `401` — Unauthorized
+- `403` — Forbidden (credential not permitted for this route)
 
 ### `POST /v1/docs`
 

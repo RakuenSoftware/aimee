@@ -381,6 +381,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-guardrails-computer-use \
                $(TESTPREFIX)/unit-test-kb-http-routes \
                $(TESTPREFIX)/unit-test-kb-scope \
+               $(TESTPREFIX)/unit-test-kb-route-acl \
                $(TESTPREFIX)/unit-test-kb-enroll \
                $(TESTPREFIX)/unit-test-kb-verifier \
                $(TESTPREFIX)/unit-test-kb-auth-oidc \
@@ -3579,6 +3580,10 @@ $(TESTPREFIX)/unit-test-kb-scope: $(OBJDIR)/tests/test_kb_scope.o \
                      $(OBJDIR)/kb/kb_scope.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
+$(TESTPREFIX)/unit-test-kb-route-acl: $(OBJDIR)/tests/test_kb_route_acl.o \
+                     $(OBJDIR)/kb/http/kb_route_acl.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
 $(TESTPREFIX)/unit-test-kb-ingest-format: $(OBJDIR)/tests/test_kb_ingest_format.o \
                      $(OBJDIR)/kb/kb_ingest_normalize.o $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -3588,6 +3593,8 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o \
                      $(OBJDIR)/tests/support/pdf_route_stubs.o \
                      $(OBJDIR)/kb/http/kb_http.o \
                      $(OBJDIR)/kb/http/kb_http_search.o \
+                     $(OBJDIR)/kb/http/kb_route_acl.o \
+                     $(OBJDIR)/kb/http/kb_http_console.o \
                      $(OBJDIR)/kb/kb_scope.o \
                      $(OBJDIR)/kb/verifier.o \
                      $(OBJDIR)/kb/enroll.o \

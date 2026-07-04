@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:console": "tsc -b && vite build --config vite.console.config.ts",
     "check": "tsc -b"
   },
   "dependencies": {
