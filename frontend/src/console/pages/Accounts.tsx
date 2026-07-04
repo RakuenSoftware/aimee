@@ -25,6 +25,66 @@ interface ScopeRow {
   active: number;
 }
 
+// EnrollClient mints a single-use enrollment for a new client (POST /v1/enroll)
+// and shows the returned aimee:// connection string to paste into the client.
+function EnrollClient() {
+  const [scope, setScope] = useState('');
+  const [host, setHost] = useState('');
+  const [port, setPort] = useState('8741');
+  const [conn, setConn] = useState('');
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  // A console-admin may only mint a scoped '<kind>:<id>' client credential (the
+  // kb rejects owner/privileged scopes); guide the operator client-side too.
+  const scopeValid = /^[a-z][a-z0-9_-]*:[A-Za-z0-9._:-]+$/.test(scope) && !/^(owner|console-admin|curator):/.test(scope);
+  const portValid = /^\d+$/.test(port) && Number(port) > 0 && Number(port) < 65536;
+
+  async function mint() {
+    setErr('');
+    setConn('');
+    setBusy(true);
+    try {
+      const r = await apiSend<{ connection_string: string }>('POST', '/v1/enroll', {
+        host,
+        port: Number(port),
+        scope,
+      });
+      setConn(r.connection_string);
+    } catch (e) {
+      setErr(`Enroll failed: ${e}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <h3>Enroll a client</h3>
+      <div className="kbc-form">
+        <input placeholder="scope (e.g. project:web)" value={scope} onChange={(e) => setScope(e.target.value)} />
+        <input placeholder="kb host" value={host} onChange={(e) => setHost(e.target.value)} />
+        <input placeholder="port" value={port} onChange={(e) => setPort(e.target.value)} style={{ width: '5rem' }} />
+        <button onClick={mint} disabled={!scopeValid || !host || !portValid || busy}>
+          {busy ? 'Minting…' : 'Mint enrollment'}
+        </button>
+      </div>
+      {scope && !scopeValid && (
+        <p className="kbc-muted">scope must be a non-privileged <code>kind:id</code> (e.g. project:web).</p>
+      )}
+      {conn && (
+        <p className="kbc-notice">
+          Single-use connection string (paste into the client):
+          <br />
+          <code>{conn}</code>{' '}
+          <button onClick={() => navigator.clipboard?.writeText(conn)}>Copy</button>
+        </p>
+      )}
+      {err && <p className="kbc-error">{err}</p>}
+    </div>
+  );
+}
+
 interface OidcConfig {
   issuer: string;
   audience: string;
@@ -235,6 +295,7 @@ export default function Accounts() {
         </table>
       )}
 
+      <EnrollClient />
       <OidcEditor />
     </section>
   );

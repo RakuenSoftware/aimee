@@ -9,18 +9,17 @@ enforces server-side.
 
 Surfaces: **Dashboard** (kb health/throughput), **Accounts** (client enrollment,
 certificate revocation, scopes, OIDC config), **Governance** (decision records,
-the policy-verdict action audit, the curator review queue). This document is the
-trust model; the surfaces are built slice by slice (see
-`docs/proposals/pending/kb-web-console.md` and its `.plan.md`).
+the policy-verdict action audit). This document is the trust model + operations
+guide (see `docs/proposals/done/kb-web-console.md` and its `.plan.md` for the design).
 
 ## Status
 
-**Default-off.** The console is a separate opt-in binary that only runs when
-launched with a console-admin credential file, and binds to `127.0.0.1` unless
-told otherwise. It is **not** wired into `compose.yaml`/the kb image until the S6
-close-out (and even then it stays opt-in behind a compose profile). S0 ships the
-service scaffold + containment model; the Dashboard/Accounts/Governance pages are
-placeholders filled in later slices.
+**Shipped, default-off.** The console is a separate opt-in service (its own
+`Dockerfile.kb-console` + the compose `console` profile) that only runs when
+launched with a console-admin credential file, bound to `127.0.0.1` by default.
+The Dashboard, Accounts (enroll / revoke / scopes / OIDC config), and Governance
+(decisions / action audit) surfaces are all live. The curator review queue is the
+one deferred surface (it needs a separate curator-scoped credential).
 
 ## Trust model
 
@@ -30,11 +29,16 @@ not merely "semi-trusted".
 - **Scoped console-admin credential, not owner.** The console holds a
   `scope:console-admin:<id>:<secret>` bearer whose route allowlist the **kb
   enforces server-side** (`src/kb/http/kb_route_acl.c`): only
-  `/v1/console/overview`, `/v1/enrollments` (+ revoke), `/v1/config/oidc`,
-  `/v1/scopes`, `/v1/decisions` (+ sub-actions), and `/v1/audit/actions`. A
-  compromised console is bounded to that allowlist — never full-KB takeover (no
-  arbitrary enroll minting, no owner routes). `/v1/review` is **not** in the set:
-  review accept/reject is a separate `curator` scope (S4/S5).
+  `POST /v1/enroll` (mint), `/v1/console/overview`, `/v1/enrollments` (+ revoke),
+  `/v1/config/oidc`, `/v1/scopes`, `/v1/decisions` (+ sub-actions), and
+  `/v1/audit/actions`. A compromised console is bounded to that allowlist. It may
+  mint client enrollments, but the kb **refuses to mint an owner or privileged
+  scope for a console-admin caller** — the requested scope must be a proper
+  `<kind>:<id>` and the kind may not be `owner`/`console-admin`/`curator` — so the
+  console cannot escalate by minting. `/v1/review` is **not** in the set: review
+  accept/reject is a separate `curator` scope. (The console is on the kb's compose
+  network, so other services on it can reach the console port, but every action
+  still requires a valid console session — OIDC or break-glass.)
 - **Deny-by-default proxy.** `/api/*` maps 1:1 to the allowlisted `/v1` routes and
   re-checks the same allowlist in Go (`acl.go`) before forwarding — defence in
   depth with the kb's server-side check. The browser's own token is never
@@ -109,3 +113,25 @@ kb-console -kb https://aimee-kb:8741 -cred console.cred -oidc oidc.json
 
 Without an OIDC file the console runs **break-glass-only** — create
 `$KB_CONSOLE_HOME/.break_glass` (0600) to enable the recovery login.
+
+## Deploy (compose)
+
+The console is a **default-off** compose service under the `console` profile — a
+stock `docker compose up` never starts it. To enable it:
+
+```bash
+# 1. Mint a console-admin enrollment on the kb (owner credential) and save it:
+printf '%s' "$CONSOLE_ADMIN_BEARER" > console.cred && chmod 600 console.cred
+
+# 2. Bring the stack up WITH the console profile:
+docker compose --profile console up -d
+#   The console is published on 127.0.0.1:8744 (localhost-only), fronts the kb at
+#   http://aimee-kb:8741, and reads ./console.cred (override KB_CONSOLE_CRED_FILE).
+```
+
+Image: `Dockerfile.kb-console` (a Node stage builds the SPA, a Go stage builds the
+binary, a slim runtime). Override `AIMEE_KB_CONSOLE_IMAGE` to pin a published tag.
+
+Configure OIDC login through the **Accounts → OIDC login config** editor (stored in
+the kb's DB2); **restart the console** to apply. Until OIDC is configured the
+console is break-glass-only (drop `$KB_CONSOLE_HOME/.break_glass`, mode 0600).

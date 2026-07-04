@@ -349,6 +349,21 @@ It is a thin client: it holds no database and proxies everything to
 
 ---
 
+## 8a. The kb console service
+
+`aimee-kb-console` (`kb-console/*.go` + the second `frontend/` SPA) is a standalone
+Go thin-client for administering a **shared/company `aimee-kb`** — dashboard,
+accounts (client enrollment, certificate revocation, scopes, OIDC config), and
+governance (decision records, the policy-verdict action audit). Unlike webchat it
+fronts the **kb `/v1` directly** (so it works with no colocated `aimee-server`) and
+uses **no PAM**: login is OIDC (with a presence-flag break-glass), and it holds a
+scoped **console-admin** credential whose route allowlist the kb enforces
+server-side (`src/kb/http/kb_route_acl.c`). Default-off; shipped as its own
+`Dockerfile.kb-console` under the compose `console` profile. See
+[`KB_CONSOLE.md`](KB_CONSOLE.md).
+
+---
+
 ## 9. Request lifecycles
 
 ### 9.1 A pre-tool hook (the hot path)

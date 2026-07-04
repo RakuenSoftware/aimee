@@ -29,7 +29,7 @@ func TestConsoleAdminAllows_Denied(t *testing.T) {
 		{"DELETE", "/v1/enrollments/abc/revoke"}, // wrong method
 		{"POST", "/v1/console/overview"},         // wrong method
 		{"get", "/v1/enrollments"},               // case-sensitive method
-		{"POST", "/v1/enroll"},                   // not in allowlist (owner mint)
+		{"GET", "/v1/enroll"},                    // only POST /v1/enroll is allowed
 		{"GET", "/v1/review"},                    // curator scope, not console-admin
 		{"POST", "/v1/review/7/accept"},
 		{"GET", "/v1/ingest/status"},

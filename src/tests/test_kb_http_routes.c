@@ -1417,6 +1417,39 @@ int db2_audit_event_list(const char *since, const char *until, const char *scope
    return 1;
 }
 
+static void test_mint_scope_restriction(void)
+{
+   /* A console-admin caller may not mint an owner/privileged scope — the guard
+    * fires before kb_enroll_mint, so no enrollment store is needed here. The
+    * configured + presented bearer is the console-admin scoped token. */
+   char buf[4096];
+   const char *ah = "Bearer scope:console-admin:c1:secret";
+   const char *bt = "scope:console-admin:c1:secret";
+   struct
+   {
+      const char *scope;
+      int want;
+   } cases[] = {
+       {"global", 403},             /* no ':' => full access */
+       {"owner:x", 403},            /* owner kind */
+       {"console-admin:evil", 403}, /* privileged kind */
+       {"curator:x", 403},          /* privileged kind */
+   };
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+   {
+      char body[128];
+      snprintf(body, sizeof(body), "{\"host\":\"h\",\"port\":8741,\"scope\":\"%s\"}",
+               cases[i].scope);
+      int s = kb_http_route_ex("POST", "/v1/enroll", NULL, ah, bt, body, (int)strlen(body), buf,
+                               sizeof(buf));
+      if (s != cases[i].want)
+         fprintf(stderr, "mint scope '%s': got %d want %d (%s)\n", cases[i].scope, s, cases[i].want,
+                 buf);
+      assert(s == cases[i].want);
+   }
+   printf("  PASS: console-admin mint scope restriction (owner/privileged -> 403)\n");
+}
+
 static void test_governance_routes(void)
 {
    char buf[65536];
@@ -4052,6 +4085,7 @@ int main(void)
    test_capabilities();
    test_console_overview();
    test_accounts_routes();
+   test_mint_scope_restriction();
    test_governance_routes();
    test_intelligence_calibration_readiness();
    test_intelligence_demotion_check();

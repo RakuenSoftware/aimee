@@ -731,7 +731,9 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
          return 405;
       }
-      if (vr.scope_kind[0])
+      /* Owner mints, and the console-admin credential may also mint (enroll-a-
+       * client is a console accounts action). Any other scope is rejected. */
+      if (vr.scope_kind[0] && strcmp(vr.scope_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) != 0)
          return kb_http_owner_required(out_buf, out_cap, "enrollment minting");
       cJSON *req = body ? cJSON_Parse(body) : NULL;
       const cJSON *jhost = req ? cJSON_GetObjectItemCaseSensitive(req, "host") : NULL;
@@ -745,6 +747,29 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return 400;
       }
       const char *scope = cJSON_IsString(jscope) ? jscope->valuestring : "global";
+      /* A console-admin caller may mint only a properly-scoped CLIENT credential
+       * — never an owner/full-access cert (a scope with no ':' gets full access
+       * at the mTLS seam) and never a privileged kind (console-admin/curator/
+       * owner). This bounds the console: it cannot escalate by minting. The owner
+       * credential keeps unrestricted minting. */
+      if (vr.scope_kind[0] && strcmp(vr.scope_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) == 0)
+      {
+         const char *colon = strchr(scope, ':');
+         size_t kindlen = colon ? (size_t)(colon - scope) : 0;
+         int privileged = !colon /* owner / full-access */ ||
+                          (kindlen == 13 && strncmp(scope, "console-admin", 13) == 0) ||
+                          (kindlen == 7 && strncmp(scope, "curator", 7) == 0) ||
+                          (kindlen == 5 && strncmp(scope, "owner", 5) == 0);
+         if (privileged)
+         {
+            cJSON_Delete(req);
+            snprintf(
+                out_buf, (size_t)out_cap,
+                "{\"error\":\"forbidden: console-admin may not mint an owner or privileged scope; "
+                "use a scoped '<kind>:<id>' value\"}");
+            return 403;
+         }
+      }
       char conn[1024];
       int rc = kb_enroll_mint(kb_default_config_dir(), jhost->valuestring, (int)jport->valuedouble,
                               scope, conn, sizeof(conn));

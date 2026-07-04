@@ -1,6 +1,42 @@
 # Proposal: aimee-kb web console (dashboard · accounts · governance)
 
-- **State:** pending (roundtable-reviewed 2026-07-04, v2 — findings folded in)
+- **State:** done
+- **Completed:** 2026-07-04
+- **Moved from:** `docs/proposals/pending/kb-web-console.md`
+- **Feature doc:** [`docs/KB_CONSOLE.md`](../../KB_CONSOLE.md)
+- **Author:** JBailes
+
+## Close-out (2026-07-04)
+
+Shipped as a new default-off `aimee-kb-console` service across eight slices, all
+roundtable-reviewed and merged to `testing`, with the two backend slices (S2a, S4,
+S2b) live-verified on real Postgres on a `.253` CT:
+
+- **S0** (#1065) — console scaffold + containment (route ACL, OIDC/break-glass
+  login, deny-by-default proxy, hash-pinned CSP, sessions/CSRF).
+- **S1** (#1066) — dashboard `/v1/console/overview` in-process fan-in + UI.
+- **S2a** (#1070) — accounts backend: enrollments list/revoke/scopes, cert-record
+  persistence, mTLS-seam revocation.
+- **S3** (#1071) — accounts UI.
+- **S4** (#1072) — governance backend: decision records (one-active-per-scope
+  409) + the action audit.
+- **S5** (#1073) — governance UI.
+- **S2b** (#1074) — DB2-backed OIDC config (get/put + console fetch + editor).
+- **S6** — enroll-a-client mint enablement, packaging (`Dockerfile.kb-console` +
+  the default-off compose `console` profile), docs, and this close-out.
+
+**Deferred / follow-ups** (documented at their call sites): server-side
+JWKS-fetch/SSRF validation on `PUT /v1/config/oidc` (the console's own verifier
+validates at login; break-glass recovers); the curator review queue in the
+governance UI (needs a separate curator-scoped credential); a JSON-array store
+for `admin_values` (currently comma-separated, commas rejected); and the
+kb-side live-config-reload for OIDC (the console re-reads at restart).
+
+The design text below is the historical record.
+
+---
+
+- **Original state:** pending (roundtable-reviewed 2026-07-04, v2 — findings folded in)
 - **Author:** JBailes
 - **Drafted:** 2026-07-04
 

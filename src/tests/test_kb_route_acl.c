@@ -10,6 +10,7 @@
 static void test_allowed_routes(void)
 {
    assert(kb_route_acl_console_admin_allows("GET", "/v1/console/overview"));
+   assert(kb_route_acl_console_admin_allows("POST", "/v1/enroll"));
    assert(kb_route_acl_console_admin_allows("GET", "/v1/enrollments"));
    assert(kb_route_acl_console_admin_allows("POST", "/v1/enrollments/abc123/revoke"));
    assert(kb_route_acl_console_admin_allows("GET", "/v1/config/oidc"));
@@ -42,7 +43,7 @@ static void test_wrong_method_denied(void)
 static void test_sibling_and_extra_segments_denied(void)
 {
    /* Not in the allowlist at all. */
-   assert(!kb_route_acl_console_admin_allows("POST", "/v1/enroll"));
+   assert(!kb_route_acl_console_admin_allows("GET", "/v1/enroll")); /* only POST is allowed */
    assert(!kb_route_acl_console_admin_allows("GET", "/v1/review"));
    assert(!kb_route_acl_console_admin_allows("POST", "/v1/review/7/accept"));
    assert(!kb_route_acl_console_admin_allows("GET", "/v1/ingest/status"));

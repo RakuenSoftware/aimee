@@ -18,6 +18,7 @@ type aclEntry struct {
 
 var consoleAdminACL = []aclEntry{
 	{"GET", "/v1/console/overview"},
+	{"POST", "/v1/enroll"},
 	{"GET", "/v1/enrollments"},
 	{"POST", "/v1/enrollments/{id}/revoke"},
 	{"GET", "/v1/config/oidc"},

@@ -93,6 +93,40 @@ services:
     volumes:
       - aimee-kb-home:/var/lib/aimee
 
+  # aimee-kb web console (dashboard / accounts / governance). DEFAULT-OFF: it only
+  # starts under the `console` profile (`docker compose --profile console up`), and
+  # is bound to localhost on the host. It fronts the kb /v1 with a scoped
+  # console-admin credential the operator must provide (see docs/KB_CONSOLE.md):
+  #   1. mint a scope:console-admin enrollment on the kb, write it to ./console.cred
+  #      (chmod 600), and 2. optionally configure OIDC via the console UI.
+  aimee-kb-console:
+    profiles: ["console"]
+    restart: unless-stopped
+    image: ${AIMEE_KB_CONSOLE_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-console:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.kb-console
+    command: ["-addr", "0.0.0.0:8744", "-kb", "http://aimee-kb:8741"]
+    environment:
+      KB_CONSOLE_CRED_FILE: /run/kb-console/console.cred
+      KB_CONSOLE_HOME: /var/lib/kb-console
+    ports:
+      # Localhost-only on the host — the console is a trusted-LAN admin surface.
+      - "127.0.0.1:8744:8744"
+    depends_on:
+      aimee-kb:
+        condition: service_healthy
+    healthcheck:
+      # The console serves its SPA over auto-TLS (self-signed) — probe with -k.
+      test: ["CMD", "curl", "-fsSk", "https://127.0.0.1:8744/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - kb-console-home:/var/lib/kb-console
+      # The operator supplies the console-admin credential (mode 0600).
+      - ${KB_CONSOLE_CRED_FILE:-./console.cred}:/run/kb-console/console.cred:ro
+
   # Bundled local LLM for the synthesis / curator passes — llama.cpp's
   # llama-server (OpenAI-compatible API at /v1). On by default; Gemma 3n E4B
   # (GGUF Q4) is fetched once from HuggingFace at first boot and cached in the
@@ -154,6 +188,7 @@ services:
 
 volumes:
   aimee-kb-home:
+  kb-console-home:
   aimee-kb-postgres:
   aimee-embedder-models:
   aimee-llm-models:

@@ -1,0 +1,42 @@
+# aimee-kb-console: the web console for a shared aimee-kb (dashboard / accounts /
+# governance). It is a separate, DEFAULT-OFF service — enabled via the compose
+# `console` profile — that fronts the kb /v1 with a scoped console-admin
+# credential. See docs/KB_CONSOLE.md for the trust model.
+
+# --- frontend: build the console SPA into a single inlined html ---
+FROM node:20-bookworm AS frontend
+WORKDIR /frontend
+# @rakuensoftware/smoothgui is vendored (frontend/vendor/) so the build needs no
+# credentials — same as the webchat SPA.
+COPY frontend/package.json frontend/package-lock.json ./
+COPY frontend/vendor/ ./vendor/
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build:console
+
+# --- console service: the standalone Go server (cgo: sqlite sessions) ---
+FROM golang:1.24-bookworm AS gobuild
+WORKDIR /src/kb-console
+COPY kb-console/go.mod kb-console/go.sum ./
+RUN go mod download
+COPY kb-console/ ./
+RUN CGO_ENABLED=1 go build -o /out/kb-console .
+
+# --- runtime ---
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=gobuild /out/kb-console /usr/local/bin/kb-console
+COPY --from=frontend /frontend/dist-console /opt/kb-console/frontend/dist-console
+# Run as a non-root user — a 0600 cred file is meaningless against root, and this
+# bounds any console compromise. KB_CONSOLE_HOME must be writable by this user.
+RUN useradd --system --uid 10001 --home-dir /var/lib/kb-console --create-home kbconsole \
+    && chown -R kbconsole /var/lib/kb-console
+USER kbconsole
+WORKDIR /opt/kb-console
+EXPOSE 8744
+# The console needs a console-admin credential (KB_CONSOLE_CRED_FILE, mode 0600)
+# and the kb URL; supply them via compose/env. The SPA path is passed explicitly
+# because the binary lives in /usr/local/bin.
+ENTRYPOINT ["/usr/local/bin/kb-console", "-spa", "/opt/kb-console/frontend/dist-console/console.html"]
