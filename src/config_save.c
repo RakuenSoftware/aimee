@@ -1044,6 +1044,8 @@ int config_save(const config_t *cfg)
        * persist only a non-default positive override (a bad <=0 is never written). */
       if (cfg->reduce_gateway_mutate)
          cJSON_AddBoolToObject(reduce, "gateway_mutate", cfg->reduce_gateway_mutate);
+      if (cfg->reduce_command_filter)
+         cJSON_AddBoolToObject(reduce, "command_filter", cfg->reduce_command_filter);
       if (cfg->reduce_gateway_session_disable_ttl_ms != 3600000 &&
           cfg->reduce_gateway_session_disable_ttl_ms > 0)
          cJSON_AddNumberToObject(reduce, "gateway_session_disable_ttl_ms",

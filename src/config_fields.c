@@ -283,6 +283,7 @@ const config_field_t config_fields[] = {
     {"reduce.history_fold", offsetof(config_t, reduce_history_fold), sizeof(int), 1, CFG_BOOL},
     {"reduce.compress", offsetof(config_t, reduce_compress), sizeof(int), 1, CFG_BOOL},
     {"reduce.gateway_mutate", offsetof(config_t, reduce_gateway_mutate), sizeof(int), 1, CFG_BOOL},
+    {"reduce.command_filter", offsetof(config_t, reduce_command_filter), sizeof(int), 1, CFG_BOOL},
     {"reduce.gateway_session_disable_ttl_ms",
      offsetof(config_t, reduce_gateway_session_disable_ttl_ms), sizeof(int), 0, CFG_INT},
     {"reduce.freeze_guard", offsetof(config_t, reduce_freeze_guard_enabled), sizeof(int), 1,

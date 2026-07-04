@@ -966,6 +966,11 @@ typedef struct config
    int reduce_freeze_guard_horizon;
    int reduce_gateway_mutate;
    int reduce_gateway_session_disable_ttl_ms;
+   /* reduce_command_filter: deterministic command-aware tool-output condensation lever
+    * (proposal: deterministic-tool-output-condensation). Default OFF. S1 ships the
+    * primitives + this gate; the tool seam is wired in a later slice, so the flag is
+    * inert until then. */
+   int reduce_command_filter;
    /* Runtime-only (NOT parsed as a key, NOT persisted): 1 iff the operator set the
     * reduce.gateway_seam key explicitly. Lets config_save persist gateway_seam only
     * when the user chose it, never when config_load synthesized it from mutate=1. */

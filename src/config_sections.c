@@ -771,6 +771,9 @@ void config_parse_reduce_section(config_t *cfg, cJSON *root)
        * truncates. A resulting <=0 (incl. a truncated 0.x) is caught startup-fatal
        * by config_reduce_validate(). */
       cfg->reduce_gateway_session_disable_ttl_ms = item->valueint;
+   item = cJSON_GetObjectItemCaseSensitive(reduce, "command_filter");
+   if (cJSON_IsBool(item))
+      cfg->reduce_command_filter = cJSON_IsTrue(item) ? 1 : 0;
    item = cJSON_GetObjectItemCaseSensitive(reduce, "freeze_guard");
    if (cJSON_IsBool(item))
       cfg->reduce_freeze_guard_enabled = cJSON_IsTrue(item) ? 1 : 0;
