@@ -44,9 +44,10 @@ extern "C"
    /* Sampled pre/post token-delta (§4 gateway_token_delta_pre_post_sampled). Called on
     * every APPLIED mutation with the reducer's baseline + reduced token counts; a
     * deterministic 1-in-GW_STAT_TOKEN_SAMPLE_N sample is accumulated (sum of baseline,
-    * sum of reduced, sample count) so the §6 "monotone reduction" gate can check that
-    * the sampled mean reduced < mean baseline. Cheap: one relaxed-atomic counter gates
-    * the sample, and the three accumulators are relaxed atomics. */
+    * sum of reduced, sample count) so the §6 net-shrink gate can check that the sampled
+    * mean reduced < sampled mean baseline. Cheap: one relaxed-atomic counter gates the
+    * sample; the sums are published before the count so a concurrent dump never sees a
+    * count ahead of its sums. */
    void gw_stat_record_token_delta(int baseline_tokens, int reduced_tokens);
    uint64_t gw_stat_token_sample_count(void);
    uint64_t gw_stat_token_baseline_sum(void);

@@ -111,13 +111,15 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
       context_reduce_result_free(&res); /* res.messages still owned by res -> freed here */
       return;
    }
-   res.messages = NULL; /* ownership moved into container */
+   res.messages = NULL;                    /* ownership moved into container */
+   int baseline_tok = res.baseline_tokens; /* capture the token counts before freeing res */
+   int reduced_tok = res.reduced_tokens;
    context_reduce_result_free(&res);
 
    gw_provenance_mark_reduced(&ctx->st); /* mark ONLY after replace succeeds */
    ctx->mutated = 1;
    gw_stat_inc(GW_STAT_MUTATE_APPLIED);
-   gw_stat_record_token_delta(res.baseline_tokens, res.reduced_tokens); /* sampled §4 */
+   gw_stat_record_token_delta(baseline_tok, reduced_tok); /* sampled §4 */
 }
 
 gw_post_action_t gw_buffered_after_status(cJSON *container, const char *key, int http_status,

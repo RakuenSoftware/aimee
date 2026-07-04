@@ -112,10 +112,13 @@ void gw_stat_record_token_delta(int baseline_tokens, int reduced_tokens)
    uint64_t n = atomic_fetch_add_explicit(&g_token_seen, 1, memory_order_relaxed);
    if (n % GW_STAT_TOKEN_SAMPLE_N != 0)
       return;
-   atomic_fetch_add_explicit(&g_token_sample_count, 1, memory_order_relaxed);
+   /* Publish the sums BEFORE the count so a concurrent gw_stat_dump that reads count
+    * then sums never sees a count ahead of its sums (at worst the sums are momentarily
+    * ahead — a conservative mean, never a torn over-count). */
    atomic_fetch_add_explicit(&g_token_baseline_sum, (uint64_t)baseline_tokens,
                              memory_order_relaxed);
    atomic_fetch_add_explicit(&g_token_reduced_sum, (uint64_t)reduced_tokens, memory_order_relaxed);
+   atomic_fetch_add_explicit(&g_token_sample_count, 1, memory_order_relaxed);
 }
 
 uint64_t gw_stat_token_sample_count(void)

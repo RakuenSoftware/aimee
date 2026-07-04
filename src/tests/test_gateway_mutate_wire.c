@@ -234,7 +234,8 @@ static void test_token_delta_sampling(void)
 static void test_no_behavior_change_when_off(void)
 {
    /* With reduce_gateway_mutate off (default config in this test's HOME), the buffered
-    * mutate must be a byte-identical no-op even given a resolvable-looking identity. */
+    * mutate short-circuits at the flag gate BEFORE inspecting the payload, so the
+    * container is a byte-identical no-op for ANY input regardless of size/shape. */
    cJSON *c = container_with("payload");
    char *before = cJSON_PrintUnformatted(c);
    gw_mutate_ctx_t ctx;

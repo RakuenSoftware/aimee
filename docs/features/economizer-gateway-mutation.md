@@ -69,9 +69,15 @@ unrelated caller. Disable state is a bounded (10k), TTL'd, process-local set.
 `gateway_stream_error_disable`, `gateway_session_disabled_set{reason}`,
 `gateway_session_disabled_blocks`, and the sampled `gateway_token_delta_*` sums.
 
+The token-delta is sampled **deterministically at 1-in-100** applied mutations
+(`gateway_token_delta_sample_count`, `…_baseline_sum`, `…_reduced_sum`). The `.254`
+net-shrink gate checks that the sampled `reduced_sum < baseline_sum` (sampled mean
+reduced below mean baseline); the sums are published before the count so a scrape never
+sees a count ahead of its sums.
+
 ## Rollout & rollback
 
-Enable `reduce_gateway_mutate` on a validation host, watch the counters, and roll back by
+Enable `reduce.gateway_mutate` on a validation host, watch the counters, and roll back by
 flipping it to `false` (the circuit breaker also self-limits per session). The
 default-**ON** decision, the ≥7-day `.254` validation campaign, and the snapshot-cost
 benchmark are **out of scope for this feature** and gate that separate decision.
