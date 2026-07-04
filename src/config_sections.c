@@ -740,6 +740,19 @@ void config_parse_fold_section(config_t *cfg, cJSON *root)
  * it, so an exposed flag is never silently inert. All default-off. */
 void config_parse_reduce_section(config_t *cfg, cJSON *root)
 {
+   /* Two-tier economizer switches (P3), colocated `economizer:` block — parsed FIRST, before
+    * the reduce early-return, so a config that sets economizer.* but no reduce.* is honored. */
+   cJSON *econ = cJSON_GetObjectItemCaseSensitive(root, "economizer");
+   if (cJSON_IsObject(econ))
+   {
+      cJSON *e = cJSON_GetObjectItemCaseSensitive(econ, "enabled");
+      if (cJSON_IsBool(e))
+         cfg->economizer_enabled = cJSON_IsTrue(e) ? 1 : 0;
+      e = cJSON_GetObjectItemCaseSensitive(econ, "aggressive");
+      if (cJSON_IsBool(e))
+         cfg->economizer_aggressive = cJSON_IsTrue(e) ? 1 : 0;
+   }
+
    cJSON *reduce = cJSON_GetObjectItemCaseSensitive(root, "reduce");
    if (!cJSON_IsObject(reduce))
       return;
@@ -784,18 +797,6 @@ void config_parse_reduce_section(config_t *cfg, cJSON *root)
       if (h > FREEZE_GUARD_MAX_HORIZON)
          h = FREEZE_GUARD_MAX_HORIZON; /* clamp at parse so on-disk == runtime */
       cfg->reduce_freeze_guard_horizon = h;
-   }
-
-   /* Two-tier economizer switches (P3), colocated `economizer:` block. */
-   cJSON *econ = cJSON_GetObjectItemCaseSensitive(root, "economizer");
-   if (cJSON_IsObject(econ))
-   {
-      item = cJSON_GetObjectItemCaseSensitive(econ, "enabled");
-      if (cJSON_IsBool(item))
-         cfg->economizer_enabled = cJSON_IsTrue(item) ? 1 : 0;
-      item = cJSON_GetObjectItemCaseSensitive(econ, "aggressive");
-      if (cJSON_IsBool(item))
-         cfg->economizer_aggressive = cJSON_IsTrue(item) ? 1 : 0;
    }
 }
 

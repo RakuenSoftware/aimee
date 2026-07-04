@@ -1755,6 +1755,18 @@ static inline int config_issue(const char *fmt, ...)
  * In strict mode, returns -1 on validation errors. */
 int config_load(config_t *cfg);
 
+/* Live config snapshot (live-config-reload P1a) — a double-buffer + seqlock holding the
+ * current config for immediate, push-driven reload. config_t is a flat POD, so reads are a
+ * lock-free struct copy. Additive in P1a: not yet wired into config_load or a push trigger.
+ *   config_snapshot_init  — seed the snapshot from a loaded config (once, at startup).
+ *   config_snapshot_get   — copy the live snapshot into `out` (seqlock read). -1 if uninit.
+ *   config_reload         — re-read the file, VALIDATE-or-keep, and publish only if the
+ *                           content-hash token changed (self-reload no-op guard).
+ *                           Returns 1 = published, 0 = no-op (unchanged), -1 = kept (bad). */
+void config_snapshot_init(const config_t *cfg);
+int config_snapshot_get(config_t *out);
+int config_reload(void);
+
 /* Two-tier economizer resolution (P3) — compute EFFECTIVE lever states without mutating
  * config_t (so config_save always round-trips the raw user values). Precedence:
  * master-kill (economizer.enabled) > aggressive-tier ceiling > individual reduce.* default. */

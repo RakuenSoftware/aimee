@@ -3,7 +3,10 @@
  * The on-disk format is YAML; the in-memory model is still cJSON. The
  * yaml.c shim handles parse/emit so this file's schema-extraction code
  * never sees the format change. */
+#include <pthread.h>
 #include <stdarg.h>
+#include <stdatomic.h>
+#include <stdint.h>
 #include "aimee.h"
 #include "json_fluent.h"
 #include "aimee_home.h"
@@ -1469,4 +1472,93 @@ int config_load(config_t *cfg)
    }
 
    return 0;
+}
+
+/* ---- live config snapshot: double-buffer + seqlock (live-config-reload P1a) ----
+ *
+ * A single writer (config_reload, serialized by g_snap_wlock) publishes a fresh config_t
+ * into the inactive slot of a two-slot double buffer and flips the active index; readers
+ * copy the active slot under a seqlock and retry if a publish raced them. config_t is a
+ * flat POD, so the copy is a plain struct assignment. Additive in P1a — NOT yet wired into
+ * config_load or any push trigger (that is P1b); the infra is here + unit-tested first. */
+static config_t g_snap[2];
+static _Atomic unsigned g_snap_seq = 0;    /* seqlock: even = stable, odd = writing */
+static _Atomic unsigned g_snap_active = 0; /* index (0/1) of the live slot */
+static uint64_t g_snap_token = 0;          /* content-hash of the active snapshot */
+static int g_snap_inited = 0;
+static pthread_mutex_t g_snap_wlock = PTHREAD_MUTEX_INITIALIZER;
+
+/* FNV-1a over the POD bytes. config_t is memset to 0 before every load (below) so padding
+ * is deterministic and the token is stable for a given logical config. */
+static uint64_t config_snapshot_token(const config_t *c)
+{
+   const unsigned char *p = (const unsigned char *)c;
+   uint64_t h = 1469598103934665603ULL;
+   for (size_t i = 0; i < sizeof *c; i++)
+   {
+      h ^= p[i];
+      h *= 1099511628211ULL;
+   }
+   return h;
+}
+
+/* Publish `cfg` into the inactive slot and flip. Caller holds g_snap_wlock (single writer). */
+static void config_snapshot_publish(const config_t *cfg)
+{
+   unsigned s = atomic_load_explicit(&g_snap_seq, memory_order_relaxed);
+   atomic_store_explicit(&g_snap_seq, s + 1, memory_order_release); /* -> odd (writing) */
+   unsigned nxt = atomic_load_explicit(&g_snap_active, memory_order_relaxed) ^ 1u;
+   g_snap[nxt] = *cfg; /* fill the slot no reader is on */
+   atomic_store_explicit(&g_snap_active, nxt, memory_order_release);
+   g_snap_token = config_snapshot_token(cfg);
+   atomic_store_explicit(&g_snap_seq, s + 2, memory_order_release); /* -> even (stable) */
+   g_snap_inited = 1;
+}
+
+void config_snapshot_init(const config_t *cfg)
+{
+   if (!cfg)
+      return;
+   pthread_mutex_lock(&g_snap_wlock);
+   g_snap_token = 0; /* force the first publish */
+   config_snapshot_publish(cfg);
+   pthread_mutex_unlock(&g_snap_wlock);
+}
+
+int config_snapshot_get(config_t *out)
+{
+   if (!out || !g_snap_inited)
+      return -1;
+   for (;;)
+   {
+      unsigned s0 = atomic_load_explicit(&g_snap_seq, memory_order_acquire);
+      if (s0 & 1u)
+         continue; /* a publish is in progress */
+      unsigned act = atomic_load_explicit(&g_snap_active, memory_order_acquire);
+      *out = g_snap[act]; /* POD copy */
+      unsigned s1 = atomic_load_explicit(&g_snap_seq, memory_order_acquire);
+      if (s0 == s1)
+         return 0; /* stable — no publish raced the copy */
+   }
+}
+
+int config_reload(void)
+{
+   config_t fresh;
+   memset(&fresh, 0, sizeof fresh); /* zero padding so the token is stable */
+   if (config_load(&fresh) != 0)
+      return -1; /* parse failure -> keep the running snapshot */
+   char err[256];
+   if (config_reduce_validate(&fresh, err, sizeof err) != 0)
+      return -1; /* invalid -> keep the running snapshot (validate-or-keep) */
+   uint64_t tok = config_snapshot_token(&fresh);
+   pthread_mutex_lock(&g_snap_wlock);
+   if (g_snap_inited && tok == g_snap_token)
+   {
+      pthread_mutex_unlock(&g_snap_wlock);
+      return 0; /* self-reload no-op guard: nothing logically changed */
+   }
+   config_snapshot_publish(&fresh);
+   pthread_mutex_unlock(&g_snap_wlock);
+   return 1; /* a new snapshot was published */
 }
