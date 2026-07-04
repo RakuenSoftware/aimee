@@ -40,7 +40,7 @@ booleans except the two numeric tuning knobs. Defaults in parentheses.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| **`reduce.command_filter`** | **off** | **Tool-output condensation** — deterministically condense recognized command output (test-runner failures kept, passes elided; compiler diagnostics kept, progress dropped) with the full output spilled for recovery. See [Tool-output condensation](features/tool-output-condensation.md). |
+| **`reduce.command_filter`** | **on** | **Tool-output condensation** — deterministically condense recognized command output (test-runner failures kept, passes elided; compiler diagnostics kept, progress dropped) with the full output spilled for recovery. See [Tool-output condensation](features/tool-output-condensation.md). |
 | `reduce.gateway_mutate` | off | Apply the economizer to the live inbound `/v1` request so the **primary** agent's tokens are reduced too. See [Economizer gateway mutation](features/economizer-gateway-mutation.md). |
 | `reduce.compress` | on | Size-based compression of oversized tool-result bodies. |
 | `reduce.history_fold` | on | Fold old turn history into a rolling skeleton. |

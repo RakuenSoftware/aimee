@@ -567,7 +567,12 @@ static void config_set_defaults(config_t *cfg)
    cfg->reduce_gateway_mutate = 0;
    cfg->reduce_gateway_session_disable_ttl_ms = 3600000;
    cfg->reduce_gateway_seam_explicit = 0;
-   cfg->reduce_command_filter = 0; /* command-aware tool-output condensation: default off */
+   /* command-aware tool-output condensation: DEFAULT-ON (P1c). Safe-tier lever — it passes
+    * the deterministic gate: lossless-on-demand (full output spilled), fail-open (any
+    * miss/decline -> raw), and a no-over-reduction audit (failures/diagnostics + their
+    * detail block are kept in the condensed view, not just the spill). It replaces the old
+    * lossy 32 KB read-cap truncation with lossless-recoverable condensation. */
+   cfg->reduce_command_filter = 1;
    /* Autonomous-dev knobs — defaults match the historical AIMEE_AUTONOMY_* env defaults
     * (adversarial + fan-out tiers OFF; retry/unit caps at their wfe defaults). */
    cfg->autonomy_skeptics = 0;

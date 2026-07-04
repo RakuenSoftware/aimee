@@ -18,7 +18,7 @@ credentials live in the server's **sealed vault**; see
   pipeline knobs (`autonomy.*`, previously environment-only; a change applies on the next
   server start, and an exported `AIMEE_AUTONOMY_*` still overrides). Secrets and endpoints
   are deliberately not in the allowlist. See [SETTINGS.md](SETTINGS.md).
-- **Tool-output condensation** (default-off, `reduce.command_filter`): a deterministic,
+- **Tool-output condensation** (default-ON, `reduce.command_filter`): a deterministic,
   command-aware context-economizer lever that condenses recognized command output at the
   delegate tool seam — test-runner failures and compiler diagnostics kept, passing
   transcripts and build progress dropped — with the full output spilled for lossless

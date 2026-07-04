@@ -929,7 +929,7 @@ char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_cod
    if (!tool_condense_enabled(cfg) || !raw || !raw[0])
       return NULL;
    long rawlen = (long)strlen(raw);
-   if (rawlen > (1 << 20))
+   if (rawlen > TOOL_CONDENSE_CEILING)
       return NULL; /* over the input cap -> hand back to the size-based fallback */
 
    tc_reco_result_t reco = tc_recognize(cmdline);

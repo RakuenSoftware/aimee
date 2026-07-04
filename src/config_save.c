@@ -293,7 +293,7 @@ static int reduce_has_non_default(const config_t *cfg)
           (cfg->reduce_gateway_seam && cfg->reduce_gateway_seam_explicit) ||
           !cfg->reduce_freeze_guard_enabled ||
           (cfg->reduce_freeze_guard_horizon > 0 && cfg->reduce_freeze_guard_horizon != 1) ||
-          cfg->reduce_gateway_mutate ||
+          cfg->reduce_gateway_mutate || !cfg->reduce_command_filter /* default-ON (P1c) */ ||
           (cfg->reduce_gateway_session_disable_ttl_ms != 3600000 &&
            cfg->reduce_gateway_session_disable_ttl_ms > 0);
 }
@@ -1044,8 +1044,8 @@ int config_save(const config_t *cfg)
        * persist only a non-default positive override (a bad <=0 is never written). */
       if (cfg->reduce_gateway_mutate)
          cJSON_AddBoolToObject(reduce, "gateway_mutate", cfg->reduce_gateway_mutate);
-      if (cfg->reduce_command_filter)
-         cJSON_AddBoolToObject(reduce, "command_filter", cfg->reduce_command_filter);
+      if (!cfg->reduce_command_filter) /* default-ON (P1c) -> persist only the opt-out */
+         cJSON_AddBoolToObject(reduce, "command_filter", 0);
       if (cfg->reduce_gateway_session_disable_ttl_ms != 3600000 &&
           cfg->reduce_gateway_session_disable_ttl_ms > 0)
          cJSON_AddNumberToObject(reduce, "gateway_session_disable_ttl_ms",

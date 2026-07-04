@@ -11,6 +11,11 @@
 
 #include "config.h"
 
+/* Last-resort ceiling (2 MB) for tool output when the command-filter lever is on: the seam
+ * captures up to this so the FULL output reaches the lever (condense + spill) instead of
+ * being truncated at the old 32 KB read cap, and it bounds fail-open blast radius. */
+#define TOOL_CONDENSE_CEILING (2 * 1024 * 1024)
+
 /* 1 iff the command-filter lever is enabled (reduce_command_filter). */
 int tool_condense_enabled(const config_t *cfg);
 

@@ -10,19 +10,20 @@ LLM, so it is ~free). It knows that a test runner's value is its *failures*, a c
 its *diagnostics*, and drops the rest — **losslessly**: the full raw output is spilled to
 disk and a recovery pointer is left in the condensed result, so nothing is destroyed.
 
-It is **default-OFF** and complements — does not replace — the size-based
-`reduce.compress`, which stays the fallback for unrecognized output.
+It is **default-ON** (unified-economizer P1c — a safe-tier lever: lossless-on-demand,
+fail-open, no-over-reduction) and complements — does not replace — the size-based
+`reduce.compress`, which stays the fallback for unrecognized output. Set
+`reduce.command_filter=false` to opt out.
 
 ## Configuration
 
 ```yaml
 reduce:
-  command_filter: false   # DEFAULT OFF. The whole lever.
+  command_filter: true    # DEFAULT ON. Set false to opt out.
 ```
 
 Turn it on from the web UI (**⚙️ Settings → `reduce.command_filter`**, see
-[SETTINGS.md](../SETTINGS.md)) or the config above. When off, tool output is **byte-identical
-to today** — the seam falls through to the size-based `reduce.compress`.
+[SETTINGS.md](../SETTINGS.md)) or the config above. When off, tool output is **byte-identical to today** — the seam falls through to the size-based `reduce.compress`.
 
 ## What it does
 
@@ -52,7 +53,7 @@ before the size-based compression:
   recovery pointer all fall through to passthrough. Nothing is dropped without a backstop.
 - **Never hide a failure.** A test runner or build with a **non-zero exit and no recognized
   failure line** passes through verbatim rather than risk eliding the cause.
-- **Fail-open everywhere.** An unrecognized command, an over-cap body (> 1 MiB), or any
+- **Fail-open everywhere.** An unrecognized command, an over-ceiling body (> 2 MB), or any
   filter error degrades to the size-based `reduce.compress` — never a crash or a dropped
   result.
 - **No masquerade.** A path-prefixed command whose basename matches a known tool (`./git`)
@@ -71,11 +72,16 @@ condensation also logs its `raw→final` delta under the `tool_condense` module.
 
 ## Scope & rollout
 
-Shipped as the **delegate surface** (default-off). Enable it on a validation host, watch the
-savings counters, and roll back by flipping `reduce.command_filter` to `false`.
+Shipped as the **delegate surface**, **default-ON** (the safe-tier lever): when on, the
+delegate bash seam captures the full output (up to a 2 MB ceiling) so the lever sees all of
+it, condenses recognized families losslessly, and spills the raw for recovery. Opt out with
+`reduce.command_filter=false`; roll back the default by the same flag.
+
+The **default-ON** flip landed in unified-economizer **P1c**, justified by the deterministic
+gate (lossless-on-demand + fail-open + a no-over-reduction audit); it replaces the old lossy
+32 KB read-cap truncation with lossless-recoverable condensation.
 
 **Carried follow-ups** (not yet shipped): the **primary-agent** surface (a client-side hook
 + a first-class `tool_output_get` retrieval tool); additional command families (VCS `git`,
-file/dir ops, package managers); and the **operator default-ON** decision — a named gate
-(no-lost-signal audit + material realized savings + fail-safe, measured via the counters
-above), never a silent flip.
+file/dir ops, package managers); and unifying the spill with the other economizer recovery
+handles (unified-economizer P2).
