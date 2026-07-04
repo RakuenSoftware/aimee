@@ -8,9 +8,20 @@ export function setCsrf(token: string) {
   csrfToken = token;
 }
 
+// ApiError carries the HTTP status so callers can branch (e.g. 409) without
+// brittle string-matching on the message.
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number) {
+    super(`HTTP ${status}`);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 export async function apiGet<T = unknown>(path: string): Promise<T> {
   const r = await fetch(`/api${path}`, { credentials: 'same-origin' });
-  if (!r.ok) throw new Error(`${r.status}`);
+  if (!r.ok) throw new ApiError(r.status);
   return r.json() as Promise<T>;
 }
 
@@ -21,7 +32,7 @@ export async function apiSend<T = unknown>(method: string, path: string, body?: 
     headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  if (!r.ok) throw new Error(`${r.status}`);
+  if (!r.ok) throw new ApiError(r.status);
   return r.json() as Promise<T>;
 }
 
