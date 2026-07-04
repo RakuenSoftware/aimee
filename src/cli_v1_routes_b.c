@@ -1218,6 +1218,8 @@ cJSON *marshal_request(const char *method, int argc, char **argv)
       return marshal_memory_identity(argc, argv);
    if (strcmp(method, "memory.prefer") == 0)
       return marshal_memory_prefer(argc, argv);
+   if (strcmp(method, "memory.archive") == 0)
+      return marshal_memory_archive(argc, argv);
    if (strcmp(method, "memory.list") == 0)
       return marshal_memory_list(argc, argv);
    if (strcmp(method, "memory.get") == 0)
