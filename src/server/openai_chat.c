@@ -1161,6 +1161,13 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
     * policing — so `instructions` is passed through un-merged and the pipeline
     * folds in the <aimee-context> envelope. */
 
+   /* Economizer gateway-mutation NOTE (regression guard): this streaming handler
+    * BUFFERS the upstream reply via agent_execute_messages (the same buffered path the
+    * non-streaming /v1/responses handler uses) and replays it as SSE. So the gateway
+    * mutation + its 4xx-restore-resend / 5xx-disable already apply here via S6 — there
+    * is NO true token-by-token upstream stream for the OpenAI primary path (hence no
+    * S5-style streaming disable-only code). If a future refactor introduces a real
+    * agent_http_post_stream path here, it must add the streaming mutation contract. */
    parsed_response_t parsed;
    int erc =
        agent_execute_messages(ag, messages, tools, instructions, max_tokens, temperature, &parsed);

@@ -1,7 +1,7 @@
 # Proposal: Gateway mutation — primary-agent context reduction
 
 - **State:** done — implemented + merged to `testing` behind `reduce_gateway_mutate`
-  (default OFF, zero behavior change when off), across 6 roundtable-reviewed PRs
+  (default OFF, zero behavior change when off), across 7 roundtable-reviewed PRs
   (#1015 config, #1017 session-breaker+telemetry, #1018 decision helpers, #1019
   Anthropic buffered, #1021 Anthropic streaming, #1022 OpenAI `/v1/responses` buffered,
   #1023 telemetry+docs). See **Close-out** below for the acceptance mapping, the
@@ -304,12 +304,24 @@ S5 Anthropic streaming (SSE decoder-layer inspect-as-forward + disable) (#1021);
 S6 OpenAI `/v1/responses` buffered via reference-boxing (#1022); S8 sampled token-delta
 telemetry + no-behavior-change test + docs (#1023).
 
-**S7 (OpenAI streaming) — subsumed by S6 (verified finding).** `openai_chat.c` has zero
-`agent_http_post_stream`: the `/v1/responses` streaming handler buffers upstream via
-`agent_execute_messages` then replays as SSE, so it inherits S6's full buffered mutation
-including the 4xx restore-resend — strictly better than the streaming disable-only
-contract. There is no true token-by-token upstream streaming for the OpenAI primary path,
-so no separate S7 code was written.
+**Inbound endpoint coverage** (the gateway-mutation seam extends the existing economizer
+*shadow* seam, which lives only on the two primary-agent endpoints):
+
+| Endpoint | Handler | Upstream | Mutation |
+|---|---|---|---|
+| `/v1/messages` buffered | `anthropic_http.c messages_buffered` | buffered | S4 (restore-resend / 5xx-disable) |
+| `/v1/messages` streaming | `anthropic_http.c messages_stream` | true SSE stream | S5 (disable-subsequent-turns) |
+| `/v1/responses` buffered + streaming | `openai_chat.c agent_execute_messages` | buffered (streaming replays) | S6 (restore-resend / 5xx-disable) |
+| `/v1/chat/completions`, `/v1/completions` | `chat_stream_handler`, `completion_stream_handler` | — | **out of scope** (no economizer shadow seam; not a primary-agent reduction path) |
+
+**S7 (OpenAI streaming) — subsumed by S6 (verified repo-wide).** A repo-wide search
+confirms `agent_http_post_stream` (true token-by-token upstream streaming) exists **only**
+in `anthropic_http.c` — there is no OpenAI-family true upstream streaming anywhere in the
+server. The `/v1/responses` streaming handler (`responses_stream_handler`) buffers upstream
+via `agent_execute_messages` then replays as SSE, so it inherits S6's full buffered
+mutation including the 4xx restore-resend — strictly better than the streaming
+disable-only contract — so no separate S7 code was written. A code comment in
+`responses_stream_handler` records this as a regression guard.
 
 **Acceptance:**
 - **#1–#6 (mechanical + integration): met.** Unit tests: `test_config_economizer`
