@@ -971,6 +971,23 @@ typedef struct config
     * when the user chose it, never when config_load synthesized it from mutate=1. */
    int reduce_gateway_seam_explicit;
 
+   /* Autonomous-development pipeline knobs (Phase-C). These were env-var-only
+    * (AIMEE_AUTONOMY_*); the config values are bridged to those env vars at startup
+    * (autonomy_config_to_env) so the wfe library — which reads them via getenv across a
+    * module boundary — sees them, while an explicitly-set env var still overrides.
+    * Exposed here so they appear in the typed config surface + web Settings. Defaults
+    * match the historical env defaults; a change applies on the next server start.
+    * autonomy_skeptics: N adversarial skeptics on the implement gate (0 = off).
+    * autonomy_fanout: 1 = engine-level fan-out manager loop (0 = single-dispatch).
+    * autonomy_unit_retry: per-unit retry-different-delegate cap.
+    * autonomy_unit_max: max fan-out units (a larger decomposition parks).
+    * autonomy_ci_retry_max: per-work-item red-CI retry cap before parking. */
+   int autonomy_skeptics;
+   int autonomy_fanout;
+   int autonomy_unit_retry;
+   int autonomy_unit_max;
+   int autonomy_ci_retry_max;
+
    /* Session/worktree cleanup policy.
     * worktree_stale_secs: inactivity threshold before a session is pruned
     *   (0 = use default: 14400 = 4 hours).

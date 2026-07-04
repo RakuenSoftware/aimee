@@ -567,6 +567,13 @@ static void config_set_defaults(config_t *cfg)
    cfg->reduce_gateway_mutate = 0;
    cfg->reduce_gateway_session_disable_ttl_ms = 3600000;
    cfg->reduce_gateway_seam_explicit = 0;
+   /* Autonomous-dev knobs — defaults match the historical AIMEE_AUTONOMY_* env defaults
+    * (adversarial + fan-out tiers OFF; retry/unit caps at their wfe defaults). */
+   cfg->autonomy_skeptics = 0;
+   cfg->autonomy_fanout = 0;
+   cfg->autonomy_unit_retry = 2;
+   cfg->autonomy_unit_max = 16;
+   cfg->autonomy_ci_retry_max = 2;
    snprintf(cfg->memory_citations_mode, sizeof(cfg->memory_citations_mode), "%s", "off");
    snprintf(cfg->memory_coref_mode, sizeof(cfg->memory_coref_mode), "%s", "off");
    cfg->memory_cognify_async_enabled = 0;
@@ -1190,6 +1197,7 @@ int config_load(config_t *cfg)
    config_parse_fold_section(cfg, root);
    config_parse_reduce_section(cfg, root);
    config_apply_reduce_consistency(cfg); /* mutate=1 -> auto-enable shadow seam in memory + WARN */
+   config_parse_autonomy_section(cfg, root);
 
    config_parse_memory_section(cfg, root);
    config_apply_learning_settings(cfg, root);

@@ -784,6 +784,51 @@ void config_parse_reduce_section(config_t *cfg, cJSON *root)
    }
 }
 
+/* Autonomous-development pipeline knobs (Phase-C). Historically env-only
+ * (AIMEE_AUTONOMY_*); parsed here so they live in the typed config + web Settings, then
+ * bridged to the env vars at startup (autonomy_config_to_env) for the wfe library. Only
+ * non-negative values are accepted (a negative is ignored, leaving the default). */
+void config_parse_autonomy_section(config_t *cfg, cJSON *root)
+{
+   cJSON *autonomy = cJSON_GetObjectItemCaseSensitive(root, "autonomy");
+   if (!cJSON_IsObject(autonomy))
+      return;
+   cJSON *item = cJSON_GetObjectItemCaseSensitive(autonomy, "skeptics");
+   if (cJSON_IsNumber(item) && item->valueint >= 0)
+      cfg->autonomy_skeptics = item->valueint;
+   item = cJSON_GetObjectItemCaseSensitive(autonomy, "fanout");
+   if (cJSON_IsBool(item))
+      cfg->autonomy_fanout = cJSON_IsTrue(item) ? 1 : 0;
+   item = cJSON_GetObjectItemCaseSensitive(autonomy, "unit_retry");
+   if (cJSON_IsNumber(item) && item->valueint >= 0)
+      cfg->autonomy_unit_retry = item->valueint;
+   item = cJSON_GetObjectItemCaseSensitive(autonomy, "unit_max");
+   if (cJSON_IsNumber(item) && item->valueint > 0)
+      cfg->autonomy_unit_max = item->valueint;
+   item = cJSON_GetObjectItemCaseSensitive(autonomy, "ci_retry_max");
+   if (cJSON_IsNumber(item) && item->valueint >= 0)
+      cfg->autonomy_ci_retry_max = item->valueint;
+}
+
+/* Bridge the autonomy config knobs to the AIMEE_AUTONOMY_* env vars the wfe library
+ * reads via getenv (it cannot see config_t across the module boundary). setenv's third
+ * arg is 0 — it sets the var ONLY when unset, so an explicitly-exported env var (a
+ * deployment override) always wins over the config value. Call once at server startup;
+ * a Settings change to these knobs therefore applies on the next server start. */
+void autonomy_config_to_env(const config_t *cfg)
+{
+   char buf[16];
+   snprintf(buf, sizeof buf, "%d", cfg->autonomy_skeptics);
+   setenv("AIMEE_AUTONOMY_SKEPTICS", buf, 0);
+   setenv("AIMEE_AUTONOMY_FANOUT", cfg->autonomy_fanout ? "1" : "0", 0);
+   snprintf(buf, sizeof buf, "%d", cfg->autonomy_unit_retry);
+   setenv("AIMEE_AUTONOMY_UNIT_RETRY", buf, 0);
+   snprintf(buf, sizeof buf, "%d", cfg->autonomy_unit_max);
+   setenv("AIMEE_AUTONOMY_UNIT_MAX", buf, 0);
+   snprintf(buf, sizeof buf, "%d", cfg->autonomy_ci_retry_max);
+   setenv("AIMEE_AUTONOMY_CI_RETRY_MAX", buf, 0);
+}
+
 /* Normalize economizer gateway-mutation invariants IN MEMORY after parse. mutate=1
  * requires the shadow seam so the validation gates always have a same-payload
  * baseline: auto-enable reduce_gateway_seam in memory (never rewriting the file)

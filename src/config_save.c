@@ -1050,6 +1050,24 @@ int config_save(const config_t *cfg)
                                  cfg->reduce_gateway_session_disable_ttl_ms);
    }
 
+   /* Autonomous-dev knobs — persist only non-defaults (defaults: skeptics 0, fanout off,
+    * unit_retry 2, unit_max 16, ci_retry_max 2). */
+   if (cfg->autonomy_skeptics != 0 || cfg->autonomy_fanout != 0 || cfg->autonomy_unit_retry != 2 ||
+       cfg->autonomy_unit_max != 16 || cfg->autonomy_ci_retry_max != 2)
+   {
+      cJSON *autonomy = cJSON_AddObjectToObject(root, "autonomy");
+      if (cfg->autonomy_skeptics != 0)
+         cJSON_AddNumberToObject(autonomy, "skeptics", cfg->autonomy_skeptics);
+      if (cfg->autonomy_fanout != 0)
+         cJSON_AddBoolToObject(autonomy, "fanout", cfg->autonomy_fanout);
+      if (cfg->autonomy_unit_retry != 2)
+         cJSON_AddNumberToObject(autonomy, "unit_retry", cfg->autonomy_unit_retry);
+      if (cfg->autonomy_unit_max != 16)
+         cJSON_AddNumberToObject(autonomy, "unit_max", cfg->autonomy_unit_max);
+      if (cfg->autonomy_ci_retry_max != 2)
+         cJSON_AddNumberToObject(autonomy, "ci_retry_max", cfg->autonomy_ci_retry_max);
+   }
+
    /* Session/worktree cleanup policy (only save if non-default) */
    if (cfg->worktree_stale_secs || cfg->max_sessions || cfg->max_worktrees)
    {

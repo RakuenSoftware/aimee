@@ -273,6 +273,30 @@ const config_field_t config_fields[] = {
      offsetof(config_t, roundtable_pipeline_parked_releases_slot), sizeof(int), 1, CFG_BOOL},
     {"roundtable.pipeline_unknown_context_tokens",
      offsetof(config_t, roundtable_pipeline_unknown_context_tokens), sizeof(int), 0, CFG_INT},
+    /* Context economizer (context_reduce). Already config_t fields, parsed + saved under
+     * the "reduce" yaml object; exposed here so the typed config surface + web Settings
+     * can toggle them. gateway_seam is intentionally omitted (it is synthesized from
+     * gateway_mutate and its persistence is explicit-gated — gateway_mutate is the
+     * user-facing toggle). */
+    {"reduce.measure", offsetof(config_t, reduce_measure_enabled), sizeof(int), 1, CFG_BOOL},
+    {"reduce.delegate_seam", offsetof(config_t, reduce_delegate_seam), sizeof(int), 1, CFG_BOOL},
+    {"reduce.history_fold", offsetof(config_t, reduce_history_fold), sizeof(int), 1, CFG_BOOL},
+    {"reduce.compress", offsetof(config_t, reduce_compress), sizeof(int), 1, CFG_BOOL},
+    {"reduce.gateway_mutate", offsetof(config_t, reduce_gateway_mutate), sizeof(int), 1, CFG_BOOL},
+    {"reduce.gateway_session_disable_ttl_ms",
+     offsetof(config_t, reduce_gateway_session_disable_ttl_ms), sizeof(int), 0, CFG_INT},
+    {"reduce.freeze_guard", offsetof(config_t, reduce_freeze_guard_enabled), sizeof(int), 1,
+     CFG_BOOL},
+    {"reduce.freeze_guard_horizon", offsetof(config_t, reduce_freeze_guard_horizon), sizeof(int), 0,
+     CFG_INT},
+    /* Autonomous-development pipeline knobs (Phase-C). New config_t fields bridged to the
+     * AIMEE_AUTONOMY_* env vars at startup (a set env var still overrides); a change
+     * applies on the next server start. */
+    {"autonomy.skeptics", offsetof(config_t, autonomy_skeptics), sizeof(int), 0, CFG_INT},
+    {"autonomy.fanout", offsetof(config_t, autonomy_fanout), sizeof(int), 1, CFG_BOOL},
+    {"autonomy.unit_retry", offsetof(config_t, autonomy_unit_retry), sizeof(int), 0, CFG_INT},
+    {"autonomy.unit_max", offsetof(config_t, autonomy_unit_max), sizeof(int), 0, CFG_INT},
+    {"autonomy.ci_retry_max", offsetof(config_t, autonomy_ci_retry_max), sizeof(int), 0, CFG_INT},
     {NULL, 0, 0, 0, CFG_STRING},
 };
 
