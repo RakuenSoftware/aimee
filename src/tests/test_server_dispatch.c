@@ -882,6 +882,10 @@ int handle_dashboard_all(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "dashboard.all");
 }
+int handle_dashboard_audit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "dashboard.audit");
+}
 char *server_agent_list_json(void)
 {
    return strdup("[]");
