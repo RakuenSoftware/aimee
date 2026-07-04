@@ -3,6 +3,7 @@
  * enable gate. CORE layer: depends only on config.h + libc. */
 #include "tool_condense.h"
 
+#include <stdio.h> /* snprintf */
 #include <stdlib.h>
 #include <string.h>
 
@@ -108,12 +109,12 @@ static void emit_clean_line(sb_t *s, const char *line, size_t n)
    {
       if (start[i] == 0x1b && i + 1 < n && start[i + 1] == '[')
       {
-         /* CSI: ESC '[' params… final byte in 0x40..0x7e */
+         /* CSI: ESC '[' params (0x20..0x3f) then a final byte (0x40..0x7e). */
          size_t j = i + 2;
          while (j < n && (unsigned char)start[j] >= 0x20 && (unsigned char)start[j] < 0x40)
             j++;
-         if (j < n) /* skip the final byte too */
-            j++;
+         if (j < n && (unsigned char)start[j] >= 0x40 && (unsigned char)start[j] <= 0x7e)
+            j++; /* consume the valid final byte; a malformed/truncated CSI still drops */
          i = j;
          continue;
       }
