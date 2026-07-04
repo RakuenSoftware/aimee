@@ -4,11 +4,38 @@
 #include "tool_condense.h"
 
 #include <fcntl.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h> /* snprintf */
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+/* ---- realized-savings observability (Slice 6) ---- */
+static atomic_llong g_tc_recognized, g_tc_applied, g_tc_applied_raw, g_tc_applied_final,
+    g_tc_family_test, g_tc_family_diag;
+
+void tool_condense_stats_snapshot(tool_condense_totals_t *out)
+{
+   if (!out)
+      return;
+   out->recognized = atomic_load_explicit(&g_tc_recognized, memory_order_relaxed);
+   out->applied = atomic_load_explicit(&g_tc_applied, memory_order_relaxed);
+   out->applied_raw = atomic_load_explicit(&g_tc_applied_raw, memory_order_relaxed);
+   out->applied_final = atomic_load_explicit(&g_tc_applied_final, memory_order_relaxed);
+   out->family_test = atomic_load_explicit(&g_tc_family_test, memory_order_relaxed);
+   out->family_diag = atomic_load_explicit(&g_tc_family_diag, memory_order_relaxed);
+}
+
+void tool_condense_stats_reset(void)
+{
+   atomic_store_explicit(&g_tc_recognized, 0, memory_order_relaxed);
+   atomic_store_explicit(&g_tc_applied, 0, memory_order_relaxed);
+   atomic_store_explicit(&g_tc_applied_raw, 0, memory_order_relaxed);
+   atomic_store_explicit(&g_tc_applied_final, 0, memory_order_relaxed);
+   atomic_store_explicit(&g_tc_family_test, 0, memory_order_relaxed);
+   atomic_store_explicit(&g_tc_family_diag, 0, memory_order_relaxed);
+}
 
 int tool_condense_enabled(const config_t *cfg)
 {
@@ -877,6 +904,7 @@ char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_cod
       stats->recognized = (reco.outcome == TC_RECOGNIZED);
    if (reco.outcome != TC_RECOGNIZED)
       return NULL; /* OPAQUE / UNRECOGNIZED -> passthrough (S3 acts only on a family) */
+   atomic_fetch_add_explicit(&g_tc_recognized, 1, memory_order_relaxed);
 
    char *cond = NULL;
    const char *family = "";
@@ -934,12 +962,24 @@ char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_cod
    sb_adds(&out, ptr);
    free(cond);
    char *final = sb_finish(&out);
-   if (stats && final)
+   if (final)
    {
-      stats->final_bytes = (long)strlen(final);
-      stats->spilled = 1;
-      snprintf(stats->family, sizeof stats->family, "%s", family);
-      snprintf(stats->spill_ref, sizeof stats->spill_ref, "%s", ref);
+      long finallen = (long)strlen(final);
+      if (stats)
+      {
+         stats->final_bytes = finallen;
+         stats->spilled = 1;
+         snprintf(stats->family, sizeof stats->family, "%s", family);
+         snprintf(stats->spill_ref, sizeof stats->spill_ref, "%s", ref);
+      }
+      /* realized-savings accounting (Slice 6) */
+      atomic_fetch_add_explicit(&g_tc_applied, 1, memory_order_relaxed);
+      atomic_fetch_add_explicit(&g_tc_applied_raw, rawlen, memory_order_relaxed);
+      atomic_fetch_add_explicit(&g_tc_applied_final, finallen, memory_order_relaxed);
+      if (strcmp(family, "test") == 0)
+         atomic_fetch_add_explicit(&g_tc_family_test, 1, memory_order_relaxed);
+      else if (strcmp(family, "diag") == 0)
+         atomic_fetch_add_explicit(&g_tc_family_diag, 1, memory_order_relaxed);
    }
    return final;
 }

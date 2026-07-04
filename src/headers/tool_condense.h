@@ -73,6 +73,25 @@ typedef struct
 char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_code, const char *raw,
                           const char *spill_dir, tc_stats_t *stats);
 
+/* ---- realized-savings observability (Slice 6) ---- */
+
+/* Cumulative process-wide counters, updated at the seam so an operator can measure the
+ * lever's REALIZED savings on real traffic before any default-on decision. */
+typedef struct
+{
+   long long recognized;    /* recognized commands seen by tool_condense_apply */
+   long long applied;       /* condensations that shrank + spilled (a family fired) */
+   long long applied_raw;   /* total input bytes over APPLIED condensations */
+   long long applied_final; /* total output bytes over APPLIED condensations */
+   long long family_test;   /* applied condensations tagged "test" */
+   long long family_diag;   /* applied condensations tagged "diag" */
+} tool_condense_totals_t;
+
+/* Snapshot the counters (thread-safe). */
+void tool_condense_stats_snapshot(tool_condense_totals_t *out);
+/* Reset the counters (tests). */
+void tool_condense_stats_reset(void);
+
 /* Strip content-free noise, line-wise:
  *  - remove ANSI CSI escape sequences (ESC '[' … final-byte);
  *  - resolve carriage-return progress redraws (keep only the text after the last '\r'

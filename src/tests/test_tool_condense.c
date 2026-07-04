@@ -316,6 +316,42 @@ int main(void)
       free(r);
    }
 
+   /* ---- realized-savings observability (S6) ---- */
+   {
+      tool_condense_stats_reset();
+      config_t cfg;
+      memset(&cfg, 0, sizeof cfg);
+      cfg.reduce_command_filter = 1;
+      char big[8192];
+      size_t off = 0;
+      off += (size_t)snprintf(big + off, sizeof big - off, "==== session ====\n");
+      for (int k = 0; k < 120; k++)
+         off += (size_t)snprintf(big + off, sizeof big - off, "t::case_%03d PASSED\n", k);
+      snprintf(big + off, sizeof big - off, "==== 120 passed ====\n");
+      char dir[] = "/tmp/tc_s6_XXXXXX";
+      assert(mkdtemp(dir));
+      tc_stats_t st;
+      char *r = tool_condense_apply(&cfg, "pytest -q", 0, big, dir, &st);
+      assert(r);
+      /* an UNRECOGNIZED command must not touch the counters */
+      assert(tool_condense_apply(&cfg, "frobnicate", 0, big, dir, NULL) == NULL);
+
+      tool_condense_totals_t t;
+      tool_condense_stats_snapshot(&t);
+      assert(t.recognized == 1); /* only pytest counted; frobnicate did not */
+      assert(t.applied == 1);
+      assert(t.family_test == 1 && t.family_diag == 0);
+      assert(t.applied_raw > t.applied_final); /* realized savings */
+      assert(t.applied_raw == st.raw_bytes);
+
+      char spath[512];
+      snprintf(spath, sizeof spath, "%s/%s.out", dir, st.spill_ref);
+      unlink(spath);
+      rmdir(dir);
+      free(r);
+      tool_condense_stats_reset();
+   }
+
    printf("ok\n");
    return 0;
 }
