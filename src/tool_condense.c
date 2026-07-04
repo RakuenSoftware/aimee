@@ -861,63 +861,80 @@ static void tc_hash_ref(const char *seed, const char *content, char out[40])
 /* Per-user spill-store byte budget (P2 §2.2): keep the tool-spills dir bounded. */
 #define TC_SPILL_MAX_BYTES (64L * 1024 * 1024)
 
-/* Keep the spill dir under TC_SPILL_MAX_BYTES: remove OLDEST .out files (by mtime) until
- * under budget. Best-effort — any error just leaves the file. Bounded scan (512 entries). */
+/* Keep the spill dir under TC_SPILL_MAX_BYTES: remove OLDEST regular .out files (by mtime)
+ * until under budget. Best-effort — any error just leaves the file. Each pass tracks up to
+ * 512 files; if MORE than 512 exist and the store is still over budget, the outer loop
+ * re-scans (bounded passes) so a large store still drains rather than growing unbounded.
+ * lstat + S_ISREG so a symlink planted in the dir is never followed for size/mtime. */
 static void tc_spill_evict(const char *dir, long budget)
 {
-   DIR *d = opendir(dir);
-   if (!d)
-      return;
-   struct
+   for (int pass = 0; pass < 16; pass++)
    {
-      char name[80];
-      long mt;
-      long sz;
-   } ents[512];
-   int ne = 0;
-   long total = 0;
-   struct dirent *de;
-   while ((de = readdir(d)) != NULL && ne < 512)
-   {
-      size_t l = strlen(de->d_name);
-      if (l < 5 || l >= sizeof ents[0].name || strcmp(de->d_name + l - 4, ".out") != 0)
-         continue;
-      char p[1500];
-      if (snprintf(p, sizeof p, "%s/%s", dir, de->d_name) >= (int)sizeof p)
-         continue;
-      struct stat st;
-      if (stat(p, &st) != 0)
-         continue;
-      snprintf(ents[ne].name, sizeof ents[ne].name, "%s", de->d_name);
-      ents[ne].mt = (long)st.st_mtime;
-      ents[ne].sz = (long)st.st_size;
-      total += ents[ne].sz;
-      ne++;
-   }
-   closedir(d);
-   while (total > budget && ne > 0)
-   {
-      int oldest = 0;
-      for (int i = 1; i < ne; i++)
-         if (ents[i].mt < ents[oldest].mt)
-            oldest = i;
-      char p[1500];
-      if (snprintf(p, sizeof p, "%s/%s", dir, ents[oldest].name) < (int)sizeof p)
-         (void)unlink(p);
-      total -= ents[oldest].sz;
-      ents[oldest] = ents[--ne];
+      DIR *d = opendir(dir);
+      if (!d)
+         return;
+      struct
+      {
+         char name[80];
+         long mt;
+         long sz;
+      } ents[512];
+      int ne = 0;
+      long total = 0; /* total over ALL .out files, not just the tracked sample */
+      struct dirent *de;
+      while ((de = readdir(d)) != NULL)
+      {
+         size_t l = strlen(de->d_name);
+         if (l < 5 || l >= sizeof ents[0].name || strcmp(de->d_name + l - 4, ".out") != 0)
+            continue;
+         char p[1500];
+         if (snprintf(p, sizeof p, "%s/%s", dir, de->d_name) >= (int)sizeof p)
+            continue;
+         struct stat st;
+         if (lstat(p, &st) != 0 || !S_ISREG(st.st_mode))
+            continue;
+         total += (long)st.st_size;
+         if (ne < 512)
+         {
+            snprintf(ents[ne].name, sizeof ents[ne].name, "%s", de->d_name);
+            ents[ne].mt = (long)st.st_mtime;
+            ents[ne].sz = (long)st.st_size;
+            ne++;
+         }
+      }
+      closedir(d);
+      if (total <= budget || ne == 0)
+         return;
+      /* evict oldest-of-sample until the GLOBAL total is under budget or the sample empties */
+      while (total > budget && ne > 0)
+      {
+         int oldest = 0;
+         for (int i = 1; i < ne; i++)
+            if (ents[i].mt < ents[oldest].mt)
+               oldest = i;
+         char p[1500];
+         if (snprintf(p, sizeof p, "%s/%s", dir, ents[oldest].name) < (int)sizeof p)
+            (void)unlink(p);
+         total -= ents[oldest].sz;
+         ents[oldest] = ents[--ne];
+      }
+      if (total <= budget)
+         return; /* else >512 files remained: loop re-scans to reach the untracked oldest */
    }
 }
 
-/* Write the full raw output to <dir>/<ref>.out with the §2.2 DURABILITY contract: write to
- * a temp file, fsync, atomic rename to the ref path, fsync the dir — so a partial/crashed
- * write is never promoted to a readable ref. Returns 0 only on a durable write, -1 otherwise
- * (the caller then passes through — never a condense without a recoverable backstop). */
+/* Write the full raw output to <dir>/<ref>.out with the §2.2 DURABILITY contract: write to a
+ * PID-unique temp file (so two processes spilling the same ref never race on one .tmp), fsync,
+ * atomic rename to the ref path — so a partial/crashed write is never promoted to a readable
+ * ref. The rename makes the content immediately readable (what recall needs THIS run); the
+ * trailing directory fsync is best-effort crash-durability of the dir entry and does not gate
+ * success. Returns 0 only when the durable rename landed, -1 otherwise (the caller then passes
+ * through — never a condense without a recoverable backstop). */
 static int tc_spill_write(const char *dir, const char *ref, const char *content)
 {
-   char path[1400], tmp[1424];
+   char path[1400], tmp[1440];
    if (snprintf(path, sizeof path, "%s/%s.out", dir, ref) >= (int)sizeof path ||
-       snprintf(tmp, sizeof tmp, "%s/%s.tmp", dir, ref) >= (int)sizeof tmp)
+       snprintf(tmp, sizeof tmp, "%s/%s.%d.tmp", dir, ref, (int)getpid()) >= (int)sizeof tmp)
       return -1;
    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
    if (fd < 0)
@@ -992,6 +1009,8 @@ char *tool_condense_recall(const char *spill_dir, const char *ref, char *err, si
    if (!buf)
    {
       close(fd);
+      if (err && errn)
+         snprintf(err, errn, "allocation failed");
       return NULL;
    }
    ssize_t r;
