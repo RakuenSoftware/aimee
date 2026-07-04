@@ -1773,6 +1773,13 @@ int config_reload(void);
  * run under the reload writer lock: they must be quick and must NOT call config_reload. */
 typedef void (*config_reapplier_fn)(const config_t *old_cfg, const config_t *new_cfg);
 void config_reload_register_reapplier(config_reapplier_fn fn);
+
+/* Live autonomy.* accessor (thread-safe) for wfe: for an AIMEE_AUTONOMY_* env NAME that maps
+ * to a config field, write the effective value to *out and return 1 — preferring an operator-
+ * exported env var, else the live config snapshot. Returns 0 for a non-config autonomy var
+ * (e.g. MAX_TURNS) so the caller falls back to its own getenv default. Replaces the unsafe
+ * setenv env-bridge for live reload: no cross-thread setenv, wfe reads the seqlock snapshot. */
+int config_autonomy_lookup(const char *env_name, long *out);
 /* Force a read from DISK, bypassing the live snapshot. Use for a read-modify-save that must
  * reflect the current on-disk file (e.g. config.set) so it never clobbers an external edit,
  * and internally by config_reload. Ordinary readers should use config_load. */

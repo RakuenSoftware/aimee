@@ -1576,6 +1576,40 @@ int config_snapshot_get(config_t *out)
    }
 }
 
+int config_autonomy_lookup(const char *env_name, long *out)
+{
+   if (!env_name || !out)
+      return 0;
+   /* Operator override wins: an explicitly-exported env var (getenv is a safe read now that
+    * nothing setenv's these). Otherwise the LIVE snapshot — so a config.set on autonomy.*
+    * takes effect on the next workflow with no restart and no cross-thread setenv. */
+   const char *e = getenv(env_name);
+   config_t c;
+   int have = config_snapshot_get(&c) == 0;
+#define TC_AUT(name, field, boolish)                                                               \
+   if (strcmp(env_name, name) == 0)                                                                \
+   {                                                                                               \
+      if (e && e[0])                                                                               \
+      {                                                                                            \
+         *out = (boolish) ? (e[0] == '1' ? 1 : 0) : atol(e);                                       \
+         return 1;                                                                                 \
+      }                                                                                            \
+      if (have)                                                                                    \
+      {                                                                                            \
+         *out = c.field;                                                                           \
+         return 1;                                                                                 \
+      }                                                                                            \
+      return 0;                                                                                    \
+   }
+   TC_AUT("AIMEE_AUTONOMY_SKEPTICS", autonomy_skeptics, 0)
+   TC_AUT("AIMEE_AUTONOMY_FANOUT", autonomy_fanout, 1)
+   TC_AUT("AIMEE_AUTONOMY_UNIT_RETRY", autonomy_unit_retry, 0)
+   TC_AUT("AIMEE_AUTONOMY_UNIT_MAX", autonomy_unit_max, 0)
+   TC_AUT("AIMEE_AUTONOMY_CI_RETRY_MAX", autonomy_ci_retry_max, 0)
+#undef TC_AUT
+   return 0; /* not a config-backed autonomy var (e.g. MAX_TURNS) -> caller falls back to env */
+}
+
 int config_reload(void)
 {
    /* Hold the writer lock across the WHOLE reload (load + validate + token + publish) so two

@@ -132,6 +132,28 @@ int main(void)
       assert(atomic_load_explicit(&g_reapply_calls, memory_order_relaxed) == mid);
    }
 
+   /* --- autonomy-live: config_autonomy_lookup (operator env override > live snapshot,
+    * non-config var -> fall back) --- */
+   {
+      long v;
+      /* a non-config autonomy var -> 0 so the caller uses its own env/default */
+      platform_unsetenv("AIMEE_AUTONOMY_MAX_TURNS");
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_MAX_TURNS", &v) == 0);
+      /* operator env override wins */
+      platform_setenv("AIMEE_AUTONOMY_SKEPTICS", "7");
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_SKEPTICS", &v) == 1 && v == 7);
+      /* no env -> the LIVE snapshot value (write skeptics=9, reload, look up) */
+      platform_unsetenv("AIMEE_AUTONOMY_SKEPTICS");
+      static config_t sc;
+      memset(&sc, 0, sizeof sc);
+      config_load(&sc); /* snapshot base */
+      sc.reduce_gateway_session_disable_ttl_ms = 3600000;
+      sc.autonomy_skeptics = 9;
+      assert(config_save(&sc) == 0);
+      assert(config_reload() == 1);
+      assert(config_autonomy_lookup("AIMEE_AUTONOMY_SKEPTICS", &v) == 1 && v == 9);
+   }
+
    /* --- concurrent torn-read stress: readers spin while the writer toggles + reloads --- */
    {
       platform_unsetenv("AIMEE_NO_CACHE"); /* exercise the real cached read path under threads */

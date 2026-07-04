@@ -1319,7 +1319,7 @@ $(TESTPREFIX)/unit-test-wfe-engine: $(OBJDIR)/tests/test_wfe_engine.o \
 
 # Workflow engine W3: block executors (freeze is real git; others integration-gated).
 $(TESTPREFIX)/unit-test-wfe-blocks: $(OBJDIR)/tests/test_wfe_blocks.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \
+                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                     $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
                                     $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
@@ -1385,7 +1385,7 @@ $(TESTPREFIX)/unit-test-wfe-bind-ingress: $(OBJDIR)/tests/test_wfe_bind_ingress.
                                     $(OBJDIR)/workflow/wfe_bind_ingress.o $(OBJDIR)/log.o $(OBJDIR)/workflow/wfe_enforce.o \
                                     $(OBJDIR)/workflow/wfe_externalization.o $(OBJDIR)/db1/wfe_binding.o \
                                     $(OBJDIR)/workflow/wfe_router.o $(OBJDIR)/workflow/wfe_router_catalog.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \
+                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/workflow/wfe_manager_artifacts.o $(OBJDIR)/workflow/wfe_deliver.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                     $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
@@ -1403,7 +1403,7 @@ $(TESTPREFIX)/unit-test-primary-cli-ingestor: $(OBJDIR)/tests/test_primary_cli_i
                                     $(OBJDIR)/workflow/wfe_bind_ingress.o $(OBJDIR)/workflow/wfe_enforce.o \
                                     $(OBJDIR)/workflow/wfe_externalization.o $(OBJDIR)/db1/wfe_binding.o \
                                     $(OBJDIR)/workflow/wfe_router.o $(OBJDIR)/workflow/wfe_router_catalog.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \
+                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/workflow/wfe_manager_artifacts.o $(OBJDIR)/workflow/wfe_deliver.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                     $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
@@ -1417,7 +1417,7 @@ $(TESTPREFIX)/unit-test-primary-cli-ingestor: $(OBJDIR)/tests/test_primary_cli_i
 $(TESTPREFIX)/unit-test-wfe-block-resolve: $(OBJDIR)/tests/test_wfe_block_resolve.o \
                                     $(OBJDIR)/workflow/wfe_block_resolve.o $(OBJDIR)/workflow/wfe_enforce.o \
                                     $(OBJDIR)/workflow/wfe_externalization.o $(OBJDIR)/db1/wfe_binding.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \
+                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/workflow/wfe_manager_artifacts.o $(OBJDIR)/workflow/wfe_deliver.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                     $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
@@ -1432,7 +1432,7 @@ $(TESTPREFIX)/unit-test-wfe-advance-exec: $(OBJDIR)/tests/test_wfe_advance_exec.
                                     $(OBJDIR)/workflow/wfe_advance_exec.o $(OBJDIR)/workflow/wfe_advance.o \
                                     $(OBJDIR)/workflow/wfe_enforce.o $(OBJDIR)/workflow/wfe_externalization.o \
                                     $(OBJDIR)/db1/wfe_binding.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \
+                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/workflow/wfe_manager_artifacts.o $(OBJDIR)/workflow/wfe_deliver.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                     $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
@@ -1516,7 +1516,7 @@ $(TESTPREFIX)/unit-test-wfe-router-catalog: $(OBJDIR)/tests/test_wfe_router_cata
 
 # Integration: the manager executors driven through the real engine (DB1-backed).
 $(TESTPREFIX)/unit-test-wfe-manager-flow: $(OBJDIR)/tests/test_wfe_manager_flow.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \
+                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/workflow/wfe_manager_artifacts.o $(OBJDIR)/workflow/wfe_deliver.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                     $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
@@ -1529,7 +1529,7 @@ $(TESTPREFIX)/unit-test-wfe-manager-flow: $(OBJDIR)/tests/test_wfe_manager_flow.
 
 # Config-extensible blocks + safety blocks share the blocks/engine/registry deps.
 $(TESTPREFIX)/unit-test-wfe-custom: $(OBJDIR)/tests/test_wfe_custom.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \
+                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                     $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
                                     $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
@@ -1540,7 +1540,7 @@ $(TESTPREFIX)/unit-test-wfe-custom: $(OBJDIR)/tests/test_wfe_custom.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-wfe-safety: $(OBJDIR)/tests/test_wfe_safety.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \
+                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                     $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
                                     $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
@@ -1555,7 +1555,7 @@ $(TESTPREFIX)/unit-test-wfe-failure-taxonomy: $(OBJDIR)/tests/test_wfe_failure_t
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-wfe-delegate-seam: $(OBJDIR)/tests/test_wfe_delegate_seam.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \
+                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                     $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
                                     $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
@@ -1568,7 +1568,7 @@ $(TESTPREFIX)/unit-test-wfe-delegate-seam: $(OBJDIR)/tests/test_wfe_delegate_sea
 $(TESTPREFIX)/unit-test-wfe-scheduler: $(OBJDIR)/tests/test_wfe_scheduler.o \
                                     $(OBJDIR)/server/wfe_scheduler.o $(OBJDIR)/workflow/wfe_autonomy.o \
                                     $(OBJDIR)/tests/support/log_stub.o \
-                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \
+                                    $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o $(OBJDIR)/tests/support/config_autonomy_stub.o \
                                     $(OBJDIR)/db1/db1_init.o $(OBJDIR)/db1/db_schema.o \
                                     $(OBJDIR)/db1/wfe_store.o $(OBJDIR)/workflow/wfe_def.o \
                                     $(OBJDIR)/workflow/wfe_iface.o $(OBJDIR)/workflow/wfe_validate.o \
@@ -3407,6 +3407,9 @@ $(OBJDIR)/tests/support/mock_agent_http.o: tests/support/mock_agent_http.c tests
 	@mkdir -p $(dir $@) && $(CC) $(TEST_C_FLAGS) -o $@ -c $<
 
 $(OBJDIR)/tests/support/ir_ingress_stubs.o: tests/support/ir_ingress_stubs.c
+	@mkdir -p $(dir $@) && $(CC) $(TEST_C_FLAGS) -o $@ -c $<
+
+$(OBJDIR)/tests/support/config_autonomy_stub.o: tests/support/config_autonomy_stub.c
 	@mkdir -p $(dir $@) && $(CC) $(TEST_C_FLAGS) -o $@ -c $<
 
 $(OBJDIR)/tests/support/router_advise_stub.o: tests/support/router_advise_stub.c

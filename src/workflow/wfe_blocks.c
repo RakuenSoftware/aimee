@@ -17,6 +17,7 @@
 #include <unistd.h>
 
 #include "aimee_home.h"
+#include "config.h" /* config_autonomy_lookup: live autonomy.* (snapshot) instead of setenv */
 #include "cJSON.h"
 #include "util.h"
 #include "wfe_deliver.h" /* gate.deliver verdict-graph re-verify (Q4) */
@@ -357,22 +358,12 @@ static int wfe_judge_refuted(const char *workdir, const char *lens)
 
 int wfe_implement_adversarial_ok(const char *workdir)
 {
-   const char *sv = getenv("AIMEE_AUTONOMY_SKEPTICS");
+   /* LIVE value (operator env override > config snapshot); config-backed so a config.set on
+    * autonomy.skeptics applies without a restart. */
    long k = 0;
-   if (sv && sv[0])
-   {
-      char *e = NULL;
-      long v = strtol(sv, &e, 10);
-      if (e && *e == '\0' && v >= 0)
-         k = v;
-      else
-         /* A set-but-invalid value on a SAFETY knob silently disables the tier
-          * (fail-open) if we default to 0 quietly — warn so the operator sees it. */
-         fprintf(stderr,
-                 "wfe: invalid AIMEE_AUTONOMY_SKEPTICS '%s' — adversarial tier "
-                 "stays OFF\n",
-                 sv);
-   }
+   long lv;
+   if (config_autonomy_lookup("AIMEE_AUTONOMY_SKEPTICS", &lv) && lv >= 0)
+      k = lv;
    if (k <= 0)
       return 1; /* tier OFF (default) -> unchanged behavior */
    if (!g_judge || !g_judge->judge)
@@ -519,6 +510,11 @@ static wfe_step_result_t exec_author(wfe_ctx *ctx, const wfe_node_t *node)
 /* A positive-long env with a default (0/garbage/negative -> default). */
 static long wfe_env_pos(const char *name, long def)
 {
+   /* live-config-reload: for a config-backed AIMEE_AUTONOMY_* var, take the LIVE value
+    * (operator env override > snapshot) so a config.set applies without a restart. */
+   long lv;
+   if (config_autonomy_lookup(name, &lv))
+      return lv > 0 ? lv : def;
    const char *v = getenv(name);
    if (!v || !v[0])
       return def;
@@ -676,7 +672,9 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
    char commit[64] = "";
    double cost = 0.0;
 
-   if (getenv("AIMEE_AUTONOMY_FANOUT") && getenv("AIMEE_AUTONOMY_FANOUT")[0] == '1')
+   long fanout_on = 0;
+   (void)config_autonomy_lookup("AIMEE_AUTONOMY_FANOUT", &fanout_on); /* live: env > snapshot */
+   if (fanout_on)
    {
       /* Manager loop (PC3b): decompose -> fan out engineer per unit -> per-unit verify
        * + retry-different. A unit that never passes parks pending_human via DEGRADED
@@ -936,15 +934,10 @@ static wfe_step_result_t exec_gate_ci(wfe_ctx *ctx, const wfe_node_t *node)
        * input, bounded per-work-item by AIMEE_AUTONOMY_CI_RETRY_MAX (default 2,
        * counted from the recorded ci_event failures). On exhaustion, park for a human
        * via the PC1 DEGRADED class rather than spinning the loop. */
-      const char *cv = getenv("AIMEE_AUTONOMY_CI_RETRY_MAX");
       long cap = 2;
-      if (cv && cv[0])
-      {
-         char *e = NULL;
-         long v = strtol(cv, &e, 10);
-         if (e && *e == '\0' && v > 0)
-            cap = v;
-      }
+      long lv; /* live: operator env override > config snapshot */
+      if (config_autonomy_lookup("AIMEE_AUTONOMY_CI_RETRY_MAX", &lv) && lv > 0)
+         cap = lv;
       if (fail_count >= cap)
          return wfe_step_failed_class(WFE_FAIL_DEGRADED, 0); /* park pending_human */
       /* Poll-only path (no webhook events): record this failure so the per-work-item

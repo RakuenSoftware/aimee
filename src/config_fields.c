@@ -301,16 +301,11 @@ const config_field_t config_fields[] = {
     /* Autonomous-development pipeline knobs (Phase-C). New config_t fields bridged to the
      * AIMEE_AUTONOMY_* env vars at startup (a set env var still overrides); a change
      * applies on the next server start. */
-    {"autonomy.skeptics", offsetof(config_t, autonomy_skeptics), sizeof(int), 0, CFG_INT,
-     RELOAD_RESTART},
-    {"autonomy.fanout", offsetof(config_t, autonomy_fanout), sizeof(int), 1, CFG_BOOL,
-     RELOAD_RESTART},
-    {"autonomy.unit_retry", offsetof(config_t, autonomy_unit_retry), sizeof(int), 0, CFG_INT,
-     RELOAD_RESTART},
-    {"autonomy.unit_max", offsetof(config_t, autonomy_unit_max), sizeof(int), 0, CFG_INT,
-     RELOAD_RESTART},
-    {"autonomy.ci_retry_max", offsetof(config_t, autonomy_ci_retry_max), sizeof(int), 0, CFG_INT,
-     RELOAD_RESTART},
+    {"autonomy.skeptics", offsetof(config_t, autonomy_skeptics), sizeof(int), 0, CFG_INT},
+    {"autonomy.fanout", offsetof(config_t, autonomy_fanout), sizeof(int), 1, CFG_BOOL},
+    {"autonomy.unit_retry", offsetof(config_t, autonomy_unit_retry), sizeof(int), 0, CFG_INT},
+    {"autonomy.unit_max", offsetof(config_t, autonomy_unit_max), sizeof(int), 0, CFG_INT},
+    {"autonomy.ci_retry_max", offsetof(config_t, autonomy_ci_retry_max), sizeof(int), 0, CFG_INT},
     {NULL, 0, 0, 0, CFG_STRING},
 };
 #pragma GCC diagnostic pop
