@@ -89,10 +89,21 @@ static void startup_notify(int fd, const char *message)
    close(fd);
 }
 
+/* Set by SIGHUP (async-signal-safe: just a flag); the server main loop observes it and calls
+ * config_reload() off the signal path (config_reload takes a mutex / does I/O). */
+volatile sig_atomic_t g_config_reload_requested = 0;
+
 #ifndef _WIN32
 static void signal_handler_info(int sig, siginfo_t *info, void *ucontext)
 {
    (void)ucontext;
+#ifdef SIGHUP
+   if (sig == SIGHUP)
+   {
+      g_config_reload_requested = 1; /* reload config, NOT shut down */
+      return;
+   }
+#endif
    (void)shutdown_forensics_record_signal("server", sig, info, g_ctx.start_time,
                                           g_ctx.active_sessions, 0, g_ctx.session_threads);
    g_ctx.running = 0;
@@ -163,7 +174,12 @@ static int run_server(const char *socket_path, log_level_t log_level)
    git_ops_register_session_isolation(session_isolation_target);
 
    config_t cfg;
+   memset(&cfg, 0, sizeof cfg); /* clean padding so the snapshot token is stable */
    config_load(&cfg);
+   /* Seed the live config snapshot (live-config-reload P1b): from here, every config_load in
+    * the server returns this snapshot, and config_reload (on config.set / SIGHUP) republishes
+    * it so changes take effect immediately instead of on the next mtime-cache miss. */
+   config_snapshot_init(&cfg);
 
    /* Bridge the autonomy config knobs to their AIMEE_AUTONOMY_* env vars as early as
     * possible — before any consumer (plugin discovery, the wfe engine) could read them

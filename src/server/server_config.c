@@ -97,6 +97,10 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (config_save(&cfg) != 0)
       return server_send_error(conn, "config: could not save configuration", NULL);
 
+   /* Push the change into the live snapshot NOW so it takes effect immediately for every
+    * config_load reader, instead of waiting for an mtime-cache miss (live-config-reload P1b). */
+   (void)config_reload();
+
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "key", key);
    cJSON_AddItemToObject(resp, "value", config_field_value_json(&cfg, f));

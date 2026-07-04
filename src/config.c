@@ -878,7 +878,22 @@ int econ_gateway_mutate_on(const config_t *cfg)
               : 0;
 }
 
+static int config_load_file(config_t *cfg);
+static int config_snapshot_live(void);
+
+/* Public config read. In the SERVER (once config_snapshot_init has seeded the live snapshot)
+ * this returns the current snapshot — a lock-free POD copy that reflects the last reload
+ * IMMEDIATELY (push-driven), with no file I/O or mtime-cache-miss wait. Everywhere else (CLI
+ * one-shots, and before startup seeds it) it reads the file. config_reload uses the from-file
+ * path directly so a reload always re-reads disk, never the snapshot it is about to replace. */
 int config_load(config_t *cfg)
+{
+   if (config_snapshot_live())
+      return config_snapshot_get(cfg);
+   return config_load_file(cfg);
+}
+
+static int config_load_file(config_t *cfg)
 {
    config_set_defaults(cfg);
 
@@ -1488,6 +1503,14 @@ static uint64_t g_snap_token = 0;          /* content-hash of the active snapsho
 static int g_snap_inited = 0;
 static pthread_mutex_t g_snap_wlock = PTHREAD_MUTEX_INITIALIZER;
 
+/* 1 once config_snapshot_init has seeded the live snapshot (server context). Read by the
+ * config_load wrapper to decide snapshot-vs-file. Set under g_snap_wlock; the plain read is
+ * a benign race (0 -> file read, 1 -> snapshot; both valid, and it only transitions 0->1). */
+static int config_snapshot_live(void)
+{
+   return g_snap_inited;
+}
+
 /* FNV-1a over the POD bytes. config_t is memset to 0 before every load (below) so padding
  * is deterministic and the token is stable for a given logical config. */
 static uint64_t config_snapshot_token(const config_t *c)
@@ -1552,8 +1575,8 @@ int config_reload(void)
     * snapshot), after which config_load is only reached here (serialized) + by CLI one-shots. */
    pthread_mutex_lock(&g_snap_wlock);
    config_t fresh;
-   memset(&fresh, 0, sizeof fresh); /* zero padding so the token is stable */
-   if (config_load(&fresh) != 0)
+   memset(&fresh, 0, sizeof fresh);   /* zero padding so the token is stable */
+   if (config_load_file(&fresh) != 0) /* always re-read DISK, never the snapshot we replace */
    {
       pthread_mutex_unlock(&g_snap_wlock);
       return -1; /* parse failure -> keep the running snapshot */
