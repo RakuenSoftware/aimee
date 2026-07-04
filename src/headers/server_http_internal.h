@@ -88,4 +88,22 @@ extern server_http_json_provider g_rules_provider;
 extern server_http_completion_fn g_runs_handler;
 #define SHTTP_RESP_MAX (256 * 1024)
 
+/* Per-request context handed to a /v1 route handler (shared so route handlers can
+ * live in their own translation unit, e.g. server_ci_route.c). `id` holds the
+ * extracted dynamic path segment for RM_PREFIX routes, or "" for fixed routes. */
+typedef struct
+{
+   const char *method;
+   const char *path;
+   const char *body;
+   int body_len;
+   const char *id;
+   const char *op; /* matched row's NDJSON method twin (for rh_dispatch_op), or NULL */
+} route_req_t;
+
+typedef int (*route_handler_fn)(const route_req_t *rq, char *resp, int cap);
+
+/* PC2: CI webhook route handler (defined in server_ci_route.c). */
+int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap);
+
 #endif /* SERVER_HTTP_INTERNAL_H */
