@@ -1043,6 +1043,37 @@ paths:
         "503":
           description: Revoke failed (store unavailable)
 
+  /config/oidc:
+    get:
+      operationId: getConsoleOidcConfig
+      summary: Console OIDC login config (console-admin)
+      responses:
+        "200":
+          description: OIDC config (empty if unset)
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Unauthorized
+    put:
+      operationId: putConsoleOidcConfig
+      summary: Set the console OIDC login config (console-admin)
+      description: |
+        Structural validation (https jwks_url + required fields). The console
+        fetches this at startup; restart the console to re-apply.
+      responses:
+        "200":
+          description: Stored config
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad request
+        "503":
+          description: Config store unavailable
+
   /scopes:
     get:
       operationId: listScopes

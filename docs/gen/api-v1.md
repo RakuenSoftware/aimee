@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 56
+Total endpoints: 58
 
 ## Endpoints
 
@@ -265,6 +265,28 @@ Responses:
 - `400` — Missing required parameters
 - `401` — Unauthorized
 - `503` — Knowledge store unavailable
+
+### `GET /v1/config/oidc`
+
+Console OIDC login config (console-admin)
+
+Responses:
+
+- `200` — OIDC config (empty if unset)
+- `401` — Unauthorized
+
+### `PUT /v1/config/oidc`
+
+Set the console OIDC login config (console-admin)
+
+Structural validation (https jwks_url + required fields). The console
+fetches this at startup; restart the console to re-apply.
+
+Responses:
+
+- `200` — Stored config
+- `400` — Bad request
+- `503` — Config store unavailable
 
 ### `GET /v1/console/overview`
 

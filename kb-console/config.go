@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 )
@@ -76,6 +77,41 @@ func (c *config) loadOIDC(path string) error {
 		return err
 	}
 	return json.Unmarshal(b, &c.oidc)
+}
+
+// fetchOIDCFromKB populates the OIDC config from the kb's DB2-backed
+// /v1/config/oidc (S2b) when no local file configured it. The console reads this
+// once at startup; restart the console to re-apply an edited config. Best-effort:
+// a failure just leaves the console break-glass-only.
+func (c *config) fetchOIDCFromKB(kbBase, bearer string, client *http.Client) {
+	req, err := http.NewRequest("GET", strings.TrimRight(kbBase, "/")+"/v1/config/oidc", nil)
+	if err != nil {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	resp, err := client.Do(req)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return
+	}
+	var d struct {
+		Issuer      string   `json:"issuer"`
+		Audience    string   `json:"audience"`
+		JWKSURL     string   `json:"jwks_url"`
+		AdminClaim  string   `json:"admin_claim"`
+		AdminValues []string `json:"admin_values"`
+		Configured  bool     `json:"configured"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&d) != nil || !d.Configured {
+		return
+	}
+	c.oidc = oidcConfig{
+		Issuer: d.Issuer, Audience: d.Audience, JWKSURL: d.JWKSURL,
+		AdminClaim: d.AdminClaim, AdminValues: d.AdminValues,
+	}
 }
 
 // oidcConfigured reports whether OIDC login is available (vs break-glass-only).

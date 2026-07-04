@@ -68,6 +68,11 @@ func main() {
 		kbClient.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	}
 
+	// If no file/env configured OIDC, pull the DB2-backed config from the kb (S2b).
+	if !cfg.oidcConfigured() {
+		cfg.fetchOIDCFromKB(cfg.kbBaseURL, bearer, kbClient)
+	}
+
 	srv := &server{
 		cfg: cfg, auth: newAuthenticator(cfg), sessions: sessions,
 		kbBearer: bearer, kbClient: kbClient,

@@ -46,4 +46,20 @@ void db2_enrollment_touch_last_seen(const char *fingerprint, const char *scope);
 /* Drop the is-revoked cache (called after a revoke so the change is seen now). */
 void db2_enrollment_cache_flush(void);
 
+/* --- console OIDC login config (single row id=1) --- */
+typedef struct
+{
+   char issuer[256];
+   char audience[256];
+   char jwks_url[512];
+   char admin_claim[64];
+   char admin_values[512]; /* comma-separated accepted values */
+   char updated_at[32];
+} db2_console_oidc_t;
+
+/* Get the console OIDC config. 0 = found+filled, 1 = not configured, -1 = error. */
+int db2_console_oidc_get(db2_console_oidc_t *out);
+/* Upsert the single-row console OIDC config. Returns 0, or -1 on error. */
+int db2_console_oidc_put(const db2_console_oidc_t *in);
+
 #endif /* DB2_ENROLLMENTS_H */

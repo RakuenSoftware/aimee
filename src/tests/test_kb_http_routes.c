@@ -1295,6 +1295,18 @@ void db2_enrollment_touch_last_seen(const char *fingerprint, const char *scope)
 void db2_enrollment_cache_flush(void)
 {
 }
+static db2_console_oidc_t g_stub_oidc;
+int db2_console_oidc_get(db2_console_oidc_t *out)
+{
+   *out = g_stub_oidc;
+   return g_stub_oidc.issuer[0] ? 0 : 1;
+}
+int db2_console_oidc_put(const db2_console_oidc_t *in)
+{
+   g_stub_oidc = *in;
+   snprintf(g_stub_oidc.updated_at, sizeof(g_stub_oidc.updated_at), "2026-07-04 00:00:00");
+   return 0;
+}
 
 /* audit_log() (pulled in via the revoke handler) resolves its 0600 audit.log
  * under config_default_dir(); stub it to a temp dir for the test. */
@@ -1486,6 +1498,44 @@ static void test_accounts_routes(void)
    assert(s == 200);
    assert(strstr(buf, "\"scopes\"") != NULL);
    assert(strstr(buf, "\"scope\":\"project:web\"") != NULL);
+
+   /* GET /v1/config/oidc → unset -> configured:false. */
+   s = kb_http_route_ex("GET", "/v1/config/oidc", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200 && strstr(buf, "\"configured\":false"));
+   /* PUT valid config -> 200 configured:true. */
+   const char *ocfg =
+       "{\"issuer\":\"https://idp\",\"audience\":\"kbc\",\"jwks_url\":\"https://idp/jwks\","
+       "\"admin_claim\":\"groups\",\"admin_values\":[\"admins\"]}";
+   s = kb_http_route_ex("PUT", "/v1/config/oidc", NULL, NULL, NULL, ocfg, (int)strlen(ocfg), buf,
+                        sizeof(buf));
+   assert(s == 200 && strstr(buf, "\"configured\":true") && strstr(buf, "\"admins\""));
+   /* Now GET reflects it. */
+   s = kb_http_route_ex("GET", "/v1/config/oidc", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200 && strstr(buf, "\"issuer\":\"https://idp\""));
+   /* PUT non-https jwks_url -> 400. */
+   const char *bad =
+       "{\"issuer\":\"https://idp\",\"jwks_url\":\"http://idp/jwks\",\"admin_claim\":\"groups\","
+       "\"admin_values\":[\"admins\"]}";
+   s = kb_http_route_ex("PUT", "/v1/config/oidc", NULL, NULL, NULL, bad, (int)strlen(bad), buf,
+                        sizeof(buf));
+   assert(s == 400);
+   /* PUT missing fields -> 400. */
+   s = kb_http_route_ex("PUT", "/v1/config/oidc", NULL, NULL, NULL, "{}", 2, buf, sizeof(buf));
+   assert(s == 400);
+   /* PUT with a comma in an admin value -> 400 (would corrupt the CSV store). */
+   const char *comma =
+       "{\"issuer\":\"https://idp\",\"audience\":\"kbc\",\"jwks_url\":\"https://idp/jwks\","
+       "\"admin_claim\":\"groups\",\"admin_values\":[\"a,b\"]}";
+   s = kb_http_route_ex("PUT", "/v1/config/oidc", NULL, NULL, NULL, comma, (int)strlen(comma), buf,
+                        sizeof(buf));
+   assert(s == 400);
+   /* PUT missing audience -> 400. */
+   const char *noaud =
+       "{\"issuer\":\"https://idp\",\"jwks_url\":\"https://idp/jwks\",\"admin_claim\":\"groups\","
+       "\"admin_values\":[\"a\"]}";
+   s = kb_http_route_ex("PUT", "/v1/config/oidc", NULL, NULL, NULL, noaud, (int)strlen(noaud), buf,
+                        sizeof(buf));
+   assert(s == 400);
 }
 
 static void test_console_overview(void)

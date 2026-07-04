@@ -158,9 +158,172 @@ static int list_scopes(char *out_buf, int out_cap)
    return emit(root, out_buf, out_cap, 200);
 }
 
-int kb_http_accounts_route(const char *method, const char *path, const char *query_string,
-                           char *out_buf, int out_cap)
+/* Split a comma-separated value list into a JSON array. */
+static cJSON *csv_to_array(const char *csv)
 {
+   cJSON *arr = cJSON_CreateArray();
+   const char *p = csv;
+   while (p && *p)
+   {
+      while (*p == ' ' || *p == ',')
+         p++;
+      const char *start = p;
+      while (*p && *p != ',')
+         p++;
+      size_t n = (size_t)(p - start);
+      while (n > 0 && start[n - 1] == ' ')
+         n--;
+      if (n > 0)
+      {
+         char item[256];
+         if (n >= sizeof(item))
+            n = sizeof(item) - 1;
+         memcpy(item, start, n);
+         item[n] = '\0';
+         cJSON_AddItemToArray(arr, cJSON_CreateString(item));
+      }
+   }
+   return arr;
+}
+
+static int oidc_config_to_json(const db2_console_oidc_t *c, char *out_buf, int out_cap, int status)
+{
+   cJSON *root = cJSON_CreateObject();
+   cJSON_AddStringToObject(root, "issuer", c->issuer);
+   cJSON_AddStringToObject(root, "audience", c->audience);
+   cJSON_AddStringToObject(root, "jwks_url", c->jwks_url);
+   cJSON_AddStringToObject(root, "admin_claim", c->admin_claim);
+   cJSON_AddItemToObject(root, "admin_values", csv_to_array(c->admin_values));
+   cJSON_AddStringToObject(root, "updated_at", c->updated_at);
+   cJSON_AddBoolToObject(root, "configured",
+                         c->issuer[0] && c->audience[0] && c->jwks_url[0] && c->admin_claim[0] &&
+                             c->admin_values[0]);
+   char *s = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   if (!s || strlen(s) >= (size_t)out_cap)
+   {
+      free(s);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"response too large\"}");
+      return 500;
+   }
+   snprintf(out_buf, (size_t)out_cap, "%s", s);
+   free(s);
+   return status;
+}
+
+/* GET /v1/config/oidc — the console OIDC login config (empty if unset). */
+static int get_oidc_config(char *out_buf, int out_cap)
+{
+   db2_console_oidc_t c;
+   int rc = db2_console_oidc_get(&c);
+   if (rc < 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"config store unavailable\"}");
+      return 503;
+   }
+   return oidc_config_to_json(&c, out_buf, out_cap, 200); /* rc==1 => zeroed = unset */
+}
+
+/* PUT /v1/config/oidc — store the console OIDC config after structural
+ * validation. (The console's own verifier fetches + validates the JWKS at login;
+ * break-glass recovers a bad config. Deeper server-side JWKS-fetch/SSRF
+ * validation here is a documented follow-up.) */
+static int put_oidc_config(const char *body, char *out_buf, int out_cap)
+{
+   cJSON *req = body ? cJSON_Parse(body) : NULL;
+   if (!req)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"bad request: JSON body required\"}");
+      return 400;
+   }
+   const cJSON *iss = cJSON_GetObjectItemCaseSensitive(req, "issuer");
+   const cJSON *aud = cJSON_GetObjectItemCaseSensitive(req, "audience");
+   const cJSON *jwks = cJSON_GetObjectItemCaseSensitive(req, "jwks_url");
+   const cJSON *claim = cJSON_GetObjectItemCaseSensitive(req, "admin_claim");
+   const cJSON *vals = cJSON_GetObjectItemCaseSensitive(req, "admin_values");
+
+   const char *jwks_s = cJSON_IsString(jwks) ? jwks->valuestring : "";
+   const char *iss_s = cJSON_IsString(iss) ? iss->valuestring : "";
+   const char *aud_s = cJSON_IsString(aud) ? aud->valuestring : "";
+   if (!iss_s[0] || !aud_s[0] || !cJSON_IsString(claim) || !claim->valuestring[0] || !jwks_s[0] ||
+       !cJSON_IsArray(vals) || cJSON_GetArraySize(vals) == 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"bad request: issuer, audience, jwks_url, admin_claim, and a non-empty "
+               "admin_values array are required\"}");
+      return 400;
+   }
+   /* issuer + jwks_url must be https (OIDC IdPs are https endpoints). */
+   if (strncmp(iss_s, "https://", 8) != 0 || strncmp(jwks_s, "https://", 8) != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"bad request: issuer and jwks_url must be https\"}");
+      return 400;
+   }
+   /* Every admin_values element must be a non-empty string with no comma (the
+    * store is comma-separated, so a comma would corrupt the round-trip). */
+   {
+      const cJSON *vv = NULL;
+      cJSON_ArrayForEach(vv, vals)
+      {
+         if (!cJSON_IsString(vv) || !vv->valuestring[0] || strchr(vv->valuestring, ','))
+         {
+            cJSON_Delete(req);
+            snprintf(out_buf, (size_t)out_cap,
+                     "{\"error\":\"bad request: each admin_values entry must be a non-empty string "
+                     "without commas\"}");
+            return 400;
+         }
+      }
+   }
+
+   db2_console_oidc_t c;
+   memset(&c, 0, sizeof(c));
+   snprintf(c.issuer, sizeof(c.issuer), "%s", iss_s);
+   snprintf(c.audience, sizeof(c.audience), "%s", aud_s);
+   snprintf(c.jwks_url, sizeof(c.jwks_url), "%s", jwks_s);
+   snprintf(c.admin_claim, sizeof(c.admin_claim), "%s", claim->valuestring);
+   /* Join admin_values into the comma-separated store form. */
+   size_t vpos = 0;
+   const cJSON *v = NULL;
+   cJSON_ArrayForEach(v, vals)
+   {
+      if (!cJSON_IsString(v))
+         continue;
+      int wrote = snprintf(c.admin_values + vpos, sizeof(c.admin_values) - vpos, "%s%s",
+                           vpos ? "," : "", v->valuestring);
+      if (wrote > 0 && (size_t)wrote < sizeof(c.admin_values) - vpos)
+         vpos += (size_t)wrote;
+   }
+   cJSON_Delete(req);
+
+   if (db2_console_oidc_put(&c) != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"config store unavailable\"}");
+      return 503;
+   }
+   audit_log("console_oidc_config_put", "issuer=%s jwks_url=%s", c.issuer, c.jwks_url);
+   /* Re-read to return the canonical stored form (with updated_at). */
+   db2_console_oidc_t stored;
+   if (db2_console_oidc_get(&stored) == 0)
+      return oidc_config_to_json(&stored, out_buf, out_cap, 200);
+   return oidc_config_to_json(&c, out_buf, out_cap, 200);
+}
+
+int kb_http_accounts_route(const char *method, const char *path, const char *query_string,
+                           const char *body, char *out_buf, int out_cap)
+{
+   if (strcmp(path, "/v1/config/oidc") == 0)
+   {
+      if (strcmp(method, "GET") == 0)
+         return get_oidc_config(out_buf, out_cap);
+      if (strcmp(method, "PUT") == 0)
+         return put_oidc_config(body, out_buf, out_cap);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
+      return 405;
+   }
    if (strcmp(path, "/v1/enrollments") == 0 || strcmp(path, "/v1/enrollments/") == 0)
    {
       if (strcmp(method, "GET") != 0)

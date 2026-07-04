@@ -25,6 +25,87 @@ interface ScopeRow {
   active: number;
 }
 
+interface OidcConfig {
+  issuer: string;
+  audience: string;
+  jwks_url: string;
+  admin_claim: string;
+  admin_values: string[];
+  updated_at: string;
+  configured: boolean;
+}
+
+// S2b OIDC editor: the console reads this config from the kb at startup, so a
+// change takes effect after a console restart.
+function OidcEditor() {
+  const [cfg, setCfg] = useState<OidcConfig | null>(null);
+  const [form, setForm] = useState({ issuer: '', audience: '', jwks_url: '', admin_claim: '', admin_values: '' });
+  const [msg, setMsg] = useState('');
+  const [err, setErr] = useState('');
+
+  const load = useCallback(async () => {
+    try {
+      const c = await apiGet<OidcConfig>('/v1/config/oidc');
+      setCfg(c);
+      setForm({
+        issuer: c.issuer,
+        audience: c.audience,
+        jwks_url: c.jwks_url,
+        admin_claim: c.admin_claim,
+        admin_values: (c.admin_values ?? []).join(', '),
+      });
+      setErr('');
+    } catch (e) {
+      setErr(String(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function save() {
+    setMsg('');
+    setErr('');
+    try {
+      await apiSend('PUT', '/v1/config/oidc', {
+        issuer: form.issuer,
+        audience: form.audience,
+        jwks_url: form.jwks_url,
+        admin_claim: form.admin_claim,
+        admin_values: form.admin_values.split(',').map((v) => v.trim()).filter(Boolean),
+      });
+      setMsg('Saved. Restart the console to apply the new OIDC config.');
+      await load();
+    } catch (e) {
+      setErr(`Save failed: ${e}`);
+    }
+  }
+
+  return (
+    <div>
+      <h3>OIDC login config</h3>
+      {cfg && !cfg.configured && <p className="kbc-muted">Not configured — the console is break-glass-only until this is set.</p>}
+      {cfg?.updated_at && <p className="kbc-muted">Last updated {cfg.updated_at}.</p>}
+      <div className="kbc-form">
+        <input placeholder="issuer (https://idp…)" value={form.issuer} onChange={(e) => setForm({ ...form, issuer: e.target.value })} />
+        <input placeholder="audience" value={form.audience} onChange={(e) => setForm({ ...form, audience: e.target.value })} />
+        <input placeholder="jwks_url (https://…)" value={form.jwks_url} onChange={(e) => setForm({ ...form, jwks_url: e.target.value })} />
+        <input placeholder="admin_claim (e.g. groups)" value={form.admin_claim} onChange={(e) => setForm({ ...form, admin_claim: e.target.value })} />
+        <input placeholder="admin_values (comma-separated)" value={form.admin_values} onChange={(e) => setForm({ ...form, admin_values: e.target.value })} />
+        <button
+          onClick={save}
+          disabled={!form.issuer || !form.audience || !form.jwks_url || !form.admin_claim || !form.admin_values}
+        >
+          Save
+        </button>
+      </div>
+      {msg && <p className="kbc-notice">{msg}</p>}
+      {err && <p className="kbc-error">{err}</p>}
+    </div>
+  );
+}
+
 export default function Accounts() {
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
   const [scopes, setScopes] = useState<ScopeRow[]>([]);
@@ -153,6 +234,8 @@ export default function Accounts() {
           </tbody>
         </table>
       )}
+
+      <OidcEditor />
     </section>
   );
 }

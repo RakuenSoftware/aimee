@@ -7,6 +7,6 @@
 /* Handle an accounts route (/v1/enrollments*, /v1/scopes). Returns the HTTP
  * status if (method, path) is an accounts route, or -1 if it is not. */
 int kb_http_accounts_route(const char *method, const char *path, const char *query_string,
-                           char *out_buf, int out_cap);
+                           const char *body, char *out_buf, int out_cap);
 
 #endif /* KB_HTTP_ACCOUNTS_H */

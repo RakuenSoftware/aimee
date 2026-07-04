@@ -711,7 +711,7 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       int cr = kb_http_console_route(method, path, out_buf, out_cap);
       if (cr >= 0)
          return cr;
-      int ar = kb_http_accounts_route(method, path, query_string, out_buf, out_cap);
+      int ar = kb_http_accounts_route(method, path, query_string, body, out_buf, out_cap);
       if (ar >= 0)
          return ar;
       int gr = kb_http_governance_route(method, path, query_string, body, out_buf, out_cap);

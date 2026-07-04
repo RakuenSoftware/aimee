@@ -326,3 +326,71 @@ void db2_enrollment_touch_last_seen(const char *fingerprint, const char *scope)
    aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
 }
+
+/* --- console OIDC login config (single row id=1) --- */
+
+int db2_console_oidc_get(db2_console_oidc_t *out)
+{
+   if (!out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT issuer, audience, jwks_url, admin_claim, admin_values, updated_at"
+                        " FROM kb_console_oidc WHERE id = 1",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
+   int rc = 1;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *c;
+      c = aimee_pg_column_text(st, 0);
+      snprintf(out->issuer, sizeof(out->issuer), "%s", c ? c : "");
+      c = aimee_pg_column_text(st, 1);
+      snprintf(out->audience, sizeof(out->audience), "%s", c ? c : "");
+      c = aimee_pg_column_text(st, 2);
+      snprintf(out->jwks_url, sizeof(out->jwks_url), "%s", c ? c : "");
+      c = aimee_pg_column_text(st, 3);
+      snprintf(out->admin_claim, sizeof(out->admin_claim), "%s", c ? c : "");
+      c = aimee_pg_column_text(st, 4);
+      snprintf(out->admin_values, sizeof(out->admin_values), "%s", c ? c : "");
+      c = aimee_pg_column_text(st, 5);
+      snprintf(out->updated_at, sizeof(out->updated_at), "%s", c ? c : "");
+      rc = 0;
+   }
+   aimee_pg_finalize(st);
+   return rc;
+}
+
+int db2_console_oidc_put(const db2_console_oidc_t *in)
+{
+   if (!in)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "INSERT INTO kb_console_oidc (id, issuer, audience, jwks_url, admin_claim, admin_values,"
+       " updated_at) VALUES (1, ?1, ?2, ?3, ?4, ?5, pg_now_text())"
+       " ON CONFLICT (id) DO UPDATE SET issuer=EXCLUDED.issuer, audience=EXCLUDED.audience,"
+       " jwks_url=EXCLUDED.jwks_url, admin_claim=EXCLUDED.admin_claim,"
+       " admin_values=EXCLUDED.admin_values, updated_at=EXCLUDED.updated_at",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", in->issuer);
+   aimee_pg_bind_text(st, "?2", in->audience);
+   aimee_pg_bind_text(st, "?3", in->jwks_url);
+   aimee_pg_bind_text(st, "?4", in->admin_claim);
+   aimee_pg_bind_text(st, "?5", in->admin_values);
+   aimee_pg_step_t rc = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return (rc == AIMEE_PG_DONE || rc == AIMEE_PG_ROW) ? 0 : -1;
+}
