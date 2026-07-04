@@ -780,10 +780,17 @@ static char *tc_signal_filter(int exit_code, const char *in, const char *const *
    return sb_finish(&s);
 }
 
+/* Context window kept around each failure marker (P1a): a few lines before (go-test puts
+ * the message above the marker) + a wider span after (pytest/jest/rust/java multi-line
+ * tracebacks fall below it). A pathological traceback longer than TC_TEST_CTX_AFTER
+ * overflows the window but is fully preserved in the spill (recoverable). */
+#define TC_TEST_CTX_BEFORE 3
+#define TC_TEST_CTX_AFTER  8
+
 char *tc_family_test_runner(int exit_code, const char *in)
 {
-   /* ctx 2/3: keep each failure's detail block (the message line is separate from its marker). */
-   return tc_signal_filter(exit_code, in, TC_FAIL_SIGS, TC_KEEP_SIGS, 1, 2, 6, 2, 3);
+   return tc_signal_filter(exit_code, in, TC_FAIL_SIGS, TC_KEEP_SIGS, 1, 2, 6, TC_TEST_CTX_BEFORE,
+                           TC_TEST_CTX_AFTER);
 }
 
 /* Compiler / linter diagnostics (Slice 5): keep every error/warning/note + file:line
