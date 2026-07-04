@@ -77,6 +77,14 @@ static void ss_render_section(struct ss_sbuf *b, const char *title, cJSON *arr)
  * server-side hook (git pull --ff-only, session_state writes) need a co-located
  * server and are intentionally skipped here; proactive recall is the injectable
  * value. Always soft-fails (exit 0) so the host session is never blocked. */
+/* SessionStart recall retry policy. Total worst case ~= the old single 30s
+ * shot: SESSION_START_RECALL_ATTEMPTS * per-attempt timeout + linear backoff.
+ * Per-attempt timeout stays generous enough not to trip a slow-but-healthy
+ * server (a 12s recall on a cold provider still lands on the first attempt). */
+#define SESSION_START_RECALL_ATTEMPTS   3
+#define SESSION_START_RECALL_TIMEOUT_MS 15000
+#define SESSION_START_RECALL_BACKOFF_US 400000 /* multiplied by attempt: 0.4s, 0.8s */
+
 static int handle_session_start_remote(void)
 {
    char *endpoint = cli_v1_client_endpoint();
@@ -91,17 +99,35 @@ static int handle_session_start_remote(void)
    char *body_s = cJSON_PrintUnformatted(body);
    cJSON_Delete(body);
 
+   /* Retry a few times before giving up: session-start fires exactly once and
+    * soft-fails silently, so a single transient failure (a server restart gap,
+    * a cold connection that stalls to the timeout) would otherwise leave the
+    * session with no recall context at all. Bounded so a genuinely-down server
+    * never blocks the prompt for long. Only transport failures (resp==NULL) and
+    * 5xx are retried — a 4xx (bad bearer/body/route) is deterministic and won't
+    * change on retry, so give up immediately rather than burn the budget. */
    int status = 0;
-   cJSON *resp =
-       cli_http_request(endpoint, "POST", "/v1/memory/recall", body_s, bearer, 30000, &status);
+   cJSON *resp = NULL;
+   for (int attempt = 0; attempt < SESSION_START_RECALL_ATTEMPTS; attempt++)
+   {
+      if (attempt > 0)
+         usleep(SESSION_START_RECALL_BACKOFF_US * attempt);
+      status = 0;
+      resp = cli_http_request(endpoint, "POST", "/v1/memory/recall", body_s, bearer,
+                              SESSION_START_RECALL_TIMEOUT_MS, &status);
+      if (status == 200)
+         break; /* success: keep resp for rendering */
+      int retryable = (resp == NULL) || (status >= 500);
+      cJSON_Delete(resp);
+      resp = NULL;
+      if (!retryable)
+         break; /* deterministic client error — no point retrying */
+   }
    free(endpoint);
    free(bearer);
    free(body_s);
-   if (!resp || status != 200)
-   {
-      cJSON_Delete(resp);
+   if (!resp)
       return 0;
-   }
 
    cJSON *recall = cJSON_GetObjectItemCaseSensitive(resp, "recall");
    struct ss_sbuf b = {0};

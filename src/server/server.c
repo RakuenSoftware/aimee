@@ -125,9 +125,17 @@ void server_compute_budget_release(server_ctx_t *ctx, int granted)
    pthread_mutex_unlock(&ctx->compute_budget_mutex);
 }
 
-/* Update event loop registration: IN always, OUT when there's pending data */
+/* Update event loop registration: IN always, OUT when there's pending data.
+ *
+ * Only meaningful for connections owned by the epoll accept loop. The /v1 HTTP
+ * workers (server_http.c) run their own blocking per-connection loop and build
+ * a memset-zeroed server_conn_t whose evloop is NULL and whose fd was never
+ * registered with any epoll set; for them this is a no-op (dereferencing a NULL
+ * evloop here previously crashed the whole server on every buffered response). */
 static void conn_update_events(server_conn_t *conn)
 {
+   if (!conn->evloop)
+      return;
    uint32_t events = PLAT_EV_IN;
    if (conn->write_len > 0)
       events |= PLAT_EV_OUT;
