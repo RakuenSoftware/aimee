@@ -537,10 +537,13 @@ static cJSON *read_units_json(const char *wd)
    FILE *f = fopen(path, "rb");
    if (!f)
       return NULL;
-   fseek(f, 0, SEEK_END);
+   if (fseek(f, 0, SEEK_END) != 0)
+   {
+      fclose(f);
+      return NULL;
+   }
    long len = ftell(f);
-   fseek(f, 0, SEEK_SET);
-   if (len <= 0 || len > (1 << 20))
+   if (len <= 0 || len > (1 << 20) || fseek(f, 0, SEEK_SET) != 0)
    {
       fclose(f);
       return NULL;
@@ -582,18 +585,37 @@ static cJSON *read_units_json(const char *wd)
  * Returns 0 if every unit passed its per-unit verify (caller then runs the mandatory
  * aggregate gate), -1 if any unit permanently failed (caller parks — NO silent partial
  * advance). *cost accumulates every dispatch. */
+/* Copy `src` into `dst` stripping control bytes (< 0x20) to a printable space and
+ * hard-capping the length, so untrusted coordinator-generated unit text cannot smuggle
+ * newline-delimited prompt-injection directives into a privileged engineer prompt. */
+static void sanitize_unit(const char *src, char *dst, size_t cap)
+{
+   size_t o = 0;
+   for (const char *p = src; *p && o + 1 < cap; p++)
+   {
+      unsigned char ch = (unsigned char)*p;
+      dst[o++] = (ch < 0x20 || ch == 0x7f) ? ' ' : (char)ch;
+   }
+   dst[o] = '\0';
+}
+
 static int run_fanout_units(const char *wd, const wfe_node_t *node, double *cost)
 {
-   /* 1. Decompose (coordinator writes .aimee/units.json + commits; do not implement). */
-   char c[64] = "";
-   (void)wfe_delegate_dispatch(
-       wd, "architect", "$random",
-       "Decompose the approved plan into a SMALL number of INDEPENDENT implementation units. "
-       "Write ONLY a JSON array of concise imperative unit-task strings to .aimee/units.json in "
-       "the repo root, then commit that file. Do NOT implement anything else.",
-       NULL, c, cost);
-
+   /* 1. Decompose — but ONLY if a prior loop hasn't already produced units (the file
+    * is committed, so a re-driven implement reuses the established unit list instead of
+    * re-decomposing every loop). Coordinator writes .aimee/units.json; does NOT implement. */
    cJSON *units = read_units_json(wd);
+   if (!units)
+   {
+      char c[64] = "";
+      (void)wfe_delegate_dispatch(
+          wd, "architect", "$random",
+          "Decompose the approved plan into a SMALL number of INDEPENDENT implementation units. "
+          "Write ONLY a JSON array of concise imperative unit-task strings to .aimee/units.json in "
+          "the repo root, then commit that file. Do NOT implement anything else.",
+          NULL, c, cost);
+      units = read_units_json(wd);
+   }
    cJSON *fallback = NULL;
    int n_units = units ? cJSON_GetArraySize(units) : 0;
    if (n_units <= 0)
@@ -604,14 +626,26 @@ static int run_fanout_units(const char *wd, const wfe_node_t *node, double *cost
       units = fallback;
       n_units = 1;
    }
+   /* Bound the fan-out: a pathological/hostile decomposition (thousands of units) would
+    * fan out thousands of dispatches. Cap it; an over-cap decomposition is itself a
+    * coordinator failure -> DEGRADED park. */
+   long unit_max = wfe_env_pos("AIMEE_AUTONOMY_UNIT_MAX", 16);
+   if (n_units > unit_max)
+   {
+      cJSON_Delete(units);
+      return -1;
+   }
 
    long retry_max = wfe_env_pos("AIMEE_AUTONOMY_UNIT_RETRY", 2);
    int failed = 0;
    for (int i = 0; i < n_units && !failed; i++)
    {
       const cJSON *u = cJSON_GetArrayItem(units, i);
-      const char *utext = (cJSON_IsString(u) && u->valuestring) ? u->valuestring : "";
-      char prompt[2048];
+      if (!cJSON_IsString(u) || !u->valuestring || !u->valuestring[0])
+         continue; /* skip an empty/non-string entry (no work to dispatch) */
+      char utext[512];
+      sanitize_unit(u->valuestring, utext, sizeof utext);
+      char prompt[1024];
       snprintf(prompt, sizeof prompt,
                "Implement ONLY this unit of the approved plan on the work-item branch, run "
                "`aimee git verify`, fix any failures, then commit. UNIT: %s",
@@ -631,7 +665,7 @@ static int run_fanout_units(const char *wd, const wfe_node_t *node, double *cost
       if (!ok)
          failed = 1; /* this unit could not be made to pass -> park (no partial advance) */
    }
-   cJSON_Delete(units == fallback ? fallback : units);
+   cJSON_Delete(units); /* whether the real list or the fallback; fallback aliases units */
    return failed ? -1 : 0;
 }
 
@@ -667,9 +701,9 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
     * max_attempts on exhaustion); a re-dispatched fresh engineer sees + fixes findings. */
    if (!wfe_implement_verify_ok(wd))
       return with_cost(wfe_step_looped(), cost);
-   /* MANDATORY aggregate adversarial gate (PC3/Q2): with AIMEE_AUTONOMY_SKEPTICS>0, a
-    * reviewer + N skeptic judgments must not refute the merged change. A refute loops
-    * back (bounded). Tier OFF by default -> unchanged behavior. */
+   /* Aggregate adversarial gate (PC3/Q2), OPT-IN via AIMEE_AUTONOMY_SKEPTICS>0 (default
+    * off -> a pass-through, unchanged behavior). When enabled, a reviewer + N skeptic
+    * judgments of the merged change must not refute; a refute loops back (bounded). */
    if (!wfe_implement_adversarial_ok(wd))
       return with_cost(wfe_step_looped(), cost);
    char handle[80];
