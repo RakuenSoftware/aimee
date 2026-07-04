@@ -3595,6 +3595,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o \
                      $(OBJDIR)/kb/http/kb_http_search.o \
                      $(OBJDIR)/kb/http/kb_route_acl.o \
                      $(OBJDIR)/kb/http/kb_http_console.o \
+                     $(OBJDIR)/util.o \
                      $(OBJDIR)/kb/kb_scope.o \
                      $(OBJDIR)/kb/verifier.o \
                      $(OBJDIR)/kb/enroll.o \
