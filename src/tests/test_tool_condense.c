@@ -108,6 +108,70 @@ int main(void)
       free(r);
    }
 
+   /* ---- tc_recognize (S2) ---- */
+#define RECO(line) tc_recognize(line)
+   {
+      tc_reco_result_t r;
+      /* plain recognized commands + subcommand extraction */
+      r = RECO("git status");
+      assert(r.outcome == TC_RECOGNIZED && !strcmp(r.cmd, "git") && !strcmp(r.sub, "status"));
+      r = RECO("cargo test --all");
+      assert(r.outcome == TC_RECOGNIZED && !strcmp(r.cmd, "cargo") && !strcmp(r.sub, "test"));
+      r = RECO("pytest tests/");
+      assert(r.outcome == TC_RECOGNIZED && !strcmp(r.cmd, "pytest"));
+      /* subcommand skips leading options */
+      r = RECO("git -C /repo status");
+      assert(r.outcome == TC_RECOGNIZED && !strcmp(r.sub, "status"));
+
+      /* wrapper unwrapping */
+      r = RECO("npx tsc --noEmit");
+      assert(r.outcome == TC_RECOGNIZED && !strcmp(r.cmd, "tsc"));
+      r = RECO("uv run pytest -q");
+      assert(r.outcome == TC_RECOGNIZED && !strcmp(r.cmd, "pytest"));
+      r = RECO("poetry run pytest");
+      assert(r.outcome == TC_RECOGNIZED && !strcmp(r.cmd, "pytest"));
+      r = RECO("time cargo build");
+      assert(r.outcome == TC_RECOGNIZED && !strcmp(r.cmd, "cargo"));
+      r = RECO("env FOO=bar RUST_LOG=info cargo test");
+      assert(r.outcome == TC_RECOGNIZED && !strcmp(r.cmd, "cargo"));
+      r = RECO("FOO=bar cargo test");
+      assert(r.outcome == TC_RECOGNIZED && !strcmp(r.cmd, "cargo"));
+      r = RECO("sudo -u ci npm run build");
+      assert(r.outcome == TC_RECOGNIZED && !strcmp(r.cmd, "npm") && !strcmp(r.sub, "run"));
+      r = RECO("pnpm exec eslint .");
+      assert(r.outcome == TC_RECOGNIZED && !strcmp(r.cmd, "eslint"));
+
+      /* full path to a known command still resolves by basename */
+      r = RECO("/usr/bin/git log");
+      assert(r.outcome == TC_RECOGNIZED && !strcmp(r.cmd, "git"));
+
+      /* OPAQUE: multiplexers, make, scripts, interpreters */
+      r = RECO("make test");
+      assert(r.outcome == TC_OPAQUE && !strcmp(r.cmd, "make"));
+      r = RECO("xargs rm");
+      assert(r.outcome == TC_OPAQUE);
+      r = RECO("./run.sh --ci");
+      assert(r.outcome == TC_OPAQUE);
+      r = RECO("bash scripts/build.sh");
+      assert(r.outcome == TC_OPAQUE);
+      r = RECO("/opt/tools/custom_runner");
+      assert(r.outcome == TC_OPAQUE);
+
+      /* UNRECOGNIZED: unknown command + any compound/piped/substituted line */
+      r = RECO("frobnicate --now");
+      assert(r.outcome == TC_UNRECOGNIZED);
+      r = RECO("cargo test | grep FAIL");
+      assert(r.outcome == TC_UNRECOGNIZED); /* pipe -> passthrough */
+      r = RECO("git status && cargo build");
+      assert(r.outcome == TC_UNRECOGNIZED); /* chain -> passthrough */
+      r = RECO("echo $(git rev-parse HEAD)");
+      assert(r.outcome == TC_UNRECOGNIZED); /* substitution -> passthrough */
+      r = RECO("");
+      assert(r.outcome == TC_UNRECOGNIZED);
+      r = RECO(NULL);
+      assert(r.outcome == TC_UNRECOGNIZED);
+   }
+
    printf("ok\n");
    return 0;
 }

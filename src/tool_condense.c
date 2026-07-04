@@ -12,6 +12,238 @@ int tool_condense_enabled(const config_t *cfg)
    return cfg && cfg->reduce_command_filter ? 1 : 0;
 }
 
+/* ---- command recognition (Slice 2) ---- */
+
+#define TC_MAXTOK 24
+
+/* Tokenize a simple command line into argv (whitespace-separated, single/double quotes
+ * honored + stripped). Returns the token count, or -1 if the line contains a shell
+ * COMPOUND operator (| ; & newline), a command substitution ($( or backtick), or a
+ * glob/redirect we won't reason about — the caller then treats the line as UNRECOGNIZED
+ * (fail-open passthrough). Redirect operators end token collection (the command name is
+ * before them). Tokens are copied into `store` (a caller buffer of >= TC_MAXTOK*64). */
+static int tc_tokenize(const char *s, char *tok[TC_MAXTOK], char *store, size_t storecap)
+{
+   int n = 0;
+   size_t used = 0;
+   while (*s)
+   {
+      while (*s == ' ' || *s == '\t')
+         s++;
+      if (!*s)
+         break;
+      /* compound operators / substitution / newline -> bail (compound line) */
+      if (*s == '|' || *s == ';' || *s == '&' || *s == '\n' || *s == '`')
+         return -1;
+      if (*s == '$' && s[1] == '(')
+         return -1;
+      /* a redirect ends the command portion — argv[0..] already captured */
+      if (*s == '<' || *s == '>')
+         break;
+      if (n >= TC_MAXTOK)
+         break; /* enough tokens to recognize the command */
+      /* accumulate one token, honoring '…' and "…" quoting */
+      char *out = store + used;
+      size_t tlen = 0;
+      while (*s && *s != ' ' && *s != '\t' && *s != '|' && *s != ';' && *s != '&' && *s != '<' &&
+             *s != '>' && *s != '\n')
+      {
+         char q = 0;
+         if (*s == '\'' || *s == '"')
+         {
+            q = *s++;
+            while (*s && *s != q)
+            {
+               if (used + tlen + 2 >= storecap)
+                  return -1;
+               out[tlen++] = *s++;
+            }
+            if (*s == q)
+               s++;
+            continue;
+         }
+         if (used + tlen + 2 >= storecap)
+            return -1;
+         out[tlen++] = *s++;
+      }
+      out[tlen] = '\0';
+      used += tlen + 1;
+      tok[n++] = out;
+   }
+   return n;
+}
+
+/* basename of a path token (after the last '/'). */
+static const char *tc_base(const char *p)
+{
+   const char *b = strrchr(p, '/');
+   return b ? b + 1 : p;
+}
+
+/* A known single-command wrapper that takes the inner command as its trailing args.
+ * Returns the number of leading tokens to skip to reach the inner command, or 0 if `t`
+ * is not such a wrapper. `next` is the following token (may be NULL) for 2-word forms. */
+static int tc_wrapper_skip(const char *t, const char *next)
+{
+   /* prefix-only wrappers: <wrapper> <inner…> */
+   static const char *const one[] = {"time", "nice", "nohup", "stdbuf", "npx", NULL};
+   for (int i = 0; one[i]; i++)
+      if (strcmp(t, one[i]) == 0)
+         return 1;
+   /* two-word runners: <a> <b> <inner…> */
+   if (next)
+   {
+      if ((strcmp(t, "uv") == 0 || strcmp(t, "poetry") == 0 || strcmp(t, "pipenv") == 0) &&
+          strcmp(next, "run") == 0)
+         return 2;
+      if (strcmp(t, "bun") == 0 && strcmp(next, "x") == 0)
+         return 2;
+      if ((strcmp(t, "pnpm") == 0 || strcmp(t, "npm") == 0 || strcmp(t, "yarn") == 0) &&
+          strcmp(next, "exec") == 0)
+         return 2;
+   }
+   return 0;
+}
+
+/* Is `c` a command whose output we intend to condense (a family lands in a later slice)? */
+static int tc_is_recognized_cmd(const char *c)
+{
+   static const char *const known[] = {
+       "git",    "cargo",  "go",    "pytest",  "jest",  "vitest", "mocha",  "ctest", "mvn",
+       "gradle", "dotnet", "tsc",   "eslint",  "ruff",  "mypy",   "flake8", "rustc", "gcc",
+       "g++",    "cc",     "clang", "clang++", "ls",    "grep",   "rg",     "find",  "npm",
+       "yarn",   "pnpm",   "pip",   "pip3",    "cmake", NULL};
+   for (int i = 0; known[i]; i++)
+      if (strcmp(c, known[i]) == 0)
+         return 1;
+   return 0;
+}
+
+/* Is `t` a leading `VAR=VALUE` environment assignment (identifier before the first '=',
+ * not an option, not a path)? */
+static int tc_is_var_assign(const char *t)
+{
+   const char *eq = strchr(t, '=');
+   if (!eq || eq == t || t[0] == '-' || strchr(t, '/'))
+      return 0;
+   for (const char *p = t; p < eq; p++)
+      if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9') ||
+            *p == '_'))
+         return 0;
+   return 1;
+}
+
+/* A subcommand-bearing command whose 2nd token is meaningful for family routing. */
+static int tc_has_subcommand(const char *c)
+{
+   static const char *const subc[] = {"git",  "cargo", "go",  "dotnet", "npm",
+                                      "yarn", "pnpm",  "pip", "pip3",   NULL};
+   for (int i = 0; subc[i]; i++)
+      if (strcmp(c, subc[i]) == 0)
+         return 1;
+   return 0;
+}
+
+tc_reco_result_t tc_recognize(const char *cmdline)
+{
+   tc_reco_result_t r;
+   r.outcome = TC_UNRECOGNIZED;
+   r.cmd[0] = '\0';
+   r.sub[0] = '\0';
+   if (!cmdline)
+      return r;
+
+   char *tok[TC_MAXTOK];
+   char store[TC_MAXTOK * 64];
+   int n = tc_tokenize(cmdline, tok, store, sizeof store);
+   if (n <= 0)
+      return r; /* empty or compound -> UNRECOGNIZED (passthrough) */
+
+   int i = 0;
+   /* strip a leading VAR=VALUE prefix, `env` + its assignments, sudo, and chained
+    * single-command wrappers, until we reach the real inner command. */
+   int guard = 0;
+   while (i < n && guard++ < TC_MAXTOK)
+   {
+      /* bare `VAR=VALUE cmd` prefix */
+      if (tc_is_var_assign(tok[i]))
+      {
+         i++;
+         continue;
+      }
+      const char *b = tc_base(tok[i]);
+      if (strcmp(b, "env") == 0)
+      {
+         i++;
+         while (i < n && tc_is_var_assign(tok[i]))
+            i++;
+         continue;
+      }
+      if (strcmp(b, "sudo") == 0)
+      {
+         i++;
+         while (i < n && tok[i][0] == '-')
+         {
+            /* sudo short options that take a separate argument (best-effort): consume
+             * both the option and its value (e.g. `-u ci`). --opt=val is self-contained. */
+            const char *o = tok[i];
+            int takes_arg = (o[1] && strchr("ugpCrtTURhDP", o[1]) && o[2] == '\0');
+            i++;
+            if (takes_arg && i < n)
+               i++;
+         }
+         continue;
+      }
+      int skip = tc_wrapper_skip(b, (i + 1 < n) ? tok[i + 1] : NULL);
+      if (skip)
+      {
+         i += skip;
+         continue;
+      }
+      break;
+   }
+   if (i >= n)
+      return r;
+
+   const char *cmd = tc_base(tok[i]);
+   snprintf(r.cmd, sizeof r.cmd, "%s", cmd);
+
+   /* multiplexers, make, and shell interpreters are always OPAQUE (arbitrary output —
+    * only a generic fallback may ever apply, never a family rule). */
+   if (strcmp(cmd, "xargs") == 0 || strcmp(cmd, "make") == 0 || strcmp(cmd, "bash") == 0 ||
+       strcmp(cmd, "sh") == 0 || strcmp(cmd, "zsh") == 0)
+   {
+      r.outcome = TC_OPAQUE;
+      return r;
+   }
+   /* a `./script` or a path to something whose basename we don't know is OPAQUE too;
+    * but a full path to a KNOWN command (e.g. /usr/bin/git) still resolves by basename. */
+   if ((tok[i][0] == '.' || strchr(tok[i], '/')) && !tc_is_recognized_cmd(cmd))
+   {
+      r.outcome = TC_OPAQUE;
+      return r;
+   }
+
+   if (tc_is_recognized_cmd(cmd))
+   {
+      r.outcome = TC_RECOGNIZED;
+      if (tc_has_subcommand(cmd) && i + 1 < n)
+      {
+         /* A subcommand (status/test/run/install/…) is a bare word: skip options ('-…')
+          * and option-arguments (paths with '/', or KEY=VALUE with '=') — best-effort;
+          * the family rule in a later slice re-parses precisely. */
+         for (int j = i + 1; j < n; j++)
+            if (tok[j][0] != '-' && !strchr(tok[j], '/') && !strchr(tok[j], '='))
+            {
+               snprintf(r.sub, sizeof r.sub, "%s", tok[j]);
+               break;
+            }
+      }
+      return r;
+   }
+   return r; /* UNRECOGNIZED */
+}
+
 /* ---- a minimal growable string builder (self-contained so the unit test links only
  * this TU + config) ---- */
 typedef struct

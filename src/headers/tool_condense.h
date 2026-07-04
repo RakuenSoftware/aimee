@@ -14,6 +14,31 @@
 /* 1 iff the command-filter lever is enabled (reduce_command_filter). */
 int tool_condense_enabled(const config_t *cfg);
 
+/* ---- command recognition (Slice 2) ---- */
+
+/* The recognition outcome for a shell command line. Drives whether/how the output is
+ * condensed and the ledger's recognized/unrecognized accounting. */
+typedef enum
+{
+   TC_UNRECOGNIZED = 0, /* not a command we handle (or a compound/piped line) -> passthrough */
+   TC_OPAQUE,           /* multiplexer/make/script: only a generic fallback may ever apply */
+   TC_RECOGNIZED, /* a command we intend to condense; the FAMILY is resolved in later slices */
+} tc_reco_t;
+
+typedef struct
+{
+   tc_reco_t outcome;
+   char cmd[64]; /* normalized inner command basename (after wrapper unwrapping), or "" */
+   char sub[64]; /* the subcommand token (git <sub>, cargo <sub>, npm <sub>, …), or "" */
+} tc_reco_result_t;
+
+/* Recognize a shell command line: reject compound/piped/substituted lines (fail-open ->
+ * UNRECOGNIZED), strip known single-command wrappers (env VAR=…, sudo, nice, time, npx,
+ * bun x, pnpm/npm/yarn exec, uv/poetry/pipenv run), and classify the inner command.
+ * xargs and make and scripts (./x, bash x, sh -c) are OPAQUE (never a family rule).
+ * Deterministic + allocation-free (fixed output buffers). */
+tc_reco_result_t tc_recognize(const char *cmdline);
+
 /* Strip content-free noise, line-wise:
  *  - remove ANSI CSI escape sequences (ESC '[' … final-byte);
  *  - resolve carriage-return progress redraws (keep only the text after the last '\r'
