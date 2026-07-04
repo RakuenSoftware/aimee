@@ -252,3 +252,38 @@ Folded in:
 - **db1 schema decision pulled into Phase 1:** §4 explicit-capture commands can't ship on an undecided
   schema, so OQ1 (repurpose `harness_memory` vs new table) is **resolved as the first step of
   Phase 1**, before the commands.
+
+## Migration design (R3 — `.md` retirement, roundtabled)
+
+The `.md`-retirement migration (§2) was roundtabled (7 participants) before any code. Verdict: the
+migration **cannot be safely automated end-to-end** — it is operator-gated at every write/delete.
+
+**Hard conclusions (data-loss traps):**
+- **Scope is not mechanically derivable.** `harness_memory.type ∈ {fact,index,note,scratch}` carries
+  no user/org signal; the only signal is the `.md` frontmatter `metadata.type`
+  (project/feedback/reference/user), and it is advisory. Auto-defaulting is silent + irreversible:
+  default→db1 locks org-generalizable notes away; default→db2 leaks private notes org-wide.
+  **Classification MUST be operator-reviewed per memory.**
+- **Never bulk-load free-form `.md` into structured `user_memories`.** The `identity:`/`pref:` recall
+  selectors won't match arbitrary bodies → *stored-but-not-surfaced* = data-loss-by-inaccessibility.
+  Preserved documents need a **separate, non-recallable archival kind/table**, distinct from the
+  structured identity/preference store.
+- **The server db1 `harness_memory` table is canonical; the client `.md` files are a re-hydrated
+  (lossy) derivative.** Reconcile against the table, not the files; never hash hydrate's re-render.
+- **Define the replacement write path BEFORE removing interception.** Deleting
+  `memory_redirect`/PostToolUse before agents have a new memory target drops all NEW writes silently.
+- **Verification is content-hash + key-set reconciliation, not count-only**; keep the source
+  read-only until an explicit per-phase reversibility gate confirms the copy.
+
+**Sequenced slices (each gated, reversible):**
+1. **Slice 1 (shipped, read-only):** `scripts/harness-memory-inventory.py` — inventories the `.md`
+   store, surfaces per-memory scope-signals for classification, and (best-effort) reconciles against
+   the canonical server table. Writes nothing, deletes nothing.
+2. **Operator classification** — the operator labels each memory user(db1)/org(db2)/archive/drop
+   (no automated scope guess).
+3. **Migration writes** — copy per the classification into db1 (user), db2 (org), or a non-recallable
+   archival store; verify by content-hash + key-set; **source retained**.
+4. **Replacement write path** — new agent memory routes to db1/db2 (extends S2's capture) so
+   interception can be removed without dropping writes.
+5. **Subsystem removal** — delete `harness_memory_*`/`memory_redirect`/routes/tests/docs, gated on
+   (2)+(3)+(4) confirmed, after a read-only compatibility window.
