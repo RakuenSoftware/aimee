@@ -2116,6 +2116,7 @@ static const http_route_t g_v1_routes[] = {
     /* dashboard.* / insights.* / identity.* / dogfood.* / lsp.* (op-parity wave 4).
      * Dashboard surfaces are read views (GET). */
     {"GET", "/v1/dashboard/all", NULL, RM_EXACT, "dashboard.all", 0, rh_dispatch_op},
+    {"GET", "/v1/dashboard/audit", NULL, RM_EXACT, "dashboard.audit", 0, rh_dispatch_op},
     {"GET", "/v1/dashboard/delegations", NULL, RM_EXACT, "dashboard.delegations", 0,
      rh_dispatch_op},
     {"GET", "/v1/dashboard/logs", NULL, RM_EXACT, "dashboard.logs", 0, rh_dispatch_op},

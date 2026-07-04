@@ -4,6 +4,7 @@ import { Routes, Route, Navigate, NavLink, useLocation } from 'react-router-dom'
 import { Toast } from '@rakuensoftware/smoothgui';
 import Chat from './pages/Chat';
 import Dashboard from './pages/Dashboard';
+import Logs from './pages/Logs';
 import EditWorkflows from './pages/EditWorkflows';
 import WorkflowActions from './pages/WorkflowActions';
 import Agents from './pages/Agents';
@@ -66,6 +67,7 @@ type Tab = { label: string; icon: string; route: string };
 const NAV_ITEMS: Tab[] = [
   { label: 'Chat', icon: '💬', route: '/chat' },
   { label: 'Dashboard', icon: '📊', route: '/dashboard' },
+  { label: 'Logs', icon: '📜', route: '/logs' },
   { label: 'Edit Workflows', icon: '🔀', route: '/edit-workflows' },
   { label: 'Workflow Actions', icon: '📝', route: '/workflow-actions' },
   { label: 'Agents', icon: '🤝', route: '/agents' },
@@ -241,6 +243,7 @@ export default function App() {
               <Routes>
                 <Route path="/chat" element={<Chat />} />
                 <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/logs" element={<Logs />} />
                 <Route path="/edit-workflows" element={<EditWorkflows />} />
                 <Route path="/workflow-actions" element={<WorkflowActions />} />
                 <Route path="/agents" element={<Agents />} />

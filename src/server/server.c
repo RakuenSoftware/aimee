@@ -1438,6 +1438,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"dashboard.onboard", handle_dashboard_onboard},
     {"dashboard.memory_stats", handle_dashboard_memory_stats},
     {"dashboard.all", handle_dashboard_all},
+    {"dashboard.audit", handle_dashboard_audit},
     {"lsp.diagnostics_summary", handle_lsp_diagnostics_summary},
     {"workspace.context", handle_workspace_context},
     {"workspace.add", handle_workspace_add},

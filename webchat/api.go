@@ -73,6 +73,7 @@ type methodRoute struct {
 var methodRoutes = map[string]methodRoute{
 	// Dashboard read views (GET, no args).
 	"dashboard.all":            {http.MethodGet, "/v1/dashboard/all"},
+	"dashboard.audit":          {http.MethodGet, "/v1/dashboard/audit"},
 	"dashboard.delegations":    {http.MethodGet, "/v1/dashboard/delegations"},
 	"dashboard.metrics":        {http.MethodGet, "/v1/dashboard/metrics"},
 	"dashboard.logs":           {http.MethodGet, "/v1/dashboard/logs"},
@@ -419,6 +420,13 @@ func (s *server) handleDashboardAll(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		out[k] = v
+	}
+	// Active sessions are webchat-owned (not in the aimee-server dashboard.all),
+	// so inject the current user's sessions for the dashboard's Sessions panel.
+	if sessions, serr := s.listChatSessions(currentUser(r)); serr == nil {
+		if raw, merr := json.Marshal(sessions); merr == nil {
+			out["sessions"] = raw
+		}
 	}
 	json.NewEncoder(w).Encode(out)
 }

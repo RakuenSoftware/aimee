@@ -1,0 +1,622 @@
+{
+  "agents": [
+    {
+      "name": "minimax",
+      "endpoint": "https://api.minimax.io/v1/chat/completions",
+      "model": "MiniMax-M3",
+      "auth_type": "bearer",
+      "provider": "minimax",
+      "cost_tier": 0,
+      "enabled": true,
+      "tools_enabled": true,
+      "max_turns": -1,
+      "max_parallel": 3,
+      "context_window": 200000,
+      "roles": [
+        "code",
+        "review",
+        "explain",
+        "refactor",
+        "draft",
+        "execute",
+        "summarize",
+        "format",
+        "reason",
+        "search"
+      ],
+      "personas": []
+    },
+    {
+      "name": "mistral",
+      "endpoint": "https://api.mistral.ai/v1/chat/completions",
+      "model": "mistral-medium-3.5",
+      "auth_type": "bearer",
+      "provider": "openai",
+      "cost_tier": 0,
+      "enabled": true,
+      "tools_enabled": true,
+      "max_turns": -1,
+      "max_parallel": 3,
+      "context_window": 131072,
+      "roles": [
+        "code",
+        "review",
+        "explain",
+        "refactor",
+        "draft",
+        "execute",
+        "summarize",
+        "format",
+        "reason",
+        "search"
+      ],
+      "personas": []
+    },
+    {
+      "name": "mimo-2.5",
+      "endpoint": "https://token-plan-ams.xiaomimimo.com/v1/chat/completions",
+      "model": "mimo-v2.5-pro",
+      "auth_type": "bearer",
+      "provider": "openai",
+      "cost_tier": 0,
+      "enabled": true,
+      "tools_enabled": true,
+      "max_turns": 14,
+      "max_parallel": 3,
+      "context_window": 131072,
+      "roles": [
+        "code",
+        "review",
+        "explain",
+        "refactor",
+        "draft",
+        "execute",
+        "summarize",
+        "format",
+        "diagnose",
+        "validate"
+      ],
+      "personas": []
+    },
+    {
+      "name": "codex",
+      "endpoint": "https://chatgpt.com/backend-api/codex",
+      "model": "gpt-5.5",
+      "auth_type": "codex-oauth",
+      "provider": "chatgpt",
+      "cost_tier": 0,
+      "enabled": true,
+      "tools_enabled": false,
+      "max_turns": -1,
+      "max_parallel": 3,
+      "roles": [
+        "code",
+        "review",
+        "explain",
+        "refactor",
+        "draft",
+        "execute",
+        "summarize",
+        "format",
+        "reason",
+        "search"
+      ],
+      "personas": []
+    },
+    {
+      "name": "claude",
+      "endpoint": "",
+      "model": "",
+      "auth_type": "none",
+      "provider": "claude",
+      "cost_tier": 1,
+      "enabled": true,
+      "tools_enabled": true,
+      "max_turns": -1,
+      "max_parallel": 3,
+      "context_window": 200000,
+      "roles": [
+        "code",
+        "review",
+        "explain",
+        "refactor",
+        "draft",
+        "execute"
+      ],
+      "personas": []
+    },
+    {
+      "name": "mimo-2.5-pro",
+      "endpoint": "https://token-plan-ams.xiaomimimo.com/v1/chat/completions",
+      "model": "mimo-v2.5-pro",
+      "auth_type": "bearer",
+      "provider": "openai",
+      "cost_tier": 0,
+      "enabled": true,
+      "tools_enabled": true,
+      "max_turns": -1,
+      "max_parallel": 3,
+      "context_window": 131072,
+      "roles": [
+        "code",
+        "review",
+        "explain",
+        "refactor",
+        "draft",
+        "execute",
+        "summarize",
+        "format",
+        "reason",
+        "search"
+      ],
+      "personas": []
+    },
+    {
+      "name": "glm-5.2",
+      "endpoint": "https://api.z.ai/api/coding/paas/v4/chat/completions",
+      "model": "glm-5.2",
+      "auth_type": "bearer",
+      "provider": "openai",
+      "cost_tier": 0,
+      "enabled": true,
+      "tools_enabled": true,
+      "max_turns": -1,
+      "max_parallel": 3,
+      "context_window": 131072,
+      "roles": [
+        "code",
+        "review",
+        "explain",
+        "refactor",
+        "draft",
+        "execute",
+        "summarize",
+        "format",
+        "reason",
+        "search"
+      ],
+      "personas": []
+    },
+    {
+      "name": "local-synth",
+      "endpoint": "http://10.100.0.1:8742/v1",
+      "model": "aimee-synth",
+      "auth_type": "none",
+      "provider": "openai",
+      "cost_tier": 0,
+      "enabled": true,
+      "tools_enabled": true,
+      "max_turns": -1,
+      "max_parallel": 4,
+      "context_window": 65536,
+      "roles": [
+        "code",
+        "review",
+        "explain",
+        "refactor",
+        "draft",
+        "execute",
+        "summarize",
+        "format",
+        "reason",
+        "search"
+      ],
+      "personas": []
+    }
+  ],
+  "delegations": [
+    {
+      "agent": "mistral",
+      "role": "execute",
+      "success": true,
+      "turns": 18,
+      "tool_calls": 18,
+      "latency_ms": 24004,
+      "confidence": 80,
+      "created_at": "2026-07-04 15:19:50"
+    },
+    {
+      "agent": "mimo-2.5-pro",
+      "role": "execute",
+      "success": true,
+      "turns": 1,
+      "tool_calls": 1,
+      "latency_ms": 3650,
+      "confidence": 80,
+      "created_at": "2026-07-04 15:15:30"
+    },
+    {
+      "agent": "mistral",
+      "role": "review",
+      "success": true,
+      "turns": 0,
+      "tool_calls": 0,
+      "latency_ms": 4662,
+      "confidence": 80,
+      "created_at": "2026-07-03 19:47:45"
+    },
+    {
+      "agent": "mimo-2.5-pro",
+      "role": "review",
+      "success": true,
+      "turns": 4,
+      "tool_calls": 8,
+      "latency_ms": 74515,
+      "confidence": 75,
+      "created_at": "2026-07-03 19:26:20"
+    },
+    {
+      "agent": "minimax",
+      "role": "review",
+      "success": true,
+      "turns": 13,
+      "tool_calls": 15,
+      "latency_ms": 69865,
+      "confidence": 65,
+      "created_at": "2026-07-03 19:10:42"
+    }
+  ],
+  "logs": [],
+  "lsp": {
+    "errors": 0,
+    "warnings": 0,
+    "active_servers": 0
+  },
+  "memory_stats": {
+    "tiers": [
+      {
+        "tier": "L0",
+        "functional_name": "Experience",
+        "count": 3
+      },
+      {
+        "tier": "L1",
+        "functional_name": "Experience",
+        "count": 50
+      },
+      {
+        "tier": "L2",
+        "functional_name": "Observation",
+        "count": 2
+      },
+      {
+        "tier": "L3",
+        "functional_name": "World",
+        "count": 0
+      },
+      {
+        "tier": "L4",
+        "functional_name": "MentalModel",
+        "count": 0
+      },
+      {
+        "tier": "L5",
+        "functional_name": "Pattern",
+        "count": 0
+      }
+    ],
+    "tier_kinds": [
+      {
+        "tier": "L0",
+        "functional_name": "Experience",
+        "kind": "fact",
+        "count": 3
+      },
+      {
+        "tier": "L1",
+        "functional_name": "Experience",
+        "kind": "episode",
+        "count": 50
+      },
+      {
+        "tier": "L2",
+        "functional_name": "Observation",
+        "kind": "fact",
+        "count": 1
+      },
+      {
+        "tier": "L2",
+        "functional_name": "Observation",
+        "kind": "preference",
+        "count": 1
+      }
+    ],
+    "scopes": [
+      {
+        "scope": "global",
+        "count": 39,
+        "conflicted_memories": 0
+      },
+      {
+        "scope": "workspace",
+        "count": 16,
+        "conflicted_memories": 0
+      },
+      {
+        "scope": "project",
+        "count": 0,
+        "conflicted_memories": 0
+      }
+    ]
+  },
+  "metrics": [
+    {
+      "role": "draft",
+      "total": 144,
+      "successes": 144,
+      "avg_latency_ms": 42027,
+      "tokens": 4380809,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 0,
+      "estimated_cost_usd": 0
+    },
+    {
+      "role": "review",
+      "total": 56,
+      "successes": 53,
+      "avg_latency_ms": 127428,
+      "tokens": 6250294,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 0,
+      "estimated_cost_usd": 0
+    },
+    {
+      "role": "execute",
+      "total": 21,
+      "successes": 17,
+      "avg_latency_ms": 34162,
+      "tokens": 816504,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 491840,
+      "estimated_cost_usd": 0
+    },
+    {
+      "role": "code",
+      "total": 9,
+      "successes": 9,
+      "avg_latency_ms": 39423,
+      "tokens": 259360,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 0,
+      "estimated_cost_usd": 0
+    },
+    {
+      "role": "summarize",
+      "total": 3,
+      "successes": 3,
+      "avg_latency_ms": 482,
+      "tokens": 2441,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 0,
+      "estimated_cost_usd": 0
+    },
+    {
+      "role": "reason",
+      "total": 3,
+      "successes": 3,
+      "avg_latency_ms": 199096,
+      "tokens": 51337,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 0,
+      "estimated_cost_usd": 0
+    },
+    {
+      "role": "validate",
+      "total": 1,
+      "successes": 1,
+      "avg_latency_ms": 46094,
+      "tokens": 29424,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 0,
+      "estimated_cost_usd": 0
+    },
+    {
+      "role": "diagnose",
+      "total": 1,
+      "successes": 0,
+      "avg_latency_ms": 116,
+      "tokens": 0,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 0,
+      "estimated_cost_usd": 0
+    }
+  ],
+  "onboard": {
+    "version": "1",
+    "ready": true,
+    "elapsed_ms": 0,
+    "next_actions": [],
+    "steps": [
+      {
+        "step": "database",
+        "status": "ok",
+        "message": "memory store reachable"
+      },
+      {
+        "step": "agents",
+        "status": "ok",
+        "message": "8 agents configured"
+      },
+      {
+        "step": "delegations",
+        "status": "ok",
+        "message": "delegate activity recorded"
+      },
+      {
+        "step": "lsp",
+        "status": "ok",
+        "message": "no code diagnostics"
+      }
+    ]
+  },
+  "plans": [
+    {
+      "id": 2,
+      "agent": "delegate-plan",
+      "task": "Fix add bug",
+      "status": "pending",
+      "created_at": "2026-07-03 07:08:32",
+      "total_steps": 1,
+      "done_steps": 0
+    },
+    {
+      "id": 1,
+      "agent": "delegate-plan",
+      "task": "Fix the add bug in calc",
+      "status": "pending",
+      "created_at": "2026-07-03 07:03:02",
+      "total_steps": 1,
+      "done_steps": 0
+    }
+  ],
+  "traces": [
+    {
+      "turn": 18,
+      "direction": "response",
+      "tool_name": null
+    },
+    {
+      "turn": 18,
+      "direction": "request",
+      "tool_name": null
+    },
+    {
+      "turn": 17,
+      "direction": "tool_call",
+      "tool_name": "bash"
+    },
+    {
+      "turn": 17,
+      "direction": "response",
+      "tool_name": null
+    },
+    {
+      "turn": 17,
+      "direction": "request",
+      "tool_name": null
+    }
+  ],
+  "token_audit": [
+    {
+      "tool_name": "delegate",
+      "role": "draft",
+      "prompt_tokens": 3800000,
+      "completion_tokens": 580000,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 0,
+      "estimated_cost_usd": 4.21,
+      "usage_kind": "realized",
+      "call_count": 144,
+      "last_seen": "2026-07-04 15:19:50"
+    },
+    {
+      "tool_name": "delegate",
+      "role": "review",
+      "prompt_tokens": 5900000,
+      "completion_tokens": 350000,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 0,
+      "estimated_cost_usd": 6.02,
+      "usage_kind": "realized",
+      "call_count": 56,
+      "last_seen": "2026-07-04 14:02:11"
+    },
+    {
+      "tool_name": "delegate",
+      "role": "execute",
+      "prompt_tokens": 780000,
+      "completion_tokens": 36000,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 0,
+      "estimated_cost_usd": 0.44,
+      "usage_kind": "realized",
+      "call_count": 21,
+      "last_seen": "2026-07-04 13:50:00"
+    },
+    {
+      "tool_name": "summarize",
+      "role": "summarize",
+      "prompt_tokens": 2200,
+      "completion_tokens": 240,
+      "cache_write_tokens": 0,
+      "cache_read_tokens": 0,
+      "estimated_cost_usd": 0.001,
+      "usage_kind": "realized",
+      "call_count": 3,
+      "last_seen": "2026-07-03 22:10:00"
+    }
+  ],
+  "decisions": [
+    {
+      "id": 3,
+      "task_id": 49,
+      "options": "accept | reject | revise",
+      "chosen": "accept",
+      "rationale": "Passed proposal gate with 2/2 approvals",
+      "assumptions": "",
+      "outcome": "success",
+      "created_at": "2026-07-04 10:22:31"
+    },
+    {
+      "id": 2,
+      "task_id": 48,
+      "options": "autonomous | manual",
+      "chosen": "manual",
+      "rationale": "Panel unreachable, fell back to manual review",
+      "assumptions": "",
+      "outcome": "pending",
+      "created_at": "2026-07-03 09:15:02"
+    },
+    {
+      "id": 1,
+      "task_id": 47,
+      "options": "merge | hold",
+      "chosen": "hold",
+      "rationale": "CI gate failed on lint",
+      "assumptions": "",
+      "outcome": "reject",
+      "created_at": "2026-07-02 18:40:12"
+    }
+  ],
+  "sessions": [
+    {
+      "id": "web-8c634ea6-a216-4987-96e9-096033c95df3",
+      "title": "Test",
+      "cwd": "/var/lib/aimee-workspaces/webusers/admin/aimee",
+      "created_at": "2026-07-03T17:06:07Z",
+      "last_active": "2026-07-03T17:06:07Z"
+    }
+  ],
+  "audit": [
+    {
+      "ts": "2026-07-04T15:19:45Z",
+      "kind": "tool_action",
+      "actor": "delegate",
+      "tool": "bash",
+      "mode": "approve",
+      "reason_code": "allow",
+      "verdict": "allow",
+      "task_id": 0
+    },
+    {
+      "ts": "2026-07-04T15:18:10Z",
+      "kind": "tool_action",
+      "actor": "primary",
+      "tool": "edit",
+      "mode": "approve",
+      "reason_code": "path_guard",
+      "verdict": "block",
+      "task_id": 0
+    },
+    {
+      "ts": "2026-07-04T15:17:02Z",
+      "kind": "tool_action",
+      "actor": "delegate",
+      "tool": "write",
+      "mode": "approve",
+      "reason_code": "rewrite",
+      "verdict": "rewrite",
+      "task_id": 0
+    }
+  ]
+}

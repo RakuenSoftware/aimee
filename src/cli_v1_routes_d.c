@@ -612,6 +612,7 @@ static const struct
     {"curator.implements", "POST", "/v1/curator/implements"},
     {"curator.invalidated", "POST", "/v1/curator/invalidated"},
     {"dashboard.all", "GET", "/v1/dashboard/all"},
+    {"dashboard.audit", "GET", "/v1/dashboard/audit"},
     {"dashboard.delegations", "GET", "/v1/dashboard/delegations"},
     {"dashboard.logs", "GET", "/v1/dashboard/logs"},
     {"dashboard.memory_stats", "GET", "/v1/dashboard/memory_stats"},

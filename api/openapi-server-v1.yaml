@@ -2096,6 +2096,10 @@ paths:
     get:
       summary: Full dashboard snapshot
       responses: { "200": { description: Dashboard, content: { application/json: { schema: { type: object } } } } }
+  /dashboard/audit:
+    get:
+      summary: Tool-action audit ledger (guardrail verdicts) for the Logs page
+      responses: { "200": { description: Audit, content: { application/json: { schema: { type: object } } } } }
   /dashboard/delegations:
     get:
       summary: Delegation dashboard

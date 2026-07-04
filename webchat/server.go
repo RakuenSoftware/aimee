@@ -121,6 +121,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/", s.requireAuth(s.handleRoot))
 	mux.HandleFunc("/chat", s.requireAuth(s.handleSPA))
 	mux.HandleFunc("/dashboard", s.requireAuth(s.handleSPA))
+	mux.HandleFunc("/logs", s.requireAuth(s.handleSPA))
 	// Workflow surfaces: "Edit Workflows" (the def/graph editor) and "Workflow
 	// Actions" (author → autonomous-run → status/history). Both are SPA routes so a
 	// hard refresh / direct link serves index.html and React Router takes over.
@@ -177,6 +178,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 
 	// Aggregate dashboard endpoint — all panels in one server round-trip
 	mux.HandleFunc("/api/dashboard", s.requireAuth(s.handleDashboardAll))
+	mux.HandleFunc("/api/audit", s.requireAuth(s.dataArrayHandler("dashboard.audit")))
 
 	// Code-graph visualization (§8): read-only views via aimee-server's index_graph_* MCP tools.
 	mux.HandleFunc("/api/graph/hubs", s.requireAuth(s.handleGraphHubs))
