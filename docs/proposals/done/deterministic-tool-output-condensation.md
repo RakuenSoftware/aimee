@@ -1,13 +1,55 @@
 # Proposal: Deterministic command-aware tool-output condensation
 
-- **State:** proposed — design (pending review). A new **deterministic (non-LLM),
-  command-aware** condensation lever for the unified context economizer that shrinks
-  **tool/command output** at the execution seam, before it enters agent context.
-  Default-off, lossless-on-demand, config-gated, integrated with the existing `reduce_*`
-  subsystem and its telemetry ledger. Design roundtable-reviewed (1 round, no blocking
-  items); the refinements below (spill retrieval + lifetime, wrapper-unwrapping slice,
-  filter isolation, ledger schema, per-family failure policy, spill security,
-  delegate-first thesis) are incorporated.
+- **State:** done — the **delegate surface** is implemented + merged to `testing`, wired at
+  the live `tool_bash` seam behind `reduce_command_filter` (default **OFF** — "wired +
+  shipped, inert until an operator enables the flag"; byte-identical fall-through to the
+  size-based `reduce_compress` when off). A new **deterministic (non-LLM), command-aware**
+  condensation lever for the unified context economizer that shrinks tool/command output
+  at the execution seam, before it enters agent context. See **Implementation status**
+  below. Design roundtable-reviewed (2 rounds, no blocking); every slice roundtable-reviewed.
+
+## Implementation status
+
+Shipped as seven design slices, each roundtable-reviewed + CI-green + squash-merged, all
+**default-off**:
+
+- **S1 (PR #1035)** — `reduce_command_filter` config flag (→ `config_fields[]` → auto in
+  the web Settings page) + the pure primitives (`tc_strip_noise` / `tc_dedup_lines` /
+  `tc_truncate_with_signal`).
+- **S2 (PR #1036)** — `tc_recognize`: compound-line fail-open, wrapper unwrapping
+  (`env`/`sudo`/`time`/`npx`/`uv run`/…), OPAQUE for xargs/make/scripts/**any path-prefixed
+  invocation** (masquerade guard). Every mis-parse falls to passthrough — never the wrong
+  family.
+- **S3 (PR #1038)** — the engine: `tc_family_test_runner` (keep failures + summary, drop
+  passes; non-zero-with-no-failure passthrough), the opaque-ref spill store
+  (`O_NOFOLLOW` 0600), and `tool_condense_apply` (material-gain gate; **lossless** — no
+  condense without a durable spill; 1 MiB input cap → size-based fallback).
+- **S4 (PR #1039)** — wired the **delegate bash-tool seam** (`tool_bash`): LIVE. Fail-open
+  to `agent_compress_tool_result`. Validated by a `.253` CT boot smoke (`/storage` store).
+- **S5 (PR #1041)** — the compilers/linters (**diagnostics**) family via a shared
+  `tc_signal_filter`; `require_fail_nonzero` keeps an unrecognized build failure verbatim.
+- **S6 (PR #1042)** — realized-savings observability (atomic counters +
+  `tool_condense_stats_snapshot`) so an operator can measure before any default-on.
+- **S7 — CARRIED (not shipped).** The **primary-agent hook** surface. The proposal's own
+  §9.3 leaves its contract open (rewrite-the-command vs filter-the-result, and whether the
+  Claude-Code hook surface can carry the recovery pointer without breaking the tool
+  contract). It is a distinct surface with its own trust model + validation gate; the
+  delegate surface reaches its own default-on decision independently (§2.3), so this does
+  not block the shipped work.
+
+**Carried follow-ups** (sanctioned, not loose ends): S7 primary-agent hook + first-class
+`tool_output_get` retrieval tool; the additional families (VCS `git`, file-ops,
+package-managers); and the primary-agent-surface spill lifetime/eviction sweep.
+
+**Default-ON enablement gate (named, not silent):** the flip from default-off is an
+operator decision, owned by the operator, and must NOT happen silently — changing the
+default reopens this filing. Its evidence bar (from the S6 counters on a live workload):
+(1) **no lost signal** — on a corpus of failing builds/tests the *condensed* text contains
+every failure the raw did; (2) **material realized savings** — `applied_raw` vs
+`applied_final` shows a real reduction on recognized commands without regressing task
+success; (3) **fail-safe proven** — unrecognized / over-cap / filter-error all degrade to
+raw + spill. The delegate-surface lever is complete, live-wired, and self-measuring toward
+that gate.
 - **Thesis:** the largest and most signal-sparse contributor to context growth in a
   coding agent is **tool output** — test-runner logs, compiler/linter dumps, VCS status,
   directory listings, package-manager chatter. Most of that volume is not signal:
