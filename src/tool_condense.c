@@ -216,9 +216,11 @@ tc_reco_result_t tc_recognize(const char *cmdline)
       r.outcome = TC_OPAQUE;
       return r;
    }
-   /* a `./script` or a path to something whose basename we don't know is OPAQUE too;
-    * but a full path to a KNOWN command (e.g. /usr/bin/git) still resolves by basename. */
-   if ((tok[i][0] == '.' || strchr(tok[i], '/')) && !tc_is_recognized_cmd(cmd))
+   /* ANY path-prefixed invocation is OPAQUE — we only apply a family rule to a BARE
+    * command name (resolved by the shell against $PATH). Honoring the basename of a
+    * path would let `./git` / `/tmp/git` (a script or binary that merely shares a known
+    * name) inherit that command's family filter; treat all such as opaque. */
+   if (tok[i][0] == '.' || strchr(tok[i], '/'))
    {
       r.outcome = TC_OPAQUE;
       return r;

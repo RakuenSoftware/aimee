@@ -141,9 +141,14 @@ int main(void)
       r = RECO("pnpm exec eslint .");
       assert(r.outcome == TC_RECOGNIZED && !strcmp(r.cmd, "eslint"));
 
-      /* full path to a known command still resolves by basename */
+      /* a path-prefixed invocation is OPAQUE even if the basename is a known command —
+       * `/tmp/git` / `./git` must NOT inherit the git family filter (masquerade guard). */
       r = RECO("/usr/bin/git log");
-      assert(r.outcome == TC_RECOGNIZED && !strcmp(r.cmd, "git"));
+      assert(r.outcome == TC_OPAQUE);
+      r = RECO("./git status");
+      assert(r.outcome == TC_OPAQUE);
+      r = RECO("/tmp/cargo test");
+      assert(r.outcome == TC_OPAQUE);
 
       /* OPAQUE: multiplexers, make, scripts, interpreters */
       r = RECO("make test");
