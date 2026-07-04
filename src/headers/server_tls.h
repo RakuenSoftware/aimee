@@ -43,6 +43,12 @@ extern "C"
    /* server_tls_init from the default location (<config>/tls/server.crt + .key). */
    int server_tls_init_default(void);
 
+   /* Live cert reload (live-config-reload): re-read the SAME cert/key files server_tls_init
+    * was given and atomically swap the listener's SSL_CTX (new handshakes use the new cert;
+    * in-flight connections keep the old until they drain). Validate-or-keep: a cert that fails
+    * to load keeps the current one. Returns 1 = reloaded, 0 = TLS not enabled, -1 = kept. */
+   int server_tls_reload(void);
+
    /* Per-connection lifecycle for the conn worker: handshake an accepted fd and
     * register its SSL on the conn-io shim (NULL on failure — caller closes fd);
     * and the teardown (unregister + shutdown + free). */

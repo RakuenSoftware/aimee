@@ -19,6 +19,11 @@
 
 static SSL_CTX *g_ctx = NULL;
 static pthread_mutex_t g_ctx_mu = PTHREAD_MUTEX_INITIALIZER;
+/* Saved at init so a SIGHUP reload can re-read the SAME cert/key files (live-config-reload). */
+static char g_cert_path[MAX_PATH_LEN];
+static char g_key_path[MAX_PATH_LEN];
+static char g_client_ca_path[MAX_PATH_LEN];
+static int g_mtls_mode = 0;
 
 /* mTLS verify callback: OpenSSL has already checked the chain/validity
  * (preverify_ok). Additionally reject a revoked leaf (depth 0) by consulting the
@@ -81,23 +86,17 @@ static int alpn_select_cb(SSL *ssl, const unsigned char **out, unsigned char *ou
    return SSL_TLSEXT_ERR_OK;
 }
 
-int server_tls_init(const char *cert_path, const char *key_path, int mtls_mode,
-                    const char *client_ca_path)
+/* Build a fresh SSL_CTX from the given cert/key/mtls settings, WITHOUT touching g_ctx.
+ * Returns the ctx (caller owns) or NULL on any load failure — so both init and a live reload
+ * validate-or-keep: a bad cert never disturbs the running listener. */
+static SSL_CTX *tls_build_ctx(const char *cert_path, const char *key_path, int mtls_mode,
+                              const char *client_ca_path)
 {
-   if (!cert_path || !cert_path[0] || !key_path || !key_path[0])
-      return -1;
-   pthread_mutex_lock(&g_ctx_mu);
-   if (g_ctx)
-   {
-      pthread_mutex_unlock(&g_ctx_mu);
-      return 0;
-   }
    SSL_CTX *ctx = SSL_CTX_new(TLS_server_method());
    if (!ctx)
    {
-      pthread_mutex_unlock(&g_ctx_mu);
       aimee_log(LOG_WARN, "server.tls", "SSL_CTX_new failed");
-      return -1;
+      return NULL;
    }
    /* Modern floor; no client-cert verification (plain server TLS — the bearer is
     * the caller's authentication, the TLS is the channel). */
@@ -121,8 +120,7 @@ int server_tls_init(const char *cert_path, const char *key_path, int mtls_mode,
       aimee_log(LOG_WARN, "server.tls", "failed to load TLS cert/key (%s, %s): %s", cert_path,
                 key_path, ERR_error_string(ERR_get_error(), NULL));
       SSL_CTX_free(ctx);
-      pthread_mutex_unlock(&g_ctx_mu);
-      return -1;
+      return NULL;
    }
 
    /* mTLS: verify client certs against aimee's client CA. The chain is verified
@@ -155,10 +153,72 @@ int server_tls_init(const char *cert_path, const char *key_path, int mtls_mode,
       }
    }
 
+   return ctx;
+}
+
+int server_tls_init(const char *cert_path, const char *key_path, int mtls_mode,
+                    const char *client_ca_path)
+{
+   if (!cert_path || !cert_path[0] || !key_path || !key_path[0])
+      return -1;
+   pthread_mutex_lock(&g_ctx_mu);
+   if (g_ctx)
+   {
+      pthread_mutex_unlock(&g_ctx_mu);
+      return 0;
+   }
+   SSL_CTX *ctx = tls_build_ctx(cert_path, key_path, mtls_mode, client_ca_path);
+   if (!ctx)
+   {
+      pthread_mutex_unlock(&g_ctx_mu);
+      return -1;
+   }
    g_ctx = ctx;
+   /* remember the paths so a SIGHUP reload can re-read the same files */
+   snprintf(g_cert_path, sizeof g_cert_path, "%s", cert_path);
+   snprintf(g_key_path, sizeof g_key_path, "%s", key_path);
+   snprintf(g_client_ca_path, sizeof g_client_ca_path, "%s", client_ca_path ? client_ca_path : "");
+   g_mtls_mode = mtls_mode;
    pthread_mutex_unlock(&g_ctx_mu);
    aimee_log(LOG_INFO, "server.tls", "native TLS enabled (cert %s)", cert_path);
    return 0;
+}
+
+int server_tls_reload(void)
+{
+   pthread_mutex_lock(&g_ctx_mu);
+   if (!g_ctx)
+   {
+      pthread_mutex_unlock(&g_ctx_mu);
+      return 0; /* TLS not enabled -> nothing to reload */
+   }
+   char cert[MAX_PATH_LEN], key[MAX_PATH_LEN], ca[MAX_PATH_LEN];
+   snprintf(cert, sizeof cert, "%s", g_cert_path);
+   snprintf(key, sizeof key, "%s", g_key_path);
+   snprintf(ca, sizeof ca, "%s", g_client_ca_path);
+   int mtls = g_mtls_mode;
+   pthread_mutex_unlock(&g_ctx_mu);
+
+   /* Build the replacement OUTSIDE the lock (file I/O). Validate-or-keep: a cert that fails to
+    * load leaves the running listener on the current cert (never a broken TLS endpoint). */
+   SSL_CTX *nctx = tls_build_ctx(cert, key, mtls, ca[0] ? ca : NULL);
+   if (!nctx)
+   {
+      aimee_log(LOG_WARN, "server.tls",
+                "TLS reload: new cert/key failed to load — keeping the current cert");
+      return -1;
+   }
+   pthread_mutex_lock(&g_ctx_mu);
+   SSL_CTX *old = g_ctx;
+   g_ctx = nctx; /* new handshakes use the new cert */
+   pthread_mutex_unlock(&g_ctx_mu);
+   /* In-flight connections' SSL objects hold their own ref on `old` (SSL_new up-refs the
+    * SSL_CTX), so this free just drops OUR ref; `old` is destroyed when the last live SSL on
+    * it is freed. No handshake in progress can observe a half-freed ctx (the accept path
+    * takes g_ctx_mu around the g_ctx read + SSL_new). */
+   SSL_CTX_free(old);
+   aimee_log(LOG_INFO, "server.tls", "TLS cert reloaded (cert %s)", cert);
+   return 1;
 }
 
 int server_tls_peer_identity(SSL *ssl, char *cn_out, size_t cn_len, char *serial_out,
@@ -203,17 +263,22 @@ int server_tls_enabled(void)
 
 SSL *server_tls_accept(int fd)
 {
+   if (fd < 0)
+      return NULL;
+   /* Take the ctx lock only around the read + SSL_new so the up-ref is atomic vs a live cert
+    * reload's swap+free (SSL_new increments the SSL_CTX refcount, pinning `ctx` for this SSL's
+    * lifetime). The handshake itself runs OUTSIDE the lock. */
+   pthread_mutex_lock(&g_ctx_mu);
    SSL_CTX *ctx = g_ctx;
-   if (!ctx || fd < 0)
+   SSL *ssl = ctx ? SSL_new(ctx) : NULL;
+   pthread_mutex_unlock(&g_ctx_mu);
+   if (!ssl)
       return NULL;
    /* Bound the handshake (and subsequent blocking reads) so a stalled peer cannot
     * pin a per-conn worker thread indefinitely (the conn cap is small). */
    struct timeval tv = {.tv_sec = 30, .tv_usec = 0};
    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-   SSL *ssl = SSL_new(ctx);
-   if (!ssl)
-      return NULL;
    SSL_set_fd(ssl, fd);
    if (SSL_accept(ssl) != 1)
    {

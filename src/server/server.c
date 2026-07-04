@@ -13,8 +13,9 @@
 #include "primary_cli_ingestor.h"
 #include "server.h"
 #include "turn_registry.h"
-#include "server_http.h" /* server_http_api_status_report */
-#include "config.h"      /* config_t / config_load for api.status, api.enable */
+#include "server_http.h"
+#include "server_tls.h" /* server_http_api_status_report */
+#include "config.h"     /* config_t / config_load for api.status, api.enable */
 #include "delegate_backend_docker.h"
 #include "delegate_backend_local.h"
 #include "delegate_backend_ssh.h"
@@ -2036,6 +2037,9 @@ int server_run(server_ctx_t *ctx)
          int rc = config_reload();
          aimee_log(rc < 0 ? LOG_WARN : LOG_INFO, "config", "SIGHUP config reload: %s",
                    rc > 0 ? "applied" : (rc == 0 ? "no change" : "rejected (kept running config)"));
+         /* Also live-reload the TLS cert (re-read cert/key + swap SSL_CTX) so a renewed cert
+          * is picked up on SIGHUP without dropping the listener (live-config-reload). */
+         (void)server_tls_reload();
       }
    }
    return 0;
