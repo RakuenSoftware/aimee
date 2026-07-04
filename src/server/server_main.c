@@ -165,6 +165,11 @@ static int run_server(const char *socket_path, log_level_t log_level)
    config_t cfg;
    config_load(&cfg);
 
+   /* Bridge the autonomy config knobs to their AIMEE_AUTONOMY_* env vars as early as
+    * possible — before any consumer (plugin discovery, the wfe engine) could read them
+    * via getenv. An explicitly-set env var still overrides (setenv no-overwrite). */
+   autonomy_config_to_env(&cfg);
+
    /* Startup-fatal validation for the live gateway-mutation path: an invalid
     * session-disable TTL (<=0) must refuse to bring up the /v1 server rather than
     * pin/disable the breaker on live client traffic. Scoped to server startup so
@@ -213,10 +218,6 @@ static int run_server(const char *socket_path, log_level_t log_level)
 
    /* Parse plugin extension config keys not covered by config_load(). */
    config_load_plugin_extensions(&cfg);
-
-   /* Bridge the autonomy config knobs to their AIMEE_AUTONOMY_* env vars before the wfe
-    * engine reads them (an explicitly-set env var still overrides — setenv no-overwrite). */
-   autonomy_config_to_env(&cfg);
 
    /* Register bundled context engine and discover plugins from all sources.
     * Must run after config_load so plugin_loader can read install prefix from env.

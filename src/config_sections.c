@@ -784,30 +784,40 @@ void config_parse_reduce_section(config_t *cfg, cJSON *root)
    }
 }
 
+/* Clamp an integer to [lo, hi]. */
+static int clampi(int v, int lo, int hi)
+{
+   return v < lo ? lo : (v > hi ? hi : v);
+}
+
 /* Autonomous-development pipeline knobs (Phase-C). Historically env-only
  * (AIMEE_AUTONOMY_*); parsed here so they live in the typed config + web Settings, then
- * bridged to the env vars at startup (autonomy_config_to_env) for the wfe library. Only
- * non-negative values are accepted (a negative is ignored, leaving the default). */
+ * bridged to the env vars at startup (autonomy_config_to_env) for the wfe library.
+ * Out-of-range values are CLAMPED to sane bounds (not silently dropped) — this runs at
+ * config_load, so it also bounds a value a raw config.set persisted, before the startup
+ * bridge reads it: a fat-fingered skeptics=1000 can't fan out 1000 judge dispatches. The
+ * wfe consumers additionally fail-safe on <=0 (treat as off/default), so the low end is
+ * doubly safe. */
 void config_parse_autonomy_section(config_t *cfg, cJSON *root)
 {
    cJSON *autonomy = cJSON_GetObjectItemCaseSensitive(root, "autonomy");
    if (!cJSON_IsObject(autonomy))
       return;
    cJSON *item = cJSON_GetObjectItemCaseSensitive(autonomy, "skeptics");
-   if (cJSON_IsNumber(item) && item->valueint >= 0)
-      cfg->autonomy_skeptics = item->valueint;
+   if (cJSON_IsNumber(item))
+      cfg->autonomy_skeptics = clampi(item->valueint, 0, 32);
    item = cJSON_GetObjectItemCaseSensitive(autonomy, "fanout");
    if (cJSON_IsBool(item))
       cfg->autonomy_fanout = cJSON_IsTrue(item) ? 1 : 0;
    item = cJSON_GetObjectItemCaseSensitive(autonomy, "unit_retry");
-   if (cJSON_IsNumber(item) && item->valueint >= 0)
-      cfg->autonomy_unit_retry = item->valueint;
+   if (cJSON_IsNumber(item))
+      cfg->autonomy_unit_retry = clampi(item->valueint, 0, 10);
    item = cJSON_GetObjectItemCaseSensitive(autonomy, "unit_max");
-   if (cJSON_IsNumber(item) && item->valueint > 0)
-      cfg->autonomy_unit_max = item->valueint;
+   if (cJSON_IsNumber(item)) /* unit_max must be positive — 0 units is meaningless */
+      cfg->autonomy_unit_max = clampi(item->valueint, 1, 256);
    item = cJSON_GetObjectItemCaseSensitive(autonomy, "ci_retry_max");
-   if (cJSON_IsNumber(item) && item->valueint >= 0)
-      cfg->autonomy_ci_retry_max = item->valueint;
+   if (cJSON_IsNumber(item))
+      cfg->autonomy_ci_retry_max = clampi(item->valueint, 0, 20);
 }
 
 /* Bridge the autonomy config knobs to the AIMEE_AUTONOMY_* env vars the wfe library
@@ -817,7 +827,7 @@ void config_parse_autonomy_section(config_t *cfg, cJSON *root)
  * a Settings change to these knobs therefore applies on the next server start. */
 void autonomy_config_to_env(const config_t *cfg)
 {
-   char buf[16];
+   char buf[16]; /* an int is at most 11 chars + sign + NUL = 13 <= 16 */
    snprintf(buf, sizeof buf, "%d", cfg->autonomy_skeptics);
    setenv("AIMEE_AUTONOMY_SKEPTICS", buf, 0);
    setenv("AIMEE_AUTONOMY_FANOUT", cfg->autonomy_fanout ? "1" : "0", 0);
