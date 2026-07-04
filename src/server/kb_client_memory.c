@@ -16,6 +16,7 @@
 
 #include "kb_client.h"
 #include "kb_client_memory_internal.h"
+#include "db1/user_memory.h"
 #include "cJSON.h"
 #include "memory_query.h" /* db2_memory_low_eff_row_t etc. */
 #include "tasks.h"
@@ -985,6 +986,12 @@ int64_t kb_client_memory_upsert_workflow(const char *workspace, const char *sign
    return id;
 }
 
+/* Proposal 2 Phase 1: recall assembly runs IN aimee-kb (the shared, db2-only,
+ * many-user store) which has no access to this user's db1, so the db1<->db2
+ * merge happens here in aimee-server (1:1 per user) — the single proxy seam
+ * every recall consumer (the /v1 endpoint AND the primary-agent pre-turn
+ * injection) shares. The per-section merge logic lives in db1/user_memory.c
+ * (db1_user_memory_merge_into_array) so it is unit-testable without kb. */
 char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, int session_start,
                                       const char *graph_code_fusion_state)
 {
@@ -998,7 +1005,37 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
    cJSON_AddStringToObject(
        req, "graph_code_fusion_state",
        (graph_code_fusion_state && graph_code_fusion_state[0]) ? graph_code_fusion_state : "off");
-   return kb_v1_action_request("memory.recall", req);
+   char *j = kb_v1_action_request("memory.recall", req);
+   if (!j)
+      return NULL;
+
+   /* Fast path: when this user has no db1 memory (the case until capture is
+    * wired), skip the parse/merge/reserialize entirely and pass the kb bundle
+    * through verbatim — recall is on the primary agent's hot per-turn loop. */
+   if (!db1_user_memory_any())
+      return j;
+
+   /* Merge this user's db1 identity/preferences on top of the org bundle. */
+   cJSON *bundle = cJSON_Parse(j);
+   if (bundle)
+   {
+      cJSON *recall = cJSON_GetObjectItemCaseSensitive(bundle, "recall");
+      if (recall)
+      {
+         db1_user_memory_merge_into_array(cJSON_GetObjectItemCaseSensitive(recall, "identity"),
+                                          DB1_USER_RECALL_IDENTITY, "user identity");
+         db1_user_memory_merge_into_array(cJSON_GetObjectItemCaseSensitive(recall, "preferences"),
+                                          DB1_USER_RECALL_PREFERENCES, "user preference");
+      }
+      char *merged = cJSON_PrintUnformatted(bundle);
+      cJSON_Delete(bundle);
+      if (merged)
+      {
+         free(j);
+         return merged;
+      }
+   }
+   return j; /* parse/merge failed: return the kb bundle verbatim */
 }
 
 char *kb_client_memory_recall_json(const char *task_hint, int limit_tokens, int session_start)
