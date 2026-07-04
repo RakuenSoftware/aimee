@@ -45,6 +45,11 @@ typedef struct
    int terminal;                /* reached a terminal state this step */
    char state[24];              /* active | accepted | rejected | abandoned */
    wfe_pause_reason_t pause_reason;
+   /* Phase-C failure taxonomy (meaningful iff last_status == WFE_STEP_FAILED),
+    * propagated from the executor's step result so the autonomy run loop can route
+    * retry / terminal-reject / park without re-deriving the reason. */
+   wfe_failure_class_t failure_class;
+   int failure_has_new_input;
 } wfe_advance_result_t;
 
 /* Advance the work item exactly one step. Returns 0 on a clean step (incl.

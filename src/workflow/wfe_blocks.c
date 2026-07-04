@@ -468,7 +468,7 @@ static wfe_step_result_t exec_implement(wfe_ctx *ctx, const wfe_node_t *node)
       return with_cost(wfe_step_looped(), cost);
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
    if (wfe_git_freeze(wd, "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
-      return with_cost(wfe_step_failed(), cost);
+      return with_cost(wfe_step_failed_class(WFE_FAIL_CORRUPTION, 0), cost); /* worktree/git */
    /* Mechanical verify gate (WP-1b): a unit only advances if it PASSES. A failed
     * verdict loops back to implement (the engine bounds the retries via
     * stage_attempt and parks max_attempts on exhaustion); a re-dispatched fresh
@@ -498,7 +498,7 @@ static wfe_step_result_t exec_document(wfe_ctx *ctx, const wfe_node_t *node)
       return with_cost(wfe_step_looped(), cost);
    char base[64] = "", head[64] = "", dhash[65] = "", err[128] = "";
    if (wfe_git_freeze(wd, "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
-      return with_cost(wfe_step_failed(), cost);
+      return with_cost(wfe_step_failed_class(WFE_FAIL_CORRUPTION, 0), cost); /* worktree/git */
    char handle[80];
    snprintf(handle, sizeof handle, "%s.out", node->id);
    return wfe_step_advanced(handle, head, cost);
@@ -729,7 +729,7 @@ static wfe_step_result_t exec_custom(wfe_ctx *ctx, const wfe_node_t *node)
    if (c->produces == WFE_ART_BRANCH)
    {
       if (wfe_git_freeze(wd, "HEAD", base, head, dhash, err, sizeof err) != 0 || !head[0])
-         return wfe_step_failed();
+         return wfe_step_failed_class(WFE_FAIL_CORRUPTION, 0);
       return wfe_step_advanced(handle, head, 0.0);
    }
    return wfe_step_advanced(handle, "", 0.0); /* produces: none (sink) */

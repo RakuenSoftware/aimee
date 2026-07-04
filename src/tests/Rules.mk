@@ -118,6 +118,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-db $(TESTPR
                $(TESTPREFIX)/unit-test-wfe-autonomy \
                $(TESTPREFIX)/unit-test-wfe-custom \
                $(TESTPREFIX)/unit-test-wfe-safety \
+               $(TESTPREFIX)/unit-test-wfe-failure-taxonomy \
                $(TESTPREFIX)/unit-test-wfe-delegate-seam \
                $(TESTPREFIX)/unit-test-wfe-scheduler \
                $(TESTPREFIX)/unit-test-wfe-random-delegate \
@@ -1545,6 +1546,10 @@ $(TESTPREFIX)/unit-test-wfe-safety: $(OBJDIR)/tests/test_wfe_safety.o \
                                     $(OBJDIR)/aimee_home.o $(OBJDIR)/util.o $(OBJDIR)/posix/util.o \
                                     $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-wfe-failure-taxonomy: $(OBJDIR)/tests/test_wfe_failure_taxonomy.o \
+                                    $(OBJDIR)/workflow/wfe_iface.o
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-wfe-delegate-seam: $(OBJDIR)/tests/test_wfe_delegate_seam.o \
                                     $(OBJDIR)/workflow/wfe_blocks.o $(OBJDIR)/workflow/wfe_engine.o \

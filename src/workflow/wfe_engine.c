@@ -304,6 +304,8 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
    wfe_ctx ctx = {work_item_id, def, node, &wi};
    wfe_step_result_t r = fn(&ctx, node);
    out->last_status = r.status;
+   out->failure_class = r.failure_class;
+   out->failure_has_new_input = r.failure_has_new_input;
    if (r.cost_usd > 0)
       WFE_CKW(db1_work_item_add_cost(work_item_id, r.cost_usd));
    /* post-executor budget re-check: a single step's cost can push over the cap,
@@ -329,10 +331,26 @@ int wfe_engine_advance(const char *work_item_id, wfe_advance_result_t *out, char
    }
    else if (r.status == WFE_STEP_FAILED)
    {
-      /* park with a NON-empty pause_reason so the next advance treats it as
-       * parked (an empty reason reads as "not parked" -> re-runs the node). */
-      WFE_CKW(db1_work_item_set_pause(work_item_id, "failed", node->id));
-      db1_lifecycle_event_add(work_item_id, node->id, "failed", "engine", "", "", r.cost_usd);
+      /* Phase-C failure taxonomy: derive the pause reason from the failure class so
+       * the run loop + UI can distinguish a terminal reject from a park-for-human
+       * from a stuck (transient without new input). Park with a NON-empty reason so
+       * the next advance treats it as parked (empty reads as "not parked"). */
+      wfe_failure_disposition_t disp =
+          wfe_failure_disposition(r.failure_class, r.failure_has_new_input);
+      const char *reason = "failed"; /* terminal-reject (refusal/permanent/corruption) */
+      const char *detail = "terminal";
+      if (disp == WFE_FDISP_PARK_HUMAN)
+      {
+         reason = "pending_human"; /* degraded / budget / forge -> human resumes */
+         detail = "park_human";
+      }
+      else if (disp == WFE_FDISP_PARK_STUCK)
+      {
+         reason = "stuck"; /* transient without new input -> no spin (stuck-skip guard) */
+         detail = "park_stuck";
+      }
+      WFE_CKW(db1_work_item_set_pause(work_item_id, reason, node->id));
+      db1_lifecycle_event_add(work_item_id, node->id, "failed", "engine", detail, "", r.cost_usd);
    }
    else
    {

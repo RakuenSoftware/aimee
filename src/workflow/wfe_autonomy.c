@@ -178,7 +178,13 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
       }
       if (r.last_status == WFE_STEP_FAILED)
       {
-         wfe_autonomy_cleanup_worktree(work_item_id);
+         /* Phase-C taxonomy: only a TERMINAL disposition tears down the worktree; a
+          * park-for-human or park-stuck keeps it so a human resume / new-input retry
+          * can pick up where it left off. (Retryable-with-new-input uses the LOOPED
+          * path, which never reaches here.) */
+         if (wfe_failure_disposition(r.failure_class, r.failure_has_new_input) ==
+             WFE_FDISP_TERMINAL)
+            wfe_autonomy_cleanup_worktree(work_item_id);
          return 0;
       }
       if (r.last_status != WFE_STEP_PENDING)

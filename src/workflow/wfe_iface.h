@@ -80,6 +80,22 @@ typedef enum
                             * be determined (transient/unknown) -- re-drive later */
 } wfe_pause_reason_t;
 
+/* Failure taxonomy (Phase-C Q4): how the autonomy run loop should react to a
+ * WFE_STEP_FAILED result. The core invariant is NEVER auto-retry without genuinely
+ * NEW input (a CI log / verify findings / a roundtable verdict) — a bare re-dispatch
+ * of the same prompt is not a retry, it is a spin, so it parks instead. */
+typedef enum
+{
+   WFE_FAIL_NONE = 0,  /* unclassified -> treated as PERMANENT (conservative: stop) */
+   WFE_FAIL_TRANSIENT, /* retryable IFF has_new_input, else park stuck */
+   WFE_FAIL_REFUSAL,   /* model/agent refused -> terminal-reject */
+   WFE_FAIL_PERMANENT, /* a permanent error -> terminal-reject */
+   WFE_FAIL_DEGRADED,  /* roundtable/panel degraded / exhausted retries -> park human */
+   WFE_FAIL_BUDGET,    /* budget breach -> park human */
+   WFE_FAIL_FORGE,     /* git/forge op failed -> park human */
+   WFE_FAIL_CORRUPTION /* worktree/tree corruption -> terminal */
+} wfe_failure_class_t;
+
 typedef struct
 {
    wfe_step_status_t status;
@@ -88,6 +104,11 @@ typedef struct
    char artifact_handle[64];        /* produced-artifact handle id, or "" */
    char content_hash[65];           /* sha256 hex of produced artifact, or "" */
    double cost_usd;                 /* cost incurred by this step */
+   /* Phase-C failure taxonomy (meaningful iff status == WFE_STEP_FAILED). Default 0
+    * (WFE_FAIL_NONE, no new input) preserves the pre-taxonomy "stop" behavior for any
+    * executor that has not been taught the classes. */
+   wfe_failure_class_t failure_class;
+   int failure_has_new_input; /* 1 iff a TRANSIENT failure carries genuinely new input */
 } wfe_step_result_t;
 
 /* ---- Executor vtable: gates ARE ordinary block executors (one call-site) ---- */
@@ -108,6 +129,21 @@ wfe_step_result_t wfe_step_advanced(const char *artifact_handle, const char *con
 wfe_step_result_t wfe_step_pending(wfe_pause_reason_t reason);
 wfe_step_result_t wfe_step_failed(void);
 wfe_step_result_t wfe_step_looped(void);
+
+/* A classified failure (Phase-C Q4). has_new_input is honored only for
+ * WFE_FAIL_TRANSIENT (retry vs park-stuck); ignored for the other classes. */
+wfe_step_result_t wfe_step_failed_class(wfe_failure_class_t cls, int has_new_input);
+
+/* Map a failure class to the run-loop disposition, so the routing lives in one
+ * place (exposed for the unit test). */
+typedef enum
+{
+   WFE_FDISP_TERMINAL = 0, /* cleanup + stop (terminal-reject / corruption) */
+   WFE_FDISP_PARK_HUMAN,   /* park pending_human (degraded / budget / forge) */
+   WFE_FDISP_RETRY,        /* loop back with new input (transient + new input) */
+   WFE_FDISP_PARK_STUCK    /* transient without new input -> park stuck (no spin) */
+} wfe_failure_disposition_t;
+wfe_failure_disposition_t wfe_failure_disposition(wfe_failure_class_t cls, int has_new_input);
 
 /* ---- Autonomous merge-target rail (WP-5 safety) ----
  * The single source of truth for the branch an autonomous run may target for a

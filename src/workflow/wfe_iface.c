@@ -107,7 +107,40 @@ wfe_step_result_t wfe_step_failed(void)
    wfe_step_result_t r;
    memset(&r, 0, sizeof r);
    r.status = WFE_STEP_FAILED;
+   /* Back-compat: an unclassified failed() is a conservative terminal stop. */
+   r.failure_class = WFE_FAIL_PERMANENT;
    return r;
+}
+
+wfe_step_result_t wfe_step_failed_class(wfe_failure_class_t cls, int has_new_input)
+{
+   wfe_step_result_t r;
+   memset(&r, 0, sizeof r);
+   r.status = WFE_STEP_FAILED;
+   r.failure_class = (cls == WFE_FAIL_NONE) ? WFE_FAIL_PERMANENT : cls;
+   r.failure_has_new_input = has_new_input ? 1 : 0;
+   return r;
+}
+
+wfe_failure_disposition_t wfe_failure_disposition(wfe_failure_class_t cls, int has_new_input)
+{
+   switch (cls)
+   {
+   case WFE_FAIL_TRANSIENT:
+      /* The core invariant: retry ONLY with genuinely new input, else park stuck so
+       * the scheduler cannot spin on an identical re-dispatch. */
+      return has_new_input ? WFE_FDISP_RETRY : WFE_FDISP_PARK_STUCK;
+   case WFE_FAIL_DEGRADED:
+   case WFE_FAIL_BUDGET:
+   case WFE_FAIL_FORGE:
+      return WFE_FDISP_PARK_HUMAN;
+   case WFE_FAIL_REFUSAL:
+   case WFE_FAIL_PERMANENT:
+   case WFE_FAIL_CORRUPTION:
+   case WFE_FAIL_NONE:
+   default:
+      return WFE_FDISP_TERMINAL;
+   }
 }
 
 wfe_step_result_t wfe_step_looped(void)
