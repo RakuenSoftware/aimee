@@ -1583,31 +1583,47 @@ int config_autonomy_lookup(const char *env_name, long *out)
    /* Operator override wins: an explicitly-exported env var (getenv is a safe read now that
     * nothing setenv's these). Otherwise the LIVE snapshot — so a config.set on autonomy.*
     * takes effect on the next workflow with no restart and no cross-thread setenv. */
-   const char *e = getenv(env_name);
    config_t c;
    int have = config_snapshot_get(&c) == 0;
-#define TC_AUT(name, field, boolish)                                                               \
-   if (strcmp(env_name, name) == 0)                                                                \
-   {                                                                                               \
-      if (e && e[0])                                                                               \
-      {                                                                                            \
-         *out = (boolish) ? (e[0] == '1' ? 1 : 0) : atol(e);                                       \
-         return 1;                                                                                 \
-      }                                                                                            \
-      if (have)                                                                                    \
-      {                                                                                            \
-         *out = c.field;                                                                           \
-         return 1;                                                                                 \
-      }                                                                                            \
-      return 0;                                                                                    \
+   long snap = 0;
+   int boolish = 0, is_autonomy = 1;
+   if (strcmp(env_name, "AIMEE_AUTONOMY_SKEPTICS") == 0)
+      snap = have ? c.autonomy_skeptics : 0;
+   else if (strcmp(env_name, "AIMEE_AUTONOMY_FANOUT") == 0)
+      snap = have ? c.autonomy_fanout : 0, boolish = 1;
+   else if (strcmp(env_name, "AIMEE_AUTONOMY_UNIT_RETRY") == 0)
+      snap = have ? c.autonomy_unit_retry : 0;
+   else if (strcmp(env_name, "AIMEE_AUTONOMY_UNIT_MAX") == 0)
+      snap = have ? c.autonomy_unit_max : 0;
+   else if (strcmp(env_name, "AIMEE_AUTONOMY_CI_RETRY_MAX") == 0)
+      snap = have ? c.autonomy_ci_retry_max : 0;
+   else
+      is_autonomy = 0;
+   if (!is_autonomy)
+      return 0; /* not a config-backed autonomy var (e.g. MAX_TURNS) -> caller falls back */
+
+   const char *e = getenv(env_name);
+   if (e && e[0]) /* operator override — VALIDATED (a garbage value falls through to snapshot) */
+   {
+      if (boolish)
+      {
+         *out = (e[0] == '1') ? 1 : 0;
+         return 1;
+      }
+      char *end = NULL;
+      long v = strtol(e, &end, 10);
+      if (end && *end == '\0')
+      {
+         *out = v;
+         return 1;
+      }
    }
-   TC_AUT("AIMEE_AUTONOMY_SKEPTICS", autonomy_skeptics, 0)
-   TC_AUT("AIMEE_AUTONOMY_FANOUT", autonomy_fanout, 1)
-   TC_AUT("AIMEE_AUTONOMY_UNIT_RETRY", autonomy_unit_retry, 0)
-   TC_AUT("AIMEE_AUTONOMY_UNIT_MAX", autonomy_unit_max, 0)
-   TC_AUT("AIMEE_AUTONOMY_CI_RETRY_MAX", autonomy_ci_retry_max, 0)
-#undef TC_AUT
-   return 0; /* not a config-backed autonomy var (e.g. MAX_TURNS) -> caller falls back to env */
+   if (have)
+   {
+      *out = snap; /* live snapshot value */
+      return 1;
+   }
+   return 0;
 }
 
 int config_reload(void)

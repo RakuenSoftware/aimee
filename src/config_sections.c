@@ -841,19 +841,9 @@ void config_parse_autonomy_section(config_t *cfg, cJSON *root)
  * arg is 0 — it sets the var ONLY when unset, so an explicitly-exported env var (a
  * deployment override) always wins over the config value. Call once at server startup;
  * a Settings change to these knobs therefore applies on the next server start. */
-void autonomy_config_to_env(const config_t *cfg)
-{
-   char buf[16]; /* an int is at most 11 chars + sign + NUL = 13 <= 16 */
-   snprintf(buf, sizeof buf, "%d", cfg->autonomy_skeptics);
-   setenv("AIMEE_AUTONOMY_SKEPTICS", buf, 0);
-   setenv("AIMEE_AUTONOMY_FANOUT", cfg->autonomy_fanout ? "1" : "0", 0);
-   snprintf(buf, sizeof buf, "%d", cfg->autonomy_unit_retry);
-   setenv("AIMEE_AUTONOMY_UNIT_RETRY", buf, 0);
-   snprintf(buf, sizeof buf, "%d", cfg->autonomy_unit_max);
-   setenv("AIMEE_AUTONOMY_UNIT_MAX", buf, 0);
-   snprintf(buf, sizeof buf, "%d", cfg->autonomy_ci_retry_max);
-   setenv("AIMEE_AUTONOMY_CI_RETRY_MAX", buf, 0);
-}
+/* NOTE: autonomy_config_to_env (the startup setenv bridge) was REMOVED — wfe now reads
+ * autonomy.* live from the config snapshot via config_autonomy_lookup (thread-safe), so there
+ * is no cross-thread setenv. An operator-exported AIMEE_AUTONOMY_* still overrides. */
 
 /* Normalize economizer gateway-mutation invariants IN MEMORY after parse. mutate=1
  * requires the shadow seam so the validation gates always have a same-payload
