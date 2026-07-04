@@ -239,9 +239,12 @@ static char *build_session_context(const char *client_cwd)
    {
       const char *mr = getenv("AIMEE_MEMORY_MD_RETIRE");
       if (mr && (mr[0] == '1' || mr[0] == 't' || mr[0] == 'T' || mr[0] == 'y'))
-         pos += (size_t)snprintf(buf + pos, cap - pos,
-                                 "- Memory files (e.g. `.md`) are RETIRED: a write to your memory "
-                                 "dir is intercepted into aimee and not persisted as a file.\n");
+         pos +=
+             (size_t)snprintf(buf + pos, cap - pos,
+                              "- Memory `.md` files are RETIRED: a `.md` write UNDER YOUR MEMORY "
+                              "DIR is intercepted into aimee and not persisted as a file. Writing "
+                              "`.md` files elsewhere (docs, READMEs, notes) is unaffected — only "
+                              "the memory dir is intercepted.\n");
    }
    pos += (size_t)snprintf(buf + pos, cap - pos, "\n");
 
