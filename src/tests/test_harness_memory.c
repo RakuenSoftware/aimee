@@ -2,7 +2,9 @@
 
 #include "db1/db1.h"
 #include "db1/harness_memory.h"
+#include "db1/user_memory.h"
 #include "harness_memory_common.h"
+#include "cJSON.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -102,6 +104,70 @@ static void test_project_key_ok(void)
    assert(hmem_project_key_ok(big) == 0);
 }
 
+/* Proposal 2 Phase 1: db1 user-memory store + recall selectors. */
+static void test_user_memory(void)
+{
+   /* db1 already init'd (:memory:) by main. */
+   assert(db1_user_memory_upsert("fact", "L2", "identity:operator", "JBailes is the operator", 1.0,
+                                 "t") == 0);
+   assert(db1_user_memory_upsert("preference", "L2", "pref:no-attr", "No Claude attribution", 1.0,
+                                 "t") == 0);
+   /* Tier gate: an L1 identity fact must NOT surface (recall requires L2+). */
+   assert(db1_user_memory_upsert("fact", "L1", "identity:ignored", "low tier", 1.0, "t") == 0);
+   /* Key-prefix gate: an L2 fact without an identity-ish key must NOT surface. */
+   assert(db1_user_memory_upsert("fact", "L2", "misc:thing", "not identity", 1.0, "t") == 0);
+
+   db1_user_memory_row_t rows[16];
+   int n = db1_user_memory_list_recall(DB1_USER_RECALL_IDENTITY, rows, 16);
+   assert(n == 1); /* only identity:operator (L2 + identity: prefix) */
+   assert(strcmp(rows[0].key, "identity:operator") == 0);
+
+   int np = db1_user_memory_list_recall(DB1_USER_RECALL_PREFERENCES, rows, 16);
+   assert(np == 1);
+   assert(strcmp(rows[0].key, "pref:no-attr") == 0);
+
+   /* Upsert idempotency: same (kind,key) updates in place, no duplicate row. */
+   assert(db1_user_memory_upsert("preference", "L2", "pref:no-attr", "updated", 1.0, "t") == 0);
+   np = db1_user_memory_list_recall(DB1_USER_RECALL_PREFERENCES, rows, 16);
+   assert(np == 1);
+   assert(strcmp(rows[0].content, "updated") == 0);
+
+   /* Merge into a synthetic org (db2/kb) recall array: db1 wins on key
+    * collision (org dup removed, db1 row first), org-only rows survive. */
+   cJSON *arr = cJSON_CreateArray();
+   cJSON *org1 = cJSON_CreateObject();
+   cJSON_AddStringToObject(org1, "key", "identity:operator"); /* collides with db1 */
+   cJSON_AddStringToObject(org1, "text", "stale org version");
+   cJSON_AddStringToObject(org1, "scope", "org");
+   cJSON_AddItemToArray(arr, org1);
+   cJSON *org2 = cJSON_CreateObject();
+   cJSON_AddStringToObject(org2, "key", "identity:orgonly");
+   cJSON_AddStringToObject(org2, "scope", "org");
+   cJSON_AddItemToArray(arr, org2);
+
+   db1_user_memory_merge_into_array(arr, DB1_USER_RECALL_IDENTITY, "user identity");
+
+   assert(cJSON_GetArraySize(arr) == 2); /* db1 operator + org-only; org dup replaced */
+   cJSON *first = cJSON_GetArrayItem(arr, 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(first, "key")), "identity:operator") ==
+          0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(first, "scope")), "user") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(first, "text")),
+                 "JBailes is the operator") == 0); /* db1 content, not the stale org one */
+   int found_orgonly = 0;
+   cJSON *it = NULL;
+   cJSON_ArrayForEach(it, arr)
+   {
+      const char *k = cJSON_GetStringValue(cJSON_GetObjectItem(it, "key"));
+      if (k && strcmp(k, "identity:orgonly") == 0)
+         found_orgonly = 1;
+   }
+   assert(found_orgonly); /* org-only row survives the merge */
+   cJSON_Delete(arr);
+
+   printf("test_user_memory: PASS\n");
+}
+
 int main(void)
 {
    test_sha();
@@ -109,6 +175,7 @@ int main(void)
    test_resolve();
    test_project_key_ok();
    assert(db1_init(":memory:") == 0);
+   test_user_memory();
 
    /* upsert + get (nested name round-trips) */
    hmem_row_t in = mkrow("proj", "topics/auth", "fact", "alpha");
