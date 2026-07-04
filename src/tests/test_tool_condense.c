@@ -202,6 +202,27 @@ int main(void)
       /* non-zero exit with NO failure signal -> passthrough (NULL) */
       char *r2 = tc_family_test_runner(1, "building...\nlinking...\nnothing useful here\n");
       assert(r2 == NULL);
+
+      /* NO-OVER-REDUCTION (P1a): the failure DETAIL (a separate line from its `--- FAIL:`
+       * marker, `go test` style) must survive in the CONDENSED output, not just the spill.
+       * 60 passes + a failure whose message is the line ABOVE the marker. */
+      char gt[8192];
+      size_t o = 0;
+      for (int k = 0; k < 60; k++)
+      {
+         o += (size_t)snprintf(gt + o, sizeof gt - o, "=== RUN   TestPass%02d\n", k);
+         o += (size_t)snprintf(gt + o, sizeof gt - o, "--- PASS: TestPass%02d (0.00s)\n", k);
+      }
+      o += (size_t)snprintf(gt + o, sizeof gt - o, "=== RUN   TestBoom\n");
+      o += (size_t)snprintf(gt + o, sizeof gt - o, "    x_test.go:63: boom: expected 5 got 4\n");
+      snprintf(gt + o, sizeof gt - o, "--- FAIL: TestBoom (0.00s)\nFAIL\n");
+      char *r3 = tc_family_test_runner(1, gt);
+      assert(r3);
+      assert(strstr(r3, "--- FAIL: TestBoom"));     /* the marker */
+      assert(strstr(r3, "boom: expected 5 got 4")); /* the DETAIL — must NOT be elided */
+      assert(!strstr(r3, "TestPass30"));            /* middle passes still dropped */
+      assert(strlen(r3) < strlen(gt));              /* still materially shrank */
+      free(r3);
    }
 
    /* ---- tool_condense_apply (S3) ---- */

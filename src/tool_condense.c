@@ -669,7 +669,7 @@ static const char *const TC_KEEP_SIGS[] = {"test result", "result:", "====",    
  * or NULL (OOM / the safety passthrough). */
 static char *tc_signal_filter(int exit_code, const char *in, const char *const *fail_sigs,
                               const char *const *keep_sigs, int require_fail_nonzero, size_t head,
-                              size_t tail)
+                              size_t tail, size_t ctx_before, size_t ctx_after)
 {
    if (!in)
       return NULL;
@@ -715,14 +715,36 @@ static char *tc_signal_filter(int exit_code, const char *in, const char *const *
       return NULL;
    }
 
+   /* Pre-pass: mark which lines to keep. A fail-signal line drags in its DETAIL BLOCK —
+    * ctx_before lines above + ctx_after below — so a failure's message (a separate line
+    * from its marker, e.g. `x_test.go:63: expected 5 got 4` above `--- FAIL:`) is never
+    * elided while its marker survives. head/tail and keep-signals are kept as before. */
+   char *keep = calloc(nlines, 1);
+   if (!keep)
+   {
+      free(lp);
+      free(ll);
+      return NULL;
+   }
+   for (size_t i = 0; i < nlines; i++)
+   {
+      if (i < head || i + tail >= nlines || line_has_any(lp[i], ll[i], keep_sigs))
+         keep[i] = 1;
+      if (line_has_any(lp[i], ll[i], fail_sigs))
+      {
+         size_t lo = (i > ctx_before) ? i - ctx_before : 0;
+         size_t hi = (i + ctx_after < nlines) ? i + ctx_after : nlines - 1;
+         for (size_t j = lo; j <= hi; j++)
+            keep[j] = 1;
+      }
+   }
+
    sb_t s = {0};
    int first = 1;
    size_t elided = 0;
    for (size_t i = 0; i < nlines; i++)
    {
-      int keep = (i < head) || (i + tail >= nlines) || line_has_any(lp[i], ll[i], fail_sigs) ||
-                 line_has_any(lp[i], ll[i], keep_sigs);
-      if (keep)
+      if (keep[i])
       {
          if (elided)
          {
@@ -752,6 +774,7 @@ static char *tc_signal_filter(int exit_code, const char *in, const char *const *
          sb_addc(&s, '\n');
       sb_adds(&s, mark);
    }
+   free(keep);
    free(lp);
    free(ll);
    return sb_finish(&s);
@@ -759,7 +782,8 @@ static char *tc_signal_filter(int exit_code, const char *in, const char *const *
 
 char *tc_family_test_runner(int exit_code, const char *in)
 {
-   return tc_signal_filter(exit_code, in, TC_FAIL_SIGS, TC_KEEP_SIGS, 1, 2, 6);
+   /* ctx 2/3: keep each failure's detail block (the message line is separate from its marker). */
+   return tc_signal_filter(exit_code, in, TC_FAIL_SIGS, TC_KEEP_SIGS, 1, 2, 6, 2, 3);
 }
 
 /* Compiler / linter diagnostics (Slice 5): keep every error/warning/note + file:line
@@ -793,7 +817,9 @@ static const char *const TC_DIAG_KEEP_SIGS[] = {"warning", "warn:",   "note:",  
  * warnings is still condensed. */
 char *tc_family_diagnostics(int exit_code, const char *in)
 {
-   return tc_signal_filter(exit_code, in, TC_DIAG_FAIL_SIGS, TC_DIAG_KEEP_SIGS, 1, 2, 4);
+   /* ctx 0/0: a compiler diagnostic line is self-contained (file:line:col + message);
+    * the source-echo/caret below it is redundant (the model has the file:line). */
+   return tc_signal_filter(exit_code, in, TC_DIAG_FAIL_SIGS, TC_DIAG_KEEP_SIGS, 1, 2, 4, 0, 0);
 }
 
 /* ---- spill store + top-level apply (Slice 3) ---- */
