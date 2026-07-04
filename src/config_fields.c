@@ -11,6 +11,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Entries omit the trailing reload_class -> RELOAD_HOT (0) by C zero-fill; suppress the
+ * pedantic missing-field-initializer warning for the whole intentional table (P2). */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
 const config_field_t config_fields[] = {
     {"db2_url", offsetof(config_t, db2_url), sizeof(((config_t *)0)->db2_url), 0, CFG_STRING},
     {"provider", offsetof(config_t, provider), sizeof(((config_t *)0)->provider), 0, CFG_STRING},
@@ -238,9 +242,10 @@ const config_field_t config_fields[] = {
      sizeof(double), 0, CFG_FLOAT},
     {"guardrails_semantic_allow_ml_only_block",
      offsetof(config_t, guardrails_semantic_allow_ml_only_block), sizeof(int), 0, CFG_BOOL},
-    {"kb_api_http_port", offsetof(config_t, kb_api_http_port), sizeof(int), 0, CFG_INT},
+    {"kb_api_http_port", offsetof(config_t, kb_api_http_port), sizeof(int), 0, CFG_INT,
+     RELOAD_RESTART},
     {"kb_api_bearer_token", offsetof(config_t, kb_api_bearer_token),
-     sizeof(((config_t *)0)->kb_api_bearer_token), 0, CFG_STRING},
+     sizeof(((config_t *)0)->kb_api_bearer_token), 0, CFG_STRING, RELOAD_RESTART},
     {"kb_mining_enabled", offsetof(config_t, kb_mining_enabled), sizeof(int), 0, CFG_BOOL},
     {"kb_mining_min_poll_s", offsetof(config_t, kb_mining_min_poll_s), sizeof(int), 0, CFG_INT},
     {"verify_enabled", offsetof(config_t, verify_enabled), sizeof(int), 1, CFG_BOOL},
@@ -295,13 +300,19 @@ const config_field_t config_fields[] = {
     /* Autonomous-development pipeline knobs (Phase-C). New config_t fields bridged to the
      * AIMEE_AUTONOMY_* env vars at startup (a set env var still overrides); a change
      * applies on the next server start. */
-    {"autonomy.skeptics", offsetof(config_t, autonomy_skeptics), sizeof(int), 0, CFG_INT},
-    {"autonomy.fanout", offsetof(config_t, autonomy_fanout), sizeof(int), 1, CFG_BOOL},
-    {"autonomy.unit_retry", offsetof(config_t, autonomy_unit_retry), sizeof(int), 0, CFG_INT},
-    {"autonomy.unit_max", offsetof(config_t, autonomy_unit_max), sizeof(int), 0, CFG_INT},
-    {"autonomy.ci_retry_max", offsetof(config_t, autonomy_ci_retry_max), sizeof(int), 0, CFG_INT},
+    {"autonomy.skeptics", offsetof(config_t, autonomy_skeptics), sizeof(int), 0, CFG_INT,
+     RELOAD_RESTART},
+    {"autonomy.fanout", offsetof(config_t, autonomy_fanout), sizeof(int), 1, CFG_BOOL,
+     RELOAD_RESTART},
+    {"autonomy.unit_retry", offsetof(config_t, autonomy_unit_retry), sizeof(int), 0, CFG_INT,
+     RELOAD_RESTART},
+    {"autonomy.unit_max", offsetof(config_t, autonomy_unit_max), sizeof(int), 0, CFG_INT,
+     RELOAD_RESTART},
+    {"autonomy.ci_retry_max", offsetof(config_t, autonomy_ci_retry_max), sizeof(int), 0, CFG_INT,
+     RELOAD_RESTART},
     {NULL, 0, 0, 0, CFG_STRING},
 };
+#pragma GCC diagnostic pop
 
 const config_field_t *config_field_lookup(const char *key)
 {
@@ -311,6 +322,20 @@ const config_field_t *config_field_lookup(const char *key)
       if (strcmp(key, config_fields[i].key) == 0)
          return &config_fields[i];
    return NULL;
+}
+
+const char *config_field_reload_verdict(const config_field_t *f)
+{
+   switch (f ? f->reload_class : RELOAD_HOT)
+   {
+   case RELOAD_RESTART:
+      return "saved — restart the server for this to take effect";
+   case RELOAD_REAPPLIABLE:
+      return "applied live";
+   case RELOAD_HOT:
+   default:
+      return "applied live";
+   }
 }
 
 cJSON *config_field_value_json(const config_t *cfg, const config_field_t *f)

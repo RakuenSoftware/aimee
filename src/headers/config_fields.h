@@ -18,6 +18,16 @@ typedef enum
    CFG_FLOAT
 } config_field_type_t;
 
+/* When a config.set / Settings change takes effect (live-config-reload P2). Default 0 = HOT
+ * so a field left unannotated is treated as live — correct for the common case (read
+ * per-request via config_load, which now returns the pushed snapshot). */
+typedef enum
+{
+   RELOAD_HOT = 0,     /* read per-request -> live immediately after config.set pushes a reload */
+   RELOAD_REAPPLIABLE, /* bound state with a live re-applier hook (P3) */
+   RELOAD_RESTART,     /* bound at startup with no live re-applier yet -> needs a restart */
+} reload_class_t;
+
 typedef struct
 {
    const char *key;
@@ -25,7 +35,11 @@ typedef struct
    size_t size;
    int is_bool; /* 1 for bool fields */
    config_field_type_t type;
+   reload_class_t reload_class; /* omitted -> RELOAD_HOT (0) */
 } config_field_t;
+
+/* Human label for the reload class, for the config.set / Settings verdict. */
+const char *config_field_reload_verdict(const config_field_t *f);
 
 /* NULL-key-terminated allowlist. */
 extern const config_field_t config_fields[];

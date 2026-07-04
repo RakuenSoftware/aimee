@@ -106,6 +106,10 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "key", key);
    cJSON_AddItemToObject(resp, "value", config_field_value_json(&cfg, f));
+   /* Live/Restart verdict (live-config-reload P2): tell the caller whether the change is in
+    * effect now or needs a restart, instead of leaving them to guess. */
+   cJSON_AddStringToObject(resp, "reload", config_field_reload_verdict(f));
+   cJSON_AddBoolToObject(resp, "applied_live", f->reload_class != RELOAD_RESTART);
    /* One-time setup warning: enabling delegate use of Claude-via-CLI carries an
     * Anthropic account-action risk. Surfaced here (not on every delegate call)
     * and in DELEGATES.md. */

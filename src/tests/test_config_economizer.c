@@ -7,6 +7,7 @@
 #include <string.h>
 #include "aimee.h"
 #include "config_sections.h"
+#include "config_fields.h"
 #include "aimee_home.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -60,10 +61,22 @@ static void test_two_tier_resolution(void)
    assert(econ_gateway_mutate_on(NULL) == 0);
 }
 
+/* live-config-reload P2: reload-class classification + verdict. */
+static void test_reload_class(void)
+{
+   const config_field_t *hot = config_field_lookup("economizer.aggressive");
+   const config_field_t *rst = config_field_lookup("autonomy.skeptics");
+   assert(hot && hot->reload_class == RELOAD_HOT);
+   assert(rst && rst->reload_class == RELOAD_RESTART);
+   assert(strstr(config_field_reload_verdict(rst), "restart"));
+   assert(strcmp(config_field_reload_verdict(hot), "applied live") == 0);
+}
+
 int main(void)
 {
    printf("config_economizer: ");
    test_two_tier_resolution();
+   test_reload_class();
 
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-econ-cfg-XXXXXX", platform_tmpdir());
