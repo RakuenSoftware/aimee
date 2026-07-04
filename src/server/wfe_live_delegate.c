@@ -279,6 +279,103 @@ static int wfe_live_verify_run(const char *workdir, char *out_verdict, size_t n)
 
 static const wfe_verify_provider_t WFE_LIVE_VERIFY = {wfe_live_verify_run};
 
+/* Live judge provider (PC3): dispatch a reviewer/skeptic delegate to READ-ONLY judge
+ * the change in `workdir` and emit a {"refuted":bool} verdict. The delegate runs with
+ * tools (it can `git diff` + read files) but we do NOT commit — this is a judgment,
+ * not a producing step. Fail-closed: any dispatch error / a response that does not
+ * carry an explicit `"refuted": false` is treated as REFUTED, so the adversarial gate
+ * can never advance on an ambiguous verdict. */
+static int wfe_live_judge_run(const char *workdir, const char *lens, char *out_verdict, size_t n)
+{
+   if (out_verdict && n)
+      out_verdict[0] = '\0';
+   if (!workdir || !workdir[0])
+      return -1;
+   int is_skeptic = (lens && strcmp(lens, "skeptic") == 0);
+   /* reviewer -> the reviewer persona; skeptic -> the (adversarial) security persona,
+    * with the REFUTE framing carried by the prompt (lens diversity). */
+   const char *persona = is_skeptic ? "security" : "reviewer";
+
+   char prompt[2048];
+   if (is_skeptic)
+      snprintf(
+          prompt, sizeof prompt,
+          "You are an ADVERSARIAL skeptic reviewing an autonomous code change. Inspect the "
+          "change in this git worktree (e.g. `git diff HEAD~5..HEAD` and read the touched "
+          "files). Try HARD to REFUTE it: find a correctness bug, a broken or missing test, an "
+          "unmet requirement, or a security regression. Do NOT edit files. End your reply with "
+          "EXACTLY one JSON line and nothing after it: {\"refuted\": true, \"reason\": \"<the "
+          "flaw>\"} if you found a real flaw, or {\"refuted\": false} only if you genuinely "
+          "cannot refute it.");
+   else
+      snprintf(
+          prompt, sizeof prompt,
+          "Review the autonomous code change in this git worktree (e.g. `git diff "
+          "HEAD~5..HEAD` and read the touched files) for correctness and quality. Do NOT edit "
+          "files. End your reply with EXACTLY one JSON line and nothing after it: {\"refuted\": "
+          "false} if the change is sound, or {\"refuted\": true, \"reason\": \"<why>\"} if it "
+          "is flawed.");
+
+   agent_config_t acfg;
+   memset(&acfg, 0, sizeof(acfg));
+   if (agent_load_config(&acfg) != 0)
+      return -1;
+   char *sys_prompt = persona_compose_delegate_prompt(persona, workdir, "");
+   persona_t pinfo;
+   memset(&pinfo, 0, sizeof pinfo);
+   persona_load(NULL, persona, &pinfo);
+
+   run_cmd_set_cwd(workdir);
+   agent_result_t res;
+   memset(&res, 0, sizeof(res));
+   agent_t *chosen = NULL;
+   const char *chosen_role = NULL;
+   int best_tier = 0;
+   for (int ri = 0; ri < pinfo.roles_count && !chosen; ri++)
+   {
+      const char *r = delegate_role_canonicalize(pinfo.roles[ri]);
+      for (int ai = 0; ai < acfg.agent_count; ai++)
+      {
+         agent_t *ag = &acfg.agents[ai];
+         if (!ag->enabled || !agent_has_role(ag, r) || !agent_supports_persona(ag, persona) ||
+             !agent_is_available_for_routing(ag))
+            continue;
+         if (provider_catalog_get_health(ag->name) == CATALOG_HEALTH_DOWN)
+            continue;
+         if (!chosen || ag->cost_tier < best_tier)
+         {
+            chosen = ag;
+            chosen_role = r;
+            best_tier = ag->cost_tier;
+         }
+      }
+   }
+   int rc = -1;
+   if (chosen)
+      rc = agent_execute_with_tools_for_role(chosen, &acfg.network, chosen_role,
+                                             sys_prompt ? sys_prompt : "", prompt,
+                                             AGENT_DEFAULT_MAX_TOKENS, 0.2, &res);
+   run_cmd_set_cwd(NULL);
+   free(sys_prompt);
+   persona_free(&pinfo);
+
+   int refuted = 1; /* fail-closed default */
+   if (rc == 0 && res.response && res.response[0])
+   {
+      /* Accept ONLY on an explicit refuted:false; everything else -> refuted. */
+      if (strstr(res.response, "\"refuted\": false") || strstr(res.response, "\"refuted\":false"))
+         refuted = 0;
+   }
+   free(res.response);
+   if (rc != 0 && !chosen)
+      snprintf(out_verdict, n, "{\"refuted\":true,\"reason\":\"no judge agent available\"}");
+   else
+      snprintf(out_verdict, n, "{\"refuted\":%s}", refuted ? "true" : "false");
+   return 0; /* a verdict was produced (even a fail-closed one) */
+}
+
+static const wfe_judge_provider_t WFE_LIVE_JUDGE = {wfe_live_judge_run};
+
 void wfe_autonomy_register(void)
 {
    /* Full engine executor set so a work item can run end-to-end server-side. */
@@ -289,6 +386,10 @@ void wfe_autonomy_register(void)
     * that passes verification). */
    wfe_set_delegate_provider(&WFE_LIVE_DELEGATE);
    wfe_set_verify_provider(&WFE_LIVE_VERIFY);
+   /* The live adversarial judge (PC3): reviewer + skeptic verdicts for the implement
+    * adversarial gate. Inert unless AIMEE_AUTONOMY_SKEPTICS>0 (default off), so
+    * registration alone changes nothing. */
+   wfe_set_judge_provider(&WFE_LIVE_JUDGE);
    /* The live forge (F4): registers a real push+PR+merge provider ONLY if the
     * operator enabled wfe_live_forge_enabled (default OFF). While off, the engine
     * keeps its fail-closed forge stub, so pr.open re-loops and merge parks. */
