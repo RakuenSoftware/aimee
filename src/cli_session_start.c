@@ -89,7 +89,8 @@ static void ss_render_section(struct ss_sbuf *b, const char *title, cJSON *arr)
  * silently, so one transient failure would otherwise leave the session with no
  * context. Only transport failures (resp==NULL) and 5xx are retried — a 4xx is
  * deterministic (bad bearer/body/route). Bounded so a genuinely-down server
- * never blocks the prompt for long. Returns the 200 response or NULL. */
+ * never blocks the prompt for long. Returns the first 200 response (ownership
+ * passes to the caller) or NULL; on failure the last response is freed here. */
 static cJSON *ss_retry_post(const char *endpoint, const char *bearer, const char *path,
                             const char *body_s)
 {
@@ -127,7 +128,7 @@ static int handle_session_start_remote(void)
     * persona principles, so a fresh session is never left with an empty brief
     * (the pre-Phase-1 behaviour when recall was empty). The endpoint takes no
     * input; send an empty object. */
-   cJSON *brief = ss_retry_post(endpoint, bearer, "/v1/session/brief", "{}");
+   cJSON *brief = ss_retry_post(endpoint, bearer, "/v1/session/brief_assemble", "{}");
    if (brief)
    {
       const char *out = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(brief, "output"));
@@ -159,7 +160,9 @@ static int handle_session_start_remote(void)
       ss_render_section(&b, "Directives", cJSON_GetObjectItem(recall, "directives"));
       if (b.p && b.p[0])
       {
-         ss_add(&ctx, "\n# Proactive Recall (session-start)\n\n");
+         /* The brief already ends with a blank line, so no leading newline is
+          * needed here (avoids a triple blank line between the two blocks). */
+         ss_add(&ctx, "# Proactive Recall (session-start)\n\n");
          ss_add(&ctx, b.p);
       }
       free(b.p);

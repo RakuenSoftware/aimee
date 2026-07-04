@@ -701,7 +701,7 @@ static const struct
     {"server.health", "GET", "/v1/server/health"},
     {"server.info", "GET", "/v1/server/info"},
     {"session.brief", "POST", "/v1/sessions/brief"},
-    {"session.brief_assemble", "POST", "/v1/session/brief"},
+    {"session.brief_assemble", "POST", "/v1/session/brief_assemble"},
     {"session.close", "POST", "/v1/sessions/close"},
     {"session.create", "POST", "/v1/sessions/create"},
     {"session.get", "POST", "/v1/sessions/get"},

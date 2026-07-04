@@ -2725,7 +2725,7 @@ paths:
           content:
             application/json:
               schema: { type: object }
-  /session/brief:
+  /session/brief_assemble:
     post:
       summary: Workspace-independent session brief for the remote thin client
       description: >-
