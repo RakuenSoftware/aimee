@@ -124,6 +124,35 @@ static int hook_event_has_cmd(cJSON *hooks, const char *event, const char *needl
    return 0;
 }
 
+/* Assert ensure_claude_code_hooks registered EVERY hook aimee relies on. This
+ * required set is INDEPENDENT of the production code's registration order/table
+ * on purpose -- so if any registration is ever dropped (as the SessionStart hook
+ * silently was, leaving the primary with no aimee session brief: the configured
+ * persona [default `engineer`, but operator-selectable via AIMEE_MODE / the mode
+ * file] + MCP-skill index + Rules + Key Facts, rendered by `aimee session-start`
+ * -> session_start_emit -> build_session_context), this fails. Adding a new client
+ * hook means adding it here too. Each entry: {settings.json event, the
+ * `aimee <subcommand>` it invokes}. Asserted for BOTH the fresh-settings and the
+ * add-to-an-existing-settings.json paths (the latter is the exact shape of the
+ * live regression: a settings.json that already had the other hooks but not
+ * SessionStart). */
+static void assert_required_hooks_present(cJSON *hooks)
+{
+   static const struct
+   {
+      const char *event;
+      const char *subcommand;
+   } required[] = {
+       {"SessionStart", "session-start"},          /* session brief: persona + skills + rules */
+       {"UserPromptSubmit", "user-prompt-submit"}, /* per-turn recall envelope */
+       {"PreCompact", "pre-compact"},              /* post-compact recall re-prime */
+       {"PreToolUse", "attention-guard"},          /* per-file attention + destructive-op guard */
+       {"PostToolUse", "hooks post"},              /* post-edit hook */
+   };
+   for (size_t i = 0; i < sizeof(required) / sizeof(required[0]); i++)
+      assert(hook_event_has_cmd(hooks, required[i].event, required[i].subcommand));
+}
+
 /* --- Test read_json_file --- */
 
 static void test_read_json_file_missing(void)
@@ -330,14 +359,8 @@ static void test_claude_hooks_create_post_hook_on_fresh_settings(void)
    }
    assert(found);
 
-   /* Regression: the SessionStart hook MUST be registered -- it is the seam that
-    * delivers aimee's session brief (persona principles/brief + MCP-skill index +
-    * Rules + Key Facts via `aimee session-start`). Its absence left the primary
-    * agent with no aimee persona/skills/rules context. The per-turn context hooks
-    * are registered alongside it. */
-   assert(hook_event_has_cmd(hooks, "SessionStart", "session-start"));
-   assert(hook_event_has_cmd(hooks, "UserPromptSubmit", "user-prompt-submit"));
-   assert(hook_event_has_cmd(hooks, "PreCompact", "pre-compact"));
+   /* Regression: from an empty settings.json, EVERY required hook is registered. */
+   assert_required_hooks_present(hooks);
    cJSON_Delete(root);
 
    char cmd[512];
@@ -376,6 +399,11 @@ static void test_claude_hooks_patch_existing_matcher(void)
    assert(strstr(matcher->valuestring, "Edit|Write|MultiEdit") != NULL);
    assert(strstr(matcher->valuestring, "EnterWorktree") != NULL);
    assert(strstr(matcher->valuestring, "ExitWorktree") != NULL);
+
+   /* Regression (the live shape of the SessionStart bug): a settings.json that
+    * already had SOME hooks must still get the MISSING ones added -- SessionStart
+    * in particular. Merging into an existing file must not skip a hook. */
+   assert_required_hooks_present(hooks);
    cJSON_Delete(root);
 
    char cmd[512];

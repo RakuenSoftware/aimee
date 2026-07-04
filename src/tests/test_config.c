@@ -1873,6 +1873,34 @@ int main(void)
          platform_unsetenv("AIMEE_MODE");
    }
 
+   /* --- config_current_persona: the persona injected into the session-start
+    * brief is the CONFIGURED one, not a hardcoded 'engineer'. `engineer` is only
+    * the DEFAULT; it must be operator-selectable via AIMEE_MODE (or the mode
+    * file), including ARBITRARY/custom persona names (not just the built-in enum).
+    * Guards the persona-selection side of the session brief from regressing to
+    * engineer-only. */
+   {
+      char *old_mode = getenv("AIMEE_MODE");
+      char *saved = old_mode ? strdup(old_mode) : NULL;
+      char p[64];
+      platform_setenv("AIMEE_MODE", "reviewer");
+      config_current_persona(p, sizeof(p));
+      assert(strcmp(p, "reviewer") == 0); /* a non-default built-in persona */
+      platform_setenv("AIMEE_MODE", "my-custom-persona");
+      config_current_persona(p, sizeof(p));
+      assert(strcmp(p, "my-custom-persona") == 0); /* arbitrary name, verbatim */
+      platform_setenv("AIMEE_MODE", "engineer");
+      config_current_persona(p, sizeof(p));
+      assert(strcmp(p, "engineer") == 0); /* the default is selectable explicitly too */
+      if (saved)
+      {
+         platform_setenv("AIMEE_MODE", saved);
+         free(saved);
+      }
+      else
+         platform_unsetenv("AIMEE_MODE");
+   }
+
    /* --- AIMEE_DB2_URL env overrides a cached config-file db2_url ---
     * Regression for the kb IP-drift outage: when Postgres is recreated on a new
     * bridge IP the runtime injects the current address via AIMEE_DB2_URL, which
