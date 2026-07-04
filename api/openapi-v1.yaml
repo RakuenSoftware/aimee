@@ -997,6 +997,66 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /enrollments:
+    get:
+      operationId: listEnrollments
+      summary: List issued client-certificate enrollments (console)
+      description: |
+        Paginated list of redeemed client certificates for the accounts surface.
+        Requires a console-admin credential.
+      responses:
+        "200":
+          description: Enrollment list
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Unauthorized
+        "503":
+          description: Store unavailable
+
+  /enrollments/{id}/revoke:
+    post:
+      operationId: revokeEnrollment
+      summary: Revoke a client-certificate enrollment (console)
+      description: |
+        Marks the enrollment revoked; the revocation is enforced at the mTLS
+        seam. Requires a console-admin credential.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Revoked enrollment
+          content:
+            application/json:
+              schema:
+                type: object
+        "400":
+          description: Bad enrollment id
+        "404":
+          description: Enrollment not found
+        "503":
+          description: Revoke failed (store unavailable)
+
+  /scopes:
+    get:
+      operationId: listScopes
+      summary: Scope lattice — distinct scopes with cert counts (console)
+      responses:
+        "200":
+          description: Scope list
+          content:
+            application/json:
+              schema:
+                type: object
+        "401":
+          description: Unauthorized
+
   /intelligence/calibration/readiness:
     get:
       operationId: getIntelligenceCalibrationReadiness

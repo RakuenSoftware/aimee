@@ -2,7 +2,7 @@
 
 > Auto-generated from `api/openapi-v1.yaml` by `scripts/gen-api-docs.py`. Do not edit by hand; run `make docs-gen` to regenerate.
 
-Total endpoints: 49
+Total endpoints: 52
 
 ## Endpoints
 
@@ -340,6 +340,37 @@ Responses:
 - `405` — Method not allowed
 - `500` — Queue drain failed
 
+### `GET /v1/enrollments`
+
+List issued client-certificate enrollments (console)
+
+Paginated list of redeemed client certificates for the accounts surface.
+Requires a console-admin credential.
+
+Responses:
+
+- `200` — Enrollment list
+- `401` — Unauthorized
+- `503` — Store unavailable
+
+### `POST /v1/enrollments/{id}/revoke`
+
+Revoke a client-certificate enrollment (console)
+
+Marks the enrollment revoked; the revocation is enforced at the mTLS
+seam. Requires a console-admin credential.
+
+| Name | In | Required | Type | Description |
+|------|----|----------|------|-------------|
+| `id` | path | yes | integer |  |
+
+Responses:
+
+- `200` — Revoked enrollment
+- `400` — Bad enrollment id
+- `404` — Enrollment not found
+- `503` — Revoke failed (store unavailable)
+
 ### `POST /v1/entities/search`
 
 Find entities by name or context
@@ -628,6 +659,15 @@ Responses:
 - `400` — Invalid id
 - `401` — Unauthorized
 - `404` — Document not found
+
+### `GET /v1/scopes`
+
+Scope lattice — distinct scopes with cert counts (console)
+
+Responses:
+
+- `200` — Scope list
+- `401` — Unauthorized
 
 ### `POST /v1/search`
 

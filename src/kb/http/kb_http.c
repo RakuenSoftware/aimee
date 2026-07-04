@@ -26,6 +26,8 @@
 #include "kb_scope.h"
 #include "kb_route_acl.h"
 #include "kb_http_console.h"
+#include "kb_http_accounts.h"
+#include "db2/enrollments.h"
 #include "kb_verifier.h"
 #include "kb/http/openapi_data.h"
 #include "db2/lifecycle.h"
@@ -632,6 +634,17 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
                   "{\"error\":\"enrollment failed: invalid or already-used token, or bad CSR\"}");
          return 401;
       }
+      /* Persist a queryable enrollment record keyed by the cert's sha256
+       * fingerprint, so the console can list + revoke it. Best-effort: a DB2
+       * outage must not fail the redemption (the cert is already issued).
+       * INVARIANT: this fingerprint MUST equal what kb_tls_peer_fingerprint()
+       * computes for the same cert at the mTLS seam (both are sha256 of the cert
+       * DER via X509_digest), or revocation checks would silently miss. Live-
+       * verified in the S2a integration test. (kb_pki_ca_fingerprint despite its
+       * name hashes any cert's DER, not the CA specifically.) */
+      char fp[KB_PKI_FP_HEX] = "";
+      if (kb_pki_ca_fingerprint(cert, fp, sizeof(fp)) == 0)
+         db2_enrollment_insert(scope, fp, "", "", 0, NULL);
       cJSON *resp = cJSON_CreateObject();
       cJSON_AddStringToObject(resp, "client_cert", cert);
       cJSON_AddStringToObject(resp, "scope", scope);
@@ -688,15 +701,18 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       }
    }
 
-   /* Console read/aggregate routes (kb_http_console.c). Served only to the owner
-    * (unscoped credential) or a console-admin bearer — never to some other scope
-    * kind, so a project-scoped client cannot reach the console surface. (In an
-    * auth-off deployment vr is zeroed = owner, consistent with everything open.) */
+   /* Console + accounts routes. Served only to the owner (unscoped credential) or
+    * a console-admin bearer — never to some other scope kind, so a project-scoped
+    * client cannot reach the console surface. (In an auth-off deployment vr is
+    * zeroed = owner, consistent with everything open.) */
    if (!vr.scope_kind[0] || strcmp(vr.scope_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) == 0)
    {
       int cr = kb_http_console_route(method, path, out_buf, out_cap);
       if (cr >= 0)
          return cr;
+      int ar = kb_http_accounts_route(method, path, query_string, out_buf, out_cap);
+      if (ar >= 0)
+         return ar;
    }
 
    /* POST /v1/enroll — the owner mints a one-time client enrollment (the HTTP

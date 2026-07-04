@@ -1236,6 +1236,111 @@ static void test_capabilities(void)
    assert(strstr(buf, "memory") != NULL);
 }
 
+/* ── db2_enrollment_* stubs (satisfy refs from kb_http.o + kb_http_accounts.o +
+ *    kb_tls_serve.o) with a single canned row so the accounts routes can be
+ *    exercised without a live DB2. ─────────────────────────────────────────── */
+#include "db2/enrollments.h"
+static int g_stub_revoked_calls = 0;
+int db2_enrollment_insert(const char *scope, const char *fingerprint, const char *serial,
+                          const char *expires_at, int legacy, int64_t *out_id)
+{
+   (void)scope;
+   (void)fingerprint;
+   (void)serial;
+   (void)expires_at;
+   (void)legacy;
+   if (out_id)
+      *out_id = 1;
+   return 0;
+}
+static void fill_stub_row(db2_enrollment_row_t *r)
+{
+   memset(r, 0, sizeof(*r));
+   r->id = 7;
+   snprintf(r->scope, sizeof(r->scope), "project:web");
+   snprintf(r->fingerprint, sizeof(r->fingerprint), "abc123");
+   snprintf(r->state, sizeof(r->state), "active");
+   snprintf(r->issued_at, sizeof(r->issued_at), "2026-07-04 00:00:00");
+}
+int db2_enrollment_list(int limit, db2_enrollment_row_t *out, int max)
+{
+   (void)limit;
+   if (!out || max < 1)
+      return -1;
+   fill_stub_row(&out[0]);
+   return 1;
+}
+int db2_enrollment_revoke(int64_t id, db2_enrollment_row_t *out)
+{
+   if (id != 7)
+      return 1; /* not found */
+   if (out)
+   {
+      fill_stub_row(out);
+      snprintf(out->state, sizeof(out->state), "revoked");
+      snprintf(out->revoked_at, sizeof(out->revoked_at), "2026-07-04 01:00:00");
+   }
+   return 0;
+}
+int db2_enrollment_is_revoked(const char *fingerprint)
+{
+   g_stub_revoked_calls++;
+   return fingerprint && strcmp(fingerprint, "revoked-fp") == 0;
+}
+void db2_enrollment_touch_last_seen(const char *fingerprint, const char *scope)
+{
+   (void)fingerprint;
+   (void)scope;
+}
+void db2_enrollment_cache_flush(void)
+{
+}
+
+/* audit_log() (pulled in via the revoke handler) resolves its 0600 audit.log
+ * under config_default_dir(); stub it to a temp dir for the test. */
+const char *config_default_dir(void)
+{
+   return "/tmp";
+}
+
+static void test_accounts_routes(void)
+{
+   char buf[65536];
+   /* GET /v1/enrollments → the canned row. */
+   int s = kb_http_route_ex("GET", "/v1/enrollments", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"enrollments\"") != NULL);
+   assert(strstr(buf, "\"fingerprint\":\"abc123\"") != NULL);
+   assert(strstr(buf, "\"count\":1") != NULL);
+
+   /* POST /v1/enrollments/7/revoke → revoked row. */
+   s = kb_http_route_ex("POST", "/v1/enrollments/7/revoke", NULL, NULL, NULL, NULL, 0, buf,
+                        sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"revoked\":true") != NULL);
+   assert(strstr(buf, "\"state\":\"revoked\"") != NULL);
+
+   /* Unknown id → 404. */
+   s = kb_http_route_ex("POST", "/v1/enrollments/999/revoke", NULL, NULL, NULL, NULL, 0, buf,
+                        sizeof(buf));
+   assert(s == 404);
+
+   /* Bad id → 400. */
+   s = kb_http_route_ex("POST", "/v1/enrollments/abc/revoke", NULL, NULL, NULL, NULL, 0, buf,
+                        sizeof(buf));
+   assert(s == 400);
+
+   /* Wrong method on the list route → 405. */
+   s = kb_http_route_ex("POST", "/v1/enrollments", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 405);
+
+   /* GET /v1/scopes → aggregated. */
+   s = kb_http_route_ex("GET", "/v1/scopes", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"scopes\"") != NULL);
+   assert(strstr(buf, "\"scope\":\"project:web\"") != NULL);
+}
+
 static void test_console_overview(void)
 {
    /* The dashboard aggregate returns a versioned, timestamped envelope with a
@@ -3749,6 +3854,7 @@ int main(void)
    test_version();
    test_capabilities();
    test_console_overview();
+   test_accounts_routes();
    test_intelligence_calibration_readiness();
    test_intelligence_demotion_check();
    test_intelligence_bandit_export();

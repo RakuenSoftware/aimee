@@ -388,6 +388,7 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/db2/collab_rules.c
     ${AIMEE_SRC_DIR}/db2/curiosity.c
     ${AIMEE_SRC_DIR}/db2/decision_log.c
+    ${AIMEE_SRC_DIR}/db2/enrollments.c
     ${AIMEE_SRC_DIR}/db2/entity_edges.c
     ${AIMEE_SRC_DIR}/db2/entity_profiles.c
     ${AIMEE_SRC_DIR}/db2/epistemic_directives.c
@@ -992,6 +993,7 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/http/kb_http.c
     ${AIMEE_SRC_DIR}/kb/http/kb_route_acl.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_console.c
+    ${AIMEE_SRC_DIR}/kb/http/kb_http_accounts.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_code.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_ingest.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_jobs.c

@@ -113,6 +113,29 @@ int kb_tls_peer_cn(SSL *ssl, char *out, size_t cap)
    return n > 0 ? 0 : -1;
 }
 
+int kb_tls_peer_fingerprint(SSL *ssl, char *hex_out, size_t cap)
+{
+   if (!ssl || !hex_out || cap < 65)
+      return -1;
+   X509 *peer = SSL_get1_peer_certificate(ssl);
+   if (!peer)
+      return -1;
+   /* sha256 of the DER encoding — must match kb_pki_ca_fingerprint (which the
+    * enrollment record was keyed by), so a revoked cert is recognized here. */
+   unsigned char md[EVP_MAX_MD_SIZE];
+   unsigned int mdlen = 0;
+   int rc = -1;
+   if (X509_digest(peer, EVP_sha256(), md, &mdlen) == 1 && mdlen == 32)
+   {
+      for (unsigned int i = 0; i < mdlen; i++)
+         snprintf(hex_out + i * 2, 3, "%02x", md[i]);
+      hex_out[64] = '\0';
+      rc = 0;
+   }
+   X509_free(peer);
+   return rc;
+}
+
 /* --- the mTLS client dialer --- */
 
 #include <netdb.h>

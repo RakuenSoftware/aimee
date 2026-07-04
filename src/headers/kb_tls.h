@@ -36,6 +36,10 @@ extern "C"
     * -1 if there is no peer certificate or it does not fit. */
    int kb_tls_peer_cn(SSL *ssl, char *out, size_t cap);
 
+   /* Lowercase-hex sha256 fingerprint of the peer (client) certificate DER, into
+    * hex_out (needs >=65 bytes). Matches kb_pki_ca_fingerprint. 0 on success. */
+   int kb_tls_peer_fingerprint(SSL *ssl, char *hex_out, size_t cap);
+
    /* Serve ONE mTLS connection on `fd` using `ctx`: complete the handshake
     * (which REQUIRES + verifies a client cert), read the HTTP request, route it
     * with the scope taken from the client certificate's CN (verify-then-trust —

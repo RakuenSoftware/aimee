@@ -16,10 +16,11 @@
 /* --- serve one mTLS connection (handshake + request + scoped routing) --- */
 
 #include "cJSON.h"
-#include "kb_enroll.h" /* KB_ENROLL_SCOPE_MAX */
-#include "kb_http.h"   /* kb_http_route_ex */
-#include "kb_paths.h"  /* kb_default_config_dir */
-#include "kb_pki.h"    /* CA load + CSR signing for renew */
+#include "kb_enroll.h"       /* KB_ENROLL_SCOPE_MAX */
+#include "kb_http.h"         /* kb_http_route_ex */
+#include "db2/enrollments.h" /* revocation source of truth + last-seen */
+#include "kb_paths.h"        /* kb_default_config_dir */
+#include "kb_pki.h"          /* CA load + CSR signing for renew */
 
 #include <stdlib.h>
 #include <string.h>
@@ -222,15 +223,36 @@ void kb_tls_serve_conn(int fd, SSL_CTX *ctx)
       snprintf(authhdr, sizeof(authhdr), "Bearer %s", synth);
    }
 
+   /* Revocation (mTLS seam): reject a client cert whose enrollment has been
+    * revoked. The DB revoked_at is the source of truth (short-TTL cached); a
+    * live cert also gets a debounced last-seen bump. */
+   int cert_revoked = 0;
+   if (have_cert)
+   {
+      char fp[65] = "";
+      if (kb_tls_peer_fingerprint(ssl, fp, sizeof(fp)) == 0)
+      {
+         cert_revoked = db2_enrollment_is_revoked(fp);
+         if (!cert_revoked)
+            db2_enrollment_touch_last_seen(fp, cn); /* cn = the cert's scope identity */
+      }
+   }
+
    /* Routes reachable WITHOUT a client cert (the enrollment bootstrap): fetch
     * the CA for TOFU pinning, and redeem a token for a cert. */
    int is_bootstrap =
        (strcmp(cpath, "/v1/enroll/ca") == 0 || strcmp(cpath, "/v1/enroll/redeem") == 0);
 
    int status;
+   /* A revoked client cert is rejected before any route runs. */
+   if (cert_revoked)
+   {
+      snprintf(resp, KB_TLS_RESP_MAX, "{\"error\":\"client certificate has been revoked\"}");
+      status = 401;
+   }
    /* A client without a cert yet (still enrolling) may ONLY use bootstrap
     * routes. Everything else requires an identity, so a cert-less peer is 401. */
-   if (!have_cert && !is_bootstrap)
+   else if (!have_cert && !is_bootstrap)
    {
       snprintf(resp, KB_TLS_RESP_MAX,
                "{\"error\":\"client certificate required (enroll first via "

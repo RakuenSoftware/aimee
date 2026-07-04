@@ -69,6 +69,26 @@ not merely "semi-trusted".
   with its credential and refuses to start unless it 200s (credential + ACL +
   route all wired).
 
+## Certificate revocation semantics (S2a)
+
+Revoking an enrollment (`POST /v1/enrollments/{id}/revoke`) sets `revoked_at` in
+DB2 — the **source of truth** — and the mTLS seam rejects a revoked client cert on
+its next request (matched by the sha256 fingerprint of the cert DER). Two deliberate
+trade-offs:
+
+- **Fail-open on a DB outage, for unknown certs only.** If DB2 is unreachable, an
+  *unknown* fingerprint is treated as not-revoked so a transient DB blip cannot lock
+  every mTLS client out of the shared kb. A **known** revocation still holds through
+  an outage: `revoke` primes the in-process cache with the revoked verdict, which is
+  checked before the DB. Every fail-open is logged (throttled) as a `WARN`.
+- **Single-instance cache.** The is-revoked cache is per-process with a 30 s TTL; a
+  revoke is reflected immediately in the process that served it. Running multiple kb
+  instances means a revoke can take up to the TTL to be seen by the others — run a
+  single kb instance, or shorten the TTL, for a tight revocation window.
+
+Certs issued before S2a (no enrollment row) are **backfilled** as `legacy` rows on
+their first authenticated request, so they become listable and revocable.
+
 ## Running (dev)
 
 ```bash
