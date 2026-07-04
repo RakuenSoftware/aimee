@@ -224,19 +224,26 @@ static char *build_session_context(const char *client_cwd)
           "work.\n"
           "- Use `aimee session brief` to inspect the full startup brief.\n\n");
 
-   /* Enforce aimee's memory system as the single memory of record. Memory an
-    * agent writes to its OWN store (e.g. Claude Code's .md memory files) is
-    * intercepted and captured into aimee (memory_redirect), so the agent must
-    * use aimee memory directly rather than a native mechanism. */
+   /* Enforce aimee's memory system as the single memory of record: steer the
+    * agent to aimee memory commands rather than a native store. The generic
+    * reminder is always on (operator directive). The stronger '.md files are
+    * intercepted / not persisted' claim is only accurate under the retirement
+    * flag (AIMEE_MEMORY_MD_RETIRE), so it is gated on it. */
    pos += (size_t)snprintf(
        buf + pos, cap - pos,
        "# Memory (use aimee, not your own store)\n"
        "- aimee is the single memory of record. Store durable memory with "
        "`aimee memory store <key> <content>`; set who-you-are / preferences with "
        "`aimee memory identity <key> <value>` and `aimee memory prefer <key> <value>`.\n"
-       "- Retrieve prior context with `aimee memory search <terms>` or `aimee memory recall`.\n"
-       "- Do NOT keep memory in your own files (e.g. `.md` notes): such writes are intercepted "
-       "and redirected into aimee's memory.\n\n");
+       "- Retrieve prior context with `aimee memory search <terms>` or `aimee memory recall`.\n");
+   {
+      const char *mr = getenv("AIMEE_MEMORY_MD_RETIRE");
+      if (mr && (mr[0] == '1' || mr[0] == 't' || mr[0] == 'T' || mr[0] == 'y'))
+         pos += (size_t)snprintf(buf + pos, cap - pos,
+                                 "- Memory files (e.g. `.md`) are RETIRED: a write to your memory "
+                                 "dir is intercepted into aimee and not persisted as a file.\n");
+   }
+   pos += (size_t)snprintf(buf + pos, cap - pos, "\n");
 
    {
       char cwd[MAX_PATH_LEN];

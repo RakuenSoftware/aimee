@@ -8,6 +8,7 @@
 #include "harness_memory_audit.h"  /* hmem_audit */
 #include "harness_memory_common.h" /* hmem_resolve_project / hmem_project_key_ok */
 #include "harness_memory_scope.h"  /* hmem_scope_for_client */
+#include "harness_memory_spill.h"  /* hmem_spill_write (retirement db1-outage fail-open) */
 #include "json_fluent.h"           /* jo_ok */
 #include "memory_redirect.h"       /* memory_redirect_classify / _bash_targets / _rematerialize */
 #include "primary_cli_ingestor.h"
@@ -833,11 +834,18 @@ static int server_memory_intercept(const char *tool, const char *tool_input, con
       const char *mr = getenv("AIMEE_MEMORY_MD_RETIRE");
       if (mr && (mr[0] == '1' || mr[0] == 't' || mr[0] == 'T' || mr[0] == 'y'))
       {
-         char akey[HMEM_PROJECT_KEY_MAX + 16];
-         snprintf(akey, sizeof(akey), "archive:%s", name);
+         /* Project-qualified so identically-named memories from different
+          * projects don't collide under this user's UNIQUE(kind,key). */
+         char akey[HMEM_PROJECT_KEY_MAX + 600];
+         snprintf(akey, sizeof(akey), "archive:%s/%s", project, name);
          if (db1_user_memory_upsert("archive", "L1", akey, content, 1.0, client) != 0)
          {
-            cJSON_Delete(ti); /* store failed — fail open rather than block the agent */
+            /* db1 outage: spill for the next reconcile (matches the non-retire
+             * path + the client fallback), then fail-open so the agent isn't
+             * blocked on our store. */
+            int sp = hmem_spill_write(project, name, "archive", content);
+            hmem_audit(sp == 0 ? "spill" : "spill-failed", project, name, "db1 store unreachable");
+            cJSON_Delete(ti);
             return 0;
          }
          hmem_audit("redirect-db1", project, name, NULL);

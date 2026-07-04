@@ -337,8 +337,10 @@ int memory_redirect_check(const char *tool, cJSON *root, const char *cwd, const 
       int md_retire = mr && (mr[0] == '1' || mr[0] == 't' || mr[0] == 'T' || mr[0] == 'y');
       if (md_retire)
       {
-         char key[HMEM_PROJECT_KEY_MAX + 16];
-         snprintf(key, sizeof(key), "archive:%s", name);
+         /* Project-qualified: identically-named memories from different projects
+          * must not collide under this user's UNIQUE(kind,key). */
+         char key[HMEM_PROJECT_KEY_MAX + 600];
+         snprintf(key, sizeof(key), "archive:%s/%s", project, name);
          cJSON *ub = cJSON_CreateObject();
          cJSON_AddStringToObject(ub, "kind", "archive");
          cJSON_AddStringToObject(ub, "tier", "L1");
