@@ -1236,6 +1236,25 @@ static void test_capabilities(void)
    assert(strstr(buf, "memory") != NULL);
 }
 
+static void test_console_overview(void)
+{
+   /* The dashboard aggregate returns a versioned, timestamped envelope with a
+    * components[] array even when individual sources are unavailable (partial
+    * failure is reported per-component, not a whole-request error). */
+   char buf[65536];
+   int status =
+       kb_http_route_ex("GET", "/v1/console/overview", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(status == 200);
+   assert(strstr(buf, "\"schema\":\"console.overview.v1\"") != NULL);
+   assert(strstr(buf, "\"components\"") != NULL);
+   assert(strstr(buf, "\"generated_at\"") != NULL);
+   /* Wrong method is rejected. */
+   char b2[256];
+   int s2 =
+       kb_http_route_ex("POST", "/v1/console/overview", NULL, NULL, NULL, NULL, 0, b2, sizeof(b2));
+   assert(s2 == 405);
+}
+
 static void test_intelligence_calibration_readiness(void)
 {
    char buf[512];
@@ -3729,6 +3748,7 @@ int main(void)
    test_health_status_mode();
    test_version();
    test_capabilities();
+   test_console_overview();
    test_intelligence_calibration_readiness();
    test_intelligence_demotion_check();
    test_intelligence_bandit_export();

@@ -3,7 +3,10 @@
  * The on-disk format is YAML; the in-memory model is still cJSON. The
  * yaml.c shim handles parse/emit so this file's schema-extraction code
  * never sees the format change. */
+#include <pthread.h>
 #include <stdarg.h>
+#include <stdatomic.h>
+#include <stdint.h>
 #include "aimee.h"
 #include "json_fluent.h"
 #include "aimee_home.h"
@@ -343,6 +346,7 @@ static const config_schema_entry_t config_schema[] = {
     {"compact", SCHEMA_OBJECT, 0},
     {"fold", SCHEMA_OBJECT, 0},
     {"reduce", SCHEMA_OBJECT, 0},
+    {"economizer", SCHEMA_OBJECT, 0},
     {"sessions", SCHEMA_OBJECT, 0},
     {"sandbox", SCHEMA_OBJECT, 0},
     {"ecomode", SCHEMA_BOOL, 0},
@@ -567,7 +571,16 @@ static void config_set_defaults(config_t *cfg)
    cfg->reduce_gateway_mutate = 0;
    cfg->reduce_gateway_session_disable_ttl_ms = 3600000;
    cfg->reduce_gateway_seam_explicit = 0;
-   cfg->reduce_command_filter = 0; /* command-aware tool-output condensation: default off */
+   /* Two-tier economizer switches (P3): master ON (measure exempt), aggressive tier OFF. With
+    * these defaults every effective lever equals its pre-P3 value (back-compat). */
+   cfg->economizer_enabled = 1;
+   cfg->economizer_aggressive = 0;
+   /* command-aware tool-output condensation: DEFAULT-ON (P1c). Safe-tier lever — it passes
+    * the deterministic gate: lossless-on-demand (full output spilled), fail-open (any
+    * miss/decline -> raw), and a no-over-reduction audit (failures/diagnostics + their
+    * detail block are kept in the condensed view, not just the spill). It replaces the old
+    * lossy 32 KB read-cap truncation with lossless-recoverable condensation. */
+   cfg->reduce_command_filter = 1;
    /* Autonomous-dev knobs — defaults match the historical AIMEE_AUTONOMY_* env defaults
     * (adversarial + fan-out tiers OFF; retry/unit caps at their wfe defaults). */
    cfg->autonomy_skeptics = 0;
@@ -851,7 +864,35 @@ static void config_apply_inference_backend_defaults(config_t *cfg, const cJSON *
       cfg->memory_rewrite_enabled = accel;
 }
 
+int econ_reduction_master_on(const config_t *cfg)
+{
+   return cfg && cfg->economizer_enabled ? 1 : 0;
+}
+
+int econ_gateway_mutate_on(const config_t *cfg)
+{
+   /* the live-primary mutator needs the master ON, the aggressive tier opted IN, AND the
+    * lever itself set — the aggressive flag alone never activates a live-traffic mutator. */
+   return cfg && cfg->economizer_enabled && cfg->economizer_aggressive && cfg->reduce_gateway_mutate
+              ? 1
+              : 0;
+}
+
+static int config_snapshot_live(void);
+
+/* Public config read. In the SERVER (once config_snapshot_init has seeded the live snapshot)
+ * this returns the current snapshot — a lock-free POD copy that reflects the last reload
+ * IMMEDIATELY (push-driven), with no file I/O or mtime-cache-miss wait. Everywhere else (CLI
+ * one-shots, and before startup seeds it) it reads the file. config_reload uses the from-file
+ * path directly so a reload always re-reads disk, never the snapshot it is about to replace. */
 int config_load(config_t *cfg)
+{
+   if (config_snapshot_live())
+      return config_snapshot_get(cfg);
+   return config_load_file(cfg);
+}
+
+int config_load_file(config_t *cfg)
 {
    config_set_defaults(cfg);
 
@@ -1445,4 +1486,181 @@ int config_load(config_t *cfg)
    }
 
    return 0;
+}
+
+/* ---- live config snapshot: double-buffer + seqlock (live-config-reload P1a) ----
+ *
+ * A single writer (config_reload, serialized by g_snap_wlock) publishes a fresh config_t
+ * into the inactive slot of a two-slot double buffer and flips the active index; readers
+ * copy the active slot under a seqlock and retry if a publish raced them. config_t is a
+ * flat POD, so the copy is a plain struct assignment. Additive in P1a — NOT yet wired into
+ * config_load or any push trigger (that is P1b); the infra is here + unit-tested first. */
+static config_t g_snap[2];
+static _Atomic unsigned g_snap_seq = 0;    /* seqlock: even = stable, odd = writing */
+static _Atomic unsigned g_snap_active = 0; /* index (0/1) of the live slot */
+static uint64_t g_snap_token = 0;          /* content-hash of the active snapshot */
+static _Atomic int g_snap_inited = 0;      /* atomic so the config_load wrapper's read is visible */
+static pthread_mutex_t g_snap_wlock = PTHREAD_MUTEX_INITIALIZER;
+
+/* Re-applier registry (P3): hooks run after a reload publishes, under g_snap_wlock. */
+#define CONFIG_MAX_REAPPLIERS 16
+static config_reapplier_fn g_reappliers[CONFIG_MAX_REAPPLIERS];
+static int g_reapplier_count = 0;
+
+void config_reload_register_reapplier(config_reapplier_fn fn)
+{
+   pthread_mutex_lock(&g_snap_wlock);
+   if (fn && g_reapplier_count < CONFIG_MAX_REAPPLIERS)
+      g_reappliers[g_reapplier_count++] = fn;
+   pthread_mutex_unlock(&g_snap_wlock);
+}
+
+/* 1 once config_snapshot_init has seeded the live snapshot (server context). Read by the
+ * config_load wrapper to decide snapshot-vs-file; only ever transitions 0 -> 1. */
+static int config_snapshot_live(void)
+{
+   return atomic_load_explicit(&g_snap_inited, memory_order_acquire);
+}
+
+/* FNV-1a over the POD bytes. config_t is memset to 0 before every load (below) so padding
+ * is deterministic and the token is stable for a given logical config. */
+static uint64_t config_snapshot_token(const config_t *c)
+{
+   const unsigned char *p = (const unsigned char *)c;
+   uint64_t h = 1469598103934665603ULL;
+   for (size_t i = 0; i < sizeof *c; i++)
+   {
+      h ^= p[i];
+      h *= 1099511628211ULL;
+   }
+   return h;
+}
+
+/* Publish `cfg` into the inactive slot and flip. Caller holds g_snap_wlock (single writer). */
+static void config_snapshot_publish(const config_t *cfg)
+{
+   unsigned s = atomic_load_explicit(&g_snap_seq, memory_order_relaxed);
+   atomic_store_explicit(&g_snap_seq, s + 1, memory_order_release); /* -> odd (writing) */
+   unsigned nxt = atomic_load_explicit(&g_snap_active, memory_order_relaxed) ^ 1u;
+   g_snap[nxt] = *cfg; /* fill the slot no reader is on */
+   atomic_store_explicit(&g_snap_active, nxt, memory_order_release);
+   g_snap_token = config_snapshot_token(cfg);
+   atomic_store_explicit(&g_snap_seq, s + 2, memory_order_release); /* -> even (stable) */
+   atomic_store_explicit(&g_snap_inited, 1, memory_order_release);
+}
+
+void config_snapshot_init(const config_t *cfg)
+{
+   if (!cfg)
+      return;
+   pthread_mutex_lock(&g_snap_wlock);
+   g_snap_token = 0; /* force the first publish */
+   config_snapshot_publish(cfg);
+   pthread_mutex_unlock(&g_snap_wlock);
+}
+
+int config_snapshot_get(config_t *out)
+{
+   if (!out || !atomic_load_explicit(&g_snap_inited, memory_order_acquire))
+      return -1;
+   for (;;)
+   {
+      unsigned s0 = atomic_load_explicit(&g_snap_seq, memory_order_acquire);
+      if (s0 & 1u)
+         continue; /* a publish is in progress */
+      unsigned act = atomic_load_explicit(&g_snap_active, memory_order_acquire);
+      *out = g_snap[act]; /* POD copy */
+      unsigned s1 = atomic_load_explicit(&g_snap_seq, memory_order_acquire);
+      if (s0 == s1)
+         return 0; /* stable — no publish raced the copy */
+   }
+}
+
+int config_autonomy_lookup(const char *env_name, long *out)
+{
+   if (!env_name || !out)
+      return 0;
+   /* Operator override wins: an explicitly-exported env var (getenv is a safe read now that
+    * nothing setenv's these). Otherwise the LIVE snapshot — so a config.set on autonomy.*
+    * takes effect on the next workflow with no restart and no cross-thread setenv. */
+   config_t c;
+   int have = config_snapshot_get(&c) == 0;
+   long snap = 0;
+   int boolish = 0, is_autonomy = 1;
+   if (strcmp(env_name, "AIMEE_AUTONOMY_SKEPTICS") == 0)
+      snap = have ? c.autonomy_skeptics : 0;
+   else if (strcmp(env_name, "AIMEE_AUTONOMY_FANOUT") == 0)
+      snap = have ? c.autonomy_fanout : 0, boolish = 1;
+   else if (strcmp(env_name, "AIMEE_AUTONOMY_UNIT_RETRY") == 0)
+      snap = have ? c.autonomy_unit_retry : 0;
+   else if (strcmp(env_name, "AIMEE_AUTONOMY_UNIT_MAX") == 0)
+      snap = have ? c.autonomy_unit_max : 0;
+   else if (strcmp(env_name, "AIMEE_AUTONOMY_CI_RETRY_MAX") == 0)
+      snap = have ? c.autonomy_ci_retry_max : 0;
+   else
+      is_autonomy = 0;
+   if (!is_autonomy)
+      return 0; /* not a config-backed autonomy var (e.g. MAX_TURNS) -> caller falls back */
+
+   const char *e = getenv(env_name);
+   if (e && e[0]) /* operator override — VALIDATED (a garbage value falls through to snapshot) */
+   {
+      if (boolish)
+      {
+         *out = (e[0] == '1') ? 1 : 0;
+         return 1;
+      }
+      char *end = NULL;
+      long v = strtol(e, &end, 10);
+      if (end && *end == '\0')
+      {
+         *out = v;
+         return 1;
+      }
+   }
+   if (have)
+   {
+      *out = snap; /* live snapshot value */
+      return 1;
+   }
+   return 0;
+}
+
+int config_reload(void)
+{
+   /* Hold the writer lock across the WHOLE reload (load + validate + token + publish) so two
+    * concurrent config_reload callers cannot race each other's config_load on the shared
+    * g_config_cache. NOTE: config_load's g_config_cache is a pre-existing benign racy cache
+    * shared with per-request config_load callers that are NOT under this lock; P1b removes
+    * that exposure by moving the server's hot readers to config_snapshot_get (this seqlock
+    * snapshot), after which config_load is only reached here (serialized) + by CLI one-shots. */
+   pthread_mutex_lock(&g_snap_wlock);
+   config_t fresh;
+   memset(&fresh, 0, sizeof fresh);   /* zero padding so the token is stable */
+   if (config_load_file(&fresh) != 0) /* always re-read DISK, never the snapshot we replace */
+   {
+      pthread_mutex_unlock(&g_snap_wlock);
+      return -1; /* parse failure -> keep the running snapshot */
+   }
+   char err[256];
+   if (config_reduce_validate(&fresh, err, sizeof err) != 0)
+   {
+      pthread_mutex_unlock(&g_snap_wlock);
+      return -1; /* invalid -> keep the running snapshot (validate-or-keep) */
+   }
+   uint64_t tok = config_snapshot_token(&fresh);
+   if (atomic_load_explicit(&g_snap_inited, memory_order_acquire) && tok == g_snap_token)
+   {
+      pthread_mutex_unlock(&g_snap_wlock);
+      return 0; /* self-reload no-op guard: nothing logically changed */
+   }
+   /* capture the OLD snapshot (if any) so re-appliers can diff their section, then publish. */
+   config_t old;
+   int have_old =
+       atomic_load_explicit(&g_snap_inited, memory_order_acquire) && config_snapshot_get(&old) == 0;
+   config_snapshot_publish(&fresh);
+   for (int i = 0; i < g_reapplier_count; i++)
+      g_reappliers[i](have_old ? &old : &fresh, &fresh);
+   pthread_mutex_unlock(&g_snap_wlock);
+   return 1; /* a new snapshot was published */
 }

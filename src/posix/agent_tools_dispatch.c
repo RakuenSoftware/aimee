@@ -4,6 +4,9 @@
 #include "aimee.h"
 #include "agent_tools.h"
 #include "agent_tools_internal.h"
+#include "aimee_home.h"
+#include "log.h"
+#include "tool_condense.h"
 #include "tool_args_coerce.h"
 #include "workspace_provider.h"
 
@@ -370,6 +373,39 @@ static char *td_execute_script(cJSON *args, const char *name, const char *dispat
    free(env_json);
 
    return result;
+}
+
+/* tool_output_get (P2): resolve a spill ref to the full raw output aimee condensed —
+ * the single first-class recovery handle. */
+static char *td_tool_output_get(cJSON *args, const char *name, const char *dispatch_cwd,
+                                const char *dispatch_sid, int timeout_ms)
+{
+   (void)name;
+   (void)dispatch_cwd;
+   (void)dispatch_sid;
+   (void)timeout_ms;
+   cJSON *r = cJSON_GetObjectItem(args, "ref");
+   if (!r || !cJSON_IsString(r))
+      return safe_strdup("error: missing 'ref' parameter");
+   char spill_dir[600];
+   const char *home = aimee_home();
+   if (!home || !home[0] ||
+       snprintf(spill_dir, sizeof spill_dir, "%s/tool-spills", home) >= (int)sizeof spill_dir)
+      return safe_strdup("error: spill store unavailable");
+   char err[64];
+   char *full = tool_condense_recall(spill_dir, r->valuestring, err, sizeof err);
+   if (!full)
+   {
+      char msg[128];
+      snprintf(msg, sizeof msg, "error: %s", err[0] ? err : "not found");
+      return safe_strdup(msg);
+   }
+   /* recovery-cost telemetry (P4): each recall is a page-back — the counter is bumped inside
+    * tool_condense_recall; log the bytes so the net-of-recovery is greppable next to the
+    * "condensed X->Y" lines. */
+   aimee_log(LOG_INFO, "tool_condense", "tool_output_get recovered %zu bytes (%s)", strlen(full),
+             r->valuestring);
+   return full;
 }
 
 static char *td_read_file(cJSON *args, const char *name, const char *dispatch_cwd,
@@ -1506,6 +1542,8 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       result = td_execute_script(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "read_file") == 0)
       result = td_read_file(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
+   else if (strcmp(name, "tool_output_get") == 0)
+      result = td_tool_output_get(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "edit_file") == 0)
       result = td_edit_file(args, name, dispatch_cwd, dispatch_sid, timeout_ms);
    else if (strcmp(name, "write_file") == 0)

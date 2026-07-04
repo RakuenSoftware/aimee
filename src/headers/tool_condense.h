@@ -11,6 +11,11 @@
 
 #include "config.h"
 
+/* Last-resort ceiling (2 MB) for tool output when the command-filter lever is on: the seam
+ * captures up to this so the FULL output reaches the lever (condense + spill) instead of
+ * being truncated at the old 32 KB read cap, and it bounds fail-open blast radius. */
+#define TOOL_CONDENSE_CEILING (2 * 1024 * 1024)
+
 /* 1 iff the command-filter lever is enabled (reduce_command_filter). */
 int tool_condense_enabled(const config_t *cfg);
 
@@ -73,6 +78,13 @@ typedef struct
 char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_code, const char *raw,
                           const char *spill_dir, tc_stats_t *stats);
 
+/* Recovery contract (P2): resolve a spill `ref` (as emitted in a condensed pointer) to its
+ * full content. Validates the ref (`tc-`+16 hex — never a path) and reads it from
+ * `spill_dir` bounded to TOOL_CONDENSE_CEILING. Returns a NEW string (caller frees), or NULL
+ * with an error in `err` ("invalid ref" / "spill expired") — the single first-class handle
+ * that makes lossless-on-demand real. */
+char *tool_condense_recall(const char *spill_dir, const char *ref, char *err, size_t errn);
+
 /* ---- realized-savings observability (Slice 6) ---- */
 
 /* Cumulative process-wide counters, updated at the seam so an operator can measure the
@@ -85,6 +97,18 @@ typedef struct
    long long applied_final; /* total output bytes over APPLIED condensations */
    long long family_test;   /* applied condensations tagged "test" */
    long long family_diag;   /* applied condensations tagged "diag" */
+   /* recovery-cost telemetry (P4): the page-back side of the ledger. Best-effort monotonic
+    * counters (relaxed atomics); the snapshot is NOT a transactional point-in-time view, so
+    * the two DERIVED fields can be transiently inconsistent under concurrency — fine for an
+    * observability gate, do not drive a hard automated decision off a single live read.
+    * recovered_bytes is the on-disk spill byte count (== the re-injected string length for
+    * the text tool-output this lever handles). */
+   long long recovered;       /* successful tool_output_get recalls (page-backs) */
+   long long recovered_bytes; /* total bytes re-injected by those recalls */
+   long long saved_bytes;     /* derived: applied_raw - applied_final (gross condense saving) */
+   /* derived: saved_bytes - recovered_bytes. MEANINGFULLY negative when recovery exceeds the
+    * condensation saving — i.e. the lever is net-LOSS on this workload (do not clamp at 0). */
+   long long net_saved_bytes;
 } tool_condense_totals_t;
 
 /* Snapshot the counters. Each field is read atomically, but the six are NOT a single

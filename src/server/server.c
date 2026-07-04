@@ -61,6 +61,9 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
+
+/* Defined in server_main.c; set by the SIGHUP handler, observed by the main loop (P1b). */
+extern volatile sig_atomic_t g_config_reload_requested;
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -2058,6 +2061,15 @@ int server_run(server_ctx_t *ctx)
       struct timespec ts = {.tv_sec = 1, .tv_nsec = 0};
       nanosleep(&ts, NULL);
       webuser_editor_reap_tick();
+      /* SIGHUP requested a config reload (live-config-reload P1b): do it here, off the
+       * signal path, since config_reload takes a mutex and does file I/O. */
+      if (g_config_reload_requested)
+      {
+         g_config_reload_requested = 0;
+         int rc = config_reload();
+         aimee_log(rc < 0 ? LOG_WARN : LOG_INFO, "config", "SIGHUP config reload: %s",
+                   rc > 0 ? "applied" : (rc == 0 ? "no change" : "rejected (kept running config)"));
+      }
    }
    return 0;
 }

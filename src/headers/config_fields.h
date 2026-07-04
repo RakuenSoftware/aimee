@@ -18,6 +18,20 @@ typedef enum
    CFG_FLOAT
 } config_field_type_t;
 
+/* When a config.set / Settings change takes effect (live-config-reload P2). Default 0 = HOT.
+ * HOT-default is justified, not fail-open: with P1b, config_load returns the pushed snapshot,
+ * so every field READ PER-REQUEST is live immediately — and the audited majority (provider/
+ * model/endpoint, and the reduce/economizer/memory/ingress feature flags) are read per
+ * request (e.g. openai_endpoint/embedding_endpoint are read on each call). The STARTUP-BOUND
+ * minority is explicitly RELOAD_RESTART: db2_url (postgres pool), kb_api_* (kb client init),
+ * autonomy.* (env bridge). As P3 adds re-appliers, those move RESTART -> REAPPLIABLE (live). */
+typedef enum
+{
+   RELOAD_HOT = 0,     /* read per-request -> live immediately after config.set pushes a reload */
+   RELOAD_REAPPLIABLE, /* bound state with a live re-applier hook (P3) */
+   RELOAD_RESTART,     /* bound at startup with no live re-applier yet -> needs a restart */
+} reload_class_t;
+
 typedef struct
 {
    const char *key;
@@ -25,7 +39,11 @@ typedef struct
    size_t size;
    int is_bool; /* 1 for bool fields */
    config_field_type_t type;
+   reload_class_t reload_class; /* omitted -> RELOAD_HOT (0) */
 } config_field_t;
+
+/* Human label for the reload class, for the config.set / Settings verdict. */
+const char *config_field_reload_verdict(const config_field_t *f);
 
 /* NULL-key-terminated allowlist. */
 extern const config_field_t config_fields[];

@@ -89,10 +89,21 @@ static void startup_notify(int fd, const char *message)
    close(fd);
 }
 
+/* Set by SIGHUP (async-signal-safe: just a flag); the server main loop observes it and calls
+ * config_reload() off the signal path (config_reload takes a mutex / does I/O). */
+volatile sig_atomic_t g_config_reload_requested = 0;
+
 #ifndef _WIN32
 static void signal_handler_info(int sig, siginfo_t *info, void *ucontext)
 {
    (void)ucontext;
+#ifdef SIGHUP
+   if (sig == SIGHUP)
+   {
+      g_config_reload_requested = 1; /* reload config, NOT shut down */
+      return;
+   }
+#endif
    (void)shutdown_forensics_record_signal("server", sig, info, g_ctx.start_time,
                                           g_ctx.active_sessions, 0, g_ctx.session_threads);
    g_ctx.running = 0;
@@ -163,12 +174,16 @@ static int run_server(const char *socket_path, log_level_t log_level)
    git_ops_register_session_isolation(session_isolation_target);
 
    config_t cfg;
+   memset(&cfg, 0, sizeof cfg); /* clean padding so the snapshot token is stable */
    config_load(&cfg);
-
-   /* Bridge the autonomy config knobs to their AIMEE_AUTONOMY_* env vars as early as
-    * possible — before any consumer (plugin discovery, the wfe engine) could read them
-    * via getenv. An explicitly-set env var still overrides (setenv no-overwrite). */
-   autonomy_config_to_env(&cfg);
+   /* Seed the live config snapshot (live-config-reload P1b): from here, every config_load in
+    * the server returns this snapshot, and config_reload (on config.set / SIGHUP) republishes
+    * it so changes take effect immediately instead of on the next mtime-cache miss. */
+   config_snapshot_init(&cfg);
+   /* NOTE: the autonomy.* env bridge (autonomy_config_to_env) is intentionally NOT called —
+    * wfe now reads autonomy.* LIVE from the config snapshot via config_autonomy_lookup (an
+    * operator-exported AIMEE_AUTONOMY_* still overrides), so a config.set applies without a
+    * restart and without an unsafe cross-thread setenv. */
 
    /* Startup-fatal validation for the live gateway-mutation path: an invalid
     * session-disable TTL (<=0) must refuse to bring up the /v1 server rather than
@@ -182,6 +197,18 @@ static int run_server(const char *socket_path, log_level_t log_level)
          return 1;
       }
    }
+
+   /* P3: surface suppressed intent — an explicit lever the two-tier switches override, so an
+    * operator is never silently ignored (per the two-tier design's startup-WARN ruling). */
+   if (!cfg.economizer_enabled &&
+       (cfg.reduce_history_fold || cfg.reduce_compress || cfg.reduce_command_filter))
+      aimee_log(LOG_WARN, "economizer",
+                "economizer.enabled=false MASTER-KILL: all reduction is off (measure still "
+                "runs); individual reduce.* levers are suppressed");
+   if (cfg.reduce_gateway_mutate && !econ_gateway_mutate_on(&cfg))
+      aimee_log(LOG_WARN, "economizer",
+                "reduce.gateway_mutate=true is SUPPRESSED: the live-primary mutator needs "
+                "economizer.enabled && economizer.aggressive (both) to activate");
 
    /* Remote aimee-kb: when a kb_client_url is configured (this host uses a
     * remote kb rather than a local sidecar), export it into our own env so the

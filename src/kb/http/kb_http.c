@@ -24,6 +24,8 @@
 #include "kb_pki.h"
 #include "kb_paths.h"
 #include "kb_scope.h"
+#include "kb_route_acl.h"
+#include "kb_http_console.h"
 #include "kb_verifier.h"
 #include "kb/http/openapi_data.h"
 #include "db2/lifecycle.h"
@@ -671,6 +673,30 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
             return 403;
          }
       }
+
+      /* console-admin containment: the web console's scope:console-admin bearer
+       * is authorized ONLY for its fixed route allowlist (kb_route_acl.c); every
+       * other route is a 403 regardless of scope target. Server-side enforcement,
+       * defence-in-depth with the console's own role gate. */
+      if (vr.scope_kind[0] && strcmp(vr.scope_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) == 0 &&
+          !kb_route_acl_console_admin_allows(method, path))
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"forbidden: console-admin credential not permitted for %s %s\"}",
+                  method, path);
+         return 403;
+      }
+   }
+
+   /* Console read/aggregate routes (kb_http_console.c). Served only to the owner
+    * (unscoped credential) or a console-admin bearer — never to some other scope
+    * kind, so a project-scoped client cannot reach the console surface. (In an
+    * auth-off deployment vr is zeroed = owner, consistent with everything open.) */
+   if (!vr.scope_kind[0] || strcmp(vr.scope_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) == 0)
+   {
+      int cr = kb_http_console_route(method, path, out_buf, out_cap);
+      if (cr >= 0)
+         return cr;
    }
 
    /* POST /v1/enroll — the owner mints a one-time client enrollment (the HTTP

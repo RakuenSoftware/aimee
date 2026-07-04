@@ -32,7 +32,8 @@ int gw_mutate_is_enabled(void)
    config_t cfg;
    if (config_load(&cfg) != 0)
       return 0;
-   return cfg.reduce_gateway_mutate ? 1 : 0;
+   /* aggressive tier (P3): live-primary mutation needs enabled && aggressive && the lever. */
+   return econ_gateway_mutate_on(&cfg);
 }
 
 void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
@@ -48,8 +49,8 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
    config_t cfg;
    if (config_load(&cfg) != 0)
       return;
-   if (!cfg.reduce_gateway_mutate)
-      return; /* dark by default */
+   if (!econ_gateway_mutate_on(&cfg))
+      return; /* dark by default; needs enabled && aggressive && gateway_mutate (P3) */
    ctx->mutate_on = 1;
    ctx->ttl_ms = cfg.reduce_gateway_session_disable_ttl_ms;
 

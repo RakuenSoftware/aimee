@@ -1181,6 +1181,19 @@ int config_load(config_t *cfg)
    return 0;
 }
 
+int config_load_file(config_t *cfg)
+{
+   memset(cfg, 0, sizeof(*cfg));
+   return 0;
+}
+
+/* live-config-reload P1b: server_config.c / server.c call config_reload after a config.set
+ * and on SIGHUP; stub it here (this test doesn't link the real config.o). */
+int config_reload(void)
+{
+   return 0;
+}
+
 int config_save(const config_t *cfg)
 {
    (void)cfg;

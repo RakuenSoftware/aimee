@@ -27,7 +27,11 @@ int main(void)
       memset(&cfg, 0, sizeof cfg);
       assert(tool_condense_enabled(&cfg) == 0);
       cfg.reduce_command_filter = 1;
-      assert(tool_condense_enabled(&cfg) == 1);
+      assert(tool_condense_enabled(&cfg) == 0); /* P3 master (economizer.enabled) still off */
+      cfg.economizer_enabled = 1;
+      assert(tool_condense_enabled(&cfg) == 1); /* master + lever both on */
+      cfg.economizer_enabled = 0;               /* master-kill overrides the lever */
+      assert(tool_condense_enabled(&cfg) == 0);
       assert(tool_condense_enabled(NULL) == 0);
    }
 
@@ -202,6 +206,49 @@ int main(void)
       /* non-zero exit with NO failure signal -> passthrough (NULL) */
       char *r2 = tc_family_test_runner(1, "building...\nlinking...\nnothing useful here\n");
       assert(r2 == NULL);
+
+      /* NO-OVER-REDUCTION (P1a): the failure DETAIL (a separate line from its `--- FAIL:`
+       * marker, `go test` style) must survive in the CONDENSED output, not just the spill.
+       * 60 passes + a failure whose message is the line ABOVE the marker. */
+      char gt[8192];
+      size_t o = 0;
+      for (int k = 0; k < 60; k++)
+      {
+         o += (size_t)snprintf(gt + o, sizeof gt - o, "=== RUN   TestPass%02d\n", k);
+         o += (size_t)snprintf(gt + o, sizeof gt - o, "--- PASS: TestPass%02d (0.00s)\n", k);
+      }
+      o += (size_t)snprintf(gt + o, sizeof gt - o, "=== RUN   TestBoom\n");
+      o += (size_t)snprintf(gt + o, sizeof gt - o, "    x_test.go:63: boom: expected 5 got 4\n");
+      snprintf(gt + o, sizeof gt - o, "--- FAIL: TestBoom (0.00s)\nFAIL\n");
+      char *r3 = tc_family_test_runner(1, gt);
+      assert(r3);
+      assert(strstr(r3, "--- FAIL: TestBoom"));     /* the marker */
+      assert(strstr(r3, "boom: expected 5 got 4")); /* the DETAIL — must NOT be elided */
+      assert(!strstr(r3, "TestPass30"));            /* middle passes still dropped */
+      assert(strlen(r3) < strlen(gt));              /* still materially shrank */
+      free(r3);
+
+      /* multi-line detail block (pytest-style traceback BELOW the failure line) — every
+       * line of the block survives, not just the first. */
+      char py[8192];
+      size_t p = 0;
+      for (int k = 0; k < 50; k++)
+         p += (size_t)snprintf(py + p, sizeof py - p, "test_mod.py::test_ok%02d PASSED\n", k);
+      snprintf(py + p, sizeof py - p,
+               "test_mod.py::test_div FAILED\n"
+               "=================== FAILURES ===================\n"
+               "    def test_div():\n"
+               ">       assert divide(1, 0) == 1\n"
+               "E       ZeroDivisionError: division by zero\n"
+               "test_mod.py:7: ZeroDivisionError\n"
+               "=========== 1 failed, 50 passed ===========\n");
+      char *r4 = tc_family_test_runner(1, py);
+      assert(r4);
+      assert(strstr(r4, "test_div FAILED"));
+      assert(strstr(r4, "ZeroDivisionError: division by zero")); /* the assertion cause */
+      assert(strstr(r4, "assert divide(1, 0)"));                 /* the asserting line */
+      assert(!strstr(r4, "test_ok20 PASSED"));                   /* passes dropped */
+      free(r4);
    }
 
    /* ---- tool_condense_apply (S3) ---- */
@@ -223,6 +270,7 @@ int main(void)
       assert(tool_condense_apply(&cfg, "pytest -q", 0, big, "/tmp", NULL) == NULL);
 
       cfg.reduce_command_filter = 1;
+      cfg.economizer_enabled = 1; /* P3 master gate */
       /* unrecognized command -> passthrough */
       assert(tool_condense_apply(&cfg, "frobnicate", 0, big, "/tmp", NULL) == NULL);
       /* recognized but no spill dir -> passthrough (lossless: never condense without spill) */
@@ -237,18 +285,22 @@ int main(void)
       assert(st.recognized && st.spilled && !strcmp(st.family, "test"));
       assert(st.final_bytes < st.raw_bytes);
       assert(strstr(r, "condensed by aimee")); /* recovery pointer present */
-      assert(strstr(r, st.spill_ref));         /* references the spill file */
-      assert(strstr(r, dir));                  /* the catable full path */
-      /* the spill file exists + holds the FULL raw */
+      assert(strstr(r, st.spill_ref));         /* references the spill ref */
+      assert(strstr(r, "tool_output_get"));    /* the first-class retrieval handle (P2) */
+      /* RECOVERY CONTRACT (P2): tool_condense_recall resolves the ref to the FULL raw. */
+      char rerr[64];
+      char *full = tool_condense_recall(dir, st.spill_ref, rerr, sizeof rerr);
+      assert(full);
+      assert((long)strlen(full) == st.raw_bytes); /* lossless-on-demand */
+      free(full);
+      /* path-traversal + malformed refs are rejected (never escape the spill dir). */
+      assert(tool_condense_recall(dir, "../../etc/passwd", rerr, sizeof rerr) == NULL);
+      assert(tool_condense_recall(dir, "tc-XYZ", rerr, sizeof rerr) == NULL);
+      assert(tool_condense_recall(dir, "tc-0000000000000000", rerr, sizeof rerr) ==
+             NULL); /* expired */
+      /* cleanup */
       char spath[512];
       snprintf(spath, sizeof spath, "%s/%s.out", dir, st.spill_ref);
-      FILE *sf = fopen(spath, "rb");
-      assert(sf);
-      fseek(sf, 0, SEEK_END);
-      long sz = ftell(sf);
-      fclose(sf);
-      assert(sz == st.raw_bytes);
-      /* cleanup */
       unlink(spath);
       rmdir(dir);
       free(r);
@@ -296,6 +348,7 @@ int main(void)
       config_t cfg;
       memset(&cfg, 0, sizeof cfg);
       cfg.reduce_command_filter = 1;
+      cfg.economizer_enabled = 1; /* P3 master gate */
       char big[8192];
       size_t off = 0;
       for (int k = 0; k < 80; k++)
@@ -322,6 +375,7 @@ int main(void)
       config_t cfg;
       memset(&cfg, 0, sizeof cfg);
       cfg.reduce_command_filter = 1;
+      cfg.economizer_enabled = 1; /* P3 master gate */
       char big[8192];
       size_t off = 0;
       off += (size_t)snprintf(big + off, sizeof big - off, "==== session ====\n");
@@ -343,6 +397,20 @@ int main(void)
       assert(t.family_test == 1 && t.family_diag == 0);
       assert(t.applied_raw > t.applied_final); /* realized savings */
       assert(t.applied_raw == st.raw_bytes);
+      /* recovery-cost telemetry (P4): before any recall, net saving == gross saving */
+      assert(t.saved_bytes == t.applied_raw - t.applied_final);
+      assert(t.recovered == 0 && t.recovered_bytes == 0);
+      assert(t.net_saved_bytes == t.saved_bytes);
+
+      /* recall the spill -> a page-back is counted + the net saving drops by the bytes back */
+      char rerr[64];
+      char *back = tool_condense_recall(dir, st.spill_ref, rerr, sizeof rerr);
+      assert(back);
+      tool_condense_stats_snapshot(&t);
+      assert(t.recovered == 1);
+      assert(t.recovered_bytes == (long long)strlen(back));
+      assert(t.net_saved_bytes == t.saved_bytes - t.recovered_bytes); /* recovery erodes the net */
+      free(back);
 
       char spath[512];
       snprintf(spath, sizeof spath, "%s/%s.out", dir, st.spill_ref);

@@ -144,6 +144,7 @@ static const struct
     {"memory", "store", "memory.store", NULL, NULL, 60000},
     {"memory", "identity", "memory.identity", "memory.user_capture", NULL, 60000},
     {"memory", "prefer", "memory.prefer", "memory.user_capture", NULL, 60000},
+    {"memory", "archive", "memory.archive", "memory.user_capture", NULL, 60000},
     {"memory", "list", "memory.list", NULL, "memories", 60000},
     {"memory", "get", "memory.get", NULL, NULL, 60000},
     {"memory", "show", "memory.get", NULL, NULL, 60000},
@@ -552,18 +553,26 @@ cJSON *marshal_memory_store(int argc, char **argv)
  * silent collisions), and dispatches as the server op memory.user_capture with
  * kind + prefixed key + tier L2 so recall surfaces it. Returns NULL (a clear
  * usage/limit error) on bad input so cli_v1_forward reports it. */
-static cJSON *marshal_user_capture(const char *cmd, const char *kind, const char *prefix, int argc,
-                                   char **argv)
+static cJSON *marshal_user_capture(const char *cmd, const char *kind, const char *prefix,
+                                   const char *tier, int argc, char **argv)
 {
    rpc_opts_t opts;
    rpc_parse(argc, argv, NULL, &opts);
-   if (opts.pos_count < 2 || !opts.positional[0][0] || !opts.positional[1][0])
+   /* Content may be positional OR --content=<value>. The flag form is required
+    * for arbitrary bodies (e.g. the .md migration): rpc_parse would otherwise
+    * mis-read a value starting with `--` (frontmatter `---`) as a flag, whereas
+    * a --content=... value is taken verbatim after the first '='. */
+   const char *keyarg = opts.pos_count > 0 ? opts.positional[0] : NULL;
+   const char *content = opts.pos_count > 1 ? opts.positional[1] : rpc_get(&opts, "content");
+   if (!keyarg || !keyarg[0] || !content || !content[0])
    {
-      fprintf(stderr, "aimee: usage: aimee memory %s <key> <value>\n", cmd);
+      fprintf(stderr,
+              "aimee: usage: aimee memory %s <key> <value>   (or: %s <key> --content=<value>)\n",
+              cmd, cmd);
       return NULL;
    }
    char key[512];
-   int need = snprintf(key, sizeof(key), "%s%s", prefix, opts.positional[0]);
+   int need = snprintf(key, sizeof(key), "%s%s", prefix, keyarg);
    if (need < 0 || (size_t)need >= sizeof(key))
    {
       fprintf(stderr, "aimee: memory %s: key too long (max %zu chars)\n", cmd,
@@ -572,22 +581,32 @@ static cJSON *marshal_user_capture(const char *cmd, const char *kind, const char
    }
    cJSON *req = marshal_no_args("memory.user_capture");
    cJSON_AddStringToObject(req, "kind", kind);
-   cJSON_AddStringToObject(req, "tier", "L2");
+   cJSON_AddStringToObject(req, "tier", tier);
    cJSON_AddStringToObject(req, "key", key);
-   cJSON_AddStringToObject(req, "content", opts.positional[1]);
+   cJSON_AddStringToObject(req, "content", content);
    return req;
 }
 
 /* `aimee memory identity <key> <value>` — a per-user identity fact in db1. */
 cJSON *marshal_memory_identity(int argc, char **argv)
 {
-   return marshal_user_capture("identity", "fact", "identity:", argc, argv);
+   return marshal_user_capture("identity", "fact", "identity:", "L2", argc, argv);
 }
 
 /* `aimee memory prefer <key> <value>` — a per-user preference in db1. */
 cJSON *marshal_memory_prefer(int argc, char **argv)
 {
-   return marshal_user_capture("prefer", "preference", "pref:", argc, argv);
+   return marshal_user_capture("prefer", "preference", "pref:", "L2", argc, argv);
+}
+
+/* `aimee memory archive <name> <body>` — preserve a memory in db1 as a private,
+ * NON-RECALLABLE archival row (kind='archive' + tier L1 both keep it out of the
+ * L2/fact|preference recall selectors). The .md-retirement migration writes here
+ * so nothing is lost and nothing leaks to org (db2) before operator
+ * classification. */
+cJSON *marshal_memory_archive(int argc, char **argv)
+{
+   return marshal_user_capture("archive", "archive", "archive:", "L1", argc, argv);
 }
 
 cJSON *marshal_memory_list(int argc, char **argv)

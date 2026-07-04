@@ -3,17 +3,20 @@
  * enable gate. CORE layer: depends only on config.h + libc. */
 #include "tool_condense.h"
 
+#include <dirent.h>
 #include <fcntl.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h> /* snprintf */
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
-/* ---- realized-savings observability (Slice 6) ---- */
+/* ---- realized-savings observability (Slice 6) + recovery-cost telemetry (P4) ---- */
 static atomic_llong g_tc_recognized, g_tc_applied, g_tc_applied_raw, g_tc_applied_final,
-    g_tc_family_test, g_tc_family_diag;
+    g_tc_family_test, g_tc_family_diag, g_tc_recovered, g_tc_recovered_bytes;
 
 void tool_condense_stats_snapshot(tool_condense_totals_t *out)
 {
@@ -25,6 +28,13 @@ void tool_condense_stats_snapshot(tool_condense_totals_t *out)
    out->applied_final = atomic_load_explicit(&g_tc_applied_final, memory_order_relaxed);
    out->family_test = atomic_load_explicit(&g_tc_family_test, memory_order_relaxed);
    out->family_diag = atomic_load_explicit(&g_tc_family_diag, memory_order_relaxed);
+   out->recovered = atomic_load_explicit(&g_tc_recovered, memory_order_relaxed);
+   out->recovered_bytes = atomic_load_explicit(&g_tc_recovered_bytes, memory_order_relaxed);
+   /* net-of-recovery saving: bytes dropped by condensation MINUS bytes paged back via
+    * tool_output_get. This is the recovery-cost gate metric — if recovered approaches
+    * (raw-final), the lever is not net-saving on this workload. */
+   out->saved_bytes = out->applied_raw - out->applied_final;
+   out->net_saved_bytes = out->saved_bytes - out->recovered_bytes;
 }
 
 void tool_condense_stats_reset(void)
@@ -33,13 +43,16 @@ void tool_condense_stats_reset(void)
    atomic_store_explicit(&g_tc_applied, 0, memory_order_relaxed);
    atomic_store_explicit(&g_tc_applied_raw, 0, memory_order_relaxed);
    atomic_store_explicit(&g_tc_applied_final, 0, memory_order_relaxed);
+   atomic_store_explicit(&g_tc_recovered, 0, memory_order_relaxed);
+   atomic_store_explicit(&g_tc_recovered_bytes, 0, memory_order_relaxed);
    atomic_store_explicit(&g_tc_family_test, 0, memory_order_relaxed);
    atomic_store_explicit(&g_tc_family_diag, 0, memory_order_relaxed);
 }
 
 int tool_condense_enabled(const config_t *cfg)
 {
-   return cfg && cfg->reduce_command_filter ? 1 : 0;
+   /* safe-tier lever, gated by the P3 master switch: economizer.enabled off = one kill. */
+   return cfg && cfg->economizer_enabled && cfg->reduce_command_filter ? 1 : 0;
 }
 
 /* ---- command recognition (Slice 2) ---- */
@@ -669,7 +682,7 @@ static const char *const TC_KEEP_SIGS[] = {"test result", "result:", "====",    
  * or NULL (OOM / the safety passthrough). */
 static char *tc_signal_filter(int exit_code, const char *in, const char *const *fail_sigs,
                               const char *const *keep_sigs, int require_fail_nonzero, size_t head,
-                              size_t tail)
+                              size_t tail, size_t ctx_before, size_t ctx_after)
 {
    if (!in)
       return NULL;
@@ -715,14 +728,36 @@ static char *tc_signal_filter(int exit_code, const char *in, const char *const *
       return NULL;
    }
 
+   /* Pre-pass: mark which lines to keep. A fail-signal line drags in its DETAIL BLOCK —
+    * ctx_before lines above + ctx_after below — so a failure's message (a separate line
+    * from its marker, e.g. `x_test.go:63: expected 5 got 4` above `--- FAIL:`) is never
+    * elided while its marker survives. head/tail and keep-signals are kept as before. */
+   char *keep = calloc(nlines, 1);
+   if (!keep)
+   {
+      free(lp);
+      free(ll);
+      return NULL;
+   }
+   for (size_t i = 0; i < nlines; i++)
+   {
+      if (i < head || i + tail >= nlines || line_has_any(lp[i], ll[i], keep_sigs))
+         keep[i] = 1;
+      if (line_has_any(lp[i], ll[i], fail_sigs))
+      {
+         size_t lo = (i > ctx_before) ? i - ctx_before : 0;
+         size_t hi = (i + ctx_after < nlines) ? i + ctx_after : nlines - 1;
+         for (size_t j = lo; j <= hi; j++)
+            keep[j] = 1;
+      }
+   }
+
    sb_t s = {0};
    int first = 1;
    size_t elided = 0;
    for (size_t i = 0; i < nlines; i++)
    {
-      int keep = (i < head) || (i + tail >= nlines) || line_has_any(lp[i], ll[i], fail_sigs) ||
-                 line_has_any(lp[i], ll[i], keep_sigs);
-      if (keep)
+      if (keep[i])
       {
          if (elided)
          {
@@ -752,14 +787,23 @@ static char *tc_signal_filter(int exit_code, const char *in, const char *const *
          sb_addc(&s, '\n');
       sb_adds(&s, mark);
    }
+   free(keep);
    free(lp);
    free(ll);
    return sb_finish(&s);
 }
 
+/* Context window kept around each failure marker (P1a): a few lines before (go-test puts
+ * the message above the marker) + a wider span after (pytest/jest/rust/java multi-line
+ * tracebacks fall below it). A pathological traceback longer than TC_TEST_CTX_AFTER
+ * overflows the window but is fully preserved in the spill (recoverable). */
+#define TC_TEST_CTX_BEFORE 3
+#define TC_TEST_CTX_AFTER  8
+
 char *tc_family_test_runner(int exit_code, const char *in)
 {
-   return tc_signal_filter(exit_code, in, TC_FAIL_SIGS, TC_KEEP_SIGS, 1, 2, 6);
+   return tc_signal_filter(exit_code, in, TC_FAIL_SIGS, TC_KEEP_SIGS, 1, 2, 6, TC_TEST_CTX_BEFORE,
+                           TC_TEST_CTX_AFTER);
 }
 
 /* Compiler / linter diagnostics (Slice 5): keep every error/warning/note + file:line
@@ -793,7 +837,9 @@ static const char *const TC_DIAG_KEEP_SIGS[] = {"warning", "warn:",   "note:",  
  * warnings is still condensed. */
 char *tc_family_diagnostics(int exit_code, const char *in)
 {
-   return tc_signal_filter(exit_code, in, TC_DIAG_FAIL_SIGS, TC_DIAG_KEEP_SIGS, 1, 2, 4);
+   /* ctx 0/0: a compiler diagnostic line is self-contained (file:line:col + message);
+    * the source-echo/caret below it is redundant (the model has the file:line). */
+   return tc_signal_filter(exit_code, in, TC_DIAG_FAIL_SIGS, TC_DIAG_KEEP_SIGS, 1, 2, 4, 0, 0);
 }
 
 /* ---- spill store + top-level apply (Slice 3) ---- */
@@ -822,12 +868,85 @@ static void tc_hash_ref(const char *seed, const char *content, char out[40])
  * -1 otherwise (the caller then passes through — never a condense without a backstop).
  * Opened O_NOFOLLOW (never follow a pre-planted symlink at the predictable path) + 0600.
  * The ref is content-derived so re-writing an existing ref is idempotent (same bytes). */
+/* Per-user spill-store byte budget (P2 §2.2): keep the tool-spills dir bounded. */
+#define TC_SPILL_MAX_BYTES (64L * 1024 * 1024)
+
+/* Keep the spill dir under TC_SPILL_MAX_BYTES: remove OLDEST regular .out files (by mtime)
+ * until under budget. Best-effort — any error just leaves the file. Each pass tracks up to
+ * 512 files; if MORE than 512 exist and the store is still over budget, the outer loop
+ * re-scans (bounded passes) so a large store still drains rather than growing unbounded.
+ * lstat + S_ISREG so a symlink planted in the dir is never followed for size/mtime. */
+static void tc_spill_evict(const char *dir, long budget)
+{
+   for (int pass = 0; pass < 16; pass++)
+   {
+      DIR *d = opendir(dir);
+      if (!d)
+         return;
+      struct
+      {
+         char name[80];
+         long mt;
+         long sz;
+      } ents[512];
+      int ne = 0;
+      long total = 0; /* total over ALL .out files, not just the tracked sample */
+      struct dirent *de;
+      while ((de = readdir(d)) != NULL)
+      {
+         size_t l = strlen(de->d_name);
+         if (l < 5 || l >= sizeof ents[0].name || strcmp(de->d_name + l - 4, ".out") != 0)
+            continue;
+         char p[1500];
+         if (snprintf(p, sizeof p, "%s/%s", dir, de->d_name) >= (int)sizeof p)
+            continue;
+         struct stat st;
+         if (lstat(p, &st) != 0 || !S_ISREG(st.st_mode))
+            continue;
+         total += (long)st.st_size;
+         if (ne < 512)
+         {
+            snprintf(ents[ne].name, sizeof ents[ne].name, "%s", de->d_name);
+            ents[ne].mt = (long)st.st_mtime;
+            ents[ne].sz = (long)st.st_size;
+            ne++;
+         }
+      }
+      closedir(d);
+      if (total <= budget || ne == 0)
+         return;
+      /* evict oldest-of-sample until the GLOBAL total is under budget or the sample empties */
+      while (total > budget && ne > 0)
+      {
+         int oldest = 0;
+         for (int i = 1; i < ne; i++)
+            if (ents[i].mt < ents[oldest].mt)
+               oldest = i;
+         char p[1500];
+         if (snprintf(p, sizeof p, "%s/%s", dir, ents[oldest].name) < (int)sizeof p)
+            (void)unlink(p);
+         total -= ents[oldest].sz;
+         ents[oldest] = ents[--ne];
+      }
+      if (total <= budget)
+         return; /* else >512 files remained: loop re-scans to reach the untracked oldest */
+   }
+}
+
+/* Write the full raw output to <dir>/<ref>.out with the §2.2 DURABILITY contract: write to a
+ * PID-unique temp file (so two processes spilling the same ref never race on one .tmp), fsync,
+ * atomic rename to the ref path — so a partial/crashed write is never promoted to a readable
+ * ref. The rename makes the content immediately readable (what recall needs THIS run); the
+ * trailing directory fsync is best-effort crash-durability of the dir entry and does not gate
+ * success. Returns 0 only when the durable rename landed, -1 otherwise (the caller then passes
+ * through — never a condense without a recoverable backstop). */
 static int tc_spill_write(const char *dir, const char *ref, const char *content)
 {
-   char path[1400];
-   if (snprintf(path, sizeof path, "%s/%s.out", dir, ref) >= (int)sizeof path)
+   char path[1400], tmp[1440];
+   if (snprintf(path, sizeof path, "%s/%s.out", dir, ref) >= (int)sizeof path ||
+       snprintf(tmp, sizeof tmp, "%s/%s.%d.tmp", dir, ref, (int)getpid()) >= (int)sizeof tmp)
       return -1;
-   int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
+   int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0600);
    if (fd < 0)
       return -1;
    size_t n = strlen(content), off = 0;
@@ -842,9 +961,79 @@ static int tc_spill_write(const char *dir, const char *ref, const char *content)
       }
       off += (size_t)w;
    }
+   if (ok && off == n && fsync(fd) != 0)
+      ok = 0;
    if (close(fd) != 0)
       ok = 0;
-   return (ok && off == n) ? 0 : -1;
+   if (!ok || off != n || rename(tmp, path) != 0)
+   {
+      (void)unlink(tmp);
+      return -1;
+   }
+   int dfd = open(dir, O_RDONLY | O_DIRECTORY);
+   if (dfd >= 0)
+   {
+      (void)fsync(dfd);
+      (void)close(dfd);
+   }
+   return 0;
+}
+
+/* Validate a spill ref is exactly `tc-` + 16 lowercase hex (no path chars) — a strict
+ * predicate so a recall can never traverse out of the spill dir. */
+static int tc_ref_valid(const char *ref)
+{
+   if (!ref || strncmp(ref, "tc-", 3) != 0)
+      return 0;
+   const char *h = ref + 3;
+   if (strlen(h) != 16)
+      return 0;
+   for (const char *p = h; *p; p++)
+      if (!((*p >= '0' && *p <= '9') || (*p >= 'a' && *p <= 'f')))
+         return 0;
+   return 1;
+}
+
+char *tool_condense_recall(const char *spill_dir, const char *ref, char *err, size_t errn)
+{
+   if (err && errn)
+      err[0] = '\0';
+   if (!spill_dir || !tc_ref_valid(ref))
+   {
+      if (err && errn)
+         snprintf(err, errn, "invalid ref");
+      return NULL;
+   }
+   char path[1400];
+   if (snprintf(path, sizeof path, "%s/%s.out", spill_dir, ref) >= (int)sizeof path)
+      return NULL;
+   int fd = open(path, O_RDONLY | O_NOFOLLOW);
+   if (fd < 0)
+   {
+      if (err && errn)
+         snprintf(err, errn, "spill expired");
+      return NULL;
+   }
+   size_t cap = (size_t)TOOL_CONDENSE_CEILING + 1, len = 0;
+   char *buf = malloc(cap);
+   if (!buf)
+   {
+      close(fd);
+      if (err && errn)
+         snprintf(err, errn, "allocation failed");
+      return NULL;
+   }
+   ssize_t r;
+   while (len < (size_t)TOOL_CONDENSE_CEILING &&
+          (r = read(fd, buf + len, (size_t)TOOL_CONDENSE_CEILING - len)) > 0)
+      len += (size_t)r;
+   close(fd);
+   buf[len] = '\0';
+   /* recovery-cost telemetry (P4): a successful recall is a page-back — count it + the bytes
+    * re-injected, so net-of-recovery saving is observable (the promotion-gate metric). */
+   atomic_fetch_add_explicit(&g_tc_recovered, 1, memory_order_relaxed);
+   atomic_fetch_add_explicit(&g_tc_recovered_bytes, (long long)len, memory_order_relaxed);
+   return buf;
 }
 
 /* Does the recognized command denote a TEST-RUNNER invocation (the only S3 family)? */
@@ -896,7 +1085,7 @@ char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_cod
    if (!tool_condense_enabled(cfg) || !raw || !raw[0])
       return NULL;
    long rawlen = (long)strlen(raw);
-   if (rawlen > (1 << 20))
+   if (rawlen > TOOL_CONDENSE_CEILING)
       return NULL; /* over the input cap -> hand back to the size-based fallback */
 
    tc_reco_result_t reco = tc_recognize(cmdline);
@@ -938,6 +1127,7 @@ char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_cod
    }
    char ref[40];
    tc_hash_ref(cmdline ? cmdline : "", raw, ref);
+   tc_spill_evict(spill_dir, TC_SPILL_MAX_BYTES); /* keep the store bounded (§2.2) */
    if (tc_spill_write(spill_dir, ref, raw) != 0)
    {
       free(cond);
@@ -946,12 +1136,12 @@ char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_cod
 
    sb_t out = {0};
    sb_adds(&out, cond);
-   char ptr[4200];
+   char ptr[256];
    int pn = snprintf(ptr, sizeof ptr,
-                     "\n[output condensed by aimee — %ld bytes total; the full, unfiltered "
-                     "output is at %s/%s.out — read it if you need a passing case or elided "
-                     "detail]",
-                     rawlen, spill_dir, ref);
+                     "\n[output condensed by aimee — %ld bytes total; retrieve the full, "
+                     "unfiltered output with the tool_output_get tool, ref \"%s\", if you need "
+                     "a passing case or elided detail]",
+                     rawlen, ref);
    if (pn < 0 || pn >= (int)sizeof ptr)
    {
       /* the recovery pointer would be truncated (pathological spill path) -> passthrough

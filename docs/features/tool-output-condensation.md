@@ -10,19 +10,20 @@ LLM, so it is ~free). It knows that a test runner's value is its *failures*, a c
 its *diagnostics*, and drops the rest — **losslessly**: the full raw output is spilled to
 disk and a recovery pointer is left in the condensed result, so nothing is destroyed.
 
-It is **default-OFF** and complements — does not replace — the size-based
-`reduce.compress`, which stays the fallback for unrecognized output.
+It is **default-ON** (unified-economizer P1c — a safe-tier lever: lossless-on-demand,
+fail-open, no-over-reduction) and complements — does not replace — the size-based
+`reduce.compress`, which stays the fallback for unrecognized output. Set
+`reduce.command_filter=false` to opt out.
 
 ## Configuration
 
 ```yaml
 reduce:
-  command_filter: false   # DEFAULT OFF. The whole lever.
+  command_filter: true    # DEFAULT ON. Set false to opt out.
 ```
 
 Turn it on from the web UI (**⚙️ Settings → `reduce.command_filter`**, see
-[SETTINGS.md](../SETTINGS.md)) or the config above. When off, tool output is **byte-identical
-to today** — the seam falls through to the size-based `reduce.compress`.
+[SETTINGS.md](../SETTINGS.md)) or the config above. When off, tool output is **byte-identical to today** — the seam falls through to the size-based `reduce.compress`.
 
 ## What it does
 
@@ -40,9 +41,12 @@ before the size-based compression:
    - **Compilers / linters** (`tsc`/`eslint`/`ruff`/`mypy`/`gcc`/`clang`/`rustc`/`cmake`,
      and `cargo|go|dotnet|npm|… build/check/clippy/vet/lint`): keep every error/warning/note
      and diagnostic, drop the `Compiling…/Downloading…/Checking…` progress.
-3. **Spill + point.** The full raw output is written to `<aimee_home>/tool-spills/<ref>.out`
-   (mode `0600`) and the condensed result ends with a pointer to that path, which the
-   delegate reads back with its own bash tool if it needs an elided passing case.
+3. **Spill + point.** The full raw output is **atomically** written to
+   `<aimee_home>/tool-spills/<ref>.out` (temp → `fsync` → rename → dir `fsync`, mode `0600`,
+   so a partial write is never promoted) and the condensed result ends with a pointer
+   carrying the opaque `ref`. The agent retrieves the full original with the first-class
+   **`tool_output_get`** tool (P2) — one recovery handle, not a raw filesystem path. The
+   spill store is kept under a 64 MB budget by oldest-first (mtime) eviction.
 
 ## Safety contract
 
@@ -52,7 +56,7 @@ before the size-based compression:
   recovery pointer all fall through to passthrough. Nothing is dropped without a backstop.
 - **Never hide a failure.** A test runner or build with a **non-zero exit and no recognized
   failure line** passes through verbatim rather than risk eliding the cause.
-- **Fail-open everywhere.** An unrecognized command, an over-cap body (> 1 MiB), or any
+- **Fail-open everywhere.** An unrecognized command, an over-ceiling body (> 2 MB), or any
   filter error degrades to the size-based `reduce.compress` — never a crash or a dropped
   result.
 - **No masquerade.** A path-prefixed command whose basename matches a known tool (`./git`)
@@ -62,20 +66,40 @@ before the size-based compression:
   spill. Spill files are per-user (`0700` directory) and excluded from log/trace exports by
   default.
 
-## Observability
+## Observability + recovery cost (P4)
 
-Process-wide counters accumulate realized savings on live traffic
+Process-wide counters accumulate realized savings **and recovery cost** on live traffic
 ([`tool_condense_stats_snapshot`](../../src/tool_condense.c)): `recognized`, `applied`,
-`applied_raw` vs `applied_final` bytes, and per-family (`test`, `diag`) counts. Each
-condensation also logs its `raw→final` delta under the `tool_condense` module.
+`applied_raw` vs `applied_final` bytes, per-family (`test`, `diag`) counts, and the
+**recovery-cost** side — `recovered` (successful `tool_output_get` page-backs) and
+`recovered_bytes` (bytes re-injected). Two derived fields make the promotion-gate metric
+explicit:
+
+- `saved_bytes` = `applied_raw − applied_final` (gross condensation saving);
+- **`net_saved_bytes`** = `saved_bytes − recovered_bytes` (**net of recovery**).
+
+`net_saved_bytes` is the honest measure: if the agent keeps paging spilled output back in,
+`recovered_bytes` rises toward `saved_bytes` and the net collapses — the signal that the
+lever is not net-saving on that workload. Each condensation logs its `raw→final` delta and
+each recall logs `tool_output_get recovered N bytes` under the `tool_condense` module, so the
+two sides are greppable together. (This precise per-call channel exists because
+`tool_output_get` is the single first-class recovery handle from P2; `history_fold`/`compress`
+recovery via fold-recall remains best-effort, not byte-exact.)
 
 ## Scope & rollout
 
-Shipped as the **delegate surface** (default-off). Enable it on a validation host, watch the
-savings counters, and roll back by flipping `reduce.command_filter` to `false`.
+Shipped as the **delegate surface**, **default-ON** (the safe-tier lever): when on, the
+delegate bash seam captures the full output (up to a 2 MB ceiling) so the lever sees all of
+it, condenses recognized families losslessly, and spills the raw for recovery. Opt out with
+`reduce.command_filter=false`; roll back the default by the same flag.
 
-**Carried follow-ups** (not yet shipped): the **primary-agent** surface (a client-side hook
-+ a first-class `tool_output_get` retrieval tool); additional command families (VCS `git`,
-file/dir ops, package managers); and the **operator default-ON** decision — a named gate
-(no-lost-signal audit + material realized savings + fail-safe, measured via the counters
-above), never a silent flip.
+The **default-ON** flip landed in unified-economizer **P1c**, justified by the deterministic
+gate (lossless-on-demand + fail-open + a no-over-reduction audit); it replaces the old lossy
+32 KB read-cap truncation with lossless-recoverable condensation.
+
+The first-class **`tool_output_get`** retrieval tool + the atomic-write / bounded-eviction
+recovery contract landed in unified-economizer **P2**.
+
+**Carried follow-ups** (not yet shipped): the **primary-agent** surface (a client-side
+hook); additional command families (VCS `git`, file/dir ops, package managers); and folding
+the fold-recall / `code_span_get` recovery flows through the same `tool_output_get` handle.

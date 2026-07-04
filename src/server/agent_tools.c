@@ -576,6 +576,19 @@ static cJSON *tp_read_file(void)
    return params;
 }
 
+static cJSON *tp_tool_output_get(void)
+{
+   cJSON *params = tp_obj();
+   cJSON *props = cJSON_CreateObject();
+   tp_prop(props, "ref", "string",
+           "The spill ref from a '[output condensed by aimee ... ref \"tc-...\"]' pointer.");
+   cJSON_AddItemToObject(params, "properties", props);
+   cJSON *req = cJSON_CreateArray();
+   cJSON_AddItemToArray(req, cJSON_CreateString("ref"));
+   cJSON_AddItemToObject(params, "required", req);
+   return params;
+}
+
 static cJSON *tp_write_file(void)
 {
    cJSON *params = tp_obj();
@@ -883,6 +896,11 @@ static const builtin_tool_def_t g_builtin_tools[] = {
      "stdout, stderr, exit_code, duration_ms, and truncation flags.",
      tp_execute_script, TSURF_CHAT},
     {"read_file", "Read a file and return its contents.", tp_read_file, TSURF_ALL},
+    {"tool_output_get",
+     "Retrieve the full, unfiltered output that aimee condensed. Pass the ref from a "
+     "'[output condensed by aimee ... ref \"tc-...\"]' pointer to get the complete original "
+     "output (e.g. a passing test case or an elided detail).",
+     tp_tool_output_get, TSURF_ALL},
     {"write_file", "Write content to a file (overwrites).", tp_write_file, TSURF_ALL},
     {"edit_file",
      "Make a surgical edit to an existing file by replacing old_string with new_string. "

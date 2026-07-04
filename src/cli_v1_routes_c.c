@@ -1614,6 +1614,11 @@ void pt_print_config_set(const char *method, cJSON *resp)
    cJSON *v = cJSON_GetObjectItemCaseSensitive(resp, "value");
    printf("set %s = ", cJSON_IsString(k) ? k->valuestring : "?");
    pt_print_config_value(v);
+   /* Live/Restart verdict (live-config-reload P2). */
+   cJSON *rl = cJSON_GetObjectItemCaseSensitive(resp, "reload");
+   cJSON *live = cJSON_GetObjectItemCaseSensitive(resp, "applied_live");
+   if (cJSON_IsString(rl) && live && !cJSON_IsTrue(live))
+      printf("  (%s)\n", rl->valuestring);
 }
 void pt_print_config_show(const char *method, cJSON *resp)
 {

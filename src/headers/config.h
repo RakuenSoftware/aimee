@@ -966,15 +966,31 @@ typedef struct config
    int reduce_freeze_guard_horizon;
    int reduce_gateway_mutate;
    int reduce_gateway_session_disable_ttl_ms;
-   /* reduce_command_filter: deterministic command-aware tool-output condensation lever
-    * (proposal: deterministic-tool-output-condensation). Default OFF. S1 ships the
-    * primitives + this gate; the tool seam is wired in a later slice, so the flag is
-    * inert until then. */
+   /* reduce_command_filter: deterministic command-aware tool-output condensation lever.
+    * DEFAULT-ON (unified-economizer P1c): a safe-tier lever — lossless-on-demand (full
+    * output spilled), fail-open, and no-over-reduction (failures/diagnostics + their detail
+    * block kept in the condensed view). When on, tool_bash captures up to TOOL_CONDENSE_
+    * CEILING (2 MB) so the full output reaches the lever, replacing the old lossy 32 KB
+    * read-cap truncation. Set reduce.command_filter=false to opt out. */
    int reduce_command_filter;
    /* Runtime-only (NOT parsed as a key, NOT persisted): 1 iff the operator set the
     * reduce.gateway_seam key explicitly. Lets config_save persist gateway_seam only
     * when the user chose it, never when config_load synthesized it from mutate=1. */
    int reduce_gateway_seam_explicit;
+
+   /* Unified-economizer TWO-TIER switches (P3). These GATE the individual reduce.* levers
+    * without mutating them (resolved by the econ_* accessors, never surprising config_save):
+    *   economizer.enabled   — MASTER for all reduction ACTIONS. DEFAULT-ON. false = one
+    *                          off-switch: every reducer is forced off, but measure/telemetry
+    *                          keeps running (reports zero — proving the kill works). The safe
+    *                          tier (delegate-seam: command_filter/history_fold/compress) is on
+    *                          under it by their own defaults.
+    *   economizer.aggressive — opt-in ceiling for the AGGRESSIVE tier (live PRIMARY /v1
+    *                          mutation: gateway_mutate). DEFAULT-OFF. gateway_mutate requires
+    *                          enabled && aggressive && reduce.gateway_mutate (all three) — the
+    *                          aggressive flag alone never activates a live-traffic mutator. */
+   int economizer_enabled;
+   int economizer_aggressive;
 
    /* Autonomous-development pipeline knobs (Phase-C). These were env-var-only
     * (AIMEE_AUTONOMY_*); the config values are bridged to those env vars at startup
@@ -1738,6 +1754,42 @@ static inline int config_issue(const char *fmt, ...)
 /* Load config from default path. Returns defaults if missing.
  * In strict mode, returns -1 on validation errors. */
 int config_load(config_t *cfg);
+
+/* Live config snapshot (live-config-reload P1a) — a double-buffer + seqlock holding the
+ * current config for immediate, push-driven reload. config_t is a flat POD, so reads are a
+ * lock-free struct copy. Additive in P1a: not yet wired into config_load or a push trigger.
+ *   config_snapshot_init  — seed the snapshot from a loaded config (once, at startup).
+ *   config_snapshot_get   — copy the live snapshot into `out` (seqlock read). -1 if uninit.
+ *   config_reload         — re-read the file, VALIDATE-or-keep, and publish only if the
+ *                           content-hash token changed (self-reload no-op guard).
+ *                           Returns 1 = published, 0 = no-op (unchanged), -1 = kept (bad). */
+void config_snapshot_init(const config_t *cfg);
+int config_snapshot_get(config_t *out);
+int config_reload(void);
+
+/* Re-applier registry (live-config-reload P3): a hook invoked after config_reload publishes a
+ * new snapshot, receiving the OLD and NEW config so it can push bound state (env bridge, log
+ * level, TLS, …) live when the section it owns changed. Register once at startup. Re-appliers
+ * run under the reload writer lock: they must be quick and must NOT call config_reload. */
+typedef void (*config_reapplier_fn)(const config_t *old_cfg, const config_t *new_cfg);
+void config_reload_register_reapplier(config_reapplier_fn fn);
+
+/* Live autonomy.* accessor (thread-safe) for wfe: for an AIMEE_AUTONOMY_* env NAME that maps
+ * to a config field, write the effective value to *out and return 1 — preferring an operator-
+ * exported env var, else the live config snapshot. Returns 0 for a non-config autonomy var
+ * (e.g. MAX_TURNS) so the caller falls back to its own getenv default. Replaces the unsafe
+ * setenv env-bridge for live reload: no cross-thread setenv, wfe reads the seqlock snapshot. */
+int config_autonomy_lookup(const char *env_name, long *out);
+/* Force a read from DISK, bypassing the live snapshot. Use for a read-modify-save that must
+ * reflect the current on-disk file (e.g. config.set) so it never clobbers an external edit,
+ * and internally by config_reload. Ordinary readers should use config_load. */
+int config_load_file(config_t *cfg);
+
+/* Two-tier economizer resolution (P3) — compute EFFECTIVE lever states without mutating
+ * config_t (so config_save always round-trips the raw user values). Precedence:
+ * master-kill (economizer.enabled) > aggressive-tier ceiling > individual reduce.* default. */
+int econ_reduction_master_on(const config_t *cfg); /* economizer.enabled (measure is exempt) */
+int econ_gateway_mutate_on(const config_t *cfg);   /* enabled && aggressive && gateway_mutate */
 
 /* Validate the economizer gateway-mutation invariants that are STARTUP-FATAL (as
  * opposed to the in-memory normalizations config_load already applied). Currently:

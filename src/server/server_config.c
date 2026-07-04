@@ -87,8 +87,10 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!f)
       return server_send_error(conn, "config: unknown key", NULL);
 
+   /* Read from DISK (not the live snapshot) for the read-modify-save so a config.set never
+    * clobbers an external edit made to the file since the last reload (live-config-reload P1b). */
    config_t cfg;
-   if (config_load(&cfg) != 0)
+   if (config_load_file(&cfg) != 0)
       return server_send_error(conn, "config: could not load configuration", NULL);
 
    if (config_field_set_value(&cfg, f, value) != 0)
@@ -97,9 +99,17 @@ int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (config_save(&cfg) != 0)
       return server_send_error(conn, "config: could not save configuration", NULL);
 
+   /* Push the change into the live snapshot NOW so it takes effect immediately for every
+    * config_load reader, instead of waiting for an mtime-cache miss (live-config-reload P1b). */
+   (void)config_reload();
+
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "key", key);
    cJSON_AddItemToObject(resp, "value", config_field_value_json(&cfg, f));
+   /* Live/Restart verdict (live-config-reload P2): tell the caller whether the change is in
+    * effect now or needs a restart, instead of leaving them to guess. */
+   cJSON_AddStringToObject(resp, "reload", config_field_reload_verdict(f));
+   cJSON_AddBoolToObject(resp, "applied_live", f->reload_class != RELOAD_RESTART);
    /* One-time setup warning: enabling delegate use of Claude-via-CLI carries an
     * Anthropic account-action risk. Surfaced here (not on every delegate call)
     * and in DELEGATES.md. */
