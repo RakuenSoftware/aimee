@@ -175,10 +175,14 @@ int server_tls_init(const char *cert_path, const char *key_path, int mtls_mode,
    }
    g_ctx = ctx;
    /* remember the paths so a SIGHUP reload can re-read the same files */
-   snprintf(g_cert_path, sizeof g_cert_path, "%s", cert_path);
-   snprintf(g_key_path, sizeof g_key_path, "%s", key_path);
+   int t1 = snprintf(g_cert_path, sizeof g_cert_path, "%s", cert_path);
+   int t2 = snprintf(g_key_path, sizeof g_key_path, "%s", key_path);
    snprintf(g_client_ca_path, sizeof g_client_ca_path, "%s", client_ca_path ? client_ca_path : "");
    g_mtls_mode = mtls_mode;
+   if (t1 >= (int)sizeof g_cert_path || t2 >= (int)sizeof g_key_path)
+      aimee_log(LOG_WARN, "server.tls",
+                "TLS cert/key path too long to save — live SIGHUP cert reload will be a no-op "
+                "(restart to pick up a renewed cert)");
    pthread_mutex_unlock(&g_ctx_mu);
    aimee_log(LOG_INFO, "server.tls", "native TLS enabled (cert %s)", cert_path);
    return 0;
@@ -211,12 +215,12 @@ int server_tls_reload(void)
    pthread_mutex_lock(&g_ctx_mu);
    SSL_CTX *old = g_ctx;
    g_ctx = nctx; /* new handshakes use the new cert */
-   pthread_mutex_unlock(&g_ctx_mu);
-   /* In-flight connections' SSL objects hold their own ref on `old` (SSL_new up-refs the
-    * SSL_CTX), so this free just drops OUR ref; `old` is destroyed when the last live SSL on
-    * it is freed. No handshake in progress can observe a half-freed ctx (the accept path
-    * takes g_ctx_mu around the g_ctx read + SSL_new). */
+   /* Free UNDER the lock: post-swap accepts read nctx (never old), and in-flight SSL objects
+    * hold their own ref on `old` (SSL_new up-refs the SSL_CTX), so this drops only OUR ref —
+    * `old` is destroyed when the last live SSL on it is freed. Doing it inside the critical
+    * section closes any window where an accept could observe the pointer being freed. */
    SSL_CTX_free(old);
+   pthread_mutex_unlock(&g_ctx_mu);
    aimee_log(LOG_INFO, "server.tls", "TLS cert reloaded (cert %s)", cert);
    return 1;
 }
