@@ -1,6 +1,49 @@
 # Proposal: Unified economizer with a two-tier safety model
 
-- **State:** proposed — design (pending review). Consolidate aimee's **six overlapping
+- **State:** ✅ **COMPLETE (closed out 2026-07-04).** All five phases merged to `testing`.
+  See the **Implementation status** section below for what shipped, an honest reframe the
+  build surfaced, and the carried follow-ups.
+
+## Implementation status (P1–P5, all merged)
+
+| Phase | PR | What landed |
+| --- | --- | --- |
+| Proposal | #1049 | This doc — 3 roundtable rounds, no blocking. |
+| **P1** | #1050, #1051 | Replaced the lossy default: fixed `command_filter` over-reduction (failure DETAIL block kept, not just the marker — caught by deterministic measurement), fronted the tool-output cap (growable buffers, full output up to a 2 MB ceiling reaches the lever), and **defaulted `command_filter` ON**. Today's on-by-default tool-output reducer is now lossless-recoverable instead of a 32 KB truncation. |
+| **P2** | #1052 | First-class recovery handle: the **`tool_output_get`** tool + `tool_condense_recall` (ref-validated, no traversal, bounded) + the §2.2 durability contract (atomic temp→fsync→rename spill, PID-unique temp, 64 MB LRU eviction with `lstat`/`S_ISREG`). |
+| **P3** | #1053 | Two-tier config: **`economizer.enabled`** (master-kill, measurement exempt) + **`economizer.aggressive`** (ceiling; `gateway_mutate` needs enabled ∧ aggressive ∧ the lever). Non-mutating accessors at 5 seams; startup WARN on suppressed intent; back-compat matrix test. |
+| **P4** | #1054 | Recovery-cost telemetry: `recovered`/`recovered_bytes` counters on the precise `tool_output_get` page-back channel + derived `saved_bytes` and **`net_saved_bytes`** (the honest promotion-gate metric; meaningfully negative on a net-loss workload). |
+| **P5** | (this) | Close-out. |
+
+**Honest reframe the build surfaced.** The proposal assumed `history_fold`/`compress` were
+aggressive default-OFF levers to *promote*. The code's real defaults showed otherwise: the
+**delegate-seam** reduction (`command_filter`/`history_fold`/`compress`) is **already
+default-ON** — that *is* the safe tier — while the live-**primary** `gateway_mutate` path is
+default-OFF — that *is* the aggressive tier. So P3 mapped the two tiers onto the defaults that
+already existed, and P5's "promote fold/compress" became **"measure-and-keep"**: they are on,
+and P4 gives the recovery-cost instrumentation to demote them later *if* measured net-loss.
+
+**Validation.** Every slice was roundtable-reviewed (design + code) and unit-tested
+(recognition/family/spill/recall/eviction/counters/net in `test_tool_condense`; two-tier
+resolution + back-compat + round-trip in `test_config_economizer`); all merged CI-green. The
+**reduce path was already measured live on `.254`** (the `avoided` ledger: ~21% avg token
+reduction, up to ~70%, zero unsafe bypasses across 1,124 turns), and the RTK lever was
+measured deterministically on real `gcc`/`clang`/`go test` output (44–85%, which *caught* the
+P1 failure-detail bug).
+
+**Carried follow-ups** (sanctioned, not loose ends):
+1. **Deploy-tier live e2e** (a real delegate exercising condense→`tool_output_get` recall on
+   a running stack) — carried post-merge, as for prior economizer proposals.
+2. **Byte-exact fold/compress recovery cost.** Only `tool_output_get` is a precise per-call
+   channel; `history_fold`/`compress` recovery via fold-recall stays best-effort. Extending
+   P4-style telemetry to fold-recall would let P5's measure-and-keep gate cover them too.
+3. **Unify fold-recall / `code_span_get` through `tool_output_get`** — the one-handle ideal
+   for *all* levers (P2 delivered it for the tool-output surface only).
+4. **Primary-agent surface** for `command_filter` (a client-side hook) + more command families.
+
+---
+
+- **Original design (as proposed):** Consolidate aimee's **six overlapping
   context-reduction systems** into a **single economizer** with an explicit **two-tier**
   safety model: a **safe, default-ON** baseline every user gets, and an **aggressive,
   default-OFF** tier the user opts into. The promotion gate between tiers is **recovery
