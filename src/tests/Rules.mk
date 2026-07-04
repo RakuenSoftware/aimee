@@ -992,7 +992,8 @@ $(TESTPREFIX)/unit-test-gateway-mutate-wire: $(OBJDIR)/tests/test_gateway_mutate
                      $(OBJDIR)/server/gateway_mutate_wire.o $(OBJDIR)/server/gateway_mutate.o \
                      $(OBJDIR)/server/msg_session_disable.o $(OBJDIR)/server/gw_mutate_stats.o \
                      $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/session_compact.o \
-                     $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/harness_memory_common.o \
+                     $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/token_tracker.o \
+                     $(OBJDIR)/harness_memory_common.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lpthread
 

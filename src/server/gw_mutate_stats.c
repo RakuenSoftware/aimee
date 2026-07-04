@@ -23,6 +23,13 @@ static reason_entry_t g_reasons[GW_STAT_REASON_MAX];
 static int g_reason_n;
 static pthread_mutex_t g_reason_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/* Sampled token-delta accumulators (1-in-N deterministic sample). */
+#define GW_STAT_TOKEN_SAMPLE_N 100
+static _Atomic uint64_t g_token_seen;         /* applied mutations seen (for the sample gate) */
+static _Atomic uint64_t g_token_sample_count; /* samples actually recorded */
+static _Atomic uint64_t g_token_baseline_sum;
+static _Atomic uint64_t g_token_reduced_sum;
+
 void gw_stat_inc(gw_stat_t which)
 {
    if (which < 0 || which >= GW_STAT__COUNT)
@@ -97,6 +104,33 @@ uint64_t gw_stat_get_reason(const char *group, const char *reason)
    return v;
 }
 
+void gw_stat_record_token_delta(int baseline_tokens, int reduced_tokens)
+{
+   if (baseline_tokens < 0 || reduced_tokens < 0)
+      return;
+   /* Deterministic 1-in-N sample: only every Nth applied mutation is accumulated. */
+   uint64_t n = atomic_fetch_add_explicit(&g_token_seen, 1, memory_order_relaxed);
+   if (n % GW_STAT_TOKEN_SAMPLE_N != 0)
+      return;
+   atomic_fetch_add_explicit(&g_token_sample_count, 1, memory_order_relaxed);
+   atomic_fetch_add_explicit(&g_token_baseline_sum, (uint64_t)baseline_tokens,
+                             memory_order_relaxed);
+   atomic_fetch_add_explicit(&g_token_reduced_sum, (uint64_t)reduced_tokens, memory_order_relaxed);
+}
+
+uint64_t gw_stat_token_sample_count(void)
+{
+   return atomic_load_explicit(&g_token_sample_count, memory_order_relaxed);
+}
+uint64_t gw_stat_token_baseline_sum(void)
+{
+   return atomic_load_explicit(&g_token_baseline_sum, memory_order_relaxed);
+}
+uint64_t gw_stat_token_reduced_sum(void)
+{
+   return atomic_load_explicit(&g_token_reduced_sum, memory_order_relaxed);
+}
+
 static const char *g_flat_names[GW_STAT__COUNT] = {
     "gateway_mutate_attempted", "gateway_mutate_applied",       "gateway_4xx_restore_resend",
     "gateway_5xx_disable",      "gateway_stream_error_disable", "gateway_session_disabled_blocks",
@@ -111,6 +145,15 @@ void gw_stat_dump(FILE *out)
       uint64_t v = gw_stat_get((gw_stat_t)i);
       if (v)
          fprintf(out, "%s %llu\n", g_flat_names[i], (unsigned long long)v);
+   }
+   uint64_t sc = gw_stat_token_sample_count();
+   if (sc)
+   {
+      fprintf(out, "gateway_token_delta_sample_count %llu\n", (unsigned long long)sc);
+      fprintf(out, "gateway_token_delta_baseline_sum %llu\n",
+              (unsigned long long)gw_stat_token_baseline_sum());
+      fprintf(out, "gateway_token_delta_reduced_sum %llu\n",
+              (unsigned long long)gw_stat_token_reduced_sum());
    }
    pthread_mutex_lock(&g_reason_lock);
    for (int i = 0; i < g_reason_n; i++)
@@ -140,6 +183,10 @@ void gw_stat_reset(void)
 {
    for (int i = 0; i < GW_STAT__COUNT; i++)
       atomic_store_explicit(&g_flat[i], 0, memory_order_relaxed);
+   atomic_store_explicit(&g_token_seen, 0, memory_order_relaxed);
+   atomic_store_explicit(&g_token_sample_count, 0, memory_order_relaxed);
+   atomic_store_explicit(&g_token_baseline_sum, 0, memory_order_relaxed);
+   atomic_store_explicit(&g_token_reduced_sum, 0, memory_order_relaxed);
    pthread_mutex_lock(&g_reason_lock);
    memset(g_reasons, 0, sizeof(g_reasons));
    g_reason_n = 0;

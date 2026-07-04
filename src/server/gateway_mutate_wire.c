@@ -117,6 +117,7 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
    gw_provenance_mark_reduced(&ctx->st); /* mark ONLY after replace succeeds */
    ctx->mutated = 1;
    gw_stat_inc(GW_STAT_MUTATE_APPLIED);
+   gw_stat_record_token_delta(res.baseline_tokens, res.reduced_tokens); /* sampled §4 */
 }
 
 gw_post_action_t gw_buffered_after_status(cJSON *container, const char *key, int http_status,

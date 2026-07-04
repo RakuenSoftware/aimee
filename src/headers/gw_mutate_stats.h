@@ -41,6 +41,17 @@ extern "C"
    void gw_stat_inc_reason(const char *group, const char *reason);
    uint64_t gw_stat_get_reason(const char *group, const char *reason);
 
+   /* Sampled pre/post token-delta (§4 gateway_token_delta_pre_post_sampled). Called on
+    * every APPLIED mutation with the reducer's baseline + reduced token counts; a
+    * deterministic 1-in-GW_STAT_TOKEN_SAMPLE_N sample is accumulated (sum of baseline,
+    * sum of reduced, sample count) so the §6 "monotone reduction" gate can check that
+    * the sampled mean reduced < mean baseline. Cheap: one relaxed-atomic counter gates
+    * the sample, and the three accumulators are relaxed atomics. */
+   void gw_stat_record_token_delta(int baseline_tokens, int reduced_tokens);
+   uint64_t gw_stat_token_sample_count(void);
+   uint64_t gw_stat_token_baseline_sum(void);
+   uint64_t gw_stat_token_reduced_sum(void);
+
    /* Human-readable dump of every non-zero counter, one `name value` per line
     * (Prometheus-ish), for a /metrics-style endpoint or diagnostics. */
    void gw_stat_dump(FILE *out);

@@ -209,6 +209,46 @@ static void test_stream_error_classify(void)
    assert(gw_status_is_invalid_request(200) == 0);
 }
 
+static void test_token_delta_sampling(void)
+{
+   gw_stat_reset();
+   /* 1-in-100 deterministic sample: the 1st call (n=0) is sampled; the next 99 are not. */
+   gw_stat_record_token_delta(1000, 500);
+   assert(gw_stat_token_sample_count() == 1);
+   assert(gw_stat_token_baseline_sum() == 1000);
+   assert(gw_stat_token_reduced_sum() == 500);
+   for (int i = 0; i < 99; i++)
+      gw_stat_record_token_delta(2000, 1900);
+   assert(gw_stat_token_sample_count() == 1); /* none of n=1..99 sampled */
+   gw_stat_record_token_delta(4000, 1000);    /* n=100 -> sampled */
+   assert(gw_stat_token_sample_count() == 2);
+   assert(gw_stat_token_baseline_sum() == 5000);
+   assert(gw_stat_token_reduced_sum() == 1500);
+   /* the §6 monotone-reduction property: sampled reduced sum < baseline sum */
+   assert(gw_stat_token_reduced_sum() < gw_stat_token_baseline_sum());
+   /* negatives ignored */
+   gw_stat_record_token_delta(-1, 5);
+   assert(gw_stat_token_baseline_sum() == 5000);
+}
+
+static void test_no_behavior_change_when_off(void)
+{
+   /* With reduce_gateway_mutate off (default config in this test's HOME), the buffered
+    * mutate must be a byte-identical no-op even given a resolvable-looking identity. */
+   cJSON *c = container_with("payload");
+   char *before = cJSON_PrintUnformatted(c);
+   gw_mutate_ctx_t ctx;
+   gw_buffered_mutate(c, "messages", "model", "sys", "0011223344556677", "bearer", "identity",
+                      &ctx);
+   char *after = cJSON_PrintUnformatted(c);
+   assert(before && after && strcmp(before, after) == 0);
+   assert(ctx.mutated == 0);
+   free(before);
+   free(after);
+   gw_mutate_ctx_free(&ctx);
+   cJSON_Delete(c);
+}
+
 int main(void)
 {
    printf("gateway_mutate_wire: ");
@@ -227,6 +267,8 @@ int main(void)
    test_dark_default_and_identityless();
    test_stream_disable();
    test_stream_error_classify();
+   test_token_delta_sampling();
+   test_no_behavior_change_when_off();
    printf("ok\n");
    return 0;
 }
