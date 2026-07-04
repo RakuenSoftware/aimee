@@ -867,15 +867,21 @@ char *tool_bash(const char *command, int timeout_ms)
       }
       return safe_strdup("{\"stdout\":\"\",\"stderr\":\"fork failed\",\"exit_code\":-1}");
    }
-   /* command-aware condensation (P1b): when reduce_command_filter is on, capture the FULL
-    * output up to the 2 MB ceiling so tool_condense sees all of it (the old 32 KB read cap
-    * truncated the input before the lever could condense + spill it). Default-off keeps the
-    * 32 KB cap — byte-identical. Config loaded ONCE here and reused for the condense below. */
+   /* command-aware condensation (P1b): when reduce_command_filter is on, `rawcap` (the
+    * MAXIMUM we'll capture) rises to the 2 MB ceiling so tool_condense sees the FULL output
+    * (the old 32 KB read cap truncated the input before the lever could condense + spill it).
+    * Default-off keeps the 32 KB cap — byte-identical. Per-call config load, reused for both
+    * the cap and the condense step below (previously the load happened after allocation, so
+    * it could not influence the cap). Buffers start SMALL and grow toward rawcap only if the
+    * output actually overflows, so an `echo hi` costs ~32 KB, not 2 MB. */
    config_t tc_cfg;
    int tc_on = (config_load(&tc_cfg) == 0 && tool_condense_enabled(&tc_cfg));
    size_t rawcap = tc_on ? (size_t)TOOL_CONDENSE_CEILING : (size_t)AGENT_TOOL_OUTPUT_RAW_MAX;
-   char *out_buf = malloc(rawcap + 1);
-   char *err_buf = malloc(rawcap + 1);
+   size_t out_cap =
+       (rawcap < AGENT_TOOL_OUTPUT_RAW_MAX) ? rawcap : (size_t)AGENT_TOOL_OUTPUT_RAW_MAX;
+   size_t err_cap = out_cap;
+   char *out_buf = malloc(out_cap + 1);
+   char *err_buf = malloc(err_cap + 1);
    if (!out_buf || !err_buf)
    {
       free(out_buf);
@@ -952,23 +958,45 @@ char *tool_bash(const char *command, int timeout_ms)
       if (stdout_open && FD_ISSET(stdout_pipe[0], &rfds))
       {
          char discard[4096];
-         void *dst = out_len < rawcap ? out_buf + out_len : discard;
-         size_t cap = out_len < rawcap ? rawcap - out_len : sizeof(discard);
+         /* grow toward rawcap only when the buffer actually filled (small outputs stay
+          * cheap); a failed realloc just stops growing (we discard the excess, bounded). */
+         if (out_len == out_cap && out_cap < rawcap)
+         {
+            size_t ncap = out_cap * 2 > rawcap ? rawcap : out_cap * 2;
+            char *nb = realloc(out_buf, ncap + 1);
+            if (nb)
+            {
+               out_buf = nb;
+               out_cap = ncap;
+            }
+         }
+         void *dst = out_len < out_cap ? out_buf + out_len : discard;
+         size_t cap = out_len < out_cap ? out_cap - out_len : sizeof(discard);
          ssize_t n = read(stdout_pipe[0], dst, cap);
          if (n <= 0)
             stdout_open = 0;
-         else if (out_len < rawcap)
+         else if (out_len < out_cap)
             out_len += (size_t)n;
       }
       if (stderr_open && FD_ISSET(stderr_pipe[0], &rfds))
       {
          char discard[4096];
-         void *dst = err_len < rawcap ? err_buf + err_len : discard;
-         size_t cap = err_len < rawcap ? rawcap - err_len : sizeof(discard);
+         if (err_len == err_cap && err_cap < rawcap)
+         {
+            size_t ncap = err_cap * 2 > rawcap ? rawcap : err_cap * 2;
+            char *nb = realloc(err_buf, ncap + 1);
+            if (nb)
+            {
+               err_buf = nb;
+               err_cap = ncap;
+            }
+         }
+         void *dst = err_len < err_cap ? err_buf + err_len : discard;
+         size_t cap = err_len < err_cap ? err_cap - err_len : sizeof(discard);
          ssize_t n = read(stderr_pipe[0], dst, cap);
          if (n <= 0)
             stderr_open = 0;
-         else if (err_len < rawcap)
+         else if (err_len < err_cap)
             err_len += (size_t)n;
       }
    }
