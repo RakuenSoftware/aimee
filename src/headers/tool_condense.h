@@ -47,6 +47,11 @@ tc_reco_result_t tc_recognize(const char *cmdline);
  * (caller frees), or NULL to pass the raw output through unchanged. */
 char *tc_family_test_runner(int exit_code, const char *in);
 
+/* Compiler/linter diagnostics family (Slice 5): keep errors/warnings/notes + file:line
+ * diagnostics, drop progress chatter. A non-zero exit's error lines are always kept.
+ * Returns a NEW string (caller frees) or NULL to pass through. */
+char *tc_family_diagnostics(int exit_code, const char *in);
+
 /* Per-condensation accounting for the economizer ledger. */
 typedef struct
 {

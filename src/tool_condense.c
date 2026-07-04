@@ -634,11 +634,18 @@ static const char *const TC_FAIL_SIGS[] = {
 static const char *const TC_KEEP_SIGS[] = {"test result", "result:", "====",     "collected",
                                            "summary",     "warning", "warnings", NULL};
 
-char *tc_family_test_runner(int exit_code, const char *in)
+/* Generic "keep the signal, drop the noise" line filter shared by the families. Keeps the
+ * first `head` + last `tail` lines and every line matching `fail_sigs` or `keep_sigs`;
+ * drops the rest, collapsing runs to a "... N lines elided ..." marker. When
+ * `require_fail_nonzero` is set, a non-zero exit with NO `fail_sigs` line returns NULL
+ * (verbatim passthrough — never hide the cause behind the filter). Returns a NEW string
+ * or NULL (OOM / the safety passthrough). */
+static char *tc_signal_filter(int exit_code, const char *in, const char *const *fail_sigs,
+                              const char *const *keep_sigs, int require_fail_nonzero, size_t head,
+                              size_t tail)
 {
    if (!in)
       return NULL;
-   /* index lines */
    size_t nlines = 0;
    for (const char *p = in;;)
    {
@@ -667,32 +674,27 @@ char *tc_family_test_runner(int exit_code, const char *in)
       const char *np = next_line(p, &n, &has_nl);
       lp[idx] = p;
       ll[idx] = n;
-      if (line_has_any(p, n, TC_FAIL_SIGS))
+      if (line_has_any(p, n, fail_sigs))
          any_fail = 1;
       idx++;
       if (!has_nl)
          break;
       p = np;
    }
-   /* Safety: a non-zero exit with no recognizable failure line -> passthrough (never
-    * risk hiding the cause behind a passing-transcript filter). */
-   if (exit_code != 0 && !any_fail)
+   if (require_fail_nonzero && exit_code != 0 && !any_fail)
    {
       free(lp);
       free(ll);
       return NULL;
    }
 
-   /* Always keep the first HEAD lines (banner/session start) and the last TAIL lines
-    * (the end-of-run summary lives here); drop passing transcripts in between. */
-   const size_t HEAD = 2, TAIL = 6;
    sb_t s = {0};
    int first = 1;
    size_t elided = 0;
    for (size_t i = 0; i < nlines; i++)
    {
-      int keep = (i < HEAD) || (i + TAIL >= nlines) || line_has_any(lp[i], ll[i], TC_FAIL_SIGS) ||
-                 line_has_any(lp[i], ll[i], TC_KEEP_SIGS);
+      int keep = (i < head) || (i + tail >= nlines) || line_has_any(lp[i], ll[i], fail_sigs) ||
+                 line_has_any(lp[i], ll[i], keep_sigs);
       if (keep)
       {
          if (elided)
@@ -726,6 +728,26 @@ char *tc_family_test_runner(int exit_code, const char *in)
    free(lp);
    free(ll);
    return sb_finish(&s);
+}
+
+char *tc_family_test_runner(int exit_code, const char *in)
+{
+   return tc_signal_filter(exit_code, in, TC_FAIL_SIGS, TC_KEEP_SIGS, 1, 2, 6);
+}
+
+/* Compiler / linter diagnostics (Slice 5): keep every error/warning/note + file:line
+ * diagnostic, drop the progress chatter ("Compiling …", "Downloading …", "Checking …").
+ * Warnings on a zero exit are still condensed (require_fail_nonzero = 0); a non-zero exit's
+ * error lines are always kept by the fail-signals, so a build failure is never hidden. */
+static const char *const TC_DIAG_FAIL_SIGS[] = {"error",    "undefined", "cannot",  "expected",
+                                                "fatal",    "panicked",  "no such", "not found",
+                                                "conflict", NULL};
+static const char *const TC_DIAG_KEEP_SIGS[] = {"warning", "warn:",   "note:",     "help:", "-->",
+                                                "error[",  "::error", "::warning", "====",  NULL};
+
+char *tc_family_diagnostics(int exit_code, const char *in)
+{
+   return tc_signal_filter(exit_code, in, TC_DIAG_FAIL_SIGS, TC_DIAG_KEEP_SIGS, 0, 2, 4);
 }
 
 /* ---- spill store + top-level apply (Slice 3) ---- */
@@ -794,6 +816,28 @@ static int tc_is_test_invocation(const tc_reco_result_t *r)
    return 0;
 }
 
+/* Does the recognized command denote a COMPILER/LINTER invocation (Slice 5)? */
+static int tc_is_diagnostics_invocation(const tc_reco_result_t *r)
+{
+   static const char *const diag[] = {"tsc", "eslint", "ruff",    "mypy",  "flake8", "gcc", "g++",
+                                      "cc",  "clang",  "clang++", "rustc", "cmake",  NULL};
+   for (int i = 0; diag[i]; i++)
+      if (strcmp(r->cmd, diag[i]) == 0)
+         return 1;
+   if (strcmp(r->cmd, "cargo") == 0 &&
+       (strcmp(r->sub, "build") == 0 || strcmp(r->sub, "check") == 0 ||
+        strcmp(r->sub, "clippy") == 0))
+      return 1;
+   if (strcmp(r->cmd, "go") == 0 && (strcmp(r->sub, "build") == 0 || strcmp(r->sub, "vet") == 0))
+      return 1;
+   if (strcmp(r->cmd, "dotnet") == 0 && strcmp(r->sub, "build") == 0)
+      return 1;
+   if ((strcmp(r->cmd, "npm") == 0 || strcmp(r->cmd, "yarn") == 0 || strcmp(r->cmd, "pnpm") == 0) &&
+       (strcmp(r->sub, "build") == 0 || strcmp(r->sub, "lint") == 0))
+      return 1;
+   return 0;
+}
+
 char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_code, const char *raw,
                           const char *spill_dir, tc_stats_t *stats)
 {
@@ -821,6 +865,11 @@ char *tool_condense_apply(const config_t *cfg, const char *cmdline, int exit_cod
    {
       cond = tc_family_test_runner(exit_code, raw);
       family = "test";
+   }
+   else if (tc_is_diagnostics_invocation(&reco))
+   {
+      cond = tc_family_diagnostics(exit_code, raw);
+      family = "diag";
    }
    if (!cond)
       return NULL; /* no family match or the filter declined -> passthrough */

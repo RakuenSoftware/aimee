@@ -254,6 +254,63 @@ int main(void)
       free(r);
    }
 
+   /* ---- tc_family_diagnostics (S5) ---- */
+   {
+      char big[8192];
+      size_t off = 0;
+      for (int k = 0; k < 60; k++)
+         off += (size_t)snprintf(big + off, sizeof big - off,
+                                 "   Compiling crate_%02d v0.1.0 (/w/crate_%02d)\n", k, k);
+      off += (size_t)snprintf(big + off, sizeof big - off,
+                              "error[E0308]: mismatched types\n --> src/lib.rs:42:9\n");
+      snprintf(big + off, sizeof big - off, "error: aborting due to previous error\n");
+
+      char *r = tc_family_diagnostics(1, big);
+      assert(r);
+      assert(strstr(r, "E0308"));         /* the error kept */
+      assert(strstr(r, "src/lib.rs:42")); /* the diagnostic location kept */
+      assert(strstr(r, "lines elided"));  /* Compiling… progress elided */
+      assert(!strstr(r, "crate_30"));     /* a middle progress line dropped */
+      assert(strlen(r) < strlen(big));
+      free(r);
+
+      /* warnings on a clean (exit 0) build are still condensed (not gated on failure) */
+      char warns[4096];
+      off = 0;
+      for (int k = 0; k < 40; k++)
+         off += (size_t)snprintf(warns + off, sizeof warns - off, "   Compiling pkg_%02d\n", k);
+      snprintf(warns + off, sizeof warns - off,
+               "warning: unused variable `x`\n --> a.rs:1:5\nwarning: 1 warning emitted\n");
+      char *r2 = tc_family_diagnostics(0, warns);
+      assert(r2 && strstr(r2, "unused variable") && strstr(r2, "lines elided"));
+      free(r2);
+   }
+
+   /* ---- diagnostics routing through tool_condense_apply (S5) ---- */
+   {
+      config_t cfg;
+      memset(&cfg, 0, sizeof cfg);
+      cfg.reduce_command_filter = 1;
+      char big[8192];
+      size_t off = 0;
+      for (int k = 0; k < 80; k++)
+         off += (size_t)snprintf(big + off, sizeof big - off, "src/mod_%02d.ts building...\n", k);
+      snprintf(big + off, sizeof big - off,
+               "src/x.ts:10:3 - error TS2322: Type mismatch\nFound 1 error.\n");
+      char dir[] = "/tmp/tc_diag_XXXXXX";
+      assert(mkdtemp(dir));
+      tc_stats_t st;
+      char *r = tool_condense_apply(&cfg, "tsc --noEmit", 1, big, dir, &st);
+      assert(r);
+      assert(st.recognized && st.spilled && !strcmp(st.family, "diag"));
+      assert(strstr(r, "TS2322"));
+      char spath[512];
+      snprintf(spath, sizeof spath, "%s/%s.out", dir, st.spill_ref);
+      unlink(spath);
+      rmdir(dir);
+      free(r);
+   }
+
    printf("ok\n");
    return 0;
 }
