@@ -325,6 +325,21 @@ static int wfe_live_judge_run(const char *workdir, const char *lens, char *out_v
    memset(&pinfo, 0, sizeof pinfo);
    persona_load(NULL, persona, &pinfo);
 
+   /* Read-only enforcement (defense in depth): capture the pre-judge HEAD so we can
+    * hard-reset the worktree afterwards — the judge is instructed not to edit, but we
+    * do not rely on instruction-following; any edit it makes is discarded. */
+   char pre_head[64] = "";
+   {
+      const char *argv[] = {"git", "-C", workdir, "rev-parse", "HEAD", NULL};
+      char *o = NULL;
+      if (safe_exec_capture(argv, &o, 256) == 0 && o)
+      {
+         chomp(o);
+         snprintf(pre_head, sizeof pre_head, "%s", o);
+      }
+      free(o);
+   }
+
    run_cmd_set_cwd(workdir);
    agent_result_t res;
    memset(&res, 0, sizeof(res));
@@ -359,12 +374,47 @@ static int wfe_live_judge_run(const char *workdir, const char *lens, char *out_v
    free(sys_prompt);
    persona_free(&pinfo);
 
+   /* Discard anything the judge changed: hard-reset to the pre-judge HEAD + clean
+    * untracked. This makes the read-only property enforced, not merely requested. */
+   if (pre_head[0])
+   {
+      const char *reset[] = {"reset", "--hard", pre_head};
+      (void)git_run(workdir, reset, 3);
+      const char *clean[] = {"clean", "-fd"};
+      (void)git_run(workdir, clean, 2);
+   }
+
    int refuted = 1; /* fail-closed default */
    if (rc == 0 && res.response && res.response[0])
    {
-      /* Accept ONLY on an explicit refuted:false; everything else -> refuted. */
-      if (strstr(res.response, "\"refuted\": false") || strstr(res.response, "\"refuted\":false"))
-         refuted = 0;
+      /* Parse ONLY the LAST non-empty line as the verdict JSON (the delegate is told
+       * to emit exactly one JSON line at the end). A substring scan of the whole
+       * response would false-ACCEPT on a skeptic's reasoning that quotes
+       * {"refuted": false}. Accept only on an explicit boolean refuted:false; anything
+       * that doesn't parse to that is REFUTED (fail closed). */
+      const char *r = res.response;
+      size_t len = strlen(r);
+      while (len > 0 &&
+             (r[len - 1] == '\n' || r[len - 1] == '\r' || r[len - 1] == ' ' || r[len - 1] == '\t'))
+         len--;
+      size_t start = len;
+      while (start > 0 && r[start - 1] != '\n')
+         start--;
+      size_t llen = len - start;
+      char line[512];
+      if (llen > 0 && llen < sizeof line)
+      {
+         memcpy(line, r + start, llen);
+         line[llen] = '\0';
+         cJSON *doc = cJSON_Parse(line);
+         if (doc)
+         {
+            const cJSON *rf = cJSON_GetObjectItemCaseSensitive(doc, "refuted");
+            if (rf && cJSON_IsFalse(rf))
+               refuted = 0;
+            cJSON_Delete(doc);
+         }
+      }
    }
    free(res.response);
    if (rc != 0 && !chosen)
