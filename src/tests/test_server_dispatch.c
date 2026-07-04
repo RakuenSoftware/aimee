@@ -130,9 +130,18 @@ int platform_evloop_del(platform_evloop_t *loop, int fd)
    return 0;
 }
 
+/* Instrumented so test_conn_update_events_null_evloop can assert the invariant
+ * that conn_update_events never hands a NULL loop to the event layer (a NULL
+ * loop here means epoll_ctl(loop->epoll_fd,...) would dereference NULL and
+ * crash the whole server — the /v1 HTTP-worker crash-loop regression). */
+int g_evloop_mod_null_loop = 0;
+int g_evloop_mod_nonnull_loop = 0;
 int platform_evloop_mod(platform_evloop_t *loop, int fd, uint32_t events)
 {
-   (void)loop;
+   if (loop)
+      g_evloop_mod_nonnull_loop = 1;
+   else
+      g_evloop_mod_null_loop = 1;
    (void)fd;
    (void)events;
    return 0;
@@ -1734,9 +1743,71 @@ static void test_hooks_pre_recovers_worktree_mapping_from_cwd(void)
    free(ctx);
 }
 
+/* Regression: the /v1 HTTP workers (server_http.c) build a memset-zeroed
+ * server_conn_t, so conn->evloop is NULL and its fd is never registered with
+ * any epoll set. Flushing a buffered response must NOT route that NULL loop
+ * into the event layer — conn_update_events used to call
+ * platform_evloop_mod(conn->evloop, ...) unconditionally, so epoll_ctl
+ * dereferenced NULL and segfaulted the whole server on every buffered /v1
+ * response (a crash-restart loop). conn_update_events now no-ops on NULL. */
+static void test_conn_update_events_null_evloop(void)
+{
+   int fds[2];
+   assert(pipe(fds) == 0);
+
+   /* Case 1: NULL evloop (the HTTP-worker shape). Preload pending bytes so
+    * server_send_response drains them via conn_flush, which is the path that
+    * calls conn_update_events. The event layer must never see the NULL loop. */
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(conn != NULL);
+   conn->fd = fds[1];
+   conn->evloop = NULL;
+   memcpy(conn->write_buf, "hello", 5);
+   conn->write_len = 5;
+   conn->write_pos = 0;
+
+   g_evloop_mod_null_loop = 0;
+   g_evloop_mod_nonnull_loop = 0;
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   int rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   assert(rc == 0);                     /* response actually written */
+   assert(g_evloop_mod_null_loop == 0); /* the fix: NULL loop never used */
+   free(conn);
+
+   /* Case 2 (positive control): an epoll-registered conn (non-NULL evloop)
+    * must still have its interest set updated — the fix must not disable that
+    * for real event-loop connections. */
+   char marker;
+   conn = calloc(1, sizeof(*conn));
+   assert(conn != NULL);
+   conn->fd = fds[1];
+   conn->evloop = (platform_evloop_t *)&marker; /* non-NULL; stub never derefs */
+   memcpy(conn->write_buf, "world", 5);
+   conn->write_len = 5;
+   conn->write_pos = 0;
+
+   g_evloop_mod_null_loop = 0;
+   g_evloop_mod_nonnull_loop = 0;
+   resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "ok");
+   rc = server_send_response(conn, resp);
+   cJSON_Delete(resp);
+   assert(rc == 0);
+   assert(g_evloop_mod_null_loop == 0);
+   assert(g_evloop_mod_nonnull_loop == 1); /* registration still happens */
+   free(conn);
+
+   close(fds[0]);
+   close(fds[1]);
+   printf("test_conn_update_events_null_evloop: PASS\n");
+}
+
 int main(void)
 {
    test_invalid_json();
+   test_conn_update_events_null_evloop();
    test_missing_method();
    test_oversized_payload();
    test_large_delegate_payload_within_limit();
