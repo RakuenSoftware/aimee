@@ -180,7 +180,6 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * the server returns this snapshot, and config_reload (on config.set / SIGHUP) republishes
     * it so changes take effect immediately instead of on the next mtime-cache miss. */
    config_snapshot_init(&cfg);
-
    /* Bridge the autonomy config knobs to their AIMEE_AUTONOMY_* env vars as early as
     * possible — before any consumer (plugin discovery, the wfe engine) could read them
     * via getenv. An explicitly-set env var still overrides (setenv no-overwrite). */

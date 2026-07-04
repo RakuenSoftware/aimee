@@ -65,9 +65,11 @@ static void test_two_tier_resolution(void)
 static void test_reload_class(void)
 {
    const config_field_t *hot = config_field_lookup("economizer.aggressive");
-   const config_field_t *rst = config_field_lookup("autonomy.skeptics");
+   const config_field_t *rst = config_field_lookup("db2_url");           /* startup: pg pool */
+   const config_field_t *aut = config_field_lookup("autonomy.skeptics"); /* env-bridged: restart */
    assert(hot && hot->reload_class == RELOAD_HOT);
    assert(rst && rst->reload_class == RELOAD_RESTART);
+   assert(aut && aut->reload_class == RELOAD_RESTART);
    assert(strstr(config_field_reload_verdict(rst), "restart"));
    assert(strcmp(config_field_reload_verdict(hot), "applied live") == 0);
 }

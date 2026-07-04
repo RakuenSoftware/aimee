@@ -1502,6 +1502,19 @@ static uint64_t g_snap_token = 0;          /* content-hash of the active snapsho
 static _Atomic int g_snap_inited = 0;      /* atomic so the config_load wrapper's read is visible */
 static pthread_mutex_t g_snap_wlock = PTHREAD_MUTEX_INITIALIZER;
 
+/* Re-applier registry (P3): hooks run after a reload publishes, under g_snap_wlock. */
+#define CONFIG_MAX_REAPPLIERS 16
+static config_reapplier_fn g_reappliers[CONFIG_MAX_REAPPLIERS];
+static int g_reapplier_count = 0;
+
+void config_reload_register_reapplier(config_reapplier_fn fn)
+{
+   pthread_mutex_lock(&g_snap_wlock);
+   if (fn && g_reapplier_count < CONFIG_MAX_REAPPLIERS)
+      g_reappliers[g_reapplier_count++] = fn;
+   pthread_mutex_unlock(&g_snap_wlock);
+}
+
 /* 1 once config_snapshot_init has seeded the live snapshot (server context). Read by the
  * config_load wrapper to decide snapshot-vs-file; only ever transitions 0 -> 1. */
 static int config_snapshot_live(void)
@@ -1591,7 +1604,13 @@ int config_reload(void)
       pthread_mutex_unlock(&g_snap_wlock);
       return 0; /* self-reload no-op guard: nothing logically changed */
    }
+   /* capture the OLD snapshot (if any) so re-appliers can diff their section, then publish. */
+   config_t old;
+   int have_old =
+       atomic_load_explicit(&g_snap_inited, memory_order_acquire) && config_snapshot_get(&old) == 0;
    config_snapshot_publish(&fresh);
+   for (int i = 0; i < g_reapplier_count; i++)
+      g_reappliers[i](have_old ? &old : &fresh, &fresh);
    pthread_mutex_unlock(&g_snap_wlock);
    return 1; /* a new snapshot was published */
 }
